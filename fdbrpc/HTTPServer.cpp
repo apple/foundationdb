@@ -28,7 +28,7 @@ Future<Void> callbackHandler(Reference<IConnection> conn,
                              Reference<HTTP::IRequestHandler> requestHandler,
                              Reference<HTTP::IncomingRequest> req,
                              FlowMutex* mutex) {
-	Reference<HTTP::OutgoingResponse> response = makeReference<HTTP::OutgoingResponse>();
+	auto response = makeReference<HTTP::OutgoingResponse>();
 	UnsentPacketQueue content;
 	response->data.content = &content;
 	response->data.contentLen = 0;
@@ -86,7 +86,7 @@ Future<Void> connectionHandler(Reference<HTTP::SimServerContext> server,
 			co_await readPrevRequest;
 			co_await delay(0);
 			co_await conn->onReadable();
-			Reference<HTTP::IncomingRequest> req = makeReference<HTTP::IncomingRequest>();
+			auto req = makeReference<HTTP::IncomingRequest>();
 			readPrevRequest = req->read(conn, false);
 			server->actors.add(callbackHandler(conn, readPrevRequest, requestHandler, req, &responseMutex));
 		}
@@ -282,7 +282,7 @@ Future<Reference<HTTP::IncomingResponse>> doRequestTest(std::string hostname,
 		Error err;
 		try {
 			if (!conn) {
-				co_await store(conn, INetworkConnections::net()->connect(hostname, service, false));
+				conn = co_await INetworkConnections::net()->connect(hostname, service, false);
 				ASSERT(conn.isValid());
 				co_await conn->connectHandshake();
 			}
@@ -309,7 +309,7 @@ Future<Reference<HTTP::IncomingResponse>> doRequestTest(std::string hostname,
 
 Future<Reference<HTTP::IncomingResponse>> doHelloWorldReq(Reference<IConnection> conn) {
 	UnsentPacketQueue content;
-	Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
+	auto req = makeReference<HTTP::OutgoingRequest>();
 
 	Reference<IRateControl> sendReceiveRate = makeReference<Unlimited>();
 	int64_t bytes_sent = 0;
@@ -347,7 +347,7 @@ Future<Reference<HTTP::IncomingResponse>> doHelloWorldReq(Reference<IConnection>
 
 Future<Reference<HTTP::IncomingResponse>> doHelloWorldErrorReq(Reference<IConnection> conn) {
 	UnsentPacketQueue content;
-	Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
+	auto req = makeReference<HTTP::OutgoingRequest>();
 
 	Reference<IRateControl> sendReceiveRate = makeReference<Unlimited>();
 	int64_t bytes_sent = 0;
@@ -368,7 +368,7 @@ Future<Reference<HTTP::IncomingResponse>> doHelloWorldErrorReq(Reference<IConnec
 
 Future<Reference<HTTP::IncomingResponse>> doHelloBadMD5Req(Reference<IConnection> conn) {
 	UnsentPacketQueue content;
-	Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
+	auto req = makeReference<HTTP::OutgoingRequest>();
 
 	Reference<IRateControl> sendReceiveRate = makeReference<Unlimited>();
 	int64_t bytes_sent = 0;
