@@ -52,34 +52,33 @@ Optional<Subspace> DirectoryLayer::nodeWithPrefix(Optional<T> const& prefix) con
 	return nodeWithPrefix(prefix.get());
 }
 
-ACTOR Future<DirectoryLayer::Node> find(Reference<DirectoryLayer> dirLayer,
-                                        Reference<Transaction> tr,
-                                        IDirectory::Path path) {
-	state int pathIndex = 0;
-	state DirectoryLayer::Node node = DirectoryLayer::Node(dirLayer, dirLayer->rootNode, IDirectory::Path(), path);
+Future<DirectoryLayer::Node> find(Reference<DirectoryLayer> dirLayer,
+                                  Reference<Transaction> tr,
+                                  IDirectory::Path path) {
+	DirectoryLayer::Node node = DirectoryLayer::Node(dirLayer, dirLayer->rootNode, IDirectory::Path(), path);
 
-	for (; pathIndex != path.size(); ++pathIndex) {
+	for (int pathIndex = 0; pathIndex != path.size(); ++pathIndex) {
 		ASSERT(node.subspace.present());
 		Optional<FDBStandalone<ValueRef>> val =
-		    wait(tr->get(node.subspace.get().get(DirectoryLayer::SUB_DIR_KEY).get(path[pathIndex], true).key()));
+		    co_await tr->get(node.subspace.get().get(DirectoryLayer::SUB_DIR_KEY).get(path[pathIndex], true).key());
 
 		node.path.push_back(path[pathIndex]);
 		node = DirectoryLayer::Node(dirLayer, dirLayer->nodeWithPrefix(val), node.path, path);
 
-		DirectoryLayer::Node _node = wait(node.loadMetadata(tr));
+		DirectoryLayer::Node _node = co_await node.loadMetadata(tr);
 		node = _node;
 
 		if (!node.exists() || node.layer == DirectoryLayer::PARTITION_LAYER) {
-			return node;
+			co_return node;
 		}
 	}
 
 	if (!node.loadedMetadata) {
-		DirectoryLayer::Node _node = wait(node.loadMetadata(tr));
+		DirectoryLayer::Node _node = co_await node.loadMetadata(tr);
 		node = _node;
 	}
 
-	return node;
+	co_return node;
 }
 
 IDirectory::Path DirectoryLayer::toAbsolutePath(IDirectory::Path const& subpath) const {
@@ -129,15 +128,15 @@ void DirectoryLayer::initializeDirectory(Reference<Transaction> const& tr) const
 	tr->set(rootNode.pack(VERSION_KEY), StringRef((uint8_t*)VERSION, 12));
 }
 
-ACTOR Future<Void> checkVersionInternal(const DirectoryLayer* dirLayer, Reference<Transaction> tr, bool writeAccess) {
+Future<Void> checkVersionInternal(const DirectoryLayer* dirLayer, Reference<Transaction> tr, bool writeAccess) {
 	Optional<FDBStandalone<ValueRef>> versionBytes =
-	    wait(tr->get(dirLayer->rootNode.pack(DirectoryLayer::VERSION_KEY)));
+	    co_await tr->get(dirLayer->rootNode.pack(DirectoryLayer::VERSION_KEY));
 
 	if (!versionBytes.present()) {
 		if (writeAccess) {
 			dirLayer->initializeDirectory(tr);
 		}
-		return Void();
+		co_return;
 	} else {
 		if (versionBytes.get().size() != 12) {
 			throw invalid_directory_layer_metadata();
@@ -148,125 +147,121 @@ ACTOR Future<Void> checkVersionInternal(const DirectoryLayer* dirLayer, Referenc
 			throw incompatible_directory_version();
 		}
 	}
-
-	return Void();
 }
 
 Future<Void> DirectoryLayer::checkVersion(Reference<Transaction> const& tr, bool writeAccess) const {
 	return checkVersionInternal(this, tr, writeAccess);
 }
 
-ACTOR Future<Standalone<StringRef>> getPrefix(Reference<DirectoryLayer> dirLayer,
-                                              Reference<Transaction> tr,
-                                              Optional<Standalone<StringRef>> prefix) {
+Future<Standalone<StringRef>> getPrefix(Reference<DirectoryLayer> dirLayer,
+                                        Reference<Transaction> tr,
+                                        Optional<Standalone<StringRef>> prefix) {
 	if (!prefix.present()) {
-		Standalone<StringRef> allocated = wait(dirLayer->allocator.allocate(tr));
-		state Standalone<StringRef> finalPrefix = allocated.withPrefix(dirLayer->contentSubspace.key());
+		Standalone<StringRef> allocated = co_await dirLayer->allocator.allocate(tr);
+		Standalone<StringRef> finalPrefix = allocated.withPrefix(dirLayer->contentSubspace.key());
 
-		FDBStandalone<RangeResultRef> result = wait(tr->getRange(KeyRangeRef(finalPrefix, strinc(finalPrefix)), 1));
+		FDBStandalone<RangeResultRef> result = co_await tr->getRange(KeyRangeRef(finalPrefix, strinc(finalPrefix)), 1);
 
 		if (result.size() > 0) {
 			throw directory_prefix_not_empty();
 		}
 
-		return finalPrefix;
+		co_return finalPrefix;
 	}
 
-	return prefix.get();
+	co_return prefix.get();
 }
 
-ACTOR Future<Optional<Subspace>> nodeContainingKey(Reference<DirectoryLayer> dirLayer,
-                                                   Reference<Transaction> tr,
-                                                   Standalone<StringRef> key,
-                                                   bool snapshot) {
+Future<Optional<Subspace>> nodeContainingKey(Reference<DirectoryLayer> dirLayer,
+                                             Reference<Transaction> tr,
+                                             Standalone<StringRef> key,
+                                             bool snapshot) {
 	if (key.startsWith(dirLayer->nodeSubspace.key())) {
-		return dirLayer->rootNode;
+		co_return dirLayer->rootNode;
 	}
 
 	KeyRange range = KeyRangeRef(dirLayer->nodeSubspace.range().begin, keyAfter(dirLayer->nodeSubspace.pack(key)));
-	FDBStandalone<RangeResultRef> result = wait(tr->getRange(range, 1, snapshot, true));
+	FDBStandalone<RangeResultRef> result = co_await tr->getRange(range, 1, snapshot, true);
 
 	if (result.size() > 0) {
 		Standalone<StringRef> prevPrefix = dirLayer->nodeSubspace.unpack(result[0].key).getString(0);
 		if (key.startsWith(prevPrefix)) {
-			return dirLayer->nodeWithPrefix(prevPrefix);
+			co_return dirLayer->nodeWithPrefix(prevPrefix);
 		}
 	}
 
-	return Optional<Subspace>();
+	co_return Optional<Subspace>();
 }
 
-ACTOR Future<bool> isPrefixFree(Reference<DirectoryLayer> dirLayer,
-                                Reference<Transaction> tr,
-                                Standalone<StringRef> prefix,
-                                bool snapshot) {
+Future<bool> isPrefixFree(Reference<DirectoryLayer> dirLayer,
+                          Reference<Transaction> tr,
+                          Standalone<StringRef> prefix,
+                          bool snapshot) {
 	if (!prefix.size()) {
-		return false;
+		co_return false;
 	}
 
-	Optional<Subspace> node = wait(nodeContainingKey(dirLayer, tr, prefix, snapshot));
+	Optional<Subspace> node = co_await nodeContainingKey(dirLayer, tr, prefix, snapshot);
 	if (node.present()) {
-		return false;
+		co_return false;
 	}
 
-	FDBStandalone<RangeResultRef> result = wait(tr->getRange(
-	    KeyRangeRef(dirLayer->nodeSubspace.pack(prefix), dirLayer->nodeSubspace.pack(strinc(prefix))), 1, snapshot));
-	return !result.size();
+	FDBStandalone<RangeResultRef> result = co_await tr->getRange(
+	    KeyRangeRef(dirLayer->nodeSubspace.pack(prefix), dirLayer->nodeSubspace.pack(strinc(prefix))), 1, snapshot);
+	co_return !result.size();
 }
 
-ACTOR Future<Subspace> getParentNode(Reference<DirectoryLayer> dirLayer,
-                                     Reference<Transaction> tr,
-                                     IDirectory::Path path) {
+Future<Subspace> getParentNode(Reference<DirectoryLayer> dirLayer, Reference<Transaction> tr, IDirectory::Path path) {
 	if (path.size() > 1) {
 		Reference<DirectorySubspace> parent =
-		    wait(dirLayer->createOrOpenInternal(tr,
-		                                        IDirectory::Path(path.begin(), path.end() - 1),
-		                                        StringRef(),
-		                                        Optional<Standalone<StringRef>>(),
-		                                        true,
-		                                        true));
-		return dirLayer->nodeWithPrefix(parent->key());
+		    co_await dirLayer->createOrOpenInternal(tr,
+		                                            IDirectory::Path(path.begin(), path.end() - 1),
+		                                            StringRef(),
+		                                            Optional<Standalone<StringRef>>(),
+		                                            true,
+		                                            true);
+		co_return dirLayer->nodeWithPrefix(parent->key());
 	} else {
-		return dirLayer->rootNode;
+		co_return dirLayer->rootNode;
 	}
 }
 
-ACTOR Future<Reference<DirectorySubspace>> createInternal(Reference<DirectoryLayer> dirLayer,
-                                                          Reference<Transaction> tr,
-                                                          IDirectory::Path path,
-                                                          Standalone<StringRef> layer,
-                                                          Optional<Standalone<StringRef>> prefix,
-                                                          bool allowCreate) {
+Future<Reference<DirectorySubspace>> createInternal(Reference<DirectoryLayer> dirLayer,
+                                                    Reference<Transaction> tr,
+                                                    IDirectory::Path path,
+                                                    Standalone<StringRef> layer,
+                                                    Optional<Standalone<StringRef>> prefix,
+                                                    bool allowCreate) {
 	if (!allowCreate) {
 		throw directory_does_not_exist();
 	}
 
-	wait(dirLayer->checkVersion(tr, true));
+	co_await dirLayer->checkVersion(tr, true);
 
-	state Standalone<StringRef> newPrefix = wait(getPrefix(dirLayer, tr, prefix));
-	bool isFree = wait(isPrefixFree(dirLayer, tr, newPrefix, !prefix.present()));
+	Standalone<StringRef> newPrefix = co_await getPrefix(dirLayer, tr, prefix);
+	bool isFree = co_await isPrefixFree(dirLayer, tr, newPrefix, !prefix.present());
 
 	if (!isFree) {
 		throw directory_prefix_in_use();
 	}
 
-	Subspace parentNode = wait(getParentNode(dirLayer, tr, path));
+	Subspace parentNode = co_await getParentNode(dirLayer, tr, path);
 	Subspace node = dirLayer->nodeWithPrefix(newPrefix);
 
 	tr->set(parentNode.get(DirectoryLayer::SUB_DIR_KEY).get(path.back(), true).key(), newPrefix);
 	tr->set(node.get(DirectoryLayer::LAYER_KEY).key(), layer);
-	return dirLayer->contentsOfNode(node, path, layer);
+	co_return dirLayer->contentsOfNode(node, path, layer);
 }
 
-ACTOR Future<Reference<DirectorySubspace>> _createOrOpenInternal(Reference<DirectoryLayer> dirLayer,
-                                                                 Reference<Transaction> tr,
-                                                                 IDirectory::Path path,
-                                                                 Standalone<StringRef> layer,
-                                                                 Optional<Standalone<StringRef>> prefix,
-                                                                 bool allowCreate,
-                                                                 bool allowOpen) {
+Future<Reference<DirectorySubspace>> _createOrOpenInternal(Reference<DirectoryLayer> dirLayer,
+                                                           Reference<Transaction> tr,
+                                                           IDirectory::Path path,
+                                                           Standalone<StringRef> layer,
+                                                           Optional<Standalone<StringRef>> prefix,
+                                                           bool allowCreate,
+                                                           bool allowOpen) {
 	ASSERT(!prefix.present() || allowCreate);
-	wait(dirLayer->checkVersion(tr, false));
+	co_await dirLayer->checkVersion(tr, false);
 
 	if (prefix.present() && !dirLayer->allowManualPrefixes) {
 		if (!dirLayer->getPath().size()) {
@@ -280,19 +275,19 @@ ACTOR Future<Reference<DirectorySubspace>> _createOrOpenInternal(Reference<Direc
 		throw cannot_open_root_directory();
 	}
 
-	state DirectoryLayer::Node existingNode = wait(find(dirLayer, tr, path));
+	DirectoryLayer::Node existingNode = co_await find(dirLayer, tr, path);
 	if (existingNode.exists()) {
 		if (existingNode.isInPartition()) {
 			IDirectory::Path subpath = existingNode.getPartitionSubpath();
 			Reference<DirectorySubspace> dirSpace =
-			    wait(existingNode.getContents()->getDirectoryLayer()->createOrOpenInternal(
-			        tr, subpath, layer, prefix, allowCreate, allowOpen));
-			return dirSpace;
+			    co_await existingNode.getContents()->getDirectoryLayer()->createOrOpenInternal(
+			        tr, subpath, layer, prefix, allowCreate, allowOpen);
+			co_return dirSpace;
 		}
-		return dirLayer->openInternal(layer, existingNode, allowOpen);
+		co_return dirLayer->openInternal(layer, existingNode, allowOpen);
 	} else {
-		Reference<DirectorySubspace> dirSpace = wait(createInternal(dirLayer, tr, path, layer, prefix, allowCreate));
-		return dirSpace;
+		Reference<DirectorySubspace> dirSpace = co_await createInternal(dirLayer, tr, path, layer, prefix, allowCreate);
+		co_return dirSpace;
 	}
 }
 
@@ -319,35 +314,35 @@ Future<Reference<DirectorySubspace>> DirectoryLayer::createOrOpen(Reference<Tran
 	return createOrOpenInternal(tr, path, layer, Optional<Standalone<StringRef>>(), true, true);
 }
 
-ACTOR Future<Standalone<VectorRef<StringRef>>> listInternal(Reference<DirectoryLayer> dirLayer,
-                                                            Reference<Transaction> tr,
-                                                            IDirectory::Path path) {
-	wait(dirLayer->checkVersion(tr, false));
+Future<Standalone<VectorRef<StringRef>>> listInternal(Reference<DirectoryLayer> dirLayer,
+                                                      Reference<Transaction> tr,
+                                                      IDirectory::Path path) {
+	co_await dirLayer->checkVersion(tr, false);
 
-	state DirectoryLayer::Node node = wait(find(dirLayer, tr, path));
+	DirectoryLayer::Node node = co_await find(dirLayer, tr, path);
 
 	if (!node.exists()) {
 		throw directory_does_not_exist();
 	}
 	if (node.isInPartition(true)) {
 		Standalone<VectorRef<StringRef>> partitionList =
-		    wait(node.getContents()->getDirectoryLayer()->list(tr, node.getPartitionSubpath()));
-		return partitionList;
+		    co_await node.getContents()->getDirectoryLayer()->list(tr, node.getPartitionSubpath());
+		co_return partitionList;
 	}
 
-	state Subspace subdir = node.subspace.get().get(DirectoryLayer::SUB_DIR_KEY);
-	state Key begin = subdir.range().begin;
-	state Standalone<VectorRef<StringRef>> subdirectories;
+	Subspace subdir = node.subspace.get().get(DirectoryLayer::SUB_DIR_KEY);
+	Key begin = subdir.range().begin;
+	Standalone<VectorRef<StringRef>> subdirectories;
 
-	loop {
-		FDBStandalone<RangeResultRef> subdirRange = wait(tr->getRange(KeyRangeRef(begin, subdir.range().end)));
+	while (true) {
+		FDBStandalone<RangeResultRef> subdirRange = co_await tr->getRange(KeyRangeRef(begin, subdir.range().end));
 
 		for (int i = 0; i < subdirRange.size(); ++i) {
 			subdirectories.push_back_deep(subdirectories.arena(), subdir.unpack(subdirRange[i].key).getString(0));
 		}
 
 		if (!subdirRange.more) {
-			return subdirectories;
+			co_return subdirectories;
 		}
 
 		begin = keyAfter(subdirRange.back().key);
@@ -373,23 +368,19 @@ bool pathsEqual(IDirectory::Path const& path1,
 	return true;
 }
 
-ACTOR Future<Void> removeFromParent(Reference<DirectoryLayer> dirLayer,
-                                    Reference<Transaction> tr,
-                                    IDirectory::Path path) {
+Future<Void> removeFromParent(Reference<DirectoryLayer> dirLayer, Reference<Transaction> tr, IDirectory::Path path) {
 	ASSERT(path.size() >= 1);
-	DirectoryLayer::Node parentNode = wait(find(dirLayer, tr, IDirectory::Path(path.begin(), path.end() - 1)));
+	DirectoryLayer::Node parentNode = co_await find(dirLayer, tr, IDirectory::Path(path.begin(), path.end() - 1));
 	if (parentNode.subspace.present()) {
 		tr->clear(parentNode.subspace.get().get(DirectoryLayer::SUB_DIR_KEY).get(path.back(), true).key());
 	}
-
-	return Void();
 }
 
-ACTOR Future<Reference<DirectorySubspace>> moveInternal(Reference<DirectoryLayer> dirLayer,
-                                                        Reference<Transaction> tr,
-                                                        IDirectory::Path oldPath,
-                                                        IDirectory::Path newPath) {
-	wait(dirLayer->checkVersion(tr, true));
+Future<Reference<DirectorySubspace>> moveInternal(Reference<DirectoryLayer> dirLayer,
+                                                  Reference<Transaction> tr,
+                                                  IDirectory::Path oldPath,
+                                                  IDirectory::Path newPath) {
+	co_await dirLayer->checkVersion(tr, true);
 
 	if (oldPath.size() <= newPath.size()) {
 		if (pathsEqual(oldPath, newPath, oldPath.size())) {
@@ -401,10 +392,10 @@ ACTOR Future<Reference<DirectorySubspace>> moveInternal(Reference<DirectoryLayer
 	futures.push_back(find(dirLayer, tr, oldPath));
 	futures.push_back(find(dirLayer, tr, newPath));
 
-	std::vector<DirectoryLayer::Node> nodes = wait(getAll(futures));
+	std::vector<DirectoryLayer::Node> nodes = co_await getAll(futures);
 
-	state DirectoryLayer::Node oldNode = nodes[0];
-	state DirectoryLayer::Node newNode = nodes[1];
+	DirectoryLayer::Node oldNode = nodes[0];
+	DirectoryLayer::Node newNode = nodes[1];
 
 	if (!oldNode.exists()) {
 		throw directory_does_not_exist();
@@ -416,24 +407,24 @@ ACTOR Future<Reference<DirectorySubspace>> moveInternal(Reference<DirectoryLayer
 		}
 
 		Reference<DirectorySubspace> partitionMove =
-		    wait(newNode.getContents()->move(tr, oldNode.getPartitionSubpath(), newNode.getPartitionSubpath()));
-		return partitionMove;
+		    co_await newNode.getContents()->move(tr, oldNode.getPartitionSubpath(), newNode.getPartitionSubpath());
+		co_return partitionMove;
 	}
 
 	if (newNode.exists() || newPath.empty()) {
 		throw directory_already_exists();
 	}
 
-	DirectoryLayer::Node parentNode = wait(find(dirLayer, tr, IDirectory::Path(newPath.begin(), newPath.end() - 1)));
+	DirectoryLayer::Node parentNode = co_await find(dirLayer, tr, IDirectory::Path(newPath.begin(), newPath.end() - 1));
 	if (!parentNode.exists()) {
 		throw parent_directory_does_not_exist();
 	}
 
 	tr->set(parentNode.subspace.get().get(DirectoryLayer::SUB_DIR_KEY).get(newPath.back(), true).key(),
 	        dirLayer->nodeSubspace.unpack(oldNode.subspace.get().key()).getString(0));
-	wait(removeFromParent(dirLayer, tr, oldPath));
+	co_await removeFromParent(dirLayer, tr, oldPath);
 
-	return dirLayer->contentsOfNode(oldNode.subspace.get(), newPath, oldNode.layer);
+	co_return dirLayer->contentsOfNode(oldNode.subspace.get(), newPath, oldNode.layer);
 }
 
 Future<Reference<DirectorySubspace>> DirectoryLayer::move(Reference<Transaction> const& tr,
@@ -447,14 +438,13 @@ Future<Reference<DirectorySubspace>> DirectoryLayer::moveTo(Reference<Transactio
 	throw cannot_modify_root_directory();
 }
 
-Future<Void> removeRecursive(Reference<DirectoryLayer> const&, Reference<Transaction> const&, Subspace const&);
-ACTOR Future<Void> removeRecursive(Reference<DirectoryLayer> dirLayer, Reference<Transaction> tr, Subspace nodeSub) {
-	state Subspace subdir = nodeSub.get(DirectoryLayer::SUB_DIR_KEY);
-	state Key begin = subdir.range().begin;
-	state std::vector<Future<Void>> futures;
+Future<Void> removeRecursive(Reference<DirectoryLayer> dirLayer, Reference<Transaction> tr, Subspace nodeSub) {
+	Subspace subdir = nodeSub.get(DirectoryLayer::SUB_DIR_KEY);
+	Key begin = subdir.range().begin;
+	std::vector<Future<Void>> futures;
 
-	loop {
-		FDBStandalone<RangeResultRef> range = wait(tr->getRange(KeyRangeRef(begin, subdir.range().end)));
+	while (true) {
+		FDBStandalone<RangeResultRef> range = co_await tr->getRange(KeyRangeRef(begin, subdir.range().end));
 		for (int i = 0; i < range.size(); ++i) {
 			Subspace subNode = dirLayer->nodeWithPrefix(range[i].value);
 			futures.push_back(removeRecursive(dirLayer, tr, subNode));
@@ -468,53 +458,47 @@ ACTOR Future<Void> removeRecursive(Reference<DirectoryLayer> dirLayer, Reference
 	}
 
 	// waits are done concurrently
-	wait(waitForAll(futures));
+	co_await waitForAll(futures);
 
 	Standalone<StringRef> nodePrefix = dirLayer->nodeSubspace.unpack(nodeSub.key()).getString(0);
 
 	tr->clear(KeyRangeRef(nodePrefix, strinc(nodePrefix)));
 	tr->clear(nodeSub.range());
-
-	return Void();
 }
 
-Future<bool> removeInternal(Reference<DirectoryLayer> const&,
-                            Reference<Transaction> const&,
-                            IDirectory::Path const&,
-                            bool const&);
-ACTOR Future<bool> removeInternal(Reference<DirectoryLayer> dirLayer,
-                                  Reference<Transaction> tr,
-                                  IDirectory::Path path,
-                                  bool failOnNonexistent) {
-	wait(dirLayer->checkVersion(tr, true));
+Future<bool> removeInternal(Reference<DirectoryLayer> dirLayer,
+                            Reference<Transaction> tr,
+                            IDirectory::Path path,
+                            bool failOnNonexistent) {
+	co_await dirLayer->checkVersion(tr, true);
 
 	if (path.empty()) {
 		throw cannot_modify_root_directory();
 	}
 
-	state DirectoryLayer::Node node = wait(find(dirLayer, tr, path));
+	DirectoryLayer::Node node = co_await find(dirLayer, tr, path);
 
 	if (!node.exists()) {
 		if (failOnNonexistent) {
 			throw directory_does_not_exist();
 		} else {
-			return false;
+			co_return false;
 		}
 	}
 
 	if (node.isInPartition()) {
-		bool recurse = wait(
-		    removeInternal(node.getContents()->getDirectoryLayer(), tr, node.getPartitionSubpath(), failOnNonexistent));
-		return recurse;
+		bool recurse = co_await removeInternal(
+		    node.getContents()->getDirectoryLayer(), tr, node.getPartitionSubpath(), failOnNonexistent);
+		co_return recurse;
 	}
 
-	state std::vector<Future<Void>> futures;
+	std::vector<Future<Void>> futures;
 	futures.push_back(removeRecursive(dirLayer, tr, node.subspace.get()));
 	futures.push_back(removeFromParent(dirLayer, tr, path));
 
-	wait(waitForAll(futures));
+	co_await waitForAll(futures);
 
-	return true;
+	co_return true;
 }
 
 Future<Void> DirectoryLayer::remove(Reference<Transaction> const& tr, Path const& path) {
@@ -525,23 +509,21 @@ Future<bool> DirectoryLayer::removeIfExists(Reference<Transaction> const& tr, Pa
 	return removeInternal(Reference<DirectoryLayer>::addRef(this), tr, path, false);
 }
 
-ACTOR Future<bool> existsInternal(Reference<DirectoryLayer> dirLayer,
-                                  Reference<Transaction> tr,
-                                  IDirectory::Path path) {
-	wait(dirLayer->checkVersion(tr, false));
+Future<bool> existsInternal(Reference<DirectoryLayer> dirLayer, Reference<Transaction> tr, IDirectory::Path path) {
+	co_await dirLayer->checkVersion(tr, false);
 
-	DirectoryLayer::Node node = wait(find(dirLayer, tr, path));
+	DirectoryLayer::Node node = co_await find(dirLayer, tr, path);
 
 	if (!node.exists()) {
-		return false;
+		co_return false;
 	}
 
 	if (node.isInPartition()) {
-		bool exists = wait(node.getContents()->getDirectoryLayer()->exists(tr, node.getPartitionSubpath()));
-		return exists;
+		bool exists = co_await node.getContents()->getDirectoryLayer()->exists(tr, node.getPartitionSubpath());
+		co_return exists;
 	}
 
-	return true;
+	co_return true;
 }
 
 Future<bool> DirectoryLayer::exists(Reference<Transaction> const& tr, Path const& path) {
