@@ -326,6 +326,14 @@ public:
 		}
 	}
 
+	ACTOR static Future<Void> handleReportCommitCostEstimationReqs(Ratekeeper* self, RatekeeperInterface rkInterf) {
+		loop {
+			ReportCommitCostEstimationRequest req = waitNext(rkInterf.reportCommitCostEstimation.getFuture());
+			self->updateCommitCostEstimation(req.ssTrTagCommitCost);
+			req.reply.send(Void());
+		}
+	}
+
 	ACTOR static Future<Void> run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 		state ActorOwningSelfRef<Ratekeeper> pSelf(
 		    new Ratekeeper(rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True)));
@@ -353,6 +361,7 @@ public:
 		}
 
 		self.addActor.send(self.refreshStorageServerCommitCosts());
+		self.addActor.send(self.handleReportCommitCostEstimationReqs(rkInterf));
 
 		TraceEvent("RkTLogQueueSizeParameters", rkInterf.id())
 		    .detail("Target", SERVER_KNOBS->TARGET_BYTES_PER_TLOG)
@@ -488,11 +497,6 @@ public:
 					TraceEvent("RatekeeperHalted", rkInterf.id()).detail("ReqID", req.requesterID);
 					break;
 				}
-				when(ReportCommitCostEstimationRequest req =
-				         waitNext(rkInterf.reportCommitCostEstimation.getFuture())) {
-					self.updateCommitCostEstimation(req.ssTrTagCommitCost);
-					req.reply.send(Void());
-				}
 				when(GetSSVersionLagRequest req = waitNext(rkInterf.getSSVersionLag.getFuture())) {
 					GetSSVersionLagReply reply;
 					self.getSSVersionLag(reply.maxPrimarySSVersion, reply.maxRemoteSSVersion);
@@ -580,6 +584,10 @@ Future<Void> Ratekeeper::monitorThrottlingChanges() {
 
 Future<Void> Ratekeeper::monitorHotShards(Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	return RatekeeperImpl::monitorHotShards(this, dbInfo);
+}
+
+Future<Void> Ratekeeper::handleReportCommitCostEstimationReqs(RatekeeperInterface rkInterf) {
+	return RatekeeperImpl::handleReportCommitCostEstimationReqs(this, rkInterf);
 }
 
 Future<Void> Ratekeeper::run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
