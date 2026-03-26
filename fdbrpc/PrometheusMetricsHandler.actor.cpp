@@ -24,7 +24,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR Future<Void> prometheusMetricsCallback(Reference<HTTP::IncomingRequest> req,
-                                              Reference<HTTP::OutgoingResponse> response) {
+                                             Reference<HTTP::OutgoingResponse> response) {
 	wait(delay(0));
 
 	if (req->verb != HTTP::HTTP_VERB_GET || req->resource != "/metrics") {
