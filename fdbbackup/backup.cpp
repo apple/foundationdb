@@ -52,7 +52,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
 #include "fdbclient/BulkLoading.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/BackupContainer.h"
 
 #include "flow/Platform.h"

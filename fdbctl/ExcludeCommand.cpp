@@ -22,7 +22,7 @@ I * Licensed under the Apache License, Version 2.0 (the "License");
 #include "fdbctl/ControlCommands.h"
 
 #include "fdbclient/IClientApi.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/Schemas.h"
 #include "fdbclient/StorageServerInterface.h"

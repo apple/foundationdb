@@ -37,7 +37,7 @@
 #include "fdbclient/SpecialKeySpace.h"
 #include "flow/Arena.h"
 #include "flow/UnitTest.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/StatusClient.h"
 #include "flow/CoroUtils.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
