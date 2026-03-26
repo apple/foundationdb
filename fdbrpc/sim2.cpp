@@ -43,7 +43,7 @@
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/AsyncFileEncrypted.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
-#include "fdbrpc/AsyncFileNonDurable.actor.h"
+#include "fdbrpc/AsyncFileNonDurable.h"
 #include "fdbrpc/AsyncFileChaos.h"
 #include "crc32/crc32c.h"
 #include "fdbrpc/TraceFileIO.h"

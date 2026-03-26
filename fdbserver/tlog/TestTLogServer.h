@@ -1,5 +1,5 @@
 /*
- * TestTLogServer.actor.h
+ * TestTLogServer.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,11 +18,8 @@
  * limitations under the License.
  */
 
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_TLOG_TEST_TLOG_ACTOR_G_H)
-#define FDBSERVER_TLOG_TEST_TLOG_ACTOR_G_H
-#include "TestTLogServer.actor.g.h"
-#elif !defined(FDBSERVER_TLOG_TEST_TLOG_ACTOR_H)
-#define FDBSERVER_TLOG_TEST_TLOG_ACTOR_H
+#ifndef FDBSERVER_TLOG_TEST_TLOG_H
+#define FDBSERVER_TLOG_TEST_TLOG_H
 
 #include <memory>
 #include <unordered_map>
@@ -35,8 +32,6 @@
 #include "fdbserver/core/TLogInterface.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/flow.h"
-
-#include "flow/actorcompiler.h" // has to be last include
 
 #pragma once
 
@@ -92,11 +87,11 @@ struct TLogContext : NonCopyable, public ReferenceCounted<TLogContext> {
 // test state
 struct TLogTestContext : NonCopyable, public ReferenceCounted<TLogTestContext> {
 
-	ACTOR static Future<Void> sendPushMessages(TLogTestContext* pTLogTestContext);
+	static Future<Void> sendPushMessages(TLogTestContext* pTLogTestContext);
 
 	Future<Void> sendPushMessages() { return sendPushMessages(this); }
 
-	ACTOR static Future<Void> sendCommitMessages(TLogTestContext* pTLogTestContext, uint16_t processID);
+	static Future<Void> sendCommitMessages(TLogTestContext* pTLogTestContext, uint16_t processID);
 
 	Future<Void> sendCommitMessages(uint16_t processID = 0) { return sendCommitMessages(this, processID); }
 
@@ -104,7 +99,7 @@ struct TLogTestContext : NonCopyable, public ReferenceCounted<TLogTestContext> {
 		return peekCommitMessages(this, tagID, logID);
 	}
 
-	ACTOR static Future<Void> peekCommitMessages(TLogTestContext* pTLogTestContext, uint16_t logGroupID, uint32_t tag);
+	static Future<Void> peekCommitMessages(TLogTestContext* pTLogTestContext, uint16_t logGroupID, uint32_t tag);
 
 	explicit(false) TLogTestContext(TestTLogOptions& tLogOptions) : tLogOptions(tLogOptions), epoch(1) {}
 
@@ -134,5 +129,4 @@ struct TLogTestContext : NonCopyable, public ReferenceCounted<TLogTestContext> {
 	const uint32_t primaryLocality = 0;
 };
 
-#include "flow/unactorcompiler.h"
-#endif // FDBSERVER_TLOG_TEST_TLOG_ACTOR_H
+#endif // FDBSERVER_TLOG_TEST_TLOG_H
