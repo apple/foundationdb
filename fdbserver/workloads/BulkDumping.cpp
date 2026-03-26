@@ -21,7 +21,7 @@
 #include "fdbclient/BulkDumping.h"
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/tester/workloads.actor.h"

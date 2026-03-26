@@ -22,7 +22,7 @@
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupContainerFileSystem.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbserver/restoreworker/RestoreWorkerInterface.h"
 #include "fdbclient/RunRYWTransaction.h"
 #include "fdbserver/restoreworker/RestoreCommon.h"

@@ -350,6 +350,7 @@ struct TLogData : NonCopyable {
 	// End of fields used by snapshot based backup and restore
 
 	Reference<AsyncVar<bool>> degraded;
+	Reference<AsyncVar<bool>> lowDiskTLogExclusion;
 	std::vector<TagsAndMessage> tempTagMessages;
 
 	// Distribution of end-to-end server latency of tlog commit requests.
@@ -378,6 +379,7 @@ struct TLogData : NonCopyable {
 	         IDiskQueue* persistentQueue,
 	         Reference<AsyncVar<ServerDBInfo> const> dbInfo,
 	         Reference<AsyncVar<bool>> degraded,
+	         Reference<AsyncVar<bool>> lowDiskTLogExclusion,
 	         std::string folder,
 	         Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck)
 	  : dbgid(dbgid), workerID(workerID), persistentData(persistentData), rawPersistentQueue(persistentQueue),
@@ -387,12 +389,25 @@ struct TLogData : NonCopyable {
 	    targetVolatileBytes(SERVER_KNOBS->TLOG_SPILL_THRESHOLD), overheadBytesInput(0), overheadBytesDurable(0),
 	    peekMemoryLimiter(SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES),
 	    concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS), ignorePopDeadline(0), dataFolder(folder),
-	    degraded(degraded),
+	    degraded(degraded), lowDiskTLogExclusion(lowDiskTLogExclusion),
 	    commitLatencyDist(Histogram::getHistogram("tLog"_sr, "commit"_sr, Histogram::Unit::milliseconds)),
 	    queueWaitLatencyDist(Histogram::getHistogram("tLog"_sr, "QueueWait"_sr, Histogram::Unit::milliseconds)),
 	    timeUntilDurableDist(Histogram::getHistogram("tLog"_sr, "TimeUntilDurable"_sr, Histogram::Unit::milliseconds)),
 	    enablePrimaryTxnSystemHealthCheck(enablePrimaryTxnSystemHealthCheck) {
 		cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
+	}
+
+	double availableSpaceRatio(StorageBytes const& kvStoreBytes, StorageBytes const& queueBytes) const {
+		auto ratio = [](StorageBytes const& storageBytes) -> double {
+			return storageBytes.total > 0 ? double(storageBytes.available) / storageBytes.total : 1.0;
+		};
+		return std::min(ratio(kvStoreBytes), ratio(queueBytes));
+	}
+
+	bool shouldAcceptNewData(StorageBytes const& kvStoreBytes,
+	                         StorageBytes const& queueBytes,
+	                         double minAvailableSpaceRatio) const {
+		return minAvailableSpaceRatio <= 0.0 || availableSpaceRatio(kvStoreBytes, queueBytes) >= minAvailableSpaceRatio;
 	}
 };
 
@@ -2849,10 +2864,11 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 			//TraceEvent("TLogCommitReq", logData->logId).detail("Ver", req.version).detail("PrevVer", req.prevVersion).detail("LogVer", logData->version.get());
 			ASSERT(logData->isPrimary);
 			CODE_PROBE(logData->stopped(), "TLogCommitRequest while stopped");
-			if (!logData->stopped())
-				logData->addActor.send(tLogCommit(self, req, logData, warningCollectorInput));
-			else
+			if (logData->stopped()) {
 				req.reply.sendError(tlog_stopped());
+			} else {
+				logData->addActor.send(tLogCommit(self, req, logData, warningCollectorInput));
+			}
 		}
 		when(ReplyPromise<TLogLockResult> reply = waitNext(tli.lock.getFuture())) {
 			logData->addActor.send(tLogLock(self, reply, logData));
@@ -2894,7 +2910,7 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 	}
 }
 
-void removeLog(TLogData* self, Reference<LogData> logData) {
+void removeLog(TLogData* self, Reference<LogData> logData, bool terminateWorkerIfEmpty = true) {
 	TraceEvent("TLogRemoved", self->dbgid)
 	    .detail("LogId", logData->logId)
 	    .detail("Input", logData->bytesInput.getValue())
@@ -2912,15 +2928,56 @@ void removeLog(TLogData* self, Reference<LogData> logData) {
 	while (self->popOrder.size() && !self->id_data.contains(self->popOrder.front())) {
 		self->popOrder.pop_front();
 	}
-
-	if (self->id_data.size() == 0) {
-		throw worker_removed();
-	}
 	if (logData->queueCommittingVersion == 0) {
 		// If the removed tlog never attempted a queue commit, the update storage loop could become stuck waiting for
 		// queueCommittedVersion to advance.
 		logData->queueCommittedVersion.set(std::numeric_limits<Version>::max());
 	}
+	if (self->id_data.size() == 0 && terminateWorkerIfEmpty) {
+		throw worker_removed();
+	}
+}
+
+static void throwLowDiskTLogRecoveryFailed(TLogData* self,
+                                           Reference<LogData> logData,
+                                           Version ver,
+                                           double minAvailableSpaceRatio,
+                                           StorageBytes kvStoreBytes,
+                                           StorageBytes queueBytes) {
+	if (!self->lowDiskTLogExclusion->get()) {
+		self->lowDiskTLogExclusion->set(true);
+	}
+	TraceEvent(SevWarnAlways, "TLogPullAsyncDataLowDiskSpace", logData->logId)
+	    .detail("MinAvailableSpaceRatio", minAvailableSpaceRatio)
+	    .detail("AvailableSpaceRatio", self->availableSpaceRatio(kvStoreBytes, queueBytes))
+	    .detail("KvstoreBytesAvailable", kvStoreBytes.available)
+	    .detail("KvstoreBytesTotal", kvStoreBytes.total)
+	    .detail("QueueDiskBytesAvailable", queueBytes.available)
+	    .detail("QueueDiskBytesTotal", queueBytes.total)
+	    .detail("Version", ver)
+	    .detail("Action", "FailRecoveryAndRecruitNewTLogs");
+	CODE_PROBE(true, "pullAsyncData failed recovery due to TLOG_MIN_AVAILABLE_SPACE_RATIO");
+	throw recruitment_failed();
+}
+
+double effectiveTLogMinAvailableSpaceRatio() {
+	if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
+		return 0.0;
+	}
+	return SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO;
+}
+
+static void failIfTLogCannotAcceptNewData(TLogData* self, Reference<LogData> logData, Version ver) {
+	StorageBytes kvStoreBytes = self->persistentData->getStorageBytes();
+	StorageBytes queueBytes = self->rawPersistentQueue->getStorageBytes();
+	const double minAvailableSpaceRatio = effectiveTLogMinAvailableSpaceRatio();
+	if (self->shouldAcceptNewData(kvStoreBytes, queueBytes, minAvailableSpaceRatio)) {
+		return;
+	}
+	CODE_PROBE(true, "pullAsyncData blocked by TLOG_MIN_AVAILABLE_SPACE_RATIO");
+	// Outside speedUpSimulation, fail recovery and temporarily exclude this worker from TLog recruitment until disk
+	// space recovers.
+	throwLowDiskTLogRecoveryFailed(self, logData, ver, minAvailableSpaceRatio, kvStoreBytes, queueBytes);
 }
 
 // remote tLog pull data from log routers
@@ -3000,6 +3057,11 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 						    std::max(logData->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 					}
 
+					failIfTLogCannotAcceptNewData(self, logData, ver);
+					if (logData->stopped()) {
+						return Void();
+					}
+
 					commitMessages(self, logData, ver, messages);
 
 					if (self->terminated.isSet()) {
@@ -3039,6 +3101,11 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 							logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, r->popped());
 							logData->minKnownCommittedVersion =
 							    std::max(logData->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
+						}
+
+						failIfTLogCannotAcceptNewData(self, logData, ver);
+						if (logData->stopped()) {
+							return Void();
 						}
 
 						if (self->terminated.isSet()) {
@@ -3141,10 +3208,10 @@ ACTOR Future<Void> tLogCore(TLogData* self,
 		wait(error);
 		throw internal_error();
 	} catch (Error& e) {
-		if (e.code() != error_code_worker_removed)
+		if (e.code() != error_code_worker_removed && e.code() != error_code_recruitment_failed)
 			throw;
 
-		removeLog(self, logData);
+		removeLog(self, logData, e.code() != error_code_recruitment_failed);
 		return Void();
 	}
 }
@@ -3608,6 +3675,7 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 
 	state Future<Void> updater;
 	state bool pulledRecoveryVersions = false;
+	state bool removePersistentState = false;
 	try {
 		if (logData->removed.isReady()) {
 			throw logData->removed.getError();
@@ -3727,14 +3795,15 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 	} catch (Error& e) {
 		req.reply.sendError(recruitment_failed());
 
-		if (e.code() != error_code_worker_removed) {
+		if (e.code() != error_code_worker_removed && e.code() != error_code_recruitment_failed) {
 			throw;
 		}
 
+		removePersistentState = e.code() != error_code_recruitment_failed;
 		wait(delay(0.0)); // if multiple recruitment requests were already in the promise stream make sure they are all
 		                  // started before any are removed
 
-		removeLog(self, logData);
+		removeLog(self, logData, removePersistentState);
 		return Void();
 	}
 
@@ -3777,10 +3846,18 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         Promise<Void> recovered,
                         std::string folder,
                         Reference<AsyncVar<bool>> degraded,
+                        Reference<AsyncVar<bool>> lowDiskTLogExclusion,
                         Reference<AsyncVar<UID>> activeSharedTLog,
                         Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck) {
-	state TLogData self(
-	    tlogId, workerID, persistentData, persistentQueue, db, degraded, folder, enablePrimaryTxnSystemHealthCheck);
+	state TLogData self(tlogId,
+	                    workerID,
+	                    persistentData,
+	                    persistentQueue,
+	                    db,
+	                    degraded,
+	                    lowDiskTLogExclusion,
+	                    folder,
+	                    enablePrimaryTxnSystemHealthCheck);
 	state Future<Void> error = actorCollection(self.sharedActors.getFuture());
 
 	TraceEvent("SharedTLog", tlogId);

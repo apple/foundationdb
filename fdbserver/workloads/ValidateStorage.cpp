@@ -20,7 +20,7 @@
 
 #include "fdbclient/Audit.h"
 #include "fdbclient/AuditUtils.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/QuietDatabase.actor.h"
