@@ -1,5 +1,5 @@
 /*
- * TLSConfig.actor.cpp
+ * TLSConfig.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -57,8 +57,6 @@ TLSPolicy::~TLSPolicy() {}
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
 #include "flow/genericactors.actor.h"
-
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 std::vector<std::string> LoadedTLSConfig::getVerifyPeers() const {
 	if (tlsVerifyPeers.size()) {
@@ -297,27 +295,26 @@ TLSPolicy::TLSPolicy(const LoadedTLSConfig& loaded, std::function<void()> on_fai
 
 // And now do the same thing, but async...
 
-ACTOR static Future<Void> readEntireFile(std::string filename, std::string* destination) {
-	state Reference<IAsyncFile> file =
-	    wait(IAsyncFileSystem::filesystem()->open(filename, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0));
-	state int64_t filesize = wait(file->size());
+static Future<Void> readEntireFile(std::string filename, std::string* destination) {
+	Reference<IAsyncFile> file = co_await IAsyncFileSystem::filesystem()->open(
+	    filename, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0);
+	int64_t filesize = co_await file->size();
 	if (filesize > FLOW_KNOBS->CERT_FILE_MAX_SIZE) {
 		throw file_too_large();
 	}
 	destination->resize(filesize);
-	wait(success(file->read(&((*destination)[0]), filesize, 0)));
-	return Void();
+	co_await success(file->read(&((*destination)[0]), filesize, 0));
 }
 
-ACTOR Future<LoadedTLSConfig> TLSConfig::loadAsync(const TLSConfig* self) {
-	state LoadedTLSConfig loaded;
-	state std::vector<Future<Void>> reads;
+Future<LoadedTLSConfig> TLSConfig::loadAsync(const TLSConfig* self) {
+	LoadedTLSConfig loaded;
+	std::vector<Future<Void>> reads;
 
-	state int32_t certIdx = -1;
-	state int32_t keyIdx = -1;
-	state int32_t caIdx = -1;
+	int32_t certIdx = -1;
+	int32_t keyIdx = -1;
+	int32_t caIdx = -1;
 
-	state std::string certPath = self->getCertificatePathSync();
+	std::string certPath = self->getCertificatePathSync();
 	if (certPath.size()) {
 		reads.push_back(readEntireFile(certPath, &loaded.tlsCertBytes));
 		certIdx = reads.size() - 1;
@@ -325,7 +322,7 @@ ACTOR Future<LoadedTLSConfig> TLSConfig::loadAsync(const TLSConfig* self) {
 		loaded.tlsCertBytes = self->tlsCertBytes;
 	}
 
-	state std::string keyPath = self->getKeyPathSync();
+	std::string keyPath = self->getKeyPathSync();
 	if (keyPath.size()) {
 		reads.push_back(readEntireFile(keyPath, &loaded.tlsKeyBytes));
 		keyIdx = reads.size() - 1;
@@ -333,7 +330,7 @@ ACTOR Future<LoadedTLSConfig> TLSConfig::loadAsync(const TLSConfig* self) {
 		loaded.tlsKeyBytes = self->tlsKeyBytes;
 	}
 
-	state std::string CAPath = self->getCAPathSync();
+	std::string CAPath = self->getCAPathSync();
 	if (CAPath.size()) {
 		reads.push_back(readEntireFile(CAPath, &loaded.tlsCABytes));
 		caIdx = reads.size() - 1;
@@ -342,7 +339,7 @@ ACTOR Future<LoadedTLSConfig> TLSConfig::loadAsync(const TLSConfig* self) {
 	}
 
 	try {
-		wait(waitForAll(reads));
+		co_await waitForAll(reads);
 	} catch (Error& e) {
 		if (certIdx != -1 && reads[certIdx].isError()) {
 			fprintf(stderr, "Warning: Error reading TLS Certificate [%s]: %s\n", certPath.c_str(), e.what());
@@ -362,7 +359,7 @@ ACTOR Future<LoadedTLSConfig> TLSConfig::loadAsync(const TLSConfig* self) {
 	loaded.endpointType = self->endpointType;
 	loaded.tlsDisablePlainTextConnection = self->tlsDisablePlainTextConnection;
 
-	return loaded;
+	co_return loaded;
 }
 
 std::string TLSPolicy::ErrorString(boost::system::error_code e) {

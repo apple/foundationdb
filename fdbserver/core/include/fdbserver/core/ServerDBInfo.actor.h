@@ -120,12 +120,12 @@ struct GetServerDBInfoRequest {
 extern template class RequestStream<GetServerDBInfoRequest, false>;
 extern template struct NetNotifiedQueue<GetServerDBInfoRequest, false>;
 
-ACTOR Future<Void> broadcastTxnRequest(TxnStateRequest req, int sendAmount, bool sendReply);
+Future<Void> broadcastTxnRequest(TxnStateRequest req, int sendAmount, bool sendReply);
 
-ACTOR Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoRequest req,
-                                                           int sendAmount,
-                                                           Optional<Endpoint> sender,
-                                                           bool sendReply);
+Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoRequest req,
+                                                     int sendAmount,
+                                                     Optional<Endpoint> sender,
+                                                     bool sendReply);
 
 #include "flow/unactorcompiler.h"
 #endif

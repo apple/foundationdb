@@ -217,7 +217,7 @@ public:
 #ifndef PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP
 private:
 #endif
-	ACTOR static Future<LoadedTLSConfig> loadAsync(const TLSConfig* self); // FIXME
+	static Future<LoadedTLSConfig> loadAsync(const TLSConfig* self); // FIXME
 	template <typename T>
 	friend class LoadAsyncActorState;
 

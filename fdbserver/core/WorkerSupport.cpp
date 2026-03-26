@@ -10,8 +10,6 @@
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
 
-#include "flow/actorcompiler.h"
-
 template class RequestStream<RecruitMasterRequest, false>;
 template struct NetNotifiedQueue<RecruitMasterRequest, false>;
 
@@ -26,15 +24,15 @@ template struct NetNotifiedQueue<GetServerDBInfoRequest, false>;
 
 namespace {
 
-ACTOR Future<std::vector<Endpoint>> tryDBInfoBroadcast(RequestStream<UpdateServerDBInfoRequest> stream,
-                                                       UpdateServerDBInfoRequest req) {
+Future<std::vector<Endpoint>> tryDBInfoBroadcast(RequestStream<UpdateServerDBInfoRequest> stream,
+                                                 UpdateServerDBInfoRequest req) {
 	ErrorOr<std::vector<Endpoint>> rep =
-	    wait(stream.getReplyUnlessFailedFor(req, SERVER_KNOBS->DBINFO_FAILED_DELAY, 0));
+	    co_await stream.getReplyUnlessFailedFor(req, SERVER_KNOBS->DBINFO_FAILED_DELAY, 0);
 	if (rep.present()) {
-		return rep.get();
+		co_return rep.get();
 	}
 	req.broadcastInfo.push_back(stream.getEndpoint());
-	return req.broadcastInfo;
+	co_return req.broadcastInfo;
 }
 
 std::set<std::pair<std::string, std::string>> g_roles;
@@ -56,12 +54,12 @@ Standalone<StringRef> roleString(std::set<std::pair<std::string, std::string>> r
 
 } // namespace
 
-ACTOR Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoRequest req,
-                                                           int sendAmount,
-                                                           Optional<Endpoint> sender,
-                                                           bool sendReply) {
-	state std::vector<Future<std::vector<Endpoint>>> replies;
-	state ReplyPromise<std::vector<Endpoint>> reply = req.reply;
+Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoRequest req,
+                                                     int sendAmount,
+                                                     Optional<Endpoint> sender,
+                                                     bool sendReply) {
+	std::vector<Future<std::vector<Endpoint>>> replies;
+	ReplyPromise<std::vector<Endpoint>> reply = req.reply;
 	resetReply(req);
 	int currentStream = 0;
 	std::vector<Endpoint> broadcastEndpoints = req.broadcastInfo;
@@ -75,7 +73,7 @@ ACTOR Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoReq
 		replies.push_back(tryDBInfoBroadcast(cur, req));
 		resetReply(req);
 	}
-	wait(waitForAll(replies));
+	co_await waitForAll(replies);
 	std::vector<Endpoint> notUpdated;
 	if (sender.present()) {
 		notUpdated.push_back(sender.get());
@@ -86,11 +84,11 @@ ACTOR Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoReq
 	if (sendReply) {
 		reply.send(notUpdated);
 	}
-	return notUpdated;
+	co_return notUpdated;
 }
 
-ACTOR Future<Void> broadcastTxnRequest(TxnStateRequest req, int sendAmount, bool sendReply) {
-	state ReplyPromise<Void> reply = req.reply;
+Future<Void> broadcastTxnRequest(TxnStateRequest req, int sendAmount, bool sendReply) {
+	ReplyPromise<Void> reply = req.reply;
 	resetReply(req);
 	std::vector<Future<Void>> replies;
 	int currentStream = 0;
@@ -105,11 +103,10 @@ ACTOR Future<Void> broadcastTxnRequest(TxnStateRequest req, int sendAmount, bool
 		replies.push_back(brokenPromiseToNever(cur.getReply(req)));
 		resetReply(req);
 	}
-	wait(waitForAll(replies));
+	co_await waitForAll(replies);
 	if (sendReply) {
 		reply.send(Void());
 	}
-	return Void();
 }
 
 bool addressInDbAndPrimarySatelliteDc(const NetworkAddress& address, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
@@ -219,9 +216,9 @@ void endRole(const Role& role, UID id, std::string reason, bool ok, Error e) {
 	}
 }
 
-ACTOR Future<Void> traceRole(Role role, UID roleId) {
-	loop {
-		wait(delay(SERVER_KNOBS->WORKER_LOGGING_INTERVAL));
+Future<Void> traceRole(Role role, UID roleId) {
+	while (true) {
+		co_await delay(SERVER_KNOBS->WORKER_LOGGING_INTERVAL);
 		TraceEvent("Role", roleId).detail("Transition", "Refresh").detail("As", role.roleName);
 	}
 }
