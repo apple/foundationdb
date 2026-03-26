@@ -682,6 +682,7 @@ public:
 	std::vector<Reference<TCMachineTeamInfo>> machineTeams; // all machine teams
 
 	std::vector<Reference<TCTeamInfo>> teams;
+	std::unordered_map<std::string, Reference<TCTeamInfo>> teamsByServerIDs;
 
 	std::vector<DDTeamCollection*> teamCollections;
 	AsyncTrigger printDetailedTeamsInfo;
