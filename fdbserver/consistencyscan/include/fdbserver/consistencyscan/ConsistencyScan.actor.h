@@ -31,7 +31,7 @@
 
 struct ServerDBInfo;
 
-ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
+Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 
 #include "flow/unactorcompiler.h"
 #endif
