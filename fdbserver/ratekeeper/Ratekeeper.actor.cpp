@@ -454,11 +454,41 @@ public:
 		}
 	}
 
+	ACTOR static Future<Void> rateUpdater(Ratekeeper* self, bool* lastLimited) {
+		loop {
+			double actualTps = self->smoothReleasedTransactions.smoothRate();
+			actualTps = std::max(std::max(1.0, actualTps),
+			                     self->smoothTotalDurableBytes.smoothRate() / CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT);
+
+			if (self->actualTpsHistory.size() > SERVER_KNOBS->MAX_TPS_HISTORY_SAMPLES) {
+				self->actualTpsHistory.pop_front();
+			}
+			self->actualTpsHistory.push_back(actualTps);
+
+			while (self->version_recovery.size() > CLIENT_KNOBS->MAX_GENERATIONS) {
+				self->version_recovery.erase(self->version_recovery.begin());
+			}
+
+			self->updateRate(&self->normalLimits);
+			self->updateRate(&self->batchLimits);
+
+			*lastLimited = self->smoothReleasedTransactions.smoothRate() >
+			               SERVER_KNOBS->LAST_LIMITED_RATIO * self->batchLimits.tpsLimit;
+			double tooOld = now() - 1.0;
+			for (auto p = self->grvProxyInfo.begin(); p != self->grvProxyInfo.end();) {
+				if (p->second.lastUpdateTime < tooOld)
+					p = self->grvProxyInfo.erase(p);
+				else
+					++p;
+			}
+			wait(delayJittered(SERVER_KNOBS->METRIC_UPDATE_RATE));
+		}
+	}
+
 	ACTOR static Future<Void> run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 		state ActorOwningSelfRef<Ratekeeper> pSelf(
 		    new Ratekeeper(rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True)));
 		state Ratekeeper& self = *pSelf;
-		state Future<Void> timeout = Void();
 		state std::vector<Future<Void>> tlogTrackers;
 		state std::vector<TLogInterface> tlogInterfs;
 		state Promise<Void> err;
@@ -521,38 +551,10 @@ public:
 		self.addActor.send(self.handleGetRateInfoReqs(rkInterf, &recoveryVersion, &lastLimited));
 		self.addActor.send(
 		    self.handleDBInfoChanges(dbInfo, &recovering, &recoveryVersion, &tlogInterfs, &tlogTrackers, &err));
+		self.addActor.send(self.rateUpdater(&lastLimited));
 
 		try {
 			loop choose {
-				when(wait(timeout)) {
-					double actualTps = self.smoothReleasedTransactions.smoothRate();
-					actualTps =
-					    std::max(std::max(1.0, actualTps),
-					             self.smoothTotalDurableBytes.smoothRate() / CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT);
-
-					if (self.actualTpsHistory.size() > SERVER_KNOBS->MAX_TPS_HISTORY_SAMPLES) {
-						self.actualTpsHistory.pop_front();
-					}
-					self.actualTpsHistory.push_back(actualTps);
-
-					while (self.version_recovery.size() > CLIENT_KNOBS->MAX_GENERATIONS) {
-						self.version_recovery.erase(self.version_recovery.begin());
-					}
-
-					self.updateRate(&self.normalLimits);
-					self.updateRate(&self.batchLimits);
-
-					lastLimited = self.smoothReleasedTransactions.smoothRate() >
-					              SERVER_KNOBS->LAST_LIMITED_RATIO * self.batchLimits.tpsLimit;
-					double tooOld = now() - 1.0;
-					for (auto p = self.grvProxyInfo.begin(); p != self.grvProxyInfo.end();) {
-						if (p->second.lastUpdateTime < tooOld)
-							p = self.grvProxyInfo.erase(p);
-						else
-							++p;
-					}
-					timeout = delayJittered(SERVER_KNOBS->METRIC_UPDATE_RATE);
-				}
 				when(HaltRatekeeperRequest req = waitNext(rkInterf.haltRatekeeper.getFuture())) {
 					req.reply.send(Void());
 					TraceEvent("RatekeeperHalted", rkInterf.id()).detail("ReqID", req.requesterID);
@@ -634,6 +636,10 @@ Future<Void> Ratekeeper::handleDBInfoChanges(Reference<AsyncVar<ServerDBInfo> co
                                              Promise<Void>* err) {
 	return RatekeeperImpl::handleDBInfoChanges(
 	    this, dbInfo, recovering, recoveryVersion, tlogInterfs, tlogTrackers, err);
+}
+
+Future<Void> Ratekeeper::rateUpdater(bool* lastLimited) {
+	return RatekeeperImpl::rateUpdater(this, lastLimited);
 }
 
 Future<Void> Ratekeeper::run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {

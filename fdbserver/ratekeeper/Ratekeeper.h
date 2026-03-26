@@ -223,6 +223,7 @@ class Ratekeeper {
 	                                 std::vector<TLogInterface>* tlogInterfs,
 	                                 std::vector<Future<Void>>* tlogTrackers,
 	                                 Promise<Void>* err);
+	Future<Void> rateUpdater(bool* lastLimited);
 
 	void getSSVersionLag(Version& maxSSPrimaryVersion, Version& maxSSRemoteVersion);
 
