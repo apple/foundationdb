@@ -17,7 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "fdbserver/MetricClient.h"
+#include "MetricClient.h"
 #include "fdbrpc/Stats.h"
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"

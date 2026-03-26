@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#ifndef METRIC_CLIENT_H
-#define METRIC_CLIENT_H
+#ifndef FDBSERVER_WORKER_METRIC_CLIENT_H
+#define FDBSERVER_WORKER_METRIC_CLIENT_H
 
-#include "flow/TDMetric.actor.h"
-#include "flow/Msgpack.h"
-#include "flow/network.h"
 #include "flow/IUDPSocket.h"
+#include "flow/Msgpack.h"
+#include "flow/TDMetric.actor.h"
+#include "flow/network.h"
 
 class IMetricClient {
 protected:
@@ -52,4 +52,5 @@ public:
 	UDPMetricClient();
 	void send(MetricCollection*) override;
 };
+
 #endif

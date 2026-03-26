@@ -58,13 +58,4 @@ extern IKeyValueStore* keyValueStoreLogSystem(class IDiskQueue* queue,
                                               bool replaceContent,
                                               bool exactRecovery);
 
-IKeyValueStore* openKVStore(KeyValueStoreType storeType,
-                            std::string const& filename,
-                            UID logID,
-                            int64_t memoryLimit,
-                            bool checkChecksums = false,
-                            bool checkIntegrity = false,
-                            Reference<AsyncVar<struct ServerDBInfo> const> db = {},
-                            int64_t pageCacheBytes = 0);
-
 #endif

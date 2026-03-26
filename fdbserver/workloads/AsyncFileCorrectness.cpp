@@ -25,7 +25,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/IRandom.h"
 #include "flow/SystemMonitor.h"
-#include "fdbserver/workloads/AsyncFile.h"
+#include "AsyncFile.h"
 
 // An enumeration representing the type of operation to be performed in a correctness test operation
 enum OperationType { READ, WRITE, SYNC, REOPEN, TRUNCATE };

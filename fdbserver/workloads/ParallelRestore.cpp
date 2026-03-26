@@ -21,7 +21,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbserver/tester/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.h"
+#include "BulkSetup.h"
 #include "fdbserver/restoreworker/RestoreWorkerInterface.h"
 
 // A workload which test the correctness of backup and restore process

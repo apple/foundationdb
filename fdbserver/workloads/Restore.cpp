@@ -27,7 +27,7 @@
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/tester/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.h"
+#include "BulkSetup.h"
 #include "flow/IRandom.h"
 
 // TODO: explain the purpose of this workload and how it different from the
