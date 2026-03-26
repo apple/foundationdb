@@ -969,6 +969,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_PREFER_LOW_READ_UTIL_TEAM,                          true );
 	init( DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL,                   120);
 	init( MOVING_WINDOW_SAMPLE_SIZE,                         10000000); // 10MB
+	init( DD_GET_TEAM_BY_SERVERS_WAIT_INTERVAL,                    30); // 30s
 
 	//Storage Server
 	init( STORAGE_LOGGING_DELAY,                                 5.0 );

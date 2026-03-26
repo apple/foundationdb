@@ -184,16 +184,27 @@ public:
 	}
 
 	// Find the team with the exact storage servers as req.src.
-	static void getTeamByServers(DDTeamCollection* self, GetTeamRequest req) {
-		const std::string servers = TCTeamInfo::serversToString(req.src);
-		Optional<Reference<IDataDistributionTeam>> res;
-		for (const auto& team : self->teams) {
-			if (team->getServerIDsStr() == servers) {
-				res = team;
+	ACTOR static Future<Void> getTeamByServers(DDTeamCollection* self, GetTeamRequest req) {
+		state double currTime;
+		state const std::string servers = TCTeamInfo::serversToString(req.src);
+		state Optional<Reference<IDataDistributionTeam>> res;
+		state std::vector<Reference<TCTeamInfo>>::iterator teamIt;
+
+		TraceEvent("GetTeamByServersStart");
+		wait(delay(SERVER_KNOBS->DD_GET_TEAM_BY_SERVERS_WAIT_INTERVAL));
+		currTime = now();
+		teamIt = self->teams.begin();
+		for (; teamIt != self->teams.end(); ++teamIt) {
+			if ((*teamIt)->getServerIDsStr() == servers) {
+				res = *teamIt;
 				break;
 			}
 		}
+
+		TraceEvent("GetTeamByServersEnd").detail("TeamsSize", self->teams.size()).detail("TimeElapsed", now() - currTime).detail("Servers", servers).detail("Result", res.present());
+
 		req.reply.send(std::make_pair(res, false));
+		return Void();
 	}
 
 	// Return a threshold of team queue size which guarantees at least DD_LONG_STORAGE_QUEUE_TEAM_MAJORITY_PERCENTILE
@@ -3077,7 +3088,7 @@ public:
 		loop {
 			GetTeamRequest req = waitNext(tci.getTeam.getFuture());
 			if (req.findTeamByServers) {
-				getTeamByServers(self, req);
+				wait(getTeamByServers(self, req));
 			} else {
 				self->addActor.send(self->getTeam(req));
 			}
