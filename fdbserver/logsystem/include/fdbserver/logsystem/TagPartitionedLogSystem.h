@@ -1,5 +1,5 @@
 /*
- * TagPartitionedLogSystem.actor.h
+ * TagPartitionedLogSystem.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,11 +18,8 @@
  * limitations under the License.
  */
 
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_LOGSYSTEM_TAGPARTITIONEDLOGSYSTEM_ACTOR_G_H)
-#define FDBSERVER_LOGSYSTEM_TAGPARTITIONEDLOGSYSTEM_ACTOR_G_H
-#include "fdbserver/logsystem/TagPartitionedLogSystem.actor.g.h"
-#elif !defined(FDBSERVER_LOGSYSTEM_TAGPARTITIONEDLOGSYSTEM_ACTOR_H)
-#define FDBSERVER_LOGSYSTEM_TAGPARTITIONEDLOGSYSTEM_ACTOR_H
+#ifndef FDBSERVER_LOGSYSTEM_TAGPARTITIONEDLOGSYSTEM_H
+#define FDBSERVER_LOGSYSTEM_TAGPARTITIONEDLOGSYSTEM_H
 
 #pragma once
 
@@ -30,8 +27,6 @@
 #include "fdbserver/core/DBCoreState.h"
 #include "fdbserver/logsystem/LogSystemTypes.h"
 #include "flow/ActorCollection.h"
-
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 // TagPartitionedLogSystem info in old epoch
 struct OldLogData {
@@ -446,5 +441,4 @@ std::vector<T> TagPartitionedLogSystem::getReadyNonError(std::vector<Future<T>> 
 	return result;
 }
 
-#include "flow/unactorcompiler.h"
-#endif // FDBSERVER_LOGSYSTEM_TAGPARTITIONEDLOGSYSTEM_ACTOR_H
+#endif // FDBSERVER_LOGSYSTEM_TAGPARTITIONEDLOGSYSTEM_H

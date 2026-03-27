@@ -1,5 +1,5 @@
 /*
- * TagPartitionedLogSystem.actor.cpp
+ * TagPartitionedLogSystem.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/logsystem/TagPartitionedLogSystem.actor.h"
+#include "fdbserver/logsystem/TagPartitionedLogSystem.h"
 
 #include <boost/dynamic_bitset.hpp>
 #include <utility>
