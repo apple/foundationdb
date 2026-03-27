@@ -986,7 +986,7 @@ public:
 	// Rolling window duration over which the average bytes moved by DD is calculated for the 'MovingData' trace event.
 	double DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL;
 	int64_t MOVING_WINDOW_SAMPLE_SIZE;
-	int64_t DD_GET_TEAM_BY_SERVERS_WAIT_INTERVAL;
+	double DD_GET_TEAM_BY_SERVERS_WAIT_INTERVAL;
 
 	// Storage Server
 	double STORAGE_LOGGING_DELAY;
