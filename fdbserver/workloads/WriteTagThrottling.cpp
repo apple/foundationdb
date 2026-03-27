@@ -23,7 +23,7 @@
 #include "BulkSetup.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 
 // workload description:
 // This workload aims to test whether we can throttling some bad clients that doing penetrating write on write hot-spot

@@ -22,7 +22,7 @@
 
 #include "fdbclient/PImpl.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 
 class TransactionTagCounter {
 	PImpl<class TransactionTagCounterImpl> impl;
