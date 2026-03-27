@@ -1661,9 +1661,6 @@ Future<Version> TagPartitionedLogSystem::getPoppedFromTLog(Reference<AsyncVar<Op
 
 			ASSERT(rep.popped.present());
 			co_return rep.popped.get();
-		} else if (res.index() == 1) {
-		} else {
-			UNREACHABLE();
 		}
 	}
 }
@@ -3615,14 +3612,13 @@ Future<Void> TagPartitionedLogSystem::trackRejoins(
 					req.reply.send(true);
 				}
 			} else if (res.index() == 1) {
+				// warnTimeout fired
 				for (const auto& logId : logsWaiting) {
 					TraceEvent(SevWarnAlways, "TLogRejoinSlow", dbgid)
 					    .detail("Elapsed", startTime - now())
 					    .detail("LogId", logId);
 				}
 				warnTimeout = Never();
-			} else {
-				UNREACHABLE();
 			}
 		}
 	} catch (...) {
@@ -3645,9 +3641,6 @@ Future<TLogLockResult> TagPartitionedLogSystem::lockTLog(UID myID,
 
 			TraceEvent("TLogLocked", myID).detail("TLog", tlog->get().id()).detail("End", data.end);
 			co_return data;
-		} else if (res.index() == 1) {
-		} else {
-			UNREACHABLE();
 		}
 	}
 }
