@@ -22,7 +22,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.h"
+#include "BulkSetup.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"

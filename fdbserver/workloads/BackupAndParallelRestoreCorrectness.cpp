@@ -28,7 +28,7 @@
 #include "fdbserver/restoreworker/RestoreCommon.h"
 #include "fdbserver/tester/workloads.actor.h"
 #include "fdbserver/tester/TestEncryptionUtils.h"
-#include "fdbserver/workloads/BulkSetup.h"
+#include "BulkSetup.h"
 
 #define TEST_ABORT_FASTRESTORE 0
 
@@ -193,14 +193,13 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> doBackup(BackupAndParallelRestoreCorrectnessWorkload* self,
-	                             double startDelay,
-	                             FileBackupAgent* backupAgent,
-	                             Database cx,
-	                             Key tag,
-	                             Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                             double stopDifferentialDelay,
-	                             Promise<Void> submitted) {
+	Future<Void> doBackup(double startDelay,
+	                      FileBackupAgent* backupAgent,
+	                      Database cx,
+	                      Key tag,
+	                      Standalone<VectorRef<KeyRangeRef>> backupRanges,
+	                      double stopDifferentialDelay,
+	                      Promise<Void> submitted) {
 		UID randomID = nondeterministicRandom()->randomUniqueID();
 		Future<Void> stopDifferentialFuture = delay(stopDifferentialDelay);
 
@@ -235,9 +234,9 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			                                   tag.toString(),
 			                                   backupRanges,
 			                                   StopWhenDone{ !stopDifferentialDelay },
-			                                   self->usePartitionedLogs,
+			                                   usePartitionedLogs,
 			                                   IncrementalBackupOnly::False,
-			                                   self->encryptionKeyFileName);
+			                                   encryptionKeyFileName);
 		} catch (Error& e) {
 			TraceEvent("BARW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
@@ -360,11 +359,10 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 	// This actor attempts to restore the database without clearing the keyspace.
 	// TODO: Enable this function in correctness test
-	static Future<Void> attemptDirtyRestore(BackupAndParallelRestoreCorrectnessWorkload* self,
-	                                        Database cx,
-	                                        FileBackupAgent* backupAgent,
-	                                        Standalone<StringRef> lastBackupContainer,
-	                                        UID randomID) {
+	Future<Void> attemptDirtyRestore(Database cx,
+	                                 FileBackupAgent* backupAgent,
+	                                 Standalone<StringRef> lastBackupContainer,
+	                                 UID randomID) {
 		Transaction tr(cx);
 		int rowCount = 0;
 		while (true) {
@@ -386,7 +384,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				TraceEvent(SevError, "MXFastRestore").detail("RestoreFunction", "ShouldChangeToMyOwnRestoreLogic");
 				co_await backupAgent->restore(cx,
 				                              cx,
-				                              self->backupTag,
+				                              backupTag,
 				                              KeyRef(lastBackupContainer),
 				                              {},
 				                              WaitForComplete::True,
@@ -395,11 +393,11 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				                              normalKeys,
 				                              Key(),
 				                              Key(),
-				                              self->locked,
+				                              locked,
 				                              OnlyApplyMutationLogs::False,
 				                              InconsistentSnapshotOnly::False,
 				                              ::invalidVersion,
-				                              self->encryptionKeyFileName);
+				                              encryptionKeyFileName);
 				TraceEvent(SevError, "BARW_RestoreAllowedOverwrittingDatabase", randomID).log();
 				ASSERT(false);
 			} catch (Error& e) {
@@ -446,16 +444,14 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 			TraceEvent("BARW_DoBackup1", randomID).detail("Tag", printable(backupTag));
 			Promise<Void> submitted;
-			Future<Void> b =
-			    doBackup(this, 0, &backupAgent, cx, backupTag, backupRanges, stopDifferentialAfter, submitted);
+			Future<Void> b = doBackup(0, &backupAgent, cx, backupTag, backupRanges, stopDifferentialAfter, submitted);
 
 			if (abortAndRestartAfter) {
 				TraceEvent("BARW_DoBackup2", randomID)
 				    .detail("Tag", printable(backupTag))
 				    .detail("AbortWait", abortAndRestartAfter);
 				co_await submitted.getFuture();
-				b = b && doBackup(this,
-				                  abortAndRestartAfter,
+				b = b && doBackup(abortAndRestartAfter,
 				                  &backupAgent,
 				                  cx,
 				                  backupTag,
@@ -521,7 +517,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					printf("TODO: Check if restore can succeed if dirty restore is performed first\n");
 					// TODO: To support restore even after we attempt dirty restore. Not implemented in the 1st version
 					// fast restore
-					// wait(attemptDirtyRestore(this, cx, &backupAgent, StringRef(lastBackupContainer->getURL()),
+					// wait(attemptDirtyRestore(cx, &backupAgent, StringRef(lastBackupContainer->getURL()),
 					// randomID));
 				}
 

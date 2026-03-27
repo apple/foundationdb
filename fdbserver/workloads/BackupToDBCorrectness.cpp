@@ -25,7 +25,7 @@
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/tester/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.h"
+#include "BulkSetup.h"
 #include "flow/ApiVersion.h"
 
 // This workload tests backing up one cluster to another.
@@ -289,14 +289,13 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> doBackup(BackupToDBCorrectnessWorkload* self,
-	                             double startDelay,
-	                             DatabaseBackupAgent* backupAgent,
-	                             Database cx,
-	                             Key tag,
-	                             Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                             double stopDifferentialDelay,
-	                             Promise<Void> submitted) {
+	Future<Void> doBackup(double startDelay,
+	                      DatabaseBackupAgent* backupAgent,
+	                      Database cx,
+	                      Key tag,
+	                      Standalone<VectorRef<KeyRangeRef>> backupRanges,
+	                      double stopDifferentialDelay,
+	                      Promise<Void> submitted) {
 
 		UID randomID = nondeterministicRandom()->randomUniqueID();
 
@@ -337,9 +336,9 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				                                   tag,
 				                                   backupRanges,
 				                                   StopWhenDone{ !stopDifferentialDelay },
-				                                   self->backupPrefix,
+				                                   backupPrefix,
 				                                   StringRef(),
-				                                   LockDB{ self->locked },
+				                                   LockDB{ locked },
 				                                   DatabaseBackupAgent::PreBackupAction::CLEAR);
 			} catch (Error& e) {
 				TraceEvent("BARW_SubmitBackup1Exception", randomID).error(e);
@@ -416,7 +415,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 		TraceEvent("BARW_DoBackupWaitBackup", randomID).detail("Tag", printable(tag));
 
 		UID _destUid = co_await backupAgent->getDestUid(cx, logUid);
-		self->destUid = _destUid;
+		destUid = _destUid;
 
 		EBackupState statusValue = co_await backupAgent->waitBackup(cx, tag, StopWhenDone::True);
 		co_await backupAgent->unlockBackup(cx, tag);
@@ -593,7 +592,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 			TraceEvent("BARW_DoBackup1", randomID).detail("Tag", printable(backupTag));
 			Promise<Void> submitted;
 			Future<Void> b =
-			    doBackup(this, 0, &backupAgent, extraDB, backupTag, backupRanges, stopDifferentialAfter, submitted);
+			    doBackup(0, &backupAgent, extraDB, backupTag, backupRanges, stopDifferentialAfter, submitted);
 
 			if (abortAndRestartAfter) {
 				TraceEvent("BARW_DoBackup2", randomID)
@@ -601,8 +600,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				    .detail("AbortWait", abortAndRestartAfter);
 				co_await submitted.getFuture();
 
-				b = b && doBackup(this,
-				                  abortAndRestartAfter,
+				b = b && doBackup(abortAndRestartAfter,
 				                  &backupAgent,
 				                  extraDB,
 				                  backupTag,

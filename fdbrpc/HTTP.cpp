@@ -272,7 +272,7 @@ Future<size_t> read_delimited_into_string(Reference<IConnection> conn,
 		if (buf->size() >= lookBack) {
 			sPos = buf->size() - lookBack;
 		}
-		co_await success(read_into_string(conn, buf, FLOW_KNOBS->HTTP_READ_SIZE));
+		co_await read_into_string(conn, buf, FLOW_KNOBS->HTTP_READ_SIZE);
 	}
 }
 
@@ -280,7 +280,7 @@ Future<size_t> read_delimited_into_string(Reference<IConnection> conn,
 Future<Void> read_fixed_into_string(Reference<IConnection> conn, int len, std::string* buf, size_t pos) {
 	int stop_size = pos + len;
 	while (buf->size() < stop_size) {
-		co_await success(read_into_string(conn, buf, FLOW_KNOBS->HTTP_READ_SIZE));
+		co_await read_into_string(conn, buf, FLOW_KNOBS->HTTP_READ_SIZE);
 	}
 }
 
@@ -785,7 +785,7 @@ Future<Void> sendProxyConnectRequest(Reference<IConnection> conn, std::string re
 	int64_t bytes_sent = 0;
 	UnsentPacketQueue empty_packet_queue;
 
-	Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
+	auto req = makeReference<HTTP::OutgoingRequest>();
 	req->verb = HTTP_VERB_CONNECT;
 	req->resource = remoteHost + ":" + remoteService;
 	req->data.content = &empty_packet_queue;

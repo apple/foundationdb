@@ -24,7 +24,6 @@
 // FIXME: Trim this down
 #include "fmt/format.h"
 #include "flow/Platform.actor.h"
-#include "fdbclient/AsyncTaskThread.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/FDBTypes.h"
@@ -445,7 +444,7 @@ Future<std::vector<std::string>> IBackupContainer::listContainers(const std::str
 
 Future<Version> timeKeeperVersionFromDatetime(std::string datetime, Database db) {
 	KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
-	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	auto tr = makeReference<ReadYourWritesTransaction>(db);
 
 	int64_t time = BackupAgentBase::parseTime(datetime);
 	if (time < 0) {
@@ -464,7 +463,7 @@ Future<Version> timeKeeperVersionFromDatetime(std::string datetime, Database db)
 			if (rangeResult.results.size() != 1) {
 				// No key less than time was found in the database
 				// Look for a key >= time.
-				co_await store(rangeResult, versionMap.getRange(tr, time, std::numeric_limits<int64_t>::max(), 1));
+				rangeResult = co_await versionMap.getRange(tr, time, std::numeric_limits<int64_t>::max(), 1);
 
 				if (rangeResult.results.size() != 1) {
 					fprintf(stderr, "ERROR: Unable to calculate a version for given date/time.\n");
@@ -506,7 +505,7 @@ Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version v, Reference<ReadY
 			if (mid == min) {
 				// There aren't any records having a version < v, so just look for any record having a time < now
 				// and base a result on it
-				co_await store(rangeResult, versionMap.getRange(tr, 0, (int64_t)now(), 1));
+				rangeResult = co_await versionMap.getRange(tr, 0, (int64_t)now(), 1);
 
 				if (rangeResult.results.size() != 1) {
 					// There aren't any timekeeper records to base a result on so return nothing

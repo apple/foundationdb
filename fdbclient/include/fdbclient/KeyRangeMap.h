@@ -131,26 +131,26 @@ private:
 // krm*(): KeyRangeMap-like abstraction stored in the database, accessed through Transactions
 class Transaction;
 class ReadYourWritesTransaction;
-Future<RangeResult> krmGetRanges(Transaction* const& tr,
-                                 Key const& mapPrefix,
-                                 KeyRange const& keys,
-                                 int const& limit = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-                                 int const& limitBytes = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES);
-Future<RangeResult> krmGetRanges(Reference<ReadYourWritesTransaction> const& tr,
-                                 Key const& mapPrefix,
-                                 KeyRange const& keys,
-                                 int const& limit = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-                                 int const& limitBytes = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES);
-Future<RangeResult> krmGetRangesUnaligned(Transaction* const& tr,
-                                          Key const& mapPrefix,
-                                          KeyRange const& keys,
-                                          int const& limit = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-                                          int const& limitBytes = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES);
-Future<RangeResult> krmGetRangesUnaligned(Reference<ReadYourWritesTransaction> const& tr,
-                                          Key const& mapPrefix,
-                                          KeyRange const& keys,
-                                          int const& limit = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-                                          int const& limitBytes = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES);
+Future<RangeResult> krmGetRanges(Transaction* tr,
+                                 Key mapPrefix,
+                                 KeyRange keys,
+                                 int limit = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+                                 int limitBytes = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES);
+Future<RangeResult> krmGetRanges(Reference<ReadYourWritesTransaction> tr,
+                                 Key mapPrefix,
+                                 KeyRange keys,
+                                 int limit = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+                                 int limitBytes = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES);
+Future<RangeResult> krmGetRangesUnaligned(Transaction* tr,
+                                          Key mapPrefix,
+                                          KeyRange keys,
+                                          int limit = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+                                          int limitBytes = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES);
+Future<RangeResult> krmGetRangesUnaligned(Reference<ReadYourWritesTransaction> tr,
+                                          Key mapPrefix,
+                                          KeyRange keys,
+                                          int limit = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+                                          int limitBytes = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES);
 void krmSetPreviouslyEmptyRange(Transaction* tr,
                                 const KeyRef& mapPrefix,
                                 const KeyRangeRef& keys,
@@ -162,11 +162,8 @@ void krmSetPreviouslyEmptyRange(struct CommitTransactionRef& tr,
                                 const KeyRangeRef& keys,
                                 const ValueRef& newValue,
                                 const ValueRef& oldEndValue);
-Future<Void> krmSetRange(Transaction* const& tr, Key const& mapPrefix, KeyRange const& range, Value const& value);
-Future<Void> krmSetRange(Reference<ReadYourWritesTransaction> const& tr,
-                         Key const& mapPrefix,
-                         KeyRange const& range,
-                         Value const& value);
+Future<Void> krmSetRange(Transaction* tr, Key mapPrefix, KeyRange range, Value value);
+Future<Void> krmSetRange(Reference<ReadYourWritesTransaction> tr, Key mapPrefix, KeyRange range, Value value);
 Future<Void> krmSetRangeCoalescing(Transaction* const& tr,
                                    Key const& mapPrefix,
                                    KeyRange const& range,

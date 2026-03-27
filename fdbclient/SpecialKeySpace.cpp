@@ -1290,7 +1290,7 @@ Future<RangeResult> ExclusionInProgressActor(ReadYourWritesTransaction* ryw, Key
 		}
 	}
 
-	co_await success(fLogsKey);
+	co_await fLogsKey;
 	Optional<Standalone<StringRef>> value = fLogsKey.get();
 	ASSERT(value.present());
 	// TODO(jscheuermann): The logs key range doesn't hold any information about localities. This is a limitation

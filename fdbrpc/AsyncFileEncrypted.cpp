@@ -80,7 +80,7 @@ public:
 			if (cachedBlock.present()) {
 				plaintext = cachedBlock.get();
 			} else {
-				co_await store(plaintext, readBlock(self.getPtr(), block));
+				plaintext = co_await readBlock(self.getPtr(), block);
 				self->readBuffers.insert(block, plaintext);
 			}
 			auto start = (block == firstBlock) ? plaintext.begin() + (offset % FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE)
