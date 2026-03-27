@@ -51,7 +51,7 @@
 #include "fdbserver/backupworker/BackupWorker.h"
 #include "fdbserver/clustercontroller/ClusterController.actor.h"
 #include "fdbserver/commitproxy/CommitProxyServer.actor.h"
-#include "fdbserver/consistencyscan/ConsistencyScan.actor.h"
+#include "fdbserver/consistencyscan/ConsistencyScan.h"
 #include "fdbserver/datadistributor/DataDistributor.h"
 #include "fdbserver/grvproxy/GrvProxyServer.h"
 #include "fdbserver/logrouter/LogRouter.h"

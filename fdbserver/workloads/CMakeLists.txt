@@ -7,6 +7,7 @@ target_include_directories(fdbserver_workloads PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${CMAKE_CURRENT_BINARY_DIR})
 target_link_libraries(fdbserver_workloads PRIVATE
+  fdbserver_consistencyscan
   fdbserver_core
   fdbserver_worker
   fdbserver_tester

@@ -1,5 +1,5 @@
 /*
- * MockS3ServerChaos.actor.cpp
+ * MockS3ServerChaos.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -26,7 +26,6 @@
 #include "fdbrpc/simulator.h"
 #include "flow/Trace.h"
 #include "flow/IRandom.h"
-#include "flow/actorcompiler.h"
 
 // Clear the chaos server registry (for testing/debugging only)
 // NOTE: In production simulation tests, the registry should NOT be cleared between tests,
@@ -96,7 +95,7 @@ std::string generateS3ErrorXML(const std::string& code, const std::string& messa
 }
 
 // Phase 1: Inject delay if configured
-ACTOR Future<Void> maybeInjectDelay(S3Operation op) {
+Future<Void> maybeInjectDelay(S3Operation op) {
 	auto injector = S3FaultInjector::injector();
 	double delayRate = injector->getDelayRate() * getOperationMultiplier(op);
 
@@ -109,16 +108,14 @@ ACTOR Future<Void> maybeInjectDelay(S3Operation op) {
 		    .detail("Delay", delayTime)
 		    .detail("MaxDelay", maxDelay);
 
-		wait(delay(delayTime));
+		co_await delay(delayTime);
 	}
-
-	return Void();
 }
 
 // Phase 2: Inject errors if configured
-ACTOR Future<bool> maybeInjectError(Reference<HTTP::IncomingRequest> req,
-                                    Reference<HTTP::OutgoingResponse> response,
-                                    S3Operation op) {
+Future<bool> maybeInjectError(Reference<HTTP::IncomingRequest> req,
+                              Reference<HTTP::OutgoingResponse> response,
+                              S3Operation op) {
 	auto injector = S3FaultInjector::injector();
 	double errorRate = injector->getErrorRate() * getOperationMultiplier(op);
 
@@ -218,7 +215,7 @@ ACTOR Future<bool> maybeInjectError(Reference<HTTP::IncomingRequest> req,
 }
 
 // Phase 4: Corrupt response data if configured
-ACTOR Future<Void> maybeCorruptResponse(Reference<HTTP::OutgoingResponse> response, S3Operation op) {
+Future<Void> maybeCorruptResponse(Reference<HTTP::OutgoingResponse> response, S3Operation op) {
 	auto injector = S3FaultInjector::injector();
 	double corruptionRate = injector->getCorruptionRate() * getOperationMultiplier(op);
 
@@ -248,10 +245,10 @@ ACTOR Future<Void> maybeCorruptResponse(Reference<HTTP::OutgoingResponse> respon
 // Core chaos server implementation
 class MockS3ChaosServerImpl {
 public:
-	ACTOR static Future<Void> handleRequest(Reference<HTTP::IncomingRequest> req,
-	                                        Reference<HTTP::OutgoingResponse> response) {
-		// Classify the operation type (must be state since used after wait())
-		state S3Operation op = classifyS3Operation(req->verb, req->resource);
+	static Future<Void> handleRequest(Reference<HTTP::IncomingRequest> req,
+	                                  Reference<HTTP::OutgoingResponse> response) {
+		// Classify the operation type before the first suspension point.
+		S3Operation op = classifyS3Operation(req->verb, req->resource);
 
 		TraceEvent("MockS3ChaosRequest")
 		    .detail("Method", req->verb)
@@ -260,22 +257,22 @@ public:
 		    .detail("ContentLength", req->data.contentLen);
 
 		// Phase 1: Inject delay if configured
-		wait(maybeInjectDelay(op));
+		co_await maybeInjectDelay(op);
 
 		// Phase 2: Check if we should inject an error
-		state bool errorInjected = wait(maybeInjectError(req, response, op));
+		bool errorInjected = co_await maybeInjectError(req, response, op);
 		if (errorInjected) {
-			return Void();
+			co_return;
 		}
 
 		// Phase 3: Delegate to base MockS3Server for normal processing
 		// Use the exposed processMockS3Request function to access the shared server instance
-		wait(processMockS3Request(req, response));
+		co_await processMockS3Request(req, response);
 
 		// Phase 4: Possibly corrupt the response data
-		wait(maybeCorruptResponse(response, op));
+		co_await maybeCorruptResponse(response, op);
 
-		return Void();
+		co_return;
 	}
 };
 
@@ -290,8 +287,8 @@ Reference<HTTP::IRequestHandler> MockS3ChaosRequestHandler::clone() {
 }
 
 // Safe server registration that prevents conflicts using truly simulator-global registry
-ACTOR Future<Void> registerMockS3ChaosServer(std::string ip, std::string port) {
-	state std::string serverKey = ip + ":" + port;
+Future<Void> registerMockS3ChaosServer(std::string ip, std::string port) {
+	std::string serverKey = ip + ":" + port;
 	ASSERT(g_simulator);
 
 	TraceEvent("MockS3ChaosServerRegistration")
@@ -305,7 +302,7 @@ ACTOR Future<Void> registerMockS3ChaosServer(std::string ip, std::string port) {
 	// Check if server is already registered using truly simulator-global registry
 	if (g_simulator->registeredMockS3ChaosServers.count(serverKey)) {
 		TraceEvent(SevWarn, "MockS3ChaosServerAlreadyRegistered").detail("Address", serverKey);
-		return Void();
+		co_return;
 	}
 
 	try {
@@ -319,14 +316,14 @@ ACTOR Future<Void> registerMockS3ChaosServer(std::string ip, std::string port) {
 			    .detail("PersistenceDir", persistenceDir);
 
 			// Load any previously persisted state (for crash recovery in simulation)
-			wait(loadMockS3PersistedStateFuture());
+			co_await loadMockS3PersistedStateFuture();
 		}
 
-		wait(g_simulator->registerSimHTTPServer(ip, port, makeReference<MockS3ChaosRequestHandler>()));
+		co_await g_simulator->registerSimHTTPServer(ip, port, makeReference<MockS3ChaosRequestHandler>());
 		g_simulator->registeredMockS3ChaosServers.insert(serverKey);
 
 		// Enable persistence automatically for all MockS3 instances (including chaos)
-		wait(initializeMockS3Persistence(serverKey));
+		co_await initializeMockS3Persistence(serverKey);
 
 		TraceEvent("MockS3ChaosServerRegistered")
 		    .detail("Address", serverKey)
@@ -341,12 +338,10 @@ ACTOR Future<Void> registerMockS3ChaosServer(std::string ip, std::string port) {
 		    .detail("ErrorName", e.name());
 		throw;
 	}
-
-	return Void();
 }
 
 // Public Interface Implementation
-ACTOR Future<Void> startMockS3ServerChaos(NetworkAddress listenAddress) {
+Future<Void> startMockS3ServerChaos(NetworkAddress listenAddress) {
 	ASSERT(g_network->isSimulated());
 
 	TraceEvent("MockS3ChaosServerStart")
@@ -355,11 +350,7 @@ ACTOR Future<Void> startMockS3ServerChaos(NetworkAddress listenAddress) {
 	    .detail("Port", listenAddress.port);
 
 	// Register the chaos-enabled HTTP server
-	wait(registerMockS3ChaosServer(listenAddress.ip.toString(), std::to_string(listenAddress.port)));
+	co_await registerMockS3ChaosServer(listenAddress.ip.toString(), std::to_string(listenAddress.port));
 
 	TraceEvent("MockS3ChaosServerStarted").detail("Address", listenAddress.toString()).detail("Ready", true);
-
-	return Void();
 }
-
-#include "flow/unactorcompiler.h"
