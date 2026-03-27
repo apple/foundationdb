@@ -23,7 +23,7 @@
 
 #include "flow/flow.h"
 #include "flow/Platform.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/FlowTransport.h"
 #include "flow/actorcompiler.h" // has to be last include

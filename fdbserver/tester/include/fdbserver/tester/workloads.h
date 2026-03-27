@@ -1,5 +1,5 @@
 /*
- * workloads.actor.h
+ * workloads.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_TESTER_WORKLOADS_ACTOR_H
-#define FDBSERVER_TESTER_WORKLOADS_ACTOR_H
+#ifndef FDBSERVER_TESTER_WORKLOADS_H
+#define FDBSERVER_TESTER_WORKLOADS_H
 #pragma once
 
 #include "fdbclient/NativeAPI.actor.h"
@@ -74,7 +74,7 @@ struct TestWorkload : NonCopyable, WorkloadContext, ReferenceCounted<TestWorkloa
 		if (runSetup)
 			phases |= TestWorkload::SETUP;
 	}
-	virtual ~TestWorkload() {};
+	virtual ~TestWorkload(){};
 	virtual Future<Void> initialized() { return Void(); }
 	// WARNING: this method must not be implemented by a workload directly. Instead, this will be implemented by
 	// the workload factory. Instead, provide a static member variable called name.

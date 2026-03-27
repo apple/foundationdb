@@ -19,7 +19,7 @@
  */
 
 #include "fdbserver/core/TesterInterface.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "BulkSetup.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbclient/NativeAPI.actor.h"

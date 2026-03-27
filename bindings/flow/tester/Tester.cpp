@@ -28,7 +28,7 @@
 #include "bindings/flow/FDBLoanerTypes.h"
 #include "fdbrpc/fdbrpc.h"
 #include "flow/DeterministicRandom.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 
 // Otherwise we have to type setupNetwork(), FDB::open(), etc.
 using namespace FDB;

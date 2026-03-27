@@ -58,7 +58,7 @@
 #include "flow/Profiler.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/SendBufferIterator.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 #include "flow/WatchFile.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Util.h"

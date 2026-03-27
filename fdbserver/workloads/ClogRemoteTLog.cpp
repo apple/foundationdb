@@ -9,7 +9,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/ServerDBInfo.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "flow/Buggify.h"
 #include "flow/Error.h"
 #include "flow/IPAddress.h"

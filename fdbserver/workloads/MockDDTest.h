@@ -20,7 +20,7 @@
 #ifndef FOUNDATIONDB_MOCKDDTEST_H
 #define FOUNDATIONDB_MOCKDDTEST_H
 
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "fdbserver/datadistributor/DDSharedContext.h"
 #include "fdbserver/datadistributor/DDTxnProcessor.h"
 #include "fdbserver/core/MoveKeys.h"

@@ -32,7 +32,7 @@
 #endif
 #include <boost/algorithm/string.hpp>
 
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 #include "flow/Trace.h"
 #include "flow/Platform.h"
 #include "flow/flow.h"

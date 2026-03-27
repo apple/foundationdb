@@ -50,7 +50,7 @@
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 #include "SimpleOpt/SimpleOpt.h"
 
 // CLI for S3Client.

@@ -52,7 +52,7 @@
 #include "flow/swift/ABI/Task.h"
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
