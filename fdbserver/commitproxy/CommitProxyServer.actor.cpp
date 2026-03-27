@@ -54,7 +54,7 @@
 #include "fdbserver/core/RatekeeperInterface.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/RestoreCoreUtil.h"
-#include "fdbserver/core/ServerDBInfo.actor.h"
+#include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/commitproxy/CommitProxyServer.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"

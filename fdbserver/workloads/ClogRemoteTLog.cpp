@@ -8,7 +8,7 @@
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/ServerDBInfo.actor.h"
+#include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/tester/workloads.actor.h"
 #include "flow/Buggify.h"
 #include "flow/Error.h"

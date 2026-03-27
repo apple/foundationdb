@@ -24,7 +24,7 @@
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbserver/core/RecoveryState.h"
-#include "fdbserver/core/ServerDBInfo.actor.h"
+#include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.actor.h"
 #include "fdbrpc/simulator.h"
