@@ -30,6 +30,7 @@
 #include "flow/IRateControl.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/core/Knobs.h"
+#include "fdbserver/consistencyscan/ConsistencyScan.actor.h"
 #include "fdbserver/core/StorageMetrics.actor.h"
 #include "fdbserver/datadistributor/DataDistribution.h"
 #include "fdbserver/core/QuietDatabase.actor.h"
