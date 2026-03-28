@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <map>
+
 #include "fdbserver/core/RecoveryState.h"
 #include "flow/UnitTest.h"
 
@@ -27,6 +29,26 @@
 namespace cluster_health {
 
 namespace {
+
+class FakeWorkerEventProvider final : public IWorkerEventProvider, public ReferenceCounted<FakeWorkerEventProvider> {
+	std::map<std::string, LatestWorkerEvents> latestEventsByName;
+
+public:
+	void addref() const override { ReferenceCounted<FakeWorkerEventProvider>::addref(); }
+	void delref() const override { ReferenceCounted<FakeWorkerEventProvider>::delref(); }
+
+	void setLatestEvents(std::string eventName, LatestWorkerEvents latestEvents) {
+		latestEventsByName[std::move(eventName)] = std::move(latestEvents);
+	}
+
+	Future<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const override {
+		auto it = latestEventsByName.find(eventName);
+		if (it == latestEventsByName.end()) {
+			return LatestWorkerEvents();
+		}
+		return it->second;
+	}
+};
 
 TraceEventFields makeSpaceMetrics(std::string const& availableBytesField,
                                   std::string const& totalBytesField,

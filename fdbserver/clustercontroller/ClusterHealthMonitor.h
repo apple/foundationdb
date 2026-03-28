@@ -20,7 +20,6 @@
 
 #pragma once
 
-#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -60,17 +59,6 @@ public:
 	void addref() const override { ReferenceCounted<WorkerEventProvider>::addref(); }
 	void delref() const override { ReferenceCounted<WorkerEventProvider>::delref(); }
 	void setWorkers(std::vector<WorkerDetails> workers);
-	Future<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const override;
-};
-
-// Test event provider backed by manually supplied latest-event snapshots.
-class FakeWorkerEventProvider final : public IWorkerEventProvider, public ReferenceCounted<FakeWorkerEventProvider> {
-	std::map<std::string, LatestWorkerEvents> latestEventsByName;
-
-public:
-	void addref() const override { ReferenceCounted<FakeWorkerEventProvider>::addref(); }
-	void delref() const override { ReferenceCounted<FakeWorkerEventProvider>::delref(); }
-	void setLatestEvents(std::string eventName, LatestWorkerEvents latestEvents);
 	Future<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const override;
 };
 

@@ -84,18 +84,6 @@ Future<LatestWorkerEvents> WorkerEventProvider::getLatestEvents(std::string cons
 	return latestEventOnWorkers(workers, eventName);
 }
 
-void FakeWorkerEventProvider::setLatestEvents(std::string eventName, LatestWorkerEvents latestEvents) {
-	latestEventsByName[std::move(eventName)] = std::move(latestEvents);
-}
-
-Future<LatestWorkerEvents> FakeWorkerEventProvider::getLatestEvents(std::string const& eventName) const {
-	auto it = latestEventsByName.find(eventName);
-	if (it == latestEventsByName.end()) {
-		return LatestWorkerEvents();
-	}
-	return it->second;
-}
-
 Monitor::Monitor(std::vector<std::unique_ptr<IFactor>>&& factors,
                  Reference<IWorkerEventProvider const> workerEventProvider)
   : factors(std::move(factors)), workerEventProvider(workerEventProvider) {}

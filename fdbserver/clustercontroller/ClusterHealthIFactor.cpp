@@ -25,6 +25,7 @@
 #include "flow/Trace.h"
 
 #include "ClusterHealthIFactor.h"
+#include "ClusterHealthMonitor.h"
 
 namespace cluster_health {
 
