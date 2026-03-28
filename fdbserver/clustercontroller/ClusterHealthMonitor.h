@@ -23,10 +23,10 @@
 #include <map>
 #include <memory>
 #include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 
+#include "ClusterHealthIFactor.h"
 #include "fdbserver/core/WorkerEvents.h"
 #include "flow/flow.h"
 
@@ -74,79 +74,22 @@ public:
 	Future<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const override;
 };
 
-// Computes one cluster-health signal from shared monitoring inputs.
-class IFactor {
-public:
-	virtual ~IFactor() = default;
-	virtual std::string_view getName() const = 0;
-
-	virtual Future<Level> fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) = 0;
-};
-
-// Evaluates storage-server free-space pressure from StorageMetrics events.
-class StorageSpaceFactor : public IFactor {
-	double interventionThreshold;
-	double criticalInterventionThreshold;
-
-public:
-	StorageSpaceFactor(double interventionThreshold, double criticalInterventionThreshold);
-
-	std::string_view getName() const override;
-	Future<Level> fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) override;
-};
-
-// Evaluates TLog queue-disk free-space pressure from TLogMetrics events.
-class TLogSpaceFactor : public IFactor {
-	double interventionThreshold;
-	double criticalInterventionThreshold;
-
-public:
-	TLogSpaceFactor(double interventionThreshold, double criticalInterventionThreshold);
-
-	std::string_view getName() const override;
-	Future<Level> fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) override;
-};
-
-// Evaluates whether data distribution is restoring or has lost storage replication.
-class StorageReplicationFactor : public IFactor {
-public:
-	std::string_view getName() const override;
-	Future<Level> fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) override;
-};
-
-// Evaluates cluster recovery progress from MasterRecoveryState events.
-class RecoveryStateFactor : public IFactor {
-public:
-	std::string_view getName() const override;
-	Future<Level> fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) override;
-};
-
-// Evaluates whether any worker is currently reporting a latest process error.
-class ProcessErrorsFactor : public IFactor {
-public:
-	std::string_view getName() const override;
-	Future<Level> fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) override;
-};
-
-// Evaluates ratekeeper throttling severity from RkUpdate events.
-class RkThrottlingFactor : public IFactor {
-	double criticalTpsLimitToReleasedTpsRatioThreshold;
-
-public:
-	explicit RkThrottlingFactor(double criticalTpsLimitToReleasedTpsRatioThreshold);
-
-	std::string_view getName() const override;
-	Future<Level> fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) override;
-};
-
 // Periodically evaluates factors and logs the aggregate cluster-health metric.
 class Monitor {
 	std::vector<std::unique_ptr<IFactor>> factors;
 	Reference<IWorkerEventProvider const> workerEventProvider;
 
-public:
 	Monitor(std::vector<std::unique_ptr<IFactor>>&& factors, Reference<IWorkerEventProvider const> workerEventProvider);
+	friend Monitor createHealthMonitor(Reference<IWorkerEventProvider const> workerEventProvider);
+
+public:
+	Monitor(Monitor&&) noexcept = default;
+	Monitor& operator=(Monitor&&) noexcept = default;
+
 	Future<Void> run();
 };
+
+// Creates a monitor configured with the current cluster-health factors and server knobs.
+Monitor createHealthMonitor(Reference<IWorkerEventProvider const> workerEventProvider);
 
 } // namespace cluster_health

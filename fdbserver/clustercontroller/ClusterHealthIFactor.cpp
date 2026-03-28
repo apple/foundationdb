@@ -1,0 +1,249 @@
+/*
+ * ClusterHealthIFactor.cpp
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include <algorithm>
+#include <limits>
+
+#include "fdbserver/core/RecoveryState.h"
+#include "flow/Trace.h"
+
+#include "ClusterHealthIFactor.h"
+
+namespace cluster_health {
+
+namespace {
+
+Future<Level> fetchSpaceLevel(Reference<IWorkerEventProvider const> workerEventProvider,
+                              std::string const& eventName,
+                              std::string const& availableBytesField,
+                              std::string const& totalBytesField,
+                              double interventionThreshold,
+                              double criticalInterventionThreshold,
+                              char const* failureTraceEventName) {
+	auto eventsAndErrors = co_await workerEventProvider->getLatestEvents(eventName);
+	if (!eventsAndErrors.present()) {
+		co_return Level::METRICS_MISSING;
+	}
+
+	auto const& [events, _errors] = eventsAndErrors.get();
+	if (events.empty()) {
+		co_return Level::METRICS_MISSING;
+	}
+
+	double minAvailableSpaceRatio = 1.0;
+
+	try {
+		for (auto const& [address, traceEvent] : events) {
+			(void)address;
+			double available = traceEvent.getDouble(availableBytesField);
+			double total = std::max(1.0, traceEvent.getDouble(totalBytesField));
+			minAvailableSpaceRatio = std::min(minAvailableSpaceRatio, available / total);
+		}
+
+		if (minAvailableSpaceRatio < criticalInterventionThreshold) {
+			co_return Level::CRITICAL_INTERVENTION_REQUIRED;
+		}
+		if (minAvailableSpaceRatio < interventionThreshold) {
+			co_return Level::INTERVENTION_REQUIRED;
+		}
+		co_return Level::HEALTHY;
+	} catch (Error& e) {
+		TraceEvent(SevWarnAlways, failureTraceEventName).error(e);
+		co_return Level::METRICS_MISSING;
+	}
+}
+
+} // namespace
+
+StorageSpaceFactor::StorageSpaceFactor(double interventionThreshold, double criticalInterventionThreshold)
+  : interventionThreshold(interventionThreshold), criticalInterventionThreshold(criticalInterventionThreshold) {}
+
+std::string_view StorageSpaceFactor::getName() const {
+	return "StorageSpace";
+}
+
+Future<Level> StorageSpaceFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) {
+	co_return co_await fetchSpaceLevel(workerEventProvider,
+	                                   "StorageMetrics",
+	                                   "KvstoreBytesAvailable",
+	                                   "KvstoreBytesTotal",
+	                                   interventionThreshold,
+	                                   criticalInterventionThreshold,
+	                                   "StorageSpaceFactorFetchFailed");
+}
+
+TLogSpaceFactor::TLogSpaceFactor(double interventionThreshold, double criticalInterventionThreshold)
+  : interventionThreshold(interventionThreshold), criticalInterventionThreshold(criticalInterventionThreshold) {}
+
+std::string_view TLogSpaceFactor::getName() const {
+	return "TLogSpace";
+}
+
+Future<Level> TLogSpaceFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) {
+	co_return co_await fetchSpaceLevel(workerEventProvider,
+	                                   "TLogMetrics",
+	                                   "QueueDiskBytesAvailable",
+	                                   "QueueDiskBytesTotal",
+	                                   interventionThreshold,
+	                                   criticalInterventionThreshold,
+	                                   "TLogSpaceFactorFetchFailed");
+}
+
+std::string_view StorageReplicationFactor::getName() const {
+	return "StorageReplication";
+}
+
+Future<Level> StorageReplicationFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) {
+	auto eventsAndErrors = co_await workerEventProvider->getLatestEvents("MovingData");
+	if (!eventsAndErrors.present()) {
+		co_return Level::METRICS_MISSING;
+	}
+
+	auto const& [events, _errors] = eventsAndErrors.get();
+	if (events.empty()) {
+		co_return Level::METRICS_MISSING;
+	}
+
+	try {
+		int64_t queuedOrInFlightRepairMoves = 0;
+		int64_t zeroReplicaTeams = 0;
+		for (auto const& [address, traceEvent] : events) {
+			(void)address;
+			int64_t inQueue = traceEvent.getInt64("InQueue");
+			int64_t inFlight = traceEvent.getInt64("InFlight");
+			int64_t priorityTeamUnhealthy = traceEvent.getInt64("PriorityTeamUnhealthy");
+			int64_t priorityTeam2Left = traceEvent.getInt64("PriorityTeam2Left");
+			int64_t priorityTeam1Left = traceEvent.getInt64("PriorityTeam1Left");
+			int64_t priorityTeam0Left = traceEvent.getInt64("PriorityTeam0Left");
+
+			zeroReplicaTeams += priorityTeam0Left;
+			if (inQueue > 0 || inFlight > 0) {
+				queuedOrInFlightRepairMoves +=
+				    priorityTeamUnhealthy + priorityTeam2Left + priorityTeam1Left + priorityTeam0Left;
+			}
+		}
+
+		if (zeroReplicaTeams > 0) {
+			co_return Level::OUTAGE;
+		}
+		if (queuedOrInFlightRepairMoves > 0) {
+			co_return Level::SELF_HEALING;
+		}
+		co_return Level::HEALTHY;
+	} catch (Error& e) {
+		TraceEvent(SevWarnAlways, "StorageReplicationFactorFetchFailed").error(e);
+		co_return Level::METRICS_MISSING;
+	}
+}
+
+std::string_view RecoveryStateFactor::getName() const {
+	return "RecoveryState";
+}
+
+Future<Level> RecoveryStateFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) {
+	auto eventsAndErrors = co_await workerEventProvider->getLatestEvents("MasterRecoveryState");
+	if (!eventsAndErrors.present()) {
+		co_return Level::METRICS_MISSING;
+	}
+
+	auto const& [events, _errors] = eventsAndErrors.get();
+	if (events.empty()) {
+		co_return Level::METRICS_MISSING;
+	}
+
+	try {
+		Level level = Level::HEALTHY;
+		for (auto const& [_address, traceEvent] : events) {
+			int const statusCode = traceEvent.getInt("StatusCode");
+			if (statusCode < RecoveryStatus::accepting_commits) {
+				level = Level::OUTAGE;
+				break;
+			}
+			if (statusCode < RecoveryStatus::fully_recovered) {
+				level = Level::SELF_HEALING;
+			}
+		}
+		co_return level;
+	} catch (Error& e) {
+		TraceEvent(SevWarnAlways, "RecoveryStateFactorFetchFailed").error(e);
+		co_return Level::METRICS_MISSING;
+	}
+}
+
+std::string_view ProcessErrorsFactor::getName() const {
+	return "ProcessErrors";
+}
+
+Future<Level> ProcessErrorsFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) {
+	auto eventsAndErrors = co_await workerEventProvider->getLatestEvents("");
+	if (!eventsAndErrors.present()) {
+		co_return Level::METRICS_MISSING;
+	}
+
+	auto const& [events, _errors] = eventsAndErrors.get();
+	co_return events.empty() ? Level::HEALTHY : Level::CRITICAL_INTERVENTION_REQUIRED;
+}
+
+RkThrottlingFactor::RkThrottlingFactor(double criticalTpsLimitToReleasedTpsRatioThreshold)
+  : criticalTpsLimitToReleasedTpsRatioThreshold(criticalTpsLimitToReleasedTpsRatioThreshold) {}
+
+std::string_view RkThrottlingFactor::getName() const {
+	return "RkThrottling";
+}
+
+Future<Level> RkThrottlingFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) {
+	auto eventsAndErrors = co_await workerEventProvider->getLatestEvents("RkUpdate");
+	if (!eventsAndErrors.present()) {
+		co_return Level::METRICS_MISSING;
+	}
+
+	auto const& [events, _errors] = eventsAndErrors.get();
+	if (events.empty()) {
+		co_return Level::METRICS_MISSING;
+	}
+
+	try {
+		double minTpsLimitToReleasedTpsRatio = std::numeric_limits<double>::infinity();
+		for (auto const& [address, traceEvent] : events) {
+			(void)address;
+			double tpsLimit = traceEvent.getDouble("TPSLimit");
+			if (tpsLimit == 0.0) {
+				co_return Level::OUTAGE;
+			}
+
+			double releasedTps = traceEvent.getDouble("ReleasedTPS");
+			if (releasedTps == 0.0) {
+				continue;
+			}
+
+			minTpsLimitToReleasedTpsRatio = std::min(minTpsLimitToReleasedTpsRatio, tpsLimit / releasedTps);
+		}
+
+		if (minTpsLimitToReleasedTpsRatio < criticalTpsLimitToReleasedTpsRatioThreshold) {
+			co_return Level::CRITICAL_INTERVENTION_REQUIRED;
+		}
+		co_return Level::HEALTHY;
+	} catch (Error& e) {
+		TraceEvent(SevWarnAlways, "RkThrottlingFactorFetchFailed").error(e);
+		co_return Level::METRICS_MISSING;
+	}
+}
+
+} // namespace cluster_health

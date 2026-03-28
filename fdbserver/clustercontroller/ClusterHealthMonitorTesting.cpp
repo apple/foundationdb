@@ -21,6 +21,7 @@
 #include "fdbserver/core/RecoveryState.h"
 #include "flow/UnitTest.h"
 
+#include "ClusterHealthIFactor.h"
 #include "ClusterHealthMonitor.h"
 
 namespace cluster_health {

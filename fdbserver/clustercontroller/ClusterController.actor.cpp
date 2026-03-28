@@ -71,26 +71,6 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-namespace {
-
-std::vector<std::unique_ptr<cluster_health::IFactor>> makeClusterHealthFactors() {
-	std::vector<std::unique_ptr<cluster_health::IFactor>> factors;
-	factors.push_back(std::make_unique<cluster_health::StorageSpaceFactor>(
-	    SERVER_KNOBS->CLUSTER_HEALTH_METRIC_STORAGE_INTERVENTION_THRESHOLD,
-	    SERVER_KNOBS->CLUSTER_HEALTH_METRIC_STORAGE_CRITICAL_THRESHOLD));
-	factors.push_back(std::make_unique<cluster_health::TLogSpaceFactor>(
-	    SERVER_KNOBS->CLUSTER_HEALTH_METRIC_TLOG_INTERVENTION_THRESHOLD,
-	    SERVER_KNOBS->CLUSTER_HEALTH_METRIC_TLOG_CRITICAL_THRESHOLD));
-	factors.push_back(std::make_unique<cluster_health::StorageReplicationFactor>());
-	factors.push_back(std::make_unique<cluster_health::RecoveryStateFactor>());
-	factors.push_back(std::make_unique<cluster_health::ProcessErrorsFactor>());
-	factors.push_back(std::make_unique<cluster_health::RkThrottlingFactor>(
-	    SERVER_KNOBS->CLUSTER_HEALTH_METRIC_RK_CRITICAL_RELEASED_TPS_RATIO_THRESHOLD));
-	return factors;
-}
-
-} // namespace
-
 ClusterControllerData::ClusterControllerData(ClusterControllerFullInterface const& ccInterface,
                                              LocalityData const& locality,
                                              ServerCoordinators const& coordinators,
@@ -99,8 +79,7 @@ ClusterControllerData::ClusterControllerData(ClusterControllerFullInterface cons
     clusterControllerProcessId(locality.processId()), clusterControllerDcId(locality.dcId()), id(ccInterface.id()),
     clusterId(clusterId), ac(false),
     clusterHealthWorkerEventProvider(makeReference<cluster_health::WorkerEventProvider>()),
-    clusterHealthMonitor(makeClusterHealthFactors(),
-                         Reference<cluster_health::IWorkerEventProvider const>(clusterHealthWorkerEventProvider)),
+    clusterHealthMonitor(cluster_health::createHealthMonitor(clusterHealthWorkerEventProvider)),
     outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()), startTime(now()),
     goodRecruitmentTime(Never()), goodRemoteRecruitmentTime(Never()), dcLogServerVersionDifference(0),
     dcStorageServerVersionDifference(0), datacenterVersionDifference(0), versionDifferenceUpdated(false),
