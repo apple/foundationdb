@@ -45,9 +45,9 @@ public:
 	                    UID id,
 	                    int64_t memoryLimit,
 	                    KeyValueStoreType storeType,
-	                    bool disableSnapshot,
-	                    bool replaceContent,
-	                    bool exactRecovery);
+	                    DisableSnapshot,
+	                    ReplaceContent,
+	                    ExactRecovery);
 
 	bool getReplaceContent() const override { return replaceContent; }
 	// IClosable
@@ -903,9 +903,9 @@ KeyValueStoreMemory<Container>::KeyValueStoreMemory(IDiskQueue* log,
                                                     UID id,
                                                     int64_t memoryLimit,
                                                     KeyValueStoreType storeType,
-                                                    bool disableSnapshot,
-                                                    bool replaceContent,
-                                                    bool exactRecovery)
+                                                    DisableSnapshot disableSnapshot,
+                                                    ReplaceContent replaceContent,
+                                                    ExactRecovery exactRecovery)
   : type(storeType), id(id), log(log), db(db), committedWriteBytes(0), overheadWriteBytes(0), currentSnapshotEnd(-1),
     previousSnapshotEnd(-1), committedDataSize(0), transactionSize(0), transactionIsLarge(false), resetSnapshot(false),
     disableSnapshot(disableSnapshot), replaceContent(replaceContent), firstCommitWithSnapshot(true), snapshotCount(0),
@@ -939,18 +939,18 @@ IKeyValueStore* keyValueStoreMemory(std::string const& basename,
 		                                           logID,
 		                                           memoryLimit,
 		                                           storeType,
-		                                           /*doc*/ false,
-		                                           /*ument*/ false,
-		                                           /*thisstuff FFS*/ false);
+		                                           DisableSnapshot::False,
+		                                           ReplaceContent::False,
+		                                           ExactRecovery::False);
 	} else {
 		return new KeyValueStoreMemory<IKeyValueContainer>(log,
 		                                                   Reference<AsyncVar<ServerDBInfo> const>(),
 		                                                   logID,
 		                                                   memoryLimit,
 		                                                   storeType,
-		                                                   /* name */ false,
-		                                                   /*the */ false,
-		                                                   /* effing parameter*/ false);
+		                                                   DisableSnapshot::False,
+		                                                   ReplaceContent::False,
+		                                                   ExactRecovery::False);
 	}
 }
 
