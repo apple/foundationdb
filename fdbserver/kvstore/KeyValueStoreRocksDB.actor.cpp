@@ -66,7 +66,7 @@
 #endif // WITH_ROCKSDB
 
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/IKeyValueStore.actor.h"
+#include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/RocksDBCheckpointUtils.actor.h"
 #include "RocksDBCommon.h"
 

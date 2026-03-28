@@ -25,7 +25,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/AccumulativeChecksumUtil.h"
 #include "fdbserver/core/ApplyMetadataMutation.h"
-#include "fdbserver/core/IKeyValueStore.actor.h"
+#include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/LogProtocolMessage.h"
 #include "fdbserver/core/LogSystem.h"

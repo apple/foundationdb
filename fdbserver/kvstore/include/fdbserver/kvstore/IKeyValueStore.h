@@ -22,7 +22,7 @@
 #define FDBSERVER_KVSTORE_IKEYVALUESTORE_H
 #pragma once
 
-#include "fdbserver/core/IKeyValueStore.actor.h"
+#include "fdbserver/core/IKeyValueStore.h"
 
 IKeyValueStore* openKVStore(KeyValueStoreType storeType,
                             std::string const& filename,

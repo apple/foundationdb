@@ -42,7 +42,7 @@
 #include "fdbserver/core/ApplyMetadataMutation.h"
 #include "fdbserver/core/ConflictBatch.h"
 #include "fdbserver/core/DataDistributorInterface.h"
-#include "fdbserver/core/IKeyValueStore.actor.h"
+#include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/LogSystem.h"
 #include "fdbserver/kvstore/FDBExecHelper.h"

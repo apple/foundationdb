@@ -1,5 +1,5 @@
 /*
- * IKeyValueStore.actor.h
+ * IKeyValueStore.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,13 +18,9 @@
  * limitations under the License.
  */
 
+#ifndef FDBSERVER_CORE_IKEYVALUESTORE_H
+#define FDBSERVER_CORE_IKEYVALUESTORE_H
 #pragma once
-
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CORE_IKEYVALUESTORE_ACTOR_G_H)
-#define FDBSERVER_CORE_IKEYVALUESTORE_ACTOR_G_H
-#include "fdbserver/core/IKeyValueStore.actor.g.h"
-#elif !defined(FDBSERVER_CORE_IKEYVALUESTORE_ACTOR_H)
-#define FDBSERVER_CORE_IKEYVALUESTORE_ACTOR_H
 
 #include "flow/Trace.h"
 #include "fdbclient/FDBTypes.h"
@@ -32,8 +28,6 @@
 #include "fdbclient/IClosable.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "flow/flow.h"
-
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct CheckpointRequest {
 	const Version version; // The FDB version at which the checkpoint is created.
@@ -208,6 +202,4 @@ extern IKeyValueStore* keyValueStoreLogSystem(class IDiskQueue* queue,
                                               bool disableSnapshot,
                                               bool replaceContent,
                                               bool exactRecovery);
-
-#include "flow/unactorcompiler.h"
 #endif

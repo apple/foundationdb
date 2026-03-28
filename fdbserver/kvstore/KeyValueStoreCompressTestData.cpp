@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/core/IKeyValueStore.actor.h"
+#include "fdbserver/core/IKeyValueStore.h"
 
 // KeyValueStoreCompressTestData wraps an existing IKeyValueStore and
 // implements the following rudimentary compression scheme:
