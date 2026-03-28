@@ -498,6 +498,10 @@ bool canLaunchSrc(RelocateData& relocation,
 	ASSERT(relocation.src.size() != 0);
 	ASSERT(teamSize >= singleRegionTeamSize);
 
+	if (relocation.isRestore() && SERVER_KNOBS->DD_ALLOW_UNLIMITED_RESTORED_DATA_MOVES) {
+		return true;
+	}
+
 	// Blob migrator is backed by s3 so it can allow unlimited data movements
 	if (relocation.src.size() == 1 && BlobMigratorInterface::isBlobMigrator(relocation.src.back())) {
 		return true;
@@ -1089,7 +1093,7 @@ bool runPendingBulkLoadTaskWithRelocateData(DDQueue* self, RelocateData& rd) {
 // canceled inflight relocateData. Launch the relocation for the rd.
 void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>> combined,
                                const DDEnabledState* ddEnabledState) {
-	[[maybe_unused]] int startedHere = 0;
+	int relocationsStarted = 0;
 	double startTime = now();
 	// kick off relocators from items in the queue as need be
 	auto it = combined.begin();
@@ -1143,11 +1147,18 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 			}
 		}
 
+		if (SERVER_KNOBS->DD_MAX_ACTIVE_RELOCATIONS > 0 &&
+		    activeRelocations >= SERVER_KNOBS->DD_MAX_ACTIVE_RELOCATIONS) {
+			TraceEvent("DDRelocationsDelayedByLimit", distributorId).detail("ActiveRelocations", activeRelocations);
+			continue;
+		}
+
 		// Data movement avoids overloading source servers in moving data.
 		// SOMEDAY: the list of source servers may be outdated since they were fetched when the work was put in the
 		// queue
 		// FIXME: we need spare capacity even when we're just going to be cancelling work via TEAM_HEALTHY
-		if (!rd.isRestore() && !canLaunchSrc(rd, teamSize, singleRegionTeamSize, busymap, cancellableRelocations)) {
+
+		if (!canLaunchSrc(rd, teamSize, singleRegionTeamSize, busymap, cancellableRelocations)) {
 			// logRelocation( rd, "SkippingQueuedRelocation" );
 			if (rd.bulkLoadTask.present()) {
 				TraceEvent(SevError, "DDBulkLoadTaskDelayedByBusySrc", this->distributorId)
@@ -1157,6 +1168,8 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 			}
 			continue;
 		}
+
+		relocationsStarted++;
 
 		// From now on, the source servers for the RelocateData rd have enough resource to move the data away,
 		// because they do not have too much inflight data movement.
@@ -1187,7 +1200,6 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 				rd.wantsNewServers |= it->value().wantsNewServers;
 			}
 		}
-		startedHere++;
 
 		// update both inFlightActors and inFlight key range maps, cancelling deleted RelocateShards
 		std::vector<KeyRange> ranges;
@@ -1262,15 +1274,14 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 
 		// logRelocation( rd, "LaunchedRelocation" );
 	}
-	if (now() - startTime > .001 && deterministicRandom()->random01() < 0.001)
+	if (now() - startTime > .001 && deterministicRandom()->random01() < 0.001) {
 		TraceEvent(SevWarnAlways, "LaunchingQueueSlowx1000").detail("Elapsed", now() - startTime);
+	}
 
-	/*if( startedHere > 0 ) {
-	    TraceEvent("StartedDDRelocators", distributorId)
-	        .detail("QueueSize", queuedRelocations)
-	        .detail("StartedHere", startedHere)
-	        .detail("ActiveRelocations", activeRelocations);
-	} */
+	TraceEvent("DDLaunchQueuedWork", distributorId)
+	    .detail("RelocationsStartedThisCall", relocationsStarted)
+	    .detail("ActiveRelocations", activeRelocations)
+	    .detail("QueueSize", queuedRelocations);
 
 	validate();
 }
@@ -1531,6 +1542,10 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 	// We will decide doBulkLoading after prevCleanup completes.
 	// rd.bulkLoadTask.present() is just the default value.
 	state bool doBulkLoading = rd.bulkLoadTask.present();
+
+	if (SERVER_KNOBS->DD_RELOCATOR_STARTUP_MAX_DELAY) {
+		wait(delay(deterministicRandom()->randomInt(0, SERVER_KNOBS->DD_RELOCATOR_STARTUP_MAX_DELAY)));
+	}
 
 	try {
 		if (now() - self->lastInterval < 1.0) {
