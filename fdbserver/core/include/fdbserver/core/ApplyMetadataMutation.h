@@ -40,6 +40,9 @@
 
 class AccumulativeChecksumBuilder;
 
+// applyMetadataMutations() is shared with resolver/clustercontroller code, so
+// it depends on a narrow commit-proxy view instead of the full ProxyCommitData
+// definition from the commitproxy module.
 struct ApplyMetadataRangeLock {
 	virtual ~ApplyMetadataRangeLock() = default;
 	virtual bool pendingRequest() const = 0;
@@ -68,7 +71,7 @@ struct ApplyMetadataProxyContext {
 	uint16_t commitProxyIndex = 0;
 	std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder = nullptr;
 	Optional<LogEpoch> epoch;
-	std::shared_ptr<ApplyMetadataRangeLock> rangeLock = nullptr;
+	ApplyMetadataRangeLock* rangeLock = nullptr;
 };
 
 // Resolver's data for applyMetadataMutations() calls.

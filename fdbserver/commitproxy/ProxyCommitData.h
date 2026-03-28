@@ -314,6 +314,8 @@ struct ProxyCommitData {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);
 	}
 
+	// Build the core-owned view consumed by applyMetadataMutations() without
+	// exposing the full ProxyCommitData type outside commitproxy.
 	ApplyMetadataProxyContext getApplyMetadataProxyContext();
 };
 struct RangeLock : ApplyMetadataRangeLock {
@@ -403,5 +405,8 @@ inline ApplyMetadataProxyContext ProxyCommitData::getApplyMetadataProxyContext()
 		     .commitProxyIndex = commitProxyIndex,
 		     .acsBuilder = acsBuilder,
 		     .epoch = epoch,
-		     .rangeLock = std::static_pointer_cast<ApplyMetadataRangeLock>(rangeLock) };
+		     // applyMetadataMutations() only borrows the interface during the
+		     // synchronous call, so there is no need to propagate shared
+		     // ownership through the context object.
+		     .rangeLock = rangeLock.get() };
 }
