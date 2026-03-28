@@ -49,7 +49,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "MetricLogger.actor.h"
 #include "fdbserver/backupworker/BackupWorker.h"
-#include "fdbserver/clustercontroller/ClusterController.actor.h"
+#include "fdbserver/clustercontroller/ClusterController.h"
 #include "fdbserver/commitproxy/CommitProxyServer.actor.h"
 #include "fdbserver/consistencyscan/ConsistencyScan.h"
 #include "fdbserver/datadistributor/DataDistributor.h"
