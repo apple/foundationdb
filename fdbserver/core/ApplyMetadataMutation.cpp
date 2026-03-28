@@ -66,7 +66,7 @@ public:
 	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
 	                           Arena& arena_,
 	                           const VectorRef<MutationRef>& mutations_,
-	                           ProxyCommitData& proxyCommitData_,
+	                           const ApplyMetadataProxyData& proxyCommitData_,
 	                           Reference<ILogSystem> logSystem_,
 	                           LogPushData* toCommit_,
 	                           bool& confChange_,
@@ -76,12 +76,11 @@ public:
 	                           bool provisionalCommitProxy_)
 	  : spanContext(spanContext_), dbgid(proxyCommitData_.dbgid), arena(arena_), mutations(mutations_),
 	    txnStateStore(proxyCommitData_.txnStateStore), toCommit(toCommit_), confChange(confChange_),
-	    logSystem(logSystem_), version(version), popVersion(popVersion_),
-	    vecBackupKeys(&proxyCommitData_.vecBackupKeys), keyInfo(&proxyCommitData_.keyInfo),
-	    uid_applyMutationsData(proxyCommitData_.firstProxy ? &proxyCommitData_.uid_applyMutationsData : nullptr),
-	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), committedVersion(&proxyCommitData_.committedVersion),
-	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
-	    tssMapping(&proxyCommitData_.tssMapping), initialCommit(initialCommit_),
+	    logSystem(logSystem_), version(version), popVersion(popVersion_), vecBackupKeys(proxyCommitData_.vecBackupKeys),
+	    keyInfo(proxyCommitData_.keyInfo), uid_applyMutationsData(proxyCommitData_.uid_applyMutationsData),
+	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), committedVersion(proxyCommitData_.committedVersion),
+	    storageCache(proxyCommitData_.storageCache), tag_popped(proxyCommitData_.tag_popped),
+	    tssMapping(proxyCommitData_.tssMapping), initialCommit(initialCommit_),
 	    provisionalCommitProxy(provisionalCommitProxy_),
 	    accumulativeChecksumIndex(getCommitProxyAccumulativeChecksumIndex(proxyCommitData_.commitProxyIndex)),
 	    acsBuilder(proxyCommitData_.acsBuilder), epoch(proxyCommitData_.epoch), rangeLock(proxyCommitData_.rangeLock) {
@@ -1172,7 +1171,7 @@ public:
 } // anonymous namespace
 
 void applyMetadataMutations(SpanContext const& spanContext,
-                            ProxyCommitData& proxyCommitData,
+                            const ApplyMetadataProxyData& proxyCommitData,
                             Arena& arena,
                             Reference<ILogSystem> logSystem,
                             const VectorRef<MutationRef>& mutations,

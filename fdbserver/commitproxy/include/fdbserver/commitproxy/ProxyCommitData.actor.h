@@ -19,16 +19,17 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CORE_PROXYCOMMITDATA_ACTOR_G_H)
-#define FDBSERVER_CORE_PROXYCOMMITDATA_ACTOR_G_H
-#include "fdbserver/core/ProxyCommitData.actor.g.h"
-#elif !defined(FDBSERVER_CORE_PROXYCOMMITDATA_ACTOR_H)
-#define FDBSERVER_CORE_PROXYCOMMITDATA_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_COMMITPROXY_PROXYCOMMITDATA_ACTOR_G_H)
+#define FDBSERVER_COMMITPROXY_PROXYCOMMITDATA_ACTOR_G_H
+#include "fdbserver/commitproxy/ProxyCommitData.actor.g.h"
+#elif !defined(FDBSERVER_COMMITPROXY_PROXYCOMMITDATA_ACTOR_H)
+#define FDBSERVER_COMMITPROXY_PROXYCOMMITDATA_ACTOR_H
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/RangeLock.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/core/AccumulativeChecksumUtil.h"
+#include "fdbserver/core/ApplyMetadataMutation.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/LogSystem.h"
 #include "fdbserver/core/MasterInterface.h"
@@ -45,12 +46,6 @@ DESCR struct SingleKeyMutation {
 };
 
 class LogSystemDiskQueueAdapter;
-
-struct ApplyMutationsData {
-	Future<Void> worker;
-	Version endVersion;
-	Reference<KeyRangeMap<Version>> keyVersion;
-};
 
 struct ProxyStats {
 	CounterCollection cc;
@@ -334,6 +329,24 @@ struct ProxyCommitData {
 	                   : nullptr),
 	    lastShardMove(invalidVersion), epoch(epoch) {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);
+	}
+
+	ApplyMetadataProxyData getApplyMetadataProxyData() {
+		return { .dbgid = dbgid,
+			     .txnStateStore = txnStateStore,
+			     .vecBackupKeys = &vecBackupKeys,
+			     .keyInfo = &keyInfo,
+			     .uid_applyMutationsData = firstProxy ? &uid_applyMutationsData : nullptr,
+			     .commit = commit,
+			     .cx = cx,
+			     .committedVersion = &committedVersion,
+			     .storageCache = &storageCache,
+			     .tag_popped = &tag_popped,
+			     .tssMapping = &tssMapping,
+			     .commitProxyIndex = commitProxyIndex,
+			     .acsBuilder = acsBuilder,
+			     .epoch = epoch,
+			     .rangeLock = rangeLock };
 	}
 };
 struct RangeLock {

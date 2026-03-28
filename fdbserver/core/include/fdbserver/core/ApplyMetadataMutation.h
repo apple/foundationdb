@@ -23,6 +23,10 @@
 #pragma once
 
 #include <cstddef>
+#include <map>
+#include <memory>
+#include <set>
+#include <unordered_map>
 
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/MutationList.h"
@@ -32,8 +36,34 @@
 #include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/LogSystem.h"
 #include "fdbserver/core/LogProtocolMessage.h"
-#include "fdbserver/core/ProxyCommitData.actor.h"
 #include "flow/FastRef.h"
+
+class AccumulativeChecksumBuilder;
+struct RangeLock;
+
+struct ApplyMutationsData {
+	Future<Void> worker;
+	Version endVersion;
+	Reference<KeyRangeMap<Version>> keyVersion;
+};
+
+struct ApplyMetadataProxyData {
+	UID dbgid;
+	IKeyValueStore* txnStateStore = nullptr;
+	KeyRangeMap<std::set<Key>>* vecBackupKeys = nullptr;
+	KeyRangeMap<ServerCacheInfo>* keyInfo = nullptr;
+	std::map<Key, ApplyMutationsData>* uid_applyMutationsData = nullptr;
+	PublicRequestStream<CommitTransactionRequest> commit;
+	Database cx;
+	NotifiedVersion* committedVersion = nullptr;
+	std::map<UID, Reference<StorageInfo>>* storageCache = nullptr;
+	std::map<Tag, Version>* tag_popped = nullptr;
+	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
+	uint16_t commitProxyIndex = 0;
+	std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder = nullptr;
+	Optional<LogEpoch> epoch;
+	std::shared_ptr<RangeLock> rangeLock = nullptr;
+};
 
 // Resolver's data for applyMetadataMutations() calls.
 struct ResolverData {
@@ -87,7 +117,7 @@ Reference<StorageInfo> getStorageInfo(UID id,
                                       IKeyValueStore* txnStateStore);
 
 void applyMetadataMutations(SpanContext const& spanContext,
-                            ProxyCommitData& proxyCommitData,
+                            const ApplyMetadataProxyData& proxyCommitData,
                             Arena& arena,
                             Reference<ILogSystem> logSystem,
                             const VectorRef<MutationRef>& mutations,

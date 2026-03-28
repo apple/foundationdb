@@ -50,7 +50,7 @@
 #include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/MutationTracking.h"
-#include "fdbserver/core/ProxyCommitData.actor.h"
+#include "fdbserver/commitproxy/ProxyCommitData.actor.h"
 #include "fdbserver/core/RatekeeperInterface.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/RestoreCoreUtil.h"
@@ -1042,7 +1042,7 @@ void applyMetadataEffect(CommitBatchContext* self) {
 
 			if (committed) {
 				applyMetadataMutations(SpanContext(),
-				                       *self->pProxyCommitData,
+				                       self->pProxyCommitData->getApplyMetadataProxyData(),
 				                       self->arena,
 				                       self->pProxyCommitData->logSystem,
 				                       self->resolution[0].stateMutations[versionIndex][transactionIndex].mutations,
@@ -1132,7 +1132,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 		    (!self->locked || trs[t].isLockAware())) {
 			self->commitCount++;
 			applyMetadataMutations(trs[t].spanContext,
-			                       *pProxyCommitData,
+			                       pProxyCommitData->getApplyMetadataProxyData(),
 			                       self->arena,
 			                       pProxyCommitData->logSystem,
 			                       trs[t].transaction.mutations,
@@ -2683,7 +2683,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		Arena arena;
 		bool confChanges;
 		applyMetadataMutations(SpanContext(),
-		                       *pContext->pCommitData,
+		                       pContext->pCommitData->getApplyMetadataProxyData(),
 		                       arena,
 		                       Reference<ILogSystem>(),
 		                       mutations,
