@@ -38,7 +38,6 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/SpecialKeySpace.h"
 #include "fdbclient/VersionVector.h"
-#include "fdbclient/IKeyValueStore.actor.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/MultiInterface.h"
 #include "flow/TDMetric.actor.h"
@@ -417,10 +416,6 @@ public:
 	std::unordered_map<UID, StorageServerInterface> tssMapping;
 	// map from tssid -> metrics for that tss pair
 	std::unordered_map<UID, Reference<TSSMetrics>> tssMetrics;
-
-	IKeyValueStore* storage = nullptr;
-
-	void setStorage(IKeyValueStore* storage);
 
 	// map from ssid -> ss tag
 	// @note this map allows the client to identify the latest commit versions

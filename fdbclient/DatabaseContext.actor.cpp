@@ -1545,7 +1545,6 @@ DatabaseContext::~DatabaseContext() {
 	clientDBInfoMonitor.cancel();
 	monitorTssInfoChange.cancel();
 	tssMismatchHandler.cancel();
-	storage = nullptr;
 
 	if (grvUpdateHandler.isValid()) {
 		grvUpdateHandler.cancel();
