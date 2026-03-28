@@ -46,7 +46,7 @@ Future<Void> readBulkFileBytes(std::string path, int64_t maxLength, std::shared_
 		// Read in chunks to avoid memory pressure
 		int64_t offset = 0;
 		int64_t remaining = fileSize;
-		std::shared_ptr<std::string> chunk = std::make_shared<std::string>();
+		auto chunk = std::make_shared<std::string>();
 		while (remaining > 0) {
 			int64_t bytesToRead = std::min(chunkSize, remaining);
 			chunk->clear();
@@ -97,7 +97,7 @@ Future<Void> writeBulkFileBytes(std::string path, std::shared_ptr<std::string> c
 }
 
 Future<Void> copyBulkFile(std::string fromFile, std::string toFile, size_t fileBytesMax) {
-	std::shared_ptr<std::string> content = std::make_shared<std::string>();
+	auto content = std::make_shared<std::string>();
 	co_await readBulkFileBytes(abspath(fromFile), fileBytesMax, /*output=*/content);
 	co_await writeBulkFileBytes(toFile, content);
 }
@@ -410,9 +410,8 @@ Future<Void> bulkLoadDownloadTaskFileSets(BulkLoadTransportMethod transportMetho
                                           std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets,
                                           std::string toLocalRoot,
                                           UID logId) {
-	BulkLoadFileSetKeyMap::iterator iter = fromRemoteFileSets->begin();
 	KeyRange keys;
-	for (; iter != fromRemoteFileSets->end(); iter++) {
+	for (auto iter = fromRemoteFileSets->begin(); iter != fromRemoteFileSets->end(); iter++) {
 		keys = iter->first;
 		if (!iter->second.hasDataFile()) {
 			// For empty ranges (no data file), create an empty local fileSet entry so FetchKeys knows this range was
@@ -634,7 +633,7 @@ Future<BulkLoadManifestSet> getBulkLoadManifestMetadataFromEntry(
 		                                             deterministicRandom()->randomUniqueID().toString() + "-" +
 		                                                 basename(getPath(remoteManifestFilePath)));
 		co_await downloadManifestFile(transportMethod, remoteManifestFilePath, localManifestFilePath, logId);
-		std::shared_ptr<std::string> manifestRawString = std::make_shared<std::string>();
+		auto manifestRawString = std::make_shared<std::string>();
 		co_await readBulkFileBytes(
 		    abspath(localManifestFilePath), SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, manifestRawString);
 		ASSERT(!manifestRawString->empty());
