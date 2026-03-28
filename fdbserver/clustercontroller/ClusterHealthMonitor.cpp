@@ -131,6 +131,10 @@ LatestWorkerEvents makeLatestWorkerEvents(TraceEventFields traceEventFields) {
 	return LatestWorkerEvents(std::make_pair(std::move(events), std::set<std::string>{}));
 }
 
+LatestWorkerEvents makeLatestWorkerEvents(WorkerEvents events) {
+	return LatestWorkerEvents(std::make_pair(std::move(events), std::set<std::string>{}));
+}
+
 class MovingDataMetricsBuilder {
 	TraceEventFields traceEventFields;
 
@@ -157,6 +161,13 @@ public:
 TraceEventFields makeRecoveryStateMetrics(int statusCode) {
 	TraceEventFields traceEventFields;
 	traceEventFields.addField("StatusCode", std::to_string(statusCode));
+	return traceEventFields;
+}
+
+TraceEventFields makeProcessErrorMetrics(std::string const& type, std::string const& error) {
+	TraceEventFields traceEventFields;
+	traceEventFields.addField("Type", type);
+	traceEventFields.addField("Error", error);
 	return traceEventFields;
 }
 
@@ -295,6 +306,20 @@ Future<Level> RecoveryStateFactor::fetchLevel(Reference<IWorkerEventProvider con
 		TraceEvent(SevWarnAlways, "RecoveryStateFactorFetchFailed").error(e);
 		co_return Level::METRICS_MISSING;
 	}
+}
+
+std::string_view ProcessErrorsFactor::getName() const {
+	return "ProcessErrors";
+}
+
+Future<Level> ProcessErrorsFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) {
+	auto eventsAndErrors = co_await workerEventProvider->getLatestEvents("");
+	if (!eventsAndErrors.present()) {
+		co_return Level::METRICS_MISSING;
+	}
+
+	auto const& [events, _errors] = eventsAndErrors.get();
+	co_return events.empty() ? Level::HEALTHY : Level::CRITICAL_INTERVENTION_REQUIRED;
 }
 
 Monitor::Monitor(std::vector<std::unique_ptr<IFactor>>&& factors,
@@ -444,6 +469,24 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/RecoveryStateFactor
 	ASSERT_EQ(level, Level::OUTAGE);
 
 	provider->setLatestEvents("MasterRecoveryState", LatestWorkerEvents());
+	level = co_await factor.fetchLevel(provider);
+	ASSERT_EQ(level, Level::METRICS_MISSING);
+}
+
+TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/ProcessErrorsFactor") {
+	ProcessErrorsFactor factor;
+	auto provider = makeReference<FakeWorkerEventProvider>();
+	Level level;
+
+	provider->setLatestEvents("", makeLatestWorkerEvents(makeProcessErrorMetrics("OpenClusterIdError", "io_error")));
+	level = co_await factor.fetchLevel(provider);
+	ASSERT_EQ(level, Level::CRITICAL_INTERVENTION_REQUIRED);
+
+	provider->setLatestEvents("", makeLatestWorkerEvents(WorkerEvents()));
+	level = co_await factor.fetchLevel(provider);
+	ASSERT_EQ(level, Level::HEALTHY);
+
+	provider->setLatestEvents("", LatestWorkerEvents());
 	level = co_await factor.fetchLevel(provider);
 	ASSERT_EQ(level, Level::METRICS_MISSING);
 }
