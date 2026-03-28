@@ -71,6 +71,73 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+namespace {
+
+std::vector<std::unique_ptr<cluster_health::IFactor>> makeClusterHealthFactors() {
+	std::vector<std::unique_ptr<cluster_health::IFactor>> factors;
+	factors.push_back(std::make_unique<cluster_health::StorageSpaceFactor>(
+	    SERVER_KNOBS->CLUSTER_HEALTH_METRIC_STORAGE_INTERVENTION_THRESHOLD,
+	    SERVER_KNOBS->CLUSTER_HEALTH_METRIC_STORAGE_CRITICAL_THRESHOLD));
+	factors.push_back(std::make_unique<cluster_health::TLogSpaceFactor>(
+	    SERVER_KNOBS->CLUSTER_HEALTH_METRIC_TLOG_INTERVENTION_THRESHOLD,
+	    SERVER_KNOBS->CLUSTER_HEALTH_METRIC_TLOG_CRITICAL_THRESHOLD));
+	factors.push_back(std::make_unique<cluster_health::StorageReplicationFactor>());
+	factors.push_back(std::make_unique<cluster_health::RecoveryStateFactor>());
+	factors.push_back(std::make_unique<cluster_health::ProcessErrorsFactor>());
+	factors.push_back(std::make_unique<cluster_health::RkThrottlingFactor>(
+	    SERVER_KNOBS->CLUSTER_HEALTH_METRIC_RK_CRITICAL_RELEASED_TPS_RATIO_THRESHOLD));
+	return factors;
+}
+
+} // namespace
+
+ClusterControllerData::ClusterControllerData(ClusterControllerFullInterface const& ccInterface,
+                                             LocalityData const& locality,
+                                             ServerCoordinators const& coordinators,
+                                             Reference<AsyncVar<Optional<UID>>> clusterId)
+  : gotProcessClasses(false), gotFullyRecoveredConfig(false), shouldCommitSuicide(false),
+    clusterControllerProcessId(locality.processId()), clusterControllerDcId(locality.dcId()), id(ccInterface.id()),
+    clusterId(clusterId), ac(false),
+    clusterHealthWorkerEventProvider(makeReference<cluster_health::WorkerEventProvider>()),
+    clusterHealthMonitor(makeClusterHealthFactors(),
+                         Reference<cluster_health::IWorkerEventProvider const>(clusterHealthWorkerEventProvider)),
+    outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()), startTime(now()),
+    goodRecruitmentTime(Never()), goodRemoteRecruitmentTime(Never()), dcLogServerVersionDifference(0),
+    dcStorageServerVersionDifference(0), datacenterVersionDifference(0), versionDifferenceUpdated(false),
+    remoteDCMonitorStarted(false), remoteTransactionSystemDegraded(false), recruitDistributor(false),
+    recruitRatekeeper(false), recruitConsistencyScan(false),
+    clusterControllerMetrics("ClusterController", id.toString()),
+    openDatabaseRequests("OpenDatabaseRequests", clusterControllerMetrics),
+    registerWorkerRequests("RegisterWorkerRequests", clusterControllerMetrics),
+    getWorkersRequests("GetWorkersRequests", clusterControllerMetrics),
+    getClientWorkersRequests("GetClientWorkersRequests", clusterControllerMetrics),
+    registerMasterRequests("RegisterMasterRequests", clusterControllerMetrics),
+    statusRequests("StatusRequests", clusterControllerMetrics),
+    recruitedMasterWorkerEventHolder(makeReference<EventCacheHolder>("RecruitedMasterWorker")) {
+	(void)coordinators;
+	auto serverInfo = ServerDBInfo();
+	serverInfo.id = deterministicRandom()->randomUniqueID();
+	serverInfo.infoGeneration = ++db.dbInfoCount;
+	serverInfo.masterLifetime.ccID = id;
+	serverInfo.clusterInterface = ccInterface;
+	serverInfo.myLocality = locality;
+	db.serverInfo->set(serverInfo);
+	cx = openDBOnServer(db.serverInfo, TaskPriority::DefaultEndpoint, LockAware::True);
+
+	specialCounter(clusterControllerMetrics, "ClientCount", [this]() { return db.clientCount; });
+	updateClusterHealthMonitorWorkers();
+}
+
+void ClusterControllerData::updateClusterHealthMonitorWorkers() {
+	std::vector<WorkerDetails> workers;
+	workers.reserve(id_worker.size());
+	for (auto const& [processId, workerInfo] : id_worker) {
+		(void)processId;
+		workers.push_back(workerInfo.details);
+	}
+	clusterHealthWorkerEventProvider->setWorkers(std::move(workers));
+}
+
 ACTOR Future<Optional<Value>> getPreviousCoordinators(ClusterControllerData* self) {
 	state ReadYourWritesTransaction tr(self->db.db);
 	loop {
@@ -1061,6 +1128,7 @@ ACTOR Future<Void> workerAvailabilityWatch(WorkerInterface worker,
 						cluster->addr_locality.erase(worker.secondaryAddress().get());
 					}
 				}
+				cluster->updateClusterHealthMonitorWorkers();
 				cluster->updateWorkerList.set(worker.locality.processId(), Optional<ProcessData>());
 				return Void();
 			}
@@ -1400,6 +1468,7 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 		    w.locality.processId() == self->db.serverInfo->get().master.locality.processId()) {
 			self->masterProcessId = w.locality.processId();
 		}
+		self->updateClusterHealthMonitorWorkers();
 		self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
 		self->updateDBInfo.trigger();
 		checkOutstandingRequests(self);
@@ -1427,6 +1496,7 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 		}
 
 		// Re-registrations must refresh DBInfo delivery, otherwise rebooted workers can miss role updates.
+		self->updateClusterHealthMonitorWorkers();
 		self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
 		self->updateDBInfo.trigger();
 		checkOutstandingRequests(self);
@@ -2834,6 +2904,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(monitorRatekeeper(&self));
 
 	self.addActor.send(monitorConsistencyScan(&self));
+	self.addActor.send(self.clusterHealthMonitor.run());
 	self.addActor.send(dbInfoUpdater(&self));
 	self.addActor.send(updateClusterId(&self));
 	self.addActor.send(handleGetEncryptionAtRestMode(&self, interf));

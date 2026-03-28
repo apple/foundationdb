@@ -869,6 +869,11 @@ public:
 	                                         // applies to initializing_transaction_servers phase.
 	int CC_RECOVERY_INIT_REQ_MAX_UNFINISHED_RECOVERIES; // Maximum unfinished recoveries after which transaction system
 	                                                    // intilization timeouts above do not apply.
+	double CLUSTER_HEALTH_METRIC_STORAGE_INTERVENTION_THRESHOLD;
+	double CLUSTER_HEALTH_METRIC_STORAGE_CRITICAL_THRESHOLD;
+	double CLUSTER_HEALTH_METRIC_TLOG_INTERVENTION_THRESHOLD;
+	double CLUSTER_HEALTH_METRIC_TLOG_CRITICAL_THRESHOLD;
+	double CLUSTER_HEALTH_METRIC_RK_CRITICAL_RELEASED_TPS_RATIO_THRESHOLD;
 
 	// Knobs used to select the best policy (via monte carlo)
 	int POLICY_RATING_TESTS; // number of tests per policy (in order to compare)
