@@ -83,6 +83,13 @@ TraceEventFields makeProcessErrorMetrics(std::string const& type, std::string co
 	return traceEventFields;
 }
 
+TraceEventFields makeRkUpdateMetrics(double releasedTps, double tpsLimit) {
+	TraceEventFields traceEventFields;
+	traceEventFields.addField("ReleasedTPS", std::to_string(releasedTps));
+	traceEventFields.addField("TPSLimit", std::to_string(tpsLimit));
+	return traceEventFields;
+}
+
 } // namespace
 
 TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/StorageSpaceFactor") {
@@ -214,6 +221,28 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/ProcessErrorsFactor
 	ASSERT_EQ(level, Level::HEALTHY);
 
 	provider->setLatestEvents("", LatestWorkerEvents());
+	level = co_await factor.fetchLevel(provider);
+	ASSERT_EQ(level, Level::METRICS_MISSING);
+}
+
+TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/RkThrottlingFactor") {
+	RkThrottlingFactor factor(/*criticalReleasedTpsRatioThreshold=*/0.50);
+	auto provider = makeReference<FakeWorkerEventProvider>();
+	Level level;
+
+	provider->setLatestEvents("RkUpdate", makeLatestWorkerEvents(makeRkUpdateMetrics(75, 100)));
+	level = co_await factor.fetchLevel(provider);
+	ASSERT_EQ(level, Level::HEALTHY);
+
+	provider->setLatestEvents("RkUpdate", makeLatestWorkerEvents(makeRkUpdateMetrics(25, 100)));
+	level = co_await factor.fetchLevel(provider);
+	ASSERT_EQ(level, Level::CRITICAL_INTERVENTION_REQUIRED);
+
+	provider->setLatestEvents("RkUpdate", makeLatestWorkerEvents(makeRkUpdateMetrics(0, 0)));
+	level = co_await factor.fetchLevel(provider);
+	ASSERT_EQ(level, Level::OUTAGE);
+
+	provider->setLatestEvents("RkUpdate", LatestWorkerEvents());
 	level = co_await factor.fetchLevel(provider);
 	ASSERT_EQ(level, Level::METRICS_MISSING);
 }

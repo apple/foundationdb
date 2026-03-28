@@ -265,6 +265,47 @@ Future<Level> ProcessErrorsFactor::fetchLevel(Reference<IWorkerEventProvider con
 	co_return events.empty() ? Level::HEALTHY : Level::CRITICAL_INTERVENTION_REQUIRED;
 }
 
+RkThrottlingFactor::RkThrottlingFactor(double criticalReleasedTpsRatioThreshold)
+  : criticalReleasedTpsRatioThreshold(criticalReleasedTpsRatioThreshold) {}
+
+std::string_view RkThrottlingFactor::getName() const {
+	return "RkThrottling";
+}
+
+Future<Level> RkThrottlingFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) {
+	auto eventsAndErrors = co_await workerEventProvider->getLatestEvents("RkUpdate");
+	if (!eventsAndErrors.present()) {
+		co_return Level::METRICS_MISSING;
+	}
+
+	auto const& [events, _errors] = eventsAndErrors.get();
+	if (events.empty()) {
+		co_return Level::METRICS_MISSING;
+	}
+
+	try {
+		double minReleasedTpsRatio = std::numeric_limits<double>::infinity();
+		for (auto const& [address, traceEvent] : events) {
+			(void)address;
+			double tpsLimit = traceEvent.getDouble("TPSLimit");
+			if (tpsLimit == 0.0) {
+				co_return Level::OUTAGE;
+			}
+
+			double releasedTps = traceEvent.getDouble("ReleasedTPS");
+			minReleasedTpsRatio = std::min(minReleasedTpsRatio, releasedTps / tpsLimit);
+		}
+
+		if (minReleasedTpsRatio < criticalReleasedTpsRatioThreshold) {
+			co_return Level::CRITICAL_INTERVENTION_REQUIRED;
+		}
+		co_return Level::HEALTHY;
+	} catch (Error& e) {
+		TraceEvent(SevWarnAlways, "RkThrottlingFactorFetchFailed").error(e);
+		co_return Level::METRICS_MISSING;
+	}
+}
+
 Monitor::Monitor(std::vector<std::unique_ptr<IFactor>>&& factors,
                  Reference<IWorkerEventProvider const> workerEventProvider)
   : factors(std::move(factors)), workerEventProvider(workerEventProvider) {}

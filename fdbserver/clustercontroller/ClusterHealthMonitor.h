@@ -119,6 +119,16 @@ public:
 	Future<Level> fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) override;
 };
 
+class RkThrottlingFactor : public IFactor {
+	double criticalReleasedTpsRatioThreshold;
+
+public:
+	explicit RkThrottlingFactor(double criticalReleasedTpsRatioThreshold);
+
+	std::string_view getName() const override;
+	Future<Level> fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) override;
+};
+
 class Monitor {
 	std::vector<std::unique_ptr<IFactor>> factors;
 	Reference<IWorkerEventProvider const> workerEventProvider;
