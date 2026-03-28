@@ -20,11 +20,14 @@
 
 #pragma once
 
+#include <map>
 #include <memory>
+#include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerEvents.h"
 #include "flow/flow.h"
 
 namespace cluster_health {
@@ -38,13 +41,42 @@ enum class Level {
 	HEALTHY
 };
 
+using LatestWorkerEvents = Optional<std::pair<WorkerEvents, std::set<std::string>>>;
+
+class IWorkerEventProvider {
+public:
+	virtual ~IWorkerEventProvider() = default;
+	virtual void addref() const = 0;
+	virtual void delref() const = 0;
+	virtual Future<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const = 0;
+};
+
+class RealWorkerEventProvider final : public IWorkerEventProvider, public ReferenceCounted<RealWorkerEventProvider> {
+	std::vector<WorkerDetails> workers;
+
+public:
+	void addref() const override { ReferenceCounted<RealWorkerEventProvider>::addref(); }
+	void delref() const override { ReferenceCounted<RealWorkerEventProvider>::delref(); }
+	void setWorkers(std::vector<WorkerDetails> workers);
+	Future<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const override;
+};
+
+class FakeWorkerEventProvider final : public IWorkerEventProvider, public ReferenceCounted<FakeWorkerEventProvider> {
+	std::map<std::string, LatestWorkerEvents> latestEventsByName;
+
+public:
+	void addref() const override { ReferenceCounted<FakeWorkerEventProvider>::addref(); }
+	void delref() const override { ReferenceCounted<FakeWorkerEventProvider>::delref(); }
+	void setLatestEvents(std::string eventName, LatestWorkerEvents latestEvents);
+	Future<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const override;
+};
+
 class IFactor {
 public:
 	virtual ~IFactor() = default;
 	virtual std::string_view getName() const = 0;
 
-	// SAFETY: Ensure that workers outlives this coroutine
-	virtual Future<Level> fetchLevel(std::vector<WorkerDetails> const& workers) = 0;
+	virtual Future<Level> fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) = 0;
 };
 
 class StorageSpaceFactor : public IFactor {
@@ -55,7 +87,7 @@ public:
 	StorageSpaceFactor(double interventionThreshold, double criticalInterventionThreshold);
 
 	std::string_view getName() const override;
-	Future<Level> fetchLevel(std::vector<WorkerDetails> const& workers) override;
+	Future<Level> fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) override;
 };
 
 class TLogSpaceFactor : public IFactor {
@@ -66,15 +98,17 @@ public:
 	TLogSpaceFactor(double interventionThreshold, double criticalInterventionThreshold);
 
 	std::string_view getName() const override;
-	Future<Level> fetchLevel(std::vector<WorkerDetails> const& workers) override;
+	Future<Level> fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) override;
 };
 
 class Monitor {
 	std::vector<std::unique_ptr<IFactor>> factors;
-	std::vector<WorkerDetails> workers;
+	Reference<RealWorkerEventProvider> defaultWorkerEventProvider;
+	Reference<IWorkerEventProvider const> workerEventProvider;
 
 public:
-	void setWorkers(std::vector<WorkerDetails> workers);
+	Monitor();
+	void setWorkerEventProvider(Reference<IWorkerEventProvider const> workerEventProvider);
 	Future<Void> run();
 };
 

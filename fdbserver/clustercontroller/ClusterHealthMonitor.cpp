@@ -73,14 +73,14 @@ std::string_view levelToStr(Level level) {
 	UNREACHABLE();
 }
 
-Future<Level> fetchSpaceLevel(std::vector<WorkerDetails> const& workers,
+Future<Level> fetchSpaceLevel(Reference<IWorkerEventProvider const> workerEventProvider,
                               std::string const& eventName,
                               std::string const& availableBytesField,
                               std::string const& totalBytesField,
                               double interventionThreshold,
                               double criticalInterventionThreshold,
                               char const* failureTraceEventName) {
-	auto eventsAndErrors = co_await latestEventOnWorkers(workers, eventName);
+	auto eventsAndErrors = co_await workerEventProvider->getLatestEvents(eventName);
 	if (!eventsAndErrors.present()) {
 		co_return Level::METRICS_MISSING;
 	}
@@ -115,6 +115,26 @@ Future<Level> fetchSpaceLevel(std::vector<WorkerDetails> const& workers,
 
 } // namespace
 
+void RealWorkerEventProvider::setWorkers(std::vector<WorkerDetails> workers) {
+	this->workers = std::move(workers);
+}
+
+Future<LatestWorkerEvents> RealWorkerEventProvider::getLatestEvents(std::string const& eventName) const {
+	return latestEventOnWorkers(workers, eventName);
+}
+
+void FakeWorkerEventProvider::setLatestEvents(std::string eventName, LatestWorkerEvents latestEvents) {
+	latestEventsByName[std::move(eventName)] = std::move(latestEvents);
+}
+
+Future<LatestWorkerEvents> FakeWorkerEventProvider::getLatestEvents(std::string const& eventName) const {
+	auto it = latestEventsByName.find(eventName);
+	if (it == latestEventsByName.end()) {
+		return LatestWorkerEvents();
+	}
+	return it->second;
+}
+
 StorageSpaceFactor::StorageSpaceFactor(double interventionThreshold, double criticalInterventionThreshold)
   : interventionThreshold(interventionThreshold), criticalInterventionThreshold(criticalInterventionThreshold) {}
 
@@ -122,8 +142,8 @@ std::string_view StorageSpaceFactor::getName() const {
 	return "StorageSpace";
 }
 
-Future<Level> StorageSpaceFactor::fetchLevel(std::vector<WorkerDetails> const& workers) {
-	co_return co_await fetchSpaceLevel(workers,
+Future<Level> StorageSpaceFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) {
+	co_return co_await fetchSpaceLevel(workerEventProvider,
 	                                   "StorageMetrics",
 	                                   "KvstoreBytesAvailable",
 	                                   "KvstoreBytesTotal",
@@ -139,8 +159,8 @@ std::string_view TLogSpaceFactor::getName() const {
 	return "TLogSpace";
 }
 
-Future<Level> TLogSpaceFactor::fetchLevel(std::vector<WorkerDetails> const& workers) {
-	co_return co_await fetchSpaceLevel(workers,
+Future<Level> TLogSpaceFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) {
+	co_return co_await fetchSpaceLevel(workerEventProvider,
 	                                   "TLogMetrics",
 	                                   "QueueDiskBytesAvailable",
 	                                   "QueueDiskBytesTotal",
@@ -149,8 +169,13 @@ Future<Level> TLogSpaceFactor::fetchLevel(std::vector<WorkerDetails> const& work
 	                                   "TLogSpaceFactorFetchFailed");
 }
 
-void Monitor::setWorkers(std::vector<WorkerDetails> workers) {
-	this->workers = std::move(workers);
+Monitor::Monitor()
+  : defaultWorkerEventProvider(makeReference<RealWorkerEventProvider>()),
+    workerEventProvider(defaultWorkerEventProvider) {}
+
+void Monitor::setWorkerEventProvider(Reference<IWorkerEventProvider const> workerEventProvider) {
+	this->workerEventProvider =
+	    workerEventProvider ? workerEventProvider : Reference<IWorkerEventProvider const>(defaultWorkerEventProvider);
 }
 
 Future<Void> Monitor::run() {
@@ -162,7 +187,7 @@ Future<Void> Monitor::run() {
 		std::vector<Future<Level>> levelFutures;
 		levelFutures.reserve(factors.size());
 		for (auto const& factor : factors) {
-			levelFutures.push_back(factor->fetchLevel(workers));
+			levelFutures.push_back(factor->fetchLevel(workerEventProvider));
 		}
 		co_await waitForAll(levelFutures);
 
