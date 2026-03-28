@@ -20,7 +20,7 @@
 
 #pragma once
 
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/core/Knobs.h"
 

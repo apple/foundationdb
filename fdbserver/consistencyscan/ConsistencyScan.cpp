@@ -33,7 +33,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "fdbclient/DataDistributionConfig.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/StorageMetrics.actor.h"
