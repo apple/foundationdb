@@ -1715,10 +1715,10 @@ Future<Void> monitorTraceLogIssues(Reference<AsyncVar<std::set<std::string>>> tr
 
 static const std::string excludeFromTLogRecruitmentLowDiskIssue = "exclude_from_tlog_recruitment_low_disk";
 
-ACTOR Future<Void> monitorTLogIssues(std::string folder,
-                                     Reference<AsyncVar<bool>> lowDiskTLogExclusion,
-                                     Reference<AsyncVar<std::set<std::string>>> tlogIssues) {
-	loop {
+Future<Void> monitorTLogIssues(std::string folder,
+                               Reference<AsyncVar<bool>> lowDiskTLogExclusion,
+                               Reference<AsyncVar<std::set<std::string>>> tlogIssues) {
+	while (true) {
 		std::set<std::string> currentIssues;
 		if (lowDiskTLogExclusion->get()) {
 			int64_t free = 0;
@@ -1738,9 +1738,10 @@ ACTOR Future<Void> monitorTLogIssues(std::string folder,
 			tlogIssues->set(currentIssues);
 		}
 
-		choose {
-			when(wait(lowDiskTLogExclusion->onChange())) {}
-			when(wait(lowDiskTLogExclusion->get() ? delay(1.0) : Never())) {}
+		if (lowDiskTLogExclusion->get()) {
+			co_await timeout(lowDiskTLogExclusion->onChange(), 1.0);
+		} else {
+			co_await lowDiskTLogExclusion->onChange();
 		}
 	}
 }
