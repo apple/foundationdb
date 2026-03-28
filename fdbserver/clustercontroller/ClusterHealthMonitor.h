@@ -107,6 +107,12 @@ public:
 	Future<Level> fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) override;
 };
 
+class RecoveryStateFactor : public IFactor {
+public:
+	std::string_view getName() const override;
+	Future<Level> fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) override;
+};
+
 class Monitor {
 	std::vector<std::unique_ptr<IFactor>> factors;
 	Reference<IWorkerEventProvider const> workerEventProvider;

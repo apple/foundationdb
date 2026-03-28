@@ -22,6 +22,7 @@
 #include <utility>
 
 #include "fmt/format.h"
+#include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/WorkerEvents.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
@@ -153,6 +154,12 @@ public:
 	TraceEventFields build() const { return traceEventFields; }
 };
 
+TraceEventFields makeRecoveryStateMetrics(int statusCode) {
+	TraceEventFields traceEventFields;
+	traceEventFields.addField("StatusCode", std::to_string(statusCode));
+	return traceEventFields;
+}
+
 } // namespace
 
 void WorkerEventProvider::setWorkers(std::vector<WorkerDetails> workers) {
@@ -252,6 +259,41 @@ Future<Level> StorageReplicationFactor::fetchLevel(Reference<IWorkerEventProvide
 		co_return Level::HEALTHY;
 	} catch (Error& e) {
 		TraceEvent(SevWarnAlways, "StorageReplicationFactorFetchFailed").error(e);
+		co_return Level::METRICS_MISSING;
+	}
+}
+
+std::string_view RecoveryStateFactor::getName() const {
+	return "RecoveryState";
+}
+
+Future<Level> RecoveryStateFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) {
+	auto eventsAndErrors = co_await workerEventProvider->getLatestEvents("MasterRecoveryState");
+	if (!eventsAndErrors.present()) {
+		co_return Level::METRICS_MISSING;
+	}
+
+	auto const& [events, _errors] = eventsAndErrors.get();
+	if (events.empty()) {
+		co_return Level::METRICS_MISSING;
+	}
+
+	try {
+		Level level = Level::HEALTHY;
+		for (auto const& [address, traceEvent] : events) {
+			(void)address;
+			int statusCode = traceEvent.getInt("StatusCode");
+			if (statusCode < RecoveryStatus::accepting_commits) {
+				level = Level::OUTAGE;
+				break;
+			}
+			if (statusCode < RecoveryStatus::fully_recovered) {
+				level = Level::SELF_HEALING;
+			}
+		}
+		co_return level;
+	} catch (Error& e) {
+		TraceEvent(SevWarnAlways, "RecoveryStateFactorFetchFailed").error(e);
 		co_return Level::METRICS_MISSING;
 	}
 }
@@ -373,6 +415,36 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/StorageReplicationF
 	ASSERT_EQ(level, Level::OUTAGE);
 
 	provider->setLatestEvents("MovingData", LatestWorkerEvents());
+	level = co_await factor.fetchLevel(provider);
+	ASSERT_EQ(level, Level::METRICS_MISSING);
+}
+
+TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/RecoveryStateFactor") {
+	RecoveryStateFactor factor;
+	auto provider = makeReference<FakeWorkerEventProvider>();
+	Level level;
+
+	provider->setLatestEvents("MasterRecoveryState",
+	                          makeLatestWorkerEvents(makeRecoveryStateMetrics(RecoveryStatus::fully_recovered)));
+	level = co_await factor.fetchLevel(provider);
+	ASSERT_EQ(level, Level::HEALTHY);
+
+	provider->setLatestEvents("MasterRecoveryState",
+	                          makeLatestWorkerEvents(makeRecoveryStateMetrics(RecoveryStatus::accepting_commits)));
+	level = co_await factor.fetchLevel(provider);
+	ASSERT_EQ(level, Level::SELF_HEALING);
+
+	provider->setLatestEvents("MasterRecoveryState",
+	                          makeLatestWorkerEvents(makeRecoveryStateMetrics(RecoveryStatus::all_logs_recruited)));
+	level = co_await factor.fetchLevel(provider);
+	ASSERT_EQ(level, Level::SELF_HEALING);
+
+	provider->setLatestEvents("MasterRecoveryState",
+	                          makeLatestWorkerEvents(makeRecoveryStateMetrics(RecoveryStatus::recovery_transaction)));
+	level = co_await factor.fetchLevel(provider);
+	ASSERT_EQ(level, Level::OUTAGE);
+
+	provider->setLatestEvents("MasterRecoveryState", LatestWorkerEvents());
 	level = co_await factor.fetchLevel(provider);
 	ASSERT_EQ(level, Level::METRICS_MISSING);
 }
