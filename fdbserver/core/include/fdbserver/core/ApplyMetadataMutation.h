@@ -39,7 +39,13 @@
 #include "flow/FastRef.h"
 
 class AccumulativeChecksumBuilder;
-struct RangeLock;
+
+struct ApplyMetadataRangeLock {
+	virtual ~ApplyMetadataRangeLock() = default;
+	virtual bool pendingRequest() const = 0;
+	virtual void setPendingRequest(const Key& startKey, const RangeLockStateSet& lockSetState) = 0;
+	virtual void consumePendingRequest(const Key& endKey) = 0;
+};
 
 struct ApplyMutationsData {
 	Future<Void> worker;
@@ -62,7 +68,7 @@ struct ApplyMetadataProxyContext {
 	uint16_t commitProxyIndex = 0;
 	std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder = nullptr;
 	Optional<LogEpoch> epoch;
-	std::shared_ptr<RangeLock> rangeLock = nullptr;
+	std::shared_ptr<ApplyMetadataRangeLock> rangeLock = nullptr;
 };
 
 // Resolver's data for applyMetadataMutations() calls.

@@ -332,13 +332,15 @@ struct ProxyCommitData {
 			     .rangeLock = rangeLock };
 	}
 };
-struct RangeLock {
+struct RangeLock : ApplyMetadataRangeLock {
 public:
 	explicit RangeLock(ProxyCommitData* const pProxyCommitData) : pProxyCommitData(pProxyCommitData) {
 		coreMap.insert(allKeys, RangeLockStateSet());
 	}
 
-	bool pendingRequest() const { return currentRangeLockStartKey.present(); }
+	~RangeLock() override = default;
+
+	bool pendingRequest() const override { return currentRangeLockStartKey.present(); }
 
 	void initKeyPoint(const Key& key, const Value& value) {
 		ASSERT(pProxyCommitData != nullptr && pProxyCommitData->rangeLockEnabled());
@@ -351,14 +353,14 @@ public:
 		return;
 	}
 
-	void setPendingRequest(const Key& startKey, const RangeLockStateSet& lockSetState) {
+	void setPendingRequest(const Key& startKey, const RangeLockStateSet& lockSetState) override {
 		ASSERT(pProxyCommitData != nullptr && pProxyCommitData->rangeLockEnabled());
 		ASSERT(!pendingRequest());
 		currentRangeLockStartKey = std::make_pair(startKey, lockSetState);
 		return;
 	}
 
-	void consumePendingRequest(const Key& endKey) {
+	void consumePendingRequest(const Key& endKey) override {
 		ASSERT(pProxyCommitData != nullptr && pProxyCommitData->rangeLockEnabled());
 		ASSERT(pendingRequest());
 		ASSERT(endKey <= normalKeys.end);

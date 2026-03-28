@@ -161,7 +161,7 @@ private:
 	// commit
 	std::vector<std::pair<UID, UID>> tssMappingToAdd;
 
-	std::shared_ptr<RangeLock> rangeLock = nullptr;
+	std::shared_ptr<ApplyMetadataRangeLock> rangeLock = nullptr;
 
 private:
 	bool dummyConfChange = false;
