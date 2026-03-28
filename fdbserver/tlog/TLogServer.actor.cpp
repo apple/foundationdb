@@ -436,7 +436,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		        Version popped,
 		        IDiskQueue::location poppedLocation,
 		        NothingPersistent nothingPersistent,
-		        PoppoedRecently poppedRecently,
+		        PoppedRecently poppedRecently,
 		        UnpoppedRecovered unpoppedRecovered)
 		  : nothingPersistent(nothingPersistent), poppedRecently(poppedRecently), popped(popped), persistentPopped(0),
 		    versionForPoppedLocation(0), poppedLocation(poppedLocation), unpoppedRecovered(unpoppedRecovered),

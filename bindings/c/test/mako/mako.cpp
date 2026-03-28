@@ -38,6 +38,8 @@
 #include <string_view>
 #include <thread>
 
+#include "flow/BooleanParam.h"
+
 #include <fcntl.h>
 #include <getopt.h>
 #include <sys/mman.h>
