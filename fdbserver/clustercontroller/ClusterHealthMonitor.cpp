@@ -169,8 +169,9 @@ Future<Level> TLogSpaceFactor::fetchLevel(Reference<IWorkerEventProvider const> 
 	                                   "TLogSpaceFactorFetchFailed");
 }
 
-Monitor::Monitor(Reference<IWorkerEventProvider const> workerEventProvider)
-  : workerEventProvider(workerEventProvider) {}
+Monitor::Monitor(std::vector<std::unique_ptr<IFactor>>&& factors,
+                 Reference<IWorkerEventProvider const> workerEventProvider)
+  : factors(std::move(factors)), workerEventProvider(workerEventProvider) {}
 
 Future<Void> Monitor::run() {
 	Future<Void> timer = Void();

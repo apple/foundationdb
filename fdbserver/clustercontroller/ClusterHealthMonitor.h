@@ -106,7 +106,7 @@ class Monitor {
 	Reference<IWorkerEventProvider const> workerEventProvider;
 
 public:
-	explicit Monitor(Reference<IWorkerEventProvider const>);
+	Monitor(std::vector<std::unique_ptr<IFactor>>&& factors, Reference<IWorkerEventProvider const> workerEventProvider);
 	Future<Void> run();
 };
 
