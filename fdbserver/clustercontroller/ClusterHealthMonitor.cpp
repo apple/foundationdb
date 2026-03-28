@@ -24,6 +24,7 @@
 #include "fmt/format.h"
 #include "fdbserver/core/WorkerEvents.h"
 #include "flow/Trace.h"
+#include "flow/UnitTest.h"
 #include "flow/genericactors.actor.h"
 
 #include "ClusterHealthMonitor.h"
@@ -111,6 +112,22 @@ Future<Level> fetchSpaceLevel(Reference<IWorkerEventProvider const> workerEventP
 		TraceEvent(SevWarnAlways, failureTraceEventName).error(e);
 		co_return Level::METRICS_MISSING;
 	}
+}
+
+TraceEventFields makeSpaceMetrics(std::string const& availableBytesField,
+                                  std::string const& totalBytesField,
+                                  double availableBytes,
+                                  double totalBytes) {
+	TraceEventFields traceEventFields;
+	traceEventFields.addField(availableBytesField, std::to_string(availableBytes));
+	traceEventFields.addField(totalBytesField, std::to_string(totalBytes));
+	return traceEventFields;
+}
+
+LatestWorkerEvents makeLatestWorkerEvents(TraceEventFields traceEventFields) {
+	WorkerEvents events;
+	events.emplace(NetworkAddress(IPAddress(0x01010101), 1), std::move(traceEventFields));
+	return LatestWorkerEvents(std::make_pair(std::move(events), std::set<std::string>{}));
 }
 
 } // namespace
@@ -203,6 +220,62 @@ Future<Void> Monitor::run() {
 			traceEvent.detail("LimitingFactor", factors[*limitingIndex]->getName());
 		}
 	}
+}
+
+TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/StorageSpaceFactor") {
+	StorageSpaceFactor factor(/*interventionThreshold=*/0.20, /*criticalInterventionThreshold=*/0.10);
+	auto provider = makeReference<FakeWorkerEventProvider>();
+	Level level;
+
+	provider->setLatestEvents(
+	    "StorageMetrics",
+	    makeLatestWorkerEvents(makeSpaceMetrics("KvstoreBytesAvailable", "KvstoreBytesTotal", 50, 100)));
+	level = co_await factor.fetchLevel(provider);
+	ASSERT_EQ(level, Level::HEALTHY);
+
+	provider->setLatestEvents(
+	    "StorageMetrics",
+	    makeLatestWorkerEvents(makeSpaceMetrics("KvstoreBytesAvailable", "KvstoreBytesTotal", 15, 100)));
+	level = co_await factor.fetchLevel(provider);
+	ASSERT_EQ(level, Level::INTERVENTION_REQUIRED);
+
+	provider->setLatestEvents(
+	    "StorageMetrics",
+	    makeLatestWorkerEvents(makeSpaceMetrics("KvstoreBytesAvailable", "KvstoreBytesTotal", 5, 100)));
+	level = co_await factor.fetchLevel(provider);
+	ASSERT_EQ(level, Level::CRITICAL_INTERVENTION_REQUIRED);
+
+	provider->setLatestEvents("StorageMetrics", LatestWorkerEvents());
+	level = co_await factor.fetchLevel(provider);
+	ASSERT_EQ(level, Level::METRICS_MISSING);
+}
+
+TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/TLogSpaceFactor") {
+	TLogSpaceFactor factor(/*interventionThreshold=*/0.20, /*criticalInterventionThreshold=*/0.10);
+	auto provider = makeReference<FakeWorkerEventProvider>();
+	Level level;
+
+	provider->setLatestEvents(
+	    "TLogMetrics",
+	    makeLatestWorkerEvents(makeSpaceMetrics("QueueDiskBytesAvailable", "QueueDiskBytesTotal", 50, 100)));
+	level = co_await factor.fetchLevel(provider);
+	ASSERT_EQ(level, Level::HEALTHY);
+
+	provider->setLatestEvents(
+	    "TLogMetrics",
+	    makeLatestWorkerEvents(makeSpaceMetrics("QueueDiskBytesAvailable", "QueueDiskBytesTotal", 15, 100)));
+	level = co_await factor.fetchLevel(provider);
+	ASSERT_EQ(level, Level::INTERVENTION_REQUIRED);
+
+	provider->setLatestEvents(
+	    "TLogMetrics",
+	    makeLatestWorkerEvents(makeSpaceMetrics("QueueDiskBytesAvailable", "QueueDiskBytesTotal", 5, 100)));
+	level = co_await factor.fetchLevel(provider);
+	ASSERT_EQ(level, Level::CRITICAL_INTERVENTION_REQUIRED);
+
+	provider->setLatestEvents("TLogMetrics", LatestWorkerEvents());
+	level = co_await factor.fetchLevel(provider);
+	ASSERT_EQ(level, Level::METRICS_MISSING);
 }
 
 } // namespace cluster_health
