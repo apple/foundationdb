@@ -130,10 +130,10 @@ public:
 
 // Evaluates ratekeeper throttling severity from RkUpdate events.
 class RkThrottlingFactor : public IFactor {
-	double criticalReleasedTpsRatioThreshold;
+	double criticalTpsLimitToReleasedTpsRatioThreshold;
 
 public:
-	explicit RkThrottlingFactor(double criticalReleasedTpsRatioThreshold);
+	explicit RkThrottlingFactor(double criticalTpsLimitToReleasedTpsRatioThreshold);
 
 	std::string_view getName() const override;
 	Future<Level> fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) override;

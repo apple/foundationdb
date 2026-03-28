@@ -265,8 +265,8 @@ Future<Level> ProcessErrorsFactor::fetchLevel(Reference<IWorkerEventProvider con
 	co_return events.empty() ? Level::HEALTHY : Level::CRITICAL_INTERVENTION_REQUIRED;
 }
 
-RkThrottlingFactor::RkThrottlingFactor(double criticalReleasedTpsRatioThreshold)
-  : criticalReleasedTpsRatioThreshold(criticalReleasedTpsRatioThreshold) {}
+RkThrottlingFactor::RkThrottlingFactor(double criticalTpsLimitToReleasedTpsRatioThreshold)
+  : criticalTpsLimitToReleasedTpsRatioThreshold(criticalTpsLimitToReleasedTpsRatioThreshold) {}
 
 std::string_view RkThrottlingFactor::getName() const {
 	return "RkThrottling";
@@ -284,7 +284,7 @@ Future<Level> RkThrottlingFactor::fetchLevel(Reference<IWorkerEventProvider cons
 	}
 
 	try {
-		double minReleasedTpsRatio = std::numeric_limits<double>::infinity();
+		double minTpsLimitToReleasedTpsRatio = std::numeric_limits<double>::infinity();
 		for (auto const& [address, traceEvent] : events) {
 			(void)address;
 			double tpsLimit = traceEvent.getDouble("TPSLimit");
@@ -293,10 +293,14 @@ Future<Level> RkThrottlingFactor::fetchLevel(Reference<IWorkerEventProvider cons
 			}
 
 			double releasedTps = traceEvent.getDouble("ReleasedTPS");
-			minReleasedTpsRatio = std::min(minReleasedTpsRatio, releasedTps / tpsLimit);
+			if (releasedTps == 0.0) {
+				continue;
+			}
+
+			minTpsLimitToReleasedTpsRatio = std::min(minTpsLimitToReleasedTpsRatio, tpsLimit / releasedTps);
 		}
 
-		if (minReleasedTpsRatio < criticalReleasedTpsRatioThreshold) {
+		if (minTpsLimitToReleasedTpsRatio < criticalTpsLimitToReleasedTpsRatioThreshold) {
 			co_return Level::CRITICAL_INTERVENTION_REQUIRED;
 		}
 		co_return Level::HEALTHY;

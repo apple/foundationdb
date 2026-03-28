@@ -226,17 +226,21 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/ProcessErrorsFactor
 }
 
 TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/RkThrottlingFactor") {
-	RkThrottlingFactor factor(/*criticalReleasedTpsRatioThreshold=*/0.50);
+	RkThrottlingFactor factor(/*criticalTpsLimitToReleasedTpsRatioThreshold=*/0.50);
 	auto provider = makeReference<FakeWorkerEventProvider>();
 	Level level;
 
-	provider->setLatestEvents("RkUpdate", makeLatestWorkerEvents(makeRkUpdateMetrics(75, 100)));
+	provider->setLatestEvents("RkUpdate", makeLatestWorkerEvents(makeRkUpdateMetrics(100, 25)));
 	level = co_await factor.fetchLevel(provider);
 	ASSERT_EQ(level, Level::HEALTHY);
 
-	provider->setLatestEvents("RkUpdate", makeLatestWorkerEvents(makeRkUpdateMetrics(25, 100)));
+	provider->setLatestEvents("RkUpdate", makeLatestWorkerEvents(makeRkUpdateMetrics(100, 40)));
 	level = co_await factor.fetchLevel(provider);
 	ASSERT_EQ(level, Level::CRITICAL_INTERVENTION_REQUIRED);
+
+	provider->setLatestEvents("RkUpdate", makeLatestWorkerEvents(makeRkUpdateMetrics(0, 100)));
+	level = co_await factor.fetchLevel(provider);
+	ASSERT_EQ(level, Level::HEALTHY);
 
 	provider->setLatestEvents("RkUpdate", makeLatestWorkerEvents(makeRkUpdateMetrics(0, 0)));
 	level = co_await factor.fetchLevel(provider);
