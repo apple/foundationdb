@@ -20,8 +20,6 @@
 
 #pragma once
 
-#include <compare>
-#include <cstdint>
 #include <memory>
 #include <string_view>
 #include <vector>
@@ -39,10 +37,6 @@ enum class Level {
 	METRICS_MISSING,
 	HEALTHY
 };
-
-uint8_t levelToInt(Level level);
-std::strong_ordering operator<=>(Level lhs, Level rhs);
-std::string_view levelToStr(Level level);
 
 class IFactor {
 public:

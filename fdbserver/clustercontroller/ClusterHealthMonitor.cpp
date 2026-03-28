@@ -32,6 +32,47 @@ namespace cluster_health {
 
 namespace {
 
+uint8_t levelToInt(Level level) {
+	switch (level) {
+	case Level::HEALTHY:
+		return 100;
+	case Level::CRITICAL_INTERVENTION_REQUIRED:
+		return 75;
+	case Level::INTERVENTION_REQUIRED:
+		return 50;
+	case Level::SELF_HEALING:
+		return 25;
+	case Level::METRICS_MISSING:
+	case Level::OUTAGE:
+		return 0;
+	}
+
+	UNREACHABLE();
+}
+
+std::strong_ordering operator<=>(Level lhs, Level rhs) {
+	return levelToInt(lhs) <=> levelToInt(rhs);
+}
+
+std::string_view levelToStr(Level level) {
+	switch (level) {
+	case Level::OUTAGE:
+		return "Outage";
+	case Level::CRITICAL_INTERVENTION_REQUIRED:
+		return "CriticalInterventionRequired";
+	case Level::INTERVENTION_REQUIRED:
+		return "InterventionRequired";
+	case Level::SELF_HEALING:
+		return "SelfHealing";
+	case Level::METRICS_MISSING:
+		return "MetricsMissing";
+	case Level::HEALTHY:
+		return "Healthy";
+	}
+
+	UNREACHABLE();
+}
+
 Future<Level> fetchSpaceLevel(std::vector<WorkerDetails> const& workers,
                               std::string const& eventName,
                               std::string const& availableBytesField,
@@ -73,47 +114,6 @@ Future<Level> fetchSpaceLevel(std::vector<WorkerDetails> const& workers,
 }
 
 } // namespace
-
-uint8_t levelToInt(Level level) {
-	switch (level) {
-	case Level::HEALTHY:
-		return 100;
-	case Level::CRITICAL_INTERVENTION_REQUIRED:
-		return 75;
-	case Level::INTERVENTION_REQUIRED:
-		return 50;
-	case Level::SELF_HEALING:
-		return 25;
-	case Level::METRICS_MISSING:
-	case Level::OUTAGE:
-		return 0;
-	}
-
-	UNREACHABLE();
-}
-
-std::strong_ordering operator<=>(Level lhs, Level rhs) {
-	return levelToInt(lhs) <=> levelToInt(rhs);
-}
-
-std::string_view levelToStr(Level level) {
-	switch (level) {
-	case Level::OUTAGE:
-		return "Outage";
-	case Level::CRITICAL_INTERVENTION_REQUIRED:
-		return "CriticalInterventionRequired";
-	case Level::INTERVENTION_REQUIRED:
-		return "InterventionRequired";
-	case Level::SELF_HEALING:
-		return "SelfHealing";
-	case Level::METRICS_MISSING:
-		return "MetricsMissing";
-	case Level::HEALTHY:
-		return "Healthy";
-	}
-
-	UNREACHABLE();
-}
 
 StorageSpaceFactor::StorageSpaceFactor(double interventionThreshold, double criticalInterventionThreshold)
   : interventionThreshold(interventionThreshold), criticalInterventionThreshold(criticalInterventionThreshold) {}
