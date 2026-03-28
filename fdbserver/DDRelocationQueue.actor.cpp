@@ -1532,6 +1532,18 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 	// rd.bulkLoadTask.present() is just the default value.
 	state bool doBulkLoading = rd.bulkLoadTask.present();
 
+	if (rd.isRestore()) {
+		if (SERVER_KNOBS->DD_RELOCATOR_STARTUP_RESTORED_MOVE_MAX_DELAY > 0) {
+			wait(
+			    delay(deterministicRandom()->randomInt(0, SERVER_KNOBS->DD_RELOCATOR_STARTUP_RESTORED_MOVE_MAX_DELAY)));
+		}
+	} else {
+		if (SERVER_KNOBS->DD_RELOCATOR_STARTUP_UNRESTORED_MOVE_MAX_DELAY > 0) {
+			wait(delay(
+			    deterministicRandom()->randomInt(0, SERVER_KNOBS->DD_RELOCATOR_STARTUP_UNRESTORED_MOVE_MAX_DELAY)));
+		}
+	}
+
 	try {
 		if (now() - self->lastInterval < 1.0) {
 			relocateShardInterval.severity = SevDebug;
