@@ -26,7 +26,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/core/IDiskQueue.h"
-#include "fdbserver/core/IKeyValueStore.h"
+#include "fdbserver/core/IKeyValueStore.actor.h"
 #include "fdbserver/core/LogSystem.h"
 #include "fdbserver/core/ResolverInterface.h"
 #include "fdbserver/core/TLogInterface.h"

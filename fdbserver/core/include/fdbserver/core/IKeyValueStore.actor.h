@@ -20,11 +20,11 @@
 
 #pragma once
 
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_IKEYVALUESTORE_ACTOR_G_H)
-#define FDBCLIENT_IKEYVALUESTORE_ACTOR_G_H
-#include "fdbclient/IKeyValueStore.actor.g.h"
-#elif !defined(FDBCLIENT_IKEYVALUESTORE_ACTOR_H)
-#define FDBCLIENT_IKEYVALUESTORE_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CORE_IKEYVALUESTORE_ACTOR_G_H)
+#define FDBSERVER_CORE_IKEYVALUESTORE_ACTOR_G_H
+#include "fdbserver/core/IKeyValueStore.actor.g.h"
+#elif !defined(FDBSERVER_CORE_IKEYVALUESTORE_ACTOR_H)
+#define FDBSERVER_CORE_IKEYVALUESTORE_ACTOR_H
 
 #include "flow/Trace.h"
 #include "fdbclient/FDBTypes.h"
@@ -168,6 +168,38 @@ public:
 protected:
 	virtual ~IKeyValueStore() {}
 };
+
+extern IKeyValueStore* keyValueStoreSQLite(std::string const& filename,
+                                           UID logID,
+                                           KeyValueStoreType storeType,
+                                           bool checkChecksums = false,
+                                           bool checkIntegrity = false);
+extern IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename,
+                                              UID logID,
+                                              Reference<AsyncVar<struct ServerDBInfo> const> db = {},
+                                              int64_t pageCacheBytes = 0);
+extern IKeyValueStore* keyValueStoreRocksDB(std::string const& path,
+                                            UID logID,
+                                            KeyValueStoreType storeType,
+                                            bool checkChecksums = false,
+                                            bool checkIntegrity = false);
+extern IKeyValueStore* keyValueStoreShardedRocksDB(std::string const& path,
+                                                   UID logID,
+                                                   KeyValueStoreType storeType,
+                                                   bool checkChecksums = false,
+                                                   bool checkIntegrity = false);
+extern IKeyValueStore* keyValueStoreMemory(std::string const& basename,
+                                           UID logID,
+                                           int64_t memoryLimit,
+                                           std::string ext = "fdq",
+                                           KeyValueStoreType storeType = KeyValueStoreType::MEMORY);
+extern IKeyValueStore* keyValueStoreLogSystem(class IDiskQueue* queue,
+                                              Reference<AsyncVar<struct ServerDBInfo> const> db,
+                                              UID logID,
+                                              int64_t memoryLimit,
+                                              bool disableSnapshot,
+                                              bool replaceContent,
+                                              bool exactRecovery);
 
 ACTOR static Future<Void> replaceRange_impl(IKeyValueStore* self,
                                             KeyRange range,
