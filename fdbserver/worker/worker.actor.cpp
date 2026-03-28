@@ -1745,10 +1745,10 @@ ACTOR Future<Void> monitorTLogIssues(std::string folder,
 	}
 }
 
-ACTOR Future<Void> combineWorkerIssues(Reference<AsyncVar<std::set<std::string>> const> traceLogIssues,
-                                       Reference<AsyncVar<std::set<std::string>> const> tlogIssues,
-                                       Reference<AsyncVar<std::set<std::string>>> issues) {
-	loop {
+Future<Void> combineWorkerIssues(Reference<AsyncVar<std::set<std::string>> const> traceLogIssues,
+                                 Reference<AsyncVar<std::set<std::string>> const> tlogIssues,
+                                 Reference<AsyncVar<std::set<std::string>>> issues) {
+	while (true) {
 		std::set<std::string> mergedIssues = traceLogIssues->get();
 		const auto& currentTLogIssues = tlogIssues->get();
 		mergedIssues.insert(currentTLogIssues.begin(), currentTLogIssues.end());
@@ -1756,10 +1756,7 @@ ACTOR Future<Void> combineWorkerIssues(Reference<AsyncVar<std::set<std::string>>
 			issues->set(mergedIssues);
 		}
 
-		choose {
-			when(wait(traceLogIssues->onChange())) {}
-			when(wait(tlogIssues->onChange())) {}
-		}
+		co_await race(traceLogIssues->onChange(), tlogIssues->onChange());
 	}
 }
 
