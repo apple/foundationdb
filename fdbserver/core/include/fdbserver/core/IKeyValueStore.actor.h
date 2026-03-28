@@ -50,10 +50,6 @@ struct CheckpointRequest {
 	  : version(version), ranges(ranges), format(format), checkpointID(id), checkpointDir(checkpointDir) {}
 };
 
-ACTOR static Future<Void> replaceRange_impl(class IKeyValueStore* self,
-                                            KeyRange range,
-                                            Standalone<VectorRef<KeyValueRef>> data);
-
 class IKeyValueStore : public IClosable {
 public:
 	virtual KeyValueStoreType getType() const = 0;
@@ -92,7 +88,19 @@ public:
 
 	// Replace the specified range, the default implementation ignores `blockRange` and writes the key one by one.
 	virtual Future<Void> replaceRange(KeyRange range, Standalone<VectorRef<KeyValueRef>> data) {
-		return replaceRange_impl(this, range, data);
+		int sinceYield = 0;
+		KeyRangeRef rangeRef = range;
+		if (rangeRef.empty()) {
+			co_return;
+		}
+		clear(rangeRef);
+		for (KeyValueRef const* kvItr = data.begin(); kvItr != data.end(); kvItr++) {
+			set(*kvItr);
+			if (++sinceYield > 1000) {
+				co_await yield();
+				sinceYield = 0;
+			}
+		}
 	}
 
 	// Marks a key range as active and prepares it for future read.
@@ -200,26 +208,6 @@ extern IKeyValueStore* keyValueStoreLogSystem(class IDiskQueue* queue,
                                               bool disableSnapshot,
                                               bool replaceContent,
                                               bool exactRecovery);
-
-ACTOR static Future<Void> replaceRange_impl(IKeyValueStore* self,
-                                            KeyRange range,
-                                            Standalone<VectorRef<KeyValueRef>> data) {
-	state int sinceYield = 0;
-	state const KeyValueRef* kvItr = data.begin();
-	state KeyRangeRef rangeRef = range;
-	if (rangeRef.empty()) {
-		return Void();
-	}
-	self->clear(rangeRef);
-	for (; kvItr != data.end(); kvItr++) {
-		self->set(*kvItr);
-		if (++sinceYield > 1000) {
-			wait(yield());
-			sinceYield = 0;
-		}
-	}
-	return Void();
-}
 
 #include "flow/unactorcompiler.h"
 #endif
