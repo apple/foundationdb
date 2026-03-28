@@ -58,7 +58,7 @@
 #include "fdbserver/core/BackupInterface.h"
 #include "RoleLineage.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "fdbserver/worker/Worker.actor.h"
+#include "fdbserver/worker/Worker.h"
 #include "fdbserver/kvstore/IKeyValueStore.h"
 #include "fdbserver/ratekeeper/Ratekeeper.actor.h"
 #include "fdbserver/resolver/Resolver.actor.h"

@@ -1,5 +1,5 @@
 /*
- * Worker.actor.h
+ * Worker.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,11 +20,8 @@
 
 #pragma once
 
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_WORKER_WORKER_ACTOR_G_H)
-#define FDBSERVER_WORKER_WORKER_ACTOR_G_H
-#include "fdbserver/worker/Worker.actor.g.h"
-#elif !defined(FDBSERVER_WORKER_WORKER_ACTOR_H)
-#define FDBSERVER_WORKER_WORKER_ACTOR_H
+#ifndef FDBSERVER_WORKER_WORKER_H
+#define FDBSERVER_WORKER_WORKER_H
 
 #include <string>
 
@@ -36,8 +33,6 @@
 
 struct ClusterControllerFullInterface;
 struct ServerDBInfo;
-
-#include "flow/actorcompiler.h" // This must be the last #include
 
 Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
                   LocalityData localities,
@@ -52,6 +47,4 @@ Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
                   bool consistencyCheckUrgentMode);
 
 void registerThreadForProfiling();
-
-#include "flow/unactorcompiler.h"
 #endif
