@@ -29,7 +29,7 @@
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/core/BulkLoadUtil.actor.h"
+#include "fdbserver/core/BulkLoadUtil.h"
 #include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbclient/ReadYourWrites.h"

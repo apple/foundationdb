@@ -1,5 +1,5 @@
 /*
- * TagThrottle.actor.h
+ * TagThrottle.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,11 +19,6 @@
  */
 
 #include "flow/Arena.h"
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_TAG_THROTTLE_ACTOR_G_H)
-#define FDBCLIENT_TAG_THROTTLE_ACTOR_G_H
-#include "fdbclient/TagThrottle.actor.g.h"
-#elif !defined(FDBCLIENT_TAG_THROTTLE_ACTOR_H)
-#define FDBCLIENT_TAG_THROTTLE_ACTOR_H
 
 #pragma once
 
@@ -35,7 +30,6 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 typedef StringRef TransactionTagRef;
 typedef Standalone<TransactionTagRef> TransactionTag;
@@ -247,79 +241,83 @@ namespace ThrottleApi {
 // The template functions can be called with Native API like DatabaseContext, Transaction/ReadYourWritesTransaction
 // or using IClientAPI like IDatabase, ITransaction
 
-ACTOR template <class Tr>
+template <class Tr>
 Future<Optional<bool>> getValidAutoEnabled(Reference<Tr> tr) {
 	// hold the returned standalone object's memory
-	state typename Tr::template FutureT<Optional<Value>> valueF = tr->get(tagThrottleAutoEnabledKey);
-	Optional<Value> value = wait(safeThreadFutureToFuture(valueF));
+	typename Tr::template FutureT<Optional<Value>> valueF = tr->get(tagThrottleAutoEnabledKey);
+	Optional<Value> value = co_await safeThreadFutureToFuture(valueF);
 	if (!value.present()) {
-		return {};
+		co_return Optional<bool>();
 	} else if (value.get() == "1"_sr) {
-		return true;
+		co_return true;
 	} else if (value.get() == "0"_sr) {
-		return false;
+		co_return false;
 	} else {
 		TraceEvent(SevWarnAlways, "InvalidAutoTagThrottlingValue").detail("Value", value.get());
-		return {};
+		co_return Optional<bool>();
 	}
 }
 
-ACTOR template <class DB>
+template <class DB>
 Future<std::vector<TagThrottleInfo>> getRecommendedTags(Reference<DB> db, int limit) {
-	state Reference<typename DB::TransactionT> tr = db->createTransaction();
-	loop {
+	Reference<typename DB::TransactionT> tr = db->createTransaction();
+	while (true) {
+		Error err;
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			Optional<bool> enableAuto = wait(getValidAutoEnabled(tr));
+			Optional<bool> enableAuto = co_await getValidAutoEnabled(tr);
 			if (!enableAuto.present()) {
 				tr->reset();
-				wait(delay(CLIENT_KNOBS->DEFAULT_BACKOFF));
+				co_await delay(CLIENT_KNOBS->DEFAULT_BACKOFF);
 				continue;
 			} else if (enableAuto.get()) {
-				return std::vector<TagThrottleInfo>();
+				co_return std::vector<TagThrottleInfo>();
 			}
-			state typename DB::TransactionT::template FutureT<RangeResult> f =
+			typename DB::TransactionT::template FutureT<RangeResult> f =
 			    tr->getRange(KeyRangeRef(tagThrottleAutoKeysPrefix, tagThrottleKeys.end), limit);
-			RangeResult throttles = wait(safeThreadFutureToFuture(f));
+			RangeResult throttles = co_await safeThreadFutureToFuture(f);
 			std::vector<TagThrottleInfo> results;
 			for (auto throttle : throttles) {
 				results.push_back(TagThrottleInfo(TagThrottleKey::fromKey(throttle.key),
 				                                  TagThrottleValue::fromValue(throttle.value)));
 			}
-			return results;
+			co_return results;
 		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
+			err = e;
 		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
-ACTOR template <class DB>
+template <class DB>
 Future<std::vector<TagThrottleInfo>>
 getThrottledTags(Reference<DB> db, int limit, ContainsRecommended containsRecommended = ContainsRecommended::False) {
-	state Reference<typename DB::TransactionT> tr = db->createTransaction();
-	state Optional<bool> reportAuto;
-	loop {
+	Reference<typename DB::TransactionT> tr = db->createTransaction();
+	Optional<bool> reportAuto;
+	while (true) {
+		Error err;
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			wait(store(reportAuto, getValidAutoEnabled(tr)));
+			co_await store(reportAuto, getValidAutoEnabled(tr));
 			if (!reportAuto.present()) {
 				tr->reset();
-				wait(delay(CLIENT_KNOBS->DEFAULT_BACKOFF));
+				co_await delay(CLIENT_KNOBS->DEFAULT_BACKOFF);
 				continue;
 			}
-			state typename DB::TransactionT::template FutureT<RangeResult> f = tr->getRange(
+			typename DB::TransactionT::template FutureT<RangeResult> f = tr->getRange(
 			    reportAuto.get() ? tagThrottleKeys : KeyRangeRef(tagThrottleKeysPrefix, tagThrottleAutoKeysPrefix),
 			    limit);
-			RangeResult throttles = wait(safeThreadFutureToFuture(f));
+			RangeResult throttles = co_await safeThreadFutureToFuture(f);
 			std::vector<TagThrottleInfo> results;
 			for (auto throttle : throttles) {
 				results.push_back(TagThrottleInfo(TagThrottleKey::fromKey(throttle.key),
 				                                  TagThrottleValue::fromValue(throttle.value)));
 			}
-			return results;
+			co_return results;
 		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
+			err = e;
 		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
@@ -328,12 +326,12 @@ void signalThrottleChange(Reference<Tr> tr) {
 	tr->atomicOp(tagThrottleSignalKey, "XXXXXXXXXX\x00\x00\x00\x00"_sr, MutationRef::SetVersionstampedValue);
 }
 
-ACTOR template <class Tr>
+template <class Tr>
 Future<Void> updateThrottleCount(Reference<Tr> tr, int64_t delta) {
-	state typename Tr::template FutureT<Optional<Value>> countVal = tr->get(tagThrottleCountKey);
-	state typename Tr::template FutureT<Optional<Value>> limitVal = tr->get(tagThrottleLimitKey);
+	typename Tr::template FutureT<Optional<Value>> countVal = tr->get(tagThrottleCountKey);
+	typename Tr::template FutureT<Optional<Value>> limitVal = tr->get(tagThrottleLimitKey);
 
-	wait(success(safeThreadFutureToFuture(countVal)) && success(safeThreadFutureToFuture(limitVal)));
+	co_await (success(safeThreadFutureToFuture(countVal)) && success(safeThreadFutureToFuture(limitVal)));
 
 	int64_t count = 0;
 	int64_t limit = 0;
@@ -358,29 +356,29 @@ Future<Void> updateThrottleCount(Reference<Tr> tr, int64_t delta) {
 	writer << count;
 
 	tr->set(tagThrottleCountKey, writer.toValue());
-	return Void();
 }
 
-ACTOR template <class DB>
+template <class DB>
 Future<bool> unthrottleMatchingThrottles(Reference<DB> db,
                                          KeyRef beginKey,
                                          KeyRef endKey,
                                          Optional<TransactionPriority> priority,
                                          bool onlyExpiredThrottles) {
-	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+	Reference<typename DB::TransactionT> tr = db->createTransaction();
 
-	state KeySelector begin = firstGreaterOrEqual(beginKey);
-	state KeySelector end = firstGreaterOrEqual(endKey);
+	KeySelector begin = firstGreaterOrEqual(beginKey);
+	KeySelector end = firstGreaterOrEqual(endKey);
 
-	state bool removed = false;
+	bool removed = false;
 
-	loop {
+	while (true) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		Error err;
 		try {
 			// holds memory of the RangeResult
-			state typename DB::TransactionT::template FutureT<RangeResult> f = tr->getRange(begin, end, 1000);
-			state RangeResult tags = wait(safeThreadFutureToFuture(f));
-			state uint64_t unthrottledTags = 0;
+			typename DB::TransactionT::template FutureT<RangeResult> f = tr->getRange(begin, end, 1000);
+			RangeResult tags = co_await safeThreadFutureToFuture(f);
+			uint64_t unthrottledTags = 0;
 			uint64_t manualUnthrottledTags = 0;
 			for (auto tag : tags) {
 				if (onlyExpiredThrottles) {
@@ -405,24 +403,25 @@ Future<bool> unthrottleMatchingThrottles(Reference<DB> db,
 			}
 
 			if (manualUnthrottledTags > 0) {
-				wait(updateThrottleCount(tr, -manualUnthrottledTags));
+				co_await updateThrottleCount(tr, -manualUnthrottledTags);
 			}
 
 			if (unthrottledTags > 0) {
 				signalThrottleChange(tr);
 			}
 
-			wait(safeThreadFutureToFuture(tr->commit()));
+			co_await safeThreadFutureToFuture(tr->commit());
 
 			if (!tags.more) {
-				return removed;
+				co_return removed;
 			}
 
 			ASSERT(tags.size() > 0);
 			begin = KeySelector(firstGreaterThan(tags[tags.size() - 1].key), tags.arena());
 		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
+			err = e;
 		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
@@ -448,14 +447,14 @@ Future<bool> unthrottleAll(Reference<DB> db,
 	return unthrottleMatchingThrottles(db, begin, end, priority, false);
 }
 
-ACTOR template <class DB>
+template <class DB>
 Future<bool> unthrottleTags(Reference<DB> db,
                             TagSet tags,
                             Optional<TagThrottleType> throttleType,
                             Optional<TransactionPriority> priority) {
-	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+	Reference<typename DB::TransactionT> tr = db->createTransaction();
 
-	state std::vector<Key> keys;
+	std::vector<Key> keys;
 	for (auto p : allTransactionPriorities) {
 		if (!priority.present() || priority.get() == p) {
 			if (!throttleType.present() || throttleType.get() == TagThrottleType::AUTO) {
@@ -467,20 +466,21 @@ Future<bool> unthrottleTags(Reference<DB> db,
 		}
 	}
 
-	state bool removed = false;
+	bool removed = false;
 
-	loop {
+	while (true) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		Error err;
 		try {
-			state std::vector<typename DB::TransactionT::template FutureT<Optional<Value>>> valueFutures;
-			state std::vector<Future<Optional<Value>>> values;
+			std::vector<typename DB::TransactionT::template FutureT<Optional<Value>>> valueFutures;
+			std::vector<Future<Optional<Value>>> values;
 			values.reserve(keys.size());
 			for (auto key : keys) {
 				valueFutures.push_back(tr->get(key));
 				values.push_back(safeThreadFutureToFuture(valueFutures.back()));
 			}
 
-			wait(waitForAll(values));
+			co_await waitForAll(values);
 
 			int delta = 0;
 			for (int i = 0; i < values.size(); ++i) {
@@ -500,21 +500,22 @@ Future<bool> unthrottleTags(Reference<DB> db,
 			}
 
 			if (delta != 0) {
-				wait(updateThrottleCount(tr, delta));
+				co_await updateThrottleCount(tr, delta);
 			}
 			if (removed) {
 				signalThrottleChange(tr);
-				wait(safeThreadFutureToFuture(tr->commit()));
+				co_await safeThreadFutureToFuture(tr->commit());
 			}
 
-			return removed;
+			co_return removed;
 		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
+			err = e;
 		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
-ACTOR template <class DB>
+template <class DB>
 Future<Void> throttleTags(Reference<DB> db,
                           TagSet tags,
                           double tpsRate,
@@ -523,8 +524,8 @@ Future<Void> throttleTags(Reference<DB> db,
                           TransactionPriority priority,
                           Optional<double> expirationTime = Optional<double>(),
                           Optional<TagThrottledReason> reason = Optional<TagThrottledReason>()) {
-	state Reference<typename DB::TransactionT> tr = db->createTransaction();
-	state Key key = TagThrottleKey(tags, throttleType, priority).toKey();
+	Reference<typename DB::TransactionT> tr = db->createTransaction();
+	Key key = TagThrottleKey(tags, throttleType, priority).toKey();
 
 	ASSERT(initialDuration > 0);
 
@@ -537,17 +538,18 @@ Future<Void> throttleTags(Reference<DB> db,
 	                          reason.present() ? reason.get() : TagThrottledReason::UNSET);
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withTagThrottleValueReason()));
 	wr << throttle;
-	state Value value = wr.toValue();
+	Value value = wr.toValue();
 
-	loop {
+	while (true) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		Error err;
 		try {
 			if (throttleType == TagThrottleType::MANUAL) {
 				// hold the returned standalone object's memory
-				state typename DB::TransactionT::template FutureT<Optional<Value>> oldThrottleF = tr->get(key);
-				Optional<Value> oldThrottle = wait(safeThreadFutureToFuture(oldThrottleF));
+				typename DB::TransactionT::template FutureT<Optional<Value>> oldThrottleF = tr->get(key);
+				Optional<Value> oldThrottle = co_await safeThreadFutureToFuture(oldThrottleF);
 				if (!oldThrottle.present()) {
-					wait(updateThrottleCount(tr, 1));
+					co_await updateThrottleCount(tr, 1);
 				}
 			}
 
@@ -557,35 +559,37 @@ Future<Void> throttleTags(Reference<DB> db,
 				signalThrottleChange(tr);
 			}
 
-			wait(safeThreadFutureToFuture(tr->commit()));
-			return Void();
+			co_await safeThreadFutureToFuture(tr->commit());
+			co_return;
 		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
+			err = e;
 		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
-ACTOR template <class DB>
+template <class DB>
 Future<Void> enableAuto(Reference<DB> db, bool enabled) {
-	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+	Reference<typename DB::TransactionT> tr = db->createTransaction();
 
-	loop {
+	while (true) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		Error err;
 		try {
 			// hold the returned standalone object's memory
-			state typename DB::TransactionT::template FutureT<Optional<Value>> valueF =
-			    tr->get(tagThrottleAutoEnabledKey);
-			Optional<Value> value = wait(safeThreadFutureToFuture(valueF));
+			typename DB::TransactionT::template FutureT<Optional<Value>> valueF = tr->get(tagThrottleAutoEnabledKey);
+			Optional<Value> value = co_await safeThreadFutureToFuture(valueF);
 			if (!value.present() || (enabled && value.get() != "1"_sr) || (!enabled && value.get() != "0"_sr)) {
 				tr->set(tagThrottleAutoEnabledKey, enabled ? "1"_sr : "0"_sr);
 				signalThrottleChange<typename DB::TransactionT>(tr);
 
-				wait(safeThreadFutureToFuture(tr->commit()));
+				co_await safeThreadFutureToFuture(tr->commit());
 			}
-			return Void();
+			co_return;
 		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
+			err = e;
 		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
@@ -622,6 +626,3 @@ using PrioritizedTransactionTagMap = std::map<TransactionPriority, TransactionTa
 
 template <class Value>
 using UIDTransactionTagMap = std::unordered_map<UID, TransactionTagMap<Value>>;
-
-#include "flow/unactorcompiler.h"
-#endif
