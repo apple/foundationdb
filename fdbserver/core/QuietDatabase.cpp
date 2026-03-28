@@ -714,17 +714,17 @@ Future<Void> repairDeadDatacenter(Database cx, Reference<AsyncVar<ServerDBInfo> 
 			    .detail("PrimaryDead", primaryDead);
 			g_simulator->usableRegions = 1;
 
-			co_await success(ManagementAPI::changeConfig(
+			co_await ManagementAPI::changeConfig(
 			    cx.getReference(),
 			    (primaryDead ? g_simulator->disablePrimary : g_simulator->disableRemote) + " repopulate_anti_quorum=1",
-			    true));
+			    true);
 			while (dbInfo->get().recoveryState < RecoveryState::STORAGE_RECOVERED) {
 				co_await dbInfo->onChange();
 			}
 			TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration")
 			    .detail("Location", context)
 			    .detail("Stage", "Usable_Regions");
-			co_await success(ManagementAPI::changeConfig(cx.getReference(), "usable_regions=1", true));
+			co_await ManagementAPI::changeConfig(cx.getReference(), "usable_regions=1", true);
 		}
 	}
 }
