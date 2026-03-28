@@ -37,14 +37,6 @@
 #include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-DESCR struct SingleKeyMutation {
-	Standalone<StringRef> shardBegin;
-	Standalone<StringRef> shardEnd;
-	int64_t tag1;
-	int64_t tag2;
-	int64_t tag3;
-};
-
 class LogSystemDiskQueueAdapter;
 
 struct ProxyStats {
@@ -215,8 +207,6 @@ struct ProxyCommitData {
 	PublicRequestStream<CommitTransactionRequest> commit;
 	Database cx;
 	Reference<AsyncVar<ServerDBInfo> const> db;
-	EventMetricHandle<SingleKeyMutation> singleKeyMutationEvent;
-
 	std::map<UID, Reference<StorageInfo>> storageCache;
 	std::unordered_map<UID, StorageServerInterface> tssMapping;
 	std::map<Tag, Version> tag_popped;
@@ -318,10 +308,9 @@ struct ProxyCommitData {
 	    provisional(provisional), lastCoalesceTime(0), locked(false),
 	    commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN), localCommitBatchesStarted(0),
 	    getConsistentReadVersion(getConsistentReadVersion), commit(commit),
-	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True)), db(db),
-	    singleKeyMutationEvent("SingleKeyMutation"_sr), lastTxsPop(0), popRemoteTxs(false), lastStartCommit(0),
-	    lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0), lastMasterReset(now()),
-	    lastResolverReset(now()), commitProxyIndex(commitProxyIndex),
+	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True)), db(db), lastTxsPop(0),
+	    popRemoteTxs(false), lastStartCommit(0), lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION),
+	    lastCommitTime(0), lastMasterReset(now()), lastResolverReset(now()), commitProxyIndex(commitProxyIndex),
 	    acsBuilder(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
 	                       !SERVER_KNOBS->ENABLE_VERSION_VECTOR && !SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST
 	                   ? std::make_shared<AccumulativeChecksumBuilder>(
