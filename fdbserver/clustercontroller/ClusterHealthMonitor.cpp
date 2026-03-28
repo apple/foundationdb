@@ -280,9 +280,8 @@ Future<Level> RecoveryStateFactor::fetchLevel(Reference<IWorkerEventProvider con
 
 	try {
 		Level level = Level::HEALTHY;
-		for (auto const& [address, traceEvent] : events) {
-			(void)address;
-			int statusCode = traceEvent.getInt("StatusCode");
+		for (auto const& [_address, traceEvent] : events) {
+			int const statusCode = traceEvent.getInt("StatusCode");
 			if (statusCode < RecoveryStatus::accepting_commits) {
 				level = Level::OUTAGE;
 				break;
