@@ -32,34 +32,33 @@
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR Future<int64_t> getDataInFlight(Database cx, Reference<AsyncVar<struct ServerDBInfo> const> dbInfo);
-ACTOR Future<std::pair<int64_t, int64_t>> getTLogQueueInfo(Database cx,
-                                                           Reference<AsyncVar<struct ServerDBInfo> const> dbInfo);
-ACTOR Future<int64_t> getMaxStorageServerQueueSize(Database cx,
-                                                   Reference<AsyncVar<struct ServerDBInfo> const> dbInfo,
-                                                   Version version);
-ACTOR Future<int64_t> getDataDistributionQueueSize(Database cx,
-                                                   Reference<AsyncVar<struct ServerDBInfo> const> dbInfo,
-                                                   bool reportInFlight);
-ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface distributorWorker);
-ACTOR Future<bool> getTeamCollectionValid(Database cx, Reference<AsyncVar<struct ServerDBInfo> const> dbInfo);
-ACTOR Future<std::vector<StorageServerInterface>> getStorageServers(Database cx, bool use_system_priority = false);
+Future<int64_t> getDataInFlight(Database cx, Reference<AsyncVar<struct ServerDBInfo> const> dbInfo);
+Future<std::pair<int64_t, int64_t>> getTLogQueueInfo(Database cx,
+                                                     Reference<AsyncVar<struct ServerDBInfo> const> dbInfo);
+Future<int64_t> getMaxStorageServerQueueSize(Database cx,
+                                             Reference<AsyncVar<struct ServerDBInfo> const> dbInfo,
+                                             Version version);
+Future<int64_t> getDataDistributionQueueSize(Database cx,
+                                             Reference<AsyncVar<struct ServerDBInfo> const> dbInfo,
+                                             bool reportInFlight);
+Future<bool> getTeamCollectionValid(Database cx, WorkerInterface distributorWorker);
+Future<bool> getTeamCollectionValid(Database cx, Reference<AsyncVar<struct ServerDBInfo> const> dbInfo);
+Future<std::vector<StorageServerInterface>> getStorageServers(Database cx, bool use_system_priority = false);
 ACTOR Future<std::vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo, int flags = 0);
-ACTOR Future<WorkerInterface> getMasterWorker(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
-ACTOR Future<Void> repairDeadDatacenter(Database cx,
-                                        Reference<AsyncVar<ServerDBInfo> const> dbInfo,
-                                        std::string context);
-ACTOR Future<Void> reconfigureAfter(Database cx,
-                                    double time,
-                                    Reference<AsyncVar<ServerDBInfo> const> dbInfo,
-                                    std::string context);
+Future<WorkerInterface> getMasterWorker(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
+Future<Void> repairDeadDatacenter(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo, std::string context);
+Future<Void> reconfigureAfter(Database cx,
+                              double time,
+                              Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                              std::string context);
 
-ACTOR Future<std::pair<std::vector<WorkerInterface>, int>>
-getStorageWorkers(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo, bool localOnly);
-ACTOR Future<std::vector<WorkerInterface>> getCoordWorkers(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
+Future<std::pair<std::vector<WorkerInterface>, int>> getStorageWorkers(Database cx,
+                                                                       Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                                                       bool localOnly);
+Future<std::vector<WorkerInterface>> getCoordWorkers(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 
-ACTOR Future<Void> enableConsistencyScanInSim(Database db);
-ACTOR Future<Void> disableConsistencyScanInSim(Database db, bool waitForCompletion);
+Future<Void> enableConsistencyScanInSim(Database db);
+Future<Void> disableConsistencyScanInSim(Database db, bool waitForCompletion);
 
 #include "flow/unactorcompiler.h"
 
