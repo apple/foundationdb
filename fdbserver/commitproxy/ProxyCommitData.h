@@ -314,23 +314,7 @@ struct ProxyCommitData {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);
 	}
 
-	ApplyMetadataProxyContext getApplyMetadataProxyContext() {
-		return { .dbgid = dbgid,
-			     .txnStateStore = txnStateStore,
-			     .vecBackupKeys = &vecBackupKeys,
-			     .keyInfo = &keyInfo,
-			     .uid_applyMutationsData = firstProxy ? &uid_applyMutationsData : nullptr,
-			     .commit = commit,
-			     .cx = cx,
-			     .committedVersion = &committedVersion,
-			     .storageCache = &storageCache,
-			     .tag_popped = &tag_popped,
-			     .tssMapping = &tssMapping,
-			     .commitProxyIndex = commitProxyIndex,
-			     .acsBuilder = acsBuilder,
-			     .epoch = epoch,
-			     .rangeLock = rangeLock };
-	}
+	ApplyMetadataProxyContext getApplyMetadataProxyContext();
 };
 struct RangeLock : ApplyMetadataRangeLock {
 public:
@@ -403,3 +387,21 @@ private:
 	KeyRangeMap<RangeLockStateSet> coreMap;
 	ProxyCommitData* const pProxyCommitData;
 };
+
+inline ApplyMetadataProxyContext ProxyCommitData::getApplyMetadataProxyContext() {
+	return { .dbgid = dbgid,
+		     .txnStateStore = txnStateStore,
+		     .vecBackupKeys = &vecBackupKeys,
+		     .keyInfo = &keyInfo,
+		     .uid_applyMutationsData = firstProxy ? &uid_applyMutationsData : nullptr,
+		     .commit = commit,
+		     .cx = cx,
+		     .committedVersion = &committedVersion,
+		     .storageCache = &storageCache,
+		     .tag_popped = &tag_popped,
+		     .tssMapping = &tssMapping,
+		     .commitProxyIndex = commitProxyIndex,
+		     .acsBuilder = acsBuilder,
+		     .epoch = epoch,
+		     .rangeLock = std::static_pointer_cast<ApplyMetadataRangeLock>(rangeLock) };
+}
