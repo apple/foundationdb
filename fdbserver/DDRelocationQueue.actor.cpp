@@ -2446,6 +2446,7 @@ struct DDQueueImpl {
 							ASSERT(rs.dataMove != nullptr);
 							ASSERT(rs.dataMoveId.isValid());
 							self->launchQueuedWork(RelocateData(rs), ddEnabledState);
+							wait(delay(SERVER_KNOBS->DD_RESTORE_MOVES_DEQUEUE_WAIT_TIME));
 						} else if (rs.cancelled) {
 							self->enqueueCancelledDataMove(rs.dataMoveId, rs.keys, ddEnabledState);
 						} else {

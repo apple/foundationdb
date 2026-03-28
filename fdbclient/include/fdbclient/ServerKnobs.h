@@ -140,6 +140,7 @@ public:
 	double INFLIGHT_PENALTY_UNHEALTHY;
 	double INFLIGHT_PENALTY_ONE_LEFT;
 	bool USE_OLD_NEEDED_SERVERS;
+	double DD_RESTORE_MOVES_DEQUEUE_WAIT_TIME;
 
 	// Higher priorities are executed first
 	// Priority/100 is the "priority group"/"superpriority".  Priority inversion
