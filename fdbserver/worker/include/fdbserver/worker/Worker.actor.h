@@ -39,17 +39,17 @@ struct ServerDBInfo;
 
 #include "flow/actorcompiler.h" // This must be the last #include
 
-ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
-                        LocalityData localities,
-                        ProcessClass processClass,
-                        std::string dataFolder,
-                        std::string coordFolder,
-                        int64_t memoryLimit,
-                        std::string metricsConnFile,
-                        std::string metricsPrefix,
-                        int64_t memoryProfilingThreshold,
-                        std::string whitelistBinPaths,
-                        bool consistencyCheckUrgentMode);
+Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
+                  LocalityData localities,
+                  ProcessClass processClass,
+                  std::string dataFolder,
+                  std::string coordFolder,
+                  int64_t memoryLimit,
+                  std::string metricsConnFile,
+                  std::string metricsPrefix,
+                  int64_t memoryProfilingThreshold,
+                  std::string whitelistBinPaths,
+                  bool consistencyCheckUrgentMode);
 
 void registerThreadForProfiling();
 
