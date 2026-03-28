@@ -35,7 +35,7 @@
 
 // Benchmark zstd performance. To use it:
 //  # export BM_ZSTD_DATA=path/to/datafile
-//  # bin/flowbench --benchmark_filter=bench_zstd
+//  # bin/flow_bench --benchmark_filter=bench_zstd
 
 // Compress with raw ZSTD API
 static inline std::pair<std::unique_ptr<char[]>, size_t> compress(const std::string& data, int level) {

@@ -1,5 +1,5 @@
 /*
- * GlobalData.cpp
+ * BenchSupport.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,27 +18,30 @@
  * limitations under the License.
  */
 
-#include "fdbclient/FDBTypes.h"
+#ifndef FDB_FLOW_BENCH_SUPPORT_H
+#define FDB_FLOW_BENCH_SUPPORT_H
+
+#pragma once
+
+#include "flow/Arena.h"
+#include "flow/FastAlloc.h"
 #include "flow/IRandom.h"
+#include "flow/flow.h"
 
-static constexpr size_t globalDataSize = 1 << 20;
-static uint8_t* globalData = nullptr;
+static constexpr size_t flowBenchDataSize = 1 << 20;
 
-static inline void initGlobalData() {
+inline uint8_t* flowBenchData() {
+	static uint8_t* globalData = nullptr;
 	if (!globalData) {
-		globalData = static_cast<uint8_t*>(allocateFast(globalDataSize));
+		globalData = static_cast<uint8_t*>(allocateFast(flowBenchDataSize));
 	}
-	deterministicRandom()->randomBytes(globalData, globalDataSize);
+	deterministicRandom()->randomBytes(globalData, flowBenchDataSize);
+	return globalData;
 }
 
-KeyValueRef getKV(size_t keySize, size_t valueSize) {
-	initGlobalData();
-	ASSERT(keySize + valueSize <= globalDataSize);
-	return KeyValueRef(KeyRef(globalData, keySize), ValueRef(globalData + keySize, valueSize));
+inline StringRef getString(size_t size) {
+	ASSERT(size <= flowBenchDataSize);
+	return StringRef(flowBenchData(), size);
 }
 
-KeyRef getKey(size_t keySize) {
-	initGlobalData();
-	ASSERT(keySize);
-	return KeyRef(globalData, keySize);
-}
+#endif

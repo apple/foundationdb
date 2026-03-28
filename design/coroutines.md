@@ -861,7 +861,7 @@ Future<Void> foo(Database const& cx);
 ### File Naming
 
 Converted files should be renamed from `.actor.cpp` to `.cpp` (or `.actor.h` to `.h`) since they no longer need the
-actor compiler. Both `fdbserver` and `flowbench` use `fdb_find_sources()` in their `CMakeLists.txt`, which
+actor compiler. Both `fdbserver` and `flow_bench` use `fdb_find_sources()` in their `CMakeLists.txt`, which
 automatically picks up files by glob, so the rename is usually sufficient without any CMake changes.
 
 ### Conversion Checklist
@@ -994,7 +994,7 @@ python3 ../contrib/benchmark_comparison.py
 - OVERALL_GEOMEAN calculations for statistical analysis
 
 **Requirements**:
-- Working flowbench binary with both actor and coroutine benchmarks
+- Working flow_bench binary with both actor and coroutine benchmarks
 - Benchmark infrastructure must include: bench_net2, coroutine_net2, bench_delay, coroutine_delay_bench, coroutine_yield_bench, bench_callback, coroutine_callback
 
 **Usage**: Tool automatically runs benchmarks and generates comparison report in the format matching historical coroutine optimization reports.

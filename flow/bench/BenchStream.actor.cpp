@@ -20,12 +20,11 @@
 
 #include "benchmark/benchmark.h"
 
-#include "fdbclient/FDBTypes.h"
+#include "BenchSupport.h"
 #include "flow/flow.h"
 #include "flow/TLSConfig.actor.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/network.h"
-#include "flowbench/GlobalData.h"
 
 #include <thread>
 
@@ -34,15 +33,15 @@
 ACTOR static Future<Void> benchStreamActor(benchmark::State* benchState) {
 	state size_t items = benchState->range(0);
 	size_t size = benchState->range(1);
-	state KeyRef key = getKey(size);
-	state PromiseStream<Key> stream;
+	state StringRef key = getString(size);
+	state PromiseStream<StringRef> stream;
 	state int i;
 	while (benchState->KeepRunning()) {
 		for (i = 0; i < items; ++i) {
 			stream.send(key);
 		}
 		for (i = 0; i < items; ++i) {
-			Key receivedKey = waitNext(stream.getFuture());
+			StringRef receivedKey = waitNext(stream.getFuture());
 			benchmark::DoNotOptimize(receivedKey);
 		}
 	}

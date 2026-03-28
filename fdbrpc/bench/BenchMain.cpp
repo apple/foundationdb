@@ -1,5 +1,5 @@
 /*
- * flowbench.cpp
+ * BenchMain.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,9 +19,11 @@
  */
 
 #include "benchmark/benchmark.h"
-#include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/ThreadSafeTransaction.h"
+#include "fdbrpc/Net2FileSystem.h"
+#include "flow/Platform.h"
+#include "flow/TLSConfig.actor.h"
 #include "flow/ThreadHelper.actor.h"
+#include "flow/network.h"
 #include <thread>
 
 Future<Void> stopNetworkAfter(Future<Void> what) {
@@ -39,13 +41,19 @@ int main(int argc, char** argv) {
 	if (benchmark::ReportUnrecognizedArguments(argc, argv)) {
 		return 1;
 	}
-	setupNetwork();
+
+	platformInit();
+	Error::init();
+	g_network = newNet2(TLSConfig());
+	g_network->addStopCallback(Net2FileSystem::stop);
+	Net2FileSystem::newFileSystem();
+
 	Promise<Void> benchmarksDone;
 	std::thread benchmarkThread([&]() {
 		benchmark::RunSpecifiedBenchmarks();
 		onMainThreadVoid([&]() { benchmarksDone.send(Void()); });
 	});
 	auto f = stopNetworkAfter(benchmarksDone.getFuture());
-	runNetwork();
+	g_network->run();
 	benchmarkThread.join();
 }

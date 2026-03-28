@@ -97,4 +97,9 @@ if(WIN32)
   add_dependencies(fdbrpc_sampling_actors fdbrpc_actors)
 endif()
 
+if(NOT FOUNDATIONDB_CROSS_COMPILING) # FIXME(swift): make this work when
+                                     # x-compiling.
+  add_subdirectory(bench EXCLUDE_FROM_ALL)
+endif()
+
 add_subdirectory(tests)

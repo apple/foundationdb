@@ -18,12 +18,13 @@
  * limitations under the License.
  */
 
-#ifndef __FDBBENCH_GLOBALDATA_H__
-#define __FDBBENCH_GLOBALDATA_H__
+#ifndef FDB_FDBCLIENT_BENCH_GLOBALDATA_H
+#define FDB_FDBCLIENT_BENCH_GLOBALDATA_H
 
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
+#include "flow/flow.h"
 
 KeyValueRef getKV(size_t keySize, size_t valueSize);
 KeyRef getKey(size_t keySize);

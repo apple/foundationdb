@@ -22,7 +22,8 @@
 #include "crc32/crc32c.h"
 #include "flow/Hash3.h"
 #include "flow/xxhash.h"
-#include "flowbench/GlobalData.h"
+
+#include "BenchSupport.h"
 
 #include <stdint.h>
 
@@ -33,10 +34,10 @@ enum class HashType {
 };
 
 template <HashType hashType>
-inline void hash(const KeyRef& key, size_t length) {}
+inline void hash(const StringRef& key, size_t length) {}
 
 template <>
-inline void hash<HashType::HashLittle2>(const KeyRef& key, size_t length) {
+inline void hash<HashType::HashLittle2>(const StringRef& key, size_t length) {
 	uint32_t part1;
 	uint32_t part2;
 	hashlittle2(key.begin(), length, &part1, &part2);
@@ -45,19 +46,19 @@ inline void hash<HashType::HashLittle2>(const KeyRef& key, size_t length) {
 }
 
 template <>
-inline void hash<HashType::CRC32C>(const KeyRef& key, size_t length) {
+inline void hash<HashType::CRC32C>(const StringRef& key, size_t length) {
 	benchmark::DoNotOptimize(crc32c_append(0xfdbeefdb, key.begin(), length));
 }
 
 template <>
-inline void hash<HashType::XXHash3>(const KeyRef& key, size_t length) {
+inline void hash<HashType::XXHash3>(const StringRef& key, size_t length) {
 	benchmark::DoNotOptimize(XXH3_64bits(key.begin(), length));
 }
 
 template <HashType hashType>
 static void bench_hash(benchmark::State& state) {
 	auto length = 1 << state.range(0);
-	auto key = getKey(length);
+	auto key = getString(length);
 	for (auto _ : state) {
 		hash<hashType>(key, length);
 	}
