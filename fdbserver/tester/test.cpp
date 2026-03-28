@@ -47,7 +47,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/DataDistributionConfig.h"
 #include "fdbserver/tester/KnobProtectiveGroups.h"
-#include "fdbserver/core/QuietDatabase.actor.h"
+#include "fdbserver/core/QuietDatabase.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/tester/workloads.actor.h"
 #include "fdbserver/tester/WorkloadUtils.h"

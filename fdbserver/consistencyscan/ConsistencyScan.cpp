@@ -42,7 +42,7 @@
 #include "fdbserver/core/ShardSizing.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/core/TesterInterface.h"
-#include "fdbserver/core/QuietDatabase.actor.h"
+#include "fdbserver/core/QuietDatabase.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Trace.h"
 #include "flow/CoroUtils.h"

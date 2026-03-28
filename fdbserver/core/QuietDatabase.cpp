@@ -1,5 +1,5 @@
 /*
- * QuietDatabase.actor.cpp
+ * QuietDatabase.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -36,7 +36,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunRYWTransaction.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/QuietDatabase.actor.h"
+#include "fdbserver/core/QuietDatabase.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbclient/ManagementAPI.h"
 #include "flow/CoroUtils.h"
