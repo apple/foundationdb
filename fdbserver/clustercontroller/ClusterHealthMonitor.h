@@ -43,6 +43,7 @@ enum class Level {
 
 using LatestWorkerEvents = Optional<std::pair<WorkerEvents, std::set<std::string>>>;
 
+// Abstracts access to health-monitor inputs so factors can be evaluated in production and tests.
 class IWorkerEventProvider {
 public:
 	virtual ~IWorkerEventProvider() = default;
@@ -51,6 +52,7 @@ public:
 	virtual Future<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const = 0;
 };
 
+// Production event provider backed by worker event-log RPCs.
 class WorkerEventProvider final : public IWorkerEventProvider, public ReferenceCounted<WorkerEventProvider> {
 	std::vector<WorkerDetails> workers;
 
@@ -61,6 +63,7 @@ public:
 	Future<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const override;
 };
 
+// Test event provider backed by manually supplied latest-event snapshots.
 class FakeWorkerEventProvider final : public IWorkerEventProvider, public ReferenceCounted<FakeWorkerEventProvider> {
 	std::map<std::string, LatestWorkerEvents> latestEventsByName;
 
@@ -71,6 +74,7 @@ public:
 	Future<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const override;
 };
 
+// Computes one cluster-health signal from shared monitoring inputs.
 class IFactor {
 public:
 	virtual ~IFactor() = default;
@@ -79,6 +83,7 @@ public:
 	virtual Future<Level> fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) = 0;
 };
 
+// Evaluates storage-server free-space pressure from StorageMetrics events.
 class StorageSpaceFactor : public IFactor {
 	double interventionThreshold;
 	double criticalInterventionThreshold;
@@ -90,6 +95,7 @@ public:
 	Future<Level> fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) override;
 };
 
+// Evaluates TLog queue-disk free-space pressure from TLogMetrics events.
 class TLogSpaceFactor : public IFactor {
 	double interventionThreshold;
 	double criticalInterventionThreshold;
@@ -101,24 +107,28 @@ public:
 	Future<Level> fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) override;
 };
 
+// Evaluates whether data distribution is restoring or has lost storage replication.
 class StorageReplicationFactor : public IFactor {
 public:
 	std::string_view getName() const override;
 	Future<Level> fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) override;
 };
 
+// Evaluates cluster recovery progress from MasterRecoveryState events.
 class RecoveryStateFactor : public IFactor {
 public:
 	std::string_view getName() const override;
 	Future<Level> fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) override;
 };
 
+// Evaluates whether any worker is currently reporting a latest process error.
 class ProcessErrorsFactor : public IFactor {
 public:
 	std::string_view getName() const override;
 	Future<Level> fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) override;
 };
 
+// Evaluates ratekeeper throttling severity from RkUpdate events.
 class RkThrottlingFactor : public IFactor {
 	double criticalReleasedTpsRatioThreshold;
 
@@ -129,6 +139,7 @@ public:
 	Future<Level> fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) override;
 };
 
+// Periodically evaluates factors and logs the aggregate cluster-health metric.
 class Monitor {
 	std::vector<std::unique_ptr<IFactor>> factors;
 	Reference<IWorkerEventProvider const> workerEventProvider;
