@@ -31,9 +31,9 @@ Future<GenerationRegReadReply> waitAndSendRead(GenerationRegInterface stateServe
 		co_await delay(SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * deterministicRandom()->random01());
 	GenerationRegReadReply reply;
 	if (stateServer.hostname.present()) {
-		co_await store(reply, retryGetReplyFromHostname(req, stateServer.hostname.get(), WLTOKEN_GENERATIONREG_READ));
+		reply = co_await retryGetReplyFromHostname(req, stateServer.hostname.get(), WLTOKEN_GENERATIONREG_READ);
 	} else {
-		co_await store(reply, retryBrokenPromise(stateServer.read, req));
+		reply = co_await retryBrokenPromise(stateServer.read, req);
 	}
 	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY)
 		co_await delay(SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * deterministicRandom()->random01());
@@ -45,9 +45,9 @@ Future<UniqueGeneration> waitAndSendWrite(GenerationRegInterface stateServer, Ge
 		co_await delay(SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * deterministicRandom()->random01());
 	UniqueGeneration reply;
 	if (stateServer.hostname.present()) {
-		co_await store(reply, retryGetReplyFromHostname(req, stateServer.hostname.get(), WLTOKEN_GENERATIONREG_WRITE));
+		reply = co_await retryGetReplyFromHostname(req, stateServer.hostname.get(), WLTOKEN_GENERATIONREG_WRITE);
 	} else {
-		co_await store(reply, retryBrokenPromise(stateServer.write, req));
+		reply = co_await retryBrokenPromise(stateServer.write, req);
 	}
 	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY)
 		co_await delay(SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * deterministicRandom()->random01());
