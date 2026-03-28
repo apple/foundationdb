@@ -727,7 +727,6 @@ Future<Void> repairDeadDatacenter(Database cx, Reference<AsyncVar<ServerDBInfo> 
 			co_await success(ManagementAPI::changeConfig(cx.getReference(), "usable_regions=1", true));
 		}
 	}
-	co_return;
 }
 
 Future<Void> reconfigureAfter(Database cx,
@@ -736,7 +735,6 @@ Future<Void> reconfigureAfter(Database cx,
                               std::string context) {
 	co_await delay(time);
 	co_await uncancellable(repairDeadDatacenter(cx, dbInfo, context));
-	co_return;
 }
 
 struct QuietDatabaseChecker {
@@ -949,7 +947,6 @@ Future<Void> disableConsistencyScanInSim(Database db, bool waitForCompletion) {
 	CODE_PROBE(true, "Consistency Scan disabled in simulation");
 	TraceEvent("ConsistencyScan_SimDisabled").log();
 	printf("Consistency scan complete.\n");
-	co_return;
 }
 
 // Waits until a database quiets down (no data in flight, small tlog queue, low SQ, no active data distribution). This
