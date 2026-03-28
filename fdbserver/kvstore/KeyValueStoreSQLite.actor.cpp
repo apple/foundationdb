@@ -2119,8 +2119,8 @@ private:
 IKeyValueStore* keyValueStoreSQLite(std::string const& filename,
                                     UID logID,
                                     KeyValueStoreType storeType,
-                                    bool checkChecksums,
-                                    bool checkIntegrity) {
+                                    CheckChecksums checkChecksums,
+                                    CheckIntegrity checkIntegrity) {
 	return new KeyValueStoreSQLite(filename, logID, storeType, checkChecksums, checkIntegrity);
 }
 
@@ -2323,7 +2323,8 @@ ACTOR Future<Void> KVFileCheck(std::string filename, bool integrity) {
 		type = KeyValueStoreType::SSD_BTREE_V2;
 	ASSERT(type != KeyValueStoreType::END);
 
-	state IKeyValueStore* store = keyValueStoreSQLite(filename, UID(0, 0), type, !integrity, integrity);
+	state IKeyValueStore* store =
+	    keyValueStoreSQLite(filename, UID(0, 0), type, CheckChecksums(!integrity), CheckIntegrity(integrity));
 	ASSERT(store != nullptr);
 
 	// Wait for integry check to finish

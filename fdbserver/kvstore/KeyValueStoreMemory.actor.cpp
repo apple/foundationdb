@@ -958,9 +958,9 @@ IKeyValueStore* keyValueStoreLogSystem(class IDiskQueue* queue,
                                        Reference<AsyncVar<ServerDBInfo> const> db,
                                        UID logID,
                                        int64_t memoryLimit,
-                                       bool disableSnapshot,
-                                       bool replaceContent,
-                                       bool exactRecovery) {
+                                       DisableSnapshot disableSnapshot,
+                                       ReplaceContent replaceContent,
+                                       ExactRecovery exactRecovery) {
 	return new KeyValueStoreMemory<IKeyValueContainer>(
 	    queue, db, logID, memoryLimit, KeyValueStoreType::MEMORY, disableSnapshot, replaceContent, exactRecovery);
 }
