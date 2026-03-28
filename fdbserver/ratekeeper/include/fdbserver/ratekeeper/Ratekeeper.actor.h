@@ -32,7 +32,7 @@
 
 struct ServerDBInfo;
 
-ACTOR Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo> const> db);
+Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo> const> db);
 
 #include "flow/unactorcompiler.h"
 #endif

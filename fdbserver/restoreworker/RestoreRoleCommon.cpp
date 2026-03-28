@@ -23,7 +23,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunRYWTransaction.h"
 
-#include "fdbserver/core/RestoreUtil.h"
+#include "fdbserver/restoreworker/RestoreUtil.h"
 #include "RestoreRoleCommon.h"
 #include "RestoreLoader.h"
 #include "RestoreApplier.h"
@@ -193,22 +193,4 @@ Future<Void> traceRoleVersionBatchProgress(Reference<RestoreRoleData> self, std:
 
 		co_await delay(SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY);
 	}
-}
-
-//-------Helper functions
-std::string getHexString(StringRef input) {
-	std::stringstream ss;
-	for (int i = 0; i < input.size(); i++) {
-		if (i % 4 == 0)
-			ss << " ";
-		if (i == 12) { // The end of 12bytes, which is the version size for value
-			ss << "|";
-		}
-		if (i == (12 + 12)) { // The end of version + header
-			ss << "@";
-		}
-		ss << std::setfill('0') << std::setw(2) << std::hex
-		   << (int)input[i]; // [] operator moves the pointer in step of unit8
-	}
-	return ss.str();
 }

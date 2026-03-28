@@ -281,7 +281,7 @@ Future<Void> healthMetricsRequestServer(GrvProxyInterface grvProxy,
 // global configuration key space.
 Future<Void> globalConfigMigrate(GrvProxyData* grvProxyData) {
 	Key migratedKey("\xff\x02/fdbClientInfo/migrated/"_sr);
-	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(grvProxyData->cx);
+	auto tr = makeReference<ReadYourWritesTransaction>(grvProxyData->cx);
 	try {
 		while (true) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -331,7 +331,7 @@ Future<Void> globalConfigMigrate(GrvProxyData* grvProxyData) {
 
 // Periodically refresh local copy of global configuration.
 Future<Void> globalConfigRefresh(GrvProxyData* grvProxyData, Version* cachedVersion, RangeResult* cachedData) {
-	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(grvProxyData->cx);
+	auto tr = makeReference<ReadYourWritesTransaction>(grvProxyData->cx);
 	while (true) {
 		Error err;
 		try {
@@ -372,7 +372,7 @@ Future<Void> globalConfigRequestServer(GrvProxyData* grvProxyData, GrvProxyInter
 	                delay(SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_INTERVAL);
 
 	// Run one-time migration to support upgrades.
-	co_await success(timeout(globalConfigMigrate(grvProxyData), SERVER_KNOBS->GLOBAL_CONFIG_MIGRATE_TIMEOUT));
+	co_await timeout(globalConfigMigrate(grvProxyData), SERVER_KNOBS->GLOBAL_CONFIG_MIGRATE_TIMEOUT);
 
 	while (true) {
 		auto res = co_await race(grvProxy.refreshGlobalConfig.getFuture(), refreshFuture, actors.getResult());

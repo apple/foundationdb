@@ -227,7 +227,7 @@ private:
 			}
 			int64_t offset = page * checksumHistoryPageSize;
 			// perform a read to verify checksum, it will remove the entry upon success
-			co_await success(self->read(self->pageBuffer, checksumHistoryPageSize, offset));
+			co_await self->read(self->pageBuffer, checksumHistoryPageSize, offset);
 		}
 	}
 

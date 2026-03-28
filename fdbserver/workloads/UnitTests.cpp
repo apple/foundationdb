@@ -134,7 +134,7 @@ struct UnitTestWorkload : TestWorkload {
 	}
 	Future<Void> start(Database const& cx) override {
 		if (enabled)
-			return runUnitTests(this);
+			return runUnitTests();
 		return Void();
 	}
 	Future<bool> check(Database const& cx) override { return testsFailed.getValue() == 0; }
@@ -160,12 +160,12 @@ struct UnitTestWorkload : TestWorkload {
 		return true;
 	}
 
-	static Future<Void> runUnitTests(UnitTestWorkload* self) {
+	Future<Void> runUnitTests() {
 		std::vector<UnitTest*> tests;
 
 		for (auto test = g_unittests.tests; test != nullptr; test = test->next) {
-			if (self->testMatched(test->name)) {
-				++self->testsAvailable;
+			if (testMatched(test->name)) {
+				++testsAvailable;
 				tests.push_back(test);
 			}
 		}
@@ -178,15 +178,15 @@ struct UnitTestWorkload : TestWorkload {
 
 		if (tests.size() == 0) {
 			TraceEvent(SevError, "NoMatchingUnitTests")
-			    .detail("TestPattern", self->testPattern)
-			    .detail("TestsIgnored", self->testsIgnored);
-			++self->testsFailed;
+			    .detail("TestPattern", testPattern)
+			    .detail("TestsIgnored", testsIgnored);
+			++testsFailed;
 			co_return;
 		}
 
 		deterministicRandom()->randomShuffle(tests);
-		if (self->testRunLimit > 0 && tests.size() > self->testRunLimit)
-			tests.resize(self->testRunLimit);
+		if (testRunLimit > 0 && tests.size() > testRunLimit)
+			tests.resize(testRunLimit);
 
 		std::vector<UnitTest*>::iterator t;
 		for (t = tests.begin(); t != tests.end(); ++t) {
@@ -203,22 +203,22 @@ struct UnitTestWorkload : TestWorkload {
 			double start_now = now();
 			double start_timer = timer();
 
-			platform::createDirectory(self->testParams.getDataDir());
+			platform::createDirectory(testParams.getDataDir());
 			try {
-				co_await test->func(self->testParams);
+				co_await test->func(testParams);
 			} catch (Error& e) {
-				++self->testsFailed;
+				++testsFailed;
 				result = e;
 			}
-			if (self->cleanupAfterTests) {
-				platform::eraseDirectoryRecursive(self->testParams.getDataDir());
+			if (cleanupAfterTests) {
+				platform::eraseDirectoryRecursive(testParams.getDataDir());
 			}
-			++self->testsExecuted;
+			++testsExecuted;
 			double wallTime = timer() - start_timer;
 			double simTime = now() - start_now;
 
-			self->totalWallTime += wallTime;
-			self->totalSimTime += simTime;
+			totalWallTime += wallTime;
+			totalSimTime += simTime;
 			TraceEvent(result.code() != error_code_success ? SevError : SevInfo, "UnitTest")
 			    .errorUnsuppressed(result)
 			    .detail("Name", test->name)

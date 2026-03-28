@@ -20,7 +20,7 @@
 
 #include "fdbserver/tester/workloads.actor.h"
 #include "flow/ActorCollection.h"
-#include "fdbserver/workloads/AsyncFile.h"
+#include "AsyncFile.h"
 
 // class RandomByteGenerator
 

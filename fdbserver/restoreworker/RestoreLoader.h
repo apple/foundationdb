@@ -29,7 +29,7 @@
 #include "fdbrpc/Stats.h"
 #include "fdbserver/core/CoordinationInterface.h"
 #include "fdbrpc/Locality.h"
-#include "fdbserver/core/RestoreUtil.h"
+#include "fdbserver/restoreworker/RestoreUtil.h"
 #include "fdbserver/restoreworker/RestoreCommon.h"
 #include "RestoreRoleCommon.h"
 #include "fdbserver/restoreworker/RestoreWorkerInterface.h"

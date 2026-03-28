@@ -27,8 +27,8 @@
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/tester/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.h"
-#include "fdbserver/workloads/ReadWriteWorkload.actor.h"
+#include "BulkSetup.h"
+#include "ReadWriteWorkload.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/RunRYWTransaction.h"
@@ -72,9 +72,7 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 
 	// for each boundary except the last one in boundaries, found the first existed key generated from keyForIndex as
 	// beginIdx, found the last existed key generated from keyForIndex the endIdx.
-	static Future<IndexRangeVec> convertKeyBoundaryToIndexShard(Database cx,
-	                                                            SkewedReadWriteWorkload* self,
-	                                                            Standalone<VectorRef<KeyRef>> boundaries) {
+	Future<IndexRangeVec> convertKeyBoundaryToIndexShard(Database cx, Standalone<VectorRef<KeyRef>> boundaries) {
 		IndexRangeVec res;
 		for (int i = 0; i < boundaries.size() - 1; ++i) {
 			KeyRangeRef currentShard = KeyRangeRef(boundaries[i], boundaries[i + 1]);
@@ -87,14 +85,14 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 				    return getAll(f);
 			    });
 			ASSERT(ranges[0].size() == 1 && ranges[1].size() == 1);
-			res.emplace_back(self->indexForKey(ranges[0][0].key), self->indexForKey(ranges[1][0].key));
+			res.emplace_back(indexForKey(ranges[0][0].key), indexForKey(ranges[1][0].key));
 		}
 
 		ASSERT(res.size() == boundaries.size() - 1);
 		co_return res;
 	}
 
-	static Future<Void> updateServerShards(Database cx, SkewedReadWriteWorkload* self) {
+	Future<Void> updateServerShards(Database cx) {
 		RangeResult serverList;
 		RangeResult range;
 		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
@@ -114,16 +112,16 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 			co_await tr->onError(err);
 		}
 		// decode server interfaces
-		self->serverInterfaces.clear();
+		serverInterfaces.clear();
 		for (int i = 0; i < serverList.size(); i++) {
 			auto ssi = decodeServerListValue(serverList[i].value);
-			self->serverInterfaces.emplace(ssi.id(), ssi);
+			serverInterfaces.emplace(ssi.id(), ssi);
 		}
 		// clear self->serverShards
-		self->serverShards.clear();
+		serverShards.clear();
 
 		// leftEdge < workloadBegin < workloadEnd
-		Key workloadBegin = self->keyForIndex(0), workloadEnd = self->keyForIndex(self->nodeCount);
+		Key workloadBegin = keyForIndex(0), workloadEnd = keyForIndex(nodeCount);
 		Key leftEdge(allKeys.begin);
 		std::vector<UID> leftServer; // left server owns the range [leftEdge, workloadBegin)
 		KeyRangeRef workloadRange(workloadBegin, workloadEnd);
@@ -157,7 +155,7 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 		// deep count because wait below will destruct workloadEnd
 		keyBegins.push_back_deep(keyBegins.arena(), workloadEnd);
 
-		IndexRangeVec indexShards = co_await convertKeyBoundaryToIndexShard(cx, self, keyBegins);
+		IndexRangeVec indexShards = co_await convertKeyBoundaryToIndexShard(cx, keyBegins);
 		ASSERT(beginServers.size() == indexShards.size());
 		// sort shard begin idx
 		// build self->serverShards, starting from the left shard
@@ -171,7 +169,7 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 		}
 		// self->serverShards is ordered by UID
 		for (auto it : serverShards) {
-			self->serverShards.emplace_back(it);
+			this->serverShards.emplace_back(it);
 		}
 		//		if (self->clientId == 0) {
 		//			self->debugPrintServerShards();
@@ -210,14 +208,14 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 		if (enableReadLatencyLogging)
 			clients.push_back(tracePeriodically());
 
-		co_await updateServerShards(cx, this);
+		co_await updateServerShards(cx);
 		for (currentHotRound = 0; currentHotRound < skewRound; ++currentHotRound) {
 			setHotServers();
 			startReadWriteClients(cx, clients);
 			co_await timeout(waitForAll(clients), testDuration / skewRound, Void());
 			clients.clear();
 			co_await delay(5.0);
-			co_await updateServerShards(cx, this);
+			co_await updateServerShards(cx);
 		}
 	}
 

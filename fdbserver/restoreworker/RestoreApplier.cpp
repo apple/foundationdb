@@ -24,12 +24,12 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/BackupAgent.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/restoreworker/RestoreCommon.h"
-#include "fdbserver/core/RestoreUtil.h"
+#include "fdbserver/restoreworker/RestoreUtil.h"
 #include "RestoreRoleCommon.h"
 #include "RestoreApplier.h"
 
@@ -45,7 +45,7 @@ static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 void handleUpdateRateRequest(RestoreUpdateRateRequest req, Reference<RestoreApplierData> self);
 
 Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int nodeIndex, Database cx) {
-	Reference<RestoreApplierData> self = makeReference<RestoreApplierData>(applierInterf.id(), nodeIndex);
+	auto self = makeReference<RestoreApplierData>(applierInterf.id(), nodeIndex);
 	ActorCollection actors(false);
 	Future<Void> exitRole = Never();
 

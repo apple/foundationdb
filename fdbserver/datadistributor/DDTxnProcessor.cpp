@@ -20,7 +20,7 @@
 
 #include "fdbserver/datadistributor/DDTxnProcessor.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbserver/datadistributor/DataDistribution.h"
 #include "fdbclient/DatabaseContext.h"
 #include "flow/CoroUtils.h"
@@ -54,7 +54,7 @@ class DDTxnProcessorImpl {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			Error err;
 			try {
-				co_await store(res.servers, NativeAPI::getServerListAndProcessClasses(&tr));
+				res.servers = co_await NativeAPI::getServerListAndProcessClasses(&tr);
 				res.readVersion = tr.getReadVersion().get();
 				co_return res;
 			} catch (Error& e) {
@@ -298,7 +298,7 @@ class DDTxnProcessorImpl {
 	                                                                             std::vector<Optional<Key>> remoteDcIds,
 	                                                                             const DDEnabledState* ddEnabledState,
 	                                                                             SkipDDModeCheck skipDDModeCheck) {
-		Reference<InitialDataDistribution> result = makeReference<InitialDataDistribution>();
+		auto result = makeReference<InitialDataDistribution>();
 		Key beginKey = allKeys.begin;
 
 		bool succeeded{ false };
@@ -306,9 +306,8 @@ class DDTxnProcessorImpl {
 		Transaction tr(cx);
 
 		if (ddLargeTeamEnabled()) {
-			co_await store(result->userRangeConfig,
-			               DDConfiguration().userRangeConfig().getSnapshot(
-			                   SystemDBWriteLockedNow(cx.getReference()), allKeys.begin, allKeys.end));
+			result->userRangeConfig = co_await DDConfiguration().userRangeConfig().getSnapshot(
+			    SystemDBWriteLockedNow(cx.getReference()), allKeys.begin, allKeys.end);
 		}
 		std::map<UID, Optional<Key>> server_dc;
 		std::map<std::vector<UID>, std::pair<std::vector<UID>, std::vector<UID>>> team_cache;
@@ -707,7 +706,7 @@ class DDTxnProcessorImpl {
 	                                          UID serverID,
 	                                          Version addedVersion,
 	                                          Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure) {
-		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		while (true) {
 			Error err;
 			bool hasErr = false;

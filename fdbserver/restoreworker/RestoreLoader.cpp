@@ -240,7 +240,7 @@ Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf,
                                int nodeIndex,
                                Database cx,
                                RestoreControllerInterface ci) {
-	Reference<RestoreLoaderData> self = makeReference<RestoreLoaderData>(loaderInterf.id(), nodeIndex, ci);
+	auto self = makeReference<RestoreLoaderData>(loaderInterf.id(), nodeIndex, ci);
 	Future<Void> error = actorCollection(self->addActor.getFuture());
 	ActorCollection actors(false); // actors whose errors can be ignored
 	Future<Void> exitRole = Never();

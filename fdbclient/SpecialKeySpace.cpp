@@ -37,7 +37,7 @@
 #include "fdbclient/SpecialKeySpace.h"
 #include "flow/Arena.h"
 #include "flow/UnitTest.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/StatusClient.h"
 #include "flow/CoroUtils.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -1290,7 +1290,7 @@ Future<RangeResult> ExclusionInProgressActor(ReadYourWritesTransaction* ryw, Key
 		}
 	}
 
-	co_await success(fLogsKey);
+	co_await fLogsKey;
 	Optional<Standalone<StringRef>> value = fLogsKey.get();
 	ASSERT(value.present());
 	// TODO(jscheuermann): The logs key range doesn't hold any information about localities. This is a limitation

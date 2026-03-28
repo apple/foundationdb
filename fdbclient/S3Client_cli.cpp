@@ -43,7 +43,7 @@
 #include "fdbclient/IKnobCollection.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/versions.h"
-#include "fdbclient/S3Client.actor.h"
+#include "fdbclient/S3Client.h"
 #include "fdbclient/BackupAgent.h"
 #include "flow/Platform.h"
 #include "flow/ArgParseUtil.h"

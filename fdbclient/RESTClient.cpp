@@ -98,7 +98,7 @@ Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTClient> c
                                                          RESTUrl url,
                                                          std::set<unsigned int> successCodes) {
 
-	Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
+	auto req = makeReference<HTTP::OutgoingRequest>();
 	UnsentPacketQueue content;
 	req->data.content = &content;
 	req->data.contentLen = url.body.size();
@@ -144,14 +144,12 @@ Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTClient> c
 			    client->conectionPool->connect(connectPoolKey, url.connType.secure, client->knobs.max_connection_life);
 
 			// Finish connecting, do request
-			co_await store(rconn, timeoutError(frconn, client->knobs.connect_timeout));
+			rconn = co_await timeoutError(frconn, client->knobs.connect_timeout);
 			connectionEstablished = true;
 
 			remoteAddress = rconn.conn->getPeerAddress();
-			co_await store(
-			    r,
-			    timeoutError(HTTP::doRequest(rconn.conn, req, sendReceiveRate, &statsPtr->bytes_sent, sendReceiveRate),
-			                 reqTimeout));
+			r = co_await timeoutError(
+			    HTTP::doRequest(rconn.conn, req, sendReceiveRate, &statsPtr->bytes_sent, sendReceiveRate), reqTimeout);
 
 			// Since the response was parsed successfully (which is why we are here) reuse the connection unless we
 			// received the "Connection: close" header.
