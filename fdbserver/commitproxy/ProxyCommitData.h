@@ -1,5 +1,5 @@
 /*
- * ProxyCommitData.actor.h
+ * ProxyCommitData.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,11 +19,6 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_COMMITPROXY_PROXYCOMMITDATA_ACTOR_G_H)
-#define FDBSERVER_COMMITPROXY_PROXYCOMMITDATA_ACTOR_G_H
-#include "ProxyCommitData.actor.g.h"
-#elif !defined(FDBSERVER_COMMITPROXY_PROXYCOMMITDATA_ACTOR_H)
-#define FDBSERVER_COMMITPROXY_PROXYCOMMITDATA_ACTOR_H
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/RangeLock.h"
@@ -35,7 +30,6 @@
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/ResolverInterface.h"
 #include "flow/IRandom.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 class LogSystemDiskQueueAdapter;
 
@@ -407,6 +401,3 @@ private:
 	KeyRangeMap<RangeLockStateSet> coreMap;
 	ProxyCommitData* const pProxyCommitData;
 };
-
-#include "flow/unactorcompiler.h"
-#endif // FDBSERVER_COMMITPROXY_PROXYCOMMITDATA_ACTOR_H
