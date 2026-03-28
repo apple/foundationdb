@@ -31,7 +31,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/BulkDumpUtil.h"
-#include "fdbserver/core/BulkLoadUtil.actor.h"
+#include "fdbserver/core/BulkLoadUtil.h"
 #include "fdbserver/datadistributor/DataDistributor.h"
 #include "fdbserver/datadistributor/DDSharedContext.h"
 #include "fdbserver/datadistributor/DDTeamCollection.h"

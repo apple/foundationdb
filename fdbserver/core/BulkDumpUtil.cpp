@@ -24,7 +24,7 @@
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/S3Client.h"
 #include "fdbserver/core/BulkDumpUtil.h"
-#include "fdbserver/core/BulkLoadUtil.actor.h"
+#include "fdbserver/core/BulkLoadUtil.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/core/StorageMetrics.actor.h"

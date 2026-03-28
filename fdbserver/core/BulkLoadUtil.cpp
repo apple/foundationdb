@@ -1,5 +1,5 @@
 /*
- * BulkLoadUtils.actor.cpp
+ * BulkLoadUtil.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -22,7 +22,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/S3Client.h"
-#include "fdbserver/core/BulkLoadUtil.actor.h"
+#include "fdbserver/core/BulkLoadUtil.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/core/StorageMetrics.actor.h"

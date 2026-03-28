@@ -1,5 +1,5 @@
 /*
- * BulkLoadUtil.actor.h
+ * BulkLoadUtil.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -17,17 +17,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-#include <memory>
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CORE_BULKLOADUTIL_ACTOR_G_H)
-#define FDBSERVER_CORE_BULKLOADUTIL_ACTOR_G_H
-#include "fdbserver/core/BulkLoadUtil.actor.g.h"
-#elif !defined(FDBSERVER_CORE_BULKLOADUTIL_ACTOR_H)
-#define FDBSERVER_CORE_BULKLOADUTIL_ACTOR_H
 #pragma once
 
+#include <memory>
+
 #include "fdbclient/BulkLoading.h"
-#include "flow/actorcompiler.h" // has to be last include
 
 // Erase file folder
 void clearFileFolder(const std::string& folderPath, const UID& logId = UID(), bool ignoreError = false);
@@ -84,6 +78,3 @@ Future<BulkLoadManifestSet> getBulkLoadManifestMetadataFromEntry(
     BulkLoadTransportMethod transportMethod,
     std::string jobRoot,
     UID logId);
-
-#include "flow/unactorcompiler.h"
-#endif
