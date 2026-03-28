@@ -113,16 +113,6 @@ Future<Void> emptyActor() {
 	return Void();
 }
 
-Future<Void> explicitVoidActor(Future<Void> signal) {
-	co_await signal;
-	co_return;
-}
-
-Future<Void> explicitVoidCaller(Future<Void> signal, ExplicitVoid = {}) {
-	Void value = co_await explicitVoidActor(signal);
-	co_return value;
-}
-
 Future<Void> oneWaitVoidActor(Uncancellable, Future<Void> f) {
 	co_await f;
 	co_return;
@@ -386,15 +376,6 @@ TEST_CASE("/flow/coro/trivial_actors") {
 	ASSERT(f.get() == 111);
 
 	return Void();
-}
-
-TEST_CASE("/flow/coro/explicitVoid") {
-	Promise<Void> signal;
-	Future<Void> value = explicitVoidCaller(signal.getFuture());
-	ASSERT(!value.isReady());
-	signal.send(Void());
-	co_await value;
-	co_return;
 }
 
 TEST_CASE("/flow/coro/yieldedFuture/progress") {

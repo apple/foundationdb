@@ -181,7 +181,6 @@ struct fmt::formatter<Result> : fmt::formatter<std::string> {
 
 template <class T>
 Future<T> stopNetworkAfter(Future<T> what, ExplicitVoid = {}) {
-
 	T t = co_await what;
 	g_network->stop();
 	co_return t;
