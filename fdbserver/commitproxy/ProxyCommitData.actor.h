@@ -21,7 +21,7 @@
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_COMMITPROXY_PROXYCOMMITDATA_ACTOR_G_H)
 #define FDBSERVER_COMMITPROXY_PROXYCOMMITDATA_ACTOR_G_H
-#include "fdbserver/commitproxy/ProxyCommitData.actor.g.h"
+#include "ProxyCommitData.actor.g.h"
 #elif !defined(FDBSERVER_COMMITPROXY_PROXYCOMMITDATA_ACTOR_H)
 #define FDBSERVER_COMMITPROXY_PROXYCOMMITDATA_ACTOR_H
 
