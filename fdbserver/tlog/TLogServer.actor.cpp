@@ -435,9 +435,9 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		TagData(Tag tag,
 		        Version popped,
 		        IDiskQueue::location poppedLocation,
-		        bool nothingPersistent,
-		        bool poppedRecently,
-		        bool unpoppedRecovered)
+		        NothingPersistent nothingPersistent,
+		        PoppoedRecently poppedRecently,
+		        UnpoppedRecovered unpoppedRecovered)
 		  : nothingPersistent(nothingPersistent), poppedRecently(poppedRecently), popped(popped), persistentPopped(0),
 		    versionForPoppedLocation(0), poppedLocation(poppedLocation), unpoppedRecovered(unpoppedRecovered),
 		    tag(tag) {}
