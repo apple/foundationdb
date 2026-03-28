@@ -115,11 +115,11 @@ Future<Level> fetchSpaceLevel(Reference<IWorkerEventProvider const> workerEventP
 
 } // namespace
 
-void RealWorkerEventProvider::setWorkers(std::vector<WorkerDetails> workers) {
+void WorkerEventProvider::setWorkers(std::vector<WorkerDetails> workers) {
 	this->workers = std::move(workers);
 }
 
-Future<LatestWorkerEvents> RealWorkerEventProvider::getLatestEvents(std::string const& eventName) const {
+Future<LatestWorkerEvents> WorkerEventProvider::getLatestEvents(std::string const& eventName) const {
 	return latestEventOnWorkers(workers, eventName);
 }
 

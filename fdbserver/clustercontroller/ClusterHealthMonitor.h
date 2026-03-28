@@ -51,12 +51,12 @@ public:
 	virtual Future<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const = 0;
 };
 
-class RealWorkerEventProvider final : public IWorkerEventProvider, public ReferenceCounted<RealWorkerEventProvider> {
+class WorkerEventProvider final : public IWorkerEventProvider, public ReferenceCounted<WorkerEventProvider> {
 	std::vector<WorkerDetails> workers;
 
 public:
-	void addref() const override { ReferenceCounted<RealWorkerEventProvider>::addref(); }
-	void delref() const override { ReferenceCounted<RealWorkerEventProvider>::delref(); }
+	void addref() const override { ReferenceCounted<WorkerEventProvider>::addref(); }
+	void delref() const override { ReferenceCounted<WorkerEventProvider>::delref(); }
 	void setWorkers(std::vector<WorkerDetails> workers);
 	Future<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const override;
 };
