@@ -169,14 +169,8 @@ Future<Level> TLogSpaceFactor::fetchLevel(Reference<IWorkerEventProvider const> 
 	                                   "TLogSpaceFactorFetchFailed");
 }
 
-Monitor::Monitor()
-  : defaultWorkerEventProvider(makeReference<RealWorkerEventProvider>()),
-    workerEventProvider(defaultWorkerEventProvider) {}
-
-void Monitor::setWorkerEventProvider(Reference<IWorkerEventProvider const> workerEventProvider) {
-	this->workerEventProvider =
-	    workerEventProvider ? workerEventProvider : Reference<IWorkerEventProvider const>(defaultWorkerEventProvider);
-}
+Monitor::Monitor(Reference<IWorkerEventProvider const> workerEventProvider)
+  : workerEventProvider(workerEventProvider) {}
 
 Future<Void> Monitor::run() {
 	Future<Void> timer = Void();

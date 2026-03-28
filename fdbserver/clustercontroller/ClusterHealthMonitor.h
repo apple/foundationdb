@@ -103,12 +103,10 @@ public:
 
 class Monitor {
 	std::vector<std::unique_ptr<IFactor>> factors;
-	Reference<RealWorkerEventProvider> defaultWorkerEventProvider;
 	Reference<IWorkerEventProvider const> workerEventProvider;
 
 public:
-	Monitor();
-	void setWorkerEventProvider(Reference<IWorkerEventProvider const> workerEventProvider);
+	explicit Monitor(Reference<IWorkerEventProvider const>);
 	Future<Void> run();
 };
 
