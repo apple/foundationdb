@@ -50,6 +50,14 @@
 #include "flow/network.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+namespace {
+
+FDB_BOOLEAN_PARAM(NothingPersistent);
+FDB_BOOLEAN_PARAM(PoppedRecently);
+FDB_BOOLEAN_PARAM(UnpoppedRecovered);
+
+} // namespace
+
 struct TLogQueueEntryRef {
 	UID id;
 	Version version;
@@ -565,9 +573,9 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	// only callable after getTagData returns a null reference
 	Reference<TagData> createTagData(Tag tag,
 	                                 Version popped,
-	                                 bool nothingPersistent,
-	                                 bool poppedRecently,
-	                                 bool unpoppedRecovered) {
+	                                 NothingPersistent nothingPersistent,
+	                                 PoppedRecently poppedRecently,
+	                                 UnpoppedRecovered unpoppedRecovered) {
 		if (tag.locality != tagLocalityLogRouter && tag.locality != tagLocalityTxs && tag != txsTag && allTags.size() &&
 		    !allTags.contains(tag) && popped <= recoveredAt) {
 			popped = recoveredAt + 1;
@@ -1283,7 +1291,8 @@ ACTOR Future<Void> tLogPopCore(TLogData* self, Tag inputTag, Version to, Referen
 	state Tag tag(tagLocality, inputTag.id);
 	auto tagData = logData->getTagData(tag);
 	if (!tagData) {
-		tagData = logData->createTagData(tag, upTo, true, true, false);
+		tagData =
+		    logData->createTagData(tag, upTo, NothingPersistent::True, PoppedRecently::True, UnpoppedRecovered::False);
 	} else if (upTo > tagData->popped) {
 		tagData->popped = upTo;
 		tagData->poppedRecently = true;
@@ -1601,7 +1610,8 @@ void commitMessages(TLogData* self,
 			}
 			Reference<LogData::TagData> tagData = logData->getTagData(tag);
 			if (!tagData) {
-				tagData = logData->createTagData(tag, 0, true, true, false);
+				tagData = logData->createTagData(
+				    tag, 0, NothingPersistent::True, PoppedRecently::True, UnpoppedRecovered::False);
 			}
 
 			if (version >= tagData->popped) {
@@ -2563,7 +2573,7 @@ ACTOR Future<Void> initPersistentState(TLogData* self, Reference<LogData> logDat
 
 	for (auto tag : logData->allTags) {
 		ASSERT(!logData->getTagData(tag));
-		logData->createTagData(tag, 0, true, true, true);
+		logData->createTagData(tag, 0, NothingPersistent::True, PoppedRecently::True, UnpoppedRecovered::True);
 		updatePersistentPopped(self, logData, logData->getTagData(tag));
 	}
 
@@ -3432,7 +3442,8 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 				TraceEvent("TLogRestorePopped", logData->logId).detail("Tag", tag.toString()).detail("To", popped);
 				auto tagData = logData->getTagData(tag);
 				ASSERT(!tagData);
-				logData->createTagData(tag, popped, false, false, false);
+				logData->createTagData(
+				    tag, popped, NothingPersistent::False, PoppedRecently::False, UnpoppedRecovered::False);
 				logData->getTagData(tag)->persistentPopped = popped;
 			}
 		}
