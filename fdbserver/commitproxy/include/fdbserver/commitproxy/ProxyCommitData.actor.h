@@ -331,7 +331,7 @@ struct ProxyCommitData {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);
 	}
 
-	ApplyMetadataProxyData getApplyMetadataProxyData() {
+	ApplyMetadataProxyContext getApplyMetadataProxyContext() {
 		return { .dbgid = dbgid,
 			     .txnStateStore = txnStateStore,
 			     .vecBackupKeys = &vecBackupKeys,

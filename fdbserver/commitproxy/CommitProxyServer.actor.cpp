@@ -1042,7 +1042,7 @@ void applyMetadataEffect(CommitBatchContext* self) {
 
 			if (committed) {
 				applyMetadataMutations(SpanContext(),
-				                       self->pProxyCommitData->getApplyMetadataProxyData(),
+				                       self->pProxyCommitData->getApplyMetadataProxyContext(),
 				                       self->arena,
 				                       self->pProxyCommitData->logSystem,
 				                       self->resolution[0].stateMutations[versionIndex][transactionIndex].mutations,
@@ -1132,7 +1132,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 		    (!self->locked || trs[t].isLockAware())) {
 			self->commitCount++;
 			applyMetadataMutations(trs[t].spanContext,
-			                       pProxyCommitData->getApplyMetadataProxyData(),
+			                       pProxyCommitData->getApplyMetadataProxyContext(),
 			                       self->arena,
 			                       pProxyCommitData->logSystem,
 			                       trs[t].transaction.mutations,
@@ -2683,7 +2683,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		Arena arena;
 		bool confChanges;
 		applyMetadataMutations(SpanContext(),
-		                       pContext->pCommitData->getApplyMetadataProxyData(),
+		                       pContext->pCommitData->getApplyMetadataProxyContext(),
 		                       arena,
 		                       Reference<ILogSystem>(),
 		                       mutations,

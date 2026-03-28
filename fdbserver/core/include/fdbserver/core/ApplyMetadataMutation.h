@@ -47,7 +47,7 @@ struct ApplyMutationsData {
 	Reference<KeyRangeMap<Version>> keyVersion;
 };
 
-struct ApplyMetadataProxyData {
+struct ApplyMetadataProxyContext {
 	UID dbgid;
 	IKeyValueStore* txnStateStore = nullptr;
 	KeyRangeMap<std::set<Key>>* vecBackupKeys = nullptr;
@@ -117,7 +117,7 @@ Reference<StorageInfo> getStorageInfo(UID id,
                                       IKeyValueStore* txnStateStore);
 
 void applyMetadataMutations(SpanContext const& spanContext,
-                            const ApplyMetadataProxyData& proxyCommitData,
+                            const ApplyMetadataProxyContext& proxyMetadata,
                             Arena& arena,
                             Reference<ILogSystem> logSystem,
                             const VectorRef<MutationRef>& mutations,
