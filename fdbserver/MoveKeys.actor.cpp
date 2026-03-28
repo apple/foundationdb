@@ -3173,6 +3173,8 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 
 				wait(tr.commit());
 
+				wait(delay(SERVER_KNOBS->MOVEKEYS_SUCCESS_DELAY));
+
 				TraceEvent(sevDm, "CleanUpDataMoveCommitted", dataMoveId)
 				    .detail("DataMoveID", dataMoveId)
 				    .detail("Range", range);
@@ -3196,6 +3198,8 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 					    .error(lastError)
 					    .detail("DataMoveRange", range.toString());
 				}
+
+				wait(delay(SERVER_KNOBS->MOVEKEYS_RETRIABLE_ERROR_DELAY));
 			}
 		}
 	} catch (Error& e) {

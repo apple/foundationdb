@@ -328,6 +328,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_SHARD_METRICS_TIMEOUT,                             60.0 ); if( randomize && BUGGIFY ) DD_SHARD_METRICS_TIMEOUT = 0.1;
 	init( DD_LOCATION_CACHE_SIZE,                            2000000 ); if( randomize && BUGGIFY ) DD_LOCATION_CACHE_SIZE = 3;
 	init( MOVEKEYS_LOCK_POLLING_DELAY,                           5.0 );
+	init( MOVEKEYS_SUCCESS_DELAY,                                  0 ); if( randomize && BUGGIFY ) MOVEKEYS_SUCCESS_DELAY = deterministicRandom()->randomInt(1, 3);
+	init( MOVEKEYS_RETRIABLE_ERROR_DELAY,                          0 ); if( randomize && BUGGIFY ) MOVEKEYS_RETRIABLE_ERROR_DELAY = deterministicRandom()->randomInt(1, 60);
 	init( DEBOUNCE_RECRUITING_DELAY,                             5.0 );
 	init( DD_FAILURE_TIME,                                       1.0 ); if( randomize && BUGGIFY ) DD_FAILURE_TIME = 10.0;
 	init( DD_ZERO_HEALTHY_TEAM_DELAY,                            1.0 );
