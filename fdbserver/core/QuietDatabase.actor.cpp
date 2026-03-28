@@ -336,13 +336,11 @@ int64_t extractMaxQueueSize(const std::vector<Future<TraceEventFields>>& message
 Future<TraceEventFields> getStorageMetricsTimeout(UID storage, WorkerInterface wi, Version version) {
 	int retries = 0;
 	while (true) {
-		++retries;
-		Future<TraceEventFields> eventLogReply =
+		Future<TraceEventFields> eventLogReplyFuture =
 		    wi.eventLogRequest.getReply(EventLogRequest(StringRef(storage.toString() + "/StorageMetrics")));
-		Future<Void> timeout = delay(30.0);
-		auto res = co_await race(eventLogReply, timeout);
-		if (res.index() == 0) {
-			TraceEventFields storageMetrics = std::get<0>(std::move(res));
+		auto eventLogReply = co_await timeout(eventLogReplyFuture, 30.0);
+		if (eventLogReply.present()) {
+			TraceEventFields const& storageMetrics = eventLogReply.get();
 			try {
 				if (version == invalidVersion || getDurableVersion(storageMetrics) >= static_cast<int64_t>(version)) {
 					co_return storageMetrics;
@@ -361,7 +359,7 @@ Future<TraceEventFields> getStorageMetricsTimeout(UID storage, WorkerInterface w
 			    .detail("Storage", storage);
 			throw timed_out();
 		}
-		if (retries > 30) {
+		if (++retries > 30) {
 			TraceEvent("QuietDatabaseFailure")
 			    .detail("Reason", "Could not fetch StorageMetrics x30")
 			    .detail("Storage", storage)
