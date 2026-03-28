@@ -104,22 +104,26 @@ void WriteMap::mutate(KeyRef key, MutationRef::Type operation, ValueRef param, b
 			it.tree.clear();
 			OperationStack op(RYWMutation(Optional<StringRef>(), MutationRef::SetValue));
 			coalesceOver(op, RYWMutation(param, operation), *arena);
-			PTreeImpl::insert(
-			    writes,
-			    ver,
-			    WriteMapEntry(
-			        key, std::move(op), true, following_conflict, is_conflict, following_unreadable, is_unreadable));
+			PTreeImpl::insert(writes,
+			                  ver,
+			                  WriteMapEntry(key,
+			                                std::move(op),
+			                                FollowingKeysCleared::True,
+			                                FollowingKeysConflict(following_conflict),
+			                                IsConflict(is_conflict),
+			                                FollowingKeysUnreadable(following_unreadable),
+			                                IsUnreadable(is_unreadable)));
 		} else {
 			it.tree.clear();
 			PTreeImpl::insert(writes,
 			                  ver,
 			                  WriteMapEntry(key,
 			                                OperationStack(RYWMutation(param, operation)),
-			                                is_cleared,
-			                                following_conflict,
-			                                is_conflict,
-			                                following_unreadable,
-			                                is_unreadable));
+			                                FollowingKeysCleared(is_cleared),
+			                                FollowingKeysConflict(following_conflict),
+			                                IsConflict(is_conflict),
+			                                FollowingKeysUnreadable(following_unreadable),
+			                                IsUnreadable(is_unreadable)));
 		}
 	} else {
 		if (!it.is_unreadable() &&
@@ -130,11 +134,11 @@ void WriteMap::mutate(KeyRef key, MutationRef::Type operation, ValueRef param, b
 			                  ver,
 			                  WriteMapEntry(key,
 			                                OperationStack(RYWMutation(param, operation)),
-			                                is_cleared,
-			                                following_conflict,
-			                                is_conflict,
-			                                following_unreadable,
-			                                is_unreadable));
+			                                FollowingKeysCleared(is_cleared),
+			                                FollowingKeysConflict(following_conflict),
+			                                IsConflict(is_conflict),
+			                                FollowingKeysUnreadable(following_unreadable),
+			                                IsUnreadable(is_unreadable)));
 		} else {
 			WriteMapEntry e(it.entry());
 			e.is_conflict = is_conflict;
@@ -192,14 +196,26 @@ void WriteMap::clear(KeyRangeRef keys, bool addConflict) {
 	                  ExtStringRef(keys.end, end_coalesce_clear ? 1 : 0));
 
 	if (insert_begin)
-		PTreeImpl::insert(writes, ver, WriteMapEntry(keys.begin, OperationStack(), true, true, true, false, false));
+		PTreeImpl::insert(writes,
+		                  ver,
+		                  WriteMapEntry(keys.begin,
+		                                OperationStack(),
+		                                FollowingKeysCleared::True,
+		                                FollowingKeysConflict::True,
+		                                IsConflict::True,
+		                                FollowingKeysUnreadable::False,
+		                                IsUnreadable::False));
 
 	if (insert_end)
-		PTreeImpl::insert(
-		    writes,
-		    ver,
-		    WriteMapEntry(
-		        keys.end, OperationStack(), end_cleared, end_conflict, end_conflict, end_unreadable, end_unreadable));
+		PTreeImpl::insert(writes,
+		                  ver,
+		                  WriteMapEntry(keys.end,
+		                                OperationStack(),
+		                                FollowingKeysCleared(end_cleared),
+		                                FollowingKeysConflict(end_conflict),
+		                                IsConflict(end_conflict),
+		                                FollowingKeysUnreadable(end_unreadable),
+		                                IsUnreadable(end_unreadable)));
 }
 
 void WriteMap::addUnmodifiedAndUnreadableRange(KeyRangeRef keys) {
@@ -231,14 +247,26 @@ void WriteMap::addUnmodifiedAndUnreadableRange(KeyRangeRef keys) {
 	                  ExtStringRef(keys.end, end_coalesce_unmodified ? 1 : 0));
 
 	if (insert_begin)
-		PTreeImpl::insert(writes, ver, WriteMapEntry(keys.begin, OperationStack(), false, false, false, true, true));
+		PTreeImpl::insert(writes,
+		                  ver,
+		                  WriteMapEntry(keys.begin,
+		                                OperationStack(),
+		                                FollowingKeysCleared::False,
+		                                FollowingKeysConflict::False,
+		                                IsConflict::False,
+		                                FollowingKeysUnreadable::True,
+		                                IsUnreadable::True));
 
 	if (insert_end)
-		PTreeImpl::insert(
-		    writes,
-		    ver,
-		    WriteMapEntry(
-		        keys.end, OperationStack(), end_cleared, end_conflict, end_conflict, end_unreadable, end_unreadable));
+		PTreeImpl::insert(writes,
+		                  ver,
+		                  WriteMapEntry(keys.end,
+		                                OperationStack(),
+		                                FollowingKeysCleared(end_cleared),
+		                                FollowingKeysConflict(end_conflict),
+		                                IsConflict(end_conflict),
+		                                FollowingKeysUnreadable(end_unreadable),
+		                                IsUnreadable(end_unreadable)));
 }
 
 void WriteMap::addConflictRange(KeyRangeRef keys) {
@@ -256,11 +284,11 @@ void WriteMap::addConflictRange(KeyRangeRef keys) {
 		}
 		insertions.push_back(WriteMapEntry(keys.begin,
 		                                   it.is_operation() ? OperationStack(it.op()) : OperationStack(),
-		                                   it.entry().following_keys_cleared,
-		                                   true,
-		                                   true,
-		                                   it.entry().following_keys_unreadable,
-		                                   it.entry().is_unreadable));
+		                                   FollowingKeysCleared(it.entry().following_keys_cleared),
+		                                   FollowingKeysConflict::True,
+		                                   IsConflict::True,
+		                                   FollowingKeysUnreadable(it.entry().following_keys_unreadable),
+		                                   IsUnreadable(it.entry().is_unreadable)));
 	}
 
 	while (it.endKey() < keys.end) {
@@ -282,8 +310,13 @@ void WriteMap::addConflictRange(KeyRangeRef keys) {
 		++it;
 
 		if (!it.keyAtBegin() || it.beginKey() != keys.end) {
-			insertions.push_back(
-			    WriteMapEntry(keys.end, OperationStack(), isCleared, false, false, followingUnreadable, isUnreadable));
+			insertions.push_back(WriteMapEntry(keys.end,
+			                                   OperationStack(),
+			                                   FollowingKeysCleared(isCleared),
+			                                   FollowingKeysConflict::False,
+			                                   IsConflict::False,
+			                                   FollowingKeysUnreadable(followingUnreadable),
+			                                   IsUnreadable(isUnreadable)));
 		}
 	}
 
@@ -577,20 +610,28 @@ void WriteMap::clearNoConflict(KeyRangeRef keys) {
 	                  ExtStringRef(keys.end, end_coalesce_clear ? 1 : 0));
 
 	for (int i = 0; i < conflict_ranges.size(); i++) {
-		PTreeImpl::insert(
-		    writes,
-		    ver,
-		    WriteMapEntry(
-		        conflict_ranges[i].toArenaOrRef(*arena), OperationStack(), true, conflicted, conflicted, false, false));
+		PTreeImpl::insert(writes,
+		                  ver,
+		                  WriteMapEntry(conflict_ranges[i].toArenaOrRef(*arena),
+		                                OperationStack(),
+		                                FollowingKeysCleared::True,
+		                                FollowingKeysConflict(conflicted),
+		                                IsConflict(conflicted),
+		                                FollowingKeysUnreadable::False,
+		                                IsUnreadable::False));
 		conflicted = !conflicted;
 	}
 
 	ASSERT(conflicted != lastConflicted);
 
 	if (insert_end)
-		PTreeImpl::insert(
-		    writes,
-		    ver,
-		    WriteMapEntry(
-		        keys.end, OperationStack(), end_cleared, end_conflict, end_conflict, end_unreadable, end_unreadable));
+		PTreeImpl::insert(writes,
+		                  ver,
+		                  WriteMapEntry(keys.end,
+		                                OperationStack(),
+		                                FollowingKeysCleared(end_cleared),
+		                                FollowingKeysConflict(end_conflict),
+		                                IsConflict(end_conflict),
+		                                FollowingKeysUnreadable(end_unreadable),
+		                                IsUnreadable(end_unreadable)));
 }
