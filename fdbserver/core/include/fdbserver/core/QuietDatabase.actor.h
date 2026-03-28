@@ -19,18 +19,12 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CORE_QUIETDATABASE_ACTOR_G_H)
-#define FDBSERVER_CORE_QUIETDATABASE_ACTOR_G_H
-#include "fdbserver/core/QuietDatabase.actor.g.h"
-#elif !defined(FDBSERVER_CORE_QUIETDATABASE_ACTOR_H)
-#define FDBSERVER_CORE_QUIETDATABASE_ACTOR_H
 
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 Future<int64_t> getDataInFlight(Database cx, Reference<AsyncVar<struct ServerDBInfo> const> dbInfo);
 Future<std::pair<int64_t, int64_t>> getTLogQueueInfo(Database cx,
@@ -44,7 +38,7 @@ Future<int64_t> getDataDistributionQueueSize(Database cx,
 Future<bool> getTeamCollectionValid(Database cx, WorkerInterface distributorWorker);
 Future<bool> getTeamCollectionValid(Database cx, Reference<AsyncVar<struct ServerDBInfo> const> dbInfo);
 Future<std::vector<StorageServerInterface>> getStorageServers(Database cx, bool use_system_priority = false);
-ACTOR Future<std::vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo, int flags = 0);
+Future<std::vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo, int flags = 0);
 Future<WorkerInterface> getMasterWorker(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 Future<Void> repairDeadDatacenter(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo, std::string context);
 Future<Void> reconfigureAfter(Database cx,
@@ -59,7 +53,3 @@ Future<std::vector<WorkerInterface>> getCoordWorkers(Database cx, Reference<Asyn
 
 Future<Void> enableConsistencyScanInSim(Database db);
 Future<Void> disableConsistencyScanInSim(Database db, bool waitForCompletion);
-
-#include "flow/unactorcompiler.h"
-
-#endif

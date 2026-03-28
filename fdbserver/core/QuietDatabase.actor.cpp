@@ -40,16 +40,14 @@
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbclient/ManagementAPI.h"
 #include "flow/CoroUtils.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR Future<std::vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo, int flags) {
-	loop {
-		choose {
-			when(std::vector<WorkerDetails> w = wait(brokenPromiseToNever(
-			         dbInfo->get().clusterInterface.getWorkers.getReply(GetWorkersRequest(flags))))) {
-				return w;
-			}
-			when(wait(dbInfo->onChange())) {}
+Future<std::vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo, int flags) {
+	while (true) {
+		auto res = co_await race(
+		    brokenPromiseToNever(dbInfo->get().clusterInterface.getWorkers.getReply(GetWorkersRequest(flags))),
+		    dbInfo->onChange());
+		if (res.index() == 0) {
+			co_return std::get<0>(std::move(res));
 		}
 	}
 }
@@ -335,36 +333,33 @@ int64_t extractMaxQueueSize(const std::vector<Future<TraceEventFields>>& message
 }
 
 // Timeout wrapper when getting the storage metrics. This will do some additional tracing
-ACTOR Future<TraceEventFields> getStorageMetricsTimeout(UID storage, WorkerInterface wi, Version version) {
-	state int retries = 0;
-	loop {
+Future<TraceEventFields> getStorageMetricsTimeout(UID storage, WorkerInterface wi, Version version) {
+	int retries = 0;
+	while (true) {
 		++retries;
-		state Future<TraceEventFields> eventLogReply =
+		Future<TraceEventFields> eventLogReply =
 		    wi.eventLogRequest.getReply(EventLogRequest(StringRef(storage.toString() + "/StorageMetrics")));
-		state Future<Void> timeout = delay(30.0);
-		state TraceEventFields storageMetrics;
-		choose {
-			when(wait(store(storageMetrics, eventLogReply))) {
-				try {
-					if (version == invalidVersion ||
-					    getDurableVersion(storageMetrics) >= static_cast<int64_t>(version)) {
-						return storageMetrics;
-					}
-				} catch (Error& e) {
-					TraceEvent("QuietDatabaseFailure")
-					    .error(e)
-					    .detail("Reason", "Failed to extract DurableVersion from StorageMetrics")
-					    .detail("SSID", storage)
-					    .detail("StorageMetrics", storageMetrics.toString());
-					throw;
+		Future<Void> timeout = delay(30.0);
+		auto res = co_await race(eventLogReply, timeout);
+		if (res.index() == 0) {
+			TraceEventFields storageMetrics = std::get<0>(std::move(res));
+			try {
+				if (version == invalidVersion || getDurableVersion(storageMetrics) >= static_cast<int64_t>(version)) {
+					co_return storageMetrics;
 				}
-			}
-			when(wait(timeout)) {
+			} catch (Error& e) {
 				TraceEvent("QuietDatabaseFailure")
-				    .detail("Reason", "Could not fetch StorageMetrics")
-				    .detail("Storage", storage);
-				throw timed_out();
+				    .error(e)
+				    .detail("Reason", "Failed to extract DurableVersion from StorageMetrics")
+				    .detail("SSID", storage)
+				    .detail("StorageMetrics", storageMetrics.toString());
+				throw;
 			}
+		} else {
+			TraceEvent("QuietDatabaseFailure")
+			    .detail("Reason", "Could not fetch StorageMetrics")
+			    .detail("Storage", storage);
+			throw timed_out();
 		}
 		if (retries > 30) {
 			TraceEvent("QuietDatabaseFailure")
@@ -373,7 +368,7 @@ ACTOR Future<TraceEventFields> getStorageMetricsTimeout(UID storage, WorkerInter
 			    .detail("Version", version);
 			throw timed_out();
 		}
-		wait(delay(1.0));
+		co_await delay(1.0);
 	}
 }
 
