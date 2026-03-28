@@ -130,6 +130,29 @@ LatestWorkerEvents makeLatestWorkerEvents(TraceEventFields traceEventFields) {
 	return LatestWorkerEvents(std::make_pair(std::move(events), std::set<std::string>{}));
 }
 
+class MovingDataMetricsBuilder {
+	TraceEventFields traceEventFields;
+
+	MovingDataMetricsBuilder& setField(char const* fieldName, int64_t value) {
+		traceEventFields.addField(fieldName, std::to_string(value));
+		return *this;
+	}
+
+public:
+	MovingDataMetricsBuilder() {
+		inQueue(0).inFlight(0).priorityTeamUnhealthy(0).priorityTeam2Left(0).priorityTeam1Left(0).priorityTeam0Left(0);
+	}
+
+	MovingDataMetricsBuilder& inQueue(int64_t value) { return setField("InQueue", value); }
+	MovingDataMetricsBuilder& inFlight(int64_t value) { return setField("InFlight", value); }
+	MovingDataMetricsBuilder& priorityTeamUnhealthy(int64_t value) { return setField("PriorityTeamUnhealthy", value); }
+	MovingDataMetricsBuilder& priorityTeam2Left(int64_t value) { return setField("PriorityTeam2Left", value); }
+	MovingDataMetricsBuilder& priorityTeam1Left(int64_t value) { return setField("PriorityTeam1Left", value); }
+	MovingDataMetricsBuilder& priorityTeam0Left(int64_t value) { return setField("PriorityTeam0Left", value); }
+
+	TraceEventFields build() const { return traceEventFields; }
+};
+
 } // namespace
 
 void WorkerEventProvider::setWorkers(std::vector<WorkerDetails> workers) {
@@ -184,6 +207,53 @@ Future<Level> TLogSpaceFactor::fetchLevel(Reference<IWorkerEventProvider const> 
 	                                   interventionThreshold,
 	                                   criticalInterventionThreshold,
 	                                   "TLogSpaceFactorFetchFailed");
+}
+
+std::string_view StorageReplicationFactor::getName() const {
+	return "StorageReplication";
+}
+
+Future<Level> StorageReplicationFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) {
+	auto eventsAndErrors = co_await workerEventProvider->getLatestEvents("MovingData");
+	if (!eventsAndErrors.present()) {
+		co_return Level::METRICS_MISSING;
+	}
+
+	auto const& [events, _errors] = eventsAndErrors.get();
+	if (events.empty()) {
+		co_return Level::METRICS_MISSING;
+	}
+
+	try {
+		int64_t queuedOrInFlightRepairMoves = 0;
+		int64_t zeroReplicaTeams = 0;
+		for (auto const& [address, traceEvent] : events) {
+			(void)address;
+			int64_t inQueue = traceEvent.getInt64("InQueue");
+			int64_t inFlight = traceEvent.getInt64("InFlight");
+			int64_t priorityTeamUnhealthy = traceEvent.getInt64("PriorityTeamUnhealthy");
+			int64_t priorityTeam2Left = traceEvent.getInt64("PriorityTeam2Left");
+			int64_t priorityTeam1Left = traceEvent.getInt64("PriorityTeam1Left");
+			int64_t priorityTeam0Left = traceEvent.getInt64("PriorityTeam0Left");
+
+			zeroReplicaTeams += priorityTeam0Left;
+			if (inQueue > 0 || inFlight > 0) {
+				queuedOrInFlightRepairMoves +=
+				    priorityTeamUnhealthy + priorityTeam2Left + priorityTeam1Left + priorityTeam0Left;
+			}
+		}
+
+		if (zeroReplicaTeams > 0) {
+			co_return Level::OUTAGE;
+		}
+		if (queuedOrInFlightRepairMoves > 0) {
+			co_return Level::SELF_HEALING;
+		}
+		co_return Level::HEALTHY;
+	} catch (Error& e) {
+		TraceEvent(SevWarnAlways, "StorageReplicationFactorFetchFailed").error(e);
+		co_return Level::METRICS_MISSING;
+	}
 }
 
 Monitor::Monitor(std::vector<std::unique_ptr<IFactor>>&& factors,
@@ -274,6 +344,35 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/TLogSpaceFactor") {
 	ASSERT_EQ(level, Level::CRITICAL_INTERVENTION_REQUIRED);
 
 	provider->setLatestEvents("TLogMetrics", LatestWorkerEvents());
+	level = co_await factor.fetchLevel(provider);
+	ASSERT_EQ(level, Level::METRICS_MISSING);
+}
+
+TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/StorageReplicationFactor") {
+	StorageReplicationFactor factor;
+	auto provider = makeReference<FakeWorkerEventProvider>();
+	Level level;
+
+	provider->setLatestEvents("MovingData", makeLatestWorkerEvents(MovingDataMetricsBuilder().build()));
+	level = co_await factor.fetchLevel(provider);
+	ASSERT_EQ(level, Level::HEALTHY);
+
+	provider->setLatestEvents(
+	    "MovingData", makeLatestWorkerEvents(MovingDataMetricsBuilder().inQueue(1).priorityTeamUnhealthy(1).build()));
+	level = co_await factor.fetchLevel(provider);
+	ASSERT_EQ(level, Level::SELF_HEALING);
+
+	provider->setLatestEvents(
+	    "MovingData", makeLatestWorkerEvents(MovingDataMetricsBuilder().inFlight(1).priorityTeam1Left(1).build()));
+	level = co_await factor.fetchLevel(provider);
+	ASSERT_EQ(level, Level::SELF_HEALING);
+
+	provider->setLatestEvents(
+	    "MovingData", makeLatestWorkerEvents(MovingDataMetricsBuilder().inQueue(1).priorityTeam0Left(1).build()));
+	level = co_await factor.fetchLevel(provider);
+	ASSERT_EQ(level, Level::OUTAGE);
+
+	provider->setLatestEvents("MovingData", LatestWorkerEvents());
 	level = co_await factor.fetchLevel(provider);
 	ASSERT_EQ(level, Level::METRICS_MISSING);
 }
