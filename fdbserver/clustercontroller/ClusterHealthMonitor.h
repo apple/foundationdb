@@ -1,0 +1,76 @@
+/*
+ * ClusterHealthMonitor.h
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#pragma once
+
+#include <compare>
+#include <cstdint>
+#include <memory>
+#include <string_view>
+#include <vector>
+
+#include "fdbserver/core/WorkerInterface.actor.h"
+#include "flow/flow.h"
+
+namespace cluster_health {
+
+enum class Level {
+	OUTAGE,
+	CRITICAL_INTERVENTION_REQUIRED,
+	INTERVENTION_REQUIRED,
+	SELF_HEALING,
+	METRICS_MISSING,
+	HEALTHY
+};
+
+uint8_t levelToInt(Level level);
+std::strong_ordering operator<=>(Level lhs, Level rhs);
+std::string_view levelToStr(Level level);
+
+class IFactor {
+public:
+	virtual ~IFactor() = default;
+	virtual std::string_view getName() const = 0;
+
+	// SAFETY: Ensure that workers outlives this coroutine
+	virtual Future<Level> fetchLevel(std::vector<WorkerDetails> const& workers) = 0;
+};
+
+class StorageSpaceFactor : public IFactor {
+	double interventionThreshold;
+	double criticalInterventionThreshold;
+
+public:
+	StorageSpaceFactor(double interventionThreshold, double criticalInterventionThreshold);
+
+	std::string_view getName() const override;
+	Future<Level> fetchLevel(std::vector<WorkerDetails> const& workers) override;
+};
+
+class Monitor {
+	std::vector<std::unique_ptr<IFactor>> factors;
+	std::vector<WorkerDetails> workers;
+
+public:
+	void setWorkers(std::vector<WorkerDetails> workers);
+	Future<Void> run();
+};
+
+} // namespace cluster_health
