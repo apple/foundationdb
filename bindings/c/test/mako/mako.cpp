@@ -1654,7 +1654,14 @@ void printStats(Arguments const& args, WorkflowStatistics const* stats, double c
 	prev = current;
 }
 
-void printStatsHeader(Arguments const& args, bool show_commit, bool is_first_header_empty, bool show_op_stats) {
+FDB_BOOLEAN_PARAM(ShowCommit);
+FDB_BOOLEAN_PARAM(IsFirstHeaderEmpty);
+FDB_BOOLEAN_PARAM(ShowOpStats);
+
+void printStatsHeader(Arguments const& args,
+                      ShowCommit show_commit,
+                      IsFirstHeaderEmpty is_first_header_empty,
+                      ShowOpStats show_op_stats) {
 	/* header */
 	if (is_first_header_empty)
 		putTitle("");
@@ -1709,7 +1716,7 @@ void printWorkerStats(WorkflowStatistics& final_stats, Arguments args, FILE* fp,
 	}
 
 	fmt::print("Latency (us)");
-	printStatsHeader(args, true, false, true);
+	printStatsHeader(args, ShowCommit::True, IsFirstHeaderEmpty::False, ShowOpStats::True);
 
 	/* Total Samples */
 	putTitle("Samples");
@@ -2057,7 +2064,7 @@ void printReport(Arguments const& args,
 	}
 
 	/* per-op stats */
-	printStatsHeader(args, true, true, false);
+	printStatsHeader(args, ShowCommit::True, IsFirstHeaderEmpty::True, ShowOpStats::False);
 
 	/* OPS */
 	putTitle("Total OPS");
@@ -2183,7 +2190,7 @@ int statsProcessMain(Arguments const& args,
 	}
 
 	if (args.verbose >= VERBOSE_DEFAULT)
-		printStatsHeader(args, false, true, false);
+		printStatsHeader(args, ShowCommit::False, IsFirstHeaderEmpty::True, ShowOpStats::False);
 
 	FILE* fp = nullptr;
 	if (args.json_output_path[0] != '\0') {
