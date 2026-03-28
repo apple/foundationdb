@@ -33,11 +33,11 @@
 
 struct ClusterControllerFullInterface;
 
-ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> ccr,
-                                     Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
-                                     Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
-                                     LocalityData locality,
-                                     Reference<AsyncVar<Optional<UID>>> clusterId);
+Future<Void> clusterController(Reference<IClusterConnectionRecord> ccr,
+                               Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
+                               Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
+                               LocalityData locality,
+                               Reference<AsyncVar<Optional<UID>>> clusterId);
 
 #include "flow/unactorcompiler.h"
 #endif
