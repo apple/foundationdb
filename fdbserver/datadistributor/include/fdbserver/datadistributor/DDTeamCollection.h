@@ -134,6 +134,10 @@ struct TSSPairState : ReferenceCounted<TSSPairState>, NonCopyable {
 	Future<Void> waitComplete() const { return complete.getFuture(); }
 };
 
+FDB_BOOLEAN_PARAM(IsFailed);
+FDB_BOOLEAN_PARAM(IsUndesired);
+FDB_BOOLEAN_PARAM(IsWiggling);
+
 class ServerStatus {
 public:
 	bool isWiggling;
@@ -144,8 +148,9 @@ public:
 	LocalityData locality;
 	ServerStatus()
 	  : isWiggling(false), isFailed(true), isUndesired(false), isWrongConfiguration(false), initialized(false) {}
-	ServerStatus(LocalityData const& locality) : ServerStatus(false, false, false, locality) {}
-	ServerStatus(bool isFailed, bool isUndesired, bool isWiggling, LocalityData const& locality)
+	ServerStatus(LocalityData const& locality)
+	  : ServerStatus(IsFailed::False, IsUndesired::False, IsWiggling::False, locality) {}
+	ServerStatus(IsFailed isFailed, IsUndesired isUndesired, IsWiggling isWiggling, LocalityData const& locality)
 	  : isWiggling(isWiggling), isFailed(isFailed), isUndesired(isUndesired), isWrongConfiguration(false),
 	    initialized(true), locality(locality) {}
 	bool isUnhealthy() const { return isFailed || isUndesired; }
