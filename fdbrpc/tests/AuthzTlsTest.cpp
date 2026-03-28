@@ -180,16 +180,11 @@ struct fmt::formatter<Result> : fmt::formatter<std::string> {
 };
 
 template <class T>
-Future<T> stopNetworkAfter(Future<T> what) {
-	if constexpr (std::is_same_v<T, Void>) {
-		co_await what;
-		g_network->stop();
-		co_return;
-	} else {
-		T t = co_await what;
-		g_network->stop();
-		co_return t;
-	}
+Future<T> stopNetworkAfter(Future<T> what, ExplicitVoid = {}) {
+
+	T t = co_await what;
+	g_network->stop();
+	co_return t;
 }
 
 // Reflective struct containing information about the requester from a server PoV
