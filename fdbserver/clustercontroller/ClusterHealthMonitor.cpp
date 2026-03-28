@@ -30,6 +30,50 @@
 
 namespace cluster_health {
 
+namespace {
+
+Future<Level> fetchSpaceLevel(std::vector<WorkerDetails> const& workers,
+                              std::string const& eventName,
+                              std::string const& availableBytesField,
+                              std::string const& totalBytesField,
+                              double interventionThreshold,
+                              double criticalInterventionThreshold,
+                              char const* failureTraceEventName) {
+	auto eventsAndErrors = co_await latestEventOnWorkers(workers, eventName);
+	if (!eventsAndErrors.present()) {
+		co_return Level::METRICS_MISSING;
+	}
+
+	auto const& [events, _errors] = eventsAndErrors.get();
+	if (events.empty()) {
+		co_return Level::METRICS_MISSING;
+	}
+
+	double minAvailableSpaceRatio = 1.0;
+
+	try {
+		for (auto const& [address, traceEvent] : events) {
+			(void)address;
+			double available = traceEvent.getDouble(availableBytesField);
+			double total = std::max(1.0, traceEvent.getDouble(totalBytesField));
+			minAvailableSpaceRatio = std::min(minAvailableSpaceRatio, available / total);
+		}
+
+		if (minAvailableSpaceRatio < criticalInterventionThreshold) {
+			co_return Level::CRITICAL_INTERVENTION_REQUIRED;
+		}
+		if (minAvailableSpaceRatio < interventionThreshold) {
+			co_return Level::INTERVENTION_REQUIRED;
+		}
+		co_return Level::HEALTHY;
+	} catch (Error& e) {
+		TraceEvent(SevWarnAlways, failureTraceEventName).error(e);
+		co_return Level::METRICS_MISSING;
+	}
+}
+
+} // namespace
+
 uint8_t levelToInt(Level level) {
 	switch (level) {
 	case Level::HEALTHY:
@@ -79,37 +123,30 @@ std::string_view StorageSpaceFactor::getName() const {
 }
 
 Future<Level> StorageSpaceFactor::fetchLevel(std::vector<WorkerDetails> const& workers) {
-	auto eventsAndErrors = co_await latestEventOnWorkers(workers, "StorageMetrics");
-	if (!eventsAndErrors.present()) {
-		co_return Level::METRICS_MISSING;
-	}
+	co_return co_await fetchSpaceLevel(workers,
+	                                   "StorageMetrics",
+	                                   "KvstoreBytesAvailable",
+	                                   "KvstoreBytesTotal",
+	                                   interventionThreshold,
+	                                   criticalInterventionThreshold,
+	                                   "StorageSpaceFactorFetchFailed");
+}
 
-	auto const& [events, _errors] = eventsAndErrors.get();
-	if (events.empty()) {
-		co_return Level::METRICS_MISSING;
-	}
+TLogSpaceFactor::TLogSpaceFactor(double interventionThreshold, double criticalInterventionThreshold)
+  : interventionThreshold(interventionThreshold), criticalInterventionThreshold(criticalInterventionThreshold) {}
 
-	double minAvailableSpaceRatio = 1.0;
+std::string_view TLogSpaceFactor::getName() const {
+	return "TLogSpace";
+}
 
-	try {
-		for (auto const& [address, traceEvent] : events) {
-			(void)address;
-			double available = traceEvent.getDouble("KvstoreBytesAvailable");
-			double total = std::max(1.0, traceEvent.getDouble("KvstoreBytesTotal"));
-			minAvailableSpaceRatio = std::min(minAvailableSpaceRatio, available / total);
-		}
-
-		if (minAvailableSpaceRatio < criticalInterventionThreshold) {
-			co_return Level::CRITICAL_INTERVENTION_REQUIRED;
-		}
-		if (minAvailableSpaceRatio < interventionThreshold) {
-			co_return Level::INTERVENTION_REQUIRED;
-		}
-		co_return Level::HEALTHY;
-	} catch (Error& e) {
-		TraceEvent(SevWarnAlways, "StorageSpaceFactorFetchFailed").error(e);
-		co_return Level::METRICS_MISSING;
-	}
+Future<Level> TLogSpaceFactor::fetchLevel(std::vector<WorkerDetails> const& workers) {
+	co_return co_await fetchSpaceLevel(workers,
+	                                   "TLogMetrics",
+	                                   "QueueDiskBytesAvailable",
+	                                   "QueueDiskBytesTotal",
+	                                   interventionThreshold,
+	                                   criticalInterventionThreshold,
+	                                   "TLogSpaceFactorFetchFailed");
 }
 
 void Monitor::setWorkers(std::vector<WorkerDetails> workers) {

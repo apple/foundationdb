@@ -64,6 +64,17 @@ public:
 	Future<Level> fetchLevel(std::vector<WorkerDetails> const& workers) override;
 };
 
+class TLogSpaceFactor : public IFactor {
+	double interventionThreshold;
+	double criticalInterventionThreshold;
+
+public:
+	TLogSpaceFactor(double interventionThreshold, double criticalInterventionThreshold);
+
+	std::string_view getName() const override;
+	Future<Level> fetchLevel(std::vector<WorkerDetails> const& workers) override;
+};
+
 class Monitor {
 	std::vector<std::unique_ptr<IFactor>> factors;
 	std::vector<WorkerDetails> workers;
