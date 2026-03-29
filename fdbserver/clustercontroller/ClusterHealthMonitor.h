@@ -68,16 +68,13 @@ class Monitor {
 	Reference<IWorkerEventProvider const> workerEventProvider;
 
 	Monitor(std::vector<std::unique_ptr<IFactor>>&& factors, Reference<IWorkerEventProvider const> workerEventProvider);
-	friend Monitor createHealthMonitor(Reference<IWorkerEventProvider const> workerEventProvider);
 
 public:
 	Monitor(Monitor&&) noexcept = default;
 	Monitor& operator=(Monitor&&) noexcept = default;
 
+	static Monitor create(Reference<IWorkerEventProvider const> workerEventProvider);
 	Future<Void> run();
 };
-
-// Creates a monitor configured with the current cluster-health factors and server knobs.
-Monitor createHealthMonitor(Reference<IWorkerEventProvider const> workerEventProvider);
 
 } // namespace cluster_health

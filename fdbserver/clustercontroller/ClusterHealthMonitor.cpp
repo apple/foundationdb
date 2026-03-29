@@ -120,7 +120,7 @@ Future<Void> Monitor::run() {
 	}
 }
 
-Monitor createHealthMonitor(Reference<IWorkerEventProvider const> workerEventProvider) {
+Monitor Monitor::create(Reference<IWorkerEventProvider const> workerEventProvider) {
 	std::vector<std::unique_ptr<IFactor>> factors;
 	factors.push_back(
 	    std::make_unique<StorageSpaceFactor>(SERVER_KNOBS->CLUSTER_HEALTH_METRIC_STORAGE_INTERVENTION_THRESHOLD,

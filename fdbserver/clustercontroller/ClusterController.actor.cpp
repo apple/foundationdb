@@ -79,7 +79,7 @@ ClusterControllerData::ClusterControllerData(ClusterControllerFullInterface cons
     clusterControllerProcessId(locality.processId()), clusterControllerDcId(locality.dcId()), id(ccInterface.id()),
     clusterId(clusterId), ac(false),
     clusterHealthWorkerEventProvider(makeReference<cluster_health::WorkerEventProvider>()),
-    clusterHealthMonitor(cluster_health::createHealthMonitor(clusterHealthWorkerEventProvider)),
+    clusterHealthMonitor(cluster_health::Monitor::create(clusterHealthWorkerEventProvider)),
     outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()), startTime(now()),
     goodRecruitmentTime(Never()), goodRemoteRecruitmentTime(Never()), dcLogServerVersionDifference(0),
     dcStorageServerVersionDifference(0), datacenterVersionDifference(0), versionDifferenceUpdated(false),
