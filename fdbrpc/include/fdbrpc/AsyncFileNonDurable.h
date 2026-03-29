@@ -533,7 +533,7 @@ private:
 			// Need to know the size of the file directly before this truncate
 			// takes effect to see what range it modifies.
 			if (!self->minSizeAfterPendingModificationsIsExact) {
-				co_await success(self->size());
+				co_await self->size();
 			}
 			ASSERT(self->minSizeAfterPendingModificationsIsExact);
 			int64_t beginModifiedRange = std::min(size, self->minSizeAfterPendingModifications);
@@ -630,7 +630,7 @@ private:
 		if (durable)
 			co_await allModifications;
 		else
-			co_await success(errorOr(allModifications));
+			co_await errorOr(allModifications);
 
 		if (!durable) {
 			// Sometimes sync the file if writes were made durably.  Before a file is first synced, it is stored in a
@@ -638,7 +638,7 @@ private:
 			// simulate a failure to fsync the directory storing the file
 			if (self->hasBeenSynced && writeDurable && deterministicRandom()->random01() < 0.5) {
 				CODE_PROBE(true, "AsyncFileNonDurable kill was durable and synced", probe::decoration::rare);
-				co_await success(errorOr(self->file->sync()));
+				co_await errorOr(self->file->sync());
 			}
 
 			// Setting this promise could trigger the deletion of the AsyncFileNonDurable; after this none of its

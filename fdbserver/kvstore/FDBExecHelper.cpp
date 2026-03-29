@@ -304,7 +304,7 @@ static Future<int> execHelperImpl(ExecCmdValueString* execArg, UID snapUID, std:
 		paramList.push_back("--uid");
 		paramList.push_back(uidStr.toString());
 		cmdErr = spawnProcess(snapBin.toString(), paramList, maxWaitTime, false /*isSync*/, 0);
-		co_await success(cmdErr);
+		co_await cmdErr;
 		err = cmdErr.get();
 	} else {
 		// copy the files
@@ -315,7 +315,7 @@ static Future<int> execHelperImpl(ExecCmdValueString* execArg, UID snapUID, std:
 		paramList.push_back(mkdirBin);
 		paramList.push_back(folderTo);
 		cmdErr = spawnProcess(mkdirBin, paramList, maxWaitTime, false /*isSync*/, 10.0);
-		co_await success(cmdErr);
+		co_await cmdErr;
 		err = cmdErr.get();
 		if (err == 0) {
 			std::vector<std::string> paramList;
@@ -325,7 +325,7 @@ static Future<int> execHelperImpl(ExecCmdValueString* execArg, UID snapUID, std:
 			paramList.push_back(folderFrom);
 			paramList.push_back(folderTo);
 			cmdErr = spawnProcess(cpBin, paramList, maxWaitTime, true /*isSync*/, 1.0);
-			co_await success(cmdErr);
+			co_await cmdErr;
 			err = cmdErr.get();
 		}
 	}
