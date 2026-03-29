@@ -89,6 +89,7 @@ public:
 	int BROADCAST_BATCH_SIZE;
 	double TRANSACTION_TIMEOUT_DELAY_INTERVAL;
 	bool SYSTEM_TRANSACTIONS_USE_EXPONENTIAL_BACKOFF;
+	int SYSTEM_TRANSACTIONS_DEFAULT_MAX_BACKOFF;
 
 	// When locationCache in DatabaseContext gets to be this size, items will be evicted
 	int LOCATION_CACHE_EVICTION_SIZE;

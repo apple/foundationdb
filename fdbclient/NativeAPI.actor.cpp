@@ -7277,7 +7277,7 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		// back to a lower value.
 		// Note that the default max is much lower.
 		if (CLIENT_KNOBS->SYSTEM_TRANSACTIONS_USE_EXPONENTIAL_BACKOFF) {
-			trState->options.maxBackoff = 60;
+			trState->options.maxBackoff = CLIENT_KNOBS->SYSTEM_TRANSACTIONS_DEFAULT_MAX_BACKOFF;
 		}
 		break;
 
