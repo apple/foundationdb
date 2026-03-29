@@ -168,7 +168,7 @@ Future<Void> Monitor::run() {
 	Future<Void> timer = Void();
 	while (true) {
 		co_await timer;
-		timer = delay(5.0);
+		timer = delay(SERVER_KNOBS->CLUSTER_HEALTH_METRIC_POLL_INTERVAL);
 
 		std::vector<Future<Level>> levelFutures;
 		levelFutures.reserve(factors.size());

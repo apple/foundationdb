@@ -870,6 +870,7 @@ public:
 	int CC_RECOVERY_INIT_REQ_MAX_UNFINISHED_RECOVERIES; // Maximum unfinished recoveries after which transaction system
 	                                                    // intilization timeouts above do not apply.
 	bool CLUSTER_HEALTH_METRIC_ENABLE;
+	double CLUSTER_HEALTH_METRIC_POLL_INTERVAL; // Poll interval in seconds for the cluster-health monitor.
 	double CLUSTER_HEALTH_METRIC_STORAGE_INTERVENTION_THRESHOLD;
 	double CLUSTER_HEALTH_METRIC_STORAGE_CRITICAL_THRESHOLD;
 	double CLUSTER_HEALTH_METRIC_TLOG_INTERVENTION_THRESHOLD;
