@@ -31,6 +31,16 @@ namespace cluster_health {
 
 namespace {
 
+WorkerEvents filterEmptyEvents(WorkerEvents const& events) {
+	WorkerEvents filteredEvents;
+	for (auto const& [address, traceEvent] : events) {
+		if (traceEvent.size() > 0) {
+			filteredEvents.emplace(address, traceEvent);
+		}
+	}
+	return filteredEvents;
+}
+
 Future<Level> fetchSpaceLevel(Reference<IWorkerEventProvider const> workerEventProvider,
                               std::string const& eventName,
                               std::string const& availableBytesField,
@@ -44,14 +54,15 @@ Future<Level> fetchSpaceLevel(Reference<IWorkerEventProvider const> workerEventP
 	}
 
 	auto const& [events, _errors] = eventsAndErrors.get();
-	if (events.empty()) {
+	WorkerEvents filteredEvents = filterEmptyEvents(events);
+	if (filteredEvents.empty()) {
 		co_return Level::METRICS_MISSING;
 	}
 
 	double minAvailableSpaceRatio = 1.0;
 
 	try {
-		for (auto const& [address, traceEvent] : events) {
+		for (auto const& [address, traceEvent] : filteredEvents) {
 			(void)address;
 			double available = traceEvent.getDouble(availableBytesField);
 			double total = std::max(1.0, traceEvent.getDouble(totalBytesField));
@@ -118,14 +129,15 @@ Future<Level> StorageReplicationFactor::fetchLevel(Reference<IWorkerEventProvide
 	}
 
 	auto const& [events, _errors] = eventsAndErrors.get();
-	if (events.empty()) {
+	WorkerEvents filteredEvents = filterEmptyEvents(events);
+	if (filteredEvents.empty()) {
 		co_return Level::METRICS_MISSING;
 	}
 
 	try {
 		int64_t queuedOrInFlightRepairMoves = 0;
 		int64_t zeroReplicaTeams = 0;
-		for (auto const& [address, traceEvent] : events) {
+		for (auto const& [address, traceEvent] : filteredEvents) {
 			(void)address;
 			int64_t inQueue = traceEvent.getInt64("InQueue");
 			int64_t inFlight = traceEvent.getInt64("InFlight");
@@ -165,13 +177,14 @@ Future<Level> RecoveryStateFactor::fetchLevel(Reference<IWorkerEventProvider con
 	}
 
 	auto const& [events, _errors] = eventsAndErrors.get();
-	if (events.empty()) {
+	WorkerEvents filteredEvents = filterEmptyEvents(events);
+	if (filteredEvents.empty()) {
 		co_return Level::METRICS_MISSING;
 	}
 
 	try {
 		Level level = Level::HEALTHY;
-		for (auto const& [_address, traceEvent] : events) {
+		for (auto const& [_address, traceEvent] : filteredEvents) {
 			int const statusCode = traceEvent.getInt("StatusCode");
 			if (statusCode < RecoveryStatus::accepting_commits) {
 				level = Level::OUTAGE;
@@ -198,8 +211,12 @@ Future<Level> ProcessErrorsFactor::fetchLevel(Reference<IWorkerEventProvider con
 		co_return Level::METRICS_MISSING;
 	}
 
-	auto const& [events, _errors] = eventsAndErrors.get();
-	co_return events.empty() ? Level::HEALTHY : Level::CRITICAL_INTERVENTION_REQUIRED;
+	auto const& [events, errors] = eventsAndErrors.get();
+	WorkerEvents filteredEvents = filterEmptyEvents(events);
+	if (filteredEvents.empty()) {
+		co_return errors.empty() ? Level::HEALTHY : Level::METRICS_MISSING;
+	}
+	co_return Level::CRITICAL_INTERVENTION_REQUIRED;
 }
 
 RkThrottlingFactor::RkThrottlingFactor(double criticalTpsLimitToReleasedTpsRatioThreshold)
@@ -216,13 +233,14 @@ Future<Level> RkThrottlingFactor::fetchLevel(Reference<IWorkerEventProvider cons
 	}
 
 	auto const& [events, _errors] = eventsAndErrors.get();
-	if (events.empty()) {
+	WorkerEvents filteredEvents = filterEmptyEvents(events);
+	if (filteredEvents.empty()) {
 		co_return Level::METRICS_MISSING;
 	}
 
 	try {
 		double minTpsLimitToReleasedTpsRatio = std::numeric_limits<double>::infinity();
-		for (auto const& [address, traceEvent] : events) {
+		for (auto const& [address, traceEvent] : filteredEvents) {
 			(void)address;
 			double tpsLimit = traceEvent.getDouble("TPSLimit");
 			if (tpsLimit == 0.0) {

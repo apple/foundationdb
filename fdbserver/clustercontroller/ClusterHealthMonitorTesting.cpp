@@ -70,6 +70,10 @@ LatestWorkerEvents makeLatestWorkerEvents(WorkerEvents events) {
 	return LatestWorkerEvents(std::make_pair(std::move(events), std::set<std::string>{}));
 }
 
+LatestWorkerEvents makeLatestWorkerEvents(WorkerEvents events, std::set<std::string> errors) {
+	return LatestWorkerEvents(std::make_pair(std::move(events), std::move(errors)));
+}
+
 class MovingDataMetricsBuilder {
 	TraceEventFields traceEventFields;
 
@@ -137,6 +141,14 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/StorageSpaceFactor"
 	    makeLatestWorkerEvents(makeSpaceMetrics("KvstoreBytesAvailable", "KvstoreBytesTotal", 5, 100)));
 	level = co_await factor.fetchLevel(provider);
 	ASSERT_EQ(level, Level::CRITICAL_INTERVENTION_REQUIRED);
+
+	WorkerEvents mixedRoleEvents;
+	mixedRoleEvents.emplace(NetworkAddress(IPAddress(0x01010101), 1), TraceEventFields());
+	mixedRoleEvents.emplace(NetworkAddress(IPAddress(0x02020202), 2),
+	                        makeSpaceMetrics("KvstoreBytesAvailable", "KvstoreBytesTotal", 50, 100));
+	provider->setLatestEvents("StorageMetrics", makeLatestWorkerEvents(std::move(mixedRoleEvents)));
+	level = co_await factor.fetchLevel(provider);
+	ASSERT_EQ(level, Level::HEALTHY);
 
 	provider->setLatestEvents("StorageMetrics", LatestWorkerEvents());
 	level = co_await factor.fetchLevel(provider);
@@ -239,9 +251,15 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/ProcessErrorsFactor
 	level = co_await factor.fetchLevel(provider);
 	ASSERT_EQ(level, Level::CRITICAL_INTERVENTION_REQUIRED);
 
-	provider->setLatestEvents("", makeLatestWorkerEvents(WorkerEvents()));
+	WorkerEvents emptyLatestErrors;
+	emptyLatestErrors.emplace(NetworkAddress(IPAddress(0x01010101), 1), TraceEventFields());
+	provider->setLatestEvents("", makeLatestWorkerEvents(std::move(emptyLatestErrors)));
 	level = co_await factor.fetchLevel(provider);
 	ASSERT_EQ(level, Level::HEALTHY);
+
+	provider->setLatestEvents("", makeLatestWorkerEvents(WorkerEvents(), { "1.1.1.1:1" }));
+	level = co_await factor.fetchLevel(provider);
+	ASSERT_EQ(level, Level::METRICS_MISSING);
 
 	provider->setLatestEvents("", LatestWorkerEvents());
 	level = co_await factor.fetchLevel(provider);
