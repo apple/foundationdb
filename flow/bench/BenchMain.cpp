@@ -18,39 +18,8 @@
  * limitations under the License.
  */
 
-#include "benchmark/benchmark.h"
-#include "flow/Platform.h"
-#include "flow/TLSConfig.actor.h"
-#include "flow/network.h"
-#include "flow/ThreadHelper.actor.h"
-#include <thread>
-
-Future<Void> stopNetworkAfter(Future<Void> what) {
-	try {
-		co_await what;
-		g_network->stop();
-	} catch (...) {
-		g_network->stop();
-		throw;
-	}
-}
+#include "flow/BenchMain.h"
 
 int main(int argc, char** argv) {
-	benchmark::Initialize(&argc, argv);
-	if (benchmark::ReportUnrecognizedArguments(argc, argv)) {
-		return 1;
-	}
-
-	platformInit();
-	Error::init();
-	g_network = newNet2(TLSConfig());
-
-	Promise<Void> benchmarksDone;
-	std::thread benchmarkThread([&]() {
-		benchmark::RunSpecifiedBenchmarks();
-		onMainThreadVoid([&]() { benchmarksDone.send(Void()); });
-	});
-	auto f = stopNetworkAfter(benchmarksDone.getFuture());
-	g_network->run();
-	benchmarkThread.join();
+	return runBenchmarks(argc, argv);
 }
