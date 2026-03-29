@@ -152,6 +152,10 @@ void WorkerEventProvider::setRatekeeperWorker(Optional<WorkerInterface> ratekeep
 	this->ratekeeperWorker = std::move(ratekeeperWorker);
 }
 
+void WorkerEventProvider::setDataDistributorWorker(Optional<WorkerInterface> dataDistributorWorker) {
+	this->dataDistributorWorker = std::move(dataDistributorWorker);
+}
+
 void WorkerEventProvider::setStorageServers(std::vector<StorageServerInterface> storageServers) {
 	this->storageServers = std::move(storageServers);
 }
@@ -169,6 +173,13 @@ Future<LatestWorkerEvents> WorkerEventProvider::getLatestRatekeeperEvents(std::s
 		return LatestWorkerEvents();
 	}
 	return latestEventOnWorker(ratekeeperWorker.get(), eventName);
+}
+
+Future<LatestWorkerEvents> WorkerEventProvider::getLatestDataDistributorEvents(std::string const& eventName) const {
+	if (!dataDistributorWorker.present()) {
+		return LatestWorkerEvents();
+	}
+	return latestEventOnWorker(dataDistributorWorker.get(), eventName);
 }
 
 Future<LatestWorkerEvents> WorkerEventProvider::getLatestStorageServerEvents(std::string const& eventName) const {

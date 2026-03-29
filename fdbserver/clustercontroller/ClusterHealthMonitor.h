@@ -52,6 +52,7 @@ public:
 	virtual void delref() const = 0;
 	virtual Future<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const = 0;
 	virtual Future<LatestWorkerEvents> getLatestRatekeeperEvents(std::string const& eventName) const = 0;
+	virtual Future<LatestWorkerEvents> getLatestDataDistributorEvents(std::string const& eventName) const = 0;
 	virtual Future<LatestWorkerEvents> getLatestStorageServerEvents(std::string const& eventName) const = 0;
 	virtual Future<LatestWorkerEvents> getLatestTLogEvents(std::string const& eventName) const = 0;
 };
@@ -60,6 +61,7 @@ public:
 class WorkerEventProvider final : public IWorkerEventProvider, public ReferenceCounted<WorkerEventProvider> {
 	std::vector<WorkerDetails> workers;
 	Optional<WorkerInterface> ratekeeperWorker;
+	Optional<WorkerInterface> dataDistributorWorker;
 	std::vector<StorageServerInterface> storageServers;
 	std::vector<TLogInterface> tlogs;
 
@@ -68,10 +70,12 @@ public:
 	void delref() const override { ReferenceCounted<WorkerEventProvider>::delref(); }
 	void setWorkers(std::vector<WorkerDetails> workers);
 	void setRatekeeperWorker(Optional<WorkerInterface> ratekeeperWorker);
+	void setDataDistributorWorker(Optional<WorkerInterface> dataDistributorWorker);
 	void setStorageServers(std::vector<StorageServerInterface> storageServers);
 	void setTLogs(std::vector<TLogInterface> tlogs);
 	Future<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const override;
 	Future<LatestWorkerEvents> getLatestRatekeeperEvents(std::string const& eventName) const override;
+	Future<LatestWorkerEvents> getLatestDataDistributorEvents(std::string const& eventName) const override;
 	Future<LatestWorkerEvents> getLatestStorageServerEvents(std::string const& eventName) const override;
 	Future<LatestWorkerEvents> getLatestTLogEvents(std::string const& eventName) const override;
 };

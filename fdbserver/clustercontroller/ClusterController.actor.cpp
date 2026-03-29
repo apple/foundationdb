@@ -125,6 +125,15 @@ void ClusterControllerData::updateClusterHealthMonitorWorkers() {
 	}
 	clusterHealthWorkerEventProvider->setRatekeeperWorker(std::move(ratekeeperWorker));
 
+	Optional<WorkerInterface> dataDistributorWorker;
+	if (db.serverInfo->get().distributor.present()) {
+		auto workerIt = id_worker.find(db.serverInfo->get().distributor.get().locality.processId());
+		if (workerIt != id_worker.end()) {
+			dataDistributorWorker = workerIt->second.details.interf;
+		}
+	}
+	clusterHealthWorkerEventProvider->setDataDistributorWorker(std::move(dataDistributorWorker));
+
 	std::vector<StorageServerInterface> storageServers;
 	storageServers.reserve(storageStatusInfos.size());
 	for (auto const& storageStatusInfo : storageStatusInfos) {

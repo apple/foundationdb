@@ -134,7 +134,7 @@ std::string_view StorageReplicationFactor::getName() const {
 
 Future<Level> StorageReplicationFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider,
                                                    TrackCodeProbes trackCodeProbes) {
-	auto eventsAndErrors = co_await workerEventProvider->getLatestEvents("MovingData");
+	auto eventsAndErrors = co_await workerEventProvider->getLatestDataDistributorEvents("MovingData");
 	if (!eventsAndErrors.present()) {
 		co_return Level::METRICS_MISSING;
 	}

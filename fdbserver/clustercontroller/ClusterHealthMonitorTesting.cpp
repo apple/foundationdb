@@ -33,6 +33,7 @@ namespace {
 class FakeWorkerEventProvider final : public IWorkerEventProvider, public ReferenceCounted<FakeWorkerEventProvider> {
 	std::map<std::string, LatestWorkerEvents> latestEventsByName;
 	std::map<std::string, LatestWorkerEvents> latestRatekeeperEventsByName;
+	std::map<std::string, LatestWorkerEvents> latestDataDistributorEventsByName;
 	std::map<std::string, LatestWorkerEvents> latestStorageServerEventsByName;
 	std::map<std::string, LatestWorkerEvents> latestTLogEventsByName;
 
@@ -46,6 +47,10 @@ public:
 
 	void setLatestRatekeeperEvents(std::string eventName, LatestWorkerEvents latestEvents) {
 		latestRatekeeperEventsByName[std::move(eventName)] = std::move(latestEvents);
+	}
+
+	void setLatestDataDistributorEvents(std::string eventName, LatestWorkerEvents latestEvents) {
+		latestDataDistributorEventsByName[std::move(eventName)] = std::move(latestEvents);
 	}
 
 	void setLatestStorageServerEvents(std::string eventName, LatestWorkerEvents latestEvents) {
@@ -67,6 +72,14 @@ public:
 	Future<LatestWorkerEvents> getLatestRatekeeperEvents(std::string const& eventName) const override {
 		auto it = latestRatekeeperEventsByName.find(eventName);
 		if (it != latestRatekeeperEventsByName.end()) {
+			return it->second;
+		}
+		return getLatestEvents(eventName);
+	}
+
+	Future<LatestWorkerEvents> getLatestDataDistributorEvents(std::string const& eventName) const override {
+		auto it = latestDataDistributorEventsByName.find(eventName);
+		if (it != latestDataDistributorEventsByName.end()) {
 			return it->second;
 		}
 		return getLatestEvents(eventName);
@@ -265,7 +278,19 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/StorageReplicationF
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::OUTAGE);
 
+	WorkerEvents staleWorkerEvents;
+	staleWorkerEvents.emplace(NetworkAddress(IPAddress(0x01010101), 1),
+	                          MovingDataMetricsBuilder().inQueue(1).priorityTeam0Left(1).build());
+	staleWorkerEvents.emplace(NetworkAddress(IPAddress(0x02020202), 2), MovingDataMetricsBuilder().build());
+	provider->setLatestEvents("MovingData", makeLatestWorkerEvents(std::move(staleWorkerEvents)));
+	provider->setLatestDataDistributorEvents(
+	    "MovingData",
+	    makeLatestWorkerEvents(NetworkAddress(IPAddress(0x02020202), 2), MovingDataMetricsBuilder().build()));
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
+	ASSERT_EQ(level, Level::HEALTHY);
+
 	provider->setLatestEvents("MovingData", LatestWorkerEvents());
+	provider->setLatestDataDistributorEvents("MovingData", LatestWorkerEvents());
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::METRICS_MISSING);
 }
