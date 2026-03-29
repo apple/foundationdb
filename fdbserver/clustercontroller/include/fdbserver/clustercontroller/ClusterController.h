@@ -1,5 +1,5 @@
 /*
- * ClusterController.actor.h
+ * ClusterController.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,25 +19,16 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CLUSTERCONTROLLER_ACTOR_G_H)
-#define FDBSERVER_CLUSTERCONTROLLER_ACTOR_G_H
-#include "fdbserver/clustercontroller/ClusterController.actor.g.h"
-#elif !defined(FDBSERVER_CLUSTERCONTROLLER_ACTOR_H)
-#define FDBSERVER_CLUSTERCONTROLLER_ACTOR_H
 
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/Locality.h"
 #include "flow/flow.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct ClusterControllerFullInterface;
 
-ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> ccr,
-                                     Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
-                                     Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
-                                     LocalityData locality,
-                                     Reference<AsyncVar<Optional<UID>>> clusterId);
-
-#include "flow/unactorcompiler.h"
-#endif
+Future<Void> clusterController(Reference<IClusterConnectionRecord> ccr,
+                               Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
+                               Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
+                               LocalityData locality,
+                               Reference<AsyncVar<Optional<UID>>> clusterId);
