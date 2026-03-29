@@ -33,7 +33,7 @@
 #include "fdbserver/consistencyscan/ConsistencyScan.h"
 #include "fdbserver/core/StorageMetrics.actor.h"
 #include "fdbserver/datadistributor/DataDistribution.h"
-#include "fdbserver/core/QuietDatabase.actor.h"
+#include "fdbserver/core/QuietDatabase.h"
 #include "fdbserver/core/TSSMappingUtil.h"
 #include "flow/DeterministicRandom.h"
 #include "fdbclient/ManagementAPI.h"
