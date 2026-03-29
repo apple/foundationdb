@@ -41,6 +41,7 @@ static Future<Void> splitError(Future<Void> in, Promise<Void> errOut) {
 
 class RatekeeperImpl {
 public:
+
 #if 0
 #ifdef DIFF_PLACEHOLDER_CONFIGURATION_MONITOR
 #endif
@@ -187,7 +188,7 @@ public:
 	}
 
 #if 0
-#ifdef DIFF_PLACEHOLDER_MONITOR_STORAGE_SERVER_BLAH
+#ifdef DIFF_PLACEHOLDER_MONITOR_STORAGE_SERVER_QUEUE_SIZE_IN_SIMULATION
 #endif
 #endif
 	// works with ExcludeIncludeStorageServersWorkload.actor.cpp to make sure the size of SS list is bounded
@@ -243,7 +244,7 @@ public:
 	}
 
 #if 0
-#ifdef DIFF_PLACEHOLDER_TRACK_TLOG_QUEUE_BLAH
+#ifdef DIFF_PLACEHOLDER_TRACK_TLOG_QUEUE_INFO
 #endif
 #endif
 	static Future<Void> trackTLogQueueInfo(Ratekeeper* self, TLogInterface tli) {
@@ -279,7 +280,7 @@ public:
 	}
 
 #if 0
-#ifdef DIFF_PLACEHOLDER_TRACK_TLOG_QUEUE_BLAH
+#ifdef DIFF_PLACEHOLDER_TRACK_EACH_STORAGE_SERVER
 #endif
 #endif
 	static Future<Void> trackEachStorageServer(
@@ -314,7 +315,7 @@ public:
 	}
 
 #if 0
-#ifdef DIFF_PLACEHOLDER_TRACK_TLOG_QUEUE_BLAH
+#ifdef DIFF_PLACEHOLDER_MONITOR_HOT_SHARDS
 #endif
 #endif
 
@@ -363,10 +364,9 @@ public:
 	}
 
 #if 0
-#ifdef DIFF_PLACEHOLDER_TRACK_TLOG_QUEUE_BLAH
+#ifdef DIFF_PLACEHOLDER_HANDLE_REPORT_COMMIT_COST_ESTIMATION_REQS
 #endif
 #endif
-
 	static Future<Void> handleReportCommitCostEstimationReqs(Ratekeeper* self, RatekeeperInterface rkInterf) {
 		while (true) {
 			ReportCommitCostEstimationRequest req = co_await rkInterf.reportCommitCostEstimation.getFuture();
@@ -376,10 +376,9 @@ public:
 	}
 
 #if 0
-#ifdef DIFF_PLACEHOLDER_TRACK_TLOG_QUEUE_BLAH
+#ifdef DIFF_PLACEHOLDER_HANDLE_GET_SS_VERSION_LAG_REQS
 #endif
 #endif
-
 	static Future<Void> handleGetSSVersionLagReqs(Ratekeeper* self, RatekeeperInterface rkInterf) {
 		while (true) {
 			GetSSVersionLagRequest req = co_await rkInterf.getSSVersionLag.getFuture();
@@ -390,10 +389,9 @@ public:
 	}
 
 #if 0
-#ifdef DIFF_PLACEHOLDER_TRACK_TLOG_QUEUE_BLAH
+#ifdef DIFF_PLACEHOLDER_HANDLE_GET_RATE_INFO_REQS
 #endif
 #endif
-
 	static Future<Void> handleGetRateInfoReqs(Ratekeeper* self,
 	                                          RatekeeperInterface rkInterf,
 	                                          Version* recoveryVersion,
@@ -464,10 +462,9 @@ public:
 	}
 
 #if 0
-#ifdef DIFF_PLACEHOLDER_TRACK_TLOG_QUEUE_BLAH
+#ifdef DIFF_PLACEHOLDER_HANDLE_DB_INFO_CHANGES
 #endif
 #endif
-
 	static Future<Void> handleDBInfoChanges(Ratekeeper* self,
 	                                        Reference<AsyncVar<ServerDBInfo> const> dbInfo,
 	                                        bool* recovering,
@@ -511,10 +508,9 @@ public:
 	}
 
 #if 0
-#ifdef DIFF_PLACEHOLDER_TRACK_TLOG_QUEUE_BLAH
+#ifdef DIFF_PLACEHOLDER_RATE_UPDATER
 #endif
 #endif
-
 	static Future<Void> rateUpdater(Ratekeeper* self, bool* lastLimited) {
 		while (true) {
 			double actualTps = self->smoothReleasedTransactions.smoothRate();
@@ -547,10 +543,9 @@ public:
 	}
 
 #if 0
-#ifdef DIFF_PLACEHOLDER_TRACK_TLOG_QUEUE_BLAH
+#ifdef DIFF_PLACEHOLDER_RUN
 #endif
 #endif
-
 	static Future<Void> run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 		ActorOwningSelfRef<Ratekeeper> pSelf(
 		    new Ratekeeper(rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True)));
@@ -631,10 +626,9 @@ public:
 	}
 
 #if 0
-#ifdef DIFF_PLACEHOLDER_TRACK_TLOG_QUEUE_BLAH
+#ifdef DIFF_PLACEHOLDER_REFRESH_STORAGE_SERVER_COMMIT_COSTS
 #endif
 #endif
-
 	static Future<Void> refreshStorageServerCommitCosts(Ratekeeper* self) {
 		double lastBusiestCommitTagPick{ 0 };
 		std::vector<Future<Void>> replies;
