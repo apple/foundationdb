@@ -48,8 +48,8 @@ class WinLockGuard {
 
 public:
 	explicit WinLockGuard(HANDLE& mutex) : mutex(mutex) {
-		HANDLE result = CreateMutexA(NULL, FALSE, NULL);
-		if (result == NULL) {
+		HANDLE result = CreateMutexA(nullptr, FALSE, nullptr);
+		if (result == nullptr) {
 			throw std::system_error(GetLastError(), std::system_category(), nullptr);
 		}
 		mutex = result;
