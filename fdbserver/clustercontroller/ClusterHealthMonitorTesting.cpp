@@ -32,6 +32,7 @@ namespace {
 
 class FakeWorkerEventProvider final : public IWorkerEventProvider, public ReferenceCounted<FakeWorkerEventProvider> {
 	std::map<std::string, LatestWorkerEvents> latestEventsByName;
+	std::map<std::string, LatestWorkerEvents> latestRatekeeperEventsByName;
 	std::map<std::string, LatestWorkerEvents> latestStorageServerEventsByName;
 	std::map<std::string, LatestWorkerEvents> latestTLogEventsByName;
 
@@ -41,6 +42,10 @@ public:
 
 	void setLatestEvents(std::string eventName, LatestWorkerEvents latestEvents) {
 		latestEventsByName[std::move(eventName)] = std::move(latestEvents);
+	}
+
+	void setLatestRatekeeperEvents(std::string eventName, LatestWorkerEvents latestEvents) {
+		latestRatekeeperEventsByName[std::move(eventName)] = std::move(latestEvents);
 	}
 
 	void setLatestStorageServerEvents(std::string eventName, LatestWorkerEvents latestEvents) {
@@ -57,6 +62,14 @@ public:
 			return LatestWorkerEvents();
 		}
 		return it->second;
+	}
+
+	Future<LatestWorkerEvents> getLatestRatekeeperEvents(std::string const& eventName) const override {
+		auto it = latestRatekeeperEventsByName.find(eventName);
+		if (it != latestRatekeeperEventsByName.end()) {
+			return it->second;
+		}
+		return getLatestEvents(eventName);
 	}
 
 	Future<LatestWorkerEvents> getLatestStorageServerEvents(std::string const& eventName) const override {
@@ -93,6 +106,12 @@ LatestWorkerEvents makeLatestWorkerEvents(TraceEventFields traceEventFields) {
 }
 
 LatestWorkerEvents makeLatestWorkerEvents(WorkerEvents events) {
+	return LatestWorkerEvents(std::make_pair(std::move(events), std::set<std::string>{}));
+}
+
+LatestWorkerEvents makeLatestWorkerEvents(NetworkAddress address, TraceEventFields traceEventFields) {
+	WorkerEvents events;
+	events.emplace(address, std::move(traceEventFields));
 	return LatestWorkerEvents(std::make_pair(std::move(events), std::set<std::string>{}));
 }
 
@@ -333,7 +352,17 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/RkThrottlingFactor"
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::OUTAGE);
 
+	WorkerEvents staleWorkerEvents;
+	staleWorkerEvents.emplace(NetworkAddress(IPAddress(0x01010101), 1), makeRkUpdateMetrics(100, 0));
+	staleWorkerEvents.emplace(NetworkAddress(IPAddress(0x02020202), 2), makeRkUpdateMetrics(100, 200));
+	provider->setLatestEvents("RkUpdate", makeLatestWorkerEvents(std::move(staleWorkerEvents)));
+	provider->setLatestRatekeeperEvents(
+	    "RkUpdate", makeLatestWorkerEvents(NetworkAddress(IPAddress(0x02020202), 2), makeRkUpdateMetrics(100, 200)));
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
+	ASSERT_EQ(level, Level::HEALTHY);
+
 	provider->setLatestEvents("RkUpdate", LatestWorkerEvents());
+	provider->setLatestRatekeeperEvents("RkUpdate", LatestWorkerEvents());
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::METRICS_MISSING);
 }

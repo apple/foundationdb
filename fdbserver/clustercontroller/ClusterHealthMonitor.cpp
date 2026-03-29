@@ -34,6 +34,28 @@ namespace cluster_health {
 
 namespace {
 
+Future<LatestWorkerEvents> latestEventOnWorker(WorkerInterface worker, std::string eventName) {
+	try {
+		EventLogRequest req = eventName.empty() ? EventLogRequest() : EventLogRequest(Standalone<StringRef>(eventName));
+		ErrorOr<TraceEventFields> traceEvent =
+		    co_await errorOr(timeoutError(worker.eventLogRequest.getReply(req), 2.0));
+
+		WorkerEvents results;
+		std::set<std::string> failed;
+		if (traceEvent.isError()) {
+			failed.insert(worker.address().toString());
+			results[worker.address()] = TraceEventFields();
+		} else {
+			results[worker.address()] = traceEvent.get();
+		}
+		co_return std::make_pair(std::move(results), std::move(failed));
+	} catch (Error& e) {
+		ASSERT(e.code() ==
+		       error_code_actor_cancelled); // All errors should be filtering through the errorOr actor above
+		throw;
+	}
+}
+
 template <class Interface>
 Future<LatestWorkerEvents> latestEventOnInterfaces(std::vector<Interface> interfaces,
                                                    std::unordered_map<NetworkAddress, WorkerInterface> addressWorkers,
@@ -126,6 +148,10 @@ void WorkerEventProvider::setWorkers(std::vector<WorkerDetails> workers) {
 	this->workers = std::move(workers);
 }
 
+void WorkerEventProvider::setRatekeeperWorker(Optional<WorkerInterface> ratekeeperWorker) {
+	this->ratekeeperWorker = std::move(ratekeeperWorker);
+}
+
 void WorkerEventProvider::setStorageServers(std::vector<StorageServerInterface> storageServers) {
 	this->storageServers = std::move(storageServers);
 }
@@ -136,6 +162,13 @@ void WorkerEventProvider::setTLogs(std::vector<TLogInterface> tlogs) {
 
 Future<LatestWorkerEvents> WorkerEventProvider::getLatestEvents(std::string const& eventName) const {
 	return latestEventOnWorkers(workers, eventName);
+}
+
+Future<LatestWorkerEvents> WorkerEventProvider::getLatestRatekeeperEvents(std::string const& eventName) const {
+	if (!ratekeeperWorker.present()) {
+		return LatestWorkerEvents();
+	}
+	return latestEventOnWorker(ratekeeperWorker.get(), eventName);
 }
 
 Future<LatestWorkerEvents> WorkerEventProvider::getLatestStorageServerEvents(std::string const& eventName) const {

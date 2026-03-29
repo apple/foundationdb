@@ -251,7 +251,7 @@ std::string_view RkThrottlingFactor::getName() const {
 
 Future<Level> RkThrottlingFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider,
                                              TrackCodeProbes trackCodeProbes) {
-	auto eventsAndErrors = co_await workerEventProvider->getLatestEvents("RkUpdate");
+	auto eventsAndErrors = co_await workerEventProvider->getLatestRatekeeperEvents("RkUpdate");
 	if (!eventsAndErrors.present()) {
 		co_return Level::METRICS_MISSING;
 	}
