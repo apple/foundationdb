@@ -7269,6 +7269,16 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 			throw e;
 		}
 		trState->options.rawAccess = true;
+
+		// NOTE: if enabling READ_SYSTEM_KEYS, we assume it is from an fdbserver
+		// process (most likely) and that a good default is not to DOS ourselves
+		// by too-frequent reads.
+		// FDB-internal use cases that don't want this can override the max backoff
+		// back to a lower value.
+		// Note that the default max is much lower.
+		if (CLIENT_KNOBS->SYSTEM_TRANSACTIONS_USE_EXPONENTIAL_BACKOFF) {
+			trState->options.maxBackoff = 60;
+		}
 		break;
 
 	case FDBTransactionOptions::BYPASS_STORAGE_QUOTA:
@@ -7876,7 +7886,7 @@ Future<Void> Transaction::onError(Error const& e) {
 		} else if (e.code() == error_code_transaction_rejected_range_locked) {
 			++trState->cx->transactionsLockRejected;
 		}
-
+		// block 1
 		double backoff = getBackoff(e.code());
 		reset();
 		return delay(backoff, trState->taskID);
@@ -7890,9 +7900,19 @@ Future<Void> Transaction::onError(Error const& e) {
 		else if (e.code() == error_code_future_version)
 			++trState->cx->transactionsFutureVersions;
 
-		double maxBackoff = trState->options.maxBackoff;
-		reset();
-		return delay(std::min(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, maxBackoff), trState->taskID);
+		if (e.code() == error_code_transaction_too_old &&
+			trState->options.maxBackoff != CLIENT_KNOBS->DEFAULT_MAX_BACKOFF &&
+			CLIENT_KNOBS->SYSTEM_TRANSACTIONS_USE_EXPONENTIAL_BACKOFF) {
+			// block 2
+			double backoff = getBackoff(e.code());
+			reset();
+			return delay(backoff, trState->taskID);
+		} else {
+			// block 3
+			double maxBackoff = trState->options.maxBackoff;
+			reset();
+			return delay(std::min(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, maxBackoff), trState->taskID);
+		}
 	}
 
 	return e;

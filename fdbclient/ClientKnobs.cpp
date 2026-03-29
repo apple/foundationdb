@@ -92,6 +92,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( GRV_BATCH_TIMEOUT,                     0.005 ); if( randomize && BUGGIFY ) GRV_BATCH_TIMEOUT = 0.1;
 	init( BROADCAST_BATCH_SIZE,                     20 ); if( randomize && BUGGIFY ) BROADCAST_BATCH_SIZE = 1;
 	init( TRANSACTION_TIMEOUT_DELAY_INTERVAL,     10.0 ); if( randomize && BUGGIFY ) TRANSACTION_TIMEOUT_DELAY_INTERVAL = 1.0;
+	init( SYSTEM_TRANSACTIONS_USE_EXPONENTIAL_BACKOFF, false);  if(randomize && BUGGIFY ) SYSTEM_TRANSACTIONS_USE_EXPONENTIAL_BACKOFF = true;
 
 	init( LOCATION_CACHE_EVICTION_SIZE,         600000 );
 	init( LOCATION_CACHE_EVICTION_SIZE_SIM,         10 ); if( randomize && BUGGIFY ) LOCATION_CACHE_EVICTION_SIZE_SIM = 3;
