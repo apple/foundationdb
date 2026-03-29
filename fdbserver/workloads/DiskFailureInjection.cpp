@@ -23,7 +23,7 @@
 #include "fdbserver/tester/workloads.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "fdbserver/core/QuietDatabase.actor.h"
+#include "fdbserver/core/QuietDatabase.h"
 #include "fdbserver/core/WorkerEvents.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 

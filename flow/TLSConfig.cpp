@@ -303,7 +303,7 @@ static Future<Void> readEntireFile(std::string filename, std::string* destinatio
 		throw file_too_large();
 	}
 	destination->resize(filesize);
-	co_await success(file->read(&((*destination)[0]), filesize, 0));
+	co_await file->read(&((*destination)[0]), filesize, 0);
 }
 
 Future<LoadedTLSConfig> TLSConfig::loadAsync(const TLSConfig* self) {

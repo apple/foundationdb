@@ -30,7 +30,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/S3Client.h"
 #include "fdbserver/tester/workloads.h"
-#include "fdbserver/core/BulkLoadUtil.actor.h"
+#include "fdbserver/core/BulkLoadUtil.h"
 #include "flow/Platform.h"
 
 #include <string>

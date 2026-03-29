@@ -23,7 +23,7 @@
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "fdbserver/core/QuietDatabase.actor.h"
+#include "fdbserver/core/QuietDatabase.h"
 #include "fdbserver/core/ServerDBInfo.h"
 
 struct WorkerErrorsWorkload : TestWorkload {

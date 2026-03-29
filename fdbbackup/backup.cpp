@@ -2113,7 +2113,7 @@ Future<Void> submitBackup(Database db,
 			if (waitForCompletion) {
 				printf("Submitted and now waiting for the backup on tag `%s' to complete.\n",
 				       printable(StringRef(tagName)).c_str());
-				co_await success(backupAgent.waitBackup(db, tagName));
+				co_await backupAgent.waitBackup(db, tagName);
 			} else {
 				// Check if a backup agent is running
 				bool agentRunning = co_await backupAgent.checkActive(db);
@@ -2300,7 +2300,7 @@ Future<Void> discontinueBackup(Database db, std::string tagName, WaitForComplete
 		if (waitForCompletion) {
 			printf("Discontinued and now waiting for the backup on tag `%s' to complete.\n",
 			       printable(StringRef(tagName)).c_str());
-			co_await success(backupAgent.waitBackup(db, tagName));
+			co_await backupAgent.waitBackup(db, tagName);
 		} else {
 			printf("The backup on tag `%s' was successfully discontinued.\n", printable(StringRef(tagName)).c_str());
 		}
@@ -2891,7 +2891,7 @@ Future<Void> queryBackup(const char* name,
 		if (snapshotVersion != invalidVersion) {
 			// When a snapshot version is specified, we will first get a restore set using the latest snapshot file to
 			// restore to the snapshot version. After snapshot version, we will only use mutation logs to restore.
-			co_await store(fileSet, bc->getRestoreSet(snapshotVersion, keyRangesFilter));
+			fileSet = co_await bc->getRestoreSet(snapshotVersion, keyRangesFilter);
 			if (fileSet.present()) {
 				result["snapshot_version"] = fileSet.get().targetVersion;
 				for (const auto& rangeFile : fileSet.get().ranges) {
@@ -2936,11 +2936,10 @@ Future<Void> queryBackup(const char* name,
 			}
 
 			// We only need to know all the mutation logs from `snapshotVersion` to `restoreVersion`.
-			co_await store(fileSet,
-			               bc->getRestoreSet(restoreVersion, keyRangesFilter, /*logOnly=*/true, snapshotVersion));
+			fileSet = co_await bc->getRestoreSet(restoreVersion, keyRangesFilter, /*logOnly=*/true, snapshotVersion);
 		} else {
 			// When a snapshot version is not specified, we use the latest snapshot to restore to the `restoreVersion`.
-			co_await store(fileSet, bc->getRestoreSet(restoreVersion, keyRangesFilter));
+			fileSet = co_await bc->getRestoreSet(restoreVersion, keyRangesFilter);
 		}
 
 		if (fileSet.present()) {
@@ -3012,7 +3011,7 @@ Future<Void> listBackup(std::string baseUrl, Optional<std::string> proxy) {
 }
 
 Future<Void> listBackupTags(Database cx) {
-	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
 	while (true) {
 		Error err;
 		try {

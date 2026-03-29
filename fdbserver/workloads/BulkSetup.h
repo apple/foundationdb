@@ -31,7 +31,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbserver/core/ServerDBInfo.h"
-#include "fdbserver/core/QuietDatabase.actor.h"
+#include "fdbserver/core/QuietDatabase.h"
 #include "fdbserver/tester/WorkloadUtils.h"
 #include "fdbrpc/simulator.h"
 

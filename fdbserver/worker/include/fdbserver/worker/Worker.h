@@ -1,5 +1,5 @@
 /*
- * Worker.actor.h
+ * Worker.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,11 +20,8 @@
 
 #pragma once
 
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_WORKER_WORKER_ACTOR_G_H)
-#define FDBSERVER_WORKER_WORKER_ACTOR_G_H
-#include "fdbserver/worker/Worker.actor.g.h"
-#elif !defined(FDBSERVER_WORKER_WORKER_ACTOR_H)
-#define FDBSERVER_WORKER_WORKER_ACTOR_H
+#ifndef FDBSERVER_WORKER_WORKER_H
+#define FDBSERVER_WORKER_WORKER_H
 
 #include <string>
 
@@ -37,21 +34,17 @@
 struct ClusterControllerFullInterface;
 struct ServerDBInfo;
 
-#include "flow/actorcompiler.h" // This must be the last #include
-
-ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
-                        LocalityData localities,
-                        ProcessClass processClass,
-                        std::string dataFolder,
-                        std::string coordFolder,
-                        int64_t memoryLimit,
-                        std::string metricsConnFile,
-                        std::string metricsPrefix,
-                        int64_t memoryProfilingThreshold,
-                        std::string whitelistBinPaths,
-                        bool consistencyCheckUrgentMode);
+Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
+                  LocalityData localities,
+                  ProcessClass processClass,
+                  std::string dataFolder,
+                  std::string coordFolder,
+                  int64_t memoryLimit,
+                  std::string metricsConnFile,
+                  std::string metricsPrefix,
+                  int64_t memoryProfilingThreshold,
+                  std::string whitelistBinPaths,
+                  bool consistencyCheckUrgentMode);
 
 void registerThreadForProfiling();
-
-#include "flow/unactorcompiler.h"
 #endif
