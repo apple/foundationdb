@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <unordered_map>
 #include <utility>
 
 #include "fmt/format.h"
@@ -32,6 +33,51 @@
 namespace cluster_health {
 
 namespace {
+
+template <class Interface>
+Future<LatestWorkerEvents> latestEventOnInterfaces(std::vector<Interface> interfaces,
+                                                   std::unordered_map<NetworkAddress, WorkerInterface> addressWorkers,
+                                                   std::string eventName) {
+	try {
+		std::vector<Future<ErrorOr<TraceEventFields>>> eventTraces;
+		std::vector<NetworkAddress> addresses;
+		std::set<std::string> failed;
+		WorkerEvents results;
+
+		for (auto const& interf : interfaces) {
+			auto workerIt = addressWorkers.find(interf.address());
+			if (workerIt == addressWorkers.end()) {
+				failed.insert(interf.address().toString());
+				results[interf.address()] = TraceEventFields();
+				continue;
+			}
+
+			addresses.push_back(interf.address());
+			eventTraces.push_back(
+			    errorOr(timeoutError(workerIt->second.eventLogRequest.getReply(EventLogRequest(
+			                             Standalone<StringRef>(interf.id().toString() + "/" + eventName))),
+			                         2.0)));
+		}
+
+		co_await waitForAll(eventTraces);
+
+		for (int i = 0; i < eventTraces.size(); ++i) {
+			ErrorOr<TraceEventFields> const& traceEvent = eventTraces[i].get();
+			if (traceEvent.isError()) {
+				failed.insert(addresses[i].toString());
+				results[addresses[i]] = TraceEventFields();
+			} else {
+				results[addresses[i]] = traceEvent.get();
+			}
+		}
+
+		co_return std::make_pair(std::move(results), std::move(failed));
+	} catch (Error& e) {
+		ASSERT(e.code() ==
+		       error_code_actor_cancelled); // All errors should be filtering through the errorOr actor above
+		throw;
+	}
+}
 
 uint8_t levelToInt(Level level) {
 	switch (level) {
@@ -80,8 +126,34 @@ void WorkerEventProvider::setWorkers(std::vector<WorkerDetails> workers) {
 	this->workers = std::move(workers);
 }
 
+void WorkerEventProvider::setStorageServers(std::vector<StorageServerInterface> storageServers) {
+	this->storageServers = std::move(storageServers);
+}
+
+void WorkerEventProvider::setTLogs(std::vector<TLogInterface> tlogs) {
+	this->tlogs = std::move(tlogs);
+}
+
 Future<LatestWorkerEvents> WorkerEventProvider::getLatestEvents(std::string const& eventName) const {
 	return latestEventOnWorkers(workers, eventName);
+}
+
+Future<LatestWorkerEvents> WorkerEventProvider::getLatestStorageServerEvents(std::string const& eventName) const {
+	std::unordered_map<NetworkAddress, WorkerInterface> addressWorkers;
+	addressWorkers.reserve(workers.size());
+	for (auto const& worker : workers) {
+		addressWorkers.emplace(worker.interf.address(), worker.interf);
+	}
+	return latestEventOnInterfaces(storageServers, std::move(addressWorkers), eventName);
+}
+
+Future<LatestWorkerEvents> WorkerEventProvider::getLatestTLogEvents(std::string const& eventName) const {
+	std::unordered_map<NetworkAddress, WorkerInterface> addressWorkers;
+	addressWorkers.reserve(workers.size());
+	for (auto const& worker : workers) {
+		addressWorkers.emplace(worker.interf.address(), worker.interf);
+	}
+	return latestEventOnInterfaces(tlogs, std::move(addressWorkers), eventName);
 }
 
 Monitor::Monitor(std::vector<std::unique_ptr<IFactor>>&& factors,

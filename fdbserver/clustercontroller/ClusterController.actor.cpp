@@ -115,6 +115,15 @@ void ClusterControllerData::updateClusterHealthMonitorWorkers() {
 		workers.push_back(workerInfo.details);
 	}
 	clusterHealthWorkerEventProvider->setWorkers(std::move(workers));
+
+	std::vector<StorageServerInterface> storageServers;
+	storageServers.reserve(storageStatusInfos.size());
+	for (auto const& storageStatusInfo : storageStatusInfos) {
+		storageServers.push_back(storageStatusInfo);
+	}
+	clusterHealthWorkerEventProvider->setStorageServers(std::move(storageServers));
+
+	clusterHealthWorkerEventProvider->setTLogs(db.serverInfo->get().logSystemConfig.allPresentLogs());
 }
 
 ACTOR Future<Optional<Value>> getPreviousCoordinators(ClusterControllerData* self) {
@@ -1281,6 +1290,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		dbInfo.id = deterministicRandom()->randomUniqueID();
 		dbInfo.infoGeneration = ++self->db.dbInfoCount;
 		self->db.serverInfo->set(dbInfo);
+		self->updateClusterHealthMonitorWorkers();
 	}
 
 	checkOutstandingRequests(self);
@@ -1855,6 +1865,7 @@ ACTOR Future<Void> monitorStorageMetadata(ClusterControllerData* self) {
 			wait(tr->commit());
 
 			self->storageStatusInfos = std::move(servers);
+			self->updateClusterHealthMonitorWorkers();
 			wait(watchFuture);
 			tr->reset();
 		} catch (Error& e) {

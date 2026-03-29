@@ -26,6 +26,8 @@
 #include <vector>
 
 #include "ClusterHealthIFactor.h"
+#include "fdbclient/StorageServerInterface.h"
+#include "fdbserver/core/TLogInterface.h"
 #include "fdbserver/core/WorkerEvents.h"
 #include "flow/flow.h"
 
@@ -49,17 +51,25 @@ public:
 	virtual void addref() const = 0;
 	virtual void delref() const = 0;
 	virtual Future<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const = 0;
+	virtual Future<LatestWorkerEvents> getLatestStorageServerEvents(std::string const& eventName) const = 0;
+	virtual Future<LatestWorkerEvents> getLatestTLogEvents(std::string const& eventName) const = 0;
 };
 
 // Production event provider backed by worker event-log RPCs.
 class WorkerEventProvider final : public IWorkerEventProvider, public ReferenceCounted<WorkerEventProvider> {
 	std::vector<WorkerDetails> workers;
+	std::vector<StorageServerInterface> storageServers;
+	std::vector<TLogInterface> tlogs;
 
 public:
 	void addref() const override { ReferenceCounted<WorkerEventProvider>::addref(); }
 	void delref() const override { ReferenceCounted<WorkerEventProvider>::delref(); }
 	void setWorkers(std::vector<WorkerDetails> workers);
+	void setStorageServers(std::vector<StorageServerInterface> storageServers);
+	void setTLogs(std::vector<TLogInterface> tlogs);
 	Future<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const override;
+	Future<LatestWorkerEvents> getLatestStorageServerEvents(std::string const& eventName) const override;
+	Future<LatestWorkerEvents> getLatestTLogEvents(std::string const& eventName) const override;
 };
 
 // Periodically evaluates factors and logs the aggregate cluster-health metric.

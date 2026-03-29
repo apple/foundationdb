@@ -41,14 +41,12 @@ WorkerEvents filterEmptyEvents(WorkerEvents const& events) {
 	return filteredEvents;
 }
 
-Future<Level> fetchSpaceLevel(Reference<IWorkerEventProvider const> workerEventProvider,
-                              std::string const& eventName,
+Future<Level> fetchSpaceLevel(LatestWorkerEvents eventsAndErrors,
                               std::string const& availableBytesField,
                               std::string const& totalBytesField,
                               double interventionThreshold,
                               double criticalInterventionThreshold,
                               char const* failureTraceEventName) {
-	auto eventsAndErrors = co_await workerEventProvider->getLatestEvents(eventName);
 	if (!eventsAndErrors.present()) {
 		co_return Level::METRICS_MISSING;
 	}
@@ -93,8 +91,7 @@ std::string_view StorageSpaceFactor::getName() const {
 
 Future<Level> StorageSpaceFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider,
                                              TrackCodeProbes trackCodeProbes) {
-	Level level = co_await fetchSpaceLevel(workerEventProvider,
-	                                       "StorageMetrics",
+	Level level = co_await fetchSpaceLevel(co_await workerEventProvider->getLatestStorageServerEvents("StorageMetrics"),
 	                                       "KvstoreBytesAvailable",
 	                                       "KvstoreBytesTotal",
 	                                       interventionThreshold,
@@ -117,8 +114,7 @@ std::string_view TLogSpaceFactor::getName() const {
 
 Future<Level> TLogSpaceFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider,
                                           TrackCodeProbes trackCodeProbes) {
-	Level level = co_await fetchSpaceLevel(workerEventProvider,
-	                                       "TLogMetrics",
+	Level level = co_await fetchSpaceLevel(co_await workerEventProvider->getLatestTLogEvents("TLogMetrics"),
 	                                       "QueueDiskBytesAvailable",
 	                                       "QueueDiskBytesTotal",
 	                                       interventionThreshold,

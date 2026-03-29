@@ -32,6 +32,8 @@ namespace {
 
 class FakeWorkerEventProvider final : public IWorkerEventProvider, public ReferenceCounted<FakeWorkerEventProvider> {
 	std::map<std::string, LatestWorkerEvents> latestEventsByName;
+	std::map<std::string, LatestWorkerEvents> latestStorageServerEventsByName;
+	std::map<std::string, LatestWorkerEvents> latestTLogEventsByName;
 
 public:
 	void addref() const override { ReferenceCounted<FakeWorkerEventProvider>::addref(); }
@@ -41,9 +43,33 @@ public:
 		latestEventsByName[std::move(eventName)] = std::move(latestEvents);
 	}
 
+	void setLatestStorageServerEvents(std::string eventName, LatestWorkerEvents latestEvents) {
+		latestStorageServerEventsByName[std::move(eventName)] = std::move(latestEvents);
+	}
+
+	void setLatestTLogEvents(std::string eventName, LatestWorkerEvents latestEvents) {
+		latestTLogEventsByName[std::move(eventName)] = std::move(latestEvents);
+	}
+
 	Future<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const override {
 		auto it = latestEventsByName.find(eventName);
 		if (it == latestEventsByName.end()) {
+			return LatestWorkerEvents();
+		}
+		return it->second;
+	}
+
+	Future<LatestWorkerEvents> getLatestStorageServerEvents(std::string const& eventName) const override {
+		auto it = latestStorageServerEventsByName.find(eventName);
+		if (it == latestStorageServerEventsByName.end()) {
+			return LatestWorkerEvents();
+		}
+		return it->second;
+	}
+
+	Future<LatestWorkerEvents> getLatestTLogEvents(std::string const& eventName) const override {
+		auto it = latestTLogEventsByName.find(eventName);
+		if (it == latestTLogEventsByName.end()) {
 			return LatestWorkerEvents();
 		}
 		return it->second;
@@ -124,19 +150,19 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/StorageSpaceFactor"
 	auto provider = makeReference<FakeWorkerEventProvider>();
 	Level level;
 
-	provider->setLatestEvents(
+	provider->setLatestStorageServerEvents(
 	    "StorageMetrics",
 	    makeLatestWorkerEvents(makeSpaceMetrics("KvstoreBytesAvailable", "KvstoreBytesTotal", 50, 100)));
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::HEALTHY);
 
-	provider->setLatestEvents(
+	provider->setLatestStorageServerEvents(
 	    "StorageMetrics",
 	    makeLatestWorkerEvents(makeSpaceMetrics("KvstoreBytesAvailable", "KvstoreBytesTotal", 15, 100)));
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::INTERVENTION_REQUIRED);
 
-	provider->setLatestEvents(
+	provider->setLatestStorageServerEvents(
 	    "StorageMetrics",
 	    makeLatestWorkerEvents(makeSpaceMetrics("KvstoreBytesAvailable", "KvstoreBytesTotal", 5, 100)));
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
@@ -146,11 +172,11 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/StorageSpaceFactor"
 	mixedRoleEvents.emplace(NetworkAddress(IPAddress(0x01010101), 1), TraceEventFields());
 	mixedRoleEvents.emplace(NetworkAddress(IPAddress(0x02020202), 2),
 	                        makeSpaceMetrics("KvstoreBytesAvailable", "KvstoreBytesTotal", 50, 100));
-	provider->setLatestEvents("StorageMetrics", makeLatestWorkerEvents(std::move(mixedRoleEvents)));
+	provider->setLatestStorageServerEvents("StorageMetrics", makeLatestWorkerEvents(std::move(mixedRoleEvents)));
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::HEALTHY);
 
-	provider->setLatestEvents("StorageMetrics", LatestWorkerEvents());
+	provider->setLatestStorageServerEvents("StorageMetrics", LatestWorkerEvents());
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::METRICS_MISSING);
 }
@@ -160,25 +186,25 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/TLogSpaceFactor") {
 	auto provider = makeReference<FakeWorkerEventProvider>();
 	Level level;
 
-	provider->setLatestEvents(
+	provider->setLatestTLogEvents(
 	    "TLogMetrics",
 	    makeLatestWorkerEvents(makeSpaceMetrics("QueueDiskBytesAvailable", "QueueDiskBytesTotal", 50, 100)));
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::HEALTHY);
 
-	provider->setLatestEvents(
+	provider->setLatestTLogEvents(
 	    "TLogMetrics",
 	    makeLatestWorkerEvents(makeSpaceMetrics("QueueDiskBytesAvailable", "QueueDiskBytesTotal", 15, 100)));
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::INTERVENTION_REQUIRED);
 
-	provider->setLatestEvents(
+	provider->setLatestTLogEvents(
 	    "TLogMetrics",
 	    makeLatestWorkerEvents(makeSpaceMetrics("QueueDiskBytesAvailable", "QueueDiskBytesTotal", 5, 100)));
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::CRITICAL_INTERVENTION_REQUIRED);
 
-	provider->setLatestEvents("TLogMetrics", LatestWorkerEvents());
+	provider->setLatestTLogEvents("TLogMetrics", LatestWorkerEvents());
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::METRICS_MISSING);
 }
