@@ -2772,8 +2772,8 @@ void RocksDBKeyValueStore::Writer::action(RestoreAction& a) {
 IKeyValueStore* keyValueStoreRocksDB(std::string const& path,
                                      UID logID,
                                      KeyValueStoreType storeType,
-                                     bool checkChecksums,
-                                     bool checkIntegrity) {
+                                     CheckChecksums checkChecksums,
+                                     CheckIntegrity checkIntegrity) {
 #ifdef WITH_ROCKSDB
 	return new RocksDBKeyValueStore(path, logID);
 #else
