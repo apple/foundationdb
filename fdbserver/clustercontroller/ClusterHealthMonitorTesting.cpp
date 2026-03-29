@@ -108,11 +108,15 @@ class MovingDataMetricsBuilder {
 		return *this;
 	}
 
-public:
-	MovingDataMetricsBuilder() {
-		inQueue(0).inFlight(0).priorityTeamUnhealthy(0).priorityTeam2Left(0).priorityTeam1Left(0).priorityTeam0Left(0);
+	TraceEventFields buildWithDefault(char const* fieldName, int64_t defaultValue, TraceEventFields fields) const {
+		std::string value;
+		if (!fields.tryGetValue(fieldName, value)) {
+			fields.addField(fieldName, std::to_string(defaultValue));
+		}
+		return fields;
 	}
 
+public:
 	MovingDataMetricsBuilder& inQueue(int64_t value) { return setField("InQueue", value); }
 	MovingDataMetricsBuilder& inFlight(int64_t value) { return setField("InFlight", value); }
 	MovingDataMetricsBuilder& priorityTeamUnhealthy(int64_t value) { return setField("PriorityTeamUnhealthy", value); }
@@ -120,7 +124,16 @@ public:
 	MovingDataMetricsBuilder& priorityTeam1Left(int64_t value) { return setField("PriorityTeam1Left", value); }
 	MovingDataMetricsBuilder& priorityTeam0Left(int64_t value) { return setField("PriorityTeam0Left", value); }
 
-	TraceEventFields build() const { return traceEventFields; }
+	TraceEventFields build() const {
+		TraceEventFields fields = traceEventFields;
+		fields = buildWithDefault("InQueue", 0, std::move(fields));
+		fields = buildWithDefault("InFlight", 0, std::move(fields));
+		fields = buildWithDefault("PriorityTeamUnhealthy", 0, std::move(fields));
+		fields = buildWithDefault("PriorityTeam2Left", 0, std::move(fields));
+		fields = buildWithDefault("PriorityTeam1Left", 0, std::move(fields));
+		fields = buildWithDefault("PriorityTeam0Left", 0, std::move(fields));
+		return fields;
+	}
 };
 
 TraceEventFields makeRecoveryStateMetrics(int statusCode) {
