@@ -1,11 +1,7 @@
 include(FDBBenchmark)
 
 fdb_find_sources(FDBCLIENT_BENCH_SRCS)
-add_flow_target(
-  EXECUTABLE
-  NAME fdbclient_bench
-  SRCS ${FDBCLIENT_BENCH_SRCS}
-  ADDL_SRCS ${CMAKE_SOURCE_DIR}/flow/bench/BenchMain.cpp)
+add_flow_target(EXECUTABLE NAME fdbclient_bench SRCS ${FDBCLIENT_BENCH_SRCS})
 
 fdb_setup_googlebenchmark()
 
