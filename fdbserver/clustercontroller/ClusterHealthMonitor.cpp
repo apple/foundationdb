@@ -190,6 +190,7 @@ Future<Void> Monitor::run() {
 		}
 
 		traceEvent.detail("Aggregate", levelToStr(limitingLevel));
+		traceEvent.detail("AggregateValue", levelToInt(limitingLevel));
 		if (limitingIndex.present()) {
 			traceEvent.detail("LimitingFactor", factors[*limitingIndex]->getName());
 		}

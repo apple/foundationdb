@@ -153,6 +153,7 @@ Fields:
 - `FactorProcessErrors`: same enum
 - `FactorRkThrottling`: same enum
 - `Aggregate`: same enum, computed from the most limiting factor
+- `AggregateValue`: numeric aggregate score, currently one of `0`, `25`, `50`, `75`, or `100`
 - `LimitingFactor`: factor name string, present when not healthy
 
 The aggregate is determined by taking the lowest-scoring level across all factors.
