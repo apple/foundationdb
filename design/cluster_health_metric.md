@@ -109,8 +109,8 @@ Fields used:
 
 Behavior:
 - Returns `CRITICAL_INTERVENTION_REQUIRED` if any worker reports a non-empty latest error.
-- Returns `HEALTHY` if all latest-error records are empty.
-- Returns `METRICS_MISSING` if the latest-error fetch fails.
+- Returns `HEALTHY` if all non-failed latest-error records are empty and at least one latest-error request succeeded.
+- Returns `METRICS_MISSING` only if every latest-error request fails.
 
 ### `RkThrottling`
 

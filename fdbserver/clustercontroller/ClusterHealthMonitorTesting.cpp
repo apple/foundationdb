@@ -283,6 +283,13 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/ProcessErrorsFactor
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::HEALTHY);
 
+	WorkerEvents partiallyFailedLatestErrors;
+	partiallyFailedLatestErrors.emplace(NetworkAddress(IPAddress(0x01010101), 1), TraceEventFields());
+	partiallyFailedLatestErrors.emplace(NetworkAddress(IPAddress(0x02020202), 2), TraceEventFields());
+	provider->setLatestEvents("", makeLatestWorkerEvents(std::move(partiallyFailedLatestErrors), { "2.2.2.2:2" }));
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
+	ASSERT_EQ(level, Level::HEALTHY);
+
 	provider->setLatestEvents("", makeLatestWorkerEvents(WorkerEvents(), { "1.1.1.1:1" }));
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::METRICS_MISSING);

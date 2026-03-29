@@ -234,8 +234,9 @@ Future<Level> ProcessErrorsFactor::fetchLevel(Reference<IWorkerEventProvider con
 	auto const& [events, errors] = eventsAndErrors.get();
 	WorkerEvents filteredEvents = filterEmptyEvents(events);
 	if (filteredEvents.empty()) {
-		CODE_PROBE(trackCodeProbes && errors.empty(), "ClusterHealth ProcessErrorsFactor returns HEALTHY");
-		co_return errors.empty() ? Level::HEALTHY : Level::METRICS_MISSING;
+		bool const hadSuccessfulRequest = events.size() > errors.size();
+		CODE_PROBE(trackCodeProbes && hadSuccessfulRequest, "ClusterHealth ProcessErrorsFactor returns HEALTHY");
+		co_return hadSuccessfulRequest ? Level::HEALTHY : Level::METRICS_MISSING;
 	}
 	CODE_PROBE(trackCodeProbes, "ClusterHealth ProcessErrorsFactor returns CRITICAL_INTERVENTION_REQUIRED");
 	co_return Level::CRITICAL_INTERVENTION_REQUIRED;
