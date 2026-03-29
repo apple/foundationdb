@@ -41,7 +41,6 @@ static Future<Void> splitError(Future<Void> in, Promise<Void> errOut) {
 
 class RatekeeperImpl {
 public:
-
 #if 0
 #ifdef DIFF_PLACEHOLDER_CONFIGURATION_MONITOR
 #endif
