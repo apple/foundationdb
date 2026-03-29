@@ -161,6 +161,10 @@ Monitor::Monitor(std::vector<std::unique_ptr<IFactor>>&& factors,
   : factors(std::move(factors)), workerEventProvider(workerEventProvider) {}
 
 Future<Void> Monitor::run() {
+	if (!SERVER_KNOBS->CLUSTER_HEALTH_METRIC_ENABLE) {
+		co_return;
+	}
+
 	Future<Void> timer = Void();
 	while (true) {
 		co_await timer;
