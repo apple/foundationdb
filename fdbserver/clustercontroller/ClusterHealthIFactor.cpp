@@ -91,14 +91,21 @@ std::string_view StorageSpaceFactor::getName() const {
 	return "StorageSpace";
 }
 
-Future<Level> StorageSpaceFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) {
-	co_return co_await fetchSpaceLevel(workerEventProvider,
-	                                   "StorageMetrics",
-	                                   "KvstoreBytesAvailable",
-	                                   "KvstoreBytesTotal",
-	                                   interventionThreshold,
-	                                   criticalInterventionThreshold,
-	                                   "StorageSpaceFactorFetchFailed");
+Future<Level> StorageSpaceFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider,
+                                             TrackCodeProbes trackCodeProbes) {
+	Level level = co_await fetchSpaceLevel(workerEventProvider,
+	                                       "StorageMetrics",
+	                                       "KvstoreBytesAvailable",
+	                                       "KvstoreBytesTotal",
+	                                       interventionThreshold,
+	                                       criticalInterventionThreshold,
+	                                       "StorageSpaceFactorFetchFailed");
+	CODE_PROBE(trackCodeProbes && level == Level::HEALTHY, "ClusterHealth StorageSpaceFactor returns HEALTHY");
+	CODE_PROBE(trackCodeProbes && level == Level::INTERVENTION_REQUIRED,
+	           "ClusterHealth StorageSpaceFactor returns INTERVENTION_REQUIRED");
+	CODE_PROBE(trackCodeProbes && level == Level::CRITICAL_INTERVENTION_REQUIRED,
+	           "ClusterHealth StorageSpaceFactor returns CRITICAL_INTERVENTION_REQUIRED");
+	co_return level;
 }
 
 TLogSpaceFactor::TLogSpaceFactor(double interventionThreshold, double criticalInterventionThreshold)
@@ -108,21 +115,29 @@ std::string_view TLogSpaceFactor::getName() const {
 	return "TLogSpace";
 }
 
-Future<Level> TLogSpaceFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) {
-	co_return co_await fetchSpaceLevel(workerEventProvider,
-	                                   "TLogMetrics",
-	                                   "QueueDiskBytesAvailable",
-	                                   "QueueDiskBytesTotal",
-	                                   interventionThreshold,
-	                                   criticalInterventionThreshold,
-	                                   "TLogSpaceFactorFetchFailed");
+Future<Level> TLogSpaceFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider,
+                                          TrackCodeProbes trackCodeProbes) {
+	Level level = co_await fetchSpaceLevel(workerEventProvider,
+	                                       "TLogMetrics",
+	                                       "QueueDiskBytesAvailable",
+	                                       "QueueDiskBytesTotal",
+	                                       interventionThreshold,
+	                                       criticalInterventionThreshold,
+	                                       "TLogSpaceFactorFetchFailed");
+	CODE_PROBE(trackCodeProbes && level == Level::HEALTHY, "ClusterHealth TLogSpaceFactor returns HEALTHY");
+	CODE_PROBE(trackCodeProbes && level == Level::INTERVENTION_REQUIRED,
+	           "ClusterHealth TLogSpaceFactor returns INTERVENTION_REQUIRED");
+	CODE_PROBE(trackCodeProbes && level == Level::CRITICAL_INTERVENTION_REQUIRED,
+	           "ClusterHealth TLogSpaceFactor returns CRITICAL_INTERVENTION_REQUIRED");
+	co_return level;
 }
 
 std::string_view StorageReplicationFactor::getName() const {
 	return "StorageReplication";
 }
 
-Future<Level> StorageReplicationFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) {
+Future<Level> StorageReplicationFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider,
+                                                   TrackCodeProbes trackCodeProbes) {
 	auto eventsAndErrors = co_await workerEventProvider->getLatestEvents("MovingData");
 	if (!eventsAndErrors.present()) {
 		co_return Level::METRICS_MISSING;
@@ -154,11 +169,14 @@ Future<Level> StorageReplicationFactor::fetchLevel(Reference<IWorkerEventProvide
 		}
 
 		if (zeroReplicaTeams > 0) {
+			CODE_PROBE(trackCodeProbes, "ClusterHealth StorageReplicationFactor returns OUTAGE");
 			co_return Level::OUTAGE;
 		}
 		if (queuedOrInFlightRepairMoves > 0) {
+			CODE_PROBE(trackCodeProbes, "ClusterHealth StorageReplicationFactor returns SELF_HEALING");
 			co_return Level::SELF_HEALING;
 		}
+		CODE_PROBE(trackCodeProbes, "ClusterHealth StorageReplicationFactor returns HEALTHY");
 		co_return Level::HEALTHY;
 	} catch (Error& e) {
 		TraceEvent(SevWarnAlways, "StorageReplicationFactorFetchFailed").error(e);
@@ -170,7 +188,8 @@ std::string_view RecoveryStateFactor::getName() const {
 	return "RecoveryState";
 }
 
-Future<Level> RecoveryStateFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) {
+Future<Level> RecoveryStateFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider,
+                                              TrackCodeProbes trackCodeProbes) {
 	auto eventsAndErrors = co_await workerEventProvider->getLatestEvents("MasterRecoveryState");
 	if (!eventsAndErrors.present()) {
 		co_return Level::METRICS_MISSING;
@@ -194,6 +213,10 @@ Future<Level> RecoveryStateFactor::fetchLevel(Reference<IWorkerEventProvider con
 				level = Level::SELF_HEALING;
 			}
 		}
+		CODE_PROBE(trackCodeProbes && level == Level::OUTAGE, "ClusterHealth RecoveryStateFactor returns OUTAGE");
+		CODE_PROBE(trackCodeProbes && level == Level::SELF_HEALING,
+		           "ClusterHealth RecoveryStateFactor returns SELF_HEALING");
+		CODE_PROBE(trackCodeProbes && level == Level::HEALTHY, "ClusterHealth RecoveryStateFactor returns HEALTHY");
 		co_return level;
 	} catch (Error& e) {
 		TraceEvent(SevWarnAlways, "RecoveryStateFactorFetchFailed").error(e);
@@ -205,7 +228,8 @@ std::string_view ProcessErrorsFactor::getName() const {
 	return "ProcessErrors";
 }
 
-Future<Level> ProcessErrorsFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) {
+Future<Level> ProcessErrorsFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider,
+                                              TrackCodeProbes trackCodeProbes) {
 	auto eventsAndErrors = co_await workerEventProvider->getLatestEvents("");
 	if (!eventsAndErrors.present()) {
 		co_return Level::METRICS_MISSING;
@@ -214,8 +238,10 @@ Future<Level> ProcessErrorsFactor::fetchLevel(Reference<IWorkerEventProvider con
 	auto const& [events, errors] = eventsAndErrors.get();
 	WorkerEvents filteredEvents = filterEmptyEvents(events);
 	if (filteredEvents.empty()) {
+		CODE_PROBE(trackCodeProbes && errors.empty(), "ClusterHealth ProcessErrorsFactor returns HEALTHY");
 		co_return errors.empty() ? Level::HEALTHY : Level::METRICS_MISSING;
 	}
+	CODE_PROBE(trackCodeProbes, "ClusterHealth ProcessErrorsFactor returns CRITICAL_INTERVENTION_REQUIRED");
 	co_return Level::CRITICAL_INTERVENTION_REQUIRED;
 }
 
@@ -226,7 +252,8 @@ std::string_view RkThrottlingFactor::getName() const {
 	return "RkThrottling";
 }
 
-Future<Level> RkThrottlingFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider) {
+Future<Level> RkThrottlingFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider,
+                                             TrackCodeProbes trackCodeProbes) {
 	auto eventsAndErrors = co_await workerEventProvider->getLatestEvents("RkUpdate");
 	if (!eventsAndErrors.present()) {
 		co_return Level::METRICS_MISSING;
@@ -244,6 +271,7 @@ Future<Level> RkThrottlingFactor::fetchLevel(Reference<IWorkerEventProvider cons
 			(void)address;
 			double tpsLimit = traceEvent.getDouble("TPSLimit");
 			if (tpsLimit == 0.0) {
+				CODE_PROBE(trackCodeProbes, "ClusterHealth RkThrottlingFactor returns OUTAGE");
 				co_return Level::OUTAGE;
 			}
 
@@ -256,8 +284,10 @@ Future<Level> RkThrottlingFactor::fetchLevel(Reference<IWorkerEventProvider cons
 		}
 
 		if (minTpsLimitToReleasedTpsRatio < criticalTpsLimitToReleasedTpsRatioThreshold) {
+			CODE_PROBE(trackCodeProbes, "ClusterHealth RkThrottlingFactor returns CRITICAL_INTERVENTION_REQUIRED");
 			co_return Level::CRITICAL_INTERVENTION_REQUIRED;
 		}
+		CODE_PROBE(trackCodeProbes, "ClusterHealth RkThrottlingFactor returns HEALTHY");
 		co_return Level::HEALTHY;
 	} catch (Error& e) {
 		TraceEvent(SevWarnAlways, "RkThrottlingFactorFetchFailed").error(e);

@@ -127,19 +127,19 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/StorageSpaceFactor"
 	provider->setLatestEvents(
 	    "StorageMetrics",
 	    makeLatestWorkerEvents(makeSpaceMetrics("KvstoreBytesAvailable", "KvstoreBytesTotal", 50, 100)));
-	level = co_await factor.fetchLevel(provider);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::HEALTHY);
 
 	provider->setLatestEvents(
 	    "StorageMetrics",
 	    makeLatestWorkerEvents(makeSpaceMetrics("KvstoreBytesAvailable", "KvstoreBytesTotal", 15, 100)));
-	level = co_await factor.fetchLevel(provider);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::INTERVENTION_REQUIRED);
 
 	provider->setLatestEvents(
 	    "StorageMetrics",
 	    makeLatestWorkerEvents(makeSpaceMetrics("KvstoreBytesAvailable", "KvstoreBytesTotal", 5, 100)));
-	level = co_await factor.fetchLevel(provider);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::CRITICAL_INTERVENTION_REQUIRED);
 
 	WorkerEvents mixedRoleEvents;
@@ -147,11 +147,11 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/StorageSpaceFactor"
 	mixedRoleEvents.emplace(NetworkAddress(IPAddress(0x02020202), 2),
 	                        makeSpaceMetrics("KvstoreBytesAvailable", "KvstoreBytesTotal", 50, 100));
 	provider->setLatestEvents("StorageMetrics", makeLatestWorkerEvents(std::move(mixedRoleEvents)));
-	level = co_await factor.fetchLevel(provider);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::HEALTHY);
 
 	provider->setLatestEvents("StorageMetrics", LatestWorkerEvents());
-	level = co_await factor.fetchLevel(provider);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::METRICS_MISSING);
 }
 
@@ -163,23 +163,23 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/TLogSpaceFactor") {
 	provider->setLatestEvents(
 	    "TLogMetrics",
 	    makeLatestWorkerEvents(makeSpaceMetrics("QueueDiskBytesAvailable", "QueueDiskBytesTotal", 50, 100)));
-	level = co_await factor.fetchLevel(provider);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::HEALTHY);
 
 	provider->setLatestEvents(
 	    "TLogMetrics",
 	    makeLatestWorkerEvents(makeSpaceMetrics("QueueDiskBytesAvailable", "QueueDiskBytesTotal", 15, 100)));
-	level = co_await factor.fetchLevel(provider);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::INTERVENTION_REQUIRED);
 
 	provider->setLatestEvents(
 	    "TLogMetrics",
 	    makeLatestWorkerEvents(makeSpaceMetrics("QueueDiskBytesAvailable", "QueueDiskBytesTotal", 5, 100)));
-	level = co_await factor.fetchLevel(provider);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::CRITICAL_INTERVENTION_REQUIRED);
 
 	provider->setLatestEvents("TLogMetrics", LatestWorkerEvents());
-	level = co_await factor.fetchLevel(provider);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::METRICS_MISSING);
 }
 
@@ -189,26 +189,26 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/StorageReplicationF
 	Level level;
 
 	provider->setLatestEvents("MovingData", makeLatestWorkerEvents(MovingDataMetricsBuilder().build()));
-	level = co_await factor.fetchLevel(provider);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::HEALTHY);
 
 	provider->setLatestEvents(
 	    "MovingData", makeLatestWorkerEvents(MovingDataMetricsBuilder().inQueue(1).priorityTeamUnhealthy(1).build()));
-	level = co_await factor.fetchLevel(provider);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::SELF_HEALING);
 
 	provider->setLatestEvents(
 	    "MovingData", makeLatestWorkerEvents(MovingDataMetricsBuilder().inFlight(1).priorityTeam1Left(1).build()));
-	level = co_await factor.fetchLevel(provider);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::SELF_HEALING);
 
 	provider->setLatestEvents(
 	    "MovingData", makeLatestWorkerEvents(MovingDataMetricsBuilder().inQueue(1).priorityTeam0Left(1).build()));
-	level = co_await factor.fetchLevel(provider);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::OUTAGE);
 
 	provider->setLatestEvents("MovingData", LatestWorkerEvents());
-	level = co_await factor.fetchLevel(provider);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::METRICS_MISSING);
 }
 
@@ -219,26 +219,26 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/RecoveryStateFactor
 
 	provider->setLatestEvents("MasterRecoveryState",
 	                          makeLatestWorkerEvents(makeRecoveryStateMetrics(RecoveryStatus::fully_recovered)));
-	level = co_await factor.fetchLevel(provider);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::HEALTHY);
 
 	provider->setLatestEvents("MasterRecoveryState",
 	                          makeLatestWorkerEvents(makeRecoveryStateMetrics(RecoveryStatus::accepting_commits)));
-	level = co_await factor.fetchLevel(provider);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::SELF_HEALING);
 
 	provider->setLatestEvents("MasterRecoveryState",
 	                          makeLatestWorkerEvents(makeRecoveryStateMetrics(RecoveryStatus::all_logs_recruited)));
-	level = co_await factor.fetchLevel(provider);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::SELF_HEALING);
 
 	provider->setLatestEvents("MasterRecoveryState",
 	                          makeLatestWorkerEvents(makeRecoveryStateMetrics(RecoveryStatus::recovery_transaction)));
-	level = co_await factor.fetchLevel(provider);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::OUTAGE);
 
 	provider->setLatestEvents("MasterRecoveryState", LatestWorkerEvents());
-	level = co_await factor.fetchLevel(provider);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::METRICS_MISSING);
 }
 
@@ -248,21 +248,21 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/ProcessErrorsFactor
 	Level level;
 
 	provider->setLatestEvents("", makeLatestWorkerEvents(makeProcessErrorMetrics("OpenClusterIdError", "io_error")));
-	level = co_await factor.fetchLevel(provider);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::CRITICAL_INTERVENTION_REQUIRED);
 
 	WorkerEvents emptyLatestErrors;
 	emptyLatestErrors.emplace(NetworkAddress(IPAddress(0x01010101), 1), TraceEventFields());
 	provider->setLatestEvents("", makeLatestWorkerEvents(std::move(emptyLatestErrors)));
-	level = co_await factor.fetchLevel(provider);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::HEALTHY);
 
 	provider->setLatestEvents("", makeLatestWorkerEvents(WorkerEvents(), { "1.1.1.1:1" }));
-	level = co_await factor.fetchLevel(provider);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::METRICS_MISSING);
 
 	provider->setLatestEvents("", LatestWorkerEvents());
-	level = co_await factor.fetchLevel(provider);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::METRICS_MISSING);
 }
 
@@ -272,23 +272,23 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/RkThrottlingFactor"
 	Level level;
 
 	provider->setLatestEvents("RkUpdate", makeLatestWorkerEvents(makeRkUpdateMetrics(100, 25)));
-	level = co_await factor.fetchLevel(provider);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::HEALTHY);
 
 	provider->setLatestEvents("RkUpdate", makeLatestWorkerEvents(makeRkUpdateMetrics(100, 40)));
-	level = co_await factor.fetchLevel(provider);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::CRITICAL_INTERVENTION_REQUIRED);
 
 	provider->setLatestEvents("RkUpdate", makeLatestWorkerEvents(makeRkUpdateMetrics(0, 100)));
-	level = co_await factor.fetchLevel(provider);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::HEALTHY);
 
 	provider->setLatestEvents("RkUpdate", makeLatestWorkerEvents(makeRkUpdateMetrics(0, 0)));
-	level = co_await factor.fetchLevel(provider);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::OUTAGE);
 
 	provider->setLatestEvents("RkUpdate", LatestWorkerEvents());
-	level = co_await factor.fetchLevel(provider);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::METRICS_MISSING);
 }
 

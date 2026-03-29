@@ -97,7 +97,7 @@ Future<Void> Monitor::run() {
 		std::vector<Future<Level>> levelFutures;
 		levelFutures.reserve(factors.size());
 		for (auto const& factor : factors) {
-			levelFutures.push_back(factor->fetchLevel(workerEventProvider));
+			levelFutures.push_back(factor->fetchLevel(workerEventProvider, TrackCodeProbes::True));
 		}
 		co_await waitForAll(levelFutures);
 
