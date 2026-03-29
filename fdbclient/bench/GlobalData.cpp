@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbclientbench/GlobalData.h"
+#include "GlobalData.h"
 #include "flow/IRandom.h"
 
 static constexpr size_t globalDataSize = 1 << 20;

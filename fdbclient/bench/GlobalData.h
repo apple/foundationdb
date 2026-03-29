@@ -29,8 +29,6 @@
 KeyValueRef getKV(size_t keySize, size_t valueSize);
 KeyRef getKey(size_t keySize);
 
-// Pre-generate a vector of T using a lambda then return them
-// via next() one by one with wrap-around
 template <typename T>
 struct InputGenerator {
 	InputGenerator() {}

@@ -23,7 +23,7 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/MutationList.h"
-#include "fdbclientbench/GlobalData.h"
+#include "GlobalData.h"
 #include "flow/Arena.h"
 #include "flow/FastAlloc.h"
 
