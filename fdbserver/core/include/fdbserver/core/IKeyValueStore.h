@@ -171,11 +171,17 @@ protected:
 	virtual ~IKeyValueStore() {}
 };
 
+FDB_BOOLEAN_PARAM(CheckChecksums);
+FDB_BOOLEAN_PARAM(CheckIntegrity);
+FDB_BOOLEAN_PARAM(DisableSnapshot);
+FDB_BOOLEAN_PARAM(ReplaceContent);
+FDB_BOOLEAN_PARAM(ExactRecovery);
+
 extern IKeyValueStore* keyValueStoreSQLite(std::string const& filename,
                                            UID logID,
                                            KeyValueStoreType storeType,
-                                           bool checkChecksums = false,
-                                           bool checkIntegrity = false);
+                                           CheckChecksums = CheckChecksums::False,
+                                           CheckIntegrity = CheckIntegrity::False);
 extern IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename,
                                               UID logID,
                                               Reference<AsyncVar<struct ServerDBInfo> const> db = {},
@@ -183,13 +189,13 @@ extern IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename,
 extern IKeyValueStore* keyValueStoreRocksDB(std::string const& path,
                                             UID logID,
                                             KeyValueStoreType storeType,
-                                            bool checkChecksums = false,
-                                            bool checkIntegrity = false);
+                                            CheckChecksums = CheckChecksums::False,
+                                            CheckIntegrity = CheckIntegrity::False);
 extern IKeyValueStore* keyValueStoreShardedRocksDB(std::string const& path,
                                                    UID logID,
                                                    KeyValueStoreType storeType,
-                                                   bool checkChecksums = false,
-                                                   bool checkIntegrity = false);
+                                                   CheckChecksums = CheckChecksums::False,
+                                                   CheckIntegrity = CheckIntegrity::False);
 extern IKeyValueStore* keyValueStoreMemory(std::string const& basename,
                                            UID logID,
                                            int64_t memoryLimit,
@@ -199,7 +205,7 @@ extern IKeyValueStore* keyValueStoreLogSystem(class IDiskQueue* queue,
                                               Reference<AsyncVar<struct ServerDBInfo> const> db,
                                               UID logID,
                                               int64_t memoryLimit,
-                                              bool disableSnapshot,
-                                              bool replaceContent,
-                                              bool exactRecovery);
+                                              DisableSnapshot,
+                                              ReplaceContent,
+                                              ExactRecovery);
 #endif

@@ -33,9 +33,14 @@ IKeyValueStore* openKVStore(KeyValueStoreType storeType,
                             int64_t pageCacheBytes) {
 	switch (storeType) {
 	case KeyValueStoreType::SSD_BTREE_V1:
-		return keyValueStoreSQLite(filename, logID, KeyValueStoreType::SSD_BTREE_V1, false, checkIntegrity);
+		return keyValueStoreSQLite(
+		    filename, logID, KeyValueStoreType::SSD_BTREE_V1, CheckChecksums::False, CheckIntegrity(checkIntegrity));
 	case KeyValueStoreType::SSD_BTREE_V2:
-		return keyValueStoreSQLite(filename, logID, KeyValueStoreType::SSD_BTREE_V2, checkChecksums, checkIntegrity);
+		return keyValueStoreSQLite(filename,
+		                           logID,
+		                           KeyValueStoreType::SSD_BTREE_V2,
+		                           CheckChecksums(checkChecksums),
+		                           CheckIntegrity(checkIntegrity));
 	case KeyValueStoreType::MEMORY:
 		return keyValueStoreMemory(filename, logID, memoryLimit);
 	case KeyValueStoreType::SSD_REDWOOD_V1:
@@ -43,7 +48,8 @@ IKeyValueStore* openKVStore(KeyValueStoreType storeType,
 	case KeyValueStoreType::SSD_ROCKSDB_V1:
 		return keyValueStoreRocksDB(filename, logID, storeType);
 	case KeyValueStoreType::SSD_SHARDED_ROCKSDB:
-		return keyValueStoreShardedRocksDB(filename, logID, storeType, checkChecksums, checkIntegrity);
+		return keyValueStoreShardedRocksDB(
+		    filename, logID, storeType, CheckChecksums(checkChecksums), CheckIntegrity(checkIntegrity));
 	case KeyValueStoreType::MEMORY_RADIXTREE:
 		return keyValueStoreMemory(filename,
 		                           logID,

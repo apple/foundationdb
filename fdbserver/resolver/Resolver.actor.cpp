@@ -746,7 +746,7 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 	if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
 		self->logAdapter = new LogSystemDiskQueueAdapter(self->logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
 		self->txnStateStore = keyValueStoreLogSystem(
-		    self->logAdapter, db, resolver.id(), /*doc=*/2e9, /*u=*/true, /*ment=*/true, /*constants=*/true);
+		    self->logAdapter, db, resolver.id(), 2e9, DisableSnapshot::True, ReplaceContent::True, ExactRecovery::True);
 
 		// wait for txnStateStore recovery
 		wait(success(self->txnStateStore->readValue(StringRef())));
