@@ -7886,7 +7886,6 @@ Future<Void> Transaction::onError(Error const& e) {
 		} else if (e.code() == error_code_transaction_rejected_range_locked) {
 			++trState->cx->transactionsLockRejected;
 		}
-		// block 1
 		double backoff = getBackoff(e.code());
 		reset();
 		return delay(backoff, trState->taskID);
@@ -7903,12 +7902,10 @@ Future<Void> Transaction::onError(Error const& e) {
 		if (e.code() == error_code_transaction_too_old &&
 			trState->options.maxBackoff != CLIENT_KNOBS->DEFAULT_MAX_BACKOFF &&
 			CLIENT_KNOBS->SYSTEM_TRANSACTIONS_USE_EXPONENTIAL_BACKOFF) {
-			// block 2
 			double backoff = getBackoff(e.code());
 			reset();
 			return delay(backoff, trState->taskID);
 		} else {
-			// block 3
 			double maxBackoff = trState->options.maxBackoff;
 			reset();
 			return delay(std::min(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, maxBackoff), trState->taskID);
