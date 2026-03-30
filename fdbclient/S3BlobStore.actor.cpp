@@ -1590,12 +1590,13 @@ Future<Void> S3BlobStoreEndpoint::listObjectsStream(std::string const& bucket,
 	    Reference<S3BlobStoreEndpoint>::addRef(this), bucket, results, prefix, delimiter, maxDepth, recurseFilter);
 }
 
-Future<S3BlobStoreEndpoint::ListResult> listObjects_impl(Reference<S3BlobStoreEndpoint> bstore,
-                                                         std::string bucket,
-                                                         Optional<std::string> prefix,
-                                                         Optional<char> delimiter,
-                                                         int maxDepth,
-                                                         std::function<bool(std::string const&)> recurseFilterUnsafe) {
+AsyncResult<S3BlobStoreEndpoint::ListResult> listObjects_impl(
+    Reference<S3BlobStoreEndpoint> bstore,
+    std::string bucket,
+    Optional<std::string> prefix,
+    Optional<char> delimiter,
+    int maxDepth,
+    std::function<bool(std::string const&)> recurseFilterUnsafe) {
 	// C++20 coroutine safety: copy const& params to survive across suspension.
 	auto recurseFilter = recurseFilterUnsafe;
 
@@ -1632,7 +1633,7 @@ Future<S3BlobStoreEndpoint::ListResult> listObjects_impl(Reference<S3BlobStoreEn
 	co_return results;
 }
 
-Future<S3BlobStoreEndpoint::ListResult> S3BlobStoreEndpoint::listObjects(
+AsyncResult<S3BlobStoreEndpoint::ListResult> S3BlobStoreEndpoint::listObjects(
     std::string const& bucket,
     Optional<std::string> prefix,
     Optional<char> delimiter,

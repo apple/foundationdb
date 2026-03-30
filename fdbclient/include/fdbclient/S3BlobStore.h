@@ -420,11 +420,11 @@ public:
 	                               std::function<bool(std::string const&)> recurseFilter = nullptr);
 
 	// Get a list of the files in a bucket, see listObjectsStream for more argument detail.
-	Future<ListResult> listObjects(std::string const& bucket,
-	                               Optional<std::string> prefix = {},
-	                               Optional<char> delimiter = {},
-	                               int maxDepth = 0,
-	                               std::function<bool(std::string const&)> recurseFilter = nullptr);
+	AsyncResult<ListResult> listObjects(std::string const& bucket,
+	                                    Optional<std::string> prefix = {},
+	                                    Optional<char> delimiter = {},
+	                                    int maxDepth = 0,
+	                                    std::function<bool(std::string const&)> recurseFilter = nullptr);
 
 	// Get a list of all buckets
 	Future<std::vector<std::string>> listBuckets();
