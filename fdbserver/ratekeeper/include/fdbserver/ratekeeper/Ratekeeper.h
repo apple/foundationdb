@@ -1,5 +1,5 @@
 /*
- * Ratekeeper.actor.h
+ * Ratekeeper.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,21 +18,16 @@
  * limitations under the License.
  */
 
-#pragma once
+#ifndef FDBSERVER_RATEKEEPER_PUBLIC_H
+#define FDBSERVER_RATEKEEPER_PUBLIC_H
 
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RATEKEEPER_ACTOR_G_H)
-#define FDBSERVER_RATEKEEPER_ACTOR_G_H
-#include "fdbserver/ratekeeper/Ratekeeper.actor.g.h"
-#elif !defined(FDBSERVER_RATEKEEPER_ACTOR_H)
-#define FDBSERVER_RATEKEEPER_ACTOR_H
+#pragma once
 
 #include "fdbserver/core/RatekeeperInterface.h"
 #include "flow/flow.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct ServerDBInfo;
 
 Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo> const> db);
 
-#include "flow/unactorcompiler.h"
 #endif

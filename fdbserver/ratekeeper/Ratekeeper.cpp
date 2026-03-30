@@ -1,5 +1,5 @@
 /*
- * Ratekeeper.actor.cpp
+ * Ratekeeper.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -22,7 +22,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/WaitFailure.h"
-#include "fdbserver/ratekeeper/Ratekeeper.actor.h"
+#include "fdbserver/ratekeeper/Ratekeeper.h"
 #include "Ratekeeper.h"
 #include "TagThrottler.h"
 #include "flow/OwningResource.h"
@@ -39,667 +39,602 @@ static Future<Void> splitError(Future<Void> in, Promise<Void> errOut) {
 	}
 }
 
-class RatekeeperImpl {
-public:
 #if 0
 #ifdef DIFF_PLACEHOLDER_CONFIGURATION_MONITOR
 #endif
 #endif
-	static Future<Void> configurationMonitor(Ratekeeper* self) {
+Future<Void> Ratekeeper::configurationMonitor() {
+	while (true) {
+		ReadYourWritesTransaction tr(db);
+
 		while (true) {
-			ReadYourWritesTransaction tr(self->db);
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				RangeResult results = co_await tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY);
+				ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
 
-			while (true) {
-				Error err;
-				try {
-					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-					RangeResult results = co_await tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY);
-					ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
+				configuration.fromKeyValues((VectorRef<KeyValueRef>)results);
 
-					self->configuration.fromKeyValues((VectorRef<KeyValueRef>)results);
-
-					Future<Void> watchFuture = tr.watch(moveKeysLockOwnerKey) || tr.watch(excludedServersVersionKey) ||
-					                           tr.watch(failedServersVersionKey) ||
-					                           tr.watch(excludedLocalityVersionKey) ||
-					                           tr.watch(failedLocalityVersionKey);
-					co_await tr.commit();
-					co_await watchFuture;
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				co_await tr.onError(err);
+				Future<Void> watchFuture = tr.watch(moveKeysLockOwnerKey) || tr.watch(excludedServersVersionKey) ||
+				                           tr.watch(failedServersVersionKey) || tr.watch(excludedLocalityVersionKey) ||
+				                           tr.watch(failedLocalityVersionKey);
+				co_await tr.commit();
+				co_await watchFuture;
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
+}
 
 #if 0
 #ifdef DIFF_PLACEHOLDER_MONITOR_SERVER_LIST_CHANGE
 #endif
 #endif
-	static Future<Void> monitorServerListChange(
-	    Ratekeeper* self,
-	    PromiseStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges) {
-		std::map<UID, StorageServerInterface> oldServers;
-		Transaction tr(self->db);
+Future<Void> Ratekeeper::monitorServerListChange(
+    PromiseStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges) {
+	std::map<UID, StorageServerInterface> oldServers;
+	Transaction tr(db);
 
-		while (true) {
-			Error err;
-			try {
-				if (now() - self->lastSSListFetchedTimestamp > 2 * SERVER_KNOBS->SERVER_LIST_DELAY) {
-					TraceEvent(SevWarnAlways, "RatekeeperGetSSListLongLatency", self->id)
-					    .detail("Latency", now() - self->lastSSListFetchedTimestamp);
-				}
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
-				    co_await NativeAPI::getServerListAndProcessClasses(&tr);
-				self->lastSSListFetchedTimestamp = now();
+	while (true) {
+		Error err;
+		try {
+			if (now() - lastSSListFetchedTimestamp > 2 * SERVER_KNOBS->SERVER_LIST_DELAY) {
+				TraceEvent(SevWarnAlways, "RatekeeperGetSSListLongLatency", id)
+				    .detail("Latency", now() - lastSSListFetchedTimestamp);
+			}
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
+			    co_await NativeAPI::getServerListAndProcessClasses(&tr);
+			lastSSListFetchedTimestamp = now();
 
-				std::map<UID, StorageServerInterface> newServers;
-				for (const auto& [ssi, _] : results) {
-					const UID serverId = ssi.id();
-					newServers[serverId] = ssi;
+			std::map<UID, StorageServerInterface> newServers;
+			for (const auto& [ssi, _] : results) {
+				const UID serverId = ssi.id();
+				newServers[serverId] = ssi;
 
-					if (oldServers.contains(serverId)) {
-						if (ssi.getValue.getEndpoint() != oldServers[serverId].getValue.getEndpoint() ||
-						    ssi.isAcceptingRequests() != oldServers[serverId].isAcceptingRequests()) {
-							serverChanges.send(std::make_pair(serverId, Optional<StorageServerInterface>(ssi)));
-						}
-						oldServers.erase(serverId);
-					} else {
+				if (oldServers.contains(serverId)) {
+					if (ssi.getValue.getEndpoint() != oldServers[serverId].getValue.getEndpoint() ||
+					    ssi.isAcceptingRequests() != oldServers[serverId].isAcceptingRequests()) {
 						serverChanges.send(std::make_pair(serverId, Optional<StorageServerInterface>(ssi)));
 					}
+					oldServers.erase(serverId);
+				} else {
+					serverChanges.send(std::make_pair(serverId, Optional<StorageServerInterface>(ssi)));
 				}
-
-				for (const auto& it : oldServers) {
-					serverChanges.send(std::make_pair(it.first, Optional<StorageServerInterface>()));
-				}
-
-				oldServers.swap(newServers);
-				tr = Transaction(self->db);
-				co_await delay(SERVER_KNOBS->SERVER_LIST_DELAY);
-				continue;
-			} catch (Error& e) {
-				err = e;
 			}
-			if (err.code() != error_code_actor_cancelled) {
-				TraceEvent("RatekeeperGetSSListError", self->id).errorUnsuppressed(err).suppressFor(1.0);
+
+			for (const auto& it : oldServers) {
+				serverChanges.send(std::make_pair(it.first, Optional<StorageServerInterface>()));
 			}
-			co_await tr.onError(err);
+
+			oldServers.swap(newServers);
+			tr = Transaction(db);
+			co_await delay(SERVER_KNOBS->SERVER_LIST_DELAY);
+			continue;
+		} catch (Error& e) {
+			err = e;
 		}
+		if (err.code() != error_code_actor_cancelled) {
+			TraceEvent("RatekeeperGetSSListError", id).errorUnsuppressed(err).suppressFor(1.0);
+		}
+		co_await tr.onError(err);
 	}
+}
 
 #if 0
 #ifdef DIFF_PLACEHOLDER_TRACK_STORAGE_SERVER_QUEUE_INFO
 #endif
 #endif
-	static Future<Void> trackStorageServerQueueInfo(ActorWeakSelfRef<Ratekeeper> self, StorageServerInterface ssi) {
-		self->storageQueueInfo.insert(mapPair(ssi.id(), StorageQueueInfo(self->id, ssi.id(), ssi.locality)));
-		self->healthMetrics.storageStats[ssi.id()] = HealthMetrics::StorageStats();
-		TraceEvent("RkTrackStorageStart", self->id)
-		    .detail("StorageServer", ssi.id())
-		    .detail("Locality", ssi.locality.toString());
+Future<Void> Ratekeeper::trackStorageServerQueueInfo(StorageServerInterface ssi) {
+	storageQueueInfo.insert(mapPair(ssi.id(), StorageQueueInfo(id, ssi.id(), ssi.locality)));
+	healthMetrics.storageStats[ssi.id()] = HealthMetrics::StorageStats();
+	TraceEvent("RkTrackStorageStart", id).detail("StorageServer", ssi.id()).detail("Locality", ssi.locality.toString());
 
-		while (true) {
-			try {
-				ErrorOr<StorageQueuingMetricsReply> reply = co_await ssi.getQueuingMetrics.getReplyUnlessFailedFor(
-				    StorageQueuingMetricsRequest(), 0, 0); // SOMEDAY: or tryGetReply?
-				Map<UID, StorageQueueInfo>::iterator myQueueInfo = self->storageQueueInfo.find(ssi.id());
-				ASSERT(myQueueInfo != self->storageQueueInfo.end());
-				if (reply.present()) {
-					myQueueInfo->value.update(reply.get(), self->smoothTotalDurableBytes);
-					myQueueInfo->value.acceptingRequests = ssi.isAcceptingRequests();
+	while (true) {
+		try {
+			ErrorOr<StorageQueuingMetricsReply> reply = co_await ssi.getQueuingMetrics.getReplyUnlessFailedFor(
+			    StorageQueuingMetricsRequest(), 0, 0); // SOMEDAY: or tryGetReply?
+			Map<UID, StorageQueueInfo>::iterator myQueueInfo = storageQueueInfo.find(ssi.id());
+			ASSERT(myQueueInfo != storageQueueInfo.end());
+			if (reply.present()) {
+				myQueueInfo->value.update(reply.get(), smoothTotalDurableBytes);
+				myQueueInfo->value.acceptingRequests = ssi.isAcceptingRequests();
 
-					// Update health stats.
-					auto ssMetrics = self->healthMetrics.storageStats.find(ssi.id());
-					ASSERT(ssMetrics != self->healthMetrics.storageStats.end());
-					ssMetrics->second.storageQueue = myQueueInfo->value.getStorageQueueBytes();
-					ssMetrics->second.storageDurabilityLag = myQueueInfo->value.getDurabilityLag();
-					ssMetrics->second.cpuUsage = reply.get().cpuUsage;
-					ssMetrics->second.diskUsage = reply.get().diskUsage;
-				} else {
-					if (myQueueInfo->value.valid) {
-						TraceEvent("RkStorageServerDidNotRespond", self->id).detail("StorageServer", ssi.id());
-					}
-					myQueueInfo->value.valid = false;
+				// Update health stats.
+				auto ssMetrics = healthMetrics.storageStats.find(ssi.id());
+				ASSERT(ssMetrics != healthMetrics.storageStats.end());
+				ssMetrics->second.storageQueue = myQueueInfo->value.getStorageQueueBytes();
+				ssMetrics->second.storageDurabilityLag = myQueueInfo->value.getDurabilityLag();
+				ssMetrics->second.cpuUsage = reply.get().cpuUsage;
+				ssMetrics->second.diskUsage = reply.get().diskUsage;
+			} else {
+				if (myQueueInfo->value.valid) {
+					TraceEvent("RkStorageServerDidNotRespond", id).detail("StorageServer", ssi.id());
 				}
-
-				co_await (delayJittered(SERVER_KNOBS->METRIC_UPDATE_RATE) &&
-				          IFailureMonitor::failureMonitor().onStateEqual(ssi.getQueuingMetrics.getEndpoint(),
-				                                                         FailureStatus(false)));
-			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled) {
-					self->storageQueueInfo.erase(ssi.id());
-					self->healthMetrics.storageStats.erase(ssi.id());
-					throw;
-				}
-				// Do no stop tracking storage server. The error might be recoverable.
-				Map<UID, StorageQueueInfo>::iterator myQueueInfo = self->storageQueueInfo.find(ssi.id());
-				ASSERT(myQueueInfo != self->storageQueueInfo.end());
 				myQueueInfo->value.valid = false;
-				TraceEvent("RkTrackStorageError", self->id)
-				    .detail("StorageServer", ssi.id())
-				    .detail("Locality", ssi.locality.toString())
-				    .errorUnsuppressed(e);
 			}
+
+			co_await (delayJittered(SERVER_KNOBS->METRIC_UPDATE_RATE) &&
+			          IFailureMonitor::failureMonitor().onStateEqual(ssi.getQueuingMetrics.getEndpoint(),
+			                                                         FailureStatus(false)));
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				storageQueueInfo.erase(ssi.id());
+				healthMetrics.storageStats.erase(ssi.id());
+				throw;
+			}
+			// Do no stop tracking storage server. The error might be recoverable.
+			Map<UID, StorageQueueInfo>::iterator myQueueInfo = storageQueueInfo.find(ssi.id());
+			ASSERT(myQueueInfo != storageQueueInfo.end());
+			myQueueInfo->value.valid = false;
+			TraceEvent("RkTrackStorageError", id)
+			    .detail("StorageServer", ssi.id())
+			    .detail("Locality", ssi.locality.toString())
+			    .errorUnsuppressed(e);
 		}
 	}
+}
 
 #if 0
 #ifdef DIFF_PLACEHOLDER_MONITOR_STORAGE_SERVER_QUEUE_SIZE_IN_SIMULATION
 #endif
 #endif
-	// works with ExcludeIncludeStorageServersWorkload.actor.cpp to make sure the size of SS list is bounded
-	static Future<Void> monitorStorageServerQueueSizeInSimulation(ActorWeakSelfRef<Ratekeeper> self) {
-		if (!g_network->isSimulated()) {
-			co_return;
-		}
-		int threshold = SERVER_KNOBS->RATEKEEPER_MONITOR_SS_THRESHOLD;
-		int cnt = 0;
-		int maxCount = 5;
-		Transaction tr(self->db);
-		while (true) {
-			Error err;
-			try {
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
-				    co_await NativeAPI::getServerListAndProcessClasses(&tr);
-				int serverListSize = results.size();
-				int interfaceSize = self->storageServerInterfaces.size();
-				int metricSize = self->healthMetrics.storageStats.size();
-				if (interfaceSize - serverListSize > threshold || metricSize - serverListSize > threshold) {
-					cnt++;
-				} else {
-					cnt = 0;
-				}
-				if (cnt > maxCount) {
-					TraceEvent(SevError, "TooManySSInRK")
-					    .detail("Threshold", threshold)
-					    .detail("ServerListSize", serverListSize)
-					    .detail("InterfaceSize", interfaceSize)
-					    .detail("MetricSize", metricSize)
-					    .log();
-				}
-
-				// Storage related stats should be consistent.
-				for (const auto& [id, _] : self->storageServerInterfaces) {
-					ASSERT(self->storageQueueInfo.find(id) != self->storageQueueInfo.end());
-					ASSERT(self->healthMetrics.storageStats.find(id) != self->healthMetrics.storageStats.end());
-				}
-
-				// wait for monitorServerListChange to remove the interface
-				co_await delay(SERVER_KNOBS->RATEKEEPER_MONITOR_SS_DELAY);
-				tr = Transaction(self->db);
-				continue;
-			} catch (Error& e) {
-				err = e;
-			}
-			TraceEvent("RateKeeperFailedToReadSSList").log();
-			co_await tr.onError(err);
-		}
+// works with ExcludeIncludeStorageServersWorkload.actor.cpp to make sure the size of SS list is bounded
+Future<Void> Ratekeeper::monitorStorageServerQueueSizeInSimulation() {
+	if (!g_network->isSimulated()) {
+		co_return;
 	}
+	int threshold = SERVER_KNOBS->RATEKEEPER_MONITOR_SS_THRESHOLD;
+	int cnt = 0;
+	int maxCount = 5;
+	Transaction tr(db);
+	while (true) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
+			    co_await NativeAPI::getServerListAndProcessClasses(&tr);
+			int serverListSize = results.size();
+			int interfaceSize = storageServerInterfaces.size();
+			int metricSize = healthMetrics.storageStats.size();
+			if (interfaceSize - serverListSize > threshold || metricSize - serverListSize > threshold) {
+				cnt++;
+			} else {
+				cnt = 0;
+			}
+			if (cnt > maxCount) {
+				TraceEvent(SevError, "TooManySSInRK")
+				    .detail("Threshold", threshold)
+				    .detail("ServerListSize", serverListSize)
+				    .detail("InterfaceSize", interfaceSize)
+				    .detail("MetricSize", metricSize)
+				    .log();
+			}
+
+			// Storage related stats should be consistent.
+			for (const auto& [id, _] : storageServerInterfaces) {
+				ASSERT(storageQueueInfo.find(id) != storageQueueInfo.end());
+				ASSERT(healthMetrics.storageStats.find(id) != healthMetrics.storageStats.end());
+			}
+
+			// wait for monitorServerListChange to remove the interface
+			co_await delay(SERVER_KNOBS->RATEKEEPER_MONITOR_SS_DELAY);
+			tr = Transaction(db);
+			continue;
+		} catch (Error& e) {
+			err = e;
+		}
+		TraceEvent("RateKeeperFailedToReadSSList").log();
+		co_await tr.onError(err);
+	}
+}
 
 #if 0
 #ifdef DIFF_PLACEHOLDER_TRACK_TLOG_QUEUE_INFO
 #endif
 #endif
-	static Future<Void> trackTLogQueueInfo(Ratekeeper* self, TLogInterface tli) {
-		self->tlogQueueInfo.insert(mapPair(tli.id(), TLogQueueInfo(tli.id())));
-		Map<UID, TLogQueueInfo>::iterator myQueueInfo = self->tlogQueueInfo.find(tli.id());
-		TraceEvent("RkTrackTLog", self->id).detail("TransactionLog", tli.id());
-		try {
-			while (true) {
-				ErrorOr<TLogQueuingMetricsReply> reply = co_await tli.getQueuingMetrics.getReplyUnlessFailedFor(
-				    TLogQueuingMetricsRequest(), 0, 0); // SOMEDAY: or tryGetReply?
-				if (reply.present()) {
-					myQueueInfo->value.update(reply.get(), self->smoothTotalDurableBytes);
-					myQueueInfo->value.valid = true;
-				} else {
-					if (myQueueInfo->value.valid) {
-						TraceEvent("RkTLogDidNotRespond", self->id).detail("TransactionLog", tli.id());
-					}
-					myQueueInfo->value.valid = false;
+Future<Void> Ratekeeper::trackTLogQueueInfo(TLogInterface tli) {
+	tlogQueueInfo.insert(mapPair(tli.id(), TLogQueueInfo(tli.id())));
+	Map<UID, TLogQueueInfo>::iterator myQueueInfo = tlogQueueInfo.find(tli.id());
+	TraceEvent("RkTrackTLog", id).detail("TransactionLog", tli.id());
+	try {
+		while (true) {
+			ErrorOr<TLogQueuingMetricsReply> reply = co_await tli.getQueuingMetrics.getReplyUnlessFailedFor(
+			    TLogQueuingMetricsRequest(), 0, 0); // SOMEDAY: or tryGetReply?
+			if (reply.present()) {
+				myQueueInfo->value.update(reply.get(), smoothTotalDurableBytes);
+				myQueueInfo->value.valid = true;
+			} else {
+				if (myQueueInfo->value.valid) {
+					TraceEvent("RkTLogDidNotRespond", id).detail("TransactionLog", tli.id());
 				}
+				myQueueInfo->value.valid = false;
+			}
 
-				co_await (delayJittered(SERVER_KNOBS->METRIC_UPDATE_RATE) &&
-				          IFailureMonitor::failureMonitor().onStateEqual(tli.getQueuingMetrics.getEndpoint(),
-				                                                         FailureStatus(false)));
-			}
-		} catch (Error& e) {
-			// including cancellation
-			self->tlogQueueInfo.erase(myQueueInfo);
-			if (e.code() != error_code_actor_cancelled) {
-				TraceEvent("RkTrackTLogError", self->id).detail("TransactionLog", tli.id()).errorUnsuppressed(e);
-			}
-			throw;
+			co_await (delayJittered(SERVER_KNOBS->METRIC_UPDATE_RATE) &&
+			          IFailureMonitor::failureMonitor().onStateEqual(tli.getQueuingMetrics.getEndpoint(),
+			                                                         FailureStatus(false)));
 		}
+	} catch (Error& e) {
+		// including cancellation
+		tlogQueueInfo.erase(myQueueInfo);
+		if (e.code() != error_code_actor_cancelled) {
+			TraceEvent("RkTrackTLogError", id).detail("TransactionLog", tli.id()).errorUnsuppressed(e);
+		}
+		throw;
 	}
+}
 
 #if 0
 #ifdef DIFF_PLACEHOLDER_TRACK_EACH_STORAGE_SERVER
 #endif
 #endif
-	static Future<Void> trackEachStorageServer(
-	    ActorWeakSelfRef<Ratekeeper> self,
-	    FutureStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges) {
+Future<Void> Ratekeeper::trackEachStorageServer(
+    FutureStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges) {
+	std::unordered_map<UID, Future<Void>> storageServerTrackers;
+	Promise<Void> err;
 
-		std::unordered_map<UID, Future<Void>> storageServerTrackers;
-		Promise<Void> err;
+	while (true) {
+		auto res = co_await race(serverChanges, err.getFuture());
+		ASSERT_EQ(res.index(), 0);
+		std::pair<UID, Optional<StorageServerInterface>> change = std::get<0>(std::move(res));
 
-		while (true) {
-			auto res = co_await race(serverChanges, err.getFuture());
-			ASSERT_EQ(res.index(), 0);
-			std::pair<UID, Optional<StorageServerInterface>> change = std::get<0>(std::move(res));
+		co_await delay(0); // prevent storageServerTracker from getting cancelled while on the call stack
 
-			co_await delay(0); // prevent storageServerTracker from getting cancelled while on the call stack
+		const UID& id = change.first;
+		if (change.second.present()) {
+			if (!change.second.get().isTss()) {
 
-			const UID& id = change.first;
-			if (change.second.present()) {
-				if (!change.second.get().isTss()) {
+				auto& a = storageServerTrackers[change.first];
+				a = Future<Void>();
+				a = splitError(trackStorageServerQueueInfo(change.second.get()), err);
 
-					auto& a = storageServerTrackers[change.first];
-					a = Future<Void>();
-					a = splitError(trackStorageServerQueueInfo(self, change.second.get()), err);
-
-					self->storageServerInterfaces[id] = change.second.get();
-				}
-			} else {
-				storageServerTrackers.erase(id);
-				self->storageServerInterfaces.erase(id);
+				storageServerInterfaces[id] = change.second.get();
 			}
+		} else {
+			storageServerTrackers.erase(id);
+			storageServerInterfaces.erase(id);
 		}
 	}
+}
 
 #if 0
 #ifdef DIFF_PLACEHOLDER_MONITOR_HOT_SHARDS
 #endif
 #endif
+Future<Void> Ratekeeper::monitorHotShards(Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	while (true) {
+		co_await delay(SERVER_KNOBS->HOT_SHARD_MONITOR_FREQUENCY);
+		if (!ssHighWriteQueue.present()) {
+			continue;
+		}
 
-	static Future<Void> monitorHotShards(Ratekeeper* self, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
-		while (true) {
-			co_await delay(SERVER_KNOBS->HOT_SHARD_MONITOR_FREQUENCY);
-			if (!self->ssHighWriteQueue.present()) {
-				continue;
-			}
+		UID ssi = ssHighWriteQueue.get();
+		SetThrottledShardRequest setReq;
 
-			UID ssi = self->ssHighWriteQueue.get();
-			SetThrottledShardRequest setReq;
+		// TraceEvent(SevDebug, "SendGetHotShardsRequest");
+		try {
+			GetHotShardsRequest getReq;
+			GetHotShardsReply reply = co_await storageServerInterfaces[ssi].getHotShards.getReply(getReq);
 
-			// TraceEvent(SevDebug, "SendGetHotShardsRequest");
-			try {
-				GetHotShardsRequest getReq;
-				GetHotShardsReply reply = co_await self->storageServerInterfaces[ssi].getHotShards.getReply(getReq);
-
-				// Backup's restore range can't be throttled, otherwise restore would fail,
-				// i.e., "ApplyMutationsError".
-				KeyRangeRef applyMutationRange("\xfe\xff\xfe"_sr, "\xfe\xff\xff\xff"_sr);
-				for (const auto& shard : reply.hotShards) {
-					if (!shard.intersects(applyMutationRange)) {
-						setReq.throttledShards.push_back(shard);
-					} else {
-						TraceEvent("IgnoreHotShard").detail("Shard", shard);
-					}
+			// Backup's restore range can't be throttled, otherwise restore would fail,
+			// i.e., "ApplyMutationsError".
+			KeyRangeRef applyMutationRange("\xfe\xff\xfe"_sr, "\xfe\xff\xff\xff"_sr);
+			for (const auto& shard : reply.hotShards) {
+				if (!shard.intersects(applyMutationRange)) {
+					setReq.throttledShards.push_back(shard);
+				} else {
+					TraceEvent("IgnoreHotShard").detail("Shard", shard);
 				}
-			} catch (Error& e) {
-				TraceEvent(SevWarn, "CannotMonitorHotShardForSS").detail("SS", ssi);
-				continue;
 			}
-			if (!setReq.throttledShards.size()) {
-				continue;
-			}
-			setReq.expirationTime = now() + SERVER_KNOBS->HOT_SHARD_THROTTLING_EXPIRE_AFTER;
-			for (auto& shard : setReq.throttledShards) {
-				TraceEvent(SevInfo, "SendRequestThrottleHotShard")
-				    .detail("Shard", shard)
-				    .detail("DelayUntil", setReq.expirationTime);
-			}
-			for (const auto& cpi : dbInfo->get().client.commitProxies) {
-				cpi.setThrottledShard.send(setReq);
-			}
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "CannotMonitorHotShardForSS").detail("SS", ssi);
+			continue;
+		}
+		if (!setReq.throttledShards.size()) {
+			continue;
+		}
+		setReq.expirationTime = now() + SERVER_KNOBS->HOT_SHARD_THROTTLING_EXPIRE_AFTER;
+		for (auto& shard : setReq.throttledShards) {
+			TraceEvent(SevInfo, "SendRequestThrottleHotShard")
+			    .detail("Shard", shard)
+			    .detail("DelayUntil", setReq.expirationTime);
+		}
+		for (const auto& cpi : dbInfo->get().client.commitProxies) {
+			cpi.setThrottledShard.send(setReq);
 		}
 	}
+}
 
 #if 0
 #ifdef DIFF_PLACEHOLDER_HANDLE_REPORT_COMMIT_COST_ESTIMATION_REQS
 #endif
 #endif
-	static Future<Void> handleReportCommitCostEstimationReqs(Ratekeeper* self, RatekeeperInterface rkInterf) {
-		while (true) {
-			ReportCommitCostEstimationRequest req = co_await rkInterf.reportCommitCostEstimation.getFuture();
-			self->updateCommitCostEstimation(req.ssTrTagCommitCost);
-			req.reply.send(Void());
-		}
+Future<Void> Ratekeeper::handleReportCommitCostEstimationReqs(RatekeeperInterface rkInterf) {
+	while (true) {
+		ReportCommitCostEstimationRequest req = co_await rkInterf.reportCommitCostEstimation.getFuture();
+		updateCommitCostEstimation(req.ssTrTagCommitCost);
+		req.reply.send(Void());
 	}
+}
 
 #if 0
 #ifdef DIFF_PLACEHOLDER_HANDLE_GET_SS_VERSION_LAG_REQS
 #endif
 #endif
-	static Future<Void> handleGetSSVersionLagReqs(Ratekeeper* self, RatekeeperInterface rkInterf) {
-		while (true) {
-			GetSSVersionLagRequest req = co_await rkInterf.getSSVersionLag.getFuture();
-			GetSSVersionLagReply reply;
-			self->getSSVersionLag(reply.maxPrimarySSVersion, reply.maxRemoteSSVersion);
-			req.reply.send(reply);
-		}
+Future<Void> Ratekeeper::handleGetSSVersionLagReqs(RatekeeperInterface rkInterf) {
+	while (true) {
+		GetSSVersionLagRequest req = co_await rkInterf.getSSVersionLag.getFuture();
+		GetSSVersionLagReply reply;
+		getSSVersionLag(reply.maxPrimarySSVersion, reply.maxRemoteSSVersion);
+		req.reply.send(reply);
 	}
+}
 
 #if 0
 #ifdef DIFF_PLACEHOLDER_HANDLE_GET_RATE_INFO_REQS
 #endif
 #endif
-	static Future<Void> handleGetRateInfoReqs(Ratekeeper* self,
-	                                          RatekeeperInterface rkInterf,
-	                                          Version* recoveryVersion,
-	                                          bool* lastLimited) {
-		while (true) {
-			GetRateInfoRequest req = co_await rkInterf.getRateInfo.getFuture();
-			GetRateInfoReply reply;
+Future<Void> Ratekeeper::handleGetRateInfoReqs(RatekeeperInterface rkInterf,
+                                               Version* recoveryVersion,
+                                               bool* lastLimited) {
+	while (true) {
+		GetRateInfoRequest req = co_await rkInterf.getRateInfo.getFuture();
+		GetRateInfoReply reply;
 
-			auto& p = self->grvProxyInfo[req.requesterID];
-			//TraceEvent("RKMPU", req.requesterID).detail("TRT", req.totalReleasedTransactions).detail("Last", p.totalTransactions).detail("Delta", req.totalReleasedTransactions - p.totalTransactions);
-			if (p.totalTransactions > 0) {
-				self->smoothReleasedTransactions.addDelta(req.totalReleasedTransactions - p.totalTransactions);
+		auto& p = grvProxyInfo[req.requesterID];
+		//TraceEvent("RKMPU", req.requesterID).detail("TRT", req.totalReleasedTransactions).detail("Last", p.totalTransactions).detail("Delta", req.totalReleasedTransactions - p.totalTransactions);
+		if (p.totalTransactions > 0) {
+			smoothReleasedTransactions.addDelta(req.totalReleasedTransactions - p.totalTransactions);
 
-				for (auto const& [tag, count] : req.throttledTagCounts) {
-					self->tagThrottler->addRequests(tag, count);
-				}
+			for (auto const& [tag, count] : req.throttledTagCounts) {
+				tagThrottler->addRequests(tag, count);
 			}
-			if (p.batchTransactions > 0) {
-				self->smoothBatchReleasedTransactions.addDelta(req.batchReleasedTransactions - p.batchTransactions);
-			}
-
-			p.totalTransactions = req.totalReleasedTransactions;
-			p.batchTransactions = req.batchReleasedTransactions;
-			p.version = req.version;
-			self->maxVersion = std::max(self->maxVersion, req.version);
-
-			if (*recoveryVersion == std::numeric_limits<Version>::max() &&
-			    self->version_recovery.contains(*recoveryVersion)) {
-				*recoveryVersion = self->maxVersion;
-				self->version_recovery[*recoveryVersion] = self->version_recovery[std::numeric_limits<Version>::max()];
-				self->version_recovery.erase(std::numeric_limits<Version>::max());
-			}
-
-			p.lastUpdateTime = now();
-
-			reply.transactionRate = self->normalLimits.tpsLimit / self->grvProxyInfo.size();
-			reply.batchTransactionRate = self->batchLimits.tpsLimit / self->grvProxyInfo.size();
-			reply.leaseDuration = SERVER_KNOBS->METRIC_UPDATE_RATE;
-
-			if (p.lastThrottledTagChangeId != self->tagThrottler->getThrottledTagChangeId() ||
-			    now() > p.lastTagPushTime + SERVER_KNOBS->TAG_THROTTLE_PUSH_INTERVAL) {
-				p.lastThrottledTagChangeId = self->tagThrottler->getThrottledTagChangeId();
-				p.lastTagPushTime = now();
-
-				bool returningTagsToProxy{ false };
-				if (SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES) {
-					auto proxyThrottledTags = self->tagThrottler->getProxyRates(self->grvProxyInfo.size());
-					if (!SERVER_KNOBS->GLOBAL_TAG_THROTTLING_REPORT_ONLY) {
-						returningTagsToProxy = proxyThrottledTags.size() > 0;
-						reply.proxyThrottledTags = std::move(proxyThrottledTags);
-					}
-				} else {
-					auto clientThrottledTags = self->tagThrottler->getClientRates();
-					if (!SERVER_KNOBS->GLOBAL_TAG_THROTTLING_REPORT_ONLY) {
-						returningTagsToProxy = clientThrottledTags.size() > 0;
-						reply.clientThrottledTags = std::move(clientThrottledTags);
-					}
-				}
-				CODE_PROBE(returningTagsToProxy, "Returning tag throttles to a proxy");
-			}
-
-			reply.healthMetrics.update(self->healthMetrics, true, req.detailed);
-			reply.healthMetrics.tpsLimit = self->normalLimits.tpsLimit;
-			reply.healthMetrics.batchLimited = *lastLimited;
-
-			req.reply.send(reply);
 		}
+		if (p.batchTransactions > 0) {
+			smoothBatchReleasedTransactions.addDelta(req.batchReleasedTransactions - p.batchTransactions);
+		}
+
+		p.totalTransactions = req.totalReleasedTransactions;
+		p.batchTransactions = req.batchReleasedTransactions;
+		p.version = req.version;
+		maxVersion = std::max(maxVersion, req.version);
+
+		if (*recoveryVersion == std::numeric_limits<Version>::max() && version_recovery.contains(*recoveryVersion)) {
+			*recoveryVersion = maxVersion;
+			version_recovery[*recoveryVersion] = version_recovery[std::numeric_limits<Version>::max()];
+			version_recovery.erase(std::numeric_limits<Version>::max());
+		}
+
+		p.lastUpdateTime = now();
+
+		reply.transactionRate = normalLimits.tpsLimit / grvProxyInfo.size();
+		reply.batchTransactionRate = batchLimits.tpsLimit / grvProxyInfo.size();
+		reply.leaseDuration = SERVER_KNOBS->METRIC_UPDATE_RATE;
+
+		if (p.lastThrottledTagChangeId != tagThrottler->getThrottledTagChangeId() ||
+		    now() > p.lastTagPushTime + SERVER_KNOBS->TAG_THROTTLE_PUSH_INTERVAL) {
+			p.lastThrottledTagChangeId = tagThrottler->getThrottledTagChangeId();
+			p.lastTagPushTime = now();
+
+			bool returningTagsToProxy{ false };
+			if (SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES) {
+				auto proxyThrottledTags = tagThrottler->getProxyRates(grvProxyInfo.size());
+				if (!SERVER_KNOBS->GLOBAL_TAG_THROTTLING_REPORT_ONLY) {
+					returningTagsToProxy = proxyThrottledTags.size() > 0;
+					reply.proxyThrottledTags = std::move(proxyThrottledTags);
+				}
+			} else {
+				auto clientThrottledTags = tagThrottler->getClientRates();
+				if (!SERVER_KNOBS->GLOBAL_TAG_THROTTLING_REPORT_ONLY) {
+					returningTagsToProxy = clientThrottledTags.size() > 0;
+					reply.clientThrottledTags = std::move(clientThrottledTags);
+				}
+			}
+			CODE_PROBE(returningTagsToProxy, "Returning tag throttles to a proxy");
+		}
+
+		reply.healthMetrics.update(healthMetrics, true, req.detailed);
+		reply.healthMetrics.tpsLimit = normalLimits.tpsLimit;
+		reply.healthMetrics.batchLimited = *lastLimited;
+
+		req.reply.send(reply);
 	}
+}
 
 #if 0
 #ifdef DIFF_PLACEHOLDER_HANDLE_DB_INFO_CHANGES
 #endif
 #endif
-	static Future<Void> handleDBInfoChanges(Ratekeeper* self,
-	                                        Reference<AsyncVar<ServerDBInfo> const> dbInfo,
-	                                        bool* recovering,
-	                                        Version* recoveryVersion,
-	                                        std::vector<TLogInterface>* tlogInterfs,
-	                                        std::vector<Future<Void>>* tlogTrackers,
-	                                        Promise<Void>* err) {
-		while (true) {
-			co_await dbInfo->onChange();
-
-			if (!*recovering && dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
-				*recovering = true;
-				*recoveryVersion = self->maxVersion;
-				if (*recoveryVersion == 0) {
-					*recoveryVersion = std::numeric_limits<Version>::max();
-				}
-				if (self->version_recovery.contains(*recoveryVersion)) {
-					auto& it = self->version_recovery[*recoveryVersion];
-					double existingEnd = it.second.present() ? it.second.get() : now();
-					double existingDuration = existingEnd - it.first;
-					self->version_recovery[*recoveryVersion] =
-					    std::make_pair(now() - existingDuration, Optional<double>());
-				} else {
-					self->version_recovery[*recoveryVersion] = std::make_pair(now(), Optional<double>());
-				}
-			}
-			if (*recovering && dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
-				*recovering = false;
-				self->version_recovery[*recoveryVersion].second = now();
-			}
-
-			if (*tlogInterfs != dbInfo->get().logSystemConfig.allLocalLogs()) {
-				*tlogInterfs = dbInfo->get().logSystemConfig.allLocalLogs();
-				*tlogTrackers = std::vector<Future<Void>>();
-				for (int i = 0; i < tlogInterfs->size(); i++) {
-					tlogTrackers->push_back(splitError(self->trackTLogQueueInfo((*tlogInterfs)[i]), *err));
-				}
-			}
-			self->remoteDC = dbInfo->get().logSystemConfig.getRemoteDcId();
-		}
-	}
-
-#if 0
-#ifdef DIFF_PLACEHOLDER_RATE_UPDATER
-#endif
-#endif
-	static Future<Void> rateUpdater(Ratekeeper* self, bool* lastLimited) {
-		while (true) {
-			double actualTps = self->smoothReleasedTransactions.smoothRate();
-			actualTps = std::max(std::max(1.0, actualTps),
-			                     self->smoothTotalDurableBytes.smoothRate() / CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT);
-
-			if (self->actualTpsHistory.size() > SERVER_KNOBS->MAX_TPS_HISTORY_SAMPLES) {
-				self->actualTpsHistory.pop_front();
-			}
-			self->actualTpsHistory.push_back(actualTps);
-
-			while (self->version_recovery.size() > CLIENT_KNOBS->MAX_GENERATIONS) {
-				self->version_recovery.erase(self->version_recovery.begin());
-			}
-
-			self->updateRate(&self->normalLimits);
-			self->updateRate(&self->batchLimits);
-
-			*lastLimited = self->smoothReleasedTransactions.smoothRate() >
-			               SERVER_KNOBS->LAST_LIMITED_RATIO * self->batchLimits.tpsLimit;
-			double tooOld = now() - 1.0;
-			for (auto p = self->grvProxyInfo.begin(); p != self->grvProxyInfo.end();) {
-				if (p->second.lastUpdateTime < tooOld)
-					p = self->grvProxyInfo.erase(p);
-				else
-					++p;
-			}
-			co_await delayJittered(SERVER_KNOBS->METRIC_UPDATE_RATE);
-		}
-	}
-
-#if 0
-#ifdef DIFF_PLACEHOLDER_RUN
-#endif
-#endif
-	static Future<Void> run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
-		ActorOwningSelfRef<Ratekeeper> pSelf(
-		    new Ratekeeper(rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True)));
-		Ratekeeper& self = *pSelf;
-		std::vector<Future<Void>> tlogTrackers;
-		std::vector<TLogInterface> tlogInterfs;
-		Promise<Void> err;
-		Future<Void> collection = actorCollection(self.addActor.getFuture());
-
-		TraceEvent("RatekeeperStarting", rkInterf.id());
-		self.addActor.send(waitFailureServer(rkInterf.waitFailure.getFuture()));
-		self.addActor.send(self.configurationMonitor());
-
-		PromiseStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges;
-		self.addActor.send(self.monitorServerListChange(serverChanges));
-		self.addActor.send(RatekeeperImpl::trackEachStorageServer(pSelf, serverChanges.getFuture()));
-		self.addActor.send(monitorStorageServerQueueSizeInSimulation(pSelf));
-		self.addActor.send(traceRole(Role::RATEKEEPER, rkInterf.id()));
-
-		self.addActor.send(self.monitorThrottlingChanges());
-
-		if (SERVER_KNOBS->HOT_SHARD_THROTTLING_ENABLED) {
-			self.addActor.send(self.monitorHotShards(dbInfo));
-		}
-
-		self.addActor.send(self.refreshStorageServerCommitCosts());
-		self.addActor.send(self.handleReportCommitCostEstimationReqs(rkInterf));
-		self.addActor.send(self.handleGetSSVersionLagReqs(rkInterf));
-
-		TraceEvent("RkTLogQueueSizeParameters", rkInterf.id())
-		    .detail("Target", SERVER_KNOBS->TARGET_BYTES_PER_TLOG)
-		    .detail("Spring", SERVER_KNOBS->SPRING_BYTES_TLOG)
-		    .detail(
-		        "Rate",
-		        (SERVER_KNOBS->TARGET_BYTES_PER_TLOG - SERVER_KNOBS->SPRING_BYTES_TLOG) /
-		            ((((double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) / SERVER_KNOBS->VERSIONS_PER_SECOND) +
-		             2.0));
-
-		TraceEvent("RkStorageServerQueueSizeParameters", rkInterf.id())
-		    .detail("Target", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER)
-		    .detail("Spring", SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER)
-		    .detail("EBrake", SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES)
-		    .detail(
-		        "Rate",
-		        (SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER - SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER) /
-		            ((((double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) / SERVER_KNOBS->VERSIONS_PER_SECOND) +
-		             2.0));
-
-		tlogInterfs = dbInfo->get().logSystemConfig.allLocalLogs();
-		tlogTrackers.reserve(tlogInterfs.size());
-		for (int i = 0; i < tlogInterfs.size(); i++) {
-			tlogTrackers.push_back(splitError(self.trackTLogQueueInfo(tlogInterfs[i]), err));
-		}
-
-		self.remoteDC = dbInfo->get().logSystemConfig.getRemoteDcId();
-
-		bool recovering = dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS;
-		Version recoveryVersion = std::numeric_limits<Version>::max();
-		if (recovering) {
-			self.version_recovery[recoveryVersion] = std::make_pair(now(), Optional<double>());
-		}
-
-		bool lastLimited = false;
-		self.addActor.send(self.handleGetRateInfoReqs(rkInterf, &recoveryVersion, &lastLimited));
-		self.addActor.send(
-		    self.handleDBInfoChanges(dbInfo, &recovering, &recoveryVersion, &tlogInterfs, &tlogTrackers, &err));
-		self.addActor.send(self.rateUpdater(&lastLimited));
-
-		try {
-			auto res = co_await race(rkInterf.haltRatekeeper.getFuture(), err.getFuture(), collection);
-			ASSERT_EQ(res.index(), 0);
-			HaltRatekeeperRequest req = std::get<0>(std::move(res));
-			req.reply.send(Void());
-			TraceEvent("RatekeeperHalted", rkInterf.id()).detail("ReqID", req.requesterID);
-		} catch (Error& err) {
-			TraceEvent("RatekeeperDied", rkInterf.id()).errorUnsuppressed(err);
-		}
-	}
-
-#if 0
-#ifdef DIFF_PLACEHOLDER_REFRESH_STORAGE_SERVER_COMMIT_COSTS
-#endif
-#endif
-	static Future<Void> refreshStorageServerCommitCosts(Ratekeeper* self) {
-		double lastBusiestCommitTagPick{ 0 };
-		std::vector<Future<Void>> replies;
-		while (true) {
-			lastBusiestCommitTagPick = now();
-			co_await delay(SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL);
-
-			replies.clear();
-
-			double elapsed = now() - lastBusiestCommitTagPick;
-			// for each SS, select the busiest commit tag from ssTrTagCommitCost
-			for (auto& [ssId, ssQueueInfo] : self->storageQueueInfo) {
-				// NOTE: In some cases, for unknown reason SS will not respond to the updateCommitCostRequest. Since the
-				// information is not time-sensitive, we do not wait for the replies.
-				replies.push_back(self->storageServerInterfaces[ssId].updateCommitCostRequest.getReply(
-				    ssQueueInfo.refreshCommitCost(elapsed)));
-			}
-		}
-	}
-}; // class RatekeeperImpl
-
-Future<Void> Ratekeeper::configurationMonitor() {
-	return RatekeeperImpl::configurationMonitor(this);
-}
-
-Future<Void> Ratekeeper::monitorServerListChange(
-    PromiseStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges) {
-	return RatekeeperImpl::monitorServerListChange(this, serverChanges);
-}
-
-Future<Void> Ratekeeper::trackTLogQueueInfo(TLogInterface tli) {
-	return RatekeeperImpl::trackTLogQueueInfo(this, tli);
-}
-
-Future<Void> Ratekeeper::monitorThrottlingChanges() {
-	return tagThrottler->monitorThrottlingChanges();
-}
-
-Future<Void> Ratekeeper::monitorHotShards(Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
-	return RatekeeperImpl::monitorHotShards(this, dbInfo);
-}
-
-Future<Void> Ratekeeper::handleReportCommitCostEstimationReqs(RatekeeperInterface rkInterf) {
-	return RatekeeperImpl::handleReportCommitCostEstimationReqs(this, rkInterf);
-}
-
-Future<Void> Ratekeeper::handleGetSSVersionLagReqs(RatekeeperInterface rkInterf) {
-	return RatekeeperImpl::handleGetSSVersionLagReqs(this, rkInterf);
-}
-
-Future<Void> Ratekeeper::handleGetRateInfoReqs(RatekeeperInterface rkInterf,
-                                               Version* recoveryVersion,
-                                               bool* lastLimited) {
-	return RatekeeperImpl::handleGetRateInfoReqs(this, rkInterf, recoveryVersion, lastLimited);
-}
-
 Future<Void> Ratekeeper::handleDBInfoChanges(Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                              bool* recovering,
                                              Version* recoveryVersion,
                                              std::vector<TLogInterface>* tlogInterfs,
                                              std::vector<Future<Void>>* tlogTrackers,
                                              Promise<Void>* err) {
-	return RatekeeperImpl::handleDBInfoChanges(
-	    this, dbInfo, recovering, recoveryVersion, tlogInterfs, tlogTrackers, err);
+	while (true) {
+		co_await dbInfo->onChange();
+
+		if (!*recovering && dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+			*recovering = true;
+			*recoveryVersion = maxVersion;
+			if (*recoveryVersion == 0) {
+				*recoveryVersion = std::numeric_limits<Version>::max();
+			}
+			if (version_recovery.contains(*recoveryVersion)) {
+				auto& it = version_recovery[*recoveryVersion];
+				double existingEnd = it.second.present() ? it.second.get() : now();
+				double existingDuration = existingEnd - it.first;
+				version_recovery[*recoveryVersion] = std::make_pair(now() - existingDuration, Optional<double>());
+			} else {
+				version_recovery[*recoveryVersion] = std::make_pair(now(), Optional<double>());
+			}
+		}
+		if (*recovering && dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
+			*recovering = false;
+			version_recovery[*recoveryVersion].second = now();
+		}
+
+		if (*tlogInterfs != dbInfo->get().logSystemConfig.allLocalLogs()) {
+			*tlogInterfs = dbInfo->get().logSystemConfig.allLocalLogs();
+			*tlogTrackers = std::vector<Future<Void>>();
+			for (int i = 0; i < tlogInterfs->size(); i++) {
+				tlogTrackers->push_back(splitError(trackTLogQueueInfo((*tlogInterfs)[i]), *err));
+			}
+		}
+		remoteDC = dbInfo->get().logSystemConfig.getRemoteDcId();
+	}
 }
 
+#if 0
+#ifdef DIFF_PLACEHOLDER_RATE_UPDATER
+#endif
+#endif
 Future<Void> Ratekeeper::rateUpdater(bool* lastLimited) {
-	return RatekeeperImpl::rateUpdater(this, lastLimited);
+	while (true) {
+		double actualTps = smoothReleasedTransactions.smoothRate();
+		actualTps = std::max(std::max(1.0, actualTps),
+		                     smoothTotalDurableBytes.smoothRate() / CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT);
+
+		if (actualTpsHistory.size() > SERVER_KNOBS->MAX_TPS_HISTORY_SAMPLES) {
+			actualTpsHistory.pop_front();
+		}
+		actualTpsHistory.push_back(actualTps);
+
+		while (version_recovery.size() > CLIENT_KNOBS->MAX_GENERATIONS) {
+			version_recovery.erase(version_recovery.begin());
+		}
+
+		updateRate(&normalLimits);
+		updateRate(&batchLimits);
+
+		*lastLimited =
+		    smoothReleasedTransactions.smoothRate() > SERVER_KNOBS->LAST_LIMITED_RATIO * batchLimits.tpsLimit;
+		double tooOld = now() - 1.0;
+		for (auto p = grvProxyInfo.begin(); p != grvProxyInfo.end();) {
+			if (p->second.lastUpdateTime < tooOld)
+				p = grvProxyInfo.erase(p);
+			else
+				++p;
+		}
+		co_await delayJittered(SERVER_KNOBS->METRIC_UPDATE_RATE);
+	}
 }
 
+#if 0
+#ifdef DIFF_PLACEHOLDER_RUN
+#endif
+#endif
 Future<Void> Ratekeeper::run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
-	return RatekeeperImpl::run(rkInterf, dbInfo);
+	ActorOwningSelfRef<Ratekeeper> pSelf(
+	    new Ratekeeper(rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True)));
+	Ratekeeper& self = *pSelf;
+	std::vector<Future<Void>> tlogTrackers;
+	std::vector<TLogInterface> tlogInterfs;
+	Promise<Void> err;
+	Future<Void> collection = actorCollection(self.addActor.getFuture());
+
+	TraceEvent("RatekeeperStarting", rkInterf.id());
+	self.addActor.send(waitFailureServer(rkInterf.waitFailure.getFuture()));
+	self.addActor.send(self.configurationMonitor());
+
+	PromiseStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges;
+	self.addActor.send(self.monitorServerListChange(serverChanges));
+	self.addActor.send(self.trackEachStorageServer(serverChanges.getFuture()));
+	self.addActor.send(self.monitorStorageServerQueueSizeInSimulation());
+	self.addActor.send(traceRole(Role::RATEKEEPER, rkInterf.id()));
+
+	self.addActor.send(self.monitorThrottlingChanges());
+
+	if (SERVER_KNOBS->HOT_SHARD_THROTTLING_ENABLED) {
+		self.addActor.send(self.monitorHotShards(dbInfo));
+	}
+
+	self.addActor.send(self.refreshStorageServerCommitCosts());
+	self.addActor.send(self.handleReportCommitCostEstimationReqs(rkInterf));
+	self.addActor.send(self.handleGetSSVersionLagReqs(rkInterf));
+
+	TraceEvent("RkTLogQueueSizeParameters", rkInterf.id())
+	    .detail("Target", SERVER_KNOBS->TARGET_BYTES_PER_TLOG)
+	    .detail("Spring", SERVER_KNOBS->SPRING_BYTES_TLOG)
+	    .detail("Rate",
+	            (SERVER_KNOBS->TARGET_BYTES_PER_TLOG - SERVER_KNOBS->SPRING_BYTES_TLOG) /
+	                ((((double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) / SERVER_KNOBS->VERSIONS_PER_SECOND) +
+	                 2.0));
+
+	TraceEvent("RkStorageServerQueueSizeParameters", rkInterf.id())
+	    .detail("Target", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER)
+	    .detail("Spring", SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER)
+	    .detail("EBrake", SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES)
+	    .detail("Rate",
+	            (SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER - SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER) /
+	                ((((double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) / SERVER_KNOBS->VERSIONS_PER_SECOND) +
+	                 2.0));
+
+	tlogInterfs = dbInfo->get().logSystemConfig.allLocalLogs();
+	tlogTrackers.reserve(tlogInterfs.size());
+	for (int i = 0; i < tlogInterfs.size(); i++) {
+		tlogTrackers.push_back(splitError(self.trackTLogQueueInfo(tlogInterfs[i]), err));
+	}
+
+	self.remoteDC = dbInfo->get().logSystemConfig.getRemoteDcId();
+
+	bool recovering = dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS;
+	Version recoveryVersion = std::numeric_limits<Version>::max();
+	if (recovering) {
+		self.version_recovery[recoveryVersion] = std::make_pair(now(), Optional<double>());
+	}
+
+	bool lastLimited = false;
+	self.addActor.send(self.handleGetRateInfoReqs(rkInterf, &recoveryVersion, &lastLimited));
+	self.addActor.send(
+	    self.handleDBInfoChanges(dbInfo, &recovering, &recoveryVersion, &tlogInterfs, &tlogTrackers, &err));
+	self.addActor.send(self.rateUpdater(&lastLimited));
+
+	try {
+		auto res = co_await race(rkInterf.haltRatekeeper.getFuture(), err.getFuture(), collection);
+		ASSERT_EQ(res.index(), 0);
+		HaltRatekeeperRequest req = std::get<0>(std::move(res));
+		req.reply.send(Void());
+		TraceEvent("RatekeeperHalted", rkInterf.id()).detail("ReqID", req.requesterID);
+	} catch (Error& err) {
+		TraceEvent("RatekeeperDied", rkInterf.id()).errorUnsuppressed(err);
+	}
+}
+
+#if 0
+#ifdef DIFF_PLACEHOLDER_REFRESH_STORAGE_SERVER_COMMIT_COSTS
+#endif
+#endif
+Future<Void> Ratekeeper::refreshStorageServerCommitCosts() {
+	double lastBusiestCommitTagPick{ 0 };
+	std::vector<Future<Void>> replies;
+	while (true) {
+		lastBusiestCommitTagPick = now();
+		co_await delay(SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL);
+
+		replies.clear();
+
+		double elapsed = now() - lastBusiestCommitTagPick;
+		// for each SS, select the busiest commit tag from ssTrTagCommitCost
+		for (auto& [ssId, ssQueueInfo] : storageQueueInfo) {
+			// NOTE: In some cases, for unknown reason SS will not respond to the updateCommitCostRequest. Since the
+			// information is not time-sensitive, we do not wait for the replies.
+			replies.push_back(
+			    storageServerInterfaces[ssId].updateCommitCostRequest.getReply(ssQueueInfo.refreshCommitCost(elapsed)));
+		}
+	}
+}
+
+Future<Void> Ratekeeper::monitorThrottlingChanges() {
+	return tagThrottler->monitorThrottlingChanges();
 }
 
 Ratekeeper::Ratekeeper(UID id, Database db)
@@ -1250,10 +1185,6 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	if (limitReason == limitReason_t::storage_server_write_queue_size) {
 		ssHighWriteQueue = reasonID;
 	}
-}
-
-Future<Void> Ratekeeper::refreshStorageServerCommitCosts() {
-	return RatekeeperImpl::refreshStorageServerCommitCosts(this);
 }
 
 void Ratekeeper::getSSVersionLag(Version& maxSSPrimaryVersion, Version& maxSSRemoteVersion) {
