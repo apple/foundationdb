@@ -533,6 +533,43 @@ struct AwaitableFuture
 	}
 };
 
+template <class PromiseType, class ValueType>
+struct AwaitableFutureIgnore : AwaitableFuture<PromiseType, ValueType, false> {
+	using Base = AwaitableFuture<PromiseType, ValueType, false>;
+
+	AwaitableFutureIgnore(Future<ToFutureVal<ValueType>> future, PromiseType* pt) : Base(future, pt) {}
+
+	Void await_resume() {
+		auto self = static_cast<Base*>(this);
+		self->resumeImpl();
+		if (self->future.isError()) {
+			throw self->future.getError();
+		}
+		return Void();
+	}
+};
+
+template <class PromiseType, class SourceValue, class ResultValue>
+struct AwaitableFutureErrorOr : AwaitableFuture<PromiseType, SourceValue, false> {
+	using Base = AwaitableFuture<PromiseType, SourceValue, false>;
+	using ResultType = ErrorOr<ResultValue>;
+
+	AwaitableFutureErrorOr(Future<ToFutureVal<SourceValue>> future, PromiseType* pt) : Base(future, pt) {}
+
+	ResultType await_resume() {
+		auto self = static_cast<Base*>(this);
+		self->resumeImpl();
+		if (self->future.isError()) {
+			return ResultType(self->future.getError());
+		}
+		if constexpr (std::is_same_v<ResultValue, Void>) {
+			return ResultType(Void());
+		} else {
+			return ResultType(self->future.get());
+		}
+	}
+};
+
 // TODO: This can be merged with AwaitableFutureStream by passing more template arguments.
 template <class PromiseType, class ValueType, bool ReturnsExplicitVoid = false>
 struct ThreadAwaitableFutureStream
@@ -724,6 +761,16 @@ struct CoroPromise : CoroReturn<T, CoroPromise<T, IsCancellable, ReturnsExplicit
 	}
 
 	template <class U>
+	auto await_transform(coro::FutureIgnore<U> future) {
+		return coro::AwaitableFutureIgnore<promise_type, U>{ std::move(future.future), this };
+	}
+
+	template <class U, class V>
+	auto await_transform(coro::FutureErrorOr<U, V> future) {
+		return coro::AwaitableFutureErrorOr<promise_type, U, V>{ std::move(future.future), this };
+	}
+
+	template <class U>
 	auto await_transform(const FutureStream<U>& futureStream) {
 		return coro::AwaitableFuture<promise_type, U, true, ReturnsExplicitVoid>{ futureStream, this };
 	}
@@ -811,6 +858,16 @@ struct AsyncResultPromise
 	template <class U>
 	auto await_transform(const Future<U>& future) {
 		return coro::AwaitableFuture<promise_type, U, false, ReturnsExplicitVoid>{ future, this };
+	}
+
+	template <class U>
+	auto await_transform(coro::FutureIgnore<U> future) {
+		return coro::AwaitableFutureIgnore<promise_type, U>{ std::move(future.future), this };
+	}
+
+	template <class U, class V>
+	auto await_transform(coro::FutureErrorOr<U, V> future) {
+		return coro::AwaitableFutureErrorOr<promise_type, U, V>{ std::move(future.future), this };
 	}
 
 	template <class U>
