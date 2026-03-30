@@ -40,6 +40,11 @@ Future<Void> waitForAllReady(std::vector<Future<T>> results) {
 
 template <class T>
 Future<T> timeout(Future<T> what, double time, T timedoutValue, TaskPriority taskID = TaskPriority::DefaultDelay) {
+	if (what.canGet()) {
+		co_return what.get();
+	} else if (what.isError()) {
+		throw what.getError();
+	}
 	auto res = co_await race(what, delay(time, taskID));
 	if (res.index() == 0) {
 		co_return std::get<0>(std::move(res));
