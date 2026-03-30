@@ -23,13 +23,13 @@
 #include "flow/flow.h"
 #include "flow/TDMetric.actor.h"
 
-struct TraceEventNameID {
+struct TraceEventNameIDDescriptor {
 	Standalone<StringRef> name;
 	Standalone<StringRef> id;
 };
 
 template <>
-struct Descriptor<TraceEventNameID> : DescribeType<TraceEventNameID,
-                                                   "TraceEventNameID",
-                                                   DescribeField<&TraceEventNameID::name, "name">,
-                                                   DescribeField<&TraceEventNameID::id, "id">> {};
+struct Descriptor<TraceEventNameIDDescriptor> : DescribeType<TraceEventNameIDDescriptor,
+                                                             "TraceEventNameID",
+                                                             DescribeField<&TraceEventNameIDDescriptor::name, "name">,
+                                                             DescribeField<&TraceEventNameIDDescriptor::id, "id">> {};

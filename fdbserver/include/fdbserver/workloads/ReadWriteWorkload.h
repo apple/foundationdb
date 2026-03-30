@@ -25,7 +25,7 @@
 #include "flow/TDMetric.actor.h"
 #include <boost/lexical_cast.hpp>
 
-struct TransactionSuccessMetric {
+struct TransactionSuccessMetricDescriptor {
 	int64_t totalLatency;
 	int64_t startLatency;
 	int64_t commitLatency;
@@ -33,33 +33,35 @@ struct TransactionSuccessMetric {
 };
 
 template <>
-struct Descriptor<TransactionSuccessMetric>
-  : DescribeType<TransactionSuccessMetric,
+struct Descriptor<TransactionSuccessMetricDescriptor>
+  : DescribeType<TransactionSuccessMetricDescriptor,
                  "TransactionSuccessMetric",
-                 DescribeField<&TransactionSuccessMetric::totalLatency, "totalLatency", "ns">,
-                 DescribeField<&TransactionSuccessMetric::startLatency, "startLatency", "ns">,
-                 DescribeField<&TransactionSuccessMetric::commitLatency, "commitLatency", "ns">,
-                 DescribeField<&TransactionSuccessMetric::retries, "retries", "count">> {};
+                 DescribeField<&TransactionSuccessMetricDescriptor::totalLatency, "totalLatency", "ns">,
+                 DescribeField<&TransactionSuccessMetricDescriptor::startLatency, "startLatency", "ns">,
+                 DescribeField<&TransactionSuccessMetricDescriptor::commitLatency, "commitLatency", "ns">,
+                 DescribeField<&TransactionSuccessMetricDescriptor::retries, "retries", "count">> {};
 
-struct TransactionFailureMetric {
+struct TransactionFailureMetricDescriptor {
 	int64_t startLatency;
 	int64_t errorCode;
 };
 
 template <>
-struct Descriptor<TransactionFailureMetric>
-  : DescribeType<TransactionFailureMetric,
+struct Descriptor<TransactionFailureMetricDescriptor>
+  : DescribeType<TransactionFailureMetricDescriptor,
                  "TransactionFailureMetric",
-                 DescribeField<&TransactionFailureMetric::startLatency, "startLatency", "ns">,
-                 DescribeField<&TransactionFailureMetric::errorCode, "errorCode", "flow error code">> {};
+                 DescribeField<&TransactionFailureMetricDescriptor::startLatency, "startLatency", "ns">,
+                 DescribeField<&TransactionFailureMetricDescriptor::errorCode, "errorCode", "flow error code">> {};
 
-struct ReadMetric {
+struct ReadMetricDescriptor {
 	int64_t readLatency;
 };
 
 template <>
-struct Descriptor<ReadMetric>
-  : DescribeType<ReadMetric, "ReadMetric", DescribeField<&ReadMetric::readLatency, "readLatency", "ns">> {};
+struct Descriptor<ReadMetricDescriptor>
+  : DescribeType<ReadMetricDescriptor,
+                 "ReadMetric",
+                 DescribeField<&ReadMetricDescriptor::readLatency, "readLatency", "ns">> {};
 
 // Common ReadWrite test settings
 struct ReadWriteCommon : KVWorkload {
@@ -87,9 +89,9 @@ struct ReadWriteCommon : KVWorkload {
 	// states of metric
 	Int64MetricHandle totalReadsMetric;
 	Int64MetricHandle totalRetriesMetric;
-	EventMetricHandle<TransactionSuccessMetric> transactionSuccessMetric;
-	EventMetricHandle<TransactionFailureMetric> transactionFailureMetric;
-	EventMetricHandle<ReadMetric> readMetric;
+	EventMetricHandle<TransactionSuccessMetricDescriptor> transactionSuccessMetric;
+	EventMetricHandle<TransactionFailureMetricDescriptor> transactionFailureMetric;
+	EventMetricHandle<ReadMetricDescriptor> readMetric;
 	PerfIntCounter aTransactions, bTransactions, retries;
 	DDSketch<double> latencies, readLatencies, commitLatencies, GRVLatencies, fullReadLatencies;
 	double readLatencyTotal;

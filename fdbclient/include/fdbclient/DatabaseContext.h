@@ -515,7 +515,7 @@ public:
 	TaskPriority taskID;
 
 	Int64MetricHandle getValueSubmitted;
-	EventMetricHandle<GetValueComplete> getValueCompleted;
+	EventMetricHandle<GetValueCompleteDescriptor> getValueCompleted;
 
 	Reference<AsyncVar<ClientDBInfo>> clientInfo;
 	Future<Void> clientInfoMonitor;

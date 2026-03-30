@@ -23,10 +23,12 @@
 #include "flow/flow.h"
 #include "flow/TDMetric.actor.h"
 
-struct GetValueComplete {
+struct GetValueCompleteDescriptor {
 	int64_t latency;
 };
 
 template <>
-struct Descriptor<GetValueComplete>
-  : DescribeType<GetValueComplete, "GetValueComplete", DescribeField<&GetValueComplete::latency, "latency", "ns">> {};
+struct Descriptor<GetValueCompleteDescriptor>
+  : DescribeType<GetValueCompleteDescriptor,
+                 "GetValueComplete",
+                 DescribeField<&GetValueCompleteDescriptor::latency, "latency", "ns">> {};

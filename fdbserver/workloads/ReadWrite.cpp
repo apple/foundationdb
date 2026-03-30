@@ -69,7 +69,7 @@ struct ReadWriteCommonImpl {
 	                               DDSketch<double>* latencies,
 	                               double* totalLatency,
 	                               int* latencyCount,
-	                               EventMetricHandle<ReadMetric> readMetric,
+	                               EventMetricHandle<ReadMetricDescriptor> readMetric,
 	                               bool shouldRecord) {
 		double readBegin = now();
 		Optional<Value> value = co_await f;
@@ -88,7 +88,7 @@ struct ReadWriteCommonImpl {
 	                               DDSketch<double>* latencies,
 	                               double* totalLatency,
 	                               int* latencyCount,
-	                               EventMetricHandle<ReadMetric> readMetric,
+	                               EventMetricHandle<ReadMetricDescriptor> readMetric,
 	                               bool shouldRecord) {
 		double readBegin = now();
 		RangeResult value = co_await f;

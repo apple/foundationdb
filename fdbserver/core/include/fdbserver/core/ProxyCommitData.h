@@ -30,7 +30,7 @@
 #include "fdbserver/core/ResolverInterface.h"
 #include "flow/IRandom.h"
 
-struct SingleKeyMutation {
+struct SingleKeyMutationDescriptor {
 	Standalone<StringRef> shardBegin;
 	Standalone<StringRef> shardEnd;
 	int64_t tag1;
@@ -39,13 +39,14 @@ struct SingleKeyMutation {
 };
 
 template <>
-struct Descriptor<SingleKeyMutation> : DescribeType<SingleKeyMutation,
-                                                    "SingleKeyMutation",
-                                                    DescribeField<&SingleKeyMutation::shardBegin, "shardBegin">,
-                                                    DescribeField<&SingleKeyMutation::shardEnd, "shardEnd">,
-                                                    DescribeField<&SingleKeyMutation::tag1, "tag1">,
-                                                    DescribeField<&SingleKeyMutation::tag2, "tag2">,
-                                                    DescribeField<&SingleKeyMutation::tag3, "tag3">> {};
+struct Descriptor<SingleKeyMutationDescriptor>
+  : DescribeType<SingleKeyMutationDescriptor,
+                 "SingleKeyMutation",
+                 DescribeField<&SingleKeyMutationDescriptor::shardBegin, "shardBegin">,
+                 DescribeField<&SingleKeyMutationDescriptor::shardEnd, "shardEnd">,
+                 DescribeField<&SingleKeyMutationDescriptor::tag1, "tag1">,
+                 DescribeField<&SingleKeyMutationDescriptor::tag2, "tag2">,
+                 DescribeField<&SingleKeyMutationDescriptor::tag3, "tag3">> {};
 
 class LogSystemDiskQueueAdapter;
 
@@ -223,7 +224,7 @@ struct ProxyCommitData {
 	PublicRequestStream<CommitTransactionRequest> commit;
 	Database cx;
 	Reference<AsyncVar<ServerDBInfo> const> db;
-	EventMetricHandle<SingleKeyMutation> singleKeyMutationEvent;
+	EventMetricHandle<SingleKeyMutationDescriptor> singleKeyMutationEvent;
 
 	std::map<UID, Reference<StorageInfo>> storageCache;
 	std::unordered_map<UID, StorageServerInterface> tssMapping;
