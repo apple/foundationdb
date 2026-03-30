@@ -534,10 +534,55 @@ struct AwaitableFuture
 };
 
 template <class PromiseType, class ValueType>
-struct AwaitableFutureIgnore : AwaitableFuture<PromiseType, ValueType, false> {
-	using Base = AwaitableFuture<PromiseType, ValueType, false>;
+struct AwaitableFutureOwning : Callback<ToFutureVal<ValueType>> {
+	using FutureValue = ToFutureVal<ValueType>;
+	Future<FutureValue> future;
+	PromiseType* pt = nullptr;
 
-	AwaitableFutureIgnore(Future<ToFutureVal<ValueType>> future, PromiseType* pt) : Base(future, pt) {}
+	AwaitableFutureOwning(Future<FutureValue> future, PromiseType* pt) : future(std::move(future)), pt(pt) {}
+
+	void fire(FutureValue const&) override { pt->resume(); }
+	void fire(FutureValue&&) override { pt->resume(); }
+	void error(Error) override { pt->resume(); }
+
+	[[maybe_unused]] [[nodiscard]] bool await_ready() const {
+		if (actorWaitStateIsCancelled(pt->waitState())) {
+			pt->waitState() = ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK;
+			return true;
+		}
+		return future.isReady();
+	}
+
+	[[maybe_unused]] void await_suspend(n_coroutine::coroutine_handle<> h) {
+		pt->setHandle(h);
+		pt->waitState() = ACTOR_WAIT_STATE_WAITING;
+
+		StrictFuture<FutureValue> sf = future;
+		sf.addCallbackAndClear(this);
+	}
+
+	bool resumeImpl() {
+		switch (pt->waitState()) {
+		case ACTOR_WAIT_STATE_CANCELLED:
+			this->remove();
+		case ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK:
+			throw actor_cancelled();
+		}
+
+		bool wasReady = pt->waitState() == ACTOR_WAIT_STATE_NOT_WAITING;
+		if (actorWaitStateIsWaiting(pt->waitState())) {
+			this->remove();
+			pt->waitState() = ACTOR_WAIT_STATE_NOT_WAITING;
+		}
+		return wasReady;
+	}
+};
+
+template <class PromiseType, class ValueType>
+struct AwaitableFutureIgnore : AwaitableFutureOwning<PromiseType, ValueType> {
+	using Base = AwaitableFutureOwning<PromiseType, ValueType>;
+
+	AwaitableFutureIgnore(Future<ToFutureVal<ValueType>> future, PromiseType* pt) : Base(std::move(future), pt) {}
 
 	Void await_resume() {
 		auto self = static_cast<Base*>(this);
@@ -552,11 +597,11 @@ struct AwaitableFutureIgnore : AwaitableFuture<PromiseType, ValueType, false> {
 };
 
 template <class PromiseType, class SourceValue, class ResultValue>
-struct AwaitableFutureErrorOr : AwaitableFuture<PromiseType, SourceValue, false> {
-	using Base = AwaitableFuture<PromiseType, SourceValue, false>;
+struct AwaitableFutureErrorOr : AwaitableFutureOwning<PromiseType, SourceValue> {
+	using Base = AwaitableFutureOwning<PromiseType, SourceValue>;
 	using ResultType = ErrorOr<ResultValue>;
 
-	AwaitableFutureErrorOr(Future<ToFutureVal<SourceValue>> future, PromiseType* pt) : Base(future, pt) {}
+	AwaitableFutureErrorOr(Future<ToFutureVal<SourceValue>> future, PromiseType* pt) : Base(std::move(future), pt) {}
 
 	ResultType await_resume() {
 		auto self = static_cast<Base*>(this);
