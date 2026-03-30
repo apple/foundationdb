@@ -64,7 +64,6 @@ Future<Void> benchWaitForAllReadyActor(benchmark::State* state) {
 	}
 
 	state->SetItemsProcessed(static_cast<int64_t>(state->iterations()) * futureCount);
-	co_return;
 }
 
 template <WaitForAllReadyImpl Impl, WaitForAllReadyScenario Scenario>
