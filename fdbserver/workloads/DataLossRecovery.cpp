@@ -22,9 +22,9 @@
 #include <limits>
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbserver/core/MoveKeys.h"
-#include "fdbserver/core/QuietDatabase.actor.h"
+#include "fdbserver/core/QuietDatabase.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/tester/workloads.actor.h"

@@ -39,12 +39,13 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/tester/tester.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/worker/Worker.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/CoordinationInterface.h"
 #include "fdbclient/SimpleIni.h"
-#include "fdbrpc/AsyncFileNonDurable.actor.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbrpc/AsyncFileNonDurable.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/versions.h"
@@ -626,7 +627,7 @@ Future<Void> runDr(Reference<IClusterConnectionRecord> connRecord) {
 
 Future<Void> runSimHTTPServer() {
 	TraceEvent("SimHTTPServerStarting");
-	Reference<HTTP::SimServerContext> context = makeReference<HTTP::SimServerContext>();
+	auto context = makeReference<HTTP::SimServerContext>();
 	g_simulator->addSimHTTPProcess(context);
 
 	try {
@@ -2799,8 +2800,7 @@ static Future<Void> simulationSetupAndRunImpl(std::string dataFolder,
 		std::string clusterFileDir = joinPath(dataFolder, deterministicRandom()->randomUniqueID().toString());
 		platform::createDirectory(clusterFileDir);
 		writeFile(joinPath(clusterFileDir, "fdb.cluster"), connectionString.get().toString());
-		Reference<ClusterConnectionFile> connFile =
-		    makeReference<ClusterConnectionFile>(joinPath(clusterFileDir, "fdb.cluster"));
+		auto connFile = makeReference<ClusterConnectionFile>(joinPath(clusterFileDir, "fdb.cluster"));
 		if (rebooting) {
 			// protect coordinators for restarting tests
 			std::vector<NetworkAddress> coordinatorAddresses =

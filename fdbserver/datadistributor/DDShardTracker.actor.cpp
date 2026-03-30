@@ -569,8 +569,18 @@ Future<Void> brokenPromiseToReady(Future<Void> f) {
 	}
 }
 
+// True if [begin, end) spans across the system keyspace boundary.
+static bool crossesCriticalSystemBoundary(KeyRef begin, KeyRef end) {
+	return begin < systemKeys.begin && end > systemKeys.begin;
+}
+
 static bool shardForwardMergeFeasible(DataDistributionTracker* self, KeyRange const& keys, KeyRangeRef nextRange) {
 	if (keys.end == allKeys.end) {
+		return false;
+	}
+
+	// Don't merge across critical system metadata boundaries
+	if (crossesCriticalSystemBoundary(keys.begin, nextRange.end)) {
 		return false;
 	}
 
@@ -591,6 +601,11 @@ static bool shardForwardMergeFeasible(DataDistributionTracker* self, KeyRange co
 
 static bool shardBackwardMergeFeasible(DataDistributionTracker* self, KeyRange const& keys, KeyRangeRef prevRange) {
 	if (keys.begin == allKeys.begin) {
+		return false;
+	}
+
+	// Don't merge across critical system metadata boundaries
+	if (crossesCriticalSystemBoundary(prevRange.begin, keys.end)) {
 		return false;
 	}
 
@@ -2055,5 +2070,14 @@ TEST_CASE("/DataDistributor/Tracker/FetchTopK") {
 	ASSERT(reply.maxReadLoad == -1);
 	ASSERT(reply.minReadLoad == -1);
 
+	return Void();
+}
+
+TEST_CASE("/DataDistributor/Tracker/CrossesCriticalSystemBoundary") {
+	ASSERT(!crossesCriticalSystemBoundary("a"_sr, "z"_sr));
+	ASSERT(!crossesCriticalSystemBoundary(systemKeys.begin, systemKeys.end));
+	ASSERT(!crossesCriticalSystemBoundary("a"_sr, systemKeys.begin));
+	ASSERT(crossesCriticalSystemBoundary("a"_sr, "\xff/serverList/"_sr));
+	ASSERT(crossesCriticalSystemBoundary(""_sr, allKeys.end));
 	return Void();
 }

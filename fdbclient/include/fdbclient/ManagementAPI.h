@@ -1,0 +1,415 @@
+/*
+ * ManagementAPI.h
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#pragma once
+
+/* This file defines "management" interfaces for configuration, coordination changes, and
+the inclusion and exclusion of servers. It is used to implement fdbcli management commands
+and by test workloads that simulate such. It isn't exposed to C clients or anywhere outside
+our code base and doesn't need to be versioned. It doesn't do anything you can't do with the
+standard API and some knowledge of the contents of the system key space.
+*/
+
+#include <string>
+#include <map>
+#include "fdbclient/GenericManagementAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/RangeLock.h"
+#include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/DatabaseConfiguration.h"
+#include "fdbclient/MonitorLeader.h"
+
+Future<DatabaseConfiguration> getDatabaseConfiguration(Transaction* tr, bool useSystemPriority = false);
+Future<DatabaseConfiguration> getDatabaseConfiguration(Database cx, bool useSystemPriority = false);
+Future<Void> waitForFullReplication(Database cx);
+
+struct IQuorumChange : ReferenceCounted<IQuorumChange> {
+	virtual ~IQuorumChange() {}
+	virtual Future<std::vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
+	                                                                   std::vector<NetworkAddress> oldCoordinators,
+	                                                                   Reference<IClusterConnectionRecord>,
+	                                                                   CoordinatorsResult&) = 0;
+	virtual std::string getDesiredClusterKeyName() const { return std::string(); }
+};
+
+// Change to use the given set of coordination servers
+Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
+                                                         ClusterConnectionString* conn,
+                                                         std::string newName);
+Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChange> change);
+Reference<IQuorumChange> autoQuorumChange(int desired = -1);
+Reference<IQuorumChange> nameQuorumChange(std::string const& name, Reference<IQuorumChange> const& other);
+
+// Exclude the given set of servers from use as state servers.  Returns as soon as the change is durable, without
+// necessarily waiting for the servers to be evacuated.  A NetworkAddress with a port of 0 means all servers on the
+// given IP.
+Future<Void> excludeServers(Database cx, std::vector<AddressExclusion> servers, bool failed = false);
+Future<Void> excludeServers(Transaction* tr, std::vector<AddressExclusion> servers, bool failed = false);
+
+// Exclude the servers matching the given set of localities from use as state servers.  Returns as soon as the change
+// is durable, without necessarily waiting for the servers to be evacuated.
+Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string> localities, bool failed = false);
+Future<Void> excludeLocalities(Transaction* tr, std::unordered_set<std::string> localities, bool failed = false);
+
+// Remove the given servers from the exclusion list.  A NetworkAddress with a port of 0 means all servers on the given
+// IP.  A NetworkAddress() means all servers (don't exclude anything)
+Future<Void> includeServers(Database cx, std::vector<AddressExclusion> servers, bool failed = false);
+
+// Remove the given localities from the exclusion list.
+Future<Void> includeLocalities(Database cx,
+                               std::vector<std::string> localities,
+                               bool failed = false,
+                               bool includeAll = false);
+
+// Set the process class of processes with the given address.  A NetworkAddress with a port of 0 means all servers on
+// the given IP.
+Future<Void> setClass(Database cx, AddressExclusion server, ProcessClass processClass);
+
+// Get the current list of excluded servers including both "exclude" and "failed".
+Future<std::vector<AddressExclusion>> getAllExcludedServers(Database cx);
+Future<std::vector<AddressExclusion>> getAllExcludedServers(Transaction* tr);
+
+// Get the current list of excluded servers.
+Future<std::vector<AddressExclusion>> getExcludedServerList(Transaction* tr);
+
+// Get the current list of failed servers.
+Future<std::vector<AddressExclusion>> getExcludedFailedServerList(Transaction* tr);
+
+// Get the current list of excluded localities
+Future<std::vector<std::string>> getAllExcludedLocalities(Database cx);
+Future<std::vector<std::string>> getAllExcludedLocalities(Transaction* tr);
+
+// Get the current list of excluded localities.
+Future<std::vector<std::string>> getExcludedLocalityList(Transaction* tr);
+
+// Get the current list of failed localities.
+Future<std::vector<std::string>> getExcludedFailedLocalityList(Transaction* tr);
+
+// Decodes the locality string to a pair of locality prefix and its value.
+// The prefix could be dcid, processid, machineid, processid.
+std::pair<std::string, std::string> decodeLocality(const std::string& locality);
+std::set<AddressExclusion> getServerAddressesByLocality(
+    const std::map<std::string, StorageServerInterface> server_interfaces,
+    const std::string& locality);
+std::set<AddressExclusion> getAddressesByLocality(const std::vector<ProcessData>& workers, const std::string& locality);
+
+// Check for the given, previously excluded servers to be evacuated (no longer used for state).  If waitForExclusion
+// is true, this actor returns once it is safe to shut down all such machines without impacting fault tolerance,
+// until and unless any of them are explicitly included with includeServers()
+Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx,
+                                                          std::vector<AddressExclusion> servers,
+                                                          bool waitForAllExcluded);
+Future<bool> checkForExcludingServersTxActor(ReadYourWritesTransaction* tr,
+                                             std::set<AddressExclusion>* exclusions,
+                                             std::set<NetworkAddress>* inProgressExclusion);
+
+// Gets a list of all workers in the cluster (excluding testers)
+Future<std::vector<ProcessData>> getWorkers(Database cx);
+Future<std::vector<ProcessData>> getWorkers(Transaction* tr);
+
+Future<Void> timeKeeperSetDisable(Database cx);
+
+Future<Void> lockDatabase(Transaction* tr, UID id);
+Future<Void> lockDatabase(Reference<ReadYourWritesTransaction> tr, UID id);
+Future<Void> lockDatabase(Database cx, UID id);
+
+Future<Void> unlockDatabase(Transaction* tr, UID id);
+Future<Void> unlockDatabase(Reference<ReadYourWritesTransaction> tr, UID id);
+Future<Void> unlockDatabase(Database cx, UID id);
+
+Future<Void> checkDatabaseLock(Transaction* tr, UID id);
+Future<Void> checkDatabaseLock(Reference<ReadYourWritesTransaction> tr, UID id);
+
+Future<Void> advanceVersion(Database cx, Version v);
+
+Future<int> setDDMode(Database cx, int mode);
+
+Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile, Standalone<StringRef> dcId);
+
+// Start an audit on range of the specific type.
+Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile,
+                         KeyRange range,
+                         AuditType type,
+                         KeyValueStoreType engineType,
+                         double timeoutSeconds);
+// Cancel an audit given type and id
+Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> clusterFile,
+                               AuditType type,
+                               UID auditId,
+                               double timeoutSeconds);
+
+// Set bulk load mode
+// When the mode is on, DD will periodically check if there is any bulkload task to do by scaning the metadata.
+Future<int> setBulkLoadMode(Database cx, int mode);
+
+// Get bulk load mode value.
+Future<int> getBulkLoadMode(Database cx);
+
+// Create a bulkload task submission transaction without commit
+// Used by ManagementAPI and bulkdumpRestore at DD
+Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr, BulkLoadTaskState bulkLoadTask);
+
+// Create an bulkload task acknowledge transaction without commit
+// Used by ManagementAPI and bulkdumpRestore at DD
+Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr, KeyRange range, UID taskId);
+
+// Get bulk load task for the input range and taskId
+Future<BulkLoadTaskState> getBulkLoadTask(Transaction* tr,
+                                          KeyRange range,
+                                          UID taskId,
+                                          std::vector<BulkLoadPhase> phases);
+
+// Add bulkLoad job to history map
+Future<Void> addBulkLoadJobToHistory(Transaction* tr, BulkLoadJobState jobState);
+
+// Get all past bulkLoad jobs from history map
+Future<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database cx);
+
+// Erase all bulkLoad job history metadata if jobId is not provided. Otherwise, erase the job with the given jobId.
+Future<Void> clearBulkLoadJobHistory(Database cx, Optional<UID> jobId = Optional<UID>());
+
+// Get the current running bulk load job
+// Set lockAware=true when checking during database restore (when database is locked).
+Future<Optional<BulkLoadJobState>> getRunningBulkLoadJob(Database cx, bool lockAware = false);
+
+// Cancel bulkLoad job for the given jobId
+Future<Void> cancelBulkLoadJob(Database cx, UID jobId);
+
+// Acknowledge all bulk load tasks that are in the Error phase.
+// After acknowledge, the write traffic to the task's range is turned on and the task's metadata is cleared by the bulk
+// load engine.
+Future<Void> acknowledgeAllErrorBulkLoadTasks(Database cx, UID jobId, KeyRange jobRange);
+
+// Submit a BulkLoad job: loading data from a remote folder using bulkloading mechanism.
+// There is at most one BulkLoad or one BulkDump job at a time.
+// If there is any existing BulkLoad or BulkDump job, reject the new job.
+// Set lockAware=true when submitting during database restore (when database is locked).
+Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState, bool lockAware = false);
+
+// Return the existing BulkLoad job metadata (if any)
+Future<Optional<BulkLoadJobState>> getSubmittedBulkLoadJob(Transaction* tr);
+
+// Set bulk dump mode. When the mode is on, DD will periodically check if there is any bulkdump task to do by scaning
+// the metadata.
+Future<int> setBulkDumpMode(Database cx, int mode);
+
+// Get bulk dump mode value.
+Future<int> getBulkDumpMode(Database cx);
+
+// TODO(BulkDump): Cancel or clear the BulkDump job
+Future<Void> cancelBulkDumpJob(Database cx, UID jobId);
+
+// Submit a bulkdump job: dumping data to a remote folder by storage servers.
+// There is at most one BulkLoad or one BulkDump job at a time.
+// If there is any existing BulkLoad or BulkDump job, reject the new job.
+Future<Void> submitBulkDumpJob(Database cx, BulkDumpState bulkDumpJob);
+
+// Return the existing job metadata
+Future<Optional<BulkDumpState>> getSubmittedBulkDumpJob(Transaction* tr);
+
+// Get total number of completed tasks within the input range
+Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToRead);
+
+// ==================== BulkDump/BulkLoad Progress Tracking ====================
+
+// Represents a stalled task for observability
+struct BulkLoadStalledTask {
+	UID taskId;
+	KeyRange range;
+	UID storageServerId;
+	double stalledSeconds;
+	int restartCount;
+	std::string lastError;
+
+	BulkLoadStalledTask() : stalledSeconds(0), restartCount(0) {}
+	BulkLoadStalledTask(UID taskId,
+	                    KeyRange range,
+	                    UID storageServerId,
+	                    double stalledSeconds,
+	                    int restartCount,
+	                    std::string lastError)
+	  : taskId(taskId), range(range), storageServerId(storageServerId), stalledSeconds(stalledSeconds),
+	    restartCount(restartCount), lastError(lastError) {}
+};
+
+// Aggregated progress for a BulkDump job
+struct BulkDumpProgress {
+	UID jobId;
+	KeyRange jobRange;
+	int totalTasks;
+	int completeTasks;
+	int runningTasks;
+	int errorTasks;
+	int64_t totalBytes;
+	int64_t completedBytes;
+	double elapsedSeconds;
+	double startTime; // For computing current throughput
+	std::vector<BulkLoadStalledTask> stalledTasks;
+
+	BulkDumpProgress()
+	  : totalTasks(0), completeTasks(0), runningTasks(0), errorTasks(0), totalBytes(0), completedBytes(0),
+	    elapsedSeconds(0), startTime(0) {}
+
+	double progressPercent() const { return totalTasks > 0 ? 100.0 * completeTasks / totalTasks : 0; }
+
+	double avgBytesPerSecond() const { return elapsedSeconds > 0 ? completedBytes / elapsedSeconds : 0; }
+
+	Optional<double> etaSeconds() const {
+		double rate = avgBytesPerSecond();
+		if (rate > 0 && completedBytes < totalBytes) {
+			return (totalBytes - completedBytes) / rate;
+		}
+		return {};
+	}
+};
+
+// Aggregated progress for a BulkLoad job
+struct BulkLoadProgress {
+	UID jobId;
+	KeyRange jobRange;
+	int totalTasks;
+	int submittedTasks;
+	int triggeredTasks;
+	int runningTasks;
+	int completeTasks;
+	int errorTasks;
+	int64_t totalBytes;
+	int64_t completedBytes;
+	double elapsedSeconds;
+	double startTime;
+	std::vector<BulkLoadStalledTask> stalledTasks;
+
+	BulkLoadProgress()
+	  : totalTasks(0), submittedTasks(0), triggeredTasks(0), runningTasks(0), completeTasks(0), errorTasks(0),
+	    totalBytes(0), completedBytes(0), elapsedSeconds(0), startTime(0) {}
+
+	double progressPercent() const { return totalTasks > 0 ? 100.0 * completeTasks / totalTasks : 0; }
+
+	double avgBytesPerSecond() const { return elapsedSeconds > 0 ? completedBytes / elapsedSeconds : 0; }
+
+	Optional<double> etaSeconds() const {
+		double rate = avgBytesPerSecond();
+		if (rate > 0 && completedBytes < totalBytes) {
+			return (totalBytes - completedBytes) / rate;
+		}
+		return {};
+	}
+};
+
+// Get aggregated progress for the current BulkDump job (if any)
+// Reads task metadata from system keys and computes aggregate metrics
+Future<Optional<BulkDumpProgress>> getBulkDumpProgress(Database cx);
+
+// Get aggregated progress for the current BulkLoad job (if any)
+// Reads task metadata from system keys and computes aggregate metrics
+Future<Optional<BulkLoadProgress>> getBulkLoadProgress(Database cx);
+
+// Threshold in seconds for considering a task "stalled"
+constexpr double BULK_TASK_STALL_THRESHOLD_SECONDS = 60.0;
+
+// BulkDump owner tracking - stored in separate system keys for backward compatibility
+struct BulkDumpOwnerInfo {
+	UID ownerUID;
+	std::string ownerType; // e.g., "backup", "dr", "migration"
+	std::string ownerName; // e.g., backup tag
+	double submitTime;
+
+	constexpr static FileIdentifier file_identifier = 1384510;
+
+	BulkDumpOwnerInfo() : submitTime(0) {}
+	BulkDumpOwnerInfo(UID uid, std::string type, std::string name, double time)
+	  : ownerUID(uid), ownerType(type), ownerName(name), submitTime(time) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, ownerUID, ownerType, ownerName, submitTime);
+	}
+};
+
+// Generic bulk owner tracking (internal implementation)
+Future<Void> setBulkOwner(Database cx, UID jobId, BulkDumpOwnerInfo ownerInfo, bool isBulkDump);
+Future<Optional<BulkDumpOwnerInfo>> getBulkOwner(Database cx, UID jobId, bool isBulkDump);
+
+// Public API wrappers (for backward compatibility)
+Future<Void> setBulkDumpOwner(Database cx, UID jobId, BulkDumpOwnerInfo ownerInfo);
+Future<Optional<BulkDumpOwnerInfo>> getBulkDumpOwner(Database cx, UID jobId);
+Future<Void> setBulkLoadOwner(Database cx, UID jobId, BulkDumpOwnerInfo ownerInfo);
+Future<Optional<BulkDumpOwnerInfo>> getBulkLoadOwner(Database cx, UID jobId);
+
+// ==================== End Progress Tracking ====================
+
+// Persist a rangeLock owner to database metadata
+// A range can only be locked by a registered owner
+Future<Void> registerRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID, std::string description);
+
+// Remove an owner form the database metadata
+Future<Void> removeRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID);
+
+// Get all registered rangeLock owner
+Future<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx);
+
+// Get a rangeLock owner by ownerUniqueID
+Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID);
+
+// Block write traffic to a user range (the input range must be within normalKeys).
+// One transaction can call releaseExclusiveReadLockOnRange at most for one time.
+Future<Void> takeExclusiveReadLockOnRange(Transaction* tr, KeyRange range, RangeLockOwnerName ownerUniqueID);
+
+Future<Void> takeExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID);
+
+// Unblock a user range (the input range must be within normalKeys).
+// One transaction can call releaseExclusiveReadLockOnRange at most for one time.
+Future<Void> releaseExclusiveReadLockOnRange(Transaction* tr, KeyRange range, RangeLockOwnerName ownerUniqueID);
+
+Future<Void> releaseExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID);
+
+// Get locked ranges within the input range (the input range must be within normalKeys)
+Future<std::vector<std::pair<KeyRange, RangeLockState>>> findExclusiveReadLockOnRange(
+    Database cx,
+    KeyRange range,
+    Optional<RangeLockOwnerName> ownerName = Optional<RangeLockOwnerName>());
+
+// Clear all exclusive read lock by the input user. Not transactional.
+Future<Void> releaseExclusiveReadLockByUser(Database cx, RangeLockOwnerName ownerUniqueID);
+
+Future<Void> printHealthyZone(Database cx);
+Future<bool> clearHealthyZone(Database cx, bool printWarning = false, bool clearSSFailureZoneString = false);
+Future<bool> setHealthyZone(Database cx, StringRef zoneId, double seconds, bool printWarning = false);
+
+Future<Void> waitForPrimaryDC(Database cx, StringRef dcId);
+
+// Gets the cluster connection string
+Future<Optional<ClusterConnectionString>> getConnectionString(Database cx);
+
+void schemaCoverage(std::string const& spath, bool covered = true);
+bool schemaMatch(json_spirit::mValue const& schema,
+                 json_spirit::mValue const& result,
+                 std::string& errorStr,
+                 Severity sev = SevError,
+                 bool checkCoverage = false,
+                 std::string path = std::string(),
+                 std::string schema_path = std::string());
+
+// execute payload in 'snapCmd' on all the coordinators, TLogs and
+// storage nodes
+Future<Void> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
+
+Future<Void> disableBackupWorker(Database cx);
+Future<Void> enableBackupWorker(Database cx);

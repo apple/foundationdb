@@ -66,6 +66,12 @@ public:
 	bool operator==(const OperationStack& r) const;
 };
 
+FDB_BOOLEAN_PARAM(FollowingKeysCleared);
+FDB_BOOLEAN_PARAM(FollowingKeysConflict);
+FDB_BOOLEAN_PARAM(IsConflict);
+FDB_BOOLEAN_PARAM(FollowingKeysUnreadable);
+FDB_BOOLEAN_PARAM(IsUnreadable);
+
 struct WriteMapEntry {
 	KeyRef key;
 	OperationStack stack;
@@ -77,11 +83,11 @@ struct WriteMapEntry {
 
 	WriteMapEntry(KeyRef const& key,
 	              OperationStack&& stack,
-	              bool following_keys_cleared,
-	              bool following_keys_conflict,
-	              bool is_conflict,
-	              bool following_keys_unreadable,
-	              bool is_unreadable)
+	              FollowingKeysCleared following_keys_cleared,
+	              FollowingKeysConflict following_keys_conflict,
+	              IsConflict is_conflict,
+	              FollowingKeysUnreadable following_keys_unreadable,
+	              IsUnreadable is_unreadable)
 	  : key(key), stack(std::move(stack)), following_keys_cleared(following_keys_cleared),
 	    following_keys_conflict(following_keys_conflict), is_conflict(is_conflict),
 	    following_keys_unreadable(following_keys_unreadable), is_unreadable(is_unreadable) {}
@@ -127,11 +133,33 @@ private:
 
 public:
 	explicit WriteMap(Arena* arena) : arena(arena), writeMapEmpty(true), ver(-1), scratch_iterator(this) {
-		PTreeImpl::insert(
-		    writes, ver, WriteMapEntry(allKeys.begin, OperationStack(), false, false, false, false, false));
-		PTreeImpl::insert(writes, ver, WriteMapEntry(allKeys.end, OperationStack(), false, false, false, false, false));
-		PTreeImpl::insert(
-		    writes, ver, WriteMapEntry(afterAllKeys, OperationStack(), false, false, false, false, false));
+		PTreeImpl::insert(writes,
+		                  ver,
+		                  WriteMapEntry(allKeys.begin,
+		                                OperationStack(),
+		                                FollowingKeysCleared::False,
+		                                FollowingKeysConflict::False,
+		                                IsConflict::False,
+		                                FollowingKeysUnreadable::False,
+		                                IsUnreadable::False));
+		PTreeImpl::insert(writes,
+		                  ver,
+		                  WriteMapEntry(allKeys.end,
+		                                OperationStack(),
+		                                FollowingKeysCleared::False,
+		                                FollowingKeysConflict::False,
+		                                IsConflict::False,
+		                                FollowingKeysUnreadable::False,
+		                                IsUnreadable::False));
+		PTreeImpl::insert(writes,
+		                  ver,
+		                  WriteMapEntry(afterAllKeys,
+		                                OperationStack(),
+		                                FollowingKeysCleared::False,
+		                                FollowingKeysConflict::False,
+		                                IsConflict::False,
+		                                FollowingKeysUnreadable::False,
+		                                IsUnreadable::False));
 	}
 
 	WriteMap(WriteMap&& r) noexcept

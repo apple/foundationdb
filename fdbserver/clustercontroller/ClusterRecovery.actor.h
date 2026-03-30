@@ -36,7 +36,7 @@
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbserver/core/CoordinatedState.h"
 #include "fdbserver/core/CoordinationInterface.h" // copy constructors for ServerCoordinators class
-#include "ClusterController.actor.h"
+#include "ClusterController.h"
 #include "fdbserver/core/DBCoreState.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/LogSystem.h"

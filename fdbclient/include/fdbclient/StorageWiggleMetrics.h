@@ -135,7 +135,7 @@ Future<Void> resetStorageWiggleMetrics_impl(
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	if (!metrics.present()) {
-		co_await store(metrics, metricsProperty.get(tr));
+		metrics = co_await metricsProperty.get(tr);
 	}
 
 	if (metrics.present()) {

@@ -54,7 +54,7 @@ public:
 		Reference<IAsyncFile> f = co_await bc->readFile(snapshot.fileName);
 		int64_t size = co_await f->size();
 		Standalone<StringRef> buf = makeString(size);
-		co_await success(f->read(mutateString(buf), buf.size(), 0));
+		co_await f->read(mutateString(buf), buf.size(), 0);
 		json_spirit::mValue json;
 		if (!json_spirit::read_string(buf.toString(), json)) {
 			fprintf(stderr,
@@ -1132,7 +1132,7 @@ public:
 			restorableSet.targetVersion = targetVersion;
 			std::vector<LogFile> logFiles;
 			Version begin = beginVersion == invalidVersion ? 0 : beginVersion;
-			co_await store(logFiles, bc->listLogFiles(begin, targetVersion, false));
+			logFiles = co_await bc->listLogFiles(begin, targetVersion, false);
 			// List logs in version order so log continuity can be analyzed
 			std::sort(logFiles.begin(), logFiles.end());
 			if (!logFiles.empty()) {

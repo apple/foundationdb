@@ -1040,7 +1040,7 @@ void startRole(const Role& role,
                const std::string& origination = "Recruited");
 void endRole(const Role& role, UID id, std::string reason, bool ok = true, Error e = Error());
 
-ACTOR Future<Void> traceRole(Role role, UID roleId);
+Future<Void> traceRole(Role role, UID roleId);
 
 struct ServerDBInfo;
 
@@ -1051,20 +1051,6 @@ class Database openDBOnServer(Reference<AsyncVar<ServerDBInfo> const> const& db,
 Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>> const> in,
                                      Reference<AsyncVar<Optional<struct ClusterInterface>>> out);
 
-ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> ccr,
-                        LocalityData localities,
-                        ProcessClass processClass,
-                        std::string dataFolder,
-                        std::string coordFolder,
-                        int64_t memoryLimit,
-                        std::string metricsConnFile,
-                        std::string metricsPrefix,
-                        int64_t memoryProfilingThreshold,
-                        std::string whitelistBinPaths,
-                        bool consistencyCheckUrgentMode);
-
-void registerThreadForProfiling();
-
 // Returns true if `address` is used in the db (indicated by `dbInfo`) transaction system and in the db's primary
 // satellite DC.
 bool addressInDbAndPrimarySatelliteDc(const NetworkAddress& address, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
@@ -1074,8 +1060,6 @@ bool addressInDbAndRemoteDc(
     const NetworkAddress& address,
     Reference<AsyncVar<ServerDBInfo> const> dbInfo,
     Optional<std::vector<NetworkAddress>> storageServers = Optional<std::vector<NetworkAddress>>{});
-
-void updateCpuProfiler(ProfilerRequest req);
 
 extern bool isSimulatorProcessUnreliable();
 

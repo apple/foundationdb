@@ -574,7 +574,7 @@ public:
 	                        Reference<FutureBucket> futureBucket,
 	                        std::shared_ptr<double const> pollDelay,
 	                        int maxConcurrentTasks) {
-		Reference<AsyncVar<bool>> paused = makeReference<AsyncVar<bool>>(true);
+		auto paused = makeReference<AsyncVar<bool>>(true);
 		Future<Void> watchPausedFuture = watchPaused(cx, taskBucket, paused);
 		taskBucket->metricLogger = taskBucket->cc.traceCounters(
 		    "TaskBucketMetrics", taskBucket->dbgid, CLIENT_KNOBS->TASKBUCKET_LOGGING_DELAY);
@@ -583,8 +583,9 @@ public:
 				co_await (paused->onChange() || watchPausedFuture);
 			}
 
-			co_await (dispatch(cx, taskBucket, futureBucket, pollDelay, maxConcurrentTasks) || paused->onChange() ||
-			          watchPausedFuture);
+			co_await race(dispatch(cx, taskBucket, futureBucket, pollDelay, maxConcurrentTasks),
+			              paused->onChange(),
+			              watchPausedFuture);
 		}
 	}
 
@@ -677,7 +678,7 @@ public:
 
 				bool is_busy = co_await isBusy(tr, taskBucket);
 				if (!is_busy) {
-					co_await success(addIdle(tr, taskBucket));
+					co_await addIdle(tr, taskBucket);
 				}
 
 				Optional<Value> val = co_await tr->get(taskBucket->active.key());

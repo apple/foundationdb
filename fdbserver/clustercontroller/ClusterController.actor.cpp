@@ -40,8 +40,8 @@
 #include "fdbserver/core/BackupInterface.h"
 #include "fdbserver/core/CoordinatedState.h"
 #include "fdbserver/core/CoordinationInterface.h" // copy constructors for ServerCoordinators class
-#include "fdbserver/clustercontroller/ClusterController.actor.h"
-#include "ClusterController.actor.h"
+#include "fdbserver/clustercontroller/ClusterController.h"
+#include "ClusterController.h"
 #include "ClusterRecovery.actor.h"
 #include "fdbserver/core/DataDistributorInterface.h"
 #include "fdbserver/core/LeaderElection.h"
@@ -71,18 +71,20 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR Future<Optional<Value>> getPreviousCoordinators(ClusterControllerData* self) {
-	state ReadYourWritesTransaction tr(self->db.db);
-	loop {
+Future<Optional<Value>> getPreviousCoordinators(ClusterControllerData* self) {
+	ReadYourWritesTransaction tr(self->db.db);
+	while (true) {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			Optional<Value> previousCoordinators = wait(tr.get(previousCoordinatorsKey));
-			return previousCoordinators;
+			Optional<Value> previousCoordinators = co_await tr.get(previousCoordinatorsKey);
+			co_return previousCoordinators;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
@@ -220,20 +222,20 @@ bool ClusterControllerData::remoteTransactionSystemContainsDegradedServers() {
 }
 
 // Recruit failed log routers in parallel
-ACTOR Future<Void> recruitFailedLogRouters(ClusterControllerData* cluster,
-                                           ClusterControllerData::DBInfo* db,
-                                           std::vector<int> tagIds,
-                                           int logSetIndex,
-                                           Reference<ILogSystem> logSystem,
-                                           LogSystemConfig config) {
-	state Optional<Key> targetDcId =
+Future<Void> recruitFailedLogRouters(ClusterControllerData* cluster,
+                                     ClusterControllerData::DBInfo* db,
+                                     std::vector<int> tagIds,
+                                     int logSetIndex,
+                                     Reference<ILogSystem> logSystem,
+                                     LogSystemConfig config) {
+	Optional<Key> targetDcId =
 	    db->recoveryData->remoteDcIds.size() ? db->recoveryData->remoteDcIds[0] : Optional<Key>();
 
 	// Use getWorkersForRoleInDatacenter to get workers for all log routers at once
 	std::map<Optional<Standalone<StringRef>>, int> id_used;
 	cluster->updateKnownIds(&id_used);
 
-	state std::vector<WorkerDetails> workers =
+	std::vector<WorkerDetails> workers =
 	    cluster->getWorkersForRoleInDatacenter(targetDcId, ProcessClass::LogRouter, tagIds.size(), db->config, id_used);
 
 	if (workers.size() < tagIds.size()) {
@@ -252,7 +254,7 @@ ACTOR Future<Void> recruitFailedLogRouters(ClusterControllerData* cluster,
 	    .detail("TargetDcId", targetDcId);
 
 	// Build requests for all log routers and send them in parallel
-	state std::vector<Future<ErrorOr<TLogInterface>>> recruitments;
+	std::vector<Future<ErrorOr<TLogInterface>>> recruitments;
 
 	for (int i = 0; i < tagIds.size(); i++) {
 		Tag routerTag = Tag(tagLocalityLogRouter, tagIds[i]);
@@ -294,8 +296,8 @@ ACTOR Future<Void> recruitFailedLogRouters(ClusterControllerData* cluster,
 	}
 
 	// Wait for all recruitments to complete
-	state Future<Void> timeout = delay(SERVER_KNOBS->CC_RERECRUIT_LOG_ROUTER_TIMEOUT);
-	wait(waitForAll(recruitments) || timeout);
+	Future<Void> timeout = delay(SERVER_KNOBS->CC_RERECRUIT_LOG_ROUTER_TIMEOUT);
+	co_await (waitForAll(recruitments) || timeout);
 
 	if (timeout.isReady()) {
 		TraceEvent(SevWarn, "LogRoutersRecruitmentTimeout", cluster->id)
@@ -331,17 +333,16 @@ ACTOR Future<Void> recruitFailedLogRouters(ClusterControllerData* cluster,
 	db->recoveryData->registrationTrigger.trigger();
 
 	TraceEvent("LogRoutersRecruitmentComplete", cluster->id).detail("Count", tagIds.size());
-
-	return Void();
 }
 
-ACTOR Future<std::vector<int>> monitorLogRouters(Reference<ILogSystem> logSystem, int logSetIndex) {
-	state std::vector<Future<Void>> failures;
-	state LogSystemConfig config = logSystem->getLogSystemConfig();
-	state std::vector<int> failedTagIds;
+Future<std::vector<int>> monitorLogRouters(Reference<ILogSystem> logSystem, int logSetIndex) {
+	std::vector<Future<Void>> failures;
+	LogSystemConfig config = logSystem->getLogSystemConfig();
+	std::vector<int> failedTagIds;
 
 	if (logSetIndex == -1) {
-		return Never();
+		co_await Future<Void>(Never());
+		UNREACHABLE();
 	}
 
 	ASSERT_WE_THINK(logSetIndex >= 0 && logSetIndex < config.tLogs.size());
@@ -358,17 +359,18 @@ ACTOR Future<std::vector<int>> monitorLogRouters(Reference<ILogSystem> logSystem
 	}
 
 	if (failures.empty()) {
-		return Never();
+		co_await Future<Void>(Never());
+		UNREACHABLE();
 	}
 
-	wait(quorum(failures, 1));
+	co_await quorum(failures, 1);
 
 	for (int i = 0; i < failures.size(); i++) {
 		if (failures[i].isReady() || failures[i].isError()) {
 			failedTagIds.push_back(i);
 		}
 	}
-	return failedTagIds;
+	co_return failedTagIds;
 }
 
 // When in fully_recovered state, the cluster controller will monitor log routers
@@ -934,16 +936,16 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 }
 
-ACTOR Future<Void> doCheckOutstandingRequests(ClusterControllerData* self) {
+Future<Void> doCheckOutstandingRequests(ClusterControllerData* self) {
 	try {
-		wait(delay(SERVER_KNOBS->CHECK_OUTSTANDING_INTERVAL));
+		co_await delay(SERVER_KNOBS->CHECK_OUTSTANDING_INTERVAL);
 		while (now() - self->lastRecruitTime < SERVER_KNOBS->SINGLETON_RECRUIT_BME_DELAY ||
 		       !self->goodRecruitmentTime.isReady()) {
 			if (now() - self->lastRecruitTime < SERVER_KNOBS->SINGLETON_RECRUIT_BME_DELAY) {
-				wait(delay(SERVER_KNOBS->SINGLETON_RECRUIT_BME_DELAY + 0.001 - (now() - self->lastRecruitTime)));
+				co_await delay(SERVER_KNOBS->SINGLETON_RECRUIT_BME_DELAY + 0.001 - (now() - self->lastRecruitTime));
 			}
 			if (!self->goodRecruitmentTime.isReady()) {
-				wait(self->goodRecruitmentTime);
+				co_await self->goodRecruitmentTime;
 			}
 		}
 
@@ -962,14 +964,13 @@ ACTOR Future<Void> doCheckOutstandingRequests(ClusterControllerData* self) {
 			TraceEvent(SevError, "CheckOutstandingError").error(e);
 		}
 	}
-	return Void();
 }
 
-ACTOR Future<Void> doCheckOutstandingRemoteRequests(ClusterControllerData* self) {
+Future<Void> doCheckOutstandingRemoteRequests(ClusterControllerData* self) {
 	try {
-		wait(delay(SERVER_KNOBS->CHECK_OUTSTANDING_INTERVAL));
+		co_await delay(SERVER_KNOBS->CHECK_OUTSTANDING_INTERVAL);
 		while (!self->goodRemoteRecruitmentTime.isReady()) {
-			wait(self->goodRemoteRecruitmentTime);
+			co_await self->goodRemoteRecruitmentTime;
 		}
 
 		checkOutstandingRemoteRecruitmentRequests(self);
@@ -978,7 +979,6 @@ ACTOR Future<Void> doCheckOutstandingRemoteRequests(ClusterControllerData* self)
 			TraceEvent(SevError, "CheckOutstandingError").error(e);
 		}
 	}
-	return Void();
 }
 
 void checkOutstandingRequests(ClusterControllerData* self) {
@@ -991,14 +991,14 @@ void checkOutstandingRequests(ClusterControllerData* self) {
 	}
 }
 
-ACTOR Future<Void> rebootAndCheck(ClusterControllerData* cluster, Optional<Standalone<StringRef>> processID) {
+Future<Void> rebootAndCheck(ClusterControllerData* cluster, Optional<Standalone<StringRef>> processID) {
 	{
 		ASSERT(processID.present());
 		auto watcher = cluster->id_worker.find(processID);
 		ASSERT(watcher != cluster->id_worker.end());
 
 		watcher->second.reboots++;
-		wait(delay(g_network->isSimulated() ? SERVER_KNOBS->SIM_SHUTDOWN_TIMEOUT : SERVER_KNOBS->SHUTDOWN_TIMEOUT));
+		co_await delay(g_network->isSimulated() ? SERVER_KNOBS->SIM_SHUTDOWN_TIMEOUT : SERVER_KNOBS->SHUTDOWN_TIMEOUT);
 	}
 
 	{
@@ -1009,8 +1009,6 @@ ACTOR Future<Void> rebootAndCheck(ClusterControllerData* cluster, Optional<Stand
 				checkOutstandingRequests(cluster);
 		}
 	}
-
-	return Void();
 }
 
 ACTOR Future<Void> workerAvailabilityWatch(WorkerInterface worker,
@@ -1085,16 +1083,15 @@ struct FailureStatusInfo {
 	}
 };
 
-ACTOR Future<std::vector<TLogInterface>> requireAll(std::vector<Future<Optional<std::vector<TLogInterface>>>> in) {
-	state std::vector<TLogInterface> out;
-	state int i;
-	for (i = 0; i < in.size(); i++) {
-		Optional<std::vector<TLogInterface>> x = wait(in[i]);
+Future<std::vector<TLogInterface>> requireAll(std::vector<Future<Optional<std::vector<TLogInterface>>>> in) {
+	std::vector<TLogInterface> out;
+	for (int i = 0; i < in.size(); i++) {
+		Optional<std::vector<TLogInterface>> x = co_await in[i];
 		if (!x.present())
 			throw recruitment_failed();
 		out.insert(out.end(), x.get().begin(), x.get().end());
 	}
-	return out;
+	co_return out;
 }
 
 void clusterRecruitStorage(ClusterControllerData* self, RecruitStorageRequest req) {
@@ -1466,39 +1463,40 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 
 #define TIME_KEEPER_VERSION "1"_sr
 
-ACTOR Future<Void> timeKeeperSetVersion(ClusterControllerData* self) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
-	loop {
+Future<Void> timeKeeperSetVersion(ClusterControllerData* self) {
+	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+	while (true) {
+		Error err;
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->set(timeKeeperVersionKey, TIME_KEEPER_VERSION);
-			wait(tr->commit());
+			co_await tr->commit();
 			break;
 		} catch (Error& e) {
-			wait(tr->onError(e));
+			err = e;
 		}
+		co_await tr->onError(err);
 	}
-
-	return Void();
 }
 
 // This actor periodically gets read version and writes it to cluster with current timestamp as key. To avoid
 // running out of space, it limits the max number of entries and clears old entries on each update. This mapping is
 // used from backup and restore to get the version information for a timestamp.
-ACTOR Future<Void> timeKeeper(ClusterControllerData* self) {
-	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
+Future<Void> timeKeeper(ClusterControllerData* self) {
+	KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
 
 	TraceEvent("TimeKeeperStarted").log();
 
-	wait(timeKeeperSetVersion(self));
+	co_await timeKeeperSetVersion(self);
 
-	loop {
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
-		loop {
+	while (true) {
+		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+		while (true) {
+			Error err;
 			try {
-				state UID debugID = deterministicRandom()->randomUniqueID();
+				UID debugID = deterministicRandom()->randomUniqueID();
 				if (!g_network->isSimulated()) {
 					// This is done to provide an arbitrary logged transaction every ~10s.
 					// FIXME: replace or augment this with logging on the proxy which tracks
@@ -1509,7 +1507,7 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData* self) {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-				Optional<Value> disableValue = wait(tr->get(timeKeeperDisableKey));
+				Optional<Value> disableValue = co_await tr->get(timeKeeperDisableKey);
 				if (disableValue.present()) {
 					break;
 				}
@@ -1525,30 +1523,31 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData* self) {
 					versionMap.erase(tr, 0, ttl);
 				}
 
-				wait(tr->commit());
+				co_await tr->commit();
 				break;
 			} catch (Error& e) {
-				wait(tr->onError(e));
+				err = e;
 			}
+			co_await tr->onError(err);
 		}
 
-		wait(delay(SERVER_KNOBS->TIME_KEEPER_DELAY));
+		co_await delay(SERVER_KNOBS->TIME_KEEPER_DELAY);
 	}
 }
 
-ACTOR Future<Void> statusServer(FutureStream<StatusRequest> requests,
-                                ClusterControllerData* self,
-                                ServerCoordinators coordinators) {
+Future<Void> statusServer(FutureStream<StatusRequest> requests,
+                          ClusterControllerData* self,
+                          ServerCoordinators coordinators) {
 	// Seconds since the END of the last GetStatus executed
-	state double last_request_time = 0.0;
+	double last_request_time = 0.0;
 
 	// Place to accumulate a batch of requests to respond to
-	state std::vector<StatusRequest> requests_batch;
+	std::vector<StatusRequest> requests_batch;
 
-	loop {
+	while (true) {
 		try {
 			// Wait til first request is ready
-			StatusRequest req = waitNext(requests);
+			StatusRequest req = co_await requests;
 			++self->statusRequests;
 			requests_batch.push_back(req);
 
@@ -1557,7 +1556,7 @@ ACTOR Future<Void> statusServer(FutureStream<StatusRequest> requests,
 
 			// Wait if needed to satisfy min_time knob, also allows more requests to queue up.
 			double minwait = std::max(next_allowed_request_time - now(), 0.0);
-			wait(delay(minwait));
+			co_await delay(minwait);
 
 			// Get all requests that are ready right *now*, before GetStatus() begins.
 			// All of these requests will be responded to with the next GetStatus() result.
@@ -1598,18 +1597,18 @@ ACTOR Future<Void> statusServer(FutureStream<StatusRequest> requests,
 				}
 			}
 
-			state ErrorOr<StatusReply> result = wait(errorOr(clusterGetStatus(self->db.serverInfo,
-			                                                                  self->cx,
-			                                                                  workers,
-			                                                                  workerIssues,
-			                                                                  self->storageStatusInfos,
-			                                                                  &self->db.clientStatus,
-			                                                                  coordinators,
-			                                                                  incompatibleConnections,
-			                                                                  self->datacenterVersionDifference,
-			                                                                  self->dcLogServerVersionDifference,
-			                                                                  self->dcStorageServerVersionDifference,
-			                                                                  self->excludedDegradedServers)));
+			ErrorOr<StatusReply> result = co_await errorOr(clusterGetStatus(self->db.serverInfo,
+			                                                                self->cx,
+			                                                                workers,
+			                                                                workerIssues,
+			                                                                self->storageStatusInfos,
+			                                                                &self->db.clientStatus,
+			                                                                coordinators,
+			                                                                incompatibleConnections,
+			                                                                self->datacenterVersionDifference,
+			                                                                self->dcLogServerVersionDifference,
+			                                                                self->dcStorageServerVersionDifference,
+			                                                                self->excludedDegradedServers));
 
 			if (result.isError() && result.getError().code() == error_code_actor_cancelled)
 				throw result.getError();
@@ -1618,7 +1617,7 @@ ACTOR Future<Void> statusServer(FutureStream<StatusRequest> requests,
 			// requests
 			last_request_time = now();
 
-			state Optional<StatusReply> faultToleranceRelatedStatus;
+			Optional<StatusReply> faultToleranceRelatedStatus;
 			while (!requests_batch.empty()) {
 				if (result.isError())
 					requests_batch.back().reply.sendError(result.getError());
@@ -1632,7 +1631,7 @@ ACTOR Future<Void> statusServer(FutureStream<StatusRequest> requests,
 					requests_batch.back().reply.send(faultToleranceRelatedStatus.get());
 				}
 				requests_batch.pop_back();
-				wait(yield());
+				co_await yield();
 			}
 			faultToleranceRelatedStatus.reset();
 		} catch (Error& e) {
@@ -1642,20 +1641,21 @@ ACTOR Future<Void> statusServer(FutureStream<StatusRequest> requests,
 	}
 }
 
-ACTOR Future<Void> monitorProcessClasses(ClusterControllerData* self) {
+Future<Void> monitorProcessClasses(ClusterControllerData* self) {
 
-	state ReadYourWritesTransaction trVer(self->db.db);
-	loop {
+	ReadYourWritesTransaction trVer(self->db.db);
+	while (true) {
+		Error err;
 		try {
 			trVer.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			trVer.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-			Optional<Value> val = wait(trVer.get(processClassVersionKey));
+			Optional<Value> val = co_await trVer.get(processClassVersionKey);
 
 			if (val.present())
 				break;
 
-			RangeResult processClasses = wait(trVer.getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeResult processClasses = co_await trVer.getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
 			ASSERT(!processClasses.more && processClasses.size() < CLIENT_KNOBS->TOO_MANY);
 
 			trVer.clear(processClassKeys);
@@ -1665,22 +1665,24 @@ ACTOR Future<Void> monitorProcessClasses(ClusterControllerData* self) {
 				trVer.set(processClassKeyFor(processUid.toString()), it.value);
 			}
 
-			wait(trVer.commit());
+			co_await trVer.commit();
 			TraceEvent("ProcessClassUpgrade").log();
 			break;
 		} catch (Error& e) {
-			wait(trVer.onError(e));
+			err = e;
 		}
+		co_await trVer.onError(err);
 	}
 
-	loop {
-		state ReadYourWritesTransaction tr(self->db.db);
+	while (true) {
+		ReadYourWritesTransaction tr(self->db.db);
 
-		loop {
+		while (true) {
+			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				RangeResult processClasses = wait(tr.getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY));
+				RangeResult processClasses = co_await tr.getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
 				ASSERT(!processClasses.more && processClasses.size() < CLIENT_KNOBS->TOO_MANY);
 
 				if (processClasses != self->lastProcessClasses || !self->gotProcessClasses) {
@@ -1719,27 +1721,29 @@ ACTOR Future<Void> monitorProcessClasses(ClusterControllerData* self) {
 					checkOutstandingRequests(self);
 				}
 
-				state Future<Void> watchFuture = tr.watch(processClassChangeKey);
-				wait(tr.commit());
-				wait(watchFuture);
+				Future<Void> watchFuture = tr.watch(processClassChangeKey);
+				co_await tr.commit();
+				co_await watchFuture;
 				break;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 }
 
-ACTOR Future<Void> monitorServerInfoConfig(ClusterControllerData::DBInfo* db) {
-	loop {
-		state ReadYourWritesTransaction tr(db->db);
-		loop {
+Future<Void> monitorServerInfoConfig(ClusterControllerData::DBInfo* db) {
+	while (true) {
+		ReadYourWritesTransaction tr(db->db);
+		while (true) {
+			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 
-				Optional<Value> configVal = wait(tr.get(latencyBandConfigKey));
+				Optional<Value> configVal = co_await tr.get(latencyBandConfigKey);
 				Optional<LatencyBandConfig> config;
 				if (configVal.present()) {
 					config = LatencyBandConfig::parse(configVal.get());
@@ -1754,32 +1758,34 @@ ACTOR Future<Void> monitorServerInfoConfig(ClusterControllerData::DBInfo* db) {
 					db->serverInfo->set(serverInfo);
 				}
 
-				state Future<Void> configChangeFuture = tr.watch(latencyBandConfigKey);
+				Future<Void> configChangeFuture = tr.watch(latencyBandConfigKey);
 
-				wait(tr.commit());
-				wait(configChangeFuture);
+				co_await tr.commit();
+				co_await configChangeFuture;
 
 				break;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 }
 
 // Monitors storage metadata changes and updates to storage servers.
-ACTOR Future<Void> monitorStorageMetadata(ClusterControllerData* self) {
-	state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(serverMetadataKeys.begin,
-	                                                                                           IncludeVersion());
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
-	state std::vector<StorageServerMetaInfo> servers;
-	loop {
+Future<Void> monitorStorageMetadata(ClusterControllerData* self) {
+	KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(serverMetadataKeys.begin,
+	                                                                                     IncludeVersion());
+	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+	std::vector<StorageServerMetaInfo> servers;
+	while (true) {
+		Error err;
 		try {
 			servers.clear();
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			state RangeResult serverList = wait(tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeResult serverList = co_await tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
 			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
 			servers.reserve(serverList.size());
@@ -1787,7 +1793,7 @@ ACTOR Future<Void> monitorStorageMetadata(ClusterControllerData* self) {
 				servers.push_back(StorageServerMetaInfo(decodeServerListValue(ss.value)));
 			}
 
-			state RangeResult serverMetadata = wait(tr->getRange(serverMetadataKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeResult serverMetadata = co_await tr->getRange(serverMetadataKeys, CLIENT_KNOBS->TOO_MANY);
 			ASSERT(!serverMetadata.more && serverMetadata.size() < CLIENT_KNOBS->TOO_MANY);
 			std::map<UID, StorageMetadataType> idMetadata;
 			for (const auto& sm : serverMetadata) {
@@ -1802,15 +1808,17 @@ ACTOR Future<Void> monitorStorageMetadata(ClusterControllerData* self) {
 				}
 			}
 
-			state Future<Void> watchFuture = tr->watch(serverMetadataChangeKey);
-			wait(tr->commit());
+			Future<Void> watchFuture = tr->watch(serverMetadataChangeKey);
+			co_await tr->commit();
 
 			self->storageStatusInfos = std::move(servers);
-			wait(watchFuture);
+			co_await watchFuture;
 			tr->reset();
+			continue;
 		} catch (Error& e) {
-			wait(tr->onError(e));
+			err = e;
 		}
+		co_await tr->onError(err);
 	}
 }
 
@@ -1819,22 +1827,23 @@ ACTOR Future<Void> monitorStorageMetadata(ClusterControllerData* self) {
 // all processes in the system by updating the ClientDBInfo object. The
 // GlobalConfig actor class contains the functionality to read the latest
 // history and update the processes local view.
-ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
-	loop {
-		state ReadYourWritesTransaction tr(db->db);
-		state ClientDBInfo clientInfo;
-		loop {
+Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
+	while (true) {
+		ReadYourWritesTransaction tr(db->db);
+		ClientDBInfo clientInfo;
+		while (true) {
+			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				state Optional<Value> globalConfigVersion = wait(tr.get(globalConfigVersionKey));
+				Optional<Value> globalConfigVersion = co_await tr.get(globalConfigVersionKey);
 
 				if (globalConfigVersion.present()) {
 					// Since the history keys end with versionstamps, they
 					// should be sorted correctly (versionstamps are stored in
 					// big-endian order).
 					RangeResult globalConfigHistory =
-					    wait(tr.getRange(globalConfigHistoryKeys, CLIENT_KNOBS->TOO_MANY));
+					    co_await tr.getRange(globalConfigHistoryKeys, CLIENT_KNOBS->TOO_MANY);
 					// If the global configuration version key has been set,
 					// the history should contain at least one item.
 					ASSERT(globalConfigHistory.size() > 0);
@@ -1897,22 +1906,23 @@ ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 					db->clientInfo->set(clientInfo);
 				}
 
-				state Future<Void> globalConfigFuture = tr.watch(globalConfigVersionKey);
-				wait(tr.commit());
-				wait(globalConfigFuture);
+				Future<Void> globalConfigFuture = tr.watch(globalConfigVersionKey);
+				co_await tr.commit();
+				co_await globalConfigFuture;
 				break;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 }
 
-ACTOR Future<Void> updatedChangingDatacenters(ClusterControllerData* self) {
+Future<Void> updatedChangingDatacenters(ClusterControllerData* self) {
 	// do not change the cluster controller until all the processes have had a chance to register
-	wait(delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
-	loop {
-		state Future<Void> onChange = self->desiredDcIds.onChange();
+	co_await delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY);
+	while (true) {
+		Future<Void> onChange = self->desiredDcIds.onChange();
 		if (!self->desiredDcIds.get().present()) {
 			self->changingDcIds.set(std::make_pair(false, self->desiredDcIds.get()));
 		} else {
@@ -1931,7 +1941,7 @@ ACTOR Future<Void> updatedChangingDatacenters(ClusterControllerData* self) {
 					worker.reply.send(RegisterWorkerReply(worker.details.processClass, worker.priorityInfo));
 				}
 			} else {
-				state int currentFit = ProcessClass::BestFit;
+				int currentFit = ProcessClass::BestFit;
 				while (currentFit <= ProcessClass::NeverAssign) {
 					bool updated = false;
 					for (auto& it : self->id_worker) {
@@ -1952,14 +1962,14 @@ ACTOR Future<Void> updatedChangingDatacenters(ClusterControllerData* self) {
 						}
 					}
 					if (updated && currentFit < ProcessClass::NeverAssign) {
-						wait(delay(SERVER_KNOBS->CC_CLASS_DELAY));
+						co_await delay(SERVER_KNOBS->CC_CLASS_DELAY);
 					}
 					currentFit++;
 				}
 			}
 		}
 
-		wait(onChange);
+		co_await onChange;
 	}
 }
 
@@ -2024,9 +2034,9 @@ ACTOR Future<Void> updatedChangedDatacenters(ClusterControllerData* self) {
 	}
 }
 
-ACTOR Future<Void> updateDatacenterVersionDifference(ClusterControllerData* self) {
-	state double lastLogTime = 0;
-	loop {
+Future<Void> updateDatacenterVersionDifference(ClusterControllerData* self) {
+	double lastLogTime = 0;
+	while (true) {
 		self->versionDifferenceUpdated = false;
 		if (self->db.serverInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS &&
 		    self->db.config.usableRegions == 1) {
@@ -2041,12 +2051,12 @@ ACTOR Future<Void> updateDatacenterVersionDifference(ClusterControllerData* self
 				checkOutstandingRequests(self);
 			}
 
-			wait(self->db.serverInfo->onChange());
+			co_await self->db.serverInfo->onChange();
 			continue;
 		}
 
-		state Optional<TLogInterface> primaryLog;
-		state Optional<TLogInterface> remoteLog;
+		Optional<TLogInterface> primaryLog;
+		Optional<TLogInterface> remoteLog;
 		if (self->db.serverInfo->get().recoveryState >= RecoveryState::ALL_LOGS_RECRUITED) {
 			for (auto& logSet : self->db.serverInfo->get().logSystemConfig.tLogs) {
 				if (logSet.isLocal && logSet.locality != tagLocalitySatellite) {
@@ -2069,20 +2079,20 @@ ACTOR Future<Void> updateDatacenterVersionDifference(ClusterControllerData* self
 		}
 
 		if (!primaryLog.present() || !remoteLog.present() || !self->db.serverInfo->get().ratekeeper.present()) {
-			wait(self->db.serverInfo->onChange());
+			co_await self->db.serverInfo->onChange();
 			continue;
 		}
 
-		state Future<Void> onChange = self->db.serverInfo->onChange();
-		loop {
-			state Future<TLogQueuingMetricsReply> primaryMetrics =
+		Future<Void> onChange = self->db.serverInfo->onChange();
+		while (true) {
+			Future<TLogQueuingMetricsReply> primaryMetrics =
 			    brokenPromiseToNever(primaryLog.get().getQueuingMetrics.getReply(TLogQueuingMetricsRequest()));
-			state Future<TLogQueuingMetricsReply> remoteMetrics =
+			Future<TLogQueuingMetricsReply> remoteMetrics =
 			    brokenPromiseToNever(remoteLog.get().getQueuingMetrics.getReply(TLogQueuingMetricsRequest()));
-			state Future<GetSSVersionLagReply> ssVersionLagReply = brokenPromiseToNever(
+			Future<GetSSVersionLagReply> ssVersionLagReply = brokenPromiseToNever(
 			    self->db.serverInfo->get().ratekeeper.get().getSSVersionLag.getReply(GetSSVersionLagRequest()));
 
-			wait((success(primaryMetrics) && success(remoteMetrics) && success(ssVersionLagReply)) || onChange);
+			co_await ((success(primaryMetrics) && success(remoteMetrics) && success(ssVersionLagReply)) || onChange);
 			if (onChange.isReady()) {
 				break;
 			}
@@ -2114,7 +2124,7 @@ ACTOR Future<Void> updateDatacenterVersionDifference(ClusterControllerData* self
 				}
 			}
 
-			wait(delay(SERVER_KNOBS->VERSION_LAG_METRIC_INTERVAL) || onChange);
+			co_await (delay(SERVER_KNOBS->VERSION_LAG_METRIC_INTERVAL) || onChange);
 			if (onChange.isReady()) {
 				break;
 			}
@@ -2124,10 +2134,10 @@ ACTOR Future<Void> updateDatacenterVersionDifference(ClusterControllerData* self
 
 // A background actor that periodically checks remote DC health, and `checkOutstandingRequests` if remote DC
 // recovers.
-ACTOR Future<Void> updateRemoteDCHealth(ClusterControllerData* self) {
+Future<Void> updateRemoteDCHealth(ClusterControllerData* self) {
 	// The purpose of the initial delay is to wait for the cluster to achieve a steady state before checking remote
 	// DC health, since remote DC healthy may trigger a failover, and we don't want that to happen too frequently.
-	wait(delay(SERVER_KNOBS->INITIAL_UPDATE_CROSS_DC_INFO_DELAY));
+	co_await delay(SERVER_KNOBS->INITIAL_UPDATE_CROSS_DC_INFO_DELAY);
 
 	self->remoteDCMonitorStarted = true;
 
@@ -2137,40 +2147,42 @@ ACTOR Future<Void> updateRemoteDCHealth(ClusterControllerData* self) {
 		checkOutstandingRequests(self);
 	}
 
-	loop {
+	while (true) {
 		bool oldRemoteTransactionSystemDegraded = self->remoteTransactionSystemDegraded;
 		self->remoteTransactionSystemDegraded = self->remoteTransactionSystemContainsDegradedServers();
 
 		if (oldRemoteTransactionSystemDegraded && !self->remoteTransactionSystemDegraded) {
 			checkOutstandingRequests(self);
 		}
-		wait(delay(SERVER_KNOBS->CHECK_REMOTE_HEALTH_INTERVAL));
+		co_await delay(SERVER_KNOBS->CHECK_REMOTE_HEALTH_INTERVAL);
 	}
 }
 
-ACTOR Future<Void> doEmptyCommit(Database cx) {
-	state Transaction tr(cx);
-	loop {
+Future<Void> doEmptyCommit(Database cx) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.makeSelfConflicting();
-			wait(tr.commit());
-			return Void();
+			co_await tr.commit();
+			co_return;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
-ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterControllerFullInterface interf) {
-	loop {
-		state ForceRecoveryRequest req = waitNext(interf.clientInterface.forceRecovery.getFuture());
+Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterControllerFullInterface interf) {
+	while (true) {
+		ForceRecoveryRequest req = co_await interf.clientInterface.forceRecovery.getFuture();
 		TraceEvent("ForcedRecoveryStart", self->id)
 		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
 		    .detail("DcId", req.dcId.printable());
-		state Future<Void> fCommit = doEmptyCommit(self->cx);
-		wait(fCommit || delay(SERVER_KNOBS->FORCE_RECOVERY_CHECK_DELAY));
+		Future<Void> fCommit = doEmptyCommit(self->cx);
+		co_await (fCommit || delay(SERVER_KNOBS->FORCE_RECOVERY_CHECK_DELAY));
 		if (!fCommit.isReady() || fCommit.isError()) {
 			if (self->clusterControllerDcId != req.dcId) {
 				std::vector<Optional<Key>> dcPriority;
@@ -2181,7 +2193,7 @@ ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterCo
 				self->db.forceRecovery = true;
 				self->db.forceMasterFailure.trigger();
 			}
-			wait(fCommit);
+			co_await fCommit;
 		}
 		TraceEvent("ForcedRecoveryFinish", self->id).log();
 		self->db.forceRecovery = false;
@@ -2189,13 +2201,13 @@ ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterCo
 	}
 }
 
-ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAuditRequest req) {
-	state UID auditId;
+Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAuditRequest req) {
+	UID auditId;
 	ASSERT(!req.cancel);
 	try {
 		while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ||
 		       !self->db.serverInfo->get().distributor.present()) {
-			wait(self->db.serverInfo->onChange());
+			co_await self->db.serverInfo->onChange();
 		}
 		TraceEvent(SevVerbose, "CCTriggerAuditStorageBegin", self->id)
 		    .detail("Range", req.range)
@@ -2203,7 +2215,7 @@ ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAudit
 		    .detail("KeyValueStoreType", req.engineType.toString())
 		    .detail("DDId", self->db.serverInfo->get().distributor.get().id());
 		TriggerAuditRequest fReq(req.getType(), req.range, req.engineType);
-		UID auditId_ = wait(self->db.serverInfo->get().distributor.get().triggerAudit.getReply(fReq));
+		UID auditId_ = co_await self->db.serverInfo->get().distributor.get().triggerAudit.getReply(fReq);
 		auditId = auditId_;
 		TraceEvent(SevVerbose, "CCTriggerAuditStorageEnd", self->id)
 		    .detail("AuditID", auditId)
@@ -2220,23 +2232,21 @@ ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAudit
 		    .detail("KeyValueStoreType", req.engineType.toString());
 		req.reply.sendError(audit_storage_failed());
 	}
-
-	return Void();
 }
 
-ACTOR Future<Void> cancelAuditStorage(ClusterControllerData* self, TriggerAuditRequest req) {
+Future<Void> cancelAuditStorage(ClusterControllerData* self, TriggerAuditRequest req) {
 	ASSERT(req.cancel);
 	try {
 		while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ||
 		       !self->db.serverInfo->get().distributor.present()) {
-			wait(self->db.serverInfo->onChange());
+			co_await self->db.serverInfo->onChange();
 		}
 		TraceEvent(SevVerbose, "CCCancelAuditStorageBegin", self->id)
 		    .detail("AuditID", req.id)
 		    .detail("AuditType", req.getType())
 		    .detail("DDId", self->db.serverInfo->get().distributor.get().id());
 		TriggerAuditRequest fReq(req.getType(), req.id);
-		UID auditId = wait(self->db.serverInfo->get().distributor.get().triggerAudit.getReply(fReq));
+		UID auditId = co_await self->db.serverInfo->get().distributor.get().triggerAudit.getReply(fReq);
 		TraceEvent(SevVerbose, "CCCancelAuditStorageEnd", self->id)
 		    .detail("ReturnedAuditID", auditId)
 		    .detail("AuditID", auditId)
@@ -2250,13 +2260,11 @@ ACTOR Future<Void> cancelAuditStorage(ClusterControllerData* self, TriggerAuditR
 		    .detail("AuditType", req.getType());
 		req.reply.sendError(cancel_audit_storage_failed());
 	}
-
-	return Void();
 }
 
-ACTOR Future<Void> handleTriggerAuditStorage(ClusterControllerData* self, ClusterControllerFullInterface interf) {
-	loop {
-		TriggerAuditRequest req = waitNext(interf.clientInterface.triggerAudit.getFuture());
+Future<Void> handleTriggerAuditStorage(ClusterControllerData* self, ClusterControllerFullInterface interf) {
+	while (true) {
+		TriggerAuditRequest req = co_await interf.clientInterface.triggerAudit.getFuture();
 		TraceEvent(SevVerbose, "CCTriggerAuditStorageReceived", self->id)
 		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
 		    .detail("Range", req.range)
@@ -2271,23 +2279,23 @@ ACTOR Future<Void> handleTriggerAuditStorage(ClusterControllerData* self, Cluste
 	}
 }
 
-ACTOR Future<Void> startDataDistributor(ClusterControllerData* self, double waitTime) {
+Future<Void> startDataDistributor(ClusterControllerData* self, double waitTime) {
 	// If master fails at the same time, give it a chance to clear master PID.
 	// Also wait to avoid too many consecutive recruits in a small time window.
-	wait(delay(waitTime));
+	co_await delay(waitTime);
 
 	TraceEvent("CCStartDataDistributor", self->id).log();
-	loop {
+	while (true) {
 		try {
-			state bool noDistributor = !self->db.serverInfo->get().distributor.present();
+			bool noDistributor = !self->db.serverInfo->get().distributor.present();
 			while (!self->masterProcessId.present() ||
 			       self->masterProcessId != self->db.serverInfo->get().master.locality.processId() ||
 			       self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
-				wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
+				co_await (self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
 			}
 			if (noDistributor && self->db.serverInfo->get().distributor.present()) {
 				// Existing distributor registers while waiting, so skip.
-				return Void();
+				co_return;
 			}
 
 			std::map<Optional<Standalone<StringRef>>, int> idUsed = self->getUsedIds();
@@ -2297,7 +2305,7 @@ ACTOR Future<Void> startDataDistributor(ClusterControllerData* self, double wait
 			                                                                self->db.config,
 			                                                                idUsed);
 			InitializeDataDistributorRequest req(deterministicRandom()->randomUniqueID());
-			state WorkerDetails worker = ddWorker.worker;
+			WorkerDetails worker = ddWorker.worker;
 			if (self->onMasterIsBetter(worker, ProcessClass::DataDistributor)) {
 				worker = self->id_worker[self->masterProcessId.get()].details;
 			}
@@ -2307,8 +2315,8 @@ ACTOR Future<Void> startDataDistributor(ClusterControllerData* self, double wait
 			    .detail("Addr", worker.interf.address())
 			    .detail("DDID", req.reqId);
 
-			ErrorOr<DataDistributorInterface> ddInterf = wait(worker.interf.dataDistributor.getReplyUnlessFailedFor(
-			    req, SERVER_KNOBS->WAIT_FOR_DISTRIBUTOR_JOIN_DELAY, 0));
+			ErrorOr<DataDistributorInterface> ddInterf = co_await worker.interf.dataDistributor.getReplyUnlessFailedFor(
+			    req, SERVER_KNOBS->WAIT_FOR_DISTRIBUTOR_JOIN_DELAY, 0);
 
 			if (ddInterf.present()) {
 				self->recruitDistributor.set(false);
@@ -2330,7 +2338,7 @@ ACTOR Future<Void> startDataDistributor(ClusterControllerData* self, double wait
 					self->db.setDistributor(ddInterf.get());
 				}
 				checkOutstandingRequests(self);
-				return Void();
+				co_return;
 			}
 		} catch (Error& e) {
 			TraceEvent("CCDataDistributorRecruitError", self->id).error(e);
@@ -2338,7 +2346,7 @@ ACTOR Future<Void> startDataDistributor(ClusterControllerData* self, double wait
 				throw;
 			}
 		}
-		wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
+		co_await lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY);
 	}
 }
 
@@ -2372,23 +2380,23 @@ ACTOR Future<Void> monitorDataDistributor(ClusterControllerData* self) {
 	}
 }
 
-ACTOR Future<Void> startRatekeeper(ClusterControllerData* self, double waitTime) {
+Future<Void> startRatekeeper(ClusterControllerData* self, double waitTime) {
 	// If master fails at the same time, give it a chance to clear master PID.
 	// Also wait to avoid too many consecutive recruits in a small time window.
-	wait(delay(waitTime));
+	co_await delay(waitTime);
 
 	TraceEvent("CCStartRatekeeper", self->id).log();
-	loop {
+	while (true) {
 		try {
-			state bool no_ratekeeper = !self->db.serverInfo->get().ratekeeper.present();
+			bool no_ratekeeper = !self->db.serverInfo->get().ratekeeper.present();
 			while (!self->masterProcessId.present() ||
 			       self->masterProcessId != self->db.serverInfo->get().master.locality.processId() ||
 			       self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
-				wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
+				co_await (self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
 			}
 			if (no_ratekeeper && self->db.serverInfo->get().ratekeeper.present()) {
 				// Existing ratekeeper registers while waiting, so skip.
-				return Void();
+				co_return;
 			}
 
 			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
@@ -2398,7 +2406,7 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData* self, double waitTime)
 			                                                                self->db.config,
 			                                                                id_used);
 			InitializeRatekeeperRequest req(deterministicRandom()->randomUniqueID());
-			state WorkerDetails worker = rkWorker.worker;
+			WorkerDetails worker = rkWorker.worker;
 			if (self->onMasterIsBetter(worker, ProcessClass::Ratekeeper)) {
 				worker = self->id_worker[self->masterProcessId.get()].details;
 			}
@@ -2408,8 +2416,8 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData* self, double waitTime)
 			    .detail("Addr", worker.interf.address())
 			    .detail("RKID", req.reqId);
 
-			ErrorOr<RatekeeperInterface> interf = wait(
-			    worker.interf.ratekeeper.getReplyUnlessFailedFor(req, SERVER_KNOBS->WAIT_FOR_RATEKEEPER_JOIN_DELAY, 0));
+			ErrorOr<RatekeeperInterface> interf = co_await worker.interf.ratekeeper.getReplyUnlessFailedFor(
+			    req, SERVER_KNOBS->WAIT_FOR_RATEKEEPER_JOIN_DELAY, 0);
 			if (interf.present()) {
 				self->recruitRatekeeper.set(false);
 				self->recruitingRatekeeperID = interf.get().id();
@@ -2428,7 +2436,7 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData* self, double waitTime)
 					self->db.setRatekeeper(interf.get());
 				}
 				checkOutstandingRequests(self);
-				return Void();
+				co_return;
 			}
 		} catch (Error& e) {
 			TraceEvent("CCRatekeeperRecruitError", self->id).error(e);
@@ -2436,7 +2444,7 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData* self, double waitTime)
 				throw;
 			}
 		}
-		wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
+		co_await lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY);
 	}
 }
 
@@ -2464,20 +2472,20 @@ ACTOR Future<Void> monitorRatekeeper(ClusterControllerData* self) {
 	}
 }
 
-ACTOR Future<Void> startConsistencyScan(ClusterControllerData* self) {
-	wait(delay(0.0)); // If master fails at the same time, give it a chance to clear master PID.
+Future<Void> startConsistencyScan(ClusterControllerData* self) {
+	co_await delay(0.0); // If master fails at the same time, give it a chance to clear master PID.
 	TraceEvent("CCStartConsistencyScan", self->id).log();
-	loop {
+	while (true) {
 		try {
-			state bool no_consistencyScan = !self->db.serverInfo->get().consistencyScan.present();
+			bool no_consistencyScan = !self->db.serverInfo->get().consistencyScan.present();
 			while (!self->masterProcessId.present() ||
 			       self->masterProcessId != self->db.serverInfo->get().master.locality.processId() ||
 			       self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
-				wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
+				co_await (self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
 			}
 			if (no_consistencyScan && self->db.serverInfo->get().consistencyScan.present()) {
 				// Existing consistencyScan registers while waiting, so skip.
-				return Void();
+				co_return;
 			}
 
 			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
@@ -2488,7 +2496,7 @@ ACTOR Future<Void> startConsistencyScan(ClusterControllerData* self) {
 			                                                                id_used);
 
 			InitializeConsistencyScanRequest req(deterministicRandom()->randomUniqueID());
-			state WorkerDetails worker = csWorker.worker;
+			WorkerDetails worker = csWorker.worker;
 			if (self->onMasterIsBetter(worker, ProcessClass::ConsistencyScan)) {
 				worker = self->id_worker[self->masterProcessId.get()].details;
 			}
@@ -2498,8 +2506,8 @@ ACTOR Future<Void> startConsistencyScan(ClusterControllerData* self) {
 			    .detail("Addr", worker.interf.address())
 			    .detail("CSID", req.reqId);
 
-			ErrorOr<ConsistencyScanInterface> interf = wait(worker.interf.consistencyScan.getReplyUnlessFailedFor(
-			    req, SERVER_KNOBS->WAIT_FOR_CONSISTENCYSCAN_JOIN_DELAY, 0));
+			ErrorOr<ConsistencyScanInterface> interf = co_await worker.interf.consistencyScan.getReplyUnlessFailedFor(
+			    req, SERVER_KNOBS->WAIT_FOR_CONSISTENCYSCAN_JOIN_DELAY, 0);
 			if (interf.present()) {
 				self->recruitConsistencyScan.set(false);
 				self->recruitingConsistencyScanID = interf.get().id();
@@ -2518,7 +2526,7 @@ ACTOR Future<Void> startConsistencyScan(ClusterControllerData* self) {
 					self->db.setConsistencyScan(interf.get());
 				}
 				checkOutstandingRequests(self);
-				return Void();
+				co_return;
 			} else {
 				TraceEvent("CCConsistencyScanRecruitEmpty", self->id).log();
 			}
@@ -2528,7 +2536,7 @@ ACTOR Future<Void> startConsistencyScan(ClusterControllerData* self) {
 				throw;
 			}
 		}
-		wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
+		co_await lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY);
 	}
 }
 
@@ -2558,20 +2566,22 @@ ACTOR Future<Void> monitorConsistencyScan(ClusterControllerData* self) {
 	}
 }
 
-ACTOR Future<Void> stopConsistencyScan(Database db) {
-	state ConsistencyScanState cs = ConsistencyScanState();
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
-	loop {
+Future<Void> stopConsistencyScan(Database db) {
+	ConsistencyScanState cs = ConsistencyScanState();
+	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	while (true) {
+		Error err;
 		try {
 			SystemDBWriteLockedNow(db.getReference())->setOptions(tr);
-			state ConsistencyScanState::Config config = wait(ConsistencyScanState().config().getD(tr));
+			ConsistencyScanState::Config config = co_await ConsistencyScanState().config().getD(tr);
 			config.enabled = false;
 			cs.config().set(tr, config);
-			wait(tr->commit());
-			return Void();
+			co_await tr->commit();
+			co_return;
 		} catch (Error& e) {
-			wait(tr->onError(e));
+			err = e;
 		}
+		co_await tr->onError(err);
 	}
 }
 
@@ -2642,11 +2652,11 @@ static void invalidateExcludedProcessComplaints(ClusterControllerData* self) {
 }
 
 // The actor that periodically monitors the health of tracked workers.
-ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
-	loop {
+Future<Void> workerHealthMonitor(ClusterControllerData* self) {
+	while (true) {
 		try {
 			while (!self->goodRecruitmentTime.isReady()) {
-				wait(lowPriorityDelay(SERVER_KNOBS->CC_WORKER_HEALTH_CHECKING_INTERVAL));
+				co_await lowPriorityDelay(SERVER_KNOBS->CC_WORKER_HEALTH_CHECKING_INTERVAL);
 			}
 			self->degradationInfo = self->getDegradationInfo();
 
@@ -2735,7 +2745,7 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 				checkOutstandingRequests(self);
 			}
 
-			wait(delay(SERVER_KNOBS->CC_WORKER_HEALTH_CHECKING_INTERVAL));
+			co_await delay(SERVER_KNOBS->CC_WORKER_HEALTH_CHECKING_INTERVAL);
 		} catch (Error& e) {
 			TraceEvent(SevWarnAlways, "ClusterControllerHealthMonitorError").error(e);
 			if (e.code() == error_code_actor_cancelled) {
@@ -2747,15 +2757,16 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 
 // Update the DBInfo state with this processes cluster ID. If this process does
 // not have a cluster ID and one does not exist in the database, generate one.
-ACTOR Future<Void> updateClusterId(ClusterControllerData* self) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
-	loop {
+Future<Void> updateClusterId(ClusterControllerData* self) {
+	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+	while (true) {
+		Error err;
 		try {
-			state Optional<UID> durableClusterId = self->clusterId->get();
+			Optional<UID> durableClusterId = self->clusterId->get();
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			Optional<Value> clusterIdVal = wait(tr->get(clusterIdKey));
+			Optional<Value> clusterIdVal = co_await tr->get(clusterIdKey);
 
 			if (clusterIdVal.present()) {
 				UID clusterId = BinaryReader::fromStringRef<UID>(clusterIdVal.get(), IncludeVersion());
@@ -2774,7 +2785,7 @@ ACTOR Future<Void> updateClusterId(ClusterControllerData* self) {
 				ASSERT(!durableClusterId.present());
 				durableClusterId = deterministicRandom()->randomUniqueID();
 				tr->set(clusterIdKey, BinaryWriter::toValue(durableClusterId.get(), IncludeVersion()));
-				wait(tr->commit());
+				co_await tr->commit();
 			}
 			auto serverInfo = self->db.serverInfo->get();
 			if (!serverInfo.client.clusterId.isValid()) {
@@ -2788,18 +2799,19 @@ ACTOR Future<Void> updateClusterId(ClusterControllerData* self) {
 				clientInfo.clusterId = durableClusterId.get();
 				self->db.clientInfo->set(clientInfo);
 			}
-			return Void();
+			co_return;
 		} catch (Error& e) {
-			wait(tr->onError(e));
+			err = e;
 		}
+		co_await tr->onError(err);
 	}
 }
 
-ACTOR Future<Void> handleGetEncryptionAtRestMode(ClusterControllerData* self, ClusterControllerFullInterface ccInterf) {
-	loop {
-		state GetEncryptionAtRestModeRequest req = waitNext(ccInterf.getEncryptionAtRestMode.getFuture());
+Future<Void> handleGetEncryptionAtRestMode(ClusterControllerData* self, ClusterControllerFullInterface ccInterf) {
+	while (true) {
+		GetEncryptionAtRestModeRequest req = co_await ccInterf.getEncryptionAtRestMode.getFuture();
 		TraceEvent("HandleGetEncryptionAtRestModeStart").detail("TlogId", req.tlogId);
-		EncryptionAtRestModeDeprecated mode = wait(self->encryptionAtRestModeDeprecated.getFuture());
+		EncryptionAtRestModeDeprecated mode = co_await self->encryptionAtRestModeDeprecated.getFuture();
 		GetEncryptionAtRestModeResponse resp;
 		resp.mode = mode;
 		req.reply.send(resp);
@@ -2934,13 +2946,13 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	}
 }
 
-ACTOR Future<Void> replaceInterface(ClusterControllerFullInterface interf) {
-	loop {
+Future<Void> replaceInterface(ClusterControllerFullInterface interf) {
+	while (true) {
 		if (interf.hasMessage()) {
-			wait(delay(SERVER_KNOBS->REPLACE_INTERFACE_DELAY));
-			return Void();
+			co_await delay(SERVER_KNOBS->REPLACE_INTERFACE_DELAY);
+			co_return;
 		}
-		wait(delay(SERVER_KNOBS->REPLACE_INTERFACE_CHECK_DELAY));
+		co_await delay(SERVER_KNOBS->REPLACE_INTERFACE_CHECK_DELAY);
 	}
 }
 
@@ -2997,16 +3009,16 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
 	}
 }
 
-ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRecord,
-                                     Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
-                                     Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
-                                     LocalityData locality,
-                                     Reference<AsyncVar<Optional<UID>>> clusterId) {
-	state bool hasConnected = false;
-	loop {
+Future<Void> clusterController(Reference<IClusterConnectionRecord> connRecord,
+                               Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
+                               Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
+                               LocalityData locality,
+                               Reference<AsyncVar<Optional<UID>>> clusterId) {
+	bool hasConnected = false;
+	while (true) {
 		try {
 			ServerCoordinators coordinators(connRecord);
-			wait(clusterController(coordinators, currentCC, hasConnected, asyncPriorityInfo, locality, clusterId));
+			co_await clusterController(coordinators, currentCC, hasConnected, asyncPriorityInfo, locality, clusterId);
 			hasConnected = true;
 		} catch (Error& e) {
 			if (e.code() != error_code_coordinators_changed)
