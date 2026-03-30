@@ -38,4 +38,14 @@ Future<Void> waitForAllReady(std::vector<Future<T>> results) {
 	co_return;
 }
 
+template <class T>
+Future<T> timeout(Future<T> what, double time, T timedoutValue, TaskPriority taskID = TaskPriority::DefaultDelay) {
+	auto res = co_await race(what, delay(time, taskID));
+	if (res.index() == 0) {
+		co_return std::get<0>(std::move(res));
+	} else {
+		co_return timedoutValue;
+	}
+}
+
 } // namespace generic_coro

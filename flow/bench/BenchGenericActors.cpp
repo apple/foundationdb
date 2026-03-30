@@ -30,6 +30,8 @@ namespace {
 
 enum class WaitForAllReadyImpl { Actor, Coroutine };
 enum class WaitForAllReadyScenario { Ready, Error };
+enum class TimeoutImpl { Actor, Coroutine };
+enum class TimeoutScenario { Ready, ConstructPending };
 
 template <WaitForAllReadyScenario Scenario>
 std::vector<Future<int>> makeResults(int futureCount) {
@@ -72,6 +74,52 @@ void benchWaitForAllReady(benchmark::State& state) {
 	onMainThread([&state] { return benchWaitForAllReadyActor<Impl, Scenario>(&state); }).blockUntilReady();
 }
 
+template <TimeoutImpl Impl, TimeoutScenario Scenario>
+Future<Void> benchTimeoutActor(benchmark::State* state) {
+	const Future<int> readyFuture = Future<int>(7);
+	const Future<int> neverFuture = Future<int>(Never());
+	const int timedOutValue = -1;
+	int64_t sink = 0;
+
+	if constexpr (Scenario == TimeoutScenario::Ready) {
+		while (state->KeepRunning()) {
+			Future<int> done;
+			if constexpr (Impl == TimeoutImpl::Actor) {
+				done = ::timeout<int>(readyFuture, 0.0, timedOutValue);
+			} else {
+				done = generic_coro::timeout<int>(readyFuture, 0.0, timedOutValue);
+			}
+			sink += co_await done;
+			benchmark::DoNotOptimize(done);
+			benchmark::ClobberMemory();
+		}
+	} else {
+		for (auto _ : *state) {
+			benchmark::DoNotOptimize(_);
+			state->ResumeTiming();
+			Future<int> done;
+			if constexpr (Impl == TimeoutImpl::Actor) {
+				done = ::timeout<int>(neverFuture, 1.0, timedOutValue);
+			} else {
+				done = generic_coro::timeout<int>(neverFuture, 1.0, timedOutValue);
+			}
+			ASSERT(!done.isReady());
+			benchmark::DoNotOptimize(done);
+			state->PauseTiming();
+			done.cancel();
+		}
+	}
+
+	benchmark::DoNotOptimize(sink);
+	state->SetItemsProcessed(static_cast<int64_t>(state->iterations()));
+	co_return;
+}
+
+template <TimeoutImpl Impl, TimeoutScenario Scenario>
+void benchTimeout(benchmark::State& state) {
+	onMainThread([&state] { return benchTimeoutActor<Impl, Scenario>(&state); }).blockUntilReady();
+}
+
 BENCHMARK_TEMPLATE(benchWaitForAllReady, WaitForAllReadyImpl::Actor, WaitForAllReadyScenario::Ready)
     ->Name("WaitForAllReady/actor/ready")
     ->RangeMultiplier(4)
@@ -94,6 +142,22 @@ BENCHMARK_TEMPLATE(benchWaitForAllReady, WaitForAllReadyImpl::Coroutine, WaitFor
     ->Name("WaitForAllReady/coroutine/error")
     ->RangeMultiplier(4)
     ->Range(1, 1 << 12)
+    ->ReportAggregatesOnly(true);
+
+BENCHMARK_TEMPLATE(benchTimeout, TimeoutImpl::Actor, TimeoutScenario::Ready)
+    ->Name("Timeout/actor/ready")
+    ->ReportAggregatesOnly(true);
+
+BENCHMARK_TEMPLATE(benchTimeout, TimeoutImpl::Coroutine, TimeoutScenario::Ready)
+    ->Name("Timeout/coroutine/ready")
+    ->ReportAggregatesOnly(true);
+
+BENCHMARK_TEMPLATE(benchTimeout, TimeoutImpl::Actor, TimeoutScenario::ConstructPending)
+    ->Name("Timeout/actor/construct_pending")
+    ->ReportAggregatesOnly(true);
+
+BENCHMARK_TEMPLATE(benchTimeout, TimeoutImpl::Coroutine, TimeoutScenario::ConstructPending)
+    ->Name("Timeout/coroutine/construct_pending")
     ->ReportAggregatesOnly(true);
 
 } // namespace
