@@ -31,11 +31,10 @@ enum class TimeoutScenario { Ready, ConstructPending };
 
 template <TimeoutImpl Impl, TimeoutScenario Scenario>
 Future<Void> benchTimeoutActor(benchmark::State* state) {
-	const Future<int> readyFuture = Future<int>(7);
-	const Future<int> neverFuture = Future<int>(Never());
 	const int timedOutValue = -1;
 
 	if constexpr (Scenario == TimeoutScenario::Ready) {
+		const Future<int> readyFuture = Future<int>(7);
 		int64_t sink = 0;
 		while (state->KeepRunning()) {
 			Future<int> done;
@@ -50,6 +49,7 @@ Future<Void> benchTimeoutActor(benchmark::State* state) {
 		}
 		benchmark::DoNotOptimize(sink);
 	} else {
+		const Future<int> neverFuture = Future<int>(Never());
 		for (auto _ : *state) {
 			benchmark::DoNotOptimize(_);
 			state->ResumeTiming();
