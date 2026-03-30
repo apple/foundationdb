@@ -1,5 +1,5 @@
 /*
- * Ratekeeper.actor.cpp
+ * Ratekeeper.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -22,7 +22,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/WaitFailure.h"
-#include "fdbserver/ratekeeper/Ratekeeper.actor.h"
+#include "fdbserver/ratekeeper/Ratekeeper.h"
 #include "Ratekeeper.h"
 #include "TagThrottler.h"
 #include "flow/OwningResource.h"

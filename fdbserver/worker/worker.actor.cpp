@@ -60,7 +60,7 @@
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/worker/Worker.h"
 #include "fdbserver/kvstore/IKeyValueStore.h"
-#include "fdbserver/ratekeeper/Ratekeeper.actor.h"
+#include "fdbserver/ratekeeper/Ratekeeper.h"
 #include "fdbserver/resolver/Resolver.actor.h"
 #include "fdbserver/sequencer/MasterServer.actor.h"
 #include "fdbserver/storageserver/StorageServer.actor.h"
