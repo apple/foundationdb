@@ -568,11 +568,12 @@ Future<Void> deleteRecursively_impl(Reference<S3BlobStoreEndpoint> b,
 	std::list<Future<Void>> deleteFutures;
 	try {
 		while (true) {
-			auto res = co_await race(done, resultStream.getFuture());
+			// Preserve actor choose{} semantics: if the stream result and completion are both ready,
+			// drain the stream item before honoring done. Using race(done, stream) drops the final
+			// stream item because race() breaks ties by argument order.
+			auto res = co_await race(resultStream.getFuture(), done);
 			if (res.index() == 0) {
-				done = Never();
-			} else if (res.index() == 1) {
-				S3BlobStoreEndpoint::ListResult list = std::get<1>(std::move(res));
+				S3BlobStoreEndpoint::ListResult list = std::get<0>(std::move(res));
 
 				for (auto& object : list.objects) {
 					deleteFutures.push_back(map(b->deleteObject(bucket, object.name), [=](Void) -> Void {
@@ -585,6 +586,8 @@ Future<Void> deleteRecursively_impl(Reference<S3BlobStoreEndpoint> b,
 						return Void();
 					}));
 				}
+			} else if (res.index() == 1) {
+				done = Never();
 			} else {
 				UNREACHABLE();
 			}
@@ -1612,15 +1615,18 @@ AsyncResult<S3BlobStoreEndpoint::ListResult> listObjects_impl(
 
 	try {
 		while (true) {
-			auto res = co_await race(done, resultStream.getFuture());
+			// Preserve actor choose{} semantics: if the stream result and completion are both ready,
+			// drain the stream item before honoring done. Using race(done, stream) drops the final
+			// stream item because race() breaks ties by argument order.
+			auto res = co_await race(resultStream.getFuture(), done);
 			if (res.index() == 0) {
-				done = Never();
-			} else if (res.index() == 1) {
-				S3BlobStoreEndpoint::ListResult info = std::get<1>(std::move(res));
+				S3BlobStoreEndpoint::ListResult info = std::get<0>(std::move(res));
 
 				results.commonPrefixes.insert(
 				    results.commonPrefixes.end(), info.commonPrefixes.begin(), info.commonPrefixes.end());
 				results.objects.insert(results.objects.end(), info.objects.begin(), info.objects.end());
+			} else if (res.index() == 1) {
+				done = Never();
 			} else {
 				UNREACHABLE();
 			}
