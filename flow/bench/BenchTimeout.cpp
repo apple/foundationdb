@@ -34,9 +34,9 @@ Future<Void> benchTimeoutActor(benchmark::State* state) {
 	const Future<int> readyFuture = Future<int>(7);
 	const Future<int> neverFuture = Future<int>(Never());
 	const int timedOutValue = -1;
-	int64_t sink = 0;
 
 	if constexpr (Scenario == TimeoutScenario::Ready) {
+		int64_t sink = 0;
 		while (state->KeepRunning()) {
 			Future<int> done;
 			if constexpr (Impl == TimeoutImpl::Actor) {
@@ -48,6 +48,7 @@ Future<Void> benchTimeoutActor(benchmark::State* state) {
 			benchmark::DoNotOptimize(done);
 			benchmark::ClobberMemory();
 		}
+		benchmark::DoNotOptimize(sink);
 	} else {
 		for (auto _ : *state) {
 			benchmark::DoNotOptimize(_);
@@ -64,10 +65,7 @@ Future<Void> benchTimeoutActor(benchmark::State* state) {
 			done.cancel();
 		}
 	}
-
-	benchmark::DoNotOptimize(sink);
 	state->SetItemsProcessed(static_cast<int64_t>(state->iterations()));
-	co_return;
 }
 
 template <TimeoutImpl Impl, TimeoutScenario Scenario>
