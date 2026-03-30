@@ -1,5 +1,5 @@
 /*
- * BenchGenericActors.cpp
+ * BenchTimeout.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -24,55 +24,10 @@
 #include "flow/genericactors.actor.h"
 #include "flow/genericactors.h"
 
-#include <vector>
-
 namespace {
 
-enum class WaitForAllReadyImpl { Actor, Coroutine };
-enum class WaitForAllReadyScenario { Ready, Error };
 enum class TimeoutImpl { Actor, Coroutine };
 enum class TimeoutScenario { Ready, ConstructPending };
-
-template <WaitForAllReadyScenario Scenario>
-std::vector<Future<int>> makeResults(int futureCount) {
-	std::vector<Future<int>> results;
-	results.reserve(futureCount);
-	for (int i = 0; i < futureCount; ++i) {
-		if constexpr (Scenario == WaitForAllReadyScenario::Ready) {
-			results.emplace_back(i);
-		} else {
-			results.emplace_back(operation_failed());
-		}
-	}
-	return results;
-}
-
-template <WaitForAllReadyImpl Impl, WaitForAllReadyScenario Scenario>
-Future<Void> benchWaitForAllReadyActor(benchmark::State* state) {
-	const int futureCount = state->range(0);
-	const std::vector<Future<int>> results = makeResults<Scenario>(futureCount);
-
-	while (state->KeepRunning()) {
-		if constexpr (Impl == WaitForAllReadyImpl::Actor) {
-			Future<Void> done = ::waitForAllReady<int>(results);
-			co_await done;
-			benchmark::DoNotOptimize(done);
-		} else {
-			Future<Void> done = generic_coro::waitForAllReady<int>(results);
-			co_await done;
-			benchmark::DoNotOptimize(done);
-		}
-		benchmark::ClobberMemory();
-	}
-
-	state->SetItemsProcessed(static_cast<int64_t>(state->iterations()) * futureCount);
-	co_return;
-}
-
-template <WaitForAllReadyImpl Impl, WaitForAllReadyScenario Scenario>
-void benchWaitForAllReady(benchmark::State& state) {
-	onMainThread([&state] { return benchWaitForAllReadyActor<Impl, Scenario>(&state); }).blockUntilReady();
-}
 
 template <TimeoutImpl Impl, TimeoutScenario Scenario>
 Future<Void> benchTimeoutActor(benchmark::State* state) {
@@ -119,30 +74,6 @@ template <TimeoutImpl Impl, TimeoutScenario Scenario>
 void benchTimeout(benchmark::State& state) {
 	onMainThread([&state] { return benchTimeoutActor<Impl, Scenario>(&state); }).blockUntilReady();
 }
-
-BENCHMARK_TEMPLATE(benchWaitForAllReady, WaitForAllReadyImpl::Actor, WaitForAllReadyScenario::Ready)
-    ->Name("WaitForAllReady/actor/ready")
-    ->RangeMultiplier(4)
-    ->Range(1, 1 << 12)
-    ->ReportAggregatesOnly(true);
-
-BENCHMARK_TEMPLATE(benchWaitForAllReady, WaitForAllReadyImpl::Coroutine, WaitForAllReadyScenario::Ready)
-    ->Name("WaitForAllReady/coroutine/ready")
-    ->RangeMultiplier(4)
-    ->Range(1, 1 << 12)
-    ->ReportAggregatesOnly(true);
-
-BENCHMARK_TEMPLATE(benchWaitForAllReady, WaitForAllReadyImpl::Actor, WaitForAllReadyScenario::Error)
-    ->Name("WaitForAllReady/actor/error")
-    ->RangeMultiplier(4)
-    ->Range(1, 1 << 12)
-    ->ReportAggregatesOnly(true);
-
-BENCHMARK_TEMPLATE(benchWaitForAllReady, WaitForAllReadyImpl::Coroutine, WaitForAllReadyScenario::Error)
-    ->Name("WaitForAllReady/coroutine/error")
-    ->RangeMultiplier(4)
-    ->Range(1, 1 << 12)
-    ->ReportAggregatesOnly(true);
 
 BENCHMARK_TEMPLATE(benchTimeout, TimeoutImpl::Actor, TimeoutScenario::Ready)
     ->Name("Timeout/actor/ready")
