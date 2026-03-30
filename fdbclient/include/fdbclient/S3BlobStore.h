@@ -248,7 +248,7 @@ public:
 
 		ConnectionPoolData() {}
 
-		// Destructor implementation in S3BlobStore.actor.cpp
+		// Destructor implementation in S3BlobStore.cpp
 		// In simulation, explicitly closes all pooled connections before destruction
 		~ConnectionPoolData();
 	};

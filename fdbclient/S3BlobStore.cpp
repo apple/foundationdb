@@ -1,5 +1,5 @@
 /*
- * S3BlobStore.actor.cpp
+ * S3BlobStore.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
