@@ -427,7 +427,7 @@ public:
 	                                    std::function<bool(std::string const&)> recurseFilter = nullptr);
 
 	// Get a list of all buckets
-	Future<std::vector<std::string>> listBuckets();
+	AsyncResult<std::vector<std::string>> listBuckets();
 
 	// Check if a bucket exists
 	Future<bool> bucketExists(std::string const& bucket);
@@ -462,7 +462,7 @@ public:
 	Future<Void> createBucket(std::string const& bucket);
 
 	// Useful methods for working with tiny files
-	Future<std::string> readEntireFile(std::string const& bucket, std::string const& object);
+	AsyncResult<std::string> readEntireFile(std::string const& bucket, std::string const& object);
 	Future<Void> writeEntireFile(std::string const& bucket, std::string const& object, std::string const& content);
 	Future<Void> writeEntireFileFromBuffer(std::string const& bucket,
 	                                       std::string const& object,

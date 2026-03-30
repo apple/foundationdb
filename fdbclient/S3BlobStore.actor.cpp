@@ -1643,7 +1643,7 @@ AsyncResult<S3BlobStoreEndpoint::ListResult> S3BlobStoreEndpoint::listObjects(
 	    Reference<S3BlobStoreEndpoint>::addRef(this), bucket, prefix, delimiter, maxDepth, recurseFilter);
 }
 
-Future<std::vector<std::string>> listBuckets_impl(Reference<S3BlobStoreEndpoint> bstore) {
+AsyncResult<std::vector<std::string>> listBuckets_impl(Reference<S3BlobStoreEndpoint> bstore) {
 	std::string resource = "/?marker=";
 	std::string lastName;
 	bool more = true;
@@ -1710,7 +1710,7 @@ Future<std::vector<std::string>> listBuckets_impl(Reference<S3BlobStoreEndpoint>
 	co_return buckets;
 }
 
-Future<std::vector<std::string>> S3BlobStoreEndpoint::listBuckets() {
+AsyncResult<std::vector<std::string>> S3BlobStoreEndpoint::listBuckets() {
 	return listBuckets_impl(Reference<S3BlobStoreEndpoint>::addRef(this));
 }
 
@@ -1944,7 +1944,9 @@ void S3BlobStoreEndpoint::setAuthHeaders(std::string const& verb, std::string co
 	headers["Authorization"] = auth;
 }
 
-Future<std::string> readEntireFile_impl(Reference<S3BlobStoreEndpoint> bstore, std::string bucket, std::string object) {
+AsyncResult<std::string> readEntireFile_impl(Reference<S3BlobStoreEndpoint> bstore,
+                                             std::string bucket,
+                                             std::string object) {
 	co_await bstore->requestRateRead->getAllowance(1);
 
 	std::string resource = bstore->constructResourcePath(bucket, object);
@@ -1975,7 +1977,7 @@ Future<std::string> readEntireFile_impl(Reference<S3BlobStoreEndpoint> bstore, s
 	co_return r->data.content;
 }
 
-Future<std::string> S3BlobStoreEndpoint::readEntireFile(std::string const& bucket, std::string const& object) {
+AsyncResult<std::string> S3BlobStoreEndpoint::readEntireFile(std::string const& bucket, std::string const& object) {
 	return readEntireFile_impl(Reference<S3BlobStoreEndpoint>::addRef(this), bucket, object);
 }
 
