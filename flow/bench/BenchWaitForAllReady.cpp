@@ -48,6 +48,8 @@ std::vector<Future<int>> makeResults(int futureCount) {
 template <WaitForAllReadyImpl Impl, WaitForAllReadyScenario Scenario>
 Future<Void> benchWaitForAllReadyActor(benchmark::State* state) {
 	const int futureCount = state->range(0);
+	// Prebuild the futures so the benchmark isolates waitForAllReady itself
+	// instead of vector growth or Promise/Future setup cost.
 	const std::vector<Future<int>> results = makeResults<Scenario>(futureCount);
 
 	while (state->KeepRunning()) {

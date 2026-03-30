@@ -91,6 +91,8 @@ namespace coro {
 
 template <class T>
 struct FutureIgnore {
+	// Wrap a Future<T> so coroutine await_transform can resume on completion
+	// without materializing the T payload at the await site.
 	Future<T> future;
 };
 
@@ -101,6 +103,8 @@ FutureIgnore<T> ignore(Future<T> future) {
 
 template <class SourceValue, class ResultValue>
 struct FutureErrorOr {
+	// Reuse Future<T> storage but request a non-throwing await_resume() that
+	// converts completion into ErrorOr<ResultValue>.
 	Future<std::conditional_t<std::is_void_v<SourceValue>, Void, SourceValue>> future;
 };
 

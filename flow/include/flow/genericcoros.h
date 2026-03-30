@@ -33,6 +33,8 @@ Future<Void> waitForAllReady(std::vector<Future<T>> results) {
 		if (result.isReady()) {
 			continue;
 		}
+		// waitForAllReady only cares that each future completes; composing
+		// ignore() with errorOr() avoids both throwing on error and copying T.
 		co_await coro::errorOr(coro::ignore(result));
 	}
 	co_return;

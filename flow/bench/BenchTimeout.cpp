@@ -53,6 +53,9 @@ Future<Void> benchTimeoutActor(benchmark::State* state) {
 		for (auto _ : *state) {
 			benchmark::DoNotOptimize(_);
 			state->ResumeTiming();
+			// Measure the cost of constructing the timeout race itself. Using a
+			// never-ready input keeps the returned future pending so timer delay
+			// does not dominate the comparison.
 			Future<int> done;
 			if constexpr (Impl == TimeoutImpl::Actor) {
 				done = ::timeout<int>(neverFuture, 1.0, timedOutValue);

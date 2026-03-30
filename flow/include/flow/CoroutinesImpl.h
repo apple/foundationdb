@@ -542,6 +542,8 @@ struct AwaitableFutureIgnore : AwaitableFuture<PromiseType, ValueType, false> {
 	Void await_resume() {
 		auto self = static_cast<Base*>(this);
 		self->resumeImpl();
+		// Preserve normal Future<T> error propagation while discarding any
+		// successful T payload.
 		if (self->future.isError()) {
 			throw self->future.getError();
 		}
@@ -559,6 +561,8 @@ struct AwaitableFutureErrorOr : AwaitableFuture<PromiseType, SourceValue, false>
 	ResultType await_resume() {
 		auto self = static_cast<Base*>(this);
 		self->resumeImpl();
+		// Convert failed Future<T> awaits into ErrorOr instead of throwing so
+		// callers can cheaply observe completion-only state.
 		if (self->future.isError()) {
 			return ResultType(self->future.getError());
 		}
@@ -762,6 +766,9 @@ struct CoroPromise : CoroReturn<T, CoroPromise<T, IsCancellable, ReturnsExplicit
 
 	template <class U>
 	auto await_transform(coro::FutureIgnore<U> future) {
+		// Custom adapters compose through await_transform rather than wrapper
+		// coroutines so cancellation and wait-state handling stay identical to
+		// plain Future<T> awaits.
 		return coro::AwaitableFutureIgnore<promise_type, U>{ std::move(future.future), this };
 	}
 
@@ -862,6 +869,8 @@ struct AsyncResultPromise
 
 	template <class U>
 	auto await_transform(coro::FutureIgnore<U> future) {
+		// Mirror CoroPromise support so AsyncResult coroutines can use the same
+		// non-allocating await adapters.
 		return coro::AwaitableFutureIgnore<promise_type, U>{ std::move(future.future), this };
 	}
 
