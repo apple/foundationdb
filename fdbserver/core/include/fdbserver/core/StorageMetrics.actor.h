@@ -253,32 +253,67 @@ public:
 	// void sendErrorWithPenalty(const ReplyPromise<Reply>& promise, const Error& err, double penalty);
 };
 
-ACTOR template <class ServiceType>
-Future<Void> serveStorageMetricsRequests(ServiceType* self, StorageServerInterface ssi) {
-	state Future<Void> doPollMetrics = Void();
-	loop {
-		choose {
-			when(state WaitMetricsRequest req = waitNext(ssi.waitMetrics.getFuture())) {
-				self->addActor(self->waitMetricsForReal(req));
-			}
-			when(SplitMetricsRequest req = waitNext(ssi.splitMetrics.getFuture())) {
-				self->getSplitMetrics(req);
-			}
-			when(GetStorageMetricsRequest req = waitNext(ssi.getStorageMetrics.getFuture())) {
-				self->getStorageMetrics(req);
-			}
-			when(ReadHotSubRangeRequest req = waitNext(ssi.getReadHotRanges.getFuture())) {
-				self->getHotRangeMetrics(req);
-			}
-			when(SplitRangeRequest req = waitNext(ssi.getRangeSplitPoints.getFuture())) {
-				self->getSplitPoints(req);
-			}
-			when(wait(doPollMetrics)) {
-				self->metrics.poll();
-				doPollMetrics = delay(SERVER_KNOBS->STORAGE_SERVER_POLL_METRICS_DELAY);
-			}
-		}
+namespace storagemetrics_impl {
+
+template <class ServiceType>
+Future<Void> serveWaitMetricsReqs(ServiceType* self, FutureStream<WaitMetricsRequest> waitMetrics) {
+	while (true) {
+		auto req = co_await waitMetrics;
+		self->addActor(self->waitMetricsForReal(req));
 	}
 }
+
+template <class ServiceType>
+Future<Void> serveSplitMetricsReqs(ServiceType* self, FutureStream<SplitMetricsRequest> splitMetrics) {
+	while (true) {
+		auto req = co_await splitMetrics;
+		self->getSplitMetrics(req);
+	}
+}
+
+template <class ServiceType>
+Future<Void> serveGetStorageMetricsReqs(ServiceType* self, FutureStream<GetStorageMetricsRequest> getStorageMetrics) {
+	while (true) {
+		auto req = co_await getStorageMetrics;
+		self->getStorageMetrics(req);
+	}
+}
+
+template <class ServiceType>
+Future<Void> serveReadHotRangeMetricsReqs(ServiceType* self, FutureStream<ReadHotSubRangeRequest> readHotRanges) {
+	while (true) {
+		auto req = co_await readHotRanges;
+		self->getHotRangeMetrics(req);
+	}
+}
+
+template <class ServiceType>
+Future<Void> serveSplitPointsReqs(ServiceType* self, FutureStream<SplitRangeRequest> splitPoints) {
+	while (true) {
+		auto req = co_await splitPoints;
+		self->getSplitPoints(req);
+	}
+}
+
+template <class ServiceType>
+Future<Void> pollMetrics(ServiceType* self) {
+	while (true) {
+		self->metrics.poll();
+		co_await delay(SERVER_KNOBS->STORAGE_SERVER_POLL_METRICS_DELAY);
+	}
+}
+
+} // namespace storagemetrics_impl
+
+template <class ServiceType>
+Future<Void> serveStorageMetricsRequests(ServiceType* self, StorageServerInterface ssi) {
+	co_await race(storagemetrics_impl::serveWaitMetricsReqs(self, ssi.waitMetrics.getFuture()),
+	              storagemetrics_impl::serveSplitMetricsReqs(self, ssi.splitMetrics.getFuture()),
+	              storagemetrics_impl::serveGetStorageMetricsReqs(self, ssi.getStorageMetrics.getFuture()),
+	              storagemetrics_impl::serveReadHotRangeMetricsReqs(self, ssi.getReadHotRanges.getFuture()),
+	              storagemetrics_impl::serveSplitPointsReqs(self, ssi.getRangeSplitPoints.getFuture()),
+	              storagemetrics_impl::pollMetrics(self));
+}
+
 #include "flow/unactorcompiler.h"
 #endif // FDBSERVER_STORAGEMETRICS_H
