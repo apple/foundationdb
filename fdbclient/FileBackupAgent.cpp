@@ -7995,8 +7995,7 @@ public:
 	                                     Key tagName,
 	                                     Standalone<VectorRef<KeyRangeRef>> ranges,
 	                                     Key addPrefix,
-	                                     Key removePrefix,
-	                                     UsePartitionedLog fastRestore) {
+	                                     Key removePrefix) {
 		auto ryw_tr = makeReference<ReadYourWritesTransaction>(cx);
 		BackupConfig backupConfig;
 		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
@@ -8104,76 +8103,71 @@ public:
 
 		bc = fileBackup::getBackupContainerWithProxy(bc);
 
-		if (fastRestore) {
-			ASSERT(false); // fastRestore deprecated
-			co_return -1;
-		} else {
-			TraceEvent("AS_StartRestore").log();
-			Standalone<VectorRef<KeyRangeRef>> restoreRange;
-			Standalone<VectorRef<KeyRangeRef>> systemRestoreRange;
-			for (auto r : ranges) {
-				restoreRange.push_back_deep(restoreRange.arena(), r);
-			}
-			if (!systemRestoreRange.empty()) {
-				// restore system keys
-				co_await restore(backupAgent,
-				                 cx,
-				                 cx,
-				                 "system_restore"_sr,
-				                 KeyRef(bc->getURL()),
-				                 bc->getProxy(),
-				                 systemRestoreRange,
-				                 {},
-				                 WaitForComplete::True,
-				                 ::invalidVersion,
-				                 Verbose::True,
-				                 addPrefix,
-				                 removePrefix,
-				                 LockDB::True,
-				                 UnlockDB::False,
-				                 OnlyApplyMutationLogs::False,
-				                 InconsistentSnapshotOnly::False,
-				                 {},
-				                 randomUid);
-				auto rywTransaction = makeReference<ReadYourWritesTransaction>(cx);
-				// clear old restore config associated with system keys
-				while (true) {
-					Error err;
-					try {
-						rywTransaction->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-						rywTransaction->setOption(FDBTransactionOptions::LOCK_AWARE);
-						RestoreConfig oldRestore(randomUid);
-						oldRestore.clear(rywTransaction);
-						co_await rywTransaction->commit();
-						break;
-					} catch (Error& e) {
-						err = e;
-					}
-					co_await rywTransaction->onError(err);
-				}
-			}
-			// restore user data
-			Version ver = co_await restore(backupAgent,
-			                               cx,
-			                               cx,
-			                               tagName,
-			                               KeyRef(bc->getURL()),
-			                               bc->getProxy(),
-			                               restoreRange,
-			                               {},
-			                               WaitForComplete::True,
-			                               ::invalidVersion,
-			                               Verbose::True,
-			                               addPrefix,
-			                               removePrefix,
-			                               LockDB::True,
-			                               UnlockDB::True,
-			                               OnlyApplyMutationLogs::False,
-			                               InconsistentSnapshotOnly::False,
-			                               {},
-			                               randomUid);
-			co_return ver;
+		TraceEvent("AS_StartRestore").log();
+		Standalone<VectorRef<KeyRangeRef>> restoreRange;
+		Standalone<VectorRef<KeyRangeRef>> systemRestoreRange;
+		for (auto r : ranges) {
+			restoreRange.push_back_deep(restoreRange.arena(), r);
 		}
+		if (!systemRestoreRange.empty()) {
+			// restore system keys
+			co_await restore(backupAgent,
+			                 cx,
+			                 cx,
+			                 "system_restore"_sr,
+			                 KeyRef(bc->getURL()),
+			                 bc->getProxy(),
+			                 systemRestoreRange,
+			                 {},
+			                 WaitForComplete::True,
+			                 ::invalidVersion,
+			                 Verbose::True,
+			                 addPrefix,
+			                 removePrefix,
+			                 LockDB::True,
+			                 UnlockDB::False,
+			                 OnlyApplyMutationLogs::False,
+			                 InconsistentSnapshotOnly::False,
+			                 {},
+			                 randomUid);
+			auto rywTransaction = makeReference<ReadYourWritesTransaction>(cx);
+			// clear old restore config associated with system keys
+			while (true) {
+				Error err;
+				try {
+					rywTransaction->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					rywTransaction->setOption(FDBTransactionOptions::LOCK_AWARE);
+					RestoreConfig oldRestore(randomUid);
+					oldRestore.clear(rywTransaction);
+					co_await rywTransaction->commit();
+					break;
+				} catch (Error& e) {
+					err = e;
+				}
+				co_await rywTransaction->onError(err);
+			}
+		}
+		// restore user data
+		Version ver = co_await restore(backupAgent,
+		                               cx,
+		                               cx,
+		                               tagName,
+		                               KeyRef(bc->getURL()),
+		                               bc->getProxy(),
+		                               restoreRange,
+		                               {},
+		                               WaitForComplete::True,
+		                               ::invalidVersion,
+		                               Verbose::True,
+		                               addPrefix,
+		                               removePrefix,
+		                               LockDB::True,
+		                               UnlockDB::True,
+		                               OnlyApplyMutationLogs::False,
+		                               InconsistentSnapshotOnly::False,
+		                               {},
+		                               randomUid);
+		co_return ver;
 	}
 };
 
@@ -8330,8 +8324,7 @@ Future<Version> FileBackupAgent::atomicRestore(Database cx,
                                                Standalone<VectorRef<KeyRangeRef>> ranges,
                                                Key addPrefix,
                                                Key removePrefix) {
-	return FileBackupAgentImpl::atomicRestore(
-	    this, cx, tagName, ranges, addPrefix, removePrefix, UsePartitionedLog::False);
+	return FileBackupAgentImpl::atomicRestore(this, cx, tagName, ranges, addPrefix, removePrefix);
 }
 
 Future<ERestoreState> FileBackupAgent::abortRestore(Reference<ReadYourWritesTransaction> tr, Key tagName) {
