@@ -23,7 +23,7 @@
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "BulkSetup.h"
 
 // Workload to test atomicRestore().

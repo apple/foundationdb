@@ -1,5 +1,5 @@
 /*
- * workloads.actor.h
+ * workloads.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_TESTER_WORKLOADS_ACTOR_H
-#define FDBSERVER_TESTER_WORKLOADS_ACTOR_H
+#ifndef FDBSERVER_TESTER_WORKLOADS_H
+#define FDBSERVER_TESTER_WORKLOADS_H
 #pragma once
 
 #include "fdbclient/NativeAPI.actor.h"

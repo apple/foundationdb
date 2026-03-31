@@ -37,7 +37,7 @@
 #include "flow/serialize.h"
 #include "flow/IRandom.h"
 #include "flow/genericactors.actor.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"

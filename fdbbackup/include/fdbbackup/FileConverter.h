@@ -24,7 +24,7 @@
 
 #include <cinttypes>
 #include "SimpleOpt/SimpleOpt.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 
 namespace file_converter {
 

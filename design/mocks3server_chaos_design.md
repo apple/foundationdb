@@ -53,7 +53,7 @@ if (BUGGIFY) {
 
 * **HTTP errors**: 429 (throttling), 503 (service unavailable), 500/502 (server errors)
 * **Auth errors**: 401 (unauthorized), 406 (not acceptable) 
-* **S3-specific errors**: InvalidToken, ExpiredToken (matching [`S3BlobStore.actor.cpp`](https://github.com/apple/foundationdb/tree/main/fdbclient/S3BlobStore.actor.cpp#L1241) patterns)
+* **S3-specific errors**: InvalidToken, ExpiredToken (matching [`S3BlobStore.cpp`](https://github.com/apple/foundationdb/tree/main/fdbclient/S3BlobStore.cpp#L1241) patterns)
 * **Connection issues**: Connection drops, timeouts
 * **Data corruption**: Malformed responses, bit flips
 
@@ -119,4 +119,3 @@ wait(startMockS3ServerChaos(listenAddress));
 ```
 
 Chaos behavior is controlled by **S3FaultInjector rates** (0.0-1.0), with **BUGGIFY providing occasional extra chaos** - no master boolean switch.
-

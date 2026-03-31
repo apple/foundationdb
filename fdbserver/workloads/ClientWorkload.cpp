@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "fdbserver/core/ServerDBInfo.actor.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/core/ServerDBInfo.h"
+#include "fdbserver/tester/workloads.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 
