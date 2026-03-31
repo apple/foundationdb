@@ -391,7 +391,7 @@ template <class Awaiter, class ValueType, bool IsStream, bool ReturnsExplicitVoi
 struct AwaitableResume;
 
 template <class Awaiter>
-struct AwaitableResume<Awaiter, Void, false, false> {
+struct AwaitableResume<Awaiter, Void, /* IsStream = */ false, /* ReturnsExplicitVoid = */ false> {
 	[[maybe_unused]] void await_resume() {
 		auto self = static_cast<Awaiter*>(this);
 		self->resumeImpl();
@@ -402,7 +402,7 @@ struct AwaitableResume<Awaiter, Void, false, false> {
 };
 
 template <class Awaiter, class ValueType>
-struct AwaitableResume<Awaiter, ValueType, false, false> {
+struct AwaitableResume<Awaiter, ValueType, /* IsStream = */ false, /* ReturnsExplicitVoid = */ false> {
 	ValueType const& await_resume() {
 		auto self = static_cast<Awaiter*>(this);
 		self->resumeImpl();
@@ -414,10 +414,11 @@ struct AwaitableResume<Awaiter, ValueType, false, false> {
 };
 
 template <class Awaiter, class ValueType>
-struct AwaitableResume<Awaiter, ValueType, false, true> : AwaitableResume<Awaiter, ValueType, false, false> {};
+struct AwaitableResume<Awaiter, ValueType, /* IsStream = */ false, /* ReturnsExplicitVoid = */ true>
+  : AwaitableResume<Awaiter, ValueType, /* IsStream = */ false, /* ReturnsExplicitVoid = */ false> {};
 
 template <class Awaiter>
-struct AwaitableResume<Awaiter, Void, false, true> {
+struct AwaitableResume<Awaiter, Void, /* IsStream = */ false, /* ReturnsExplicitVoid = */ true> {
 	[[maybe_unused]] ExplicitVoid await_resume() {
 		auto self = static_cast<Awaiter*>(this);
 		self->resumeImpl();
@@ -429,7 +430,7 @@ struct AwaitableResume<Awaiter, Void, false, true> {
 };
 
 template <class Awaiter, class ValueType>
-struct AwaitableResume<Awaiter, ValueType, true, false> {
+struct AwaitableResume<Awaiter, ValueType, /* IsStream = */ true, /* ReturnsExplicitVoid = */ false> {
 	ValueType await_resume() {
 		auto self = static_cast<Awaiter*>(this);
 		if (self->resumeImpl()) {
@@ -443,7 +444,8 @@ struct AwaitableResume<Awaiter, ValueType, true, false> {
 };
 
 template <class Awaiter, class ValueType>
-struct AwaitableResume<Awaiter, ValueType, true, true> : AwaitableResume<Awaiter, ValueType, true, false> {};
+struct AwaitableResume<Awaiter, ValueType, /* IsStream = */ true, /* ReturnsExplicitVoid = */ true>
+  : AwaitableResume<Awaiter, ValueType, /* IsStream = */ true, /* ReturnsExplicitVoid = */ false> {};
 
 // Awaiter for `Future<T>` and `FutureStream<T>` values transformed through a
 // coroutine promise.
