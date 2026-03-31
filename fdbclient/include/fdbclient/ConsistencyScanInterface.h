@@ -18,15 +18,12 @@
  * limitations under the License.
  */
 
+#pragma once
+
 #include "fdbclient/SystemData.h"
 #include "fdbclient/json_spirit/json_spirit_value.h"
 #include "flow/serialize.h"
 #include "fmt/core.h"
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_CONSISTENCYSCANINTERFACE_ACTOR_G_H)
-#define FDBCLIENT_CONSISTENCYSCANINTERFACE_ACTOR_G_H
-#include "fdbclient/ConsistencyScanInterface.actor.g.h"
-#elif !defined(FDBCLIENT_CONSISTENCYSCANINTERFACE_ACTOR_H)
-#define FDBCLIENT_CONSISTENCYSCANINTERFACE_ACTOR_H
 
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/DatabaseConfiguration.h"
@@ -36,8 +33,6 @@
 #include "fdbrpc/Locality.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/KeyBackedRangeMap.actor.h"
-
-#include "flow/actorcompiler.h" // must be last include
 
 struct ConsistencyScanInterface {
 	constexpr static FileIdentifier file_identifier = 4983265;
@@ -325,7 +320,3 @@ struct ConsistencyScanState : public KeyBackedClass {
 		roundStatsHistory().erase(tr, 0, MAX_VERSION);
 	}
 };
-
-#include "flow/unactorcompiler.h"
-
-#endif // FDBCLIENT_CONSISTENCYSCANINTERFACE_H
