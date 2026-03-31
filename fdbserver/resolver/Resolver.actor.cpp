@@ -37,7 +37,7 @@
 #include "fdbserver/core/ResolverInterface.h"
 #include "fdbserver/core/RestoreCoreUtil.h"
 #include "fdbserver/core/ServerDBInfo.h"
-#include "fdbserver/core/StorageMetrics.actor.h"
+#include "fdbserver/core/StorageMetrics.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/resolver/Resolver.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"

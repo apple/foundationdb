@@ -29,7 +29,7 @@
 #include "RestoreLoader.h"
 #include "RestoreRoleCommon.h"
 #include "fdbserver/core/MutationTracking.h"
-#include "fdbserver/core/StorageMetrics.actor.h"
+#include "fdbserver/core/StorageMetrics.h"
 
 #include "flow/CoroUtils.h"
 

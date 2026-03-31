@@ -20,7 +20,7 @@
 
 #include <algorithm>
 
-#include "fdbserver/core/StorageMetrics.actor.h"
+#include "fdbserver/core/StorageMetrics.h"
 #include "flow/CodeProbe.h"
 #include "flow/Hash3.h"
 #include "flow/IRandom.h"

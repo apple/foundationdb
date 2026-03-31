@@ -19,18 +19,12 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CORE_STORAGEMETRICS_G_H)
-#define FDBSERVER_CORE_STORAGEMETRICS_G_H
-#include "fdbserver/core/StorageMetrics.actor.g.h"
-#elif !defined(FDBSERVER_CORE_STORAGEMETRICS_H)
-#define FDBSERVER_CORE_STORAGEMETRICS_H
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/simulator.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbserver/core/Knobs.h"
-#include "flow/actorcompiler.h"
 
 const StringRef STORAGESERVER_HISTOGRAM_GROUP = "StorageServer"_sr;
 const StringRef FETCH_KEYS_LATENCY_HISTOGRAM = "FetchKeysLatency"_sr;
@@ -314,6 +308,3 @@ Future<Void> serveStorageMetricsRequests(ServiceType* self, StorageServerInterfa
 	              storagemetrics_impl::serveSplitPointsReqs(self, ssi.getRangeSplitPoints.getFuture()),
 	              storagemetrics_impl::pollMetrics(self));
 }
-
-#include "flow/unactorcompiler.h"
-#endif // FDBSERVER_STORAGEMETRICS_H
