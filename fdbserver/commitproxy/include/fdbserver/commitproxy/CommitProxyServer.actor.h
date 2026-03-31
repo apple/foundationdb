@@ -32,10 +32,10 @@
 struct InitializeCommitProxyRequest;
 struct ServerDBInfo;
 
-ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
-                                     InitializeCommitProxyRequest req,
-                                     Reference<AsyncVar<ServerDBInfo> const> db,
-                                     std::string whitelistBinPaths);
+Future<Void> commitProxyServer(CommitProxyInterface proxy,
+                               InitializeCommitProxyRequest req,
+                               Reference<AsyncVar<ServerDBInfo> const> db,
+                               std::string whitelistBinPaths);
 
 #include "flow/unactorcompiler.h"
 #endif
