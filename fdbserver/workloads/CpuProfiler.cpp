@@ -21,7 +21,7 @@
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/QuietDatabase.h"
 #include "fdbserver/core/ServerDBInfo.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 
 // A workload which starts the CPU profiler at a given time and duration on all workers in a cluster
 struct CpuProfilerWorkload : TestWorkload {

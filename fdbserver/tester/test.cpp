@@ -49,7 +49,7 @@
 #include "fdbserver/tester/KnobProtectiveGroups.h"
 #include "fdbserver/core/QuietDatabase.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "fdbserver/tester/WorkloadUtils.h"
 #include "fdbserver/tester/tester.h"
 #include "fdbclient/MonitorLeader.h"

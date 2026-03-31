@@ -87,7 +87,7 @@
 #include "flow/Knobs.h"
 #include "flow/Platform.h"
 #include "flow/SystemMonitor.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 #include "fdbclient/Tracing.h"
 #include "flow/UnitTest.h"
 #include "flow/network.h"

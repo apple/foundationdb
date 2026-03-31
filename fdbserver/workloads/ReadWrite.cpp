@@ -27,7 +27,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "BulkSetup.h"
 #include "ReadWriteWorkload.h"
 #include "fdbclient/ReadYourWrites.h"

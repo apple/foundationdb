@@ -25,7 +25,7 @@
 #include "swift/ABI/Task.h"
 #include <stdint.h>
 #include "flow/AsioReactor.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 
 #if !defined(__has_feature)
 #define __has_feature(x) 0

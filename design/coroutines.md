@@ -851,10 +851,10 @@ When a function is converted from `ACTOR` to a coroutine, any forward declaratio
 If you also write `const&` explicitly, the generated code will contain `const& const&`, which is a compile error.
 
 ```c++
-// workloads.actor.h — WRONG: ACTOR + const& = double const&
+// workloads.h — WRONG: ACTOR + const& = double const&
 ACTOR Future<Void> foo(Database const& cx);
 
-// workloads.actor.h — CORRECT: remove ACTOR since foo() is now a coroutine
+// workloads.h — CORRECT: remove ACTOR since foo() is now a coroutine
 Future<Void> foo(Database const& cx);
 ```
 

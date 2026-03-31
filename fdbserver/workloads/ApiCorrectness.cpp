@@ -24,7 +24,7 @@
 #include "fdbserver/core/QuietDatabase.h"
 
 #include "fdbserver/core/MutationTracking.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "ApiWorkload.h"
 #include "MemoryKeyValueStore.h"
 #include "flow/IRandom.h"

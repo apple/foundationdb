@@ -21,7 +21,7 @@
 #include "fdbrpc/simulator.h"
 #include "flow/flow.h"
 #include "flow/network.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 #include "flow/swift_concurrency_hooks.h"
 #include "flow/swift.h"
 #include "flow/swift/ABI/Task.h"

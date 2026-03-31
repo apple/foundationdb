@@ -1,5 +1,5 @@
 /*
- * TLSConfig.actor.h
+ * TLSConfig.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,13 +18,8 @@
  * limitations under the License.
  */
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
-#if defined(NO_INTELLISENSE) && !defined(FLOW_TLS_CONFIG_ACTOR_G_H)
-#define FLOW_TLS_CONFIG_ACTOR_G_H
-#include "flow/TLSConfig.actor.g.h"
-#elif !defined(FLOW_TLS_CONFIG_ACTOR_H)
-#define FLOW_TLS_CONFIG_ACTOR_H
+#ifndef FLOW_TLSCONFIG_H
+#define FLOW_TLSCONFIG_H
 
 #pragma once
 
@@ -42,7 +37,6 @@
 #include "flow/FastRef.h"
 #include "flow/Knobs.h"
 #include "flow/flow.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 typedef int NID;
 
@@ -313,5 +307,4 @@ public:
 	"  " TLS_DISABLE_PLAINTEXT_CONNECTION_FLAG "\n"                                                                    \
 	"                 Disable non-TLS connections. All plaintext connection attempts will timeout.\n"
 
-#include "flow/unactorcompiler.h"
 #endif

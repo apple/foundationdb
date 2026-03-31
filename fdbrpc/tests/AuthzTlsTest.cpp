@@ -41,7 +41,7 @@
 #include "flow/Error.h"
 #include "flow/MkCert.h"
 #include "flow/ScopeExit.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 
 using namespace std::literals::string_view_literals;
 

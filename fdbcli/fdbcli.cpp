@@ -53,7 +53,7 @@
 #include "flow/CodeProbe.h"
 #include "flow/CoroUtils.h"
 
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 #include "flow/ThreadHelper.actor.h"
 #include "SimpleOpt/SimpleOpt.h"
 

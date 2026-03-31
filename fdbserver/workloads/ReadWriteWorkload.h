@@ -21,7 +21,7 @@
 #pragma once
 
 #include "fdbrpc/DDSketch.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "flow/TDMetric.actor.h"
 #include <boost/lexical_cast.hpp>
 

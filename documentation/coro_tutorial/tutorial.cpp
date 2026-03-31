@@ -24,7 +24,7 @@
 #include "flow/DeterministicRandom.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include <functional>
 #include <unordered_map>
