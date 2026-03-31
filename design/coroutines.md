@@ -858,6 +858,15 @@ ACTOR Future<Void> foo(Database const& cx);
 Future<Void> foo(Database const& cx);
 ```
 
+### `DESCR` Deprecation
+
+The older TDMetric `DESCR` shorthand is deprecated. When a coroutine conversion touches metric event types, do not add
+new `DESCR(...)`-style declarations. Instead, define an explicit payload type with a
+`...Descriptor` suffix and specialize `Descriptor<T>` with `DescribeType<...>` and `DescribeField<...>` next to it.
+
+This keeps descriptor types unambiguous in coroutine-converted code and matches the old TDMetric pattern in files
+such as `flow/EventTypes.h`, `fdbclient/EventTypes.h`, and the workload metric definitions.
+
 ### File Naming
 
 Converted files should be renamed from `.actor.cpp` to `.cpp` (or `.actor.h` to `.h`) since they no longer need the

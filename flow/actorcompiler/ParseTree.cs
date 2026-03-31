@@ -215,13 +215,6 @@ namespace actorcompiler
     };
 
 
-    class Declaration
-    {
-        public string type;
-        public string name;
-        public string comment;
-    };
-
     class Actor
     {
         public List<string> attributes = new List<string>();
@@ -241,12 +234,5 @@ namespace actorcompiler
 
         public bool IsCancellable() { return returnType != null && !isUncancellable; }
         public void SetUncancellable() { isUncancellable = true; }
-    };
-
-    class Descr
-    {
-        public string name;
-        public string superClassList;
-        public List<Declaration> body;
     };
 };
