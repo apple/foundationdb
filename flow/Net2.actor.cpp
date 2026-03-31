@@ -363,8 +363,10 @@ class BindPromise {
 	NetworkAddress peerAddr;
 
 public:
-	BindPromise(const char* errContext, UID errID) : errContext(errContext), errID(errID) {}
-	BindPromise(AuditedEvent auditedEvent, UID errID) : errContext(auditedEvent), errID(errID) {}
+	BindPromise(const char* errContext, UID errID, NetworkAddress peerAddr)
+	  : errContext(errContext), errID(errID), peerAddr(peerAddr) {}
+	BindPromise(AuditedEvent auditedEvent, UID errID, NetworkAddress peerAddr)
+	  : errContext(auditedEvent), errID(errID), peerAddr(peerAddr) {}
 	BindPromise(BindPromise const& r) = default;
 	BindPromise(BindPromise&& r) noexcept
 	  : p(std::move(r.p)), errContext(r.errContext), errID(r.errID), peerAddr(r.peerAddr) {}
@@ -372,8 +374,6 @@ public:
 	Future<Void> getFuture() const { return p.getFuture(); }
 
 	NetworkAddress getPeerAddr() const { return peerAddr; }
-
-	void setPeerAddr(const NetworkAddress& addr) { peerAddr = addr; }
 
 	void operator()(const boost::system::error_code& error, size_t bytesWritten = 0) {
 		try {
@@ -431,7 +431,7 @@ public:
 		self->peer_address = addr;
 		try {
 			auto to = tcpEndpoint(addr);
-			BindPromise p("N2_ConnectError", self->id);
+			BindPromise p("N2_ConnectError", self->id, self->peer_address);
 			Future<Void> onConnected = p.getFuture();
 			self->socket.async_connect(to, std::move(p));
 
@@ -458,7 +458,7 @@ public:
 	// returns when write() can write at least one byte
 	Future<Void> onWritable() override {
 		++g_net2->countWriteProbes;
-		BindPromise p("N2_WriteProbeError", id);
+		BindPromise p("N2_WriteProbeError", id, peer_address);
 		auto f = p.getFuture();
 		socket.async_write_some(boost::asio::null_buffers(), std::move(p));
 		return f;
@@ -467,7 +467,7 @@ public:
 	// returns when read() can read at least one byte
 	Future<Void> onReadable() override {
 		++g_net2->countReadProbes;
-		BindPromise p("N2_ReadProbeError", id);
+		BindPromise p("N2_ReadProbeError", id, peer_address);
 		auto f = p.getFuture();
 		socket.async_read_some(boost::asio::null_buffers(), std::move(p));
 		return f;
@@ -639,7 +639,7 @@ public:
 		try {
 			if (toAddress.present()) {
 				auto to = udpEndpoint(toAddress.get());
-				BindPromise p("N2_UDPConnectError", self->id);
+				BindPromise p("N2_UDPConnectError", self->id, toAddress.get());
 				Future<Void> onConnected = p.getFuture();
 				self->socket.async_connect(to, std::move(p));
 
@@ -799,7 +799,8 @@ private:
 		state Reference<Connection> conn(new Connection(self->io_service));
 		state tcp::acceptor::endpoint_type peer_endpoint;
 		try {
-			BindPromise p("N2_AcceptError", UID());
+			// Peer address not known until accept succeeds
+			BindPromise p("N2_AcceptError", UID(), NetworkAddress());
 			auto f = p.getFuture();
 			self->acceptor.async_accept(conn->getSocket(), peer_endpoint, std::move(p));
 			wait(f);
@@ -929,7 +930,7 @@ public:
 		self->peer_address = addr;
 		try {
 			auto to = tcpEndpoint(self->peer_address);
-			BindPromise p("N2_ConnectError", self->id);
+			BindPromise p("N2_ConnectError", self->id, self->peer_address);
 			Future<Void> onConnected = p.getFuture();
 			self->socket.async_connect(to, std::move(p));
 
@@ -971,7 +972,7 @@ public:
 
 		try {
 			auto to = tcpEndpoint(self->peer_address);
-			BindPromise p("N2_ConnectError", self->id);
+			BindPromise p("N2_ConnectError", self->id, self->peer_address);
 			Future<Void> onConnected = p.getFuture();
 			self->socket.async_connect(to, std::move(p));
 
@@ -1022,8 +1023,7 @@ public:
 				static SimpleCounter<int64_t>* countServerTLSHandshakesOnMainThread =
 				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakesOnMainThread");
 				countServerTLSHandshakesOnMainThread->increment(1);
-				BindPromise p("N2_AcceptHandshakeError"_audit, self->id);
-				p.setPeerAddr(self->getPeerAddress());
+				BindPromise p("N2_AcceptHandshakeError"_audit, self->id, self->getPeerAddress());
 				onHandshook = p.getFuture();
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::server, std::move(p));
 			}
@@ -1147,8 +1147,7 @@ public:
 				static SimpleCounter<int64_t>* countClientTLSHandshakesOnMainThread =
 				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakesOnMainThread");
 				countClientTLSHandshakesOnMainThread->increment(1);
-				BindPromise p("N2_ConnectHandshakeError"_audit, self->id);
-				p.setPeerAddr(self->getPeerAddress());
+				BindPromise p("N2_ConnectHandshakeError"_audit, self->id, self->getPeerAddress());
 				onHandshook = p.getFuture();
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::client, std::move(p));
 			}
@@ -1208,7 +1207,7 @@ public:
 	// returns when write() can write at least one byte
 	Future<Void> onWritable() override {
 		++g_net2->countWriteProbes;
-		BindPromise p("N2_WriteProbeError", id);
+		BindPromise p("N2_WriteProbeError", id, peer_address);
 		auto f = p.getFuture();
 		socket.async_write_some(boost::asio::null_buffers(), std::move(p));
 		return f;
@@ -1217,7 +1216,7 @@ public:
 	// returns when read() can read at least one byte
 	Future<Void> onReadable() override {
 		++g_net2->countReadProbes;
-		BindPromise p("N2_ReadProbeError", id);
+		BindPromise p("N2_ReadProbeError", id, peer_address);
 		auto f = p.getFuture();
 		socket.async_read_some(boost::asio::null_buffers(), std::move(p));
 		return f;
@@ -1377,7 +1376,8 @@ private:
 		state Reference<SSLConnection> conn(new SSLConnection(self->io_service, self->contextVar->get()));
 		state tcp::acceptor::endpoint_type peer_endpoint;
 		try {
-			BindPromise p("N2_AcceptError", UID());
+			// Peer address not known until accept succeeds
+			BindPromise p("N2_AcceptError", UID(), NetworkAddress());
 			auto f = p.getFuture();
 			self->acceptor.async_accept(conn->getSocket(), peer_endpoint, std::move(p));
 			wait(f);
