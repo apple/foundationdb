@@ -39,10 +39,6 @@ static Future<Void> splitError(Future<Void> in, Promise<Void> errOut) {
 	}
 }
 
-#if 0
-#ifdef DIFF_PLACEHOLDER_CONFIGURATION_MONITOR
-#endif
-#endif
 Future<Void> Ratekeeper::configurationMonitor() {
 	while (true) {
 		ReadYourWritesTransaction tr(db);
@@ -71,10 +67,6 @@ Future<Void> Ratekeeper::configurationMonitor() {
 	}
 }
 
-#if 0
-#ifdef DIFF_PLACEHOLDER_MONITOR_SERVER_LIST_CHANGE
-#endif
-#endif
 Future<Void> Ratekeeper::monitorServerListChange(
     PromiseStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges) {
 	std::map<UID, StorageServerInterface> oldServers;
@@ -126,10 +118,6 @@ Future<Void> Ratekeeper::monitorServerListChange(
 	}
 }
 
-#if 0
-#ifdef DIFF_PLACEHOLDER_TRACK_STORAGE_SERVER_QUEUE_INFO
-#endif
-#endif
 Future<Void> Ratekeeper::trackStorageServerQueueInfo(StorageServerInterface ssi) {
 	storageQueueInfo.insert(mapPair(ssi.id(), StorageQueueInfo(id, ssi.id(), ssi.locality)));
 	healthMetrics.storageStats[ssi.id()] = HealthMetrics::StorageStats();
@@ -180,10 +168,6 @@ Future<Void> Ratekeeper::trackStorageServerQueueInfo(StorageServerInterface ssi)
 	}
 }
 
-#if 0
-#ifdef DIFF_PLACEHOLDER_MONITOR_STORAGE_SERVER_QUEUE_SIZE_IN_SIMULATION
-#endif
-#endif
 // works with ExcludeIncludeStorageServersWorkload.actor.cpp to make sure the size of SS list is bounded
 Future<Void> Ratekeeper::monitorStorageServerQueueSizeInSimulation() {
 	if (!g_network->isSimulated()) {
@@ -236,10 +220,6 @@ Future<Void> Ratekeeper::monitorStorageServerQueueSizeInSimulation() {
 	}
 }
 
-#if 0
-#ifdef DIFF_PLACEHOLDER_TRACK_TLOG_QUEUE_INFO
-#endif
-#endif
 Future<Void> Ratekeeper::trackTLogQueueInfo(TLogInterface tli) {
 	tlogQueueInfo.insert(mapPair(tli.id(), TLogQueueInfo(tli.id())));
 	Map<UID, TLogQueueInfo>::iterator myQueueInfo = tlogQueueInfo.find(tli.id());
@@ -272,10 +252,6 @@ Future<Void> Ratekeeper::trackTLogQueueInfo(TLogInterface tli) {
 	}
 }
 
-#if 0
-#ifdef DIFF_PLACEHOLDER_TRACK_EACH_STORAGE_SERVER
-#endif
-#endif
 Future<Void> Ratekeeper::trackEachStorageServer(
     FutureStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges) {
 	std::unordered_map<UID, Future<Void>> storageServerTrackers;
@@ -305,10 +281,6 @@ Future<Void> Ratekeeper::trackEachStorageServer(
 	}
 }
 
-#if 0
-#ifdef DIFF_PLACEHOLDER_MONITOR_HOT_SHARDS
-#endif
-#endif
 Future<Void> Ratekeeper::monitorHotShards(Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	while (true) {
 		co_await delay(SERVER_KNOBS->HOT_SHARD_MONITOR_FREQUENCY);
@@ -353,10 +325,6 @@ Future<Void> Ratekeeper::monitorHotShards(Reference<AsyncVar<ServerDBInfo> const
 	}
 }
 
-#if 0
-#ifdef DIFF_PLACEHOLDER_HANDLE_REPORT_COMMIT_COST_ESTIMATION_REQS
-#endif
-#endif
 Future<Void> Ratekeeper::handleReportCommitCostEstimationReqs(RatekeeperInterface rkInterf) {
 	while (true) {
 		ReportCommitCostEstimationRequest req = co_await rkInterf.reportCommitCostEstimation.getFuture();
@@ -365,10 +333,6 @@ Future<Void> Ratekeeper::handleReportCommitCostEstimationReqs(RatekeeperInterfac
 	}
 }
 
-#if 0
-#ifdef DIFF_PLACEHOLDER_HANDLE_GET_SS_VERSION_LAG_REQS
-#endif
-#endif
 Future<Void> Ratekeeper::handleGetSSVersionLagReqs(RatekeeperInterface rkInterf) {
 	while (true) {
 		GetSSVersionLagRequest req = co_await rkInterf.getSSVersionLag.getFuture();
@@ -378,10 +342,6 @@ Future<Void> Ratekeeper::handleGetSSVersionLagReqs(RatekeeperInterface rkInterf)
 	}
 }
 
-#if 0
-#ifdef DIFF_PLACEHOLDER_HANDLE_GET_RATE_INFO_REQS
-#endif
-#endif
 Future<Void> Ratekeeper::handleGetRateInfoReqs(RatekeeperInterface rkInterf,
                                                Version* recoveryVersion,
                                                bool* lastLimited) {
@@ -449,10 +409,6 @@ Future<Void> Ratekeeper::handleGetRateInfoReqs(RatekeeperInterface rkInterf,
 	}
 }
 
-#if 0
-#ifdef DIFF_PLACEHOLDER_HANDLE_DB_INFO_CHANGES
-#endif
-#endif
 Future<Void> Ratekeeper::handleDBInfoChanges(Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                              bool* recovering,
                                              Version* recoveryVersion,
@@ -493,10 +449,6 @@ Future<Void> Ratekeeper::handleDBInfoChanges(Reference<AsyncVar<ServerDBInfo> co
 	}
 }
 
-#if 0
-#ifdef DIFF_PLACEHOLDER_RATE_UPDATER
-#endif
-#endif
 Future<Void> Ratekeeper::rateUpdater(bool* lastLimited) {
 	while (true) {
 		double actualTps = smoothReleasedTransactions.smoothRate();
@@ -528,10 +480,6 @@ Future<Void> Ratekeeper::rateUpdater(bool* lastLimited) {
 	}
 }
 
-#if 0
-#ifdef DIFF_PLACEHOLDER_RUN
-#endif
-#endif
 Future<Void> Ratekeeper::run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	ActorOwningSelfRef<Ratekeeper> pSelf(
 	    new Ratekeeper(rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True)));
@@ -609,10 +557,6 @@ Future<Void> Ratekeeper::run(RatekeeperInterface rkInterf, Reference<AsyncVar<Se
 	}
 }
 
-#if 0
-#ifdef DIFF_PLACEHOLDER_REFRESH_STORAGE_SERVER_COMMIT_COSTS
-#endif
-#endif
 Future<Void> Ratekeeper::refreshStorageServerCommitCosts() {
 	double lastBusiestCommitTagPick{ 0 };
 	std::vector<Future<Void>> replies;
