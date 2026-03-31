@@ -33,6 +33,3 @@ Future<Void> readTSSMappingRYW(Reference<ReadYourWritesTransaction> tr,
 
 // Reads the current cluster TSS mapping as part of the given Transaction
 Future<Void> readTSSMapping(Transaction* tr, std::map<UID, StorageServerInterface>* tssMapping);
-
-// Removes the TSS pairs from the cluster
-Future<Void> removeTSSPairsFromCluster(Database cx, std::vector<std::pair<UID, UID>> pairsToRemove);
