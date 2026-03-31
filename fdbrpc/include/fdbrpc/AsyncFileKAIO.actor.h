@@ -48,13 +48,23 @@
 // /data/v7/fdb/
 #define KAIO_LOGGING 0
 
-DESCR struct SlowAioSubmit {
-	int64_t submitDuration; // ns
-	int64_t truncateDuration; // ns
+struct SlowAioSubmit {
+	int64_t submitDuration;
+	int64_t truncateDuration;
 	int64_t numTruncates;
 	int64_t truncateBytes;
 	int64_t largestTruncate;
 };
+
+template <>
+struct Descriptor<SlowAioSubmit>
+  : DescribeType<SlowAioSubmit,
+                 "SlowAioSubmit",
+                 DescribeField<&SlowAioSubmit::submitDuration, "submitDuration", "ns">,
+                 DescribeField<&SlowAioSubmit::truncateDuration, "truncateDuration", "ns">,
+                 DescribeField<&SlowAioSubmit::numTruncates, "numTruncates">,
+                 DescribeField<&SlowAioSubmit::truncateBytes, "truncateBytes">,
+                 DescribeField<&SlowAioSubmit::largestTruncate, "largestTruncate">> {};
 
 class AsyncFileKAIO final : public IAsyncFile, public ReferenceCounted<AsyncFileKAIO> {
 public:

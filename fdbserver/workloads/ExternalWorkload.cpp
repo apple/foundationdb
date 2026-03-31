@@ -22,7 +22,7 @@
 #include "flow/Platform.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "foundationdb/CppWorkload.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 
 extern void flushTraceFileVoid();
 

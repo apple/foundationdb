@@ -1,5 +1,5 @@
 /*
- * EventTypes.actor.h
+ * EventTypes.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,23 +20,16 @@
 
 #pragma once
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
-#if defined(NO_INTELLISENSE) && !defined(FLOW_EVENTTYPES_ACTOR_G_H)
-#define FLOW_EVENTTYPES_ACTOR_G_H
-#include "flow/EventTypes.actor.g.h"
-#elif !defined(FLOW_EVENTTYPES_ACTOR_H)
-#define FLOW_EVENTTYPES_ACTOR_H
-
 #include "flow/flow.h"
 #include "flow/TDMetric.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
-DESCR struct TraceEventNameID {
+struct TraceEventNameIDDescriptor {
 	Standalone<StringRef> name;
 	Standalone<StringRef> id;
 };
 
-#include "flow/unactorcompiler.h"
-
-#endif
+template <>
+struct Descriptor<TraceEventNameIDDescriptor> : DescribeType<TraceEventNameIDDescriptor,
+                                                             "TraceEventNameID",
+                                                             DescribeField<&TraceEventNameIDDescriptor::name, "name">,
+                                                             DescribeField<&TraceEventNameIDDescriptor::id, "id">> {};

@@ -26,7 +26,7 @@
 #include "fdbrpc/FlowGrpcTests.h"
 #include "fdbrpc/FileTransfer.h"
 #include "flow/UnitTest.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 #include "flow/flow.h"
 
 // So that tests are not optimized out. :/

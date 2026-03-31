@@ -1,5 +1,5 @@
 /*
- * Ratekeeper.actor.h
+ * EventTypes.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,19 +20,15 @@
 
 #pragma once
 
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RATEKEEPER_ACTOR_G_H)
-#define FDBSERVER_RATEKEEPER_ACTOR_G_H
-#include "fdbserver/ratekeeper/Ratekeeper.actor.g.h"
-#elif !defined(FDBSERVER_RATEKEEPER_ACTOR_H)
-#define FDBSERVER_RATEKEEPER_ACTOR_H
-
-#include "fdbserver/core/RatekeeperInterface.h"
 #include "flow/flow.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/TDMetric.actor.h"
 
-struct ServerDBInfo;
+struct GetValueCompleteDescriptor {
+	int64_t latency;
+};
 
-Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo> const> db);
-
-#include "flow/unactorcompiler.h"
-#endif
+template <>
+struct Descriptor<GetValueCompleteDescriptor>
+  : DescribeType<GetValueCompleteDescriptor,
+                 "GetValueComplete",
+                 DescribeField<&GetValueCompleteDescriptor::latency, "latency", "ns">> {};

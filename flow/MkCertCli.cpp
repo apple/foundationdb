@@ -31,7 +31,7 @@
 #include "flow/Platform.h"
 #include "flow/ScopeExit.h"
 #include "SimpleOpt/SimpleOpt.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 #include "flow/Trace.h"
 
 enum EMkCertOpt : int {

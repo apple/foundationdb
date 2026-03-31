@@ -334,15 +334,15 @@ struct DirectoryRemoveIfExistsFunc : InstructionFunc {
 		if (count.getInt(0) == 0) {
 			logOp(format("remove_if_exists %s", pathToString(directory->getPath()).c_str()));
 
-			co_await success(executeMutation(
-			    instruction, [instruction, directory]() { return directory->removeIfExists(instruction->tr); }));
+			co_await executeMutation(instruction,
+			                         [instruction, directory]() { return directory->removeIfExists(instruction->tr); });
 		} else {
 			IDirectory::Path path = co_await popPath(data);
 			logOp(format("remove_if_exists %s", pathToString(combinePaths(directory->getPath(), path)).c_str()));
 
-			co_await success(executeMutation(instruction, [instruction, directory, path]() {
+			co_await executeMutation(instruction, [instruction, directory, path]() {
 				return directory->removeIfExists(instruction->tr, path);
-			}));
+			});
 		}
 	}
 };

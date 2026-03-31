@@ -40,7 +40,7 @@
 #include "fdbrpc/LoadBalance.h"
 #include "fdbserver/core/AccumulativeChecksumUtil.h"
 #include "fdbserver/core/BulkDumpUtil.h"
-#include "fdbserver/core/BulkLoadUtil.actor.h"
+#include "fdbserver/core/BulkLoadUtil.h"
 #include "fdbserver/core/FDBRocksDBVersion.h"
 #include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"

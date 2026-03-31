@@ -23,7 +23,7 @@
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 
 struct LowLatencyWorkload : TestWorkload {
 	static constexpr auto NAME = "LowLatency";

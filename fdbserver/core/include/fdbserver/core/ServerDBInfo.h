@@ -22,6 +22,104 @@
 #define FDBSERVER_CORE_SERVERDBINFO_H
 #pragma once
 
-#include "fdbserver/core/ServerDBInfo.actor.h"
+#include "fdbclient/ConsistencyScanInterface.actor.h"
+#include "fdbserver/core/DataDistributorInterface.h"
+#include "fdbserver/core/LatencyBandConfig.h"
+#include "fdbserver/core/LogSystemConfig.h"
+#include "fdbserver/core/MasterInterface.h"
+#include "fdbserver/core/RatekeeperInterface.h"
+#include "fdbserver/core/RecoveryState.h"
+#include "fdbserver/core/WorkerInterface.actor.h"
+
+struct ServerDBInfo {
+	constexpr static FileIdentifier file_identifier = 13838807;
+	// This structure contains transient information which is broadcast to all workers for a database,
+	// permitting them to communicate with each other.  It is not available to the client.  This mechanism
+	// (see GetServerDBInfoRequest) is closely parallel to OpenDatabaseRequest for the client.
+
+	UID id; // Changes each time any other member changes
+	ClusterControllerFullInterface clusterInterface;
+	ClientDBInfo client; // After a successful recovery, eventually proxies that communicate with it
+	Optional<DataDistributorInterface> distributor; // The best guess of current data distributor.
+	MasterInterface master; // The best guess as to the most recent master, which might still be recovering
+	Optional<RatekeeperInterface> ratekeeper;
+	Optional<ConsistencyScanInterface> consistencyScan;
+	std::vector<ResolverInterface> resolvers;
+	DBRecoveryCount
+	    recoveryCount; // A recovery count from DBCoreState.  A successful cluster recovery increments it twice;
+	                   // unsuccessful recoveries may increment it once. Depending on where the current master is in its
+	                   // recovery process, this might not have been written by the current master.
+	RecoveryState recoveryState;
+	LifetimeToken masterLifetime; // Used by masterserver to detect not being the currently chosen master
+	LocalityData myLocality; // (Not serialized) Locality information, if available, for the *local* process
+	LogSystemConfig logSystemConfig;
+	std::vector<UID> priorCommittedLogServers; // If !fullyRecovered and logSystemConfig refers to a new log system
+	                                           // which may not have been committed to the coordinated state yet, then
+	                                           // priorCommittedLogServers are the previous, fully committed generation
+	                                           // which need to stay alive in case this recovery fails
+	Optional<LatencyBandConfig> latencyBandConfig;
+	int64_t infoGeneration;
+
+	ServerDBInfo()
+	  : recoveryCount(0), recoveryState(RecoveryState::UNINITIALIZED), logSystemConfig(0), infoGeneration(0) {}
+
+	bool operator==(ServerDBInfo const& r) const { return id == r.id; }
+	bool operator!=(ServerDBInfo const& r) const { return id != r.id; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar,
+		           id,
+		           clusterInterface,
+		           client,
+		           distributor,
+		           master,
+		           ratekeeper,
+		           consistencyScan,
+		           resolvers,
+		           recoveryCount,
+		           recoveryState,
+		           masterLifetime,
+		           logSystemConfig,
+		           priorCommittedLogServers,
+		           latencyBandConfig,
+		           infoGeneration);
+	}
+};
+using AsyncVar_ServerDBInfo = AsyncVar<ServerDBInfo>;
+
+struct UpdateServerDBInfoRequest {
+	constexpr static FileIdentifier file_identifier = 9467438;
+	Standalone<StringRef> serializedDbInfo;
+	std::vector<Endpoint> broadcastInfo;
+	ReplyPromise<std::vector<Endpoint>> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, serializedDbInfo, broadcastInfo, reply);
+	}
+};
+
+struct GetServerDBInfoRequest {
+	constexpr static FileIdentifier file_identifier = 9467439;
+	UID knownServerInfoID;
+	ReplyPromise<struct ServerDBInfo> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, knownServerInfoID, reply);
+	}
+};
+
+// Instantiated in worker.actor.cpp
+extern template class RequestStream<GetServerDBInfoRequest, false>;
+extern template struct NetNotifiedQueue<GetServerDBInfoRequest, false>;
+
+Future<Void> broadcastTxnRequest(TxnStateRequest req, int sendAmount, bool sendReply);
+
+Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoRequest req,
+                                                     int sendAmount,
+                                                     Optional<Endpoint> sender,
+                                                     bool sendReply);
 
 #endif

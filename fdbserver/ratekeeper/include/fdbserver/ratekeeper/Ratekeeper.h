@@ -1,5 +1,5 @@
 /*
- * unactorcompiler.h
+ * Ratekeeper.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,20 +18,16 @@
  * limitations under the License.
  */
 
-#ifndef POST_ACTOR_COMPILER
+#ifndef FDBSERVER_RATEKEEPER_PUBLIC_H
+#define FDBSERVER_RATEKEEPER_PUBLIC_H
 
-#ifndef NO_INTELLISENSE
-#undef ACTOR
-#undef SWIFT_ACTOR
-#undef state
-#undef UNCANCELLABLE
-#undef choose
-#undef when
-#endif
+#pragma once
 
-#undef THIS
-#undef THIS_ADDR
+#include "fdbserver/core/RatekeeperInterface.h"
+#include "flow/flow.h"
+
+struct ServerDBInfo;
+
+Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo> const> db);
 
 #endif
-
-// loop is still defined

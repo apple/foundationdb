@@ -1,5 +1,5 @@
 /*
- * ReadWriteWorkload.actor.h
+ * ReadWriteWorkload.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,32 +19,49 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_READWRITEWORKLOAD_ACTOR_G_H)
-#define FDBSERVER_READWRITEWORKLOAD_ACTOR_G_H
-#include "ReadWriteWorkload.actor.g.h"
-#elif !defined(FDBSERVER_READWRITEWORKLOAD_ACTOR_H)
-#define FDBSERVER_READWRITEWORKLOAD_ACTOR_H
 
 #include "fdbrpc/DDSketch.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "flow/TDMetric.actor.h"
 #include <boost/lexical_cast.hpp>
-#include "flow/actorcompiler.h" // This must be the last #include.
-DESCR struct TransactionSuccessMetric {
-	int64_t totalLatency; // ns
-	int64_t startLatency; // ns
-	int64_t commitLatency; // ns
-	int64_t retries; // count
+
+struct TransactionSuccessMetricDescriptor {
+	int64_t totalLatency;
+	int64_t startLatency;
+	int64_t commitLatency;
+	int64_t retries;
 };
 
-DESCR struct TransactionFailureMetric {
-	int64_t startLatency; // ns
-	int64_t errorCode; // flow error code
+template <>
+struct Descriptor<TransactionSuccessMetricDescriptor>
+  : DescribeType<TransactionSuccessMetricDescriptor,
+                 "TransactionSuccessMetric",
+                 DescribeField<&TransactionSuccessMetricDescriptor::totalLatency, "totalLatency", "ns">,
+                 DescribeField<&TransactionSuccessMetricDescriptor::startLatency, "startLatency", "ns">,
+                 DescribeField<&TransactionSuccessMetricDescriptor::commitLatency, "commitLatency", "ns">,
+                 DescribeField<&TransactionSuccessMetricDescriptor::retries, "retries", "count">> {};
+
+struct TransactionFailureMetricDescriptor {
+	int64_t startLatency;
+	int64_t errorCode;
 };
 
-DESCR struct ReadMetric {
-	int64_t readLatency; // ns
+template <>
+struct Descriptor<TransactionFailureMetricDescriptor>
+  : DescribeType<TransactionFailureMetricDescriptor,
+                 "TransactionFailureMetric",
+                 DescribeField<&TransactionFailureMetricDescriptor::startLatency, "startLatency", "ns">,
+                 DescribeField<&TransactionFailureMetricDescriptor::errorCode, "errorCode", "flow error code">> {};
+
+struct ReadMetricDescriptor {
+	int64_t readLatency;
 };
+
+template <>
+struct Descriptor<ReadMetricDescriptor>
+  : DescribeType<ReadMetricDescriptor,
+                 "ReadMetric",
+                 DescribeField<&ReadMetricDescriptor::readLatency, "readLatency", "ns">> {};
 
 // Common ReadWrite test settings
 struct ReadWriteCommon : KVWorkload {
@@ -72,9 +89,9 @@ struct ReadWriteCommon : KVWorkload {
 	// states of metric
 	Int64MetricHandle totalReadsMetric;
 	Int64MetricHandle totalRetriesMetric;
-	EventMetricHandle<TransactionSuccessMetric> transactionSuccessMetric;
-	EventMetricHandle<TransactionFailureMetric> transactionFailureMetric;
-	EventMetricHandle<ReadMetric> readMetric;
+	EventMetricHandle<TransactionSuccessMetricDescriptor> transactionSuccessMetric;
+	EventMetricHandle<TransactionFailureMetricDescriptor> transactionFailureMetric;
+	EventMetricHandle<ReadMetricDescriptor> readMetric;
 	PerfIntCounter aTransactions, bTransactions, retries;
 	DDSketch<double> latencies, readLatencies, commitLatencies, GRVLatencies, fullReadLatencies;
 	double readLatencyTotal;
@@ -164,6 +181,3 @@ struct ReadWriteCommon : KVWorkload {
 	Standalone<KeyValueRef> operator()(uint64_t n);
 	bool shouldRecord(double checkTime = now());
 };
-
-#include "flow/unactorcompiler.h"
-#endif // FDBSERVER_READWRITEWORKLOAD_ACTOR_H
