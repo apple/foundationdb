@@ -14,4 +14,5 @@ target_link_libraries(fdbserver_workloads PRIVATE
   fdbserver_datadistributor
   fdbserver_restoreworker
   fdbserver_resolver
+  fdbserver_storageserver
   fdbserver_mocks3)
