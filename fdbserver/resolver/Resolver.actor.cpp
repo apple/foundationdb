@@ -807,21 +807,18 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
 	}
 }
 
-ACTOR Future<Void> resolver(ResolverInterface resolver,
-                            InitializeResolverRequest initReq,
-                            Reference<AsyncVar<ServerDBInfo> const> db) {
+Future<Void> resolver(ResolverInterface resolver,
+                      InitializeResolverRequest initReq,
+                      Reference<AsyncVar<ServerDBInfo> const> db) {
 	try {
-		state Future<Void> core = resolverCore(resolver, initReq, db);
-		loop choose {
-			when(wait(core)) {
-				return Void();
-			}
-			when(wait(checkRemoved(db, initReq.recoveryCount, resolver))) {}
+		Future<Void> core = resolverCore(resolver, initReq, db);
+		while (true) {
+			co_await waitOrError(checkRemoved(db, initReq.recoveryCount, resolver), core);
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled || e.code() == error_code_worker_removed) {
 			TraceEvent("ResolverTerminated", resolver.id()).errorUnsuppressed(e);
-			return Void();
+			co_return;
 		}
 		throw;
 	}

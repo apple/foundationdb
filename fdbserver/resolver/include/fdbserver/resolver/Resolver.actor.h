@@ -32,9 +32,9 @@
 struct InitializeResolverRequest;
 struct ServerDBInfo;
 
-ACTOR Future<Void> resolver(ResolverInterface resolver,
-                            InitializeResolverRequest initReq,
-                            Reference<AsyncVar<ServerDBInfo> const> db);
+Future<Void> resolver(ResolverInterface resolver,
+                      InitializeResolverRequest initReq,
+                      Reference<AsyncVar<ServerDBInfo> const> db);
 
 #include "flow/unactorcompiler.h"
 #endif
