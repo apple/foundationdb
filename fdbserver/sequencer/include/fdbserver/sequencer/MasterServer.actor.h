@@ -33,12 +33,12 @@
 struct ClusterControllerFullInterface;
 struct ServerDBInfo;
 
-ACTOR Future<Void> masterServer(MasterInterface mi,
-                                Reference<AsyncVar<ServerDBInfo> const> db,
-                                Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
-                                ServerCoordinators serverCoordinators,
-                                LifetimeToken lifetime,
-                                bool forceRecovery);
+Future<Void> masterServer(MasterInterface mi,
+                          Reference<AsyncVar<ServerDBInfo> const> db,
+                          Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
+                          ServerCoordinators serverCoordinators,
+                          LifetimeToken lifetime,
+                          bool forceRecovery);
 
 #include "flow/unactorcompiler.h"
 #endif
