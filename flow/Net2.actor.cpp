@@ -110,12 +110,21 @@ void initProfiling() {
 }
 #endif
 
-DESCR struct SlowTask {
-	int64_t clocks; // clocks
-	int64_t duration; // ns
-	int64_t priority; // priority level
-	int64_t numYields; // count
+struct SlowTaskDescriptor {
+	int64_t clocks;
+	int64_t duration;
+	int64_t priority;
+	int64_t numYields;
 };
+
+template <>
+struct Descriptor<SlowTaskDescriptor>
+  : DescribeType<SlowTaskDescriptor,
+                 "SlowTask",
+                 DescribeField<&SlowTaskDescriptor::clocks, "clocks", "clocks">,
+                 DescribeField<&SlowTaskDescriptor::duration, "duration", "ns">,
+                 DescribeField<&SlowTaskDescriptor::priority, "priority", "priority level">,
+                 DescribeField<&SlowTaskDescriptor::numYields, "numYields", "count">> {};
 
 namespace N2 { // No indent, it's the whole file
 
@@ -325,7 +334,7 @@ public:
 	DoubleMetricHandle countReactTime;
 	BoolMetricHandle awakeMetric;
 
-	EventMetricHandle<SlowTask> slowTaskMetric;
+	EventMetricHandle<SlowTaskDescriptor> slowTaskMetric;
 
 	std::vector<std::string> blobCredentialFiles;
 	Optional<std::string> proxy;

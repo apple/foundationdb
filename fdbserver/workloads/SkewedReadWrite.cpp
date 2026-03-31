@@ -28,7 +28,7 @@
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/tester/workloads.actor.h"
 #include "BulkSetup.h"
-#include "ReadWriteWorkload.actor.h"
+#include "ReadWriteWorkload.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/RunRYWTransaction.h"
