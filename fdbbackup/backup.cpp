@@ -4229,6 +4229,10 @@ int main(int argc, char* argv[]) {
 			return result.present();
 		};
 
+		if (!restoreSystemKeys && !restoreUserKeys && backupKeys.empty()) {
+			addDefaultBackupRanges(backupKeys);
+		}
+
 		if ((restoreUserKeys || restoreSystemKeys) && !backupKeys.empty()) {
 			fprintf(stderr,
 			        "ERROR: Cannot specify additional ranges when using --user-data or --system-metadata "
