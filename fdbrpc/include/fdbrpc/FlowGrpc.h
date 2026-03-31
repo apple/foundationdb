@@ -26,7 +26,7 @@
 
 #include "flow/flow.h"
 #include "flow/NetworkAddress.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 #include "fdbrpc/grpc/AsyncGrpcClient.h"
 #include "fdbrpc/grpc/AsyncTaskExecutor.h"
 #include "fdbrpc/grpc/Credentials.h"

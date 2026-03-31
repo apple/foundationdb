@@ -23,7 +23,7 @@
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/Tuple.h"
 #include "ApiWorkload.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "fdbserver/core/Knobs.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"

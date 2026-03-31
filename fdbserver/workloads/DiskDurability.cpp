@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "flow/ActorCollection.h"
 #include "flow/SystemMonitor.h"
 #include "flow/IAsyncFile.h"

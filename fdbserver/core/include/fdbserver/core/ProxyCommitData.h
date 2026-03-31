@@ -1,5 +1,5 @@
 /*
- * ProxyCommitData.actor.h
+ * ProxyCommitData.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,11 +19,6 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CORE_PROXYCOMMITDATA_ACTOR_G_H)
-#define FDBSERVER_CORE_PROXYCOMMITDATA_ACTOR_G_H
-#include "fdbserver/core/ProxyCommitData.actor.g.h"
-#elif !defined(FDBSERVER_CORE_PROXYCOMMITDATA_ACTOR_H)
-#define FDBSERVER_CORE_PROXYCOMMITDATA_ACTOR_H
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/RangeLock.h"
@@ -34,15 +29,24 @@
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/ResolverInterface.h"
 #include "flow/IRandom.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
-DESCR struct SingleKeyMutation {
+struct SingleKeyMutationDescriptor {
 	Standalone<StringRef> shardBegin;
 	Standalone<StringRef> shardEnd;
 	int64_t tag1;
 	int64_t tag2;
 	int64_t tag3;
 };
+
+template <>
+struct Descriptor<SingleKeyMutationDescriptor>
+  : DescribeType<SingleKeyMutationDescriptor,
+                 "SingleKeyMutation",
+                 DescribeField<&SingleKeyMutationDescriptor::shardBegin, "shardBegin">,
+                 DescribeField<&SingleKeyMutationDescriptor::shardEnd, "shardEnd">,
+                 DescribeField<&SingleKeyMutationDescriptor::tag1, "tag1">,
+                 DescribeField<&SingleKeyMutationDescriptor::tag2, "tag2">,
+                 DescribeField<&SingleKeyMutationDescriptor::tag3, "tag3">> {};
 
 class LogSystemDiskQueueAdapter;
 
@@ -220,7 +224,7 @@ struct ProxyCommitData {
 	PublicRequestStream<CommitTransactionRequest> commit;
 	Database cx;
 	Reference<AsyncVar<ServerDBInfo> const> db;
-	EventMetricHandle<SingleKeyMutation> singleKeyMutationEvent;
+	EventMetricHandle<SingleKeyMutationDescriptor> singleKeyMutationEvent;
 
 	std::map<UID, Reference<StorageInfo>> storageCache;
 	std::unordered_map<UID, StorageServerInterface> tssMapping;
@@ -405,6 +409,3 @@ private:
 	KeyRangeMap<RangeLockStateSet> coreMap;
 	ProxyCommitData* const pProxyCommitData;
 };
-
-#include "flow/unactorcompiler.h"
-#endif // FDBSERVER_COMMITPROXY_PROXYCOMMITDATA_ACTOR_H

@@ -851,12 +851,21 @@ When a function is converted from `ACTOR` to a coroutine, any forward declaratio
 If you also write `const&` explicitly, the generated code will contain `const& const&`, which is a compile error.
 
 ```c++
-// workloads.actor.h — WRONG: ACTOR + const& = double const&
+// workloads.h — WRONG: ACTOR + const& = double const&
 ACTOR Future<Void> foo(Database const& cx);
 
-// workloads.actor.h — CORRECT: remove ACTOR since foo() is now a coroutine
+// workloads.h — CORRECT: remove ACTOR since foo() is now a coroutine
 Future<Void> foo(Database const& cx);
 ```
+
+### `DESCR` Deprecation
+
+The older TDMetric `DESCR` shorthand is deprecated. When a coroutine conversion touches metric event types, do not add
+new `DESCR(...)`-style declarations. Instead, define an explicit payload type with a
+`...Descriptor` suffix and specialize `Descriptor<T>` with `DescribeType<...>` and `DescribeField<...>` next to it.
+
+This keeps descriptor types unambiguous in coroutine-converted code and matches the old TDMetric pattern in files
+such as `flow/EventTypes.h`, `fdbclient/EventTypes.h`, and the workload metric definitions.
 
 ### File Naming
 

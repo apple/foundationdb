@@ -28,7 +28,7 @@
 #include "fmt/format.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/SystemMonitor.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 
 using namespace FDB;
 

@@ -20,7 +20,7 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 
