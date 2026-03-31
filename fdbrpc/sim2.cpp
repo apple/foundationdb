@@ -302,7 +302,7 @@ SimClogging g_clogging;
 struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 	explicit Sim2Conn(ISimulator::ProcessInfo* process)
 	  : opened(false), closedByCaller(false), stableConnection(false), trustedPeer(true), process(process),
-	    dbgid(deterministicRandom()->randomUniqueID()), stopReceive(Never()) {
+	    dbgid(deterministicRandom()->randomUniqueID()), stopReceive(Never()), incomingClosed(false) {
 		pipes = sender(this) && receiver(this);
 	}
 
@@ -378,6 +378,9 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 		rollRandomClose();
 
 		int64_t avail = receivedBytes.get() - readBytes.get(); // SOMEDAY: random?
+		if (avail == 0 && incomingClosed.get()) {
+			throw connection_failed();
+		}
 		int toRead = std::min<int64_t>(end - begin, avail);
 		ASSERT(toRead >= 0 && toRead <= recvBuf.size() && toRead <= end - begin);
 		for (int i = 0; i < toRead; i++)
@@ -450,6 +453,8 @@ private:
 
 	Future<Void> pipes;
 	Future<Void> stopReceive;
+	// Becomes true after the peer has closed and no more bytes can be delivered to recvBuf.
+	AsyncVar<bool> incomingClosed;
 
 	int availableSendBufferForPeer() const {
 		return sendBufSize - (writtenBytes.get() - receivedBytes.get());
@@ -476,8 +481,24 @@ private:
 		loop {
 			if (self->sentBytes.get() != self->receivedBytes.get())
 				co_await g_simulator->onProcess(self->peerProcess);
-			while (self->sentBytes.get() == self->receivedBytes.get())
-				co_await self->sentBytes.onChange();
+			while (self->sentBytes.get() == self->receivedBytes.get()) {
+				if (self->stopReceive.isReady()) {
+					// stopReceive can become ready on the peer-closing process, but incomingClosed must notify readers
+					// on the owning receiver process.
+					co_await g_simulator->onProcess(self->process);
+					if (self->stopReceive.isReady() && self->sentBytes.get() == self->receivedBytes.get()) {
+						self->incomingClosed.set(true);
+						co_return;
+					}
+					co_await g_simulator->onProcess(self->peerProcess);
+					continue;
+				}
+				co_await (self->sentBytes.onChange() || self->stopReceive);
+				if (g_simulator->getCurrentProcess() != self->peerProcess) {
+					// sentBytes notifications arrive on peerProcess, but stopReceive can resume us on the closer.
+					co_await g_simulator->onProcess(self->peerProcess);
+				}
+			}
 			ASSERT(g_simulator->getCurrentProcess() == self->peerProcess);
 
 			// Simulated network disconnection. Make sure to only throw connection_failed() on the sender process.
@@ -500,10 +521,13 @@ private:
 			co_await delay(g_clogging.getRecvDelay(
 			    self->peerProcess->address, self->process->address, self->isStableConnection()));
 			ASSERT(g_simulator->getCurrentProcess() == self->process);
-			if (self->stopReceive.isReady()) {
-				co_await Future<Void>(Never());
-			}
 			self->receivedBytes.set(pos);
+			// A peer close only prevents future bytes from arriving. If stopReceive becomes ready after sentBytes moved
+			// forward, keep the connection readable until we've delivered through sentBytes.
+			if (self->stopReceive.isReady() && self->receivedBytes.get() == self->sentBytes.get()) {
+				self->incomingClosed.set(true);
+				co_return;
+			}
 			co_await Future<Void>(Void()); // Prior notification can delete self and cancel this actor
 			ASSERT(g_simulator->getCurrentProcess() == self->process);
 		}
@@ -515,7 +539,10 @@ private:
 					ASSERT(g_simulator->getCurrentProcess() == self->process);
 					co_return;
 				}
-				co_await self->receivedBytes.onChange();
+				if (self->incomingClosed.get()) {
+					throw connection_failed();
+				}
+				co_await (self->receivedBytes.onChange() || self->incomingClosed.onChange());
 				self->rollRandomClose();
 			}
 		} catch (Error& e) {
