@@ -26,7 +26,7 @@
 #include "fdbserver/core/CoordinationInterface.h" // copy constructors for ServerCoordinators class
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MasterInterface.h"
-#include "fdbserver/sequencer/MasterServer.actor.h"
+#include "fdbserver/sequencer/MasterServer.h"
 #include "ResolutionBalancer.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "flow/ActorCollection.h"

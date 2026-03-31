@@ -1,5 +1,5 @@
 /*
- * Resolver.actor.h
+ * Resolver.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,15 +19,9 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESOLVER_ACTOR_G_H)
-#define FDBSERVER_RESOLVER_ACTOR_G_H
-#include "fdbserver/resolver/Resolver.actor.g.h"
-#elif !defined(FDBSERVER_RESOLVER_ACTOR_H)
-#define FDBSERVER_RESOLVER_ACTOR_H
 
 #include "fdbserver/core/ResolverInterface.h"
 #include "flow/flow.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct InitializeResolverRequest;
 struct ServerDBInfo;
@@ -35,6 +29,3 @@ struct ServerDBInfo;
 Future<Void> resolver(ResolverInterface resolver,
                       InitializeResolverRequest initReq,
                       Reference<AsyncVar<ServerDBInfo> const> db);
-
-#include "flow/unactorcompiler.h"
-#endif
