@@ -25,7 +25,7 @@
 
 #include "benchmark/benchmark.h"
 #include "flow/Platform.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/network.h"
 
