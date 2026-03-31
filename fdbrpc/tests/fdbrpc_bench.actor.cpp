@@ -110,33 +110,71 @@ private:
 	std::vector<std::pair<int64_t, int>> vals;
 };
 
-ACTOR Future<Void> echoServer() {
-	state EchoServerInterface echoServer;
-	state StatCounter c;
-	echoServer.getInterface.makeWellKnownEndpoint(WLTOKEN_ECHO_SERVER, TaskPriority::DefaultEndpoint);
-	state Future<Void> next = delay(10);
-	loop {
-		try {
-			choose {
-				when(GetInterfaceRequest req = waitNext(echoServer.getInterface.getFuture())) {
-					req.reply.send(echoServer);
-				}
-				when(EchoRequest req = waitNext(echoServer.echo.getFuture())) {
-					req.reply.send(req.message);
-					c.inc();
-				}
-				when(wait(next)) {
-					next = delay(10);
-					std::cout << "Throughput: " << c.avg() << " req/sec" << std::endl;
-				}
-			}
-		} catch (Error& e) {
-			if (e.code() != error_code_operation_obsolete) {
-				fprintf(stderr, "Error: %s\n", e.what());
-				throw e;
+class EchoServer {
+	static void rethrowUnexpectedError(const Error& e) {
+		if (e.code() != error_code_operation_obsolete) {
+			fprintf(stderr, "Error: %s\n", e.what());
+			throw e;
+		}
+	}
+
+	ACTOR static Future<Void> serveGetInterfaceReqs(EchoServer* self) {
+		loop {
+			try {
+				GetInterfaceRequest req = waitNext(self->interf.getInterface.getFuture());
+				req.reply.send(self->interf);
+			} catch (Error& e) {
+				rethrowUnexpectedError(e);
 			}
 		}
 	}
+
+	ACTOR static Future<Void> serveEchoReqs(EchoServer* self) {
+		loop {
+			try {
+				EchoRequest req = waitNext(self->interf.echo.getFuture());
+				req.reply.send(req.message);
+				self->counter.inc();
+			} catch (Error& e) {
+				rethrowUnexpectedError(e);
+			}
+		}
+	}
+
+	ACTOR static Future<Void> printThroughput(EchoServer* self) {
+		loop {
+			try {
+				wait(delay(10));
+				std::cout << "Throughput: " << self->counter.avg() << " req/sec" << std::endl;
+			} catch (Error& e) {
+				rethrowUnexpectedError(e);
+			}
+		}
+	}
+
+	ACTOR static Future<Void> run(EchoServer* self) {
+		state std::vector<Future<Void>> tasks;
+		tasks.reserve(3);
+		tasks.push_back(serveGetInterfaceReqs(self));
+		tasks.push_back(serveEchoReqs(self));
+		tasks.push_back(printThroughput(self));
+		wait(waitForAny(tasks));
+		return Void();
+	}
+
+	EchoServerInterface interf;
+	StatCounter counter;
+
+public:
+	EchoServer() { interf.getInterface.makeWellKnownEndpoint(WLTOKEN_ECHO_SERVER, TaskPriority::DefaultEndpoint); }
+
+	Future<Void> run() { return EchoServer::run(this); }
+};
+
+ACTOR Future<Void> echoServer() {
+	state EchoServer server;
+	wait(server.run());
+	return Void();
 }
 
 int payload_size_bytes = 1024 * 10;
