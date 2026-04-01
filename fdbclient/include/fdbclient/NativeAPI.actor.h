@@ -543,9 +543,7 @@ Future<Void> Database::run(Fun fun) {
 }
 
 ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, SpanContext spanContext);
-ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx,
-                                                                                  KeyRange keys,
-                                                                                  int shardLimit);
+Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx, KeyRange keys, int shardLimit);
 
 int64_t extractIntOption(Optional<StringRef> value,
                          int64_t minValue = std::numeric_limits<int64_t>::min(),
@@ -553,7 +551,7 @@ int64_t extractIntOption(Optional<StringRef> value,
 
 // Takes a snapshot of the cluster, specifically the following persistent
 // states: coordinator, TLog and storage state
-ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
+Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
 
 // Adds necessary mutation(s) to the transaction, so that *one* checkpoint will be created for
 // each and every shards overlapping with `ranges`.

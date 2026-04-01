@@ -5950,12 +5950,12 @@ Future<StorageMetrics> DatabaseContext::getStorageMetrics(KeyRange const& keys,
 	}
 }
 
-ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx,
-                                                                                  KeyRange keys,
-                                                                                  int shardLimit) {
-	GetDDMetricsReply rep = wait(proxyLoadBalance(
-	    cx, makeReqBuilder<GetDDMetricsRequest>(keys, shardLimit), &CommitProxyInterface::getDDMetrics));
-	return rep.storageMetricsList;
+Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx,
+                                                                            KeyRange keys,
+                                                                            int shardLimit) {
+	GetDDMetricsReply rep = co_await proxyLoadBalance(
+	    cx, makeReqBuilder<GetDDMetricsRequest>(keys, shardLimit), &CommitProxyInterface::getDDMetrics);
+	co_return rep.storageMetricsList;
 }
 
 Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> DatabaseContext::getReadHotRanges(KeyRange const& keys) {
@@ -6322,15 +6322,14 @@ void enableClientInfoLogging() {
 	TraceEvent(SevInfo, "ClientInfoLoggingEnabled").log();
 }
 
-ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID) {
+Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID) {
 	TraceEvent("SnapCreateEnter").detail("SnapCmd", snapCmd).detail("UID", snapUID);
 	try {
-		wait(proxyLoadBalance(cx,
-		                      makeReqBuilder<ProxySnapRequest>(snapCmd, snapUID, snapUID),
-		                      &CommitProxyInterface::proxySnapReq,
-		                      AtMostOnce::True));
+		co_await proxyLoadBalance(cx,
+		                          makeReqBuilder<ProxySnapRequest>(snapCmd, snapUID, snapUID),
+		                          &CommitProxyInterface::proxySnapReq,
+		                          AtMostOnce::True);
 		TraceEvent("SnapCreateExit").detail("SnapCmd", snapCmd).detail("UID", snapUID);
-		return Void();
 	} catch (Error& e) {
 		TraceEvent("SnapCreateError").error(e).detail("SnapCmd", snapCmd.toString()).detail("UID", snapUID);
 		throw;
