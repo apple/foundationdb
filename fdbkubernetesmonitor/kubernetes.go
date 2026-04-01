@@ -28,6 +28,7 @@ import (
 	"strconv"
 	"time"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/util/retry"
 
 	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
@@ -64,9 +65,6 @@ type kubernetesClient struct {
 
 	// Adds the controller runtime client to the kubernetesClient.
 	client.Client
-
-	// patchType defines the patch type that should be used for patching the pod metadata.
-	patchType client.Patch
 }
 
 func setupCache(namespace string, podName string, nodeName string) (client.WithWatch, cache.Cache, error) {
@@ -131,7 +129,6 @@ func createPodClient(ctx context.Context, logger logr.Logger, enableNodeWatcher 
 		nodeMetadata:  nil,
 		TimestampFeed: make(chan int64, 10),
 		Logger:        logger,
-		patchType:     client.Apply,
 		Client:        internalClient,
 	}
 
@@ -285,7 +282,7 @@ func (podClient *kubernetesClient) updateAnnotationsOnPod(annotationChanges map[
 			return nil
 		}
 
-		return podClient.Patch(context.Background(), &corev1.Pod{
+		unstructuredPod, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&corev1.Pod{
 			TypeMeta: metav1.TypeMeta{
 				Kind:       "Pod",
 				APIVersion: "v1",
@@ -295,12 +292,21 @@ func (podClient *kubernetesClient) updateAnnotationsOnPod(annotationChanges map[
 				Name:        podClient.podMetadata.Name,
 				Annotations: currentAnnotations,
 			},
-		}, podClient.patchType, client.FieldOwner("fdb-kubernetes-monitor"), client.ForceOwnership)
+		})
+		if err != nil {
+			return err
+		}
+
+		return podClient.Apply(
+			context.Background(),
+			client.ApplyConfigurationFromUnstructured(&unstructured.Unstructured{Object: unstructuredPod}),
+			client.FieldOwner("fdb-kubernetes-monitor"),
+			client.ForceOwnership)
 	})
 }
 
 // OnAdd is called when an object is added.
-func (podClient *kubernetesClient) OnAdd(obj interface{}, isInInitialList bool) {
+func (podClient *kubernetesClient) OnAdd(obj interface{}, _ bool) {
 	switch castedObj := obj.(type) {
 	case *corev1.Pod:
 		podClient.Logger.Info("Got event for OnAdd for Pod resource", "name", castedObj.Name, "namespace", castedObj.Namespace)

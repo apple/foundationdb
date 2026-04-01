@@ -57,7 +57,6 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <limits.h>
@@ -1255,7 +1254,7 @@ static int eio__realpath(struct tmpbuf* tmpbuf, eio_wd wd, const char* path) {
 
     if (fd >= 0)
       {
-        sprintf (tmp1, "/proc/self/fd/%d", fd);
+        snprintf(tmp1, PATH_MAX, "/proc/self/fd/%d", fd);
         req->result = readlink (tmp1, res, PATH_MAX);
         close (fd);
 

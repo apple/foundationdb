@@ -661,7 +661,8 @@ public:
 	explicit LineageReference(ActorLineage* ptr) : Reference<ActorLineage>(ptr), actorName_(""), allocated_(false) {}
 	LineageReference(const LineageReference& r) : Reference<ActorLineage>(r), actorName_(""), allocated_(false) {}
 	LineageReference(LineageReference&& r)
-	  : Reference<ActorLineage>(std::forward<LineageReference>(r)), actorName_(r.actorName_), allocated_(r.allocated_) {
+	  : Reference<ActorLineage>(r.getPtr()), actorName_(r.actorName_), allocated_(r.allocated_) {
+		r.setPtrUnsafe(nullptr);
 		r.actorName_ = "";
 		r.allocated_ = false;
 	}
@@ -1480,15 +1481,30 @@ static inline void destruct(T& t) {
 	t.~T();
 }
 
+// These stay as int8_t constants rather than an enum class because actor_wait_state also stores generated callback
+// group numbers, so the code frequently mixes named sentinel states with arbitrary positive integer values.
+constexpr int8_t ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK = -2;
+constexpr int8_t ACTOR_WAIT_STATE_CANCELLED = -1;
+constexpr int8_t ACTOR_WAIT_STATE_NOT_WAITING = 0;
+constexpr int8_t ACTOR_WAIT_STATE_WAITING = 1;
+
+constexpr bool actorWaitStateIsCancelled(int8_t waitState) {
+	return waitState < ACTOR_WAIT_STATE_NOT_WAITING;
+}
+
+constexpr bool actorWaitStateIsWaiting(int8_t waitState) {
+	return waitState > ACTOR_WAIT_STATE_NOT_WAITING;
+}
+
 template <class ReturnValue>
 struct Actor : SAV<ReturnValue> {
 #ifdef ENABLE_SAMPLING
 	LineageReference lineage = *currentLineage;
 #endif
-	int8_t actor_wait_state; // -1 means actor is cancelled; 0 means actor is not waiting; 1-N mean waiting in callback
-	                         // group #
+	int8_t actor_wait_state; // Negative values mean cancellation, 0 means not waiting, positive values identify the
+	                         // waiting callback group.
 
-	Actor() : SAV<ReturnValue>(1, 1), actor_wait_state(0) { /*++actorCount;*/
+	Actor() : SAV<ReturnValue>(1, 1), actor_wait_state(ACTOR_WAIT_STATE_NOT_WAITING) { /*++actorCount;*/
 	}
 	// ~Actor() { --actorCount; }
 
@@ -1504,9 +1520,9 @@ struct Actor<void> {
 #ifdef ENABLE_SAMPLING
 	LineageReference lineage = *currentLineage;
 #endif
-	int8_t actor_wait_state; // 0 means actor is not waiting; 1-N mean waiting in callback group #
+	int8_t actor_wait_state; // 0 means not waiting, positive values identify the waiting callback group.
 
-	Actor() : actor_wait_state(0) { /*++actorCount;*/
+	Actor() : actor_wait_state(ACTOR_WAIT_STATE_NOT_WAITING) { /*++actorCount;*/
 	}
 	// ~Actor() { --actorCount; }
 

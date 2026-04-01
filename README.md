@@ -140,17 +140,18 @@ Building FoundationDB requires at least 8GB of memory. More memory is needed whe
 
 ### macOS
 
-The build under macOS will work the same way as on Linux. [Homebrew](https://brew.sh/) can be used to install the `boost` library and the `ninja` build tool.
+The build under macOS will work the same way as on Linux. [Homebrew](https://brew.sh/) can be used to install the `boost` library and the `ninja` build tool. Be carefull, curent main branch use boost 1.86, do install this version or just let cmake download one. Also, if swift binding is not interest, use -DBUILD_SWIFT_BINDING=OFF. One more thing, toml11project may block build process, mannualy change "cmake_minimum_required(VERSION 3.1)" to "cmake_minimum_required(VERSION 4.2)" in <BUILD_DIR>toml11Project-prefix/src/toml11Project/CMakeLists.txt and run again.
 
 ```sh
-cmake -G Ninja <FDB_SOURCE_DIR>
+cmake -G Ninja <FDB_SOURCE_DIR> -B <BUILD_DIR>
+cd <BUILD_DIR>
 ninja
 ```
 
 To generate an installable package,
 
 ```sh
-<FDB_SOURCE_DIR>/packaging/osx/buildpkg.sh . <FDB_SOURCE_DIR>
+<FDB_SOURCE_DIR>/packaging/osx/buildpkg.sh <BUILD_DIR> <FDB_SOURCE_DIR>
 ```
 
 ### Windows
@@ -184,6 +185,25 @@ CMake can build a compilation database for you. However, the default generated o
 CMake will not produce a `compile_commands.json` by default; you must pass `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`.  This also enables the target `processed_compile_commands`, which rewrites `compile_commands.json` to describe the actor compiler source file, not the post-processed output files, and places the output file in the source directory.  This file should then be picked up automatically by any tooling.
 
 Note that if the building is done inside the `foundationdb/build` Docker image, the resulting paths will still be incorrect and require manual fixing. One will wish to re-run `cmake` with `-DCMAKE_EXPORT_COMPILE_COMMANDS=OFF` to prevent it from reverting the manual changes.
+
+### Running `clang-tidy`
+
+FoundationDB's CMake build supports opt-in `clang-tidy` execution during C/C++ compilation via `-DUSE_CLANG_TIDY=ON`.
+
+Example:
+
+```sh
+cmake -S <FDB_SOURCE_DIR> -B build -G Ninja \
+  -DUSE_CLANG_TIDY=ON
+ninja -C build fdbserver
+```
+
+Optional CMake variables:
+
+* `CLANG_TIDY`: path to the `clang-tidy` executable (auto-detected by default)
+* `CLANG_TIDY_EXTRA_ARGS`: additional space-separated arguments passed to `clang-tidy`
+
+If you prefer running `clang-tidy` manually, configure with `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` and build the `processed_compile_commands` target. The generated source-tree `compile_commands.json` is Flow-aware and is usually the best compilation database to point `clang-tidy` at.
 
 ### Using IDEs
 

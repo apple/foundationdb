@@ -114,8 +114,6 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( DETAILED_HEALTH_METRICS_MAX_STALENESS,   5.0 );
 	init( MID_SHARD_SIZE_MAX_STALENESS,           10.0 );
 	init( TAG_ENCODE_KEY_SERVERS,                false ); if( randomize && BUGGIFY ) TAG_ENCODE_KEY_SERVERS = true;
-	init( RANGESTREAM_FRAGMENT_SIZE,               1e6 );
-	init( RANGESTREAM_BUFFERED_FRAGMENTS_LIMIT,     20 );
 	init( QUARANTINE_TSS_ON_MISMATCH,             true ); if( randomize && BUGGIFY ) QUARANTINE_TSS_ON_MISMATCH = false; // if true, a tss mismatch will put the offending tss in quarantine. If false, it will just be killed
 	init( CHANGE_FEED_EMPTY_BATCH_TIME,          0.005 );
 
@@ -185,7 +183,7 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( COPY_LOG_BLOCKS_PER_TASK,               1000 );
 	init( COPY_LOG_PREFETCH_BLOCKS,                  3 );
 	init( COPY_LOG_READ_AHEAD_BYTES,        BACKUP_LOCK_BYTES / COPY_LOG_PREFETCH_BLOCKS); // each task will use up to COPY_LOG_PREFETCH_BLOCKS * COPY_LOG_READ_AHEAD_BYTES memory
-	init( COPY_LOG_TASK_DURATION_NANOS,	      1e10 ); // 10 seconds
+	init( COPY_LOG_TASK_DURATION_SECONDS,	        10 );
 	init( BACKUP_TASKS_PER_AGENT,                   10 );
 	init( BACKUP_POLL_PROGRESS_SECONDS,             10 );
 	init( SIM_BACKUP_TASKS_PER_AGENT,               10 );
@@ -205,9 +203,9 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( BACKUP_STATUS_DELAY,                    40.0 );
 	init( BACKUP_STATUS_JITTER,                   0.05 );
 	init( MIN_CLEANUP_SECONDS,                  3600.0 );
-	init( FASTRESTORE_ATOMICOP_WEIGHT,               1 ); if( randomize && BUGGIFY ) { FASTRESTORE_ATOMICOP_WEIGHT = deterministicRandom()->random01() * 200 + 1; }
 	init( RESTORE_RANGES_READ_BATCH,             10000 );
 
+	init( BACKUP_RANGE_PARTITIONED_VDIR_INTERVAL, 100000 * 1000000LL );
 	init( BACKUP_CONTAINER_LOCAL_ALLOW_RELATIVE_PATH, false );
 	init( ENABLE_REPLICA_CONSISTENCY_CHECK_ON_BACKUP_READS, false ); if( randomize && BUGGIFY ) { ENABLE_REPLICA_CONSISTENCY_CHECK_ON_BACKUP_READS = true; }
 	init( BACKUP_CONSISTENCY_CHECK_REQUIRED_REPLICAS, -2 ); // Do consistency check based on all available storage replicas

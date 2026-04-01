@@ -1,0 +1,21 @@
+---
+Checks: >
+  -*,
+  bugprone-sizeof-expression,
+  bugprone-suspicious-string-compare,
+  bugprone-use-after-move,
+  modernize-use-auto,
+  modernize-use-equals-default,
+  modernize-use-override,
+  modernize-use-using,
+  performance-for-range-copy,
+  readability-container-contains,
+  readability-const-return-type,
+  readability-container-size-empty,
+  readability-delete-null-pointer,
+  readability-duplicate-include,
+  readability-inconsistent-ifelse-braces
+CheckOptions:
+  - key: modernize-use-auto.MinTypeNameLength
+    value: '11'
+...

@@ -30,7 +30,7 @@
 #include <grpcpp/security/tls_credentials_options.h>
 
 #include "flow/Knobs.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 
 namespace ge = grpc::experimental;
 

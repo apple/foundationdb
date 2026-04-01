@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "fdbserver/workloads/MemoryKeyValueStore.h"
+#include "MemoryKeyValueStore.h"
 
 // Get the value associated with a key
 Optional<Value> MemoryKeyValueStore::get(KeyRef key) const {
-	std::map<Key, Value>::const_iterator value = store.find(key);
+	auto value = store.find(key);
 	if (value != store.end())
 		return value->second;
 	else
@@ -32,7 +32,7 @@ Optional<Value> MemoryKeyValueStore::get(KeyRef key) const {
 // Returns the key designated by a key selector
 Key MemoryKeyValueStore::getKey(KeySelectorRef selector) const {
 	// Begin by getting the start key referenced by the key selector
-	std::map<Key, Value>::const_iterator mapItr = store.lower_bound(selector.getKey());
+	auto mapItr = store.lower_bound(selector.getKey());
 
 	// Update the iterator position if necessary based on the value of orEqual
 	int count = 0;
@@ -81,16 +81,16 @@ Key MemoryKeyValueStore::getKey(KeySelectorRef selector) const {
 RangeResult MemoryKeyValueStore::getRange(KeyRangeRef range, int limit, Reverse reverse) const {
 	RangeResult results;
 	if (!reverse) {
-		std::map<Key, Value>::const_iterator mapItr = store.lower_bound(range.begin);
-
-		for (; mapItr != store.end() && mapItr->first < range.end && results.size() < limit; mapItr++)
+		for (auto mapItr = store.lower_bound(range.begin);
+		     mapItr != store.end() && mapItr->first < range.end && results.size() < limit;
+		     mapItr++)
 			results.push_back_deep(results.arena(), KeyValueRef(mapItr->first, mapItr->second));
 	}
 
 	// Support for reverse getRange queries is supported, but not tested at this time.  This is because reverse range
 	// queries have been disallowed by the database at the API level
 	else {
-		std::map<Key, Value>::const_iterator mapItr = store.lower_bound(range.end);
+		auto mapItr = store.lower_bound(range.end);
 		if (mapItr == store.begin())
 			return results;
 

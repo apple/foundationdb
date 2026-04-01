@@ -22,12 +22,11 @@ I * Licensed under the Apache License, Version 2.0 (the "License");
 #include "fdbctl/ControlCommands.h"
 
 #include "fdbclient/IClientApi.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/Schemas.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/genericactors.actor.h"
-#include "fdbctl/ControlCommands.h"
 #include "fmt/format.h"
 #include <boost/algorithm/string.hpp>
 
@@ -178,7 +177,7 @@ Future<Void> excludeServersAndLocalities(Reference<IDatabase> db,
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		try {
-			if (force && servers.size())
+			if (force && !servers.empty())
 				tr->set(failed ? special_keys::failedForceOptionSpecialKey
 				               : special_keys::excludedForceOptionSpecialKey,
 				        ValueRef());
@@ -187,7 +186,7 @@ Future<Void> excludeServersAndLocalities(Reference<IDatabase> db,
 				                  : special_keys::excludedServersSpecialKeyRange.begin.withSuffix(s.toString());
 				tr->set(addr, ValueRef());
 			}
-			if (force && localities.size())
+			if (force && !localities.empty())
 				tr->set(failed ? special_keys::failedLocalityForceOptionSpecialKey
 				               : special_keys::excludedLocalityForceOptionSpecialKey,
 				        ValueRef());
@@ -284,7 +283,7 @@ Future<grpc::Status> exclude(Reference<IDatabase> db, const ExcludeRequest* req,
 		Future<bool> future_workers = utils::getWorkersProcessData(db, &workers);
 		Future<Void> future_server_interfaces = utils::getStorageServerInterfaces(db, &server_interfaces);
 
-		co_await success(future_workers);
+		co_await future_workers;
 		co_await future_server_interfaces;
 
 		bool force = req->force();
@@ -358,7 +357,7 @@ Future<grpc::Status> exclude(Reference<IDatabase> db, const ExcludeRequest* req,
 			auto worker = workerPorts.find(addr.ip);
 			if (worker == workerPorts.end())
 				absentExclusions.insert(addr);
-			else if (addr.port > 0 && worker->second.count(addr.port) == 0)
+			else if (addr.port > 0 && !worker->second.contains(addr.port))
 				absentExclusions.insert(addr);
 		}
 

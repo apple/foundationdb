@@ -115,18 +115,18 @@ struct CodeProbes {
 
 	void verify() const {
 		std::map<std::pair<std::string_view, std::string_view>, ICodeProbe const*> comments;
-		for (auto probe : codeProbes) {
-			auto file = probe.first.file;
-			auto comment = probe.second->comment();
+		for (const auto& [probeLocation, probe] : codeProbes) {
+			auto file = probeLocation.file;
+			auto comment = probe->comment();
 			auto commentEntry = std::make_pair(file, std::string_view(comment));
-			ASSERT(file == probe.second->filename());
+			ASSERT(file == probe->filename());
 			auto iter = comments.find(commentEntry);
-			if (iter != comments.end() && probe.second->line() != iter->second->line()) {
+			if (iter != comments.end() && probe->line() != iter->second->line()) {
 				fmt::print("ERROR ({}:{}): {} isn't unique in file {}. Previously seen here: {}:{}\n",
-				           probe.first.file,
-				           probe.first.line,
+				           probeLocation.file,
+				           probeLocation.line,
 				           iter->first.second,
-				           probe.second->filename(),
+				           probe->filename(),
 				           iter->second->filename(),
 				           iter->second->line());
 				// ICodeProbe const& fst = *iter->second;
@@ -141,7 +141,7 @@ struct CodeProbes {
 				// fmt::print("\t2nd CompUnit: {}\n", snd.compilationUnit());
 				// fmt::print("\n");
 			} else {
-				comments.emplace(commentEntry, probe.second);
+				comments.emplace(commentEntry, probe);
 			}
 		}
 	}
@@ -156,13 +156,13 @@ struct CodeProbes {
 		} else {
 			std::vector<std::string_view> files;
 			fmt::print("\t<CoverageCases>\n");
-			for (auto probe : codeProbes) {
-				files.push_back(probe.first.file);
+			for (const auto& [probeLocation, probe] : codeProbes) {
+				files.push_back(probeLocation.file);
 				fmt::print("\t\t<Case File=\"{}\" Line=\"{}\" Comment=\"{}\" Condition=\"{}\"/>\n",
-				           probe.first.file,
-				           probe.first.line,
-				           probe.second->comment(),
-				           probe.second->condition());
+				           probeLocation.file,
+				           probeLocation.line,
+				           probe->comment(),
+				           probe->condition());
 			}
 			fmt::print("\t</CoverageCases>\n");
 			fmt::print("\t<Inputs>\n");
@@ -188,28 +188,27 @@ struct CodeProbes {
 		} while (false);
 		auto contexts = fromStrings(context);
 		const ICodeProbe* prev = nullptr;
-		for (auto probe : codeProbes) {
-			auto p = probe.second;
+		for (const auto& [_probeLocation, probe] : codeProbes) {
 			if (!contexts.empty()) {
 				bool print = false;
 				for (auto c : contexts) {
-					print = print || p->expectInContext(c);
+					print = print || probe->expectInContext(c);
 				}
 				if (!print) {
 					continue;
 				}
 			}
-			if (prev == nullptr || *prev != *probe.second) {
+			if (prev == nullptr || *prev != *probe) {
 				fmt::print(
 				    "{{ \"File\": \"{}\", \"Line\": {}, \"Comment\": \"{}\", \"Condition\": \"{}\", \"Function\": "
 				    "\"{}\" }}\n",
-				    probe.first.file,
-				    p->line(),
-				    p->comment(),
-				    p->condition(),
-				    p->function());
+				    probe->filename(),
+				    probe->line(),
+				    probe->comment(),
+				    probe->condition(),
+				    probe->function());
 			}
-			prev = probe.second;
+			prev = probe;
 		}
 	}
 };
@@ -223,10 +222,10 @@ size_t hash_value(CodeProbes::Location const& location) {
 
 void CodeProbes::traceMissedProbes(Optional<ExecutionContext> context) const {
 	boost::unordered_map<Location, bool> locations;
-	for (auto probe : codeProbes) {
+	for (const auto& [probeLocation, probe] : codeProbes) {
 		decltype(locations.begin()) iter;
-		std::tie(iter, std::ignore) = locations.emplace(probe.first, false);
-		iter->second = iter->second || probe.second->wasHit();
+		std::tie(iter, std::ignore) = locations.emplace(probeLocation, false);
+		iter->second = iter->second || probe->wasHit();
 	}
 	for (const auto& [loc, probe] : codeProbes) {
 		auto iter = locations.find(loc);
@@ -255,7 +254,7 @@ void traceMissedProbes(Optional<ExecutionContext> context) {
 	CodeProbes::instance().traceMissedProbes(context);
 }
 
-ICodeProbe::~ICodeProbe() {}
+ICodeProbe::~ICodeProbe() = default;
 
 bool ICodeProbe::operator==(const ICodeProbe& other) const {
 	return filename() == other.filename() && line() == other.line();

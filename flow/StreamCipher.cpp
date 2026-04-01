@@ -59,8 +59,8 @@ StreamCipherKey const* StreamCipherKey::getGlobalCipherKey() {
 }
 
 void StreamCipherKey::cleanup() noexcept {
-	for (const auto& itr : cipherKeys) {
-		itr.second->reset();
+	for (const auto& [_cipherId, cipherKey] : cipherKeys) {
+		cipherKey->reset();
 	}
 }
 
@@ -108,8 +108,8 @@ HMAC_CTX* StreamCipher::getHmacCtx() {
 }
 
 void StreamCipher::cleanup() noexcept {
-	for (auto itr : ctxs) {
-		EVP_CIPHER_CTX_free(itr.second);
+	for (const auto& [_ctxId, cipherContext] : ctxs) {
+		EVP_CIPHER_CTX_free(cipherContext);
 	}
 }
 
@@ -160,7 +160,7 @@ StringRef DecryptionStreamCipher::finish(Arena& arena) {
 }
 
 HmacSha256StreamCipher::HmacSha256StreamCipher() : cipher(EVP_MAX_KEY_LENGTH) {
-	HMAC_Init_ex(cipher.getHmacCtx(), NULL, 0, EVP_sha256(), nullptr);
+	HMAC_Init_ex(cipher.getHmacCtx(), nullptr, 0, EVP_sha256(), nullptr);
 }
 
 StringRef HmacSha256StreamCipher::finish(Arena& arena) {

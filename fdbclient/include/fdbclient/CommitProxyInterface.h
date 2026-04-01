@@ -27,12 +27,11 @@
 
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/EncryptKeyProxyInterface.h"
 #include "fdbclient/GlobalConfig.h"
 #include "fdbclient/GrvProxyInterface.h"
-#include "fdbclient/IdempotencyId.actor.h"
+#include "fdbclient/IdempotencyId.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "fdbclient/VersionVector.h"
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
@@ -126,7 +125,6 @@ struct ClientDBInfo {
 	Optional<Value> forward;
 	std::vector<VersionHistory> history;
 	UID clusterId;
-	Optional<EncryptKeyProxyInterface> encryptKeyProxy;
 
 	ClusterType clusterType = ClusterType::STANDALONE;
 
@@ -140,7 +138,7 @@ struct ClientDBInfo {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, grvProxies, commitProxies, id, forward, history, encryptKeyProxy, clusterId, clusterType);
+		serializer(ar, grvProxies, commitProxies, id, forward, history, clusterId, clusterType);
 	}
 };
 

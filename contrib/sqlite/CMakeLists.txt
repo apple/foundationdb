@@ -7,6 +7,8 @@ add_library(sqlite STATIC
   sqliteLimit.h
   sqlite3.amalgamation.c)
 
+set_target_properties(sqlite PROPERTIES C_CLANG_TIDY "")
+
 
 target_include_directories(sqlite PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # Suppress warnings in sqlite since it's third party

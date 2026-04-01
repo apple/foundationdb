@@ -87,7 +87,7 @@ ERROR( change_feed_cancelled, 1062, "Change feed was cancelled" )
 // 1064 removed
 // 1065 removed
 ERROR( change_feed_popped, 1066, "Tried to read a version older than what has been popped from the change feed" )
-ERROR( remote_kvs_cancelled, 1067, "The remote key-value store is cancelled" )
+// 1067 removed
 ERROR( page_header_wrong_page_id, 1068, "Page header does not match location on disk" )
 ERROR( page_header_checksum_failed, 1069, "Page header checksum failed" )
 ERROR( page_header_version_not_supported, 1070, "Page header version is not supported" )

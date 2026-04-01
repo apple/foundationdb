@@ -42,7 +42,7 @@ bool KeyValueStore::exists(fdb::KeyRef key) {
 fdb::Key KeyValueStore::getKey(fdb::KeyRef keyName, bool orEqual, int offset) const {
 	std::unique_lock<std::mutex> lock(mutex);
 	// Begin by getting the start key referenced by the key selector
-	std::map<fdb::Key, fdb::Value>::const_iterator mapItr = store.lower_bound(keyName);
+	auto mapItr = store.lower_bound(keyName);
 
 	// Update the iterator position if necessary based on the value of orEqual
 	int count = 0;
@@ -92,16 +92,16 @@ std::vector<fdb::KeyValue> KeyValueStore::getRange(fdb::KeyRef begin, fdb::KeyRe
 	std::unique_lock<std::mutex> lock(mutex);
 	std::vector<fdb::KeyValue> results;
 	if (!reverse) {
-		std::map<fdb::Key, fdb::Value>::const_iterator mapItr = store.lower_bound(begin);
-
-		for (; mapItr != store.end() && mapItr->first < end && results.size() < limit; mapItr++)
+		for (auto mapItr = store.lower_bound(begin);
+		     mapItr != store.end() && mapItr->first < end && results.size() < limit;
+		     mapItr++)
 			results.push_back(fdb::KeyValue{ mapItr->first, mapItr->second });
 	}
 
 	// Support for reverse getRange queries is supported, but not tested at this time.  This is because reverse range
 	// queries have been disallowed by the database at the API level
 	else {
-		std::map<fdb::Key, fdb::Value>::const_iterator mapItr = store.lower_bound(end);
+		auto mapItr = store.lower_bound(end);
 		if (mapItr == store.begin())
 			return results;
 

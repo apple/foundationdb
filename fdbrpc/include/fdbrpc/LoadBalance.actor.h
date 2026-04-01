@@ -465,7 +465,7 @@ struct RequestData : NonCopyable {
 	bool compareReplicas = false;
 	Future<Void> comparisonResult;
 
-	RequestData(bool compareReplicas = false) : compareReplicas(compareReplicas) {}
+	explicit RequestData(bool compareReplicas = false) : compareReplicas(compareReplicas) {}
 
 	// Whether or not the response future is valid
 	// This is true once setupRequest is called, even though at that point the response is Never().
@@ -549,14 +549,14 @@ struct RequestData : NonCopyable {
 		if (backoff > 0) {
 			response = mapAsync(delay(backoff), [this, stream, &request, model, alternatives, channel](Void _) {
 				requestStarted = true;
-				modelHolder = Reference<ModelHolder>(new ModelHolder(model, stream->getEndpoint().token.first()));
+				modelHolder = makeReference<ModelHolder>(model, stream->getEndpoint().token.first());
 				Future<Reply> resp = stream->tryGetReply(request);
 				maybeDuplicateTSSRequest(stream, request, model, resp, alternatives, channel);
 				return resp;
 			});
 		} else {
 			requestStarted = true;
-			modelHolder = Reference<ModelHolder>(new ModelHolder(model, stream->getEndpoint().token.first()));
+			modelHolder = makeReference<ModelHolder>(model, stream->getEndpoint().token.first());
 			response = stream->tryGetReply(request);
 			maybeDuplicateTSSRequest(stream, request, model, response, alternatives, channel);
 		}

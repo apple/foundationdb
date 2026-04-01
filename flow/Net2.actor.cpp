@@ -24,6 +24,7 @@
 #include "flow/Arena.h"
 #include "flow/Knobs.h"
 #include "flow/Platform.h"
+#include "flow/SimpleCounter.h"
 #include "flow/Trace.h"
 #include "flow/swift.h"
 #include "flow/swift_concurrency_hooks.h"
@@ -57,8 +58,8 @@
 #include "flow/Profiler.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/SendBufferIterator.h"
-#include "flow/TLSConfig.actor.h"
-#include "flow/WatchFile.actor.h"
+#include "flow/TLSConfig.h"
+#include "flow/WatchFile.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Util.h"
 #include "flow/UnitTest.h"
@@ -109,12 +110,21 @@ void initProfiling() {
 }
 #endif
 
-DESCR struct SlowTask {
-	int64_t clocks; // clocks
-	int64_t duration; // ns
-	int64_t priority; // priority level
-	int64_t numYields; // count
+struct SlowTaskDescriptor {
+	int64_t clocks;
+	int64_t duration;
+	int64_t priority;
+	int64_t numYields;
 };
+
+template <>
+struct Descriptor<SlowTaskDescriptor>
+  : DescribeType<SlowTaskDescriptor,
+                 "SlowTask",
+                 DescribeField<&SlowTaskDescriptor::clocks, "clocks", "clocks">,
+                 DescribeField<&SlowTaskDescriptor::duration, "duration", "ns">,
+                 DescribeField<&SlowTaskDescriptor::priority, "priority", "priority level">,
+                 DescribeField<&SlowTaskDescriptor::numYields, "numYields", "count">> {};
 
 namespace N2 { // No indent, it's the whole file
 
@@ -266,7 +276,7 @@ public:
 	struct PromiseTask final : public FastAllocated<PromiseTask> {
 		Promise<Void> promise;
 		swift::Job* _Nullable swiftJob = nullptr;
-		PromiseTask() {}
+		PromiseTask() = default;
 		explicit PromiseTask(Promise<Void>&& promise) noexcept : promise(std::move(promise)) {}
 		explicit PromiseTask(swift::Job* swiftJob) : swiftJob(swiftJob) {}
 
@@ -324,7 +334,7 @@ public:
 	DoubleMetricHandle countReactTime;
 	BoolMetricHandle awakeMetric;
 
-	EventMetricHandle<SlowTask> slowTaskMetric;
+	EventMetricHandle<SlowTaskDescriptor> slowTaskMetric;
 
 	std::vector<std::string> blobCredentialFiles;
 	Optional<std::string> proxy;
@@ -362,17 +372,17 @@ class BindPromise {
 	NetworkAddress peerAddr;
 
 public:
-	BindPromise(const char* errContext, UID errID) : errContext(errContext), errID(errID) {}
-	BindPromise(AuditedEvent auditedEvent, UID errID) : errContext(auditedEvent), errID(errID) {}
-	BindPromise(BindPromise const& r) : p(r.p), errContext(r.errContext), errID(r.errID), peerAddr(r.peerAddr) {}
+	BindPromise(const char* errContext, UID errID, NetworkAddress peerAddr)
+	  : errContext(errContext), errID(errID), peerAddr(peerAddr) {}
+	BindPromise(AuditedEvent auditedEvent, UID errID, NetworkAddress peerAddr)
+	  : errContext(auditedEvent), errID(errID), peerAddr(peerAddr) {}
+	BindPromise(BindPromise const& r) = default;
 	BindPromise(BindPromise&& r) noexcept
 	  : p(std::move(r.p)), errContext(r.errContext), errID(r.errID), peerAddr(r.peerAddr) {}
 
 	Future<Void> getFuture() const { return p.getFuture(); }
 
 	NetworkAddress getPeerAddr() const { return peerAddr; }
-
-	void setPeerAddr(const NetworkAddress& addr) { peerAddr = addr; }
 
 	void operator()(const boost::system::error_code& error, size_t bytesWritten = 0) {
 		try {
@@ -430,7 +440,7 @@ public:
 		self->peer_address = addr;
 		try {
 			auto to = tcpEndpoint(addr);
-			BindPromise p("N2_ConnectError", self->id);
+			BindPromise p("N2_ConnectError", self->id, self->peer_address);
 			Future<Void> onConnected = p.getFuture();
 			self->socket.async_connect(to, std::move(p));
 
@@ -457,7 +467,7 @@ public:
 	// returns when write() can write at least one byte
 	Future<Void> onWritable() override {
 		++g_net2->countWriteProbes;
-		BindPromise p("N2_WriteProbeError", id);
+		BindPromise p("N2_WriteProbeError", id, peer_address);
 		auto f = p.getFuture();
 		socket.async_write_some(boost::asio::null_buffers(), std::move(p));
 		return f;
@@ -466,7 +476,7 @@ public:
 	// returns when read() can read at least one byte
 	Future<Void> onReadable() override {
 		++g_net2->countReadProbes;
-		BindPromise p("N2_ReadProbeError", id);
+		BindPromise p("N2_ReadProbeError", id, peer_address);
 		auto f = p.getFuture();
 		socket.async_read_some(boost::asio::null_buffers(), std::move(p));
 		return f;
@@ -638,7 +648,7 @@ public:
 		try {
 			if (toAddress.present()) {
 				auto to = udpEndpoint(toAddress.get());
-				BindPromise p("N2_UDPConnectError", self->id);
+				BindPromise p("N2_UDPConnectError", self->id, toAddress.get());
 				Future<Void> onConnected = p.getFuture();
 				self->socket.async_connect(to, std::move(p));
 
@@ -798,7 +808,8 @@ private:
 		state Reference<Connection> conn(new Connection(self->io_service));
 		state tcp::acceptor::endpoint_type peer_endpoint;
 		try {
-			BindPromise p("N2_AcceptError", UID());
+			// Peer address not known until accept succeeds
+			BindPromise p("N2_AcceptError", UID(), NetworkAddress());
 			auto f = p.getFuture();
 			self->acceptor.async_accept(conn->getSocket(), peer_endpoint, std::move(p));
 			wait(f);
@@ -814,10 +825,10 @@ private:
 	}
 };
 
-typedef boost::asio::ssl::stream<boost::asio::ip::tcp::socket&> ssl_socket;
+using ssl_socket = boost::asio::ssl::stream<boost::asio::ip::tcp::socket&>;
 
 struct SSLHandshakerThread final : IThreadPoolReceiver {
-	SSLHandshakerThread() {}
+	SSLHandshakerThread() = default;
 	void init() override {}
 
 	struct Handshake final : TypedAction<SSLHandshakerThread, Handshake> {
@@ -928,7 +939,7 @@ public:
 		self->peer_address = addr;
 		try {
 			auto to = tcpEndpoint(self->peer_address);
-			BindPromise p("N2_ConnectError", self->id);
+			BindPromise p("N2_ConnectError", self->id, self->peer_address);
 			Future<Void> onConnected = p.getFuture();
 			self->socket.async_connect(to, std::move(p));
 
@@ -970,7 +981,7 @@ public:
 
 		try {
 			auto to = tcpEndpoint(self->peer_address);
-			BindPromise p("N2_ConnectError", self->id);
+			BindPromise p("N2_ConnectError", self->id, self->peer_address);
 			Future<Void> onConnected = p.getFuture();
 			self->socket.async_connect(to, std::move(p));
 
@@ -1021,8 +1032,7 @@ public:
 				static SimpleCounter<int64_t>* countServerTLSHandshakesOnMainThread =
 				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakesOnMainThread");
 				countServerTLSHandshakesOnMainThread->increment(1);
-				BindPromise p("N2_AcceptHandshakeError"_audit, self->id);
-				p.setPeerAddr(self->getPeerAddress());
+				BindPromise p("N2_AcceptHandshakeError"_audit, self->id, self->getPeerAddress());
 				onHandshook = p.getFuture();
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::server, std::move(p));
 			}
@@ -1146,8 +1156,7 @@ public:
 				static SimpleCounter<int64_t>* countClientTLSHandshakesOnMainThread =
 				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakesOnMainThread");
 				countClientTLSHandshakesOnMainThread->increment(1);
-				BindPromise p("N2_ConnectHandshakeError"_audit, self->id);
-				p.setPeerAddr(self->getPeerAddress());
+				BindPromise p("N2_ConnectHandshakeError"_audit, self->id, self->getPeerAddress());
 				onHandshook = p.getFuture();
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::client, std::move(p));
 			}
@@ -1207,7 +1216,7 @@ public:
 	// returns when write() can write at least one byte
 	Future<Void> onWritable() override {
 		++g_net2->countWriteProbes;
-		BindPromise p("N2_WriteProbeError", id);
+		BindPromise p("N2_WriteProbeError", id, peer_address);
 		auto f = p.getFuture();
 		socket.async_write_some(boost::asio::null_buffers(), std::move(p));
 		return f;
@@ -1216,7 +1225,7 @@ public:
 	// returns when read() can read at least one byte
 	Future<Void> onReadable() override {
 		++g_net2->countReadProbes;
-		BindPromise p("N2_ReadProbeError", id);
+		BindPromise p("N2_ReadProbeError", id, peer_address);
 		auto f = p.getFuture();
 		socket.async_read_some(boost::asio::null_buffers(), std::move(p));
 		return f;
@@ -1376,7 +1385,8 @@ private:
 		state Reference<SSLConnection> conn(new SSLConnection(self->io_service, self->contextVar->get()));
 		state tcp::acceptor::endpoint_type peer_endpoint;
 		try {
-			BindPromise p("N2_AcceptError", UID());
+			// Peer address not known until accept succeeds
+			BindPromise p("N2_AcceptError", UID(), NetworkAddress());
 			auto f = p.getFuture();
 			self->acceptor.async_accept(conn->getSocket(), peer_endpoint, std::move(p));
 			wait(f);
@@ -1587,6 +1597,10 @@ ActorLineageSet& Net2::getActorLineageSet() {
 }
 #endif
 
+// TIP: ways to test this code:
+//
+// fdbserver -r test -f tests/noSim/RandomUnitTests.toml
+// fdbserver -r unittests -f noSim
 void Net2::run() {
 	TraceEvent::setNetworkThread();
 	TraceEvent("Net2Running").log();
@@ -1608,8 +1622,8 @@ void Net2::run() {
 	}
 
 	// Get the address to the launch function
-	typedef void (*runCycleFuncPtr)();
-	runCycleFuncPtr runFunc = reinterpret_cast<runCycleFuncPtr>(
+	using runCycleFuncPtr = void (*)();
+	auto runFunc = reinterpret_cast<runCycleFuncPtr>(
 	    reinterpret_cast<flowGlobalType>(g_network->global(INetwork::enRunCycleFunc)));
 
 	started.store(true);
@@ -1678,6 +1692,7 @@ void Net2::run() {
 		[[maybe_unused]] int queueSize = taskQueue.getNumReadyTasks();
 
 		FDB_TRACE_PROBE(run_loop_tasks_start, queueSize);
+		int tasksExecuted = 0;
 		while (taskQueue.hasReadyTask()) {
 			++countTasks;
 			currentTaskID = taskQueue.getReadyTaskID();
@@ -1686,6 +1701,7 @@ void Net2::run() {
 			taskQueue.popReadyTask();
 
 			try {
+				++tasksExecuted;
 				++tasksSinceReact;
 				(*task)();
 			} catch (Error& e) {
@@ -1721,6 +1737,9 @@ void Net2::run() {
 			taskBegin = newTaskBegin;
 			tscBegin = tscNow;
 		}
+		static SimpleCounter<int64_t>* callbacksExecuted =
+		    SimpleCounter<int64_t>::makeCounter("/Net2/callbacksExecuted");
+		callbacksExecuted->increment(tasksExecuted);
 
 		trackAtPriority(TaskPriority::RunLoop, taskBegin);
 
@@ -1759,7 +1778,7 @@ void Net2::run() {
 			if (other_offset) {
 				size_t iter_offset = 0;
 				while (iter_offset < other_offset) {
-					ProfilingSample* ps = (ProfilingSample*)(other_backtraces + iter_offset);
+					auto* ps = (ProfilingSample*)(other_backtraces + iter_offset);
 					TraceEvent(SevWarn, "Net2RunLoopTrace")
 					    .detailf("TraceTime", "%.6f", ps->timestamp)
 					    .detail("Trace", platform::format_backtrace(ps->frames, ps->length));
@@ -1772,16 +1791,23 @@ void Net2::run() {
 		}
 #endif
 		nnow = timer_monotonic();
+		auto time_delta = nnow - now;
 
-		if ((nnow - now) > FLOW_KNOBS->SLOW_LOOP_CUTOFF &&
-		    nondeterministicRandom()->random01() < (nnow - now) * FLOW_KNOBS->SLOW_LOOP_SAMPLING_RATE)
-			TraceEvent("SomewhatSlowRunLoopBottom")
-			    .detail("Elapsed", nnow - now); // This includes the time spent running tasks
+		static SimpleCounter<double>* exec_time = SimpleCounter<double>::makeCounter("/Net2/mainThreadExecutionTime");
+		exec_time->increment(time_delta);
+
+		if (time_delta > FLOW_KNOBS->SLOW_LOOP_CUTOFF &&
+		    nondeterministicRandom()->random01() < time_delta * FLOW_KNOBS->SLOW_LOOP_SAMPLING_RATE) {
+			TraceEvent("SomewhatSlowRunLoopBottom").detail("Elapsed", time_delta);
+		}
 	}
 
 	for (auto& fn : stopCallbacks) {
 		fn();
 	}
+
+	// Emit at least one batch of counters, for manual inspection.
+	simpleCounterReport();
 
 #ifdef WIN32
 	timeEndPeriod(1);
@@ -1925,7 +1951,7 @@ Future<Void> Net2::delay(double seconds, TaskPriority taskId) {
 	                     // as infinite
 		return Never();
 
-	PromiseTask* t = new PromiseTask;
+	auto* t = new PromiseTask;
 	if (seconds <= 0.) {
 		taskQueue.addReady(taskId, t);
 	} else {
@@ -1942,9 +1968,9 @@ Future<Void> Net2::orderedDelay(double seconds, TaskPriority taskId) {
 
 void Net2::_swiftEnqueue(void* _job) {
 #ifdef WITH_SWIFT
-	swift::Job* job = (swift::Job*)_job;
+	auto* job = (swift::Job*)_job;
 	TaskPriority priority = swift_priority_to_net2(job->getPriority());
-	PromiseTask* t = new PromiseTask(job);
+	auto* t = new PromiseTask(job);
 	taskQueue.addReady(priority, t);
 #endif
 }
@@ -1952,7 +1978,7 @@ void Net2::_swiftEnqueue(void* _job) {
 void Net2::onMainThread(Promise<Void>&& signal, TaskPriority taskID) {
 	if (stopped)
 		return;
-	PromiseTask* p = new PromiseTask(std::move(signal));
+	auto* p = new PromiseTask(std::move(signal));
 	if (taskQueue.addReadyThreadSafe(isOnMainThread(), taskID, p)) {
 		reactor.wake();
 	}
@@ -2266,7 +2292,7 @@ struct TestGVR {
 	Optional<std::pair<UID, UID>> debugID;
 	Promise<Optional<Standalone<StringRef>>> reply;
 
-	TestGVR() {}
+	TestGVR() = default;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -2278,9 +2304,9 @@ template <class F>
 THREAD_HANDLE startThreadF(F&& func) {
 	struct Thing {
 		F f;
-		Thing(F&& f) : f(std::move(f)) {}
+		explicit Thing(F&& f) : f(std::move(f)) {}
 		THREAD_FUNC start(void* p) {
-			Thing* self = (Thing*)p;
+			auto* self = (Thing*)p;
 			self->f();
 			delete self;
 			THREAD_RETURN;
@@ -2429,63 +2455,3 @@ TEST_CASE("noSim/flow/Net2/onMainThreadFIFO") {
 	}
 	return Void();
 }
-
-void net2_test() {
-	/*
-	g_network = newNet2();  // for promise serialization below
-
-	Endpoint destination;
-
-	printf("  Used: %lld\n", FastAllocator<4096>::getTotalMemory());
-
-	char junk[100];
-
-	double before = timer();
-
-	std::vector<TestGVR> reqs;
-	reqs.reserve( 10000 );
-
-	int totalBytes = 0;
-	for(int j=0; j<1000; j++) {
-	    UnsentPacketQueue unsent;
-	    ReliablePacketList reliable;
-
-	    reqs.resize(10000);
-	    for(int i=0; i<10000; i++) {
-	        TestGVR &req = reqs[i];
-	        req.key = "Foobar"_sr;
-
-	        SerializeSource<TestGVR> what(req);
-
-	        SendBuffer* pb = unsent.getWriteBuffer();
-	        ReliablePacket* rp = new ReliablePacket;  // 0
-
-	        PacketWriter wr(pb,rp,AssumeVersion(g_network->protocolVersion()));
-	        //BinaryWriter wr;
-	        SplitBuffer packetLen;
-	        uint32_t len = 0;
-	        wr.writeAhead(sizeof(len), &packetLen);
-	        wr << destination.token;
-	        //req.reply.getEndpoint();
-	        what.serializePacketWriter(wr);
-	        //wr.serializeBytes(junk, 43);
-
-	        unsent.setWriteBuffer(wr.finish());
-	        len = wr.size() - sizeof(len);
-	        packetLen.write(&len, sizeof(len));
-
-	        //totalBytes += wr.getLength();
-	        totalBytes += wr.size();
-
-	        if (rp) reliable.insert(rp);
-	    }
-	    reqs.clear();
-	    unsent.discardAll();
-	    reliable.discardAll();
-	}
-
-	printf("SimSend x 1Kx10K: %0.2f sec\n", timer()-before);
-	printf("  Bytes: %d\n", totalBytes);
-	printf("  Used: %lld\n", FastAllocator<4096>::getTotalMemory());
-	*/
-};

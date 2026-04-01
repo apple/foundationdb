@@ -30,6 +30,7 @@
 #include "flow/TDMetric.actor.g.h"
 #elif !defined(FLOW_TDMETRIC_ACTOR_H)
 #define FLOW_TDMETRIC_ACTOR_H
+#include <array>
 #include <string>
 #include <unordered_map>
 #include "flow/flow.h"
@@ -39,8 +40,9 @@
 #include "flow/CompressedInt.h"
 #include "flow/OTELMetrics.h"
 #include <algorithm>
-#include <functional>
 #include <cmath>
+#include <functional>
+#include <type_traits>
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 enum MetricsDataModel { STATSD = 0, OTLP, NONE };
@@ -148,9 +150,9 @@ struct MetricKeyRef {
 		return mk;
 	}
 
-	const Standalone<StringRef> packLatestKey() const;
-	const Standalone<StringRef> packDataKey(int64_t time = -1) const;
-	const Standalone<StringRef> packFieldRegKey() const;
+	Standalone<StringRef> packLatestKey() const;
+	Standalone<StringRef> packDataKey(int64_t time = -1) const;
+	Standalone<StringRef> packFieldRegKey() const;
 
 	bool isField() const { return fieldName.size() > 0 && fieldType.size() > 0; }
 	void writeField(BinaryWriter& wr) const;
@@ -176,7 +178,7 @@ struct MetricBatch {
 
 	MetricBatch() {}
 
-	MetricBatch(FDBScope* in) {
+	explicit MetricBatch(FDBScope* in) {
 		assert(in != nullptr);
 		scope.inserts = std::move(in->inserts);
 		scope.appends = std::move(in->appends);
@@ -363,12 +365,12 @@ struct make_index_sequence_impl;
 
 template <size_t Start, size_t... Indices, size_t End>
 struct make_index_sequence_impl<Start, index_sequence<Indices...>, End> {
-	typedef typename make_index_sequence_impl<Start + 1, index_sequence<Indices..., Start>, End>::type type;
+	using type = typename make_index_sequence_impl<Start + 1, index_sequence<Indices..., Start>, End>::type;
 };
 
 template <size_t End, size_t... Indices>
 struct make_index_sequence_impl<End, index_sequence<Indices...>, End> {
-	typedef index_sequence<Indices...> type;
+	using type = index_sequence<Indices...>;
 };
 
 // The code that actually implements tuple_map
@@ -394,14 +396,103 @@ auto tuple_map(F f, const Tuple& t, const Tuples&... ts) -> decltype(tuple_map_i
 	    f, typename make_index_sequence_impl<0, index_sequence<>, std::tuple_size<Tuple>::value>::type(), t, ts...);
 }
 
+template <class Tuple>
+using tuple_indexes_t = typename make_index_sequence_impl<0, index_sequence<>, std::tuple_size<Tuple>::value>::type;
+
 template <class T>
 struct Descriptor {
+	// Specialize Descriptor<T> next to each metric payload struct, typically by inheriting from
+	// DescribeType<T, "...", DescribeField<&T::member, "...">, ...>.
 #ifndef NO_INTELLISENSE
 	using fields = std::tuple<>;
-	typedef make_index_sequence_impl<0, index_sequence<>, std::tuple_size<fields>::value>::type field_indexes;
+	using field_indexes = tuple_indexes_t<fields>;
 
 	static StringRef typeName() { return ""_sr; }
 #endif
+};
+
+// String literals need a wrapper type before they can be used as non-type template parameters.
+template <size_t N>
+struct FixedString {
+	std::array<char, N> value{};
+
+	constexpr FixedString(const char (&str)[N]) {
+		for (size_t i = 0; i < N; ++i) {
+			value[i] = str[i];
+		}
+	}
+
+	constexpr size_t size() const { return N - 1; }
+};
+
+template <size_t N>
+FixedString(const char (&)[N]) -> FixedString<N>;
+
+template <FixedString Str>
+StringRef fixedStringRef() {
+	return StringRef(reinterpret_cast<const uint8_t*>(Str.value.data()), Str.size());
+}
+
+template <auto MemberPtr>
+struct MemberPointerTraits;
+
+// DescribeField only takes a member pointer at the call site; recover the owning class and field type here.
+template <class Class, class FieldType, FieldType Class::* MemberPtr>
+struct MemberPointerTraits<MemberPtr> {
+	using class_type = Class;
+	using field_type = FieldType;
+};
+
+template <typename T>
+inline StringRef describeFieldTypeName() {
+	return metricTypeName<T>();
+}
+
+template <>
+inline StringRef describeFieldTypeName<int64_t>() {
+	return "int64_t"_sr;
+}
+
+template <>
+inline StringRef describeFieldTypeName<double>() {
+	return "double"_sr;
+}
+
+template <>
+inline StringRef describeFieldTypeName<bool>() {
+	return "bool"_sr;
+}
+
+template <>
+inline StringRef describeFieldTypeName<Standalone<StringRef>>() {
+	return "Standalone<StringRef>"_sr;
+}
+
+// One field entry inside a Descriptor<T> specialization.
+// Use DescribeField<&T::member, "memberName", "optional comment">.
+template <auto MemberPtr, FixedString Name, FixedString Comment = "">
+struct DescribeField {
+	using traits = MemberPointerTraits<MemberPtr>;
+	using class_type = typename traits::class_type;
+	using type = typename traits::field_type;
+
+	static StringRef name() { return fixedStringRef<Name>(); }
+	static StringRef typeName() { return describeFieldTypeName<type>(); }
+	static StringRef comment() { return fixedStringRef<Comment>(); }
+	static inline type get(class_type& from) { return from.*MemberPtr; }
+};
+
+// Shared implementation for Descriptor<T> specializations. The specialization names the metric type
+// and lists its exported fields in the order they should appear in TDMetric output.
+template <class Self, FixedString TypeName, class... Fields>
+struct DescribeType {
+	static_assert((std::is_same_v<Self, typename Fields::class_type> && ...));
+
+	static StringRef typeName() { return fixedStringRef<TypeName>(); }
+
+	using type = Self;
+	using fields = std::tuple<Fields...>;
+	using field_indexes = tuple_indexes_t<fields>;
 };
 
 // FieldHeader is a serializable (FIXED SIZE!) and updatable Header type for Metric field levels.
@@ -707,7 +798,7 @@ struct EventField : public Descriptor {
 
 	void operator=(EventField&& r) noexcept { levels = std::move(r.levels); }
 
-	EventField(Descriptor d = Descriptor()) : Descriptor(d) {}
+	explicit EventField(Descriptor d = Descriptor()) : Descriptor(d) {}
 
 	static StringRef typeName() { return metricTypeName<T>(); }
 
@@ -761,7 +852,8 @@ struct TimeDescriptor {
 };
 
 struct BaseMetric {
-	BaseMetric(MetricNameRef const& name) : metricName(name), enabled(false), pCollection(nullptr), registered(false) {
+	explicit BaseMetric(MetricNameRef const& name)
+	  : metricName(name), enabled(false), pCollection(nullptr), registered(false) {
 		setConfig(false);
 	}
 	virtual ~BaseMetric() {}
@@ -820,7 +912,7 @@ struct BaseMetric {
 
 struct BaseEventMetric : BaseMetric {
 
-	BaseEventMetric(MetricNameRef const& name) : BaseMetric(name) {}
+	explicit BaseEventMetric(MetricNameRef const& name) : BaseMetric(name) {}
 
 	// Needed for MetricUtil
 	alignas(8) static const StringRef metricType;
@@ -967,7 +1059,7 @@ private:
 
 // A field Descriptor compatible with EventField but with name set at runtime
 struct DynamicDescriptor {
-	DynamicDescriptor(const char* name) : _name(StringRef((uint8_t*)name, strlen(name))) {}
+	explicit DynamicDescriptor(const char* name) : _name(StringRef((uint8_t*)name, strlen(name))) {}
 	StringRef name() const { return _name; }
 
 private:
@@ -1016,7 +1108,7 @@ struct DynamicFieldBase {
 template <typename T>
 struct DynamicField final : public DynamicFieldBase, EventField<T, DynamicDescriptor> {
 	typedef EventField<T, DynamicDescriptor> EventFieldType;
-	DynamicField(const char* name) : DynamicFieldBase(), EventFieldType(DynamicDescriptor(name)), value(T()) {}
+	explicit DynamicField(const char* name) : DynamicFieldBase(), EventFieldType(DynamicDescriptor(name)), value(T()) {}
 
 	StringRef fieldName() const override { return EventFieldType::name(); }
 
@@ -1096,7 +1188,7 @@ private:
 	}
 
 public:
-	DynamicEventMetric(MetricNameRef const& name, Void = Void());
+	explicit DynamicEventMetric(MetricNameRef const& name, Void = Void());
 	~DynamicEventMetric() override = default;
 
 	void addref() override { ReferenceCounted<DynamicEventMetric>::addref(); }
@@ -1395,9 +1487,9 @@ template <typename T>
 struct MetricHandle {
 	using ValueType = typename T::ValueType;
 
-	MetricHandle(StringRef const& name = StringRef(),
-	             StringRef const& id = StringRef(),
-	             ValueType const& initial = ValueType())
+	explicit MetricHandle(StringRef const& name = StringRef(),
+	                      StringRef const& id = StringRef(),
+	                      ValueType const& initial = ValueType())
 	  : ref(T::getOrCreateInstance(name, id, true, initial)) {}
 
 	// Initialize this handle to point to a new or existing metric with (name, id).  If a new metric is created then the
@@ -1456,7 +1548,7 @@ class IMetric {
 public:
 	const UID id;
 	const MetricsDataModel model;
-	IMetric(MetricsDataModel m) : id{ deterministicRandom()->randomUniqueID() }, model{ m } {
+	explicit IMetric(MetricsDataModel m) : id{ deterministicRandom()->randomUniqueID() }, model{ m } {
 		MetricCollection* metrics = MetricCollection::getMetricCollection();
 		if (metrics != nullptr) {
 			if (metrics->map.count(id) > 0) {

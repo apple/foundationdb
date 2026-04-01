@@ -34,7 +34,7 @@
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/GenericManagementAPI.actor.h"
+#include "fdbclient/GenericManagementAPI.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/MultiVersionAssignmentVars.h"
 #include "fdbclient/ClientVersion.h"
@@ -1912,7 +1912,15 @@ void MultiVersionApi::useFutureProtocolVersion() {
 }
 
 namespace {
-void validateOption(Optional<StringRef> value, bool canBePresent, bool canBeAbsent, bool canBeEmpty = true) {
+
+FDB_BOOLEAN_PARAM(CanBePresent);
+FDB_BOOLEAN_PARAM(CanBeAbsent);
+FDB_BOOLEAN_PARAM(CanBeEmpty);
+
+void validateOption(Optional<StringRef> value,
+                    CanBePresent canBePresent,
+                    CanBeAbsent canBeAbsent,
+                    CanBeEmpty canBeEmpty = CanBeEmpty::True) {
 	ASSERT(canBePresent || canBeAbsent);
 
 	if (!canBePresent && value.present() && (!canBeEmpty || value.get().size() > 0)) {
@@ -2113,19 +2121,19 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 	}
 
 	if (option == FDBNetworkOptions::DISABLE_MULTI_VERSION_CLIENT_API) {
-		validateOption(value, false, true);
+		validateOption(value, CanBePresent::False, CanBeAbsent::True);
 		disableMultiVersionClientApi();
 	} else if (option == FDBNetworkOptions::CALLBACKS_ON_EXTERNAL_THREADS) {
-		validateOption(value, false, true);
+		validateOption(value, CanBePresent::False, CanBeAbsent::True);
 		setCallbacksOnExternalThreads();
 	} else if (option == FDBNetworkOptions::EXTERNAL_CLIENT_LIBRARY) {
-		validateOption(value, true, false, false);
+		validateOption(value, CanBePresent::True, CanBeAbsent::False, CanBeEmpty::False);
 		addExternalLibrary(abspath(value.get().toString()), false);
 	} else if (option == FDBNetworkOptions::EXTERNAL_CLIENT_DIRECTORY) {
-		validateOption(value, true, false, false);
+		validateOption(value, CanBePresent::True, CanBeAbsent::False, CanBeEmpty::False);
 		addExternalLibraryDirectory(value.get().toString());
 	} else if (option == FDBNetworkOptions::DISABLE_LOCAL_CLIENT) {
-		validateOption(value, false, true);
+		validateOption(value, CanBePresent::False, CanBeAbsent::True);
 		disableLocalClient();
 	} else if (option == FDBNetworkOptions::SUPPORTED_CLIENT_VERSIONS) {
 		ASSERT(value.present());
@@ -2145,7 +2153,7 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 		disableBypass = true;
 	} else if (option == FDBNetworkOptions::CLIENT_THREADS_PER_VERSION) {
 		MutexHolder holder(lock);
-		validateOption(value, true, false, false);
+		validateOption(value, CanBePresent::True, CanBeAbsent::False, CanBeEmpty::False);
 		if (networkStartSetup) {
 			throw invalid_option();
 		}
@@ -2156,13 +2164,13 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 		threadCount = extractIntOption(value, 1, 1);
 #endif
 	} else if (option == FDBNetworkOptions::CLIENT_TMP_DIR) {
-		validateOption(value, true, false, false);
+		validateOption(value, CanBePresent::True, CanBeAbsent::False, CanBeEmpty::False);
 		tmpDir = abspath(value.get().toString());
 	} else if (option == FDBNetworkOptions::FUTURE_VERSION_CLIENT_LIBRARY) {
-		validateOption(value, true, false, false);
+		validateOption(value, CanBePresent::True, CanBeAbsent::False, CanBeEmpty::False);
 		addExternalLibrary(abspath(value.get().toString()), true);
 	} else if (option == FDBNetworkOptions::TRACE_FILE_IDENTIFIER) {
-		validateOption(value, true, false, true);
+		validateOption(value, CanBePresent::True, CanBeAbsent::False, CanBeEmpty::True);
 		traceFileIdentifier = value.get().toString();
 		{
 			MutexHolder holder(lock);
@@ -2171,16 +2179,16 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 			localClient->api->setNetworkOption(option, value);
 		}
 	} else if (option == FDBNetworkOptions::TRACE_SHARE_AMONG_CLIENT_THREADS) {
-		validateOption(value, false, true);
+		validateOption(value, CanBePresent::False, CanBeAbsent::True);
 		traceShareBaseNameAmongThreads = true;
 	} else if (option == FDBNetworkOptions::IGNORE_EXTERNAL_CLIENT_FAILURES) {
-		validateOption(value, false, true);
+		validateOption(value, CanBePresent::False, CanBeAbsent::True);
 		ignoreExternalClientFailures = true;
 	} else if (option == FDBNetworkOptions::FAIL_INCOMPATIBLE_CLIENT) {
-		validateOption(value, false, true);
+		validateOption(value, CanBePresent::False, CanBeAbsent::True);
 		failIncompatibleClient = true;
 	} else if (option == FDBNetworkOptions::RETAIN_CLIENT_LIBRARY_COPIES) {
-		validateOption(value, false, true);
+		validateOption(value, CanBePresent::False, CanBeAbsent::True);
 		retainClientLibCopies = true;
 	} else {
 		forwardOption = true;
@@ -2257,11 +2265,11 @@ void MultiVersionApi::setupNetwork() {
 					auto libCopies = copyExternalLibraryPerThread(path);
 					for (int idx = 0; idx < libCopies.size(); ++idx) {
 						bool unlinkOnLoad = libCopies[idx].second && !retainClientLibCopies;
-						externalClients[filename].push_back(Reference<ClientInfo>(
-						    new ClientInfo(new DLApi(libCopies[idx].first, unlinkOnLoad /*unlink on load*/),
-						                   path,
-						                   useFutureVersion,
-						                   idx)));
+						externalClients[filename].push_back(
+						    makeReference<ClientInfo>(new DLApi(libCopies[idx].first, unlinkOnLoad /*unlink on load*/),
+						                              path,
+						                              useFutureVersion,
+						                              idx));
 					}
 				}
 			}
@@ -2959,7 +2967,7 @@ THREAD_FUNC runSingleAssignmentVarTest(void* arg) {
 
 struct AbortableTest {
 	static FutureInfo createThreadFuture(FutureInfo f) {
-		ThreadSingleAssignmentVar<Void>* abort = new ThreadSingleAssignmentVar<Void>();
+		auto* abort = new ThreadSingleAssignmentVar<Void>();
 		abort->addref(); // this leaks if abort is never set
 
 		auto newFuture =
@@ -3030,7 +3038,7 @@ struct DLTest {
 			// Functions needed for DLSingleAssignmentVar
 			api->futureSetCallback = [](FdbCApi::FDBFuture* f, FdbCApi::FDBCallback callback, void* callbackParameter) {
 				try {
-					CAPICallback* cb = new CAPICallback(callback, f, callbackParameter);
+					auto* cb = new CAPICallback(callback, f, callbackParameter);
 					int ignore;
 					((ThreadSingleAssignmentVarBase*)f)->callOrSetAsCallback(cb, ignore, 0);
 					return FdbCApi::fdb_error_t(error_code_success);

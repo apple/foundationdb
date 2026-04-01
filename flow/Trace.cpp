@@ -39,7 +39,7 @@
 #include "flow/IThreadPool.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/FastRef.h"
-#include "flow/EventTypes.actor.h"
+#include "flow/EventTypes.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/MetricSample.h"
 #include "flow/network.h"
@@ -64,7 +64,7 @@ unsigned tracedLines = 0;
 thread_local int failedLineOverflow = 0;
 bool g_traceProcessEvents = false;
 
-ITraceLogIssuesReporter::~ITraceLogIssuesReporter() {}
+ITraceLogIssuesReporter::~ITraceLogIssuesReporter() = default;
 
 struct SuppressionMap {
 	struct SuppressionInfo {
@@ -79,7 +79,7 @@ struct SuppressionMap {
 	int64_t checkAndInsertSuppression(std::string type, double duration, bool& suppress) {
 		ASSERT(g_network);
 		if (suppressionMap.size() >= FLOW_KNOBS->MAX_TRACE_SUPPRESSIONS) {
-			TraceEvent(SevWarnAlways, "ClearingTraceSuppressionMap").log();
+			TraceEvent(SevWarnAlways, "ClearingTraceSuppressionMap").writeEvent();
 			suppressionMap.clear();
 		}
 
@@ -134,11 +134,11 @@ private:
 	uint64_t rollsize;
 	Mutex mutex;
 
-	EventMetricHandle<TraceEventNameID> SevErrorNames;
-	EventMetricHandle<TraceEventNameID> SevWarnAlwaysNames;
-	EventMetricHandle<TraceEventNameID> SevWarnNames;
-	EventMetricHandle<TraceEventNameID> SevInfoNames;
-	EventMetricHandle<TraceEventNameID> SevDebugNames;
+	EventMetricHandle<TraceEventNameIDDescriptor> SevErrorNames;
+	EventMetricHandle<TraceEventNameIDDescriptor> SevWarnAlwaysNames;
+	EventMetricHandle<TraceEventNameIDDescriptor> SevWarnNames;
+	EventMetricHandle<TraceEventNameIDDescriptor> SevInfoNames;
+	EventMetricHandle<TraceEventNameIDDescriptor> SevDebugNames;
 
 	struct RoleInfo {
 		std::map<std::string, int> roles;
@@ -146,7 +146,7 @@ private:
 
 		void refreshRolesString() {
 			rolesString = "";
-			for (auto itr : roles) {
+			for (const auto& itr : roles) {
 				if (!rolesString.empty()) {
 					rolesString += ",";
 				}
@@ -277,7 +277,7 @@ public:
 		struct Ping final : TypedAction<WriterThread, Ping> {
 			ThreadReturnPromise<Void> ack;
 
-			explicit Ping() {};
+			explicit Ping() = default;
 			double getTimeEstimate() const override { return 0; }
 		};
 		void action(Ping& ping) {
@@ -375,7 +375,7 @@ public:
 		fields.addField("LogGroup", logGroup);
 
 		RoleInfo const& r = mutateRoleInfo();
-		if (r.rolesString.size() > 0) {
+		if (!r.rolesString.empty()) {
 			fields.addField("Roles", r.rolesString);
 		}
 
@@ -435,7 +435,7 @@ public:
 	void logMetrics(int severity, const char* name, UID id, uint64_t event_ts) {
 		ASSERT(TraceEvent::isNetworkThread() && logTraceEventMetrics);
 
-		EventMetricHandle<TraceEventNameID>* m = nullptr;
+		EventMetricHandle<TraceEventNameIDDescriptor>* m = nullptr;
 		switch (severity) {
 		case SevError:
 			m = &SevErrorNames;
@@ -469,7 +469,7 @@ public:
 
 		MutexHolder hold(mutex);
 		bool roll = false;
-		if (!eventBuffer.size())
+		if (eventBuffer.empty())
 			return Void(); // SOMEDAY: maybe we still roll the tracefile here?
 
 		if (rollsize && bufferLength + loggedLength > rollsize) // SOMEDAY: more conditions to roll
@@ -1169,6 +1169,22 @@ BaseTraceEvent& BaseTraceEvent::detailf(std::string key, const char* valueFormat
 	}
 	return *this;
 }
+
+BaseTraceEvent& BaseTraceEvent::log(const char* valueFormat, ...) {
+	if (enabled) {
+		va_list args;
+		va_start(args, valueFormat);
+		std::string value;
+		int result = vsformat(value, valueFormat, args);
+		va_end(args);
+
+		ASSERT(result >= 0);
+		std::string key = "LogMessage";
+		detailImpl(std::move(key), std::move(value));
+	}
+	return *this;
+}
+
 BaseTraceEvent& BaseTraceEvent::detailfNoMetric(std::string&& key, const char* valueFormat, ...) {
 	if (enabled) {
 		va_list args;
@@ -1189,7 +1205,7 @@ BaseTraceEvent& BaseTraceEvent::detailfNoMetric(std::string&& key, const char* v
 BaseTraceEvent& BaseTraceEvent::trackLatest(const std::string& trackingKey) {
 	ASSERT(!logged);
 	this->trackingKey = trackingKey;
-	ASSERT(this->trackingKey.size() != 0 && this->trackingKey[0] != '/' && this->trackingKey[0] != '\\');
+	ASSERT(!this->trackingKey.empty() && this->trackingKey[0] != '/' && this->trackingKey[0] != '\\');
 	return *this;
 }
 
@@ -1315,7 +1331,7 @@ BaseTraceEvent& BaseTraceEvent::backtrace(const std::string& prefix) {
 	return detail(prefix + "Backtrace", platform::get_backtrace());
 }
 
-void BaseTraceEvent::log() {
+void BaseTraceEvent::writeEvent() {
 	if (!logged) {
 		init();
 		++g_allocation_tracing_disabled;
@@ -1379,12 +1395,12 @@ void BaseTraceEvent::log() {
 BaseTraceEvent::~BaseTraceEvent() {
 	//  fprintf(stderr, "[%s:%d](%s) ~BaseTraceEvent [%p] \n", __FILE_NAME__, __LINE__, __FUNCTION__,
 	//          this);
-	log();
+	writeEvent();
 	if (failedLineOverflow == 1) {
 		failedLineOverflow = 2;
 		auto msg = fmt::format("Traced {} lines", tracedLines);
 		ProcessEvents::trigger("TracedTooManyLines"_sr, StringRef(msg), test_failed());
-		TraceEvent(SevError, "TracedTooManyLines").log();
+		TraceEvent(SevError, "TracedTooManyLines").writeEvent();
 		crashAndDie();
 	}
 }

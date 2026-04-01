@@ -12,8 +12,6 @@ from .parse_tree import (
     ChooseStatement,
     CodeBlock,
     ContinueStatement,
-    Declaration,
-    Descr,
     ForStatement,
     IfStatement,
     LoopStatement,
@@ -211,71 +209,6 @@ class Context:
         self.continue_f = other.continue_f
         self.catch_f_err = other.catch_f_err
         self.try_loop_depth = other.try_loop_depth
-
-
-class DescrCompiler:
-    def __init__(self, descr: "Descr", brace_depth: int) -> None:
-        self.descr = descr
-        self.member_indent_str = "\t" * brace_depth
-
-    def write(self, writer) -> int:
-        lines = 0
-        indent = self.member_indent_str
-        writer.write(
-            f"{indent}template<> struct Descriptor<struct {self.descr.name}> {{\n"
-        )
-        writer.write(
-            f'{indent}\tstatic StringRef typeName() {{ return "{self.descr.name}"_sr; }}\n'
-        )
-        writer.write(f"{indent}\ttypedef {self.descr.name} type;\n")
-        lines += 3
-        for dec in self.descr.body:
-            writer.write(f"{indent}\tstruct {dec.name}Descriptor {{\n")
-            writer.write(
-                f'{indent}\t\tstatic StringRef name() {{ return "{dec.name}"_sr; }}\n'
-            )
-            writer.write(
-                f'{indent}\t\tstatic StringRef typeName() {{ return "{dec.type}"_sr; }}\n'
-            )
-            writer.write(
-                f'{indent}\t\tstatic StringRef comment() {{ return "{dec.comment}"_sr; }}\n'
-            )
-            writer.write(f"{indent}\t\ttypedef {dec.type} type;\n")
-            writer.write(
-                f"{indent}\t\tstatic inline type get({self.descr.name}& from);\n"
-            )
-            writer.write(f"{indent}\t}};\n")
-            lines += 7
-        writer.write(f"{indent}\ttypedef std::tuple<")
-        first = True
-        for dec in self.descr.body:
-            if not first:
-                writer.write(",")
-            writer.write(f"{dec.name}Descriptor")
-            first = False
-        writer.write("> fields;\n")
-        writer.write(
-            f"{indent}\ttypedef make_index_sequence_impl<0, index_sequence<>, std::tuple_size<fields>::value>::type field_indexes;\n"
-        )
-        writer.write(f"{indent}}};\n")
-        if self.descr.super_class_list:
-            writer.write(
-                f"{indent}struct {self.descr.name} : {self.descr.super_class_list} {{\n"
-            )
-        else:
-            writer.write(f"{indent}struct {self.descr.name} {{\n")
-        lines += 4
-        for dec in self.descr.body:
-            writer.write(f"{indent}\t{dec.type} {dec.name}; //{dec.comment}\n")
-            lines += 1
-        writer.write(f"{indent}}};\n")
-        lines += 1
-        for dec in self.descr.body:
-            writer.write(
-                f"{indent}{dec.type} Descriptor<{self.descr.name}>::{dec.name}Descriptor::get({self.descr.name}& from) {{ return from.{dec.name}; }}\n"
-            )
-            lines += 1
-        return lines
 
 
 class ActorCompiler:
@@ -785,7 +718,7 @@ class ActorCompiler:
         cancel_func.specifiers = "override"
         cancel_func.indent(self.code_indent)
         cancel_func.write_line("auto wait_state = this->actor_wait_state;")
-        cancel_func.write_line("this->actor_wait_state = -1;")
+        cancel_func.write_line("this->actor_wait_state = ACTOR_WAIT_STATE_CANCELLED;")
         cancel_func.write_line("switch (wait_state) {")
         last_group = -1
         for cb in sorted(self.callbacks, key=lambda c: c.callback_group):
@@ -1412,7 +1345,8 @@ class ActorCompiler:
         exit_func = self.get_function("exitChoose", "", [])
         exit_func.return_type = "void"
         exit_func.write_line(
-            "if ({0}->actor_wait_state > 0) {0}->actor_wait_state = 0;", self.this
+            "if (actorWaitStateIsWaiting({0}->actor_wait_state)) {0}->actor_wait_state = ACTOR_WAIT_STATE_NOT_WAITING;",
+            self.this,
         )
         for choice in choices:
             exit_func.write_line(
@@ -1554,7 +1488,7 @@ class ActorCompiler:
                 self.line_numberFunction(cx.target, stmt.first_source_line)
                 if self.actor.is_cancellable():
                     cx.target.write_line(
-                        "if ({1}->actor_wait_state < 0) return {0};",
+                        "if (actorWaitStateIsCancelled({1}->actor_wait_state)) return {0};",
                         cx.catch_f_err.call(
                             "actor_cancelled()", self.adjust_loop_depth(cx.try_loop_depth)
                         ),

@@ -141,6 +141,8 @@ public:
 
 	BulkLoadManifest getManifest() const { return manifest; }
 
+	double getSubmitTime() const { return now(); }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, jobId, jobRange, phase, taskId, manifest);

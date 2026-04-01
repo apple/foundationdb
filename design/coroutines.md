@@ -6,6 +6,7 @@
 * [Choose-When](#choose-when)
     * [Execution in when-expressions](#execution-in-when-expressions)
     * [Waiting in When-Blocks](#waiting-in-when-blocks)
+    * [Migrating `choose`-`when`](#migrating-choose-when)
 * [Generators](#generators)
     * [Generators and ranges](#generators-and-ranges)
     * [Eager vs Lazy Execution](#eager-vs-lazy-execution)
@@ -98,9 +99,36 @@ choose {
 }
 ```
 
-Since this is a compiler functionality, we can't use this with C++ coroutines. We could
-keep only this feature around, but only using standard C++ is desirable. So instead, we
-introduce a new `class` called `Choose` to achieve something very similar:
+Since this is a compiler functionality, we can't use this with C++ coroutines. For most
+coroutine conversions, prefer `race(...)` and then branch on the returned `std::variant`.
+This keeps the control flow explicit and usually maps more directly to what the coroutine
+will do after the wait. `Choose` is still available for cases where the old `choose`-`when`
+shape is the clearest fit, or where you need its ordered evaluation behavior described below.
+
+For example, this actor pattern:
+
+```c++
+choose {
+    when(R res = wait(f1)) {
+        return res;
+    }
+    when(wait(timeout(...))) {
+        throw io_timeout();
+    }
+}
+```
+
+should usually become:
+
+```c++
+auto result = co_await race(f1, timeout(...));
+if (result.index() == 0) {
+    co_return std::get<0>(result);
+}
+throw io_timeout();
+```
+
+`Choose` remains useful when you specifically want callback-style handling of the winner:
 
 ```c++
 co_await Choose()
@@ -130,7 +158,7 @@ co_await Choose()
     })
     .When([](){ return foo() }, [](Foo const& f) {
         // do something else
-    }).Run();
+    }).run();
 ```
 
 The implementation of `When` will guarantee that this lambda will only be executed if all previous
@@ -195,7 +223,40 @@ loop {
 }
 ```
 
-However, often using `choose`-`when` (or `Choose().When`) is overkill and other facilities like `quorum` and
+### Migrating `choose`-`when`
+
+When porting actor code, use this rule of thumb:
+
+* Prefer `race(...)` when the `choose` picks one winner and then the code branches on which future completed.
+* Use `Choose()` when you need ordered `when` evaluation, lazy creation of later futures, or the callback style is
+  genuinely clearer than branching on a `std::variant`.
+* Use more specific helpers like `quorum`, `waitForAll`, `waitForAllReady`, or `operator||` when they express the
+  intent better than either `race` or `Choose`.
+
+`race(...)` is usually the best direct replacement for patterns like:
+
+```c++
+choose {
+    when(R res = wait(f1)) {
+        return res;
+    }
+    when(S res = wait(f2)) {
+        return use(res);
+    }
+}
+```
+
+which becomes:
+
+```c++
+auto result = co_await race(f1, f2);
+if (result.index() == 0) {
+    co_return std::get<0>(result);
+}
+co_return use(std::get<1>(result));
+```
+
+However, often using `choose`-`when` is overkill and other facilities like `quorum` and
 `operator||` should be used instead. For example this:
 
 ```c++
@@ -500,7 +561,8 @@ If you have an existing `ACTOR`, you can port it to a C++ coroutine by following
 3. Remove all `state` modifiers from local variables.
 4. Replace all `wait(expr)` with `co_await expr`.
 5. Remove all `waitNext(expr)` with `co_await expr`.
-6. Rewrite existing `choose-when` statements using the `Choose` class.
+6. Rewrite existing `choose-when` statements by preferring `race(...)` for first-ready branching; use `Choose`
+   only when you need ordered `when` semantics or callback-style handling.
 
 In addition, the following things should be looked out for:
 
@@ -789,17 +851,26 @@ When a function is converted from `ACTOR` to a coroutine, any forward declaratio
 If you also write `const&` explicitly, the generated code will contain `const& const&`, which is a compile error.
 
 ```c++
-// workloads.actor.h — WRONG: ACTOR + const& = double const&
+// workloads.h — WRONG: ACTOR + const& = double const&
 ACTOR Future<Void> foo(Database const& cx);
 
-// workloads.actor.h — CORRECT: remove ACTOR since foo() is now a coroutine
+// workloads.h — CORRECT: remove ACTOR since foo() is now a coroutine
 Future<Void> foo(Database const& cx);
 ```
+
+### `DESCR` Deprecation
+
+The older TDMetric `DESCR` shorthand is deprecated. When a coroutine conversion touches metric event types, do not add
+new `DESCR(...)`-style declarations. Instead, define an explicit payload type with a
+`...Descriptor` suffix and specialize `Descriptor<T>` with `DescribeType<...>` and `DescribeField<...>` next to it.
+
+This keeps descriptor types unambiguous in coroutine-converted code and matches the old TDMetric pattern in files
+such as `flow/EventTypes.h`, `fdbclient/EventTypes.h`, and the workload metric definitions.
 
 ### File Naming
 
 Converted files should be renamed from `.actor.cpp` to `.cpp` (or `.actor.h` to `.h`) since they no longer need the
-actor compiler. Both `fdbserver` and `flowbench` use `fdb_find_sources()` in their `CMakeLists.txt`, which
+actor compiler. Both `fdbserver` and `flow_bench` use `fdb_find_sources()` in their `CMakeLists.txt`, which
 automatically picks up files by glob, so the rename is usually sufficient without any CMake changes.
 
 ### Conversion Checklist
@@ -811,7 +882,8 @@ automatically picks up files by glob, so the rename is usually sufficient withou
    - **Check**: is the variable inside a block (`if`/`else`/`for`/`try`)? If so, move it to function scope.
 5. Replace `wait(expr)` with `co_await expr`. Replace `waitNext(expr)` with `co_await expr`.
 6. Replace `return expr` with `co_return expr`. Replace `return Void()` with `co_return`.
-7. Rewrite `choose`/`when` using the `Choose` class.
+7. Rewrite `choose`/`when` by preferring `race(...)`; use `Choose` only for patterns that do not map cleanly to
+   `race`.
 8. Simplify: `wait(success(f))` → `co_await f`; `wait(store(v, f))` → `v = co_await f`.
 9. For `const&` parameters: copy to a local before the first `co_await`.
 10. Remove `ACTOR` from any forward declarations of the converted functions in `.actor.h` files.
@@ -931,7 +1003,7 @@ python3 ../contrib/benchmark_comparison.py
 - OVERALL_GEOMEAN calculations for statistical analysis
 
 **Requirements**:
-- Working flowbench binary with both actor and coroutine benchmarks
+- Working flow_bench binary with both actor and coroutine benchmarks
 - Benchmark infrastructure must include: bench_net2, coroutine_net2, bench_delay, coroutine_delay_bench, coroutine_yield_bench, bench_callback, coroutine_callback
 
 **Usage**: Tool automatically runs benchmarks and generates comparison report in the format matching historical coroutine optimization reports.

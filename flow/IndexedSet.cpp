@@ -396,7 +396,7 @@ TEST_CASE("/flow/IndexedSets/ints") {
 	ASSERT(is.find(20) != is.end());
 
 	for (int i = 20; i < 200; i += 10) {
-		is.insert(std::move(i), 3);
+		is.insert(i, 3);
 		is.testonly_assertBalanced();
 		ASSERT(is.find(i) != is.end());
 	}
@@ -455,7 +455,7 @@ TEST_CASE("/flow/IndexedSet/comparison to std::set") {
 	std::set<int> ss;
 	for (int i = 0; i < 1000000; i++) {
 		int p = deterministicRandom()->randomInt(0, 2000000);
-		is.insert(std::move(p), 1);
+		is.insert(p, 1);
 		ss.insert(p);
 	}
 

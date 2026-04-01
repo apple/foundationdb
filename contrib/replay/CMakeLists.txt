@@ -25,27 +25,23 @@ file(MAKE_DIRECTORY ${REPLAY_OUTPUT_DIR})
 
 # Get all Go source files for dependency tracking
 file(GLOB REPLAY_GO_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*.go")
+set(REPLAY_GO_MOD "${CMAKE_CURRENT_SOURCE_DIR}/go.mod")
+set(REPLAY_GO_SUM "${CMAKE_CURRENT_SOURCE_DIR}/go.sum")
 
-# Custom target to build replay
-# This handles all Go dependencies automatically - users just need Go installed
-# ALL means it builds by default (but only if Go is available - see check above)
-add_custom_target(replay ALL
-    COMMAND ${CMAKE_COMMAND} -E echo "Downloading Go dependencies..."
-    COMMAND ${GO_EXECUTABLE} mod download
-    COMMAND ${CMAKE_COMMAND} -E echo "Tidying Go modules..."
-    COMMAND ${GO_EXECUTABLE} mod tidy
-    COMMAND ${CMAKE_COMMAND} -E echo "Building replay..."
+# Custom command to build replay - only rebuilds when source files change
+# go build handles dependencies automatically (downloads if needed)
+add_custom_command(
+    OUTPUT ${REPLAY_BINARY}
     COMMAND ${GO_EXECUTABLE} build -o ${REPLAY_BINARY} .
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    COMMENT "Building FDB trace replay tool (all dependencies handled automatically)"
-    BYPRODUCTS ${REPLAY_BINARY}
-    SOURCES ${REPLAY_GO_SOURCES}
+    DEPENDS ${REPLAY_GO_SOURCES} ${REPLAY_GO_MOD} ${REPLAY_GO_SUM}
+    COMMENT "Building FDB trace replay tool"
 )
 
-# Make sure the binary is executable
-add_custom_command(TARGET replay POST_BUILD
-    COMMAND chmod +x ${REPLAY_BINARY}
-    COMMENT "Making replay executable"
+# Target that depends on the binary - only triggers rebuild when deps change
+add_custom_target(replay ALL
+    DEPENDS ${REPLAY_BINARY}
+    SOURCES ${REPLAY_GO_SOURCES}
 )
 
 message(STATUS "replay will be built by default (Go found)")

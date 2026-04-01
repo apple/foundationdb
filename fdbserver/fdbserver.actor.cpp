@@ -50,33 +50,26 @@
 #include "fdbclient/SimpleIni.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/IPAllowList.h"
-#include "fdbrpc/FlowProcess.actor.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/PerfMetric.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/FlowGrpc.h"
 #include "fdbrpc/simulator.h"
-#include "fdbserver/ConflictSet.h"
-#include "fdbserver/CoordinationInterface.h"
+#include "fdbserver/coordinator/CoordinationServer.h"
 #include "fdbserver/CoroFlow.h"
-#include "fdbserver/DataDistribution.actor.h"
-#include "fdbserver/FDBExecHelper.actor.h"
-#include "fdbserver/IKeyValueStore.h"
-#include "fdbserver/MoveKeys.actor.h"
+#include "fdbserver/datadistributor/DataDistribution.h"
+#include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/NetworkTest.h"
-#include "fdbserver/RemoteIKeyValueStore.actor.h"
-#include "fdbserver/RestoreWorkerInterface.actor.h"
-#include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/SimulatedCluster.h"
-#include "fdbserver/Status.actor.h"
-#include "fdbserver/TesterInterface.actor.h"
-#include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/pubsub.h"
-#include "fdbserver/OnDemandStore.h"
-#include "fdbserver/MockS3Server.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/kvstore/KVFileUtils.h"
+#include "fdbserver/core/ServerDBInfo.h"
+#include "fdbserver/datadistributor/SimulatedCluster.h"
+#include "fdbserver/tester/TestEncryptionUtils.h"
+#include "fdbserver/tester/tester.h"
+#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/worker/Worker.h"
+#include "fdbserver/mocks3/MockS3Server.h"
 #ifdef WITH_ROCKSDB
-#include "fdbserver/FDBRocksDBVersion.h"
+#include "fdbserver/core/FDBRocksDBVersion.h"
 #endif
 #include "flow/ArgParseUtil.h"
 #include "flow/DeterministicRandom.h"
@@ -84,7 +77,7 @@
 #include "flow/ProtocolVersion.h"
 #include "SimpleOpt/SimpleOpt.h"
 #include "flow/SystemMonitor.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 #include "fdbclient/Tracing.h"
 #include "flow/WriteOnlySet.h"
 #include "flow/UnitTest.h"
@@ -92,7 +85,7 @@
 #include "flow/flow.h"
 #include "flow/network.h"
 #include "flow/SimpleCounter.h"
-#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupAgent.h"
 
 #include "flow/swift.h"
 #include "flow/swift_concurrency_hooks.h"
@@ -141,7 +134,7 @@ enum {
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_PRINT_CODE_PROBES, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
 	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIALS, OPT_PROXY, OPT_DEPRECATED_CONFIG_PATH, OPT_DEPRECATED_USE_TEST_CONFIG_DB, OPT_DEPRECATED_NO_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
-	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, 
+	OPT_IP_TRUSTED_MASK,
 	OPT_NEW_CLUSTER_KEY, OPT_AUTHZ_PUBLIC_KEY_FILE, OPT_USE_FUTURE_PROTOCOL_VERSION, OPT_CONSISTENCY_CHECK_URGENT_MODE,
 	OPT_MOCKS3_PERSISTENCE_DIR
 };
@@ -238,8 +231,6 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_FAULT_INJECTION,       "--fault-injection",           SO_REQ_SEP },
 	{ OPT_PROFILER,	             "--profiler-",                 SO_REQ_SEP },
 	{ OPT_PRINT_SIMTIME,         "--print-sim-time",             SO_NONE },
-	{ OPT_FLOW_PROCESS_NAME,     "--process-name",              SO_REQ_SEP },
-	{ OPT_FLOW_PROCESS_ENDPOINT, "--process-endpoint",          SO_REQ_SEP },
 	{ OPT_IP_TRUSTED_MASK,       "--trusted-subnet-",           SO_REQ_SEP },
 	{ OPT_NEW_CLUSTER_KEY,       "--new-cluster-key",           SO_REQ_SEP },
 	{ OPT_AUTHZ_PUBLIC_KEY_FILE, "--authorization-public-key-file", SO_REQ_SEP },
@@ -476,67 +467,6 @@ void testSerializationSpeed() {
 	printf("  Deallocate: %0.1f MB/sec\n", bytes / 1e6 / deallocate);
 	printf("  Bytes: %0.1f MB\n", bytes / 1e6);
 	printf("\n");
-}
-
-std::string toHTML(const StringRef& binaryString) {
-	std::string s;
-
-	for (int i = 0; i < binaryString.size(); i++) {
-		uint8_t c = binaryString[i];
-		if (c == '<')
-			s += "&lt;";
-		else if (c == '>')
-			s += "&gt;";
-		else if (c == '&')
-			s += "&amp;";
-		else if (c == '"')
-			s += "&quot;";
-		else if (c == ' ')
-			s += "&nbsp;";
-		else if (c > 32 && c < 127)
-			s += c;
-		else
-			s += format("<span class=\"binary\">[%02x]</span>", c);
-	}
-
-	return s;
-}
-
-ACTOR Future<Void> dumpDatabase(Database cx, std::string outputFilename, KeyRange range = allKeys) {
-	try {
-		state Transaction tr(cx);
-		loop {
-			state FILE* output = fopen(outputFilename.c_str(), "wt");
-			try {
-				state KeySelectorRef iter = firstGreaterOrEqual(range.begin);
-				state Arena arena;
-				fprintf(output, "<html><head><style type=\"text/css\">.binary {color:red}</style></head><body>\n");
-				Version ver = wait(tr.getReadVersion());
-				fprintf(output, "<h3>Database version: %" PRId64 "</h3>", ver);
-
-				loop {
-					RangeResult results = wait(tr.getRange(iter, firstGreaterOrEqual(range.end), 1000));
-					for (int r = 0; r < results.size(); r++) {
-						std::string key = toHTML(results[r].key), value = toHTML(results[r].value);
-						fprintf(output, "<p>%s <b>:=</b> %s</p>\n", key.c_str(), value.c_str());
-					}
-					if (results.size() < 1000)
-						break;
-					iter = firstGreaterThan(KeyRef(arena, results[results.size() - 1].key));
-				}
-				fprintf(output, "</body></html>");
-				fclose(output);
-				TraceEvent("DatabaseDumped").detail("Filename", outputFilename);
-				return Void();
-			} catch (Error& e) {
-				fclose(output);
-				wait(tr.onError(e));
-			}
-		}
-	} catch (Error& e) {
-		TraceEvent(SevError, "DumpDatabaseError").error(e).detail("Filename", outputFilename);
-		throw;
-	}
 }
 
 void memoryTest();
@@ -1109,7 +1039,6 @@ enum class ServerRole {
 	CreateTemplateDatabase,
 	DSLTest,
 	FDBD,
-	FlowProcess,
 	KVFileGenerateIOLogChecksums,
 	KVFileIntegrityCheck,
 	KVFileDump,
@@ -1182,8 +1111,6 @@ struct CLIOptions {
 	UnitTestParameters testParams;
 
 	std::map<std::string, std::string> profilerConfig;
-	std::string flowProcessName;
-	Endpoint flowProcessEndpoint;
 	bool printSimTime = false;
 	IPAllowList allowList;
 
@@ -1406,8 +1333,6 @@ private:
 					role = ServerRole::NetworkTestClient;
 				else if (!strcmp(sRole, "networktestserver"))
 					role = ServerRole::NetworkTestServer;
-				else if (!strcmp(sRole, "restore"))
-					role = ServerRole::Restore;
 				else if (!strcmp(sRole, "kvfileintegritycheck"))
 					role = ServerRole::KVFileIntegrityCheck;
 				else if (!strcmp(sRole, "kvfilegeneratesums"))
@@ -1420,8 +1345,6 @@ private:
 					role = ServerRole::ConsistencyCheckUrgent;
 				else if (!strcmp(sRole, "unittests"))
 					role = ServerRole::UnitTests;
-				else if (!strcmp(sRole, "flowprocess"))
-					role = ServerRole::FlowProcess;
 				else if (!strcmp(sRole, "changeclusterkey"))
 					role = ServerRole::ChangeClusterKey;
 				else if (!strcmp(sRole, "mocks3server"))
@@ -1774,42 +1697,6 @@ private:
 			case OPT_DEPRECATED_NO_CONFIG_DB:
 				warnDeprecatedOption(args.OptionText());
 				break;
-			case OPT_FLOW_PROCESS_NAME:
-				flowProcessName = args.OptionArg();
-				std::cout << flowProcessName << std::endl;
-				break;
-			case OPT_FLOW_PROCESS_ENDPOINT: {
-				std::vector<std::string> strings;
-				std::cout << args.OptionArg() << std::endl;
-				boost::split(strings, args.OptionArg(), [](char c) { return c == ','; });
-				for (auto& str : strings) {
-					std::cout << str << " ";
-				}
-				std::cout << "\n";
-				if (strings.size() != 3) {
-					std::cerr << "Invalid argument, expected 3 elements in --process-endpoint got " << strings.size()
-					          << std::endl;
-					flushAndExit(FDB_EXIT_ERROR);
-				}
-				try {
-					auto addr = NetworkAddress::parse(strings[0]);
-					uint64_t fst = std::stoul(strings[1]);
-					uint64_t snd = std::stoul(strings[2]);
-					UID token(fst, snd);
-					NetworkAddressList l;
-					l.address = addr;
-					flowProcessEndpoint = Endpoint(l, token);
-					std::cout << "flowProcessEndpoint: " << flowProcessEndpoint.getPrimaryAddress().toString()
-					          << ", token: " << flowProcessEndpoint.token.toString() << "\n";
-				} catch (Error& e) {
-					std::cerr << "Could not parse network address " << strings[0] << std::endl;
-					flushAndExit(FDB_EXIT_ERROR);
-				} catch (std::exception& e) {
-					std::cerr << "Could not parse token " << strings[1] << "," << strings[2] << std::endl;
-					flushAndExit(FDB_EXIT_ERROR);
-				}
-				break;
-			}
 			case OPT_PRINT_SIMTIME:
 				printSimTime = true;
 				break;
@@ -2118,15 +2005,6 @@ int main(int argc, char* argv[]) {
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
 		g_knobs.initialize(Randomize::True, role == ServerRole::Simulation ? IsSimulated::True : IsSimulated::False);
 
-		if (!SERVER_KNOBS->ALLOW_DANGEROUS_KNOBS) {
-			if (SERVER_KNOBS->REMOTE_KV_STORE) {
-				fprintf(stderr,
-				        "ERROR : explicitly setting REMOTE_KV_STORE is dangerous! set ALLOW_DANGEROUS_KNOBS to "
-				        "proceed anyways\n");
-				flushAndExit(FDB_EXIT_ERROR);
-			}
-		}
-
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY);
 
@@ -2204,8 +2082,7 @@ int main(int argc, char* argv[]) {
 			opts.buildNetwork(argv[0]);
 
 			const bool expectsPublicAddress =
-			    (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer || role == ServerRole::Restore ||
-			     role == ServerRole::FlowProcess || role == ServerRole::MockS3Server);
+			    (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer || role == ServerRole::MockS3Server);
 			if (opts.publicAddressStrs.empty()) {
 				if (expectsPublicAddress) {
 					fprintf(stderr, "ERROR: The -p or --public-address option is required\n");
@@ -2477,8 +2354,7 @@ int main(int argc, char* argv[]) {
 		} else if (role == ServerRole::FDBD) {
 			// Update the global blob credential files list so that both fast
 			// restore workers and backup workers can access blob storage.
-			std::vector<std::string>* pFiles =
-			    (std::vector<std::string>*)g_network->global(INetwork::enBlobCredentialFiles);
+			auto* pFiles = static_cast<std::vector<std::string>*>(g_network->global(INetwork::enBlobCredentialFiles));
 			if (pFiles != nullptr) {
 				for (auto& f : opts.blobCredentials) {
 					pFiles->push_back(f);
@@ -2486,57 +2362,43 @@ int main(int argc, char* argv[]) {
 			}
 
 			// Update proxy string
-			Optional<std::string>* pProxy = (Optional<std::string>*)g_network->global(INetwork::enProxy);
+			auto* pProxy = static_cast<Optional<std::string>*>(g_network->global(INetwork::enProxy));
 			*pProxy = opts.proxy;
 
-			// Call fast restore for the class FastRestoreClass. This is a short-cut to run fast restore in circus
-			if (opts.processClass == ProcessClass::FastRestoreClass) {
-				printf("Run as fast restore worker\n");
-				ASSERT(opts.connectionFile);
-				auto dataFolder = opts.dataFolder;
-				if (!dataFolder.size())
-					dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
+			ASSERT(opts.connectionFile);
 
-				std::vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
-				actors.push_back(restoreWorker(opts.connectionFile, opts.localities, dataFolder));
-				f = stopAfter(waitForAll(actors));
-				printf("Fast restore worker started\n");
-				g_network->run();
-				printf("g_network->run() done\n");
-			} else { // Call fdbd roles in conventional way
-				ASSERT(opts.connectionFile);
+			setupRunLoopProfiler();
 
-				setupRunLoopProfiler();
+			auto dataFolder = opts.dataFolder;
+			if (!dataFolder.size())
+				dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
 
-				auto dataFolder = opts.dataFolder;
-				if (!dataFolder.size())
-					dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
+			std::vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
 
-				std::vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
+			actors.push_back(fdbd(opts.connectionFile,
+			                      opts.localities,
+			                      opts.processClass,
+			                      dataFolder,
+			                      dataFolder,
+			                      opts.storageMemLimit,
+			                      opts.metricsConnFile,
+			                      opts.metricsPrefix,
+			                      opts.rsssize,
+			                      opts.whitelistBinPaths,
+			                      opts.consistencyCheckUrgentMode));
+			actors.push_back(histogramReport());
+			actors.push_back(metricsReport());
 
 #ifdef FLOW_GRPC_ENABLED
-				if (opts.grpcAddressStrs.size() > 0) {
-					FlowGrpc::init(&opts.tlsConfig, NetworkAddress::parse(opts.grpcAddressStrs[0]));
-					actors.push_back(GrpcServer::instance()->run());
-				}
-#endif
-				actors.push_back(fdbd(opts.connectionFile,
-				                      opts.localities,
-				                      opts.processClass,
-				                      dataFolder,
-				                      dataFolder,
-				                      opts.storageMemLimit,
-				                      opts.metricsConnFile,
-				                      opts.metricsPrefix,
-				                      opts.rsssize,
-				                      opts.whitelistBinPaths,
-				                      opts.consistencyCheckUrgentMode));
-				actors.push_back(histogramReport());
-				actors.push_back(metricsReport());
-
-				f = stopAfter(waitForAll(actors));
-				g_network->run();
+			if (opts.grpcAddressStrs.size() > 0) {
+				FlowGrpc::init(&opts.tlsConfig, NetworkAddress::parse(opts.grpcAddressStrs[0]));
+				actors.push_back(GrpcServer::instance()->run());
 			}
+#endif
+
+			f = stopAfter(waitForAll(actors));
+			g_network->run();
+
 		} else if (role == ServerRole::MultiTester) {
 			setupRunLoopProfiler();
 			f = stopAfter(runTests(opts.connectionFile,
@@ -2602,9 +2464,6 @@ int main(int argc, char* argv[]) {
 		} else if (role == ServerRole::NetworkTestServer) {
 			f = stopAfter(networkTestServer());
 			g_network->run();
-		} else if (role == ServerRole::Restore) {
-			f = stopAfter(restoreWorker(opts.connectionFile, opts.localities, opts.dataFolder));
-			g_network->run();
 		} else if (role == ServerRole::KVFileIntegrityCheck) {
 			f = stopAfter(KVFileCheck(opts.kvFile, true));
 			g_network->run();
@@ -2618,36 +2477,6 @@ int main(int argc, char* argv[]) {
 			}
 
 			f = result;
-		} else if (role == ServerRole::FlowProcess) {
-			std::string traceFormat = getTraceFormatExtension();
-			// close and reopen trace file with the correct process listen address to name the file
-			closeTraceFile();
-			// writer is not shutdown immediately, addref on it
-			disposeTraceFileWriter();
-			// use the same trace format as before
-			selectTraceFormatter(traceFormat);
-			// create the trace file with the correct process address
-			openTraceFile(
-			    g_network->getLocalAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
-			auto m =
-			    startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId, opts.localities.dataHallId());
-			TraceEvent(SevDebug, "StartingFlowProcess").detail("FlowProcessName", opts.flowProcessName);
-#if defined(__linux__)
-			prctl(PR_SET_PDEATHSIG, SIGTERM);
-			if (getppid() == 1) /* parent already died before prctl */
-				flushAndExit(FDB_EXIT_SUCCESS);
-#elif defined(__FreeBSD__)
-			const int sig = SIGTERM;
-			procctl(P_PID, 0, PROC_PDEATHSIG_CTL, (void*)&sig);
-			if (getppid() == 1) /* parent already died before procctl */
-				flushAndExit(FDB_EXIT_SUCCESS);
-#endif
-
-			if (opts.flowProcessName == "KeyValueStoreProcess") {
-				ProcessFactory<KeyValueStoreProcess>(opts.flowProcessName.c_str());
-			}
-			f = stopAfter(runFlowProcess(opts.flowProcessName, opts.flowProcessEndpoint));
-			g_network->run();
 		} else if (role == ServerRole::KVFileDump) {
 			f = stopAfter(KVFileDump(opts.kvFile));
 			g_network->run();
@@ -2676,49 +2505,12 @@ int main(int argc, char* argv[]) {
 		if (role == ServerRole::Simulation) {
 			printf("Unseed: %d\n", unseed);
 			printf("Elapsed: %f simsec, %f real seconds\n", now() - startNow, timer() - start);
-		}
-
-		// IFailureMonitor::failureMonitor().address_info.clear();
-
-		// we should have shut down ALL actors associated with this machine; let's list all of the ones still live
-		/*{
-		    auto living = Actor::all;
-		    printf("%d surviving actors:\n", living.size());
-		    for(auto a = living.begin(); a != living.end(); ++a)
-		        printf("  #%lld %s %p\n", (*a)->creationIndex, (*a)->getName(), (*a));
-		}
-
-		{
-		    auto living = DatabaseContext::all;
-		    printf("%d surviving DatabaseContexts:\n", living.size());
-		    for(auto a = living.begin(); a != living.end(); ++a)
-		        printf("  #%lld %p\n", (*a)->creationIndex, (*a));
-		}
-
-		{
-		    auto living = TransactionData::all;
-		    printf("%d surviving TransactionData(s):\n", living.size());
-		    for(auto a = living.begin(); a != living.end(); ++a)
-		        printf("  #%lld %p\n", (*a)->creationIndex, (*a));
-		}*/
-
-		/*cout << Actor::allActors.size() << " surviving actors:" << std::endl;
-		std::map<std::string,int> actorCount;
-		for(int i=0; i<Actor::allActors.size(); i++)
-		    ++actorCount[Actor::allActors[i]->getName()];
-		for(auto i = actorCount.rbegin(); !(i == actorCount.rend()); ++i)
-		    std::cout << "  " << i->second << " " << i->first << std::endl;*/
-		//	std::cout << "  " << Actor::allActors[i]->getName() << std::endl;
-
-		if (role == ServerRole::Simulation) {
 			unsigned long sevErrorEventsLogged = TraceEvent::CountEventsLoggedAt(SevError);
 			if (sevErrorEventsLogged > 0) {
 				printf("%lu SevError events logged\n", sevErrorEventsLogged);
 				rc = FDB_EXIT_ERROR;
 			}
 		}
-
-		// g_simulator->run();
 
 #ifdef ALLOC_INSTRUMENTATION
 		{
@@ -2770,23 +2562,19 @@ int main(int argc, char* argv[]) {
 			memSample_entered = true;
 		}
 #endif
-		// printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
 		flushAndExit(rc);
 	} catch (Error& e) {
 		fprintf(stderr, "Error: %s\n", e.what());
 		TraceEvent(SevError, "MainError").error(e);
-		// printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
 		flushAndExit(FDB_EXIT_MAIN_ERROR);
 	} catch (boost::system::system_error& e) {
 		ASSERT_WE_THINK(false); // boost errors shouldn't leak
 		fprintf(stderr, "boost::system::system_error: %s (%d)", e.what(), e.code().value());
 		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
-		// printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
 		flushAndExit(FDB_EXIT_MAIN_EXCEPTION);
 	} catch (std::exception& e) {
 		fprintf(stderr, "std::exception: %s\n", e.what());
 		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
-		// printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
 		flushAndExit(FDB_EXIT_MAIN_EXCEPTION);
 	}
 

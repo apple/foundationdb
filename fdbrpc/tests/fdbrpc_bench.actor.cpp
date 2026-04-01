@@ -23,7 +23,7 @@
 
 #include "flow/flow.h"
 #include "flow/Platform.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/FlowTransport.h"
 #include "flow/actorcompiler.h" // has to be last include
@@ -72,7 +72,7 @@ struct EchoRequest {
 // where each entry counts the number of hits each second.
 class StatCounter {
 public:
-	StatCounter(int size = 10) : vals(size) {}
+	explicit StatCounter(int size = 10) : vals(size) {}
 
 	// Returns the average number of hits per seconds over last `size` seconds.
 	int avg() {

@@ -875,12 +875,13 @@ typename IndexedSet<T, Metric>::iterator IndexedSet<T, Metric>::insert(T_&& data
 		t = nextT;
 	}
 
+	Metric metricDelta = metric;
 	Node* newNode = new Node(std::forward<T_>(data), std::forward<Metric_>(metric), t);
 	t->child[d] = newNode;
 
 	while (true) {
 		t->balance += d ? 1 : -1;
-		t->total = t->total + metric;
+		t->total = t->total + metricDelta;
 		if (t->balance == 0)
 			break;
 		if (t->balance != 1 && t->balance != -1) {
@@ -909,7 +910,7 @@ typename IndexedSet<T, Metric>::iterator IndexedSet<T, Metric>::insert(T_&& data
 		t = t->parent;
 		if (!t)
 			break;
-		t->total = t->total + metric;
+		t->total = t->total + metricDelta;
 	}
 
 	return iterator{ newNode };

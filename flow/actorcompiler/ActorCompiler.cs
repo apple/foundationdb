@@ -237,73 +237,6 @@ namespace actorcompiler
         public int CallbackGroup;
     }
 
-    class DescrCompiler
-    {
-        Descr descr;
-        string memberIndentStr;
-
-        public DescrCompiler(Descr descr, int braceDepth)
-        {
-            this.descr = descr;
-            this.memberIndentStr = new string('\t', braceDepth);
-        }
-        public void Write(TextWriter writer, out int lines)
-        {
-            lines = 0;
-
-            writer.WriteLine(memberIndentStr + "template<> struct Descriptor<struct {0}> {{", descr.name);
-            writer.WriteLine(memberIndentStr + "\tstatic StringRef typeName() {{ return \"{0}\"_sr; }}", descr.name);
-            writer.WriteLine(memberIndentStr + "\ttypedef {0} type;", descr.name);
-            lines += 3;
-
-            foreach (var dec in descr.body)
-            {
-                writer.WriteLine(memberIndentStr + "\tstruct {0}Descriptor {{", dec.name);
-                writer.WriteLine(memberIndentStr + "\t\tstatic StringRef name() {{ return \"{0}\"_sr; }}", dec.name);
-                writer.WriteLine(memberIndentStr + "\t\tstatic StringRef typeName() {{ return \"{0}\"_sr; }}", dec.type);
-                writer.WriteLine(memberIndentStr + "\t\tstatic StringRef comment() {{ return \"{0}\"_sr; }}", dec.comment);
-                writer.WriteLine(memberIndentStr + "\t\ttypedef {0} type;", dec.type);
-                writer.WriteLine(memberIndentStr + "\t\tstatic inline type get({0}& from);", descr.name);
-                writer.WriteLine(memberIndentStr + "\t};");
-                lines += 7;
-            }
-
-            writer.Write(memberIndentStr + "\ttypedef std::tuple<");
-            bool FirstDesc = true;
-            foreach (var dec in descr.body)
-            {
-                if (!FirstDesc)
-                    writer.Write(",");
-                writer.Write("{0}Descriptor", dec.name);
-                FirstDesc = false;
-            }
-            writer.Write("> fields;\n");
-            writer.WriteLine(memberIndentStr + "\ttypedef make_index_sequence_impl<0, index_sequence<>, std::tuple_size<fields>::value>::type field_indexes;");
-            writer.WriteLine(memberIndentStr + "};");
-            if(descr.superClassList != null)
-                writer.WriteLine(memberIndentStr + "struct {0} : {1} {{", descr.name, descr.superClassList);
-            else
-                writer.WriteLine(memberIndentStr + "struct {0} {{", descr.name);
-            lines += 4;
-
-            foreach (var dec in descr.body)
-            {
-                writer.WriteLine(memberIndentStr + "\t{0} {1}; //{2}", dec.type, dec.name, dec.comment);
-                lines++;
-            }
-
-            writer.WriteLine(memberIndentStr + "};");
-            lines++;
-
-            foreach (var dec in descr.body)
-            {
-                writer.WriteLine(memberIndentStr + "{0} Descriptor<{1}>::{2}Descriptor::get({1}& from) {{ return from.{2}; }}", dec.type, descr.name, dec.name);
-                lines++;
-            }
-
-        }
-    }
-
     class ActorCompiler
     {
         Actor actor;
@@ -869,7 +802,7 @@ namespace actorcompiler
 
             var exitFunc = getFunction("exitChoose", "");
             exitFunc.returnType = "void";
-            exitFunc.WriteLine("if ({0}->actor_wait_state > 0) {0}->actor_wait_state = 0;", This);
+            exitFunc.WriteLine("if (actorWaitStateIsWaiting({0}->actor_wait_state)) {0}->actor_wait_state = ACTOR_WAIT_STATE_NOT_WAITING;", This);
             foreach(var ch in choices)
                 exitFunc.WriteLine("{0}->{1}::remove();", This, ch.CallbackTypeInStateClass);
             exitFunc.endIsUnreachable = true;
@@ -991,7 +924,7 @@ namespace actorcompiler
                     firstChoice = false;
                     LineNumber(cx.target, stmt.FirstSourceLine);
                     if (actor.IsCancellable())
-                        cx.target.WriteLine("if ({1}->actor_wait_state < 0) return {0};", cx.catchFErr.call("actor_cancelled()", AdjustLoopDepth(cx.tryLoopDepth)), This);
+                        cx.target.WriteLine("if (actorWaitStateIsCancelled({1}->actor_wait_state)) return {0};", cx.catchFErr.call("actor_cancelled()", AdjustLoopDepth(cx.tryLoopDepth)), This);
                 }
 
                 cx.target.WriteLine("if ({0}.isReady()) {{ if ({0}.isError()) return {2}; else return {1}; }};", ch.Future, ch.Body.call(ch.Future + "." + getFunc + "()", "loopDepth"), cx.catchFErr.call(ch.Future + ".getError()", AdjustLoopDepth(cx.tryLoopDepth)));
@@ -1330,7 +1263,7 @@ namespace actorcompiler
                 };
                 cancelFunc.Indent(codeIndent);
                 cancelFunc.WriteLine("auto wait_state = this->actor_wait_state;");
-                cancelFunc.WriteLine("this->actor_wait_state = -1;");
+                cancelFunc.WriteLine("this->actor_wait_state = ACTOR_WAIT_STATE_CANCELLED;");
                 cancelFunc.WriteLine("switch (wait_state) {");
                 int lastGroup = -1;
                 foreach (var cb in callbacks.OrderBy(cb => cb.CallbackGroup))

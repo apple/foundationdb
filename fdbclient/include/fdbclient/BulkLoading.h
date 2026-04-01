@@ -25,6 +25,7 @@
 #include "flow/Platform.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/Trace.h"
+#include "flow/Util.h"
 #include <cstdint>
 #include <string>
 #pragma once
@@ -866,7 +867,7 @@ public:
 		                  ", [JobRange]: " + jobRange.toString() +
 		                  ", [Phase]: " + convertBulkLoadJobPhaseToString(phase) +
 		                  ", [TransportMethod]: " + convertBulkLoadTransportMethodToString(transportMethod);
-		res = res + ", [SubmitTime]: " + std::to_string(submitTime);
+		res = res + ", [SubmitTime]: " + formatTimeISO8601(submitTime);
 		res = res + ", [SinceSubmitMins]: " + std::to_string((now() - submitTime) / 60.0);
 		if (taskCount.present()) {
 			res = res + ", [TaskCount]: " + std::to_string(taskCount.get());

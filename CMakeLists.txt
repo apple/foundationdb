@@ -27,7 +27,11 @@ project(foundationdb
   VERSION 8.0.0
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
   HOMEPAGE_URL "http://www.foundationdb.org/"
-  LANGUAGES C CXX ASM Swift)
+  LANGUAGES C CXX ASM)
+
+if(WITH_SWIFT)
+  enable_language(Swift)
+endif()
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
@@ -297,10 +301,6 @@ if(NOT WIN32)
 endif()
 add_subdirectory(fdbbackup)
 add_subdirectory(tests)
-if(NOT FOUNDATIONDB_CROSS_COMPILING) # FIXME(swift): make this work when
-                                     # x-compiling.
-  add_subdirectory(flowbench EXCLUDE_FROM_ALL)
-endif()
 if(WITH_PYTHON AND WITH_C_BINDING)
   if(NOT FOUNDATIONDB_CROSS_COMPILING) # FIXME(swift): make this work when
                                        # x-compiling.

@@ -51,7 +51,7 @@
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
-#include "flow/WatchFile.actor.h"
+#include "flow/WatchFile.h"
 #include "flow/IConnection.h"
 #define XXH_INLINE_ALL
 #include "flow/xxhash.h"
@@ -230,7 +230,7 @@ void EndpointMap::remove(Endpoint::Token const& token, NetworkMessageReceiver* r
 }
 
 struct EndpointNotFoundReceiver final : NetworkMessageReceiver {
-	EndpointNotFoundReceiver(EndpointMap& endpoints) {
+	explicit EndpointNotFoundReceiver(EndpointMap& endpoints) {
 		endpoints.insertWellKnown(
 		    this, Endpoint::wellKnownToken(WLTOKEN_ENDPOINT_NOT_FOUND), TaskPriority::DefaultEndpoint);
 	}
@@ -256,7 +256,7 @@ struct PingRequest {
 };
 
 struct PingReceiver final : NetworkMessageReceiver {
-	PingReceiver(EndpointMap& endpoints) {
+	explicit PingReceiver(EndpointMap& endpoints) {
 		endpoints.insertWellKnown(this, Endpoint::wellKnownToken(WLTOKEN_PING_PACKET), TaskPriority::ReadSocket);
 	}
 	void receive(ArenaObjectReader& reader) override {
@@ -271,7 +271,7 @@ struct PingReceiver final : NetworkMessageReceiver {
 };
 
 struct UnauthorizedEndpointReceiver final : NetworkMessageReceiver {
-	UnauthorizedEndpointReceiver(EndpointMap& endpoints) {
+	explicit UnauthorizedEndpointReceiver(EndpointMap& endpoints) {
 		endpoints.insertWellKnown(
 		    this, Endpoint::wellKnownToken(WLTOKEN_UNAUTHORIZED_ENDPOINT), TaskPriority::ReadSocket);
 	}
@@ -294,7 +294,7 @@ struct UnauthorizedEndpointReceiver final : NetworkMessageReceiver {
 class NetworkAddressCachedString {
 public:
 	NetworkAddressCachedString() { setAddressList(NetworkAddressList()); }
-	NetworkAddressCachedString(NetworkAddressList const& list) { setAddressList(list); }
+	explicit NetworkAddressCachedString(NetworkAddressList const& list) { setAddressList(list); }
 	NetworkAddressList const& getAddressList() const { return addressList; }
 	void setAddressList(NetworkAddressList const& list) {
 		cachedStr = Standalone<StringRef>(StringRef(list.address.toString()));
@@ -387,9 +387,9 @@ struct ConnectionLogWriter : IThreadPoolReceiver {
 	std::string fileName;
 	std::fstream file;
 
-	ConnectionLogWriter(const std::string baseDir) : baseDir(baseDir) {}
+	explicit ConnectionLogWriter(const std::string baseDir) : baseDir(baseDir) {}
 
-	virtual ~ConnectionLogWriter() {
+	~ConnectionLogWriter() override {
 		if (file.is_open())
 			file.close();
 	}
@@ -400,12 +400,12 @@ struct ConnectionLogWriter : IThreadPoolReceiver {
 		AppendAction(std::string localAddr, std::deque<TransportData::ConnectionHistoryEntry>&& entries)
 		  : localAddr(localAddr), entries(std::move(entries)) {}
 
-		double getTimeEstimate() const { return 2; }
+		double getTimeEstimate() const override { return 2; }
 	};
 
 	std::string newFileName() const { return baseDir + "fdb-connection-log-" + time_str() + ".csv"; }
 
-	void init() { fileName = newFileName(); }
+	void init() override { fileName = newFileName(); }
 
 	std::string time_str() const { return std::to_string(now()); }
 
@@ -1157,8 +1157,8 @@ void Peer::onIncomingConnection(Reference<Peer> self, Reference<IConnection> con
 }
 
 TransportData::~TransportData() {
-	for (auto& p : peers) {
-		p.second->connect.cancel();
+	for (auto& [_peerAddress, peer] : peers) {
+		peer->connect.cancel();
 	}
 }
 
@@ -1818,8 +1818,8 @@ FlowTransport::FlowTransport(uint64_t transportId, int maxWellKnownEndpoints, IP
   : self(new TransportData(transportId, maxWellKnownEndpoints, allowList)) {
 	self->multiVersionCleanup = multiVersionCleanupWorker(self);
 	if (g_network->isSimulated()) {
-		for (auto const& p : g_simulator->authKeys) {
-			self->publicKeys.emplace(p.first, p.second.toPublic());
+		for (const auto& [keyName, key] : g_simulator->authKeys) {
+			self->publicKeys.emplace(keyName, key.toPublic());
 		}
 	}
 }

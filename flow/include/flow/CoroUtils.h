@@ -25,22 +25,63 @@
 
 namespace coro {
 
-template <class Parent, int Idx, class F>
-using ConditionalActorCallback = std::conditional_t<GetFutureTypeV<F> == FutureType::Future,
-                                                    ActorCallback<Parent, Idx, FutureReturnTypeT<F>>,
-                                                    ActorSingleCallback<Parent, Idx, FutureReturnTypeT<F>>>;
+// Adapts `AsyncResult<T>` callbacks to the same callback interface used by
+// `choose()` and `race()` over Future/FutureStream inputs.
+template <class Parent, int Idx, class ValueType>
+struct ActorAsyncResultCallback : AsyncResultCallback<ValueType> {
+	AsyncResultState<ValueType>* state = nullptr;
+
+	void bind(AsyncResult<ValueType>& result) { state = result.state; }
+
+	void remove() {
+		if (state) {
+			state->clearCallback(this);
+			state = nullptr;
+		}
+	}
+
+	void fire(ValueType const& value) override {
+#ifdef ENABLE_SAMPLING
+		LineageScope _(static_cast<Parent*>(this)->lineageAddr());
+#endif
+		static_cast<Parent*>(this)->a_callback_fire(this, value);
+	}
+
+	void fire(ValueType&& value) override {
+#ifdef ENABLE_SAMPLING
+		LineageScope _(static_cast<Parent*>(this)->lineageAddr());
+#endif
+		static_cast<Parent*>(this)->a_callback_fire(this, std::move(value));
+	}
+
+	void error(Error e) override {
+#ifdef ENABLE_SAMPLING
+		LineageScope _(static_cast<Parent*>(this)->lineageAddr());
+#endif
+		static_cast<Parent*>(this)->a_callback_error(this, e);
+	}
+};
+
+template <class Parent, int Idx, class AwaitableType>
+using ConditionalActorCallback =
+    std::conditional_t<GetFutureTypeV<AwaitableType> == FutureType::Future,
+                       ActorCallback<Parent, Idx, FutureReturnTypeT<AwaitableType>>,
+                       std::conditional_t<GetFutureTypeV<AwaitableType> == FutureType::FutureStream,
+                                          ActorSingleCallback<Parent, Idx, FutureReturnTypeT<AwaitableType>>,
+                                          ActorAsyncResultCallback<Parent, Idx, FutureReturnTypeT<AwaitableType>>>>;
 
 template <class Parent, int Idx, class... Args>
 struct ChooseImplCallback;
 
-template <class Parent, int Idx, class F, class... Args>
-struct ChooseImplCallback<Parent, Idx, F, Args...>
-  : ConditionalActorCallback<ChooseImplCallback<Parent, Idx, F, Args...>, Idx, F>,
+template <class Parent, int Idx, class AwaitableType, class... Args>
+struct ChooseImplCallback<Parent, Idx, AwaitableType, Args...>
+  : ConditionalActorCallback<ChooseImplCallback<Parent, Idx, AwaitableType, Args...>, Idx, AwaitableType>,
     ChooseImplCallback<Parent, Idx + 1, Args...> {
 
-	using ThisCallback = ConditionalActorCallback<ChooseImplCallback<Parent, Idx, F, Args...>, Idx, F>;
-	using ValueType = FutureReturnTypeT<F>;
-	static constexpr FutureType futureType = GetFutureTypeV<F>;
+	using ThisCallback =
+	    ConditionalActorCallback<ChooseImplCallback<Parent, Idx, AwaitableType, Args...>, Idx, AwaitableType>;
+	using ValueType = FutureReturnTypeT<AwaitableType>;
+	static constexpr FutureType futureType = GetFutureTypeV<AwaitableType>;
 
 	[[nodiscard]] Parent* getParent() { return static_cast<Parent*>(this); }
 
@@ -58,7 +99,7 @@ struct ChooseImplCallback<Parent, Idx, F, Args...>
 	}
 
 	void a_callback_fire(ThisCallback*, ValueType const& value) {
-		getParent()->actor_wait_state = 0;
+		getParent()->actor_wait_state = ACTOR_WAIT_STATE_NOT_WAITING;
 		getParent()->removeCallbacks();
 		try {
 			std::get<Idx>(getParent()->functions)(value);
@@ -71,7 +112,7 @@ struct ChooseImplCallback<Parent, Idx, F, Args...>
 	}
 
 	void a_callback_error(ThisCallback*, Error e) {
-		getParent()->actor_wait_state = 0;
+		getParent()->actor_wait_state = ACTOR_WAIT_STATE_NOT_WAITING;
 		getParent()->removeCallbacks();
 		getParent()->SAV<Void>::sendErrorAndDelPromiseRef(e);
 	}
@@ -105,13 +146,13 @@ struct ChooseImplActor final : Actor<Void>,
 	                std::tuple<std::function<void(FutureReturnTypeT<Args> const&)>...>&& functions)
 	  : Actor<Void>(), futures(futures), functions(functions) {
 		ChooseImplCallback<ChooseImplActor<Args...>, 0, Args...>::registerCallbacks();
-		actor_wait_state = 1;
+		actor_wait_state = ACTOR_WAIT_STATE_WAITING;
 	}
 
 	void cancel() override {
 		const auto waitState = actor_wait_state;
-		actor_wait_state = -1;
-		if (waitState > 0) {
+		actor_wait_state = ACTOR_WAIT_STATE_CANCELLED;
+		if (actorWaitStateIsWaiting(waitState)) {
 			ChooseImplCallback<ChooseImplActor<Args...>, 0, Args...>::removeCallbacks();
 			SAV<Void>::sendErrorAndDelPromiseRef(actor_cancelled());
 		}
@@ -212,9 +253,146 @@ public:
 	}
 };
 
+template <class... Futures>
+using RaceResult = std::variant<FutureReturnTypeT<std::decay_t<Futures>>...>;
+
+template <std::size_t Idx, class Result, class AwaitableType>
+Future<Result> raceReadyResult(AwaitableType&& future) {
+	if (future.isError()) {
+		return future.getError();
+	}
+	if constexpr (GetFutureTypeV<std::remove_cvref_t<AwaitableType>> == FutureType::Future) {
+		return Result(std::in_place_index<Idx>, future.get());
+	} else if constexpr (GetFutureTypeV<std::remove_cvref_t<AwaitableType>> == FutureType::FutureStream) {
+		auto fs = future;
+		return Result(std::in_place_index<Idx>, fs.pop());
+	} else {
+		return Result(std::in_place_index<Idx>, std::forward<AwaitableType>(future).get());
+	}
+}
+
+template <std::size_t Idx, class Result, class First, class... Rest>
+Future<Result> raceReady(First&& first, Rest&&... rest) {
+	if (first.isReady()) {
+		return raceReadyResult<Idx, Result>(std::forward<First>(first));
+	}
+	if constexpr (sizeof...(Rest) > 0) {
+		return raceReady<Idx + 1, Result>(std::forward<Rest>(rest)...);
+	}
+	return Future<Result>();
+}
+
+template <class Parent, int Idx, class... Futures>
+struct RaceImplCallback;
+
+template <class Parent, int Idx, class AwaitableType, class... Futures>
+struct RaceImplCallback<Parent, Idx, AwaitableType, Futures...>
+  : ConditionalActorCallback<RaceImplCallback<Parent, Idx, AwaitableType, Futures...>, Idx, AwaitableType>,
+    RaceImplCallback<Parent, Idx + 1, Futures...> {
+	using ThisCallback =
+	    ConditionalActorCallback<RaceImplCallback<Parent, Idx, AwaitableType, Futures...>, Idx, AwaitableType>;
+	using ValueType = FutureReturnTypeT<AwaitableType>;
+	static constexpr FutureType futureType = GetFutureTypeV<AwaitableType>;
+
+	[[nodiscard]] Parent* getParent() { return static_cast<Parent*>(this); }
+
+	void registerCallbacks() {
+		if constexpr (futureType == FutureType::Future) {
+			StrictFuture<ValueType> sf = std::get<Idx>(getParent()->futures);
+			sf.addCallbackAndClear(static_cast<ThisCallback*>(this));
+		} else if constexpr (futureType == FutureType::FutureStream) {
+			auto sf = std::get<Idx>(getParent()->futures);
+			sf.addCallbackAndClear(static_cast<ThisCallback*>(this));
+		} else {
+			ThisCallback::bind(std::get<Idx>(getParent()->futures));
+			std::move(std::get<Idx>(getParent()->futures)).addCallbackAndClear(static_cast<ThisCallback*>(this));
+		}
+		if constexpr (sizeof...(Futures) > 0) {
+			RaceImplCallback<Parent, Idx + 1, Futures...>::registerCallbacks();
+		}
+	}
+
+	void a_callback_fire(ThisCallback*, ValueType const& value) { getParent()->template finish<Idx>(value); }
+	void a_callback_fire(ThisCallback*, ValueType&& value) { getParent()->template finish<Idx>(std::move(value)); }
+
+	void a_callback_error(ThisCallback*, Error e) { getParent()->fail(e); }
+
+	void removeCallbacks() {
+		ThisCallback::remove();
+		if constexpr (sizeof...(Futures) > 0) {
+			RaceImplCallback<Parent, Idx + 1, Futures...>::removeCallbacks();
+		}
+	}
+};
+
+template <class Parent, int Idx>
+struct RaceImplCallback<Parent, Idx> {
+#ifdef ENABLE_SAMPLING
+	LineageReference* lineageAddr() { return currentLineage; }
+#endif
+};
+
+template <class Result, class... Futures>
+struct RaceImplActor final : Actor<Result>,
+                             RaceImplCallback<RaceImplActor<Result, Futures...>, 0, Futures...>,
+                             FastAllocated<RaceImplActor<Result, Futures...>> {
+	std::tuple<Futures...> futures;
+
+	using FastAllocated<RaceImplActor<Result, Futures...>>::operator new;
+	using FastAllocated<RaceImplActor<Result, Futures...>>::operator delete;
+
+	explicit RaceImplActor(std::tuple<Futures...>&& futures) : Actor<Result>(), futures(std::move(futures)) {
+		this->actor_wait_state = ACTOR_WAIT_STATE_WAITING;
+		RaceImplCallback<RaceImplActor<Result, Futures...>, 0, Futures...>::registerCallbacks();
+	}
+
+	template <std::size_t Idx, class T>
+	void finish(T&& value) {
+		this->actor_wait_state = ACTOR_WAIT_STATE_NOT_WAITING;
+		RaceImplCallback<RaceImplActor<Result, Futures...>, 0, Futures...>::removeCallbacks();
+		this->SAV<Result>::sendAndDelPromiseRef(Result(std::in_place_index<Idx>, std::forward<T>(value)));
+	}
+
+	void fail(Error e) {
+		this->actor_wait_state = ACTOR_WAIT_STATE_NOT_WAITING;
+		RaceImplCallback<RaceImplActor<Result, Futures...>, 0, Futures...>::removeCallbacks();
+		this->SAV<Result>::sendErrorAndDelPromiseRef(e);
+	}
+
+	void cancel() override {
+		const auto waitState = this->actor_wait_state;
+		this->actor_wait_state = ACTOR_WAIT_STATE_CANCELLED;
+		if (actorWaitStateIsWaiting(waitState)) {
+			RaceImplCallback<RaceImplActor<Result, Futures...>, 0, Futures...>::removeCallbacks();
+			this->SAV<Result>::sendErrorAndDelPromiseRef(actor_cancelled());
+		}
+	}
+
+	void destroy() override { delete this; }
+};
+
 } // namespace coro
 
 using Choose = coro::ChooseClause<>;
+
+// Waits for the first input Future/FutureStream to become ready and returns its value in a variant whose index
+// matches the winning argument. If multiple inputs are already ready, the lowest-index argument wins; for streams,
+// the next queued element is consumed. Errors and explicit cancellation propagate to the returned Future, while
+// non-winning inputs are only detached from the race. They are not actively cancelled here, but may still cancel
+// if dropping the race also drops their last reference.
+template <class... Futures>
+[[nodiscard]] auto race(Futures&&... futures) -> Future<coro::RaceResult<std::decay_t<Futures>...>> {
+	static_assert(sizeof...(Futures) > 0, "race requires at least one Future argument");
+
+	using Result = coro::RaceResult<std::decay_t<Futures>...>;
+	Future<Result> ready = coro::raceReady<0, Result>(futures...);
+	if (ready.isValid()) {
+		return ready;
+	}
+
+	return Future<Result>(
+	    new coro::RaceImplActor<Result, std::decay_t<Futures>...>(std::make_tuple(std::forward<Futures>(futures)...)));
+}
 
 template <class T, class F>
 AsyncGenerator<T> map(AsyncGenerator<T> gen, F pred) {

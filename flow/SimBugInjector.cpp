@@ -63,7 +63,7 @@ unsigned ISimBug::numHits() const {
 	return ISimBugImpl::get(impl)->numHits;
 }
 
-IBugIdentifier::~IBugIdentifier() {}
+IBugIdentifier::~IBugIdentifier() = default;
 
 bool SimBugInjector::isEnabled() const {
 	return simBugInjector != nullptr && simBugInjector->isEnabled;
@@ -86,9 +86,8 @@ void SimBugInjector::disable() {
 }
 
 void SimBugInjector::reset() {
-	if (simBugInjector) {
-		delete simBugInjector;
-	}
+
+	delete simBugInjector;
 }
 
 std::shared_ptr<ISimBug> SimBugInjector::getImpl(const IBugIdentifier& id, bool getDisabled /* = false */) const {

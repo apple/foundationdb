@@ -448,7 +448,7 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureKeyRangeArray_Future
 		return JNI_NULL;
 	}
 
-	jobjectArray kr_values = jenv->NewObjectArray(count, keyrange_class, NULL);
+	jobjectArray kr_values = jenv->NewObjectArray(count, keyrange_class, nullptr);
 	if (!kr_values) {
 		if (!jenv->ExceptionOccurred())
 			throwOutOfMem(jenv);
@@ -600,7 +600,7 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureMappedResults_Future
 		return JNI_NULL;
 	}
 
-	jobjectArray mrr_values = jenv->NewObjectArray(count, mapped_key_value_class, NULL);
+	jobjectArray mrr_values = jenv->NewObjectArray(count, mapped_key_value_class, nullptr);
 	if (!mrr_values) {
 		if (!jenv->ExceptionOccurred())
 			throwOutOfMem(jenv);
@@ -753,7 +753,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1create
 		throwParamNotNull(jenv);
 		return 0;
 	}
-	FDBDatabase* database = (FDBDatabase*)dbPtr;
+	auto* database = (FDBDatabase*)dbPtr;
 	FDBTransaction* tr;
 	fdb_error_t err = fdb_database_create_transaction(database, &tr);
 	if (err) {
@@ -780,12 +780,12 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1setOpti
 		throwParamNotNull(jenv);
 		return;
 	}
-	FDBDatabase* c = (FDBDatabase*)dPtr;
+	auto* c = (FDBDatabase*)dPtr;
 	uint8_t* barr = nullptr;
 	int size = 0;
 
 	if (value != JNI_NULL) {
-		barr = (uint8_t*)jenv->GetByteArrayElements(value, JNI_NULL);
+		barr = (decltype(barr))jenv->GetByteArrayElements(value, JNI_NULL);
 		if (!barr) {
 			throwRuntimeEx(jenv, "Error getting handle to native resources");
 			return;
@@ -810,7 +810,7 @@ JNIEXPORT jdouble JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1getM
 		throwParamNotNull(jenv);
 		return 0;
 	}
-	FDBDatabase* database = (FDBDatabase*)dbPtr;
+	auto* database = (FDBDatabase*)dbPtr;
 	return (jdouble)fdb_database_get_main_thread_busyness(database);
 }
 
@@ -822,7 +822,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1getCli
 		return 0;
 	}
 
-	FDBDatabase* database = (FDBDatabase*)dbPtr;
+	auto* database = (FDBDatabase*)dbPtr;
 
 	FDBFuture* f = fdb_database_get_client_status(database);
 	return (jlong)f;
@@ -869,7 +869,7 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1s
 		throwParamNotNull(jenv);
 		return;
 	}
-	FDBTransaction* tr = (FDBTransaction*)tPtr;
+	auto* tr = (FDBTransaction*)tPtr;
 	fdb_transaction_set_read_version(tr, version);
 }
 
@@ -880,7 +880,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 		throwParamNotNull(jenv);
 		return 0;
 	}
-	FDBTransaction* tr = (FDBTransaction*)tPtr;
+	auto* tr = (FDBTransaction*)tPtr;
 	FDBFuture* f = fdb_transaction_get_read_version(tr);
 	return (jlong)f;
 }
@@ -894,9 +894,9 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 		throwParamNotNull(jenv);
 		return 0;
 	}
-	FDBTransaction* tr = (FDBTransaction*)tPtr;
+	auto* tr = (FDBTransaction*)tPtr;
 
-	uint8_t* barr = (uint8_t*)jenv->GetByteArrayElements(keyBytes, JNI_NULL);
+	auto* barr = (uint8_t*)jenv->GetByteArrayElements(keyBytes, JNI_NULL);
 	if (!barr) {
 		if (!jenv->ExceptionOccurred())
 			throwRuntimeEx(jenv, "Error getting handle to native resources");
@@ -919,9 +919,9 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 		throwParamNotNull(jenv);
 		return 0;
 	}
-	FDBTransaction* tr = (FDBTransaction*)tPtr;
+	auto* tr = (FDBTransaction*)tPtr;
 
-	uint8_t* barr = (uint8_t*)jenv->GetByteArrayElements(keyBytes, JNI_NULL);
+	auto* barr = (uint8_t*)jenv->GetByteArrayElements(keyBytes, JNI_NULL);
 	if (!barr) {
 		if (!jenv->ExceptionOccurred())
 			throwRuntimeEx(jenv, "Error getting handle to native resources");
@@ -953,16 +953,16 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 		throwParamNotNull(jenv);
 		return 0;
 	}
-	FDBTransaction* tr = (FDBTransaction*)tPtr;
+	auto* tr = (FDBTransaction*)tPtr;
 
-	uint8_t* barrBegin = (uint8_t*)jenv->GetByteArrayElements(keyBeginBytes, JNI_NULL);
+	auto* barrBegin = (uint8_t*)jenv->GetByteArrayElements(keyBeginBytes, JNI_NULL);
 	if (!barrBegin) {
 		if (!jenv->ExceptionOccurred())
 			throwRuntimeEx(jenv, "Error getting handle to native resources");
 		return 0;
 	}
 
-	uint8_t* barrEnd = (uint8_t*)jenv->GetByteArrayElements(keyEndBytes, JNI_NULL);
+	auto* barrEnd = (uint8_t*)jenv->GetByteArrayElements(keyEndBytes, JNI_NULL);
 	if (!barrEnd) {
 		jenv->ReleaseByteArrayElements(keyBeginBytes, (jbyte*)barrBegin, JNI_ABORT);
 		if (!jenv->ExceptionOccurred())
@@ -1010,16 +1010,16 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 		throwParamNotNull(jenv);
 		return 0;
 	}
-	FDBTransaction* tr = (FDBTransaction*)tPtr;
+	auto* tr = (FDBTransaction*)tPtr;
 
-	uint8_t* barrBegin = (uint8_t*)jenv->GetByteArrayElements(keyBeginBytes, JNI_NULL);
+	auto* barrBegin = (uint8_t*)jenv->GetByteArrayElements(keyBeginBytes, JNI_NULL);
 	if (!barrBegin) {
 		if (!jenv->ExceptionOccurred())
 			throwRuntimeEx(jenv, "Error getting handle to native resources");
 		return 0;
 	}
 
-	uint8_t* barrEnd = (uint8_t*)jenv->GetByteArrayElements(keyEndBytes, JNI_NULL);
+	auto* barrEnd = (uint8_t*)jenv->GetByteArrayElements(keyEndBytes, JNI_NULL);
 	if (!barrEnd) {
 		jenv->ReleaseByteArrayElements(keyBeginBytes, (jbyte*)barrBegin, JNI_ABORT);
 		if (!jenv->ExceptionOccurred())
@@ -1027,7 +1027,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 		return 0;
 	}
 
-	uint8_t* barrMapper = (uint8_t*)jenv->GetByteArrayElements(mapperBytes, JNI_NULL);
+	auto* barrMapper = (uint8_t*)jenv->GetByteArrayElements(mapperBytes, JNI_NULL);
 	if (!barrMapper) {
 		jenv->ReleaseByteArrayElements(keyBeginBytes, (jbyte*)barrBegin, JNI_ABORT);
 		jenv->ReleaseByteArrayElements(keyEndBytes, (jbyte*)barrEnd, JNI_ABORT);
@@ -1076,7 +1076,7 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FutureResults_FutureResults_1
 		return;
 	}
 
-	FDBFuture* f = (FDBFuture*)future;
+	auto* f = (FDBFuture*)future;
 	const FDBKeyValue* kvs;
 	int count;
 	fdb_bool_t more;
@@ -1153,7 +1153,7 @@ Java_com_apple_foundationdb_FutureMappedResults_FutureMappedResults_1getDirect(J
 		return;
 	}
 
-	FDBFuture* f = (FDBFuture*)future;
+	auto* f = (FDBFuture*)future;
 	const FDBMappedKeyValue* kvms;
 	int count;
 	fdb_bool_t more;
@@ -1219,16 +1219,16 @@ Java_com_apple_foundationdb_FDBTransaction_Transaction_1getEstimatedRangeSizeByt
 		throwParamNotNull(jenv);
 		return 0;
 	}
-	FDBTransaction* tr = (FDBTransaction*)tPtr;
+	auto* tr = (FDBTransaction*)tPtr;
 
-	uint8_t* startKey = (uint8_t*)jenv->GetByteArrayElements(beginKeyBytes, JNI_NULL);
+	auto* startKey = (uint8_t*)jenv->GetByteArrayElements(beginKeyBytes, JNI_NULL);
 	if (!startKey) {
 		if (!jenv->ExceptionOccurred())
 			throwRuntimeEx(jenv, "Error getting handle to native resources");
 		return 0;
 	}
 
-	uint8_t* endKey = (uint8_t*)jenv->GetByteArrayElements(endKeyBytes, JNI_NULL);
+	auto* endKey = (uint8_t*)jenv->GetByteArrayElements(endKeyBytes, JNI_NULL);
 	if (!endKey) {
 		jenv->ReleaseByteArrayElements(beginKeyBytes, (jbyte*)startKey, JNI_ABORT);
 		if (!jenv->ExceptionOccurred())
@@ -1254,16 +1254,16 @@ Java_com_apple_foundationdb_FDBTransaction_Transaction_1getRangeSplitPoints(JNIE
 		throwParamNotNull(jenv);
 		return 0;
 	}
-	FDBTransaction* tr = (FDBTransaction*)tPtr;
+	auto* tr = (FDBTransaction*)tPtr;
 
-	uint8_t* startKey = (uint8_t*)jenv->GetByteArrayElements(beginKeyBytes, JNI_NULL);
+	auto* startKey = (uint8_t*)jenv->GetByteArrayElements(beginKeyBytes, JNI_NULL);
 	if (!startKey) {
 		if (!jenv->ExceptionOccurred())
 			throwRuntimeEx(jenv, "Error getting handle to native resources");
 		return 0;
 	}
 
-	uint8_t* endKey = (uint8_t*)jenv->GetByteArrayElements(endKeyBytes, JNI_NULL);
+	auto* endKey = (uint8_t*)jenv->GetByteArrayElements(endKeyBytes, JNI_NULL);
 	if (!endKey) {
 		jenv->ReleaseByteArrayElements(beginKeyBytes, (jbyte*)startKey, JNI_ABORT);
 		if (!jenv->ExceptionOccurred())
@@ -1287,16 +1287,16 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1s
 		throwParamNotNull(jenv);
 		return;
 	}
-	FDBTransaction* tr = (FDBTransaction*)tPtr;
+	auto* tr = (FDBTransaction*)tPtr;
 
-	uint8_t* barrKey = (uint8_t*)jenv->GetByteArrayElements(keyBytes, JNI_NULL);
+	auto* barrKey = (uint8_t*)jenv->GetByteArrayElements(keyBytes, JNI_NULL);
 	if (!barrKey) {
 		if (!jenv->ExceptionOccurred())
 			throwRuntimeEx(jenv, "Error getting handle to native resources");
 		return;
 	}
 
-	uint8_t* barrValue = (uint8_t*)jenv->GetByteArrayElements(valueBytes, JNI_NULL);
+	auto* barrValue = (uint8_t*)jenv->GetByteArrayElements(valueBytes, JNI_NULL);
 	if (!barrValue) {
 		jenv->ReleaseByteArrayElements(keyBytes, (jbyte*)barrKey, JNI_ABORT);
 		if (!jenv->ExceptionOccurred())
@@ -1317,9 +1317,9 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1c
 		throwParamNotNull(jenv);
 		return;
 	}
-	FDBTransaction* tr = (FDBTransaction*)tPtr;
+	auto* tr = (FDBTransaction*)tPtr;
 
-	uint8_t* barr = (uint8_t*)jenv->GetByteArrayElements(keyBytes, JNI_NULL);
+	auto* barr = (uint8_t*)jenv->GetByteArrayElements(keyBytes, JNI_NULL);
 	if (!barr) {
 		if (!jenv->ExceptionOccurred())
 			throwRuntimeEx(jenv, "Error getting handle to native resources");
@@ -1339,16 +1339,16 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1c
 		throwParamNotNull(jenv);
 		return;
 	}
-	FDBTransaction* tr = (FDBTransaction*)tPtr;
+	auto* tr = (FDBTransaction*)tPtr;
 
-	uint8_t* barrKeyBegin = (uint8_t*)jenv->GetByteArrayElements(keyBeginBytes, JNI_NULL);
+	auto* barrKeyBegin = (uint8_t*)jenv->GetByteArrayElements(keyBeginBytes, JNI_NULL);
 	if (!barrKeyBegin) {
 		if (!jenv->ExceptionOccurred())
 			throwRuntimeEx(jenv, "Error getting handle to native resources");
 		return;
 	}
 
-	uint8_t* barrKeyEnd = (uint8_t*)jenv->GetByteArrayElements(keyEndBytes, JNI_NULL);
+	auto* barrKeyEnd = (uint8_t*)jenv->GetByteArrayElements(keyEndBytes, JNI_NULL);
 	if (!barrKeyEnd) {
 		jenv->ReleaseByteArrayElements(keyBeginBytes, (jbyte*)barrKeyBegin, JNI_ABORT);
 		if (!jenv->ExceptionOccurred())
@@ -1372,16 +1372,16 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1m
 		throwParamNotNull(jenv);
 		return;
 	}
-	FDBTransaction* tr = (FDBTransaction*)tPtr;
+	auto* tr = (FDBTransaction*)tPtr;
 
-	uint8_t* barrKey = (uint8_t*)jenv->GetByteArrayElements(key, JNI_NULL);
+	auto* barrKey = (uint8_t*)jenv->GetByteArrayElements(key, JNI_NULL);
 	if (!barrKey) {
 		if (!jenv->ExceptionOccurred())
 			throwRuntimeEx(jenv, "Error getting handle to native resources");
 		return;
 	}
 
-	uint8_t* barrValue = (uint8_t*)jenv->GetByteArrayElements(value, JNI_NULL);
+	auto* barrValue = (uint8_t*)jenv->GetByteArrayElements(value, JNI_NULL);
 	if (!barrValue) {
 		jenv->ReleaseByteArrayElements(key, (jbyte*)barrKey, JNI_ABORT);
 		if (!jenv->ExceptionOccurred())
@@ -1403,7 +1403,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 		throwParamNotNull(jenv);
 		return 0;
 	}
-	FDBTransaction* tr = (FDBTransaction*)tPtr;
+	auto* tr = (FDBTransaction*)tPtr;
 	FDBFuture* f = fdb_transaction_commit(tr);
 	return (jlong)f;
 }
@@ -1417,12 +1417,12 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1s
 		throwParamNotNull(jenv);
 		return;
 	}
-	FDBTransaction* tr = (FDBTransaction*)tPtr;
+	auto* tr = (FDBTransaction*)tPtr;
 	uint8_t* barr = nullptr;
 	int size = 0;
 
 	if (value != JNI_NULL) {
-		barr = (uint8_t*)jenv->GetByteArrayElements(value, JNI_NULL);
+		barr = (decltype(barr))jenv->GetByteArrayElements(value, JNI_NULL);
 		if (!barr) {
 			if (!jenv->ExceptionOccurred())
 				throwRuntimeEx(jenv, "Error getting handle to native resources");
@@ -1445,7 +1445,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 		throwParamNotNull(jenv);
 		return 0;
 	}
-	FDBTransaction* tr = (FDBTransaction*)tPtr;
+	auto* tr = (FDBTransaction*)tPtr;
 	int64_t version;
 	fdb_error_t err = fdb_transaction_get_committed_version(tr, &version);
 	if (err) {
@@ -1462,7 +1462,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 		throwParamNotNull(jenv);
 		return 0;
 	}
-	FDBFuture* f = fdb_transaction_get_approximate_size((FDBTransaction*)tPtr);
+	auto* f = fdb_transaction_get_approximate_size((FDBTransaction*)tPtr);
 	return (jlong)f;
 }
 
@@ -1473,7 +1473,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 		throwParamNotNull(jenv);
 		return 0;
 	}
-	FDBTransaction* tr = (FDBTransaction*)tPtr;
+	auto* tr = (FDBTransaction*)tPtr;
 	FDBFuture* f = fdb_transaction_get_versionstamp(tr);
 	return (jlong)f;
 }
@@ -1486,9 +1486,9 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 		throwParamNotNull(jenv);
 		return 0;
 	}
-	FDBTransaction* tr = (FDBTransaction*)tPtr;
+	auto* tr = (FDBTransaction*)tPtr;
 
-	uint8_t* barr = (uint8_t*)jenv->GetByteArrayElements(key, JNI_NULL);
+	auto* barr = (uint8_t*)jenv->GetByteArrayElements(key, JNI_NULL);
 	if (!barr) {
 		if (!jenv->ExceptionOccurred())
 			throwRuntimeEx(jenv, "Error getting handle to native resources");
@@ -1510,7 +1510,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 		throwParamNotNull(jenv);
 		return 0;
 	}
-	FDBTransaction* tr = (FDBTransaction*)tPtr;
+	auto* tr = (FDBTransaction*)tPtr;
 	FDBFuture* f = fdb_transaction_on_error(tr, (fdb_error_t)errorCode);
 	return (jlong)f;
 }
@@ -1543,9 +1543,9 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 		throwParamNotNull(jenv);
 		return 0;
 	}
-	FDBTransaction* tr = (FDBTransaction*)tPtr;
+	auto* tr = (FDBTransaction*)tPtr;
 
-	uint8_t* barr = (uint8_t*)jenv->GetByteArrayElements(key, JNI_NULL);
+	auto* barr = (uint8_t*)jenv->GetByteArrayElements(key, JNI_NULL);
 	if (!barr) {
 		if (!jenv->ExceptionOccurred())
 			throwRuntimeEx(jenv, "Error getting handle to native resources");
@@ -1578,9 +1578,9 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1a
 		throwParamNotNull(jenv);
 		return;
 	}
-	FDBTransaction* tr = (FDBTransaction*)tPtr;
+	auto* tr = (FDBTransaction*)tPtr;
 
-	uint8_t* begin_barr = (uint8_t*)jenv->GetByteArrayElements(keyBegin, JNI_NULL);
+	auto* begin_barr = (uint8_t*)jenv->GetByteArrayElements(keyBegin, JNI_NULL);
 	if (!begin_barr) {
 		if (!jenv->ExceptionOccurred())
 			throwRuntimeEx(jenv, "Error getting handle to native resources");
@@ -1588,7 +1588,7 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1a
 	}
 	int begin_size = jenv->GetArrayLength(keyBegin);
 
-	uint8_t* end_barr = (uint8_t*)jenv->GetByteArrayElements(keyEnd, JNI_NULL);
+	auto* end_barr = (uint8_t*)jenv->GetByteArrayElements(keyEnd, JNI_NULL);
 	if (!end_barr) {
 		jenv->ReleaseByteArrayElements(keyBegin, (jbyte*)begin_barr, JNI_ABORT);
 		if (!jenv->ExceptionOccurred())

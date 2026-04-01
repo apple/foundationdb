@@ -1,0 +1,270 @@
+/*
+ * LogSet.cpp
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "fdbserver/logsystem/LogSystemTypes.h"
+
+#include "fdbclient/FDBTypes.h"
+
+std::string LogSet::logRouterString() {
+	std::string result;
+	for (int i = 0; i < logRouters.size(); i++) {
+		if (i > 0) {
+			result += ", ";
+		}
+		result += logRouters[i]->get().id().toString();
+	}
+	return result;
+}
+
+bool LogSet::hasLogRouter(UID id) const {
+	for (const auto& router : logRouters) {
+		if (router->get().id() == id) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool LogSet::hasBackupWorker(UID id) const {
+	for (const auto& worker : backupWorkers) {
+		if (worker->get().id() == id) {
+			return true;
+		}
+	}
+	return false;
+}
+
+std::string LogSet::logServerString() {
+	std::string result;
+	for (int i = 0; i < logServers.size(); i++) {
+		if (i > 0) {
+			result += ", ";
+		}
+		result += logServers[i]->get().id().toString();
+	}
+	return result;
+}
+
+void LogSet::populateSatelliteTagLocations(int logRouterTags, int oldLogRouterTags, int txsTags, int oldTxsTags) {
+	satelliteTagLocations.clear();
+	satelliteTagLocations.resize(std::max({ logRouterTags, oldLogRouterTags, txsTags, oldTxsTags }) + 1);
+
+	std::map<int, int> server_usedBest;
+	std::set<std::pair<int, int>> used_servers;
+	for (int i = 0; i < tLogLocalities.size(); i++) {
+		used_servers.insert(std::make_pair(0, i));
+	}
+
+	Reference<LocalitySet> serverSet = Reference<LocalitySet>(new LocalityMap<std::pair<int, int>>());
+	auto* serverMap = (LocalityMap<std::pair<int, int>>*)serverSet.getPtr();
+	std::vector<std::pair<int, int>> resultPairs;
+	for (int loc = 0; loc < satelliteTagLocations.size(); loc++) {
+		int team = loc;
+		if (loc < logRouterTags) {
+			team = loc + 1;
+		} else if (loc == logRouterTags) {
+			team = 0;
+		}
+
+		bool teamComplete = false;
+		alsoServers.resize(1);
+		serverMap->clear();
+		resultPairs.clear();
+		for (auto& used_idx : used_servers) {
+			auto entry = serverMap->add(tLogLocalities[used_idx.second], &used_idx);
+			if (resultPairs.empty()) {
+				resultPairs.push_back(used_idx);
+				alsoServers[0] = entry;
+			}
+
+			resultEntries.clear();
+			if (serverSet->selectReplicas(tLogPolicy, alsoServers, resultEntries)) {
+				for (auto& entry : resultEntries) {
+					resultPairs.push_back(*serverMap->getObject(entry));
+				}
+				int firstBestUsed = server_usedBest[resultPairs[0].second];
+				for (int i = 1; i < resultPairs.size(); i++) {
+					int thisBestUsed = server_usedBest[resultPairs[i].second];
+					if (thisBestUsed < firstBestUsed) {
+						std::swap(resultPairs[0], resultPairs[i]);
+						firstBestUsed = thisBestUsed;
+					}
+				}
+				server_usedBest[resultPairs[0].second]++;
+
+				for (auto& res : resultPairs) {
+					satelliteTagLocations[team].push_back(res.second);
+					used_servers.erase(res);
+					res.first++;
+					used_servers.insert(res);
+				}
+				teamComplete = true;
+				break;
+			}
+		}
+		ASSERT(teamComplete);
+	}
+
+	checkSatelliteTagLocations();
+}
+
+void LogSet::checkSatelliteTagLocations() {
+	std::vector<int> usedBest;
+	std::vector<int> used;
+	usedBest.resize(tLogLocalities.size());
+	used.resize(tLogLocalities.size());
+	for (auto team : satelliteTagLocations) {
+		usedBest[team[0]]++;
+		for (auto loc : team) {
+			used[loc]++;
+		}
+	}
+
+	int minUsedBest = satelliteTagLocations.size();
+	int maxUsedBest = 0;
+	for (auto i : usedBest) {
+		minUsedBest = std::min(minUsedBest, i);
+		maxUsedBest = std::max(maxUsedBest, i);
+	}
+
+	int minUsed = satelliteTagLocations.size();
+	int maxUsed = 0;
+	for (auto i : used) {
+		minUsed = std::min(minUsed, i);
+		maxUsed = std::max(maxUsed, i);
+	}
+
+	bool foundDuplicate = false;
+	std::set<Optional<Key>> zones;
+	std::set<Optional<Key>> dcs;
+	for (auto& loc : tLogLocalities) {
+		if (zones.contains(loc.zoneId())) {
+			foundDuplicate = true;
+			break;
+		}
+		zones.insert(loc.zoneId());
+		dcs.insert(loc.dcId());
+	}
+	bool moreThanOneDC = dcs.size() > 1;
+
+	TraceEvent(((maxUsed - minUsed > 1) || (maxUsedBest - minUsedBest > 1))
+	               ? (g_network->isSimulated() && !foundDuplicate && !moreThanOneDC ? SevError : SevWarnAlways)
+	               : SevInfo,
+	           "CheckSatelliteTagLocations")
+	    .detail("MinUsed", minUsed)
+	    .detail("MaxUsed", maxUsed)
+	    .detail("MinUsedBest", minUsedBest)
+	    .detail("MaxUsedBest", maxUsedBest)
+	    .detail("DuplicateZones", foundDuplicate)
+	    .detail("NumOfDCs", dcs.size());
+}
+
+int LogSet::bestLocationFor(Tag tag) {
+	if (locality == tagLocalitySatellite) {
+		return satelliteTagLocations[tag.id + 1][0];
+	}
+
+	return tag.id % logServers.size();
+}
+
+void LogSet::updateLocalitySet(std::vector<LocalityData> const& localities) {
+	LocalityMap<int>* logServerMap;
+
+	logServerSet = Reference<LocalitySet>(new LocalityMap<int>());
+	logServerMap = (LocalityMap<int>*)logServerSet.getPtr();
+
+	logEntryArray.clear();
+	logEntryArray.reserve(localities.size());
+	logIndexArray.clear();
+	logIndexArray.reserve(localities.size());
+
+	for (int i = 0; i < localities.size(); i++) {
+		logIndexArray.push_back(i);
+		logEntryArray.push_back(logServerMap->add(localities[i], &logIndexArray.back()));
+	}
+}
+
+bool LogSet::satisfiesPolicy(const std::vector<LocalityEntry>& locations) {
+	resultEntries.clear();
+
+	bool result = logServerSet->selectReplicas(tLogPolicy, locations, resultEntries);
+	ASSERT(result);
+
+	return resultEntries.empty();
+}
+
+void LogSet::getPushLocations(VectorRef<Tag> tags,
+                              std::vector<int>& locations,
+                              int locationOffset,
+                              bool allLocations,
+                              const Optional<Reference<LocalitySet>>& restrictedLogSet) {
+	if (locality == tagLocalitySatellite) {
+		for (auto& t : tags) {
+			if (t.locality == tagLocalityTxs || t.locality == tagLocalityLogRouter) {
+				for (int loc : satelliteTagLocations[t.id + 1]) {
+					locations.push_back(locationOffset + loc);
+				}
+			}
+		}
+		uniquify(locations);
+		return;
+	}
+
+	newLocations.clear();
+	alsoServers.clear();
+	resultEntries.clear();
+
+	if (allLocations) {
+		TraceEvent("AllLocationsSet").log();
+		for (int i = 0; i < logServers.size(); i++) {
+			newLocations.push_back(i);
+		}
+	} else {
+		for (auto& t : tags) {
+			if (locality == tagLocalitySpecial || t.locality == locality || t.locality < 0) {
+				newLocations.push_back(bestLocationFor(t));
+			}
+		}
+	}
+
+	uniquify(newLocations);
+
+	if (!newLocations.empty()) {
+		alsoServers.reserve(newLocations.size());
+	}
+
+	for (auto location : newLocations) {
+		locations.push_back(locationOffset + location);
+		alsoServers.push_back(logEntryArray[location]);
+	}
+
+	bool result;
+	if (restrictedLogSet.present()) {
+		result = restrictedLogSet.get()->selectReplicas(tLogPolicy, alsoServers, resultEntries);
+	} else {
+		result = logServerSet->selectReplicas(tLogPolicy, alsoServers, resultEntries);
+	}
+	ASSERT(result);
+
+	auto* logServerMap = (LocalityMap<int>*)logServerSet.getPtr();
+	for (auto entry : resultEntries) {
+		locations.push_back(locationOffset + *logServerMap->getObject(entry));
+	}
+}

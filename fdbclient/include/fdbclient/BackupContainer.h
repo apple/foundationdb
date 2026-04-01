@@ -33,8 +33,8 @@ FDB_BOOLEAN_PARAM(IncludeKeyRangeMap);
 
 class ReadYourWritesTransaction;
 
-Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version const& v, Reference<ReadYourWritesTransaction> const& tr);
-Future<Version> timeKeeperVersionFromDatetime(std::string const& datetime, Database const& db);
+Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version v, Reference<ReadYourWritesTransaction> tr);
+Future<Version> timeKeeperVersionFromDatetime(std::string datetime, Database db);
 
 // Helper function to check if a URL is a blobstore:// URL
 bool isBlobstoreUrl(const std::string& url);
@@ -68,6 +68,9 @@ static const uint32_t BACKUP_AGENT_MLOG_VERSION = 2001;
 
 // Mutation log version written by BackupWorker
 static const uint32_t PARTITIONED_MLOG_VERSION = 4110;
+
+// Mutation log version written by BackupWorker for range partitioned logs
+static const uint32_t RANGE_PARTITIONED_MLOG_VERSION = 5001;
 
 // Snapshot file version written by FileBackupAgent
 static const uint32_t BACKUP_AGENT_SNAPSHOT_FILE_VERSION = 1001;
@@ -269,6 +272,12 @@ public:
 	                                                          uint16_t tagId,
 	                                                          int totalTags) = 0;
 
+	virtual Future<Reference<IBackupFile>> writeRangePartitionedLogFile(Version beginVersion,
+	                                                                    Version endVersion,
+	                                                                    Version baseVersion,
+	                                                                    int32_t partitionId,
+	                                                                    int blockSize) = 0;
+
 	// Write a KeyspaceSnapshotFile of range file names representing a full non overlapping
 	// snapshot of the key ranges this backup is targeting.
 	// For BulkDump snapshots, pass SnapshotMetadata with snapshotType="bulkdump" and the job ID.
@@ -279,6 +288,9 @@ public:
 	    int64_t totalBytes,
 	    IncludeKeyRangeMap includeKeyRangeMap,
 	    Optional<SnapshotMetadata> metadata = Optional<SnapshotMetadata>()) = 0;
+
+	// Write a partition list file which contains the partition info (e.g. key ranges and partition id).
+	virtual Future<Void> writePartitionListFile(Version v, std::string contents) = 0;
 
 	// Open a file for read by name
 	virtual Future<Reference<IAsyncFile>> readFile(const std::string& name) = 0;

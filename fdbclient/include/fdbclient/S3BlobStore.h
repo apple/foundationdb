@@ -248,7 +248,7 @@ public:
 
 		ConnectionPoolData() {}
 
-		// Destructor implementation in S3BlobStore.actor.cpp
+		// Destructor implementation in S3BlobStore.cpp
 		// In simulation, explicitly closes all pooled connections before destruction
 		~ConnectionPoolData();
 	};
@@ -420,14 +420,14 @@ public:
 	                               std::function<bool(std::string const&)> recurseFilter = nullptr);
 
 	// Get a list of the files in a bucket, see listObjectsStream for more argument detail.
-	Future<ListResult> listObjects(std::string const& bucket,
-	                               Optional<std::string> prefix = {},
-	                               Optional<char> delimiter = {},
-	                               int maxDepth = 0,
-	                               std::function<bool(std::string const&)> recurseFilter = nullptr);
+	AsyncResult<ListResult> listObjects(std::string const& bucket,
+	                                    Optional<std::string> prefix = {},
+	                                    Optional<char> delimiter = {},
+	                                    int maxDepth = 0,
+	                                    std::function<bool(std::string const&)> recurseFilter = nullptr);
 
 	// Get a list of all buckets
-	Future<std::vector<std::string>> listBuckets();
+	AsyncResult<std::vector<std::string>> listBuckets();
 
 	// Check if a bucket exists
 	Future<bool> bucketExists(std::string const& bucket);
@@ -462,7 +462,7 @@ public:
 	Future<Void> createBucket(std::string const& bucket);
 
 	// Useful methods for working with tiny files
-	Future<std::string> readEntireFile(std::string const& bucket, std::string const& object);
+	AsyncResult<std::string> readEntireFile(std::string const& bucket, std::string const& object);
 	Future<Void> writeEntireFile(std::string const& bucket, std::string const& object, std::string const& content);
 	Future<Void> writeEntireFileFromBuffer(std::string const& bucket,
 	                                       std::string const& object,

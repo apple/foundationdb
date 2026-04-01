@@ -21,7 +21,7 @@
 #include "flow/UnitTest.h"
 #include "flow/IAsyncFile.h"
 #include "fdbrpc/fdbrpc.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 
 #include <sstream>
 #include <cstdint>
@@ -863,7 +863,7 @@ struct YAMRandom {
 		} else if (op == 1) {
 			onchanges.push_back(trigger([this]() { this->randomOp(); }, yam.onChange(k)));
 		} else if (op == 2) {
-			if (onchanges.size()) {
+			if (!onchanges.empty()) {
 				int i = deterministicRandom()->randomInt(0, onchanges.size());
 				onchanges[i] = onchanges.back();
 				onchanges.pop_back();
@@ -1133,6 +1133,44 @@ struct Tracker {
 	}
 };
 
+struct LifetimeTracked {
+	inline static int liveCount = 0;
+
+	LifetimeTracked() { ++liveCount; }
+	LifetimeTracked(const LifetimeTracked&) { ++liveCount; }
+	LifetimeTracked(LifetimeTracked&&) noexcept { ++liveCount; }
+	LifetimeTracked& operator=(const LifetimeTracked&) = default;
+	LifetimeTracked& operator=(LifetimeTracked&&) noexcept = default;
+	~LifetimeTracked() { --liveCount; }
+};
+
+AsyncResult<Tracker> immediateAsyncResultTracker() {
+	co_return Tracker{};
+}
+
+AsyncResult<Tracker> delayedAsyncResultTracker(Future<Void> signal) {
+	co_await signal;
+	co_return Tracker{};
+}
+
+AsyncResult<int> immediateAsyncResultInt(int value) {
+	co_return value;
+}
+
+AsyncResult<int> delayedAsyncResultInt(Future<Void> signal, int value) {
+	co_await signal;
+	co_return value;
+}
+
+AsyncResult<int> failingAsyncResultInt(Future<Void> signal) {
+	co_await signal;
+	throw io_error();
+}
+
+AsyncResult<LifetimeTracked> immediateAsyncResultLifetimeTracked() {
+	co_return LifetimeTracked{};
+}
+
 } // namespace
 
 TEST_CASE("/flow/coro/PromiseStream/move") {
@@ -1200,6 +1238,39 @@ TEST_CASE("/flow/coro/PromiseStream/move2") {
 	ASSERT(tracker.moved);
 	ASSERT(!movedTracker.moved);
 	ASSERT(movedTracker.copied == 0);
+}
+
+TEST_CASE("/flow/coro/AsyncResult/move") {
+	{
+		Tracker tracker = co_await immediateAsyncResultTracker();
+		ASSERT(!tracker.moved);
+		ASSERT(tracker.copied == 0);
+	}
+
+	{
+		Promise<Void> signal;
+		AsyncResult<Tracker> result = delayedAsyncResultTracker(signal.getFuture());
+		signal.send(Void());
+		Tracker tracker = co_await result;
+		ASSERT(!tracker.moved);
+		ASSERT(tracker.copied == 0);
+	}
+}
+
+TEST_CASE("/flow/coro/AsyncResult/releaseDestroysState") {
+	ASSERT_EQ(LifetimeTracked::liveCount, 0);
+
+	{
+		AsyncResult<LifetimeTracked> result = immediateAsyncResultLifetimeTracked();
+		ASSERT_GT(LifetimeTracked::liveCount, 0);
+	}
+	ASSERT_EQ(LifetimeTracked::liveCount, 0);
+
+	{
+		LifetimeTracked value = co_await immediateAsyncResultLifetimeTracked();
+		ASSERT_GT(LifetimeTracked::liveCount, 0);
+	}
+	ASSERT_EQ(LifetimeTracked::liveCount, 0);
 }
 
 namespace {
@@ -1984,4 +2055,136 @@ TEST_CASE("/flow/coro/chooseRepeatedCancel") {
 	intPromise.send(3);
 	ASSERT(chooseFuture.getError().code() == error_code_actor_cancelled);
 	return Void();
+}
+
+TEST_CASE("/flow/coro/raceReady") {
+	Future<std::variant<int, std::string>> raced = race(Future<int>(7), Future<std::string>("later"));
+	ASSERT(raced.isReady());
+	auto result = raced.get();
+	ASSERT_EQ(result.index(), 0);
+	ASSERT_EQ(std::get<0>(result), 7);
+
+	Future<std::variant<int, std::string>> errorFirst = race(Future<int>(io_error()), Future<std::string>("later"));
+	ASSERT(errorFirst.isReady());
+	ASSERT(errorFirst.isError());
+	ASSERT_EQ(errorFirst.getError().code(), error_code_io_error);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/raceReadyFirstArgumentWinsTie") {
+	// When both inputs are already ready, race() breaks ties by argument order.
+	Future<std::variant<int, std::string>> raced = race(Future<int>(7), Future<std::string>("winner"));
+	ASSERT(raced.isReady());
+	auto result = raced.get();
+	ASSERT_EQ(result.index(), 0);
+	ASSERT_EQ(std::get<0>(result), 7);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/raceSuccess") {
+	Promise<int> intPromise;
+	Promise<std::string> stringPromise;
+	Future<std::variant<int, std::string>> raced = race(intPromise.getFuture(), stringPromise.getFuture());
+	stringPromise.send("winner");
+	auto result = co_await raced;
+	ASSERT_EQ(result.index(), 1);
+	ASSERT_EQ(std::get<1>(result), "winner");
+	co_return;
+}
+
+TEST_CASE("/flow/coro/raceSuccessFirstArgument") {
+	Promise<int> intPromise;
+	Promise<std::string> stringPromise;
+	Future<std::variant<int, std::string>> raced = race(intPromise.getFuture(), stringPromise.getFuture());
+	intPromise.send(42);
+	auto result = co_await raced;
+	ASSERT_EQ(result.index(), 0);
+	ASSERT_EQ(std::get<0>(result), 42);
+	co_return;
+}
+
+TEST_CASE("/flow/coro/raceError") {
+	Promise<int> intPromise;
+	Promise<std::string> stringPromise;
+	Future<std::variant<int, std::string>> raced = race(intPromise.getFuture(), stringPromise.getFuture());
+	intPromise.sendError(io_error());
+	try {
+		co_await raced;
+		ASSERT(false);
+	} catch (Error const& e) {
+		ASSERT_EQ(e.code(), error_code_io_error);
+	}
+	co_return;
+}
+
+TEST_CASE("/flow/coro/raceCancel") {
+	Promise<int> intPromise;
+	Promise<std::string> stringPromise;
+	Future<std::variant<int, std::string>> raced = race(intPromise.getFuture(), stringPromise.getFuture());
+	raced.cancel();
+	ASSERT(raced.isReady());
+	ASSERT(raced.isError());
+	ASSERT_EQ(raced.getError().code(), error_code_actor_cancelled);
+	intPromise.send(1);
+	stringPromise.send("late");
+	ASSERT_EQ(raced.getError().code(), error_code_actor_cancelled);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/raceStreamReady") {
+	PromiseStream<int> intStream;
+	intStream.send(11);
+	Future<std::variant<int, std::string>> raced = race(intStream.getFuture(), Future<std::string>("later"));
+	ASSERT(raced.isReady());
+	auto result = raced.get();
+	ASSERT_EQ(result.index(), 0);
+	ASSERT_EQ(std::get<0>(result), 11);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/raceStreamSuccess") {
+	PromiseStream<int> intStream;
+	Promise<std::string> stringPromise;
+	Future<std::variant<int, std::string>> raced = race(intStream.getFuture(), stringPromise.getFuture());
+	intStream.send(13);
+	auto result = co_await raced;
+	ASSERT_EQ(result.index(), 0);
+	ASSERT_EQ(std::get<0>(result), 13);
+	co_return;
+}
+
+TEST_CASE("/flow/coro/raceAsyncResultReady") {
+	Future<std::variant<int, std::string>> raced = race(immediateAsyncResultInt(17), Future<std::string>("later"));
+	ASSERT(raced.isReady());
+	auto result = raced.get();
+	ASSERT_EQ(result.index(), 0);
+	ASSERT_EQ(std::get<0>(result), 17);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/raceAsyncResultSuccess") {
+	Promise<Void> signal;
+	Promise<std::string> stringPromise;
+	Future<std::variant<int, std::string>> raced =
+	    race(delayedAsyncResultInt(signal.getFuture(), 19), stringPromise.getFuture());
+	signal.send(Void());
+	auto result = co_await raced;
+	ASSERT_EQ(result.index(), 0);
+	ASSERT_EQ(std::get<0>(result), 19);
+	co_return;
+}
+
+TEST_CASE("/flow/coro/raceAsyncResultError") {
+	Promise<Void> signal;
+	Promise<std::string> stringPromise;
+	Future<std::variant<int, std::string>> raced =
+	    race(failingAsyncResultInt(signal.getFuture()), stringPromise.getFuture());
+	signal.send(Void());
+	try {
+		co_await raced;
+		ASSERT(false);
+	} catch (Error const& e) {
+		ASSERT_EQ(e.code(), error_code_io_error);
+	}
+	co_return;
 }

@@ -60,7 +60,7 @@ RUN curl -Ls "https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TA
 
 WORKDIR /
 
-FROM golang:1.24.9-bookworm AS go-build
+FROM golang:1.25.8-bookworm AS go-build
 COPY fdbkubernetesmonitor/ /fdbkubernetesmonitor
 WORKDIR /fdbkubernetesmonitor
 RUN go build -o /fdb-kubernetes-monitor *.go
@@ -133,7 +133,7 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
     $CURL $FDB_WEBSITE/$FDB_VERSION/libfdb_c.${FDB_ARCH}.so -o /usr/lib/libfdb_c.so
 
 # Setup all symlinks for the other binaries that are a copy of fdbbackup
-RUN for file in fdbdr fdbrestore backup_agent dr_agent fastrestore_tool; do \
+RUN for file in fdbdr fdbrestore backup_agent dr_agent; do \
         ln -s /usr/bin/fdbbackup "/usr/bin/$file"; \
     done && \
     cd / && \

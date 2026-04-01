@@ -315,11 +315,11 @@ struct RandomIntRange {
 	int min;
 	int max;
 
-	RandomIntRange(int low = 0, int high = 0) : min(low), max(high) {}
+	explicit(false) RandomIntRange(int low = 0, int high = 0) : min(low), max(high) {}
 
 	// Accepts strings of the form "min:max" or "N"
 	// where N will be used for both min and max
-	RandomIntRange(std::string str) {
+	explicit(false) RandomIntRange(std::string str) {
 		StringRef high = str;
 		StringRef low = high.eat(":");
 		if (high.size() == 0) {
@@ -393,7 +393,7 @@ struct P2PNetworkTest {
 		return s;
 	}
 
-	P2PNetworkTest() {}
+	P2PNetworkTest() = default;
 
 	P2PNetworkTest(std::string listenerAddresses,
 	               std::string remoteAddresses,

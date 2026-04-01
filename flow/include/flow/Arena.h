@@ -469,49 +469,11 @@ public:
 	static bool isPrintable(char c) { return c > 32 && c < 127; }
 	inline std::string printable() const;
 
-	std::string toHexString(int limit = -1) const {
-		if (limit < 0)
-			limit = length;
-		std::string rv;
-		if (length > limit) {
-			// If limit is high enough split it so that 2/3 of limit is used to show prefix bytes and the rest is used
-			// for suffix bytes
-			if (limit >= 9) {
-				int suffix = limit / 3;
-				return substr(0, limit - suffix).toHexString() + "..." + substr(length - suffix, suffix).toHexString() +
-				       format(" [%d bytes]", length);
-			}
-			rv = substr(0, limit).toHexString() + format("...[%d]", length);
-		} else {
-			rv.reserve(length * 7);
-			for (int i = 0; i < length; i++) {
-				uint8_t b = (*this)[i];
-				if (isalnum(b))
-					rv.append(format("%02x (%c) ", b, b));
-				else
-					rv.append(format("%02x ", b));
-			}
-			if (rv.size() > 0)
-				rv.resize(rv.size() - 1);
-		}
-		bytesCopied()->increment(rv.length());
-		return rv;
-	}
+	std::string toHexString(int limit = -1) const;
 
 	// Get string with full content in hex format. Different digits are splitted by a space.
 	// This is currently used for bulk dumping manifest text file when recording key ranges.
-	std::string toFullHexStringPlain() const {
-		std::string s;
-		s.reserve(length * 7);
-		for (int i = 0; i < length; i++) {
-			uint8_t b = (*this)[i];
-			s.append(format("%02x ", b));
-		}
-		if (s.size() > 0)
-			s.resize(s.size() - 1);
-		bytesCopied()->increment(s.length());
-		return s;
-	}
+	std::string toFullHexStringPlain() const;
 
 	int expectedSize() const { return size(); }
 

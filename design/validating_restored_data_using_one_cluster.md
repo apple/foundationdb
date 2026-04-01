@@ -83,5 +83,3 @@ Alternative Design Considerations
     * Add new AuditType **ValidateRestore.**
     * New audit actor auditRestoreQ() in StorageServer similar to auditStorageShardReplicaQ()
         * Change the code to read the range appended with the prefix restored_data_prefix. Can compare, update metadata and error mechanism in the same way. [Range](https://github.com/apple/foundationdb/blob/release-7.4/fdbserver/storageserver.actor.cpp#L5671)
-
-

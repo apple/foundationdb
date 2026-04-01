@@ -32,7 +32,7 @@
 
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/CommitTransaction.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunTransaction.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GenericTransactionHelper.h"
@@ -226,7 +226,7 @@ struct BinaryCodec {
 // Codec for using Flatbuffer compatible types via ObjectWriter/ObjectReader
 template <typename T, typename VersionOptions>
 struct ObjectCodec {
-	ObjectCodec(VersionOptions vo) : vo(vo) {}
+	explicit(false) ObjectCodec(VersionOptions vo) : vo(vo) {}
 	VersionOptions vo;
 
 	inline Standalone<StringRef> pack(T const& val) const { return ObjectWriter::toValue<T>(val, vo); }
@@ -247,7 +247,7 @@ private:
 	Key key;
 
 public:
-	WatchableTrigger(Key k) : key(k) {}
+	explicit WatchableTrigger(Key k) : key(k) {}
 
 	template <class Transaction>
 	void update(Transaction tr, AddConflictRange conflict = AddConflictRange::False) {
@@ -357,7 +357,8 @@ Future<Version> WatchableTrigger::onChangeActor(WatchableTrigger self,
 template <typename T, typename Codec = TupleCodec<T>, bool SystemAccess = true>
 class KeyBackedProperty {
 public:
-	KeyBackedProperty(KeyRef key = invalidKey, Optional<WatchableTrigger> trigger = {}, Codec codec = {})
+	explicit(false)
+	    KeyBackedProperty(KeyRef key = invalidKey, Optional<WatchableTrigger> trigger = {}, Codec codec = {})
 	  : key(key), trigger(trigger), codec(codec) {}
 
 	template <class Transaction>
@@ -496,7 +497,8 @@ class KeyBackedBinaryValue : public KeyBackedProperty<T, BinaryCodec<T>> {
 	typedef KeyBackedProperty<T, BinaryCodec<T>> Base;
 
 public:
-	KeyBackedBinaryValue(KeyRef key = invalidKey, Optional<WatchableTrigger> trigger = {}) : Base(key, trigger) {}
+	explicit(false) KeyBackedBinaryValue(KeyRef key = invalidKey, Optional<WatchableTrigger> trigger = {})
+	  : Base(key, trigger) {}
 
 	template <class Transaction>
 	void atomicOp(Transaction tr, T const& val, MutationRef::Type type) {
@@ -562,7 +564,8 @@ template <typename _KeyType,
           typename ValueCodec = TupleCodec<_ValueType>>
 class KeyBackedMap {
 public:
-	KeyBackedMap(KeyRef prefix = invalidKey, Optional<WatchableTrigger> trigger = {}, ValueCodec valueCodec = {})
+	explicit(false)
+	    KeyBackedMap(KeyRef prefix = invalidKey, Optional<WatchableTrigger> trigger = {}, ValueCodec valueCodec = {})
 	  : subspace(prefixRange(prefix)), trigger(trigger), valueCodec(valueCodec) {}
 
 	typedef _KeyType KeyType;
@@ -600,9 +603,9 @@ public:
 			    map(safeThreadFutureToFuture(getRangeFuture),
 			        [prefix = subspace.begin, valueCodec = valueCodec](RangeResult const& kvs) -> RangeResultType {
 				        RangeResultType rangeResult;
-				        for (int i = 0; i < kvs.size(); ++i) {
-					        KeyType key = KeyCodec::unpack(kvs[i].key.removePrefix(prefix));
-					        ValueType val = valueCodec.unpack(kvs[i].value);
+				        for (const auto& keyValue : kvs) {
+					        KeyType key = KeyCodec::unpack(keyValue.key.removePrefix(prefix));
+					        ValueType val = valueCodec.unpack(keyValue.value);
 					        rangeResult.results.push_back(PairType(key, val));
 				        }
 				        rangeResult.more = kvs.more;
@@ -896,7 +899,7 @@ public:
 template <typename _ValueType, typename Codec = TupleCodec<_ValueType>>
 class KeyBackedSet {
 public:
-	KeyBackedSet(KeyRef key = invalidKey, Optional<WatchableTrigger> trigger = {})
+	explicit(false) KeyBackedSet(KeyRef key = invalidKey, Optional<WatchableTrigger> trigger = {})
 	  : subspace(prefixRange(key)), trigger(trigger) {}
 
 	typedef _ValueType ValueType;
@@ -1143,7 +1146,7 @@ public:
 
 class KeyBackedClass {
 public:
-	KeyBackedClass(StringRef prefix, Optional<Key> triggerOverride = {})
+	explicit KeyBackedClass(StringRef prefix, Optional<Key> triggerOverride = {})
 	  : subspace(prefix), trigger(triggerOverride.orDefault(subspace.pack("_changeTrigger"_sr))) {}
 
 	Subspace subspace;

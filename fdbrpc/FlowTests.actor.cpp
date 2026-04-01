@@ -31,7 +31,7 @@
 #include "flow/WriteOnlySet.h"
 #include "fdbrpc/fdbrpc.h"
 #include "flow/IAsyncFile.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 #include "fdbrpc/grpc/AsyncTaskExecutor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -373,7 +373,7 @@ struct Int {
 	constexpr static FileIdentifier file_identifier = 12345;
 	uint32_t value;
 	Int() = default;
-	Int(uint32_t value) : value(value) {}
+	explicit(false) Int(uint32_t value) : value(value) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, value);
@@ -557,7 +557,8 @@ TEST_CASE("/flow/flow/callbacks") {
 
 	onReady(std::move(f), [&result](int x) { result = x; }, [&result](Error e) { result = -1; });
 	onReady(p.getFuture(), [&happened](int) { happened = true; }, [&happened](Error) { happened = true; });
-	ASSERT(!f.isValid());
+	ASSERT(
+	    !f.isValid()); // NOLINT(bugprone-use-after-move): this test intentionally checks the moved-from Future state.
 	ASSERT(p.isValid() && !p.isSet() && p.getFutureReferenceCount() == 1);
 	ASSERT(result == 0 && !happened);
 
@@ -574,7 +575,8 @@ TEST_CASE("/flow/flow/callbacks") {
 	f = p.getFuture();
 	result = 0;
 	onReady(std::move(f), [&result](int x) { result = x; }, [&result](Error e) { result = -e.code(); });
-	ASSERT(!f.isValid());
+	ASSERT(
+	    !f.isValid()); // NOLINT(bugprone-use-after-move): this test intentionally checks the moved-from Future state.
 	ASSERT(p.isValid() && !p.isSet() && p.getFutureReferenceCount() == 1);
 	ASSERT(result == 0);
 
@@ -1394,7 +1396,7 @@ TEST_CASE("/flow/DeterministicRandom/SignedOverflow") {
 struct Tracker {
 	int copied;
 	bool moved;
-	Tracker(int copied = 0) : copied(copied), moved(false) {}
+	explicit Tracker(int copied = 0) : copied(copied), moved(false) {}
 	Tracker(Tracker&& other) : Tracker(other.copied) {
 		ASSERT(!other.moved);
 		other.moved = true;
@@ -1487,7 +1489,8 @@ TEST_CASE("/flow/flow/PromiseStream/move2") {
 	stream.send(Tracker{});
 	Tracker tracker = waitNext(stream.getFuture());
 	Tracker movedTracker = std::move(tracker);
-	ASSERT(tracker.moved);
+	ASSERT(
+	    tracker.moved); // NOLINT(bugprone-use-after-move): this test intentionally checks the moved-from Tracker state.
 	ASSERT(!movedTracker.moved);
 	ASSERT(movedTracker.copied == 0);
 	return Void();

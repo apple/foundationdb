@@ -28,6 +28,10 @@
 #include "flow/ThreadHelper.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+//
+// TODO: IS THIS FILE NEEDED?  IS IT RUN ON A RECURRING BASIS?  IF NOT, DELETE IT.
+//
+
 void* allocateLargePages(int total);
 
 bool testFuzzActor(Future<int> (*actor)(FutureStream<int> const&, PromiseStream<int> const&, Future<Void> const&),
@@ -296,7 +300,7 @@ public:
 	const uint8_t* end() const { return data + length; }
 
 private:
-	TestBuffer(int length) noexcept : length(length) {}
+	explicit TestBuffer(int length) noexcept : length(length) {}
 	int length;
 	uint8_t data[1];
 };
@@ -630,7 +634,7 @@ void showArena(ArenaBlock* a, ArenaBlock* parent) {
 	if (!a->isTiny()) {
 		int o = a->nextBlockOffset;
 		while (o) {
-			ArenaBlockRef* r = (ArenaBlockRef*)((char*)a->getData() + o);
+			auto* r = (ArenaBlockRef*)((char*)a->getData() + o);
 
 			// If alignedBuffer is valid then print its pointer and size, else recurse
 			if (r->aligned4kBufferSize != 0) {
@@ -978,8 +982,8 @@ ACTOR [[flow_allow_discard]] Future<int> introFirst(Future<int> a, Future<int> b
 
 struct AddReply {
 	int sum;
-	AddReply() {}
-	AddReply(int x) : sum(x) {}
+	AddReply() = default;
+	explicit(false) AddReply(int x) : sum(x) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -991,7 +995,7 @@ struct AddRequest {
 	int a, b;
 	Promise<AddReply> reply; // Self-addressed envelope
 
-	AddRequest() {}
+	AddRequest() = default;
 	AddRequest(int a, int b) : a(a), b(b) {}
 
 	template <class Ar>
@@ -1188,17 +1192,12 @@ void asyncMapTest() {
 	printf("  onChange(present, set): %0.1fM/sec\n", 1.0 / (timer() - startt));
 }
 
-extern void net2_test();
-
 void dsltest() {
 	double startt, endt;
 
 	setThreadLocalDeterministicRandomSeed(40);
 
 	asyncMapTest();
-
-	net2_test();
-	// sleeptest();
 
 	Future<Void> ctf = cycleTime(1000, 1000);
 	ctf.get();
