@@ -53,7 +53,6 @@
 #include "fdbserver/core/ProxyCommitData.h"
 #include "fdbserver/core/RatekeeperInterface.h"
 #include "fdbserver/core/RecoveryState.h"
-#include "fdbserver/core/RestoreCoreUtil.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/commitproxy/CommitProxyServer.actor.h"
@@ -2631,7 +2630,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 
 		((KeyRangeRef&)txnKeys) = KeyRangeRef(keyAfter(data.back().key, txnKeys.arena()), txnKeys.end);
 
-		MutationsVec mutations;
+		Standalone<VectorRef<MutationRef>> mutations;
 		std::vector<std::pair<MapPair<Key, ServerCacheInfo>, int>> keyInfoData;
 		std::vector<UID> src, dest;
 		ServerCacheInfo info;

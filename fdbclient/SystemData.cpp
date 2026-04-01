@@ -1512,8 +1512,6 @@ const KeyRef mustContainSystemMutationsKey = "\xff/mustContainSystemMutations"_s
 
 const KeyRangeRef monitorConfKeys("\xff\x02/monitorConf/"_sr, "\xff\x02/monitorConf0"_sr);
 
-const KeyRef restoreRequestDoneKey = "\xff\x02/restoreRequestDone"_sr;
-
 const KeyRef healthyZoneKey = "\xff\x02/healthyZone"_sr;
 const StringRef ignoreSSFailuresZoneString = "IgnoreSSFailures"_sr;
 const KeyRef rebalanceDDIgnoreKey = "\xff\x02/rebalanceDDIgnored"_sr;
