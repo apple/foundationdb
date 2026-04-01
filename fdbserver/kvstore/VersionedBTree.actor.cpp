@@ -60,6 +60,22 @@
 
 using namespace std::string_view_literals;
 
+static uint8_t legacyXorWithForPagerName(std::string filename) {
+	size_t lastSlash = filename.find_last_of("\\/");
+	if (lastSlash != filename.npos) {
+		filename.erase(0, lastSlash + 1);
+	}
+	return filename.empty()
+	           ? 0x5e
+	           : static_cast<uint8_t>(filename[XXH3_64bits(filename.data(), filename.size()) % filename.size()]);
+}
+
+static void prepareLegacyXorCompatibility(const Reference<ArenaPage>& page, const std::string& pagerName) {
+	if (page->getEncodingType() == EncodingType::XOREncryption_TestOnly_DEPRECATED) {
+		page->setLegacyXorWith(legacyXorWithForPagerName(pagerName));
+	}
+}
+
 // Returns a string where every line in lines is prefixed with prefix
 std::string addPrefix(std::string prefix, std::string lines) {
 	StringRef m = lines;
@@ -2565,6 +2581,11 @@ public:
 		// last committed version + 1
 		page->setWriteInfo(pageIDs.front(), this->getLastCommittedVersion() + 1);
 
+		if (page->getEncodingType() == EncodingType::XOREncryption_TestOnly_DEPRECATED) {
+			page = page->clone();
+			prepareLegacyXorCompatibility(page, filename);
+		}
+
 		page->preWrite(pageIDs.front());
 
 		int blockSize = header ? smallestPhysicalBlock : physicalPageSize;
@@ -2806,6 +2827,7 @@ public:
 
 		try {
 			page->postReadHeader(pageID);
+			prepareLegacyXorCompatibility(page, self->filename);
 			page->postReadPayload(pageID);
 			debug_printf("DWALPager(%s) op=readPhysicalVerified %s ptr=%p\n",
 			             self->filename.c_str(),
@@ -2871,6 +2893,7 @@ public:
 
 		try {
 			page->postReadHeader(pageIDs.front());
+			prepareLegacyXorCompatibility(page, self->filename);
 			page->postReadPayload(pageIDs.front());
 			debug_printf("DWALPager(%s) op=readPhysicalVerified %s ptr=%p bytes=%d\n",
 			             self->filename.c_str(),
@@ -5091,11 +5114,16 @@ public:
 			}
 
 			if (self->m_encodingType != self->m_header.encodingType) {
-				TraceEvent(SevWarn, "RedwoodBTreeUnexpectedEncodingType")
-				    .detail("InstanceName", self->m_pager->getName())
-				    .detail("UsingEncodingType", self->m_encodingType)
-				    .detail("ExistingEncodingType", self->m_header.encodingType);
-				throw unexpected_encoding_type();
+				if (g_network->isSimulated() &&
+				    self->m_header.encodingType == EncodingType::XOREncryption_TestOnly_DEPRECATED) {
+					self->m_encodingType = self->m_header.encodingType;
+				} else {
+					TraceEvent(SevWarn, "RedwoodBTreeUnexpectedEncodingType")
+					    .detail("InstanceName", self->m_pager->getName())
+					    .detail("UsingEncodingType", self->m_encodingType)
+					    .detail("ExistingEncodingType", self->m_header.encodingType);
+					throw unexpected_encoding_type();
+				}
 			}
 
 			self->m_lazyClearQueue.recover(self->m_pager, self->m_header.lazyDeleteQueue, "LazyClearQueueRecovered");
