@@ -5953,7 +5953,7 @@ Future<StorageMetrics> DatabaseContext::getStorageMetrics(KeyRange const& keys,
 Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx,
                                                                             KeyRange keys,
                                                                             int shardLimit) {
-	GetDDMetricsReply rep = co_await proxyLoadBalance(
+	GetDDMetricsReply rep = co_await commitProxyLoadBalance(
 	    cx, makeReqBuilder<GetDDMetricsRequest>(keys, shardLimit), &CommitProxyInterface::getDDMetrics);
 	co_return rep.storageMetricsList;
 }
@@ -6325,10 +6325,10 @@ void enableClientInfoLogging() {
 Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID) {
 	TraceEvent("SnapCreateEnter").detail("SnapCmd", snapCmd).detail("UID", snapUID);
 	try {
-		co_await proxyLoadBalance(cx,
-		                          makeReqBuilder<ProxySnapRequest>(snapCmd, snapUID, snapUID),
-		                          &CommitProxyInterface::proxySnapReq,
-		                          AtMostOnce::True);
+		co_await commitProxyLoadBalance(cx,
+		                                makeReqBuilder<ProxySnapRequest>(snapCmd, snapUID, snapUID),
+		                                &CommitProxyInterface::proxySnapReq,
+		                                AtMostOnce::True);
 		TraceEvent("SnapCreateExit").detail("SnapCmd", snapCmd).detail("UID", snapUID);
 	} catch (Error& e) {
 		TraceEvent("SnapCreateError").error(e).detail("SnapCmd", snapCmd.toString()).detail("UID", snapUID);
@@ -6561,9 +6561,9 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion
 	state bool ddCheck;
 	try {
 		ExclusionSafetyCheckReply _ddCheck =
-		    wait(proxyLoadBalance(cx,
-		                          makeReqBuilder<ExclusionSafetyCheckRequest>(exclusions),
-		                          &CommitProxyInterface::exclusionSafetyCheckReq));
+		    wait(commitProxyLoadBalance(cx,
+		                                makeReqBuilder<ExclusionSafetyCheckRequest>(exclusions),
+		                                &CommitProxyInterface::exclusionSafetyCheckReq));
 		ddCheck = _ddCheck.safe;
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled) {
