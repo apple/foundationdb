@@ -117,34 +117,34 @@ class EchoServer {
 		}
 	}
 
-	static Future<Void> serveGetInterfaceReqs(EchoServer* self) {
+	Future<Void> serveGetInterfaceReqs() {
 		while (true) {
 			try {
-				GetInterfaceRequest req = co_await self->interf.getInterface.getFuture();
-				req.reply.send(self->interf);
+				GetInterfaceRequest req = co_await interf.getInterface.getFuture();
+				req.reply.send(interf);
 			} catch (Error& e) {
 				rethrowUnexpectedError(e);
 			}
 		}
 	}
 
-	static Future<Void> serveEchoReqs(EchoServer* self) {
+	Future<Void> serveEchoReqs() {
 		while (true) {
 			try {
-				EchoRequest req = co_await self->interf.echo.getFuture();
+				EchoRequest req = co_await interf.echo.getFuture();
 				req.reply.send(req.message);
-				self->counter.inc();
+				counter.inc();
 			} catch (Error& e) {
 				rethrowUnexpectedError(e);
 			}
 		}
 	}
 
-	static Future<Void> printThroughput(EchoServer* self) {
+	Future<Void> printThroughput() {
 		while (true) {
 			try {
 				co_await delay(10);
-				std::cout << "Throughput: " << self->counter.avg() << " req/sec" << std::endl;
+				std::cout << "Throughput: " << counter.avg() << " req/sec" << std::endl;
 			} catch (Error& e) {
 				rethrowUnexpectedError(e);
 			}
@@ -157,7 +157,7 @@ class EchoServer {
 public:
 	EchoServer() { interf.getInterface.makeWellKnownEndpoint(WLTOKEN_ECHO_SERVER, TaskPriority::DefaultEndpoint); }
 
-	Future<Void> run() { co_await race(serveGetInterfaceReqs(this), serveEchoReqs(this), printThroughput(this)); }
+	Future<Void> run() { co_await race(serveGetInterfaceReqs(), serveEchoReqs(), printThroughput()); }
 };
 
 Future<Void> echoServer() {
