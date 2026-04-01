@@ -93,6 +93,8 @@
 #include "flow/network.h"
 #include "flow/serialize.h"
 
+#include "ProxyLoadBalance.h"
+
 #ifdef ADDRESS_SANITIZER
 #include <sanitizer/lsan_interface.h>
 #endif
@@ -6577,19 +6579,11 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion
 	    .detail("Exclusions", describe(exclusions));
 	state bool ddCheck;
 	try {
-		loop {
-			choose {
-				when(wait(cx->onProxiesChanged())) {}
-				when(ExclusionSafetyCheckReply _ddCheck =
-				         wait(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
-				                               &CommitProxyInterface::exclusionSafetyCheckReq,
-				                               ExclusionSafetyCheckRequest(exclusions),
-				                               cx->taskID))) {
-					ddCheck = _ddCheck.safe;
-					break;
-				}
-			}
-		}
+		ExclusionSafetyCheckReply _ddCheck =
+		    wait(proxyLoadBalance(cx,
+		                          makeReqBuilder<ExclusionSafetyCheckRequest>(exclusions),
+		                          &CommitProxyInterface::exclusionSafetyCheckReq));
+		ddCheck = _ddCheck.safe;
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled) {
 			TraceEvent("ExclusionSafetyCheckError")

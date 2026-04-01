@@ -92,6 +92,7 @@ if(WITH_AWS_BACKUP)
 endif()
 
 add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
+target_include_directories(fdbclient PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(fdbclient PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/versions.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/include/fdbclient/versions.h)
 add_dependencies(fdbclient fdboptions)
@@ -179,6 +180,7 @@ endif()
 # fdbserver retain sampling functionality in client code while disabling
 # sampling for pure clients.
 add_flow_target(STATIC_LIBRARY NAME fdbclient_sampling SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
+target_include_directories(fdbclient_sampling PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(fdbclient_sampling PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
 add_dependencies(fdbclient_sampling fdboptions)
 target_link_libraries(fdbclient_sampling PUBLIC fdbrpc_sampling msgpack PRIVATE rapidxml)
