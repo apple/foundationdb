@@ -60,6 +60,8 @@
 
 using namespace std::string_view_literals;
 
+// Older simulated Redwood files derived the test-only XOR secret from the basename of the pager file.
+// Keep that mapping stable so restarted upgrade tests can still read and continue writing those files.
 static uint8_t legacyXorWithForPagerName(std::string filename) {
 	size_t lastSlash = filename.find_last_of("\\/");
 	if (lastSlash != filename.npos) {
@@ -70,6 +72,8 @@ static uint8_t legacyXorWithForPagerName(std::string filename) {
 	           : static_cast<uint8_t>(filename[XXH3_64bits(filename.data(), filename.size()) % filename.size()]);
 }
 
+// Legacy XOR pages need the filename-derived byte installed on the ArenaPage before encode/decode.
+// XXHash64 pages ignore this state.
 static void prepareLegacyXorCompatibility(const Reference<ArenaPage>& page, const std::string& pagerName) {
 	if (page->getEncodingType() == EncodingType::XOREncryption_TestOnly_DEPRECATED) {
 		page->setLegacyXorWith(legacyXorWithForPagerName(pagerName));
