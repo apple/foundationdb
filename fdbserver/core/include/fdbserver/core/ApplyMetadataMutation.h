@@ -32,7 +32,7 @@
 #include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/LogSystem.h"
 #include "fdbserver/core/LogProtocolMessage.h"
-#include "fdbserver/core/ProxyCommitData.actor.h"
+#include "fdbserver/core/ProxyCommitData.h"
 #include "flow/FastRef.h"
 
 // Resolver's data for applyMetadataMutations() calls.

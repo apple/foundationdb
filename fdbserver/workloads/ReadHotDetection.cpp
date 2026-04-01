@@ -21,9 +21,9 @@
 #include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.h"
-#include "fdbserver/workloads/BulkSetup.h"
+#include "BulkSetup.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 
 struct ReadHotDetectionWorkload : TestWorkload {
 	static constexpr auto NAME = "ReadHotDetection";

@@ -39,6 +39,19 @@ namespace n_coroutine = ::std::experimental;
 
 struct Uncancellable {};
 
+// Marker parameter for coroutines that want `co_await Future<Void>` to
+// produce a value convertible to `Void` instead of `void`:
+//
+//   Future<Void> f(Future<Void> ready, ExplicitVoid = {}) {
+//     Void v = co_await ready;
+//     co_return;
+//   }
+//
+// Unmarked coroutines resume with co_await Future<Void>` -> `void`
+struct ExplicitVoid {
+	operator Void() const { return Void(); }
+};
+
 template <class T>
 class AsyncResult;
 
@@ -49,7 +62,7 @@ struct AsyncResultState;
 template <class T>
 struct AsyncResultCallback;
 
-template <class T, bool IsCancellable>
+template <class T, bool IsCancellable, bool ReturnsExplicitVoid = false>
 struct AsyncResultPromise;
 
 template <class PromiseType, class ValueType>
@@ -112,7 +125,7 @@ private:
 
 	coro::AsyncResultState<StoredT>* state;
 
-	template <class U, bool IsCancellable>
+	template <class U, bool IsCancellable, bool ReturnsExplicitVoid>
 	friend struct coro::AsyncResultPromise;
 	template <class PromiseType, class ValueType>
 	friend struct coro::AwaitableAsyncResult;
@@ -239,18 +252,20 @@ public:
 
 template <typename ReturnValue, typename... Args>
 struct [[maybe_unused]] n_coroutine::coroutine_traits<Future<ReturnValue>, Args...> {
-	using promise_type = coro::CoroPromise<ReturnValue, !coro::hasUncancellable<Args...>>;
+	using promise_type =
+	    coro::CoroPromise<ReturnValue, !coro::hasUncancellable<Args...>, coro::hasExplicitVoid<Args...>>;
 };
 
 template <typename ReturnValue, typename... Args>
 struct [[maybe_unused]] n_coroutine::coroutine_traits<AsyncResult<ReturnValue>, Args...> {
-	using promise_type = coro::AsyncResultPromise<ReturnValue, !coro::hasUncancellable<Args...>>;
+	using promise_type =
+	    coro::AsyncResultPromise<ReturnValue, !coro::hasUncancellable<Args...>, coro::hasExplicitVoid<Args...>>;
 };
 
 template <typename ReturnValue, typename... Args>
 struct [[maybe_unused]] n_coroutine::coroutine_traits<AsyncGenerator<ReturnValue>, Args...> {
 	static_assert(!coro::hasUncancellable<Args...>, "AsyncGenerator can't be uncancellable");
-	using promise_type = coro::AsyncGeneratorPromise<ReturnValue>;
+	using promise_type = coro::AsyncGeneratorPromise<ReturnValue, coro::hasExplicitVoid<Args...>>;
 };
 
 template <class T>

@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbclient/GlobalConfig.h"
 #include "fdbclient/ManagementAPI.h"

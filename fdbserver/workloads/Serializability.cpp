@@ -22,7 +22,7 @@
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/ActorCollection.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 
 struct SerializabilityWorkload : TestWorkload {
 	static constexpr auto NAME = "Serializability";

@@ -20,8 +20,8 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.h"
-#include "fdbserver/tester/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.h"
+#include "fdbserver/tester/workloads.h"
+#include "BulkSetup.h"
 
 // Storefront workload will maintain 2 tables: one for orders and one for items
 // Items table will have an entry for each item and the current total of "unfilled" orders

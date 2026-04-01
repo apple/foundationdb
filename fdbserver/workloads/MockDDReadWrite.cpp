@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/workloads/MockDDTest.h"
+#include "MockDDTest.h"
 #include "fdbserver/datadistributor/MockDataDistributor.h"
 #include "fdbserver/datadistributor/DDTxnProcessor.h"
 

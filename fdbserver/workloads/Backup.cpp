@@ -24,7 +24,7 @@
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "fdbserver/tester/TestEncryptionUtils.h"
 #include "flow/IRandom.h"
 
@@ -135,13 +135,12 @@ struct BackupWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> doBackup(BackupWorkload* self,
-	                             double startDelay,
-	                             FileBackupAgent* backupAgent,
-	                             Database cx,
-	                             Key tag,
-	                             Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                             double stopDifferentialDelay) {
+	Future<Void> doBackup(double startDelay,
+	                      FileBackupAgent* backupAgent,
+	                      Database cx,
+	                      Key tag,
+	                      Standalone<VectorRef<KeyRangeRef>> backupRanges,
+	                      double stopDifferentialDelay) {
 
 		UID randomID = nondeterministicRandom()->randomUniqueID();
 
@@ -177,9 +176,9 @@ struct BackupWorkload : TestWorkload {
 			                                   tag.toString(),
 			                                   backupRanges,
 			                                   StopWhenDone{ !stopDifferentialDelay },
-			                                   self->usePartitionedLog,
+			                                   usePartitionedLog,
 			                                   IncrementalBackupOnly::False,
-			                                   self->encryptionKeyFileName);
+			                                   encryptionKeyFileName);
 		} catch (Error& e) {
 			TraceEvent("BW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
@@ -324,7 +323,7 @@ struct BackupWorkload : TestWorkload {
 			co_await delay(backupAfter);
 
 			TraceEvent("BW_DoBackup1", randomID).detail("Tag", printable(backupTag));
-			Future<Void> b = doBackup(this, 0, &backupAgent, cx, backupTag, backupRanges, stopDifferentialAfter);
+			Future<Void> b = doBackup(0, &backupAgent, cx, backupTag, backupRanges, stopDifferentialAfter);
 
 			TraceEvent("BW_DoBackupWait", randomID)
 			    .detail("BackupTag", printable(backupTag))

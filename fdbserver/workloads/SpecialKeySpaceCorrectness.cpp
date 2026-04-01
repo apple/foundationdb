@@ -29,7 +29,7 @@
 #include "fdbclient/SpecialKeySpace.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/TesterInterface.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "flow/IRandom.h"
 
 struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
@@ -118,8 +118,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override {
 		testRywLifetime(cx);
 		co_await timeout(testSpecialKeySpaceErrors(cx, this) && getRangeCallActor(cx, this) &&
-		                     testConflictRanges(cx, /*read*/ true, this) &&
-		                     testConflictRanges(cx, /*read*/ false, this) && metricsApiCorrectnessActor(cx, this),
+		                     testConflictRanges(cx, /*read*/ true) && testConflictRanges(cx, /*read*/ false) &&
+		                     metricsApiCorrectnessActor(cx, this),
 		                 testDuration,
 		                 Void());
 		// Only use one client to avoid potential conflicts on changing cluster configuration
@@ -601,7 +601,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> testConflictRanges(Database cx_, bool read, SpecialKeySpaceCorrectnessWorkload* self) {
+	Future<Void> testConflictRanges(Database cx_, bool read) {
 		StringRef prefix = read ? readConflictRangeKeysRange.begin : writeConflictRangeKeysRange.begin;
 		CODE_PROBE(read, "test read conflict range special key implementation");
 		CODE_PROBE(!read, "test write conflict range special key implementation");
@@ -617,7 +617,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		referenceTx->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		referenceTx->setVersion(100); // Prevent this from doing a GRV or committing
 		referenceTx->clear(normalKeys);
-		int numKeys = deterministicRandom()->randomInt(1, self->conflictRangeSizeFactor) * 4;
+		int numKeys = deterministicRandom()->randomInt(1, conflictRangeSizeFactor) * 4;
 		std::vector<std::string> keys; // Must all be distinct
 		keys.resize(numKeys);
 		int lastKey = 0;
@@ -669,7 +669,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				throw;
 			ASSERT(e.code() == error_code_special_keys_no_module_found);
 		}
-		for (int i = 0; i < self->conflictRangeSizeFactor; ++i) {
+		for (int i = 0; i < conflictRangeSizeFactor; ++i) {
 			GetRangeLimits limit;
 			KeySelector begin;
 			KeySelector end;
@@ -704,7 +704,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					    .detail("End", end)
 					    .detail("Ryw", ryw);
 					had_error = true;
-					++self->wrongResults;
+					++wrongResults;
 				}
 				++correct_iter;
 				++test_iter;
@@ -720,7 +720,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				    .detail("Ryw", ryw);
 				++correct_iter;
 				had_error = true;
-				++self->wrongResults;
+				++wrongResults;
 			}
 			while (test_iter != testResultFuture.get().end()) {
 				TraceEvent(SevError, "TestFailure")
@@ -733,7 +733,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				    .detail("Ryw", ryw);
 				++test_iter;
 				had_error = true;
-				++self->wrongResults;
+				++wrongResults;
 			}
 			if (had_error)
 				break;

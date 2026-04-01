@@ -43,14 +43,14 @@
 #include "fdbclient/IKnobCollection.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/versions.h"
-#include "fdbclient/S3Client.actor.h"
+#include "fdbclient/S3Client.h"
 #include "fdbclient/BackupAgent.h"
 #include "flow/Platform.h"
 #include "flow/ArgParseUtil.h"
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 #include "SimpleOpt/SimpleOpt.h"
 
 // CLI for S3Client.

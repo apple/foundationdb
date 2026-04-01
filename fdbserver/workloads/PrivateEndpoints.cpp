@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 
 #include "flow/CoroUtils.h"
 
@@ -57,12 +57,7 @@ struct PrivateEndpoints : TestWorkload {
 	template <class T>
 	static Future<Void> assumeFailure(Future<T> f) {
 		try {
-			if constexpr (std::is_same_v<T, Void>) {
-				co_await f;
-			} else {
-				T t = co_await f;
-				(void)t;
-			}
+			co_await f;
 			ASSERT(false);
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
@@ -108,28 +103,28 @@ struct PrivateEndpoints : TestWorkload {
 		addTestFor(&CommitProxyInterface::exclusionSafetyCheckReq);
 		// addTestFor(&CommitProxyInterface::getDDMetrics);
 	}
-	Future<Void> start(Database const& cx) override { return _start(this, cx); }
+	Future<Void> start(Database const& cx) override { return _start(cx); }
 	Future<bool> check(Database const& cx) override { return success; }
 	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.emplace_back("Successes", double(numSuccesses), Averaged::True);
 	}
 
-	static Future<Void> _start(PrivateEndpoints* self, Database cx) {
+	Future<Void> _start(Database cx) {
 		Reference<AsyncVar<ClientDBInfo>> clientInfo = cx->clientInfo;
-		TraceEvent("PrivateEndpointTestStartWait").detail("WaitTime", self->startAfter).log();
-		co_await delay(self->startAfter);
-		TraceEvent("PrivateEndpointTestStart").detail("RunFor", self->runFor).log();
-		Future<Void> end = delay(self->runFor);
+		TraceEvent("PrivateEndpointTestStartWait").detail("WaitTime", startAfter).log();
+		co_await delay(startAfter);
+		TraceEvent("PrivateEndpointTestStart").detail("RunFor", runFor).log();
+		Future<Void> end = delay(runFor);
 		try {
 			while (true) {
-				auto testFuture = deterministicRandom()->randomChoice(self->testFunctions)(clientInfo);
+				auto testFuture = deterministicRandom()->randomChoice(testFunctions)(clientInfo);
 				{
 					auto choice = co_await race(end, testFuture);
 					if (choice.index() == 0) {
 						TraceEvent("PrivateEndpointTestDone").log();
 						co_return;
 					} else if (choice.index() == 1) {
-						++self->numSuccesses;
+						++numSuccesses;
 					} else {
 						UNREACHABLE();
 					}

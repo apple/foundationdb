@@ -22,9 +22,9 @@
 #include "fdbclient/Knobs.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/core/ServerDBInfo.actor.h"
+#include "fdbserver/core/ServerDBInfo.h"
 #include "DeltaTree.h"
-#include "fdbserver/core/IDiskQueue.h"
+#include "fdbserver/kvstore/IDiskQueue.h"
 #include "IKeyValueContainer.h"
 #include "fdbserver/core/IKeyValueStore.h"
 #include "RadixTree.h"
@@ -45,9 +45,9 @@ public:
 	                    UID id,
 	                    int64_t memoryLimit,
 	                    KeyValueStoreType storeType,
-	                    bool disableSnapshot,
-	                    bool replaceContent,
-	                    bool exactRecovery);
+	                    DisableSnapshot,
+	                    ReplaceContent,
+	                    ExactRecovery);
 
 	bool getReplaceContent() const override { return replaceContent; }
 	// IClosable
@@ -903,9 +903,9 @@ KeyValueStoreMemory<Container>::KeyValueStoreMemory(IDiskQueue* log,
                                                     UID id,
                                                     int64_t memoryLimit,
                                                     KeyValueStoreType storeType,
-                                                    bool disableSnapshot,
-                                                    bool replaceContent,
-                                                    bool exactRecovery)
+                                                    DisableSnapshot disableSnapshot,
+                                                    ReplaceContent replaceContent,
+                                                    ExactRecovery exactRecovery)
   : type(storeType), id(id), log(log), db(db), committedWriteBytes(0), overheadWriteBytes(0), currentSnapshotEnd(-1),
     previousSnapshotEnd(-1), committedDataSize(0), transactionSize(0), transactionIsLarge(false), resetSnapshot(false),
     disableSnapshot(disableSnapshot), replaceContent(replaceContent), firstCommitWithSnapshot(true), snapshotCount(0),
@@ -939,18 +939,18 @@ IKeyValueStore* keyValueStoreMemory(std::string const& basename,
 		                                           logID,
 		                                           memoryLimit,
 		                                           storeType,
-		                                           /*doc*/ false,
-		                                           /*ument*/ false,
-		                                           /*thisstuff FFS*/ false);
+		                                           DisableSnapshot::False,
+		                                           ReplaceContent::False,
+		                                           ExactRecovery::False);
 	} else {
 		return new KeyValueStoreMemory<IKeyValueContainer>(log,
 		                                                   Reference<AsyncVar<ServerDBInfo> const>(),
 		                                                   logID,
 		                                                   memoryLimit,
 		                                                   storeType,
-		                                                   /* name */ false,
-		                                                   /*the */ false,
-		                                                   /* effing parameter*/ false);
+		                                                   DisableSnapshot::False,
+		                                                   ReplaceContent::False,
+		                                                   ExactRecovery::False);
 	}
 }
 
@@ -958,9 +958,9 @@ IKeyValueStore* keyValueStoreLogSystem(class IDiskQueue* queue,
                                        Reference<AsyncVar<ServerDBInfo> const> db,
                                        UID logID,
                                        int64_t memoryLimit,
-                                       bool disableSnapshot,
-                                       bool replaceContent,
-                                       bool exactRecovery) {
+                                       DisableSnapshot disableSnapshot,
+                                       ReplaceContent replaceContent,
+                                       ExactRecovery exactRecovery) {
 	return new KeyValueStoreMemory<IKeyValueContainer>(
 	    queue, db, logID, memoryLimit, KeyValueStoreType::MEMORY, disableSnapshot, replaceContent, exactRecovery);
 }

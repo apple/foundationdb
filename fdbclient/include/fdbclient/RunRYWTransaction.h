@@ -43,20 +43,14 @@ using RunRYWTransactionResult = decltype(std::declval<Function>()(Reference<Read
 // The supplied function should be idempotent. Otherwise, outcome of this function will depend on how many times the
 // transaction is retried.
 template <class Function>
-Future<RunRYWTransactionResult<Function>> runRYWTransaction(Database cx, Function func) {
+Future<RunRYWTransactionResult<Function>> runRYWTransaction(Database cx, Function func, ExplicitVoid = {}) {
 	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	while (true) {
 		Error err;
 		try {
-			if constexpr (std::is_same_v<RunRYWTransactionResult<Function>, Void>) {
-				co_await func(tr);
-				co_await tr->commit();
-				co_return;
-			} else {
-				RunRYWTransactionResult<Function> result = co_await func(tr);
-				co_await tr->commit();
-				co_return result;
-			}
+			auto const result = co_await func(tr);
+			co_await tr->commit();
+			co_return result;
 		} catch (Error& e) {
 			err = e;
 		}
@@ -67,27 +61,21 @@ Future<RunRYWTransactionResult<Function>> runRYWTransaction(Database cx, Functio
 // Debug version of runRYWTransaction. It logs the function name and the committed version of the transaction.
 // Note the function name is required, e.g., taskFunc->getName() for TaskFuncBase.
 template <class Function>
-Future<RunRYWTransactionResult<Function>> runRYWTransactionDebug(Database cx, StringRef name, Function func) {
+Future<RunRYWTransactionResult<Function>> runRYWTransactionDebug(Database cx,
+                                                                 StringRef name,
+                                                                 Function func,
+                                                                 ExplicitVoid = {}) {
 	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	while (true) {
 		Error err;
 		try {
 			// func should be idempodent; otherwise, retry will get undefined result
-			if constexpr (std::is_same_v<RunRYWTransactionResult<Function>, Void>) {
-				co_await func(tr);
-				co_await tr->commit();
-				TraceEvent("DebugRunRYWTransaction")
-				    .detail("Function", name)
-				    .detail("CommitVersion", tr->getCommittedVersion());
-				co_return;
-			} else {
-				RunRYWTransactionResult<Function> result = co_await func(tr);
-				co_await tr->commit();
-				TraceEvent("DebugRunRYWTransaction")
-				    .detail("Function", name)
-				    .detail("CommitVersion", tr->getCommittedVersion());
-				co_return result;
-			}
+			auto const result = co_await func(tr);
+			co_await tr->commit();
+			TraceEvent("DebugRunRYWTransaction")
+			    .detail("Function", name)
+			    .detail("CommitVersion", tr->getCommittedVersion());
+			co_return result;
 		} catch (Error& e) {
 			err = e;
 		}
@@ -119,20 +107,14 @@ Future<Void> runRYWTransactionVoid(Database cx, Function func) {
 }
 
 template <class Function>
-Future<RunRYWTransactionResult<Function>> runRYWTransactionFailIfLocked(Database cx, Function func) {
+Future<RunRYWTransactionResult<Function>> runRYWTransactionFailIfLocked(Database cx, Function func, ExplicitVoid = {}) {
 	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	while (true) {
 		Error err;
 		try {
-			if constexpr (std::is_same_v<RunRYWTransactionResult<Function>, Void>) {
-				co_await func(tr);
-				co_await tr->commit();
-				co_return;
-			} else {
-				RunRYWTransactionResult<Function> result = co_await func(tr);
-				co_await tr->commit();
-				co_return result;
-			}
+			auto const result = co_await func(tr);
+			co_await tr->commit();
+			co_return result;
 		} catch (Error& e) {
 			err = e;
 		}
@@ -143,17 +125,11 @@ Future<RunRYWTransactionResult<Function>> runRYWTransactionFailIfLocked(Database
 }
 
 template <class Function>
-Future<RunRYWTransactionResult<Function>> runRYWTransactionNoRetry(Database cx, Function func) {
+Future<RunRYWTransactionResult<Function>> runRYWTransactionNoRetry(Database cx, Function func, ExplicitVoid = {}) {
 	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	if constexpr (std::is_same_v<RunRYWTransactionResult<Function>, Void>) {
-		co_await func(tr);
-		co_await tr->commit();
-		co_return;
-	} else {
-		RunRYWTransactionResult<Function> result = co_await func(tr);
-		co_await tr->commit();
-		co_return result;
-	}
+	auto const result = co_await func(tr);
+	co_await tr->commit();
+	co_return result;
 }
 
 #if defined(__GNUC__) && !defined(__clang__)

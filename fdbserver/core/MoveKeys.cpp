@@ -29,11 +29,11 @@
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/core/BulkLoadUtil.actor.h"
+#include "fdbserver/core/BulkLoadUtil.h"
 #include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbserver/TSSMappingUtil.h"
+#include "fdbserver/core/TSSMappingUtil.h"
 
 template <typename... T>
 static inline void dprint(fmt::format_string<T...> fmt, T&&... args) {
@@ -451,7 +451,7 @@ Future<bool> validateRangeAssignment(Database occ,
 		try {
 			// If corruption detected, enter security mode which
 			// stops using data moves and only allow auditStorage
-			co_await success(setDDMode(occ, 2));
+			co_await setDDMode(occ, 2);
 			TraceEvent(SevInfo, "ValidateRangeAssignmentCorruptionDetectedAndDDStopped")
 			    .detail("DataMoveID", dataMoveId)
 			    .detail("Range", range)
@@ -992,7 +992,7 @@ static Future<Void> startMoveKeys(Database occ,
 			batches++;
 
 			// RYW to optimize re-reading the same key ranges
-			Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(occ);
+			auto tr = makeReference<ReadYourWritesTransaction>(occ);
 			int retries = 0;
 
 			while (true) {
@@ -1879,11 +1879,11 @@ static Future<Void> startMoveShards(Database occ,
 					if (bulkLoadTaskState.present()) {
 						BulkLoadTaskState newBulkLoadTaskState;
 						try {
-							co_await store(newBulkLoadTaskState,
-							               getBulkLoadTask(&tr,
-							                               bulkLoadTaskState.get().getRange(),
-							                               bulkLoadTaskState.get().getTaskId(),
-							                               { BulkLoadPhase::Triggered, BulkLoadPhase::Running }));
+							newBulkLoadTaskState =
+							    co_await getBulkLoadTask(&tr,
+							                             bulkLoadTaskState.get().getRange(),
+							                             bulkLoadTaskState.get().getTaskId(),
+							                             { BulkLoadPhase::Triggered, BulkLoadPhase::Running });
 							// It is possible that the previous data move is cancelled but has updated the
 							// task phase as running. In this case, we update the phase from Running to Running
 							newBulkLoadTaskState.phase = BulkLoadPhase::Running;
@@ -1987,7 +1987,7 @@ static Future<Void> startMoveShards(Database occ,
 
 static Future<Void> checkDataMoveComplete(Database occ, UID dataMoveId, KeyRange keys, UID relocationIntervalId) {
 	try {
-		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(occ);
+		auto tr = makeReference<ReadYourWritesTransaction>(occ);
 		Key begin = keys.begin;
 		while (begin < keys.end) {
 			while (true) {
@@ -2333,11 +2333,11 @@ static Future<Void> finishMoveShards(Database occ,
 						if (bulkLoadTaskState.present()) {
 							BulkLoadTaskState newBulkLoadTaskState;
 							try {
-								co_await store(newBulkLoadTaskState,
-								               getBulkLoadTask(&tr,
-								                               bulkLoadTaskState.get().getRange(),
-								                               bulkLoadTaskState.get().getTaskId(),
-								                               { BulkLoadPhase::Running, BulkLoadPhase::Complete }));
+								newBulkLoadTaskState =
+								    co_await getBulkLoadTask(&tr,
+								                             bulkLoadTaskState.get().getRange(),
+								                             bulkLoadTaskState.get().getTaskId(),
+								                             { BulkLoadPhase::Running, BulkLoadPhase::Complete });
 								newBulkLoadTaskState.phase = BulkLoadPhase::Complete;
 							} catch (Error& e) {
 								if (e.code() == error_code_bulkload_task_outdated) {
@@ -2442,7 +2442,7 @@ static Future<Void> finishMoveShards(Database occ,
 }; // anonymous namespace
 
 Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServerInterface server) {
-	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
 	KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
 	KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(serverMetadataKeys.begin,
 	                                                                                     IncludeVersion());
@@ -2503,7 +2503,7 @@ Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServerInter
 			          success(fExclProc2) && success(fExclIP2) && success(fFailProc2) && success(fFailIP2));
 
 			for (const auto& exclusion : localityExclusions) {
-				co_await success(exclusion);
+				co_await exclusion;
 			}
 
 			// If we have been added to the excluded/failed state servers or localities list, we have to fail
@@ -2666,7 +2666,7 @@ Future<Void> removeStorageServer(Database cx,
 	KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
 	KeyBackedObjectMap<UID, StorageMigrationType, decltype(IncludeVersion())> metadataMap(serverMetadataKeys.begin,
 	                                                                                      IncludeVersion());
-	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
 	bool retry = false;
 	int noCanRemoveCount = 0;
 
@@ -3384,14 +3384,4 @@ Future<Void> unassignServerKeys(UID traceId, TrType tr, KeyRangeRef keys, std::s
 			TraceEvent("UnassignKeys", traceId).detail("Keys", keys).detail("SS", id);
 		}
 	}
-}
-
-// Assign given key range to specified storage server.
-template <typename TrType = Transaction*>
-Future<Void> assignKeysToServer(UID traceId, TrType tr, KeyRangeRef keys, UID serverUID) {
-	Value value = keyServersValue(std::vector<UID>({ serverUID }), std::vector<UID>(), UID(), UID());
-	co_await krmSetRangeCoalescing(tr, keyServersPrefix, keys, allKeys, value);
-	co_await krmSetRangeCoalescing(tr, serverKeysPrefixFor(serverUID), keys, allKeys, serverKeysTrue);
-	dprint("Assign {} to server {}\n", normalKeys.toString(), serverUID.toString());
-	TraceEvent("AssignKeys", traceId).detail("Keys", keys).detail("SS", serverUID);
 }

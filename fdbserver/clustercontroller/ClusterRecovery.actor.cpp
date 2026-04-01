@@ -1160,9 +1160,9 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	                                             self->dbInfo,
 	                                             self->dbgid,
 	                                             self->memoryLimit,
-	                                             /*disableSnapshot=*/false,
-	                                             /*replaceContent=*/false,
-	                                             /*exactRecovery=*/true);
+	                                             DisableSnapshot::False,
+	                                             ReplaceContent::False,
+	                                             ExactRecovery::True);
 
 	// Version 0 occurs at the version epoch. The version epoch is the number
 	// of microseconds since the Unix epoch. It can be set through fdbcli.

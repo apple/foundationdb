@@ -24,7 +24,7 @@
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/TesterInterface.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 
 struct RangeLocking : TestWorkload {
 	static constexpr auto NAME = "RangeLocking";

@@ -12,8 +12,6 @@ from .parse_tree import (
     ChooseStatement,
     CodeBlock,
     ContinueStatement,
-    Declaration,
-    Descr,
     ForStatement,
     IfStatement,
     LoopStatement,
@@ -211,71 +209,6 @@ class Context:
         self.continue_f = other.continue_f
         self.catch_f_err = other.catch_f_err
         self.try_loop_depth = other.try_loop_depth
-
-
-class DescrCompiler:
-    def __init__(self, descr: "Descr", brace_depth: int) -> None:
-        self.descr = descr
-        self.member_indent_str = "\t" * brace_depth
-
-    def write(self, writer) -> int:
-        lines = 0
-        indent = self.member_indent_str
-        writer.write(
-            f"{indent}template<> struct Descriptor<struct {self.descr.name}> {{\n"
-        )
-        writer.write(
-            f'{indent}\tstatic StringRef typeName() {{ return "{self.descr.name}"_sr; }}\n'
-        )
-        writer.write(f"{indent}\tusing type = {self.descr.name};\n")
-        lines += 3
-        for dec in self.descr.body:
-            writer.write(f"{indent}\tstruct {dec.name}Descriptor {{\n")
-            writer.write(
-                f'{indent}\t\tstatic StringRef name() {{ return "{dec.name}"_sr; }}\n'
-            )
-            writer.write(
-                f'{indent}\t\tstatic StringRef typeName() {{ return "{dec.type}"_sr; }}\n'
-            )
-            writer.write(
-                f'{indent}\t\tstatic StringRef comment() {{ return "{dec.comment}"_sr; }}\n'
-            )
-            writer.write(f"{indent}\t\tusing type = {dec.type};\n")
-            writer.write(
-                f"{indent}\t\tstatic inline type get({self.descr.name}& from);\n"
-            )
-            writer.write(f"{indent}\t}};\n")
-            lines += 7
-        writer.write(f"{indent}\tusing fields = std::tuple<")
-        first = True
-        for dec in self.descr.body:
-            if not first:
-                writer.write(",")
-            writer.write(f"{dec.name}Descriptor")
-            first = False
-        writer.write(">;\n")
-        writer.write(
-            f"{indent}\tusing field_indexes = make_index_sequence_impl<0, index_sequence<>, std::tuple_size<fields>::value>::type;\n"
-        )
-        writer.write(f"{indent}}};\n")
-        if self.descr.super_class_list:
-            writer.write(
-                f"{indent}struct {self.descr.name} : {self.descr.super_class_list} {{\n"
-            )
-        else:
-            writer.write(f"{indent}struct {self.descr.name} {{\n")
-        lines += 4
-        for dec in self.descr.body:
-            writer.write(f"{indent}\t{dec.type} {dec.name}; //{dec.comment}\n")
-            lines += 1
-        writer.write(f"{indent}}};\n")
-        lines += 1
-        for dec in self.descr.body:
-            writer.write(
-                f"{indent}{dec.type} Descriptor<{self.descr.name}>::{dec.name}Descriptor::get({self.descr.name}& from) {{ return from.{dec.name}; }}\n"
-            )
-            lines += 1
-        return lines
 
 
 class ActorCompiler:

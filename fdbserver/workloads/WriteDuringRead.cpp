@@ -24,7 +24,7 @@
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/ActorCollection.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "fdbclient/Atomic.h"
 #include "flow/ApiVersion.h"
 #include "flow/CoroUtils.h"

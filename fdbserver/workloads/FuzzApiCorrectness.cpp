@@ -32,7 +32,7 @@
 #include "fdbclient/GenericManagementAPI.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "flow/ActorCollection.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "flow/Arena.h"
 
 namespace ph = std::placeholders;

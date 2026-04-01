@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/workloads/MockDDTest.h"
+#include "MockDDTest.h"
 #include "flow/CoroUtils.h"
 
 class MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {

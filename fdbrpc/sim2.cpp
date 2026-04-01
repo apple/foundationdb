@@ -43,7 +43,7 @@
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/AsyncFileEncrypted.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
-#include "fdbrpc/AsyncFileNonDurable.actor.h"
+#include "fdbrpc/AsyncFileNonDurable.h"
 #include "fdbrpc/AsyncFileChaos.h"
 #include "crc32/crc32c.h"
 #include "fdbrpc/TraceFileIO.h"
@@ -52,7 +52,7 @@
 #include "flow/swift/ABI/Task.h"
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
@@ -1080,7 +1080,7 @@ public:
 		return t->promise.getFuture();
 	}
 	static Future<Void> checkShutdown(Sim2* self, TaskPriority taskID) {
-		co_await success(self->getCurrentProcess()->shutdownSignal.getFuture());
+		co_await self->getCurrentProcess()->shutdownSignal.getFuture();
 		self->setCurrentTask(taskID);
 		co_return;
 	}
@@ -2489,7 +2489,7 @@ public:
 
 		// check not too many servers
 		ASSERT(self->httpHandlers.size() < 1000);
-		Reference<HTTP::SimRegisteredHandlerContext> handlerContext =
+		auto handlerContext =
 		    makeReference<HTTP::SimRegisteredHandlerContext>(hostname, service, self->nextHTTPPort++, requestHandler);
 		self->httpHandlers.insert({ id, handlerContext });
 

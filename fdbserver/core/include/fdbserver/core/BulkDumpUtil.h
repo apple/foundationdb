@@ -86,9 +86,6 @@ std::string generateBulkDumpJobFolder(const UID& jobId);
 // Define task folder name.
 std::string getBulkDumpJobTaskFolder(const UID& jobId, const UID& taskId);
 
-// Define job root folder.
-std::string getBulkLoadJobRoot(const std::string& root, const UID& jobId);
-
 // Generate key-value data, byte sampling data, and manifest file.
 // Return BulkLoadManifest metadata (equivalent to content of the manifest file).
 // TODO(BulkDump): can cause slow tasks, do the task in a separate thread in the future.

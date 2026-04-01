@@ -21,7 +21,7 @@
 #include "flow/swift.h"
 #include "flow/swift_concurrency_hooks.h"
 #include "flow/swift/ABI/Task.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 
 // FIXME: surely there must be some more automatic way to maintain the mappings with Swift/C++ interop.
 TaskPriority swift_priority_to_net2(swift::JobPriority p) {

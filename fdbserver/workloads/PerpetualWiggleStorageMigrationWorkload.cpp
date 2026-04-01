@@ -25,7 +25,7 @@
 #include "fdbserver/datadistributor/DDTxnProcessor.h"
 #include "fdbserver/core/MoveKeys.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "fdbclient/VersionedMap.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/SimulatorProcessInfo.h"

@@ -126,10 +126,4 @@ enum class DiskQueueVersion : uint16_t {
 	V2 = 2, // Use xxhash3
 };
 
-IDiskQueue* openDiskQueue(std::string basename,
-                          std::string ext,
-                          UID dbgid,
-                          DiskQueueVersion diskQueueVersion,
-                          int64_t fileSizeWarningLimit = -1); // opens basename+"0."+ext and basename+"1."+ext
-
 #endif

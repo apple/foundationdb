@@ -1,6 +1,6 @@
 set(FDBSERVER_KVSTORE_SRCS
   DiskQueue.actor.cpp
-  FDBExecHelper.actor.cpp
+  FDBExecHelper.cpp
   IKeyValueStore.cpp
   IPager.cpp
   KeyValueStoreCompressTestData.cpp
@@ -16,6 +16,9 @@ set(FDBSERVER_KVSTORE_SRCS
   VersionedBTreeDebug.cpp)
 
 add_flow_target(STATIC_LIBRARY NAME fdbserver_kvstore SRCS ${FDBSERVER_KVSTORE_SRCS})
+add_fdbserver_link_test(fdbserver_kvstorelinktest
+  fdbserver_kvstore
+  fdbserver_core)
 
 configure_fdbserver_common_includes(fdbserver_kvstore)
 target_include_directories(fdbserver_kvstore
@@ -26,7 +29,7 @@ target_include_directories(fdbserver_kvstore
     ${CMAKE_SOURCE_DIR}/contrib/sqlite
     ${CMAKE_SOURCE_DIR}/fdbserver/include
     ${CMAKE_BINARY_DIR}/fdbserver/include)
-target_link_libraries(fdbserver_kvstore PUBLIC fdbserver_core sqlite PRIVATE fdbclient)
+target_link_libraries(fdbserver_kvstore PUBLIC fdbserver_core sqlite)
 
 if(WITH_ROCKSDB)
   add_dependencies(fdbserver_kvstore rocksdb)

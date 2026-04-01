@@ -28,8 +28,8 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.h"
-#include "fdbserver/tester/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.h"
+#include "fdbserver/tester/workloads.h"
+#include "BulkSetup.h"
 
 struct CycleWorkload : TestWorkload, Arena {
 	static constexpr auto NAME = "Cycle";

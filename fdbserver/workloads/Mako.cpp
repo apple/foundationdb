@@ -20,8 +20,8 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.h"
-#include "fdbserver/tester/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.h"
+#include "fdbserver/tester/workloads.h"
+#include "BulkSetup.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/zipf.h"
 #include "crc32/crc32c.h"
@@ -169,13 +169,13 @@ struct MakoWorkload : TestWorkload {
 	Future<Void> setup(Database const& cx) override {
 		if (doChecksumVerificationOnly)
 			return Void();
-		return _setup(cx, this);
+		return _setup(cx);
 	}
 
 	Future<Void> start(Database const& cx) override {
 		if (doChecksumVerificationOnly)
 			return Void();
-		return _start(cx, this);
+		return _start(cx);
 	}
 
 	Future<bool> check(Database const& cx) override {
@@ -183,7 +183,7 @@ struct MakoWorkload : TestWorkload {
 			return true;
 		}
 		// verify checksum consistency
-		return dochecksumVerification(cx, this);
+		return dochecksumVerification(cx);
 	}
 
 	// disable the default timeout setting
@@ -283,12 +283,12 @@ struct MakoWorkload : TestWorkload {
 		return digits;
 	}
 
-	static void updateCSFlags(MakoWorkload* self, std::vector<bool>& flags, uint64_t startIdx, uint64_t endIdx) {
+	void updateCSFlags(std::vector<bool>& flags, uint64_t startIdx, uint64_t endIdx) {
 		// We deal with cases where rowCount % csCount != 0 and csPartitionSize % csSize != 0;
 		// In particular, all keys with index in range [csSize * csPartitionSize, rowCount) will not be used for
 		// checksum By the same way, for any i in range [0, csSize): keys with index in range [ i*csPartitionSize,
 		// i*csPartitionSize + csCount*csStepSizeInPartition) will not be used for checksum
-		uint64_t boundary = self->csSize * self->csPartitionSize;
+		uint64_t boundary = csSize * csPartitionSize;
 		if (startIdx >= boundary)
 			return;
 		else if (endIdx > boundary)
@@ -300,128 +300,123 @@ struct MakoWorkload : TestWorkload {
 
 		if (startIdx + 1 == endIdx) {
 			// single key case
-			startIdx = startIdx % self->csPartitionSize;
-			if ((startIdx < self->csCount * self->csStepSizeInPartition) &&
-			    (startIdx % self->csStepSizeInPartition == 0)) {
-				flags.at(startIdx / self->csStepSizeInPartition) = true;
+			startIdx = startIdx % csPartitionSize;
+			if ((startIdx < csCount * csStepSizeInPartition) && (startIdx % csStepSizeInPartition == 0)) {
+				flags.at(startIdx / csStepSizeInPartition) = true;
 			}
 		} else {
 			// key range case
-			uint64_t count = self->csCount;
-			uint64_t base = (startIdx / self->csPartitionSize) * self->csPartitionSize;
+			uint64_t count = csCount;
+			uint64_t base = (startIdx / csPartitionSize) * csPartitionSize;
 			startIdx -= base;
 			endIdx -= base;
-			uint64_t startStepIdx = std::min(startIdx / self->csStepSizeInPartition, self->csCount - 1);
+			uint64_t startStepIdx = std::min(startIdx / csStepSizeInPartition, csCount - 1);
 
 			// if changed range size is more than one csPartitionSize, which means every checksum needs to be updated
-			if ((endIdx - startIdx) < self->csPartitionSize) {
+			if ((endIdx - startIdx) < csPartitionSize) {
 				uint64_t endStepIdx;
-				if (endIdx > self->csPartitionSize) {
-					endStepIdx =
-					    self->csCount +
-					    std::min((endIdx - 1 - self->csPartitionSize) / self->csStepSizeInPartition, self->csCount);
+				if (endIdx > csPartitionSize) {
+					endStepIdx = csCount + std::min((endIdx - 1 - csPartitionSize) / csStepSizeInPartition, csCount);
 				} else {
-					endStepIdx = std::min((endIdx - 1) / self->csStepSizeInPartition, self->csCount - 1);
+					endStepIdx = std::min((endIdx - 1) / csStepSizeInPartition, csCount - 1);
 				}
 				// All the left boundary of csStep should be updated
 				// Also, check the startIdx whether it is the left boundary of a csStep
-				if (startIdx == self->csStepSizeInPartition * startStepIdx)
+				if (startIdx == csStepSizeInPartition * startStepIdx)
 					flags[startStepIdx] = true;
 				count = endStepIdx - startStepIdx;
 			}
 			for (int i = 1; i <= count; ++i) {
-				flags[(startStepIdx + i) % self->csCount] = true;
+				flags[(startStepIdx + i) % csCount] = true;
 			}
 		}
 	}
 	Standalone<KeyValueRef> operator()(uint64_t n) { return KeyValueRef(keyForIndex(n), randomValue()); }
 
-	static Future<Void> tracePeriodically(MakoWorkload* self) {
+	Future<Void> tracePeriodically() {
 		double start = timer();
 		double elapsed = 0.0;
 		int64_t last_ops = 0;
 		int64_t last_xacts = 0;
 
 		while (true) {
-			elapsed += self->periodicLoggingInterval;
+			elapsed += periodicLoggingInterval;
 			co_await delayUntil(start + elapsed);
-			TraceEvent((self->description() + "_CommitLatency").c_str())
-			    .detail("Mean", self->opLatencies[OP_COMMIT].mean())
-			    .detail("Median", self->opLatencies[OP_COMMIT].median())
-			    .detail("Percentile5", self->opLatencies[OP_COMMIT].percentile(.05))
-			    .detail("Percentile95", self->opLatencies[OP_COMMIT].percentile(.95))
-			    .detail("Count", self->opCounters[OP_COMMIT].getValue())
+			TraceEvent((description() + "_CommitLatency").c_str())
+			    .detail("Mean", opLatencies[OP_COMMIT].mean())
+			    .detail("Median", opLatencies[OP_COMMIT].median())
+			    .detail("Percentile5", opLatencies[OP_COMMIT].percentile(.05))
+			    .detail("Percentile95", opLatencies[OP_COMMIT].percentile(.95))
+			    .detail("Count", opCounters[OP_COMMIT].getValue())
 			    .detail("Elapsed", elapsed);
-			TraceEvent((self->description() + "_GRVLatency").c_str())
-			    .detail("Mean", self->opLatencies[OP_GETREADVERSION].mean())
-			    .detail("Median", self->opLatencies[OP_GETREADVERSION].median())
-			    .detail("Percentile5", self->opLatencies[OP_GETREADVERSION].percentile(.05))
-			    .detail("Percentile95", self->opLatencies[OP_GETREADVERSION].percentile(.95))
-			    .detail("Count", self->opCounters[OP_GETREADVERSION].getValue());
+			TraceEvent((description() + "_GRVLatency").c_str())
+			    .detail("Mean", opLatencies[OP_GETREADVERSION].mean())
+			    .detail("Median", opLatencies[OP_GETREADVERSION].median())
+			    .detail("Percentile5", opLatencies[OP_GETREADVERSION].percentile(.05))
+			    .detail("Percentile95", opLatencies[OP_GETREADVERSION].percentile(.95))
+			    .detail("Count", opCounters[OP_GETREADVERSION].getValue());
 
 			std::string ts = format("T=%04.0fs: ", elapsed);
-			self->periodicMetrics.emplace_back(ts + "Transactions/sec",
-			                                   (self->xacts.getValue() - last_xacts) / self->periodicLoggingInterval,
-			                                   Averaged::False);
-			self->periodicMetrics.emplace_back(ts + "Operations/sec",
-			                                   (self->totalOps.getValue() - last_ops) / self->periodicLoggingInterval,
-			                                   Averaged::False);
+			periodicMetrics.emplace_back(
+			    ts + "Transactions/sec", (xacts.getValue() - last_xacts) / periodicLoggingInterval, Averaged::False);
+			periodicMetrics.emplace_back(
+			    ts + "Operations/sec", (totalOps.getValue() - last_ops) / periodicLoggingInterval, Averaged::False);
 
-			last_xacts = self->xacts.getValue();
-			last_ops = self->totalOps.getValue();
+			last_xacts = xacts.getValue();
+			last_ops = totalOps.getValue();
 		}
 	}
-	Future<Void> _setup(Database cx, MakoWorkload* self) {
+	Future<Void> _setup(Database cx) {
 		// use all the clients to populate data
-		if (self->populateData) {
+		if (populateData) {
 			Promise<double> loadTime;
 			Promise<std::vector<std::pair<uint64_t, double>>> ratesAtKeyCounts;
 
 			co_await bulkSetup(cx,
-			                   self,
-			                   self->rowCount,
+			                   this,
+			                   rowCount,
 			                   loadTime,
-			                   self->insertionCountsToMeasure.empty(),
-			                   self->warmingDelay,
-			                   self->maxInsertRate,
-			                   self->insertionCountsToMeasure,
+			                   insertionCountsToMeasure.empty(),
+			                   warmingDelay,
+			                   maxInsertRate,
+			                   insertionCountsToMeasure,
 			                   ratesAtKeyCounts);
 
 			// This is the setup time
-			self->loadTime = loadTime.getFuture().get();
+			this->loadTime = loadTime.getFuture().get();
 			// This is the rates of importing keys
-			self->ratesAtKeyCounts = ratesAtKeyCounts.getFuture().get();
+			this->ratesAtKeyCounts = ratesAtKeyCounts.getFuture().get();
 		}
 		// Use one client to initialize checksums
-		if (self->checksumVerification && self->clientId == 0) {
-			co_await generateChecksum(cx, self);
+		if (checksumVerification && clientId == 0) {
+			co_await generateChecksum(cx);
 		}
 	}
 
-	Future<Void> _start(Database cx, MakoWorkload* self) {
+	Future<Void> _start(Database cx) {
 		// TODO: Do I need to read data to warm the cache of the keySystem like ReadWrite.cpp (line 465)?
-		if (self->runBenchmark) {
-			co_await self->_runBenchmark(cx, self);
+		if (runBenchmark) {
+			co_await _runBenchmark(cx);
 		}
-		if (!self->preserveData && self->clientId == 0) {
-			co_await self->cleanup(cx, self);
+		if (!preserveData && clientId == 0) {
+			co_await cleanup(cx);
 		}
 	}
 
-	Future<Void> _runBenchmark(Database cx, MakoWorkload* self) {
+	Future<Void> _runBenchmark(Database cx) {
 		std::vector<Future<Void>> clients;
-		clients.reserve(self->actorCountPerClient);
-		for (int c = 0; c < self->actorCountPerClient; ++c) {
-			clients.push_back(self->makoClient(cx, self, self->actorCountPerClient / self->transactionsPerSecond, c));
+		clients.reserve(actorCountPerClient);
+		for (int c = 0; c < actorCountPerClient; ++c) {
+			clients.push_back(makoClient(cx, actorCountPerClient / transactionsPerSecond, c));
 		}
 
-		if (self->enableLogging)
-			clients.push_back(tracePeriodically(self));
+		if (enableLogging)
+			clients.push_back(tracePeriodically());
 
-		co_await timeout(waitForAll(clients), self->testDuration, Void());
+		co_await timeout(waitForAll(clients), testDuration, Void());
 	}
 
-	Future<Void> makoClient(Database cx, MakoWorkload* self, double delay, int actorIndex) {
+	Future<Void> makoClient(Database cx, double delay, int actorIndex) {
 
 		Key rkey;
 		Key rkey2;
@@ -437,14 +432,14 @@ struct MakoWorkload : TestWorkload {
 		KeyRangeRef rkeyRangeRef;
 		std::vector<int> perOpCount(MAX_OP, 0);
 		// flag at index-i indicates whether checksum-i need to be updated
-		std::vector<bool> csChangedFlags(self->csCount, false);
+		std::vector<bool> csChangedFlags(csCount, false);
 		double lastTime = timer();
 		double commitStart{ 0 };
 
 		TraceEvent("ClientStarting")
 		    .detail("ActorIndex", actorIndex)
-		    .detail("ClientIndex", self->clientId)
-		    .detail("NumActors", self->actorCountPerClient);
+		    .detail("ClientIndex", clientId)
+		    .detail("NumActors", actorCountPerClient);
 
 		while (true) {
 			// used for throttling
@@ -452,50 +447,50 @@ struct MakoWorkload : TestWorkload {
 			Error err;
 			try {
 				// user-defined value: whether commit read-only ops or not; default is false
-				doCommit = self->commitGet;
+				doCommit = commitGet;
 				for (i = 0; i < MAX_OP; ++i) {
 					if (i == OP_COMMIT)
 						continue;
-					for (count = 0; count < self->operations[i][0]; ++count) {
-						range = self->operations[i][1];
+					for (count = 0; count < operations[i][0]; ++count) {
+						range = operations[i][1];
 						rangeLen = digits(range);
 						// generate random key-val pair for operation
-						indBegin = self->getRandomKeyIndex(self->rowCount);
-						rkey = self->keyForIndex(indBegin);
-						rval = self->randomValue();
-						indEnd = std::min(indBegin + range, self->rowCount);
-						rkey2 = self->keyForIndex(indEnd);
+						indBegin = getRandomKeyIndex(rowCount);
+						rkey = keyForIndex(indBegin);
+						rval = randomValue();
+						indEnd = std::min(indBegin + range, rowCount);
+						rkey2 = keyForIndex(indEnd);
 						// KeyRangeRef(min, maxPlusOne)
 						rkeyRangeRef = KeyRangeRef(rkey, rkey2);
 
 						// used for mako-level consistency check
-						if (self->checksumVerification) {
+						if (checksumVerification) {
 							if (i == OP_INSERT | i == OP_UPDATE | i == OP_CLEAR) {
-								updateCSFlags(self, csChangedFlags, indBegin, indBegin + 1);
+								updateCSFlags(csChangedFlags, indBegin, indBegin + 1);
 							} else if (i == OP_CLEARRANGE) {
-								updateCSFlags(self, csChangedFlags, indBegin, indEnd);
+								updateCSFlags(csChangedFlags, indBegin, indEnd);
 							}
 						}
 
 						if (i == OP_GETREADVERSION) {
-							co_await logLatency(tr.getReadVersion(), &self->opLatencies[i]);
+							co_await logLatency(tr.getReadVersion(), &opLatencies[i]);
 						} else if (i == OP_GET) {
-							co_await logLatency(tr.get(rkey, Snapshot::False), &self->opLatencies[i]);
+							co_await logLatency(tr.get(rkey, Snapshot::False), &opLatencies[i]);
 						} else if (i == OP_GETRANGE) {
 							co_await logLatency(tr.getRange(rkeyRangeRef, CLIENT_KNOBS->TOO_MANY, Snapshot::False),
-							                    &self->opLatencies[i]);
+							                    &opLatencies[i]);
 						} else if (i == OP_SGET) {
-							co_await logLatency(tr.get(rkey, Snapshot::True), &self->opLatencies[i]);
+							co_await logLatency(tr.get(rkey, Snapshot::True), &opLatencies[i]);
 						} else if (i == OP_SGETRANGE) {
 							// do snapshot get range here
 							co_await logLatency(tr.getRange(rkeyRangeRef, CLIENT_KNOBS->TOO_MANY, Snapshot::True),
-							                    &self->opLatencies[i]);
+							                    &opLatencies[i]);
 						} else if (i == OP_UPDATE) {
-							co_await logLatency(tr.get(rkey, Snapshot::False), &self->opLatencies[OP_GET]);
-							if (self->latencyForLocalOperation) {
+							co_await logLatency(tr.get(rkey, Snapshot::False), &opLatencies[OP_GET]);
+							if (latencyForLocalOperation) {
 								double opBegin = timer();
 								tr.set(rkey, rval);
-								self->opLatencies[OP_INSERT].addSample(timer() - opBegin);
+								opLatencies[OP_INSERT].addSample(timer() - opBegin);
 							} else {
 								tr.set(rkey, rval);
 							}
@@ -503,103 +498,103 @@ struct MakoWorkload : TestWorkload {
 						} else if (i == OP_INSERT) {
 							// generate an (almost) unique key here, it starts with 'mako' and then comes with
 							// randomly generated characters
-							randStr(reinterpret_cast<char*>(mutateString(rkey)) + self->KEYPREFIXLEN,
-							        self->keyBytes - self->KEYPREFIXLEN);
-							if (self->latencyForLocalOperation) {
+							randStr(reinterpret_cast<char*>(mutateString(rkey)) + KEYPREFIXLEN,
+							        keyBytes - KEYPREFIXLEN);
+							if (latencyForLocalOperation) {
 								double opBegin = timer();
 								tr.set(rkey, rval);
-								self->opLatencies[OP_INSERT].addSample(timer() - opBegin);
+								opLatencies[OP_INSERT].addSample(timer() - opBegin);
 							} else {
 								tr.set(rkey, rval);
 							}
 							doCommit = true;
 						} else if (i == OP_INSERTRANGE) {
 							char* rkeyPtr = reinterpret_cast<char*>(mutateString(rkey));
-							randStr(rkeyPtr + self->KEYPREFIXLEN, self->keyBytes - self->KEYPREFIXLEN);
+							randStr(rkeyPtr + KEYPREFIXLEN, keyBytes - KEYPREFIXLEN);
 							for (int range_i = 0; range_i < range; ++range_i) {
-								format("%0.*d", rangeLen, range_i).copy(rkeyPtr + self->keyBytes - rangeLen, rangeLen);
-								if (self->latencyForLocalOperation) {
+								format("%0.*d", rangeLen, range_i).copy(rkeyPtr + keyBytes - rangeLen, rangeLen);
+								if (latencyForLocalOperation) {
 									double opBegin = timer();
-									tr.set(rkey, self->randomValue());
-									self->opLatencies[OP_INSERT].addSample(timer() - opBegin);
+									tr.set(rkey, randomValue());
+									opLatencies[OP_INSERT].addSample(timer() - opBegin);
 								} else {
-									tr.set(rkey, self->randomValue());
+									tr.set(rkey, randomValue());
 								}
 							}
 							doCommit = true;
 						} else if (i == OP_CLEAR) {
-							if (self->latencyForLocalOperation) {
+							if (latencyForLocalOperation) {
 								double opBegin = timer();
 								tr.clear(rkey);
-								self->opLatencies[OP_CLEAR].addSample(timer() - opBegin);
+								opLatencies[OP_CLEAR].addSample(timer() - opBegin);
 							} else {
 								tr.clear(rkey);
 							}
 							doCommit = true;
 						} else if (i == OP_SETCLEAR) {
-							randStr(reinterpret_cast<char*>(mutateString(rkey)) + self->KEYPREFIXLEN,
-							        self->keyBytes - self->KEYPREFIXLEN);
-							if (self->latencyForLocalOperation) {
+							randStr(reinterpret_cast<char*>(mutateString(rkey)) + KEYPREFIXLEN,
+							        keyBytes - KEYPREFIXLEN);
+							if (latencyForLocalOperation) {
 								double opBegin = timer();
 								tr.set(rkey, rval);
-								self->opLatencies[OP_INSERT].addSample(timer() - opBegin);
+								opLatencies[OP_INSERT].addSample(timer() - opBegin);
 							} else {
 								tr.set(rkey, rval);
 							}
-							co_await self->updateCSBeforeCommit(&tr, self, &csChangedFlags);
+							co_await updateCSBeforeCommit(&tr, &csChangedFlags);
 							// commit the change and update metrics
 							commitStart = timer();
 							co_await tr.commit();
-							self->opLatencies[OP_COMMIT].addSample(timer() - commitStart);
+							opLatencies[OP_COMMIT].addSample(timer() - commitStart);
 							++perOpCount[OP_COMMIT];
 							tr.reset();
-							if (self->latencyForLocalOperation) {
+							if (latencyForLocalOperation) {
 								double opBegin = timer();
 								tr.clear(rkey);
-								self->opLatencies[OP_CLEAR].addSample(timer() - opBegin);
+								opLatencies[OP_CLEAR].addSample(timer() - opBegin);
 							} else {
 								tr.clear(rkey);
 							}
 							doCommit = true;
 						} else if (i == OP_CLEARRANGE) {
-							if (self->latencyForLocalOperation) {
+							if (latencyForLocalOperation) {
 								double opBegin = timer();
 								tr.clear(rkeyRangeRef);
-								self->opLatencies[OP_CLEARRANGE].addSample(timer() - opBegin);
+								opLatencies[OP_CLEARRANGE].addSample(timer() - opBegin);
 							} else {
 								tr.clear(rkeyRangeRef);
 							}
 							doCommit = true;
 						} else if (i == OP_SETCLEARRANGE) {
 							char* rkeyPtr = reinterpret_cast<char*>(mutateString(rkey));
-							randStr(rkeyPtr + self->KEYPREFIXLEN, self->keyBytes - self->KEYPREFIXLEN);
+							randStr(rkeyPtr + KEYPREFIXLEN, keyBytes - KEYPREFIXLEN);
 							std::string scr_start_key;
 							std::string scr_end_key;
 							KeyRangeRef scr_key_range_ref;
 							for (int range_i = 0; range_i < range; ++range_i) {
-								format("%0.*d", rangeLen, range_i).copy(rkeyPtr + self->keyBytes - rangeLen, rangeLen);
-								if (self->latencyForLocalOperation) {
+								format("%0.*d", rangeLen, range_i).copy(rkeyPtr + keyBytes - rangeLen, rangeLen);
+								if (latencyForLocalOperation) {
 									double opBegin = timer();
-									tr.set(rkey, self->randomValue());
-									self->opLatencies[OP_INSERT].addSample(timer() - opBegin);
+									tr.set(rkey, randomValue());
+									opLatencies[OP_INSERT].addSample(timer() - opBegin);
 								} else {
-									tr.set(rkey, self->randomValue());
+									tr.set(rkey, randomValue());
 								}
 								if (range_i == 0)
 									scr_start_key = rkey.toString();
 							}
 							scr_end_key = rkey.toString();
 							scr_key_range_ref = KeyRangeRef(KeyRef(scr_start_key), KeyRef(scr_end_key));
-							co_await self->updateCSBeforeCommit(&tr, self, &csChangedFlags);
+							co_await updateCSBeforeCommit(&tr, &csChangedFlags);
 							commitStart = timer();
 							co_await tr.commit();
-							self->opLatencies[OP_COMMIT].addSample(timer() - commitStart);
+							opLatencies[OP_COMMIT].addSample(timer() - commitStart);
 							++perOpCount[OP_COMMIT];
 							tr.reset();
-							if (self->latencyForLocalOperation) {
+							if (latencyForLocalOperation) {
 								double opBegin = timer();
 								tr.clear(scr_key_range_ref);
-								self->opLatencies[OP_CLEARRANGE].addSample(timer() - opBegin);
+								opLatencies[OP_CLEARRANGE].addSample(timer() - opBegin);
 							} else {
 								tr.clear(scr_key_range_ref);
 							}
@@ -610,17 +605,17 @@ struct MakoWorkload : TestWorkload {
 				}
 
 				if (doCommit) {
-					co_await self->updateCSBeforeCommit(&tr, self, &csChangedFlags);
+					co_await updateCSBeforeCommit(&tr, &csChangedFlags);
 					commitStart = timer();
 					co_await tr.commit();
-					self->opLatencies[OP_COMMIT].addSample(timer() - commitStart);
+					opLatencies[OP_COMMIT].addSample(timer() - commitStart);
 					++perOpCount[OP_COMMIT];
 				}
 				// successfully finish the transaction, update metrics
-				++self->xacts;
+				++xacts;
 				for (int op = 0; op < MAX_OP; ++op) {
-					self->opCounters[op] += perOpCount[op];
-					self->totalOps += perOpCount[op];
+					opCounters[op] += perOpCount[op];
+					totalOps += perOpCount[op];
 				}
 			} catch (Error& e) {
 				err = e;
@@ -629,18 +624,18 @@ struct MakoWorkload : TestWorkload {
 			if (err.code() == error_code_operation_cancelled)
 				throw err;
 			else if (err.code() == error_code_not_committed)
-				++self->conflicts;
+				++conflicts;
 			co_await tr.onError(err);
-			++self->retries;
+			++retries;
 			// reset all the operations' counters to 0
 			std::fill(perOpCount.begin(), perOpCount.end(), 0);
 			tr.reset();
 		}
 	}
 
-	Future<Void> cleanup(Database cx, MakoWorkload* self) {
+	Future<Void> cleanup(Database cx) {
 		// clear all data starts with 'mako' in the database
-		std::string keyPrefix(self->keyPrefix);
+		std::string keyPrefix(this->keyPrefix);
 		ReadYourWritesTransaction tr(cx);
 
 		while (true) {
@@ -648,7 +643,7 @@ struct MakoWorkload : TestWorkload {
 			try {
 				tr.clear(prefixRange(keyPrefix));
 				co_await tr.commit();
-				TraceEvent("CleanUpMakoRelatedData").detail("KeyPrefix", self->keyPrefix);
+				TraceEvent("CleanUpMakoRelatedData").detail("KeyPrefix", this->keyPrefix);
 				break;
 			} catch (Error& e) {
 				err = e;
@@ -775,13 +770,13 @@ struct MakoWorkload : TestWorkload {
 		}
 	}
 
-	static Future<uint32_t> calcCheckSum(ReadYourWritesTransaction* tr, MakoWorkload* self, int csIndex) {
+	Future<uint32_t> calcCheckSum(ReadYourWritesTransaction* tr, int csIndex) {
 		uint32_t result = 0;
 		int i{ 0 };
 		Key csKey;
-		for (i = 0; i < self->csSize; ++i) {
-			int idx = csIndex * self->csStepSizeInPartition + i * self->csPartitionSize;
-			csKey = self->keyForIndex(idx);
+		for (i = 0; i < csSize; ++i) {
+			int idx = csIndex * csStepSizeInPartition + i * csPartitionSize;
+			csKey = keyForIndex(idx);
 			Optional<Value> temp = co_await tr->get(csKey);
 			if (temp.present()) {
 				Value val = temp.get();
@@ -794,7 +789,7 @@ struct MakoWorkload : TestWorkload {
 		co_return result;
 	}
 
-	static Future<bool> dochecksumVerification(Database cx, MakoWorkload* self) {
+	Future<bool> dochecksumVerification(Database cx) {
 		ReadYourWritesTransaction tr(cx);
 		int csIdx{ 0 };
 		Value csValue;
@@ -803,8 +798,8 @@ struct MakoWorkload : TestWorkload {
 			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-				for (csIdx = 0; csIdx < self->csCount; ++csIdx) {
-					Optional<Value> temp = co_await tr.get(self->csKeys[csIdx]);
+				for (csIdx = 0; csIdx < csCount; ++csIdx) {
+					Optional<Value> temp = co_await tr.get(csKeys[csIdx]);
 					if (!temp.present()) {
 						TraceEvent(SevError, "TestFailure")
 						    .detail("Reason", "NoExistingChecksum")
@@ -813,7 +808,7 @@ struct MakoWorkload : TestWorkload {
 					} else {
 						csValue = temp.get();
 						ASSERT(csValue.size() == sizeof(uint32_t));
-						uint32_t calculatedCS = co_await calcCheckSum(&tr, self, csIdx);
+						uint32_t calculatedCS = co_await calcCheckSum(&tr, csIdx);
 						uint32_t existingCS = *(reinterpret_cast<const uint32_t*>(csValue.begin()));
 						if (existingCS != calculatedCS) {
 							TraceEvent(SevError, "TestFailure")
@@ -837,17 +832,17 @@ struct MakoWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> generateChecksum(Database cx, MakoWorkload* self) {
+	Future<Void> generateChecksum(Database cx) {
 		ReadYourWritesTransaction tr(cx);
 		int csIdx{ 0 };
 		while (true) {
 			Error err;
 			try {
-				for (csIdx = 0; csIdx < self->csCount; ++csIdx) {
-					Optional<Value> temp = co_await tr.get(self->csKeys[csIdx]);
+				for (csIdx = 0; csIdx < csCount; ++csIdx) {
+					Optional<Value> temp = co_await tr.get(csKeys[csIdx]);
 					if (temp.present())
-						TraceEvent("DuplicatePopulationOnSamePrefix").detail("KeyPrefix", self->keyPrefix);
-					co_await self->updateCheckSum(&tr, self, csIdx);
+						TraceEvent("DuplicatePopulationOnSamePrefix").detail("KeyPrefix", keyPrefix);
+					co_await updateCheckSum(&tr, csIdx);
 				}
 				co_await tr.commit();
 				break;
@@ -859,21 +854,19 @@ struct MakoWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> updateCheckSum(ReadYourWritesTransaction* tr, MakoWorkload* self, int csIdx) {
-		uint32_t csVal = co_await calcCheckSum(tr, self, csIdx);
+	Future<Void> updateCheckSum(ReadYourWritesTransaction* tr, int csIdx) {
+		uint32_t csVal = co_await calcCheckSum(tr, csIdx);
 		TraceEvent("UpdateCheckSum").detail("ChecksumIndex", csIdx).detail("Checksum", csVal);
-		tr->set(self->csKeys[csIdx], ValueRef(reinterpret_cast<const uint8_t*>(&csVal), sizeof(uint32_t)));
+		tr->set(csKeys[csIdx], ValueRef(reinterpret_cast<const uint8_t*>(&csVal), sizeof(uint32_t)));
 	}
 
-	static Future<Void> updateCSBeforeCommit(ReadYourWritesTransaction* tr,
-	                                         MakoWorkload* self,
-	                                         std::vector<bool>* flags) {
-		if (!self->checksumVerification)
+	Future<Void> updateCSBeforeCommit(ReadYourWritesTransaction* tr, std::vector<bool>* flags) {
+		if (!checksumVerification)
 			co_return;
 
-		for (int csIdx = 0; csIdx < self->csCount; ++csIdx) {
+		for (int csIdx = 0; csIdx < csCount; ++csIdx) {
 			if ((*flags)[csIdx]) {
-				co_await updateCheckSum(tr, self, csIdx);
+				co_await updateCheckSum(tr, csIdx);
 				(*flags)[csIdx] = false;
 			}
 		}

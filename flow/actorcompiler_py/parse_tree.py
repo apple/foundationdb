@@ -198,13 +198,6 @@ class ThrowStatement(Statement):
 
 
 @dataclass
-class Declaration:
-    type: str = ""
-    name: str = ""
-    comment: str = ""
-
-
-@dataclass
 class Actor:
     attributes: List[str] = field(default_factory=list)
     return_type: Optional[str] = None
@@ -226,10 +219,3 @@ class Actor:
 
     def set_uncancellable(self) -> None:
         self._is_uncancellable = True
-
-
-@dataclass
-class Descr:
-    name: str = ""
-    super_class_list: Optional[str] = None
-    body: List[Declaration] = field(default_factory=list)

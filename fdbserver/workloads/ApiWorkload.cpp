@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/workloads/ApiWorkload.h"
+#include "ApiWorkload.h"
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/MultiVersionTransaction.h"

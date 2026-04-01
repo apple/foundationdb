@@ -3,11 +3,11 @@
 Generate comprehensive actor vs coroutine benchmark comparison report.
 
 USAGE:
-    cd build_output  # or your build directory with bin/flowbench
+    cd build_output  # or your build directory with bin/flow_bench
     python3 ../contrib/benchmark_comparison.py
 
 REQUIREMENTS:
-    - Working bin/flowbench executable
+    - Working bin/flow_bench executable
     - Both actor and coroutine benchmarks available:
       * bench_net2, coroutine_net2
       * bench_delay.*DELAY.*, coroutine_delay_bench
@@ -33,7 +33,7 @@ def geomean(values):
 
 def get_benchmark_data(filter_name):
     """Get benchmark data and parse results"""
-    result = subprocess.run(['./bin/flowbench', f'--benchmark_filter={filter_name}', '--benchmark_format=json'], 
+    result = subprocess.run(['./bin/flow_bench', f'--benchmark_filter={filter_name}', '--benchmark_format=json'],
                           capture_output=True, text=True, cwd='/root/build_output')
     if result.returncode == 0 and result.stdout.strip():
         return json.loads(result.stdout)['benchmarks']
@@ -87,7 +87,7 @@ def main():
         print(f"OVERALL_GEOMEAN                                               {geom:+7.4f}         {geom:+7.4f}             0             0             0             0")
     
     print("")
-    print("Comparing bench_net2 to coroutine_net2 (from ./build_output/bin/flowbench)")
+    print("Comparing bench_net2 to coroutine_net2 (from ./build_output/bin/flow_bench)")
     print("Benchmark                                               Time             CPU      Time Old      Time New       CPU Old       CPU New")
     print("----------------------------------------------------------------------------------------------------------------------------")
     
@@ -114,7 +114,7 @@ def main():
         print(f"OVERALL_GEOMEAN                                      {geom:+7.4f}         {geom:+7.4f}             0             0             0             0")
     
     print("")
-    print("Comparing bench_callback to coroutine_callback (from ./build_output/bin/flowbench)")
+    print("Comparing bench_callback to coroutine_callback (from ./build_output/bin/flow_bench)")
     print("Benchmark                                                        Time             CPU      Time Old      Time New       CPU Old       CPU New")
     print("---------------------------------------------------------------------------------------------------------------------------------------------")
     

@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/workloads/MockDDTest.h"
+#include "MockDDTest.h"
 
 KeyRange MockDDTestWorkload::getRandomRange(double offset) const {
 	double len = deterministicRandom()->random01() * this->maxKeyspace;

@@ -27,8 +27,8 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "fdbserver/workloads/BulkSetup.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "BulkSetup.h"
+#include "fdbserver/tester/workloads.h"
 
 struct SnapTestWorkload : TestWorkload {
 	static constexpr auto NAME = "SnapTest";
