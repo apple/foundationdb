@@ -22,7 +22,7 @@
 #define FDBSERVER_CORE_SERVERDBINFO_H
 #pragma once
 
-#include "fdbclient/ConsistencyScanInterface.actor.h"
+#include "fdbclient/ConsistencyScanInterface.h"
 #include "fdbserver/core/DataDistributorInterface.h"
 #include "fdbserver/core/LatencyBandConfig.h"
 #include "fdbserver/core/LogSystemConfig.h"
