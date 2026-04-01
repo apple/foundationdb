@@ -26,7 +26,6 @@
 #include "flow/TLSConfig.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/FlowTransport.h"
-#include "flow/actorcompiler.h" // has to be last include
 
 namespace fdbrpc_bench {
 NetworkAddress serverAddress;
@@ -118,10 +117,10 @@ class EchoServer {
 		}
 	}
 
-	ACTOR static Future<Void> serveGetInterfaceReqs(EchoServer* self) {
-		loop {
+	static Future<Void> serveGetInterfaceReqs(EchoServer* self) {
+		while (true) {
 			try {
-				GetInterfaceRequest req = waitNext(self->interf.getInterface.getFuture());
+				GetInterfaceRequest req = co_await self->interf.getInterface.getFuture();
 				req.reply.send(self->interf);
 			} catch (Error& e) {
 				rethrowUnexpectedError(e);
@@ -129,10 +128,10 @@ class EchoServer {
 		}
 	}
 
-	ACTOR static Future<Void> serveEchoReqs(EchoServer* self) {
-		loop {
+	static Future<Void> serveEchoReqs(EchoServer* self) {
+		while (true) {
 			try {
-				EchoRequest req = waitNext(self->interf.echo.getFuture());
+				EchoRequest req = co_await self->interf.echo.getFuture();
 				req.reply.send(req.message);
 				self->counter.inc();
 			} catch (Error& e) {
@@ -141,10 +140,10 @@ class EchoServer {
 		}
 	}
 
-	ACTOR static Future<Void> printThroughput(EchoServer* self) {
-		loop {
+	static Future<Void> printThroughput(EchoServer* self) {
+		while (true) {
 			try {
-				wait(delay(10));
+				co_await delay(10);
 				std::cout << "Throughput: " << self->counter.avg() << " req/sec" << std::endl;
 			} catch (Error& e) {
 				rethrowUnexpectedError(e);
@@ -161,10 +160,9 @@ public:
 	Future<Void> run() { co_await race(serveGetInterfaceReqs(this), serveEchoReqs(this), printThroughput(this)); }
 };
 
-ACTOR Future<Void> echoServer() {
-	state EchoServer server;
-	wait(server.run());
-	return Void();
+Future<Void> echoServer() {
+	EchoServer server;
+	co_await server.run();
 }
 
 int payload_size_bytes = 1024 * 10;
@@ -184,27 +182,26 @@ std::string randString(int size) {
 	return result;
 }
 
-ACTOR Future<Void> echoClient() {
+Future<Void> echoClient() {
 	std::cout << "Starting client. Payload size: " << payload_size_bytes << " bytes" << std::endl;
-	state EchoServerInterface server;
+	EchoServerInterface server;
 	server.getInterface =
 	    RequestStream<GetInterfaceRequest>(Endpoint::wellKnown({ serverAddress }, WLTOKEN_ECHO_SERVER));
-	EchoServerInterface s = wait(server.getInterface.getReply(GetInterfaceRequest()));
-	server = s;
-	state std::string payload = randString(payload_size_bytes);
+	server = co_await server.getInterface.getReply(GetInterfaceRequest());
+	std::string payload = randString(payload_size_bytes);
 
 	while (true) {
-		state int duration_seconds = 10;
-		state int request_count = 0;
+		int duration_seconds = 10;
+		int request_count = 0;
 
-		state std::chrono::time_point<std::chrono::steady_clock> start_time = std::chrono::steady_clock::now();
-		state std::chrono::time_point<std::chrono::steady_clock> end_time =
+		std::chrono::time_point<std::chrono::steady_clock> start_time = std::chrono::steady_clock::now();
+		std::chrono::time_point<std::chrono::steady_clock> end_time =
 		    start_time + std::chrono::seconds(duration_seconds);
 
 		while (std::chrono::steady_clock::now() < end_time) {
 			EchoRequest echoRequest;
 			echoRequest.message = payload;
-			std::string echoMessage = wait(server.echo.getReply(echoRequest));
+			co_await server.echo.getReply(echoRequest);
 			++request_count;
 		}
 		std::cout << "Sent " << request_count << " requests in " << request_count / duration_seconds << " /second"
@@ -257,7 +254,6 @@ int main(int argc, char* argv[]) {
 	}
 
 	bool isServer = (mode == "server");
-	std::string port;
 	std::vector<std::function<Future<Void>()>> toRun;
 	auto actor = actors.find(mode);
 	toRun.push_back(actor->second);
