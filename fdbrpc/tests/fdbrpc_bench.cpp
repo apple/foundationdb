@@ -1,5 +1,5 @@
 /*
- * fdbrpc_bench.actor.cpp
+ * fdbrpc_bench.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
