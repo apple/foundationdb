@@ -5953,16 +5953,9 @@ Future<StorageMetrics> DatabaseContext::getStorageMetrics(KeyRange const& keys,
 ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx,
                                                                                   KeyRange keys,
                                                                                   int shardLimit) {
-	loop {
-		choose {
-			when(wait(cx->onProxiesChanged())) {}
-			when(GetDDMetricsReply rep = wait(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
-			                                                   &CommitProxyInterface::getDDMetrics,
-			                                                   GetDDMetricsRequest(keys, shardLimit)))) {
-				return rep.storageMetricsList;
-			}
-		}
-	}
+	GetDDMetricsReply rep = wait(proxyLoadBalance(
+	    cx, makeReqBuilder<GetDDMetricsRequest>(keys, shardLimit), &CommitProxyInterface::getDDMetrics));
+	return rep.storageMetricsList;
 }
 
 Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> DatabaseContext::getReadHotRanges(KeyRange const& keys) {
