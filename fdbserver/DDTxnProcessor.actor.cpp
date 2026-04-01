@@ -385,6 +385,8 @@ class DDTxnProcessorImpl {
 		// multiple transactions. In that case, each iteration should begin where the previous left off
 		// Scan keyServers in batches to build the shard map
 		state double keyServerScanStart = now();
+		state double lastScanLogTime = now();
+		state int scanBatchCount = 0;
 		while (beginKey < allKeys.end) {
 			CODE_PROBE(beginKey > allKeys.begin, "Multi-transactional getInitialDataDistribution");
 			loop {
@@ -471,6 +473,15 @@ class DDTxnProcessorImpl {
 
 					ASSERT_GT(keyServers.size(), 0);
 					beginKey = keyServers.end()[-1].key;
+					scanBatchCount++;
+					if (now() - lastScanLogTime >= 30.0) {
+						lastScanLogTime = now();
+						TraceEvent("DDInitKeyServerScanProgress", distributorId)
+						    .detail("BeginKey", beginKey)
+						    .detail("Batches", scanBatchCount)
+						    .detail("ShardsScanned", result->shards.size())
+						    .detail("ElapsedSeconds", now() - keyServerScanStart);
+					}
 					break;
 				} catch (Error& e) {
 					TraceEvent("GetInitialTeamsKeyServersRetry", distributorId).error(e);

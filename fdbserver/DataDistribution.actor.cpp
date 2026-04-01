@@ -937,6 +937,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 	loop {
 		trackerCancelled = false;
+		state double ddStartTime = now();
 		// whether all initial shard are tracked
 		self->initialized = Promise<Void>();
 
@@ -946,6 +947,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 		state Promise<UID> removeFailedServer;
 		try {
 			wait(DataDistributor::init(self));
+
+			TraceEvent("DDInitComplete", self->ddId)
+			    .detail("ElapsedSeconds", now() - ddStartTime);
 
 			// When/If this assertion fails, Evan owes Ben a pat on the back for his foresight
 			ASSERT(self->configuration.storageTeamSize > 0);
