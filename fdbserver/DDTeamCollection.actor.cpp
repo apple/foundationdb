@@ -1264,7 +1264,17 @@ public:
 		state Future<Void> storageMetadataTracker = self->updateStorageMetadata(server);
 		try {
 			loop {
-				status.isUndesired = !self->disableFailingLaggingServers.get() && server->ssVersionTooFarBehind.get();
+				{
+				bool versionLagUndesired =
+				    !self->disableFailingLaggingServers.get() && server->ssVersionTooFarBehind.get();
+				if (versionLagUndesired && !status.isUndesired) {
+					TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
+					    .detail("Server", server->getId())
+					    .detail("Address", server->getLastKnownInterface().address())
+					    .detail("Reason", "VersionLag");
+				}
+				status.isUndesired = versionLagUndesired;
+			}
 				status.isWrongConfiguration = false;
 				status.isWiggling = false;
 				hasWrongDC = !self->isCorrectDC(*server);
@@ -1298,6 +1308,7 @@ public:
 								TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
 								    .detail("Server", server->getId())
 								    .detail("Address", server->getLastKnownInterface().address())
+								    .detail("Reason", "SameAddress")
 								    .detail("OtherServer", i.second->getId())
 								    .detail("NumShards",
 								            self->shardsAffectedByTeamFailure->getNumberOfShards(server->getId()))
@@ -1323,6 +1334,8 @@ public:
 					if (self->optimalTeamCount > 0) {
 						TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
 						    .detail("Server", server->getId())
+						    .detail("Address", server->getLastKnownInterface().address())
+						    .detail("Reason", "WrongMachineClass")
 						    .detail("OptimalTeamCount", self->optimalTeamCount)
 						    .detail("Fitness", server->getLastKnownClass().machineClassFitness(ProcessClass::Storage));
 						status.isUndesired = true;
@@ -1399,9 +1412,16 @@ public:
 				}
 
 				if (worstStatus != DDTeamCollection::Status::NONE) {
+					const char* exclusionType = worstStatus == DDTeamCollection::Status::WIGGLING  ? "Wiggling"
+					                            : worstStatus == DDTeamCollection::Status::FAILED  ? "Failed"
+					                            : worstStatus == DDTeamCollection::Status::EXCLUDED ? "Excluded"
+					                                                                                 : "Unknown";
 					TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
 					    .detail("Server", server->getId())
-					    .detail("Excluded", worstAddr.toString());
+					    .detail("Address", server->getLastKnownInterface().address())
+					    .detail("Reason", "Excluded")
+					    .detail("ExclusionType", exclusionType)
+					    .detail("ExcludedAddress", worstAddr.toString());
 					status.isUndesired = true;
 					status.isWrongConfiguration = true;
 

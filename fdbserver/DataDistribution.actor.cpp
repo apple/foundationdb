@@ -554,6 +554,8 @@ public:
 				    .detail("E", self->initData->shards.end()[-1].key)
 				    .detail("Src", describe(self->initData->shards.end()[-2].primarySrc))
 				    .detail("Dest", describe(self->initData->shards.end()[-2].primaryDest))
+				    .detail("NumShards", self->initData->shards.size())
+				    .detail("NumServers", self->initData->allServers.size())
 				    .trackLatest(self->initialDDEventHolder->trackingKey);
 			} else {
 				TraceEvent("DDInitGotInitialDD", self->ddId)
@@ -561,6 +563,8 @@ public:
 				    .detail("E", "")
 				    .detail("Src", "[no items]")
 				    .detail("Dest", "[no items]")
+				    .detail("NumShards", self->initData->shards.size())
+				    .detail("NumServers", self->initData->allServers.size())
 				    .trackLatest(self->initialDDEventHolder->trackingKey);
 			}
 
@@ -752,6 +756,10 @@ public:
 	// TODO: unit test needed
 	ACTOR static Future<Void> resumeFromDataMoves(Reference<DataDistributor> self, Future<Void> readyToStart) {
 		state KeyRangeMap<std::shared_ptr<DataMove>>::iterator it = self->initData->dataMoveMap.ranges().begin();
+		state int validMoves = 0;
+		state int cancelledMoves = 0;
+		state int emptyMoves = 0;
+		state double resumeStart = now();
 
 		wait(readyToStart);
 
@@ -759,6 +767,7 @@ public:
 			const DataMoveMetaData& meta = it.value()->meta;
 			if (meta.ranges.empty()) {
 				TraceEvent(SevInfo, "EmptyDataMoveRange", self->ddId).detail("DataMoveMetaData", meta.toString());
+				emptyMoves++;
 				continue;
 			}
 			if (it.value()->isCancelled() || (it.value()->valid && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
@@ -767,8 +776,9 @@ public:
 				rs.cancelled = true;
 				self->relocationProducer.send(rs);
 				TraceEvent("DDInitScheduledCancelDataMove", self->ddId).detail("DataMove", meta.toString());
+				cancelledMoves++;
 			} else if (it.value()->valid) {
-				TraceEvent(SevDebug, "DDInitFoundDataMove", self->ddId).detail("DataMove", meta.toString());
+				TraceEvent(SevInfo, "DDInitFoundDataMove", self->ddId).detail("DataMove", meta.toString());
 				ASSERT(meta.ranges.front() == it.range());
 				// TODO: Persist priority in DataMoveMetaData.
 				RelocateShard rs(meta.ranges.front(), DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
@@ -790,8 +800,15 @@ public:
 				self->shardsAffectedByTeamFailure->moveShard(rs.keys, teams);
 				self->relocationProducer.send(rs);
 				wait(yield(TaskPriority::DataDistribution));
+				validMoves++;
 			}
 		}
+
+		TraceEvent("DDInitResumedDataMoves", self->ddId)
+		    .detail("ValidMoves", validMoves)
+		    .detail("CancelledMoves", cancelledMoves)
+		    .detail("EmptyMoves", emptyMoves)
+		    .detail("ElapsedSeconds", now() - resumeStart);
 
 		// Trigger background cleanup for datamove tombstones
 		self->addActor.send((self->removeDataMoveTombstoneBackground(self)));
