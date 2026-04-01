@@ -344,11 +344,11 @@ private:
 	// direction 0 = left, 1 = right
 	template <int direction>
 	static void moveIterator(Node const*& node) {
-		moveIteratorImpl<direction, true>(node);
+		IndexedSet::template moveIteratorImpl<direction, true>(node);
 	}
 	template <int direction>
 	static void moveIterator(Node*& node) {
-		moveIteratorImpl<direction, false>(node);
+		IndexedSet::template moveIteratorImpl<direction, false>(node);
 	}
 
 public: // but testonly
