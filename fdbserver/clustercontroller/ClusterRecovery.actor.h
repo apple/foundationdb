@@ -320,7 +320,7 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 Future<Void> recruitNewMaster(ClusterControllerData* cluster,
                               ClusterControllerData::DBInfo* db,
                               MasterInterface* newMaster);
-ACTOR Future<Void> cleanupRecoveryActorCollection(Reference<ClusterRecoveryData> self);
+Future<Void> cleanupRecoveryActorCollection(Reference<ClusterRecoveryData> self);
 ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self);
 bool isNormalClusterRecoveryError(const Error&);
 
