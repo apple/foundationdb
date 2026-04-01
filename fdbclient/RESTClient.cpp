@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/RESTClient.h"
+#include "RESTClient.h"
 
 #include "fdbrpc/HTTP.h"
 #include "flow/IRateControl.h"
