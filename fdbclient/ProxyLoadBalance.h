@@ -25,6 +25,7 @@
 #include <utility>
 
 #include "fdbclient/CommitProxyInterface.h"
+#include "fdbclient/GrvProxyInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbrpc/LoadBalance.actor.h"
 
@@ -55,6 +56,22 @@ Future<REPLY_TYPE(Req)> proxyLoadBalance(Database cx,
 	while (true) {
 		Future<REPLY_TYPE(Req)> replyFuture = basicLoadBalance(
 		    cx->getCommitProxies(UseProvisionalProxies::False), channel, reqBuilder.build(), cx->taskID, atMostOnce);
+		auto res = co_await race(replyFuture, cx->onProxiesChanged());
+		if (res.index() == 0) {
+			co_return std::get<0>(std::move(res));
+		}
+	}
+}
+
+template <class Req, class Builder>
+Future<REPLY_TYPE(Req)> grvProxyLoadBalance(Database cx,
+                                            Builder reqBuilder,
+                                            RequestStream<Req> GrvProxyInterface::*channel,
+                                            AtMostOnce atMostOnce = AtMostOnce::False,
+                                            ExplicitVoid = {}) {
+	while (true) {
+		Future<REPLY_TYPE(Req)> replyFuture = basicLoadBalance(
+		    cx->getGrvProxies(UseProvisionalProxies::False), channel, reqBuilder.build(), cx->taskID, atMostOnce);
 		auto res = co_await race(replyFuture, cx->onProxiesChanged());
 		if (res.index() == 0) {
 			co_return std::get<0>(std::move(res));
