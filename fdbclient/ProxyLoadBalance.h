@@ -29,6 +29,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbrpc/LoadBalance.actor.h"
 
+// Stores constructor arguments so a request can be rebuilt on each retry.
 template <class Req, class... Args>
 class ReqBuilder {
 	std::tuple<Args...> args;
@@ -41,12 +42,14 @@ public:
 	}
 };
 
+// Infers the stored argument types while ensuring the request is constructible.
 template <class Req, class... Args>
 ReqBuilder<Req, std::decay_t<Args>...> makeReqBuilder(Args&&... args) {
 	static_assert(std::is_constructible_v<Req, std::decay_t<Args>...>);
 	return ReqBuilder<Req, std::decay_t<Args>...>(std::forward<Args>(args)...);
 }
 
+// Retries a commit-proxy request whenever the proxy set changes before a reply arrives.
 template <class Req, class Builder>
 Future<REPLY_TYPE(Req)> commitProxyLoadBalance(Database cx,
                                                Builder reqBuilder,
@@ -63,6 +66,7 @@ Future<REPLY_TYPE(Req)> commitProxyLoadBalance(Database cx,
 	}
 }
 
+// Retries a GRV-proxy request whenever the proxy set changes before a reply arrives.
 template <class Req, class Builder>
 Future<REPLY_TYPE(Req)> grvProxyLoadBalance(Database cx,
                                             Builder reqBuilder,
