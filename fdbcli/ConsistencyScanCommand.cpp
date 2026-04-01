@@ -24,7 +24,7 @@
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunTransaction.h"
-#include "fdbclient/ConsistencyScanInterface.actor.h"
+#include "fdbclient/ConsistencyScanInterface.h"
 
 namespace fdb_cli {
 

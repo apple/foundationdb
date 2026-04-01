@@ -18,15 +18,12 @@
  * limitations under the License.
  */
 
+#pragma once
+
 #include "fdbclient/SystemData.h"
 #include "fdbclient/json_spirit/json_spirit_value.h"
 #include "flow/serialize.h"
 #include "fmt/core.h"
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_CONSISTENCYSCANINTERFACE_ACTOR_G_H)
-#define FDBCLIENT_CONSISTENCYSCANINTERFACE_ACTOR_G_H
-#include "fdbclient/ConsistencyScanInterface.actor.g.h"
-#elif !defined(FDBCLIENT_CONSISTENCYSCANINTERFACE_ACTOR_H)
-#define FDBCLIENT_CONSISTENCYSCANINTERFACE_ACTOR_H
 
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/DatabaseConfiguration.h"
@@ -36,8 +33,6 @@
 #include "fdbrpc/Locality.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/KeyBackedRangeMap.actor.h"
-
-#include "flow/actorcompiler.h" // must be last include
 
 struct ConsistencyScanInterface {
 	constexpr static FileIdentifier file_identifier = 4983265;
@@ -312,23 +307,16 @@ struct ConsistencyScanState : public KeyBackedClass {
 	// History of scan round stats stored by their start version
 	StatsHistoryMap roundStatsHistory() { return { subspace.pack(__FUNCTION__sr), IncludeVersion() }; }
 
-	ACTOR static Future<Void> clearStatsActor(ConsistencyScanState* self, Reference<ReadYourWritesTransaction> tr) {
+	Future<Void> clearStats(Reference<ReadYourWritesTransaction> tr) {
 		// read the keyspaces so the transaction conflicts on write (key-backed properties don't expose conflict ranges,
 		// and the extra work here is negligible because this is a rare manual command so performance is not a huge
 		// concern)
-		wait(success(self->currentRoundStats().getD(tr)) && success(self->lifetimeStats().getD(tr)) &&
-		     success(self->roundStatsHistory().getRange(tr, {}, {}, 1, Snapshot::False, Reverse::False)));
+		co_await (success(currentRoundStats().getD(tr)) && success(lifetimeStats().getD(tr)) &&
+		          success(roundStatsHistory().getRange(tr, {}, {}, 1, Snapshot::False, Reverse::False)));
 
 		// update each of the stats keyspaces to empty
-		self->currentRoundStats().set(tr, ConsistencyScanState::RoundStats());
-		self->lifetimeStats().set(tr, ConsistencyScanState::LifetimeStats());
-		self->roundStatsHistory().erase(tr, 0, MAX_VERSION);
-		return Void();
+		currentRoundStats().set(tr, ConsistencyScanState::RoundStats());
+		lifetimeStats().set(tr, ConsistencyScanState::LifetimeStats());
+		roundStatsHistory().erase(tr, 0, MAX_VERSION);
 	}
-
-	Future<Void> clearStats(Reference<ReadYourWritesTransaction> tr) { return clearStatsActor(this, tr); }
 };
-
-#include "flow/unactorcompiler.h"
-
-#endif // FDBCLIENT_CONSISTENCYSCANINTERFACE_H
