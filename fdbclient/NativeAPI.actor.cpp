@@ -5956,14 +5956,10 @@ ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsLis
 	loop {
 		choose {
 			when(wait(cx->onProxiesChanged())) {}
-			when(ErrorOr<GetDDMetricsReply> rep =
-			         wait(errorOr(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
-			                                       &CommitProxyInterface::getDDMetrics,
-			                                       GetDDMetricsRequest(keys, shardLimit))))) {
-				if (rep.isError()) {
-					throw rep.getError();
-				}
-				return rep.get().storageMetricsList;
+			when(GetDDMetricsReply rep = wait(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
+			                                                   &CommitProxyInterface::getDDMetrics,
+			                                                   GetDDMetricsRequest(keys, shardLimit)))) {
+				return rep.storageMetricsList;
 			}
 		}
 	}
