@@ -53,7 +53,7 @@ ReqBuilder<Req, std::decay_t<Args>...> makeReqBuilder(Args&&... args) {
 template <class Req, class Builder>
 Future<REPLY_TYPE(Req)> commitProxyLoadBalance(Database cx,
                                                Builder reqBuilder,
-                                               RequestStream<Req> CommitProxyInterface::*channel,
+                                               RequestStream<Req> CommitProxyInterface::* channel,
                                                AtMostOnce atMostOnce = AtMostOnce::False,
                                                ExplicitVoid = {}) {
 	while (true) {
@@ -70,7 +70,7 @@ Future<REPLY_TYPE(Req)> commitProxyLoadBalance(Database cx,
 template <class Req, class Builder>
 Future<REPLY_TYPE(Req)> grvProxyLoadBalance(Database cx,
                                             Builder reqBuilder,
-                                            RequestStream<Req> GrvProxyInterface::*channel,
+                                            RequestStream<Req> GrvProxyInterface::* channel,
                                             AtMostOnce atMostOnce = AtMostOnce::False,
                                             ExplicitVoid = {}) {
 	while (true) {
