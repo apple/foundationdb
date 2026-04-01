@@ -1265,16 +1265,16 @@ public:
 		try {
 			loop {
 				{
-				bool versionLagUndesired =
-				    !self->disableFailingLaggingServers.get() && server->ssVersionTooFarBehind.get();
-				if (versionLagUndesired && !status.isUndesired) {
-					TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
-					    .detail("Server", server->getId())
-					    .detail("Address", server->getLastKnownInterface().address())
-					    .detail("Reason", "VersionLag");
+					bool versionLagUndesired =
+					    !self->disableFailingLaggingServers.get() && server->ssVersionTooFarBehind.get();
+					if (versionLagUndesired && !status.isUndesired) {
+						TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
+						    .detail("Server", server->getId())
+						    .detail("Address", server->getLastKnownInterface().address())
+						    .detail("Reason", "VersionLag");
+					}
+					status.isUndesired = versionLagUndesired;
 				}
-				status.isUndesired = versionLagUndesired;
-			}
 				status.isWrongConfiguration = false;
 				status.isWiggling = false;
 				hasWrongDC = !self->isCorrectDC(*server);
@@ -1412,10 +1412,10 @@ public:
 				}
 
 				if (worstStatus != DDTeamCollection::Status::NONE) {
-					const char* exclusionType = worstStatus == DDTeamCollection::Status::WIGGLING  ? "Wiggling"
-					                            : worstStatus == DDTeamCollection::Status::FAILED  ? "Failed"
+					const char* exclusionType = worstStatus == DDTeamCollection::Status::WIGGLING   ? "Wiggling"
+					                            : worstStatus == DDTeamCollection::Status::FAILED   ? "Failed"
 					                            : worstStatus == DDTeamCollection::Status::EXCLUDED ? "Excluded"
-					                                                                                 : "Unknown";
+					                                                                                : "Unknown";
 					TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
 					    .detail("Server", server->getId())
 					    .detail("Address", server->getLastKnownInterface().address())

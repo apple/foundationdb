@@ -314,7 +314,7 @@ class DDTxnProcessorImpl {
 					}
 				}
 
-			state double dataMoveReadStart = now();
+				state double dataMoveReadStart = now();
 				RangeResult dms = wait(tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY));
 				if (now() - dataMoveReadStart > 5.0) {
 					TraceEvent(SevWarn, "DDInitSlowDataMoveRead", distributorId)

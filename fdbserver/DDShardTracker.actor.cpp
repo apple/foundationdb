@@ -1313,8 +1313,7 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker* self, Reference<I
 		wait(yield(TaskPriority::DataDistribution));
 	}
 
-	TraceEvent("TrackInitialShardsComplete", self->distributorId)
-	    .detail("ShardsTracked", s);
+	TraceEvent("TrackInitialShardsComplete", self->distributorId).detail("ShardsTracked", s);
 
 	state double changeSizesStart = now();
 	Future<Void> initialSize = changeSizes(self, KeyRangeRef(allKeys.begin, allKeys.end), 0);
