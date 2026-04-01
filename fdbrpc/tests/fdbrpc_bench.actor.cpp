@@ -152,23 +152,13 @@ class EchoServer {
 		}
 	}
 
-	ACTOR static Future<Void> run(EchoServer* self) {
-		state std::vector<Future<Void>> tasks;
-		tasks.reserve(3);
-		tasks.push_back(serveGetInterfaceReqs(self));
-		tasks.push_back(serveEchoReqs(self));
-		tasks.push_back(printThroughput(self));
-		wait(waitForAny(tasks));
-		return Void();
-	}
-
 	EchoServerInterface interf;
 	StatCounter counter;
 
 public:
 	EchoServer() { interf.getInterface.makeWellKnownEndpoint(WLTOKEN_ECHO_SERVER, TaskPriority::DefaultEndpoint); }
 
-	Future<Void> run() { return EchoServer::run(this); }
+	Future<Void> run() { co_await race(serveGetInterfaceReqs(this), serveEchoReqs(this), printThroughput(this)); }
 };
 
 ACTOR Future<Void> echoServer() {
