@@ -55,15 +55,6 @@ struct RoleLineageCollector : IALPCollector<RoleLineage> {
 	}
 };
 
-// creates a new root and sets the role lineage
-ACTOR template <class Fun>
-Future<decltype(std::declval<Fun>()())> runInRole(Fun fun, ProcessClass::ClusterRole role) {
-	getCurrentLineage()->makeRoot();
-	getCurrentLineage()->modify(&RoleLineage::role) = role;
-	decltype(std::declval<Fun>()()) res = wait(fun());
-	return res;
-}
-
 #include "flow/unactorcompiler.h"
 
 #endif
