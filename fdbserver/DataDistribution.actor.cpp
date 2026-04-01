@@ -778,7 +778,7 @@ public:
 				TraceEvent("DDInitScheduledCancelDataMove", self->ddId).detail("DataMove", meta.toString());
 				cancelledMoves++;
 			} else if (it.value()->valid) {
-				TraceEvent(SevInfo, "DDInitFoundDataMove", self->ddId).detail("DataMove", meta.toString());
+				TraceEvent(SevDebug, "DDInitFoundDataMove", self->ddId).detail("DataMove", meta.toString());
 				ASSERT(meta.ranges.front() == it.range());
 				// TODO: Persist priority in DataMoveMetaData.
 				RelocateShard rs(meta.ranges.front(), DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
