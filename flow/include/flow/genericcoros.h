@@ -37,11 +37,14 @@ Future<Void> waitForAllReady(std::vector<Future<T>> results) {
 		// ignore() with errorOr() avoids both throwing on error and copying T.
 		co_await coro::errorOr(coro::ignore(result));
 	}
-	co_return;
 }
 
 template <class T>
-Future<T> timeout(Future<T> what, double time, T timedoutValue, TaskPriority taskID = TaskPriority::DefaultDelay) {
+Future<T> timeout(Future<T> what,
+                  double time,
+                  T timedoutValue,
+                  TaskPriority taskID = TaskPriority::DefaultDelay,
+                  ExplicitVoid = {}) {
 	if (what.canGet()) {
 		co_return what.get();
 	} else if (what.isError()) {
