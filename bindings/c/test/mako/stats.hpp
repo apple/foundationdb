@@ -174,6 +174,17 @@ public:
 		latency_us_total[op] += latency_us;
 	}
 
+	void subtractCounters(const WorkflowStatistics& baseline) noexcept {
+		conflicts -= baseline.conflicts;
+		total_errors -= baseline.total_errors;
+		total_timeouts -= baseline.total_timeouts;
+		for (auto op = 0; op < MAX_OP; op++) {
+			ops[op] -= baseline.ops[op];
+			errors[op] -= baseline.errors[op];
+			timeouts[op] -= baseline.timeouts[op];
+		}
+	}
+
 	void writeToFile(const std::string& filename, int op) const {
 		rapidjson::StringBuffer ss;
 		rapidjson::Writer<rapidjson::StringBuffer> writer(ss);
