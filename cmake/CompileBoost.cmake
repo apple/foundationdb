@@ -103,6 +103,7 @@ function(compile_boost)
 
   add_library(${COMPILE_BOOST_TARGET} INTERFACE)
   target_include_directories(${COMPILE_BOOST_TARGET} SYSTEM INTERFACE ${BOOST_INSTALL_DIR}/include)
+  target_compile_definitions(${COMPILE_BOOST_TARGET} INTERFACE BOOST_NO_CXX98_FUNCTION_BASE)
   target_link_libraries(${COMPILE_BOOST_TARGET} INTERFACE ${COMPILE_BOOST_TARGET}_context ${COMPILE_BOOST_TARGET}_filesystem ${COMPILE_BOOST_TARGET}_iostreams ${COMPILE_BOOST_TARGET}_system ${COMPILE_BOOST_TARGET}_serialization)
 
 endfunction(compile_boost)
@@ -169,6 +170,7 @@ set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores an
 #
 if(Boost_FOUND AND NOT FORCE_BOOST_BUILD)
   add_library(boost_target INTERFACE)
+  target_compile_definitions(boost_target INTERFACE BOOST_NO_CXX98_FUNCTION_BASE)
   target_link_libraries(boost_target INTERFACE Boost::boost Boost::context Boost::filesystem Boost::iostreams Boost::serialization Boost::system)
 elseif(WIN32)
   message(FATAL_ERROR "Could not find Boost")
