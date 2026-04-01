@@ -49,10 +49,12 @@ ReqBuilder<Req, std::decay_t<Args>...> makeReqBuilder(Args&&... args) {
 template <class Req, class Builder>
 Future<REPLY_TYPE(Req)> proxyLoadBalance(Database cx,
                                          Builder reqBuilder,
-                                         RequestStream<Req> CommitProxyInterface::*channel) {
+                                         RequestStream<Req> CommitProxyInterface::*channel,
+                                         AtMostOnce atMostOnce = AtMostOnce::False,
+                                         ExplicitVoid = {}) {
 	while (true) {
 		Future<REPLY_TYPE(Req)> replyFuture = basicLoadBalance(
-		    cx->getCommitProxies(UseProvisionalProxies::False), channel, reqBuilder.build(), cx->taskID);
+		    cx->getCommitProxies(UseProvisionalProxies::False), channel, reqBuilder.build(), cx->taskID, atMostOnce);
 		auto res = co_await race(replyFuture, cx->onProxiesChanged());
 		if (res.index() == 0) {
 			co_return std::get<0>(std::move(res));

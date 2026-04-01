@@ -6336,19 +6336,12 @@ void enableClientInfoLogging() {
 ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID) {
 	TraceEvent("SnapCreateEnter").detail("SnapCmd", snapCmd).detail("UID", snapUID);
 	try {
-		loop {
-			choose {
-				when(wait(cx->onProxiesChanged())) {}
-				when(wait(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
-				                           &CommitProxyInterface::proxySnapReq,
-				                           ProxySnapRequest(snapCmd, snapUID, snapUID),
-				                           cx->taskID,
-				                           AtMostOnce::True))) {
-					TraceEvent("SnapCreateExit").detail("SnapCmd", snapCmd).detail("UID", snapUID);
-					return Void();
-				}
-			}
-		}
+		wait(proxyLoadBalance(cx,
+		                      makeReqBuilder<ProxySnapRequest>(snapCmd, snapUID, snapUID),
+		                      &CommitProxyInterface::proxySnapReq,
+		                      AtMostOnce::True));
+		TraceEvent("SnapCreateExit").detail("SnapCmd", snapCmd).detail("UID", snapUID);
+		return Void();
 	} catch (Error& e) {
 		TraceEvent("SnapCreateError").error(e).detail("SnapCmd", snapCmd.toString()).detail("UID", snapUID);
 		throw;
