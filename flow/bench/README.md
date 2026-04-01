@@ -1,7 +1,13 @@
 Summary
 =======
 
-`flowbench` is an executable that can be used to microbenchmark parts of the FoundationDB code. The goal is to make it easy to test the performance of various sub-millisecond operations using `flow` and `fdbrpc`. Specifically, this tool can be used to:
+The benchmark suite is split into three executables:
+
+- `flow_bench` for benchmarks that depend only on `flow`
+- `fdbrpc_bench` for benchmarks that depend on `fdbrpc`
+- `fdbclient_bench` for benchmarks that depend on `fdbclient`
+
+These binaries can be used to microbenchmark parts of the FoundationDB code without always pulling in higher-level dependencies. Specifically, they can be used to:
 
 - Test the performance effects of changes to the actor compiler or to the `flow` and `fdbrpc` libraries
 - Test the performance of various uses of the `flow` and `fdbrpc` libraries
@@ -11,16 +17,16 @@ Summary
 Usage
 =====
 
-- To build the `flowbench` executable, run `ninja flowbench` or `make flowbench` depending on which build system you're using.
-- Then you can run `bin/flowbench --help` to see possible uses of `flowbench`.
-- Running `bin/flowbench` directly will run all registered benchmarks, but you may want to limit your run to a subset of benchmarks. This can be done by running `bin/flowbench --benchmark_filter=<regex>`
-- All benchmark names can be listed with `bin/flowbench --benchmark_list_tests`
+- To build one of the benchmark executables, run `ninja flow_bench`, `ninja fdbrpc_bench`, or `ninja fdbclient_bench`.
+- Then you can run `bin/<target> --help` to see possible uses of that benchmark binary.
+- Running `bin/<target>` directly will run all registered benchmarks in that binary, but you may want to limit your run to a subset of benchmarks. This can be done by running `bin/<target> --benchmark_filter=<regex>`
+- All benchmark names can be listed with `bin/<target> --benchmark_list_tests`
 - Example output:
 
 ```
-$ bin/flowbench --benchmark_filter=bench_ref
+$ bin/flow_bench --benchmark_filter=bench_ref
 2020-08-04 21:49:40
-Running bin/flowbench
+Running bin/flow_bench
 Run on (7 X 2904 MHz CPU s)
 CPU Caches:
   L1 Data 32 KiB (x7)

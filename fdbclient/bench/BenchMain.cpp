@@ -1,5 +1,5 @@
 /*
- * GlobalData.cpp
+ * BenchMain.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,27 +18,8 @@
  * limitations under the License.
  */
 
-#include "fdbclient/FDBTypes.h"
-#include "flow/IRandom.h"
+#include "flow/BenchMain.h"
 
-static constexpr size_t globalDataSize = 1 << 20;
-static uint8_t* globalData = nullptr;
-
-static inline void initGlobalData() {
-	if (!globalData) {
-		globalData = static_cast<uint8_t*>(allocateFast(globalDataSize));
-	}
-	deterministicRandom()->randomBytes(globalData, globalDataSize);
-}
-
-KeyValueRef getKV(size_t keySize, size_t valueSize) {
-	initGlobalData();
-	ASSERT(keySize + valueSize <= globalDataSize);
-	return KeyValueRef(KeyRef(globalData, keySize), ValueRef(globalData + keySize, valueSize));
-}
-
-KeyRef getKey(size_t keySize) {
-	initGlobalData();
-	ASSERT(keySize);
-	return KeyRef(globalData, keySize);
+int main(int argc, char** argv) {
+	return runBenchmarks(argc, argv);
 }

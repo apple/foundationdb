@@ -19,8 +19,9 @@
  */
 
 #include "benchmark/benchmark.h"
+#include "BenchSupport.h"
+
 #include "flow/IRandom.h"
-#include "flowbench/GlobalData.h"
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/DDSketch.h"
 #include "fdbrpc/ContinuousSample.h"

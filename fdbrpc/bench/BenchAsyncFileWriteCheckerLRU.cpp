@@ -1,9 +1,6 @@
 #include "benchmark/benchmark.h"
-#include "crc32/crc32c.h"
-#include "flow/Hash3.h"
-#include "flow/xxhash.h"
-#include "flowbench/GlobalData.h"
 #include "fdbrpc/AsyncFileWriteChecker.h"
+#include "flow/IRandom.h"
 
 #include <stdint.h>
 

@@ -1,5 +1,5 @@
 /*
- * flowbench.cpp
+ * BenchMain.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,34 +18,8 @@
  * limitations under the License.
  */
 
-#include "benchmark/benchmark.h"
-#include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/ThreadSafeTransaction.h"
-#include "flow/ThreadHelper.actor.h"
-#include <thread>
-
-Future<Void> stopNetworkAfter(Future<Void> what) {
-	try {
-		co_await what;
-		g_network->stop();
-	} catch (...) {
-		g_network->stop();
-		throw;
-	}
-}
+#include "flow/BenchMain.h"
 
 int main(int argc, char** argv) {
-	benchmark::Initialize(&argc, argv);
-	if (benchmark::ReportUnrecognizedArguments(argc, argv)) {
-		return 1;
-	}
-	setupNetwork();
-	Promise<Void> benchmarksDone;
-	std::thread benchmarkThread([&]() {
-		benchmark::RunSpecifiedBenchmarks();
-		onMainThreadVoid([&]() { benchmarksDone.send(Void()); });
-	});
-	auto f = stopNetworkAfter(benchmarksDone.getFuture());
-	runNetwork();
-	benchmarkThread.join();
+	return runBenchmarks(argc, argv);
 }

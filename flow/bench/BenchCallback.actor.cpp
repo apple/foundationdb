@@ -22,7 +22,6 @@
 
 #include <vector>
 
-#include "fdbclient/FDBTypes.h"
 #include "flow/flow.h"
 #include "flow/ThreadHelper.actor.h"
 
