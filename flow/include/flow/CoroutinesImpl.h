@@ -533,6 +533,92 @@ struct AwaitableFuture
 	}
 };
 
+template <class PromiseType, class ValueType>
+struct AwaitableFutureOwning : Callback<ToFutureVal<ValueType>> {
+	using FutureValue = ToFutureVal<ValueType>;
+	Future<FutureValue> future;
+	PromiseType* pt = nullptr;
+
+	AwaitableFutureOwning(Future<FutureValue> future, PromiseType* pt) : future(std::move(future)), pt(pt) {}
+
+	void fire(FutureValue const&) override { pt->resume(); }
+	void fire(FutureValue&&) override { pt->resume(); }
+	void error(Error) override { pt->resume(); }
+
+	[[maybe_unused]] [[nodiscard]] bool await_ready() const {
+		if (actorWaitStateIsCancelled(pt->waitState())) {
+			pt->waitState() = ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK;
+			return true;
+		}
+		return future.isReady();
+	}
+
+	[[maybe_unused]] void await_suspend(n_coroutine::coroutine_handle<> h) {
+		pt->setHandle(h);
+		pt->waitState() = ACTOR_WAIT_STATE_WAITING;
+
+		StrictFuture<FutureValue> sf = future;
+		sf.addCallbackAndClear(this);
+	}
+
+	bool resumeImpl() {
+		switch (pt->waitState()) {
+		case ACTOR_WAIT_STATE_CANCELLED:
+			this->remove();
+		case ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK:
+			throw actor_cancelled();
+		}
+
+		bool wasReady = pt->waitState() == ACTOR_WAIT_STATE_NOT_WAITING;
+		if (actorWaitStateIsWaiting(pt->waitState())) {
+			this->remove();
+			pt->waitState() = ACTOR_WAIT_STATE_NOT_WAITING;
+		}
+		return wasReady;
+	}
+};
+
+template <class PromiseType, class ValueType>
+struct AwaitableFutureIgnore : AwaitableFutureOwning<PromiseType, ValueType> {
+	using Base = AwaitableFutureOwning<PromiseType, ValueType>;
+
+	AwaitableFutureIgnore(Future<ToFutureVal<ValueType>> future, PromiseType* pt) : Base(std::move(future), pt) {}
+
+	Void await_resume() {
+		auto self = static_cast<Base*>(this);
+		self->resumeImpl();
+		// Preserve normal Future<T> error propagation while discarding any
+		// successful T payload.
+		if (self->future.isError()) {
+			throw self->future.getError();
+		}
+		return Void();
+	}
+};
+
+template <class PromiseType, class SourceValue, class ResultValue>
+struct AwaitableFutureErrorOr : AwaitableFutureOwning<PromiseType, SourceValue> {
+	using Base = AwaitableFutureOwning<PromiseType, SourceValue>;
+	using ResultType = ErrorOr<ResultValue>;
+
+	AwaitableFutureErrorOr(Future<ToFutureVal<SourceValue>> future, PromiseType* pt) : Base(std::move(future), pt) {}
+
+	ResultType await_resume() {
+		auto self = static_cast<Base*>(this);
+		self->resumeImpl();
+		// Convert failed Future<T> awaits into ErrorOr instead of throwing so
+		// callers can cheaply observe completion-only state.
+		if (self->future.isError()) {
+			return ResultType(self->future.getError());
+		}
+		if constexpr (std::is_same_v<ResultValue, Void>) {
+			return ResultType(Void());
+		} else {
+			return ResultType(self->future.get());
+		}
+	}
+};
+
 // TODO: This can be merged with AwaitableFutureStream by passing more template arguments.
 template <class PromiseType, class ValueType, bool ReturnsExplicitVoid = false>
 struct ThreadAwaitableFutureStream
@@ -724,6 +810,19 @@ struct CoroPromise : CoroReturn<T, CoroPromise<T, IsCancellable, ReturnsExplicit
 	}
 
 	template <class U>
+	auto await_transform(coro::FutureIgnore<U> future) {
+		// Custom adapters compose through await_transform rather than wrapper
+		// coroutines so cancellation and wait-state handling stay identical to
+		// plain Future<T> awaits.
+		return coro::AwaitableFutureIgnore<promise_type, U>{ std::move(future.future), this };
+	}
+
+	template <class U, class V>
+	auto await_transform(coro::FutureErrorOr<U, V> future) {
+		return coro::AwaitableFutureErrorOr<promise_type, U, V>{ std::move(future.future), this };
+	}
+
+	template <class U>
 	auto await_transform(const FutureStream<U>& futureStream) {
 		return coro::AwaitableFuture<promise_type, U, true, ReturnsExplicitVoid>{ futureStream, this };
 	}
@@ -811,6 +910,18 @@ struct AsyncResultPromise
 	template <class U>
 	auto await_transform(const Future<U>& future) {
 		return coro::AwaitableFuture<promise_type, U, false, ReturnsExplicitVoid>{ future, this };
+	}
+
+	template <class U>
+	auto await_transform(coro::FutureIgnore<U> future) {
+		// Mirror CoroPromise support so AsyncResult coroutines can use the same
+		// non-allocating await adapters.
+		return coro::AwaitableFutureIgnore<promise_type, U>{ std::move(future.future), this };
+	}
+
+	template <class U, class V>
+	auto await_transform(coro::FutureErrorOr<U, V> future) {
+		return coro::AwaitableFutureErrorOr<promise_type, U, V>{ std::move(future.future), this };
 	}
 
 	template <class U>
