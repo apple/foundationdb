@@ -760,6 +760,7 @@ public:
 		state int cancelledMoves = 0;
 		state int emptyMoves = 0;
 		state double resumeStart = now();
+		state double lastLogTime = now();
 
 		wait(readyToStart);
 
@@ -801,6 +802,14 @@ public:
 				self->relocationProducer.send(rs);
 				wait(yield(TaskPriority::DataDistribution));
 				validMoves++;
+			}
+			if (now() - lastLogTime >= 30.0) {
+				lastLogTime = now();
+				TraceEvent("DDInitResumeDataMovesProgress", self->ddId)
+				    .detail("ValidMoves", validMoves)
+				    .detail("CancelledMoves", cancelledMoves)
+				    .detail("EmptyMoves", emptyMoves)
+				    .detail("ElapsedSeconds", now() - resumeStart);
 			}
 		}
 

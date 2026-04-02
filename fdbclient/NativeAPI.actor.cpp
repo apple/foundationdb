@@ -8068,18 +8068,16 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
 				return std::make_pair(res, -1);
 			}
 		} catch (Error& e) {
-			TraceEvent(SevDebug, "WaitStorageMetricsHandleError").error(e);
+			retryCount++;
+			// Upgrade from SevDebug to SevWarn after 60 seconds of retrying
+			Severity sev = (now() - startTime > 60.0) ? SevWarn : SevDebug;
+			TraceEvent(sev, "WaitStorageMetricsHandleError")
+			    .error(e)
+			    .detail("Keys", keys)
+			    .detail("Elapsed", now() - startTime)
+			    .detail("Retries", retryCount);
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
 				cx->invalidateCache(tenantInfo.prefix, keys);
-				retryCount++;
-				if (now() - lastLogTime >= 60.0) {
-					lastLogTime = now();
-					TraceEvent(SevWarn, "WaitStorageMetricsRetrying")
-					    .detail("Keys", keys)
-					    .detail("Elapsed", now() - startTime)
-					    .detail("Retries", retryCount)
-					    .detail("ErrorCode", e.code());
-				}
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 			} else if (e.code() == error_code_future_version) {
 				wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, TaskPriority::DataDistribution));
