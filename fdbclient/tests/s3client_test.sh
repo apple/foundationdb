@@ -35,13 +35,6 @@ function filter_http_debug {
   echo "${output}" | grep -v "Contents of" | grep -v "^$" | grep -v "^[[:space:]]*$" | grep -v "HTTP" | grep -v "^\[.*\]" | grep -v "^Request Header:" | grep -v "^Response Header:" | grep -v "^Response Code:" | grep -v "^Response ContentLen:" | grep -v "^-- RESPONSE CONTENT--" | grep -v "^--------" | grep -v "^<?xml" | grep -v "^<.*>" | grep -v "^'$" | grep -v "^++"
 }
 
-# Check whether captured output contains a literal string. Avoid echo|grep -q because
-# pipefail can turn grep's early success exit into a false negative via SIGPIPE upstream.
-function output_contains {
-  local output="$1"
-  local needle="$2"
-  grep -Fq -- "${needle}" <<<"${output}"
-}
 
 # Run s3client with proper TLS CA file handling
 # This function handles the case where TLS_CA_FILE might be empty
@@ -258,7 +251,7 @@ function test_nonexistent_bucket {
       # 1. The command succeeded (status 0)
       # 2. The output contains the URL header
       # 3. There are no objects listed (no lines after the header)
-      if echo "${output}" | grep -q "Contents of" &&
+      if output_contains "${output}" "Contents of" &&
          [[ $(filter_http_debug "${output}" | wc -l) -eq 0 ]]; then
         # Success - we have the header and no other non-empty lines (excluding HTTP debug lines)
         return 0
@@ -301,7 +294,7 @@ function test_nonexistent_resource {
     local filtered_output
     filtered_output=$(filter_http_debug "${output}")
     
-    if ! (echo "${output}" | grep -q "Contents of" &&
+    if ! (output_contains "${output}" "Contents of" &&
           [[ -z "$(echo "${filtered_output}" | tr -d '[:space:]')" ]]); then
       err "Failed to detect non-existent resource in S3"
       return 1
@@ -315,8 +308,8 @@ function test_nonexistent_resource {
       # 1. The command succeeded (status 0)
       # 2. The output contains the URL header
       # 3. There are no actual object listings (no lines starting with FILE or DIR)
-      if echo "${output}" | grep -q "Contents of" && 
-         ! echo "${output}" | grep -q "^FILE\|^DIR"; then
+      if output_contains "${output}" "Contents of" && 
+         ! output_matches "${output}" "^FILE\|^DIR"; then
         # Success - we have the header and no object listings
         return 0
       else
@@ -375,8 +368,8 @@ function test_empty_bucket {
     local filtered_output
     filtered_output=$(filter_http_debug "${output}")
     
-    if echo "${output}" | grep -q "No objects found" || 
-       (echo "${output}" | grep -q "Contents of" && 
+    if output_contains "${output}" "No objects found" ||
+       (output_contains "${output}" "Contents of" && 
         [[ -z "$(echo "${filtered_output}" | tr -d '[:space:]')" ]]); then
       log "Successfully handled empty bucket listing"
       return 0
