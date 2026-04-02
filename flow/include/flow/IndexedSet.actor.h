@@ -32,10 +32,39 @@
 #include "flow/Platform.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+template <class Node>
+void ISFreeNodesSync(std::vector<Node*> toFree) {
+	// Frees the forest of nodes in the 'toFree' vector without waiting.
+
+	// Freeing many items from a large tree is bound by the memory latency to
+	// fetch each node from main memory.  This code does a largely depth first
+	// traversal of the forest to be destroyed (using a stack) but prefetches
+	// each node and puts it on a short queue before actually processing it, so
+	// that several memory transactions can be outstanding simultaneously.
+	Deque<Node*> prefetchQueue;
+	while (!prefetchQueue.empty() || !toFree.empty()) {
+
+		while (prefetchQueue.size() < 10 && !toFree.empty()) {
+			_mm_prefetch((const char*)toFree.back(), _MM_HINT_T0);
+			prefetchQueue.push_back(toFree.back());
+			toFree.pop_back();
+		}
+
+		auto n = prefetchQueue.front();
+		prefetchQueue.pop_front();
+
+		if (n->child[0])
+			toFree.push_back(n->child[0]);
+		if (n->child[1])
+			toFree.push_back(n->child[1]);
+		n->child[0] = n->child[1] = 0;
+		delete n;
+	}
+}
+
 ACTOR template <class Node>
-[[flow_allow_discard]] Future<Void> ISFreeNodes(std::vector<Node*> toFree, bool synchronous) {
-	// Frees the forest of nodes in the 'toFree' vector.
-	// If 'synchronous' is true, then there can be no waits.
+[[flow_allow_discard]] Future<Void> ISFreeNodes(std::vector<Node*> toFree) {
+	// Frees the forest of nodes in the 'toFree' vector, yielding periodically.
 
 	state int eraseCount = 0;
 
@@ -64,7 +93,7 @@ ACTOR template <class Node>
 		delete n;
 		++eraseCount;
 
-		if (!synchronous && eraseCount % 1000 == 0)
+		if (eraseCount % 1000 == 0)
 			wait(yield());
 	}
 

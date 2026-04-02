@@ -1392,7 +1392,7 @@ void IndexedSet<T, Metric>::erase(typename IndexedSet<T, Metric>::iterator begin
 	std::vector<IndexedSet<T, Metric>::Node*> toFree;
 	erase(begin, end, toFree);
 
-	ISFreeNodes(toFree, true);
+	ISFreeNodesSync(toFree);
 }
 
 template <class T, class Metric>
@@ -1407,7 +1407,7 @@ Future<Void> IndexedSet<T, Metric>::eraseAsync(typename IndexedSet<T, Metric>::i
 	std::vector<IndexedSet<T, Metric>::Node*> toFree;
 	erase(begin, end, toFree);
 
-	return uncancellable(ISFreeNodes(toFree, false));
+	return uncancellable(ISFreeNodes(toFree));
 }
 
 template <class Key, class Value, class Pair, class Metric>
