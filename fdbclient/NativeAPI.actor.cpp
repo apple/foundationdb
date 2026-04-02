@@ -53,7 +53,6 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.h"
-#include "fdbclient/IKnobCollection.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/KeyRangeMap.h"
@@ -732,9 +731,9 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		std::string knobValueString = optionValue.substr(eq + 1);
 
 		try {
-			auto knobValue = IKnobCollection::parseKnobValue(knobName, knobValueString, IKnobCollection::Type::CLIENT);
+			auto knobValue = parseClientKnobValue(knobName, knobValueString);
 			if (g_network) {
-				IKnobCollection::getMutableGlobalKnobCollection().setKnob(knobName, knobValue);
+				setClientKnob(knobName, knobValue);
 			} else {
 				networkOptions.knobs[knobName] = knobValue;
 			}
@@ -899,9 +898,9 @@ ACTOR Future<Void> monitorNetworkBusyness() {
 }
 
 static void setupGlobalKnobs() {
-	IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::CLIENT, Randomize::False, IsSimulated::False);
+	resetClientKnobs(Randomize::False, IsSimulated::False);
 	for (const auto& [knobName, knobValue] : networkOptions.knobs) {
-		IKnobCollection::getMutableGlobalKnobCollection().setKnob(knobName, knobValue);
+		setClientKnob(knobName, knobValue);
 	}
 }
 
