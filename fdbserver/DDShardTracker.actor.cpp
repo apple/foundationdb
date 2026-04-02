@@ -1323,6 +1323,10 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker* self, Reference<I
 	TraceEvent("TrackInitialShardsMetricsComplete", self->distributorId)
 	    .detail("ElapsedSeconds", now() - changeSizesStart);
 
+	// DDStarted bookends DDStarting — marks DD fully operational. Uses DD* prefix so
+	// the full startup sequence can be queried with Type="DD*" in trace logs.
+	TraceEvent("DDStarted", self->distributorId);
+
 	self->maxShardSizeUpdater = updateMaxShardSize(self->dbSizeEstimate, self->maxShardSize);
 
 	return Void();

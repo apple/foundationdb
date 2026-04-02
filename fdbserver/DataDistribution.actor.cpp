@@ -505,6 +505,30 @@ public:
 	// Initialize the required internal states of DataDistributor from system metadata. It's necessary before
 	// DataDistributor start working. Doesn't include initialization of optional components, like TenantCache, DDQueue,
 	// Tracker, TeamCollection. The components should call its own ::init methods.
+	//
+	// DD Startup Progress (trace events in order):
+	//   DDStarting                        - DD process recruited and starting init
+	//   DDInitTakingMoveKeysLock          - Acquiring move keys lock
+	//   DDInitTookMoveKeysLock            - Lock acquired
+	//   DDInitGotConfiguration            - Database configuration loaded
+	//   DDInitUpdatedReplicaKeys          - Replica keys updated
+	//   DDInitSlowDataMoveRead            - (SevWarn) dataMoveKeys read taking >5s
+	//   DDInitServerListAndDataMoveReadComplete - Server list + data moves read: NumDataMoves, NumServers,
+	//   ElapsedSeconds DDInitKeyServerScanProgress       - (every 30s) keyServer scan: BeginKey, Batches, ShardsScanned
+	//   DDInitKeyServerScanComplete       - keyServer scan done: NumShards, ElapsedSeconds
+	//   DDInitGotInitialDD                - Init data loaded: NumShards, NumServers
+	//   DDInitDataLoaded                  - Init data loaded, ElapsedSeconds (does NOT mean DD is fully operational)
+	//
+	// After init(), the following startup events fire from other components:
+	//   DDInitResumeDataMovesProgress     - (every 30s) data move resume: ValidMoves, CancelledMoves, EmptyMoves
+	//   DDInitResumedDataMoves            - Data move resume complete with counts
+	//   TrackInitialShards                - Shard tracker setup started with InitialShardCount
+	//   TrackInitialShardsComplete        - Shard trackers created: ShardsTracked
+	//   DDTrackerStarting                 - Teams ready (fires from DDTeamCollection after readyToStart + delay)
+	//   TrackInitialShardsMetricsComplete - All shard metrics received: ElapsedSeconds
+	//                                       WaitStorageMetricsHandleError may fire (SevWarn after 60s) if a
+	//                                       shard's metrics read is stuck retrying: Keys, Retries
+	//   DDStarted                         - DD is fully operational with all shard sizes loaded
 	ACTOR static Future<Void> init(Reference<DataDistributor> self) {
 		loop {
 			TraceEvent("DDInitTakingMoveKeysLock", self->ddId).log();
@@ -957,7 +981,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 		try {
 			wait(DataDistributor::init(self));
 
-			TraceEvent("DDInitComplete", self->ddId).detail("ElapsedSeconds", now() - ddStartTime);
+			TraceEvent("DDInitDataLoaded", self->ddId).detail("ElapsedSeconds", now() - ddStartTime);
 
 			// When/If this assertion fails, Evan owes Ben a pat on the back for his foresight
 			ASSERT(self->configuration.storageTeamSize > 0);
@@ -3327,6 +3351,9 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 
 	try {
 		TraceEvent("DataDistributorRunning", di.id());
+		// DDStarting duplicates the above with DD* prefix so the full startup sequence
+		// can be queried with Type="DD*" in trace logs
+		TraceEvent("DDStarting", di.id());
 		self->addActor.send(waitFailureServer(di.waitFailure.getFuture()));
 		self->addActor.send(cacheServerWatcher(&cx));
 		state Future<Void> distributor = reportErrorsExcept(
