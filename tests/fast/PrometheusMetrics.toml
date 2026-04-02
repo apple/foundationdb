@@ -1,0 +1,24 @@
+[[test]]
+testTitle = 'PrometheusMetricsTest'
+timeout = 120
+
+    [[test.workload]]
+    testName = 'PrometheusMetricsTest'
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 2500.0
+    testDuration = 30.0
+    expectedRate = 0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 30.0
+
+[[knobs]]
+prometheus_metrics_enabled = true
+metrics_data_model = "otel"

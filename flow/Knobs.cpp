@@ -97,6 +97,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( OTEL_UDP_EMISSION_ADDR,                       "127.0.0.1");
 	init( OTEL_UDP_EMISSION_PORT,                             8903 );
 	init( METRICS_EMIT_DDSKETCH,                             false ); // Determines if DDSketch buckets will get emitted
+	init( PROMETHEUS_METRICS_ENABLED,                         false ); // Enable MetricCollection for Prometheus /metrics endpoint
 
 	//connectionMonitor
 	init( CONNECTION_MONITOR_LOOP_TIME,   isSimulated ? 0.75 : 1.0 ); if( randomize && BUGGIFY ) CONNECTION_MONITOR_LOOP_TIME = 6.0;

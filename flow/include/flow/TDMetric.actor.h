@@ -262,9 +262,13 @@ public:
 	MetricCollection() {}
 
 	static MetricCollection* getMetricCollection() {
-		if (g_network == nullptr || knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL) == MetricsDataModel::NONE)
+		if (g_network == nullptr)
 			return nullptr;
-		return static_cast<MetricCollection*>((void*)g_network->global(INetwork::enMetrics));
+		if (knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL) != MetricsDataModel::NONE ||
+		    FLOW_KNOBS->PROMETHEUS_METRICS_ENABLED) {
+			return static_cast<MetricCollection*>((void*)g_network->global(INetwork::enMetrics));
+		}
+		return nullptr;
 	}
 };
 
