@@ -23,7 +23,7 @@
 #include <vector>
 
 #include "fdbclient/ClientKnobs.h"
-#include "fdbclient/IKnobCollection.h"
+#include "fdbclient/KnobValue.h"
 
 extern ClientKnobs const* CLIENT_KNOBS;
 
