@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/ServerKnobs.h"
+#include "fdbserver/core/ServerKnobs.h"
 #include "fdbclient/Knobs.h"
 #include "flow/IRandom.h"
 

@@ -23,7 +23,7 @@
 
 #pragma once
 
-#include "fdbclient/ServerKnobs.h"
+#include "fdbserver/core/ServerKnobs.h"
 
 inline const ServerKnobs& getServerKnobs() {
 	return *SERVER_KNOBS;

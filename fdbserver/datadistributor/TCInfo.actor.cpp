@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/ServerKnobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/datadistributor/DDTeamCollection.h"
 #include "fdbserver/datadistributor/TCInfo.h"
 #include "flow/CoroUtils.h"
