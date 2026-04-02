@@ -20,6 +20,7 @@
 
 #include "fdbclient/ServerKnobs.h"
 #include "fdbclient/IKnobCollection.h"
+#include "fdbclient/Knobs.h"
 #include "flow/IRandom.h"
 
 #define init(knob, value) INIT_KNOB(knob, value)
@@ -28,8 +29,17 @@ ServerKnobs::ServerKnobs(Randomize randomize, ClientKnobs* clientKnobs, IsSimula
 	initialize(randomize, clientKnobs, isSimulated);
 }
 
+namespace {
+ClientKnobs bootstrapGlobalClientKnobs(Randomize::False, IsSimulated::False);
+ServerKnobs bootstrapGlobalServerKnobs(Randomize::False, &bootstrapGlobalClientKnobs, IsSimulated::False);
+} // namespace
+
+ServerKnobs const* SERVER_KNOBS = &bootstrapGlobalServerKnobs;
+
 void resetServerKnobs(Randomize randomize, IsSimulated isSimulated) {
 	IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::SERVER, randomize, isSimulated);
+	CLIENT_KNOBS = &IKnobCollection::getGlobalKnobCollection().getClientKnobs();
+	SERVER_KNOBS = &IKnobCollection::getGlobalKnobCollection().getServerKnobs();
 }
 
 void initializeServerKnobs(Randomize randomize, IsSimulated isSimulated) {

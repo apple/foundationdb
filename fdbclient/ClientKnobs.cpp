@@ -38,8 +38,15 @@ ClientKnobs::ClientKnobs(Randomize randomize, IsSimulated isSimulated) {
 	initialize(randomize, isSimulated);
 }
 
+namespace {
+ClientKnobs bootstrapGlobalClientKnobs(Randomize::False, IsSimulated::False);
+}
+
+ClientKnobs const* CLIENT_KNOBS = &bootstrapGlobalClientKnobs;
+
 void resetClientKnobs(Randomize randomize, IsSimulated isSimulated) {
 	IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::CLIENT, randomize, isSimulated);
+	CLIENT_KNOBS = &IKnobCollection::getGlobalKnobCollection().getClientKnobs();
 }
 
 void initializeClientKnobs(Randomize randomize, IsSimulated isSimulated) {

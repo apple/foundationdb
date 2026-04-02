@@ -1359,6 +1359,8 @@ public:
 	void initialize(Randomize, ClientKnobs*, IsSimulated);
 };
 
+extern ServerKnobs const* SERVER_KNOBS;
+
 void resetServerKnobs(Randomize randomize, IsSimulated isSimulated);
 void initializeServerKnobs(Randomize randomize, IsSimulated isSimulated);
 Optional<KnobValue> tryParseServerKnobValue(std::string const& knobName, std::string const& knobValue);

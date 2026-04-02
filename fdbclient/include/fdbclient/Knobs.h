@@ -22,9 +22,10 @@
 
 #include <vector>
 
+#include "fdbclient/ClientKnobs.h"
 #include "fdbclient/IKnobCollection.h"
 
-#define CLIENT_KNOBS (&IKnobCollection::getGlobalKnobCollection().getClientKnobs())
+extern ClientKnobs const* CLIENT_KNOBS;
 
 inline const ClientKnobs& getClientKnobs() {
 	return *CLIENT_KNOBS;
