@@ -20,6 +20,9 @@
 
 #pragma once
 
+#include <vector>
+
+#include "fdbclient/KnobValue.h"
 #include "flow/Knobs.h"
 #include "flow/swift_support.h"
 #include "fdbrpc/Locality.h"
@@ -1355,3 +1358,11 @@ public:
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);
 };
+
+void resetServerKnobs(Randomize randomize, IsSimulated isSimulated);
+void initializeServerKnobs(Randomize randomize, IsSimulated isSimulated);
+Optional<KnobValue> tryParseServerKnobValue(std::string const& knobName, std::string const& knobValue);
+KnobValue parseServerKnobValue(std::string const& knobName, std::string const& knobValue);
+bool trySetServerKnob(std::string const& knobName, KnobValueRef const& knobValue);
+void setServerKnob(std::string const& knobName, KnobValueRef const& knobValue);
+void setupServerKnobs(std::vector<std::pair<std::string, std::string>> const& knobs);

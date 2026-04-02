@@ -38,6 +38,41 @@ ClientKnobs::ClientKnobs(Randomize randomize, IsSimulated isSimulated) {
 	initialize(randomize, isSimulated);
 }
 
+void resetClientKnobs(Randomize randomize, IsSimulated isSimulated) {
+	IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::CLIENT, randomize, isSimulated);
+}
+
+void initializeClientKnobs(Randomize randomize, IsSimulated isSimulated) {
+	IKnobCollection::getMutableGlobalKnobCollection().initialize(randomize, isSimulated);
+}
+
+Optional<KnobValue> tryParseClientKnobValue(std::string const& knobName, std::string const& knobValue) {
+	try {
+		return IKnobCollection::parseKnobValue(knobName, knobValue, IKnobCollection::Type::CLIENT);
+	} catch (Error& e) {
+		if (e.code() == error_code_invalid_option) {
+			return {};
+		}
+		throw;
+	}
+}
+
+KnobValue parseClientKnobValue(std::string const& knobName, std::string const& knobValue) {
+	return IKnobCollection::parseKnobValue(knobName, knobValue, IKnobCollection::Type::CLIENT);
+}
+
+bool trySetClientKnob(std::string const& knobName, KnobValueRef const& knobValue) {
+	return IKnobCollection::getMutableGlobalKnobCollection().trySetKnob(knobName, knobValue);
+}
+
+void setClientKnob(std::string const& knobName, KnobValueRef const& knobValue) {
+	IKnobCollection::getMutableGlobalKnobCollection().setKnob(knobName, knobValue);
+}
+
+void setupClientKnobs(std::vector<std::pair<std::string, std::string>> const& knobs) {
+	IKnobCollection::setupKnobs(knobs);
+}
+
 void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	// clang-format off
 

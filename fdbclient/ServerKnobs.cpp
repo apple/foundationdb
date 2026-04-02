@@ -19,12 +19,48 @@
  */
 
 #include "fdbclient/ServerKnobs.h"
+#include "fdbclient/IKnobCollection.h"
 #include "flow/IRandom.h"
 
 #define init(knob, value) INIT_KNOB(knob, value)
 
 ServerKnobs::ServerKnobs(Randomize randomize, ClientKnobs* clientKnobs, IsSimulated isSimulated) {
 	initialize(randomize, clientKnobs, isSimulated);
+}
+
+void resetServerKnobs(Randomize randomize, IsSimulated isSimulated) {
+	IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::SERVER, randomize, isSimulated);
+}
+
+void initializeServerKnobs(Randomize randomize, IsSimulated isSimulated) {
+	IKnobCollection::getMutableGlobalKnobCollection().initialize(randomize, isSimulated);
+}
+
+Optional<KnobValue> tryParseServerKnobValue(std::string const& knobName, std::string const& knobValue) {
+	try {
+		return IKnobCollection::parseKnobValue(knobName, knobValue, IKnobCollection::Type::SERVER);
+	} catch (Error& e) {
+		if (e.code() == error_code_invalid_option) {
+			return {};
+		}
+		throw;
+	}
+}
+
+KnobValue parseServerKnobValue(std::string const& knobName, std::string const& knobValue) {
+	return IKnobCollection::parseKnobValue(knobName, knobValue, IKnobCollection::Type::SERVER);
+}
+
+bool trySetServerKnob(std::string const& knobName, KnobValueRef const& knobValue) {
+	return IKnobCollection::getMutableGlobalKnobCollection().trySetKnob(knobName, knobValue);
+}
+
+void setServerKnob(std::string const& knobName, KnobValueRef const& knobValue) {
+	IKnobCollection::getMutableGlobalKnobCollection().setKnob(knobName, knobValue);
+}
+
+void setupServerKnobs(std::vector<std::pair<std::string, std::string>> const& knobs) {
+	IKnobCollection::setupKnobs(knobs);
 }
 
 void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSimulated isSimulated) {
