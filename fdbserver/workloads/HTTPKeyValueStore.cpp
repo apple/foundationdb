@@ -24,7 +24,7 @@
 #include "flow/Util.h"
 #include "flow/serialize.h"
 #include "fdbrpc/HTTP.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include <cstring>
 #include <limits>
 
@@ -233,17 +233,15 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 						    co_await INetworkConnections::net()->resolveTCPEndpoint(self->hostname, self->service);
 						ASSERT(!addrs.empty());
 						int idx = deterministicRandom()->randomInt(0, addrs.size());
-						co_await store(self->conn,
-						               timeoutError(INetworkConnections::net()->connect(addrs[idx].ip.toString(),
-						                                                                std::to_string(addrs[idx].port),
-						                                                                false),
-						                            FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
+						self->conn =
+						    co_await timeoutError(INetworkConnections::net()->connect(
+						                              addrs[idx].ip.toString(), std::to_string(addrs[idx].port), false),
+						                          FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT);
 
 					} else {
-						co_await store(
-						    self->conn,
-						    timeoutError(INetworkConnections::net()->connect(self->hostname, self->service, false),
-						                 FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
+						self->conn = co_await timeoutError(
+						    INetworkConnections::net()->connect(self->hostname, self->service, false),
+						    FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT);
 					}
 					if (self->conn.isValid()) {
 						co_await self->conn->connectHandshake();

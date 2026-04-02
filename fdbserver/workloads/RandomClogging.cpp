@@ -22,8 +22,9 @@
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/core/TesterInterface.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/TesterInterface.h"
+#include "fdbserver/tester/workloads.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct RandomCloggingWorkload : FailureInjectionWorkload {
 	static constexpr auto NAME = "RandomClogging";

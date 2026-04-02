@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
 from .errors import ActorCompilerError
-from .actor_compiler import ActorCompiler, DescrCompiler
+from .actor_compiler import ActorCompiler
 
 from .parse_tree import (
     Actor,
@@ -15,8 +15,6 @@ from .parse_tree import (
     ChooseStatement,
     CodeBlock,
     ContinueStatement,
-    Declaration,
-    Descr,
     ForStatement,
     IfStatement,
     LoopStatement,
@@ -394,18 +392,6 @@ class ActorParser:
                         f'#line {self.tokens[i].source_line} "{self.source_file}"\n'
                     )
                     outLine += 1
-            elif tok.value == "DESCR":
-                descr, end = self.parse_descr(i)
-                descr_writer = io.StringIO()
-                lines = DescrCompiler(descr, tok.brace_depth).write(descr_writer)
-                writer.write(descr_writer.getvalue())
-                outLine += lines
-                i = end
-                if i < len(self.tokens) and self.line_numbers_enabled:
-                    writer.write(
-                        f'#line {self.tokens[i].source_line} "{self.source_file}"\n'
-                    )
-                    outLine += 1
             elif tok.value in ("class", "struct", "union"):
                 writer.write(tok.value)
                 success, name = self.parse_class_context(
@@ -460,79 +446,6 @@ class ActorParser:
                 self.error_message_policy.handle_actor_without_wait(self.source_file, actor)
             self._parse_end = body.end_pos + 1
         return actor
-
-    def parse_descr(self, pos: int) -> Tuple[Descr, int]:
-        descr = Descr()
-        toks = self.range(pos + 1, len(self.tokens))
-        heading = toks.take_while(lambda t: t.value != "{")
-        body = self.range(heading.end_pos + 1, len(self.tokens)).take_while(
-            lambda t: t.brace_depth > toks.first().brace_depth or t.value == ";"
-        )
-        self.parse_descrHeading(descr, heading)
-        descr.body = self.parse_descrCodeBlock(body)
-        end = body.end_pos + 1
-        return descr, end
-
-    def parse_descrHeading(self, descr: Descr, toks: TokenRange) -> None:
-        nonWhitespace = lambda t: not t.is_whitespace
-        toks.first(nonWhitespace).ensure(
-            "non-struct DESCR!", lambda t: t.value == "struct"
-        )
-        toks = (
-            toks.skipWhile(lambda t: t.is_whitespace)
-            .skip(1)
-            .skipWhile(lambda t: t.is_whitespace)
-        )
-        colon = next((t for t in toks if t.value == ":"), None)
-        if colon:
-            descr.super_class_list = self.str(
-                self.range(colon.position + 1, toks.end_pos)
-            ).strip()
-            toks = self.range(toks.begin_pos, colon.position)
-        descr.name = self.str(toks).strip()
-
-    def parse_descrCodeBlock(self, toks: TokenRange) -> List[Declaration]:
-        declarations: List[Declaration] = []
-        while True:
-            delim = next((t for t in toks if t.value == ";"), None)
-            if delim is None:
-                break
-            pos = delim.position + 1
-            potential_comment = self.range(pos, toks.end_pos).skipWhile(
-                lambda t: t.value in ("\t", " ")
-            )
-            if (
-                not potential_comment.is_empty()
-                and potential_comment.first().value.startswith("//")
-            ):
-                pos = potential_comment.first().position + 1
-            self.parse_declarationRange(self.range(toks.begin_pos, pos), declarations)
-            toks = self.range(pos, toks.end_pos)
-        if not toks.all_match(lambda t: t.is_whitespace):
-            raise ActorCompilerError(
-                toks.first(lambda t: not t.is_whitespace).source_line,
-                "Trailing unterminated statement in code block",
-            )
-        return declarations
-
-    def parse_declarationRange(
-        self, toks: TokenRange, declarations: List[Declaration]
-    ) -> None:
-        delim = toks.first(lambda t: t.value == ";")
-        nameRange = (
-            self.range(toks.begin_pos, delim.position)
-            .Revskip_while(lambda t: t.is_whitespace)
-            .Revtake_while(lambda t: not t.is_whitespace)
-        )
-        typeRange = self.range(toks.begin_pos, nameRange.begin_pos)
-        commentRange = self.range(delim.position + 1, toks.end_pos)
-        declarations.append(
-            Declaration(
-                name=self.str(nameRange).strip(),
-                type=self.str(typeRange).strip(),
-                comment=self.str(commentRange).strip().lstrip("/"),
-            )
-        )
 
     def parse_test_caseHeading(self, actor: Actor, toks: TokenRange) -> None:
         actor.is_static = True

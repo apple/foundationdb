@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/StatusClient.h"
-#include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/RunRYWTransaction.actor.h"
+#include "fdbclient/ManagementAPI.h"
+#include "fdbclient/RunRYWTransaction.h"
 
 struct TriggerRecoveryLoopWorkload : TestWorkload {
 	static constexpr auto NAME = "TriggerRecoveryLoop";

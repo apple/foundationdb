@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbclient/StatusClient.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 
 struct DDMetricsExcludeWorkload : TestWorkload {
 	static constexpr auto NAME = "DDMetricsExclude";

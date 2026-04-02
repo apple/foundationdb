@@ -25,13 +25,13 @@
 #include "flow/ProcessEvents.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbserver/core/TesterInterface.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/TesterInterface.h"
+#include "fdbserver/tester/workloads.h"
 #include "flow/IRateControl.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/core/Knobs.h"
 #include "flow/DeterministicRandom.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/network.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
@@ -150,7 +150,7 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 			Error err;
 			try {
 				shardLocationPairList.clear();
-				co_await store(shardLocationPairList, self->getKeyLocationsForRangeList(cx, rangesToCheck, self));
+				shardLocationPairList = co_await self->getKeyLocationsForRangeList(cx, rangesToCheck, self);
 				break;
 			} catch (Error& e) {
 				err = e;
@@ -361,6 +361,7 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 						if (!rangeResult.present() || rangeResult.get().error.present()) {
 							valueAvailableToCheck = false;
 							TraceEvent e(SevInfo, "ConsistencyCheckUrgent_TesterGetRangeError");
+							e.suppressFor(60.0);
 							e.detail("ResultPresent", rangeResult.present());
 							e.detail("StorageServer", storageServerInterfaces[j].uniqueID);
 							if (rangeResult.present()) {
@@ -381,6 +382,7 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 					if (!valueAvailableToCheck) {
 						failedRanges.insert(range, true);
 						TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterShardAddedToRetry")
+						    .suppressFor(60.0)
 						    .setMaxEventLength(-1)
 						    .setMaxFieldLength(-1)
 						    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
@@ -525,6 +527,7 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 				// by the next consistencyCheckEpoch
 				numFailedShards++;
 				TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterShardFailed")
+				    .suppressFor(60.0)
 				    .setMaxEventLength(-1)
 				    .setMaxFieldLength(-1)
 				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)

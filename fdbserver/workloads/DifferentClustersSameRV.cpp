@@ -19,10 +19,10 @@
  */
 
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
-#include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/RunRYWTransaction.actor.h"
+#include "fdbclient/ManagementAPI.h"
+#include "fdbclient/RunRYWTransaction.h"
 #include "fdbrpc/simulator.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "flow/ApiVersion.h"
 #include "flow/genericactors.actor.h"
 
@@ -91,7 +91,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		auto switchConnFileDb = Database::createDatabase(cx->getConnectionRecord(), -1);
 		originalDB = cx;
 		std::vector<Future<Void>> clients = { readerClientSeparateDBs(cx, extraDB, keyToRead),
-			                                  doSwitch(switchConnFileDb, this),
+			                                  doSwitch(switchConnFileDb),
 			                                  writerClient(cx, keyToRead),
 			                                  writerClient(extraDB, keyToRead) };
 		return success(timeout(waitForAll(clients), testDuration));
@@ -168,26 +168,26 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> doSwitch(Database cx, DifferentClustersSameRVWorkload* self) {
+	Future<Void> doSwitch(Database cx) {
 		UID lockUid = deterministicRandom()->randomUniqueID();
-		co_await delay(self->switchAfter);
+		co_await delay(switchAfter);
 		Future<Void> watchFuture;
 		co_await runRYWTransaction(
-		    cx, [&watchFuture, self](Reference<ReadYourWritesTransaction> tr) mutable -> Future<Void> {
-			    watchFuture = tr->watch(self->keyToWatch);
+		    cx, [this, &watchFuture](Reference<ReadYourWritesTransaction> tr) mutable -> Future<Void> {
+			    watchFuture = tr->watch(keyToWatch);
 			    return Void();
 		    });
-		co_await (lockDatabase(self->originalDB, lockUid) && lockDatabase(self->extraDB, lockUid));
+		co_await (lockDatabase(originalDB, lockUid) && lockDatabase(extraDB, lockUid));
 		TraceEvent("DifferentClusters_LockedDatabases").log();
-		std::pair<Version, Optional<Value>> read1 = co_await doRead(self->originalDB, self->keyToRead);
+		std::pair<Version, Optional<Value>> read1 = co_await doRead(originalDB, keyToRead);
 		Version rv = read1.first;
 		Optional<Value> val1 = read1.second;
-		co_await doWrite(self->extraDB, self->keyToRead, val1);
+		co_await doWrite(extraDB, keyToRead, val1);
 		TraceEvent("DifferentClusters_CopiedDatabase").log();
-		co_await advanceVersion(self->extraDB, rv);
+		co_await advanceVersion(extraDB, rv);
 		TraceEvent("DifferentClusters_AdvancedVersion").log();
 		co_await cx->switchConnectionRecord(
-		    makeReference<ClusterConnectionMemoryRecord>(self->extraDB->getConnectionRecord()->getConnectionString()));
+		    makeReference<ClusterConnectionMemoryRecord>(extraDB->getConnectionRecord()->getConnectionString()));
 		TraceEvent("DifferentClusters_SwitchedConnectionFile").log();
 		Transaction tr(cx);
 		tr.setVersion(rv);
@@ -195,7 +195,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		Error readErr;
 		bool readFailed = false;
 		try {
-			Optional<Value> val2 = co_await tr.get(self->keyToRead);
+			Optional<Value> val2 = co_await tr.get(keyToRead);
 			// We read the same key at the same read version with the same db, we must get the same value (or fail to
 			// read)
 			ASSERT(val1 == val2);
@@ -211,15 +211,15 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		// In an actual switch we would call switchConnectionRecord after unlocking the database. But it's possible
 		// that a storage server serves a read at |rv| even after the recovery caused by unlocking the database, and we
 		// want to make that more likely for this test. So read at |rv| then unlock.
-		co_await unlockDatabase(self->extraDB, lockUid);
+		co_await unlockDatabase(extraDB, lockUid);
 		TraceEvent("DifferentClusters_UnlockedExtraDB").log();
 		ASSERT(!watchFuture.isReady() || watchFuture.isError());
-		co_await doWrite(self->extraDB, self->keyToWatch, Optional<Value>{ ""_sr });
+		co_await doWrite(extraDB, keyToWatch, Optional<Value>{ ""_sr });
 		TraceEvent("DifferentClusters_WaitingForWatch").log();
 		Error watchErr;
 		bool watchFailed = false;
 		try {
-			co_await timeoutError(watchFuture, (self->testDuration - self->switchAfter) / 2);
+			co_await timeoutError(watchFuture, (testDuration - switchAfter) / 2);
 		} catch (Error& err) {
 			watchErr = err;
 			watchFailed = true;
@@ -229,8 +229,8 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 			co_await tr.onError(watchErr);
 		}
 		TraceEvent("DifferentClusters_Done").log();
-		self->switchComplete = true;
-		co_await unlockDatabase(self->originalDB, lockUid); // So quietDatabase can finish
+		switchComplete = true;
+		co_await unlockDatabase(originalDB, lockUid); // So quietDatabase can finish
 	}
 
 	static Future<Void> writerClient(Database cx, Value const& keyToRead) {
@@ -267,7 +267,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		try {
 			tr->reset();
 			tr->setVersion(version);
-			co_await store(res, tr->get(keyToRead));
+			res = co_await tr->get(keyToRead);
 			co_return res;
 		} catch (Error& e) {
 			TraceEvent(name).error(e);

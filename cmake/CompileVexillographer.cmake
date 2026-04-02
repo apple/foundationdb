@@ -21,6 +21,7 @@ if(WIN32 AND FDB_USE_CSHARP_TOOLS)
     TARGET vexillographer PROPERTY VS_DOTNET_REFERENCES "System" "System.Core"
                                    "System.Data" "System.Xml" "System.Xml.Linq")
   set(VEXILLOGRAPHER_DEPENDS vexillographer)
+  set(VEXILLOGRAPHER_COMMAND $<TARGET_FILE:vexillographer>)
 elseif(FDB_USE_CSHARP_TOOLS AND CSHARP_TOOLCHAIN_FOUND)
   if(CSHARP_USE_MONO)
     set(VEXILLOGRAPHER_REFERENCES

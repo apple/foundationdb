@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "fdbserver/MockS3Server.h"
-#include "fdbserver/MockS3ServerChaos.h"
+#include "fdbserver/mocks3/MockS3Server.h"
+#include "fdbserver/mocks3/MockS3ServerChaos.h"
 
 #include "fdbrpc/HTTP.h"
 #include "fdbrpc/simulator.h"
@@ -28,9 +28,9 @@
 #include "flow/IRandom.h"
 #include "flow/serialize.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/S3Client.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/BulkLoadUtil.actor.h"
+#include "fdbclient/S3Client.h"
+#include "fdbserver/tester/workloads.h"
+#include "fdbserver/core/BulkLoadUtil.h"
 #include "flow/Platform.h"
 
 #include <string>

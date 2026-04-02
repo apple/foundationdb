@@ -18,10 +18,11 @@
  * limitations under the License.
  */
 
-#include "fdbserver/core/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbclient/RunRYWTransaction.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbclient/RunRYWTransaction.h"
+#include "fdbserver/tester/workloads.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct AtomicOpsApiCorrectnessWorkload : TestWorkload {
 	static constexpr auto NAME = "AtomicOpsApiCorrectness";

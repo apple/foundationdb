@@ -106,7 +106,7 @@ function s3_cleanup_url {
   local local_scratch_dir="${2}"
   local local_url="${3}"
   local credentials="${4}"
-  
+
   local cmd=("${local_build_dir}/bin/s3client")
   cmd+=("${KNOBS[@]}")
   
@@ -218,13 +218,48 @@ function run_backup {
     echo "${status_output}"
     return 1
   fi
-  
+
+  # For 'both' or 'bulkdump' mode, wait for BulkDump snapshot to be written
+  # BulkDump writes the snapshot file AFTER DD job completes, which is async from rangefile snapshot
+  if [[ "${backup_mode}" == "both" || "${backup_mode}" == "bulkdump" ]]; then
+    log "Waiting for BulkDump snapshot to be written (mode: ${backup_mode})..."
+    local bulkdump_timeout=120  # Additional timeout for BulkDump
+    local bulkdump_elapsed=0
+    local bulkdump_poll=5
+
+    while [[ $bulkdump_elapsed -lt $bulkdump_timeout ]]; do
+      sleep $bulkdump_poll
+      bulkdump_elapsed=$((bulkdump_elapsed + bulkdump_poll))
+
+      # Check for BulkDump snapshot file with ",bulk" suffix (used in 'both' mode)
+      # or check if any snapshot has bulkDumpJobId field
+      set +e
+      snapshot_list=$("${local_build_dir}"/bin/fdbbackup describe -d "${local_url}" -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" --log --logdir="${local_scratch_dir}" 2>&1)
+      set -e
+
+      # Check if BulkDump snapshot exists (look for bulkDumpJobId in describe output)
+      if echo "${snapshot_list}" | grep -q "bulkDumpJobId\|,bulk"; then
+        log "BulkDump snapshot found after ${bulkdump_elapsed}s"
+        break
+      fi
+
+      if [[ $((bulkdump_elapsed % 30)) -eq 0 ]]; then
+        log "Still waiting for BulkDump snapshot (${bulkdump_elapsed}s elapsed)..."
+      fi
+    done
+
+    if [[ $bulkdump_elapsed -ge $bulkdump_timeout ]]; then
+      log "Warning: Timeout waiting for BulkDump snapshot after ${bulkdump_timeout}s"
+      log "BulkDump may still be running - proceeding anyway"
+    fi
+  fi
+
   # Check if backup already completed (no need to discontinue)
   if echo "${status_output}" | grep -q "completed"; then
     log "Backup already completed - no need to discontinue"
     return 0
   fi
-  
+
   # Stop the backup to finalize it (only if still running)
   log "Stopping backup to finalize restorable state"
   set +e

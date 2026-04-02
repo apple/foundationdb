@@ -19,8 +19,8 @@
  */
 
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/core/TesterInterface.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/TesterInterface.h"
+#include "fdbserver/tester/workloads.h"
 
 struct SidebandMessage {
 	constexpr static FileIdentifier file_identifier = 11862046;

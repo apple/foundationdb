@@ -20,10 +20,10 @@
 
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/core/TesterInterface.actor.h"
-#include "fdbserver/workloads/BulkSetup.h"
+#include "fdbserver/core/TesterInterface.h"
+#include "BulkSetup.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "flow/ApiVersion.h"
 
 struct VersionStampWorkload : TestWorkload {

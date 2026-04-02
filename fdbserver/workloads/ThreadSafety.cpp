@@ -20,11 +20,11 @@
 
 #include "fdbrpc/simulator.h"
 #include "flow/DeterministicRandom.h"
-#include "fdbserver/core/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbclient/MultiVersionTransaction.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 
 struct ThreadSafetyWorkload;
 

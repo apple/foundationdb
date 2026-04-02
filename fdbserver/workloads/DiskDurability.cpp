@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "flow/ActorCollection.h"
 #include "flow/SystemMonitor.h"
 #include "flow/IAsyncFile.h"
-#include "fdbserver/workloads/AsyncFile.actor.h"
+#include "AsyncFile.h"
 
 struct DiskDurabilityWorkload : public AsyncFileWorkload {
 	static constexpr auto NAME = "DiskDurability";
@@ -33,17 +33,14 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 		int64_t lastData;
 		Reference<FlowLock> lock;
 
-		static Future<Void> test_impl(FileBlock* self,
-		                              Reference<AsyncFileHandle> file,
-		                              int pages,
-		                              Reference<AsyncFileBuffer> buffer) {
-			co_await self->lock->take();
+		Future<Void> test_impl(Reference<AsyncFileHandle> file, int pages, Reference<AsyncFileBuffer> buffer) {
+			co_await lock->take();
 
-			int64_t offset = (int64_t)self->blockNum * pages * _PAGE_SIZE;
+			int64_t offset = (int64_t)blockNum * pages * _PAGE_SIZE;
 			int size = pages * _PAGE_SIZE;
 
 			int64_t newData = 0;
-			if (self->lastData == 0)
+			if (lastData == 0)
 				newData = deterministicRandom()->randomInt64(std::numeric_limits<int64_t>::min(),
 				                                             std::numeric_limits<int64_t>::max());
 			else {
@@ -56,12 +53,12 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 				newData = 1;
 			int64_t* arr = (int64_t*)buffer->buffer;
 			for (int i = 0, imax = size / sizeof(int64_t); i < imax; ++i) {
-				if (self->lastData != 0 && arr[i] != self->lastData) {
+				if (lastData != 0 && arr[i] != lastData) {
 					TraceEvent(SevError, "WriteWasNotDurable")
 					    .detail("Filename", file->path)
 					    .detail("Offset", offset)
 					    .detail("OpSize", size)
-					    .detail("Expected", self->lastData)
+					    .detail("Expected", lastData)
 					    .detail("Found", arr[i])
 					    .detail("Index", i);
 					throw io_error();
@@ -70,12 +67,12 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 			}
 
 			co_await file->file->write(buffer->buffer, size, offset);
-			self->lock->release(1);
-			self->lastData = newData;
+			lock->release(1);
+			lastData = newData;
 		}
 
 		Future<Void> test(Reference<AsyncFileHandle> file, int pages, Reference<AsyncFileBuffer> buffer) {
-			return test_impl(this, file, pages, buffer);
+			return test_impl(file, pages, buffer);
 		}
 	};
 
@@ -142,7 +139,7 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 	}
 
 	Future<Void> worker() {
-		Reference<AsyncFileBuffer> buffer = makeReference<AsyncFileBuffer>(_PAGE_SIZE, true);
+		auto buffer = makeReference<AsyncFileBuffer>(_PAGE_SIZE, true);
 		int logfp = (int)ceil(log2(filePages));
 		while (true) {
 			int block = intHash(std::min<int>(

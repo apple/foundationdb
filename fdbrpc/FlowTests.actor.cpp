@@ -31,7 +31,7 @@
 #include "flow/WriteOnlySet.h"
 #include "fdbrpc/fdbrpc.h"
 #include "flow/IAsyncFile.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 #include "fdbrpc/grpc/AsyncTaskExecutor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -373,7 +373,7 @@ struct Int {
 	constexpr static FileIdentifier file_identifier = 12345;
 	uint32_t value;
 	Int() = default;
-	Int(uint32_t value) : value(value) {}
+	explicit(false) Int(uint32_t value) : value(value) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, value);
@@ -1396,7 +1396,7 @@ TEST_CASE("/flow/DeterministicRandom/SignedOverflow") {
 struct Tracker {
 	int copied;
 	bool moved;
-	Tracker(int copied = 0) : copied(copied), moved(false) {}
+	explicit Tracker(int copied = 0) : copied(copied), moved(false) {}
 	Tracker(Tracker&& other) : Tracker(other.copied) {
 		ASSERT(!other.moved);
 		other.moved = true;

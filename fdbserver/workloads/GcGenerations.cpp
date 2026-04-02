@@ -19,15 +19,15 @@
  */
 
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/RecoveryState.h"
-#include "fdbserver/core/ServerDBInfo.actor.h"
-#include "fdbserver/core/TesterInterface.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/ServerDBInfo.h"
+#include "fdbserver/core/TesterInterface.h"
+#include "fdbserver/tester/workloads.h"
 #include "fdbrpc/simulator.h"
 #include "flow/CodeProbe.h"
 #include "flow/NetworkAddress.h"
@@ -80,7 +80,7 @@ struct GcGenerationsWorkload : TestWorkload {
 		std::vector<NetworkAddress> coordinators;
 		if (csOptional.present()) {
 			ClusterConnectionString cs = csOptional.get();
-			co_await store(coordinators, cs.tryResolveHostnames());
+			coordinators = co_await cs.tryResolveHostnames();
 		}
 
 		auto isCoordinator = [](const std::vector<NetworkAddress>& coordinators, const IPAddress& ip) {
@@ -181,8 +181,6 @@ struct GcGenerationsWorkload : TestWorkload {
 	}
 
 	Future<Void> gcGenerationsTestClient(GcGenerationsWorkload* self, Database cx) {
-		g_simulator->disableTLogRecoveryFinish = true;
-
 		co_await delay(self->startDelay);
 
 		TraceEvent("WaitingForDbAvailable").detail("RecoveryState", self->dbInfo->get().recoveryState);
@@ -194,13 +192,18 @@ struct GcGenerationsWorkload : TestWorkload {
 		double workloadEnd = now() + self->testDuration;
 		TraceEvent("GcGenerations").detail("StartTime", startTime).detail("EndTime", workloadEnd);
 
+		// Block TLog recovery while creating generations to test generation accumulation during recovery
+		g_simulator->disableTLogRecoveryFinish = true;
+
 		co_await self->generateMultipleTxnGenerations(self, cx);
 		self->unclogAll();
 		disableConnectionFailures("GcGenerations");
 
-		co_await self->generationReduced(self);
-
+		// Unblock TLogs before waiting for generation reduction
+		// The June 2025 fix prevents generation GC when TLogs are blocked
 		g_simulator->disableTLogRecoveryFinish = false;
+
+		co_await self->generationReduced(self);
 
 		TraceEvent("WaitingForDbFullyRecovered").detail("RecoveryState", self->dbInfo->get().recoveryState);
 		while (self->dbInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED) {

@@ -20,9 +20,10 @@
 
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/core/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.h"
 #include "flow/DeterministicRandom.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct WatchesSameKeyWorkload : TestWorkload {
 	static constexpr auto NAME = "WatchesSameKeyCorrectness";
@@ -34,11 +35,11 @@ struct WatchesSameKeyWorkload : TestWorkload {
 	}
 
 	Future<Void> setup(Database const& cx) override {
-		cases.push_back(case1(cx, "foo1"_sr, this));
-		cases.push_back(case2(cx, "foo2"_sr, this));
-		cases.push_back(case3(cx, "foo3"_sr, this));
-		cases.push_back(case4(cx, "foo4"_sr, this));
-		cases.push_back(case5(cx, "foo5"_sr, this));
+		cases.push_back(case1(cx, "foo1"_sr));
+		cases.push_back(case2(cx, "foo2"_sr));
+		cases.push_back(case3(cx, "foo3"_sr));
+		cases.push_back(case4(cx, "foo4"_sr));
+		cases.push_back(case5(cx, "foo5"_sr));
 		return Void();
 	}
 
@@ -91,7 +92,7 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> case1(Database cx, Key key, WatchesSameKeyWorkload* self) {
+	Future<Void> case1(Database cx, Key key) {
 		/**
 		 * Tests case 2 in the design doc:
 		 *  - we get a watch that has the same value as a key in the watch map
@@ -104,7 +105,7 @@ struct WatchesSameKeyWorkload : TestWorkload {
 				int i{ 0 };
 
 				tr.set(key, Value(deterministicRandom()->randomUniqueID().toString()));
-				for (i = 0; i < self->numWatches; i++) { // set watches for a given k/v pair set above
+				for (i = 0; i < numWatches; i++) { // set watches for a given k/v pair set above
 					watchFutures.push_back(tr.watch(key));
 				}
 				co_await tr.commit();
@@ -121,7 +122,7 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> case2(Database cx, Key key, WatchesSameKeyWorkload* self) {
+	Future<Void> case2(Database cx, Key key) {
 		/**
 		 * Tests case 3 in the design doc:
 		 * 	- we get a watch that has a different value than the key in the map but the version is larger
@@ -135,7 +136,7 @@ struct WatchesSameKeyWorkload : TestWorkload {
 				int i{ 0 };
 
 				tr.set(key, Value(deterministicRandom()->randomUniqueID().toString()));
-				for (i = 0; i < self->numWatches; i++) { // set watches for a given k/v pair set above
+				for (i = 0; i < numWatches; i++) { // set watches for a given k/v pair set above
 					watchFutures.push_back(tr.watch(key));
 				}
 				co_await tr.commit();
@@ -152,7 +153,7 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> case3(Database cx, Key key, WatchesSameKeyWorkload* self) {
+	Future<Void> case3(Database cx, Key key) {
 		/**
 		 * Tests case 2 for the storage server response:
 		 * 	- i.e ABA but when the storage server responds the future count == 1 so we do nothing (no refire)
@@ -183,7 +184,7 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> case4(Database cx, Key key, WatchesSameKeyWorkload* self) {
+	Future<Void> case4(Database cx, Key key) {
 		/**
 		 * Tests case 3 for the storage server response:
 		 * 	- i.e ABA but when the storage server responds the future count > 1 so we refire request to SS
@@ -217,7 +218,7 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> case5(Database cx, Key key, WatchesSameKeyWorkload* self) {
+	Future<Void> case5(Database cx, Key key) {
 		/**
 		 * Tests case 5 in the design doc:
 		 * 	- i.e values of watches are different but versions are the same

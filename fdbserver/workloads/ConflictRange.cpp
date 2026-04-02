@@ -19,13 +19,13 @@
  */
 
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/core/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbserver/workloads/workloads.actor.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbserver/tester/workloads.h"
+#include "fdbclient/ManagementAPI.h"
 
 // For this test to report properly buggify must be disabled (flow.h) , and failConnection must be disabled in
-// (sim2.actor.cpp)
+// (sim2.cpp)
 
 struct ConflictRangeWorkload : TestWorkload {
 	static constexpr auto NAME = "ConflictRange";

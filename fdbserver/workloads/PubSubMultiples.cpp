@@ -19,9 +19,10 @@
  */
 
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/pubsub.h"
-#include "fdbserver/core/TesterInterface.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "pubsub.h"
+#include "fdbserver/core/TesterInterface.h"
+#include "fdbserver/tester/workloads.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct PubSubMultiplesWorkload : TestWorkload {
 	static constexpr auto NAME = "PubSubMultiples";

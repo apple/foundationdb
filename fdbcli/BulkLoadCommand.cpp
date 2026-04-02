@@ -19,11 +19,12 @@
  */
 
 #include "fdbcli/fdbcli.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/BulkLoading.h"
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/ThreadHelper.actor.h"
+#include "flow/Util.h"
 
 namespace fdb_cli {
 
@@ -59,22 +60,22 @@ Future<Void> printPastBulkLoadJob(Database cx) {
 		ASSERT(job.getPhase() == BulkLoadJobPhase::Complete || job.getPhase() == BulkLoadJobPhase::Error ||
 		       job.getPhase() == BulkLoadJobPhase::Cancelled);
 		if (!job.getTaskCount().present()) {
-			fmt::println("Job {} submitted at {} for range {}. The job has not initialized for {} mins and exited "
+			fmt::println("Job {} submitted at {} for range {}. The job has not initialized for {:.1f} mins and exited "
 			             "with status {}.",
 			             job.getJobId().toString(),
-			             std::to_string(job.getSubmitTime()),
+			             formatTimeISO8601(job.getSubmitTime()),
 			             job.getJobRange().toString(),
-			             std::to_string((job.getEndTime() - job.getSubmitTime()) / 60.0),
+			             (job.getEndTime() - job.getSubmitTime()) / 60.0,
 			             convertBulkLoadJobPhaseToString(job.getPhase()));
 		} else {
 			fmt::println(
-			    "Job {} submitted at {} for range {}. The job has {} tasks. The job ran for {} mins and exited "
+			    "Job {} submitted at {} for range {}. The job has {} tasks. The job ran for {:.1f} mins and exited "
 			    "with status {}.",
 			    job.getJobId().toString(),
-			    std::to_string(job.getSubmitTime()),
+			    formatTimeISO8601(job.getSubmitTime()),
 			    job.getJobRange().toString(),
 			    job.getTaskCount().get(),
-			    std::to_string((job.getEndTime() - job.getSubmitTime()) / 60.0),
+			    (job.getEndTime() - job.getSubmitTime()) / 60.0,
 			    convertBulkLoadJobPhaseToString(job.getPhase()));
 		}
 		if (job.getPhase() == BulkLoadJobPhase::Error) {
@@ -110,7 +111,7 @@ Future<Void> printBulkLoadJobProgress(Database cx, BulkLoadJobState job) {
 			rangeResult.clear();
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			co_await store(rangeResult, krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(readBegin, readEnd)));
+			rangeResult = co_await krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(readBegin, readEnd));
 			for (int i = 0; i < rangeResult.size() - 1; ++i) {
 				if (rangeResult[i].value.empty()) {
 					continue;
@@ -121,8 +122,7 @@ Future<Void> printBulkLoadJobProgress(Database cx, BulkLoadJobState job) {
 					fmt::println("Finished {} tasks", completeTaskCount);
 					fmt::println("Error {} tasks", errorTaskCount);
 					printBulkLoadJobTotalTaskCount(totalTaskCount);
-					if (bulkLoadTask.phase == BulkLoadPhase::Submitted &&
-					    bulkLoadTask.getJobId() != UID::fromString("00000000-0000-0000-0000-000000000000")) {
+					if (bulkLoadTask.phase == BulkLoadPhase::Submitted && bulkLoadTask.getJobId().isValid()) {
 						fmt::println("Job {} has been cancelled or has completed", jobId.toString());
 					}
 					co_return;
@@ -190,12 +190,7 @@ Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens) {
 			fmt::println("{}", BULK_LOAD_LOAD_USAGE);
 			co_return UID();
 		}
-		UID jobId = UID::fromString(tokens[2].toString());
-		if (!jobId.isValid()) {
-			fmt::println("ERROR: Invalid job id {}", tokens[2].toString());
-			fmt::println("{}", BULK_LOAD_LOAD_USAGE);
-			co_return UID();
-		}
+		UID jobId = validateBulkJobId(tokens[2], BULK_LOAD_LOAD_USAGE.c_str());
 		Key rangeBegin = tokens[3];
 		Key rangeEnd = tokens[4];
 		// Bulk load can only inject data to normal key space, aka "" ~ \xff
@@ -219,14 +214,9 @@ Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens) {
 			fmt::println("{}", BULK_LOAD_CANCEL_USAGE);
 			co_return UID();
 		}
-		UID jobId = UID::fromString(tokens[2].toString());
-		if (!jobId.isValid()) {
-			fmt::println("ERROR: Invalid job id {}", tokens[2].toString());
-			fmt::println("{}", BULK_LOAD_CANCEL_USAGE);
-			co_return UID();
-		}
-		co_await cancelBulkLoadJob(cx, jobId);
-		fmt::println("Job {} has been cancelled. The job range lock has been cleared", jobId.toString());
+		UID cancelJobId = validateBulkJobId(tokens[2], BULK_LOAD_CANCEL_USAGE.c_str());
+		co_await cancelBulkLoadJob(cx, cancelJobId);
+		fmt::println("Job {} has been cancelled. The job range lock has been cleared", cancelJobId.toString());
 		co_return UID();
 
 	} else if (tokencmp(tokens[1], "status")) {
@@ -234,14 +224,56 @@ Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens) {
 			fmt::println("{}", BULK_LOAD_STATUS_USAGE);
 			co_return UID();
 		}
-		Optional<BulkLoadJobState> job = co_await getRunningBulkLoadJob(cx);
-		if (!job.present()) {
+
+		// Get aggregated progress
+		Optional<BulkLoadProgress> progressOpt = co_await getBulkLoadProgress(cx);
+		if (!progressOpt.present()) {
 			fmt::println("No bulk loading job is running");
 			co_return UID();
 		}
-		fmt::println("Running bulk loading job: {}", job.get().getJobId().toString());
-		fmt::println("Job information: {}", job.get().toString());
-		co_await printBulkLoadJobProgress(cx, job.get());
+
+		BulkLoadProgress progress = progressOpt.get();
+
+		fmt::println("BulkLoad job {} is in progress.", progress.jobId.toString());
+
+		std::string ownerSuffix = co_await getBulkOwnerSuffix(cx, progress.jobId, false);
+
+		fmt::println(" Range: {}{}", progress.jobRange.toString(), ownerSuffix);
+		fmt::println("");
+		fmt::println("Progress:");
+		fmt::println(" Tasks - {} submitted, {} triggered, {} running, {} complete, {} error",
+		             progress.submittedTasks,
+		             progress.triggeredTasks,
+		             progress.runningTasks,
+		             progress.completeTasks,
+		             progress.errorTasks);
+
+		int totalTasks = progress.submittedTasks + progress.triggeredTasks + progress.runningTasks +
+		                 progress.completeTasks + progress.errorTasks;
+		if (totalTasks > 0) {
+			fmt::println(" Tasks completed - {} / {} ({:.1f}%)",
+			             progress.completeTasks,
+			             totalTasks,
+			             100.0 * progress.completeTasks / totalTasks);
+		}
+
+		fmt::println(" Bytes completed - {}", formatBytesProgress(progress.completedBytes, progress.totalBytes));
+
+		printProgressMetrics(progress.avgBytesPerSecond(), progress.etaSeconds(), progress.elapsedSeconds);
+
+		printTaskBreakdown(progress.submittedTasks,
+		                   progress.triggeredTasks,
+		                   progress.runningTasks,
+		                   progress.completeTasks,
+		                   progress.errorTasks);
+
+		printBulkAnalysis(progress.avgBytesPerSecond(),
+		                  progress.elapsedSeconds,
+		                  progress.completeTasks,
+		                  totalTasks,
+		                  progress.errorTasks,
+		                  progress.stalledTasks);
+
 		co_return UID();
 
 	} else if (tokencmp(tokens[1], "history")) {
@@ -278,12 +310,7 @@ Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens) {
 		}
 		if (tokens.size() == 5) {
 			if (tokencmp(tokens[2], "clear") && tokencmp(tokens[3], "id")) {
-				UID jobId = UID::fromString(tokens[4].toString());
-				if (!jobId.isValid()) {
-					fmt::println("ERROR: Invalid job id {}", tokens[4].toString());
-					fmt::println("{}", BULK_LOAD_HISTORY_CLEAR_USAGE);
-					co_return UID();
-				}
+				UID jobId = validateBulkJobId(tokens[4], BULK_LOAD_HISTORY_CLEAR_USAGE.c_str());
 				co_await clearBulkLoadJobHistory(cx, jobId);
 				fmt::println("Bulkload job {} has been cleared from history", jobId.toString());
 				co_return jobId;

@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "fdbclient/TagThrottle.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbclient/TagThrottle.h"
+#include "fdbserver/tester/workloads.h"
 
 // This workload sets the throughput quota of a tag during the setup phase
 class ThroughputQuotaWorkload : public TestWorkload {
@@ -32,7 +32,7 @@ class ThroughputQuotaWorkload : public TestWorkload {
 	int64_t getTotalQuota() const { return totalQuotaInPages * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE; }
 
 	Future<Void> setupImpl(Database cx) {
-		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		while (true) {
 			Error err;
 			try {

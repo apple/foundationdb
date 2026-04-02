@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "fdbclient/AuditUtils.actor.h"
+#include "fdbclient/AuditUtils.h"
 #include "fdbclient/RangeLock.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/core/TesterInterface.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/TesterInterface.h"
+#include "fdbserver/tester/workloads.h"
 
 struct RangeLocking : TestWorkload {
 	static constexpr auto NAME = "RangeLocking";
@@ -342,7 +342,7 @@ struct RangeLocking : TestWorkload {
 
 	Future<std::vector<KeyRange>> getLockedRangesFromDB(Database cx) {
 		std::vector<std::pair<KeyRange, RangeLockState>> res;
-		co_await store(res, findExclusiveReadLockOnRange(cx, normalKeys));
+		res = co_await findExclusiveReadLockOnRange(cx, normalKeys);
 		std::vector<KeyRange> ranges;
 		for (const auto& [lockedRange, _lockState] : res) {
 			ranges.push_back(lockedRange);
@@ -362,7 +362,7 @@ struct RangeLocking : TestWorkload {
 
 	Future<Void> checkKVCorrectness(RangeLocking* self, Database cx) {
 		std::map<Key, Value> currentKvsInDB;
-		co_await store(currentKvsInDB, self->getKVSFromDB(self, cx));
+		currentKvsInDB = co_await self->getKVSFromDB(self, cx);
 		for (const auto& [key, value] : currentKvsInDB) {
 			if (self->kvs.find(key) == self->kvs.end()) {
 				TraceEvent(SevError, "RangeLockWorkLoadHistory")
@@ -407,7 +407,7 @@ struct RangeLocking : TestWorkload {
 
 	Future<Void> checkLockCorrectness(RangeLocking* self, Database cx) {
 		std::vector<KeyRange> currentLockRangesInDB;
-		co_await store(currentLockRangesInDB, self->getLockedRangesFromDB(cx));
+		currentLockRangesInDB = co_await self->getLockedRangesFromDB(cx);
 		std::vector<KeyRange> currentLockRangesInMemory = self->getLockedRangesFromMemory(self);
 		for (int i = 0; i < currentLockRangesInDB.size(); i++) {
 			if (i >= currentLockRangesInMemory.size()) {
@@ -582,7 +582,7 @@ struct RangeLocking : TestWorkload {
 		}
 		for (i = 0; i < candidates.size(); i++) {
 			locksPerUser.clear();
-			co_await store(locksPerUser, findExclusiveReadLockOnRange(cx, normalKeys, candidates[i]));
+			locksPerUser = co_await findExclusiveReadLockOnRange(cx, normalKeys, candidates[i]);
 			if (std::find(usersToUnlock.begin(), usersToUnlock.end(), candidates[i]) != usersToUnlock.end()) {
 				TraceEvent("RangeLockWorkloadTestUnlockRangeByUser")
 				    .detail("Ops", "Find unlocked user")

@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/StorageCorruptionBug.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbserver/tester/workloads.h"
+#include "fdbserver/core/StorageCorruptionBug.h"
+#include "fdbclient/ManagementAPI.h"
 #include "flow/ProcessEvents.h"
 
 namespace {

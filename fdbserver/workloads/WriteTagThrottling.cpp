@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "fdbserver/core/TesterInterface.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/TesterInterface.h"
+#include "fdbserver/tester/workloads.h"
+#include "BulkSetup.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "fdbserver/workloads/BulkSetup.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 
 // workload description:
 // This workload aims to test whether we can throttling some bad clients that doing penetrating write on write hot-spot
@@ -306,7 +306,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 		Reference<DatabaseContext> db = cx.getReference();
 		while (true) {
 			co_await delay(1.0);
-			co_await store(tags, ThrottleApi::getThrottledTags(db, CLIENT_KNOBS->TOO_MANY, ContainsRecommended::True));
+			tags = co_await ThrottleApi::getThrottledTags(db, CLIENT_KNOBS->TOO_MANY, ContainsRecommended::True);
 			recordThrottledTags(tags);
 		}
 	}

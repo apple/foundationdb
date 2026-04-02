@@ -19,11 +19,11 @@
  */
 
 #include <algorithm>
-#include "fdbclient/MutationLogReader.actor.h"
+#include "fdbclient/MutationLogReader.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/Tuple.h"
-#include "fdbserver/workloads/ApiWorkload.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "ApiWorkload.h"
+#include "fdbserver/tester/workloads.h"
 #include "fdbserver/core/Knobs.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"

@@ -24,7 +24,7 @@
 #include "flow/DeterministicRandom.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 #include <functional>
 #include <unordered_map>
 #include <memory>
@@ -102,7 +102,7 @@ struct GetForkRequest {
 	ForkState forkState;
 	ReplyPromise<ForkState> reply;
 
-	GetForkRequest(ForkState fork_state) : forkState(fork_state) {}
+	explicit GetForkRequest(ForkState fork_state) : forkState(fork_state) {}
 	GetForkRequest() = default;
 
 	template <class Ar>
@@ -116,7 +116,7 @@ struct ReleaseForkRequest {
 	ForkState forkState;
 	ReplyPromise<ForkState> reply;
 
-	ReleaseForkRequest(ForkState fork_state) : forkState(fork_state) {}
+	explicit ReleaseForkRequest(ForkState fork_state) : forkState(fork_state) {}
 	ReleaseForkRequest() = default;
 
 	template <class Ar>

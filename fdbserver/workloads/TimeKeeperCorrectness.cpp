@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbserver/core/Knobs.h"
@@ -66,7 +66,7 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 
 	Future<bool> check(Database const& cx) override {
 		KeyBackedMap<int64_t, Version> dbTimeKeeper = KeyBackedMap<int64_t, Version>(timeKeeperPrefixRange.begin);
-		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 
 		TraceEvent(SevInfo, "TKCorrectness_CheckStart")
 		    .detail("TimeKeeperMaxEntries", SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES)

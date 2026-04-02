@@ -19,14 +19,14 @@
  */
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbrpc/simulator.h"
-#include "fdbserver/core/QuietDatabase.actor.h"
+#include "fdbserver/core/QuietDatabase.h"
 
-#include "fdbserver/MutationTracking.h"
-#include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/workloads/ApiWorkload.h"
-#include "fdbserver/workloads/MemoryKeyValueStore.h"
+#include "fdbserver/core/MutationTracking.h"
+#include "fdbserver/tester/workloads.h"
+#include "ApiWorkload.h"
+#include "MemoryKeyValueStore.h"
 #include "flow/IRandom.h"
 #include "flow/genericactors.actor.h"
 

@@ -19,10 +19,10 @@
  */
 
 #include "fdbrpc/simulator.h"
-#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupAgent.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
-#include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.h"
+#include "fdbserver/tester/workloads.h"
+#include "BulkSetup.h"
 
 // A workload which test the correctness of backup and restore process
 struct AtomicSwitchoverWorkload : TestWorkload {

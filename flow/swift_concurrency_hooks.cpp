@@ -21,7 +21,7 @@
 #include "flow/swift_concurrency_hooks.h"
 #include "flow/swift.h"
 #include "flow/swift/ABI/Task.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 
 // ==== ----------------------------------------------------------------------------------------------------------------
 

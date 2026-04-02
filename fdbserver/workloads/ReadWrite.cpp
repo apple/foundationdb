@@ -25,11 +25,11 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/core/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.h"
-#include "fdbserver/workloads/ReadWriteWorkload.actor.h"
+#include "fdbserver/tester/workloads.h"
+#include "BulkSetup.h"
+#include "ReadWriteWorkload.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/CoroUtils.h"
@@ -69,7 +69,7 @@ struct ReadWriteCommonImpl {
 	                               DDSketch<double>* latencies,
 	                               double* totalLatency,
 	                               int* latencyCount,
-	                               EventMetricHandle<ReadMetric> readMetric,
+	                               EventMetricHandle<ReadMetricDescriptor> readMetric,
 	                               bool shouldRecord) {
 		double readBegin = now();
 		Optional<Value> value = co_await f;
@@ -88,7 +88,7 @@ struct ReadWriteCommonImpl {
 	                               DDSketch<double>* latencies,
 	                               double* totalLatency,
 	                               int* latencyCount,
-	                               EventMetricHandle<ReadMetric> readMetric,
+	                               EventMetricHandle<ReadMetricDescriptor> readMetric,
 	                               bool shouldRecord) {
 		double readBegin = now();
 		RangeResult value = co_await f;

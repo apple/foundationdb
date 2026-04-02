@@ -160,7 +160,7 @@ StringRef DecryptionStreamCipher::finish(Arena& arena) {
 }
 
 HmacSha256StreamCipher::HmacSha256StreamCipher() : cipher(EVP_MAX_KEY_LENGTH) {
-	HMAC_Init_ex(cipher.getHmacCtx(), NULL, 0, EVP_sha256(), nullptr);
+	HMAC_Init_ex(cipher.getHmacCtx(), nullptr, 0, EVP_sha256(), nullptr);
 }
 
 StringRef HmacSha256StreamCipher::finish(Arena& arena) {

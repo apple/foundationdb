@@ -19,12 +19,12 @@
  */
 
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/core/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 
 // This test creates a scenario that large number of SS join the cluster, by excluding and including a random
 // SS consistently for many times.
@@ -66,14 +66,14 @@ struct ExcludeIncludeStorageServersWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override {
 		if (!enabled)
 			return Void();
-		return workloadMain(this, cx);
+		return workloadMain(cx);
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }
 
 	void getMetrics(std::vector<PerfMetric>&) override {}
 
-	static Future<Void> workloadMain(ExcludeIncludeStorageServersWorkload* self, Database cx) {
+	Future<Void> workloadMain(Database cx) {
 		int round = deterministicRandom()->randomInt(10, 80);
 		std::set<AddressExclusion> servers;
 		std::set<AddressExclusion>::iterator it;
@@ -116,7 +116,7 @@ struct ExcludeIncludeStorageServersWorkload : TestWorkload {
 				}
 
 				// get all log routers and remove from SS candidate set
-				for (const auto& tLogSet : self->dbInfo->get().logSystemConfig.tLogs) {
+				for (const auto& tLogSet : dbInfo->get().logSystemConfig.tLogs) {
 					for (const auto& logRouter : tLogSet.logRouters) {
 						if (logRouter.present()) {
 							const auto& logRouterInterf = logRouter.interf();

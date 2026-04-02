@@ -20,7 +20,7 @@
 
 #include <cinttypes>
 #include "fmt/format.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "flow/IAsyncFile.h"
 #include "fdbclient/FDBTypes.h"
 

@@ -55,26 +55,21 @@
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/FlowGrpc.h"
 #include "fdbrpc/simulator.h"
-#include "fdbserver/ConflictSet.h"
-#include "fdbserver/CoordinationInterface.h"
+#include "fdbserver/coordinator/CoordinationServer.h"
 #include "fdbserver/CoroFlow.h"
-#include "fdbserver/DataDistribution.actor.h"
-#include "fdbserver/FDBExecHelper.actor.h"
-#include "fdbserver/IKeyValueStore.h"
-#include "fdbserver/MoveKeys.actor.h"
+#include "fdbserver/datadistributor/DataDistribution.h"
+#include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/NetworkTest.h"
-#include "fdbserver/RestoreWorkerInterface.actor.h"
+#include "fdbserver/kvstore/KVFileUtils.h"
 #include "fdbserver/core/ServerDBInfo.h"
-#include "fdbserver/SimulatedCluster.h"
-#include "fdbserver/Status.actor.h"
-#include "fdbserver/core/TesterInterface.actor.h"
+#include "fdbserver/datadistributor/SimulatedCluster.h"
+#include "fdbserver/tester/TestEncryptionUtils.h"
+#include "fdbserver/tester/tester.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "fdbserver/pubsub.h"
-#include "fdbserver/OnDemandStore.h"
-#include "fdbserver/MockS3Server.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/worker/Worker.h"
+#include "fdbserver/mocks3/MockS3Server.h"
 #ifdef WITH_ROCKSDB
-#include "fdbserver/FDBRocksDBVersion.h"
+#include "fdbserver/core/FDBRocksDBVersion.h"
 #endif
 #include "flow/ArgParseUtil.h"
 #include "flow/DeterministicRandom.h"
@@ -82,7 +77,7 @@
 #include "flow/ProtocolVersion.h"
 #include "SimpleOpt/SimpleOpt.h"
 #include "flow/SystemMonitor.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 #include "fdbclient/Tracing.h"
 #include "flow/WriteOnlySet.h"
 #include "flow/UnitTest.h"
@@ -90,7 +85,7 @@
 #include "flow/flow.h"
 #include "flow/network.h"
 #include "flow/SimpleCounter.h"
-#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupAgent.h"
 
 #include "flow/swift.h"
 #include "flow/swift_concurrency_hooks.h"
@@ -472,67 +467,6 @@ void testSerializationSpeed() {
 	printf("  Deallocate: %0.1f MB/sec\n", bytes / 1e6 / deallocate);
 	printf("  Bytes: %0.1f MB\n", bytes / 1e6);
 	printf("\n");
-}
-
-std::string toHTML(const StringRef& binaryString) {
-	std::string s;
-
-	for (int i = 0; i < binaryString.size(); i++) {
-		uint8_t c = binaryString[i];
-		if (c == '<')
-			s += "&lt;";
-		else if (c == '>')
-			s += "&gt;";
-		else if (c == '&')
-			s += "&amp;";
-		else if (c == '"')
-			s += "&quot;";
-		else if (c == ' ')
-			s += "&nbsp;";
-		else if (c > 32 && c < 127)
-			s += c;
-		else
-			s += format("<span class=\"binary\">[%02x]</span>", c);
-	}
-
-	return s;
-}
-
-ACTOR Future<Void> dumpDatabase(Database cx, std::string outputFilename, KeyRange range = allKeys) {
-	try {
-		state Transaction tr(cx);
-		loop {
-			state FILE* output = fopen(outputFilename.c_str(), "wt");
-			try {
-				state KeySelectorRef iter = firstGreaterOrEqual(range.begin);
-				state Arena arena;
-				fprintf(output, "<html><head><style type=\"text/css\">.binary {color:red}</style></head><body>\n");
-				Version ver = wait(tr.getReadVersion());
-				fprintf(output, "<h3>Database version: %" PRId64 "</h3>", ver);
-
-				loop {
-					RangeResult results = wait(tr.getRange(iter, firstGreaterOrEqual(range.end), 1000));
-					for (int r = 0; r < results.size(); r++) {
-						std::string key = toHTML(results[r].key), value = toHTML(results[r].value);
-						fprintf(output, "<p>%s <b>:=</b> %s</p>\n", key.c_str(), value.c_str());
-					}
-					if (results.size() < 1000)
-						break;
-					iter = firstGreaterThan(KeyRef(arena, results[results.size() - 1].key));
-				}
-				fprintf(output, "</body></html>");
-				fclose(output);
-				TraceEvent("DatabaseDumped").detail("Filename", outputFilename);
-				return Void();
-			} catch (Error& e) {
-				fclose(output);
-				wait(tr.onError(e));
-			}
-		}
-	} catch (Error& e) {
-		TraceEvent(SevError, "DumpDatabaseError").error(e).detail("Filename", outputFilename);
-		throw;
-	}
 }
 
 void memoryTest();
@@ -1399,8 +1333,6 @@ private:
 					role = ServerRole::NetworkTestClient;
 				else if (!strcmp(sRole, "networktestserver"))
 					role = ServerRole::NetworkTestServer;
-				else if (!strcmp(sRole, "restore"))
-					role = ServerRole::Restore;
 				else if (!strcmp(sRole, "kvfileintegritycheck"))
 					role = ServerRole::KVFileIntegrityCheck;
 				else if (!strcmp(sRole, "kvfilegeneratesums"))
@@ -2149,8 +2081,8 @@ int main(int argc, char* argv[]) {
 			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT, &opts.allowList);
 			opts.buildNetwork(argv[0]);
 
-			const bool expectsPublicAddress = (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer ||
-			                                   role == ServerRole::Restore || role == ServerRole::MockS3Server);
+			const bool expectsPublicAddress =
+			    (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer || role == ServerRole::MockS3Server);
 			if (opts.publicAddressStrs.empty()) {
 				if (expectsPublicAddress) {
 					fprintf(stderr, "ERROR: The -p or --public-address option is required\n");
@@ -2433,54 +2365,40 @@ int main(int argc, char* argv[]) {
 			auto* pProxy = static_cast<Optional<std::string>*>(g_network->global(INetwork::enProxy));
 			*pProxy = opts.proxy;
 
-			// Call fast restore for the class FastRestoreClass. This is a short-cut to run fast restore in circus
-			if (opts.processClass == ProcessClass::FastRestoreClass) {
-				printf("Run as fast restore worker\n");
-				ASSERT(opts.connectionFile);
-				auto dataFolder = opts.dataFolder;
-				if (!dataFolder.size())
-					dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
+			ASSERT(opts.connectionFile);
 
-				std::vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
-				actors.push_back(restoreWorker(opts.connectionFile, opts.localities, dataFolder));
-				f = stopAfter(waitForAll(actors));
-				printf("Fast restore worker started\n");
-				g_network->run();
-				printf("g_network->run() done\n");
-			} else { // Call fdbd roles in conventional way
-				ASSERT(opts.connectionFile);
+			setupRunLoopProfiler();
 
-				setupRunLoopProfiler();
+			auto dataFolder = opts.dataFolder;
+			if (!dataFolder.size())
+				dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
 
-				auto dataFolder = opts.dataFolder;
-				if (!dataFolder.size())
-					dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
+			std::vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
 
-				std::vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
+			actors.push_back(fdbd(opts.connectionFile,
+			                      opts.localities,
+			                      opts.processClass,
+			                      dataFolder,
+			                      dataFolder,
+			                      opts.storageMemLimit,
+			                      opts.metricsConnFile,
+			                      opts.metricsPrefix,
+			                      opts.rsssize,
+			                      opts.whitelistBinPaths,
+			                      opts.consistencyCheckUrgentMode));
+			actors.push_back(histogramReport());
+			actors.push_back(metricsReport());
 
 #ifdef FLOW_GRPC_ENABLED
-				if (opts.grpcAddressStrs.size() > 0) {
-					FlowGrpc::init(&opts.tlsConfig, NetworkAddress::parse(opts.grpcAddressStrs[0]));
-					actors.push_back(GrpcServer::instance()->run());
-				}
-#endif
-				actors.push_back(fdbd(opts.connectionFile,
-				                      opts.localities,
-				                      opts.processClass,
-				                      dataFolder,
-				                      dataFolder,
-				                      opts.storageMemLimit,
-				                      opts.metricsConnFile,
-				                      opts.metricsPrefix,
-				                      opts.rsssize,
-				                      opts.whitelistBinPaths,
-				                      opts.consistencyCheckUrgentMode));
-				actors.push_back(histogramReport());
-				actors.push_back(metricsReport());
-
-				f = stopAfter(waitForAll(actors));
-				g_network->run();
+			if (opts.grpcAddressStrs.size() > 0) {
+				FlowGrpc::init(&opts.tlsConfig, NetworkAddress::parse(opts.grpcAddressStrs[0]));
+				actors.push_back(GrpcServer::instance()->run());
 			}
+#endif
+
+			f = stopAfter(waitForAll(actors));
+			g_network->run();
+
 		} else if (role == ServerRole::MultiTester) {
 			setupRunLoopProfiler();
 			f = stopAfter(runTests(opts.connectionFile,
@@ -2546,9 +2464,6 @@ int main(int argc, char* argv[]) {
 		} else if (role == ServerRole::NetworkTestServer) {
 			f = stopAfter(networkTestServer());
 			g_network->run();
-		} else if (role == ServerRole::Restore) {
-			f = stopAfter(restoreWorker(opts.connectionFile, opts.localities, opts.dataFolder));
-			g_network->run();
 		} else if (role == ServerRole::KVFileIntegrityCheck) {
 			f = stopAfter(KVFileCheck(opts.kvFile, true));
 			g_network->run();
@@ -2590,49 +2505,12 @@ int main(int argc, char* argv[]) {
 		if (role == ServerRole::Simulation) {
 			printf("Unseed: %d\n", unseed);
 			printf("Elapsed: %f simsec, %f real seconds\n", now() - startNow, timer() - start);
-		}
-
-		// IFailureMonitor::failureMonitor().address_info.clear();
-
-		// we should have shut down ALL actors associated with this machine; let's list all of the ones still live
-		/*{
-		    auto living = Actor::all;
-		    printf("%d surviving actors:\n", living.size());
-		    for(auto a = living.begin(); a != living.end(); ++a)
-		        printf("  #%lld %s %p\n", (*a)->creationIndex, (*a)->getName(), (*a));
-		}
-
-		{
-		    auto living = DatabaseContext::all;
-		    printf("%d surviving DatabaseContexts:\n", living.size());
-		    for(auto a = living.begin(); a != living.end(); ++a)
-		        printf("  #%lld %p\n", (*a)->creationIndex, (*a));
-		}
-
-		{
-		    auto living = TransactionData::all;
-		    printf("%d surviving TransactionData(s):\n", living.size());
-		    for(auto a = living.begin(); a != living.end(); ++a)
-		        printf("  #%lld %p\n", (*a)->creationIndex, (*a));
-		}*/
-
-		/*cout << Actor::allActors.size() << " surviving actors:" << std::endl;
-		std::map<std::string,int> actorCount;
-		for(int i=0; i<Actor::allActors.size(); i++)
-		    ++actorCount[Actor::allActors[i]->getName()];
-		for(auto i = actorCount.rbegin(); !(i == actorCount.rend()); ++i)
-		    std::cout << "  " << i->second << " " << i->first << std::endl;*/
-		//	std::cout << "  " << Actor::allActors[i]->getName() << std::endl;
-
-		if (role == ServerRole::Simulation) {
 			unsigned long sevErrorEventsLogged = TraceEvent::CountEventsLoggedAt(SevError);
 			if (sevErrorEventsLogged > 0) {
 				printf("%lu SevError events logged\n", sevErrorEventsLogged);
 				rc = FDB_EXIT_ERROR;
 			}
 		}
-
-		// g_simulator->run();
 
 #ifdef ALLOC_INSTRUMENTATION
 		{
@@ -2684,23 +2562,19 @@ int main(int argc, char* argv[]) {
 			memSample_entered = true;
 		}
 #endif
-		// printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
 		flushAndExit(rc);
 	} catch (Error& e) {
 		fprintf(stderr, "Error: %s\n", e.what());
 		TraceEvent(SevError, "MainError").error(e);
-		// printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
 		flushAndExit(FDB_EXIT_MAIN_ERROR);
 	} catch (boost::system::system_error& e) {
 		ASSERT_WE_THINK(false); // boost errors shouldn't leak
 		fprintf(stderr, "boost::system::system_error: %s (%d)", e.what(), e.code().value());
 		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
-		// printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
 		flushAndExit(FDB_EXIT_MAIN_EXCEPTION);
 	} catch (std::exception& e) {
 		fprintf(stderr, "std::exception: %s\n", e.what());
 		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
-		// printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
 		flushAndExit(FDB_EXIT_MAIN_EXCEPTION);
 	}
 

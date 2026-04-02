@@ -19,11 +19,11 @@
  */
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/RangeLock.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
@@ -184,7 +184,8 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 			co_await waitForAll(actors);
 
 			// Make sure all ranges locked by the workload client are unlocked
-			for (int j = 0; j < lockActorCount; ++j) {
+			int j = 0;
+			for (; j < lockActorCount; j++) {
 				std::vector<std::pair<KeyRange, RangeLockState>> res = co_await findExclusiveReadLockOnRange(
 				    cx, normalKeys, rangeLockOwnerNamePrefix + "-" + std::to_string(j));
 				ASSERT(res.empty());

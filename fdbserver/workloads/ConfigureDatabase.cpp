@@ -22,15 +22,15 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/core/TesterInterface.actor.h"
-#include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/RunRYWTransaction.actor.h"
+#include "fdbserver/core/TesterInterface.h"
+#include "fdbclient/ManagementAPI.h"
+#include "fdbclient/RunRYWTransaction.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
-#include "fdbserver/core/QuietDatabase.actor.h"
-#include "fdbserver/SimulatedCluster.h"
+#include "fdbserver/core/QuietDatabase.h"
+#include "fdbserver/datadistributor/SimulatedCluster.h"
 #include "flow/IRandom.h"
 
 static const char* storageMigrationTypes[] = { "perpetual_storage_wiggle=0 storage_migration_type=aggressive",
@@ -337,8 +337,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				std::vector<StorageServerInterface> storageServers = co_await getStorageServers(cx);
 
 				if (!aggressiveMigrationTriggered) {
-					co_await store(aggressiveMigrationTriggered,
-					               issueAggressiveMigrationIfNeeded(cx, conf, storageServers));
+					aggressiveMigrationTriggered = co_await issueAggressiveMigrationIfNeeded(cx, conf, storageServers);
 				}
 
 				for (i = 0; i < storageServers.size(); i++) {

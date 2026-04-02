@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/workloads/MemoryKeyValueStore.h"
+#include "MemoryKeyValueStore.h"
 
 // Get the value associated with a key
 Optional<Value> MemoryKeyValueStore::get(KeyRef key) const {
@@ -81,9 +81,9 @@ Key MemoryKeyValueStore::getKey(KeySelectorRef selector) const {
 RangeResult MemoryKeyValueStore::getRange(KeyRangeRef range, int limit, Reverse reverse) const {
 	RangeResult results;
 	if (!reverse) {
-		auto mapItr = store.lower_bound(range.begin);
-
-		for (; mapItr != store.end() && mapItr->first < range.end && results.size() < limit; mapItr++)
+		for (auto mapItr = store.lower_bound(range.begin);
+		     mapItr != store.end() && mapItr->first < range.end && results.size() < limit;
+		     mapItr++)
 			results.push_back_deep(results.arena(), KeyValueRef(mapItr->first, mapItr->second));
 	}
 

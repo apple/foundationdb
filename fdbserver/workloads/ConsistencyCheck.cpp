@@ -25,17 +25,18 @@
 #include "flow/ProcessEvents.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbserver/core/TesterInterface.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/TesterInterface.h"
+#include "fdbserver/tester/workloads.h"
 #include "flow/IRateControl.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/StorageMetrics.actor.h"
-#include "fdbserver/DataDistribution.actor.h"
-#include "fdbserver/core/QuietDatabase.actor.h"
-#include "fdbserver/TSSMappingUtil.h"
+#include "fdbserver/consistencyscan/ConsistencyScan.h"
+#include "fdbserver/core/StorageMetrics.actor.h"
+#include "fdbserver/datadistributor/DataDistribution.h"
+#include "fdbserver/core/QuietDatabase.h"
+#include "fdbserver/core/TSSMappingUtil.h"
 #include "flow/DeterministicRandom.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/network.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
@@ -1072,7 +1073,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		if (!g_network->isSimulated()) {
 			co_return true;
 		}
-		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		ConsistencyScanState cs;
 		while (true) {
 			Error err;

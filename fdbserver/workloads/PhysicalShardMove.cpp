@@ -18,15 +18,15 @@
  * limitations under the License.
  */
 
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbrpc/simulator.h"
-#include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/MoveKeys.actor.h"
-#include "fdbserver/core/QuietDatabase.actor.h"
-#include "fdbserver/ServerCheckpoint.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/MoveKeys.h"
+#include "fdbserver/core/QuietDatabase.h"
+#include "fdbserver/core/ServerCheckpoint.h"
+#include "fdbserver/tester/workloads.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/flow.h"
@@ -97,20 +97,19 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		DataMovementReason dataMoveReason = static_cast<DataMovementReason>(
 		    deterministicRandom()->randomInt(1, static_cast<int>(DataMovementReason::NUMBER_OF_REASONS)));
 		KeyRangeRef currentRange = KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr);
-		co_await store(
-		    teamA,
-		    moveShard(this,
-		              cx,
-		              newDataMoveId(deterministicRandom()->randomUInt64(),
-		                            AssignEmptyRange::False,
-		                            deterministicRandom()->random01() < SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY
-		                                ? DataMoveType::PHYSICAL
-		                                : DataMoveType::LOGICAL,
-		                            dataMoveReason),
-		              currentRange,
-		              teamSize,
-		              includes,
-		              excludes));
+		teamA = co_await moveShard(
+		    this,
+		    cx,
+		    newDataMoveId(deterministicRandom()->randomUInt64(),
+		                  AssignEmptyRange::False,
+		                  deterministicRandom()->random01() < SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY
+		                      ? DataMoveType::PHYSICAL
+		                      : DataMoveType::LOGICAL,
+		                  dataMoveReason),
+		    currentRange,
+		    teamSize,
+		    includes,
+		    excludes);
 		TraceEvent(SevDebug, "TestMovedRange1").detail("Range", currentRange).detail("Team", describe(teamA));
 
 		excludes.insert(teamA.begin(), teamA.end());
@@ -121,20 +120,19 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 
 		// Move range [TestKeyA, TestKeyB) to sh0.
 		currentRange = KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr);
-		co_await store(
-		    teamA,
-		    moveShard(this,
-		              cx,
-		              newDataMoveId(sh0,
-		                            AssignEmptyRange::False,
-		                            deterministicRandom()->random01() < SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY
-		                                ? DataMoveType::PHYSICAL
-		                                : DataMoveType::LOGICAL,
-		                            dataMoveReason),
-		              currentRange,
-		              teamSize,
-		              includes,
-		              excludes));
+		teamA = co_await moveShard(
+		    this,
+		    cx,
+		    newDataMoveId(sh0,
+		                  AssignEmptyRange::False,
+		                  deterministicRandom()->random01() < SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY
+		                      ? DataMoveType::PHYSICAL
+		                      : DataMoveType::LOGICAL,
+		                  dataMoveReason),
+		    currentRange,
+		    teamSize,
+		    includes,
+		    excludes);
 		TraceEvent(SevDebug, "TestMovedRange2").detail("Range", currentRange).detail("Team", describe(teamA));
 
 		std::vector<KeyRange> checkpointRanges;
@@ -325,8 +323,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		while (true) {
 			records.clear();
 			try {
-				co_await store(records,
-				               getCheckpointMetaData(cx, restoreRanges, version, format, Optional<UID>(dataMoveId)));
+				records = co_await getCheckpointMetaData(cx, restoreRanges, version, format, Optional<UID>(dataMoveId));
 				TraceEvent(SevDebug, "TestCheckpointMetaDataFetched")
 				    .detail("Range", describe(checkpointRanges))
 				    .detail("Version", version);
@@ -373,7 +370,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 					ASSERT(platform::createDirectory(currentDir));
 					checkpointFutures.push_back(fetchCheckpoint(cx, records.front().second, currentDir));
 				}
-				co_await store(fetchedCheckpoints, getAll(checkpointFutures));
+				fetchedCheckpoints = co_await getAll(checkpointFutures);
 				TraceEvent(SevDebug, "TestCheckpointFetched").detail("Checkpoints", describe(fetchedCheckpoints));
 				break;
 			} catch (Error& e) {
@@ -445,7 +442,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 	}
 
 	Future<Version> populateData(PhysicalShardMoveWorkLoad* self, Database cx, std::map<Key, Value>* kvs) {
-		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		Version version{ 0 };
 		UID debugID;
 		while (true) {
@@ -533,7 +530,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 
 	Future<Version> writeAndVerify(PhysicalShardMoveWorkLoad* self, Database cx, Key key, Optional<Value> value) {
 		// state Transaction tr(cx);
-		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		Version version{ 0 };
 		UID debugID;
 		while (true) {

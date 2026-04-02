@@ -1074,10 +1074,22 @@ const KeyRangeRef backupProgressKeys("\xff\x02/backupProgress/"_sr, "\xff\x02/ba
 const KeyRef backupProgressPrefix = backupProgressKeys.begin;
 const KeyRef backupStartedKey = "\xff\x02/backupStarted"_sr;
 extern const KeyRef backupPausedKey = "\xff\x02/backupPaused"_sr;
+
+// Backup keys related to Range Partitioned.
 const KeyRef backupRangePartitionedMapUploadedPrefix = "\xff\x02/backupRangePartitionedMapUploaded/"_sr;
+const KeyRangeRef backupRangePartitionedProgressKeys("\xff\x02/backupRangePartitionedProgress/"_sr,
+                                                     "\xff\x02/backupRangePartitionedProgress0"_sr);
+const KeyRef backupRangePartitionedProgressPrefix = backupRangePartitionedProgressKeys.begin;
 
 Key backupRangePartitionedMapUploadedKeyFor(Version v) {
 	return backupRangePartitionedMapUploadedPrefix.withSuffix(format("%lld", v));
+}
+
+Key backupRangePartitionedProgressKey(UID workerID) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(backupRangePartitionedProgressPrefix);
+	wr << workerID;
+	return wr.toValue();
 }
 
 Key backupProgressKeyFor(UID workerID) {
@@ -1222,6 +1234,28 @@ BulkDumpState decodeBulkDumpState(const ValueRef& value) {
 	return bulkDumpState;
 }
 
+// BulkDump owner tracking - stored separately for backward compatibility
+const KeyRangeRef bulkDumpOwnerKeys = KeyRangeRef("\xff/bulkDumpOwner/"_sr, "\xff/bulkDumpOwner0"_sr);
+const KeyRef bulkDumpOwnerPrefix = bulkDumpOwnerKeys.begin;
+
+const Key bulkDumpOwnerKeyFor(const UID& jobId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(bulkDumpOwnerPrefix);
+	wr << jobId;
+	return wr.toValue();
+}
+
+// BulkLoad owner tracking - stored separately for backward compatibility
+const KeyRangeRef bulkLoadOwnerKeys = KeyRangeRef("\xff/bulkLoadOwner/"_sr, "\xff/bulkLoadOwner0"_sr);
+const KeyRef bulkLoadOwnerPrefix = bulkLoadOwnerKeys.begin;
+
+const Key bulkLoadOwnerKeyFor(const UID& jobId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(bulkLoadOwnerPrefix);
+	wr << jobId;
+	return wr.toValue();
+}
+
 // Range Lock
 const std::string rangeLockNameForBulkLoad = "BulkLoad";
 
@@ -1271,7 +1305,7 @@ const KeyRef tagThrottleCountKey = "\xff\x02/throttledTags/manualThrottleCount"_
 
 // Client status info prefix
 const KeyRangeRef fdbClientInfoPrefixRange("\xff\x02/fdbClientInfo/"_sr, "\xff\x02/fdbClientInfo0"_sr);
-// See remaining fields in GlobalConfig.actor.h
+// See remaining fields in GlobalConfig.h
 
 // ConsistencyCheck settings
 const KeyRef fdbShouldConsistencyCheckBeSuspended = "\xff\x02/ConsistencyCheck/Suspend"_sr;
@@ -1477,8 +1511,6 @@ const KeyRef metadataVersionRequiredValue = "\x00\x00\x00\x00\x00\x00\x00\x00\x0
 const KeyRef mustContainSystemMutationsKey = "\xff/mustContainSystemMutations"_sr;
 
 const KeyRangeRef monitorConfKeys("\xff\x02/monitorConf/"_sr, "\xff\x02/monitorConf0"_sr);
-
-const KeyRef restoreRequestDoneKey = "\xff\x02/restoreRequestDone"_sr;
 
 const KeyRef healthyZoneKey = "\xff\x02/healthyZone"_sr;
 const StringRef ignoreSSFailuresZoneString = "IgnoreSSFailures"_sr;

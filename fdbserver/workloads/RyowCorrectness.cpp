@@ -20,10 +20,10 @@
 
 #include <vector>
 
-#include "fdbserver/core/TesterInterface.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/workloads/MemoryKeyValueStore.h"
-#include "fdbserver/workloads/ApiWorkload.h"
+#include "fdbserver/core/TesterInterface.h"
+#include "fdbserver/tester/workloads.h"
+#include "MemoryKeyValueStore.h"
+#include "ApiWorkload.h"
 
 #define TRACE_TRANSACTION 0
 

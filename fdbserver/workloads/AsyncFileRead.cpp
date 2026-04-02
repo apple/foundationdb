@@ -20,11 +20,11 @@
 #include <utility>
 #include <vector>
 
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "flow/ActorCollection.h"
 #include "flow/SystemMonitor.h"
 #include "flow/IAsyncFile.h"
-#include "fdbserver/workloads/AsyncFile.actor.h"
+#include "AsyncFile.h"
 #include "flow/DeterministicRandom.h"
 
 static const double ROLL_TIME = 5.0;
@@ -229,7 +229,7 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 		co_await timeout(waitForAll(readFutures), 10, Void());
 	}
 
-	static Future<Void> readLoop(AsyncFileReadWorkload* self, int bufferIndex, double fixedRate) {
+	Future<Void> readLoop(int bufferIndex, double fixedRate) {
 		bool writeFlag = false;
 		double begin = 0.0;
 		double lastTime = now();
@@ -239,29 +239,26 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 
 			// state Future<Void> d = delay( 1/25. * (.75 + 0.5*deterministicRandom()->random01()) );
 			int64_t offset;
-			if (self->unbufferedIO)
-				offset = (int64_t)(deterministicRandom()->random01() * (self->fileSize - 1) /
-				                   AsyncFileWorkload::_PAGE_SIZE) *
+			if (unbufferedIO)
+				offset = (int64_t)(deterministicRandom()->random01() * (fileSize - 1) / AsyncFileWorkload::_PAGE_SIZE) *
 				         AsyncFileWorkload::_PAGE_SIZE;
 			else
-				offset = (int64_t)(deterministicRandom()->random01() * (self->fileSize - 1));
+				offset = (int64_t)(deterministicRandom()->random01() * (fileSize - 1));
 
-			writeFlag = deterministicRandom()->random01() < self->writeFraction;
+			writeFlag = deterministicRandom()->random01() < writeFraction;
 			if (writeFlag)
-				self->rbg.writeRandomBytesToBuffer((char*)self->readBuffers[bufferIndex]->buffer, self->readSize);
+				rbg.writeRandomBytesToBuffer((char*)readBuffers[bufferIndex]->buffer, readSize);
 
-			auto r =
-			    writeFlag
-			        ? tag(self->fileHandle->file->write(self->readBuffers[bufferIndex]->buffer, self->readSize, offset),
-			              self->readSize)
-			        : self->fileHandle->file->read(self->readBuffers[bufferIndex]->buffer, self->readSize, offset);
+			auto r = writeFlag
+			             ? tag(fileHandle->file->write(readBuffers[bufferIndex]->buffer, readSize, offset), readSize)
+			             : fileHandle->file->read(readBuffers[bufferIndex]->buffer, readSize, offset);
 			begin = now();
-			if (self->ioLog)
-				self->ioLog->logIOIssue(writeFlag, begin);
-			co_await uncancellable(holdWhile(self->fileHandle, holdWhile(self->readBuffers[bufferIndex], r)));
-			if (self->ioLog)
-				self->ioLog->logIOCompletion(writeFlag, begin, now());
-			self->bytesRead += self->readSize;
+			if (ioLog)
+				ioLog->logIOIssue(writeFlag, begin);
+			co_await uncancellable(holdWhile(fileHandle, holdWhile(readBuffers[bufferIndex], r)));
+			if (ioLog)
+				ioLog->logIOCompletion(writeFlag, begin, now());
+			bytesRead += readSize;
 			// wait(d);
 		}
 	}
@@ -274,7 +271,7 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 
 			readers.reserve(self->numParallelReads);
 			for (int i = 0; i < self->numParallelReads; i++)
-				readers.push_back(readLoop(self, i, self->fixedRate / self->numParallelReads));
+				readers.push_back(readLoop(i, self->fixedRate / self->numParallelReads));
 			co_await waitForAll(readers);
 
 			delete self->ioLog;

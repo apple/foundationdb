@@ -1,0 +1,8 @@
+function(add_fdbserver_link_test target_name)
+  set(link_libs ${ARGN})
+  list(GET link_libs 0 primary_lib)
+  list(REMOVE_AT link_libs 0)
+  file(RELATIVE_PATH link_test_src "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_SOURCE_DIR}/fdbclient/LinkTest.cpp")
+  add_flow_target(LINK_TEST NAME ${target_name} SRCS ${link_test_src})
+  target_link_libraries(${target_name} PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,${primary_lib}>" ${link_libs} rapidxml)
+endfunction()

@@ -20,8 +20,9 @@
 
 #include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/core/TesterInterface.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/TesterInterface.h"
+#include "fdbserver/tester/workloads.h"
+#include "fdbserver/tester/WorkloadUtils.h"
 
 struct DDBalanceWorkload : TestWorkload {
 	static constexpr auto NAME = "DDBalance";

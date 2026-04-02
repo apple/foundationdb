@@ -20,10 +20,11 @@
 
 #include <boost/lexical_cast.hpp>
 
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/Schemas.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
+#include "flow/actorcompiler.h" // This must be the last include
 
 struct DataDistributionMetricsWorkload : KVWorkload {
 	static constexpr auto NAME = "DataDistributionMetrics";
@@ -53,19 +54,19 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 
 	Key keyForIndex(int n) { return doubleToTestKey((double)n / nodeCount, keyPrefix); }
 
-	static Future<Void> ddRWClient(Database cx, DataDistributionMetricsWorkload* self) {
+	Future<Void> ddRWClient(Database cx) {
 		while (true) {
 			ReadYourWritesTransaction tr(cx);
 			int i{ 0 };
 			Error err;
 			try {
-				for (i = 0; i < self->readPerTx; ++i)
-					co_await tr.get(self->keyForIndex(deterministicRandom()->randomInt(0, self->nodeCount))); // read
-				for (i = 0; i < self->writePerTx; ++i)
-					tr.set(self->keyForIndex(deterministicRandom()->randomInt(0, self->nodeCount)),
+				for (i = 0; i < readPerTx; ++i)
+					co_await tr.get(keyForIndex(deterministicRandom()->randomInt(0, nodeCount))); // read
+				for (i = 0; i < writePerTx; ++i)
+					tr.set(keyForIndex(deterministicRandom()->randomInt(0, nodeCount)),
 					       getRandomValue()); // write
 				co_await tr.commit();
-				++self->commits;
+				++commits;
 			} catch (Error& e) {
 				err = e;
 			}
@@ -79,8 +80,7 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		while (true) {
 			tr->setOption(FDBTransactionOptions::RAW_ACCESS);
-			tr->setOption(FDBTransactionOptions::TIMEOUT,
-			              StringRef((uint8_t*)&self->transactionTimeLimit, sizeof(int64_t)));
+			tr->setOption(FDBTransactionOptions::TIMEOUT, StringRef((uint8_t*)&transactionTimeLimit, sizeof(int64_t)));
 			Error err;
 			try {
 				co_await delay(self->delayPerLoop);
@@ -145,8 +145,8 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 		}
 	}
 
-	static Future<bool> _check(Database cx, DataDistributionMetricsWorkload* self) {
-		if (self->errors.getValue() > 0) {
+	Future<bool> _check(Database cx) {
+		if (errors.getValue() > 0) {
 			TraceEvent(SevError, "TestFailure").detail("Reason", "GetRange Results Inconsistent");
 			co_return false;
 		}
@@ -157,15 +157,14 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 		int retries = 0;
 		while (true) {
 			tr->setOption(FDBTransactionOptions::RAW_ACCESS);
-			tr->setOption(FDBTransactionOptions::TIMEOUT,
-			              StringRef((uint8_t*)&self->transactionTimeLimit, sizeof(int64_t)));
+			tr->setOption(FDBTransactionOptions::TIMEOUT, StringRef((uint8_t*)&transactionTimeLimit, sizeof(int64_t)));
 			Error err;
 			try {
 				RangeResult result = co_await tr->getRange(ddStatsRange, CLIENT_KNOBS->TOO_MANY);
 				ASSERT(!result.more);
-				self->numShards = result.size();
+				numShards = result.size();
 				// There's no guarantee that #shards <= CLIENT_KNOBS->SHARD_COUNT_LIMIT all the time
-				ASSERT(self->numShards >= 1);
+				ASSERT(numShards >= 1);
 				int64_t totalBytes = 0;
 				auto schema = readJSONStrictly(JSONSchemas::dataDistributionStatsSchema.toString()).get_obj();
 				for (i = 0; i < result.size(); ++i) {
@@ -181,7 +180,7 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 					}
 					totalBytes += valueObj["shard_bytes"].get_int64();
 				}
-				self->avgBytes = totalBytes / self->numShards;
+				avgBytes = totalBytes / numShards;
 				break;
 			} catch (Error& e) {
 				err = e;
@@ -202,7 +201,7 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 		std::vector<Future<Void>> clients;
 		clients.push_back(resultConsistencyCheckClient(cx, this));
 		for (int i = 0; i < actorCount; ++i)
-			clients.push_back(ddRWClient(cx, this));
+			clients.push_back(ddRWClient(cx));
 		co_await timeout(waitForAll(clients), testDuration, Void());
 		co_await delay(5.0);
 	}
@@ -211,7 +210,7 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 
 	Future<bool> check(Database const& cx) override {
 		if (clientId == 0)
-			return _check(cx, this);
+			return _check(cx);
 		return true;
 	}
 

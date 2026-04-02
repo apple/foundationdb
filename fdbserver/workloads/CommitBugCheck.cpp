@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "fdbserver/core/TesterInterface.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/TesterInterface.h"
+#include "fdbserver/tester/workloads.h"
 
 // Regression tests for 2 commit related bugs
 struct CommitBugWorkload : TestWorkload {

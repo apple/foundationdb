@@ -24,7 +24,7 @@
 #include "flow/DeterministicRandom.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include <functional>
 #include <unordered_map>
@@ -194,8 +194,7 @@ Future<Void> echoServer() {
 			          [&requests](StreamRequest const& req) {
 				          requests.add([](StreamRequest req) -> Future<Void> {
 					          req.reply.setByteLimit(1024);
-					          int i = 0;
-					          for (; i < 100; ++i) {
+					          for (int i = 0; i < 100; ++i) {
 						          co_await req.reply.onReady();
 						          std::cout << "Send " << i << std::endl;
 						          req.reply.send(StreamReply{ i });

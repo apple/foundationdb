@@ -39,11 +39,11 @@
 #include "fdbrpc/AsyncFileChaos.h"
 #include "fdbrpc/AsyncFileEIO.actor.h"
 #include "fdbrpc/AsyncFileEncrypted.h"
-#include "fdbrpc/AsyncFileWinASIO.actor.h"
+#include "fdbrpc/AsyncFileWinASIO.h"
 #include "fdbrpc/AsyncFileKAIO.actor.h"
 #include "flow/AsioReactor.h"
 #include "flow/Platform.h"
-#include "fdbrpc/AsyncFileWriteChecker.actor.h"
+#include "fdbrpc/AsyncFileWriteChecker.h"
 
 // Opens a file for asynchronous I/O
 Future<Reference<class IAsyncFile>> Net2FileSystem::open(const std::string& filename, int64_t flags, int64_t mode) {

@@ -8,8 +8,8 @@
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/ServerDBInfo.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/ServerDBInfo.h"
+#include "fdbserver/tester/workloads.h"
 #include "flow/Buggify.h"
 #include "flow/Error.h"
 #include "flow/IPAddress.h"
@@ -137,7 +137,7 @@ struct ClogRemoteTLog : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	static Future<Optional<double>> measureMaxSSLag(ClogRemoteTLog* self, Database db) {
+	Future<Optional<double>> measureMaxSSLag(Database db) {
 		StatusObject status = co_await StatusClient::statusFetcher(db);
 		StatusObjectReader reader(status);
 		StatusObjectReader cluster;
@@ -174,7 +174,7 @@ struct ClogRemoteTLog : TestWorkload {
 		}
 		TraceEvent("MaxSSDataLag")
 		    .detail("SecondLag", maxSSLag == -1 ? "none" : std::to_string(maxSSLag))
-		    .detail("SecondThreshold", self->lagThreshold);
+		    .detail("SecondThreshold", lagThreshold);
 		if (maxSSLag == -1) {
 			co_return Optional<double>();
 		} else {
@@ -274,9 +274,9 @@ struct ClogRemoteTLog : TestWorkload {
 		}
 	}
 
-	static std::vector<NetworkAddress> getRemoteTLogs(ClogRemoteTLog* self) {
+	std::vector<NetworkAddress> getRemoteTLogs() {
 		std::vector<NetworkAddress> remoteTLogIPs;
-		for (const auto& tLogSet : self->dbInfo->get().logSystemConfig.tLogs) {
+		for (const auto& tLogSet : dbInfo->get().logSystemConfig.tLogs) {
 			if (tLogSet.isLocal) {
 				continue;
 			}
@@ -287,16 +287,16 @@ struct ClogRemoteTLog : TestWorkload {
 		return remoteTLogIPs;
 	}
 
-	static Future<Void> clogRemoteTLog(ClogRemoteTLog* self, Database db) {
-		co_await delay(self->clogInitDelay);
+	Future<Void> clogRemoteTLog(Database db) {
+		co_await delay(clogInitDelay);
 
 		// Ensure db is ready
-		while (self->dbInfo->get().recoveryState < RecoveryState::FULLY_RECOVERED) {
-			co_await self->dbInfo->onChange();
+		while (dbInfo->get().recoveryState < RecoveryState::FULLY_RECOVERED) {
+			co_await dbInfo->onChange();
 		}
 
 		// Then, get all remote TLog IPs
-		std::vector<NetworkAddress> remoteTLogs = getRemoteTLogs(self);
+		std::vector<NetworkAddress> remoteTLogs = getRemoteTLogs();
 		ASSERT(!remoteTLogs.empty());
 
 		// Then, get all remote SS IPs
@@ -314,14 +314,14 @@ struct ClogRemoteTLog : TestWorkload {
 		// If we can find such a machine that is just running a remote tlog, then we will do extra checking at the end
 		// (in check() method). If we can't find such a machine, we pick a random machhine and still run the test to
 		// ensure no crashes or correctness issues are observed.
-		self->cloggedRemoteTLog = isolatedRemoteTLog.present()
-		                              ? isolatedRemoteTLog.get()
-		                              : self->cloggedRemoteTLog =
-		                                    remoteTLogs[deterministicRandom()->randomInt(0, remoteTLogs.size())];
-		ASSERT(self->cloggedRemoteTLog.present());
+		cloggedRemoteTLog = isolatedRemoteTLog.present()
+		                        ? isolatedRemoteTLog.get()
+		                        : cloggedRemoteTLog =
+		                              remoteTLogs[deterministicRandom()->randomInt(0, remoteTLogs.size())];
+		ASSERT(cloggedRemoteTLog.present());
 
 		// Then, find all processes that the remote tlog will have degraded connection with
-		IPAddress cc = self->dbInfo->get().clusterInterface.address().ip;
+		IPAddress cc = dbInfo->get().clusterInterface.address().ip;
 		std::vector<IPAddress> processes;
 		for (const auto& process : g_simulator->getAllProcesses()) {
 			const auto& ip = process->address.ip;
@@ -334,21 +334,21 @@ struct ClogRemoteTLog : TestWorkload {
 		// Finally, start the clogging between the remote tlog and the processes calculated above
 		int numClogged{ 0 };
 		for (const auto& ip : processes) {
-			if (self->cloggedRemoteTLog.get().ip == ip) {
+			if (cloggedRemoteTLog.get().ip == ip) {
 				continue;
 			}
-			double clogDuration = self->testDuration * (0.5 + 0.4 * deterministicRandom()->random01());
+			double clogDuration = testDuration * (0.5 + 0.4 * deterministicRandom()->random01());
 			// clogDuration must be less than testDuration to ensure that the clogging ends before the test ends
-			g_simulator->clogPair(ip, self->cloggedRemoteTLog.get().ip, clogDuration);
+			g_simulator->clogPair(ip, cloggedRemoteTLog.get().ip, clogDuration);
 			TraceEvent("ClogRemoteTLog")
-			    .detail("SrcIP", self->cloggedRemoteTLog->ip)
+			    .detail("SrcIP", cloggedRemoteTLog->ip)
 			    .detail("DstIP", ip)
 			    .detail("Duration", clogDuration);
 			numClogged++;
 		}
 
 		if (isolatedRemoteTLog.present() && numClogged > 1) {
-			self->doCheck = true;
+			doCheck = true;
 		}
 
 		co_await Future<Void>(Never());
@@ -370,13 +370,13 @@ struct ClogRemoteTLog : TestWorkload {
 	}
 
 	Future<Void> workload(ClogRemoteTLog* self, Database db) {
-		Future<Void> clog = self->clogRemoteTLog(self, db);
+		Future<Void> clog = clogRemoteTLog(db);
 		TestState testState = TestState::TEST_INIT;
 		self->actualStatePath.push_back(testState);
 		bool statusCheckPassed = false;
 		while (true) {
 			co_await delay(self->lagMeasurementFrequency);
-			Optional<double> ssLag = co_await measureMaxSSLag(self, db);
+			Optional<double> ssLag = co_await measureMaxSSLag(db);
 			if (!ssLag.present()) {
 				continue;
 			}
@@ -400,7 +400,7 @@ struct ClogRemoteTLog : TestWorkload {
 				    remoteTLogNotInDbInfo(self->cloggedRemoteTLog.get(), self->dbInfo->get())) {
 					localState = TestState::CLOGGED_REMOTE_TLOG_EXCLUDED;
 					if (!statusCheckPassed) {
-						co_await store(statusCheckPassed, grayFailureStatusCheck(db, self->cloggedRemoteTLog.get()));
+						statusCheckPassed = co_await grayFailureStatusCheck(db, self->cloggedRemoteTLog.get());
 						ASSERT(statusCheckPassed);
 					}
 					stateTransition = localState != testState;

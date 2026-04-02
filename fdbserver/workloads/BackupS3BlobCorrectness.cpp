@@ -80,19 +80,20 @@
 
 #include <atomic>
 #include "fdbclient/Audit.h"
-#include "fdbclient/AuditUtils.actor.h"
+#include "fdbclient/AuditUtils.h"
 #include "fdbclient/DatabaseConfiguration.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/simulator.h"
-#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.h"
-#include "fdbserver/MockS3Server.h"
-#include "fdbserver/MockS3ServerChaos.h"
+#include "fdbserver/tester/workloads.h"
+#include "fdbserver/tester/TestEncryptionUtils.h"
+#include "BulkSetup.h"
+#include "fdbserver/mocks3/MockS3Server.h"
+#include "fdbserver/mocks3/MockS3ServerChaos.h"
 #include "flow/IRandom.h"
 
 // Counters to verify BulkDump/BulkLoad were actually used
@@ -347,8 +348,44 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		}
 	}
 
-	// Wait for a backup to become restorable, with retries
-	// This handles cases where cluster recoveries delay snapshot completion
+	static Future<Void> verifyBulkDumpObservability(Database cx, UID expectedBackupUID, std::string backupTag) {
+		double startTime = now();
+		double maxWaitTime = 30.0;
+
+		TraceEvent("BS3BCW_ObservabilityCheckStart")
+		    .detail("ExpectedBackupUID", expectedBackupUID)
+		    .detail("BackupTag", backupTag);
+
+		loop {
+			Optional<BulkDumpProgress> progressOpt = co_await getBulkDumpProgress(cx);
+
+			if (progressOpt.present()) {
+				BulkDumpProgress progress = progressOpt.get();
+
+				TraceEvent("BS3BCW_ObservabilityProgress")
+				    .detail("JobId", progress.jobId)
+				    .detail("TotalTasks", progress.totalTasks)
+				    .detail("CompleteTasks", progress.completeTasks)
+				    .detail("ProgressPercent", progress.progressPercent())
+				    .detail("TotalBytes", progress.totalBytes)
+				    .detail("CompletedBytes", progress.completedBytes);
+
+				Optional<BulkDumpOwnerInfo> ownerInfo = co_await getBulkDumpOwner(cx, progress.jobId);
+				if (ownerInfo.present() && ownerInfo.get().ownerUID == expectedBackupUID) {
+					TraceEvent("BS3BCW_ObservabilityVerified").detail("BackupUID", expectedBackupUID);
+					co_return;
+				}
+			}
+
+			if (now() - startTime > maxWaitTime) {
+				TraceEvent(SevWarn, "BS3BCW_ObservabilityTimeout");
+				co_return;
+			}
+
+			co_await delay(5.0);
+		}
+	}
+
 	static Future<Void> waitForRestorable(Reference<IBackupContainer> backupContainer, int maxAttempts) {
 		int restorabilityCheckAttempts = 0;
 		bool isRestorable = false;
@@ -390,19 +427,18 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		    .detail("SnapshotBytes", lastSnapshotBytes);
 	}
 
-	static Future<Void> doBackup(BackupS3BlobCorrectnessWorkload* self,
-	                             double startDelay,
-	                             FileBackupAgent* backupAgent,
-	                             Database cx,
-	                             Key tag,
-	                             Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                             double stopDifferentialDelay,
-	                             Promise<Void> submitted) {
+	Future<Void> doBackup(double startDelay,
+	                      FileBackupAgent* backupAgent,
+	                      Database cx,
+	                      Key tag,
+	                      Standalone<VectorRef<KeyRangeRef>> backupRanges,
+	                      double stopDifferentialDelay,
+	                      Promise<Void> submitted) {
 
 		UID randomID = nondeterministicRandom()->randomUniqueID();
 
 		// Increment the backup agent requests
-		if (self->agentRequest) {
+		if (agentRequest) {
 			BackupS3BlobCorrectnessWorkload::backupAgentRequests++;
 		}
 
@@ -469,7 +505,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		    .detail("StopWhenDone", stopDifferentialDelay ? "False" : "True");
 
 		// S3-specific: Use configurable backup URL and snapshot intervals
-		std::string backupContainer = self->backupURL;
+		std::string backupContainer = backupURL;
 		Future<Void> status = statusLoop(cx, tag.toString());
 
 		// Testing v1 (non-partitioned) backup approach
@@ -478,15 +514,15 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			co_await backupAgent->submitBackup(cx,
 			                                   StringRef(backupContainer),
 			                                   {},
-			                                   self->initSnapshotInterval,
-			                                   self->snapshotInterval,
+			                                   initSnapshotInterval,
+			                                   snapshotInterval,
 			                                   tag.toString(),
 			                                   backupRanges,
 			                                   StopWhenDone{ !stopDifferentialDelay },
 			                                   UsePartitionedLog::False,
 			                                   IncrementalBackupOnly::False,
-			                                   self->encryptionKeyFileName,
-			                                   self->snapshotMode);
+			                                   encryptionKeyFileName,
+			                                   snapshotMode);
 		} catch (Error& e) {
 			TraceEvent("BS3BCW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
@@ -494,6 +530,18 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		}
 
 		submitted.send(Void());
+
+		Future<Void> observabilityCheck = Void();
+		if (snapshotMode == 1 || snapshotMode == 2) {
+			KeyBackedTag keyBackedTag = makeBackupTag(tag.toString());
+			try {
+				UidAndAbortedFlagT uidFlag = co_await keyBackedTag.getOrThrow(cx.getReference());
+				UID backupUID = uidFlag.first;
+				observabilityCheck = verifyBulkDumpObservability(cx, backupUID, tag.toString());
+			} catch (Error& e) {
+				TraceEvent(SevWarn, "BS3BCW_CouldNotGetBackupUID").error(e);
+			}
+		}
 
 		TraceEvent("BS3BCW_DoBackupWaitToDiscontinue", randomID)
 		    .detail("Tag", printable(tag))
@@ -570,8 +618,8 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 
 		if (agentRequest) {
 			Promise<Void> submitted;
-			Future<Void> b = doBackup(
-			    this, backupAfter, &backupAgent, cx, backupTag, backupRanges, stopDifferentialAfter, submitted);
+			Future<Void> b =
+			    doBackup(backupAfter, &backupAgent, cx, backupTag, backupRanges, stopDifferentialAfter, submitted);
 
 			if (abortAndRestartAfter) {
 				TraceEvent("BS3BCW_AbortAndRestartAfter").detail("AbortAndRestartAfter", abortAndRestartAfter);
@@ -587,8 +635,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 				TraceEvent("BS3BCW_AbortComplete").detail("Tag", printable(backupTag));
 				co_await b;
 				TraceEvent("BS3BCW_RestartBackup").detail("Tag", printable(backupTag));
-				b = doBackup(this,
-				             0,
+				b = doBackup(0,
 				             &backupAgent,
 				             cx,
 				             backupTag,

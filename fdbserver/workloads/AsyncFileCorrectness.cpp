@@ -21,11 +21,11 @@
 #include <cinttypes>
 
 #include "fmt/format.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "flow/ActorCollection.h"
 #include "flow/IRandom.h"
 #include "flow/SystemMonitor.h"
-#include "fdbserver/workloads/AsyncFile.actor.h"
+#include "AsyncFile.h"
 
 // An enumeration representing the type of operation to be performed in a correctness test operation
 enum OperationType { READ, WRITE, SYNC, REOPEN, TRUNCATE };

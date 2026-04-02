@@ -21,15 +21,16 @@
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/simulator.h"
-#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
+#include "fdbserver/tester/TestEncryptionUtils.h"
 #include "flow/Arena.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"
@@ -105,7 +106,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 			while (true) {
 				Error err;
 				try {
-					co_await store(v, tr.getReadVersion());
+					v = co_await tr.getReadVersion();
 					break;
 				} catch (Error& e) {
 					err = e;

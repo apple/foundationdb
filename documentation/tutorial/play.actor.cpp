@@ -22,7 +22,7 @@
 #include "flow/Arena.h"
 #include "flow/flow.h"
 #include "flow/Platform.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 #include "flow/actorcompiler.h"
 
 #include <iostream>

@@ -19,7 +19,7 @@
  */
 #ifdef FLOW_GRPC_ENABLED
 #include "fdbctl/ControlCommands.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/Schemas.h"
 #include "fmt/format.h"
 #include <boost/algorithm/string.hpp>
@@ -468,7 +468,7 @@ Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			ThreadFuture<RangeResult> serverListF = tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
-			co_await success(safeThreadFutureToFuture(serverListF));
+			co_await safeThreadFutureToFuture(serverListF);
 			ASSERT(!serverListF.get().more);
 			ASSERT_LT(serverListF.get().size(), CLIENT_KNOBS->TOO_MANY);
 			RangeResult serverList = serverListF.get();
@@ -502,8 +502,8 @@ Future<bool> getWorkersProcessData(Reference<IDatabase> db, std::vector<ProcessD
 			ThreadFuture<RangeResult> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
 			ThreadFuture<RangeResult> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
 
-			co_await success(safeThreadFutureToFuture(processClasses));
-			co_await success(safeThreadFutureToFuture(processData));
+			co_await safeThreadFutureToFuture(processClasses);
+			co_await safeThreadFutureToFuture(processData);
 
 			ASSERT(!processClasses.get().more && processClasses.get().size() < CLIENT_KNOBS->TOO_MANY);
 			ASSERT(!processData.get().more && processData.get().size() < CLIENT_KNOBS->TOO_MANY);

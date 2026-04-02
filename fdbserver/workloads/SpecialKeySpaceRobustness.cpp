@@ -21,11 +21,12 @@
 #include "boost/lexical_cast.hpp"
 #include "boost/algorithm/string.hpp"
 
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/Schemas.h"
-#include "fdbclient/SpecialKeySpace.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbclient/SpecialKeySpace.h"
+#include "fdbserver/tester/workloads.h"
+#include "flow/actorcompiler.h"
 
 struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 	static constexpr auto NAME = "SpecialKeySpaceRobustness";

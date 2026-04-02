@@ -19,15 +19,15 @@
  */
 
 #include "fdbclient/DatabaseConfiguration.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/simulator.h"
-#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.h"
+#include "fdbserver/tester/workloads.h"
+#include "BulkSetup.h"
 #include "flow/IRandom.h"
 
 // TODO: explain the purpose of this workload and how it different from the
@@ -273,7 +273,7 @@ struct RestoreWorkload : TestWorkload {
 						co_await delay(5.0);
 
 						tr = makeReference<ReadYourWritesTransaction>(cx);
-						co_await store(taskCount, backupAgent.getTaskCount(tr));
+						taskCount = co_await backupAgent.getTaskCount(tr);
 					}
 
 					RangeResult agentValues =

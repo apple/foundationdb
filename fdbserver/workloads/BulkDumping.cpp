@@ -21,12 +21,12 @@
 #include "fdbclient/BulkDumping.h"
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/MockS3Server.h"
-#include "fdbserver/MockS3ServerChaos.h"
+#include "fdbserver/tester/workloads.h"
+#include "fdbserver/mocks3/MockS3Server.h"
+#include "fdbserver/mocks3/MockS3ServerChaos.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/Platform.h"
@@ -249,8 +249,11 @@ struct BulkDumping : TestWorkload {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				rangeResult.clear();
-				co_await store(rangeResult, krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, endKey)));
-				for (int i = 0; i < rangeResult.size() - 1; ++i) {
+				rangeResult = co_await krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, endKey));
+				if (rangeResult.empty()) {
+					break;
+				}
+				for (int i = 0; i < static_cast<int>(rangeResult.size()) - 1; ++i) {
 					if (rangeResult[i].value.empty()) {
 						continue;
 					}
@@ -491,7 +494,7 @@ struct BulkDumping : TestWorkload {
 		int oldBulkDumpMode = 0;
 		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Setting BulkDump Mode");
 		try {
-			co_await store(oldBulkDumpMode, timeoutError(setBulkDumpMode(cx, 1), modeSetTimeout)); // Enable bulkDump
+			oldBulkDumpMode = co_await timeoutError(setBulkDumpMode(cx, 1), modeSetTimeout); // Enable bulkDump
 			TraceEvent("BulkDumpingWorkLoad").detail("Phase", "BulkDump Mode Set").detail("OldMode", oldBulkDumpMode);
 		} catch (Error& e) {
 			if (e.code() == error_code_timed_out) {
@@ -526,7 +529,7 @@ struct BulkDumping : TestWorkload {
 		    .detail("Phase", "Setting BulkLoad Mode")
 		    .detail("Job", bulkDumpJob.toString());
 		try {
-			co_await store(oldBulkLoadMode, timeoutError(setBulkLoadMode(cx, 1), modeSetTimeout)); // Enable bulkLoad
+			oldBulkLoadMode = co_await timeoutError(setBulkLoadMode(cx, 1), modeSetTimeout); // Enable bulkLoad
 			TraceEvent("BulkDumpingWorkLoad").detail("Phase", "BulkLoad Mode Set").detail("OldMode", oldBulkLoadMode);
 		} catch (Error& e) {
 			if (e.code() == error_code_timed_out) {

@@ -718,8 +718,8 @@ template <class V>
 class ReferencedObject : NonCopyable, public ReferenceCounted<ReferencedObject<V>> {
 public:
 	ReferencedObject() : value() {}
-	ReferencedObject(V const& v) : value(v) {}
-	ReferencedObject(V&& v) : value(std::move(v)) {}
+	explicit ReferencedObject(V const& v) : value(v) {}
+	explicit ReferencedObject(V&& v) : value(std::move(v)) {}
 	ReferencedObject(ReferencedObject&& r) : value(std::move(r.value)) {}
 
 	void operator=(ReferencedObject&& r) { value = std::move(r.value); }
@@ -1522,7 +1522,7 @@ struct ActiveCounter {
 
 	T counter;
 
-	ActiveCounter(T initialValue) : counter(initialValue) {}
+	explicit ActiveCounter(T initialValue) : counter(initialValue) {}
 
 	T getValue() { return counter; }
 
@@ -1547,7 +1547,9 @@ struct ActiveCounter {
 //   lock.error(e);   // Next waiter will get e, future waiters will see broken_promise
 //   lock = Lock();   // Or let Lock and any copies go out of scope.  All waiters will see broken_promise.
 struct FlowMutex {
-	FlowMutex(bool hangOnDroppedMutex = false) : hangOnDroppedMutex(hangOnDroppedMutex) { lastPromise.send(Void()); }
+	explicit FlowMutex(bool hangOnDroppedMutex = false) : hangOnDroppedMutex(hangOnDroppedMutex) {
+		lastPromise.send(Void());
+	}
 
 	bool available() const { return lastPromise.isSet(); }
 
@@ -1596,7 +1598,7 @@ struct FlowLock : NonCopyable, public ReferenceCounted<FlowLock> {
 		FlowLock* lock;
 		int remaining;
 		Releaser() : lock(0), remaining(0) {}
-		Releaser(FlowLock& lock, int64_t amount = 1) : lock(&lock), remaining(amount) {}
+		explicit(false) Releaser(FlowLock& lock, int64_t amount = 1) : lock(&lock), remaining(amount) {}
 		Releaser(Releaser&& r) noexcept : lock(r.lock), remaining(r.remaining) { r.remaining = 0; }
 		void operator=(Releaser&& r) {
 			if (remaining)
@@ -1735,7 +1737,7 @@ private:
 };
 
 struct NotifiedInt {
-	NotifiedInt(int64_t val = 0) : val(val) {}
+	explicit NotifiedInt(int64_t val = 0) : val(val) {}
 
 	Future<Void> whenAtLeast(int64_t limit) {
 		if (val >= limit)
@@ -1871,7 +1873,7 @@ struct YieldedFutureActor final : SAV<Void>,
 	using FastAllocated<YieldedFutureActor>::operator new;
 	using FastAllocated<YieldedFutureActor>::operator delete;
 
-	YieldedFutureActor(Future<Void>&& f) : SAV<Void>(1, 1), in_error_state(Error::fromCode(UNSET_ERROR_CODE)) {
+	explicit YieldedFutureActor(Future<Void>&& f) : SAV<Void>(1, 1), in_error_state(Error::fromCode(UNSET_ERROR_CODE)) {
 		f.addYieldedCallbackAndClear(static_cast<ActorCallback<YieldedFutureActor, 1, Void>*>(this));
 	}
 
@@ -1988,9 +1990,9 @@ public:
 	AndFuture& operator=(AndFuture const& f) = default;
 	AndFuture& operator=(AndFuture&& f) noexcept = default;
 
-	AndFuture(Future<Void> const& f) : futureCount(1), futures{ f } {}
+	explicit(false) AndFuture(Future<Void> const& f) : futureCount(1), futures{ f } {}
 
-	AndFuture(Error const& e) : futureCount(1), futures{ Future<Void>(e) } {}
+	explicit(false) AndFuture(Error const& e) : futureCount(1), futures{ Future<Void>(e) } {}
 
 	operator Future<Void>() { return getFuture(); }
 
@@ -2344,7 +2346,7 @@ template <class T>
 class UnsafeWeakFutureReference {
 public:
 	UnsafeWeakFutureReference() {}
-	UnsafeWeakFutureReference(Future<Reference<T>> future) : data(new UnsafeWeakFutureReferenceData(future)) {}
+	explicit UnsafeWeakFutureReference(Future<Reference<T>> future) : data(new UnsafeWeakFutureReferenceData(future)) {}
 
 	// Returns a future to obtain a normal reference handle
 	// If the future is ready, this creates a Reference<T> to wrap the object
@@ -2370,7 +2372,7 @@ private:
 		Future<Reference<T>> future;
 		Future<Void> moveResultFuture;
 
-		UnsafeWeakFutureReferenceData(Future<Reference<T>> future) : future(future) {
+		explicit UnsafeWeakFutureReferenceData(Future<Reference<T>> future) : future(future) {
 			moveResultFuture = moveResult(this);
 		}
 

@@ -20,10 +20,10 @@
 
 #include <boost/lexical_cast.hpp>
 
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/Schemas.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 
 struct TokenBucket {
 	static constexpr const double addTokensInterval = 0.1;

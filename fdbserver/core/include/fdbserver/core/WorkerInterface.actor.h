@@ -30,11 +30,11 @@
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/TLogInterface.h"
 #include "fdbserver/core/RatekeeperInterface.h"
-#include "fdbclient/ConsistencyScanInterface.actor.h"
+#include "fdbclient/ConsistencyScanInterface.h"
 #include "fdbserver/core/ResolverInterface.h"
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbserver/core/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/core/LogSystemConfig.h"
 #include "fdbrpc/MultiInterface.h"
@@ -1040,7 +1040,7 @@ void startRole(const Role& role,
                const std::string& origination = "Recruited");
 void endRole(const Role& role, UID id, std::string reason, bool ok = true, Error e = Error());
 
-ACTOR Future<Void> traceRole(Role role, UID roleId);
+Future<Void> traceRole(Role role, UID roleId);
 
 struct ServerDBInfo;
 
@@ -1048,93 +1048,8 @@ class Database openDBOnServer(Reference<AsyncVar<ServerDBInfo> const> const& db,
                               TaskPriority taskID = TaskPriority::DefaultEndpoint,
                               LockAware = LockAware::False,
                               EnableLocalityLoadBalance = EnableLocalityLoadBalance::True);
-ACTOR Future<Void> extractClusterInterface(
-    Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>> const> in,
-    Reference<AsyncVar<Optional<struct ClusterInterface>>> out);
-
-ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> ccr,
-                        LocalityData localities,
-                        ProcessClass processClass,
-                        std::string dataFolder,
-                        std::string coordFolder,
-                        int64_t memoryLimit,
-                        std::string metricsConnFile,
-                        std::string metricsPrefix,
-                        int64_t memoryProfilingThreshold,
-                        std::string whitelistBinPaths,
-                        bool consistencyCheckUrgentMode);
-
-ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> ccr,
-                                     Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
-                                     Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
-                                     LocalityData locality,
-                                     Reference<AsyncVar<Optional<UID>>> clusterId);
-
-// These servers are started by workerServer
-class IKeyValueStore;
-class ServerCoordinators;
-class IDiskQueue;
-
-ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
-                                 StorageServerInterface ssi,
-                                 Tag seedTag,
-                                 Version startVersion,
-                                 Version tssSeedVersion,
-                                 ReplyPromise<InitializeStorageReply> recruitReply,
-                                 Reference<AsyncVar<ServerDBInfo> const> db,
-                                 std::string folder);
-
-ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
-                                 StorageServerInterface ssi,
-                                 Reference<AsyncVar<ServerDBInfo> const> db,
-                                 std::string folder,
-                                 Promise<Void> recovered,
-                                 Reference<IClusterConnectionRecord> connRecord);
-
-ACTOR Future<Void> masterServer(MasterInterface mi,
-                                Reference<AsyncVar<ServerDBInfo> const> db,
-                                Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
-                                ServerCoordinators serverCoordinators,
-                                LifetimeToken lifetime,
-                                bool forceRecovery);
-ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
-                                     InitializeCommitProxyRequest req,
-                                     Reference<AsyncVar<ServerDBInfo> const> db,
-                                     std::string whitelistBinPaths);
-ACTOR Future<Void> grvProxyServer(GrvProxyInterface proxy,
-                                  InitializeGrvProxyRequest req,
-                                  Reference<AsyncVar<ServerDBInfo> const> db);
-ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
-                        IDiskQueue* persistentQueue,
-                        Reference<AsyncVar<ServerDBInfo> const> db,
-                        LocalityData locality,
-                        PromiseStream<InitializeTLogRequest> tlogRequests,
-                        UID tlogId,
-                        UID workerID,
-                        bool restoreFromDisk,
-                        Promise<Void> oldLog,
-                        Promise<Void> recovered,
-                        std::string folder,
-                        Reference<AsyncVar<bool>> degraded,
-                        Reference<AsyncVar<UID>> activeSharedTLog,
-                        Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck);
-ACTOR Future<Void> resolver(ResolverInterface resolver,
-                            InitializeResolverRequest initReq,
-                            Reference<AsyncVar<ServerDBInfo> const> db);
-Future<Void> logRouter(TLogInterface interf,
-                       InitializeLogRouterRequest req,
-                       Reference<AsyncVar<ServerDBInfo> const> db);
-Future<Void> dataDistributor(DataDistributorInterface ddi,
-                             Reference<AsyncVar<ServerDBInfo> const> db,
-                             std::string folder);
-ACTOR Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo> const> db);
-ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
-
-ACTOR Future<Void> backupWorker(BackupInterface bi,
-                                InitializeBackupRequest req,
-                                Reference<AsyncVar<ServerDBInfo> const> db);
-
-void registerThreadForProfiling();
+Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>> const> in,
+                                     Reference<AsyncVar<Optional<struct ClusterInterface>>> out);
 
 // Returns true if `address` is used in the db (indicated by `dbInfo`) transaction system and in the db's primary
 // satellite DC.
@@ -1145,10 +1060,6 @@ bool addressInDbAndRemoteDc(
     const NetworkAddress& address,
     Reference<AsyncVar<ServerDBInfo> const> dbInfo,
     Optional<std::vector<NetworkAddress>> storageServers = Optional<std::vector<NetworkAddress>>{});
-
-void updateCpuProfiler(ProfilerRequest req);
-
-typedef decltype(&tLog) TLogFn;
 
 extern bool isSimulatorProcessUnreliable();
 

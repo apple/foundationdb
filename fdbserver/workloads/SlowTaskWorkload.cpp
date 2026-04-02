@@ -21,7 +21,7 @@
 #include <cinttypes>
 
 #include "fmt/format.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "flow/SignalSafeUnwind.h"
 
 // Stress test the slow task profiler or flow profiler

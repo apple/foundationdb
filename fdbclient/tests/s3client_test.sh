@@ -35,6 +35,14 @@ function filter_http_debug {
   echo "${output}" | grep -v "Contents of" | grep -v "^$" | grep -v "^[[:space:]]*$" | grep -v "HTTP" | grep -v "^\[.*\]" | grep -v "^Request Header:" | grep -v "^Response Header:" | grep -v "^Response Code:" | grep -v "^Response ContentLen:" | grep -v "^-- RESPONSE CONTENT--" | grep -v "^--------" | grep -v "^<?xml" | grep -v "^<.*>" | grep -v "^'$" | grep -v "^++"
 }
 
+# Check whether captured output contains a literal string. Avoid echo|grep -q because
+# pipefail can turn grep's early success exit into a false negative via SIGPIPE upstream.
+function output_contains {
+  local output="$1"
+  local needle="$2"
+  grep -Fq -- "${needle}" <<<"${output}"
+}
+
 # Run s3client with proper TLS CA file handling
 # This function handles the case where TLS_CA_FILE might be empty
 function run_s3client {
@@ -466,7 +474,7 @@ function test_list_with_files {
 
     local missing=0
     for i in $(seq 1 "${file_count}"); do
-      if ! echo "${output}" | grep -q "ls_test/file${i}"; then
+      if ! output_contains "${output}" "ls_test/file${i}"; then
         err "Missing file${i} in ls output"
         missing=1
       fi
@@ -549,10 +557,10 @@ function test_list_with_files {
 
     for i in $(seq 1 "${files_per_level}"); do
       local expected="${current_path}/file${current_depth}_${i}"
-      if ! echo "${output}" | grep -q "${expected}"; then
+      if ! output_contains "${output}" "${expected}"; then
         err "Missing ${expected} in ls output"
         log "=== DEBUG: Recursive ls output ==="
-        echo "${output}" | grep -v "HTTP" | head -30
+        awk '!/HTTP/ { print; if (++count == 30) exit }' <<<"${output}"
         log "=== END DEBUG ==="
         missing=1
       fi

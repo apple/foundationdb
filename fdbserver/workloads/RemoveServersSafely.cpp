@@ -19,12 +19,12 @@
  */
 
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/core/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "flow/CoroUtils.h"
 
 template <>
@@ -582,7 +582,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			std::vector<NetworkAddress> coordinators;
 			if (csOptional.present()) {
 				ClusterConnectionString cs = csOptional.get();
-				co_await store(coordinators, cs.tryResolveHostnames());
+				coordinators = co_await cs.tryResolveHostnames();
 			}
 			if (coordinators.size() > 2) {
 				auto randomCoordinator = deterministicRandom()->randomChoice(coordinators);

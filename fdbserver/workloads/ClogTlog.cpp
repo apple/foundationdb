@@ -18,15 +18,15 @@
  * limitations under the License.
  */
 
-#include "fdbclient/GenericManagementAPI.actor.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/GenericManagementAPI.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbserver/core/RecoveryState.h"
-#include "fdbserver/core/ServerDBInfo.actor.h"
-#include "fdbserver/core/TesterInterface.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/ServerDBInfo.h"
+#include "fdbserver/core/TesterInterface.h"
+#include "fdbserver/tester/workloads.h"
 #include "fdbrpc/simulator.h"
 #include "flow/CodeProbe.h"
 #include "flow/NetworkAddress.h"

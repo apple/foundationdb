@@ -21,12 +21,12 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/core/TesterInterface.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.h"
+#include "fdbserver/core/TesterInterface.h"
+#include "fdbserver/tester/workloads.h"
+#include "BulkSetup.h"
 
 // For this test to report properly buggify must be disabled (flow.h) , and failConnection must be disabled in
-// (sim2.actor.cpp)
+// (sim2.cpp)
 struct ReportConflictingKeysWorkload : TestWorkload {
 	static constexpr auto NAME = "ReportConflictingKeys";
 

@@ -52,18 +52,18 @@
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/GlobalConfig.actor.h"
+#include "fdbclient/GlobalConfig.h"
 #include "fdbclient/IKnobCollection.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NameLineage.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbclient/SpecialKeySpace.actor.h"
+#include "fdbclient/SpecialKeySpace.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TransactionLineage.h"
@@ -87,7 +87,7 @@
 #include "flow/Knobs.h"
 #include "flow/Platform.h"
 #include "flow/SystemMonitor.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 #include "fdbclient/Tracing.h"
 #include "flow/UnitTest.h"
 #include "flow/network.h"
@@ -2856,7 +2856,7 @@ struct TSSDuplicateStreamData {
 	// empty constructor for optional?
 	TSSDuplicateStreamData() = default;
 
-	TSSDuplicateStreamData(PromiseStream<StreamReply> stream) : stream(stream) {}
+	explicit TSSDuplicateStreamData(PromiseStream<StreamReply> stream) : stream(stream) {}
 
 	bool done() { return tssComparisonDone.getFuture().isReady(); }
 
@@ -4067,8 +4067,8 @@ public:
 	ValueRef setValue;
 
 	MutationBlock() : mutated(false) {}
-	MutationBlock(bool _cleared) : mutated(true), cleared(_cleared) {}
-	MutationBlock(ValueRef value) : mutated(true), cleared(false), setValue(value) {}
+	explicit MutationBlock(bool _cleared) : mutated(true), cleared(_cleared) {}
+	explicit MutationBlock(ValueRef value) : mutated(true), cleared(false), setValue(value) {}
 };
 
 bool compareBegin(KeyRangeRef lhs, KeyRangeRef rhs) {

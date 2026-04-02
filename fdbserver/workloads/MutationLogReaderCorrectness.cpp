@@ -22,10 +22,10 @@
 #include <limits>
 #include "fmt/format.h"
 #include "fdbrpc/simulator.h"
-#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupContainer.h"
-#include "fdbclient/MutationLogReader.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbclient/MutationLogReader.h"
+#include "fdbserver/tester/workloads.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/flow.h"

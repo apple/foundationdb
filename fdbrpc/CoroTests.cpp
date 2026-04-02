@@ -21,7 +21,7 @@
 #include "flow/UnitTest.h"
 #include "flow/IAsyncFile.h"
 #include "fdbrpc/fdbrpc.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 
 #include <sstream>
 #include <cstdint>
@@ -171,6 +171,16 @@ Future<int> sumActor(FutureStream<int> in) {
 template <class T>
 Future<T> templateActor(T t) {
 	return t;
+}
+
+Future<int> coroValueAfterYield(int value) {
+	co_await delay(0);
+	co_return value;
+}
+
+Future<int> coroErrorAfterYield() {
+	co_await delay(0);
+	throw operation_failed();
 }
 
 // bool expectActorCount(int x) { return actorCount == x; }
@@ -328,6 +338,55 @@ TEST_CASE("/flow/coro/cancel2") {
 	cf = Future<Void>();
 	ASSERT(c2 == 1 && c3 == 1);
 	return Void();
+}
+
+TEST_CASE("/flow/coro/errorOr/ReadyValue") {
+	ErrorOr<int> result = co_await coro::errorOr(Future<int>(42));
+	ASSERT(result.present());
+	ASSERT_EQ(result.get(), 42);
+}
+
+TEST_CASE("/flow/coro/errorOr/ReadyError") {
+	ErrorOr<int> result = co_await coro::errorOr(Future<int>(operation_failed()));
+	ASSERT(result.isError());
+	ASSERT_EQ(result.getError().code(), error_code_operation_failed);
+}
+
+TEST_CASE("/flow/coro/errorOr/AsyncValue") {
+	ErrorOr<int> result = co_await coro::errorOr(coroValueAfterYield(7));
+	ASSERT(result.present());
+	ASSERT_EQ(result.get(), 7);
+}
+
+TEST_CASE("/flow/coro/errorOr/AsyncError") {
+	ErrorOr<int> result = co_await coro::errorOr(coroErrorAfterYield());
+	ASSERT(result.isError());
+	ASSERT_EQ(result.getError().code(), error_code_operation_failed);
+}
+
+TEST_CASE("/flow/coro/ignore/ReadyValue") {
+	Void ignored = co_await coro::ignore(Future<int>(42));
+	(void)ignored;
+}
+
+TEST_CASE("/flow/coro/ignore/ReadyError") {
+	try {
+		co_await coro::ignore(Future<int>(operation_failed()));
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_operation_failed);
+	}
+}
+
+TEST_CASE("/flow/coro/errorOrIgnore/AsyncValue") {
+	ErrorOr<Void> result = co_await coro::errorOr(coro::ignore(coroValueAfterYield(9)));
+	ASSERT(result.present());
+}
+
+TEST_CASE("/flow/coro/errorOrIgnore/AsyncError") {
+	ErrorOr<Void> result = co_await coro::errorOr(coro::ignore(coroErrorAfterYield()));
+	ASSERT(result.isError());
+	ASSERT_EQ(result.getError().code(), error_code_operation_failed);
 }
 
 TEST_CASE("/flow/coro/trivial_actors") {
@@ -1133,6 +1192,44 @@ struct Tracker {
 	}
 };
 
+struct LifetimeTracked {
+	inline static int liveCount = 0;
+
+	LifetimeTracked() { ++liveCount; }
+	LifetimeTracked(const LifetimeTracked&) { ++liveCount; }
+	LifetimeTracked(LifetimeTracked&&) noexcept { ++liveCount; }
+	LifetimeTracked& operator=(const LifetimeTracked&) = default;
+	LifetimeTracked& operator=(LifetimeTracked&&) noexcept = default;
+	~LifetimeTracked() { --liveCount; }
+};
+
+AsyncResult<Tracker> immediateAsyncResultTracker() {
+	co_return Tracker{};
+}
+
+AsyncResult<Tracker> delayedAsyncResultTracker(Future<Void> signal) {
+	co_await signal;
+	co_return Tracker{};
+}
+
+AsyncResult<int> immediateAsyncResultInt(int value) {
+	co_return value;
+}
+
+AsyncResult<int> delayedAsyncResultInt(Future<Void> signal, int value) {
+	co_await signal;
+	co_return value;
+}
+
+AsyncResult<int> failingAsyncResultInt(Future<Void> signal) {
+	co_await signal;
+	throw io_error();
+}
+
+AsyncResult<LifetimeTracked> immediateAsyncResultLifetimeTracked() {
+	co_return LifetimeTracked{};
+}
+
 } // namespace
 
 TEST_CASE("/flow/coro/PromiseStream/move") {
@@ -1200,6 +1297,39 @@ TEST_CASE("/flow/coro/PromiseStream/move2") {
 	ASSERT(tracker.moved);
 	ASSERT(!movedTracker.moved);
 	ASSERT(movedTracker.copied == 0);
+}
+
+TEST_CASE("/flow/coro/AsyncResult/move") {
+	{
+		Tracker tracker = co_await immediateAsyncResultTracker();
+		ASSERT(!tracker.moved);
+		ASSERT(tracker.copied == 0);
+	}
+
+	{
+		Promise<Void> signal;
+		AsyncResult<Tracker> result = delayedAsyncResultTracker(signal.getFuture());
+		signal.send(Void());
+		Tracker tracker = co_await result;
+		ASSERT(!tracker.moved);
+		ASSERT(tracker.copied == 0);
+	}
+}
+
+TEST_CASE("/flow/coro/AsyncResult/releaseDestroysState") {
+	ASSERT_EQ(LifetimeTracked::liveCount, 0);
+
+	{
+		AsyncResult<LifetimeTracked> result = immediateAsyncResultLifetimeTracked();
+		ASSERT_GT(LifetimeTracked::liveCount, 0);
+	}
+	ASSERT_EQ(LifetimeTracked::liveCount, 0);
+
+	{
+		LifetimeTracked value = co_await immediateAsyncResultLifetimeTracked();
+		ASSERT_GT(LifetimeTracked::liveCount, 0);
+	}
+	ASSERT_EQ(LifetimeTracked::liveCount, 0);
 }
 
 namespace {
@@ -2079,5 +2209,41 @@ TEST_CASE("/flow/coro/raceStreamSuccess") {
 	auto result = co_await raced;
 	ASSERT_EQ(result.index(), 0);
 	ASSERT_EQ(std::get<0>(result), 13);
+	co_return;
+}
+
+TEST_CASE("/flow/coro/raceAsyncResultReady") {
+	Future<std::variant<int, std::string>> raced = race(immediateAsyncResultInt(17), Future<std::string>("later"));
+	ASSERT(raced.isReady());
+	auto result = raced.get();
+	ASSERT_EQ(result.index(), 0);
+	ASSERT_EQ(std::get<0>(result), 17);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/raceAsyncResultSuccess") {
+	Promise<Void> signal;
+	Promise<std::string> stringPromise;
+	Future<std::variant<int, std::string>> raced =
+	    race(delayedAsyncResultInt(signal.getFuture(), 19), stringPromise.getFuture());
+	signal.send(Void());
+	auto result = co_await raced;
+	ASSERT_EQ(result.index(), 0);
+	ASSERT_EQ(std::get<0>(result), 19);
+	co_return;
+}
+
+TEST_CASE("/flow/coro/raceAsyncResultError") {
+	Promise<Void> signal;
+	Promise<std::string> stringPromise;
+	Future<std::variant<int, std::string>> raced =
+	    race(failingAsyncResultInt(signal.getFuture()), stringPromise.getFuture());
+	signal.send(Void());
+	try {
+		co_await raced;
+		ASSERT(false);
+	} catch (Error const& e) {
+		ASSERT_EQ(e.code(), error_code_io_error);
+	}
 	co_return;
 }

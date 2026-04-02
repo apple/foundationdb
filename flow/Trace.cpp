@@ -39,7 +39,7 @@
 #include "flow/IThreadPool.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/FastRef.h"
-#include "flow/EventTypes.actor.h"
+#include "flow/EventTypes.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/MetricSample.h"
 #include "flow/network.h"
@@ -134,11 +134,11 @@ private:
 	uint64_t rollsize;
 	Mutex mutex;
 
-	EventMetricHandle<TraceEventNameID> SevErrorNames;
-	EventMetricHandle<TraceEventNameID> SevWarnAlwaysNames;
-	EventMetricHandle<TraceEventNameID> SevWarnNames;
-	EventMetricHandle<TraceEventNameID> SevInfoNames;
-	EventMetricHandle<TraceEventNameID> SevDebugNames;
+	EventMetricHandle<TraceEventNameIDDescriptor> SevErrorNames;
+	EventMetricHandle<TraceEventNameIDDescriptor> SevWarnAlwaysNames;
+	EventMetricHandle<TraceEventNameIDDescriptor> SevWarnNames;
+	EventMetricHandle<TraceEventNameIDDescriptor> SevInfoNames;
+	EventMetricHandle<TraceEventNameIDDescriptor> SevDebugNames;
 
 	struct RoleInfo {
 		std::map<std::string, int> roles;
@@ -435,7 +435,7 @@ public:
 	void logMetrics(int severity, const char* name, UID id, uint64_t event_ts) {
 		ASSERT(TraceEvent::isNetworkThread() && logTraceEventMetrics);
 
-		EventMetricHandle<TraceEventNameID>* m = nullptr;
+		EventMetricHandle<TraceEventNameIDDescriptor>* m = nullptr;
 		switch (severity) {
 		case SevError:
 			m = &SevErrorNames;

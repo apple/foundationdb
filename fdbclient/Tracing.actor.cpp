@@ -163,7 +163,8 @@ private:
 	// Writes the given vector of linked SpanContext's to the request. If the vector is
 	// empty, the request is not modified.
 	inline void serialize_vector(const SmallVectorRef<SpanContext>& vec, MsgpackBuffer& buf) {
-		int size = vec.size();
+		// Each SpanContext produces 3 MsgPack elements: traceID.first, traceID.second, spanID
+		int size = vec.size() * 3;
 		if (size <= 15) {
 			buf.write_byte(static_cast<uint8_t>(size) | 0b10010000);
 		} else if (size <= 65535) {
@@ -185,7 +186,8 @@ private:
 	// Writes the given vector of linked SpanEventRef's to the request. If the vector is
 	// empty, the request is not modified.
 	inline void serialize_vector(const SmallVectorRef<SpanEventRef>& vec, MsgpackBuffer& buf) {
-		int size = vec.size();
+		// Each SpanEventRef produces 3 MsgPack elements: name, time, attributes
+		int size = vec.size() * 3;
 		if (size <= 15) {
 			buf.write_byte(static_cast<uint8_t>(size) | 0b10010000);
 		} else if (size <= 65535) {
@@ -264,10 +266,20 @@ struct FastUDPTracer : public UDPTracer {
 				// Force loopback when in simulation mode
 				destAddr = "127.0.0.1";
 			}
-			NetworkAddress destAddress =
-			    NetworkAddress::parse(destAddr + ":" + std::to_string(FLOW_KNOBS->TRACING_UDP_LISTENER_PORT));
-
-			socket_ = INetworkConnections::net()->createUDPSocket(destAddress);
+			// NetworkAddress::parse() only accepts literal IP addresses, not hostnames.
+			// If the knob is set to a DNS name, parse() throws connection_string_invalid.
+			// Catch it here and disable tracing gracefully instead of crashing the process.
+			try {
+				NetworkAddress destAddress =
+				    NetworkAddress::parse(destAddr + ":" + std::to_string(FLOW_KNOBS->TRACING_UDP_LISTENER_PORT));
+				socket_ = INetworkConnections::net()->createUDPSocket(destAddress);
+			} catch (Error& e) {
+				TraceEvent(SevWarnAlways, "TracingInvalidListenerAddress")
+				    .error(e)
+				    .detail("Address", destAddr)
+				    .detail("Hint", "TRACING_UDP_LISTENER_ADDR must be a literal IP address, not a hostname");
+				send_error_ = true; // disable tracing for this process
+			}
 		});
 
 		if (size == 0) {
@@ -275,15 +287,14 @@ struct FastUDPTracer : public UDPTracer {
 		}
 
 		++total_messages_;
+		if (send_error_) {
+			return;
+		}
 		if (!socket_.isReady()) {
 			++unready_socket_messages_;
 			return;
 		} else if (socket_fd_ == -1) {
 			socket_fd_ = socket_.get()->native_handle();
-		}
-
-		if (send_error_) {
-			return;
 		}
 	}
 
@@ -607,7 +618,7 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	ASSERT(data[70] == 0xcc);
 	ASSERT(data[71] == static_cast<uint8_t>(SpanStatus::OK));
 	// Linked SpanContext
-	ASSERT(data[72] == 0b10010001);
+	ASSERT(data[72] == 0b10010011); // 3 elements: traceID.first, traceID.second, spanID
 	ASSERT(data[73] == 0xcf);
 	ASSERT(swapUint64BE(&data[74]) == 200);
 	ASSERT(data[82] == 0xcf);
@@ -646,7 +657,7 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	ASSERT(data[72] == 0xcc);
 	ASSERT(data[73] == static_cast<uint8_t>(SpanStatus::OK));
 	// Linked SpanContext
-	ASSERT(data[74] == 0b10010001);
+	ASSERT(data[74] == 0b10010011); // 3 elements: traceID.first, traceID.second, spanID
 	ASSERT(data[75] == 0xcf);
 	ASSERT(swapUint64BE(&data[76]) == 300);
 	ASSERT(data[84] == 0xcf);
@@ -654,7 +665,7 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	ASSERT(data[93] == 0xcf);
 	ASSERT(swapUint64BE(&data[94]) == 400);
 	// Events
-	ASSERT(data[102] == 0b10010001); // empty
+	ASSERT(data[102] == 0b10010011); // 3 elements: name, time, attributes
 	ASSERT(readMPString(&data[103]) == "event1");
 	ASSERT(data[110] == 0xcb);
 	ASSERT(swapDoubleBE(&data[111]) == 100.101);

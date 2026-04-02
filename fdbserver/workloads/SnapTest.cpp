@@ -19,17 +19,16 @@
  */
 
 #include <boost/lexical_cast.hpp>
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/SimpleIni.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/Status.actor.h"
-#include "fdbserver/core/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "fdbserver/workloads/BulkSetup.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "BulkSetup.h"
+#include "fdbserver/tester/workloads.h"
 
 struct SnapTestWorkload : TestWorkload {
 	static constexpr auto NAME = "SnapTest";

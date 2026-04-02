@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/workloads/MockDDTest.h"
+#include "MockDDTest.h"
 #include "flow/CoroUtils.h"
 
 class MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
@@ -100,9 +100,9 @@ public:
 		Reference<InitialDataDistribution> initData =
 		    mock->getInitialDataDistribution(ddcx.id(), ddcx.lock, {}, ddcx.ddEnabledState.get(), SkipDDModeCheck::True)
 		        .get();
-		Reference<PhysicalShardCollection> physicalShardCollection = makeReference<PhysicalShardCollection>();
-		Reference<BulkLoadTaskCollection> bulkLoadTaskCollection = makeReference<BulkLoadTaskCollection>(ddcx.id());
-		Reference<AsyncVar<bool>> zeroHealthyTeams = makeReference<AsyncVar<bool>>(false);
+		auto physicalShardCollection = makeReference<PhysicalShardCollection>();
+		auto bulkLoadTaskCollection = makeReference<BulkLoadTaskCollection>(ddcx.id());
+		auto zeroHealthyTeams = makeReference<AsyncVar<bool>>(false);
 
 		shardTracker = makeReference<DataDistributionTracker>(
 		    DataDistributionTrackerInitParams{ .db = mock,

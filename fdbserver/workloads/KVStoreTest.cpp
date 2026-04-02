@@ -22,9 +22,9 @@
 #include <cinttypes>
 #include "fdbclient/FDBTypes.h"
 #include "fmt/format.h"
-#include "fdbserver/core/ServerDBInfo.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/core/ServerDBInfo.h"
+#include "fdbserver/tester/workloads.h"
+#include "fdbserver/core/IKeyValueStore.h"
 #include "flow/ActorCollection.h"
 #include "flow/CoroUtils.h"
 

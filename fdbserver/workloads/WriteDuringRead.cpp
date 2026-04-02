@@ -19,12 +19,12 @@
  */
 
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/core/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/ActorCollection.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "fdbclient/Atomic.h"
 #include "flow/ApiVersion.h"
 #include "flow/CoroUtils.h"

@@ -423,6 +423,11 @@ Value backupProgressValue(const WorkerBackupStatus& status);
 UID decodeBackupProgressKey(const KeyRef& key);
 WorkerBackupStatus decodeBackupProgressValue(const ValueRef& value);
 
+//   "\xff\x02/backupRangePartitionedProgress/[[workerID]]" := "[[WorkerBackupStatus]]"
+extern const KeyRangeRef backupRangePartitionedProgressKeys;
+extern const KeyRef backupRangePartitionedProgressPrefix;
+Key backupRangePartitionedProgressKey(UID workerID);
+
 // The key to signal when partition map has been uploaded for a given version.
 //    "\xff\x02/backupRangePartitionedMapUploaded/<version>" := "1"
 extern const KeyRef backupRangePartitionedMapUploadedPrefix;
@@ -514,6 +519,17 @@ extern const KeyRangeRef bulkDumpKeys;
 extern const KeyRef bulkDumpPrefix;
 Value bulkDumpStateValue(const BulkDumpState& bulkDumpState);
 BulkDumpState decodeBulkDumpState(const ValueRef& value);
+
+// BulkDump owner tracking - stored separately for backward compatibility
+// "\xff/bulkDumpOwner/[[jobId]]" := "[[BulkDumpOwnerInfo]]"
+extern const KeyRangeRef bulkDumpOwnerKeys;
+extern const KeyRef bulkDumpOwnerPrefix;
+
+// "\xff/bulkLoadOwner/[[jobId]]" := "[[BulkDumpOwnerInfo]]" (reuses same struct)
+extern const KeyRangeRef bulkLoadOwnerKeys;
+extern const KeyRef bulkLoadOwnerPrefix;
+const Key bulkDumpOwnerKeyFor(const UID& jobId);
+const Key bulkLoadOwnerKeyFor(const UID& jobId);
 
 extern const std::string rangeLockNameForBulkLoad;
 extern const KeyRangeRef rangeLockKeys;

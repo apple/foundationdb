@@ -23,8 +23,8 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.h"
+#include "fdbserver/tester/workloads.h"
+#include "BulkSetup.h"
 
 #include "flow/Error.h"
 #include "flow/Trace.h"

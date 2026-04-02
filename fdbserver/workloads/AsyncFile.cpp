@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "flow/ActorCollection.h"
-#include "fdbserver/workloads/AsyncFile.actor.h"
+#include "AsyncFile.h"
 
 // class RandomByteGenerator
 

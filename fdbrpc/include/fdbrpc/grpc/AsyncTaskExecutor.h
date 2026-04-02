@@ -59,7 +59,6 @@ concept IsVoidReturn = std::is_void_v<std::invoke_result_t<Func>>;
 //     });
 //
 // - TODO: Move this to more standard location inside codebase.
-// - TODO: Remove AsyncTaskThread which has similar purpose however implemented differently?
 class AsyncTaskExecutor {
 public:
 	explicit AsyncTaskExecutor(int num_threads) {
