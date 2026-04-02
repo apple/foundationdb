@@ -71,8 +71,8 @@ void ISFreeNodesSync(std::vector<Node*> toFree) {
 	}
 }
 
-ACTOR template <class Node>
-[[flow_allow_discard]] Future<Void> ISFreeNodes(std::vector<Node*> toFree) {
+template <class Node>
+Future<Void> ISFreeNodes(std::vector<Node*> toFree) {
 	// Frees the forest of nodes in the 'toFree' vector, yielding periodically.
 
 	state int eraseCount = 0;
@@ -80,11 +80,10 @@ ACTOR template <class Node>
 	while (ISFreeNodeImpl(toFree, prefetchQueue)) {
 		++eraseCount;
 
-		if (eraseCount % 1000 == 0)
-			wait(yield());
+		if (eraseCount % 1000 == 0) {
+			co_await yield();
+		}
 	}
-
-	return Void();
 }
 
 #include "flow/unactorcompiler.h"
