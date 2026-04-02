@@ -23,7 +23,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/Arena.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/TDMetric.h"
 #include "flow/serialize.h"
 #include "flow/UnitTest.h"
 

@@ -44,7 +44,7 @@
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/SystemMonitor.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/TDMetric.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "MetricLogger.actor.h"

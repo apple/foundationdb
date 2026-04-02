@@ -105,7 +105,7 @@
 #include "flow/IRandom.h"
 #include "flow/IndexedSet.h"
 #include "flow/SystemMonitor.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/TDMetric.h"
 #include "flow/Trace.h"
 #include "flow/Util.h"
 #include "flow/genericactors.actor.h"
