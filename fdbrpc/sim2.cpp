@@ -479,24 +479,25 @@ private:
 	}
 	static Future<Void> receiver(Sim2Conn* self) {
 		loop {
+			TaskPriority currentTaskID = g_network->getCurrentTask();
 			if (self->sentBytes.get() != self->receivedBytes.get())
-				co_await g_simulator->onProcess(self->peerProcess);
+				co_await g_simulator->onProcess(self->peerProcess, currentTaskID);
 			while (self->sentBytes.get() == self->receivedBytes.get()) {
 				if (self->stopReceive.isReady()) {
 					// stopReceive can become ready on the peer-closing process, but incomingClosed must notify readers
 					// on the owning receiver process.
-					co_await g_simulator->onProcess(self->process);
+					co_await g_simulator->onProcess(self->process, currentTaskID);
 					if (self->stopReceive.isReady() && self->sentBytes.get() == self->receivedBytes.get()) {
 						self->incomingClosed.set(true);
 						co_return;
 					}
-					co_await g_simulator->onProcess(self->peerProcess);
+					co_await g_simulator->onProcess(self->peerProcess, currentTaskID);
 					continue;
 				}
 				co_await (self->sentBytes.onChange() || self->stopReceive);
 				if (g_simulator->getCurrentProcess() != self->peerProcess) {
 					// sentBytes notifications arrive on peerProcess, but stopReceive can resume us on the closer.
-					co_await g_simulator->onProcess(self->peerProcess);
+					co_await g_simulator->onProcess(self->peerProcess, currentTaskID);
 				}
 			}
 			ASSERT(g_simulator->getCurrentProcess() == self->peerProcess);
@@ -516,7 +517,7 @@ private:
 			        : deterministicRandom()->randomInt64(self->receivedBytes.get(), self->sentBytes.get() + 1);
 			co_await delay(g_clogging.getSendDelay(
 			    self->peerProcess->address, self->process->address, self->isStableConnection()));
-			co_await g_simulator->onProcess(self->process);
+			co_await g_simulator->onProcess(self->process, currentTaskID);
 			ASSERT(g_simulator->getCurrentProcess() == self->process);
 			co_await delay(g_clogging.getRecvDelay(
 			    self->peerProcess->address, self->process->address, self->isStableConnection()));
