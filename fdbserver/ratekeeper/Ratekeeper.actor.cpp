@@ -1003,8 +1003,9 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		const auto scaledTargetBytes = static_cast<int64_t>(limits->logTargetBytes * diskBudgetRatio);
 		const auto targetBytes =
 		    std::max(int64_t{ 1 }, std::min(std::max(int64_t{ 1 }, scaledTargetBytes), availableAboveMinBytes));
-		if (diskBudgetRatio < 1.0) {
-			CODE_PROBE(true, "Ratekeeper tlog disk budget ratio below one");
+
+		CODE_PROBE(diskBudgetRatio < 1.0, "Ratekeeper tlog disk budget ratio below one");
+		if (targetBytes != limits->logTargetBytes) {
 			if (minFreeSpace == SERVER_KNOBS->MIN_AVAILABLE_SPACE) {
 				tlogLimitReason = limitReason_t::log_server_min_free_space;
 			} else {
