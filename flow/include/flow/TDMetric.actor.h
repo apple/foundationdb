@@ -30,6 +30,7 @@
 #include "flow/TDMetric.actor.g.h"
 #elif !defined(FLOW_TDMETRIC_ACTOR_H)
 #define FLOW_TDMETRIC_ACTOR_H
+#include <array>
 #include <string>
 #include <unordered_map>
 #include "flow/flow.h"
@@ -39,8 +40,9 @@
 #include "flow/CompressedInt.h"
 #include "flow/OTELMetrics.h"
 #include <algorithm>
-#include <functional>
 #include <cmath>
+#include <functional>
+#include <type_traits>
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 enum MetricsDataModel { STATSD = 0, OTLP, NONE };
@@ -394,14 +396,103 @@ auto tuple_map(F f, const Tuple& t, const Tuples&... ts) -> decltype(tuple_map_i
 	    f, typename make_index_sequence_impl<0, index_sequence<>, std::tuple_size<Tuple>::value>::type(), t, ts...);
 }
 
+template <class Tuple>
+using tuple_indexes_t = typename make_index_sequence_impl<0, index_sequence<>, std::tuple_size<Tuple>::value>::type;
+
 template <class T>
 struct Descriptor {
+	// Specialize Descriptor<T> next to each metric payload struct, typically by inheriting from
+	// DescribeType<T, "...", DescribeField<&T::member, "...">, ...>.
 #ifndef NO_INTELLISENSE
 	using fields = std::tuple<>;
-	using field_indexes = make_index_sequence_impl<0, index_sequence<>, std::tuple_size<fields>::value>::type;
+	using field_indexes = tuple_indexes_t<fields>;
 
 	static StringRef typeName() { return ""_sr; }
 #endif
+};
+
+// String literals need a wrapper type before they can be used as non-type template parameters.
+template <size_t N>
+struct FixedString {
+	std::array<char, N> value{};
+
+	constexpr FixedString(const char (&str)[N]) {
+		for (size_t i = 0; i < N; ++i) {
+			value[i] = str[i];
+		}
+	}
+
+	constexpr size_t size() const { return N - 1; }
+};
+
+template <size_t N>
+FixedString(const char (&)[N]) -> FixedString<N>;
+
+template <FixedString Str>
+StringRef fixedStringRef() {
+	return StringRef(reinterpret_cast<const uint8_t*>(Str.value.data()), Str.size());
+}
+
+template <auto MemberPtr>
+struct MemberPointerTraits;
+
+// DescribeField only takes a member pointer at the call site; recover the owning class and field type here.
+template <class Class, class FieldType, FieldType Class::* MemberPtr>
+struct MemberPointerTraits<MemberPtr> {
+	using class_type = Class;
+	using field_type = FieldType;
+};
+
+template <typename T>
+inline StringRef describeFieldTypeName() {
+	return metricTypeName<T>();
+}
+
+template <>
+inline StringRef describeFieldTypeName<int64_t>() {
+	return "int64_t"_sr;
+}
+
+template <>
+inline StringRef describeFieldTypeName<double>() {
+	return "double"_sr;
+}
+
+template <>
+inline StringRef describeFieldTypeName<bool>() {
+	return "bool"_sr;
+}
+
+template <>
+inline StringRef describeFieldTypeName<Standalone<StringRef>>() {
+	return "Standalone<StringRef>"_sr;
+}
+
+// One field entry inside a Descriptor<T> specialization.
+// Use DescribeField<&T::member, "memberName", "optional comment">.
+template <auto MemberPtr, FixedString Name, FixedString Comment = "">
+struct DescribeField {
+	using traits = MemberPointerTraits<MemberPtr>;
+	using class_type = typename traits::class_type;
+	using type = typename traits::field_type;
+
+	static StringRef name() { return fixedStringRef<Name>(); }
+	static StringRef typeName() { return describeFieldTypeName<type>(); }
+	static StringRef comment() { return fixedStringRef<Comment>(); }
+	static inline type get(class_type& from) { return from.*MemberPtr; }
+};
+
+// Shared implementation for Descriptor<T> specializations. The specialization names the metric type
+// and lists its exported fields in the order they should appear in TDMetric output.
+template <class Self, FixedString TypeName, class... Fields>
+struct DescribeType {
+	static_assert((std::is_same_v<Self, typename Fields::class_type> && ...));
+
+	static StringRef typeName() { return fixedStringRef<TypeName>(); }
+
+	using type = Self;
+	using fields = std::tuple<Fields...>;
+	using field_indexes = tuple_indexes_t<fields>;
 };
 
 // FieldHeader is a serializable (FIXED SIZE!) and updatable Header type for Metric field levels.

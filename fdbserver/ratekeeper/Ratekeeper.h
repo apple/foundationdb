@@ -26,7 +26,7 @@
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbserver/core/RatekeeperLimitReasons.h"
 #include "fdbserver/core/RatekeeperInterface.h"
@@ -127,8 +127,6 @@ struct RatekeeperLimits {
 };
 
 class Ratekeeper {
-	friend class RatekeeperImpl;
-
 	struct GrvProxyInfo {
 		int64_t totalTransactions{ 0 };
 		int64_t batchTransactions{ 0 };
@@ -207,13 +205,25 @@ class Ratekeeper {
 	Future<Void> refreshStorageServerCommitCosts();
 	Future<Void> monitorServerListChange(PromiseStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges);
 	Future<Void> trackStorageServerQueueInfo(StorageServerInterface);
+	Future<Void> monitorStorageServerQueueSizeInSimulation();
 	Future<Void> trackTLogQueueInfo(TLogInterface);
+	Future<Void> trackEachStorageServer(FutureStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges);
 
 	void tryAutoThrottleTag(TransactionTag, double rate, double busyness, TagThrottledReason);
 	void tryAutoThrottleTag(StorageQueueInfo&, int64_t storageQueue, int64_t storageDurabilityLag);
 	Future<Void> monitorThrottlingChanges();
 	Future<Void> monitorBlobWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 	Future<Void> monitorHotShards(Reference<AsyncVar<ServerDBInfo> const> dbInfo);
+	Future<Void> handleReportCommitCostEstimationReqs(RatekeeperInterface rkInterf);
+	Future<Void> handleGetSSVersionLagReqs(RatekeeperInterface rkInterf);
+	Future<Void> handleGetRateInfoReqs(RatekeeperInterface rkInterf, Version* recoveryVersion, bool* lastLimited);
+	Future<Void> handleDBInfoChanges(Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+	                                 bool* recovering,
+	                                 Version* recoveryVersion,
+	                                 std::vector<TLogInterface>* tlogInterfs,
+	                                 std::vector<Future<Void>>* tlogTrackers,
+	                                 Promise<Void>* err);
+	Future<Void> rateUpdater(bool* lastLimited);
 
 	void getSSVersionLag(Version& maxSSPrimaryVersion, Version& maxSSRemoteVersion);
 

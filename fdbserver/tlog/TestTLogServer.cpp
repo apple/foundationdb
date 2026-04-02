@@ -25,7 +25,7 @@
 
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/ReplicationPolicy.h"
-#include "fdbserver/core/ServerDBInfo.actor.h"
+#include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/kvstore/IDiskQueue.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/TLogInterface.h"

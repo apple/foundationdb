@@ -29,7 +29,6 @@
 #include "fdbserver/core/LogProtocolMessage.h"
 #include "fdbserver/core/LogSystem.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
-#include "fdbserver/core/ServerDBInfo.actor.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/backupworker/BackupWorker.h"

@@ -23,7 +23,7 @@
 #pragma once
 
 #include "fdbrpc/fdbrpc.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 
 #include <map>
 

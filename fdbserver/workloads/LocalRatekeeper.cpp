@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "fdbserver/core/Knobs.h"
 
 namespace {

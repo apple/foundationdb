@@ -21,7 +21,7 @@
 #include "fdbcli/fdbcli.h"
 
 #include "fdbclient/IClientApi.h"
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/CommitTransaction.h"

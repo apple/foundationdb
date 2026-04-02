@@ -1677,9 +1677,9 @@ public:
 						interfaceChanged = server->onInterfaceChanged;
 						// Old failureTracker for the old interface will be actorCancelled since the handler of the old
 						// actor now points to the new failure monitor actor.
-						status = ServerStatus(status.isFailed,
-						                      status.isUndesired,
-						                      status.isWiggling,
+						status = ServerStatus(IsFailed(status.isFailed),
+						                      IsUndesired(status.isUndesired),
+						                      IsWiggling(status.isWiggling),
 						                      server->getLastKnownInterface().locality);
 
 						// self->traceTeamCollectionInfo();
@@ -6210,7 +6210,8 @@ public:
 			interface.locality.set("data_hall"_sr, Standalone<StringRef>(std::to_string(id % 3)));
 			collection->server_info[uid] = makeReference<TCServerInfo>(
 			    interface, collection.get(), ProcessClass(), true, collection->storageServerSet);
-			collection->server_status.set(uid, ServerStatus(false, false, false, interface.locality));
+			collection->server_status.set(
+			    uid, ServerStatus(IsFailed::False, IsUndesired::False, IsWiggling::False, interface.locality));
 			collection->checkAndCreateMachine(collection->server_info[uid]);
 		}
 
@@ -6278,7 +6279,8 @@ public:
 			collection->server_info[uid] = makeReference<TCServerInfo>(
 			    interface, collection.get(), ProcessClass(), true, collection->storageServerSet);
 
-			collection->server_status.set(uid, ServerStatus(false, false, false, interface.locality));
+			collection->server_status.set(
+			    uid, ServerStatus(IsFailed::False, IsUndesired::False, IsWiggling::False, interface.locality));
 		}
 
 		int totalServerIndex = collection->constructMachinesFromServers();

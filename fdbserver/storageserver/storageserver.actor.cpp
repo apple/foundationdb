@@ -40,7 +40,7 @@
 #include "fdbrpc/LoadBalance.h"
 #include "fdbserver/core/AccumulativeChecksumUtil.h"
 #include "fdbserver/core/BulkDumpUtil.h"
-#include "fdbserver/core/BulkLoadUtil.actor.h"
+#include "fdbserver/core/BulkLoadUtil.h"
 #include "fdbserver/core/FDBRocksDBVersion.h"
 #include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
@@ -11897,7 +11897,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	state double lastLoopTopTime = now();
 	state Future<Void> dbInfoChange = Void();
 	state Future<Void> checkLastUpdate = Void();
-	state Future<Void> updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
+	state Future<Void> updateProcessStatsTimer = delay(SERVER_KNOBS->STORAGE_UPDATE_PROCESS_STATS_INTERVAL);
 
 	self->actors.add(updateStorage(self));
 	self->actors.add(waitFailureServer(ssi.waitFailure.getFuture()));
@@ -12077,7 +12077,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 			}
 			when(wait(updateProcessStatsTimer)) {
 				updateProcessStats(self);
-				updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
+				updateProcessStatsTimer = delay(SERVER_KNOBS->STORAGE_UPDATE_PROCESS_STATS_INTERVAL);
 			}
 			when(GetHotShardsRequest req = waitNext(ssi.getHotShards.getFuture())) {
 				struct ComparePair {

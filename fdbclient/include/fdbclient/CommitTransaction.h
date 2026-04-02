@@ -113,16 +113,6 @@ struct MutationRef {
 		       (accumulativeChecksumIndex.present() ? sizeof(uint16_t) + 1 : 1);
 	}
 	int expectedSize() const { return param1.size() + param2.size(); }
-	int weightedTotalSize() const {
-		// AtomicOp can cause more workload to FDB cluster than the same-size set mutation;
-		// Amplify atomicOp size to consider such extra workload.
-		// A good value for FASTRESTORE_ATOMICOP_WEIGHT needs experimental evaluations.
-		if (isAtomicOp()) {
-			return totalSize() * CLIENT_KNOBS->FASTRESTORE_ATOMICOP_WEIGHT;
-		} else {
-			return totalSize();
-		}
-	}
 
 	std::string toString() const {
 		std::string checksumStr;

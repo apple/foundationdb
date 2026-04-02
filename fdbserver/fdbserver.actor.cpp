@@ -61,13 +61,12 @@
 #include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/NetworkTest.h"
 #include "fdbserver/kvstore/KVFileUtils.h"
-#include "fdbserver/restoreworker/RestoreWorkerInterface.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/datadistributor/SimulatedCluster.h"
 #include "fdbserver/tester/TestEncryptionUtils.h"
 #include "fdbserver/tester/tester.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "fdbserver/worker/Worker.actor.h"
+#include "fdbserver/worker/Worker.h"
 #include "fdbserver/mocks3/MockS3Server.h"
 #ifdef WITH_ROCKSDB
 #include "fdbserver/core/FDBRocksDBVersion.h"
@@ -78,7 +77,7 @@
 #include "flow/ProtocolVersion.h"
 #include "SimpleOpt/SimpleOpt.h"
 #include "flow/SystemMonitor.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 #include "fdbclient/Tracing.h"
 #include "flow/WriteOnlySet.h"
 #include "flow/UnitTest.h"
@@ -1334,8 +1333,6 @@ private:
 					role = ServerRole::NetworkTestClient;
 				else if (!strcmp(sRole, "networktestserver"))
 					role = ServerRole::NetworkTestServer;
-				else if (!strcmp(sRole, "restore"))
-					role = ServerRole::Restore;
 				else if (!strcmp(sRole, "kvfileintegritycheck"))
 					role = ServerRole::KVFileIntegrityCheck;
 				else if (!strcmp(sRole, "kvfilegeneratesums"))
@@ -2084,8 +2081,8 @@ int main(int argc, char* argv[]) {
 			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT, &opts.allowList);
 			opts.buildNetwork(argv[0]);
 
-			const bool expectsPublicAddress = (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer ||
-			                                   role == ServerRole::Restore || role == ServerRole::MockS3Server);
+			const bool expectsPublicAddress =
+			    (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer || role == ServerRole::MockS3Server);
 			if (opts.publicAddressStrs.empty()) {
 				if (expectsPublicAddress) {
 					fprintf(stderr, "ERROR: The -p or --public-address option is required\n");
@@ -2368,54 +2365,40 @@ int main(int argc, char* argv[]) {
 			auto* pProxy = static_cast<Optional<std::string>*>(g_network->global(INetwork::enProxy));
 			*pProxy = opts.proxy;
 
-			// Call fast restore for the class FastRestoreClass. This is a short-cut to run fast restore in circus
-			if (opts.processClass == ProcessClass::FastRestoreClass) {
-				printf("Run as fast restore worker\n");
-				ASSERT(opts.connectionFile);
-				auto dataFolder = opts.dataFolder;
-				if (!dataFolder.size())
-					dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
+			ASSERT(opts.connectionFile);
 
-				std::vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
-				actors.push_back(restoreWorker(opts.connectionFile, opts.localities, dataFolder));
-				f = stopAfter(waitForAll(actors));
-				printf("Fast restore worker started\n");
-				g_network->run();
-				printf("g_network->run() done\n");
-			} else { // Call fdbd roles in conventional way
-				ASSERT(opts.connectionFile);
+			setupRunLoopProfiler();
 
-				setupRunLoopProfiler();
+			auto dataFolder = opts.dataFolder;
+			if (!dataFolder.size())
+				dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
 
-				auto dataFolder = opts.dataFolder;
-				if (!dataFolder.size())
-					dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
+			std::vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
 
-				std::vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
+			actors.push_back(fdbd(opts.connectionFile,
+			                      opts.localities,
+			                      opts.processClass,
+			                      dataFolder,
+			                      dataFolder,
+			                      opts.storageMemLimit,
+			                      opts.metricsConnFile,
+			                      opts.metricsPrefix,
+			                      opts.rsssize,
+			                      opts.whitelistBinPaths,
+			                      opts.consistencyCheckUrgentMode));
+			actors.push_back(histogramReport());
+			actors.push_back(metricsReport());
 
 #ifdef FLOW_GRPC_ENABLED
-				if (opts.grpcAddressStrs.size() > 0) {
-					FlowGrpc::init(&opts.tlsConfig, NetworkAddress::parse(opts.grpcAddressStrs[0]));
-					actors.push_back(GrpcServer::instance()->run());
-				}
-#endif
-				actors.push_back(fdbd(opts.connectionFile,
-				                      opts.localities,
-				                      opts.processClass,
-				                      dataFolder,
-				                      dataFolder,
-				                      opts.storageMemLimit,
-				                      opts.metricsConnFile,
-				                      opts.metricsPrefix,
-				                      opts.rsssize,
-				                      opts.whitelistBinPaths,
-				                      opts.consistencyCheckUrgentMode));
-				actors.push_back(histogramReport());
-				actors.push_back(metricsReport());
-
-				f = stopAfter(waitForAll(actors));
-				g_network->run();
+			if (opts.grpcAddressStrs.size() > 0) {
+				FlowGrpc::init(&opts.tlsConfig, NetworkAddress::parse(opts.grpcAddressStrs[0]));
+				actors.push_back(GrpcServer::instance()->run());
 			}
+#endif
+
+			f = stopAfter(waitForAll(actors));
+			g_network->run();
+
 		} else if (role == ServerRole::MultiTester) {
 			setupRunLoopProfiler();
 			f = stopAfter(runTests(opts.connectionFile,
@@ -2480,9 +2463,6 @@ int main(int argc, char* argv[]) {
 			g_network->run();
 		} else if (role == ServerRole::NetworkTestServer) {
 			f = stopAfter(networkTestServer());
-			g_network->run();
-		} else if (role == ServerRole::Restore) {
-			f = stopAfter(restoreWorker(opts.connectionFile, opts.localities, opts.dataFolder));
 			g_network->run();
 		} else if (role == ServerRole::KVFileIntegrityCheck) {
 			f = stopAfter(KVFileCheck(opts.kvFile, true));

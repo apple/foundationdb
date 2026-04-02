@@ -190,6 +190,11 @@ endif()
 add_flow_target(LINK_TEST NAME fdbclientlinktest SRCS LinkTest.cpp)
 target_link_libraries(fdbclientlinktest PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,fdbclient>" rapidxml) # re-link rapidxml due to private link interface
 
+if(NOT FOUNDATIONDB_CROSS_COMPILING) # FIXME(swift): make this work when
+                                     # x-compiling.
+  add_subdirectory(bench EXCLUDE_FROM_ALL)
+endif()
+
 if(BUILD_AZURE_BACKUP)
   target_link_libraries(fdbclient PRIVATE curl azure-storage-lite)
   target_link_libraries(fdbclient_sampling PRIVATE curl azure-storage-lite)

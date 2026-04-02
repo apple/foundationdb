@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 
 #include "flow/CoroUtils.h"
 
@@ -57,12 +57,7 @@ struct PrivateEndpoints : TestWorkload {
 	template <class T>
 	static Future<Void> assumeFailure(Future<T> f) {
 		try {
-			if constexpr (std::is_same_v<T, Void>) {
-				co_await f;
-			} else {
-				T t = co_await f;
-				(void)t;
-			}
+			co_await f;
 			ASSERT(false);
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {

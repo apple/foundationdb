@@ -3931,8 +3931,8 @@ ACTOR Future<Void> testCheckpointRestore(IKeyValueStore* kvStore, std::vector<Ke
 IKeyValueStore* keyValueStoreShardedRocksDB(std::string const& path,
                                             UID logID,
                                             KeyValueStoreType storeType,
-                                            bool checkChecksums,
-                                            bool checkIntegrity) {
+                                            CheckChecksums checkChecksums,
+                                            CheckIntegrity checkIntegrity) {
 #ifdef WITH_ROCKSDB
 	return new ShardedRocksDBKeyValueStore(path, logID);
 #else

@@ -22,7 +22,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "BulkSetup.h"
 #include "fdbclient/ManagementAPI.h"
 #include "flow/ApiVersion.h"

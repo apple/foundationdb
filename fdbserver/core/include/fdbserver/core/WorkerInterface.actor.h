@@ -30,7 +30,7 @@
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/TLogInterface.h"
 #include "fdbserver/core/RatekeeperInterface.h"
-#include "fdbclient/ConsistencyScanInterface.actor.h"
+#include "fdbclient/ConsistencyScanInterface.h"
 #include "fdbserver/core/ResolverInterface.h"
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/StorageServerInterface.h"

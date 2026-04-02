@@ -387,11 +387,11 @@ struct AwaitableAsyncResult {
 template <class T>
 using ToFutureVal = std::conditional_t<std::is_void_v<T>, Void, T>;
 
-template <class Awaiter, class ValueType, bool IsStream>
+template <class Awaiter, class ValueType, bool IsStream, bool ReturnsExplicitVoid = false>
 struct AwaitableResume;
 
 template <class Awaiter>
-struct AwaitableResume<Awaiter, Void, false> {
+struct AwaitableResume<Awaiter, Void, /* IsStream = */ false, /* ReturnsExplicitVoid = */ false> {
 	[[maybe_unused]] void await_resume() {
 		auto self = static_cast<Awaiter*>(this);
 		self->resumeImpl();
@@ -402,7 +402,7 @@ struct AwaitableResume<Awaiter, Void, false> {
 };
 
 template <class Awaiter, class ValueType>
-struct AwaitableResume<Awaiter, ValueType, false> {
+struct AwaitableResume<Awaiter, ValueType, /* IsStream = */ false, /* ReturnsExplicitVoid = */ false> {
 	ValueType const& await_resume() {
 		auto self = static_cast<Awaiter*>(this);
 		self->resumeImpl();
@@ -414,7 +414,23 @@ struct AwaitableResume<Awaiter, ValueType, false> {
 };
 
 template <class Awaiter, class ValueType>
-struct AwaitableResume<Awaiter, ValueType, true> {
+struct AwaitableResume<Awaiter, ValueType, /* IsStream = */ false, /* ReturnsExplicitVoid = */ true>
+  : AwaitableResume<Awaiter, ValueType, /* IsStream = */ false, /* ReturnsExplicitVoid = */ false> {};
+
+template <class Awaiter>
+struct AwaitableResume<Awaiter, Void, /* IsStream = */ false, /* ReturnsExplicitVoid = */ true> {
+	[[maybe_unused]] ExplicitVoid await_resume() {
+		auto self = static_cast<Awaiter*>(this);
+		self->resumeImpl();
+		if (self->future.isError()) {
+			throw self->future.getError();
+		}
+		return ExplicitVoid{};
+	}
+};
+
+template <class Awaiter, class ValueType>
+struct AwaitableResume<Awaiter, ValueType, /* IsStream = */ true, /* ReturnsExplicitVoid = */ false> {
 	ValueType await_resume() {
 		auto self = static_cast<Awaiter*>(this);
 		if (self->resumeImpl()) {
@@ -427,12 +443,19 @@ struct AwaitableResume<Awaiter, ValueType, true> {
 	}
 };
 
+template <class Awaiter, class ValueType>
+struct AwaitableResume<Awaiter, ValueType, /* IsStream = */ true, /* ReturnsExplicitVoid = */ true>
+  : AwaitableResume<Awaiter, ValueType, /* IsStream = */ true, /* ReturnsExplicitVoid = */ false> {};
+
 // Awaiter for `Future<T>` and `FutureStream<T>` values transformed through a
 // coroutine promise.
-template <class PromiseType, class ValueType, bool IsStream>
+template <class PromiseType, class ValueType, bool IsStream, bool ReturnsExplicitVoid = false>
 struct AwaitableFuture
   : std::conditional_t<IsStream, SingleCallback<ToFutureVal<ValueType>>, Callback<ToFutureVal<ValueType>>>,
-    AwaitableResume<AwaitableFuture<PromiseType, ValueType, IsStream>, ValueType, IsStream> {
+    AwaitableResume<AwaitableFuture<PromiseType, ValueType, IsStream, ReturnsExplicitVoid>,
+                    ValueType,
+                    IsStream,
+                    ReturnsExplicitVoid> {
 	using FutureValue = ToFutureVal<ValueType>;
 	using FutureType = std::conditional_t<IsStream, FutureStream<FutureValue>, Future<FutureValue> const&>;
 	FutureType future;
@@ -511,10 +534,13 @@ struct AwaitableFuture
 };
 
 // TODO: This can be merged with AwaitableFutureStream by passing more template arguments.
-template <class PromiseType, class ValueType>
+template <class PromiseType, class ValueType, bool ReturnsExplicitVoid = false>
 struct ThreadAwaitableFutureStream
   : SingleCallback<ToFutureVal<ValueType>>,
-    AwaitableResume<ThreadAwaitableFutureStream<PromiseType, ValueType>, ValueType, true> {
+    AwaitableResume<ThreadAwaitableFutureStream<PromiseType, ValueType, ReturnsExplicitVoid>,
+                    ValueType,
+                    true,
+                    ReturnsExplicitVoid> {
 	using FutureValue = ToFutureVal<ValueType>;
 	using FutureType = ThreadFutureStream<FutureValue>;
 	FutureType future;
@@ -580,7 +606,7 @@ struct ThreadAwaitableFutureStream
 	}
 };
 
-template <class T, class Promise>
+template <class T, class Promise, bool ReturnsExplicitVoid = false>
 struct CoroReturn {
 	template <class U>
 	void return_value(U&& value) {
@@ -589,11 +615,19 @@ struct CoroReturn {
 };
 
 template <class Promise>
-struct CoroReturn<Void, Promise> {
+struct CoroReturn<Void, Promise, false> {
 	void return_void() { static_cast<Promise*>(this)->coroActor.set(Void()); }
 };
 
-template <class T, class Promise>
+template <class Promise>
+struct CoroReturn<Void, Promise, true> {
+	template <std::convertible_to<Void> U>
+	void return_value(U&&) {
+		static_cast<Promise*>(this)->coroActor.set(Void());
+	}
+};
+
+template <class T, class Promise, bool ReturnsExplicitVoid = false>
 struct AsyncResultReturn {
 	template <class U>
 	void return_value(U&& value) {
@@ -602,13 +636,21 @@ struct AsyncResultReturn {
 };
 
 template <class Promise>
-struct AsyncResultReturn<Void, Promise> {
+struct AsyncResultReturn<Void, Promise, false> {
 	void return_void() { static_cast<Promise*>(this)->state->setValue(Void()); }
 };
 
-template <class T, bool IsCancellable>
-struct CoroPromise : CoroReturn<T, CoroPromise<T, IsCancellable>> {
-	using promise_type = CoroPromise<T, IsCancellable>;
+template <class Promise>
+struct AsyncResultReturn<Void, Promise, true> {
+	template <std::convertible_to<Void> U>
+	void return_value(U&&) {
+		static_cast<Promise*>(this)->state->setValue(Void());
+	}
+};
+
+template <class T, bool IsCancellable, bool ReturnsExplicitVoid = false>
+struct CoroPromise : CoroReturn<T, CoroPromise<T, IsCancellable, ReturnsExplicitVoid>, ReturnsExplicitVoid> {
+	using promise_type = CoroPromise<T, IsCancellable, ReturnsExplicitVoid>;
 	using ActorType = coro::CoroActor<T, IsCancellable>;
 	using ReturnValue = std::conditional_t<std::is_void_v<T>, Void, T>;
 	using ReturnFutureType = Future<ReturnValue>;
@@ -678,12 +720,12 @@ struct CoroPromise : CoroReturn<T, CoroPromise<T, IsCancellable>> {
 
 	template <class U>
 	auto await_transform(const Future<U>& future) {
-		return coro::AwaitableFuture<promise_type, U, false>{ future, this };
+		return coro::AwaitableFuture<promise_type, U, false, ReturnsExplicitVoid>{ future, this };
 	}
 
 	template <class U>
 	auto await_transform(const FutureStream<U>& futureStream) {
-		return coro::AwaitableFuture<promise_type, U, true>{ futureStream, this };
+		return coro::AwaitableFuture<promise_type, U, true, ReturnsExplicitVoid>{ futureStream, this };
 	}
 
 	template <class U>
@@ -698,13 +740,14 @@ struct CoroPromise : CoroReturn<T, CoroPromise<T, IsCancellable>> {
 
 	template <class U>
 	auto await_transform(const ThreadFutureStream<U>& futureStream) {
-		return coro::ThreadAwaitableFutureStream<promise_type, U>{ futureStream, this };
+		return coro::ThreadAwaitableFutureStream<promise_type, U, ReturnsExplicitVoid>{ futureStream, this };
 	}
 };
 
-template <class T, bool IsCancellable>
-struct AsyncResultPromise : AsyncResultReturn<T, AsyncResultPromise<T, IsCancellable>> {
-	using promise_type = AsyncResultPromise<T, IsCancellable>;
+template <class T, bool IsCancellable, bool ReturnsExplicitVoid>
+struct AsyncResultPromise
+  : AsyncResultReturn<T, AsyncResultPromise<T, IsCancellable, ReturnsExplicitVoid>, ReturnsExplicitVoid> {
+	using promise_type = AsyncResultPromise<T, IsCancellable, ReturnsExplicitVoid>;
 	using ReturnValue = std::conditional_t<std::is_void_v<T>, Void, T>;
 	using ReturnAsyncResultType = AsyncResult<T>;
 	using State = AsyncResultState<ReturnValue>;
@@ -767,12 +810,12 @@ struct AsyncResultPromise : AsyncResultReturn<T, AsyncResultPromise<T, IsCancell
 
 	template <class U>
 	auto await_transform(const Future<U>& future) {
-		return coro::AwaitableFuture<promise_type, U, false>{ future, this };
+		return coro::AwaitableFuture<promise_type, U, false, ReturnsExplicitVoid>{ future, this };
 	}
 
 	template <class U>
 	auto await_transform(const FutureStream<U>& futureStream) {
-		return coro::AwaitableFuture<promise_type, U, true>{ futureStream, this };
+		return coro::AwaitableFuture<promise_type, U, true, ReturnsExplicitVoid>{ futureStream, this };
 	}
 
 	template <class U>
@@ -787,7 +830,7 @@ struct AsyncResultPromise : AsyncResultReturn<T, AsyncResultPromise<T, IsCancell
 
 	template <class U>
 	auto await_transform(const ThreadFutureStream<U>& futureStream) {
-		return coro::ThreadAwaitableFutureStream<promise_type, U>{ futureStream, this };
+		return coro::ThreadAwaitableFutureStream<promise_type, U, ReturnsExplicitVoid>{ futureStream, this };
 	}
 };
 
@@ -834,9 +877,9 @@ struct GeneratorPromise {
 	void return_void() {}
 };
 
-template <class T>
+template <class T, bool ReturnsExplicitVoid = false>
 struct AsyncGeneratorPromise {
-	using promise_type = AsyncGeneratorPromise<T>;
+	using promise_type = AsyncGeneratorPromise<T, ReturnsExplicitVoid>;
 
 	static void* operator new(size_t s) { return allocateFast(int(s)); }
 	static void operator delete(void* p, size_t s) { freeFast(int(s), p); }
@@ -875,12 +918,12 @@ struct AsyncGeneratorPromise {
 
 	template <class U>
 	auto await_transform(const Future<U>& future) {
-		return coro::AwaitableFuture<promise_type, U, false>{ future, this };
+		return coro::AwaitableFuture<promise_type, U, false, ReturnsExplicitVoid>{ future, this };
 	}
 
 	template <class U>
 	auto await_transform(const FutureStream<U>& futureStream) {
-		return coro::AwaitableFuture<promise_type, U, true>{ futureStream, this };
+		return coro::AwaitableFuture<promise_type, U, true, ReturnsExplicitVoid>{ futureStream, this };
 	}
 
 	template <class U>
@@ -952,6 +995,27 @@ struct HasUncancellable<Uncancellable, Rest...> {
 
 template <class... Args>
 inline constexpr bool hasUncancellable = HasUncancellable<Args...>::value;
+
+template <class... Args>
+struct HasExplicitVoid;
+
+template <>
+struct HasExplicitVoid<> {
+	static constexpr bool value = false;
+};
+
+template <class First, class... Args>
+struct HasExplicitVoid<First, Args...> {
+	static constexpr bool value = HasExplicitVoid<Args...>::value;
+};
+
+template <class... Rest>
+struct HasExplicitVoid<ExplicitVoid, Rest...> {
+	static constexpr bool value = true;
+};
+
+template <class... Args>
+inline constexpr bool hasExplicitVoid = HasExplicitVoid<Args...>::value;
 
 } // namespace coro
 

@@ -42,7 +42,7 @@ Future<Void> sendErrorOnProcess(ISimulator::ProcessInfo* process, Promise<Void> 
 }
 
 Future<Void> AsyncFileDetachable::doShutdown(AsyncFileDetachable* self) {
-	co_await success(g_simulator->getCurrentProcess()->shutdownSignal.getFuture());
+	co_await g_simulator->getCurrentProcess()->shutdownSignal.getFuture();
 	self->file = Reference<IAsyncFile>();
 }
 
