@@ -34,8 +34,10 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "TestHarness.h"
+#include "TesterServer.h"
 #include "fdbserver/tester/workloads.h"
+
+namespace {
 
 Standalone<VectorRef<KeyValueRef>> checkAllOptionsConsumed(VectorRef<KeyValueRef> options) {
 	static StringRef nothing = ""_sr;
@@ -124,6 +126,8 @@ Future<Reference<TestWorkload>> getWorkloadIface(WorkloadRequest work,
 	co_return compound;
 }
 
+} // namespace
+
 /**
  * Only works in simulation. This method prints all simulated processes in a human readable form to stdout. It groups
  * processes by data center, data hall, zone, and machine (in this order).
@@ -191,6 +195,8 @@ Future<Void> databaseWarmer(Database cx) {
 	co_return; // Unreachable but required for coroutine
 }
 
+namespace {
+
 // Tries indefinitely to commit a simple, self conflicting transaction
 Future<Void> pingDatabase(Database cx) {
 	Transaction tr(cx);
@@ -218,6 +224,8 @@ Future<Void> pingDatabase(Database cx) {
 	}
 }
 
+} // namespace
+
 Future<Void> testDatabaseLiveness(Database cx, double databasePingDelay, std::string context, double startDelay) {
 	co_await delay(startDelay);
 	while (true) {
@@ -241,6 +249,8 @@ Future<Void> testDatabaseLiveness(Database cx, double databasePingDelay, std::st
 		}
 	}
 }
+
+namespace {
 
 template <class T>
 void sendResult(ReplyPromise<T>& reply, Optional<ErrorOr<T>> const& result) {
@@ -509,6 +519,8 @@ Future<Void> testerServerWorkload(WorkloadRequest work,
 	}
 	co_return;
 }
+
+} // namespace
 
 Future<Void> testerServerCore(TesterInterface const& interf,
                               Reference<IClusterConnectionRecord> const& ccr,

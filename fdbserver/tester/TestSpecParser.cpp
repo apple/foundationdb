@@ -31,7 +31,9 @@
 #include "flow/Trace.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/Knobs.h"
-#include "TestHarness.h"
+#include "TestSpecParser.h"
+
+namespace {
 
 std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKeys = {
 	// These are read by SimulatedCluster and used before testers exist.  Thus, they must
@@ -225,6 +227,21 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	  } },
 };
 
+template <typename T>
+std::string toml_to_string(const T& value) {
+	// TOML formatting converts numbers to strings exactly how they're in the file
+	// and thus, is equivalent to testspec.  However, strings are quoted, so we
+	// must remove the quotes.
+	if (value.type() == toml::value_t::string) {
+		const std::string& formatted = toml::format(value);
+		return formatted.substr(1, formatted.size() - 2);
+	} else {
+		return toml::format(value);
+	}
+}
+
+} // namespace
+
 std::vector<TestSpec> readTests(std::ifstream& ifs) {
 	TestSpec spec;
 	std::vector<TestSpec> result;
@@ -290,19 +307,6 @@ std::vector<TestSpec> readTests(std::ifstream& ifs) {
 	return result;
 }
 
-template <typename T>
-std::string toml_to_string(const T& value) {
-	// TOML formatting converts numbers to strings exactly how they're in the file
-	// and thus, is equivalent to testspec.  However, strings are quoted, so we
-	// must remove the quotes.
-	if (value.type() == toml::value_t::string) {
-		const std::string& formatted = toml::format(value);
-		return formatted.substr(1, formatted.size() - 2);
-	} else {
-		return toml::format(value);
-	}
-}
-
 namespace {
 
 // In the current TOML scope, look for "knobs" field. If exists, translate all
@@ -339,6 +343,8 @@ KnobKeyValuePairs getOverriddenKnobKeyValues(const toml::value& context) {
 }
 
 } // namespace
+
+namespace {
 
 TestSet readTOMLTests_(std::string fileName) {
 	Standalone<VectorRef<KeyValueRef>> workloadOptions;
@@ -390,6 +396,8 @@ TestSet readTOMLTests_(std::string fileName) {
 
 	return result;
 }
+
+} // namespace
 
 // A hack to catch and log std::exception, because TOML11 has very useful
 // error messages, but the actor framework can't handle std::exception.

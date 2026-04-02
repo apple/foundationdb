@@ -37,7 +37,7 @@
 #include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/QuietDatabase.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "TestHarness.h"
+#include "ConsistencyChecker.h"
 #include "fdbserver/tester/workloads.h"
 
 Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbInfo, AuditType auditType) {
@@ -194,6 +194,8 @@ Future<Void> checkConsistency(Database cx,
 		co_await repairDeadDatacenter(cx, dbInfo, "ConsistencyCheck");
 	}
 }
+
+namespace {
 
 Future<std::unordered_set<int>> runUrgentConsistencyCheckWorkload(
     Database cx,
@@ -731,6 +733,8 @@ Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<Cluster
 		consistencyCheckerId = deterministicRandom()->randomInt64(1, 10000000);
 	}
 }
+
+} // namespace
 
 Future<Void> runConsistencyCheckerUrgentHolder(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc,
                                                Database cx,

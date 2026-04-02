@@ -31,7 +31,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/QuietDatabase.h"
-#include "TestHarness.h"
+#include "DatabaseMaintenance.h"
 
 Future<Void> clearData(Database cx) {
 	TraceEvent("ClearData_Start").detail("Phase", "Enter");

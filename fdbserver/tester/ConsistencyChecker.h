@@ -1,5 +1,5 @@
 /*
- * TestHarness.h
+ * ConsistencyChecker.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -21,8 +21,6 @@
 #pragma once
 
 #include <cstdint>
-#include <iosfwd>
-#include <string>
 #include <vector>
 
 #include "fdbclient/NativeAPI.actor.h"
@@ -30,27 +28,7 @@
 
 enum class AuditType : uint8_t;
 struct ClusterControllerFullInterface;
-struct ClusterInterface;
 struct ServerDBInfo;
-
-struct TestSet {
-	KnobKeyValuePairs overrideKnobs;
-	std::vector<TestSpec> testSpecs;
-};
-
-struct TesterConsistencyScanState {
-	bool enabled = false;
-	bool enableAfter = false;
-	bool waitForComplete = false;
-};
-
-Future<Void> testDatabaseLiveness(Database cx, double databasePingDelay, std::string context, double startDelay = 0.0);
-void printSimulatedTopology();
-
-Future<Void> clearData(Database cx);
-Future<Void> dumpDatabase(Database const& cx, std::string const& outputFilename, KeyRange const& range);
-std::vector<PerfMetric> aggregateMetrics(std::vector<std::vector<PerfMetric>> metrics);
-Future<Void> checkConsistencyScanAfterTest(Database cx, TesterConsistencyScanState* csState);
 
 Future<Void> checkConsistency(Database cx,
                               std::vector<TesterInterface> testers,
@@ -67,6 +45,3 @@ Future<Void> runConsistencyCheckerUrgentHolder(Reference<AsyncVar<Optional<Clust
                                                Optional<std::vector<TesterInterface>> testers,
                                                int minTestersExpected,
                                                bool repeatRun);
-
-std::vector<TestSpec> readTests(std::ifstream& ifs);
-TestSet readTOMLTests(std::string fileName);
