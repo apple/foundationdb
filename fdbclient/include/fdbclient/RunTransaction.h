@@ -43,7 +43,7 @@ template <class Function, class DB>
 using RunTransactionResult = decltype(std::declval<Function>()(Reference<typename DB::TransactionT>()).getValue());
 
 template <class Function, class DB>
-Future<RunTransactionResult<Function, DB>> runTransaction(Reference<DB> db, Function func) {
+Future<RunTransactionResult<Function, DB>> runTransaction(Reference<DB> db, Function func, ExplicitVoid = {}) {
 	Reference<typename DB::TransactionT> tr = db->createTransaction();
 	while (true) {
 		if constexpr (can_set_transaction_options<DB>) {
@@ -53,15 +53,9 @@ Future<RunTransactionResult<Function, DB>> runTransaction(Reference<DB> db, Func
 		Error err;
 		try {
 			// func should be idempotent; otherwise, retry will get undefined result
-			if constexpr (std::is_same_v<RunTransactionResult<Function, DB>, Void>) {
-				co_await func(tr);
-				co_await safeThreadFutureToFuture(tr->commit());
-				co_return;
-			} else {
-				RunTransactionResult<Function, DB> result = co_await func(tr);
-				co_await safeThreadFutureToFuture(tr->commit());
-				co_return result;
-			}
+			auto const result = co_await func(tr);
+			co_await safeThreadFutureToFuture(tr->commit());
+			co_return result;
 		} catch (Error& e) {
 			err = e;
 		}

@@ -71,23 +71,6 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-Future<Optional<Value>> getPreviousCoordinators(ClusterControllerData* self) {
-	ReadYourWritesTransaction tr(self->db.db);
-	while (true) {
-		Error err;
-		try {
-			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			Optional<Value> previousCoordinators = co_await tr.get(previousCoordinatorsKey);
-			co_return previousCoordinators;
-		} catch (Error& e) {
-			err = e;
-		}
-		co_await tr.onError(err);
-	}
-}
-
 bool ClusterControllerData::processesInSameDC(const NetworkAddress& addr1, const NetworkAddress& addr2) const {
 	return this->addr_locality.contains(addr1) && this->addr_locality.contains(addr2) &&
 	       this->addr_locality.at(addr1).dcId().present() && this->addr_locality.at(addr2).dcId().present() &&
@@ -1082,17 +1065,6 @@ struct FailureStatusInfo {
 		return std::max(now - lastRequestTime, lastRequestTime - penultimateRequestTime);
 	}
 };
-
-Future<std::vector<TLogInterface>> requireAll(std::vector<Future<Optional<std::vector<TLogInterface>>>> in) {
-	std::vector<TLogInterface> out;
-	for (int i = 0; i < in.size(); i++) {
-		Optional<std::vector<TLogInterface>> x = co_await in[i];
-		if (!x.present())
-			throw recruitment_failed();
-		out.insert(out.end(), x.get().begin(), x.get().end());
-	}
-	co_return out;
-}
 
 void clusterRecruitStorage(ClusterControllerData* self, RecruitStorageRequest req) {
 	try {
@@ -2563,25 +2535,6 @@ ACTOR Future<Void> monitorConsistencyScan(ClusterControllerData* self) {
 			TraceEvent("CCMonitorConsistencyScanStarting", self->id).log();
 			wait(startConsistencyScan(self));
 		}
-	}
-}
-
-Future<Void> stopConsistencyScan(Database db) {
-	ConsistencyScanState cs = ConsistencyScanState();
-	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
-	while (true) {
-		Error err;
-		try {
-			SystemDBWriteLockedNow(db.getReference())->setOptions(tr);
-			ConsistencyScanState::Config config = co_await ConsistencyScanState().config().getD(tr);
-			config.enabled = false;
-			cs.config().set(tr, config);
-			co_await tr->commit();
-			co_return;
-		} catch (Error& e) {
-			err = e;
-		}
-		co_await tr->onError(err);
 	}
 }
 
