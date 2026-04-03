@@ -507,7 +507,7 @@ public:
 	// Tracker, TeamCollection. The components should call its own ::init methods.
 	//
 	// DD Startup Progress (trace events in order):
-	//   DDStarting                        - DD process recruited and starting init
+	//   DDInitRunning                     - DD process recruited and starting init
 	//   DDInitTakingMoveKeysLock          - Acquiring move keys lock
 	//   DDInitTookMoveKeysLock            - Lock acquired
 	//   DDInitGotConfiguration            - Database configuration loaded
@@ -528,7 +528,7 @@ public:
 	//   TrackInitialShardsMetricsComplete - All shard metrics received: ElapsedSeconds
 	//                                       WaitStorageMetricsHandleError may fire (SevWarn after 60s) if a
 	//                                       shard's metrics read is stuck retrying: Keys, Retries
-	//   DDStarted                         - DD is fully operational with all shard sizes loaded
+	//   DDInitDone                        - DD is fully operational with all shard sizes loaded
 	ACTOR static Future<Void> init(Reference<DataDistributor> self) {
 		loop {
 			TraceEvent("DDInitTakingMoveKeysLock", self->ddId).log();
@@ -3351,9 +3351,9 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 
 	try {
 		TraceEvent("DataDistributorRunning", di.id());
-		// DDStarting duplicates the above with DD* prefix so the full startup sequence
+		// DDInitRunning duplicates the above with DD* prefix so the full startup sequence
 		// can be queried with Type="DD*" in trace logs
-		TraceEvent("DDStarting", di.id());
+		TraceEvent("DDInitRunning", di.id());
 		self->addActor.send(waitFailureServer(di.waitFailure.getFuture()));
 		self->addActor.send(cacheServerWatcher(&cx));
 		state Future<Void> distributor = reportErrorsExcept(
