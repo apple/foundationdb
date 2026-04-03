@@ -24,6 +24,7 @@
 #include "fdbclient/RangeLock.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/core/AccumulativeChecksumUtil.h"
+#include "fdbserver/core/ApplyMetadataMutation.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/LogSystem.h"
 #include "fdbserver/core/MasterInterface.h"
@@ -49,12 +50,6 @@ struct Descriptor<SingleKeyMutationDescriptor>
                  DescribeField<&SingleKeyMutationDescriptor::tag3, "tag3">> {};
 
 class LogSystemDiskQueueAdapter;
-
-struct ApplyMutationsData {
-	Future<Void> worker;
-	Version endVersion;
-	Reference<KeyRangeMap<Version>> keyVersion;
-};
 
 struct ProxyStats {
 	CounterCollection cc;
@@ -225,7 +220,6 @@ struct ProxyCommitData {
 	Database cx;
 	Reference<AsyncVar<ServerDBInfo> const> db;
 	EventMetricHandle<SingleKeyMutationDescriptor> singleKeyMutationEvent;
-
 	std::map<UID, Reference<StorageInfo>> storageCache;
 	std::unordered_map<UID, StorageServerInterface> tssMapping;
 	std::map<Tag, Version> tag_popped;
@@ -339,14 +333,20 @@ struct ProxyCommitData {
 	    lastShardMove(invalidVersion), epoch(epoch) {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);
 	}
+
+	// Build the core-owned view consumed by applyMetadataMutations() without
+	// exposing the full ProxyCommitData type outside commitproxy.
+	ApplyMetadataProxyContext getApplyMetadataProxyContext();
 };
-struct RangeLock {
+struct RangeLock : ApplyMetadataRangeLock {
 public:
 	explicit RangeLock(ProxyCommitData* const pProxyCommitData) : pProxyCommitData(pProxyCommitData) {
 		coreMap.insert(allKeys, RangeLockStateSet());
 	}
 
-	bool pendingRequest() const { return currentRangeLockStartKey.present(); }
+	~RangeLock() override = default;
+
+	bool pendingRequest() const override { return currentRangeLockStartKey.present(); }
 
 	void initKeyPoint(const Key& key, const Value& value) {
 		ASSERT(pProxyCommitData != nullptr && pProxyCommitData->rangeLockEnabled());
@@ -359,14 +359,14 @@ public:
 		return;
 	}
 
-	void setPendingRequest(const Key& startKey, const RangeLockStateSet& lockSetState) {
+	void setPendingRequest(const Key& startKey, const RangeLockStateSet& lockSetState) override {
 		ASSERT(pProxyCommitData != nullptr && pProxyCommitData->rangeLockEnabled());
 		ASSERT(!pendingRequest());
 		currentRangeLockStartKey = std::make_pair(startKey, lockSetState);
 		return;
 	}
 
-	void consumePendingRequest(const Key& endKey) {
+	void consumePendingRequest(const Key& endKey) override {
 		ASSERT(pProxyCommitData != nullptr && pProxyCommitData->rangeLockEnabled());
 		ASSERT(pendingRequest());
 		ASSERT(endKey <= normalKeys.end);
@@ -409,3 +409,24 @@ private:
 	KeyRangeMap<RangeLockStateSet> coreMap;
 	ProxyCommitData* const pProxyCommitData;
 };
+
+inline ApplyMetadataProxyContext ProxyCommitData::getApplyMetadataProxyContext() {
+	return { .dbgid = dbgid,
+		     .txnStateStore = txnStateStore,
+		     .vecBackupKeys = &vecBackupKeys,
+		     .keyInfo = &keyInfo,
+		     .uid_applyMutationsData = firstProxy ? &uid_applyMutationsData : nullptr,
+		     .commit = commit,
+		     .cx = cx,
+		     .committedVersion = &committedVersion,
+		     .storageCache = &storageCache,
+		     .tag_popped = &tag_popped,
+		     .tssMapping = &tssMapping,
+		     .commitProxyIndex = commitProxyIndex,
+		     .acsBuilder = acsBuilder,
+		     .epoch = epoch,
+		     // applyMetadataMutations() only borrows the interface during the
+		     // synchronous call, so there is no need to propagate shared
+		     // ownership through the context object.
+		     .rangeLock = rangeLock.get() };
+}
