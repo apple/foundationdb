@@ -55,7 +55,7 @@
 #include "fdbserver/core/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/core/ServerCheckpoint.h"
 #include "fdbserver/core/SpanContextMessage.h"
-#include "fdbserver/core/StorageCorruptionBug.h"
+#include "fdbserver/storageserver/StorageCorruptionBug.h"
 #include "fdbserver/core/StorageMetrics.actor.h"
 #include "fdbserver/core/TLogInterface.h"
 #include "TransactionTagCounter.h"
