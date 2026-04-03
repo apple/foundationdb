@@ -38,7 +38,7 @@
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/MultiVersionAssignmentVars.h"
 #include "fdbclient/ClientVersion.h"
-#include "fdbclient/LocalClientAPI.h"
+#include "LocalClientAPI.h"
 #include "fdbclient/VersionVector.h"
 
 #include "flow/ThreadPrimitives.h"

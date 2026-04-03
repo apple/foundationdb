@@ -1,5 +1,5 @@
 /*
- * LocalClientAPI.h
+ * StorageCorruptionBug.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -17,12 +17,20 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-#ifndef FDBCLIENT_LOCALCLIENTAPI_H
-#define FDBCLIENT_LOCALCLIENTAPI_H
 #pragma once
+#ifndef FDBSERVER_STORAGESERVER_STORAGE_CORRUPTION_BUG_H
+#define FDBSERVER_STORAGESERVER_STORAGE_CORRUPTION_BUG_H
 
-#include "fdbclient/IClientApi.h"
+#include "flow/SimBugInjector.h"
 
-IClientApi* getLocalClientAPI();
-#endif
+class StorageCorruptionBug : public ISimBug {
+public:
+	double corruptionProbability = 0.001;
+};
+
+class StorageCorruptionBugID : public IBugIdentifier {
+public:
+	std::shared_ptr<ISimBug> create() const override { return std::make_shared<StorageCorruptionBug>(); }
+};
+
+#endif // FDBSERVER_STORAGESERVER_STORAGE_CORRUPTION_BUG_H

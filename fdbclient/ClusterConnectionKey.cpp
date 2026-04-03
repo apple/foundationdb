@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/ClusterConnectionKey.h"
+#include "ClusterConnectionKey.h"
 
 // Creates a cluster connection record with a given connection string and saves it to the specified key. Needs to be
 // persisted should be set to true unless this ClusterConnectionKey is being created with the value read from the

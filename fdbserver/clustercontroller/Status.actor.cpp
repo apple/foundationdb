@@ -37,7 +37,7 @@
 #include "ClusterRecovery.actor.h"
 #include "fdbserver/core/CoordinationInterface.h"
 #include "fdbserver/datadistributor/DataDistribution.h"
-#include "fdbclient/ConsistencyScanInterface.actor.h"
+#include "fdbclient/ConsistencyScanInterface.h"
 #include "flow/UnitTest.h"
 #include "fdbserver/core/QuietDatabase.h"
 #include "fdbserver/core/RatekeeperLimitReasons.h"

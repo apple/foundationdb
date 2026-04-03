@@ -333,6 +333,37 @@ public:
 		}
 	};
 
+	// Legacy test-only encoding retained to read and continue writing simulation-created Redwood files from
+	// older releases. The xorWith byte is derived from the pager filename and provided by the caller.
+	struct XOREncryptionEncoder {
+		struct Header {
+			XXH64_hash_t checksum;
+			uint8_t xorKey;
+		};
+
+		static void encode(void* header, uint8_t xorWith, uint8_t* payload, int len, PhysicalPageID seed) {
+			Header* h = reinterpret_cast<Header*>(header);
+			h->checksum = XXH3_64bits_withSeed(payload, len, seed);
+			h->xorKey =
+			    static_cast<uint8_t>(deterministicRandom()->randomInt(0, std::numeric_limits<uint8_t>::max() + 1));
+			uint8_t xorMask = static_cast<uint8_t>(~h->xorKey) ^ xorWith;
+			for (int i = 0; i < len; ++i) {
+				payload[i] ^= xorMask;
+			}
+		}
+
+		static void decode(void* header, uint8_t xorWith, uint8_t* payload, int len, PhysicalPageID seed) {
+			const Header* h = reinterpret_cast<const Header*>(header);
+			uint8_t xorMask = static_cast<uint8_t>(~h->xorKey) ^ xorWith;
+			for (int i = 0; i < len; ++i) {
+				payload[i] ^= xorMask;
+			}
+			if (h->checksum != XXH3_64bits_withSeed(payload, len, seed)) {
+				throw page_decoding_failed();
+			}
+		}
+	};
+
 #pragma pack(pop)
 
 	// Get the size of the encoding header based on type
@@ -341,6 +372,9 @@ public:
 	static int encodingHeaderSize(EncodingType t) {
 		if (t == EncodingType::XXHash64) {
 			return sizeof(XXHashEncoder::Header);
+		} else if (t == EncodingType::XOREncryption_TestOnly_DEPRECATED) {
+			ASSERT(g_network->isSimulated());
+			return sizeof(XOREncryptionEncoder::Header);
 		} else {
 			TraceEvent(SevWarnAlways, "InvalidPageEncoding").detail("EncodingType", t);
 			throw page_encoding_not_supported();
@@ -391,6 +425,7 @@ public:
 
 		// Non-verifying header parse just to initialize members
 		p->postReadHeader(invalidPhysicalPageID, false);
+		p->legacyXorWith = legacyXorWith;
 
 		return Reference<ArenaPage>(p);
 	}
@@ -404,9 +439,12 @@ public:
 
 		// Non-verifying header parse just to initialize component pointers
 		p->postReadHeader(invalidPhysicalPageID, false);
+		p->legacyXorWith = legacyXorWith;
 
 		return Reference<ArenaPage>(p);
 	}
+
+	void setLegacyXorWith(uint8_t xorWith) { legacyXorWith = xorWith; }
 
 	// The next two functions set mostly forensic info that may help in an investigation to identify data on disk.  The
 	// exception is pageID which must be set to the physical page ID on disk where the page is written or post-read
@@ -444,6 +482,12 @@ public:
 
 		if (page->encodingType == EncodingType::XXHash64) {
 			XXHashEncoder::encode(page->getEncodingHeader(), pPayload, payloadSize, pageID);
+		} else if (page->encodingType == EncodingType::XOREncryption_TestOnly_DEPRECATED) {
+			if (!legacyXorWith.present()) {
+				TraceEvent(SevWarnAlways, "LegacyXorCompatibilityNotInitialized");
+				throw page_encoding_not_supported();
+			}
+			XOREncryptionEncoder::encode(page->getEncodingHeader(), legacyXorWith.get(), pPayload, payloadSize, pageID);
 		} else {
 			TraceEvent(SevWarnAlways, "InvalidPageEncoding").detail("EncodingType", page->encodingType);
 			throw page_encoding_not_supported();
@@ -489,6 +533,12 @@ public:
 	void postReadPayload(PhysicalPageID pageID, double* decryptTime = nullptr) {
 		if (page->encodingType == EncodingType::XXHash64) {
 			XXHashEncoder::decode(page->getEncodingHeader(), pPayload, payloadSize, pageID);
+		} else if (page->encodingType == EncodingType::XOREncryption_TestOnly_DEPRECATED) {
+			if (!legacyXorWith.present()) {
+				TraceEvent(SevWarnAlways, "LegacyXorCompatibilityNotInitialized");
+				throw page_encoding_not_supported();
+			}
+			XOREncryptionEncoder::decode(page->getEncodingHeader(), legacyXorWith.get(), pPayload, payloadSize, pageID);
 		} else {
 			TraceEvent(SevWarnAlways, "InvalidPageEncoding").detail("EncodingType", page->encodingType);
 			throw page_encoding_not_supported();
@@ -523,6 +573,7 @@ private:
 	// These are accessed very often so they are stored directly
 	uint8_t* pPayload;
 	int payloadSize;
+	Optional<uint8_t> legacyXorWith;
 
 public:
 	EncodingType getEncodingType() const { return page->encodingType; }
