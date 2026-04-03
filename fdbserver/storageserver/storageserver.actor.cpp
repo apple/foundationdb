@@ -56,7 +56,7 @@
 #include "fdbserver/core/ServerCheckpoint.h"
 #include "fdbserver/core/SpanContextMessage.h"
 #include "fdbserver/storageserver/StorageCorruptionBug.h"
-#include "fdbserver/core/StorageMetrics.actor.h"
+#include "fdbserver/core/StorageMetrics.h"
 #include "fdbserver/core/TLogInterface.h"
 #include "TransactionTagCounter.h"
 #include "fdbserver/core/WaitFailure.h"

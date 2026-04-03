@@ -27,7 +27,7 @@
 #include "fdbserver/core/BulkLoadUtil.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/RocksDBCheckpointUtils.actor.h"
-#include "fdbserver/core/StorageMetrics.actor.h"
+#include "fdbserver/core/StorageMetrics.h"
 SSBulkDumpTask getSSBulkDumpTask(const std::map<std::string, std::vector<StorageServerInterface>>& locations,
                                  const BulkDumpState& bulkDumpState) {
 	StorageServerInterface targetServer;
