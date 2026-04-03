@@ -28,7 +28,6 @@ add_subdirectory(core)
 add_subdirectory(logsystem)
 add_subdirectory(kvstore)
 add_subdirectory(mocks3)
-add_subdirectory(restoreworker)
 add_subdirectory(clustercontroller)
 add_subdirectory(backupworker)
 add_subdirectory(commitproxy)
@@ -172,7 +171,6 @@ target_link_libraries(fdbserver PRIVATE
   "$<LINK_LIBRARY:WHOLE_ARCHIVE,fdbserver_workloads>"
   fdbserver_worker
   fdbserver_backupworker
-  fdbserver_restoreworker
   fdbserver_clustercontroller
   fdbserver_commitproxy
   fdbserver_consistencyscan

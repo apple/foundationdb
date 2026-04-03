@@ -20,7 +20,7 @@
 
 #include "fdbclient/HighContentionPrefixAllocator.h"
 #include "fdbserver/core/TesterInterface.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 
 // This workload tests the basic contract of the high contention allocator
 struct HighContentionPrefixAllocatorWorkload : TestWorkload {

@@ -202,7 +202,6 @@ public:
 	double BACKUP_STATUS_DELAY;
 	double BACKUP_STATUS_JITTER;
 	double MIN_CLEANUP_SECONDS;
-	int64_t FASTRESTORE_ATOMICOP_WEIGHT; // workload amplication factor for atomic op
 	int RESTORE_RANGES_READ_BATCH;
 
 	// interval for version directory bucketing in range-partitioned backup.

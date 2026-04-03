@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "fdbserver/tester/workloads.actor.h"
-#include "fdbserver/core/StorageCorruptionBug.h"
+#include "fdbserver/tester/workloads.h"
+#include "fdbserver/storageserver/StorageCorruptionBug.h"
 #include "fdbclient/ManagementAPI.h"
 #include "flow/ProcessEvents.h"
 

@@ -23,7 +23,6 @@
 #ifndef NO_INTELLISENSE
 #undef ACTOR
 #undef SWIFT_ACTOR
-#undef DESCR
 #undef state
 #undef UNCANCELLABLE
 #undef choose

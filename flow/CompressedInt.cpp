@@ -85,6 +85,8 @@ void testCompressedInt(IntType n, StringRef rep = StringRef()) {
 	}
 }
 
+void forceLinkCompressedIntTests() {}
+
 TEST_CASE("/flow/compressed_ints") {
 	testCompressedInt<int>(-2, "\x7e"_sr);
 	testCompressedInt<int>(-1, "\x7f"_sr);

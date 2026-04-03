@@ -301,10 +301,6 @@ if(NOT WIN32)
 endif()
 add_subdirectory(fdbbackup)
 add_subdirectory(tests)
-if(NOT FOUNDATIONDB_CROSS_COMPILING) # FIXME(swift): make this work when
-                                     # x-compiling.
-  add_subdirectory(flowbench EXCLUDE_FROM_ALL)
-endif()
 if(WITH_PYTHON AND WITH_C_BINDING)
   if(NOT FOUNDATIONDB_CROSS_COMPILING) # FIXME(swift): make this work when
                                        # x-compiling.

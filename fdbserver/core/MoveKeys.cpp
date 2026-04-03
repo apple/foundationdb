@@ -3385,13 +3385,3 @@ Future<Void> unassignServerKeys(UID traceId, TrType tr, KeyRangeRef keys, std::s
 		}
 	}
 }
-
-// Assign given key range to specified storage server.
-template <typename TrType = Transaction*>
-Future<Void> assignKeysToServer(UID traceId, TrType tr, KeyRangeRef keys, UID serverUID) {
-	Value value = keyServersValue(std::vector<UID>({ serverUID }), std::vector<UID>(), UID(), UID());
-	co_await krmSetRangeCoalescing(tr, keyServersPrefix, keys, allKeys, value);
-	co_await krmSetRangeCoalescing(tr, serverKeysPrefixFor(serverUID), keys, allKeys, serverKeysTrue);
-	dprint("Assign {} to server {}\n", normalKeys.toString(), serverUID.toString());
-	TraceEvent("AssignKeys", traceId).detail("Keys", keys).detail("SS", serverUID);
-}

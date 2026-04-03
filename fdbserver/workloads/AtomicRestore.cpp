@@ -23,8 +23,7 @@
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/restoreworker/RestoreCommon.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "BulkSetup.h"
 
 // Workload to test atomicRestore().
@@ -32,7 +31,6 @@
 struct AtomicRestoreWorkload : TestWorkload {
 	static constexpr auto NAME = "AtomicRestore";
 	double startAfter, restoreAfter;
-	bool fastRestore; // true: use fast restore, false: use old style restore
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
 	UsePartitionedLog usePartitionedLogs{ false };
 	Key addPrefix, removePrefix; // Original key will be first applied removePrefix and then applied addPrefix
@@ -42,13 +40,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 
 		startAfter = getOption(options, "startAfter"_sr, 10.0);
 		restoreAfter = getOption(options, "restoreAfter"_sr, 20.0);
-		fastRestore = getOption(options, "fastRestore"_sr, false);
-		if (!fastRestore) {
-			addDefaultBackupRanges(backupRanges);
-		} else {
-			// Fast restore doesn't support multiple ranges yet
-			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
-		}
+		addDefaultBackupRanges(backupRanges);
 		usePartitionedLogs.set(
 		    getOption(options, "usePartitionedLogs"_sr, deterministicRandom()->random01() < 0.5 ? true : false));
 
@@ -119,22 +111,16 @@ struct AtomicRestoreWorkload : TestWorkload {
 		co_await delay(restoreAfter * deterministicRandom()->random01());
 		TraceEvent("AtomicRestore_RestoreStart").log();
 
-		if (fastRestore) { // New fast parallel restore
-			TraceEvent(SevInfo, "AtomicParallelRestore").log();
-			co_await backupAgent.atomicParallelRestore(
-			    cx, BackupAgentBase::getDefaultTag(), backupRanges, addPrefix, removePrefix);
-		} else { // Old style restore
-			while (true) {
-				try {
-					co_await backupAgent.atomicRestore(
-					    cx, BackupAgentBase::getDefaultTag(), backupRanges, StringRef(), StringRef());
-					break;
-				} catch (Error& e) {
-					if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
-						throw;
-				}
-				co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
+		while (true) {
+			try {
+				co_await backupAgent.atomicRestore(
+				    cx, BackupAgentBase::getDefaultTag(), backupRanges, StringRef(), StringRef());
+				break;
+			} catch (Error& e) {
+				if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
+					throw;
 			}
+			co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
 		}
 
 		// SOMEDAY: Remove after backup agents can exist quiescently

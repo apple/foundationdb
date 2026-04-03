@@ -22,7 +22,7 @@
 #define FDBSERVER_APIWORKLOAD_H
 #pragma once
 
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/ThreadSafeTransaction.h"
