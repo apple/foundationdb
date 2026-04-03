@@ -3351,8 +3351,8 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 
 	try {
 		TraceEvent("DataDistributorRunning", di.id());
-		// DDInitRunning duplicates the above with DD* prefix so the full startup sequence
-		// can be queried with Type="DD*" in trace logs
+		// DDInitRunning duplicates the above with DDInit* prefix so the full startup sequence
+		// can be queried with Type="DDInit*" in trace logs
 		TraceEvent("DDInitRunning", di.id());
 		self->addActor.send(waitFailureServer(di.waitFailure.getFuture()));
 		self->addActor.send(cacheServerWatcher(&cx));
