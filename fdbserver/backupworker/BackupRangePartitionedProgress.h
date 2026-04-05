@@ -49,6 +49,8 @@ public:
 
 	void delref() { ReferenceCounted<BackupRangePartitionedProgress>::delref(); }
 
+	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> getUnfinishedBackup();
+
 private:
 	// Used for logging and debugging purpose to identify which backup progress it is.
 	const UID dbgid;
