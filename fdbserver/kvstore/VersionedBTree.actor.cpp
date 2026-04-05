@@ -60,12 +60,13 @@
 
 using namespace std::string_view_literals;
 
-// Older simulated Redwood files derived the test-only XOR secret from the basename of the pager file.
-// Keep that mapping stable so restarted upgrade tests can still read and continue writing those files.
+// Older simulated Redwood files derived the test-only XOR secret from the pager filename after erasing the directory
+// prefix with `erase(0, lastSlash)`, which intentionally leaves the final slash in the hashed suffix. Keep that exact
+// mapping stable so restarted upgrade tests can still read and continue writing those files.
 static uint8_t legacyXorWithForPagerName(std::string filename) {
 	size_t lastSlash = filename.find_last_of("\\/");
 	if (lastSlash != filename.npos) {
-		filename.erase(0, lastSlash + 1);
+		filename.erase(0, lastSlash);
 	}
 	return filename.empty()
 	           ? 0x5e
