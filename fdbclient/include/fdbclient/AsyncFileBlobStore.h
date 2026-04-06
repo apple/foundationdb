@@ -1,5 +1,5 @@
 /*
- * AsyncFileS3BlobStore.h
+ * AsyncFileBlobStore.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -27,7 +27,7 @@
 #include "flow/serialize.h"
 #include "flow/Net2Packet.h"
 #include "flow/IRateControl.h"
-#include "fdbclient/S3BlobStore.h"
+#include "fdbclient/IBlobStore.h"
 #include "md5/md5.h"
 #include "libb64/encode.h"
 #include <openssl/sha.h>
@@ -46,13 +46,13 @@ static Future<T> joinErrorGroup(Future<T> f, Promise<Void> p) {
 // This class represents a write-only file that lives in an S3-style blob store.  It writes using the REST API,
 // using multi-part upload and beginning to transfer each part as soon as it is large enough.
 // All write operations file operations must be sequential and contiguous.
-// Limits on part sizes, upload speed, and concurrent uploads are taken from the S3BlobStoreEndpoint being used.
-class AsyncFileS3BlobStoreWrite final : public IAsyncFile, public ReferenceCounted<AsyncFileS3BlobStoreWrite> {
+// Limits on part sizes, upload speed, and concurrent uploads are taken from the IBlobStoreEndpoint being used.
+class AsyncFileBlobStoreWrite final : public IAsyncFile, public ReferenceCounted<AsyncFileBlobStoreWrite> {
 public:
-	void addref() override { ReferenceCounted<AsyncFileS3BlobStoreWrite>::addref(); }
-	void delref() override { ReferenceCounted<AsyncFileS3BlobStoreWrite>::delref(); }
+	void addref() override { ReferenceCounted<AsyncFileBlobStoreWrite>::addref(); }
+	void delref() override { ReferenceCounted<AsyncFileBlobStoreWrite>::delref(); }
 
-	virtual StringRef getClassName() override { return "AsyncFileS3BlobStoreWrite"_sr; }
+	virtual StringRef getClassName() override { return "AsyncFileBlobStoreWrite"_sr; }
 
 	struct Part : ReferenceCounted<Part> {
 		Part(int n, int minSize, bool useSHA256)
@@ -111,7 +111,7 @@ public:
 
 	Future<int> read(void* data, int length, int64_t offset) override { throw file_not_readable(); }
 
-	static Future<Void> write_impl(Reference<AsyncFileS3BlobStoreWrite> f, const uint8_t* data, int length) {
+	static Future<Void> write_impl(Reference<AsyncFileBlobStoreWrite> f, const uint8_t* data, int length) {
 		Part* p = f->m_parts.back().getPtr();
 		// If this write will cause the part to cross the min part size boundary then write to the boundary and start a
 		// new part.
@@ -138,7 +138,7 @@ public:
 		m_cursor += length;
 
 		return m_error.getFuture() ||
-		       write_impl(Reference<AsyncFileS3BlobStoreWrite>::addRef(this), (const uint8_t*)data, length);
+		       write_impl(Reference<AsyncFileBlobStoreWrite>::addRef(this), (const uint8_t*)data, length);
 	}
 
 	Future<Void> truncate(int64_t size) override {
@@ -147,7 +147,7 @@ public:
 		return Void();
 	}
 
-	static Future<std::string> doPartUpload(AsyncFileS3BlobStoreWrite* f, Part* p) {
+	static Future<std::string> doPartUpload(AsyncFileBlobStoreWrite* f, Part* p) {
 		p->finalizeChecksum();
 		std::string upload_id = co_await f->getUploadID();
 		std::string etag = co_await f->m_bstore->uploadPart(
@@ -155,7 +155,7 @@ public:
 		co_return etag;
 	}
 
-	static Future<Void> doFinishUpload(AsyncFileS3BlobStoreWrite* f) {
+	static Future<Void> doFinishUpload(AsyncFileBlobStoreWrite* f) {
 		// If there is only 1 part then it has not yet been uploaded so just write the whole file at once.
 		if (f->m_parts.size() == 1) {
 			Reference<Part> part = f->m_parts.back();
@@ -168,7 +168,7 @@ public:
 		// There are at least 2 parts.  End the last part (which could be empty)
 		co_await f->endCurrentPart(f);
 
-		S3BlobStoreEndpoint::MultiPartSetT partSet;
+		IBlobStoreEndpoint::MultiPartSetT partSet;
 		std::vector<Reference<Part>>::iterator p;
 
 		// Wait for all the parts to be done to get their ETags, populate the partSet required to finish the object
@@ -176,7 +176,7 @@ public:
 		for (p = f->m_parts.begin(); p != f->m_parts.end(); ++p) {
 			std::string tag = co_await (*p)->etag;
 			if ((*p)->length > 0) { // The last part might be empty and has to be omitted.
-				partSet[(*p)->number] = S3BlobStoreEndpoint::PartInfo(tag, (*p)->checksumString);
+				partSet[(*p)->number] = IBlobStoreEndpoint::PartInfo(tag, (*p)->checksumString);
 			}
 		}
 
@@ -187,7 +187,7 @@ public:
 
 		// Log the checksum if present - this is just a hash of the multipart structure, not the object content
 		if (checksumSHA256.present()) {
-			TraceEvent(SevDebug, "AsyncFileS3BlobStoreMultipartUploadChecksum")
+			TraceEvent(SevDebug, "AsyncFileBlobStoreMultipartUploadChecksum")
 			    .detail("Bucket", f->m_bucket)
 			    .detail("Object", f->m_object)
 			    .detail("ChecksumSHA256", checksumSHA256.get())
@@ -225,7 +225,7 @@ public:
 
 	int64_t debugFD() const override { return -1; }
 
-	~AsyncFileS3BlobStoreWrite() override {
+	~AsyncFileBlobStoreWrite() override {
 		m_upload_id.cancel();
 		m_finished.cancel();
 		m_parts.clear(); // Contains futures
@@ -234,7 +234,7 @@ public:
 	std::string getFilename() const override { return m_object; }
 
 private:
-	Reference<S3BlobStoreEndpoint> m_bstore;
+	Reference<IBlobStoreEndpoint> m_bstore;
 	std::string m_bucket;
 	std::string m_object;
 
@@ -247,7 +247,7 @@ private:
 	FlowLock m_concurrentUploads;
 
 	// End the current part and start uploading it, but also wait for a part to finish if too many are in transit.
-	static Future<Void> endCurrentPart(AsyncFileS3BlobStoreWrite* f, bool startNew = false) {
+	static Future<Void> endCurrentPart(AsyncFileBlobStoreWrite* f, bool startNew = false) {
 		if (f->m_parts.back()->length == 0)
 			co_return;
 
@@ -274,7 +274,7 @@ private:
 	}
 
 public:
-	AsyncFileS3BlobStoreWrite(Reference<S3BlobStoreEndpoint> bstore, std::string bucket, std::string object)
+	AsyncFileBlobStoreWrite(Reference<IBlobStoreEndpoint> bstore, std::string bucket, std::string object)
 	  : m_bstore(bstore), m_bucket(bucket), m_object(object), m_cursor(0),
 	    m_concurrentUploads(bstore->knobs.concurrent_writes_per_file) {
 
@@ -286,10 +286,10 @@ public:
 
 // Different Download Approaches:
 //
-// 1. AsyncFileS3BlobStoreRead::read
+// 1. AsyncFileBlobStoreRead::read
 //    - Always uses range requests (Range: bytes=0-24)
 //    - ❌ NO checksum verification - can't use x-amz-checksum-mode: ENABLED
-//    - Used by backup/restore operations through BackupContainerS3BlobStore::readFile()
+//    - Used by backup/restore operations through BackupContainerBlobStore::readFile()
 //
 // 2. S3BlobStoreEndpoint::readEntireFile (for small files):
 //    - ✅ HAS checksum verification using x-amz-checksum-mode: ENABLED
@@ -318,12 +318,12 @@ public:
 // - The XXH64 checksums are used to verify the download.
 
 // This class represents a read-only file that lives in an S3-style blob store.  It reads using the REST API.
-class AsyncFileS3BlobStoreRead final : public IAsyncFile, public ReferenceCounted<AsyncFileS3BlobStoreRead> {
+class AsyncFileBlobStoreRead final : public IAsyncFile, public ReferenceCounted<AsyncFileBlobStoreRead> {
 public:
-	void addref() override { ReferenceCounted<AsyncFileS3BlobStoreRead>::addref(); }
-	void delref() override { ReferenceCounted<AsyncFileS3BlobStoreRead>::delref(); }
+	void addref() override { ReferenceCounted<AsyncFileBlobStoreRead>::addref(); }
+	void delref() override { ReferenceCounted<AsyncFileBlobStoreRead>::delref(); }
 
-	virtual StringRef getClassName() override { return "AsyncFileS3BlobStoreRead"_sr; }
+	virtual StringRef getClassName() override { return "AsyncFileBlobStoreRead"_sr; }
 
 	Future<int> read(void* data, int length, int64_t offset) override;
 
@@ -345,13 +345,13 @@ public:
 
 	std::string getFilename() const override { return m_object; }
 
-	~AsyncFileS3BlobStoreRead() override {}
+	~AsyncFileBlobStoreRead() override {}
 
-	Reference<S3BlobStoreEndpoint> m_bstore;
+	Reference<IBlobStoreEndpoint> m_bstore;
 	std::string m_bucket;
 	std::string m_object;
 	mutable Future<int64_t> m_size;
 
-	AsyncFileS3BlobStoreRead(Reference<S3BlobStoreEndpoint> bstore, std::string bucket, std::string object)
+	AsyncFileBlobStoreRead(Reference<IBlobStoreEndpoint> bstore, std::string bucket, std::string object)
 	  : m_bstore(bstore), m_bucket(bucket), m_object(object) {}
 };
