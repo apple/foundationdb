@@ -5715,8 +5715,9 @@ void DDTeamCollection::addServer(StorageServerInterface newServer,
 
 bool DDTeamCollection::removeTeam(Reference<TCTeamInfo> team) {
 	TraceEvent("RemovedServerTeam", distributorId).detail("Team", team->getDesc());
-	if (teamsByServerIDs.find(team->getServerIDsStr()) != teamsByServerIDs.end()) {
-		teamsByServerIDs.erase(team->getServerIDsStr());
+	auto it = teamsByServerIDs.find(team->getServerIDsStr());
+	if (it != teamsByServerIDs.end()) {
+		teamsByServerIDs.erase(it);
 	}
 	bool found = false;
 	for (int t = 0; t < teams.size(); t++) {
