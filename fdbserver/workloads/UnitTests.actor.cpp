@@ -123,9 +123,6 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkDDSketchTests();
 		forceLinkWipedStringTests();
 		forceLinkRandomKeyValueUtilsTests();
-		forceLinkSimKmsVaultTests();
-		forceLinkRESTSimKmsVaultTest();
-		forceLinkActorFuzzUnitTests();
 		forceLinkSimpleCounterTests();
 
 #ifdef FLOW_GRPC_ENABLED
