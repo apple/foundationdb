@@ -124,8 +124,6 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkWipedStringTests();
 		forceLinkRandomKeyValueUtilsTests();
 		forceLinkSimKmsVaultTests();
-<<<<<<< HEAD
-=======
 		forceLinkRESTSimKmsVaultTest();
 		forceLinkActorFuzzUnitTests();
 		forceLinkSimpleCounterTests();
@@ -134,7 +132,6 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkGrpcTests();
 		forceLinkGrpcTests2();
 #endif
->>>>>>> ff1922078 (SimpleCounter implementation and application to Arena, FastAlloc, and Net2 cherrypick to 7.4 (#12372))
 	}
 
 	Future<Void> setup(Database const& cx) override {
