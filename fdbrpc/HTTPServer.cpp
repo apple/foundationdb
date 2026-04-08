@@ -23,11 +23,16 @@
 #include "flow/Trace.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
+
+struct SharedFlowMutex : ReferenceCounted<SharedFlowMutex> {
+	FlowMutex mutex;
+};
+
 Future<Void> callbackHandler(Reference<IConnection> conn,
                              Future<Void> readRequestDone,
                              Reference<HTTP::IRequestHandler> requestHandler,
                              Reference<HTTP::IncomingRequest> req,
-                             FlowMutex* mutex) {
+                             Reference<SharedFlowMutex> mutexHolder) {
 	auto response = makeReference<HTTP::OutgoingResponse>();
 	UnsentPacketQueue content;
 	response->data.content = &content;
@@ -58,7 +63,7 @@ Future<Void> callbackHandler(Reference<IConnection> conn,
 	}
 	// take out response mutex to ensure no parallel writers to response connection
 	// FIXME: is this necessary? I think it is
-	FlowMutex::Lock lock = co_await mutex->take();
+	FlowMutex::Lock lock = co_await mutexHolder->mutex.take();
 	try {
 		co_await response->write(conn);
 	} catch (Error& e) {
@@ -79,7 +84,7 @@ Future<Void> connectionHandler(Reference<HTTP::SimServerContext> server,
                                Reference<HTTP::IRequestHandler> requestHandler) {
 	try {
 		// TODO do we actually have multiple requests on a connection? how does this work
-		FlowMutex responseMutex;
+		Reference<SharedFlowMutex> responseMutex = makeReference<SharedFlowMutex>();
 		Future<Void> readPrevRequest = Future<Void>(Void());
 		co_await conn->acceptHandshake();
 		while (true) {
@@ -88,7 +93,7 @@ Future<Void> connectionHandler(Reference<HTTP::SimServerContext> server,
 			co_await conn->onReadable();
 			auto req = makeReference<HTTP::IncomingRequest>();
 			readPrevRequest = req->read(conn, false);
-			server->actors.add(callbackHandler(conn, readPrevRequest, requestHandler, req, &responseMutex));
+			server->actors.add(callbackHandler(conn, readPrevRequest, requestHandler, req, responseMutex));
 		}
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled) {

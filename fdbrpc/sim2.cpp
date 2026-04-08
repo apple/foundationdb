@@ -48,6 +48,7 @@
 #include "crc32/crc32c.h"
 #include "fdbrpc/TraceFileIO.h"
 #include "flow/flow.h"
+#include "flow/CoroUtils.h"
 #include "flow/swift.h"
 #include "flow/swift/ABI/Task.h"
 #include "flow/genericactors.actor.h"
@@ -381,7 +382,7 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 		rollRandomClose();
 
 		int64_t avail = receivedBytes.get() - readBytes.get(); // SOMEDAY: random?
-		if (avail == 0 && !incomingClosed.get() && processTerminating(peerProcess) &&
+		if (avail == 0 && !incomingClosed.get() && peerProcess && processTerminating(peerProcess) &&
 		    sentBytes.get() == receivedBytes.get()) {
 			setIncomingClosed();
 		}
@@ -478,8 +479,69 @@ private:
 	} // SOMEDAY: acknowledgedBytes instead of receivedBytes
 
 	static bool processTerminating(const ISimulator::ProcessInfo* process) {
-		return process->failed || process->rebooting || process->shutdownSignal.isSet() ||
+		return !process || process->failed || process->rebooting || process->shutdownSignal.isSet() ||
 		       process->terminatedSignal.isSet();
+	}
+
+	static Future<bool> hopToProcessOrTermination(ISimulator::ProcessInfo* process, TaskPriority taskID) {
+		if (g_simulator->getCurrentProcess() == process) {
+			co_return !processTerminating(process);
+		}
+		if (processTerminating(process)) {
+			co_return false;
+		}
+		auto result = co_await race(g_simulator->onProcess(process, taskID), process->onTerminated());
+		co_return result.index() == 0 && !processTerminating(process);
+	}
+
+	static Future<bool> delayOrTermination(ISimulator::ProcessInfo* process, double seconds, TaskPriority taskID) {
+		if (processTerminating(process)) {
+			co_return false;
+		}
+		auto result = co_await race(delay(seconds, taskID), process->onTerminated());
+		co_return result.index() == 0 && !processTerminating(process);
+	}
+
+	static Future<Void> waitForSenderWakeup(Sim2Conn* self) {
+		if (processTerminating(self->peerProcess)) {
+			(void)co_await race(self->writtenBytes.onChange(), self->connWakeup.onTrigger());
+			co_return;
+		}
+		(void)co_await race(
+		    self->writtenBytes.onChange(), self->connWakeup.onTrigger(), self->peerProcess->onTerminated());
+		co_return;
+	}
+
+	static Future<Void> waitForReceiverWakeup(Sim2Conn* self) {
+		if (processTerminating(self->peerProcess)) {
+			(void)co_await self->connWakeup.onTrigger();
+			co_return;
+		}
+		(void)co_await race(self->connWakeup.onTrigger(), self->peerProcess->onTerminated());
+		co_return;
+	}
+
+	static Future<Void> waitForReadableStateChange(Sim2Conn* self) {
+		(void)co_await race(self->receivedBytes.onChange(), self->incomingClosed.onChange());
+		co_return;
+	}
+
+	static Future<Void> waitForReadableStateChangeOrTermination(Sim2Conn* self) {
+		if (processTerminating(self->peerProcess)) {
+			(void)co_await race(self->receivedBytes.onChange(), self->incomingClosed.onChange());
+			co_return;
+		}
+		(void)co_await race(
+		    self->receivedBytes.onChange(), self->incomingClosed.onChange(), self->peerProcess->onTerminated());
+		co_return;
+	}
+
+	static Future<Void> waitForWritableStateChangeOrTermination(Reference<Sim2Conn> targetPeer) {
+		(void)co_await race(targetPeer->receivedBytes.onChange(),
+		                    targetPeer->incomingClosed.onChange(),
+		                    targetPeer->connWakeup.onTrigger(),
+		                    targetPeer->process->onTerminated());
+		co_return;
 	}
 
 	bool writeClosed(const Reference<Sim2Conn>& targetPeer) const {
@@ -493,11 +555,13 @@ private:
 	}
 
 	static Future<Void> triggerStopReceive(Sim2Conn* self) {
-		// armStopReceive() can be called from either endpoint's simulator process. The resumed waiters must therefore
-		// re-check and, if needed, hop back to their owning process before mutating connection state.
+		// armStopReceive() can be called from either endpoint's simulator process, and this delay therefore fires on
+		// whichever process armed it. Resumed waiters must re-check their state and, if needed, hop back to their
+		// owning process before mutating connection state.
 		co_await delay(1.0);
 		self->stopReceive.set(true);
 		self->connWakeup.trigger();
+		co_return;
 	}
 
 	void armStopReceive() {
@@ -511,10 +575,11 @@ private:
 	void setIncomingClosed() {
 		ASSERT(g_simulator->getCurrentProcess() == process);
 		if (!incomingClosed.get()) {
-			TraceEvent("Sim2IncomingClosed")
-			    .detail("Receiver", process->address)
-			    .detail("Peer", peerProcess->address)
-			    .detail("Connection", dbgid);
+			TraceEvent traceEvent("Sim2IncomingClosed");
+			traceEvent.detail("Receiver", process->address).detail("Connection", dbgid);
+			if (peerProcess) {
+				traceEvent.detail("Peer", peerProcess->address);
+			}
 			incomingClosed.set(true);
 		}
 	}
@@ -535,24 +600,19 @@ private:
 				if (self->stopReceive.get() || processTerminating(self->peerProcess)) {
 					co_return;
 				}
-				co_await ((self->writtenBytes.onChange() || self->connWakeup.onTrigger()) ||
-				          self->peerProcess->onTerminated());
+				co_await waitForSenderWakeup(self);
 				if (processTerminating(self->peerProcess)) {
 					co_return;
 				}
-				if (g_simulator->getCurrentProcess() != self->peerProcess) {
+				if (g_simulator->getCurrentProcess() != self->peerProcess &&
+				    !co_await hopToProcessOrTermination(self->peerProcess, currentTaskID)) {
 					// stopReceive can wake us on the closer's process, but sentBytes must advance on the sender side.
-					co_await (g_simulator->onProcess(self->peerProcess, currentTaskID) ||
-					          self->peerProcess->onTerminated());
-					if (processTerminating(self->peerProcess)) {
-						co_return;
-					}
+					co_return;
 				}
 			}
 			ASSERT(g_simulator->getCurrentProcess() == self->peerProcess);
-			co_await (delay(.002 * deterministicRandom()->random01(), currentTaskID) ||
-			          self->peerProcess->onTerminated());
-			if (processTerminating(self->peerProcess)) {
+			if (!co_await delayOrTermination(
+			        self->peerProcess, .002 * deterministicRandom()->random01(), currentTaskID)) {
 				co_return;
 			}
 			ASSERT(g_simulator->getCurrentProcess() == self->peerProcess);
@@ -566,46 +626,42 @@ private:
 			loop {
 				TaskPriority currentTaskID = g_network->getCurrentTask();
 				if (self->sentBytes.get() != self->receivedBytes.get() && !processTerminating(self->peerProcess)) {
-					co_await (g_simulator->onProcess(self->peerProcess, currentTaskID) ||
-					          self->peerProcess->onTerminated());
+					(void)co_await hopToProcessOrTermination(self->peerProcess, currentTaskID);
+					// If the hop fails because peerProcess terminates, fall through to the processTerminating()
+					// handling below so already-sent bytes can still be delivered from self->process.
 				}
 				while (self->sentBytes.get() == self->receivedBytes.get()) {
 					if (self->stopReceive.get() || processTerminating(self->peerProcess)) {
 						// stopReceive can become ready on the peer-closing process, but incomingClosed must notify
 						// readers on the owning receiver process.
-						if (g_simulator->getCurrentProcess() != self->process) {
-							co_await g_simulator->onProcess(self->process, currentTaskID);
+						if (g_simulator->getCurrentProcess() != self->process &&
+						    !co_await hopToProcessOrTermination(self->process, currentTaskID)) {
+							co_return;
 						}
 						if ((self->stopReceive.get() || processTerminating(self->peerProcess)) &&
 						    self->sentBytes.get() == self->receivedBytes.get()) {
 							self->setIncomingClosed();
 							co_return;
 						}
-						if (!processTerminating(self->peerProcess)) {
-							co_await (g_simulator->onProcess(self->peerProcess, currentTaskID) ||
-							          self->peerProcess->onTerminated());
-						}
-						if (processTerminating(self->peerProcess)) {
+						if (processTerminating(self->peerProcess) ||
+						    !co_await hopToProcessOrTermination(self->peerProcess, currentTaskID)) {
 							break;
 						}
 						continue;
 					}
-					co_await (self->connWakeup.onTrigger() || self->peerProcess->onTerminated());
-					if (g_simulator->getCurrentProcess() != self->peerProcess) {
+					co_await waitForReceiverWakeup(self);
+					if (g_simulator->getCurrentProcess() != self->peerProcess &&
+					    !processTerminating(self->peerProcess)) {
 						// sentBytes notifications arrive on peerProcess, but stopReceive can resume us on the closer.
-						if (processTerminating(self->peerProcess)) {
-							break;
-						}
-						co_await (g_simulator->onProcess(self->peerProcess, currentTaskID) ||
-						          self->peerProcess->onTerminated());
-						if (processTerminating(self->peerProcess)) {
+						if (!co_await hopToProcessOrTermination(self->peerProcess, currentTaskID)) {
 							break;
 						}
 					}
 				}
 				if (processTerminating(self->peerProcess)) {
-					if (g_simulator->getCurrentProcess() != self->process) {
-						co_await g_simulator->onProcess(self->process, currentTaskID);
+					if (g_simulator->getCurrentProcess() != self->process &&
+					    !co_await hopToProcessOrTermination(self->process, currentTaskID)) {
+						co_return;
 					}
 					if (self->sentBytes.get() == self->receivedBytes.get()) {
 						self->setIncomingClosed();
@@ -632,14 +688,15 @@ private:
 				double sendDelay = g_clogging.getSendDelay(
 				    self->peerProcess->address, self->process->address, self->isStableConnection());
 				double sendDelayEnd = now() + sendDelay;
-				co_await (delay(sendDelay, currentTaskID) || self->peerProcess->onTerminated());
+				co_await delayOrTermination(self->peerProcess, sendDelay, currentTaskID);
 				// Once bytes have advanced into sentBytes they are already "on the wire". Preserve the normal
 				// sender-side delay while the peer is alive, but if the sender dies mid-flight, finish only the
 				// remaining network delay on the receiver side so already-sent bytes do not get stranded behind a dead
 				// process.
 				double remainingSendDelay = std::max(0.0, sendDelayEnd - now());
-				if (g_simulator->getCurrentProcess() != self->process) {
-					co_await g_simulator->onProcess(self->process, currentTaskID);
+				if (g_simulator->getCurrentProcess() != self->process &&
+				    !co_await hopToProcessOrTermination(self->process, currentTaskID)) {
+					co_return;
 				}
 				if (remainingSendDelay > ISimulator::TIME_EPS) {
 					co_await delay(remainingSendDelay);
@@ -666,8 +723,11 @@ private:
 		if (err.present()) {
 			if (err.get().code() == error_code_connection_failed) {
 				TaskPriority currentTaskID = g_network->getCurrentTask();
-				if (g_simulator->getCurrentProcess() != self->process) {
-					co_await g_simulator->onProcess(self->process, currentTaskID);
+				if (g_simulator->getCurrentProcess() != self->process &&
+				    !co_await hopToProcessOrTermination(self->process, currentTaskID)) {
+					// If our own process is terminating too, there is no surviving owner left that could observe a
+					// re-thrown pipe error, so finishing shutdown here is equivalent.
+					co_return;
 				}
 				self->setIncomingClosed();
 			}
@@ -686,17 +746,26 @@ private:
 					throw connection_failed();
 				}
 				if (processTerminating(self->peerProcess) && self->sentBytes.get() == self->receivedBytes.get()) {
-					self->setIncomingClosed();
-					throw connection_failed();
+					if (g_simulator->getCurrentProcess() != self->process &&
+					    !co_await hopToProcessOrTermination(self->process, currentTaskID)) {
+						co_return;
+					}
+					// sentBytes can still advance while we hop back to the owning process, so re-check before
+					// declaring the connection drained and closed.
+					if (processTerminating(self->peerProcess) && self->sentBytes.get() == self->receivedBytes.get()) {
+						self->setIncomingClosed();
+						throw connection_failed();
+					}
+					continue;
 				}
 				if (!processTerminating(self->peerProcess)) {
-					co_await ((self->receivedBytes.onChange() || self->incomingClosed.onChange()) ||
-					          self->peerProcess->onTerminated());
+					co_await waitForReadableStateChangeOrTermination(self);
 				} else {
-					co_await (self->receivedBytes.onChange() || self->incomingClosed.onChange());
+					co_await waitForReadableStateChange(self);
 				}
-				if (g_simulator->getCurrentProcess() != self->process) {
-					co_await g_simulator->onProcess(self->process, currentTaskID);
+				if (g_simulator->getCurrentProcess() != self->process &&
+				    !co_await hopToProcessOrTermination(self->process, currentTaskID)) {
+					co_return;
 				}
 				self->rollRandomClose();
 			}
@@ -717,11 +786,10 @@ private:
 					ASSERT(g_simulator->getCurrentProcess() == self->process);
 					co_return;
 				}
-				co_await (((targetPeer->receivedBytes.onChange() || targetPeer->incomingClosed.onChange()) ||
-				           targetPeer->connWakeup.onTrigger()) ||
-				          targetPeer->process->onTerminated());
-				if (g_simulator->getCurrentProcess() != self->process) {
-					co_await g_simulator->onProcess(self->process, currentTaskID);
+				co_await waitForWritableStateChangeOrTermination(targetPeer);
+				if (g_simulator->getCurrentProcess() != self->process &&
+				    !co_await hopToProcessOrTermination(self->process, currentTaskID)) {
+					co_return;
 				}
 			}
 		} catch (Error& e) {
