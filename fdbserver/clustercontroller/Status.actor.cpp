@@ -2980,17 +2980,26 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state Future<JsonBuilderObject> recoveryStateStatusFuture =
 		    recoveryStateStatusFetcher(cx, ccWorker, mWorker, workers.size(), &status_incomplete_reasons, &statusCode);
 
-		state Future<JsonBuilderObject> idmpKeyStatusFuture = getIdmpKeyStatus(cx);
+		state Future<ErrorOr<JsonBuilderObject>> idmpKeyStatusFuture =
+		    errorOr(timeoutError(getIdmpKeyStatus(cx), 5.0));
 
-		state Future<JsonBuilderObject> versionEpochStatusFuture =
-		    versionEpochStatusFetcher(cx, &status_incomplete_reasons);
+		state Future<ErrorOr<JsonBuilderObject>> versionEpochStatusFuture =
+		    errorOr(timeoutError(versionEpochStatusFetcher(cx, &status_incomplete_reasons), 5.0));
 
-		wait(waitForAll<JsonBuilderObject>(
-		    { recoveryStateStatusFuture, idmpKeyStatusFuture, versionEpochStatusFuture }));
+		// Launch loadConfiguration concurrently with recovery/idmp/versionEpoch
+		state Future<std::pair<Optional<DatabaseConfiguration>, Optional<LoadConfigurationResult>>>
+		    loadConfigFuture = loadConfiguration(cx, &messages, &status_incomplete_reasons);
 
-		state JsonBuilderObject recoveryStateStatus = recoveryStateStatusFuture.get();
-		state JsonBuilderObject idmpKeyStatus = idmpKeyStatusFuture.get();
-		state JsonBuilderObject versionEpochStatus = versionEpochStatusFuture.get();
+		// Wait for recovery state (need statusCode) concurrently with loadConfiguration
+		wait(ready(recoveryStateStatusFuture) && ready(loadConfigFuture));
+		// Don't need to wait for idmp/versionEpoch yet — they're used much later
+
+		state JsonBuilderObject recoveryStateStatus;
+		if (recoveryStateStatusFuture.isReady() && !recoveryStateStatusFuture.isError()) {
+			recoveryStateStatus = recoveryStateStatusFuture.get();
+		} else {
+			status_incomplete_reasons.insert("Unable to fetch recovery state status.");
+		}
 
 		// machine metrics
 		state WorkerEvents mMetrics = workerEventsVec[0].present() ? workerEventsVec[0].get().first : WorkerEvents();
@@ -3033,10 +3042,14 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state std::unordered_map<NetworkAddress, WorkerInterface> address_workers;
 
 		if (statusCode != RecoveryStatus::configuration_missing) {
-			std::pair<Optional<DatabaseConfiguration>, Optional<LoadConfigurationResult>> loadResults =
-			    wait(loadConfiguration(cx, &messages, &status_incomplete_reasons));
-			configuration = loadResults.first;
-			loadResult = loadResults.second;
+			// loadConfigFuture was launched concurrently above and should already be ready
+			if (loadConfigFuture.isReady() && !loadConfigFuture.isError()) {
+				auto loadResults = loadConfigFuture.get();
+				configuration = loadResults.first;
+				loadResult = loadResults.second;
+			} else {
+				status_incomplete_reasons.insert("Unable to load database configuration.");
+			}
 		}
 
 		if (loadResult.present()) {
@@ -3063,23 +3076,12 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		state std::vector<NetworkAddress> coordinatorAddresses;
 		if (configuration.present()) {
-			// Do the latency probe by itself to avoid interference from other status activities
+			// Launch latency probe concurrently — don't block on it
 			state bool isAvailable = true;
-			JsonBuilderObject latencyProbeResults =
-			    wait(latencyProbeFetcher(cx, &messages, &status_incomplete_reasons, &isAvailable));
-
-			statusObj["database_available"] = isAvailable;
-			if (!latencyProbeResults.empty()) {
-				statusObj["latency_probe"] = latencyProbeResults;
-			}
+			state Future<JsonBuilderObject> latencyProbeFuture =
+			    latencyProbeFetcher(cx, &messages, &status_incomplete_reasons, &isAvailable);
 
 			state std::vector<Future<Void>> warningFutures;
-			if (isAvailable) {
-				warningFutures.push_back(consistencyCheckStatusFetcher(cx, &messages, &status_incomplete_reasons));
-				if (!SERVER_KNOBS->DISABLE_DUPLICATE_LOG_WARNING) {
-					warningFutures.push_back(logRangeWarningFetcher(cx, &messages, &status_incomplete_reasons));
-				}
-			}
 
 			// Start getting storage servers now (using system priority) concurrently.  Using sys priority because
 			// having storage servers in status output is important to give context to error messages in status that
@@ -3138,16 +3140,58 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				}
 			}
 
-			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
-			wait(success(primaryDCFO));
+			// Launch hostname resolution as a future (don't block)
+			state Future<ErrorOr<std::vector<NetworkAddress>>> hostnamesFuture =
+			    errorOr(timeoutError(coordinators.ccr->getConnectionString().tryResolveHostnames(), 5.0));
 
-			ErrorOr<std::vector<NetworkAddress>> addresses =
-			    wait(errorOr(timeoutError(coordinators.ccr->getConnectionString().tryResolveHostnames(), 5.0)));
-			if (addresses.present()) {
-				coordinatorAddresses = std::move(addresses.get());
+			// Wait on futures2, primaryDCFO, hostnames, and latencyProbe ALL concurrently
+			wait(waitForAllReady(futures2) && success(primaryDCFO) &&
+			     ready(hostnamesFuture) && ready(latencyProbeFuture));
+
+			state std::vector<JsonBuilderObject> workerStatuses;
+			for (int i = 0; i < futures2.size(); i++) {
+				if (futures2[i].isReady() && !futures2[i].isError()) {
+					workerStatuses.push_back(futures2[i].get());
+				} else {
+					workerStatuses.push_back(JsonBuilderObject());
+					status_incomplete_reasons.insert("Unable to fetch some status data.");
+				}
+			}
+
+			if (hostnamesFuture.isReady() && !hostnamesFuture.isError()) {
+				ErrorOr<std::vector<NetworkAddress>> addresses = hostnamesFuture.get();
+				if (addresses.present()) {
+					coordinatorAddresses = std::move(addresses.get());
+				} else {
+					messages.push_back(
+					    JsonString::makeMessage("fetch_coordinator_addresses",
+					                            "Fetching coordinator addresses timed out"));
+				}
 			} else {
 				messages.push_back(
-				    JsonString::makeMessage("fetch_coordinator_addresses", "Fetching coordinator addresses timed out"));
+				    JsonString::makeMessage("fetch_coordinator_addresses",
+				                            "Fetching coordinator addresses timed out"));
+			}
+
+			// Collect the latency probe result
+			if (latencyProbeFuture.isReady() && !latencyProbeFuture.isError()) {
+				JsonBuilderObject latencyProbeResults = latencyProbeFuture.get();
+				statusObj["database_available"] = isAvailable;
+				if (!latencyProbeResults.empty()) {
+					statusObj["latency_probe"] = latencyProbeResults;
+				}
+			} else {
+				isAvailable = false;
+				statusObj["database_available"] = false;
+				status_incomplete_reasons.insert("Unable to fetch latency probe status.");
+			}
+
+			// Launch warning futures now that we know availability
+			if (isAvailable) {
+				warningFutures.push_back(consistencyCheckStatusFetcher(cx, &messages, &status_incomplete_reasons));
+				if (!SERVER_KNOBS->DISABLE_DUPLICATE_LOG_WARNING) {
+					warningFutures.push_back(logRangeWarningFetcher(cx, &messages, &status_incomplete_reasons));
+				}
 			}
 
 			int logFaultTolerance = 100;
@@ -3188,6 +3232,15 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			if (!qos.empty())
 				statusObj["qos"] = qos;
 
+			// Collect deferred versionEpochStatus
+			wait(ready(versionEpochStatusFuture));
+			state JsonBuilderObject versionEpochStatus;
+			if (versionEpochStatusFuture.isReady() && !versionEpochStatusFuture.isError() &&
+			    versionEpochStatusFuture.get().present()) {
+				versionEpochStatus = versionEpochStatusFuture.get().get();
+			} else {
+				status_incomplete_reasons.insert("Unable to fetch version epoch status.");
+			}
 			statusObj["version_epoch"] = versionEpochStatus;
 
 			// Merge dataOverlay into data
@@ -3247,7 +3300,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				    JsonBuilder::makeMessage("grv_proxies_error", "Timed out trying to retrieve grv proxies."));
 			}
 
-			wait(waitForAll(warningFutures));
+			wait(waitForAllReady(warningFutures));
 		} else {
 			// Set layers status to { _valid: false, error: "configurationMissing"}
 			JsonBuilderObject layers;
@@ -3321,6 +3374,15 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		if (!recoveryStateStatus.empty())
 			statusObj["recovery_state"] = recoveryStateStatus;
 
+		// Collect deferred idmpKeyStatus
+		wait(ready(idmpKeyStatusFuture));
+		state JsonBuilderObject idmpKeyStatus;
+		if (idmpKeyStatusFuture.isReady() && !idmpKeyStatusFuture.isError() &&
+		    idmpKeyStatusFuture.get().present()) {
+			idmpKeyStatus = idmpKeyStatusFuture.get().get();
+		} else {
+			status_incomplete_reasons.insert("Unable to fetch idempotency key status.");
+		}
 		statusObj["idempotency_ids"] = idmpKeyStatus;
 
 		// cluster messages subsection;
