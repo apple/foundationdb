@@ -39,7 +39,7 @@ void BackupRangePartitionedProgress::addBackupStatus(const WorkerBackupStatus& s
 Future<Void> getBackupRangePartitionedProgress(Database cx,
                                                UID dbgid,
                                                Reference<BackupRangePartitionedProgress> bStatus,
-                                               bool logging) {
+                                               Severity severity) {
 	Transaction tr(cx);
 
 	while (true) {
@@ -56,14 +56,13 @@ Future<Void> getBackupRangePartitionedProgress(Database cx,
 				const UID workerID = decodeBackupRangePartitionedProgressKey(it.key);
 				const WorkerBackupStatus status = decodeBackupRangePartitionedProgressValue(it.value);
 				bStatus->addBackupStatus(status);
-				if (logging) {
-					TraceEvent("GotBackupRangePartitionedProgress", dbgid)
-					    .detail("BackupWorker", workerID)
-					    .detail("Epoch", status.epoch)
-					    .detail("Version", status.version)
-					    .detail("Tag", status.tag.toString())
-					    .detail("TotalTags", status.totalTags);
-				}
+
+				TraceEvent(severity, "GotBackupRangePartitionedProgress", dbgid)
+				    .detail("BackupWorker", workerID)
+				    .detail("Epoch", status.epoch)
+				    .detail("Version", status.version)
+				    .detail("Tag", status.tag.toString())
+				    .detail("TotalTags", status.totalTags);
 			}
 			co_return;
 		} catch (Error& e) {

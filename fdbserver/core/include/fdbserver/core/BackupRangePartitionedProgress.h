@@ -62,4 +62,4 @@ private:
 Future<Void> getBackupRangePartitionedProgress(Database cx,
                                                UID dbgid,
                                                Reference<BackupRangePartitionedProgress> bStatus,
-                                               bool logging);
+                                               Severity severity);

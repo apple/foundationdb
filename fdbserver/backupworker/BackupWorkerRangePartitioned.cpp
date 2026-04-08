@@ -803,7 +803,7 @@ Future<Void> monitorBackupRangePartitionedProgress(BackupRangePartitionedData* s
 		// check all workers have started by checking their progress is larger
 		// than the backup's start version.
 		Reference<BackupRangePartitionedProgress> progress(new BackupRangePartitionedProgress(self->myId));
-		co_await getBackupRangePartitionedProgress(self->cx, self->myId, progress, /*logging=*/false);
+		co_await getBackupRangePartitionedProgress(self->cx, self->myId, progress, SevDebug);
 
 		std::map<Tag, Version> tagVersions = progress->getEpochStatus(self->recruitedEpoch);
 		if (tagVersions.size() != self->totalTags) {
