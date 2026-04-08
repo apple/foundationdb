@@ -354,10 +354,10 @@ public:
 	// all of the objects in the bucket under the given prefix.
 	// Since it can take a while, if a pNumDeleted and/or pBytesDeleted are provided they will be incremented every time
 	// a deletion of an object completes.
-	virtual Future<Void> deleteRecursively(std::string const& bucket,
-	                                       std::string prefix = "",
-	                                       int* pNumDeleted = nullptr,
-	                                       int64_t* pBytesDeleted = nullptr) = 0;
+	Future<Void> deleteRecursively(std::string const& bucket,
+	                               std::string prefix = "",
+	                               int* pNumDeleted = nullptr,
+	                               int64_t* pBytesDeleted = nullptr);
 
 	virtual Future<Void> writeEntireFile(std::string const& bucket,
 	                                     std::string const& object,
@@ -384,15 +384,23 @@ public:
 	                                                            std::string const& uploadID,
 	                                                            MultiPartSetT const& parts) = 0;
 
-	// Get a list of the files in a bucket.
+	// Get bucket contents via a stream, since listing large buckets will take many serial blob requests.
 	// If a delimiter is passed then common prefixes will be read in parallel, recursively, depending on recurseFilter.
 	// recurseFilter must be a function that takes a string and returns true if it passes.  The default behavior is
 	// to assume true.
-	virtual AsyncResult<ListResult> listObjects(std::string const& bucket,
-	                                            Optional<std::string> prefix = {},
-	                                            Optional<char> delimiter = {},
-	                                            int maxDepth = 0,
-	                                            std::function<bool(std::string const&)> recurseFilter = nullptr) = 0;
+	virtual Future<Void> listObjectsStream(std::string const& bucket,
+	                                       PromiseStream<ListResult> results,
+	                                       Optional<std::string> prefix = {},
+	                                       Optional<char> delimiter = {},
+	                                       int maxDepth = 0,
+	                                       std::function<bool(std::string const&)> recurseFilter = nullptr) = 0;
+
+	// Get a list of the files in a bucket, see listObjectsStream for more argument detail.
+	AsyncResult<ListResult> listObjects(std::string const& bucket,
+	                                    Optional<std::string> prefix = {},
+	                                    Optional<char> delimiter = {},
+	                                    int maxDepth = 0,
+	                                    std::function<bool(std::string const&)> recurseFilter = nullptr);
 
 	// Create a bucket if it does not already exist.
 	virtual Future<Void> createBucket(std::string const& bucket) = 0;

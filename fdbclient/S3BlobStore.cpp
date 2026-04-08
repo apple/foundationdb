@@ -253,73 +253,6 @@ Future<Void> S3BlobStoreEndpoint::deleteObject(std::string const& bucket, std::s
 	return deleteObject_impl(Reference<S3BlobStoreEndpoint>::addRef(this), bucket, object);
 }
 
-Future<Void> deleteRecursively_impl(Reference<S3BlobStoreEndpoint> b,
-                                    std::string bucket,
-                                    std::string prefix,
-                                    int* pNumDeleted,
-                                    int64_t* pBytesDeleted) {
-	PromiseStream<S3BlobStoreEndpoint::ListResult> resultStream;
-	// Start a recursive parallel listing which will send results to resultStream as they are received
-	Future<Void> done = b->listObjectsStream(bucket, resultStream, prefix, '/', std::numeric_limits<int>::max());
-	// Wrap done in an actor which will send end_of_stream since listObjectsStream() does not (so that many calls can
-	// write to the same stream)
-	done = map(done, [=](Void) mutable {
-		resultStream.sendError(end_of_stream());
-		return Void();
-	});
-
-	std::list<Future<Void>> deleteFutures;
-	try {
-		while (true) {
-			// Preserve actor choose{} semantics: if the stream result and completion are both ready,
-			// drain the stream item before honoring done. Using race(done, stream) drops the final
-			// stream item because race() breaks ties by argument order.
-			auto res = co_await race(resultStream.getFuture(), done);
-			if (res.index() == 0) {
-				S3BlobStoreEndpoint::ListResult list = std::get<0>(std::move(res));
-
-				for (auto& object : list.objects) {
-					deleteFutures.push_back(map(b->deleteObject(bucket, object.name), [=](Void) -> Void {
-						if (pNumDeleted != nullptr) {
-							++*pNumDeleted;
-						}
-						if (pBytesDeleted != nullptr) {
-							*pBytesDeleted += object.size;
-						}
-						return Void();
-					}));
-				}
-			} else if (res.index() == 1) {
-				done = Never();
-			} else {
-				UNREACHABLE();
-			}
-
-			// This is just a precaution to avoid having too many outstanding delete actors waiting to run
-			while (deleteFutures.size() > CLIENT_KNOBS->BLOBSTORE_CONCURRENT_REQUESTS) {
-				co_await deleteFutures.front();
-				deleteFutures.pop_front();
-			}
-		}
-	} catch (Error& e) {
-		if (e.code() != error_code_end_of_stream)
-			throw;
-	}
-
-	while (deleteFutures.size() > 0) {
-		co_await deleteFutures.front();
-		deleteFutures.pop_front();
-	}
-}
-
-Future<Void> S3BlobStoreEndpoint::deleteRecursively(std::string const& bucket,
-                                                    std::string prefix,
-                                                    int* pNumDeleted,
-                                                    int64_t* pBytesDeleted) {
-	return deleteRecursively_impl(
-	    Reference<S3BlobStoreEndpoint>::addRef(this), bucket, prefix, pNumDeleted, pBytesDeleted);
-}
-
 Future<Void> createBucket_impl(Reference<S3BlobStoreEndpoint> b, std::string bucket) {
 	UnsentPacketQueue packets;
 	co_await b->requestRateWrite->getAllowance(1);
@@ -1261,62 +1194,6 @@ Future<Void> S3BlobStoreEndpoint::listObjectsStream(std::string const& bucket,
                                                     std::function<bool(std::string const&)> recurseFilter) {
 	return listObjectsStream_impl(
 	    Reference<S3BlobStoreEndpoint>::addRef(this), bucket, results, prefix, delimiter, maxDepth, recurseFilter);
-}
-
-AsyncResult<S3BlobStoreEndpoint::ListResult> listObjects_impl(
-    Reference<S3BlobStoreEndpoint> bstore,
-    std::string bucket,
-    Optional<std::string> prefix,
-    Optional<char> delimiter,
-    int maxDepth,
-    std::function<bool(std::string const&)> recurseFilterUnsafe) {
-	// C++20 coroutine safety: copy const& params to survive across suspension.
-	auto recurseFilter = recurseFilterUnsafe;
-
-	S3BlobStoreEndpoint::ListResult results;
-	PromiseStream<S3BlobStoreEndpoint::ListResult> resultStream;
-	Future<Void> done = bstore->listObjectsStream(bucket, resultStream, prefix, delimiter, maxDepth, recurseFilter);
-	// Wrap done in an actor which sends end_of_stream because list does not so that many lists can write to the same
-	// stream
-	done = map(done, [=](Void) mutable {
-		resultStream.sendError(end_of_stream());
-		return Void();
-	});
-
-	try {
-		while (true) {
-			// Preserve actor choose{} semantics: if the stream result and completion are both ready,
-			// drain the stream item before honoring done. Using race(done, stream) drops the final
-			// stream item because race() breaks ties by argument order.
-			auto res = co_await race(resultStream.getFuture(), done);
-			if (res.index() == 0) {
-				S3BlobStoreEndpoint::ListResult info = std::get<0>(std::move(res));
-
-				results.commonPrefixes.insert(
-				    results.commonPrefixes.end(), info.commonPrefixes.begin(), info.commonPrefixes.end());
-				results.objects.insert(results.objects.end(), info.objects.begin(), info.objects.end());
-			} else if (res.index() == 1) {
-				done = Never();
-			} else {
-				UNREACHABLE();
-			}
-		}
-	} catch (Error& e) {
-		if (e.code() != error_code_end_of_stream)
-			throw;
-	}
-
-	co_return results;
-}
-
-AsyncResult<S3BlobStoreEndpoint::ListResult> S3BlobStoreEndpoint::listObjects(
-    std::string const& bucket,
-    Optional<std::string> prefix,
-    Optional<char> delimiter,
-    int maxDepth,
-    std::function<bool(std::string const&)> recurseFilter) {
-	return listObjects_impl(
-	    Reference<S3BlobStoreEndpoint>::addRef(this), bucket, prefix, delimiter, maxDepth, recurseFilter);
 }
 
 AsyncResult<std::vector<std::string>> listBuckets_impl(Reference<S3BlobStoreEndpoint> bstore) {

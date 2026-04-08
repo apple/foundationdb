@@ -120,14 +120,7 @@ public:
 	                               Optional<std::string> prefix = {},
 	                               Optional<char> delimiter = {},
 	                               int maxDepth = 0,
-	                               std::function<bool(std::string const&)> recurseFilter = nullptr);
-
-	// Get a list of the files in a bucket, see listObjectsStream for more argument detail.
-	AsyncResult<ListResult> listObjects(std::string const& bucket,
-	                                    Optional<std::string> prefix = {},
-	                                    Optional<char> delimiter = {},
-	                                    int maxDepth = 0,
-	                                    std::function<bool(std::string const&)> recurseFilter = nullptr) override;
+	                               std::function<bool(std::string const&)> recurseFilter = nullptr) override;
 
 	// Get a list of all buckets
 	AsyncResult<std::vector<std::string>> listBuckets();
@@ -150,16 +143,6 @@ public:
 
 	// Delete an object in a bucket
 	Future<Void> deleteObject(std::string const& bucket, std::string const& object) override;
-
-	// Delete all objects in a bucket under a prefix.  Note this is not atomic as blob store does not
-	// support this operation directly. This method is just a convenience method that lists and deletes
-	// all of the objects in the bucket under the given prefix.
-	// Since it can take a while, if a pNumDeleted and/or pBytesDeleted are provided they will be incremented every time
-	// a deletion of an object completes.
-	Future<Void> deleteRecursively(std::string const& bucket,
-	                               std::string prefix = "",
-	                               int* pNumDeleted = nullptr,
-	                               int64_t* pBytesDeleted = nullptr) override;
 
 	// Create a bucket if it does not already exist.
 	Future<Void> createBucket(std::string const& bucket) override;
