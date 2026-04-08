@@ -29,12 +29,13 @@
 struct StatusWorkload : TestWorkload {
 	static constexpr auto NAME = "Status";
 
-	double testDuration, requestsPerSecond;
+	double testDuration, requestsPerSecond, maxStatusLatency;
 	bool enableLatencyBands;
 
 	Future<Void> latencyBandActor;
 
 	PerfIntCounter requests, replies, errors, totalSize;
+	double worstLatency = 0;
 	Optional<StatusObject> parsedSchema;
 
 	StatusWorkload(WorkloadContext const& wcx)
@@ -42,6 +43,7 @@ struct StatusWorkload : TestWorkload {
 	    errors("Status Errors"), totalSize("Status reply size sum") {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		requestsPerSecond = getOption(options, "requestsPerSecond"_sr, 0.5);
+		maxStatusLatency = getOption(options, "maxStatusLatency"_sr, 0.0);
 		enableLatencyBands = getOption(options, "enableLatencyBands"_sr, deterministicRandom()->random01() < 0.5);
 		auto statusSchemaStr = getOption(options, "schema"_sr, JSONSchemas::statusSchema);
 		if (!statusSchemaStr.empty()) {
@@ -66,7 +68,17 @@ struct StatusWorkload : TestWorkload {
 
 		return success(timeout(fetcher(cx, this), testDuration));
 	}
-	Future<bool> check(Database const& cx) override { return errors.getValue() == 0; }
+	Future<bool> check(Database const& cx) override {
+		if (errors.getValue() != 0)
+			return false;
+		if (maxStatusLatency > 0 && worstLatency > maxStatusLatency) {
+			TraceEvent(SevError, "StatusLatencyExceeded")
+			    .detail("WorstLatency", worstLatency)
+			    .detail("MaxAllowed", maxStatusLatency);
+			return false;
+		}
+		return true;
+	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {
 		if (clientId != 0)
@@ -77,6 +89,7 @@ struct StatusWorkload : TestWorkload {
 		m.emplace_back(
 		    "Average Reply Size", replies.getValue() ? totalSize.getValue() / replies.getValue() : 0, Averaged::False);
 		m.push_back(errors.getMetric());
+		m.emplace_back("Worst Latency", worstLatency, Averaged::False);
 	}
 
 	static void schemaCoverageRequirements(StatusObject const& schema, std::string schema_path = std::string()) {
@@ -185,10 +198,11 @@ struct StatusWorkload : TestWorkload {
 				BinaryWriter br(AssumeVersion(g_network->protocolVersion()));
 				save(br, result);
 				self->totalSize += br.getLength();
-				TraceEvent("StatusWorkloadReply")
-				    .detail("ReplySize", br.getLength())
-				    .detail("Latency",
-				            now() - issued); //.detail("Reply", json_spirit::write_string(json_spirit::mValue(result)));
+				double latency = now() - issued;
+			self->worstLatency = std::max(self->worstLatency, latency);
+			TraceEvent("StatusWorkloadReply")
+			    .detail("ReplySize", br.getLength())
+			    .detail("Latency", latency);;
 				std::string errorStr;
 				if (self->parsedSchema.present() &&
 				    !schemaMatch(self->parsedSchema.get(), result, errorStr, SevError, true)) {

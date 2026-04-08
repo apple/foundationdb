@@ -1,0 +1,22 @@
+[[test]]
+testTitle = 'StatusDuringOutage'
+
+    [[test.workload]]
+    testName = 'Status'
+    testDuration = 60.0
+    requestsPerSecond = 0.5
+    maxStatusLatency = 10.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 1
+    reboot = false
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 60.0
+    swizzle = 0
+    scale = 1.0
+    clogginess = 2.0
