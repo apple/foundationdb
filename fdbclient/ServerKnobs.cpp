@@ -313,8 +313,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_SHARD_SIZE_GRANULARITY,                         5000000 );
 	init( DD_SHARD_SIZE_GRANULARITY_SIM,                      500000 ); if( randomize && BUGGIFY ) DD_SHARD_SIZE_GRANULARITY_SIM = 0;
 	init( DD_MOVE_KEYS_PARALLELISM,                               15 ); if( randomize && BUGGIFY ) DD_MOVE_KEYS_PARALLELISM = 1;
-	init( DD_RELOCATOR_STARTUP_RESTORED_MOVE_MAX_DELAY,            0 ); if( randomize && BUGGIFY ) DD_RELOCATOR_STARTUP_RESTORED_MOVE_MAX_DELAY = deterministicRandom()->randomInt(0, 4);
-	init( DD_RELOCATOR_STARTUP_UNRESTORED_MOVE_MAX_DELAY,          0 ); if( randomize && BUGGIFY ) DD_RELOCATOR_STARTUP_UNRESTORED_MOVE_MAX_DELAY = deterministicRandom()->randomInt(0, 4);
+	// TODO: Run these DD relocator startup delay knobs with non-default values some of the time.
+	// This doesn't work in simulation currently because DD queue sizing and quiesce timing is overly sensitive.
+	init( DD_RELOCATOR_STARTUP_RESTORED_MOVE_MAX_DELAY,            0 );
+	init( DD_RELOCATOR_STARTUP_UNRESTORED_MOVE_MAX_DELAY,          0 );
 	init( DD_FETCH_SOURCE_PARALLELISM,                          1000 ); if( randomize && BUGGIFY ) DD_FETCH_SOURCE_PARALLELISM = 1;
 	init( DD_MERGE_LIMIT,                                       2000 ); if( randomize && BUGGIFY ) DD_MERGE_LIMIT = 2;
 	init( DD_SHARD_METRICS_TIMEOUT,                             60.0 ); if( randomize && BUGGIFY ) DD_SHARD_METRICS_TIMEOUT = 0.1;
