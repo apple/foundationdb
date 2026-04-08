@@ -117,7 +117,6 @@ Arena::Arena() : impl(nullptr) {
 	arenasCreated()->increment(1);
 }
 
->>>>>>> dd891027a (Address issues noticed by retroactive AI code review (#12930))
 Arena::Arena(size_t reservedSize) : impl(0) {
 	UNSTOPPABLE_ASSERT(reservedSize < std::numeric_limits<int>::max());
 	arenasCreated()->increment(1);
