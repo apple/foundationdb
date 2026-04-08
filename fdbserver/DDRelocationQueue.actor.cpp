@@ -1325,6 +1325,21 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 	state uint64_t debugID = deterministicRandom()->randomUInt64();
 	state bool enableShardMove = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD;
 
+	// The code to move shards can be expensive at scale (e.g. with thousands of concurrent shards),
+	// so in an emergency, these knobs can be used to spread out the execution of subsequent code
+	// by injecting a uniform random delay here.
+	if (rd.isRestore()) {
+		if (SERVER_KNOBS->DD_RELOCATOR_STARTUP_RESTORED_MOVE_MAX_DELAY > 0) {
+			wait(
+			    delay(deterministicRandom()->randomInt(0, SERVER_KNOBS->DD_RELOCATOR_STARTUP_RESTORED_MOVE_MAX_DELAY)));
+		}
+	} else {
+		if (SERVER_KNOBS->DD_RELOCATOR_STARTUP_UNRESTORED_MOVE_MAX_DELAY > 0) {
+			wait(delay(
+			    deterministicRandom()->randomInt(0, SERVER_KNOBS->DD_RELOCATOR_STARTUP_UNRESTORED_MOVE_MAX_DELAY)));
+		}
+	}
+
 	try {
 		if (now() - self->lastInterval < 1.0) {
 			relocateShardInterval.severity = SevDebug;
