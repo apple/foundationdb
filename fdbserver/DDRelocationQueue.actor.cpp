@@ -1299,10 +1299,10 @@ bool getWantTrueBestIfMoveout(int priority) {
 
 // This actor relocates the specified keys to a good place.
 // The inFlightActor key range map stores the actor for each RelocateData
-ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
-                                             RelocateData rd,
-                                             Future<Void> prevCleanup,
-                                             const DDEnabledState* ddEnabledState) {
+ACTOR Future<Void> dataDistributionRelocatorInternal(DDQueue* self,
+                                                     RelocateData rd,
+                                                     Future<Void> prevCleanup,
+                                                     const DDEnabledState* ddEnabledState) {
 	state Promise<Void> errorOut(self->error);
 	state TraceInterval relocateShardInterval("RelocateShard", rd.randomId);
 	state PromiseStream<RelocateData> dataTransferComplete(self->dataTransferComplete);
@@ -1324,21 +1324,6 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 	state WantTrueBestIfMoveout wantTrueBestIfMoveout(getWantTrueBestIfMoveout(rd.priority));
 	state uint64_t debugID = deterministicRandom()->randomUInt64();
 	state bool enableShardMove = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD;
-
-	// The code to move shards can be expensive at scale (e.g. with thousands of concurrent shards),
-	// so in an emergency, these knobs can be used to spread out the execution of subsequent code
-	// by injecting a uniform random delay here.
-	if (rd.isRestore()) {
-		if (SERVER_KNOBS->DD_RELOCATOR_STARTUP_RESTORED_MOVE_MAX_DELAY > 0) {
-			wait(
-			    delay(deterministicRandom()->randomInt(0, SERVER_KNOBS->DD_RELOCATOR_STARTUP_RESTORED_MOVE_MAX_DELAY)));
-		}
-	} else {
-		if (SERVER_KNOBS->DD_RELOCATOR_STARTUP_UNRESTORED_MOVE_MAX_DELAY > 0) {
-			wait(delay(
-			    deterministicRandom()->randomInt(0, SERVER_KNOBS->DD_RELOCATOR_STARTUP_UNRESTORED_MOVE_MAX_DELAY)));
-		}
-	}
 
 	try {
 		if (now() - self->lastInterval < 1.0) {
@@ -2040,6 +2025,44 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 		}
 		throw err;
 	}
+}
+
+static LatencySample* ddRelocatorLatency(DDQueue* self) {
+	static LatencySample* p = new LatencySample("DataDistributionRelocator",
+	                                            self->distributorId,
+	                                            SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL,
+	                                            SERVER_KNOBS->DD_RELOCATOR_LATENCY_SKETCH_ACCURACY);
+	return p;
+}
+
+ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
+                                             RelocateData rd,
+                                             Future<Void> prevCleanup,
+                                             const DDEnabledState* ddEnabledState) {
+
+	state LatencySample* latency_sample = ddRelocatorLatency(self);
+
+	state double n = now();
+
+	// The code to move shards can be expensive at scale (e.g. with thousands of concurrent shards),
+	// so in an emergency, these knobs can be used to spread out the execution of subsequent code
+	// by injecting a uniform random delay here.
+	wait(delay(deterministicRandom()->random01() *
+	           (rd.isRestore() ? SERVER_KNOBS->DD_RELOCATOR_STARTUP_RESTORED_MOVE_MAX_DELAY
+	                           : SERVER_KNOBS->DD_RELOCATOR_STARTUP_UNRESTORED_MOVE_MAX_DELAY)));
+
+	state std::function<void()> cleanup = [&]() -> void { latency_sample->addMeasurement(now() - n); };
+
+	try {
+		wait(dataDistributionRelocatorInternal(self, rd, prevCleanup, ddEnabledState));
+	} catch (Error& e) {
+		cleanup();
+		throw e;
+	}
+
+	cleanup();
+
+	return Void();
 }
 
 inline double getWorstCpu(const HealthMetrics& metrics, const std::vector<UID>& ids) {
