@@ -1168,6 +1168,12 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			trackerCancelled = true;
 			state Error err = e;
 			TraceEvent("DataDistributorDestroyTeamCollections").error(e);
+			// Log every DD exit with the reason. movekeys_conflict is the most common
+			// non-kill cause — it's a normal internal restart, but was previously
+			// invisible because reportErrorsExcept suppresses logging for "normal" DD errors.
+			TraceEvent(SevWarn, "DDExiting", self->ddId)
+			    .error(e)
+			    .detail("ErrorCode", e.code());
 			state std::vector<UID> teamForDroppedRange;
 			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
 				// Choose a random healthy team to host the to-be-dropped range.
