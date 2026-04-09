@@ -24,6 +24,7 @@
 #include "flow/Arena.h"
 #include "flow/Knobs.h"
 #include "flow/Platform.h"
+#include "flow/SimpleCounter.h"
 #include "flow/Trace.h"
 #include <algorithm>
 #include <memory>
@@ -309,16 +310,6 @@ public:
 	DoubleMetricHandle countLaunchTime;
 	DoubleMetricHandle countReactTime;
 	BoolMetricHandle awakeMetric;
-	Int64MetricHandle countClientTLSHandshakesOnSideThreads;
-	Int64MetricHandle countClientTLSHandshakesOnMainThread;
-	Int64MetricHandle countServerTLSHandshakesOnSideThreads;
-	Int64MetricHandle countServerTLSHandshakesOnMainThread;
-	Int64MetricHandle countClientTLSHandshakesTimedout;
-	Int64MetricHandle countServerTLSHandshakesTimedout;
-	Int64MetricHandle countServerTLSHandshakeThrottled;
-	Int64MetricHandle countClientTLSHandshakeThrottled;
-	Int64MetricHandle countServerTLSHandshakeLocked;
-	Int64MetricHandle countClientTLSHandshakeLocked;
 
 	EventMetricHandle<SlowTask> slowTaskMetric;
 
@@ -902,7 +893,9 @@ public:
 				if (iter->second.first >= FLOW_KNOBS->TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS) {
 					TraceEvent("TLSOutgoingConnectionThrottlingWarning").suppressFor(1.0).detail("PeerIP", addr);
 					wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
-					g_net2->countClientTLSHandshakeThrottled++;
+					static SimpleCounter<int64_t>* countClientTLSHandshakeThrottled =
+					    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakeThrottled");
+					countClientTLSHandshakeThrottled->increment(1);
 					throw connection_failed();
 				}
 			} else {
@@ -954,7 +947,9 @@ public:
 			// FIXME: see comment elsewhere about making this the only path.
 			if ((FLOW_KNOBS->DISABLE_MAINTHREAD_TLS_HANDSHAKE && N2::g_net2->sslHandshakerThreadsStarted > 0) ||
 			    N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
-				g_net2->countServerTLSHandshakesOnSideThreads++;
+				static SimpleCounter<int64_t>* countServerTLSHandshakesOnSideThreads =
+				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakesOnSideThreads");
+				countServerTLSHandshakesOnSideThreads->increment(1);
 				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
 				auto handshake =
 				    new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::server);
@@ -963,7 +958,9 @@ public:
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
 				// Otherwise use flow network thread
-				g_net2->countServerTLSHandshakesOnMainThread++;
+				static SimpleCounter<int64_t>* countServerTLSHandshakesOnMainThread =
+				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakesOnMainThread");
+				countServerTLSHandshakesOnMainThread->increment(1);
 				BindPromise p("N2_AcceptHandshakeError"_audit, self->id);
 				p.setPeerAddr(self->getPeerAddress());
 				onHandshook = p.getFuture();
@@ -990,7 +987,9 @@ public:
 					    .detail("PeerIP", peerIP.first.toString());
 					wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
 					self->closeSocket();
-					g_net2->countServerTLSHandshakeThrottled++;
+					static SimpleCounter<int64_t>* countServerTLSHandshakeThrottled =
+					    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakeThrottled");
+					countServerTLSHandshakeThrottled->increment(1);
 					throw connection_failed();
 				}
 			} else {
@@ -1001,7 +1000,9 @@ public:
 		wait(g_network->networkInfo.handshakeLock->take(
 		    getTaskPriorityFromInt(FLOW_KNOBS->TLS_HANDSHAKE_FLOWLOCK_PRIORITY)));
 		state FlowLock::Releaser releaser(*g_network->networkInfo.handshakeLock);
-		g_net2->countServerTLSHandshakeLocked++;
+		static SimpleCounter<int64_t>* countServerTLSHandshakeLocked =
+		    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakeLocked");
+		countServerTLSHandshakeLocked->increment(1);
 
 		Promise<Void> connected;
 		doAcceptHandshake(self, connected);
@@ -1011,7 +1012,9 @@ public:
 					return Void();
 				}
 				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
-					g_net2->countServerTLSHandshakesTimedout++;
+					static SimpleCounter<int64_t>* countServerTLSHandshakesTimedout =
+					    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakesTimedout");
+					countServerTLSHandshakesTimedout->increment(1);
 					throw connection_failed();
 				}
 			}
@@ -1053,7 +1056,9 @@ public:
 			// thousand incremental threads.
 			if ((FLOW_KNOBS->DISABLE_MAINTHREAD_TLS_HANDSHAKE && N2::g_net2->sslHandshakerThreadsStarted > 0) ||
 			    N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
-				g_net2->countClientTLSHandshakesOnSideThreads++;
+				static SimpleCounter<int64_t>* countClientTLSHandshakesOnSideThreads =
+				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakesOnSideThreads");
+				countClientTLSHandshakesOnSideThreads->increment(1);
 				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
 				auto handshake =
 				    new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::client);
@@ -1062,7 +1067,9 @@ public:
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
 				// Otherwise use flow network thread
-				g_net2->countClientTLSHandshakesOnMainThread++;
+				static SimpleCounter<int64_t>* countClientTLSHandshakesOnMainThread =
+				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakesOnMainThread");
+				countClientTLSHandshakesOnMainThread->increment(1);
 				BindPromise p("N2_ConnectHandshakeError"_audit, self->id);
 				p.setPeerAddr(self->getPeerAddress());
 				onHandshook = p.getFuture();
@@ -1081,7 +1088,9 @@ public:
 		wait(g_network->networkInfo.handshakeLock->take(
 		    getTaskPriorityFromInt(FLOW_KNOBS->TLS_HANDSHAKE_FLOWLOCK_PRIORITY)));
 		state FlowLock::Releaser releaser(*g_network->networkInfo.handshakeLock);
-		g_net2->countClientTLSHandshakeLocked++;
+		static SimpleCounter<int64_t>* countClientTLSHandshakeLocked =
+		    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakeLocked");
+		countClientTLSHandshakeLocked->increment(1);
 
 		Promise<Void> connected;
 		doConnectHandshake(self, connected);
@@ -1091,7 +1100,9 @@ public:
 					return Void();
 				}
 				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
-					g_net2->countClientTLSHandshakesTimedout++;
+					static SimpleCounter<int64_t>* countClientTLSHandshakesTimedout =
+					    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakesTimedout");
+					countClientTLSHandshakesTimedout->increment(1);
 					throw connection_failed();
 				}
 			}
@@ -1479,16 +1490,6 @@ void Net2::initMetrics() {
 	slowTaskMetric.init("Net2.SlowTask"_sr);
 	countLaunchTime.init("Net2.CountLaunchTime"_sr);
 	countReactTime.init("Net2.CountReactTime"_sr);
-	countClientTLSHandshakesOnSideThreads.init("Net2.CountClientTLSHandshakesOnSideThreads"_sr);
-	countClientTLSHandshakesOnMainThread.init("Net2.CountClientTLSHandshakesOnMainThread"_sr);
-	countServerTLSHandshakesOnSideThreads.init("Net2.CountServerTLSHandshakesOnSideThreads"_sr);
-	countServerTLSHandshakesOnMainThread.init("Net2.CountServerTLSHandshakesOnMainThread"_sr);
-	countClientTLSHandshakesTimedout.init("Net2.CountClientTLSHandshakesTimedout"_sr);
-	countServerTLSHandshakesTimedout.init("Net2.CountServerTLSHandshakesTimedout"_sr);
-	countServerTLSHandshakeThrottled.init("Net2.CountServerTLSHandshakeThrottled"_sr);
-	countClientTLSHandshakeThrottled.init("Net2.CountClientTLSHandshakeThrottled"_sr);
-	countServerTLSHandshakeLocked.init("Net2.CountServerTLSHandshakeLocked"_sr);
-	countClientTLSHandshakeLocked.init("Net2.CountClientTLSHandshakeLocked"_sr);
 	taskQueue.initMetrics();
 }
 
@@ -1594,6 +1595,7 @@ void Net2::run() {
 		[[maybe_unused]] int queueSize = taskQueue.getNumReadyTasks();
 
 		FDB_TRACE_PROBE(run_loop_tasks_start, queueSize);
+		int tasksExecuted = 0;
 		while (taskQueue.hasReadyTask()) {
 			++countTasks;
 			currentTaskID = taskQueue.getReadyTaskID();
@@ -1602,6 +1604,7 @@ void Net2::run() {
 			taskQueue.popReadyTask();
 
 			try {
+				++tasksExecuted;
 				++tasksSinceReact;
 				(*task)();
 			} catch (Error& e) {
@@ -1637,6 +1640,9 @@ void Net2::run() {
 			taskBegin = newTaskBegin;
 			tscBegin = tscNow;
 		}
+		static SimpleCounter<int64_t>* callbacksExecuted =
+		    SimpleCounter<int64_t>::makeCounter("/Net2/callbacksExecuted");
+		callbacksExecuted->increment(tasksExecuted);
 
 		trackAtPriority(TaskPriority::RunLoop, taskBegin);
 
@@ -1688,16 +1694,23 @@ void Net2::run() {
 		}
 #endif
 		nnow = timer_monotonic();
+		auto time_delta = nnow - now;
 
-		if ((nnow - now) > FLOW_KNOBS->SLOW_LOOP_CUTOFF &&
-		    nondeterministicRandom()->random01() < (nnow - now) * FLOW_KNOBS->SLOW_LOOP_SAMPLING_RATE)
-			TraceEvent("SomewhatSlowRunLoopBottom")
-			    .detail("Elapsed", nnow - now); // This includes the time spent running tasks
+		static SimpleCounter<double>* exec_time = SimpleCounter<double>::makeCounter("/Net2/mainThreadExecutionTime");
+		exec_time->increment(time_delta);
+
+		if (time_delta > FLOW_KNOBS->SLOW_LOOP_CUTOFF &&
+		    nondeterministicRandom()->random01() < time_delta * FLOW_KNOBS->SLOW_LOOP_SAMPLING_RATE) {
+			TraceEvent("SomewhatSlowRunLoopBottom").detail("Elapsed", time_delta);
+		}
 	}
 
 	for (auto& fn : stopCallbacks) {
 		fn();
 	}
+
+	// Emit at least one batch of counters, for manual inspection.
+	simpleCounterReport();
 
 #ifdef WIN32
 	timeEndPeriod(1);

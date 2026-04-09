@@ -52,6 +52,11 @@ void forceLinkCommitProxyTests();
 void forceLinkWipedStringTests();
 void forceLinkRandomKeyValueUtilsTests();
 void forceLinkSimKmsVaultTests();
+void forceLinkRESTSimKmsVaultTest();
+void forceLinkActorFuzzUnitTests();
+void forceLinkGrpcTests();
+void forceLinkGrpcTests2();
+void forceLinkSimpleCounterTests();
 
 struct UnitTestWorkload : TestWorkload {
 	static constexpr auto NAME = "UnitTests";
@@ -118,7 +123,12 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkDDSketchTests();
 		forceLinkWipedStringTests();
 		forceLinkRandomKeyValueUtilsTests();
-		forceLinkSimKmsVaultTests();
+		forceLinkSimpleCounterTests();
+
+#ifdef FLOW_GRPC_ENABLED
+		forceLinkGrpcTests();
+		forceLinkGrpcTests2();
+#endif
 	}
 
 	Future<Void> setup(Database const& cx) override {
