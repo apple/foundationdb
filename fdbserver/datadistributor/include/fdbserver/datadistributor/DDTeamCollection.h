@@ -687,7 +687,12 @@ public:
 	std::map<Standalone<StringRef>, Reference<TCMachineInfo>> machine_info;
 	std::vector<Reference<TCMachineTeamInfo>> machineTeams; // all machine teams
 
+	// IMPORTANT: teams and teamsByServerIDs MUST be consistent, so any time we
+	// mutate teams, we must also mutate teamsByServerIDs
 	std::vector<Reference<TCTeamInfo>> teams;
+	// O(1) hash map from server ID string to team information
+	// Currently used by getTeamByServers
+	std::unordered_map<std::string, Reference<TCTeamInfo>> teamsByServerIDs;
 
 	std::vector<DDTeamCollection*> teamCollections;
 	AsyncTrigger printDetailedTeamsInfo;
