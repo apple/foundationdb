@@ -109,6 +109,3 @@ temp/
 /.ccls-cache
 .clangd/
 .stignore
-
-# AI assistants
-.claude*
