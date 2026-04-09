@@ -64,23 +64,6 @@ NetworkTestInterface::NetworkTestInterface(INetwork* local) {
 	test.makeWellKnownEndpoint(WLTOKEN_NETWORKTEST, TaskPriority::DefaultEndpoint);
 }
 
-Future<Void> networkTestLogging(int* sent, LatencyStats* latency) {
-	double lastTime = now();
-
-	while (true) {
-		co_await delay(1.0);
-		auto spd = *sent / (now() - lastTime);
-		if (FLOW_KNOBS->NETWORK_TEST_SCRIPT_MODE) {
-			fprintf(stderr, "%f\t%.3f\t%.3f\n", spd, latency->mean() * 1e6, latency->stddev() * 1e6);
-		} else {
-			fprintf(stderr, "responses per second: %f (%f us)\n", spd, latency->mean() * 1e6);
-		}
-		latency->reset();
-		lastTime = now();
-		*sent = 0;
-	}
-}
-
 class NetworkTestServer {
 public:
 	NetworkTestServer() : interf(g_network) {}
@@ -125,32 +108,58 @@ Future<Void> networkTestServer() {
 	co_await server.run();
 }
 
-Future<Void> networkTestStreamingServerRequests(NetworkTestInterface* interf, int* sent, LatencyStats* latency) {
-	while (true) {
-		try {
-			NetworkTestStreamingRequest req = co_await interf->testStream.getFuture();
-			LatencyStats::sample sample = latency->tick();
-			for (int i = 0; i < 100; ++i) {
-				co_await req.reply.onReady();
-				req.reply.send(NetworkTestStreamingReply{ i });
-			}
-			req.reply.sendError(end_of_stream());
-			latency->tock(sample);
-			(*sent)++;
-		} catch (Error& e) {
-			if (e.code() != error_code_operation_obsolete) {
-				throw e;
+class NetworkTestStreamingServer {
+public:
+	NetworkTestStreamingServer() : interf(g_network) {}
+
+	Future<Void> run() { co_await race(requests(), logging()); }
+
+private:
+	Future<Void> requests() {
+		while (true) {
+			try {
+				NetworkTestStreamingRequest req = co_await interf.testStream.getFuture();
+				LatencyStats::sample sample = latency.tick();
+				for (int i = 0; i < 100; ++i) {
+					co_await req.reply.onReady();
+					req.reply.send(NetworkTestStreamingReply{ i });
+				}
+				req.reply.sendError(end_of_stream());
+				latency.tock(sample);
+				sent++;
+			} catch (Error& e) {
+				if (e.code() != error_code_operation_obsolete) {
+					throw e;
+				}
 			}
 		}
 	}
-}
 
-Future<Void> networkTestStreamingServer() {
-	NetworkTestInterface interf(g_network);
+	Future<Void> logging() {
+		double lastTime = now();
+
+		while (true) {
+			co_await delay(1.0);
+			auto spd = sent / (now() - lastTime);
+			if (FLOW_KNOBS->NETWORK_TEST_SCRIPT_MODE) {
+				fprintf(stderr, "%f\t%.3f\t%.3f\n", spd, latency.mean() * 1e6, latency.stddev() * 1e6);
+			} else {
+				fprintf(stderr, "responses per second: %f (%f us)\n", spd, latency.mean() * 1e6);
+			}
+			latency.reset();
+			lastTime = now();
+			sent = 0;
+		}
+	}
+
+	NetworkTestInterface interf;
 	int sent = 0;
 	LatencyStats latency;
+};
 
-	co_await race(networkTestStreamingServerRequests(&interf, &sent, &latency), networkTestLogging(&sent, &latency));
+Future<Void> networkTestStreamingServer() {
+	NetworkTestStreamingServer server;
+	co_await server.run();
 }
 
 static bool moreRequestsPending(int count) {
