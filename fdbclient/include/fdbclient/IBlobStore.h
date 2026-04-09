@@ -23,6 +23,7 @@
 #include <functional>
 #include <map>
 #include <queue>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -312,7 +313,7 @@ public:
 		const char* resource = "";
 		if (withResource)
 			resource = "<name>";
-		return format("blobstore://<api_key>:<secret>:<security_token>@<host>[:<port>]/"
+		return format("blobstore://<credentials>@<host>[:<port>]/"
 		              "%s[?<param>=<value>[&<param>=<value>]...]",
 		              resource);
 	}
@@ -331,7 +332,7 @@ public:
 
 	// Get a normalized version of this URL with the given resource and any non-default BlobKnob values as URL
 	// parameters in addition to the passed params string
-	virtual std::string getResourceURL(std::string resource, std::string params) const = 0;
+	virtual std::string getResourceURL(std::string resource, std::string params) const;
 
 	// Check if an object exists in a bucket
 	virtual Future<bool> objectExists(std::string const& bucket, std::string const& object) = 0;
@@ -359,9 +360,7 @@ public:
 	                               int* pNumDeleted = nullptr,
 	                               int64_t* pBytesDeleted = nullptr);
 
-	virtual Future<Void> writeEntireFile(std::string const& bucket,
-	                                     std::string const& object,
-	                                     std::string const& content) = 0;
+	Future<Void> writeEntireFile(std::string const& bucket, std::string const& object, std::string const& content);
 	virtual Future<Void> writeEntireFileFromBuffer(std::string const& bucket,
 	                                               std::string const& object,
 	                                               UnsentPacketQueue* pContent,
@@ -382,7 +381,8 @@ public:
 	virtual Future<Optional<std::string>> finishMultiPartUpload(std::string const& bucket,
 	                                                            std::string const& object,
 	                                                            std::string const& uploadID,
-	                                                            MultiPartSetT const& parts) = 0;
+	                                                            MultiPartSetT const& parts,
+	                                                            int64_t totalSize = 0) = 0;
 
 	// Get bucket contents via a stream, since listing large buckets will take many serial blob requests.
 	// If a delimiter is passed then common prefixes will be read in parallel, recursively, depending on recurseFilter.
@@ -404,6 +404,66 @@ public:
 
 	// Create a bucket if it does not already exist.
 	virtual Future<Void> createBucket(std::string const& bucket) = 0;
+
+	// Check if a bucket exists
+	virtual Future<bool> bucketExists(std::string const& bucket) = 0;
+
+	// Get a list of all buckets
+	virtual AsyncResult<std::vector<std::string>> listBuckets() = 0;
+
+	// Read an entire small file and return its contents
+	virtual AsyncResult<std::string> readEntireFile(std::string const& bucket, std::string const& object) = 0;
+
+	// Provider-specific credential refresh from files or SDK.
+	// Default implementation reads credential files and calls extractCredentialFields.
+	virtual Future<Void> updateSecret();
+
+	// Extract credential fields from a JSON account object.
+	// Returns true if credentials were successfully extracted, false to continue searching.
+	virtual bool extractCredentialFields(JSONDoc& account) = 0;
+
+	virtual std::string credentialFileKey() const { return "@" + host; }
+
+	virtual bool lookupSecretOnEachRequest() { return true; }
+
+	virtual void setRequestHeaders(std::string const& verb, std::string const& resource, HTTP::Headers& headers) = 0;
+
+	// Transform resource URI for the actual HTTP request (e.g., URI encoding, proxy absolute-form).
+	virtual std::string normalizeResourceForRequest(std::string const& resource) { return resource; }
+
+	// In simulation, optionally mutate a successful response to inject provider-specific errors.
+	// Called after receiving the response, before success/failure handling.
+	virtual void simulateRequestFailure(std::string const& verb,
+	                                    std::string const& resource,
+	                                    Reference<HTTP::IncomingResponse>& r) {}
+
+	// Called on non-success responses during doRequest retry loop.
+	// Set retryExtended=true to extend retries beyond maxTries.
+	virtual void processRequestFailure(Reference<HTTP::IncomingResponse> const& r,
+	                                   TraceEvent& event,
+	                                   bool& retryExtended) {}
+
+	// Called before sending the main request when retryExtended is true.
+	// Returns true to proceed with the request, false to skip this iteration.
+	virtual Future<bool> preRetryCheck(std::string const& verb,
+	                                   std::string const& resource,
+	                                   ReusableConnection& rconn,
+	                                   int requestTimeout,
+	                                   bool& retryExtended) {
+		co_return true;
+	}
+
+	// Do an HTTP request to the blob store, read the response. Handles connection, retry, and authentication.
+	Future<Reference<HTTP::IncomingResponse>> doRequest(std::string const& verb,
+	                                                    std::string const& resource,
+	                                                    const HTTP::Headers& headers,
+	                                                    UnsentPacketQueue* pContent,
+	                                                    int contentLen,
+	                                                    std::set<unsigned int> successCodes);
+
+	// Shared connection management
+	Future<ReusableConnection> connect(bool* reusingConn);
+	void returnConnection(ReusableConnection& rconn);
 
 	// Shared state
 	BlobKnobs knobs;

@@ -24,16 +24,19 @@
 #include "flow/Hostname.h"
 #include "flow/IAsyncFile.h"
 #include "flow/IConnection.h"
+#include "flow/Trace.h"
 #include "flow/CoroUtils.h"
 #include "flow/genericactors.actor.h"
+
+#include "md5/md5.h"
+#include "libb64/encode.h"
+#include <openssl/sha.h>
 
 #include <boost/algorithm/string.hpp>
 #include <climits>
 #include <limits>
 
-// --- ConnectionPoolData ---
 
-// IBlobStoreEndpoint::ConnectionPoolData destructor implementation
 IBlobStoreEndpoint::ConnectionPoolData::~ConnectionPoolData() {
 	// In simulation, explicitly close all pooled connections before destruction.
 	// This satisfies Sim2Conn's assertion: !opened || closedByCaller
@@ -49,7 +52,6 @@ IBlobStoreEndpoint::ConnectionPoolData::~ConnectionPoolData() {
 	}
 }
 
-// --- Stats ---
 
 json_spirit::mObject IBlobStoreEndpoint::Stats::getJSON() {
 	json_spirit::mObject o;
@@ -71,7 +73,6 @@ IBlobStoreEndpoint::Stats IBlobStoreEndpoint::Stats::operator-(const Stats& rhs)
 
 IBlobStoreEndpoint::Stats IBlobStoreEndpoint::s_stats;
 
-// --- BlobKnobs ---
 
 BlobKnobs::BlobKnobs() {
 	secure_connection = 1;
@@ -100,6 +101,7 @@ BlobKnobs::BlobKnobs() {
 	max_recv_bytes_per_second = CLIENT_KNOBS->BLOBSTORE_MAX_RECV_BYTES_PER_SECOND;
 	max_delay_retryable_error = CLIENT_KNOBS->BLOBSTORE_MAX_DELAY_RETRYABLE_ERROR;
 	max_delay_connection_failed = CLIENT_KNOBS->BLOBSTORE_MAX_DELAY_CONNECTION_FAILED;
+	multipart_retry_delay_ms = CLIENT_KNOBS->BLOBSTORE_MULTIPART_RETRY_DELAY_MS;
 	sdk_auth = false;
 	enable_object_integrity_check = CLIENT_KNOBS->BLOBSTORE_ENABLE_OBJECT_INTEGRITY_CHECK;
 	global_connection_pool = CLIENT_KNOBS->BLOBSTORE_GLOBAL_CONNECTION_POOL;
@@ -223,7 +225,41 @@ Future<Optional<json_spirit::mObject>> IBlobStoreEndpoint::tryReadJSONFile(std::
 	co_return Optional<json_spirit::mObject>();
 }
 
-// --- IBlobStoreEndpoint::fromString ---
+
+std::string IBlobStoreEndpoint::getResourceURL(std::string resource, std::string params) const {
+	std::string hostPort = host;
+	if (!service.empty()) {
+		hostPort.append(":");
+		hostPort.append(service);
+	}
+
+	std::string r = format("blobstore://@%s/%s", hostPort.c_str(), resource.c_str());
+
+	// Get params that are deviations from knob defaults
+	std::string knobParams = knobs.getURLParameters();
+	if (!knobParams.empty()) {
+		if (!params.empty()) {
+			params.append("&");
+		}
+		params.append(knobParams);
+	}
+
+	for (const auto& [k, v] : extraHeaders) {
+		if (!params.empty()) {
+			params.append("&");
+		}
+		params.append("header=");
+		params.append(k);
+		params.append(":");
+		params.append(v);
+	}
+
+	if (!params.empty())
+		r.append("?").append(params);
+
+	return r;
+}
+
 
 Reference<IBlobStoreEndpoint> IBlobStoreEndpoint::fromString(const std::string& url,
                                                              const Optional<std::string>& proxy,
@@ -360,17 +396,8 @@ Reference<IBlobStoreEndpoint> IBlobStoreEndpoint::fromString(const std::string& 
 		if (resourceFromURL != nullptr)
 			*resourceFromURL = resource.toString();
 
-		Optional<S3BlobStoreEndpoint::Credentials> creds;
-		if (cred.present()) {
-			StringRef c(cred.get());
-			StringRef key = c.eat(":");
-			StringRef secret = c.eat(":");
-			StringRef securityToken = c.eat();
-			creds = S3BlobStoreEndpoint::Credentials{ key.toString(), secret.toString(), securityToken.toString() };
-		}
-
 		return makeReference<S3BlobStoreEndpoint>(
-		    host.toString(), service.toString(), region, proxyHost, proxyPort, creds, knobs, extraHeaders);
+		    host.toString(), service.toString(), region, proxyHost, proxyPort, cred, knobs, extraHeaders);
 
 	} catch (std::string& err) {
 		if (error != nullptr)
@@ -384,12 +411,72 @@ Reference<IBlobStoreEndpoint> IBlobStoreEndpoint::fromString(const std::string& 
 	}
 }
 
-AsyncResult<IBlobStoreEndpoint::ListResult> listObjects_impl(Reference<IBlobStoreEndpoint> bstore,
-                                                             std::string bucket,
-                                                             Optional<std::string> prefix,
-                                                             Optional<char> delimiter,
-                                                             int maxDepth,
-                                                             std::function<bool(std::string const&)> recurseFilterUnsafe) {
+
+Future<Void> updateSecret_impl(Reference<IBlobStoreEndpoint> b) {
+	auto* pFiles = (std::vector<std::string>*)g_network->global(INetwork::enBlobCredentialFiles);
+	if (pFiles == nullptr)
+		co_return;
+
+	std::vector<Future<Optional<json_spirit::mObject>>> reads;
+	for (auto& f : *pFiles)
+		reads.push_back(IBlobStoreEndpoint::tryReadJSONFile(f));
+
+	co_await waitForAll(reads);
+
+	std::string credentialsFileKey = b->credentialFileKey();
+
+	int invalid = 0;
+
+	for (auto& f : reads) {
+		// If value not present then the credentials file wasn't readable or valid. Continue to check other results.
+		if (!f.get().present()) {
+			TraceEvent(SevWarn, "BlobStoreCredentialFileNotReadable")
+			    .detail("Endpoint", b->host)
+			    .detail("Service", b->service);
+			++invalid;
+			continue;
+		}
+
+		JSONDoc doc(f.get().get());
+		if (doc.has("accounts") && doc.last().type() == json_spirit::obj_type) {
+			JSONDoc accounts(doc.last().get_obj());
+			if (accounts.has(credentialsFileKey, false) && accounts.last().type() == json_spirit::obj_type) {
+				JSONDoc account(accounts.last());
+				if (b->extractCredentialFields(account)) {
+					co_return;
+				}
+			}
+		}
+	}
+
+	// If any sources were invalid
+	if (invalid > 0) {
+		TraceEvent(SevWarn, "BlobStoreCredentialFileInvalid")
+		    .detail("Endpoint", b->host)
+		    .detail("Service", b->service)
+		    .detail("Invalid", invalid);
+		throw backup_auth_unreadable();
+	}
+
+	// All sources were valid but didn't contain the desired info
+	TraceEvent(SevWarn, "BlobStoreCredentialsMissing")
+	    .detail("Endpoint", b->host)
+	    .detail("Service", b->service)
+	    .detail("CredentialsKey", credentialsFileKey);
+	throw backup_auth_missing();
+}
+
+Future<Void> IBlobStoreEndpoint::updateSecret() {
+	return updateSecret_impl(Reference<IBlobStoreEndpoint>::addRef(this));
+}
+
+AsyncResult<IBlobStoreEndpoint::ListResult> listObjects_impl(
+    Reference<IBlobStoreEndpoint> bstore,
+    std::string bucket,
+    Optional<std::string> prefix,
+    Optional<char> delimiter,
+    int maxDepth,
+    std::function<bool(std::string const&)> recurseFilterUnsafe) {
 	// C++20 coroutine safety: copy const& params to survive across suspension.
 	auto recurseFilter = recurseFilterUnsafe;
 
@@ -429,12 +516,14 @@ AsyncResult<IBlobStoreEndpoint::ListResult> listObjects_impl(Reference<IBlobStor
 	co_return results;
 }
 
-AsyncResult<IBlobStoreEndpoint::ListResult> IBlobStoreEndpoint::listObjects(std::string const& bucket,
-                                                                           Optional<std::string> prefix,
-                                                                           Optional<char> delimiter,
-                                                                           int maxDepth,
-                                                                           std::function<bool(std::string const&)> recurseFilter) {
-	return listObjects_impl(Reference<IBlobStoreEndpoint>::addRef(this), bucket, prefix, delimiter, maxDepth, recurseFilter);
+AsyncResult<IBlobStoreEndpoint::ListResult> IBlobStoreEndpoint::listObjects(
+    std::string const& bucket,
+    Optional<std::string> prefix,
+    Optional<char> delimiter,
+    int maxDepth,
+    std::function<bool(std::string const&)> recurseFilter) {
+	return listObjects_impl(
+	    Reference<IBlobStoreEndpoint>::addRef(this), bucket, prefix, delimiter, maxDepth, recurseFilter);
 }
 
 Future<Void> deleteRecursively_impl(Reference<IBlobStoreEndpoint> b,
@@ -500,5 +589,418 @@ Future<Void> IBlobStoreEndpoint::deleteRecursively(std::string const& bucket,
                                                    std::string prefix,
                                                    int* pNumDeleted,
                                                    int64_t* pBytesDeleted) {
-	return deleteRecursively_impl(Reference<IBlobStoreEndpoint>::addRef(this), bucket, prefix, pNumDeleted, pBytesDeleted);
+	return deleteRecursively_impl(
+	    Reference<IBlobStoreEndpoint>::addRef(this), bucket, prefix, pNumDeleted, pBytesDeleted);
+}
+
+
+Future<Void> writeEntireFile_impl(Reference<IBlobStoreEndpoint> bstore,
+                                  std::string bucket,
+                                  std::string object,
+                                  std::string content) {
+	UnsentPacketQueue packets;
+	if (content.size() > bstore->knobs.multipart_max_part_size)
+		throw file_too_large();
+
+	PacketWriter pw(packets.getWriteBuffer(content.size()), nullptr, Unversioned());
+	pw.serializeBytes(content);
+
+	// Yield because we may have just had to copy several MB's into packet buffer chain and next we have to calculate a
+	// hash of it.
+	// TODO: If this actor is used to send large files then combine the summing and packetization into a loop
+	// with a yield() every 20k or so.
+	co_await yield();
+
+	// If enable_object_integrity_check is true, calculate the sha256 sum of the content.
+	// Otherwise, do md5. The hash type must match what the provider's writeEntireFileFromBuffer expects.
+	std::string contentHash;
+	if (bstore->knobs.enable_object_integrity_check) {
+		unsigned char hash[SHA256_DIGEST_LENGTH];
+		SHA256_CTX sha256;
+		SHA256_Init(&sha256);
+		SHA256_Update(&sha256, content.data(), content.size());
+		SHA256_Final(hash, &sha256);
+		contentHash = base64::encoder::from_string(std::string(reinterpret_cast<char*>(hash), SHA256_DIGEST_LENGTH));
+		contentHash.resize(contentHash.size() - 1);
+	} else {
+		MD5_CTX sum;
+		::MD5_Init(&sum);
+		::MD5_Update(&sum, content.data(), content.size());
+		std::string sumBytes;
+		sumBytes.resize(16);
+		::MD5_Final((unsigned char*)sumBytes.data(), &sum);
+		contentHash = base64::encoder::from_string(sumBytes);
+		contentHash.resize(contentHash.size() - 1);
+	}
+
+	co_await bstore->writeEntireFileFromBuffer(bucket, object, &packets, content.size(), contentHash);
+}
+
+Future<Void> IBlobStoreEndpoint::writeEntireFile(std::string const& bucket,
+                                                 std::string const& object,
+                                                 std::string const& content) {
+	return writeEntireFile_impl(Reference<IBlobStoreEndpoint>::addRef(this), bucket, object, content);
+}
+
+
+Future<IBlobStoreEndpoint::ReusableConnection> connect_impl(Reference<IBlobStoreEndpoint> b, bool* reusingConn) {
+	// First try to get a connection from the pool
+	*reusingConn = false;
+	while (!b->connectionPool->pool.empty()) {
+		IBlobStoreEndpoint::ReusableConnection rconn = b->connectionPool->pool.front();
+		b->connectionPool->pool.pop();
+
+		// If the connection expires in the future then return it
+		if (rconn.expirationTime > now()) {
+			*reusingConn = true;
+			++b->blobStats->reusedConnections;
+			TraceEvent("IBlobStoreEndpointReusingConnected")
+			    .suppressFor(60)
+			    .detail("RemoteEndpoint", rconn.conn->getPeerAddress())
+			    .detail("ExpiresIn", rconn.expirationTime - now())
+			    .detail("Proxy", b->proxyHost.orDefault(""));
+			co_return rconn;
+		}
+		++b->blobStats->expiredConnections;
+	}
+	++b->blobStats->newConnections;
+	std::string host = b->host, service = b->service;
+	TraceEvent(SevDebug, "IBlobStoreEndpointBuildingNewConnection")
+	    .detail("UseProxy", b->useProxy)
+	    .detail("TLS", b->knobs.secure_connection == 1)
+	    .detail("Host", host)
+	    .detail("Service", service)
+	    .log();
+	if (service.empty()) {
+		if (b->useProxy) {
+			fprintf(stderr, "ERROR: Port can't be empty when using HTTP proxy.\n");
+			throw connection_failed();
+		}
+		service = b->knobs.secure_connection ? "https" : "http";
+	}
+	bool isTLS = b->knobs.isTLS();
+	Reference<IConnection> conn;
+	if (b->useProxy) {
+		if (isTLS) {
+			conn = co_await HTTP::proxyConnect(host, service, b->proxyHost.get(), b->proxyPort.get());
+		} else {
+			host = b->proxyHost.get();
+			service = b->proxyPort.get();
+			conn = co_await INetworkConnections::net()->connect(host, service, false);
+		}
+	} else {
+		co_await store(conn, INetworkConnections::net()->connect(host, service, isTLS));
+	}
+	ASSERT(conn.isValid());
+	co_await conn->connectHandshake();
+
+	TraceEvent("IBlobStoreEndpointNewConnectionSuccess")
+	    .suppressFor(60)
+	    .detail("RemoteEndpoint", conn->getPeerAddress())
+	    .detail("ExpiresIn", b->knobs.max_connection_life)
+	    .detail("Proxy", b->proxyHost.orDefault(""));
+
+	if (b->lookupSecretOnEachRequest()) {
+		co_await b->updateSecret();
+	}
+
+	co_return IBlobStoreEndpoint::ReusableConnection({ conn, now() + b->knobs.max_connection_life });
+}
+
+Future<IBlobStoreEndpoint::ReusableConnection> IBlobStoreEndpoint::connect(bool* reusingConn) {
+	return connect_impl(Reference<IBlobStoreEndpoint>::addRef(this), reusingConn);
+}
+
+void IBlobStoreEndpoint::returnConnection(ReusableConnection& rconn) {
+	// If it expires in the future then add it to the pool in the front
+	if (rconn.expirationTime > now()) {
+		connectionPool->pool.push(rconn);
+	} else {
+		++blobStats->expiredConnections;
+	}
+	rconn.conn = Reference<IConnection>();
+}
+
+
+// Do a request, get a Response.
+// Request content is provided as UnsentPacketQueue *pContent which will be depleted as bytes are sent but the queue
+// itself must live for the life of this actor and be destroyed by the caller.
+Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<IBlobStoreEndpoint> bstore,
+                                                         std::string verb,
+                                                         std::string resource,
+                                                         HTTP::Headers headers,
+                                                         UnsentPacketQueue* pContent,
+                                                         int contentLen,
+                                                         std::set<unsigned int> successCodes) {
+	UnsentPacketQueue contentCopy;
+	Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
+	req->verb = verb;
+	req->data.content = &contentCopy;
+	req->data.contentLen = contentLen;
+
+	if (resource.empty()) {
+		resource = "/";
+	}
+
+	// For requests with content to upload, the request timeout should be at least twice the amount of time
+	// it would take to upload the content given the upload bandwidth and concurrency limits.
+	int bandwidthThisRequest = 1 + bstore->knobs.max_send_bytes_per_second / bstore->knobs.concurrent_uploads;
+	int contentUploadSeconds = contentLen / bandwidthThisRequest;
+	int requestTimeout = std::max(bstore->knobs.request_timeout_min, 3 * contentUploadSeconds);
+
+	co_await bstore->concurrentRequests.take();
+	FlowLock::Releaser globalReleaser(bstore->concurrentRequests, 1);
+
+	int maxTries = std::min(bstore->knobs.request_tries, bstore->knobs.connect_tries);
+	int thisTry = 1;
+	double nextRetryDelay = 2.0;
+	bool retryExtended = false;
+
+	while (true) {
+		Optional<Error> err;
+		Optional<NetworkAddress> remoteAddress;
+		bool connectionEstablished = false;
+		Reference<HTTP::IncomingResponse> r;
+		std::string canonicalURI = resource;
+		UID connID = UID();
+		double reqStartTimer{ 0 };
+		double connectStartTimer = g_network->timer();
+		bool reusingConn = false;
+		bool fastRetry = false;
+		IBlobStoreEndpoint::ReusableConnection rconn;
+
+		// Reset headers to initial state for this retry attempt to prevent header accumulation
+		req->data.headers = headers;
+		req->data.headers["Host"] = bstore->host;
+
+		// Merge extraHeaders into headers
+		for (const auto& [k, v] : bstore->extraHeaders) {
+			std::string& fieldValue = req->data.headers[k];
+			if (!fieldValue.empty()) {
+				fieldValue.append(",");
+			}
+			fieldValue.append(v);
+		}
+
+		try {
+			Future<IBlobStoreEndpoint::ReusableConnection> frconn = bstore->connect(&reusingConn);
+
+			// Make a shallow copy of the queue
+			req->data.content->discardAll();
+			if (pContent != nullptr) {
+				PacketBuffer* pFirst = pContent->getUnsent();
+				PacketBuffer* pLast = nullptr;
+				for (PacketBuffer* p = pFirst; p != nullptr; p = p->nextPacketBuffer()) {
+					p->addref();
+					p->bytes_sent = 0; // Reset sent count on each buffer
+					pLast = p;
+				}
+				req->data.content->prependWriteBuffer(pFirst, pLast);
+			}
+
+			co_await store(rconn, timeoutError(frconn, bstore->knobs.connect_timeout));
+			connectionEstablished = true;
+			connID = rconn.conn->getDebugID();
+			reqStartTimer = g_network->timer();
+
+			// Provider hook: pre-retry check
+			if (retryExtended) {
+				bool proceed = co_await bstore->preRetryCheck(verb, resource, rconn, requestTimeout, retryExtended);
+				if (!proceed) {
+					bstore->returnConnection(rconn);
+					continue;
+				}
+			}
+
+			// Finish/update the request headers (which includes auth headers).
+			// This must be done AFTER the connection is ready because credentials may be
+			// refreshed when a new connection is established.
+			bstore->setRequestHeaders(verb, resource, req->data.headers);
+			canonicalURI = bstore->normalizeResourceForRequest(resource);
+
+			// Has to be in absolute-form.
+			if (bstore->useProxy && bstore->knobs.secure_connection == 0) {
+				canonicalURI = "http://" + bstore->host + ":" + bstore->service + canonicalURI;
+			}
+
+			req->resource = canonicalURI;
+
+			remoteAddress = rconn.conn->getPeerAddress();
+			co_await bstore->requestRate->getAllowance(1);
+
+			Future<Reference<HTTP::IncomingResponse>> reqF =
+			    HTTP::doRequest(rconn.conn, req, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate);
+
+			if (reqF.isReady() && reusingConn) {
+				fastRetry = true;
+			}
+
+			Reference<HTTP::IncomingResponse> _r = co_await timeoutError(reqF, requestTimeout);
+			r = _r;
+
+			bstore->simulateRequestFailure(verb, resource, r);
+
+			// Since the response was parsed successfully reuse the connection unless we
+			// received the "Connection: close" header.
+			if (r->data.headers["Connection"] != "close") {
+				bstore->returnConnection(rconn);
+			} else {
+				++bstore->blobStats->expiredConnections;
+			}
+			rconn.conn.clear();
+
+		} catch (Error& e) {
+			TraceEvent("BlobStoreDoRequestError")
+			    .errorUnsuppressed(e)
+			    .detail("Verb", verb)
+			    .detail("Resource", resource);
+			// Close the connection on error to satisfy Sim2Conn's assertion in simulation
+			if (connectionEstablished && rconn.conn.isValid()) {
+				rconn.conn->close();
+				rconn.conn.clear();
+			}
+			if (e.code() == error_code_actor_cancelled)
+				throw;
+			err = e;
+		}
+
+		double end = g_network->timer();
+		double connectDuration = reqStartTimer - connectStartTimer;
+		double reqDuration = end - reqStartTimer;
+		bstore->blobStats->requestLatency.addMeasurement(reqDuration);
+
+		// If err is not present then r is valid. If r->code is in successCodes then record the successful request and return r.
+		if (!err.present() && successCodes.count(r->code) != 0) {
+			bstore->s_stats.requests_successful++;
+			++bstore->blobStats->requestsSuccessful;
+			co_return r;
+		}
+
+		bstore->s_stats.requests_failed++;
+		++bstore->blobStats->requestsFailed;
+
+		// All errors in err are potentially retryable as well as certain HTTP response codes...
+		// But only if our previous attempt was not the last allowable try.
+		bool retryable = err.present() || r->code == 500 || r->code == 502 || r->code == 503 || r->code == 429;
+		retryable = retryable && (thisTry < maxTries);
+
+		if (!retryable || !err.present()) {
+			fastRetry = false;
+		}
+
+		TraceEvent event(SevWarn,
+		                 (retryable || retryExtended)
+		                     ? (fastRetry ? "BlobStoreEndpointRequestFailedFastRetryable"
+		                                  : "BlobStoreEndpointRequestFailedRetryable")
+		                     : "BlobStoreEndpointRequestFailed");
+
+		bool connectionFailed = false;
+		if (err.present()) {
+			event.errorUnsuppressed(err.get());
+			if (err.get().code() == error_code_connection_failed) {
+				connectionFailed = true;
+			}
+		}
+		event.suppressFor(60);
+		if (!err.present()) {
+			event.detail("ResponseCode", r->code);
+		}
+
+		// Provider hook: process failure
+		if (!err.present()) {
+			bstore->processRequestFailure(r, event, retryExtended);
+		}
+
+		event.detail("ConnectionEstablished", connectionEstablished);
+		event.detail("ReusingConn", reusingConn);
+		if (connectionEstablished) {
+			event.detail("ConnID", connID);
+			event.detail("ConnectDuration", connectDuration);
+			event.detail("ReqDuration", reqDuration);
+		}
+
+		if (remoteAddress.present())
+			event.detail("RemoteEndpoint", remoteAddress.get());
+		else
+			event.detail("RemoteHost", bstore->host);
+
+		event.detail("Verb", verb)
+		    .detail("Resource", resource)
+		    .detail("ThisTry", thisTry)
+		    .detail("URI", canonicalURI)
+		    .detail("Proxy", bstore->proxyHost.orDefault(""));
+
+		// If r is not valid or not code 429 then increment the try count.
+		// 429's will not count against the attempt limit. Also skip incrementing the retry count for fast retries.
+		if (!fastRetry && (!r || r->code != 429))
+			++thisTry;
+
+		if (fastRetry) {
+			++bstore->blobStats->fastRetries;
+			co_await delay(0);
+		} else if (retryable || retryExtended) {
+			// We will wait delay seconds before the next retry, start with nextRetryDelay.
+			double delaySeconds = nextRetryDelay;
+			// connectionFailed is treated specially
+			double limit =
+			    connectionFailed ? bstore->knobs.max_delay_connection_failed : bstore->knobs.max_delay_retryable_error;
+			// Double but limit the *next* nextRetryDelay.
+			nextRetryDelay = std::min(nextRetryDelay * 2, limit);
+			// If r is valid then obey the Retry-After response header if present.
+			if (r) {
+				auto iRetryAfter = r->data.headers.find("Retry-After");
+				if (iRetryAfter != r->data.headers.end()) {
+					event.detail("RetryAfterHeader", iRetryAfter->second);
+					char* pEnd;
+					double retryAfter = strtod(iRetryAfter->second.c_str(), &pEnd);
+					if (*pEnd)
+						retryAfter = 300;
+					delaySeconds = std::max(delaySeconds, retryAfter);
+				}
+			}
+
+			event.detail("RetryDelay", delaySeconds);
+			co_await ::delay(delaySeconds);
+		} else {
+			// We can't retry, so throw something.
+			if (r && r->code == 406)
+				throw http_not_accepted();
+
+			// This error code means the authentication header was not accepted, likely the account or key is wrong.
+			if (r && r->code == 401)
+				throw http_auth_failed();
+
+			// Recognize and throw specific errors
+			if (err.present()) {
+				int code = err.get().code();
+				// If we get a timed_out error during the connect() phase, we'll call that connection_failed
+				// despite the fact that there was technically never a 'connection' to begin with. It differentiates
+				// between an active connection timing out vs a connection timing out, though not between an active
+				// connection failing vs connection attempt failing.
+				if (code == error_code_timed_out && !connectionEstablished) {
+					TraceEvent(SevWarn, "BlobStoreEndpointConnectTimeout")
+					    .suppressFor(60)
+					    .detail("Timeout", requestTimeout);
+					throw connection_failed();
+				}
+
+				// TODO: Add more error types?
+				if (code == error_code_timed_out || code == error_code_connection_failed ||
+				    code == error_code_lookup_failed)
+					throw err.get();
+			}
+
+			throw http_request_failed();
+		}
+	}
+}
+
+Future<Reference<HTTP::IncomingResponse>> IBlobStoreEndpoint::doRequest(std::string const& verb,
+                                                                        std::string const& resource,
+                                                                        const HTTP::Headers& headers,
+                                                                        UnsentPacketQueue* pContent,
+                                                                        int contentLen,
+                                                                        std::set<unsigned int> successCodes) {
+	return doRequest_impl(
+	    Reference<IBlobStoreEndpoint>::addRef(this), verb, resource, headers, pContent, contentLen, successCodes);
 }

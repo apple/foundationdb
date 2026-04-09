@@ -31,17 +31,6 @@ public:
 	void addref() override { ReferenceCounted<S3BlobStoreEndpoint>::addref(); }
 	void delref() override { ReferenceCounted<S3BlobStoreEndpoint>::delref(); }
 
-	// Bring base class types into scope for backward compatibility
-	using IBlobStoreEndpoint::BlobStats;
-	using IBlobStoreEndpoint::ConnectionPoolData;
-	using IBlobStoreEndpoint::ListResult;
-	using IBlobStoreEndpoint::MultiPartSetT;
-	using IBlobStoreEndpoint::ObjectInfo;
-	using IBlobStoreEndpoint::ParametersT;
-	using IBlobStoreEndpoint::PartInfo;
-	using IBlobStoreEndpoint::ReusableConnection;
-	using IBlobStoreEndpoint::Stats;
-
 	struct Credentials {
 		std::string key;
 		std::string secret;
@@ -53,7 +42,7 @@ public:
 	                    std::string region,
 	                    Optional<std::string> const& proxyHost,
 	                    Optional<std::string> const& proxyPort,
-	                    Optional<Credentials> const& creds,
+	                    Optional<StringRef> const& creds,
 	                    BlobKnobs const& knobs = BlobKnobs(),
 	                    HTTP::Headers extraHeaders = HTTP::Headers());
 
@@ -72,11 +61,17 @@ public:
 		return Reference<S3BlobStoreEndpoint>::addRef(dynamic_cast<S3BlobStoreEndpoint*>(base.getPtr()));
 	}
 
+	Future<Void> updateSecret() override;
+	bool extractCredentialFields(JSONDoc& account) override;
+	std::string credentialFileKey() const override;
+	bool lookupSecretOnEachRequest() override;
+	void setRequestHeaders(std::string const& verb, std::string const& resource, HTTP::Headers& headers) override;
+	std::string normalizeResourceForRequest(std::string const& resource) override;
+
 	Optional<Credentials> credentials;
 	bool lookupKey;
 	bool lookupSecret;
-
-	Future<Void> updateSecret();
+	bool simulatedTokenError = false; // Set by simulateRequestFailure for BUGGIFY testing
 
 	// Calculates the authentication string from the secret key
 	static std::string hmac_sha1(Credentials const& creds, std::string const& msg);
@@ -91,18 +86,18 @@ public:
 	                      std::string date = "",
 	                      std::string datestamp = "");
 
-	// Do an HTTP request to the Blob Store, read the response.  Handles authentication.
-	// Every blob store interaction should ultimately go through this function
-	Future<Reference<HTTP::IncomingResponse>> doRequest(std::string const& verb,
-	                                                    std::string const& resource,
-	                                                    const HTTP::Headers& headers,
-	                                                    UnsentPacketQueue* pContent,
-	                                                    int contentLen,
-	                                                    std::set<unsigned int> successCodes);
-
-	// Connection management — credentials are refreshed on new connections
-	Future<ReusableConnection> connect(bool* reusingConn);
-	void returnConnection(ReusableConnection& conn);
+	// doRequest hooks for S3 token error recovery
+	void simulateRequestFailure(std::string const& verb,
+	                            std::string const& resource,
+	                            Reference<HTTP::IncomingResponse>& r) override;
+	void processRequestFailure(Reference<HTTP::IncomingResponse> const& r,
+	                           TraceEvent& event,
+	                           bool& retryExtended) override;
+	Future<bool> preRetryCheck(std::string const& verb,
+	                           std::string const& resource,
+	                           ReusableConnection& rconn,
+	                           int requestTimeout,
+	                           bool& retryExtended) override;
 
 	// Get a normalized version of this URL with the given resource and any non-default BlobKnob values as URL
 	// parameters in addition to the passed params string
@@ -123,10 +118,10 @@ public:
 	                               std::function<bool(std::string const&)> recurseFilter = nullptr) override;
 
 	// Get a list of all buckets
-	AsyncResult<std::vector<std::string>> listBuckets();
+	AsyncResult<std::vector<std::string>> listBuckets() override;
 
 	// Check if a bucket exists
-	Future<bool> bucketExists(std::string const& bucket);
+	Future<bool> bucketExists(std::string const& bucket) override;
 
 	// Check if an object exists in a bucket
 	Future<bool> objectExists(std::string const& bucket, std::string const& object) override;
@@ -148,10 +143,7 @@ public:
 	Future<Void> createBucket(std::string const& bucket) override;
 
 	// Useful methods for working with tiny files
-	AsyncResult<std::string> readEntireFile(std::string const& bucket, std::string const& object);
-	Future<Void> writeEntireFile(std::string const& bucket,
-	                             std::string const& object,
-	                             std::string const& content) override;
+	AsyncResult<std::string> readEntireFile(std::string const& bucket, std::string const& object) override;
 	Future<Void> writeEntireFileFromBuffer(std::string const& bucket,
 	                                       std::string const& object,
 	                                       UnsentPacketQueue* pContent,
@@ -172,7 +164,8 @@ public:
 	Future<Optional<std::string>> finishMultiPartUpload(std::string const& bucket,
 	                                                    std::string const& object,
 	                                                    std::string const& uploadID,
-	                                                    MultiPartSetT const& parts) override;
+	                                                    MultiPartSetT const& parts,
+	                                                    int64_t totalSize = 0) override;
 
 	Future<Void> abortMultiPartUpload(std::string const& bucket,
 	                                  std::string const& object,

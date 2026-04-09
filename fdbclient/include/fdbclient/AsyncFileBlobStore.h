@@ -43,7 +43,7 @@ static Future<T> joinErrorGroup(Future<T> f, Promise<Void> p) {
 		throw;
 	}
 }
-// This class represents a write-only file that lives in an S3-style blob store.  It writes using the REST API,
+// This class represents a write-only file that lives in a blob store.  It writes using the REST API,
 // using multi-part upload and beginning to transfer each part as soon as it is large enough.
 // All write operations file operations must be sequential and contiguous.
 // Limits on part sizes, upload speed, and concurrent uploads are taken from the IBlobStoreEndpoint being used.
@@ -182,8 +182,8 @@ public:
 
 		// No need to wait for the upload ID here because the above loop waited for all the parts and each part required
 		// the upload ID so it is ready
-		Optional<std::string> checksumSHA256 =
-		    co_await f->m_bstore->finishMultiPartUpload(f->m_bucket, f->m_object, f->m_upload_id.get(), partSet);
+		Optional<std::string> checksumSHA256 = co_await f->m_bstore->finishMultiPartUpload(
+		    f->m_bucket, f->m_object, f->m_upload_id.get(), partSet, f->m_cursor);
 
 		// Log the checksum if present - this is just a hash of the multipart structure, not the object content
 		if (checksumSHA256.present()) {
@@ -284,40 +284,7 @@ public:
 	}
 };
 
-// Different Download Approaches:
-//
-// 1. AsyncFileBlobStoreRead::read
-//    - Always uses range requests (Range: bytes=0-24)
-//    - ❌ NO checksum verification - can't use x-amz-checksum-mode: ENABLED
-//    - Used by backup/restore operations through BackupContainerBlobStore::readFile()
-//
-// 2. S3BlobStoreEndpoint::readEntireFile (for small files):
-//    - ✅ HAS checksum verification using x-amz-checksum-mode: ENABLED
-//    - Used for small file downloads where full object retrieval is efficient
-//
-// 3. S3Client::copyDownFile (for large files):
-//    - Uses range-based downloads in parallel parts
-//    - ✅ Validates overall file checksum after download using XXH64 stored in tags/companion files
-//
-// Why Range Requests Can't Use S3 Checksums:
-// - S3 limitation: x-amz-checksum-mode: ENABLED only works for full object downloads
-// - Range requests (Range: bytes=X-Y) cannot be checksum-verified by S3 because:
-//   * The checksum is calculated for the entire object, not arbitrary byte ranges
-//   * S3 doesn't know how to verify partial content against a full-object checksum
-//
-// - Upload: SHA256 checksums stored with multipart uploads ✅
-// - Download:
-//   * Small files: S3 SHA256 verification ✅
-//   * Large files: Custom XXH64 verification after complete download ✅
-//   * Range requests: No S3 verification ❌ (but still get FoundationDB's own checksums)
-//
-// - Range requests are more efficient for large files and allow parallel downloads
-// - S3's checksum verification wouldn't work with range requests anyway
-// - You still get protection through FoundationDB's XXH64 checksums
-// - The multipart upload checksums primarily protect against transmission errors during upload
-// - The XXH64 checksums are used to verify the download.
-
-// This class represents a read-only file that lives in an S3-style blob store.  It reads using the REST API.
+// This class represents a read-only file that lives in a blob store.  It reads using the REST API.
 class AsyncFileBlobStoreRead final : public IAsyncFile, public ReferenceCounted<AsyncFileBlobStoreRead> {
 public:
 	void addref() override { ReferenceCounted<AsyncFileBlobStoreRead>::addref(); }
