@@ -64,17 +64,7 @@ NetworkTestInterface::NetworkTestInterface(INetwork* local) {
 	test.makeWellKnownEndpoint(WLTOKEN_NETWORKTEST, TaskPriority::DefaultEndpoint);
 }
 
-Future<Void> networkTestServerRequests(NetworkTestInterface* interf, int* sent, LatencyStats* latency) {
-	while (true) {
-		NetworkTestRequest req = co_await interf->test.getFuture();
-		LatencyStats::sample sample = latency->tick();
-		req.reply.send(NetworkTestReply(Value(std::string(req.replySize, '.'))));
-		latency->tock(sample);
-		(*sent)++;
-	}
-}
-
-Future<Void> networkTestServerLogging(int* sent, LatencyStats* latency) {
+Future<Void> networkTestLogging(int* sent, LatencyStats* latency) {
 	double lastTime = now();
 
 	while (true) {
@@ -91,12 +81,48 @@ Future<Void> networkTestServerLogging(int* sent, LatencyStats* latency) {
 	}
 }
 
-Future<Void> networkTestServer() {
-	NetworkTestInterface interf(g_network);
+class NetworkTestServer {
+public:
+	NetworkTestServer() : interf(g_network) {}
+
+	Future<Void> run() { co_await race(requests(), logging()); }
+
+private:
+	Future<Void> requests() {
+		while (true) {
+			NetworkTestRequest req = co_await interf.test.getFuture();
+			LatencyStats::sample sample = latency.tick();
+			req.reply.send(NetworkTestReply(Value(std::string(req.replySize, '.'))));
+			latency.tock(sample);
+			sent++;
+		}
+	}
+
+	Future<Void> logging() {
+		double lastTime = now();
+
+		while (true) {
+			co_await delay(1.0);
+			auto spd = sent / (now() - lastTime);
+			if (FLOW_KNOBS->NETWORK_TEST_SCRIPT_MODE) {
+				fprintf(stderr, "%f\t%.3f\t%.3f\n", spd, latency.mean() * 1e6, latency.stddev() * 1e6);
+			} else {
+				fprintf(stderr, "responses per second: %f (%f us)\n", spd, latency.mean() * 1e6);
+			}
+			latency.reset();
+			lastTime = now();
+			sent = 0;
+		}
+	}
+
+	NetworkTestInterface interf;
 	int sent = 0;
 	LatencyStats latency;
+};
 
-	co_await race(networkTestServerRequests(&interf, &sent, &latency), networkTestServerLogging(&sent, &latency));
+Future<Void> networkTestServer() {
+	NetworkTestServer server;
+	co_await server.run();
 }
 
 Future<Void> networkTestStreamingServerRequests(NetworkTestInterface* interf, int* sent, LatencyStats* latency) {
@@ -124,8 +150,7 @@ Future<Void> networkTestStreamingServer() {
 	int sent = 0;
 	LatencyStats latency;
 
-	co_await race(networkTestStreamingServerRequests(&interf, &sent, &latency),
-	              networkTestServerLogging(&sent, &latency));
+	co_await race(networkTestStreamingServerRequests(&interf, &sent, &latency), networkTestLogging(&sent, &latency));
 }
 
 static bool moreRequestsPending(int count) {
