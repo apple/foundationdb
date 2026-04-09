@@ -99,46 +99,33 @@ Future<Void> networkTestServer() {
 	co_await race(networkTestServerRequests(&interf, &sent, &latency), networkTestServerLogging(&sent, &latency));
 }
 
-ACTOR Future<Void> networkTestStreamingServer() {
-	state NetworkTestInterface interf(g_network);
-	state Future<Void> logging = delay(1.0);
-	state double lastTime = now();
-	state int sent = 0;
-	state LatencyStats latency;
-
-	loop {
+Future<Void> networkTestStreamingServerRequests(NetworkTestInterface* interf, int* sent, LatencyStats* latency) {
+	while (true) {
 		try {
-			choose {
-				when(state NetworkTestStreamingRequest req = waitNext(interf.testStream.getFuture())) {
-					state LatencyStats::sample sample = latency.tick();
-					state int i = 0;
-					for (; i < 100; ++i) {
-						wait(req.reply.onReady());
-						req.reply.send(NetworkTestStreamingReply{ i });
-					}
-					req.reply.sendError(end_of_stream());
-					latency.tock(sample);
-					sent++;
-				}
-				when(wait(logging)) {
-					auto spd = sent / (now() - lastTime);
-					if (FLOW_KNOBS->NETWORK_TEST_SCRIPT_MODE) {
-						fprintf(stderr, "%f\t%.3f\t%.3f\n", spd, latency.mean() * 1e6, latency.stddev() * 1e6);
-					} else {
-						fprintf(stderr, "responses per second: %f (%f us)\n", spd, latency.mean() * 1e6);
-					}
-					latency.reset();
-					lastTime = now();
-					sent = 0;
-					logging = delay(1.0);
-				}
+			NetworkTestStreamingRequest req = co_await interf->testStream.getFuture();
+			LatencyStats::sample sample = latency->tick();
+			for (int i = 0; i < 100; ++i) {
+				co_await req.reply.onReady();
+				req.reply.send(NetworkTestStreamingReply{ i });
 			}
+			req.reply.sendError(end_of_stream());
+			latency->tock(sample);
+			(*sent)++;
 		} catch (Error& e) {
 			if (e.code() != error_code_operation_obsolete) {
 				throw e;
 			}
 		}
 	}
+}
+
+Future<Void> networkTestStreamingServer() {
+	NetworkTestInterface interf(g_network);
+	int sent = 0;
+	LatencyStats latency;
+
+	co_await race(networkTestStreamingServerRequests(&interf, &sent, &latency),
+	              networkTestServerLogging(&sent, &latency));
 }
 
 static bool moreRequestsPending(int count) {
