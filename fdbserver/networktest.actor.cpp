@@ -154,42 +154,34 @@ static bool moreLoggingNeeded(int count, int iteration) {
 	}
 }
 
-ACTOR Future<Void> testClient(std::vector<NetworkTestInterface> interfs,
-                              int* sent,
-                              int* completed,
-                              LatencyStats* latency) {
-	state std::string request_payload(FLOW_KNOBS->NETWORK_TEST_REQUEST_SIZE, '.');
-	state LatencyStats::sample sample;
+Future<Void> testClient(std::vector<NetworkTestInterface> interfs, int* sent, int* completed, LatencyStats* latency) {
+	std::string request_payload(FLOW_KNOBS->NETWORK_TEST_REQUEST_SIZE, '.');
 
 	while (moreRequestsPending(*sent)) {
 		(*sent)++;
-		sample = latency->tick();
-		NetworkTestReply rep = wait(
-		    retryBrokenPromise(interfs[deterministicRandom()->randomInt(0, interfs.size())].test,
-		                       NetworkTestRequest(StringRef(request_payload), FLOW_KNOBS->NETWORK_TEST_REPLY_SIZE)));
+		LatencyStats::sample sample = latency->tick();
+		co_await retryBrokenPromise(
+		    interfs[deterministicRandom()->randomInt(0, interfs.size())].test,
+		    NetworkTestRequest(StringRef(request_payload), FLOW_KNOBS->NETWORK_TEST_REPLY_SIZE));
 		latency->tock(sample);
 		(*completed)++;
 	}
-	return Void();
 }
 
-ACTOR Future<Void> testClientStream(std::vector<NetworkTestInterface> interfs,
-                                    int* sent,
-                                    int* completed,
-                                    LatencyStats* latency) {
-	state std::string request_payload(FLOW_KNOBS->NETWORK_TEST_REQUEST_SIZE, '.');
-	state LatencyStats::sample sample;
-
+Future<Void> testClientStream(std::vector<NetworkTestInterface> interfs,
+                              int* sent,
+                              int* completed,
+                              LatencyStats* latency) {
 	while (moreRequestsPending(*sent)) {
 		(*sent)++;
-		sample = latency->tick();
-		state ReplyPromiseStream<NetworkTestStreamingReply> stream =
+		LatencyStats::sample sample = latency->tick();
+		ReplyPromiseStream<NetworkTestStreamingReply> stream =
 		    interfs[deterministicRandom()->randomInt(0, interfs.size())].testStream.getReplyStream(
 		        NetworkTestStreamingRequest{});
-		state int j = 0;
+		int j = 0;
 		try {
-			loop {
-				NetworkTestStreamingReply rep = waitNext(stream.getFuture());
+			while (true) {
+				NetworkTestStreamingReply rep = co_await stream.getFuture();
 				ASSERT(rep.index == j++);
 			}
 		} catch (Error& e) {
@@ -199,15 +191,14 @@ ACTOR Future<Void> testClientStream(std::vector<NetworkTestInterface> interfs,
 		latency->tock(sample);
 		(*completed)++;
 	}
-	return Void();
 }
 
-ACTOR Future<Void> logger(int* sent, int* completed, LatencyStats* latency) {
-	state double lastTime = now();
-	state int logged = 0;
-	state int iteration = 0;
+Future<Void> logger(int* sent, int* completed, LatencyStats* latency) {
+	double lastTime = now();
+	int logged = 0;
+	int iteration = 0;
 	while (moreLoggingNeeded(logged, ++iteration)) {
-		wait(delay(1.0));
+		co_await delay(1.0);
 		auto spd = (*completed - logged) / (now() - lastTime);
 		if (FLOW_KNOBS->NETWORK_TEST_SCRIPT_MODE) {
 			if (iteration == 2) {
@@ -223,7 +214,6 @@ ACTOR Future<Void> logger(int* sent, int* completed, LatencyStats* latency) {
 	}
 	// tell the clients to shut down
 	*sent = -1;
-	return Void();
 }
 
 static void networkTestnanosleep() {
@@ -283,32 +273,31 @@ static void networkTestnanosleep() {
 	return;
 }
 
-ACTOR Future<Void> networkTestClient(std::string testServers) {
+Future<Void> networkTestClient(std::string const& testServers) {
 	if (testServers == "nanosleep") {
 		networkTestnanosleep();
 		// return Void();
 	}
 
-	state std::vector<NetworkTestInterface> interfs;
-	state std::vector<NetworkAddress> servers = NetworkAddress::parseList(testServers);
-	state int sent = 0;
-	state int completed = 0;
-	state LatencyStats latency;
+	std::vector<NetworkTestInterface> interfs;
+	std::vector<NetworkAddress> servers = NetworkAddress::parseList(testServers);
+	int sent = 0;
+	int completed = 0;
+	LatencyStats latency;
 
 	interfs.reserve(servers.size());
 	for (int i = 0; i < servers.size(); i++) {
 		interfs.push_back(NetworkTestInterface(servers[i]));
 	}
 
-	state std::vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 	clients.reserve(FLOW_KNOBS->NETWORK_TEST_CLIENT_COUNT);
 	for (int i = 0; i < FLOW_KNOBS->NETWORK_TEST_CLIENT_COUNT; i++) {
 		clients.push_back(testClient(interfs, &sent, &completed, &latency));
 	}
 	clients.push_back(logger(&sent, &completed, &latency));
 
-	wait(waitForAll(clients));
-	return Void();
+	co_await waitForAll(clients);
 }
 
 struct RandomIntRange {
@@ -431,17 +420,17 @@ struct P2PNetworkTest {
 
 	NetworkAddress randomRemote() { return remotes[nondeterministicRandom()->randomInt(0, remotes.size())]; }
 
-	ACTOR static Future<Standalone<StringRef>> readMsg(P2PNetworkTest* self, Reference<IConnection> conn) {
-		state Standalone<StringRef> buffer = makeString(sizeof(int));
-		state int writeOffset = 0;
-		state bool gotHeader = false;
+	static Future<Standalone<StringRef>> readMsg(P2PNetworkTest* self, Reference<IConnection> conn) {
+		Standalone<StringRef> buffer = makeString(sizeof(int));
+		int writeOffset = 0;
+		bool gotHeader = false;
 
 		// Fill buffer sequentially until the initial bytesToRead is read (or more), then read
 		// intended message size and add it to bytesToRead, continue if needed until bytesToRead is 0.
-		loop {
+		while (true) {
 			int stutter = self->waitReadMilliseconds.get();
 			if (stutter > 0) {
-				wait(delay(stutter / 1e3));
+				co_await delay(stutter / 1e3);
 			}
 
 			int len = conn->read((uint8_t*)buffer.begin() + writeOffset, (uint8_t*)buffer.end());
@@ -451,12 +440,12 @@ struct P2PNetworkTest {
 			// If buffer is complete, either process it as a header or return it
 			if (writeOffset == buffer.size()) {
 				if (gotHeader) {
-					return buffer;
+					co_return buffer;
 				} else {
 					gotHeader = true;
 					int msgSize = *(int*)buffer.begin();
 					if (msgSize == 0) {
-						return Standalone<StringRef>();
+						co_return Standalone<StringRef>();
 					}
 					buffer = makeString(msgSize);
 					writeOffset = 0;
@@ -464,22 +453,22 @@ struct P2PNetworkTest {
 			}
 
 			if (len == 0) {
-				wait(conn->onReadable());
-				wait(delay(0, TaskPriority::ReadSocket));
+				co_await conn->onReadable();
+				co_await delay(0, TaskPriority::ReadSocket);
 			}
 		}
 	}
 
-	ACTOR static Future<Void> writeMsg(P2PNetworkTest* self, Reference<IConnection> conn, StringRef msg) {
-		state UnsentPacketQueue packets;
+	static Future<Void> writeMsg(P2PNetworkTest* self, Reference<IConnection> conn, StringRef msg) {
+		UnsentPacketQueue packets;
 		PacketWriter writer(packets.getWriteBuffer(msg.size()), nullptr, Unversioned());
 		writer.serializeBinaryItem((int)msg.size());
 		writer.serializeBytes(msg);
 
-		loop {
+		while (true) {
 			int stutter = self->waitWriteMilliseconds.get();
 			if (stutter > 0) {
-				wait(delay(stutter / 1e3));
+				co_await delay(stutter / 1e3);
 			}
 			int sent = conn->write(packets.getUnsent(), FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
 
@@ -492,43 +481,41 @@ struct P2PNetworkTest {
 				break;
 			}
 
-			wait(conn->onWritable());
-			wait(yield(TaskPriority::WriteSocket));
+			co_await conn->onWritable();
+			co_await yield(TaskPriority::WriteSocket);
 		}
-
-		return Void();
 	}
 
-	ACTOR static Future<Void> doSession(P2PNetworkTest* self, Reference<IConnection> conn, bool incoming) {
-		state int numRequests;
+	static Future<Void> doSession(P2PNetworkTest* self, Reference<IConnection> conn, bool incoming) {
+		int numRequests{ 0 };
 
 		try {
 			if (incoming) {
-				wait(conn->acceptHandshake());
+				co_await conn->acceptHandshake();
 
 				// Read the number of requests for the session
-				Standalone<StringRef> buf = wait(readMsg(self, conn));
+				Standalone<StringRef> buf = co_await readMsg(self, conn);
 				ASSERT(buf.size() == sizeof(int));
 				numRequests = *(int*)buf.begin();
 			} else {
-				wait(conn->connectHandshake());
+				co_await conn->connectHandshake();
 
 				// Pick the number of requests for the session and send it to remote
 				numRequests = self->requests.get();
-				wait(writeMsg(self, conn, StringRef((const uint8_t*)&numRequests, sizeof(int))));
+				co_await writeMsg(self, conn, StringRef((const uint8_t*)&numRequests, sizeof(int)));
 			}
 
 			while (numRequests > 0) {
 				if (incoming) {
 					// Wait for a request
-					wait(success(readMsg(self, conn)));
+					co_await success(readMsg(self, conn));
 					// Send a reply
-					wait(writeMsg(self, conn, self->msgBuffer.substr(0, self->replyBytes.get())));
+					co_await writeMsg(self, conn, self->msgBuffer.substr(0, self->replyBytes.get()));
 				} else {
 					// Send a request
-					wait(writeMsg(self, conn, self->msgBuffer.substr(0, self->requestBytes.get())));
+					co_await writeMsg(self, conn, self->msgBuffer.substr(0, self->requestBytes.get()));
 					// Wait for a reply
-					wait(success(readMsg(self, conn)));
+					co_await success(readMsg(self, conn));
 				}
 
 				if (--numRequests == 0) {
@@ -536,7 +523,7 @@ struct P2PNetworkTest {
 				}
 			}
 
-			wait(delay(self->idleMilliseconds.get() / 1e3));
+			co_await delay(self->idleMilliseconds.get() / 1e3);
 			conn->close();
 
 			if (incoming) {
@@ -550,35 +537,37 @@ struct P2PNetworkTest {
 			    .error(e)
 			    .detail("Remote", conn->getPeerAddress());
 		}
-
-		return Void();
 	}
 
-	ACTOR static Future<Void> outgoing(P2PNetworkTest* self) {
-		loop {
-			wait(delay(0, TaskPriority::WriteSocket));
-			state NetworkAddress remote = self->randomRemote();
+	static Future<Void> outgoing(P2PNetworkTest* self) {
+		while (true) {
+			co_await delay(0, TaskPriority::WriteSocket);
+			NetworkAddress remote = self->randomRemote();
 
+			Optional<Error> err;
 			try {
-				state Reference<IConnection> conn = wait(INetworkConnections::net()->connect(remote));
+				Reference<IConnection> conn = co_await INetworkConnections::net()->connect(remote);
 				// printf("Connected to %s\n", remote.toString().c_str());
-				wait(doSession(self, conn, false));
+				co_await doSession(self, conn, false);
 			} catch (Error& e) {
+				err = e;
+			}
+			if (err.present()) {
 				++self->connectErrors;
-				TraceEvent(SevError, "P2POutgoingError").error(e).detail("Remote", remote);
-				wait(delay(1));
+				TraceEvent(SevError, "P2POutgoingError").error(err.get()).detail("Remote", remote);
+				co_await delay(1);
 			}
 		}
 	}
 
-	ACTOR static Future<Void> incoming(P2PNetworkTest* self, Reference<IListener> listener) {
-		state ActorCollection sessions(false);
+	static Future<Void> incoming(P2PNetworkTest* self, Reference<IListener> listener) {
+		ActorCollection sessions(false);
 
-		loop {
-			wait(delay(0, TaskPriority::AcceptSocket));
+		while (true) {
+			co_await delay(0, TaskPriority::AcceptSocket);
 
 			try {
-				state Reference<IConnection> conn = wait(listener->accept());
+				Reference<IConnection> conn = co_await listener->accept();
 				// printf("Connected from %s\n", conn->getPeerAddress().toString().c_str());
 				sessions.add(doSession(self, conn, true));
 			} catch (Error& e) {
@@ -588,9 +577,7 @@ struct P2PNetworkTest {
 		}
 	}
 
-	ACTOR static Future<Void> run_oneshot(P2PNetworkTest* self) {
-		state ActorCollection actors(false);
-
+	static Future<Void> run_oneshot(P2PNetworkTest* self) {
 		self->startTime = now();
 
 		fmt::print("{0} listeners, {1} remotes, {2} outgoing connections\n",
@@ -607,30 +594,28 @@ struct P2PNetworkTest {
 		}
 
 		if (!self->listeners.empty()) {
-			state Reference<IConnection> conn1 = wait(self->listeners[0]->accept());
+			Reference<IConnection> conn1 = co_await self->listeners[0]->accept();
 			printf("Server: connected from %s\n", conn1->getPeerAddress().toString().c_str());
 			try {
-				wait(conn1->acceptHandshake());
+				co_await conn1->acceptHandshake();
 				printf("Server: connected from %s, handshake done\n", conn1->getPeerAddress().toString().c_str());
 			} catch (Error& e) {
 				printf("Server: handshake error %s\n", e.what());
 			}
 			threadSleep(11.0);
-			return Void();
+			co_return;
 		}
 
 		if (!self->remotes.empty()) {
-			state Reference<IConnection> conn2 = wait(INetworkConnections::net()->connect(self->remotes[0]));
+			Reference<IConnection> conn2 = co_await INetworkConnections::net()->connect(self->remotes[0]);
 			printf("Client: connected to %s\n", self->remotes[0].toString().c_str());
-			wait(conn2->connectHandshake());
+			co_await conn2->connectHandshake();
 			printf("Client: connected to %s, handshake done\n", self->remotes[0].toString().c_str());
 		}
-
-		return Void();
 	}
 
-	ACTOR static Future<Void> run_impl(P2PNetworkTest* self) {
-		state ActorCollection actors(false);
+	static Future<Void> run_impl(P2PNetworkTest* self) {
+		ActorCollection actors(false);
 
 		self->startTime = now();
 		self->globalStartTime = self->startTime;
@@ -668,14 +653,13 @@ struct P2PNetworkTest {
 			}
 		}
 
-		loop {
-			wait(delay(1.0, TaskPriority::Max));
+		while (true) {
+			co_await delay(1.0, TaskPriority::Max);
 			printf("%s\n", self->statsString().c_str());
 			if (self->targetDuration > 0 && now() - self->globalStartTime > self->targetDuration) {
 				break;
 			}
 		}
-		return Void();
 	}
 
 	Future<Void> run() {
