@@ -57,6 +57,12 @@ class AsyncResult;
 
 namespace coro {
 template <class T>
+struct FutureIgnore;
+
+template <class SourceValue, class ResultValue = std::conditional_t<std::is_void_v<SourceValue>, Void, SourceValue>>
+struct FutureErrorOr;
+
+template <class T>
 struct AsyncResultState;
 
 template <class T>
@@ -73,6 +79,45 @@ struct AsyncResultAwaiter;
 
 template <class Parent, int Idx, class ValueType>
 struct ActorAsyncResultCallback;
+
+template <class PromiseType, class ValueType>
+struct AwaitableFutureIgnore;
+
+template <class PromiseType, class SourceValue, class ResultValue>
+struct AwaitableFutureErrorOr;
+} // namespace coro
+
+namespace coro {
+
+template <class T>
+struct FutureIgnore {
+	// Wrap a Future<T> so coroutine await_transform can resume on completion
+	// without materializing the T payload at the await site.
+	Future<T> future;
+};
+
+template <class T>
+FutureIgnore<T> ignore(Future<T> future) {
+	return FutureIgnore<T>{ std::move(future) };
+}
+
+template <class SourceValue, class ResultValue>
+struct FutureErrorOr {
+	// Reuse Future<T> storage but request a non-throwing await_resume() that
+	// converts completion into ErrorOr<ResultValue>.
+	Future<std::conditional_t<std::is_void_v<SourceValue>, Void, SourceValue>> future;
+};
+
+template <class T>
+FutureErrorOr<T> errorOr(Future<T> future) {
+	return FutureErrorOr<T>{ std::move(future) };
+}
+
+template <class T>
+FutureErrorOr<T, Void> errorOr(FutureIgnore<T> future) {
+	return FutureErrorOr<T, Void>{ std::move(future.future) };
+}
+
 } // namespace coro
 
 // Move-only coroutine result that transfers ownership through co_await.

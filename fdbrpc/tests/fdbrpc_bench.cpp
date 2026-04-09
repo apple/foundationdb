@@ -1,5 +1,5 @@
 /*
- * fdbrpc_bench.actor.cpp
+ * fdbrpc_bench.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -26,7 +26,6 @@
 #include "flow/TLSConfig.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/FlowTransport.h"
-#include "flow/actorcompiler.h" // has to be last include
 
 namespace fdbrpc_bench {
 NetworkAddress serverAddress;
@@ -110,33 +109,60 @@ private:
 	std::vector<std::pair<int64_t, int>> vals;
 };
 
-ACTOR Future<Void> echoServer() {
-	state EchoServerInterface echoServer;
-	state StatCounter c;
-	echoServer.getInterface.makeWellKnownEndpoint(WLTOKEN_ECHO_SERVER, TaskPriority::DefaultEndpoint);
-	state Future<Void> next = delay(10);
-	loop {
-		try {
-			choose {
-				when(GetInterfaceRequest req = waitNext(echoServer.getInterface.getFuture())) {
-					req.reply.send(echoServer);
-				}
-				when(EchoRequest req = waitNext(echoServer.echo.getFuture())) {
-					req.reply.send(req.message);
-					c.inc();
-				}
-				when(wait(next)) {
-					next = delay(10);
-					std::cout << "Throughput: " << c.avg() << " req/sec" << std::endl;
-				}
-			}
-		} catch (Error& e) {
-			if (e.code() != error_code_operation_obsolete) {
-				fprintf(stderr, "Error: %s\n", e.what());
-				throw e;
+class EchoServer {
+	static void rethrowUnexpectedError(const Error& e) {
+		if (e.code() != error_code_operation_obsolete) {
+			fprintf(stderr, "Error: %s\n", e.what());
+			throw e;
+		}
+	}
+
+	Future<Void> serveGetInterfaceReqs() {
+		while (true) {
+			try {
+				GetInterfaceRequest req = co_await interf.getInterface.getFuture();
+				req.reply.send(interf);
+			} catch (Error& e) {
+				rethrowUnexpectedError(e);
 			}
 		}
 	}
+
+	Future<Void> serveEchoReqs() {
+		while (true) {
+			try {
+				EchoRequest req = co_await interf.echo.getFuture();
+				req.reply.send(req.message);
+				counter.inc();
+			} catch (Error& e) {
+				rethrowUnexpectedError(e);
+			}
+		}
+	}
+
+	Future<Void> printThroughput() {
+		while (true) {
+			try {
+				co_await delay(10);
+				std::cout << "Throughput: " << counter.avg() << " req/sec" << std::endl;
+			} catch (Error& e) {
+				rethrowUnexpectedError(e);
+			}
+		}
+	}
+
+	EchoServerInterface interf;
+	StatCounter counter;
+
+public:
+	EchoServer() { interf.getInterface.makeWellKnownEndpoint(WLTOKEN_ECHO_SERVER, TaskPriority::DefaultEndpoint); }
+
+	Future<Void> run() { co_await race(serveGetInterfaceReqs(), serveEchoReqs(), printThroughput()); }
+};
+
+Future<Void> echoServer() {
+	EchoServer server;
+	co_await server.run();
 }
 
 int payload_size_bytes = 1024 * 10;
@@ -156,27 +182,26 @@ std::string randString(int size) {
 	return result;
 }
 
-ACTOR Future<Void> echoClient() {
+Future<Void> echoClient() {
 	std::cout << "Starting client. Payload size: " << payload_size_bytes << " bytes" << std::endl;
-	state EchoServerInterface server;
+	EchoServerInterface server;
 	server.getInterface =
 	    RequestStream<GetInterfaceRequest>(Endpoint::wellKnown({ serverAddress }, WLTOKEN_ECHO_SERVER));
-	EchoServerInterface s = wait(server.getInterface.getReply(GetInterfaceRequest()));
-	server = s;
-	state std::string payload = randString(payload_size_bytes);
+	server = co_await server.getInterface.getReply(GetInterfaceRequest());
+	std::string payload = randString(payload_size_bytes);
 
 	while (true) {
-		state int duration_seconds = 10;
-		state int request_count = 0;
+		int duration_seconds = 10;
+		int request_count = 0;
 
-		state std::chrono::time_point<std::chrono::steady_clock> start_time = std::chrono::steady_clock::now();
-		state std::chrono::time_point<std::chrono::steady_clock> end_time =
+		std::chrono::time_point<std::chrono::steady_clock> start_time = std::chrono::steady_clock::now();
+		std::chrono::time_point<std::chrono::steady_clock> end_time =
 		    start_time + std::chrono::seconds(duration_seconds);
 
 		while (std::chrono::steady_clock::now() < end_time) {
 			EchoRequest echoRequest;
 			echoRequest.message = payload;
-			std::string echoMessage = wait(server.echo.getReply(echoRequest));
+			co_await server.echo.getReply(echoRequest);
 			++request_count;
 		}
 		std::cout << "Sent " << request_count << " requests in " << request_count / duration_seconds << " /second"
@@ -229,7 +254,6 @@ int main(int argc, char* argv[]) {
 	}
 
 	bool isServer = (mode == "server");
-	std::string port;
 	std::vector<std::function<Future<Void>()>> toRun;
 	auto actor = actors.find(mode);
 	toRun.push_back(actor->second);

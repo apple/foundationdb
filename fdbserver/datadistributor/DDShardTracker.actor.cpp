@@ -1139,17 +1139,14 @@ Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, GetTopKMe
 	}
 }
 
-ACTOR Future<Void> fetchTopKShardMetrics(DataDistributionTracker* self, GetTopKMetricsRequest req) {
-	choose {
-		// simulate time_out
-		when(wait(g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01) ? Never()
-		                                                              : fetchTopKShardMetrics_impl(self, req))) {}
-		when(wait(delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT))) {
-			CODE_PROBE(true, "TopK DD_SHARD_METRICS_TIMEOUT");
-			req.reply.send(GetTopKMetricsReply());
-		}
+Future<Void> fetchTopKShardMetrics(DataDistributionTracker* self, GetTopKMetricsRequest req) {
+	// simulate time_out
+	Future<Void> f =
+	    g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01) ? Never() : fetchTopKShardMetrics_impl(self, req);
+	if (auto const res = co_await timeout(f, SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT); !res.present()) {
+		CODE_PROBE(true, "TopK DD_SHARD_METRICS_TIMEOUT");
+		req.reply.send(GetTopKMetricsReply());
 	}
-	return Void();
 }
 
 Future<Void> fetchShardMetrics_impl(DataDistributionTracker* self, GetMetricsRequest req) {
@@ -1180,17 +1177,15 @@ Future<Void> fetchShardMetrics_impl(DataDistributionTracker* self, GetMetricsReq
 	}
 }
 
-ACTOR Future<Void> fetchShardMetrics(DataDistributionTracker* self, GetMetricsRequest req) {
-	choose {
-		when(wait(fetchShardMetrics_impl(self, req))) {}
-		when(wait(delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT, TaskPriority::DataDistribution))) {
-			CODE_PROBE(true, "DD_SHARD_METRICS_TIMEOUT");
-			StorageMetrics largeMetrics;
-			largeMetrics.bytes = getMaxShardSize(self->dbSizeEstimate->get());
-			req.reply.send(largeMetrics);
-		}
+Future<Void> fetchShardMetrics(DataDistributionTracker* self, GetMetricsRequest req) {
+	if (auto const res = co_await timeout(
+	        fetchShardMetrics_impl(self, req), SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT, TaskPriority::DataDistribution);
+	    !res.present()) {
+		CODE_PROBE(true, "DD_SHARD_METRICS_TIMEOUT");
+		StorageMetrics largeMetrics;
+		largeMetrics.bytes = getMaxShardSize(self->dbSizeEstimate->get());
+		req.reply.send(largeMetrics);
 	}
-	return Void();
 }
 
 Future<Void> fetchShardMetricsList_impl(DataDistributionTracker* self, GetMetricsListRequest req) {
@@ -1233,14 +1228,12 @@ Future<Void> fetchShardMetricsList_impl(DataDistributionTracker* self, GetMetric
 	}
 }
 
-ACTOR Future<Void> fetchShardMetricsList(DataDistributionTracker* self, GetMetricsListRequest req) {
-	choose {
-		when(wait(fetchShardMetricsList_impl(self, req))) {}
-		when(wait(delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT))) {
-			req.reply.sendError(timed_out());
-		}
+Future<Void> fetchShardMetricsList(DataDistributionTracker* self, GetMetricsListRequest req) {
+	if (auto const res =
+	        co_await timeout(fetchShardMetricsList_impl(self, req), SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT);
+	    !res.present()) {
+		req.reply.sendError(timed_out());
 	}
-	return Void();
 }
 
 void triggerStorageQueueRebalance(DataDistributionTracker* self, RebalanceStorageQueueRequest req) {
@@ -1298,50 +1291,95 @@ DataDistributionTracker::~DataDistributionTracker() {
 }
 
 struct DataDistributionTrackerImpl {
-	ACTOR static Future<Void> run(DataDistributionTracker* self, Reference<InitialDataDistribution> initData) {
-		state Future<Void> loggingTrigger = Void();
-		state Future<Void> readHotDetect = readHotDetector(self);
-		state Reference<EventCacheHolder> ddTrackerStatsEventHolder = makeReference<EventCacheHolder>("DDTrackerStats");
+	static Future<Void> serveAverageShardBytesReqs(DataDistributionTracker* self,
+	                                               FutureStream<Promise<int64_t>> averageShardBytes) {
+		while (true) {
+			Promise<int64_t> req = co_await averageShardBytes;
+			req.send(self->getAverageShardBytes());
+		}
+	}
 
+	static Future<Void> logDDTrackerStats(DataDistributionTracker* self) {
+		Reference<EventCacheHolder> ddTrackerStatsEventHolder = makeReference<EventCacheHolder>("DDTrackerStats");
+		while (true) {
+			TraceEvent("DDTrackerStats", self->distributorId)
+			    .detail("Shards", self->shards->size())
+			    .detail("TotalSizeBytes", self->dbSizeEstimate->get())
+			    .detail("SystemSizeBytes", self->systemSizeEstimate)
+			    .trackLatest(ddTrackerStatsEventHolder->trackingKey);
+			co_await delay(SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL, TaskPriority::FlushTrace);
+		}
+	}
+
+	static Future<Void> serveGetMetricsReqs(DataDistributionTracker* self,
+	                                        FutureStream<GetMetricsRequest> getShardMetrics) {
+		while (true) {
+			GetMetricsRequest req = co_await getShardMetrics;
+			self->actors.add(fetchShardMetrics(self, req));
+		}
+	}
+
+	static Future<Void> serveGetTopKMetricsReqs(DataDistributionTracker* self,
+	                                            FutureStream<GetTopKMetricsRequest> getTopKMetrics) {
+		while (true) {
+			GetTopKMetricsRequest req = co_await getTopKMetrics;
+			self->actors.add(fetchTopKShardMetrics(self, req));
+		}
+	}
+
+	static Future<Void> serveGetMetricsListReqs(DataDistributionTracker* self,
+	                                            FutureStream<GetMetricsListRequest> getShardMetricsList) {
+		while (true) {
+			GetMetricsListRequest req = co_await getShardMetricsList;
+			self->actors.add(fetchShardMetricsList(self, req));
+		}
+	}
+
+	static Future<Void> serveTriggerStorageQueueRebalanceReqs(
+	    DataDistributionTracker* self,
+	    FutureStream<RebalanceStorageQueueRequest> triggerStorageQueueRebalanceReqs) {
+		while (true) {
+			RebalanceStorageQueueRequest req = co_await triggerStorageQueueRebalanceReqs;
+			triggerStorageQueueRebalance(self, req);
+		}
+	}
+
+	static Future<Void> serveTriggerShardBulkLoadingReqs(
+	    DataDistributionTracker* self,
+	    FutureStream<BulkLoadShardRequest> triggerShardBulkLoadingReqs) {
+		while (true) {
+			BulkLoadShardRequest req = co_await triggerShardBulkLoadingReqs;
+			createShardToBulkLoad(self, req.bulkLoadTaskState, req.cancelledDataMovePriority);
+		}
+	}
+
+	static Future<Void> serveRestartShardTrackerReqs(DataDistributionTracker* self,
+	                                                 FutureStream<KeyRange> restartShardTrackerReqs) {
+		while (true) {
+			KeyRange req = co_await restartShardTrackerReqs;
+			restartShardTrackers(self, req);
+		}
+	}
+
+	static Future<Void> run(DataDistributionTracker* self, Reference<InitialDataDistribution> initData) {
 		try {
-			wait(trackInitialShards(self, initData));
-			if (*self->trackerCancelled)
-				return Void();
+			co_await trackInitialShards(self, initData);
+			if (*self->trackerCancelled) {
+				co_return;
+			}
 			initData.clear(); // Release reference count.
 
-			loop choose {
-				when(Promise<int64_t> req = waitNext(self->averageShardBytes)) {
-					req.send(self->getAverageShardBytes());
-				}
-				when(wait(loggingTrigger)) {
-					TraceEvent("DDTrackerStats", self->distributorId)
-					    .detail("Shards", self->shards->size())
-					    .detail("TotalSizeBytes", self->dbSizeEstimate->get())
-					    .detail("SystemSizeBytes", self->systemSizeEstimate)
-					    .trackLatest(ddTrackerStatsEventHolder->trackingKey);
-
-					loggingTrigger = delay(SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL, TaskPriority::FlushTrace);
-				}
-				when(GetMetricsRequest req = waitNext(self->getShardMetrics)) {
-					self->actors.add(fetchShardMetrics(self, req));
-				}
-				when(GetTopKMetricsRequest req = waitNext(self->getTopKMetrics)) {
-					self->actors.add(fetchTopKShardMetrics(self, req));
-				}
-				when(GetMetricsListRequest req = waitNext(self->getShardMetricsList)) {
-					self->actors.add(fetchShardMetricsList(self, req));
-				}
-				when(RebalanceStorageQueueRequest req = waitNext(self->triggerStorageQueueRebalance)) {
-					triggerStorageQueueRebalance(self, req);
-				}
-				when(BulkLoadShardRequest req = waitNext(self->triggerShardBulkLoading)) {
-					createShardToBulkLoad(self, req.bulkLoadTaskState, req.cancelledDataMovePriority);
-				}
-				when(wait(self->actors.getResult())) {}
-				when(KeyRange req = waitNext(self->shardsAffectedByTeamFailure->restartShardTracker.getFuture())) {
-					restartShardTrackers(self, req);
-				}
-			}
+			co_await race(
+			    logDDTrackerStats(self),
+			    readHotDetector(self),
+			    serveAverageShardBytesReqs(self, self->averageShardBytes),
+			    serveGetMetricsReqs(self, self->getShardMetrics),
+			    serveGetTopKMetricsReqs(self, self->getTopKMetrics),
+			    serveGetMetricsListReqs(self, self->getShardMetricsList),
+			    serveTriggerStorageQueueRebalanceReqs(self, self->triggerStorageQueueRebalance),
+			    serveTriggerShardBulkLoadingReqs(self, self->triggerShardBulkLoading),
+			    serveRestartShardTrackerReqs(self, self->shardsAffectedByTeamFailure->restartShardTracker.getFuture()),
+			    self->actors.getResult());
 		} catch (Error& e) {
 			if (e.code() != error_code_broken_promise) {
 				TraceEvent(SevError, "DataDistributionTrackerError", self->distributorId)
@@ -1349,7 +1387,7 @@ struct DataDistributionTrackerImpl {
 			} else {
 				TraceEvent(SevWarn, "DataDistributionTrackerError", self->distributorId).error(e);
 			}
-			throw e;
+			throw;
 		}
 	}
 };

@@ -21,7 +21,7 @@
 #include "fdbserver/CoroFlow.h"
 #include "flow/ActorCollection.h"
 #include "Coro.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/TDMetric.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "flow/actorcompiler.h" // has to be last include

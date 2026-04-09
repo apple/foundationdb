@@ -50,12 +50,12 @@
 #include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/MutationTracking.h"
-#include "fdbserver/core/ProxyCommitData.h"
+#include "ProxyCommitData.h"
 #include "fdbserver/core/RatekeeperInterface.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/WaitFailure.h"
-#include "fdbserver/commitproxy/CommitProxyServer.actor.h"
+#include "fdbserver/commitproxy/CommitProxyServer.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/CodeProbe.h"
@@ -1041,7 +1041,7 @@ void applyMetadataEffect(CommitBatchContext* self) {
 
 			if (committed) {
 				applyMetadataMutations(SpanContext(),
-				                       *self->pProxyCommitData,
+				                       self->pProxyCommitData->getApplyMetadataProxyContext(),
 				                       self->arena,
 				                       self->pProxyCommitData->logSystem,
 				                       self->resolution[0].stateMutations[versionIndex][transactionIndex].mutations,
@@ -1131,7 +1131,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 		    (!self->locked || trs[t].isLockAware())) {
 			self->commitCount++;
 			applyMetadataMutations(trs[t].spanContext,
-			                       *pProxyCommitData,
+			                       pProxyCommitData->getApplyMetadataProxyContext(),
 			                       self->arena,
 			                       pProxyCommitData->logSystem,
 			                       trs[t].transaction.mutations,
@@ -2682,7 +2682,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		Arena arena;
 		bool confChanges;
 		applyMetadataMutations(SpanContext(),
-		                       *pContext->pCommitData,
+		                       pContext->pCommitData->getApplyMetadataProxyContext(),
 		                       arena,
 		                       Reference<ILogSystem>(),
 		                       mutations,
@@ -3043,23 +3043,23 @@ ACTOR Future<Void> updateLocalDbInfo(Reference<AsyncVar<ServerDBInfo> const> in,
 	}
 }
 
-ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
-                                     InitializeCommitProxyRequest req,
-                                     Reference<AsyncVar<ServerDBInfo> const> db,
-                                     std::string whitelistBinPaths) {
+Future<Void> commitProxyServer(CommitProxyInterface proxy,
+                               InitializeCommitProxyRequest req,
+                               Reference<AsyncVar<ServerDBInfo> const> db,
+                               std::string whitelistBinPaths) {
 	try {
-		state Reference<AsyncVar<ServerDBInfo>> localDb = makeReference<AsyncVar<ServerDBInfo>>();
-		state Future<Void> core = commitProxyServerCore(proxy,
-		                                                req.master,
-		                                                req.masterLifetime,
-		                                                localDb,
-		                                                req.recoveryCount,
-		                                                req.recoveryTransactionVersion,
-		                                                req.firstProxy,
-		                                                whitelistBinPaths,
-		                                                proxy.provisional,
-		                                                req.commitProxyIndex);
-		wait(core || updateLocalDbInfo(db, localDb, req.recoveryCount, proxy));
+		auto localDb = makeReference<AsyncVar<ServerDBInfo>>();
+		Future<Void> core = commitProxyServerCore(proxy,
+		                                          req.master,
+		                                          req.masterLifetime,
+		                                          localDb,
+		                                          req.recoveryCount,
+		                                          req.recoveryTransactionVersion,
+		                                          req.firstProxy,
+		                                          whitelistBinPaths,
+		                                          proxy.provisional,
+		                                          req.commitProxyIndex);
+		co_await race(core, updateLocalDbInfo(db, localDb, req.recoveryCount, proxy));
 	} catch (Error& e) {
 		Severity sev = e.code() == error_code_failed_to_progress ? SevWarnAlways : SevInfo;
 		TraceEvent(sev, "CommitProxyTerminated", proxy.id()).errorUnsuppressed(e);
@@ -3072,7 +3072,6 @@ ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
 		}
 		CODE_PROBE(e.code() == error_code_failed_to_progress, "Commit proxy failed to progress");
 	}
-	return Void();
 }
 
 void forceLinkCommitProxyTests() {}

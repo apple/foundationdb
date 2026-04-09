@@ -18,17 +18,19 @@
  * limitations under the License.
  */
 #pragma once
-#ifndef FDBSERVER_STORAGE_CORRUPTION_BUG_H
-#define FDBSERVER_STORAGE_CORRUPTION_BUG_H
+#ifndef FDBSERVER_STORAGESERVER_STORAGE_CORRUPTION_BUG_H
+#define FDBSERVER_STORAGESERVER_STORAGE_CORRUPTION_BUG_H
+
 #include "flow/SimBugInjector.h"
 
 class StorageCorruptionBug : public ISimBug {
 public:
 	double corruptionProbability = 0.001;
 };
+
 class StorageCorruptionBugID : public IBugIdentifier {
 public:
 	std::shared_ptr<ISimBug> create() const override { return std::make_shared<StorageCorruptionBug>(); }
 };
 
-#endif // FDBSERVER_STORAGE_CORRUPTION_BUG_H
+#endif // FDBSERVER_STORAGESERVER_STORAGE_CORRUPTION_BUG_H
