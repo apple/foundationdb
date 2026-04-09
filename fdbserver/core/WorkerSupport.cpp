@@ -5,7 +5,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/ServerDBInfo.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/TDMetric.h"
 #include "flow/Trace.h"
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
