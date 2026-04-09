@@ -23,9 +23,7 @@
 
 #pragma once
 
-#include "fdbclient/IKnobCollection.h"
-
-#define SERVER_KNOBS (&IKnobCollection::getGlobalKnobCollection().getServerKnobs())
+#include "fdbserver/core/ServerKnobs.h"
 
 inline const ServerKnobs& getServerKnobs() {
 	return *SERVER_KNOBS;

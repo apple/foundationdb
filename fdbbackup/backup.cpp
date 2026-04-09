@@ -46,7 +46,7 @@
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
-#include "fdbclient/IKnobCollection.h"
+#include "fdbclient/Knobs.h"
 #include "fdbclient/RunRYWTransaction.h"
 #include "fdbclient/S3BlobStore.h"
 #include "fdbclient/SystemData.h"
@@ -4152,9 +4152,9 @@ int main(int argc, char* argv[]) {
 
 		Future<Void> memoryUsageMonitor = startMemoryUsageMonitor(memLimit);
 
-		IKnobCollection::setupKnobs(knobs);
+		setupClientKnobs(knobs);
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		IKnobCollection::getMutableGlobalKnobCollection().initialize(Randomize::False, IsSimulated::False);
+		initializeClientKnobs(Randomize::False, IsSimulated::False);
 
 		TraceEvent("ProgramStart")
 		    .setMaxEventLength(12000)
