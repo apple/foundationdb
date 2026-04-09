@@ -2944,36 +2944,10 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		futures.push_back(latestEventOnWorkers(workers, "TraceFileOpenError"));
 		futures.push_back(latestEventOnWorkers(workers, "ProgramStart"));
 
-		// Wait for all response pairs.
-		state std::vector<Optional<std::pair<WorkerEvents, std::set<std::string>>>> workerEventsVec =
-		    wait(getAll(futures));
-
-		// Create a unique set of all workers who were unreachable for 1 or more of the event requests above.
-		// Since each event request is independent and to all workers, workers can have responded to some
-		// event requests but still end up in the unreachable set.
-		std::set<std::string> mergeUnreachable;
-
-		// For each (optional) pair, if the pair is present and not empty then add the unreachable workers to the
-		// set.
-		for (auto pair : workerEventsVec) {
-			if (pair.present() && !pair.get().second.empty())
-				mergeUnreachable.insert(pair.get().second.begin(), pair.get().second.end());
-		}
-
-		// We now have a unique set of workers who were in some way unreachable.  If there is anything in that set,
-		// create a message for it and include the list of unreachable processes.
-		if (!mergeUnreachable.empty()) {
-			JsonBuilderObject message =
-			    JsonBuilder::makeMessage("unreachable_processes", "The cluster has some unreachable processes.");
-			JsonBuilderArray unreachableProcs;
-			for (auto m : mergeUnreachable) {
-				unreachableProcs.push_back(JsonBuilderObject().setKey("address", m));
-			}
-			message["unreachable_processes"] = unreachableProcs;
-			messages.push_back(message);
-		}
-
-		state ProtocolVersionData protocolVersion = wait(getNewestProtocolVersion(cx, ccWorker));
+		// Launch all early fetches concurrently
+		state Future<std::vector<Optional<std::pair<WorkerEvents, std::set<std::string>>>>> workerEventsFuture =
+		    getAll(futures);
+		state Future<ProtocolVersionData> protocolVersionFuture = getNewestProtocolVersion(cx, ccWorker);
 
 		// construct status information for cluster subsections
 		state int statusCode = (int)RecoveryStatus::END;
@@ -2986,12 +2960,33 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state Future<ErrorOr<JsonBuilderObject>> versionEpochStatusFuture =
 		    errorOr(timeoutError(versionEpochStatusFetcher(cx, &status_incomplete_reasons), 5.0));
 
-		// Launch loadConfiguration concurrently with recovery/idmp/versionEpoch
 		state Future<std::pair<Optional<DatabaseConfiguration>, Optional<LoadConfigurationResult>>>
 		    loadConfigFuture = loadConfiguration(cx, &messages, &status_incomplete_reasons);
 
-		// Wait for recovery state (need statusCode) concurrently with loadConfiguration
-		wait(ready(recoveryStateStatusFuture) && ready(loadConfigFuture));
+		// Wait for workerEvents, protocolVersion, recoveryState, and loadConfig ALL concurrently
+		wait(success(workerEventsFuture) && success(protocolVersionFuture) &&
+		     ready(recoveryStateStatusFuture) && ready(loadConfigFuture));
+
+		state std::vector<Optional<std::pair<WorkerEvents, std::set<std::string>>>> workerEventsVec =
+		    workerEventsFuture.get();
+		state ProtocolVersionData protocolVersion = protocolVersionFuture.get();
+
+		// Create a unique set of all workers who were unreachable for 1 or more of the event requests above.
+		std::set<std::string> mergeUnreachable;
+		for (auto pair : workerEventsVec) {
+			if (pair.present() && !pair.get().second.empty())
+				mergeUnreachable.insert(pair.get().second.begin(), pair.get().second.end());
+		}
+		if (!mergeUnreachable.empty()) {
+			JsonBuilderObject message =
+			    JsonBuilder::makeMessage("unreachable_processes", "The cluster has some unreachable processes.");
+			JsonBuilderArray unreachableProcs;
+			for (auto m : mergeUnreachable) {
+				unreachableProcs.push_back(JsonBuilderObject().setKey("address", m));
+			}
+			message["unreachable_processes"] = unreachableProcs;
+			messages.push_back(message);
+		}
 		// Don't need to wait for idmp/versionEpoch yet — they're used much later
 
 		state JsonBuilderObject recoveryStateStatus;
