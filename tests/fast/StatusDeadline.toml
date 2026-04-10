@@ -1,15 +1,26 @@
+[configuration]
+minimumReplication = 3
+machineCount = 10
+
 [[test]]
 testTitle = 'StatusDeadline'
 
     [[test.workload]]
     testName = 'Status'
-    testDuration = 90.0
-    requestsPerSecond = 0.2
-    maxStatusLatency = 28.0
+    testDuration = 40.0
+    requestsPerSecond = 1
+    maxStatusLatency = 30.0
 
     [[test.workload]]
     testName = 'Attrition'
-    machinesToKill = 10
+    machinesToKill = 9
     machinesToLeave = 1
     reboot = false
-    testDuration = 90.0
+    testDuration = 5.0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 40.0
+    swizzle = 0
+    scale = 1.0
+    clogginess = 2.0
