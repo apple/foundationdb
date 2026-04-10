@@ -51,13 +51,10 @@ Future<Void> waitForContinuousFailure(IFailureMonitor* monitor,
 		                                                   // of time, so there is no point in waiting for changes
 			waitDelay = 0;
 
-		auto res = co_await race(monitor->onStateEqual(endpoint, FailureStatus(false)), delay(waitDelay));
-		if (res.index() == 0) {
-			// SOMEDAY: Use onStateChanged() for efficiency
-		} else if (res.index() == 1) {
+		// SOMEDAY: Use onStateChanged() for efficiency
+		if (auto healthy = co_await timeout(monitor->onStateEqual(endpoint, FailureStatus(false)), waitDelay);
+		    !healthy.present()) {
 			co_return;
-		} else {
-			UNREACHABLE();
 		}
 	}
 }
