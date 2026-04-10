@@ -155,7 +155,7 @@ Future<Void> clusterRecruitFromConfiguration(ClusterControllerData* self, Refere
 Future<RecruitRemoteFromConfigurationReply> clusterRecruitRemoteFromConfiguration(
     ClusterControllerData* self,
     Reference<RecruitRemoteWorkersInfo> req) {
-	// At the moment this doesn't really need to be an coroutine (it always completes immediately)
+	// At the moment this doesn't really need to be a coroutine (it always completes immediately)
 	CODE_PROBE(true, "ClusterController RecruitTLogsRequest Remote");
 	while (true) {
 		Error err;
