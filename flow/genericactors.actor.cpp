@@ -327,6 +327,21 @@ TEST_CASE("/flow/genericcoros/TransformErrors") {
 	return Void();
 }
 
+TEST_CASE("/flow/genericcoros/TransformError") {
+	int value = wait(generic_coro::transformError<int>(Future<int>(7), transaction_too_old(), operation_failed()));
+	ASSERT_EQ(value, 7);
+
+	int transformedErrorCode = wait(getErrorCode(generic_coro::transformError<int>(
+	    Future<int>(transaction_too_old()), transaction_too_old(), operation_failed())));
+	ASSERT_EQ(transformedErrorCode, error_code_operation_failed);
+
+	int preservedErrorCode = wait(getErrorCode(
+	    generic_coro::transformError<int>(Future<int>(process_behind()), transaction_too_old(), operation_failed())));
+	ASSERT_EQ(preservedErrorCode, error_code_process_behind);
+
+	return Void();
+}
+
 TEST_CASE("/flow/genericcoros/WaitForAllReady") {
 	state std::vector<Future<int>> results;
 	results = { Future<int>(1), Future<int>(operation_failed()), Future<int>(3) };
@@ -352,6 +367,16 @@ TEST_CASE("/flow/genericcoros/Timeout") {
 
 	int errorCode = wait(getErrorCode(generic_coro::timeoutError<int>(Future<int>(Never()), 0.0)));
 	ASSERT_EQ(errorCode, error_code_timed_out);
+
+	return Void();
+}
+
+TEST_CASE("/flow/genericcoros/Delayed") {
+	int value = wait(generic_coro::delayed<int>(Future<int>(7)));
+	ASSERT_EQ(value, 7);
+
+	int errorCode = wait(getErrorCode(generic_coro::delayed<int>(Future<int>(operation_failed()))));
+	ASSERT_EQ(errorCode, error_code_operation_failed);
 
 	return Void();
 }
