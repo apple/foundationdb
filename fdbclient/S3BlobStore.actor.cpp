@@ -846,6 +846,36 @@ std::string awsCanonicalURI(const std::string& resource, std::vector<std::string
 	return canonicalURI;
 }
 
+// ref: https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html
+std::string parseErrorCodeFromS3(std::string xmlResponse) {
+	// Copy XML string to a modifiable buffer
+	try {
+		std::vector<char> xmlBuffer(xmlResponse.begin(), xmlResponse.end());
+		xmlBuffer.push_back('\0'); // Ensure null-terminated string
+		// Parse the XML
+		xml_document<> doc;
+		doc.parse<0>(&xmlBuffer[0]);
+		// Find the root node
+		xml_node<>* root = doc.first_node("Error");
+		if (!root) {
+			TraceEvent(SevWarn, "ParseS3XMLResponseNoError").detail("Response", xmlResponse).log();
+			return "";
+		}
+		// Find the <Code> node
+		xml_node<>* codeNode = root->first_node("Code");
+		if (!codeNode) {
+			TraceEvent(SevWarn, "ParseS3XMLResponseNoErrorCode").detail("Response", xmlResponse).log();
+			return "";
+		}
+		return std::string(codeNode->value());
+	} catch (Error e) {
+		TraceEvent("BackupParseS3ErrorCodeFailure").errorUnsuppressed(e);
+		throw backup_parse_s3_response_failure();
+	} catch (...) {
+		throw backup_parse_s3_response_failure();
+	}
+}
+
 // Do a request, get a Response.
 // Request content is provided as UnsentPacketQueue *pContent which will be depleted as bytes are sent but the queue
 // itself must live for the life of this actor and be destroyed by the caller
@@ -1031,6 +1061,14 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		event.suppressFor(60);
 		if (!err.present()) {
 			event.detail("ResponseCode", r->code);
+			std::string s3Error = parseErrorCodeFromS3(r->data.content);
+			event.detail("S3ErrorCode", s3Error);
+			if (r->code == badRequestCode) {
+				TraceEvent(SevWarnAlways, "S3BlobStoreBadRequest")
+				    .detail("HttpCode", r->code)
+				    .detail("HttpResponseContent", r->data.content)
+				    .detail("S3Error", s3Error);
+			}
 		}
 
 		event.detail("ConnectionEstablished", connectionEstablished);
