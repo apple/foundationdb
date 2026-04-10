@@ -25,6 +25,7 @@
 #include "flow/TLSConfig.h"
 
 #include <sstream>
+#include <algorithm>
 #include <cstdint>
 #include <ranges>
 #include <iterator>
@@ -1506,26 +1507,10 @@ enum class NoThrowOnCancelEvent { Start, LifetimeConstructed, WaitReturned, Catc
 
 struct NoThrowOnCancelRecorder {
 	std::vector<NoThrowOnCancelEvent> events;
-	int waitReturnedCount = 0;
-	int catchBlockCount = 0;
-	int afterWaitCount = 0;
 
-	void record(NoThrowOnCancelEvent event) {
-		events.push_back(event);
-		switch (event) {
-		case NoThrowOnCancelEvent::WaitReturned:
-			++waitReturnedCount;
-			break;
-		case NoThrowOnCancelEvent::CatchBlock:
-			++catchBlockCount;
-			break;
-		case NoThrowOnCancelEvent::AfterWait:
-			++afterWaitCount;
-			break;
-		default:
-			break;
-		}
-	}
+	int count(NoThrowOnCancelEvent event) const { return std::count(events.begin(), events.end(), event); }
+
+	void record(NoThrowOnCancelEvent event) { events.push_back(event); }
 };
 
 struct NoThrowOnCancelLifetimeTracker {
@@ -1544,9 +1529,9 @@ void assertNoThrowOnCancelDestroyedAtWait(NoThrowOnCancelRecorder const& recorde
 		NoThrowOnCancelEvent::LifetimeDestroyed,
 	};
 	ASSERT(recorder.events == expected);
-	ASSERT_EQ(recorder.waitReturnedCount, 0);
-	ASSERT_EQ(recorder.catchBlockCount, 0);
-	ASSERT_EQ(recorder.afterWaitCount, 0);
+	ASSERT_EQ(recorder.count(NoThrowOnCancelEvent::WaitReturned), 0);
+	ASSERT_EQ(recorder.count(NoThrowOnCancelEvent::CatchBlock), 0);
+	ASSERT_EQ(recorder.count(NoThrowOnCancelEvent::AfterWait), 0);
 }
 
 template <typename T>
@@ -2155,9 +2140,9 @@ TEST_CASE("/flow/coro/actor") {
 		TraceEvent("CoroNoThrowOnCancelTestResult")
 		    .detail("Scenario", "ExplicitCancel")
 		    .detail("EventCount", recorder.events.size())
-		    .detail("WaitReturnedCount", recorder.waitReturnedCount)
-		    .detail("CatchBlockCount", recorder.catchBlockCount)
-		    .detail("AfterWaitCount", recorder.afterWaitCount);
+		    .detail("WaitReturnedCount", recorder.count(NoThrowOnCancelEvent::WaitReturned))
+		    .detail("CatchBlockCount", recorder.count(NoThrowOnCancelEvent::CatchBlock))
+		    .detail("AfterWaitCount", recorder.count(NoThrowOnCancelEvent::AfterWait));
 		assertNoThrowOnCancelDestroyedAtWait(recorder);
 	}
 	{
@@ -2171,9 +2156,9 @@ TEST_CASE("/flow/coro/actor") {
 		TraceEvent("CoroNoThrowOnCancelTestResult")
 		    .detail("Scenario", "DropFuture")
 		    .detail("EventCount", recorder.events.size())
-		    .detail("WaitReturnedCount", recorder.waitReturnedCount)
-		    .detail("CatchBlockCount", recorder.catchBlockCount)
-		    .detail("AfterWaitCount", recorder.afterWaitCount);
+		    .detail("WaitReturnedCount", recorder.count(NoThrowOnCancelEvent::WaitReturned))
+		    .detail("CatchBlockCount", recorder.count(NoThrowOnCancelEvent::CatchBlock))
+		    .detail("AfterWaitCount", recorder.count(NoThrowOnCancelEvent::AfterWait));
 		assertNoThrowOnCancelDestroyedAtWait(recorder);
 	}
 
