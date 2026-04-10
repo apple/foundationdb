@@ -864,7 +864,7 @@ Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3BlobSto
 			conn = _conn;
 		}
 	} else {
-		co_await store(conn, INetworkConnections::net()->connect(host, service, isTLS));
+		conn = co_await INetworkConnections::net()->connect(host, service, isTLS);
 	}
 
 	// Ensure connection is valid before handshake
@@ -1047,8 +1047,8 @@ Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobStoreEn
 
 	UnsentPacketQueue contentCopy;
 	UnsentPacketQueue dryrunContentCopy; // NonCopyable state var so must be declared at top of actor
-	Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
-	Reference<HTTP::OutgoingRequest> dryrunRequest = makeReference<HTTP::OutgoingRequest>();
+	auto req = makeReference<HTTP::OutgoingRequest>();
+	auto dryrunRequest = makeReference<HTTP::OutgoingRequest>();
 	req->verb = verb;
 	req->data.content = &contentCopy;
 	req->data.contentLen = contentLen;
@@ -1138,7 +1138,7 @@ Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobStoreEn
 			}
 
 			// Finish connecting, do request
-			co_await store(rconn, timeoutError(frconn, bstore->knobs.connect_timeout));
+			rconn = co_await timeoutError(frconn, bstore->knobs.connect_timeout);
 			connectionEstablished = true;
 			connID = rconn.conn->getDebugID();
 			reqStartTimer = g_network->timer();
