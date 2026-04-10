@@ -36,7 +36,7 @@
 #include "fdbclient/TagThrottle.h"
 #include "fdbclient/DataDistributionConfig.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/StorageMetrics.actor.h"
+#include "fdbserver/core/StorageMetrics.h"
 #include "fdbserver/core/RatekeeperInterface.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/ShardSizing.h"

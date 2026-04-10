@@ -1,5 +1,5 @@
 /*
- * LocalClientAPI.h
+ * TesterServer.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#ifndef FDBCLIENT_LOCALCLIENTAPI_H
-#define FDBCLIENT_LOCALCLIENTAPI_H
 #pragma once
 
-#include "fdbclient/IClientApi.h"
+#include <string>
 
-IClientApi* getLocalClientAPI();
-#endif
+#include "fdbclient/NativeAPI.actor.h"
+
+Future<Void> testDatabaseLiveness(Database cx, double databasePingDelay, std::string context, double startDelay = 0.0);
+void printSimulatedTopology();

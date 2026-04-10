@@ -22,7 +22,7 @@
 
 #include "fdbrpc/DDSketch.h"
 #include "fdbserver/tester/workloads.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/TDMetric.h"
 #include <boost/lexical_cast.hpp>
 
 struct TransactionSuccessMetricDescriptor {

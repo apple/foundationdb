@@ -1,5 +1,5 @@
 /*
- * EventTypes.h
+ * LocalClientAPI.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,18 +18,11 @@
  * limitations under the License.
  */
 
+#ifndef FDBCLIENT_LOCALCLIENTAPI_H
+#define FDBCLIENT_LOCALCLIENTAPI_H
 #pragma once
 
-#include "flow/flow.h"
-#include "flow/TDMetric.h"
+#include "fdbclient/IClientApi.h"
 
-struct TraceEventNameIDDescriptor {
-	Standalone<StringRef> name;
-	Standalone<StringRef> id;
-};
-
-template <>
-struct Descriptor<TraceEventNameIDDescriptor> : DescribeType<TraceEventNameIDDescriptor,
-                                                             "TraceEventNameID",
-                                                             DescribeField<&TraceEventNameIDDescriptor::name, "name">,
-                                                             DescribeField<&TraceEventNameIDDescriptor::id, "id">> {};
+IClientApi* getLocalClientAPI();
+#endif

@@ -1,5 +1,5 @@
 /*
- * EventTypes.h
+ * StorageCorruptionBug.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -17,19 +17,20 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 #pragma once
+#ifndef FDBSERVER_STORAGESERVER_STORAGE_CORRUPTION_BUG_H
+#define FDBSERVER_STORAGESERVER_STORAGE_CORRUPTION_BUG_H
 
-#include "flow/flow.h"
-#include "flow/TDMetric.h"
+#include "flow/SimBugInjector.h"
 
-struct TraceEventNameIDDescriptor {
-	Standalone<StringRef> name;
-	Standalone<StringRef> id;
+class StorageCorruptionBug : public ISimBug {
+public:
+	double corruptionProbability = 0.001;
 };
 
-template <>
-struct Descriptor<TraceEventNameIDDescriptor> : DescribeType<TraceEventNameIDDescriptor,
-                                                             "TraceEventNameID",
-                                                             DescribeField<&TraceEventNameIDDescriptor::name, "name">,
-                                                             DescribeField<&TraceEventNameIDDescriptor::id, "id">> {};
+class StorageCorruptionBugID : public IBugIdentifier {
+public:
+	std::shared_ptr<ISimBug> create() const override { return std::make_shared<StorageCorruptionBug>(); }
+};
+
+#endif // FDBSERVER_STORAGESERVER_STORAGE_CORRUPTION_BUG_H
