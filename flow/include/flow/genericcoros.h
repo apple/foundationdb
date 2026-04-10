@@ -71,6 +71,19 @@ Future<T> throwErrorOr(Future<ErrorOr<T>> f, ExplicitVoid = {}) {
 }
 
 template <class T>
+Future<T> transformErrors(Future<T> f, Error err, ExplicitVoid = {}) {
+	ErrorOr<T> t = co_await coro::errorOr(f);
+	if (t.present()) {
+		co_return std::move(t).get();
+	}
+	Error e = t.getError();
+	if (e.code() == error_code_actor_cancelled) {
+		throw e;
+	}
+	throw err;
+}
+
+template <class T>
 Future<Void> waitForAllReady(std::vector<Future<T>> results) {
 	for (auto const& result : results) {
 		if (result.isReady()) {
