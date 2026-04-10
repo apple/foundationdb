@@ -58,4 +58,40 @@ Future<T> timeout(Future<T> what,
 	}
 }
 
+template <class T>
+Future<Optional<T>> timeout(Future<T> what,
+                            double time,
+                            TaskPriority taskID = TaskPriority::DefaultDelay,
+                            ExplicitVoid = {}) {
+	if (what.canGet()) {
+		co_return what.get();
+	} else if (what.isError()) {
+		throw what.getError();
+	}
+	auto res = co_await race(what, delay(time, taskID));
+	if (res.index() == 0) {
+		co_return std::get<0>(std::move(res));
+	} else {
+		co_return Optional<T>();
+	}
+}
+
+template <class T>
+Future<T> timeoutError(Future<T> what,
+                       double time,
+                       TaskPriority taskID = TaskPriority::DefaultDelay,
+                       ExplicitVoid = {}) {
+	if (what.canGet()) {
+		co_return what.get();
+	} else if (what.isError()) {
+		throw what.getError();
+	}
+	auto res = co_await race(what, delay(time, taskID));
+	if (res.index() == 0) {
+		co_return std::get<0>(std::move(res));
+	} else {
+		throw timed_out();
+	}
+}
+
 } // namespace generic_coro
