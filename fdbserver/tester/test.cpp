@@ -51,7 +51,6 @@
 #include "fdbserver/tester/tester.h"
 #include "fdbserver/tester/workloads.h"
 
-// returns unconsumed options
 int passCount = 0;
 int failCount = 0;
 
