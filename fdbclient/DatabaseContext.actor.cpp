@@ -54,7 +54,6 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.h"
-#include "fdbclient/IKnobCollection.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/KeyRangeMap.h"
@@ -63,6 +62,7 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/MutationList.h"
+#include "ProxyLoadBalance.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SpecialKeySpace.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -455,22 +455,17 @@ inline HealthMetrics populateHealthMetrics(const HealthMetrics& detailedMetrics,
 	}
 }
 
-ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext* cx, bool detailed, bool sendDetailedRequest) {
-	loop {
-		choose {
-			when(wait(cx->onProxiesChanged())) {}
-			when(GetHealthMetricsReply rep = wait(basicLoadBalance(cx->getGrvProxies(UseProvisionalProxies::False),
-			                                                       &GrvProxyInterface::getHealthMetrics,
-			                                                       GetHealthMetricsRequest(sendDetailedRequest)))) {
-				cx->healthMetrics.update(rep.healthMetrics, sendDetailedRequest, true);
-				cx->healthMetricsLastUpdated = now();
-				if (sendDetailedRequest) {
-					cx->detailedHealthMetricsLastUpdated = now();
-				}
-				return populateHealthMetrics(cx->healthMetrics, detailed);
-			}
-		}
+static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext* cx, bool detailed, bool sendDetailedRequest) {
+	GetHealthMetricsReply rep =
+	    co_await grvProxyLoadBalance(Database(Reference<DatabaseContext>::addRef(cx)),
+	                                 makeReqBuilder<GetHealthMetricsRequest>(sendDetailedRequest),
+	                                 &GrvProxyInterface::getHealthMetrics);
+	cx->healthMetrics.update(rep.healthMetrics, sendDetailedRequest, true);
+	cx->healthMetricsLastUpdated = now();
+	if (sendDetailedRequest) {
+		cx->detailedHealthMetricsLastUpdated = now();
 	}
+	co_return populateHealthMetrics(cx->healthMetrics, detailed);
 }
 
 Future<HealthMetrics> DatabaseContext::getHealthMetrics(bool detailed = false) {

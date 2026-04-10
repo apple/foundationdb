@@ -221,8 +221,8 @@ Future<T> timeout(Future<T> what, double time, T timedoutValue, TaskPriority tas
 }
 
 ACTOR template <class T>
-Future<Optional<T>> timeout(Future<T> what, double time) {
-	Future<Void> end = delay(time);
+Future<Optional<T>> timeout(Future<T> what, double time, TaskPriority taskID = TaskPriority::DefaultDelay) {
+	Future<Void> end = delay(time, taskID);
 	choose {
 		when(T t = wait(what)) {
 			return t;

@@ -60,7 +60,7 @@ ProcessClass::ProcessClass(std::string s, ClassSource source) : _source(source) 
 	else if (s == "cluster_controller")
 		_class = ClusterControllerClass;
 	else if (s == "fast_restore")
-		_class = FastRestoreClass;
+		ASSERT(false); // deprecated
 	else if (s == "data_distributor")
 		_class = DataDistributorClass;
 	else if (s == "coordinator")
@@ -113,7 +113,7 @@ ProcessClass::ProcessClass(std::string classStr, std::string sourceStr) {
 	else if (classStr == "cluster_controller")
 		_class = ClusterControllerClass;
 	else if (classStr == "fast_restore")
-		_class = FastRestoreClass;
+		ASSERT(false); // deprecated
 	else if (classStr == "data_distributor")
 		_class = DataDistributorClass;
 	else if (classStr == "coordinator")
@@ -172,6 +172,7 @@ std::string ProcessClass::toString() const {
 	case ClusterControllerClass:
 		return "cluster_controller";
 	case FastRestoreClass:
+		ASSERT(false);
 		return "fast_restore";
 	case DataDistributorClass:
 		return "data_distributor";

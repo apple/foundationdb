@@ -39,7 +39,7 @@ struct ProcessClass {
 		LogClass,
 		ClusterControllerClass,
 		LogRouterClass,
-		FastRestoreClass,
+		FastRestoreClass, // deprecated
 		DataDistributorClass,
 		CoordinatorClass,
 		RatekeeperClass,
