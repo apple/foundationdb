@@ -38,6 +38,8 @@ struct NoThrowOnCancel;
 
 namespace coro {
 
+// Awaiters register one of these while suspended so NoThrowOnCancel can detach
+// the pending callback or continuation before destroying the coroutine frame.
 struct AwaitCancelHandler {
 	virtual void cancelWait() = 0;
 };
@@ -162,6 +164,9 @@ struct CoroActor final : Actor<std::conditional_t<std::is_void_v<T>, Void, T>> {
 	}
 };
 
+// Separate the Actor/SAV state from the coroutine frame because cancellation
+// destroys the frame while returned Future objects may still observe the
+// cancelled result.
 template <class T>
 struct NoThrowOnCancelCoroActor final : Actor<std::conditional_t<std::is_void_v<T>, Void, T>> {
 	using ValType = std::conditional_t<std::is_void_v<T>, Void, T>;
@@ -191,6 +196,8 @@ struct NoThrowOnCancelCoroActor final : Actor<std::conditional_t<std::is_void_v<
 
 	void destroyFrame() {
 		auto h = handle;
+		// The coroutine is gone after destroy(); leave no handle for a later
+		// Future drop to destroy again.
 		handle = {};
 		h.destroy();
 	}
@@ -201,6 +208,8 @@ struct NoThrowOnCancelCoroActor final : Actor<std::conditional_t<std::is_void_v<
 		}
 
 		if (cancelHandler) {
+			// The handler object is stored in the coroutine frame, so unregister
+			// it from its wait source before destroying the frame below.
 			auto handler = cancelHandler;
 			cancelHandler = nullptr;
 			handler->cancelWait();
@@ -249,6 +258,9 @@ public:
 	AsyncResultCallback<T>* callback = nullptr;
 	n_coroutine::coroutine_handle<> producerHandle;
 	int8_t* producerWaitState = nullptr;
+	// Only populated while the producer is suspended in an awaiter. The awaiter
+	// lives in the producer frame and must be detached before no-throw cancel
+	// destroys that frame.
 	AwaitCancelHandler* producerCancelHandler = nullptr;
 
 	~AsyncResultState() {
@@ -327,6 +339,8 @@ public:
 
 		if (noThrowOnCancel) {
 			if (producerCancelHandler) {
+				// The handler object is inside producerHandle's coroutine frame.
+				// Clear the wait source first so it cannot resume freed storage.
 				auto handler = producerCancelHandler;
 				producerCancelHandler = nullptr;
 				handler->cancelWait();
@@ -334,6 +348,8 @@ public:
 			auto h = producerHandle;
 			producerHandle = {};
 			producerWaitState = nullptr;
+			// Hold the consumer-visible state, but discard the producer frame
+			// instead of resuming it through actor_cancelled().
 			h.destroy();
 			setError(actor_cancelled());
 			complete();
@@ -433,6 +449,8 @@ struct AwaitableAsyncResult : AwaitCancelHandler {
 	}
 
 	void cancelWait() override {
+		// AsyncResultState only stores one waiting continuation, so cancelling
+		// this await means the continuation must no longer be resumed.
 		if (result.state) {
 			result.state->clearContinuation();
 		}
@@ -606,6 +624,8 @@ struct AwaitableFuture
 		pt->setCancelHandler(this);
 	}
 
+	// NoThrowOnCancel destroys the coroutine frame instead of resuming this
+	// awaiter, so detach the callback from the Future before that happens.
 	void cancelWait() override { this->remove(); }
 
 	bool resumeImpl() {
@@ -660,6 +680,8 @@ struct AwaitableFutureOwning : Callback<ToFutureVal<ValueType>>, AwaitCancelHand
 		pt->setCancelHandler(this);
 	}
 
+	// NoThrowOnCancel destroys the coroutine frame instead of resuming this
+	// awaiter, so detach the callback from the Future before that happens.
 	void cancelWait() override { this->remove(); }
 
 	bool resumeImpl() {
@@ -773,6 +795,8 @@ struct ThreadAwaitableFutureStream
 		pt->setCancelHandler(this);
 	}
 
+	// NoThrowOnCancel destroys the coroutine frame instead of resuming this
+	// awaiter, so detach the callback from the FutureStream before that happens.
 	void cancelWait() override { this->remove(); }
 
 	bool resumeImpl() {
@@ -969,6 +993,8 @@ struct CoroPromise<T, IsCancellable, ReturnsExplicitVoid, true>
 	using ReturnValue = std::conditional_t<std::is_void_v<T>, Void, T>;
 	using ReturnFutureType = Future<ReturnValue>;
 
+	// The normal promise embeds CoroActor in the coroutine frame. NoThrowOnCancel
+	// allocates it separately because cancel() intentionally destroys that frame.
 	ActorType* coroActor = new ActorType();
 
 	CoroPromise() {}
@@ -1001,6 +1027,8 @@ struct CoroPromise<T, IsCancellable, ReturnsExplicitVoid, true>
 			void await_resume() const noexcept {}
 
 			bool await_suspend(n_coroutine::coroutine_handle<>) const noexcept {
+				// Normal completion hands the result to the Future and leaves
+				// no frame for a later cancel/drop path to destroy.
 				sav->handle = {};
 				if (sav->isError()) {
 					sav->finishSendErrorAndDelPromiseRef();

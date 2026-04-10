@@ -33,6 +33,8 @@ struct CleanupCounter {
 	~CleanupCounter() { ++*cleanupCount; }
 };
 
+// Baseline: cancellation resumes the coroutine through actor_cancelled(), so the
+// catch count should match the number of cancelled futures.
 Future<Void> cancelWithThrow(Future<Void> signal, uint64_t* cleanupCount, uint64_t* caughtCount) {
 	CleanupCounter cleanup{ cleanupCount };
 	try {
@@ -44,6 +46,8 @@ Future<Void> cancelWithThrow(Future<Void> signal, uint64_t* cleanupCount, uint64
 	}
 }
 
+// Treatment: cancellation destroys the frame directly. The catch block is kept
+// as a sentinel to prove that RAII cleanup ran without exception unwinding.
 Future<Void> cancelWithoutThrow(Future<Void> signal,
                                 uint64_t* cleanupCount,
                                 uint64_t* caughtCount,
@@ -91,6 +95,8 @@ Future<Void> benchNoThrowOnCancelActor(benchmark::State* state) {
 		futures.reserve(batchSize);
 		for (auto _ : *state) {
 			benchmark::DoNotOptimize(_);
+			// Exclude construction from this scenario so the timed region focuses
+			// on the cancellation path itself.
 			state->PauseTiming();
 			futures.clear();
 			for (int i = 0; i < batchSize; ++i) {

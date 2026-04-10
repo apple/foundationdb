@@ -1236,6 +1236,8 @@ AsyncResult<Void> noThrowOnCancelAsyncResult(Future<Void> signal, int* cleanupCo
 	try {
 		co_await signal;
 	} catch (Error&) {
+		// NoThrowOnCancel should destroy the frame and run RAII cleanup without
+		// resuming here to throw actor_cancelled().
 		*cleanupCount += 100;
 	}
 	co_return;
@@ -1544,6 +1546,7 @@ Future<Void> noThrowOnCancelTest(std::stringstream& ss, Future<Void> signal, NoT
 		co_await signal;
 		ss << "wait returned. ";
 	} catch (Error& e) {
+		// NoThrowOnCancel should bypass coroutine catches on cancellation.
 		ss << "error: " << e.what() << ". ";
 	}
 
