@@ -551,6 +551,22 @@ But this one is:
 co_await bar(Uncancellable());
 ```
 
+## NoThrowOnCancel
+
+`NoThrowOnCancel` is a marker for coroutines that should still cancel, but should not run cancellation through an
+`actor_cancelled` exception inside the coroutine:
+
+```c++
+Future<Void> foo(NoThrowOnCancel = {}) {
+    Resource r;
+    co_await something();
+}
+```
+
+When a coroutine with this marker is cancelled, the coroutine frame is destroyed and normal C++ RAII cleanup runs for
+locals in scope. `catch` blocks inside the coroutine do not observe `actor_cancelled` for cancellation. This differs from
+`Uncancellable`, where cancelling the returned future is a no-op and the coroutine continues until completion.
+
 ## Porting `ACTOR`'s to C++ Coroutines
 
 If you have an existing `ACTOR`, you can port it to a C++ coroutine by following these steps:

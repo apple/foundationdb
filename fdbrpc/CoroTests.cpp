@@ -1226,6 +1226,20 @@ AsyncResult<int> failingAsyncResultInt(Future<Void> signal) {
 	throw io_error();
 }
 
+AsyncResult<Void> noThrowOnCancelAsyncResult(Future<Void> signal, int* cleanupCount, NoThrowOnCancel = {}) {
+	struct CleanupCounter {
+		int* count;
+		~CleanupCounter() { ++*count; }
+	} cleanupCounter{ cleanupCount };
+
+	try {
+		co_await signal;
+	} catch (Error&) {
+		*cleanupCount += 100;
+	}
+	co_return;
+}
+
 AsyncResult<LifetimeTracked> immediateAsyncResultLifetimeTracked() {
 	co_return LifetimeTracked{};
 }
@@ -1330,6 +1344,19 @@ TEST_CASE("/flow/coro/AsyncResult/releaseDestroysState") {
 		ASSERT_GT(LifetimeTracked::liveCount, 0);
 	}
 	ASSERT_EQ(LifetimeTracked::liveCount, 0);
+}
+
+TEST_CASE("/flow/coro/AsyncResult/noThrowOnCancel") {
+	Promise<Void> signal;
+	int cleanupCount = 0;
+	AsyncResult<Void> result = noThrowOnCancelAsyncResult(signal.getFuture(), &cleanupCount);
+
+	ASSERT(signal.getFutureReferenceCount() == 1);
+	result.cancel();
+	ASSERT(result.isReady() && result.isError() && result.getError().code() == error_code_actor_cancelled);
+	ASSERT_EQ(cleanupCount, 1);
+	ASSERT(signal.getFutureReferenceCount() == 0);
+	return Void();
 }
 
 namespace {
@@ -1505,6 +1532,21 @@ Future<Void> actor_cancel_test(std::stringstream& ss) {
 
 	co_return;
 	ss << "after co_return. ";
+}
+
+Future<Void> noThrowOnCancelTest(std::stringstream& ss, Future<Void> signal, NoThrowOnCancel = {}) {
+	ss << "start. ";
+
+	LifetimeLogger ll(ss, 0);
+
+	try {
+		co_await signal;
+		ss << "wait returned. ";
+	} catch (Error& e) {
+		ss << "error: " << e.what() << ". ";
+	}
+
+	ss << "after wait. ";
 }
 
 Future<Void> actor_throw_test(std::stringstream& ss) {
@@ -2047,6 +2089,32 @@ TEST_CASE("/flow/coro/actor") {
 		std::cout << ss3.str() << std::endl;
 		ASSERT(ss3.str() == "start. LifetimeLogger(0). error: Asynchronous operation cancelled. "
 		                    "~LifetimeLogger(0). ");
+	}
+
+	std::cout << std::endl;
+	std::cout << "no_throw_on_cancel_test\n";
+	std::cout << "=======================\n";
+	{
+		std::stringstream ss3a;
+		Promise<Void> signal;
+		Future<Void> f = noThrowOnCancelTest(ss3a, signal.getFuture());
+		ASSERT(signal.getFutureReferenceCount() == 1);
+		f.cancel();
+		ASSERT(f.isReady() && f.isError() && f.getError().code() == error_code_actor_cancelled);
+		ASSERT(signal.getFutureReferenceCount() == 0);
+		std::cout << ss3a.str() << std::endl;
+		ASSERT(ss3a.str() == "start. LifetimeLogger(0). ~LifetimeLogger(0). ");
+	}
+	{
+		std::stringstream ss3b;
+		Promise<Void> signal;
+		{
+			Future<Void> f = noThrowOnCancelTest(ss3b, signal.getFuture());
+			ASSERT(signal.getFutureReferenceCount() == 1);
+		}
+		ASSERT(signal.getFutureReferenceCount() == 0);
+		std::cout << ss3b.str() << std::endl;
+		ASSERT(ss3b.str() == "start. LifetimeLogger(0). ~LifetimeLogger(0). ");
 	}
 
 	std::cout << std::endl;
