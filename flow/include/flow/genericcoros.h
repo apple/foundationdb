@@ -28,7 +28,7 @@
 namespace generic_coro {
 
 template <class T>
-Future<T> traceAfter(Future<T> what, std::string type, bool traceErrors = true) {
+Future<T> traceAfter(Future<T> what, std::string type, bool traceErrors = true, ExplicitVoid = {}) {
 	try {
 		T val = co_await what;
 		TraceEvent(type.c_str());
@@ -43,7 +43,7 @@ Future<T> traceAfter(Future<T> what, std::string type, bool traceErrors = true) 
 }
 
 template <class T>
-Future<Optional<T>> stopAfter(Future<T> what) {
+Future<Optional<T>> stopAfter(Future<T> what, ExplicitVoid = {}) {
 	Optional<T> ret = T();
 	try {
 		T res = co_await what;
