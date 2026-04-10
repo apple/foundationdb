@@ -32,7 +32,13 @@ namespace {
 
 template <std::size_t C>
 std::string binRep(std::array<unsigned char, C> const& addr) {
-	return fmt::format("{:02x}", fmt::join(addr, ":"));
+	std::string result;
+	for (size_t i = 0; i < addr.size(); ++i) {
+		if (i > 0)
+			result += ":";
+		result += fmt::format("{:02x}", addr[i]);
+	}
+	return result;
 }
 
 template <std::size_t C>

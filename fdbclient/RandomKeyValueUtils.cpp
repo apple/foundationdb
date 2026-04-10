@@ -25,7 +25,12 @@ template <typename T>
 void printNextN(T generator, int count = 10) {
 	fmt::print("Generating from .next() on {}\n", generator.toString());
 	for (int i = 0; i < count; ++i) {
-		fmt::print("  {}\n", generator.next());
+		auto next_val = generator.next();
+		if constexpr (std::is_same_v<decltype(next_val), unsigned int> || std::is_same_v<decltype(next_val), int>) {
+			fmt::print("  {}\n", next_val);
+		} else {
+			fmt::print("  {}\n", next_val.toString());
+		}
 	}
 	fmt::print("\n");
 }

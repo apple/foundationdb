@@ -65,7 +65,11 @@ struct DDRangeConfig {
 	bool operator==(DDRangeConfig const& rhs) const = default;
 
 	// String description of the range config
-	std::string toString() const { return fmt::format("replication={} teamID={}", replicationFactor, teamID); }
+	std::string toString() const {
+		return fmt::format("replication={} teamID={}",
+		                   replicationFactor.present() ? std::to_string(replicationFactor.get()) : "unset",
+		                   teamID.present() ? std::to_string(teamID.get()) : "unset");
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

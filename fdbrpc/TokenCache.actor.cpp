@@ -300,11 +300,17 @@ bool TokenCacheImpl::validate(TenantId tenantId, StringRef token) {
 	}
 	if (!tenantFound) {
 		CODE_PROBE(true, "Valid token doesn't reference tenant");
+		std::string tenantsStr;
+		for (int i = 0; i < entry->tenants.size(); ++i) {
+			if (i > 0)
+				tenantsStr += " ";
+			tenantsStr += fmt::format("{:#x}", entry->tenants[i]);
+		}
 		TraceEvent(SevWarn, "InvalidToken"_audit)
 		    .detail("From", peer)
 		    .detail("Reason", "TenantTokenMismatch")
 		    .detail("RequestedTenant", fmt::format("{:#x}", tenantId))
-		    .detail("TenantsInToken", fmt::format("{:#x}", fmt::join(entry->tenants, " ")));
+		    .detail("TenantsInToken", tenantsStr);
 		return false;
 	}
 	// audit logging
