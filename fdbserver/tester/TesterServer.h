@@ -1,5 +1,5 @@
 /*
- * EventTypes.h
+ * TesterServer.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,16 +20,9 @@
 
 #pragma once
 
-#include "flow/flow.h"
-#include "flow/TDMetric.h"
+#include <string>
 
-struct TraceEventNameIDDescriptor {
-	Standalone<StringRef> name;
-	Standalone<StringRef> id;
-};
+#include "fdbclient/NativeAPI.actor.h"
 
-template <>
-struct Descriptor<TraceEventNameIDDescriptor> : DescribeType<TraceEventNameIDDescriptor,
-                                                             "TraceEventNameID",
-                                                             DescribeField<&TraceEventNameIDDescriptor::name, "name">,
-                                                             DescribeField<&TraceEventNameIDDescriptor::id, "id">> {};
+Future<Void> testDatabaseLiveness(Database cx, double databasePingDelay, std::string context, double startDelay = 0.0);
+void printSimulatedTopology();

@@ -18,13 +18,128 @@
  * limitations under the License.
  */
 
-#include "fdbclient/ServerKnobs.h"
+#include "fdbserver/core/ServerKnobs.h"
+#include "fdbclient/Knobs.h"
 #include "flow/IRandom.h"
+
+#include <iostream>
 
 #define init(knob, value) INIT_KNOB(knob, value)
 
 ServerKnobs::ServerKnobs(Randomize randomize, ClientKnobs* clientKnobs, IsSimulated isSimulated) {
 	initialize(randomize, clientKnobs, isSimulated);
+}
+
+namespace {
+FlowKnobs globalFlowKnobs(Randomize::False, IsSimulated::False);
+ClientKnobs globalClientKnobs(Randomize::False, IsSimulated::False);
+ServerKnobs globalServerKnobs(Randomize::False, &globalClientKnobs, IsSimulated::False);
+ClientKnobs bootstrapGlobalClientKnobs(Randomize::False, IsSimulated::False);
+ServerKnobs bootstrapGlobalServerKnobs(Randomize::False, &bootstrapGlobalClientKnobs, IsSimulated::False);
+
+FlowKnobs& mutableFlowKnobs() {
+	return *const_cast<FlowKnobs*>(FLOW_KNOBS);
+}
+
+ClientKnobs& mutableClientKnobs() {
+	return *const_cast<ClientKnobs*>(CLIENT_KNOBS);
+}
+
+ServerKnobs& mutableServerKnobs() {
+	return *const_cast<ServerKnobs*>(SERVER_KNOBS);
+}
+
+Optional<KnobValue> tryParseKnobValueImpl(std::string const& knobName, std::string const& knobValue) {
+	auto parsedKnobValue = FLOW_KNOBS->parseKnobValue(knobName, knobValue);
+	if (!std::holds_alternative<NoKnobFound>(parsedKnobValue)) {
+		return KnobValueRef::create(parsedKnobValue);
+	}
+
+	parsedKnobValue = CLIENT_KNOBS->parseKnobValue(knobName, knobValue);
+	if (!std::holds_alternative<NoKnobFound>(parsedKnobValue)) {
+		return KnobValueRef::create(parsedKnobValue);
+	}
+
+	parsedKnobValue = SERVER_KNOBS->parseKnobValue(knobName, knobValue);
+	if (!std::holds_alternative<NoKnobFound>(parsedKnobValue)) {
+		return KnobValueRef::create(parsedKnobValue);
+	}
+
+	return {};
+}
+} // namespace
+
+ServerKnobs const* SERVER_KNOBS = &bootstrapGlobalServerKnobs;
+
+void resetServerKnobs(Randomize randomize, IsSimulated isSimulated) {
+	FLOW_KNOBS = &globalFlowKnobs;
+	CLIENT_KNOBS = &globalClientKnobs;
+	SERVER_KNOBS = &globalServerKnobs;
+	globalFlowKnobs.reset(randomize, isSimulated);
+	globalClientKnobs.reset(randomize, isSimulated);
+	globalServerKnobs.reset(randomize, &globalClientKnobs, isSimulated);
+}
+
+void initializeServerKnobs(Randomize randomize, IsSimulated isSimulated) {
+	mutableFlowKnobs().initialize(randomize, isSimulated);
+	mutableClientKnobs().initialize(randomize, isSimulated);
+	mutableServerKnobs().initialize(randomize, &mutableClientKnobs(), isSimulated);
+}
+
+Optional<KnobValue> tryParseServerKnobValue(std::string const& knobName, std::string const& knobValue) {
+	return tryParseKnobValueImpl(knobName, knobValue);
+}
+
+KnobValue parseServerKnobValue(std::string const& knobName, std::string const& knobValue) {
+	auto result = tryParseServerKnobValue(knobName, knobValue);
+	if (!result.present()) {
+		throw invalid_option();
+	}
+	return result.get();
+}
+
+bool trySetServerKnob(std::string const& knobName, KnobValueRef const& knobValue) {
+	const bool setFlowKnob = knobValue.visitSetKnob(knobName, mutableFlowKnobs());
+	const bool setClientKnob = knobValue.visitSetKnob(knobName, mutableClientKnobs());
+	const bool setServerKnob = knobValue.visitSetKnob(knobName, mutableServerKnobs());
+	return setFlowKnob || setClientKnob || setServerKnob;
+}
+
+void setServerKnob(std::string const& knobName, KnobValueRef const& knobValue) {
+	if (trySetServerKnob(knobName, knobValue)) {
+		return;
+	}
+
+	TraceEvent(SevWarnAlways, "FailedToSetKnob").detail("KnobName", knobName).detail("KnobValue", knobValue.toString());
+	throw invalid_option_value();
+}
+
+void setupServerKnobs(std::vector<std::pair<std::string, std::string>> const& knobs) {
+	for (const auto& [knobName, knobValueString] : knobs) {
+		try {
+			setServerKnob(knobName, parseServerKnobValue(knobName, knobValueString));
+		} catch (Error& e) {
+			if (e.code() == error_code_invalid_option_value) {
+				std::cerr << "WARNING: Invalid value '" << knobValueString << "' for knob option '" << knobName
+				          << "'\n";
+				TraceEvent(SevWarnAlways, "InvalidKnobValue")
+				    .detail("Knob", printable(knobName))
+				    .detail("Value", printable(knobValueString));
+			} else if (e.code() == error_code_invalid_option) {
+				std::cerr << "WARNING: Invalid knob option '" << knobName << "'\n";
+				TraceEvent(SevWarnAlways, "InvalidKnobName")
+				    .detail("Knob", printable(knobName))
+				    .detail("Value", printable(knobValueString));
+			} else {
+				std::cerr << "ERROR: Failed to set knob option '" << knobName << "': " << e.what() << "\n";
+				TraceEvent(SevError, "FailedToSetKnob")
+				    .errorUnsuppressed(e)
+				    .detail("Knob", printable(knobName))
+				    .detail("Value", printable(knobValueString));
+				throw e;
+			}
+		}
+	}
 }
 
 void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSimulated isSimulated) {

@@ -20,10 +20,21 @@
 
 #pragma once
 
-#include "fdbclient/IKnobCollection.h"
+#include <vector>
 
-#define CLIENT_KNOBS (&IKnobCollection::getGlobalKnobCollection().getClientKnobs())
+#include "fdbclient/ClientKnobs.h"
+#include "fdbclient/KnobValue.h"
+
+extern ClientKnobs const* CLIENT_KNOBS;
 
 inline const ClientKnobs& getClientKnobs() {
 	return *CLIENT_KNOBS;
 }
+
+void resetClientKnobs(Randomize randomize, IsSimulated isSimulated);
+void initializeClientKnobs(Randomize randomize, IsSimulated isSimulated);
+Optional<KnobValue> tryParseClientKnobValue(std::string const& knobName, std::string const& knobValue);
+KnobValue parseClientKnobValue(std::string const& knobName, std::string const& knobValue);
+bool trySetClientKnob(std::string const& knobName, KnobValueRef const& knobValue);
+void setClientKnob(std::string const& knobName, KnobValueRef const& knobValue);
+void setupClientKnobs(std::vector<std::pair<std::string, std::string>> const& knobs);

@@ -1,5 +1,5 @@
 /*
- * CommitProxyServer.actor.h
+ * CommitProxyServer.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,23 +19,14 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_COMMITPROXYSERVER_ACTOR_G_H)
-#define FDBSERVER_COMMITPROXYSERVER_ACTOR_G_H
-#include "fdbserver/commitproxy/CommitProxyServer.actor.g.h"
-#elif !defined(FDBSERVER_COMMITPROXYSERVER_ACTOR_H)
-#define FDBSERVER_COMMITPROXYSERVER_ACTOR_H
 
 #include "fdbclient/CommitProxyInterface.h"
 #include "flow/flow.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct InitializeCommitProxyRequest;
 struct ServerDBInfo;
 
-ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
-                                     InitializeCommitProxyRequest req,
-                                     Reference<AsyncVar<ServerDBInfo> const> db,
-                                     std::string whitelistBinPaths);
-
-#include "flow/unactorcompiler.h"
-#endif
+Future<Void> commitProxyServer(CommitProxyInterface proxy,
+                               InitializeCommitProxyRequest req,
+                               Reference<AsyncVar<ServerDBInfo> const> db,
+                               std::string whitelistBinPaths);

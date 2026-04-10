@@ -1,5 +1,5 @@
 /*
- * MasterServer.actor.h
+ * MasterServer.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,26 +19,17 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_MASTERSERVER_ACTOR_G_H)
-#define FDBSERVER_MASTERSERVER_ACTOR_G_H
-#include "fdbserver/sequencer/MasterServer.actor.g.h"
-#elif !defined(FDBSERVER_MASTERSERVER_ACTOR_H)
-#define FDBSERVER_MASTERSERVER_ACTOR_H
 
 #include "fdbserver/core/CoordinationInterface.h"
 #include "fdbserver/core/MasterInterface.h"
 #include "flow/flow.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct ClusterControllerFullInterface;
 struct ServerDBInfo;
 
-ACTOR Future<Void> masterServer(MasterInterface mi,
-                                Reference<AsyncVar<ServerDBInfo> const> db,
-                                Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
-                                ServerCoordinators serverCoordinators,
-                                LifetimeToken lifetime,
-                                bool forceRecovery);
-
-#include "flow/unactorcompiler.h"
-#endif
+Future<Void> masterServer(MasterInterface mi,
+                          Reference<AsyncVar<ServerDBInfo> const> db,
+                          Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
+                          ServerCoordinators serverCoordinators,
+                          LifetimeToken lifetime,
+                          bool forceRecovery);

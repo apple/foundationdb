@@ -1,5 +1,5 @@
 /*
- * Resolver.actor.h
+ * DatabaseMaintenance.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,22 +19,19 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESOLVER_ACTOR_G_H)
-#define FDBSERVER_RESOLVER_ACTOR_G_H
-#include "fdbserver/resolver/Resolver.actor.g.h"
-#elif !defined(FDBSERVER_RESOLVER_ACTOR_H)
-#define FDBSERVER_RESOLVER_ACTOR_H
 
-#include "fdbserver/core/ResolverInterface.h"
-#include "flow/flow.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include <string>
+#include <vector>
 
-struct InitializeResolverRequest;
-struct ServerDBInfo;
+#include "fdbclient/NativeAPI.actor.h"
 
-ACTOR Future<Void> resolver(ResolverInterface resolver,
-                            InitializeResolverRequest initReq,
-                            Reference<AsyncVar<ServerDBInfo> const> db);
+struct TesterConsistencyScanState {
+	bool enabled = false;
+	bool enableAfter = false;
+	bool waitForComplete = false;
+};
 
-#include "flow/unactorcompiler.h"
-#endif
+Future<Void> clearData(Database cx);
+Future<Void> dumpDatabase(Database const& cx, std::string const& outputFilename, KeyRange const& range);
+std::vector<PerfMetric> aggregateMetrics(std::vector<std::vector<PerfMetric>> metrics);
+Future<Void> checkConsistencyScanAfterTest(Database cx, TesterConsistencyScanState* csState);

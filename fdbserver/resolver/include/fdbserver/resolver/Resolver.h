@@ -1,5 +1,5 @@
 /*
- * EventTypes.h
+ * Resolver.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,16 +20,12 @@
 
 #pragma once
 
+#include "fdbserver/core/ResolverInterface.h"
 #include "flow/flow.h"
-#include "flow/TDMetric.h"
 
-struct TraceEventNameIDDescriptor {
-	Standalone<StringRef> name;
-	Standalone<StringRef> id;
-};
+struct InitializeResolverRequest;
+struct ServerDBInfo;
 
-template <>
-struct Descriptor<TraceEventNameIDDescriptor> : DescribeType<TraceEventNameIDDescriptor,
-                                                             "TraceEventNameID",
-                                                             DescribeField<&TraceEventNameIDDescriptor::name, "name">,
-                                                             DescribeField<&TraceEventNameIDDescriptor::id, "id">> {};
+Future<Void> resolver(ResolverInterface resolver,
+                      InitializeResolverRequest initReq,
+                      Reference<AsyncVar<ServerDBInfo> const> db);

@@ -1,5 +1,5 @@
 /*
- * EventTypes.h
+ * TestSpecParser.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,16 +20,16 @@
 
 #pragma once
 
-#include "flow/flow.h"
-#include "flow/TDMetric.h"
+#include <iosfwd>
+#include <string>
+#include <vector>
 
-struct TraceEventNameIDDescriptor {
-	Standalone<StringRef> name;
-	Standalone<StringRef> id;
+#include "fdbserver/tester/WorkloadUtils.h"
+
+struct TestSet {
+	KnobKeyValuePairs overrideKnobs;
+	std::vector<TestSpec> testSpecs;
 };
 
-template <>
-struct Descriptor<TraceEventNameIDDescriptor> : DescribeType<TraceEventNameIDDescriptor,
-                                                             "TraceEventNameID",
-                                                             DescribeField<&TraceEventNameIDDescriptor::name, "name">,
-                                                             DescribeField<&TraceEventNameIDDescriptor::id, "id">> {};
+std::vector<TestSpec> readTests(std::ifstream& ifs);
+TestSet readTOMLTests(std::string fileName);
