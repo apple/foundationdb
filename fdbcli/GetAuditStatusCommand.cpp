@@ -221,7 +221,7 @@ Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef> toke
 		if (tokens.size() == 4) {
 			count = std::stoi(tokens[3].toString());
 		}
-		std::vector<AuditStorageState> const& res = co_await getAuditStates(cx, type, /*newFirst=*/true, count);
+		std::vector<AuditStorageState> res = co_await getAuditStates(cx, type, /*newFirst=*/true, count);
 		for (const auto& it : res) {
 			fmt::println("Audit result is:\n{}", it.toString());
 		}
@@ -235,7 +235,7 @@ Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef> toke
 		if (tokens.size() == 5) {
 			count = std::stoi(tokens[4].toString());
 		}
-		std::vector<AuditStorageState> const& res = co_await getAuditStates(cx, type, /*newFirst=*/true, count, phase);
+		std::vector<AuditStorageState> res = co_await getAuditStates(cx, type, /*newFirst=*/true, count, phase);
 		for (const auto& it : res) {
 			fmt::println("Audit result is:\n{}", it.toString());
 		}
