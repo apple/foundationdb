@@ -1,5 +1,5 @@
 /*
- * FailureMonitor.actor.cpp
+ * FailureMonitor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,27 +19,27 @@
  */
 
 #include "fdbrpc/FailureMonitor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/CoroUtils.h"
 
-ACTOR Future<Void> waitForStateEqual(IFailureMonitor* monitor, Endpoint endpoint, FailureStatus status) {
-	loop {
+Future<Void> waitForStateEqual(IFailureMonitor* monitor, Endpoint endpoint, FailureStatus status) {
+	while (true) {
 		Future<Void> change = monitor->onStateChanged(endpoint);
 		if (monitor->getState(endpoint) == status)
-			return Void();
-		wait(change);
+			co_return;
+		co_await change;
 	}
 }
 
-ACTOR Future<Void> waitForContinuousFailure(IFailureMonitor* monitor,
-                                            Endpoint endpoint,
-                                            double sustainedFailureDuration,
-                                            double slope) {
-	state double startT = now();
+Future<Void> waitForContinuousFailure(IFailureMonitor* monitor,
+                                      Endpoint endpoint,
+                                      double sustainedFailureDuration,
+                                      double slope) {
+	double startT = now();
 
-	loop {
-		wait(monitor->onFailed(endpoint));
+	while (true) {
+		co_await monitor->onFailed(endpoint);
 		if (monitor->permanentlyFailed(endpoint))
-			return Void();
+			co_return;
 
 		// X == sustainedFailureDuration + slope * (now()-startT+X)
 		double waitDelay = (sustainedFailureDuration + slope * (now() - startT)) / (1 - slope);
@@ -50,12 +50,11 @@ ACTOR Future<Void> waitForContinuousFailure(IFailureMonitor* monitor,
 		             FLOW_KNOBS->SERVER_REQUEST_INTERVAL)) // We will not get a failure monitoring update in this amount
 		                                                   // of time, so there is no point in waiting for changes
 			waitDelay = 0;
-		choose {
-			when(wait(monitor->onStateEqual(endpoint, FailureStatus(false)))) {
-			} // SOMEDAY: Use onStateChanged() for efficiency
-			when(wait(delay(waitDelay))) {
-				return Void();
-			}
+
+		// SOMEDAY: Use onStateChanged() for efficiency
+		if (auto healthy = co_await timeout(monitor->onStateEqual(endpoint, FailureStatus(false)), waitDelay);
+		    !healthy.present()) {
+			co_return;
 		}
 	}
 }
