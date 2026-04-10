@@ -2755,7 +2755,7 @@ Future<Void> addBulkLoadJobToHistory(Transaction* tr, BulkLoadJobState jobState)
 	tr->set(newJobKey, bulkLoadJobValue(jobState));
 }
 
-Future<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database cx) {
+AsyncResult<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database cx) {
 	RangeResult jobHistoryResult;
 	Key beginKey = bulkLoadJobHistoryKeys.begin;
 	Key endKey = bulkLoadJobHistoryKeys.end;

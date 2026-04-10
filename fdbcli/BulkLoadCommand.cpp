@@ -51,7 +51,7 @@ static const std::string BULK_LOAD_HELP_MESSAGE =
     BULKLOAD_PRINT_LOCK_USAGE + BULKLOAD_PRINT_LOCK_OWNER_USAGE + BULKLOAD_CLEAR_LOCK_USAGE;
 
 Future<Void> printPastBulkLoadJob(Database cx) {
-	std::vector<BulkLoadJobState> const& jobs = co_await getBulkLoadJobFromHistory(cx);
+	std::vector<BulkLoadJobState> jobs = co_await getBulkLoadJobFromHistory(cx);
 	if (jobs.empty()) {
 		fmt::println("No bulk loading job in the history");
 		co_return;
