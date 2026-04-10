@@ -21,6 +21,7 @@
 #include "flow/UnitTest.h"
 #include "flow/IAsyncFile.h"
 #include "fdbrpc/fdbrpc.h"
+#include "flow/Trace.h"
 #include "flow/TLSConfig.h"
 
 #include <sstream>
@@ -2091,9 +2092,7 @@ TEST_CASE("/flow/coro/actor") {
 		                    "~LifetimeLogger(0). ");
 	}
 
-	std::cout << std::endl;
-	std::cout << "no_throw_on_cancel_test\n";
-	std::cout << "=======================\n";
+	TraceEvent("CoroNoThrowOnCancelTestStart");
 	{
 		std::stringstream ss3a;
 		Promise<Void> signal;
@@ -2102,7 +2101,7 @@ TEST_CASE("/flow/coro/actor") {
 		f.cancel();
 		ASSERT(f.isReady() && f.isError() && f.getError().code() == error_code_actor_cancelled);
 		ASSERT(signal.getFutureReferenceCount() == 0);
-		std::cout << ss3a.str() << std::endl;
+		TraceEvent("CoroNoThrowOnCancelTestResult").detail("Scenario", "ExplicitCancel").detail("Result", ss3a.str());
 		ASSERT(ss3a.str() == "start. LifetimeLogger(0). ~LifetimeLogger(0). ");
 	}
 	{
@@ -2113,7 +2112,7 @@ TEST_CASE("/flow/coro/actor") {
 			ASSERT(signal.getFutureReferenceCount() > 0);
 		}
 		ASSERT(signal.getFutureReferenceCount() == 0);
-		std::cout << ss3b.str() << std::endl;
+		TraceEvent("CoroNoThrowOnCancelTestResult").detail("Scenario", "DropFuture").detail("Result", ss3b.str());
 		ASSERT(ss3b.str() == "start. LifetimeLogger(0). ~LifetimeLogger(0). ");
 	}
 
