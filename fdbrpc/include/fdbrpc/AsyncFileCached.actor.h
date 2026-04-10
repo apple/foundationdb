@@ -34,7 +34,7 @@
 #include "flow/flow.h"
 #include "flow/IAsyncFile.h"
 #include "flow/Knobs.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/TDMetric.h"
 #include "flow/network.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 

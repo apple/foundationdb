@@ -1,5 +1,5 @@
 /*
- * TDMetric.actor.h
+ * TDMetric.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,20 +20,14 @@
 
 #pragma once
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include <cstddef>
-#if defined(NO_INTELLISENSE) && !defined(FLOW_TDMETRIC_ACTOR_G_H)
-#define FLOW_TDMETRIC_ACTOR_G_H
-#include "flow/TDMetric.actor.g.h"
-#elif !defined(FLOW_TDMETRIC_ACTOR_H)
-#define FLOW_TDMETRIC_ACTOR_H
 #include <array>
 #include <string>
 #include <unordered_map>
 #include "flow/flow.h"
+#include "flow/CoroUtils.h"
 #include "flow/network.h"
 #include "flow/Knobs.h"
 #include "flow/genericactors.actor.h"
@@ -43,7 +37,6 @@
 #include <cmath>
 #include <functional>
 #include <type_traits>
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 enum MetricsDataModel { STATSD = 0, OTLP, NONE };
 MetricsDataModel knobToMetricModel(const std::string& knob);
@@ -722,13 +715,12 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> updatePreviousHeader(FieldLevel* self,
-	                                               IMetricDB* db,
-	                                               Standalone<MetricKeyRef> mk,
-	                                               uint64_t rollTime,
-	                                               FDBScope* scope) {
-
-		Optional<Standalone<StringRef>> block = wait(db->getLastBlock(mk.packDataKey(-1)));
+	static Future<Void> updatePreviousHeader(FieldLevel* self,
+	                                         IMetricDB* db,
+	                                         Standalone<MetricKeyRef> mk,
+	                                         uint64_t rollTime,
+	                                         FDBScope* scope) {
+		Optional<Standalone<StringRef>> block = co_await db->getLastBlock(mk.packDataKey(-1));
 
 		// If the block is present, use it
 		if (block.present()) {
@@ -757,8 +749,6 @@ public:
 		// lastTimeRequiringHeaderPatch
 		MetricBatch batch{ scope };
 		self->flushUpdates(mk, rollTime, batch);
-
-		return Void();
 	}
 
 	// Flush this level's data to the output batch.
@@ -1580,7 +1570,3 @@ bool verifyStatsdMessage(const std::string& msg);
 void createOtelGauge(UID id, const std::string& name, double value);
 
 void createOtelGauge(UID id, const std::string& name, double value, const std::vector<OTEL::Attribute>&);
-
-#include "flow/unactorcompiler.h"
-
-#endif

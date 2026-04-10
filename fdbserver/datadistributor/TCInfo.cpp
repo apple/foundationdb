@@ -1,5 +1,5 @@
 /*
- * TCInfo.actor.cpp
+ * TCInfo.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,52 +18,53 @@
  * limitations under the License.
  */
 
-#include "fdbclient/ServerKnobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/datadistributor/DDTeamCollection.h"
 #include "fdbserver/datadistributor/TCInfo.h"
 #include "flow/CoroUtils.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 class TCServerInfoImpl {
 public:
-	ACTOR static Future<Void> updateServerMetrics(TCServerInfo* server) {
-		state StorageServerInterface ssi = server->lastKnownInterface;
-		state Future<ErrorOr<GetStorageMetricsReply>> metricsRequest =
+	static Future<Void> updateServerMetrics(TCServerInfo* server) {
+		StorageServerInterface ssi = server->lastKnownInterface;
+		Future<ErrorOr<GetStorageMetricsReply>> metricsRequest =
 		    ssi.getStorageMetrics.tryGetReply(GetStorageMetricsRequest(), TaskPriority::DataDistributionLaunch);
-		state Future<Void> resetRequest = Never();
-		state Future<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged(server->onInterfaceChanged);
-		state Future<Void> serverRemoved(server->onRemoved);
+		Future<Void> resetRequest = Never();
+		Future<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged(server->onInterfaceChanged);
+		Future<Void> serverRemoved(server->onRemoved);
 
-		loop {
-			choose {
-				when(ErrorOr<GetStorageMetricsReply> rep = wait(metricsRequest)) {
-					if (rep.present()) {
-						server->metrics = rep;
-						if (server->updated.canBeSet()) {
-							server->updated.send(Void());
-						}
-						break;
+		while (true) {
+			auto res = co_await race(metricsRequest, interfaceChanged, serverRemoved, resetRequest);
+			if (res.index() == 0) {
+				ErrorOr<GetStorageMetricsReply> rep = std::get<0>(std::move(res));
+				if (rep.present()) {
+					server->metrics = rep;
+					if (server->updated.canBeSet()) {
+						server->updated.send(Void());
 					}
-					metricsRequest = Never();
-					resetRequest = delay(SERVER_KNOBS->METRIC_DELAY, TaskPriority::DataDistributionLaunch);
+					break;
 				}
-				when(std::pair<StorageServerInterface, ProcessClass> _ssi = wait(interfaceChanged)) {
-					ssi = _ssi.first;
-					interfaceChanged = server->onInterfaceChanged;
-					resetRequest = Void();
-				}
-				when(wait(serverRemoved)) {
-					return Void();
-				}
-				when(wait(resetRequest)) { // To prevent a tight spin loop
-					if (IFailureMonitor::failureMonitor().getState(ssi.getStorageMetrics.getEndpoint()).isFailed()) {
-						resetRequest = IFailureMonitor::failureMonitor().onStateEqual(
-						    ssi.getStorageMetrics.getEndpoint(), FailureStatus(false));
-					} else {
-						resetRequest = Never();
-						metricsRequest = ssi.getStorageMetrics.tryGetReply(GetStorageMetricsRequest(),
-						                                                   TaskPriority::DataDistributionLaunch);
-					}
+				metricsRequest = Never();
+				resetRequest = delay(SERVER_KNOBS->METRIC_DELAY, TaskPriority::DataDistributionLaunch);
+			} else if (res.index() == 1) {
+				// interfaceChanged
+				auto updatedInterface = std::get<1>(std::move(res));
+				ssi = updatedInterface.first;
+				interfaceChanged = server->onInterfaceChanged;
+				resetRequest = Void();
+			} else if (res.index() == 2) {
+				// serverRemoved
+				co_return;
+			} else if (res.index() == 3) {
+				// resetRequest
+				// To prevent a tight spin loop
+				if (IFailureMonitor::failureMonitor().getState(ssi.getStorageMetrics.getEndpoint()).isFailed()) {
+					resetRequest = IFailureMonitor::failureMonitor().onStateEqual(ssi.getStorageMetrics.getEndpoint(),
+					                                                              FailureStatus(false));
+				} else {
+					resetRequest = Never();
+					metricsRequest = ssi.getStorageMetrics.tryGetReply(GetStorageMetricsRequest(),
+					                                                   TaskPriority::DataDistributionLaunch);
 				}
 			}
 		}
@@ -111,8 +112,6 @@ public:
 				}
 			}
 		}
-
-		return Void();
 	}
 
 	static Future<Void> updateServerMetrics(Reference<TCServerInfo> server) {

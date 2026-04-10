@@ -1,5 +1,5 @@
 /*
- * StorageMetrics.actor.cpp
+ * StorageMetrics.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,14 +20,14 @@
 
 #include <algorithm>
 
-#include "fdbserver/core/StorageMetrics.actor.h"
+#include "fdbserver/core/StorageMetrics.h"
 #include "flow/CodeProbe.h"
 #include "flow/Hash3.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
+#include "flow/CoroUtils.h"
 #include "flow/flow.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 CommonStorageCounters::CommonStorageCounters(const std::string& name,
                                              const std::string& id,
@@ -636,11 +636,11 @@ void StorageServerMetrics::add(KeyRangeMap<int>& map, KeyRangeRef const& keys, i
 	collapse(map, keys.end);
 }
 
-ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest req, Future<Void> timeout) {
-	state PromiseStream<StorageMetrics> change;
-	state StorageMetrics metrics = self->getMetrics(req.keys);
-	state Error error = success();
-	state bool timedout = false;
+Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest req, Future<Void> timeout) {
+	PromiseStream<StorageMetrics> change;
+	StorageMetrics metrics = self->getMetrics(req.keys);
+	Error error = success();
+	bool timedout = false;
 
 	DisabledTraceEvent(SevDebug, "WaitMetrics", metricReqId)
 	    .detail("Keys", req.keys)
@@ -650,7 +650,7 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 	if (!req.min.allLessOrEqual(metrics) || !metrics.allLessOrEqual(req.max)) {
 		CODE_PROBE(true, "ShardWaitMetrics return case 1 (quickly)");
 		req.reply.send(metrics);
-		return Void();
+		co_return;
 	}
 
 	{
@@ -658,15 +658,13 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 		for (auto r = rs.begin(); r != rs.end(); ++r) {
 			r->value().push_back(change);
 		}
-		loop {
+		while (true) {
 			try {
-				choose {
-					when(StorageMetrics c = waitNext(change.getFuture())) {
-						metrics += c;
-					}
-					when(wait(timeout)) {
-						timedout = true;
-					}
+				auto res = co_await race(change.getFuture(), timeout);
+				if (res.index() == 0) {
+					metrics += std::get<0>(std::move(res));
+				} else {
+					timedout = true;
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled) {
@@ -693,7 +691,7 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 			}
 		}
 
-		wait(delay(0));
+		co_await delay(0);
 	}
 	auto rs = self->waitMetricsMap.modify(req.keys);
 	for (auto i = rs.begin(); i != rs.end(); ++i) {
@@ -714,8 +712,6 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 		CODE_PROBE(true, "ShardWaitMetrics delayed wrong_shard_server()");
 		req.reply.sendError(error);
 	}
-
-	return Void();
 }
 
 Future<Void> StorageServerMetrics::waitMetrics(WaitMetricsRequest req, Future<Void> delay) {

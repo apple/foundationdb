@@ -40,7 +40,7 @@
 #include "flow/ThreadHelper.actor.h"
 #include "flow/FastRef.h"
 #include "flow/EventTypes.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/TDMetric.h"
 #include "flow/MetricSample.h"
 #include "flow/network.h"
 #include "flow/SimBugInjector.h"
