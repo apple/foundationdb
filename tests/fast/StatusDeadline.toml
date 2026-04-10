@@ -1,0 +1,15 @@
+[[test]]
+testTitle = 'StatusDeadline'
+
+    [[test.workload]]
+    testName = 'Status'
+    testDuration = 90.0
+    requestsPerSecond = 0.2
+    maxStatusLatency = 28.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 1
+    reboot = false
+    testDuration = 90.0

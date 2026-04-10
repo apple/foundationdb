@@ -2871,6 +2871,19 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	state WorkerDetails ddWorker; // DataDistributor worker
 	state WorkerDetails rkWorker; // Ratekeeper worker
 	state WorkerDetails csWorker; // ConsistencyScan worker
+	// Total we have 116 waits, the ones with database calls or timeouts are these
+	// Wait 2 - 1 second
+	// Wait 3 - 5 seconds
+	// Wait 4 - 5 seconds
+	// Wiat 5 - 5 seconds
+	// Wait 6 - 6 seconds
+	// Wait 7 - 3 seconds
+	// Wait 8 - 5 seconds
+	// Wait 9 - 5 seconds
+	// Wait 14 - 5 seconds
+	// Wait 16 - 2 seconds
+	// Total 42 seconds
+	// So even if we add the wait to the idempotency checker, this still won't be enough
 
 	try {
 
@@ -2944,39 +2957,25 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		futures.push_back(latestEventOnWorkers(workers, "TraceFileOpenError"));
 		futures.push_back(latestEventOnWorkers(workers, "ProgramStart"));
 
-		// Launch all early fetches concurrently
-		state Future<std::vector<Optional<std::pair<WorkerEvents, std::set<std::string>>>>> workerEventsFuture =
-		    getAll(futures);
-		state Future<ProtocolVersionData> protocolVersionFuture = getNewestProtocolVersion(cx, ccWorker);
-
-		// construct status information for cluster subsections
-		state int statusCode = (int)RecoveryStatus::END;
-		state Future<JsonBuilderObject> recoveryStateStatusFuture =
-		    recoveryStateStatusFetcher(cx, ccWorker, mWorker, workers.size(), &status_incomplete_reasons, &statusCode);
-
-		state Future<ErrorOr<JsonBuilderObject>> idmpKeyStatusFuture =
-		    errorOr(timeoutError(getIdmpKeyStatus(cx), 5.0));
-
-		state Future<ErrorOr<JsonBuilderObject>> versionEpochStatusFuture =
-		    errorOr(timeoutError(versionEpochStatusFetcher(cx, &status_incomplete_reasons), 5.0));
-
-		state Future<std::pair<Optional<DatabaseConfiguration>, Optional<LoadConfigurationResult>>>
-		    loadConfigFuture = loadConfiguration(cx, &messages, &status_incomplete_reasons);
-
-		// Wait for workerEvents, protocolVersion, recoveryState, and loadConfig ALL concurrently
-		wait(success(workerEventsFuture) && success(protocolVersionFuture) &&
-		     ready(recoveryStateStatusFuture) && ready(loadConfigFuture));
-
+		// Wait for all response pairs.
+		// WAIT 1: but all RPCs, no transactions
 		state std::vector<Optional<std::pair<WorkerEvents, std::set<std::string>>>> workerEventsVec =
-		    workerEventsFuture.get();
-		state ProtocolVersionData protocolVersion = protocolVersionFuture.get();
+		    wait(getAll(futures));
 
 		// Create a unique set of all workers who were unreachable for 1 or more of the event requests above.
+		// Since each event request is independent and to all workers, workers can have responded to some
+		// event requests but still end up in the unreachable set.
 		std::set<std::string> mergeUnreachable;
+
+		// For each (optional) pair, if the pair is present and not empty then add the unreachable workers to the
+		// set.
 		for (auto pair : workerEventsVec) {
 			if (pair.present() && !pair.get().second.empty())
 				mergeUnreachable.insert(pair.get().second.begin(), pair.get().second.end());
 		}
+
+		// We now have a unique set of workers who were in some way unreachable.  If there is anything in that set,
+		// create a message for it and include the list of unreachable processes.
 		if (!mergeUnreachable.empty()) {
 			JsonBuilderObject message =
 			    JsonBuilder::makeMessage("unreachable_processes", "The cluster has some unreachable processes.");
@@ -2987,14 +2986,27 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			message["unreachable_processes"] = unreachableProcs;
 			messages.push_back(message);
 		}
-		// Don't need to wait for idmp/versionEpoch yet — they're used much later
 
-		state JsonBuilderObject recoveryStateStatus;
-		if (recoveryStateStatusFuture.isReady() && !recoveryStateStatusFuture.isError()) {
-			recoveryStateStatus = recoveryStateStatusFuture.get();
-		} else {
-			status_incomplete_reasons.insert("Unable to fetch recovery state status.");
-		}
+		// WAIT 2: DB call - 1 second timeout inside
+		state ProtocolVersionData protocolVersion = wait(getNewestProtocolVersion(cx, ccWorker));
+
+		// construct status information for cluster subsections
+		state int statusCode = (int)RecoveryStatus::END;
+		state Future<JsonBuilderObject> recoveryStateStatusFuture =
+		    recoveryStateStatusFetcher(cx, ccWorker, mWorker, workers.size(), &status_incomplete_reasons, &statusCode);
+
+		state Future<JsonBuilderObject> idmpKeyStatusFuture = getIdmpKeyStatus(cx);
+
+		state Future<JsonBuilderObject> versionEpochStatusFuture =
+		    versionEpochStatusFetcher(cx, &status_incomplete_reasons);
+
+		// WAIT 3: 5 seconds
+		wait(waitForAll<JsonBuilderObject>(
+		    { recoveryStateStatusFuture, idmpKeyStatusFuture, versionEpochStatusFuture }));
+
+		state JsonBuilderObject recoveryStateStatus = recoveryStateStatusFuture.get();
+		state JsonBuilderObject idmpKeyStatus = idmpKeyStatusFuture.get();
+		state JsonBuilderObject versionEpochStatus = versionEpochStatusFuture.get();
 
 		// machine metrics
 		state WorkerEvents mMetrics = workerEventsVec[0].present() ? workerEventsVec[0].get().first : WorkerEvents();
@@ -3036,15 +3048,12 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state Optional<LoadConfigurationResult> loadResult;
 		state std::unordered_map<NetworkAddress, WorkerInterface> address_workers;
 
+		// WAIT 4: 5 second time out
 		if (statusCode != RecoveryStatus::configuration_missing) {
-			// loadConfigFuture was launched concurrently above and should already be ready
-			if (loadConfigFuture.isReady() && !loadConfigFuture.isError()) {
-				auto loadResults = loadConfigFuture.get();
-				configuration = loadResults.first;
-				loadResult = loadResults.second;
-			} else {
-				status_incomplete_reasons.insert("Unable to load database configuration.");
-			}
+			std::pair<Optional<DatabaseConfiguration>, Optional<LoadConfigurationResult>> loadResults =
+			    wait(loadConfiguration(cx, &messages, &status_incomplete_reasons));
+			configuration = loadResults.first;
+			loadResult = loadResults.second;
 		}
 
 		if (loadResult.present()) {
@@ -3071,12 +3080,24 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		state std::vector<NetworkAddress> coordinatorAddresses;
 		if (configuration.present()) {
-			// Launch latency probe concurrently — don't block on it
+			// Do the latency probe by itself to avoid interference from other status activities
 			state bool isAvailable = true;
-			state Future<JsonBuilderObject> latencyProbeFuture =
-			    latencyProbeFetcher(cx, &messages, &status_incomplete_reasons, &isAvailable);
+			JsonBuilderObject latencyProbeResults =
+				// WAIT 5: 5 seconds
+			    wait(latencyProbeFetcher(cx, &messages, &status_incomplete_reasons, &isAvailable));
+
+			statusObj["database_available"] = isAvailable;
+			if (!latencyProbeResults.empty()) {
+				statusObj["latency_probe"] = latencyProbeResults;
+			}
 
 			state std::vector<Future<Void>> warningFutures;
+			if (isAvailable) {
+				warningFutures.push_back(consistencyCheckStatusFetcher(cx, &messages, &status_incomplete_reasons));
+				if (!SERVER_KNOBS->DISABLE_DUPLICATE_LOG_WARNING) {
+					warningFutures.push_back(logRangeWarningFetcher(cx, &messages, &status_incomplete_reasons));
+				}
+			}
 
 			// Start getting storage servers now (using system priority) concurrently.  Using sys priority because
 			// having storage servers in status output is important to give context to error messages in status that
@@ -3113,6 +3134,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				double timeout = g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01) ? 0.0 : 2.0;
 				primaryWiggleValues = timeoutError(readStorageWiggleValues(cx, true, true), timeout);
 				remoteWiggleValues = timeoutError(readStorageWiggleValues(cx, false, true), timeout);
+				// WAIT 6: 6 seconds
 				wait(store(
 				         storageWiggler,
 				         storageWigglerStatsFetcher(db->get().distributor, configuration.get(), cx, true, &messages)) &&
@@ -3135,58 +3157,19 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				}
 			}
 
-			// Launch hostname resolution as a future (don't block)
-			state Future<ErrorOr<std::vector<NetworkAddress>>> hostnamesFuture =
-			    errorOr(timeoutError(coordinators.ccr->getConnectionString().tryResolveHostnames(), 5.0));
+			// WAIT 7: 3 seconds?
+			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
+			// WAIT 8: 5 seconds
+			wait(success(primaryDCFO));
 
-			// Wait on futures2, primaryDCFO, hostnames, and latencyProbe ALL concurrently
-			wait(waitForAllReady(futures2) && success(primaryDCFO) &&
-			     ready(hostnamesFuture) && ready(latencyProbeFuture));
-
-			state std::vector<JsonBuilderObject> workerStatuses;
-			for (int i = 0; i < futures2.size(); i++) {
-				if (futures2[i].isReady() && !futures2[i].isError()) {
-					workerStatuses.push_back(futures2[i].get());
-				} else {
-					workerStatuses.push_back(JsonBuilderObject());
-					status_incomplete_reasons.insert("Unable to fetch some status data.");
-				}
-			}
-
-			if (hostnamesFuture.isReady() && !hostnamesFuture.isError()) {
-				ErrorOr<std::vector<NetworkAddress>> addresses = hostnamesFuture.get();
-				if (addresses.present()) {
-					coordinatorAddresses = std::move(addresses.get());
-				} else {
-					messages.push_back(
-					    JsonString::makeMessage("fetch_coordinator_addresses",
-					                            "Fetching coordinator addresses timed out"));
-				}
+			// WAIT 9: 5 seconds
+			ErrorOr<std::vector<NetworkAddress>> addresses =
+			    wait(errorOr(timeoutError(coordinators.ccr->getConnectionString().tryResolveHostnames(), 5.0)));
+			if (addresses.present()) {
+				coordinatorAddresses = std::move(addresses.get());
 			} else {
 				messages.push_back(
-				    JsonString::makeMessage("fetch_coordinator_addresses",
-				                            "Fetching coordinator addresses timed out"));
-			}
-
-			// Collect the latency probe result
-			if (latencyProbeFuture.isReady() && !latencyProbeFuture.isError()) {
-				JsonBuilderObject latencyProbeResults = latencyProbeFuture.get();
-				statusObj["database_available"] = isAvailable;
-				if (!latencyProbeResults.empty()) {
-					statusObj["latency_probe"] = latencyProbeResults;
-				}
-			} else {
-				isAvailable = false;
-				statusObj["database_available"] = false;
-				status_incomplete_reasons.insert("Unable to fetch latency probe status.");
-			}
-
-			// Launch warning futures now that we know availability
-			if (isAvailable) {
-				warningFutures.push_back(consistencyCheckStatusFetcher(cx, &messages, &status_incomplete_reasons));
-				if (!SERVER_KNOBS->DISABLE_DUPLICATE_LOG_WARNING) {
-					warningFutures.push_back(logRangeWarningFetcher(cx, &messages, &status_incomplete_reasons));
-				}
+				    JsonString::makeMessage("fetch_coordinator_addresses", "Fetching coordinator addresses timed out"));
 			}
 
 			int logFaultTolerance = 100;
@@ -3227,15 +3210,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			if (!qos.empty())
 				statusObj["qos"] = qos;
 
-			// Collect deferred versionEpochStatus
-			wait(ready(versionEpochStatusFuture));
-			state JsonBuilderObject versionEpochStatus;
-			if (versionEpochStatusFuture.isReady() && !versionEpochStatusFuture.isError() &&
-			    versionEpochStatusFuture.get().present()) {
-				versionEpochStatus = versionEpochStatusFuture.get().get();
-			} else {
-				status_incomplete_reasons.insert("Unable to fetch version epoch status.");
-			}
 			statusObj["version_epoch"] = versionEpochStatus;
 
 			// Merge dataOverlay into data
@@ -3260,6 +3234,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			}
 
 			// Need storage servers now for processStatusFetcher() below.
+			// WAIT 10: I think these are RPC calls
 			ErrorOr<std::vector<StorageServerStatusInfo>> _storageServers = wait(storageServerFuture);
 			if (_storageServers.present()) {
 				storageServers = _storageServers.get();
@@ -3269,6 +3244,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			}
 
 			// ...also tlogs
+			// WAIT 11: maybe RPC problem?
 			ErrorOr<std::vector<std::pair<TLogInterface, EventMap>>> _tLogs = wait(tLogFuture);
 			if (_tLogs.present()) {
 				tLogs = _tLogs.get();
@@ -3278,6 +3254,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			}
 
 			// ...also commit proxies
+			// WAIT 12: RPC
 			ErrorOr<std::vector<std::pair<CommitProxyInterface, EventMap>>> _commitProxies = wait(commitProxyFuture);
 			if (_commitProxies.present()) {
 				commitProxies = _commitProxies.get();
@@ -3287,6 +3264,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			}
 
 			// ...also grv proxies
+			// WAIT 13: RPC
 			ErrorOr<std::vector<std::pair<GrvProxyInterface, EventMap>>> _grvProxies = wait(grvProxyFuture);
 			if (_grvProxies.present()) {
 				grvProxies = _grvProxies.get();
@@ -3295,7 +3273,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				    JsonBuilder::makeMessage("grv_proxies_error", "Timed out trying to retrieve grv proxies."));
 			}
 
-			wait(waitForAllReady(warningFutures));
+			// WAIT 14: 5 seconds
+			wait(waitForAll(warningFutures));
 		} else {
 			// Set layers status to { _valid: false, error: "configurationMissing"}
 			JsonBuilderObject layers;
@@ -3304,6 +3283,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			statusObj["layers"] = layers;
 		}
 
+		// WAIT 15: seems like CX is unused
 		JsonBuilderObject processStatus =
 		    wait(processStatusFetcher(db,
 		                              workers,
@@ -3369,15 +3349,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		if (!recoveryStateStatus.empty())
 			statusObj["recovery_state"] = recoveryStateStatus;
 
-		// Collect deferred idmpKeyStatus
-		wait(ready(idmpKeyStatusFuture));
-		state JsonBuilderObject idmpKeyStatus;
-		if (idmpKeyStatusFuture.isReady() && !idmpKeyStatusFuture.isError() &&
-		    idmpKeyStatusFuture.get().present()) {
-			idmpKeyStatus = idmpKeyStatusFuture.get().get();
-		} else {
-			status_incomplete_reasons.insert("Unable to fetch idempotency key status.");
-		}
 		statusObj["idempotency_ids"] = idmpKeyStatus;
 
 		// cluster messages subsection;
@@ -3399,6 +3370,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			auto sysDB = SystemDBWriteLockedNow(cx.getReference());
 
 			// TODO: Use the same transaction.
+			// WAIT 16: 2 seconds
 			wait(timeoutError(
 			    store(config, cs.config().getD(sysDB)) && store(currentRound, cs.currentRoundStats().getD(sysDB)) &&
 			        store(lifetime, cs.lifetimeStats().getD(sysDB)) &&
