@@ -41,6 +41,7 @@ namespace coro {
 // Awaiters register one of these while suspended so NoThrowOnCancel can detach
 // the pending callback or continuation before destroying the coroutine frame.
 struct AwaitCancelHandler {
+	virtual ~AwaitCancelHandler() = default;
 	virtual void cancelWait() = 0;
 };
 
