@@ -143,7 +143,7 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 }
 
 // Save each tag's savedVersion for all epochs into "bStatus".
-Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupProgress> bStatus, bool logging) {
+Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupProgress> bStatus, Severity severity) {
 	Transaction tr(cx);
 
 	while (true) {
@@ -162,14 +162,12 @@ Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupProgress>
 				const UID workerID = decodeBackupProgressKey(it.key);
 				const WorkerBackupStatus status = decodeBackupProgressValue(it.value);
 				bStatus->addBackupStatus(status);
-				if (logging) {
-					TraceEvent("GotBackupProgress", dbgid)
-					    .detail("BackupWorker", workerID)
-					    .detail("Epoch", status.epoch)
-					    .detail("Version", status.version)
-					    .detail("Tag", status.tag.toString())
-					    .detail("TotalTags", status.totalTags);
-				}
+				TraceEvent(severity, "GotBackupProgress", dbgid)
+				    .detail("BackupWorker", workerID)
+				    .detail("Epoch", status.epoch)
+				    .detail("Version", status.version)
+				    .detail("Tag", status.tag.toString())
+				    .detail("TotalTags", status.totalTags);
 			}
 			co_return;
 		} catch (Error& e) {

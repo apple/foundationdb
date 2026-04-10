@@ -664,7 +664,7 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<ClusterRecoveryData> se
 	state LogEpoch epoch = self->cstate.myDBState.recoveryCount;
 	state Reference<BackupProgress> backupProgress(
 	    new BackupProgress(self->dbgid, self->logSystem->getOldEpochTagsVersionsInfo()));
-	state Future<Void> gotProgress = getBackupProgress(cx, self->dbgid, backupProgress, /*logging=*/true);
+	state Future<Void> gotProgress = getBackupProgress(cx, self->dbgid, backupProgress, SevInfo);
 	state std::vector<Future<InitializeBackupReply>> initializationReplies;
 
 	state std::vector<std::pair<UID, Tag>> idsTags; // worker IDs and tags for current epoch
