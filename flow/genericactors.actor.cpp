@@ -200,6 +200,11 @@ ACTOR Future<Void> lowPriorityDelayAfterCleared(Reference<AsyncVar<bool>> condit
 	}
 }
 
+struct SetAsyncVarTrue {
+	Reference<AsyncVar<bool>> value;
+	void operator()() const { value->set(true); }
+};
+
 namespace {
 
 struct DummyState {
@@ -207,11 +212,6 @@ struct DummyState {
 	int unchanged{ 0 };
 	bool operator==(DummyState const& rhs) const { return changed == rhs.changed && unchanged == rhs.unchanged; }
 	bool operator!=(DummyState const& rhs) const { return !(*this == rhs); }
-};
-
-struct SetAsyncVarTrue {
-	Reference<AsyncVar<bool>> value;
-	void operator()() const { value->set(true); }
 };
 
 ACTOR Future<Void> testPublisher(Reference<AsyncVar<DummyState>> input) {
