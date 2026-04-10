@@ -177,4 +177,18 @@ Future<T> delayed(Future<T> what,
 	}
 }
 
+template <class Func>
+Future<Void> trigger(Func what, Future<Void> signal) {
+	co_await signal;
+	what();
+}
+
+template <class Func>
+Future<Void> triggerOnError(Func what, Future<Void> signal) {
+	ErrorOr<Void> res = co_await coro::errorOr(coro::ignore(signal));
+	if (res.isError()) {
+		what();
+	}
+}
+
 } // namespace generic_coro

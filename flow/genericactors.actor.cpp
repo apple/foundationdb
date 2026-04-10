@@ -209,6 +209,11 @@ struct DummyState {
 	bool operator!=(DummyState const& rhs) const { return !(*this == rhs); }
 };
 
+struct SetAsyncVarTrue {
+	Reference<AsyncVar<bool>> value;
+	void operator()() const { value->set(true); }
+};
+
 ACTOR Future<Void> testPublisher(Reference<AsyncVar<DummyState>> input) {
 	state int i = 0;
 	for (; i < 100; ++i) {
@@ -242,6 +247,15 @@ ACTOR Future<int> getErrorCode(Future<int> future) {
 	try {
 		int value = wait(future);
 		(void)value;
+		return 0;
+	} catch (Error& e) {
+		return e.code();
+	}
+}
+
+ACTOR Future<int> getVoidErrorCode(Future<Void> future) {
+	try {
+		wait(future);
 		return 0;
 	} catch (Error& e) {
 		return e.code();
@@ -377,6 +391,40 @@ TEST_CASE("/flow/genericcoros/Delayed") {
 
 	int errorCode = wait(getErrorCode(generic_coro::delayed<int>(Future<int>(operation_failed()))));
 	ASSERT_EQ(errorCode, error_code_operation_failed);
+
+	return Void();
+}
+
+TEST_CASE("/flow/genericcoros/Trigger") {
+	state Reference<AsyncVar<bool>> called = makeReference<AsyncVar<bool>>(false);
+	state Promise<Void> signal;
+	state Future<Void> triggered = generic_coro::trigger(SetAsyncVarTrue{ called }, signal.getFuture());
+
+	ASSERT(!called->get());
+	ASSERT(!triggered.isReady());
+
+	signal.send(Void());
+	wait(triggered);
+	ASSERT(called->get());
+
+	called->set(false);
+	int errorCode =
+	    wait(getVoidErrorCode(generic_coro::trigger(SetAsyncVarTrue{ called }, Future<Void>(operation_failed()))));
+	ASSERT_EQ(errorCode, error_code_operation_failed);
+	ASSERT(!called->get());
+
+	return Void();
+}
+
+TEST_CASE("/flow/genericcoros/TriggerOnError") {
+	state Reference<AsyncVar<bool>> called = makeReference<AsyncVar<bool>>(false);
+	wait(generic_coro::triggerOnError(SetAsyncVarTrue{ called }, Future<Void>(Void())));
+	ASSERT(!called->get());
+
+	int errorCode = wait(
+	    getVoidErrorCode(generic_coro::triggerOnError(SetAsyncVarTrue{ called }, Future<Void>(operation_failed()))));
+	ASSERT_EQ(errorCode, 0);
+	ASSERT(called->get());
 
 	return Void();
 }
