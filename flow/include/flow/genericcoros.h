@@ -28,6 +28,40 @@
 namespace generic_coro {
 
 template <class T>
+Future<T> traceAfter(Future<T> what, std::string type, bool traceErrors = true) {
+	try {
+		T val = co_await what;
+		TraceEvent(type.c_str());
+		co_return val;
+	} catch (Error& e) {
+		// Don't trace operation_cancelled as it's a normal control flow mechanism, not an error
+		if (traceErrors && e.code() != error_code_operation_cancelled) {
+			TraceEvent(type.c_str()).errorUnsuppressed(e);
+		}
+		throw;
+	}
+}
+
+template <class T>
+Future<Optional<T>> stopAfter(Future<T> what) {
+	Optional<T> ret = T();
+	try {
+		T res = co_await what;
+		ret = Optional<T>(res);
+	} catch (Error& e) {
+		bool ok = e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete ||
+		          e.code() == error_code_actor_cancelled || e.code() == error_code_local_config_changed;
+		TraceEvent(ok ? SevInfo : SevError, "StopAfterError").error(e);
+		if (!ok) {
+			fprintf(stderr, "Fatal Error: %s\n", e.what());
+			ret = Optional<T>();
+		}
+	}
+	g_network->stop();
+	co_return ret;
+}
+
+template <class T>
 Future<Void> waitForAllReady(std::vector<Future<T>> results) {
 	for (auto const& result : results) {
 		if (result.isReady()) {
