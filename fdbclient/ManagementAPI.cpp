@@ -3639,7 +3639,7 @@ Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, RangeLockOwnerNa
 	}
 }
 
-Future<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx) {
+AsyncResult<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx) {
 	std::vector<RangeLockOwner> res;
 	Key beginKey = rangeLockOwnerKeys.begin;
 	Key endKey = rangeLockOwnerKeys.end;

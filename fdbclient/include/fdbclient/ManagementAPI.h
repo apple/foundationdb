@@ -363,7 +363,7 @@ Future<Void> registerRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueI
 Future<Void> removeRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID);
 
 // Get all registered rangeLock owner
-Future<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx);
+AsyncResult<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx);
 
 // Get a rangeLock owner by ownerUniqueID
 Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID);
