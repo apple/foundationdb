@@ -1,5 +1,5 @@
 /*
- * DataDistributionTracker.actor.cpp
+ * DDShardTracker.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -33,7 +33,6 @@
 #include "flow/Trace.h"
 #include "fdbserver/datadistributor/DDShardTracker.h"
 #include "flow/CoroUtils.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 // The used bandwidth of a shard. The higher the value is, the busier the shard is.
 enum BandwidthStatus { BandwidthStatusLow, BandwidthStatusNormal, BandwidthStatusHigh };
@@ -315,19 +314,6 @@ Future<Void> readHotDetector(DataDistributionTracker* self) {
 		throw e;
 	}
 }
-
-/*
-ACTOR Future<Void> extrapolateShardBytes( Reference<AsyncVar<Optional<int64_t>>> inBytes,
-Reference<AsyncVar<Optional<int64_t>>> outBytes ) { state std::deque< std::pair<double,int64_t> > past; loop { wait(
-inBytes->onChange() ); if( inBytes->get().present() ) { past.emplace_back(now(),inBytes->get().get()); if
-(past.size() < 2) outBytes->set( inBytes->get() ); else { while (past.size() > 1 && past.end()[-1].first -
-past.begin()[1].first > 1.0) past.pop_front(); double rate = std::max(0.0,
-double(past.end()[-1].second-past.begin()[0].second)/(past.end()[-1].first - past.begin()[0].first)); outBytes->set(
-inBytes->get().get() + rate * 10.0 );
-            }
-        }
-    }
-}*/
 
 Future<int64_t> getFirstSize(Reference<AsyncVar<Optional<ShardMetrics>>> stats) {
 	while (true) {
@@ -730,7 +716,7 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 
 	int64_t systemBytes = keys.begin >= systemKeys.begin ? shardSize->get().get().metrics.bytes : 0;
 
-	loop {
+	while (true) {
 		Optional<ShardMetrics> newMetrics;
 		if (!forwardComplete) {
 			if (nextIter->range().end == allKeys.end) {
@@ -2092,23 +2078,21 @@ bool PhysicalShardCollection::physicalShardExists(uint64_t physicalShardID) {
 
 // FIXME: complete this test with non-empty range
 TEST_CASE("/DataDistributor/Tracker/FetchTopK") {
-	state DataDistributionTracker self;
-	state std::vector<KeyRange> ranges;
+	DataDistributionTracker self;
+	std::vector<KeyRange> ranges;
 	// for (int i = 1; i <= 10; i += 2) {
 	//     ranges.emplace_back(KeyRangeRef(doubleToTestKey(i), doubleToTestKey(i + 2)));
 	//     std::cout << "add range: " << ranges.back().begin.toString() << "\n";
 	// }
-	state GetTopKMetricsRequest req(ranges, 3, 1000, 100000);
+	GetTopKMetricsRequest req(ranges, 3, 1000, 100000);
 
 	// double targetDensities[10] = { 2, 1, 3, 5, 4, 10, 6, 8, 7, 0 };
 
-	wait(fetchTopKShardMetrics(&self, req));
+	co_await fetchTopKShardMetrics(&self, req);
 	auto& reply = req.reply.getFuture().get();
 	ASSERT(reply.shardMetrics.empty());
 	ASSERT(reply.maxReadLoad == -1);
 	ASSERT(reply.minReadLoad == -1);
-
-	return Void();
 }
 
 TEST_CASE("/DataDistributor/Tracker/CrossesCriticalSystemBoundary") {
