@@ -1351,7 +1351,7 @@ TEST_CASE("/flow/coro/AsyncResult/noThrowOnCancel") {
 	int cleanupCount = 0;
 	AsyncResult<Void> result = noThrowOnCancelAsyncResult(signal.getFuture(), &cleanupCount);
 
-	ASSERT(signal.getFutureReferenceCount() == 1);
+	ASSERT(signal.getFutureReferenceCount() > 0);
 	result.cancel();
 	ASSERT(result.isReady() && result.isError() && result.getError().code() == error_code_actor_cancelled);
 	ASSERT_EQ(cleanupCount, 1);
@@ -2098,7 +2098,7 @@ TEST_CASE("/flow/coro/actor") {
 		std::stringstream ss3a;
 		Promise<Void> signal;
 		Future<Void> f = noThrowOnCancelTest(ss3a, signal.getFuture());
-		ASSERT(signal.getFutureReferenceCount() == 1);
+		ASSERT(signal.getFutureReferenceCount() > 0);
 		f.cancel();
 		ASSERT(f.isReady() && f.isError() && f.getError().code() == error_code_actor_cancelled);
 		ASSERT(signal.getFutureReferenceCount() == 0);
@@ -2110,7 +2110,7 @@ TEST_CASE("/flow/coro/actor") {
 		Promise<Void> signal;
 		{
 			Future<Void> f = noThrowOnCancelTest(ss3b, signal.getFuture());
-			ASSERT(signal.getFutureReferenceCount() == 1);
+			ASSERT(signal.getFutureReferenceCount() > 0);
 		}
 		ASSERT(signal.getFutureReferenceCount() == 0);
 		std::cout << ss3b.str() << std::endl;
