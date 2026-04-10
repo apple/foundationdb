@@ -20,6 +20,7 @@
 
 #include "flow/flow.h"
 #include "flow/UnitTest.h"
+#include "flow/genericcoros.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR Future<bool> allTrue(std::vector<Future<bool>> all) {
@@ -237,6 +238,16 @@ static Future<ErrorOr<Void>> badTestFuture(double duration, Error e) {
 	return tag(delay(duration), ErrorOr<Void>(e));
 }
 
+ACTOR Future<int> getErrorCode(Future<int> future) {
+	try {
+		int value = wait(future);
+		(void)value;
+		return 0;
+	} catch (Error& e) {
+		return e.code();
+	}
+}
+
 } // namespace
 
 TEST_CASE("/flow/genericactors/AsyncListener") {
@@ -280,6 +291,68 @@ TEST_CASE("/flow/genericactors/WaitForMost") {
 			ASSERT_EQ(e.code(), error_code_operation_failed);
 		}
 	}
+	return Void();
+}
+
+TEST_CASE("/flow/genericcoros/ThrowErrorOr") {
+	int value = wait(generic_coro::throwErrorOr<int>(Future<ErrorOr<int>>(ErrorOr<int>(7))));
+	ASSERT_EQ(value, 7);
+
+	int errorCode =
+	    wait(getErrorCode(generic_coro::throwErrorOr<int>(Future<ErrorOr<int>>(ErrorOr<int>(operation_failed())))));
+	ASSERT_EQ(errorCode, error_code_operation_failed);
+
+	return Void();
+}
+
+TEST_CASE("/flow/genericcoros/TraceAfter") {
+	int value = wait(generic_coro::traceAfter<int>(Future<int>(7), "GenericCorosTraceAfter"));
+	ASSERT_EQ(value, 7);
+
+	int errorCode = wait(
+	    getErrorCode(generic_coro::traceAfter<int>(Future<int>(operation_failed()), "GenericCorosTraceAfterError")));
+	ASSERT_EQ(errorCode, error_code_operation_failed);
+
+	return Void();
+}
+
+TEST_CASE("/flow/genericcoros/TransformErrors") {
+	int value = wait(generic_coro::transformErrors<int>(Future<int>(7), operation_failed()));
+	ASSERT_EQ(value, 7);
+
+	int errorCode =
+	    wait(getErrorCode(generic_coro::transformErrors<int>(Future<int>(transaction_too_old()), operation_failed())));
+	ASSERT_EQ(errorCode, error_code_operation_failed);
+
+	return Void();
+}
+
+TEST_CASE("/flow/genericcoros/WaitForAllReady") {
+	state std::vector<Future<int>> results;
+	results = { Future<int>(1), Future<int>(operation_failed()), Future<int>(3) };
+
+	wait(generic_coro::waitForAllReady<int>(results));
+
+	return Void();
+}
+
+TEST_CASE("/flow/genericcoros/Timeout") {
+	int readyValue = wait(generic_coro::timeout<int>(Future<int>(7), 0.0, -1));
+	ASSERT_EQ(readyValue, 7);
+
+	int timedOutValue = wait(generic_coro::timeout<int>(Future<int>(Never()), 0.0, -1));
+	ASSERT_EQ(timedOutValue, -1);
+
+	Optional<int> readyOptional = wait(generic_coro::timeout<int>(Future<int>(7), 0.0));
+	ASSERT(readyOptional.present());
+	ASSERT_EQ(readyOptional.get(), 7);
+
+	Optional<int> timedOutOptional = wait(generic_coro::timeout<int>(Future<int>(Never()), 0.0));
+	ASSERT(!timedOutOptional.present());
+
+	int errorCode = wait(getErrorCode(generic_coro::timeoutError<int>(Future<int>(Never()), 0.0)));
+	ASSERT_EQ(errorCode, error_code_timed_out);
+
 	return Void();
 }
 
