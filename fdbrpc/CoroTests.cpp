@@ -28,6 +28,7 @@
 #include <cstdint>
 #include <ranges>
 #include <iterator>
+#include <vector>
 
 #include <fmt/base.h>
 #include <fmt/format.h>
@@ -1501,6 +1502,53 @@ struct LifetimeLogger {
 	int id;
 };
 
+enum class NoThrowOnCancelEvent { Start, LifetimeConstructed, WaitReturned, CatchBlock, AfterWait, LifetimeDestroyed };
+
+struct NoThrowOnCancelRecorder {
+	std::vector<NoThrowOnCancelEvent> events;
+	int waitReturnedCount = 0;
+	int catchBlockCount = 0;
+	int afterWaitCount = 0;
+
+	void record(NoThrowOnCancelEvent event) {
+		events.push_back(event);
+		switch (event) {
+		case NoThrowOnCancelEvent::WaitReturned:
+			++waitReturnedCount;
+			break;
+		case NoThrowOnCancelEvent::CatchBlock:
+			++catchBlockCount;
+			break;
+		case NoThrowOnCancelEvent::AfterWait:
+			++afterWaitCount;
+			break;
+		default:
+			break;
+		}
+	}
+};
+
+struct NoThrowOnCancelLifetimeTracker {
+	explicit NoThrowOnCancelLifetimeTracker(NoThrowOnCancelRecorder& recorder) : recorder(recorder) {
+		recorder.record(NoThrowOnCancelEvent::LifetimeConstructed);
+	}
+	~NoThrowOnCancelLifetimeTracker() { recorder.record(NoThrowOnCancelEvent::LifetimeDestroyed); }
+
+	NoThrowOnCancelRecorder& recorder;
+};
+
+void assertNoThrowOnCancelDestroyedAtWait(NoThrowOnCancelRecorder const& recorder) {
+	const std::vector<NoThrowOnCancelEvent> expected{
+		NoThrowOnCancelEvent::Start,
+		NoThrowOnCancelEvent::LifetimeConstructed,
+		NoThrowOnCancelEvent::LifetimeDestroyed,
+	};
+	ASSERT(recorder.events == expected);
+	ASSERT_EQ(recorder.waitReturnedCount, 0);
+	ASSERT_EQ(recorder.catchBlockCount, 0);
+	ASSERT_EQ(recorder.afterWaitCount, 0);
+}
+
 template <typename T>
 Future<Void> simple_await_test(std::stringstream& ss, Future<T> f) {
 	ss << "start. ";
@@ -1537,20 +1585,20 @@ Future<Void> actor_cancel_test(std::stringstream& ss) {
 	ss << "after co_return. ";
 }
 
-Future<Void> noThrowOnCancelTest(std::stringstream& ss, Future<Void> signal, NoThrowOnCancel = {}) {
-	ss << "start. ";
+Future<Void> noThrowOnCancelTest(NoThrowOnCancelRecorder& recorder, Future<Void> signal, NoThrowOnCancel = {}) {
+	recorder.record(NoThrowOnCancelEvent::Start);
 
-	LifetimeLogger ll(ss, 0);
+	NoThrowOnCancelLifetimeTracker tracker(recorder);
 
 	try {
 		co_await signal;
-		ss << "wait returned. ";
-	} catch (Error& e) {
+		recorder.record(NoThrowOnCancelEvent::WaitReturned);
+	} catch (Error&) {
 		// NoThrowOnCancel should bypass coroutine catches on cancellation.
-		ss << "error: " << e.what() << ". ";
+		recorder.record(NoThrowOnCancelEvent::CatchBlock);
 	}
 
-	ss << "after wait. ";
+	recorder.record(NoThrowOnCancelEvent::AfterWait);
 }
 
 Future<Void> actor_throw_test(std::stringstream& ss) {
@@ -2097,26 +2145,36 @@ TEST_CASE("/flow/coro/actor") {
 
 	TraceEvent("CoroNoThrowOnCancelTestStart");
 	{
-		std::stringstream ss3a;
+		NoThrowOnCancelRecorder recorder;
 		Promise<Void> signal;
-		Future<Void> f = noThrowOnCancelTest(ss3a, signal.getFuture());
+		Future<Void> f = noThrowOnCancelTest(recorder, signal.getFuture());
 		ASSERT(signal.getFutureReferenceCount() > 0);
 		f.cancel();
 		ASSERT(f.isReady() && f.isError() && f.getError().code() == error_code_actor_cancelled);
 		ASSERT(signal.getFutureReferenceCount() == 0);
-		TraceEvent("CoroNoThrowOnCancelTestResult").detail("Scenario", "ExplicitCancel").detail("Result", ss3a.str());
-		ASSERT(ss3a.str() == "start. LifetimeLogger(0). ~LifetimeLogger(0). ");
+		TraceEvent("CoroNoThrowOnCancelTestResult")
+		    .detail("Scenario", "ExplicitCancel")
+		    .detail("EventCount", recorder.events.size())
+		    .detail("WaitReturnedCount", recorder.waitReturnedCount)
+		    .detail("CatchBlockCount", recorder.catchBlockCount)
+		    .detail("AfterWaitCount", recorder.afterWaitCount);
+		assertNoThrowOnCancelDestroyedAtWait(recorder);
 	}
 	{
-		std::stringstream ss3b;
+		NoThrowOnCancelRecorder recorder;
 		Promise<Void> signal;
 		{
-			Future<Void> f = noThrowOnCancelTest(ss3b, signal.getFuture());
+			Future<Void> f = noThrowOnCancelTest(recorder, signal.getFuture());
 			ASSERT(signal.getFutureReferenceCount() > 0);
 		}
 		ASSERT(signal.getFutureReferenceCount() == 0);
-		TraceEvent("CoroNoThrowOnCancelTestResult").detail("Scenario", "DropFuture").detail("Result", ss3b.str());
-		ASSERT(ss3b.str() == "start. LifetimeLogger(0). ~LifetimeLogger(0). ");
+		TraceEvent("CoroNoThrowOnCancelTestResult")
+		    .detail("Scenario", "DropFuture")
+		    .detail("EventCount", recorder.events.size())
+		    .detail("WaitReturnedCount", recorder.waitReturnedCount)
+		    .detail("CatchBlockCount", recorder.catchBlockCount)
+		    .detail("AfterWaitCount", recorder.afterWaitCount);
+		assertNoThrowOnCancelDestroyedAtWait(recorder);
 	}
 
 	std::cout << std::endl;
