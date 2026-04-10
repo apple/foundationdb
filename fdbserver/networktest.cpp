@@ -1,5 +1,5 @@
 /*
- * networktest.actor.cpp
+ * networktest.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,13 +20,13 @@
 
 #include "fmt/format.h"
 #include "fdbserver/NetworkTest.h"
-#include "flow/Knobs.h"
 #include "flow/ActorCollection.h"
+#include "flow/CoroUtils.h"
+#include "flow/Knobs.h"
 #include "flow/UnitTest.h"
 #include <inttypes.h>
 
 #include "flow/IConnection.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 constexpr int WLTOKEN_NETWORKTEST = WLTOKEN_FIRST_AVAILABLE;
 
@@ -711,35 +711,33 @@ struct P2PNetworkTest {
 // The client will close the connection after a random idleMilliseconds.
 // Reads and writes can optionally preceded by random delays, waitReadMilliseconds and waitWriteMilliseconds.
 TEST_CASE(":/network/p2ptest") {
-	state P2PNetworkTest p2p(params.get("listenerAddresses").orDefault(""),
-	                         params.get("remoteAddresses").orDefault(""),
-	                         params.getInt("connectionsOut").orDefault(1),
-	                         params.get("requestBytes").orDefault("50:100"),
-	                         params.get("replyBytes").orDefault("500:1000"),
-	                         params.get("requests").orDefault("10:10000"),
-	                         params.get("idleMilliseconds").orDefault("0"),
-	                         params.get("waitReadMilliseconds").orDefault("0"),
-	                         params.get("waitWriteMilliseconds").orDefault("0"),
-	                         params.getDouble("targetDuration").orDefault(0.0),
-	                         false);
+	P2PNetworkTest p2p(params.get("listenerAddresses").orDefault(""),
+	                   params.get("remoteAddresses").orDefault(""),
+	                   params.getInt("connectionsOut").orDefault(1),
+	                   params.get("requestBytes").orDefault("50:100"),
+	                   params.get("replyBytes").orDefault("500:1000"),
+	                   params.get("requests").orDefault("10:10000"),
+	                   params.get("idleMilliseconds").orDefault("0"),
+	                   params.get("waitReadMilliseconds").orDefault("0"),
+	                   params.get("waitWriteMilliseconds").orDefault("0"),
+	                   params.getDouble("targetDuration").orDefault(0.0),
+	                   false);
 
-	wait(p2p.run());
-	return Void();
+	co_await p2p.run();
 }
 
 TEST_CASE(":/network/p2poneshottest") {
-	state P2PNetworkTest p2p(params.get("listenerAddresses").orDefault(""),
-	                         params.get("remoteAddresses").orDefault(""),
-	                         params.getInt("connectionsOut").orDefault(1),
-	                         params.get("requestBytes").orDefault("50:100"),
-	                         params.get("replyBytes").orDefault("500:1000"),
-	                         params.get("requests").orDefault("10:10000"),
-	                         params.get("idleMilliseconds").orDefault("0"),
-	                         params.get("waitReadMilliseconds").orDefault("0"),
-	                         params.get("waitWriteMilliseconds").orDefault("0"),
-	                         params.getDouble("targetDuration").orDefault(0.0),
-	                         true);
+	P2PNetworkTest p2p(params.get("listenerAddresses").orDefault(""),
+	                   params.get("remoteAddresses").orDefault(""),
+	                   params.getInt("connectionsOut").orDefault(1),
+	                   params.get("requestBytes").orDefault("50:100"),
+	                   params.get("replyBytes").orDefault("500:1000"),
+	                   params.get("requests").orDefault("10:10000"),
+	                   params.get("idleMilliseconds").orDefault("0"),
+	                   params.get("waitReadMilliseconds").orDefault("0"),
+	                   params.get("waitWriteMilliseconds").orDefault("0"),
+	                   params.getDouble("targetDuration").orDefault(0.0),
+	                   true);
 
-	wait(p2p.run());
-	return Void();
+	co_await p2p.run();
 }
