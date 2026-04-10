@@ -55,8 +55,8 @@
 #include "fdbserver/core/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/core/ServerCheckpoint.h"
 #include "fdbserver/core/SpanContextMessage.h"
-#include "fdbserver/core/StorageCorruptionBug.h"
-#include "fdbserver/core/StorageMetrics.actor.h"
+#include "fdbserver/storageserver/StorageCorruptionBug.h"
+#include "fdbserver/core/StorageMetrics.h"
 #include "fdbserver/core/TLogInterface.h"
 #include "TransactionTagCounter.h"
 #include "fdbserver/core/WaitFailure.h"
@@ -105,7 +105,7 @@
 #include "flow/IRandom.h"
 #include "flow/IndexedSet.h"
 #include "flow/SystemMonitor.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/TDMetric.h"
 #include "flow/Trace.h"
 #include "flow/Util.h"
 #include "flow/genericactors.actor.h"
@@ -11897,7 +11897,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	state double lastLoopTopTime = now();
 	state Future<Void> dbInfoChange = Void();
 	state Future<Void> checkLastUpdate = Void();
-	state Future<Void> updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
+	state Future<Void> updateProcessStatsTimer = delay(SERVER_KNOBS->STORAGE_UPDATE_PROCESS_STATS_INTERVAL);
 
 	self->actors.add(updateStorage(self));
 	self->actors.add(waitFailureServer(ssi.waitFailure.getFuture()));
@@ -12077,7 +12077,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 			}
 			when(wait(updateProcessStatsTimer)) {
 				updateProcessStats(self);
-				updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
+				updateProcessStatsTimer = delay(SERVER_KNOBS->STORAGE_UPDATE_PROCESS_STATS_INTERVAL);
 			}
 			when(GetHotShardsRequest req = waitNext(ssi.getHotShards.getFuture())) {
 				struct ComparePair {

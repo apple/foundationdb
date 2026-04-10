@@ -23,7 +23,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/Arena.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/TDMetric.h"
 #include "flow/serialize.h"
 #include "flow/UnitTest.h"
 
@@ -1511,8 +1511,6 @@ const KeyRef metadataVersionRequiredValue = "\x00\x00\x00\x00\x00\x00\x00\x00\x0
 const KeyRef mustContainSystemMutationsKey = "\xff/mustContainSystemMutations"_sr;
 
 const KeyRangeRef monitorConfKeys("\xff\x02/monitorConf/"_sr, "\xff\x02/monitorConf0"_sr);
-
-const KeyRef restoreRequestDoneKey = "\xff\x02/restoreRequestDone"_sr;
 
 const KeyRef healthyZoneKey = "\xff\x02/healthyZone"_sr;
 const StringRef ignoreSSFailuresZoneString = "IgnoreSSFailures"_sr;

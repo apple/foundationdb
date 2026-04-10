@@ -46,7 +46,7 @@
 #include "flow/Error.h"
 #include "flow/flow.h"
 #include "flow/Net2Packet.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/TDMetric.h"
 #include "flow/ObjectSerializer.h"
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"

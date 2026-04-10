@@ -96,6 +96,44 @@ function err {
   echo "$(date -Iseconds) ERROR: ${*}" >&2
 }
 
+# Check whether captured output contains a literal string.
+# Avoids echo|grep -q because pipefail can turn grep's early-exit into
+# a false negative via SIGPIPE on the upstream echo.
+# $1 output to search
+# $2 literal string to find
+function output_contains {
+  local output="$1"
+  local needle="$2"
+  grep -Fq -- "${needle}" <<<"${output}"
+}
+
+# Check whether captured output matches a basic regex.
+# $1 output to search
+# $2 regex pattern
+function output_matches {
+  local output="$1"
+  local pattern="$2"
+  grep -q -- "${pattern}" <<<"${output}"
+}
+
+# Case-insensitive regex match.
+# $1 output to search
+# $2 regex pattern
+function output_matches_i {
+  local output="$1"
+  local pattern="$2"
+  grep -qi -- "${pattern}" <<<"${output}"
+}
+
+# Extended regex match.
+# $1 output to search
+# $2 extended regex pattern
+function output_matches_E {
+  local output="$1"
+  local pattern="$2"
+  grep -qE -- "${pattern}" <<<"${output}"
+}
+
 # Check if test data should be preserved (PRESERVE_TEST_DATA=1)
 # If yes, prints preservation message and returns 0 (should skip cleanup)
 # If no, returns 1 (should continue with normal cleanup)

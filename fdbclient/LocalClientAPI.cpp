@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/LocalClientAPI.h"
+#include "LocalClientAPI.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 
 IClientApi* getLocalClientAPI() {

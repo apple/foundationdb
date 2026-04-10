@@ -24,7 +24,6 @@
 #include "flow/UnitTest.h"
 #include "flow/Knobs.h"
 #include "flow/IConnection.h"
-#include "fdbclient/IKnobCollection.h"
 #include "flow/network.h"
 #include <functional>
 #include <iomanip>
@@ -266,10 +265,20 @@ struct FastUDPTracer : public UDPTracer {
 				// Force loopback when in simulation mode
 				destAddr = "127.0.0.1";
 			}
-			NetworkAddress destAddress =
-			    NetworkAddress::parse(destAddr + ":" + std::to_string(FLOW_KNOBS->TRACING_UDP_LISTENER_PORT));
-
-			socket_ = INetworkConnections::net()->createUDPSocket(destAddress);
+			// NetworkAddress::parse() only accepts literal IP addresses, not hostnames.
+			// If the knob is set to a DNS name, parse() throws connection_string_invalid.
+			// Catch it here and disable tracing gracefully instead of crashing the process.
+			try {
+				NetworkAddress destAddress =
+				    NetworkAddress::parse(destAddr + ":" + std::to_string(FLOW_KNOBS->TRACING_UDP_LISTENER_PORT));
+				socket_ = INetworkConnections::net()->createUDPSocket(destAddress);
+			} catch (Error& e) {
+				TraceEvent(SevWarnAlways, "TracingInvalidListenerAddress")
+				    .error(e)
+				    .detail("Address", destAddr)
+				    .detail("Hint", "TRACING_UDP_LISTENER_ADDR must be a literal IP address, not a hostname");
+				send_error_ = true; // disable tracing for this process
+			}
 		});
 
 		if (size == 0) {
@@ -277,15 +286,14 @@ struct FastUDPTracer : public UDPTracer {
 		}
 
 		++total_messages_;
+		if (send_error_) {
+			return;
+		}
 		if (!socket_.isReady()) {
 			++unready_socket_messages_;
 			return;
 		} else if (socket_fd_ == -1) {
 			socket_fd_ = socket_.get()->native_handle();
-		}
-
-		if (send_error_) {
-			return;
 		}
 	}
 

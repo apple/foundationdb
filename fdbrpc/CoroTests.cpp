@@ -173,6 +173,16 @@ Future<T> templateActor(T t) {
 	return t;
 }
 
+Future<int> coroValueAfterYield(int value) {
+	co_await delay(0);
+	co_return value;
+}
+
+Future<int> coroErrorAfterYield() {
+	co_await delay(0);
+	throw operation_failed();
+}
+
 // bool expectActorCount(int x) { return actorCount == x; }
 bool expectActorCount(int) {
 	return true;
@@ -328,6 +338,55 @@ TEST_CASE("/flow/coro/cancel2") {
 	cf = Future<Void>();
 	ASSERT(c2 == 1 && c3 == 1);
 	return Void();
+}
+
+TEST_CASE("/flow/coro/errorOr/ReadyValue") {
+	ErrorOr<int> result = co_await coro::errorOr(Future<int>(42));
+	ASSERT(result.present());
+	ASSERT_EQ(result.get(), 42);
+}
+
+TEST_CASE("/flow/coro/errorOr/ReadyError") {
+	ErrorOr<int> result = co_await coro::errorOr(Future<int>(operation_failed()));
+	ASSERT(result.isError());
+	ASSERT_EQ(result.getError().code(), error_code_operation_failed);
+}
+
+TEST_CASE("/flow/coro/errorOr/AsyncValue") {
+	ErrorOr<int> result = co_await coro::errorOr(coroValueAfterYield(7));
+	ASSERT(result.present());
+	ASSERT_EQ(result.get(), 7);
+}
+
+TEST_CASE("/flow/coro/errorOr/AsyncError") {
+	ErrorOr<int> result = co_await coro::errorOr(coroErrorAfterYield());
+	ASSERT(result.isError());
+	ASSERT_EQ(result.getError().code(), error_code_operation_failed);
+}
+
+TEST_CASE("/flow/coro/ignore/ReadyValue") {
+	Void ignored = co_await coro::ignore(Future<int>(42));
+	(void)ignored;
+}
+
+TEST_CASE("/flow/coro/ignore/ReadyError") {
+	try {
+		co_await coro::ignore(Future<int>(operation_failed()));
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_operation_failed);
+	}
+}
+
+TEST_CASE("/flow/coro/errorOrIgnore/AsyncValue") {
+	ErrorOr<Void> result = co_await coro::errorOr(coro::ignore(coroValueAfterYield(9)));
+	ASSERT(result.present());
+}
+
+TEST_CASE("/flow/coro/errorOrIgnore/AsyncError") {
+	ErrorOr<Void> result = co_await coro::errorOr(coro::ignore(coroErrorAfterYield()));
+	ASSERT(result.isError());
+	ASSERT_EQ(result.getError().code(), error_code_operation_failed);
 }
 
 TEST_CASE("/flow/coro/trivial_actors") {

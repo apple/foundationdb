@@ -28,7 +28,7 @@
 #include "flow/BooleanParam.h"
 #include "flow/flow.h"
 #include "flow/WipedString.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/TDMetric.h"
 #include "flow/IRandom.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitProxyInterface.h"
