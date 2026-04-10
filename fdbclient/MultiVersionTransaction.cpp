@@ -1,5 +1,5 @@
 /*
- * MultiVersionTransaction.actor.cpp
+ * MultiVersionTransaction.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -51,8 +51,6 @@
 #ifdef __unixish__
 #include <fcntl.h>
 #endif // __unixish__
-
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 #ifdef FDBCLIENT_NATIVEAPI_ACTOR_H
 #error "MVC should not depend on the Native API"
@@ -1163,14 +1161,13 @@ ThreadFuture<Void> MultiVersionTransaction::onError(Error const& e) {
 
 // Waits for the specified duration and signals the assignment variable with a timed out error
 // This will be canceled if a new timeout is set, in which case the tsav will not be signaled.
-ACTOR Future<Void> timeoutImpl(Reference<ThreadSingleAssignmentVar<Void>> tsav, double duration) {
-	state double endTime = now() + duration;
+Future<Void> timeoutImpl(Reference<ThreadSingleAssignmentVar<Void>> tsav, double duration) {
+	double endTime = now() + duration;
 	while (now() < endTime) {
-		wait(delayUntil(std::min(endTime + 0.0001, now() + CLIENT_KNOBS->TRANSACTION_TIMEOUT_DELAY_INTERVAL)));
+		co_await delayUntil(std::min(endTime + 0.0001, now() + CLIENT_KNOBS->TRANSACTION_TIMEOUT_DELAY_INTERVAL));
 	}
 
 	tsav->trySendError(transaction_timed_out());
-	return Void();
 }
 
 namespace {
@@ -2487,13 +2484,13 @@ void MultiVersionApi::updateSupportedVersions() {
 }
 
 // Must be called from the main thread
-ACTOR Future<std::string> updateClusterSharedStateMapImpl(MultiVersionApi* self,
-                                                          ClusterConnectionRecord connectionRecord,
-                                                          ProtocolVersion dbProtocolVersion,
-                                                          Reference<IDatabase> db) {
+Future<std::string> updateClusterSharedStateMapImpl(MultiVersionApi* self,
+                                                    ClusterConnectionRecord connectionRecord,
+                                                    ProtocolVersion dbProtocolVersion,
+                                                    Reference<IDatabase> db) {
 	// The cluster ID will be the connection record string (either a filename or the connection string itself)
 	// in versions before we could read the cluster ID.
-	state std::string clusterId = connectionRecord.toString();
+	std::string clusterId = connectionRecord.toString();
 
 	if (self->clusterSharedStateMap.find(clusterId) == self->clusterSharedStateMap.end()) {
 		TraceEvent("CreatingClusterSharedState")
@@ -2509,19 +2506,19 @@ ACTOR Future<std::string> updateClusterSharedStateMapImpl(MultiVersionApi* self,
 			    .detail("ClusterId", clusterId)
 			    .detail("ProtocolVersionExpected", dbProtocolVersion)
 			    .detail("ProtocolVersionFound", sharedStateInfo.protocolVersion);
-			return clusterId;
+			co_return clusterId;
 		}
 
 		TraceEvent("SettingClusterSharedState")
 		    .detail("ClusterId", clusterId)
 		    .detail("ProtocolVersion", dbProtocolVersion);
 
-		state ThreadFuture<DatabaseSharedState*> entry = sharedStateInfo.sharedStateFuture;
-		DatabaseSharedState* sharedState = wait(safeThreadFutureToFuture(entry));
+		ThreadFuture<DatabaseSharedState*> entry = sharedStateInfo.sharedStateFuture;
+		DatabaseSharedState* sharedState = co_await safeThreadFutureToFuture(entry);
 		db->setSharedState(sharedState);
 	}
 
-	return clusterId;
+	co_return clusterId;
 }
 
 // Must be called from the main thread
@@ -2860,24 +2857,23 @@ THREAD_FUNC cancel(void* arg) {
 	THREAD_RETURN;
 }
 
-ACTOR Future<Void> checkUndestroyedFutures(std::vector<ThreadSingleAssignmentVar<int>*> undestroyed) {
-	state int fNum;
-	state ThreadSingleAssignmentVar<int>* f;
-	state double start = now();
+Future<Void> checkUndestroyedFutures(std::vector<ThreadSingleAssignmentVar<int>*> undestroyed) {
+	ThreadSingleAssignmentVar<int>* f;
+	double start = now();
 
-	for (fNum = 0; fNum < undestroyed.size(); ++fNum) {
+	for (int fNum = 0; fNum < undestroyed.size(); ++fNum) {
 		f = undestroyed[fNum];
 
 		while (!f->isReady() && start + 5 >= now()) {
-			wait(delay(1.0));
+			co_await delay(1.0);
 		}
 
 		ASSERT(f->isReady());
 	}
 
-	wait(delay(1.0));
+	co_await delay(1.0);
 
-	for (fNum = 0; fNum < undestroyed.size(); ++fNum) {
+	for (int fNum = 0; fNum < undestroyed.size(); ++fNum) {
 		f = undestroyed[fNum];
 
 		ASSERT_EQ(f->debugGetReferenceCount(), 1);
@@ -2885,8 +2881,6 @@ ACTOR Future<Void> checkUndestroyedFutures(std::vector<ThreadSingleAssignmentVar
 
 		f->cancel();
 	}
-
-	return Void();
 }
 
 // Common code for tests of single assignment vars. Tests both correctness and thread safety.
@@ -2984,16 +2978,14 @@ struct AbortableTest {
 };
 
 TEST_CASE("fdbclient/multiversionclient/AbortableSingleAssignmentVar") {
-	state volatile bool done = false;
-	state THREAD_HANDLE thread = g_network->startThread(runSingleAssignmentVarTest<AbortableTest>, (void*)&done);
+	volatile bool done = false;
+	THREAD_HANDLE thread = g_network->startThread(runSingleAssignmentVarTest<AbortableTest>, (void*)&done);
 
 	while (!done) {
-		wait(delay(1.0));
+		co_await delay(1.0);
 	}
 
 	waitThread(thread);
-
-	return Void();
 }
 
 class CAPICallback final : public ThreadCallback {
@@ -3061,13 +3053,13 @@ struct DLTest {
 };
 
 TEST_CASE("fdbclient/multiversionclient/DLSingleAssignmentVar") {
-	state volatile bool done = false;
+	volatile bool done = false;
 
 	MultiVersionApi::api->callbackOnMainThread = true;
-	state THREAD_HANDLE thread = g_network->startThread(runSingleAssignmentVarTest<DLTest>, (void*)&done);
+	THREAD_HANDLE thread = g_network->startThread(runSingleAssignmentVarTest<DLTest>, (void*)&done);
 
 	while (!done) {
-		wait(delay(1.0));
+		co_await delay(1.0);
 	}
 
 	waitThread(thread);
@@ -3077,12 +3069,10 @@ TEST_CASE("fdbclient/multiversionclient/DLSingleAssignmentVar") {
 	thread = g_network->startThread(runSingleAssignmentVarTest<DLTest>, (void*)&done);
 
 	while (!done) {
-		wait(delay(1.0));
+		co_await delay(1.0);
 	}
 
 	waitThread(thread);
-
-	return Void();
 }
 
 struct MapTest {
@@ -3105,16 +3095,14 @@ struct MapTest {
 };
 
 TEST_CASE("fdbclient/multiversionclient/MapSingleAssignmentVar") {
-	state volatile bool done = false;
-	state THREAD_HANDLE thread = g_network->startThread(runSingleAssignmentVarTest<MapTest>, (void*)&done);
+	volatile bool done = false;
+	THREAD_HANDLE thread = g_network->startThread(runSingleAssignmentVarTest<MapTest>, (void*)&done);
 
 	while (!done) {
-		wait(delay(1.0));
+		co_await delay(1.0);
 	}
 
 	waitThread(thread);
-
-	return Void();
 }
 
 struct FlatMapTest {
@@ -3144,14 +3132,12 @@ struct FlatMapTest {
 };
 
 TEST_CASE("fdbclient/multiversionclient/FlatMapSingleAssignmentVar") {
-	state volatile bool done = false;
-	state THREAD_HANDLE thread = g_network->startThread(runSingleAssignmentVarTest<FlatMapTest>, (void*)&done);
+	volatile bool done = false;
+	THREAD_HANDLE thread = g_network->startThread(runSingleAssignmentVarTest<FlatMapTest>, (void*)&done);
 
 	while (!done) {
-		wait(delay(1.0));
+		co_await delay(1.0);
 	}
 
 	waitThread(thread);
-
-	return Void();
 }
