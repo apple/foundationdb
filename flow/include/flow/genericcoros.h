@@ -163,4 +163,18 @@ Future<T> timeoutError(Future<T> what,
 	}
 }
 
+template <class T>
+Future<T> delayed(Future<T> what,
+                  double time = 0.0,
+                  TaskPriority taskID = TaskPriority::DefaultDelay,
+                  ExplicitVoid = {}) {
+	ErrorOr<T> t = co_await coro::errorOr(what);
+	co_await delay(time, taskID);
+	if (t.present()) {
+		co_return std::move(t).get();
+	} else {
+		throw t.getError();
+	}
+}
+
 } // namespace generic_coro
