@@ -149,7 +149,7 @@ void printSimulatedTopology() {
 		if (l.zoneId() != r.zoneId()) {
 			return l.zoneId() < r.zoneId();
 		}
-		if (l.machineId() != r.zoneId()) {
+		if (l.machineId() != r.machineId()) {
 			return l.machineId() < r.machineId();
 		}
 		return lhs->address < rhs->address;
