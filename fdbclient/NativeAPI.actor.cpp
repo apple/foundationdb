@@ -92,6 +92,8 @@
 #include "flow/network.h"
 #include "flow/serialize.h"
 
+#include "ProxyLoadBalance.h"
+
 #ifdef ADDRESS_SANITIZER
 #include <sanitizer/lsan_interface.h>
 #endif
@@ -5947,23 +5949,12 @@ Future<StorageMetrics> DatabaseContext::getStorageMetrics(KeyRange const& keys,
 	}
 }
 
-ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx,
-                                                                                  KeyRange keys,
-                                                                                  int shardLimit) {
-	loop {
-		choose {
-			when(wait(cx->onProxiesChanged())) {}
-			when(ErrorOr<GetDDMetricsReply> rep =
-			         wait(errorOr(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
-			                                       &CommitProxyInterface::getDDMetrics,
-			                                       GetDDMetricsRequest(keys, shardLimit))))) {
-				if (rep.isError()) {
-					throw rep.getError();
-				}
-				return rep.get().storageMetricsList;
-			}
-		}
-	}
+Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx,
+                                                                            KeyRange keys,
+                                                                            int shardLimit) {
+	GetDDMetricsReply rep = co_await commitProxyLoadBalance(
+	    cx, makeReqBuilder<GetDDMetricsRequest>(keys, shardLimit), &CommitProxyInterface::getDDMetrics);
+	co_return rep.storageMetricsList;
 }
 
 Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> DatabaseContext::getReadHotRanges(KeyRange const& keys) {
@@ -6330,22 +6321,14 @@ void enableClientInfoLogging() {
 	TraceEvent(SevInfo, "ClientInfoLoggingEnabled").log();
 }
 
-ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID) {
+Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID) {
 	TraceEvent("SnapCreateEnter").detail("SnapCmd", snapCmd).detail("UID", snapUID);
 	try {
-		loop {
-			choose {
-				when(wait(cx->onProxiesChanged())) {}
-				when(wait(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
-				                           &CommitProxyInterface::proxySnapReq,
-				                           ProxySnapRequest(snapCmd, snapUID, snapUID),
-				                           cx->taskID,
-				                           AtMostOnce::True))) {
-					TraceEvent("SnapCreateExit").detail("SnapCmd", snapCmd).detail("UID", snapUID);
-					return Void();
-				}
-			}
-		}
+		co_await commitProxyLoadBalance(cx,
+		                                makeReqBuilder<ProxySnapRequest>(snapCmd, snapUID, snapUID),
+		                                &CommitProxyInterface::proxySnapReq,
+		                                AtMostOnce::True);
+		TraceEvent("SnapCreateExit").detail("SnapCmd", snapCmd).detail("UID", snapUID);
 	} catch (Error& e) {
 		TraceEvent("SnapCreateError").error(e).detail("SnapCmd", snapCmd.toString()).detail("UID", snapUID);
 		throw;
@@ -6576,19 +6559,11 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion
 	    .detail("Exclusions", describe(exclusions));
 	state bool ddCheck;
 	try {
-		loop {
-			choose {
-				when(wait(cx->onProxiesChanged())) {}
-				when(ExclusionSafetyCheckReply _ddCheck =
-				         wait(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
-				                               &CommitProxyInterface::exclusionSafetyCheckReq,
-				                               ExclusionSafetyCheckRequest(exclusions),
-				                               cx->taskID))) {
-					ddCheck = _ddCheck.safe;
-					break;
-				}
-			}
-		}
+		ExclusionSafetyCheckReply _ddCheck =
+		    wait(commitProxyLoadBalance(cx,
+		                                makeReqBuilder<ExclusionSafetyCheckRequest>(exclusions),
+		                                &CommitProxyInterface::exclusionSafetyCheckReq));
+		ddCheck = _ddCheck.safe;
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled) {
 			TraceEvent("ExclusionSafetyCheckError")
