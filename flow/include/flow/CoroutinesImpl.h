@@ -869,36 +869,104 @@ struct AsyncResultReturn<Void, Promise, true> {
 template <class T, bool IsCancellable, bool ReturnsExplicitVoid = false, bool NoThrowOnCancel = false>
 struct CoroPromise;
 
-template <class T, bool IsCancellable, bool ReturnsExplicitVoid>
-struct CoroPromise<T, IsCancellable, ReturnsExplicitVoid, false>
-  : CoroReturn<T, CoroPromise<T, IsCancellable, ReturnsExplicitVoid, false>, ReturnsExplicitVoid> {
-	using promise_type = CoroPromise<T, IsCancellable, ReturnsExplicitVoid, false>;
-	using ActorType = coro::CoroActor<T, IsCancellable>;
+template <class Derived, class T, bool ReturnsExplicitVoid>
+struct CoroPromiseBase : CoroReturn<T, Derived, ReturnsExplicitVoid> {
+	using promise_type = Derived;
 	using ReturnValue = std::conditional_t<std::is_void_v<T>, Void, T>;
 	using ReturnFutureType = Future<ReturnValue>;
 
-	ActorType coroActor; // Embedded in coroutine frame — single allocation
-
-	CoroPromise() {}
+	promise_type* self() { return static_cast<promise_type*>(this); }
 
 	n_coroutine::coroutine_handle<promise_type> handle() {
-		return n_coroutine::coroutine_handle<promise_type>::from_promise(*this);
+		return n_coroutine::coroutine_handle<promise_type>::from_promise(*self());
 	}
 
 	static void* operator new(size_t s) { return allocateFast(int(s)); }
 	static void operator delete(void* p, size_t s) { freeFast(int(s), p); }
 
-	ReturnFutureType get_return_object() noexcept {
-		coroActor.handle = handle();
-		return ReturnFutureType(&coroActor);
-	}
-
 	template <class U>
 	void setReturnValue(U&& value) {
-		coroActor.set(std::forward<U>(value));
+		self()->actor()->set(std::forward<U>(value));
 	}
 
 	[[nodiscard]] n_coroutine::suspend_never initial_suspend() const noexcept { return {}; }
+
+	void unhandled_exception() {
+		// The exception should always be type Error.
+		try {
+			std::rethrow_exception(std::current_exception());
+		} catch (const Error& error) {
+			self()->actor()->setError(error);
+		} catch (...) {
+			self()->actor()->setError(unknown_error());
+		}
+	}
+
+	void setHandle(n_coroutine::coroutine_handle<> h) { self()->actor()->handle = h; }
+
+	void resume() { self()->actor()->handle.resume(); }
+
+	int8_t& waitState() { return self()->actor()->waitState(); }
+	void setCancelHandler(AwaitCancelHandler*) {}
+	void clearCancelHandler(AwaitCancelHandler*) {}
+
+	template <class U>
+	auto await_transform(const Future<U>& future) {
+		return coro::AwaitableFuture<promise_type, U, false, ReturnsExplicitVoid>{ future, self() };
+	}
+
+	template <class U>
+	auto await_transform(coro::FutureIgnore<U> future) {
+		// Custom adapters compose through await_transform rather than wrapper
+		// coroutines so cancellation and wait-state handling stay identical to
+		// plain Future<T> awaits.
+		return coro::AwaitableFutureIgnore<promise_type, U>{ std::move(future.future), self() };
+	}
+
+	template <class U, class V>
+	auto await_transform(coro::FutureErrorOr<U, V> future) {
+		return coro::AwaitableFutureErrorOr<promise_type, U, V>{ std::move(future.future), self() };
+	}
+
+	template <class U>
+	auto await_transform(const FutureStream<U>& futureStream) {
+		return coro::AwaitableFuture<promise_type, U, true, ReturnsExplicitVoid>{ futureStream, self() };
+	}
+
+	template <class U>
+	auto await_transform(AsyncResult<U>& result) {
+		return coro::AwaitableAsyncResult<promise_type, U>{ std::move(result), self() };
+	}
+
+	template <class U>
+	auto await_transform(AsyncResult<U>&& result) {
+		return coro::AwaitableAsyncResult<promise_type, U>{ std::move(result), self() };
+	}
+
+	template <class U>
+	auto await_transform(const ThreadFutureStream<U>& futureStream) {
+		return coro::ThreadAwaitableFutureStream<promise_type, U, ReturnsExplicitVoid>{ futureStream, self() };
+	}
+};
+
+template <class T, bool IsCancellable, bool ReturnsExplicitVoid>
+struct CoroPromise<T, IsCancellable, ReturnsExplicitVoid, false>
+  : CoroPromiseBase<CoroPromise<T, IsCancellable, ReturnsExplicitVoid, false>, T, ReturnsExplicitVoid> {
+	using promise_type = CoroPromise<T, IsCancellable, ReturnsExplicitVoid, false>;
+	using Base = CoroPromiseBase<promise_type, T, ReturnsExplicitVoid>;
+	using ActorType = coro::CoroActor<T, IsCancellable>;
+	using ReturnFutureType = typename Base::ReturnFutureType;
+
+	ActorType coroActor; // Embedded in coroutine frame — single allocation
+
+	CoroPromise() {}
+
+	ActorType* actor() { return &coroActor; }
+
+	ReturnFutureType get_return_object() noexcept {
+		actor()->handle = this->handle();
+		return ReturnFutureType(actor());
+	}
 
 	auto final_suspend() noexcept {
 		struct FinalAwaitable {
@@ -925,74 +993,17 @@ struct CoroPromise<T, IsCancellable, ReturnsExplicitVoid, false>
 				}
 			}
 		};
-		return FinalAwaitable(&coroActor);
-	}
-
-	void unhandled_exception() {
-		// The exception should always be type Error.
-		try {
-			std::rethrow_exception(std::current_exception());
-		} catch (const Error& error) {
-			coroActor.setError(error);
-		} catch (...) {
-			coroActor.setError(unknown_error());
-		}
-	}
-
-	void setHandle(n_coroutine::coroutine_handle<> h) { coroActor.handle = h; }
-
-	void resume() { coroActor.handle.resume(); }
-
-	int8_t& waitState() { return coroActor.waitState(); }
-	void setCancelHandler(AwaitCancelHandler*) {}
-	void clearCancelHandler(AwaitCancelHandler*) {}
-
-	template <class U>
-	auto await_transform(const Future<U>& future) {
-		return coro::AwaitableFuture<promise_type, U, false, ReturnsExplicitVoid>{ future, this };
-	}
-
-	template <class U>
-	auto await_transform(coro::FutureIgnore<U> future) {
-		// Custom adapters compose through await_transform rather than wrapper
-		// coroutines so cancellation and wait-state handling stay identical to
-		// plain Future<T> awaits.
-		return coro::AwaitableFutureIgnore<promise_type, U>{ std::move(future.future), this };
-	}
-
-	template <class U, class V>
-	auto await_transform(coro::FutureErrorOr<U, V> future) {
-		return coro::AwaitableFutureErrorOr<promise_type, U, V>{ std::move(future.future), this };
-	}
-
-	template <class U>
-	auto await_transform(const FutureStream<U>& futureStream) {
-		return coro::AwaitableFuture<promise_type, U, true, ReturnsExplicitVoid>{ futureStream, this };
-	}
-
-	template <class U>
-	auto await_transform(AsyncResult<U>& result) {
-		return coro::AwaitableAsyncResult<promise_type, U>{ std::move(result), this };
-	}
-
-	template <class U>
-	auto await_transform(AsyncResult<U>&& result) {
-		return coro::AwaitableAsyncResult<promise_type, U>{ std::move(result), this };
-	}
-
-	template <class U>
-	auto await_transform(const ThreadFutureStream<U>& futureStream) {
-		return coro::ThreadAwaitableFutureStream<promise_type, U, ReturnsExplicitVoid>{ futureStream, this };
+		return FinalAwaitable(actor());
 	}
 };
 
 template <class T, bool IsCancellable, bool ReturnsExplicitVoid>
 struct CoroPromise<T, IsCancellable, ReturnsExplicitVoid, true>
-  : CoroReturn<T, CoroPromise<T, IsCancellable, ReturnsExplicitVoid, true>, ReturnsExplicitVoid> {
+  : CoroPromiseBase<CoroPromise<T, IsCancellable, ReturnsExplicitVoid, true>, T, ReturnsExplicitVoid> {
 	using promise_type = CoroPromise<T, IsCancellable, ReturnsExplicitVoid, true>;
+	using Base = CoroPromiseBase<promise_type, T, ReturnsExplicitVoid>;
 	using ActorType = coro::NoThrowOnCancelCoroActor<T>;
-	using ReturnValue = std::conditional_t<std::is_void_v<T>, Void, T>;
-	using ReturnFutureType = Future<ReturnValue>;
+	using ReturnFutureType = typename Base::ReturnFutureType;
 
 	// The normal promise embeds CoroActor in the coroutine frame. NoThrowOnCancel
 	// allocates it separately because cancel() intentionally destroys that frame.
@@ -1000,24 +1011,12 @@ struct CoroPromise<T, IsCancellable, ReturnsExplicitVoid, true>
 
 	CoroPromise() {}
 
-	n_coroutine::coroutine_handle<promise_type> handle() {
-		return n_coroutine::coroutine_handle<promise_type>::from_promise(*this);
-	}
-
-	static void* operator new(size_t s) { return allocateFast(int(s)); }
-	static void operator delete(void* p, size_t s) { freeFast(int(s), p); }
+	ActorType* actor() { return coroActor; }
 
 	ReturnFutureType get_return_object() noexcept {
-		coroActor->handle = handle();
-		return ReturnFutureType(coroActor);
+		actor()->handle = this->handle();
+		return ReturnFutureType(actor());
 	}
-
-	template <class U>
-	void setReturnValue(U&& value) {
-		coroActor->set(std::forward<U>(value));
-	}
-
-	[[nodiscard]] n_coroutine::suspend_never initial_suspend() const noexcept { return {}; }
 
 	auto final_suspend() noexcept {
 		struct FinalAwaitable {
@@ -1039,61 +1038,11 @@ struct CoroPromise<T, IsCancellable, ReturnsExplicitVoid, true>
 				return false;
 			}
 		};
-		return FinalAwaitable(coroActor);
+		return FinalAwaitable(actor());
 	}
 
-	void unhandled_exception() {
-		try {
-			std::rethrow_exception(std::current_exception());
-		} catch (const Error& error) {
-			coroActor->setError(error);
-		} catch (...) {
-			coroActor->setError(unknown_error());
-		}
-	}
-
-	void setHandle(n_coroutine::coroutine_handle<> h) { coroActor->handle = h; }
-
-	void resume() { coroActor->handle.resume(); }
-
-	int8_t& waitState() { return coroActor->waitState(); }
-	void setCancelHandler(AwaitCancelHandler* handler) { coroActor->setCancelHandler(handler); }
-	void clearCancelHandler(AwaitCancelHandler* handler) { coroActor->clearCancelHandler(handler); }
-
-	template <class U>
-	auto await_transform(const Future<U>& future) {
-		return coro::AwaitableFuture<promise_type, U, false, ReturnsExplicitVoid>{ future, this };
-	}
-
-	template <class U>
-	auto await_transform(coro::FutureIgnore<U> future) {
-		return coro::AwaitableFutureIgnore<promise_type, U>{ std::move(future.future), this };
-	}
-
-	template <class U, class V>
-	auto await_transform(coro::FutureErrorOr<U, V> future) {
-		return coro::AwaitableFutureErrorOr<promise_type, U, V>{ std::move(future.future), this };
-	}
-
-	template <class U>
-	auto await_transform(const FutureStream<U>& futureStream) {
-		return coro::AwaitableFuture<promise_type, U, true, ReturnsExplicitVoid>{ futureStream, this };
-	}
-
-	template <class U>
-	auto await_transform(AsyncResult<U>& result) {
-		return coro::AwaitableAsyncResult<promise_type, U>{ std::move(result), this };
-	}
-
-	template <class U>
-	auto await_transform(AsyncResult<U>&& result) {
-		return coro::AwaitableAsyncResult<promise_type, U>{ std::move(result), this };
-	}
-
-	template <class U>
-	auto await_transform(const ThreadFutureStream<U>& futureStream) {
-		return coro::ThreadAwaitableFutureStream<promise_type, U, ReturnsExplicitVoid>{ futureStream, this };
-	}
+	void setCancelHandler(AwaitCancelHandler* handler) { actor()->setCancelHandler(handler); }
+	void clearCancelHandler(AwaitCancelHandler* handler) { actor()->clearCancelHandler(handler); }
 };
 
 template <class T, bool IsCancellable, bool ReturnsExplicitVoid, bool NoThrowOnCancel>
