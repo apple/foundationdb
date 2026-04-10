@@ -62,6 +62,15 @@ Future<Optional<T>> stopAfter(Future<T> what, ExplicitVoid = {}) {
 }
 
 template <class T>
+Future<T> throwErrorOr(Future<ErrorOr<T>> f, ExplicitVoid = {}) {
+	ErrorOr<T> t = co_await f;
+	if (t.isError()) {
+		throw t.getError();
+	}
+	co_return std::move(t).get();
+}
+
+template <class T>
 Future<Void> waitForAllReady(std::vector<Future<T>> results) {
 	for (auto const& result : results) {
 		if (result.isReady()) {
