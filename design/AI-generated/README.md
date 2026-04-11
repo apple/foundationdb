@@ -3,7 +3,7 @@
 This directory contains an AI-generated code overview of the current `main` code base as of April, 2026.
 
 This was generated using a commercially available coding assistant in widespread use.  We are not disclosing
-the specific model used.
+the specific model used.  It took about an hour and cost about $20 in API usage.
 
 Prompts:
 
@@ -33,25 +33,27 @@ Subsequently:
 
 This generated the 12 files whose names have a `subsystem_` prefix.
 
-## Rationale
+## Rationale and relationship to existing documentation
 
 Basically we did this on a Friday afternoon to see what the AI would
 come up with.  On cursory examination it seems mostly reasonable.  We
-hope this is usable as a starting point.  It is meant to supplement,
-not replace, the existing documentation in the parent directory.
+hope this is usable as a starting point for people new to the system
+or new to specific areas.  It is meant to supplement, not replace, the
+existing documentation in the parent directory.
 
-Note that the standard for developer-maintained documentation of
-software systems is generally observable to be *widely uneven*.  Some
-areas have in-depth, well-written deep dives.  Some areas are out of
-date.  Some areas are not covered at all.  This is just the nature of
-things.  So AI-generated documentation, by contrast, will be more
-comprehensive in coverage, but not quite as in-depth.  It might have
-random errors and omissions, but human-maintained documentation
-certainly suffers from that too.
+Note that the industry standard for developer-maintained documentation
+of software systems (not just FDB) is generally considered to be
+*widely uneven*.  Some areas have in-depth, well-written deep dives.
+Some areas are out of date.  Some areas are not covered at all.  This
+is just the nature of things.  AI-generated documentation, by
+contrast, will be more comprehensive in coverage, but not quite as
+in-depth.  It might have random errors and omissions, but
+human-maintained documentation certainly suffers from that too.
 
 ## Caveats
 
-We have not reviewed this in depth, but plan to. Errors/omissions will
-be incrementally addressed.  Feel free to send PRs to make
-corrections.  At some point in a few quarters it may be appropriate to
-completely regenerate this documentation with more advanced models.
+We have not reviewed this in detail. Errors/omissions will be
+incrementally addressed.  Feel free to send PRs to make corrections.
+At some point in a few quarters it may be appropriate to completely
+regenerate this documentation with more advanced AI models or
+more creative prompts.
