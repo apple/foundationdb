@@ -99,4 +99,4 @@ private:
 	Optional<Value> backupStartedValue;
 };
 
-Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupProgress> bStatus, bool logging);
+Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupProgress> bStatus, Severity severity);
