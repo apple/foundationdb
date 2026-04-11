@@ -1590,9 +1590,9 @@ Optional<Value> getValueFromJSON(StatusObject statusObj) {
 	}
 }
 
-ACTOR Future<Optional<Value>> getJSON(Database db, std::string jsonField = "") {
-	StatusObject statusObj = wait(StatusClient::statusFetcher(db, jsonField));
-	return getValueFromJSON(statusObj);
+Future<Optional<Value>> getJSON(Database db, std::string jsonField = "") {
+	StatusObject statusObj = co_await StatusClient::statusFetcher(db, jsonField);
+	co_return getValueFromJSON(statusObj);
 }
 
 ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> connRecord) {

@@ -1043,7 +1043,7 @@ ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 	}
 }
 
-ACTOR Future<Optional<Value>> getJSON(Database db, std::string jsonField = "");
+Future<Optional<Value>> getJSON(Database db, std::string jsonField = "");
 
 struct SingleSpecialKeyImpl : SpecialKeyRangeReadImpl {
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
