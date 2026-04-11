@@ -1124,7 +1124,7 @@ template <class T>
 struct QuorumAsyncResultCallback final : AsyncResultCallback<typename AsyncResult<T>::StoredT> {
 	using StoredT = typename AsyncResult<T>::StoredT;
 
-	AsyncResultState<StoredT>* state = nullptr;
+	AsyncResultState<StoredT>* resultState = nullptr;
 	QuorumAsyncResult<T>* head = nullptr;
 
 	QuorumAsyncResultCallback() = default;
@@ -1133,7 +1133,7 @@ struct QuorumAsyncResultCallback final : AsyncResultCallback<typename AsyncResul
 	void fire(StoredT const&) override;
 	void fire(StoredT&&) override;
 	void error(Error error) override;
-	bool isRegistered() const { return state != nullptr; }
+	bool isRegistered() const { return resultState != nullptr; }
 	void detach();
 };
 } // namespace coro
@@ -1141,15 +1141,15 @@ struct QuorumAsyncResultCallback final : AsyncResultCallback<typename AsyncResul
 namespace coro {
 template <class T>
 QuorumAsyncResultCallback<T>::QuorumAsyncResultCallback(AsyncResult<T>& result, QuorumAsyncResult<T>* head)
-  : state(result.state), head(head) {
+  : resultState(result.state), head(head) {
 	std::move(result).addCallbackAndClear(this);
 }
 
 template <class T>
 void QuorumAsyncResultCallback<T>::detach() {
-	if (state) {
-		auto* s = state;
-		state = nullptr;
+	if (resultState) {
+		auto* s = resultState;
+		resultState = nullptr;
 		s->clearCallback(this);
 		if (!s->isReady()) {
 			s->cancelProducer();
@@ -1278,7 +1278,7 @@ template <class T>
 struct GetAllAsyncResultCallback final : AsyncResultCallback<typename AsyncResult<T>::StoredT> {
 	using StoredT = typename AsyncResult<T>::StoredT;
 
-	AsyncResultState<StoredT>* state = nullptr;
+	AsyncResultState<StoredT>* resultState = nullptr;
 	GetAllAsyncResult<T>* head = nullptr;
 	int idx = -1;
 
@@ -1288,7 +1288,7 @@ struct GetAllAsyncResultCallback final : AsyncResultCallback<typename AsyncResul
 	void fire(StoredT const& value) override;
 	void fire(StoredT&& value) override;
 	void error(Error error) override;
-	bool isRegistered() const { return state != nullptr; }
+	bool isRegistered() const { return resultState != nullptr; }
 	void detach();
 };
 } // namespace coro
@@ -1296,15 +1296,15 @@ struct GetAllAsyncResultCallback final : AsyncResultCallback<typename AsyncResul
 namespace coro {
 template <class T>
 GetAllAsyncResultCallback<T>::GetAllAsyncResultCallback(AsyncResult<T>& result, GetAllAsyncResult<T>* head, int idx)
-  : state(result.state), head(head), idx(idx) {
+  : resultState(result.state), head(head), idx(idx) {
 	std::move(result).addCallbackAndClear(this);
 }
 
 template <class T>
 void GetAllAsyncResultCallback<T>::detach() {
-	if (state) {
-		auto* s = state;
-		state = nullptr;
+	if (resultState) {
+		auto* s = resultState;
+		resultState = nullptr;
 		s->clearCallback(this);
 		if (!s->isReady()) {
 			s->cancelProducer();
