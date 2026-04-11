@@ -1,5 +1,7 @@
 # Subsystem 10: Rate Keeping & Throttling
 
+**[Diagrams](diagram_10_ratekeeper.md)**
+
 **Location:** `fdbserver/ratekeeper/`  
 **Size:** ~4K  
 **Role:** Back-pressure on commits and reads, tag-based throttling, throughput tracking.

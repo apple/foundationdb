@@ -1,5 +1,7 @@
 # Subsystem 4: Cluster Controller & Coordination
 
+**[Diagrams](diagram_04_cluster_controller.md)**
+
 **Location:** `fdbserver/clustercontroller/`, `fdbserver/coordinator/`, `fdbserver/core/LeaderElection.actor.cpp`  
 **Size:** ~13K + coordination code  
 **Role:** Leader election, role recruitment, process registration, cluster-wide decision making.

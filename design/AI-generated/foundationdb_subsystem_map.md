@@ -8,18 +8,18 @@ This is a research document, not an implementation plan. It partitions the entir
 
 | # | Subsystem | Primary Location | ~LOC | One-line summary |
 |---|-----------|-----------------|------|------------------|
-| 1 | **Flow Runtime** | `flow/` | 31K impl + headers | Async actor framework, event loop, deterministic time, memory arenas |
-| 2 | **RPC & Transport** | `fdbrpc/` | 28K impl + headers | Endpoint-addressed messaging, peer management, failure monitoring, simulation network |
-| 3 | **Client Library** | `fdbclient/` | 75K impl, 34K headers | Transaction API, read-your-writes, location caching, multi-version client |
-| 4 | **Cluster Controller & Coordination** | `fdbserver/clustercontroller/`, `fdbserver/coordinator/`, `fdbserver/core/LeaderElection` | 13K + coordination | Leader election, role recruitment, process registration, cluster-wide decision making |
-| 5 | **Transaction Commit Pipeline** | `fdbserver/commitproxy/`, `fdbserver/grvproxy/`, `fdbserver/resolver/`, `fdbserver/sequencer/` | ~12K | Version assignment, conflict detection, commit batching — the write-path orchestration |
-| 6 | **Transaction Log (TLog) & Log System** | `fdbserver/tlog/`, `fdbserver/logsystem/`, `fdbserver/logrouter/` | 17K | Durable mutation logging, tag-partitioned replication, peek cursors for storage servers |
-| 7 | **Storage Server & Engines** | `fdbserver/storageserver/`, `fdbserver/kvstore/` | 63K | Serves reads, applies mutations from log, pluggable storage backends (RocksDB, SQLite, memory) |
-| 8 | **Data Distribution** | `fdbserver/datadistributor/` | 22K | Shard management, team building, rebalancing, MoveKeys protocol |
-| 9 | **Cluster Recovery** | `fdbserver/clustercontroller/ClusterRecovery*`, `fdbserver/core/RecoveryState.h` | (part of #4 files) | 9-phase state machine to reconstitute the transaction system after failures |
-| 10 | **Rate Keeping & Throttling** | `fdbserver/ratekeeper/` | 4K | Back-pressure on commits and reads, tag-based throttling, throughput tracking |
-| 11 | **Backup, Restore & DR** | `fdbserver/backupworker/`, `fdbclient/FileBackupAgent*`, `fdbclient/BackupContainer*`, `fdbbackup/` | ~10K server, ~20K client | Continuous backup to external storage, point-in-time restore, cross-cluster DR |
-| 12 | **Simulation & Testing** | `fdbrpc/sim2.cpp`, `fdbserver/workloads/`, `fdbserver/tester/`, `tests/` | 51K workloads + sim | Deterministic simulation (Sim2), fault injection (Buggify), workload-based integration tests |
+| 1 | [**Flow Runtime**](subsystem_01_flow_runtime.md) | `flow/` | 31K impl + headers | Async actor framework, event loop, deterministic time, memory arenas |
+| 2 | [**RPC & Transport**](subsystem_02_rpc_transport.md) | `fdbrpc/` | 28K impl + headers | Endpoint-addressed messaging, peer management, failure monitoring, simulation network |
+| 3 | [**Client Library**](subsystem_03_client_library.md) | `fdbclient/` | 75K impl, 34K headers | Transaction API, read-your-writes, location caching, multi-version client |
+| 4 | [**Cluster Controller & Coordination**](subsystem_04_cluster_controller.md) | `fdbserver/clustercontroller/`, `fdbserver/coordinator/`, `fdbserver/core/LeaderElection` | 13K + coordination | Leader election, role recruitment, process registration, cluster-wide decision making |
+| 5 | [**Transaction Commit Pipeline**](subsystem_05_commit_pipeline.md) | `fdbserver/commitproxy/`, `fdbserver/grvproxy/`, `fdbserver/resolver/`, `fdbserver/sequencer/` | ~12K | Version assignment, conflict detection, commit batching — the write-path orchestration |
+| 6 | [**Transaction Log (TLog) & Log System**](subsystem_06_tlog_logsystem.md) | `fdbserver/tlog/`, `fdbserver/logsystem/`, `fdbserver/logrouter/` | 17K | Durable mutation logging, tag-partitioned replication, peek cursors for storage servers |
+| 7 | [**Storage Server & Engines**](subsystem_07_storage_server.md) | `fdbserver/storageserver/`, `fdbserver/kvstore/` | 63K | Serves reads, applies mutations from log, pluggable storage backends (RocksDB, SQLite, memory) |
+| 8 | [**Data Distribution**](subsystem_08_data_distribution.md) | `fdbserver/datadistributor/` | 22K | Shard management, team building, rebalancing, MoveKeys protocol |
+| 9 | [**Cluster Recovery**](subsystem_09_cluster_recovery.md) | `fdbserver/clustercontroller/ClusterRecovery*`, `fdbserver/core/RecoveryState.h` | (part of #4 files) | 9-phase state machine to reconstitute the transaction system after failures |
+| 10 | [**Rate Keeping & Throttling**](subsystem_10_ratekeeper.md) | `fdbserver/ratekeeper/` | 4K | Back-pressure on commits and reads, tag-based throttling, throughput tracking |
+| 11 | [**Backup, Restore & DR**](subsystem_11_backup_dr.md) | `fdbserver/backupworker/`, `fdbclient/FileBackupAgent*`, `fdbclient/BackupContainer*`, `fdbbackup/` | ~10K server, ~20K client | Continuous backup to external storage, point-in-time restore, cross-cluster DR |
+| 12 | [**Simulation & Testing**](subsystem_12_simulation_testing.md) | `fdbrpc/sim2.cpp`, `fdbserver/workloads/`, `fdbserver/tester/`, `tests/` | 51K workloads + sim | Deterministic simulation (Sim2), fault injection (Buggify), workload-based integration tests |
 
 Plus supporting code: `fdbserver/worker/` (process startup, ~4K), `fdbserver/core/` (shared interfaces/utilities, ~14K), `fdbcli/` (CLI, ~8K), `bindings/` (language FFI), `fdbserver/consistencyscan/` (~2K).
 
@@ -27,7 +27,7 @@ Plus supporting code: `fdbserver/worker/` (process startup, ~4K), `fdbserver/cor
 
 ## Detailed Subsystem Descriptions
 
-### 1. Flow Runtime (`flow/`)
+### 1. [Flow Runtime](subsystem_01_flow_runtime.md) (`flow/`)
 
 **What it is:** A custom async programming framework that underpins every line of FDB code. It is *not* a library you can opt out of — it *is* the execution model.
 
@@ -46,7 +46,7 @@ Plus supporting code: `fdbserver/worker/` (process startup, ~4K), `fdbserver/cor
 
 ---
 
-### 2. RPC & Transport (`fdbrpc/`)
+### 2. [RPC & Transport](subsystem_02_rpc_transport.md) (`fdbrpc/`)
 
 **What it is:** The layer that makes Flow's Future/Promise work *across process boundaries*. It maps the actor model onto a network.
 
@@ -65,7 +65,7 @@ Plus supporting code: `fdbserver/worker/` (process startup, ~4K), `fdbserver/cor
 
 ---
 
-### 3. Client Library (`fdbclient/`)
+### 3. [Client Library](subsystem_03_client_library.md) (`fdbclient/`)
 
 **What it is:** Everything an application (or internal FDB component acting as a client) uses to read and write data.
 
@@ -85,7 +85,7 @@ Plus supporting code: `fdbserver/worker/` (process startup, ~4K), `fdbserver/cor
 
 ---
 
-### 4. Cluster Controller & Coordination
+### 4. [Cluster Controller & Coordination](subsystem_04_cluster_controller.md)
 
 **What it is:** The "brain" that decides who does what. One process is elected Cluster Controller (CC); it recruits and monitors all server roles.
 
@@ -110,7 +110,7 @@ Plus supporting code: `fdbserver/worker/` (process startup, ~4K), `fdbserver/cor
 
 ---
 
-### 5. Transaction Commit Pipeline
+### 5. [Transaction Commit Pipeline](subsystem_05_commit_pipeline.md)
 
 **What it is:** The assembly line that takes a client's commit request and makes it durable. Four server roles collaborate in a strict pipeline.
 
@@ -156,7 +156,7 @@ Phase 4: REPLY                      CommitProxy
 
 ---
 
-### 6. Transaction Log (TLog) & Log System
+### 6. [Transaction Log (TLog) & Log System](subsystem_06_tlog_logsystem.md)
 
 **What it is:** The durable write-ahead log. All committed mutations flow through TLogs before being applied to storage servers. This is FDB's durability guarantee.
 
@@ -183,7 +183,7 @@ Phase 4: REPLY                      CommitProxy
 
 ---
 
-### 7. Storage Server & Engines
+### 7. [Storage Server & Engines](subsystem_07_storage_server.md)
 
 **What it is:** The read path and durable key-value store. Storage servers serve client reads and maintain the materialized state of their assigned key ranges (shards).
 
@@ -205,7 +205,7 @@ Phase 4: REPLY                      CommitProxy
 
 ---
 
-### 8. Data Distribution
+### 8. [Data Distribution](subsystem_08_data_distribution.md)
 
 **What it is:** The subsystem that decides which storage servers hold which key ranges, and moves data when the assignment needs to change.
 
@@ -229,7 +229,7 @@ Phase 4: REPLY                      CommitProxy
 
 ---
 
-### 9. Cluster Recovery
+### 9. [Cluster Recovery](subsystem_09_cluster_recovery.md)
 
 **What it is:** The state machine that reconstitutes the entire transaction system after a failure (master crash, network partition, coordinator change, etc.).
 
@@ -254,7 +254,7 @@ Phase 4: REPLY                      CommitProxy
 
 ---
 
-### 10. Rate Keeping & Throttling (`fdbserver/ratekeeper/`)
+### 10. [Rate Keeping & Throttling](subsystem_10_ratekeeper.md) (`fdbserver/ratekeeper/`)
 
 **What it is:** Back-pressure mechanism that prevents the cluster from being overwhelmed.
 
@@ -273,7 +273,7 @@ Phase 4: REPLY                      CommitProxy
 
 ---
 
-### 11. Backup, Restore & DR
+### 11. [Backup, Restore & DR](subsystem_11_backup_dr.md)
 
 **What it is:** Continuous backup of the mutation stream to external storage, with point-in-time restore capability.
 
@@ -295,7 +295,7 @@ Phase 4: REPLY                      CommitProxy
 
 ---
 
-### 12. Simulation & Testing
+### 12. [Simulation & Testing](subsystem_12_simulation_testing.md)
 
 **What it is:** FDB's most distinctive engineering practice — deterministic simulation testing that can find bugs that would take years to manifest in production.
 

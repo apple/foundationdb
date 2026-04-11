@@ -1,5 +1,7 @@
 # Subsystem 8: Data Distribution
 
+**[Diagrams](diagram_08_data_distribution.md)**
+
 **Location:** `fdbserver/datadistributor/`  
 **Size:** ~22K  
 **Role:** Shard management, team building, rebalancing, MoveKeys protocol.

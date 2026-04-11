@@ -1,5 +1,7 @@
 # Subsystem 2: RPC & Transport
 
+**[Diagrams](diagram_02_rpc_transport.md)**
+
 **Location:** `fdbrpc/`  
 **Size:** ~28K implementation + headers  
 **Role:** Maps Flow's actor model onto a network -- makes Future/Promise work across process boundaries.

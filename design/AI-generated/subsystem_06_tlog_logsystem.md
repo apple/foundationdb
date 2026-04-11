@@ -1,5 +1,7 @@
 # Subsystem 6: Transaction Log (TLog) & Log System
 
+**[Diagrams](diagram_06_tlog_logsystem.md)**
+
 **Location:** `fdbserver/tlog/`, `fdbserver/logsystem/`, `fdbserver/logrouter/`  
 **Size:** ~17K  
 **Role:** Durable mutation logging, tag-partitioned replication, peek cursors for storage servers.

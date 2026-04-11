@@ -1,5 +1,7 @@
 # Subsystem 1: Flow Runtime
 
+**[Diagrams](diagram_01_flow_runtime.md)**
+
 **Location:** `flow/`  
 **Size:** ~31K implementation + headers  
 **Role:** The custom async programming framework that is the execution model for all FoundationDB code.

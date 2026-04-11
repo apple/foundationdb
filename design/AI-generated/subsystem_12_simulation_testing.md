@@ -1,5 +1,7 @@
 # Subsystem 12: Simulation & Testing
 
+**[Diagrams](diagram_12_simulation_testing.md)**
+
 **Location:** `fdbrpc/sim2.cpp`, `fdbserver/workloads/`, `fdbserver/tester/`, `tests/`  
 **Size:** ~51K workloads + simulator  
 **Role:** Deterministic simulation (Sim2), fault injection (Buggify), workload-based integration tests.

@@ -1,5 +1,7 @@
 # Subsystem 7: Storage Server & Engines
 
+**[Diagrams](diagram_07_storage_server.md)**
+
 **Location:** `fdbserver/storageserver/`, `fdbserver/kvstore/`  
 **Size:** ~63K  
 **Role:** Serves reads, applies mutations from log, pluggable storage backends.

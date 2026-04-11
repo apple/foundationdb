@@ -1,5 +1,7 @@
 # Subsystem 3: Client Library
 
+**[Diagrams](diagram_03_client_library.md)**
+
 **Location:** `fdbclient/`  
 **Size:** ~75K implementation, ~34K headers  
 **Role:** Everything an application (or internal FDB component) uses to read and write data.

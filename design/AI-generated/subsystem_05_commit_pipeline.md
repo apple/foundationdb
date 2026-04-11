@@ -1,5 +1,7 @@
 # Subsystem 5: Transaction Commit Pipeline
 
+**[Diagrams](diagram_05_commit_pipeline.md)**
+
 **Location:** `fdbserver/commitproxy/`, `fdbserver/grvproxy/`, `fdbserver/resolver/`, `fdbserver/sequencer/`  
 **Size:** ~12K  
 **Role:** Version assignment, conflict detection, commit batching -- the write-path orchestration.

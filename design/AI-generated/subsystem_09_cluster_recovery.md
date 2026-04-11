@@ -1,5 +1,7 @@
 # Subsystem 9: Cluster Recovery
 
+**[Diagrams](diagram_09_cluster_recovery.md)**
+
 **Location:** `fdbserver/clustercontroller/ClusterRecovery.actor.cpp`, `fdbserver/core/RecoveryState.h`  
 **Size:** Part of ClusterController files  
 **Role:** 9-phase state machine to reconstitute the transaction system after failures.

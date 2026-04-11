@@ -1,5 +1,7 @@
 # Subsystem 11: Backup, Restore & DR
 
+**[Diagrams](diagram_11_backup_dr.md)**
+
 **Location:** `fdbserver/backupworker/`, `fdbclient/FileBackupAgent*`, `fdbclient/BackupContainer*`, `fdbbackup/`  
 **Size:** ~10K server, ~20K client  
 **Role:** Continuous backup to external storage, point-in-time restore, cross-cluster DR.
