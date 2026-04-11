@@ -36,10 +36,14 @@ This generated the 12 files whose names have a `subsystem_` prefix.
 ## Rationale and relationship to existing documentation
 
 Basically we did this on a Friday afternoon to see what the AI would
-come up with.  On cursory examination it seems mostly reasonable.  We
-hope this is usable as a starting point for people new to the system
-or new to specific areas.  It is meant to supplement, not replace, the
-existing documentation in the parent directory.
+come up with.  On cursory examination it seems pretty reasonable.  We
+were pleased to note that the first thing mentioned in the first file
+we reviewed is `SAV`, which is of central importance to the system but
+is buried in `flow.h` and is hardly mentioned in ../*.md.
+
+In any case, we hope this is usable as a starting point for people new
+to the system or new to specific areas.  It is meant to supplement,
+not replace, the existing documentation in the parent directory.
 
 Note that the industry standard for developer-maintained documentation
 of software systems (not just FDB) is generally considered to be
