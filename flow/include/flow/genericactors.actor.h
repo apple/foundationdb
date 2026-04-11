@@ -1396,7 +1396,6 @@ Future<std::vector<T>> getAll(std::vector<Future<T>> input) {
 
 template <class T>
 Future<std::vector<T>> getAll(std::vector<AsyncResult<T>> input) {
-	static_assert(!std::is_void_v<T>, "getAll(std::vector<AsyncResult<T>>) does not support AsyncResult<void>");
 	if (input.empty())
 		return std::vector<T>();
 

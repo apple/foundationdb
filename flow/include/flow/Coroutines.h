@@ -132,8 +132,9 @@ FutureErrorOr<T, Void> errorOr(FutureIgnore<T> future) {
 template <class T>
 class SWIFT_SENDABLE AsyncResult {
 public:
+	static_assert(!std::is_void_v<T>, "Use AsyncResult<Void> instead of AsyncResult<void>");
 	using Element = T;
-	using StoredT = std::conditional_t<std::is_void_v<T>, Void, T>;
+	using StoredT = T;
 
 	AsyncResult() noexcept : state(nullptr) {}
 	AsyncResult(AsyncResult const&) = delete;
@@ -157,24 +158,12 @@ public:
 	void cancel() const;
 	void addCallbackAndClear(coro::AsyncResultCallback<StoredT>* cb) &&;
 
-	// add_lvalue_reference_t maps void to void, so this stays well-formed for
-	// AsyncResult<void> even though the accessor itself is constrained away.
-	std::add_lvalue_reference_t<std::add_const_t<T>> get() const&
-	    requires(!std::is_void_v<T>);
-	std::conditional_t<std::is_void_v<T>, void, T> get() &&
-	    requires(!std::is_void_v<T>);
-	std::conditional_t<std::is_void_v<T>, void, T> getValue() const&
-	    requires(!std::is_void_v<T>)
-	{
-		return get();
-	}
-	std::conditional_t<std::is_void_v<T>, void, T> getValue() &&
-	    requires(!std::is_void_v<T>)
-	{
-		return std::move(*this).get();
-	}
+	T const& get() const&;
+	T get() &&;
+	T getValue() const& { return get(); }
+	T getValue() && { return std::move(*this).get(); }
 
-	    auto operator co_await() &;
+	auto operator co_await() &;
 	auto operator co_await() &&;
 
 private:
@@ -366,17 +355,13 @@ void AsyncResult<T>::addCallbackAndClear(coro::AsyncResultCallback<StoredT>* cb)
 }
 
 template <class T>
-std::add_lvalue_reference_t<std::add_const_t<T>> AsyncResult<T>::get() const&
-    requires(!std::is_void_v<T>)
-{
+T const& AsyncResult<T>::get() const& {
 	ASSERT(state);
 	return state->get();
 }
 
 template <class T>
-std::conditional_t<std::is_void_v<T>, void, T> AsyncResult<T>::get() &&
-    requires(!std::is_void_v<T>)
-{
+T AsyncResult<T>::get() && {
 	ASSERT(state);
 	return state->take();
 }

@@ -1226,7 +1226,7 @@ AsyncResult<int> failingAsyncResultInt(Future<Void> signal) {
 	throw io_error();
 }
 
-AsyncResult<void> delayedAsyncResultVoid(Future<Void> signal) {
+AsyncResult<Void> delayedAsyncResultVoid(Future<Void> signal) {
 	co_await signal;
 	co_return;
 }
@@ -1367,7 +1367,7 @@ TEST_CASE("/flow/coro/quorumAsyncResultSuccess") {
 TEST_CASE("/flow/coro/quorumAsyncResultVoid") {
 	Promise<Void> signal1;
 	Promise<Void> signal2;
-	std::vector<AsyncResult<void>> results;
+	std::vector<AsyncResult<Void>> results;
 	results.push_back(delayedAsyncResultVoid(signal1.getFuture()));
 	results.push_back(delayedAsyncResultVoid(signal2.getFuture()));
 

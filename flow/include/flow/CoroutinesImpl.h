@@ -319,8 +319,7 @@ struct AwaitableFutureStore {
 //
 // `PromiseType` is the coroutine promise object that owns the wait-state and
 // coroutine handle bookkeeping for the suspended actor.
-// `ValueType` is the logical `AsyncResult<T>` payload type being awaited; for
-// `AsyncResult<void>` the stored state still uses `Void` internally.
+// `ValueType` is the logical `AsyncResult<T>` payload type being awaited.
 template <class PromiseType, class ValueType>
 struct AwaitableAsyncResult {
 	using StateType = typename AsyncResult<ValueType>::StoredT;
@@ -844,12 +843,10 @@ struct CoroPromise : CoroReturn<T, CoroPromise<T, IsCancellable, ReturnsExplicit
 };
 
 template <class T, bool IsCancellable, bool ReturnsExplicitVoid>
-struct AsyncResultPromise : AsyncResultReturn<std::conditional_t<std::is_void_v<T>, Void, T>,
-                                              AsyncResultPromise<T, IsCancellable, ReturnsExplicitVoid>,
-                                              ReturnsExplicitVoid> {
+struct AsyncResultPromise
+  : AsyncResultReturn<T, AsyncResultPromise<T, IsCancellable, ReturnsExplicitVoid>, ReturnsExplicitVoid> {
 	using promise_type = AsyncResultPromise<T, IsCancellable, ReturnsExplicitVoid>;
-	// AsyncResult<void> still stores completion as Void inside AsyncResultState.
-	using ReturnValue = std::conditional_t<std::is_void_v<T>, Void, T>;
+	using ReturnValue = T;
 	using ReturnAsyncResultType = AsyncResult<T>;
 	using State = AsyncResultState<ReturnValue>;
 
