@@ -27,6 +27,7 @@
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
 #include "fdbclient/json_spirit/json_spirit_reader_template.h"
 #include "fdbrpc/genericactors.actor.h"
+#include "flow/CoroUtils.h"
 #include <cstdint>
 
 #include "flow/actorcompiler.h" // has to be last include
@@ -510,25 +511,25 @@ StatusObject getClientDatabaseStatus(StatusObjectReader client, StatusObjectRead
 	return databaseStatus;
 }
 
-ACTOR Future<StatusObject> statusFetcherImpl(Reference<IClusterConnectionRecord> connRecord,
-                                             Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface,
-                                             std::string statusField) {
+AsyncResult<StatusObject> statusFetcherImpl(Reference<IClusterConnectionRecord> connRecord,
+                                            Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface,
+                                            std::string statusField) {
 	if (!g_network)
 		throw network_not_setup();
 
-	state StatusObject statusObj;
-	state StatusObject statusObjClient;
-	state StatusArray clientMessages;
+	StatusObject statusObj;
+	StatusObject statusObjClient;
+	StatusArray clientMessages;
 
 	// This could be read from the JSON but doing so safely is ugly so using a real var.
-	state bool quorum_reachable = false;
-	state int coordinatorsFaultTolerance = 0;
+	bool quorum_reachable = false;
+	int coordinatorsFaultTolerance = 0;
 
 	try {
-		state int64_t clientTime = g_network->timer();
+		int64_t clientTime = g_network->timer();
 
 		StatusObject _statusObjClient =
-		    wait(clientStatusFetcher(connRecord, &clientMessages, &quorum_reachable, &coordinatorsFaultTolerance));
+		    co_await clientStatusFetcher(connRecord, &clientMessages, &quorum_reachable, &coordinatorsFaultTolerance);
 		statusObjClient = _statusObjClient;
 
 		if (clientTime != -1)
@@ -544,17 +545,15 @@ ACTOR Future<StatusObject> statusFetcherImpl(Reference<IClusterConnectionRecord>
 		// it.
 	}
 
-	state StatusObject statusObjCluster;
+	StatusObject statusObjCluster;
 
 	if (quorum_reachable) {
 		try {
-
-			state Future<Void> interfaceTimeout = delay(2.0);
-
-			loop {
+			Future<Void> interfaceTimeout = delay(2.0);
+			while (true) {
 				if (clusterInterface->get().present()) {
 					Optional<StatusObject> _statusObjCluster =
-					    wait(clusterStatusFetcher(clusterInterface->get().get(), &clientMessages, statusField));
+					    co_await clusterStatusFetcher(clusterInterface->get().get(), &clientMessages, statusField);
 					if (_statusObjCluster.present()) {
 						statusObjCluster = _statusObjCluster.get();
 						// TODO: this is a temporary fix, getting the number of available coordinators should move to
@@ -578,14 +577,12 @@ ACTOR Future<StatusObject> statusFetcherImpl(Reference<IClusterConnectionRecord>
 					// else clusterStatusFetcher added a message
 					break;
 				}
-				choose {
-					when(wait(clusterInterface->onChange())) {}
-					when(wait(interfaceTimeout)) {
-						clientMessages.push_back(makeMessage(MessageType::NO_CLUSTER_CONTROLLER,
-						                                     "Unable to locate a cluster controller within 2 seconds.  "
-						                                     "Check that there are server processes running."));
-						break;
-					}
+				auto res = co_await race(clusterInterface->onChange(), interfaceTimeout);
+				if (res.index() == 1) {
+					clientMessages.push_back(makeMessage(MessageType::NO_CLUSTER_CONTROLLER,
+					                                     "Unable to locate a cluster controller within 2 seconds.  "
+					                                     "Check that there are server processes running."));
+					break;
 				}
 			}
 
@@ -614,7 +611,7 @@ ACTOR Future<StatusObject> statusFetcherImpl(Reference<IClusterConnectionRecord>
 	if (layers_valid.is_null())
 		layers_valid = false;
 
-	return statusObj;
+	co_return statusObj;
 }
 
 ACTOR Future<Void> timeoutMonitorLeader(Database db) {
@@ -628,7 +625,7 @@ ACTOR Future<Void> timeoutMonitorLeader(Database db) {
 	}
 }
 
-Future<StatusObject> StatusClient::statusFetcher(Database db, std::string statusField) {
+AsyncResult<StatusObject> StatusClient::statusFetcher(Database db, std::string statusField) {
 	db->lastStatusFetch = now();
 	if (!db->statusClusterInterface) {
 		db->statusClusterInterface = makeReference<AsyncVar<Optional<ClusterInterface>>>();
