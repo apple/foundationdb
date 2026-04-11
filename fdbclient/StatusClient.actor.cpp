@@ -302,9 +302,9 @@ void JSONDoc::mergeValueInto(json_spirit::mValue& dst, const json_spirit::mValue
 
 // Check if a quorum of coordination servers is reachable
 // Will not throw, will just return non-present Optional if error
-Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<IClusterConnectionRecord> connRecord,
-                                                               bool* quorum_reachable,
-                                                               int* coordinatorsFaultTolerance) {
+AsyncResult<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<IClusterConnectionRecord> connRecord,
+                                                                    bool* quorum_reachable,
+                                                                    int* coordinatorsFaultTolerance) {
 	try {
 		ClientCoordinators coord(connRecord);
 		StatusObject statusObj;
@@ -376,10 +376,10 @@ Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<ICluste
 
 // Client section of the json output
 // Will NOT throw, errors will be put into messages array
-Future<StatusObject> clientStatusFetcher(Reference<IClusterConnectionRecord> connRecord,
-                                         StatusArray* messages,
-                                         bool* quorum_reachable,
-                                         int* coordinatorsFaultTolerance) {
+AsyncResult<StatusObject> clientStatusFetcher(Reference<IClusterConnectionRecord> connRecord,
+                                              StatusArray* messages,
+                                              bool* quorum_reachable,
+                                              int* coordinatorsFaultTolerance) {
 	StatusObject statusObj;
 
 	Optional<StatusObject> coordsStatusObj =
@@ -419,9 +419,9 @@ Future<StatusObject> clientStatusFetcher(Reference<IClusterConnectionRecord> con
 }
 
 // Cluster section of json output
-Future<Optional<StatusObject>> clusterStatusFetcher(ClusterInterface cI,
-                                                    StatusArray* messages,
-                                                    std::string statusField) {
+AsyncResult<Optional<StatusObject>> clusterStatusFetcher(ClusterInterface cI,
+                                                         StatusArray* messages,
+                                                         std::string statusField) {
 	StatusRequest req(statusField);
 	Future<Void> clusterTimeout = delay(30.0);
 	Optional<StatusObject> oStatusObj;
