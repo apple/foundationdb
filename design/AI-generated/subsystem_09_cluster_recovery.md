@@ -2,7 +2,7 @@
 
 **[Diagrams](diagram_09_cluster_recovery.md)**
 
-**Location:** `fdbserver/clustercontroller/ClusterRecovery.actor.cpp`, `fdbserver/core/RecoveryState.h`  
+**Location:** [`fdbserver/clustercontroller/ClusterRecovery.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterRecovery.actor.cpp), [`fdbserver/core/RecoveryState.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/RecoveryState.h)
 **Size:** Part of ClusterController files  
 **Role:** 9-phase state machine to reconstitute the transaction system after failures.
 
@@ -14,7 +14,7 @@ Recovery is triggered when the master (sequencer) fails, a network partition hea
 
 ---
 
-## ClusterRecoveryData -- `ClusterRecovery.actor.h:178-318`
+## ClusterRecoveryData -- [`ClusterRecovery.actor.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterRecovery.actor.h)`:178-318`
 
 ```
 struct ClusterRecoveryData {
@@ -45,7 +45,7 @@ struct ClusterRecoveryData {
 
 ---
 
-## The 9 Recovery States -- `RecoveryState.h:31-42`
+## The 9 Recovery States -- [`RecoveryState.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/RecoveryState.h)`:31-42`
 
 ```
 enum class RecoveryState {
@@ -142,7 +142,7 @@ All old generation TLogs have been fully recruited into the system.
 
 ---
 
-## trackTlogRecovery() -- `ClusterRecovery.actor.cpp:449-533`
+## trackTlogRecovery() -- [`ClusterRecovery.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterRecovery.actor.cpp)`:449-533`
 
 Monitors TLog set completeness and drives state transitions:
 
@@ -207,9 +207,9 @@ loop {
 
 | File | Purpose |
 |------|---------|
-| `fdbserver/clustercontroller/ClusterRecovery.actor.cpp` | clusterRecoveryCore, recruitment, state machine |
-| `fdbserver/clustercontroller/ClusterRecovery.actor.h` | ClusterRecoveryData struct |
-| `fdbserver/core/include/fdbserver/core/RecoveryState.h` | RecoveryState enum |
-| `fdbserver/core/include/fdbserver/core/DBCoreState.h` | DBCoreState (coordinated TLog config) |
-| `fdbserver/core/CoordinatedState.cpp` | Replicated read/write over generation registers |
-| `fdbserver/logsystem/TagPartitionedLogSystem.actor.cpp` | newEpoch() for creating new TLog generations |
+| [`fdbserver/clustercontroller/ClusterRecovery.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterRecovery.actor.cpp) | clusterRecoveryCore, recruitment, state machine |
+| [`fdbserver/clustercontroller/ClusterRecovery.actor.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterRecovery.actor.h) | ClusterRecoveryData struct |
+| [`fdbserver/core/include/fdbserver/core/RecoveryState.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/RecoveryState.h) | RecoveryState enum |
+| [`fdbserver/core/include/fdbserver/core/DBCoreState.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/DBCoreState.h) | DBCoreState (coordinated TLog config) |
+| [`fdbserver/core/CoordinatedState.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/CoordinatedState.cpp) | Replicated read/write over generation registers |
+| [`fdbserver/logsystem/TagPartitionedLogSystem.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/logsystem/TagPartitionedLogSystem.actor.cpp) | newEpoch() for creating new TLog generations |

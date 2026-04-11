@@ -2,7 +2,7 @@
 
 **[Diagrams](diagram_12_simulation_testing.md)**
 
-**Location:** `fdbrpc/sim2.cpp`, `fdbserver/workloads/`, `fdbserver/tester/`, `tests/`  
+**Location:** [`fdbrpc/sim2.cpp`](https://github.com/apple/foundationdb/blob/main/fdbrpc/sim2.cpp), [`fdbserver/workloads/`](https://github.com/apple/foundationdb/tree/main/fdbserver/workloads), `fdbserver/tester/`, `tests/`
 **Size:** ~51K workloads + simulator  
 **Role:** Deterministic simulation (Sim2), fault injection (Buggify), workload-based integration tests.
 
@@ -14,7 +14,7 @@ FDB's most distinctive engineering practice. The entire cluster -- multiple proc
 
 ---
 
-## Sim2 -- Deterministic Simulator -- `fdbrpc/sim2.cpp`
+## Sim2 -- Deterministic Simulator -- [`fdbrpc/sim2.cpp`](https://github.com/apple/foundationdb/blob/main/fdbrpc/sim2.cpp)
 
 ### Sim2 Class (line 1025)
 
@@ -213,7 +213,7 @@ struct ICodeProbe {
 
 ---
 
-## Workload System -- `fdbserver/workloads/`
+## Workload System -- [`fdbserver/workloads/`](https://github.com/apple/foundationdb/tree/main/fdbserver/workloads)
 
 ### TestWorkload Base Class (`workloads.h:65-98`)
 
@@ -282,7 +282,7 @@ timeout = 2100
 
 ---
 
-## SimulatedCluster -- `fdbserver/SimulatedCluster.cpp`
+## SimulatedCluster -- [`fdbserver/SimulatedCluster.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/SimulatedCluster.cpp)
 
 ### TestConfig (lines 131-429)
 
@@ -332,13 +332,13 @@ Each tester receives `WorkloadRequest`:
 
 | File | Purpose |
 |------|---------|
-| `fdbrpc/sim2.cpp` | Sim2 deterministic simulator implementation |
-| `fdbrpc/include/fdbrpc/simulator.h` | ISimulator interface |
+| [`fdbrpc/sim2.cpp`](https://github.com/apple/foundationdb/blob/main/fdbrpc/sim2.cpp) | Sim2 deterministic simulator implementation |
+| [`fdbrpc/include/fdbrpc/simulator.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/simulator.h) | ISimulator interface |
 | `fdbrpc/include/fdbrpc/SimulatorProcessInfo.h` | ProcessInfo, MachineInfo |
 | `fdbrpc/include/fdbrpc/AsyncFileNonDurable.h` | Simulated unreliable disk |
 | `flow/include/flow/Buggify.h` | BUGGIFY macros |
 | `flow/include/flow/CodeProbe.h` | CODE_PROBE coverage tracking |
-| `fdbserver/SimulatedCluster.cpp` | Simulated cluster setup, TestConfig |
+| [`fdbserver/SimulatedCluster.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/SimulatedCluster.cpp) | Simulated cluster setup, TestConfig |
 | `fdbserver/tester/include/fdbserver/tester/workloads.h` | TestWorkload base class |
 | `fdbserver/tester/test.cpp` | Test execution orchestration |
 | `fdbserver/workloads/*.cpp` | 60+ workload implementations |

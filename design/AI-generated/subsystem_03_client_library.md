@@ -2,7 +2,7 @@
 
 **[Diagrams](diagram_03_client_library.md)**
 
-**Location:** `fdbclient/`  
+**Location:** [`fdbclient/`](https://github.com/apple/foundationdb/tree/main/fdbclient)
 **Size:** ~75K implementation, ~34K headers  
 **Role:** Everything an application (or internal FDB component) uses to read and write data.
 
@@ -63,7 +63,7 @@ class ReadYourWritesTransaction {
 - `set()`/`clear()` buffer in local `WriteMap`
 - On `commit()`: flush all writes to underlying `Transaction`, then commit
 
-### Layer 3: MultiVersionTransaction -- `MultiVersionTransaction.h/cpp`
+### Layer 3: MultiVersionTransaction -- [`MultiVersionTransaction.cpp`](https://github.com/apple/foundationdb/blob/main/fdbclient/MultiVersionTransaction.cpp)
 
 Supports running against clusters with different protocol versions:
 
@@ -72,7 +72,7 @@ Supports running against clusters with different protocol versions:
 - Converts between `ThreadFuture<T>` (cross-thread) and internal `Future<T>`
 - Enables rolling upgrades with mixed-version clusters
 
-### Layer 4: C API / Language Bindings -- `bindings/c/fdb_c.h`
+### Layer 4: C API / Language Bindings -- [`fdb_c.h`](https://github.com/apple/foundationdb/blob/main/bindings/c/foundationdb/fdb_c.h)
 
 FFI boundary for external languages:
 - `fdb_setup_network()` / `fdb_run_network()` / `fdb_stop_network()` -- lifecycle
@@ -82,7 +82,7 @@ FFI boundary for external languages:
 
 ---
 
-## DatabaseContext -- `DatabaseContext.h`, `DatabaseContext.actor.cpp`
+## DatabaseContext -- `DatabaseContext.h`, [`DatabaseContext.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbclient/DatabaseContext.actor.cpp)
 
 Central state for a database connection. Shared by all transactions on this connection.
 
@@ -119,7 +119,7 @@ Caches recent read versions to reduce GRV proxy load. Background updater via `ba
 
 ---
 
-## Commit Flow -- `NativeAPI.actor.cpp:4369+`
+## Commit Flow -- [`NativeAPI.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbclient/NativeAPI.actor.cpp)`:4369+`
 
 ### tryCommit() Actor
 
@@ -152,7 +152,7 @@ struct CommitTransactionRequest {
 };
 ```
 
-### MutationRef -- `CommitTransaction.h:64-150`
+### MutationRef -- [`CommitTransaction.h`](https://github.com/apple/foundationdb/blob/main/fdbclient/include/fdbclient/CommitTransaction.h)`:64-150`
 
 ```
 struct MutationRef {
@@ -222,7 +222,7 @@ while (true) {
 
 ---
 
-## Cluster Discovery -- `MonitorLeader.h/actor.cpp`
+## Cluster Discovery -- [`MonitorLeader.h`](https://github.com/apple/foundationdb/blob/main/fdbclient/include/fdbclient/MonitorLeader.h)
 
 ### Connection Flow
 
@@ -246,7 +246,7 @@ wait(watch);                          // then wait for change
 
 ---
 
-## System Keys -- `SystemData.h`
+## System Keys -- [`SystemData.h`](https://github.com/apple/foundationdb/blob/main/fdbclient/include/fdbclient/SystemData.h)
 
 Special key ranges for cluster metadata (prefix `\xff`):
 
@@ -277,12 +277,12 @@ Management API exposed as key-value operations:
 
 | File | Purpose |
 |------|---------|
-| `fdbclient/NativeAPI.actor.cpp` | Core transaction implementation, tryCommit, getValue, getRange |
+| [`fdbclient/NativeAPI.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbclient/NativeAPI.actor.cpp) | Core transaction implementation, tryCommit, getValue, getRange |
 | `fdbclient/include/fdbclient/NativeAPI.actor.h` | Transaction class, TransactionState |
-| `fdbclient/ReadYourWrites.actor.cpp` | RYW layer, write map, snapshot cache merging |
+| [`fdbclient/ReadYourWrites.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbclient/ReadYourWrites.actor.cpp) | RYW layer, write map, snapshot cache merging |
 | `fdbclient/include/fdbclient/DatabaseContext.h` | DatabaseContext: location cache, proxy tracking, watches |
-| `fdbclient/include/fdbclient/CommitTransaction.h` | MutationRef, CommitTransactionRef |
-| `fdbclient/MultiVersionTransaction.cpp` | Multi-version client, DLTransaction |
+| [`fdbclient/include/fdbclient/CommitTransaction.h`](https://github.com/apple/foundationdb/blob/main/fdbclient/include/fdbclient/CommitTransaction.h) | MutationRef, CommitTransactionRef |
+| [`fdbclient/MultiVersionTransaction.cpp`](https://github.com/apple/foundationdb/blob/main/fdbclient/MultiVersionTransaction.cpp) | Multi-version client, DLTransaction |
 | `fdbclient/MonitorLeader.actor.cpp` | Cluster discovery, leader tracking |
-| `fdbclient/include/fdbclient/SystemData.h` | System key range definitions |
+| [`fdbclient/include/fdbclient/SystemData.h`](https://github.com/apple/foundationdb/blob/main/fdbclient/include/fdbclient/SystemData.h) | System key range definitions |
 | `fdbclient/ProxyLoadBalance.h` | Proxy load balancing templates |

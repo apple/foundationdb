@@ -2,7 +2,7 @@
 
 **[Diagrams](diagram_11_backup_dr.md)**
 
-**Location:** `fdbserver/backupworker/`, `fdbclient/FileBackupAgent*`, `fdbclient/BackupContainer*`, `fdbbackup/`  
+**Location:** [`fdbserver/backupworker/`](https://github.com/apple/foundationdb/tree/main/fdbserver/backupworker), `fdbclient/FileBackupAgent*`, `fdbclient/BackupContainer*`, [`fdbbackup/`](https://github.com/apple/foundationdb/tree/main/fdbbackup)
 **Size:** ~10K server, ~20K client  
 **Role:** Continuous backup to external storage, point-in-time restore, cross-cluster DR.
 
@@ -43,7 +43,7 @@ Together, range files + log files enable point-in-time restore: restore the rang
 
 ---
 
-## BackupWorker -- `fdbserver/backupworker/BackupWorker.cpp`
+## BackupWorker -- [`fdbserver/backupworker/BackupWorker.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/backupworker/BackupWorker.cpp)
 
 Server-side role that pulls mutations from TLogs (like a storage server, but writes to backup storage).
 
@@ -86,7 +86,7 @@ struct PerBackupInfo {
 
 ---
 
-## BackupAgent -- `fdbclient/BackupAgent.h`, `fdbclient/FileBackupAgent.cpp`
+## BackupAgent -- [`fdbclient/BackupAgent.h`](https://github.com/apple/foundationdb/blob/main/fdbclient/include/fdbclient/BackupAgent.h), [`fdbclient/FileBackupAgent.cpp`](https://github.com/apple/foundationdb/blob/main/fdbclient/FileBackupAgent.cpp)
 
 Client-side orchestration of backup lifecycle.
 
@@ -130,7 +130,7 @@ Future<Void> run(Database cx, double pollDelay, int maxConcurrentTasks);
 
 ---
 
-## Backup Container -- `fdbclient/BackupContainer.h`
+## Backup Container -- [`fdbclient/BackupContainer.h`](https://github.com/apple/foundationdb/blob/main/fdbclient/include/fdbclient/BackupContainer.h)
 
 ### IBackupContainer Interface (lines 249-366)
 
@@ -214,7 +214,7 @@ class RestoreConfig : public KeyBackedTaskConfig {
 
 ---
 
-## Disaster Recovery (DR) -- `fdbclient/DatabaseBackupAgent.cpp`
+## Disaster Recovery (DR) -- [`fdbclient/DatabaseBackupAgent.cpp`](https://github.com/apple/foundationdb/blob/main/fdbclient/DatabaseBackupAgent.cpp)
 
 Streams mutations from one cluster to another in near-real-time.
 
@@ -281,10 +281,10 @@ IBackupContainer ──read range files──▶ Restore Agent
 
 | File | Purpose |
 |------|---------|
-| `fdbserver/backupworker/BackupWorker.cpp` | Server-side mutation pulling and writing |
-| `fdbclient/include/fdbclient/BackupAgent.h` | BackupAgentBase, FileBackupAgent API |
-| `fdbclient/FileBackupAgent.cpp` | Backup/restore orchestration, TaskBucket |
-| `fdbclient/DatabaseBackupAgent.cpp` | DR agent, cross-cluster streaming |
-| `fdbclient/include/fdbclient/BackupContainer.h` | IBackupContainer, file format definitions |
-| `fdbclient/BackupContainerFileSystem.cpp` | Filesystem-based container implementation |
-| `fdbbackup/backup.cpp` | Backup CLI tool |
+| [`fdbserver/backupworker/BackupWorker.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/backupworker/BackupWorker.cpp) | Server-side mutation pulling and writing |
+| [`fdbclient/include/fdbclient/BackupAgent.h`](https://github.com/apple/foundationdb/blob/main/fdbclient/include/fdbclient/BackupAgent.h) | BackupAgentBase, FileBackupAgent API |
+| [`fdbclient/FileBackupAgent.cpp`](https://github.com/apple/foundationdb/blob/main/fdbclient/FileBackupAgent.cpp) | Backup/restore orchestration, TaskBucket |
+| [`fdbclient/DatabaseBackupAgent.cpp`](https://github.com/apple/foundationdb/blob/main/fdbclient/DatabaseBackupAgent.cpp) | DR agent, cross-cluster streaming |
+| [`fdbclient/include/fdbclient/BackupContainer.h`](https://github.com/apple/foundationdb/blob/main/fdbclient/include/fdbclient/BackupContainer.h) | IBackupContainer, file format definitions |
+| [`fdbclient/BackupContainerFileSystem.cpp`](https://github.com/apple/foundationdb/blob/main/fdbclient/BackupContainerFileSystem.cpp) | Filesystem-based container implementation |
+| [`fdbbackup/backup.cpp`](https://github.com/apple/foundationdb/blob/main/fdbbackup/backup.cpp) | Backup CLI tool |

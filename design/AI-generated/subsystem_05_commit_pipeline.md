@@ -2,7 +2,7 @@
 
 **[Diagrams](diagram_05_commit_pipeline.md)**
 
-**Location:** `fdbserver/commitproxy/`, `fdbserver/grvproxy/`, `fdbserver/resolver/`, `fdbserver/sequencer/`  
+**Location:** [`fdbserver/commitproxy/`](https://github.com/apple/foundationdb/tree/main/fdbserver/commitproxy), [`fdbserver/grvproxy/`](https://github.com/apple/foundationdb/tree/main/fdbserver/grvproxy), [`fdbserver/resolver/`](https://github.com/apple/foundationdb/tree/main/fdbserver/resolver), [`fdbserver/sequencer/`](https://github.com/apple/foundationdb/tree/main/fdbserver/sequencer)
 **Size:** ~12K  
 **Role:** Version assignment, conflict detection, commit batching -- the write-path orchestration.
 
@@ -27,7 +27,7 @@ Phase 4: REPLY                          ▼
 
 ---
 
-## Commit Proxy -- `CommitProxyServer.actor.cpp`
+## Commit Proxy -- [`CommitProxyServer.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/commitproxy/CommitProxyServer.actor.cpp)
 
 The workhorse of the commit pipeline. Batches client commits and drives them through all phases.
 
@@ -91,7 +91,7 @@ struct CommitBatchContext {
 
 ---
 
-## GRV Proxy -- `GrvProxyServer.cpp`
+## GRV Proxy -- [`GrvProxyServer.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/grvproxy/GrvProxyServer.cpp)
 
 Assigns read versions to client transactions.
 
@@ -125,7 +125,7 @@ struct GrvProxyData {
 
 ---
 
-## Master/Sequencer -- `masterserver.actor.cpp`
+## Master/Sequencer -- [`masterserver.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/sequencer/masterserver.actor.cpp)
 
 Assigns monotonically increasing commit versions.
 
@@ -176,7 +176,7 @@ Keeps versions roughly aligned with wall-clock microseconds while maintaining mo
 
 ---
 
-## Resolver -- `Resolver.actor.cpp`, `ConflictSet.cpp`
+## Resolver -- [`Resolver.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/resolver/Resolver.actor.cpp), [`ConflictSet.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/resolver/ConflictSet.cpp)
 
 Pure conflict detection. Maintains a sliding window of committed write ranges.
 
@@ -246,10 +246,10 @@ Tags connect mutations to storage servers:
 
 | File | Purpose |
 |------|---------|
-| `fdbserver/commitproxy/CommitProxyServer.actor.cpp` | 5-phase commit batch pipeline |
+| [`fdbserver/commitproxy/CommitProxyServer.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/commitproxy/CommitProxyServer.actor.cpp) | 5-phase commit batch pipeline |
 | `fdbserver/commitproxy/ProxyCommitData.h` | ProxyCommitData, tag lookup |
-| `fdbserver/grvproxy/GrvProxyServer.cpp` | Read version assignment, rate limiting |
-| `fdbserver/sequencer/masterserver.actor.cpp` | Version assignment, wall-clock alignment |
+| [`fdbserver/grvproxy/GrvProxyServer.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/grvproxy/GrvProxyServer.cpp) | Read version assignment, rate limiting |
+| [`fdbserver/sequencer/masterserver.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/sequencer/masterserver.actor.cpp) | Version assignment, wall-clock alignment |
 | `fdbserver/sequencer/MasterData.h` | MasterData, version tracking |
-| `fdbserver/resolver/Resolver.actor.cpp` | Conflict detection, batch resolution |
-| `fdbserver/resolver/ConflictSet.cpp` | SkipList-based conflict range tracking |
+| [`fdbserver/resolver/Resolver.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/resolver/Resolver.actor.cpp) | Conflict detection, batch resolution |
+| [`fdbserver/resolver/ConflictSet.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/resolver/ConflictSet.cpp) | SkipList-based conflict range tracking |

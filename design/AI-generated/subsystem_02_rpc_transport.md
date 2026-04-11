@@ -2,7 +2,7 @@
 
 **[Diagrams](diagram_02_rpc_transport.md)**
 
-**Location:** `fdbrpc/`  
+**Location:** [`fdbrpc/`](https://github.com/apple/foundationdb/tree/main/fdbrpc)
 **Size:** ~28K implementation + headers  
 **Role:** Maps Flow's actor model onto a network -- makes Future/Promise work across process boundaries.
 
@@ -16,7 +16,7 @@ FlowTransport is the layer that lets actors on different processes (or simulated
 
 ## Key Data Structures
 
-### Endpoint -- `FlowTransport.h:43-120`
+### Endpoint -- [`FlowTransport.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/FlowTransport.h)`:43-120`
 
 A globally unique address for a message receiver:
 
@@ -31,7 +31,7 @@ struct Endpoint {
 - **Well-known tokens**: `wellKnownToken(int id)` returns `UID(-1, id)`. Reserved IDs: `WLTOKEN_ENDPOINT_NOT_FOUND(0)`, `WLTOKEN_PING_PACKET`, `WLTOKEN_UNAUTHORIZED_ENDPOINT`, plus system services (leader election, config transactions, etc.)
 - **Address selection**: `choosePrimaryAddress()` swaps primary/secondary based on local TLS preference.
 
-### Peer -- `FlowTransport.h:149-193`
+### Peer -- [`FlowTransport.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/FlowTransport.h)`:149-193`
 
 Per-destination connection state:
 
@@ -61,7 +61,7 @@ struct Peer : ReferenceCounted<Peer> {
 6. On failure: exponential backoff (INITIAL_RECONNECTION_TIME to MAX_RECONNECTION_TIME, growth factor 1.5x)
 7. `discardUnreliablePackets()` on disconnect; reliable packets resent after reconnect
 
-### EndpointMap -- `FlowTransport.actor.cpp:90-230`
+### EndpointMap -- [`FlowTransport.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbrpc/FlowTransport.actor.cpp)`:90-230`
 
 Maps tokens to local message receivers:
 
@@ -78,7 +78,7 @@ struct Entry {
 - `insert()` -- allocates from free list, encodes priority in upper 32 bits
 - `remove()` -- returns slot to free list
 
-### FlowTransport -- `FlowTransport.h:199-315`
+### FlowTransport -- [`FlowTransport.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/FlowTransport.h)`:199-315`
 
 Singleton managing all network communication:
 
@@ -94,11 +94,11 @@ Singleton managing all network communication:
 
 ---
 
-## Request/Reply Pattern -- `fdbrpc.h`
+## Request/Reply Pattern -- [`fdbrpc.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/fdbrpc.h)
 
 The fundamental communication pattern in FDB:
 
-### RequestStream<T> (`fdbrpc.h:728-949`)
+### RequestStream<T> ([`fdbrpc.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/fdbrpc.h)`:728-949`)
 
 A typed channel for sending requests to a service. Wraps a `NetNotifiedQueue<T>`:
 
@@ -113,7 +113,7 @@ stream.send(req);
 GetValueReply reply = wait(req.reply.getFuture());
 ```
 
-### ReplyPromise<T> (`fdbrpc.h:131-204`)
+### ReplyPromise<T> ([`fdbrpc.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/fdbrpc.h)`:131-204`)
 
 Single-value reply channel embedded in requests:
 
@@ -145,7 +145,7 @@ CLIENT:
 14. Client's wait() resolves
 ```
 
-### ReplyPromiseStream<T> (`fdbrpc.h:460-640`)
+### ReplyPromiseStream<T> ([`fdbrpc.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/fdbrpc.h)`:460-640`)
 
 Stream of replies with flow control:
 - Server sends multiple responses
@@ -183,7 +183,7 @@ struct ConnectPacket {
 
 ---
 
-## Failure Monitoring -- `FailureMonitor.h`
+## Failure Monitoring -- [`FailureMonitor.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/FailureMonitor.h)
 
 Tracks endpoint/process availability:
 
@@ -213,7 +213,7 @@ class SimpleFailureMonitor : public IFailureMonitor {
 
 ---
 
-## Locality & Replication -- `Locality.h`, `ReplicationPolicy.h`
+## Locality & Replication -- [`Locality.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/Locality.h), [`ReplicationPolicy.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/ReplicationPolicy.h)
 
 ### LocalityData
 
@@ -227,13 +227,13 @@ Key-value map of location attributes for each process:
 | `keyDcId` | "dc-east" | Datacenter |
 | `keyDataHallId` | "hall-1" | Data hall within DC |
 
-### ProcessClass (`Locality.h:27-154`)
+### ProcessClass ([`Locality.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/Locality.h)`:27-154`)
 
 Classifies process suitability for roles:
 - **ClassType**: `StorageClass`, `TransactionClass`, `LogClass`, `CommitProxyClass`, `GrvProxyClass`, `MasterClass`, `ResolverClass`, etc.
 - **Fitness**: `BestFit` > `GoodFit` > `UnsetFit` > `OkayFit` > `WorstFit` > `ExcludeFit` > `NeverAssign`
 
-### Replication Policies (`ReplicationPolicy.h`)
+### Replication Policies ([`ReplicationPolicy.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/ReplicationPolicy.h))
 
 Composable constraint system:
 - **PolicyOne** -- select 1 replica anywhere
@@ -253,7 +253,7 @@ Computed from locality attributes; used for preferring nearby replicas.
 
 ---
 
-## Sim2 -- Deterministic Simulator -- `sim2.cpp`, `simulator.h`
+## Sim2 -- Deterministic Simulator -- [`sim2.cpp`](https://github.com/apple/foundationdb/blob/main/fdbrpc/sim2.cpp), [`simulator.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/simulator.h)
 
 Replaces Net2 during testing. Runs the entire cluster in a single OS thread with virtual time.
 
@@ -276,7 +276,7 @@ State per simulated process:
 - `globals` -- per-process global variables
 - `shutdownSignal` -- Promise<KillType> for clean shutdown
 
-### SimClogging (`sim2.cpp:198-297`)
+### SimClogging ([`sim2.cpp`](https://github.com/apple/foundationdb/blob/main/fdbrpc/sim2.cpp)`:198-297`)
 
 Simulates network impairment:
 - `getSendDelay()` / `getRecvDelay()` -- adds latency between addresses
@@ -328,13 +328,13 @@ Client-side request distribution:
 
 | File | Purpose |
 |------|---------|
-| `fdbrpc/include/fdbrpc/fdbrpc.h` | RequestStream, ReplyPromise, NetSAV, request/reply pattern |
-| `fdbrpc/include/fdbrpc/FlowTransport.h` | Endpoint, Peer, FlowTransport API |
-| `fdbrpc/FlowTransport.actor.cpp` | Transport implementation, EndpointMap, connection actors |
-| `fdbrpc/include/fdbrpc/FailureMonitor.h` | Failure detection interface and implementation |
-| `fdbrpc/include/fdbrpc/Locality.h` | LocalityData, ProcessClass, LBDistance |
-| `fdbrpc/include/fdbrpc/ReplicationPolicy.h` | PolicyOne, PolicyAcross, PolicyAnd |
+| [`fdbrpc/include/fdbrpc/fdbrpc.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/fdbrpc.h) | RequestStream, ReplyPromise, NetSAV, request/reply pattern |
+| [`fdbrpc/include/fdbrpc/FlowTransport.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/FlowTransport.h) | Endpoint, Peer, FlowTransport API |
+| [`fdbrpc/FlowTransport.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbrpc/FlowTransport.actor.cpp) | Transport implementation, EndpointMap, connection actors |
+| [`fdbrpc/include/fdbrpc/FailureMonitor.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/FailureMonitor.h) | Failure detection interface and implementation |
+| [`fdbrpc/include/fdbrpc/Locality.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/Locality.h) | LocalityData, ProcessClass, LBDistance |
+| [`fdbrpc/include/fdbrpc/ReplicationPolicy.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/ReplicationPolicy.h) | PolicyOne, PolicyAcross, PolicyAnd |
 | `fdbrpc/include/fdbrpc/LoadBalance.actor.h` | Client-side load balancing |
-| `fdbrpc/sim2.cpp` | Sim2 deterministic simulator |
-| `fdbrpc/include/fdbrpc/simulator.h` | ISimulator interface, ProcessInfo |
+| [`fdbrpc/sim2.cpp`](https://github.com/apple/foundationdb/blob/main/fdbrpc/sim2.cpp) | Sim2 deterministic simulator |
+| [`fdbrpc/include/fdbrpc/simulator.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/simulator.h) | ISimulator interface, ProcessInfo |
 | `flow/include/flow/IConnection.h` | IConnection, IListener interfaces |

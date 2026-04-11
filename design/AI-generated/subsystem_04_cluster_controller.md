@@ -2,7 +2,7 @@
 
 **[Diagrams](diagram_04_cluster_controller.md)**
 
-**Location:** `fdbserver/clustercontroller/`, `fdbserver/coordinator/`, `fdbserver/core/LeaderElection.actor.cpp`  
+**Location:** [`fdbserver/clustercontroller/`](https://github.com/apple/foundationdb/tree/main/fdbserver/clustercontroller), [`fdbserver/coordinator/`](https://github.com/apple/foundationdb/tree/main/fdbserver/coordinator), [`fdbserver/core/LeaderElection.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/LeaderElection.actor.cpp)
 **Size:** ~13K + coordination code  
 **Role:** Leader election, role recruitment, process registration, cluster-wide decision making.
 
@@ -20,7 +20,7 @@ One process is elected Cluster Controller (CC). It is the "brain" of the cluster
 
 Typically 3 or 5 processes (addresses hardcoded in cluster file) that run a `leaderRegister` actor. They don't store user data -- only coordination metadata.
 
-### Generation Register -- `Coordination.actor.cpp:67-131`
+### Generation Register -- [`Coordination.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/coordinator/Coordination.actor.cpp)`:67-131`
 
 The fundamental primitive: a register with generation numbers that prevents stale writes.
 
@@ -41,7 +41,7 @@ struct GenerationRegVal {
 - If valid: update writeGen and value, return writeGen
 - If invalid: return `max(readGen, writeGen)` for client retry
 
-### Election Algorithm -- `LeaderElection.actor.cpp`
+### Election Algorithm -- [`LeaderElection.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/LeaderElection.actor.cpp)
 
 **`tryBecomeLeaderInternal()`** (lines 107-300):
 
@@ -63,7 +63,7 @@ struct GenerationRegVal {
 - `changeID` -- unique ID for this leadership claim (top 7 bits = process class fitness)
 - `forward` flag -- signals connection string update
 
-### Coordinated State -- `CoordinatedState.cpp:71-210`
+### Coordinated State -- [`CoordinatedState.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/CoordinatedState.cpp)`:71-210`
 
 Higher-level abstraction over generation registers for cluster-wide state:
 
@@ -131,7 +131,7 @@ struct WorkerHealth {
 
 ---
 
-## Worker Registration -- `ClusterController.actor.cpp:1252-1434`
+## Worker Registration -- [`ClusterController.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterController.actor.cpp)`:1252-1434`
 
 ### RegisterWorkerRequest
 
@@ -251,7 +251,7 @@ struct ServerDBInfo {
 
 ---
 
-## WorkerInterface -- `WorkerInterface.actor.h:45-126`
+## WorkerInterface -- [`WorkerInterface.actor.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/WorkerInterface.actor.h)`:45-126`
 
 RPCs exposed by every worker process:
 
@@ -267,10 +267,10 @@ RPCs exposed by every worker process:
 
 | File | Purpose |
 |------|---------|
-| `fdbserver/clustercontroller/ClusterController.actor.cpp` | CC main loop, worker registration, event handling |
+| [`fdbserver/clustercontroller/ClusterController.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterController.actor.cpp) | CC main loop, worker registration, event handling |
 | `fdbserver/clustercontroller/ClusterController.h` | ClusterControllerData, fitness calculation, recruitment |
-| `fdbserver/coordinator/Coordination.actor.cpp` | leaderRegister, generation register, coordination |
-| `fdbserver/core/LeaderElection.actor.cpp` | tryBecomeLeaderInternal, candidacy, heartbeat |
-| `fdbserver/core/CoordinatedState.cpp` | Replicated read/write over generation registers |
-| `fdbserver/core/include/fdbserver/core/WorkerInterface.actor.h` | WorkerInterface, ClusterControllerFullInterface |
+| [`fdbserver/coordinator/Coordination.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/coordinator/Coordination.actor.cpp) | leaderRegister, generation register, coordination |
+| [`fdbserver/core/LeaderElection.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/LeaderElection.actor.cpp) | tryBecomeLeaderInternal, candidacy, heartbeat |
+| [`fdbserver/core/CoordinatedState.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/CoordinatedState.cpp) | Replicated read/write over generation registers |
+| [`fdbserver/core/include/fdbserver/core/WorkerInterface.actor.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/WorkerInterface.actor.h) | WorkerInterface, ClusterControllerFullInterface |
 | `fdbserver/core/include/fdbserver/core/ServerDBInfo.h` | ServerDBInfo structure and broadcasting |
