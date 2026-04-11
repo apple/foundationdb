@@ -30,8 +30,6 @@
 #include "flow/CoroUtils.h"
 #include <cstdint>
 
-#include "flow/actorcompiler.h" // has to be last include
-
 json_spirit::mValue readJSONStrictly(const std::string& s) {
 	json_spirit::mValue val;
 	std::string::const_iterator i = s.begin();
@@ -304,14 +302,14 @@ void JSONDoc::mergeValueInto(json_spirit::mValue& dst, const json_spirit::mValue
 
 // Check if a quorum of coordination servers is reachable
 // Will not throw, will just return non-present Optional if error
-ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<IClusterConnectionRecord> connRecord,
-                                                                     bool* quorum_reachable,
-                                                                     int* coordinatorsFaultTolerance) {
+Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<IClusterConnectionRecord> connRecord,
+                                                               bool* quorum_reachable,
+                                                               int* coordinatorsFaultTolerance) {
 	try {
-		state ClientCoordinators coord(connRecord);
-		state StatusObject statusObj;
+		ClientCoordinators coord(connRecord);
+		StatusObject statusObj;
 
-		state std::vector<Future<Optional<LeaderInfo>>> leaderServers;
+		std::vector<Future<Optional<LeaderInfo>>> leaderServers;
 		leaderServers.reserve(coord.clientLeaderServers.size());
 		for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
 			if (coord.clientLeaderServers[i].hostname.present()) {
@@ -326,7 +324,7 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<I
 			}
 		}
 
-		state std::vector<Future<ProtocolInfoReply>> coordProtocols;
+		std::vector<Future<ProtocolInfoReply>> coordProtocols;
 		coordProtocols.reserve(coord.clientLeaderServers.size());
 		for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
 			if (coord.clientLeaderServers[i].hostname.present()) {
@@ -339,9 +337,9 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<I
 			}
 		}
 
-		wait(smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.5) &&
-		         smartQuorum(coordProtocols, coordProtocols.size() / 2 + 1, 1.5) ||
-		     delay(2.0));
+		co_await (smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.5) &&
+		              smartQuorum(coordProtocols, coordProtocols.size() / 2 + 1, 1.5) ||
+		          delay(2.0));
 
 		statusObj["quorum_reachable"] = *quorum_reachable =
 		    quorum(leaderServers, leaderServers.size() / 2 + 1).isReady();
@@ -369,24 +367,24 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<I
 		statusObj["coordinators"] = coordsStatus;
 
 		*coordinatorsFaultTolerance = (leaderServers.size() - 1) / 2 - coordinatorsUnavailable;
-		return statusObj;
-	} catch (Error& e) {
+		co_return statusObj;
+	} catch (Error&) {
 		*quorum_reachable = false;
-		return Optional<StatusObject>();
+		co_return Optional<StatusObject>();
 	}
 }
 
 // Client section of the json output
 // Will NOT throw, errors will be put into messages array
-ACTOR Future<StatusObject> clientStatusFetcher(Reference<IClusterConnectionRecord> connRecord,
-                                               StatusArray* messages,
-                                               bool* quorum_reachable,
-                                               int* coordinatorsFaultTolerance) {
-	state StatusObject statusObj;
+Future<StatusObject> clientStatusFetcher(Reference<IClusterConnectionRecord> connRecord,
+                                         StatusArray* messages,
+                                         bool* quorum_reachable,
+                                         int* coordinatorsFaultTolerance) {
+	StatusObject statusObj;
 
-	state Optional<StatusObject> coordsStatusObj =
-	    wait(clientCoordinatorsStatusFetcher(connRecord, quorum_reachable, coordinatorsFaultTolerance));
-	state bool contentsUpToDate = wait(connRecord->upToDate());
+	Optional<StatusObject> coordsStatusObj =
+	    co_await clientCoordinatorsStatusFetcher(connRecord, quorum_reachable, coordinatorsFaultTolerance);
+	bool contentsUpToDate = co_await connRecord->upToDate();
 
 	if (coordsStatusObj.present()) {
 		statusObj["coordinators"] = coordsStatusObj.get();
@@ -403,7 +401,7 @@ ACTOR Future<StatusObject> clientStatusFetcher(Reference<IClusterConnectionRecor
 	statusObj["cluster_file"] = statusObjClusterFile;
 
 	if (!contentsUpToDate) {
-		ClusterConnectionString storedConnectionString = wait(connRecord->getStoredConnectionString());
+		ClusterConnectionString storedConnectionString = co_await connRecord->getStoredConnectionString();
 		std::string description = "Cluster file contents do not match current cluster connection string.";
 		description += "\nThe file contains the connection string: ";
 		description += storedConnectionString.toString().c_str();
@@ -417,50 +415,46 @@ ACTOR Future<StatusObject> clientStatusFetcher(Reference<IClusterConnectionRecor
 		messages->push_back(makeMessage(MessageType::INCORRECT_CLUSTER_FILE_CONTENTS, description.c_str()));
 	}
 
-	return statusObj;
+	co_return statusObj;
 }
 
 // Cluster section of json output
-ACTOR Future<Optional<StatusObject>> clusterStatusFetcher(ClusterInterface cI,
-                                                          StatusArray* messages,
-                                                          std::string statusField) {
-	state StatusRequest req(statusField);
-	state Future<Void> clusterTimeout = delay(30.0);
-	state Optional<StatusObject> oStatusObj;
+Future<Optional<StatusObject>> clusterStatusFetcher(ClusterInterface cI,
+                                                    StatusArray* messages,
+                                                    std::string statusField) {
+	StatusRequest req(statusField);
+	Future<Void> clusterTimeout = delay(30.0);
+	Optional<StatusObject> oStatusObj;
 
-	wait(delay(0.0)); // make sure the cluster controller is marked as not failed
+	co_await delay(0.0); // make sure the cluster controller is marked as not failed
 
-	state Future<ErrorOr<StatusReply>> statusReply = cI.databaseStatus.tryGetReply(req);
-	loop {
-		choose {
-			when(ErrorOr<StatusReply> result = wait(statusReply)) {
-				if (result.isError()) {
-					if (result.getError().code() == error_code_request_maybe_delivered)
-						messages->push_back(makeMessage(MessageType::UNREACHABLE_CLUSTER_CONTROLLER,
-						                                ("Unable to communicate with the cluster controller at " +
-						                                 cI.address().toString() + " to get status.")
-						                                    .c_str()));
-					else if (result.getError().code() == error_code_server_overloaded)
-						messages->push_back(makeMessage(MessageType::SERVER_OVERLOADED,
-						                                "The cluster controller is currently processing too many "
-						                                "status requests and is unable to respond"));
-					else
-						messages->push_back(makeMessage(MessageType::STATUS_INCOMPLETE_ERROR,
-						                                "Cluster encountered an error fetching status."));
-				} else {
-					oStatusObj = result.get().statusObj;
-				}
-				break;
-			}
-			when(wait(clusterTimeout)) {
+	Future<ErrorOr<StatusReply>> statusReply = cI.databaseStatus.tryGetReply(req);
+	auto res = co_await race(statusReply, clusterTimeout);
+	if (res.index() == 0) {
+		ErrorOr<StatusReply> result = std::get<0>(std::move(res));
+		if (result.isError()) {
+			if (result.getError().code() == error_code_request_maybe_delivered)
+				messages->push_back(makeMessage(MessageType::UNREACHABLE_CLUSTER_CONTROLLER,
+				                                ("Unable to communicate with the cluster controller at " +
+				                                 cI.address().toString() + " to get status.")
+				                                    .c_str()));
+			else if (result.getError().code() == error_code_server_overloaded)
+				messages->push_back(makeMessage(MessageType::SERVER_OVERLOADED,
+				                                "The cluster controller is currently processing too many "
+				                                "status requests and is unable to respond"));
+			else
 				messages->push_back(
-				    makeMessage(MessageType::STATUS_INCOMPLETE_TIMEOUT, "Timed out fetching cluster status."));
-				break;
-			}
+				    makeMessage(MessageType::STATUS_INCOMPLETE_ERROR, "Cluster encountered an error fetching status."));
+		} else {
+			oStatusObj = result.get().statusObj;
 		}
+	} else if (res.index() == 1) {
+		messages->push_back(makeMessage(MessageType::STATUS_INCOMPLETE_TIMEOUT, "Timed out fetching cluster status."));
+	} else {
+		UNREACHABLE();
 	}
 
-	return oStatusObj;
+	co_return oStatusObj;
 }
 
 // Create and return a database_status section.
@@ -614,13 +608,13 @@ AsyncResult<StatusObject> statusFetcherImpl(Reference<IClusterConnectionRecord> 
 	co_return statusObj;
 }
 
-ACTOR Future<Void> timeoutMonitorLeader(Database db) {
-	state Future<Void> leadMon = monitorLeader<ClusterInterface>(db->getConnectionRecord(), db->statusClusterInterface);
-	loop {
-		wait(delay(CLIENT_KNOBS->STATUS_IDLE_TIMEOUT + 0.00001 + db->lastStatusFetch - now()));
+Future<Void> timeoutMonitorLeader(Database db) {
+	Future<Void> leadMon = monitorLeader<ClusterInterface>(db->getConnectionRecord(), db->statusClusterInterface);
+	while (true) {
+		co_await delay(CLIENT_KNOBS->STATUS_IDLE_TIMEOUT + 0.00001 + db->lastStatusFetch - now());
 		if (now() - db->lastStatusFetch > CLIENT_KNOBS->STATUS_IDLE_TIMEOUT) {
 			db->statusClusterInterface = Reference<AsyncVar<Optional<ClusterInterface>>>();
-			return Void();
+			co_return;
 		}
 	}
 }
