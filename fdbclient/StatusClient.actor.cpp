@@ -522,9 +522,8 @@ AsyncResult<StatusObject> statusFetcherImpl(Reference<IClusterConnectionRecord> 
 	try {
 		int64_t clientTime = g_network->timer();
 
-		StatusObject _statusObjClient =
+		statusObjClient =
 		    co_await clientStatusFetcher(connRecord, &clientMessages, &quorum_reachable, &coordinatorsFaultTolerance);
-		statusObjClient = _statusObjClient;
 
 		if (clientTime != -1)
 			statusObjClient["timestamp"] = clientTime;
@@ -549,7 +548,7 @@ AsyncResult<StatusObject> statusFetcherImpl(Reference<IClusterConnectionRecord> 
 					Optional<StatusObject> _statusObjCluster =
 					    co_await clusterStatusFetcher(clusterInterface->get().get(), &clientMessages, statusField);
 					if (_statusObjCluster.present()) {
-						statusObjCluster = _statusObjCluster.get();
+						statusObjCluster = std::move(_statusObjCluster).get();
 						// TODO: this is a temporary fix, getting the number of available coordinators should move to
 						// the server side
 						if (statusObjCluster.count("fault_tolerance")) {
