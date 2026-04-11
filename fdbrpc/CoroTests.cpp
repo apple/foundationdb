@@ -1342,7 +1342,7 @@ TEST_CASE("/flow/coro/quorumAsyncResultReady") {
 	results.push_back(immediateAsyncResultInt(1));
 	results.push_back(immediateAsyncResultInt(2));
 
-	Future<Void> q = quorum(results, 2);
+	Future<Void> q = quorum(std::move(results), 2);
 	ASSERT(q.isReady());
 	co_await q;
 }
@@ -1354,7 +1354,7 @@ TEST_CASE("/flow/coro/quorumAsyncResultSuccess") {
 		results.push_back(delayedAsyncResultInt(signals[i].getFuture(), i));
 	}
 
-	Future<Void> q = quorum(results, 2);
+	Future<Void> q = quorum(std::move(results), 2);
 	ASSERT(!q.isReady());
 	signals[0].send(Void());
 	ASSERT(!q.isReady());
@@ -1386,7 +1386,7 @@ TEST_CASE("/flow/coro/quorumAsyncResultError") {
 	results.push_back(delayedAsyncResultInt(successSignal.getFuture(), 1));
 	results.push_back(failingAsyncResultInt(errorSignal.getFuture()));
 
-	Future<Void> q = quorum(results, 2);
+	Future<Void> q = quorum(std::move(results), 2);
 	ASSERT(!q.isReady());
 	successSignal.send(Void());
 	ASSERT(!q.isReady());

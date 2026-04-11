@@ -1201,11 +1201,10 @@ Future<Void> quorum(AsyncResult<T>* pItems, int itemCount, int n) {
 	return Future<Void>(q);
 }
 
-// AsyncResult is single-consumer, so these overloads move from the input results.
+// AsyncResult is single-consumer, so quorum requires an explicit ownership
+// transfer from vector callers.
 template <class T>
-Future<Void> quorum(std::vector<AsyncResult<T>>& results, int n) {
-	return quorum(results.data(), results.size(), n);
-}
+Future<Void> quorum(std::vector<AsyncResult<T>>& results, int n) = delete;
 
 template <class T>
 Future<Void> quorum(std::vector<AsyncResult<T>>&& results, int n) {
