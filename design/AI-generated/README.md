@@ -23,12 +23,15 @@ Prompts:
 
 This generated the file `foundationdb_subsystem_map.md`.
 
-*save this exact full description to a file*
+Subsequently:
 
-*for each of the 12 subsystems identified above, please study the code in depth and generate a module-specific architecture/design/implementation overview, focusing on the key data   
-  structures, methods, and data flow in the system.  Please save each subsystem-specific overview to its own .md file
+*for each of the 12 subsystems identified above, please study the code
+ in depth and generate a module-specific
+ architecture/design/implementation overview, focusing on the key data
+ structures, methods, and data flow in the system.  Please save each
+ subsystem-specific overview to its own .md file*
 
-This generated the 12 files named `subsystem_*`.
+This generated the 12 files whose names have a `subsystem_` prefix.
 
 ## Rationale
 
