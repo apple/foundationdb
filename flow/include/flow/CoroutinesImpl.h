@@ -844,9 +844,11 @@ struct CoroPromise : CoroReturn<T, CoroPromise<T, IsCancellable, ReturnsExplicit
 };
 
 template <class T, bool IsCancellable, bool ReturnsExplicitVoid>
-struct AsyncResultPromise
-  : AsyncResultReturn<T, AsyncResultPromise<T, IsCancellable, ReturnsExplicitVoid>, ReturnsExplicitVoid> {
+struct AsyncResultPromise : AsyncResultReturn<std::conditional_t<std::is_void_v<T>, Void, T>,
+                                              AsyncResultPromise<T, IsCancellable, ReturnsExplicitVoid>,
+                                              ReturnsExplicitVoid> {
 	using promise_type = AsyncResultPromise<T, IsCancellable, ReturnsExplicitVoid>;
+	// AsyncResult<void> still stores completion as Void inside AsyncResultState.
 	using ReturnValue = std::conditional_t<std::is_void_v<T>, Void, T>;
 	using ReturnAsyncResultType = AsyncResult<T>;
 	using State = AsyncResultState<ReturnValue>;

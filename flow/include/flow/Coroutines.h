@@ -80,6 +80,12 @@ struct AsyncResultAwaiter;
 template <class Parent, int Idx, class ValueType>
 struct ActorAsyncResultCallback;
 
+template <class ValueType>
+struct QuorumAsyncResultCallback;
+
+template <class ValueType>
+struct GetAllAsyncResultCallback;
+
 template <class PromiseType, class ValueType>
 struct AwaitableFutureIgnore;
 
@@ -151,15 +157,22 @@ public:
 	void cancel() const;
 	void addCallbackAndClear(coro::AsyncResultCallback<StoredT>* cb) &&;
 
-	T const& get() const&
+	// add_lvalue_reference_t maps void to void, so this stays well-formed for
+	// AsyncResult<void> even though the accessor itself is constrained away.
+	std::add_lvalue_reference_t<std::add_const_t<T>> get() const&
 	    requires(!std::is_void_v<T>);
-	T get() && requires(!std::is_void_v<T>);
-	T getValue() const&
+	std::conditional_t<std::is_void_v<T>, void, T> get() &&
+	    requires(!std::is_void_v<T>);
+	std::conditional_t<std::is_void_v<T>, void, T> getValue() const&
 	    requires(!std::is_void_v<T>)
 	{
 		return get();
 	}
-	T getValue() && requires(!std::is_void_v<T>) { return std::move(*this).get(); }
+	std::conditional_t<std::is_void_v<T>, void, T> getValue() &&
+	    requires(!std::is_void_v<T>)
+	{
+		return std::move(*this).get();
+	}
 
 	    auto operator co_await() &;
 	auto operator co_await() &&;
@@ -178,6 +191,10 @@ private:
 	friend struct coro::AsyncResultAwaiter;
 	template <class Parent, int Idx, class ValueType>
 	friend struct coro::ActorAsyncResultCallback;
+	template <class ValueType>
+	friend struct coro::QuorumAsyncResultCallback;
+	template <class ValueType>
+	friend struct coro::GetAllAsyncResultCallback;
 };
 
 #include "flow/CoroutinesImpl.h"
@@ -349,7 +366,7 @@ void AsyncResult<T>::addCallbackAndClear(coro::AsyncResultCallback<StoredT>* cb)
 }
 
 template <class T>
-T const& AsyncResult<T>::get() const&
+std::add_lvalue_reference_t<std::add_const_t<T>> AsyncResult<T>::get() const&
     requires(!std::is_void_v<T>)
 {
 	ASSERT(state);
@@ -357,14 +374,15 @@ T const& AsyncResult<T>::get() const&
 }
 
 template <class T>
-    T AsyncResult<T>::get() &&
-    requires(!std::is_void_v<T>) {
-	    ASSERT(state);
-	    return state->take();
-    }
+std::conditional_t<std::is_void_v<T>, void, T> AsyncResult<T>::get() &&
+    requires(!std::is_void_v<T>)
+{
+	ASSERT(state);
+	return state->take();
+}
 
-    template <class T>
-    auto AsyncResult<T>::operator co_await() & {
+template <class T>
+auto AsyncResult<T>::operator co_await() & {
 	return coro::AsyncResultAwaiter<T>{ std::move(*this) };
 }
 
