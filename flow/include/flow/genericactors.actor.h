@@ -1141,7 +1141,7 @@ struct QuorumAsyncResultCallback final : AsyncResultCallback<typename AsyncResul
 namespace coro {
 template <class T>
 QuorumAsyncResultCallback<T>::QuorumAsyncResultCallback(AsyncResult<T>& result, QuorumAsyncResult<T>* head)
-  : resultState(result.state), head(head) {
+  : resultState(result.resultState), head(head) {
 	std::move(result).addCallbackAndClear(this);
 }
 
@@ -1296,7 +1296,7 @@ struct GetAllAsyncResultCallback final : AsyncResultCallback<typename AsyncResul
 namespace coro {
 template <class T>
 GetAllAsyncResultCallback<T>::GetAllAsyncResultCallback(AsyncResult<T>& result, GetAllAsyncResult<T>* head, int idx)
-  : resultState(result.state), head(head), idx(idx) {
+  : resultState(result.resultState), head(head), idx(idx) {
 	std::move(result).addCallbackAndClear(this);
 }
 
