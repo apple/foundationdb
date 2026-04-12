@@ -137,7 +137,7 @@
 #endif
 
 template <class T>
-class Future;
+class AsyncResult;
 class Void;
 
 // g++ requires that non-dependent names have to be looked up at
@@ -425,14 +425,14 @@ bool createDirectory(std::string const& directory);
 
 // e.g. extension==".fdb", returns filenames relative to directory
 std::vector<std::string> listFiles(std::string const& directory, std::string const& extension = "");
-Future<std::vector<std::string>> listFilesAsync(std::string const& directory, std::string const& extension = "");
+AsyncResult<std::vector<std::string>> listFilesAsync(std::string const& directory, std::string const& extension = "");
 
 // returns directory names relative to directory
 std::vector<std::string> listDirectories(std::string const& directory);
-Future<std::vector<std::string>> listDirectoriesAsync(std::string const& directory);
+AsyncResult<std::vector<std::string>> listDirectoriesAsync(std::string const& directory);
 
 void findFilesRecursively(std::string const& path, std::vector<std::string>& out);
-Future<Void> findFilesRecursivelyAsync(std::string path, std::vector<std::string>* out);
+AsyncResult<Void> findFilesRecursivelyAsync(std::string path, std::vector<std::string>* out);
 
 // Tag the given file as "temporary", i.e. not really needing commits to disk
 void makeTemporary(const char* filename);
