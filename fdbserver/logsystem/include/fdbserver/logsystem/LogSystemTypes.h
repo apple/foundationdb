@@ -22,7 +22,6 @@
 #define FDBSERVER_LOGSYSTEM_LOGSYSTEMTYPES_H
 #pragma once
 
-#include "fdbserver/core/LogSystem.h"
 #include "fdbserver/core/LogSystemConfig.h"
 #include "fdbserver/core/DBCoreState.h"
 

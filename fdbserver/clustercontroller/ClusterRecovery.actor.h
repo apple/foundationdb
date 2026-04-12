@@ -39,7 +39,7 @@
 #include "ClusterController.h"
 #include "fdbserver/core/DBCoreState.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/core/LogSystemConfig.h"
 #include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/WorkerInterface.actor.h"

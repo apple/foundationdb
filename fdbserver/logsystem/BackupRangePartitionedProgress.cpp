@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/core/BackupRangePartitionedProgress.h"
+#include "fdbserver/logsystem/BackupRangePartitionedProgress.h"
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"

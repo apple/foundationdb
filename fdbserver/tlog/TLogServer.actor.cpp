@@ -42,7 +42,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/core/ServerDBInfo.h"
-#include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "flow/Histogram.h"
 #include "flow/DebugTrace.h"

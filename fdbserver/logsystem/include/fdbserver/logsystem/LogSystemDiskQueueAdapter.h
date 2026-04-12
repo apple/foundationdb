@@ -24,7 +24,6 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/core/IDiskQueue.h"
-#include "fdbserver/core/LogSystem.h"
 #include "fdbserver/logsystem/LogSystem.h"
 
 struct PeekTxsInfo {

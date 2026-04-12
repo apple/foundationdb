@@ -31,7 +31,7 @@
 #include "fdbserver/core/ShardSizing.h"
 #include "fdbclient/RunRYWTransaction.h"
 #include "fdbserver/datadistributor/DDTxnProcessor.h"
-#include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/datadistributor/ShardsAffectedByTeamFailure.h"
 #include "fdbserver/datadistributor/TCInfo.h"
 #include "fdbclient/StorageWiggleMetrics.h"

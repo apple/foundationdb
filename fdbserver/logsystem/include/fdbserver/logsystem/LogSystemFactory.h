@@ -22,7 +22,6 @@
 #define FDBSERVER_LOGSYSTEM_LOGSYSTEMFACTORY_H
 #pragma once
 
-#include "fdbserver/core/LogSystem.h"
 #include "fdbserver/logsystem/LogSystem.h"
 
 Reference<LogSystem> makeLogSystemFromServerDBInfo(

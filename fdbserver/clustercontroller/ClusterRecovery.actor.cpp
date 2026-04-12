@@ -23,8 +23,8 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/sim_validation.h"
-#include "fdbserver/core/ApplyMetadataMutation.h"
-#include "fdbserver/core/BackupProgress.h"
+#include "fdbserver/logsystem/ApplyMetadataMutation.h"
+#include "fdbserver/logsystem/BackupProgress.h"
 #include "ClusterRecovery.actor.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MasterInterface.h"

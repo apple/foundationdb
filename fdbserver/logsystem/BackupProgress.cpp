@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/core/BackupProgress.h"
+#include "fdbserver/logsystem/BackupProgress.h"
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"

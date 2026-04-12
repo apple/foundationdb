@@ -20,9 +20,8 @@
 
 #include "fdbrpc/Stats.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/logrouter/LogRouter.h"
-#include "fdbserver/logsystem/LogSystemTypes.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/core/RecoveryState.h"

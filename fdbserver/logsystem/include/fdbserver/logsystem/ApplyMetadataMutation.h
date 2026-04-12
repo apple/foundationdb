@@ -34,9 +34,8 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/IKeyValueStore.h"
-#include "fdbserver/core/LogSystem.h"
 #include "fdbserver/core/LogProtocolMessage.h"
-#include "../../../../logsystem/include/fdbserver/logsystem/LogSystem.h"
+#include "fdbserver/logsystem/LogSystem.h"
 #include "flow/FastRef.h"
 
 class AccumulativeChecksumBuilder;

@@ -30,7 +30,7 @@
 #include "fdbserver/grvproxy/GrvProxyServer.h"
 #include "GrvProxyTagThrottler.h"
 #include "GrvTransactionRateInfo.h"
-#include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/WaitFailure.h"
