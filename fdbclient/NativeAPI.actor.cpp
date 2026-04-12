@@ -1209,28 +1209,24 @@ ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
 		try {
 			wait(cx->getBackoff());
 			++cx->transactionKeyServerLocationRequests;
-			choose {
-				when(wait(cx->onProxiesChanged())) {}
-				when(GetKeyServerLocationsReply rep = wait(basicLoadBalance(
-				         cx->getCommitProxies(useProvisionalProxies),
-				         &CommitProxyInterface::getKeyServersLocations,
-				         GetKeyServerLocationsRequest(
-				             span.context, key, Optional<KeyRef>(), /*limit=*/100, isBackward, version, key.arena()),
-				         TaskPriority::DefaultPromiseEndpoint))) {
-					++cx->transactionKeyServerLocationRequestsCompleted;
-					if (debugID.present())
-						g_traceBatch.addEvent(
-						    "TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocation.After");
-					ASSERT(rep.results.size() == 1);
+			state GetKeyServerLocationsReply rep = wait(commitProxyLoadBalance(
+			    cx,
+			    makeReqBuilder<GetKeyServerLocationsRequest>(
+			        span.context, key, Optional<KeyRef>(), /*limit=*/100, isBackward, version, key.arena()),
+			    &CommitProxyInterface::getKeyServersLocations,
+			    useProvisionalProxies,
+			    TaskPriority::DefaultPromiseEndpoint));
+			++cx->transactionKeyServerLocationRequestsCompleted;
+			if (debugID.present())
+				g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocation.After");
+			ASSERT(rep.results.size() == 1);
 
-					auto locationInfo = cx->setCachedLocation(rep.results[0].first, rep.results[0].second);
-					updateTssMappings(cx, rep);
-					updateTagMappings(cx, rep);
+			auto locationInfo = cx->setCachedLocation(rep.results[0].first, rep.results[0].second);
+			updateTssMappings(cx, rep);
+			updateTagMappings(cx, rep);
 
-					cx->updateBackoff(success());
-					return KeyRangeLocationInfo(KeyRange(rep.results[0].first, rep.arena), locationInfo);
-				}
-			}
+			cx->updateBackoff(success());
+			return KeyRangeLocationInfo(KeyRange(rep.results[0].first, rep.arena), locationInfo);
 		} catch (Error& e) {
 			if (e.code() == error_code_commit_proxy_memory_limit_exceeded) {
 				// Eats commit_proxy_memory_limit_exceeded error from commit proxies

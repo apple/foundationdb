@@ -53,17 +53,28 @@ ReqBuilder<Req, std::decay_t<Args>...> makeReqBuilder(Args&&... args) {
 template <class Req, class Builder>
 Future<REPLY_TYPE(Req)> commitProxyLoadBalance(Database cx,
                                                Builder reqBuilder,
-                                               RequestStream<Req> CommitProxyInterface::* channel,
+                                               RequestStream<Req> CommitProxyInterface::*channel,
+                                               UseProvisionalProxies useProvisionalProxies,
+                                               TaskPriority taskID,
                                                AtMostOnce atMostOnce = AtMostOnce::False,
                                                ExplicitVoid = {}) {
 	while (true) {
 		Future<REPLY_TYPE(Req)> replyFuture = basicLoadBalance(
-		    cx->getCommitProxies(UseProvisionalProxies::False), channel, reqBuilder.build(), cx->taskID, atMostOnce);
+		    cx->getCommitProxies(useProvisionalProxies), channel, reqBuilder.build(), taskID, atMostOnce);
 		auto res = co_await race(replyFuture, cx->onProxiesChanged());
 		if (res.index() == 0) {
 			co_return std::get<0>(std::move(res));
 		}
 	}
+}
+
+template <class Req, class Builder>
+Future<REPLY_TYPE(Req)> commitProxyLoadBalance(Database cx,
+                                               Builder reqBuilder,
+                                               RequestStream<Req> CommitProxyInterface::*channel,
+                                               AtMostOnce atMostOnce = AtMostOnce::False,
+                                               ExplicitVoid = {}) {
+	return commitProxyLoadBalance(cx, reqBuilder, channel, UseProvisionalProxies::False, cx->taskID, atMostOnce);
 }
 
 // Retries a GRV-proxy request whenever the proxy set changes before a reply arrives.
