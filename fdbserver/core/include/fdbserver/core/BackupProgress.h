@@ -34,12 +34,24 @@ public:
 	BackupProgress(UID id, const std::map<LogEpoch, EpochTagsVersionsInfo>& infos) : dbgid(id), epochInfos(infos) {}
 	~BackupProgress() {}
 
+	// Adds a backup status. If the tag already has an entry, then the max of
+	// savedVersion is used.
 	void addBackupStatus(const WorkerBackupStatus& status);
 
+	// Returns a map of tuple<Epoch, endVersion, logRouterTags> : std::map<tag, savedVersion>, so that
+	// the backup range should be [savedVersion + 1, endVersion) for the "tag" of the "Epoch".
+	//
+	// Specifically, the backup ranges for each old epoch are:
+	//    if tag in tags_without_backup_progress:
+	//        backup [epochBegin, endVersion)
+	//    else if savedVersion < endVersion - 1 = knownCommittedVersion
+	//        backup [savedVersion + 1, endVersion)
 	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> getUnfinishedBackup();
 
+	// Set the value for "backupStartedKey"
 	void setBackupStartedValue(Optional<Value> value) { backupStartedValue = value; }
 
+	// Returns progress for an epoch.
 	std::map<Tag, Version> getEpochStatus(LogEpoch epoch) const {
 		const auto it = progress.find(epoch);
 		if (it == progress.end())
@@ -60,6 +72,8 @@ private:
 		return tags;
 	}
 
+	// For each tag in progress, the saved version is smaller than endVersion - 1,
+	// add {tag, savedVersion+1} to tagVersions and remove the tag from "tags".
 	void updateTagVersions(std::map<Tag, Version>* tagVersions,
 	                       std::set<Tag>* tags,
 	                       const std::map<Tag, Version>& progress,
@@ -68,9 +82,20 @@ private:
 	                       LogEpoch epoch);
 
 	const UID dbgid;
+
+	// Note this MUST be iterated in ascending order.
 	const std::map<LogEpoch, EpochTagsVersionsInfo> epochInfos;
+
+	// Backup progress saved in the system keyspace. Note there can be multiple
+	// progress status for a tag in an epoch due to later epoch trying to fill
+	// the gap. "progress" MUST be iterated in ascending order.
 	std::map<LogEpoch, std::map<Tag, Version>> progress;
+
+	// LogRouterTags for each epoch obtained by decoding backup progress from
+	// the system keyspace.
 	std::map<LogEpoch, int32_t> epochTags;
+
+	// Value of the "backupStartedKey".
 	Optional<Value> backupStartedValue;
 };
 

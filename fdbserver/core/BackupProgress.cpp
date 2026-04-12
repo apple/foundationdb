@@ -52,6 +52,8 @@ void BackupProgress::updateTagVersions(std::map<Tag, Version>* tagVersions,
                                        Version adjustedBeginVersion,
                                        LogEpoch epoch) {
 	for (const auto& [tag, savedVersion] : progress) {
+		// If tag is not in "tags", it means the old epoch has more tags than
+		// new epoch's tags. Just ignore the tag here.
 		auto n = tags->erase(tag);
 		if (n > 0 && savedVersion < endVersion - 1) {
 			const Version beginVersion =
@@ -71,13 +73,16 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> toRecruit;
 
 	if (!backupStartedValue.present())
-		return toRecruit;
+		return toRecruit; // No active backups
 
 	Version lastEnd = invalidVersion;
 	for (const auto& [epoch, info] : epochInfos) {
 		std::set<Tag> tags = enumerateLogRouterTags(info.logRouterTags);
 		std::map<Tag, Version> tagVersions;
 
+		// Sometimes, an epoch's begin version is lower than the previous epoch's
+		// end version. In this case, adjust the epoch's begin version to be the
+		// same as previous end version.
 		Version adjustedBeginVersion = lastEnd > info.epochBegin ? lastEnd : info.epochBegin;
 		lastEnd = info.epochEnd;
 
@@ -86,6 +91,7 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 			std::set<Tag> toCheck = tags;
 			for (auto current = progressIt; current != progress.begin() && !toCheck.empty();) {
 				auto prev = std::prev(current);
+				// Previous epoch is gone, consolidate the progress.
 				for (auto [tag, version] : prev->second) {
 					if (toCheck.contains(tag)) {
 						progressIt->second[tag] = std::max(version, progressIt->second[tag]);
@@ -101,6 +107,9 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 			    progress.rend(),
 			    [epoch = epoch](const std::pair<LogEpoch, std::map<Tag, Version>>& p) { return p.first < epoch; });
 			while (!(rit == progress.rend())) {
+				// A partial recovery can result in empty epoch that copies previous
+				// epoch's version range. In this case, we should check previous
+				// epoch's savedVersion.
 				int savedMore = 0;
 				for (auto [tag, version] : rit->second) {
 					if (version >= info.epochBegin) {
@@ -108,6 +117,8 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 					}
 				}
 				if (savedMore > 0) {
+					// The logRouterTags are the same
+					// ASSERT(info.logRouterTags == epochTags[rit->first]);
 					updateTagVersions(&tagVersions, &tags, rit->second, info.epochEnd, adjustedBeginVersion, epoch);
 					if (tags.empty())
 						break;
@@ -116,7 +127,7 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 			}
 		}
 
-		for (const Tag& tag : tags) {
+		for (const Tag& tag : tags) { // tags without progress data
 			tagVersions.insert({ tag, adjustedBeginVersion });
 			TraceEvent("BackupVersionRange", dbgid)
 			    .detail("OldEpoch", epoch)
@@ -132,6 +143,7 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 	return toRecruit;
 }
 
+// Save each tag's savedVersion for all epochs into "bStatus".
 Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupProgress> bStatus, Severity severity) {
 	Transaction tr(cx);
 

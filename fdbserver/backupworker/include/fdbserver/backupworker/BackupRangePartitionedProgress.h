@@ -50,7 +50,12 @@ public:
 	void delref() { ReferenceCounted<BackupRangePartitionedProgress>::delref(); }
 
 private:
+	// Used for logging and debugging purpose to identify which backup progress it is.
 	const UID dbgid;
+
+	// Backup progress saved in the system keyspace. Note there can be multiple
+	// progress status for a tag in an epoch due to later epoch trying to fill
+	// the gap. "progress" MUST be iterated in ascending order.
 	std::map<LogEpoch, std::map<Tag, Version>> progress;
 };
 
