@@ -4086,30 +4086,31 @@ Optional<KeyRangeRef> intersects(VectorRef<KeyRangeRef> lhs, VectorRef<KeyRangeR
 	return Optional<KeyRangeRef>();
 }
 
-ACTOR void checkWrites(Reference<TransactionState> trState,
-                       Future<Void> committed,
-                       Promise<Void> outCommitted,
-                       CommitTransactionRequest req) {
-	state Version version;
+Future<Void> checkWrites(Uncancellable,
+                         Reference<TransactionState> trState,
+                         Future<Void> committed,
+                         Promise<Void> outCommitted,
+                         CommitTransactionRequest req) {
+	Version version{ 0 };
 	try {
-		wait(committed);
+		co_await committed;
 		// If the commit is successful, by definition the transaction still exists for now.  Grab the version, and don't
 		// use it again.
 		version = trState->committedVersion;
 		outCommitted.send(Void());
 	} catch (Error& e) {
 		outCommitted.sendError(e);
-		return;
+		co_return;
 	}
 
-	wait(delay(deterministicRandom()->random01())); // delay between 0 and 1 seconds
+	co_await delay(deterministicRandom()->random01()); // delay between 0 and 1 seconds
 
-	state KeyRangeMap<MutationBlock> expectedValues;
+	KeyRangeMap<MutationBlock> expectedValues;
 
 	auto& mutations = req.transaction.mutations;
-	state int mCount = mutations.size(); // debugging info for traceEvent
+	const int mCount = mutations.size(); // debugging info for traceEvent
 
-	for (int idx = 0; idx < mutations.size(); idx++) {
+	for (int idx = 0; idx < mutations.size(); ++idx) {
 		if (mutations[idx].type == MutationRef::SetValue)
 			expectedValues.insert(singleKeyRange(mutations[idx].param1), MutationBlock(mutations[idx].param2));
 		else if (mutations[idx].type == MutationRef::ClearRange)
@@ -4117,26 +4118,25 @@ ACTOR void checkWrites(Reference<TransactionState> trState,
 	}
 
 	try {
-		state Transaction tr(trState->cx);
+		Transaction tr(trState->cx);
 		tr.setVersion(version);
-		state int checkedRanges = 0;
-		state KeyRangeMap<MutationBlock>::Ranges ranges = expectedValues.ranges();
-		state KeyRangeMap<MutationBlock>::iterator it = ranges.begin();
-		for (; it != ranges.end(); ++it) {
-			state MutationBlock m = it->value();
+		int checkedRanges = 0;
+		auto ranges = expectedValues.ranges();
+		for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+			MutationBlock m = it->value();
 			if (m.mutated) {
 				checkedRanges++;
 				if (m.cleared) {
-					RangeResult shouldBeEmpty = wait(tr.getRange(it->range(), 1));
+					RangeResult shouldBeEmpty = co_await tr.getRange(it->range(), 1);
 					if (shouldBeEmpty.size()) {
 						TraceEvent(SevError, "CheckWritesFailed")
 						    .detail("Class", "Clear")
 						    .detail("KeyBegin", it->range().begin)
 						    .detail("KeyEnd", it->range().end);
-						return;
+						co_return;
 					}
 				} else {
-					Optional<Value> val = wait(tr.get(it->range().begin));
+					Optional<Value> val = co_await tr.get(it->range().begin);
 					if (!val.present() || val.get() != m.setValue) {
 						TraceEvent evt(SevError, "CheckWritesFailed");
 						evt.detail("Class", "Set").detail("Key", it->range().begin).detail("Expected", m.setValue);
@@ -4144,7 +4144,7 @@ ACTOR void checkWrites(Reference<TransactionState> trState,
 							evt.detail("Actual", "_Value Missing_");
 						else
 							evt.detail("Actual", val.get());
-						return;
+						co_return;
 					}
 				}
 			}
@@ -4669,7 +4669,7 @@ Future<Void> Transaction::commitMutations() {
 
 		if (isCheckingWrites) {
 			Promise<Void> committed;
-			checkWrites(trState, commitResult, committed, tr);
+			checkWrites(Uncancellable(), trState, commitResult, committed, tr);
 			return committed.getFuture();
 		}
 		return commitResult;
