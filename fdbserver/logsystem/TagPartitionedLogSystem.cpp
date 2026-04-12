@@ -1652,10 +1652,15 @@ Future<Version> TagPartitionedLogSystem::getPoppedFromTLog(Reference<AsyncVar<Op
                                                            Tag tag) {
 
 	while (true) {
-		auto res = co_await race(log->get().present() ? brokenPromiseToNever(log->get().interf().peekMessages.getReply(
-		                                                    TLogPeekRequest(-1, tag, false, false)))
-		                                              : Never(),
-		                         log->onChange());
+		const auto logInterface = log->get();
+		if (!logInterface.present()) {
+			co_await log->onChange();
+			continue;
+		}
+
+		auto res = co_await race(
+		    brokenPromiseToNever(logInterface.interf().peekMessages.getReply(TLogPeekRequest(-1, tag, false, false))),
+		    log->onChange());
 		if (res.index() == 0) {
 			TLogPeekReply rep = std::get<0>(std::move(res));
 
@@ -3645,16 +3650,21 @@ Future<Void> TagPartitionedLogSystem::trackRejoins(
 
 Future<TLogLockResult> TagPartitionedLogSystem::lockTLog(UID myID,
                                                          Reference<AsyncVar<OptionalInterface<TLogInterface>>> tlog) {
-	TraceEvent("TLogLockStarted", myID).detail("TLog", tlog->get().id()).detail("InfPresent", tlog->get().present());
+	const auto initialTLog = tlog->get();
+	TraceEvent("TLogLockStarted", myID).detail("TLog", initialTLog.id()).detail("InfPresent", initialTLog.present());
 	while (true) {
-		auto res = co_await race(tlog->get().present()
-		                             ? brokenPromiseToNever(tlog->get().interf().lock.getReply<TLogLockResult>())
-		                             : Never(),
+		const auto tlogInterface = tlog->get();
+		if (!tlogInterface.present()) {
+			co_await tlog->onChange();
+			continue;
+		}
+
+		auto res = co_await race(brokenPromiseToNever(tlogInterface.interf().lock.getReply<TLogLockResult>()),
 		                         tlog->onChange());
 		if (res.index() == 0) {
 			TLogLockResult data = std::get<0>(std::move(res));
 
-			TraceEvent("TLogLocked", myID).detail("TLog", tlog->get().id()).detail("End", data.end);
+			TraceEvent("TLogLocked", myID).detail("TLog", tlogInterface.id()).detail("End", data.end);
 			co_return data;
 		}
 	}
