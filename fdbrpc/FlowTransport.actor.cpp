@@ -1698,16 +1698,9 @@ static Future<Void> connectionIncoming(TransportData* self, Reference<IConnectio
 	}
 }
 
-static Future<Void> listen(TransportData* self, NetworkAddress listenAddr) {
+static Future<Void> listenImpl(TransportData* self, NetworkAddress listenAddr, Reference<IListener> listener) {
 	ActorCollectionNoErrors
 	    incoming; // Actors monitoring incoming connections that haven't yet been associated with a peer
-	Reference<IListener> listener = INetworkConnections::net()->listen(listenAddr);
-	if (!g_network->isSimulated() && self->localAddresses.getAddressList().address.port == 0) {
-		TraceEvent(SevInfo, "UpdatingListenAddress")
-		    .detail("AssignedListenAddress", listener->getListenAddress().toString());
-		self->localAddresses.setNetworkAddress(listener->getListenAddress());
-		setTraceLocalAddress(listener->getListenAddress());
-	}
 	uint64_t connectionCount = 0;
 	try {
 		while (true) {
@@ -1731,6 +1724,17 @@ static Future<Void> listen(TransportData* self, NetworkAddress listenAddr) {
 		TraceEvent(SevError, "ListenError").error(e);
 		throw;
 	}
+}
+
+static Future<Void> listen(TransportData* self, NetworkAddress listenAddr) {
+	Reference<IListener> listener = INetworkConnections::net()->listen(listenAddr);
+	if (!g_network->isSimulated() && self->localAddresses.getAddressList().address.port == 0) {
+		TraceEvent(SevInfo, "UpdatingListenAddress")
+		    .detail("AssignedListenAddress", listener->getListenAddress().toString());
+		self->localAddresses.setNetworkAddress(listener->getListenAddress());
+		setTraceLocalAddress(listener->getListenAddress());
+	}
+	return listenImpl(self, listenAddr, listener);
 }
 
 Reference<Peer> TransportData::getPeer(NetworkAddress const& address) {
