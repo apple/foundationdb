@@ -1177,7 +1177,7 @@ public:
 
 	ProtocolVersion logProtocol;
 
-	Reference<TagPartitionedLogSystem> logSystem;
+	Reference<LogSystem> logSystem;
 	Reference<IPeekCursor> logCursor;
 
 	// The version the cluster starts on. This value is not persisted and may

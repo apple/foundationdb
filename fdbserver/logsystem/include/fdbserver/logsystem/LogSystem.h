@@ -1,5 +1,5 @@
 /*
- * TagPartitionedLogSystem.h
+ * LogSystem.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_LOGSYSTEM_TAGPARTITIONEDLOGSYSTEM_H
-#define FDBSERVER_LOGSYSTEM_TAGPARTITIONEDLOGSYSTEM_H
+#ifndef FDBSERVER_LOGSYSTEM_LOGSYSTEM_H
+#define FDBSERVER_LOGSYSTEM_LOGSYSTEM_H
 
 #pragma once
 
@@ -28,7 +28,7 @@
 #include "LogSystemTypes.h"
 #include "flow/ActorCollection.h"
 
-// TagPartitionedLogSystem info in old epoch
+// LogSystem info in old epoch
 struct OldLogData {
 	std::vector<Reference<LogSet>> tLogs;
 	int32_t logRouterTags;
@@ -83,7 +83,7 @@ struct DurableVersionInfo {
 	    policyResult(meetsPolicy), knownLockedTLogIds(std::move(lockedTLogIds)) {}
 };
 
-struct TagPartitionedLogSystem : ReferenceCounted<TagPartitionedLogSystem> {
+struct LogSystem : ReferenceCounted<LogSystem> {
 	const UID dbgid;
 	LogSystemType logSystemType;
 	std::vector<Reference<LogSet>> tLogs; // LogSets in different locations: primary, satellite, or remote
@@ -138,10 +138,10 @@ struct TagPartitionedLogSystem : ReferenceCounted<TagPartitionedLogSystem> {
 	std::vector<OldLogData> oldLogData; // each element has the log info. in one old epoch.
 	AsyncTrigger logSystemConfigChanged;
 
-	TagPartitionedLogSystem(UID dbgid,
-	                        LocalityData locality,
-	                        LogEpoch e,
-	                        Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>())
+	LogSystem(UID dbgid,
+	          LocalityData locality,
+	          LogEpoch e,
+	          Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>())
 	  : dbgid(dbgid), logSystemType(LogSystemType::empty), expectedLogSets(0), logRouterTags(0), txsTags(0),
 	    repopulateRegionAntiQuorum(0), stopped(false), epoch(e), oldestBackupEpoch(0),
 	    recoveredVersion(makeReference<AsyncVar<Version>>(invalidVersion)),
@@ -170,25 +170,25 @@ struct TagPartitionedLogSystem : ReferenceCounted<TagPartitionedLogSystem> {
 	// Return the min version of all pseudoLocalities, i.e., logRouter and backupTag
 	Version popPseudoLocalityTag(Tag tag, Version upTo);
 
-	static Future<Void> recoverAndEndEpoch(Reference<AsyncVar<Reference<TagPartitionedLogSystem>>> const& outLogSystem,
+	static Future<Void> recoverAndEndEpoch(Reference<AsyncVar<Reference<LogSystem>>> const& outLogSystem,
 	                                       UID const& dbgid,
 	                                       DBCoreState const& oldState,
 	                                       FutureStream<TLogRejoinRequest> const& rejoins,
 	                                       LocalityData const& locality,
 	                                       bool* forceRecovery);
 
-	static Reference<TagPartitionedLogSystem> fromLogSystemConfig(UID const& dbgid,
-	                                                              LocalityData const& locality,
-	                                                              LogSystemConfig const& lsConf,
-	                                                              bool excludeRemote,
-	                                                              bool useRecoveredAt,
-	                                                              Optional<PromiseStream<Future<Void>>> addActor);
+	static Reference<LogSystem> fromLogSystemConfig(UID const& dbgid,
+	                                                LocalityData const& locality,
+	                                                LogSystemConfig const& lsConf,
+	                                                bool excludeRemote,
+	                                                bool useRecoveredAt,
+	                                                Optional<PromiseStream<Future<Void>>> addActor);
 
-	static Reference<TagPartitionedLogSystem> fromOldLogSystemConfig(UID const& dbgid,
-	                                                                 LocalityData const& locality,
-	                                                                 LogSystemConfig const& lsConf);
+	static Reference<LogSystem> fromOldLogSystemConfig(UID const& dbgid,
+	                                                   LocalityData const& locality,
+	                                                   LogSystemConfig const& lsConf);
 
-	// Convert TagPartitionedLogSystem to DBCoreState and override input newState as return value
+	// Convert LogSystem to DBCoreState and override input newState as return value
 	void toCoreState(DBCoreState& newState) const;
 
 	bool remoteStorageRecovered() const;
@@ -203,7 +203,7 @@ struct TagPartitionedLogSystem : ReferenceCounted<TagPartitionedLogSystem> {
 
 	Future<Void> onError() const;
 
-	static Future<Void> onError_internal(TagPartitionedLogSystem const* self);
+	static Future<Void> onError_internal(LogSystem const* self);
 
 	static Future<Void> pushResetChecker(Reference<ConnectionResetInfo> self, NetworkAddress addr);
 
@@ -280,7 +280,7 @@ struct TagPartitionedLogSystem : ReferenceCounted<TagPartitionedLogSystem> {
 	void pop(Version upTo, Tag tag, Version durableKnownCommittedVersion = 0, int8_t popLocality = tagLocalityInvalid);
 
 	// pop tag from log up to the version defined in self->outstandingPops[].first
-	static Future<Void> popFromLog(TagPartitionedLogSystem* self,
+	static Future<Void> popFromLog(LogSystem* self,
 	                               Reference<AsyncVar<OptionalInterface<TLogInterface>>> log,
 	                               Tag tag,
 	                               double delayBeforePop,
@@ -288,7 +288,7 @@ struct TagPartitionedLogSystem : ReferenceCounted<TagPartitionedLogSystem> {
 
 	static Future<Version> getPoppedFromTLog(Reference<AsyncVar<OptionalInterface<TLogInterface>>> log, Tag tag);
 
-	static Future<Version> getPoppedTxs(TagPartitionedLogSystem* self);
+	static Future<Version> getPoppedTxs(LogSystem* self);
 
 	Future<Version> getTxsPoppedVersion();
 
@@ -301,16 +301,15 @@ struct TagPartitionedLogSystem : ReferenceCounted<TagPartitionedLogSystem> {
 
 	// Call only after end_epoch() has successfully completed.  Returns a new epoch immediately following this one.
 	// The new epoch is only provisional until the caller updates the coordinated DBCoreState.
-	Future<Reference<TagPartitionedLogSystem>> newEpoch(
-	    RecruitFromConfigurationReply const& recr,
-	    Future<RecruitRemoteFromConfigurationReply> const& fRemoteWorkers,
-	    DatabaseConfiguration const& config,
-	    LogEpoch recoveryCount,
-	    Version recoveryTransactionVersion,
-	    int8_t primaryLocality,
-	    int8_t remoteLocality,
-	    std::vector<Tag> const& allTags,
-	    Reference<AsyncVar<bool>> const& recruitmentStalled);
+	Future<Reference<LogSystem>> newEpoch(RecruitFromConfigurationReply const& recr,
+	                                      Future<RecruitRemoteFromConfigurationReply> const& fRemoteWorkers,
+	                                      DatabaseConfiguration const& config,
+	                                      LogEpoch recoveryCount,
+	                                      Version recoveryTransactionVersion,
+	                                      int8_t primaryLocality,
+	                                      int8_t remoteLocality,
+	                                      std::vector<Tag> const& allTags,
+	                                      Reference<AsyncVar<bool>> const& recruitmentStalled);
 
 	LogSystemConfig getLogSystemConfig() const;
 
@@ -370,14 +369,14 @@ struct TagPartitionedLogSystem : ReferenceCounted<TagPartitionedLogSystem> {
 	    LogLockInfo lockInfo,
 	    std::vector<Reference<AsyncVar<bool>>> failed = std::vector<Reference<AsyncVar<bool>>>());
 
-	static Future<Void> epochEnd(Reference<AsyncVar<Reference<TagPartitionedLogSystem>>> outLogSystem,
+	static Future<Void> epochEnd(Reference<AsyncVar<Reference<LogSystem>>> outLogSystem,
 	                             UID dbgid,
 	                             DBCoreState prevState,
 	                             FutureStream<TLogRejoinRequest> rejoinRequests,
 	                             LocalityData locality,
 	                             bool* forceRecovery);
 
-	static Future<Void> recruitOldLogRouters(TagPartitionedLogSystem* self,
+	static Future<Void> recruitOldLogRouters(LogSystem* self,
 	                                         std::vector<WorkerInterface> workers,
 	                                         LogEpoch recoveryCount,
 	                                         int8_t locality,
@@ -390,8 +389,8 @@ struct TagPartitionedLogSystem : ReferenceCounted<TagPartitionedLogSystem> {
 
 	static std::vector<Tag> getLocalTags(int8_t locality, const std::vector<Tag>& allTags);
 
-	static Future<Void> newRemoteEpoch(TagPartitionedLogSystem* self,
-	                                   Reference<TagPartitionedLogSystem> oldLogSystem,
+	static Future<Void> newRemoteEpoch(LogSystem* self,
+	                                   Reference<LogSystem> oldLogSystem,
 	                                   Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers,
 	                                   DatabaseConfiguration configuration,
 	                                   LogEpoch recoveryCount,
@@ -400,17 +399,16 @@ struct TagPartitionedLogSystem : ReferenceCounted<TagPartitionedLogSystem> {
 	                                   std::vector<Tag> allTags,
 	                                   std::vector<Version> oldGenerationRecoverAtVersions);
 
-	static Future<Reference<TagPartitionedLogSystem>> newEpoch(
-	    Reference<TagPartitionedLogSystem> oldLogSystem,
-	    RecruitFromConfigurationReply recr,
-	    Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers,
-	    DatabaseConfiguration configuration,
-	    LogEpoch recoveryCount,
-	    Version recoveryTransactionVersion,
-	    int8_t primaryLocality,
-	    int8_t remoteLocality,
-	    std::vector<Tag> allTags,
-	    Reference<AsyncVar<bool>> recruitmentStalled);
+	static Future<Reference<LogSystem>> newEpoch(Reference<LogSystem> oldLogSystem,
+	                                             RecruitFromConfigurationReply recr,
+	                                             Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers,
+	                                             DatabaseConfiguration configuration,
+	                                             LogEpoch recoveryCount,
+	                                             Version recoveryTransactionVersion,
+	                                             int8_t primaryLocality,
+	                                             int8_t remoteLocality,
+	                                             std::vector<Tag> allTags,
+	                                             Reference<AsyncVar<bool>> recruitmentStalled);
 
 	static Future<Void> trackRejoins(
 	    UID dbgid,
@@ -435,7 +433,7 @@ Optional<std::tuple<Version, Version>> getRecoverVersionUnicast(
     Version minDV);
 
 template <class T>
-std::vector<T> TagPartitionedLogSystem::getReadyNonError(std::vector<Future<T>> const& futures) {
+std::vector<T> LogSystem::getReadyNonError(std::vector<Future<T>> const& futures) {
 	// Return the values of those futures which have (non-error) values ready
 	std::vector<T> result;
 	for (auto& f : futures)
@@ -444,4 +442,4 @@ std::vector<T> TagPartitionedLogSystem::getReadyNonError(std::vector<Future<T>> 
 	return result;
 }
 
-#endif // FDBSERVER_LOGSYSTEM_TAGPARTITIONEDLOGSYSTEM_H
+#endif // FDBSERVER_LOGSYSTEM_LOGSYSTEM_H

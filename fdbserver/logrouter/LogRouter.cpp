@@ -72,7 +72,7 @@ struct LogRouterData {
 	};
 
 	const UID dbgid;
-	Reference<AsyncVar<Reference<TagPartitionedLogSystem>>> logSystem;
+	Reference<AsyncVar<Reference<LogSystem>>> logSystem;
 	Future<Void> logSystemChanged = Void();
 	Optional<UID> primaryPeekLocation;
 	NotifiedVersion version; // The largest version at which the log router has peeked mutations
@@ -131,9 +131,9 @@ struct LogRouterData {
 	}
 
 	LogRouterData(UID dbgid, const InitializeLogRouterRequest& req)
-	  : dbgid(dbgid), logSystem(new AsyncVar<Reference<TagPartitionedLogSystem>>()), version(req.startVersion - 1),
-	    minPopped(0), startVersion(req.startVersion), minKnownCommittedVersion(0), poppedVersion(0),
-	    routerTag(req.routerTag), allowPops(false), foundEpochEnd(false), generation(req.recoveryCount),
+	  : dbgid(dbgid), logSystem(new AsyncVar<Reference<LogSystem>>()), version(req.startVersion - 1), minPopped(0),
+	    startVersion(req.startVersion), minKnownCommittedVersion(0), poppedVersion(0), routerTag(req.routerTag),
+	    allowPops(false), foundEpochEnd(false), generation(req.recoveryCount),
 	    peekLatencyDist(Histogram::getHistogram("LogRouter"_sr, "PeekTLogLatency"_sr, Histogram::Unit::milliseconds)),
 	    cc("LogRouter", dbgid.toString()), getMoreCount("GetMoreCount", cc),
 	    getMoreBlockedCount("GetMoreBlockedCount", cc) {

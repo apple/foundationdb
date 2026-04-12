@@ -31,7 +31,7 @@ struct StorageServer : IStorageMetricsService {
     NotifiedVersion durableVersion;                      // committed to disk
     
     // Log system connection
-    Reference<TagPartitionedLogSystem> logSystem;
+    Reference<LogSystem> logSystem;
     Reference<IPeekCursor> logCursor;
     
     // Storage engine

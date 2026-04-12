@@ -44,7 +44,7 @@
 struct DBCoreState;
 struct LogPushData;
 struct LocalityData;
-struct TagPartitionedLogSystem;
+struct LogSystem;
 
 struct ConnectionResetInfo : public ReferenceCounted<ConnectionResetInfo> {
 	double lastReset;
@@ -98,19 +98,19 @@ struct EpochTagsVersionsInfo {
 	  : logRouterTags(n), epochBegin(begin), epochEnd(end) {}
 };
 
-bool logSystemHasRemoteLogs(TagPartitionedLogSystem const& logSystem);
+bool logSystemHasRemoteLogs(LogSystem const& logSystem);
 void logSystemGetPushLocations(
-    TagPartitionedLogSystem const& logSystem,
+    LogSystem const& logSystem,
     VectorRef<Tag> tags,
     std::vector<int>& locations,
     bool allLocations = false,
     Optional<std::vector<Reference<LocalitySet>>> fromLocations = Optional<std::vector<Reference<LocalitySet>>>());
-std::vector<Reference<LocalitySet>> logSystemGetPushLocationsForTags(TagPartitionedLogSystem const& logSystem,
+std::vector<Reference<LocalitySet>> logSystemGetPushLocationsForTags(LogSystem const& logSystem,
                                                                      std::vector<int>& fromLocations);
-Tag logSystemGetRandomRouterTag(TagPartitionedLogSystem const& logSystem);
-int logSystemGetLogRouterTags(TagPartitionedLogSystem const& logSystem);
-Tag logSystemGetRandomTxsTag(TagPartitionedLogSystem const& logSystem);
-TLogVersion logSystemGetTLogVersion(TagPartitionedLogSystem const& logSystem);
+Tag logSystemGetRandomRouterTag(LogSystem const& logSystem);
+int logSystemGetLogRouterTags(LogSystem const& logSystem);
+Tag logSystemGetRandomTxsTag(LogSystem const& logSystem);
+TLogVersion logSystemGetTLogVersion(LogSystem const& logSystem);
 
 struct LengthPrefixedStringRef {
 	// Represents a pointer to a string which is prefixed by a 4-byte length
@@ -150,7 +150,7 @@ struct LogPushData : NonCopyable {
 	// Log subsequences have to start at 1 (the MergedPeekCursor relies on this to make sure we never have !hasMessage()
 	// in the middle of data for a version
 
-	explicit LogPushData(Reference<TagPartitionedLogSystem> logSystem, int tlogCount);
+	explicit LogPushData(Reference<LogSystem> logSystem, int tlogCount);
 
 	void addTxsTag();
 
@@ -223,7 +223,7 @@ struct LogPushData : NonCopyable {
 	int getLogRouterTags() { return logSystemGetLogRouterTags(*logSystem); }
 
 private:
-	Reference<TagPartitionedLogSystem> logSystem;
+	Reference<LogSystem> logSystem;
 	std::vector<Tag> next_message_tags;
 	std::vector<Tag> prev_tags;
 	std::set<Tag> written_tags;

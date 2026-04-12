@@ -2684,7 +2684,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		applyMetadataMutations(SpanContext(),
 		                       pContext->pCommitData->getApplyMetadataProxyContext(),
 		                       arena,
-		                       Reference<TagPartitionedLogSystem>(),
+		                       Reference<LogSystem>(),
 		                       mutations,
 		                       /* pToCommit= */ nullptr,
 		                       confChanges,

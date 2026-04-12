@@ -2372,7 +2372,7 @@ static JsonBuilderObject tlogFetcher(int* logFaultTolerance,
 	for (const auto& tLogSet : tLogs) {
 		if (tLogSet.tLogs.size() == 0) {
 			// We can have LogSets where there are no tLogs but some LogRouters. It's the way
-			// recruiting is implemented for old LogRouters in TagPartitionedLogSystem, where
+			// recruiting is implemented for old LogRouters in LogSystem, where
 			// it adds an empty LogSet for missing locality.
 			continue;
 		}

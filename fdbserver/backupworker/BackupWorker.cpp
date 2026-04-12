@@ -114,7 +114,7 @@ struct BackupData {
 	Version minKnownCommittedVersion;
 	Version savedVersion; // Largest version saved to blob storage
 	Reference<AsyncVar<ServerDBInfo> const> db;
-	AsyncVar<Reference<TagPartitionedLogSystem>> logSystem;
+	AsyncVar<Reference<LogSystem>> logSystem;
 	Database cx;
 	std::vector<VersionedMessage> messages;
 	NotifiedVersion pulledVersion;
@@ -1082,7 +1082,7 @@ Future<Void> backupWorker(BackupInterface interf,
 			auto res = co_await race(dbInfoChange, done, error);
 			if (res.index() == 0) {
 				dbInfoChange = db->onChange();
-				Reference<TagPartitionedLogSystem> ls = makeLogSystemFromServerDBInfo(self.myId, db->get(), true);
+				Reference<LogSystem> ls = makeLogSystemFromServerDBInfo(self.myId, db->get(), true);
 				bool hasPseudoLocality = ls.isValid() && ls->hasPseudoLocality(tagLocalityBackup);
 				if (hasPseudoLocality) {
 					self.logSystem.set(ls);

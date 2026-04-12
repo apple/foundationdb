@@ -79,7 +79,7 @@ struct BackupRangePartitionedData {
 	Version savedVersion; // Largest version saved to blob storage
 	NotifiedVersion pulledVersion;
 	Version logFolderBaseVersion;
-	AsyncVar<Reference<TagPartitionedLogSystem>> logSystem;
+	AsyncVar<Reference<LogSystem>> logSystem;
 	AsyncVar<bool> paused; // Track if "backupPausedKey" is set.
 	Reference<FlowLock> lock;
 	AsyncTrigger doneTrigger;
@@ -983,7 +983,7 @@ Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
 			auto res = co_await race(dbInfoChange, done, error);
 			if (res.index() == 0) {
 				dbInfoChange = db->onChange();
-				Reference<TagPartitionedLogSystem> ls = makeLogSystemFromServerDBInfo(self.myId, db->get(), true);
+				Reference<LogSystem> ls = makeLogSystemFromServerDBInfo(self.myId, db->get(), true);
 
 				if (ls.isValid()) {
 					self.logSystem.set(ls);

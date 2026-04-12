@@ -252,7 +252,7 @@ Future<LogSystemDiskQueueAdapter::CommitMessage> LogSystemDiskQueueAdapter::getC
 	return pcm.getFuture();
 }
 
-LogSystemDiskQueueAdapter* openDiskQueueAdapter(Reference<TagPartitionedLogSystem> logSystem,
+LogSystemDiskQueueAdapter* openDiskQueueAdapter(Reference<LogSystem> logSystem,
                                                 Reference<AsyncVar<PeekTxsInfo>> peekLocality,
                                                 Version txsPoppedVersion) {
 	return new LogSystemDiskQueueAdapter(logSystem, peekLocality, txsPoppedVersion, true);

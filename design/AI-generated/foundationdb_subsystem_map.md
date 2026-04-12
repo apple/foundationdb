@@ -167,7 +167,7 @@ Phase 4: REPLY                      CommitProxy
 - Provides `peek()` interface: storage servers pull mutations by tag and version range.
 - Quorum replication: a mutation is committed when `f+1` of `2f+1` TLog replicas acknowledge.
 
-**Log System** (`TagPartitionedLogSystem.actor.cpp`):
+**Log System** (`LogSystem.cpp`):
 - Abstraction over the set of TLog replicas.
 - `ILogSystem::push()` — sends mutations to all relevant TLog replicas, waits for quorum.
 - `ILogSystem::peek()` → `IPeekCursor` — merges results from multiple TLogs for a given tag, handling multi-generation log sets during recovery.
@@ -179,7 +179,7 @@ Phase 4: REPLY                      CommitProxy
 
 **Key dynamic behavior:** Storage servers are *consumers* of the log. They continuously peek their assigned tag, pulling committed mutations and applying them to local storage. This decoupling means commits don't wait for storage servers — only for TLog quorum.
 
-**Principal files:** `TLogServer.actor.cpp`, `TagPartitionedLogSystem.actor.cpp`, `LogRouter.cpp`, `LogSystem.h`, `LogSystemConfig.h`, `IDiskQueue.h`
+**Principal files:** `TLogServer.actor.cpp`, `LogSystem.cpp`, `LogRouter.cpp`, `LogSystem.h`, `LogSystemConfig.h`, `IDiskQueue.h`
 
 ---
 
@@ -250,7 +250,7 @@ Phase 4: REPLY                      CommitProxy
 - `trackTlogRecovery()` — monitors TLog set completeness and writes coordinated state updates
 - `provisionalMaster()` — handles the gap between old and new transaction systems
 
-**Principal files:** `ClusterRecovery.actor.cpp`, `ClusterRecovery.actor.h`, `RecoveryState.h`, `DBCoreState.h`, `CoordinatedState.cpp`, `TagPartitionedLogSystem.actor.cpp` (newEpoch)
+**Principal files:** `ClusterRecovery.actor.cpp`, `ClusterRecovery.actor.h`, `RecoveryState.h`, `DBCoreState.h`, `CoordinatedState.cpp`, `LogSystem.cpp` (newEpoch)
 
 ---
 

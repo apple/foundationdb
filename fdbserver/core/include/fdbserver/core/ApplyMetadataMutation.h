@@ -36,7 +36,7 @@
 #include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/LogSystem.h"
 #include "fdbserver/core/LogProtocolMessage.h"
-#include "../../../../logsystem/include/fdbserver/logsystem/TagPartitionedLogSystem.h"
+#include "../../../../logsystem/include/fdbserver/logsystem/LogSystem.h"
 #include "flow/FastRef.h"
 
 class AccumulativeChecksumBuilder;
@@ -84,7 +84,7 @@ struct ResolverData {
 	// Whether configuration changes. If so, a recovery is forced.
 	bool& confChanges;
 	bool initialCommit = false;
-	Reference<TagPartitionedLogSystem> logSystem = Reference<TagPartitionedLogSystem>();
+	Reference<LogSystem> logSystem = Reference<LogSystem>();
 	LogPushData* toCommit = nullptr;
 	Version popVersion = 0; // exclusive, usually set to commitVersion + 1
 	std::map<UID, Reference<StorageInfo>>* storageCache = nullptr;
@@ -96,7 +96,7 @@ struct ResolverData {
 
 	// For transaction batches that contain metadata mutations
 	ResolverData(UID debugId,
-	             Reference<TagPartitionedLogSystem> logSystem,
+	             Reference<LogSystem> logSystem,
 	             IKeyValueStore* store,
 	             KeyRangeMap<ServerCacheInfo>* info,
 	             LogPushData* toCommit,
@@ -129,7 +129,7 @@ Reference<StorageInfo> getStorageInfo(UID id,
 void applyMetadataMutations(SpanContext const& spanContext,
                             const ApplyMetadataProxyContext& proxyMetadata,
                             Arena& arena,
-                            Reference<TagPartitionedLogSystem> logSystem,
+                            Reference<LogSystem> logSystem,
                             const VectorRef<MutationRef>& mutations,
                             LogPushData* pToCommit,
                             bool& confChange,

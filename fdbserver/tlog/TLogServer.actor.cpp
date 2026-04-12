@@ -548,7 +548,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 
 	// For each version above knownCommittedVersion, track:
 	// <Version, PrevVersion (that the sequencer provided), TLogs that the version has been sent to (the tLogs
-	//  are represented by their corresponding positions in "TagPartitionedLogSystem::tLogs")>
+	//  are represented by their corresponding positions in "LogSystem::tLogs")>
 	std::deque<UnknownCommittedVersions> unknownCommittedVersions;
 
 	Deque<std::pair<Version, Standalone<VectorRef<uint8_t>>>> messageBlocks;
@@ -655,7 +655,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 
 	std::map<UID, PeekTrackerData> peekTracker;
 
-	Reference<AsyncVar<Reference<TagPartitionedLogSystem>>> logSystem;
+	Reference<AsyncVar<Reference<LogSystem>>> logSystem;
 	Tag remoteTag;
 	bool isPrimary;
 	int logRouterTags;
@@ -693,7 +693,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	    nonEmptyPeeks("NonEmptyPeeks", cc), persistentDataUpdateBatches("PersistentDataUpdateBatches", cc),
 	    dirtyTagsProcessed("DirtyTagsProcessed", cc), logId(interf.id()), protocolVersion(protocolVersion),
 	    newPersistentDataVersion(invalidVersion), tLogData(tLogData), unrecoveredBefore(1), recoveredAt(1),
-	    recoveryTxnVersion(1), logSystem(new AsyncVar<Reference<TagPartitionedLogSystem>>()), remoteTag(remoteTag),
+	    recoveryTxnVersion(1), logSystem(new AsyncVar<Reference<LogSystem>>()), remoteTag(remoteTag),
 	    isPrimary(isPrimary), logRouterTags(logRouterTags), logRouterPoppedVersion(0), logRouterPopToVersion(0),
 	    locality(tagLocalityInvalid), recruitmentID(recruitmentID), logSpillType(logSpillType),
 	    allTags(tags.begin(), tags.end()), terminated(tLogData->terminated.getFuture()), execOpCommitInProgress(false),
@@ -2847,7 +2847,7 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 					logData->removed = logData->removed && logData->logSystem->get()->endEpoch();
 				}
 			} else {
-				logData->logSystem->set(Reference<TagPartitionedLogSystem>());
+				logData->logSystem->set(Reference<LogSystem>());
 			}
 		}
 		when(TLogPeekStreamRequest req = waitNext(tli.peekStreamMessages.getFuture())) {
@@ -3572,7 +3572,7 @@ bool tlogTerminated(TLogData* self, IKeyValueStore* persistentData, TLogQueue* p
 ACTOR Future<Void> updateLogSystem(TLogData* self,
                                    Reference<LogData> logData,
                                    LogSystemConfig recoverFrom,
-                                   Reference<AsyncVar<Reference<TagPartitionedLogSystem>>> logSystem) {
+                                   Reference<AsyncVar<Reference<LogSystem>>> logSystem) {
 	loop {
 		bool found = self->dbInfo->get().logSystemConfig.recruitmentID == logData->recruitmentID;
 		if (found) {
@@ -3590,7 +3590,7 @@ ACTOR Future<Void> updateLogSystem(TLogData* self,
 			}
 		}
 		if (!found) {
-			logSystem->set(Reference<TagPartitionedLogSystem>());
+			logSystem->set(Reference<LogSystem>());
 		} else {
 			logData->logSystem->get()->pop(logData->logRouterPoppedVersion,
 			                               logData->remoteTag,

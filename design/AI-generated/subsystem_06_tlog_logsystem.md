@@ -100,7 +100,7 @@ When in-memory data exceeds `targetVolatileBytes`:
 
 ---
 
-## Log System -- `TagPartitionedLogSystem.actor.cpp`
+## Log System -- `LogSystem.cpp`
 
 Abstraction over the set of TLog replicas.
 
@@ -234,7 +234,7 @@ Optional per-storage-server version tracking:
 | File | Purpose |
 |------|---------|
 | `fdbserver/tlog/TLogServer.actor.cpp` | TLog server: push, peek, spill, DiskQueue |
-| `fdbserver/logsystem/TagPartitionedLogSystem.actor.cpp` | LogSystem: push/peek/pop across TLog replicas |
+| `fdbserver/logsystem/LogSystem.cpp` | LogSystem: push/peek/pop across TLog replicas |
 | `fdbserver/core/include/fdbserver/core/LogSystem.h` | ILogSystem, IPeekCursor interfaces |
 | `fdbserver/core/include/fdbserver/core/LogSystemConfig.h` | Log system configuration and epoch tracking |
 | `fdbserver/core/include/fdbserver/core/IDiskQueue.h` | IDiskQueue interface for TLog persistence |

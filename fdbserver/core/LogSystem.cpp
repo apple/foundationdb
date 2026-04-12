@@ -22,11 +22,10 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/core/OTELSpanContextMessage.h"
 #include "fdbserver/core/SpanContextMessage.h"
-#include "../logsystem/include/fdbserver/logsystem/TagPartitionedLogSystem.h"
+#include "../logsystem/include/fdbserver/logsystem/LogSystem.h"
 #include "flow/serialize.h"
 
-LogPushData::LogPushData(Reference<TagPartitionedLogSystem> logSystem, int tlogCount)
-  : logSystem(logSystem), subsequence(1) {
+LogPushData::LogPushData(Reference<LogSystem> logSystem, int tlogCount) : logSystem(logSystem), subsequence(1) {
 	ASSERT(tlogCount > 0);
 	messagesWriter.reserve(tlogCount);
 	for (int i = 0; i < tlogCount; i++) {
