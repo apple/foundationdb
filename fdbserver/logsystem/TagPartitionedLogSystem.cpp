@@ -3646,29 +3646,16 @@ Future<Void> TagPartitionedLogSystem::trackRejoins(
 Future<TLogLockResult> TagPartitionedLogSystem::lockTLog(UID myID,
                                                          Reference<AsyncVar<OptionalInterface<TLogInterface>>> tlog) {
 	TraceEvent("TLogLockStarted", myID).detail("TLog", tlog->get().id()).detail("InfPresent", tlog->get().present());
-	Future<TLogLockResult> lockReply;
-	Optional<Endpoint> lockEndpoint;
 	while (true) {
-		if (!lockReply.isValid() && tlog->get().present()) {
-			lockEndpoint = tlog->get().interf().lock.getEndpoint();
-			lockReply = brokenPromiseToNever(tlog->get().interf().lock.getReply<TLogLockResult>());
-		}
-
-		auto res = co_await race(lockReply.isValid() ? lockReply : Never(), tlog->onChange());
+		auto res = co_await race(tlog->get().present()
+		                             ? brokenPromiseToNever(tlog->get().interf().lock.getReply<TLogLockResult>())
+		                             : Never(),
+		                         tlog->onChange());
 		if (res.index() == 0) {
 			TLogLockResult data = std::get<0>(std::move(res));
 
 			TraceEvent("TLogLocked", myID).detail("TLog", tlog->get().id()).detail("End", data.end);
 			co_return data;
-		}
-
-		// Preserve an in-flight lock request across unrelated AsyncVar changes so a rejoin update cannot detach the
-		// pending reply and force us to issue a new lock RPC. If the interface disappeared or moved, restart the
-		// request.
-		if (!tlog->get().present() || !lockEndpoint.present() ||
-		    tlog->get().interf().lock.getEndpoint() != lockEndpoint.get()) {
-			lockReply = Future<TLogLockResult>();
-			lockEndpoint = Optional<Endpoint>();
 		}
 	}
 }
