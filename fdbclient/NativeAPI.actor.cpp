@@ -74,6 +74,7 @@
 #include "fdbrpc/sim_validation.h"
 #include "flow/Arena.h"
 #include "flow/ActorCollection.h"
+#include "flow/CoroUtils.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Error.h"
 #include "flow/FastRef.h"
@@ -6547,16 +6548,16 @@ Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaDa
 	co_return res;
 }
 
-ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> exclusions) {
+Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> exclusions) {
 	TraceEvent("ExclusionSafetyCheckBegin")
 	    .detail("NumExclusion", exclusions.size())
 	    .detail("Exclusions", describe(exclusions));
-	state bool ddCheck;
+	bool ddCheck{ false };
 	try {
 		ExclusionSafetyCheckReply _ddCheck =
-		    wait(commitProxyLoadBalance(cx,
-		                                makeReqBuilder<ExclusionSafetyCheckRequest>(exclusions),
-		                                &CommitProxyInterface::exclusionSafetyCheckReq));
+		    co_await commitProxyLoadBalance(cx,
+		                                    makeReqBuilder<ExclusionSafetyCheckRequest>(exclusions),
+		                                    &CommitProxyInterface::exclusionSafetyCheckReq);
 		ddCheck = _ddCheck.safe;
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled) {
@@ -6568,10 +6569,10 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion
 		throw;
 	}
 	TraceEvent("ExclusionSafetyCheckCoordinators").log();
-	state ClientCoordinators coordinatorList(cx->getConnectionRecord());
-	state std::vector<Future<Optional<LeaderInfo>>> leaderServers;
+	ClientCoordinators coordinatorList(cx->getConnectionRecord());
+	std::vector<Future<Optional<LeaderInfo>>> leaderServers;
 	leaderServers.reserve(coordinatorList.clientLeaderServers.size());
-	for (int i = 0; i < coordinatorList.clientLeaderServers.size(); i++) {
+	for (int i = 0; i < coordinatorList.clientLeaderServers.size(); ++i) {
 		if (coordinatorList.clientLeaderServers[i].hostname.present()) {
 			leaderServers.push_back(retryGetReplyFromHostname(GetLeaderRequest(coordinatorList.clusterKey, UID()),
 			                                                  coordinatorList.clientLeaderServers[i].hostname.get(),
@@ -6584,16 +6585,14 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion
 		}
 	}
 	// Wait for quorum so we don't dismiss live coordinators as unreachable by acting too fast
-	choose {
-		when(wait(smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.0))) {}
-		when(wait(delay(3.0))) {
-			TraceEvent("ExclusionSafetyCheckNoCoordinatorQuorum").log();
-			return false;
-		}
+	auto res = co_await race(smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.0), delay(3.0));
+	if (res.index() == 1) {
+		TraceEvent("ExclusionSafetyCheckNoCoordinatorQuorum").log();
+		co_return false;
 	}
 	int attemptCoordinatorExclude = 0;
 	int coordinatorsUnavailable = 0;
-	for (int i = 0; i < leaderServers.size(); i++) {
+	for (int i = 0; i < leaderServers.size(); ++i) {
 		NetworkAddress leaderAddress =
 		    coordinatorList.clientLeaderServers[i].getLeader.getEndpoint().getPrimaryAddress();
 		if (leaderServers[i].isReady()) {
@@ -6616,7 +6615,7 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion
 	    .detail("CoordinatorCheck", coordinatorCheck)
 	    .detail("DataDistributorCheck", ddCheck);
 
-	return (ddCheck && coordinatorCheck);
+	co_return ddCheck&& coordinatorCheck;
 }
 
 // returns true if we can connect to the given worker interface
