@@ -448,27 +448,6 @@ Future<Void> returnIfTrue(Future<T> what, F pred) {
 	return returnIfTrue(map(what, pred));
 }
 
-// filters a stream
-ACTOR template <class T, class F>
-Future<Void> filter(FutureStream<T> input, F pred, PromiseStream<T> output) {
-	loop {
-		try {
-			T nextInput = waitNext(input);
-			if (pred(nextInput))
-				output.send(nextInput);
-		} catch (Error& e) {
-			if (e.code() == error_code_end_of_stream) {
-				break;
-			} else
-				throw;
-		}
-	}
-
-	output.sendError(end_of_stream());
-
-	return Void();
-}
-
 template <class T>
 struct WorkerCache {
 	// SOMEDAY: Would we do better to use "unreliable" (at most once) transport for the initialize requests and get rid
