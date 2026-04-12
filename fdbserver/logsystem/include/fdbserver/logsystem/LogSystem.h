@@ -33,6 +33,7 @@
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/ReplicationPolicy.h"
+#include "fdbserver/core/BackupProgressTypes.h"
 #include "fdbserver/core/DBCoreState.h"
 #include "fdbserver/core/LogSystemConfig.h"
 #include "fdbserver/core/MutationTracking.h"
@@ -94,14 +95,6 @@ struct LogPushVersionSet {
 	Version version;
 	Version knownCommittedVersion;
 	Version minKnownCommittedVersion;
-};
-
-struct EpochTagsVersionsInfo {
-	int32_t logRouterTags;
-	Version epochBegin, epochEnd;
-
-	explicit EpochTagsVersionsInfo(int32_t n, Version begin, Version end)
-	  : logRouterTags(n), epochBegin(begin), epochEnd(end) {}
 };
 
 bool logSystemHasRemoteLogs(LogSystem const& logSystem);

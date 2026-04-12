@@ -24,7 +24,7 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/BackupInterface.h"
-#include "fdbserver/logsystem/BackupProgress.h"
+#include "fdbserver/core/BackupProgress.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/LogProtocolMessage.h"
 #include "fdbserver/logsystem/LogSystem.h"

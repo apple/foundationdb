@@ -62,7 +62,7 @@
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbserver/logsystem/ApplyMetadataMutation.h"
-#include "fdbserver/logsystem/BackupProgress.h"
+#include "fdbserver/core/BackupProgress.h"
 #include "fdbserver/core/DBCoreState.h"
 #include "fdbserver/core/MoveKeys.h"
 #include "flow/Error.h"
