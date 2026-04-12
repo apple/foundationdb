@@ -1465,14 +1465,14 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Reference<Transac
 	                                : latestVersion);
 }
 
-ACTOR Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange keys) {
-	state int totalRanges = 0;
-	state int totalRequests = 0;
+Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange keys) {
+	int totalRanges = 0;
+	int totalRequests = 0;
 
-	wait(trState->startTransaction());
+	co_await trState->startTransaction();
 
-	loop {
-		std::vector<KeyRangeLocationInfo> locations = wait(getKeyRangeLocations_internal(
+	while (true) {
+		std::vector<KeyRangeLocationInfo> locations = co_await getKeyRangeLocations_internal(
 		    trState->cx,
 		    keys,
 		    CLIENT_KNOBS->WARM_RANGE_SHARD_LIMIT,
@@ -1480,7 +1480,7 @@ ACTOR Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange 
 		    trState->spanContext,
 		    trState->readOptions.present() ? trState->readOptions.get().debugID : Optional<UID>(),
 		    trState->useProvisionalProxies,
-		    trState->readVersion()));
+		    trState->readVersion());
 		totalRanges += CLIENT_KNOBS->WARM_RANGE_SHARD_LIMIT;
 		totalRequests++;
 		if (locations.size() == 0 || totalRanges >= trState->cx->locationCacheSize ||
@@ -1491,21 +1491,21 @@ ACTOR Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange 
 
 		if (totalRequests % 20 == 0) {
 			// To avoid blocking the proxies from starting other transactions, occasionally get a read version.
-			state Transaction tr(trState->cx);
-			loop {
+			Transaction tr(trState->cx);
+			while (true) {
+				Error err;
 				try {
 					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 					tr.setOption(FDBTransactionOptions::CAUSAL_READ_RISKY);
-					wait(success(tr.getReadVersion()));
+					co_await success(tr.getReadVersion());
 					break;
 				} catch (Error& e) {
-					wait(tr.onError(e));
+					err = e;
 				}
+				co_await tr.onError(err);
 			}
 		}
 	}
-
-	return Void();
 }
 
 SpanContext generateSpanID(bool transactionTracingSample, SpanContext parentContext = SpanContext()) {
