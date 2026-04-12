@@ -24,7 +24,7 @@
 
 #include "fdbserver/core/CoordinationInterface.h"
 
-Future<Void> coordinationServer(std::string const& dataFolder, Reference<IClusterConnectionRecord> const& ccf);
+Future<Void> coordinationServer(std::string dataFolder, Reference<IClusterConnectionRecord> ccf);
 Future<Void> coordChangeClusterKey(std::string dataFolder, KeyRef newClusterKey, KeyRef oldClusterKey);
 
 #endif

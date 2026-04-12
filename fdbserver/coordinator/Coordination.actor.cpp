@@ -501,13 +501,13 @@ struct LeaderRegisterCollection {
 
 	explicit LeaderRegisterCollection(OnDemandStore* pStore) : actors(false), pStore(pStore) {}
 
-	ACTOR static Future<Void> init(LeaderRegisterCollection* self) {
+	static Future<Void> init(LeaderRegisterCollection* self) {
 		if (!self->pStore->exists())
-			return Void();
+			co_return;
 		OnDemandStore& store = *self->pStore;
-		state Future<Standalone<RangeResultRef>> forwardingInfoF = store->readRange(fwdKeys);
-		state Future<Standalone<RangeResultRef>> forwardingTimeF = store->readRange(fwdTimeKeys);
-		wait(success(forwardingInfoF) && success(forwardingTimeF));
+		Future<Standalone<RangeResultRef>> forwardingInfoF = store->readRange(fwdKeys);
+		Future<Standalone<RangeResultRef>> forwardingTimeF = store->readRange(fwdTimeKeys);
+		co_await (success(forwardingInfoF) && success(forwardingTimeF));
 		Standalone<RangeResultRef> forwardingInfo = forwardingInfoF.get();
 		Standalone<RangeResultRef> forwardingTime = forwardingTimeF.get();
 		for (int i = 0; i < forwardingInfo.size(); i++) {
@@ -520,7 +520,6 @@ struct LeaderRegisterCollection {
 			double time = BinaryReader::fromStringRef<double>(forwardingTime[i].value, Unversioned());
 			self->forwardStartTime[forwardingTime[i].key.removePrefix(fwdTimeKeys.begin)] = time;
 		}
-		return Void();
 	}
 
 	Future<Void> onError() const { return actors.getResult(); }
@@ -547,11 +546,11 @@ struct LeaderRegisterCollection {
 	// When the lead coordinator changes, store the new connection ID in the "fwd" keyspace.
 	// If a request arrives using an old connection id, resend it to the new coordinator using the stored connection id.
 	// Store when this change took place in the fwdTime keyspace.
-	ACTOR static Future<Void> setForward(LeaderRegisterCollection* self,
-	                                     KeyRef key,
-	                                     ClusterConnectionString conn,
-	                                     ForwardRequest req,
-	                                     UID id) {
+	static Future<Void> setForward(LeaderRegisterCollection* self,
+	                               KeyRef key,
+	                               ClusterConnectionString conn,
+	                               ForwardRequest req,
+	                               UID id) {
 		double forwardTime = now();
 		LeaderInfo forwardInfo;
 		forwardInfo.forward = true;
@@ -561,10 +560,9 @@ struct LeaderRegisterCollection {
 		OnDemandStore& store = *self->pStore;
 		store->set(KeyValueRef(key.withPrefix(fwdKeys.begin), conn.toString()));
 		store->set(KeyValueRef(key.withPrefix(fwdTimeKeys.begin), BinaryWriter::toValue(forwardTime, Unversioned())));
-		wait(store->commit());
+		co_await store->commit();
 		// Do not process a forwarding request until after it has been made durable in case the coordinator restarts
 		self->getInterface(req.key, id).forward.send(req);
-		return Void();
 	}
 
 	LeaderElectionRegInterface& getInterface(KeyRef key, UID id) {
@@ -582,12 +580,12 @@ struct LeaderRegisterCollection {
 		return i->value;
 	}
 
-	ACTOR static Future<Void> wrap(LeaderRegisterCollection* self, Key key, Future<Void> actor, UID id) {
-		state Error e;
+	static Future<Void> wrap(LeaderRegisterCollection* self, Key key, Future<Void> actor, UID id) {
+		Error e;
 		try {
 			// FIXME: Get worker ID here
 			startRole(Role::COORDINATOR, id, UID());
-			wait(actor || traceRole(Role::COORDINATOR, id));
+			co_await (actor || traceRole(Role::COORDINATOR, id));
 			endRole(Role::COORDINATOR, id, "Coordinator changed");
 		} catch (Error& err) {
 			endRole(Role::COORDINATOR, id, err.what(), err.code() == error_code_actor_cancelled, err);
@@ -598,7 +596,6 @@ struct LeaderRegisterCollection {
 		self->registerInterfaces.erase(key);
 		if (e.code() != invalid_error_code)
 			throw e;
-		return Void();
 	}
 };
 
@@ -744,97 +741,97 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 	}
 }
 
-ACTOR Future<Void> coordinationServer(std::string dataFolder, Reference<IClusterConnectionRecord> ccr) {
-	state UID myID = deterministicRandom()->randomUniqueID();
-	state LeaderElectionRegInterface myLeaderInterface(g_network);
-	state GenerationRegInterface myInterface(g_network);
-	state OnDemandStore store(dataFolder, myID, fileCoordinatorPrefix);
+Future<Void> coordinationServer(std::string dataFolder, Reference<IClusterConnectionRecord> ccr) {
+	UID myID = deterministicRandom()->randomUniqueID();
+	LeaderElectionRegInterface myLeaderInterface(g_network);
+	GenerationRegInterface myInterface(g_network);
+	OnDemandStore store(dataFolder, myID, fileCoordinatorPrefix);
 	TraceEvent("CoordinationServer", myID)
 	    .detail("MyInterfaceAddr", myInterface.read.getEndpoint().getPrimaryAddress())
 	    .detail("Folder", dataFolder);
 
+	Error err;
 	try {
 		LocalGenerationReg generationReg(myInterface, &store);
-		wait(generationReg.run() || leaderServer(myLeaderInterface, &store, myID, ccr) || store.getError());
+		co_await (generationReg.run() || leaderServer(myLeaderInterface, &store, myID, ccr) || store.getError());
 		throw internal_error();
 	} catch (Error& e) {
-		state Error err = e;
-		TraceEvent("CoordinationServerError", myID).errorUnsuppressed(e);
-
-		// Handle a rare issue where the coordinator crashes during creation of
-		// its disk queue files. A disk queue consists of two files, created in
-		// the following manner:
-		//
-		//   1. Create two .part files.
-		//   2. Rename each .part file to remove its .part suffix.
-		//
-		// Step 2 can crash in between removing the .part suffix of the first
-		// and second file. If this occurs, the disk queue will refuse to open
-		// on subsequent attempts because it only sees one of its files,
-		// causing a process crash with the file_not_found error. Normally this
-		// behavior is fine, but in simulation it can occasionally cause
-		// problems. Simulation does not take into account injected errors can
-		// cause permanent process death. In most cases this is true. But if
-		// this inconsistent disk queue state occurs on a coordinator, the
-		// coordinator will enter a reboot loop, continuously failing to open
-		// its disk queue and crashing. If the simulation run has a small
-		// number of processes and another process is colocated with the
-		// coordinator, the run may get stuck because the coordinator crashing
-		// brings the other role offline as well. This has been observed in a
-		// stuck simulation run where a tlog colocated with a coordinator that
-		// ran into this issue meant the tlog replication policy couldn't be
-		// achieved.
-		//
-		// As a short term fix, catch file_not_found and fix inconsistent disk
-		// queue state on the coordinator. In the long term, we should either
-		// modify simulation to consider injected errors as fatal or allow the
-		// coordinator to manually fix disk queue state in real clusters.
-		if (g_network->isSimulated() && g_simulator->speedUpSimulation && e.code() == error_code_file_not_found) {
-			state std::vector<Future<Reference<IAsyncFile>>> fs;
-			fs.reserve(2);
-			for (int i = 0; i < 2; ++i) {
-				std::string file = joinPath(dataFolder, format("%s%d.fdq", fileCoordinatorPrefix.c_str(), i));
-				fs.push_back(
-				    IAsyncFileSystem::filesystem()->open(file,
-				                                         IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED |
-				                                             IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_LOCK,
-				                                         0));
-			}
-			wait(waitForAllReady(fs));
-
-			// Make sure one of the disk queue files is missing. This should be
-			// the only cause of the file_not_found error.
-			ASSERT(((fs[0].isError() && fs[0].getError().code() == error_code_file_not_found) ||
-			        (fs[1].isError() && fs[1].getError().code() == error_code_file_not_found)) &&
-			       fs[0].isError() != fs[1].isError());
-
-			TraceEvent(SevWarnAlways, "CoordinatorDiskQueueInconsistentState")
-			    .detail("File0Missing", fs[0].isError())
-			    .detail("File1Missing", fs[1].isError());
-			;
-
-			// Remove the remaining disk queue file to allow the coordinator to
-			// create new files on next boot.
-			if (fs[0].isError()) {
-				ASSERT(fs[0].getError().code() == error_code_file_not_found);
-				wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(dataFolder, fileCoordinatorPrefix + "1.fdq"),
-				                                                true));
-			}
-			if (fs[1].isError()) {
-				ASSERT(fs[1].getError().code() == error_code_file_not_found);
-				wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(dataFolder, fileCoordinatorPrefix + "0.fdq"),
-				                                                true));
-			}
-		}
-
-		throw err;
+		err = e;
 	}
+	TraceEvent("CoordinationServerError", myID).errorUnsuppressed(err);
+
+	// Handle a rare issue where the coordinator crashes during creation of
+	// its disk queue files. A disk queue consists of two files, created in
+	// the following manner:
+	//
+	//   1. Create two .part files.
+	//   2. Rename each .part file to remove its .part suffix.
+	//
+	// Step 2 can crash in between removing the .part suffix of the first
+	// and second file. If this occurs, the disk queue will refuse to open
+	// on subsequent attempts because it only sees one of its files,
+	// causing a process crash with the file_not_found error. Normally this
+	// behavior is fine, but in simulation it can occasionally cause
+	// problems. Simulation does not take into account injected errors can
+	// cause permanent process death. In most cases this is true. But if
+	// this inconsistent disk queue state occurs on a coordinator, the
+	// coordinator will enter a reboot loop, continuously failing to open
+	// its disk queue and crashing. If the simulation run has a small
+	// number of processes and another process is colocated with the
+	// coordinator, the run may get stuck because the coordinator crashing
+	// brings the other role offline as well. This has been observed in a
+	// stuck simulation run where a tlog colocated with a coordinator that
+	// ran into this issue meant the tlog replication policy couldn't be
+	// achieved.
+	//
+	// As a short term fix, catch file_not_found and fix inconsistent disk
+	// queue state on the coordinator. In the long term, we should either
+	// modify simulation to consider injected errors as fatal or allow the
+	// coordinator to manually fix disk queue state in real clusters.
+	if (g_network->isSimulated() && g_simulator->speedUpSimulation && err.code() == error_code_file_not_found) {
+		std::vector<Future<Reference<IAsyncFile>>> fs;
+		fs.reserve(2);
+		for (int i = 0; i < 2; ++i) {
+			std::string file = joinPath(dataFolder, format("%s%d.fdq", fileCoordinatorPrefix.c_str(), i));
+			fs.push_back(IAsyncFileSystem::filesystem()->open(file,
+			                                                  IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED |
+			                                                      IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_LOCK,
+			                                                  0));
+		}
+		co_await waitForAllReady(fs);
+
+		// Make sure one of the disk queue files is missing. This should be
+		// the only cause of the file_not_found error.
+		ASSERT(((fs[0].isError() && fs[0].getError().code() == error_code_file_not_found) ||
+		        (fs[1].isError() && fs[1].getError().code() == error_code_file_not_found)) &&
+		       fs[0].isError() != fs[1].isError());
+
+		TraceEvent(SevWarnAlways, "CoordinatorDiskQueueInconsistentState")
+		    .detail("File0Missing", fs[0].isError())
+		    .detail("File1Missing", fs[1].isError());
+		;
+
+		// Remove the remaining disk queue file to allow the coordinator to
+		// create new files on next boot.
+		if (fs[0].isError()) {
+			ASSERT(fs[0].getError().code() == error_code_file_not_found);
+			co_await IAsyncFileSystem::filesystem()->deleteFile(joinPath(dataFolder, fileCoordinatorPrefix + "1.fdq"),
+			                                                    true);
+		}
+		if (fs[1].isError()) {
+			ASSERT(fs[1].getError().code() == error_code_file_not_found);
+			co_await IAsyncFileSystem::filesystem()->deleteFile(joinPath(dataFolder, fileCoordinatorPrefix + "0.fdq"),
+			                                                    true);
+		}
+	}
+
+	throw err;
 }
 
-ACTOR Future<Void> changeClusterDescription(std::string datafolder, KeyRef newClusterKey, KeyRef oldClusterKey) {
-	state UID myID = deterministicRandom()->randomUniqueID();
-	state OnDemandStore store(datafolder, myID, fileCoordinatorPrefix);
-	RangeResult res = wait(store->readRange(allKeys));
+Future<Void> changeClusterDescription(std::string datafolder, KeyRef newClusterKey, KeyRef oldClusterKey) {
+	UID myID = deterministicRandom()->randomUniqueID();
+	OnDemandStore store(datafolder, myID, fileCoordinatorPrefix);
+	RangeResult res = co_await store->readRange(allKeys);
 	// Context, in coordinators' kv-store
 	// cluster description and the random id are always appear together as the clusterKey
 	// The old cluster key, (call it oldCKey) below can appear in the following scenarios:
@@ -874,8 +871,7 @@ ACTOR Future<Void> changeClusterDescription(std::string datafolder, KeyRef newCl
 			}
 		}
 	}
-	wait(store->commit());
-	return Void();
+	co_await store->commit();
 }
 
 Future<Void> coordChangeClusterKey(std::string dataFolder, KeyRef newClusterKey, KeyRef oldClusterKey) {
