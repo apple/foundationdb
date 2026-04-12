@@ -1187,15 +1187,15 @@ void updateTagMappings(Database cx, const GetKeyServerLocationsReply& reply) {
 
 // If isBackward == true, returns the shard containing the key before 'key' (an infinitely long, inexpressible key).
 // Otherwise returns the shard containing key
-ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
-                                                           Key key,
-                                                           SpanContext spanContext,
-                                                           Optional<UID> debugID,
-                                                           UseProvisionalProxies useProvisionalProxies,
-                                                           Reverse isBackward,
-                                                           Version version) {
+Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
+                                                     Key key,
+                                                     SpanContext spanContext,
+                                                     Optional<UID> debugID,
+                                                     UseProvisionalProxies useProvisionalProxies,
+                                                     Reverse isBackward,
+                                                     Version version) {
 
-	state Span span("NAPI:getKeyLocation"_loc, spanContext);
+	Span span("NAPI:getKeyLocation"_loc, spanContext);
 	if (isBackward) {
 		ASSERT(key != allKeys.begin && key <= allKeys.end);
 	} else {
@@ -1205,17 +1205,17 @@ ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
 	if (debugID.present())
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocation.Before");
 
-	loop {
+	while (true) {
 		try {
-			wait(cx->getBackoff());
+			co_await cx->getBackoff();
 			++cx->transactionKeyServerLocationRequests;
-			state GetKeyServerLocationsReply rep = wait(commitProxyLoadBalance(
+			GetKeyServerLocationsReply rep = co_await commitProxyLoadBalance(
 			    cx,
 			    makeReqBuilder<GetKeyServerLocationsRequest>(
 			        span.context, key, Optional<KeyRef>(), /*limit=*/100, isBackward, version, key.arena()),
 			    &CommitProxyInterface::getKeyServersLocations,
 			    useProvisionalProxies,
-			    TaskPriority::DefaultPromiseEndpoint));
+			    TaskPriority::DefaultPromiseEndpoint);
 			++cx->transactionKeyServerLocationRequestsCompleted;
 			if (debugID.present())
 				g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocation.After");
@@ -1226,7 +1226,7 @@ ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
 			updateTagMappings(cx, rep);
 
 			cx->updateBackoff(success());
-			return KeyRangeLocationInfo(KeyRange(rep.results[0].first, rep.arena), locationInfo);
+			co_return KeyRangeLocationInfo(KeyRange(rep.results[0].first, rep.arena), locationInfo);
 		} catch (Error& e) {
 			if (e.code() == error_code_commit_proxy_memory_limit_exceeded) {
 				// Eats commit_proxy_memory_limit_exceeded error from commit proxies
@@ -1342,49 +1342,47 @@ void DatabaseContext::updateBackoff(const Error& err) {
 	}
 }
 
-ACTOR Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
-    Database cx,
-    KeyRange keys,
-    int limit,
-    Reverse reverse,
-    SpanContext spanContext,
-    Optional<UID> debugID,
-    UseProvisionalProxies useProvisionalProxies,
-    Version version) {
-	state Span span("NAPI:getKeyRangeLocations"_loc, spanContext);
+Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(Database cx,
+                                                                        KeyRange keys,
+                                                                        int limit,
+                                                                        Reverse reverse,
+                                                                        SpanContext spanContext,
+                                                                        Optional<UID> debugID,
+                                                                        UseProvisionalProxies useProvisionalProxies,
+                                                                        Version version) {
+	Span span("NAPI:getKeyRangeLocations"_loc, spanContext);
 	if (debugID.present())
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocations.Before");
 
-	loop {
+	while (true) {
 		try {
-			wait(cx->getBackoff());
+			co_await cx->getBackoff();
 			++cx->transactionKeyServerLocationRequests;
-			state GetKeyServerLocationsReply rep = wait(
-			    commitProxyLoadBalance(cx,
-			                           makeReqBuilder<GetKeyServerLocationsRequest>(
-			                               span.context, keys.begin, keys.end, limit, reverse, version, keys.arena()),
-			                           &CommitProxyInterface::getKeyServersLocations,
-			                           useProvisionalProxies,
-			                           TaskPriority::DefaultPromiseEndpoint));
+			GetKeyServerLocationsReply rep = co_await commitProxyLoadBalance(
+			    cx,
+			    makeReqBuilder<GetKeyServerLocationsRequest>(
+			        span.context, keys.begin, keys.end, limit, reverse, version, keys.arena()),
+			    &CommitProxyInterface::getKeyServersLocations,
+			    useProvisionalProxies,
+			    TaskPriority::DefaultPromiseEndpoint);
 			++cx->transactionKeyServerLocationRequestsCompleted;
 			if (debugID.present())
 				g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocations.After");
 			ASSERT(rep.results.size());
 
-			state std::vector<KeyRangeLocationInfo> results;
-			state int shard = 0;
-			for (; shard < rep.results.size(); shard++) {
+			std::vector<KeyRangeLocationInfo> results;
+			for (int shard = 0; shard < rep.results.size(); ++shard) {
 				// FIXME: these shards are being inserted into the map sequentially, it would be much more CPU
 				// efficient to save the map pairs and insert them all at once.
 				results.emplace_back((rep.results[shard].first & keys),
 				                     cx->setCachedLocation(rep.results[shard].first, rep.results[shard].second));
-				wait(yield());
+				co_await yield();
 			}
 			updateTssMappings(cx, rep);
 			updateTagMappings(cx, rep);
 
 			cx->updateBackoff(success());
-			return results;
+			co_return results;
 		} catch (Error& e) {
 			if (e.code() == error_code_commit_proxy_memory_limit_exceeded) {
 				// Eats commit_proxy_memory_limit_exceeded error from commit proxies

@@ -647,13 +647,13 @@ ACTOR Future<Optional<Standalone<VectorRef<KeyRef>>>> splitStorageMetricsWithLoc
 namespace NativeAPI {
 Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(Transaction* tr);
 }
-ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
-                                                           Key key,
-                                                           SpanContext spanContext,
-                                                           Optional<UID> debugID,
-                                                           UseProvisionalProxies useProvisionalProxies,
-                                                           Reverse isBackward,
-                                                           Version version);
+Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
+                                                     Key key,
+                                                     SpanContext spanContext,
+                                                     Optional<UID> debugID,
+                                                     UseProvisionalProxies useProvisionalProxies,
+                                                     Reverse isBackward,
+                                                     Version version);
 
 Future<Void> refreshTransaction(DatabaseContext* self, Transaction* tr);
 
