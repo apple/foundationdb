@@ -2945,8 +2945,6 @@ Future<RangeResult> WorkerInterfacesSpecialKeyImpl::getRange(ReadYourWritesTrans
 	return workerInterfacesImplGetRangeActor(ryw, getKeyRange().begin, kr);
 }
 
-Future<Optional<Value>> getJSON(Database db, std::string jsonField = "");
-
 static Future<RangeResult> FaultToleranceMetricsImplActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
 	RangeResult res;
 	if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionRecord()) {

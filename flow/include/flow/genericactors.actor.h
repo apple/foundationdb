@@ -246,6 +246,24 @@ Future<T> timeoutError(Future<T> what, double time, TaskPriority taskID = TaskPr
 	}
 }
 
+template <class T>
+AsyncResult<T> timeoutError(AsyncResult<T> what,
+                            double time,
+                            TaskPriority taskID = TaskPriority::DefaultDelay,
+                            ExplicitVoid = {}) {
+	if (what.canGet()) {
+		co_return what.get();
+	} else if (what.isError()) {
+		throw what.getError();
+	}
+	auto res = co_await race(std::move(what), delay(time, taskID));
+	if (res.index() == 0) {
+		co_return std::get<0>(std::move(res));
+	} else {
+		throw timed_out();
+	}
+}
+
 ACTOR template <class T>
 Future<T> delayed(Future<T> what, double time = 0.0, TaskPriority taskID = TaskPriority::DefaultDelay) {
 	try {

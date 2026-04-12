@@ -1556,9 +1556,9 @@ ReadYourWritesTransaction::ReadYourWritesTransaction(Database const& cx)
 	applyPersistentOptions();
 }
 
-ACTOR Future<Void> timebomb(double endTime, Promise<Void> resetPromise) {
+Future<Void> timebomb(double endTime, Promise<Void> resetPromise) {
 	while (now() < endTime) {
-		wait(delayUntil(std::min(endTime + 0.0001, now() + CLIENT_KNOBS->TRANSACTION_TIMEOUT_DELAY_INTERVAL)));
+		co_await delayUntil(std::min(endTime + 0.0001, now() + CLIENT_KNOBS->TRANSACTION_TIMEOUT_DELAY_INTERVAL));
 	}
 	if (!resetPromise.isSet())
 		resetPromise.sendError(transaction_timed_out());
@@ -1590,7 +1590,7 @@ Optional<Value> getValueFromJSON(StatusObject statusObj) {
 	}
 }
 
-Future<Optional<Value>> getJSON(Database db, std::string jsonField = "") {
+Future<Optional<Value>> getJSON(Database db, std::string jsonField) {
 	StatusObject statusObj = co_await StatusClient::statusFetcher(db, jsonField);
 	co_return getValueFromJSON(statusObj);
 }
