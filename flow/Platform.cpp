@@ -1,5 +1,5 @@
 /*
- * Platform.actor.cpp
+ * Platform.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -52,7 +52,6 @@
 #include "flow/Error.h"
 #include "flow/FaultInjection.h"
 #include "flow/Knobs.h"
-#include "flow/Platform.actor.h"
 #include "flow/ScopeExit.h"
 #include "flow/SimpleCounter.h"
 #include "flow/StreamCipher.h"
@@ -2077,9 +2076,9 @@ static void enableLargePages() {
 	ModifyPrivilege(SE_LOCK_MEMORY_NAME, true);
 	largePagesPrivilegeEnabled = true;
 #else
-	// SOMEDAY: can/should we teach the client how to enable large pages
-	// on Linux? Or just rely on the system to have been configured as
-	// desired?
+		// SOMEDAY: can/should we teach the client how to enable large pages
+		// on Linux? Or just rely on the system to have been configured as
+		// desired?
 #endif
 }
 
@@ -2286,8 +2285,8 @@ void atomicReplace(std::string const& path, std::string const& content, bool tex
 		if (!f)
 			throw io_error();
 #ifdef _WIN32
-		// In Windows case, ReplaceFile API is used which preserves the ownership,
-		// ACLs and other attributes of the original file
+			// In Windows case, ReplaceFile API is used which preserves the ownership,
+			// ACLs and other attributes of the original file
 #elif defined(__unixish__)
 		// get the uid/gid/mode bits of old file and set it on new file, else fail
 		struct stat info;
@@ -3877,7 +3876,7 @@ void profileHandler(int sig) {
 #ifndef WITH_SWIFT
 	ps->timestamp = checkThreadTime.is_lock_free() ? checkThreadTime.load() : 0;
 #else
-	// FIXME: problem with Swift build: lib/libflow.a(Platform.actor.g.cpp.o):Platform.actor.g.cpp:function
+	// FIXME: problem with Swift build: lib/libflow.a(Platform.cpp.o):Platform.cpp:function
 	// profileHandler(int): error: undefined reference to '__atomic_is_lock_free'
 	ps->timestamp = 0;
 #endif /* WITH_SWIFT */
