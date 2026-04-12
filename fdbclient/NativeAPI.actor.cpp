@@ -6018,10 +6018,10 @@ Future<Standalone<VectorRef<KeyRef>>> Transaction::getRangeSplitPoints(KeyRange 
 	return ::getRangeSplitPoints(trState, keys, chunkSize);
 }
 
-ACTOR Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware) {
-	state ReadYourWritesTransaction tr(cx);
-	state Version version = invalidVersion;
-	loop {
+Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware) {
+	ReadYourWritesTransaction tr(cx);
+	while (true) {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			if (lockAware) {
@@ -6029,42 +6029,39 @@ ACTOR Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAw
 			}
 
 			tr.set(perpetualStorageWiggleKey, enable ? "1"_sr : "0"_sr);
-			wait(tr.commit());
-			version = tr.getCommittedVersion();
-			break;
+			co_await tr.commit();
+			co_return tr.getCommittedVersion();
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
-	return version;
 }
 
-ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,
-                                                                                      bool primary,
-                                                                                      bool use_system_priority) {
-	state StorageWiggleData wiggleState;
-	state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap =
-	    wiggleState.wigglingStorageServer(PrimaryRegion(primary));
+Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,
+                                                                                bool primary,
+                                                                                bool use_system_priority) {
+	StorageWiggleData wiggleState;
+	auto metadataMap = wiggleState.wigglingStorageServer(PrimaryRegion(primary));
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
 
-	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	state KeyBackedRangeResult<std::pair<UID, StorageWiggleValue>> res;
-
-	// read the wiggling pairs
-	loop {
+	while (true) {
+		Error err;
 		try {
+			KeyBackedRangeResult<std::pair<UID, StorageWiggleValue>> res;
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			if (use_system_priority) {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			}
-			wait(store(res, metadataMap.getRange(tr, UID(0, 0), Optional<UID>(), CLIENT_KNOBS->TOO_MANY)));
-			wait(tr->commit());
-			break;
+			co_await store(res, metadataMap.getRange(tr, UID(0, 0), Optional<UID>(), CLIENT_KNOBS->TOO_MANY));
+			co_await tr->commit();
+			co_return res.results;
 		} catch (Error& e) {
-			wait(tr->onError(e));
+			err = e;
 		}
+		co_await tr->onError(err);
 	}
-	return res.results;
 }
 
 ACTOR Future<Void> splitStorageMetricsStream(PromiseStream<Key> resultStream,
