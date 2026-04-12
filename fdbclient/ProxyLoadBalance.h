@@ -50,10 +50,10 @@ ReqBuilder<Req, std::decay_t<Args>...> makeReqBuilder(Args&&... args) {
 }
 
 // Retries a commit-proxy request whenever the proxy set changes before a reply arrives.
-template <class Req, class Builder>
+template <class Req, class Builder, bool IsPublicStream>
 Future<REPLY_TYPE(Req)> commitProxyLoadBalance(Database cx,
                                                Builder reqBuilder,
-                                               RequestStream<Req> CommitProxyInterface::*channel,
+                                               RequestStream<Req, IsPublicStream> CommitProxyInterface::*channel,
                                                UseProvisionalProxies useProvisionalProxies,
                                                TaskPriority taskID,
                                                AtMostOnce atMostOnce = AtMostOnce::False,
@@ -68,20 +68,20 @@ Future<REPLY_TYPE(Req)> commitProxyLoadBalance(Database cx,
 	}
 }
 
-template <class Req, class Builder>
+template <class Req, class Builder, bool IsPublicStream>
 Future<REPLY_TYPE(Req)> commitProxyLoadBalance(Database cx,
                                                Builder reqBuilder,
-                                               RequestStream<Req> CommitProxyInterface::*channel,
+                                               RequestStream<Req, IsPublicStream> CommitProxyInterface::*channel,
                                                AtMostOnce atMostOnce = AtMostOnce::False,
                                                ExplicitVoid = {}) {
 	return commitProxyLoadBalance(cx, reqBuilder, channel, UseProvisionalProxies::False, cx->taskID, atMostOnce);
 }
 
 // Retries a GRV-proxy request whenever the proxy set changes before a reply arrives.
-template <class Req, class Builder>
+template <class Req, class Builder, bool IsPublicStream>
 Future<REPLY_TYPE(Req)> grvProxyLoadBalance(Database cx,
                                             Builder reqBuilder,
-                                            RequestStream<Req> GrvProxyInterface::* channel,
+                                            RequestStream<Req, IsPublicStream> GrvProxyInterface::*channel,
                                             AtMostOnce atMostOnce = AtMostOnce::False,
                                             ExplicitVoid = {}) {
 	while (true) {
