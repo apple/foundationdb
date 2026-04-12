@@ -29,6 +29,7 @@
 #include "fdbserver/core/LogSystem.h"
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/ResolverInterface.h"
+#include "../logsystem/include/fdbserver/logsystem/TagPartitionedLogSystem.h"
 #include "flow/IRandom.h"
 
 struct SingleKeyMutationDescriptor {
@@ -186,7 +187,7 @@ struct ProxyCommitData {
 	MasterInterface master;
 	std::vector<ResolverInterface> resolvers;
 	LogSystemDiskQueueAdapter* logAdapter;
-	Reference<ILogSystem> logSystem;
+	Reference<TagPartitionedLogSystem> logSystem;
 	IKeyValueStore* txnStateStore;
 	NotifiedVersion committedVersion; // Provided that this recovery has succeeded or will succeed, this version is
 	                                  // fully committed (durable)

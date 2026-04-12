@@ -20,6 +20,39 @@
 
 #include "fdbserver/logsystem/TagPartitionedLogSystem.h"
 
+bool logSystemHasRemoteLogs(TagPartitionedLogSystem const& logSystem) {
+	return logSystem.hasRemoteLogs();
+}
+
+void logSystemGetPushLocations(TagPartitionedLogSystem const& logSystem,
+                               VectorRef<Tag> tags,
+                               std::vector<int>& locations,
+                               bool allLocations,
+                               Optional<std::vector<Reference<LocalitySet>>> fromLocations) {
+	logSystem.getPushLocations(tags, locations, allLocations, fromLocations);
+}
+
+std::vector<Reference<LocalitySet>> logSystemGetPushLocationsForTags(TagPartitionedLogSystem const& logSystem,
+                                                                     std::vector<int>& fromLocations) {
+	return logSystem.getPushLocationsForTags(fromLocations);
+}
+
+Tag logSystemGetRandomRouterTag(TagPartitionedLogSystem const& logSystem) {
+	return logSystem.getRandomRouterTag();
+}
+
+int logSystemGetLogRouterTags(TagPartitionedLogSystem const& logSystem) {
+	return logSystem.getLogRouterTags();
+}
+
+Tag logSystemGetRandomTxsTag(TagPartitionedLogSystem const& logSystem) {
+	return logSystem.getRandomTxsTag();
+}
+
+TLogVersion logSystemGetTLogVersion(TagPartitionedLogSystem const& logSystem) {
+	return logSystem.getTLogVersion();
+}
+
 #include <boost/dynamic_bitset.hpp>
 #include <utility>
 
@@ -247,21 +280,23 @@ Version TagPartitionedLogSystem::popPseudoLocalityTag(Tag tag, Version upTo) {
 	return minVersion;
 }
 
-Future<Void> TagPartitionedLogSystem::recoverAndEndEpoch(Reference<AsyncVar<Reference<ILogSystem>>> const& outLogSystem,
-                                                         UID const& dbgid,
-                                                         DBCoreState const& oldState,
-                                                         FutureStream<TLogRejoinRequest> const& rejoins,
-                                                         LocalityData const& locality,
-                                                         bool* forceRecovery) {
+Future<Void> TagPartitionedLogSystem::recoverAndEndEpoch(
+    Reference<AsyncVar<Reference<TagPartitionedLogSystem>>> const& outLogSystem,
+    UID const& dbgid,
+    DBCoreState const& oldState,
+    FutureStream<TLogRejoinRequest> const& rejoins,
+    LocalityData const& locality,
+    bool* forceRecovery) {
 	return epochEnd(outLogSystem, dbgid, oldState, rejoins, locality, forceRecovery);
 }
 
-Reference<ILogSystem> TagPartitionedLogSystem::fromLogSystemConfig(UID const& dbgid,
-                                                                   LocalityData const& locality,
-                                                                   LogSystemConfig const& lsConf,
-                                                                   bool excludeRemote,
-                                                                   bool useRecoveredAt,
-                                                                   Optional<PromiseStream<Future<Void>>> addActor) {
+Reference<TagPartitionedLogSystem> TagPartitionedLogSystem::fromLogSystemConfig(
+    UID const& dbgid,
+    LocalityData const& locality,
+    LogSystemConfig const& lsConf,
+    bool excludeRemote,
+    bool useRecoveredAt,
+    Optional<PromiseStream<Future<Void>>> addActor) {
 	ASSERT(lsConf.logSystemType == LogSystemType::tagPartitioned ||
 	       (lsConf.logSystemType == LogSystemType::empty && !lsConf.tLogs.size()));
 	// ASSERT(lsConf.epoch == epoch);  //< FIXME
@@ -296,9 +331,9 @@ Reference<ILogSystem> TagPartitionedLogSystem::fromLogSystemConfig(UID const& db
 	return logSystem;
 }
 
-Reference<ILogSystem> TagPartitionedLogSystem::fromOldLogSystemConfig(UID const& dbgid,
-                                                                      LocalityData const& locality,
-                                                                      LogSystemConfig const& lsConf) {
+Reference<TagPartitionedLogSystem> TagPartitionedLogSystem::fromOldLogSystemConfig(UID const& dbgid,
+                                                                                   LocalityData const& locality,
+                                                                                   LogSystemConfig const& lsConf) {
 	ASSERT(lsConf.logSystemType == LogSystemType::tagPartitioned ||
 	       (lsConf.logSystemType == LogSystemType::empty && !lsConf.tLogs.size()));
 	// ASSERT(lsConf.epoch == epoch);  //< FIXME
@@ -592,7 +627,7 @@ Future<TLogCommitReply> TagPartitionedLogSystem::recordPushMetrics(Reference<Con
 	co_return t;
 }
 
-Future<Version> TagPartitionedLogSystem::push(const ILogSystem::PushVersionSet& versionSet,
+Future<Version> TagPartitionedLogSystem::push(const LogPushVersionSet& versionSet,
                                               LogPushData& data,
                                               SpanContext const& spanContext,
                                               Optional<UID> debugID,
@@ -721,11 +756,11 @@ void TagPartitionedLogSystem::resetBestServerIfNotLocked(
 	}
 }
 
-Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekAll(UID dbgid,
-                                                                    Version begin,
-                                                                    Version end,
-                                                                    Tag tag,
-                                                                    bool parallelGetMore) {
+Reference<IPeekCursor> TagPartitionedLogSystem::peekAll(UID dbgid,
+                                                        Version begin,
+                                                        Version end,
+                                                        Tag tag,
+                                                        bool parallelGetMore) {
 	int bestSet = 0;
 	std::vector<Reference<LogSet>> localSets;
 	Version lastBegin = 0;
@@ -769,7 +804,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekAll(UID dbgid,
 		return makeReference<SetPeekCursor>(
 		    localSets, bestSet, bestServer, tag, begin, end, parallelGetMore, bestKnownLockedTLogIds);
 	} else {
-		std::vector<Reference<ILogSystem::IPeekCursor>> cursors;
+		std::vector<Reference<IPeekCursor>> cursors;
 		std::vector<LogMessageVersion> epochEnds;
 
 		if (lastBegin < end && localSets.size()) {
@@ -864,11 +899,11 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekAll(UID dbgid,
 	}
 }
 
-Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekRemote(UID dbgid,
-                                                                       Version begin,
-                                                                       Optional<Version> end,
-                                                                       Tag tag,
-                                                                       bool parallelGetMore) {
+Reference<IPeekCursor> TagPartitionedLogSystem::peekRemote(UID dbgid,
+                                                           Version begin,
+                                                           Optional<Version> end,
+                                                           Tag tag,
+                                                           bool parallelGetMore) {
 	int bestSet = -1;
 	Version lastBegin = recoveredAt.present() ? recoveredAt.get() + 1 : 0;
 	for (int t = 0; t < tLogs.size(); t++) {
@@ -900,7 +935,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekRemote(UID dbgid
 		return makeReference<BufferedCursor>(
 		    tLogs[bestSet]->logRouters, tag, begin, end.present() ? end.get() + 1 : getPeekEnd(), parallelGetMore);
 	} else {
-		std::vector<Reference<ILogSystem::IPeekCursor>> cursors;
+		std::vector<Reference<IPeekCursor>> cursors;
 		std::vector<LogMessageVersion> epochEnds;
 		TraceEvent("TLogPeekRemoteAddingBest", dbgid)
 		    .detail("Tag", tag.toString())
@@ -975,11 +1010,11 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekRemote(UID dbgid
 	}
 }
 
-Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peek(UID dbgid,
-                                                                 Version begin,
-                                                                 Optional<Version> end,
-                                                                 Tag tag,
-                                                                 bool parallelGetMore) {
+Reference<IPeekCursor> TagPartitionedLogSystem::peek(UID dbgid,
+                                                     Version begin,
+                                                     Optional<Version> end,
+                                                     Tag tag,
+                                                     bool parallelGetMore) {
 	if (!tLogs.size()) {
 		TraceEvent("TLogPeekNoLogSets", dbgid).detail("Tag", tag.toString()).detail("Begin", begin);
 		return makeReference<ServerPeekCursor>(
@@ -993,11 +1028,11 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peek(UID dbgid,
 	}
 }
 
-Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peek(UID dbgid,
-                                                                 Version begin,
-                                                                 Optional<Version> end,
-                                                                 std::vector<Tag> tags,
-                                                                 bool parallelGetMore) {
+Reference<IPeekCursor> TagPartitionedLogSystem::peek(UID dbgid,
+                                                     Version begin,
+                                                     Optional<Version> end,
+                                                     std::vector<Tag> tags,
+                                                     bool parallelGetMore) {
 	if (tags.empty()) {
 		TraceEvent("TLogPeekNoTags", dbgid).detail("Begin", begin);
 		return makeReference<ServerPeekCursor>(
@@ -1008,7 +1043,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peek(UID dbgid,
 		return peek(dbgid, begin, end, tags[0], parallelGetMore);
 	}
 
-	std::vector<Reference<ILogSystem::IPeekCursor>> cursors;
+	std::vector<Reference<IPeekCursor>> cursors;
 	cursors.reserve(tags.size());
 	for (auto tag : tags) {
 		cursors.push_back(peek(dbgid, begin, end, tag, parallelGetMore));
@@ -1016,12 +1051,12 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peek(UID dbgid,
 	return makeReference<BufferedCursor>(cursors, begin, end.present() ? end.get() + 1 : getPeekEnd(), true, false);
 }
 
-Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLocal(UID dbgid,
-                                                                      Tag tag,
-                                                                      Version begin,
-                                                                      Version end,
-                                                                      bool useMergePeekCursors,
-                                                                      int8_t peekLocality) {
+Reference<IPeekCursor> TagPartitionedLogSystem::peekLocal(UID dbgid,
+                                                          Tag tag,
+                                                          Version begin,
+                                                          Version end,
+                                                          bool useMergePeekCursors,
+                                                          int8_t peekLocality) {
 	if (tag.locality >= 0 || tag.locality == tagLocalitySpecial) {
 		peekLocality = tag.locality;
 	}
@@ -1090,7 +1125,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLocal(UID dbgid,
 			    tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor(tag)], tag, begin, end, false, false);
 		}
 	} else {
-		std::vector<Reference<ILogSystem::IPeekCursor>> cursors;
+		std::vector<Reference<IPeekCursor>> cursors;
 		std::vector<LogMessageVersion> epochEnds;
 
 		if (tLogs[bestSet]->startVersion < end) {
@@ -1230,11 +1265,11 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLocal(UID dbgid,
 	}
 }
 
-Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekTxs(UID dbgid,
-                                                                    Version begin,
-                                                                    int8_t peekLocality,
-                                                                    Version localEnd,
-                                                                    bool canDiscardPopped) {
+Reference<IPeekCursor> TagPartitionedLogSystem::peekTxs(UID dbgid,
+                                                        Version begin,
+                                                        int8_t peekLocality,
+                                                        Version localEnd,
+                                                        bool canDiscardPopped) {
 	Version end = getEnd();
 	if (!tLogs.size()) {
 		TraceEvent("TLogPeekTxsNoLogs", dbgid).log();
@@ -1254,7 +1289,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekTxs(UID dbgid,
 	}
 
 	if (peekLocality < 0 || localEnd == invalidVersion || localEnd <= begin) {
-		std::vector<Reference<ILogSystem::IPeekCursor>> cursors;
+		std::vector<Reference<IPeekCursor>> cursors;
 		cursors.reserve(maxTxsTags);
 		for (int i = 0; i < maxTxsTags; i++) {
 			cursors.push_back(peekAll(dbgid, begin, end, Tag(tagLocalityTxs, i), true));
@@ -1265,7 +1300,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekTxs(UID dbgid,
 
 	try {
 		if (localEnd >= end) {
-			std::vector<Reference<ILogSystem::IPeekCursor>> cursors;
+			std::vector<Reference<IPeekCursor>> cursors;
 			cursors.reserve(maxTxsTags);
 			for (int i = 0; i < maxTxsTags; i++) {
 				cursors.push_back(peekLocal(dbgid, Tag(tagLocalityTxs, i), begin, end, true, peekLocality));
@@ -1274,13 +1309,13 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekTxs(UID dbgid,
 			return makeReference<BufferedCursor>(cursors, begin, end, false, canDiscardPopped);
 		}
 
-		std::vector<Reference<ILogSystem::IPeekCursor>> cursors;
+		std::vector<Reference<IPeekCursor>> cursors;
 		std::vector<LogMessageVersion> epochEnds;
 
 		cursors.resize(2);
 
-		std::vector<Reference<ILogSystem::IPeekCursor>> localCursors;
-		std::vector<Reference<ILogSystem::IPeekCursor>> allCursors;
+		std::vector<Reference<IPeekCursor>> localCursors;
+		std::vector<Reference<IPeekCursor>> allCursors;
 		for (int i = 0; i < maxTxsTags; i++) {
 			localCursors.push_back(peekLocal(dbgid, Tag(tagLocalityTxs, i), begin, localEnd, true, peekLocality));
 			allCursors.push_back(peekAll(dbgid, localEnd, end, Tag(tagLocalityTxs, i), true));
@@ -1293,7 +1328,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekTxs(UID dbgid,
 		return makeReference<MultiCursor>(cursors, epochEnds);
 	} catch (Error& e) {
 		if (e.code() == error_code_worker_removed) {
-			std::vector<Reference<ILogSystem::IPeekCursor>> cursors;
+			std::vector<Reference<IPeekCursor>> cursors;
 			cursors.reserve(maxTxsTags);
 			for (int i = 0; i < maxTxsTags; i++) {
 				cursors.push_back(peekAll(dbgid, begin, end, Tag(tagLocalityTxs, i), true));
@@ -1305,10 +1340,10 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekTxs(UID dbgid,
 	}
 }
 
-Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekSingle(UID dbgid,
-                                                                       Version begin,
-                                                                       Tag tag,
-                                                                       std::vector<std::pair<Version, Tag>> history) {
+Reference<IPeekCursor> TagPartitionedLogSystem::peekSingle(UID dbgid,
+                                                           Version begin,
+                                                           Tag tag,
+                                                           std::vector<std::pair<Version, Tag>> history) {
 	while (history.size() && begin >= history.back().first) {
 		history.pop_back();
 	}
@@ -1317,7 +1352,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekSingle(UID dbgid
 		TraceEvent("TLogPeekSingleNoHistory", dbgid).detail("Tag", tag.toString()).detail("Begin", begin);
 		return peekLocal(dbgid, tag, begin, getPeekEnd(), false);
 	} else {
-		std::vector<Reference<ILogSystem::IPeekCursor>> cursors;
+		std::vector<Reference<IPeekCursor>> cursors;
 		std::vector<LogMessageVersion> epochEnds;
 
 		TraceEvent("TLogPeekSingleAddingLocal", dbgid).detail("Tag", tag.toString()).detail("Begin", history[0].first);
@@ -1341,7 +1376,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekSingle(UID dbgid
 	}
 }
 
-Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(
+Reference<IPeekCursor> TagPartitionedLogSystem::peekLogRouter(
     UID dbgid,
     Version begin,
     Tag tag,
@@ -1801,7 +1836,7 @@ Future<Void> TagPartitionedLogSystem::endEpoch() {
 	return waitForAll(lockResults);
 }
 
-Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
+Future<Reference<TagPartitionedLogSystem>> TagPartitionedLogSystem::newEpoch(
     RecruitFromConfigurationReply const& recr,
     Future<RecruitRemoteFromConfigurationReply> const& fRemoteWorkers,
     DatabaseConfiguration const& config,
@@ -1989,11 +2024,10 @@ Version TagPartitionedLogSystem::getBackupStartVersion() const {
 	return backupStartVersion;
 }
 
-std::map<LogEpoch, ILogSystem::EpochTagsVersionsInfo> TagPartitionedLogSystem::getOldEpochTagsVersionsInfo() const {
+std::map<LogEpoch, EpochTagsVersionsInfo> TagPartitionedLogSystem::getOldEpochTagsVersionsInfo() const {
 	std::map<LogEpoch, EpochTagsVersionsInfo> epochInfos;
 	for (const auto& old : oldLogData) {
-		epochInfos.insert(
-		    { old.epoch, ILogSystem::EpochTagsVersionsInfo(old.logRouterTags, old.epochBegin, old.epochEnd) });
+		epochInfos.insert({ old.epoch, EpochTagsVersionsInfo(old.logRouterTags, old.epochBegin, old.epochEnd) });
 		TraceEvent("OldEpochTagsVersions", dbgid)
 		    .detail("Epoch", old.epoch)
 		    .detail("Tags", old.logRouterTags)
@@ -2442,7 +2476,7 @@ static bool isSubset(const std::map<uint8_t, std::vector<uint16_t>>& mapA,
 	return true;
 }
 
-Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Reference<ILogSystem>>> outLogSystem,
+Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Reference<TagPartitionedLogSystem>>> outLogSystem,
                                                UID dbgid,
                                                DBCoreState prevState,
                                                FutureStream<TLogRejoinRequest> rejoinRequests,
@@ -3187,7 +3221,7 @@ Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSystem* se
 	TraceEvent("RemoteLogRecruitment_CompletingRecovery").log();
 }
 
-Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
+Future<Reference<TagPartitionedLogSystem>> TagPartitionedLogSystem::newEpoch(
     Reference<TagPartitionedLogSystem> oldLogSystem,
     RecruitFromConfigurationReply recr,
     Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers,

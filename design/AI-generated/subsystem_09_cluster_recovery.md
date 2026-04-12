@@ -24,7 +24,7 @@ struct ClusterRecoveryData {
     DatabaseConfiguration configuration;
     std::vector<Optional<Key>> primaryDcId, remoteDcIds;
     
-    Reference<ILogSystem> logSystem;
+    Reference<TagPartitionedLogSystem> logSystem;
     IKeyValueStore* txnStateStore;               // in-memory metadata store
     LogSystemDiskQueueAdapter* txnStateLogAdapter;
     

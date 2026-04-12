@@ -57,7 +57,7 @@ struct BackupData {
     const LogEpoch recruitedEpoch, backupEpoch;
     
     Version savedVersion;                   // largest version saved to storage
-    AsyncVar<Reference<ILogSystem>> logSystem;
+    AsyncVar<Reference<TagPartitionedLogSystem>> logSystem;
     std::vector<VersionedMessage> messages; // in-memory mutation buffer
     std::map<UID, PerBackupInfo> backups;   // per-backup configurations
 };

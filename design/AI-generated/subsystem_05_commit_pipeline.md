@@ -35,7 +35,7 @@ The workhorse of the commit pipeline. Batches client commits and drives them thr
 struct ProxyCommitData {
     MasterInterface master;                           // for version assignment
     std::vector<ResolverInterface> resolvers;         // for conflict detection
-    Reference<ILogSystem> logSystem;                  // for TLog push
+    Reference<TagPartitionedLogSystem> logSystem;                  // for TLog push
     IKeyValueStore* txnStateStore;                    // persistent metadata
     
     NotifiedVersion committedVersion;                 // largest durable version

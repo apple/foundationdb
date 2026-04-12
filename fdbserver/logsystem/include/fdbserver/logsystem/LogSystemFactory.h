@@ -23,14 +23,15 @@
 #pragma once
 
 #include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/TagPartitionedLogSystem.h"
 
-Reference<ILogSystem> makeLogSystemFromServerDBInfo(
+Reference<TagPartitionedLogSystem> makeLogSystemFromServerDBInfo(
     UID const& dbgid,
     ServerDBInfo const& db,
     bool useRecoveredAt = false,
     Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>());
 
-Reference<ILogSystem> makeLogSystemFromLogSystemConfig(
+Reference<TagPartitionedLogSystem> makeLogSystemFromLogSystemConfig(
     UID const& dbgid,
     LocalityData const& locality,
     LogSystemConfig const& conf,
@@ -38,11 +39,11 @@ Reference<ILogSystem> makeLogSystemFromLogSystemConfig(
     bool useRecoveredAt = false,
     Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>());
 
-Reference<ILogSystem> makeOldLogSystemFromLogSystemConfig(UID const& dbgid,
-                                                          LocalityData const& locality,
-                                                          LogSystemConfig const& conf);
+Reference<TagPartitionedLogSystem> makeOldLogSystemFromLogSystemConfig(UID const& dbgid,
+                                                                       LocalityData const& locality,
+                                                                       LogSystemConfig const& conf);
 
-Future<Void> recoverAndEndLogSystemEpoch(Reference<AsyncVar<Reference<ILogSystem>>> const& outLogSystem,
+Future<Void> recoverAndEndLogSystemEpoch(Reference<AsyncVar<Reference<TagPartitionedLogSystem>>> const& outLogSystem,
                                          UID const& dbgid,
                                          DBCoreState const& oldState,
                                          FutureStream<TLogRejoinRequest> const& rejoins,

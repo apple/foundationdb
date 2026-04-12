@@ -1717,10 +1717,10 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		// Issue acs mutation at the end of this commit batch
 		addAccumulativeChecksumMutations(self);
 	}
-	const auto versionSet = ILogSystem::PushVersionSet{ self->prevVersion,
-		                                                self->commitVersion,
-		                                                pProxyCommitData->committedVersion.get(),
-		                                                pProxyCommitData->minKnownCommittedVersion };
+	const auto versionSet = LogPushVersionSet{ self->prevVersion,
+		                                       self->commitVersion,
+		                                       pProxyCommitData->committedVersion.get(),
+		                                       pProxyCommitData->minKnownCommittedVersion };
 	self->loggingComplete =
 	    pProxyCommitData->logSystem->push(versionSet, self->toCommit, span.context, self->debugID, tpcvMap);
 
@@ -2684,7 +2684,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		applyMetadataMutations(SpanContext(),
 		                       pContext->pCommitData->getApplyMetadataProxyContext(),
 		                       arena,
-		                       Reference<ILogSystem>(),
+		                       Reference<TagPartitionedLogSystem>(),
 		                       mutations,
 		                       /* pToCommit= */ nullptr,
 		                       confChanges,

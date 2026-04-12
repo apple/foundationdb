@@ -22,9 +22,11 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/core/OTELSpanContextMessage.h"
 #include "fdbserver/core/SpanContextMessage.h"
+#include "../logsystem/include/fdbserver/logsystem/TagPartitionedLogSystem.h"
 #include "flow/serialize.h"
 
-LogPushData::LogPushData(Reference<ILogSystem> logSystem, int tlogCount) : logSystem(logSystem), subsequence(1) {
+LogPushData::LogPushData(Reference<TagPartitionedLogSystem> logSystem, int tlogCount)
+  : logSystem(logSystem), subsequence(1) {
 	ASSERT(tlogCount > 0);
 	messagesWriter.reserve(tlogCount);
 	for (int i = 0; i < tlogCount; i++) {
@@ -34,7 +36,7 @@ LogPushData::LogPushData(Reference<ILogSystem> logSystem, int tlogCount) : logSy
 }
 
 void LogPushData::addTxsTag() {
-	next_message_tags.push_back(logSystem->getRandomTxsTag());
+	next_message_tags.push_back(logSystemGetRandomTxsTag(*logSystem));
 }
 
 void LogPushData::addTransactionInfo(SpanContext const& context) {
@@ -46,14 +48,14 @@ void LogPushData::addTransactionInfo(SpanContext const& context) {
 void LogPushData::writeMessage(StringRef rawMessageWithoutLength, bool usePreviousLocations) {
 	if (!usePreviousLocations) {
 		prev_tags.clear();
-		if (logSystem->hasRemoteLogs()) {
+		if (logSystemHasRemoteLogs(*logSystem)) {
 			prev_tags.push_back(chooseRouterTag());
 		}
 		for (auto& tag : next_message_tags) {
 			prev_tags.push_back(tag);
 		}
 		msg_locations.clear();
-		logSystem->getPushLocations(prev_tags, msg_locations);
+		logSystemGetPushLocations(*logSystem, VectorRef<Tag>((Tag*)prev_tags.data(), prev_tags.size()), msg_locations);
 		written_tags.insert(next_message_tags.begin(), next_message_tags.end());
 		next_message_tags.clear();
 	}
@@ -95,7 +97,7 @@ float LogPushData::getEmptyMessageRatio() const {
 }
 
 bool LogPushData::writeTransactionInfo(int location, uint32_t subseq) {
-	if (!FLOW_KNOBS->WRITE_TRACING_ENABLED || logSystem->getTLogVersion() < TLogVersion::V6 ||
+	if (!FLOW_KNOBS->WRITE_TRACING_ENABLED || logSystemGetTLogVersion(*logSystem) < TLogVersion::V6 ||
 	    writtenLocations.contains(location)) {
 		return false;
 	}
@@ -108,7 +110,7 @@ bool LogPushData::writeTransactionInfo(int location, uint32_t subseq) {
 	wr << uint32_t(0) << subseq << uint16_t(prev_tags.size());
 	for (auto& tag : prev_tags)
 		wr << tag;
-	if (logSystem->getTLogVersion() >= TLogVersion::V7) {
+	if (logSystemGetTLogVersion(*logSystem) >= TLogVersion::V7) {
 		OTELSpanContextMessage contextMessage(spanContext);
 		wr << contextMessage;
 	} else {

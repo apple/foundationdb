@@ -30,6 +30,7 @@
 #include "fdbserver/core/LogSystem.h"
 #include "fdbserver/core/ResolverInterface.h"
 #include "fdbserver/core/TLogInterface.h"
+#include "../logsystem/include/fdbserver/logsystem/TagPartitionedLogSystem.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/flow.h"
 
@@ -119,7 +120,7 @@ struct TLogTestContext : NonCopyable, public ReferenceCounted<TLogTestContext> {
 	// system state
 	UID logID;
 	UID workerID;
-	Reference<ILogSystem> ls;
+	Reference<TagPartitionedLogSystem> ls;
 	ServerDBInfo dbInfo;
 	Reference<AsyncVar<ServerDBInfo>> dbInfoRef;
 	Standalone<StringRef> dcID;

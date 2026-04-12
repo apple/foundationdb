@@ -143,7 +143,7 @@ struct Resolver : ReferenceCounted<Resolver> {
 	// happens at commit proxies and we never "write" to the LogSystem at
 	// Resolvers.
 	LogSystemDiskQueueAdapter* logAdapter = nullptr;
-	Reference<ILogSystem> logSystem;
+	Reference<TagPartitionedLogSystem> logSystem;
 	IKeyValueStore* txnStateStore = nullptr;
 	int localTLogCount = -1;
 

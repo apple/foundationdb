@@ -25,6 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/core/IDiskQueue.h"
 #include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/TagPartitionedLogSystem.h"
 
 struct PeekTxsInfo {
 	int8_t primaryLocality;
@@ -57,7 +58,7 @@ public:
 
 	// It does, however, peek the specified tag directly at recovery time.
 
-	LogSystemDiskQueueAdapter(Reference<ILogSystem> logSystem,
+	LogSystemDiskQueueAdapter(Reference<TagPartitionedLogSystem> logSystem,
 	                          Reference<AsyncVar<PeekTxsInfo>> peekLocality,
 	                          Version txsPoppedVersion,
 	                          bool recover)
@@ -118,12 +119,12 @@ public:
 private:
 	Reference<AsyncVar<PeekTxsInfo>> peekLocality;
 	Future<Void> localityChanged;
-	Reference<ILogSystem::IPeekCursor> cursor;
+	Reference<IPeekCursor> cursor;
 	int peekTypeSwitches;
 
 	// Recovery state (used while readNext() is being called repeatedly)
 	bool enableRecovery;
-	Reference<ILogSystem> logSystem;
+	Reference<TagPartitionedLogSystem> logSystem;
 	Version startLoc, recoveryLoc, recoveryQueueLoc;
 	std::vector<Standalone<StringRef>> recoveryQueue;
 	int recoveryQueueDataSize;
@@ -139,7 +140,7 @@ private:
 	friend class LogSystemDiskQueueAdapterImpl;
 };
 
-LogSystemDiskQueueAdapter* openDiskQueueAdapter(Reference<ILogSystem> logSystem,
+LogSystemDiskQueueAdapter* openDiskQueueAdapter(Reference<TagPartitionedLogSystem> logSystem,
                                                 Reference<AsyncVar<PeekTxsInfo>> peekLocality,
                                                 Version txsPoppedVersion);
 

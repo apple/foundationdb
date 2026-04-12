@@ -25,7 +25,7 @@
 
 #include "fdbrpc/Replication.h"
 #include "fdbserver/core/DBCoreState.h"
-#include "fdbserver/logsystem/LogSystemTypes.h"
+#include "LogSystemTypes.h"
 #include "flow/ActorCollection.h"
 
 // TagPartitionedLogSystem info in old epoch
@@ -83,7 +83,7 @@ struct DurableVersionInfo {
 	    policyResult(meetsPolicy), knownLockedTLogIds(std::move(lockedTLogIds)) {}
 };
 
-struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartitionedLogSystem> {
+struct TagPartitionedLogSystem : ReferenceCounted<TagPartitionedLogSystem> {
 	const UID dbgid;
 	LogSystemType logSystemType;
 	std::vector<Reference<LogSet>> tLogs; // LogSets in different locations: primary, satellite, or remote
@@ -149,59 +149,59 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	    recoveryCompleteWrittenToCoreState(false), remoteLogsWrittenToCoreState(false), hasRemoteServers(false),
 	    locality(locality), addActor(addActor), popActors(false) {}
 
-	void stopRejoins() final;
+	void stopRejoins();
 
-	void addref() final;
+	void addref();
 
-	void delref() final;
+	void delref();
 
-	std::string describe() const final;
+	std::string describe() const;
 
-	UID getDebugID() const final;
+	UID getDebugID() const;
 
-	LogSystemType getLogSystemType() const final;
+	LogSystemType getLogSystemType() const;
 
 	void addPseudoLocality(int8_t locality);
 
-	Tag getPseudoPopTag(Tag tag, ProcessClass::ClassType type) const final;
+	Tag getPseudoPopTag(Tag tag, ProcessClass::ClassType type) const;
 
-	bool hasPseudoLocality(int8_t locality) const final;
+	bool hasPseudoLocality(int8_t locality) const;
 
 	// Return the min version of all pseudoLocalities, i.e., logRouter and backupTag
-	Version popPseudoLocalityTag(Tag tag, Version upTo) final;
+	Version popPseudoLocalityTag(Tag tag, Version upTo);
 
-	static Future<Void> recoverAndEndEpoch(Reference<AsyncVar<Reference<ILogSystem>>> const& outLogSystem,
+	static Future<Void> recoverAndEndEpoch(Reference<AsyncVar<Reference<TagPartitionedLogSystem>>> const& outLogSystem,
 	                                       UID const& dbgid,
 	                                       DBCoreState const& oldState,
 	                                       FutureStream<TLogRejoinRequest> const& rejoins,
 	                                       LocalityData const& locality,
 	                                       bool* forceRecovery);
 
-	static Reference<ILogSystem> fromLogSystemConfig(UID const& dbgid,
-	                                                 LocalityData const& locality,
-	                                                 LogSystemConfig const& lsConf,
-	                                                 bool excludeRemote,
-	                                                 bool useRecoveredAt,
-	                                                 Optional<PromiseStream<Future<Void>>> addActor);
+	static Reference<TagPartitionedLogSystem> fromLogSystemConfig(UID const& dbgid,
+	                                                              LocalityData const& locality,
+	                                                              LogSystemConfig const& lsConf,
+	                                                              bool excludeRemote,
+	                                                              bool useRecoveredAt,
+	                                                              Optional<PromiseStream<Future<Void>>> addActor);
 
-	static Reference<ILogSystem> fromOldLogSystemConfig(UID const& dbgid,
-	                                                    LocalityData const& locality,
-	                                                    LogSystemConfig const& lsConf);
+	static Reference<TagPartitionedLogSystem> fromOldLogSystemConfig(UID const& dbgid,
+	                                                                 LocalityData const& locality,
+	                                                                 LogSystemConfig const& lsConf);
 
 	// Convert TagPartitionedLogSystem to DBCoreState and override input newState as return value
-	void toCoreState(DBCoreState& newState) const final;
+	void toCoreState(DBCoreState& newState) const;
 
-	bool remoteStorageRecovered() const final;
+	bool remoteStorageRecovered() const;
 
 	// Checks older TLog generations and remove no longer needed generations from the log system.
-	void purgeOldRecoveredGenerationsCoreState(DBCoreState&) final;
-	void purgeOldRecoveredGenerationsInMemory(const DBCoreState&) final;
+	void purgeOldRecoveredGenerationsCoreState(DBCoreState&);
+	void purgeOldRecoveredGenerationsInMemory(const DBCoreState&);
 
-	Future<Void> onCoreStateChanged() const final;
+	Future<Void> onCoreStateChanged() const;
 
-	void coreStateWritten(DBCoreState const& newState) final;
+	void coreStateWritten(DBCoreState const& newState);
 
-	Future<Void> onError() const final;
+	Future<Void> onError() const;
 
 	static Future<Void> onError_internal(TagPartitionedLogSystem const* self);
 
@@ -212,11 +212,11 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                                                 NetworkAddress addr,
 	                                                 Future<TLogCommitReply> in);
 
-	Future<Version> push(const ILogSystem::PushVersionSet& versionSet,
+	Future<Version> push(const LogPushVersionSet& versionSet,
 	                     LogPushData& data,
 	                     SpanContext const& spanContext,
 	                     Optional<UID> debugID,
-	                     Optional<std::unordered_map<uint16_t, Version>> tpcvMap) final;
+	                     Optional<std::unordered_map<uint16_t, Version>> tpcvMap);
 
 	// Version vector/Unicast specific: reset best server if it is not known to have been locked/stopped.
 	void resetBestServerIfNotLocked(int bestSet,
@@ -228,13 +228,13 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 
 	Reference<IPeekCursor> peekRemote(UID dbgid, Version begin, Optional<Version> end, Tag tag, bool parallelGetMore);
 
-	Reference<IPeekCursor> peek(UID dbgid, Version begin, Optional<Version> end, Tag tag, bool parallelGetMore) final;
+	Reference<IPeekCursor> peek(UID dbgid, Version begin, Optional<Version> end, Tag tag, bool parallelGetMore);
 
 	Reference<IPeekCursor> peek(UID dbgid,
 	                            Version begin,
 	                            Optional<Version> end,
 	                            std::vector<Tag> tags,
-	                            bool parallelGetMore) final;
+	                            bool parallelGetMore);
 
 	Reference<IPeekCursor> peekLocal(UID dbgid,
 	                                 Tag tag,
@@ -247,36 +247,37 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                               Version begin,
 	                               int8_t peekLocality,
 	                               Version localEnd,
-	                               bool canDiscardPopped) final;
+	                               bool canDiscardPopped);
 
-	Reference<IPeekCursor> peekSingle(UID dbgid,
-	                                  Version begin,
-	                                  Tag tag,
-	                                  std::vector<std::pair<Version, Tag>> history) final;
+	Reference<IPeekCursor> peekSingle(
+	    UID dbgid,
+	    Version begin,
+	    Tag tag,
+	    std::vector<std::pair<Version, Tag>> history = std::vector<std::pair<Version, Tag>>());
 
 	// LogRouter or BackupWorker use this function to obtain a cursor for peeking tlogs of a generation (i.e., epoch).
 	// Specifically, the epoch is determined by looking up "dbgid" in tlog sets of generations.
 	// The returned cursor can peek data at the "tag" from the given "begin" version to that epoch's end version or
 	// the recovery version for the latest old epoch. For the current epoch, the cursor has no end version.
 	// For the old epoch, the cursor is provided an end version.
-	Reference<IPeekCursor> peekLogRouter(
-	    UID dbgid,
-	    Version begin,
-	    Tag tag,
-	    bool useSatellite,
-	    Optional<Version> end,
-	    const Optional<std::map<uint8_t, std::vector<uint16_t>>>& knownStoppedTLogIds) final;
+	Reference<IPeekCursor> peekLogRouter(UID dbgid,
+	                                     Version begin,
+	                                     Tag tag,
+	                                     bool useSatellite,
+	                                     Optional<Version> end = Optional<Version>(),
+	                                     const Optional<std::map<uint8_t, std::vector<uint16_t>>>& knownStoppedTLogIds =
+	                                         Optional<std::map<uint8_t, std::vector<uint16_t>>>());
 
-	Version getKnownCommittedVersion() final;
+	Version getKnownCommittedVersion();
 
-	Future<Void> onKnownCommittedVersionChange() final;
+	Future<Void> onKnownCommittedVersionChange();
 
 	void popLogRouter(Version upTo, Tag tag, Version durableKnownCommittedVersion, int8_t popLocality);
 
-	void popTxs(Version upTo, int8_t popLocality) final;
+	void popTxs(Version upTo, int8_t popLocality = tagLocalityInvalid);
 
 	// pop 'tag.locality' type data up to the 'upTo' version
-	void pop(Version upTo, Tag tag, Version durableKnownCommittedVersion, int8_t popLocality) final;
+	void pop(Version upTo, Tag tag, Version durableKnownCommittedVersion = 0, int8_t popLocality = tagLocalityInvalid);
 
 	// pop tag from log up to the version defined in self->outstandingPops[].first
 	static Future<Void> popFromLog(TagPartitionedLogSystem* self,
@@ -289,69 +290,70 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 
 	static Future<Version> getPoppedTxs(TagPartitionedLogSystem* self);
 
-	Future<Version> getTxsPoppedVersion() final;
+	Future<Version> getTxsPoppedVersion();
 
 	static Future<Void> confirmEpochLive_internal(Reference<LogSet> logSet, Optional<UID> debugID);
 
 	// Returns success after confirming that pushes in the current epoch are still possible
-	Future<Void> confirmEpochLive(Optional<UID> debugID) final;
+	Future<Void> confirmEpochLive(Optional<UID> debugID = Optional<UID>());
 
-	Future<Void> endEpoch() final;
+	Future<Void> endEpoch();
 
 	// Call only after end_epoch() has successfully completed.  Returns a new epoch immediately following this one.
 	// The new epoch is only provisional until the caller updates the coordinated DBCoreState.
-	Future<Reference<ILogSystem>> newEpoch(RecruitFromConfigurationReply const& recr,
-	                                       Future<RecruitRemoteFromConfigurationReply> const& fRemoteWorkers,
-	                                       DatabaseConfiguration const& config,
-	                                       LogEpoch recoveryCount,
-	                                       Version recoveryTransactionVersion,
-	                                       int8_t primaryLocality,
-	                                       int8_t remoteLocality,
-	                                       std::vector<Tag> const& allTags,
-	                                       Reference<AsyncVar<bool>> const& recruitmentStalled) final;
+	Future<Reference<TagPartitionedLogSystem>> newEpoch(
+	    RecruitFromConfigurationReply const& recr,
+	    Future<RecruitRemoteFromConfigurationReply> const& fRemoteWorkers,
+	    DatabaseConfiguration const& config,
+	    LogEpoch recoveryCount,
+	    Version recoveryTransactionVersion,
+	    int8_t primaryLocality,
+	    int8_t remoteLocality,
+	    std::vector<Tag> const& allTags,
+	    Reference<AsyncVar<bool>> const& recruitmentStalled);
 
-	LogSystemConfig getLogSystemConfig() const final;
+	LogSystemConfig getLogSystemConfig() const;
 
-	Standalone<StringRef> getLogsValue() const final;
+	Standalone<StringRef> getLogsValue() const;
 
-	Future<Void> onLogSystemConfigChange() final;
+	Future<Void> onLogSystemConfigChange();
 
-	void updateLogRouter(int logSetIndex, int tagId, TLogInterface const& newLogRouter) final;
+	void updateLogRouter(int logSetIndex, int tagId, TLogInterface const& newLogRouter);
 
-	Version getEnd() const final;
+	Version getEnd() const;
 
 	Version getPeekEnd() const;
 
 	void getPushLocations(VectorRef<Tag> tags,
 	                      std::vector<int>& locations,
 	                      bool allLocations,
-	                      Optional<std::vector<Reference<LocalitySet>>> fromLocations) const final;
+	                      Optional<std::vector<Reference<LocalitySet>>> fromLocations) const;
 
-	std::vector<Reference<LocalitySet>> getPushLocationsForTags(std::vector<int>& fromLocations) const final;
+	std::vector<Reference<LocalitySet>> getPushLocationsForTags(std::vector<int>& fromLocations) const;
 
-	bool hasRemoteLogs() const final;
+	bool hasRemoteLogs() const;
 
-	Tag getRandomRouterTag() const final;
+	Tag getRandomRouterTag() const;
 
-	Tag getRandomTxsTag() const final;
+	Tag getRandomTxsTag() const;
 
-	TLogVersion getTLogVersion() const final;
+	TLogVersion getTLogVersion() const;
 
-	int getLogRouterTags() const final;
+	int getLogRouterTags() const;
 
-	Version getBackupStartVersion() const final;
+	Version getBackupStartVersion() const;
 
-	std::map<LogEpoch, ILogSystem::EpochTagsVersionsInfo> getOldEpochTagsVersionsInfo() const final;
+	std::map<LogEpoch, EpochTagsVersionsInfo> getOldEpochTagsVersionsInfo() const;
 
 	inline Reference<LogSet> getEpochLogSet(LogEpoch epoch) const;
 
-	void setBackupWorkers(const std::vector<InitializeBackupReply>& replies) final;
+	void setBackupWorkers(const std::vector<InitializeBackupReply>& replies);
 
-	bool removeBackupWorker(const BackupWorkerDoneRequest& req) final;
+	bool removeBackupWorker(const BackupWorkerDoneRequest& req);
 
-	LogEpoch getOldestBackupEpoch() const final;
+	LogEpoch getOldestBackupEpoch() const;
 
-	void setOldestBackupEpoch(LogEpoch epoch) final;
+	void setOldestBackupEpoch(LogEpoch epoch);
 	static Future<Void> monitorLog(Reference<AsyncVar<OptionalInterface<TLogInterface>>> logServer,
 	                               Reference<AsyncVar<bool>> failed);
 
@@ -368,7 +370,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	    LogLockInfo lockInfo,
 	    std::vector<Reference<AsyncVar<bool>>> failed = std::vector<Reference<AsyncVar<bool>>>());
 
-	static Future<Void> epochEnd(Reference<AsyncVar<Reference<ILogSystem>>> outLogSystem,
+	static Future<Void> epochEnd(Reference<AsyncVar<Reference<TagPartitionedLogSystem>>> outLogSystem,
 	                             UID dbgid,
 	                             DBCoreState prevState,
 	                             FutureStream<TLogRejoinRequest> rejoinRequests,
@@ -398,16 +400,17 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                                   std::vector<Tag> allTags,
 	                                   std::vector<Version> oldGenerationRecoverAtVersions);
 
-	static Future<Reference<ILogSystem>> newEpoch(Reference<TagPartitionedLogSystem> oldLogSystem,
-	                                              RecruitFromConfigurationReply recr,
-	                                              Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers,
-	                                              DatabaseConfiguration configuration,
-	                                              LogEpoch recoveryCount,
-	                                              Version recoveryTransactionVersion,
-	                                              int8_t primaryLocality,
-	                                              int8_t remoteLocality,
-	                                              std::vector<Tag> allTags,
-	                                              Reference<AsyncVar<bool>> recruitmentStalled);
+	static Future<Reference<TagPartitionedLogSystem>> newEpoch(
+	    Reference<TagPartitionedLogSystem> oldLogSystem,
+	    RecruitFromConfigurationReply recr,
+	    Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers,
+	    DatabaseConfiguration configuration,
+	    LogEpoch recoveryCount,
+	    Version recoveryTransactionVersion,
+	    int8_t primaryLocality,
+	    int8_t remoteLocality,
+	    std::vector<Tag> allTags,
+	    Reference<AsyncVar<bool>> recruitmentStalled);
 
 	static Future<Void> trackRejoins(
 	    UID dbgid,

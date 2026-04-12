@@ -288,7 +288,7 @@ Future<Void> TLogTestContext::sendPushMessages(TLogTestContext* pTLogTestContext
 			}
 		}
 		if (toCommit.getMutationCount()) {
-			const auto versionSet = ILogSystem::PushVersionSet{ prev, next, prev, prev };
+			const auto versionSet = LogPushVersionSet{ prev, next, prev, prev };
 			Future<Version> loggingComplete =
 			    pTLogTestContext->ls->push(versionSet, toCommit, SpanContext(), UID(), tpcvMap);
 			Version ver = co_await loggingComplete;

@@ -67,7 +67,7 @@ public:
 	                           Arena& arena_,
 	                           const VectorRef<MutationRef>& mutations_,
 	                           const ApplyMetadataProxyContext& proxyMetadata_,
-	                           Reference<ILogSystem> logSystem_,
+	                           Reference<TagPartitionedLogSystem> logSystem_,
 	                           LogPushData* toCommit_,
 	                           bool& confChange_,
 	                           Version version,
@@ -119,7 +119,7 @@ private:
 	// Flag indicates if the configure is changed
 	bool& confChange;
 
-	Reference<ILogSystem> logSystem = Reference<ILogSystem>();
+	Reference<TagPartitionedLogSystem> logSystem = Reference<TagPartitionedLogSystem>();
 	Version version = invalidVersion;
 	Version popVersion = 0;
 	KeyRangeMap<std::set<Key>>* vecBackupKeys = nullptr;
@@ -1173,7 +1173,7 @@ public:
 void applyMetadataMutations(SpanContext const& spanContext,
                             const ApplyMetadataProxyContext& proxyMetadata,
                             Arena& arena,
-                            Reference<ILogSystem> logSystem,
+                            Reference<TagPartitionedLogSystem> logSystem,
                             const VectorRef<MutationRef>& mutations,
                             LogPushData* toCommit,
                             bool& confChange,

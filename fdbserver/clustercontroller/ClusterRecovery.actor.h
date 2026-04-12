@@ -199,7 +199,7 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 
 	ServerCoordinators coordinators;
 
-	Reference<ILogSystem> logSystem;
+	Reference<TagPartitionedLogSystem> logSystem;
 	double lastVersionTime;
 	LogSystemDiskQueueAdapter* txnStateLogAdapter;
 	IKeyValueStore* txnStateStore;

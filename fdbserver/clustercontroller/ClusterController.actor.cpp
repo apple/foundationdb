@@ -209,7 +209,7 @@ Future<Void> recruitFailedLogRouters(ClusterControllerData* cluster,
                                      ClusterControllerData::DBInfo* db,
                                      std::vector<int> tagIds,
                                      int logSetIndex,
-                                     Reference<ILogSystem> logSystem,
+                                     Reference<TagPartitionedLogSystem> logSystem,
                                      LogSystemConfig config) {
 	Optional<Key> targetDcId =
 	    db->recoveryData->remoteDcIds.size() ? db->recoveryData->remoteDcIds[0] : Optional<Key>();
@@ -318,7 +318,7 @@ Future<Void> recruitFailedLogRouters(ClusterControllerData* cluster,
 	TraceEvent("LogRoutersRecruitmentComplete", cluster->id).detail("Count", tagIds.size());
 }
 
-Future<std::vector<int>> monitorLogRouters(Reference<ILogSystem> logSystem, int logSetIndex) {
+Future<std::vector<int>> monitorLogRouters(Reference<TagPartitionedLogSystem> logSystem, int logSetIndex) {
 	std::vector<Future<Void>> failures;
 	LogSystemConfig config = logSystem->getLogSystemConfig();
 	std::vector<int> failedTagIds;
@@ -424,7 +424,7 @@ Future<Void> monitorAndRecruitLogRouters(ClusterControllerData* self) {
 
 		ASSERT(self->db.recoveryData.isValid());
 		uint64_t recoveryCount = self->db.recoveryData->cstate.myDBState.recoveryCount;
-		Reference<ILogSystem> logSystem = self->db.recoveryData->logSystem;
+		Reference<TagPartitionedLogSystem> logSystem = self->db.recoveryData->logSystem;
 		LogSystemConfig config = logSystem->getLogSystemConfig();
 
 		// Find the log set with log routers (should be remote/satellite)

@@ -207,7 +207,7 @@ struct GrvProxyData {
 	GrvProxyStats stats;
 	MasterInterface master;
 	PublicRequestStream<GetReadVersionRequest> getConsistentReadVersion;
-	Reference<ILogSystem> logSystem;
+	Reference<TagPartitionedLogSystem> logSystem;
 
 	Database cx;
 	Reference<AsyncVar<ServerDBInfo> const> db;
