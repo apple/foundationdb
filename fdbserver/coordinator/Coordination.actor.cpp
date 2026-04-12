@@ -29,6 +29,7 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
 #include "flow/IndexedSet.h"
+#include "flow/genericactors.actor.h"
 #include "fdbclient/MonitorLeader.h"
 #include "flow/network.h"
 
@@ -76,19 +77,33 @@ struct GenerationRegVal {
 	}
 };
 
-ACTOR Future<Void> localGenerationReg(GenerationRegInterface interf, OnDemandStore* pstore) {
-	state GenerationRegVal v;
-	state OnDemandStore& store = *pstore;
-	// SOMEDAY: concurrent access to different keys?
-	loop choose {
-		when(GenerationRegReadRequest _req = waitNext(interf.read.getFuture())) {
+class LocalGenerationReg {
+public:
+	LocalGenerationReg(GenerationRegInterface interf, OnDemandStore* pstore)
+	  : readReqs(interf.read.getFuture()), writeReqs(interf.write.getFuture()), pStore(pstore),
+	    storeLock(new FlowLock(1)) {}
+
+	Future<Void> run() {
+		return serveReadReqs(readReqs, pStore, storeLock) || serveWriteReqs(writeReqs, pStore, storeLock);
+	}
+
+private:
+	static Future<Void> serveReadReqs(FutureStream<GenerationRegReadRequest> readReqs,
+	                                  OnDemandStore* pstore,
+	                                  Reference<FlowLock> storeLock) {
+		OnDemandStore& store = *pstore;
+		while (true) {
+			GenerationRegReadRequest req = co_await readReqs;
 			TraceEvent("GenerationRegReadRequest")
-			    .detail("From", _req.reply.getEndpoint().getPrimaryAddress())
-			    .detail("K", _req.key);
-			state GenerationRegReadRequest req = _req;
-			Optional<Value> rawV = wait(store->readValue(req.key));
-			v = rawV.present() ? BinaryReader::fromStringRef<GenerationRegVal>(rawV.get(), IncludeVersion())
-			                   : GenerationRegVal();
+			    .detail("From", req.reply.getEndpoint().getPrimaryAddress())
+			    .detail("K", req.key);
+			// SOMEDAY: concurrent access to different keys?
+			co_await storeLock->take();
+			FlowLock::Releaser storeLockReleaser(*storeLock);
+			Optional<Value> rawV = co_await store->readValue(req.key);
+			GenerationRegVal v = rawV.present()
+			                         ? BinaryReader::fromStringRef<GenerationRegVal>(rawV.get(), IncludeVersion())
+			                         : GenerationRegVal();
 			TraceEvent("GenerationRegReadReply")
 			    .detail("RVSize", rawV.present() ? rawV.get().size() : -1)
 			    .detail("VWG", v.writeGen.generation);
@@ -96,21 +111,31 @@ ACTOR Future<Void> localGenerationReg(GenerationRegInterface interf, OnDemandSto
 				v.readGen = req.gen;
 				store->set(KeyValueRef(
 				    req.key, BinaryWriter::toValue(v, IncludeVersion(ProtocolVersion::withGenerationRegVal()))));
-				wait(store->commit());
+				co_await store->commit();
 			}
 			req.reply.send(GenerationRegReadReply(v.val, v.writeGen, v.readGen));
 		}
-		when(GenerationRegWriteRequest _wrq = waitNext(interf.write.getFuture())) {
-			state GenerationRegWriteRequest wrq = _wrq;
-			Optional<Value> rawV = wait(store->readValue(wrq.kv.key));
-			v = rawV.present() ? BinaryReader::fromStringRef<GenerationRegVal>(rawV.get(), IncludeVersion())
-			                   : GenerationRegVal();
+	}
+
+	static Future<Void> serveWriteReqs(FutureStream<GenerationRegWriteRequest> writeReqs,
+	                                   OnDemandStore* pstore,
+	                                   Reference<FlowLock> storeLock) {
+		OnDemandStore& store = *pstore;
+		while (true) {
+			GenerationRegWriteRequest wrq = co_await writeReqs;
+			// SOMEDAY: concurrent access to different keys?
+			co_await storeLock->take();
+			FlowLock::Releaser storeLockReleaser(*storeLock);
+			Optional<Value> rawV = co_await store->readValue(wrq.kv.key);
+			GenerationRegVal v = rawV.present()
+			                         ? BinaryReader::fromStringRef<GenerationRegVal>(rawV.get(), IncludeVersion())
+			                         : GenerationRegVal();
 			if (v.readGen <= wrq.gen && v.writeGen < wrq.gen) {
 				v.writeGen = wrq.gen;
 				v.val = wrq.kv.value;
 				store->set(KeyValueRef(
 				    wrq.kv.key, BinaryWriter::toValue(v, IncludeVersion(ProtocolVersion::withGenerationRegVal()))));
-				wait(store->commit());
+				co_await store->commit();
 				TraceEvent("GenerationRegWrote")
 				    .detail("From", wrq.reply.getEndpoint().getPrimaryAddress())
 				    .detail("Key", wrq.kv.key)
@@ -128,12 +153,18 @@ ACTOR Future<Void> localGenerationReg(GenerationRegInterface interf, OnDemandSto
 			}
 		}
 	}
-}
+
+	FutureStream<GenerationRegReadRequest> readReqs;
+	FutureStream<GenerationRegWriteRequest> writeReqs;
+	OnDemandStore* pStore;
+	Reference<FlowLock> storeLock;
+};
 
 TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 	state GenerationRegInterface reg;
 	state OnDemandStore store(params.getDataDir(), deterministicRandom()->randomUniqueID(), fileCoordinatorPrefix);
-	state Future<Void> actor = localGenerationReg(reg, &store);
+	LocalGenerationReg generationReg(reg, &store);
+	state Future<Void> actor = generationReg.run();
 	state Key the_key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, 10)));
 
 	state UniqueGeneration firstGen(0, deterministicRandom()->randomUniqueID());
@@ -723,8 +754,8 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder, Reference<ICluster
 	    .detail("Folder", dataFolder);
 
 	try {
-		wait(localGenerationReg(myInterface, &store) || leaderServer(myLeaderInterface, &store, myID, ccr) ||
-		     store.getError());
+		LocalGenerationReg generationReg(myInterface, &store);
+		wait(generationReg.run() || leaderServer(myLeaderInterface, &store, myID, ccr) || store.getError());
 		throw internal_error();
 	} catch (Error& e) {
 		state Error err = e;
