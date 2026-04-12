@@ -235,7 +235,7 @@ Optional per-storage-server version tracking:
 |------|---------|
 | `fdbserver/tlog/TLogServer.actor.cpp` | TLog server: push, peek, spill, DiskQueue |
 | `fdbserver/logsystem/LogSystem.cpp` | LogSystem: push/peek/pop across TLog replicas |
-| `fdbserver/core/include/fdbserver/core/LogSystem.h` | ILogSystem, IPeekCursor interfaces |
+| `fdbserver/core/include/fdbserver/core/LogSystem.h` | IPeekCursor, LogPushVersionSet, EpochTagsVersionsInfo, and LogPushData |
 | `fdbserver/core/include/fdbserver/core/LogSystemConfig.h` | Log system configuration and epoch tracking |
 | `fdbserver/core/include/fdbserver/core/IDiskQueue.h` | IDiskQueue interface for TLog persistence |
 | `fdbserver/logrouter/LogRouter.cpp` | Cross-region mutation routing |
