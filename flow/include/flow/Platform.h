@@ -425,11 +425,9 @@ bool createDirectory(std::string const& directory);
 
 // e.g. extension==".fdb", returns filenames relative to directory
 std::vector<std::string> listFiles(std::string const& directory, std::string const& extension = "");
-AsyncResult<std::vector<std::string>> listFilesAsync(std::string const& directory, std::string const& extension = "");
 
 // returns directory names relative to directory
 std::vector<std::string> listDirectories(std::string const& directory);
-AsyncResult<std::vector<std::string>> listDirectoriesAsync(std::string const& directory);
 
 void findFilesRecursively(std::string const& path, std::vector<std::string>& out);
 AsyncResult<Void> findFilesRecursivelyAsync(std::string path, std::vector<std::string>* out);

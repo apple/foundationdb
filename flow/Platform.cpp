@@ -2764,16 +2764,8 @@ std::vector<std::string> listFiles(std::string const& directory, std::string con
 	return findFiles(directory, extension, false /* directoryOnly */, false).get();
 }
 
-AsyncResult<std::vector<std::string>> listFilesAsync(std::string const& directory, std::string const& extension) {
-	return findFiles(directory, extension, false /* directoryOnly */, true);
-}
-
 std::vector<std::string> listDirectories(std::string const& directory) {
 	return findFiles(directory, "", true /* directoryOnly */, false).get();
-}
-
-AsyncResult<std::vector<std::string>> listDirectoriesAsync(std::string const& directory) {
-	return findFiles(directory, "", true /* directoryOnly */, true);
 }
 
 void findFilesRecursively(std::string const& path, std::vector<std::string>& out) {
@@ -2792,12 +2784,12 @@ void findFilesRecursively(std::string const& path, std::vector<std::string>& out
 
 AsyncResult<Void> findFilesRecursivelyAsync(std::string path, std::vector<std::string>* out) {
 	// Add files to output, prefixing path
-	std::vector<std::string> files = co_await listFilesAsync(path, "");
+	std::vector<std::string> files = co_await findFiles(path, "", false /* directoryOnly */, true);
 	for (auto const& f : files)
 		out->push_back(joinPath(path, f));
 
 	// Recurse for directories
-	std::vector<std::string> directories = co_await listDirectoriesAsync(path);
+	std::vector<std::string> directories = co_await findFiles(path, "", true /* directoryOnly */, true);
 	for (auto const& dir : directories) {
 		if (dir != "." && dir != "..")
 			co_await findFilesRecursivelyAsync(joinPath(path, dir), out);
