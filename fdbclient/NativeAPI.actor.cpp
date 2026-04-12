@@ -1359,38 +1359,32 @@ ACTOR Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
 		try {
 			wait(cx->getBackoff());
 			++cx->transactionKeyServerLocationRequests;
-			choose {
-				when(wait(cx->onProxiesChanged())) {}
-				when(GetKeyServerLocationsReply _rep = wait(basicLoadBalance(
-				         cx->getCommitProxies(useProvisionalProxies),
-				         &CommitProxyInterface::getKeyServersLocations,
-				         GetKeyServerLocationsRequest(
-				             span.context, keys.begin, keys.end, limit, reverse, version, keys.arena()),
-				         TaskPriority::DefaultPromiseEndpoint))) {
-					++cx->transactionKeyServerLocationRequestsCompleted;
-					state GetKeyServerLocationsReply rep = _rep;
-					if (debugID.present())
-						g_traceBatch.addEvent(
-						    "TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocations.After");
-					ASSERT(rep.results.size());
+			state GetKeyServerLocationsReply rep = wait(
+			    commitProxyLoadBalance(cx,
+			                           makeReqBuilder<GetKeyServerLocationsRequest>(
+			                               span.context, keys.begin, keys.end, limit, reverse, version, keys.arena()),
+			                           &CommitProxyInterface::getKeyServersLocations,
+			                           useProvisionalProxies,
+			                           TaskPriority::DefaultPromiseEndpoint));
+			++cx->transactionKeyServerLocationRequestsCompleted;
+			if (debugID.present())
+				g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocations.After");
+			ASSERT(rep.results.size());
 
-					state std::vector<KeyRangeLocationInfo> results;
-					state int shard = 0;
-					for (; shard < rep.results.size(); shard++) {
-						// FIXME: these shards are being inserted into the map sequentially, it would be much more CPU
-						// efficient to save the map pairs and insert them all at once.
-						results.emplace_back(
-						    (rep.results[shard].first & keys),
-						    cx->setCachedLocation(rep.results[shard].first, rep.results[shard].second));
-						wait(yield());
-					}
-					updateTssMappings(cx, rep);
-					updateTagMappings(cx, rep);
-
-					cx->updateBackoff(success());
-					return results;
-				}
+			state std::vector<KeyRangeLocationInfo> results;
+			state int shard = 0;
+			for (; shard < rep.results.size(); shard++) {
+				// FIXME: these shards are being inserted into the map sequentially, it would be much more CPU
+				// efficient to save the map pairs and insert them all at once.
+				results.emplace_back((rep.results[shard].first & keys),
+				                     cx->setCachedLocation(rep.results[shard].first, rep.results[shard].second));
+				wait(yield());
 			}
+			updateTssMappings(cx, rep);
+			updateTagMappings(cx, rep);
+
+			cx->updateBackoff(success());
+			return results;
 		} catch (Error& e) {
 			if (e.code() == error_code_commit_proxy_memory_limit_exceeded) {
 				// Eats commit_proxy_memory_limit_exceeded error from commit proxies
