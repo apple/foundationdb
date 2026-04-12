@@ -135,11 +135,11 @@ AuditPhase stringToAuditPhase(std::string auditPhaseStr) {
 }
 
 // This is not transactional
-Future<std::vector<AuditStorageState>> getAuditStates(Database cx,
-                                                      AuditType auditType,
-                                                      bool newFirst,
-                                                      Optional<int> num,
-                                                      Optional<AuditPhase> phase) {
+AsyncResult<std::vector<AuditStorageState>> getAuditStates(Database cx,
+                                                           AuditType auditType,
+                                                           bool newFirst,
+                                                           Optional<int> num,
+                                                           Optional<AuditPhase> phase) {
 	Transaction tr(cx);
 	std::vector<AuditStorageState> auditStates;
 	Key readBegin;
