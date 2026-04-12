@@ -1,5 +1,5 @@
 /*
- *RocksDBCheckpointUtils.actor.h
+ *RocksDBCheckpointUtils.h
  *
  * This source file is part of the FoundationDB open source project
  *
