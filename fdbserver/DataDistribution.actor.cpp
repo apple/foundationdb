@@ -514,7 +514,8 @@ public:
 	//   DDInitUpdatedReplicaKeys          - Replica keys updated
 	//   DDInitSlowDataMoveRead            - (SevWarn) dataMoveKeys read taking >5s
 	//   DDInitServerListAndDataMoveReadComplete - Server list + data moves read: NumDataMoves, NumServers,
-	//   ElapsedSeconds DDInitKeyServerScanProgress       - (every 30s) keyServer scan: BeginKey, Batches, ShardsScanned
+	//   ElapsedSeconds
+	//   DDInitKeyServerScanProgress       - (every 30s) keyServer scan: BeginKey, Batches, ShardsScanned
 	//   DDInitKeyServerScanComplete       - keyServer scan done: NumShards, ElapsedSeconds
 	//   DDInitGotInitialDD                - Init data loaded: NumShards, NumServers
 	//   DDInitDataLoaded                  - Init data loaded, ElapsedSeconds (does NOT mean DD is fully operational)
@@ -1171,9 +1172,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			// Log every DD exit with the reason. movekeys_conflict is the most common
 			// non-kill cause — it's a normal internal restart, but was previously
 			// invisible because reportErrorsExcept suppresses logging for "normal" DD errors.
-			TraceEvent(SevWarn, "DDExiting", self->ddId)
-			    .error(e)
-			    .detail("ErrorCode", e.code());
+			TraceEvent(SevWarn, "DDExiting", self->ddId).error(e).detail("ErrorCode", e.code());
 			state std::vector<UID> teamForDroppedRange;
 			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
 				// Choose a random healthy team to host the to-be-dropped range.
