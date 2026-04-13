@@ -464,6 +464,7 @@ Future<Void> readCommitted(Database cx,
 			if (readLowPriority) {
 				tr.setOption(FDBTransactionOptions::READ_PRIORITY_LOW);
 			}
+			tr.setOption(FDBTransactionOptions::READ_SERVER_SIDE_CACHE_DISABLE);
 			if (CLIENT_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_BACKUP_READS) {
 				tr.setOption(FDBTransactionOptions::ENABLE_REPLICA_CONSISTENCY_CHECK);
 				int64_t requiredReplicas = CLIENT_KNOBS->BACKUP_CONSISTENCY_CHECK_REQUIRED_REPLICAS;
@@ -559,6 +560,7 @@ Future<Void> readCommitted(Database cx,
 			if (readLowPriority) {
 				tr.setOption(FDBTransactionOptions::READ_PRIORITY_LOW);
 			}
+			tr.setOption(FDBTransactionOptions::READ_SERVER_SIDE_CACHE_DISABLE);
 
 			RangeResult rangevalue = co_await tr.getRange(nextKey, end, limits);
 
