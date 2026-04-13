@@ -161,6 +161,7 @@ Operation Types
 - ``gr`` – GET RANGE
 - ``sg`` – Snapshot GET
 - ``sgr`` – Snapshot GET RANGE
+- ``sj`` – GET ``\xff\xff/status/json`` from the special key space
 - ``u`` – Update (= GET followed by SET)
 - ``i`` – Insert (= SET with a new key)
 - ``ir`` – Insert Range (Sequential)
