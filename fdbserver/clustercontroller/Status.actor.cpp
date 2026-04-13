@@ -2889,9 +2889,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	// So even if we add the wait to the idempotency checker, this still won't be enough
 
 	try {
-
 		state JsonBuilderObject statusObj;
-
 		// Get the master Worker interface
 		Optional<WorkerDetails> _mWorker = getWorker(workers, db->get().master.address());
 		if (_mWorker.present()) {
@@ -4019,18 +4017,58 @@ TEST_CASE("/fdbserver/clustercontroller/clusterGetStatusDeadline") {
 	choose {
 		when(StatusReply reply = wait(statusFuture)) {
 			double elapsed = now() - startTime;
+
+			// Log the full status JSON for inspection
 			TraceEvent("ClusterGetStatusDeadlineTest")
 			    .detail("Elapsed", elapsed)
-			    .detail("StatusSize", reply.statusStr.size());
+			    .detail("StatusSize", reply.statusStr.size())
+			    .detail("StatusJSON", reply.statusStr);
+			fmt::print("=== Status JSON ({:.2f}s) ===\n{}\n=== End Status JSON ===\n",
+			           elapsed, reply.statusStr);
 
 			// Verify it returned before 30 seconds
 			ASSERT(elapsed < 30.0);
 
-			// Verify partial data is present — these fields are set before any transaction
+			// Parse and inspect the status object
 			json_spirit::mValue mv = readJSONStrictly(reply.statusStr);
 			auto obj = mv.get_obj();
+
+			// Fields set before any transaction — should always be present
 			ASSERT(obj.count("protocol_version") > 0);
 			ASSERT(obj.count("connection_string") > 0);
+			ASSERT(obj.count("bounce_impact") > 0);
+
+			// Assembly section fields — should be present even after deadline
+			ASSERT(obj.count("messages") > 0);
+			ASSERT(obj.count("clients") > 0);
+			ASSERT(obj.count("incompatible_connections") > 0);
+			ASSERT(obj.count("datacenter_lag") > 0);
+			ASSERT(obj.count("degraded_processes") > 0);
+			ASSERT(obj.count("cluster_controller_timestamp") > 0);
+
+			// Verify the deadline-exceeded message is in messages
+			auto& messagesArr = obj["messages"].get_array();
+			bool foundDeadlineMsg = false;
+			bool foundIncomplete = false;
+			for (auto& msg : messagesArr) {
+				auto& msgObj = msg.get_obj();
+				if (msgObj.count("name") && msgObj["name"].get_str() == "status_incomplete") {
+					foundIncomplete = true;
+					if (msgObj.count("reasons")) {
+						for (auto& reason : msgObj["reasons"].get_array()) {
+							auto& reasonObj = reason.get_obj();
+							if (reasonObj.count("description") &&
+							    reasonObj["description"].get_str() == "Status collection deadline exceeded.") {
+								foundDeadlineMsg = true;
+							}
+						}
+					}
+				}
+			}
+			fmt::print("Found status_incomplete message: {}\n", foundIncomplete);
+			fmt::print("Found deadline exceeded reason: {}\n", foundDeadlineMsg);
+			ASSERT(foundIncomplete);
+			ASSERT(foundDeadlineMsg);
 		}
 		when(wait(timeout)) {
 			TraceEvent(SevError, "ClusterGetStatusDeadlineTestFailed")
