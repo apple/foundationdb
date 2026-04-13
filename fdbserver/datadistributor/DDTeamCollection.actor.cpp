@@ -2722,17 +2722,18 @@ public:
 				    .detail("TSSLocality", candidateWorker.worker.locality.toString())
 				    .detail("Primary", self->primary);
 
-				Optional<std::pair<UID, Version>> ssPairInfoResult = wait(tssState->waitOnSS());
-				if (ssPairInfoResult.present()) {
-					isr.tssPairIDAndVersion = ssPairInfoResult.get();
+				Optional<Optional<std::pair<UID, Version>>> ssPairInfoResult =
+				    wait(timeout(tssState->waitOnSS(), SERVER_KNOBS->TSS_RECRUITMENT_TIMEOUT));
+				if (ssPairInfoResult.present() && ssPairInfoResult.get().present()) {
+					isr.tssPairIDAndVersion = ssPairInfoResult.get().get();
 
 					TraceEvent("TSS_Recruit", self->distributorId)
 					    .detail("ReqID", isr.reqId)
-					    .detail("SSID", ssPairInfoResult.get().first)
+					    .detail("SSID", ssPairInfoResult.get().get().first)
 					    .detail("TSSID", interfaceId)
 					    .detail("Stage", "TSSGotPair")
 					    .detail("TSSAddr", candidateWorker.worker.address())
-					    .detail("SSVersion", ssPairInfoResult.get().second)
+					    .detail("SSVersion", ssPairInfoResult.get().get().second)
 					    .detail("TSSLocality", candidateWorker.worker.locality.toString())
 					    .detail("Primary", self->primary);
 				} else {
@@ -2741,7 +2742,9 @@ public:
 					TraceEvent(SevWarnAlways, "TSS_RecruitError", self->distributorId)
 					    .detail("ReqID", isr.reqId)
 					    .detail("TSSID", interfaceId)
-					    .detail("Reason", "TSS failed to get SS pair for some reason")
+					    .detail("Reason",
+					            ssPairInfoResult.present() ? "TSS failed to get SS pair for some reason"
+					                                       : "TSS timed out waiting for SS pair")
 					    .detail("TSSAddr", candidateWorker.worker.address())
 					    .detail("TSSLocality", candidateWorker.worker.locality.toString())
 					    .detail("Primary", self->primary);

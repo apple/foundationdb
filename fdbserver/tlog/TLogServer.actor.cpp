@@ -2984,6 +2984,20 @@ static void failIfTLogCannotAcceptNewData(TLogData* self, Reference<LogData> log
 	if (self->shouldAcceptNewData(kvStoreBytes, queueBytes, minAvailableSpaceRatio)) {
 		return;
 	}
+	if (g_network->isSimulated() && !g_simulator->speedUpSimulation) {
+		TraceEvent(SevWarnAlways, "TLogPullAsyncDataLowDiskSpeedUpSimulation", logData->logId)
+		    .detail("MinAvailableSpaceRatio", minAvailableSpaceRatio)
+		    .detail("AvailableSpaceRatio", self->availableSpaceRatio(kvStoreBytes, queueBytes))
+		    .detail("KvstoreBytesAvailable", kvStoreBytes.available)
+		    .detail("KvstoreBytesTotal", kvStoreBytes.total)
+		    .detail("QueueDiskBytesAvailable", queueBytes.available)
+		    .detail("QueueDiskBytesTotal", queueBytes.total)
+		    .detail("Version", ver);
+		g_simulator->speedUpSimulation = true;
+		if (self->shouldAcceptNewData(kvStoreBytes, queueBytes, effectiveTLogMinAvailableSpaceRatio())) {
+			return;
+		}
+	}
 	CODE_PROBE(true, "pullAsyncData blocked by TLOG_MIN_AVAILABLE_SPACE_RATIO");
 	// Outside speedUpSimulation, fail recovery and temporarily exclude this worker from TLog recruitment until disk
 	// space recovers.
