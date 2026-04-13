@@ -628,6 +628,16 @@ public:
 				    SevDebug, id, "complex", "Worker is not in the target DC", worker_details, fitness, dcIds);
 				continue;
 			}
+			if (excludesFromTLogRecruitmentDueToLowDisk(worker_info.issues)) {
+				logWorkerUnavailable(SevInfo,
+				                     id,
+				                     "complex",
+				                     "Worker is excluded from TLog recruitment due to low disk",
+				                     worker_details,
+				                     fitness,
+				                     dcIds);
+				continue;
+			}
 			if (!allowDegraded && worker_details.degraded) {
 				logWorkerUnavailable(
 				    SevInfo, id, "complex", "Worker is degraded and not allowed", worker_details, fitness, dcIds);

@@ -333,6 +333,7 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                         "trace_log_file_write_error",
                         "trace_log_could_not_create_file",
                         "trace_log_writer_thread_unresponsive",
+                        "exclude_from_tlog_recruitment_low_disk",
                         "process_error",
                         "io_error",
                         "io_timeout",
@@ -619,7 +620,8 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                         "incorrect_cluster_file_contents",
                         "trace_log_file_write_error",
                         "trace_log_could_not_create_file",
-                        "trace_log_writer_thread_unresponsive"
+                        "trace_log_writer_thread_unresponsive",
+                        "exclude_from_tlog_recruitment_low_disk"
                      ]
                   },
                   "description":"Cluster file contents do not match current cluster connection string. Verify cluster file is writable and has not been overwritten externally."
