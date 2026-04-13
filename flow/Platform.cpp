@@ -2761,11 +2761,19 @@ AsyncResult<std::vector<std::string>> findFiles(std::string directory,
 namespace platform {
 
 std::vector<std::string> listFiles(std::string const& directory, std::string const& extension) {
-	return findFiles(directory, extension, false /* directoryOnly */, false).get();
+	auto result = findFiles(directory, extension, false /* directoryOnly */, false);
+	if (result.isError()) {
+		throw result.getError();
+	}
+	return std::move(result).get();
 }
 
 std::vector<std::string> listDirectories(std::string const& directory) {
-	return findFiles(directory, "", true /* directoryOnly */, false).get();
+	auto result = findFiles(directory, "", true /* directoryOnly */, false);
+	if (result.isError()) {
+		throw result.getError();
+	}
+	return std::move(result).get();
 }
 
 void findFilesRecursively(std::string const& path, std::vector<std::string>& out) {
