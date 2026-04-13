@@ -371,7 +371,7 @@ Future<ErrorOr<X>> waitValueOrSignal(Future<X> value,
 	PeerHolder holder = PeerHolder(peer);
 	while (true) {
 		try {
-			auto res = co_await race(value, signal);
+			auto res = co_await race(value, signal, peer.isValid() ? peer->disconnect.getFuture() : Never());
 			if (res.index() == 0) {
 				X x = std::get<0>(std::move(res));
 
@@ -381,6 +381,13 @@ Future<ErrorOr<X>> waitValueOrSignal(Future<X> value,
 				co_return ErrorOr<X>(IFailureMonitor::failureMonitor().knownUnauthorized(endpoint)
 				                         ? unauthorized_attempt()
 				                         : request_maybe_delivered());
+			} else if (res.index() == 2) {
+				CODE_PROBE(true, "waitValueOrSignal detected peer disconnect");
+				TraceEvent("WaitValueOrSignalPeerDisconnect")
+				    .suppressFor(1.0)
+				    .detail("Endpoint", endpoint.getPrimaryAddress())
+				    .detail("Token", endpoint.token);
+				co_return ErrorOr<X>(request_maybe_delivered());
 			}
 		} catch (Error& e) {
 			if (signal.isError()) {
