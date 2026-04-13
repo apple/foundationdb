@@ -2874,7 +2874,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	state WorkerDetails ddWorker; // DataDistributor worker
 	state WorkerDetails rkWorker; // Ratekeeper worker
 	state WorkerDetails csWorker; // ConsistencyScan worker
-	// Total we have 116 waits, the ones with database calls or timeouts are these
+	// Total we have 16 waits, the ones with database calls or timeouts are these
 	// Wait 2 - 1 second
 	// Wait 3 - 5 seconds
 	// Wait 4 - 5 seconds
@@ -3087,6 +3087,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		statusObj["protocol_version"] = format("%" PRIx64, g_network->protocolVersion().version());
 		statusObj["connection_string"] = coordinators.ccr->getConnectionString().toString();
 		statusObj["bounce_impact"] = getBounceImpactInfo(statusCode);
+		// WAIT 2 data used here
+		// why can't this be moved down to the construction bit?
 		statusObj["newest_protocol_version"] = format("%" PRIx64, protocolVersion.newestProtocolVersion.version());
 		statusObj["lowest_compatible_protocol_version"] =
 		    format("%" PRIx64, protocolVersion.lowestCompatibleProtocolVersion.version());
@@ -3096,6 +3098,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state std::unordered_map<NetworkAddress, WorkerInterface> address_workers;
 
 		// WAIT 4: 5 second time out
+		// This data is used immediately
 		if (statusCode != RecoveryStatus::configuration_missing) {
 			state Future<std::pair<Optional<DatabaseConfiguration>, Optional<LoadConfigurationResult>>> loadConfigFuture =
 			    loadConfiguration(cx, &messages, &status_incomplete_reasons);
@@ -3151,6 +3154,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			tLast = timer();
 
 			statusObj["database_available"] = isAvailable;
+			// WAIT 5 data used here
 			if (!latencyProbeResults.empty()) {
 				statusObj["latency_probe"] = latencyProbeResults;
 			}
@@ -3297,6 +3301,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			if (!qos.empty())
 				statusObj["qos"] = qos;
 
+			// WAIT 5 data used here
+			// Why is this here? This could be further down in the construction section
 			statusObj["version_epoch"] = versionEpochStatus;
 
 			// Merge dataOverlay into data
@@ -3527,9 +3533,12 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		}
 		statusObj["degraded_processes"] = totalDegraded;
 
+		// WAIT 5 data used here
+		// What happens if these are null because we bailed on the timeout?
 		if (!recoveryStateStatus.empty())
 			statusObj["recovery_state"] = recoveryStateStatus;
 
+		// WAIT 5 data used here
 		statusObj["idempotency_ids"] = idmpKeyStatus;
 
 		// cluster messages subsection;
