@@ -2821,7 +2821,6 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
                                          uint16_t commitProxyIndex) {
 	state ProxyCommitData commitData(proxy.id(),
 	                                 master,
-	                                 proxy.getConsistentReadVersion,
 	                                 recoveryTransactionVersion,
 	                                 proxy.commit,
 	                                 db,
