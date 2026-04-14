@@ -247,6 +247,24 @@ Future<T> timeoutError(Future<T> what, double time, TaskPriority taskID = TaskPr
 	}
 }
 
+template <class T>
+AsyncResult<T> timeoutError(AsyncResult<T> what,
+                            double time,
+                            TaskPriority taskID = TaskPriority::DefaultDelay,
+                            ExplicitVoid = {}) {
+	if (what.canGet()) {
+		co_return what.get();
+	} else if (what.isError()) {
+		throw what.getError();
+	}
+	auto res = co_await race(std::move(what), delay(time, taskID));
+	if (res.index() == 0) {
+		co_return std::get<0>(std::move(res));
+	} else {
+		throw timed_out();
+	}
+}
+
 ACTOR template <class T>
 Future<T> delayed(Future<T> what, double time = 0.0, TaskPriority taskID = TaskPriority::DefaultDelay) {
 	try {
@@ -264,17 +282,6 @@ ACTOR template <class Func>
 Future<Void> trigger(Func what, Future<Void> signal) {
 	wait(signal);
 	what();
-	return Void();
-}
-
-ACTOR template <class Func>
-Future<Void> triggerOnError(Func what, Future<Void> signal) {
-	try {
-		wait(signal);
-	} catch (Error& e) {
-		what();
-	}
-
 	return Void();
 }
 
@@ -311,12 +318,6 @@ ACTOR template <class T, class X>
 Future<T> holdWhile(X object, Future<T> what) {
 	T val = wait(what);
 	return val;
-}
-
-ACTOR template <class T, class X>
-Future<Void> holdWhileVoid(X object, Future<T> what) {
-	T val = wait(what);
-	return Void();
 }
 
 // Assign the future value of what to out
@@ -464,67 +465,6 @@ ACTOR Future<Void> returnIfTrue(Future<bool> f);
 template <class T, class F>
 Future<Void> returnIfTrue(Future<T> what, F pred) {
 	return returnIfTrue(map(what, pred));
-}
-
-// filters a stream
-ACTOR template <class T, class F>
-Future<Void> filter(FutureStream<T> input, F pred, PromiseStream<T> output) {
-	loop {
-		try {
-			T nextInput = waitNext(input);
-			if (pred(nextInput))
-				output.send(nextInput);
-		} catch (Error& e) {
-			if (e.code() == error_code_end_of_stream) {
-				break;
-			} else
-				throw;
-		}
-	}
-
-	output.sendError(end_of_stream());
-
-	return Void();
-}
-
-// filters a stream asynchronously
-ACTOR template <class T, class F>
-Future<Void> asyncFilter(FutureStream<T> input, F actorPred, PromiseStream<T> output) {
-	state Deque<std::pair<T, Future<bool>>> futures;
-	state std::pair<T, Future<bool>> p;
-
-	loop {
-		try {
-			choose {
-				when(T nextInput = waitNext(input)) {
-					futures.emplace_back(nextInput, actorPred(nextInput));
-				}
-				when(bool pass = wait(futures.size() == 0 ? Never() : futures.front().second)) {
-					if (pass)
-						output.send(futures.front().first);
-					futures.pop_front();
-				}
-			}
-		} catch (Error& e) {
-			if (e.code() == error_code_end_of_stream) {
-				break;
-			} else {
-				throw e;
-			}
-		}
-	}
-
-	while (futures.size()) {
-		p = futures.front();
-		bool pass = wait(p.second);
-		if (pass)
-			output.send(p.first);
-		futures.pop_front();
-	}
-
-	output.sendError(end_of_stream());
-
-	return Void();
 }
 
 template <class T>
@@ -851,14 +791,6 @@ Future<Void> asyncDeserialize(Reference<AsyncVar<Standalone<StringRef>>> input,
 	}
 }
 
-ACTOR template <class V, class T>
-void forwardVector(Future<V> values, std::vector<Promise<T>> out) {
-	V in = wait(values);
-	ASSERT(in.size() == out.size());
-	for (int i = 0; i < out.size(); i++)
-		out[i].send(in[i]);
-}
-
 ACTOR template <class T>
 Future<Void> delayedAsyncVar(Reference<AsyncVar<T>> in, Reference<AsyncVar<T>> out, double time) {
 	try {
@@ -943,24 +875,6 @@ ACTOR Future<Void> delayAfterCleared(Reference<AsyncVar<bool>> condition,
 
 // Same as delayAfterCleared, but use lowPriorityDelay.
 ACTOR Future<Void> lowPriorityDelayAfterCleared(Reference<AsyncVar<bool>> condition, double time);
-
-// Similar to timeoutError, but does not throw timed_out if condition is true.
-// Once condition becomes false again, reset the timer (e.g. if time is 10s, wait for 10s again before throwing
-// timed_out, if condition remains to be false).
-ACTOR template <class T>
-Future<T> timeoutErrorIfCleared(Future<T> what,
-                                Reference<AsyncVar<bool>> condition,
-                                double time,
-                                TaskPriority taskID = TaskPriority::DefaultDelay) {
-	choose {
-		when(T t = wait(what)) {
-			return t;
-		}
-		when(wait(delayAfterCleared(condition, time, taskID))) {
-			throw timed_out();
-		}
-	}
-}
 
 Future<bool> allTrue(const std::vector<Future<bool>>& all);
 Future<Void> anyTrue(std::vector<Reference<AsyncVar<bool>>> const& input, Reference<AsyncVar<bool>> const& output);
@@ -2247,13 +2161,6 @@ public:
 	}
 };
 
-ACTOR template <class T>
-Future<T> delayActionJittered(Future<T> what, double time) {
-	wait(delayJittered(time));
-	T t = wait(what);
-	return t;
-}
-
 class AndFuture {
 public:
 	AndFuture() = default;
@@ -2322,125 +2229,6 @@ private:
 	std::vector<Future<Void>> futures;
 };
 
-// Performs an unordered merge of a and b.
-ACTOR template <class T>
-Future<Void> unorderedMergeStreams(FutureStream<T> a, FutureStream<T> b, PromiseStream<T> output) {
-	state Future<T> aFuture = waitAndForward(a);
-	state Future<T> bFuture = waitAndForward(b);
-	state bool aOpen = true;
-	state bool bOpen = true;
-
-	loop {
-		try {
-			choose {
-				when(T val = wait(aFuture)) {
-					output.send(val);
-					aFuture = waitAndForward(a);
-				}
-				when(T val = wait(bFuture)) {
-					output.send(val);
-					bFuture = waitAndForward(b);
-				}
-			}
-		} catch (Error& e) {
-			if (e.code() != error_code_end_of_stream) {
-				output.sendError(e);
-				break;
-			}
-
-			ASSERT(!aFuture.isError() || !bFuture.isError() || aFuture.getError().code() == bFuture.getError().code());
-
-			if (aFuture.isError()) {
-				aFuture = Never();
-				aOpen = false;
-			}
-			if (bFuture.isError()) {
-				bFuture = Never();
-				bOpen = false;
-			}
-
-			if (!aOpen && !bOpen) {
-				output.sendError(e);
-				break;
-			}
-		}
-	}
-
-	return Void();
-}
-
-// Returns the ordered merge of a and b, assuming that a and b are both already ordered (prefer a over b if keys are
-// equal). T must be a class that implements compare()
-ACTOR template <class T>
-Future<Void> orderedMergeStreams(FutureStream<T> a, FutureStream<T> b, PromiseStream<T> output) {
-	state Optional<T> savedKVa;
-	state bool aOpen;
-	state Optional<T> savedKVb;
-	state bool bOpen;
-
-	aOpen = bOpen = true;
-
-	loop {
-		if (aOpen && !savedKVa.present()) {
-			try {
-				T KVa = waitNext(a);
-				savedKVa = Optional<T>(KVa);
-			} catch (Error& e) {
-				if (e.code() == error_code_end_of_stream) {
-					aOpen = false;
-					if (!bOpen) {
-						output.sendError(e);
-					}
-				} else {
-					output.sendError(e);
-					break;
-				}
-			}
-		}
-		if (bOpen && !savedKVb.present()) {
-			try {
-				T KVb = waitNext(b);
-				savedKVb = Optional<T>(KVb);
-			} catch (Error& e) {
-				if (e.code() == error_code_end_of_stream) {
-					bOpen = false;
-					if (!aOpen) {
-						output.sendError(e);
-					}
-				} else {
-					output.sendError(e);
-					break;
-				}
-			}
-		}
-
-		if (!aOpen) {
-			output.send(savedKVb.get());
-			savedKVb = Optional<T>();
-		} else if (!bOpen) {
-			output.send(savedKVa.get());
-			savedKVa = Optional<T>();
-		} else {
-			int cmp = savedKVa.get().compare(savedKVb.get());
-
-			if (cmp == 0) {
-				// prefer a
-				output.send(savedKVa.get());
-				savedKVa = Optional<T>();
-				savedKVb = Optional<T>();
-			} else if (cmp < 0) {
-				output.send(savedKVa.get());
-				savedKVa = Optional<T>();
-			} else {
-				output.send(savedKVb.get());
-				savedKVb = Optional<T>();
-			}
-		}
-	}
-
-	return Void();
-}
-
 ACTOR template <class T>
 Future<Void> timeReply(Future<T> replyToTime, PromiseStream<double> timeOutput) {
 	state double startTime = now();
@@ -2470,47 +2258,6 @@ Future<T> forward(Future<T> from, Promise<T> to) {
 		}
 		throw e;
 	}
-}
-
-ACTOR template <class Transaction>
-Future<Void> buggifiedCommit(Transaction tr, bool buggify, int maxDelayDuration = 60.0) {
-	state int buggifyUnknownResultPoint = 0;
-	state int buggifyDelayPoint = 0;
-
-	if (buggify) {
-		int choice = deterministicRandom()->randomInt(1, 9);
-		buggifyUnknownResultPoint = choice / 3;
-		buggifyDelayPoint = choice % 3;
-	}
-
-	// Simulate a delay before commit that could potentially trigger a timeout
-	if (buggifyDelayPoint == 1) {
-		wait(delay(deterministicRandom()->random01() * maxDelayDuration));
-	}
-
-	// Simulate an unknown result that didn't commit
-	if (buggifyUnknownResultPoint == 1) {
-		// The delay avoids a no-wait commit.
-		if (!BUGGIFY) {
-			wait(delay(0));
-		}
-
-		throw commit_unknown_result();
-	}
-
-	wait(safeThreadFutureToFuture(tr->commit()));
-
-	// Simulate a long delay after commit that could potentially trigger a timeout
-	if (buggifyDelayPoint == 2) {
-		wait(delay(deterministicRandom()->random01() * maxDelayDuration));
-	}
-
-	// Simulate an unknown result that did commit
-	if (buggifyUnknownResultPoint == 2) {
-		throw commit_unknown_result();
-	}
-
-	return Void();
 }
 
 // Monad

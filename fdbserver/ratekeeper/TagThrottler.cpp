@@ -130,6 +130,9 @@ class TagThrottlerImpl {
 					CODE_PROBE(true, "Tag throttle changes detected");
 					break;
 				} catch (Error& e) {
+					if (e.code() == error_code_actor_cancelled) {
+						throw e;
+					}
 					err = e;
 				}
 

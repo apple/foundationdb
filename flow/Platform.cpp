@@ -1,5 +1,5 @@
 /*
- * Platform.actor.cpp
+ * Platform.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -52,7 +52,6 @@
 #include "flow/Error.h"
 #include "flow/FaultInjection.h"
 #include "flow/Knobs.h"
-#include "flow/Platform.actor.h"
 #include "flow/ScopeExit.h"
 #include "flow/SimpleCounter.h"
 #include "flow/StreamCipher.h"
@@ -185,8 +184,6 @@ static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<u
 #endif // __APPLE_
 
 #endif // __unixish__
-
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 std::string removeWhitespace(const std::string& t) {
 	static const std::string ws(" \t\r");
@@ -2654,16 +2651,16 @@ bool acceptDirectory(FILE_ATTRIBUTE_DATA fileAttributes, std::string const& name
 	return (fileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }
 
-ACTOR Future<std::vector<std::string>> findFiles(std::string directory,
-                                                 std::string extension,
-                                                 bool directoryOnly,
-                                                 bool async) {
+AsyncResult<std::vector<std::string>> findFiles(std::string directory,
+                                                std::string extension,
+                                                bool directoryOnly,
+                                                bool async) {
 	INJECT_FAULT(platform_error, "findFiles"); // findFiles failed (Win32)
-	state std::vector<std::string> result;
-	state int64_t tsc_begin = timestampCounter();
+	std::vector<std::string> result;
+	int64_t tsc_begin = timestampCounter();
 
-	state WIN32_FIND_DATA fd;
-	state HANDLE h = FindFirstFile((directory + "/*" + extension).c_str(), &fd);
+	WIN32_FIND_DATA fd;
+	HANDLE h = FindFirstFile((directory + "/*" + extension).c_str(), &fd);
 	if (h == INVALID_HANDLE_VALUE) {
 		if (GetLastError() != ERROR_FILE_NOT_FOUND && GetLastError() != ERROR_PATH_NOT_FOUND) {
 			TraceEvent(SevError, "FindFirstFile")
@@ -2673,7 +2670,7 @@ ACTOR Future<std::vector<std::string>> findFiles(std::string directory,
 			throw platform_error();
 		}
 	} else {
-		loop {
+		while (true) {
 			std::string name = fd.cFileName;
 			if ((directoryOnly && acceptDirectory(fd.dwFileAttributes, name, extension)) ||
 			    (!directoryOnly && acceptFile(fd.dwFileAttributes, name, extension))) {
@@ -2682,7 +2679,7 @@ ACTOR Future<std::vector<std::string>> findFiles(std::string directory,
 			if (!FindNextFile(h, &fd))
 				break;
 			if (async && timestampCounter() - tsc_begin > FLOW_KNOBS->TSC_YIELD_TIME && !g_network->isSimulated()) {
-				wait(yield());
+				co_await yield();
 				tsc_begin = timestampCounter();
 			}
 		}
@@ -2697,7 +2694,7 @@ ACTOR Future<std::vector<std::string>> findFiles(std::string directory,
 		FindClose(h);
 	}
 	std::sort(result.begin(), result.end());
-	return result;
+	co_return result;
 }
 
 #elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
@@ -2711,18 +2708,16 @@ bool acceptDirectory(FILE_ATTRIBUTE_DATA fileAttributes, std::string const& name
 	return S_ISDIR(fileAttributes);
 }
 
-ACTOR Future<std::vector<std::string>> findFiles(std::string directory,
-                                                 std::string extension,
-                                                 bool directoryOnly,
-                                                 bool async) {
+AsyncResult<std::vector<std::string>> findFiles(std::string directory,
+                                                std::string extension,
+                                                bool directoryOnly,
+                                                bool async) {
 	INJECT_FAULT(platform_error, "findFiles"); // findFiles failed
-	state std::vector<std::string> result;
-	state int64_t tsc_begin = timestampCounter();
+	std::vector<std::string> result;
+	int64_t tsc_begin = timestampCounter();
 
-	state DIR* dip = nullptr;
-
-	if ((dip = opendir(directory.c_str())) != nullptr) {
-		loop {
+	if (DIR* dip = opendir(directory.c_str()); dip != nullptr) {
+		while (true) {
 			struct dirent* dit;
 			dit = readdir(dip);
 			if (dit == nullptr) {
@@ -2748,7 +2743,7 @@ ACTOR Future<std::vector<std::string>> findFiles(std::string directory,
 				result.push_back(name);
 			}
 			if (async && timestampCounter() - tsc_begin > FLOW_KNOBS->TSC_YIELD_TIME && !g_network->isSimulated()) {
-				wait(yield());
+				co_await yield();
 				tsc_begin = timestampCounter();
 			}
 		}
@@ -2756,7 +2751,7 @@ ACTOR Future<std::vector<std::string>> findFiles(std::string directory,
 		closedir(dip);
 	}
 	std::sort(result.begin(), result.end());
-	return result;
+	co_return result;
 }
 
 #else
@@ -2766,19 +2761,19 @@ ACTOR Future<std::vector<std::string>> findFiles(std::string directory,
 namespace platform {
 
 std::vector<std::string> listFiles(std::string const& directory, std::string const& extension) {
-	return findFiles(directory, extension, false /* directoryOnly */, false).get();
-}
-
-Future<std::vector<std::string>> listFilesAsync(std::string const& directory, std::string const& extension) {
-	return findFiles(directory, extension, false /* directoryOnly */, true);
+	auto result = findFiles(directory, extension, false /* directoryOnly */, false);
+	if (result.isError()) {
+		throw result.getError();
+	}
+	return std::move(result).get();
 }
 
 std::vector<std::string> listDirectories(std::string const& directory) {
-	return findFiles(directory, "", true /* directoryOnly */, false).get();
-}
-
-Future<std::vector<std::string>> listDirectoriesAsync(std::string const& directory) {
-	return findFiles(directory, "", true /* directoryOnly */, true);
+	auto result = findFiles(directory, "", true /* directoryOnly */, false);
+	if (result.isError()) {
+		throw result.getError();
+	}
+	return std::move(result).get();
 }
 
 void findFilesRecursively(std::string const& path, std::vector<std::string>& out) {
@@ -2795,19 +2790,18 @@ void findFilesRecursively(std::string const& path, std::vector<std::string>& out
 	}
 }
 
-ACTOR Future<Void> findFilesRecursivelyAsync(std::string path, std::vector<std::string>* out) {
+AsyncResult<Void> findFilesRecursivelyAsync(std::string path, std::vector<std::string>* out) {
 	// Add files to output, prefixing path
-	state std::vector<std::string> files = wait(listFilesAsync(path, ""));
+	std::vector<std::string> files = co_await findFiles(path, "", false /* directoryOnly */, true);
 	for (auto const& f : files)
 		out->push_back(joinPath(path, f));
 
 	// Recurse for directories
-	state std::vector<std::string> directories = wait(listDirectoriesAsync(path));
+	std::vector<std::string> directories = co_await findFiles(path, "", true /* directoryOnly */, true);
 	for (auto const& dir : directories) {
 		if (dir != "." && dir != "..")
-			wait(findFilesRecursivelyAsync(joinPath(path, dir), out));
+			co_await findFilesRecursivelyAsync(joinPath(path, dir), out);
 	}
-	return Void();
 }
 
 } // namespace platform
@@ -3882,7 +3876,7 @@ void profileHandler(int sig) {
 #ifndef WITH_SWIFT
 	ps->timestamp = checkThreadTime.is_lock_free() ? checkThreadTime.load() : 0;
 #else
-	// FIXME: problem with Swift build: lib/libflow.a(Platform.actor.g.cpp.o):Platform.actor.g.cpp:function
+	// FIXME: problem with Swift build: lib/libflow.a(Platform.cpp.o):Platform.cpp:function
 	// profileHandler(int): error: undefined reference to '__atomic_is_lock_free'
 	ps->timestamp = 0;
 #endif /* WITH_SWIFT */

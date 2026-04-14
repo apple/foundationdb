@@ -570,7 +570,7 @@ Future<Void> createCheckpoint(Reference<ReadYourWritesTransaction> tr,
 // Gets checkpoint metadata for `ranges` at the specific version, with the particular format.
 // Returns a list of [range, checkpoint], where the `checkpoint` has data over `range`.
 // checkpoint_not_found() error will be returned if the specific checkpoint cannot be found.
-ACTOR Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaData(
+Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaData(
     Database cx,
     std::vector<KeyRange> ranges,
     Version version,
@@ -627,12 +627,12 @@ int64_t getMaxClearKeySize(KeyRef const& key);
 struct KeyRangeLocationInfo;
 // Return the aggregated StorageMetrics of range keys to the caller. The locations tell which interface should
 // serve the request. The final result is within (min-permittedError/2, max + permittedError/2) if valid.
-ACTOR Future<Optional<StorageMetrics>> waitStorageMetricsWithLocation(Version version,
-                                                                      KeyRange keys,
-                                                                      std::vector<KeyRangeLocationInfo> locations,
-                                                                      StorageMetrics min,
-                                                                      StorageMetrics max,
-                                                                      StorageMetrics permittedError);
+Future<Optional<StorageMetrics>> waitStorageMetricsWithLocation(Version version,
+                                                                KeyRange keys,
+                                                                std::vector<KeyRangeLocationInfo> locations,
+                                                                StorageMetrics min,
+                                                                StorageMetrics max,
+                                                                StorageMetrics permittedError);
 
 // Return the suggested split points from storage server.The locations tell which interface should
 // serve the request. `limit` is the current estimated storage metrics of `keys`.The returned points, if present,
@@ -645,8 +645,7 @@ ACTOR Future<Optional<Standalone<VectorRef<KeyRef>>>> splitStorageMetricsWithLoc
     Optional<int> minSplitBytes);
 
 namespace NativeAPI {
-ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(
-    Transaction* tr);
+Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(Transaction* tr);
 }
 ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
                                                            Key key,
@@ -656,7 +655,7 @@ ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
                                                            Reverse isBackward,
                                                            Version version);
 
-ACTOR Future<Void> refreshTransaction(DatabaseContext* self, Transaction* tr);
+Future<Void> refreshTransaction(DatabaseContext* self, Transaction* tr);
 
 #include "flow/unactorcompiler.h"
 #endif

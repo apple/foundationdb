@@ -29,7 +29,7 @@
 
 struct IPAddress {
 	// It should be the same to boost::asio::ip::address_v6::bytes_type. This is enforced by static_assert in
-	// Platform.actor.cpp.
+	// Platform.cpp.
 	using IPAddressStore = std::array<uint8_t, 16>;
 
 public:
