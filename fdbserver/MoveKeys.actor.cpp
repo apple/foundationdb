@@ -1611,6 +1611,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 						// verify dest hasn't changed and commit the metadata update.
 						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 						tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						tr.trState->taskID = TaskPriority::MoveKeys;
 						wait(checkMoveKeysLock(&tr, lock, ddEnabledState));
 
 						// Re-read keyServers to verify dest hasn't changed while we waited
@@ -1625,23 +1626,43 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 						                      SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
 						                      SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
 
-						// Verify dest is unchanged — if another DD instance reassigned the
-						// shard while we were waiting, we must not commit stale metadata.
+						// Verify dest is unchanged across the full currentKeys range — if
+						// another DD instance split or reassigned any overlapping subrange
+						// while we were waiting, we must not commit stale metadata.
 						{
-							std::vector<UID> checkSrc, checkDest;
-							if (convergenceCheckKeyServers.size() > 1) {
+							bool destChanged = convergenceCheckKeyServers.size() <= 1;
+							bool boundaryChanged =
+							    convergenceCheckKeyServers.size() <= 1 ||
+							    convergenceCheckKeyServers.back().key != endKey;
+							std::vector<UID> mismatchedDest;
+							for (int i = 0; !destChanged && i + 1 < convergenceCheckKeyServers.size(); ++i) {
+								std::vector<UID> checkSrc, checkDest;
 								decodeKeyServersValue(convergenceCheckUIDtoTagMap,
-								                      convergenceCheckKeyServers[0].value,
+								                      convergenceCheckKeyServers[i].value,
 								                      checkSrc,
 								                      checkDest);
+								if (checkDest != dest) {
+									destChanged = true;
+									mismatchedDest = checkDest;
+								}
 							}
-							if (checkDest != dest) {
-								CODE_PROBE(true, "finishMoveKeys dest changed during waitForShardReady");
+							if (destChanged || boundaryChanged) {
+								CODE_PROBE(true,
+								           "finishMoveKeys dest changed during waitForShardReady");
 								TraceEvent(SevWarn, "FinishMoveKeysDestChanged", relocationIntervalId)
 								    .detail("KeyBegin", keys.begin)
 								    .detail("KeyEnd", keys.end)
+								    .detail("CurrentKeysBegin", currentKeys.begin)
+								    .detail("CurrentKeysEnd", currentKeys.end)
 								    .detail("OrigDest", describe(dest))
-								    .detail("NewDest", describe(checkDest));
+								    .detail("NewDest", describe(mismatchedDest))
+								    .detail("ExpectedEndKey", endKey)
+								    .detail("ObservedEndKey",
+								            convergenceCheckKeyServers.size() > 0
+								                ? convergenceCheckKeyServers.back().key
+								                : KeyRef())
+								    .detail("DestChanged", destChanged)
+								    .detail("BoundaryChanged", boundaryChanged);
 								tr.reset();
 								continue; // retry the inner loop
 							}
