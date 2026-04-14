@@ -121,8 +121,8 @@ struct KRMCoalesceTestWorkload : TestWorkload {
 				tr2.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-				RangeResult r = wait(tr2.getRange(
-				    KeyRangeRef(prefix.withSuffix(keyA), prefix.withSuffix(keyG)), CLIENT_KNOBS->TOO_MANY));
+				RangeResult r = wait(tr2.getRange(KeyRangeRef(prefix.withSuffix(keyA), prefix.withSuffix(keyG)),
+				                                  CLIENT_KNOBS->TOO_MANY));
 				entries = r;
 				break;
 			} catch (Error& e) {
@@ -173,8 +173,7 @@ struct KRMCoalesceTestWorkload : TestWorkload {
 				tr3->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				// Set range [A, B) to valueX with maxRange [A, F)
-				wait(krmSetRangeCoalescing(
-				    tr3, prefix, KeyRangeRef(keyA, keyB), KeyRangeRef(keyA, keyF), valueX));
+				wait(krmSetRangeCoalescing(tr3, prefix, KeyRangeRef(keyA, keyB), KeyRangeRef(keyA, keyF), valueX));
 
 				wait(tr3->commit());
 				break;
@@ -193,8 +192,8 @@ struct KRMCoalesceTestWorkload : TestWorkload {
 				tr4.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr4.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-				RangeResult r = wait(tr4.getRange(
-				    KeyRangeRef(prefix.withSuffix(keyA), prefix.withSuffix(keyG)), CLIENT_KNOBS->TOO_MANY));
+				RangeResult r = wait(tr4.getRange(KeyRangeRef(prefix.withSuffix(keyA), prefix.withSuffix(keyG)),
+				                                  CLIENT_KNOBS->TOO_MANY));
 				afterEntries = r;
 				break;
 			} catch (Error& e) {
@@ -204,9 +203,7 @@ struct KRMCoalesceTestWorkload : TestWorkload {
 
 		// The key test is that we got here without crashing. Entry count may vary
 		// based on what the clear/set operations did, but we tolerated the uncoalesced state.
-		TraceEvent("KRMCoalesceTestAfterSkip")
-		    .detail("EntryCount", afterEntries.size())
-		    .detail("OriginalCount", 6);
+		TraceEvent("KRMCoalesceTestAfterSkip").detail("EntryCount", afterEntries.size()).detail("OriginalCount", 6);
 
 		// Clean up
 		state Transaction tr5(cx);
@@ -244,8 +241,8 @@ struct KRMCoalesceTestWorkload : TestWorkload {
 				tr1->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				// Set [A, B) = X
-				wait(krmSetRangeCoalescing(
-				    tr1, prefix, KeyRangeRef(keyA, keyB), KeyRangeRef(""_sr, "\xff"_sr), valueX));
+				wait(
+				    krmSetRangeCoalescing(tr1, prefix, KeyRangeRef(keyA, keyB), KeyRangeRef(""_sr, "\xff"_sr), valueX));
 
 				wait(tr1->commit());
 				break;
@@ -261,8 +258,8 @@ struct KRMCoalesceTestWorkload : TestWorkload {
 				tr2->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				// Set [B, C) = Y (different value, should not coalesce)
-				wait(krmSetRangeCoalescing(
-				    tr2, prefix, KeyRangeRef(keyB, keyC), KeyRangeRef(""_sr, "\xff"_sr), valueY));
+				wait(
+				    krmSetRangeCoalescing(tr2, prefix, KeyRangeRef(keyB, keyC), KeyRangeRef(""_sr, "\xff"_sr), valueY));
 
 				wait(tr2->commit());
 				break;
