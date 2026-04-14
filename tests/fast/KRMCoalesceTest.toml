@@ -3,7 +3,7 @@ allowDefaultTenant = false
 storageEngineExcludeTypes = [5]
 
 [[knobs]]
-dd_coalesce_uncoalesced_krm = true
+dd_tolerate_uncoalesced_krm = true
 
 [[test]]
 testTitle = 'KRMCoalesceTest'

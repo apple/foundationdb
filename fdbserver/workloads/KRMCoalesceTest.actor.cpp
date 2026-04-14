@@ -20,7 +20,7 @@
 
 // Test workload for KRM (KeyRangeMap) tolerance of uncoalesced entries.
 //
-// This test verifies that when DD_COALESCE_UNCOALESCED_KRM is enabled,
+// This test verifies that when DD_TOLERATE_UNCOALESCED_KRM is enabled,
 // the system skips (tolerates) adjacent entries with the same value
 // instead of crashing with ASSERT.
 //
@@ -134,11 +134,11 @@ struct KRMCoalesceTestWorkload : TestWorkload {
 		ASSERT_EQ(entries.size(), 6);
 		TraceEvent("KRMCoalesceTestVerifiedUncoalesced").detail("EntryCount", entries.size());
 
-		// Step 3: Call krmSetRangeCoalescing which should trigger auto-coalesce
+		// Step 3: Call krmSetRangeCoalescing which should trigger the tolerance path
 		// We set a range that overlaps with the uncoalesced entries
-		// This requires DD_COALESCE_UNCOALESCED_KRM to be true
-		if (!SERVER_KNOBS->DD_COALESCE_UNCOALESCED_KRM) {
-			TraceEvent("KRMCoalesceTestSkipped").detail("Reason", "DD_COALESCE_UNCOALESCED_KRM is false");
+		// This requires DD_TOLERATE_UNCOALESCED_KRM to be true
+		if (!SERVER_KNOBS->DD_TOLERATE_UNCOALESCED_KRM) {
+			TraceEvent("KRMCoalesceTestSkipped").detail("Reason", "DD_TOLERATE_UNCOALESCED_KRM is false");
 			// Clean up and skip
 			state Transaction trClean(cx);
 			loop {

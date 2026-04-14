@@ -295,11 +295,10 @@ static Future<Void> krmSetRangeCoalescing_(Transaction* tr,
 
 	// Check for uncoalesced data: if value equals endValue but we're not at maxWithPrefix.end,
 	// there are redundant entries beyond what we read. With the knob enabled, skip the operation
-	// entirely to avoid creating inconsistent state. Without knob, ASSERT as before.
+	// to avoid crashing. Without knob, ASSERT as before.
 	if (value == endValue && endKey != maxWithPrefix.end) {
-		if (IKnobCollection::getGlobalKnobCollection().getServerKnobs().DD_COALESCE_UNCOALESCED_KRM) {
-			// Log warning and return early - don't modify metadata when uncoalesced entries exist
-			TraceEvent(SevWarnAlways, "KRMSkippingUncoalescedEntries")
+		if (IKnobCollection::getGlobalKnobCollection().getServerKnobs().DD_TOLERATE_UNCOALESCED_KRM) {
+			TraceEvent(SevWarnAlways, "KRMToleratingUncoalescedEntries")
 			    .detail("MapPrefix", mapPrefix)
 			    .detail("BeginKey", beginKey)
 			    .detail("EndKey", endKey)
@@ -307,7 +306,7 @@ static Future<Void> krmSetRangeCoalescing_(Transaction* tr,
 			    .detail("Value", value);
 			return Void(); // Skip this operation entirely
 		} else {
-			ASSERT(false); // Uncoalesced KRM entries detected; set DD_COALESCE_UNCOALESCED_KRM=true to skip
+			ASSERT(false); // Uncoalesced KRM entries detected; set DD_TOLERATE_UNCOALESCED_KRM=true to tolerate
 		}
 	}
 
