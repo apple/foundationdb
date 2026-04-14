@@ -1,6 +1,8 @@
 # Subsystem 1: Flow Runtime
 
-**Location:** `flow/`  
+**[Diagrams](diagram_01_flow_runtime.md)**
+
+**Location:** [`flow/`](https://github.com/apple/foundationdb/tree/main/flow)
 **Size:** ~31K implementation + headers  
 **Role:** The custom async programming framework that is the execution model for all FoundationDB code.
 
@@ -14,7 +16,7 @@ Flow is not a library you can opt out of -- it **is** the execution model. Every
 
 ## Key Data Structures
 
-### SAV (SingleAssignmentVar) -- `flow.h:730-914`
+### SAV (SingleAssignmentVar) -- [`flow.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/flow.h)`:730-914`
 
 The core primitive underlying all async communication. A reference-counted cell that holds either a value or an error, set exactly once.
 
@@ -36,7 +38,7 @@ struct SAV<T> : Callback<T>, FastAllocated<SAV<T>> {
 
 **Callback chain:** SAV inherits from `Callback<T>`, which forms a **doubly-linked circular list**. Multiple waiters can register on one SAV. When the SAV fires, it walks the chain calling `fire(value)` or `error(err)` on each callback, then unlinks them.
 
-### Future<T> -- `flow.h:973-1068`
+### Future<T> -- [`flow.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/flow.h)`:973-1068`
 
 Read-only handle to a SAV. Cannot set the value, only observe it.
 
@@ -54,7 +56,7 @@ Future<T> f(error);    // immediately errored
 - `cancel()` -- calls `sav->cancel()`, used by actor system
 - `addCallbackAndClear(cb)` -- transfers ownership of callback to SAV
 
-### Promise<T> -- `flow.h:1091-1157`
+### Promise<T> -- [`flow.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/flow.h)`:1091-1157`
 
 Write-only handle to a SAV. Delivers the value exactly once.
 
@@ -66,7 +68,7 @@ Write-only handle to a SAV. Delivers the value exactly once.
 
 **Lifecycle:** Creating a Promise creates a SAV with `promises=1, futures=0`. Calling `getFuture()` increments `futures`. When the Promise is destroyed without sending, it sends `broken_promise()` error.
 
-### FutureStream<T> / PromiseStream<T> -- `flow.h:1159-1456`
+### FutureStream<T> / PromiseStream<T> -- [`flow.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/flow.h)`:1159-1456`
 
 Multi-value async channels for request/reply patterns.
 
@@ -89,7 +91,7 @@ stream.send(MyRequest{42, ReplyPromise<MyReply>()});
 
 No explicit backpressure -- values accumulate in the queue. Implicit pressure: if the consumer doesn't drain, memory grows.
 
-### Error / ErrorOr<T> -- `Error.h:44-81`, `flow.h:124-317`
+### Error / ErrorOr<T> -- [`Error.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/Error.h)`:44-81`, [`flow.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/flow.h)`:124-317`
 
 **Error class:**
 - `uint16_t error_code` + `uint16_t flags` (includes `FLAG_INJECTED_FAULT`)
@@ -132,18 +134,18 @@ The compiler:
 - `choose { when(wait(a)) {...} when(wait(b)) {...} }` -- race two futures
 - `loop` -- `while(true)` alias
 
-### C++20 Coroutine Integration -- `CoroutinesImpl.h`
+### C++20 Coroutine Integration -- [`CoroutinesImpl.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/CoroutinesImpl.h)
 
 The codebase is being migrated from the custom actor compiler to C++20 native coroutines:
 
-**CoroPromise<T>** (`CoroutinesImpl.h:737-844`):
+**CoroPromise<T>** ([`CoroutinesImpl.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/CoroutinesImpl.h)`:737-844`):
 - The `promise_type` for `Future<T>` coroutines
 - Embeds a `CoroActor<T>` which inherits from `Actor<T>` (which inherits from SAV)
 - `get_return_object()` returns `Future<T>` backed by the coroutine's SAV
 - `initial_suspend()` returns `suspend_never` (eager start)
 - `await_transform()` overloads convert `Future<U>` into `AwaitableFuture`
 
-**AwaitableFuture** (`CoroutinesImpl.h:453-534`):
+**AwaitableFuture** ([`CoroutinesImpl.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/CoroutinesImpl.h)`:453-534`):
 - The awaiter type for `co_await Future<T>`
 - `await_ready()` -- checks if future is ready or coroutine cancelled
 - `await_suspend()` -- registers callback with the future's SAV
@@ -154,7 +156,7 @@ The codebase is being migrated from the custom actor compiler to C++20 native co
 
 ---
 
-## Net2 Event Loop -- `Net2.actor.cpp`
+## Net2 Event Loop -- [`Net2.actor.cpp`](https://github.com/apple/foundationdb/blob/main/flow/Net2.actor.cpp)
 
 The real (non-simulated) event loop. Single-threaded, priority-based task scheduling over Boost.ASIO.
 
@@ -203,7 +205,7 @@ The `run()` method:
 
 ---
 
-## Arena Memory System -- `Arena.h`
+## Arena Memory System -- [`Arena.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/Arena.h)
 
 ### Arena
 
@@ -220,7 +222,7 @@ class Arena {
 };
 ```
 
-**ArenaBlock** (`Arena.h:171-212`):
+**ArenaBlock** ([`Arena.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/Arena.h)`:171-212`):
 - Fixed block sizes: `SMALL=64`, `LARGE=8193`
 - Bump pointer allocation: `bigUsed` tracks next free offset
 - Blocks chain together; all freed when Arena destroyed
@@ -276,7 +278,7 @@ Thread-local pool allocator for common sizes (16, 32, 64, 96, 128, 256 bytes).
 
 ---
 
-## Serialization -- `serialize.h`
+## Serialization -- [`serialize.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/serialize.h)
 
 Unified framework for binary serialization:
 
@@ -289,7 +291,7 @@ Unified framework for binary serialization:
 
 ---
 
-## Tracing -- `Trace.h`, `Trace.cpp`
+## Tracing -- `Trace.h`, [`Trace.cpp`](https://github.com/apple/foundationdb/blob/main/flow/Trace.cpp)
 
 Structured event logging used everywhere:
 
@@ -308,7 +310,7 @@ TraceEvent("MyEvent", self->dbgid)
 
 ---
 
-## Generic Actors -- `genericactors.actor.h`
+## Generic Actors -- [`genericactors.actor.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/genericactors.actor.h)
 
 Key utility actors:
 
@@ -326,7 +328,7 @@ Key utility actors:
 | `holdWhile(object, Future<T>)` | Keep object alive until future resolves |
 | `uncancellable(Future<T>)` | Prevent cancellation |
 
-**AsyncVar<T>** (`genericactors.actor.h:753-785`):
+**AsyncVar<T>** ([`genericactors.actor.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/genericactors.actor.h)`:753-785`):
 - Reactive variable: holds a value, notifies on change
 - `get()` -- current value
 - `onChange()` -- returns `Future<Void>` that fires on next change
@@ -364,13 +366,13 @@ Key utility actors:
 
 | File | Purpose |
 |------|---------|
-| `flow/include/flow/flow.h` | Master include: Future, Promise, SAV, Callback, ErrorOr |
-| `flow/include/flow/Arena.h` | Arena, StringRef, Standalone, VectorRef |
-| `flow/include/flow/Error.h` | Error class and error code definitions |
-| `flow/include/flow/CoroutinesImpl.h` | C++20 coroutine integration (CoroPromise, AwaitableFuture) |
-| `flow/include/flow/genericactors.actor.h` | Utility actors (delay, timeout, waitForAll, AsyncVar) |
-| `flow/include/flow/serialize.h` | Serialization framework |
+| [`flow/include/flow/flow.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/flow.h) | Master include: Future, Promise, SAV, Callback, ErrorOr |
+| [`flow/include/flow/Arena.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/Arena.h) | Arena, StringRef, Standalone, VectorRef |
+| [`flow/include/flow/Error.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/Error.h) | Error class and error code definitions |
+| [`flow/include/flow/CoroutinesImpl.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/CoroutinesImpl.h) | C++20 coroutine integration (CoroPromise, AwaitableFuture) |
+| [`flow/include/flow/genericactors.actor.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/genericactors.actor.h) | Utility actors (delay, timeout, waitForAll, AsyncVar) |
+| [`flow/include/flow/serialize.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/serialize.h) | Serialization framework |
 | `flow/include/flow/FastAlloc.h` | Thread-local pool allocator |
-| `flow/Net2.actor.cpp` | Real event loop (Boost.ASIO based) |
-| `flow/Trace.cpp` | Structured event tracing |
+| [`flow/Net2.actor.cpp`](https://github.com/apple/foundationdb/blob/main/flow/Net2.actor.cpp) | Real event loop (Boost.ASIO based) |
+| [`flow/Trace.cpp`](https://github.com/apple/foundationdb/blob/main/flow/Trace.cpp) | Structured event tracing |
 | `flow/include/flow/actorcompiler.h` | ACTOR/wait/state macro definitions |
