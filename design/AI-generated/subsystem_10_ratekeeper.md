@@ -1,6 +1,8 @@
 # Subsystem 10: Rate Keeping & Throttling
 
-**Location:** `fdbserver/ratekeeper/`  
+**[Diagrams](diagram_10_ratekeeper.md)**
+
+**Location:** [`fdbserver/ratekeeper/`](https://github.com/apple/foundationdb/tree/main/fdbserver/ratekeeper)
 **Size:** ~4K  
 **Role:** Back-pressure on commits and reads, tag-based throttling, throughput tracking.
 
@@ -12,7 +14,7 @@ The Ratekeeper is a singleton role (recruited by Cluster Controller) that monito
 
 ---
 
-## Ratekeeper Structure -- `Ratekeeper.h:129-232`
+## Ratekeeper Structure -- [`Ratekeeper.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/ratekeeper/Ratekeeper.h)`:129-232`
 
 ```
 class Ratekeeper {
@@ -70,7 +72,7 @@ struct RatekeeperLimits {
 
 ---
 
-## Rate Calculation -- `Ratekeeper.cpp:642-850`
+## Rate Calculation -- [`Ratekeeper.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/ratekeeper/Ratekeeper.cpp)`:642-850`
 
 ### `updateRate(RatekeeperLimits* limits)`
 
@@ -123,7 +125,7 @@ The final rate is the **minimum** across all metrics, with the `limitReason` tra
 
 ---
 
-## Communication with GRV Proxies -- `Ratekeeper.cpp:345-410`
+## Communication with GRV Proxies -- [`Ratekeeper.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/ratekeeper/Ratekeeper.cpp)`:345-410`
 
 ### GetRateInfoRequest
 
@@ -163,7 +165,7 @@ GRV proxy enforces limits by delaying `GetReadVersion` responses when rate excee
 
 ---
 
-## Tag Throttling -- `GlobalTagThrottler.cpp`
+## Tag Throttling -- [`GlobalTagThrottler.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/ratekeeper/GlobalTagThrottler.cpp)
 
 Per-tag (per-tenant/workload) transaction throttling.
 
@@ -205,7 +207,7 @@ class PerTagStatistics {
 
 ---
 
-## Server Throughput Tracking -- `ServerThroughputTracker.cpp`
+## Server Throughput Tracking -- [`ServerThroughputTracker.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/ratekeeper/ServerThroughputTracker.cpp)
 
 Tracks per-storage-server throughput for load-aware throttling:
 - Read IOPS and bandwidth per server
@@ -218,9 +220,9 @@ Tracks per-storage-server throughput for load-aware throttling:
 
 | File | Purpose |
 |------|---------|
-| `fdbserver/ratekeeper/Ratekeeper.cpp` | Rate calculation, proxy communication |
-| `fdbserver/ratekeeper/Ratekeeper.h` | Ratekeeper, StorageQueueInfo, TLogQueueInfo, RatekeeperLimits |
-| `fdbserver/ratekeeper/GlobalTagThrottler.cpp` | Per-tag throttling implementation |
-| `fdbserver/ratekeeper/RkTagThrottleCollection.cpp` | Tag throttle collection management |
-| `fdbserver/ratekeeper/ServerThroughputTracker.cpp` | Per-server throughput monitoring |
+| [`fdbserver/ratekeeper/Ratekeeper.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/ratekeeper/Ratekeeper.cpp) | Rate calculation, proxy communication |
+| [`fdbserver/ratekeeper/Ratekeeper.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/ratekeeper/Ratekeeper.h) | Ratekeeper, StorageQueueInfo, TLogQueueInfo, RatekeeperLimits |
+| [`fdbserver/ratekeeper/GlobalTagThrottler.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/ratekeeper/GlobalTagThrottler.cpp) | Per-tag throttling implementation |
+| [`fdbserver/ratekeeper/RkTagThrottleCollection.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/ratekeeper/RkTagThrottleCollection.cpp) | Tag throttle collection management |
+| [`fdbserver/ratekeeper/ServerThroughputTracker.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/ratekeeper/ServerThroughputTracker.cpp) | Per-server throughput monitoring |
 | `fdbserver/ratekeeper/RatekeeperLimits.cpp` | Limit calculation utilities |
