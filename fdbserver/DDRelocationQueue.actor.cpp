@@ -572,7 +572,7 @@ DDQueue::DDQueue(DDQueueInitParams const& params)
     finishMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
     cleanUpDataMoveParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
     fetchSourceLock(new FlowLock(SERVER_KNOBS->DD_FETCH_SOURCE_PARALLELISM)), activeRelocations(0),
-    queuedRelocations(0), bytesWritten(0), teamSize(params.teamSize), singleRegionTeamSize(params.singleRegionTeamSize),
+    queuedRelocations(0), inFlightRestoreMoves(0), bytesWritten(0), teamSize(params.teamSize), singleRegionTeamSize(params.singleRegionTeamSize),
     output(params.relocationProducer), input(params.relocationConsumer), getShardMetrics(params.getShardMetrics),
     getTopKMetrics(params.getTopKMetrics), lastInterval(0), suppressIntervals(0),
     rawProcessingUnhealthy(new AsyncVar<bool>(false)), rawProcessingWiggle(new AsyncVar<bool>(false)),
@@ -1019,7 +1019,11 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 		}
 
 		if (overlappingInFlight) {
-			ASSERT(!rd.isRestore());
+			if (rd.isRestore()) {
+				// Buffered isRestore move now overlaps with a newer in-flight relocation.
+				// Skip it — the newer relocation handles this range.
+				inFlightRestoreMoves--;
+			}
 			// logRelocation( rd, "SkippingOverlappingInFlight" );
 			continue;
 		}
@@ -1085,6 +1089,7 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 		    SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA ? cancelDataMove(this, rd.keys, ddEnabledState) : Void();
 
 		inFlight.insert(rd.keys, rd);
+		bool restoreMoveSplit = false;
 		for (int r = 0; r < ranges.size(); r++) {
 			RelocateData& rrs = inFlight.rangeContaining(ranges[r].begin)->value();
 			rrs.keys = ranges[r];
@@ -1093,7 +1098,14 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 				ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 				rrs.dataMoveId = rd.dataMove->meta.id;
 			} else {
-				ASSERT_WE_THINK(!rd.isRestore()); // Restored data move should not overlap.
+				if (rd.isRestore() && !restoreMoveSplit) {
+					// Buffered isRestore move's range was split by an overlapping in-flight
+					// relocation. Treat sub-ranges as normal moves. The split sub-ranges
+					// will have dataMove reset, so relocationComplete won't see them as
+					// isRestore — adjust the counter here (once per move).
+					restoreMoveSplit = true;
+					inFlightRestoreMoves--;
+				}
 				// TODO(psm): The shard id is determined by DD.
 				rrs.dataMove.reset();
 				if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
@@ -2399,6 +2411,7 @@ struct DDQueueImpl {
 		state KeyRange keysToLaunchFrom;
 		state RelocateData launchData;
 		state Future<Void> recordMetrics = delay(SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL);
+		state Deque<RelocateShard> pendingRestoreMoves;
 
 		state std::vector<Future<Void>> ddQueueFutures;
 
@@ -2445,7 +2458,12 @@ struct DDQueueImpl {
 						if (rs.isRestore()) {
 							ASSERT(rs.dataMove != nullptr);
 							ASSERT(rs.dataMoveId.isValid());
-							self->launchQueuedWork(RelocateData(rs), ddEnabledState);
+							if (self->inFlightRestoreMoves < SERVER_KNOBS->DD_MAX_INFLIGHT_RESTORE_MOVES) {
+								self->inFlightRestoreMoves++;
+								self->launchQueuedWork(RelocateData(rs), ddEnabledState);
+							} else {
+								pendingRestoreMoves.push_back(rs);
+							}
 						} else if (rs.cancelled) {
 							self->enqueueCancelledDataMove(rs.dataMoveId, rs.keys, ddEnabledState);
 						} else {
@@ -2482,6 +2500,17 @@ struct DDQueueImpl {
 						// self->logRelocation( done, "ShardRelocatorDone" );
 						self->noErrorActors.add(
 						    tag(delay(0, TaskPriority::DataDistributionLaunch), done.keys, rangesComplete));
+						if (done.isRestore()) {
+							self->inFlightRestoreMoves--;
+							while (!pendingRestoreMoves.empty() &&
+							       self->inFlightRestoreMoves <
+							           SERVER_KNOBS->DD_MAX_INFLIGHT_RESTORE_MOVES) {
+								auto rs = pendingRestoreMoves.front();
+								pendingRestoreMoves.pop_front();
+								self->inFlightRestoreMoves++;
+								self->launchQueuedWork(RelocateData(rs), ddEnabledState);
+							}
+						}
 						if (g_network->isSimulated() && debug_isCheckRelocationDuration() &&
 						    now() - done.startTime > 60) {
 							TraceEvent(SevWarnAlways, "RelocationDurationTooLong")
