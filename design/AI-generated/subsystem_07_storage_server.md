@@ -1,6 +1,8 @@
 # Subsystem 7: Storage Server & Engines
 
-**Location:** `fdbserver/storageserver/`, `fdbserver/kvstore/`  
+**[Diagrams](diagram_07_storage_server.md)**
+
+**Location:** [`fdbserver/storageserver/`](https://github.com/apple/foundationdb/tree/main/fdbserver/storageserver), [`fdbserver/kvstore/`](https://github.com/apple/foundationdb/tree/main/fdbserver/kvstore)
 **Size:** ~63K  
 **Role:** Serves reads, applies mutations from log, pluggable storage backends.
 
@@ -12,7 +14,7 @@ Storage servers are the read path and the materialized state of the database. Ea
 
 ---
 
-## StorageServer Structure -- `storageserver.actor.cpp:850-1528`
+## StorageServer Structure -- [`storageserver.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/storageserver/storageserver.actor.cpp)`:850-1528`
 
 ```
 struct StorageServer : IStorageMetricsService {
@@ -44,7 +46,7 @@ struct StorageServer : IStorageMetricsService {
 
 ---
 
-## Update Loop -- `storageserver.actor.cpp:9535+`
+## Update Loop -- [`storageserver.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/storageserver/storageserver.actor.cpp)`:9535+`
 
 The `update()` actor pulls mutations from the log system and applies them locally.
 
@@ -154,7 +156,7 @@ Modifies shard map to move ranges between states:
 
 ---
 
-## Storage Engines -- `fdbserver/kvstore/`
+## Storage Engines -- [`fdbserver/kvstore/`](https://github.com/apple/foundationdb/tree/main/fdbserver/kvstore)
 
 ### IKeyValueStore Interface
 
@@ -179,7 +181,7 @@ struct IKeyValueStore {
 };
 ```
 
-### RocksDB Engine -- `KeyValueStoreRocksDB.actor.cpp`
+### RocksDB Engine -- [`KeyValueStoreRocksDB.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreRocksDB.actor.cpp)
 
 Primary production engine.
 
@@ -190,16 +192,16 @@ Primary production engine.
 - Bloom filter: `ROCKSDB_BLOOM_BITS_PER_KEY` (typically 10)
 - Direct I/O: `ROCKSDB_USE_DIRECT_READS`
 
-**Sharded variant** (`KeyValueStoreShardedRocksDB.actor.cpp`):
+**Sharded variant** ([`KeyValueStoreShardedRocksDB.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreShardedRocksDB.actor.cpp)):
 - Per-shard column families
 - Better isolation between shards
 - Supports physical shard operations (addRange/removeRange)
 
-### SQLite Engine -- `KeyValueStoreSQLite.actor.cpp`
+### SQLite Engine -- [`KeyValueStoreSQLite.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreSQLite.actor.cpp)
 
 Legacy engine. Simple SQL-backed KV store.
 
-### Memory Engine -- `KeyValueStoreMemory.actor.cpp`
+### Memory Engine -- [`KeyValueStoreMemory.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreMemory.actor.cpp)
 
 In-memory map-based engine:
 - Used for testing
@@ -249,10 +251,10 @@ Client ──GetValueRequest──▶ StorageServer getValueQ()
 
 | File | Purpose |
 |------|---------|
-| `fdbserver/storageserver/storageserver.actor.cpp` | SS main loop, update, read serving, shard management |
-| `fdbserver/kvstore/KeyValueStoreRocksDB.actor.cpp` | RocksDB engine implementation |
-| `fdbserver/kvstore/KeyValueStoreShardedRocksDB.actor.cpp` | Sharded RocksDB engine |
-| `fdbserver/kvstore/KeyValueStoreSQLite.actor.cpp` | SQLite engine |
-| `fdbserver/kvstore/KeyValueStoreMemory.actor.cpp` | Memory engine |
-| `fdbserver/core/include/fdbserver/core/IKeyValueStore.h` | IKeyValueStore interface |
-| `fdbserver/core/StorageMetrics.cpp` | Storage metrics tracking |
+| [`fdbserver/storageserver/storageserver.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/storageserver/storageserver.actor.cpp) | SS main loop, update, read serving, shard management |
+| [`fdbserver/kvstore/KeyValueStoreRocksDB.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreRocksDB.actor.cpp) | RocksDB engine implementation |
+| [`fdbserver/kvstore/KeyValueStoreShardedRocksDB.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreShardedRocksDB.actor.cpp) | Sharded RocksDB engine |
+| [`fdbserver/kvstore/KeyValueStoreSQLite.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreSQLite.actor.cpp) | SQLite engine |
+| [`fdbserver/kvstore/KeyValueStoreMemory.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreMemory.actor.cpp) | Memory engine |
+| [`fdbserver/core/include/fdbserver/core/IKeyValueStore.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/IKeyValueStore.h) | IKeyValueStore interface |
+| [`fdbserver/core/StorageMetrics.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/StorageMetrics.cpp) | Storage metrics tracking |
