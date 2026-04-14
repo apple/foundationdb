@@ -39,6 +39,7 @@
 
 #include <list>
 #include <optional>
+#include <type_traits>
 #include <utility>
 
 #include "flow/flow.h"
@@ -1028,7 +1029,65 @@ struct GetAllAsyncResultCallback;
 } // namespace coro
 
 template <class T>
-using QuorumAsyncResult = QuorumState<coro::QuorumAsyncResultCallback<T>>;
+struct QuorumAsyncResult final : SAV<Void> {
+	int antiQuorum;
+	int count;
+
+	static inline int sizeFor(int count) {
+		return sizeof(QuorumAsyncResult<T>) + sizeof(coro::QuorumAsyncResultCallback<T>) * count;
+	}
+
+	int detachPendingCallbacks() {
+		int detachedCallbacks = 0;
+		for (int i = 0; i < count; ++i) {
+			if (callbacks()[i].isRegistered()) {
+				callbacks()[i].detach();
+				++detachedCallbacks;
+			}
+		}
+		return detachedCallbacks;
+	}
+
+	void destroy() override {
+		int size = sizeFor(this->count);
+		this->~QuorumAsyncResult();
+		freeFast(size, this);
+	}
+	void cancel() override {
+		int cancelledCallbacks = detachPendingCallbacks();
+		if (canBeSet())
+			sendError(actor_cancelled());
+		for (int i = 0; i < cancelledCallbacks; ++i)
+			delPromiseRef();
+	}
+	explicit QuorumAsyncResult(int quorum, int count)
+	  : SAV<Void>(1, count), antiQuorum(count - quorum + 1), count(count) {
+		if (!quorum)
+			this->send(Void());
+	}
+	void oneSuccess() {
+		if (getPromiseReferenceCount() == antiQuorum && canBeSet()) {
+			int cancelledCallbacks = detachPendingCallbacks();
+			this->sendAndDelPromiseRef(Void());
+			for (int i = 0; i < cancelledCallbacks; ++i)
+				delPromiseRef();
+		} else {
+			delPromiseRef();
+		}
+	}
+	void oneError(Error err) {
+		if (canBeSet()) {
+			int cancelledCallbacks = detachPendingCallbacks();
+			this->sendErrorAndDelPromiseRef(err);
+			for (int i = 0; i < cancelledCallbacks; ++i)
+				delPromiseRef();
+		} else {
+			delPromiseRef();
+		}
+	}
+
+	coro::QuorumAsyncResultCallback<T>* callbacks() { return (coro::QuorumAsyncResultCallback<T>*)(this + 1); }
+};
 
 namespace coro {
 template <class T>
@@ -1053,6 +1112,19 @@ struct QuorumAsyncResultCallback final : AsyncResultCallback<typename AsyncResul
 } // namespace coro
 
 namespace coro {
+template <class StoredT>
+void detachAsyncResultStateCallback(AsyncResultState<StoredT>*& resultState, AsyncResultCallback<StoredT>* callback) {
+	if (resultState) {
+		auto* s = resultState;
+		resultState = nullptr;
+		s->clearCallback(callback);
+		if (!s->isReady()) {
+			s->cancelProducer();
+		}
+		s->delRef();
+	}
+}
+
 template <class T>
 QuorumAsyncResultCallback<T>::QuorumAsyncResultCallback(AsyncResult<T>& result, QuorumAsyncResult<T>* head)
   : resultState(result.resultState), head(head) {
@@ -1061,15 +1133,7 @@ QuorumAsyncResultCallback<T>::QuorumAsyncResultCallback(AsyncResult<T>& result, 
 
 template <class T>
 void QuorumAsyncResultCallback<T>::detach() {
-	if (resultState) {
-		auto* s = resultState;
-		resultState = nullptr;
-		s->clearCallback(this);
-		if (!s->isReady()) {
-			s->cancelProducer();
-		}
-		s->delRef();
-	}
+	detachAsyncResultStateCallback(resultState, this);
 }
 
 template <class T>
@@ -1138,19 +1202,24 @@ struct GetAllAsyncResult final : SAV<std::vector<T>> {
 		return sizeof(GetAllAsyncResult<T>) + sizeof(coro::GetAllAsyncResultCallback<T>) * count;
 	}
 
+	int detachPendingCallbacks() {
+		int detachedCallbacks = 0;
+		for (int i = 0; i < count; ++i) {
+			if (callbacks()[i].isRegistered()) {
+				callbacks()[i].detach();
+				++detachedCallbacks;
+			}
+		}
+		return detachedCallbacks;
+	}
+
 	void destroy() override {
 		int size = sizeFor(this->count);
 		this->~GetAllAsyncResult();
 		freeFast(size, this);
 	}
 	void cancel() override {
-		int cancelledCallbacks = 0;
-		for (int i = 0; i < count; ++i) {
-			if (callbacks()[i].isRegistered()) {
-				callbacks()[i].detach();
-				++cancelledCallbacks;
-			}
-		}
+		int cancelledCallbacks = detachPendingCallbacks();
 		if (this->canBeSet())
 			this->sendError(actor_cancelled());
 		for (int i = 0; i < cancelledCallbacks; ++i)
@@ -1175,9 +1244,12 @@ struct GetAllAsyncResult final : SAV<std::vector<T>> {
 		}
 	}
 	void oneError(Error err) {
-		if (this->canBeSet())
+		if (this->canBeSet()) {
+			int cancelledCallbacks = detachPendingCallbacks();
 			this->sendErrorAndDelPromiseRef(err);
-		else
+			for (int i = 0; i < cancelledCallbacks; ++i)
+				this->delPromiseRef();
+		} else
 			this->delPromiseRef();
 	}
 
@@ -1216,22 +1288,21 @@ GetAllAsyncResultCallback<T>::GetAllAsyncResultCallback(AsyncResult<T>& result, 
 
 template <class T>
 void GetAllAsyncResultCallback<T>::detach() {
-	if (resultState) {
-		auto* s = resultState;
-		resultState = nullptr;
-		s->clearCallback(this);
-		if (!s->isReady()) {
-			s->cancelProducer();
-		}
-		s->delRef();
-	}
+	detachAsyncResultStateCallback(resultState, this);
 }
 
 template <class T>
 void GetAllAsyncResultCallback<T>::fire(StoredT const& value) {
-	// AsyncResult values are moved into the aggregate in fire(T&&). The const&
-	// path would imply an unnecessary copy and should never be taken.
-	UNREACHABLE();
+	if constexpr (std::is_constructible_v<T, StoredT const&>) {
+		T copied(value);
+		detach();
+		head->oneSuccess(idx, std::move(copied));
+	} else {
+		// AsyncResultState::complete() currently dispatches through fire(T&&). If
+		// that ever changes, move-only AsyncResult payloads still need this path
+		// to stay unreachable.
+		UNREACHABLE();
+	}
 }
 
 template <class T>
@@ -1309,7 +1380,12 @@ Future<std::vector<T>> getAll(std::vector<Future<T>> input) {
 }
 
 template <class T>
-Future<std::vector<T>> getAll(std::vector<AsyncResult<T>> input) {
+// AsyncResult is single-consumer, so getAll requires an explicit ownership
+// transfer from vector callers.
+Future<std::vector<T>> getAll(std::vector<AsyncResult<T>>& input) = delete;
+
+template <class T>
+Future<std::vector<T>> getAll(std::vector<AsyncResult<T>>&& input) {
 	if (input.empty())
 		return std::vector<T>();
 
