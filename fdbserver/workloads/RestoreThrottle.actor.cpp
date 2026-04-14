@@ -208,7 +208,7 @@ struct RestoreThrottleWorkload : TestWorkload {
 
 		// Force DD restart
 		state UID lockOwner = deterministicRandom()->randomUniqueID();
-		state MoveKeysLock lock = wait(takeMoveKeysLock(cx, lockOwner));
+		MoveKeysLock lock = wait(takeMoveKeysLock(cx, lockOwner));
 		TraceEvent("RestoreThrottleForcedDDRestart").detail("LockOwner", lockOwner);
 
 		// Check moves after restart
