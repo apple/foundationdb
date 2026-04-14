@@ -1505,6 +1505,16 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 					// needs a minimum version the dest server must reach. A fresh transaction
 					// later will have a newer version, and the server will already be past this
 					// older version, so the readiness guarantee still holds.
+					//
+					// Correctness of the two-transaction split:
+					// Between the wait and the second transaction's commit, the shard assignment
+					// could change (e.g. another DD instance reassigns the shard after a
+					// movekeys_conflict restart). The second transaction handles this by:
+					//   1. checkMoveKeysLock verifies our DD instance still owns the move
+					//   2. Re-reading keyServers and verifying dest is unchanged
+					//   3. If dest changed, we retry the entire inner loop
+					// The dest servers confirmed readiness at version V1. The second transaction
+					// reads at V2 >= V1, so the readiness guarantee carries forward.
 					state Version readVersion = tr.getReadVersion().get();
 
 					releaser.release();
