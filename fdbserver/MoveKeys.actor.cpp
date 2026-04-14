@@ -1529,18 +1529,16 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 					tssReady.reserve(storageServerInterfaces.size());
 					tssReadyInterfs.reserve(storageServerInterfaces.size());
 					for (int s = 0; s < storageServerInterfaces.size(); s++) {
-						serverReady.push_back(waitForShardReady(storageServerInterfaces[s],
-						                                        keys,
-						                                        readVersion,
-						                                        GetShardStateRequest::READABLE));
+						serverReady.push_back(waitForShardReady(
+						    storageServerInterfaces[s], keys, readVersion, GetShardStateRequest::READABLE));
 
 						auto tssPair = tssMapping.find(storageServerInterfaces[s].id());
 
 						if (tssPair != tssMapping.end() && waitForTSSCounter > 0 &&
 						    !tssToIgnore.count(tssPair->second.id())) {
 							tssReadyInterfs.push_back(tssPair->second);
-							tssReady.push_back(waitForShardReady(
-							    tssPair->second, keys, readVersion, GetShardStateRequest::READABLE));
+							tssReady.push_back(
+							    waitForShardReady(tssPair->second, keys, readVersion, GetShardStateRequest::READABLE));
 						}
 					}
 
@@ -1628,8 +1626,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 								                      checkDest);
 							}
 							if (checkDest != dest) {
-								CODE_PROBE(true,
-								           "finishMoveKeys dest changed during waitForShardReady");
+								CODE_PROBE(true, "finishMoveKeys dest changed during waitForShardReady");
 								TraceEvent(SevWarn, "FinishMoveKeysDestChanged", relocationIntervalId)
 								    .detail("KeyBegin", keys.begin)
 								    .detail("KeyEnd", keys.end)
