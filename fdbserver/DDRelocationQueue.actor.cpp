@@ -572,13 +572,13 @@ DDQueue::DDQueue(DDQueueInitParams const& params)
     finishMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
     cleanUpDataMoveParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
     fetchSourceLock(new FlowLock(SERVER_KNOBS->DD_FETCH_SOURCE_PARALLELISM)), activeRelocations(0),
-    queuedRelocations(0), inFlightRestoreMoves(0), bytesWritten(0), teamSize(params.teamSize), singleRegionTeamSize(params.singleRegionTeamSize),
-    output(params.relocationProducer), input(params.relocationConsumer), getShardMetrics(params.getShardMetrics),
-    getTopKMetrics(params.getTopKMetrics), lastInterval(0), suppressIntervals(0),
-    rawProcessingUnhealthy(new AsyncVar<bool>(false)), rawProcessingWiggle(new AsyncVar<bool>(false)),
-    unhealthyRelocations(0), movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")),
-    moveReusePhysicalShard(0), moveCreateNewPhysicalShard(0),
-    retryFindDstReasonCount(static_cast<int>(RetryFindDstReason::NumberOfTypes), 0),
+    queuedRelocations(0), inFlightRestoreMoves(0), bytesWritten(0), teamSize(params.teamSize),
+    singleRegionTeamSize(params.singleRegionTeamSize), output(params.relocationProducer),
+    input(params.relocationConsumer), getShardMetrics(params.getShardMetrics), getTopKMetrics(params.getTopKMetrics),
+    lastInterval(0), suppressIntervals(0), rawProcessingUnhealthy(new AsyncVar<bool>(false)),
+    rawProcessingWiggle(new AsyncVar<bool>(false)), unhealthyRelocations(0),
+    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")), moveReusePhysicalShard(0),
+    moveCreateNewPhysicalShard(0), retryFindDstReasonCount(static_cast<int>(RetryFindDstReason::NumberOfTypes), 0),
     moveBytesRate(SERVER_KNOBS->DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL) {}
 
 void DDQueue::startRelocation(int priority, int healthPriority) {
@@ -2503,8 +2503,7 @@ struct DDQueueImpl {
 						if (done.isRestore()) {
 							self->inFlightRestoreMoves--;
 							while (!pendingRestoreMoves.empty() &&
-							       self->inFlightRestoreMoves <
-							           SERVER_KNOBS->DD_MAX_INFLIGHT_RESTORE_MOVES) {
+							       self->inFlightRestoreMoves < SERVER_KNOBS->DD_MAX_INFLIGHT_RESTORE_MOVES) {
 								auto rs = pendingRestoreMoves.front();
 								pendingRestoreMoves.pop_front();
 								self->inFlightRestoreMoves++;

@@ -259,11 +259,9 @@ struct RestoreThrottleWorkload : TestWorkload {
 			}
 			if (now() - startTime > self->testDuration) {
 				if (ddProgressing) {
-					TraceEvent("RestoreThrottleTimedOutButProgressing")
-					    .detail("RemainingMoves", previousMoves);
+					TraceEvent("RestoreThrottleTimedOutButProgressing").detail("RemainingMoves", previousMoves);
 				} else if (previousMoves <= 5) {
-					TraceEvent("RestoreThrottleFewMovesNotProgressing")
-					    .detail("RemainingMoves", previousMoves);
+					TraceEvent("RestoreThrottleFewMovesNotProgressing").detail("RemainingMoves", previousMoves);
 				} else {
 					TraceEvent(SevError, "RestoreThrottleDDNotProgressing")
 					    .detail("RemainingMoves", previousMoves)
