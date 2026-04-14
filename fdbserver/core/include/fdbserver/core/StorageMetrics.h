@@ -77,6 +77,11 @@ private:
 struct StorageServerMetrics {
 	KeyRangeMap<std::vector<PromiseStream<StorageMetrics>>> waitMetricsMap;
 	StorageMetricSample byteSample;
+	int64_t waitMetricsMapRangeCountHighWatermark = 0;
+	int64_t waitMetricsMapNonEmptyRangeCountHighWatermark = 0;
+	int64_t waitMetricsMapWatcherCountHighWatermark = 0;
+	int64_t waitMetricsMapWatcherCapacityHighWatermark = 0;
+	int64_t waitMetricsMapMaxWatchersPerRangeHighWatermark = 0;
 
 	// FIXME: iops is not effectively tested, and is not used by data distribution
 	TransientStorageMetricSample iopsSample, bytesWriteSample;
@@ -103,6 +108,8 @@ struct StorageServerMetrics {
 	void notifyNotReadable(KeyRangeRef keys);
 
 	void poll();
+
+	void traceWaitMetricsMapIfHighWatermark(const char* reason, KeyRangeRef keys);
 
 	// static void waitMetrics( StorageServerMetrics* const& self, WaitMetricsRequest const& req );
 
