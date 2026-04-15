@@ -169,9 +169,7 @@ struct GcGenerationsWorkload : TestWorkload {
 				continue;
 			}
 
-			TraceEvent("RebootingPrimaryDcMaster")
-			    .detail("Iteration", successfulReboots)
-			    .detail("Master", masterAddr);
+			TraceEvent("RebootingPrimaryDcMaster").detail("Iteration", successfulReboots).detail("Master", masterAddr);
 			g_simulator->rebootProcess(masterProc, ISimulator::KillType::Reboot);
 
 			// Wait for recovery to create a new generation.
