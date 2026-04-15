@@ -923,7 +923,6 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 
 	state int maxTries = std::min(bstore->knobs.request_tries, bstore->knobs.connect_tries);
 	state int thisTry = 1;
-	state int badRequestCode = 400;
 	state double nextRetryDelay = 2.0;
 
 	loop {
@@ -1066,8 +1065,8 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			event.detail("ResponseCode", r->code);
 			std::string s3Error = parseErrorCodeFromS3(r->data.content);
 			event.detail("S3ErrorCode", s3Error);
-			if (r->code == badRequestCode) {
-				TraceEvent(SevWarnAlways, "S3BlobStoreBadRequest")
+			if (r->code >= 400 && r->code < 500) {
+				TraceEvent(SevWarnAlways, "S3BlobStoreClientError")
 				    .detail("HttpCode", r->code)
 				    .detail("HttpResponseContent", r->data.content)
 				    .detail("S3Error", s3Error);
