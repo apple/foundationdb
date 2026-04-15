@@ -107,7 +107,6 @@ void makeUndefined(void*, size_t) {}
 #endif
 } // namespace
 
-
 static SimpleCounter<int64_t>* arenasCreated(void) {
 	static SimpleCounter<int64_t>* p = SimpleCounter<int64_t>::makeCounter("/flow/arena/arenasCreated");
 	return p;
