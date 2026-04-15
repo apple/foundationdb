@@ -66,6 +66,17 @@ struct GcGenerationsWorkload : TestWorkload {
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
+	// Ensure simulator state is cleaned up even if the workload is cancelled by timeout.
+	// Without this, a timeout leaves the cluster permanently degraded: remote DC clogged,
+	// connection failures active, disableTLogRecoveryFinish=true — causing Cycle check to fail.
+	~GcGenerationsWorkload() {
+		if (g_network && g_network->isSimulated()) {
+			unclogAll();
+			disableConnectionFailures("GcGenerations");
+			g_simulator->disableTLogRecoveryFinish = false;
+		}
+	}
+
 	void unclogAll() {
 		TraceEvent("GcGenerationsUnclogRemote").detail("UnclogConnectionCount", cloggedPairs.size());
 		// unclog previously clogged connections
@@ -129,7 +140,8 @@ struct GcGenerationsWorkload : TestWorkload {
 	Future<Void> generateMultipleTxnGenerations(GcGenerationsWorkload* self, Database cx) {
 		co_await self->clogRemoteDc(self, cx);
 		int generationCount = 0;
-		for (int i = 0; i < 6; ++i) {
+		int successfulReboots = 0;
+		while (successfulReboots < 6) {
 			// Sometimes Cycle Setup can take a long time, so we need to extend
 			// connection failures injection for clogRemoteDc() to work properly.
 			// We also want to make sure connection failures are still active when we
@@ -139,15 +151,28 @@ struct GcGenerationsWorkload : TestWorkload {
 
 			co_await delay(30);
 			TraceEvent("WaitingForDbAvailable")
-			    .detail("Index", i)
+			    .detail("Iteration", successfulReboots)
 			    .detail("RecoveryState", self->dbInfo->get().recoveryState);
 			co_await self->dbAvailable(self);
 			generationCount = self->dbInfo->get().logSystemConfig.oldTLogs.size();
-			TraceEvent("WaitingForDbAvailableDone")
-			    .detail("Index", i)
-			    .detail("Master", self->dbInfo->get().master.address());
-			g_simulator->rebootProcess(g_simulator->getProcessByAddress(self->dbInfo->get().master.address()),
-			                           ISimulator::KillType::Reboot);
+
+			// Only reboot the master if it's in the primary DC. If it's in the clogged
+			// remote DC, recovery will stall because the master can't communicate with
+			// primary DC processes. Loop back and try again.
+			auto masterAddr = self->dbInfo->get().master.address();
+			auto* masterProc = g_simulator->getProcessByAddress(masterAddr);
+			if (!masterProc || !masterProc->locality.dcId().present() ||
+			    masterProc->locality.dcId() == g_simulator->remoteDcId) {
+				TraceEvent("RetryingRemoteDcMaster")
+				    .detail("Iteration", successfulReboots)
+				    .detail("MasterAddr", masterAddr);
+				continue;
+			}
+
+			TraceEvent("RebootingPrimaryDcMaster")
+			    .detail("Iteration", successfulReboots)
+			    .detail("Master", masterAddr);
+			g_simulator->rebootProcess(masterProc, ISimulator::KillType::Reboot);
 
 			// Wait for recovery to create a new generation.
 			// Use <= (not ==) so the loop only exits when oldTLogs has strictly grown.
@@ -158,10 +183,12 @@ struct GcGenerationsWorkload : TestWorkload {
 				co_await self->dbInfo->onChange();
 			}
 			TraceEvent("CurrentGenerations")
+			    .detail("Iteration", successfulReboots)
 			    .detail("PrevCount", generationCount)
 			    .detail("New", self->dbInfo->get().logSystemConfig.oldTLogs.size());
 			ASSERT(self->dbInfo->get().logSystemConfig.oldTLogs.size() > generationCount);
 			generationCount = self->dbInfo->get().logSystemConfig.oldTLogs.size();
+			++successfulReboots;
 		}
 		TraceEvent("AfterMultipleRecovery")
 		    .detail("OldGenerationCount", self->dbInfo->get().logSystemConfig.oldTLogs.size());
