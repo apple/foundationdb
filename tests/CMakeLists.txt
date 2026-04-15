@@ -217,6 +217,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/WriteDuringRead.toml)
   add_fdb_test(TEST_FILES fast/WriteDuringReadClean.toml)
   add_fdb_test(TEST_FILES noSim/RandomUnitTests.toml IGNORE)
+  add_fdb_test(TEST_FILES noSim/TraceEventXMLHandling.toml)
 
   if(WITH_ROCKSDB_EXPERIMENTAL)
     add_fdb_test(TEST_FILES fast/ValidateStorage.toml)
