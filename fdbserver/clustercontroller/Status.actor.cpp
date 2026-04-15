@@ -2953,6 +2953,7 @@ ACTOR static Future<Void> clusterGetStatusImpl(
 		futures.push_back(latestEventOnWorkers(workers, "ProgramStart"));
 
 		// Wait for all response pairs.
+		// WAIT 1
 		state std::vector<Optional<std::pair<WorkerEvents, std::set<std::string>>>> workerEventsVec =
 		    wait(getAll(futures));
 		TraceEvent("StatusTiming").detail("Wait", 1).detail("Desc", "WorkerEvents").detail("Elapsed", timer() - tStart).detail("Delta", timer() - tLast);
@@ -2983,6 +2984,7 @@ ACTOR static Future<Void> clusterGetStatusImpl(
 			messages->push_back(message);
 		}
 
+		// WAIT 2
 		state ProtocolVersionData protocolVersion = wait(getNewestProtocolVersion(cx, ccWorker));
 		TraceEvent("StatusTiming").detail("Wait", 2).detail("Desc", "ProtocolVersion").detail("Elapsed", timer() - tStart).detail("Delta", timer() - tLast);
 		tLast = timer();
@@ -2990,7 +2992,17 @@ ACTOR static Future<Void> clusterGetStatusImpl(
 		// construct status information for cluster subsections
 		state int statusCode = (int)RecoveryStatus::END;
 		state Future<JsonBuilderObject> recoveryStateStatusFuture =
-		    recoveryStateStatusFetcher(cx, ccWorker, mWorker, workers.size(), status_incomplete_reasons, &statusCode);
+			recoveryStateStatusFetcher(cx, ccWorker, mWorker, workers.size(), status_incomplete_reasons, &statusCode);
+
+		// WAIT 2 data used here
+		// why can't this be moved down to the construction bit?
+		(*statusObj)["newest_protocol_version"] = format("%" PRIx64, protocolVersion.newestProtocolVersion.version());
+		(*statusObj)["lowest_compatible_protocol_version"] =
+			format("%" PRIx64, protocolVersion.lowestCompatibleProtocolVersion.version());
+
+		(*statusObj)["protocol_version"] = format("%" PRIx64, g_network->protocolVersion().version());
+		(*statusObj)["connection_string"] = coordinators.ccr->getConnectionString().toString();
+		(*statusObj)["bounce_impact"] = getBounceImpactInfo(statusCode);
 
 		state Future<ErrorOr<JsonBuilderObject>> idmpKeyStatusFuture = errorOr(timeoutError(getIdmpKeyStatus(cx), 5.0));
 
@@ -3010,6 +3022,14 @@ ACTOR static Future<Void> clusterGetStatusImpl(
 			status_incomplete_reasons->insert("Unable to retrieve idempotency ID status.");
 		}
 		state JsonBuilderObject versionEpochStatus = versionEpochStatusFuture.get();
+
+		if (!recoveryStateStatus.empty()) {
+			(*statusObj)["recovery_state"] = recoveryStateStatus;
+		}
+
+		(*statusObj)["idempotency_ids"] = idmpKeyStatus;
+
+		(*statusObj)["version_epoch"] = versionEpochStatus;
 
 		// machine metrics
 		state WorkerEvents mMetrics = workerEventsVec[0].present() ? workerEventsVec[0].get().first : WorkerEvents();
@@ -3039,15 +3059,6 @@ ACTOR static Future<Void> clusterGetStatusImpl(
 		state JsonBuilderObject metacluster;
 		state JsonBuilderObject storageWiggler;
 		state std::unordered_set<UID> wiggleServers;
-
-		(*statusObj)["protocol_version"] = format("%" PRIx64, g_network->protocolVersion().version());
-		(*statusObj)["connection_string"] = coordinators.ccr->getConnectionString().toString();
-		(*statusObj)["bounce_impact"] = getBounceImpactInfo(statusCode);
-		// WAIT 2 data used here
-		// why can't this be moved down to the construction bit?
-		(*statusObj)["newest_protocol_version"] = format("%" PRIx64, protocolVersion.newestProtocolVersion.version());
-		(*statusObj)["lowest_compatible_protocol_version"] =
-		    format("%" PRIx64, protocolVersion.lowestCompatibleProtocolVersion.version());
 
 		state Optional<DatabaseConfiguration> configuration;
 		state Optional<LoadConfigurationResult> loadResult;
@@ -3096,7 +3107,6 @@ ACTOR static Future<Void> clusterGetStatusImpl(
 			tLast = timer();
 
 			(*statusObj)["database_available"] = isAvailable;
-			// WAIT 5 data used here
 			if (!latencyProbeResults.empty()) {
 				(*statusObj)["latency_probe"] = latencyProbeResults;
 			}
@@ -3169,15 +3179,14 @@ ACTOR static Future<Void> clusterGetStatusImpl(
 				}
 			}
 
-			// WAIT 7: 3 seconds?
-			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
-			TraceEvent("StatusTiming").detail("Wait", 7).detail("Desc", "WorkerStatuses").detail("Elapsed", timer() - tStart).detail("Delta", timer() - tLast);
-			tLast = timer();
-
 			// WAIT 8: 5 seconds
 			wait(success(primaryDCFO));
 			TraceEvent("StatusTiming").detail("Wait", 8).detail("Desc", "PrimaryDcfo").detail("Elapsed", timer() - tStart).detail("Delta", timer() - tLast);
 			tLast = timer();
+
+			if (primaryDCFO.get().present()) {
+				(*statusObj)["active_primary_dc"] = primaryDCFO.get().get();
+			}
 
 			ErrorOr<std::vector<NetworkAddress>> addresses =
 			    wait(errorOr(timeoutError(coordinators.ccr->getConnectionString().tryResolveHostnames(), 5.0)));
@@ -3210,13 +3219,15 @@ ACTOR static Future<Void> clusterGetStatusImpl(
 			state JsonBuilderObject configObj =
 			    configurationFetcher(configuration, coordinators, status_incomplete_reasons);
 
-			if (primaryDCFO.get().present()) {
-				(*statusObj)["active_primary_dc"] = primaryDCFO.get().get();
-			}
 			// configArr could be empty
 			if (!configObj.empty()) {
 				(*statusObj)["configuration"] = configObj;
 			}
+
+			// WAIT 7: 3 seconds?
+			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
+			TraceEvent("StatusTiming").detail("Wait", 7).detail("Desc", "WorkerStatuses").detail("Elapsed", timer() - tStart).detail("Delta", timer() - tLast);
+			tLast = timer();
 
 			// workloadStatusFetcher returns the workload section but also optionally writes the qos section and
 			// adds to the dataOverlay object
@@ -3227,10 +3238,6 @@ ACTOR static Future<Void> clusterGetStatusImpl(
 			// Add qos section if it was populated
 			if (!qos.empty())
 				(*statusObj)["qos"] = qos;
-
-			// WAIT 5 data used here
-			// Why is this here? This could be further down in the construction section
-			(*statusObj)["version_epoch"] = versionEpochStatus;
 
 			// Merge dataOverlay into data
 			JsonBuilderObject& clusterDataSection = workerStatuses[0];
@@ -3369,14 +3376,6 @@ ACTOR static Future<Void> clusterGetStatusImpl(
 			}
 		}
 		(*statusObj)["degraded_processes"] = totalDegraded;
-
-		// WAIT 5 data used here
-		// What happens if these are null because we bailed on the timeout?
-		if (!recoveryStateStatus.empty())
-			(*statusObj)["recovery_state"] = recoveryStateStatus;
-
-		// WAIT 5 data used here
-		(*statusObj)["idempotency_ids"] = idmpKeyStatus;
 
 		// Fetch Consistency Scan Information
 		try {
