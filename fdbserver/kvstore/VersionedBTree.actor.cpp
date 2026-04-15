@@ -3621,7 +3621,9 @@ public:
 		debug_printf("DWALPager(%s) shutdown cancel recovery\n", self->filename.c_str());
 		self->recoverFuture.cancel();
 		debug_printf("DWALPager(%s) shutdown cancel commit\n", self->filename.c_str());
-		self->commitFuture.cancel();
+		// Cancelling the future does not destroy the state held by the commit coroutine. Reset the future entirely so
+		// shutdown releases that coroutine state before tearing down the pager.
+		self->commitFuture = Future<Void>();
 		debug_printf("DWALPager(%s) shutdown cancel remap\n", self->filename.c_str());
 		self->remapCleanupFuture.cancel();
 		debug_printf("DWALPager(%s) shutdown kill file extension\n", self->filename.c_str());
