@@ -911,8 +911,8 @@ Future<Void> makeStream(const std::vector<Future<T>>& futures, PromiseStream<T>&
 template <class T>
 class QuorumCallback;
 
-// Shared SAV-backed quorum bookkeeping used by both Future and AsyncResult
-// adapters. The callback type owns transport-specific detach logic.
+// SAV-backed quorum bookkeeping for Future callbacks. AsyncResult quorum uses
+// a separate state type because it owns producer cancellation.
 template <class CallbackType>
 struct QuorumState final : SAV<Void> {
 	int antiQuorum;
