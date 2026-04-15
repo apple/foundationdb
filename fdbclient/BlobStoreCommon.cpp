@@ -36,7 +36,6 @@
 #include <climits>
 #include <limits>
 
-
 IBlobStoreEndpoint::ConnectionPoolData::~ConnectionPoolData() {
 	// In simulation, explicitly close all pooled connections before destruction.
 	// This satisfies Sim2Conn's assertion: !opened || closedByCaller
@@ -51,7 +50,6 @@ IBlobStoreEndpoint::ConnectionPoolData::~ConnectionPoolData() {
 		}
 	}
 }
-
 
 json_spirit::mObject IBlobStoreEndpoint::Stats::getJSON() {
 	json_spirit::mObject o;
@@ -72,7 +70,6 @@ IBlobStoreEndpoint::Stats IBlobStoreEndpoint::Stats::operator-(const Stats& rhs)
 }
 
 IBlobStoreEndpoint::Stats IBlobStoreEndpoint::s_stats;
-
 
 BlobKnobs::BlobKnobs() {
 	secure_connection = 1;
@@ -225,7 +222,6 @@ Future<Optional<json_spirit::mObject>> IBlobStoreEndpoint::tryReadJSONFile(std::
 	co_return Optional<json_spirit::mObject>();
 }
 
-
 std::string IBlobStoreEndpoint::getResourceURL(std::string resource, std::string params) const {
 	std::string hostPort = host;
 	if (!service.empty()) {
@@ -259,7 +255,6 @@ std::string IBlobStoreEndpoint::getResourceURL(std::string resource, std::string
 
 	return r;
 }
-
 
 Reference<IBlobStoreEndpoint> IBlobStoreEndpoint::fromString(const std::string& url,
                                                              const Optional<std::string>& proxy,
@@ -410,7 +405,6 @@ Reference<IBlobStoreEndpoint> IBlobStoreEndpoint::fromString(const std::string& 
 		throw backup_invalid_url();
 	}
 }
-
 
 Future<Void> updateSecret_impl(Reference<IBlobStoreEndpoint> b) {
 	auto* pFiles = (std::vector<std::string>*)g_network->global(INetwork::enBlobCredentialFiles);
@@ -593,7 +587,6 @@ Future<Void> IBlobStoreEndpoint::deleteRecursively(std::string const& bucket,
 	    Reference<IBlobStoreEndpoint>::addRef(this), bucket, prefix, pNumDeleted, pBytesDeleted);
 }
 
-
 Future<Void> writeEntireFile_impl(Reference<IBlobStoreEndpoint> bstore,
                                   std::string bucket,
                                   std::string object,
@@ -642,7 +635,6 @@ Future<Void> IBlobStoreEndpoint::writeEntireFile(std::string const& bucket,
 	return writeEntireFile_impl(Reference<IBlobStoreEndpoint>::addRef(this), bucket, object, content);
 }
 
-
 Future<IBlobStoreEndpoint::ReusableConnection> connect_impl(Reference<IBlobStoreEndpoint> b, bool* reusingConn) {
 	// First try to get a connection from the pool
 	*reusingConn = false;
@@ -689,7 +681,7 @@ Future<IBlobStoreEndpoint::ReusableConnection> connect_impl(Reference<IBlobStore
 			conn = co_await INetworkConnections::net()->connect(host, service, false);
 		}
 	} else {
-		co_await store(conn, INetworkConnections::net()->connect(host, service, isTLS));
+		conn = co_await INetworkConnections::net()->connect(host, service, isTLS);
 	}
 	ASSERT(conn.isValid());
 	co_await conn->connectHandshake();
@@ -721,7 +713,6 @@ void IBlobStoreEndpoint::returnConnection(ReusableConnection& rconn) {
 	rconn.conn = Reference<IConnection>();
 }
 
-
 // Do a request, get a Response.
 // Request content is provided as UnsentPacketQueue *pContent which will be depleted as bytes are sent but the queue
 // itself must live for the life of this actor and be destroyed by the caller.
@@ -733,7 +724,7 @@ Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<IBlobStoreEnd
                                                          int contentLen,
                                                          std::set<unsigned int> successCodes) {
 	UnsentPacketQueue contentCopy;
-	Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
+	auto req = makeReference<HTTP::OutgoingRequest>();
 	req->verb = verb;
 	req->data.content = &contentCopy;
 	req->data.contentLen = contentLen;
@@ -798,7 +789,7 @@ Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<IBlobStoreEnd
 				req->data.content->prependWriteBuffer(pFirst, pLast);
 			}
 
-			co_await store(rconn, timeoutError(frconn, bstore->knobs.connect_timeout));
+			rconn = co_await timeoutError(frconn, bstore->knobs.connect_timeout);
 			connectionEstablished = true;
 			connID = rconn.conn->getDebugID();
 			reqStartTimer = g_network->timer();
@@ -869,7 +860,8 @@ Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<IBlobStoreEnd
 		double reqDuration = end - reqStartTimer;
 		bstore->blobStats->requestLatency.addMeasurement(reqDuration);
 
-		// If err is not present then r is valid. If r->code is in successCodes then record the successful request and return r.
+		// If err is not present then r is valid. If r->code is in successCodes then record the successful request and
+		// return r.
 		if (!err.present() && successCodes.count(r->code) != 0) {
 			bstore->s_stats.requests_successful++;
 			++bstore->blobStats->requestsSuccessful;
@@ -889,10 +881,9 @@ Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<IBlobStoreEnd
 		}
 
 		TraceEvent event(SevWarn,
-		                 (retryable || retryExtended)
-		                     ? (fastRetry ? "BlobStoreEndpointRequestFailedFastRetryable"
-		                                  : "BlobStoreEndpointRequestFailedRetryable")
-		                     : "BlobStoreEndpointRequestFailed");
+		                 (retryable || retryExtended) ? (fastRetry ? "BlobStoreEndpointRequestFailedFastRetryable"
+		                                                           : "BlobStoreEndpointRequestFailedRetryable")
+		                                              : "BlobStoreEndpointRequestFailed");
 
 		bool connectionFailed = false;
 		if (err.present()) {

@@ -111,8 +111,7 @@ S3BlobStoreEndpoint::S3BlobStoreEndpoint(std::string const& host,
                        proxyPort,
                        knobs,
                        extraHeaders),
-    credentials(parseS3Credentials(creds)),
-    lookupKey(credentials.present() && credentials.get().key.empty()),
+    credentials(parseS3Credentials(creds)), lookupKey(credentials.present() && credentials.get().key.empty()),
     lookupSecret(credentials.present() && credentials.get().secret.empty()) {
 
 	if (this->region.empty() && CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER) {
@@ -204,8 +203,7 @@ Future<bool> objectExists_impl(Reference<S3BlobStoreEndpoint> b, std::string buc
 	std::string resource = b->constructResourcePath(bucket, object);
 	HTTP::Headers headers;
 
-	Reference<HTTP::IncomingResponse> r =
-	    co_await b->doRequest("HEAD", resource, headers, nullptr, 0, { 200, 404 });
+	Reference<HTTP::IncomingResponse> r = co_await b->doRequest("HEAD", resource, headers, nullptr, 0, { 200, 404 });
 	co_return r->code == 200;
 }
 
@@ -274,8 +272,7 @@ Future<int64_t> objectSize_impl(Reference<S3BlobStoreEndpoint> b, std::string bu
 	std::string resource = b->constructResourcePath(bucket, object);
 	HTTP::Headers headers;
 
-	Reference<HTTP::IncomingResponse> r =
-	    co_await b->doRequest("HEAD", resource, headers, nullptr, 0, { 200, 404 });
+	Reference<HTTP::IncomingResponse> r = co_await b->doRequest("HEAD", resource, headers, nullptr, 0, { 200, 404 });
 	if (r->code == 404)
 		throw file_not_found();
 	co_return r->data.contentLen;
@@ -427,7 +424,6 @@ bool isS3TokenError(const std::string& s3Error) {
 	return s3Error == "InvalidToken" || s3Error == "ExpiredToken";
 }
 
-
 void S3BlobStoreEndpoint::setRequestHeaders(std::string const& verb,
                                             std::string const& resource,
                                             HTTP::Headers& headers) {
@@ -440,7 +436,6 @@ void S3BlobStoreEndpoint::setRequestHeaders(std::string const& verb,
 		setAuthHeaders(verb, resource, headers);
 	}
 }
-
 
 std::string S3BlobStoreEndpoint::normalizeResourceForRequest(std::string const& resource) {
 	std::vector<std::string> queryParameters;
@@ -488,10 +483,9 @@ std::string parseBucketFromURI(std::string uri) {
 	return uri.substr(0, secondSlash);
 }
 
-
 void S3BlobStoreEndpoint::simulateRequestFailure(std::string const& verb,
-                                                  std::string const& resource,
-                                                  Reference<HTTP::IncomingResponse>& r) {
+                                                 std::string const& resource,
+                                                 Reference<HTTP::IncomingResponse>& r) {
 	simulatedTokenError = false;
 	if (!g_network->isSimulated() || !BUGGIFY || deterministicRandom()->random01() >= 0.1) {
 		return;
@@ -540,15 +534,13 @@ Future<bool> S3BlobStoreEndpoint::preRetryCheck(std::string const& verb,
 
 	std::string bucket = parseBucketFromURI(resource);
 	if (bucket.empty()) {
-		TraceEvent(SevError, "EmptyBucketRequest")
-		    .detail("Verb", verb)
-		    .detail("Resource", resource);
+		TraceEvent(SevError, "EmptyBucketRequest").detail("Verb", verb).detail("Resource", resource);
 		throw bucket_not_in_url();
 	}
 
 	// Send a cheap HEAD request to verify credentials before resending a potentially large upload
 	UnsentPacketQueue dryrunContentCopy;
-	Reference<HTTP::OutgoingRequest> dryrunRequest = makeReference<HTTP::OutgoingRequest>();
+	auto dryrunRequest = makeReference<HTTP::OutgoingRequest>();
 	dryrunRequest->data.content = &dryrunContentCopy;
 	populateDryrunRequest(dryrunRequest, Reference<S3BlobStoreEndpoint>::addRef(this), bucket);
 	setRequestHeaders(dryrunRequest->verb, dryrunRequest->resource, dryrunRequest->data.headers);
@@ -576,9 +568,7 @@ Future<bool> S3BlobStoreEndpoint::preRetryCheck(std::string const& verb,
 		co_return false;
 	} else if (dryrunR->code == 200 || dryrunR->code == 404) {
 		// Credentials are good now — proceed with the real request
-		TraceEvent("S3TokenIssueResolved")
-		    .detail("HttpCode", dryrunR->code)
-		    .detail("URI", dryrunRequest->resource);
+		TraceEvent("S3TokenIssueResolved").detail("HttpCode", dryrunR->code).detail("URI", dryrunRequest->resource);
 		retryExtended = false;
 		co_return true;
 	} else {
@@ -590,7 +580,6 @@ Future<bool> S3BlobStoreEndpoint::preRetryCheck(std::string const& verb,
 		throw http_bad_response();
 	}
 }
-
 
 Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
                                     std::string bucket,
@@ -1195,8 +1184,7 @@ static Future<std::string> beginMultiPartUpload_impl(Reference<S3BlobStoreEndpoi
 		// AWS S3 will reject completion if any part checksum is missing.
 		headers["x-amz-checksum-algorithm"] = "SHA256";
 	}
-	Reference<HTTP::IncomingResponse> r =
-	    co_await bstore->doRequest("POST", resource, headers, nullptr, 0, { 200 });
+	Reference<HTTP::IncomingResponse> r = co_await bstore->doRequest("POST", resource, headers, nullptr, 0, { 200 });
 
 	try {
 		xml_document<> doc;
@@ -1446,8 +1434,7 @@ Future<std::map<std::string, std::string>> getObjectTags_impl(Reference<S3BlobSt
 	resource += "?tagging";
 	HTTP::Headers headers;
 
-	Reference<HTTP::IncomingResponse> r =
-	    co_await bstore->doRequest("GET", resource, headers, nullptr, 0, { 200 });
+	Reference<HTTP::IncomingResponse> r = co_await bstore->doRequest("GET", resource, headers, nullptr, 0, { 200 });
 
 	rapidxml::xml_document<> doc;
 	doc.parse<rapidxml::parse_default>((char*)r->data.content.c_str());
