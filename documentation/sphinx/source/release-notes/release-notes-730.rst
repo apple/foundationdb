@@ -4,6 +4,15 @@
 Release Notes
 #############
 
+7.3.77
+======
+* Same as 7.3.76 release with AVX enabled.
+
+7.3.76
+======
+* Fixed peer disconnect detection in waitValueOrSignal so dead connections are detected immediately instead of hanging indefinitely. `(PR #12935) <https://github.com/apple/foundationdb/pull/12935>`_
+* Made getTeamByServers O(1) in time. `(PR #12938) <https://github.com/apple/foundationdb/pull/12938>`_
+
 7.3.75
 ======
 * Same as 7.3.74 release with AVX enabled.
