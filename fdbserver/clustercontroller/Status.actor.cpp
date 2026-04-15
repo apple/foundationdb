@@ -3052,20 +3052,16 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		}
 
 		// machine metrics
-		state WorkerEvents mMetrics;
-		state WorkerEvents pMetrics;
-		state WorkerEvents networkMetrics;
-		state WorkerEvents latestError;
-		state WorkerEvents traceFileOpenErrors;
-		state WorkerEvents programStarts;
-		if (workerEventsVec.size() >= 6) {
-			mMetrics = workerEventsVec[0].present() ? workerEventsVec[0].get().first : WorkerEvents();
-			pMetrics = workerEventsVec[1].present() ? workerEventsVec[1].get().first : WorkerEvents();
-			networkMetrics = workerEventsVec[2].present() ? workerEventsVec[2].get().first : WorkerEvents();
-			latestError = workerEventsVec[3].present() ? workerEventsVec[3].get().first : WorkerEvents();
-			traceFileOpenErrors = workerEventsVec[4].present() ? workerEventsVec[4].get().first : WorkerEvents();
-			programStarts = workerEventsVec[5].present() ? workerEventsVec[5].get().first : WorkerEvents();
-		}
+		state WorkerEvents mMetrics = workerEventsVec[0].present() ? workerEventsVec[0].get().first : WorkerEvents();
+		// process metrics
+		state WorkerEvents pMetrics = workerEventsVec[1].present() ? workerEventsVec[1].get().first : WorkerEvents();
+		state WorkerEvents networkMetrics =
+		    workerEventsVec[2].present() ? workerEventsVec[2].get().first : WorkerEvents();
+		state WorkerEvents latestError = workerEventsVec[3].present() ? workerEventsVec[3].get().first : WorkerEvents();
+		state WorkerEvents traceFileOpenErrors =
+		    workerEventsVec[4].present() ? workerEventsVec[4].get().first : WorkerEvents();
+		state WorkerEvents programStarts =
+		    workerEventsVec[5].present() ? workerEventsVec[5].get().first : WorkerEvents();
 
 		if (db->get().recoveryCount > 0) {
 			statusObj["generation"] = db->get().recoveryCount;
