@@ -43,6 +43,7 @@
 #include "flow/MetricSample.h"
 #include "flow/network.h"
 #include "flow/SimBugInjector.h"
+#include "flow/UnitTest.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -1783,3 +1784,144 @@ std::string traceableStringToString(const char* value, size_t S) {
 // correct outcome
 static_assert("InvalidToken"_audit, "Either AuditedEvent has a bug or whitelisting for this event type has changed");
 static_assert(!"nvalidToken"_audit, "AuditedEvent has a bug");
+
+TEST_CASE("noSim/traceEventXMLHandling") {
+	// Verify that TraceEvent handles large XML strings (like S3 API responses) without breaking.
+	// Tests the full pipeline: detail() -> field truncation -> XML/JSON formatting.
+
+	// Minimal S3-style XML
+	std::string smallXml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+	                        "<Error><Code>NoSuchKey</Code>"
+	                        "<Message>The specified key does not exist.</Message>"
+	                        "<Key>backup/snapshot/1234</Key>"
+	                        "<RequestId>ABCDEF123456</RequestId></Error>";
+	TraceEvent("TestSmallXml").detail("ResponseDetails", smallXml);
+
+	// Large ListBucket-style response with many keys
+	std::string largeXml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+	                        "<ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">"
+	                        "<Name>my-backup-bucket</Name>"
+	                        "<Prefix>backup/range/</Prefix>"
+	                        "<MaxKeys>1000</MaxKeys>"
+	                        "<IsTruncated>true</IsTruncated>";
+	for (int i = 0; i < 200; i++) {
+		largeXml += "<Contents><Key>backup/range/shard-" + std::to_string(i) +
+		            "/data-" + std::to_string(i * 1000) + ".fdb</Key>"
+		            "<LastModified>2026-01-15T12:00:00.000Z</LastModified>"
+		            "<ETag>&quot;abcdef" + std::to_string(i) + "&quot;</ETag>"
+		            "<Size>" + std::to_string(100000 + i * 500) + "</Size>"
+		            "<StorageClass>STANDARD</StorageClass></Contents>";
+	}
+	largeXml += "</ListBucketResult>";
+	ASSERT(largeXml.size() > 30000); // Confirm it's large enough to exceed default limits
+	TraceEvent("TestLargeXml").detail("ResponseDetails", largeXml);
+
+	// Large XML with setMaxFieldLength(-1) to bypass truncation
+	TraceEvent("TestLargeXmlNoTrunc").setMaxFieldLength(-1).setMaxEventLength(-1).detail("ResponseDetails", largeXml);
+
+	// XML containing chars that need escaping: &, <, >, ", newlines, \r
+	std::string nastyXml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
+	                        "<Error>\n"
+	                        "  <Code>AccessDenied</Code>\n"
+	                        "  <Message>Access Denied: user &lt;anonymous&gt; is not allowed "
+	                        "to perform &quot;s3:GetObject&quot; on resource "
+	                        "\"arn:aws:s3:::bucket/key\"</Message>\n"
+	                        "  <Detail>Condition: StringEquals{\"aws:PrincipalTag/team\": "
+	                        "\"backup\"} &amp;&amp; IpAddress{\"aws:SourceIp\": "
+	                        "\"10.0.0.0/8\"}</Detail>\n"
+	                        "</Error>";
+	TraceEvent("TestNastyXml").detail("ResponseDetails", nastyXml);
+
+	// Verify XML formatter handles the content without crashing
+	{
+		XmlTraceLogFormatter xmlFmt;
+		TraceEventFields fields;
+		fields.addField("Type", "TestXmlFormat");
+		fields.addField("ResponseDetails", largeXml);
+		std::string formatted = xmlFmt.formatEvent(fields);
+		ASSERT(formatted.find("<Event ") == 0);
+		ASSERT(formatted.find("/>") != std::string::npos);
+		// Escaped XML should not contain raw & (only &amp; etc.)
+		// Check that a literal & from the ETag &quot; was escaped to &amp;quot;
+		ASSERT(formatted.find("&amp;quot;") != std::string::npos);
+	}
+
+	// Verify JSON formatter handles the content without crashing
+	{
+		JsonTraceLogFormatter jsonFmt;
+		TraceEventFields fields;
+		fields.addField("Type", "TestJsonFormat");
+		fields.addField("ResponseDetails", nastyXml);
+		std::string formatted = jsonFmt.formatEvent(fields);
+		ASSERT(formatted.find("{") == 0);
+		// Newlines should be escaped as \n in JSON
+		ASSERT(formatted.find("\\n") != std::string::npos);
+		// Raw \r should be escaped as \r in JSON
+		ASSERT(formatted.find("\\r") != std::string::npos);
+	}
+
+	// Empty content (e.g. HEAD responses)
+	TraceEvent("TestEmptyContent").detail("ResponseDetails", std::string());
+
+	// Binary-ish content (non-printable chars that Traceable<std::string> should hex-escape)
+	std::string binaryContent = "<?xml version=\"1.0\"?><Data>";
+	binaryContent += std::string(1, '\x01');
+	binaryContent += std::string(1, '\x1f');
+	binaryContent += std::string(1, '\x00');
+	binaryContent += "</Data>";
+	TraceEvent("TestBinaryContent").detail("ResponseDetails", binaryContent);
+
+	// 10000+ chars of raw xml-like garbage with unescaped <, >, &, ", newlines.
+	// Confirms TraceEvent + formatters handle arbitrary large content with chars needing escaping.
+	{
+		std::string garbage;
+		garbage.reserve(12000);
+		for (int i = 0; i < 500; i++) {
+			garbage += "<Tag attr=\"val&" + std::to_string(i) + "\">";
+			garbage += "data with <angles> & ampersands & \"quotes\"\n";
+			garbage += "</Tag>\r\n";
+		}
+		ASSERT(garbage.size() > 10000);
+
+		// Should not crash even with default truncation
+		TraceEvent("TestXmlGarbage").detail("ResponseDetails", garbage);
+
+		// Full content with no truncation
+		TraceEvent("TestXmlGarbageNoTrunc")
+		    .setMaxFieldLength(-1)
+		    .setMaxEventLength(-1)
+		    .detail("ResponseDetails", garbage);
+
+		// Verify XML formatter escapes all raw <, >, &, " chars
+		XmlTraceLogFormatter xmlFmt;
+		TraceEventFields fields;
+		fields.addField("Type", "TestGarbageXmlFormat");
+		fields.addField("ResponseDetails", garbage);
+		std::string formatted = xmlFmt.formatEvent(fields);
+		ASSERT(formatted.find("<Event ") == 0);
+		ASSERT(formatted.find("/>") != std::string::npos);
+		// Strip the <Event ... />\n wrapper that formatEvent adds, then verify
+		// the interior contains no raw < or > (they must all be escaped)
+		// 7 == strlen("<Event ") to skip past the opening tag
+		std::string interior = formatted.substr(7, formatted.rfind("/>") - 7);
+		ASSERT(interior.find('<') == std::string::npos);
+		ASSERT(interior.find('>') == std::string::npos);
+		// Also verify & and " escaping occurred
+		ASSERT(formatted.find("&amp;") != std::string::npos);
+		ASSERT(formatted.find("&lt;") != std::string::npos);
+		ASSERT(formatted.find("&gt;") != std::string::npos);
+		ASSERT(formatted.find("&quot;") != std::string::npos);
+
+		// Verify JSON formatter handles it too
+		JsonTraceLogFormatter jsonFmt;
+		TraceEventFields jfields;
+		jfields.addField("Type", "TestGarbageJsonFormat");
+		jfields.addField("ResponseDetails", garbage);
+		std::string jformatted = jsonFmt.formatEvent(jfields);
+		ASSERT(jformatted.find("{") == 0);
+		ASSERT(jformatted.find("\\n") != std::string::npos);
+		ASSERT(jformatted.find("\\r") != std::string::npos);
+	}
+
+	return Void();
+}
