@@ -89,7 +89,7 @@ struct StatusWorkload : TestWorkload {
 		m.emplace_back(
 		    "Average Reply Size", replies.getValue() ? totalSize.getValue() / replies.getValue() : 0, Averaged::False);
 		m.push_back(errors.getMetric());
-		m.emplace_back("Worst Latency", worstLatency, Averaged::False);
+		m.emplace_back("Worst Latency", worstLatency, Averaged::True);
 	}
 
 	static void schemaCoverageRequirements(StatusObject const& schema, std::string schema_path = std::string()) {

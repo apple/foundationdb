@@ -46,6 +46,7 @@ Future<StatusReply> clusterGetStatus(
     Version const& dcLogServerVersionDifference,
     Version const& dcStorageServerVersionDifference,
     std::unordered_map<NetworkAddress, double /* latest time at which address was excluded */> const&
-        excludedDegradedServers);
+        excludedDegradedServers,
+    double const& deadlineTimeout);
 
 StatusReply clusterGetFaultToleranceStatus(const std::string& statusString);

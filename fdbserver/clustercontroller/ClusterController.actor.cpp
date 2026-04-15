@@ -1666,7 +1666,8 @@ Future<Void> statusServer(FutureStream<StatusRequest> requests,
 			                                                                self->datacenterVersionDifference,
 			                                                                self->dcLogServerVersionDifference,
 			                                                                self->dcStorageServerVersionDifference,
-			                                                                self->excludedDegradedServers));
+			                                                                self->excludedDegradedServers,
+			                                                                28.0));
 
 			if (result.isError() && result.getError().code() == error_code_actor_cancelled)
 				throw result.getError();
