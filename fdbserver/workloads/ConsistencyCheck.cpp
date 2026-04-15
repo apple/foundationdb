@@ -568,14 +568,14 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			}
 		}
 
-		int missingDc0 = configuration.regions.size() == 0
+		int missingDc0 = configuration.regions.empty()
 		                     ? 0
 		                     : std::count(missingStorage.begin(), missingStorage.end(), configuration.regions[0].dcId);
 		int missingDc1 = configuration.regions.size() < 2
 		                     ? 0
 		                     : std::count(missingStorage.begin(), missingStorage.end(), configuration.regions[1].dcId);
 
-		if ((configuration.regions.size() == 0 && missingStorage.size()) ||
+		if ((configuration.regions.empty() && !missingStorage.empty()) ||
 		    (configuration.regions.size() == 1 && missingDc0) ||
 		    (configuration.regions.size() == 2 && configuration.usableRegions == 1 && missingDc0 && missingDc1) ||
 		    (configuration.regions.size() == 2 && configuration.usableRegions > 1 && (missingDc0 || missingDc1))) {
@@ -791,7 +791,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				std::vector<ProcessData> workers = co_await ::getWorkers(&tr);
 
 				std::map<NetworkAddress, LocalityData> addr_locality;
-				for (auto w : workers) {
+				for (const auto& w : workers) {
 					addr_locality[w.address] = w.locality;
 				}
 
@@ -996,7 +996,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		    !g_simulator->datacenterDead(g_simulator->primaryDcId) &&
 		    !g_simulator->datacenterDead(g_simulator->remoteDcId)) {
 			for (auto& tlogSet : db.logSystemConfig.tLogs) {
-				if (!tlogSet.isLocal && tlogSet.logRouters.size()) {
+				if (!tlogSet.isLocal && !tlogSet.logRouters.empty()) {
 					for (auto& logRouter : tlogSet.logRouters) {
 						if (!nonExcludedWorkerProcessMap.contains(logRouter.interf().address())) {
 							TraceEvent("ConsistencyCheck_LogRouterNotInNonExcludedWorkers")

@@ -2123,7 +2123,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		// Find out if there is a shard boundary in(beginKey, endKey)
 		Standalone<VectorRef<KeyRef>> keys = co_await runRYWTransaction(
 		    cx, [=](Reference<ReadYourWritesTransaction> tr) { return getBlockOfShards(tr, beginKey, endKey, 1); });
-		if (keys.size() > 0) {
+		if (!keys.empty()) {
 			Params.addBackupRangeTasks().set(task, true);
 			co_return;
 		}
@@ -2246,7 +2246,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 			}
 
 			// write kvData to file, update lastKey and key count
-			if (values.first.size() != 0) {
+			if (!values.first.empty()) {
 				for (size_t i = 0; i < values.first.size(); ++i) {
 					co_await rangeFile->writeKV(values.first[i].key, values.first[i].value);
 				}
@@ -2410,7 +2410,7 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 				    getBlockOfShards(tr, beginKey, allKeys.end, CLIENT_KNOBS->TOO_MANY);
 				co_await (success(shardBoundaries) && taskBucket->keepRunning(tr, task));
 
-				if (shardBoundaries.get().size() == 0)
+				if (shardBoundaries.get().empty())
 					break;
 
 				for (auto& boundary : shardBoundaries.get()) {
@@ -2538,7 +2538,7 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 
 		// Set anything inside a dispatched range to DONE.
 		// Also ensure that the boundary value are true, false, [true, false]...
-		if (dispatchBoundaries.size() > 0) {
+		if (!dispatchBoundaries.empty()) {
 			bool lastValue = false;
 			Key lastKey;
 			for (i = 0; i < dispatchBoundaries.size(); ++i) {
@@ -2570,7 +2570,7 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 
 		// Set anything outside the backup ranges to SKIP.  We can use insert() here instead of modify()
 		// because it's OK to delete shard boundaries in the skipped ranges.
-		if (backupRanges.size() > 0) {
+		if (!backupRanges.empty()) {
 			shardMap.insert(KeyRangeRef(allKeys.begin, backupRanges.front().begin), SKIP);
 			co_await yield();
 
@@ -4689,8 +4689,8 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 
 			// Now shrink and translate fileRange
 			Key fileEnd = std::min(fileRange.end, restoreRange.end);
-			if (fileEnd == (removePrefix.get() == StringRef() ? allKeys.end : strinc(removePrefix.get()))) {
-				fileEnd = addPrefix.get() == StringRef() ? allKeys.end : strinc(addPrefix.get());
+			if (fileEnd == (removePrefix.get().empty() ? allKeys.end : strinc(removePrefix.get()))) {
+				fileEnd = addPrefix.get().empty() ? allKeys.end : strinc(addPrefix.get());
 			} else {
 				fileEnd = fileEnd.removePrefix(removePrefix.get()).withPrefix(addPrefix.get());
 			}
@@ -5563,7 +5563,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				err = e;
 			}
 			if (err.code() == error_code_end_of_stream) {
-				if (mutations.size() > 0) {
+				if (!mutations.empty()) {
 					co_await writeMutations(cx, mutations, restore.mutationLogPrefix(), task, taskBucket);
 				}
 				break;
@@ -5744,14 +5744,14 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		int64_t maxTagID = 0;
 		std::vector<RestoreConfig::RestoreFile> logs;
 		std::vector<RestoreConfig::RestoreFile> ranges;
-		for (auto f : logFiles.results) {
+		for (const auto& f : logFiles.results) {
 			if (f.endVersion > beginVersion) {
 				// skip all files whose endVersion is smaller or equal to beginVersion
 				logs.push_back(f);
 				maxTagID = std::max(maxTagID, f.tagId);
 			}
 		}
-		for (auto f : rangeFiles.results) {
+		for (const auto& f : rangeFiles.results) {
 			// the getRange might get out-of-bound range file because log files need them to work
 			if (f.version >= beginVersion && f.version < endVersion) {
 				ranges.push_back(f);
@@ -5980,7 +5980,7 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 		}
 
 		// If there were no files to load then this batch is done and restore is almost done.
-		if (files.results.size() == 0) {
+		if (files.results.empty()) {
 			// If adding to existing batch then blocks could be in progress so create a new Dispatch task that waits
 			// for them to finish
 			if (addingToExistingBatch) {
@@ -6292,7 +6292,7 @@ Future<std::string> restoreStatus(Reference<ReadYourWritesTransaction> tr, Key t
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 	std::vector<KeyBackedTag> tags;
-	if (tagName.size() == 0) {
+	if (tagName.empty()) {
 		std::vector<KeyBackedTag> t = co_await getAllRestoreTags(tr);
 		tags = t;
 	} else
@@ -6545,8 +6545,8 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		}
 
 		// add log files
-		std::vector<RestoreConfig::RestoreFile>::iterator logStart = logFiles.begin();
-		std::vector<RestoreConfig::RestoreFile>::iterator logEnd = logFiles.end();
+		auto logStart = logFiles.begin();
+		auto logEnd = logFiles.end();
 		int txBytes = 0;
 
 		tr->reset();
@@ -6558,7 +6558,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 
 				co_await taskBucket->keepRunning(tr, task);
 
-				std::vector<RestoreConfig::RestoreFile>::iterator logIt = logStart;
+				auto logIt = logStart;
 
 				txBytes = 0;
 				int logFileCount = 0;
@@ -6586,8 +6586,8 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			co_await tr->onError(err);
 		}
 
-		std::vector<RestoreConfig::RestoreFile>::iterator rangeStart = rangeFiles.begin();
-		std::vector<RestoreConfig::RestoreFile>::iterator rangeEnd = rangeFiles.end();
+		auto rangeStart = rangeFiles.begin();
+		auto rangeEnd = rangeFiles.end();
 
 		tr->reset();
 		while (rangeStart != rangeEnd) {
@@ -6598,7 +6598,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 
 				co_await taskBucket->keepRunning(tr, task);
 
-				std::vector<RestoreConfig::RestoreFile>::iterator rangeIt = rangeStart;
+				auto rangeIt = rangeStart;
 
 				txBytes = 0;
 				int rangeFileCount = 0;
@@ -6626,8 +6626,8 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		}
 
 		// add files
-		std::vector<RestoreConfig::RestoreFile>::iterator start = files.begin();
-		std::vector<RestoreConfig::RestoreFile>::iterator end = files.end();
+		auto start = files.begin();
+		auto end = files.end();
 
 		tr->reset();
 		while (start != end) {
@@ -6638,7 +6638,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 
 				co_await taskBucket->keepRunning(tr, task);
 
-				std::vector<RestoreConfig::RestoreFile>::iterator it = start;
+				auto it = start;
 
 				txBytes = 0;
 				int nFileBlocks = 0;
@@ -7102,7 +7102,7 @@ public:
 				// Allow restoring over existing data only when using the validation restore prefix.
 				// validateRestoreLogKeys.begin (\xff\x02/rlog/) is the designated prefix for validation restores.
 				// Using any other prefix with existing data could corrupt user data.
-				if (existingRows.size() > 0 && addPrefix != validateRestoreLogKeys.begin) {
+				if (!existingRows.empty() && addPrefix != validateRestoreLogKeys.begin) {
 					throw restore_destination_not_empty();
 				}
 			}
@@ -8475,7 +8475,7 @@ static Future<Void> writeKVs(Database cx, Standalone<VectorRef<KeyValueRef>> kvs
 			    .detail("Begin", begin)
 			    .detail("End", end);
 			RangeResult readKVs = co_await tr.getRange(KeyRangeRef(k1, k2), CLIENT_KNOBS->TOO_MANY);
-			ASSERT(readKVs.size() > 0 || begin == end);
+			ASSERT(!readKVs.empty() || begin == end);
 			break;
 		} catch (Error& e) {
 			err = e;

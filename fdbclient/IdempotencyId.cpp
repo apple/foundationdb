@@ -152,7 +152,7 @@ TEST_CASE("/fdbclient/IdempotencyId/basic") {
 		idSet.erase(id);
 		ASSERT(idSet.find(id) == idSet.end());
 	}
-	ASSERT(idSet.size() == 0);
+	ASSERT(idSet.empty());
 
 	ASSERT(!kvContainsIdempotencyId(kv, generate(arena)).present());
 
@@ -216,7 +216,7 @@ static Future<Optional<Key>> getBoundary(Reference<ReadYourWritesTransaction> tr
                                          int64_t* time) {
 	RangeResult result =
 	    co_await tr->getRange(range, /*limit*/ 1, Snapshot::False, oldest ? Reverse::False : Reverse::True);
-	if (!result.size()) {
+	if (result.empty()) {
 		co_return Optional<Key>();
 	}
 	if (version != nullptr) {

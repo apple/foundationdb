@@ -89,11 +89,11 @@ class DDTxnProcessorImpl {
 					for (int shard = 0; shard < keyServersEntries.size(); shard++) {
 						std::vector<UID> src, dest;
 						decodeKeyServersValue(UIDtoTagMap, keyServersEntries[shard].value, src, dest);
-						ASSERT(src.size());
+						ASSERT(!src.empty());
 						updateServersAndCompleteSources(servers, completeSources, shard, src);
 					}
 
-					ASSERT(servers.size() > 0);
+					ASSERT(!servers.empty());
 				}
 
 				// If the size of keyServerEntries is large, then just assume we are using all storage servers
@@ -107,7 +107,7 @@ class DDTxnProcessorImpl {
 					for (auto s = serverList.begin(); s != serverList.end(); ++s)
 						servers.insert(decodeServerListValue(s->value).id());
 
-					ASSERT(servers.size() > 0);
+					ASSERT(!servers.empty());
 				}
 
 				break;
@@ -197,8 +197,8 @@ class DDTxnProcessorImpl {
 				for (auto& kv : replicaKeys) {
 					auto dcId = decodeDatacenterReplicasKey(kv.key);
 					auto replicas = decodeDatacenterReplicasValue(kv.value);
-					if ((primaryDcId.size() && primaryDcId.at(0) == dcId) ||
-					    (remoteDcIds.size() && remoteDcIds.at(0) == dcId && configuration.usableRegions > 1)) {
+					if ((!primaryDcId.empty() && primaryDcId.at(0) == dcId) ||
+					    (!remoteDcIds.empty() && remoteDcIds.at(0) == dcId && configuration.usableRegions > 1)) {
 						if (replicas > configuration.storageTeamSize) {
 							tr.set(kv.key, datacenterReplicasValue(configuration.storageTeamSize));
 						}
@@ -467,7 +467,7 @@ class DDTxnProcessorImpl {
 					for (int i = 0; i < keyServers.size() - 1; i++) {
 						decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest, srcId, destId);
 						DDShardInfo info(keyServers[i].key, srcId, destId);
-						if (remoteDcIds.size()) {
+						if (!remoteDcIds.empty()) {
 							auto srcIter = team_cache.find(src);
 							if (srcIter == team_cache.end()) {
 								for (auto& id : src) {
@@ -485,7 +485,7 @@ class DDTxnProcessorImpl {
 								info.primarySrc = srcIter->second.first;
 								info.remoteSrc = srcIter->second.second;
 							}
-							if (dest.size()) {
+							if (!dest.empty()) {
 								info.hasDest = true;
 								auto destIter = team_cache.find(dest);
 								if (destIter == team_cache.end()) {
@@ -513,7 +513,7 @@ class DDTxnProcessorImpl {
 								result->primaryTeams.insert(src);
 								team_cache[src] = std::pair<std::vector<UID>, std::vector<UID>>();
 							}
-							if (dest.size()) {
+							if (!dest.empty()) {
 								info.hasDest = true;
 								info.primaryDest = dest;
 								auto destIter = team_cache.find(dest);

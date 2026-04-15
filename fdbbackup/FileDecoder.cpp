@@ -38,7 +38,6 @@
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupContainerFileSystem.h"
-#include "fdbclient/BuildFlags.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
@@ -302,7 +301,7 @@ int parseDecodeCommandLine(Reference<DecodeParams> param, CSimpleOpt* args) {
 				param->decode_range = false;
 			} else if (ftype == "range") {
 				param->decode_logs = false;
-			} else if (ftype != "both" && ftype != "") {
+			} else if (ftype != "both" && !ftype.empty()) {
 				err = true;
 				std::cerr << "ERROR: Unrecognized backup file type option: " << args->OptionArg() << "\n";
 				return FDB_EXIT_ERROR;

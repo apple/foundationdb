@@ -178,7 +178,7 @@ Future<Void> krmSetRange(Transaction* tr, Key mapPrefix, KeyRange range, Value v
 	    co_await tr->getRange(lastLessOrEqual(withPrefix.end), firstGreaterThan(withPrefix.end), 1, Snapshot::True);
 
 	Value oldValue;
-	bool hasResult = old.size() > 0 && old[0].key.startsWith(mapPrefix);
+	bool hasResult = !old.empty() && old[0].key.startsWith(mapPrefix);
 	if (hasResult)
 		oldValue = old[0].value;
 
@@ -198,7 +198,7 @@ Future<Void> krmSetRange(Reference<ReadYourWritesTransaction> tr, Key mapPrefix,
 	    co_await tr->getRange(lastLessOrEqual(withPrefix.end), firstGreaterThan(withPrefix.end), 1, Snapshot::True);
 
 	Value oldValue;
-	bool hasResult = old.size() > 0 && old[0].key.startsWith(mapPrefix);
+	bool hasResult = !old.empty() && old[0].key.startsWith(mapPrefix);
 	if (hasResult)
 		oldValue = old[0].value;
 
@@ -238,7 +238,7 @@ static Future<Void> krmSetRangeCoalescing_(Transaction* tr,
 
 	// Determine how far to extend this range at the beginning
 	auto beginRange = keys[0].get();
-	bool hasBegin = beginRange.size() > 0 && beginRange[0].key.startsWith(mapPrefix);
+	bool hasBegin = !beginRange.empty() && beginRange[0].key.startsWith(mapPrefix);
 	Value beginValue = hasBegin ? beginRange[0].value : ""_sr;
 
 	Key beginKey = withPrefix.begin;
@@ -249,7 +249,7 @@ static Future<Void> krmSetRangeCoalescing_(Transaction* tr,
 
 	// Determine how far to extend this range at the end
 	auto endRange = keys[1].get();
-	bool hasEnd = endRange.size() >= 1 && endRange[0].key.startsWith(mapPrefix) && endRange[0].key <= withPrefix.end;
+	bool hasEnd = !endRange.empty() && endRange[0].key.startsWith(mapPrefix) && endRange[0].key <= withPrefix.end;
 	bool hasNext = (endRange.size() == 2 && endRange[1].key.startsWith(mapPrefix)) ||
 	               (endRange.size() == 1 && withPrefix.end < endRange[0].key && endRange[0].key.startsWith(mapPrefix));
 	Value existingValue = hasEnd ? endRange[0].value : ""_sr;
@@ -350,8 +350,8 @@ TEST_CASE("/keyrangemap/decoderange/aligned") {
 	// [""(start), A, B, C, D, E(end)]
 	decodedRanges = krmDecodeRanges(prefix, KeyRangeRef(StringRef(), keyE), kv);
 	ASSERT(decodedRanges.size() == 6);
-	ASSERT(decodedRanges.front().key == StringRef());
-	ASSERT(decodedRanges.front().value == StringRef());
+	ASSERT(decodedRanges.front().key.empty());
+	ASSERT(decodedRanges.front().value.empty());
 	ASSERT(decodedRanges.back().key == keyE);
 	ASSERT(decodedRanges.back().value == keyD);
 
@@ -402,8 +402,8 @@ TEST_CASE("/keyrangemap/decoderange/unaligned") {
 	// [""(start), A, B, C, D, E(end)]
 	decodedRanges = krmDecodeRanges(prefix, KeyRangeRef(StringRef(), keyE), kv, false);
 	ASSERT(decodedRanges.size() == 6);
-	ASSERT(decodedRanges.front().key == StringRef());
-	ASSERT(decodedRanges.front().value == StringRef());
+	ASSERT(decodedRanges.front().key.empty());
+	ASSERT(decodedRanges.front().value.empty());
 	ASSERT(decodedRanges.back().key == keyE);
 	ASSERT(decodedRanges.back().value == keyD);
 

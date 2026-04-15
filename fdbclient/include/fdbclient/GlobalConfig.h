@@ -122,8 +122,8 @@ public:
 	// reference which also contains the arena holding the object. As long as
 	// the caller keeps the ConfigValue reference, the value is guaranteed to
 	// be readable. An empty reference is returned if the value does not exist.
-	const Reference<ConfigValue> get(KeyRef name);
-	const std::map<KeyRef, Reference<ConfigValue>> get(KeyRangeRef range);
+	Reference<ConfigValue> get(KeyRef name);
+	std::map<KeyRef, Reference<ConfigValue>> get(KeyRangeRef range);
 
 	// For arithmetic value types, returns a copy of the value for the given
 	// key, or the supplied default value if the framework does not know about

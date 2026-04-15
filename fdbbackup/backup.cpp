@@ -53,7 +53,6 @@
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/ManagementAPI.h"
-#include "fdbclient/BackupContainer.h"
 
 #include "flow/Platform.h"
 
@@ -1644,7 +1643,7 @@ AsyncResult<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
 		layerRoot.create("paused.$latest") = fBackupPaused.get().present();
 
 		int j = 0;
-		for (KeyBackedTag eachTag : backupTags) {
+		for (const KeyBackedTag& eachTag : backupTags) {
 			EBackupState status = tagStates[j].get();
 			const char* statusText = fba.getStateText(status);
 
@@ -2762,7 +2761,7 @@ Future<Void> queryBackup(const char* name,
 					object["file_name"] = rangeFile.fileName;
 					object["file_size"] = rangeFile.fileSize;
 					object["version"] = rangeFile.version;
-					object["key_range"] = fileSet.get().keyRanges.count(rangeFile.fileName) == 0
+					object["key_range"] = !fileSet.get().keyRanges.contains(rangeFile.fileName)
 					                          ? "none"
 					                          : fileSet.get().keyRanges.at(rangeFile.fileName).toString();
 					rangeFilesJson.push_back(object);
@@ -2812,7 +2811,7 @@ Future<Void> queryBackup(const char* name,
 				object["file_name"] = rangeFile.fileName;
 				object["file_size"] = rangeFile.fileSize;
 				object["version"] = rangeFile.version;
-				object["key_range"] = fileSet.get().keyRanges.count(rangeFile.fileName) == 0
+				object["key_range"] = !fileSet.get().keyRanges.contains(rangeFile.fileName)
 				                          ? "none"
 				                          : fileSet.get().keyRanges.at(rangeFile.fileName).toString();
 				rangeFilesJson.push_back(object);
@@ -2860,7 +2859,7 @@ Future<Void> queryBackup(const char* name,
 Future<Void> listBackup(std::string baseUrl, Optional<std::string> proxy) {
 	try {
 		std::vector<std::string> containers = co_await IBackupContainer::listContainers(baseUrl, proxy);
-		for (std::string container : containers) {
+		for (const std::string& container : containers) {
 			printf("%s\n", container.c_str());
 		}
 	} catch (Error& e) {
@@ -4053,7 +4052,7 @@ int main(int argc, char* argv[]) {
 				// Add the backup key range
 			case ProgramExe::BACKUP:
 				// Error, if the keys option was not specified
-				if (backupKeys.size() == 0) {
+				if (backupKeys.empty()) {
 					fprintf(stderr, "ERROR: Unknown backup option value `%s'\n", args->File(argLoop));
 					printHelpTeaser(newArgV[0]);
 					return FDB_EXIT_ERROR;
@@ -4083,7 +4082,7 @@ int main(int argc, char* argv[]) {
 
 			case ProgramExe::DB_BACKUP:
 				// Error, if the keys option was not specified
-				if (backupKeys.size() == 0) {
+				if (backupKeys.empty()) {
 					fprintf(stderr, "ERROR: Unknown DR option value `%s'\n", args->File(argLoop));
 					printHelpTeaser(newArgV[0]);
 					return FDB_EXIT_ERROR;
@@ -4204,7 +4203,7 @@ int main(int argc, char* argv[]) {
 		};
 
 		auto initSourceCluster = [&](bool required, bool quiet = false) {
-			if (!sourceClusterFile.size() && required) {
+			if (sourceClusterFile.empty() && required) {
 				if (!quiet) {
 					fprintf(stderr, "ERROR: source cluster file is required\n");
 				}

@@ -253,7 +253,7 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 		std::cout << msg << "\n  ";
 		for (const auto& fp : fileProgress) {
 			std::cout << fp->fd->getFilename() << " " << fp->mutations.size() << " mutations";
-			if (fp->mutations.size() > 0) {
+			if (!fp->mutations.empty()) {
 				std::cout << ", range " << fp->mutations[0].version.toString() << " "
 				          << fp->mutations.back().version.toString() << "\n";
 			} else {

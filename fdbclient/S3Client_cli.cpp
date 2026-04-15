@@ -176,7 +176,7 @@ struct Params : public ReferenceCounted<Params> {
 	void updateKnobs() {
 		// Set default to 'true' for blobstore_enable_object_integrity_check if not explicitly set
 		bool blobstore_enable_object_integrity_check_set = false;
-		for (const std::pair p : knobs) {
+		for (const auto& p : knobs) {
 			if (p.first == blobstore_enable_object_integrity_check) {
 				blobstore_enable_object_integrity_check_set = true;
 				break;

@@ -118,7 +118,7 @@ Future<Void> ResolutionBalancer::resolutionBalancing_impl(ResolutionBalancer* se
 	key_resolver.insert(SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? normalKeys : allKeys, 0);
 	while (true) {
 		co_await delay(SERVER_KNOBS->MIN_BALANCE_TIME, TaskPriority::ResolutionMetrics);
-		while (self->resolverChanges.get().size())
+		while (!self->resolverChanges.get().empty())
 			co_await self->resolverChanges.onChange();
 		std::vector<Future<ResolutionMetricsReply>> futures;
 		for (auto& p : self->resolvers)

@@ -330,7 +330,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 				}
 			} else {
 				if (res.size() > memRes.size() || (res.size() < memRes.size() && !res.more) ||
-				    (res.size() == 0 && res.more && !resized)) {
+				    (res.empty() && res.more && !resized)) {
 					TraceEvent(SevError, "WDRGetRangeWrongResult", randomID)
 					    .detail("BeginKey", begin.getKey())
 					    .detail("BeginOffset", begin.offset)

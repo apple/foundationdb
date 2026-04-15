@@ -172,7 +172,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		for (auto& netAddr : netAddrs) {
 			auto machineIpPorts = machineProcesses.find(netAddr);
 			if (machineIpPorts != machineProcesses.end()) {
-				ASSERT(machineIpPorts->second.size());
+				ASSERT(!machineIpPorts->second.empty());
 				for (auto& processAdd : machineIpPorts->second)
 					processAddrs.insert(processAdd);
 			} else {
@@ -577,7 +577,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		std::vector<AddressExclusion> toKillMarkFailedArray;
 		AddressExclusion coordExcl;
 		// Exclude a coordinator under buggify, but only if fault tolerance is > 0 and kill set is non-empty already
-		if (BUGGIFY && toKill.size()) {
+		if (BUGGIFY && !toKill.empty()) {
 			Optional<ClusterConnectionString> csOptional = co_await getConnectionString(cx);
 			std::vector<NetworkAddress> coordinators;
 			if (csOptional.present()) {
@@ -678,7 +678,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		std::unordered_set<std::string> toKillLocalitiesFailed;
 		if (markExcludeAsFailed) {
 			toKillLocalitiesFailed = getLocalitiesFromAddresses(toKillMarkFailedArray);
-			if (excludeLocalitiesInsteadOfServers && toKillLocalitiesFailed.size() > 0) {
+			if (excludeLocalitiesInsteadOfServers && !toKillLocalitiesFailed.empty()) {
 				TraceEvent("RemoveAndKill", functionId)
 				    .detail("Step", "Excluding localities with failed option")
 				    .detail("FailedAddressesSize", toKillMarkFailedArray.size())
@@ -698,7 +698,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		}
 
 		std::unordered_set<std::string> toKillLocalities = getLocalitiesFromAddresses(toKillArray);
-		if (excludeLocalitiesInsteadOfServers && toKillLocalities.size() > 0) {
+		if (excludeLocalitiesInsteadOfServers && !toKillLocalities.empty()) {
 			TraceEvent("RemoveAndKill", functionId)
 			    .detail("Step", "Excluding localities without failed option")
 			    .detail("AddressesSize", toKillArray.size())
@@ -718,7 +718,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 		// We need to skip at least the quorum change if there's nothing to kill, because there might not be enough
 		// servers left alive to do a coordinators auto (?)
-		if (toKill.size()) {
+		if (!toKill.empty()) {
 			// Wait for removal to be safe
 			TraceEvent("RemoveAndKill", functionId)
 			    .detail("Step", "Wait For Server Exclusion")
@@ -728,7 +728,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				co_await (
 				    success(checkForExcludingServers(cx, toKillArray, true /* wait for exclusion */)) ||
 				    checkLocalityChange(
-				        cx, toKillArray, toKillLocalities, markExcludeAsFailed && toKillLocalitiesFailed.size() > 0));
+				        cx, toKillArray, toKillLocalities, markExcludeAsFailed && !toKillLocalitiesFailed.empty()));
 			} else {
 				co_await checkForExcludingServers(cx, toKillArray, true /* wait for exclusion */);
 			}

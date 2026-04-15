@@ -363,7 +363,7 @@ Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens) {
 			co_return UID();
 		}
 		std::vector<RangeLockOwner> owners = co_await getAllRangeLockOwners(cx);
-		for (const auto owner : owners) {
+		for (const auto& owner : owners) {
 			fmt::println("{}", owner.toString());
 		}
 		co_return UID();

@@ -79,7 +79,7 @@ struct ClogTlogWorkload : TestWorkload {
 				ips.push_back(ip);
 			}
 		}
-		ASSERT(ips.size() > 0);
+		ASSERT(!ips.empty());
 
 		// Find all primary tlogs
 		std::vector<NetworkAddress> logs; // all primary logs except CC
@@ -97,7 +97,7 @@ struct ClogTlogWorkload : TestWorkload {
 				}
 			}
 		}
-		ASSERT(logs.size() > 0 && tlog.present());
+		ASSERT(!logs.empty() && tlog.present());
 
 		// clog pairs
 		for (const auto& ip : ips) {

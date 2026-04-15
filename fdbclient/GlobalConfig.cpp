@@ -71,7 +71,7 @@ Key GlobalConfig::prefixedKey(KeyRef key) {
 	return key.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::GLOBALCONFIG).begin);
 }
 
-const Reference<ConfigValue> GlobalConfig::get(KeyRef name) {
+Reference<ConfigValue> GlobalConfig::get(KeyRef name) {
 	auto it = data.find(name);
 	if (it == data.end()) {
 		return Reference<ConfigValue>();
@@ -79,7 +79,7 @@ const Reference<ConfigValue> GlobalConfig::get(KeyRef name) {
 	return it->second;
 }
 
-const std::map<KeyRef, Reference<ConfigValue>> GlobalConfig::get(KeyRangeRef range) {
+std::map<KeyRef, Reference<ConfigValue>> GlobalConfig::get(KeyRangeRef range) {
 	std::map<KeyRef, Reference<ConfigValue>> results;
 	for (const auto& [key, value] : data) {
 		if (range.contains(key)) {
@@ -205,7 +205,7 @@ Future<Void> GlobalConfig::updater(const ClientDBInfo* dbInfo) {
 			loop {
 				// run one iteration at the beginning
 				co_await delay(0);
-				if (dbInfo->history.size() > 0) {
+				if (!dbInfo->history.empty()) {
 					if (lastUpdate < dbInfo->history[0].version) {
 						// This process missed too many global configuration
 						// history updates or the protocol version changed, so it
@@ -214,7 +214,7 @@ Future<Void> GlobalConfig::updater(const ClientDBInfo* dbInfo) {
 						// DBInfo could have changed after the wait. If
 						// changes are present, re-run the loop to make
 						// sure they are applied.
-						if (dbInfo->history.size() > 0 &&
+						if (!dbInfo->history.empty() &&
 						    dbInfo->history[0].version != std::numeric_limits<Version>::max()) {
 							continue;
 						}

@@ -112,7 +112,7 @@ private:
 
 	// These implement the actual "compression" scheme
 	static Value pack(Value val) {
-		if (!val.size())
+		if (val.empty())
 			return val;
 		uint8_t c = val[0];
 
@@ -135,7 +135,7 @@ private:
 		return val;
 	}
 	static Value unpack(Value val) {
-		if (!val.size())
+		if (val.empty())
 			return val;
 		if (val[0] == 0)
 			return val.substr(1); // Uncompressed value

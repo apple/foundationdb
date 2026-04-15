@@ -162,7 +162,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 			co_await delay(0);
 
 			// Fill the operations buffer with random operations
-			while (self->operations.size() < self->numSimultaneousOperations && postponedOperations.size() == 0) {
+			while (self->operations.size() < self->numSimultaneousOperations && postponedOperations.empty()) {
 				self->operations.push_back(
 				    self->processOperation(self, self->generateOperation(self->operations.size(), false)));
 				validOperations++;
@@ -187,7 +187,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 						// know
 						if (isValid && memcmp(&self->fileValidityMask[info.offset + start],
 						                      &info.data->buffer[start],
-						                      i - start)) {
+						                      i - start) != 0) {
 							printf("Read returned incorrect results at %" PRIu64 " of length %" PRIu64 "\n",
 							       info.offset,
 							       info.length);
@@ -222,7 +222,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 				memset(&self->fileLock[info.offset], 0, info.length * sizeof(uint32_t));
 
 			// Only generate new operations if we don't have a postponed operation in queue
-			if (postponedOperations.size() == 0) {
+			if (postponedOperations.empty()) {
 				// Insert a new operation into the operations buffer
 				OperationInfo newOperation = self->generateOperation(info.index);
 
@@ -235,13 +235,13 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 			}
 
 			// If there is a postponed operation, clear the queue so that we can run it
-			if (postponedOperations.size() > 0) {
+			if (!postponedOperations.empty()) {
 				self->operations[info.index] = Never();
 				validOperations--;
 			}
 
 			// If there are no operations being processed and postponed operations are waiting, run them now
-			while (validOperations == 0 && postponedOperations.size() > 0) {
+			while (validOperations == 0 && !postponedOperations.empty()) {
 				self->operations.clear();
 				self->operations.push_back(self->processOperation(self, postponedOperations.front()));
 				OperationInfo info = co_await self->operations.front();

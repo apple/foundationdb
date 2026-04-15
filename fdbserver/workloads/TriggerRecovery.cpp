@@ -119,7 +119,7 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 					                   .removePrefix("\xff\xff/worker_interfaces/"_sr);
 					address_interface[ip_port] = it.value;
 				}
-				for (auto it : address_interface) {
+				for (const auto& it : address_interface) {
 					if (cx->apiVersionAtLeast(700))
 						BinaryReader::fromStringRef<ClientWorkerInterface>(it.second, IncludeVersion())
 						    .reboot.send(RebootRequest());

@@ -201,7 +201,7 @@ struct Profiler {
 			self->environmentInfoWriter << uint8_t(0);
 
 		self->output_buffer = new OutputBuffer;
-		OutputBuffer* otherBuffer = new OutputBuffer;
+		auto* otherBuffer = new OutputBuffer;
 
 		// The profilingSignals signal set will be used by enableSignal
 		sigemptyset(&self->profilingSignals);

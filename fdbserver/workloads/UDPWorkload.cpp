@@ -33,7 +33,6 @@
 #include <unordered_map>
 #include <vector>
 #include <memory>
-#include <functional>
 #include "flow/IUDPSocket.h"
 #include "flow/IConnection.h"
 

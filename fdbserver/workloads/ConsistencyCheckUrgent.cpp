@@ -241,7 +241,7 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 				}
 			}
 
-			if (sourceStorageServers.size() == 0) {
+			if (sourceStorageServers.empty()) {
 				TraceEvent(SevWarnAlways, "ConsistencyCheckUrgent_TesterEmptySourceServers")
 				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 				    .detail("ClientId", self->clientId)
@@ -500,7 +500,7 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 					ASSERT(firstValidServer != -1);
 					if (keyValueFutures[firstValidServer].get().get().more) {
 						VectorRef<KeyValueRef> result = keyValueFutures[firstValidServer].get().get().data;
-						ASSERT(result.size() > 0);
+						ASSERT(!result.empty());
 						begin = firstGreaterThan(result[result.size() - 1].key);
 						ASSERT(begin.getKey() != allKeys.end);
 					} else {
@@ -574,7 +574,7 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 				failedRangesToCheck.push_back(failedRangesIter->range());
 			}
 		}
-		if (failedRangesToCheck.size() > 0) { // Retry for any failed shard
+		if (!failedRangesToCheck.empty()) { // Retry for any failed shard
 			if (consistencyCheckEpoch < CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_RETRY_DEPTH_MAX) {
 				co_await delay(60.0); // Backoff 1 min
 				TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterRetryFailedRanges")
@@ -611,7 +611,7 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 			    .detail("ConsistencyCheckerId", consistencyCheckerId)
 			    .detail("ClientCount", clientCount)
 			    .detail("ClientId", clientId);
-			if (rangesToCheck.size() == 0) {
+			if (rangesToCheck.empty()) {
 				TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterExit")
 				    .detail("Reason", "AssignedEmptyRangeToCheck")
 				    .detail("ConsistencyCheckerId", consistencyCheckerId)

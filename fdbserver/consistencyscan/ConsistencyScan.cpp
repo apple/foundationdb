@@ -808,7 +808,7 @@ Future<Void> consistencyScanCore(Database db, Reference<ConsistencyScanMemorySta
 							if (storageServerInterfaces.size() > 1) {
 								// sometimes do the first key in the range, sometimes try to do a later key in the range
 								Key corruptKey = targetRange.begin;
-								if (deterministicRandom()->coinflip() && targetRange.end.size() > 0) {
+								if (deterministicRandom()->coinflip() && !targetRange.end.empty()) {
 									Key corruptKey2 = targetRange.end.substr(0, targetRange.end.size() - 1);
 									if (corruptKey2 > corruptKey) {
 										corruptKey = corruptKey2;
@@ -906,7 +906,7 @@ Future<Void> consistencyScanCore(Database db, Reference<ConsistencyScanMemorySta
 								} else {
 									VectorRef<KeyValueRef> result =
 									    keyValueFutures[firstValidServer.get()].get().get().data;
-									ASSERT(result.size() > 0);
+									ASSERT(!result.empty());
 									statsCurrentRound.lastEndKey = keyAfter(result.back().key);
 									targetRange = KeyRangeRef(statsCurrentRound.lastEndKey, targetRange.end);
 									if (targetRange.empty()) {
@@ -923,7 +923,7 @@ Future<Void> consistencyScanCore(Database db, Reference<ConsistencyScanMemorySta
 									if (i == firstValidServer.get()) {
 										logicalBytesRead += rangeResult.data.expectedSize();
 									}
-									Key storageNextKey = (rangeResult.more && rangeResult.data.size() > 0)
+									Key storageNextKey = (rangeResult.more && !rangeResult.data.empty())
 									                         ? keyAfter(rangeResult.data.back().key)
 									                         : targetRange.end;
 									if (storageNextKey > nextKey) {
@@ -1372,7 +1372,7 @@ Future<bool> getKeyLocations(Database cx,
 				                std::min<KeyRef>(shards[i].first.end, endKey).removePrefix(keyServersPrefix)),
 				    RangeResultRef(keyValueResponse.data, keyValueResponse.more));
 
-				if (keyValueResponse.data.size() && beginKey == keyValueResponse.data[0].key) {
+				if (!keyValueResponse.data.empty() && beginKey == keyValueResponse.data[0].key) {
 					keyLocations.push_back_deep(keyLocations.arena(), currentLocations[0]);
 				}
 
@@ -1603,7 +1603,7 @@ Future<Void> checkDataConsistency(Database cx,
 		decodeKeyServersValue(UIDtoTagMap, keyLocations[shard].value, sourceStorageServers, destStorageServers, false);
 
 		// If the destStorageServers is non-empty, then this shard is being relocated
-		bool isRelocating = destStorageServers.size() > 0;
+		bool isRelocating = !destStorageServers.empty();
 
 		double shardCheckStartTime = now();
 		double rateLimiterWaitTimeForThisShard = 0;
@@ -1754,7 +1754,7 @@ Future<Void> checkDataConsistency(Database cx,
 
 		if (firstClient) {
 			// If there was an error retrieving shard estimated size
-			if (performQuiescentChecks && estimatedBytes.size() == 0)
+			if (performQuiescentChecks && estimatedBytes.empty())
 				testFailure("Error fetching storage metrics", performQuiescentChecks, success, failureIsError);
 
 			// If running a distributed test, storage server size is an accumulation of shard estimates
@@ -1929,7 +1929,7 @@ Future<Void> checkDataConsistency(Database cx,
 					// Advance to the next set of entries
 					if (firstValidServer.present() && keyValueFutures[firstValidServer.get()].get().get().more) {
 						VectorRef<KeyValueRef> result = keyValueFutures[firstValidServer.get()].get().get().data;
-						ASSERT(result.size() > 0);
+						ASSERT(!result.empty());
 						ASSERT(result[result.size() - 1].key != allKeys.end);
 						readRange = KeyRangeRef(keyAfter(result[result.size() - 1].key), range.end);
 						lastStartSampleKey = lastSampleKey;

@@ -51,7 +51,7 @@ Reference<ClusterConnectionFile> ClusterConnectionFile::openOrDefault(const char
 
 // Sets the connections string held by this object and persists it.
 Future<Void> ClusterConnectionFile::setAndPersistConnectionString(ClusterConnectionString const& conn) {
-	ASSERT(filename.size());
+	ASSERT(!filename.empty());
 	cs = conn;
 	return success(persist());
 }
@@ -104,7 +104,7 @@ std::string ClusterConnectionFile::toString() const {
 
 // returns <resolved name, was default file>
 std::pair<std::string, bool> ClusterConnectionFile::lookupClusterFileName(std::string const& filename) {
-	if (filename.length())
+	if (!filename.empty())
 		return std::make_pair(filename, false);
 
 	std::string f;
@@ -147,7 +147,7 @@ std::string ClusterConnectionFile::getErrorString(std::pair<std::string, bool> c
 Future<bool> ClusterConnectionFile::persist() {
 	setPersisted();
 
-	if (filename.size()) {
+	if (!filename.empty()) {
 		try {
 			atomicReplace(filename,
 			              "# DO NOT EDIT!\n# This file is auto-generated, it is not to be edited by hand\n" +

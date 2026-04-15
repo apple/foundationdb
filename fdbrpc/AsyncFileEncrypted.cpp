@@ -46,7 +46,7 @@ public:
 	// Read a single block of size ENCRYPTION_BLOCK_SIZE bytes, and decrypt.
 	static Future<Standalone<StringRef>> readBlock(AsyncFileEncrypted* self, uint32_t block) {
 		Arena arena;
-		unsigned char* encrypted = new (arena) unsigned char[FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE];
+		auto* encrypted = new (arena) unsigned char[FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE];
 		int bytes = co_await uncancellable(holdWhile(
 		    arena,
 		    self->file->read(encrypted, FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE, FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE * block)));
@@ -70,7 +70,7 @@ public:
 		uint32_t firstBlock = offset / FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE;
 		uint32_t lastBlock = (offset + length - 1) / FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE;
 		uint32_t block{ 0 };
-		unsigned char* output = reinterpret_cast<unsigned char*>(data);
+		auto* output = reinterpret_cast<unsigned char*>(data);
 		int bytesRead = 0;
 		ASSERT(self->mode == AsyncFileEncrypted::Mode::READ_ONLY);
 		for (block = firstBlock; block <= lastBlock; ++block) {
@@ -110,7 +110,7 @@ public:
 		ASSERT(self->mode == AsyncFileEncrypted::Mode::APPEND_ONLY);
 		// All writes must append to the end of the file:
 		ASSERT_EQ(offset, self->currentBlock * FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE + self->offsetInBlock);
-		unsigned char const* input = reinterpret_cast<unsigned char const*>(data);
+		auto const* input = reinterpret_cast<unsigned char const*>(data);
 		while (length > 0) {
 			const auto chunkSize = std::min(length, FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE - self->offsetInBlock);
 			Arena arena;

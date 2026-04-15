@@ -84,13 +84,13 @@ Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<StringRef> 
 		bool hasCaughtErr = false;
 		try {
 			// update cluster description
-			if (new_cluster_description.size()) {
+			if (!new_cluster_description.empty()) {
 				tr->set(fdb_cli::clusterDescriptionSpecialKey, new_cluster_description);
 			}
 			// if auto change, read the special key to retrieve the recommended config
 			if (automatic) {
 				// if previous read failed, retry, otherwise, use the same recommended config
-				if (!auto_coordinators_str.size()) {
+				if (auto_coordinators_str.empty()) {
 					// Hold the reference to the standalone's memory
 					ThreadFuture<Optional<Value>> auto_coordinatorsF = tr->get(fdb_cli::coordinatorsAutoSpecialKey);
 					Optional<Value> auto_coordinators = co_await safeThreadFutureToFuture(auto_coordinatorsF);
@@ -108,7 +108,7 @@ Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<StringRef> 
 						if (Hostname::isHostname(t->toString())) {
 							// We do not resolve hostnames here. We commit them as is.
 							const auto& hostname = Hostname::parse(t->toString());
-							if (new_coordinators_hostnames.count(hostname)) {
+							if (new_coordinators_hostnames.contains(hostname)) {
 								fprintf(stderr,
 								        "ERROR: passed redundant coordinators: `%s'\n",
 								        hostname.toString().c_str());
@@ -118,7 +118,7 @@ Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<StringRef> 
 							newCoordinatorslist.push_back(hostname.toString());
 						} else {
 							const auto& addr = NetworkAddress::parse(t->toString());
-							if (new_coordinators_addresses.count(addr)) {
+							if (new_coordinators_addresses.contains(addr)) {
 								fprintf(
 								    stderr, "ERROR: passed redundant coordinators: `%s'\n", addr.toString().c_str());
 								co_return true;

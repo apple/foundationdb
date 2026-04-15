@@ -109,8 +109,7 @@ Future<Reference<IAsyncFile>> AsyncFileNonDurable::open(std::string filename,
 
 		// If we are in the process of deleting a file, we can't let someone else modify it at the same time.  We
 		// therefore block the creation of new files until deletion is complete
-		std::map<std::string, Future<Void>>::iterator deletedFile =
-		    AsyncFileNonDurable::filesBeingDeleted.find(filename);
+		auto deletedFile = AsyncFileNonDurable::filesBeingDeleted.find(filename);
 		if (deletedFile != AsyncFileNonDurable::filesBeingDeleted.end()) {
 			//TraceEvent("AsyncFileNonDurableOpenWaitOnDelete1").detail("Filename", filename);
 			co_await (deletedFile->second || shutdown);

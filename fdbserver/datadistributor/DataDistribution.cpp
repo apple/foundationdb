@@ -511,7 +511,7 @@ public:
 		primaryDcId.clear();
 		remoteDcIds.clear();
 		const std::vector<RegionInfo>& regions = configuration.regions;
-		if (configuration.regions.size() > 0) {
+		if (!configuration.regions.empty()) {
 			primaryDcId.push_back(regions[0].dcId);
 		}
 		if (configuration.regions.size() > 1) {
@@ -2420,7 +2420,7 @@ Future<Void> generateLocalBulkDumpJobManifestFile(Reference<DataDistributor> sel
 	    BulkLoadJobManifestFileHeader(bulkLoadManifestFormatVersion, self->bulkDumpJobManager.taskManifestMap.size())
 	        .toString());
 	content->append(bulkLoadJobManifestLineTerminator);
-	std::map<Key, BulkLoadManifest>::iterator iter = self->bulkDumpJobManager.taskManifestMap.begin();
+	auto iter = self->bulkDumpJobManager.taskManifestMap.begin();
 	for (; iter != self->bulkDumpJobManager.taskManifestMap.end(); iter++) {
 		content->append(BulkLoadJobFileManifestEntry(iter->second).toString());
 		content->append(bulkLoadJobManifestLineTerminator);

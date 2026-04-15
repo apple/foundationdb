@@ -37,7 +37,7 @@ Future<bool> killCommandActor(Reference<IDatabase> db,
                               Reference<ITransaction> tr,
                               std::vector<StringRef> tokens,
                               std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface) {
-	ASSERT(tokens.size() >= 1);
+	ASSERT(!tokens.empty());
 	bool result = true;
 	std::string addressesStr;
 	if (tokens.size() == 1) {
@@ -46,19 +46,19 @@ Future<bool> killCommandActor(Reference<IDatabase> db,
 		co_await getWorkerInterfaces(tr, address_interface, true);
 	}
 	if (tokens.size() == 1 || tokencmp(tokens[1], "list")) {
-		if (address_interface->size() == 0) {
+		if (address_interface->empty()) {
 			printf("\nNo addresses can be killed.\n");
 		} else if (address_interface->size() == 1) {
 			printf("\nThe following address can be killed:\n");
 		} else {
 			printf("\nThe following %zu addresses can be killed:\n", address_interface->size());
 		}
-		for (auto it : *address_interface) {
+		for (const auto& it : *address_interface) {
 			printf("%s\n", printable(it.first).c_str());
 		}
 		printf("\n");
 	} else if (tokencmp(tokens[1], "all")) {
-		if (address_interface->size() == 0) {
+		if (address_interface->empty()) {
 			result = false;
 			fprintf(stderr,
 			        "ERROR: no processes to kill. You must run the `kill’ command before "

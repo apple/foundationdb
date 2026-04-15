@@ -144,9 +144,9 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 				dataHalls.emplace(process->locality.dataHallId().castTo<StringRef>());
 				zones.emplace(process->locality.zoneId().castTo<StringRef>());
 			}
-			killDc = dataCenters.size() > 0 && random.random01() > (dataHalls.size() < 0 ? 0.1 : 0.25);
-			killDatahall = dataHalls.size() > 0 && killDc && random.random01() < 0.5;
-			killZone = zones.size() > 0 && random.random01() < 0.2;
+			killDc = !dataCenters.empty() && random.random01() > (dataHalls.size() < 0 ? 0.1 : 0.25);
+			killDatahall = !dataHalls.empty() && killDc && random.random01() < 0.5;
+			killZone = !zones.empty() && random.random01() < 0.2;
 		}
 		TraceEvent("AddingFailureInjection")
 		    .detail("Reboot", reboot)
@@ -336,7 +336,7 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 				co_await delay(delayBeforeKill);
 
 				// decide on a machine to kill
-				ASSERT(machines.size());
+				ASSERT(!machines.empty());
 				Optional<Standalone<StringRef>> target = machines.back().dcId();
 
 				ISimulator::KillType kt = ISimulator::KillType::Reboot;

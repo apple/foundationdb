@@ -129,7 +129,7 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 		// \xff\xff/transaction/conflicting_keys0)
 		auto resultFuture = ryw->getRange(conflictingKeysRange, CLIENT_KNOBS->TOO_MANY);
 		auto result = resultFuture.get();
-		ASSERT(!result.more && result.size() == 0);
+		ASSERT(!result.more && result.empty());
 	}
 
 	Future<Void> conflictingClient(Database cx, ReportConflictingKeysWorkload* self) {
@@ -181,8 +181,8 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 					++self->conflicts;
 				}
 				// These two conflict sets should not be empty
-				ASSERT(readConflictRanges.size());
-				ASSERT(writeConflictRanges.size());
+				ASSERT(!readConflictRanges.empty());
+				ASSERT(!writeConflictRanges.empty());
 				// check API correctness
 				if (foundConflict) {
 					// \xff\xff/transaction/conflicting_keys is always initialized to false, skip it here
@@ -203,7 +203,7 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 					tr2 = makeReference<ReadYourWritesTransaction>(cx);
 
 					const RangeResult conflictingKeyRanges = conflictingKeyRangesFuture.get();
-					ASSERT(conflictingKeyRanges.size() > 0);
+					ASSERT(!conflictingKeyRanges.empty());
 					ASSERT(conflictingKeyRanges.size() <= readConflictRanges.size() * 2);
 					ASSERT(conflictingKeyRanges.size() % 2 == 0);
 					ASSERT(!conflictingKeyRanges.more);

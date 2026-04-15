@@ -187,7 +187,7 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 		int corruptedWorkers = 0;
 		std::map<NetworkAddress, WorkerInterface> workersMap;
 		std::vector<WorkerDetails> workers = co_await getWorkers(dbInfo);
-		for (auto worker : workers) {
+		for (const auto& worker : workers) {
 			workersMap[worker.interf.address()] = worker.interf;
 		}
 		TraceEvent("ResendChaos")

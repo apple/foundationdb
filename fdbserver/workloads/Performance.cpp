@@ -43,7 +43,7 @@ struct PerformanceWorkload : TestWorkload {
 
 		// "Consume" all options and save for later tests
 		for (int i = 0; i < options.size(); i++) {
-			if (options[i].value.size()) {
+			if (!options[i].value.empty()) {
 				savedOptions.push_back_deep(savedOptions.arena(), KeyValueRef(options[i].key, options[i].value));
 				printf("saved option (%d): '%s'='%s'\n",
 				       i,

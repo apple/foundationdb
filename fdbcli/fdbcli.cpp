@@ -32,7 +32,6 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.h"
 #include "fdbclient/Knobs.h"
-#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/Schemas.h"
@@ -604,7 +603,7 @@ void printBuildInformation() {
 void printHelpOverview() {
 	printf("\nList of commands:\n\n");
 	for (const auto& [command, help] : helpMap) {
-		if (help.short_desc.size())
+		if (!help.short_desc.empty())
 			printf(" %s:\n      %s\n", command.c_str(), help.short_desc.c_str());
 	}
 	printf("\nFor information on a specific command, type `help <command>'.");
@@ -614,7 +613,7 @@ void printHelpOverview() {
 
 void printHelp(StringRef command) {
 	auto i = helpMap.find(command.toString());
-	if (i != helpMap.end() && i->second.short_desc.size()) {
+	if (i != helpMap.end() && !i->second.short_desc.empty()) {
 		printf("\n%s\n\n", i->second.usage.c_str());
 		auto cstr = i->second.short_desc.c_str();
 		printf("%c%s.\n", toupper(cstr[0]), cstr + 1);
@@ -825,7 +824,7 @@ void fdbcliCompCmd(std::string const& text, std::vector<std::string>& lc) {
 	std::string base_input = text;
 
 	// If there is a token and the input does not end in a space
-	if (count && text.size() > 0 && text[text.size() - 1] != ' ') {
+	if (count && !text.empty() && text[text.size() - 1] != ' ') {
 		count--; // Ignore the last token for purposes of later code
 		ntext = tokens.back().toString();
 		base_input = whole_line.substr(0, whole_line.rfind(ntext));
@@ -1169,7 +1168,7 @@ Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterConnecti
 			}
 			line = rawline.get();
 
-			if (!line.size())
+			if (line.empty())
 				continue;
 
 			// Don't put dangerous commands in the command history
@@ -1191,7 +1190,7 @@ Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterConnecti
 			if (partial)
 				LogCommand(line, randomID, "ERROR: unterminated quote");
 			if (malformed || partial) {
-				if (parsed.size() > 0) {
+				if (!parsed.empty()) {
 					// Denote via a special token that the command was a parse failure.
 					auto& last_command = parsed.back();
 					last_command.insert(last_command.begin(),
@@ -1211,7 +1210,7 @@ Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterConnecti
 					break;
 				}
 
-				if (!tokens.size())
+				if (tokens.empty())
 					continue;
 
 				if (tokencmp(tokens[0], "parse_error")) {
@@ -1233,7 +1232,7 @@ Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterConnecti
 					printf("\n");
 				}
 
-				if (!helpMap.count(tokens[0].toString()) && !hiddenCommands.count(tokens[0].toString())) {
+				if (!helpMap.contains(tokens[0].toString()) && !hiddenCommands.contains(tokens[0].toString())) {
 					fprintf(stderr, "ERROR: Unknown command `%s'. Try `help'?\n", formatStringRef(tokens[0]).c_str());
 					is_error = true;
 					continue;
@@ -1704,7 +1703,7 @@ Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterConnecti
 						Standalone<StringRef> endKey;
 						if (tokens.size() >= 3) {
 							endKey = tokens[2];
-						} else if (tokens[1].size() == 0) {
+						} else if (tokens[1].empty()) {
 							endKey = normalKeys.end;
 						} else if (tokens[1] == systemKeys.begin) {
 							endKey = systemKeys.end;
@@ -1945,7 +1944,7 @@ Future<int> runCli(CLIOptions opt, Reference<ClusterConnectionFile> ccf) {
 		    bool partial = false;
 		    std::string linecopy = line;
 		    std::vector<std::vector<StringRef>> parsed = parseLine(linecopy, error, partial);
-		    if (parsed.size() == 0 || parsed.back().size() == 0)
+		    if (parsed.empty() || parsed.back().empty())
 			    return LineNoise::Hint();
 		    StringRef command = parsed.back().front();
 		    int finishedParameters = parsed.back().size() + error;
@@ -2083,7 +2082,7 @@ int main(int argc, char** argv) {
 	initHelp();
 
 	// deferred TLS options
-	if (opt.tlsCertPath.size()) {
+	if (!opt.tlsCertPath.empty()) {
 		try {
 			setNetworkOption(FDBNetworkOptions::TLS_CERT_PATH, opt.tlsCertPath);
 		} catch (Error& e) {
@@ -2092,7 +2091,7 @@ int main(int argc, char** argv) {
 		}
 	}
 
-	if (opt.tlsCAPath.size()) {
+	if (!opt.tlsCAPath.empty()) {
 		try {
 			setNetworkOption(FDBNetworkOptions::TLS_CA_PATH, opt.tlsCAPath);
 		} catch (Error& e) {
@@ -2100,9 +2099,9 @@ int main(int argc, char** argv) {
 			return 1;
 		}
 	}
-	if (opt.tlsKeyPath.size()) {
+	if (!opt.tlsKeyPath.empty()) {
 		try {
-			if (opt.tlsPassword.size())
+			if (!opt.tlsPassword.empty())
 				setNetworkOption(FDBNetworkOptions::TLS_PASSWORD, opt.tlsPassword);
 
 			setNetworkOption(FDBNetworkOptions::TLS_KEY_PATH, opt.tlsKeyPath);
@@ -2111,7 +2110,7 @@ int main(int argc, char** argv) {
 			return 1;
 		}
 	}
-	if (opt.tlsVerifyPeers.size()) {
+	if (!opt.tlsVerifyPeers.empty()) {
 		try {
 			setNetworkOption(FDBNetworkOptions::TLS_VERIFY_PEERS, opt.tlsVerifyPeers);
 		} catch (Error& e) {

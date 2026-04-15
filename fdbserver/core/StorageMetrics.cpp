@@ -242,7 +242,7 @@ void StorageServerMetrics::notifyNotReadable(KeyRangeRef keys) {
 	auto rs = waitMetricsMap.intersectingRanges(keys);
 	for (auto r = rs.begin(); r != rs.end(); ++r) {
 		auto& v = r->value();
-		CODE_PROBE(v.size(), "notifyNotReadable() sending errors to intersecting ranges");
+		CODE_PROBE(!v.empty(), "notifyNotReadable() sending errors to intersecting ranges");
 		for (int n = 0; n < v.size(); n++)
 			v[n].sendError(wrong_shard_server());
 	}
@@ -748,7 +748,7 @@ bool TransientStorageMetricSample::roll(int64_t metric) const {
 void TransientStorageMetricSample::poll(KeyRangeMap<std::vector<PromiseStream<StorageMetrics>>>& waitMap,
                                         StorageMetrics metrics) {
 	double now = ::now();
-	while (queue.size() && queue.front().first <= now) {
+	while (!queue.empty() && queue.front().first <= now) {
 		KeyRef key = queue.front().second.first;
 		int64_t delta = queue.front().second.second;
 		ASSERT(delta != 0);
@@ -770,7 +770,7 @@ void TransientStorageMetricSample::poll(KeyRangeMap<std::vector<PromiseStream<St
 
 void TransientStorageMetricSample::poll() {
 	double now = ::now();
-	while (queue.size() && queue.front().first <= now) {
+	while (!queue.empty() && queue.front().first <= now) {
 		KeyRef key = queue.front().second.first;
 		int64_t delta = queue.front().second.second;
 		ASSERT(delta != 0);
@@ -877,7 +877,7 @@ TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/noneSplitable") {
 
 	std::vector<KeyRef> t = ssm.getSplitPoints(KeyRangeRef("A"_sr, "C"_sr), 10000 * sampleUnit, {});
 
-	ASSERT(t.size() == 0);
+	ASSERT(t.empty());
 
 	return Void();
 }
@@ -898,7 +898,7 @@ TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/chunkTooLarge") {
 
 	std::vector<KeyRef> t = ssm.getSplitPoints(KeyRangeRef("A"_sr, "C"_sr), 1000 * sampleUnit, {});
 
-	ASSERT(t.size() == 0);
+	ASSERT(t.empty());
 
 	return Void();
 }

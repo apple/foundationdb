@@ -174,7 +174,7 @@ public:
 		Standalone<StringRef> result(self->recoveryQueue[0].substr(0, bytes), self->recoveryQueue[0].arena());
 		self->recoveryQueue[0].contents() = self->recoveryQueue[0].substr(bytes);
 		self->recoveryQueueDataSize = self->recoveryQueue[0].size();
-		if (self->recoveryQueue[0].size() == 0) {
+		if (self->recoveryQueue[0].empty()) {
 			self->recoveryQueue.clear();
 		}
 		co_return result;
@@ -193,8 +193,8 @@ IDiskQueue::location LogSystemDiskQueueAdapter::getNextReadLocation() const {
 }
 
 IDiskQueue::location LogSystemDiskQueueAdapter::push(StringRef contents) {
-	while (contents.size()) {
-		int remainder = pushedData.size() == 0 ? 0 : pushedData.back().capacity() - pushedData.back().size();
+	while (!contents.empty()) {
+		int remainder = pushedData.empty() ? 0 : pushedData.back().capacity() - pushedData.back().size();
 
 		if (remainder == 0) {
 			VectorRef<uint8_t> block;

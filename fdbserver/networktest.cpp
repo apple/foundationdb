@@ -336,11 +336,11 @@ struct RandomIntRange {
 	explicit(false) RandomIntRange(std::string str) {
 		StringRef high = str;
 		StringRef low = high.eat(":");
-		if (high.size() == 0) {
+		if (high.empty()) {
 			high = low;
 		}
-		min = low.size() == 0 ? 0 : atol(low.toString().c_str());
-		max = high.size() == 0 ? 0 : atol(high.toString().c_str());
+		min = low.empty() ? 0 : atol(low.toString().c_str());
+		max = high.empty() ? 0 : atol(high.toString().c_str());
 		if (min > max) {
 			std::swap(min, max);
 		}
@@ -614,7 +614,7 @@ struct P2PNetworkTest {
 			printf("Remote: %s\n", n.toString().c_str());
 		}
 
-		for (auto el : self->listeners) {
+		for (const auto& el : self->listeners) {
 			printf("Listener: %s\n", el->getListenAddress().toString().c_str());
 		}
 
@@ -654,7 +654,7 @@ struct P2PNetworkTest {
 			printf("Remote: %s\n", n.toString().c_str());
 		}
 
-		for (auto el : self->listeners) {
+		for (const auto& el : self->listeners) {
 			printf("Listener: %s\n", el->getListenAddress().toString().c_str());
 			actors.add(incoming(self, el));
 		}

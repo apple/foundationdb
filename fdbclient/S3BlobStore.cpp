@@ -59,7 +59,6 @@ S3BlobStoreEndpoint::ConnectionPoolData::~ConnectionPoolData() {
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
 #include <boost/algorithm/string.hpp>
-#include <boost/algorithm/string.hpp>
 #include <boost/algorithm/hex.hpp>
 #include "flow/IAsyncFile.h"
 #include "flow/Hostname.h"
@@ -304,7 +303,7 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(const std::string
 		// hostPort is at least a host or IP address, optionally followed by :portNumber or :serviceName
 		StringRef h(hostPort);
 		StringRef host = h.eat(":");
-		if (host.size() == 0)
+		if (host.empty())
 			throw std::string("host cannot be empty");
 
 		StringRef service = h.eat();
@@ -315,7 +314,7 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(const std::string
 		HTTP::Headers extraHeaders;
 		while (1) {
 			StringRef name = t.eat("=");
-			if (name.size() == 0)
+			if (name.empty())
 				break;
 			StringRef value = t.eat("&");
 
@@ -324,7 +323,7 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(const std::string
 				StringRef originalValue = value;
 				StringRef headerFieldName = value.eat(":");
 				StringRef headerFieldValue = value;
-				if (headerFieldName.size() == 0 || headerFieldValue.size() == 0) {
+				if (headerFieldName.empty() || headerFieldValue.empty()) {
 					throw format("'%s' is not a valid value for '%s' parameter.  Format is <FieldName>:<FieldValue> "
 					             "where strings are not empty.",
 					             originalValue.toString().c_str(),
@@ -603,7 +602,7 @@ Future<Void> deleteRecursively_impl(Reference<S3BlobStoreEndpoint> b,
 			throw;
 	}
 
-	while (deleteFutures.size() > 0) {
+	while (!deleteFutures.empty()) {
 		co_await deleteFutures.front();
 		deleteFutures.pop_front();
 	}
@@ -919,7 +918,7 @@ std::string awsCanonicalURI(const std::string& resource, std::vector<std::string
 
 	StringRef qStr(queryString);
 	StringRef queryParameter;
-	while ((queryParameter = qStr.eat("&")) != StringRef()) {
+	while (!(queryParameter = qStr.eat("&")).empty()) {
 		StringRef param = queryParameter.eat("=");
 		StringRef value = queryParameter.eat();
 
@@ -1283,7 +1282,7 @@ Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobStoreEn
 
 		// If err is not present then r is valid.
 		// If r->code is in successCodes then record the successful request and return r.
-		if (!err.present() && successCodes.count(r->code) != 0) {
+		if (!err.present() && successCodes.contains(r->code)) {
 			TraceEvent(SevDebug, "S3BlobStoreDoRequestSuccessful")
 			    .detail("Verb", verb)
 			    .detail("Error", err.present())
@@ -2548,7 +2547,7 @@ TEST_CASE("/backup/s3/virtual_hosting_list_resource_path") {
 
 	// In virtual hosting mode, constructResourcePath returns "" for empty object
 	std::string listResource = s3->constructResourcePath("test-bucket", "");
-	ASSERT(listResource == ""); // Virtual hosting mode doesn't include bucket in path
+	ASSERT(listResource.empty()); // Virtual hosting mode doesn't include bucket in path
 
 	// listObjectsStream_impl should add "/" before query string to form valid HTTP request
 	// Expected: GET /bulkload/path?list-type=2&... (but we can't test the full actor here)
@@ -2602,7 +2601,7 @@ TEST_CASE("/backup/s3/constructResourcePath") {
 	// Virtual hosting mode doesn't include bucket in path
 	ASSERT(s3->constructResourcePath("test-bucket", "normal/file.txt") == "/normal/file.txt");
 	ASSERT(s3->constructResourcePath("test-bucket", "/leading/slash.txt") == "/leading/slash.txt");
-	ASSERT(s3->constructResourcePath("test-bucket", "") == "");
+	ASSERT(s3->constructResourcePath("test-bucket", "").empty());
 
 	return Void();
 }

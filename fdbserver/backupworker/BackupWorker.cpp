@@ -192,7 +192,7 @@ struct BackupData {
 							TraceEvent("BackupWorkerDetectAbortedJob", self->myId).detail("BackupID", uid);
 							co_return;
 						}
-						ASSERT(workers.present() && workers.get().size() > 0);
+						ASSERT(workers.present() && !workers.get().empty());
 						auto& v = workers.get();
 						v.erase(std::remove_if(v.begin(),
 						                       v.end(),
@@ -211,7 +211,7 @@ struct BackupData {
 							// monitor all workers' updates
 							watchFuture = tr->watch(config.startedBackupWorkers().key);
 						}
-						ASSERT(workers.present() && workers.get().size() > 0);
+						ASSERT(workers.present() && !workers.get().empty());
 						if (!updated) {
 							config.startedBackupWorkers().set(tr, workers.get());
 						}
@@ -230,7 +230,7 @@ struct BackupData {
 						tr->reset();
 						continue;
 					} else {
-						ASSERT(workers.present() && workers.get().size() > 0);
+						ASSERT(workers.present() && !workers.get().empty());
 						config.startedBackupWorkers().set(tr, workers.get());
 						co_await tr->commit();
 						break;
@@ -381,7 +381,7 @@ struct BackupData {
 	// to start new backups and stop ones not in the active state.
 	void onBackupChanges(const std::vector<std::pair<UID, Version>>& uidVersions) {
 		std::set<UID> stopList;
-		for (auto it : backups) {
+		for (const auto& it : backups) {
 			stopList.insert(it.first);
 		}
 

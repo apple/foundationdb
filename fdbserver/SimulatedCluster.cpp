@@ -298,7 +298,7 @@ class TestConfig : public BasicTestConfig {
 		while (ifs.good()) {
 			getline(ifs, cline);
 			std::string line = removeWhitespace(std::string(cline));
-			if (!line.size() || line.find(';') == 0)
+			if (line.empty() || line.find(';') == 0)
 				continue;
 
 			size_t found = line.find('=');
@@ -969,7 +969,7 @@ Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				if (i == 0) {
 					std::string coordinationFolder =
 					    ini.GetValue(printable(localities.machineId()).c_str(), "coordinationFolder", "");
-					if (!coordinationFolder.size())
+					if (coordinationFolder.empty())
 						coordinationFolder = ini.GetValue(
 						    printable(localities.machineId()).c_str(),
 						    format("c%d", i * listenPerProcess).c_str(),
@@ -1112,7 +1112,7 @@ Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				ASSERT(openFile.get().canGet());
 			}
 
-			for (auto it : g_simulator->getMachineById(localities.machineId())->deletingOrClosingFiles) {
+			for (const auto& it : g_simulator->getMachineById(localities.machineId())->deletingOrClosingFiles) {
 				filenames.insert(it);
 				closingStr += it + ", ";
 			}
@@ -1215,7 +1215,7 @@ Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				}
 				myFolders = toRebootFrom;
 				if (!useSeedFile) {
-					for (auto f : toRebootFrom) {
+					for (const auto& f : toRebootFrom) {
 						if (!fileExists(joinPath(f, "fdb.cluster"))) {
 							writeFile(joinPath(f, "fdb.cluster"), connStr.toString());
 						}
@@ -1411,7 +1411,7 @@ Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		g_simulator->processesPerMachine = processesPerMachine;
 
 		uniquify(dcIds);
-		if (!BUGGIFY && dcIds.size() == 2 && dcIds[0] != "" && dcIds[1] != "") {
+		if (!BUGGIFY && dcIds.size() == 2 && !dcIds[0].empty() && !dcIds[1].empty()) {
 			StatusObject primaryObj;
 			StatusObject primaryDcObj;
 			primaryDcObj["id"] = dcIds[0];
@@ -1671,7 +1671,7 @@ SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConf
 		for (const auto& storageEngineExcluded : testConfig.storageEngineExcludeTypes) {
 			storageEngineAvailable.erase(storageEngineExcluded);
 		}
-		ASSERT(storageEngineAvailable.size() > 0);
+		ASSERT(!storageEngineAvailable.empty());
 		std::vector<SimulationStorageEngine> storageEngineCandidates;
 		for (const auto& storageEngine : storageEngineAvailable) {
 			if (storageEngine == SimulationStorageEngine::MEMORY) {
@@ -2201,7 +2201,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		startingConfigString += format(" tss_storage_engine:=%d", simconfig.db.testingStorageServerStoreType);
 	}
 
-	if (g_simulator->originalRegions != "") {
+	if (!g_simulator->originalRegions.empty()) {
 		simconfig.set_config(g_simulator->originalRegions);
 		g_simulator->startingDisabledConfiguration = startingConfigString + " " + g_simulator->disableRemote;
 		startingConfigString += " " + g_simulator->originalRegions;
@@ -2357,7 +2357,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		}
 	}
 
-	ASSERT(coordinatorAddresses.size() > 0);
+	ASSERT(!coordinatorAddresses.empty());
 
 	// Mark a random majority of the coordinators as protected, so
 	// we won't accidentally kill off a quorum and render the
@@ -2460,7 +2460,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		for (int machine = 0; machine < totalMachines; machine++) {
 			Standalone<StringRef> machineId(deterministicRandom()->randomUniqueID().toString());
 			if (machine == 0 || machineCount - dataCenters <= 4 || assignedMachines != 4 ||
-			    simconfig.db.regions.size() || deterministicRandom()->random01() < 0.5) {
+			    !simconfig.db.regions.empty() || deterministicRandom()->random01() < 0.5) {
 				zoneId = deterministicRandom()->randomUniqueID().toString();
 				newZoneId = deterministicRandom()->randomUniqueID().toString();
 			}
@@ -2471,7 +2471,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 				if (assignedMachines < 4)
 					processClass = ProcessClass((ProcessClass::ClassType)deterministicRandom()->randomInt(0, 2),
 					                            ProcessClass::CommandLineSource); // Unset or Storage
-				else if (assignedMachines == 4 && !simconfig.db.regions.size())
+				else if (assignedMachines == 4 && simconfig.db.regions.empty())
 					processClass = ProcessClass(
 					    processClassesSubSet[deterministicRandom()->randomInt(0, processClassesSubSet.size())],
 					    ProcessClass::CommandLineSource); // Unset or Stateless
@@ -2540,7 +2540,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 
 			if (requiresExtraDBMachines) {
 				int cluster = 4;
-				for (auto extraDatabase : g_simulator->extraDatabases) {
+				for (const auto& extraDatabase : g_simulator->extraDatabases) {
 					std::vector<IPAddress> extraIps;
 					extraIps.reserve(processesPerMachine);
 					for (int i = 0; i < processesPerMachine; i++) {
@@ -2805,7 +2805,7 @@ static Future<Void> simulationSetupAndRunImpl(std::string dataFolder,
 			// protect coordinators for restarting tests
 			std::vector<NetworkAddress> coordinatorAddresses =
 			    co_await connFile->getConnectionString().tryResolveHostnames();
-			ASSERT(coordinatorAddresses.size() > 0);
+			ASSERT(!coordinatorAddresses.empty());
 			for (int i = 0; i < (coordinatorAddresses.size() / 2) + 1; i++) {
 				TraceEvent("ProtectCoordinator")
 				    .detail("Address", coordinatorAddresses[i])

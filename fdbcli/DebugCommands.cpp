@@ -378,7 +378,7 @@ Future<bool> doCheckAll(Database cx, KeyRange inputRange, Optional<StringRef> dc
 							throw reply.get().error.get();
 						}
 						GetKeyValuesReply current = reply.get();
-						if (current.data.size() == 0) {
+						if (current.data.empty()) {
 							continue; // Ignore if no data has replied
 						}
 						if (claimEndKey.empty() || current.data[current.data.size() - 1].key < claimEndKey) {

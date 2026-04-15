@@ -250,7 +250,7 @@ void RESTUrl::parseUrl(const std::string& fullUrl) {
 		// hostPort is at least a host or IP address, optionally followed by :portNumber or :serviceName
 		StringRef hRef(hostPort);
 		StringRef h = hRef.eat(":");
-		if (h.size() == 0) {
+		if (h.empty()) {
 			CODE_PROBE(true, "REST URI empty host");
 			throw std::string("host cannot be empty");
 		}

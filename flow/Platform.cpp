@@ -56,7 +56,6 @@
 #include "flow/SimpleCounter.h"
 #include "flow/StreamCipher.h"
 #include "flow/Trace.h"
-#include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/Util.h"
 
@@ -117,7 +116,6 @@ static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<u
 /* Needed for memory allocation */
 #include <linux/mman.h>
 /* Needed for processor affinity */
-#include <sched.h>
 /* Needed for getProcessorTime* and setpriority */
 #include <sys/syscall.h>
 /* Needed for setpriority */
@@ -1572,7 +1570,7 @@ SystemStatistics getSystemStatistics(std::string const& dataFolder,
 	returnStats.machineCommittedRAM = memInfo.committed;
 	returnStats.machineAvailableRAM = memInfo.available;
 
-	if (dataFolder != "") {
+	if (!dataFolder.empty()) {
 		int64_t diskTotal, diskFree;
 		getDiskBytes(dataFolder, diskFree, diskTotal);
 		returnStats.processDiskTotalBytes = diskTotal;
@@ -1733,7 +1731,7 @@ SystemStatistics getSystemStatistics(std::string const& dataFolder,
 
 	(*statState)->machineLastRetransSegs = machineRetransSegs;
 
-	if (dataFolder != "") {
+	if (!dataFolder.empty()) {
 		DiskStatistics currentDiskStats = getDiskStatistics(dataFolder);
 
 		returnStats.processDiskQueueDepth = currentDiskStats.currentIOs;
@@ -2233,9 +2231,9 @@ int getRandomSeed() {
 std::string joinPath(std::string const& directory, std::string const& filename) {
 	auto d = directory;
 	auto f = filename;
-	while (f.size() && (f[0] == '/' || f[0] == CANONICAL_PATH_SEPARATOR))
+	while (!f.empty() && (f[0] == '/' || f[0] == CANONICAL_PATH_SEPARATOR))
 		f = f.substr(1);
-	while (d.size() && (d.back() == '/' || d.back() == CANONICAL_PATH_SEPARATOR))
+	while (!d.empty() && (d.back() == '/' || d.back() == CANONICAL_PATH_SEPARATOR))
 		d.resize(d.size() - 1);
 	return d + CANONICAL_PATH_SEPARATOR + f;
 }
@@ -2477,9 +2475,9 @@ std::string cleanPath(std::string const& path) {
 
 	StringRef p(path);
 
-	while (p.size() != 0) {
+	while (!p.empty()) {
 		StringRef part = p.eat(separator);
-		if (part.size() == 0 || (part.size() == 1 && part[0] == '.'))
+		if (part.empty() || (part.size() == 1 && part[0] == '.'))
 			continue;
 		if (part == dotdot) {
 			if (!finalParts.empty() && finalParts.back() != dotdot) {
