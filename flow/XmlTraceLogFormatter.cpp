@@ -93,7 +93,7 @@ std::string XmlTraceLogFormatter::formatEvent(const TraceEventFields& fields) co
 	return std::move(oss).str();
 }
 
-// Test that TraceEvent details with XML junk get escaped.
+// Test case to ensure that TraceEvent details with XML junk get escaped.
 //
 // This doesn't attempt to ensure that whatever we log is valid XML.
 // We might be logging a response from a remote server which may or
