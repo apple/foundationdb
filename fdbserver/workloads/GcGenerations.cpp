@@ -173,10 +173,7 @@ struct GcGenerationsWorkload : TestWorkload {
 			g_simulator->rebootProcess(masterProc, ISimulator::KillType::Reboot);
 
 			// Wait for recovery to create a new generation.
-			// Use <= (not ==) so the loop only exits when oldTLogs has strictly grown.
-			// With ==, a generation GC that reduces oldTLogs.size() below generationCount
-			// would also exit the loop, then the ASSERT(size > generationCount) would fire.
-			while (self->dbInfo->get().logSystemConfig.oldTLogs.size() <= generationCount ||
+			while (self->dbInfo->get().logSystemConfig.oldTLogs.size() == generationCount ||
 			       self->dbInfo->get().recoveryState < RecoveryState::RECOVERY_TRANSACTION) {
 				co_await self->dbInfo->onChange();
 			}
