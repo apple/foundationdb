@@ -2831,6 +2831,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			self->context->markTrackerCancelled();
 			state Error err = e;
 			TraceEvent("DataDistributorDestroyTeamCollections", self->ddId).error(e);
+			TraceEvent(SevWarn, "DDExiting", self->ddId).error(e);
 			state std::vector<UID> teamForDroppedRange;
 			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
 				// Choose a random healthy team to host the to-be-dropped range.
