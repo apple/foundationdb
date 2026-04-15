@@ -3415,21 +3415,6 @@ ACTOR static Future<Void> clusterGetStatusImpl(
 			                                           "Fetching consistency scan state timed out."));
 		}
 
-		// Create the status_incomplete message if there were any reasons that the status is incomplete.
-		if (!status_incomplete_reasons->empty()) {
-			JsonBuilderObject incomplete_message =
-			    JsonBuilder::makeMessage("status_incomplete", "Unable to retrieve all status information.");
-			// Make a JSON array of all of the reasons in the status_incomplete_reasons set.
-			JsonBuilderArray reasons;
-			for (auto i : *status_incomplete_reasons) {
-				reasons.push_back(JsonBuilderObject().setKey("description", i));
-			}
-			incomplete_message["reasons"] = reasons;
-			messages->push_back(incomplete_message);
-		}
-
-		(*statusObj)["messages"] = messages;
-
 		int64_t clusterTime = g_network->timer();
 		if (clusterTime != -1) {
 			(*statusObj)["cluster_controller_timestamp"] = clusterTime;
@@ -3468,19 +3453,15 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	state JsonBuilderArray messages;
 	state std::set<std::string> status_incomplete_reasons;
 
-	Future<Void> deadline = delay(28.0);
-
-	choose {
-		when(wait(deadline)) {
-			// Add a message that the status timed out, then return
-		}
-		when(wait(clusterGetStatusImpl(
+	Optional<Void> result = wait(timeout(clusterGetStatusImpl(
 			&statusObj, &messages, &status_incomplete_reasons,
 			db, cx, workers, workerIssues, storageMetadatas, coordinators, excludedDegradedServers
-			))) {
-			// This was successful, so then just return the object
-		}
+			), 28.0));
+
+	if (!result.present()) {
+		status_incomplete_reasons.insert("Status collection deadline exceeded.");
 	}
+
 	// Other construction bits
 	statusObj["clients"] = clientStatusFetcher(clientStatus);
 
@@ -3502,6 +3483,20 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	statusObj["datacenter_lag"] = getLagObject(datacenterVersionDifference);
 	statusObj["logserver_lag"] = getLagObject(dcLogServerVersionDifference);
 	statusObj["storageserver_lag"] = getLagObject(dcStorageServerVersionDifference);
+
+	// Create the status_incomplete message if there were any reasons that the status is incomplete.
+	if (!status_incomplete_reasons.empty()) {
+		JsonBuilderObject incomplete_message =
+			JsonBuilder::makeMessage("status_incomplete", "Unable to retrieve all status information.");
+		// Make a JSON array of all of the reasons in the status_incomplete_reasons set.
+		JsonBuilderArray reasons;
+		for (auto i : status_incomplete_reasons) {
+			reasons.push_back(JsonBuilderObject().setKey("description", i));
+		}
+		incomplete_message["reasons"] = reasons;
+		messages.push_back(incomplete_message);
+	}
+	statusObj["messages"] = messages;
 
 	return StatusReply(statusObj.getJson());
 }
