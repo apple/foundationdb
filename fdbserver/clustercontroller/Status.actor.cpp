@@ -2974,7 +2974,6 @@ ACTOR static Future<Void> clusterGetStatusImpl(
 		state Future<JsonBuilderObject> recoveryStateStatusFuture =
 			recoveryStateStatusFetcher(cx, ccWorker, mWorker, workers.size(), status_incomplete_reasons, &statusCode);
 
-		// why can't this be moved down to the construction bit?
 		(*statusObj)["newest_protocol_version"] = format("%" PRIx64, protocolVersion.newestProtocolVersion.version());
 		(*statusObj)["lowest_compatible_protocol_version"] =
 			format("%" PRIx64, protocolVersion.lowestCompatibleProtocolVersion.version());
@@ -3823,9 +3822,7 @@ TEST_CASE("/status/json/merging") {
 }
 
 
-// Build then run with
-// bin/fdbserver -r unittests -f "/fdbserver/clustercontroller/clusterGetStatusDeadline" -p auto:4000
-// Test that clusterGetStatus returns partial results within 30 seconds
+// Test that clusterGetStatus returns partial results within the specified deadline
 // even when the database is unavailable and transactions hang forever.
 TEST_CASE("/fdbserver/clustercontroller/clusterGetStatusDeadline") {
 	// Create mock ServerDBInfo with fake interfaces that will never respond
