@@ -2862,26 +2862,12 @@ ACTOR static Future<Void> clusterGetStatusImpl(
     std::unordered_map<NetworkAddress, double> excludedDegradedServers) {
 
 	state double tStart = timer();
-	state double tLast = tStart;
 
 	state WorkerDetails mWorker; // Master worker
 	state WorkerDetails ccWorker; // Cluster-Controller worker
 	state WorkerDetails ddWorker; // DataDistributor worker
 	state WorkerDetails rkWorker; // Ratekeeper worker
 	state WorkerDetails csWorker; // ConsistencyScan worker
-	// Total we have 16 waits, the ones with database calls or timeouts are these
-	// Wait 2 - 1 second
-	// Wait 3 - 5 seconds
-	// Wait 4 - 5 seconds
-	// Wiat 5 - 5 seconds
-	// Wait 6 - 6 seconds
-	// Wait 7 - 3 seconds
-	// Wait 8 - 5 seconds
-	// Wait 9 - 5 seconds
-	// Wait 14 - 5 seconds
-	// Wait 16 - 2 seconds
-	// Total 42 seconds
-	// So even if we add the wait to the idempotency checker, this still won't be enough
 
 	try {
 		// Get the master Worker interface
@@ -2953,11 +2939,8 @@ ACTOR static Future<Void> clusterGetStatusImpl(
 		futures.push_back(latestEventOnWorkers(workers, "ProgramStart"));
 
 		// Wait for all response pairs.
-		// WAIT 1
 		state std::vector<Optional<std::pair<WorkerEvents, std::set<std::string>>>> workerEventsVec =
 		    wait(getAll(futures));
-		TraceEvent("StatusTiming").detail("Wait", 1).detail("Desc", "WorkerEvents").detail("Elapsed", timer() - tStart).detail("Delta", timer() - tLast);
-		tLast = timer();
 
 		// Create a unique set of all workers who were unreachable for 1 or more of the event requests above.
 		// Since each event request is independent and to all workers, workers can have responded to some
@@ -2984,17 +2967,13 @@ ACTOR static Future<Void> clusterGetStatusImpl(
 			messages->push_back(message);
 		}
 
-		// WAIT 2
 		state ProtocolVersionData protocolVersion = wait(getNewestProtocolVersion(cx, ccWorker));
-		TraceEvent("StatusTiming").detail("Wait", 2).detail("Desc", "ProtocolVersion").detail("Elapsed", timer() - tStart).detail("Delta", timer() - tLast);
-		tLast = timer();
 
 		// construct status information for cluster subsections
 		state int statusCode = (int)RecoveryStatus::END;
 		state Future<JsonBuilderObject> recoveryStateStatusFuture =
 			recoveryStateStatusFetcher(cx, ccWorker, mWorker, workers.size(), status_incomplete_reasons, &statusCode);
 
-		// WAIT 2 data used here
 		// why can't this be moved down to the construction bit?
 		(*statusObj)["newest_protocol_version"] = format("%" PRIx64, protocolVersion.newestProtocolVersion.version());
 		(*statusObj)["lowest_compatible_protocol_version"] =
@@ -3011,8 +2990,6 @@ ACTOR static Future<Void> clusterGetStatusImpl(
 
 		wait(success(recoveryStateStatusFuture) && success(idmpKeyStatusFuture) &&
 		     success(versionEpochStatusFuture));
-		TraceEvent("StatusTiming").detail("Wait", 3).detail("Desc", "RecoveryIdmpVersionEpoch").detail("Elapsed", timer() - tStart).detail("Delta", timer() - tLast);
-		tLast = timer();
 
 		state JsonBuilderObject recoveryStateStatus = recoveryStateStatusFuture.get();
 		state JsonBuilderObject idmpKeyStatus;
@@ -3064,15 +3041,11 @@ ACTOR static Future<Void> clusterGetStatusImpl(
 		state Optional<LoadConfigurationResult> loadResult;
 		state std::unordered_map<NetworkAddress, WorkerInterface> address_workers;
 
-		// WAIT 4: 5 second time out
-		// This data is used immediately
 		if (statusCode != RecoveryStatus::configuration_missing) {
 			std::pair<Optional<DatabaseConfiguration>, Optional<LoadConfigurationResult>> loadResults =
 			    wait(loadConfiguration(cx, messages, status_incomplete_reasons));
 			configuration = loadResults.first;
 			loadResult = loadResults.second;
-			TraceEvent("StatusTiming").detail("Wait", 4).detail("Desc", "LoadConfiguration").detail("Elapsed", timer() - tStart).detail("Delta", timer() - tLast);
-			tLast = timer();
 		}
 
 		if (loadResult.present()) {
@@ -3103,8 +3076,6 @@ ACTOR static Future<Void> clusterGetStatusImpl(
 			state bool isAvailable = true;
 			JsonBuilderObject latencyProbeResults =
 			    wait(latencyProbeFetcher(cx, messages, status_incomplete_reasons, &isAvailable));
-			TraceEvent("StatusTiming").detail("Wait", 5).detail("Desc", "LatencyProbe").detail("Elapsed", timer() - tStart).detail("Delta", timer() - tLast);
-			tLast = timer();
 
 			(*statusObj)["database_available"] = isAvailable;
 			if (!latencyProbeResults.empty()) {
@@ -3154,13 +3125,10 @@ ACTOR static Future<Void> clusterGetStatusImpl(
 				double timeout = g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01) ? 0.0 : 2.0;
 				primaryWiggleValues = timeoutError(readStorageWiggleValues(cx, true, true), timeout);
 				remoteWiggleValues = timeoutError(readStorageWiggleValues(cx, false, true), timeout);
-				// WAIT 6: 6 seconds
 				wait(store(
 				         storageWiggler,
 				         storageWigglerStatsFetcher(db->get().distributor, configuration.get(), cx, true, messages)) &&
 				     ready(primaryWiggleValues) && ready(remoteWiggleValues));
-				TraceEvent("StatusTiming").detail("Wait", 6).detail("Desc", "WigglerStats").detail("Elapsed", timer() - tStart).detail("Delta", timer() - tLast);
-				tLast = timer();
 
 				if (primaryWiggleValues.canGet()) {
 					for (auto& p : primaryWiggleValues.get())
@@ -3179,10 +3147,7 @@ ACTOR static Future<Void> clusterGetStatusImpl(
 				}
 			}
 
-			// WAIT 8: 5 seconds
 			wait(success(primaryDCFO));
-			TraceEvent("StatusTiming").detail("Wait", 8).detail("Desc", "PrimaryDcfo").detail("Elapsed", timer() - tStart).detail("Delta", timer() - tLast);
-			tLast = timer();
 
 			if (primaryDCFO.get().present()) {
 				(*statusObj)["active_primary_dc"] = primaryDCFO.get().get();
@@ -3190,8 +3155,6 @@ ACTOR static Future<Void> clusterGetStatusImpl(
 
 			ErrorOr<std::vector<NetworkAddress>> addresses =
 			    wait(errorOr(timeoutError(coordinators.ccr->getConnectionString().tryResolveHostnames(), 5.0)));
-			TraceEvent("StatusTiming").detail("Wait", 9).detail("Desc", "Addresses").detail("Elapsed", timer() - tStart).detail("Delta", timer() - tLast);
-			tLast = timer();
 			if (addresses.present()) {
 				coordinatorAddresses = std::move(addresses.get());
 			} else {
@@ -3224,10 +3187,7 @@ ACTOR static Future<Void> clusterGetStatusImpl(
 				(*statusObj)["configuration"] = configObj;
 			}
 
-			// WAIT 7: 3 seconds?
 			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
-			TraceEvent("StatusTiming").detail("Wait", 7).detail("Desc", "WorkerStatuses").detail("Elapsed", timer() - tStart).detail("Delta", timer() - tLast);
-			tLast = timer();
 
 			// workloadStatusFetcher returns the workload section but also optionally writes the qos section and
 			// adds to the dataOverlay object
@@ -3261,7 +3221,6 @@ ACTOR static Future<Void> clusterGetStatusImpl(
 			}
 
 			// Need storage servers now for processStatusFetcher() below.
-			// WAIT 10: I think these are RPC calls
 			ErrorOr<std::vector<StorageServerStatusInfo>> _storageServers = wait(storageServerFuture);
 			if (_storageServers.present()) {
 				storageServers = _storageServers.get();
@@ -3269,11 +3228,8 @@ ACTOR static Future<Void> clusterGetStatusImpl(
 				messages->push_back(
 				    JsonBuilder::makeMessage("storage_servers_error", "Timed out trying to retrieve storage servers."));
 			}
-			TraceEvent("StatusTiming").detail("Wait", 10).detail("Desc", "StorageServers").detail("Elapsed", timer() - tStart).detail("Delta", timer() - tLast);
-			tLast = timer();
 
 			// ...also tlogs
-			// WAIT 11: maybe RPC problem?
 			ErrorOr<std::vector<std::pair<TLogInterface, EventMap>>> _tLogs = wait(tLogFuture);
 			if (_tLogs.present()) {
 				tLogs = _tLogs.get();
@@ -3281,11 +3237,8 @@ ACTOR static Future<Void> clusterGetStatusImpl(
 				messages->push_back(
 				    JsonBuilder::makeMessage("log_servers_error", "Timed out trying to retrieve log servers."));
 			}
-			TraceEvent("StatusTiming").detail("Wait", 11).detail("Desc", "TLogs").detail("Elapsed", timer() - tStart).detail("Delta", timer() - tLast);
-			tLast = timer();
 
 			// ...also commit proxies
-			// WAIT 12: RPC
 			ErrorOr<std::vector<std::pair<CommitProxyInterface, EventMap>>> _commitProxies = wait(commitProxyFuture);
 			if (_commitProxies.present()) {
 				commitProxies = _commitProxies.get();
@@ -3293,11 +3246,8 @@ ACTOR static Future<Void> clusterGetStatusImpl(
 				messages->push_back(
 				    JsonBuilder::makeMessage("commit_proxies_error", "Timed out trying to retrieve commit proxies."));
 			}
-			TraceEvent("StatusTiming").detail("Wait", 12).detail("Desc", "CommitProxies").detail("Elapsed", timer() - tStart).detail("Delta", timer() - tLast);
-			tLast = timer();
 
 			// ...also grv proxies
-			// WAIT 13: RPC
 			ErrorOr<std::vector<std::pair<GrvProxyInterface, EventMap>>> _grvProxies = wait(grvProxyFuture);
 			if (_grvProxies.present()) {
 				grvProxies = _grvProxies.get();
@@ -3305,14 +3255,9 @@ ACTOR static Future<Void> clusterGetStatusImpl(
 				messages->push_back(
 				    JsonBuilder::makeMessage("grv_proxies_error", "Timed out trying to retrieve grv proxies."));
 			}
-			TraceEvent("StatusTiming").detail("Wait", 13).detail("Desc", "GrvProxies").detail("Elapsed", timer() - tStart).detail("Delta", timer() - tLast);
-			tLast = timer();
 
 			if (!warningFutures.empty()) {
-				// WAIT 14: 5 seconds
 				wait(waitForAll(warningFutures));
-				TraceEvent("StatusTiming").detail("Wait", 14).detail("Desc", "WarningFutures").detail("Elapsed", timer() - tStart).detail("Delta", timer() - tLast);
-				tLast = timer();
 			}
 		} else {
 			// Set layers status to { _valid: false, error: "configurationMissing"}
@@ -3322,7 +3267,6 @@ ACTOR static Future<Void> clusterGetStatusImpl(
 			(*statusObj)["layers"] = layers;
 		}
 
-		// WAIT 15: seems like CX is unused
 		JsonBuilderObject processStatus =
 		    wait(processStatusFetcher(db,
 		                              workers,
@@ -3343,8 +3287,6 @@ ACTOR static Future<Void> clusterGetStatusImpl(
 		                              configuration,
 		                              loadResult.present() ? loadResult.get().healthyZone : Optional<Key>(),
 		                              status_incomplete_reasons));
-		TraceEvent("StatusTiming").detail("Wait", 15).detail("Desc", "ProcessStatus").detail("Elapsed", timer() - tStart).detail("Delta", timer() - tLast);
-		tLast = timer();
 		(*statusObj)["processes"] = processStatus;
 
 		int activeTSSCount = 0;
@@ -3387,15 +3329,12 @@ ACTOR static Future<Void> clusterGetStatusImpl(
 			auto sysDB = SystemDBWriteLockedNow(cx.getReference());
 
 			// TODO: Use the same transaction.
-			// WAIT 16: 2 seconds
 			wait(timeoutError(
 			    store(config, cs.config().getD(sysDB)) && store(currentRound, cs.currentRoundStats().getD(sysDB)) &&
 			        store(lifetime, cs.lifetimeStats().getD(sysDB)) &&
 			        store(olderStats,
 			              cs.roundStatsHistory().getRange(sysDB, {}, {}, 5, Snapshot::False, Reverse::True)),
 			    2.0));
-			TraceEvent("StatusTiming").detail("Wait", 16).detail("Desc", "ConsistencyScan").detail("Elapsed", timer() - tStart).detail("Delta", timer() - tLast);
-			tLast = timer();
 			json_spirit::mObject csDoc;
 			csDoc["configuration"] = config.toJSON();
 			csDoc["lifetime_stats"] = lifetime.toJSON();
