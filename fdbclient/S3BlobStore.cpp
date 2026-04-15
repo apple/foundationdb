@@ -1295,7 +1295,7 @@ Future<Optional<std::string>> finishMultiPartUpload_impl(Reference<S3BlobStoreEn
                                                          std::string object,
                                                          std::string uploadID,
                                                          S3BlobStoreEndpoint::MultiPartSetT parts,
-                                                         int64_t totalSize) {
+                                                         int64_t /*totalSize*/) {
 	UnsentPacketQueue part_list; // NonCopyable state var so must be declared at top of actor
 	co_await bstore->requestRateWrite->getAllowance(1);
 

@@ -46,7 +46,9 @@ public:
 	                    BlobKnobs const& knobs = BlobKnobs(),
 	                    HTTP::Headers extraHeaders = HTTP::Headers());
 
-	// Guess AWS region from the hostname (e.g. "s3.us-west-2.amazonaws.com" → "us-west-2")
+	// Infer the cloud region from a hostname by matching known service prefixes
+	// (e.g. "s3.us-west-2.amazonaws.com" -> "us-west-2", "cos.ap-beijing.myqcloud.com" → "ap-beijing").
+	// Returns "auto" for GCS S3-compatible endpoints and "" if no pattern matches.
 	static std::string guessRegionFromDomain(std::string domain);
 
 	// Convenience: parse URL and return as S3BlobStoreEndpoint (downcasts from IBlobStoreEndpoint::fromString).
@@ -58,7 +60,14 @@ public:
 	                                                 ParametersT* ignored_parameters) {
 		Reference<IBlobStoreEndpoint> base =
 		    IBlobStoreEndpoint::fromString(url, proxy, resourceFromURL, error, ignored_parameters);
-		return Reference<S3BlobStoreEndpoint>::addRef(dynamic_cast<S3BlobStoreEndpoint*>(base.getPtr()));
+		S3BlobStoreEndpoint* endpoint = dynamic_cast<S3BlobStoreEndpoint*>(base.getPtr());
+		if (base && !endpoint) {
+			if (error) {
+				*error = "Parsed blob store endpoint is not an S3BlobStoreEndpoint";
+			}
+			return Reference<S3BlobStoreEndpoint>();
+		}
+		return Reference<S3BlobStoreEndpoint>::addRef(endpoint);
 	}
 
 	Future<Void> updateSecret() override;

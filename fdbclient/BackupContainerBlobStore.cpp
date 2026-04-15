@@ -189,7 +189,7 @@ void BackupContainerBlobStore::validateBackupUrl(const std::string& resource) {
 		throw backup_invalid_url();
 
 	for (auto c : resource)
-		if (!isalnum(c) && c != '_' && c != '-' && c != '.' && c != '/')
+		if (!isalnum(static_cast<unsigned char>(c)) && c != '_' && c != '-' && c != '.' && c != '/')
 			throw backup_invalid_url();
 }
 

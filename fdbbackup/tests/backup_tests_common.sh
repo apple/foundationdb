@@ -19,7 +19,7 @@
 # limitations under the License.
 #
 # Common backup test functions
-# Shared between backup_restore_test.sh, s3_backup_bulkdump_bulkload.sh, dir_backup_test.sh, etc.
+# Shared between blob_backup_restore_test.sh, s3_backup_bulkdump_bulkload.sh, dir_backup_test.sh, etc.
 # These functions work with both S3/blobstore and file-based backup testing
 
 # Source shared test utilities (output_contains, output_matches, etc.)

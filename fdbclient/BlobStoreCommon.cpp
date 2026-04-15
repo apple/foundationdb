@@ -850,7 +850,7 @@ Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<IBlobStoreEnd
 			rconn.conn.clear();
 
 		} catch (Error& e) {
-			TraceEvent("BlobStoreDoRequestError")
+			TraceEvent(SevWarn, "BlobStoreDoRequestError")
 			    .errorUnsuppressed(e)
 			    .detail("Verb", verb)
 			    .detail("Resource", resource);

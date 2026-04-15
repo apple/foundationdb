@@ -8,13 +8,13 @@
 # a restore. We verify the restore is the same as the original.
 #
 # Debugging:
-#   - Run with -x flag: bash -x backup_restore_test.sh...
-#   - Preserve test data: PRESERVE_TEST_DATA=1 ./backup_restore_test.sh ...
+#   - Run with -x flag: bash -x blob_backup_restore_test.sh...
+#   - Preserve test data: PRESERVE_TEST_DATA=1 ./blob_backup_restore_test.sh ...
 #     This will leave all test data including MockS3 persistence files
 #     in the test scratch directory for analysis after the test completes.
 #
 # Usage:
-#   backup_restore_test.sh <source_dir> <build_dir> [scratch_dir] [--encrypt]
+#   blob_backup_restore_test.sh <source_dir> <build_dir> [scratch_dir] [--encrypt]
 #
 # See https://apple.github.io/foundationdb/backups.html
 
