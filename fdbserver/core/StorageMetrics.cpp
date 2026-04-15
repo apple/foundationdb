@@ -666,22 +666,22 @@ void StorageServerMetrics::add(KeyRangeMap<int>& map, KeyRangeRef const& keys, i
 
 void StorageServerMetrics::traceWaitMetricsMapIfHighWatermark(const char* reason, KeyRangeRef keys) {
 	auto stats = summarizeWaitMetricsMap(waitMetricsMap);
-	if (stats.rangeCount <= waitMetricsMapRangeCountHighWatermark &&
-	    stats.nonEmptyRangeCount <= waitMetricsMapNonEmptyRangeCountHighWatermark &&
-	    stats.watcherCount <= waitMetricsMapWatcherCountHighWatermark &&
-	    stats.watcherCapacity <= waitMetricsMapWatcherCapacityHighWatermark &&
-	    stats.maxWatchersPerRange <= waitMetricsMapMaxWatchersPerRangeHighWatermark) {
+	if (stats.rangeCount <= waitMetricsMapHighWatermarks.rangeCount &&
+	    stats.nonEmptyRangeCount <= waitMetricsMapHighWatermarks.nonEmptyRangeCount &&
+	    stats.watcherCount <= waitMetricsMapHighWatermarks.watcherCount &&
+	    stats.watcherCapacity <= waitMetricsMapHighWatermarks.watcherCapacity &&
+	    stats.maxWatchersPerRange <= waitMetricsMapHighWatermarks.maxWatchersPerRange) {
 		return;
 	}
 
-	waitMetricsMapRangeCountHighWatermark = std::max(waitMetricsMapRangeCountHighWatermark, stats.rangeCount);
-	waitMetricsMapNonEmptyRangeCountHighWatermark =
-	    std::max(waitMetricsMapNonEmptyRangeCountHighWatermark, stats.nonEmptyRangeCount);
-	waitMetricsMapWatcherCountHighWatermark = std::max(waitMetricsMapWatcherCountHighWatermark, stats.watcherCount);
-	waitMetricsMapWatcherCapacityHighWatermark =
-	    std::max(waitMetricsMapWatcherCapacityHighWatermark, stats.watcherCapacity);
-	waitMetricsMapMaxWatchersPerRangeHighWatermark =
-	    std::max(waitMetricsMapMaxWatchersPerRangeHighWatermark, stats.maxWatchersPerRange);
+	waitMetricsMapHighWatermarks.rangeCount = std::max(waitMetricsMapHighWatermarks.rangeCount, stats.rangeCount);
+	waitMetricsMapHighWatermarks.nonEmptyRangeCount =
+	    std::max(waitMetricsMapHighWatermarks.nonEmptyRangeCount, stats.nonEmptyRangeCount);
+	waitMetricsMapHighWatermarks.watcherCount = std::max(waitMetricsMapHighWatermarks.watcherCount, stats.watcherCount);
+	waitMetricsMapHighWatermarks.watcherCapacity =
+	    std::max(waitMetricsMapHighWatermarks.watcherCapacity, stats.watcherCapacity);
+	waitMetricsMapHighWatermarks.maxWatchersPerRange =
+	    std::max(waitMetricsMapHighWatermarks.maxWatchersPerRange, stats.maxWatchersPerRange);
 
 	TraceEvent(SevInfo, "WaitMetricsMapStats")
 	    .detail("Reason", reason)
@@ -691,11 +691,11 @@ void StorageServerMetrics::traceWaitMetricsMapIfHighWatermark(const char* reason
 	    .detail("WatcherCount", stats.watcherCount)
 	    .detail("WatcherCapacity", stats.watcherCapacity)
 	    .detail("MaxWatchersPerRange", stats.maxWatchersPerRange)
-	    .detail("RangeCountHighWatermark", waitMetricsMapRangeCountHighWatermark)
-	    .detail("NonEmptyRangeCountHighWatermark", waitMetricsMapNonEmptyRangeCountHighWatermark)
-	    .detail("WatcherCountHighWatermark", waitMetricsMapWatcherCountHighWatermark)
-	    .detail("WatcherCapacityHighWatermark", waitMetricsMapWatcherCapacityHighWatermark)
-	    .detail("MaxWatchersPerRangeHighWatermark", waitMetricsMapMaxWatchersPerRangeHighWatermark);
+	    .detail("RangeCountHighWatermark", waitMetricsMapHighWatermarks.rangeCount)
+	    .detail("NonEmptyRangeCountHighWatermark", waitMetricsMapHighWatermarks.nonEmptyRangeCount)
+	    .detail("WatcherCountHighWatermark", waitMetricsMapHighWatermarks.watcherCount)
+	    .detail("WatcherCapacityHighWatermark", waitMetricsMapHighWatermarks.watcherCapacity)
+	    .detail("MaxWatchersPerRangeHighWatermark", waitMetricsMapHighWatermarks.maxWatchersPerRange);
 }
 
 Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest req, Future<Void> timeout) {
