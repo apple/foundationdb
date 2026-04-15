@@ -35,6 +35,7 @@
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include <time.h>
 #include "ClusterRecovery.actor.h"
+#include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbserver/core/CoordinationInterface.h"
 #include "fdbserver/datadistributor/DataDistribution.h"
 #include "fdbclient/ConsistencyScanInterface.h"
@@ -3887,6 +3888,128 @@ TEST_CASE("/status/json/merging") {
 		       expected.c_str(),
 		       result.c_str());
 		ASSERT(false);
+	}
+
+	return Void();
+}
+
+
+// Build then run with
+// bin/fdbserver -r unittests -f "/fdbserver/clustercontroller/clusterGetStatusDeadline" -p auto:4000
+// Test that clusterGetStatus returns partial results within 30 seconds
+// even when the database is unavailable and transactions hang forever.
+TEST_CASE("/fdbserver/clustercontroller/clusterGetStatusDeadline") {
+	// Create mock ServerDBInfo with fake interfaces that will never respond
+	NetworkAddress masterAddr(IPAddress(0x01010101), 1);
+	NetworkAddress ccAddr(IPAddress(0x09090909), 1);
+	NetworkAddress proxyAddr(IPAddress(0x07070707), 1);
+	UID testUID(1, 2);
+
+	ServerDBInfo testDbInfo;
+	testDbInfo.clusterInterface.changeCoordinators =
+	    RequestStream<struct ChangeCoordinatorsRequest>(Endpoint({ ccAddr }, testUID));
+
+	MasterInterface mInterface;
+	mInterface.getCommitVersion = RequestStream<struct GetCommitVersionRequest>(Endpoint({ masterAddr }, testUID));
+	testDbInfo.master = mInterface;
+
+	// Add a GRV proxy that points to a non-existent address — any GRV request will hang
+	GrvProxyInterface proxyInterf;
+	proxyInterf.getConsistentReadVersion =
+	    PublicRequestStream<struct GetReadVersionRequest>(Endpoint({ proxyAddr }, testUID));
+	testDbInfo.client.grvProxies.push_back(proxyInterf);
+
+	testDbInfo.recoveryState = RecoveryState::ACCEPTING_COMMITS;
+	testDbInfo.recoveryCount = 1;
+
+	state Reference<AsyncVar<ServerDBInfo>> db = makeReference<AsyncVar<ServerDBInfo>>(testDbInfo);
+	state Database cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True);
+
+	// Create minimal ServerCoordinators
+	state ServerCoordinators coordinators(Reference<IClusterConnectionRecord>(
+	    new ClusterConnectionMemoryRecord(ClusterConnectionString())));
+
+	// Empty containers for other parameters
+	state std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>> clientStatus;
+
+	// Call clusterGetStatus — it should return within 30 seconds even though
+	// all transaction-dependent operations will hang (GRV proxy is unreachable)
+	state double startTime = now();
+	state Future<StatusReply> statusFuture = clusterGetStatus(db,
+	                                                          cx,
+	                                                          std::vector<WorkerDetails>(),
+	                                                          std::vector<ProcessIssues>(),
+	                                                          std::vector<StorageServerMetaInfo>(),
+	                                                          &clientStatus,
+	                                                          coordinators,
+	                                                          std::vector<NetworkAddress>(),
+	                                                          0,
+	                                                          0,
+	                                                          0,
+	                                                          std::unordered_map<NetworkAddress, double>());
+	state Future<Void> timeout = delay(30.0);
+
+	choose {
+		when(StatusReply reply = wait(statusFuture)) {
+			double elapsed = now() - startTime;
+
+			// Log the full status JSON for inspection
+			TraceEvent("ClusterGetStatusDeadlineTest")
+			    .detail("Elapsed", elapsed)
+			    .detail("StatusSize", reply.statusStr.size())
+			    .detail("StatusJSON", reply.statusStr);
+			fmt::print("=== Status JSON ({:.2f}s) ===\n{}\n=== End Status JSON ===\n",
+			           elapsed, reply.statusStr);
+
+			// Verify it returned before 30 seconds
+			ASSERT(elapsed < 30.0);
+
+			// Parse and inspect the status object
+			json_spirit::mValue mv = readJSONStrictly(reply.statusStr);
+			auto obj = mv.get_obj();
+
+			// Fields set before any transaction — should always be present
+			ASSERT(obj.count("protocol_version") > 0);
+			ASSERT(obj.count("connection_string") > 0);
+			ASSERT(obj.count("bounce_impact") > 0);
+
+			// Assembly section fields — should be present even after deadline
+			ASSERT(obj.count("messages") > 0);
+			ASSERT(obj.count("clients") > 0);
+			ASSERT(obj.count("incompatible_connections") > 0);
+			ASSERT(obj.count("datacenter_lag") > 0);
+			ASSERT(obj.count("degraded_processes") > 0);
+			ASSERT(obj.count("cluster_controller_timestamp") > 0);
+
+			// Verify the deadline-exceeded message is in messages
+			auto& messagesArr = obj["messages"].get_array();
+			bool foundDeadlineMsg = false;
+			bool foundIncomplete = false;
+			for (auto& msg : messagesArr) {
+				auto& msgObj = msg.get_obj();
+				if (msgObj.count("name") && msgObj["name"].get_str() == "status_incomplete") {
+					foundIncomplete = true;
+					if (msgObj.count("reasons")) {
+						for (auto& reason : msgObj["reasons"].get_array()) {
+							auto& reasonObj = reason.get_obj();
+							if (reasonObj.count("description") &&
+							    reasonObj["description"].get_str() == "Status collection deadline exceeded.") {
+								foundDeadlineMsg = true;
+							}
+						}
+					}
+				}
+			}
+			fmt::print("Found status_incomplete message: {}\n", foundIncomplete);
+			fmt::print("Found deadline exceeded reason: {}\n", foundDeadlineMsg);
+			ASSERT(foundIncomplete);
+			ASSERT(foundDeadlineMsg);
+		}
+		when(wait(timeout)) {
+			TraceEvent(SevError, "ClusterGetStatusDeadlineTestFailed")
+			    .detail("Elapsed", now() - startTime);
+			ASSERT(false); // clusterGetStatus did not return within 30 seconds
+		}
 	}
 
 	return Void();
