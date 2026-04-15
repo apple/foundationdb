@@ -1426,9 +1426,23 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker* self, Reference<I
 		wait(yield(TaskPriority::DataDistribution));
 	}
 
+	TraceEvent("TrackInitialShardsComplete", self->distributorId).detail("ShardsTracked", s);
+
+	state double changeSizesStart = now();
 	Future<Void> initialSize = changeSizes(self, KeyRangeRef(allKeys.begin, allKeys.end), 0, "ShardInit");
 	self->readyToStart.send(Void());
 	wait(initialSize);
+
+	TraceEvent("TrackInitialShardsMetricsComplete", self->distributorId)
+	    .detail("ElapsedSeconds", now() - changeSizesStart);
+
+	// DDInitDone bookends DDInitRunning — marks DD fully operational. Uses DD* prefix so
+	// the full startup sequence can be queried with Type="DD*" in trace logs.
+	// Ideally this would be in DataDistribution.actor.cpp but dataDistribution() has no
+	// callback after trackInitialShards completes — it launches all actors and waits forever.
+	// Adding a new promise to signal completion would work but risks disturbing current operation.
+	TraceEvent("DDInitDone", self->distributorId);
+
 	self->maxShardSizeUpdater = updateMaxShardSize(self->dbSizeEstimate, self->maxShardSize);
 
 	return Void();
