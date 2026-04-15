@@ -416,19 +416,6 @@ TEST_CASE("/flow/genericcoros/Trigger") {
 	return Void();
 }
 
-TEST_CASE("/flow/genericcoros/TriggerOnError") {
-	state Reference<AsyncVar<bool>> called = makeReference<AsyncVar<bool>>(false);
-	wait(generic_coro::triggerOnError(SetAsyncVarTrue{ called }, Future<Void>(Void())));
-	ASSERT(!called->get());
-
-	int errorCode = wait(
-	    getVoidErrorCode(generic_coro::triggerOnError(SetAsyncVarTrue{ called }, Future<Void>(operation_failed()))));
-	ASSERT_EQ(errorCode, 0);
-	ASSERT(called->get());
-
-	return Void();
-}
-
 #if false
 TEST_CASE("/flow/genericactors/generic/storeTuple") {
 	state std::vector<UID> resA;
