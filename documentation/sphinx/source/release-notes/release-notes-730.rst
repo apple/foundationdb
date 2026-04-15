@@ -11,7 +11,7 @@ Release Notes
 7.3.76
 ======
 * Fixed peer disconnect detection in waitValueOrSignal so dead connections are detected immediately instead of hanging indefinitely. `(PR #12935) <https://github.com/apple/foundationdb/pull/12935>`_
-* Made getTeamByServers O(1) in time. `(PR #12938) <https://github.com/apple/foundationdb/pull/12938>`_
+* Made getTeamByServers O(1) in time which was sometimes causing Data Distributor (DD) to get stuck during initialization when shard_encode_location_metadata was enabled. `(PR #12938) <https://github.com/apple/foundationdb/pull/12938>`_
 
 7.3.75
 ======
