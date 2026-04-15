@@ -63,11 +63,6 @@ std::string S3BlobStoreEndpoint::guessRegionFromDomain(std::string domain) {
 		return "us-east-1";
 	}
 
-	// GCS S3-compatible endpoint: return "auto" so v4 signatures work with any region
-	if (domain.find("storage.googleapis.com") != std::string::npos) {
-		return "auto";
-	}
-
 	static const std::vector<const char*> knownServices = { "s3.", "cos.", "oss-", "obs." };
 	boost::algorithm::to_lower(domain);
 

@@ -462,7 +462,7 @@ Future<Void> updateSecret_impl(Reference<IBlobStoreEndpoint> b) {
 	TraceEvent(SevWarn, "BlobStoreCredentialsMissing")
 	    .detail("Endpoint", b->host)
 	    .detail("Service", b->service)
-	    .detail("CredentialsKey", credentialsFileKey);
+	    .detail("Reason", "No valid credentials found");
 	throw backup_auth_missing();
 }
 

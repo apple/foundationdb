@@ -47,8 +47,8 @@ public:
 	                    HTTP::Headers extraHeaders = HTTP::Headers());
 
 	// Infer the cloud region from a hostname by matching known service prefixes
-	// (e.g. "s3.us-west-2.amazonaws.com" -> "us-west-2", "cos.ap-beijing.myqcloud.com" → "ap-beijing").
-	// Returns "auto" for GCS S3-compatible endpoints and "" if no pattern matches.
+	// (e.g. "s3.us-west-2.amazonaws.com" -> "us-west-2", "cos.ap-beijing.myqcloud.com" -> "ap-beijing").
+	// Returns "" if no pattern matches.
 	static std::string guessRegionFromDomain(std::string domain);
 
 	// Convenience: parse URL and return as S3BlobStoreEndpoint (downcasts from IBlobStoreEndpoint::fromString).
