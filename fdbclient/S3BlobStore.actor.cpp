@@ -1083,12 +1083,6 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			event.detail("HttpResponseContent", r->data.content);
 			std::string s3Error = parseErrorCodeFromS3(r->data.content);
 			event.detail("S3ErrorCode", s3Error);
-			if (r->code >= 400 && r->code < 500) {
-				TraceEvent(SevWarnAlways, "S3BlobStoreClientError")
-				    .detail("HttpCode", r->code)
-				    .detail("HttpResponseContent", r->data.content)
-				    .detail("S3Error", s3Error);
-			}
 		}
 
 		event.detail("Verb", verb)
