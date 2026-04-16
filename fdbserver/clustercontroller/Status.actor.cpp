@@ -45,7 +45,6 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/StorageWiggleMetrics.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 const char* RecoveryStatus::names[] = { "reading_coordinated_state",
 	                                    "locking_coordinated_state",
@@ -1617,98 +1616,98 @@ struct LoadConfigurationResult {
 	  : fullReplication(true), healthyZoneSeconds(0), rebalanceDDIgnored(false), dataDistributionDisabled(false) {}
 };
 
-ACTOR static Future<std::pair<Optional<DatabaseConfiguration>, Optional<LoadConfigurationResult>>>
+static Future<std::pair<Optional<DatabaseConfiguration>, Optional<LoadConfigurationResult>>>
 loadConfiguration(Database cx, JsonBuilderArray* messages, std::set<std::string>* status_incomplete_reasons) {
-	state Optional<DatabaseConfiguration> result;
-	state Optional<LoadConfigurationResult> loadResult;
-	state Transaction tr(cx);
-	state Future<Void> getConfTimeout = delay(5.0);
+	Optional<DatabaseConfiguration> result;
+	Optional<LoadConfigurationResult> loadResult;
+	Transaction tr(cx);
+	Future<Void> getConfTimeout = delay(5.0);
 
-	loop {
+	while (true) {
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		tr.setOption(FDBTransactionOptions::CAUSAL_READ_RISKY);
+		Error err;
 		try {
-			choose {
-				when(RangeResult res = wait(tr.getRange(configKeys, SERVER_KNOBS->CONFIGURATION_ROWS_TO_FETCH))) {
-					DatabaseConfiguration configuration;
-					if (res.size() == SERVER_KNOBS->CONFIGURATION_ROWS_TO_FETCH) {
-						status_incomplete_reasons->insert("Too many configuration parameters set.");
-					} else {
-						configuration.fromKeyValues((VectorRef<KeyValueRef>)res);
-					}
-
-					result = configuration;
+			auto configResult =
+			    co_await race(tr.getRange(configKeys, SERVER_KNOBS->CONFIGURATION_ROWS_TO_FETCH), getConfTimeout);
+			if (configResult.index() == 0) {
+				RangeResult res = std::get<0>(std::move(configResult));
+				DatabaseConfiguration configuration;
+				if (res.size() == SERVER_KNOBS->CONFIGURATION_ROWS_TO_FETCH) {
+					status_incomplete_reasons->insert("Too many configuration parameters set.");
+				} else {
+					configuration.fromKeyValues((VectorRef<KeyValueRef>)res);
 				}
-				when(wait(getConfTimeout)) {
-					if (!result.present()) {
-						messages->push_back(JsonString::makeMessage("unreadable_configuration",
-						                                            "Unable to read database configuration."));
-					} else {
-						messages->push_back(
-						    JsonString::makeMessage("full_replication_timeout", "Unable to read datacenter replicas."));
-					}
-					break;
-				}
-			}
 
-			ASSERT(result.present());
-			state std::vector<Future<Optional<Value>>> replicasFutures;
-			for (auto& region : result.get().regions) {
-				replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(region.dcId)));
-			}
-			state Future<Optional<Value>> healthyZoneValue = tr.get(healthyZoneKey);
-			state Future<Optional<Value>> rebalanceDDIgnored = tr.get(rebalanceDDIgnoreKey);
-			state Future<Optional<Value>> ddModeKey = tr.get(dataDistributionModeKey);
-
-			choose {
-				when(wait(waitForAll(replicasFutures) && success(healthyZoneValue) && success(rebalanceDDIgnored) &&
-				          success(ddModeKey))) {
-					int unreplicated = 0;
-					for (int i = 0; i < result.get().regions.size(); i++) {
-						if (!replicasFutures[i].get().present() ||
-						    decodeDatacenterReplicasValue(replicasFutures[i].get().get()) <
-						        result.get().storageTeamSize) {
-							unreplicated++;
-						}
-					}
-					LoadConfigurationResult res;
-					res.fullReplication = (!unreplicated || (result.get().usableRegions == 1 &&
-					                                         unreplicated < result.get().regions.size()));
-					if (healthyZoneValue.get().present()) {
-						auto healthyZone = decodeHealthyZoneValue(healthyZoneValue.get().get());
-						if (healthyZone.first == ignoreSSFailuresZoneString) {
-							res.healthyZone = healthyZone.first;
-						} else if (healthyZone.second > tr.getReadVersion().get()) {
-							res.healthyZone = healthyZone.first;
-							res.healthyZoneSeconds =
-							    (healthyZone.second - tr.getReadVersion().get()) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
-						}
-					}
-					res.rebalanceDDIgnored = rebalanceDDIgnored.get().present();
-					if (res.rebalanceDDIgnored) {
-						res.rebalanceDDIgnoreHex = rebalanceDDIgnored.get().get().toHexString();
-					}
-					if (ddModeKey.get().present()) {
-						BinaryReader rd(ddModeKey.get().get(), Unversioned());
-						int currentMode;
-						rd >> currentMode;
-						if (currentMode == 0) {
-							res.dataDistributionDisabled = true;
-						}
-					}
-					loadResult = res;
-				}
-				when(wait(getConfTimeout)) {
+				result = configuration;
+			} else {
+				if (!result.present()) {
+					messages->push_back(
+					    JsonString::makeMessage("unreadable_configuration", "Unable to read database configuration."));
+				} else {
 					messages->push_back(
 					    JsonString::makeMessage("full_replication_timeout", "Unable to read datacenter replicas."));
 				}
+				break;
+			}
+
+			ASSERT(result.present());
+			std::vector<Future<Optional<Value>>> replicasFutures;
+			for (auto& region : result.get().regions) {
+				replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(region.dcId)));
+			}
+			Future<Optional<Value>> healthyZoneValue = tr.get(healthyZoneKey);
+			Future<Optional<Value>> rebalanceDDIgnored = tr.get(rebalanceDDIgnoreKey);
+			Future<Optional<Value>> ddModeKey = tr.get(dataDistributionModeKey);
+			Future<Void> replicaStateReady = waitForAll(replicasFutures) && success(healthyZoneValue) &&
+			                                 success(rebalanceDDIgnored) && success(ddModeKey);
+
+			auto replicaLoadResult = co_await race(replicaStateReady, getConfTimeout);
+			if (replicaLoadResult.index() == 0) {
+				int unreplicated = 0;
+				for (int i = 0; i < result.get().regions.size(); ++i) {
+					if (!replicasFutures[i].get().present() ||
+					    decodeDatacenterReplicasValue(replicasFutures[i].get().get()) < result.get().storageTeamSize) {
+						unreplicated++;
+					}
+				}
+				LoadConfigurationResult res;
+				res.fullReplication =
+				    (!unreplicated || (result.get().usableRegions == 1 && unreplicated < result.get().regions.size()));
+				if (healthyZoneValue.get().present()) {
+					auto healthyZone = decodeHealthyZoneValue(healthyZoneValue.get().get());
+					if (healthyZone.first == ignoreSSFailuresZoneString) {
+						res.healthyZone = healthyZone.first;
+					} else if (healthyZone.second > tr.getReadVersion().get()) {
+						res.healthyZone = healthyZone.first;
+						res.healthyZoneSeconds =
+						    (healthyZone.second - tr.getReadVersion().get()) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+					}
+				}
+				res.rebalanceDDIgnored = rebalanceDDIgnored.get().present();
+				if (res.rebalanceDDIgnored) {
+					res.rebalanceDDIgnoreHex = rebalanceDDIgnored.get().get().toHexString();
+				}
+				if (ddModeKey.get().present()) {
+					BinaryReader rd(ddModeKey.get().get(), Unversioned());
+					int currentMode;
+					rd >> currentMode;
+					if (currentMode == 0) {
+						res.dataDistributionDisabled = true;
+					}
+				}
+				loadResult = res;
+			} else {
+				messages->push_back(
+				    JsonString::makeMessage("full_replication_timeout", "Unable to read datacenter replicas."));
 			}
 			break;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
-	return std::make_pair(result, loadResult);
+	co_return std::make_pair(result, loadResult);
 }
 
 static JsonBuilderObject configurationFetcher(Optional<DatabaseConfiguration> conf,
