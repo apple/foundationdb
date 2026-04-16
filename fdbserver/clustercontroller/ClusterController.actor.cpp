@@ -1667,7 +1667,7 @@ Future<Void> statusServer(FutureStream<StatusRequest> requests,
 			                                                                self->dcLogServerVersionDifference,
 			                                                                self->dcStorageServerVersionDifference,
 			                                                                self->excludedDegradedServers,
-			                                                                28.0));
+			                                                                SERVER_KNOBS->STATUS_TIMEOUT - 2.0));
 
 			if (result.isError() && result.getError().code() == error_code_actor_cancelled)
 				throw result.getError();
