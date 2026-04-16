@@ -2857,18 +2857,19 @@ AsyncResult<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistribut
 }
 
 // constructs the cluster section of the json status output
-Future<StatusReply> clusterGetStatus(Reference<AsyncVar<ServerDBInfo>> db,
-                                     Database cx,
-                                     std::vector<WorkerDetails> workers,
-                                     std::vector<ProcessIssues> workerIssues,
-                                     std::vector<StorageServerMetaInfo> storageMetadatas,
-                                     std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* clientStatus,
-                                     ServerCoordinators coordinators,
-                                     std::vector<NetworkAddress> incompatibleConnections,
-                                     Version datacenterVersionDifference,
-                                     Version dcLogServerVersionDifference,
-                                     Version dcStorageServerVersionDifference,
-                                     std::unordered_map<NetworkAddress, double> excludedDegradedServers) {
+AsyncResult<StatusReply> clusterGetStatus(
+    Reference<AsyncVar<ServerDBInfo>> db,
+    Database cx,
+    std::vector<WorkerDetails> workers,
+    std::vector<ProcessIssues> workerIssues,
+    std::vector<StorageServerMetaInfo> storageMetadatas,
+    std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* clientStatus,
+    ServerCoordinators coordinators,
+    std::vector<NetworkAddress> incompatibleConnections,
+    Version datacenterVersionDifference,
+    Version dcLogServerVersionDifference,
+    Version dcStorageServerVersionDifference,
+    std::unordered_map<NetworkAddress, double> excludedDegradedServers) {
 
 	double tStart = timer();
 

@@ -33,7 +33,7 @@ struct ProcessIssues {
 	ProcessIssues(NetworkAddress address, Standalone<VectorRef<StringRef>> issues) : address(address), issues(issues) {}
 };
 
-Future<StatusReply> clusterGetStatus(
+AsyncResult<StatusReply> clusterGetStatus(
     Reference<AsyncVar<struct ServerDBInfo>> db,
     Database cx,
     std::vector<WorkerDetails> workers,
