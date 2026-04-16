@@ -532,7 +532,7 @@ Future<int> consistencyCheckReadData(UID myId,
 Future<Void> consistencyScanCore(Database db, Reference<ConsistencyScanMemoryState> memState, ConsistencyScanState cs) {
 	TraceEvent("ConsistencyScanCoreStart").log();
 
-	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	auto tr = makeReference<ReadYourWritesTransaction>(db);
 	Reference<SystemTransactionGenerator<DatabaseContext>> systemDB = SystemDBWriteLockedNow(db.getReference());
 
 	// Infrequently poll the database size to use in speed calculations.
@@ -567,8 +567,8 @@ Future<Void> consistencyScanCore(Database db, Reference<ConsistencyScanMemorySta
 				// Get the config and store the cs trigger version so we can detect updates later.
 				// Get the ConsistencyScanState config and the ConsistencyScanState trigger will update when any of its
 				// configuration members change.
-				co_await store(config, cs.config().getD(tr));
-				co_await store(configVersion, cs.trigger.get(tr));
+				config = co_await cs.config().getD(tr);
+				configVersion = co_await cs.trigger.get(tr);
 
 				if (DEBUG_SCAN_PROGRESS) {
 					TraceEvent(SevDebug, "ConsistencyScanProgressGotConfig", memState->csId)
@@ -1108,7 +1108,7 @@ Future<Void> consistencyScanCore(Database db, Reference<ConsistencyScanMemorySta
 Future<Void> sometimesRandomlyClearStatsInSim(Database db, Reference<ConsistencyScanMemoryState> memState) {
 	ASSERT(g_network->isSimulated());
 
-	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	auto tr = makeReference<ReadYourWritesTransaction>(db);
 	ConsistencyScanState cs;
 
 	if (BUGGIFY_WITH_PROB(0.1) && !g_simulator->speedUpSimulation) {
@@ -1151,7 +1151,7 @@ void resetSimCorruptionCheckOnDeath(Reference<ConsistencyScanMemoryState> memSta
 Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	Database db = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	ActorCollection actors;
-	Reference<ConsistencyScanMemoryState> memState = makeReference<ConsistencyScanMemoryState>(dbInfo, csInterf.id());
+	auto memState = makeReference<ConsistencyScanMemoryState>(dbInfo, csInterf.id());
 
 	TraceEvent("ConsistencyScan_Start", csInterf.id()).log();
 	actors.add(traceRole(Role::CONSISTENCYSCAN, csInterf.id()));

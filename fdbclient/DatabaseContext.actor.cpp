@@ -877,7 +877,7 @@ Future<Void> attemptGRVFromOldProxies(std::vector<GrvProxyInterface> oldProxies,
 	std::vector<Future<Void>> replies;
 	replies.reserve(oldProxies.size());
 	GetReadVersionRequest req(
-	    span.context, 1, TransactionPriority::IMMEDIATE, GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY);
+	    span.context, 1, TransactionPriority::IMMEDIATE, invalidVersion, GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY);
 	TraceEvent evt("AttemptGRVFromOldProxies");
 	evt.detail("NumOldProxies", oldProxies.size()).detail("NumNewProxies", newProxies.size());
 	auto traceProxies = [&](std::vector<GrvProxyInterface>& proxies, std::string const& key) {

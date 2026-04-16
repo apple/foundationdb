@@ -863,7 +863,7 @@ Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3BlobSto
 			conn = _conn;
 		}
 	} else {
-		co_await store(conn, INetworkConnections::net()->connect(host, service, isTLS));
+		conn = co_await INetworkConnections::net()->connect(host, service, isTLS);
 	}
 
 	// Ensure connection is valid before handshake
@@ -934,32 +934,34 @@ std::string awsCanonicalURI(const std::string& resource, std::vector<std::string
 }
 
 // ref: https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html
-std::string parseErrorCodeFromS3(std::string xmlResponse) {
-	// Copy XML string to a modifiable buffer
+// Returns the S3 error code string from an XML error response, or "" if the response
+// cannot be parsed. This is best-effort for logging/diagnostics only — many HTTP error
+// responses (502/503 from load balancers, empty bodies, HTML responses) are not XML.
+std::string parseErrorCodeFromS3(const std::string& response) {
+	if (response.empty()) {
+		return "";
+	}
 	try {
-		std::vector<char> xmlBuffer(xmlResponse.begin(), xmlResponse.end());
-		xmlBuffer.push_back('\0'); // Ensure null-terminated string
-		// Parse the XML
+		std::vector<char> xmlBuffer(response.begin(), response.end());
+		xmlBuffer.push_back('\0');
 		xml_document<> doc;
 		doc.parse<0>(&xmlBuffer[0]);
-		// Find the root node
 		xml_node<>* root = doc.first_node("Error");
 		if (!root) {
-			TraceEvent(SevWarn, "ParseS3XMLResponseNoError").detail("Response", xmlResponse).log();
 			return "";
 		}
-		// Find the <Code> node
 		xml_node<>* codeNode = root->first_node("Code");
 		if (!codeNode) {
-			TraceEvent(SevWarn, "ParseS3XMLResponseNoErrorCode").detail("Response", xmlResponse).log();
 			return "";
 		}
 		return std::string(codeNode->value());
-	} catch (Error e) {
-		TraceEvent("BackupParseS3ErrorCodeFailure").errorUnsuppressed(e);
-		throw backup_parse_s3_response_failure();
 	} catch (...) {
-		throw backup_parse_s3_response_failure();
+		// Parse failures are expected for non-XML responses (HTML error pages, empty bodies, etc.)
+		TraceEvent("ParseS3ErrorCodeNonXML")
+		    .suppressFor(60)
+		    .detail("ResponseSize", response.size())
+		    .detail("ResponseHead", response.substr(0, 200));
+		return "";
 	}
 }
 
@@ -1046,8 +1048,8 @@ Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobStoreEn
 
 	UnsentPacketQueue contentCopy;
 	UnsentPacketQueue dryrunContentCopy; // NonCopyable state var so must be declared at top of actor
-	Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
-	Reference<HTTP::OutgoingRequest> dryrunRequest = makeReference<HTTP::OutgoingRequest>();
+	auto req = makeReference<HTTP::OutgoingRequest>();
+	auto dryrunRequest = makeReference<HTTP::OutgoingRequest>();
 	req->verb = verb;
 	req->data.content = &contentCopy;
 	req->data.contentLen = contentLen;
@@ -1081,7 +1083,7 @@ Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobStoreEn
 
 	int maxTries = std::min(bstore->knobs.request_tries, bstore->knobs.connect_tries);
 	int thisTry = 1;
-	int badRequestCode = 400;
+	constexpr int badRequestCode = 400;
 	bool s3TokenError = false;
 	double nextRetryDelay = 2.0;
 
@@ -1137,7 +1139,7 @@ Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobStoreEn
 			}
 
 			// Finish connecting, do request
-			co_await store(rconn, timeoutError(frconn, bstore->knobs.connect_timeout));
+			rconn = co_await timeoutError(frconn, bstore->knobs.connect_timeout);
 			connectionEstablished = true;
 			connID = rconn.conn->getDebugID();
 			reqStartTimer = g_network->timer();
@@ -2602,6 +2604,69 @@ TEST_CASE("/backup/s3/constructResourcePath") {
 	ASSERT(s3->constructResourcePath("test-bucket", "normal/file.txt") == "/normal/file.txt");
 	ASSERT(s3->constructResourcePath("test-bucket", "/leading/slash.txt") == "/leading/slash.txt");
 	ASSERT(s3->constructResourcePath("test-bucket", "").empty());
+
+	return Void();
+}
+
+TEST_CASE("/backup/s3/parseErrorCodeFromS3") {
+	// Valid S3 error XML — should extract the error code
+	{
+		std::string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+		                  "<Error><Code>AccessDenied</Code>"
+		                  "<Message>Access Denied</Message></Error>";
+		ASSERT(parseErrorCodeFromS3(xml) == "AccessDenied");
+	}
+
+	// InvalidToken error
+	{
+		std::string xml = "<Error><Code>InvalidToken</Code>"
+		                  "<Message>The provided token is malformed or otherwise invalid.</Message></Error>";
+		ASSERT(parseErrorCodeFromS3(xml) == "InvalidToken");
+	}
+
+	// ExpiredToken error
+	{
+		std::string xml = "<Error><Code>ExpiredToken</Code><Message>Token expired</Message></Error>";
+		ASSERT(parseErrorCodeFromS3(xml) == "ExpiredToken");
+	}
+
+	// Missing <Code> node — should return ""
+	{
+		std::string xml = "<Error><Message>Something went wrong</Message></Error>";
+		ASSERT(parseErrorCodeFromS3(xml) == "");
+	}
+
+	// No <Error> root — should return ""
+	{
+		std::string xml = "<ListBucketResult><Name>bucket</Name></ListBucketResult>";
+		ASSERT(parseErrorCodeFromS3(xml) == "");
+	}
+
+	// Empty response — should return ""
+	{
+		ASSERT(parseErrorCodeFromS3("") == "");
+	}
+
+	// HTML error page from load balancer (502/503) — should return "", not throw
+	{
+		std::string html = "<html><body><h1>502 Bad Gateway</h1></body></html>";
+		ASSERT(parseErrorCodeFromS3(html) == "");
+	}
+
+	// Completely invalid / garbage — should return "", not throw
+	{
+		ASSERT(parseErrorCodeFromS3("not xml at all {{{") == "");
+	}
+
+	// Partial XML — should return "", not throw
+	{
+		ASSERT(parseErrorCodeFromS3("<Error><Code>Incomple") == "");
+	}
+
+	// Plain text error — should return "", not throw
+	{
+		ASSERT(parseErrorCodeFromS3("Internal Server Error") == "");
+	}
 
 	return Void();
 }
