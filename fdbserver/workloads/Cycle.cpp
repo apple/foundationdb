@@ -64,7 +64,6 @@ struct CycleWorkload : TestWorkload, Arena {
 		if (skipSetup) {
 			return Void();
 		}
-		// TODO(gglass): possible cleanup here.  Leftover tenant stuff.
 		return bulkSetup(cx, this, nodeCount, Promise<double>());
 	}
 	Future<Void> start(Database const& cx) override {
