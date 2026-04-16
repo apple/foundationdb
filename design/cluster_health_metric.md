@@ -26,9 +26,9 @@ Each factor uses the following levels:
 For aggregation, the implementation assigns an internal score to each level and keeps the lowest-scoring factor as the aggregate result:
 
 - `HEALTHY` = 100
-- `CRITICAL_INTERVENTION_REQUIRED` = 75
+- `SELF_HEALING` = 75
 - `INTERVENTION_REQUIRED` = 50
-- `SELF_HEALING` = 25
+- `CRITICAL_INTERVENTION_REQUIRED` = 25
 - `METRICS_MISSING` = 0
 - `OUTAGE` = 0
 

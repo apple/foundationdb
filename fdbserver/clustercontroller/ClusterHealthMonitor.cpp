@@ -105,11 +105,11 @@ uint8_t levelToInt(Level level) {
 	switch (level) {
 	case Level::HEALTHY:
 		return 100;
-	case Level::CRITICAL_INTERVENTION_REQUIRED:
+	case Level::SELF_HEALING:
 		return 75;
 	case Level::INTERVENTION_REQUIRED:
 		return 50;
-	case Level::SELF_HEALING:
+	case Level::CRITICAL_INTERVENTION_REQUIRED:
 		return 25;
 	case Level::METRICS_MISSING:
 	case Level::OUTAGE:
@@ -117,10 +117,6 @@ uint8_t levelToInt(Level level) {
 	}
 
 	UNREACHABLE();
-}
-
-std::strong_ordering operator<=>(Level lhs, Level rhs) {
-	return levelToInt(lhs) <=> levelToInt(rhs);
 }
 
 std::string_view levelToStr(Level level) {
@@ -227,7 +223,7 @@ Future<Void> Monitor::run() {
 		for (int i = 0; i < factors.size(); ++i) {
 			Level level = levelFutures[i].get();
 			traceEvent.detail(fmt::format("Factor{}", factors[i]->getName()), levelToStr(level));
-			if (!limitingIndex.present() || level < limitingLevel) {
+			if (!limitingIndex.present() || levelToInt(level) < levelToInt(limitingLevel)) {
 				limitingIndex = i;
 				limitingLevel = level;
 			}
@@ -235,7 +231,7 @@ Future<Void> Monitor::run() {
 
 		traceEvent.detail("Aggregate", levelToStr(limitingLevel));
 		traceEvent.detail("AggregateValue", levelToInt(limitingLevel));
-		if (limitingIndex.present()) {
+		if (limitingIndex.present() && limitingLevel != Level::HEALTHY) {
 			traceEvent.detail("LimitingFactor", factors[*limitingIndex]->getName());
 		}
 	}
