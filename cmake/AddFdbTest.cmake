@@ -394,6 +394,10 @@ function(prepare_binding_test_files build_directory target_name target_dependenc
     COMMENT "Copy Flow tester for bindingtester")
 
   set(generated_binding_files python/fdb/fdboptions.py python/fdb/apiversion.py)
+  # Ensure Python binding files are generated before we try to copy them
+  if(WITH_PYTHON_BINDING)
+    add_dependencies(${target_name} fdb_python_options)
+  endif()
   if(WITH_JAVA_BINDING)
     if(NOT FDB_RELEASE)
       set(not_fdb_release_string "-SNAPSHOT")
