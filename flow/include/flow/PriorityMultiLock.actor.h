@@ -243,34 +243,72 @@ private:
 	Promise<Void> brokenOnDestruct;
 	bool killed;
 
-	static Future<Void> handleRelease(Uncancellable,
-	                                  Reference<PriorityMultiLock> self,
-	                                  Priority* priority,
-	                                  Future<Void> holder) {
-		pml_debug_printf("%f handleRelease self=%p start\n", now(), self.getPtr());
-		try {
-			co_await holder;
+	struct ReleaseHandler final : Callback<Void>, FastAllocated<ReleaseHandler> {
+		Reference<PriorityMultiLock> self;
+		Priority* priority;
+
+		ReleaseHandler(Reference<PriorityMultiLock> self, Priority* priority)
+		  : self(std::move(self)), priority(priority) {}
+
+		void release() {
+			pml_debug_printf("lock release priority %d  %s\n", (int)(priority->priority), self->toString().c_str());
+
+			pml_debug_printf("%f handleRelease self=%p releasing\n", now(), self.getPtr());
+			++self->available;
+			priority->runners -= 1;
+
+			// If there are any waiters or if the runners array is getting large, trigger the runner loop
+			if (self->waiting > 0) {
+				self->wakeRunner.trigger();
+			}
+		}
+
+		void fire(Void const&) override {
+			Callback<Void>::remove();
 			pml_debug_printf("%f handleRelease self=%p success\n", now(), self.getPtr());
-		} catch (Error& e) {
+			release();
+			delete this;
+		}
+
+		void error(Error e) override {
+			Callback<Void>::remove();
 			pml_debug_printf("%f handleRelease self=%p error %s\n", now(), self.getPtr(), e.what());
+			release();
+			delete this;
+		}
+	};
+
+	static void handleRelease(Reference<PriorityMultiLock> self, Priority* priority, Future<Void> holder) {
+		pml_debug_printf("%f handleRelease self=%p start\n", now(), self.getPtr());
+
+		if (holder.isReady()) {
+			if (holder.isError()) {
+				pml_debug_printf("%f handleRelease self=%p error %s\n", now(), self.getPtr(), holder.getError().what());
+			} else {
+				holder.get();
+				pml_debug_printf("%f handleRelease self=%p success\n", now(), self.getPtr());
+			}
+
+			pml_debug_printf("lock release priority %d  %s\n", (int)(priority->priority), self->toString().c_str());
+
+			pml_debug_printf("%f handleRelease self=%p releasing\n", now(), self.getPtr());
+			++self->available;
+			priority->runners -= 1;
+
+			// If there are any waiters or if the runners array is getting large, trigger the runner loop
+			if (self->waiting > 0) {
+				self->wakeRunner.trigger();
+			}
+			return;
 		}
 
-		pml_debug_printf("lock release priority %d  %s\n", (int)(priority->priority), self->toString().c_str());
-
-		pml_debug_printf("%f handleRelease self=%p releasing\n", now(), self.getPtr());
-		++self->available;
-		priority->runners -= 1;
-
-		// If there are any waiters or if the runners array is getting large, trigger the runner loop
-		if (self->waiting > 0) {
-			self->wakeRunner.trigger();
-		}
+		holder.addCallbackAndClear(new ReleaseHandler(std::move(self), priority));
 	}
 
 	void addRunner(Lock& lock, Priority* priority) {
 		priority->runners += 1;
 		--available;
-		handleRelease(Uncancellable(), Reference<PriorityMultiLock>::addRef(this), priority, lock.promise.getFuture());
+		handleRelease(Reference<PriorityMultiLock>::addRef(this), priority, lock.promise.getFuture());
 	}
 
 	// Current maximum running tasks for the specified priority, which must have waiters
