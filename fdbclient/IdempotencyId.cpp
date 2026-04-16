@@ -232,7 +232,7 @@ static Future<Optional<Key>> getBoundary(Reference<ReadYourWritesTransaction> tr
 	co_return result.front().key;
 }
 
-Future<JsonBuilderObject> getIdmpKeyStatus(Database db) {
+AsyncResult<JsonBuilderObject> getIdmpKeyStatus(Database db) {
 	auto tr = makeReference<ReadYourWritesTransaction>(db);
 	int64_t size{ 0 };
 	IdempotencyIdsExpiredVersion expired;

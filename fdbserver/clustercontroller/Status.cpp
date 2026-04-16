@@ -714,7 +714,7 @@ struct RolesInfo {
 	}
 };
 
-static Future<JsonBuilderObject> processStatusFetcher(
+static AsyncResult<JsonBuilderObject> processStatusFetcher(
     Reference<AsyncVar<ServerDBInfo>> db,
     std::vector<WorkerDetails> workers,
     WorkerEvents pMetrics,
@@ -1158,12 +1158,12 @@ static JsonBuilderObject clientStatusFetcher(
 	return clientStatus;
 }
 
-static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx,
-                                                            WorkerDetails ccWorker,
-                                                            WorkerDetails mWorker,
-                                                            int workerCount,
-                                                            std::set<std::string>* incomplete_reasons,
-                                                            int* statusCode) {
+static AsyncResult<JsonBuilderObject> recoveryStateStatusFetcher(Database cx,
+                                                                 WorkerDetails ccWorker,
+                                                                 WorkerDetails mWorker,
+                                                                 int workerCount,
+                                                                 std::set<std::string>* incomplete_reasons,
+                                                                 int* statusCode) {
 	JsonBuilderObject message;
 	Transaction tr(cx);
 	try {
@@ -1346,10 +1346,10 @@ static Future<Void> doProbe(Future<double> probe,
 	co_return;
 }
 
-static Future<JsonBuilderObject> latencyProbeFetcher(Database cx,
-                                                     JsonBuilderArray* messages,
-                                                     std::set<std::string>* incomplete_reasons,
-                                                     bool* isAvailable) {
+static AsyncResult<JsonBuilderObject> latencyProbeFetcher(Database cx,
+                                                          JsonBuilderArray* messages,
+                                                          std::set<std::string>* incomplete_reasons,
+                                                          bool* isAvailable) {
 	Transaction trImmediate(cx);
 	Transaction trDefault(cx);
 	Transaction trBatch(cx);
@@ -1406,7 +1406,8 @@ static Future<JsonBuilderObject> latencyProbeFetcher(Database cx,
 	co_return statusObj;
 }
 
-static Future<JsonBuilderObject> versionEpochStatusFetcher(Database cx, std::set<std::string>* incomplete_reasons) {
+static AsyncResult<JsonBuilderObject> versionEpochStatusFetcher(Database cx,
+                                                                std::set<std::string>* incomplete_reasons) {
 	JsonBuilderObject message;
 	try {
 		Transaction tr(cx);
@@ -2805,11 +2806,11 @@ Future<std::pair<Optional<StorageWiggleMetrics>, Optional<StorageWiggleMetrics>>
 }
 
 // read storageWigglerStats through Read-only tx, then convert it to JSON field
-Future<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistributorInterface> ddWorker,
-                                                     DatabaseConfiguration conf,
-                                                     Database cx,
-                                                     bool use_system_priority,
-                                                     JsonBuilderArray* messages) {
+AsyncResult<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistributorInterface> ddWorker,
+                                                          DatabaseConfiguration conf,
+                                                          Database cx,
+                                                          bool use_system_priority,
+                                                          JsonBuilderArray* messages) {
 
 	Future<GetStorageWigglerStateReply> stateFut;
 	Future<std::pair<Optional<StorageWiggleMetrics>, Optional<StorageWiggleMetrics>>> wiggleMetricsFut =
@@ -2984,19 +2985,18 @@ Future<StatusReply> clusterGetStatus(Reference<AsyncVar<ServerDBInfo>> db,
 
 		// construct status information for cluster subsections
 		int statusCode = (int)RecoveryStatus::END;
-		Future<JsonBuilderObject> recoveryStateStatusFuture =
-		    recoveryStateStatusFetcher(cx, ccWorker, mWorker, workers.size(), &status_incomplete_reasons, &statusCode);
+		std::vector<AsyncResult<JsonBuilderObject>> clusterSubsectionFetchers;
+		clusterSubsectionFetchers.push_back(
+		    recoveryStateStatusFetcher(cx, ccWorker, mWorker, workers.size(), &status_incomplete_reasons, &statusCode));
+		clusterSubsectionFetchers.push_back(getIdmpKeyStatus(cx));
+		clusterSubsectionFetchers.push_back(versionEpochStatusFetcher(cx, &status_incomplete_reasons));
 
-		Future<JsonBuilderObject> idmpKeyStatusFuture = getIdmpKeyStatus(cx);
+		std::vector<JsonBuilderObject> clusterSubsectionStatuses =
+		    co_await getAll(std::move(clusterSubsectionFetchers));
 
-		Future<JsonBuilderObject> versionEpochStatusFuture = versionEpochStatusFetcher(cx, &status_incomplete_reasons);
-
-		co_await waitForAll<JsonBuilderObject>(
-		    { recoveryStateStatusFuture, idmpKeyStatusFuture, versionEpochStatusFuture });
-
-		JsonBuilderObject recoveryStateStatus = recoveryStateStatusFuture.get();
-		JsonBuilderObject idmpKeyStatus = idmpKeyStatusFuture.get();
-		JsonBuilderObject versionEpochStatus = versionEpochStatusFuture.get();
+		JsonBuilderObject recoveryStateStatus = clusterSubsectionStatuses[0];
+		JsonBuilderObject idmpKeyStatus = clusterSubsectionStatuses[1];
+		JsonBuilderObject versionEpochStatus = clusterSubsectionStatuses[2];
 
 		// machine metrics
 		WorkerEvents mMetrics = workerEventsVec[0].present() ? workerEventsVec[0].get().first : WorkerEvents();
@@ -3117,13 +3117,14 @@ Future<StatusReply> clusterGetStatus(Reference<AsyncVar<ServerDBInfo>> db,
 			if (configuration.get().perpetualStorageWiggleSpeed > 0) {
 				Future<std::vector<std::pair<UID, StorageWiggleValue>>> primaryWiggleValues;
 				Future<std::vector<std::pair<UID, StorageWiggleValue>>> remoteWiggleValues;
+				AsyncResult<JsonBuilderObject> storageWigglerFetcher;
 				double timeout = g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01) ? 0.0 : 2.0;
 				primaryWiggleValues = timeoutError(readStorageWiggleValues(cx, true, true), timeout);
 				remoteWiggleValues = timeoutError(readStorageWiggleValues(cx, false, true), timeout);
-				co_await (store(storageWiggler,
-				                storageWigglerStatsFetcher(
-				                    db->get().distributor, configuration.get(), cx, true, &messages)) &&
-				          ready(primaryWiggleValues) && ready(remoteWiggleValues));
+				storageWigglerFetcher =
+				    storageWigglerStatsFetcher(db->get().distributor, configuration.get(), cx, true, &messages);
+				co_await (ready(primaryWiggleValues) && ready(remoteWiggleValues));
+				storageWiggler = co_await std::move(storageWigglerFetcher);
 
 				if (primaryWiggleValues.canGet()) {
 					for (auto& p : primaryWiggleValues.get())
