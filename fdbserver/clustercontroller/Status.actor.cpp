@@ -1318,27 +1318,18 @@ static Future<double> doCommitProbe(Future<double> grvProbe, Transaction* source
 	}
 }
 
-ACTOR static Future<Void> doProbe(Future<double> probe,
-                                  int timeoutSeconds,
-                                  const char* prefix,
-                                  const char* description,
-                                  JsonBuilderObject* probeObj,
-                                  JsonBuilderArray* messages,
-                                  std::set<std::string>* incomplete_reasons,
-                                  bool* isAvailable = nullptr) {
-	choose {
-		when(ErrorOr<double> result = wait(errorOr(probe))) {
-			if (result.isError()) {
-				if (isAvailable != nullptr) {
-					*isAvailable = false;
-				}
-				incomplete_reasons->insert(format(
-				    "Unable to retrieve latency probe information (%s: %s).", description, result.getError().what()));
-			} else {
-				(*probeObj)[format("%s_seconds", prefix).c_str()] = result.get();
-			}
-		}
-		when(wait(delay(timeoutSeconds))) {
+static Future<Void> doProbe(Future<double> probe,
+                            int timeoutSeconds,
+                            const char* prefix,
+                            const char* description,
+                            JsonBuilderObject* probeObj,
+                            JsonBuilderArray* messages,
+                            std::set<std::string>* incomplete_reasons,
+                            bool* isAvailable = nullptr) {
+	try {
+		if (auto const latency = co_await timeout(probe, timeoutSeconds); latency.present()) {
+			(*probeObj)[format("%s_seconds", prefix).c_str()] = latency.get();
+		} else {
 			if (isAvailable != nullptr) {
 				*isAvailable = false;
 			}
@@ -1346,9 +1337,14 @@ ACTOR static Future<Void> doProbe(Future<double> probe,
 			    JsonString::makeMessage(format("%s_probe_timeout", prefix).c_str(),
 			                            format("Unable to %s after %d seconds.", description, timeoutSeconds).c_str()));
 		}
+	} catch (Error& e) {
+		if (isAvailable != nullptr) {
+			*isAvailable = false;
+		}
+		incomplete_reasons->insert(
+		    format("Unable to retrieve latency probe information (%s: %s).", description, e.what()));
 	}
-
-	return Void();
+	co_return;
 }
 
 static Future<JsonBuilderObject> latencyProbeFetcher(Database cx,
