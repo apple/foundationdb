@@ -127,7 +127,7 @@ static Future<Optional<TraceEventFields>> latestEventOnWorker(WorkerInterface wo
 	}
 }
 
-static Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestErrorOnWorkers(
+static AsyncResult<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestErrorOnWorkers(
     std::vector<WorkerDetails> workers) {
 	return latestEventOnWorkers(workers, "");
 }
@@ -2944,7 +2944,7 @@ Future<StatusReply> clusterGetStatus(Reference<AsyncVar<ServerDBInfo>> db,
 		// Get latest events for various event types from ALL workers
 		// WorkerEvents is a map of worker's NetworkAddress to its event string
 		// The pair represents worker responses and a set of worker NetworkAddress strings which did not respond.
-		std::vector<Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>>> futures;
+		std::vector<AsyncResult<Optional<std::pair<WorkerEvents, std::set<std::string>>>>> futures;
 		futures.push_back(latestEventOnWorkers(workers, "MachineMetrics"));
 		futures.push_back(latestEventOnWorkers(workers, "ProcessMetrics"));
 		futures.push_back(latestEventOnWorkers(workers, "NetworkMetrics"));
@@ -2954,7 +2954,7 @@ Future<StatusReply> clusterGetStatus(Reference<AsyncVar<ServerDBInfo>> db,
 
 		// Wait for all response pairs.
 		std::vector<Optional<std::pair<WorkerEvents, std::set<std::string>>>> workerEventsVec =
-		    co_await getAll(futures);
+		    co_await getAll(std::move(futures));
 
 		// Create a unique set of all workers who were unreachable for 1 or more of the event requests above.
 		// Since each event request is independent and to all workers, workers can have responded to some
