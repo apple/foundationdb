@@ -40,7 +40,7 @@
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
 #include "flow/ObjectSerializer.h"
-#include "flow/PriorityMultiLock.actor.h"
+#include "flow/PriorityMultiLock.h"
 #include "flow/network.h"
 #include "flow/serialize.h"
 #include "flow/Trace.h"
