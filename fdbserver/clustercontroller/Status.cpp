@@ -1974,8 +1974,9 @@ static Future<std::vector<std::pair<TLogInterface, EventMap>>> getTLogsAndMetric
     Reference<AsyncVar<ServerDBInfo>> db,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
 	std::vector<TLogInterface> servers = db->get().logSystemConfig.allPresentLogs();
+	std::vector<std::string> eventNames{ "TLogMetrics" };
 	std::vector<std::pair<TLogInterface, EventMap>> results =
-	    co_await getServerMetrics(servers, address_workers, std::vector<std::string>{ "TLogMetrics" });
+	    co_await getServerMetrics(servers, address_workers, std::move(eventNames));
 
 	co_return results;
 }
@@ -1984,10 +1985,9 @@ static Future<std::vector<std::pair<TLogInterface, EventMap>>> getTLogsAndMetric
 static Future<std::vector<std::pair<CommitProxyInterface, EventMap>>> getCommitProxiesAndMetrics(
     Reference<AsyncVar<ServerDBInfo>> db,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
-	std::vector<std::pair<CommitProxyInterface, EventMap>> results = co_await getServerMetrics(
-	    db->get().client.commitProxies,
-	    address_workers,
-	    std::vector<std::string>{ "CommitLatencyMetrics", "CommitLatencyBands", "CommitBatchingWindowSize" });
+	std::vector<std::string> eventNames{ "CommitLatencyMetrics", "CommitLatencyBands", "CommitBatchingWindowSize" };
+	std::vector<std::pair<CommitProxyInterface, EventMap>> results =
+	    co_await getServerMetrics(db->get().client.commitProxies, address_workers, std::move(eventNames));
 
 	co_return results;
 }
@@ -1995,10 +1995,10 @@ static Future<std::vector<std::pair<CommitProxyInterface, EventMap>>> getCommitP
 static Future<std::vector<std::pair<GrvProxyInterface, EventMap>>> getGrvProxiesAndMetrics(
     Reference<AsyncVar<ServerDBInfo>> db,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
-	std::vector<std::pair<GrvProxyInterface, EventMap>> results = co_await getServerMetrics(
-	    db->get().client.grvProxies,
-	    address_workers,
-	    std::vector<std::string>{ "GRVLatencyMetrics", "GRVLatencyBands", "GRVBatchLatencyMetrics" });
+	std::vector<std::string> eventNames{ "GRVLatencyMetrics",
+		                                 "GRVLatencyBands",
+		                                 "GRVBatchLatencyMetrics" } std::vector<std::pair<GrvProxyInterface, EventMap>>
+	    results = co_await getServerMetrics(db->get().client.grvProxies, address_workers, std::move(eventNames));
 	co_return results;
 }
 
