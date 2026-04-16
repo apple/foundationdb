@@ -82,10 +82,6 @@ static void prepareLegacyXorCompatibility(const Reference<ArenaPage>& page, cons
 	}
 }
 
-static void printRedwoodStats() {
-	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
-}
-
 // Returns a string where every line in lines is prefixed with prefix
 std::string addPrefix(std::string prefix, std::string lines) {
 	StringRef m = lines;
@@ -1614,6 +1610,10 @@ struct RedwoodMetrics {
 int RedwoodMetrics::maxRecordCount = 315;
 RedwoodMetrics g_redwoodMetrics = {};
 Future<Void> g_redwoodMetricsActor;
+
+static void printRedwoodStats() {
+	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
+}
 
 Future<Void> redwoodHistogramsLogger(double interval) {
 	double currTime{ 0 };
