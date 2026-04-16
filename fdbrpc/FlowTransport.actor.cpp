@@ -43,6 +43,7 @@
 #include "fdbrpc/IPAllowList.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
+#include "flow/CoroUtils.h"
 #include "flow/Error.h"
 #include "flow/flow.h"
 #include "flow/Net2Packet.h"
@@ -443,12 +444,12 @@ struct ConnectionLogWriter : IThreadPoolReceiver {
 	}
 };
 
-ACTOR Future<Void> connectionHistoryLogger(TransportData* self) {
+Future<Void> connectionHistoryLogger(TransportData* self) {
 	if (!FLOW_KNOBS->LOG_CONNECTION_ATTEMPTS_ENABLED) {
-		return Void();
+		co_return;
 	}
 
-	state Future<Void> next = Void();
+	Future<Void> next = Void();
 
 	// One thread ensures async serialized execution on the log file.
 	if (g_network->isSimulated()) {
@@ -458,8 +459,8 @@ ACTOR Future<Void> connectionHistoryLogger(TransportData* self) {
 	}
 
 	self->connectionLogWriterThread->addThread(new ConnectionLogWriter(FLOW_KNOBS->CONNECTION_LOG_DIRECTORY));
-	loop {
-		wait(next);
+	while (true) {
+		co_await next;
 		next = delay(FLOW_KNOBS->LOG_CONNECTION_INTERVAL_SECS);
 		if (self->connectionHistory.size() == 0) {
 			continue;
@@ -472,9 +473,9 @@ ACTOR Future<Void> connectionHistoryLogger(TransportData* self) {
 	}
 }
 
-ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
-	state NetworkAddress lastAddress = NetworkAddress();
-	loop {
+Future<Void> pingLatencyLogger(TransportData* self) {
+	NetworkAddress lastAddress = NetworkAddress();
+	while (true) {
 		if (self->orderedAddresses.size()) {
 			auto it = self->orderedAddresses.upper_bound(lastAddress);
 			if (it == self->orderedAddresses.end()) {
@@ -525,12 +526,12 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 				peer->lastLoggedBytesReceived = peer->bytesReceived;
 				peer->lastLoggedBytesSent = peer->bytesSent;
 				peer->timeoutCount = 0;
-				wait(delay(FLOW_KNOBS->PING_LOGGING_INTERVAL));
+				co_await delay(FLOW_KNOBS->PING_LOGGING_INTERVAL);
 			} else if (it == self->orderedAddresses.begin()) {
-				wait(delay(FLOW_KNOBS->PING_LOGGING_INTERVAL));
+				co_await delay(FLOW_KNOBS->PING_LOGGING_INTERVAL);
 			}
 		} else {
-			wait(delay(FLOW_KNOBS->PING_LOGGING_INTERVAL));
+			co_await delay(FLOW_KNOBS->PING_LOGGING_INTERVAL);
 		}
 	}
 }
@@ -764,12 +765,12 @@ ACTOR Future<Void> connectionWriter(Reference<Peer> self, Reference<IConnection>
 	}
 }
 
-ACTOR Future<Void> delayedHealthUpdate(NetworkAddress address, bool* tooManyConnectionsClosed) {
-	state double start = now();
-	loop {
+Future<Void> delayedHealthUpdate(NetworkAddress address, bool* tooManyConnectionsClosed) {
+	double start = now();
+	while (true) {
 		if (FLOW_KNOBS->HEALTH_MONITOR_MARK_FAILED_UNSTABLE_CONNECTIONS &&
 		    FlowTransport::transport().healthMonitor()->tooManyConnectionsClosed(address) && address.isPublic()) {
-			wait(delayJittered(FLOW_KNOBS->MAX_RECONNECTION_TIME * 2.0));
+			co_await delayJittered(FLOW_KNOBS->MAX_RECONNECTION_TIME * 2.0);
 		} else {
 			if (*tooManyConnectionsClosed) {
 				TraceEvent("TooManyConnectionsClosedMarkAvailable")
@@ -783,7 +784,6 @@ ACTOR Future<Void> delayedHealthUpdate(NetworkAddress address, bool* tooManyConn
 			break;
 		}
 	}
-	return Void();
 }
 
 ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
@@ -1645,36 +1645,37 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 	}
 }
 
-ACTOR static Future<Void> connectionIncoming(TransportData* self, Reference<IConnection> conn) {
-	state TransportData::ConnectionHistoryEntry entry;
+static Future<Void> connectionIncoming(TransportData* self, Reference<IConnection> conn) {
+	TransportData::ConnectionHistoryEntry entry;
 	entry.time = now();
 	entry.addr = conn->getPeerAddress();
 	try {
-		wait(conn->acceptHandshake());
+		co_await conn->acceptHandshake();
 		static SimpleCounter<int64_t>* countIncomingConnectionHandshakeAccepted =
 		    SimpleCounter<int64_t>::makeCounter("/Transport/TLS/IncomingConnectionHandshakeAccepted");
 		countIncomingConnectionHandshakeAccepted->increment(1);
-		state Promise<Reference<Peer>> onConnected;
-		state Future<Void> reader = connectionReader(self, conn, Reference<Peer>(), onConnected);
+		Promise<Reference<Peer>> onConnected;
+		Future<Void> reader = connectionReader(self, conn, Reference<Peer>(), onConnected);
 		if (FLOW_KNOBS->LOG_CONNECTION_ATTEMPTS_ENABLED) {
 			entry.failed = false;
 			self->connectionHistory.push_back(entry);
 		}
-		choose {
-			when(wait(reader)) {
-				ASSERT(false);
-				return Void();
-			}
-			when(Reference<Peer> p = wait(onConnected.getFuture())) {
-				p->onIncomingConnection(p, conn, reader);
-			}
-			when(wait(delayJittered(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
-				CODE_PROBE(true, "Incoming connection timed out");
-				static SimpleCounter<int64_t>* countIncomingConnectionTimedout =
-				    SimpleCounter<int64_t>::makeCounter("/Transport/TLS/IncomingConnectionTimedout");
-				countIncomingConnectionTimedout->increment(1);
-				throw timed_out();
-			}
+		auto res =
+		    co_await race(reader, onConnected.getFuture(), delayJittered(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
+		if (res.index() == 0) {
+			ASSERT(false);
+			co_return;
+		} else if (res.index() == 1) {
+			Reference<Peer> p = std::get<1>(std::move(res));
+			p->onIncomingConnection(p, conn, reader);
+		} else if (res.index() == 2) {
+			CODE_PROBE(true, "Incoming connection timed out");
+			static SimpleCounter<int64_t>* countIncomingConnectionTimedout =
+			    SimpleCounter<int64_t>::makeCounter("/Transport/TLS/IncomingConnectionTimedout");
+			countIncomingConnectionTimedout->increment(1);
+			throw timed_out();
+		} else {
+			UNREACHABLE();
 		}
 		static SimpleCounter<int64_t>* countIncomingConnectionConnected =
 		    SimpleCounter<int64_t>::makeCounter("/Transport/TLS/IncomingConnectionConnected");
@@ -1695,24 +1696,15 @@ ACTOR static Future<Void> connectionIncoming(TransportData* self, Reference<ICon
 		}
 		conn->close();
 	}
-
-	return Void();
 }
 
-ACTOR static Future<Void> listen(TransportData* self, NetworkAddress listenAddr) {
-	state ActorCollectionNoErrors
+static Future<Void> listenImpl(TransportData* self, NetworkAddress listenAddr, Reference<IListener> listener) {
+	ActorCollectionNoErrors
 	    incoming; // Actors monitoring incoming connections that haven't yet been associated with a peer
-	state Reference<IListener> listener = INetworkConnections::net()->listen(listenAddr);
-	if (!g_network->isSimulated() && self->localAddresses.getAddressList().address.port == 0) {
-		TraceEvent(SevInfo, "UpdatingListenAddress")
-		    .detail("AssignedListenAddress", listener->getListenAddress().toString());
-		self->localAddresses.setNetworkAddress(listener->getListenAddress());
-		setTraceLocalAddress(listener->getListenAddress());
-	}
-	state uint64_t connectionCount = 0;
+	uint64_t connectionCount = 0;
 	try {
-		loop {
-			Reference<IConnection> conn = wait(listener->accept());
+		while (true) {
+			Reference<IConnection> conn = co_await listener->accept();
 			static SimpleCounter<int64_t>* countIncomingConnectionCreated =
 			    SimpleCounter<int64_t>::makeCounter("/Transport/TLS/IncomingConnectionCreated");
 			countIncomingConnectionCreated->increment(1);
@@ -1725,13 +1717,24 @@ ACTOR static Future<Void> listen(TransportData* self, NetworkAddress listenAddr)
 			}
 			connectionCount++;
 			if (connectionCount % (FLOW_KNOBS->ACCEPT_BATCH_SIZE) == 0) {
-				wait(delay(0, TaskPriority::AcceptSocket));
+				co_await delay(0, TaskPriority::AcceptSocket);
 			}
 		}
 	} catch (Error& e) {
 		TraceEvent(SevError, "ListenError").error(e);
 		throw;
 	}
+}
+
+static Future<Void> listen(TransportData* self, NetworkAddress listenAddr) {
+	Reference<IListener> listener = INetworkConnections::net()->listen(listenAddr);
+	if (!g_network->isSimulated() && self->localAddresses.getAddressList().address.port == 0) {
+		TraceEvent(SevInfo, "UpdatingListenAddress")
+		    .detail("AssignedListenAddress", listener->getListenAddress().toString());
+		self->localAddresses.setNetworkAddress(listener->getListenAddress());
+		setTraceLocalAddress(listener->getListenAddress());
+	}
+	return listenImpl(self, listenAddr, listener);
 }
 
 Reference<Peer> TransportData::getPeer(NetworkAddress const& address) {
@@ -1785,9 +1788,9 @@ void TransportData::applyPublicKeySet(StringRef jwkSetString) {
 	}
 }
 
-ACTOR static Future<Void> multiVersionCleanupWorker(TransportData* self) {
-	loop {
-		wait(delay(FLOW_KNOBS->CONNECTION_CLEANUP_DELAY));
+static Future<Void> multiVersionCleanupWorker(TransportData* self) {
+	while (true) {
+		co_await delay(FLOW_KNOBS->CONNECTION_CLEANUP_DELAY);
 		bool foundIncompatible = false;
 		for (auto it = self->incompatiblePeers.begin(); it != self->incompatiblePeers.end();) {
 			if (self->multiVersionConnections.count(it->second.first)) {
@@ -2229,33 +2232,33 @@ void FlowTransport::loadPublicKeyFile(const std::string& filePath) {
 	}
 }
 
-ACTOR static Future<Void> watchPublicKeyJwksFile(std::string filePath, TransportData* self) {
-	state AsyncTrigger fileChanged;
-	state Future<Void> fileWatch;
-	state unsigned errorCount = 0; // error since watch start or last successful refresh
+static Future<Void> watchPublicKeyJwksFile(std::string filePath, TransportData* self) {
+	AsyncTrigger fileChanged;
+	unsigned errorCount = 0; // error since watch start or last successful refresh
 
 	// Make sure this watch setup does not break due to async file system initialization not having been called
-	loop {
+	while (true) {
 		if (IAsyncFileSystem::filesystem())
 			break;
-		wait(delay(1.0));
+		co_await delay(1.0);
 	}
 	const int& intervalSeconds = FLOW_KNOBS->PUBLIC_KEY_FILE_REFRESH_INTERVAL_SECONDS;
-	fileWatch = watchFileForChanges(filePath, &fileChanged, &intervalSeconds, "AuthzPublicKeySetRefreshStatError");
-	loop {
+	[[maybe_unused]] Future<Void> fileWatch =
+	    watchFileForChanges(filePath, &fileChanged, &intervalSeconds, "AuthzPublicKeySetRefreshStatError");
+	while (true) {
 		try {
-			wait(fileChanged.onTrigger());
-			state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(
-			    filePath, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0));
-			state int64_t filesize = wait(file->size());
-			state std::string json(filesize, '\0');
+			co_await fileChanged.onTrigger();
+			Reference<IAsyncFile> file = co_await IAsyncFileSystem::filesystem()->open(
+			    filePath, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0);
+			int64_t filesize = co_await file->size();
+			std::string json(filesize, '\0');
 			if (filesize > FLOW_KNOBS->PUBLIC_KEY_FILE_MAX_SIZE)
 				throw file_too_large();
 			if (filesize <= 0) {
 				TraceEvent(SevWarn, "AuthzPublicKeySetEmpty").suppressFor(60);
 				continue;
 			}
-			wait(success(file->read(&json[0], filesize, 0)));
+			co_await success(file->read(&json[0], filesize, 0));
 			self->applyPublicKeySet(StringRef(json));
 			errorCount = 0;
 		} catch (Error& e) {
