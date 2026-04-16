@@ -1746,9 +1746,9 @@ static JsonBuilderObject configurationFetcher(Optional<DatabaseConfiguration> co
 	return statusObj;
 }
 
-static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
-                                                   DatabaseConfiguration configuration,
-                                                   int* minStorageReplicasRemaining) {
+static AsyncResult<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
+                                                        DatabaseConfiguration configuration,
+                                                        int* minStorageReplicasRemaining) {
 	JsonBuilderObject statusObjData;
 
 	try {
@@ -2076,7 +2076,7 @@ JsonBuilderObject getPerfLimit(TraceEventFields const& ratekeeper, double transP
 	return perfLimit;
 }
 
-static Future<JsonBuilderObject> workloadStatusFetcher(
+static AsyncResult<JsonBuilderObject> workloadStatusFetcher(
     Reference<AsyncVar<ServerDBInfo>> db,
     std::vector<WorkerDetails> workers,
     WorkerDetails mWorker,
@@ -2298,7 +2298,7 @@ static Future<JsonBuilderObject> workloadStatusFetcher(
 	co_return statusObj;
 }
 
-static Future<JsonBuilderObject> clusterSummaryStatisticsFetcher(
+static AsyncResult<JsonBuilderObject> clusterSummaryStatisticsFetcher(
     WorkerEvents pMetrics,
     Future<ErrorOr<std::vector<StorageServerStatusInfo>>> storageServerFuture,
     Future<ErrorOr<std::vector<std::pair<TLogInterface, EventMap>>>> tlogFuture,
@@ -2632,9 +2632,9 @@ static JsonBuilderArray getClientIssuesAsMessages(
 	return issuesList;
 }
 
-Future<JsonBuilderObject> layerStatusFetcher(Database cx,
-                                             JsonBuilderArray* messages,
-                                             std::set<std::string>* incomplete_reasons) {
+AsyncResult<JsonBuilderObject> layerStatusFetcher(Database cx,
+                                                  JsonBuilderArray* messages,
+                                                  std::set<std::string>* incomplete_reasons) {
 	StatusObject result;
 	JSONDoc json(result);
 	double tStart = now();
@@ -2701,49 +2701,49 @@ Future<JsonBuilderObject> layerStatusFetcher(Database cx,
 	co_return statusObj;
 }
 
-ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Database cx,
-                                                    JsonBuilderArray* messages,
-                                                    std::set<std::string>* incomplete_reasons) {
-	state JsonBuilderObject statusObj;
+AsyncResult<JsonBuilderObject> lockedStatusFetcher(Database cx,
+                                                   JsonBuilderArray* messages,
+                                                   std::set<std::string>* incomplete_reasons) {
+	JsonBuilderObject statusObj;
+	Transaction tr(cx);
+	int timeoutSeconds = 5;
+	Future<Void> getTimeout = delay(timeoutSeconds);
 
-	state Transaction tr(cx);
-	state int timeoutSeconds = 5;
-	state Future<Void> getTimeout = delay(timeoutSeconds);
-
-	loop {
+	while (true) {
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+		Error err;
 		try {
-			choose {
-				when(Optional<Value> lockUID = wait(tr.get(databaseLockedKey))) {
-					if (lockUID.present()) {
-						statusObj["locked"] = true;
-						statusObj["lock_uid"] =
-						    BinaryReader::fromStringRef<UID>(lockUID.get().substr(10), Unversioned()).toString();
-					} else {
-						statusObj["locked"] = false;
-					}
+			auto res = co_await race(tr.get(databaseLockedKey), getTimeout);
+			if (res.index() == 0) {
+				Optional<Value> lockUID = std::get<0>(std::move(res));
+				if (lockUID.present()) {
+					statusObj["locked"] = true;
+					statusObj["lock_uid"] =
+					    BinaryReader::fromStringRef<UID>(lockUID.get().substr(10), Unversioned()).toString();
+				} else {
+					statusObj["locked"] = false;
 				}
-				when(wait(getTimeout)) {
-					incomplete_reasons->insert(
-					    format("Unable to determine if database is locked after %d seconds.", timeoutSeconds));
-				}
+			} else {
+				incomplete_reasons->insert(
+				    format("Unable to determine if database is locked after %d seconds.", timeoutSeconds));
 			}
 			break;
 		} catch (Error& e) {
-			try {
-				wait(tr.onError(e));
-			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled)
-					throw;
+			err = e;
+		}
+		try {
+			co_await tr.onError(err);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 
-				incomplete_reasons->insert(format("Unable to determine if database is locked (%s).", e.what()));
-				break;
-			}
+			incomplete_reasons->insert(format("Unable to determine if database is locked (%s).", e.what()));
+			break;
 		}
 	}
-	return statusObj;
+	co_return statusObj;
 }
 
 Future<Optional<Value>> getActivePrimaryDC(Database cx, int* fullyReplicatedRegions, JsonBuilderArray* messages) {
@@ -3105,7 +3105,7 @@ Future<StatusReply> clusterGetStatus(Reference<AsyncVar<ServerDBInfo>> db,
 			int fullyReplicatedRegions = -1;
 			// NOTE: here we should start all the transaction before wait in order to overlay latency
 			Future<Optional<Value>> primaryDCFO = getActivePrimaryDC(cx, &fullyReplicatedRegions, &messages);
-			std::vector<Future<JsonBuilderObject>> futures2;
+			std::vector<AsyncResult<JsonBuilderObject>> futures2;
 			futures2.push_back(dataStatusFetcher(ddWorker, configuration.get(), &minStorageReplicasRemaining));
 			futures2.push_back(workloadStatusFetcher(
 			    db, workers, mWorker, rkWorker, &qos, &dataOverlay, &status_incomplete_reasons, storageServerFuture));
@@ -3142,7 +3142,7 @@ Future<StatusReply> clusterGetStatus(Reference<AsyncVar<ServerDBInfo>> db,
 				}
 			}
 
-			std::vector<JsonBuilderObject> workerStatuses = co_await getAll(futures2);
+			std::vector<JsonBuilderObject> workerStatuses = co_await getAll(std::move(futures2));
 			co_await primaryDCFO;
 
 			ErrorOr<std::vector<NetworkAddress>> addresses =
