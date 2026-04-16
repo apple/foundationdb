@@ -137,17 +137,35 @@ struct GcGenerationsWorkload : TestWorkload {
 		}
 	}
 
+	// Reboot the master, but only if it's in the primary DC. If the master is in the
+	// remote DC, wait and retry until a primary DC master is elected.
+	Future<Void> rebootPrimaryMaster(GcGenerationsWorkload* self) {
+		while (true) {
+			co_await self->dbAvailable(self);
+			auto masterAddr = self->dbInfo->get().master.address();
+			auto* masterProc = g_simulator->getProcessByAddress(masterAddr);
+			if (!masterProc || !masterProc->locality.dcId().present() ||
+			    masterProc->locality.dcId() == g_simulator->remoteDcId) {
+				TraceEvent("RebootPrimaryMasterSkipRemote").detail("MasterAddr", masterAddr);
+				co_await delay(5);
+				continue;
+			}
+			TraceEvent("RebootPrimaryMaster").detail("Master", masterAddr);
+			g_simulator->rebootProcess(masterProc, ISimulator::KillType::Reboot);
+			co_return;
+		}
+	}
+
 	Future<Void> generateMultipleTxnGenerations(GcGenerationsWorkload* self, Database cx) {
 		co_await self->clogRemoteDc(self, cx);
 		int generationCount = 0;
 		int successfulReboots = 0;
 		while (successfulReboots < 6) {
-			// Sometimes Cycle Setup can take a long time, so we need to extend
-			// connection failures injection for clogRemoteDc() to work properly.
-			// We also want to make sure connection failures are still active when we
-			// are triggering recoveries within this actor, so the assertion below
-			// is true.
-			extendConnectionFailures("GcGenerations", FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS);
+			// Re-enable connection failures each iteration to keep the partition active.
+			// Using enableConnectionFailures (not extendConnectionFailures) resets
+			// connectionFailureEnableTime, which prevents the peek cursor assertion
+			// in LogSystemPeekCursor from firing while clogged pairs are still active.
+			enableConnectionFailures("GcGenerations", FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS);
 
 			co_await delay(30);
 			TraceEvent("WaitingForDbAvailable")
@@ -189,22 +207,6 @@ struct GcGenerationsWorkload : TestWorkload {
 		    .detail("OldGenerationCount", self->dbInfo->get().logSystemConfig.oldTLogs.size());
 	}
 
-	Future<Void> generationReduced(GcGenerationsWorkload* self) {
-		TraceEvent("WaitForGenerationReduction")
-		    .detail("GenerationCount", self->dbInfo->get().logSystemConfig.oldTLogs.size())
-		    .detail("RecoveryState", self->dbInfo->get().recoveryState);
-		while (self->dbInfo->get().logSystemConfig.oldTLogs.size() > 1 ||
-		       self->dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
-			TraceEvent("WaitForGenerationReduction")
-			    .detail("GenerationCount", self->dbInfo->get().logSystemConfig.oldTLogs.size())
-			    .detail("RecoveryState", self->dbInfo->get().recoveryState);
-			co_await self->dbInfo->onChange();
-		}
-		TraceEvent("WaitForGenerationReduction")
-		    .detail("GenerationCount", self->dbInfo->get().logSystemConfig.oldTLogs.size())
-		    .detail("RecoveryState", self->dbInfo->get().recoveryState);
-	}
-
 	Future<Void> gcGenerationsTestClient(GcGenerationsWorkload* self, Database cx) {
 		co_await delay(self->startDelay);
 
@@ -231,13 +233,20 @@ struct GcGenerationsWorkload : TestWorkload {
 		// The new recovery starts with clean tracking state, allowing GC to proceed.
 		g_simulator->disableTLogRecoveryFinish = false;
 
-		co_await self->dbAvailable(self);
-		auto masterAddr = self->dbInfo->get().master.address();
-		TraceEvent("RebootingMasterForGC").detail("Master", masterAddr);
-		g_simulator->rebootProcess(g_simulator->getProcessByAddress(masterAddr),
-		                           ISimulator::KillType::Reboot);
-
-		co_await self->generationReduced(self);
+		// Reboot the master to trigger fresh recoveries with clean tracking state.
+		// GC may need multiple recovery cycles: remote TLogs must catch up from old
+		// generations before remoteRecoveredVersion advances past their recoverAt,
+		// and purgeOldRecoveredGenerationsCoreState only purges generations below that.
+		// Retry periodically until oldTLogs is reduced.
+		while (self->dbInfo->get().logSystemConfig.oldTLogs.size() > 1) {
+			co_await self->rebootPrimaryMaster(self);
+			// Give this recovery cycle time to GC before retrying.
+			co_await delay(60);
+			co_await self->dbAvailable(self);
+			TraceEvent("GcGenerationsWaitingForReduction")
+			    .detail("OldTLogs", self->dbInfo->get().logSystemConfig.oldTLogs.size())
+			    .detail("RecoveryState", self->dbInfo->get().recoveryState);
+		}
 
 		TraceEvent("WaitingForDbFullyRecovered").detail("RecoveryState", self->dbInfo->get().recoveryState);
 		while (self->dbInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED) {
