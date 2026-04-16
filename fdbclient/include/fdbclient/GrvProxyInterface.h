@@ -105,16 +105,16 @@ struct GetReadVersionRequest : TimedRequest {
 	                      Optional<UID> debugID = Optional<UID>())
 	  : spanContext(spanContext), transactionCount(transactionCount), flags(flags), priority(priority), tags(tags),
 	    debugID(debugID), maxVersion(maxVersion) {
-		flags = flags & ~FLAG_PRIORITY_MASK;
+		this->flags &= ~FLAG_PRIORITY_MASK;
 		switch (priority) {
 		case TransactionPriority::BATCH:
-			flags |= PRIORITY_BATCH;
+			this->flags |= PRIORITY_BATCH;
 			break;
 		case TransactionPriority::DEFAULT:
-			flags |= PRIORITY_DEFAULT;
+			this->flags |= PRIORITY_DEFAULT;
 			break;
 		case TransactionPriority::IMMEDIATE:
-			flags |= PRIORITY_SYSTEM_IMMEDIATE;
+			this->flags |= PRIORITY_SYSTEM_IMMEDIATE;
 			break;
 		default:
 			ASSERT(false);
