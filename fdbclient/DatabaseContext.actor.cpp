@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <functional>
 #include <iterator>
 #include <limits>
 #include <memory>
@@ -1463,7 +1464,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 			        return Optional<Value>();
 		        }));
 	}
-	throttleExpirer = recurring([this]() { expireThrottles(); }, CLIENT_KNOBS->TAG_THROTTLE_EXPIRATION_INTERVAL);
+	throttleExpirer = recurring(std::bind_front(&DatabaseContext::expireThrottles, this),
+	                            CLIENT_KNOBS->TAG_THROTTLE_EXPIRATION_INTERVAL);
 
 	if (BUGGIFY) {
 		DatabaseContext::debugUseTags = true;
