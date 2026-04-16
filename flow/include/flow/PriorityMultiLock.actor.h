@@ -20,17 +20,8 @@
 
 #pragma once
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
-#if defined(NO_INTELLISENSE) && !defined(FLOW_PRIORITYMULTILOCK_ACTOR_G_H)
-#define FLOW_PRIORITYMULTILOCK_ACTOR_G_H
-#include "flow/PriorityMultiLock.actor.g.h"
-#elif !defined(PRIORITYMULTILOCK_ACTOR_H)
-#define PRIORITYMULTILOCK_ACTOR_H
-
 #include "flow/flow.h"
 #include <boost/intrusive/list.hpp>
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 #define PRIORITYMULTILOCK_DEBUG 0
 
@@ -252,10 +243,13 @@ private:
 	Promise<Void> brokenOnDestruct;
 	bool killed;
 
-	ACTOR static void handleRelease(Reference<PriorityMultiLock> self, Priority* priority, Future<Void> holder) {
+	static Future<Void> handleRelease(Uncancellable,
+	                                  Reference<PriorityMultiLock> self,
+	                                  Priority* priority,
+	                                  Future<Void> holder) {
 		pml_debug_printf("%f handleRelease self=%p start\n", now(), self.getPtr());
 		try {
-			wait(holder);
+			co_await holder;
 			pml_debug_printf("%f handleRelease self=%p success\n", now(), self.getPtr());
 		} catch (Error& e) {
 			pml_debug_printf("%f handleRelease self=%p error %s\n", now(), self.getPtr(), e.what());
@@ -276,7 +270,7 @@ private:
 	void addRunner(Lock& lock, Priority* priority) {
 		priority->runners += 1;
 		--available;
-		handleRelease(Reference<PriorityMultiLock>::addRef(this), priority, lock.promise.getFuture());
+		handleRelease(Uncancellable(), Reference<PriorityMultiLock>::addRef(this), priority, lock.promise.getFuture());
 	}
 
 	// Current maximum running tasks for the specified priority, which must have waiters
@@ -287,18 +281,18 @@ private:
 		return ceil((float)weight / totalPendingWeights * concurrency);
 	}
 
-	ACTOR static Future<Void> runner(PriorityMultiLock* self) {
-		state Future<Void> error = self->brokenOnDestruct.getFuture();
+	static Future<Void> runner(PriorityMultiLock* self) {
+		Future<Void> error = self->brokenOnDestruct.getFuture();
 
 		// Priority to try to run tasks from next
-		state WaitingPrioritiesList::iterator p = self->waitingPriorities.end();
+		WaitingPrioritiesList::iterator p = self->waitingPriorities.end();
 
-		loop {
+		while (true) {
 			pml_debug_printf("runner loop start  priority=%d  %s\n", p->priority, self->toString().c_str());
 
 			// Wait for a runner to release its lock
 			pml_debug_printf("runner loop waitTrigger  priority=%d  %s\n", p->priority, self->toString().c_str());
-			wait(self->wakeRunner.onTrigger());
+			co_await self->wakeRunner.onTrigger();
 			pml_debug_printf("%f runner loop wake  priority=%d  %s\n", now(), p->priority, self->toString().c_str());
 
 			// While there are available slots and there are waiters, launch tasks
@@ -306,7 +300,7 @@ private:
 				pml_debug_printf("  launch loop start  priority=%d  %s\n", p->priority, self->toString().c_str());
 
 				// Find the next priority with waiters and capacity.  There must be at least one.
-				loop {
+				while (true) {
 					if (p == self->waitingPriorities.end()) {
 						p = self->waitingPriorities.begin();
 					}
@@ -357,7 +351,3 @@ private:
 		}
 	}
 };
-
-#include "flow/unactorcompiler.h"
-
-#endif
