@@ -26,7 +26,7 @@
 #include "fdbserver/core/CoordinationInterface.h" // copy constructors for ServerCoordinators class
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MasterInterface.h"
-#include "fdbserver/sequencer/MasterServer.actor.h"
+#include "fdbserver/sequencer/MasterServer.h"
 #include "ResolutionBalancer.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "flow/ActorCollection.h"
@@ -642,29 +642,27 @@ ACTOR Future<Void> masterServerImpl(MasterInterface mi,
 }
 #endif
 
-ACTOR Future<Void> masterServer(MasterInterface mi,
-                                Reference<AsyncVar<ServerDBInfo> const> db,
-                                Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
-                                ServerCoordinators coordinators,
-                                LifetimeToken lifetime,
-                                bool forceRecovery) {
+Future<Void> masterServer(MasterInterface mi,
+                          Reference<AsyncVar<ServerDBInfo> const> db,
+                          Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
+                          ServerCoordinators coordinators,
+                          LifetimeToken lifetime,
+                          bool forceRecovery) {
 
-	state Future<Void> ccTimeout = delay(SERVER_KNOBS->CC_INTERFACE_TIMEOUT);
+	Future<Void> ccTimeout = delay(SERVER_KNOBS->CC_INTERFACE_TIMEOUT);
 	while (!ccInterface->get().present() || db->get().clusterInterface != ccInterface->get().get()) {
-		wait(ccInterface->onChange() || db->onChange() || ccTimeout);
+		co_await race(ccInterface->onChange(), db->onChange(), ccTimeout);
 		if (ccTimeout.isReady()) {
 			TraceEvent("MasterTerminated", mi.id())
 			    .detail("Reason", "Timeout")
 			    .detail("CCInterface", ccInterface->get().present() ? ccInterface->get().get().id() : UID())
 			    .detail("DBInfoInterface", db->get().clusterInterface.id());
-			return Void();
+			co_return;
 		}
 	}
 
-	state Future<Void> onDBChange = Void();
-	wait(onDBChange);
-	wait(masterServerImpl(mi, db, ccInterface, coordinators, lifetime, forceRecovery));
-	return Void();
+	co_await Future<Void>(Void());
+	co_await masterServerImpl(mi, db, ccInterface, coordinators, lifetime, forceRecovery);
 }
 
 TEST_CASE("/fdbserver/MasterServer/FigureVersion/Simple") {

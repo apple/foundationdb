@@ -381,20 +381,6 @@ namespace actorcompiler
                         outLine++;
                     }
                 }
-                else if (tokens[i].Value == "DESCR")
-                {
-                    int end;
-                    var descr = ParseDescr(i, out end);
-                    int lines;
-                    new DescrCompiler(descr, tokens[i].BraceDepth).Write(writer, out lines);
-                    i = end;
-                    outLine += lines;
-                    if (i != tokens.Length && LineNumbersEnabled)
-                    {
-                        writer.WriteLine("#line {0} \"{1}\"", tokens[i].SourceLine, sourceFile);
-                        outLine++;
-                    }
-                }
                 else if (tokens[i].Value == "class" || tokens[i].Value == "struct" || tokens[i].Value == "union")
                 {
                     writer.Write(tokens[i].Value);
@@ -517,20 +503,6 @@ namespace actorcompiler
 
         readonly Func<Token, bool> Whitespace = (Token t) => t.IsWhitespace;
         readonly Func<Token, bool> NonWhitespace = (Token t) => !t.IsWhitespace;
-
-        void ParseDescrHeading(Descr descr, TokenRange toks)
-        {
-            toks.First(NonWhitespace).Assert("non-struct DESCR!", t => t.Value == "struct");
-            toks = toks.SkipWhile(Whitespace).Skip(1).SkipWhile(Whitespace);
-
-            var colon = toks.FirstOrDefault(t => t.Value == ":");
-            if (colon != null)
-            {
-                descr.superClassList = str(range(colon.Position + 1, toks.End)).Trim();
-                toks = range(toks.Begin, colon.Position);
-            }
-            descr.name = str(toks).Trim();
-        }
 
         void ParseTestCaseHeading(Actor actor, TokenRange toks)
         {
@@ -894,22 +866,6 @@ namespace actorcompiler
 
         static readonly HashSet<string> IllegalKeywords = new HashSet<string> { "goto", "do", "finally", "__if_exists", "__if_not_exists" };
 
-        void ParseDeclaration(TokenRange toks, List<Declaration> declarations)
-        {
-            Declaration dec = new Declaration();
-
-            Token delim = toks.First(t => t.Value == ";");
-            var nameRange = range(toks.Begin, delim.Position).RevSkipWhile(Whitespace).RevTakeWhile(NonWhitespace);
-            var typeRange = range(toks.Begin, nameRange.Begin);
-            var commentRange = range(delim.Position + 1, toks.End);
-
-            dec.name = str(nameRange).Trim();
-            dec.type = str(typeRange).Trim();
-            dec.comment = str(commentRange).Trim().TrimStart('/');
-
-            declarations.Add(dec);
-        }
-
         void ParseStatement(TokenRange toks, List<Statement> statements)
         {
             toks = toks.SkipWhile(Whitespace);
@@ -971,31 +927,6 @@ namespace actorcompiler
             }
         }
 
-        List<Declaration> ParseDescrCodeBlock(TokenRange toks)
-        {
-            List<Declaration> declarations = new List<Declaration>();
-            while (true)
-            {
-                Token delim = toks.FirstOrDefault(t => t.Value == ";");
-                if (delim == null)
-                    break;
-
-                int pos = delim.Position + 1;
-                var potentialComment = range(pos, toks.End).SkipWhile(t => t.Value == "\t" || t.Value == " ");
-                if (!potentialComment.IsEmpty && potentialComment.First().Value.StartsWith("//"))
-                {
-                    pos = potentialComment.First().Position + 1;
-                }
-
-                ParseDeclaration(range(toks.Begin, pos), declarations);
-
-                toks = range(pos, toks.End);
-            }
-            if (!toks.All(Whitespace))
-                throw new Error(toks.First(NonWhitespace).SourceLine, "Trailing unterminated statement in code block");
-            return declarations;
-        }
-
         CodeBlock ParseCodeBlock(TokenRange toks)
         {
             List<Statement> statements = new List<Statement>();
@@ -1020,21 +951,6 @@ namespace actorcompiler
         TokenRange range(int beginPos, int endPos)
         {
             return new TokenRange(tokens, beginPos, endPos);
-        }
-
-        Descr ParseDescr(int pos, out int end)
-        {
-            var descr = new Descr();
-            var toks = range(pos + 1, tokens.Length);
-            var heading = toks.TakeWhile(t => t.Value != "{");
-            var body = range(heading.End + 1, tokens.Length)
-                .TakeWhile(t => t.BraceDepth > toks.First().BraceDepth || t.Value == ";" ); //assumes no whitespace between the last "}" and the ";"
-
-            ParseDescrHeading(descr, heading);
-            descr.body = ParseDescrCodeBlock(body);
-
-            end = body.End + 1;
-            return descr;
         }
 
         Actor ParseActor( int pos, out int end ) {

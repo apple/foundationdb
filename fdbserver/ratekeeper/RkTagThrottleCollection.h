@@ -22,7 +22,7 @@
 #pragma once
 
 #include "fdbclient/Knobs.h"
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "fdbrpc/Smoother.h"
 
 class RkTagThrottleCollection : NonCopyable {

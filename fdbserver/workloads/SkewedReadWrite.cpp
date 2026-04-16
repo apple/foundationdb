@@ -26,11 +26,11 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "BulkSetup.h"
-#include "ReadWriteWorkload.actor.h"
+#include "ReadWriteWorkload.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/TDMetric.h"
 #include "fdbclient/RunRYWTransaction.h"
 
 struct SkewedReadWriteWorkload : ReadWriteCommon {

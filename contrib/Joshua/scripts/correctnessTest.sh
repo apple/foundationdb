@@ -103,6 +103,13 @@
 #                                Maps to: --random-seed
 #                                Default: auto-generated
 #
+# TH_FDBSERVER_MEMORY           Pass --memory SIZE to fdbserver
+#                                Maps to: --fdbserver-memory
+#                                Example: 12288MiB
+#                                Default: unset
+#                                Note: if unset, TestHarness2 automatically uses
+#                                12288MiB for ASAN/UBSAN-instrumented binaries
+#
 # TH_OUTPUT_FORMAT              Output format for test results
 #                                Maps to: --output-format
 #                                Values: xml/json (default: xml)

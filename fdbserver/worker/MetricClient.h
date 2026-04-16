@@ -23,7 +23,7 @@
 
 #include "flow/IUDPSocket.h"
 #include "flow/Msgpack.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/TDMetric.h"
 #include "flow/network.h"
 
 class IMetricClient {

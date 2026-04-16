@@ -60,6 +60,27 @@
 
 using namespace std::string_view_literals;
 
+// Older simulated Redwood files derived the test-only XOR secret from the pager filename after erasing the directory
+// prefix with `erase(0, lastSlash)`, which intentionally leaves the final slash in the hashed suffix. Keep that exact
+// mapping stable so restarted upgrade tests can still read and continue writing those files.
+static uint8_t legacyXorWithForPagerName(std::string filename) {
+	size_t lastSlash = filename.find_last_of("\\/");
+	if (lastSlash != filename.npos) {
+		filename.erase(0, lastSlash);
+	}
+	return filename.empty()
+	           ? 0x5e
+	           : static_cast<uint8_t>(filename[XXH3_64bits(filename.data(), filename.size()) % filename.size()]);
+}
+
+// Legacy XOR pages need the filename-derived byte installed on the ArenaPage before encode/decode.
+// XXHash64 pages ignore this state.
+static void prepareLegacyXorCompatibility(const Reference<ArenaPage>& page, const std::string& pagerName) {
+	if (page->getEncodingType() == EncodingType::XOREncryption_TestOnly_DEPRECATED) {
+		page->setLegacyXorWith(legacyXorWithForPagerName(pagerName));
+	}
+}
+
 // Returns a string where every line in lines is prefixed with prefix
 std::string addPrefix(std::string prefix, std::string lines) {
 	StringRef m = lines;
@@ -1589,21 +1610,21 @@ int RedwoodMetrics::maxRecordCount = 315;
 RedwoodMetrics g_redwoodMetrics = {};
 Future<Void> g_redwoodMetricsActor;
 
-ACTOR Future<Void> redwoodHistogramsLogger(double interval) {
-	state double currTime;
-	loop {
+Future<Void> redwoodHistogramsLogger(double interval) {
+	double currTime{ 0 };
+	while (true) {
 		currTime = now();
-		wait(delay(interval));
+		co_await delay(interval);
 		double elapsed = now() - currTime;
 		g_redwoodMetrics.logHistograms(elapsed);
 	}
 }
 
-ACTOR Future<Void> redwoodMetricsLogger() {
+Future<Void> redwoodMetricsLogger() {
 	g_redwoodMetrics.clear();
-	state Future<Void> loggingFuture = redwoodHistogramsLogger(SERVER_KNOBS->REDWOOD_HISTOGRAM_INTERVAL);
-	loop {
-		wait(delay(SERVER_KNOBS->REDWOOD_METRICS_INTERVAL));
+	[[maybe_unused]] Future<Void> loggingFuture = redwoodHistogramsLogger(SERVER_KNOBS->REDWOOD_HISTOGRAM_INTERVAL);
+	while (true) {
+		co_await delay(SERVER_KNOBS->REDWOOD_METRICS_INTERVAL);
 
 		TraceEvent e("RedwoodMetrics");
 		double elapsed = now() - g_redwoodMetrics.startTime;
@@ -1879,11 +1900,11 @@ private:
 	EvictionOrderT prioritizedEvictions;
 };
 
-ACTOR template <class T>
-Future<T> forwardError(Future<T> f, Promise<Void> target) {
+template <class T>
+Future<T> forwardError(Future<T> f, Promise<Void> target, ExplicitVoid = {}) {
 	try {
-		T x = wait(f);
-		return x;
+		T x = co_await f;
+		co_return x;
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled && target.canBeSet()) {
 			target.sendError(e);
@@ -2565,6 +2586,11 @@ public:
 		// last committed version + 1
 		page->setWriteInfo(pageIDs.front(), this->getLastCommittedVersion() + 1);
 
+		if (page->getEncodingType() == EncodingType::XOREncryption_TestOnly_DEPRECATED) {
+			page = page->clone();
+			prepareLegacyXorCompatibility(page, filename);
+		}
+
 		page->preWrite(pageIDs.front());
 
 		int blockSize = header ? smallestPhysicalBlock : physicalPageSize;
@@ -2806,6 +2832,7 @@ public:
 
 		try {
 			page->postReadHeader(pageID);
+			prepareLegacyXorCompatibility(page, self->filename);
 			page->postReadPayload(pageID);
 			debug_printf("DWALPager(%s) op=readPhysicalVerified %s ptr=%p\n",
 			             self->filename.c_str(),
@@ -2871,6 +2898,7 @@ public:
 
 		try {
 			page->postReadHeader(pageIDs.front());
+			prepareLegacyXorCompatibility(page, self->filename);
 			page->postReadPayload(pageIDs.front());
 			debug_printf("DWALPager(%s) op=readPhysicalVerified %s ptr=%p bytes=%d\n",
 			             self->filename.c_str(),
@@ -3593,7 +3621,9 @@ public:
 		debug_printf("DWALPager(%s) shutdown cancel recovery\n", self->filename.c_str());
 		self->recoverFuture.cancel();
 		debug_printf("DWALPager(%s) shutdown cancel commit\n", self->filename.c_str());
-		self->commitFuture.cancel();
+		// Cancelling the future does not destroy the state held by the commit coroutine. Reset the future entirely so
+		// shutdown releases that coroutine state before tearing down the pager.
+		self->commitFuture = Future<Void>();
 		debug_printf("DWALPager(%s) shutdown cancel remap\n", self->filename.c_str());
 		self->remapCleanupFuture.cancel();
 		debug_printf("DWALPager(%s) shutdown kill file extension\n", self->filename.c_str());
@@ -5091,11 +5121,16 @@ public:
 			}
 
 			if (self->m_encodingType != self->m_header.encodingType) {
-				TraceEvent(SevWarn, "RedwoodBTreeUnexpectedEncodingType")
-				    .detail("InstanceName", self->m_pager->getName())
-				    .detail("UsingEncodingType", self->m_encodingType)
-				    .detail("ExistingEncodingType", self->m_header.encodingType);
-				throw unexpected_encoding_type();
+				if (g_network->isSimulated() &&
+				    self->m_header.encodingType == EncodingType::XOREncryption_TestOnly_DEPRECATED) {
+					self->m_encodingType = self->m_header.encodingType;
+				} else {
+					TraceEvent(SevWarn, "RedwoodBTreeUnexpectedEncodingType")
+					    .detail("InstanceName", self->m_pager->getName())
+					    .detail("UsingEncodingType", self->m_encodingType)
+					    .detail("ExistingEncodingType", self->m_header.encodingType);
+					throw unexpected_encoding_type();
+				}
 			}
 
 			self->m_lazyClearQueue.recover(self->m_pager, self->m_header.lazyDeleteQueue, "LazyClearQueueRecovered");
@@ -7936,42 +7971,42 @@ KeyValue randomKV(int maxKeySize = 10, int maxValueSize = 5) {
 
 // Verify a range using a BTreeCursor.
 // Assumes that the BTree holds a single data version and the version is 0.
-ACTOR Future<Void> verifyRangeBTreeCursor(VersionedBTree* btree,
-                                          Key start,
-                                          Key end,
-                                          Version v,
-                                          std::map<std::pair<std::string, Version>, Optional<std::string>>* written,
-                                          int64_t* pRecordsRead) {
+Future<Void> verifyRangeBTreeCursor(VersionedBTree* btree,
+                                    Key start,
+                                    Key end,
+                                    Version v,
+                                    std::map<std::pair<std::string, Version>, Optional<std::string>>* written,
+                                    int64_t* pRecordsRead) {
 	if (end <= start)
 		end = keyAfter(start);
 
-	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator i =
+	std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator i =
 	    written->lower_bound(std::make_pair(start.toString(), 0));
-	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator iEnd =
+	std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator iEnd =
 	    written->upper_bound(std::make_pair(end.toString(), initialVersion));
-	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator iLast;
+	std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator iLast;
 
-	state VersionedBTree::BTreeCursor cur;
-	wait(btree->initBTreeCursor(&cur, v, PagerEventReasons::RangeRead));
+	VersionedBTree::BTreeCursor cur;
+	co_await btree->initBTreeCursor(&cur, v, PagerEventReasons::RangeRead);
 	debug_printf("VerifyRange(@%" PRId64 ", %s, %s): Start\n", v, start.printable().c_str(), end.printable().c_str());
 
 	// Randomly use the cursor for something else first.
 	if (deterministicRandom()->coinflip()) {
-		state Key randomKey = randomKV().key;
+		Key randomKey = randomKV().key;
 		debug_printf("VerifyRange(@%" PRId64 ", %s, %s): Dummy seek to '%s'\n",
 		             v,
 		             start.printable().c_str(),
 		             end.printable().c_str(),
 		             randomKey.toString().c_str());
-		wait(success(cur.seek(randomKey)));
+		co_await success(cur.seek(randomKey));
 	}
 
 	debug_printf(
 	    "VerifyRange(@%" PRId64 ", %s, %s): Actual seek\n", v, start.printable().c_str(), end.printable().c_str());
 
-	wait(cur.seekGTE(start));
+	co_await cur.seekGTE(start);
 
-	state Standalone<VectorRef<KeyValueRef>> results;
+	Standalone<VectorRef<KeyValueRef>> results;
 
 	while (cur.isValid() && cur.get().key < end) {
 		// Find the next written kv pair that would be present at this version
@@ -8028,7 +8063,7 @@ ACTOR Future<Void> verifyRangeBTreeCursor(VersionedBTree* btree,
 		results.arena().dependsOn(cur.back().cursor.cache->arena);
 		results.arena().dependsOn(cur.back().page->getArena());
 
-		wait(cur.moveNext());
+		co_await cur.moveNext();
 	}
 
 	// Make sure there are no further written kv pairs that would be present at this version.
@@ -8059,13 +8094,13 @@ ACTOR Future<Void> verifyRangeBTreeCursor(VersionedBTree* btree,
 	// opening new cursors
 	if (v >= btree->getOldestReadableVersion() && deterministicRandom()->coinflip()) {
 		cur = VersionedBTree::BTreeCursor();
-		wait(btree->initBTreeCursor(&cur, v, PagerEventReasons::RangeRead));
+		co_await btree->initBTreeCursor(&cur, v, PagerEventReasons::RangeRead);
 	}
 
 	// Now read the range from the tree in reverse order and compare to the saved results
-	wait(cur.seekLT(end));
+	co_await cur.seekLT(end);
 
-	state std::reverse_iterator<const KeyValueRef*> r = results.rbegin();
+	std::reverse_iterator<const KeyValueRef*> r = results.rbegin();
 
 	while (cur.isValid() && cur.get().key >= start) {
 		++*pRecordsRead;
@@ -8100,7 +8135,7 @@ ACTOR Future<Void> verifyRangeBTreeCursor(VersionedBTree* btree,
 		}
 
 		++r;
-		wait(cur.movePrev());
+		co_await cur.movePrev();
 	}
 
 	if (r != results.rend()) {
@@ -8111,31 +8146,29 @@ ACTOR Future<Void> verifyRangeBTreeCursor(VersionedBTree* btree,
 		       r->key.toString().c_str());
 		ASSERT(false);
 	}
-
-	return Void();
 }
 
 // Verify the result of point reads for every set or cleared key change made at exactly v
-ACTOR Future<Void> seekAllBTreeCursor(VersionedBTree* btree,
-                                      Version v,
-                                      std::map<std::pair<std::string, Version>, Optional<std::string>>* written,
-                                      int64_t* pRecordsRead) {
-	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator i = written->cbegin();
-	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator iEnd = written->cend();
-	state VersionedBTree::BTreeCursor cur;
+Future<Void> seekAllBTreeCursor(VersionedBTree* btree,
+                                Version v,
+                                std::map<std::pair<std::string, Version>, Optional<std::string>>* written,
+                                int64_t* pRecordsRead) {
+	auto i = written->cbegin();
+	auto iEnd = written->cend();
+	VersionedBTree::BTreeCursor cur;
 
-	wait(btree->initBTreeCursor(&cur, v, PagerEventReasons::RangeRead));
+	co_await btree->initBTreeCursor(&cur, v, PagerEventReasons::RangeRead);
 
 	while (i != iEnd) {
 		// Since the written map gets larger and takes longer to scan each time, count visits to all written recs
 		++*pRecordsRead;
-		state std::string key = i->first.first;
-		state Version ver = i->first.second;
+		std::string key = i->first.first;
+		Version ver = i->first.second;
 		if (ver == v) {
-			state Optional<std::string> val = i->second;
+			Optional<std::string> val = i->second;
 			debug_printf("Verifying @%" PRId64 " '%s'\n", ver, key.c_str());
-			state Arena arena;
-			wait(cur.seekGTE(RedwoodRecordRef(KeyRef(arena, key))));
+			Arena arena;
+			co_await cur.seekGTE(RedwoodRecordRef(KeyRef(arena, key)));
 			bool foundKey = cur.isValid() && cur.get().key == key;
 			bool hasValue = foundKey && cur.get().value.present();
 
@@ -8171,21 +8204,20 @@ ACTOR Future<Void> seekAllBTreeCursor(VersionedBTree* btree,
 		}
 		++i;
 	}
-	return Void();
 }
 
-ACTOR Future<Void> verify(VersionedBTree* btree,
-                          FutureStream<Version> vStream,
-                          std::map<std::pair<std::string, Version>, Optional<std::string>>* written,
-                          int64_t* pRecordsRead,
-                          bool serial) {
+Future<Void> verify(VersionedBTree* btree,
+                    FutureStream<Version> vStream,
+                    std::map<std::pair<std::string, Version>, Optional<std::string>>* written,
+                    int64_t* pRecordsRead,
+                    bool serial) {
 
 	// Queue of committed versions still readable from btree
-	state std::deque<Version> committedVersions;
+	std::deque<Version> committedVersions;
 
 	try {
-		loop {
-			state Version v = waitNext(vStream);
+		while (true) {
+			Version v = co_await vStream;
 			committedVersions.push_back(v);
 
 			// Remove expired versions
@@ -8205,14 +8237,13 @@ ACTOR Future<Void> verify(VersionedBTree* btree,
 			debug_printf("Using committed version %" PRId64 "\n", v);
 
 			// Get a cursor at v so that v doesn't get expired between the possibly serial steps below.
-			state VersionedBTree::BTreeCursor cur;
-			wait(btree->initBTreeCursor(&cur, v, PagerEventReasons::RangeRead));
+			VersionedBTree::BTreeCursor cur;
+			co_await btree->initBTreeCursor(&cur, v, PagerEventReasons::RangeRead);
 
 			debug_printf("Verifying entire key range at version %" PRId64 "\n", v);
-			state Future<Void> fRangeAll =
-			    verifyRangeBTreeCursor(btree, ""_sr, "\xff\xff"_sr, v, written, pRecordsRead);
+			Future<Void> fRangeAll = verifyRangeBTreeCursor(btree, ""_sr, "\xff\xff"_sr, v, written, pRecordsRead);
 			if (serial) {
-				wait(fRangeAll);
+				co_await fRangeAll;
 			}
 
 			Key begin = randomKV().key;
@@ -8220,18 +8251,18 @@ ACTOR Future<Void> verify(VersionedBTree* btree,
 
 			debug_printf(
 			    "Verifying range (%s, %s) at version %" PRId64 "\n", toString(begin).c_str(), toString(end).c_str(), v);
-			state Future<Void> fRangeRandom = verifyRangeBTreeCursor(btree, begin, end, v, written, pRecordsRead);
+			Future<Void> fRangeRandom = verifyRangeBTreeCursor(btree, begin, end, v, written, pRecordsRead);
 			if (serial) {
-				wait(fRangeRandom);
+				co_await fRangeRandom;
 			}
 
 			debug_printf("Verifying seeks to each changed key at version %" PRId64 "\n", v);
-			state Future<Void> fSeekAll = seekAllBTreeCursor(btree, v, written, pRecordsRead);
+			Future<Void> fSeekAll = seekAllBTreeCursor(btree, v, written, pRecordsRead);
 			if (serial) {
-				wait(fSeekAll);
+				co_await fSeekAll;
 			}
 
-			wait(fRangeAll && fRangeRandom && fSeekAll);
+			co_await (fRangeAll && fRangeRandom && fSeekAll);
 
 			printf("Verified version %" PRId64 "\n", v);
 		}
@@ -8240,7 +8271,6 @@ ACTOR Future<Void> verify(VersionedBTree* btree,
 			throw;
 		}
 	}
-	return Void();
 }
 
 // Does a random range read, doesn't trap/report errors

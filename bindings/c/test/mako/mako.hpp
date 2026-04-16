@@ -88,6 +88,7 @@ enum ArgKind {
 	ARG_ENABLE_TOKEN_BASED_AUTHORIZATION,
 	ARG_TRANSACTION_TIMEOUT_TX,
 	ARG_TRANSACTION_TIMEOUT_DB,
+	ARG_WARMUP_SECONDS,
 };
 
 constexpr const int OP_COUNT = 0;
@@ -101,6 +102,7 @@ enum OpKind {
 	OP_GETRANGE,
 	OP_SGET,
 	OP_SGETRANGE,
+	OP_STATUSJSON,
 	OP_UPDATE,
 	OP_INSERT,
 	OP_INSERTRANGE,
@@ -159,6 +161,7 @@ struct Arguments {
 	double load_factor;
 	int row_digits;
 	int seconds;
+	int warmup_seconds;
 	int iteration;
 	int tpsmax;
 	int tpsmin;

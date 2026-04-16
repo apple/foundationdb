@@ -40,7 +40,6 @@
 
 #include "fdbclient/ActorLineageProfiler.h"
 #include "fdbclient/ClusterConnectionFile.h"
-#include "fdbclient/IKnobCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/versions.h"
@@ -59,15 +58,15 @@
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/datadistributor/DataDistribution.h"
 #include "fdbserver/core/MoveKeys.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/NetworkTest.h"
 #include "fdbserver/kvstore/KVFileUtils.h"
-#include "fdbserver/restoreworker/RestoreWorkerInterface.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/datadistributor/SimulatedCluster.h"
 #include "fdbserver/tester/TestEncryptionUtils.h"
 #include "fdbserver/tester/tester.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "fdbserver/worker/Worker.actor.h"
+#include "fdbserver/worker/Worker.h"
 #include "fdbserver/mocks3/MockS3Server.h"
 #ifdef WITH_ROCKSDB
 #include "fdbserver/core/FDBRocksDBVersion.h"
@@ -78,7 +77,7 @@
 #include "flow/ProtocolVersion.h"
 #include "SimpleOpt/SimpleOpt.h"
 #include "flow/SystemMonitor.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 #include "fdbclient/Tracing.h"
 #include "flow/WriteOnlySet.h"
 #include "flow/UnitTest.h"
@@ -1334,8 +1333,6 @@ private:
 					role = ServerRole::NetworkTestClient;
 				else if (!strcmp(sRole, "networktestserver"))
 					role = ServerRole::NetworkTestServer;
-				else if (!strcmp(sRole, "restore"))
-					role = ServerRole::Restore;
 				else if (!strcmp(sRole, "kvfileintegritycheck"))
 					role = ServerRole::KVFileIntegrityCheck;
 				else if (!strcmp(sRole, "kvfilegeneratesums"))
@@ -1991,22 +1988,18 @@ int main(int argc, char* argv[]) {
 		}
 		enableFaultInjection(opts.faultInjectionEnabled);
 
-		IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::SERVER,
-		                                         Randomize::True,
-		                                         role == ServerRole::Simulation ? IsSimulated::True
-		                                                                        : IsSimulated::False);
-		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
-		g_knobs.setKnob("log_directory", KnobValueRef::create(opts.logFolder));
-		g_knobs.setKnob("conn_file", KnobValueRef::create(opts.connFile));
+		resetServerKnobs(Randomize::True, role == ServerRole::Simulation ? IsSimulated::True : IsSimulated::False);
+		setServerKnob("log_directory", KnobValueRef::create(opts.logFolder));
+		setServerKnob("conn_file", KnobValueRef::create(opts.connFile));
 		if (role != ServerRole::Simulation && opts.memLimit > 0) {
-			g_knobs.setKnob("commit_batches_mem_bytes_hard_limit",
-			                KnobValueRef::create(static_cast<int64_t>(opts.memLimit)));
+			setServerKnob("commit_batches_mem_bytes_hard_limit",
+			              KnobValueRef::create(static_cast<int64_t>(opts.memLimit)));
 		}
 
-		IKnobCollection::setupKnobs(opts.knobs);
-		g_knobs.setKnob("server_mem_limit", KnobValueRef::create(static_cast<int64_t>(opts.memLimit)));
+		setupServerKnobs(opts.knobs);
+		setServerKnob("server_mem_limit", KnobValueRef::create(static_cast<int64_t>(opts.memLimit)));
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		g_knobs.initialize(Randomize::True, role == ServerRole::Simulation ? IsSimulated::True : IsSimulated::False);
+		initializeServerKnobs(Randomize::True, role == ServerRole::Simulation ? IsSimulated::True : IsSimulated::False);
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY);
@@ -2084,8 +2077,8 @@ int main(int argc, char* argv[]) {
 			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT, &opts.allowList);
 			opts.buildNetwork(argv[0]);
 
-			const bool expectsPublicAddress = (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer ||
-			                                   role == ServerRole::Restore || role == ServerRole::MockS3Server);
+			const bool expectsPublicAddress =
+			    (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer || role == ServerRole::MockS3Server);
 			if (opts.publicAddressStrs.empty()) {
 				if (expectsPublicAddress) {
 					fprintf(stderr, "ERROR: The -p or --public-address option is required\n");
@@ -2337,13 +2330,13 @@ int main(int argc, char* argv[]) {
 						}
 					}
 				}
-				g_knobs.setKnob("encrypt_header_auth_token_enabled",
-				                KnobValueRef::create(ini.GetBoolValue("META", "encryptHeaderAuthTokenEnabled", false)));
-				g_knobs.setKnob("encrypt_header_auth_token_algo",
-				                KnobValueRef::create((int)ini.GetLongValue(
-				                    "META", "encryptHeaderAuthTokenAlgo", FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ALGO)));
+				setServerKnob("encrypt_header_auth_token_enabled",
+				              KnobValueRef::create(ini.GetBoolValue("META", "encryptHeaderAuthTokenEnabled", false)));
+				setServerKnob("encrypt_header_auth_token_algo",
+				              KnobValueRef::create((int)ini.GetLongValue(
+				                  "META", "encryptHeaderAuthTokenAlgo", FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ALGO)));
 
-				g_knobs.setKnob(
+				setServerKnob(
 				    "shard_encode_location_metadata",
 				    KnobValueRef::create(ini.GetBoolValue("META", "enableShardEncodeLocationMetadata", false)));
 			}
@@ -2368,54 +2361,40 @@ int main(int argc, char* argv[]) {
 			auto* pProxy = static_cast<Optional<std::string>*>(g_network->global(INetwork::enProxy));
 			*pProxy = opts.proxy;
 
-			// Call fast restore for the class FastRestoreClass. This is a short-cut to run fast restore in circus
-			if (opts.processClass == ProcessClass::FastRestoreClass) {
-				printf("Run as fast restore worker\n");
-				ASSERT(opts.connectionFile);
-				auto dataFolder = opts.dataFolder;
-				if (!dataFolder.size())
-					dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
+			ASSERT(opts.connectionFile);
 
-				std::vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
-				actors.push_back(restoreWorker(opts.connectionFile, opts.localities, dataFolder));
-				f = stopAfter(waitForAll(actors));
-				printf("Fast restore worker started\n");
-				g_network->run();
-				printf("g_network->run() done\n");
-			} else { // Call fdbd roles in conventional way
-				ASSERT(opts.connectionFile);
+			setupRunLoopProfiler();
 
-				setupRunLoopProfiler();
+			auto dataFolder = opts.dataFolder;
+			if (!dataFolder.size())
+				dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
 
-				auto dataFolder = opts.dataFolder;
-				if (!dataFolder.size())
-					dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
+			std::vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
 
-				std::vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
+			actors.push_back(fdbd(opts.connectionFile,
+			                      opts.localities,
+			                      opts.processClass,
+			                      dataFolder,
+			                      dataFolder,
+			                      opts.storageMemLimit,
+			                      opts.metricsConnFile,
+			                      opts.metricsPrefix,
+			                      opts.rsssize,
+			                      opts.whitelistBinPaths,
+			                      opts.consistencyCheckUrgentMode));
+			actors.push_back(histogramReport());
+			actors.push_back(metricsReport());
 
 #ifdef FLOW_GRPC_ENABLED
-				if (opts.grpcAddressStrs.size() > 0) {
-					FlowGrpc::init(&opts.tlsConfig, NetworkAddress::parse(opts.grpcAddressStrs[0]));
-					actors.push_back(GrpcServer::instance()->run());
-				}
-#endif
-				actors.push_back(fdbd(opts.connectionFile,
-				                      opts.localities,
-				                      opts.processClass,
-				                      dataFolder,
-				                      dataFolder,
-				                      opts.storageMemLimit,
-				                      opts.metricsConnFile,
-				                      opts.metricsPrefix,
-				                      opts.rsssize,
-				                      opts.whitelistBinPaths,
-				                      opts.consistencyCheckUrgentMode));
-				actors.push_back(histogramReport());
-				actors.push_back(metricsReport());
-
-				f = stopAfter(waitForAll(actors));
-				g_network->run();
+			if (opts.grpcAddressStrs.size() > 0) {
+				FlowGrpc::init(&opts.tlsConfig, NetworkAddress::parse(opts.grpcAddressStrs[0]));
+				actors.push_back(GrpcServer::instance()->run());
 			}
+#endif
+
+			f = stopAfter(waitForAll(actors));
+			g_network->run();
+
 		} else if (role == ServerRole::MultiTester) {
 			setupRunLoopProfiler();
 			f = stopAfter(runTests(opts.connectionFile,
@@ -2480,9 +2459,6 @@ int main(int argc, char* argv[]) {
 			g_network->run();
 		} else if (role == ServerRole::NetworkTestServer) {
 			f = stopAfter(networkTestServer());
-			g_network->run();
-		} else if (role == ServerRole::Restore) {
-			f = stopAfter(restoreWorker(opts.connectionFile, opts.localities, opts.dataFolder));
 			g_network->run();
 		} else if (role == ServerRole::KVFileIntegrityCheck) {
 			f = stopAfter(KVFileCheck(opts.kvFile, true));

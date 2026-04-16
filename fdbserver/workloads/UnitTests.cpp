@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "flow/UnitTest.h"
 
 void forceLinkIndexedSetTests();
@@ -36,6 +36,7 @@ void forceLinkJsonWebKeySetTests();
 void forceLinkVersionVectorTests();
 void forceLinkRESTClientTests();
 void forceLinkRESTUtilsTests();
+void forceLinkCompressedIntTests();
 void forceLinkCompressionUtilsTest();
 void forceLinkAtomicTests();
 void forceLinkIdempotencyIdTests();
@@ -110,6 +111,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkVersionVectorTests();
 		forceLinkRESTClientTests();
 		forceLinkRESTUtilsTests();
+		forceLinkCompressedIntTests();
 		forceLinkCompressionUtilsTest();
 		forceLinkAtomicTests();
 		forceLinkIdempotencyIdTests();

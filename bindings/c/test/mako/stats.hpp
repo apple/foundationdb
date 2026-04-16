@@ -22,6 +22,7 @@
 #define MAKO_STATS_HPP
 
 #include <array>
+#include <cassert>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -172,6 +173,23 @@ public:
 		latency_samples[op]++;
 		sketches[op].addSample(latency_us);
 		latency_us_total[op] += latency_us;
+	}
+
+	void subtractCounters(const WorkflowStatistics& baseline) noexcept {
+		assert(conflicts >= baseline.conflicts);
+		assert(total_errors >= baseline.total_errors);
+		assert(total_timeouts >= baseline.total_timeouts);
+		conflicts -= baseline.conflicts;
+		total_errors -= baseline.total_errors;
+		total_timeouts -= baseline.total_timeouts;
+		for (auto op = 0; op < MAX_OP; op++) {
+			assert(ops[op] >= baseline.ops[op]);
+			assert(errors[op] >= baseline.errors[op]);
+			assert(timeouts[op] >= baseline.timeouts[op]);
+			ops[op] -= baseline.ops[op];
+			errors[op] -= baseline.errors[op];
+			timeouts[op] -= baseline.timeouts[op];
+		}
 	}
 
 	void writeToFile(const std::string& filename, int op) const {

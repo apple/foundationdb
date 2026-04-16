@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbserver/core/Knobs.h"
 #include "ServerThroughputTracker.h"
@@ -305,6 +305,9 @@ class GlobalTagThrottlerImpl {
 					co_await delay(5.0);
 					break;
 				} catch (Error& e) {
+					if (e.code() == error_code_actor_cancelled) {
+						throw e;
+					}
 					err = e;
 				}
 				TraceEvent("GlobalTagThrottler_MonitoringChangesError", self->id).error(err);

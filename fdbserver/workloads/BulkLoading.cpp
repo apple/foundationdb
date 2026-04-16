@@ -22,10 +22,10 @@
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/core/BulkLoadUtil.actor.h"
+#include "fdbserver/core/BulkLoadUtil.h"
 #include "fdbserver/core/RocksDBCheckpointUtils.actor.h"
-#include "fdbserver/core/StorageMetrics.actor.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/core/StorageMetrics.h"
+#include "fdbserver/tester/workloads.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 const std::string simulationBulkLoadFolder = joinPath("simfdb", "bulkload");

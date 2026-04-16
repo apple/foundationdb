@@ -30,7 +30,7 @@
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/TLogInterface.h"
 #include "fdbserver/core/RatekeeperInterface.h"
-#include "fdbclient/ConsistencyScanInterface.actor.h"
+#include "fdbclient/ConsistencyScanInterface.h"
 #include "fdbserver/core/ResolverInterface.h"
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -1088,37 +1088,6 @@ Future<T> ioTimeoutError(Future<T> what, double time, const char* context = null
 				e.detail("Context", context);
 			}
 			e.detail("OrigTime", orig).detail("OrigTrace", trace).log();
-			throw err;
-		}
-	}
-}
-
-ACTOR template <class T>
-Future<T> ioTimeoutErrorIfCleared(Future<T> what,
-                                  double time,
-                                  Reference<AsyncVar<bool>> condition,
-                                  const char* context = nullptr) {
-	// Before simulation is sped up, IO operations can take a very long time so limit timeouts
-	// to not end until at least time after simulation is sped up.
-	if (g_network->isSimulated() && !g_simulator->speedUpSimulation) {
-		time += std::max(0.0, FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS - now());
-	}
-	Future<Void> end = lowPriorityDelayAfterCleared(condition, time);
-	choose {
-		when(T t = wait(what)) {
-			return t;
-		}
-		when(wait(end)) {
-			Error err = io_timeout();
-			if (isSimulatorProcessUnreliable()) {
-				err = err.asInjectedFault();
-			}
-			TraceEvent e(SevError, "IoTimeoutError");
-			e.error(err);
-			if (context != nullptr) {
-				e.detail("Context", context);
-			}
-			e.log();
 			throw err;
 		}
 	}

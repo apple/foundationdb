@@ -23,7 +23,7 @@
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
 #include "flow/OTELMetrics.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/TDMetric.h"
 #include "flow/Msgpack.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"

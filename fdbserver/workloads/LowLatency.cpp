@@ -18,12 +18,11 @@
  * limitations under the License.
  */
 
-#include "fdbclient/IKnobCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 
 struct LowLatencyWorkload : TestWorkload {
 	static constexpr auto NAME = "LowLatency";
@@ -51,10 +50,8 @@ struct LowLatencyWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override {
 		if (g_network->isSimulated()) {
-			IKnobCollection::getMutableGlobalKnobCollection().setKnob("min_delay_cc_worst_fit_candidacy_seconds",
-			                                                          KnobValueRef::create(double{ 5.0 }));
-			IKnobCollection::getMutableGlobalKnobCollection().setKnob("max_delay_cc_worst_fit_candidacy_seconds",
-			                                                          KnobValueRef::create(double{ 10.0 }));
+			setServerKnob("min_delay_cc_worst_fit_candidacy_seconds", KnobValueRef::create(double{ 5.0 }));
+			setServerKnob("max_delay_cc_worst_fit_candidacy_seconds", KnobValueRef::create(double{ 10.0 }));
 		}
 		return Void();
 	}

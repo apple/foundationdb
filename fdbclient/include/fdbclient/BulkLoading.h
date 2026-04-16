@@ -23,7 +23,7 @@
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/Platform.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/TDMetric.h"
 #include "flow/Trace.h"
 #include "flow/Util.h"
 #include <cstdint>

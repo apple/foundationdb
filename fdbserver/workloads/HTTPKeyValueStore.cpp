@@ -24,7 +24,7 @@
 #include "flow/Util.h"
 #include "flow/serialize.h"
 #include "fdbrpc/HTTP.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include <cstring>
 #include <limits>
 

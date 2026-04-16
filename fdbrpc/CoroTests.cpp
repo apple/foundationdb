@@ -21,7 +21,7 @@
 #include "flow/UnitTest.h"
 #include "flow/IAsyncFile.h"
 #include "fdbrpc/fdbrpc.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 
 #include <sstream>
 #include <cstdint>
@@ -171,6 +171,16 @@ Future<int> sumActor(FutureStream<int> in) {
 template <class T>
 Future<T> templateActor(T t) {
 	return t;
+}
+
+Future<int> coroValueAfterYield(int value) {
+	co_await delay(0);
+	co_return value;
+}
+
+Future<int> coroErrorAfterYield() {
+	co_await delay(0);
+	throw operation_failed();
 }
 
 // bool expectActorCount(int x) { return actorCount == x; }
@@ -328,6 +338,55 @@ TEST_CASE("/flow/coro/cancel2") {
 	cf = Future<Void>();
 	ASSERT(c2 == 1 && c3 == 1);
 	return Void();
+}
+
+TEST_CASE("/flow/coro/errorOr/ReadyValue") {
+	ErrorOr<int> result = co_await coro::errorOr(Future<int>(42));
+	ASSERT(result.present());
+	ASSERT_EQ(result.get(), 42);
+}
+
+TEST_CASE("/flow/coro/errorOr/ReadyError") {
+	ErrorOr<int> result = co_await coro::errorOr(Future<int>(operation_failed()));
+	ASSERT(result.isError());
+	ASSERT_EQ(result.getError().code(), error_code_operation_failed);
+}
+
+TEST_CASE("/flow/coro/errorOr/AsyncValue") {
+	ErrorOr<int> result = co_await coro::errorOr(coroValueAfterYield(7));
+	ASSERT(result.present());
+	ASSERT_EQ(result.get(), 7);
+}
+
+TEST_CASE("/flow/coro/errorOr/AsyncError") {
+	ErrorOr<int> result = co_await coro::errorOr(coroErrorAfterYield());
+	ASSERT(result.isError());
+	ASSERT_EQ(result.getError().code(), error_code_operation_failed);
+}
+
+TEST_CASE("/flow/coro/ignore/ReadyValue") {
+	Void ignored = co_await coro::ignore(Future<int>(42));
+	(void)ignored;
+}
+
+TEST_CASE("/flow/coro/ignore/ReadyError") {
+	try {
+		co_await coro::ignore(Future<int>(operation_failed()));
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_operation_failed);
+	}
+}
+
+TEST_CASE("/flow/coro/errorOrIgnore/AsyncValue") {
+	ErrorOr<Void> result = co_await coro::errorOr(coro::ignore(coroValueAfterYield(9)));
+	ASSERT(result.present());
+}
+
+TEST_CASE("/flow/coro/errorOrIgnore/AsyncError") {
+	ErrorOr<Void> result = co_await coro::errorOr(coro::ignore(coroErrorAfterYield()));
+	ASSERT(result.isError());
+	ASSERT_EQ(result.getError().code(), error_code_operation_failed);
 }
 
 TEST_CASE("/flow/coro/trivial_actors") {
@@ -1167,6 +1226,25 @@ AsyncResult<int> failingAsyncResultInt(Future<Void> signal) {
 	throw io_error();
 }
 
+AsyncResult<int> trackedAsyncResultInt(Future<Void> signal, int value, int* cancelledCount, int* completedCount) {
+	LifetimeTracked lifetime;
+	try {
+		co_await signal;
+		++*completedCount;
+		co_return value;
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			++*cancelledCount;
+		}
+		throw;
+	}
+}
+
+AsyncResult<Void> delayedAsyncResultVoid(Future<Void> signal) {
+	co_await signal;
+	co_return;
+}
+
 AsyncResult<LifetimeTracked> immediateAsyncResultLifetimeTracked() {
 	co_return LifetimeTracked{};
 }
@@ -1271,6 +1349,206 @@ TEST_CASE("/flow/coro/AsyncResult/releaseDestroysState") {
 		ASSERT_GT(LifetimeTracked::liveCount, 0);
 	}
 	ASSERT_EQ(LifetimeTracked::liveCount, 0);
+}
+
+TEST_CASE("/flow/coro/quorumAsyncResultReady") {
+	std::vector<AsyncResult<int>> results;
+	results.push_back(immediateAsyncResultInt(1));
+	results.push_back(immediateAsyncResultInt(2));
+
+	Future<Void> q = quorum(std::move(results), 2);
+	ASSERT(q.isReady());
+	co_await q;
+}
+
+TEST_CASE("/flow/coro/quorumAsyncResultSuccess") {
+	std::vector<Promise<Void>> signals(3);
+	std::vector<AsyncResult<int>> results;
+	for (int i = 0; i < signals.size(); ++i) {
+		results.push_back(delayedAsyncResultInt(signals[i].getFuture(), i));
+	}
+
+	Future<Void> q = quorum(std::move(results), 2);
+	ASSERT(!q.isReady());
+	signals[0].send(Void());
+	ASSERT(!q.isReady());
+	signals[1].send(Void());
+	ASSERT(q.isReady());
+	signals[2].send(Void());
+	co_await q;
+}
+
+TEST_CASE("/flow/coro/quorumAsyncResultVoid") {
+	Promise<Void> signal1;
+	Promise<Void> signal2;
+	std::vector<AsyncResult<Void>> results;
+	results.push_back(delayedAsyncResultVoid(signal1.getFuture()));
+	results.push_back(delayedAsyncResultVoid(signal2.getFuture()));
+
+	Future<Void> q = quorum(std::move(results), 1);
+	ASSERT(!q.isReady());
+	signal1.send(Void());
+	ASSERT(q.isReady());
+	signal2.send(Void());
+	co_await q;
+}
+
+TEST_CASE("/flow/coro/quorumAsyncResultError") {
+	Promise<Void> successSignal;
+	Promise<Void> errorSignal;
+	std::vector<AsyncResult<int>> results;
+	results.push_back(delayedAsyncResultInt(successSignal.getFuture(), 1));
+	results.push_back(failingAsyncResultInt(errorSignal.getFuture()));
+
+	Future<Void> q = quorum(std::move(results), 2);
+	ASSERT(!q.isReady());
+	successSignal.send(Void());
+	ASSERT(!q.isReady());
+	errorSignal.send(Void());
+	try {
+		co_await q;
+		ASSERT(false);
+	} catch (Error const& e) {
+		ASSERT_EQ(e.code(), error_code_io_error);
+	}
+}
+
+TEST_CASE("/flow/coro/quorumAsyncResultCancelsRemainingProducers") {
+	ASSERT_EQ(LifetimeTracked::liveCount, 0);
+
+	int cancelledCount = 0;
+	int completedCount = 0;
+	std::vector<Promise<Void>> signals(3);
+	std::vector<AsyncResult<int>> results;
+	for (int i = 0; i < signals.size(); ++i) {
+		results.push_back(trackedAsyncResultInt(signals[i].getFuture(), i, &cancelledCount, &completedCount));
+	}
+
+	Future<Void> q = quorum(std::move(results), 1);
+	signals[0].send(Void());
+	co_await q;
+
+	ASSERT_EQ(completedCount, 1);
+	ASSERT_EQ(cancelledCount, 2);
+	ASSERT_EQ(LifetimeTracked::liveCount, 0);
+}
+
+TEST_CASE("/flow/coro/quorumAsyncResultDropCancelsProducers") {
+	ASSERT_EQ(LifetimeTracked::liveCount, 0);
+
+	int cancelledCount = 0;
+	int completedCount = 0;
+	std::vector<Promise<Void>> signals(2);
+	{
+		std::vector<AsyncResult<int>> results;
+		for (int i = 0; i < signals.size(); ++i) {
+			results.push_back(trackedAsyncResultInt(signals[i].getFuture(), i, &cancelledCount, &completedCount));
+		}
+
+		Future<Void> q = quorum(std::move(results), 2);
+		ASSERT(!q.isReady());
+	}
+
+	ASSERT_EQ(completedCount, 0);
+	ASSERT_EQ(cancelledCount, 2);
+	ASSERT_EQ(LifetimeTracked::liveCount, 0);
+	co_return;
+}
+
+TEST_CASE("/flow/coro/getAllAsyncResultReady") {
+	std::vector<AsyncResult<int>> results;
+	results.push_back(immediateAsyncResultInt(3));
+	results.push_back(immediateAsyncResultInt(5));
+
+	std::vector<int> output = co_await getAll(std::move(results));
+	ASSERT_EQ(output.size(), 2);
+	ASSERT_EQ(output[0], 3);
+	ASSERT_EQ(output[1], 5);
+}
+
+TEST_CASE("/flow/coro/getAllAsyncResultSuccess") {
+	Promise<Void> signal1;
+	Promise<Void> signal2;
+	std::vector<AsyncResult<int>> results;
+	results.push_back(delayedAsyncResultInt(signal1.getFuture(), 7));
+	results.push_back(delayedAsyncResultInt(signal2.getFuture(), 11));
+
+	Future<std::vector<int>> all = getAll(std::move(results));
+	ASSERT(!all.isReady());
+	signal2.send(Void());
+	ASSERT(!all.isReady());
+	signal1.send(Void());
+
+	std::vector<int> output = co_await all;
+	ASSERT_EQ(output.size(), 2);
+	ASSERT_EQ(output[0], 7);
+	ASSERT_EQ(output[1], 11);
+}
+
+TEST_CASE("/flow/coro/getAllAsyncResultError") {
+	Promise<Void> successSignal;
+	Promise<Void> errorSignal;
+	std::vector<AsyncResult<int>> results;
+	results.push_back(delayedAsyncResultInt(successSignal.getFuture(), 13));
+	results.push_back(failingAsyncResultInt(errorSignal.getFuture()));
+
+	Future<std::vector<int>> all = getAll(std::move(results));
+	ASSERT(!all.isReady());
+	errorSignal.send(Void());
+	try {
+		co_await all;
+		ASSERT(false);
+	} catch (Error const& e) {
+		ASSERT_EQ(e.code(), error_code_io_error);
+	}
+	successSignal.send(Void());
+}
+
+TEST_CASE("/flow/coro/getAllAsyncResultErrorCancelsRemainingProducers") {
+	ASSERT_EQ(LifetimeTracked::liveCount, 0);
+
+	int cancelledCount = 0;
+	int completedCount = 0;
+	Promise<Void> successSignal;
+	Promise<Void> errorSignal;
+	std::vector<AsyncResult<int>> results;
+	results.push_back(trackedAsyncResultInt(successSignal.getFuture(), 17, &cancelledCount, &completedCount));
+	results.push_back(failingAsyncResultInt(errorSignal.getFuture()));
+
+	Future<std::vector<int>> all = getAll(std::move(results));
+	errorSignal.send(Void());
+	try {
+		co_await all;
+		ASSERT(false);
+	} catch (Error const& e) {
+		ASSERT_EQ(e.code(), error_code_io_error);
+	}
+
+	ASSERT_EQ(completedCount, 0);
+	ASSERT_EQ(cancelledCount, 1);
+	ASSERT_EQ(LifetimeTracked::liveCount, 0);
+}
+
+TEST_CASE("/flow/coro/getAllAsyncResultDropCancelsProducers") {
+	ASSERT_EQ(LifetimeTracked::liveCount, 0);
+
+	int cancelledCount = 0;
+	int completedCount = 0;
+	std::vector<Promise<Void>> signals(2);
+	{
+		std::vector<AsyncResult<int>> results;
+		for (int i = 0; i < signals.size(); ++i) {
+			results.push_back(trackedAsyncResultInt(signals[i].getFuture(), i, &cancelledCount, &completedCount));
+		}
+
+		Future<std::vector<int>> all = getAll(std::move(results));
+		ASSERT(!all.isReady());
+	}
+
+	ASSERT_EQ(completedCount, 0);
+	ASSERT_EQ(cancelledCount, 2);
+	ASSERT_EQ(LifetimeTracked::liveCount, 0);
+	co_return;
 }
 
 namespace {

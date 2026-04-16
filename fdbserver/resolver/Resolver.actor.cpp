@@ -35,11 +35,10 @@
 #include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/ResolverInterface.h"
-#include "fdbserver/core/RestoreCoreUtil.h"
 #include "fdbserver/core/ServerDBInfo.h"
-#include "fdbserver/core/StorageMetrics.actor.h"
+#include "fdbserver/core/StorageMetrics.h"
 #include "fdbserver/core/WaitFailure.h"
-#include "fdbserver/resolver/Resolver.actor.h"
+#include "fdbserver/resolver/Resolver.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "ConflictSet.h"
 #include "flow/ActorCollection.h"
@@ -619,7 +618,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(Reference<Resolver> se
 
 		((KeyRangeRef&)txnKeys) = KeyRangeRef(keyAfter(data.back().key, txnKeys.arena()), txnKeys.end);
 
-		MutationsVec mutations;
+		Standalone<VectorRef<MutationRef>> mutations;
 		std::vector<std::pair<MapPair<Key, ServerCacheInfo>, int>> keyInfoData;
 		std::vector<UID> src, dest;
 		ServerCacheInfo info;
@@ -746,7 +745,7 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 	if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
 		self->logAdapter = new LogSystemDiskQueueAdapter(self->logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
 		self->txnStateStore = keyValueStoreLogSystem(
-		    self->logAdapter, db, resolver.id(), /*doc=*/2e9, /*u=*/true, /*ment=*/true, /*constants=*/true);
+		    self->logAdapter, db, resolver.id(), 2e9, DisableSnapshot::True, ReplaceContent::True, ExactRecovery::True);
 
 		// wait for txnStateStore recovery
 		wait(success(self->txnStateStore->readValue(StringRef())));
@@ -807,21 +806,18 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
 	}
 }
 
-ACTOR Future<Void> resolver(ResolverInterface resolver,
-                            InitializeResolverRequest initReq,
-                            Reference<AsyncVar<ServerDBInfo> const> db) {
+Future<Void> resolver(ResolverInterface resolver,
+                      InitializeResolverRequest initReq,
+                      Reference<AsyncVar<ServerDBInfo> const> db) {
 	try {
-		state Future<Void> core = resolverCore(resolver, initReq, db);
-		loop choose {
-			when(wait(core)) {
-				return Void();
-			}
-			when(wait(checkRemoved(db, initReq.recoveryCount, resolver))) {}
+		Future<Void> core = resolverCore(resolver, initReq, db);
+		while (true) {
+			co_await waitOrError(checkRemoved(db, initReq.recoveryCount, resolver), core);
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled || e.code() == error_code_worker_removed) {
 			TraceEvent("ResolverTerminated", resolver.id()).errorUnsuppressed(e);
-			return Void();
+			co_return;
 		}
 		throw;
 	}

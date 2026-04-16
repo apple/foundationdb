@@ -46,26 +46,3 @@ Future<Void> readTSSMapping(Transaction* tr, std::map<UID, StorageServerInterfac
 		(*tssMapping)[ssId] = decodeServerListValue(v.get());
 	}
 }
-
-Future<Void> removeTSSPairsFromCluster(Database cx, std::vector<std::pair<UID, UID>> pairsToRemove) {
-	auto tr = makeReference<ReadYourWritesTransaction>(cx);
-	KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
-	while (true) {
-		Error err;
-		try {
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			for (auto& tssPair : pairsToRemove) {
-				// DO NOT remove server list key - that'll break a bunch of stuff. DD will eventually call
-				// removeStorageServer
-				tr->clear(serverTagKeyFor(tssPair.second));
-				tssMapDB.erase(tr, tssPair.first);
-			}
-			co_await tr->commit();
-			break;
-		} catch (Error& e) {
-			err = e;
-		}
-		co_await tr->onError(err);
-	}
-}

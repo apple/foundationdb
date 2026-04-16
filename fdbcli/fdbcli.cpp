@@ -31,7 +31,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.h"
-#include "fdbclient/IKnobCollection.h"
+#include "fdbclient/Knobs.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/ManagementAPI.h"
@@ -39,7 +39,7 @@
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "fdbclient/Tuple.h"
 
 #include "fdbclient/ThreadSafeTransaction.h"
@@ -53,7 +53,7 @@
 #include "flow/CodeProbe.h"
 #include "flow/CoroUtils.h"
 
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 #include "flow/ThreadHelper.actor.h"
 #include "SimpleOpt/SimpleOpt.h"
 
@@ -680,15 +680,11 @@ Future<Void> checkStatus(Future<Void> _f,
 }
 
 template <class T>
-Future<T> makeInterruptable(Future<T> f) {
+Future<T> makeInterruptable(Future<T> f, ExplicitVoid = {}) {
 	Future<Void> interrupt = LineNoise::onKeyboardInterrupt();
 	auto choice = co_await race(f, interrupt);
 	if (choice.index() == 0) {
-		if constexpr (std::is_same_v<T, Void>) {
-			co_return;
-		} else {
-			co_return std::get<0>(std::move(choice));
-		}
+		co_return std::get<0>(std::move(choice));
 	}
 	ASSERT_EQ(choice.index(), 1);
 	f.cancel();
@@ -925,10 +921,10 @@ struct CLIOptions {
 	}
 
 	void setupKnobs() {
-		IKnobCollection::setupKnobs(knobs);
+		setupClientKnobs(knobs);
 
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		IKnobCollection::getMutableGlobalKnobCollection().initialize(Randomize::False, IsSimulated::False);
+		initializeClientKnobs(Randomize::False, IsSimulated::False);
 	}
 
 	int processArg(CSimpleOpt& args) {
@@ -1054,17 +1050,11 @@ struct CLIOptions {
 };
 
 template <class T>
-Future<T> stopNetworkAfter(Future<T> what) {
+Future<T> stopNetworkAfter(Future<T> what, ExplicitVoid = {}) {
 	try {
-		if constexpr (std::is_same_v<T, Void>) {
-			co_await what;
-			API->stopNetwork();
-			co_return;
-		} else {
-			T t = co_await what;
-			API->stopNetwork();
-			co_return t;
-		}
+		T t = co_await what;
+		API->stopNetwork();
+		co_return t;
 	} catch (...) {
 		API->stopNetwork();
 		throw;

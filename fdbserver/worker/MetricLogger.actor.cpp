@@ -32,7 +32,7 @@
 #include "flow/OTELMetrics.h"
 #include "flow/SystemMonitor.h"
 #include "flow/UnitTest.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/TDMetric.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/KeyBackedTypes.actor.h"

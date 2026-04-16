@@ -38,11 +38,10 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/SpecialKeySpace.h"
 #include "fdbclient/VersionVector.h"
-#include "fdbclient/IKeyValueStore.actor.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/MultiInterface.h"
-#include "flow/TDMetric.actor.h"
-#include "fdbclient/EventTypes.actor.h"
+#include "flow/TDMetric.h"
+#include "fdbclient/EventTypes.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/DDSketch.h"
 
@@ -418,10 +417,6 @@ public:
 	// map from tssid -> metrics for that tss pair
 	std::unordered_map<UID, Reference<TSSMetrics>> tssMetrics;
 
-	IKeyValueStore* storage = nullptr;
-
-	void setStorage(IKeyValueStore* storage);
-
 	// map from ssid -> ss tag
 	// @note this map allows the client to identify the latest commit versions
 	// of storage servers (note that "ssVersionVectorCache" identifies storage
@@ -515,7 +510,7 @@ public:
 	TaskPriority taskID;
 
 	Int64MetricHandle getValueSubmitted;
-	EventMetricHandle<GetValueComplete> getValueCompleted;
+	EventMetricHandle<GetValueCompleteDescriptor> getValueCompleted;
 
 	Reference<AsyncVar<ClientDBInfo>> clientInfo;
 	Future<Void> clientInfoMonitor;

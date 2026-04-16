@@ -21,7 +21,7 @@
 #include <cinttypes>
 
 #include "fmt/format.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "flow/ActorCollection.h"
 #include "flow/IRandom.h"
 #include "flow/SystemMonitor.h"

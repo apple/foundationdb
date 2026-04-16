@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbserver/core/Knobs.h"

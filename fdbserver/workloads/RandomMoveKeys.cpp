@@ -24,10 +24,10 @@
 #include "fdbclient/ManagementAPI.h"
 #include "fdbserver/core/MoveKeys.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/tester/workloads.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/ServerDBInfo.h"
-#include "fdbserver/core/QuietDatabase.actor.h"
+#include "fdbserver/core/QuietDatabase.h"
 #include "flow/DeterministicRandom.h"
 
 struct MoveKeysWorkload : FailureInjectionWorkload {

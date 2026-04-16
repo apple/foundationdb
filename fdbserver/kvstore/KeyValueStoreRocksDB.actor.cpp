@@ -2049,16 +2049,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 	}
 
-	ACTOR Future<Void> errorListenActor(Future<Void> collection) {
-		try {
-			wait(collection);
-			ASSERT(false);
-			throw internal_error();
-		} catch (Error& e) {
-			throw e;
-		}
-	}
-
 	ACTOR Future<Void> updateHistogram(ThreadFutureStream<std::pair<std::string, double>> metricFutureStream) {
 		state Reference<Histogram> commitLatencyHistogram = Histogram::getHistogram(
 		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_COMMIT_LATENCY_HISTOGRAM, Histogram::Unit::milliseconds);
@@ -2772,8 +2762,8 @@ void RocksDBKeyValueStore::Writer::action(RestoreAction& a) {
 IKeyValueStore* keyValueStoreRocksDB(std::string const& path,
                                      UID logID,
                                      KeyValueStoreType storeType,
-                                     bool checkChecksums,
-                                     bool checkIntegrity) {
+                                     CheckChecksums checkChecksums,
+                                     CheckIntegrity checkIntegrity) {
 #ifdef WITH_ROCKSDB
 	return new RocksDBKeyValueStore(path, logID);
 #else

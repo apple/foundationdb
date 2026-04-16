@@ -76,10 +76,15 @@ TestHarness2 supports environment variables for configuration. Most variables fo
 - **`TH_BUGGIFY`**: Buggify mode (`on`, `off`, or `random`, default: `random`)
 - **`TH_USE_VALGRIND`**: Run tests under valgrind (`true`/`false`, default: `false`)
 - **`TH_LONG_RUNNING`**: Enable long-running test mode (`true`/`false`, default: `false`)
+- **`TH_FDBSERVER_MEMORY`**: Pass `--memory SIZE` to `fdbserver` (for example `12288MiB`)
 
 **Optional Configuration:**
 - **`TH_RANDOM_SEED`**: Force specific random seed for debugging
 - **`TH_OUTPUT_FORMAT`**: Output format (`xml` or `json`, default: `xml`)
+
+When `TH_FDBSERVER_MEMORY` is unset, TestHarness2 automatically runs sanitizer-instrumented
+`fdbserver` binaries with `--memory 12288MiB` so ASAN/UBSAN correctness jobs do not stay
+pinned to the default 8 GiB simulator limit.
 
 For a complete list of all variables, run: `python3 -m test_harness.app --help`
 

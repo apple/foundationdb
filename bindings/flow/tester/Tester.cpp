@@ -28,7 +28,7 @@
 #include "bindings/flow/FDBLoanerTypes.h"
 #include "fdbrpc/fdbrpc.h"
 #include "flow/DeterministicRandom.h"
-#include "flow/TLSConfig.actor.h"
+#include "flow/TLSConfig.h"
 
 // Otherwise we have to type setupNetwork(), FDB::open(), etc.
 using namespace FDB;
@@ -371,7 +371,7 @@ struct PopFunc : InstructionFunc {
 	static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		std::vector<StackItem> items = data->stack.pop();
 		for (StackItem item : items) {
-			co_await success(item.value);
+			co_await item.value;
 		}
 	}
 };
@@ -1684,7 +1684,7 @@ static Future<Void> doInstructions(Reference<FlowTesterData> data) {
 			// wait(printFlowTesterStack(&(data->stack)));
 			// wait(debugPrintRange(instruction->tr, "\x01test_results", ""));
 
-			Reference<InstructionData> instruction = makeReference<InstructionData>(
+			auto instruction = makeReference<InstructionData>(
 			    isDatabase, isSnapshot, data->instructions[idx].value, Reference<Transaction>());
 			if (isDatabase) {
 				Reference<Transaction> tr = data->db->createTransaction();
