@@ -256,6 +256,8 @@ private:
 		}
 	}
 
+	// Keep this as a plain callback instead of a detached coroutine: this path runs once per granted
+	// lock, and the coroutine conversion added enough per-release overhead to regress the microbench.
 	struct ReleaseHandler final : Callback<Void>, FastAllocated<ReleaseHandler> {
 		Reference<PriorityMultiLock> self;
 		Priority* priority;
@@ -281,6 +283,7 @@ private:
 	static void handleRelease(Reference<PriorityMultiLock> self, Priority* priority, Future<Void> holder) {
 		pml_debug_printf("%f handleRelease self=%p start\n", now(), self.getPtr());
 
+		// Handle immediately-ready releases inline so the hot path avoids allocating a callback object.
 		if (holder.isReady()) {
 			if (holder.isError()) {
 				pml_debug_printf("%f handleRelease self=%p error %s\n", now(), self.getPtr(), holder.getError().what());
