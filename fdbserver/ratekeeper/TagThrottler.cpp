@@ -24,6 +24,8 @@
 #include "TagThrottler.h"
 #include "flow/CoroUtils.h"
 
+#include <functional>
+
 class TagThrottlerImpl {
 	Database db;
 	UID id;
@@ -167,9 +169,11 @@ class TagThrottlerImpl {
 		return Void();
 	}
 
+	void cleanupExpiredTagThrottles() const { ThrottleApi::expire(db.getReference()); }
+
 public:
 	TagThrottlerImpl(Database db, UID id) : db(db), id(id) {
-		expiredTagThrottleCleanup = recurring([this]() { ThrottleApi::expire(this->db.getReference()); },
+		expiredTagThrottleCleanup = recurring(std::bind_front(&TagThrottlerImpl::cleanupExpiredTagThrottles, this),
 		                                      SERVER_KNOBS->TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL);
 	}
 	Future<Void> monitorThrottlingChanges() { return monitorThrottlingChanges(this); }
