@@ -2665,7 +2665,7 @@ Future<Void> respondToRecovered(TLogInterface tli, Promise<Void> recoveryComplet
 	// This delay is added for testing purpose in simulation where by setting `disableTLogRecoveryFinish`, we disable
 	// TLogs to send back `TLogRecoveryFinishedRequest`.
 	while (g_network->isSimulated() && g_simulator->disableTLogRecoveryFinish) {
-		TraceEvent("WaitingToBeUnblocked", tli.id());
+		TraceEvent("WaitingToBeUnblocked", tli.id()).suppressFor(60);
 		co_await delay(10);
 	}
 
