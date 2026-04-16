@@ -3105,13 +3105,14 @@ Future<StatusReply> clusterGetStatus(Reference<AsyncVar<ServerDBInfo>> db,
 			int fullyReplicatedRegions = -1;
 			// NOTE: here we should start all the transaction before wait in order to overlay latency
 			Future<Optional<Value>> primaryDCFO = getActivePrimaryDC(cx, &fullyReplicatedRegions, &messages);
-			std::vector<AsyncResult<JsonBuilderObject>> futures2;
-			futures2.push_back(dataStatusFetcher(ddWorker, configuration.get(), &minStorageReplicasRemaining));
-			futures2.push_back(workloadStatusFetcher(
+			std::vector<AsyncResult<JsonBuilderObject>> statusSectionFetchers;
+			statusSectionFetchers.push_back(
+			    dataStatusFetcher(ddWorker, configuration.get(), &minStorageReplicasRemaining));
+			statusSectionFetchers.push_back(workloadStatusFetcher(
 			    db, workers, mWorker, rkWorker, &qos, &dataOverlay, &status_incomplete_reasons, storageServerFuture));
-			futures2.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
-			futures2.push_back(lockedStatusFetcher(cx, &messages, &status_incomplete_reasons));
-			futures2.push_back(
+			statusSectionFetchers.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
+			statusSectionFetchers.push_back(lockedStatusFetcher(cx, &messages, &status_incomplete_reasons));
+			statusSectionFetchers.push_back(
 			    clusterSummaryStatisticsFetcher(pMetrics, storageServerFuture, tLogFuture, &status_incomplete_reasons));
 
 			if (configuration.get().perpetualStorageWiggleSpeed > 0) {
@@ -3142,7 +3143,7 @@ Future<StatusReply> clusterGetStatus(Reference<AsyncVar<ServerDBInfo>> db,
 				}
 			}
 
-			std::vector<JsonBuilderObject> workerStatuses = co_await getAll(std::move(futures2));
+			std::vector<JsonBuilderObject> workerStatuses = co_await getAll(std::move(statusSectionFetchers));
 			co_await primaryDCFO;
 
 			ErrorOr<std::vector<NetworkAddress>> addresses =
