@@ -108,7 +108,7 @@ struct StorageServerStatusInfo : public StorageServerMetaInfo {
 	explicit StorageServerStatusInfo(const StorageServerMetaInfo& info) : StorageServerMetaInfo(info, info.metadata) {}
 };
 
-static Future<Optional<TraceEventFields>> latestEventOnWorker(WorkerInterface worker, std::string eventName) {
+static AsyncResult<Optional<TraceEventFields>> latestEventOnWorker(WorkerInterface worker, std::string eventName) {
 	try {
 		EventLogRequest req =
 		    eventName.size() > 0 ? EventLogRequest(Standalone<StringRef>(eventName)) : EventLogRequest();
@@ -1919,24 +1919,24 @@ static Future<std::vector<std::pair<iface, EventMap>>> getServerMetrics(
     std::vector<iface> servers,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers,
     std::vector<std::string> eventNames) {
-	std::vector<Future<Optional<TraceEventFields>>> futures;
+	std::vector<AsyncResult<Optional<TraceEventFields>>> futures;
 	for (auto s : servers) {
 		for (auto name : eventNames) {
 			futures.push_back(latestEventOnWorker(address_workers[s.address()], s.id().toString() + "/" + name));
 		}
 	}
 
-	co_await waitForAll(futures);
+	std::vector<Optional<TraceEventFields>> eventTraces = co_await getAll(std::move(futures));
 
 	std::vector<std::pair<iface, EventMap>> results;
-	auto futureItr = futures.begin();
+	auto eventTraceItr = eventTraces.begin();
 
 	for (int i = 0; i < servers.size(); i++) {
 		EventMap serverResults;
 		for (auto name : eventNames) {
-			ASSERT(futureItr != futures.end());
-			serverResults[name] = futureItr->get().present() ? futureItr->get().get() : TraceEventFields();
-			++futureItr;
+			ASSERT(eventTraceItr != eventTraces.end());
+			serverResults[name] = eventTraceItr->present() ? eventTraceItr->get() : TraceEventFields();
+			++eventTraceItr;
 		}
 
 		results.emplace_back(servers[i], serverResults);
