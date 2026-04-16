@@ -224,9 +224,18 @@ struct GcGenerationsWorkload : TestWorkload {
 		self->unclogAll();
 		disableConnectionFailures("GcGenerations");
 
-		// Unblock TLogs before waiting for generation reduction
-		// The June 2025 fix prevents generation GC when TLogs are blocked
+		// Unblock TLogs before waiting for generation reduction.
+		// The trackRecoveryReq blocking prevented TLogs from reporting recovered state
+		// during accumulation. The current recovery's tracking is now stale (FinalUpdate
+		// will never fire), so we must trigger a fresh recovery by rebooting the master.
+		// The new recovery starts with clean tracking state, allowing GC to proceed.
 		g_simulator->disableTLogRecoveryFinish = false;
+
+		co_await self->dbAvailable(self);
+		auto masterAddr = self->dbInfo->get().master.address();
+		TraceEvent("RebootingMasterForGC").detail("Master", masterAddr);
+		g_simulator->rebootProcess(g_simulator->getProcessByAddress(masterAddr),
+		                           ISimulator::KillType::Reboot);
 
 		co_await self->generationReduced(self);
 
