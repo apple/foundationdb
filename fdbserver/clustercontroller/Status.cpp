@@ -1916,7 +1916,7 @@ static AsyncResult<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 }
 
 template <class iface>
-static Future<std::vector<std::pair<iface, EventMap>>> getServerMetrics(
+static AsyncResult<std::vector<std::pair<iface, EventMap>>> getServerMetrics(
     std::vector<iface> servers,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers,
     std::vector<std::string> eventNames) {
@@ -1962,8 +1962,8 @@ static Future<std::vector<StorageServerStatusInfo>> getStorageServerStatusInfos(
 	for (const auto& meta : storageMetadatas) {
 		servers.push_back(StorageServerStatusInfo(meta));
 	}
-	std::vector<std::pair<StorageServerStatusInfo, EventMap>> results;
-	co_await store(results, getServerMetrics(servers, address_workers, STORAGE_SERVER_METRICS_LIST));
+	std::vector<std::pair<StorageServerStatusInfo, EventMap>> results =
+	    co_await getServerMetrics(servers, address_workers, STORAGE_SERVER_METRICS_LIST);
 	for (int i = 0; i < results.size(); ++i) {
 		servers[i].eventMap = std::move(results[i].second);
 	}
