@@ -1995,10 +1995,9 @@ static Future<std::vector<std::pair<CommitProxyInterface, EventMap>>> getCommitP
 static Future<std::vector<std::pair<GrvProxyInterface, EventMap>>> getGrvProxiesAndMetrics(
     Reference<AsyncVar<ServerDBInfo>> db,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
-	std::vector<std::string> eventNames{ "GRVLatencyMetrics",
-		                                 "GRVLatencyBands",
-		                                 "GRVBatchLatencyMetrics" } std::vector<std::pair<GrvProxyInterface, EventMap>>
-	    results = co_await getServerMetrics(db->get().client.grvProxies, address_workers, std::move(eventNames));
+	std::vector<std::string> eventNames{ "GRVLatencyMetrics", "GRVLatencyBands", "GRVBatchLatencyMetrics" };
+	std::vector<std::pair<GrvProxyInterface, EventMap>> results =
+	    co_await getServerMetrics(db->get().client.grvProxies, address_workers, std::move(eventNames));
 	co_return results;
 }
 
