@@ -2754,7 +2754,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				startRole(Role::COMMIT_PROXY, recruited.id(), interf.id(), details);
 
 				DUMPTOKEN(recruited.commit);
-				DUMPTOKEN(recruited.getConsistentReadVersion);
 				DUMPTOKEN(recruited.getKeyServersLocations);
 				DUMPTOKEN(recruited.getStorageServerRejoinInfo);
 				DUMPTOKEN(recruited.waitFailure);
@@ -3500,7 +3499,7 @@ Future<UID> createAndLockProcessIdFile(std::string folder) {
 
 				int64_t fileSize = co_await lockFile.get()->size();
 				Key fileData = makeString(fileSize);
-				co_await success(lockFile.get()->read(mutateString(fileData), fileSize, 0));
+				co_await lockFile.get()->read(mutateString(fileData), fileSize, 0);
 				bool deleteCorruptProcessIdFile = false;
 				try {
 					processIDUid = BinaryReader::fromStringRef<UID>(fileData, IncludeVersion());
@@ -3562,11 +3561,10 @@ Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGeneration(
 
 		ErrorOr<Optional<LeaderInfo>> leader;
 		if (usingHostname) {
-			co_await store(
-			    leader,
-			    tryGetReplyFromHostname(request, interf.hostname.get(), WLTOKEN_LEADERELECTIONREG_ELECTIONRESULT));
+			leader = co_await tryGetReplyFromHostname(
+			    request, interf.hostname.get(), WLTOKEN_LEADERELECTIONREG_ELECTIONRESULT);
 		} else {
-			co_await store(leader, interf.electionResult.tryGetReply(request));
+			leader = co_await interf.electionResult.tryGetReply(request);
 		}
 
 		if (leader.present()) {

@@ -38,6 +38,8 @@
 #define GENERICACTORS_ACTOR_H
 
 #include <list>
+#include <optional>
+#include <type_traits>
 #include <utility>
 
 #include "flow/flow.h"
@@ -909,32 +911,34 @@ Future<Void> makeStream(const std::vector<Future<T>>& futures, PromiseStream<T>&
 template <class T>
 class QuorumCallback;
 
-template <class T>
-struct Quorum final : SAV<Void> {
+// SAV-backed quorum bookkeeping for Future callbacks. AsyncResult quorum uses
+// a separate state type because it owns producer cancellation.
+template <class CallbackType>
+struct QuorumState final : SAV<Void> {
 	int antiQuorum;
 	int count;
 
-	static inline int sizeFor(int count) { return sizeof(Quorum<T>) + sizeof(QuorumCallback<T>) * count; }
+	static inline int sizeFor(int count) { return sizeof(QuorumState<CallbackType>) + sizeof(CallbackType) * count; }
 
 	void destroy() override {
 		int size = sizeFor(this->count);
-		this->~Quorum();
+		this->~QuorumState();
 		freeFast(size, this);
 	}
 	void cancel() override {
-		int cancelled_callbacks = 0;
-		for (int i = 0; i < count; i++)
-			if (callbacks()[i].next) {
-				callbacks()[i].remove();
-				callbacks()[i].next = 0;
-				++cancelled_callbacks;
+		int cancelledCallbacks = 0;
+		for (int i = 0; i < count; i++) {
+			if (callbacks()[i].isRegistered()) {
+				callbacks()[i].detach();
+				++cancelledCallbacks;
 			}
+		}
 		if (canBeSet())
 			sendError(actor_cancelled());
-		for (int i = 0; i < cancelled_callbacks; i++)
+		for (int i = 0; i < cancelledCallbacks; i++)
 			delPromiseRef();
 	}
-	explicit Quorum(int quorum, int count) : SAV<Void>(1, count), antiQuorum(count - quorum + 1), count(count) {
+	explicit QuorumState(int quorum, int count) : SAV<Void>(1, count), antiQuorum(count - quorum + 1), count(count) {
 		if (!quorum)
 			this->send(Void());
 	}
@@ -951,28 +955,40 @@ struct Quorum final : SAV<Void> {
 			delPromiseRef();
 	}
 
-	QuorumCallback<T>* callbacks() { return (QuorumCallback<T>*)(this + 1); }
+	CallbackType* callbacks() { return (CallbackType*)(this + 1); }
 };
+
+template <class T>
+using Quorum = QuorumState<QuorumCallback<T>>;
 
 template <class T>
 class QuorumCallback : public Callback<T> {
 public:
 	void fire(const T& value) override {
-		Callback<T>::remove();
-		Callback<T>::next = 0;
+		detach();
 		head->oneSuccess();
 	}
 	void error(Error error) override {
-		Callback<T>::remove();
-		Callback<T>::next = 0;
+		detach();
 		head->oneError(error);
+	}
+	bool isRegistered() const { return Callback<T>::next != nullptr; }
+	void detach() {
+		if (isRegistered()) {
+			Callback<T>::remove();
+			Callback<T>::prev = nullptr;
+			Callback<T>::next = nullptr;
+		}
 	}
 
 private:
 	template <class U>
 	friend Future<Void> quorum(const Future<U>* pItems, int itemCount, int n);
 	Quorum<T>* head;
-	QuorumCallback() = default;
+	QuorumCallback() {
+		Callback<T>::prev = nullptr;
+		Callback<T>::next = nullptr;
+	}
 	QuorumCallback(Future<T> future, Quorum<T>* head) : head(head) { future.addCallbackAndClear(this); }
 };
 
@@ -988,7 +1004,6 @@ Future<Void> quorum(const Future<T>* pItems, int itemCount, int n) {
 		auto& r = pItems[i];
 		if (r.isReady()) {
 			new (nextCallback) QuorumCallback<T>();
-			nextCallback->next = 0;
 			if (r.isError())
 				q->oneError(r.getError());
 			else
@@ -1004,6 +1019,304 @@ template <class T>
 Future<Void> quorum(std::vector<Future<T>> const& results, int n) {
 	return quorum(&results.front(), results.size(), n);
 }
+
+namespace coro {
+template <class T>
+struct QuorumAsyncResultCallback;
+
+template <class T>
+struct GetAllAsyncResultCallback;
+} // namespace coro
+
+template <class T>
+struct QuorumAsyncResult final : SAV<Void> {
+	int antiQuorum;
+	int count;
+
+	static inline int sizeFor(int count) {
+		return sizeof(QuorumAsyncResult<T>) + sizeof(coro::QuorumAsyncResultCallback<T>) * count;
+	}
+
+	int detachPendingCallbacks() {
+		int detachedCallbacks = 0;
+		for (int i = 0; i < count; ++i) {
+			if (callbacks()[i].isRegistered()) {
+				callbacks()[i].detach();
+				++detachedCallbacks;
+			}
+		}
+		return detachedCallbacks;
+	}
+
+	void destroy() override {
+		int size = sizeFor(this->count);
+		this->~QuorumAsyncResult();
+		freeFast(size, this);
+	}
+	void cancel() override {
+		int cancelledCallbacks = detachPendingCallbacks();
+		if (canBeSet())
+			sendError(actor_cancelled());
+		for (int i = 0; i < cancelledCallbacks; ++i)
+			delPromiseRef();
+	}
+	explicit QuorumAsyncResult(int quorum, int count)
+	  : SAV<Void>(1, count), antiQuorum(count - quorum + 1), count(count) {
+		if (!quorum)
+			this->send(Void());
+	}
+	void oneSuccess() {
+		if (getPromiseReferenceCount() == antiQuorum && canBeSet()) {
+			int cancelledCallbacks = detachPendingCallbacks();
+			this->sendAndDelPromiseRef(Void());
+			for (int i = 0; i < cancelledCallbacks; ++i)
+				delPromiseRef();
+		} else {
+			delPromiseRef();
+		}
+	}
+	void oneError(Error err) {
+		if (canBeSet()) {
+			int cancelledCallbacks = detachPendingCallbacks();
+			this->sendErrorAndDelPromiseRef(err);
+			for (int i = 0; i < cancelledCallbacks; ++i)
+				delPromiseRef();
+		} else {
+			delPromiseRef();
+		}
+	}
+
+	coro::QuorumAsyncResultCallback<T>* callbacks() { return (coro::QuorumAsyncResultCallback<T>*)(this + 1); }
+};
+
+namespace coro {
+template <class T>
+// AsyncResult has a single callback slot in its state, so quorum needs a
+// callback that can unregister directly from AsyncResultState and cancel the
+// producer if the aggregate no longer needs that result.
+struct QuorumAsyncResultCallback final : AsyncResultCallback<typename AsyncResult<T>::StoredT> {
+	using StoredT = typename AsyncResult<T>::StoredT;
+
+	AsyncResultState<StoredT>* resultState = nullptr;
+	QuorumAsyncResult<T>* head = nullptr;
+
+	QuorumAsyncResultCallback() = default;
+	QuorumAsyncResultCallback(AsyncResult<T>& result, QuorumAsyncResult<T>* head);
+
+	void fire(StoredT const&) override;
+	void fire(StoredT&&) override;
+	void error(Error error) override;
+	bool isRegistered() const { return resultState != nullptr; }
+	void detach();
+};
+} // namespace coro
+
+namespace coro {
+template <class StoredT>
+void detachAsyncResultStateCallback(AsyncResultState<StoredT>*& resultState, AsyncResultCallback<StoredT>* callback) {
+	if (resultState) {
+		auto* s = resultState;
+		resultState = nullptr;
+		s->clearCallback(callback);
+		if (!s->isReady()) {
+			s->cancelProducer();
+		}
+		s->delRef();
+	}
+}
+
+template <class T>
+QuorumAsyncResultCallback<T>::QuorumAsyncResultCallback(AsyncResult<T>& result, QuorumAsyncResult<T>* head)
+  : resultState(result.resultState), head(head) {
+	std::move(result).addCallbackAndClear(this);
+}
+
+template <class T>
+void QuorumAsyncResultCallback<T>::detach() {
+	detachAsyncResultStateCallback(resultState, this);
+}
+
+template <class T>
+void QuorumAsyncResultCallback<T>::fire(StoredT const&) {
+	detach();
+	head->oneSuccess();
+}
+
+template <class T>
+void QuorumAsyncResultCallback<T>::fire(StoredT&&) {
+	detach();
+	head->oneSuccess();
+}
+
+template <class T>
+void QuorumAsyncResultCallback<T>::error(Error error) {
+	detach();
+	head->oneError(error);
+}
+} // namespace coro
+
+template <class T>
+Future<Void> quorum(AsyncResult<T>* pItems, int itemCount, int n) {
+	ASSERT(n >= 0 && n <= itemCount);
+
+	int size = QuorumAsyncResult<T>::sizeFor(itemCount);
+	QuorumAsyncResult<T>* q = new (allocateFast(size)) QuorumAsyncResult<T>(n, itemCount);
+
+	coro::QuorumAsyncResultCallback<T>* nextCallback = q->callbacks();
+	for (int i = 0; i < itemCount; ++i) {
+		auto& r = pItems[i];
+		if (r.isReady()) {
+			new (nextCallback) coro::QuorumAsyncResultCallback<T>();
+			if (r.isError())
+				q->oneError(r.getError());
+			else
+				q->oneSuccess();
+			r = AsyncResult<T>();
+		} else
+			new (nextCallback) coro::QuorumAsyncResultCallback<T>(r, q);
+		++nextCallback;
+	}
+	return Future<Void>(q);
+}
+
+// AsyncResult is single-consumer, so quorum requires an explicit ownership
+// transfer from vector callers.
+template <class T>
+Future<Void> quorum(std::vector<AsyncResult<T>>& results, int n) = delete;
+
+template <class T>
+Future<Void> quorum(std::vector<AsyncResult<T>>&& results, int n) {
+	return quorum(results.data(), results.size(), n);
+}
+
+template <class T>
+// Collect AsyncResult values without first wrapping them in Future. Each slot
+// is optional so move-only payloads can be transferred exactly once into the
+// final output vector when the last callback fires.
+struct GetAllAsyncResult final : SAV<std::vector<T>> {
+	int remaining;
+	int count;
+	std::vector<std::optional<T>> values;
+
+	static inline int sizeFor(int count) {
+		return sizeof(GetAllAsyncResult<T>) + sizeof(coro::GetAllAsyncResultCallback<T>) * count;
+	}
+
+	int detachPendingCallbacks() {
+		int detachedCallbacks = 0;
+		for (int i = 0; i < count; ++i) {
+			if (callbacks()[i].isRegistered()) {
+				callbacks()[i].detach();
+				++detachedCallbacks;
+			}
+		}
+		return detachedCallbacks;
+	}
+
+	void destroy() override {
+		int size = sizeFor(this->count);
+		this->~GetAllAsyncResult();
+		freeFast(size, this);
+	}
+	void cancel() override {
+		int cancelledCallbacks = detachPendingCallbacks();
+		if (this->canBeSet())
+			this->sendError(actor_cancelled());
+		for (int i = 0; i < cancelledCallbacks; ++i)
+			this->delPromiseRef();
+	}
+
+	explicit GetAllAsyncResult(int count)
+	  : SAV<std::vector<T>>(1, count), remaining(count), count(count), values(count) {}
+
+	template <class U>
+	void oneSuccess(int idx, U&& value) {
+		values[idx].emplace(std::forward<U>(value));
+		if (--remaining == 0 && this->canBeSet()) {
+			std::vector<T> output;
+			output.reserve(count);
+			for (auto& item : values) {
+				output.push_back(std::move(*item));
+			}
+			this->sendAndDelPromiseRef(std::move(output));
+		} else {
+			this->delPromiseRef();
+		}
+	}
+	void oneError(Error err) {
+		if (this->canBeSet()) {
+			int cancelledCallbacks = detachPendingCallbacks();
+			this->sendErrorAndDelPromiseRef(err);
+			for (int i = 0; i < cancelledCallbacks; ++i)
+				this->delPromiseRef();
+		} else
+			this->delPromiseRef();
+	}
+
+	coro::GetAllAsyncResultCallback<T>* callbacks() { return (coro::GetAllAsyncResultCallback<T>*)(this + 1); }
+};
+
+namespace coro {
+template <class T>
+// Mirrors the Future-based getAll callback path, but owns AsyncResult-specific
+// detach/cancel behavior so pending producers are released when the aggregate
+// finishes early.
+struct GetAllAsyncResultCallback final : AsyncResultCallback<typename AsyncResult<T>::StoredT> {
+	using StoredT = typename AsyncResult<T>::StoredT;
+
+	AsyncResultState<StoredT>* resultState = nullptr;
+	GetAllAsyncResult<T>* head = nullptr;
+	int idx = -1;
+
+	GetAllAsyncResultCallback() = default;
+	GetAllAsyncResultCallback(AsyncResult<T>& result, GetAllAsyncResult<T>* head, int idx);
+
+	void fire(StoredT const& value) override;
+	void fire(StoredT&& value) override;
+	void error(Error error) override;
+	bool isRegistered() const { return resultState != nullptr; }
+	void detach();
+};
+} // namespace coro
+
+namespace coro {
+template <class T>
+GetAllAsyncResultCallback<T>::GetAllAsyncResultCallback(AsyncResult<T>& result, GetAllAsyncResult<T>* head, int idx)
+  : resultState(result.resultState), head(head), idx(idx) {
+	std::move(result).addCallbackAndClear(this);
+}
+
+template <class T>
+void GetAllAsyncResultCallback<T>::detach() {
+	detachAsyncResultStateCallback(resultState, this);
+}
+
+template <class T>
+void GetAllAsyncResultCallback<T>::fire(StoredT const& value) {
+	if constexpr (std::is_constructible_v<T, StoredT const&>) {
+		T copied(value);
+		detach();
+		head->oneSuccess(idx, std::move(copied));
+	} else {
+		// AsyncResultState::complete() currently dispatches through fire(T&&). If
+		// that ever changes, move-only AsyncResult payloads still need this path
+		// to stay unreachable.
+		UNREACHABLE();
+	}
+}
+
+template <class T>
+void GetAllAsyncResultCallback<T>::fire(StoredT&& value) {
+	detach();
+	head->oneSuccess(idx, std::move(value));
+}
+
+template <class T>
+void GetAllAsyncResultCallback<T>::error(Error error) {
+	detach();
+	head->oneError(error);
+}
+} // namespace coro
 
 ACTOR template <class T>
 Future<Void> smartQuorum(std::vector<Future<T>> results,
@@ -1064,6 +1377,41 @@ Future<std::vector<T>> getAll(std::vector<Future<T>> input) {
 	for (int i = 0; i < input.size(); i++)
 		output.push_back(input[i].get());
 	return output;
+}
+
+template <class T>
+// AsyncResult is single-consumer, so getAll requires an explicit ownership
+// transfer from vector callers.
+Future<std::vector<T>> getAll(std::vector<AsyncResult<T>>& input) = delete;
+
+template <class T>
+Future<std::vector<T>> getAll(std::vector<AsyncResult<T>>&& input) {
+	if (input.empty())
+		return std::vector<T>();
+
+	int size = GetAllAsyncResult<T>::sizeFor(input.size());
+	GetAllAsyncResult<T>* result = new (allocateFast(size)) GetAllAsyncResult<T>(input.size());
+
+	coro::GetAllAsyncResultCallback<T>* nextCallback = result->callbacks();
+	for (int i = 0; i < input.size(); ++i) {
+		auto& item = input[i];
+		if (item.isReady()) {
+			new (nextCallback) coro::GetAllAsyncResultCallback<T>();
+			if (item.isError()) {
+				Error err = item.getError();
+				item = AsyncResult<T>();
+				result->oneError(err);
+			} else {
+				T value = std::move(item).get();
+				item = AsyncResult<T>();
+				result->oneSuccess(i, std::move(value));
+			}
+		} else {
+			new (nextCallback) coro::GetAllAsyncResultCallback<T>(item, result, i);
+		}
+		++nextCallback;
+	}
+	return Future<std::vector<T>>(result);
 }
 
 ACTOR template <class T>

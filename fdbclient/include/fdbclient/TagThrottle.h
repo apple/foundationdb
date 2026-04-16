@@ -298,7 +298,7 @@ getThrottledTags(Reference<DB> db, int limit, ContainsRecommended containsRecomm
 		Error err;
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			co_await store(reportAuto, getValidAutoEnabled(tr));
+			reportAuto = co_await getValidAutoEnabled(tr);
 			if (!reportAuto.present()) {
 				tr->reset();
 				co_await delay(CLIENT_KNOBS->DEFAULT_BACKOFF);
