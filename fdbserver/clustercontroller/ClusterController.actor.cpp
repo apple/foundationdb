@@ -1436,7 +1436,7 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 #define TIME_KEEPER_VERSION "1"_sr
 
 Future<Void> timeKeeperSetVersion(ClusterControllerData* self) {
-	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+	auto tr = makeReference<ReadYourWritesTransaction>(self->cx);
 	while (true) {
 		Error err;
 		try {
@@ -1464,7 +1464,7 @@ Future<Void> timeKeeper(ClusterControllerData* self) {
 	co_await timeKeeperSetVersion(self);
 
 	while (true) {
-		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+		auto tr = makeReference<ReadYourWritesTransaction>(self->cx);
 		while (true) {
 			Error err;
 			try {
@@ -1748,7 +1748,7 @@ Future<Void> monitorServerInfoConfig(ClusterControllerData::DBInfo* db) {
 Future<Void> monitorStorageMetadata(ClusterControllerData* self) {
 	KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(serverMetadataKeys.begin,
 	                                                                                     IncludeVersion());
-	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+	auto tr = makeReference<ReadYourWritesTransaction>(self->cx);
 	std::vector<StorageServerMetaInfo> servers;
 	while (true) {
 		Error err;
@@ -2711,7 +2711,7 @@ Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 // Update the DBInfo state with this processes cluster ID. If this process does
 // not have a cluster ID and one does not exist in the database, generate one.
 Future<Void> updateClusterId(ClusterControllerData* self) {
-	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+	auto tr = makeReference<ReadYourWritesTransaction>(self->cx);
 	while (true) {
 		Error err;
 		try {

@@ -51,7 +51,7 @@ static const std::string BULK_LOAD_HELP_MESSAGE =
     BULKLOAD_PRINT_LOCK_USAGE + BULKLOAD_PRINT_LOCK_OWNER_USAGE + BULKLOAD_CLEAR_LOCK_USAGE;
 
 Future<Void> printPastBulkLoadJob(Database cx) {
-	std::vector<BulkLoadJobState> const& jobs = co_await getBulkLoadJobFromHistory(cx);
+	std::vector<BulkLoadJobState> jobs = co_await getBulkLoadJobFromHistory(cx);
 	if (jobs.empty()) {
 		fmt::println("No bulk loading job in the history");
 		co_return;
@@ -362,7 +362,7 @@ Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens) {
 			fmt::println("{}", BULKLOAD_PRINT_LOCK_OWNER_USAGE);
 			co_return UID();
 		}
-		std::vector<RangeLockOwner> const& owners = co_await getAllRangeLockOwners(cx);
+		std::vector<RangeLockOwner> owners = co_await getAllRangeLockOwners(cx);
 		for (const auto owner : owners) {
 			fmt::println("{}", owner.toString());
 		}
