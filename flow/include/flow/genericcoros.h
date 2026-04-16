@@ -186,7 +186,7 @@ Future<Void> trigger(Func what, Future<Void> signal) {
 template <class T>
 Future<Void> uncancellable(Uncancellable, Future<T> what, Promise<T> result) {
 	ErrorOr<T> res = co_await coro::errorOr(what);
-	if (result.present()) {
+	if (res.present()) {
 		result.send(std::move(res).get());
 	} else {
 		result.sendError(res.getError());
