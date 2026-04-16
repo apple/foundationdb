@@ -31,7 +31,7 @@ template <class Parent, int Idx, class ValueType>
 struct ActorAsyncResultCallback : AsyncResultCallback<ValueType> {
 	AsyncResultState<ValueType>* state = nullptr;
 
-	void bind(AsyncResult<ValueType>& result) { state = result.state; }
+	void bind(AsyncResult<ValueType>& result) { state = result.resultState; }
 
 	void remove() {
 		if (state) {
