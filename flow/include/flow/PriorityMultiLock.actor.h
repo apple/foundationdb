@@ -243,6 +243,19 @@ private:
 	Promise<Void> brokenOnDestruct;
 	bool killed;
 
+	static void releaseRunner(Reference<PriorityMultiLock> self, Priority* priority) {
+		pml_debug_printf("lock release priority %d  %s\n", (int)(priority->priority), self->toString().c_str());
+
+		pml_debug_printf("%f handleRelease self=%p releasing\n", now(), self.getPtr());
+		++self->available;
+		priority->runners -= 1;
+
+		// If there are any waiters or if the runners array is getting large, trigger the runner loop
+		if (self->waiting > 0) {
+			self->wakeRunner.trigger();
+		}
+	}
+
 	struct ReleaseHandler final : Callback<Void>, FastAllocated<ReleaseHandler> {
 		Reference<PriorityMultiLock> self;
 		Priority* priority;
@@ -250,30 +263,17 @@ private:
 		ReleaseHandler(Reference<PriorityMultiLock> self, Priority* priority)
 		  : self(std::move(self)), priority(priority) {}
 
-		void release() {
-			pml_debug_printf("lock release priority %d  %s\n", (int)(priority->priority), self->toString().c_str());
-
-			pml_debug_printf("%f handleRelease self=%p releasing\n", now(), self.getPtr());
-			++self->available;
-			priority->runners -= 1;
-
-			// If there are any waiters or if the runners array is getting large, trigger the runner loop
-			if (self->waiting > 0) {
-				self->wakeRunner.trigger();
-			}
-		}
-
 		void fire(Void const&) override {
 			Callback<Void>::remove();
 			pml_debug_printf("%f handleRelease self=%p success\n", now(), self.getPtr());
-			release();
+			releaseRunner(std::move(self), priority);
 			delete this;
 		}
 
 		void error(Error e) override {
 			Callback<Void>::remove();
 			pml_debug_printf("%f handleRelease self=%p error %s\n", now(), self.getPtr(), e.what());
-			release();
+			releaseRunner(std::move(self), priority);
 			delete this;
 		}
 	};
@@ -289,16 +289,7 @@ private:
 				pml_debug_printf("%f handleRelease self=%p success\n", now(), self.getPtr());
 			}
 
-			pml_debug_printf("lock release priority %d  %s\n", (int)(priority->priority), self->toString().c_str());
-
-			pml_debug_printf("%f handleRelease self=%p releasing\n", now(), self.getPtr());
-			++self->available;
-			priority->runners -= 1;
-
-			// If there are any waiters or if the runners array is getting large, trigger the runner loop
-			if (self->waiting > 0) {
-				self->wakeRunner.trigger();
-			}
+			releaseRunner(std::move(self), priority);
 			return;
 		}
 
