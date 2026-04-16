@@ -458,9 +458,9 @@ Future<Void> readCommitted(Database cx,
 			                          : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
 
 			if (systemAccess)
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			if (lockAware)
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			if (readLowPriority) {
 				tr.setOption(FDBTransactionOptions::READ_PRIORITY_LOW);
 			}
