@@ -148,10 +148,30 @@ The ``clang-tidy-diff.py`` script has different flag conventions from ``clang-ti
 
    In the standard ``clang-tidy`` command, ``-p`` points to the build directory. In ``clang-tidy-diff.py``, ``-path`` points to the build directory and ``-p`` is for path stripping.
 
+Running clang-tidy during builds (CMake integration)
+=====================================================
+
+FoundationDB's CMake build supports running ``clang-tidy`` automatically during C/C++ compilation:
+
+.. code-block:: shell
+
+   cmake -S . -B build -G Ninja -DUSE_CLANG_TIDY=ON
+   ninja -C build fdbserver
+
+This runs ``clang-tidy`` on every file as it compiles. It is slower than using ``clang-tidy-diff.py`` on your diff but catches issues in all compiled code.
+
+Optional CMake variables:
+
+* ``CLANG_TIDY`` -- path to the ``clang-tidy`` executable (auto-detected by default)
+* ``CLANG_TIDY_EXTRA_ARGS`` -- additional space-separated arguments passed to ``clang-tidy``
+
 Known limitations
 -----------------
 
 **``.actor.cpp`` files cannot be analyzed.** These files use FoundationDB's custom actor compiler syntax (``ACTOR``, ``wait()``, ``state``) that ``clang-tidy`` cannot parse. Exclude them from your diff when running locally:
+
+Quick reference
+===============
 
 .. code-block:: shell
 
