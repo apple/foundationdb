@@ -44,16 +44,16 @@ struct PeekTxsInfo {
 
 class LogSystemDiskQueueAdapter final : public IDiskQueue {
 public:
-	// This adapter is designed to let KeyValueStoreMemory use ILogSystem
+	// This adapter is designed to let KeyValueStoreMemory use LogSystem
 	// as a backing store, so that the transaction subsystem can in
 	// turn use KeyValueStoreMemory to track configuration information as of
 	// the database version and recover it from the logging subsystem as necessary.
 
 	// Because the transaction subsystem will need to control the actual pushing of
-	// committed information to the ILogSystem, commit() in this interface doesn't directly
-	// call ILogSystem::push().  Instead it makes a commit message available through
+	// committed information to the LogSystem, commit() in this interface doesn't directly
+	// call LogSystem::push().  Instead it makes a commit message available through
 	// getCommitMessage(), and doesn't return until its acknowledge promise is set.
-	// The caller is responsible for calling ILogSystem::push() and ILogSystem::pop() with the results.
+	// The caller is responsible for calling LogSystem::push() and LogSystem::pop() with the results.
 
 	// It does, however, peek the specified tag directly at recovery time.
 
