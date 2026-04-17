@@ -30,10 +30,10 @@ Each factor uses the following levels:
 For aggregation, the implementation assigns an internal score to each level and keeps the lowest-scoring factor as the aggregate result:
 
 - `HEALTHY` = 100
-- `SELF_HEALING` = 75
-- `INTERVENTION_REQUIRED` = 50
-- `CRITICAL_INTERVENTION_REQUIRED` = 25
-- `METRICS_MISSING` = 0
+- `SELF_HEALING` = 80
+- `INTERVENTION_REQUIRED` = 60
+- `CRITICAL_INTERVENTION_REQUIRED` = 40
+- `METRICS_MISSING` = 20
 - `OUTAGE` = 0
 
 These numeric values provide a scalar metric that can be emitted, and leave room for additional intermediate values to be added in the future.
@@ -164,7 +164,7 @@ Fields:
 - `FactorProcessErrors`: same enum
 - `FactorRkThrottling`: same enum
 - `Aggregate`: same enum, computed from the most limiting factor
-- `AggregateValue`: numeric aggregate score, currently one of `0`, `25`, `50`, `75`, or `100`
+- `AggregateValue`: numeric aggregate score, currently one of `0`, `20`, `40`, `60`, `80`, or `100`
 - `LimitingFactor`: factor name string, present when not healthy
 
 The aggregate is determined by taking the lowest-scoring level across all factors.

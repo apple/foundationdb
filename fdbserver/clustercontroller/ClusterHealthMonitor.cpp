@@ -106,12 +106,13 @@ uint8_t levelToInt(Level level) {
 	case Level::HEALTHY:
 		return 100;
 	case Level::SELF_HEALING:
-		return 75;
+		return 80;
 	case Level::INTERVENTION_REQUIRED:
-		return 50;
+		return 60;
 	case Level::CRITICAL_INTERVENTION_REQUIRED:
-		return 25;
+		return 40;
 	case Level::METRICS_MISSING:
+		return 20;
 	case Level::OUTAGE:
 		return 0;
 	}
