@@ -958,7 +958,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CC_RECOVERY_INIT_REQ_GROWTH_FACTOR,                    2.0 );
 	init( CC_RECOVERY_INIT_REQ_MAX_TIMEOUT,                    300.0 );
 	init( CC_RECOVERY_INIT_REQ_MAX_UNFINISHED_RECOVERIES,        100 );
-	init( CLUSTER_HEALTH_METRIC_ENABLE, true );
+	init( CLUSTER_HEALTH_METRIC_ENABLE,                        false ); if( randomize && isSimulated && BUGGIFY ) CLUSTER_HEALTH_METRIC_ENABLE = true;
 	init( CLUSTER_HEALTH_METRIC_POLL_INTERVAL, 5.0 );
 	init( CLUSTER_HEALTH_METRIC_STORAGE_INTERVENTION_THRESHOLD, 0.20 );
 	init( CLUSTER_HEALTH_METRIC_STORAGE_CRITICAL_THRESHOLD,     0.10 );
