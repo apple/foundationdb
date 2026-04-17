@@ -42,6 +42,11 @@ function(compile_boost)
     if (NOT APPLE)
       list(APPEND BOOST_LINK_FLAGS -static-libgcc)
     endif()
+    # avoid unary_function errors with macOS 26 toolchain using c++17:
+    #  > no template named 'unary_function' in namespace 'std'; did you mean '__unary_function'?
+    if (APPLE)
+      list(APPEND BOOST_COMPILER_FLAGS -std=c++14)
+    endif()
   endif()
 
   # Update the user-config.jam
