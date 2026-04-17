@@ -60,7 +60,7 @@ public:
 	                                                 ParametersT* ignored_parameters) {
 		Reference<IBlobStoreEndpoint> base =
 		    IBlobStoreEndpoint::fromString(url, proxy, resourceFromURL, error, ignored_parameters);
-		S3BlobStoreEndpoint* endpoint = dynamic_cast<S3BlobStoreEndpoint*>(base.getPtr());
+		auto* endpoint = dynamic_cast<S3BlobStoreEndpoint*>(base.getPtr());
 		if (base && !endpoint) {
 			if (error) {
 				*error = "Parsed blob store endpoint is not an S3BlobStoreEndpoint";

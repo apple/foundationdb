@@ -43,7 +43,6 @@
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
 #include <boost/algorithm/string.hpp>
-#include <boost/algorithm/string.hpp>
 #include <boost/algorithm/hex.hpp>
 #include "flow/IAsyncFile.h"
 #include "flow/Hostname.h"
@@ -373,7 +372,7 @@ std::string awsCanonicalURI(const std::string& resource, std::vector<std::string
 
 	StringRef qStr(queryString);
 	StringRef queryParameter;
-	while ((queryParameter = qStr.eat("&")) != StringRef()) {
+	while (!(queryParameter = qStr.eat("&")).empty()) {
 		StringRef param = queryParameter.eat("=");
 		StringRef value = queryParameter.eat();
 
@@ -938,9 +937,9 @@ void S3BlobStoreEndpoint::setV4AuthHeaders(std::string const& verb,
 	headers["x-amz-date"] = amzDate;
 	std::vector<std::pair<std::string, std::string>> headersList;
 	headersList.push_back({ "host", trim_copy(headers["Host"]) + "\n" });
-	if (headers.find("Content-Type") != headers.end())
+	if (headers.contains("Content-Type"))
 		headersList.push_back({ "content-type", trim_copy(headers["Content-Type"]) + "\n" });
-	if (headers.find("Content-MD5") != headers.end())
+	if (headers.contains("Content-MD5"))
 		headersList.push_back({ "content-md5", trim_copy(headers["Content-MD5"]) + "\n" });
 	for (const auto& [headerName, headerValue] : headers) {
 		if (StringRef(headerName).startsWith("x-amz"_sr))
@@ -1579,7 +1578,7 @@ TEST_CASE("/backup/s3/virtual_hosting_list_resource_path") {
 
 	// In virtual hosting mode, constructResourcePath returns "" for empty object
 	std::string listResource = s3->constructResourcePath("test-bucket", "");
-	ASSERT(listResource == ""); // Virtual hosting mode doesn't include bucket in path
+	ASSERT(listResource.empty()); // Virtual hosting mode doesn't include bucket in path
 
 	// listObjectsStream_impl should add "/" before query string to form valid HTTP request
 	// Expected: GET /bulkload/path?list-type=2&... (but we can't test the full actor here)
@@ -1633,7 +1632,7 @@ TEST_CASE("/backup/s3/constructResourcePath") {
 	// Virtual hosting mode doesn't include bucket in path
 	ASSERT(s3->constructResourcePath("test-bucket", "normal/file.txt") == "/normal/file.txt");
 	ASSERT(s3->constructResourcePath("test-bucket", "/leading/slash.txt") == "/leading/slash.txt");
-	ASSERT(s3->constructResourcePath("test-bucket", "") == "");
+	ASSERT(s3->constructResourcePath("test-bucket", "").empty());
 
 	return Void();
 }
@@ -1663,39 +1662,39 @@ TEST_CASE("/backup/s3/parseErrorCodeFromS3") {
 	// Missing <Code> node — should return ""
 	{
 		std::string xml = "<Error><Message>Something went wrong</Message></Error>";
-		ASSERT(parseErrorCodeFromS3(xml) == "");
+		ASSERT(parseErrorCodeFromS3(xml).empty());
 	}
 
 	// No <Error> root — should return ""
 	{
 		std::string xml = "<ListBucketResult><Name>bucket</Name></ListBucketResult>";
-		ASSERT(parseErrorCodeFromS3(xml) == "");
+		ASSERT(parseErrorCodeFromS3(xml).empty());
 	}
 
 	// Empty response — should return ""
 	{
-		ASSERT(parseErrorCodeFromS3("") == "");
+		ASSERT(parseErrorCodeFromS3("").empty());
 	}
 
 	// HTML error page from load balancer (502/503) — should return "", not throw
 	{
 		std::string html = "<html><body><h1>502 Bad Gateway</h1></body></html>";
-		ASSERT(parseErrorCodeFromS3(html) == "");
+		ASSERT(parseErrorCodeFromS3(html).empty());
 	}
 
 	// Completely invalid / garbage — should return "", not throw
 	{
-		ASSERT(parseErrorCodeFromS3("not xml at all {{{") == "");
+		ASSERT(parseErrorCodeFromS3("not xml at all {{{").empty());
 	}
 
 	// Partial XML — should return "", not throw
 	{
-		ASSERT(parseErrorCodeFromS3("<Error><Code>Incomple") == "");
+		ASSERT(parseErrorCodeFromS3("<Error><Code>Incomple").empty());
 	}
 
 	// Plain text error — should return "", not throw
 	{
-		ASSERT(parseErrorCodeFromS3("Internal Server Error") == "");
+		ASSERT(parseErrorCodeFromS3("Internal Server Error").empty());
 	}
 
 	return Void();

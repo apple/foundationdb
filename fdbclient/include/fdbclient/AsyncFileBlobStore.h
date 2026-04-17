@@ -52,7 +52,7 @@ public:
 	void addref() override { ReferenceCounted<AsyncFileBlobStoreWrite>::addref(); }
 	void delref() override { ReferenceCounted<AsyncFileBlobStoreWrite>::delref(); }
 
-	virtual StringRef getClassName() override { return "AsyncFileBlobStoreWrite"_sr; }
+	StringRef getClassName() override { return "AsyncFileBlobStoreWrite"_sr; }
 
 	struct Part : ReferenceCounted<Part> {
 		Part(int n, int minSize, bool useSHA256)
@@ -290,7 +290,7 @@ public:
 	void addref() override { ReferenceCounted<AsyncFileBlobStoreRead>::addref(); }
 	void delref() override { ReferenceCounted<AsyncFileBlobStoreRead>::delref(); }
 
-	virtual StringRef getClassName() override { return "AsyncFileBlobStoreRead"_sr; }
+	StringRef getClassName() override { return "AsyncFileBlobStoreRead"_sr; }
 
 	Future<int> read(void* data, int length, int64_t offset) override;
 
@@ -312,7 +312,7 @@ public:
 
 	std::string getFilename() const override { return m_object; }
 
-	~AsyncFileBlobStoreRead() override {}
+	~AsyncFileBlobStoreRead() override = default;
 
 	Reference<IBlobStoreEndpoint> m_bstore;
 	std::string m_bucket;

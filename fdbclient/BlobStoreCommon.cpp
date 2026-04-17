@@ -573,7 +573,7 @@ Future<Void> deleteRecursively_impl(Reference<IBlobStoreEndpoint> b,
 			throw;
 	}
 
-	while (deleteFutures.size() > 0) {
+	while (!deleteFutures.empty()) {
 		co_await deleteFutures.front();
 		deleteFutures.pop_front();
 	}
@@ -862,7 +862,7 @@ Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<IBlobStoreEnd
 
 		// If err is not present then r is valid. If r->code is in successCodes then record the successful request and
 		// return r.
-		if (!err.present() && successCodes.count(r->code) != 0) {
+		if (!err.present() && successCodes.contains(r->code)) {
 			bstore->s_stats.requests_successful++;
 			++bstore->blobStats->requestsSuccessful;
 			co_return r;

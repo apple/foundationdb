@@ -221,7 +221,7 @@ public:
 	struct ConnectionPoolData : NonCopyable, ReferenceCounted<ConnectionPoolData> {
 		std::queue<ReusableConnection> pool;
 
-		ConnectionPoolData() {}
+		ConnectionPoolData() = default;
 
 		// Destructor implementation in BlobStoreCommon.cpp
 		// In simulation, explicitly closes all pooled connections before destruction
@@ -245,8 +245,8 @@ public:
 		PartInfo(std::string e, std::string c = "") : etag(e), checksum(c) {}
 	};
 
-	typedef std::map<std::string, std::string> ParametersT;
-	typedef std::map<int, PartInfo> MultiPartSetT;
+	using ParametersT = std::map<std::string, std::string>;
+	using MultiPartSetT = std::map<int, PartInfo>;
 
 	// Global connection pool for multiple blobstore endpoints with same connection settings and request destination.
 	// NOTE: This is disabled by default (BLOBSTORE_GLOBAL_CONNECTION_POOL=false), so each endpoint gets its own pool
@@ -305,7 +305,7 @@ protected:
 	}
 
 public:
-	virtual ~IBlobStoreEndpoint() {}
+	virtual ~IBlobStoreEndpoint() = default;
 	virtual void addref() = 0;
 	virtual void delref() = 0;
 
