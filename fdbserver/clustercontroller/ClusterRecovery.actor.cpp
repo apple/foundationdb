@@ -1032,7 +1032,7 @@ Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	}
 
 	RecruitFromConfigurationRequest recruitReq(self->configuration, self->lastEpochEnd == 0, maxLogRouters);
-	Reference<RecruitWorkersInfo> recruitWorkersInfo = makeReference<RecruitWorkersInfo>(recruitReq);
+	auto recruitWorkersInfo = makeReference<RecruitWorkersInfo>(recruitReq);
 	recruitWorkersInfo->dbgId = self->dbgid;
 	co_await clusterRecruitFromConfiguration(self->controllerData, recruitWorkersInfo);
 	RecruitFromConfigurationReply recruits = recruitWorkersInfo->rep;
@@ -1335,8 +1335,9 @@ Future<Void> sendInitialCommitToResolvers(Reference<ClusterRecoveryData> self) {
 
 Future<Void> triggerUpdates(Reference<ClusterRecoveryData> self, Reference<ILogSystem> oldLogSystem) {
 	while (true) {
-		co_await (oldLogSystem->onLogSystemConfigChange() || self->cstate.fullyRecovered.getFuture() ||
-		          self->recruitmentStalled->onChange());
+		co_await race(oldLogSystem->onLogSystemConfigChange(),
+		              self->cstate.fullyRecovered.getFuture(),
+		              self->recruitmentStalled->onChange());
 		if (self->cstate.fullyRecovered.isSet())
 			co_return;
 

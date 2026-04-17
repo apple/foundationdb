@@ -52,7 +52,7 @@
 #include "fdbserver/core/OTELSpanContextMessage.h"
 #include "ReadLatencySamples.h"
 #include "fdbserver/core/RecoveryState.h"
-#include "fdbserver/core/RocksDBCheckpointUtils.actor.h"
+#include "fdbserver/core/RocksDBCheckpointUtils.h"
 #include "fdbserver/core/ServerCheckpoint.h"
 #include "fdbserver/core/SpanContextMessage.h"
 #include "fdbserver/storageserver/StorageCorruptionBug.h"
