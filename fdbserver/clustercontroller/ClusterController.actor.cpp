@@ -145,23 +145,6 @@ void ClusterControllerData::updateClusterHealthMonitorInputs() {
 	clusterHealthWorkerEventProvider->setTLogs(db.serverInfo->get().logSystemConfig.allPresentLogs());
 }
 
-Future<Optional<Value>> getPreviousCoordinators(ClusterControllerData* self) {
-	ReadYourWritesTransaction tr(self->db.db);
-	Error err;
-	while (true) {
-		try {
-			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			Optional<Value> previousCoordinators = co_await tr.get(previousCoordinatorsKey);
-			co_return previousCoordinators;
-		} catch (Error& e) {
-			err = e;
-		}
-		co_await tr.onError(err);
-	}
-}
-
 bool ClusterControllerData::processesInSameDC(const NetworkAddress& addr1, const NetworkAddress& addr2) const {
 	return this->addr_locality.contains(addr1) && this->addr_locality.contains(addr2) &&
 	       this->addr_locality.at(addr1).dcId().present() && this->addr_locality.at(addr2).dcId().present() &&
