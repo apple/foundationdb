@@ -29,7 +29,7 @@
 struct StatusWorkload : TestWorkload {
 	static constexpr auto NAME = "Status";
 
-	double testDuration, requestsPerSecond, maxStatusLatency;
+	double testDuration, requestsPerSecond, maxAcceptableStatusLatency;
 	bool enableLatencyBands;
 
 	Future<Void> latencyBandActor;
@@ -43,7 +43,7 @@ struct StatusWorkload : TestWorkload {
 	    errors("Status Errors"), totalSize("Status reply size sum") {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		requestsPerSecond = getOption(options, "requestsPerSecond"_sr, 0.5);
-		maxStatusLatency = getOption(options, "maxStatusLatency"_sr, 0.0);
+		maxAcceptableStatusLatency = getOption(options, "maxStatusLatency"_sr, 0.0);
 		enableLatencyBands = getOption(options, "enableLatencyBands"_sr, deterministicRandom()->random01() < 0.5);
 		auto statusSchemaStr = getOption(options, "schema"_sr, JSONSchemas::statusSchema);
 		if (!statusSchemaStr.empty()) {
@@ -71,10 +71,10 @@ struct StatusWorkload : TestWorkload {
 	Future<bool> check(Database const& cx) override {
 		if (errors.getValue() != 0)
 			return false;
-		if (maxStatusLatency > 0 && worstLatency > maxStatusLatency) {
+		if (maxAcceptableStatusLatency > 0 && worstLatency > maxAcceptableStatusLatency) {
 			TraceEvent(SevError, "StatusLatencyExceeded")
 			    .detail("WorstLatency", worstLatency)
-			    .detail("MaxAllowed", maxStatusLatency);
+			    .detail("MaxAcceptable", maxAcceptableStatusLatency);
 			return false;
 		}
 		return true;

@@ -3002,7 +3002,6 @@ ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject& statusObj,
 		}
 
 		statusObj["idempotency_ids"] = idmpKeyStatus;
-
 		statusObj["version_epoch"] = versionEpochStatus;
 
 		// machine metrics
@@ -3826,7 +3825,7 @@ TEST_CASE("/status/json/merging") {
 
 // Test that clusterGetStatus returns partial results within the specified deadline
 // even when the database is unavailable and transactions hang forever.
-TEST_CASE("/fdbserver/clustercontroller/clusterGetStatusDeadline") {
+TEST_CASE("/fdbserver/clustercontroller/clusterGetStatusTimeout") {
 	// Create mock ServerDBInfo with fake interfaces that will never respond
 	NetworkAddress masterAddr(IPAddress(0x01010101), 1);
 	NetworkAddress ccAddr(IPAddress(0x09090909), 1);
@@ -3860,8 +3859,8 @@ TEST_CASE("/fdbserver/clustercontroller/clusterGetStatusDeadline") {
 	// Empty containers for other parameters
 	state std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>> clientStatus;
 
-	// Call clusterGetStatus with a short deadline (1 second) to force the
-	// deadline path to trigger, since internal timeouts take ~13 seconds.
+	// Call clusterGetStatus with a short timeout (1 second) to force the
+	// timeout path to trigger, since internal timeouts take ~13 seconds.
 	state double startTime = now();
 	state Future<StatusReply> statusFuture = clusterGetStatus(db,
 	                                                          cx,
@@ -3875,24 +3874,24 @@ TEST_CASE("/fdbserver/clustercontroller/clusterGetStatusDeadline") {
 	                                                          Version(0),
 	                                                          Version(0),
 	                                                          std::unordered_map<NetworkAddress, double>(),
-	                                                          1.0 /* deadlineTimeout */);
-	state Future<Void> timeout = delay(5.0);
+	                                                          1.0);
+	// Since we set the timeout above to 1 second, 5 seconds should be more than enough to complete the test.
+	// If it takes any longer, then the test case has failed
+	constexpr double MAX_ACCEPTABLE_DELAY = 5.0;
+	state Future<Void> timeout = delay(MAX_ACCEPTABLE_DELAY);
 
 	choose {
 		when(StatusReply reply = wait(statusFuture)) {
 			double elapsed = now() - startTime;
 
-			// Log the full status JSON for inspection
-			TraceEvent("ClusterGetStatusDeadlineTest")
+			TraceEvent("ClusterGetStatusTimeoutTest")
 			    .detail("Elapsed", elapsed)
 			    .detail("StatusSize", reply.statusStr.size())
 			    .detail("StatusJSON", reply.statusStr);
 			fmt::print("=== Status JSON ({:.2f}s) ===\n{}\n=== End Status JSON ===\n", elapsed, reply.statusStr);
 
-			// Verify it returned within the deadline + margin
-			ASSERT_LT(elapsed, 5.0);
+			ASSERT_LT(elapsed, MAX_ACCEPTABLE_DELAY);
 
-			// Parse and inspect the status object
 			json_spirit::mValue mv = readJSONStrictly(reply.statusStr);
 			auto obj = mv.get_obj();
 
@@ -3904,7 +3903,7 @@ TEST_CASE("/fdbserver/clustercontroller/clusterGetStatusDeadline") {
 
 			// Verify the deadline-exceeded message is in messages
 			auto& messagesArr = obj["messages"].get_array();
-			bool foundDeadlineMsg = false;
+			bool foundTimeoutMsg = false;
 			bool foundIncomplete = false;
 			for (auto& msg : messagesArr) {
 				auto& msgObj = msg.get_obj();
@@ -3915,20 +3914,20 @@ TEST_CASE("/fdbserver/clustercontroller/clusterGetStatusDeadline") {
 							auto& reasonObj = reason.get_obj();
 							if (reasonObj.count("description") &&
 							    reasonObj["description"].get_str() == "Status collection deadline exceeded.") {
-								foundDeadlineMsg = true;
+								foundTimeoutMsg = true;
 							}
 						}
 					}
 				}
 			}
 			fmt::print("Found status_incomplete message: {}\n", foundIncomplete);
-			fmt::print("Found deadline exceeded reason: {}\n", foundDeadlineMsg);
+			fmt::print("Found deadline exceeded reason: {}\n", foundTimeoutMsg);
 			ASSERT(foundIncomplete);
-			ASSERT(foundDeadlineMsg);
+			ASSERT(foundTimeoutMsg);
 		}
 		when(wait(timeout)) {
-			TraceEvent(SevError, "ClusterGetStatusDeadlineTestFailed").detail("Elapsed", now() - startTime);
-			ASSERT(false); // clusterGetStatus did not return within 5 seconds
+			TraceEvent(SevError, "ClusterGetStatusTimeoutTestFailed").detail("Elapsed", now() - startTime);
+			ASSERT(false);
 		}
 	}
 
