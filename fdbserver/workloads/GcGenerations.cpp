@@ -156,25 +156,6 @@ struct GcGenerationsWorkload : TestWorkload {
 		}
 	}
 
-	// Reboot the master, but only if it's in the primary DC. If the master is in the
-	// remote DC, wait and retry until a primary DC master is elected.
-	Future<Void> rebootPrimaryMaster(GcGenerationsWorkload* self) {
-		while (true) {
-			co_await self->dbAvailable(self);
-			if (self->isMasterInRemoteDc(self)) {
-				TraceEvent("RebootPrimaryMasterSkipRemote")
-				    .detail("MasterAddr", self->dbInfo->get().master.address());
-				co_await delay(5);
-				continue;
-			}
-			TraceEvent("RebootPrimaryMaster").detail("Master", self->dbInfo->get().master.address());
-			g_simulator->rebootProcess(
-			    g_simulator->getProcessByAddress(self->dbInfo->get().master.address()),
-			    ISimulator::KillType::Reboot);
-			co_return;
-		}
-	}
-
 	Future<Void> generateMultipleTxnGenerations(GcGenerationsWorkload* self, Database cx) {
 		co_await self->clogRemoteDc(self, cx);
 		int generationCount = 0;
@@ -256,8 +237,14 @@ struct GcGenerationsWorkload : TestWorkload {
 		// generations before remoteRecoveredVersion advances past their recoverAt,
 		// and purgeOldRecoveredGenerationsCoreState only purges generations below that.
 		// Retry periodically until oldTLogs is reduced.
+		// Note: the remote DC is unclogged now, so any master (including remote DC)
+		// can coordinate recovery. No need for the primary-DC-only guard here.
 		while (self->dbInfo->get().logSystemConfig.oldTLogs.size() > 1) {
-			co_await self->rebootPrimaryMaster(self);
+			co_await self->dbAvailable(self);
+			auto masterAddr = self->dbInfo->get().master.address();
+			TraceEvent("RebootMasterForGC").detail("Master", masterAddr);
+			g_simulator->rebootProcess(g_simulator->getProcessByAddress(masterAddr),
+			                           ISimulator::KillType::Reboot);
 			// Give this recovery cycle time to GC before retrying.
 			co_await delay(60);
 			co_await self->dbAvailable(self);
