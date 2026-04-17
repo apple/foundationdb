@@ -4,13 +4,17 @@
 
 The monitor is controlled by these server knobs:
 
-- `CLUSTER_HEALTH_METRIC_ENABLE`
-- `CLUSTER_HEALTH_METRIC_POLL_INTERVAL`
-- `CLUSTER_HEALTH_METRIC_STORAGE_INTERVENTION_THRESHOLD`
-- `CLUSTER_HEALTH_METRIC_STORAGE_CRITICAL_THRESHOLD`
-- `CLUSTER_HEALTH_METRIC_TLOG_INTERVENTION_THRESHOLD`
-- `CLUSTER_HEALTH_METRIC_TLOG_CRITICAL_THRESHOLD`
-- `CLUSTER_HEALTH_METRIC_RK_CRITICAL_RELEASED_TPS_RATIO_THRESHOLD`
+| Knob | Default | Meaning |
+| --- | --- | --- |
+| `CLUSTER_HEALTH_METRIC_ENABLE` | `false` | Enables the cluster controller monitor. When disabled, the monitor exits immediately and does not emit `ClusterHealthMetric`. Simulation buggification can set this to `true`. |
+| `CLUSTER_HEALTH_METRIC_POLL_INTERVAL` | `5.0` seconds | Time between monitor evaluations after the first evaluation. |
+| `CLUSTER_HEALTH_METRIC_STORAGE_INTERVENTION_THRESHOLD` | `0.20` | Storage server free-space warning threshold. This is a ratio, not a percentage: `0.20` means 20% free space. |
+| `CLUSTER_HEALTH_METRIC_STORAGE_CRITICAL_THRESHOLD` | `0.10` | Storage server free-space critical threshold. This should be less than or equal to the storage intervention threshold. |
+| `CLUSTER_HEALTH_METRIC_TLOG_INTERVENTION_THRESHOLD` | `0.20` | TLog queue-disk free-space warning threshold. This is a ratio, not a percentage: `0.20` means 20% free space. |
+| `CLUSTER_HEALTH_METRIC_TLOG_CRITICAL_THRESHOLD` | `0.10` | TLog queue-disk free-space critical threshold. This should be less than or equal to the TLog intervention threshold. |
+| `CLUSTER_HEALTH_METRIC_RK_CRITICAL_RELEASED_TPS_RATIO_THRESHOLD` | `1.2` | Ratekeeper critical throttling threshold for `TPSLimit / ReleasedTPS`. With the default, ratekeeper is critical when the current TPS limit is less than 120% of recently released TPS. |
+
+Threshold comparisons are strict: a value equal to a threshold does not trigger that threshold's health level.
 
 ## Health Levels
 
@@ -50,7 +54,7 @@ Fields used:
 Behavior:
 - Computes the minimum `KvstoreBytesAvailable / KvstoreBytesTotal` ratio across storage servers.
 - Returns `CRITICAL_INTERVENTION_REQUIRED` when the ratio is below `CLUSTER_HEALTH_METRIC_STORAGE_CRITICAL_THRESHOLD`.
-- Returns `INTERVENTION_REQUIRED` when the ratio is below `CLUSTER_HEALTH_METRIC_STORAGE_INTERVENTION_THRESHOLD`.
+- Returns `INTERVENTION_REQUIRED` when the ratio is below `CLUSTER_HEALTH_METRIC_STORAGE_INTERVENTION_THRESHOLD` and at or above `CLUSTER_HEALTH_METRIC_STORAGE_CRITICAL_THRESHOLD`.
 - Returns `HEALTHY` otherwise.
 
 ### `TLogSpace`
@@ -65,7 +69,7 @@ Fields used:
 Behavior:
 - Computes the minimum `QueueDiskBytesAvailable / QueueDiskBytesTotal` ratio across tlogs.
 - Returns `CRITICAL_INTERVENTION_REQUIRED` when the ratio is below `CLUSTER_HEALTH_METRIC_TLOG_CRITICAL_THRESHOLD`.
-- Returns `INTERVENTION_REQUIRED` when the ratio is below `CLUSTER_HEALTH_METRIC_TLOG_INTERVENTION_THRESHOLD`.
+- Returns `INTERVENTION_REQUIRED` when the ratio is below `CLUSTER_HEALTH_METRIC_TLOG_INTERVENTION_THRESHOLD` and at or above `CLUSTER_HEALTH_METRIC_TLOG_CRITICAL_THRESHOLD`.
 - Returns `HEALTHY` otherwise.
 
 ### `StorageReplication`
@@ -124,8 +128,15 @@ Fields used:
 Behavior:
 - Returns `OUTAGE` if any `TPSLimit == 0`.
 - Computes the minimum `TPSLimit / ReleasedTPS` ratio across samples with nonzero `ReleasedTPS`.
-- Returns `CRITICAL_INTERVENTION_REQUIRED` when that ratio is below `CLUSTER_HEALTH_METRIC_RK_CRITICAL_RELEASED_TPS_RATIO_THRESHOLD`.
-- Returns `HEALTHY` otherwise.
+- Ignores samples with `ReleasedTPS == 0` for the ratio calculation to avoid dividing by zero.
+- Returns `CRITICAL_INTERVENTION_REQUIRED` when the minimum ratio is below `CLUSTER_HEALTH_METRIC_RK_CRITICAL_RELEASED_TPS_RATIO_THRESHOLD`.
+- Returns `HEALTHY` otherwise, including the case where every non-outage sample has `ReleasedTPS == 0`.
+
+For `CLUSTER_HEALTH_METRIC_RK_CRITICAL_RELEASED_TPS_RATIO_THRESHOLD`, lower ratios are worse:
+
+- `TPSLimit / ReleasedTPS == 2.0` means ratekeeper is allowing twice the recently released transaction rate, so this factor is healthy with the default threshold.
+- `TPSLimit / ReleasedTPS == 1.0` means ratekeeper's current limit is equal to the recently released transaction rate, so this factor is critical with the default threshold of `1.2`.
+- `TPSLimit / ReleasedTPS < 1.0` means ratekeeper's current limit is below the recently released transaction rate, which is also critical.
 
 ## Missing Metrics Semantics
 
