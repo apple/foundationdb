@@ -20,7 +20,7 @@
 
 #pragma once
 
-#include "fdbclient/ConsistencyScanInterface.actor.h"
+#include "fdbclient/ConsistencyScanInterface.h"
 #include "flow/flow.h"
 
 struct ServerDBInfo;

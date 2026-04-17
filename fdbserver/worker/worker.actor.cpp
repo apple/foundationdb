@@ -44,25 +44,25 @@
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/SystemMonitor.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/TDMetric.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "MetricLogger.actor.h"
 #include "fdbserver/backupworker/BackupWorker.h"
 #include "fdbserver/clustercontroller/ClusterController.h"
-#include "fdbserver/commitproxy/CommitProxyServer.actor.h"
+#include "fdbserver/commitproxy/CommitProxyServer.h"
 #include "fdbserver/consistencyscan/ConsistencyScan.h"
 #include "fdbserver/datadistributor/DataDistributor.h"
 #include "fdbserver/grvproxy/GrvProxyServer.h"
 #include "fdbserver/logrouter/LogRouter.h"
 #include "fdbserver/core/BackupInterface.h"
-#include "RoleLineage.actor.h"
+#include "RoleLineage.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/worker/Worker.h"
 #include "fdbserver/kvstore/IKeyValueStore.h"
 #include "fdbserver/ratekeeper/Ratekeeper.h"
-#include "fdbserver/resolver/Resolver.actor.h"
-#include "fdbserver/sequencer/MasterServer.actor.h"
+#include "fdbserver/resolver/Resolver.h"
+#include "fdbserver/sequencer/MasterServer.h"
 #include "fdbserver/storageserver/StorageServer.actor.h"
 #include "fdbserver/tlog/TLogServer.actor.h"
 #include "fdbserver/core/WaitFailure.h"
@@ -2754,7 +2754,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				startRole(Role::COMMIT_PROXY, recruited.id(), interf.id(), details);
 
 				DUMPTOKEN(recruited.commit);
-				DUMPTOKEN(recruited.getConsistentReadVersion);
 				DUMPTOKEN(recruited.getKeyServersLocations);
 				DUMPTOKEN(recruited.getStorageServerRejoinInfo);
 				DUMPTOKEN(recruited.waitFailure);
@@ -3500,7 +3499,7 @@ Future<UID> createAndLockProcessIdFile(std::string folder) {
 
 				int64_t fileSize = co_await lockFile.get()->size();
 				Key fileData = makeString(fileSize);
-				co_await success(lockFile.get()->read(mutateString(fileData), fileSize, 0));
+				co_await lockFile.get()->read(mutateString(fileData), fileSize, 0);
 				bool deleteCorruptProcessIdFile = false;
 				try {
 					processIDUid = BinaryReader::fromStringRef<UID>(fileData, IncludeVersion());
@@ -3562,11 +3561,10 @@ Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGeneration(
 
 		ErrorOr<Optional<LeaderInfo>> leader;
 		if (usingHostname) {
-			co_await store(
-			    leader,
-			    tryGetReplyFromHostname(request, interf.hostname.get(), WLTOKEN_LEADERELECTIONREG_ELECTIONRESULT));
+			leader = co_await tryGetReplyFromHostname(
+			    request, interf.hostname.get(), WLTOKEN_LEADERELECTIONREG_ELECTIONRESULT);
 		} else {
-			co_await store(leader, interf.electionResult.tryGetReply(request));
+			leader = co_await interf.electionResult.tryGetReply(request);
 		}
 
 		if (leader.present()) {

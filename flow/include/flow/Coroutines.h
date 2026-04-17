@@ -57,6 +57,12 @@ class AsyncResult;
 
 namespace coro {
 template <class T>
+struct FutureIgnore;
+
+template <class SourceValue, class ResultValue = std::conditional_t<std::is_void_v<SourceValue>, Void, SourceValue>>
+struct FutureErrorOr;
+
+template <class T>
 struct AsyncResultState;
 
 template <class T>
@@ -73,6 +79,51 @@ struct AsyncResultAwaiter;
 
 template <class Parent, int Idx, class ValueType>
 struct ActorAsyncResultCallback;
+
+template <class ValueType>
+struct QuorumAsyncResultCallback;
+
+template <class ValueType>
+struct GetAllAsyncResultCallback;
+
+template <class PromiseType, class ValueType>
+struct AwaitableFutureIgnore;
+
+template <class PromiseType, class SourceValue, class ResultValue>
+struct AwaitableFutureErrorOr;
+} // namespace coro
+
+namespace coro {
+
+template <class T>
+struct FutureIgnore {
+	// Wrap a Future<T> so coroutine await_transform can resume on completion
+	// without materializing the T payload at the await site.
+	Future<T> future;
+};
+
+template <class T>
+FutureIgnore<T> ignore(Future<T> future) {
+	return FutureIgnore<T>{ std::move(future) };
+}
+
+template <class SourceValue, class ResultValue>
+struct FutureErrorOr {
+	// Reuse Future<T> storage but request a non-throwing await_resume() that
+	// converts completion into ErrorOr<ResultValue>.
+	Future<std::conditional_t<std::is_void_v<SourceValue>, Void, SourceValue>> future;
+};
+
+template <class T>
+FutureErrorOr<T> errorOr(Future<T> future) {
+	return FutureErrorOr<T>{ std::move(future) };
+}
+
+template <class T>
+FutureErrorOr<T, Void> errorOr(FutureIgnore<T> future) {
+	return FutureErrorOr<T, Void>{ std::move(future.future) };
+}
+
 } // namespace coro
 
 // Move-only coroutine result that transfers ownership through co_await.
@@ -81,24 +132,25 @@ struct ActorAsyncResultCallback;
 template <class T>
 class SWIFT_SENDABLE AsyncResult {
 public:
+	static_assert(!std::is_void_v<T>, "Use AsyncResult<Void> instead of AsyncResult<void>");
 	using Element = T;
-	using StoredT = std::conditional_t<std::is_void_v<T>, Void, T>;
+	using StoredT = T;
 
-	AsyncResult() noexcept : state(nullptr) {}
+	AsyncResult() noexcept : resultState(nullptr) {}
 	AsyncResult(AsyncResult const&) = delete;
 	AsyncResult& operator=(AsyncResult const&) = delete;
-	AsyncResult(AsyncResult&& rhs) noexcept : state(rhs.state) { rhs.state = nullptr; }
+	AsyncResult(AsyncResult&& rhs) noexcept : resultState(rhs.resultState) { rhs.resultState = nullptr; }
 	AsyncResult& operator=(AsyncResult&& rhs) noexcept {
 		if (this != &rhs) {
 			release();
-			state = rhs.state;
-			rhs.state = nullptr;
+			resultState = rhs.resultState;
+			rhs.resultState = nullptr;
 		}
 		return *this;
 	}
 	~AsyncResult() { release(); }
 
-	bool isValid() const { return state != nullptr; }
+	bool isValid() const { return resultState != nullptr; }
 	bool isReady() const;
 	bool isError() const;
 	bool canGet() const;
@@ -106,24 +158,19 @@ public:
 	void cancel() const;
 	void addCallbackAndClear(coro::AsyncResultCallback<StoredT>* cb) &&;
 
-	T const& get() const&
-	    requires(!std::is_void_v<T>);
-	T get() && requires(!std::is_void_v<T>);
-	T getValue() const&
-	    requires(!std::is_void_v<T>)
-	{
-		return get();
-	}
-	T getValue() && requires(!std::is_void_v<T>) { return std::move(*this).get(); }
+	T const& get() const&;
+	T get() &&;
+	T getValue() const& { return get(); }
+	T getValue() && { return std::move(*this).get(); }
 
-	    auto operator co_await() &;
+	auto operator co_await() &;
 	auto operator co_await() &&;
 
 private:
-	explicit AsyncResult(coro::AsyncResultState<StoredT>* state) noexcept : state(state) {}
+	explicit AsyncResult(coro::AsyncResultState<StoredT>* resultState) noexcept : resultState(resultState) {}
 	void release();
 
-	coro::AsyncResultState<StoredT>* state;
+	coro::AsyncResultState<StoredT>* resultState;
 
 	template <class U, bool IsCancellable, bool ReturnsExplicitVoid>
 	friend struct coro::AsyncResultPromise;
@@ -133,6 +180,10 @@ private:
 	friend struct coro::AsyncResultAwaiter;
 	template <class Parent, int Idx, class ValueType>
 	friend struct coro::ActorAsyncResultCallback;
+	template <class ValueType>
+	friend struct coro::QuorumAsyncResultCallback;
+	template <class ValueType>
+	friend struct coro::GetAllAsyncResultCallback;
 };
 
 #include "flow/CoroutinesImpl.h"
@@ -270,56 +321,53 @@ struct [[maybe_unused]] n_coroutine::coroutine_traits<AsyncGenerator<ReturnValue
 
 template <class T>
 bool AsyncResult<T>::isReady() const {
-	return state && state->isReady();
+	return resultState && resultState->isReady();
 }
 
 template <class T>
 bool AsyncResult<T>::isError() const {
-	return state && state->isError();
+	return resultState && resultState->isError();
 }
 
 template <class T>
 bool AsyncResult<T>::canGet() const {
-	return state && state->canGet();
+	return resultState && resultState->canGet();
 }
 
 template <class T>
 Error& AsyncResult<T>::getError() const {
-	ASSERT(state);
-	return state->getError();
+	ASSERT(resultState);
+	return resultState->getError();
 }
 
 template <class T>
 void AsyncResult<T>::cancel() const {
-	if (state) {
-		state->cancelProducer();
+	if (resultState) {
+		resultState->cancelProducer();
 	}
 }
 
 template <class T>
 void AsyncResult<T>::addCallbackAndClear(coro::AsyncResultCallback<StoredT>* cb) && {
-	ASSERT(state);
-	state->registerCallback(cb);
-	state = nullptr;
+	ASSERT(resultState);
+	resultState->registerCallback(cb);
+	resultState = nullptr;
 }
 
 template <class T>
-T const& AsyncResult<T>::get() const&
-    requires(!std::is_void_v<T>)
-{
-	ASSERT(state);
-	return state->get();
+T const& AsyncResult<T>::get() const& {
+	ASSERT(resultState);
+	return resultState->get();
 }
 
 template <class T>
-    T AsyncResult<T>::get() &&
-    requires(!std::is_void_v<T>) {
-	    ASSERT(state);
-	    return state->take();
-    }
+T AsyncResult<T>::get() && {
+	ASSERT(resultState);
+	return resultState->take();
+}
 
-    template <class T>
-    auto AsyncResult<T>::operator co_await() & {
+template <class T>
+auto AsyncResult<T>::operator co_await() & {
 	return coro::AsyncResultAwaiter<T>{ std::move(*this) };
 }
 
@@ -330,12 +378,12 @@ auto AsyncResult<T>::operator co_await() && {
 
 template <class T>
 void AsyncResult<T>::release() {
-	if (state) {
-		if (!state->isReady()) {
-			state->cancelProducer();
+	if (resultState) {
+		if (!resultState->isReady()) {
+			resultState->cancelProducer();
 		}
-		state->delRef();
-		state = nullptr;
+		resultState->delRef();
+		resultState = nullptr;
 	}
 }
 

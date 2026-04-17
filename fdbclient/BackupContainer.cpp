@@ -23,7 +23,6 @@
 
 // FIXME: Trim this down
 #include "fmt/format.h"
-#include "flow/Platform.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/FDBTypes.h"

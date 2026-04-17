@@ -37,7 +37,7 @@
 #include "ClusterRecovery.actor.h"
 #include "fdbserver/core/CoordinationInterface.h"
 #include "fdbserver/datadistributor/DataDistribution.h"
-#include "fdbclient/ConsistencyScanInterface.actor.h"
+#include "fdbclient/ConsistencyScanInterface.h"
 #include "flow/UnitTest.h"
 #include "fdbserver/core/QuietDatabase.h"
 #include "fdbserver/core/RatekeeperLimitReasons.h"
@@ -2552,6 +2552,10 @@ static std::string getIssueDescription(std::string name) {
 		return "Cluster file contents do not match current cluster connection string. Verify the cluster file and "
 		       "its "
 		       "parent directory are writable and that the cluster file has not been overwritten externally.";
+	}
+	if (name == "exclude_from_tlog_recruitment_low_disk") {
+		return "Process is temporarily excluded from TLog recruitment because its available disk space is below the "
+		       "minimum TLog threshold.";
 	}
 
 	// FIXME: name and description will be the same unless the message is 'incorrect_cluster_file_contents', which

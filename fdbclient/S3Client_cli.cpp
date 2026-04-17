@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbclient/ClientKnobCollection.h"
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
@@ -40,7 +39,6 @@
 #include "fdbclient/BackupContainerFileSystem.h"
 #import "fdbclient/BackupTLSConfig.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/IKnobCollection.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/S3Client.h"
@@ -187,10 +185,10 @@ struct Params : public ReferenceCounted<Params> {
 		if (!blobstore_enable_object_integrity_check_set) {
 			knobs.push_back(std::pair(blobstore_enable_object_integrity_check, "true"));
 		}
-		IKnobCollection::setupKnobs(knobs);
+		setupClientKnobs(knobs);
 
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		IKnobCollection::getMutableGlobalKnobCollection().initialize(Randomize::False, IsSimulated::False);
+		initializeClientKnobs(Randomize::False, IsSimulated::False);
 	}
 };
 

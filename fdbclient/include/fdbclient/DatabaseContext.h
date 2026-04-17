@@ -40,7 +40,7 @@
 #include "fdbclient/VersionVector.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/MultiInterface.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/TDMetric.h"
 #include "fdbclient/EventTypes.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/DDSketch.h"
