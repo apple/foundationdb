@@ -131,9 +131,28 @@ struct GcGenerationsWorkload : TestWorkload {
 		    .detail("CloggedRemoteProcess", describe(remoteIps));
 	}
 
+	bool isMasterInRemoteDc(GcGenerationsWorkload* self) {
+		auto masterAddr = self->dbInfo->get().master.address();
+		auto* masterProc = g_simulator->getProcessByAddress(masterAddr);
+		return !masterProc || !masterProc->locality.dcId().present() ||
+		       masterProc->locality.dcId() == g_simulator->remoteDcId;
+	}
+
+	// Wait for the DB to reach ACCEPTING_COMMITS. If the master is in the clogged
+	// remote DC, reboot it to force the CC to elect a primary DC master — otherwise
+	// recovery can never complete and we'd block forever.
 	Future<Void> dbAvailable(GcGenerationsWorkload* self) {
 		while (self->dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 			co_await self->dbInfo->onChange();
+			if (self->dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS &&
+			    self->isMasterInRemoteDc(self)) {
+				auto masterAddr = self->dbInfo->get().master.address();
+				auto* masterProc = g_simulator->getProcessByAddress(masterAddr);
+				TraceEvent("DbAvailableRebootRemoteMaster").detail("MasterAddr", masterAddr);
+				if (masterProc) {
+					g_simulator->rebootProcess(masterProc, ISimulator::KillType::Reboot);
+				}
+			}
 		}
 	}
 
@@ -142,16 +161,16 @@ struct GcGenerationsWorkload : TestWorkload {
 	Future<Void> rebootPrimaryMaster(GcGenerationsWorkload* self) {
 		while (true) {
 			co_await self->dbAvailable(self);
-			auto masterAddr = self->dbInfo->get().master.address();
-			auto* masterProc = g_simulator->getProcessByAddress(masterAddr);
-			if (!masterProc || !masterProc->locality.dcId().present() ||
-			    masterProc->locality.dcId() == g_simulator->remoteDcId) {
-				TraceEvent("RebootPrimaryMasterSkipRemote").detail("MasterAddr", masterAddr);
+			if (self->isMasterInRemoteDc(self)) {
+				TraceEvent("RebootPrimaryMasterSkipRemote")
+				    .detail("MasterAddr", self->dbInfo->get().master.address());
 				co_await delay(5);
 				continue;
 			}
-			TraceEvent("RebootPrimaryMaster").detail("Master", masterAddr);
-			g_simulator->rebootProcess(masterProc, ISimulator::KillType::Reboot);
+			TraceEvent("RebootPrimaryMaster").detail("Master", self->dbInfo->get().master.address());
+			g_simulator->rebootProcess(
+			    g_simulator->getProcessByAddress(self->dbInfo->get().master.address()),
+			    ISimulator::KillType::Reboot);
 			co_return;
 		}
 	}
@@ -177,18 +196,17 @@ struct GcGenerationsWorkload : TestWorkload {
 			// Only reboot the master if it's in the primary DC. If it's in the clogged
 			// remote DC, recovery will stall because the master can't communicate with
 			// primary DC processes. Loop back and try again.
-			auto masterAddr = self->dbInfo->get().master.address();
-			auto* masterProc = g_simulator->getProcessByAddress(masterAddr);
-			if (!masterProc || !masterProc->locality.dcId().present() ||
-			    masterProc->locality.dcId() == g_simulator->remoteDcId) {
+			if (self->isMasterInRemoteDc(self)) {
 				TraceEvent("RetryingRemoteDcMaster")
 				    .detail("Iteration", successfulReboots)
-				    .detail("MasterAddr", masterAddr);
+				    .detail("MasterAddr", self->dbInfo->get().master.address());
 				continue;
 			}
 
+			auto masterAddr = self->dbInfo->get().master.address();
 			TraceEvent("RebootingPrimaryDcMaster").detail("Iteration", successfulReboots).detail("Master", masterAddr);
-			g_simulator->rebootProcess(masterProc, ISimulator::KillType::Reboot);
+			g_simulator->rebootProcess(g_simulator->getProcessByAddress(masterAddr),
+			                           ISimulator::KillType::Reboot);
 
 			// Wait for recovery to create a new generation.
 			while (self->dbInfo->get().logSystemConfig.oldTLogs.size() == generationCount ||
