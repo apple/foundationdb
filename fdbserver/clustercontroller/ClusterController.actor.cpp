@@ -1667,7 +1667,9 @@ Future<Void> statusServer(FutureStream<StatusRequest> requests,
 			                                                                self->dcLogServerVersionDifference,
 			                                                                self->dcStorageServerVersionDifference,
 			                                                                self->excludedDegradedServers,
-			                                                                SERVER_KNOBS->STATUS_TIMEOUT - 2.0));
+			                                                                std::max(CLIENT_KNOBS->STATUS_TIMEOUT -
+			                                                                             SERVER_KNOBS->STATUS_TIMEOUT_BUFFER,
+			                                                                         SERVER_KNOBS->STATUS_TIMEOUT_BUFFER)));
 
 			if (result.isError() && result.getError().code() == error_code_actor_cancelled)
 				throw result.getError();
