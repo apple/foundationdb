@@ -1165,27 +1165,6 @@ private:
 		}
 	}
 
-	ACTOR static void verifyCommit(DiskQueue* self,
-	                               Future<Void> commitSynced,
-	                               StringBuffer* buffer,
-	                               loc_t start,
-	                               loc_t end) {
-		state TrackMe trackme(self);
-		try {
-			wait(commitSynced);
-			Standalone<StringRef> pagedData = wait(readPages(self, start, end));
-			const int startOffset = start % _PAGE_SIZE;
-			const int dataLen = end - start;
-			ASSERT(pagedData.substr(startOffset, dataLen).compare(buffer->get().substr(0, dataLen)) == 0);
-		} catch (Error& e) {
-			if (e.code() != error_code_io_error) {
-				delete buffer;
-				throw;
-			}
-		}
-		delete buffer;
-	}
-
 	// Read pages from [start, end) bytes
 	ACTOR static Future<Standalone<StringRef>> readPages(DiskQueue* self, location start, location end) {
 		state TrackMe trackme(self);

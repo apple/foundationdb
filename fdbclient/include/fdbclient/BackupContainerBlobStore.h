@@ -1,5 +1,5 @@
 /*
- * BackupContainerS3BlobStore.h
+ * BackupContainerBlobStore.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,16 +18,16 @@
  * limitations under the License.
  */
 
-#ifndef FDBCLIENT_BACKUP_CONTAINER_S3_BLOBSTORE_H
-#define FDBCLIENT_BACKUP_CONTAINER_S3_BLOBSTORE_H
+#ifndef FDBCLIENT_BACKUP_CONTAINER_BLOBSTORE_H
+#define FDBCLIENT_BACKUP_CONTAINER_BLOBSTORE_H
 #pragma once
 
-#include "fdbclient/AsyncFileS3BlobStore.h"
+#include "fdbclient/AsyncFileBlobStore.h"
 #include "fdbclient/BackupContainerFileSystem.h"
+#include "fdbclient/IBlobStore.h"
 
-class BackupContainerS3BlobStore final : public BackupContainerFileSystem,
-                                         ReferenceCounted<BackupContainerS3BlobStore> {
-	Reference<S3BlobStoreEndpoint> m_bstore;
+class BackupContainerBlobStore final : public BackupContainerFileSystem, ReferenceCounted<BackupContainerBlobStore> {
+	Reference<IBlobStoreEndpoint> m_bstore;
 	std::string m_name;
 
 	// All backup data goes into a single bucket
@@ -41,23 +41,25 @@ class BackupContainerS3BlobStore final : public BackupContainerFileSystem,
 	// Get the path of the backups's index entry
 	std::string indexEntry();
 
-	friend class BackupContainerS3BlobStoreImpl;
+	friend class BackupContainerBlobStoreImpl;
 
 public:
-	BackupContainerS3BlobStore(Reference<S3BlobStoreEndpoint> bstore,
-	                           const std::string& name,
-	                           const S3BlobStoreEndpoint::ParametersT& params,
-	                           const Optional<std::string>& encryptionKeyFileName,
-	                           bool isBackup);
+	BackupContainerBlobStore(Reference<IBlobStoreEndpoint> bstore,
+	                         const std::string& name,
+	                         const IBlobStoreEndpoint::ParametersT& params,
+	                         const Optional<std::string>& encryptionKeyFileName,
+	                         bool isBackup);
 
 	void addref() override;
 	void delref() override;
 
-	static std::string getURLFormat();
+	static std::string getURLFormat(bool withResource = true);
+
+	static void validateBackupUrl(const std::string& resource);
 
 	Future<Reference<IAsyncFile>> readFile(const std::string& path) final;
 
-	static Future<std::vector<std::string>> listURLs(Reference<S3BlobStoreEndpoint> bstore, const std::string& bucket);
+	static Future<std::vector<std::string>> listURLs(Reference<IBlobStoreEndpoint> bstore, const std::string& bucket);
 
 	Future<Reference<IBackupFile>> writeFile(const std::string& path) final;
 

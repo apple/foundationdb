@@ -21,119 +21,15 @@
 #pragma once
 
 #include <map>
-#include <unordered_map>
 #include <functional>
-#include <string>
-#include "flow/IRandom.h"
-#include "flow/flow.h"
 #include "flow/Net2Packet.h"
-#include "fdbclient/Knobs.h"
-#include "flow/IRateControl.h"
+#include "fdbclient/IBlobStore.h"
 #include "fdbrpc/HTTP.h"
-#include "fdbrpc/Stats.h"
-#include "fdbclient/JSONDoc.h"
-#include "flow/IConnection.h"
 
-#include <boost/functional/hash.hpp>
-
-// unique key that identifies interchangeable connections for the same settings and destination
-// FIXME: can we define std::hash as a struct member of a S3BlobStoreEndpoint?
-struct BlobStoreConnectionPoolKey {
-	std::string host;
-	std::string service;
-	std::string region;
-	bool isTLS;
-
-	BlobStoreConnectionPoolKey(const std::string& host,
-	                           const std::string& service,
-	                           const std::string& region,
-	                           bool isTLS)
-	  : host(host), service(service), region(region), isTLS(isTLS) {}
-
-	bool operator==(const BlobStoreConnectionPoolKey& other) const {
-		return isTLS == other.isTLS && host == other.host && service == other.service && region == other.region;
-	}
-};
-
-namespace std {
-template <>
-struct hash<BlobStoreConnectionPoolKey> {
-	std::size_t operator()(const BlobStoreConnectionPoolKey& key) const {
-		std::size_t seed = 0;
-		boost::hash_combine(seed, std::hash<std::string>{}(key.host));
-		boost::hash_combine(seed, std::hash<std::string>{}(key.service));
-		boost::hash_combine(seed, std::hash<std::string>{}(key.region));
-		boost::hash_combine(seed, std::hash<bool>{}(key.isTLS));
-		return seed;
-	}
-};
-} // namespace std
-
-// Representation of all the things you need to connect to a blob store instance with some credentials.
-// Reference counted because a very large number of them could be needed.
-class S3BlobStoreEndpoint : public ReferenceCounted<S3BlobStoreEndpoint> {
+class S3BlobStoreEndpoint : public IBlobStoreEndpoint, ReferenceCounted<S3BlobStoreEndpoint> {
 public:
-	struct Stats {
-		Stats() : requests_successful(0), requests_failed(0), bytes_sent(0) {}
-		Stats operator-(const Stats& rhs);
-		void clear() { memset(this, 0, sizeof(*this)); }
-		json_spirit::mObject getJSON();
-
-		int64_t requests_successful;
-		int64_t requests_failed;
-		int64_t bytes_sent;
-	};
-
-	static Stats s_stats;
-
-	struct BlobStats {
-		UID id;
-		CounterCollection cc;
-		Counter requestsSuccessful;
-		Counter requestsFailed;
-		Counter newConnections;
-		Counter expiredConnections;
-		Counter reusedConnections;
-		Counter fastRetries;
-
-		LatencySample requestLatency;
-
-		// init not in static codepath, to avoid initialization race issues and so no blob connections means no
-		// unnecessary blob stats traces
-		BlobStats()
-		  : id(deterministicRandom()->randomUniqueID()), cc("BlobStoreStats", id.toString()),
-		    requestsSuccessful("RequestsSuccessful", cc), requestsFailed("RequestsFailed", cc),
-		    newConnections("NewConnections", cc), expiredConnections("ExpiredConnections", cc),
-		    reusedConnections("ReusedConnections", cc), fastRetries("FastRetries", cc),
-		    requestLatency("BlobStoreRequestLatency",
-		                   id,
-		                   CLIENT_KNOBS->BLOBSTORE_LATENCY_LOGGING_INTERVAL,
-		                   CLIENT_KNOBS->BLOBSTORE_LATENCY_LOGGING_ACCURACY) {}
-	};
-	// null when initialized, so no blob stats until a blob connection is used
-	std::unique_ptr<BlobStats> blobStats;
-	Future<Void> statsLogger;
-
-	void maybeStartStatsLogger() {
-		if (!blobStats && CLIENT_KNOBS->BLOBSTORE_ENABLE_LOGGING) {
-			blobStats = std::make_unique<BlobStats>();
-			specialCounter(blobStats->cc, "GlobalConnectionPoolCount", [this]() {
-				return this->getGlobalConnectionPool().size();
-			});
-			specialCounter(blobStats->cc, "GlobalConnectionPoolSize", [this]() {
-				// FIXME: could track this explicitly via an int variable with extra logic, but this should be small and
-				// infrequent
-				int totalConnections = 0;
-				for (auto& it : this->getGlobalConnectionPool()) {
-					totalConnections += it.second->pool.size();
-				}
-				return totalConnections;
-			});
-
-			statsLogger = blobStats->cc.traceCounters(
-			    "BlobStoreMetrics", blobStats->id, CLIENT_KNOBS->BLOBSTORE_STATS_LOGGING_INTERVAL, "BlobStoreMetrics");
-		}
-	}
+	void addref() override { ReferenceCounted<S3BlobStoreEndpoint>::addref(); }
+	void delref() override { ReferenceCounted<S3BlobStoreEndpoint>::delref(); }
 
 	struct Credentials {
 		std::string key;
@@ -141,235 +37,50 @@ public:
 		std::string securityToken;
 	};
 
-	struct BlobKnobs {
-		BlobKnobs();
-		int secure_connection, connect_tries, connect_timeout, max_connection_life, request_tries, request_timeout_min,
-		    requests_per_second, list_requests_per_second, write_requests_per_second, read_requests_per_second,
-		    delete_requests_per_second, multipart_max_part_size, multipart_min_part_size, concurrent_requests,
-		    concurrent_uploads, concurrent_lists, concurrent_reads_per_file, concurrent_writes_per_file,
-		    enable_read_cache, read_block_size, read_ahead_blocks, read_cache_blocks_per_file,
-		    max_send_bytes_per_second, max_recv_bytes_per_second, sdk_auth, enable_object_integrity_check,
-		    global_connection_pool, max_delay_retryable_error, max_delay_connection_failed, multipart_retry_delay_ms;
-
-		bool set(StringRef name, int value);
-		std::string getURLParameters() const;
-		static std::vector<std::string> getKnobDescriptions() {
-			return {
-				"secure_connection (or sc)             Set 1 for secure connection and 0 for insecure connection.",
-				"connect_tries (or ct)                 Number of times to try to connect for each request.",
-				"connect_timeout (or cto)              Number of seconds to wait for a connect request to succeed.",
-				"max_connection_life (or mcl)          Maximum number of seconds to use a single TCP connection.",
-				"request_tries (or rt)                 Number of times to try each request until a parsable HTTP "
-				"response other than 429 is received.",
-				"request_timeout_min (or rtom)         Number of seconds to wait for a request to succeed after a "
-				"connection is established.",
-				"requests_per_second (or rps)          Max number of requests to start per second.",
-				"list_requests_per_second (or lrps)    Max number of list requests to start per second.",
-				"write_requests_per_second (or wrps)   Max number of write requests to start per second.",
-				"read_requests_per_second (or rrps)    Max number of read requests to start per second.",
-				"delete_requests_per_second (or drps)  Max number of delete requests to start per second.",
-				"multipart_max_part_size (or maxps)    Max part size for multipart uploads.",
-				"multipart_min_part_size (or minps)    Min part size for multipart uploads.",
-				"multipart_retry_delay_ms (or mrd)     Delay in milliseconds between retries for multipart uploads.",
-				"concurrent_requests (or cr)           Max number of total requests in progress at once, regardless of "
-				"operation-specific concurrency limits.",
-				"concurrent_uploads (or cu)            Max concurrent uploads (part or whole) that can be in progress "
-				"at once.",
-				"concurrent_lists (or cl)              Max concurrent list operations that can be in progress at once.",
-				"concurrent_reads_per_file (or crps)   Max concurrent reads in progress for any one file.",
-				"concurrent_writes_per_file (or cwps)  Max concurrent uploads in progress for any one file.",
-				"enable_read_cache (or erc)            Whether read block caching is enabled.",
-				"read_block_size (or rbs)              Block size in bytes to be used for reads.",
-				"read_ahead_blocks (or rab)            Number of blocks to read ahead of requested offset.",
-				"read_cache_blocks_per_file (or rcb)   Size of the read cache for a file in blocks.",
-				"max_send_bytes_per_second (or sbps)   Max send bytes per second for all requests combined.",
-				"max_recv_bytes_per_second (or rbps)   Max receive bytes per second for all requests combined (NOT YET "
-				"USED).",
-				"max_delay_retryable_error (or dre)    Max seconds to delay before retry when see a retryable error.",
-				"max_delay_connection_failed (or dcf)  Max seconds to delay before retry when see a connection "
-				"failure.",
-				"sdk_auth (or sa)                      Use AWS SDK to resolve credentials. Only valid if "
-				"BUILD_AWS_BACKUP is enabled.",
-				"enable_object_integrity_check (or eoic) Enable integrity check on GET requests (Default: false).",
-				"global_connection_pool (or gcp)       Enable shared connection pool between all blobstore instances."
-			};
-		}
-
-		bool isTLS() const { return secure_connection == 1; }
-	};
-
-	struct ReusableConnection {
-		Reference<IConnection> conn;
-		double expirationTime;
-		// CROSS_PROCESS_FIX: Track which process created this connection
-		NetworkAddress creatingProcess;
-		ReusableConnection() : expirationTime(0) {
-			if (g_network && g_network->isSimulated()) {
-				creatingProcess = g_network->getLocalAddress();
-			}
-		}
-		ReusableConnection(Reference<IConnection> c, double exp) : conn(c), expirationTime(exp) {
-			if (g_network && g_network->isSimulated()) {
-				creatingProcess = g_network->getLocalAddress();
-			}
-		}
-
-		// CROSS_PROCESS_FIX: Copy constructor with cross-process detection
-		ReusableConnection(const ReusableConnection& other)
-		  : conn(other.conn), expirationTime(other.expirationTime), creatingProcess(other.creatingProcess) {
-			if (g_network && g_network->isSimulated() && creatingProcess.isValid() &&
-			    creatingProcess != g_network->getLocalAddress()) {
-				// Cross-process copy detected - invalidate the connection to prevent sharing
-				conn = Reference<IConnection>();
-				expirationTime = 0; // Mark as expired
-			}
-		}
-
-		// CROSS_PROCESS_FIX: Assignment operator with cross-process detection
-		ReusableConnection& operator=(const ReusableConnection& other) {
-			if (this != &other) {
-				conn = other.conn;
-				expirationTime = other.expirationTime;
-				creatingProcess = other.creatingProcess;
-				if (g_network && g_network->isSimulated() && creatingProcess.isValid() &&
-				    creatingProcess != g_network->getLocalAddress()) {
-					// Cross-process assignment detected - invalidate the connection to prevent sharing
-					conn = Reference<IConnection>();
-					expirationTime = 0; // Mark as expired
-				}
-			}
-			return *this;
-		}
-	};
-
-	// basically, reference counted queue with option to add other fields
-	struct ConnectionPoolData : NonCopyable, ReferenceCounted<ConnectionPoolData> {
-		std::queue<ReusableConnection> pool;
-
-		ConnectionPoolData() {}
-
-		// Destructor implementation in S3BlobStore.cpp
-		// In simulation, explicitly closes all pooled connections before destruction
-		~ConnectionPoolData();
-	};
-
-	// global connection pool for multiple blobstore endpoints with same connection settings and request destination
-	// NOTE: This is disabled by default (BLOBSTORE_GLOBAL_CONNECTION_POOL=false), so each endpoint gets its own pool
-	static std::unordered_map<BlobStoreConnectionPoolKey, Reference<ConnectionPoolData>>& getGlobalConnectionPool() {
-		// Use process address as key to separate connection pools per simulated process
-		static std::map<NetworkAddress, std::unordered_map<BlobStoreConnectionPoolKey, Reference<ConnectionPoolData>>>
-		    processConnectionPools;
-
-		NetworkAddress currentProcess;
-		if (g_network && g_network->isSimulated()) {
-			currentProcess = g_network->getLocalAddress();
-		}
-		return processConnectionPools[currentProcess];
-	}
-
 	S3BlobStoreEndpoint(std::string const& host,
 	                    std::string const& service,
 	                    std::string region,
 	                    Optional<std::string> const& proxyHost,
 	                    Optional<std::string> const& proxyPort,
-	                    Optional<Credentials> const& creds,
+	                    Optional<StringRef> const& creds,
 	                    BlobKnobs const& knobs = BlobKnobs(),
-	                    HTTP::Headers extraHeaders = HTTP::Headers())
-	  : host(host), service(service), region(region), proxyHost(proxyHost), proxyPort(proxyPort),
-	    useProxy(proxyHost.present() && proxyPort.present()), credentials(creds),
-	    lookupKey(creds.present() && creds.get().key.empty()),
-	    lookupSecret(creds.present() && creds.get().secret.empty()), knobs(knobs), extraHeaders(extraHeaders),
-	    requestRate(new SpeedLimit(knobs.requests_per_second, 1)),
-	    requestRateList(new SpeedLimit(knobs.list_requests_per_second, 1)),
-	    requestRateWrite(new SpeedLimit(knobs.write_requests_per_second, 1)),
-	    requestRateRead(new SpeedLimit(knobs.read_requests_per_second, 1)),
-	    requestRateDelete(new SpeedLimit(knobs.delete_requests_per_second, 1)),
-	    sendRate(new SpeedLimit(knobs.max_send_bytes_per_second, 1)),
-	    recvRate(new SpeedLimit(knobs.max_recv_bytes_per_second, 1)), concurrentRequests(knobs.concurrent_requests),
-	    concurrentUploads(knobs.concurrent_uploads), concurrentLists(knobs.concurrent_lists) {
+	                    HTTP::Headers extraHeaders = HTTP::Headers());
 
-		if (host.empty() || (proxyHost.present() != proxyPort.present()))
-			throw connection_string_invalid();
+	// Infer the cloud region from a hostname by matching known service prefixes
+	// (e.g. "s3.us-west-2.amazonaws.com" -> "us-west-2", "cos.ap-beijing.myqcloud.com" -> "ap-beijing").
+	// Returns "" if no pattern matches.
+	static std::string guessRegionFromDomain(std::string domain);
 
-		// set connection pool instance
-		if (useProxy || !knobs.global_connection_pool) {
-			// don't use global connection pool if there's a proxy, as it complicates the logic
-			// FIXME: handle proxies?
-			connectionPool = makeReference<ConnectionPoolData>();
-		} else {
-			BlobStoreConnectionPoolKey key(host, service, region, knobs.isTLS());
-			auto it = getGlobalConnectionPool().find(key);
-			if (it != getGlobalConnectionPool().end()) {
-				connectionPool = it->second;
-			} else {
-				connectionPool = makeReference<ConnectionPoolData>();
-				getGlobalConnectionPool().insert({ key, connectionPool });
-			}
-		}
-		ASSERT(connectionPool.isValid());
-
-		maybeStartStatsLogger();
-	}
-
-	static std::string getURLFormat(bool withResource = false) {
-		const char* resource = "";
-		if (withResource)
-			resource = "<name>";
-		return format("blobstore://<api_key>:<secret>:<security_token>@<host>[:<port>]/"
-		              "%s[?<param>=<value>[&<param>=<value>]...]",
-		              resource);
-	}
-
-	typedef std::map<std::string, std::string> ParametersT;
-
-	// Parse url and return a S3BlobStoreEndpoint
-	// If the url has parameters that S3BlobStoreEndpoint can't consume then an error will be thrown unless
-	// ignored_parameters is given in which case the unconsumed parameters will be added to it.
+	// Convenience: parse URL and return as S3BlobStoreEndpoint (downcasts from IBlobStoreEndpoint::fromString).
+	// Callers that only need the IBlobStoreEndpoint interface should use IBlobStoreEndpoint::fromString directly.
 	static Reference<S3BlobStoreEndpoint> fromString(const std::string& url,
 	                                                 const Optional<std::string>& proxy,
 	                                                 std::string* resourceFromURL,
 	                                                 std::string* error,
-	                                                 ParametersT* ignored_parameters);
+	                                                 ParametersT* ignored_parameters) {
+		Reference<IBlobStoreEndpoint> base =
+		    IBlobStoreEndpoint::fromString(url, proxy, resourceFromURL, error, ignored_parameters);
+		auto* endpoint = dynamic_cast<S3BlobStoreEndpoint*>(base.getPtr());
+		if (base && !endpoint) {
+			if (error) {
+				*error = "Parsed blob store endpoint is not an S3BlobStoreEndpoint";
+			}
+			return Reference<S3BlobStoreEndpoint>();
+		}
+		return Reference<S3BlobStoreEndpoint>::addRef(endpoint);
+	}
 
-	// Get a normalized version of this URL with the given resource and any non-default BlobKnob values as URL
-	// parameters in addition to the passed params string
-	std::string getResourceURL(std::string resource, std::string params) const;
-
-	// Construct a resource path for S3 operations
-	std::string constructResourcePath(const std::string& bucket, const std::string& object) const;
-
-	// FIXME: add periodic connection reaper to pool
-	// local connection pool for this blobstore
-	Reference<ConnectionPoolData> connectionPool;
-	Future<ReusableConnection> connect(bool* reusingConn);
-	void returnConnection(ReusableConnection& conn);
-
-	std::string host;
-	std::string service;
-	std::string region;
-	Optional<std::string> proxyHost;
-	Optional<std::string> proxyPort;
-	bool useProxy;
+	Future<Void> updateSecret() override;
+	bool extractCredentialFields(JSONDoc& account) override;
+	std::string credentialFileKey() const override;
+	bool lookupSecretOnEachRequest() override;
+	void setRequestHeaders(std::string const& verb, std::string const& resource, HTTP::Headers& headers) override;
+	std::string normalizeResourceForRequest(std::string const& resource) override;
 
 	Optional<Credentials> credentials;
 	bool lookupKey;
 	bool lookupSecret;
-	BlobKnobs knobs;
-	HTTP::Headers extraHeaders;
-
-	// Speed and concurrency limits
-	Reference<IRateControl> requestRate;
-	Reference<IRateControl> requestRateList;
-	Reference<IRateControl> requestRateWrite;
-	Reference<IRateControl> requestRateRead;
-	Reference<IRateControl> requestRateDelete;
-	Reference<IRateControl> sendRate;
-	Reference<IRateControl> recvRate;
-	FlowLock concurrentRequests;
-	FlowLock concurrentUploads;
-	FlowLock concurrentLists;
-
-	Future<Void> updateSecret();
+	bool simulatedTokenError = false; // Set by simulateRequestFailure for BUGGIFY testing
 
 	// Calculates the authentication string from the secret key
 	static std::string hmac_sha1(Credentials const& creds, std::string const& msg);
@@ -384,95 +95,73 @@ public:
 	                      std::string date = "",
 	                      std::string datestamp = "");
 
-	std::string getHost() const { return host; }
+	// doRequest hooks for S3 token error recovery
+	void simulateRequestFailure(std::string const& verb,
+	                            std::string const& resource,
+	                            Reference<HTTP::IncomingResponse>& r) override;
+	void processRequestFailure(Reference<HTTP::IncomingResponse> const& r,
+	                           TraceEvent& event,
+	                           bool& retryExtended) override;
+	Future<bool> preRetryCheck(std::string const& verb,
+	                           std::string const& resource,
+	                           ReusableConnection& rconn,
+	                           int requestTimeout,
+	                           bool& retryExtended) override;
 
-	std::string getRegion() const { return region; }
+	// Get a normalized version of this URL with the given resource and any non-default BlobKnob values as URL
+	// parameters in addition to the passed params string
+	std::string getResourceURL(std::string resource, std::string params) const override;
 
-	// Do an HTTP request to the Blob Store, read the response.  Handles authentication.
-	// Every blob store interaction should ultimately go through this function
+	// Construct a resource path for S3 operations
+	std::string constructResourcePath(const std::string& bucket, const std::string& object) const;
 
-	Future<Reference<HTTP::IncomingResponse>> doRequest(std::string const& verb,
-	                                                    std::string const& resource,
-	                                                    const HTTP::Headers& headers,
-	                                                    UnsentPacketQueue* pContent,
-	                                                    int contentLen,
-	                                                    std::set<unsigned int> successCodes);
-
-	struct ObjectInfo {
-		std::string name;
-		int64_t size;
-	};
-
-	struct ListResult {
-		std::vector<std::string> commonPrefixes;
-		std::vector<ObjectInfo> objects;
-	};
-
-	// Get bucket contents via a stream, since listing large buckets will take many serial blob requests
+	// Get bucket contents via a stream, since listing large buckets will take many serial blob requests.
 	// If a delimiter is passed then common prefixes will be read in parallel, recursively, depending on recurseFilter.
-	// Recursefilter is a must be a function that takes a string and returns true if it passes.  The default behavior is
+	// recurseFilter must be a function that takes a string and returns true if it passes.  The default behavior is
 	// to assume true.
 	Future<Void> listObjectsStream(std::string const& bucket,
 	                               PromiseStream<ListResult> results,
 	                               Optional<std::string> prefix = {},
 	                               Optional<char> delimiter = {},
 	                               int maxDepth = 0,
-	                               std::function<bool(std::string const&)> recurseFilter = nullptr);
-
-	// Get a list of the files in a bucket, see listObjectsStream for more argument detail.
-	AsyncResult<ListResult> listObjects(std::string const& bucket,
-	                                    Optional<std::string> prefix = {},
-	                                    Optional<char> delimiter = {},
-	                                    int maxDepth = 0,
-	                                    std::function<bool(std::string const&)> recurseFilter = nullptr);
+	                               std::function<bool(std::string const&)> recurseFilter = nullptr) override;
 
 	// Get a list of all buckets
-	AsyncResult<std::vector<std::string>> listBuckets();
+	AsyncResult<std::vector<std::string>> listBuckets() override;
 
 	// Check if a bucket exists
-	Future<bool> bucketExists(std::string const& bucket);
+	Future<bool> bucketExists(std::string const& bucket) override;
 
 	// Check if an object exists in a bucket
-	Future<bool> objectExists(std::string const& bucket, std::string const& object);
+	Future<bool> objectExists(std::string const& bucket, std::string const& object) override;
 
 	// Get the size of an object in a bucket
-	Future<int64_t> objectSize(std::string const& bucket, std::string const& object);
+	Future<int64_t> objectSize(std::string const& bucket, std::string const& object) override;
 
 	// Read an arbitrary segment of an object
 	Future<int> readObject(std::string const& bucket,
 	                       std::string const& object,
 	                       void* data,
 	                       int length,
-	                       int64_t offset);
+	                       int64_t offset) override;
 
 	// Delete an object in a bucket
-	Future<Void> deleteObject(std::string const& bucket, std::string const& object);
+	Future<Void> deleteObject(std::string const& bucket, std::string const& object) override;
 
-	// Delete all objects in a bucket under a prefix.  Note this is not atomic as blob store does not
-	// support this operation directly. This method is just a convenience method that lists and deletes
-	// all of the objects in the bucket under the given prefix.
-	// Since it can take a while, if a pNumDeleted and/or pBytesDeleted are provided they will be incremented every time
-	// a deletion of an object completes.
-	Future<Void> deleteRecursively(std::string const& bucket,
-	                               std::string prefix = "",
-	                               int* pNumDeleted = nullptr,
-	                               int64_t* pBytesDeleted = nullptr);
-
-	// Create a bucket if it does not already exists.
-	Future<Void> createBucket(std::string const& bucket);
+	// Create a bucket if it does not already exist.
+	Future<Void> createBucket(std::string const& bucket) override;
 
 	// Useful methods for working with tiny files
-	AsyncResult<std::string> readEntireFile(std::string const& bucket, std::string const& object);
-	Future<Void> writeEntireFile(std::string const& bucket, std::string const& object, std::string const& content);
+	AsyncResult<std::string> readEntireFile(std::string const& bucket, std::string const& object) override;
 	Future<Void> writeEntireFileFromBuffer(std::string const& bucket,
 	                                       std::string const& object,
 	                                       UnsentPacketQueue* pContent,
 	                                       int contentLen,
-	                                       std::string const& contentHash);
+	                                       std::string const& contentHash) override;
 
 	// MultiPart upload methods
 	// Returns UploadID
-	Future<std::string> beginMultiPartUpload(std::string const& bucket, std::string const& object);
+	Future<std::string> beginMultiPartUpload(std::string const& bucket, std::string const& object) override;
 	// Returns eTag
 	Future<std::string> uploadPart(std::string const& bucket,
 	                               std::string const& object,
@@ -480,19 +169,13 @@ public:
 	                               unsigned int partNumber,
 	                               UnsentPacketQueue* pContent,
 	                               int contentLen,
-	                               std::string const& contentHash);
-
-	struct PartInfo {
-		std::string etag;
-		std::string checksum; // MD5 or SHA256 depending on integrity check setting
-		PartInfo() = default;
-		PartInfo(std::string e, std::string c = "") : etag(e), checksum(c) {}
-	};
-	typedef std::map<int, PartInfo> MultiPartSetT;
+	                               std::string const& contentHash) override;
 	Future<Optional<std::string>> finishMultiPartUpload(std::string const& bucket,
 	                                                    std::string const& object,
 	                                                    std::string const& uploadID,
-	                                                    MultiPartSetT const& parts);
+	                                                    MultiPartSetT const& parts,
+	                                                    int64_t totalSize = 0) override;
+
 	Future<Void> abortMultiPartUpload(std::string const& bucket,
 	                                  std::string const& object,
 	                                  std::string const& uploadID);

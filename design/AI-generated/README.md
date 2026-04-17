@@ -21,7 +21,7 @@ Prompts:
   are responsible for, and so on.  Then we can do deep dives on each
   one.  But for now I want an overview of the whole system.*
 
-This generated the file `foundationdb_subsystem_map.md`.
+This generated the file [`foundationdb_subsystem_map.md`](foundationdb_subsystem_map.md).
 
 Subsequently:
 

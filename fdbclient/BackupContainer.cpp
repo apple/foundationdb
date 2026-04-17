@@ -23,7 +23,6 @@
 
 // FIXME: Trim this down
 #include "fmt/format.h"
-#include "flow/Platform.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/FDBTypes.h"
@@ -35,13 +34,13 @@
 #include "fdbrpc/AsyncFileReadAhead.h"
 #include "fdbrpc/simulator.h"
 #include "flow/Platform.h"
-#include "fdbclient/AsyncFileS3BlobStore.h"
+#include "fdbclient/AsyncFileBlobStore.h"
 #ifdef BUILD_AZURE_BACKUP
 #include "fdbclient/BackupContainerAzureBlobStore.h"
 #endif
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BackupContainerLocalDirectory.h"
-#include "fdbclient/BackupContainerS3BlobStore.h"
+#include "fdbclient/BackupContainerBlobStore.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -255,7 +254,7 @@ std::vector<std::string> IBackupContainer::getURLFormats() {
 		BackupContainerAzureBlobStore::getURLFormat(),
 #endif
 		BackupContainerLocalDirectory::getURLFormat(),
-		BackupContainerS3BlobStore::getURLFormat(),
+		BackupContainerBlobStore::getURLFormat(),
 	};
 }
 
@@ -303,16 +302,12 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 			}
 
 			// The URL parameters contain blobstore endpoint tunables as well as possible backup-specific options.
-			S3BlobStoreEndpoint::ParametersT backupParams;
-			Reference<S3BlobStoreEndpoint> bstore =
-			    S3BlobStoreEndpoint::fromString(url, blobstoreProxy, &resource, &lastOpenError, &backupParams);
+			IBlobStoreEndpoint::ParametersT backupParams;
+			Reference<IBlobStoreEndpoint> bstore =
+			    IBlobStoreEndpoint::fromString(url, blobstoreProxy, &resource, &lastOpenError, &backupParams);
 
-			if (resource.empty())
-				throw backup_invalid_url();
-			for (auto c : resource)
-				if (!isalnum(c) && c != '_' && c != '-' && c != '.' && c != '/')
-					throw backup_invalid_url();
-			r = makeReference<BackupContainerS3BlobStore>(bstore, resource, backupParams, encryptionKeyFileName, true);
+			BackupContainerBlobStore::validateBackupUrl(resource);
+			r = makeReference<BackupContainerBlobStore>(bstore, resource, backupParams, encryptionKeyFileName, true);
 		}
 #ifdef BUILD_AZURE_BACKUP
 		else if (u.startsWith("azure://"_sr)) {
@@ -393,8 +388,8 @@ Future<std::vector<std::string>> listContainers_impl(std::string baseURL, Option
 		} else if (u.startsWith("blobstore://"_sr)) {
 			std::string resource;
 
-			S3BlobStoreEndpoint::ParametersT backupParams;
-			Reference<S3BlobStoreEndpoint> bstore = S3BlobStoreEndpoint::fromString(
+			IBlobStoreEndpoint::ParametersT backupParams;
+			Reference<IBlobStoreEndpoint> bstore = IBlobStoreEndpoint::fromString(
 			    baseURL, proxy, &resource, &IBackupContainer::lastOpenError, &backupParams);
 
 			if (!resource.empty()) {
@@ -405,9 +400,9 @@ Future<std::vector<std::string>> listContainers_impl(std::string baseURL, Option
 			}
 
 			// Create a dummy container to parse the backup-specific parameters from the URL and get a final bucket name
-			BackupContainerS3BlobStore dummy(bstore, "dummy", backupParams, {}, true);
+			BackupContainerBlobStore dummy(bstore, "dummy", backupParams, {}, true);
 
-			std::vector<std::string> results = co_await BackupContainerS3BlobStore::listURLs(bstore, dummy.getBucket());
+			std::vector<std::string> results = co_await BackupContainerBlobStore::listURLs(bstore, dummy.getBucket());
 			co_return results;
 		}
 		// TODO: Enable this when Azure backups are ready

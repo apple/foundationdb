@@ -1,6 +1,8 @@
 # Subsystem 6: Transaction Log (TLog) & Log System
 
-**Location:** `fdbserver/tlog/`, `fdbserver/logsystem/`, `fdbserver/logrouter/`  
+**[Diagrams](diagram_06_tlog_logsystem.md)**
+
+**Location:** [`fdbserver/tlog/`](https://github.com/apple/foundationdb/tree/main/fdbserver/tlog), [`fdbserver/logsystem/`](https://github.com/apple/foundationdb/tree/main/fdbserver/logsystem), [`fdbserver/logrouter/`](https://github.com/apple/foundationdb/tree/main/fdbserver/logrouter)
 **Size:** ~17K  
 **Role:** Durable mutation logging, tag-partitioned replication, peek cursors for storage servers.
 
@@ -12,7 +14,7 @@ The TLog subsystem is FDB's durability guarantee. All committed mutations flow t
 
 ---
 
-## TLog Server -- `TLogServer.actor.cpp`
+## TLog Server -- [`TLogServer.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/tlog/TLogServer.actor.cpp)
 
 ### TLogData (lines 295-420)
 
@@ -100,11 +102,11 @@ When in-memory data exceeds `targetVolatileBytes`:
 
 ---
 
-## Log System -- `LogSystem.cpp`
+## Log System -- [`LogSystem.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/logsystem/LogSystem.cpp)
 
 Abstraction over the set of TLog replicas.
 
-### ILogSystem Interface -- `LogSystem.h:57-347`
+### LogSystem Interface -- [`LogSystem.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/logsystem/include/fdbserver/logsystem/LogSystem.h)`:57-347`
 
 **Core methods:**
 
@@ -156,7 +158,7 @@ Each recovery creates a new "epoch" of TLogs:
 
 ---
 
-## Log Router -- `LogRouter.cpp`
+## Log Router -- [`LogRouter.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/logrouter/LogRouter.cpp)
 
 Routes mutations across regions in multi-datacenter deployments:
 
@@ -233,9 +235,9 @@ Optional per-storage-server version tracking:
 
 | File | Purpose |
 |------|---------|
-| `fdbserver/tlog/TLogServer.actor.cpp` | TLog server: push, peek, spill, DiskQueue |
-| `fdbserver/logsystem/LogSystem.cpp` | LogSystem: push/peek/pop across TLog replicas |
-| `fdbserver/core/include/fdbserver/core/LogSystem.h` | IPeekCursor, LogPushVersionSet, EpochTagsVersionsInfo, and LogPushData |
-| `fdbserver/core/include/fdbserver/core/LogSystemConfig.h` | Log system configuration and epoch tracking |
-| `fdbserver/core/include/fdbserver/core/IDiskQueue.h` | IDiskQueue interface for TLog persistence |
-| `fdbserver/logrouter/LogRouter.cpp` | Cross-region mutation routing |
+| [`fdbserver/tlog/TLogServer.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/tlog/TLogServer.actor.cpp) | TLog server: push, peek, spill, DiskQueue |
+| [`fdbserver/logsystem/LogSystem.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/logsystem/LogSystem.cpp) | LogSystem: push/peek/pop across TLog replicas |
+| [`fdbserver/logsystem/include/fdbserver/logsystem/LogSystem.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/logsystem/include/fdbserver/logsystem/LogSystem.h) | LogSystem, IPeekCursor interfaces |
+| [`fdbserver/core/include/fdbserver/core/LogSystemConfig.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/LogSystemConfig.h) | Log system configuration and epoch tracking |
+| [`fdbserver/core/include/fdbserver/core/IDiskQueue.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/IDiskQueue.h) | IDiskQueue interface for TLog persistence |
+| [`fdbserver/logrouter/LogRouter.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/logrouter/LogRouter.cpp) | Cross-region mutation routing |

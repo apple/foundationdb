@@ -136,6 +136,10 @@
 #include <functional>
 #endif
 
+template <class T>
+class AsyncResult;
+class Void;
+
 // g++ requires that non-dependent names have to be looked up at
 // template definition, which makes circular dependencies a royal
 // pain. (For whatever it's worth, g++ appears to be adhering to spec
@@ -426,6 +430,7 @@ std::vector<std::string> listFiles(std::string const& directory, std::string con
 std::vector<std::string> listDirectories(std::string const& directory);
 
 void findFilesRecursively(std::string const& path, std::vector<std::string>& out);
+AsyncResult<Void> findFilesRecursivelyAsync(std::string path, std::vector<std::string>* out);
 
 // Tag the given file as "temporary", i.e. not really needing commits to disk
 void makeTemporary(const char* filename);
