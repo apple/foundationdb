@@ -48,7 +48,7 @@
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/RunRYWTransaction.h"
-#include "fdbclient/S3BlobStore.h"
+#include "fdbclient/IBlobStore.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
 #include "fdbclient/BulkLoading.h"
@@ -1565,12 +1565,12 @@ AsyncResult<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
 	o.create("networkAddress") = localIP.toString();
 
 	if (exe == ProgramExe::AGENT) {
-		static S3BlobStoreEndpoint::Stats last_stats;
+		static IBlobStoreEndpoint::Stats last_stats;
 		static double last_ts = 0;
-		S3BlobStoreEndpoint::Stats current_stats = S3BlobStoreEndpoint::s_stats;
+		IBlobStoreEndpoint::Stats current_stats = IBlobStoreEndpoint::s_stats;
 		JSONDoc blobstats = o.create("blob_stats");
 		blobstats.create("total") = current_stats.getJSON();
-		S3BlobStoreEndpoint::Stats diff = current_stats - last_stats;
+		IBlobStoreEndpoint::Stats diff = current_stats - last_stats;
 		json_spirit::mObject diffObj = diff.getJSON();
 		if (last_ts > 0)
 			diffObj["bytes_per_second"] = double(current_stats.bytes_sent - last_stats.bytes_sent) / (now() - last_ts);
@@ -1626,7 +1626,7 @@ AsyncResult<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
 			int i = encryptionContainerIndices[j];
 			std::string keyPath = tagContainers[i].get()->getEncryptionKeyFileName().get();
 
-			if (seenKeyPaths.find(keyPath) == seenKeyPaths.end()) {
+			if (!seenKeyPaths.contains(keyPath)) {
 				seenKeyPaths.insert(keyPath);
 				json_spirit::mObject keyObj;
 				keyObj["path"] = tagContainers[i].get()->getEncryptionKeyFileName().get();
@@ -3041,8 +3041,9 @@ static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& er
 					buf.push_back(StringRef((uint8_t*)(line.data() + offset), i - offset));
 				ret.push_back(std::move(buf));
 				offset = i = line.find_first_not_of(' ', i + 1);
-			} else
+			} else {
 				i++;
+			}
 			break;
 		case '"':
 			quoted = !quoted;
@@ -3055,8 +3056,9 @@ static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& er
 				buf.push_back(StringRef((uint8_t*)(line.data() + offset), i - offset));
 				offset = i = line.find_first_not_of(' ', i);
 				forcetoken = false;
-			} else
+			} else {
 				i++;
+			}
 			break;
 		case '\\':
 			if (i + 2 > line.length()) {
