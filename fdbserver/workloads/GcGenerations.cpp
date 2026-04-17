@@ -186,8 +186,7 @@ struct GcGenerationsWorkload : TestWorkload {
 
 			auto masterAddr = self->dbInfo->get().master.address();
 			TraceEvent("RebootingPrimaryDcMaster").detail("Iteration", successfulReboots).detail("Master", masterAddr);
-			g_simulator->rebootProcess(g_simulator->getProcessByAddress(masterAddr),
-			                           ISimulator::KillType::Reboot);
+			g_simulator->rebootProcess(g_simulator->getProcessByAddress(masterAddr), ISimulator::KillType::Reboot);
 
 			// Wait for recovery to create a new generation.
 			while (self->dbInfo->get().logSystemConfig.oldTLogs.size() == generationCount ||
@@ -243,8 +242,7 @@ struct GcGenerationsWorkload : TestWorkload {
 			co_await self->dbAvailable(self);
 			auto masterAddr = self->dbInfo->get().master.address();
 			TraceEvent("RebootMasterForGC").detail("Master", masterAddr);
-			g_simulator->rebootProcess(g_simulator->getProcessByAddress(masterAddr),
-			                           ISimulator::KillType::Reboot);
+			g_simulator->rebootProcess(g_simulator->getProcessByAddress(masterAddr), ISimulator::KillType::Reboot);
 			// Give this recovery cycle time to GC before retrying.
 			co_await delay(60);
 			co_await self->dbAvailable(self);
