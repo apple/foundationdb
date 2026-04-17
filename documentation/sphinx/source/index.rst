@@ -44,13 +44,14 @@ The latest changes are detailed in :ref:`release-notes`. The documentation has t
 
 * :doc:`visibility` contains documentation related to Visibility into FoundationDB.
 
+* :doc:`developer-tools` contains documentation for FoundationDB contributors, including local development setup, static analysis, and internal testing tools.
+
 .. toctree::
    :maxdepth: 1
    :titlesonly:
    :hidden:
 
-   local-dev
-   internal-dev-tools
+   developer-tools
    why-foundationdb
    technical-overview
    client-design

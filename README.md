@@ -186,24 +186,9 @@ CMake will not produce a `compile_commands.json` by default; you must pass `-DCM
 
 Note that if the building is done inside the `foundationdb/build` Docker image, the resulting paths will still be incorrect and require manual fixing. One will wish to re-run `cmake` with `-DCMAKE_EXPORT_COMPILE_COMMANDS=OFF` to prevent it from reverting the manual changes.
 
-### Running `clang-tidy`
+### Code Formatting and Static Analysis
 
-FoundationDB's CMake build supports opt-in `clang-tidy` execution during C/C++ compilation via `-DUSE_CLANG_TIDY=ON`.
-
-Example:
-
-```sh
-cmake -S <FDB_SOURCE_DIR> -B build -G Ninja \
-  -DUSE_CLANG_TIDY=ON
-ninja -C build fdbserver
-```
-
-Optional CMake variables:
-
-* `CLANG_TIDY`: path to the `clang-tidy` executable (auto-detected by default)
-* `CLANG_TIDY_EXTRA_ARGS`: additional space-separated arguments passed to `clang-tidy`
-
-If you prefer running `clang-tidy` manually, configure with `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` and build the `processed_compile_commands` target. The generated source-tree `compile_commands.json` is Flow-aware and is usually the best compilation database to point `clang-tidy` at.
+`clang-format` and `clang-tidy` run as part of CI on every pull request. See the [clang-format](https://apple.github.io/foundationdb/clang-format.html) and [clang-tidy](https://apple.github.io/foundationdb/clang-tidy.html) guides for how to run them locally before pushing.
 
 ### Using IDEs
 
