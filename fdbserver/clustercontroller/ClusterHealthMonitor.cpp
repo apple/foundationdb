@@ -144,6 +144,10 @@ void WorkerEventProvider::setWorkers(std::vector<WorkerDetails> workers) {
 	this->workers = std::move(workers);
 }
 
+void WorkerEventProvider::setRecoveryState(RecoveryState recoveryState) {
+	this->recoveryState = recoveryState;
+}
+
 void WorkerEventProvider::setRatekeeperWorker(Optional<WorkerInterface> ratekeeperWorker) {
 	this->ratekeeperWorker = std::move(ratekeeperWorker);
 }
@@ -158,6 +162,10 @@ void WorkerEventProvider::setStorageServers(std::vector<StorageServerInterface> 
 
 void WorkerEventProvider::setTLogs(std::vector<TLogInterface> tlogs) {
 	this->tlogs = std::move(tlogs);
+}
+
+Optional<RecoveryState> WorkerEventProvider::getRecoveryState() const {
+	return recoveryState;
 }
 
 Future<LatestWorkerEvents> WorkerEventProvider::getLatestEvents(std::string const& eventName) const {

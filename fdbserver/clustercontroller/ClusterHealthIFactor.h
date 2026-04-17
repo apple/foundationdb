@@ -67,7 +67,7 @@ public:
 	Future<Level> fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider, TrackCodeProbes) override;
 };
 
-// Evaluates cluster recovery progress from MasterRecoveryState events.
+// Evaluates cluster recovery progress from cluster controller state.
 class RecoveryStateFactor final : public IFactor {
 public:
 	std::string_view getName() const override;

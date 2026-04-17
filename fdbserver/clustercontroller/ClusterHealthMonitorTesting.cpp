@@ -31,6 +31,7 @@ namespace cluster_health {
 namespace {
 
 class FakeWorkerEventProvider final : public IWorkerEventProvider, public ReferenceCounted<FakeWorkerEventProvider> {
+	Optional<RecoveryState> recoveryState;
 	std::map<std::string, LatestWorkerEvents> latestEventsByName;
 	std::map<std::string, LatestWorkerEvents> latestRatekeeperEventsByName;
 	std::map<std::string, LatestWorkerEvents> latestDataDistributorEventsByName;
@@ -44,6 +45,8 @@ public:
 	void setLatestEvents(std::string eventName, LatestWorkerEvents latestEvents) {
 		latestEventsByName[std::move(eventName)] = std::move(latestEvents);
 	}
+
+	void setRecoveryState(RecoveryState recoveryState) { this->recoveryState = recoveryState; }
 
 	void setLatestRatekeeperEvents(std::string eventName, LatestWorkerEvents latestEvents) {
 		latestRatekeeperEventsByName[std::move(eventName)] = std::move(latestEvents);
@@ -68,6 +71,8 @@ public:
 		}
 		return it->second;
 	}
+
+	Optional<RecoveryState> getRecoveryState() const override { return recoveryState; }
 
 	Future<LatestWorkerEvents> getLatestRatekeeperEvents(std::string const& eventName) const override {
 		auto it = latestRatekeeperEventsByName.find(eventName);
@@ -167,12 +172,6 @@ public:
 		return fields;
 	}
 };
-
-TraceEventFields makeRecoveryStateMetrics(int statusCode) {
-	TraceEventFields traceEventFields;
-	traceEventFields.addField("StatusCode", std::to_string(statusCode));
-	return traceEventFields;
-}
 
 TraceEventFields makeProcessErrorMetrics(std::string const& type, std::string const& error) {
 	TraceEventFields traceEventFields;
@@ -300,28 +299,28 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/RecoveryStateFactor
 	auto provider = makeReference<FakeWorkerEventProvider>();
 	Level level;
 
-	provider->setLatestEvents("MasterRecoveryState",
-	                          makeLatestWorkerEvents(makeRecoveryStateMetrics(RecoveryStatus::fully_recovered)));
+	provider->setRecoveryState(RecoveryState::FULLY_RECOVERED);
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::HEALTHY);
 
-	provider->setLatestEvents("MasterRecoveryState",
-	                          makeLatestWorkerEvents(makeRecoveryStateMetrics(RecoveryStatus::accepting_commits)));
+	provider->setRecoveryState(RecoveryState::ACCEPTING_COMMITS);
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::SELF_HEALING);
 
-	provider->setLatestEvents("MasterRecoveryState",
-	                          makeLatestWorkerEvents(makeRecoveryStateMetrics(RecoveryStatus::all_logs_recruited)));
+	provider->setRecoveryState(RecoveryState::ALL_LOGS_RECRUITED);
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::SELF_HEALING);
 
-	provider->setLatestEvents("MasterRecoveryState",
-	                          makeLatestWorkerEvents(makeRecoveryStateMetrics(RecoveryStatus::recovery_transaction)));
+	provider->setRecoveryState(RecoveryState::RECOVERY_TRANSACTION);
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::OUTAGE);
 
-	provider->setLatestEvents("MasterRecoveryState", LatestWorkerEvents());
+	provider->setRecoveryState(RecoveryState::FULLY_RECOVERED);
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
+	ASSERT_EQ(level, Level::HEALTHY);
+
+	auto missingProvider = makeReference<FakeWorkerEventProvider>();
+	level = co_await factor.fetchLevel(missingProvider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::METRICS_MISSING);
 }
 

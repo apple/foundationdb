@@ -3392,7 +3392,7 @@ public:
 	                      ServerCoordinators const& coordinators,
 	                      Reference<AsyncVar<Optional<UID>>> clusterId);
 
-	void updateClusterHealthMonitorWorkers();
+	void updateClusterHealthMonitorInputs();
 
 	~ClusterControllerData() {
 		ac.clear(false);

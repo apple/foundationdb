@@ -92,16 +92,16 @@ Behavior:
 
 ### `RecoveryState`
 
-Source event:
-- `MasterRecoveryState`
+Source:
+- `ServerDBInfo::recoveryState` from the cluster controller
 
 Fields used:
-- `StatusCode`
+- none; this factor reads the cluster controller's in-memory `RecoveryState`
 
 Behavior:
-- Returns `OUTAGE` if any recovery state is below `RecoveryStatus::accepting_commits`.
-- Returns `SELF_HEALING` if recovery is at or above `accepting_commits` but below `fully_recovered`.
-- Returns `HEALTHY` at `fully_recovered`.
+- Returns `OUTAGE` if recovery state is below `RecoveryState::ACCEPTING_COMMITS`.
+- Returns `SELF_HEALING` if recovery is at or above `ACCEPTING_COMMITS` but below `FULLY_RECOVERED`.
+- Returns `HEALTHY` at `FULLY_RECOVERED`.
 
 ### `ProcessErrors`
 

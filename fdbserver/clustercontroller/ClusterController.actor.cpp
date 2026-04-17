@@ -104,10 +104,10 @@ ClusterControllerData::ClusterControllerData(ClusterControllerFullInterface cons
 	cx = openDBOnServer(db.serverInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 
 	specialCounter(clusterControllerMetrics, "ClientCount", [this]() { return db.clientCount; });
-	updateClusterHealthMonitorWorkers();
+	updateClusterHealthMonitorInputs();
 }
 
-void ClusterControllerData::updateClusterHealthMonitorWorkers() {
+void ClusterControllerData::updateClusterHealthMonitorInputs() {
 	std::vector<WorkerDetails> workers;
 	workers.reserve(id_worker.size());
 	for (auto const& [processId, workerInfo] : id_worker) {
@@ -115,6 +115,7 @@ void ClusterControllerData::updateClusterHealthMonitorWorkers() {
 		workers.push_back(workerInfo.details);
 	}
 	clusterHealthWorkerEventProvider->setWorkers(std::move(workers));
+	clusterHealthWorkerEventProvider->setRecoveryState(db.serverInfo->get().recoveryState);
 
 	Optional<WorkerInterface> ratekeeperWorker;
 	if (db.serverInfo->get().ratekeeper.present()) {
@@ -1132,7 +1133,7 @@ ACTOR Future<Void> workerAvailabilityWatch(WorkerInterface worker,
 						cluster->addr_locality.erase(worker.secondaryAddress().get());
 					}
 				}
-				cluster->updateClusterHealthMonitorWorkers();
+				cluster->updateClusterHealthMonitorInputs();
 				cluster->updateWorkerList.set(worker.locality.processId(), Optional<ProcessData>());
 				return Void();
 			}
@@ -1294,7 +1295,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		dbInfo.id = deterministicRandom()->randomUniqueID();
 		dbInfo.infoGeneration = ++self->db.dbInfoCount;
 		self->db.serverInfo->set(dbInfo);
-		self->updateClusterHealthMonitorWorkers();
+		self->updateClusterHealthMonitorInputs();
 	}
 
 	checkOutstandingRequests(self);
@@ -1461,7 +1462,7 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 		    w.locality.processId() == self->db.serverInfo->get().master.locality.processId()) {
 			self->masterProcessId = w.locality.processId();
 		}
-		self->updateClusterHealthMonitorWorkers();
+		self->updateClusterHealthMonitorInputs();
 		self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
 		self->updateDBInfo.trigger();
 		checkOutstandingRequests(self);
@@ -1489,7 +1490,7 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 		}
 
 		// Re-registrations must refresh DBInfo delivery, otherwise rebooted workers can miss role updates.
-		self->updateClusterHealthMonitorWorkers();
+		self->updateClusterHealthMonitorInputs();
 		self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
 		self->updateDBInfo.trigger();
 		checkOutstandingRequests(self);
@@ -1878,7 +1879,7 @@ Future<Void> monitorStorageMetadata(ClusterControllerData* self) {
 			co_await tr->commit();
 
 			self->storageStatusInfos = std::move(servers);
-			self->updateClusterHealthMonitorWorkers();
+			self->updateClusterHealthMonitorInputs();
 			co_await watchFuture;
 			tr->reset();
 			continue;

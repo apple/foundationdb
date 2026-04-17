@@ -186,38 +186,23 @@ std::string_view RecoveryStateFactor::getName() const {
 
 Future<Level> RecoveryStateFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider,
                                               TrackCodeProbes trackCodeProbes) {
-	auto eventsAndErrors = co_await workerEventProvider->getLatestEvents("MasterRecoveryState");
-	if (!eventsAndErrors.present()) {
+	Optional<RecoveryState> recoveryState = workerEventProvider->getRecoveryState();
+	if (!recoveryState.present()) {
 		co_return Level::METRICS_MISSING;
 	}
 
-	auto const& [events, _errors] = eventsAndErrors.get();
-	WorkerEvents filteredEvents = filterEmptyEvents(events);
-	if (filteredEvents.empty()) {
-		co_return Level::METRICS_MISSING;
+	Level level = Level::HEALTHY;
+	if (recoveryState.get() < RecoveryState::ACCEPTING_COMMITS) {
+		level = Level::OUTAGE;
+	} else if (recoveryState.get() < RecoveryState::FULLY_RECOVERED) {
+		level = Level::SELF_HEALING;
 	}
 
-	try {
-		Level level = Level::HEALTHY;
-		for (auto const& [_address, traceEvent] : filteredEvents) {
-			int const statusCode = traceEvent.getInt("StatusCode");
-			if (statusCode < RecoveryStatus::accepting_commits) {
-				level = Level::OUTAGE;
-				break;
-			}
-			if (statusCode < RecoveryStatus::fully_recovered) {
-				level = Level::SELF_HEALING;
-			}
-		}
-		CODE_PROBE(trackCodeProbes && level == Level::OUTAGE, "ClusterHealth RecoveryStateFactor returns OUTAGE");
-		CODE_PROBE(trackCodeProbes && level == Level::SELF_HEALING,
-		           "ClusterHealth RecoveryStateFactor returns SELF_HEALING");
-		CODE_PROBE(trackCodeProbes && level == Level::HEALTHY, "ClusterHealth RecoveryStateFactor returns HEALTHY");
-		co_return level;
-	} catch (Error& e) {
-		TraceEvent(SevWarnAlways, "RecoveryStateFactorFetchFailed").error(e);
-		co_return Level::METRICS_MISSING;
-	}
+	CODE_PROBE(trackCodeProbes && level == Level::OUTAGE, "ClusterHealth RecoveryStateFactor returns OUTAGE");
+	CODE_PROBE(trackCodeProbes && level == Level::SELF_HEALING,
+	           "ClusterHealth RecoveryStateFactor returns SELF_HEALING");
+	CODE_PROBE(trackCodeProbes && level == Level::HEALTHY, "ClusterHealth RecoveryStateFactor returns HEALTHY");
+	co_return level;
 }
 
 std::string_view ProcessErrorsFactor::getName() const {

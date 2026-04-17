@@ -27,6 +27,7 @@
 
 #include "ClusterHealthIFactor.h"
 #include "fdbclient/StorageServerInterface.h"
+#include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/TLogInterface.h"
 #include "fdbserver/core/WorkerEvents.h"
 #include "flow/flow.h"
@@ -50,6 +51,7 @@ public:
 	virtual ~IWorkerEventProvider() = default;
 	virtual void addref() const = 0;
 	virtual void delref() const = 0;
+	virtual Optional<RecoveryState> getRecoveryState() const = 0;
 	virtual Future<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const = 0;
 	virtual Future<LatestWorkerEvents> getLatestRatekeeperEvents(std::string const& eventName) const = 0;
 	virtual Future<LatestWorkerEvents> getLatestDataDistributorEvents(std::string const& eventName) const = 0;
@@ -60,6 +62,7 @@ public:
 // Production event provider backed by worker event-log RPCs.
 class WorkerEventProvider final : public IWorkerEventProvider, public ReferenceCounted<WorkerEventProvider> {
 	std::vector<WorkerDetails> workers;
+	Optional<RecoveryState> recoveryState;
 	Optional<WorkerInterface> ratekeeperWorker;
 	Optional<WorkerInterface> dataDistributorWorker;
 	std::vector<StorageServerInterface> storageServers;
@@ -69,10 +72,12 @@ public:
 	void addref() const override { ReferenceCounted<WorkerEventProvider>::addref(); }
 	void delref() const override { ReferenceCounted<WorkerEventProvider>::delref(); }
 	void setWorkers(std::vector<WorkerDetails> workers);
+	void setRecoveryState(RecoveryState recoveryState);
 	void setRatekeeperWorker(Optional<WorkerInterface> ratekeeperWorker);
 	void setDataDistributorWorker(Optional<WorkerInterface> dataDistributorWorker);
 	void setStorageServers(std::vector<StorageServerInterface> storageServers);
 	void setTLogs(std::vector<TLogInterface> tlogs);
+	Optional<RecoveryState> getRecoveryState() const override;
 	Future<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const override;
 	Future<LatestWorkerEvents> getLatestRatekeeperEvents(std::string const& eventName) const override;
 	Future<LatestWorkerEvents> getLatestDataDistributorEvents(std::string const& eventName) const override;
