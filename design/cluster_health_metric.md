@@ -122,8 +122,8 @@ Source event:
 - `RkUpdate`
 
 Fields used:
-- `ReleasedTPS`
-- `TPSLimit`
+- `ReleasedTPS`: Ratekeeper's smoothed rate of transactions that GRV proxies have recently released from their start-transaction queues. A released transaction has been allowed to get a read version and begin; this is not commit throughput.
+- `TPSLimit`: Ratekeeper's current transaction-per-second limit for normal transaction starts, computed from cluster pressure signals and sent back to GRV proxies to pace future releases. A value of `0` means ratekeeper is not allowing normal transaction starts.
 
 Behavior:
 - Returns `OUTAGE` if any `TPSLimit == 0`.
