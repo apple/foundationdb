@@ -1,5 +1,5 @@
 /*
- *RocksDBCheckpointUtils.actor.cpp
+ *RocksDBCheckpointUtils.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/core/RocksDBCheckpointUtils.actor.h"
+#include "fdbserver/core/RocksDBCheckpointUtils.h"
 
 #ifdef WITH_ROCKSDB
 #include <rocksdb/db.h>
@@ -42,8 +42,6 @@
 #include "flow/ThreadHelper.actor.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
-
-#include "flow/actorcompiler.h" // has to be last include
 
 #ifdef WITH_ROCKSDB
 
@@ -155,33 +153,36 @@ Error statusToError(const rocksdb::Status& s) {
 }
 
 // Fetch a single sst file from storage server. The progress is checkpointed via cFun.
-ACTOR Future<int64_t> doFetchCheckpointFile(Database cx,
-                                            std::string remoteFile,
-                                            std::string localFile,
-                                            UID ssId,
-                                            UID checkpointId,
-                                            int maxRetries = 3) {
-	state Transaction tr(cx);
-	state StorageServerInterface ssi;
-	loop {
+Future<int64_t> doFetchCheckpointFile(Database cx,
+                                      std::string remoteFile,
+                                      std::string localFile,
+                                      UID ssId,
+                                      UID checkpointId,
+                                      int maxRetries = 3) {
+	Transaction tr(cx);
+	StorageServerInterface ssi;
+	while (true) {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			Optional<Value> ss = wait(tr.get(serverListKeyFor(ssId)));
+			Optional<Value> ss = co_await tr.get(serverListKeyFor(ssId));
 			if (!ss.present()) {
 				throw checkpoint_not_found();
 			}
 			ssi = decodeServerListValue(ss.get());
 			break;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 
-	state int attempt = 0;
-	state int64_t offset = 0;
-	state Reference<IAsyncFile> asyncFile;
-	loop {
+	int attempt = 0;
+	int64_t offset = 0;
+	Reference<IAsyncFile> asyncFile;
+	while (true) {
 		offset = 0;
+		Error err;
 		try {
 			asyncFile = Reference<IAsyncFile>();
 			++attempt;
@@ -192,12 +193,12 @@ ACTOR Future<int64_t> doFetchCheckpointFile(Database cx,
 			    .detail("CheckpointId", checkpointId)
 			    .detail("Attempt", attempt);
 
-			wait(IAsyncFileSystem::filesystem()->deleteFile(localFile, true));
+			co_await IAsyncFileSystem::filesystem()->deleteFile(localFile, true);
 			const int64_t flags = IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE |
 			                      IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO;
-			wait(store(asyncFile, IAsyncFileSystem::filesystem()->open(localFile, flags, 0666)));
+			co_await store(asyncFile, IAsyncFileSystem::filesystem()->open(localFile, flags, 0666));
 
-			state ReplyPromiseStream<FetchCheckpointReply> stream =
+			ReplyPromiseStream<FetchCheckpointReply> stream =
 			    ssi.fetchCheckpoint.getReplyStream(FetchCheckpointRequest(checkpointId, remoteFile));
 			TraceEvent(SevDebug, "FetchCheckpointFileReceivingData")
 			    .detail("RemoteFile", remoteFile)
@@ -205,62 +206,63 @@ ACTOR Future<int64_t> doFetchCheckpointFile(Database cx,
 			    .detail("TargetUID", ssId)
 			    .detail("CheckpointId", checkpointId)
 			    .detail("Attempt", attempt);
-			loop {
-				state FetchCheckpointReply rep = waitNext(stream.getFuture());
-				wait(asyncFile->write(rep.data.begin(), rep.data.size(), offset));
-				wait(asyncFile->flush());
+			while (true) {
+				FetchCheckpointReply rep = co_await stream.getFuture();
+				co_await asyncFile->write(rep.data.begin(), rep.data.size(), offset);
+				co_await asyncFile->flush();
 				offset += rep.data.size();
 			}
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) {
-				throw e;
-			} else if (e.code() != error_code_end_of_stream) {
-				TraceEvent(SevWarnAlways, "FetchCheckpointFileError")
-				    .errorUnsuppressed(e)
-				    .detail("RemoteFile", remoteFile)
-				    .detail("LocalFile", localFile)
-				    .detail("TargetUID", ssId)
-				    .detail("CheckpointId", checkpointId)
-				    .detail("Attempt", attempt);
-				if (attempt >= maxRetries) {
-					throw e;
-				}
-			} else {
-				wait(asyncFile->sync());
-				int64_t fileSize = wait(asyncFile->size());
-				TraceEvent(SevDebug, "FetchCheckpointFileEnd")
-				    .detail("RemoteFile", remoteFile)
-				    .detail("LocalFile", localFile)
-				    .detail("TargetUID", ssId)
-				    .detail("CheckpointId", checkpointId)
-				    .detail("Attempt", attempt)
-				    .detail("FileSize", fileSize);
-				return fileSize;
+			err = e;
+		}
+		if (err.code() == error_code_actor_cancelled) {
+			throw err;
+		} else if (err.code() != error_code_end_of_stream) {
+			TraceEvent(SevWarnAlways, "FetchCheckpointFileError")
+			    .errorUnsuppressed(err)
+			    .detail("RemoteFile", remoteFile)
+			    .detail("LocalFile", localFile)
+			    .detail("TargetUID", ssId)
+			    .detail("CheckpointId", checkpointId)
+			    .detail("Attempt", attempt);
+			if (attempt >= maxRetries) {
+				throw err;
 			}
+		} else {
+			co_await asyncFile->sync();
+			int64_t fileSize = co_await asyncFile->size();
+			TraceEvent(SevDebug, "FetchCheckpointFileEnd")
+			    .detail("RemoteFile", remoteFile)
+			    .detail("LocalFile", localFile)
+			    .detail("TargetUID", ssId)
+			    .detail("CheckpointId", checkpointId)
+			    .detail("Attempt", attempt)
+			    .detail("FileSize", fileSize);
+			co_return fileSize;
 		}
 	}
 }
 
-ACTOR Future<Void> fetchCheckpointBytesSampleFile(Database cx,
-                                                  std::shared_ptr<CheckpointMetaData> metaData,
-                                                  std::string dir,
-                                                  std::function<Future<Void>(const CheckpointMetaData&)> cFun,
-                                                  int maxRetries = 3) {
+Future<Void> fetchCheckpointBytesSampleFile(Database cx,
+                                            std::shared_ptr<CheckpointMetaData> metaData,
+                                            std::string dir,
+                                            std::function<Future<Void>(const CheckpointMetaData&)> cFun,
+                                            int maxRetries = 3) {
 	ASSERT(metaData->bytesSampleFile.present());
-	state std::string localFile = joinPath(dir, metaData->checkpointID.toString() + "_metadata_bytes.sst");
+	std::string localFile = joinPath(dir, metaData->checkpointID.toString() + "_metadata_bytes.sst");
 	TraceEvent(SevDebug, "FetchCheckpointByteSampleBegin")
 	    .detail("Checkpoint", metaData->toString())
 	    .detail("LocalFile", localFile);
 
 	ASSERT(!metaData->src.empty());
-	state UID ssId = metaData->src.front();
+	UID ssId = metaData->src.front();
 
-	wait(success(doFetchCheckpointFile(cx, metaData->bytesSampleFile.get(), localFile, ssId, metaData->checkpointID)));
+	co_await success(
+	    doFetchCheckpointFile(cx, metaData->bytesSampleFile.get(), localFile, ssId, metaData->checkpointID));
 	metaData->bytesSampleFile = localFile;
 	if (cFun) {
-		wait(cFun(*metaData));
+		co_await cFun(*metaData);
 	}
-	return Void();
 }
 
 // RocksDBColumnFamilyReader reads a RocksDB checkpoint, and returns the key-value pairs via nextKeyValues.
@@ -392,7 +394,7 @@ private:
 
 	Future<RangeResult> nextBatch(const int rowLimit, const int byteLimit, RocksCfCheckpointIterator* iterator);
 
-	ACTOR static Future<Void> doClose(RocksDBColumnFamilyReader* self);
+	static Future<Void> doClose(RocksDBColumnFamilyReader* self);
 
 	DB db = nullptr;
 	CF cf = nullptr;
@@ -707,27 +709,21 @@ rocksdb::Status RocksDBColumnFamilyReader::Reader::closeInternal(const std::stri
 	return s;
 }
 
-ACTOR Future<Void> RocksDBColumnFamilyReader::doClose(RocksDBColumnFamilyReader* self) {
-	if (self == nullptr)
-		return Void();
+Future<Void> RocksDBColumnFamilyReader::doClose(RocksDBColumnFamilyReader* self) {
+	if (self == nullptr) {
+		co_return;
+	}
 
 	auto a = new RocksDBColumnFamilyReader::Reader::CloseAction(self->path, false);
 	auto f = a->done.getFuture();
 	self->threads->post(a);
-	wait(f);
+	co_await f;
 
-	if (self != nullptr) {
-		wait(self->threads->stop());
+	co_await self->threads->stop();
+	if (self->db != nullptr) {
+		delete self->db;
 	}
-
-	if (self != nullptr) {
-		if (self->db != nullptr) {
-			delete self->db;
-		}
-		delete self;
-	}
-
-	return Void();
+	delete self;
 }
 
 class RocksDBSstFileWriter : public IRocksDBSstFileWriter {
@@ -950,11 +946,11 @@ public:
 	Future<Void> close() override;
 
 private:
-	ACTOR static Future<Void> doInit(RocksDBCFCheckpointReader* self) {
+	static Future<Void> doInit(RocksDBCFCheckpointReader* self) {
 		ASSERT(self != nullptr);
 		try {
-			state Reference<IAsyncFile> _file = wait(IAsyncFileSystem::filesystem()->open(
-			    self->path_, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO, 0));
+			Reference<IAsyncFile> _file = co_await IAsyncFileSystem::filesystem()->open(
+			    self->path_, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO, 0);
 			self->file_ = _file;
 			TraceEvent("RocksDBCheckpointReaderOpenFile").detail("File", self->path_);
 		} catch (Error& e) {
@@ -963,27 +959,25 @@ private:
 			    .detail("File", self->path_);
 			throw e;
 		}
-
-		return Void();
 	}
 
-	ACTOR static UNCANCELLABLE Future<Standalone<StringRef>> getNextChunk(RocksDBCFCheckpointReader* self,
-	                                                                      int byteLimit) {
+	static Future<Standalone<StringRef>> getNextChunk(RocksDBCFCheckpointReader* self,
+	                                                  int byteLimit,
+	                                                  Uncancellable = Uncancellable()) {
 		int blockSize = std::min(64 * 1024, byteLimit); // Block size read from disk.
-		state Standalone<StringRef> buf = makeAlignedString(_PAGE_SIZE, blockSize);
-		int bytesRead = wait(self->file_->read(mutateString(buf), blockSize, self->offset_));
+		Standalone<StringRef> buf = makeAlignedString(_PAGE_SIZE, blockSize);
+		int bytesRead = co_await self->file_->read(mutateString(buf), blockSize, self->offset_);
 		if (bytesRead == 0) {
 			throw end_of_stream();
 		}
 
 		self->offset_ += bytesRead;
-		return buf.substr(0, bytesRead);
+		co_return buf.substr(0, bytesRead);
 	}
 
-	ACTOR static Future<Void> doClose(RocksDBCFCheckpointReader* self) {
-		wait(delay(0, TaskPriority::FetchKeys));
+	static Future<Void> doClose(RocksDBCFCheckpointReader* self) {
+		co_await delay(0, TaskPriority::FetchKeys);
 		delete self;
-		return Void();
 	}
 
 	CheckpointMetaData checkpoint_;
@@ -1028,17 +1022,17 @@ Future<Void> RocksDBCFCheckpointReader::close() {
 }
 
 // Fetch a single sst file from storage server. The progress is checkpointed via cFun.
-ACTOR Future<Void> fetchCheckpointFile(Database cx,
-                                       std::shared_ptr<CheckpointMetaData> metaData,
-                                       int idx,
-                                       std::string dir,
-                                       std::function<Future<Void>(const CheckpointMetaData&)> cFun,
-                                       int maxRetries = 3) {
-	state RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(*metaData);
+Future<Void> fetchCheckpointFile(Database cx,
+                                 std::shared_ptr<CheckpointMetaData> metaData,
+                                 int idx,
+                                 std::string dir,
+                                 std::function<Future<Void>(const CheckpointMetaData&)> cFun,
+                                 int maxRetries = 3) {
+	RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(*metaData);
 
 	// Skip fetched file.
 	if (rocksCF.sstFiles[idx].fetched && rocksCF.sstFiles[idx].db_path == dir) {
-		return Void();
+		co_return;
 	}
 
 	const std::string remoteFile = rocksCF.sstFiles[idx].name;
@@ -1046,25 +1040,24 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 	ASSERT_EQ(metaData->src.size(), 1);
 	const UID ssId = metaData->src.front();
 
-	wait(success(doFetchCheckpointFile(cx, remoteFile, localFile, ssId, metaData->checkpointID)));
+	co_await success(doFetchCheckpointFile(cx, remoteFile, localFile, ssId, metaData->checkpointID));
 	rocksCF.sstFiles[idx].db_path = dir;
 	rocksCF.sstFiles[idx].fetched = true;
 	metaData->setSerializedCheckpoint(ObjectWriter::toValue(rocksCF, IncludeVersion()));
 	if (cFun) {
-		wait(cFun(*metaData));
+		co_await cFun(*metaData);
 	}
-	return Void();
 }
 
 // TODO: Return when a file exceeds a limit.
-ACTOR Future<Void> fetchCheckpointRange(Database cx,
-                                        std::shared_ptr<CheckpointMetaData> metaData,
-                                        KeyRange range,
-                                        std::string dir,
-                                        std::shared_ptr<rocksdb::SstFileWriter> writer,
-                                        std::function<Future<Void>(const CheckpointMetaData&)> cFun,
-                                        int maxRetries = 3) {
-	state std::string localFile =
+Future<Void> fetchCheckpointRange(Database cx,
+                                  std::shared_ptr<CheckpointMetaData> metaData,
+                                  KeyRange range,
+                                  std::string dir,
+                                  std::shared_ptr<rocksdb::SstFileWriter> writer,
+                                  std::function<Future<Void>(const CheckpointMetaData&)> cFun,
+                                  int maxRetries = 3) {
+	std::string localFile =
 	    joinPath(dir, UID(metaData->checkpointID.first(), deterministicRandom()->randomUInt64()).toString() + ".sst");
 	RocksDBCheckpointKeyValues rkv = getRocksKeyValuesCheckpoint(*metaData);
 	TraceEvent("FetchCheckpointRange", metaData->checkpointID)
@@ -1077,14 +1070,15 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 	}
 
 	ASSERT(!metaData->src.empty());
-	state UID ssID = metaData->src.front();
-	state Transaction tr(cx);
-	state StorageServerInterface ssi;
-	loop {
+	UID ssID = metaData->src.front();
+	Transaction tr(cx);
+	StorageServerInterface ssi;
+	while (true) {
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		Error err;
 		try {
-			Optional<Value> ss = wait(tr.get(serverListKeyFor(ssID)));
+			Optional<Value> ss = co_await tr.get(serverListKeyFor(ssID));
 			if (!ss.present()) {
 				TraceEvent(SevWarnAlways, "FetchCheckpointRangeStorageServerNotFound", metaData->checkpointID)
 				    .detail("SSID", ssID)
@@ -1094,18 +1088,19 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 			ssi = decodeServerListValue(ss.get());
 			break;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 
 	ASSERT(ssi.id() == ssID);
 
-	state int attempt = 0;
-	state int64_t totalBytes = 0;
-	state int64_t totalKeys = 0;
-	state rocksdb::Status status;
-	state Optional<Error> error;
-	loop {
+	int attempt = 0;
+	int64_t totalBytes = 0;
+	int64_t totalKeys = 0;
+	rocksdb::Status status;
+	Optional<Error> error;
+	while (true) {
 		totalBytes = 0;
 		totalKeys = 0;
 		++attempt;
@@ -1118,7 +1113,7 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 			    .detail("Attempt", attempt)
 			    .log();
 
-			wait(IAsyncFileSystem::filesystem()->deleteFile(localFile, true));
+			co_await IAsyncFileSystem::filesystem()->deleteFile(localFile, true);
 			status = writer->Open(localFile);
 			if (!status.ok()) {
 				Error e = statusToError(status);
@@ -1128,7 +1123,7 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 				throw e;
 			}
 
-			state ReplyPromiseStream<FetchCheckpointKeyValuesStreamReply> stream =
+			ReplyPromiseStream<FetchCheckpointKeyValuesStreamReply> stream =
 			    ssi.fetchCheckpointKeyValues.getReplyStream(
 			        FetchCheckpointKeyValuesRequest(metaData->checkpointID, range));
 			TraceEvent(SevDebug, "FetchCheckpointKeyValuesReceivingData", metaData->checkpointID)
@@ -1139,8 +1134,8 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 			    .detail("Attempt", attempt)
 			    .log();
 
-			loop {
-				FetchCheckpointKeyValuesStreamReply rep = waitNext(stream.getFuture());
+			while (true) {
+				FetchCheckpointKeyValuesStreamReply rep = co_await stream.getFuture();
 				for (int i = 0; i < rep.data.size(); ++i) {
 					DEBUG_MUTATION("FetchCheckpointData",
 					               metaData->version,
@@ -1215,14 +1210,12 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 	if (error.present()) {
 		throw error.get();
 	}
-
-	return Void();
 }
 
-ACTOR Future<Void> fetchCheckpointRanges(Database cx,
-                                         std::shared_ptr<CheckpointMetaData> metaData,
-                                         std::string dir,
-                                         std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
+Future<Void> fetchCheckpointRanges(Database cx,
+                                   std::shared_ptr<CheckpointMetaData> metaData,
+                                   std::string dir,
+                                   std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
 	RocksDBCheckpointKeyValues rkv = getRocksKeyValuesCheckpoint(*metaData);
 	TraceEvent("FetchCheckpointRanges")
 	    .detail("InitialState", metaData->toString())
@@ -1246,34 +1239,31 @@ ACTOR Future<Void> fetchCheckpointRanges(Database cx,
 			}
 		}
 	}
-	wait(waitForAll(fs));
+	co_await waitForAll(fs);
 	if (cFun) {
-		wait(cFun(*metaData));
+		co_await cFun(*metaData);
 	}
-
-	return Void();
 }
 } // namespace
 
-ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
-                                                        CheckpointMetaData initialState,
-                                                        std::string dir,
-                                                        std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
+Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
+                                                  CheckpointMetaData initialState,
+                                                  std::string dir,
+                                                  std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
 	TraceEvent(SevInfo, "FetchRocksCheckpointBegin")
 	    .detail("InitialState", initialState.toString())
 	    .detail("CheckpointDir", dir);
 
 	ASSERT(!initialState.ranges.empty());
 
-	state std::shared_ptr<CheckpointMetaData> metaData = std::make_shared<CheckpointMetaData>(initialState);
-	state std::vector<Future<Void>> futures;
+	std::shared_ptr<CheckpointMetaData> metaData = std::make_shared<CheckpointMetaData>(initialState);
+	std::vector<Future<Void>> futures;
 
 	if (metaData->getFormat() == DataMoveRocksCF) {
-		state RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(initialState);
+		RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(initialState);
 		TraceEvent(SevDebug, "RocksDBCheckpointMetaData").detail("RocksCF", rocksCF.toString());
 
-		state int i = 0;
-		for (; i < rocksCF.sstFiles.size(); ++i) {
+		for (int i = 0; i < rocksCF.sstFiles.size(); ++i) {
 			futures.push_back(fetchCheckpointFile(cx, metaData, i, dir, cFun));
 			TraceEvent(SevDebug, "GetCheckpointFetchingFile")
 			    .detail("FileName", rocksCF.sstFiles[i].name)
@@ -1282,29 +1272,29 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
 		if (metaData->bytesSampleFile.present()) {
 			futures.push_back(fetchCheckpointBytesSampleFile(cx, metaData, dir, cFun));
 		}
-		wait(waitForAll(futures));
+		co_await waitForAll(futures);
 	} else if (metaData->getFormat() == RocksDBKeyValues) {
 		futures.push_back(fetchCheckpointRanges(cx, metaData, dir, cFun));
 		if (metaData->bytesSampleFile.present()) {
 			futures.push_back(fetchCheckpointBytesSampleFile(cx, metaData, dir, cFun));
 		}
-		wait(waitForAll(futures));
+		co_await waitForAll(futures);
 	} else if (metaData->getFormat() == RocksDB) {
 		throw not_implemented();
 	}
 
-	return *metaData;
+	co_return *metaData;
 }
 
-ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint) {
+Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint) {
 	TraceEvent(SevInfo, "DeleteRocksCheckpointBegin", checkpoint.checkpointID)
 	    .detail("Checkpoint", checkpoint.toString());
 	if (checkpoint.getState() == CheckpointMetaData::Fail) {
-		return Void();
+		co_return;
 	}
 
-	state CheckpointFormat format = checkpoint.getFormat();
-	state std::unordered_set<std::string> dirs;
+	CheckpointFormat format = checkpoint.getFormat();
+	std::unordered_set<std::string> dirs;
 	if (format == DataMoveRocksCF) {
 		RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
 		TraceEvent(SevInfo, "DeleteRocksColumnFamilyCheckpoint", checkpoint.checkpointID)
@@ -1335,30 +1325,25 @@ ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint) {
 		ASSERT(false);
 	}
 
-	state std::unordered_set<std::string>::iterator it = dirs.begin();
-	for (; it != dirs.end(); ++it) {
-		const std::string dir = *it;
+	for (const std::string& dir : dirs) {
 		platform::eraseDirectoryRecursive(dir);
 		TraceEvent(SevInfo, "DeleteCheckpointRemovedDir", checkpoint.checkpointID)
 		    .detail("CheckpointID", checkpoint.checkpointID)
 		    .detail("Dir", dir);
-		wait(delay(0, TaskPriority::FetchKeys));
+		co_await delay(0, TaskPriority::FetchKeys);
 	}
-
-	return Void();
 }
 #else
-ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
-                                                        CheckpointMetaData initialState,
-                                                        std::string dir,
-                                                        std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
-	wait(delay(0));
-	return initialState;
+Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
+                                                  CheckpointMetaData initialState,
+                                                  std::string dir,
+                                                  std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
+	co_await delay(0);
+	co_return initialState;
 }
 
-ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint) {
-	wait(delay(0));
-	return Void();
+Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint) {
+	co_await delay(0);
 }
 #endif // WITH_ROCKSDB
 

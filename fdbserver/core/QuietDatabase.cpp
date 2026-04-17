@@ -813,7 +813,7 @@ struct QuietDatabaseChecker {
 };
 
 Future<Void> enableConsistencyScanInSim(Database db) {
-	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	auto tr = makeReference<ReadYourWritesTransaction>(db);
 	ConsistencyScanState cs;
 	if (!g_network->isSimulated()) {
 		co_return;
@@ -874,7 +874,7 @@ Future<Void> enableConsistencyScanInSim(Database db) {
 }
 
 Future<Void> disableConsistencyScanInSim(Database db, bool waitForCompletion) {
-	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	auto tr = makeReference<ReadYourWritesTransaction>(db);
 	ConsistencyScanState cs;
 	if (!g_network->isSimulated()) {
 		co_return;

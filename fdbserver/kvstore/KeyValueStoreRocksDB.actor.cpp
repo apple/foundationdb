@@ -67,7 +67,7 @@
 
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/IKeyValueStore.h"
-#include "fdbserver/core/RocksDBCheckpointUtils.actor.h"
+#include "fdbserver/core/RocksDBCheckpointUtils.h"
 #include "RocksDBCommon.h"
 
 #include "flow/actorcompiler.h" // has to be last include
@@ -2041,16 +2041,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			               i,
 			               SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE > 0 ? metricPromiseStreams[i].get() : nullptr),
 			    "fdb-rocksdb-re");
-		}
-	}
-
-	Future<Void> errorListenActor(Future<Void> collection) {
-		try {
-			co_await collection;
-			ASSERT(false);
-			throw internal_error();
-		} catch (Error& e) {
-			throw e;
 		}
 	}
 
