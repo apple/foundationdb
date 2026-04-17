@@ -199,10 +199,8 @@ struct StatusWorkload : TestWorkload {
 				save(br, result);
 				self->totalSize += br.getLength();
 				double latency = now() - issued;
-			self->worstLatency = std::max(self->worstLatency, latency);
-			TraceEvent("StatusWorkloadReply")
-			    .detail("ReplySize", br.getLength())
-			    .detail("Latency", latency);;
+				self->worstLatency = std::max(self->worstLatency, latency);
+				TraceEvent("StatusWorkloadReply").detail("ReplySize", br.getLength()).detail("Latency", latency);
 				std::string errorStr;
 				if (self->parsedSchema.present() &&
 				    !schemaMatch(self->parsedSchema.get(), result, errorStr, SevError, true)) {
