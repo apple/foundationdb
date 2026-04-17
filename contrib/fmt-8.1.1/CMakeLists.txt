@@ -124,6 +124,10 @@ endif ()
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
   "${CMAKE_CURRENT_SOURCE_DIR}/support/cmake")
 
+# avoid consteval errors with macOS 26 toolchain using c++20:
+# > error: call to consteval function 'fmt::basic_format_string<...>' is not a constant expression
+set(CMAKE_CXX_STANDARD 17)
+
 include(cxx14)
 include(CheckCXXCompilerFlag)
 include(JoinPaths)
