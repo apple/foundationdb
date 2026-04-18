@@ -26,14 +26,7 @@
 #include "flow/DebugTrace.h"
 #include "flow/CoroUtils.h"
 
-// create a peek stream for cursor when it's possible
-Future<Void> tryEstablishPeekStream(ServerPeekCursor* self) {
-	if (self->peekReplyStream.present())
-		co_return;
-	else if (!self->interf || !self->interf->get().present()) {
-		self->peekReplyStream.reset();
-		co_await Future<Void>(Never());
-	}
+Future<Void> tryEstablishPeekStreamImpl(ServerPeekCursor* self) {
 	co_await IFailureMonitor::failureMonitor().onStateEqual(
 	    self->interf->get().interf().peekStreamMessages.getEndpoint(), FailureStatus(false));
 
@@ -49,6 +42,17 @@ Future<Void> tryEstablishPeekStream(ServerPeekCursor* self) {
 	    .detail("PeerAddr", self->interf->get().interf().peekStreamMessages.getEndpoint().getPrimaryAddress())
 	    .detail("PeerAddress", self->interf->get().interf().peekStreamMessages.getEndpoint().getPrimaryAddress())
 	    .detail("PeerToken", self->interf->get().interf().peekStreamMessages.getEndpoint().token);
+}
+
+// create a peek stream for cursor when it's possible
+Future<Void> tryEstablishPeekStream(ServerPeekCursor* self) {
+	if (self->peekReplyStream.present())
+		return Void();
+	else if (!self->interf || !self->interf->get().present()) {
+		self->peekReplyStream.reset();
+		return Never();
+	}
+	return tryEstablishPeekStreamImpl(self);
 }
 
 ServerPeekCursor::ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInterface>>> const& interf,
@@ -258,17 +262,7 @@ Future<TLogPeekReply> recordRequestMetrics(ServerPeekCursor* self, NetworkAddres
 	throw internal_error(); // does not happen
 }
 
-Future<Void> serverPeekParallelGetMore(ServerPeekCursor* self, TaskPriority taskID) {
-	if (!self->interf || self->isExhausted()) {
-		if (self->hasMessage())
-			co_return;
-		co_await Future<Void>(Never());
-	}
-
-	if (!self->interfaceChanged.isValid()) {
-		self->interfaceChanged = self->interf->onChange();
-	}
-
+Future<Void> serverPeekParallelGetMoreImpl(ServerPeekCursor* self, TaskPriority taskID) {
 	while (true) {
 		DebugLogTraceEvent("SPC_GetMoreP", self->randomID)
 		    .detail("Tag", self->tag.toString())
@@ -374,14 +368,21 @@ Future<Void> serverPeekParallelGetMore(ServerPeekCursor* self, TaskPriority task
 	}
 }
 
-Future<Void> serverPeekStreamGetMore(ServerPeekCursor* self, TaskPriority taskID) {
+Future<Void> serverPeekParallelGetMore(ServerPeekCursor* self, TaskPriority taskID) {
 	if (!self->interf || self->isExhausted()) {
-		self->peekReplyStream.reset();
 		if (self->hasMessage())
-			co_return;
-		co_await Future<Void>(Never());
+			return Void();
+		return Never();
 	}
 
+	if (!self->interfaceChanged.isValid()) {
+		self->interfaceChanged = self->interf->onChange();
+	}
+
+	return serverPeekParallelGetMoreImpl(self, taskID);
+}
+
+Future<Void> serverPeekStreamGetMoreImpl(ServerPeekCursor* self, TaskPriority taskID) {
 	while (true) {
 		Optional<Error> err;
 		try {
@@ -446,10 +447,17 @@ Future<Void> serverPeekStreamGetMore(ServerPeekCursor* self, TaskPriority taskID
 	}
 }
 
-Future<Void> serverPeekGetMore(ServerPeekCursor* self, TaskPriority taskID) {
+Future<Void> serverPeekStreamGetMore(ServerPeekCursor* self, TaskPriority taskID) {
 	if (!self->interf || self->isExhausted()) {
-		co_await Future<Void>(Never());
+		self->peekReplyStream.reset();
+		if (self->hasMessage())
+			return Void();
+		return Never();
 	}
+	return serverPeekStreamGetMoreImpl(self, taskID);
+}
+
+Future<Void> serverPeekGetMoreImpl(ServerPeekCursor* self, TaskPriority taskID) {
 	try {
 		while (true) {
 			auto res = co_await race(self->interf->get().present()
@@ -487,6 +495,13 @@ Future<Void> serverPeekGetMore(ServerPeekCursor* self, TaskPriority taskID) {
 		}
 		throw e;
 	}
+}
+
+Future<Void> serverPeekGetMore(ServerPeekCursor* self, TaskPriority taskID) {
+	if (!self->interf || self->isExhausted()) {
+		return Never();
+	}
+	return serverPeekGetMoreImpl(self, taskID);
 }
 
 Future<Void> ServerPeekCursor::getMore(TaskPriority taskID) {
