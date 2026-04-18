@@ -1,5 +1,5 @@
 /*
- * LogSystemPeekCursor.actor.cpp
+ * LogSystemPeekCursor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
