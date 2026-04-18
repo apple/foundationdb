@@ -795,7 +795,8 @@ Future<std::vector<RangeFile>> getRangeFiles(Reference<IBackupContainer> bc, Ref
 }
 
 Future<Void> decode_logs(Reference<DecodeParams> params) {
-	Reference<IBackupContainer> container = IBackupContainer::openContainer(params->container_url, params->proxy, {});
+	Reference<IBackupContainer> container =
+	    IBackupContainer::openContainer(params->container_url, params->proxy, {}, 0);
 	UID uid = deterministicRandom()->randomUniqueID();
 	BackupFileList listing = co_await container->dumpFileList();
 	// remove partitioned logs

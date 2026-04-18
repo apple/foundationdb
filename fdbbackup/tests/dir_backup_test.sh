@@ -19,6 +19,10 @@ SCRATCH_DIR=
 readonly TAG="test_backup"
 USE_PARTITIONED_LOG=$(((RANDOM % 2)) && echo true || echo false )
 USE_ENCRYPTION=$(((RANDOM % 2)) && echo true || echo false )
+USE_ENCRYPTION_BLOCK_SIZE=false
+if [[ "${USE_ENCRYPTION}" == "true" ]]; then
+  USE_ENCRYPTION_BLOCK_SIZE=$(((RANDOM % 2)) && echo true || echo false)
+fi
 ENCRYPTION_KEY_FILE=
 
 # Install signal traps. Calls the cleanup function.
@@ -30,21 +34,27 @@ trap cleanup  EXIT
 function cleanup {
   echo "$(date -Iseconds) cleanup: starting (with 30s hard timeout)"
   start_cleanup_watchdog 30
-  
+
+  if cleanup_with_preserve_check; then
+    echo "$(date -Iseconds) cleanup: preserving test data, skipping cleanup"
+    cancel_cleanup_watchdog
+    return 0
+  fi
+
   echo "$(date -Iseconds) cleanup: shutting down FDB cluster"
   shutdown_fdb_cluster
-  
+
   if [[ -d "${SCRATCH_DIR}" ]]; then
     echo "$(date -Iseconds) cleanup: removing scratch dir: ${SCRATCH_DIR}"
     rm -rf "${SCRATCH_DIR}"
   fi
-  
+
   # Clean up encryption key file
   if [[ -n "${ENCRYPTION_KEY_FILE:-}" ]] && [[ -f "${ENCRYPTION_KEY_FILE}" ]]; then
     echo "$(date -Iseconds) cleanup: removing encryption key file: ${ENCRYPTION_KEY_FILE}"
     rm -f "${ENCRYPTION_KEY_FILE}"
   fi
-  
+
   echo "$(date -Iseconds) cleanup: complete"
   cancel_cleanup_watchdog
 }
@@ -80,6 +90,10 @@ function backup {
 
   if [[ -n "${local_encryption_key_file}" ]]; then
     cmd_args+=("--encryption-key-file" "${local_encryption_key_file}")
+  fi
+
+  if [[ "${USE_ENCRYPTION_BLOCK_SIZE}" == "true" ]]; then
+    cmd_args+=("--encryption-block-size" "4096")
   fi
 
   if [[ "${USE_PARTITIONED_LOG}" == "true" ]]; then
@@ -157,6 +171,17 @@ function test_dir_backup_and_restore {
     err "Failed clear data in fdb"
     return 1
   fi
+
+  log "Testing encryption mismatches"
+  local backup
+  local backup_name
+  if ! backup=$(ls -dt "${scratch_dir}"/backups/backup-* | head -1); then
+    err "Failed to list backups under ${scratch_dir}/backups/"
+    return 1
+  fi
+  backup_name=$(basename "${backup}")
+  test_encryption_mismatches "${local_build_dir}" "${scratch_dir}" "file://${scratch_dir}/backups/${backup_name}" "${TAG}" "${local_encryption_key_file}"
+
   log "Restore"
   if ! restore "${local_build_dir}" "${scratch_dir}" "${local_encryption_key_file}"; then
     err "Failed restore"
@@ -195,6 +220,11 @@ export FDB_DATA_KEYCOUNT=10
 # shellcheck source=/dev/null
 if ! source "${cwd}/../../fdbclient/tests/tests_common.sh"; then
   err "Failed to source tests_common.sh"
+  exit 1
+fi
+# shellcheck source=/dev/null
+if ! source "${cwd}/backup_tests_common.sh"; then
+  err "Failed to source backup_tests_common.sh"
   exit 1
 fi
 
@@ -238,6 +268,7 @@ fi
 
 readonly USE_PARTITIONED_LOG
 readonly USE_ENCRYPTION
+readonly USE_ENCRYPTION_BLOCK_SIZE
 readonly ENCRYPTION_KEY_FILE
 
 # Startup fdb cluster and backup agent.

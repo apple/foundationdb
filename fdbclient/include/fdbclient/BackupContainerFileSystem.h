@@ -82,6 +82,7 @@ public:
 	static Reference<BackupContainerFileSystem> openContainerFS(const std::string& url,
 	                                                            const Optional<std::string>& proxy,
 	                                                            const Optional<std::string>& encryptionKeyFileName,
+	                                                            int encryptionBlockSize,
 	                                                            bool isBackup = true);
 
 	// Get a list of fileNames and their sizes in the container under the given path
@@ -172,10 +173,13 @@ public:
 	                                                  Version beginVersion) final;
 	static Future<Void> createTestEncryptionKeyFile(std::string const& filename);
 
-	Future<Void> writeEncryptionMetadata() override;
+	Future<Void> writeEncryptionMetadata(int encryptionBlockSize) override;
 
 	// Waits for encryption initialization to complete by reading encryption key file during container opening.
 	Future<Void> encryptionSetupComplete() const override;
+
+	int getEncryptionBlockSize() const override { return encryptionBlockSize; }
+	void setEncryptionBlockSize(int blockSize) override { encryptionBlockSize = blockSize; }
 
 protected:
 	// Returns true if an encryption key file was provided.
@@ -184,6 +188,8 @@ protected:
 	void setEncryptionKey(Optional<std::string> const& encryptionKeyFileName);
 
 	Future<Void> writeEntireFileFallback(const std::string& fileName, const std::string& fileContents);
+
+	int encryptionBlockSize = 0;
 
 private:
 	struct VersionProperty {
@@ -212,6 +218,8 @@ private:
 	VersionProperty unreliableEndVersion();
 	VersionProperty logType();
 	VersionProperty fileLevelEncryption();
+
+	static std::string encryptionMetadataFileName();
 
 	// List range files, unsorted, which contain data at or between beginVersion and endVersion
 	// NOTE: This reads the range file folder schema from FDB 6.0.15 and earlier and is provided for backward

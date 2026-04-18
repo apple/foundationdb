@@ -557,6 +557,40 @@ public:
 		return prevEnd;
 	}
 
+	// Read encryption metadata from JSON file
+	static Future<std::pair<bool, int>> readEncryptionMetadata(Reference<BackupContainerFileSystem> bc) {
+		try {
+			Reference<IAsyncFile> f = co_await bc->readFile(BackupContainerFileSystem::encryptionMetadataFileName());
+			int64_t size = co_await f->size();
+			std::string content;
+			content.resize(size);
+			co_await f->read((uint8_t*)content.data(), size, 0);
+
+			json_spirit::mValue json;
+			if (json_spirit::read_string(content, json) && json.type() == json_spirit::obj_type) {
+				auto& obj = json.get_obj();
+				bool enabled = false;
+				int blockSize = 0;
+
+				if (obj.count("is_encryption_enabled") &&
+				    obj.at("is_encryption_enabled").type() == json_spirit::bool_type) {
+					enabled = obj.at("is_encryption_enabled").get_bool();
+				}
+				if (obj.count("encryption_block_size") &&
+				    obj.at("encryption_block_size").type() == json_spirit::int_type) {
+					blockSize = obj.at("encryption_block_size").get_int();
+				}
+				TraceEvent("BackupContainerReadEncryptionMetadata")
+				    .detail("URL", bc->getURL())
+				    .detail("IsEncryptionEnabled", enabled)
+				    .detail("EncryptionBlockSize", blockSize);
+				co_return std::make_pair(enabled, blockSize);
+			}
+		} catch (Error& e) {
+		}
+		co_return std::make_pair(false, 0);
+	}
+
 	static Future<BackupDescription> describeBackup(Reference<BackupContainerFileSystem> bc,
 	                                                bool deepScan,
 	                                                Version logStartVersionOverride) {
@@ -590,13 +624,13 @@ public:
 		Optional<Version> metaExpiredEnd;
 		Optional<Version> metaUnreliableEnd;
 		Optional<Version> metaLogType;
-		Optional<Version> fileLevelEncryption;
+		bool fileLevelEncryptionEnabled = false;
+		int encryptionBlockSize = 0;
 
 		std::vector<Future<Void>> metaReads;
 		metaReads.push_back(store(metaExpiredEnd, bc->expiredEndVersion().get()));
 		metaReads.push_back(store(metaUnreliableEnd, bc->unreliableEndVersion().get()));
 		metaReads.push_back(store(metaLogType, bc->logType().get()));
-		metaReads.push_back(store(fileLevelEncryption, bc->fileLevelEncryption().get()));
 
 		// Only read log begin/end versions if not doing a deep scan, otherwise scan files and recalculate them.
 		if (!deepScan) {
@@ -606,6 +640,10 @@ public:
 
 		co_await waitForAll(metaReads);
 
+		std::pair<bool, int> encryptionMeta = co_await readEncryptionMetadata(bc);
+		fileLevelEncryptionEnabled = encryptionMeta.first;
+		encryptionBlockSize = encryptionMeta.second;
+
 		TraceEvent("BackupContainerDescribe2")
 		    .detail("URL", bc->getURL())
 		    .detail("LogStartVersionOverride", logStartVersionOverride)
@@ -613,7 +651,9 @@ public:
 		    .detail("UnreliableEndVersion", metaUnreliableEnd.orDefault(invalidVersion))
 		    .detail("LogBeginVersion", metaLogBegin.orDefault(invalidVersion))
 		    .detail("LogEndVersion", metaLogEnd.orDefault(invalidVersion))
-		    .detail("LogType", metaLogType.orDefault(-1));
+		    .detail("LogType", metaLogType.orDefault(-1))
+		    .detail("FileLevelEncryption", fileLevelEncryptionEnabled)
+		    .detail("EncryptionBlockSize", encryptionBlockSize);
 
 		// If the logStartVersionOverride is positive (not relative) then ensure that unreliableEndVersion is equal or
 		// greater
@@ -694,11 +734,8 @@ public:
 			    metaLogType.present() && metaLogType.get() == BackupContainerFileSystemImpl::PARTITIONED_MUTATION_LOG;
 		}
 
-		if (fileLevelEncryption.present() && fileLevelEncryption.get() != 0) {
-			desc.fileLevelEncryption = true;
-		} else {
-			desc.fileLevelEncryption = false;
-		}
+		desc.fileLevelEncryption = fileLevelEncryptionEnabled;
+		desc.encryptionBlockSize = encryptionBlockSize;
 
 		// List logs in version order so log continuity can be analyzed
 		std::sort(logs.begin(), logs.end());
@@ -1405,16 +1442,35 @@ public:
 		ASSERT_EQ(bytesRead, cipherKey->size());
 	}
 
-	static Future<Void> writeEncryptionMetadataIfNotExists(Reference<BackupContainerFileSystem> bc) {
-		Optional<Version> existingEncryptionMetadata = co_await bc->fileLevelEncryption().get();
-
-		if (!existingEncryptionMetadata.present()) {
-			bool exists = co_await bc->exists();
-			if (!exists) {
-				co_await bc->create();
+	static Future<Void> writeEncryptionMetadataIfNotExists(Reference<BackupContainerFileSystem> bc,
+	                                                       int encryptionBlockSize) {
+		try {
+			Reference<IAsyncFile> f = co_await bc->readFile(BackupContainerFileSystem::encryptionMetadataFileName());
+			int64_t size = co_await f->size();
+			TraceEvent("WriteEncryptionMetadataAlreadyExists").detail("URL", bc->getURL()).detail("FileSize", size);
+			co_return;
+		} catch (Error& e) {
+			if (e.code() != error_code_file_not_found) {
+				TraceEvent(SevWarn, "WriteEncryptionMetadataReadError").error(e).detail("URL", bc->getURL());
+				throw e;
 			}
-			co_await bc->fileLevelEncryption().set(bc->encryptionKeyFileName.present() ? 1 : 0);
 		}
+
+		bool exists = co_await bc->exists();
+		if (!exists) {
+			TraceEvent("WriteEncryptionMetadataCreatingContainer").detail("URL", bc->getURL());
+			co_await bc->create();
+		}
+
+		// Write JSON with encryption metadata
+		JsonBuilderObject doc;
+		doc.setKey("is_encryption_enabled", bc->encryptionKeyFileName.present());
+		doc.setKey("encryption_block_size", encryptionBlockSize);
+
+		std::string jsonStr = doc.getJson();
+		TraceEvent("WriteEncryptionMetadataCompleted").detail("URL", bc->getURL()).detail("JSON", jsonStr);
+
+		co_await bc->writeEntireFile(BackupContainerFileSystem::encryptionMetadataFileName(), jsonStr);
 	}
 
 }; // class BackupContainerFileSystemImpl
@@ -1622,9 +1678,9 @@ Future<Void> BackupContainerFileSystem::expireData(Version expireEndVersion,
 	    Reference<BackupContainerFileSystem>::addRef(this), expireEndVersion, force, progress, restorableBeginVersion);
 }
 
-Future<Void> BackupContainerFileSystem::writeEncryptionMetadata() {
+Future<Void> BackupContainerFileSystem::writeEncryptionMetadata(int encryptionBlockSize) {
 	return BackupContainerFileSystemImpl::writeEncryptionMetadataIfNotExists(
-	    Reference<BackupContainerFileSystem>::addRef(this));
+	    Reference<BackupContainerFileSystem>::addRef(this), encryptionBlockSize);
 }
 
 static Future<KeyRange> getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem> bc,
@@ -1756,6 +1812,10 @@ BackupContainerFileSystem::VersionProperty BackupContainerFileSystem::fileLevelE
 	return { Reference<BackupContainerFileSystem>::addRef(this), "file_level_encryption" };
 }
 
+std::string BackupContainerFileSystem::encryptionMetadataFileName() {
+	return "properties/file_level_encryption";
+}
+
 bool BackupContainerFileSystem::usesEncryption() const {
 	return encryptionSetupFuture.isValid();
 }
@@ -1774,6 +1834,7 @@ void BackupContainerFileSystem::setEncryptionKey(Optional<std::string> const& en
 		encryptionSetupFuture = BackupContainerFileSystemImpl::readEncryptionKey(encryptionKeyFileName.get());
 	}
 }
+
 Future<Void> BackupContainerFileSystem::createTestEncryptionKeyFile(std::string const& filename) {
 	return BackupContainerFileSystemImpl::createTestEncryptionKeyFile(filename);
 }
@@ -1785,6 +1846,7 @@ Reference<BackupContainerFileSystem> BackupContainerFileSystem::openContainerFS(
     const std::string& url,
     const Optional<std::string>& proxy,
     const Optional<std::string>& encryptionKeyFileName,
+    int encryptionBlockSize,
     bool isBackup) {
 	static std::map<std::string, Reference<BackupContainerFileSystem>> m_cache;
 
@@ -1795,7 +1857,7 @@ Reference<BackupContainerFileSystem> BackupContainerFileSystem::openContainerFS(
 	try {
 		StringRef u(url);
 		if (u.startsWith("file://"_sr)) {
-			r = makeReference<BackupContainerLocalDirectory>(url, encryptionKeyFileName);
+			r = makeReference<BackupContainerLocalDirectory>(url, encryptionKeyFileName, encryptionBlockSize);
 		} else if (u.startsWith("blobstore://"_sr)) {
 			std::string resource;
 			Optional<std::string> blobstoreProxy;
@@ -1815,7 +1877,7 @@ Reference<BackupContainerFileSystem> BackupContainerFileSystem::openContainerFS(
 
 			BackupContainerBlobStore::validateBackupUrl(resource);
 			r = makeReference<BackupContainerBlobStore>(
-			    bstore, resource, backupParams, encryptionKeyFileName, isBackup);
+			    bstore, resource, backupParams, encryptionKeyFileName, isBackup, encryptionBlockSize);
 		}
 #ifdef BUILD_AZURE_BACKUP
 		else if (u.startsWith("azure://"_sr)) {
@@ -1967,7 +2029,9 @@ Future<Void> testBackupContainer(std::string url,
 
 	printf("BackupContainerTest URL %s\n", url.c_str());
 
-	Reference<IBackupContainer> c = IBackupContainer::openContainer(url, proxy, encryptionKeyFileName);
+	int encryptionBlockSize = encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0;
+	Reference<IBackupContainer> c =
+	    IBackupContainer::openContainer(url, proxy, encryptionKeyFileName, encryptionBlockSize);
 
 	// Make sure container doesn't exist, then create it.
 	try {
@@ -2399,7 +2463,8 @@ Future<Void> testBackupContainerWithMissingLogRanges(std::string url, Optional<s
 	FlowLock lock(100e6);
 	printf("BackupContainerTest URL %s\n", url.c_str());
 
-	Reference<IBackupContainer> c = IBackupContainer::openContainer(url, proxy, {});
+	Reference<IBackupContainer> c =
+	    IBackupContainer::openContainer(url, proxy, /*encryptionKeyFileName=*/{}, /*encryptionBlockSize=*/0);
 	// Make sure container doesn't exist, then create it.
 	try {
 		co_await c->deleteContainer();
@@ -2533,7 +2598,8 @@ TEST_CASE("/backup/containers/localdir/missingLogRangesRestorability") {
 Future<Void> testBackupContinuousLogEndVer(std::string url, Optional<std::string> proxy) {
 	FlowLock lock(100e6);
 	printf("BackupContainerTest URL %s\n", url.c_str());
-	Reference<IBackupContainer> c = IBackupContainer::openContainer(url, proxy, {});
+	Reference<IBackupContainer> c =
+	    IBackupContainer::openContainer(url, proxy, /*encryptionKeyFileName=*/{}, /*encryptionBlockSize=*/0);
 
 	// Make sure container doesn't exist, then create it.
 	try {

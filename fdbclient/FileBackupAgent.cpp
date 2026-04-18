@@ -1636,7 +1636,8 @@ void decodeKVPairs(StringRefReader* reader, Standalone<VectorRef<KeyValueRef>>* 
 }
 
 static Reference<IBackupContainer> getBackupContainerWithProxy(Reference<IBackupContainer> _bc) {
-	Reference<IBackupContainer> bc = IBackupContainer::openContainer(_bc->getURL(), fileBackupAgentProxy, {});
+	Reference<IBackupContainer> bc = IBackupContainer::openContainer(
+	    _bc->getURL(), fileBackupAgentProxy, _bc->getEncryptionKeyFileName(), _bc->getEncryptionBlockSize());
 	return bc;
 }
 
@@ -2301,6 +2302,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		if (!_bc) {
 			co_return;
 		}
+
 		Reference<IBackupContainer> bc = getBackupContainerWithProxy(_bc);
 		bool done = false;
 		int64_t nrKeys = 0;
@@ -3685,7 +3687,6 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 					Reference<IBackupContainer> _bc = co_await config.backupContainer().getOrThrow(tr);
 					bc = getBackupContainerWithProxy(_bc);
 				}
-
 				BackupConfig::RangeFileMapT::RangeResultType rangeresults =
 				    co_await config.snapshotRangeFileMap().getRange(tr, startKey, {}, batchSize);
 
@@ -4295,9 +4296,10 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 			}
 		}
 
+		// Properties folder is created here to ensure backup container exists because localDirectory doesn't create
+		// container during in constructor.
 		Reference<IBackupContainer> bc = co_await config.backupContainer().getOrThrow(tr);
-		co_await bc->writeEncryptionMetadata();
-
+		co_await bc->writeEncryptionMetadata(bc->getEncryptionBlockSize());
 		config.stateEnum().set(tr, EBackupState::STATE_RUNNING);
 
 		Reference<TaskFuture> backupFinished = futureBucket->future(tr);
@@ -4430,7 +4432,7 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 			Error savedError;
 			try {
 				// Open backup container for metadata access
-				Reference<IBackupContainer> bcRef = IBackupContainer::openContainer(backupUrl, {}, {});
+				Reference<IBackupContainer> bcRef = IBackupContainer::openContainer(backupUrl, {}, {}, 0);
 
 				// Get restore ranges using a transaction
 				Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
@@ -7124,7 +7126,8 @@ public:
 	                                 UsePartitionedLog partitionedLog,
 	                                 IncrementalBackupOnly incrementalBackupOnly,
 	                                 Optional<std::string> encryptionKeyFileName,
-	                                 int snapshotMode) {
+	                                 int snapshotMode,
+	                                 int encryptionBlockSize) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
@@ -7133,7 +7136,9 @@ public:
 		    .detail("TagName", tagName.c_str())
 		    .detail("StopWhenDone", stopWhenDone)
 		    .detail("UsePartitionedLog", partitionedLog)
-		    .detail("OutContainer", outContainer.toString());
+		    .detail("OutContainer", outContainer.toString())
+		    .detail("EncryptionKeyFileName", encryptionKeyFileName.present() ? encryptionKeyFileName.get() : "None")
+		    .detail("EncryptionBlockSize", encryptionBlockSize);
 
 		KeyBackedTag tag = makeBackupTag(tagName);
 		Optional<UidAndAbortedFlagT> uidAndAbortedFlag = co_await tag.get(tr);
@@ -7162,7 +7167,14 @@ public:
 			backupContainer = joinPath(backupContainer, std::string("backup-") + nowStr.toString());
 		}
 
-		Reference<IBackupContainer> bc = IBackupContainer::openContainer(backupContainer, proxy, encryptionKeyFileName);
+		// TODO: Remove
+		if (encryptionKeyFileName.present() && encryptionBlockSize == 0) {
+			assert(false);
+			encryptionBlockSize = DEFAULT_ENCRYPTION_BLOCK_SIZE;
+		}
+
+		Reference<IBackupContainer> bc =
+		    IBackupContainer::openContainer(backupContainer, proxy, encryptionKeyFileName, encryptionBlockSize);
 		try {
 			// Use longer timeout for blobstore:// URLs in simulation to handle slow S3 mock operations
 			double createTimeout = (g_network->isSimulated() && isBlobstoreUrl(backupContainer)) ? 300.0 : 30.0;
@@ -7245,7 +7257,6 @@ public:
 		config.partitionedLogEnabled().set(tr, partitionedLog);
 		config.incrementalBackupOnly().set(tr, incrementalBackupOnly);
 		config.snapshotMode().set(tr, snapshotMode);
-
 		Key taskKey = co_await fileBackup::StartFullBackupTaskFunc::addTask(
 		    tr, backupAgent->taskBucket, uid, TaskCompletionKey::noSignal());
 
@@ -7268,7 +7279,9 @@ public:
 	                                  Version beginVersion,
 	                                  UID uid,
 	                                  TransformPartitionedLog transformPartitionedLog,
-	                                  bool useRangeFileRestore = true) {
+	                                  bool useRangeFileRestore = true,
+	                                  int encryptionBlockSize = 0,
+	                                  Optional<std::string> encryptionKeyFileName = {}) {
 		KeyRangeMap<int> restoreRangeSet;
 		for (auto& range : ranges) {
 			restoreRangeSet.insert(range, 1);
@@ -7333,7 +7346,13 @@ public:
 		// Point the tag to the new uid
 		tag.set(tr, { uid, false });
 
-		Reference<IBackupContainer> bc = IBackupContainer::openContainer(backupURL.toString(), proxy, {});
+		// TODO akanksha: Remove.
+		if (encryptionKeyFileName.present() && encryptionBlockSize == 0) {
+			assert(false);
+			encryptionBlockSize = DEFAULT_ENCRYPTION_BLOCK_SIZE;
+		}
+		Reference<IBackupContainer> bc =
+		    IBackupContainer::openContainer(backupURL.toString(), proxy, encryptionKeyFileName, encryptionBlockSize);
 
 		// Configure the new restore
 		restore.tag().set(tr, tagName.toString());
@@ -7355,7 +7374,6 @@ public:
 		}
 		// this also sets restore.add/removePrefix.
 		restore.initApplyMutations(tr, addPrefix, removePrefix, onlyApplyMutationLogs);
-
 		Key taskKey = co_await fileBackup::StartFullRestoreTaskFunc::addTask(
 		    tr, backupAgent->taskBucket, uid, TaskCompletionKey::noSignal());
 
@@ -8120,7 +8138,8 @@ public:
 		}
 
 		std::string urlStr = url.toString();
-		Reference<IBackupContainer> bc = IBackupContainer::openContainer(urlStr, proxy, encryptionKeyFileName);
+		Reference<IBackupContainer> bc =
+		    IBackupContainer::openContainer(urlStr, proxy, /*encryptionKeyFileName=*/{}, /*encryptionBlockSize=*/0);
 
 		// For blobstore:// URLs, use invalidVersion to allow describeBackup to write missing version properties
 		// This is needed for S3 where metadata may not be immediately consistent
@@ -8132,6 +8151,13 @@ public:
 		} else if (!desc.fileLevelEncryption && encryptionKeyFileName.present()) {
 			fprintf(stderr, "ERROR: Backup is not encrypted, please remove the encryption key file path.\n");
 			throw restore_error();
+		}
+
+		if (desc.fileLevelEncryption) {
+			bc = IBackupContainer::openContainer(urlStr, proxy, encryptionKeyFileName, desc.encryptionBlockSize);
+			// openContainer may return a cached container that has blockSize=0 (seeded earlier without blockSize).
+			// Set it explicitly to ensure the correct value is used.
+			bc->setEncryptionBlockSize(desc.encryptionBlockSize);
 		}
 
 		if (cxOrig.present()) {
@@ -8187,7 +8213,9 @@ public:
 				                       beginVersion,
 				                       randomUid,
 				                       TransformPartitionedLog(desc.partitioned),
-				                       useRangeFileRestore);
+				                       useRangeFileRestore,
+				                       desc.encryptionBlockSize,
+				                       encryptionKeyFileName);
 				co_await tr->commit();
 				break;
 			} catch (Error& e) {
@@ -8574,7 +8602,8 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
                                            UsePartitionedLog partitionedLog,
                                            IncrementalBackupOnly incrementalBackupOnly,
                                            Optional<std::string> const& encryptionKeyFileName,
-                                           int snapshotMode) {
+                                           int snapshotMode,
+                                           int encryptionBlockSize) {
 	return FileBackupAgentImpl::submitBackup(this,
 	                                         tr,
 	                                         outContainer,
@@ -8587,7 +8616,8 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
 	                                         partitionedLog,
 	                                         incrementalBackupOnly,
 	                                         encryptionKeyFileName,
-	                                         snapshotMode);
+	                                         snapshotMode,
+	                                         encryptionBlockSize);
 }
 
 Future<Void> FileBackupAgent::discontinueBackup(Reference<ReadYourWritesTransaction> tr, Key tagName) {

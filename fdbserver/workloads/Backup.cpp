@@ -178,7 +178,9 @@ struct BackupWorkload : TestWorkload {
 			                                   StopWhenDone{ !stopDifferentialDelay },
 			                                   usePartitionedLog,
 			                                   IncrementalBackupOnly::False,
-			                                   encryptionKeyFileName);
+			                                   encryptionKeyFileName,
+			                                   /*snapshotMode=*/0,
+			                                   encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0);
 		} catch (Error& e) {
 			TraceEvent("BW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)

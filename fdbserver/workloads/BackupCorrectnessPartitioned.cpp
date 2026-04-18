@@ -316,7 +316,9 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 			                                   StopWhenDone{ !stopDifferentialDelay },
 			                                   UsePartitionedLog::True, // enable partitioned log here
 			                                   IncrementalBackupOnly::False,
-			                                   encryptionKeyFileName);
+			                                   encryptionKeyFileName,
+			                                   /*snapshotMode=*/0,
+			                                   encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0);
 		} catch (Error& e) {
 			TraceEvent("BARW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
@@ -535,7 +537,8 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 			if (lastBackupContainer && performRestore) {
 				auto container = IBackupContainer::openContainer(lastBackupContainer->getURL(),
 				                                                 lastBackupContainer->getProxy(),
-				                                                 lastBackupContainer->getEncryptionKeyFileName());
+				                                                 lastBackupContainer->getEncryptionKeyFileName(),
+				                                                 lastBackupContainer->getEncryptionBlockSize());
 				BackupDescription desc = co_await container->describeBackup();
 				Version targetVersion = -1;
 				if (desc.maxRestorableVersion.present()) {
