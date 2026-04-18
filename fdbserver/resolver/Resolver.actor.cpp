@@ -803,9 +803,9 @@ Future<Void> resolverCore(ResolverInterface resolver,
 		actors.add(pollMetrics(self));
 	}
 
-	while (true) {
-		co_await race(actors.getResult(), onError);
-	}
+	co_await race(actors.getResult(), onError);
+	// The above futures should never be ready
+	UNSTOPPABLE_ASSERT(false);
 }
 
 Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
