@@ -555,17 +555,18 @@ void rejectQueuedForMaxGrvQueueDelay(Deque<GetReadVersionRequest>* queue,
 	queue->pop_front();
 }
 
-Optional<double> incomingGrvQueueDelayEstimate(GetReadVersionRequest const& req,
-                                               Deque<GetReadVersionRequest> const& systemQueue,
-                                               Deque<GetReadVersionRequest> const& defaultQueue,
-                                               Deque<GetReadVersionRequest> const& batchQueue,
-                                               GrvTransactionRateInfo const* normalRateInfo,
-                                               GrvTransactionRateInfo const* batchRateInfo) {
+bool rejectIncomingForMaxGrvQueueDelay(GetReadVersionRequest const& req,
+                                       Deque<GetReadVersionRequest> const& systemQueue,
+                                       Deque<GetReadVersionRequest> const& defaultQueue,
+                                       Deque<GetReadVersionRequest> const& batchQueue,
+                                       GrvProxyStats* stats,
+                                       GrvTransactionRateInfo const* normalRateInfo,
+                                       GrvTransactionRateInfo const* batchRateInfo) {
 	if (!req.maxGrvQueueDelayMS.present()) {
-		return Optional<double>();
+		return false;
 	}
 	if (req.priority >= TransactionPriority::IMMEDIATE) {
-		return Optional<double>();
+		return false;
 	}
 
 	int64_t queuedTransactions = queuedTransactionCount(systemQueue) + queuedTransactionCount(defaultQueue);
@@ -574,16 +575,18 @@ Optional<double> incomingGrvQueueDelayEstimate(GetReadVersionRequest const& req,
 
 		double estimatedBatchDelay = batchRateInfo->estimateDelay(queuedTransactions, req.transactionCount);
 		if (shouldRejectForMaxGrvQueueDelay(req, estimatedBatchDelay)) {
-			return estimatedBatchDelay;
+			rejectForMaxGrvQueueDelay(req, stats, estimatedBatchDelay);
+			return true;
 		}
 	}
 
 	double estimatedNormalDelay = normalRateInfo->estimateDelay(queuedTransactions, req.transactionCount);
 	if (shouldRejectForMaxGrvQueueDelay(req, estimatedNormalDelay)) {
-		return estimatedNormalDelay;
+		rejectForMaxGrvQueueDelay(req, stats, estimatedNormalDelay);
+		return true;
 	}
 
-	return Optional<double>();
+	return false;
 }
 
 // Put a GetReadVersion request into the queue corresponding to its priority.
@@ -640,10 +643,8 @@ Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> const>
 			if (!canBeQueued) {
 				proxyGRVThresholdExceeded(&req, stats);
 			} else {
-				Optional<double> estimatedDelay = incomingGrvQueueDelayEstimate(
-				    req, *systemQueue, *defaultQueue, *batchQueue, normalRateInfo, batchRateInfo);
-				if (estimatedDelay.present()) {
-					rejectForMaxGrvQueueDelay(req, stats, estimatedDelay.get());
+				if (rejectIncomingForMaxGrvQueueDelay(
+				        req, *systemQueue, *defaultQueue, *batchQueue, stats, normalRateInfo, batchRateInfo)) {
 					continue;
 				}
 
