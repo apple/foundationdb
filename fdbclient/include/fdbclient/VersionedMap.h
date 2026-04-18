@@ -26,6 +26,7 @@
 #include "flow/IndexedSet.h"
 #include "fdbclient/FDBTypes.h"
 #include "flow/IRandom.h"
+#include <unordered_set>
 
 template <class Tree>
 Future<Void> deferredCleanupActor(std::vector<Tree> toFree, TaskPriority taskID = TaskPriority::DefaultYield) {
@@ -658,8 +659,13 @@ void check(const Reference<PTree<T>>& p) {
 // This essentially gets rid of node versions that will never be read (beyond 5s worth of versions)
 // TODO look into making this per-version compaction. (We could keep track of updated nodes at each version for example)
 template <class T>
-void compact(Reference<PTree<T>>& p, Version newOldestVersion) {
+void compact(Reference<PTree<T>>& p,
+             Version newOldestVersion,
+             std::unordered_set<PTree<T>*>& visited) {
 	if (!p) {
+		return;
+	}
+	if (!visited.insert(p.getPtr()).second) {
 		return;
 	}
 	if (p->updated && p->lastUpdateVersion <= newOldestVersion) {
@@ -674,8 +680,14 @@ void compact(Reference<PTree<T>>& p, Version newOldestVersion) {
 	}
 	Reference<PTree<T>> left = p->left(newOldestVersion);
 	Reference<PTree<T>> right = p->right(newOldestVersion);
-	compact(left, newOldestVersion);
-	compact(right, newOldestVersion);
+	compact(left, newOldestVersion, visited);
+	compact(right, newOldestVersion, visited);
+}
+
+template <class T>
+void compact(Reference<PTree<T>>& p, Version newOldestVersion) {
+	std::unordered_set<PTree<T>*> visited;
+	compact(p, newOldestVersion, visited);
 }
 
 } // namespace PTreeImpl
@@ -842,9 +854,10 @@ public:
 		ASSERT(newOldestVersion <= latestVersion);
 		// auto newBegin = roots.lower_bound(newOldestVersion);
 		auto newBegin = lower_bound(roots.begin(), roots.end(), newOldestVersion, rootsComparator());
+		std::unordered_set<PTreeT*> visited;
 		for (auto root = roots.begin(); root != newBegin; ++root) {
 			if (root->second)
-				PTreeImpl::compact(root->second, newOldestVersion);
+				PTreeImpl::compact(root->second, newOldestVersion, visited);
 		}
 		// printf("\nPrinting the tree at latest version after compaction.\n");
 		// PTreeImpl::printTreeDetails(roots.back().second(), 0);
