@@ -1,0 +1,17 @@
+[[knobs]]
+# Keep GRV ratekeeper capacity low enough that thresholded requests observe
+# proxy-side queue-delay rejection without throttling cluster setup.
+ratekeeper_default_limit = 100
+ratekeeper_max_rate = 100
+
+[[test]]
+testTitle = 'MaxGrvQueueDelay'
+
+    [[test.workload]]
+    testName = 'MaxGrvQueueDelay'
+    startAfter = 5.0
+    testTimeout = 30.0
+    requestCount = 250
+    minRejected = 1
+    maxQueueDelayMS = 0
+    permissiveMaxQueueDelayMS = 60000
