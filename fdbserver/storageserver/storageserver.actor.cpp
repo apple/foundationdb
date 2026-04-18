@@ -2287,38 +2287,38 @@ Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 // must be kept alive until the watch is finished.
 extern size_t WATCH_OVERHEAD_WATCHQ, WATCH_OVERHEAD_WATCHIMPL;
 
-Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext parent, KeyRef key) {
-	Location spanLocation = "SS:watchWaitForValueChange"_loc;
-	Span span(spanLocation, parent);
-	Reference<ServerWatchMetadata> metadata = data->getWatchMetadata(key);
+ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext parent, KeyRef key) {
+	state Location spanLocation = "SS:watchWaitForValueChange"_loc;
+	state Span span(spanLocation, parent);
+	state Reference<ServerWatchMetadata> metadata = data->getWatchMetadata(key);
 	if (metadata->debugID.present())
 		g_traceBatch.addEvent("WatchValueDebug",
 		                      metadata->debugID.get().first(),
 		                      "watchValueSendReply.Before"); //.detail("TaskID", g_network->getCurrentTask());
 
-	Version originalMetadataVersion = metadata->version;
-	co_await success(waitForVersionNoTooOld(data, metadata->version));
+	state Version originalMetadataVersion = metadata->version;
+	wait(success(waitForVersionNoTooOld(data, metadata->version)));
 	if (metadata->debugID.present())
 		g_traceBatch.addEvent("WatchValueDebug",
 		                      metadata->debugID.get().first(),
 		                      "watchValueSendReply.AfterVersion"); //.detail("TaskID", g_network->getCurrentTask());
 
-	Version minVersion = data->data().latestVersion;
-	Future<Void> watchFuture = data->watches.onChange(metadata->key);
-	ReadOptions options;
-	while (true) {
+	state Version minVersion = data->data().latestVersion;
+	state Future<Void> watchFuture = data->watches.onChange(metadata->key);
+	state ReadOptions options;
+	loop {
 		try {
 			metadata = data->getWatchMetadata(key);
-			Version latest = data->version.get();
+			state Version latest = data->version.get();
 			options.debugID = metadata->debugID;
 
 			CODE_PROBE(latest >= minVersion && latest < data->data().latestVersion,
 			           "Starting watch loop with latestVersion > data->version",
 			           probe::decoration::rare);
 			GetValueRequest getReq(span.context, metadata->key, latest, metadata->tags, options, VersionVector());
-			Future<Void> getValue = getValueQ(
+			state Future<Void> getValue = getValueQ(
 			    data, getReq); // we are relying on the delay zero at the top of getValueQ, if removed we need one here
-			GetValueReply reply = co_await getReq.reply.getFuture();
+			GetValueReply reply = wait(getReq.reply.getFuture());
 			span = Span(spanLocation, parent);
 
 			if (reply.error.present()) {
@@ -2348,7 +2348,7 @@ Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext parent,
 			Version waitVersion = minVersion;
 			if (reply.value != metadata->value) {
 				if (latest >= metadata->version) {
-					co_return latest; // fire watch
+					return latest; // fire watch
 				} else if (metadata->version > originalMetadataVersion) {
 					// another watch came in and raced in case 2 and updated the version. simply just wait and read
 					// again at the higher version to confirm
@@ -2364,7 +2364,7 @@ Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext parent,
 				throw watch_cancelled();
 			}
 
-			int64_t watchBytes =
+			state int64_t watchBytes =
 			    (metadata->key.expectedSize() + metadata->value.expectedSize() + key.expectedSize() +
 			     sizeof(Reference<ServerWatchMetadata>) + sizeof(ServerWatchMetadata) + WATCH_OVERHEAD_WATCHIMPL);
 
@@ -2382,7 +2382,7 @@ Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext parent,
 				if (metadata->debugID.present())
 					g_traceBatch.addEvent(
 					    "WatchValueDebug", metadata->debugID.get().first(), "watchValueSendReply.WaitChange");
-				co_await watchFuture;
+				wait(watchFuture);
 				data->watchBytes -= watchBytes;
 			} catch (Error& e) {
 				data->watchBytes -= watchBytes;
@@ -2398,7 +2398,7 @@ Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext parent,
 
 		watchFuture = data->watches.onChange(metadata->key);
 
-		co_await data->version.whenAtLeast(data->data().latestVersion);
+		wait(data->version.whenAtLeast(data->data().latestVersion));
 	}
 }
 
@@ -2672,7 +2672,8 @@ Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpointKeyVa
 #ifdef NO_INTELLISENSE
 size_t WATCH_OVERHEAD_WATCHQ =
     sizeof(WatchValueSendReplyActorState<WatchValueSendReplyActor>) + sizeof(WatchValueSendReplyActor);
-size_t WATCH_OVERHEAD_WATCHIMPL = 0;
+size_t WATCH_OVERHEAD_WATCHIMPL =
+    sizeof(WatchWaitForValueChangeActorState<WatchWaitForValueChangeActor>) + sizeof(WatchWaitForValueChangeActor);
 #else
 size_t WATCH_OVERHEAD_WATCHQ = 0; // only used in IDE so value is irrelevant
 size_t WATCH_OVERHEAD_WATCHIMPL = 0;
