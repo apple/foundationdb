@@ -48,12 +48,12 @@ struct VersionedMapHarness {
 	map s;
 
 	void insert(K const& k) { s.insert(k, 1); }
-	result find(K const& k) const { return result(s.atLatest().find(k)); }
-	result not_found() const { return result(s.atLatest().end()); }
-	result begin() const { return result(s.atLatest().begin()); }
-	result end() const { return result(s.atLatest().end()); }
-	result lower_bound(K const& k) const { return result(s.atLatest().lower_bound(k)); }
-	result upper_bound(K const& k) const { return result(s.atLatest().upper_bound(k)); }
+	result find(K const& k) const { return result(s.latestFind(k)); }
+	result not_found() const { return result(s.latestEnd()); }
+	result begin() const { return result(s.latestBegin()); }
+	result end() const { return result(s.latestEnd()); }
+	result lower_bound(K const& k) const { return result(s.latestLowerBound(k)); }
+	result upper_bound(K const& k) const { return result(s.latestUpperBound(k)); }
 	void erase(K const& k) { s.erase(k); }
 };
 

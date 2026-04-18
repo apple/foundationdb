@@ -889,6 +889,58 @@ public:
 		PTreeFingerT finger;
 	};
 
+	iterator latestBegin() const {
+		iterator i(roots.back().second, latestVersion);
+		PTreeImpl::first(roots.back().second, latestVersion, i.finger);
+		return i;
+	}
+	iterator latestEnd() const { return iterator(roots.back().second, latestVersion); }
+
+	// Returns x such that key==*x, or latestEnd()
+	template <class X>
+	iterator latestFind(const X& key) const {
+		iterator i(roots.back().second, latestVersion);
+		PTreeImpl::lower_bound(roots.back().second, latestVersion, key, i.finger);
+		if (i && i.key() == key)
+			return i;
+		else
+			return latestEnd();
+	}
+
+	// Returns the smallest x such that *x>=key, or latestEnd()
+	template <class X>
+	iterator latestLowerBound(const X& key) const {
+		iterator i(roots.back().second, latestVersion);
+		PTreeImpl::lower_bound(roots.back().second, latestVersion, key, i.finger);
+		return i;
+	}
+
+	// Returns the smallest x such that *x>key, or latestEnd()
+	template <class X>
+	iterator latestUpperBound(const X& key) const {
+		iterator i(roots.back().second, latestVersion);
+		PTreeImpl::upper_bound(roots.back().second, latestVersion, key, i.finger);
+		return i;
+	}
+
+	// Returns the largest x such that *x<=key, or latestEnd()
+	template <class X>
+	iterator latestLastLessOrEqual(const X& key) const {
+		iterator i(roots.back().second, latestVersion);
+		PTreeImpl::upper_bound(roots.back().second, latestVersion, key, i.finger);
+		--i;
+		return i;
+	}
+
+	// Returns the largest x such that *x<key, or latestEnd()
+	template <class X>
+	iterator latestLastLess(const X& key) const {
+		iterator i(roots.back().second, latestVersion);
+		PTreeImpl::lower_bound(roots.back().second, latestVersion, key, i.finger);
+		--i;
+		return i;
+	}
+
 	class ViewAtVersion {
 	public:
 		ViewAtVersion(Tree const& root, Version at) : root(root), at(at) {}

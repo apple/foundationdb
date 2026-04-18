@@ -6104,7 +6104,7 @@ bool changeDurableVersion(StorageServer* data, Version desiredDurableVersion) {
 		int64_t bytesDurable = VERSION_OVERHEAD;
 		for (const auto& m : v.mutations) {
 			bytesDurable += mvccStorageBytes(m);
-			auto i = verData.atLatest().find(m.param1);
+			auto i = verData.latestFind(m.param1);
 			if (i) {
 				ASSERT(i.key() == m.param1);
 				ASSERT(i.insertVersion() >= nextDurableVersion);
@@ -6114,7 +6114,7 @@ bool changeDurableVersion(StorageServer* data, Version desiredDurableVersion) {
 			if (m.type == MutationRef::SetValue) {
 				// A set can split a clear, so there might be another entry immediately after this one that should also
 				// be cleaned up
-				i = verData.atLatest().upper_bound(m.param1);
+				i = verData.latestUpperBound(m.param1);
 				if (i) {
 					ASSERT(i.insertVersion() >= nextDurableVersion);
 					if (i.insertVersion() == nextDurableVersion)
@@ -6165,10 +6165,11 @@ bool convertAtomicOp(MutationRef& m, StorageServer::VersionedData const& data, U
 	// After this function call, m should be copied into an arena immediately (before modifying data, shards, or eager)
 	if (m.type != MutationRef::ClearRange && m.type != MutationRef::SetValue) {
 		Optional<StringRef> oldVal;
-		auto it = data.atLatest().lastLessOrEqual(m.param1);
-		if (it != data.atLatest().end() && it->isValue() && it.key() == m.param1)
+		auto it = data.latestLastLessOrEqual(m.param1);
+		auto latestEnd = data.latestEnd();
+		if (it != latestEnd && it->isValue() && it.key() == m.param1)
 			oldVal = it->getValue();
-		else if (it != data.atLatest().end() && it->isClearTo() && it->getEndKey() > m.param1) {
+		else if (it != latestEnd && it->isClearTo() && it->getEndKey() > m.param1) {
 			CODE_PROBE(true, "Atomic op right after a clear.");
 		} else {
 			Optional<Value>& oldThing = eager->getValue(m.param1);
@@ -6287,7 +6288,7 @@ void applyMutation(StorageServer* self,
 	if (m.type == MutationRef::SetValue) {
 		// VersionedMap (data) is bookkeeping all empty ranges. If the key to be set is new, it is supposed to be in a
 		// range what was empty. Break the empty range into halves.
-		auto prev = data.atLatest().lastLessOrEqual(m.param1);
+		auto prev = data.latestLastLessOrEqual(m.param1);
 		if (prev && prev->isClearTo() && prev->getEndKey() > m.param1) {
 			ASSERT(prev.key() <= m.param1);
 			KeyRef end = prev->getEndKey();
@@ -6342,7 +6343,7 @@ void removeDataRange(StorageServer* ss,
 	     ++r)
 		range = KeyRangeRef(range.begin, r->end());
 
-	auto endClear = data.atLatest().lastLess(range.end);
+	auto endClear = data.latestLastLess(range.end);
 	if (endClear && endClear->isClearTo() && endClear->getEndKey() > range.end) {
 		// This clear has been bumped up to insertVersion==data.getLatestVersion and needs a corresponding mutation log
 		// entry to forget
@@ -6352,7 +6353,7 @@ void removeDataRange(StorageServer* ss,
 		++ss->counters.kvSystemClearRanges;
 	}
 
-	auto beginClear = data.atLatest().lastLess(range.begin);
+	auto beginClear = data.latestLastLess(range.begin);
 	if (beginClear && beginClear->isClearTo() && beginClear->getEndKey() > range.begin) {
 		// We don't need any special mutationLog entry - because the begin key and insert version are unchanged the
 		// original clear
