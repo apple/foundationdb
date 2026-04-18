@@ -574,6 +574,27 @@ Future<Void> resolveBatches(Reference<Resolver> self,
 	}
 }
 
+Future<Void> resolveMetricsRequests(Reference<Resolver> self, FutureStream<ResolutionMetricsRequest> metricsRequests) {
+	while (true) {
+		ResolutionMetricsRequest req = co_await metricsRequests;
+		++self->metricsRequests;
+		req.reply.send(
+		    self->iopsSample.getEstimate(SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? normalKeys : allKeys));
+	}
+}
+
+Future<Void> resolveSplitRequests(Reference<Resolver> self, FutureStream<ResolutionSplitRequest> splitRequests) {
+	while (true) {
+		ResolutionSplitRequest req = co_await splitRequests;
+		++self->splitRequests;
+		ResolutionSplitReply rep;
+		rep.key = self->iopsSample.splitEstimate(req.range, req.offset, req.front);
+		rep.used = self->iopsSample.getEstimate(req.front ? KeyRangeRef(req.range.begin, rep.key)
+		                                                  : KeyRangeRef(rep.key, req.range.end));
+		req.reply.send(rep);
+	}
+}
+
 namespace {
 
 // TODO: refactor with the one in CommitProxyServer.actor.cpp
@@ -786,23 +807,12 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 	}
 
 	actors.add(resolveBatches(self, resolver.resolve.getFuture(), &actors, db));
+	actors.add(resolveMetricsRequests(self, resolver.metrics.getFuture()));
+	actors.add(resolveSplitRequests(self, resolver.split.getFuture()));
 	actors.add(
 	    resolveTxnStateRequests(self, resolver.txnState.getFuture(), &transactionStateResolveContext, &addActor, db));
 
 	loop choose {
-		when(ResolutionMetricsRequest req = waitNext(resolver.metrics.getFuture())) {
-			++self->metricsRequests;
-			req.reply.send(self->iopsSample.getEstimate(SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? normalKeys
-			                                                                                               : allKeys));
-		}
-		when(ResolutionSplitRequest req = waitNext(resolver.split.getFuture())) {
-			++self->splitRequests;
-			ResolutionSplitReply rep;
-			rep.key = self->iopsSample.splitEstimate(req.range, req.offset, req.front);
-			rep.used = self->iopsSample.getEstimate(req.front ? KeyRangeRef(req.range.begin, rep.key)
-			                                                  : KeyRangeRef(rep.key, req.range.end));
-			req.reply.send(rep);
-		}
 		when(wait(actors.getResult())) {}
 		when(wait(onError)) {}
 		when(wait(doPollMetrics)) {
