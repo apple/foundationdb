@@ -271,16 +271,16 @@ struct MoveInUpdates {
 	Severity logSev;
 
 private:
-	ACTOR static Future<Void> loadUpdates(MoveInUpdates* self, Version begin, Version end);
+	static Future<Void> loadUpdates(MoveInUpdates* self, Version begin, Version end);
 
 	Key getPersistKey(const Version version, const int idx) const;
 };
 
-ACTOR Future<Void> MoveInUpdates::loadUpdates(MoveInUpdates* self, Version begin, Version end) {
+Future<Void> MoveInUpdates::loadUpdates(MoveInUpdates* self, Version begin, Version end) {
 	ASSERT(self->spilled);
 	if (begin >= end) {
 		self->spilled = MoveInUpdatesSpilled::False;
-		return Void();
+		co_return;
 	}
 
 	const Key beginKey = persistUpdatesKey(self->id, begin), endKey = persistUpdatesKey(self->id, end);
@@ -290,9 +290,9 @@ ACTOR Future<Void> MoveInUpdates::loadUpdates(MoveInUpdates* self, Version begin
 	    .detail("BeginKey", beginKey)
 	    .detail("EndKey", endKey);
 	ASSERT(beginKey < endKey);
-	RangeResult res = wait(self->store->readRange(KeyRangeRef(beginKey, endKey),
-	                                              SERVER_KNOBS->FETCH_SHARD_UPDATES_BYTE_LIMIT,
-	                                              SERVER_KNOBS->FETCH_SHARD_UPDATES_BYTE_LIMIT));
+	RangeResult res = co_await self->store->readRange(KeyRangeRef(beginKey, endKey),
+	                                                  SERVER_KNOBS->FETCH_SHARD_UPDATES_BYTE_LIMIT,
+	                                                  SERVER_KNOBS->FETCH_SHARD_UPDATES_BYTE_LIMIT);
 	std::vector<Standalone<VerUpdateRef>> restored;
 	for (int i = 0; i < res.size(); ++i) {
 		const Version version = decodePersistUpdateVersion(res[i].key.removePrefix(self->range.begin));
@@ -322,8 +322,6 @@ ACTOR Future<Void> MoveInUpdates::loadUpdates(MoveInUpdates* self, Version begin
 	    .detail("MaxVersion", restored.empty() ? invalidVersion : restored.back().version)
 	    .detail("VersionCount", restored.size())
 	    .detail("LastBatch", !res.more);
-
-	return Void();
 }
 
 bool MoveInUpdates::hasNext() const {
@@ -711,12 +709,12 @@ private:
 	void writeMutations(const VectorRef<MutationRef>& mutations, Version debugVersion, const char* debugContext);
 	void writeMutationsBuggy(const VectorRef<MutationRef>& mutations, Version debugVersion, const char* debugContext);
 
-	ACTOR static Future<Key> readFirstKey(IKeyValueStore* storage, KeyRangeRef range, Optional<ReadOptions> options) {
-		RangeResult r = wait(storage->readRange(range, 1, 1 << 30, options));
+	static Future<Key> readFirstKey(IKeyValueStore* storage, KeyRangeRef range, Optional<ReadOptions> options) {
+		RangeResult r = co_await storage->readRange(range, 1, 1 << 30, options);
 		if (r.size())
-			return r[0].key;
+			co_return r[0].key;
 		else
-			return range.end;
+			co_return range.end;
 	}
 };
 
@@ -2147,8 +2145,8 @@ std::shared_ptr<MoveInShard> StorageServer::getMoveInShard(const UID& dataMoveId
 	return shard;
 }
 
-ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
-	state int64_t resultSize = 0;
+Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
+	int64_t resultSize = 0;
 	Span span("SS:getValue"_loc, req.spanContext);
 	// Temporarily disabled -- this path is hit a lot
 	// getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
@@ -2164,11 +2162,11 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 
 		// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 		// so we need to downgrade here
-		wait(data->getQueryDelay());
-		state PriorityMultiLock::Lock readLock = wait(data->getReadLock(req.options));
+		co_await data->getQueryDelay();
+		PriorityMultiLock::Lock readLock = co_await data->getReadLock(req.options);
 
 		// Track time from requestTime through now as read queueing wait time
-		state double queueWaitEnd = g_network->timer();
+		double queueWaitEnd = g_network->timer();
 		data->counters.readLatencySamples.sample(
 		    queueWaitEnd - req.requestTime(), ReadLatencySamples::READ_QUEUE_WAIT, trackedReadType(req));
 
@@ -2177,9 +2175,9 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 			                      req.options.get().debugID.get().first(),
 			                      "getValueQ.DoRead"); //.detail("TaskID", g_network->getCurrentTask());
 
-		state Optional<Value> v;
+		Optional<Value> v;
 		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
-		state Version version = wait(waitForVersion(data, commitVersion, req.version, req.spanContext));
+		Version version = co_await waitForVersion(data, commitVersion, req.version, req.spanContext);
 		data->counters.readLatencySamples.sample(
 		    g_network->timer() - queueWaitEnd, ReadLatencySamples::READ_VERSION_WAIT, trackedReadType(req));
 
@@ -2188,21 +2186,21 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 			                      req.options.get().debugID.get().first(),
 			                      "getValueQ.AfterVersion"); //.detail("TaskID", g_network->getCurrentTask());
 
-		state uint64_t changeCounter = data->shardChangeCounter;
+		uint64_t changeCounter = data->shardChangeCounter;
 
 		if (!data->shards[req.key]->isReadable()) {
 			//TraceEvent("WrongShardServer", data->thisServerID).detail("Key", req.key).detail("Version", version).detail("In", "getValueQ");
 			throw wrong_shard_server();
 		}
 
-		state int path = 0;
+		int path = 0;
 		auto i = data->data().at(version).lastLessOrEqual(req.key);
 		if (i && i->isValue() && i.key() == req.key) {
 			v = (Value)i->getValue();
 			path = 1;
 		} else if (!i || !i->isClearTo() || i->getEndKey() <= req.key) {
 			path = 2;
-			Optional<Value> vv = wait(data->storage.readValue(req.key, req.options));
+			Optional<Value> vv = co_await data->storage.readValue(req.key, req.options);
 			data->counters.kvGetBytes += vv.expectedSize();
 			// Validate that while we were reading the data we didn't lose the version or shard
 			if (version < data->storageVersion()) {
@@ -2282,8 +2280,6 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		    data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
 		data->counters.readLatencyBands.addMeasurement(duration, 1, Filtered(resultSize > maxReadBytes));
 	}
-
-	return Void();
 }
 
 // Pessimistic estimate the number of overhead bytes used by each
@@ -2291,38 +2287,38 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 // must be kept alive until the watch is finished.
 extern size_t WATCH_OVERHEAD_WATCHQ, WATCH_OVERHEAD_WATCHIMPL;
 
-ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext parent, KeyRef key) {
-	state Location spanLocation = "SS:watchWaitForValueChange"_loc;
-	state Span span(spanLocation, parent);
-	state Reference<ServerWatchMetadata> metadata = data->getWatchMetadata(key);
+Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext parent, KeyRef key) {
+	Location spanLocation = "SS:watchWaitForValueChange"_loc;
+	Span span(spanLocation, parent);
+	Reference<ServerWatchMetadata> metadata = data->getWatchMetadata(key);
 	if (metadata->debugID.present())
 		g_traceBatch.addEvent("WatchValueDebug",
 		                      metadata->debugID.get().first(),
 		                      "watchValueSendReply.Before"); //.detail("TaskID", g_network->getCurrentTask());
 
-	state Version originalMetadataVersion = metadata->version;
-	wait(success(waitForVersionNoTooOld(data, metadata->version)));
+	Version originalMetadataVersion = metadata->version;
+	co_await success(waitForVersionNoTooOld(data, metadata->version));
 	if (metadata->debugID.present())
 		g_traceBatch.addEvent("WatchValueDebug",
 		                      metadata->debugID.get().first(),
 		                      "watchValueSendReply.AfterVersion"); //.detail("TaskID", g_network->getCurrentTask());
 
-	state Version minVersion = data->data().latestVersion;
-	state Future<Void> watchFuture = data->watches.onChange(metadata->key);
-	state ReadOptions options;
-	loop {
+	Version minVersion = data->data().latestVersion;
+	Future<Void> watchFuture = data->watches.onChange(metadata->key);
+	ReadOptions options;
+	while (true) {
 		try {
 			metadata = data->getWatchMetadata(key);
-			state Version latest = data->version.get();
+			Version latest = data->version.get();
 			options.debugID = metadata->debugID;
 
 			CODE_PROBE(latest >= minVersion && latest < data->data().latestVersion,
 			           "Starting watch loop with latestVersion > data->version",
 			           probe::decoration::rare);
 			GetValueRequest getReq(span.context, metadata->key, latest, metadata->tags, options, VersionVector());
-			state Future<Void> getValue = getValueQ(
+			Future<Void> getValue = getValueQ(
 			    data, getReq); // we are relying on the delay zero at the top of getValueQ, if removed we need one here
-			GetValueReply reply = wait(getReq.reply.getFuture());
+			GetValueReply reply = co_await getReq.reply.getFuture();
 			span = Span(spanLocation, parent);
 
 			if (reply.error.present()) {
@@ -2352,7 +2348,7 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext p
 			Version waitVersion = minVersion;
 			if (reply.value != metadata->value) {
 				if (latest >= metadata->version) {
-					return latest; // fire watch
+					co_return latest; // fire watch
 				} else if (metadata->version > originalMetadataVersion) {
 					// another watch came in and raced in case 2 and updated the version. simply just wait and read
 					// again at the higher version to confirm
@@ -2368,7 +2364,7 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext p
 				throw watch_cancelled();
 			}
 
-			state int64_t watchBytes =
+			int64_t watchBytes =
 			    (metadata->key.expectedSize() + metadata->value.expectedSize() + key.expectedSize() +
 			     sizeof(Reference<ServerWatchMetadata>) + sizeof(ServerWatchMetadata) + WATCH_OVERHEAD_WATCHIMPL);
 
@@ -2386,7 +2382,7 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext p
 				if (metadata->debugID.present())
 					g_traceBatch.addEvent(
 					    "WatchValueDebug", metadata->debugID.get().first(), "watchValueSendReply.WaitChange");
-				wait(watchFuture);
+				co_await watchFuture;
 				data->watchBytes -= watchBytes;
 			} catch (Error& e) {
 				data->watchBytes -= watchBytes;
@@ -2402,7 +2398,7 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext p
 
 		watchFuture = data->watches.onChange(metadata->key);
 
-		wait(data->version.whenAtLeast(data->data().latestVersion));
+		co_await data->version.whenAtLeast(data->data().latestVersion);
 	}
 }
 
@@ -2504,7 +2500,6 @@ Future<Void> getCheckpointQ(StorageServer* self, GetCheckpointRequest req) {
 		}
 		req.reply.sendError(e);
 	}
-	co_return;
 }
 
 // Delete the checkpoint from disk, as well as all related persisted meta data.
@@ -2677,17 +2672,16 @@ Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpointKeyVa
 #ifdef NO_INTELLISENSE
 size_t WATCH_OVERHEAD_WATCHQ =
     sizeof(WatchValueSendReplyActorState<WatchValueSendReplyActor>) + sizeof(WatchValueSendReplyActor);
-size_t WATCH_OVERHEAD_WATCHIMPL =
-    sizeof(WatchWaitForValueChangeActorState<WatchWaitForValueChangeActor>) + sizeof(WatchWaitForValueChangeActor);
+size_t WATCH_OVERHEAD_WATCHIMPL = 0;
 #else
 size_t WATCH_OVERHEAD_WATCHQ = 0; // only used in IDE so value is irrelevant
 size_t WATCH_OVERHEAD_WATCHIMPL = 0;
 #endif
 
-ACTOR Future<Void> getShardState_impl(StorageServer* data, GetShardStateRequest req) {
+Future<Void> getShardState_impl(StorageServer* data, GetShardStateRequest req) {
 	ASSERT(req.mode != GetShardStateRequest::NO_WAIT);
 
-	loop {
+	while (true) {
 		std::vector<Future<Void>> onChange;
 
 		for (auto t : data->shards.intersectingRanges(req.keys)) {
@@ -2721,11 +2715,11 @@ ACTOR Future<Void> getShardState_impl(StorageServer* data, GetShardStateRequest 
 				rep.shards = data->getStorageServerShards(req.keys);
 			}
 			req.reply.send(rep);
-			return Void();
+			co_return;
 		}
 
-		wait(waitForAll(onChange));
-		wait(delay(0)); // onChange could have been triggered by cancellation, let things settle before rechecking
+		co_await waitForAll(onChange);
+		co_await delay(0); // onChange could have been triggered by cancellation, let things settle before rechecking
 	}
 }
 
@@ -2813,14 +2807,14 @@ static inline void copyOptionalValue(Arena* a,
 		a->dependsOn(optionalValue.get().arena());
 	}
 }
-ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
-                                                    StringRef key,
-                                                    Version version,
-                                                    Arena* a,
-                                                    // To provide span context, tags, debug ID to underlying lookups.
-                                                    GetMappedKeyValuesRequest* pOriginalReq) {
-	state GetValueReqAndResultRef getValue;
-	state double getValueStart = g_network->timer();
+Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
+                                              StringRef key,
+                                              Version version,
+                                              Arena* a,
+                                              // To provide span context, tags, debug ID to underlying lookups.
+                                              GetMappedKeyValuesRequest* pOriginalReq) {
+	GetValueReqAndResultRef getValue;
+	double getValueStart = g_network->timer();
 	getValue.key = key;
 
 	if (data->shards[key]->isReadable()) {
@@ -2832,14 +2826,14 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 			// original request level, rather than individual underlying lookups. The reason is that throttle any
 			// individual underlying lookup will fail the original request, which is not productive.
 			data->actors.add(getValueQ(data, req));
-			GetValueReply reply = wait(req.reply.getFuture());
+			GetValueReply reply = co_await req.reply.getFuture();
 			if (!reply.error.present()) {
 				++data->counters.quickGetValueHit;
 				copyOptionalValue(a, getValue, reply.value);
 				const double duration = g_network->timer() - getValueStart;
 				data->counters.readLatencySamples.sample(
 				    duration, ReadLatencySamples::MAPPED_RANGE_LOCAL, trackedReadType(*pOriginalReq));
-				return getValue;
+				co_return getValue;
 			}
 			// Otherwise fallback.
 		} catch (Error& e) {
@@ -2850,18 +2844,18 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 
 	++data->counters.quickGetValueMiss;
 	if (SERVER_KNOBS->QUICK_GET_VALUE_FALLBACK) {
-		state Transaction tr(data->cx);
+		Transaction tr(data->cx);
 		tr.setVersion(version);
 		// TODO: is DefaultPromiseEndpoint the best priority for this?
 		tr.trState->taskID = TaskPriority::DefaultPromiseEndpoint;
 		Future<Optional<Value>> valueFuture = tr.get(key, Snapshot::True);
 		// TODO: async in case it needs to read from other servers.
-		Optional<Value> valueOption = wait(valueFuture);
+		Optional<Value> valueOption = co_await valueFuture;
 		copyOptionalValue(a, getValue, valueOption);
 		double duration = g_network->timer() - getValueStart;
 		data->counters.readLatencySamples.sample(
 		    duration, ReadLatencySamples::MAPPED_RANGE_REMOTE, trackedReadType(*pOriginalReq));
-		return getValue;
+		co_return getValue;
 	} else {
 		throw quick_get_value_miss();
 	}
@@ -2869,29 +2863,29 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 
 // If limit>=0, it returns the first rows in the range (sorted ascending), otherwise the last rows (sorted descending).
 // readRange has O(|result|) + O(log |data|) cost
-ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
-                                          Version version,
-                                          KeyRange range,
-                                          int limit,
-                                          int* pLimitBytes,
-                                          SpanContext parentSpan,
-                                          Optional<ReadOptions> options) {
-	state GetKeyValuesReply result;
-	state StorageServer::VersionedData::ViewAtVersion view = data->data().at(version);
-	state StorageServer::VersionedData::iterator vCurrent = view.end();
-	state KeyRef readBegin;
-	state KeyRef readEnd;
-	state Key readBeginTemp;
-	state int vCount = 0;
-	state Span span("SS:readRange"_loc, parentSpan);
-	state int resultLogicalSize = 0;
-	state int logicalSize = 0;
+Future<GetKeyValuesReply> readRange(StorageServer* data,
+                                    Version version,
+                                    KeyRange range,
+                                    int limit,
+                                    int* pLimitBytes,
+                                    SpanContext parentSpan,
+                                    Optional<ReadOptions> options) {
+	GetKeyValuesReply result;
+	StorageServer::VersionedData::ViewAtVersion view = data->data().at(version);
+	StorageServer::VersionedData::iterator vCurrent = view.end();
+	KeyRef readBegin;
+	KeyRef readEnd;
+	Key readBeginTemp;
+	int vCount = 0;
+	Span span("SS:readRange"_loc, parentSpan);
+	int resultLogicalSize = 0;
+	int logicalSize = 0;
 
 	// for caching the storage queue results during the first PTree traversal
-	state VectorRef<KeyValueRef> resultCache;
+	VectorRef<KeyValueRef> resultCache;
 
 	// for remembering the position in the resultCache
-	state int pos = 0;
+	int pos = 0;
 
 	// Check if the desired key-range is cached
 	auto containingRange = data->cachedRangeMap.rangeContaining(range.begin);
@@ -2954,7 +2948,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			// Read the data on disk up to vCurrent (or the end of the range)
 			readEnd = vCurrent ? std::min(vCurrent.key(), range.end) : range.end;
 			RangeResult atStorageVersion =
-			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, options));
+			    co_await data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, options);
 			logicalSize = atStorageVersion.logicalSize();
 			data->counters.kvScanBytes += logicalSize;
 			resultLogicalSize += logicalSize;
@@ -3052,7 +3046,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			readBegin = vCurrent ? std::max(vCurrent->isClearTo() ? vCurrent->getEndKey() : vCurrent.key(), range.begin)
 			                     : range.begin;
 			RangeResult atStorageVersion =
-			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, options));
+			    co_await data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, options);
 			logicalSize = atStorageVersion.logicalSize();
 			data->counters.kvScanBytes += logicalSize;
 			resultLogicalSize += logicalSize;
@@ -3110,16 +3104,16 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 	ASSERT(result.data.size() == 0 || *pLimitBytes + result.data.end()[-1].expectedSize() + sizeof(KeyValueRef) > 0);
 	result.more = limit == 0 || *pLimitBytes <= 0; // FIXME: Does this have to be exact?
 	result.version = version;
-	return result;
+	co_return result;
 }
 
-ACTOR Future<Key> findKey(StorageServer* data,
-                          KeySelectorRef sel,
-                          Version version,
-                          KeyRange range,
-                          int* pOffset,
-                          SpanContext parentSpan,
-                          Optional<ReadOptions> options)
+Future<Key> findKey(StorageServer* data,
+                    KeySelectorRef sel,
+                    Version version,
+                    KeyRange range,
+                    int* pOffset,
+                    SpanContext parentSpan,
+                    Optional<ReadOptions> options)
 // Attempts to find the key indicated by sel in the data at version, within range.
 // Precondition: selectorInRange(sel, range)
 // If it is found, offset is set to 0 and a key is returned which falls inside range.
@@ -3135,15 +3129,15 @@ ACTOR Future<Key> findKey(StorageServer* data,
 	ASSERT(selectorInRange(sel, range) && version >= data->oldestVersion.get());
 
 	// Count forward or backward distance items, skipping the first one if it == key and skipEqualKey
-	state bool forward = sel.offset > 0; // If forward, result >= sel.getKey(); else result <= sel.getKey()
-	state int sign = forward ? +1 : -1;
-	state bool skipEqualKey = sel.orEqual == forward;
-	state int distance = forward ? sel.offset : 1 - sel.offset;
-	state Span span("SS.findKey"_loc, parentSpan);
+	bool forward = sel.offset > 0; // If forward, result >= sel.getKey(); else result <= sel.getKey()
+	int sign = forward ? +1 : -1;
+	bool skipEqualKey = sel.orEqual == forward;
+	int distance = forward ? sel.offset : 1 - sel.offset;
+	Span span("SS.findKey"_loc, parentSpan);
 
 	// Don't limit the number of bytes if this is a trivial key selector (there will be at most two items returned from
 	// the read range in this case)
-	state int maxBytes;
+	int maxBytes{ 0 };
 	if (sel.offset <= 1 && sel.offset >= 0)
 		maxBytes = std::numeric_limits<int>::max();
 	else
@@ -3151,23 +3145,23 @@ ACTOR Future<Key> findKey(StorageServer* data,
 		               ? SERVER_KNOBS->BUGGIFY_LIMIT_BYTES
 		               : SERVER_KNOBS->STORAGE_LIMIT_BYTES;
 
-	state GetKeyValuesReply rep = wait(
-	    readRange(data,
-	              version,
-	              forward ? KeyRangeRef(sel.getKey(), range.end) : KeyRangeRef(range.begin, keyAfter(sel.getKey())),
-	              (distance + skipEqualKey) * sign,
-	              &maxBytes,
-	              span.context,
-	              options));
-	state bool more = rep.more && rep.data.size() != distance + skipEqualKey;
+	GetKeyValuesReply rep = co_await readRange(data,
+	                                           version,
+	                                           forward ? KeyRangeRef(sel.getKey(), range.end)
+	                                                   : KeyRangeRef(range.begin, keyAfter(sel.getKey())),
+	                                           (distance + skipEqualKey) * sign,
+	                                           &maxBytes,
+	                                           span.context,
+	                                           options);
+	bool more = rep.more && rep.data.size() != distance + skipEqualKey;
 
 	// If we get only one result in the reverse direction as a result of the data being too large, we could get stuck in
 	// a loop
 	if (more && !forward && rep.data.size() == 1) {
 		CODE_PROBE(true, "Reverse key selector returned only one result in range read");
 		maxBytes = std::numeric_limits<int>::max();
-		GetKeyValuesReply rep2 = wait(readRange(
-		    data, version, KeyRangeRef(range.begin, keyAfter(sel.getKey())), -2, &maxBytes, span.context, options));
+		GetKeyValuesReply rep2 = co_await readRange(
+		    data, version, KeyRangeRef(range.begin, keyAfter(sel.getKey())), -2, &maxBytes, span.context, options);
 		rep = rep2;
 		more = rep.more && rep.data.size() != distance + skipEqualKey;
 		ASSERT(rep.data.size() == 2 || !more);
@@ -3186,7 +3180,7 @@ ACTOR Future<Key> findKey(StorageServer* data,
 			data->metrics.notifyBytesReadPerKSecond(sel.getKey(), bytesReadPerKSecond);
 		}
 
-		return rep.data[index].key;
+		co_return rep.data[index].key;
 	} else {
 		if (SERVER_KNOBS->READ_SAMPLING_ENABLED) {
 			int64_t bytesReadPerKSecond = SERVER_KNOBS->EMPTY_READ_PENALTY;
@@ -3207,9 +3201,9 @@ ACTOR Future<Key> findKey(StorageServer* data,
 			// This is possible if key/value pairs are very large and only one result is returned on a last less than
 			// query SOMEDAY: graceful handling of exceptionally sized values
 			ASSERT(returnKey != sel.getKey());
-			return returnKey;
+			co_return returnKey;
 		} else {
-			return forward ? range.end : range.begin;
+			co_return forward ? range.end : range.begin;
 		}
 	}
 }
@@ -3316,12 +3310,12 @@ void maybeInjectConsistencyScanCorruption(UID thisServerID, GetKeyValuesRequest 
 	    .detail("Count", reply.data.size());
 }
 
-ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
+Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 // Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
 // selector offset prevents all data from being read in one range read
 {
-	state Span span("SS:getKeyValues"_loc, req.spanContext);
-	state int64_t resultSize = 0;
+	Span span("SS:getKeyValues"_loc, req.spanContext);
+	int64_t resultSize = 0;
 
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 
@@ -3336,11 +3330,11 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
-	wait(data->getQueryDelay());
-	state PriorityMultiLock::Lock readLock = wait(data->getReadLock(req.options));
+	co_await data->getQueryDelay();
+	PriorityMultiLock::Lock readLock = co_await data->getReadLock(req.options);
 
 	// Track time from requestTime through now as read queueing wait time
-	state double queueWaitEnd = g_network->timer();
+	double queueWaitEnd = g_network->timer();
 	data->counters.readLatencySamples.sample(
 	    queueWaitEnd - req.requestTime(), ReadLatencySamples::READ_QUEUE_WAIT, trackedReadType(req));
 
@@ -3350,7 +3344,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			    "TransactionDebug", req.options.get().debugID.get().first(), "storageserver.getKeyValues.Before");
 
 		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
-		state Version version = wait(waitForVersion(data, commitVersion, req.version, span.context));
+		Version version = co_await waitForVersion(data, commitVersion, req.version, span.context);
 		DisabledTraceEvent("VVV", data->thisServerID)
 		    .detail("Version", version)
 		    .detail("ReqVersion", req.version)
@@ -3362,9 +3356,9 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		data->counters.readLatencySamples.sample(
 		    g_network->timer() - queueWaitEnd, ReadLatencySamples::READ_VERSION_WAIT, trackedReadType(req));
 
-		state uint64_t changeCounter = data->shardChangeCounter;
+		uint64_t changeCounter = data->shardChangeCounter;
 		//		try {
-		state KeyRange shard = getShardKeyRange(data, req.begin);
+		KeyRange shard = getShardKeyRange(data, req.begin);
 
 		if (req.options.present() && req.options.get().debugID.present())
 			g_traceBatch.addEvent(
@@ -3385,16 +3379,16 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			throw wrong_shard_server();
 		}
 
-		state int offset1 = 0;
-		state int offset2;
-		state Future<Key> fBegin = req.begin.isFirstGreaterOrEqual()
-		                               ? Future<Key>(req.begin.getKey())
-		                               : findKey(data, req.begin, version, shard, &offset1, span.context, req.options);
-		state Future<Key> fEnd = req.end.isFirstGreaterOrEqual()
-		                             ? Future<Key>(req.end.getKey())
-		                             : findKey(data, req.end, version, shard, &offset2, span.context, req.options);
-		state Key begin = wait(fBegin);
-		state Key end = wait(fEnd);
+		int offset1 = 0;
+		int offset2{ 0 };
+		Future<Key> fBegin = req.begin.isFirstGreaterOrEqual()
+		                         ? Future<Key>(req.begin.getKey())
+		                         : findKey(data, req.begin, version, shard, &offset1, span.context, req.options);
+		Future<Key> fEnd = req.end.isFirstGreaterOrEqual()
+		                       ? Future<Key>(req.end.getKey())
+		                       : findKey(data, req.end, version, shard, &offset2, span.context, req.options);
+		Key begin = co_await fBegin;
+		Key end = co_await fEnd;
 
 		if (req.options.present() && req.options.get().debugID.present())
 			g_traceBatch.addEvent(
@@ -3445,11 +3439,11 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			}
 			req.reply.send(none);
 		} else {
-			state int remainingLimitBytes = req.limitBytes;
+			int remainingLimitBytes = req.limitBytes;
 
-			state double kvReadRange = g_network->timer();
-			GetKeyValuesReply _r = wait(readRange(
-			    data, version, KeyRangeRef(begin, end), req.limit, &remainingLimitBytes, span.context, req.options));
+			double kvReadRange = g_network->timer();
+			GetKeyValuesReply _r = co_await readRange(
+			    data, version, KeyRangeRef(begin, end), req.limit, &remainingLimitBytes, span.context, req.options);
 			const double duration = g_network->timer() - kvReadRange;
 			data->counters.readLatencySamples.sample(duration, ReadLatencySamples::KV_READ_RANGE, trackedReadType(req));
 			GetKeyValuesReply r = _r;
@@ -3523,19 +3517,16 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		                                                        abs(req.begin.offset) > maxSelectorOffset ||
 		                                                        abs(req.end.offset) > maxSelectorOffset));
 	}
-
-	return Void();
 }
 
-ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
-    StorageServer* data,
-    StringRef prefix,
-    Version version,
-    Arena* a,
-    // To provide span context, tags, debug ID to underlying lookups.
-    GetMappedKeyValuesRequest* pOriginalReq) {
-	state GetRangeReqAndResultRef getRange;
-	state double getValuesStart = g_network->timer();
+Future<GetRangeReqAndResultRef> quickGetKeyValues(StorageServer* data,
+                                                  StringRef prefix,
+                                                  Version version,
+                                                  Arena* a,
+                                                  // To provide span context, tags, debug ID to underlying lookups.
+                                                  GetMappedKeyValuesRequest* pOriginalReq) {
+	GetRangeReqAndResultRef getRange;
+	double getValuesStart = g_network->timer();
 	getRange.begin = firstGreaterOrEqual(KeyRef(*a, prefix));
 	getRange.end = firstGreaterOrEqual(strinc(prefix, *a));
 	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
@@ -3564,7 +3555,7 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 		// original request level, rather than individual underlying lookups. The reason is that throttle any individual
 		// underlying lookup will fail the original request, which is not productive.
 		data->actors.add(getKeyValuesQ(data, req));
-		GetKeyValuesReply reply = wait(req.reply.getFuture());
+		GetKeyValuesReply reply = co_await req.reply.getFuture();
 		if (!reply.error.present()) {
 			++data->counters.quickGetKeyValuesHit;
 			// Convert GetKeyValuesReply to RangeResult.
@@ -3577,7 +3568,7 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 				g_traceBatch.addEvent("TransactionDebug",
 				                      pOriginalReq->options.get().debugID.get().first(),
 				                      "storageserver.quickGetKeyValues.AfterLocalFetch");
-			return getRange;
+			co_return getRange;
 		}
 		// Otherwise fallback.
 	} catch (Error& e) {
@@ -3586,7 +3577,7 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 
 	++data->counters.quickGetKeyValuesMiss;
 	if (SERVER_KNOBS->QUICK_GET_KEY_VALUES_FALLBACK) {
-		state Transaction tr(data->cx);
+		Transaction tr(data->cx);
 		tr.setVersion(version);
 		if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present()) {
 			tr.debugTransaction(pOriginalReq->options.get().debugID.get());
@@ -3596,7 +3587,7 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 		Future<RangeResult> rangeResultFuture =
 		    tr.getRange(prefixRange(prefix), GetRangeLimits::ROW_LIMIT_UNLIMITED, Snapshot::True);
 		// TODO: async in case it needs to read from other servers.
-		RangeResult rangeResult = wait(rangeResultFuture);
+		RangeResult rangeResult = co_await rangeResultFuture;
 		a->dependsOn(rangeResult.arena());
 		getRange.result = rangeResult;
 		const double duration = g_network->timer() - getValuesStart;
@@ -3606,7 +3597,7 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 			g_traceBatch.addEvent("TransactionDebug",
 			                      pOriginalReq->options.get().debugID.get().first(),
 			                      "storageserver.quickGetKeyValues.AfterRemoteFetch");
-		return getRange;
+		co_return getRange;
 	} else {
 		throw quick_get_key_values_miss();
 	}
@@ -3785,9 +3776,9 @@ AuditGetShardInfoRes getThisServerShardInfo(StorageServer* data, KeyRange range)
 }
 
 // Check consistency between StorageServer->shardInfo and ServerKeys system key space
-ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageRequest req) {
+Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageRequest req) {
 	ASSERT(req.getType() == AuditType::ValidateStorageServerShard);
-	wait(data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield));
+	co_await data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield);
 	// The trackShardAssignment is correct when at most 1 auditStorageServerShardQ runs
 	// at a time. Currently, this is guaranteed by setting serveAuditStorageParallelismLock == 1
 	// If serveAuditStorageParallelismLock > 1, we need to check trackShardAssignmentMinVersion
@@ -3799,118 +3790,95 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 		           "ExistStorageServerShardAuditExit") // unexpected
 		    .detail("NewAuditId", req.id)
 		    .detail("NewAuditType", req.getType());
-		return Void();
+		co_return;
 	}
-	state FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
+	FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
 	TraceEvent(SevInfo, "SSAuditStorageSsShardBegin", data->thisServerID)
 	    .detail("AuditId", req.id)
 	    .detail("AuditRange", req.range);
-	state AuditStorageState res(req.id, data->thisServerID, req.getType());
-	state std::vector<std::string> errors;
-	state std::vector<Future<Void>> fs;
-	state Transaction tr(data->cx);
-	state AuditGetServerKeysRes serverKeyRes;
-	state Version serverKeyReadAtVersion;
-	state KeyRange serverKeyCompleteRange;
-	state AuditGetKeyServersRes keyServerRes;
-	state Version keyServerReadAtVersion;
-	state KeyRange keyServerCompleteRange;
-	state AuditGetShardInfoRes ownRangesLocalViewRes;
-	state Version localShardInfoReadAtVersion;
+	AuditStorageState res(req.id, data->thisServerID, req.getType());
+	std::vector<std::string> errors;
+	std::vector<Future<Void>> fs;
+	Transaction tr(data->cx);
+	AuditGetServerKeysRes serverKeyRes;
+	Version serverKeyReadAtVersion{ 0 };
+	KeyRange serverKeyCompleteRange;
+	AuditGetKeyServersRes keyServerRes;
+	Version keyServerReadAtVersion{ 0 };
+	KeyRange keyServerCompleteRange;
+	AuditGetShardInfoRes ownRangesLocalViewRes;
+	Version localShardInfoReadAtVersion{ 0 };
 	// We want to find out any mismatch between ownRangesSeenByServerKey and ownRangesLocalView and
 	// ownRangesSeenByKeyServerMap
-	state std::unordered_map<UID, std::vector<KeyRange>> ownRangesSeenByKeyServerMap;
-	state std::vector<KeyRange> ownRangesSeenByServerKey;
-	state std::vector<KeyRange> ownRangesSeenByKeyServer;
-	state std::vector<KeyRange> ownRangesLocalView;
-	state std::string failureReason;
+	std::unordered_map<UID, std::vector<KeyRange>> ownRangesSeenByKeyServerMap;
+	std::vector<KeyRange> ownRangesSeenByServerKey;
+	std::vector<KeyRange> ownRangesSeenByKeyServer;
+	std::vector<KeyRange> ownRangesLocalView;
+	std::string failureReason;
 	// Note that since krmReadRange may not return the value of the entire range at a time
 	// Given req.range, a part of the range is returned, thus, only a part of the range is
 	// able to be compared --- claimRange
 	// Given claimRange, rangeToRead is decided for reading the remaining range
 	// At beginning, rangeToRead is req.range
-	state KeyRange claimRange;
-	state Key rangeToReadBegin = req.range.begin;
-	state KeyRangeRef rangeToRead;
-	state int retryCount = 0;
-	state int64_t cumulatedValidatedLocalShardsNum = 0;
-	state int64_t cumulatedValidatedServerKeysNum = 0;
-	state Reference<IRateControl> rateLimiter =
+	KeyRange claimRange;
+	Key rangeToReadBegin = req.range.begin;
+	KeyRangeRef rangeToRead;
+	int retryCount = 0;
+	int64_t cumulatedValidatedLocalShardsNum = 0;
+	int64_t cumulatedValidatedServerKeysNum = 0;
+	Reference<IRateControl> rateLimiter =
 	    Reference<IRateControl>(new SpeedLimit(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1));
-	state int64_t remoteReadBytes = 0;
-	state double startTime = now();
-	state double lastRateLimiterWaitTime = 0;
-	state double rateLimiterBeforeWaitTime = 0;
-	state double rateLimiterTotalWaitTime = 0;
+	int64_t remoteReadBytes = 0;
+	double startTime = now();
+	double lastRateLimiterWaitTime = 0;
+	double rateLimiterBeforeWaitTime = 0;
+	double rateLimiterTotalWaitTime = 0;
 
 	try {
-		loop {
-			try {
-				if (data->version.get() == 0) {
-					failureReason = "SS version is 0";
-					throw audit_storage_failed();
-				}
-
-				// Read serverKeys and shardInfo
-				errors.clear();
-				// We do not reset retryCount for each partial read range
-				ownRangesLocalView.clear();
-				ownRangesSeenByServerKey.clear();
-				ownRangesSeenByKeyServer.clear();
-				ownRangesSeenByKeyServerMap.clear();
-				rangeToRead = KeyRangeRef(rangeToReadBegin, req.range.end);
-
-				ASSERT(!rangeToRead.empty());
-
-				// At this point, shard assignment history guarantees to contain assignments
-				// from localShardInfoReadAtVersion
-				ownRangesLocalViewRes = getThisServerShardInfo(data, rangeToRead);
-				localShardInfoReadAtVersion = ownRangesLocalViewRes.readAtVersion;
-				if (localShardInfoReadAtVersion != data->version.get()) {
-					TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
-					           "SSAuditStorageSsShardGRVMismatchError",
-					           data->thisServerID);
-					throw audit_storage_cancelled();
-				}
-
-				// Request to record shard assignment history at least localShardInfoReadAtVersion
-				data->startTrackShardAssignment(localShardInfoReadAtVersion);
-				TraceEvent(SevVerbose, "SSShardAssignmentHistoryRecordStart", data->thisServerID)
-				    .detail("AuditID", req.id);
-
-				// Transactional read of serverKeys
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				fs.clear();
-				fs.push_back(
-				    store(serverKeyRes, getThisServerKeysFromServerKeys(data->thisServerID, &tr, rangeToRead)));
-				fs.push_back(store(keyServerRes, getShardMapFromKeyServers(data->thisServerID, &tr, rangeToRead)));
-				wait(waitForAll(fs));
-				// Get serverKeys result
-				serverKeyCompleteRange = serverKeyRes.completeRange;
-				serverKeyReadAtVersion = serverKeyRes.readAtVersion;
-				// Get keyServers result
-				keyServerCompleteRange = keyServerRes.completeRange;
-				keyServerReadAtVersion = keyServerRes.readAtVersion;
-				// Get bytes read
-				remoteReadBytes = keyServerRes.readBytes + serverKeyRes.readBytes;
-				// We want to do transactional read at a version newer than data->version
-				while (serverKeyReadAtVersion < localShardInfoReadAtVersion) {
-					if (retryCount >= SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
-						failureReason = "Read serverKeys retry count exceeds the max";
+		while (true) {
+			{
+				Optional<Error> err;
+				try {
+					if (data->version.get() == 0) {
+						failureReason = "SS version is 0";
 						throw audit_storage_failed();
 					}
-					wait(rateLimiter->getAllowance(remoteReadBytes)); // RateKeeping
-					retryCount++;
-					wait(delay(0.5));
-					tr.reset();
+
+					// Read serverKeys and shardInfo
+					errors.clear();
+					// We do not reset retryCount for each partial read range
+					ownRangesLocalView.clear();
+					ownRangesSeenByServerKey.clear();
+					ownRangesSeenByKeyServer.clear();
+					ownRangesSeenByKeyServerMap.clear();
+					rangeToRead = KeyRangeRef(rangeToReadBegin, req.range.end);
+
+					ASSERT(!rangeToRead.empty());
+
+					// At this point, shard assignment history guarantees to contain assignments
+					// from localShardInfoReadAtVersion
+					ownRangesLocalViewRes = getThisServerShardInfo(data, rangeToRead);
+					localShardInfoReadAtVersion = ownRangesLocalViewRes.readAtVersion;
+					if (localShardInfoReadAtVersion != data->version.get()) {
+						TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+						           "SSAuditStorageSsShardGRVMismatchError",
+						           data->thisServerID);
+						throw audit_storage_cancelled();
+					}
+
+					// Request to record shard assignment history at least localShardInfoReadAtVersion
+					data->startTrackShardAssignment(localShardInfoReadAtVersion);
+					TraceEvent(SevVerbose, "SSShardAssignmentHistoryRecordStart", data->thisServerID)
+					    .detail("AuditID", req.id);
+
+					// Transactional read of serverKeys
 					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 					fs.clear();
 					fs.push_back(
 					    store(serverKeyRes, getThisServerKeysFromServerKeys(data->thisServerID, &tr, rangeToRead)));
 					fs.push_back(store(keyServerRes, getShardMapFromKeyServers(data->thisServerID, &tr, rangeToRead)));
-					wait(waitForAll(fs));
+					co_await waitForAll(fs);
 					// Get serverKeys result
 					serverKeyCompleteRange = serverKeyRes.completeRange;
 					serverKeyReadAtVersion = serverKeyRes.readAtVersion;
@@ -3919,147 +3887,199 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 					keyServerReadAtVersion = keyServerRes.readAtVersion;
 					// Get bytes read
 					remoteReadBytes = keyServerRes.readBytes + serverKeyRes.readBytes;
-				} // retry until serverKeyReadAtVersion is as larger as localShardInfoReadAtVersion
-				// Check versions
-				if (serverKeyReadAtVersion < localShardInfoReadAtVersion) {
-					TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
-					           "SSAuditStorageSsShardComparedVersionError",
-					           data->thisServerID);
-					throw audit_storage_cancelled();
-				}
-				if (keyServerReadAtVersion != serverKeyReadAtVersion) {
-					TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
-					           "SSAuditStorageSsShardKSVersionMismatchError",
-					           data->thisServerID);
-					throw audit_storage_cancelled();
-				}
-				try {
-					wait(timeoutError(data->version.whenAtLeast(serverKeyReadAtVersion), 30));
-				} catch (Error& e) {
-					TraceEvent(SevWarn, "SSAuditStorageSsShardWaitSSVersionTooLong", data->thisServerID)
-					    .detail("ServerKeyReadAtVersion", serverKeyReadAtVersion)
-					    .detail("SSVersion", data->version.get());
-					failureReason = "SS version takes long time to catch up with serverKeyReadAtVersion";
-					throw audit_storage_failed();
-				}
-				// At this point, shard assignment history guarantees to contain assignments
-				// upto serverKeyReadAtVersion
-
-				// Stop requesting to record shard assignment history
-				data->stopTrackShardAssignment();
-				TraceEvent(SevVerbose, "ShardAssignmentHistoryRecordStop", data->thisServerID)
-				    .detail("AuditID", req.id);
-
-				// check any serverKey update between localShardInfoReadAtVersion and serverKeyReadAtVersion
-				std::vector<std::pair<Version, KeyRangeRef>> shardAssignments =
-				    data->getShardAssignmentHistory(localShardInfoReadAtVersion, serverKeyReadAtVersion);
-				TraceEvent(SevInfo, "SSAuditStorageSsShardGetHistory", data->thisServerID)
-				    .detail("AuditId", req.id)
-				    .detail("AuditRange", req.range)
-				    .detail("ServerKeyAtVersion", serverKeyReadAtVersion)
-				    .detail("LocalShardInfoAtVersion", localShardInfoReadAtVersion)
-				    .detail("ShardAssignmentsCount", shardAssignments.size());
-				// Ideally, we revert ownRangesLocalView changes by shard assignment history
-				// Currently, we give up if any update collected
-				if (!shardAssignments.empty()) {
-					failureReason = "Shard assignment history is not empty";
-					throw audit_storage_failed();
-				}
-				// Get claim range
-				KeyRange claimRange = rangeToRead;
-				claimRange = claimRange & serverKeyCompleteRange;
-				if (claimRange.empty()) {
-					TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
-					           "SSAuditStorageSsShardOverlapRangeEmpty",
-					           data->thisServerID);
-					throw audit_storage_cancelled();
-				}
-				claimRange = claimRange & keyServerCompleteRange;
-				if (claimRange.empty()) {
-					TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
-					           "SSAuditStorageSsShardOverlapRangeEmpty",
-					           data->thisServerID);
-					throw audit_storage_cancelled();
-				}
-				// We only compare within claimRange
-				// Get ownRangesLocalView within claimRange
-				for (auto& range : ownRangesLocalViewRes.ownRanges) {
-					KeyRange overlappingRange = range & claimRange;
-					if (overlappingRange.empty()) {
-						continue;
+					// We want to do transactional read at a version newer than data->version
+					while (serverKeyReadAtVersion < localShardInfoReadAtVersion) {
+						if (retryCount >= SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
+							failureReason = "Read serverKeys retry count exceeds the max";
+							throw audit_storage_failed();
+						}
+						co_await rateLimiter->getAllowance(remoteReadBytes); // RateKeeping
+						retryCount++;
+						co_await delay(0.5);
+						tr.reset();
+						tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+						fs.clear();
+						fs.push_back(
+						    store(serverKeyRes, getThisServerKeysFromServerKeys(data->thisServerID, &tr, rangeToRead)));
+						fs.push_back(
+						    store(keyServerRes, getShardMapFromKeyServers(data->thisServerID, &tr, rangeToRead)));
+						co_await waitForAll(fs);
+						// Get serverKeys result
+						serverKeyCompleteRange = serverKeyRes.completeRange;
+						serverKeyReadAtVersion = serverKeyRes.readAtVersion;
+						// Get keyServers result
+						keyServerCompleteRange = keyServerRes.completeRange;
+						keyServerReadAtVersion = keyServerRes.readAtVersion;
+						// Get bytes read
+						remoteReadBytes = keyServerRes.readBytes + serverKeyRes.readBytes;
+					} // retry until serverKeyReadAtVersion is as larger as localShardInfoReadAtVersion
+					// Check versions
+					if (serverKeyReadAtVersion < localShardInfoReadAtVersion) {
+						TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+						           "SSAuditStorageSsShardComparedVersionError",
+						           data->thisServerID);
+						throw audit_storage_cancelled();
 					}
-					ownRangesLocalView.push_back(overlappingRange);
-				}
-				// Get ownRangesSeenByServerKey within claimRange
-				for (auto& range : serverKeyRes.ownRanges) {
-					KeyRange overlappingRange = range & claimRange;
-					if (overlappingRange.empty()) {
-						continue;
+					if (keyServerReadAtVersion != serverKeyReadAtVersion) {
+						TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+						           "SSAuditStorageSsShardKSVersionMismatchError",
+						           data->thisServerID);
+						throw audit_storage_cancelled();
 					}
-					ownRangesSeenByServerKey.push_back(overlappingRange);
-				}
-				// Get ownRangesSeenByKeyServer within claimRange
-				if (keyServerRes.rangeOwnershipMap.contains(data->thisServerID)) {
-					std::vector mergedRanges = coalesceRangeList(keyServerRes.rangeOwnershipMap[data->thisServerID]);
-					for (auto& range : mergedRanges) {
+					try {
+						co_await timeoutError(data->version.whenAtLeast(serverKeyReadAtVersion), 30);
+					} catch (Error& e) {
+						TraceEvent(SevWarn, "SSAuditStorageSsShardWaitSSVersionTooLong", data->thisServerID)
+						    .detail("ServerKeyReadAtVersion", serverKeyReadAtVersion)
+						    .detail("SSVersion", data->version.get());
+						failureReason = "SS version takes long time to catch up with serverKeyReadAtVersion";
+						throw audit_storage_failed();
+					}
+					// At this point, shard assignment history guarantees to contain assignments
+					// upto serverKeyReadAtVersion
+
+					// Stop requesting to record shard assignment history
+					data->stopTrackShardAssignment();
+					TraceEvent(SevVerbose, "ShardAssignmentHistoryRecordStop", data->thisServerID)
+					    .detail("AuditID", req.id);
+
+					// check any serverKey update between localShardInfoReadAtVersion and serverKeyReadAtVersion
+					std::vector<std::pair<Version, KeyRangeRef>> shardAssignments =
+					    data->getShardAssignmentHistory(localShardInfoReadAtVersion, serverKeyReadAtVersion);
+					TraceEvent(SevInfo, "SSAuditStorageSsShardGetHistory", data->thisServerID)
+					    .detail("AuditId", req.id)
+					    .detail("AuditRange", req.range)
+					    .detail("ServerKeyAtVersion", serverKeyReadAtVersion)
+					    .detail("LocalShardInfoAtVersion", localShardInfoReadAtVersion)
+					    .detail("ShardAssignmentsCount", shardAssignments.size());
+					// Ideally, we revert ownRangesLocalView changes by shard assignment history
+					// Currently, we give up if any update collected
+					if (!shardAssignments.empty()) {
+						failureReason = "Shard assignment history is not empty";
+						throw audit_storage_failed();
+					}
+					// Get claim range
+					KeyRange claimRange = rangeToRead;
+					claimRange = claimRange & serverKeyCompleteRange;
+					if (claimRange.empty()) {
+						TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+						           "SSAuditStorageSsShardOverlapRangeEmpty",
+						           data->thisServerID);
+						throw audit_storage_cancelled();
+					}
+					claimRange = claimRange & keyServerCompleteRange;
+					if (claimRange.empty()) {
+						TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+						           "SSAuditStorageSsShardOverlapRangeEmpty",
+						           data->thisServerID);
+						throw audit_storage_cancelled();
+					}
+					// We only compare within claimRange
+					// Get ownRangesLocalView within claimRange
+					for (auto& range : ownRangesLocalViewRes.ownRanges) {
 						KeyRange overlappingRange = range & claimRange;
 						if (overlappingRange.empty()) {
 							continue;
 						}
-						ownRangesSeenByKeyServer.push_back(overlappingRange);
+						ownRangesLocalView.push_back(overlappingRange);
 					}
-				}
-				TraceEvent(SevInfo, "SSAuditStorageSsShardReadDone", data->thisServerID)
-				    .detail("AuditId", req.id)
-				    .detail("AuditRange", req.range)
-				    .detail("ClaimRange", claimRange)
-				    .detail("ServerKeyAtVersion", serverKeyReadAtVersion)
-				    .detail("ShardInfoAtVersion", data->version.get());
-				// Log statistic
-				cumulatedValidatedLocalShardsNum = cumulatedValidatedLocalShardsNum + ownRangesLocalView.size();
-				cumulatedValidatedServerKeysNum = cumulatedValidatedServerKeysNum + ownRangesSeenByServerKey.size();
-				TraceEvent(SevInfo, "SSAuditStorageStatisticShardInfo", data->thisServerID)
-				    .suppressFor(30.0)
-				    .detail("AuditType", req.getType())
-				    .detail("AuditId", req.id)
-				    .detail("AuditRange", req.range)
-				    .detail("CurrentValidatedLocalShardsNum", ownRangesLocalView.size())
-				    .detail("CurrentValidatedServerKeysNum", ownRangesSeenByServerKey.size())
-				    .detail("CurrentValidatedInclusiveRange", claimRange)
-				    .detail("CumulatedValidatedLocalShardsNum", cumulatedValidatedLocalShardsNum)
-				    .detail("CumulatedValidatedServerKeysNum", cumulatedValidatedServerKeysNum)
-				    .detail("CumulatedValidatedInclusiveRange", KeyRangeRef(req.range.begin, claimRange.end));
+					// Get ownRangesSeenByServerKey within claimRange
+					for (auto& range : serverKeyRes.ownRanges) {
+						KeyRange overlappingRange = range & claimRange;
+						if (overlappingRange.empty()) {
+							continue;
+						}
+						ownRangesSeenByServerKey.push_back(overlappingRange);
+					}
+					// Get ownRangesSeenByKeyServer within claimRange
+					if (keyServerRes.rangeOwnershipMap.contains(data->thisServerID)) {
+						std::vector mergedRanges =
+						    coalesceRangeList(keyServerRes.rangeOwnershipMap[data->thisServerID]);
+						for (auto& range : mergedRanges) {
+							KeyRange overlappingRange = range & claimRange;
+							if (overlappingRange.empty()) {
+								continue;
+							}
+							ownRangesSeenByKeyServer.push_back(overlappingRange);
+						}
+					}
+					TraceEvent(SevInfo, "SSAuditStorageSsShardReadDone", data->thisServerID)
+					    .detail("AuditId", req.id)
+					    .detail("AuditRange", req.range)
+					    .detail("ClaimRange", claimRange)
+					    .detail("ServerKeyAtVersion", serverKeyReadAtVersion)
+					    .detail("ShardInfoAtVersion", data->version.get());
+					// Log statistic
+					cumulatedValidatedLocalShardsNum = cumulatedValidatedLocalShardsNum + ownRangesLocalView.size();
+					cumulatedValidatedServerKeysNum = cumulatedValidatedServerKeysNum + ownRangesSeenByServerKey.size();
+					TraceEvent(SevInfo, "SSAuditStorageStatisticShardInfo", data->thisServerID)
+					    .suppressFor(30.0)
+					    .detail("AuditType", req.getType())
+					    .detail("AuditId", req.id)
+					    .detail("AuditRange", req.range)
+					    .detail("CurrentValidatedLocalShardsNum", ownRangesLocalView.size())
+					    .detail("CurrentValidatedServerKeysNum", ownRangesSeenByServerKey.size())
+					    .detail("CurrentValidatedInclusiveRange", claimRange)
+					    .detail("CumulatedValidatedLocalShardsNum", cumulatedValidatedLocalShardsNum)
+					    .detail("CumulatedValidatedServerKeysNum", cumulatedValidatedServerKeysNum)
+					    .detail("CumulatedValidatedInclusiveRange", KeyRangeRef(req.range.begin, claimRange.end));
 
-				// Compare
-				// Compare keyServers and serverKeys
-				if (ownRangesSeenByKeyServer.empty()) {
-					if (!ownRangesSeenByServerKey.empty()) {
-						std::string error =
-						    format("ServerKeys shows %zu ranges that not appear on keyServers for Server(%s): ",
-						           ownRangesSeenByServerKey.size(),
-						           data->thisServerID.toString().c_str(),
-						           describe(ownRangesSeenByServerKey).c_str());
-						TraceEvent(SevError, "SSAuditStorageSsShardError", data->thisServerID)
-						    .setMaxFieldLength(-1)
-						    .setMaxEventLength(-1)
-						    .detail("AuditId", req.id)
-						    .detail("AuditRange", req.range)
-						    .detail("ClaimRange", claimRange)
-						    .detail("ErrorMessage", error)
-						    .detail("MismatchedRangeByLocalView", describe(ownRangesSeenByServerKey))
-						    .detail("AuditServer", data->thisServerID);
+					// Compare
+					// Compare keyServers and serverKeys
+					if (ownRangesSeenByKeyServer.empty()) {
+						if (!ownRangesSeenByServerKey.empty()) {
+							std::string error =
+							    format("ServerKeys shows %zu ranges that not appear on keyServers for Server(%s): ",
+							           ownRangesSeenByServerKey.size(),
+							           data->thisServerID.toString().c_str(),
+							           describe(ownRangesSeenByServerKey).c_str());
+							TraceEvent(SevError, "SSAuditStorageSsShardError", data->thisServerID)
+							    .setMaxFieldLength(-1)
+							    .setMaxEventLength(-1)
+							    .detail("AuditId", req.id)
+							    .detail("AuditRange", req.range)
+							    .detail("ClaimRange", claimRange)
+							    .detail("ErrorMessage", error)
+							    .detail("MismatchedRangeByLocalView", describe(ownRangesSeenByServerKey))
+							    .detail("AuditServer", data->thisServerID);
+						}
+					} else {
+						Optional<std::pair<KeyRange, KeyRange>> anyMismatch =
+						    rangesSame(ownRangesSeenByServerKey, ownRangesSeenByKeyServer);
+						if (anyMismatch.present()) { // mismatch detected
+							KeyRange mismatchedRangeByServerKey = anyMismatch.get().first;
+							KeyRange mismatchedRangeByKeyServer = anyMismatch.get().second;
+							std::string error =
+							    format("KeyServers and serverKeys mismatch on Server(%s): ServerKey: %s; KeyServer: %s",
+							           data->thisServerID.toString().c_str(),
+							           mismatchedRangeByServerKey.toString().c_str(),
+							           mismatchedRangeByKeyServer.toString().c_str());
+							TraceEvent(SevError, "SSAuditStorageSsShardError", data->thisServerID)
+							    .setMaxFieldLength(-1)
+							    .setMaxEventLength(-1)
+							    .detail("AuditId", req.id)
+							    .detail("AuditRange", req.range)
+							    .detail("ClaimRange", claimRange)
+							    .detail("ErrorMessage", error)
+							    .detail("MismatchedRangeByKeyServer", mismatchedRangeByKeyServer)
+							    .detail("MismatchedRangeByServerKey", mismatchedRangeByServerKey)
+							    .detail("AuditServer", data->thisServerID);
+							errors.push_back(error);
+						}
 					}
-				} else {
+
+					// Compare SS shard info and serverKeys
 					Optional<std::pair<KeyRange, KeyRange>> anyMismatch =
-					    rangesSame(ownRangesSeenByServerKey, ownRangesSeenByKeyServer);
+					    rangesSame(ownRangesSeenByServerKey, ownRangesLocalView);
 					if (anyMismatch.present()) { // mismatch detected
 						KeyRange mismatchedRangeByServerKey = anyMismatch.get().first;
-						KeyRange mismatchedRangeByKeyServer = anyMismatch.get().second;
-						std::string error =
-						    format("KeyServers and serverKeys mismatch on Server(%s): ServerKey: %s; KeyServer: %s",
-						           data->thisServerID.toString().c_str(),
-						           mismatchedRangeByServerKey.toString().c_str(),
-						           mismatchedRangeByKeyServer.toString().c_str());
+						KeyRange mismatchedRangeByLocalView = anyMismatch.get().second;
+						std::string error = format(
+						    "Storage server shard info mismatch on Server(%s): ServerKey: %s; ServerShardInfo: %s",
+						    data->thisServerID.toString().c_str(),
+						    mismatchedRangeByServerKey.toString().c_str(),
+						    mismatchedRangeByLocalView.toString().c_str());
 						TraceEvent(SevError, "SSAuditStorageSsShardError", data->thisServerID)
 						    .setMaxFieldLength(-1)
 						    .setMaxEventLength(-1)
@@ -4067,114 +4087,93 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 						    .detail("AuditRange", req.range)
 						    .detail("ClaimRange", claimRange)
 						    .detail("ErrorMessage", error)
-						    .detail("MismatchedRangeByKeyServer", mismatchedRangeByKeyServer)
+						    .detail("MismatchedRangeByLocalView", mismatchedRangeByLocalView)
 						    .detail("MismatchedRangeByServerKey", mismatchedRangeByServerKey)
 						    .detail("AuditServer", data->thisServerID);
 						errors.push_back(error);
 					}
-				}
 
-				// Compare SS shard info and serverKeys
-				Optional<std::pair<KeyRange, KeyRange>> anyMismatch =
-				    rangesSame(ownRangesSeenByServerKey, ownRangesLocalView);
-				if (anyMismatch.present()) { // mismatch detected
-					KeyRange mismatchedRangeByServerKey = anyMismatch.get().first;
-					KeyRange mismatchedRangeByLocalView = anyMismatch.get().second;
-					std::string error =
-					    format("Storage server shard info mismatch on Server(%s): ServerKey: %s; ServerShardInfo: %s",
-					           data->thisServerID.toString().c_str(),
-					           mismatchedRangeByServerKey.toString().c_str(),
-					           mismatchedRangeByLocalView.toString().c_str());
-					TraceEvent(SevError, "SSAuditStorageSsShardError", data->thisServerID)
-					    .setMaxFieldLength(-1)
-					    .setMaxEventLength(-1)
-					    .detail("AuditId", req.id)
-					    .detail("AuditRange", req.range)
-					    .detail("ClaimRange", claimRange)
-					    .detail("ErrorMessage", error)
-					    .detail("MismatchedRangeByLocalView", mismatchedRangeByLocalView)
-					    .detail("MismatchedRangeByServerKey", mismatchedRangeByServerKey)
-					    .detail("AuditServer", data->thisServerID);
-					errors.push_back(error);
-				}
-
-				// Return result
-				if (!errors.empty()) {
-					TraceEvent(SevVerbose, "SSAuditStorageSsShardErrorEnd", data->thisServerID)
-					    .detail("AuditId", req.id)
-					    .detail("AuditRange", req.range)
-					    .detail("AuditServer", data->thisServerID);
-					res.range = claimRange;
-					res.setPhase(AuditPhase::Error);
-					if (!req.ddId.isValid()) {
-						TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
-						           "SSAuditStorageSsShardDDIdInvalid",
-						           data->thisServerID);
-						throw audit_storage_cancelled();
-					}
-					res.ddId = req.ddId; // used to compare req.ddId with existing persisted ddId
-					wait(persistAuditStateByServer(data->cx, res));
-					req.reply.sendError(audit_storage_error());
-					break;
-				} else {
-					// Expand persisted complete range
-					res.range = Standalone(KeyRangeRef(req.range.begin, claimRange.end));
-					res.setPhase(AuditPhase::Complete);
-					if (!req.ddId.isValid()) {
-						TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
-						           "SSAuditStorageSsShardDDIdInvalid",
-						           data->thisServerID);
-						throw audit_storage_cancelled();
-					}
-					res.ddId = req.ddId; // used to compare req.ddId with existing persisted ddId
-					wait(persistAuditStateByServer(data->cx, res));
-					if (res.range.end < req.range.end) {
-						TraceEvent(SevInfo, "SSAuditStorageSsShardPartialDone", data->thisServerID)
-						    .suppressFor(10.0)
+					// Return result
+					if (!errors.empty()) {
+						TraceEvent(SevVerbose, "SSAuditStorageSsShardErrorEnd", data->thisServerID)
 						    .detail("AuditId", req.id)
 						    .detail("AuditRange", req.range)
-						    .detail("AuditServer", data->thisServerID)
-						    .detail("CompleteRange", res.range)
-						    .detail("ClaimRange", claimRange)
-						    .detail("RangeToReadEnd", req.range.end)
-						    .detail("LastRateLimiterWaitTime", lastRateLimiterWaitTime)
-						    .detail("RateLimiterTotalWaitTime", rateLimiterTotalWaitTime);
-						rangeToReadBegin = res.range.end;
-					} else { // complete
-						req.reply.send(res);
-						TraceEvent(SevInfo, "SSAuditStorageSsShardComplete", data->thisServerID)
-						    .detail("AuditId", req.id)
-						    .detail("AuditRange", req.range)
-						    .detail("AuditServer", data->thisServerID)
-						    .detail("ClaimRange", claimRange)
-						    .detail("CompleteRange", res.range)
-						    .detail("NumValidatedLocalShards", cumulatedValidatedLocalShardsNum)
-						    .detail("NumValidatedServerKeys", cumulatedValidatedServerKeysNum)
-						    .detail("RateLimiterTotalWaitTime", rateLimiterTotalWaitTime)
-						    .detail("TotalTime", now() - startTime);
+						    .detail("AuditServer", data->thisServerID);
+						res.range = claimRange;
+						res.setPhase(AuditPhase::Error);
+						if (!req.ddId.isValid()) {
+							TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+							           "SSAuditStorageSsShardDDIdInvalid",
+							           data->thisServerID);
+							throw audit_storage_cancelled();
+						}
+						res.ddId = req.ddId; // used to compare req.ddId with existing persisted ddId
+						co_await persistAuditStateByServer(data->cx, res);
+						req.reply.sendError(audit_storage_error());
 						break;
+					} else {
+						// Expand persisted complete range
+						res.range = Standalone(KeyRangeRef(req.range.begin, claimRange.end));
+						res.setPhase(AuditPhase::Complete);
+						if (!req.ddId.isValid()) {
+							TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+							           "SSAuditStorageSsShardDDIdInvalid",
+							           data->thisServerID);
+							throw audit_storage_cancelled();
+						}
+						res.ddId = req.ddId; // used to compare req.ddId with existing persisted ddId
+						co_await persistAuditStateByServer(data->cx, res);
+						if (res.range.end < req.range.end) {
+							TraceEvent(SevInfo, "SSAuditStorageSsShardPartialDone", data->thisServerID)
+							    .suppressFor(10.0)
+							    .detail("AuditId", req.id)
+							    .detail("AuditRange", req.range)
+							    .detail("AuditServer", data->thisServerID)
+							    .detail("CompleteRange", res.range)
+							    .detail("ClaimRange", claimRange)
+							    .detail("RangeToReadEnd", req.range.end)
+							    .detail("LastRateLimiterWaitTime", lastRateLimiterWaitTime)
+							    .detail("RateLimiterTotalWaitTime", rateLimiterTotalWaitTime);
+							rangeToReadBegin = res.range.end;
+						} else { // complete
+							req.reply.send(res);
+							TraceEvent(SevInfo, "SSAuditStorageSsShardComplete", data->thisServerID)
+							    .detail("AuditId", req.id)
+							    .detail("AuditRange", req.range)
+							    .detail("AuditServer", data->thisServerID)
+							    .detail("ClaimRange", claimRange)
+							    .detail("CompleteRange", res.range)
+							    .detail("NumValidatedLocalShards", cumulatedValidatedLocalShardsNum)
+							    .detail("NumValidatedServerKeys", cumulatedValidatedServerKeysNum)
+							    .detail("RateLimiterTotalWaitTime", rateLimiterTotalWaitTime)
+							    .detail("TotalTime", now() - startTime);
+							break;
+						}
 					}
+				} catch (Error& e) {
+					err = e;
 				}
-			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled) {
-					// In this case, we need not stop tracking shard assignment
-					// The shard history will not get unboundedly large for this case
-					// When this actor gets cancelled, data will be eventually destroyed
-					// Therefore, the shard history will be destroyed
-					throw e;
+				if (err.present()) {
+					if (err.get().code() == error_code_actor_cancelled) {
+						// In this case, we need not stop tracking shard assignment
+						// The shard history will not get unboundedly large for this case
+						// When this actor gets cancelled, data will be eventually destroyed
+						// Therefore, the shard history will be destroyed
+						throw err.get();
+					}
+					data->stopTrackShardAssignment();
+					co_await tr.onError(err.get());
 				}
-				data->stopTrackShardAssignment();
-				wait(tr.onError(e));
 			}
 
 			rateLimiterBeforeWaitTime = now();
-			wait(rateLimiter->getAllowance(remoteReadBytes)); // RateKeeping
+			co_await rateLimiter->getAllowance(remoteReadBytes); // RateKeeping
 			lastRateLimiterWaitTime = now() - rateLimiterBeforeWaitTime;
 			rateLimiterTotalWaitTime = rateLimiterTotalWaitTime + lastRateLimiterWaitTime;
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
-			return Void(); // silently exit
+			co_return; // silently exit
 		}
 		TraceEvent(SevInfo, "SSAuditStorageSsShardFailed", data->thisServerID)
 		    .errorUnsuppressed(e)
@@ -4201,8 +4200,6 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 	// Make sure the history collection is not open due to this audit
 	data->stopTrackShardAssignment();
 	TraceEvent(SevVerbose, "SSShardAssignmentHistoryRecordStopWhenExit", data->thisServerID).detail("AuditID", req.id);
-
-	return Void();
 }
 
 /*
@@ -4266,16 +4263,16 @@ static Future<ErrorOr<GetKeyValuesReply>> issueGetKeyValuesRequest(StorageServer
 // NOTE: We read the ENTIRE restored keyspace (not just rangeToRead with prefix),
 // because restored keys are stored with their original names under the prefix.
 // E.g., source key "mykey" is restored as "\xff\x02/rlog/mykey"
-ACTOR static Future<std::pair<GetKeyValuesReply, GetKeyValuesReply>> fetchSourceAndRestoredData(StorageServer* data,
-                                                                                                KeyRange rangeToRead,
-                                                                                                Version version,
-                                                                                                int limit,
-                                                                                                int limitBytes) {
+static Future<std::pair<GetKeyValuesReply, GetKeyValuesReply>> fetchSourceAndRestoredData(StorageServer* data,
+                                                                                          KeyRange rangeToRead,
+                                                                                          Version version,
+                                                                                          int limit,
+                                                                                          int limitBytes) {
 	// Construct the restored range by adding the restore prefix to the source range
 	// E.g., if source range is "key1 - key2", restored range is "\xff\x02/rlog/key1 - \xff\x02/rlog/key2"
-	state Key restoredBegin = rangeToRead.begin.withPrefix(validateRestoreLogKeys.begin);
-	state Key restoredEnd = rangeToRead.end.withPrefix(validateRestoreLogKeys.begin);
-	state KeyRange restoredRange = KeyRangeRef(restoredBegin, restoredEnd);
+	Key restoredBegin = rangeToRead.begin.withPrefix(validateRestoreLogKeys.begin);
+	Key restoredEnd = rangeToRead.end.withPrefix(validateRestoreLogKeys.begin);
+	KeyRange restoredRange = KeyRangeRef(restoredBegin, restoredEnd);
 
 	TraceEvent("SSAuditRestoreFetch", data->thisServerID)
 	    .detail("RangeToRead", rangeToRead)
@@ -4285,21 +4282,21 @@ ACTOR static Future<std::pair<GetKeyValuesReply, GetKeyValuesReply>> fetchSource
 	    .detail("LimitBytes", limitBytes);
 
 	// Read source data from user key range (this SS must own it since DD sent request here)
-	state Future<ErrorOr<GetKeyValuesReply>> sourceFuture =
+	Future<ErrorOr<GetKeyValuesReply>> sourceFuture =
 	    issueGetKeyValuesRequest(data, rangeToRead, version, limit, limitBytes);
 
 	// Read restored data from system key space
 	// NOTE: Use database transaction to read system keys since this SS might not own them
 	// IMPORTANT: Use same byte limits as source query to ensure comparable results, since restored keys
 	// are larger (include prefix), which could cause fewer keys to be returned when byte limit is reached
-	state ErrorOr<GetKeyValuesReply> restoredResult;
+	ErrorOr<GetKeyValuesReply> restoredResult;
 	try {
-		state Transaction tr(data->cx);
+		Transaction tr(data->cx);
 		tr.setVersion(version);
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		GetRangeLimits limits(limit, limitBytes);
-		state RangeResult restoredData = wait(tr.getRange(restoredRange, limits, Snapshot::False, Reverse::False));
+		RangeResult restoredData = co_await tr.getRange(restoredRange, limits, Snapshot::False, Reverse::False);
 
 		// Convert RangeResult to GetKeyValuesReply format
 		GetKeyValuesReply restoredReply;
@@ -4311,9 +4308,9 @@ ACTOR static Future<std::pair<GetKeyValuesReply, GetKeyValuesReply>> fetchSource
 		restoredResult = e;
 	}
 
-	state Future<ErrorOr<GetKeyValuesReply>> restoredFuture = Future<ErrorOr<GetKeyValuesReply>>(restoredResult);
+	Future<ErrorOr<GetKeyValuesReply>> restoredFuture = Future<ErrorOr<GetKeyValuesReply>>(restoredResult);
 
-	wait(success(sourceFuture) && success(restoredFuture));
+	co_await (success(sourceFuture) && success(restoredFuture));
 
 	// Check for errors
 	if (sourceFuture.get().isError()) {
@@ -4338,7 +4335,7 @@ ACTOR static Future<std::pair<GetKeyValuesReply, GetKeyValuesReply>> fetchSource
 	    .detail("SourceMore", sourceFuture.get().get().more)
 	    .detail("RestoredMore", restoredFuture.get().get().more);
 
-	return std::make_pair(sourceFuture.get().get(), restoredFuture.get().get());
+	co_return std::make_pair(sourceFuture.get().get(), restoredFuture.get().get());
 }
 
 // Helper: Compare source and restored data, returning validation errors
@@ -4490,10 +4487,10 @@ std::vector<std::string> compareSourceAndRestoredData(UID thisServerID,
 	return errors;
 }
 
-ACTOR Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
+Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
 	ASSERT(req.getType() == AuditType::ValidateRestore);
-	wait(data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield));
-	state FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
+	co_await data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield);
+	FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
 
 	TraceEvent(SevInfo, "SSAuditRestoreBegin", data->thisServerID)
 	    .detail("AuditID", req.id)
@@ -4507,165 +4504,170 @@ ACTOR Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
 		    .detail("AuditRange", req.range)
 		    .detail("Error", "Range must be within normalKeys");
 		req.reply.sendError(audit_storage_failed());
-		return Void();
+		co_return;
 	}
 
-	state AuditStorageState res(req.id, req.getType());
-	state std::vector<std::string> errors;
-	state Version version;
-	state KeyRange rangeToRead = req.range;
-	state Key rangeToReadBegin = req.range.begin;
-	state KeyRange claimRange;
-	state int limit = 1e4;
-	state int limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
-	state int64_t readBytes = 0;
-	state int64_t numValidatedKeys = 0;
-	state int64_t validatedBytes = 0;
-	state bool complete = false;
-	state double startTime = now();
-	state Reference<IRateControl> rateLimiter =
+	AuditStorageState res(req.id, req.getType());
+	std::vector<std::string> errors;
+	Version version{ 0 };
+	KeyRange rangeToRead = req.range;
+	Key rangeToReadBegin = req.range.begin;
+	KeyRange claimRange;
+	int limit = 1e4;
+	int limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+	int64_t readBytes = 0;
+	int64_t numValidatedKeys = 0;
+	int64_t validatedBytes = 0;
+	bool complete = false;
+	double startTime = now();
+	Reference<IRateControl> rateLimiter =
 	    Reference<IRateControl>(new SpeedLimit(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1));
 
-	try {
-		loop {
-			try {
-				readBytes = 0;
-				rangeToRead = KeyRangeRef(rangeToReadBegin, req.range.end);
-				ASSERT(!rangeToRead.empty());
+	{
+		Optional<Error> err;
+		try {
+			while (true) {
+				try {
+					readBytes = 0;
+					rangeToRead = KeyRangeRef(rangeToReadBegin, req.range.end);
+					ASSERT(!rangeToRead.empty());
 
-				TraceEvent(SevDebug, "SSAuditRestoreNewRoundBegin", data->thisServerID)
-				    .suppressFor(10.0)
+					TraceEvent(SevDebug, "SSAuditRestoreNewRoundBegin", data->thisServerID)
+					    .suppressFor(10.0)
+					    .detail("AuditID", req.id)
+					    .detail("AuditRange", req.range)
+					    .detail("ReadRangeBegin", rangeToReadBegin)
+					    .detail("ReadRangeEnd", req.range.end);
+
+					errors.clear();
+
+					// Use current durable version for reading
+					version = data->version.get();
+
+					// Fetch both source and restored data
+					std::pair<GetKeyValuesReply, GetKeyValuesReply> replyPair =
+					    co_await fetchSourceAndRestoredData(data, rangeToRead, version, limit, limitBytes);
+					GetKeyValuesReply sourceReply = replyPair.first;
+					GetKeyValuesReply restoredReply = replyPair.second;
+
+					readBytes = sourceReply.data.expectedSize() + restoredReply.data.expectedSize();
+					validatedBytes += readBytes;
+
+					// Check if we've completed reading
+					if (!sourceReply.more) {
+						complete = true;
+					}
+
+					// Compare source data with restored data
+					claimRange = rangeToRead;
+					Key lastKey = rangeToRead.begin;
+					errors = compareSourceAndRestoredData(data->thisServerID,
+					                                      req.id,
+					                                      req.range,
+					                                      sourceReply,
+					                                      restoredReply,
+					                                      rangeToRead,
+					                                      version,
+					                                      claimRange,
+					                                      lastKey,
+					                                      numValidatedKeys);
+
+					// Update progress in the database
+					KeyRange completeRange = Standalone(KeyRangeRef(rangeToRead.begin, keyAfter(lastKey)));
+					if (!complete && !completeRange.empty() && claimRange.begin == completeRange.begin) {
+						claimRange = claimRange & completeRange;
+						AuditStorageState progressState(req.id, claimRange, req.getType());
+						progressState.setPhase(AuditPhase::Running);
+						progressState.ddId = req.ddId;
+						progressState.auditServerId = data->thisServerID;
+						co_await persistAuditStateByRange(data->cx, progressState);
+					}
+
+					// Apply rate limiting
+					co_await rateLimiter->getAllowance(readBytes);
+
+					// If errors found or complete, break
+					if (!errors.empty() || complete) {
+						break;
+					}
+
+					// Move to next range
+					rangeToReadBegin = keyAfter(lastKey);
+					if (rangeToReadBegin >= req.range.end) {
+						complete = true;
+						break;
+					}
+
+				} catch (Error& e) {
+					if (e.code() == error_code_actor_cancelled) {
+						throw e;
+					}
+					throw;
+				}
+			}
+
+			// Set final state
+			if (!errors.empty()) {
+				res.setPhase(AuditPhase::Error);
+				res.error = errors[0]; // Report first error
+				res.range = req.range;
+				TraceEvent(SevWarn, "SSAuditRestoreComplete", data->thisServerID)
 				    .detail("AuditID", req.id)
 				    .detail("AuditRange", req.range)
-				    .detail("ReadRangeBegin", rangeToReadBegin)
-				    .detail("ReadRangeEnd", req.range.end);
-
-				errors.clear();
-
-				// Use current durable version for reading
-				version = data->version.get();
-
-				// Fetch both source and restored data
-				state std::pair<GetKeyValuesReply, GetKeyValuesReply> replyPair =
-				    wait(fetchSourceAndRestoredData(data, rangeToRead, version, limit, limitBytes));
-				state GetKeyValuesReply sourceReply = replyPair.first;
-				state GetKeyValuesReply restoredReply = replyPair.second;
-
-				readBytes = sourceReply.data.expectedSize() + restoredReply.data.expectedSize();
-				validatedBytes += readBytes;
-
-				// Check if we've completed reading
-				if (!sourceReply.more) {
-					complete = true;
-				}
-
-				// Compare source data with restored data
-				claimRange = rangeToRead;
-				state Key lastKey = rangeToRead.begin;
-				errors = compareSourceAndRestoredData(data->thisServerID,
-				                                      req.id,
-				                                      req.range,
-				                                      sourceReply,
-				                                      restoredReply,
-				                                      rangeToRead,
-				                                      version,
-				                                      claimRange,
-				                                      lastKey,
-				                                      numValidatedKeys);
-
-				// Update progress in the database
-				KeyRange completeRange = Standalone(KeyRangeRef(rangeToRead.begin, keyAfter(lastKey)));
-				if (!complete && !completeRange.empty() && claimRange.begin == completeRange.begin) {
-					claimRange = claimRange & completeRange;
-					AuditStorageState progressState(req.id, claimRange, req.getType());
-					progressState.setPhase(AuditPhase::Running);
-					progressState.ddId = req.ddId;
-					progressState.auditServerId = data->thisServerID;
-					wait(persistAuditStateByRange(data->cx, progressState));
-				}
-
-				// Apply rate limiting
-				wait(rateLimiter->getAllowance(readBytes));
-
-				// If errors found or complete, break
-				if (!errors.empty() || complete) {
-					break;
-				}
-
-				// Move to next range
-				rangeToReadBegin = keyAfter(lastKey);
-				if (rangeToReadBegin >= req.range.end) {
-					complete = true;
-					break;
-				}
-
-			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled) {
-					throw e;
-				}
-				throw;
+				    .detail("Complete", complete)
+				    .detail("ValidationErrors", errors.size())
+				    .detail("NumValidatedKeys", numValidatedKeys)
+				    .detail("ValidatedBytes", validatedBytes)
+				    .detail("Duration", now() - startTime);
+			} else {
+				res.setPhase(AuditPhase::Complete);
+				res.range = req.range;
+				TraceEvent(SevInfo, "SSAuditRestoreComplete", data->thisServerID)
+				    .detail("AuditID", req.id)
+				    .detail("AuditRange", req.range)
+				    .detail("Complete", complete)
+				    .detail("NumValidatedKeys", numValidatedKeys)
+				    .detail("ValidatedBytes", validatedBytes)
+				    .detail("Duration", now() - startTime);
 			}
-		}
 
-		// Set final state
-		if (!errors.empty()) {
+			// Persist final audit state
+			res.ddId = req.ddId;
+			res.auditServerId = data->thisServerID;
+			co_await persistAuditStateByRange(data->cx, res);
+
+		} catch (Error& e) {
+			err = e;
+		}
+		if (err.present()) {
+			if (err.get().code() == error_code_actor_cancelled) {
+				throw err.get();
+			}
+			// Send retryable errors back to DD so it can retry with correct SS
+			if (err.get().code() == error_code_wrong_shard_server) {
+				req.reply.sendError(err.get());
+				co_return;
+			}
 			res.setPhase(AuditPhase::Error);
-			res.error = errors[0]; // Report first error
+			res.error = err.get().what();
 			res.range = req.range;
-			TraceEvent(SevWarn, "SSAuditRestoreComplete", data->thisServerID)
+			TraceEvent(SevWarn, "SSAuditRestoreError", data->thisServerID)
+			    .errorUnsuppressed(err.get())
 			    .detail("AuditID", req.id)
-			    .detail("AuditRange", req.range)
-			    .detail("Complete", complete)
-			    .detail("ValidationErrors", errors.size())
-			    .detail("NumValidatedKeys", numValidatedKeys)
-			    .detail("ValidatedBytes", validatedBytes)
-			    .detail("Duration", now() - startTime);
-		} else {
-			res.setPhase(AuditPhase::Complete);
-			res.range = req.range;
-			TraceEvent(SevInfo, "SSAuditRestoreComplete", data->thisServerID)
-			    .detail("AuditID", req.id)
-			    .detail("AuditRange", req.range)
-			    .detail("Complete", complete)
-			    .detail("NumValidatedKeys", numValidatedKeys)
-			    .detail("ValidatedBytes", validatedBytes)
-			    .detail("Duration", now() - startTime);
+			    .detail("AuditRange", req.range);
+			res.ddId = req.ddId;
+			res.auditServerId = data->thisServerID;
+			co_await persistAuditStateByRange(data->cx, res);
 		}
-
-		// Persist final audit state
-		res.ddId = req.ddId;
-		res.auditServerId = data->thisServerID;
-		wait(persistAuditStateByRange(data->cx, res));
-
-	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled) {
-			throw e;
-		}
-		// Send retryable errors back to DD so it can retry with correct SS
-		if (e.code() == error_code_wrong_shard_server) {
-			req.reply.sendError(e);
-			return Void();
-		}
-		res.setPhase(AuditPhase::Error);
-		res.error = e.what();
-		res.range = req.range;
-		TraceEvent(SevWarn, "SSAuditRestoreError", data->thisServerID)
-		    .errorUnsuppressed(e)
-		    .detail("AuditID", req.id)
-		    .detail("AuditRange", req.range);
-		res.ddId = req.ddId;
-		res.auditServerId = data->thisServerID;
-		wait(persistAuditStateByRange(data->cx, res));
 	}
 
 	req.reply.send(res);
-	return Void();
 }
 
-ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRequest req) {
+Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRequest req) {
 	ASSERT(req.getType() == AuditType::ValidateHA || req.getType() == AuditType::ValidateReplica);
-	wait(data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield));
-	state FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
+	co_await data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield);
+	FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
 
 	TraceEvent(SevInfo, "SSAuditStorageShardReplicaBegin", data->thisServerID)
 	    .detail("AuditID", req.id)
@@ -4673,187 +4675,251 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 	    .detail("AuditType", req.type)
 	    .detail("TargetServers", describe(req.targetServers));
 
-	state AuditStorageState res(req.id, req.getType()); // we will set range of audit later
-	state std::vector<Optional<Value>> serverListValues;
-	state std::vector<Future<ErrorOr<GetKeyValuesReply>>> fs;
-	state std::vector<std::string> errors;
-	state Version version;
-	state Transaction tr(data->cx);
-	state KeyRange rangeToRead = req.range;
-	state Key rangeToReadBegin = req.range.begin;
-	state KeyRange claimRange;
-	state int limit = 1e4;
-	state int limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
-	state int64_t readBytes = 0;
-	state int64_t numValidatedKeys = 0;
-	state int64_t validatedBytes = 0;
-	state bool complete = false;
-	state int64_t checkTimes = 0;
-	state double startTime = now();
-	state double lastRateLimiterWaitTime = 0;
-	state double rateLimiterBeforeWaitTime = 0;
-	state double rateLimiterTotalWaitTime = 0;
-	state Reference<IRateControl> rateLimiter =
+	AuditStorageState res(req.id, req.getType()); // we will set range of audit later
+	std::vector<Optional<Value>> serverListValues;
+	std::vector<Future<ErrorOr<GetKeyValuesReply>>> fs;
+	std::vector<std::string> errors;
+	Version version{ 0 };
+	Transaction tr(data->cx);
+	KeyRange rangeToRead = req.range;
+	Key rangeToReadBegin = req.range.begin;
+	KeyRange claimRange;
+	int limit = 1e4;
+	int limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+	int64_t readBytes = 0;
+	int64_t numValidatedKeys = 0;
+	int64_t validatedBytes = 0;
+	bool complete = false;
+	int64_t checkTimes = 0;
+	double startTime = now();
+	double lastRateLimiterWaitTime = 0;
+	double rateLimiterBeforeWaitTime = 0;
+	double rateLimiterTotalWaitTime = 0;
+	Reference<IRateControl> rateLimiter =
 	    Reference<IRateControl>(new SpeedLimit(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1));
 	try {
-		loop {
-			try {
-				readBytes = 0;
-				rangeToRead = KeyRangeRef(rangeToReadBegin, req.range.end);
-				ASSERT(!rangeToRead.empty());
+		while (true) {
+			{
+				Optional<Error> err;
+				try {
+					readBytes = 0;
+					rangeToRead = KeyRangeRef(rangeToReadBegin, req.range.end);
+					ASSERT(!rangeToRead.empty());
 
-				TraceEvent(SevDebug, "SSAuditStorageShardReplicaNewRoundBegin", data->thisServerID)
-				    .suppressFor(10.0)
-				    .detail("AuditID", req.id)
-				    .detail("AuditRange", req.range)
-				    .detail("AuditType", req.type)
-				    .detail("ReadRangeBegin", rangeToReadBegin)
-				    .detail("ReadRangeEnd", req.range.end);
-				serverListValues.clear();
-				errors.clear();
-				fs.clear();
-				tr.reset();
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-
-				// Get SS interfaces
-				std::vector<Future<Optional<Value>>> serverListEntries;
-				for (const UID& id : req.targetServers) {
-					if (id != data->thisServerID) {
-						serverListEntries.push_back(tr.get(serverListKeyFor(id)));
-					}
-				}
-				wait(store(serverListValues, getAll(serverListEntries)));
-
-				// Decide version to compare
-				wait(store(version, tr.getReadVersion()));
-
-				// Read remote servers
-				for (const auto& v : serverListValues) {
-					if (!v.present()) {
-						TraceEvent(SevWarn, "SSAuditStorageShardReplicaRemoteServerNotFound", data->thisServerID)
-						    .detail("AuditID", req.id)
-						    .detail("AuditRange", req.range)
-						    .detail("AuditType", req.type);
-						throw audit_storage_failed();
-					}
-					StorageServerInterface remoteServer = decodeServerListValue(v.get());
-					GetKeyValuesRequest req;
-					req.begin = firstGreaterOrEqual(rangeToRead.begin);
-					req.end = firstGreaterOrEqual(rangeToRead.end);
-					req.limit = limit;
-					req.limitBytes = limitBytes;
-					req.version = version;
-					req.tags = TagSet();
-					fs.push_back(remoteServer.getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
-				}
-
-				// Read local server
-				GetKeyValuesRequest localReq;
-				localReq.begin = firstGreaterOrEqual(rangeToRead.begin);
-				localReq.end = firstGreaterOrEqual(rangeToRead.end);
-				localReq.limit = limit;
-				localReq.limitBytes = limitBytes;
-				localReq.version = version;
-				localReq.tags = TagSet();
-				data->actors.add(getKeyValuesQ(data, localReq));
-				fs.push_back(errorOr(localReq.reply.getFuture()));
-				std::vector<ErrorOr<GetKeyValuesReply>> reps = wait(getAll(fs));
-				// Note: getAll() must keep the order of fs
-
-				// Check read result
-				for (int i = 0; i < reps.size(); ++i) {
-					if (reps[i].isError()) {
-						TraceEvent(SevWarn, "SSAuditStorageShardReplicaGetKeyValuesError", data->thisServerID)
-						    .errorUnsuppressed(reps[i].getError())
-						    .detail("AuditID", req.id)
-						    .detail("AuditRange", req.range)
-						    .detail("AuditType", req.type)
-						    .detail("ReplyIndex", i)
-						    .detail("RangeRead", rangeToRead)
-						    .detail("TargetServers", describe(req.targetServers));
-						throw reps[i].getError();
-					}
-					if (reps[i].get().error.present()) {
-						TraceEvent(SevWarn, "SSAuditStorageShardReplicaGetKeyValuesError", data->thisServerID)
-						    .errorUnsuppressed(reps[i].get().error.get())
-						    .detail("AuditID", req.id)
-						    .detail("AuditRange", req.range)
-						    .detail("AuditType", req.type)
-						    .detail("ReplyIndex", i)
-						    .detail("RangeRead", rangeToRead)
-						    .detail("TargetServers", describe(req.targetServers));
-						throw reps[i].get().error.get();
-					}
-					readBytes = readBytes + reps[i].get().data.expectedSize();
-					validatedBytes = validatedBytes + reps[i].get().data.expectedSize();
-					// If any of reps finishes read, we think we complete
-					// Even some rep does not finish read, this unfinished rep has more key than
-					// the complete rep, which will lead to missKey inconsistency in
-					// this round of check
-					if (!reps[i].get().more) {
-						complete = true;
-					}
-				}
-
-				// Validation
-				claimRange = rangeToRead;
-				const GetKeyValuesReply& local = reps.back().get();
-				if (serverListValues.size() != reps.size() - 1) {
-					TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
-					           "SSAuditStorageShardReplicaRepsLengthWrong",
-					           data->thisServerID)
-					    .detail("ServerListValuesSize", serverListValues.size())
-					    .detail("RepsSize", reps.size());
-					throw audit_storage_cancelled();
-				}
-				if (reps.size() == 1) {
-					// if no other server to compare
-					TraceEvent(SevWarn, "SSAuditStorageShardReplicaNothingToCompare", data->thisServerID)
+					TraceEvent(SevDebug, "SSAuditStorageShardReplicaNewRoundBegin", data->thisServerID)
+					    .suppressFor(10.0)
 					    .detail("AuditID", req.id)
 					    .detail("AuditRange", req.range)
 					    .detail("AuditType", req.type)
-					    .detail("TargetServers", describe(req.targetServers));
-					complete = true;
-				}
-				// Compare local and each remote one by one
-				// The last one of reps is local, so skip it
-				for (int repIdx = 0; repIdx < reps.size() - 1; repIdx++) {
-					const GetKeyValuesReply& remote = reps[repIdx].get();
-					// serverListValues and reps should be same order
-					if (!serverListValues[repIdx].present()) { // if not, already throw audit_storage_failed
+					    .detail("ReadRangeBegin", rangeToReadBegin)
+					    .detail("ReadRangeEnd", req.range.end);
+					serverListValues.clear();
+					errors.clear();
+					fs.clear();
+					tr.reset();
+					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+
+					// Get SS interfaces
+					std::vector<Future<Optional<Value>>> serverListEntries;
+					for (const UID& id : req.targetServers) {
+						if (id != data->thisServerID) {
+							serverListEntries.push_back(tr.get(serverListKeyFor(id)));
+						}
+					}
+					co_await store(serverListValues, getAll(serverListEntries));
+
+					// Decide version to compare
+					co_await store(version, tr.getReadVersion());
+
+					// Read remote servers
+					for (const auto& v : serverListValues) {
+						if (!v.present()) {
+							TraceEvent(SevWarn, "SSAuditStorageShardReplicaRemoteServerNotFound", data->thisServerID)
+							    .detail("AuditID", req.id)
+							    .detail("AuditRange", req.range)
+							    .detail("AuditType", req.type);
+							throw audit_storage_failed();
+						}
+						StorageServerInterface remoteServer = decodeServerListValue(v.get());
+						GetKeyValuesRequest req;
+						req.begin = firstGreaterOrEqual(rangeToRead.begin);
+						req.end = firstGreaterOrEqual(rangeToRead.end);
+						req.limit = limit;
+						req.limitBytes = limitBytes;
+						req.version = version;
+						req.tags = TagSet();
+						fs.push_back(remoteServer.getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
+					}
+
+					// Read local server
+					GetKeyValuesRequest localReq;
+					localReq.begin = firstGreaterOrEqual(rangeToRead.begin);
+					localReq.end = firstGreaterOrEqual(rangeToRead.end);
+					localReq.limit = limit;
+					localReq.limitBytes = limitBytes;
+					localReq.version = version;
+					localReq.tags = TagSet();
+					data->actors.add(getKeyValuesQ(data, localReq));
+					fs.push_back(errorOr(localReq.reply.getFuture()));
+					std::vector<ErrorOr<GetKeyValuesReply>> reps = co_await getAll(fs);
+					// Note: getAll() must keep the order of fs
+
+					// Check read result
+					for (int i = 0; i < reps.size(); ++i) {
+						if (reps[i].isError()) {
+							TraceEvent(SevWarn, "SSAuditStorageShardReplicaGetKeyValuesError", data->thisServerID)
+							    .errorUnsuppressed(reps[i].getError())
+							    .detail("AuditID", req.id)
+							    .detail("AuditRange", req.range)
+							    .detail("AuditType", req.type)
+							    .detail("ReplyIndex", i)
+							    .detail("RangeRead", rangeToRead)
+							    .detail("TargetServers", describe(req.targetServers));
+							throw reps[i].getError();
+						}
+						if (reps[i].get().error.present()) {
+							TraceEvent(SevWarn, "SSAuditStorageShardReplicaGetKeyValuesError", data->thisServerID)
+							    .errorUnsuppressed(reps[i].get().error.get())
+							    .detail("AuditID", req.id)
+							    .detail("AuditRange", req.range)
+							    .detail("AuditType", req.type)
+							    .detail("ReplyIndex", i)
+							    .detail("RangeRead", rangeToRead)
+							    .detail("TargetServers", describe(req.targetServers));
+							throw reps[i].get().error.get();
+						}
+						readBytes = readBytes + reps[i].get().data.expectedSize();
+						validatedBytes = validatedBytes + reps[i].get().data.expectedSize();
+						// If any of reps finishes read, we think we complete
+						// Even some rep does not finish read, this unfinished rep has more key than
+						// the complete rep, which will lead to missKey inconsistency in
+						// this round of check
+						if (!reps[i].get().more) {
+							complete = true;
+						}
+					}
+
+					// Validation
+					claimRange = rangeToRead;
+					const GetKeyValuesReply& local = reps.back().get();
+					if (serverListValues.size() != reps.size() - 1) {
 						TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
-						           "SSAuditStorageShardReplicaRepIdxNotPresent",
+						           "SSAuditStorageShardReplicaRepsLengthWrong",
 						           data->thisServerID)
-						    .detail("RepIdx", repIdx);
+						    .detail("ServerListValuesSize", serverListValues.size())
+						    .detail("RepsSize", reps.size());
 						throw audit_storage_cancelled();
 					}
-					const StorageServerInterface& remoteServer = decodeServerListValue(serverListValues[repIdx].get());
-					Key lastKey = rangeToRead.begin;
-					const int end = std::min(local.data.size(), remote.data.size());
-					bool missingKey = local.data.size() != remote.data.size();
-					// Compare each key one by one
-					std::string error;
-					int i = 0;
-					for (; i < end; ++i) {
-						KeyValueRef remoteKV = remote.data[i];
-						KeyValueRef localKV = local.data[i];
-						if (!req.range.contains(remoteKV.key) || !req.range.contains(localKV.key)) {
-							TraceEvent(SevWarn, "SSAuditStorageShardReplicaKeyOutOfRange", data->thisServerID)
-							    .detail("AuditRange", req.range)
-							    .detail("RemoteServer", remoteServer.toString())
-							    .detail("LocalKey", localKV.key)
-							    .detail("RemoteKey", remoteKV.key);
-							throw wrong_shard_server();
+					if (reps.size() == 1) {
+						// if no other server to compare
+						TraceEvent(SevWarn, "SSAuditStorageShardReplicaNothingToCompare", data->thisServerID)
+						    .detail("AuditID", req.id)
+						    .detail("AuditRange", req.range)
+						    .detail("AuditType", req.type)
+						    .detail("TargetServers", describe(req.targetServers));
+						complete = true;
+					}
+					// Compare local and each remote one by one
+					// The last one of reps is local, so skip it
+					for (int repIdx = 0; repIdx < reps.size() - 1; repIdx++) {
+						const GetKeyValuesReply& remote = reps[repIdx].get();
+						// serverListValues and reps should be same order
+						if (!serverListValues[repIdx].present()) { // if not, already throw audit_storage_failed
+							TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+							           "SSAuditStorageShardReplicaRepIdxNotPresent",
+							           data->thisServerID)
+							    .detail("RepIdx", repIdx);
+							throw audit_storage_cancelled();
 						}
-						// Check if mismatch
-						if (remoteKV.key != localKV.key) {
-							error = format("Key Mismatch: local server (%016llx): %s, remote server(%016llx) %s",
-							               data->thisServerID.first(),
-							               Traceable<StringRef>::toString(localKV.key).c_str(),
-							               remoteServer.uniqueID.first(),
-							               Traceable<StringRef>::toString(remoteKV.key).c_str());
+						const StorageServerInterface& remoteServer =
+						    decodeServerListValue(serverListValues[repIdx].get());
+						Key lastKey = rangeToRead.begin;
+						const int end = std::min(local.data.size(), remote.data.size());
+						bool missingKey = local.data.size() != remote.data.size();
+						// Compare each key one by one
+						std::string error;
+						int i = 0;
+						for (; i < end; ++i) {
+							KeyValueRef remoteKV = remote.data[i];
+							KeyValueRef localKV = local.data[i];
+							if (!req.range.contains(remoteKV.key) || !req.range.contains(localKV.key)) {
+								TraceEvent(SevWarn, "SSAuditStorageShardReplicaKeyOutOfRange", data->thisServerID)
+								    .detail("AuditRange", req.range)
+								    .detail("RemoteServer", remoteServer.toString())
+								    .detail("LocalKey", localKV.key)
+								    .detail("RemoteKey", remoteKV.key);
+								throw wrong_shard_server();
+							}
+							// Check if mismatch
+							if (remoteKV.key != localKV.key) {
+								error = format("Key Mismatch: local server (%016llx): %s, remote server(%016llx) %s",
+								               data->thisServerID.first(),
+								               Traceable<StringRef>::toString(localKV.key).c_str(),
+								               remoteServer.uniqueID.first(),
+								               Traceable<StringRef>::toString(remoteKV.key).c_str());
+								TraceEvent(SevError, "SSAuditStorageShardReplicaError", data->thisServerID)
+								    .setMaxFieldLength(-1)
+								    .setMaxEventLength(-1)
+								    .detail("AuditId", req.id)
+								    .detail("AuditRange", req.range)
+								    .detail("ErrorMessage", error)
+								    .detail("Version", version)
+								    .detail("ClaimRange", claimRange);
+								errors.push_back(error);
+								break;
+							} else if (remoteKV.value != localKV.value) {
+								error = format(
+								    "Value Mismatch for Key %s: local server (%016llx): %s, remote server(%016llx) %s",
+								    Traceable<StringRef>::toString(localKV.key).c_str(),
+								    data->thisServerID.first(),
+								    Traceable<StringRef>::toString(localKV.value).c_str(),
+								    remoteServer.uniqueID.first(),
+								    Traceable<StringRef>::toString(remoteKV.value).c_str());
+								TraceEvent(SevError, "SSAuditStorageShardReplicaError", data->thisServerID)
+								    .setMaxFieldLength(-1)
+								    .setMaxEventLength(-1)
+								    .detail("AuditId", req.id)
+								    .detail("AuditRange", req.range)
+								    .detail("ErrorMessage", error)
+								    .detail("Version", version)
+								    .detail("ClaimRange", claimRange);
+								errors.push_back(error);
+								break;
+							} else {
+								TraceEvent(SevVerbose, "SSAuditStorageShardReplicaValidatedKey", data->thisServerID)
+								    .detail("Key", localKV.key);
+							}
+							++numValidatedKeys;
+							lastKey = localKV.key;
+						}
+						KeyRange completeRange = Standalone(KeyRangeRef(rangeToRead.begin, keyAfter(lastKey)));
+						if (completeRange.empty() || claimRange.begin != completeRange.begin) {
+							TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+							           "SSAuditStorageShardReplicaCompleteRangeUnexpected",
+							           data->thisServerID)
+							    .detail("ClaimRange", claimRange)
+							    .detail("CompleteRange", completeRange);
+							throw audit_storage_cancelled();
+						}
+						claimRange = claimRange & completeRange;
+						if (!error.empty()) { // if key or value mismatch detected
+							continue; // check next remote server
+						}
+						if (!local.more && !remote.more && local.data.size() == remote.data.size()) {
+							continue; // check next remote server
+						} else if (i >= local.data.size() && !local.more && i < remote.data.size()) {
+							if (!missingKey) {
+								TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+								           "SSAuditStorageShardReplicaMissingKeyUnexpected",
+								           data->thisServerID);
+							}
+							std::string error =
+							    format("Missing key(s) form local server (%lld), next key: %s, remote server(%016llx) ",
+							           data->thisServerID.first(),
+							           Traceable<StringRef>::toString(remote.data[i].key).c_str(),
+							           remoteServer.uniqueID.first());
 							TraceEvent(SevError, "SSAuditStorageShardReplicaError", data->thisServerID)
 							    .setMaxFieldLength(-1)
 							    .setMaxEventLength(-1)
@@ -4863,15 +4929,18 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 							    .detail("Version", version)
 							    .detail("ClaimRange", claimRange);
 							errors.push_back(error);
-							break;
-						} else if (remoteKV.value != localKV.value) {
-							error = format(
-							    "Value Mismatch for Key %s: local server (%016llx): %s, remote server(%016llx) %s",
-							    Traceable<StringRef>::toString(localKV.key).c_str(),
-							    data->thisServerID.first(),
-							    Traceable<StringRef>::toString(localKV.value).c_str(),
-							    remoteServer.uniqueID.first(),
-							    Traceable<StringRef>::toString(remoteKV.value).c_str());
+							continue; // check next remote server
+						} else if (i >= remote.data.size() && !remote.more && i < local.data.size()) {
+							if (!missingKey) {
+								TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+								           "SSAuditStorageShardReplicaMissingKeyUnexpected",
+								           data->thisServerID);
+							}
+							std::string error =
+							    format("Missing key(s) form remote server (%lld), next local server(%016llx) key: %s",
+							           remoteServer.uniqueID.first(),
+							           data->thisServerID.first(),
+							           Traceable<StringRef>::toString(local.data[i].key).c_str());
 							TraceEvent(SevError, "SSAuditStorageShardReplicaError", data->thisServerID)
 							    .setMaxFieldLength(-1)
 							    .setMaxEventLength(-1)
@@ -4881,120 +4950,38 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 							    .detail("Version", version)
 							    .detail("ClaimRange", claimRange);
 							errors.push_back(error);
-							break;
-						} else {
-							TraceEvent(SevVerbose, "SSAuditStorageShardReplicaValidatedKey", data->thisServerID)
-							    .detail("Key", localKV.key);
+							continue; // check next remote server
 						}
-						++numValidatedKeys;
-						lastKey = localKV.key;
 					}
-					KeyRange completeRange = Standalone(KeyRangeRef(rangeToRead.begin, keyAfter(lastKey)));
-					if (completeRange.empty() || claimRange.begin != completeRange.begin) {
-						TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
-						           "SSAuditStorageShardReplicaCompleteRangeUnexpected",
-						           data->thisServerID)
-						    .detail("ClaimRange", claimRange)
-						    .detail("CompleteRange", completeRange);
-						throw audit_storage_cancelled();
-					}
-					claimRange = claimRange & completeRange;
-					if (!error.empty()) { // if key or value mismatch detected
-						continue; // check next remote server
-					}
-					if (!local.more && !remote.more && local.data.size() == remote.data.size()) {
-						continue; // check next remote server
-					} else if (i >= local.data.size() && !local.more && i < remote.data.size()) {
-						if (!missingKey) {
-							TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
-							           "SSAuditStorageShardReplicaMissingKeyUnexpected",
-							           data->thisServerID);
-						}
-						std::string error =
-						    format("Missing key(s) form local server (%lld), next key: %s, remote server(%016llx) ",
-						           data->thisServerID.first(),
-						           Traceable<StringRef>::toString(remote.data[i].key).c_str(),
-						           remoteServer.uniqueID.first());
-						TraceEvent(SevError, "SSAuditStorageShardReplicaError", data->thisServerID)
-						    .setMaxFieldLength(-1)
-						    .setMaxEventLength(-1)
-						    .detail("AuditId", req.id)
-						    .detail("AuditRange", req.range)
-						    .detail("ErrorMessage", error)
-						    .detail("Version", version)
-						    .detail("ClaimRange", claimRange);
-						errors.push_back(error);
-						continue; // check next remote server
-					} else if (i >= remote.data.size() && !remote.more && i < local.data.size()) {
-						if (!missingKey) {
-							TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
-							           "SSAuditStorageShardReplicaMissingKeyUnexpected",
-							           data->thisServerID);
-						}
-						std::string error =
-						    format("Missing key(s) form remote server (%lld), next local server(%016llx) key: %s",
-						           remoteServer.uniqueID.first(),
-						           data->thisServerID.first(),
-						           Traceable<StringRef>::toString(local.data[i].key).c_str());
-						TraceEvent(SevError, "SSAuditStorageShardReplicaError", data->thisServerID)
-						    .setMaxFieldLength(-1)
-						    .setMaxEventLength(-1)
-						    .detail("AuditId", req.id)
-						    .detail("AuditRange", req.range)
-						    .detail("ErrorMessage", error)
-						    .detail("Version", version)
-						    .detail("ClaimRange", claimRange);
-						errors.push_back(error);
-						continue; // check next remote server
-					}
-				}
 
-				if (claimRange.end >= req.range.end) {
-					complete = true;
-				}
+					if (claimRange.end >= req.range.end) {
+						complete = true;
+					}
 
-				TraceEvent(SevInfo, "SSAuditStorageStatisticValidateReplica", data->thisServerID)
-				    .suppressFor(30.0)
-				    .detail("AuditID", req.id)
-				    .detail("AuditRange", req.range)
-				    .detail("AuditType", req.type)
-				    .detail("AuditServer", data->thisServerID)
-				    .detail("ReplicaServers", req.targetServers)
-				    .detail("CheckTimes", checkTimes)
-				    .detail("NumValidatedKeys", numValidatedKeys)
-				    .detail("CurrentValidatedInclusiveRange", claimRange)
-				    .detail("CumulatedValidatedInclusiveRange", KeyRangeRef(req.range.begin, claimRange.end));
-
-				// Return result
-				if (!errors.empty()) {
-					TraceEvent(SevError, "SSAuditStorageShardReplicaError", data->thisServerID)
-					    .setMaxFieldLength(-1)
-					    .setMaxEventLength(-1)
-					    .detail("AuditId", req.id)
+					TraceEvent(SevInfo, "SSAuditStorageStatisticValidateReplica", data->thisServerID)
+					    .suppressFor(30.0)
+					    .detail("AuditID", req.id)
 					    .detail("AuditRange", req.range)
-					    .detail("ErrorCount", errors.size())
-					    .detail("Version", version)
-					    .detail("ClaimRange", claimRange);
-					res.range = claimRange;
-					res.setPhase(AuditPhase::Error);
-					if (!req.ddId.isValid()) {
-						TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
-						           "SSAuditStorageShardReplicaDDIdInvalid",
-						           data->thisServerID);
-						throw audit_storage_cancelled();
-					}
-					res.ddId = req.ddId; // used to compare req.ddId with existing persisted ddId
-					wait(persistAuditStateByRange(data->cx, res));
-					req.reply.sendError(audit_storage_error());
-					break;
-				} else {
-					if (complete || checkTimes % 100 == 0) {
-						if (complete) {
-							res.range = req.range;
-						} else {
-							res.range = Standalone(KeyRangeRef(req.range.begin, claimRange.end));
-						}
-						res.setPhase(AuditPhase::Complete);
+					    .detail("AuditType", req.type)
+					    .detail("AuditServer", data->thisServerID)
+					    .detail("ReplicaServers", req.targetServers)
+					    .detail("CheckTimes", checkTimes)
+					    .detail("NumValidatedKeys", numValidatedKeys)
+					    .detail("CurrentValidatedInclusiveRange", claimRange)
+					    .detail("CumulatedValidatedInclusiveRange", KeyRangeRef(req.range.begin, claimRange.end));
+
+					// Return result
+					if (!errors.empty()) {
+						TraceEvent(SevError, "SSAuditStorageShardReplicaError", data->thisServerID)
+						    .setMaxFieldLength(-1)
+						    .setMaxEventLength(-1)
+						    .detail("AuditId", req.id)
+						    .detail("AuditRange", req.range)
+						    .detail("ErrorCount", errors.size())
+						    .detail("Version", version)
+						    .detail("ClaimRange", claimRange);
+						res.range = claimRange;
+						res.setPhase(AuditPhase::Error);
 						if (!req.ddId.isValid()) {
 							TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
 							           "SSAuditStorageShardReplicaDDIdInvalid",
@@ -5002,50 +4989,72 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 							throw audit_storage_cancelled();
 						}
 						res.ddId = req.ddId; // used to compare req.ddId with existing persisted ddId
-						TraceEvent(SevInfo, "SSAuditStorageShardReplicaProgressPersist", data->thisServerID)
-						    .suppressFor(10.0)
-						    .detail("AuditId", req.id)
-						    .detail("AuditRange", req.range)
-						    .detail("AuditServer", data->thisServerID)
-						    .detail("Progress", res.toString());
-						wait(persistAuditStateByRange(data->cx, res));
-					}
-					// Expand persisted complete range
-					if (complete) {
-						req.reply.send(res);
-						TraceEvent(SevInfo, "SSAuditStorageShardReplicaComplete", data->thisServerID)
-						    .detail("AuditId", req.id)
-						    .detail("AuditRange", req.range)
-						    .detail("AuditServer", data->thisServerID)
-						    .detail("ReplicaServers", req.targetServers)
-						    .detail("ClaimRange", claimRange)
-						    .detail("CompleteRange", res.range)
-						    .detail("CheckTimes", checkTimes)
-						    .detail("NumValidatedKeys", numValidatedKeys)
-						    .detail("ValidatedBytes", validatedBytes)
-						    .detail("RateLimiterTotalWaitTime", rateLimiterTotalWaitTime)
-						    .detail("TotalTime", now() - startTime);
+						co_await persistAuditStateByRange(data->cx, res);
+						req.reply.sendError(audit_storage_error());
 						break;
 					} else {
-						TraceEvent(SevInfo, "SSAuditStorageShardReplicaPartialDone", data->thisServerID)
-						    .suppressFor(10.0)
-						    .detail("AuditId", req.id)
-						    .detail("AuditRange", req.range)
-						    .detail("AuditServer", data->thisServerID)
-						    .detail("ReplicaServers", req.targetServers)
-						    .detail("ClaimRange", claimRange)
-						    .detail("CompleteRange", res.range)
-						    .detail("LastRateLimiterWaitTime", lastRateLimiterWaitTime)
-						    .detail("RateLimiterTotalWaitTime", rateLimiterTotalWaitTime);
-						rangeToReadBegin = claimRange.end;
+						if (complete || checkTimes % 100 == 0) {
+							if (complete) {
+								res.range = req.range;
+							} else {
+								res.range = Standalone(KeyRangeRef(req.range.begin, claimRange.end));
+							}
+							res.setPhase(AuditPhase::Complete);
+							if (!req.ddId.isValid()) {
+								TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+								           "SSAuditStorageShardReplicaDDIdInvalid",
+								           data->thisServerID);
+								throw audit_storage_cancelled();
+							}
+							res.ddId = req.ddId; // used to compare req.ddId with existing persisted ddId
+							TraceEvent(SevInfo, "SSAuditStorageShardReplicaProgressPersist", data->thisServerID)
+							    .suppressFor(10.0)
+							    .detail("AuditId", req.id)
+							    .detail("AuditRange", req.range)
+							    .detail("AuditServer", data->thisServerID)
+							    .detail("Progress", res.toString());
+							co_await persistAuditStateByRange(data->cx, res);
+						}
+						// Expand persisted complete range
+						if (complete) {
+							req.reply.send(res);
+							TraceEvent(SevInfo, "SSAuditStorageShardReplicaComplete", data->thisServerID)
+							    .detail("AuditId", req.id)
+							    .detail("AuditRange", req.range)
+							    .detail("AuditServer", data->thisServerID)
+							    .detail("ReplicaServers", req.targetServers)
+							    .detail("ClaimRange", claimRange)
+							    .detail("CompleteRange", res.range)
+							    .detail("CheckTimes", checkTimes)
+							    .detail("NumValidatedKeys", numValidatedKeys)
+							    .detail("ValidatedBytes", validatedBytes)
+							    .detail("RateLimiterTotalWaitTime", rateLimiterTotalWaitTime)
+							    .detail("TotalTime", now() - startTime);
+							break;
+						} else {
+							TraceEvent(SevInfo, "SSAuditStorageShardReplicaPartialDone", data->thisServerID)
+							    .suppressFor(10.0)
+							    .detail("AuditId", req.id)
+							    .detail("AuditRange", req.range)
+							    .detail("AuditServer", data->thisServerID)
+							    .detail("ReplicaServers", req.targetServers)
+							    .detail("ClaimRange", claimRange)
+							    .detail("CompleteRange", res.range)
+							    .detail("LastRateLimiterWaitTime", lastRateLimiterWaitTime)
+							    .detail("RateLimiterTotalWaitTime", rateLimiterTotalWaitTime);
+							rangeToReadBegin = claimRange.end;
+						}
 					}
+				} catch (Error& e) {
+					err = e;
 				}
-			} catch (Error& e) {
-				wait(tr.onError(e));
+				if (err.present()) {
+					co_await tr.onError(err.get());
+				}
 			}
 
 			rateLimiterBeforeWaitTime = now();
-			wait(rateLimiter->getAllowance(readBytes)); // RateKeeping
+			co_await rateLimiter->getAllowance(readBytes); // RateKeeping
 			lastRateLimiterWaitTime = now() - rateLimiterBeforeWaitTime;
 			rateLimiterTotalWaitTime = rateLimiterTotalWaitTime + lastRateLimiterWaitTime;
 			++checkTimes;
@@ -5053,7 +5062,7 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
-			return Void(); // silently exit
+			co_return; // silently exit
 		}
 		TraceEvent(SevInfo, "SSAuditStorageShardReplicaFailed", data->thisServerID)
 		    .errorUnsuppressed(e)
@@ -5070,29 +5079,27 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 			req.reply.sendError(audit_storage_failed());
 		}
 	}
-
-	return Void();
 }
 
-ACTOR Future<Void> getRangeDataToDump(StorageServer* data,
-                                      KeyRange range,
-                                      Version version,
-                                      std::shared_ptr<RangeDumpRawData> output) {
-	state std::map<Key, Value> kvsToDump;
+Future<Void> getRangeDataToDump(StorageServer* data,
+                                KeyRange range,
+                                Version version,
+                                std::shared_ptr<RangeDumpRawData> output) {
+	std::map<Key, Value> kvsToDump;
 	output->arena = Arena();
 	output->kvs.clear();
 	output->sampled.clear();
-	state std::map<Key, Value> sample;
+	std::map<Key, Value> sample;
 	output->kvsBytes = 0;
-	state Key beginKey = range.begin;
+	Key beginKey = range.begin;
 	output->lastKey = KeyRef(output->arena, range.begin);
-	state bool immediateError = true;
+	bool immediateError = true;
 	// Accumulate data read from local storage to output->kvs and make sampling until any error presents
-	loop {
+	while (true) {
 		// Read data and stop for any error
-		state ErrorOr<GetKeyValuesReply> rep;
+		ErrorOr<GetKeyValuesReply> rep;
 		try {
-			state GetKeyValuesRequest localReq;
+			GetKeyValuesRequest localReq;
 			localReq.begin = firstGreaterOrEqual(beginKey);
 			localReq.end = firstGreaterOrEqual(range.end);
 			localReq.version = version;
@@ -5100,7 +5107,7 @@ ACTOR Future<Void> getRangeDataToDump(StorageServer* data,
 			localReq.limitBytes = SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT;
 			localReq.tags = TagSet();
 			data->actors.add(getKeyValuesQ(data, localReq));
-			wait(store(rep, errorOr(localReq.reply.getFuture())));
+			co_await store(rep, errorOr(localReq.reply.getFuture()));
 			if (rep.isError()) {
 				throw rep.getError();
 			}
@@ -5151,7 +5158,6 @@ ACTOR Future<Void> getRangeDataToDump(StorageServer* data,
 	if (immediateError) {
 		throw retry();
 	}
-	return Void();
 }
 
 // The SS actor handling bulk dump task sent from DD.
@@ -5173,28 +5179,28 @@ ACTOR Future<Void> getRangeDataToDump(StorageServer* data,
 // Each task must have one manifest file.
 // If the task's range is empty, data file and sample file do not exist
 // If the task's data size is too small, the sample file may omitted
-ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
-	wait(data->serveBulkDumpParallelismLock.take(TaskPriority::DefaultYield));
-	state FlowLock::Releaser holder(data->serveBulkDumpParallelismLock); // A SS can handle one bulkDump task at a time
-	state Key rangeBegin = req.bulkDumpState.getRange().begin;
-	state Key rangeEnd = req.bulkDumpState.getRange().end;
-	state BulkLoadTransportMethod transportMethod = req.bulkDumpState.getTransportMethod();
-	state BulkLoadType dumpType = req.bulkDumpState.getType();
-	state int64_t readBytes = 0;
-	state int retryCount = 0;
-	state uint64_t batchNum = 0;
-	state Version versionToDump;
-	state std::shared_ptr<RangeDumpRawData> rangeDumpRawData;
-	state UID jobId = req.bulkDumpState.getJobId();
-	state std::string rootFolderLocal = data->bulkDumpFolder;
-	state std::string rootFolderRemote = req.bulkDumpState.getJobRoot();
+Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
+	co_await data->serveBulkDumpParallelismLock.take(TaskPriority::DefaultYield);
+	FlowLock::Releaser holder(data->serveBulkDumpParallelismLock); // A SS can handle one bulkDump task at a time
+	Key rangeBegin = req.bulkDumpState.getRange().begin;
+	Key rangeEnd = req.bulkDumpState.getRange().end;
+	BulkLoadTransportMethod transportMethod = req.bulkDumpState.getTransportMethod();
+	BulkLoadType dumpType = req.bulkDumpState.getType();
+	int64_t readBytes = 0;
+	int retryCount = 0;
+	uint64_t batchNum = 0;
+	Version versionToDump{ 0 };
+	std::shared_ptr<RangeDumpRawData> rangeDumpRawData;
+	UID jobId = req.bulkDumpState.getJobId();
+	std::string rootFolderLocal = data->bulkDumpFolder;
+	std::string rootFolderRemote = req.bulkDumpState.getJobRoot();
 	// Use jobId and taskId as the folder to store the data of the task range
 	ASSERT(req.bulkDumpState.getTaskId().present());
-	state std::string taskFolder = getBulkDumpJobTaskFolder(jobId, req.bulkDumpState.getTaskId().get());
-	state BulkLoadFileSet destinationFileSets;
-	state Transaction tr(data->cx);
+	std::string taskFolder = getBulkDumpJobTaskFolder(jobId, req.bulkDumpState.getTaskId().get());
+	BulkLoadFileSet destinationFileSets;
+	Transaction tr(data->cx);
 
-	loop {
+	while (true) {
 		try {
 			// Reset data buffer
 			rangeDumpRawData = std::make_shared<RangeDumpRawData>();
@@ -5203,33 +5209,33 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			clearFileFolder(abspath(joinPath(rootFolderLocal, taskFolder)));
 
 			// Dump data of rangeToDump in a relativeFolder
-			state KeyRange rangeToDump = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
+			KeyRange rangeToDump = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
 
 			// relativeFolder = <JobId>/<TaskId>/<batchNum>
 			// relativeFolder remains consistent between local path and remote path
-			state std::string relativeFolder = joinPath(taskFolder, std::to_string(batchNum));
+			std::string relativeFolder = joinPath(taskFolder, std::to_string(batchNum));
 
 			// Get version to dump
 			tr.reset();
-			wait(store(versionToDump, tr.getReadVersion()));
+			co_await store(versionToDump, tr.getReadVersion());
 
 			// Read data
 			// TODO(BulkDump): Read data from other servers at the versionToDump as much as possible
-			wait(getRangeDataToDump(data, rangeToDump, versionToDump, /*output=*/rangeDumpRawData));
+			co_await getRangeDataToDump(data, rangeToDump, versionToDump, /*output=*/rangeDumpRawData);
 
 			// Generate local file paths and remote file paths
 			// The data in KVStore is dumped to the local folder at first and then
 			// the local files are uploaded to the remote folder
 			// Local files and remotes files have the same relative path but different root
-			state std::pair<BulkLoadFileSet, BulkLoadFileSet> resFileSets =
+			std::pair<BulkLoadFileSet, BulkLoadFileSet> resFileSets =
 			    getLocalRemoteFileSetSetting(versionToDump,
 			                                 relativeFolder,
 			                                 /*rootLocal=*/rootFolderLocal,
 			                                 /*rootRemote=*/rootFolderRemote);
 
 			// The remote file path:
-			state BulkLoadFileSet localFileSetSetting = resFileSets.first;
-			state BulkLoadFileSet remoteFileSetSetting = resFileSets.second;
+			BulkLoadFileSet localFileSetSetting = resFileSets.first;
+			BulkLoadFileSet remoteFileSetSetting = resFileSets.second;
 
 			// Generate byte sampling setting
 			BulkLoadByteSampleSetting byteSampleSetting(0,
@@ -5239,17 +5245,17 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			                                            SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY);
 
 			// Write to SST file
-			state KeyRange dataRange = rangeToDump & KeyRangeRef(rangeBegin, keyAfter(rangeDumpRawData->lastKey));
-			state BulkLoadManifest manifest =
-			    wait(dumpDataFileToLocalDirectory(data->thisServerID,
-			                                      rangeDumpRawData,
-			                                      localFileSetSetting,
-			                                      remoteFileSetSetting,
-			                                      byteSampleSetting,
-			                                      versionToDump,
-			                                      dataRange, // the actual range of the rangeDumpRawData.kvs
-			                                      dumpType,
-			                                      transportMethod));
+			KeyRange dataRange = rangeToDump & KeyRangeRef(rangeBegin, keyAfter(rangeDumpRawData->lastKey));
+			BulkLoadManifest manifest =
+			    co_await dumpDataFileToLocalDirectory(data->thisServerID,
+			                                          rangeDumpRawData,
+			                                          localFileSetSetting,
+			                                          remoteFileSetSetting,
+			                                          byteSampleSetting,
+			                                          versionToDump,
+			                                          dataRange, // the actual range of the rangeDumpRawData.kvs
+			                                          dumpType,
+			                                          transportMethod);
 			readBytes = readBytes + rangeDumpRawData->kvsBytes;
 			TraceEvent(bulkLoadVerboseEventSev(), "SSBulkDumpDataFileGenerated", data->thisServerID)
 			    .detail("TaskID", req.bulkDumpState.getTaskId())
@@ -5266,23 +5272,23 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			    .detail("RemoteFileSet", manifest.getFileSet().toString());
 
 			// Upload Files
-			state BulkLoadFileSet localFileSet = localFileSetSetting;
+			BulkLoadFileSet localFileSet = localFileSetSetting;
 			if (!manifest.hasDataFile()) {
 				localFileSet.removeDataFile();
 			}
 			if (!manifest.hasByteSampleFile()) {
 				localFileSet.removeByteSampleFile();
 			}
-			wait(uploadBulkDumpFileSet(
-			    req.bulkDumpState.getTransportMethod(), localFileSet, manifest.getFileSet(), data->thisServerID));
+			co_await uploadBulkDumpFileSet(
+			    req.bulkDumpState.getTransportMethod(), localFileSet, manifest.getFileSet(), data->thisServerID);
 
 			// Progressively set metadata of the data range as complete phase
 			// Persist remoteFilePaths to the corresponding range
 			if (!dataRange.empty()) {
 				// The persisting range (dataRange) must be exactly same as the range presented in the manifest file
 				ASSERT(dataRange == manifest.getRange());
-				wait(persistCompleteBulkDumpRange(data->cx,
-				                                  req.bulkDumpState.generateBulkDumpMetadataToPersist(manifest)));
+				co_await persistCompleteBulkDumpRange(data->cx,
+				                                      req.bulkDumpState.generateBulkDumpMetadataToPersist(manifest));
 			}
 
 			// Move to the next range
@@ -5314,13 +5320,11 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			}
 			retryCount++;
 		}
-		wait(delay(1.0));
+		co_await delay(1.0);
 	}
 
 	// Do best effort cleanup
 	clearFileFolder(abspath(joinPath(rootFolderLocal, taskFolder)), data->thisServerID, /*ignoreError=*/true);
-
-	return Void();
 }
 
 TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
@@ -5419,25 +5423,24 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 }
 
 // Issues a secondary query (either range and point read) and fills results into "kvm".
-ACTOR Future<Void> mapSubquery(StorageServer* data,
-                               Version version,
-                               GetMappedKeyValuesRequest* pOriginalReq,
-                               Arena* pArena,
-                               bool isRangeQuery,
-                               KeyValueRef* it,
-                               MappedKeyValueRef* kvm,
-                               Key mappedKey) {
+Future<Void> mapSubquery(StorageServer* data,
+                         Version version,
+                         GetMappedKeyValuesRequest* pOriginalReq,
+                         Arena* pArena,
+                         bool isRangeQuery,
+                         KeyValueRef* it,
+                         MappedKeyValueRef* kvm,
+                         Key mappedKey) {
 	if (isRangeQuery) {
 		// Use the mappedKey as the prefix of the range query.
-		GetRangeReqAndResultRef getRange = wait(quickGetKeyValues(data, mappedKey, version, pArena, pOriginalReq));
+		GetRangeReqAndResultRef getRange = co_await quickGetKeyValues(data, mappedKey, version, pArena, pOriginalReq);
 		kvm->key = it->key;
 		kvm->value = it->value;
 		kvm->reqAndResult = getRange;
 	} else {
-		GetValueReqAndResultRef getValue = wait(quickGetValue(data, mappedKey, version, pArena, pOriginalReq));
+		GetValueReqAndResultRef getValue = co_await quickGetValue(data, mappedKey, version, pArena, pOriginalReq);
 		kvm->reqAndResult = getValue;
 	}
-	return Void();
 }
 
 int getMappedKeyValueSize(MappedKeyValueRef mappedKeyValue) {
@@ -5455,13 +5458,13 @@ int getMappedKeyValueSize(MappedKeyValueRef mappedKeyValue) {
 	return bytes;
 }
 
-ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
-                                                   GetKeyValuesReply input,
-                                                   StringRef mapper,
-                                                   // To provide span context, tags, debug ID to underlying lookups.
-                                                   GetMappedKeyValuesRequest* pOriginalReq,
-                                                   int* remainingLimitBytes) {
-	state GetMappedKeyValuesReply result;
+Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
+                                             GetKeyValuesReply input,
+                                             StringRef mapper,
+                                             // To provide span context, tags, debug ID to underlying lookups.
+                                             GetMappedKeyValuesRequest* pOriginalReq,
+                                             int* remainingLimitBytes) {
+	GetMappedKeyValuesReply result;
 	result.version = input.version;
 	result.cached = input.cached;
 	result.arena.dependsOn(input.arena);
@@ -5470,7 +5473,7 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
 		g_traceBatch.addEvent(
 		    "TransactionDebug", pOriginalReq->options.get().debugID.get().first(), "storageserver.mapKeyValues.Start");
-	state Tuple mappedKeyFormatTuple;
+	Tuple mappedKeyFormatTuple;
 
 	try {
 		mappedKeyFormatTuple = Tuple::unpack(mapper);
@@ -5478,15 +5481,15 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 		TraceEvent("MapperNotTuple").error(e).detail("Mapper", mapper);
 		throw mapper_not_tuple();
 	}
-	state std::vector<Optional<Tuple>> vt;
-	state bool isRangeQuery = false;
+	std::vector<Optional<Tuple>> vt;
+	bool isRangeQuery = false;
 	preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
 
-	state int sz = input.data.size();
+	int sz = input.data.size();
 	const int k = std::min(sz, SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE);
-	state std::vector<MappedKeyValueRef> kvms(k);
-	state std::vector<Future<Void>> subqueries;
-	state int offset = 0;
+	std::vector<MappedKeyValueRef> kvms(k);
+	std::vector<Future<Void>> subqueries;
+	int offset = 0;
 	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
 		g_traceBatch.addEvent("TransactionDebug",
 		                      pOriginalReq->options.get().debugID.get().first(),
@@ -5510,7 +5513,7 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 			subqueries.push_back(
 			    mapSubquery(data, input.version, pOriginalReq, &result.arena, isRangeQuery, it, kvm, mappedKey));
 		}
-		wait(waitForAll(subqueries));
+		co_await waitForAll(subqueries);
 		if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
 			g_traceBatch.addEvent("TransactionDebug",
 			                      pOriginalReq->options.get().debugID.get().first(),
@@ -5542,17 +5545,17 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 		g_traceBatch.addEvent("TransactionDebug",
 		                      pOriginalReq->options.get().debugID.get().first(),
 		                      "storageserver.mapKeyValues.AfterAll");
-	return result;
+	co_return result;
 }
 
 // Most of the actor is copied from getKeyValuesQ. I tried to use templates but things become nearly impossible after
 // combining actor shenanigans with template shenanigans.
-ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRequest req)
+Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRequest req)
 // Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
 // selector offset prevents all data from being read in one range read
 {
-	state Span span("SS:getMappedKeyValues"_loc, req.spanContext);
-	state int64_t resultSize = 0;
+	Span span("SS:getMappedKeyValues"_loc, req.spanContext);
+	int64_t resultSize = 0;
 
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 
@@ -5566,11 +5569,11 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
-	wait(data->getQueryDelay());
-	state PriorityMultiLock::Lock readLock = wait(data->getReadLock(req.options));
+	co_await data->getQueryDelay();
+	PriorityMultiLock::Lock readLock = co_await data->getReadLock(req.options);
 
 	// Track time from requestTime through now as read queueing wait time
-	state double queueWaitEnd = g_network->timer();
+	double queueWaitEnd = g_network->timer();
 	data->counters.readLatencySamples.sample(
 	    queueWaitEnd - req.requestTime(), ReadLatencySamples::READ_QUEUE_WAIT, trackedReadType(req));
 
@@ -5580,13 +5583,13 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			    "TransactionDebug", req.options.get().debugID.get().first(), "storageserver.getMappedKeyValues.Before");
 		// VERSION_VECTOR change
 		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
-		state Version version = wait(waitForVersion(data, commitVersion, req.version, span.context));
+		Version version = co_await waitForVersion(data, commitVersion, req.version, span.context);
 		data->counters.readLatencySamples.sample(
 		    g_network->timer() - queueWaitEnd, ReadLatencySamples::READ_VERSION_WAIT, trackedReadType(req));
 
-		state uint64_t changeCounter = data->shardChangeCounter;
+		uint64_t changeCounter = data->shardChangeCounter;
 		//		try {
-		state KeyRange shard = getShardKeyRange(data, req.begin);
+		KeyRange shard = getShardKeyRange(data, req.begin);
 
 		if (req.options.present() && req.options.get().debugID.present())
 			g_traceBatch.addEvent("TransactionDebug",
@@ -5604,16 +5607,16 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			throw wrong_shard_server();
 		}
 
-		state int offset1 = 0;
-		state int offset2;
-		state Future<Key> fBegin = req.begin.isFirstGreaterOrEqual()
-		                               ? Future<Key>(req.begin.getKey())
-		                               : findKey(data, req.begin, version, shard, &offset1, span.context, req.options);
-		state Future<Key> fEnd = req.end.isFirstGreaterOrEqual()
-		                             ? Future<Key>(req.end.getKey())
-		                             : findKey(data, req.end, version, shard, &offset2, span.context, req.options);
-		state Key begin = wait(fBegin);
-		state Key end = wait(fEnd);
+		int offset1 = 0;
+		int offset2{ 0 };
+		Future<Key> fBegin = req.begin.isFirstGreaterOrEqual()
+		                         ? Future<Key>(req.begin.getKey())
+		                         : findKey(data, req.begin, version, shard, &offset1, span.context, req.options);
+		Future<Key> fEnd = req.end.isFirstGreaterOrEqual()
+		                       ? Future<Key>(req.end.getKey())
+		                       : findKey(data, req.end, version, shard, &offset2, span.context, req.options);
+		Key begin = co_await fBegin;
+		Key end = co_await fEnd;
 
 		if (req.options.present() && req.options.get().debugID.present())
 			g_traceBatch.addEvent("TransactionDebug",
@@ -5652,24 +5655,24 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			                                     std::max<KeyRef>(req.begin.getKey(), req.end.getKey())));
 			req.reply.send(none);
 		} else {
-			state int remainingLimitBytes = req.limitBytes;
+			int remainingLimitBytes = req.limitBytes;
 			// create a temporary byte limit for index fetching ONLY, this should be excessive
 			// because readRange is cheap when reading additional bytes
-			state int bytesForIndex =
+			int bytesForIndex =
 			    std::min(req.limitBytes, (int)(req.limitBytes * SERVER_KNOBS->FRACTION_INDEX_BYTELIMIT_PREFETCH));
-			GetKeyValuesReply getKeyValuesReply = wait(readRange(
-			    data, version, KeyRangeRef(begin, end), req.limit, &bytesForIndex, span.context, req.options));
+			GetKeyValuesReply getKeyValuesReply = co_await readRange(
+			    data, version, KeyRangeRef(begin, end), req.limit, &bytesForIndex, span.context, req.options);
 
 			// Unlock read lock before the subqueries because each
 			// subquery will route back to getValueQ or getKeyValuesQ with a new request having the same
 			// read options which will each acquire the ssLock.
 			readLock.release();
 
-			state GetMappedKeyValuesReply r;
+			GetMappedKeyValuesReply r;
 			try {
 				// Map the scanned range to another list of keys and look up.
 				GetMappedKeyValuesReply _r =
-				    wait(mapKeyValues(data, getKeyValuesReply, req.mapper, &req, &remainingLimitBytes));
+				    co_await mapKeyValues(data, getKeyValuesReply, req.mapper, &req, &remainingLimitBytes);
 				r = _r;
 			} catch (Error& e) {
 				// catch txn_too_old here if prefetch runs for too long, and returns it back to client
@@ -5725,16 +5728,14 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 		                                                        abs(req.begin.offset) > maxSelectorOffset ||
 		                                                        abs(req.end.offset) > maxSelectorOffset));
 	}
-
-	return Void();
 }
 
-ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest req)
+Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest req)
 // Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
 // selector offset prevents all data from being read in one range read
 {
-	state Span span("SS:getKeyValuesStream"_loc, req.spanContext);
-	state int64_t resultSize = 0;
+	Span span("SS:getKeyValuesStream"_loc, req.spanContext);
+	int64_t resultSize = 0;
 
 	req.reply.setByteLimit(SERVER_KNOBS->RANGESTREAM_LIMIT_BYTES);
 	++data->counters.getRangeStreamQueries;
@@ -5747,7 +5748,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
-	wait(delay(0, TaskPriority::DefaultEndpoint));
+	co_await delay(0, TaskPriority::DefaultEndpoint);
 
 	try {
 		if (req.options.present() && req.options.get().debugID.present())
@@ -5755,11 +5756,11 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 			    "TransactionDebug", req.options.get().debugID.get().first(), "storageserver.getKeyValuesStream.Before");
 
 		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
-		state Version version = wait(waitForVersion(data, commitVersion, req.version, span.context));
+		Version version = co_await waitForVersion(data, commitVersion, req.version, span.context);
 
-		state uint64_t changeCounter = data->shardChangeCounter;
+		uint64_t changeCounter = data->shardChangeCounter;
 		//		try {
-		state KeyRange shard = getShardKeyRange(data, req.begin);
+		KeyRange shard = getShardKeyRange(data, req.begin);
 
 		if (req.options.present() && req.options.get().debugID.present())
 			g_traceBatch.addEvent("TransactionDebug",
@@ -5777,16 +5778,16 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 			throw wrong_shard_server();
 		}
 
-		state int offset1 = 0;
-		state int offset2;
-		state Future<Key> fBegin = req.begin.isFirstGreaterOrEqual()
-		                               ? Future<Key>(req.begin.getKey())
-		                               : findKey(data, req.begin, version, shard, &offset1, span.context, req.options);
-		state Future<Key> fEnd = req.end.isFirstGreaterOrEqual()
-		                             ? Future<Key>(req.end.getKey())
-		                             : findKey(data, req.end, version, shard, &offset2, span.context, req.options);
-		state Key begin = wait(fBegin);
-		state Key end = wait(fEnd);
+		int offset1 = 0;
+		int offset2{ 0 };
+		Future<Key> fBegin = req.begin.isFirstGreaterOrEqual()
+		                         ? Future<Key>(req.begin.getKey())
+		                         : findKey(data, req.begin, version, shard, &offset1, span.context, req.options);
+		Future<Key> fEnd = req.end.isFirstGreaterOrEqual()
+		                       ? Future<Key>(req.end.getKey())
+		                       : findKey(data, req.end, version, shard, &offset2, span.context, req.options);
+		Key begin = co_await fBegin;
+		Key end = co_await fEnd;
 		if (req.options.present() && req.options.get().debugID.present())
 			g_traceBatch.addEvent("TransactionDebug",
 			                      req.options.get().debugID.get().first(),
@@ -5824,9 +5825,9 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 			req.reply.send(none);
 			req.reply.sendError(end_of_stream());
 		} else {
-			loop {
-				wait(req.reply.onReady());
-				state PriorityMultiLock::Lock readLock = wait(data->getReadLock(req.options));
+			while (true) {
+				co_await req.reply.onReady();
+				PriorityMultiLock::Lock readLock = co_await data->getReadLock(req.options);
 
 				if (version < data->oldestVersion.get()) {
 					throw transaction_too_old();
@@ -5834,7 +5835,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 
 				// Even if TSS mode is Disabled, this may be the second test in a restarting test where the first run
 				// had it enabled.
-				state int byteLimit =
+				int byteLimit =
 				    (BUGGIFY && g_network->isSimulated() && g_simulator->tssMode == ISimulator::TSSMode::Disabled &&
 				     !data->isTss() && !data->isSSWithTSSPair())
 				        ? 1
@@ -5845,8 +5846,8 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 				    .detail("Begin", begin.printable())
 				    .detail("End", end.printable());
 
-				GetKeyValuesReply _r = wait(readRange(
-				    data, version, KeyRangeRef(begin, end), req.limit, &byteLimit, span.context, req.options));
+				GetKeyValuesReply _r = co_await readRange(
+				    data, version, KeyRangeRef(begin, end), req.limit, &byteLimit, span.context, req.options);
 				readLock.release();
 				GetKeyValuesStreamReply r(_r);
 
@@ -5916,13 +5917,11 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
 	++data->counters.finishedQueries;
-
-	return Void();
 }
 
-ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
-	state Span span("SS:getKey"_loc, req.spanContext);
-	state int64_t resultSize = 0;
+Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
+	Span span("SS:getKey"_loc, req.spanContext);
+	int64_t resultSize = 0;
 
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 
@@ -5933,26 +5932,26 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
-	wait(data->getQueryDelay());
-	state PriorityMultiLock::Lock readLock = wait(data->getReadLock(req.options));
+	co_await data->getQueryDelay();
+	PriorityMultiLock::Lock readLock = co_await data->getReadLock(req.options);
 
 	// Track time from requestTime through now as read queueing wait time
-	state double queueWaitEnd = g_network->timer();
+	double queueWaitEnd = g_network->timer();
 	data->counters.readLatencySamples.sample(
 	    queueWaitEnd - req.requestTime(), ReadLatencySamples::READ_QUEUE_WAIT, trackedReadType(req));
 
 	try {
 		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
-		state Version version = wait(waitForVersion(data, commitVersion, req.version, req.spanContext));
+		Version version = co_await waitForVersion(data, commitVersion, req.version, req.spanContext);
 		data->counters.readLatencySamples.sample(
 		    g_network->timer() - queueWaitEnd, ReadLatencySamples::READ_VERSION_WAIT, trackedReadType(req));
 
-		state uint64_t changeCounter = data->shardChangeCounter;
+		uint64_t changeCounter = data->shardChangeCounter;
 
 		KeyRange shard = getShardKeyRange(data, req.sel);
 
-		state int offset;
-		Key absoluteKey = wait(findKey(data, req.sel, version, shard, &offset, req.spanContext, req.options));
+		int offset{ 0 };
+		Key absoluteKey = co_await findKey(data, req.sel, version, shard, &offset, req.spanContext, req.options);
 
 		data->checkChangeCounter(changeCounter,
 		                         KeyRangeRef(std::min<KeyRef>(req.sel.getKey(), absoluteKey),
@@ -6010,8 +6009,6 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 		data->counters.readLatencyBands.addMeasurement(
 		    duration, 1, Filtered(resultSize > maxReadBytes || abs(req.sel.offset) > maxSelectorOffset));
 	}
-
-	return Void();
 }
 
 void getQueuingMetrics(StorageServer* self, StorageQueuingMetricsRequest const& req) {
@@ -6043,9 +6040,9 @@ void getQueuingMetrics(StorageServer* self, StorageQueuingMetricsRequest const& 
 #pragma region Updates
 #endif
 
-ACTOR Future<Void> doEagerReads(StorageServer* data, UpdateEagerReadInfo* eager) {
+Future<Void> doEagerReads(StorageServer* data, UpdateEagerReadInfo* eager) {
 	eager->finishKeyBegin();
-	state ReadOptions options;
+	ReadOptions options;
 	options.type = ReadType::EAGER;
 	if (eager->enableClearRangeEagerReads) {
 		std::vector<Future<Key>> keyEnd(eager->keyBegin.size());
@@ -6053,8 +6050,8 @@ ACTOR Future<Void> doEagerReads(StorageServer* data, UpdateEagerReadInfo* eager)
 			keyEnd[i] = data->storage.readNextKeyInclusive(eager->keyBegin[i], options);
 		data->counters.eagerReadsKeys += keyEnd.size();
 
-		state Future<std::vector<Key>> futureKeyEnds = getAll(keyEnd);
-		state std::vector<Key> keyEndVal = wait(futureKeyEnds);
+		Future<std::vector<Key>> futureKeyEnds = getAll(keyEnd);
+		std::vector<Key> keyEndVal = co_await futureKeyEnds;
 		for (const auto& key : keyEndVal) {
 			data->counters.kvScanBytes += key.expectedSize();
 		}
@@ -6065,8 +6062,8 @@ ACTOR Future<Void> doEagerReads(StorageServer* data, UpdateEagerReadInfo* eager)
 	for (int i = 0; i < value.size(); i++)
 		value[i] = data->storage.readValuePrefix(eager->keys[i].first, eager->keys[i].second, options);
 
-	state Future<std::vector<Optional<Value>>> futureValues = getAll(value);
-	std::vector<Optional<Value>> optionalValues = wait(futureValues);
+	Future<std::vector<Optional<Value>>> futureValues = getAll(value);
+	std::vector<Optional<Value>> optionalValues = co_await futureValues;
 	for (const auto& value : optionalValues) {
 		if (value.present()) {
 			data->counters.kvGetBytes += value.expectedSize();
@@ -6074,8 +6071,6 @@ ACTOR Future<Void> doEagerReads(StorageServer* data, UpdateEagerReadInfo* eager)
 	}
 	data->counters.eagerReadsKeys += eager->keys.size();
 	eager->value = optionalValues;
-
-	return Void();
 }
 
 bool changeDurableVersion(StorageServer* data, Version desiredDurableVersion) {
@@ -6499,25 +6494,25 @@ public:
 	}
 };
 
-ACTOR Future<Void> tryGetRange(PromiseStream<RangeResult> results, Transaction* tr, KeyRange keys) {
+Future<Void> tryGetRange(PromiseStream<RangeResult> results, Transaction* tr, KeyRange keys) {
 	if (SERVER_KNOBS->FETCH_USING_STREAMING) {
-		wait(tr->getRangeStream(results, keys, GetRangeLimits(), Snapshot::True));
-		return Void();
+		co_await tr->getRangeStream(results, keys, GetRangeLimits(), Snapshot::True);
+		co_return;
 	}
 
-	state KeySelectorRef begin = firstGreaterOrEqual(keys.begin);
-	state KeySelectorRef end = firstGreaterOrEqual(keys.end);
+	KeySelectorRef begin = firstGreaterOrEqual(keys.begin);
+	KeySelectorRef end = firstGreaterOrEqual(keys.end);
 
 	try {
-		loop {
+		while (true) {
 			GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED, SERVER_KNOBS->FETCH_BLOCK_BYTES);
 			limits.minRows = 0;
-			state RangeResult rep = wait(tr->getRange(begin, end, limits, Snapshot::True));
+			RangeResult rep = co_await tr->getRange(begin, end, limits, Snapshot::True);
 			results.send(rep);
 
 			if (!rep.more) {
 				results.sendError(end_of_stream());
-				return Void();
+				co_return;
 			}
 
 			begin = rep.nextBeginKeySelector();
@@ -6688,66 +6683,71 @@ Future<Void> tryGetRangeForBulkLoad(PromiseStream<RangeResult> results,
 }
 
 // Utility function to process sample files during bulk load
-ACTOR static Future<Void> processSampleFiles(StorageServer* data,
-                                             KeyRange maxRange,
-                                             std::string bulkLoadLocalDir,
-                                             std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets) {
-	state BulkLoadFileSetKeyMap::const_iterator iter = localFileSets->begin();
-	state BulkLoadFileSetKeyMap::const_iterator end = localFileSets->end();
-	state std::vector<KeyValue> rawSamples;
-	state std::unique_ptr<IRocksDBSstFileReader> reader;
+static Future<Void> processSampleFiles(StorageServer* data,
+                                       KeyRange maxRange,
+                                       std::string bulkLoadLocalDir,
+                                       std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets) {
+	BulkLoadFileSetKeyMap::const_iterator iter = localFileSets->begin();
+	BulkLoadFileSetKeyMap::const_iterator end = localFileSets->end();
+	std::vector<KeyValue> rawSamples;
+	std::unique_ptr<IRocksDBSstFileReader> reader;
 
 	while (iter != end) {
 		const auto& [range, fileSet] = *iter;
 		if (fileSet.hasByteSampleFile()) {
-			state std::string sampleFilePath = fileSet.getBytesSampleFileFullPath();
-			state int retryCount = 0;
-			state int maxRetries = 10; // Consider making this a KNOB
-			state Error lastError;
+			std::string sampleFilePath = fileSet.getBytesSampleFileFullPath();
+			int retryCount = 0;
+			int maxRetries = 10; // Consider making this a KNOB
+			Error lastError;
 
 			// This outer loop retries reading the entire file if errors occur during opening/reading
 			while (retryCount < maxRetries) {
-				try {
-					// Read all samples from the SST file into memory first
-					// Store as KeyValueRef to keep the original encoded size value
-					rawSamples.clear();
-					reader = newRocksDBSstFileReader();
-					reader->open(abspath(sampleFilePath));
+				{
+					Error err;
+					try {
+						// Read all samples from the SST file into memory first
+						// Store as KeyValueRef to keep the original encoded size value
+						rawSamples.clear();
+						reader = newRocksDBSstFileReader();
+						reader->open(abspath(sampleFilePath));
 
-					TraceEvent(SevInfo, "StorageServerProcessingSampleFile", data->thisServerID)
-					    .detail("File", sampleFilePath);
+						TraceEvent(SevInfo, "StorageServerProcessingSampleFile", data->thisServerID)
+						    .detail("File", sampleFilePath);
 
-					// Read all samples
-					while (reader->hasNext()) {
-						// Copy the next kv to rawSamples.
-						rawSamples.push_back(reader->next());
-					}
-
-					// Now apply all read samples to the in-memory set and update metrics
-					for (const auto& kv : rawSamples) {
-						const KeyRef& key = kv.key;
-						if (!maxRange.contains(key)) {
-							// Skip keys outside the maxRange
-							continue;
+						// Read all samples
+						while (reader->hasNext()) {
+							// Copy the next kv to rawSamples.
+							rawSamples.push_back(reader->next());
 						}
-						int64_t size = BinaryReader::fromStringRef<int64_t>(kv.value, Unversioned());
-						data->metrics.byteSample.sample.insert(key, size);
-						data->metrics.notifyBytes(key, size);
-						data->addMutationToMutationLogOrStorage(
-						    invalidVersion,
-						    MutationRef(MutationRef::SetValue, key.withPrefix(persistByteSampleKeys.begin), kv.value));
+
+						// Now apply all read samples to the in-memory set and update metrics
+						for (const auto& kv : rawSamples) {
+							const KeyRef& key = kv.key;
+							if (!maxRange.contains(key)) {
+								// Skip keys outside the maxRange
+								continue;
+							}
+							int64_t size = BinaryReader::fromStringRef<int64_t>(kv.value, Unversioned());
+							data->metrics.byteSample.sample.insert(key, size);
+							data->metrics.notifyBytes(key, size);
+							data->addMutationToMutationLogOrStorage(
+							    invalidVersion,
+							    MutationRef(
+							        MutationRef::SetValue, key.withPrefix(persistByteSampleKeys.begin), kv.value));
+						}
+
+						// If we get here, processing was successful for this file
+						break; // Exit the retry loop
+
+					} catch (Error& e) {
+						err = e;
 					}
-
-					// If we get here, processing was successful for this file
-					break; // Exit the retry loop
-
-				} catch (Error& e) {
-					lastError = e;
+					lastError = err;
 					retryCount++;
 					TraceEvent(retryCount < maxRetries ? SevWarn : SevError,
 					           "StorageServerSampleFileProcessingError",
 					           data->thisServerID)
-					    .error(e) // Log the actual error 'e'
+					    .error(err) // Log the actual error 'e'
 					    .detail("File", sampleFilePath)
 					    // REMOVED: .detail("Key", kv.key).detail("Value", kv.value) as 'kv' is out of scope
 					    .detail("RetryCount", retryCount)
@@ -6757,7 +6757,7 @@ ACTOR static Future<Void> processSampleFiles(StorageServer* data,
 
 					if (retryCount < maxRetries) {
 						// Wait before retrying, with exponential backoff
-						wait(delay(0.1 * pow(2, retryCount))); // Consider adding jitter
+						co_await delay(0.1 * pow(2, retryCount)); // Consider adding jitter
 						continue; // Retry reading the file
 					}
 					// On final retry failure, throw the last error encountered
@@ -6767,37 +6767,36 @@ ACTOR static Future<Void> processSampleFiles(StorageServer* data,
 		}
 		++iter;
 	} // end file iteration loop
-	return Void();
 }
 
-ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
-	state const UID fetchKeysID = deterministicRandom()->randomUniqueID();
-	state TraceInterval interval("FetchKeys");
-	state KeyRange keys = shard->keys;
-	state Future<Void> warningLogger = logFetchKeysWarning(shard);
-	state const double startTime = now();
-	state Version fetchVersion = invalidVersion;
-	state int64_t totalBytes = 0;
-	state int priority = dataMovementPriority(shard->reason);
-	state UID dataMoveId = shard->getSSBulkLoadMetadata().getDataMoveId();
-	state ConductBulkLoad conductBulkLoad = ConductBulkLoad(shard->getSSBulkLoadMetadata().getConductBulkLoad());
-	state std::string bulkLoadLocalDir =
+Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
+	const UID fetchKeysID = deterministicRandom()->randomUniqueID();
+	TraceInterval interval("FetchKeys");
+	KeyRange keys = shard->keys;
+	Future<Void> warningLogger = logFetchKeysWarning(shard);
+	const double startTime = now();
+	Version fetchVersion = invalidVersion;
+	int64_t totalBytes = 0;
+	int priority = dataMovementPriority(shard->reason);
+	UID dataMoveId = shard->getSSBulkLoadMetadata().getDataMoveId();
+	ConductBulkLoad conductBulkLoad = ConductBulkLoad(shard->getSSBulkLoadMetadata().getConductBulkLoad());
+	std::string bulkLoadLocalDir =
 	    joinPath(joinPath(data->bulkLoadFolder, dataMoveId.toString()), fetchKeysID.toString());
-	state std::shared_ptr<BulkLoadFileSetKeyMap> localBulkLoadFileSets;
+	std::shared_ptr<BulkLoadFileSetKeyMap> localBulkLoadFileSets;
 	// Since the fetchKey can split, so multiple fetchzkeys can have the same data move id. We want each fetchkey
 	// downloads its file without conflict, so we add fetchKeysID to the bulkLoadLocalDir.
-	state PromiseStream<Key> destroyedFeeds;
-	state FetchKeysMetricReporter metricReporter(fetchKeysID,
-	                                             startTime,
-	                                             keys,
-	                                             data->fetchKeysHistograms,
-	                                             data->currentRunningFetchKeys,
-	                                             data->counters.bytesFetched,
-	                                             data->counters.kvFetched);
+	PromiseStream<Key> destroyedFeeds;
+	FetchKeysMetricReporter metricReporter(fetchKeysID,
+	                                       startTime,
+	                                       keys,
+	                                       data->fetchKeysHistograms,
+	                                       data->currentRunningFetchKeys,
+	                                       data->counters.bytesFetched,
+	                                       data->counters.kvFetched);
 
 	// Set read options to use non-caching reads and set Fetch type unless low priority data fetching is disabled by
 	// a knob
-	state ReadOptions readOptions = ReadOptions(
+	ReadOptions readOptions = ReadOptions(
 	    {}, SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY ? ReadType::FETCH : ReadType::NORMAL, CacheResult::False);
 
 	if (conductBulkLoad) {
@@ -6819,7 +6818,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			    .detail("DataMoveId", dataMoveId)
 			    .detail("Elapsed", now() - startTime);
 		}
-		wait(data->coreStarted.getFuture() && delay(0));
+		co_await (data->coreStarted.getFuture() && delay(0));
 		if (conductBulkLoad) {
 			TraceEvent(SevDebug, "SSBulkLoadFetchKeysAfterCoreStarted", data->thisServerID)
 			    .detail("FKID", fetchKeysID)
@@ -6838,8 +6837,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				    .detail("CurrentVersion", data->version.get())
 				    .detail("Elapsed", now() - startTime);
 			}
-			wait(data->version.whenAtLeast(data->version.get() + 1));
-			wait(delay(0));
+			co_await data->version.whenAtLeast(data->version.get() + 1);
+			co_await delay(0);
 			if (conductBulkLoad) {
 				TraceEvent(SevDebug, "SSBulkLoadFetchKeysAfterVersionAdvance", data->thisServerID)
 				    .detail("FKID", fetchKeysID)
@@ -6887,7 +6886,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				    .detail("CurrentDurableVersion", data->durableVersion.get())
 				    .detail("Elapsed", now() - startTime);
 			}
-			wait(data->durableVersion.whenAtLeast(lastAvailable + 1));
+			co_await data->durableVersion.whenAtLeast(lastAvailable + 1);
 			if (conductBulkLoad) {
 				TraceEvent(SevDebug, "SSBulkLoadFetchKeysAfterDurableVersionWait", data->thisServerID)
 				    .detail("FKID", fetchKeysID)
@@ -6908,8 +6907,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			    .detail("DataMoveId", dataMoveId)
 			    .detail("Elapsed", now() - startTime);
 		}
-		wait(data->fetchKeysParallelismLock.take(TaskPriority::DefaultYield));
-		state FlowLock::Releaser holdingFKPL(data->fetchKeysParallelismLock);
+		co_await data->fetchKeysParallelismLock.take(TaskPriority::DefaultYield);
+		FlowLock::Releaser holdingFKPL(data->fetchKeysParallelismLock);
 		if (conductBulkLoad) {
 			TraceEvent(SevDebug, "SSBulkLoadFetchKeysAfterParallelismLock", data->thisServerID)
 			    .detail("FKID", fetchKeysID)
@@ -6917,7 +6916,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			    .detail("Elapsed", now() - startTime);
 		}
 
-		state double executeStart = now();
+		double executeStart = now();
 		++data->counters.fetchWaitingCount;
 		data->counters.fetchWaitingMS += 1000 * (executeStart - startTime);
 
@@ -6931,7 +6930,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			    .detail("DataMoveId", dataMoveId)
 			    .detail("Elapsed", now() - startTime);
 		}
-		wait(data->durableVersionLock.take());
+		co_await data->durableVersionLock.take();
 		if (conductBulkLoad) {
 			TraceEvent(SevDebug, "SSBulkLoadFetchKeysAfterDurableVersionLock", data->thisServerID)
 			    .detail("FKID", fetchKeysID)
@@ -6943,19 +6942,19 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 		data->durableVersionLock.release();
 
-		wait(delay(0));
+		co_await delay(0);
 
 		// Get the history
-		state int debug_getRangeRetries = 0;
-		state int debug_nextRetryToLog = 1;
-		state Error lastError;
+		int debug_getRangeRetries = 0;
+		int debug_nextRetryToLog = 1;
+		Error lastError;
 
 		// FIXME: The client cache does not notice when servers are added to a team. To read from a local storage
 		// server we must refresh the cache manually.
 		data->cx->invalidateCache(keys);
 
-		loop {
-			state Transaction tr(data->cx);
+		while (true) {
+			Transaction tr(data->cx);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			if (SERVER_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT) {
@@ -6988,7 +6987,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 			if (lastError.code() == error_code_transaction_too_old) {
 				try {
-					Version grvVersion = wait(tr.getRawReadVersion());
+					Version grvVersion = co_await tr.getRawReadVersion();
 					if (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01)) {
 						// Test failed GRV request.
 						throw grv_proxy_memory_limit_exceeded();
@@ -7016,9 +7015,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				shard->updates.pop_front();
 			tr.setVersion(fetchVersion);
 
-			state PromiseStream<RangeResult> results;
-			state Future<Void> hold;
-			state KeyRef rangeEnd;
+			PromiseStream<RangeResult> results;
+			Future<Void> hold;
+			KeyRef rangeEnd;
 			if (conductBulkLoad) {
 				ASSERT(dataMoveIdIsValidForBulkLoad(dataMoveId)); // TODO(BulkLoad): remove dangerous assert
 				// Get the bulkload task metadata from the data move metadata. Note that a SS can receive a data move
@@ -7030,8 +7029,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				// Note that it is possible that this SS can never get the bulkload metadata because the bulkload data
 				// move is cancelled or replaced by another data move. In this case, while
 				// getBulkLoadTaskStateFromDataMove get stuck, this fetchKeys is guaranteed to be cancelled.
-				BulkLoadTaskState bulkLoadTaskState = wait(getBulkLoadTaskStateFromDataMove(
-				    data->cx, dataMoveId, /*atLeastVersion=*/data->version.get(), data->thisServerID));
+				BulkLoadTaskState bulkLoadTaskState = co_await getBulkLoadTaskStateFromDataMove(
+				    data->cx, dataMoveId, /*atLeastVersion=*/data->version.get(), data->thisServerID);
 				TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
 				    .detail("DataMoveId", dataMoveId.toString())
 				    .detail("Range", keys)
@@ -7043,9 +7042,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				// We download the data file to local disk and pass the data file path to read in the next step.
 				localBulkLoadFileSets = std::make_shared<BulkLoadFileSetKeyMap>();
 				// A bulkload task can do file ingestion if the task range is aligned with manifests' range.
-				state bool bulkloadCanIngestSSTFile = bulkLoadTaskState.canIngestFile();
-				wait(bulkLoadFetchKeyValueFileToLoad(
-				    data, bulkLoadLocalDir, bulkLoadTaskState, /*output=*/localBulkLoadFileSets));
+				bool bulkloadCanIngestSSTFile = bulkLoadTaskState.canIngestFile();
+				co_await bulkLoadFetchKeyValueFileToLoad(
+				    data, bulkLoadLocalDir, bulkLoadTaskState, /*output=*/localBulkLoadFileSets);
 				TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
 				    .detail("DataMoveId", dataMoveId.toString())
 				    .detail("Range", keys)
@@ -7081,23 +7080,23 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					data->storage.getKeyValueStore()->clear(keys);
 
 					// Now wait on the durableVersion to be updated so clear has been committed.
-					wait(data->durableVersion.whenAtLeast(data->storageVersion() + 1));
+					co_await data->durableVersion.whenAtLeast(data->storageVersion() + 1);
 
 					// Compact the range before ingestion to optimize storage
-					wait(data->storage.getKeyValueStore()->compactRange(keys));
+					co_await data->storage.getKeyValueStore()->compactRange(keys);
 
 					// Ingest the SST files.
 					// Measure duration at this level so we capture the inter-thread handoff time.
-					state double ingestStartTime = g_network->timer(); // Record start time
-					wait(data->storage.getKeyValueStore()->ingestSSTFiles(localBulkLoadFileSets));
+					double ingestStartTime = g_network->timer(); // Record start time
+					co_await data->storage.getKeyValueStore()->ingestSSTFiles(localBulkLoadFileSets);
 					const double ingestDuration = g_network->timer() - ingestStartTime;
 					data->counters.ingestDurationLatencySample->addMeasurement(ingestDuration);
 
 					// Compact the range after ingestion to avoid accumulating compaction overtime
-					wait(data->storage.getKeyValueStore()->compactRange(keys));
+					co_await data->storage.getKeyValueStore()->compactRange(keys);
 
 					// Process sample files after SST ingestion
-					wait(processSampleFiles(data, keys, bulkLoadLocalDir, localBulkLoadFileSets));
+					co_await processSampleFiles(data, keys, bulkLoadLocalDir, localBulkLoadFileSets);
 
 					// NOTICE: We break the 'fetchKeys' loop here if we successfully ingest the SST files.
 					// EARLY EXIT FROM 'fetchKeys' LOOP!!!
@@ -7124,112 +7123,116 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				rangeEnd = keys.end;
 			}
 
-			state Key blockBegin = keys.begin;
+			Key blockBegin = keys.begin;
 
-			try {
-				loop {
-					CODE_PROBE(true, "Fetching keys for transferred shard");
-					while (data->fetchKeysBudgetUsed.get()) {
-						std::vector<Future<Void>> delays;
-						if (SERVER_KNOBS->STORAGE_FETCH_KEYS_DELAY > 0) {
-							delays.push_back(delayJittered(SERVER_KNOBS->STORAGE_FETCH_KEYS_DELAY));
+			{
+				Error err;
+				try {
+					while (true) {
+						CODE_PROBE(true, "Fetching keys for transferred shard");
+						while (data->fetchKeysBudgetUsed.get()) {
+							std::vector<Future<Void>> delays;
+							if (SERVER_KNOBS->STORAGE_FETCH_KEYS_DELAY > 0) {
+								delays.push_back(delayJittered(SERVER_KNOBS->STORAGE_FETCH_KEYS_DELAY));
+							}
+							delays.push_back(data->fetchKeysBudgetUsed.onChange());
+							co_await waitForAll(delays);
 						}
-						delays.push_back(data->fetchKeysBudgetUsed.onChange());
-						wait(waitForAll(delays));
-					}
-					state RangeResult this_block = waitNext(results.getFuture());
+						RangeResult this_block = co_await results.getFuture();
 
-					state int expectedBlockSize =
-					    (int)this_block.expectedSize() + (8 - (int)sizeof(KeyValueRef)) * this_block.size();
+						int expectedBlockSize =
+						    (int)this_block.expectedSize() + (8 - (int)sizeof(KeyValueRef)) * this_block.size();
 
-					TraceEvent(SevDebug, "FetchKeysBlock", data->thisServerID)
-					    .detail("FKID", interval.pairID)
-					    .detail("BlockRows", this_block.size())
-					    .detail("BlockBytes", expectedBlockSize)
-					    .detail("KeyBegin", keys.begin)
-					    .detail("KeyEnd", keys.end)
-					    .detail("Last", this_block.size() ? this_block.end()[-1].key : std::string())
-					    .detail("Version", fetchVersion)
-					    .detail("More", this_block.more)
-					    .detail("DataMoveId", dataMoveId.toString())
-					    .detail("ConductBulkLoad", conductBulkLoad);
-
-					DEBUG_KEY_RANGE("fetchRange", fetchVersion, keys, data->thisServerID);
-					if (MUTATION_TRACKING_ENABLED) {
-						for (auto k = this_block.begin(); k != this_block.end(); ++k) {
-							DEBUG_MUTATION("fetch",
-							               fetchVersion,
-							               MutationRef(MutationRef::SetValue, k->key, k->value),
-							               data->thisServerID);
-						}
-					}
-					if (!conductBulkLoad) {
-						metricReporter.addFetchedBytes(expectedBlockSize, this_block.size());
-					}
-					totalBytes += expectedBlockSize;
-
-					if (shard->reason != DataMovementReason::INVALID &&
-					    priority < SERVER_KNOBS->FETCH_KEYS_THROTTLE_PRIORITY_THRESHOLD &&
-					    !data->fetchKeysLimiter.ready().isReady()) {
-						TraceEvent(SevDebug, "FetchKeysThrottling", data->thisServerID).detail("FKID", fetchKeysID);
-						state double ts = now();
-						wait(data->fetchKeysLimiter.ready());
-						TraceEvent(SevDebug, "FetchKeysThrottled", data->thisServerID)
-						    .detail("Priority", priority)
-						    .detail("KeyRange", shard->keys)
-						    .detail("Delay", now() - ts)
-						    .detail("FKID", fetchKeysID);
-					}
-
-					// Write this_block to storage
-					state Standalone<VectorRef<KeyValueRef>> blockData(this_block, this_block.arena());
-					state Key blockEnd =
-					    this_block.size() > 0 && this_block.more ? keyAfter(this_block.back().key) : keys.end;
-					state KeyRange blockRange(KeyRangeRef(blockBegin, blockEnd));
-					wait(data->storage.replaceRange(blockRange, blockData));
-
-					if (conductBulkLoad) {
-						TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
+						TraceEvent(SevDebug, "FetchKeysBlock", data->thisServerID)
 						    .detail("FKID", interval.pairID)
+						    .detail("BlockRows", this_block.size())
+						    .detail("BlockBytes", expectedBlockSize)
+						    .detail("KeyBegin", keys.begin)
+						    .detail("KeyEnd", keys.end)
+						    .detail("Last", this_block.size() ? this_block.end()[-1].key : std::string())
+						    .detail("Version", fetchVersion)
+						    .detail("More", this_block.more)
 						    .detail("DataMoveId", dataMoveId.toString())
-						    .detail("Range", keys)
-						    .detail("BlockRange", blockRange)
-						    .detail("Phase", "Replaced range");
+						    .detail("ConductBulkLoad", conductBulkLoad);
+
+						DEBUG_KEY_RANGE("fetchRange", fetchVersion, keys, data->thisServerID);
+						if (MUTATION_TRACKING_ENABLED) {
+							for (auto k = this_block.begin(); k != this_block.end(); ++k) {
+								DEBUG_MUTATION("fetch",
+								               fetchVersion,
+								               MutationRef(MutationRef::SetValue, k->key, k->value),
+								               data->thisServerID);
+							}
+						}
+						if (!conductBulkLoad) {
+							metricReporter.addFetchedBytes(expectedBlockSize, this_block.size());
+						}
+						totalBytes += expectedBlockSize;
+
+						if (shard->reason != DataMovementReason::INVALID &&
+						    priority < SERVER_KNOBS->FETCH_KEYS_THROTTLE_PRIORITY_THRESHOLD &&
+						    !data->fetchKeysLimiter.ready().isReady()) {
+							TraceEvent(SevDebug, "FetchKeysThrottling", data->thisServerID).detail("FKID", fetchKeysID);
+							double ts = now();
+							co_await data->fetchKeysLimiter.ready();
+							TraceEvent(SevDebug, "FetchKeysThrottled", data->thisServerID)
+							    .detail("Priority", priority)
+							    .detail("KeyRange", shard->keys)
+							    .detail("Delay", now() - ts)
+							    .detail("FKID", fetchKeysID);
+						}
+
+						// Write this_block to storage
+						Standalone<VectorRef<KeyValueRef>> blockData(this_block, this_block.arena());
+						Key blockEnd =
+						    this_block.size() > 0 && this_block.more ? keyAfter(this_block.back().key) : keys.end;
+						KeyRange blockRange(KeyRangeRef(blockBegin, blockEnd));
+						co_await data->storage.replaceRange(blockRange, blockData);
+
+						if (conductBulkLoad) {
+							TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
+							    .detail("FKID", interval.pairID)
+							    .detail("DataMoveId", dataMoveId.toString())
+							    .detail("Range", keys)
+							    .detail("BlockRange", blockRange)
+							    .detail("Phase", "Replaced range");
+						}
+
+						data->fetchKeysLimiter.addBytes(expectedBlockSize);
+
+						KeyValueRef* kvItr = this_block.begin();
+						for (; kvItr != this_block.end(); ++kvItr) {
+							data->byteSampleApplySet(*kvItr, invalidVersion);
+						}
+
+						if (this_block.more) {
+							blockBegin = this_block.getReadThrough();
+						} else {
+							ASSERT(!this_block.readThrough.present());
+							blockBegin = rangeEnd;
+						}
+						this_block = RangeResult();
+
+						++data->counters.kvClearRangesInFetchKeys;
+						data->fetchKeysTotalCommitBytes += expectedBlockSize;
+						data->fetchKeysBytesBudget -= expectedBlockSize;
+						data->fetchKeysBudgetUsed.set(data->fetchKeysBytesBudget <= 0);
 					}
-
-					data->fetchKeysLimiter.addBytes(expectedBlockSize);
-
-					state KeyValueRef* kvItr = this_block.begin();
-					for (; kvItr != this_block.end(); ++kvItr) {
-						data->byteSampleApplySet(*kvItr, invalidVersion);
-					}
-
-					if (this_block.more) {
-						blockBegin = this_block.getReadThrough();
-					} else {
-						ASSERT(!this_block.readThrough.present());
-						blockBegin = rangeEnd;
-					}
-					this_block = RangeResult();
-
-					++data->counters.kvClearRangesInFetchKeys;
-					data->fetchKeysTotalCommitBytes += expectedBlockSize;
-					data->fetchKeysBytesBudget -= expectedBlockSize;
-					data->fetchKeysBudgetUsed.set(data->fetchKeysBytesBudget <= 0);
+				} catch (Error& e) {
+					err = e;
 				}
-			} catch (Error& e) {
-				if (!fetchKeyCanRetry(e)) {
-					throw e;
+				if (!fetchKeyCanRetry(err)) {
+					throw err;
 				}
 				if (!conductBulkLoad) {
 					data->counters.fetchKeyErrors += 1;
 				}
-				lastError = e;
+				lastError = err;
 				if (lastError.code() == error_code_storage_replica_comparison_error) {
 					// The inconsistency could be because of the inclusion of a rolled back
 					// transaction(s)/version(s) in the returned results. Retry.
 
-					wait(data->knownCommittedVersion.whenAtLeast(fetchVersion));
+					co_await data->knownCommittedVersion.whenAtLeast(fetchVersion);
 				}
 				if (blockBegin == keys.begin) {
 					TraceEvent("FKBlockFail", data->thisServerID)
@@ -7246,7 +7249,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 						    .detail("N", fetchVersion)
 						    .detail("E", data->version.get());
 					}
-					wait(delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+					co_await delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
 					continue;
 				}
 				if (blockBegin < keys.end) {
@@ -7308,9 +7311,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			// This block is for the fetchKey without SST ingestion case.
 			// For the SST ingestion case, we have already compacted the range right after ingestion.
 			// Wait until the load data has been committed.
-			wait(data->durableVersion.whenAtLeast(data->storageVersion() + 1));
+			co_await data->durableVersion.whenAtLeast(data->storageVersion() + 1);
 			// Compact the range after ingestion to avoid accumulating compaction overtime.
-			wait(data->storage.getKeyValueStore()->compactRange(keys));
+			co_await data->storage.getKeyValueStore()->compactRange(keys);
 		}
 
 		// We have completed the fetch and write of the data, now we wait for MVCC window to pass.
@@ -7334,11 +7337,11 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// version being recovered. Instead we wait for the updateStorage loop to commit something (and consequently
 		// also what we have written)
 
-		state Future<Void> fetchDurable = data->durableVersion.whenAtLeast(data->storageVersion() + 1);
-		state Future<Void> dataArrive = data->version.whenAtLeast(fetchVersion);
+		Future<Void> fetchDurable = data->durableVersion.whenAtLeast(data->storageVersion() + 1);
+		Future<Void> dataArrive = data->version.whenAtLeast(fetchVersion);
 
 		holdingFKPL.release();
-		wait(dataArrive && fetchDurable);
+		co_await (dataArrive && fetchDurable);
 
 		TraceEvent(SevDebug, "FKAfterFinalCommit", data->thisServerID)
 		    .detail("FKID", interval.pairID)
@@ -7352,7 +7355,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 		// After we add to the promise readyFetchKeys, update() would provide a pointer to FetchInjectionInfo that
 		// we can put mutation in.
-		FetchInjectionInfo* batch = wait(p.getFuture());
+		FetchInjectionInfo* batch = co_await p.getFuture();
 		TraceEvent(SevDebug, "FKUpdateBatch", data->thisServerID).detail("FKID", interval.pairID);
 
 		// TOOD(gglass): eliminate the need for the FetchingCF phase here.
@@ -7418,7 +7421,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		    .detail("Version", feedTransferredVersion)
 		    .detail("StorageVersion", data->storageVersion());
 
-		state StorageServerShard newShard;
+		StorageServerShard newShard;
 		if (data->shardAware) {
 			newShard = data->shards[keys.begin]->toStorageServerShard();
 			ASSERT(newShard.range == keys);
@@ -7434,7 +7437,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// this point.
 
 		// Wait for the transferred version (and therefore the shard data) to be committed and durable.
-		wait(data->durableVersion.whenAtLeast(feedTransferredVersion));
+		co_await data->durableVersion.whenAtLeast(feedTransferredVersion);
 
 		ASSERT(data->shards[shard->keys.begin]->assigned() &&
 		       data->shards[shard->keys.begin]->range() ==
@@ -7498,8 +7501,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		}
 		throw; // goes nowhere
 	}
-
-	return Void();
 }
 
 AddingShard::AddingShard(StorageServer* server,
@@ -7720,77 +7721,80 @@ Future<Void> bulkLoadFetchShardFileToLoad(StorageServer* data,
 	moveInShard->setPhase(MoveInPhase::Ingesting);
 }
 
-ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data, MoveInShard* moveInShard, std::string dir) {
+Future<Void> fetchShardCheckpoint(StorageServer* data, MoveInShard* moveInShard, std::string dir) {
 	TraceEvent(SevInfo, "FetchShardCheckpointMetaDataBegin", data->thisServerID)
 	    .detail("MoveInShard", moveInShard->toString());
 	ASSERT(moveInShard->getPhase() == MoveInPhase::Fetching);
 
-	state std::vector<std::pair<KeyRange, CheckpointMetaData>> records;
-	state std::vector<CheckpointMetaData> localRecords;
-	state int attempt = 0; // TODO(heliu): use shard->meta->checkpoints to continue the fetch.
-	state double fetchStartTime = now();
+	std::vector<std::pair<KeyRange, CheckpointMetaData>> records;
+	std::vector<CheckpointMetaData> localRecords;
+	int attempt = 0; // TODO(heliu): use shard->meta->checkpoints to continue the fetch.
+	double fetchStartTime = now();
 
-	loop {
-		wait(delay(0, TaskPriority::FetchKeys));
+	while (true) {
+		co_await delay(0, TaskPriority::FetchKeys);
 		if (moveInShard->failed()) {
-			return Void();
+			co_return;
 		}
 		++attempt;
 		records.clear();
 		for (const auto& range : moveInShard->ranges()) {
 			data->cx->invalidateCache(range);
 		}
-		try {
-			wait(store(records,
-			           getCheckpointMetaData(data->cx,
-			                                 moveInShard->ranges(),
-			                                 moveInShard->meta->createVersion,
-			                                 DataMoveRocksCF,
-			                                 moveInShard->dataMoveId())));
-			if (moveInShard->failed()) {
-				return Void();
-			}
+		{
+			Error err;
+			try {
+				co_await store(records,
+				               getCheckpointMetaData(data->cx,
+				                                     moveInShard->ranges(),
+				                                     moveInShard->meta->createVersion,
+				                                     DataMoveRocksCF,
+				                                     moveInShard->dataMoveId()));
+				if (moveInShard->failed()) {
+					co_return;
+				}
 
-			if (g_network->isSimulated()) {
+				if (g_network->isSimulated()) {
+					for (const auto& [range, record] : records) {
+						TraceEvent(moveInShard->logSev, "FetchShardCheckpointMetaData", data->thisServerID)
+						    .detail("MoveInShardID", moveInShard->id())
+						    .detail("Range", range)
+						    .detail("CheckpointMetaData", record.toString());
+					}
+				}
+
+				platform::eraseDirectoryRecursive(dir);
+				ASSERT(platform::createDirectory(dir));
+
+				TraceEvent(SevInfo, "FetchShardFetchCheckpointsBegin", data->thisServerID)
+				    .detail("MoveInShardID", moveInShard->id());
+				std::vector<Future<CheckpointMetaData>> fFetchCheckpoint;
 				for (const auto& [range, record] : records) {
-					TraceEvent(moveInShard->logSev, "FetchShardCheckpointMetaData", data->thisServerID)
-					    .detail("MoveInShardID", moveInShard->id())
-					    .detail("Range", range)
-					    .detail("CheckpointMetaData", record.toString());
+					const std::string checkpointDir = joinPath(dir, deterministicRandom()->randomAlphaNumeric(8));
+					if (!platform::createDirectory(checkpointDir)) {
+						throw retry();
+					}
+					fFetchCheckpoint.push_back(fetchCheckpointRanges(data->cx, record, checkpointDir, { range }));
 				}
-			}
-
-			platform::eraseDirectoryRecursive(dir);
-			ASSERT(platform::createDirectory(dir));
-
-			TraceEvent(SevInfo, "FetchShardFetchCheckpointsBegin", data->thisServerID)
-			    .detail("MoveInShardID", moveInShard->id());
-			std::vector<Future<CheckpointMetaData>> fFetchCheckpoint;
-			for (const auto& [range, record] : records) {
-				const std::string checkpointDir = joinPath(dir, deterministicRandom()->randomAlphaNumeric(8));
-				if (!platform::createDirectory(checkpointDir)) {
-					throw retry();
+				co_await store(localRecords, getAll(fFetchCheckpoint));
+				if (moveInShard->failed()) {
+					co_return;
 				}
-				fFetchCheckpoint.push_back(fetchCheckpointRanges(data->cx, record, checkpointDir, { range }));
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
-			wait(store(localRecords, getAll(fFetchCheckpoint)));
-			if (moveInShard->failed()) {
-				return Void();
-			}
-			break;
-		} catch (Error& err) {
 			TraceEvent(SevWarn, "FetchShardCheckpointsError", data->thisServerID)
 			    .errorUnsuppressed(err)
 			    .detail("Attempt", attempt)
 			    .detail("MoveInShard", moveInShard->toString());
-			state Error e = err;
-			if (e.code() == error_code_actor_cancelled || moveInShard->getPhase() != MoveInPhase::Fetching) {
-				throw e;
-			} else if (attempt > 10 || e.code() == error_code_checkpoint_not_found) {
-				wait(fallBackToAddingShard(data, moveInShard));
-				return Void();
+			if (err.code() == error_code_actor_cancelled || moveInShard->getPhase() != MoveInPhase::Fetching) {
+				throw err;
+			} else if (attempt > 10 || err.code() == error_code_checkpoint_not_found) {
+				co_await fallBackToAddingShard(data, moveInShard);
+				co_return;
 			} else {
-				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::FetchKeys));
+				co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::FetchKeys);
 			}
 		}
 	}
@@ -7810,7 +7814,6 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data, MoveInShard* moveIn
 	updateMoveInShardMetaData(data, moveInShard);
 
 	TraceEvent(SevInfo, "FetchShardCheckpointsEnd", data->thisServerID).detail("MoveInShard", moveInShard->toString());
-	return Void();
 }
 
 Future<Void> fetchShardIngestCheckpoint(StorageServer* data, MoveInShard* moveInShard) {
@@ -7893,28 +7896,28 @@ Future<Void> fetchShardIngestCheckpoint(StorageServer* data, MoveInShard* moveIn
 	    .detail("Rate", static_cast<double>(totalBytes) / duration);
 }
 
-ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
-                                          MoveInShard* moveInShard,
-                                          std::shared_ptr<MoveInUpdates> moveInUpdates) {
+Future<Void> fetchShardApplyUpdates(StorageServer* data,
+                                    MoveInShard* moveInShard,
+                                    std::shared_ptr<MoveInUpdates> moveInUpdates) {
 	TraceEvent(SevInfo, "FetchShardApplyUpdatesBegin", data->thisServerID)
 	    .detail("MoveInShard", moveInShard->toString());
 	ASSERT(moveInShard->getPhase() == MoveInPhase::ApplyingUpdates);
-	state double startTime = now();
+	double startTime = now();
 
 	try {
 		if (moveInShard->failed()) {
-			return Void();
+			co_return;
 		}
 
-		loop {
+		while (true) {
 			Promise<FetchInjectionInfo*> p;
 			data->readyFetchKeys.push_back(p);
-			FetchInjectionInfo* batch = wait(p.getFuture());
+			FetchInjectionInfo* batch = co_await p.getFuture();
 			if (moveInShard->failed()) {
-				return Void();
+				co_return;
 			}
 
-			state Version version = data->version.get() + 1;
+			Version version = data->version.get() + 1;
 			data->mutableData().createNewVersion(version);
 			ASSERT(version == data->data().getLatestVersion());
 
@@ -7977,9 +7980,9 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 				}
 
 				// Wait for the transferredVersion (and therefore the shard data) to be committed and durable.
-				wait(data->durableVersion.whenAtLeast(mLV.version + 1));
+				co_await data->durableVersion.whenAtLeast(mLV.version + 1);
 				if (moveInShard->failed()) {
-					return Void();
+					co_return;
 				}
 				break;
 			} else {
@@ -7990,7 +7993,7 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 				TraceEvent(moveInShard->logSev, "MultipleApplyUpdates").detail("MoveInShard", moveInShard->toString());
 			}
 
-			wait(data->version.whenAtLeast(version + 1));
+			co_await data->version.whenAtLeast(version + 1);
 		}
 
 		moveInShard->setPhase(MoveInPhase::Complete);
@@ -8037,8 +8040,6 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 		    .detail("MoveInShard", moveInShard->toString());
 		throw e;
 	}
-
-	return Void();
 }
 
 Future<Void> cleanUpMoveInShard(StorageServer* data, Version version, MoveInShard* moveInShard) {
@@ -8075,8 +8076,6 @@ Future<Void> cleanUpMoveInShard(StorageServer* data, Version version, MoveInShar
 	if (clearRecord) {
 		data->moveInShards.erase(moveInShard->id());
 	}
-
-	co_return;
 }
 
 // It works in the following sequences:
@@ -8086,28 +8085,28 @@ Future<Void> cleanUpMoveInShard(StorageServer* data, Version version, MoveInShar
 // 4. Apply any new updates accumulated since the checkpoint version.
 // 5. Mark the new shard as read-write
 // 6. Clean up all the checkpoint files etc.
-ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
+Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 	TraceEvent(SevInfo, "FetchShardBegin", data->thisServerID).detail("MoveInShard", moveInShard->toString());
-	state std::shared_ptr<MoveInUpdates> moveInUpdates = moveInShard->updates;
-	state std::string dir = fetchedCheckpointDir(data->folder, moveInShard->id());
-	state MoveInPhase phase;
+	std::shared_ptr<MoveInUpdates> moveInUpdates = moveInShard->updates;
+	std::string dir = fetchedCheckpointDir(data->folder, moveInShard->id());
+	MoveInPhase phase;
 
 	ASSERT(moveInShard->getPhase() != MoveInPhase::Pending);
 
-	wait(data->coreStarted.getFuture() && data->durableVersion.whenAtLeast(moveInShard->meta->createVersion + 1));
-	wait(data->fetchKeysParallelismLock.take(TaskPriority::DefaultYield));
-	state FlowLock::Releaser holdingFKPL(data->fetchKeysParallelismLock);
+	co_await (data->coreStarted.getFuture() && data->durableVersion.whenAtLeast(moveInShard->meta->createVersion + 1));
+	co_await data->fetchKeysParallelismLock.take(TaskPriority::DefaultYield);
+	FlowLock::Releaser holdingFKPL(data->fetchKeysParallelismLock);
 
-	state BulkLoadTaskState bulkLoadTaskState;
-	state bool conductBulkLoad = moveInShard->meta->conductBulkLoad;
+	BulkLoadTaskState bulkLoadTaskState;
+	bool conductBulkLoad = moveInShard->meta->conductBulkLoad;
 	if (conductBulkLoad) {
 		// Get the bulkload task metadata from the data move metadata. For details, see the comments in the fetchKeys.
-		wait(store(bulkLoadTaskState,
-		           getBulkLoadTaskStateFromDataMove(
-		               data->cx, moveInShard->dataMoveId(), data->version.get(), data->thisServerID)));
+		co_await store(bulkLoadTaskState,
+		               getBulkLoadTaskStateFromDataMove(
+		                   data->cx, moveInShard->dataMoveId(), data->version.get(), data->thisServerID));
 	}
 
-	loop {
+	while (true) {
 		phase = moveInShard->getPhase();
 		TraceEvent(moveInShard->logSev, "FetchShardLoop", data->thisServerID)
 		    .detail("MoveInShard", moveInShard->toString());
@@ -8118,16 +8117,16 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 					// Check the correctness: bulkLoadTaskMetadata stored in dataMoveMetadata must have the same
 					// dataMoveId.
 					ASSERT(bulkLoadTaskState.getDataMoveId() != moveInShard->dataMoveId());
-					wait(bulkLoadFetchShardFileToLoad(data, moveInShard, dir, bulkLoadTaskState));
+					co_await bulkLoadFetchShardFileToLoad(data, moveInShard, dir, bulkLoadTaskState);
 				} else {
-					wait(fetchShardCheckpoint(data, moveInShard, dir));
+					co_await fetchShardCheckpoint(data, moveInShard, dir);
 					TraceEvent(SevWarn, "SSBulkLoadTaskFetchShardFailedForNoMetadata", data->thisServerID)
 					    .detail("DataMoveId", moveInShard->dataMoveId());
 				}
 			} else if (phase == MoveInPhase::Ingesting) {
-				wait(fetchShardIngestCheckpoint(data, moveInShard));
+				co_await fetchShardIngestCheckpoint(data, moveInShard);
 			} else if (phase == MoveInPhase::ApplyingUpdates) {
-				wait(fetchShardApplyUpdates(data, moveInShard, moveInUpdates));
+				co_await fetchShardApplyUpdates(data, moveInShard, moveInUpdates);
 			} else if (phase == MoveInPhase::Complete) {
 				data->actors.add(cleanUpMoveInShard(data, data->data().getLatestVersion(), moveInShard));
 				break;
@@ -8142,14 +8141,12 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 			    .detail("MoveInShard", moveInShard->toString());
 			throw e;
 		}
-		wait(delay(1, TaskPriority::FetchKeys));
+		co_await delay(1, TaskPriority::FetchKeys);
 	}
 
 	validate(data);
 
 	TraceEvent(SevInfo, "FetchShardEnd", data->thisServerID).detail("MoveInShard", moveInShard->toString());
-
-	return Void();
 }
 
 MoveInUpdates::MoveInUpdates(UID id,
@@ -8445,25 +8442,25 @@ void ShardInfo::addMutation(Version version, bool fromFetch, MutationRef const& 
 	}
 }
 
-ACTOR Future<Void> restoreShards(StorageServer* data,
-                                 Version version,
-                                 RangeResult storageShards,
-                                 RangeResult moveInShards,
-                                 RangeResult assignedShards,
-                                 RangeResult availableShards) {
+Future<Void> restoreShards(StorageServer* data,
+                           Version version,
+                           RangeResult storageShards,
+                           RangeResult moveInShards,
+                           RangeResult assignedShards,
+                           RangeResult availableShards) {
 	TraceEvent(SevInfo, "StorageServerRestoreShardsBegin", data->thisServerID)
 	    .detail("StorageShard", storageShards.size())
 	    .detail("Version", version);
 
-	state int moveInLoc;
+	int moveInLoc{ 0 };
 	for (moveInLoc = 0; moveInLoc < moveInShards.size(); ++moveInLoc) {
 		MoveInShardMetaData meta = decodeMoveInShardValue(moveInShards[moveInLoc].value);
 		TraceEvent(SevInfo, "RestoreMoveInShard", data->thisServerID).detail("MoveInShard", meta.toString());
 		data->moveInShards.emplace(meta.id, std::make_shared<MoveInShard>(data, meta));
-		wait(yield());
+		co_await yield();
 	}
 
-	state int shardLoc;
+	int shardLoc{ 0 };
 	for (shardLoc = 0; shardLoc < storageShards.size(); ++shardLoc) {
 		const KeyRangeRef shardRange(
 		    storageShards[shardLoc].key.removePrefix(persistStorageServerShardKeys.begin),
@@ -8523,10 +8520,10 @@ ACTOR Future<Void> restoreShards(StorageServer* data,
 			data->newestDirtyVersion.insert(shardRange, version);
 		}
 
-		wait(yield());
+		co_await yield();
 	}
 
-	state int availableLoc;
+	int availableLoc{ 0 };
 	for (availableLoc = 0; availableLoc < availableShards.size(); availableLoc++) {
 		KeyRangeRef shardRange(
 		    availableShards[availableLoc].key.removePrefix(persistShardAvailableKeys.begin),
@@ -8550,10 +8547,10 @@ ACTOR Future<Void> restoreShards(StorageServer* data,
 			}
 		}
 
-		wait(yield());
+		co_await yield();
 	}
 
-	state int assignedLoc;
+	int assignedLoc{ 0 };
 	for (assignedLoc = 0; assignedLoc < assignedShards.size(); ++assignedLoc) {
 		KeyRangeRef shardRange(assignedShards[assignedLoc].key.removePrefix(persistShardAssignedKeys.begin),
 		                       assignedLoc + 1 == assignedShards.size()
@@ -8577,13 +8574,11 @@ ACTOR Future<Void> restoreShards(StorageServer* data,
 			}
 		}
 
-		wait(yield());
+		co_await yield();
 	}
 
 	validate(data, /*force=*/true);
 	TraceEvent(SevInfo, "StorageServerRestoreShardsEnd", data->thisServerID).detail("Version", version);
-
-	return Void();
 }
 
 void changeServerKeys(StorageServer* data,
@@ -9488,596 +9483,605 @@ Future<Void> tssDelayForever() {
 	}
 }
 
-ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
-	state double updateStart = g_network->timer();
-	state double decryptionTime = 0;
-	state double start;
-	state bool enableClearRangeEagerReads =
-	    (data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_ROCKSDB_V1 ||
-	     data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_SHARDED_ROCKSDB)
-	        ? SERVER_KNOBS->ROCKSDB_ENABLE_CLEAR_RANGE_EAGER_READS
-	        : SERVER_KNOBS->ENABLE_CLEAR_RANGE_EAGER_READS;
-	state UpdateEagerReadInfo eager(enableClearRangeEagerReads);
-	try {
+Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
+	double updateStart = g_network->timer();
+	double start{ 0 };
+	bool enableClearRangeEagerReads = (data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_ROCKSDB_V1 ||
+	                                   data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_SHARDED_ROCKSDB)
+	                                      ? SERVER_KNOBS->ROCKSDB_ENABLE_CLEAR_RANGE_EAGER_READS
+	                                      : SERVER_KNOBS->ENABLE_CLEAR_RANGE_EAGER_READS;
+	UpdateEagerReadInfo eager(enableClearRangeEagerReads);
+	{
+		Error err;
+		try {
+			// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of
+			// memory. This is often referred to as the storage server e-brake (emergency brake)
 
-		// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of
-		// memory. This is often referred to as the storage server e-brake (emergency brake)
+			// We allow the storage server to make some progress between e-brake periods, referred to as "overage", in
+			// order to ensure that it advances desiredOldestVersion enough for updateStorage to make enough progress on
+			// freeing up queue size. We also increase these limits if speed up simulation was set IF they were
+			// buggified to a very small value.
+			int64_t hardLimit = SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES;
+			int64_t hardLimitOverage = SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES_OVERAGE;
+			if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
+				hardLimit = SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES_SPEED_UP_SIM;
+				hardLimitOverage = SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES_OVERAGE_SPEED_UP_SIM;
+			}
+			double waitStartT = 0;
+			if (data->queueSize() >= hardLimit && data->durableVersion.get() < data->desiredOldestVersion.get() &&
+			    ((data->desiredOldestVersion.get() - SERVER_KNOBS->STORAGE_HARD_LIMIT_VERSION_OVERAGE >
+			      data->lastDurableVersionEBrake) ||
+			     (data->counters.bytesInput.getValue() - hardLimitOverage > data->lastBytesInputEBrake))) {
 
-		// We allow the storage server to make some progress between e-brake periods, referred to as "overage", in
-		// order to ensure that it advances desiredOldestVersion enough for updateStorage to make enough progress on
-		// freeing up queue size. We also increase these limits if speed up simulation was set IF they were
-		// buggified to a very small value.
-		state int64_t hardLimit = SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES;
-		state int64_t hardLimitOverage = SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES_OVERAGE;
-		if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
-			hardLimit = SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES_SPEED_UP_SIM;
-			hardLimitOverage = SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES_OVERAGE_SPEED_UP_SIM;
-		}
-		state double waitStartT = 0;
-		if (data->queueSize() >= hardLimit && data->durableVersion.get() < data->desiredOldestVersion.get() &&
-		    ((data->desiredOldestVersion.get() - SERVER_KNOBS->STORAGE_HARD_LIMIT_VERSION_OVERAGE >
-		      data->lastDurableVersionEBrake) ||
-		     (data->counters.bytesInput.getValue() - hardLimitOverage > data->lastBytesInputEBrake))) {
+				while (data->queueSize() >= hardLimit &&
+				       data->durableVersion.get() < data->desiredOldestVersion.get()) {
+					if (now() - waitStartT >= 1) {
+						TraceEvent(SevWarn, "StorageServerUpdateLag", data->thisServerID)
+						    .detail("Version", data->version.get())
+						    .detail("DurableVersion", data->durableVersion.get())
+						    .detail("DesiredOldestVersion", data->desiredOldestVersion.get())
+						    .detail("QueueSize", data->queueSize())
+						    .detail("LastBytesInputEBrake", data->lastBytesInputEBrake)
+						    .detail("LastDurableVersionEBrake", data->lastDurableVersionEBrake);
+						waitStartT = now();
+					}
 
-			while (data->queueSize() >= hardLimit && data->durableVersion.get() < data->desiredOldestVersion.get()) {
-				if (now() - waitStartT >= 1) {
-					TraceEvent(SevWarn, "StorageServerUpdateLag", data->thisServerID)
-					    .detail("Version", data->version.get())
-					    .detail("DurableVersion", data->durableVersion.get())
-					    .detail("DesiredOldestVersion", data->desiredOldestVersion.get())
-					    .detail("QueueSize", data->queueSize())
-					    .detail("LastBytesInputEBrake", data->lastBytesInputEBrake)
-					    .detail("LastDurableVersionEBrake", data->lastDurableVersionEBrake);
-					waitStartT = now();
+					data->behind = true;
+					co_await delayJittered(.005, TaskPriority::TLogPeekReply);
 				}
-
-				data->behind = true;
-				wait(delayJittered(.005, TaskPriority::TLogPeekReply));
+				data->lastBytesInputEBrake = data->counters.bytesInput.getValue();
+				data->lastDurableVersionEBrake = data->durableVersion.get();
 			}
-			data->lastBytesInputEBrake = data->counters.bytesInput.getValue();
-			data->lastDurableVersionEBrake = data->durableVersion.get();
-		}
 
-		if (g_network->isSimulated() && data->isTss() && g_simulator->tssMode == ISimulator::TSSMode::EnabledAddDelay &&
-		    !g_simulator->speedUpSimulation && data->tssFaultInjectTime.present() &&
-		    data->tssFaultInjectTime.get() < now()) {
-			if (deterministicRandom()->random01() < 0.01) {
-				TraceEvent(SevWarnAlways, "TSSInjectDelayForever", data->thisServerID).log();
-				// small random chance to just completely get stuck here, each tss should eventually hit this in
-				// this mode
-				wait(tssDelayForever());
-			} else {
-				// otherwise pause for part of a second
-				double delayTime = deterministicRandom()->random01();
-				TraceEvent(SevWarnAlways, "TSSInjectDelay", data->thisServerID).detail("Delay", delayTime);
-				wait(delay(delayTime));
-			}
-		}
-
-		if (data->maybeInjectDelay()) {
-			wait(delay(deterministicRandom()->random01() * 10.0));
-		}
-
-		while (data->byteSampleClearsTooLarge.get()) {
-			wait(data->byteSampleClearsTooLarge.onChange());
-		}
-
-		state Reference<ILogSystem::IPeekCursor> cursor = data->logCursor;
-
-		state double beforeTLogCursorReads = now();
-		loop {
-			wait(cursor->getMore());
-			if (!cursor->isExhausted()) {
-				break;
-			}
-		}
-		data->tlogCursorReadsLatencyHistogram->sampleSeconds(now() - beforeTLogCursorReads);
-		if (cursor->popped() > 0) {
-			TraceEvent("StorageServerWorkerRemoved", data->thisServerID)
-			    .detail("Reason", "PeekPoppedTLogData")
-			    .detail("Version", cursor->popped());
-			throw worker_removed();
-		}
-
-		++data->counters.updateBatches;
-		data->lastTLogVersion = cursor->getMaxKnownVersion();
-		if (cursor->getMinKnownCommittedVersion() > data->knownCommittedVersion.get()) {
-			data->knownCommittedVersion.set(cursor->getMinKnownCommittedVersion());
-		}
-		data->versionLag = std::max<int64_t>(0, data->lastTLogVersion - data->version.get());
-
-		ASSERT(*pReceivedUpdate == false);
-		*pReceivedUpdate = true;
-
-		start = now();
-		wait(data->durableVersionLock.take(TaskPriority::TLogPeekReply, 1));
-		state FlowLock::Releaser holdingDVL(data->durableVersionLock);
-		if (now() - start > 0.1)
-			TraceEvent("SSSlowTakeLock1", data->thisServerID)
-			    .detailf("From", "%016llx", debug_lastLoadBalanceResultEndpointToken)
-			    .detail("Duration", now() - start)
-			    .detail("Version", data->version.get());
-		data->ssVersionLockLatencyHistogram->sampleSeconds(now() - start);
-
-		start = now();
-		state FetchInjectionInfo fii;
-		state Reference<ILogSystem::IPeekCursor> cloneCursor2 = cursor->cloneNoMore();
-
-		// Collect eager read keys.
-		loop {
-			state uint64_t changeCounter = data->shardChangeCounter;
-			bool epochEnd = false;
-			bool hasPrivateData = false;
-			bool firstMutation = true;
-			bool dbgLastMessageWasProtocol = false;
-
-			Reference<ILogSystem::IPeekCursor> cloneCursor1 = cloneCursor2->cloneNoMore();
-
-			cloneCursor1->setProtocolVersion(data->logProtocol);
-
-			for (; cloneCursor1->hasMessage(); cloneCursor1->nextMessage()) {
-				ArenaReader& cloneReader = *cloneCursor1->reader();
-
-				if (LogProtocolMessage::isNextIn(cloneReader)) {
-					LogProtocolMessage lpm;
-					cloneReader >> lpm;
-					//TraceEvent(SevDebug, "SSReadingLPM", data->thisServerID).detail("Mutation", lpm);
-					dbgLastMessageWasProtocol = true;
-					cloneCursor1->setProtocolVersion(cloneReader.protocolVersion());
-				} else if (cloneReader.protocolVersion().hasSpanContext() &&
-				           SpanContextMessage::isNextIn(cloneReader)) {
-					SpanContextMessage scm;
-					cloneReader >> scm;
-				} else if (cloneReader.protocolVersion().hasOTELSpanContext() &&
-				           OTELSpanContextMessage::isNextIn(cloneReader)) {
-					OTELSpanContextMessage scm;
-					cloneReader >> scm;
+			if (g_network->isSimulated() && data->isTss() &&
+			    g_simulator->tssMode == ISimulator::TSSMode::EnabledAddDelay && !g_simulator->speedUpSimulation &&
+			    data->tssFaultInjectTime.present() && data->tssFaultInjectTime.get() < now()) {
+				if (deterministicRandom()->random01() < 0.01) {
+					TraceEvent(SevWarnAlways, "TSSInjectDelayForever", data->thisServerID).log();
+					// small random chance to just completely get stuck here, each tss should eventually hit this in
+					// this mode
+					co_await tssDelayForever();
 				} else {
-					MutationRef msg;
-					cloneReader >> msg;
-					if (!msg.validateChecksum()) {
-						TraceEvent(SevError, "ValidateChecksumError", data->thisServerID)
-						    .setMaxFieldLength(-1)
-						    .setMaxEventLength(-1)
-						    .detail("Mutation", msg);
-						ASSERT(false);
-					}
-					// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg);
-					if (data->acsValidator != nullptr) {
-						data->acsValidator->incrementTotalMutations();
-						if (isAccumulativeChecksumMutation(msg)) {
-							data->acsValidator->incrementTotalAcsMutations();
-						}
-					}
-					if (firstMutation && msg.param1.startsWith(systemKeys.end)) {
-						hasPrivateData = true;
-					}
-					firstMutation = false;
-					if (msg.param1 == lastEpochEndPrivateKey) {
-						epochEnd = true;
-						ASSERT(dbgLastMessageWasProtocol);
-					}
-					eager.addMutation(msg);
-					dbgLastMessageWasProtocol = false;
+					// otherwise pause for part of a second
+					double delayTime = deterministicRandom()->random01();
+					TraceEvent(SevWarnAlways, "TSSInjectDelay", data->thisServerID).detail("Delay", delayTime);
+					co_await delay(delayTime);
 				}
 			}
 
-			// Any fetchKeys which are ready to transition their shards to the adding,transferred state do so
-			// now. If there is an epoch end we skip this step, to increase testability and to prevent inserting
-			// a version in the middle of a rolled back version range.
-			while (!hasPrivateData && !epochEnd && !data->readyFetchKeys.empty()) {
-				auto fk = data->readyFetchKeys.back();
-				data->readyFetchKeys.pop_back();
-				fk.send(&fii);
-				// fetchKeys() would put the data it fetched into the fii. The thread will not return back to
-				// this actor until it was completed.
+			if (data->maybeInjectDelay()) {
+				co_await delay(deterministicRandom()->random01() * 10.0);
 			}
 
-			for (auto& c : fii.changes) {
-				eager.addMutations(c.mutations);
+			while (data->byteSampleClearsTooLarge.get()) {
+				co_await data->byteSampleClearsTooLarge.onChange();
 			}
 
-			wait(doEagerReads(data, &eager));
-			if (data->shardChangeCounter == changeCounter) {
-				break;
+			Reference<ILogSystem::IPeekCursor> cursor = data->logCursor;
+
+			double beforeTLogCursorReads = now();
+			while (true) {
+				co_await cursor->getMore();
+				if (!cursor->isExhausted()) {
+					break;
+				}
+			}
+			data->tlogCursorReadsLatencyHistogram->sampleSeconds(now() - beforeTLogCursorReads);
+			if (cursor->popped() > 0) {
+				TraceEvent("StorageServerWorkerRemoved", data->thisServerID)
+				    .detail("Reason", "PeekPoppedTLogData")
+				    .detail("Version", cursor->popped());
+				throw worker_removed();
 			}
 
-			CODE_PROBE(true,
-			           "A fetchKeys completed while we were doing this, so eager might be outdated.  Read it again.");
-			// SOMEDAY: Theoretically we could check the change counters of individual shards and retry the
-			// reads only selectively
-			eager = UpdateEagerReadInfo(enableClearRangeEagerReads);
-			cloneCursor2 = cursor->cloneNoMore();
-		}
-		data->eagerReadsLatencyHistogram->sampleSeconds(now() - start);
+			++data->counters.updateBatches;
+			data->lastTLogVersion = cursor->getMaxKnownVersion();
+			if (cursor->getMinKnownCommittedVersion() > data->knownCommittedVersion.get()) {
+				data->knownCommittedVersion.set(cursor->getMinKnownCommittedVersion());
+			}
+			data->versionLag = std::max<int64_t>(0, data->lastTLogVersion - data->version.get());
 
-		if (now() - start > 0.1) {
-			TraceEvent("SSSlowTakeLock2", data->thisServerID)
-			    .detailf("From", "%016llx", debug_lastLoadBalanceResultEndpointToken)
-			    .detail("Duration", now() - start)
-			    .detail("Version", data->version.get());
-		}
-		data->updateEagerReads = &eager;
-		data->debug_inApplyUpdate = true;
+			ASSERT(*pReceivedUpdate == false);
+			*pReceivedUpdate = true;
 
-		state StorageUpdater updater(data->lastVersionWithData, data->restoredVersion);
+			start = now();
+			co_await data->durableVersionLock.take(TaskPriority::TLogPeekReply, 1);
+			FlowLock::Releaser holdingDVL(data->durableVersionLock);
+			if (now() - start > 0.1)
+				TraceEvent("SSSlowTakeLock1", data->thisServerID)
+				    .detailf("From", "%016llx", debug_lastLoadBalanceResultEndpointToken)
+				    .detail("Duration", now() - start)
+				    .detail("Version", data->version.get());
+			data->ssVersionLockLatencyHistogram->sampleSeconds(now() - start);
 
-		if (EXPENSIVE_VALIDATION)
-			data->data().atLatest().validate();
-		validate(data);
+			start = now();
+			FetchInjectionInfo fii;
+			Reference<ILogSystem::IPeekCursor> cloneCursor2 = cursor->cloneNoMore();
 
-		state bool injectedChanges = false;
-		state int changeNum = 0;
-		state int mutationBytes = 0;
-		state double beforeFetchKeysUpdates = now();
-		for (; changeNum < fii.changes.size(); changeNum++) {
-			state int mutationNum = 0;
-			state VerUpdateRef* pUpdate = &fii.changes[changeNum];
-			for (; mutationNum < pUpdate->mutations.size(); mutationNum++) {
-				updater.applyMutation(data, pUpdate->mutations[mutationNum], pUpdate->version, true);
-				mutationBytes += pUpdate->mutations[mutationNum].totalSize();
-				// data->counters.mutationBytes or data->counters.mutations should not be updated because they
-				// should have counted when the mutations arrive from cursor initially.
-				injectedChanges = true;
+			// Collect eager read keys.
+			while (true) {
+				uint64_t changeCounter = data->shardChangeCounter;
+				bool epochEnd = false;
+				bool hasPrivateData = false;
+				bool firstMutation = true;
+				bool dbgLastMessageWasProtocol = false;
+
+				Reference<ILogSystem::IPeekCursor> cloneCursor1 = cloneCursor2->cloneNoMore();
+
+				cloneCursor1->setProtocolVersion(data->logProtocol);
+
+				for (; cloneCursor1->hasMessage(); cloneCursor1->nextMessage()) {
+					ArenaReader& cloneReader = *cloneCursor1->reader();
+
+					if (LogProtocolMessage::isNextIn(cloneReader)) {
+						LogProtocolMessage lpm;
+						cloneReader >> lpm;
+						//TraceEvent(SevDebug, "SSReadingLPM", data->thisServerID).detail("Mutation", lpm);
+						dbgLastMessageWasProtocol = true;
+						cloneCursor1->setProtocolVersion(cloneReader.protocolVersion());
+					} else if (cloneReader.protocolVersion().hasSpanContext() &&
+					           SpanContextMessage::isNextIn(cloneReader)) {
+						SpanContextMessage scm;
+						cloneReader >> scm;
+					} else if (cloneReader.protocolVersion().hasOTELSpanContext() &&
+					           OTELSpanContextMessage::isNextIn(cloneReader)) {
+						OTELSpanContextMessage scm;
+						cloneReader >> scm;
+					} else {
+						MutationRef msg;
+						cloneReader >> msg;
+						if (!msg.validateChecksum()) {
+							TraceEvent(SevError, "ValidateChecksumError", data->thisServerID)
+							    .setMaxFieldLength(-1)
+							    .setMaxEventLength(-1)
+							    .detail("Mutation", msg);
+							ASSERT(false);
+						}
+						// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg);
+						if (data->acsValidator != nullptr) {
+							data->acsValidator->incrementTotalMutations();
+							if (isAccumulativeChecksumMutation(msg)) {
+								data->acsValidator->incrementTotalAcsMutations();
+							}
+						}
+						if (firstMutation && msg.param1.startsWith(systemKeys.end)) {
+							hasPrivateData = true;
+						}
+						firstMutation = false;
+						if (msg.param1 == lastEpochEndPrivateKey) {
+							epochEnd = true;
+							ASSERT(dbgLastMessageWasProtocol);
+						}
+						eager.addMutation(msg);
+						dbgLastMessageWasProtocol = false;
+					}
+				}
+
+				// Any fetchKeys which are ready to transition their shards to the adding,transferred state do so
+				// now. If there is an epoch end we skip this step, to increase testability and to prevent inserting
+				// a version in the middle of a rolled back version range.
+				while (!hasPrivateData && !epochEnd && !data->readyFetchKeys.empty()) {
+					auto fk = data->readyFetchKeys.back();
+					data->readyFetchKeys.pop_back();
+					fk.send(&fii);
+					// fetchKeys() would put the data it fetched into the fii. The thread will not return back to
+					// this actor until it was completed.
+				}
+
+				for (auto& c : fii.changes) {
+					eager.addMutations(c.mutations);
+				}
+
+				co_await doEagerReads(data, &eager);
+				if (data->shardChangeCounter == changeCounter) {
+					break;
+				}
+
+				CODE_PROBE(
+				    true,
+				    "A fetchKeys completed while we were doing this, so eager might be outdated.  Read it again.");
+				// SOMEDAY: Theoretically we could check the change counters of individual shards and retry the
+				// reads only selectively
+				eager = UpdateEagerReadInfo(enableClearRangeEagerReads);
+				cloneCursor2 = cursor->cloneNoMore();
+			}
+			data->eagerReadsLatencyHistogram->sampleSeconds(now() - start);
+
+			if (now() - start > 0.1) {
+				TraceEvent("SSSlowTakeLock2", data->thisServerID)
+				    .detailf("From", "%016llx", debug_lastLoadBalanceResultEndpointToken)
+				    .detail("Duration", now() - start)
+				    .detail("Version", data->version.get());
+			}
+			data->updateEagerReads = &eager;
+			data->debug_inApplyUpdate = true;
+
+			StorageUpdater updater(data->lastVersionWithData, data->restoredVersion);
+
+			if (EXPENSIVE_VALIDATION)
+				data->data().atLatest().validate();
+			validate(data);
+
+			bool injectedChanges = false;
+			int changeNum = 0;
+			int mutationBytes = 0;
+			double beforeFetchKeysUpdates = now();
+			for (; changeNum < fii.changes.size(); changeNum++) {
+				int mutationNum = 0;
+				VerUpdateRef* pUpdate = &fii.changes[changeNum];
+				for (; mutationNum < pUpdate->mutations.size(); mutationNum++) {
+					updater.applyMutation(data, pUpdate->mutations[mutationNum], pUpdate->version, true);
+					mutationBytes += pUpdate->mutations[mutationNum].totalSize();
+					// data->counters.mutationBytes or data->counters.mutations should not be updated because they
+					// should have counted when the mutations arrive from cursor initially.
+					injectedChanges = true;
+					if (mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
+						mutationBytes = 0;
+						co_await delay(SERVER_KNOBS->UPDATE_DELAY);
+					}
+				}
+			}
+			data->fetchKeysPTreeUpdatesLatencyHistogram->sampleSeconds(now() - beforeFetchKeysUpdates);
+
+			Version ver = invalidVersion;
+			cloneCursor2->setProtocolVersion(data->logProtocol);
+			SpanContext spanContext = SpanContext();
+			double beforeTLogMsgsUpdates = now();
+			for (; cloneCursor2->hasMessage(); cloneCursor2->nextMessage()) {
 				if (mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
 					mutationBytes = 0;
-					wait(delay(SERVER_KNOBS->UPDATE_DELAY));
-				}
-			}
-		}
-		data->fetchKeysPTreeUpdatesLatencyHistogram->sampleSeconds(now() - beforeFetchKeysUpdates);
-
-		state Version ver = invalidVersion;
-		cloneCursor2->setProtocolVersion(data->logProtocol);
-		state SpanContext spanContext = SpanContext();
-		state double beforeTLogMsgsUpdates = now();
-		for (; cloneCursor2->hasMessage(); cloneCursor2->nextMessage()) {
-			if (mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
-				mutationBytes = 0;
-				// Instead of just yielding, leave time for the storage server to respond to reads
-				wait(delay(SERVER_KNOBS->UPDATE_DELAY));
-			}
-
-			if (cloneCursor2->version().version > ver) {
-				ASSERT(cloneCursor2->version().version > data->version.get());
-			}
-
-			auto& rd = *cloneCursor2->reader();
-
-			if (cloneCursor2->version().version > ver && cloneCursor2->version().version > data->version.get()) {
-				++data->counters.updateVersions;
-				ver = cloneCursor2->version().version;
-			}
-
-			if (LogProtocolMessage::isNextIn(rd)) {
-				LogProtocolMessage lpm;
-				rd >> lpm;
-
-				data->logProtocol = rd.protocolVersion();
-				data->storage.changeLogProtocol(ver, data->logProtocol);
-				cloneCursor2->setProtocolVersion(rd.protocolVersion());
-				spanContext.traceID = UID();
-			} else if (rd.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(rd)) {
-				SpanContextMessage scm;
-				rd >> scm;
-				CODE_PROBE(true, "storageserveractor converting SpanContextMessage into OTEL SpanContext");
-				spanContext =
-				    SpanContext(UID(scm.spanContext.first(), scm.spanContext.second()),
-				                0,
-				                scm.spanContext.first() != 0 && scm.spanContext.second() != 0 ? TraceFlags::sampled
-				                                                                              : TraceFlags::unsampled);
-			} else if (rd.protocolVersion().hasOTELSpanContext() && OTELSpanContextMessage::isNextIn(rd)) {
-				CODE_PROBE(true, "storageserveractor reading OTELSpanContextMessage");
-				OTELSpanContextMessage scm;
-				rd >> scm;
-				spanContext = scm.spanContext;
-			} else {
-				MutationRef msg;
-				rd >> msg;
-				if (data->acsValidator != nullptr && msg.checksum.present() &&
-				    msg.accumulativeChecksumIndex.present() && !isAccumulativeChecksumMutation(msg)) {
-					// We have to check accumulative checksum when iterating through cloneCursor2,
-					// where ss removal by tag assignment takes effect immediately
-					data->acsValidator->addMutation(
-					    msg, data->thisServerID, data->tag, data->version.get(), cloneCursor2->version().version);
+					// Instead of just yielding, leave time for the storage server to respond to reads
+					co_await delay(SERVER_KNOBS->UPDATE_DELAY);
 				}
 
-				Span span("SS:update"_loc, spanContext);
+				if (cloneCursor2->version().version > ver) {
+					ASSERT(cloneCursor2->version().version > data->version.get());
+				}
 
-				// Drop non-private mutations if TSS fault injection is enabled in simulation, or if this is a TSS
-				// in quarantine.
-				if (g_network->isSimulated() && data->isTss() && !g_simulator->speedUpSimulation &&
-				    g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations &&
-				    data->tssFaultInjectTime.present() && data->tssFaultInjectTime.get() < now() &&
-				    (msg.type == MutationRef::SetValue || msg.type == MutationRef::ClearRange) &&
-				    (msg.param1.size() < 2 || msg.param1[0] != 0xff || msg.param1[1] != 0xff) &&
-				    deterministicRandom()->random01() < 0.05) {
-					TraceEvent(SevWarnAlways, "TSSInjectDropMutation", data->thisServerID)
-					    .detail("Mutation", msg)
-					    .detail("Version", cloneCursor2->version().toString());
-				} else if (data->isTSSInQuarantine() &&
-				           (msg.param1.size() < 2 || msg.param1[0] != 0xff || msg.param1[1] != 0xff)) {
-					TraceEvent("TSSQuarantineDropMutation", data->thisServerID)
-					    .suppressFor(10.0)
-					    .detail("Version", cloneCursor2->version().toString());
-				} else if (ver != invalidVersion) { // This change belongs to a version < minVersion
-					DEBUG_MUTATION("SSPeek", ver, msg, data->thisServerID);
-					if (ver == data->initialClusterVersion) {
-						//TraceEvent("SSPeekMutation", data->thisServerID).log();
-						// The following trace event may produce a value with special characters
-						TraceEvent("SSPeekMutation", data->thisServerID)
+				auto& rd = *cloneCursor2->reader();
+
+				if (cloneCursor2->version().version > ver && cloneCursor2->version().version > data->version.get()) {
+					++data->counters.updateVersions;
+					ver = cloneCursor2->version().version;
+				}
+
+				if (LogProtocolMessage::isNextIn(rd)) {
+					LogProtocolMessage lpm;
+					rd >> lpm;
+
+					data->logProtocol = rd.protocolVersion();
+					data->storage.changeLogProtocol(ver, data->logProtocol);
+					cloneCursor2->setProtocolVersion(rd.protocolVersion());
+					spanContext.traceID = UID();
+				} else if (rd.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(rd)) {
+					SpanContextMessage scm;
+					rd >> scm;
+					CODE_PROBE(true, "storageserveractor converting SpanContextMessage into OTEL SpanContext");
+					spanContext = SpanContext(UID(scm.spanContext.first(), scm.spanContext.second()),
+					                          0,
+					                          scm.spanContext.first() != 0 && scm.spanContext.second() != 0
+					                              ? TraceFlags::sampled
+					                              : TraceFlags::unsampled);
+				} else if (rd.protocolVersion().hasOTELSpanContext() && OTELSpanContextMessage::isNextIn(rd)) {
+					CODE_PROBE(true, "storageserveractor reading OTELSpanContextMessage");
+					OTELSpanContextMessage scm;
+					rd >> scm;
+					spanContext = scm.spanContext;
+				} else {
+					MutationRef msg;
+					rd >> msg;
+					if (data->acsValidator != nullptr && msg.checksum.present() &&
+					    msg.accumulativeChecksumIndex.present() && !isAccumulativeChecksumMutation(msg)) {
+						// We have to check accumulative checksum when iterating through cloneCursor2,
+						// where ss removal by tag assignment takes effect immediately
+						data->acsValidator->addMutation(
+						    msg, data->thisServerID, data->tag, data->version.get(), cloneCursor2->version().version);
+					}
+
+					Span span("SS:update"_loc, spanContext);
+
+					// Drop non-private mutations if TSS fault injection is enabled in simulation, or if this is a TSS
+					// in quarantine.
+					if (g_network->isSimulated() && data->isTss() && !g_simulator->speedUpSimulation &&
+					    g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations &&
+					    data->tssFaultInjectTime.present() && data->tssFaultInjectTime.get() < now() &&
+					    (msg.type == MutationRef::SetValue || msg.type == MutationRef::ClearRange) &&
+					    (msg.param1.size() < 2 || msg.param1[0] != 0xff || msg.param1[1] != 0xff) &&
+					    deterministicRandom()->random01() < 0.05) {
+						TraceEvent(SevWarnAlways, "TSSInjectDropMutation", data->thisServerID)
 						    .detail("Mutation", msg)
 						    .detail("Version", cloneCursor2->version().toString());
-					}
+					} else if (data->isTSSInQuarantine() &&
+					           (msg.param1.size() < 2 || msg.param1[0] != 0xff || msg.param1[1] != 0xff)) {
+						TraceEvent("TSSQuarantineDropMutation", data->thisServerID)
+						    .suppressFor(10.0)
+						    .detail("Version", cloneCursor2->version().toString());
+					} else if (ver != invalidVersion) { // This change belongs to a version < minVersion
+						DEBUG_MUTATION("SSPeek", ver, msg, data->thisServerID);
+						if (ver == data->initialClusterVersion) {
+							//TraceEvent("SSPeekMutation", data->thisServerID).log();
+							// The following trace event may produce a value with special characters
+							TraceEvent("SSPeekMutation", data->thisServerID)
+							    .detail("Mutation", msg)
+							    .detail("Version", cloneCursor2->version().toString());
+						}
 
-					updater.applyMutation(data, msg, ver, false);
-					mutationBytes += msg.totalSize();
-					data->counters.mutationBytes += msg.totalSize();
-					data->counters.logicalBytesInput += msg.expectedSize();
-					++data->counters.mutations;
-					switch (msg.type) {
-					case MutationRef::SetValue:
-						++data->counters.setMutations;
-						break;
-					case MutationRef::ClearRange:
-						++data->counters.clearRangeMutations;
-						break;
-					case MutationRef::AddValue:
-					case MutationRef::And:
-					case MutationRef::AndV2:
-					case MutationRef::AppendIfFits:
-					case MutationRef::ByteMax:
-					case MutationRef::ByteMin:
-					case MutationRef::Max:
-					case MutationRef::Min:
-					case MutationRef::MinV2:
-					case MutationRef::Or:
-					case MutationRef::Xor:
-					case MutationRef::CompareAndClear:
-						++data->counters.atomicMutations;
-						break;
-					}
-				} else
-					TraceEvent(SevError, "DiscardingPeekedData", data->thisServerID)
-					    .detail("Mutation", msg)
-					    .detail("Version", cloneCursor2->version().toString());
-			}
-		}
-
-		if (data->acsValidator != nullptr) {
-			data->acsValidator->clearCache(data->thisServerID, data->tag, data->version.get());
-		}
-
-		data->tLogMsgsPTreeUpdatesLatencyHistogram->sampleSeconds(now() - beforeTLogMsgsUpdates);
-
-		if (ver != invalidVersion) {
-			data->lastVersionWithData = ver;
-		}
-		ver = cloneCursor2->version().version - 1;
-
-		if (injectedChanges)
-			data->lastVersionWithData = ver;
-
-		data->updateEagerReads = nullptr;
-		data->debug_inApplyUpdate = false;
-
-		if (ver == invalidVersion && !fii.changes.empty()) {
-			ver = updater.currentVersion;
-		}
-
-		if (ver != invalidVersion && ver > data->version.get()) {
-			// TODO(alexmiller): Update to version tracking.
-			// DEBUG_KEY_RANGE("SSUpdate", ver, KeyRangeRef());
-
-			data->mutableData().createNewVersion(ver);
-			if (data->otherError.getFuture().isReady())
-				data->otherError.getFuture().get();
-
-			data->counters.fetchedVersions += (ver - data->version.get());
-			++data->counters.fetchesFromLogs;
-			Optional<UID> curSourceTLogID = cursor->getCurrentPeekLocation();
-
-			if (curSourceTLogID != data->sourceTLogID) {
-				data->sourceTLogID = curSourceTLogID;
-
-				TraceEvent("StorageServerSourceTLogID", data->thisServerID)
-				    .detail("SourceTLogID",
-				            data->sourceTLogID.present() ? data->sourceTLogID.get().toString() : "unknown")
-				    .trackLatest(data->storageServerSourceTLogIDEventHolder->trackingKey);
-			}
-
-			data->noRecentUpdates.set(false);
-			data->lastUpdate = now();
-
-			data->prevVersion = data->version.get();
-			data->version.set(ver); // Triggers replies to waiting gets for new version(s)
-
-			setDataVersion(data->thisServerID, data->version.get());
-			if (data->otherError.getFuture().isReady())
-				data->otherError.getFuture().get();
-
-			Version maxVersionsInMemory =
-			    (g_network->isSimulated() && g_simulator->speedUpSimulation)
-			        ? std::max(5 * SERVER_KNOBS->VERSIONS_PER_SECOND, SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)
-			        : SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
-			for (int i = 0; i < data->recoveryVersionSkips.size(); i++) {
-				maxVersionsInMemory += data->recoveryVersionSkips[i].second;
-			}
-
-			// Trigger updateStorage if necessary
-			Version proposedOldestVersion =
-			    std::max(data->version.get(), cursor->getMinKnownCommittedVersion()) - maxVersionsInMemory;
-			if (data->primaryLocality == tagLocalitySpecial || data->tag.locality == data->primaryLocality) {
-				proposedOldestVersion = std::max(proposedOldestVersion, data->lastTLogVersion - maxVersionsInMemory);
-			}
-			proposedOldestVersion = std::min(proposedOldestVersion, data->version.get() - 1);
-			proposedOldestVersion = std::max(proposedOldestVersion, data->oldestVersion.get());
-			proposedOldestVersion = std::max(proposedOldestVersion, data->desiredOldestVersion.get());
-			proposedOldestVersion = std::max(proposedOldestVersion, data->initialClusterVersion);
-
-			DisabledTraceEvent("StorageServerUpdated", data->thisServerID)
-			    .detail("Ver", ver)
-			    .detail("DataVersion", data->version.get())
-			    .detail("LastTLogVersion", data->lastTLogVersion)
-			    .detail("NewOldest", data->oldestVersion.get())
-			    .detail("DesiredOldest", data->desiredOldestVersion.get())
-			    .detail("MinKCV", cursor->getMinKnownCommittedVersion())
-			    .detail("MaxVersionInMemory", maxVersionsInMemory)
-			    .detail("Proposed", proposedOldestVersion)
-			    .detail("PrimaryLocality", data->primaryLocality)
-			    .detail("Tag", data->tag.toString());
-
-			while (!data->recoveryVersionSkips.empty() &&
-			       proposedOldestVersion > data->recoveryVersionSkips.front().first) {
-				data->recoveryVersionSkips.pop_front();
-			}
-			data->desiredOldestVersion.set(proposedOldestVersion);
-		}
-
-		validate(data);
-
-		if ((data->lastTLogVersion - data->version.get()) < SERVER_KNOBS->STORAGE_RECOVERY_VERSION_LAG_LIMIT) {
-			if (data->registerInterfaceAcceptingRequests.canBeSet()) {
-				data->registerInterfaceAcceptingRequests.send(Void());
-				ErrorOr<Void> e = wait(errorOr(data->interfaceRegistered));
-				if (e.isError()) {
-					TraceEvent(SevWarn, "StorageInterfaceRegistrationFailed", data->thisServerID).error(e.getError());
-					throw e.getError();
+						updater.applyMutation(data, msg, ver, false);
+						mutationBytes += msg.totalSize();
+						data->counters.mutationBytes += msg.totalSize();
+						data->counters.logicalBytesInput += msg.expectedSize();
+						++data->counters.mutations;
+						switch (msg.type) {
+						case MutationRef::SetValue:
+							++data->counters.setMutations;
+							break;
+						case MutationRef::ClearRange:
+							++data->counters.clearRangeMutations;
+							break;
+						case MutationRef::AddValue:
+						case MutationRef::And:
+						case MutationRef::AndV2:
+						case MutationRef::AppendIfFits:
+						case MutationRef::ByteMax:
+						case MutationRef::ByteMin:
+						case MutationRef::Max:
+						case MutationRef::Min:
+						case MutationRef::MinV2:
+						case MutationRef::Or:
+						case MutationRef::Xor:
+						case MutationRef::CompareAndClear:
+							++data->counters.atomicMutations;
+							break;
+						}
+					} else
+						TraceEvent(SevError, "DiscardingPeekedData", data->thisServerID)
+						    .detail("Mutation", msg)
+						    .detail("Version", cloneCursor2->version().toString());
 				}
 			}
-		}
 
-		data->logCursor->advanceTo(cloneCursor2->version());
-		if (cursor->version().version >= data->lastTLogVersion) {
-			if (data->behind) {
-				TraceEvent("StorageServerNoLongerBehind", data->thisServerID)
-				    .detail("CursorVersion", cursor->version().version)
-				    .detail("TLogVersion", data->lastTLogVersion);
+			if (data->acsValidator != nullptr) {
+				data->acsValidator->clearCache(data->thisServerID, data->tag, data->version.get());
 			}
-			data->behind = false;
-		}
-		const double duration = g_network->timer() - updateStart;
-		data->counters.updateLatencySample->addMeasurement(duration);
 
-		return Void(); // update will get called again ASAP
-	} catch (Error& err) {
-		state Error e = err;
-		if (e.code() != error_code_worker_removed && e.code() != error_code_please_reboot) {
-			TraceEvent(SevError, "SSUpdateError", data->thisServerID).error(e).backtrace();
-		} else if (e.code() == error_code_please_reboot) {
-			wait(data->durableInProgress);
+			data->tLogMsgsPTreeUpdatesLatencyHistogram->sampleSeconds(now() - beforeTLogMsgsUpdates);
+
+			if (ver != invalidVersion) {
+				data->lastVersionWithData = ver;
+			}
+			ver = cloneCursor2->version().version - 1;
+
+			if (injectedChanges)
+				data->lastVersionWithData = ver;
+
+			data->updateEagerReads = nullptr;
+			data->debug_inApplyUpdate = false;
+
+			if (ver == invalidVersion && !fii.changes.empty()) {
+				ver = updater.currentVersion;
+			}
+
+			if (ver != invalidVersion && ver > data->version.get()) {
+				// TODO(alexmiller): Update to version tracking.
+				// DEBUG_KEY_RANGE("SSUpdate", ver, KeyRangeRef());
+
+				data->mutableData().createNewVersion(ver);
+				if (data->otherError.getFuture().isReady())
+					data->otherError.getFuture().get();
+
+				data->counters.fetchedVersions += (ver - data->version.get());
+				++data->counters.fetchesFromLogs;
+				Optional<UID> curSourceTLogID = cursor->getCurrentPeekLocation();
+
+				if (curSourceTLogID != data->sourceTLogID) {
+					data->sourceTLogID = curSourceTLogID;
+
+					TraceEvent("StorageServerSourceTLogID", data->thisServerID)
+					    .detail("SourceTLogID",
+					            data->sourceTLogID.present() ? data->sourceTLogID.get().toString() : "unknown")
+					    .trackLatest(data->storageServerSourceTLogIDEventHolder->trackingKey);
+				}
+
+				data->noRecentUpdates.set(false);
+				data->lastUpdate = now();
+
+				data->prevVersion = data->version.get();
+				data->version.set(ver); // Triggers replies to waiting gets for new version(s)
+
+				setDataVersion(data->thisServerID, data->version.get());
+				if (data->otherError.getFuture().isReady())
+					data->otherError.getFuture().get();
+
+				Version maxVersionsInMemory = (g_network->isSimulated() && g_simulator->speedUpSimulation)
+				                                  ? std::max(5 * SERVER_KNOBS->VERSIONS_PER_SECOND,
+				                                             SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)
+				                                  : SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
+				for (int i = 0; i < data->recoveryVersionSkips.size(); i++) {
+					maxVersionsInMemory += data->recoveryVersionSkips[i].second;
+				}
+
+				// Trigger updateStorage if necessary
+				Version proposedOldestVersion =
+				    std::max(data->version.get(), cursor->getMinKnownCommittedVersion()) - maxVersionsInMemory;
+				if (data->primaryLocality == tagLocalitySpecial || data->tag.locality == data->primaryLocality) {
+					proposedOldestVersion =
+					    std::max(proposedOldestVersion, data->lastTLogVersion - maxVersionsInMemory);
+				}
+				proposedOldestVersion = std::min(proposedOldestVersion, data->version.get() - 1);
+				proposedOldestVersion = std::max(proposedOldestVersion, data->oldestVersion.get());
+				proposedOldestVersion = std::max(proposedOldestVersion, data->desiredOldestVersion.get());
+				proposedOldestVersion = std::max(proposedOldestVersion, data->initialClusterVersion);
+
+				DisabledTraceEvent("StorageServerUpdated", data->thisServerID)
+				    .detail("Ver", ver)
+				    .detail("DataVersion", data->version.get())
+				    .detail("LastTLogVersion", data->lastTLogVersion)
+				    .detail("NewOldest", data->oldestVersion.get())
+				    .detail("DesiredOldest", data->desiredOldestVersion.get())
+				    .detail("MinKCV", cursor->getMinKnownCommittedVersion())
+				    .detail("MaxVersionInMemory", maxVersionsInMemory)
+				    .detail("Proposed", proposedOldestVersion)
+				    .detail("PrimaryLocality", data->primaryLocality)
+				    .detail("Tag", data->tag.toString());
+
+				while (!data->recoveryVersionSkips.empty() &&
+				       proposedOldestVersion > data->recoveryVersionSkips.front().first) {
+					data->recoveryVersionSkips.pop_front();
+				}
+				data->desiredOldestVersion.set(proposedOldestVersion);
+			}
+
+			validate(data);
+
+			if ((data->lastTLogVersion - data->version.get()) < SERVER_KNOBS->STORAGE_RECOVERY_VERSION_LAG_LIMIT) {
+				if (data->registerInterfaceAcceptingRequests.canBeSet()) {
+					data->registerInterfaceAcceptingRequests.send(Void());
+					ErrorOr<Void> e = co_await errorOr(data->interfaceRegistered);
+					if (e.isError()) {
+						TraceEvent(SevWarn, "StorageInterfaceRegistrationFailed", data->thisServerID)
+						    .error(e.getError());
+						throw e.getError();
+					}
+				}
+			}
+
+			data->logCursor->advanceTo(cloneCursor2->version());
+			if (cursor->version().version >= data->lastTLogVersion) {
+				if (data->behind) {
+					TraceEvent("StorageServerNoLongerBehind", data->thisServerID)
+					    .detail("CursorVersion", cursor->version().version)
+					    .detail("TLogVersion", data->lastTLogVersion);
+				}
+				data->behind = false;
+			}
+			const double duration = g_network->timer() - updateStart;
+			data->counters.updateLatencySample->addMeasurement(duration);
+
+			co_return; // update will get called again ASAP
+		} catch (Error& e) {
+			err = e;
 		}
-		throw e;
+		if (err.code() != error_code_worker_removed && err.code() != error_code_please_reboot) {
+			TraceEvent(SevError, "SSUpdateError", data->thisServerID).error(err).backtrace();
+		} else if (err.code() == error_code_please_reboot) {
+			co_await data->durableInProgress;
+		}
+		throw err;
 	}
 }
 
-ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* data,
-                                                              CheckpointMetaData metaData,
-                                                              std::string bytesSampleFile) {
-	state int failureCount = 0;
-	state std::unique_ptr<IRocksDBSstFileWriter> sstWriter;
-	state int64_t numGetRangeQueries;
-	state int64_t numSampledKeys;
-	state std::vector<KeyRange>::iterator metaDataRangesIter;
-	state Key readBegin;
-	state Key readEnd;
-	state bool anyFileCreated;
+Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* data,
+                                                        CheckpointMetaData metaData,
+                                                        std::string bytesSampleFile) {
+	int failureCount = 0;
+	std::unique_ptr<IRocksDBSstFileWriter> sstWriter;
+	int64_t numGetRangeQueries{ 0 };
+	int64_t numSampledKeys{ 0 };
+	std::vector<KeyRange>::iterator metaDataRangesIter;
+	Key readBegin;
+	Key readEnd;
+	bool anyFileCreated{ false };
 	TraceEvent(SevDebug, "CheckpointbytesSampleBegin", data->thisServerID).detail("Checkpoint", metaData.toString());
 
-	loop {
-		try {
-			// Any failure leads to retry until retryCount reaches maximum
-			// For each retry, cleanup the bytesSampleFile created in last time
-			ASSERT(directoryExists(parentDirectory(bytesSampleFile)));
-			if (fileExists(abspath(bytesSampleFile))) {
-				deleteFile(abspath(bytesSampleFile));
-			}
-			anyFileCreated = false;
-			sstWriter = newRocksDBSstFileWriter();
-			sstWriter->open(bytesSampleFile);
-			if (sstWriter == nullptr) {
-				break;
-			}
-			ASSERT(metaData.ranges.size() > 0);
-			std::sort(metaData.ranges.begin(), metaData.ranges.end(), [](KeyRange a, KeyRange b) {
-				// Debug usage: make sure no overlapping between compared two ranges
-				/* if (a.begin < b.begin) {
-				    ASSERT(a.end <= b.begin);
-				} else if (a.begin > b.begin) {
-				    ASSERT(a.end >= b.begin);
-				} else {
-				    ASSERT(false);
-				} */
-				// metaData.ranges must be in ascending order
-				// sstWriter requires written keys to be in ascending order
-				return a.begin < b.begin;
-			});
+	while (true) {
+		{
+			Error err;
+			try {
+				// Any failure leads to retry until retryCount reaches maximum
+				// For each retry, cleanup the bytesSampleFile created in last time
+				ASSERT(directoryExists(parentDirectory(bytesSampleFile)));
+				if (fileExists(abspath(bytesSampleFile))) {
+					deleteFile(abspath(bytesSampleFile));
+				}
+				anyFileCreated = false;
+				sstWriter = newRocksDBSstFileWriter();
+				sstWriter->open(bytesSampleFile);
+				if (sstWriter == nullptr) {
+					break;
+				}
+				ASSERT(metaData.ranges.size() > 0);
+				std::sort(metaData.ranges.begin(), metaData.ranges.end(), [](KeyRange a, KeyRange b) {
+					// Debug usage: make sure no overlapping between compared two ranges
+					/* if (a.begin < b.begin) {
+					    ASSERT(a.end <= b.begin);
+					} else if (a.begin > b.begin) {
+					    ASSERT(a.end >= b.begin);
+					} else {
+					    ASSERT(false);
+					} */
+					// metaData.ranges must be in ascending order
+					// sstWriter requires written keys to be in ascending order
+					return a.begin < b.begin;
+				});
 
-			numGetRangeQueries = 0;
-			numSampledKeys = 0;
-			metaDataRangesIter = metaData.ranges.begin();
-			while (metaDataRangesIter != metaData.ranges.end()) {
-				KeyRange range = *metaDataRangesIter;
-				readBegin = range.begin.withPrefix(persistByteSampleKeys.begin);
-				readEnd = range.end.withPrefix(persistByteSampleKeys.begin);
-				loop {
-					try {
-						RangeResult readResult = wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd),
-						                                                      SERVER_KNOBS->STORAGE_LIMIT_BYTES,
-						                                                      SERVER_KNOBS->STORAGE_LIMIT_BYTES));
-						numGetRangeQueries++;
-						for (int i = 0; i < readResult.size(); i++) {
-							ASSERT(!readResult[i].key.empty() && !readResult[i].value.empty());
-							int64_t size = BinaryReader::fromStringRef<int64_t>(readResult[i].value, Unversioned());
-							KeyRef key = readResult[i].key.removePrefix(persistByteSampleKeys.begin);
-							TraceEvent(SevDebug, "CheckpointbytesSampleKey", data->thisServerID)
-							    // .setMaxFieldLength(10000)
-							    .detail("Checkpoint", metaData.toString())
-							    .detail("SampleKey", key)
-							    .detail("Size", size);
-							sstWriter->write(readResult[i].key, readResult[i].value);
-							numSampledKeys++;
-						}
-						if (readResult.more) {
-							readBegin = readResult.getReadThrough();
-							ASSERT(readBegin <= readEnd);
-						} else {
-							break; // finish for current metaDataRangesIter
-						}
-					} catch (Error& e) {
-						if (failureCount < SERVER_KNOBS->ROCKSDB_CREATE_BYTES_SAMPLE_FILE_RETRY_MAX) {
-							throw retry(); // retry from sketch
-						} else {
-							throw e;
+				numGetRangeQueries = 0;
+				numSampledKeys = 0;
+				metaDataRangesIter = metaData.ranges.begin();
+				while (metaDataRangesIter != metaData.ranges.end()) {
+					KeyRange range = *metaDataRangesIter;
+					readBegin = range.begin.withPrefix(persistByteSampleKeys.begin);
+					readEnd = range.end.withPrefix(persistByteSampleKeys.begin);
+					while (true) {
+						try {
+							RangeResult readResult =
+							    co_await data->storage.readRange(KeyRangeRef(readBegin, readEnd),
+							                                     SERVER_KNOBS->STORAGE_LIMIT_BYTES,
+							                                     SERVER_KNOBS->STORAGE_LIMIT_BYTES);
+							numGetRangeQueries++;
+							for (int i = 0; i < readResult.size(); i++) {
+								ASSERT(!readResult[i].key.empty() && !readResult[i].value.empty());
+								int64_t size = BinaryReader::fromStringRef<int64_t>(readResult[i].value, Unversioned());
+								KeyRef key = readResult[i].key.removePrefix(persistByteSampleKeys.begin);
+								TraceEvent(SevDebug, "CheckpointbytesSampleKey", data->thisServerID)
+								    // .setMaxFieldLength(10000)
+								    .detail("Checkpoint", metaData.toString())
+								    .detail("SampleKey", key)
+								    .detail("Size", size);
+								sstWriter->write(readResult[i].key, readResult[i].value);
+								numSampledKeys++;
+							}
+							if (readResult.more) {
+								readBegin = readResult.getReadThrough();
+								ASSERT(readBegin <= readEnd);
+							} else {
+								break; // finish for current metaDataRangesIter
+							}
+						} catch (Error& e) {
+							if (failureCount < SERVER_KNOBS->ROCKSDB_CREATE_BYTES_SAMPLE_FILE_RETRY_MAX) {
+								throw retry(); // retry from sketch
+							} else {
+								throw e;
+							}
 						}
 					}
+					metaDataRangesIter++;
 				}
-				metaDataRangesIter++;
-			}
-			anyFileCreated = sstWriter->finish();
-			ASSERT((numSampledKeys > 0 && anyFileCreated) || (numSampledKeys == 0 && !anyFileCreated));
-			TraceEvent(SevDebug, "DumpCheckPointMetaData", data->thisServerID)
-			    .detail("NumSampledKeys", numSampledKeys)
-			    .detail("NumGetRangeQueries", numGetRangeQueries)
-			    .detail("CheckpointID", metaData.checkpointID.toString())
-			    .detail("BytesSampleTempFile", anyFileCreated ? bytesSampleFile : "noFileCreated");
-			break;
+				anyFileCreated = sstWriter->finish();
+				ASSERT((numSampledKeys > 0 && anyFileCreated) || (numSampledKeys == 0 && !anyFileCreated));
+				TraceEvent(SevDebug, "DumpCheckPointMetaData", data->thisServerID)
+				    .detail("NumSampledKeys", numSampledKeys)
+				    .detail("NumGetRangeQueries", numGetRangeQueries)
+				    .detail("CheckpointID", metaData.checkpointID.toString())
+				    .detail("BytesSampleTempFile", anyFileCreated ? bytesSampleFile : "noFileCreated");
+				break;
 
-		} catch (Error& e) {
-			if (e.code() == error_code_retry) {
-				wait(delay(0.5));
+			} catch (Error& e) {
+				err = e;
+			}
+			if (err.code() == error_code_retry) {
+				co_await delay(0.5);
 				failureCount++;
 				continue;
 			} else {
 				TraceEvent(SevDebug, "StorageCreateCheckpointMetaDataSstFileDumpedFailure", data->thisServerID)
 				    .detail("PendingCheckpoint", metaData.toString())
-				    .detail("Error", e.name());
-				throw e;
+				    .detail("Error", err.name());
+				throw err;
 			}
 		}
 	}
 
-	return anyFileCreated;
+	co_return anyFileCreated;
 }
 
 Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData metaData) {
@@ -10837,21 +10841,19 @@ void StorageServerDisk::changeLogProtocol(Version version, ProtocolVersion proto
 	    MutationRef(MutationRef::SetValue, persistLogProtocol, BinaryWriter::toValue(protocol, Unversioned())));
 }
 
-ACTOR Future<Void> applyByteSampleResult(StorageServer* data,
-                                         IKeyValueStore* storage,
-                                         Key begin,
-                                         Key end,
-                                         std::vector<Standalone<VectorRef<KeyValueRef>>>* results = nullptr) {
-	state int totalFetches = 0;
-	state int totalKeys = 0;
-	state int totalBytes = 0;
-	state ReadOptions readOptions(ReadType::NORMAL, CacheResult::False);
+Future<Void> applyByteSampleResult(StorageServer* data,
+                                   IKeyValueStore* storage,
+                                   Key begin,
+                                   Key end,
+                                   std::vector<Standalone<VectorRef<KeyValueRef>>>* results = nullptr) {
+	int totalFetches = 0;
+	int totalKeys = 0;
+	int totalBytes = 0;
+	ReadOptions readOptions(ReadType::NORMAL, CacheResult::False);
 
-	loop {
-		RangeResult bs = wait(storage->readRange(KeyRangeRef(begin, end),
-		                                         SERVER_KNOBS->STORAGE_LIMIT_BYTES,
-		                                         SERVER_KNOBS->STORAGE_LIMIT_BYTES,
-		                                         readOptions));
+	while (true) {
+		RangeResult bs = co_await storage->readRange(
+		    KeyRangeRef(begin, end), SERVER_KNOBS->STORAGE_LIMIT_BYTES, SERVER_KNOBS->STORAGE_LIMIT_BYTES, readOptions);
 		if (results) {
 			results->push_back(bs.castTo<VectorRef<KeyValueRef>>());
 			data->bytesRestored += bs.logicalSize();
@@ -10890,7 +10892,7 @@ ACTOR Future<Void> applyByteSampleResult(StorageServer* data,
 		}
 
 		if (!results) {
-			wait(delay(SERVER_KNOBS->BYTE_SAMPLE_LOAD_DELAY));
+			co_await delay(SERVER_KNOBS->BYTE_SAMPLE_LOAD_DELAY);
 		}
 	}
 	TraceEvent("RecoveredByteSampleRange", data->thisServerID)
@@ -10899,19 +10901,18 @@ ACTOR Future<Void> applyByteSampleResult(StorageServer* data,
 	    .detail("Fetches", totalFetches)
 	    .detail("Keys", totalKeys)
 	    .detail("ReadBytes", totalBytes);
-	return Void();
 }
 
-ACTOR Future<Void> restoreByteSample(StorageServer* data,
-                                     IKeyValueStore* storage,
-                                     Promise<Void> byteSampleSampleRecovered,
-                                     Future<Void> startRestore) {
-	state std::vector<Standalone<VectorRef<KeyValueRef>>> byteSampleSample;
-	wait(applyByteSampleResult(
-	    data, storage, persistByteSampleSampleKeys.begin, persistByteSampleSampleKeys.end, &byteSampleSample));
+Future<Void> restoreByteSample(StorageServer* data,
+                               IKeyValueStore* storage,
+                               Promise<Void> byteSampleSampleRecovered,
+                               Future<Void> startRestore) {
+	std::vector<Standalone<VectorRef<KeyValueRef>>> byteSampleSample;
+	co_await applyByteSampleResult(
+	    data, storage, persistByteSampleSampleKeys.begin, persistByteSampleSampleKeys.end, &byteSampleSample);
 	byteSampleSampleRecovered.send(Void());
-	wait(startRestore);
-	wait(delay(SERVER_KNOBS->BYTE_SAMPLE_START_DELAY));
+	co_await startRestore;
+	co_await delay(SERVER_KNOBS->BYTE_SAMPLE_START_DELAY);
 
 	size_t bytes_per_fetch = 0;
 	// Since the expected size also includes (as of now) the space overhead of the container, we calculate our own
@@ -10923,7 +10924,7 @@ ACTOR Future<Void> restoreByteSample(StorageServer* data,
 	}
 	bytes_per_fetch = (bytes_per_fetch / SERVER_KNOBS->BYTE_SAMPLE_LOAD_PARALLELISM) + 1;
 
-	state std::vector<Future<Void>> sampleRanges;
+	std::vector<Future<Void>> sampleRanges;
 	int accumulatedSize = 0;
 	Key lastStart =
 	    persistByteSampleKeys.begin; // make sure the first range starts at the absolute beginning of the byte sample
@@ -10941,50 +10942,48 @@ ACTOR Future<Void> restoreByteSample(StorageServer* data,
 	// make sure that the last range goes all the way to the end of the byte sample
 	sampleRanges.push_back(applyByteSampleResult(data, storage, lastStart, persistByteSampleKeys.end));
 
-	wait(waitForAll(sampleRanges));
+	co_await waitForAll(sampleRanges);
 	TraceEvent("RecoveredByteSampleChunkedRead", data->thisServerID).detail("Ranges", sampleRanges.size());
 
 	if (BUGGIFY)
-		wait(delay(deterministicRandom()->random01() * 10.0));
-
-	return Void();
+		co_await delay(deterministicRandom()->random01() * 10.0);
 }
 
-ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* storage) {
-	state Future<Optional<Value>> fFormat = storage->readValue(persistFormat.key);
-	state Future<Optional<Value>> fID = storage->readValue(persistID);
-	state Future<Optional<Value>> ftssPairID = storage->readValue(persistTssPairID);
-	state Future<Optional<Value>> fssPairID = storage->readValue(persistSSPairID);
-	state Future<Optional<Value>> fTssQuarantine = storage->readValue(persistTssQuarantine);
-	state Future<Optional<Value>> fVersion = storage->readValue(persistVersion);
-	state Future<Optional<Value>> fLogProtocol = storage->readValue(persistLogProtocol);
-	state Future<Optional<Value>> fPrimaryLocality = storage->readValue(persistPrimaryLocality);
-	state Future<RangeResult> fShardAssigned = storage->readRange(persistShardAssignedKeys);
-	state Future<RangeResult> fShardAvailable = storage->readRange(persistShardAvailableKeys);
-	state Future<RangeResult> fPendingCheckpoints = storage->readRange(persistPendingCheckpointKeys);
-	state Future<RangeResult> fCheckpoints = storage->readRange(persistCheckpointKeys);
-	state Future<RangeResult> fMoveInShards = storage->readRange(persistMoveInShardsKeyRange());
-	state Future<RangeResult> fStorageShards = storage->readRange(persistStorageServerShardKeys);
-	state Future<RangeResult> fAccumulativeChecksum = storage->readRange(persistAccumulativeChecksumKeys);
-	state Future<RangeResult> fBulkLoadTask = storage->readRange(persistBulkLoadTaskKeys);
+Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* storage) {
+	Future<Optional<Value>> fFormat = storage->readValue(persistFormat.key);
+	Future<Optional<Value>> fID = storage->readValue(persistID);
+	Future<Optional<Value>> ftssPairID = storage->readValue(persistTssPairID);
+	Future<Optional<Value>> fssPairID = storage->readValue(persistSSPairID);
+	Future<Optional<Value>> fTssQuarantine = storage->readValue(persistTssQuarantine);
+	Future<Optional<Value>> fVersion = storage->readValue(persistVersion);
+	Future<Optional<Value>> fLogProtocol = storage->readValue(persistLogProtocol);
+	Future<Optional<Value>> fPrimaryLocality = storage->readValue(persistPrimaryLocality);
+	Future<RangeResult> fShardAssigned = storage->readRange(persistShardAssignedKeys);
+	Future<RangeResult> fShardAvailable = storage->readRange(persistShardAvailableKeys);
+	Future<RangeResult> fPendingCheckpoints = storage->readRange(persistPendingCheckpointKeys);
+	Future<RangeResult> fCheckpoints = storage->readRange(persistCheckpointKeys);
+	Future<RangeResult> fMoveInShards = storage->readRange(persistMoveInShardsKeyRange());
+	Future<RangeResult> fStorageShards = storage->readRange(persistStorageServerShardKeys);
+	Future<RangeResult> fAccumulativeChecksum = storage->readRange(persistAccumulativeChecksumKeys);
+	Future<RangeResult> fBulkLoadTask = storage->readRange(persistBulkLoadTaskKeys);
 
-	state Promise<Void> byteSampleSampleRecovered;
-	state Promise<Void> startByteSampleRestore;
+	Promise<Void> byteSampleSampleRecovered;
+	Promise<Void> startByteSampleRestore;
 	data->byteSampleRecovery =
 	    restoreByteSample(data, storage, byteSampleSampleRecovered, startByteSampleRestore.getFuture());
 
 	TraceEvent("ReadingDurableState", data->thisServerID).log();
-	wait(waitForAll(
-	    std::vector{ fFormat, fID, ftssPairID, fssPairID, fTssQuarantine, fVersion, fLogProtocol, fPrimaryLocality }));
-	wait(waitForAll(std::vector{ fShardAssigned,
-	                             fShardAvailable,
-	                             fPendingCheckpoints,
-	                             fCheckpoints,
-	                             fMoveInShards,
-	                             fStorageShards,
-	                             fAccumulativeChecksum,
-	                             fBulkLoadTask }));
-	wait(byteSampleSampleRecovered.getFuture());
+	co_await waitForAll(
+	    std::vector{ fFormat, fID, ftssPairID, fssPairID, fTssQuarantine, fVersion, fLogProtocol, fPrimaryLocality });
+	co_await waitForAll(std::vector{ fShardAssigned,
+	                                 fShardAvailable,
+	                                 fPendingCheckpoints,
+	                                 fCheckpoints,
+	                                 fMoveInShards,
+	                                 fStorageShards,
+	                                 fAccumulativeChecksum,
+	                                 fBulkLoadTask });
+	co_await byteSampleSampleRecovered.getFuture();
 	TraceEvent("RestoringDurableState", data->thisServerID).log();
 
 	if (!fFormat.get().present()) {
@@ -10994,7 +10993,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		storage->dispose();
 		data->thisServerID = UID();
 		data->sk = Key();
-		return false;
+		co_return false;
 	} else {
 		TraceEvent(SevVerbose, "RestoringStorageServerWithPhysicalShards", data->thisServerID).log();
 		data->shardAware = fFormat.get().get() == persistShardAwareFormat.value;
@@ -11040,35 +11039,35 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		data->bytesRestored += fPrimaryLocality.get().expectedSize();
 	}
 
-	state Version version = BinaryReader::fromStringRef<Version>(fVersion.get().get(), Unversioned());
+	Version version = BinaryReader::fromStringRef<Version>(fVersion.get().get(), Unversioned());
 	debug_checkRestoredVersion(data->thisServerID, version, "StorageServer");
 	data->setInitialVersion(version);
 	data->bytesRestored += fVersion.get().expectedSize();
 
 	TraceEvent(SevInfo, "StorageServerRestoreVersion", data->thisServerID).detail("Version", version);
 
-	state RangeResult pendingCheckpoints = fPendingCheckpoints.get();
-	state int pCLoc;
+	RangeResult pendingCheckpoints = fPendingCheckpoints.get();
+	int pCLoc{ 0 };
 	for (pCLoc = 0; pCLoc < pendingCheckpoints.size(); ++pCLoc) {
 		CheckpointMetaData metaData = decodeCheckpointValue(pendingCheckpoints[pCLoc].value);
 		data->pendingCheckpoints[metaData.version].push_back(metaData);
-		wait(yield());
+		co_await yield();
 	}
 
-	state RangeResult checkpoints = fCheckpoints.get();
-	state int cLoc;
+	RangeResult checkpoints = fCheckpoints.get();
+	int cLoc{ 0 };
 	for (cLoc = 0; cLoc < checkpoints.size(); ++cLoc) {
 		CheckpointMetaData metaData = decodeCheckpointValue(checkpoints[cLoc].value);
 		data->checkpoints[metaData.checkpointID] = metaData;
 		if (metaData.getState() == CheckpointMetaData::Deleting) {
 			data->actors.add(deleteCheckpointQ(data, version, metaData));
 		}
-		wait(yield());
+		co_await yield();
 	}
 
-	state RangeResult available = fShardAvailable.get();
+	RangeResult available = fShardAvailable.get();
 	data->bytesRestored += available.logicalSize();
-	state int availableLoc;
+	int availableLoc{ 0 };
 	for (availableLoc = 0; availableLoc < available.size(); availableLoc++) {
 		KeyRangeRef keys(available[availableLoc].key.removePrefix(persistShardAvailableKeys.begin),
 		                 availableLoc + 1 == available.size()
@@ -11080,7 +11079,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		/*if(nowAvailable)
 		TraceEvent("AvailableShard", data->thisServerID).detail("RangeBegin", keys.begin).detail("RangeEnd", keys.end);*/
 		data->newestAvailableVersion.insert(keys, nowAvailable ? latestVersion : invalidVersion);
-		wait(yield());
+		co_await yield();
 	}
 
 	// Restore acs validator from persisted disk
@@ -11095,9 +11094,9 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		}
 	}
 
-	state KeyRangeMap<Optional<UID>> bulkLoadTaskRangeMap; // store dataMoveId on ranges with active bulkload tasks
+	KeyRangeMap<Optional<UID>> bulkLoadTaskRangeMap; // store dataMoveId on ranges with active bulkload tasks
 	bulkLoadTaskRangeMap.insert(allKeys, Optional<UID>());
-	state RangeResult bulkLoadTasks = fBulkLoadTask.get();
+	RangeResult bulkLoadTasks = fBulkLoadTask.get();
 	TraceEvent(SevDebug, "SSRecoveryBulkLoadTasksRead", data->thisServerID)
 	    .detail("TaskCount", bulkLoadTasks.size())
 	    .detail("TasksSize", bulkLoadTasks.expectedSize());
@@ -11128,14 +11127,14 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	// BulkLoadTaskRangeMap range boundary is aligned to the shard assignment boundary, because we persist the bulkload
 	// task metadata and the shard assignment metadata at the same version with the same shard boundary.
 
-	state RangeResult assigned = fShardAssigned.get();
+	RangeResult assigned = fShardAssigned.get();
 	data->bytesRestored += assigned.logicalSize();
 	data->bytesRestored += fStorageShards.get().logicalSize();
 	data->bytesRestored += fMoveInShards.get().logicalSize();
-	state int assignedLoc;
+	int assignedLoc{ 0 };
 	if (data->shardAware) {
 		// TODO(psm): Avoid copying RangeResult around.
-		wait(restoreShards(data, version, fStorageShards.get(), fMoveInShards.get(), assigned, available));
+		co_await restoreShards(data, version, fStorageShards.get(), fMoveInShards.get(), assigned, available);
 	} else {
 		for (assignedLoc = 0; assignedLoc < assigned.size(); assignedLoc++) {
 			KeyRangeRef keys(assigned[assignedLoc].key.removePrefix(persistShardAssignedKeys.begin),
@@ -11233,7 +11232,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 
 			if (!nowAssigned)
 				ASSERT(data->newestAvailableVersion.allEqual(keys, invalidVersion));
-			wait(yield());
+			co_await yield();
 		}
 	}
 
@@ -11245,7 +11244,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	// know" or "isn't really sure there is a good answer" or "author
 	// doesn't know what they are doing".  It looks bad any way you
 	// look at it.
-	wait(delay(0.0001));
+	co_await delay(0.0001);
 
 	if (!data->shardAware) {
 		// Erase data which isn't available (it is from some fetch at a later version)
@@ -11267,7 +11266,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	validate(data, true);
 	startByteSampleRestore.send(Void());
 
-	return true;
+	co_return true;
 }
 
 Future<bool> StorageServerDisk::restoreDurableState() {
@@ -11510,10 +11509,10 @@ Future<Void> checkBehind(StorageServer* self) {
 	}
 }
 
-ACTOR Future<Void> serveGetValueRequests(StorageServer* self, FutureStream<GetValueRequest> getValue) {
+Future<Void> serveGetValueRequests(StorageServer* self, FutureStream<GetValueRequest> getValue) {
 	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetValue;
-	loop {
-		GetValueRequest req = waitNext(getValue);
+	while (true) {
+		GetValueRequest req = co_await getValue;
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
 		// downgrade before doing real work
 		if (req.options.present() && req.options.get().debugID.present())
@@ -11528,10 +11527,10 @@ ACTOR Future<Void> serveGetValueRequests(StorageServer* self, FutureStream<GetVa
 	}
 }
 
-ACTOR Future<Void> serveGetKeyValuesRequests(StorageServer* self, FutureStream<GetKeyValuesRequest> getKeyValues) {
+Future<Void> serveGetKeyValuesRequests(StorageServer* self, FutureStream<GetKeyValuesRequest> getKeyValues) {
 	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKeyValues;
-	loop {
-		GetKeyValuesRequest req = waitNext(getKeyValues);
+	while (true) {
+		GetKeyValuesRequest req = co_await getKeyValues;
 
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
 		// downgrade before doing real work
@@ -11539,12 +11538,12 @@ ACTOR Future<Void> serveGetKeyValuesRequests(StorageServer* self, FutureStream<G
 	}
 }
 
-ACTOR Future<Void> serveGetMappedKeyValuesRequests(StorageServer* self,
-                                                   FutureStream<GetMappedKeyValuesRequest> getMappedKeyValues) {
+Future<Void> serveGetMappedKeyValuesRequests(StorageServer* self,
+                                             FutureStream<GetMappedKeyValuesRequest> getMappedKeyValues) {
 	// TODO: Is it fine to keep TransactionLineage::Operation::GetKeyValues here?
 	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKeyValues;
-	loop {
-		GetMappedKeyValuesRequest req = waitNext(getMappedKeyValues);
+	while (true) {
+		GetMappedKeyValuesRequest req = co_await getMappedKeyValues;
 
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
 		// downgrade before doing real work
@@ -11552,10 +11551,10 @@ ACTOR Future<Void> serveGetMappedKeyValuesRequests(StorageServer* self,
 	}
 }
 
-ACTOR Future<Void> serveGetKeyValuesStreamRequests(StorageServer* self,
-                                                   FutureStream<GetKeyValuesStreamRequest> getKeyValuesStream) {
-	loop {
-		GetKeyValuesStreamRequest req = waitNext(getKeyValuesStream);
+Future<Void> serveGetKeyValuesStreamRequests(StorageServer* self,
+                                             FutureStream<GetKeyValuesStreamRequest> getKeyValuesStream) {
+	while (true) {
+		GetKeyValuesStreamRequest req = co_await getKeyValuesStream;
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
 		// downgrade before doing real work
 		// FIXME: add readGuard again
@@ -11563,41 +11562,40 @@ ACTOR Future<Void> serveGetKeyValuesStreamRequests(StorageServer* self,
 	}
 }
 
-ACTOR Future<Void> serveGetKeyRequests(StorageServer* self, FutureStream<GetKeyRequest> getKey) {
+Future<Void> serveGetKeyRequests(StorageServer* self, FutureStream<GetKeyRequest> getKey) {
 	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKey;
-	loop {
-		GetKeyRequest req = waitNext(getKey);
+	while (true) {
+		GetKeyRequest req = co_await getKey;
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
 		// downgrade before doing real work
 		self->actors.add(self->readGuard(req, getKeyQ));
 	}
 }
 
-ACTOR Future<Void> watchValueWaitForVersion(StorageServer* self,
-                                            WatchValueRequest req,
-                                            PromiseStream<WatchValueRequest> stream) {
-	state Span span("SS:watchValueWaitForVersion"_loc, req.spanContext);
+Future<Void> watchValueWaitForVersion(StorageServer* self,
+                                      WatchValueRequest req,
+                                      PromiseStream<WatchValueRequest> stream) {
+	Span span("SS:watchValueWaitForVersion"_loc, req.spanContext);
 
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 	try {
-		wait(success(waitForVersionNoTooOld(self, req.version)));
+		co_await success(waitForVersionNoTooOld(self, req.version));
 		stream.send(req);
 	} catch (Error& e) {
 		if (!canReplyWith(e))
 			throw e;
 		self->sendErrorWithPenalty(req.reply, e, self->getPenalty());
 	}
-	return Void();
 }
 
-ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream<WatchValueRequest> stream) {
-	loop {
+Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream<WatchValueRequest> stream) {
+	while (true) {
 		getCurrentLineage()->modify(&TransactionLineage::txID) = UID();
-		state WatchValueRequest req = waitNext(stream);
-		state Reference<ServerWatchMetadata> metadata = self->getWatchMetadata(req.key.contents());
-		state Span span("SS:serveWatchValueRequestsImpl"_loc, req.spanContext);
+		WatchValueRequest req = co_await stream;
+		Reference<ServerWatchMetadata> metadata = self->getWatchMetadata(req.key.contents());
+		Span span("SS:serveWatchValueRequestsImpl"_loc, req.spanContext);
 		getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
-		state ReadOptions options;
+		ReadOptions options;
 
 		// case 1: no watch set for the current key
 		if (!metadata.isValid()) {
@@ -11648,15 +11646,15 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 		// case 5: watch value differs but their versions are the same (rare case) so check with the SS
 		else {
 			CODE_PROBE(true, "watch version in the map is the same but value is different (case 5)");
-			loop {
+			while (true) {
 				try {
-					state Version latest = self->version.get();
+					Version latest = self->version.get();
 					options.debugID = metadata->debugID;
 
 					GetValueRequest getReq(
 					    span.context, metadata->key, latest, metadata->tags, options, VersionVector());
-					state Future<Void> getValue = getValueQ(self, getReq);
-					GetValueReply reply = wait(getReq.reply.getFuture());
+					Future<Void> getValue = getValueQ(self, getReq);
+					GetValueReply reply = co_await getReq.reply.getFuture();
 					metadata = self->getWatchMetadata(req.key.contents());
 
 					if (metadata.isValid() && reply.value != metadata->value) { // valSS != valMap
@@ -11692,13 +11690,13 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 	}
 }
 
-ACTOR Future<Void> serveWatchValueRequests(StorageServer* self, FutureStream<WatchValueRequest> watchValue) {
-	state PromiseStream<WatchValueRequest> stream;
+Future<Void> serveWatchValueRequests(StorageServer* self, FutureStream<WatchValueRequest> watchValue) {
+	PromiseStream<WatchValueRequest> stream;
 	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::WatchValue;
 	self->actors.add(serveWatchValueRequestsImpl(self, stream.getFuture()));
 
-	loop {
-		WatchValueRequest req = waitNext(watchValue);
+	while (true) {
+		WatchValueRequest req = co_await watchValue;
 		// TODO: fast load balancing?
 		if (self->shouldRead(req)) {
 			self->actors.add(watchValueWaitForVersion(self, req, stream));
@@ -11709,53 +11707,52 @@ ACTOR Future<Void> serveWatchValueRequests(StorageServer* self, FutureStream<Wat
 // Change feed related message handlers that exist but do nothing.
 // The reason for these existing is that we do not want to change the StorageServerInterface
 // to remove change feed related interfaces.  Figure out how to do that later.
-ACTOR Future<Void> serveChangeFeedStreamRequests(StorageServer* self,
-                                                 FutureStream<ChangeFeedStreamRequest> changeFeedStream) {
-	loop {
-		ChangeFeedStreamRequest req = waitNext(changeFeedStream);
+Future<Void> serveChangeFeedStreamRequests(StorageServer* self,
+                                           FutureStream<ChangeFeedStreamRequest> changeFeedStream) {
+	while (true) {
+		ChangeFeedStreamRequest req = co_await changeFeedStream;
 		TraceEvent(SevWarn, "serveChangeFeedStreamRequests").detail("Unexpected", "Invocation");
 	}
 }
 
-ACTOR Future<Void> serveOverlappingChangeFeedsRequests(
-    StorageServer* self,
-    FutureStream<OverlappingChangeFeedsRequest> overlappingChangeFeeds) {
-	loop {
-		OverlappingChangeFeedsRequest req = waitNext(overlappingChangeFeeds);
+Future<Void> serveOverlappingChangeFeedsRequests(StorageServer* self,
+                                                 FutureStream<OverlappingChangeFeedsRequest> overlappingChangeFeeds) {
+	while (true) {
+		OverlappingChangeFeedsRequest req = co_await overlappingChangeFeeds;
 		TraceEvent(SevWarn, "serveOverlappingChangeFeedsRequests").detail("Unexpected", "Invocation");
 	}
 }
 
-ACTOR Future<Void> serveChangeFeedPopRequests(StorageServer* self, FutureStream<ChangeFeedPopRequest> changeFeedPops) {
-	loop {
-		ChangeFeedPopRequest req = waitNext(changeFeedPops);
+Future<Void> serveChangeFeedPopRequests(StorageServer* self, FutureStream<ChangeFeedPopRequest> changeFeedPops) {
+	while (true) {
+		ChangeFeedPopRequest req = co_await changeFeedPops;
 		TraceEvent(SevWarn, "serveChangeFeedPopRequests").detail("Unexpected", "Invocation");
 	}
 }
 
-ACTOR Future<Void> serveChangeFeedVersionUpdateRequests(
+Future<Void> serveChangeFeedVersionUpdateRequests(
     StorageServer* self,
     FutureStream<ChangeFeedVersionUpdateRequest> changeFeedVersionUpdate) {
-	loop {
-		ChangeFeedVersionUpdateRequest req = waitNext(changeFeedVersionUpdate);
+	while (true) {
+		ChangeFeedVersionUpdateRequest req = co_await changeFeedVersionUpdate;
 		TraceEvent(SevWarn, "serveChangeFeedVersionUpdateRequests").detail("Unexpected", "Invocation");
 	}
 }
 
-ACTOR Future<Void> storageEngineConsistencyCheck(StorageServer* self) {
+Future<Void> storageEngineConsistencyCheck(StorageServer* self) {
 	if (SERVER_KNOBS->STORAGE_SHARD_CONSISTENCY_CHECK_INTERVAL <= 0.0) {
-		return Void();
+		co_return;
 	}
 
 	if (self->storage.getKeyValueStoreType() != KeyValueStoreType::SSD_SHARDED_ROCKSDB) {
-		return Void();
+		co_return;
 	}
 
-	loop {
-		wait(delay(SERVER_KNOBS->STORAGE_SHARD_CONSISTENCY_CHECK_INTERVAL));
+	while (true) {
+		co_await delay(SERVER_KNOBS->STORAGE_SHARD_CONSISTENCY_CHECK_INTERVAL);
 		// Only validate when storage server and storage engine are expected to have the same shard mapping.
 		while (self->pendingAddRanges.size() > 0 || self->pendingRemoveRanges.size() > 0) {
-			wait(delay(5.0));
+			co_await delay(5.0);
 		}
 
 		CoalescedKeyRangeMap<std::string> currentShards;
@@ -11814,13 +11811,13 @@ ACTOR Future<Void> storageEngineConsistencyCheck(StorageServer* self) {
 	}
 }
 
-ACTOR Future<Void> reportStorageServerState(StorageServer* self) {
+Future<Void> reportStorageServerState(StorageServer* self) {
 	if (!SERVER_KNOBS->REPORT_DD_METRICS) {
-		return Void();
+		co_return;
 	}
 
-	loop {
-		wait(delay(SERVER_KNOBS->DD_METRICS_REPORT_INTERVAL));
+	while (true) {
+		co_await delay(SERVER_KNOBS->DD_METRICS_REPORT_INTERVAL);
 
 		const auto numRunningFetchKeys = self->currentRunningFetchKeys.numRunning();
 		if (numRunningFetchKeys == 0) {
@@ -12104,39 +12101,45 @@ bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData
 		return false;
 }
 
-ACTOR Future<Void> memoryStoreRecover(IKeyValueStore* store, Reference<IClusterConnectionRecord> connRecord, UID id) {
+Future<Void> memoryStoreRecover(IKeyValueStore* store, Reference<IClusterConnectionRecord> connRecord, UID id) {
 	if (store->getType() != KeyValueStoreType::MEMORY || connRecord.getPtr() == nullptr) {
-		return Never();
+		co_await Future<Void>(Never());
+		co_return;
 	}
 
 	// create a temp client connect to DB
 	Database cx = Database::createDatabase(connRecord, ApiVersion::LATEST_VERSION);
 
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-	state int noCanRemoveCount = 0;
-	loop {
-		try {
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+	int noCanRemoveCount = 0;
+	while (true) {
+		{
+			Optional<Error> err;
+			try {
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-			state bool canRemove = wait(canRemoveStorageServer(tr, id));
-			if (!canRemove) {
-				CODE_PROBE(true,
-				           "it's possible that the caller had a transaction in flight that assigned keys to the "
-				           "server. Wait for it to reverse its mistake.");
-				wait(delayJittered(SERVER_KNOBS->REMOVE_RETRY_DELAY, TaskPriority::UpdateStorage));
-				tr->reset();
-				TraceEvent("RemoveStorageServerRetrying")
-				    .detail("Count", noCanRemoveCount++)
-				    .detail("ServerID", id)
-				    .detail("CanRemove", canRemove);
-			} else {
-				return Void();
+				bool canRemove = co_await canRemoveStorageServer(tr, id);
+				if (!canRemove) {
+					CODE_PROBE(true,
+					           "it's possible that the caller had a transaction in flight that assigned keys to the "
+					           "server. Wait for it to reverse its mistake.");
+					co_await delayJittered(SERVER_KNOBS->REMOVE_RETRY_DELAY, TaskPriority::UpdateStorage);
+					tr->reset();
+					TraceEvent("RemoveStorageServerRetrying")
+					    .detail("Count", noCanRemoveCount++)
+					    .detail("ServerID", id)
+					    .detail("CanRemove", canRemove);
+				} else {
+					co_return;
+				}
+			} catch (Error& e) {
+				err = e;
 			}
-		} catch (Error& e) {
-			state Error err = e;
-			wait(tr->onError(e));
-			TraceEvent("RemoveStorageServerRetrying").error(err);
+			if (err.present()) {
+				co_await tr->onError(err.get());
+				TraceEvent("RemoveStorageServerRetrying").error(err.get());
+			}
 		}
 	}
 }
@@ -12323,17 +12326,17 @@ Future<Void> rocksdbLogCleaner(std::string folder) {
 }
 
 // for creating a new storage server
-ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
-                                 StorageServerInterface ssi,
-                                 Tag seedTag,
-                                 Version startVersion,
-                                 Version tssSeedVersion,
-                                 ReplyPromise<InitializeStorageReply> recruitReply,
-                                 Reference<AsyncVar<ServerDBInfo> const> db,
-                                 std::string folder) {
-	state StorageServer self(persistentData, db, ssi);
+Future<Void> storageServer(IKeyValueStore* persistentData,
+                           StorageServerInterface ssi,
+                           Tag seedTag,
+                           Version startVersion,
+                           Version tssSeedVersion,
+                           ReplyPromise<InitializeStorageReply> recruitReply,
+                           Reference<AsyncVar<ServerDBInfo> const> db,
+                           std::string folder) {
+	StorageServer self(persistentData, db, ssi);
 	self.shardAware = persistentData->shardAware();
-	state Future<Void> ssCore;
+	Future<Void> ssCore;
 	self.initialClusterVersion = startVersion;
 	if (ssi.isTss()) {
 		self.setTssPair(ssi.tssPairID.get());
@@ -12354,78 +12357,82 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	self.bulkLoadFolder = joinPath(self.folder, serverBulkLoadFolder);
 	self.actors.add(rocksdbLogCleaner(folder));
 
-	try {
-		wait(self.storage.init());
-		TraceEvent("StorageServerInitProgress", ssi.id())
-		    .detail("EngineType", self.storage.getKeyValueStoreType().toString())
-		    .detail("Step", "5.StorageInited");
-		wait(self.storage.commit());
-		TraceEvent("StorageServerInitProgress", ssi.id())
-		    .detail("EngineType", self.storage.getKeyValueStoreType().toString())
-		    .detail("Step", "6.StorageCommitted");
-		++self.counters.kvCommits;
-
-		platform::createDirectory(self.checkpointFolder);
-		platform::createDirectory(self.fetchedCheckpointFolder);
-
-		clearFileFolder(self.bulkDumpFolder, self.thisServerID, /*ignoreError=*/false);
-		clearFileFolder(self.bulkLoadFolder, self.thisServerID, /*ignoreError=*/false);
-
-		if (seedTag == invalidTag) {
-			ssi.startAcceptingRequests();
-			self.registerInterfaceAcceptingRequests.send(Void());
-
-			// Might throw recruitment_failed in case of simultaneous master failure
-			std::pair<Version, Tag> verAndTag = wait(addStorageServer(self.cx, ssi));
+	{
+		Error err;
+		try {
+			co_await self.storage.init();
 			TraceEvent("StorageServerInitProgress", ssi.id())
 			    .detail("EngineType", self.storage.getKeyValueStoreType().toString())
-			    .detail("Step", "8.StorageServerAdded");
+			    .detail("Step", "5.StorageInited");
+			co_await self.storage.commit();
+			TraceEvent("StorageServerInitProgress", ssi.id())
+			    .detail("EngineType", self.storage.getKeyValueStoreType().toString())
+			    .detail("Step", "6.StorageCommitted");
+			++self.counters.kvCommits;
 
-			self.tag = verAndTag.second;
-			if (ssi.isTss()) {
-				self.setInitialVersion(tssSeedVersion);
+			platform::createDirectory(self.checkpointFolder);
+			platform::createDirectory(self.fetchedCheckpointFolder);
+
+			clearFileFolder(self.bulkDumpFolder, self.thisServerID, /*ignoreError=*/false);
+			clearFileFolder(self.bulkLoadFolder, self.thisServerID, /*ignoreError=*/false);
+
+			if (seedTag == invalidTag) {
+				ssi.startAcceptingRequests();
+				self.registerInterfaceAcceptingRequests.send(Void());
+
+				// Might throw recruitment_failed in case of simultaneous master failure
+				std::pair<Version, Tag> verAndTag = co_await addStorageServer(self.cx, ssi);
+				TraceEvent("StorageServerInitProgress", ssi.id())
+				    .detail("EngineType", self.storage.getKeyValueStoreType().toString())
+				    .detail("Step", "8.StorageServerAdded");
+
+				self.tag = verAndTag.second;
+				if (ssi.isTss()) {
+					self.setInitialVersion(tssSeedVersion);
+				} else {
+					self.setInitialVersion(verAndTag.first - 1);
+				}
+
+				TraceEvent("StorageServerInitProgress", ssi.id())
+				    .detail("EngineType", self.storage.getKeyValueStoreType().toString())
+				    // This is an intentionally useless detail to avoid renumbering things.
+				    .detail("Step", "9.SomeLinesOfCodeExecuted");
 			} else {
-				self.setInitialVersion(verAndTag.first - 1);
+				self.tag = seedTag;
 			}
 
+			self.storage.makeNewStorageServerDurable(self.shardAware);
+			co_await self.storage.commit();
 			TraceEvent("StorageServerInitProgress", ssi.id())
 			    .detail("EngineType", self.storage.getKeyValueStoreType().toString())
-			    // This is an intentionally useless detail to avoid renumbering things.
-			    .detail("Step", "9.SomeLinesOfCodeExecuted");
-		} else {
-			self.tag = seedTag;
+			    .detail("Step", "10.NewStorageServerDurable");
+			++self.counters.kvCommits;
+
+			self.interfaceRegistered =
+			    storageInterfaceRegistration(&self, ssi, self.registerInterfaceAcceptingRequests.getFuture());
+			co_await delay(0);
+
+			TraceEvent("StorageServerInit", ssi.id())
+			    .detail("EngineType", self.storage.getKeyValueStoreType().toString())
+			    .detail("Version", self.version.get())
+			    .detail("SeedTag", seedTag.toString())
+			    .detail("TssPair", ssi.isTss() ? ssi.tssPairID.get().toString() : "");
+			InitializeStorageReply rep;
+			rep.interf = ssi;
+			rep.addedVersion = self.version.get();
+			recruitReply.send(rep);
+			self.byteSampleRecovery = Void();
+			TraceEvent("StorageServerInitProgress", ssi.id())
+			    .detail("EngineType", self.storage.getKeyValueStoreType().toString())
+			    .detail("Step", "11.RecruitReplied");
+
+			ssCore = storageServerCore(&self, ssi);
+			co_await ssCore;
+
+			throw internal_error();
+		} catch (Error& e) {
+			err = e;
 		}
-
-		self.storage.makeNewStorageServerDurable(self.shardAware);
-		wait(self.storage.commit());
-		TraceEvent("StorageServerInitProgress", ssi.id())
-		    .detail("EngineType", self.storage.getKeyValueStoreType().toString())
-		    .detail("Step", "10.NewStorageServerDurable");
-		++self.counters.kvCommits;
-
-		self.interfaceRegistered =
-		    storageInterfaceRegistration(&self, ssi, self.registerInterfaceAcceptingRequests.getFuture());
-		wait(delay(0));
-
-		TraceEvent("StorageServerInit", ssi.id())
-		    .detail("EngineType", self.storage.getKeyValueStoreType().toString())
-		    .detail("Version", self.version.get())
-		    .detail("SeedTag", seedTag.toString())
-		    .detail("TssPair", ssi.isTss() ? ssi.tssPairID.get().toString() : "");
-		InitializeStorageReply rep;
-		rep.interf = ssi;
-		rep.addedVersion = self.version.get();
-		recruitReply.send(rep);
-		self.byteSampleRecovery = Void();
-		TraceEvent("StorageServerInitProgress", ssi.id())
-		    .detail("EngineType", self.storage.getKeyValueStoreType().toString())
-		    .detail("Step", "11.RecruitReplied");
-
-		ssCore = storageServerCore(&self, ssi);
-		wait(ssCore);
-
-		throw internal_error();
-	} catch (Error& e) {
 		// If we die with an error before replying to the recruitment request, send the error to the recruiter
 		// (ClusterController, and from there to the DataDistributionTeamCollection)
 		if (!recruitReply.isSet())
@@ -12438,16 +12445,15 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 		self.moveInShards.clear();
 
-		state Error err = e;
 		if (storageServerTerminated(self, persistentData, err)) {
 			ssCore.cancel();
 			self.actors = ActorCollection(false);
-			wait(delay(0));
-			return Void();
+			co_await delay(0);
+			co_return;
 		}
 		ssCore.cancel();
 		self.actors = ActorCollection(false);
-		wait(delay(0));
+		co_await delay(0);
 		throw err;
 	}
 }
