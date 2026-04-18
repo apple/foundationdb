@@ -32,6 +32,12 @@
 
 namespace {
 
+constexpr uint32_t versionedMapBenchmarkSeed = 12345;
+
+void resetVersionedMapBenchmarkRandom() {
+	setThreadLocalDeterministicRandomSeed(versionedMapBenchmarkSeed);
+}
+
 template <typename K>
 struct VersionedMapHarness {
 	using map = VersionedMap<K, int>;
@@ -81,6 +87,7 @@ struct IntFixture {
 
 	static std::unique_ptr<IntFixture> create(int64_t keyCount, bool populateTree, bool uniqueSortedKeys = false) {
 		auto fixture = std::make_unique<IntFixture>();
+		resetVersionedMapBenchmarkRandom();
 		fixture->keys.reserve(keyCount);
 		std::mt19937_64 rng(0x4d595df4d0f33173ULL);
 		std::uniform_int_distribution<int> dist(0, INT_MAX);
@@ -108,6 +115,7 @@ struct StringRefFixture {
 
 	static std::unique_ptr<StringRefFixture> create(int64_t keyCount, bool populateTree, bool uniqueSortedKeys = false) {
 		auto fixture = std::make_unique<StringRefFixture>();
+		resetVersionedMapBenchmarkRandom();
 		fixture->keys.reserve(keyCount);
 		std::mt19937_64 rng(0x46a2f9b1d8c3e57bULL);
 		constexpr char alphabet[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
@@ -318,6 +326,7 @@ static void bench_versioned_map_multiversion_int(benchmark::State& state) {
 	int64_t compactForgetOps = 0;
 
 	for (auto _ : state) {
+		resetVersionedMapBenchmarkRandom();
 		double totalStart = timer();
 		VersionedMap<int, int> map;
 		map.createNewVersion(1);

@@ -22,6 +22,8 @@
 #include "flow/TreeBenchmark.h"
 #include "flow/UnitTest.h"
 
+static constexpr uint32_t versionedMapPerformanceSeed = 12345;
+
 template <typename K>
 struct VersionedMapHarness {
 	using map = VersionedMap<K, int>;
@@ -58,6 +60,7 @@ struct VersionedMapHarness {
 };
 
 TEST_CASE("performance/map/int/VersionedMap") {
+	setThreadLocalDeterministicRandomSeed(versionedMapPerformanceSeed);
 	VersionedMapHarness<int> tree;
 
 	treeBenchmark(tree, *randomInt);
@@ -66,6 +69,7 @@ TEST_CASE("performance/map/int/VersionedMap") {
 }
 
 TEST_CASE("performance/map/StringRef/VersionedMap") {
+	setThreadLocalDeterministicRandomSeed(versionedMapPerformanceSeed);
 	Arena arena;
 	VersionedMapHarness<StringRef> tree;
 
@@ -79,6 +83,7 @@ static void printKOps(const char* name, int64_t opCount, double elapsed) {
 }
 
 TEST_CASE("performance/multiversion/map/int/VersionedMap") {
+	setThreadLocalDeterministicRandomSeed(versionedMapPerformanceSeed);
 	constexpr int initialKeys = 20000;
 	constexpr int versions = 50000;
 	constexpr int retainedVersions = 5000;
