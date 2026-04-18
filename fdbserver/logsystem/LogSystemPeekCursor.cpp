@@ -301,8 +301,8 @@ Future<Void> serverPeekParallelGetMoreImpl(ServerPeekCursor* self, TaskPriority 
 			if (self->hasMessage())
 				co_return;
 
-			auto res = co_await race(self->interf->get().present() ? self->futureResults.front() : Never(),
-			                         self->interfaceChanged);
+			Future<TLogPeekReply> peekReply = self->interf->get().present() ? self->futureResults.front() : Never();
+			auto res = co_await race(peekReply, self->interfaceChanged);
 			if (res.index() == 0) {
 				TLogPeekReply reply = std::get<0>(std::move(res));
 
@@ -391,15 +391,15 @@ Future<Void> serverPeekStreamGetMoreImpl(ServerPeekCursor* self, TaskPriority ta
 			                                       ? map(waitAndForward(self->peekReplyStream.get().getFuture()),
 			                                             [](const TLogPeekStreamReply& r) { return r.rep; })
 			                                       : Never();
-			auto res = co_await race(
-			    self->peekReplyStream.present() ? Never() : tryEstablishPeekStream(self),
-			    self->interf->onChange(),
+			Future<Void> establishStream = self->peekReplyStream.present() ? Never() : tryEstablishPeekStream(self);
+			Future<TLogPeekReply> metricsReply =
 			    self->peekReplyStream.present()
 			        ? recordRequestMetrics(
 			              self,
 			              self->interf->get().interf().peekStreamMessages.getEndpoint().getPrimaryAddress(),
 			              fPeekReply)
-			        : Never());
+			        : Never();
+			auto res = co_await race(establishStream, self->interf->onChange(), metricsReply);
 			if (res.index() == 0) {
 			} else if (res.index() == 1) {
 				self->onlySpilled = false;
@@ -460,18 +460,19 @@ Future<Void> serverPeekStreamGetMore(ServerPeekCursor* self, TaskPriority taskID
 Future<Void> serverPeekGetMoreImpl(ServerPeekCursor* self, TaskPriority taskID) {
 	try {
 		while (true) {
-			auto res = co_await race(self->interf->get().present()
-			                             ? brokenPromiseToNever(self->interf->get().interf().peekMessages.getReply(
-			                                   TLogPeekRequest(self->messageVersion.version,
-			                                                   self->tag,
-			                                                   self->returnIfBlocked,
-			                                                   self->onlySpilled,
-			                                                   Optional<std::pair<UID, int>>(),
-			                                                   self->end.version,
-			                                                   self->returnEmptyIfStopped),
-			                                   taskID))
-			                             : Never(),
-			                         self->interf->onChange());
+			Future<TLogPeekReply> peekReply = Never();
+			if (self->interf->get().present()) {
+				peekReply = brokenPromiseToNever(
+				    self->interf->get().interf().peekMessages.getReply(TLogPeekRequest(self->messageVersion.version,
+				                                                                       self->tag,
+				                                                                       self->returnIfBlocked,
+				                                                                       self->onlySpilled,
+				                                                                       Optional<std::pair<UID, int>>(),
+				                                                                       self->end.version,
+				                                                                       self->returnEmptyIfStopped),
+				                                                       taskID));
+			}
+			auto res = co_await race(peekReply, self->interf->onChange());
 			if (res.index() == 0) {
 				TLogPeekReply reply = std::get<0>(std::move(res));
 
@@ -530,16 +531,15 @@ Future<Void> ServerPeekCursor::getMore(TaskPriority taskID) {
 
 Future<Void> serverPeekOnFailed(ServerPeekCursor const* self) {
 	while (true) {
-		auto res =
-		    co_await race(self->interf->get().present()
-		                      ? IFailureMonitor::failureMonitor().onStateEqual(
-		                            self->interf->get().interf().peekMessages.getEndpoint(), FailureStatus())
-		                      : Never(),
-		                  self->interf->get().present()
-		                      ? IFailureMonitor::failureMonitor().onStateEqual(
-		                            self->interf->get().interf().peekStreamMessages.getEndpoint(), FailureStatus())
-		                      : Never(),
-		                  self->interf->onChange());
+		Future<Void> peekMessagesFailed = Never();
+		Future<Void> peekStreamMessagesFailed = Never();
+		if (self->interf->get().present()) {
+			peekMessagesFailed = IFailureMonitor::failureMonitor().onStateEqual(
+			    self->interf->get().interf().peekMessages.getEndpoint(), FailureStatus());
+			peekStreamMessagesFailed = IFailureMonitor::failureMonitor().onStateEqual(
+			    self->interf->get().interf().peekStreamMessages.getEndpoint(), FailureStatus());
+		}
+		auto res = co_await race(peekMessagesFailed, peekStreamMessagesFailed, self->interf->onChange());
 		if (res.index() == 0 || res.index() == 1) {
 			co_return;
 		} else if (res.index() != 2) {
