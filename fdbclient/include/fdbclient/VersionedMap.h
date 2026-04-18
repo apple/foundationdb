@@ -99,12 +99,16 @@ class PTreeFinger {
 	// This finger size supports trees with up to exp(96/4.3) ~= 4,964,514,749 entries.
 	// The number 4.3 comes from here: https://en.wikipedia.org/wiki/Random_binary_tree#The_longest_path
 	// see also: check().
-	static constexpr size_t N = 96;
-	PTreeFingerEntry entries_[N];
+	static constexpr size_t pathCapacity = 96;
+	PTreeFingerEntry entries_[pathCapacity];
 	size_t size_ = 0;
 	size_t bound_sz_ = 0;
 
 public:
+	// Compacting roots usually visits one modified search path per retained root. Use the same path capacity as a
+	// reserve hint so compaction does not repeatedly rehash the visited set.
+	static constexpr size_t compactVisitedReservePerRoot = pathCapacity;
+
 	PTreeFinger() {}
 
 	// Explicit copy constructors ensure we copy the live values in entries_.
@@ -133,12 +137,12 @@ public:
 
 	void resize(size_t sz) {
 		size_ = sz;
-		ASSERT(size_ < N);
+		ASSERT(size_ < pathCapacity);
 	}
 
 	void push_back(PTree<T> const* node) {
 		entries_[size_++] = { node };
-		ASSERT(size_ < N);
+		ASSERT(size_ < pathCapacity);
 	}
 
 	void push_for_bound(PTree<T> const* node, bool less) {
@@ -855,6 +859,7 @@ public:
 		// auto newBegin = roots.lower_bound(newOldestVersion);
 		auto newBegin = lower_bound(roots.begin(), roots.end(), newOldestVersion, rootsComparator());
 		std::unordered_set<PTreeT*> visited;
+		visited.reserve((newBegin - roots.begin()) * PTreeFingerT::compactVisitedReservePerRoot);
 		for (auto root = roots.begin(); root != newBegin; ++root) {
 			if (root->second)
 				PTreeImpl::compact(root->second, newOldestVersion, visited);
