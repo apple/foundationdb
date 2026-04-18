@@ -1,5 +1,5 @@
 /*
- * Resolver.actor.cpp
+ * Resolver.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
