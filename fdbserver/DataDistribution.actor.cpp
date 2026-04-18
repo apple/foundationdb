@@ -2853,7 +2853,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 					TraceEvent(SevWarn, "DataDistributorCancelled");
 				}
 				shards.clear();
-				TraceEvent(SevWarn, "DDExiting", self->ddId).error(e);
 				throw e;
 			} else {
 				wait(shards.clearAsync());
@@ -2865,14 +2864,12 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				wait(self->removeStorageServer(removeFailedServer.getFuture().get()));
 			} else {
 				if (err.code() != error_code_movekeys_conflict && err.code() != error_code_dd_config_changed) {
-					TraceEvent(SevWarn, "DDExiting", self->ddId).error(err);
 					throw err;
 				}
 
 				bool ddEnabled = wait(self->isDataDistributionEnabled());
 				TraceEvent("DataDistributionError", self->ddId).error(err).detail("DataDistributionEnabled", ddEnabled);
 				if (ddEnabled) {
-					TraceEvent(SevWarn, "DDExiting", self->ddId).error(err);
 					throw err;
 				}
 			}
