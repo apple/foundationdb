@@ -52,6 +52,7 @@ public:
 	virtual void addref() const = 0;
 	virtual void delref() const = 0;
 	virtual Optional<RecoveryState> getRecoveryState() const = 0;
+	virtual bool shouldTreatStorageTeamOneReplicaLeftAsCritical() const = 0;
 	virtual Future<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const = 0;
 	virtual Future<LatestWorkerEvents> getLatestRatekeeperEvents(std::string const& eventName) const = 0;
 	virtual Future<LatestWorkerEvents> getLatestDataDistributorEvents(std::string const& eventName) const = 0;
@@ -63,6 +64,7 @@ public:
 class WorkerEventProvider final : public IWorkerEventProvider, public ReferenceCounted<WorkerEventProvider> {
 	std::vector<WorkerDetails> workers;
 	Optional<RecoveryState> recoveryState;
+	bool storageTeamOneReplicaLeftIsCritical = false;
 	Optional<WorkerInterface> ratekeeperWorker;
 	Optional<WorkerInterface> dataDistributorWorker;
 	std::vector<StorageServerInterface> storageServers;
@@ -73,11 +75,13 @@ public:
 	void delref() const override { ReferenceCounted<WorkerEventProvider>::delref(); }
 	void setWorkers(std::vector<WorkerDetails> workers);
 	void setRecoveryState(RecoveryState recoveryState);
+	void setStorageTeamOneReplicaLeftIsCritical(bool storageTeamOneReplicaLeftIsCritical);
 	void setRatekeeperWorker(Optional<WorkerInterface> ratekeeperWorker);
 	void setDataDistributorWorker(Optional<WorkerInterface> dataDistributorWorker);
 	void setStorageServers(std::vector<StorageServerInterface> storageServers);
 	void setTLogs(std::vector<TLogInterface> tlogs);
 	Optional<RecoveryState> getRecoveryState() const override;
+	bool shouldTreatStorageTeamOneReplicaLeftAsCritical() const override;
 	Future<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const override;
 	Future<LatestWorkerEvents> getLatestRatekeeperEvents(std::string const& eventName) const override;
 	Future<LatestWorkerEvents> getLatestDataDistributorEvents(std::string const& eventName) const override;

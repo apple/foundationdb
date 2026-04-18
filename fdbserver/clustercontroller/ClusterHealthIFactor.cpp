@@ -148,6 +148,7 @@ Future<Level> StorageReplicationFactor::fetchLevel(Reference<IWorkerEventProvide
 	try {
 		int64_t queuedOrInFlightRepairMoves = 0;
 		int64_t zeroReplicaTeams = 0;
+		int64_t oneReplicaTeams = 0;
 		for (auto const& [address, traceEvent] : filteredEvents) {
 			(void)address;
 			int64_t inQueue = traceEvent.getInt64("InQueue");
@@ -158,6 +159,7 @@ Future<Level> StorageReplicationFactor::fetchLevel(Reference<IWorkerEventProvide
 			int64_t priorityTeam0Left = traceEvent.getInt64("PriorityTeam0Left");
 
 			zeroReplicaTeams += priorityTeam0Left;
+			oneReplicaTeams += priorityTeam1Left;
 			if (inQueue > 0 || inFlight > 0) {
 				queuedOrInFlightRepairMoves +=
 				    priorityTeamUnhealthy + priorityTeam2Left + priorityTeam1Left + priorityTeam0Left;
@@ -167,6 +169,11 @@ Future<Level> StorageReplicationFactor::fetchLevel(Reference<IWorkerEventProvide
 		if (zeroReplicaTeams > 0) {
 			CODE_PROBE(trackCodeProbes, "ClusterHealth StorageReplicationFactor returns OUTAGE");
 			co_return Level::OUTAGE;
+		}
+		if (oneReplicaTeams > 0 && workerEventProvider->shouldTreatStorageTeamOneReplicaLeftAsCritical()) {
+			CODE_PROBE(trackCodeProbes,
+			           "ClusterHealth StorageReplicationFactor returns CRITICAL_INTERVENTION_REQUIRED");
+			co_return Level::CRITICAL_INTERVENTION_REQUIRED;
 		}
 		if (queuedOrInFlightRepairMoves > 0) {
 			CODE_PROBE(trackCodeProbes, "ClusterHealth StorageReplicationFactor returns SELF_HEALING");

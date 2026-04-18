@@ -149,6 +149,10 @@ void WorkerEventProvider::setRecoveryState(RecoveryState recoveryState) {
 	this->recoveryState = recoveryState;
 }
 
+void WorkerEventProvider::setStorageTeamOneReplicaLeftIsCritical(bool storageTeamOneReplicaLeftIsCritical) {
+	this->storageTeamOneReplicaLeftIsCritical = storageTeamOneReplicaLeftIsCritical;
+}
+
 void WorkerEventProvider::setRatekeeperWorker(Optional<WorkerInterface> ratekeeperWorker) {
 	this->ratekeeperWorker = std::move(ratekeeperWorker);
 }
@@ -167,6 +171,10 @@ void WorkerEventProvider::setTLogs(std::vector<TLogInterface> tlogs) {
 
 Optional<RecoveryState> WorkerEventProvider::getRecoveryState() const {
 	return recoveryState;
+}
+
+bool WorkerEventProvider::shouldTreatStorageTeamOneReplicaLeftAsCritical() const {
+	return storageTeamOneReplicaLeftIsCritical;
 }
 
 Future<LatestWorkerEvents> WorkerEventProvider::getLatestEvents(std::string const& eventName) const {

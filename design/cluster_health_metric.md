@@ -87,6 +87,7 @@ Fields used:
 
 Behavior:
 - Returns `OUTAGE` if any `PriorityTeam0Left > 0`.
+- Returns `CRITICAL_INTERVENTION_REQUIRED` if any `PriorityTeam1Left > 0` and the configured storage team size is 3.
 - Returns `SELF_HEALING` if data movement is queued or in flight to restore replication.
 - Returns `HEALTHY` otherwise.
 

@@ -32,6 +32,7 @@ namespace {
 
 class FakeWorkerEventProvider final : public IWorkerEventProvider, public ReferenceCounted<FakeWorkerEventProvider> {
 	Optional<RecoveryState> recoveryState;
+	bool storageTeamOneReplicaLeftIsCritical = false;
 	std::map<std::string, LatestWorkerEvents> latestEventsByName;
 	std::map<std::string, LatestWorkerEvents> latestRatekeeperEventsByName;
 	std::map<std::string, LatestWorkerEvents> latestDataDistributorEventsByName;
@@ -47,6 +48,10 @@ public:
 	}
 
 	void setRecoveryState(RecoveryState recoveryState) { this->recoveryState = recoveryState; }
+
+	void setStorageTeamOneReplicaLeftIsCritical(bool storageTeamOneReplicaLeftIsCritical) {
+		this->storageTeamOneReplicaLeftIsCritical = storageTeamOneReplicaLeftIsCritical;
+	}
 
 	void setLatestRatekeeperEvents(std::string eventName, LatestWorkerEvents latestEvents) {
 		latestRatekeeperEventsByName[std::move(eventName)] = std::move(latestEvents);
@@ -73,6 +78,8 @@ public:
 	}
 
 	Optional<RecoveryState> getRecoveryState() const override { return recoveryState; }
+
+	bool shouldTreatStorageTeamOneReplicaLeftAsCritical() const override { return storageTeamOneReplicaLeftIsCritical; }
 
 	Future<LatestWorkerEvents> getLatestRatekeeperEvents(std::string const& eventName) const override {
 		auto it = latestRatekeeperEventsByName.find(eventName);
@@ -271,6 +278,10 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/StorageReplicationF
 	    "MovingData", makeLatestWorkerEvents(MovingDataMetricsBuilder().inFlight(1).priorityTeam1Left(1).build()));
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::SELF_HEALING);
+
+	provider->setStorageTeamOneReplicaLeftIsCritical(true);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
+	ASSERT_EQ(level, Level::CRITICAL_INTERVENTION_REQUIRED);
 
 	provider->setLatestEvents(
 	    "MovingData", makeLatestWorkerEvents(MovingDataMetricsBuilder().inQueue(1).priorityTeam0Left(1).build()));

@@ -71,6 +71,10 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+static bool storageTeamOneReplicaLeftIsCritical(DatabaseConfiguration const& configuration) {
+	return configuration.initialized && configuration.storageTeamSize == 3;
+}
+
 ClusterControllerData::ClusterControllerData(ClusterControllerFullInterface const& ccInterface,
                                              LocalityData const& locality,
                                              ServerCoordinators const& coordinators,
@@ -116,6 +120,8 @@ void ClusterControllerData::updateClusterHealthMonitorInputs() {
 	}
 	clusterHealthWorkerEventProvider->setWorkers(std::move(workers));
 	clusterHealthWorkerEventProvider->setRecoveryState(db.serverInfo->get().recoveryState);
+	clusterHealthWorkerEventProvider->setStorageTeamOneReplicaLeftIsCritical(
+	    storageTeamOneReplicaLeftIsCritical(db.config));
 
 	Optional<WorkerInterface> ratekeeperWorker;
 	if (db.serverInfo->get().ratekeeper.present()) {
@@ -1199,6 +1205,8 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	db->recoveryStalled = req.recoveryStalled;
 	if (req.configuration.present()) {
 		db->config = req.configuration.get();
+		self->clusterHealthWorkerEventProvider->setStorageTeamOneReplicaLeftIsCritical(
+		    storageTeamOneReplicaLeftIsCritical(db->config));
 
 		if (req.recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
 			self->gotFullyRecoveredConfig = true;
