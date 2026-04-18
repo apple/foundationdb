@@ -683,11 +683,7 @@ Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> const>
 					// Return error for batch_priority GRV requests
 					int64_t proxiesCount = std::max((int)db->get().client.grvProxies.size(), 1);
 					if (batchRateInfo->getRate() <= (1.0 / proxiesCount)) {
-						if (req.maxGrvQueueDelayMS.present()) {
-							req.reply.sendError(transaction_grv_queue_rejected());
-						} else {
-							req.reply.sendError(batch_transaction_throttled());
-						}
+						req.reply.sendError(batch_transaction_throttled());
 						stats->txnThrottled += req.transactionCount;
 					} else {
 						if (SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES && req.isTagged()) {
