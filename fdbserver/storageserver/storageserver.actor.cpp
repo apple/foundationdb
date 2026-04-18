@@ -11873,8 +11873,8 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	self->actors.add(storageEngineConsistencyCheck(self));
 
 	self->transactionTagCounter.startNewInterval();
-	self->actors.add(
-	    recurring([&]() { self->transactionTagCounter.startNewInterval(); }, SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL));
+	self->actors.add(recurring(std::bind_front(&TransactionTagCounter::startNewInterval, &self->transactionTagCounter),
+	                           SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL));
 
 	self->coreStarted.send(Void());
 
