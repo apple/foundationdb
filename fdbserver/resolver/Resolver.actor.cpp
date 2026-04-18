@@ -652,7 +652,6 @@ Future<Void> processCompleteTransactionStateRequest(TransactionStateResolveConte
 		std::vector<std::pair<MapPair<Key, ServerCacheInfo>, int>> keyInfoData;
 		std::vector<UID> src, dest;
 		ServerCacheInfo info;
-		// NOTE: An ACTOR will be compiled into several classes, the this pointer is from one of them.
 		auto updateTagInfo = [pContext = pContext](const std::vector<UID>& uids,
 		                                           std::vector<Tag>& tags,
 		                                           std::vector<Reference<StorageInfo>>& storageInfoItems) {
@@ -744,11 +743,8 @@ Future<Void> resolveTxnStateRequests(FutureStream<TxnStateRequest> txnStateReque
                                      PromiseStream<Future<Void>>* addActor) {
 	while (true) {
 		TxnStateRequest request = co_await txnStateRequests;
-		if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
-			addActor->send(processTransactionStateRequestPart(pContext, request));
-		} else {
-			ASSERT(false);
-		}
+		ASSERT(SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS);
+		addActor->send(processTransactionStateRequestPart(pContext, request));
 	}
 }
 
