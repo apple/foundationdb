@@ -2665,7 +2665,7 @@ Future<Void> respondToRecovered(TLogInterface tli, Promise<Void> recoveryComplet
 	// This delay is added for testing purpose in simulation where by setting `disableTLogRecoveryFinish`, we disable
 	// TLogs to send back `TLogRecoveryFinishedRequest`.
 	while (g_network->isSimulated() && g_simulator->disableTLogRecoveryFinish) {
-		TraceEvent("WaitingToBeUnblocked", tli.id());
+		TraceEvent("WaitingToBeUnblocked", tli.id()).suppressFor(60);
 		co_await delay(10);
 	}
 
@@ -2681,6 +2681,14 @@ Future<Void> respondToRecovered(TLogInterface tli, Promise<Void> recoveryComplet
 }
 
 Future<Void> trackRecoveryReq(TLogInterface tli, TrackTLogRecoveryRequest req, Reference<LogData> logData) {
+	// Block recovery version tracking when disableTLogRecoveryFinish is set in simulation.
+	// This prevents recoveredVersion from advancing in trackTLogRecoveryActor, which in turn
+	// prevents purgeOldRecoveredGenerationsCoreState from GC'ing old TLog generations.
+	// Without this, the GcGenerations test accumulation phase races with generation GC.
+	while (g_network->isSimulated() && g_simulator->disableTLogRecoveryFinish) {
+		co_await delay(10);
+	}
+
 	while (true) {
 		Version oldestGenerationRecoverAtVersion = invalidVersion;
 		for (const auto& [tag, genVersions] : logData->tagUnpoppedOldGenerations) {
