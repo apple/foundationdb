@@ -564,6 +564,16 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 	return Void();
 }
 
+Future<Void> resolveBatches(Reference<Resolver> self,
+                            FutureStream<ResolveTransactionBatchRequest> resolveRequests,
+                            ActorCollection* actors,
+                            Reference<AsyncVar<ServerDBInfo> const> db) {
+	while (true) {
+		ResolveTransactionBatchRequest batch = co_await resolveRequests;
+		actors->add(resolveBatch(self, batch, db));
+	}
+}
+
 namespace {
 
 // TODO: refactor with the one in CommitProxyServer.actor.cpp
@@ -760,10 +770,9 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 		}
 	}
 
+	actors.add(resolveBatches(self, resolver.resolve.getFuture(), &actors, db));
+
 	loop choose {
-		when(ResolveTransactionBatchRequest batch = waitNext(resolver.resolve.getFuture())) {
-			actors.add(resolveBatch(self, batch, db));
-		}
 		when(ResolutionMetricsRequest req = waitNext(resolver.metrics.getFuture())) {
 			++self->metricsRequests;
 			req.reply.send(self->iopsSample.getEstimate(SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? normalKeys
