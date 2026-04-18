@@ -725,6 +725,21 @@ ACTOR Future<Void> processTransactionStateRequestPart(Reference<Resolver> self,
 	return Void();
 }
 
+Future<Void> resolveTxnStateRequests(Reference<Resolver> self,
+                                     FutureStream<TxnStateRequest> txnStateRequests,
+                                     TransactionStateResolveContext* pContext,
+                                     PromiseStream<Future<Void>>* addActor,
+                                     Reference<AsyncVar<ServerDBInfo> const> db) {
+	while (true) {
+		TxnStateRequest request = co_await txnStateRequests;
+		if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
+			addActor->send(processTransactionStateRequestPart(self, pContext, request, db));
+		} else {
+			ASSERT(false);
+		}
+	}
+}
+
 } // anonymous namespace
 
 ACTOR Future<Void> resolverCore(ResolverInterface resolver,
@@ -771,6 +786,8 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 	}
 
 	actors.add(resolveBatches(self, resolver.resolve.getFuture(), &actors, db));
+	actors.add(
+	    resolveTxnStateRequests(self, resolver.txnState.getFuture(), &transactionStateResolveContext, &addActor, db));
 
 	loop choose {
 		when(ResolutionMetricsRequest req = waitNext(resolver.metrics.getFuture())) {
@@ -791,13 +808,6 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 		when(wait(doPollMetrics)) {
 			self->iopsSample.poll();
 			doPollMetrics = delay(SERVER_KNOBS->SAMPLE_POLL_TIME);
-		}
-		when(TxnStateRequest request = waitNext(resolver.txnState.getFuture())) {
-			if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
-				addActor.send(processTransactionStateRequestPart(self, &transactionStateResolveContext, request, db));
-			} else {
-				ASSERT(false);
-			}
 		}
 	}
 }
