@@ -2025,11 +2025,11 @@ private:
 		}
 	};
 
-	ACTOR static Future<Void> logPeriodically(KeyValueStoreSQLite* self) {
-		state int64_t lastReadsComplete = 0;
-		state int64_t lastWritesComplete = 0;
-		loop {
-			wait(delay(FLOW_KNOBS->SQLITE_DISK_METRIC_LOGGING_INTERVAL));
+	static Future<Void> logPeriodically(KeyValueStoreSQLite* self) {
+		int64_t lastReadsComplete = 0;
+		int64_t lastWritesComplete = 0;
+		while (true) {
+			co_await delay(FLOW_KNOBS->SQLITE_DISK_METRIC_LOGGING_INTERVAL);
 
 			int64_t rc = self->readsComplete, wc = self->writesComplete;
 			TraceEvent("DiskMetrics", self->logID)
@@ -2070,9 +2070,9 @@ private:
 		walFile.clear();
 	}
 
-	ACTOR static Future<Void> stopOnError(KeyValueStoreSQLite* self) {
+	static Future<Void> stopOnError(KeyValueStoreSQLite* self) {
 		try {
-			wait(self->readThreads->getError() || self->writeThread->getError());
+			co_await (self->readThreads->getError() || self->writeThread->getError());
 			ASSERT(false);
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
@@ -2082,8 +2082,6 @@ private:
 			self->readThreads->stop(e).isReady();
 			self->writeThread->stop(e).isReady();
 		}
-
-		return Void();
 	}
 
 	ACTOR static void doClose(KeyValueStoreSQLite* self, bool deleteOnClose) {
@@ -2124,10 +2122,10 @@ IKeyValueStore* keyValueStoreSQLite(std::string const& filename,
 	return new KeyValueStoreSQLite(filename, logID, storeType, checkChecksums, checkIntegrity);
 }
 
-ACTOR Future<Void> cleanPeriodically(KeyValueStoreSQLite* self) {
-	wait(delayJittered(SERVER_KNOBS->SPRING_CLEANING_NO_ACTION_INTERVAL));
-	loop {
-		KeyValueStoreSQLite::SpringCleaningWorkPerformed workPerformed = wait(self->doClean());
+Future<Void> cleanPeriodically(KeyValueStoreSQLite* self) {
+	co_await delayJittered(SERVER_KNOBS->SPRING_CLEANING_NO_ACTION_INTERVAL);
+	while (true) {
+		KeyValueStoreSQLite::SpringCleaningWorkPerformed workPerformed = co_await self->doClean();
 
 		double duration = std::numeric_limits<double>::max();
 		if (workPerformed.lazyDeletePages >= SERVER_KNOBS->SPRING_CLEANING_LAZY_DELETE_BATCH_SIZE) {
@@ -2140,14 +2138,13 @@ ACTOR Future<Void> cleanPeriodically(KeyValueStoreSQLite* self) {
 			duration = SERVER_KNOBS->SPRING_CLEANING_NO_ACTION_INTERVAL;
 		}
 
-		wait(delayJittered(duration));
+		co_await delayJittered(duration);
 	}
 }
 
-ACTOR static Future<Void> startReadThreadsWhen(KeyValueStoreSQLite* kv, Future<Void> onReady, UID id) {
-	wait(onReady);
+static Future<Void> startReadThreadsWhen(KeyValueStoreSQLite* kv, Future<Void> onReady) {
+	co_await onReady;
 	kv->startReadThreads();
-	return Void();
 }
 
 sqlite3_vfs* vfsAsync();
@@ -2199,7 +2196,7 @@ KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename,
 	auto p = new Writer::InitAction();
 	auto f = p->result.getFuture();
 	writeThread->post(p);
-	starting = startReadThreadsWhen(this, f, logID);
+	starting = startReadThreadsWhen(this, f);
 	cleaning = cleanPeriodically(this);
 	logging = logPeriodically(this);
 }
@@ -2311,7 +2308,7 @@ void GenerateIOLogChecksumFile(std::string filename) {
 
 // If integrity is true, a full btree integrity check is done.
 // If integrity is false, only a scan of all pages to validate their checksums is done.
-ACTOR Future<Void> KVFileCheck(std::string filename, bool integrity) {
+Future<Void> KVFileCheck(std::string filename, bool integrity) {
 	if (!fileExists(filename))
 		throw file_not_found();
 
@@ -2323,23 +2320,21 @@ ACTOR Future<Void> KVFileCheck(std::string filename, bool integrity) {
 		type = KeyValueStoreType::SSD_BTREE_V2;
 	ASSERT(type != KeyValueStoreType::END);
 
-	state IKeyValueStore* store =
+	IKeyValueStore* store =
 	    keyValueStoreSQLite(filename, UID(0, 0), type, CheckChecksums(!integrity), CheckIntegrity(integrity));
 	ASSERT(store != nullptr);
 
 	// Wait for integry check to finish
-	wait(success(store->readValue(StringRef())));
+	co_await success(store->readValue(StringRef()));
 
 	if (store->getError().isError())
-		wait(store->getError());
+		co_await store->getError();
 	Future<Void> c = store->onClosed();
 	store->close();
-	wait(c);
-
-	return Void();
+	co_await c;
 }
 
-ACTOR Future<Void> KVFileDump(std::string filename) {
+Future<Void> KVFileDump(std::string filename) {
 	if (!fileExists(filename))
 		throw file_not_found();
 
@@ -2351,14 +2346,14 @@ ACTOR Future<Void> KVFileDump(std::string filename) {
 		type = KeyValueStoreType::SSD_BTREE_V2;
 	ASSERT(type != KeyValueStoreType::END);
 
-	state IKeyValueStore* store = keyValueStoreSQLite(filename, UID(0, 0), type);
+	IKeyValueStore* store = keyValueStoreSQLite(filename, UID(0, 0), type);
 	ASSERT(store != nullptr);
 
 	// dump
-	state int64_t count = 0;
-	state Key k;
-	state Key endk = allKeys.end;
-	state bool debug = false;
+	int64_t count = 0;
+	Key k;
+	Key endk = allKeys.end;
+	bool debug = false;
 
 	const char* startKey = getenv("FDB_DUMP_STARTKEY");
 	const char* endKey = getenv("FDB_DUMP_ENDKEY");
@@ -2377,7 +2372,7 @@ ACTOR Future<Void> KVFileDump(std::string filename) {
 	        debug ? "true" : "false");
 
 	while (true) {
-		RangeResult kv = wait(store->readRange(KeyRangeRef(k, endk), 1000));
+		RangeResult kv = co_await store->readRange(KeyRangeRef(k, endk), 1000);
 		for (auto& one : kv) {
 			int size = 0;
 			const uint8_t* data = nullptr;
@@ -2407,10 +2402,8 @@ ACTOR Future<Void> KVFileDump(std::string filename) {
 	fmt::print(stderr, "Counted: {}\n", count);
 
 	if (store->getError().isError())
-		wait(store->getError());
+		co_await store->getError();
 	Future<Void> c = store->onClosed();
 	store->close();
-	wait(c);
-
-	return Void();
+	co_await c;
 }

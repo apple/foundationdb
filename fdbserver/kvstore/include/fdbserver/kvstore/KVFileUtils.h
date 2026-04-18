@@ -27,7 +27,7 @@
 #include "flow/flow.h"
 
 void GenerateIOLogChecksumFile(std::string filename);
-Future<Void> KVFileCheck(std::string const& filename, bool const& integrity);
-Future<Void> KVFileDump(std::string const& filename);
+Future<Void> KVFileCheck(std::string filename, bool integrity);
+Future<Void> KVFileDump(std::string filename);
 
 #endif
