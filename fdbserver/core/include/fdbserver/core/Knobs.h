@@ -26,7 +26,7 @@
 #include "flow/Knobs.h"
 #include "flow/swift_support.h"
 #include "fdbrpc/Locality.h"
-#include "fdbclient/ClientKnobs.h"
+#include "fdbclient/Knobs.h"
 
 // Disk queue
 static constexpr int _PAGE_SIZE = 4096;
