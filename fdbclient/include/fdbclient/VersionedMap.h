@@ -79,6 +79,9 @@ struct PTree : public ReferenceCounted<PTree<T>>, FastAllocated<PTree<T>>, NonCo
 	PTree(const T& data, Version ver) : lastUpdateVersion(ver), updated(false), data(data) {
 		priority = deterministicRandom()->randomUInt32();
 	}
+	PTree(const T& data, Version ver, IRandom& random) : lastUpdateVersion(ver), updated(false), data(data) {
+		priority = random.randomUInt32();
+	}
 	PTree(uint32_t pri, T const& data, Reference<PTree> const& left, Reference<PTree> const& right, Version ver)
 	  : priority(pri), lastUpdateVersion(ver), updated(false), data(data) {
 		pointer[0] = left;
@@ -308,6 +311,26 @@ void insert(Reference<PTree<T>>& p, Version at, const T& x) {
 			const bool direction = !(c < 0);
 			Reference<PTree<T>> child = p->child(direction, at);
 			insert(child, at, x);
+			p = update(p, direction, child, at);
+			if (p->child(direction, at)->priority > p->priority)
+				rotate(p, at, !direction);
+		}
+	}
+}
+
+// Modifies p to point to a PTree with x inserted, using a caller-owned priority generator.
+template <class T>
+void insert(Reference<PTree<T>>& p, Version at, const T& x, IRandom& priorityRandom) {
+	if (!p) {
+		p = makeReference<PTree<T>>(x, at, priorityRandom);
+	} else {
+		int c = ::compare(x, p->data);
+		if (c == 0) {
+			p = makeReference<PTree<T>>(p->priority, x, p->left(at), p->right(at), at);
+		} else {
+			const bool direction = !(c < 0);
+			Reference<PTree<T>> child = p->child(direction, at);
+			insert(child, at, x, priorityRandom);
 			p = update(p, direction, child, at);
 			if (p->child(direction, at)->priority > p->priority)
 				rotate(p, at, !direction);
@@ -686,6 +709,7 @@ public:
 	typedef Reference<PTreeT> Tree;
 
 	Version oldestVersion, latestVersion;
+	Reference<IRandom> priorityRandom;
 
 	// This deque keeps track of PTree root nodes at various versions. Since the
 	// versions increase monotonically, the deque is implicitly sorted and hence
@@ -707,12 +731,16 @@ public:
 	static const int overheadPerItem = nextFastAllocatedSize(sizeof(PTreeT)) * 4;
 	struct iterator;
 
-	VersionedMap() : oldestVersion(0), latestVersion(0) { roots.emplace_back(0, Tree()); }
+	VersionedMap() : oldestVersion(0), latestVersion(0), priorityRandom(deterministicRandom()) {
+		roots.emplace_back(0, Tree());
+	}
 	VersionedMap(VersionedMap&& v) noexcept
-	  : oldestVersion(v.oldestVersion), latestVersion(v.latestVersion), roots(std::move(v.roots)) {}
+	  : oldestVersion(v.oldestVersion), latestVersion(v.latestVersion), priorityRandom(std::move(v.priorityRandom)),
+	    roots(std::move(v.roots)) {}
 	void operator=(VersionedMap&& v) noexcept {
 		oldestVersion = v.oldestVersion;
 		latestVersion = v.latestVersion;
+		priorityRandom = std::move(v.priorityRandom);
 		roots = std::move(v.roots);
 	}
 
@@ -786,8 +814,10 @@ public:
 	// insert() and erase() invalidate atLatest() and all iterators into it
 	void insert(const K& k, const T& t) { insert(k, t, latestVersion); }
 	void insert(const K& k, const T& t, Version insertAt) {
-		PTreeImpl::insert(
-		    roots.back().second, latestVersion, MapPair<K, std::pair<T, Version>>(k, std::make_pair(t, insertAt)));
+		PTreeImpl::insert(roots.back().second,
+		                  latestVersion,
+		                  MapPair<K, std::pair<T, Version>>(k, std::make_pair(t, insertAt)),
+		                  *priorityRandom);
 	}
 	void erase(const K& begin, const K& end) { PTreeImpl::remove(roots.back().second, latestVersion, begin, end); }
 	void erase(const K& key) { // key must be present
