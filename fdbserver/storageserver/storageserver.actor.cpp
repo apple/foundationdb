@@ -94,7 +94,7 @@
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/DataMovement.h"
-#include "fdbserver/storageserver/StorageServer.actor.h"
+#include "fdbserver/storageserver/StorageServer.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "StorageServerUtils.h"
 #include "flow/ActorCollection.h"
