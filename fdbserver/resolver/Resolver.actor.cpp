@@ -595,6 +595,13 @@ Future<Void> resolveSplitRequests(Reference<Resolver> self, FutureStream<Resolut
 	}
 }
 
+Future<Void> pollMetrics(Reference<Resolver> self) {
+	while (true) {
+		self->iopsSample.poll();
+		co_await delay(SERVER_KNOBS->SAMPLE_POLL_TIME);
+	}
+}
+
 namespace {
 
 // TODO: refactor with the one in CommitProxyServer.actor.cpp
@@ -768,7 +775,6 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
                                 Reference<AsyncVar<ServerDBInfo> const> db) {
 	state Reference<Resolver> self(new Resolver(resolver.id(), initReq.commitProxyCount, initReq.resolverCount));
 	state ActorCollection actors(false);
-	state Future<Void> doPollMetrics = self->resolverCount > 1 ? Void() : Future<Void>(Never());
 	state PromiseStream<Future<Void>> addActor;
 	actors.add(waitFailureServer(resolver.waitFailure.getFuture()));
 	actors.add(traceRole(Role::RESOLVER, resolver.id()));
@@ -811,14 +817,13 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 	actors.add(resolveSplitRequests(self, resolver.split.getFuture()));
 	actors.add(
 	    resolveTxnStateRequests(self, resolver.txnState.getFuture(), &transactionStateResolveContext, &addActor, db));
+	if (self->resolverCount > 1) {
+		actors.add(pollMetrics(self));
+	}
 
 	loop choose {
 		when(wait(actors.getResult())) {}
 		when(wait(onError)) {}
-		when(wait(doPollMetrics)) {
-			self->iopsSample.poll();
-			doPollMetrics = delay(SERVER_KNOBS->SAMPLE_POLL_TIME);
-		}
 	}
 }
 
