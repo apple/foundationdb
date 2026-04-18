@@ -1273,7 +1273,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			event.detail("HttpResponseContent", r->data.content);
 			std::string s3Error = parseErrorCodeFromS3(r->data.content);
 			event.detail("S3ErrorCode", s3Error);
-			if (isS3TokenError(s3Error) || simulateS3TokenError) {
+			if (r->code == badRequestCode && (isS3TokenError(s3Error) || simulateS3TokenError)) {
 				s3TokenError = true;
 			}
 		}
