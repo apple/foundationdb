@@ -7,7 +7,7 @@ set(FDBSERVER_KVSTORE_SRCS
   KeyValueStoreMemory.actor.cpp
   KeyValueStoreRocksDB.actor.cpp
   KeyValueStoreShardedRocksDB.actor.cpp
-  KeyValueStoreSQLite.actor.cpp
+  KeyValueStoreSQLite.cpp
   RocksDBCommon.cpp
   RocksDBLogForwarder.cpp
   TransactionStoreMutationTracking.cpp
