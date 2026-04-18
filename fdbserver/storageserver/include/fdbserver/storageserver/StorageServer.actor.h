@@ -1,5 +1,5 @@
 /*
- * StorageServer.h
+ * StorageServer.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
