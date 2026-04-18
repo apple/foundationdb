@@ -25,6 +25,10 @@
 #include "flow/Trace.h"
 #include "flow/genericactors.actor.h"
 
+// This workload validates the MAX_GRV_QUEUE_DELAY transaction option end-to-end.
+// The test file lowers GRV ratekeeper limits so a burst of uncached GRV requests
+// should produce proxy-side transaction_grv_queue_rejected errors, while a request
+// without the option and a request with a permissive threshold still complete.
 struct MaxGrvQueueDelayWorkload : TestWorkload {
 	static constexpr auto NAME = "MaxGrvQueueDelay";
 

@@ -562,6 +562,10 @@ bool rejectIncomingForMaxGrvQueueDelay(GetReadVersionRequest const& req,
                                        GrvProxyStats* stats,
                                        GrvTransactionRateInfo const* normalRateInfo,
                                        GrvTransactionRateInfo const* batchRateInfo) {
+	// Requests with this option should be rejected before normal queue accounting
+	// or insertion. The estimate includes work that can delay this request under
+	// ratekeeper ordering: system/default work for default requests, and batch work
+	// as well for batch requests.
 	if (!req.maxGrvQueueDelayMS.present()) {
 		return false;
 	}

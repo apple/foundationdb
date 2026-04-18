@@ -5421,6 +5421,9 @@ Future<Version> TransactionState::getReadVersion(uint32_t flags) {
 	Optional<UID> versionDebugID = readOptions.present() ? readOptions.get().debugID : Optional<UID>();
 
 	if (options.maxGrvQueueDelayMS.present()) {
+		// Do not coalesce thresholded GRV requests in versionBatcher. Each request's
+		// max queue delay is an individual admission decision at the GRV proxy, and
+		// rejected requests should not sit behind a client-side batch.
 		TransactionTagMap<uint32_t> tags;
 		for (auto tag : options.tags) {
 			++tags[tag];
