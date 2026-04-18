@@ -46,7 +46,7 @@
 
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/IKeyValueStore.h"
-#include "fdbserver/core/RocksDBCheckpointUtils.actor.h"
+#include "fdbserver/core/RocksDBCheckpointUtils.h"
 #include "RocksDBCommon.h"
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -899,9 +899,9 @@ private:
 	uint64_t numNewIterators = 0;
 };
 
-ACTOR Future<Void> flowLockLogger(const FlowLock* readLock, const FlowLock* fetchLock) {
-	loop {
-		wait(delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY));
+Future<Void> flowLockLogger(const FlowLock* readLock, const FlowLock* fetchLock) {
+	while (true) {
+		co_await delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY);
 		TraceEvent e("ShardedRocksDBFlowLock");
 		e.detail("ReadAvailable", readLock->available());
 		e.detail("ReadActivePermits", readLock->activePermits());
@@ -1176,16 +1176,15 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> shardMetricsLogger(std::shared_ptr<ShardedRocksDBState> rState,
-	                                             Future<Void> openFuture,
-	                                             ShardManager* shardManager) {
-		state std::unordered_map<std::string, std::shared_ptr<PhysicalShard>>* physicalShards =
-		    shardManager->getAllShards();
+	static Future<Void> shardMetricsLogger(std::shared_ptr<ShardedRocksDBState> rState,
+	                                       Future<Void> openFuture,
+	                                       ShardManager* shardManager) {
+		std::unordered_map<std::string, std::shared_ptr<PhysicalShard>>* physicalShards = shardManager->getAllShards();
 
 		try {
-			wait(openFuture);
-			loop {
-				wait(delay(SERVER_KNOBS->ROCKSDB_CF_METRICS_DELAY));
+			co_await openFuture;
+			while (true) {
+				co_await delay(SERVER_KNOBS->ROCKSDB_CF_METRICS_DELAY);
 				if (rState->closing) {
 					break;
 				}
@@ -1233,7 +1232,6 @@ public:
 				TraceEvent(SevError, "ShardedRocksShardMetricsLoggerError").errorUnsuppressed(e);
 			}
 		}
-		return Void();
 	}
 
 	rocksdb::Status init() {
@@ -2215,16 +2213,16 @@ struct RocksDBMetrics {
 	}
 };
 
-ACTOR Future<Void> rocksDBAggregatedMetricsLogger(std::shared_ptr<ShardedRocksDBState> rState,
-                                                  Future<Void> openFuture,
-                                                  std::shared_ptr<RocksDBMetrics> rocksDBMetrics,
-                                                  ShardManager* shardManager,
-                                                  std::string manifestDirectory) {
+Future<Void> rocksDBAggregatedMetricsLogger(std::shared_ptr<ShardedRocksDBState> rState,
+                                            Future<Void> openFuture,
+                                            std::shared_ptr<RocksDBMetrics> rocksDBMetrics,
+                                            ShardManager* shardManager,
+                                            std::string manifestDirectory) {
 	try {
-		wait(openFuture);
-		state rocksdb::DB* db = shardManager->getDb();
-		loop {
-			wait(delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY));
+		co_await openFuture;
+		rocksdb::DB* db = shardManager->getDb();
+		while (true) {
+			co_await delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY);
 			if (rState->closing) {
 				break;
 			}
@@ -2238,25 +2236,24 @@ ACTOR Future<Void> rocksDBAggregatedMetricsLogger(std::shared_ptr<ShardedRocksDB
 			TraceEvent(SevError, "ShardedRocksDBMetricsError").errorUnsuppressed(e);
 		}
 	}
-	return Void();
 }
 
 struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	using CF = rocksdb::ColumnFamilyHandle*;
 
-	ACTOR static Future<Void> refreshIteratorPool(std::shared_ptr<ShardedRocksDBState> rState,
-	                                              std::shared_ptr<IteratorPool> iteratorPool,
-	                                              Future<Void> readyToStart) {
+	static Future<Void> refreshIteratorPool(std::shared_ptr<ShardedRocksDBState> rState,
+	                                        std::shared_ptr<IteratorPool> iteratorPool,
+	                                        Future<Void> readyToStart) {
 		if (!SERVER_KNOBS->SHARDED_ROCKSDB_REUSE_ITERATORS) {
-			return Void();
+			co_return;
 		}
-		state Reference<Histogram> histogram = Histogram::getHistogram(
+		Reference<Histogram> histogram = Histogram::getHistogram(
 		    SHARDED_ROCKSDB_HISTOGRAM_GROUP, "TimeSpentRefreshIterators"_sr, Histogram::Unit::milliseconds);
 
 		try {
-			wait(readyToStart);
-			loop {
-				wait(delay(SERVER_KNOBS->ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME));
+			co_await readyToStart;
+			while (true) {
+				co_await delay(SERVER_KNOBS->ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME);
 				if (rState->closing) {
 					break;
 				}
@@ -2270,20 +2267,17 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				TraceEvent(SevError, "RefreshReadIteratorPoolError").errorUnsuppressed(e);
 			}
 		}
-
-		return Void();
 	}
 
-	ACTOR static Future<Void> refreshRocksDBBackgroundEventCounter(
-	    UID id,
-	    std::shared_ptr<RocksDBEventListener> eventListener) {
+	static Future<Void> refreshRocksDBBackgroundEventCounter(UID id,
+	                                                         std::shared_ptr<RocksDBEventListener> eventListener) {
 		if (!SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_WHEN_IO_TIMEOUT &&
 		    SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_PROBABILITY <= 0.0) {
-			return Void();
+			co_return;
 		}
 		try {
-			loop {
-				wait(delay(SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_PERIOD_SEC));
+			while (true) {
+				co_await delay(SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_PERIOD_SEC);
 				eventListener->logRecentRocksDBBackgroundWorkStats(id);
 				eventListener->resetCounters();
 			}
@@ -2292,13 +2286,12 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				TraceEvent(SevError, "RefreshRocksDBBackgroundEventCounter").errorUnsuppressed(e);
 			}
 		}
-		return Void();
 	}
 
-	ACTOR static Future<Void> doRestore(ShardedRocksDBKeyValueStore* self,
-	                                    std::string shardId,
-	                                    std::vector<KeyRange> ranges,
-	                                    std::vector<CheckpointMetaData> checkpoints) {
+	static Future<Void> doRestore(ShardedRocksDBKeyValueStore* self,
+	                              std::string shardId,
+	                              std::vector<KeyRange> ranges,
+	                              std::vector<CheckpointMetaData> checkpoints) {
 		for (const KeyRange& range : ranges) {
 			std::vector<DataShard*> shards = self->shardManager.getDataShardsByRange(range);
 			if (!shards.empty()) {
@@ -2327,7 +2320,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		self->writeThread->post(a);
 
 		try {
-			wait(res);
+			co_await res;
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
@@ -2337,8 +2330,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			}
 			throw;
 		}
-
-		return Void();
 	}
 
 	struct CompactionWorker : IThreadPoolReceiver {
@@ -3706,19 +3697,19 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		return true;
 	}
 
-	ACTOR static Future<Void> compactShards(std::shared_ptr<ShardedRocksDBState> rState,
-	                                        Future<Void> openFuture,
-	                                        ShardManager* shardManager,
-	                                        Reference<IThreadPool> thread) {
+	static Future<Void> compactShards(std::shared_ptr<ShardedRocksDBState> rState,
+	                                  Future<Void> openFuture,
+	                                  ShardManager* shardManager,
+	                                  Reference<IThreadPool> thread) {
 		try {
-			wait(openFuture);
-			state std::unordered_map<std::string, std::shared_ptr<PhysicalShard>>* physicalShards =
+			co_await openFuture;
+			std::unordered_map<std::string, std::shared_ptr<PhysicalShard>>* physicalShards =
 			    shardManager->getAllShards();
-			loop {
+			while (true) {
 				if (rState->closing) {
 					break;
 				}
-				wait(delay(SERVER_KNOBS->SHARDED_ROCKSDB_COMPACTION_ACTOR_DELAY));
+				co_await delay(SERVER_KNOBS->SHARDED_ROCKSDB_COMPACTION_ACTOR_DELAY);
 				int count = 0;
 				double start = now();
 				std::vector<std::shared_ptr<PhysicalShard>> shards;
@@ -3757,7 +3748,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					auto a = new CompactionWorker::CompactShardsAction(shards, shardManager->getMetaDataShard());
 					auto res = a->done.getFuture();
 					thread->post(a);
-					wait(res);
+					co_await res;
 				} else {
 					TraceEvent("CompactionSkipped").detail("Reason", "NoCandidate");
 				}
@@ -3767,18 +3758,17 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				TraceEvent(SevError, "ShardedRocksDBCompactionActorError").errorUnsuppressed(e);
 			}
 		}
-		return Void();
 	}
-	ACTOR static Future<Void> emptyShardCleaner(std::shared_ptr<ShardedRocksDBState> rState,
-	                                            Future<Void> openFuture,
-	                                            ShardManager* shardManager,
-	                                            Reference<IThreadPool> writeThread) {
-		state double cleanUpDelay = SERVER_KNOBS->ROCKSDB_PHYSICAL_SHARD_CLEAN_UP_DELAY;
-		state double cleanUpPeriod = cleanUpDelay * 2;
+	static Future<Void> emptyShardCleaner(std::shared_ptr<ShardedRocksDBState> rState,
+	                                      Future<Void> openFuture,
+	                                      ShardManager* shardManager,
+	                                      Reference<IThreadPool> writeThread) {
+		double cleanUpDelay = SERVER_KNOBS->ROCKSDB_PHYSICAL_SHARD_CLEAN_UP_DELAY;
+		double cleanUpPeriod = cleanUpDelay * 2;
 		try {
-			wait(openFuture);
-			loop {
-				wait(delay(cleanUpPeriod));
+			co_await openFuture;
+			while (true) {
+				co_await delay(cleanUpPeriod);
 				if (rState->closing) {
 					break;
 				}
@@ -3788,7 +3778,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					Future<Void> f = a->done.getFuture();
 					writeThread->post(a);
 					TraceEvent(SevInfo, "ShardedRocksDB").detail("DeleteEmptyShards", shards.size());
-					wait(f);
+					co_await f;
 				}
 			}
 		} catch (Error& e) {
@@ -3796,7 +3786,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				TraceEvent(SevError, "DeleteEmptyShardsError").errorUnsuppressed(e);
 			}
 		}
-		return Void();
 	}
 
 	StorageBytes getStorageBytes() const override {

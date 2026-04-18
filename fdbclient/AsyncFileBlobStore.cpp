@@ -1,5 +1,5 @@
 /*
- * AsyncFileS3BlobStore.cpp
+ * AsyncFileBlobStore.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,18 +18,18 @@
  * limitations under the License.
  */
 
-#include "fdbclient/AsyncFileS3BlobStore.h"
+#include "fdbclient/AsyncFileBlobStore.h"
 #include "fdbrpc/AsyncFileReadAhead.h"
 #include "flow/UnitTest.h"
 #include "flow/IConnection.h"
 
-Future<int64_t> AsyncFileS3BlobStoreRead::size() const {
+Future<int64_t> AsyncFileBlobStoreRead::size() const {
 	if (!m_size.isValid())
 		m_size = m_bstore->objectSize(m_bucket, m_object);
 	return m_size;
 }
 
-Future<int> AsyncFileS3BlobStoreRead::read(void* data, int length, int64_t offset) {
+Future<int> AsyncFileBlobStoreRead::read(void* data, int length, int64_t offset) {
 	return m_bstore->readObject(m_bucket, m_object, data, length, offset);
 }
 

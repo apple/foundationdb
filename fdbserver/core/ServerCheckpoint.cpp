@@ -19,7 +19,7 @@
  */
 
 #include "fdbserver/core/ServerCheckpoint.h"
-#include "fdbserver/core/RocksDBCheckpointUtils.actor.h"
+#include "fdbserver/core/RocksDBCheckpointUtils.h"
 
 ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint,
                                        const CheckpointAsKeyValues checkpointAsKeyValues,
