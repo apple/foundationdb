@@ -377,12 +377,16 @@ void last(const Reference<PTree<T>>& p, Version at, PTreeFinger<T>& f) {
 // modifies p to point to a PTree with the root of p removed
 template <class T>
 void removeRoot(Reference<PTree<T>>& p, Version at) {
-	if (!p->right(at))
+	const auto& right = p->right(at);
+	if (!right)
 		p = p->left(at);
-	else if (!p->left(at))
-		p = p->right(at);
 	else {
-		bool direction = p->right(at)->priority < p->left(at)->priority;
+		const auto& left = p->left(at);
+		if (!left) {
+			p = right;
+			return;
+		}
+		bool direction = right->priority < left->priority;
 		rotate(p, at, direction);
 		Reference<PTree<T>> child = p->child(direction, at);
 		removeRoot(child, at);
@@ -512,11 +516,13 @@ void demoteRoot(Reference<PTree<T>>& p, Version at) {
 		ASSERT(false);
 
 	uint32_t priority[2];
-	for (int i = 0; i < 2; i++)
-		if (p->child(i, at))
-			priority[i] = p->child(i, at)->priority;
+	for (int i = 0; i < 2; i++) {
+		const auto& child = p->child(i, at);
+		if (child)
+			priority[i] = child->priority;
 		else
 			priority[i] = 0;
+	}
 
 	bool higherDirection = priority[1] > priority[0];
 
