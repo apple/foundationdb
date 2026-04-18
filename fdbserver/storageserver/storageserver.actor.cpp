@@ -12327,14 +12327,14 @@ Future<Void> rocksdbLogCleaner(std::string folder) {
 }
 
 // for creating a new storage server
-Future<Void> storageServer(IKeyValueStore* persistentData,
-                           StorageServerInterface ssi,
-                           Tag seedTag,
-                           Version startVersion,
-                           Version tssSeedVersion,
-                           ReplyPromise<InitializeStorageReply> recruitReply,
-                           Reference<AsyncVar<ServerDBInfo> const> db,
-                           std::string folder) {
+static Future<Void> storageServerImpl(IKeyValueStore* persistentData,
+                                      StorageServerInterface ssi,
+                                      Tag seedTag,
+                                      Version startVersion,
+                                      Version tssSeedVersion,
+                                      ReplyPromise<InitializeStorageReply> recruitReply,
+                                      Reference<AsyncVar<ServerDBInfo> const> db,
+                                      std::string folder) {
 	StorageServer self(persistentData, db, ssi);
 	self.shardAware = persistentData->shardAware();
 	Future<Void> ssCore;
@@ -12457,6 +12457,28 @@ Future<Void> storageServer(IKeyValueStore* persistentData,
 		co_await delay(0);
 		throw err;
 	}
+}
+
+Future<Void> storageServer(IKeyValueStore* persistentData,
+                           StorageServerInterface ssi,
+                           Tag seedTag,
+                           Version startVersion,
+                           Version tssSeedVersion,
+                           ReplyPromise<InitializeStorageReply> recruitReply,
+                           Reference<AsyncVar<ServerDBInfo> const> db,
+                           std::string folder) {
+	return storageServerImpl(persistentData, ssi, seedTag, startVersion, tssSeedVersion, recruitReply, db, folder);
+}
+
+Future<Void> storageServer(IKeyValueStore* const& persistentData,
+                           StorageServerInterface const& ssi,
+                           Tag const& seedTag,
+                           Version const& startVersion,
+                           Version const& tssSeedVersion,
+                           ReplyPromise<InitializeStorageReply> const& recruitReply,
+                           Reference<AsyncVar<ServerDBInfo> const> const& db,
+                           std::string const& folder) {
+	return storageServerImpl(persistentData, ssi, seedTag, startVersion, tssSeedVersion, recruitReply, db, folder);
 }
 
 // for recovering an existing storage server
