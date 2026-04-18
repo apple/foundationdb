@@ -437,7 +437,7 @@ TLogFn tLogFnForOptions(TLogOptions options) {
 }
 
 struct DiskStore {
-	enum COMPONENT { TLogData, Storage, BlobWorker, UNSET };
+	enum COMPONENT { TLogData, Storage, UNSET };
 
 	UID storeID = UID();
 	std::string filename = ""; // For KVStoreMemory just the base filename to be passed to IDiskQueue
@@ -2010,7 +2010,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state Reference<AsyncVar<UID>> activeSharedTLog(new AsyncVar<UID>());
 	state WorkerCache<InitializeBackupReply> backupWorkerCache;
 	state WorkerCache<TLogInterface> logRouterCache;
-	state Future<Void> blobWorkerFuture = Void();
 
 	state WorkerSnapRequest lastSnapReq;
 	// Here the key is UID+role, as we still send duplicate requests to a process which is both storage and tlog
@@ -2982,9 +2981,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		endRole(Role::WORKER, interf.id(), "WorkerError", ok, e);
 		errorForwarders.clear(false);
 		sharedLogs.clear();
-		// blobWorkerFuture is also in errorForwarders so it's double refcounted. If we don't cancel it, it'll never
-		// close it's IKVS and this will hang, leaving a zombie worker
-		blobWorkerFuture.cancel();
 
 		if (e.code() != error_code_actor_cancelled) {
 			// actor_cancelled:
