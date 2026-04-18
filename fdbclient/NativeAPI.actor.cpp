@@ -5108,7 +5108,8 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanContext parentSpa
 ACTOR Future<Void> readVersionBatcher(DatabaseContext* cx,
                                       FutureStream<DatabaseContext::VersionRequest> versionStream,
                                       TransactionPriority priority,
-                                      uint32_t flags) {
+                                      uint32_t flags,
+                                      Optional<int64_t> maxGrvQueueDelayMS) {
 	state std::vector<Promise<GetReadVersionReply>> requests;
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> collection = actorCollection(addActor.getFuture());
@@ -5184,7 +5185,7 @@ ACTOR Future<Void> readVersionBatcher(DatabaseContext* cx,
 
 			Future<Void> batch = incrementalBroadcastWithError(
 			    getConsistentReadVersion(
-			        span.context, cx, count, priority, flags, std::move(tags), std::move(debugID), Optional<int64_t>()),
+			        span.context, cx, count, priority, flags, std::move(tags), std::move(debugID), maxGrvQueueDelayMS),
 			    std::move(requests),
 			    CLIENT_KNOBS->BROADCAST_BATCH_SIZE);
 
@@ -5420,33 +5421,12 @@ Future<Version> TransactionState::getReadVersion(uint32_t flags) {
 	SpanContext derivedSpanContext = generateSpanID(cx->transactionTracingSample, spanContext);
 	Optional<UID> versionDebugID = readOptions.present() ? readOptions.get().debugID : Optional<UID>();
 
-	if (options.maxGrvQueueDelayMS.present()) {
-		// Do not coalesce thresholded GRV requests in versionBatcher. Each request's
-		// max queue delay is an individual admission decision at the GRV proxy, and
-		// rejected requests should not sit behind a client-side batch.
-		TransactionTagMap<uint32_t> tags;
-		for (auto tag : options.tags) {
-			++tags[tag];
-		}
-
-		startTime = now();
-		return extractReadVersion(Reference<TransactionState>::addRef(this),
-		                          location,
-		                          spanContext,
-		                          getConsistentReadVersion(derivedSpanContext,
-		                                                   cx.getPtr(),
-		                                                   1,
-		                                                   options.priority,
-		                                                   flags,
-		                                                   std::move(tags),
-		                                                   versionDebugID,
-		                                                   options.maxGrvQueueDelayMS),
-		                          metadataVersion);
-	}
-
-	auto& batcher = cx->versionBatcher[flags];
+	// Include the max GRV queue delay in the batcher key so coalesced requests
+	// share the same proxy-side admission threshold.
+	auto& batcher = cx->versionBatcher[DatabaseContext::VersionBatcherKey(flags, options.maxGrvQueueDelayMS)];
 	if (!batcher.actor.isValid()) {
-		batcher.actor = readVersionBatcher(cx.getPtr(), batcher.stream.getFuture(), options.priority, flags);
+		batcher.actor = readVersionBatcher(
+		    cx.getPtr(), batcher.stream.getFuture(), options.priority, flags, options.maxGrvQueueDelayMS);
 	}
 
 	auto const req = DatabaseContext::VersionRequest(derivedSpanContext, options.tags, versionDebugID);
