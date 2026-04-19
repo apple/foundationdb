@@ -61,7 +61,7 @@ struct Peer : ReferenceCounted<Peer> {
 6. On failure: exponential backoff (INITIAL_RECONNECTION_TIME to MAX_RECONNECTION_TIME, growth factor 1.5x)
 7. `discardUnreliablePackets()` on disconnect; reliable packets resent after reconnect
 
-### EndpointMap -- [`FlowTransport.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbrpc/FlowTransport.actor.cpp)`:90-230`
+### EndpointMap -- [`FlowTransport.cpp`](https://github.com/apple/foundationdb/blob/main/fdbrpc/FlowTransport.cpp)`:90-230`
 
 Maps tokens to local message receivers:
 
@@ -330,7 +330,7 @@ Client-side request distribution:
 |------|---------|
 | [`fdbrpc/include/fdbrpc/fdbrpc.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/fdbrpc.h) | RequestStream, ReplyPromise, NetSAV, request/reply pattern |
 | [`fdbrpc/include/fdbrpc/FlowTransport.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/FlowTransport.h) | Endpoint, Peer, FlowTransport API |
-| [`fdbrpc/FlowTransport.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbrpc/FlowTransport.actor.cpp) | Transport implementation, EndpointMap, connection actors |
+| [`fdbrpc/FlowTransport.cpp`](https://github.com/apple/foundationdb/blob/main/fdbrpc/FlowTransport.cpp) | Transport implementation, EndpointMap, connection actors |
 | [`fdbrpc/include/fdbrpc/FailureMonitor.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/FailureMonitor.h) | Failure detection interface and implementation |
 | [`fdbrpc/include/fdbrpc/Locality.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/Locality.h) | LocalityData, ProcessClass, LBDistance |
 | [`fdbrpc/include/fdbrpc/ReplicationPolicy.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/ReplicationPolicy.h) | PolicyOne, PolicyAcross, PolicyAnd |
