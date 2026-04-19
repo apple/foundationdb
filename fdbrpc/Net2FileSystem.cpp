@@ -40,10 +40,95 @@
 #include "fdbrpc/AsyncFileEIO.actor.h"
 #include "fdbrpc/AsyncFileEncrypted.h"
 #include "fdbrpc/AsyncFileWinASIO.h"
-#include "fdbrpc/AsyncFileKAIO.actor.h"
+#include "fdbrpc/AsyncFileKAIO.h"
 #include "flow/AsioReactor.h"
 #include "flow/Platform.h"
 #include "fdbrpc/AsyncFileWriteChecker.h"
+#include "flow/UnitTest.h"
+
+#ifdef __linux__
+namespace {
+Future<Void> runAsyncFileKAIOTestOps(Reference<IAsyncFile> f, int numIterations, int fileSize, bool expectedToSucceed) {
+	void* buf = FastAllocator<4096>::allocate(); // we leak this if there is an error, but that shouldn't be a big deal
+
+	bool opTimedOut = false;
+
+	for (int iteration = 0; iteration < numIterations; ++iteration) {
+		std::vector<Future<Void>> futures;
+		for (int numOps = deterministicRandom()->randomInt(1, 20); numOps > 0; --numOps) {
+			if (deterministicRandom()->coinflip()) {
+				futures.push_back(
+				    success(f->read(buf, 4096, deterministicRandom()->randomInt(0, fileSize) / 4096 * 4096)));
+			} else {
+				futures.push_back(f->write(buf, 4096, deterministicRandom()->randomInt(0, fileSize) / 4096 * 4096));
+			}
+		}
+		for (int fIndex = 0; fIndex < futures.size(); ++fIndex) {
+			try {
+				co_await futures[fIndex];
+			} catch (Error& e) {
+				ASSERT(!expectedToSucceed);
+				ASSERT(e.code() == error_code_io_timeout);
+				opTimedOut = true;
+			}
+		}
+
+		try {
+			co_await (f->sync() && delay(0.1));
+			ASSERT(expectedToSucceed);
+		} catch (Error& e) {
+			ASSERT(!expectedToSucceed && e.code() == error_code_io_timeout);
+		}
+	}
+
+	FastAllocator<4096>::release(buf);
+
+	ASSERT(expectedToSucceed || opTimedOut);
+}
+} // namespace
+
+TEST_CASE("/fdbrpc/AsyncFileKAIO/RequestList") {
+	// This test does nothing in simulation because simulation doesn't support AsyncFileKAIO
+	if (!g_network->isSimulated()) {
+		Reference<IAsyncFile> f;
+		Optional<Error> err;
+		try {
+			f = co_await AsyncFileKAIO::open("/tmp/__KAIO_TEST_FILE__",
+			                                 IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_READWRITE |
+			                                     IAsyncFile::OPEN_CREATE,
+			                                 0666,
+			                                 nullptr);
+			int fileSize = 2 << 27; // ~100MB
+			co_await f->truncate(fileSize);
+
+			// Test that the request list works as intended with default timeout
+			AsyncFileKAIO::setTimeout(0.0);
+			co_await runAsyncFileKAIOTestOps(f, 100, fileSize, true);
+			ASSERT(!((AsyncFileKAIO*)f.getPtr())->failed);
+
+			// Test that the request list works as intended with long timeout
+			AsyncFileKAIO::setTimeout(20.0);
+			co_await runAsyncFileKAIOTestOps(f, 100, fileSize, true);
+			ASSERT(!((AsyncFileKAIO*)f.getPtr())->failed);
+
+			// Test that requests timeout correctly
+			AsyncFileKAIO::setTimeout(0.0001);
+			co_await runAsyncFileKAIOTestOps(f, 10, fileSize, false);
+			ASSERT(((AsyncFileKAIO*)f.getPtr())->failed);
+		} catch (Error& e) {
+			err = e;
+		}
+		if (err.present()) {
+			if (f) {
+				co_await AsyncFileEIO::deleteFile(f->getFilename(), true);
+			}
+			throw err.get();
+		}
+
+		co_await AsyncFileEIO::deleteFile(f->getFilename(), true);
+	}
+}
+#endif // __linux__
 
 // Opens a file for asynchronous I/O
 Future<Reference<class IAsyncFile>> Net2FileSystem::open(const std::string& filename, int64_t flags, int64_t mode) {

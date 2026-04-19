@@ -1,5 +1,5 @@
 /*
- * AsyncFileKAIO.actor.h
+ * AsyncFileKAIO.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -21,13 +21,6 @@
 #pragma once
 #ifdef __linux__
 
-// Keep actorcompiler enabled for the TEST_CASE at the bottom of this file.
-#if defined(NO_INTELLISENSE) && !defined(FLOW_ASYNCFILEKAIO_ACTOR_G_H)
-#define FLOW_ASYNCFILEKAIO_ACTOR_G_H
-#include "fdbrpc/AsyncFileKAIO.actor.g.h"
-#elif !defined(FLOW_ASYNCFILEKAIO_ACTOR_H)
-#define FLOW_ASYNCFILEKAIO_ACTOR_H
-
 #include "flow/IAsyncFile.h"
 
 #include <stdio.h>
@@ -38,10 +31,8 @@
 #include "fdbrpc/linux_kaio.h"
 #include "flow/Knobs.h"
 #include "fdbrpc/Stats.h"
-#include "flow/UnitTest.h"
 #include "crc32/crc32c.h"
 #include "flow/genericactors.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 // Set this to true to enable detailed KAIO request logging, which currently is written to a hardcoded location
 // /data/v7/fdb/
@@ -94,8 +85,8 @@ private:
 #pragma pack(push, 1)
 	struct OpLogEntry {
 		OpLogEntry() : result(0) {}
-		enum EOperation { READ = 1, WRITE = 2, SYNC = 3, TRUNCATE = 4 };
-		enum EStage { START = 1, LAUNCH = 2, REQUEUE = 3, COMPLETE = 4, READY = 5 };
+		enum EOperation{ READ = 1, WRITE = 2, SYNC = 3, TRUNCATE = 4 };
+		enum EStage{ START = 1, LAUNCH = 2, REQUEUE = 3, COMPLETE = 4, READY = 5 };
 		int64_t timestamp;
 		uint32_t id;
 		uint32_t checksum;
@@ -860,88 +851,6 @@ void AsyncFileKAIO::KAIOLogEvent(FILE* logFile,
 }
 #endif
 
-Future<Void> runTestOps(Reference<IAsyncFile> f, int numIterations, int fileSize, bool expectedToSucceed) {
-	void* buf = FastAllocator<4096>::allocate(); // we leak this if there is an error, but that shouldn't be a big deal
-
-	bool opTimedOut = false;
-
-	for (int iteration = 0; iteration < numIterations; ++iteration) {
-		std::vector<Future<Void>> futures;
-		for (int numOps = deterministicRandom()->randomInt(1, 20); numOps > 0; --numOps) {
-			if (deterministicRandom()->coinflip()) {
-				futures.push_back(
-				    success(f->read(buf, 4096, deterministicRandom()->randomInt(0, fileSize) / 4096 * 4096)));
-			} else {
-				futures.push_back(f->write(buf, 4096, deterministicRandom()->randomInt(0, fileSize) / 4096 * 4096));
-			}
-		}
-		for (int fIndex = 0; fIndex < futures.size(); ++fIndex) {
-			try {
-				co_await futures[fIndex];
-			} catch (Error& e) {
-				ASSERT(!expectedToSucceed);
-				ASSERT(e.code() == error_code_io_timeout);
-				opTimedOut = true;
-			}
-		}
-
-		try {
-			co_await (f->sync() && delay(0.1));
-			ASSERT(expectedToSucceed);
-		} catch (Error& e) {
-			ASSERT(!expectedToSucceed && e.code() == error_code_io_timeout);
-		}
-	}
-
-	FastAllocator<4096>::release(buf);
-
-	ASSERT(expectedToSucceed || opTimedOut);
-}
-
-TEST_CASE("/fdbrpc/AsyncFileKAIO/RequestList") {
-	// This test does nothing in simulation because simulation doesn't support AsyncFileKAIO
-	if (!g_network->isSimulated()) {
-		state Reference<IAsyncFile> f;
-		try {
-			Reference<IAsyncFile> f_ = wait(
-			    AsyncFileKAIO::open("/tmp/__KAIO_TEST_FILE__",
-			                        IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE,
-			                        0666,
-			                        nullptr));
-			f = f_;
-			state int fileSize = 2 << 27; // ~100MB
-			wait(f->truncate(fileSize));
-
-			// Test that the request list works as intended with default timeout
-			AsyncFileKAIO::setTimeout(0.0);
-			wait(runTestOps(f, 100, fileSize, true));
-			ASSERT(!((AsyncFileKAIO*)f.getPtr())->failed);
-
-			// Test that the request list works as intended with long timeout
-			AsyncFileKAIO::setTimeout(20.0);
-			wait(runTestOps(f, 100, fileSize, true));
-			ASSERT(!((AsyncFileKAIO*)f.getPtr())->failed);
-
-			// Test that requests timeout correctly
-			AsyncFileKAIO::setTimeout(0.0001);
-			wait(runTestOps(f, 10, fileSize, false));
-			ASSERT(((AsyncFileKAIO*)f.getPtr())->failed);
-		} catch (Error& e) {
-			state Error err = e;
-			if (f) {
-				wait(AsyncFileEIO::deleteFile(f->getFilename(), true));
-			}
-			throw err;
-		}
-
-		wait(AsyncFileEIO::deleteFile(f->getFilename(), true));
-	}
-
-	return Void();
-}
-
 AsyncFileKAIO::Context AsyncFileKAIO::ctx;
 
-#include "flow/unactorcompiler.h"
-#endif
 #endif
