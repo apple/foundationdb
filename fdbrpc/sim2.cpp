@@ -40,7 +40,7 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/Util.h"
 #include "flow/IAsyncFile.h"
-#include "fdbrpc/AsyncFileCached.actor.h"
+#include "fdbrpc/AsyncFileCached.h"
 #include "fdbrpc/AsyncFileEncrypted.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/AsyncFileNonDurable.h"

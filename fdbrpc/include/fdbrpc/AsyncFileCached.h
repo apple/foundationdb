@@ -1,5 +1,5 @@
 /*
- * AsyncFileCached.actor.h
+ * AsyncFileCached.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,14 +20,6 @@
 
 #pragma once
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
-#if defined(NO_INTELLISENSE) && !defined(FLOW_ASYNCFILECACHED_ACTOR_G_H)
-#define FLOW_ASYNCFILECACHED_ACTOR_G_H
-#include "fdbrpc/AsyncFileCached.actor.g.h"
-#elif !defined(FLOW_ASYNCFILECACHED_ACTOR_H)
-#define FLOW_ASYNCFILECACHED_ACTOR_H
-
 #include <boost/intrusive/list.hpp>
 #include <type_traits>
 
@@ -36,7 +28,6 @@
 #include "flow/Knobs.h"
 #include "flow/TDMetric.h"
 #include "flow/network.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace bi = boost::intrusive;
 struct EvictablePage {
@@ -181,11 +172,11 @@ public:
 		return tag(f, length);
 	}
 
-	ACTOR static Future<Void> write_impl(AsyncFileCached* self, void const* data, int length, int64_t offset) {
+	static Future<Void> write_impl(AsyncFileCached* self, void const* data, int length, int64_t offset) {
 		// If there is a truncate in progress before the the write position then we must
 		// wait for it to complete.
 		if (length + offset > self->currentTruncateSize)
-			wait(self->currentTruncate);
+			co_await self->currentTruncate;
 		++self->countFileCacheWrites;
 		++self->countCacheWrites;
 		Future<Void> f = read_write_impl<true>(self, static_cast<const uint8_t*>(data), length, offset);
@@ -193,8 +184,7 @@ public:
 			++self->countFileCacheWritesBlocked;
 			++self->countCacheWritesBlocked;
 		}
-		wait(f);
-		return Void();
+		co_await f;
 	}
 
 	Future<Void> write(void const* data, int length, int64_t offset) override {
@@ -212,12 +202,11 @@ public:
 
 	// This wrapper for the actual truncation operation enforces ordering of truncates.
 	// It maintains currentTruncate and currentTruncateSize so writers can wait behind truncates that would affect them.
-	ACTOR static Future<Void> truncate_impl(AsyncFileCached* self, int64_t size) {
-		wait(self->currentTruncate);
+	static Future<Void> truncate_impl(AsyncFileCached* self, int64_t size) {
+		co_await self->currentTruncate;
 		self->currentTruncateSize = size;
 		self->currentTruncate = self->changeFileSize(size);
-		wait(self->currentTruncate);
-		return Void();
+		co_await self->currentTruncate;
 	}
 
 	Future<Void> sync() override { return waitAndSync(this, flush()); }
@@ -332,23 +321,23 @@ private:
 	static Future<Reference<IAsyncFile>> open_impl(std::string filename, int flags, int mode);
 
 	// Opens a file that uses the FDB in-memory page cache
-	ACTOR static Future<Reference<IAsyncFile>> open_impl(std::string filename,
-	                                                     int flags,
-	                                                     int mode,
-	                                                     Reference<EvictablePageCache> pageCache) {
+	static Future<Reference<IAsyncFile>> open_impl(std::string filename,
+	                                               int flags,
+	                                               int mode,
+	                                               Reference<EvictablePageCache> pageCache) {
 		try {
 			TraceEvent("AFCUnderlyingOpenBegin").detail("Filename", filename);
 			if (flags & IAsyncFile::OPEN_CACHED_READ_ONLY)
 				flags = (flags & ~IAsyncFile::OPEN_READWRITE) | IAsyncFile::OPEN_READONLY;
 			else
 				flags = (flags & ~IAsyncFile::OPEN_READONLY) | IAsyncFile::OPEN_READWRITE;
-			state Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(
-			    filename, flags | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_UNBUFFERED, mode));
+			Reference<IAsyncFile> f = co_await IAsyncFileSystem::filesystem()->open(
+			    filename, flags | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_UNBUFFERED, mode);
 			TraceEvent("AFCUnderlyingOpenEnd").detail("Filename", filename);
-			int64_t l = wait(f->size());
+			int64_t l = co_await f->size();
 			TraceEvent("AFCUnderlyingSize").detail("Filename", filename).detail("Size", l);
-			state Reference<AsyncFileCached> cachedFile = makeReference<AsyncFileCached>(f, filename, l, pageCache);
-			return Reference<IAsyncFile>(cachedFile);
+			Reference<AsyncFileCached> cachedFile = makeReference<AsyncFileCached>(f, filename, l, pageCache);
+			co_return Reference<IAsyncFile>(cachedFile);
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled)
 				openFiles.erase(filename);
@@ -360,10 +349,9 @@ private:
 
 	Future<Void> quiesce();
 
-	ACTOR static Future<Void> waitAndSync(AsyncFileCached* self, Future<Void> flush) {
-		wait(flush);
-		wait(self->uncached->sync());
-		return Void();
+	static Future<Void> waitAndSync(AsyncFileCached* self, Future<Void> flush) {
+		co_await flush;
+		co_await self->uncached->sync();
 	}
 
 	template <bool writing>
@@ -434,10 +422,9 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 		return notReading;
 	}
 
-	ACTOR static Future<Void> waitAndWrite(AFCPage* self, void const* data, int length, int offset) {
-		wait(self->notReading);
+	static Future<Void> waitAndWrite(AFCPage* self, void const* data, int length, int offset) {
+		co_await self->notReading;
 		memcpy(static_cast<uint8_t*>(self->data) + offset, data, length);
-		return Void();
 	}
 
 	Future<Void> readZeroCopy() {
@@ -490,18 +477,17 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 		return notReading;
 	}
 
-	ACTOR static Future<Void> waitAndRead(AFCPage* self, void* data, int length, int offset) {
-		wait(self->notReading);
+	static Future<Void> waitAndRead(AFCPage* self, void* data, int length, int offset) {
+		co_await self->notReading;
 		memcpy(data, static_cast<uint8_t const*>(self->data) + offset, length);
-		return Void();
 	}
 
-	ACTOR static Future<Void> readThrough(AFCPage* self) {
+	static Future<Void> readThrough(AFCPage* self) {
 		ASSERT(!self->valid);
-		state void* dst = self->data;
+		void* dst = self->data;
 		if (self->pageOffset < self->owner->prevLength) {
 			try {
-				int _ = wait(self->owner->uncached->read(dst, self->pageCache->pageSize, self->pageOffset));
+				int _ = co_await self->owner->uncached->read(dst, self->pageCache->pageSize, self->pageOffset);
 				if (_ != self->pageCache->pageSize)
 					TraceEvent("ReadThroughShortRead")
 					    .detail("ReadAmount", _)
@@ -516,18 +502,17 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 		// If the memory we read into wasn't orphaned while we were waiting on the read then set valid to true
 		if (dst == self->data)
 			self->valid = true;
-		return Void();
 	}
 
-	ACTOR static Future<Void> writeThrough(AFCPage* self, Promise<Void> writing) {
+	static Future<Void> writeThrough(AFCPage* self, Promise<Void> writing) {
 		// writeThrough can be called on a page that is not dirty, just to wait for a previous writeThrough to finish.
 		// In that case we don't want to do any disk I/O
 		try {
-			state bool dirty = self->dirty;
+			bool dirty = self->dirty;
 			++self->writeThroughCount;
 			self->updateFlushableIndex();
 
-			wait(self->notReading && self->notFlushing);
+			co_await (self->notReading && self->notFlushing);
 
 			if (dirty) {
 				// Wait for rate control if it is set
@@ -539,7 +524,7 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 						            FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_IO_SIZE; // round up
 						ASSERT(allowance > 0);
 					}
-					wait(self->owner->getRateControl()->getAllowance(allowance));
+					co_await self->owner->getRateControl()->getAllowance(allowance);
 				}
 
 				if (self->pageOffset + self->pageCache->pageSize > self->owner->length) {
@@ -551,7 +536,7 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 
 				auto f = self->owner->uncached->write(self->data, self->pageCache->pageSize, self->pageOffset);
 
-				wait(f);
+				co_await f;
 			}
 		} catch (Error& e) {
 			--self->writeThroughCount;
@@ -566,8 +551,6 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 		                      // overlapping write and sync operations
 
 		self->pageCache->try_evict();
-
-		return Void();
 	}
 
 	Future<Void> flush() {
@@ -610,10 +593,9 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 		return truncate_impl(this);
 	}
 
-	ACTOR static Future<Void> truncate_impl(AFCPage* self) {
-		wait(self->notReading && self->notFlushing && yield());
+	static Future<Void> truncate_impl(AFCPage* self) {
+		co_await (self->notReading && self->notFlushing && yield());
 		delete self;
-		return Void();
 	}
 
 	AFCPage(AsyncFileCached* owner, int64_t offset)
@@ -668,6 +650,3 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 	int flushableIndex; // index in owner->flushable[]
 	int zeroCopyRefCount; // references held by "zero-copy" reads
 };
-
-#include "flow/unactorcompiler.h"
-#endif
