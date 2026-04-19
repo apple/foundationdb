@@ -18,28 +18,39 @@ One process is elected Cluster Controller (CC). It is the "brain" of the cluster
 
 ### Coordinators
 
-Typically 3 or 5 processes (addresses hardcoded in cluster file) that run a `leaderRegister` actor. They don't store user data -- only coordination metadata.
+Typically 3 or 5 processes (addresses hardcoded in cluster file) that run a `leaderRegister` actor. They don't store user data -- only coordination metadata. Coordinators are not involved in committing transactions; they hold ~1KB of state that changes only during recovery.
 
-### Generation Register -- [`Coordination.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/coordinator/Coordination.actor.cpp)`:67-131`
+### Generation Register (Paxos Acceptor) -- [`Coordination.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/coordinator/Coordination.actor.cpp)`:121-173`
 
-The fundamental primitive: a register with generation numbers that prevents stale writes.
+The fundamental primitive: a register with generation numbers that prevents stale writes. Each coordinator runs a `localGenerationReg()` actor that implements a single Paxos acceptor. The generation register protocol is isomorphic to single-decree Paxos:
+
+| Paxos concept | FDB equivalent |
+|---|---|
+| Ballot number | `UniqueGeneration` (uint64 generation + UID tiebreaker) |
+| Prepare(n) | `GenerationRegReadRequest(key, gen)` |
+| Promise(n, v) | `GenerationRegReadReply(value, writeGen, readGen)` |
+| Accept(n, v) | `GenerationRegWriteRequest(kv, gen)` |
+| Quorum of acceptors | Majority of coordinators (n/2 + 1) |
 
 ```
 struct GenerationRegVal {
-    UniqueGeneration readGen;   // highest read generation
-    UniqueGeneration writeGen;  // highest write generation
-    Optional<Value> val;        // the coordinated value
+    UniqueGeneration readGen;   // highest generation promised (Paxos: highest prepare seen)
+    UniqueGeneration writeGen;  // highest generation accepted (Paxos: highest accept seen)
+    Optional<Value> val;        // the accepted value
 };
 ```
 
-**Read protocol** (`GenerationRegReadRequest`):
-- If client's generation > stored readGen: update readGen
+**Read protocol** (`GenerationRegReadRequest`) -- equivalent to Paxos **prepare**:
+- If client's generation > stored readGen: update readGen (promise not to accept lower)
+- Persist to disk (`store->commit()`)
 - Return (value, writeGen, readGen)
 
-**Write protocol** (`GenerationRegWriteRequest`):
+**Write protocol** (`GenerationRegWriteRequest`) -- equivalent to Paxos **accept**:
 - Check: `readGen <= requestGen AND writeGen < requestGen`
-- If valid: update writeGen and value, return writeGen
-- If invalid: return `max(readGen, writeGen)` for client retry
+- If valid: update writeGen and value, persist, return writeGen
+- If invalid: return `max(readGen, writeGen)` so client can retry with a higher generation
+
+The core consensus logic in `localGenerationReg()` is ~50 lines of code.
 
 ### Election Algorithm -- [`LeaderElection.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/LeaderElection.actor.cpp)
 
@@ -63,9 +74,9 @@ struct GenerationRegVal {
 - `changeID` -- unique ID for this leadership claim (top 7 bits = process class fitness)
 - `forward` flag -- signals connection string update
 
-### Coordinated State -- [`CoordinatedState.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/CoordinatedState.cpp)`:71-210`
+### Coordinated State (Paxos Proposer) -- [`CoordinatedState.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/CoordinatedState.cpp)`:71-210`
 
-Higher-level abstraction over generation registers for cluster-wide state:
+Higher-level abstraction that implements the Paxos proposer role over generation registers. This is where the quorum logic lives -- individual coordinators are acceptors that know nothing about quorums; `CoordinatedStateImpl` drives the two-phase protocol across the quorum.
 
 ```
 struct CoordinatedStateImpl {
@@ -73,13 +84,27 @@ struct CoordinatedStateImpl {
     UniqueGeneration gen;
     uint64_t conflictGen;
     bool doomed;
+    bool initial;        // true if no prior value has been written
 };
 ```
 
-**Read**: Replicated read from quorum of coordinators, returns highest-generation value.
-**Write**: Replicated write with generation check. Throws `coordinated_state_conflict` if `wgen != gen`.
+**`read()`** -- Paxos prepare phase (two rounds):
+1. **Round 1**: Send `GenerationRegReadRequest(key, UniqueGeneration())` to all coordinators. Wait for majority. Learns the highest existing generation.
+2. **Compute ballot**: `conflictGen = max(all seen generations) + 1`. Create `gen = UniqueGeneration(conflictGen, randomUID)`.
+3. **Round 2**: Send `GenerationRegReadRequest(key, gen)` to all coordinators. Wait for majority. Each acceptor promises not to accept writes below `gen`. Returns the value with the highest `writeGen`.
 
-Used by recovery to store/update `DBCoreState` (log system configuration).
+**`setExclusive()`** -- Paxos accept phase:
+- Send `GenerationRegWriteRequest(key, value, gen)` to all coordinators.
+- For initial state (no prior writes): wait for **all** replicas. Otherwise: wait for **majority** (n/2 + 1).
+- If any coordinator returns a generation > `gen`, throw `coordinated_state_conflict` (another proposer won).
+
+**Quorum sizes** (from `replicatedRead` / `replicatedWrite`):
+- Read quorum: `replicas.size() / 2 + 1` (majority)
+- Write quorum: `replicas.size() / 2 + 1` (majority), except initial writes require all replicas
+
+**`replicatedRead()`** has a subtlety: it races two sets of futures -- replies with a value vs. replies without. If a majority report empty (no value), it returns the empty reply with the highest `rgen`. Otherwise it returns the non-empty reply with the highest `writeGen`. This handles the bootstrap case where some coordinators have been written and others haven't.
+
+Used by recovery to store/update `DBCoreState` (log system configuration). This is the only mutable state managed by coordinators.
 
 ---
 
