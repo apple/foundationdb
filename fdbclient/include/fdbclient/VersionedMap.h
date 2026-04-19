@@ -663,9 +663,7 @@ void check(const Reference<PTree<T>>& p) {
 // This essentially gets rid of node versions that will never be read (beyond 5s worth of versions)
 // TODO look into making this per-version compaction. (We could keep track of updated nodes at each version for example)
 template <class T>
-void compact(Reference<PTree<T>>& p,
-             Version newOldestVersion,
-             std::unordered_set<PTree<T>*>& visited) {
+void compact(Reference<PTree<T>>& p, Version newOldestVersion, std::unordered_set<PTree<T>*>& visited) {
 	if (!p) {
 		return;
 	}

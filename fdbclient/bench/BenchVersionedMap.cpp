@@ -113,7 +113,9 @@ struct StringRefFixture {
 	std::vector<StringRef> keys;
 	VersionedMapHarness<StringRef> tree;
 
-	static std::unique_ptr<StringRefFixture> create(int64_t keyCount, bool populateTree, bool uniqueSortedKeys = false) {
+	static std::unique_ptr<StringRefFixture> create(int64_t keyCount,
+	                                                bool populateTree,
+	                                                bool uniqueSortedKeys = false) {
 		auto fixture = std::make_unique<StringRefFixture>();
 		resetVersionedMapBenchmarkRandom();
 		fixture->keys.reserve(keyCount);
