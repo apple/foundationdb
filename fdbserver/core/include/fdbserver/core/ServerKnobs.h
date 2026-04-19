@@ -1102,6 +1102,9 @@ public:
 	// Rolling window duration over which the average bytes moved by DD is calculated for the 'MovingData' trace event.
 	double DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL;
 	int64_t MOVING_WINDOW_SAMPLE_SIZE;
+	// Probability of running the consistency check between teams and teamsByServerIDs
+	// in getTeamByServers (simulation only). 0.0 in prod, random [0.1, 0.5) in simulation.
+	double DD_TEAMS_BY_SERVER_IDS_CONSISTENCY_CHECK_PROB_SIM;
 
 	// Storage Server
 	double STORAGE_LOGGING_DELAY;
