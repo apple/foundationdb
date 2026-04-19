@@ -1079,18 +1079,16 @@ public:
 		Promise<Void> connected;
 		doAcceptHandshake(self, connected);
 		try {
-			auto res = co_await race(connected.getFuture(), delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
-			if (res.index() == 0) {
+			auto res = co_await timeout(connected.getFuture(), FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT);
+			if (res.present()) {
 				static SimpleCounter<int64_t>* countServerTLSHandshakesSucceed =
 				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakesSucceed");
 				countServerTLSHandshakesSucceed->increment(1);
-			} else if (res.index() == 1) {
+			} else {
 				static SimpleCounter<int64_t>* countServerTLSHandshakesTimedout =
 				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakesTimedout");
 				countServerTLSHandshakesTimedout->increment(1);
 				throw connection_failed();
-			} else {
-				UNREACHABLE();
 			}
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled) {
@@ -1183,18 +1181,16 @@ public:
 		Promise<Void> connected;
 		doConnectHandshake(self, connected);
 		try {
-			auto res = co_await race(connected.getFuture(), delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
-			if (res.index() == 0) {
+			auto res = co_await timeout(connected.getFuture(), FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT);
+			if (res.present()) {
 				static SimpleCounter<int64_t>* countClientTLSHandshakesSucceed =
 				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakesSucceed");
 				countClientTLSHandshakesSucceed->increment(1);
-			} else if (res.index() == 1) {
+			} else {
 				static SimpleCounter<int64_t>* countClientTLSHandshakesTimedout =
 				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakesTimedout");
 				countClientTLSHandshakesTimedout->increment(1);
 				throw connection_failed();
-			} else {
-				UNREACHABLE();
 			}
 		} catch (Error& e) {
 			// Either the connection failed, or was cancelled by the caller
