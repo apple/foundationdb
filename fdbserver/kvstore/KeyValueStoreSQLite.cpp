@@ -1958,7 +1958,7 @@ private:
 			                   std::max(1, SERVER_KNOBS->SPRING_CLEANING_LAZY_DELETE_BATCH_SIZE));
 			bool vacuumFinished = false;
 
-			loop {
+			while (true) {
 				double begin = now();
 				bool canDelete = !freeTableEmpty &&
 				                 (now() < lazyDeleteEnd || workPerformed.lazyDeletePages <
