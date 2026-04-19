@@ -85,8 +85,8 @@ private:
 #pragma pack(push, 1)
 	struct OpLogEntry {
 		OpLogEntry() : result(0) {}
-		enum EOperation{ READ = 1, WRITE = 2, SYNC = 3, TRUNCATE = 4 };
-		enum EStage{ START = 1, LAUNCH = 2, REQUEUE = 3, COMPLETE = 4, READY = 5 };
+		enum EOperation { READ = 1, WRITE = 2, SYNC = 3, TRUNCATE = 4 };
+		enum EStage { START = 1, LAUNCH = 2, REQUEUE = 3, COMPLETE = 4, READY = 5 };
 		int64_t timestamp;
 		uint32_t id;
 		uint32_t checksum;
