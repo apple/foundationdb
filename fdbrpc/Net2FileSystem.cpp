@@ -37,7 +37,7 @@
 
 #include "fdbrpc/AsyncFileCached.h"
 #include "fdbrpc/AsyncFileChaos.h"
-#include "fdbrpc/AsyncFileEIO.actor.h"
+#include "fdbrpc/AsyncFileEIO.h"
 #include "fdbrpc/AsyncFileEncrypted.h"
 #include "fdbrpc/AsyncFileWinASIO.h"
 #include "fdbrpc/AsyncFileKAIO.h"
