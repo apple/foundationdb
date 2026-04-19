@@ -1,5 +1,5 @@
 /*
- * Net2.actor.cpp
+ * Net2.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -74,7 +74,7 @@
 #ifdef WIN32
 #include <mmsystem.h>
 #endif
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/CoroUtils.h"
 
 // Defined to track the stack limit
 extern "C" intptr_t g_stackYieldLimit;
@@ -434,8 +434,8 @@ public:
 	  : id(nondeterministicRandom()->randomUniqueID()), socket(io_service) {}
 
 	// This is not part of the IConnection interface, because it is wrapped by INetwork::connect()
-	ACTOR static Future<Reference<IConnection>> connect(boost::asio::io_service* ios, NetworkAddress addr) {
-		state Reference<Connection> self(new Connection(*ios));
+	static Future<Reference<IConnection>> connect(boost::asio::io_service* ios, NetworkAddress addr) {
+		Reference<Connection> self(new Connection(*ios));
 
 		self->peer_address = addr;
 		try {
@@ -444,9 +444,9 @@ public:
 			Future<Void> onConnected = p.getFuture();
 			self->socket.async_connect(to, std::move(p));
 
-			wait(onConnected);
+			co_await onConnected;
 			self->init();
-			return self;
+			co_return self;
 		} catch (Error&) {
 			// Either the connection failed, or was cancelled by the caller
 			self->closeSocket();
@@ -637,13 +637,13 @@ class UDPSocket : public IUDPSocket, ReferenceCounted<UDPSocket> {
 	bool isPublic = false;
 
 public:
-	ACTOR static Future<Reference<IUDPSocket>> connect(boost::asio::io_service* io_service,
-	                                                   Optional<NetworkAddress> toAddress,
-	                                                   bool isV6) {
-		state Reference<UDPSocket> self(new UDPSocket(*io_service, toAddress, isV6));
+	static Future<Reference<IUDPSocket>> connect(boost::asio::io_service* io_service,
+	                                             Optional<NetworkAddress> toAddress,
+	                                             bool isV6) {
+		Reference<UDPSocket> self(new UDPSocket(*io_service, toAddress, isV6));
 		ASSERT(!toAddress.present() || toAddress.get().ip.isV6() == isV6);
 		if (!toAddress.present()) {
-			return self;
+			co_return self;
 		}
 		try {
 			if (toAddress.present()) {
@@ -652,10 +652,10 @@ public:
 				Future<Void> onConnected = p.getFuture();
 				self->socket.async_connect(to, std::move(p));
 
-				wait(onConnected);
+				co_await onConnected;
 			}
 			self->init();
-			return self;
+			co_return self;
 		} catch (...) {
 			self->closeSocket();
 			throw;
@@ -804,20 +804,20 @@ public:
 	NetworkAddress getListenAddress() const override { return listenAddress; }
 
 private:
-	ACTOR static Future<Reference<IConnection>> doAccept(Listener* self) {
-		state Reference<Connection> conn(new Connection(self->io_service));
-		state tcp::acceptor::endpoint_type peer_endpoint;
+	static Future<Reference<IConnection>> doAccept(Listener* self) {
+		Reference<Connection> conn(new Connection(self->io_service));
+		tcp::acceptor::endpoint_type peer_endpoint;
 		try {
 			// Peer address not known until accept succeeds
 			BindPromise p("N2_AcceptError", UID(), NetworkAddress());
 			auto f = p.getFuture();
 			self->acceptor.async_accept(conn->getSocket(), peer_endpoint, std::move(p));
-			wait(f);
+			co_await f;
 			auto peer_address = peer_endpoint.address().is_v6() ? IPAddress(peer_endpoint.address().to_v6().to_bytes())
 			                                                    : IPAddress(peer_endpoint.address().to_v4().to_ulong());
 			conn->accept(NetworkAddress(peer_address, peer_endpoint.port()));
 
-			return conn;
+			co_return conn;
 		} catch (...) {
 			conn->close();
 			throw;
@@ -907,17 +907,17 @@ public:
 	    ssl_sock(socket, context->mutate()), sslContext(context) {}
 
 	// This is not part of the IConnection interface, because it is wrapped by INetwork::connect()
-	ACTOR static Future<Reference<IConnection>> connect(boost::asio::io_service* ios,
-	                                                    Reference<ReferencedObject<boost::asio::ssl::context>> context,
-	                                                    NetworkAddress addr,
-	                                                    tcp::socket* existingSocket = nullptr) {
+	static Future<Reference<IConnection>> connect(boost::asio::io_service* ios,
+	                                              Reference<ReferencedObject<boost::asio::ssl::context>> context,
+	                                              NetworkAddress addr,
+	                                              tcp::socket* existingSocket = nullptr) {
 		std::pair<IPAddress, uint16_t> peerIP = std::make_pair(addr.ip, addr.port);
 		auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
 		if (iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
 			if (now() < iter->second.second) {
 				if (iter->second.first >= FLOW_KNOBS->TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS) {
 					TraceEvent("TLSOutgoingConnectionThrottlingWarning").suppressFor(1.0).detail("PeerIP", addr);
-					wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
+					co_await delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT);
 					static SimpleCounter<int64_t>* countClientTLSHandshakeThrottled =
 					    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakeThrottled");
 					countClientTLSHandshakeThrottled->increment(1);
@@ -932,10 +932,10 @@ public:
 			Reference<SSLConnection> self(new SSLConnection(context, existingSocket));
 			self->peer_address = addr;
 			self->init();
-			return self;
+			co_return self;
 		}
 
-		state Reference<SSLConnection> self(new SSLConnection(*ios, context));
+		Reference<SSLConnection> self(new SSLConnection(*ios, context));
 		self->peer_address = addr;
 		try {
 			auto to = tcpEndpoint(self->peer_address);
@@ -943,9 +943,9 @@ public:
 			Future<Void> onConnected = p.getFuture();
 			self->socket.async_connect(to, std::move(p));
 
-			wait(onConnected);
+			co_await onConnected;
 			self->init();
-			return self;
+			co_return self;
 		} catch (Error&) {
 			// Either the connection failed, or was cancelled by the caller
 			self->closeSocket();
@@ -954,7 +954,7 @@ public:
 	}
 
 	// Connect with hostname for SNI (Server Name Indication) support
-	ACTOR static Future<Reference<IConnection>> connectWithHostname(
+	static Future<Reference<IConnection>> connectWithHostname(
 	    boost::asio::io_service* ios,
 	    Reference<ReferencedObject<boost::asio::ssl::context>> context,
 	    NetworkAddress addr,
@@ -965,7 +965,7 @@ public:
 			if (now() < iter->second.second) {
 				if (iter->second.first >= FLOW_KNOBS->TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS) {
 					TraceEvent("TLSOutgoingConnectionThrottlingWarning").suppressFor(1.0).detail("PeerIP", addr);
-					wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
+					co_await delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT);
 					throw connection_failed();
 				}
 			} else {
@@ -973,7 +973,7 @@ public:
 			}
 		}
 
-		state Reference<SSLConnection> self(new SSLConnection(*ios, context));
+		Reference<SSLConnection> self(new SSLConnection(*ios, context));
 		self->peer_address = addr;
 		self->sni_hostname = hostname; // Store hostname for SNI during handshake
 
@@ -985,12 +985,12 @@ public:
 			Future<Void> onConnected = p.getFuture();
 			self->socket.async_connect(to, std::move(p));
 
-			wait(onConnected);
+			co_await onConnected;
 
 			// SNI will be set later in doConnectHandshake before SSL handshake
 
 			self->init();
-			return self;
+			co_return self;
 		} catch (Error&) {
 			// Either the connection failed, or was cancelled by the caller
 			self->closeSocket();
@@ -1004,8 +1004,8 @@ public:
 		init();
 	}
 
-	ACTOR static void doAcceptHandshake(Reference<SSLConnection> self, Promise<Void> connected) {
-		state Hold<int> holder;
+	static Future<Void> doAcceptHandshake(Uncancellable, Reference<SSLConnection> self, Promise<Void> connected) {
+		Hold<int> holder;
 
 		try {
 			Future<Void> onHandshook;
@@ -1036,8 +1036,8 @@ public:
 				onHandshook = p.getFuture();
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::server, std::move(p));
 			}
-			wait(onHandshook);
-			wait(delay(0, TaskPriority::Handshake));
+			co_await onHandshook;
+			co_await delay(0, TaskPriority::Handshake);
 			connected.send(Void());
 		} catch (...) {
 			self->closeSocket();
@@ -1045,8 +1045,8 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> acceptHandshakeWrapper(Reference<SSLConnection> self) {
-		state std::pair<IPAddress, uint16_t> peerIP;
+	static Future<Void> acceptHandshakeWrapper(Reference<SSLConnection> self) {
+		std::pair<IPAddress, uint16_t> peerIP;
 		peerIP = std::make_pair(self->getPeerAddress().ip, static_cast<uint16_t>(0));
 		auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
 		if (iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
@@ -1055,7 +1055,7 @@ public:
 					TraceEvent("TLSIncomingConnectionThrottlingWarning")
 					    .suppressFor(1.0)
 					    .detail("PeerIP", peerIP.first.toString());
-					wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
+					co_await delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT);
 					self->closeSocket();
 					static SimpleCounter<int64_t>* countServerTLSHandshakeThrottled =
 					    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakeThrottled");
@@ -1067,29 +1067,26 @@ public:
 			}
 		}
 
-		wait(g_network->networkInfo.handshakeLock->take(
-		    getTaskPriorityFromInt(FLOW_KNOBS->TLS_HANDSHAKE_FLOWLOCK_PRIORITY)));
-		state FlowLock::Releaser releaser(*g_network->networkInfo.handshakeLock);
+		co_await g_network->networkInfo.handshakeLock->take(
+		    getTaskPriorityFromInt(FLOW_KNOBS->TLS_HANDSHAKE_FLOWLOCK_PRIORITY));
+		FlowLock::Releaser releaser(*g_network->networkInfo.handshakeLock);
 		static SimpleCounter<int64_t>* countServerTLSHandshakeLocked =
 		    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakeLocked");
 		countServerTLSHandshakeLocked->increment(1);
 
 		Promise<Void> connected;
-		doAcceptHandshake(self, connected);
+		doAcceptHandshake(Uncancellable(), self, connected);
 		try {
-			choose {
-				when(wait(connected.getFuture())) {
-					static SimpleCounter<int64_t>* countServerTLSHandshakesSucceed =
-					    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakesSucceed");
-					countServerTLSHandshakesSucceed->increment(1);
-					return Void();
-				}
-				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
-					static SimpleCounter<int64_t>* countServerTLSHandshakesTimedout =
-					    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakesTimedout");
-					countServerTLSHandshakesTimedout->increment(1);
-					throw connection_failed();
-				}
+			auto res = co_await timeout(connected.getFuture(), FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT);
+			if (res.present()) {
+				static SimpleCounter<int64_t>* countServerTLSHandshakesSucceed =
+				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakesSucceed");
+				countServerTLSHandshakesSucceed->increment(1);
+			} else {
+				static SimpleCounter<int64_t>* countServerTLSHandshakesTimedout =
+				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakesTimedout");
+				countServerTLSHandshakesTimedout->increment(1);
+				throw connection_failed();
 			}
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled) {
@@ -1109,8 +1106,8 @@ public:
 
 	Future<Void> acceptHandshake() override { return acceptHandshakeWrapper(Reference<SSLConnection>::addRef(this)); }
 
-	ACTOR static void doConnectHandshake(Reference<SSLConnection> self, Promise<Void> connected) {
-		state Hold<int> holder;
+	static Future<Void> doConnectHandshake(Uncancellable, Reference<SSLConnection> self, Promise<Void> connected) {
+		Hold<int> holder;
 
 		try {
 			Future<Void> onHandshook;
@@ -1160,8 +1157,8 @@ public:
 				onHandshook = p.getFuture();
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::client, std::move(p));
 			}
-			wait(onHandshook);
-			wait(delay(0, TaskPriority::Handshake));
+			co_await onHandshook;
+			co_await delay(0, TaskPriority::Handshake);
 			connected.send(Void());
 		} catch (...) {
 			self->closeSocket();
@@ -1169,30 +1166,27 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> connectHandshakeWrapper(Reference<SSLConnection> self) {
-		wait(g_network->networkInfo.handshakeLock->take(
-		    getTaskPriorityFromInt(FLOW_KNOBS->TLS_HANDSHAKE_FLOWLOCK_PRIORITY)));
-		state FlowLock::Releaser releaser(*g_network->networkInfo.handshakeLock);
+	static Future<Void> connectHandshakeWrapper(Reference<SSLConnection> self) {
+		co_await g_network->networkInfo.handshakeLock->take(
+		    getTaskPriorityFromInt(FLOW_KNOBS->TLS_HANDSHAKE_FLOWLOCK_PRIORITY));
+		FlowLock::Releaser releaser(*g_network->networkInfo.handshakeLock);
 		static SimpleCounter<int64_t>* countClientTLSHandshakeLocked =
 		    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakeLocked");
 		countClientTLSHandshakeLocked->increment(1);
 
 		Promise<Void> connected;
-		doConnectHandshake(self, connected);
+		doConnectHandshake(Uncancellable(), self, connected);
 		try {
-			choose {
-				when(wait(connected.getFuture())) {
-					static SimpleCounter<int64_t>* countClientTLSHandshakesSucceed =
-					    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakesSucceed");
-					countClientTLSHandshakesSucceed->increment(1);
-					return Void();
-				}
-				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
-					static SimpleCounter<int64_t>* countClientTLSHandshakesTimedout =
-					    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakesTimedout");
-					countClientTLSHandshakesTimedout->increment(1);
-					throw connection_failed();
-				}
+			auto res = co_await timeout(connected.getFuture(), FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT);
+			if (res.present()) {
+				static SimpleCounter<int64_t>* countClientTLSHandshakesSucceed =
+				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakesSucceed");
+				countClientTLSHandshakesSucceed->increment(1);
+			} else {
+				static SimpleCounter<int64_t>* countClientTLSHandshakesTimedout =
+				    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakesTimedout");
+				countClientTLSHandshakesTimedout->increment(1);
+				throw connection_failed();
 			}
 		} catch (Error& e) {
 			// Either the connection failed, or was cancelled by the caller
@@ -1381,21 +1375,21 @@ public:
 	NetworkAddress getListenAddress() const override { return listenAddress; }
 
 private:
-	ACTOR static Future<Reference<IConnection>> doAccept(SSLListener* self) {
-		state Reference<SSLConnection> conn(new SSLConnection(self->io_service, self->contextVar->get()));
-		state tcp::acceptor::endpoint_type peer_endpoint;
+	static Future<Reference<IConnection>> doAccept(SSLListener* self) {
+		Reference<SSLConnection> conn(new SSLConnection(self->io_service, self->contextVar->get()));
+		tcp::acceptor::endpoint_type peer_endpoint;
 		try {
 			// Peer address not known until accept succeeds
 			BindPromise p("N2_AcceptError", UID(), NetworkAddress());
 			auto f = p.getFuture();
 			self->acceptor.async_accept(conn->getSocket(), peer_endpoint, std::move(p));
-			wait(f);
+			co_await f;
 			auto peer_address = peer_endpoint.address().is_v6() ? IPAddress(peer_endpoint.address().to_v6().to_bytes())
 			                                                    : IPAddress(peer_endpoint.address().to_v4().to_ulong());
 
 			conn->accept(NetworkAddress(peer_address, peer_endpoint.port(), false, true));
 
-			return conn;
+			co_return conn;
 		} catch (...) {
 			conn->close();
 			throw;
@@ -1436,24 +1430,24 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 	updateNow();
 }
 
-ACTOR static Future<Void> reloadCertificatesOnChange(
+static Future<Void> reloadCertificatesOnChange(
     TLSConfig config,
     std::function<void()> onPolicyFailure,
     AsyncVar<Reference<ReferencedObject<boost::asio::ssl::context>>>* contextVar,
     Reference<TLSPolicy>* policy) {
 	if (FLOW_KNOBS->TLS_CERT_REFRESH_DELAY_SECONDS <= 0) {
-		return Void();
+		co_return;
 	}
-	loop {
+	while (true) {
 		// Early in bootup, the filesystem might not be initialized yet.  Wait until it is.
 		if (IAsyncFileSystem::filesystem() != nullptr) {
 			break;
 		}
-		wait(delay(1.0));
+		co_await delay(1.0);
 	}
-	state int mismatches = 0;
-	state AsyncTrigger fileChanged;
-	state std::vector<Future<Void>> lifetimes;
+	int mismatches = 0;
+	AsyncTrigger fileChanged;
+	std::vector<Future<Void>> lifetimes;
 	const int& intervalSeconds = FLOW_KNOBS->TLS_CERT_REFRESH_DELAY_SECONDS;
 	lifetimes.push_back(watchFileForChanges(
 	    config.getCertificatePathSync(), &fileChanged, &intervalSeconds, "TLSCertificateRefreshStatError"));
@@ -1461,12 +1455,12 @@ ACTOR static Future<Void> reloadCertificatesOnChange(
 	    watchFileForChanges(config.getKeyPathSync(), &fileChanged, &intervalSeconds, "TLSKeyRefreshStatError"));
 	lifetimes.push_back(
 	    watchFileForChanges(config.getCAPathSync(), &fileChanged, &intervalSeconds, "TLSCARefreshStatError"));
-	loop {
-		wait(fileChanged.onTrigger());
+	while (true) {
+		co_await fileChanged.onTrigger();
 		TraceEvent("TLSCertificateRefreshBegin").log();
 
 		try {
-			LoadedTLSConfig loaded = wait(config.loadAsync());
+			LoadedTLSConfig loaded = co_await config.loadAsync();
 			boost::asio::ssl::context context(boost::asio::ssl::context::tls);
 			ConfigureSSLContext(loaded, context);
 			*policy = makeReference<TLSPolicy>(loaded, onPolicyFailure);
@@ -1551,15 +1545,15 @@ void Net2::initTLS(ETLSInitState targetState) {
 	tlsInitializedState = targetState;
 }
 
-ACTOR Future<Void> Net2::logTimeOffset() {
-	loop {
+Future<Void> Net2::logTimeOffset() {
+	while (true) {
 		double processTime = timer_monotonic();
 		double systemTime = timer();
 		TraceEvent("ProcessTimeOffset")
 		    .detailf("ProcessTime", "%lf", processTime)
 		    .detailf("SystemTime", "%lf", systemTime)
 		    .detailf("OffsetFromSystemTime", "%lf", processTime - systemTime);
-		wait(::delay(FLOW_KNOBS->TIME_OFFSET_LOGGING_INTERVAL));
+		co_await ::delay(FLOW_KNOBS->TIME_OFFSET_LOGGING_INTERVAL);
 	}
 }
 
@@ -2022,12 +2016,10 @@ Future<Reference<IUDPSocket>> Net2::createUDPSocket(bool isV6) {
 	return UDPSocket::connect(&reactor.ios, Optional<NetworkAddress>(), isV6);
 }
 
-ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* self,
-                                                                         std::string host,
-                                                                         std::string service) {
-	state tcp::resolver tcpResolver(self->reactor.ios);
+static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* self, std::string host, std::string service) {
+	tcp::resolver tcpResolver(self->reactor.ios);
 	Promise<std::vector<NetworkAddress>> promise;
-	state Future<std::vector<NetworkAddress>> result = promise.getFuture();
+	Future<std::vector<NetworkAddress>> result = promise.getFuture();
 
 	tcpResolver.async_resolve(
 	    host, service, [promise](const boost::system::error_code& ec, tcp::resolver::iterator iter) {
@@ -2061,7 +2053,7 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* s
 	    });
 
 	try {
-		wait(ready(result));
+		co_await ready(result);
 	} catch (Error& e) {
 		if (e.code() == error_code_lookup_failed) {
 			self->dnsCache.remove(host, service);
@@ -2072,7 +2064,7 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* s
 	std::vector<NetworkAddress> ret = result.get();
 	self->dnsCache.add(host, service, ret);
 
-	return ret;
+	co_return ret;
 }
 
 Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint(const std::string& host, const std::string& service) {
@@ -2363,10 +2355,10 @@ TEST_CASE("flow/Net2/ThreadSafeQueue/Threaded") {
 	noUnseed = true; // multi-threading inherently non-deterministic
 
 	ThreadSafeQueue<int> queue;
-	state std::vector<QueueTestThreadState> perThread = { QueueTestThreadState(0, 1000000),
-		                                                  QueueTestThreadState(1, 100000),
-		                                                  QueueTestThreadState(2, 1000000) };
-	state std::vector<Future<Void>> doneProducing;
+	std::vector<QueueTestThreadState> perThread = { QueueTestThreadState(0, 1000000),
+		                                            QueueTestThreadState(1, 100000),
+		                                            QueueTestThreadState(2, 1000000) };
+	std::vector<Future<Void>> doneProducing;
 
 	int total = 0;
 	for (int t = 0; t < perThread.size(); ++t) {
@@ -2402,29 +2394,28 @@ TEST_CASE("flow/Net2/ThreadSafeQueue/Threaded") {
 			queue.canSleep();
 	}
 
-	wait(waitForAll(doneProducing));
+	co_await waitForAll(doneProducing);
 
 	// Make sure we continue on the main thread.
 	Promise<Void> signal;
-	state Future<Void> doneConsuming = signal.getFuture();
+	Future<Void> doneConsuming = signal.getFuture();
 	g_network->onMainThread(std::move(signal), TaskPriority::DefaultOnMainThread);
-	wait(doneConsuming);
+	co_await doneConsuming;
 
 	for (int t = 0; t < perThread.size(); ++t) {
 		waitThread(perThread[t].handle);
 		perThread[t].checkDone();
 	}
-	return Void();
 }
 
 TEST_CASE("noSim/flow/Net2/onMainThreadFIFO") {
 	// Verifies that signals processed by onMainThread() are executed in order.
 	noUnseed = true; // multi-threading inherently non-deterministic
 
-	state std::vector<QueueTestThreadState> perThread = { QueueTestThreadState(0, 1000000),
-		                                                  QueueTestThreadState(1, 100000),
-		                                                  QueueTestThreadState(2, 1000000) };
-	state std::vector<Future<Void>> doneProducing;
+	std::vector<QueueTestThreadState> perThread = { QueueTestThreadState(0, 1000000),
+		                                            QueueTestThreadState(1, 100000),
+		                                            QueueTestThreadState(2, 1000000) };
+	std::vector<Future<Void>> doneProducing;
 	for (int t = 0; t < perThread.size(); ++t) {
 		auto& s = perThread[t];
 		doneProducing.push_back(s.doneProducing.getFuture());
@@ -2441,17 +2432,16 @@ TEST_CASE("noSim/flow/Net2/onMainThreadFIFO") {
 			s.doneProducing.send(Void());
 		});
 	}
-	wait(waitForAll(doneProducing));
+	co_await waitForAll(doneProducing);
 
 	// Wait for one more onMainThread to wait for all scheduled signals to be executed.
 	Promise<Void> signal;
-	state Future<Void> doneConsuming = signal.getFuture();
+	Future<Void> doneConsuming = signal.getFuture();
 	g_network->onMainThread(std::move(signal), TaskPriority::DefaultOnMainThread);
-	wait(doneConsuming);
+	co_await doneConsuming;
 
 	for (int t = 0; t < perThread.size(); ++t) {
 		waitThread(perThread[t].handle);
 		perThread[t].checkDone();
 	}
-	return Void();
 }
