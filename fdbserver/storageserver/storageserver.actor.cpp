@@ -10977,8 +10977,9 @@ Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* storage) {
 	std::vector<Future<Optional<Value>>> pointFutures = { fFormat,        fID,      ftssPairID,   fssPairID,
 		                                                  fTssQuarantine, fVersion, fLogProtocol, fPrimaryLocality };
 	co_await waitForAll(pointFutures);
-	std::vector<Future<RangeResult>> rangeFutures = { fFormat,        fID,      ftssPairID,   fssPairID,
-		                                              fTssQuarantine, fVersion, fLogProtocol, fPrimaryLocality };
+	std::vector<Future<RangeResult>> rangeFutures = { fShardAssigned,        fShardAvailable, fPendingCheckpoints,
+		                                              fCheckpoints,          fMoveInShards,   fStorageShards,
+		                                              fAccumulativeChecksum, fBulkLoadTask };
 	co_await waitForAll(rangeFutures);
 	co_await byteSampleSampleRecovered.getFuture();
 	TraceEvent("RestoringDurableState", data->thisServerID).log();
