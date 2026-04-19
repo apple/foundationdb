@@ -93,7 +93,8 @@ Plus supporting code: [`fdbserver/worker/`](https://github.com/apple/foundationd
 - Coordinators (typically 3 or 5, addresses in the cluster file) run a `leaderRegister` actor.
 - CC candidates send `CandidacyRequest`s. Coordinators track candidates and nominate based on process class fitness (encoded in top bits of `LeaderInfo.changeID`).
 - The winner becomes CC; losers detect this via `monitorLeader()` and defer.
-- Uses a generation register (`localGenerationReg`) for safe state transitions — reads and writes carry generation numbers to prevent stale updates.
+- Uses a generation register (`localGenerationReg`) for safe state transitions — reads and writes carry generation numbers to prevent stale updates. This protocol is isomorphic to single-decree Paxos (generation = ballot, read = prepare, write = accept), with quorum voting in `CoordinatedState`.
+- Coordinator state is persisted via `KeyValueStoreMemory` backed by a `DiskQueue` (`.fdq` files) -- the same engine used by TLogs.
 
 **Role recruitment:**
 - Worker processes register with CC via `registrationClient()` ([`worker.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/worker/worker.actor.cpp)).
@@ -106,7 +107,7 @@ Plus supporting code: [`fdbserver/worker/`](https://github.com/apple/foundationd
 - `ServerDBInfo` is the cluster-wide configuration broadcast. Contains: master interface, proxy lists, log system config, recovery state, latency band config.
 - Updated by CC and distributed to all workers. Workers react to changes (e.g., new proxy set).
 
-**Principal files:** [`ClusterController.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterController.actor.cpp), `ClusterControllerData.h`, [`Coordination.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/coordinator/Coordination.actor.cpp), [`LeaderElection.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/LeaderElection.actor.cpp), [`CoordinatedState.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/CoordinatedState.cpp), [`WorkerInterface.actor.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/WorkerInterface.actor.h)
+**Principal files:** [`ClusterController.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterController.actor.cpp), `ClusterController.h`, [`Coordination.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/coordinator/Coordination.actor.cpp), [`LeaderElection.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/LeaderElection.actor.cpp), [`CoordinatedState.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/CoordinatedState.cpp), [`WorkerInterface.actor.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/WorkerInterface.actor.h)
 
 ---
 
@@ -167,7 +168,7 @@ Phase 4: REPLY                      CommitProxy
 - Provides `peek()` interface: storage servers pull mutations by tag and version range.
 - Quorum replication: a mutation is committed when `f+1` of `2f+1` TLog replicas acknowledge.
 
-**Log System** ([`TagPartitionedLogSystem.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/logsystem/TagPartitionedLogSystem.actor.cpp)):
+**Log System** ([`TagPartitionedLogSystem.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/logsystem/TagPartitionedLogSystem.cpp)):
 - Abstraction over the set of TLog replicas.
 - `ILogSystem::push()` — sends mutations to all relevant TLog replicas, waits for quorum.
 - `ILogSystem::peek()` → `IPeekCursor` — merges results from multiple TLogs for a given tag, handling multi-generation log sets during recovery.
@@ -179,7 +180,7 @@ Phase 4: REPLY                      CommitProxy
 
 **Key dynamic behavior:** Storage servers are *consumers* of the log. They continuously peek their assigned tag, pulling committed mutations and applying them to local storage. This decoupling means commits don't wait for storage servers — only for TLog quorum.
 
-**Principal files:** [`TLogServer.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/tlog/TLogServer.actor.cpp), [`TagPartitionedLogSystem.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/logsystem/TagPartitionedLogSystem.actor.cpp), [`LogRouter.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/logrouter/LogRouter.cpp), [`LogSystem.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/LogSystem.h), [`LogSystemConfig.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/LogSystemConfig.h), [`IDiskQueue.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/IDiskQueue.h)
+**Principal files:** [`TLogServer.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/tlog/TLogServer.actor.cpp), [`TagPartitionedLogSystem.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/logsystem/TagPartitionedLogSystem.cpp), [`LogRouter.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/logrouter/LogRouter.cpp), [`LogSystem.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/LogSystem.h), [`LogSystemConfig.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/LogSystemConfig.h), [`IDiskQueue.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/IDiskQueue.h)
 
 ---
 
@@ -197,7 +198,7 @@ Phase 4: REPLY                      CommitProxy
 - **IKeyValueStore** interface: `readValue()`, `readRange()`, `set()`, `clear()`, `commit()`. All operations are on a versioned key-value store.
 - **RocksDB** ([`KeyValueStoreRocksDB.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreRocksDB.actor.cpp)) — primary production engine. Also a sharded variant ([`KeyValueStoreShardedRocksDB.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreShardedRocksDB.actor.cpp)) that uses per-shard column families.
 - **SQLite** ([`KeyValueStoreSQLite.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreSQLite.actor.cpp)) — legacy engine, still supported.
-- **Memory** ([`KeyValueStoreMemory.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreMemory.actor.cpp)) — for testing and special uses (e.g., txnStateStore during recovery).
+- **Memory** ([`KeyValueStoreMemory.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreMemory.actor.cpp)) — in-memory key-value store backed by a `DiskQueue` (`.fdq` append-only log files) for durability. Used by coordinators (Paxos state), TLogs (mutation queues), txnStateStore (recovery metadata), and testing.
 
 **Key dynamic behavior:** The storage server is *pull-based*. It pulls from the log system at its own pace. If a storage server falls behind, it catches up by reading more from TLogs. If it falls too far behind, it may be removed from its team and re-replicated. Reads at a given version are served from a snapshot — the SS maintains enough history to serve reads at any version between its oldest and current.
 
@@ -233,15 +234,16 @@ Phase 4: REPLY                      CommitProxy
 
 **What it is:** The state machine that reconstitutes the entire transaction system after a failure (master crash, network partition, coordinator change, etc.).
 
-**The 9 recovery states** (from [`RecoveryState.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/RecoveryState.h)):
-1. **UNINITIALIZED** — starting
-2. **READING_CSTATE** — read coordinated state from coordinators (learn about previous epoch)
-3. **LOCKING_CSTATE** — lock old TLogs to prevent split-brain
-4. **RECRUITING** — recruit new TLogs, CommitProxies, GrvProxies, Resolvers
-5. **RECOVERY_TRANSACTION** — replay the last epoch's committed-but-unapplied mutations; establish the recovery version
-6. **WRITING_CSTATE** — write the new epoch's coordinated state to coordinators
-7. **ACCEPTING_COMMITS** — new transaction system is live, accepting commits
-8. **ALL_LOGS_RECRUITED** — all TLog sets (including remote region) are populated
+**The 10 recovery states** (from [`RecoveryState.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/RecoveryState.h)):
+0. **UNINITIALIZED** — starting
+1. **READING_CSTATE** — read coordinated state from coordinators (learn about previous epoch)
+2. **LOCKING_CSTATE** — lock old TLogs to prevent split-brain
+3. **RECRUITING** — recruit new TLogs, CommitProxies, GrvProxies, Resolvers
+4. **RECOVERY_TRANSACTION** — replay the last epoch's committed-but-unapplied mutations; establish the recovery version
+5. **WRITING_CSTATE** — write the new epoch's coordinated state to coordinators
+6. **ACCEPTING_COMMITS** — new transaction system is live, accepting commits
+7. **ALL_LOGS_RECRUITED** — all TLog sets (including remote region) are populated
+8. **STORAGE_RECOVERED** — storage servers have recovered their data from the new TLogs
 9. **FULLY_RECOVERED** — old TLog data fully consumed; old generations can be discarded
 
 **Key operations during recovery:**
@@ -250,7 +252,7 @@ Phase 4: REPLY                      CommitProxy
 - `trackTlogRecovery()` — monitors TLog set completeness and writes coordinated state updates
 - `provisionalMaster()` — handles the gap between old and new transaction systems
 
-**Principal files:** [`ClusterRecovery.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterRecovery.actor.cpp), [`ClusterRecovery.actor.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterRecovery.actor.h), [`RecoveryState.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/RecoveryState.h), [`DBCoreState.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/DBCoreState.h), [`CoordinatedState.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/CoordinatedState.cpp), [`TagPartitionedLogSystem.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/logsystem/TagPartitionedLogSystem.actor.cpp) (newEpoch)
+**Principal files:** [`ClusterRecovery.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterRecovery.actor.cpp), [`ClusterRecovery.actor.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterRecovery.actor.h), [`RecoveryState.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/RecoveryState.h), [`DBCoreState.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/DBCoreState.h), [`CoordinatedState.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/CoordinatedState.cpp), [`TagPartitionedLogSystem.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/logsystem/TagPartitionedLogSystem.cpp) (newEpoch)
 
 ---
 

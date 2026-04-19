@@ -102,7 +102,7 @@ When in-memory data exceeds `targetVolatileBytes`:
 
 ---
 
-## Log System -- [`TagPartitionedLogSystem.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/logsystem/TagPartitionedLogSystem.actor.cpp)
+## Log System -- [`TagPartitionedLogSystem.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/logsystem/TagPartitionedLogSystem.cpp)
 
 Abstraction over the set of TLog replicas.
 
@@ -236,7 +236,7 @@ Optional per-storage-server version tracking:
 | File | Purpose |
 |------|---------|
 | [`fdbserver/tlog/TLogServer.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/tlog/TLogServer.actor.cpp) | TLog server: push, peek, spill, DiskQueue |
-| [`fdbserver/logsystem/TagPartitionedLogSystem.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/logsystem/TagPartitionedLogSystem.actor.cpp) | LogSystem: push/peek/pop across TLog replicas |
+| [`fdbserver/logsystem/TagPartitionedLogSystem.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/logsystem/TagPartitionedLogSystem.cpp) | LogSystem: push/peek/pop across TLog replicas |
 | [`fdbserver/core/include/fdbserver/core/LogSystem.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/LogSystem.h) | ILogSystem, IPeekCursor interfaces |
 | [`fdbserver/core/include/fdbserver/core/LogSystemConfig.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/LogSystemConfig.h) | Log system configuration and epoch tracking |
 | [`fdbserver/core/include/fdbserver/core/IDiskQueue.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/IDiskQueue.h) | IDiskQueue interface for TLog persistence |

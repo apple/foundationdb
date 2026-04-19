@@ -106,6 +106,24 @@ struct CoordinatedStateImpl {
 
 Used by recovery to store/update `DBCoreState` (log system configuration). This is the only mutable state managed by coordinators.
 
+### Coordinator Storage -- [`OnDemandStore`](https://github.com/apple/foundationdb/blob/main/fdbserver/coordinator/OnDemandStore.cpp), [`DiskQueue`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/DiskQueue.actor.cpp)
+
+Each coordinator's Paxos state (generation numbers and the coordinated value) is persisted via `KeyValueStoreMemory` -- an in-memory key-value store backed by a `DiskQueue` for durability.
+
+**On-disk format:**
+- Two files per coordinator: `coordination-0.fdq` and `coordination-1.fdq` in the process's data directory
+- `.fdq` = **F**oundation**D**B **Q**ueue -- an append-only circular log that alternates between the two files
+- Entries are checksummed (xxhash3 in DiskQueueVersion::V2)
+- `KeyValueStoreMemory` periodically snapshots the full in-memory state into the log, after which older entries are reclaimed
+
+**Access pattern:**
+- `OnDemandStore` is a lazy wrapper: opens the `KeyValueStoreMemory` only on first access (coordinator processes that are never contacted don't create files)
+- `localGenerationReg()` calls `store->readValue(key)` on each request and `store->set()` + `store->commit()` to persist generation updates
+- `store->commit()` flushes to the `.fdq` log, making Paxos promises and accepts crash-safe
+- The memory budget is 500MB (`keyValueStoreMemory(path, id, 500e6)`) -- vastly more than needed for the ~1KB of coordination state, but it's the standard `KeyValueStoreMemory` interface
+
+This is the same storage engine used by transaction logs for their mutation queues and by `txnStateStore` during recovery.
+
 ---
 
 ## ClusterControllerData -- `ClusterController.h:122-3412`

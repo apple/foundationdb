@@ -203,9 +203,17 @@ Legacy engine. Simple SQL-backed KV store.
 
 ### Memory Engine -- [`KeyValueStoreMemory.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreMemory.actor.cpp)
 
-In-memory map-based engine:
-- Used for testing
-- Used for `txnStateStore` during recovery (ephemeral metadata)
+In-memory key-value store backed by a [`DiskQueue`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/DiskQueue.actor.cpp) (append-only circular log) for durability:
+- All mutations are logged to `.fdq` files (a pair of alternating files, checksummed with xxhash3)
+- On recovery, the DiskQueue log is replayed to reconstruct the in-memory state
+- Periodic snapshots write the full state to the log so older entries can be reclaimed
+- Two backing containers: `IKeyValueContainer` (std::map-like, default) or `radix_tree` (`MEMORY_RADIXTREE` type)
+
+**Users:**
+- **Coordinator Paxos state** -- `OnDemandStore` creates a `KeyValueStoreMemory` per coordinator to persist generation register state (see [Cluster Controller & Coordination](subsystem_04_cluster_controller.md#coordinator-storage))
+- **Transaction log mutation queues** -- TLogs use `KeyValueStoreMemory` with a DiskQueue for their durable mutation log
+- **`txnStateStore`** during recovery -- ephemeral metadata reconstructed from TLog data
+- **Testing** -- in-memory storage engine for simulation tests
 
 ---
 
