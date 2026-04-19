@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 #
-# Test backup and restore from s3.
+# Test backup and restore from blob storage (S3, GCS, Azure, or MockS3Server).
 #
 # In the below we start a small FDB cluster, populate it with
-# some data and then start up MockS3Server or use S3
-# if it is available. We then run a backup to 'S3' and then
+# some data and then start up MockS3Server or use S3/GCS/Azure
+# if configured. We then run a backup to blob storage and then
 # a restore. We verify the restore is the same as the original.
 #
 # Debugging:
-#   - Run with -x flag: bash -x s3_backup_test.sh...
-#   - Preserve test data: PRESERVE_TEST_DATA=1 ./s3_backup_test.sh ...
+#   - Run with -x flag: bash -x blob_backup_restore_test.sh...
+#   - Preserve test data: PRESERVE_TEST_DATA=1 ./blob_backup_restore_test.sh ...
 #     This will leave all test data including MockS3 persistence files
 #     in the test scratch directory for analysis after the test completes.
 #
 # Usage:
-#   s3_backup_unified.sh <source_dir> <build_dir> [scratch_dir] [--encrypt]
+#   blob_backup_restore_test.sh <source_dir> <build_dir> [scratch_dir] [--encrypt]
 #
 # See https://apple.github.io/foundationdb/backups.html
 
@@ -104,7 +104,7 @@ function test_s3_backup_and_restore {
     err "Failed loading data into fdb"
     return 1
   fi
-  log "Run s3 backup"
+  log "Run blob storage backup"
   if ! run_backup "${local_build_dir}" "${local_scratch_dir}" "${local_url}" "${TAG}" "${local_encryption_key_file}" "" "${credentials}"; then
     err "Failed backup"
     return 1
@@ -121,7 +121,7 @@ function test_s3_backup_and_restore {
   log "Testing encryption mismatches"
   test_encryption_mismatches "${local_build_dir}" "${local_scratch_dir}" "${local_url}" "${TAG}" "${local_encryption_key_file}" "${credentials}"
 
-  log "Restore from s3"
+  log "Restore from blob storage"
   if ! run_restore "${local_build_dir}" "${local_scratch_dir}" "${local_url}" "${TAG}" "${local_encryption_key_file}" "" "${credentials}"; then
     err "Failed restore"
     return 1

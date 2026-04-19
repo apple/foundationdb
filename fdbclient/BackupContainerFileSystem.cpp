@@ -26,7 +26,7 @@
 #endif
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BackupContainerLocalDirectory.h"
-#include "fdbclient/BackupContainerS3BlobStore.h"
+#include "fdbclient/BackupContainerBlobStore.h"
 #include "fdbclient/JsonBuilder.h"
 #include "flow/StreamCipher.h"
 #include "flow/UnitTest.h"
@@ -190,8 +190,9 @@ public:
 						minVer = rf.version;
 					if (rf.version > maxVer)
 						maxVer = rf.version;
-				} else
+				} else {
 					throw restore_unknown_file_type();
+				}
 				co_await yield();
 			}
 		}
@@ -429,7 +430,7 @@ public:
 		if (logs.empty())
 			return;
 
-		Version snapshotBeginVersion = desc->snapshots.size() > 0 ? desc->snapshots[0].beginVersion : invalidVersion;
+		Version snapshotBeginVersion = !desc->snapshots.empty() ? desc->snapshots[0].beginVersion : invalidVersion;
 		Version begin = std::max(scanBegin, desc->minLogBegin.get());
 		TraceEvent("ContinuousLogEnd")
 		    .detail("ScanBegin", scanBegin)
@@ -685,7 +686,7 @@ public:
 		    .detail("PLogsFiles", plogs.size())
 		    .detail("Snapshots", desc.snapshots.size());
 
-		if (plogs.size() > 0) {
+		if (!plogs.empty()) {
 			desc.partitioned = true;
 			logs.swap(plogs);
 		} else {
@@ -1202,7 +1203,7 @@ public:
 			co_await (store(logs, bc->listLogFiles(minKeyRangeVersion, restorable.targetVersion, false)) &&
 			          store(plogs, bc->listLogFiles(minKeyRangeVersion, restorable.targetVersion, true)));
 
-			if (plogs.size() > 0) {
+			if (!plogs.empty()) {
 				logs.swap(plogs);
 				// sort by tag ID so that filterDuplicates works.
 				std::sort(logs.begin(), logs.end(), [](const LogFile& a, const LogFile& b) {
@@ -1805,16 +1806,12 @@ Reference<BackupContainerFileSystem> BackupContainerFileSystem::openContainerFS(
 			}
 
 			// The URL parameters contain blobstore endpoint tunables as well as possible backup-specific options.
-			S3BlobStoreEndpoint::ParametersT backupParams;
-			Reference<S3BlobStoreEndpoint> bstore =
-			    S3BlobStoreEndpoint::fromString(url, blobstoreProxy, &resource, &lastOpenError, &backupParams);
+			IBlobStoreEndpoint::ParametersT backupParams;
+			Reference<IBlobStoreEndpoint> bstore =
+			    IBlobStoreEndpoint::fromString(url, blobstoreProxy, &resource, &lastOpenError, &backupParams);
 
-			if (resource.empty())
-				throw backup_invalid_url();
-			for (auto c : resource)
-				if (!isalnum(c) && c != '_' && c != '-' && c != '.' && c != '/')
-					throw backup_invalid_url();
-			r = makeReference<BackupContainerS3BlobStore>(
+			BackupContainerBlobStore::validateBackupUrl(resource);
+			r = makeReference<BackupContainerBlobStore>(
 			    bstore, resource, backupParams, encryptionKeyFileName, isBackup);
 		}
 #ifdef BUILD_AZURE_BACKUP
@@ -1909,7 +1906,7 @@ Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<IBackup
 	}
 
 	VectorRef<uint8_t> sendBuf = content;
-	while (sendBuf.size() > 0) {
+	while (!sendBuf.empty()) {
 		int n = std::min(sendBuf.size(), deterministicRandom()->randomInt(1, 16384));
 		co_await f->append(sendBuf.begin(), n);
 		sendBuf.pop_front(n);
@@ -2378,15 +2375,15 @@ TEST_CASE("/backup/logs_continuous") {
 
 void printFileList(BackupFileList& backupFileList) {
 	printf("\nRangeFiles count:%lu", backupFileList.ranges.size());
-	for (auto r : backupFileList.ranges)
+	for (const auto& r : backupFileList.ranges)
 		printf("\n%s", r.toString().c_str());
 
 	printf("\nLogFiles count:%lu", backupFileList.logs.size());
-	for (auto l : backupFileList.logs)
+	for (const auto& l : backupFileList.logs)
 		printf("\n%s", l.toString().c_str());
 
 	printf("\nSnapshotFiles count:%lu", backupFileList.snapshots.size());
-	for (auto s : backupFileList.snapshots)
+	for (const auto& s : backupFileList.snapshots)
 		printf("\n%" PRId64 ", %" PRId64 ", %s, %" PRId64 "\n",
 		       s.beginVersion,
 		       s.endVersion,

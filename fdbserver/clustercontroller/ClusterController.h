@@ -26,6 +26,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
+#include "ClusterHealthMonitor.h"
 #include "RatekeeperMonitor.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
@@ -3382,6 +3383,8 @@ public:
 	std::vector<std::pair<RecruitStorageRequest, double>> outstandingStorageRequests;
 	ActorCollection ac;
 	UpdateWorkerList updateWorkerList;
+	Reference<cluster_health::WorkerEventProvider> clusterHealthWorkerEventProvider;
+	cluster_health::Monitor clusterHealthMonitor;
 	Future<Void> outstandingRequestChecker;
 	Future<Void> outstandingRemoteRequestChecker;
 	AsyncTrigger updateDBInfo;
@@ -3459,33 +3462,9 @@ public:
 	ClusterControllerData(ClusterControllerFullInterface const& ccInterface,
 	                      LocalityData const& locality,
 	                      ServerCoordinators const& coordinators,
-	                      Reference<AsyncVar<Optional<UID>>> clusterId)
-	  : gotProcessClasses(false), gotFullyRecoveredConfig(false), shouldCommitSuicide(false),
-	    clusterControllerProcessId(locality.processId()), clusterControllerDcId(locality.dcId()), id(ccInterface.id()),
-	    clusterId(clusterId), ac(false), outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()),
-	    startTime(now()), goodRecruitmentTime(Never()), goodRemoteRecruitmentTime(Never()),
-	    dcLogServerVersionDifference(0), dcStorageServerVersionDifference(0), datacenterVersionDifference(0),
-	    versionDifferenceUpdated(false), remoteDCMonitorStarted(false), remoteTransactionSystemDegraded(false),
-	    recruitDistributor(false), recruitRatekeeper(false), recruitConsistencyScan(false),
-	    clusterControllerMetrics("ClusterController", id.toString()),
-	    openDatabaseRequests("OpenDatabaseRequests", clusterControllerMetrics),
-	    registerWorkerRequests("RegisterWorkerRequests", clusterControllerMetrics),
-	    getWorkersRequests("GetWorkersRequests", clusterControllerMetrics),
-	    getClientWorkersRequests("GetClientWorkersRequests", clusterControllerMetrics),
-	    registerMasterRequests("RegisterMasterRequests", clusterControllerMetrics),
-	    statusRequests("StatusRequests", clusterControllerMetrics),
-	    recruitedMasterWorkerEventHolder(makeReference<EventCacheHolder>("RecruitedMasterWorker")) {
-		auto serverInfo = ServerDBInfo();
-		serverInfo.id = deterministicRandom()->randomUniqueID();
-		serverInfo.infoGeneration = ++db.dbInfoCount;
-		serverInfo.masterLifetime.ccID = id;
-		serverInfo.clusterInterface = ccInterface;
-		serverInfo.myLocality = locality;
-		db.serverInfo->set(serverInfo);
-		cx = openDBOnServer(db.serverInfo, TaskPriority::DefaultEndpoint, LockAware::True);
+	                      Reference<AsyncVar<Optional<UID>>> clusterId);
 
-		specialCounter(clusterControllerMetrics, "ClientCount", [this]() { return db.clientCount; });
-	}
+	void updateClusterHealthMonitorInputs();
 
 	~ClusterControllerData() {
 		ac.clear(false);
