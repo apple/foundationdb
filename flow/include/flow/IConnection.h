@@ -125,7 +125,7 @@ public:
 private:
 	struct Entry {
 		std::vector<NetworkAddress> addresses;
-		double lastAccess;
+		double lastAccess = 0.0;
 	};
 	std::map<std::string, Entry> entries;
 };
