@@ -2119,8 +2119,9 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 			                              : delay(SERVER_KNOBS->HEALTH_POLL_TIME, TaskPriority::DataDistributionLaunch);
 			try {
 				while (true) {
-					auto res = co_await race(
-					    doMoveKeys, pollHealth, signalledTransferComplete ? Never() : dataMovementComplete.getFuture());
+					Future<Void> dataMovementFuture =
+					    signalledTransferComplete ? Never() : dataMovementComplete.getFuture();
+					auto res = co_await race(doMoveKeys, pollHealth, dataMovementFuture);
 					if (res.index() == 0) {
 						if (extraIds.size()) {
 							destIds.insert(destIds.end(), extraIds.begin(), extraIds.end());
