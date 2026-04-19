@@ -24,7 +24,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbclient/ClientKnobs.h"
+#include "fdbclient/Knobs.h"
 #include "flow/CoroUtils.h"
 #include <fmt/format.h>
 
