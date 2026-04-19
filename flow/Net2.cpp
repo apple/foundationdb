@@ -1004,9 +1004,7 @@ public:
 		init();
 	}
 
-	static Future<Void> doAcceptHandshake(Reference<SSLConnection> self,
-	                                      Promise<Void> connected,
-	                                      Uncancellable = Uncancellable()) {
+	static Future<Void> doAcceptHandshake(Uncancellable, Reference<SSLConnection> self, Promise<Void> connected) {
 		Hold<int> holder;
 
 		try {
@@ -1077,7 +1075,7 @@ public:
 		countServerTLSHandshakeLocked->increment(1);
 
 		Promise<Void> connected;
-		doAcceptHandshake(self, connected);
+		doAcceptHandshake(Uncancellable(), self, connected);
 		try {
 			auto res = co_await timeout(connected.getFuture(), FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT);
 			if (res.present()) {
@@ -1108,9 +1106,7 @@ public:
 
 	Future<Void> acceptHandshake() override { return acceptHandshakeWrapper(Reference<SSLConnection>::addRef(this)); }
 
-	static Future<Void> doConnectHandshake(Reference<SSLConnection> self,
-	                                       Promise<Void> connected,
-	                                       Uncancellable = Uncancellable()) {
+	static Future<Void> doConnectHandshake(Uncancellable, Reference<SSLConnection> self, Promise<Void> connected) {
 		Hold<int> holder;
 
 		try {
@@ -1179,7 +1175,7 @@ public:
 		countClientTLSHandshakeLocked->increment(1);
 
 		Promise<Void> connected;
-		doConnectHandshake(self, connected);
+		doConnectHandshake(Uncancellable(), self, connected);
 		try {
 			auto res = co_await timeout(connected.getFuture(), FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT);
 			if (res.present()) {
