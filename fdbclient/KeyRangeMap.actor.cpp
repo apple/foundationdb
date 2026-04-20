@@ -222,6 +222,15 @@ ACTOR Future<Void> krmSetRange(Reference<ReadYourWritesTransaction> tr, Key mapP
 }
 
 // Sets a range of keys in a key range map, coalescing with adjacent regions if the values match
+static bool shouldTolerateUncoalescedKRM() {
+	try {
+		return IKnobCollection::getGlobalKnobCollection().getServerKnobs().DD_TOLERATE_UNCOALESCED_KRM;
+	} catch (Error&) {
+		// Client-only processes (e.g. fdbbackup) don't have server knobs.
+		return false;
+	}
+}
+
 // Ranges outside of maxRange will not be coalesced
 // CAUTION: use care when attempting to coalesce multiple ranges in the same prefix in a single transaction
 ACTOR template <class Transaction>
@@ -298,15 +307,7 @@ static Future<Void> krmSetRangeCoalescing_(Transaction* tr,
 	// (may write an uncoalesced boundary at endKey, but dropping the operation is worse).
 	// Without knob, ASSERT as before.
 	if (value == endValue && endKey != maxWithPrefix.end) {
-		bool tolerate = [&]() {
-			try {
-				return IKnobCollection::getGlobalKnobCollection().getServerKnobs().DD_TOLERATE_UNCOALESCED_KRM;
-			} catch (Error&) {
-				// Client-only processes (e.g. fdbbackup) don't have server knobs; fall through to ASSERT.
-				return false;
-			}
-		}();
-		if (tolerate) {
+		if (shouldTolerateUncoalescedKRM()) {
 			TraceEvent(SevWarnAlways, "KRMToleratingUncoalescedEntries")
 			    .detail("MapPrefix", mapPrefix)
 			    .detail("BeginKey", beginKey)
