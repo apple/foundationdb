@@ -2849,9 +2849,9 @@ ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistribu
 }
 
 // constructs the cluster section of the json status output
-ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject& statusObj,
-                                               JsonBuilderArray& messages,
-                                               std::set<std::string>& status_incomplete_reasons,
+ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
+                                               JsonBuilderArray* pMessages,
+                                               std::set<std::string>* pStatusIncompleteReasons,
                                                Reference<AsyncVar<ServerDBInfo>> db,
                                                Database cx,
                                                std::vector<WorkerDetails> workers,
@@ -2859,6 +2859,10 @@ ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject& statusObj,
                                                std::vector<StorageServerMetaInfo> storageMetadatas,
                                                ServerCoordinators coordinators,
                                                std::unordered_map<NetworkAddress, double> excludedDegradedServers) {
+	state JsonBuilderObject& statusObj = *pStatusObj;
+	state JsonBuilderArray& messages = *pMessages;
+	state std::set<std::string>& status_incomplete_reasons = *pStatusIncompleteReasons;
+
 	state double tStart = timer();
 
 	state WorkerDetails mWorker; // Master worker
@@ -3384,9 +3388,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	state JsonBuilderArray messages;
 	state std::set<std::string> status_incomplete_reasons;
 
-	ErrorOr<Optional<Void>> result = wait(errorOr(timeout(clusterGetStatusImpl(statusObj,
-	                                                                           messages,
-	                                                                           status_incomplete_reasons,
+	ErrorOr<Optional<Void>> result = wait(errorOr(timeout(clusterGetStatusImpl(&statusObj,
+	                                                                           &messages,
+	                                                                           &status_incomplete_reasons,
 	                                                                           db,
 	                                                                           cx,
 	                                                                           workers,
