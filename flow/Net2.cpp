@@ -1431,7 +1431,6 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 #endif
 
 	updateNow();
-	dnsCacheRefreshActor = coordinatorDNSCacheRefresh(this);
 }
 
 static Future<Void> reloadCertificatesOnChange(
@@ -1603,6 +1602,7 @@ void Net2::run() {
 	TraceEvent::setNetworkThread();
 	TraceEvent("Net2Running").log();
 	thread_network = this;
+	dnsCacheRefreshActor = coordinatorDNSCacheRefresh(this);
 
 	unsigned int tasksSinceReact = 0;
 
