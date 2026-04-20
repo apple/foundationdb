@@ -107,7 +107,7 @@ func (opt NetworkOptions) setOpt(code int, param []byte) error {
 	defer networkMutex.Unlock()
 
 	if apiVersion == 0 {
-		return errAPIVersionUnset
+		return ErrAPIVersionUnset
 	}
 
 	return setOpt(func(p *C.uint8_t, pl C.int) C.fdb_error_t {
@@ -138,11 +138,11 @@ func APIVersion(version int) error {
 		if apiVersion == version {
 			return nil
 		}
-		return errAPIVersionAlreadySet
+		return ErrAPIVersionAlreadySet
 	}
 
 	if version < 200 || version > headerVersion {
-		return errAPIVersionNotSupported
+		return ErrAPIVersionNotSupported
 	}
 
 	if e := C.fdb_select_api_version_impl(C.int(version), C.int(headerVersion)); e != 0 {
@@ -181,7 +181,7 @@ func GetAPIVersion() (int, error) {
 	if IsAPIVersionSelected() {
 		return apiVersion, nil
 	}
-	return 0, errAPIVersionUnset
+	return 0, ErrAPIVersionUnset
 }
 
 // MustAPIVersion is like APIVersion but panics if the API version is not
@@ -266,7 +266,7 @@ func executeWithRunningNetworkThread(f func()) error {
 // StartNetwork does nothing, but it will ensure that the API version is set and return an error otherwise.
 func StartNetwork() error {
 	if apiVersion == 0 {
-		return errAPIVersionUnset
+		return ErrAPIVersionUnset
 	}
 
 	return nil
@@ -378,7 +378,7 @@ func MustOpen(clusterFile string, dbName []byte) Database {
 // Caller must call Close() to release resources.
 func createDatabase(clusterFile string) (Database, error) {
 	if apiVersion == 0 {
-		return Database{}, errAPIVersionUnset
+		return Database{}, ErrAPIVersionUnset
 	}
 
 	var cf *C.char
@@ -412,7 +412,7 @@ func createDatabase(clusterFile string) (Database, error) {
 // Caller must call Close() to release resources.
 func OpenWithConnectionString(connectionString string) (Database, error) {
 	if apiVersion == 0 {
-		return Database{}, errAPIVersionUnset
+		return Database{}, ErrAPIVersionUnset
 	}
 
 	var cf *C.char
@@ -451,11 +451,11 @@ func CreateCluster(clusterFile string) (Cluster, error) {
 	defer networkMutex.Unlock()
 
 	if apiVersion == 0 {
-		return Cluster{}, errAPIVersionUnset
+		return Cluster{}, ErrAPIVersionUnset
 	}
 
 	if !networkStarted {
-		return Cluster{}, errNetworkNotSetup
+		return Cluster{}, ErrNetworkNotSetup
 	}
 
 	if networkStopped {
