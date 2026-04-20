@@ -82,7 +82,7 @@ FFI boundary for external languages:
 
 ---
 
-## DatabaseContext -- `DatabaseContext.h`, [`DatabaseContext.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbclient/DatabaseContext.actor.cpp)
+## DatabaseContext -- `DatabaseContext.h`, [`DatabaseContext.cpp`](https://github.com/apple/foundationdb/blob/main/fdbclient/DatabaseContext.cpp)
 
 Central state for a database connection. Shared by all transactions on this connection.
 

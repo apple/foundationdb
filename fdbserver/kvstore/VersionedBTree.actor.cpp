@@ -49,6 +49,7 @@
 
 #include <boost/intrusive/list.hpp>
 #include <cinttypes>
+#include <functional>
 #include <limits>
 #include <map>
 #include <random>
@@ -1609,6 +1610,10 @@ struct RedwoodMetrics {
 int RedwoodMetrics::maxRecordCount = 315;
 RedwoodMetrics g_redwoodMetrics = {};
 Future<Void> g_redwoodMetricsActor;
+
+static void printRedwoodStats() {
+	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
+}
 
 Future<Void> redwoodHistogramsLogger(double interval) {
 	double currTime{ 0 };
@@ -10550,9 +10555,7 @@ TEST_CASE(":/redwood/performance/set") {
 		printf("StorageBytes=%s\n", btree->getStorageBytes().toString().c_str());
 	}
 
-	state Future<Void> stats =
-	    traceMetrics ? Void()
-	                 : recurring([&]() { printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str()); }, 1.0);
+	state Future<Void> stats = traceMetrics ? Void() : recurring(std::bind_front(&printRedwoodStats), 1.0);
 
 	if (scans > 0) {
 		printf("Parallel scans, concurrency=%d, scans=%d, scanWidth=%d, scanPreftchBytes=%d ...\n",

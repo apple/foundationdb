@@ -28,15 +28,15 @@
 namespace generic_coro {
 
 template <class T>
-Future<T> traceAfter(Future<T> what, std::string type, bool traceErrors = true, ExplicitVoid = {}) {
+Future<T> traceAfter(Future<T> what, std::string eventType, bool traceErrors = true, ExplicitVoid = {}) {
 	try {
 		T val = co_await what;
-		TraceEvent(type.c_str());
+		TraceEvent(eventType.c_str());
 		co_return val;
 	} catch (Error& e) {
 		// Don't trace operation_cancelled as it's a normal control flow mechanism, not an error
 		if (traceErrors && e.code() != error_code_operation_cancelled) {
-			TraceEvent(type.c_str()).errorUnsuppressed(e);
+			TraceEvent(eventType.c_str()).errorUnsuppressed(e);
 		}
 		throw;
 	}
@@ -183,12 +183,33 @@ Future<Void> trigger(Func what, Future<Void> signal) {
 	what();
 }
 
-template <class Func>
-Future<Void> triggerOnError(Func what, Future<Void> signal) {
-	ErrorOr<Void> res = co_await coro::errorOr(coro::ignore(signal));
-	if (res.isError()) {
-		what();
+template <class T>
+Future<Void> uncancellable(Uncancellable, Future<T> what, Promise<T> result) {
+	ErrorOr<T> res = co_await coro::errorOr(what);
+	if (res.present()) {
+		result.send(std::move(res).get());
+	} else {
+		result.sendError(res.getError());
 	}
+}
+
+template <class T>
+Future<T> uncancellable(Future<T> what, ExplicitVoid = {}) {
+	Promise<T> resultPromise;
+	Future<T> result = resultPromise.getFuture();
+
+	uncancellable(Uncancellable(), what, resultPromise);
+	co_return co_await result;
+}
+
+template <class T, class X>
+Future<T> holdWhile(X object, Future<T> what) {
+	co_return co_await what;
+}
+
+template <class T, class X>
+Future<Void> store(X& out, Future<T> what) {
+	out = co_await what;
 }
 
 } // namespace generic_coro
