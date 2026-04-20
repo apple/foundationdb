@@ -175,8 +175,10 @@ public:
 	static Future<Void> write_impl(AsyncFileCached* self, void const* data, int length, int64_t offset) {
 		// If there is a truncate in progress before the the write position then we must
 		// wait for it to complete.
-		if (length + offset > self->currentTruncateSize)
-			co_await self->currentTruncate;
+		if (length + offset > self->currentTruncateSize) {
+			Future<Void> currentTruncate = self->currentTruncate;
+			co_await currentTruncate;
+		}
 		++self->countFileCacheWrites;
 		++self->countCacheWrites;
 		Future<Void> f = read_write_impl<true>(self, static_cast<const uint8_t*>(data), length, offset);
@@ -203,10 +205,12 @@ public:
 	// This wrapper for the actual truncation operation enforces ordering of truncates.
 	// It maintains currentTruncate and currentTruncateSize so writers can wait behind truncates that would affect them.
 	static Future<Void> truncate_impl(AsyncFileCached* self, int64_t size) {
-		co_await self->currentTruncate;
+		Future<Void> previousTruncate = self->currentTruncate;
+		co_await previousTruncate;
 		self->currentTruncateSize = size;
 		self->currentTruncate = self->changeFileSize(size);
-		co_await self->currentTruncate;
+		Future<Void> currentTruncate = self->currentTruncate;
+		co_await currentTruncate;
 	}
 
 	Future<Void> sync() override { return waitAndSync(this, flush()); }
@@ -423,7 +427,8 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 	}
 
 	static Future<Void> waitAndWrite(AFCPage* self, void const* data, int length, int offset) {
-		co_await self->notReading;
+		Future<Void> notReading = self->notReading;
+		co_await notReading;
 		memcpy(static_cast<uint8_t*>(self->data) + offset, data, length);
 	}
 
@@ -478,7 +483,8 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 	}
 
 	static Future<Void> waitAndRead(AFCPage* self, void* data, int length, int offset) {
-		co_await self->notReading;
+		Future<Void> notReading = self->notReading;
+		co_await notReading;
 		memcpy(data, static_cast<uint8_t const*>(self->data) + offset, length);
 	}
 
@@ -512,7 +518,8 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 			++self->writeThroughCount;
 			self->updateFlushableIndex();
 
-			co_await (self->notReading && self->notFlushing);
+			Future<Void> readyToWrite = self->notReading && self->notFlushing;
+			co_await readyToWrite;
 
 			if (dirty) {
 				// Wait for rate control if it is set
@@ -594,7 +601,8 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 	}
 
 	static Future<Void> truncate_impl(AFCPage* self) {
-		co_await (self->notReading && self->notFlushing && yield());
+		Future<Void> readyToTruncate = self->notReading && self->notFlushing && yield();
+		co_await readyToTruncate;
 		delete self;
 	}
 
