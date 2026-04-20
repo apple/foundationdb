@@ -21,14 +21,14 @@
 // Test workload for KRM (KeyRangeMap) tolerance of uncoalesced entries.
 //
 // This test verifies that when DD_TOLERATE_UNCOALESCED_KRM is enabled,
-// the system skips (tolerates) adjacent entries with the same value
-// instead of crashing with ASSERT.
+// krmSetRangeCoalescing warns about adjacent entries with the same value
+// and still applies the caller's mutation, rather than crashing with ASSERT.
 //
 // The test:
-// 1. Creates a test KRM with a custom prefix (not real system keys to avoid destabilizing)
+// 1. Creates a test KRM with a custom prefix
 // 2. Manually injects uncoalesced entries (adjacent keys with same value)
 // 3. Calls krmSetRangeCoalescing on an overlapping range
-// 4. Verifies the operation completes without crashing (entries remain, just skipped)
+// 4. Verifies the operation completes without crashing AND the data is correct
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
@@ -41,7 +41,6 @@
 struct KRMCoalesceTestWorkload : TestWorkload {
 	static constexpr auto NAME = "KRMCoalesceTest";
 
-	// Test prefix - use a non-system key to avoid interfering with real metadata
 	Key testPrefix;
 	bool enabled;
 
@@ -63,14 +62,24 @@ struct KRMCoalesceTestWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	ACTOR static Future<Void> runTest(KRMCoalesceTestWorkload* self, Database cx) {
-		// Test 1: Verify skipping of uncoalesced entries
 		wait(testCoalesceUncoalescedEntries(self, cx));
-
-		// Test 2: Verify normal operation (no uncoalesced entries)
 		wait(testNormalCoalescing(self, cx));
-
 		TraceEvent("KRMCoalesceTestComplete");
 		return Void();
+	}
+
+	// Helper to read all entries under a prefix in range [startSuffix, endSuffix)
+	ACTOR static Future<RangeResult> readEntries(Database cx, Key prefix, Key startSuffix, Key endSuffix) {
+		state Transaction tr(cx);
+		loop {
+			try {
+				RangeResult r = wait(tr.getRange(
+				    KeyRangeRef(prefix.withSuffix(startSuffix), prefix.withSuffix(endSuffix)), CLIENT_KNOBS->TOO_MANY));
+				return r;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
 	}
 
 	ACTOR static Future<Void> testCoalesceUncoalescedEntries(KRMCoalesceTestWorkload* self, Database cx) {
@@ -87,23 +96,23 @@ struct KRMCoalesceTestWorkload : TestWorkload {
 
 		TraceEvent("KRMCoalesceTestStartUncoalesced").detail("Prefix", prefix);
 
-		// Step 1: Manually inject uncoalesced entries
-		// Create: A=X, B=X, C=X, D=X, E=X, F=Y
-		// Many entries with same value to ensure some are beyond the read-ahead limit
+		if (!SERVER_KNOBS->DD_TOLERATE_UNCOALESCED_KRM) {
+			TraceEvent("KRMCoalesceTestSkipped").detail("Reason", "DD_TOLERATE_UNCOALESCED_KRM is false");
+			return Void();
+		}
+
+		// Step 1: Inject uncoalesced entries
+		// Create: prefix+A=X, prefix+B=X, prefix+C=X, prefix+D=X, prefix+E=X, prefix+F=Y
+		// B through E are uncoalesced (same value X as A)
 		state Transaction tr1(cx);
 		loop {
 			try {
-				tr1.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr1.setOption(FDBTransactionOptions::LOCK_AWARE);
-
-				// Write many uncoalesced entries with same value
 				tr1.set(prefix.withSuffix(keyA), valueX);
-				tr1.set(prefix.withSuffix(keyB), valueX); // Uncoalesced
-				tr1.set(prefix.withSuffix(keyC), valueX); // Uncoalesced
-				tr1.set(prefix.withSuffix(keyD), valueX); // Uncoalesced
-				tr1.set(prefix.withSuffix(keyE), valueX); // Uncoalesced
-				tr1.set(prefix.withSuffix(keyF), valueY); // Different value
-
+				tr1.set(prefix.withSuffix(keyB), valueX);
+				tr1.set(prefix.withSuffix(keyC), valueX);
+				tr1.set(prefix.withSuffix(keyD), valueX);
+				tr1.set(prefix.withSuffix(keyE), valueX);
+				tr1.set(prefix.withSuffix(keyF), valueY);
 				wait(tr1.commit());
 				break;
 			} catch (Error& e) {
@@ -111,70 +120,20 @@ struct KRMCoalesceTestWorkload : TestWorkload {
 			}
 		}
 
-		TraceEvent("KRMCoalesceTestInjectedUncoalesced");
+		// Step 2: Verify 6 entries exist
+		RangeResult beforeEntries = wait(readEntries(cx, prefix, keyA, keyG));
+		ASSERT_EQ(beforeEntries.size(), 6);
+		TraceEvent("KRMCoalesceTestInjectedUncoalesced").detail("EntryCount", beforeEntries.size());
 
-		// Step 2: Verify uncoalesced entries exist
-		state Transaction tr2(cx);
-		state RangeResult entries;
-		loop {
-			try {
-				tr2.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
-
-				RangeResult r = wait(tr2.getRange(KeyRangeRef(prefix.withSuffix(keyA), prefix.withSuffix(keyG)),
-				                                  CLIENT_KNOBS->TOO_MANY));
-				entries = r;
-				break;
-			} catch (Error& e) {
-				wait(tr2.onError(e));
-			}
-		}
-
-		// Should have 6 entries before coalescing
-		ASSERT_EQ(entries.size(), 6);
-		TraceEvent("KRMCoalesceTestVerifiedUncoalesced").detail("EntryCount", entries.size());
-
-		// Step 3: Call krmSetRangeCoalescing which should trigger the tolerance path
-		// We set a range that overlaps with the uncoalesced entries
-		// This requires DD_TOLERATE_UNCOALESCED_KRM to be true
-		if (!SERVER_KNOBS->DD_TOLERATE_UNCOALESCED_KRM) {
-			TraceEvent("KRMCoalesceTestSkipped").detail("Reason", "DD_TOLERATE_UNCOALESCED_KRM is false");
-			// Clean up and skip
-			state Transaction trClean(cx);
-			loop {
-				try {
-					trClean.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					trClean.setOption(FDBTransactionOptions::LOCK_AWARE);
-					trClean.clear(KeyRangeRef(prefix, strinc(prefix)));
-					wait(trClean.commit());
-					break;
-				} catch (Error& e) {
-					wait(trClean.onError(e));
-				}
-			}
-			return Void();
-		}
-
-		// Trigger the uncoalesced code path by calling krmSetRangeCoalescing on a range
-		// that will read the uncoalesced entries. With the knob enabled, this should
-		// skip the redundant entries and complete without ASSERT.
-		//
-		// Scenario to trigger skip:
-		// - Entries: A=X, B=X, C=X, D=X, E=X, F=Y
-		// - Set range [A, B) with value X, maxRange [A, F)
-		// - The read at end finds B=X and C=X (2 entries)
-		// - Case 1: hasNext=true, C <= F, valueMatches=true (B=X == X)
-		// - endKey = C, endValue = X
-		// - Skip condition: value(X) == endValue(X) && endKey(C) != maxEnd(F) = TRUE!
+		// Step 3: Call krmSetRangeCoalescing — triggers tolerance path
+		// Set range [A, B) to valueX with maxRange [A, F)
+		// The function reads entries near B, finds B=X and C=X (uncoalesced),
+		// hits value(X)==endValue(X) && endKey(C)!=maxEnd(F), logs warning,
+		// then performs: clear([A,C)), set(A,X), set(C,X)
 		state Reference<ReadYourWritesTransaction> tr3 = makeReference<ReadYourWritesTransaction>(cx);
 		loop {
 			try {
-				tr3->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr3->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-				// Set range [A, B) to valueX with maxRange [A, F)
 				wait(krmSetRangeCoalescing(tr3, prefix, KeyRangeRef(keyA, keyB), KeyRangeRef(keyA, keyF), valueX));
-
 				wait(tr3->commit());
 				break;
 			} catch (Error& e) {
@@ -182,35 +141,38 @@ struct KRMCoalesceTestWorkload : TestWorkload {
 			}
 		}
 
-		TraceEvent("KRMCoalesceTestSkippedUncoalesced");
+		TraceEvent("KRMCoalesceTestToleratedUncoalesced");
 
-		// Step 4: Verify operation completed (entries may still exist - we skip, not remove)
-		state Transaction tr4(cx);
-		state RangeResult afterEntries;
-		loop {
-			try {
-				tr4.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				tr4.setOption(FDBTransactionOptions::LOCK_AWARE);
+		// Step 4: Verify correctness — the mutation was applied, not silently dropped
+		RangeResult afterEntries = wait(readEntries(cx, prefix, keyA, keyG));
+		TraceEvent("KRMCoalesceTestAfterTolerate")
+		    .detail("EntryCount", afterEntries.size())
+		    .detail("OriginalCount", 6);
 
-				RangeResult r = wait(tr4.getRange(KeyRangeRef(prefix.withSuffix(keyA), prefix.withSuffix(keyG)),
-				                                  CLIENT_KNOBS->TOO_MANY));
-				afterEntries = r;
-				break;
-			} catch (Error& e) {
-				wait(tr4.onError(e));
+		// Verify A=X is present (the mutation was applied)
+		ASSERT(afterEntries.size() >= 1);
+		ASSERT(afterEntries[0].key == prefix.withSuffix(keyA));
+		ASSERT(afterEntries[0].value == valueX);
+
+		// Verify F=Y is still present (untouched by our operation)
+		bool foundF = false;
+		for (int i = 0; i < afterEntries.size(); i++) {
+			if (afterEntries[i].key == prefix.withSuffix(keyF)) {
+				ASSERT(afterEntries[i].value == valueY);
+				foundF = true;
 			}
 		}
+		ASSERT(foundF);
 
-		// The key test is that we got here without crashing. Entry count may vary
-		// based on what the clear/set operations did, but we tolerated the uncoalesced state.
-		TraceEvent("KRMCoalesceTestAfterSkip").detail("EntryCount", afterEntries.size()).detail("OriginalCount", 6);
+		// B should have been cleared (it was in the clear range [A, C))
+		for (int i = 0; i < afterEntries.size(); i++) {
+			ASSERT(afterEntries[i].key != prefix.withSuffix(keyB));
+		}
 
 		// Clean up
 		state Transaction tr5(cx);
 		loop {
 			try {
-				tr5.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr5.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr5.clear(KeyRangeRef(prefix, strinc(prefix)));
 				wait(tr5.commit());
 				break;
@@ -219,7 +181,7 @@ struct KRMCoalesceTestWorkload : TestWorkload {
 			}
 		}
 
-		TraceEvent("KRMCoalesceTestSkipComplete");
+		TraceEvent("KRMCoalesceTestUncoalescedComplete");
 		return Void();
 	}
 
@@ -233,17 +195,12 @@ struct KRMCoalesceTestWorkload : TestWorkload {
 
 		TraceEvent("KRMCoalesceTestStartNormal").detail("Prefix", prefix);
 
-		// Use krmSetRangeCoalescing normally (no pre-existing uncoalesced entries)
+		// Set [A, B) = X
 		state Reference<ReadYourWritesTransaction> tr1 = makeReference<ReadYourWritesTransaction>(cx);
 		loop {
 			try {
-				tr1->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr1->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-				// Set [A, B) = X
 				wait(
 				    krmSetRangeCoalescing(tr1, prefix, KeyRangeRef(keyA, keyB), KeyRangeRef(""_sr, "\xff"_sr), valueX));
-
 				wait(tr1->commit());
 				break;
 			} catch (Error& e) {
@@ -251,16 +208,12 @@ struct KRMCoalesceTestWorkload : TestWorkload {
 			}
 		}
 
+		// Set [B, C) = Y (different value, should not coalesce with A)
 		state Reference<ReadYourWritesTransaction> tr2 = makeReference<ReadYourWritesTransaction>(cx);
 		loop {
 			try {
-				tr2->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr2->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-				// Set [B, C) = Y (different value, should not coalesce)
 				wait(
 				    krmSetRangeCoalescing(tr2, prefix, KeyRangeRef(keyB, keyC), KeyRangeRef(""_sr, "\xff"_sr), valueY));
-
 				wait(tr2->commit());
 				break;
 			} catch (Error& e) {
@@ -268,32 +221,21 @@ struct KRMCoalesceTestWorkload : TestWorkload {
 			}
 		}
 
-		// Verify we have proper entries
-		state Transaction tr3(cx);
-		state RangeResult entries;
-		loop {
-			try {
-				tr3.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				tr3.setOption(FDBTransactionOptions::LOCK_AWARE);
-
-				Key endKey = prefix.withSuffix("z"_sr);
-				RangeResult r =
-				    wait(tr3.getRange(KeyRangeRef(prefix.withSuffix(keyA), endKey), CLIENT_KNOBS->TOO_MANY));
-				entries = r;
-				break;
-			} catch (Error& e) {
-				wait(tr3.onError(e));
-			}
-		}
-
+		// Verify entries
+		RangeResult entries = wait(readEntries(cx, prefix, keyA, "z"_sr));
 		TraceEvent("KRMCoalesceTestNormalEntries").detail("EntryCount", entries.size());
+
+		// Should have at least A=X and B=Y (plus possible end sentinel)
+		ASSERT(entries.size() >= 2);
+		ASSERT(entries[0].key == prefix.withSuffix(keyA));
+		ASSERT(entries[0].value == valueX);
+		ASSERT(entries[1].key == prefix.withSuffix(keyB));
+		ASSERT(entries[1].value == valueY);
 
 		// Clean up
 		state Transaction tr4(cx);
 		loop {
 			try {
-				tr4.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr4.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr4.clear(KeyRangeRef(prefix, strinc(prefix)));
 				wait(tr4.commit());
 				break;
