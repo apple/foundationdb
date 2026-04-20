@@ -503,17 +503,15 @@ Future<Void> monitorNominee(Key key,
 		Optional<LeaderInfo> li;
 		co_await Future<Void>(Void()); // Make sure we weren't cancelled
 		if (coord.hostname.present()) {
-			co_await store(
-			    li,
-			    retryGetReplyFromHostname(GetLeaderRequest(key, info->present() ? info->get().changeID : UID()),
-			                              coord.hostname.get(),
-			                              WLTOKEN_CLIENTLEADERREG_GETLEADER,
-			                              TaskPriority::CoordinationReply));
+			li = co_await retryGetReplyFromHostname(
+			    GetLeaderRequest(key, info->present() ? info->get().changeID : UID()),
+			    coord.hostname.get(),
+			    WLTOKEN_CLIENTLEADERREG_GETLEADER,
+			    TaskPriority::CoordinationReply);
 		} else {
-			co_await store(li,
-			               retryBrokenPromise(coord.getLeader,
-			                                  GetLeaderRequest(key, info->present() ? info->get().changeID : UID()),
-			                                  TaskPriority::CoordinationReply));
+			li = co_await retryBrokenPromise(coord.getLeader,
+			                                 GetLeaderRequest(key, info->present() ? info->get().changeID : UID()),
+			                                 TaskPriority::CoordinationReply);
 		}
 
 		co_await Future<Void>(Void()); // Make sure we weren't cancelled
