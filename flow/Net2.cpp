@@ -2098,10 +2098,7 @@ static Future<Void> coordinatorDNSCacheRefresh(Net2* self) {
 				if (e.code() == error_code_actor_cancelled) {
 					throw;
 				}
-				TraceEvent(SevWarn, "DNSCacheRefreshFailed")
-				    .error(e)
-				    .detail("Host", host)
-				    .detail("Service", service);
+				TraceEvent(SevWarn, "DNSCacheRefreshFailed").error(e).detail("Host", host).detail("Service", service);
 			}
 		}
 	}
