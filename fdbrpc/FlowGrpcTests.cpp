@@ -23,8 +23,8 @@
 #include <thread>
 #include <mutex>
 #include "fdbrpc/FlowGrpc.h"
-#include "fdbrpc/FlowGrpcTests.h"
-#include "fdbrpc/FileTransfer.h"
+#include "FlowGrpcTests.h"
+#include "FileTransfer.h"
 #include "flow/UnitTest.h"
 #include "flow/TLSConfig.h"
 #include "flow/flow.h"
