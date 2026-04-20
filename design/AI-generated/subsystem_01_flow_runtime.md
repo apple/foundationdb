@@ -156,7 +156,7 @@ The codebase is being migrated from the custom actor compiler to C++20 native co
 
 ---
 
-## Net2 Event Loop -- [`Net2.actor.cpp`](https://github.com/apple/foundationdb/blob/main/flow/Net2.actor.cpp)
+## Net2 Event Loop -- [`Net2.cpp`](https://github.com/apple/foundationdb/blob/main/flow/Net2.cpp)
 
 The real (non-simulated) event loop. Single-threaded, priority-based task scheduling over Boost.ASIO.
 
@@ -373,6 +373,6 @@ Key utility actors:
 | [`flow/include/flow/genericactors.actor.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/genericactors.actor.h) | Utility actors (delay, timeout, waitForAll, AsyncVar) |
 | [`flow/include/flow/serialize.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/serialize.h) | Serialization framework |
 | `flow/include/flow/FastAlloc.h` | Thread-local pool allocator |
-| [`flow/Net2.actor.cpp`](https://github.com/apple/foundationdb/blob/main/flow/Net2.actor.cpp) | Real event loop (Boost.ASIO based) |
+| [`flow/Net2.cpp`](https://github.com/apple/foundationdb/blob/main/flow/Net2.cpp) | Real event loop (Boost.ASIO based) |
 | [`flow/Trace.cpp`](https://github.com/apple/foundationdb/blob/main/flow/Trace.cpp) | Structured event tracing |
 | `flow/include/flow/actorcompiler.h` | ACTOR/wait/state macro definitions |

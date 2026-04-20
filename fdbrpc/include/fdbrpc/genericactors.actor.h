@@ -36,7 +36,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // To avoid directly access INetworkConnection::net()->removeCachedDNS(), which will require heavy include budget, put
-// the call to FlowTransport.actor.cpp as a external function.
+// the call to FlowTransport.cpp as a external function.
 extern void removeCachedDNS(const std::string& host, const std::string& service);
 
 ACTOR template <class Req, bool P>
