@@ -981,25 +981,24 @@ Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 	}
 }
 
-ACTOR Future<Void> monitorProxies(
-    Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connRecord,
-    Reference<AsyncVar<ClientDBInfo>> clientInfo,
-    Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
-    Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions,
-    Key traceLogGroup,
-    IsInternal internal) {
-	state MonitorLeaderInfo info(connRecord->get());
-	loop {
+Future<Void> monitorProxies(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connRecord,
+                            Reference<AsyncVar<ClientDBInfo>> clientInfo,
+                            Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
+                            Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions,
+                            Key traceLogGroup,
+                            IsInternal internal) {
+	MonitorLeaderInfo info(connRecord->get());
+	while (true) {
 		ASSERT(connRecord->get().isValid());
-		choose {
-			when(MonitorLeaderInfo _info = wait(monitorProxiesOneGeneration(
-			         connRecord->get(), clientInfo, coordinator, info, supportedVersions, traceLogGroup, internal))) {
-				info = _info;
-			}
-			when(wait(connRecord->onChange())) {
-				info.hasConnected = false;
-				info.intermediateConnRecord = connRecord->get();
-			}
+		auto res = co_await race(
+		    monitorProxiesOneGeneration(
+		        connRecord->get(), clientInfo, coordinator, info, supportedVersions, traceLogGroup, internal),
+		    connRecord->onChange());
+		if (res.index() == 0) {
+			info = std::get<0>(std::move(res));
+		} else if (res.index() == 1) {
+			info.hasConnected = false;
+			info.intermediateConnRecord = connRecord->get();
 		}
 	}
 }

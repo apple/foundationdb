@@ -81,13 +81,12 @@ Future<Void> monitorLeaderAndGetClientInfo(Key clusterKey,
                                            ClientData* clientData,
                                            Reference<AsyncVar<Optional<LeaderInfo>>> leaderInfo);
 
-Future<Void> monitorProxies(
-    Reference<AsyncVar<Reference<IClusterConnectionRecord>>> const& connRecord,
-    Reference<AsyncVar<ClientDBInfo>> const& clientInfo,
-    Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> const& coordinator,
-    Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> const& supportedVersions,
-    Key const& traceLogGroup,
-    IsInternal const& internal);
+Future<Void> monitorProxies(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connRecord,
+                            Reference<AsyncVar<ClientDBInfo>> clientInfo,
+                            Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
+                            Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions,
+                            Key traceLogGroup,
+                            IsInternal internal);
 
 void shrinkProxyList(ClientDBInfo& ni,
                      std::vector<UID>& lastCommitProxyUIDs,
