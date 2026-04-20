@@ -2105,24 +2105,18 @@ static Future<Void> coordinatorDNSCacheRefresh(Net2* self) {
 	}
 }
 
-static Future<std::vector<NetworkAddress>> resolveTCPEndpointWithDNSCache_impl(Net2* self,
-                                                                                std::string host,
-                                                                                std::string service) {
-	std::vector<NetworkAddress> addresses = co_await resolveTCPEndpoint_impl(self, host, service);
-	self->dnsCache.add(host, service, addresses);
-	co_return addresses;
-}
-
 Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpointWithDNSCache(const std::string& host,
                                                                          const std::string& service) {
 	if (FLOW_KNOBS->ENABLE_COORDINATOR_DNS_CACHE) {
 		Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
 		if (cache.present()) {
-			return cache.get();
+			co_return cache.get();
 		}
-		return resolveTCPEndpointWithDNSCache_impl(this, host, service);
+		std::vector<NetworkAddress> addresses = co_await resolveTCPEndpoint_impl(this, host, service);
+		dnsCache.add(host, service, addresses);
+		co_return addresses;
 	}
-	return resolveTCPEndpoint_impl(this, host, service);
+	co_return co_await resolveTCPEndpoint_impl(this, host, service);
 }
 
 std::vector<NetworkAddress> Net2::resolveTCPEndpointBlocking(const std::string& host, const std::string& service) {
