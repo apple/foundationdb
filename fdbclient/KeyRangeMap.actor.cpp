@@ -298,12 +298,14 @@ static Future<Void> krmSetRangeCoalescing_(Transaction* tr,
 	// (may write an uncoalesced boundary at endKey, but dropping the operation is worse).
 	// Without knob, ASSERT as before.
 	if (value == endValue && endKey != maxWithPrefix.end) {
-		bool tolerate = false;
-		try {
-			tolerate = IKnobCollection::getGlobalKnobCollection().getServerKnobs().DD_TOLERATE_UNCOALESCED_KRM;
-		} catch (Error&) {
-			// Client-only processes (e.g. fdbbackup) don't have server knobs; fall through to ASSERT.
-		}
+		bool tolerate = [&]() {
+			try {
+				return IKnobCollection::getGlobalKnobCollection().getServerKnobs().DD_TOLERATE_UNCOALESCED_KRM;
+			} catch (Error&) {
+				// Client-only processes (e.g. fdbbackup) don't have server knobs; fall through to ASSERT.
+				return false;
+			}
+		}();
 		if (tolerate) {
 			TraceEvent(SevWarnAlways, "KRMToleratingUncoalescedEntries")
 			    .detail("MapPrefix", mapPrefix)
