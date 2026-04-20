@@ -67,10 +67,10 @@ typedef enum {
 	CLUSTER_RECOVERY_LAST // Always the last entry
 } ClusterRecoveryEventType;
 
-ACTOR Future<Void> recoveryTerminateOnConflict(UID dbgid,
-                                               Promise<Void> fullyRecovered,
-                                               Future<Void> onConflict,
-                                               Future<Void> switchedState);
+Future<Void> recoveryTerminateOnConflict(UID dbgid,
+                                         Promise<Void> fullyRecovered,
+                                         Future<Void> onConflict,
+                                         Future<Void> switchedState);
 std::string& getRecoveryEventName(ClusterRecoveryEventType type);
 
 class ReusableCoordinatedState : NonCopyable {
@@ -317,10 +317,10 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 	}
 };
 
-ACTOR Future<Void> recruitNewMaster(ClusterControllerData* cluster,
-                                    ClusterControllerData::DBInfo* db,
-                                    MasterInterface* newMaster);
-ACTOR Future<Void> cleanupRecoveryActorCollection(Reference<ClusterRecoveryData> self);
+Future<Void> recruitNewMaster(ClusterControllerData* cluster,
+                              ClusterControllerData::DBInfo* db,
+                              MasterInterface* newMaster);
+Future<Void> cleanupRecoveryActorCollection(Reference<ClusterRecoveryData> self);
 ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self);
 bool isNormalClusterRecoveryError(const Error&);
 

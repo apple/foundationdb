@@ -36,7 +36,7 @@ public:
 	// only.
 	// @out status json
 	// @note we don't have support to fetch arbitrary status json fields at this point.
-	static Future<StatusObject> statusFetcher(Database db, std::string statusField = "");
+	static AsyncResult<StatusObject> statusFetcher(Database db, std::string statusField = "");
 };
 
 #endif

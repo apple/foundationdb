@@ -73,7 +73,7 @@ Future<Void> getAuditProgressByRange(Database cx, AuditType auditType, UID audit
 	fmt::println("Finished range count: {}", finishCount);
 }
 
-Future<std::vector<StorageServerInterface>> getStorageServers(Database cx) {
+AsyncResult<std::vector<StorageServerInterface>> getStorageServers(Database cx) {
 	Transaction tr(cx);
 	while (true) {
 		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -142,7 +142,7 @@ Future<Void> getAuditProgress(Database cx, AuditType auditType, UID auditId, Key
 	} else if (auditType == AuditType::ValidateStorageServerShard) {
 		std::vector<Future<Void>> fs;
 		std::unordered_map<UID, bool> res;
-		std::vector<StorageServerInterface> const& interfs = co_await getStorageServers(cx);
+		std::vector<StorageServerInterface> interfs = co_await getStorageServers(cx);
 		int i = 0;
 		int numCompleteServers = 0;
 		int numOngoingServers = 0;
@@ -221,7 +221,7 @@ Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef> toke
 		if (tokens.size() == 4) {
 			count = std::stoi(tokens[3].toString());
 		}
-		std::vector<AuditStorageState> const& res = co_await getAuditStates(cx, type, /*newFirst=*/true, count);
+		std::vector<AuditStorageState> res = co_await getAuditStates(cx, type, /*newFirst=*/true, count);
 		for (const auto& it : res) {
 			fmt::println("Audit result is:\n{}", it.toString());
 		}
@@ -235,7 +235,7 @@ Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef> toke
 		if (tokens.size() == 5) {
 			count = std::stoi(tokens[4].toString());
 		}
-		std::vector<AuditStorageState> const& res = co_await getAuditStates(cx, type, /*newFirst=*/true, count, phase);
+		std::vector<AuditStorageState> res = co_await getAuditStates(cx, type, /*newFirst=*/true, count, phase);
 		for (const auto& it : res) {
 			fmt::println("Audit result is:\n{}", it.toString());
 		}

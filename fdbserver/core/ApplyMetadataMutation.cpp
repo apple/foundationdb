@@ -66,7 +66,7 @@ public:
 	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
 	                           Arena& arena_,
 	                           const VectorRef<MutationRef>& mutations_,
-	                           ProxyCommitData& proxyCommitData_,
+	                           const ApplyMetadataProxyContext& proxyMetadata_,
 	                           Reference<ILogSystem> logSystem_,
 	                           LogPushData* toCommit_,
 	                           bool& confChange_,
@@ -74,17 +74,16 @@ public:
 	                           Version popVersion_,
 	                           bool initialCommit_,
 	                           bool provisionalCommitProxy_)
-	  : spanContext(spanContext_), dbgid(proxyCommitData_.dbgid), arena(arena_), mutations(mutations_),
-	    txnStateStore(proxyCommitData_.txnStateStore), toCommit(toCommit_), confChange(confChange_),
-	    logSystem(logSystem_), version(version), popVersion(popVersion_),
-	    vecBackupKeys(&proxyCommitData_.vecBackupKeys), keyInfo(&proxyCommitData_.keyInfo),
-	    uid_applyMutationsData(proxyCommitData_.firstProxy ? &proxyCommitData_.uid_applyMutationsData : nullptr),
-	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), committedVersion(&proxyCommitData_.committedVersion),
-	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
-	    tssMapping(&proxyCommitData_.tssMapping), initialCommit(initialCommit_),
+	  : spanContext(spanContext_), dbgid(proxyMetadata_.dbgid), arena(arena_), mutations(mutations_),
+	    txnStateStore(proxyMetadata_.txnStateStore), toCommit(toCommit_), confChange(confChange_),
+	    logSystem(logSystem_), version(version), popVersion(popVersion_), vecBackupKeys(proxyMetadata_.vecBackupKeys),
+	    keyInfo(proxyMetadata_.keyInfo), uid_applyMutationsData(proxyMetadata_.uid_applyMutationsData),
+	    commit(proxyMetadata_.commit), cx(proxyMetadata_.cx), committedVersion(proxyMetadata_.committedVersion),
+	    storageCache(proxyMetadata_.storageCache), tag_popped(proxyMetadata_.tag_popped),
+	    tssMapping(proxyMetadata_.tssMapping), initialCommit(initialCommit_),
 	    provisionalCommitProxy(provisionalCommitProxy_),
-	    accumulativeChecksumIndex(getCommitProxyAccumulativeChecksumIndex(proxyCommitData_.commitProxyIndex)),
-	    acsBuilder(proxyCommitData_.acsBuilder), epoch(proxyCommitData_.epoch), rangeLock(proxyCommitData_.rangeLock) {
+	    accumulativeChecksumIndex(getCommitProxyAccumulativeChecksumIndex(proxyMetadata_.commitProxyIndex)),
+	    acsBuilder(proxyMetadata_.acsBuilder), epoch(proxyMetadata_.epoch), rangeLock(proxyMetadata_.rangeLock) {
 
 		// If commit proxy, epoch must be set
 		ASSERT(toCommit == nullptr || epoch.present());
@@ -162,7 +161,7 @@ private:
 	// commit
 	std::vector<std::pair<UID, UID>> tssMappingToAdd;
 
-	std::shared_ptr<RangeLock> rangeLock = nullptr;
+	ApplyMetadataRangeLock* rangeLock = nullptr;
 
 private:
 	bool dummyConfChange = false;
@@ -1172,7 +1171,7 @@ public:
 } // anonymous namespace
 
 void applyMetadataMutations(SpanContext const& spanContext,
-                            ProxyCommitData& proxyCommitData,
+                            const ApplyMetadataProxyContext& proxyMetadata,
                             Arena& arena,
                             Reference<ILogSystem> logSystem,
                             const VectorRef<MutationRef>& mutations,
@@ -1185,7 +1184,7 @@ void applyMetadataMutations(SpanContext const& spanContext,
 	ApplyMetadataMutationsImpl(spanContext,
 	                           arena,
 	                           mutations,
-	                           proxyCommitData,
+	                           proxyMetadata,
 	                           logSystem,
 	                           toCommit,
 	                           confChange,

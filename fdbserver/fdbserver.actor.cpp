@@ -40,7 +40,6 @@
 
 #include "fdbclient/ActorLineageProfiler.h"
 #include "fdbclient/ClusterConnectionFile.h"
-#include "fdbclient/IKnobCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/versions.h"
@@ -59,6 +58,7 @@
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/datadistributor/DataDistribution.h"
 #include "fdbserver/core/MoveKeys.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/NetworkTest.h"
 #include "fdbserver/kvstore/KVFileUtils.h"
 #include "fdbserver/core/ServerDBInfo.h"
@@ -1988,22 +1988,18 @@ int main(int argc, char* argv[]) {
 		}
 		enableFaultInjection(opts.faultInjectionEnabled);
 
-		IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::SERVER,
-		                                         Randomize::True,
-		                                         role == ServerRole::Simulation ? IsSimulated::True
-		                                                                        : IsSimulated::False);
-		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
-		g_knobs.setKnob("log_directory", KnobValueRef::create(opts.logFolder));
-		g_knobs.setKnob("conn_file", KnobValueRef::create(opts.connFile));
+		resetServerKnobs(Randomize::True, role == ServerRole::Simulation ? IsSimulated::True : IsSimulated::False);
+		setServerKnob("log_directory", KnobValueRef::create(opts.logFolder));
+		setServerKnob("conn_file", KnobValueRef::create(opts.connFile));
 		if (role != ServerRole::Simulation && opts.memLimit > 0) {
-			g_knobs.setKnob("commit_batches_mem_bytes_hard_limit",
-			                KnobValueRef::create(static_cast<int64_t>(opts.memLimit)));
+			setServerKnob("commit_batches_mem_bytes_hard_limit",
+			              KnobValueRef::create(static_cast<int64_t>(opts.memLimit)));
 		}
 
-		IKnobCollection::setupKnobs(opts.knobs);
-		g_knobs.setKnob("server_mem_limit", KnobValueRef::create(static_cast<int64_t>(opts.memLimit)));
+		setupServerKnobs(opts.knobs);
+		setServerKnob("server_mem_limit", KnobValueRef::create(static_cast<int64_t>(opts.memLimit)));
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		g_knobs.initialize(Randomize::True, role == ServerRole::Simulation ? IsSimulated::True : IsSimulated::False);
+		initializeServerKnobs(Randomize::True, role == ServerRole::Simulation ? IsSimulated::True : IsSimulated::False);
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY);
@@ -2334,13 +2330,13 @@ int main(int argc, char* argv[]) {
 						}
 					}
 				}
-				g_knobs.setKnob("encrypt_header_auth_token_enabled",
-				                KnobValueRef::create(ini.GetBoolValue("META", "encryptHeaderAuthTokenEnabled", false)));
-				g_knobs.setKnob("encrypt_header_auth_token_algo",
-				                KnobValueRef::create((int)ini.GetLongValue(
-				                    "META", "encryptHeaderAuthTokenAlgo", FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ALGO)));
+				setServerKnob("encrypt_header_auth_token_enabled",
+				              KnobValueRef::create(ini.GetBoolValue("META", "encryptHeaderAuthTokenEnabled", false)));
+				setServerKnob("encrypt_header_auth_token_algo",
+				              KnobValueRef::create((int)ini.GetLongValue(
+				                  "META", "encryptHeaderAuthTokenAlgo", FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ALGO)));
 
-				g_knobs.setKnob(
+				setServerKnob(
 				    "shard_encode_location_metadata",
 				    KnobValueRef::create(ini.GetBoolValue("META", "enableShardEncodeLocationMetadata", false)));
 			}

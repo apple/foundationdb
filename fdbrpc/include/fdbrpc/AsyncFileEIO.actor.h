@@ -39,7 +39,7 @@
 #include "flow/flow.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/IAsyncFile.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/TDMetric.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 class AsyncFileEIO : public IAsyncFile, public ReferenceCounted<AsyncFileEIO> {

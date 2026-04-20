@@ -20,6 +20,7 @@
 
 #include "fdbserver/tester/workloads.h"
 #include "fdbserver/core/ServerDBInfo.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbclient/GlobalConfig.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/RunRYWTransaction.h"
@@ -215,8 +216,7 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
-			IKnobCollection::getMutableGlobalKnobCollection().setKnob("csi_status_delay",
-			                                                          KnobValueRef::create(double{ 2.0 })); // 2 seconds
+			setServerKnob("csi_status_delay", KnobValueRef::create(double{ 2.0 })); // 2 seconds
 			return changeProfilingParameters(cx, trInfoSizeLimit, samplingProbability);
 		}
 		return Void();

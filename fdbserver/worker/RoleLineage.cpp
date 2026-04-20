@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "RoleLineage.actor.h"
+#include "RoleLineage.h"
 
 using namespace std::literals;
 

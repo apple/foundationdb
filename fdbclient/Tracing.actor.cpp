@@ -24,7 +24,6 @@
 #include "flow/UnitTest.h"
 #include "flow/Knobs.h"
 #include "flow/IConnection.h"
-#include "fdbclient/IKnobCollection.h"
 #include "flow/network.h"
 #include <functional>
 #include <iomanip>

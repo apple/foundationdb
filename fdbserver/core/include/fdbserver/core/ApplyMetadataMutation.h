@@ -23,6 +23,10 @@
 #pragma once
 
 #include <cstddef>
+#include <map>
+#include <memory>
+#include <set>
+#include <unordered_map>
 
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/MutationList.h"
@@ -32,8 +36,43 @@
 #include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/LogSystem.h"
 #include "fdbserver/core/LogProtocolMessage.h"
-#include "fdbserver/core/ProxyCommitData.h"
 #include "flow/FastRef.h"
+
+class AccumulativeChecksumBuilder;
+
+// applyMetadataMutations() is shared with resolver/clustercontroller code, so
+// it depends on a narrow commit-proxy view instead of the full ProxyCommitData
+// definition from the commitproxy module.
+struct ApplyMetadataRangeLock {
+	virtual ~ApplyMetadataRangeLock() = default;
+	virtual bool pendingRequest() const = 0;
+	virtual void setPendingRequest(const Key& startKey, const RangeLockStateSet& lockSetState) = 0;
+	virtual void consumePendingRequest(const Key& endKey) = 0;
+};
+
+struct ApplyMutationsData {
+	Future<Void> worker;
+	Version endVersion;
+	Reference<KeyRangeMap<Version>> keyVersion;
+};
+
+struct ApplyMetadataProxyContext {
+	UID dbgid;
+	IKeyValueStore* txnStateStore = nullptr;
+	KeyRangeMap<std::set<Key>>* vecBackupKeys = nullptr;
+	KeyRangeMap<ServerCacheInfo>* keyInfo = nullptr;
+	std::map<Key, ApplyMutationsData>* uid_applyMutationsData = nullptr;
+	PublicRequestStream<CommitTransactionRequest> commit;
+	Database cx;
+	NotifiedVersion* committedVersion = nullptr;
+	std::map<UID, Reference<StorageInfo>>* storageCache = nullptr;
+	std::map<Tag, Version>* tag_popped = nullptr;
+	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
+	uint16_t commitProxyIndex = 0;
+	std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder = nullptr;
+	Optional<LogEpoch> epoch;
+	ApplyMetadataRangeLock* rangeLock = nullptr;
+};
 
 // Resolver's data for applyMetadataMutations() calls.
 struct ResolverData {
@@ -87,7 +126,7 @@ Reference<StorageInfo> getStorageInfo(UID id,
                                       IKeyValueStore* txnStateStore);
 
 void applyMetadataMutations(SpanContext const& spanContext,
-                            ProxyCommitData& proxyCommitData,
+                            const ApplyMetadataProxyContext& proxyMetadata,
                             Arena& arena,
                             Reference<ILogSystem> logSystem,
                             const VectorRef<MutationRef>& mutations,

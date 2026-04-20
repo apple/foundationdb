@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <functional>
 #include <limits>
 #include <numeric>
 #include <utility>
@@ -1271,12 +1272,13 @@ void DDQueue::enqueueCancelledDataMove(UID dataMoveId, KeyRange range, const DDE
 	    .detail("Range", range);
 }
 
+void DDQueue::refreshCounter() {
+	serverCounter.traceAll(distributorId);
+	serverCounter.clear();
+}
+
 Future<Void> DDQueue::periodicalRefreshCounter() {
-	auto f = [this]() {
-		serverCounter.traceAll(distributorId);
-		serverCounter.clear();
-	};
-	return recurring(f, SERVER_KNOBS->DD_QUEUE_COUNTER_REFRESH_INTERVAL);
+	return recurring(std::bind_front(&DDQueue::refreshCounter, this), SERVER_KNOBS->DD_QUEUE_COUNTER_REFRESH_INTERVAL);
 }
 
 int DDQueue::getUnhealthyRelocationCount() const {

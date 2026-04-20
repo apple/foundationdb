@@ -22,7 +22,6 @@
 #include "fdbrpc/AsyncFileReadAhead.h"
 #include "flow/IAsyncFile.h"
 #include "flow/FaultInjection.h"
-#include "flow/Platform.actor.h"
 #include "flow/Platform.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"

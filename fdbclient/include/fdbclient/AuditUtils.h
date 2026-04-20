@@ -40,11 +40,11 @@ Future<Void> persistAuditState(Database cx,
                                MoveKeyLockInfo lock,
                                bool ddEnabled);
 Future<AuditStorageState> getAuditState(Database cx, AuditType type, UID id);
-Future<std::vector<AuditStorageState>> getAuditStates(Database cx,
-                                                      AuditType auditType,
-                                                      bool newFirst,
-                                                      Optional<int> num = Optional<int>(),
-                                                      Optional<AuditPhase> phase = Optional<AuditPhase>());
+AsyncResult<std::vector<AuditStorageState>> getAuditStates(Database cx,
+                                                           AuditType auditType,
+                                                           bool newFirst,
+                                                           Optional<int> num = Optional<int>(),
+                                                           Optional<AuditPhase> phase = Optional<AuditPhase>());
 
 Future<Void> persistAuditStateByRange(Database cx, AuditStorageState auditState);
 Future<std::vector<AuditStorageState>> getAuditStateByRange(Database cx, AuditType type, UID auditId, KeyRange range);

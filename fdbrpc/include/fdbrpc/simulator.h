@@ -37,7 +37,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"
 #include "flow/IAsyncFile.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/TDMetric.h"
 #include "fdbrpc/HTTP.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"

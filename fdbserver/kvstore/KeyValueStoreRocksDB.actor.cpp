@@ -67,7 +67,7 @@
 
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/IKeyValueStore.h"
-#include "fdbserver/core/RocksDBCheckpointUtils.actor.h"
+#include "fdbserver/core/RocksDBCheckpointUtils.h"
 #include "RocksDBCommon.h"
 
 #include "flow/actorcompiler.h" // has to be last include
@@ -965,9 +965,9 @@ ACTOR Future<Void> refreshReadIteratorPool(std::shared_ptr<ReadIteratorPool> rea
 	return Void();
 }
 
-ACTOR Future<Void> flowLockLogger(UID id, const FlowLock* readLock, const FlowLock* fetchLock) {
-	loop {
-		wait(delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY));
+Future<Void> flowLockLogger(UID id, const FlowLock* readLock, const FlowLock* fetchLock) {
+	while (true) {
+		co_await delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY);
 		TraceEvent e("RocksDBFlowLock", id);
 		e.detail("ReadAvailable", readLock->available());
 		e.detail("ReadActivePermits", readLock->activePermits());
@@ -978,17 +978,15 @@ ACTOR Future<Void> flowLockLogger(UID id, const FlowLock* readLock, const FlowLo
 	}
 }
 
-ACTOR Future<Void> manualFlush(UID id, rocksdb::DB* db, std::shared_ptr<SharedRocksDBState> sharedState, CF cf) {
+Future<Void> manualFlush(UID id, rocksdb::DB* db, std::shared_ptr<SharedRocksDBState> sharedState, CF cf) {
 	if (SERVER_KNOBS->ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL) {
-		state rocksdb::FlushOptions fOptions = sharedState->getFlushOptions();
-		state double waitTime = SERVER_KNOBS->ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL;
-		state double currTime = 0;
-		state int timeElapsedAfterLastFlush = 0;
-		loop {
-			wait(delay(waitTime));
+		rocksdb::FlushOptions fOptions = sharedState->getFlushOptions();
+		double waitTime = SERVER_KNOBS->ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL;
+		while (true) {
+			co_await delay(waitTime);
 
-			currTime = now();
-			timeElapsedAfterLastFlush = currTime - sharedState->getLastFlushTime();
+			double currTime = now();
+			int timeElapsedAfterLastFlush = currTime - sharedState->getLastFlushTime();
 			if (timeElapsedAfterLastFlush >= SERVER_KNOBS->ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL) {
 				db->Flush(fOptions, cf);
 				waitTime = SERVER_KNOBS->ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL;
@@ -1005,18 +1003,17 @@ ACTOR Future<Void> manualFlush(UID id, rocksdb::DB* db, std::shared_ptr<SharedRo
 			}
 		}
 	}
-	return Void();
 }
 
-ACTOR Future<Void> rocksDBMetricLogger(UID id,
-                                       std::shared_ptr<SharedRocksDBState> sharedState,
-                                       std::shared_ptr<rocksdb::Statistics> statistics,
-                                       std::shared_ptr<PerfContextMetrics> perfContextMetrics,
-                                       rocksdb::DB* db,
-                                       std::shared_ptr<ReadIteratorPool> readIterPool,
-                                       Counters* counters,
-                                       CF cf) {
-	state std::vector<std::tuple<const char*, uint32_t, uint64_t>> tickerStats = {
+Future<Void> rocksDBMetricLogger(UID id,
+                                 std::shared_ptr<SharedRocksDBState> sharedState,
+                                 std::shared_ptr<rocksdb::Statistics> statistics,
+                                 std::shared_ptr<PerfContextMetrics> perfContextMetrics,
+                                 rocksdb::DB* db,
+                                 std::shared_ptr<ReadIteratorPool> readIterPool,
+                                 Counters* counters,
+                                 CF cf) {
+	std::vector<std::tuple<const char*, uint32_t, uint64_t>> tickerStats = {
 		{ "StallMicros", rocksdb::STALL_MICROS, 0 },
 		{ "BytesRead", rocksdb::BYTES_READ, 0 },
 		{ "IterBytesRead", rocksdb::ITER_BYTES_READ, 0 },
@@ -1073,7 +1070,7 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 
 	// To control the rocksdb::StatsLevel, use ROCKSDB_STATS_LEVEL knob.
 	// Refer StatsLevel: https://github.com/facebook/rocksdb/blob/main/include/rocksdb/statistics.h#L594
-	state std::vector<std::pair<const char*, uint32_t>> histogramStats = {
+	std::vector<std::pair<const char*, uint32_t>> histogramStats = {
 		{ "CompactionTime", rocksdb::COMPACTION_TIME }, // enabled if rocksdb::StatsLevel > kExceptTimers(2)
 		{ "CompactionCPUTime", rocksdb::COMPACTION_CPU_TIME }, // enabled if rocksdb::StatsLevel > kExceptTimers(2)
 		{ "CompressionTimeNanos",
@@ -1088,7 +1085,7 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 		{ "WriteStall", rocksdb::WRITE_STALL }, // enabled if rocksdb::StatsLevel > kExceptHistogramOrTimers(1)
 	};
 
-	state std::vector<std::pair<const char*, std::string>> intPropertyStats = {
+	std::vector<std::pair<const char*, std::string>> intPropertyStats = {
 		{ "NumImmutableMemtables", rocksdb::DB::Properties::kNumImmutableMemTable },
 		{ "NumImmutableMemtablesFlushed", rocksdb::DB::Properties::kNumImmutableMemTableFlushed },
 		{ "IsMemtableFlushPending", rocksdb::DB::Properties::kMemTableFlushPending },
@@ -1117,23 +1114,23 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 		{ "ObsoleteSstFilesSize", rocksdb::DB::Properties::kObsoleteSstFilesSize },
 	};
 
-	state std::vector<std::pair<const char*, std::string>> strPropertyStats = {
+	std::vector<std::pair<const char*, std::string>> strPropertyStats = {
 		{ "LevelStats", rocksdb::DB::Properties::kLevelStats },
 		{ "BlockCacheEntryStats", rocksdb::DB::Properties::kBlockCacheEntryStats },
 	};
 
-	state std::vector<std::pair<const char*, std::string>> levelStrPropertyStats = {
+	std::vector<std::pair<const char*, std::string>> levelStrPropertyStats = {
 		{ "CompressionRatioAtLevel", rocksdb::DB::Properties::kCompressionRatioAtLevelPrefix },
 	};
 
-	state std::unordered_map<std::string, uint64_t> readIteratorPoolStats = {
+	std::unordered_map<std::string, uint64_t> readIteratorPoolStats = {
 		{ "NumReadIteratorsCreated", 0 },
 		{ "NumTimesReadIteratorsReused", 0 },
 	};
 
-	state std::string rocksdbMetricsTrackingKey = id.toString() + "/RocksDBMetrics";
-	loop {
-		wait(delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY));
+	std::string rocksdbMetricsTrackingKey = id.toString() + "/RocksDBMetrics";
+	while (true) {
+		co_await delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY);
 		if (sharedState->isClosing()) {
 			break;
 		}
@@ -1202,8 +1199,6 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 			perfContextMetrics->log(true);
 		}
 	}
-
-	return Void();
 }
 
 void logRocksDBError(UID id,
@@ -2046,16 +2041,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			               i,
 			               SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE > 0 ? metricPromiseStreams[i].get() : nullptr),
 			    "fdb-rocksdb-re");
-		}
-	}
-
-	ACTOR Future<Void> errorListenActor(Future<Void> collection) {
-		try {
-			wait(collection);
-			ASSERT(false);
-			throw internal_error();
-		} catch (Error& e) {
-			throw e;
 		}
 	}
 

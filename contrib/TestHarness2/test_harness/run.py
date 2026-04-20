@@ -22,6 +22,10 @@ from typing import Dict, List, Pattern, OrderedDict
 
 from test_harness.summarize import Summary, SummaryTree
 
+DEFAULT_SANITIZER_MEMORY = "12288MiB"
+SANITIZER_MARKERS = (b"__asan_init", b"__ubsan_handle_")
+_SANITIZER_BINARY_CACHE: Dict[Path, bool] = {}
+
 
 def parse_test_args_file(args_file: Path) -> tuple[Path, int, bool, List[str]]:
     """
@@ -83,6 +87,44 @@ def parse_test_args_file(args_file: Path) -> tuple[Path, int, bool, List[str]]:
         raise ValueError("Random seed not specified in args file")
 
     return test_file, random_seed, buggify_enabled, extra_args
+
+
+def extra_args_include_memory(extra_args: List[str]) -> bool:
+    return any(arg in ("-m", "--memory") for arg in extra_args)
+
+
+def binary_uses_sanitizers(binary: Path) -> bool:
+    cached = _SANITIZER_BINARY_CACHE.get(binary)
+    if cached is not None:
+        return cached
+
+    found = False
+    max_marker_len = max(len(marker) for marker in SANITIZER_MARKERS)
+    overlap = max_marker_len - 1
+    with binary.open("rb") as infile:
+        tail = b""
+        while True:
+            chunk = infile.read(1024 * 1024)
+            if not chunk:
+                break
+            haystack = tail + chunk
+            if any(marker in haystack for marker in SANITIZER_MARKERS):
+                found = True
+                break
+            tail = haystack[-overlap:] if overlap else b""
+
+    _SANITIZER_BINARY_CACHE[binary] = found
+    return found
+
+
+def resolve_fdbserver_memory(binary: Path, extra_args: List[str]) -> str | None:
+    if extra_args_include_memory(extra_args):
+        return None
+    if config.fdbserver_memory is not None:
+        return config.fdbserver_memory
+    if binary_uses_sanitizers(binary):
+        return DEFAULT_SANITIZER_MEMORY
+    return None
 
 
 @total_ordering
@@ -554,6 +596,9 @@ class TestRun:
             "-s",
             str(self.random_seed),
         ]
+        memory_limit = resolve_fdbserver_memory(self.binary, self.extra_args)
+        if memory_limit is not None:
+            command += ["--memory", memory_limit]
         if self.trace_format is not None:
             command += ["--trace_format", self.trace_format]
         if self.use_tls_plugin:

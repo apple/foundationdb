@@ -220,6 +220,12 @@ class Config:
             "fdbserver.exe" if os.name == "nt" else "fdbserver"
         )
         self.binary_args = {"help": "Path to executable"}
+        self.fdbserver_memory: str | None = None
+        self.fdbserver_memory_args = {
+            "type": str,
+            "required": False,
+            "help": "Pass --memory SIZE to fdbserver (for example 12288MiB)",
+        }
         self.hit_per_runs_ratio: int = 20000
         self.hit_per_runs_ratio_args = {
             "help": "Maximum test runs before each code probe hit at least once"

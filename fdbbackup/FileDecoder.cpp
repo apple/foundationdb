@@ -41,7 +41,6 @@
 #include "fdbclient/BuildFlags.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/IKnobCollection.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/MutationList.h"
@@ -239,10 +238,10 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 	}
 
 	void updateKnobs() {
-		IKnobCollection::setupKnobs(knobs);
+		setupClientKnobs(knobs);
 
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		IKnobCollection::getMutableGlobalKnobCollection().initialize(Randomize::False, IsSimulated::False);
+		initializeClientKnobs(Randomize::False, IsSimulated::False);
 	}
 };
 

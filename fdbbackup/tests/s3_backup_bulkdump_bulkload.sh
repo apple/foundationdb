@@ -164,7 +164,7 @@ function run_validate_restore_audit {
       break
     fi
     
-    if echo "${audit_output}" | grep -qE "1221|1230|1010"; then
+    if output_matches_E "${audit_output}" "1221|1230|1010"; then
       log "Transient error detected, retrying in ${retry_delay}s..."
       sleep $retry_delay
       continue
@@ -193,12 +193,12 @@ function run_validate_restore_audit {
     local status_output
     status_output=$("${fdbcli}" -C "${cluster_file}" --exec "get_audit_status validate_restore id ${audit_id}" 2>&1)
     
-    if echo "${status_output}" | grep -q "Phase.*2"; then
+    if output_matches "${status_output}" "Phase.*2"; then
       log "Audit completed successfully after ${elapsed}s"
       return 0
     fi
     
-    if echo "${status_output}" | grep -q "Phase.*[34]"; then
+    if output_matches "${status_output}" "Phase.*[34]"; then
       err "Audit failed with status: ${status_output}"
       return 1
     fi

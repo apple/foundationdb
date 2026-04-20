@@ -1094,37 +1094,6 @@ Future<T> ioTimeoutError(Future<T> what, double time, const char* context = null
 }
 
 ACTOR template <class T>
-Future<T> ioTimeoutErrorIfCleared(Future<T> what,
-                                  double time,
-                                  Reference<AsyncVar<bool>> condition,
-                                  const char* context = nullptr) {
-	// Before simulation is sped up, IO operations can take a very long time so limit timeouts
-	// to not end until at least time after simulation is sped up.
-	if (g_network->isSimulated() && !g_simulator->speedUpSimulation) {
-		time += std::max(0.0, FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS - now());
-	}
-	Future<Void> end = lowPriorityDelayAfterCleared(condition, time);
-	choose {
-		when(T t = wait(what)) {
-			return t;
-		}
-		when(wait(end)) {
-			Error err = io_timeout();
-			if (isSimulatorProcessUnreliable()) {
-				err = err.asInjectedFault();
-			}
-			TraceEvent e(SevError, "IoTimeoutError");
-			e.error(err);
-			if (context != nullptr) {
-				e.detail("Context", context);
-			}
-			e.log();
-			throw err;
-		}
-	}
-}
-
-ACTOR template <class T>
 Future<T> ioDegradedOrTimeoutError(Future<T> what,
                                    double errTime,
                                    Reference<AsyncVar<bool>> degraded,

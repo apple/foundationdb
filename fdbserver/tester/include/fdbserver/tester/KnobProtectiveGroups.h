@@ -24,7 +24,7 @@
 #include <array>
 #include <unordered_map>
 
-#include "fdbclient/IKnobCollection.h"
+#include "flow/Knobs.h"
 
 // A list of knob key value pairs
 class KnobKeyValuePairs {

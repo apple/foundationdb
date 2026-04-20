@@ -267,4 +267,6 @@ private:
 	ReadYourWritesTransactionOptions options;
 };
 
+Future<Optional<Value>> getJSON(Database db, std::string jsonField = "");
+
 #endif

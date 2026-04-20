@@ -31,7 +31,7 @@
 #include "BulkSetup.h"
 #include "ReadWriteWorkload.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/TDMetric.h"
 #include "flow/CoroUtils.h"
 
 struct ReadWriteCommonImpl {

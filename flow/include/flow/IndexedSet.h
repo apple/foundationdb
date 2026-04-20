@@ -1384,7 +1384,60 @@ Metric IndexedSet<T, Metric>::sumTo(typename IndexedSet<T, Metric>::const_iterat
 }
 
 #include "flow/flow.h"
-#include "flow/IndexedSet.actor.h"
+
+template <class Node>
+bool ISFreeNodeImpl(std::vector<Node*>& toFree, Deque<Node*>& prefetchQueue) {
+	// Freeing many items from a large tree is bound by the memory latency to
+	// fetch each node from main memory.  This code does a largely depth first
+	// traversal of the forest to be destroyed (using a stack) but prefetches
+	// each node and puts it on a short queue before actually processing it, so
+	// that several memory transactions can be outstanding simultaneously.
+	if (prefetchQueue.empty() && toFree.empty()) {
+		return false;
+	}
+
+	while (prefetchQueue.size() < 10 && !toFree.empty()) {
+		_mm_prefetch((const char*)toFree.back(), _MM_HINT_T0);
+		prefetchQueue.push_back(toFree.back());
+		toFree.pop_back();
+	}
+
+	auto n = prefetchQueue.front();
+	prefetchQueue.pop_front();
+
+	if (n->child[0])
+		toFree.push_back(n->child[0]);
+	if (n->child[1])
+		toFree.push_back(n->child[1]);
+	n->child[0] = n->child[1] = 0;
+	delete n;
+
+	return true;
+}
+
+template <class Node>
+void ISFreeNodesSync(std::vector<Node*> toFree) {
+	// Frees the forest of nodes in the 'toFree' vector without waiting.
+
+	Deque<Node*> prefetchQueue;
+	while (ISFreeNodeImpl(toFree, prefetchQueue)) {
+	}
+}
+
+template <class Node>
+Future<Void> ISFreeNodes(std::vector<Node*> toFree) {
+	// Frees the forest of nodes in the 'toFree' vector, yielding periodically.
+
+	int eraseCount = 0;
+	Deque<Node*> prefetchQueue;
+	while (ISFreeNodeImpl(toFree, prefetchQueue)) {
+		++eraseCount;
+
+		if (eraseCount % 1000 == 0) {
+			co_await yield();
+		}
+	}
+}
 
 template <class T, class Metric>
 void IndexedSet<T, Metric>::erase(typename IndexedSet<T, Metric>::iterator begin,
@@ -1392,7 +1445,7 @@ void IndexedSet<T, Metric>::erase(typename IndexedSet<T, Metric>::iterator begin
 	std::vector<IndexedSet<T, Metric>::Node*> toFree;
 	erase(begin, end, toFree);
 
-	ISFreeNodes(toFree, true);
+	ISFreeNodesSync(toFree);
 }
 
 template <class T, class Metric>
@@ -1407,7 +1460,7 @@ Future<Void> IndexedSet<T, Metric>::eraseAsync(typename IndexedSet<T, Metric>::i
 	std::vector<IndexedSet<T, Metric>::Node*> toFree;
 	erase(begin, end, toFree);
 
-	return uncancellable(ISFreeNodes(toFree, false));
+	return uncancellable(ISFreeNodes(toFree));
 }
 
 template <class Key, class Value, class Pair, class Metric>

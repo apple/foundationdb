@@ -44,7 +44,7 @@ MyCounters() : foo("foo", cc), bar("bar", cc), baz("baz", cc) {}
 #include <cstdint>
 #include <cstddef>
 #include "flow/flow.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/TDMetric.h"
 #include "fdbrpc/DDSketch.h"
 
 struct ICounter : public IMetric {

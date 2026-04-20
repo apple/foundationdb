@@ -46,14 +46,13 @@
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
-#include "fdbclient/IKnobCollection.h"
+#include "fdbclient/Knobs.h"
 #include "fdbclient/RunRYWTransaction.h"
-#include "fdbclient/S3BlobStore.h"
+#include "fdbclient/IBlobStore.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/ManagementAPI.h"
-#include "fdbclient/BackupContainer.h"
 
 #include "flow/Platform.h"
 
@@ -1566,12 +1565,12 @@ AsyncResult<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
 	o.create("networkAddress") = localIP.toString();
 
 	if (exe == ProgramExe::AGENT) {
-		static S3BlobStoreEndpoint::Stats last_stats;
+		static IBlobStoreEndpoint::Stats last_stats;
 		static double last_ts = 0;
-		S3BlobStoreEndpoint::Stats current_stats = S3BlobStoreEndpoint::s_stats;
+		IBlobStoreEndpoint::Stats current_stats = IBlobStoreEndpoint::s_stats;
 		JSONDoc blobstats = o.create("blob_stats");
 		blobstats.create("total") = current_stats.getJSON();
-		S3BlobStoreEndpoint::Stats diff = current_stats - last_stats;
+		IBlobStoreEndpoint::Stats diff = current_stats - last_stats;
 		json_spirit::mObject diffObj = diff.getJSON();
 		if (last_ts > 0)
 			diffObj["bytes_per_second"] = double(current_stats.bytes_sent - last_stats.bytes_sent) / (now() - last_ts);
@@ -1627,7 +1626,7 @@ AsyncResult<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
 			int i = encryptionContainerIndices[j];
 			std::string keyPath = tagContainers[i].get()->getEncryptionKeyFileName().get();
 
-			if (seenKeyPaths.find(keyPath) == seenKeyPaths.end()) {
+			if (!seenKeyPaths.contains(keyPath)) {
 				seenKeyPaths.insert(keyPath);
 				json_spirit::mObject keyObj;
 				keyObj["path"] = tagContainers[i].get()->getEncryptionKeyFileName().get();
@@ -1644,7 +1643,7 @@ AsyncResult<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
 		layerRoot.create("paused.$latest") = fBackupPaused.get().present();
 
 		int j = 0;
-		for (KeyBackedTag eachTag : backupTags) {
+		for (const KeyBackedTag& eachTag : backupTags) {
 			EBackupState status = tagStates[j].get();
 			const char* statusText = fba.getStateText(status);
 
@@ -2530,8 +2529,7 @@ Future<Void> expireBackupData(const char* name,
                               Database db,
                               bool force,
                               Version restorableAfterVersion,
-                              std::string restorableAfterDatetime,
-                              Optional<std::string> encryptionKeyFile) {
+                              std::string restorableAfterDatetime) {
 	if (!endDatetime.empty()) {
 		Version v = co_await timeKeeperVersionFromDatetime(endDatetime, db);
 		endVersion = v;
@@ -2549,7 +2547,7 @@ Future<Void> expireBackupData(const char* name,
 	}
 
 	try {
-		Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer, proxy, encryptionKeyFile);
+		Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer, proxy, {});
 
 		IBackupContainer::ExpireProgress progress;
 		std::string lastProgress;
@@ -2626,10 +2624,9 @@ Future<Void> describeBackup(const char* name,
                             Optional<std::string> proxy,
                             bool deep,
                             Optional<Database> cx,
-                            bool json,
-                            Optional<std::string> encryptionKeyFile) {
+                            bool json) {
 	try {
-		Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer, proxy, encryptionKeyFile);
+		Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer, proxy, {});
 		BackupDescription desc = co_await c->describeBackup(deep);
 		if (cx.present())
 			co_await desc.resolveVersionTimes(cx.get());
@@ -2762,7 +2759,7 @@ Future<Void> queryBackup(const char* name,
 					object["file_name"] = rangeFile.fileName;
 					object["file_size"] = rangeFile.fileSize;
 					object["version"] = rangeFile.version;
-					object["key_range"] = fileSet.get().keyRanges.count(rangeFile.fileName) == 0
+					object["key_range"] = !fileSet.get().keyRanges.contains(rangeFile.fileName)
 					                          ? "none"
 					                          : fileSet.get().keyRanges.at(rangeFile.fileName).toString();
 					rangeFilesJson.push_back(object);
@@ -2812,7 +2809,7 @@ Future<Void> queryBackup(const char* name,
 				object["file_name"] = rangeFile.fileName;
 				object["file_size"] = rangeFile.fileSize;
 				object["version"] = rangeFile.version;
-				object["key_range"] = fileSet.get().keyRanges.count(rangeFile.fileName) == 0
+				object["key_range"] = !fileSet.get().keyRanges.contains(rangeFile.fileName)
 				                          ? "none"
 				                          : fileSet.get().keyRanges.at(rangeFile.fileName).toString();
 				rangeFilesJson.push_back(object);
@@ -2860,7 +2857,7 @@ Future<Void> queryBackup(const char* name,
 Future<Void> listBackup(std::string baseUrl, Optional<std::string> proxy) {
 	try {
 		std::vector<std::string> containers = co_await IBackupContainer::listContainers(baseUrl, proxy);
-		for (std::string container : containers) {
+		for (const std::string& container : containers) {
 			printf("%s\n", container.c_str());
 		}
 	} catch (Error& e) {
@@ -3042,8 +3039,9 @@ static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& er
 					buf.push_back(StringRef((uint8_t*)(line.data() + offset), i - offset));
 				ret.push_back(std::move(buf));
 				offset = i = line.find_first_not_of(' ', i + 1);
-			} else
+			} else {
 				i++;
+			}
 			break;
 		case '"':
 			quoted = !quoted;
@@ -3056,8 +3054,9 @@ static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& er
 				buf.push_back(StringRef((uint8_t*)(line.data() + offset), i - offset));
 				offset = i = line.find_first_not_of(' ', i);
 				forcetoken = false;
-			} else
+			} else {
 				i++;
+			}
 			break;
 		case '\\':
 			if (i + 2 > line.length()) {
@@ -4053,7 +4052,7 @@ int main(int argc, char* argv[]) {
 				// Add the backup key range
 			case ProgramExe::BACKUP:
 				// Error, if the keys option was not specified
-				if (backupKeys.size() == 0) {
+				if (backupKeys.empty()) {
 					fprintf(stderr, "ERROR: Unknown backup option value `%s'\n", args->File(argLoop));
 					printHelpTeaser(newArgV[0]);
 					return FDB_EXIT_ERROR;
@@ -4083,7 +4082,7 @@ int main(int argc, char* argv[]) {
 
 			case ProgramExe::DB_BACKUP:
 				// Error, if the keys option was not specified
-				if (backupKeys.size() == 0) {
+				if (backupKeys.empty()) {
 					fprintf(stderr, "ERROR: Unknown DR option value `%s'\n", args->File(argLoop));
 					printHelpTeaser(newArgV[0]);
 					return FDB_EXIT_ERROR;
@@ -4152,9 +4151,9 @@ int main(int argc, char* argv[]) {
 
 		Future<Void> memoryUsageMonitor = startMemoryUsageMonitor(memLimit);
 
-		IKnobCollection::setupKnobs(knobs);
+		setupClientKnobs(knobs);
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		IKnobCollection::getMutableGlobalKnobCollection().initialize(Randomize::False, IsSimulated::False);
+		initializeClientKnobs(Randomize::False, IsSimulated::False);
 
 		TraceEvent("ProgramStart")
 		    .setMaxEventLength(12000)
@@ -4204,7 +4203,7 @@ int main(int argc, char* argv[]) {
 		};
 
 		auto initSourceCluster = [&](bool required, bool quiet = false) {
-			if (!sourceClusterFile.size() && required) {
+			if (sourceClusterFile.empty() && required) {
 				if (!quiet) {
 					fprintf(stderr, "ERROR: source cluster file is required\n");
 				}
@@ -4344,8 +4343,7 @@ int main(int argc, char* argv[]) {
 				                               db,
 				                               forceAction,
 				                               expireRestorableAfterVersion,
-				                               expireRestorableAfterDatetime,
-				                               encryptionKeyFile));
+				                               expireRestorableAfterDatetime));
 				break;
 
 			case BackupType::DELETE_BACKUP:
@@ -4366,8 +4364,7 @@ int main(int argc, char* argv[]) {
 				                             proxy,
 				                             describeDeep,
 				                             describeTimestamps ? Optional<Database>(db) : Optional<Database>(),
-				                             jsonOutput,
-				                             encryptionKeyFile));
+				                             jsonOutput));
 				break;
 
 			case BackupType::LIST:

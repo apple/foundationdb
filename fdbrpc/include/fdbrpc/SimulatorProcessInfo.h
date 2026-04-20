@@ -27,7 +27,7 @@
 #include "flow/NetworkAddress.h"
 #include "flow/IConnection.h"
 #include "flow/IUDPSocket.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/TDMetric.h"
 #include "flow/ChaosMetrics.h"
 #include "flow/Histogram.h"
 

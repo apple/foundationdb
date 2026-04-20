@@ -24,7 +24,6 @@
 
 #include "flow/Knobs.h"
 #include "fdbclient/Knobs.h"
-#include "fdbclient/ServerKnobCollection.h"
 #include "fdbserver/core/Knobs.h"
 
 void KnobKeyValuePairs::set(const std::string& name, const ParsedKnobValue value) {
@@ -67,11 +66,9 @@ void KnobProtectiveGroup::snapshotOriginalKnobs() {
 }
 
 void KnobProtectiveGroup::assignKnobs(const KnobKeyValuePairs& overrideKnobs) {
-	auto& mutableServerKnobs = dynamic_cast<ServerKnobCollection&>(IKnobCollection::getMutableGlobalKnobCollection());
-
 	for (const auto& [name, value] : overrideKnobs.getKnobs()) {
 		Standalone<KnobValueRef> valueRef = KnobValueRef::create(value);
-		bool success = mutableServerKnobs.trySetKnob(name, valueRef);
+		bool success = trySetServerKnob(name, valueRef);
 		if (!success) {
 			TraceEvent(SevError, "FailedToAssignKnob")
 			    .detail("KnobName", name)

@@ -180,7 +180,7 @@ Future<BulkLoadTaskState> getBulkLoadTask(Transaction* tr,
 Future<Void> addBulkLoadJobToHistory(Transaction* tr, BulkLoadJobState jobState);
 
 // Get all past bulkLoad jobs from history map
-Future<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database cx);
+AsyncResult<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database cx);
 
 // Erase all bulkLoad job history metadata if jobId is not provided. Otherwise, erase the job with the given jobId.
 Future<Void> clearBulkLoadJobHistory(Database cx, Optional<UID> jobId = Optional<UID>());
@@ -363,7 +363,7 @@ Future<Void> registerRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueI
 Future<Void> removeRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID);
 
 // Get all registered rangeLock owner
-Future<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx);
+AsyncResult<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx);
 
 // Get a rangeLock owner by ownerUniqueID
 Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID);

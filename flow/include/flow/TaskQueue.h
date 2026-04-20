@@ -24,7 +24,7 @@
 
 #include <queue>
 #include <vector>
-#include "flow/TDMetric.actor.h"
+#include "flow/TDMetric.h"
 #include "flow/network.h"
 #include "flow/ThreadSafeQueue.h"
 

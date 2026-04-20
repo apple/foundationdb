@@ -20,7 +20,7 @@
 
 #include <algorithm>
 
-#include "fdbclient/ClientKnobs.h"
+#include "fdbclient/Knobs.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/WaitFailure.h"

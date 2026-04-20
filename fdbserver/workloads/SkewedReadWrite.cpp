@@ -30,7 +30,7 @@
 #include "BulkSetup.h"
 #include "ReadWriteWorkload.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/TDMetric.h"
 #include "fdbclient/RunRYWTransaction.h"
 
 struct SkewedReadWriteWorkload : ReadWriteCommon {

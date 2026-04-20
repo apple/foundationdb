@@ -36,7 +36,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // To avoid directly access INetworkConnection::net()->removeCachedDNS(), which will require heavy include budget, put
-// the call to FlowTransport.actor.cpp as a external function.
+// the call to FlowTransport.cpp as a external function.
 extern void removeCachedDNS(const std::string& host, const std::string& service);
 
 ACTOR template <class Req, bool P>
@@ -77,17 +77,6 @@ Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req, P> to, Req request
 			CODE_PROBE(true, "retryBrokenPromise with taskID");
 		}
 	}
-}
-
-ACTOR template <class Req>
-Future<Void> tryInitializeRequestStream(RequestStream<Req>* stream, Hostname hostname, WellKnownEndpoints token) {
-	Optional<NetworkAddress> address = wait(hostname.resolve());
-	if (!address.present()) {
-		return Void();
-	}
-	ASSERT(stream != nullptr);
-	*stream = RequestStream<Req>(Endpoint::wellKnown({ address.get() }, token));
-	return Void();
 }
 
 ACTOR template <class Req>

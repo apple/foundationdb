@@ -21,7 +21,7 @@
 #pragma once
 
 #include "flow/flow.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/TDMetric.h"
 
 struct TraceEventNameIDDescriptor {
 	Standalone<StringRef> name;

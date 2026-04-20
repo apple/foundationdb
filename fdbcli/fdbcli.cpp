@@ -31,7 +31,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.h"
-#include "fdbclient/IKnobCollection.h"
+#include "fdbclient/Knobs.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/ManagementAPI.h"
@@ -921,10 +921,10 @@ struct CLIOptions {
 	}
 
 	void setupKnobs() {
-		IKnobCollection::setupKnobs(knobs);
+		setupClientKnobs(knobs);
 
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		IKnobCollection::getMutableGlobalKnobCollection().initialize(Randomize::False, IsSimulated::False);
+		initializeClientKnobs(Randomize::False, IsSimulated::False);
 	}
 
 	int processArg(CSimpleOpt& args) {

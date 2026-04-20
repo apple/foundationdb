@@ -246,42 +246,6 @@ Future<Void> tssComparison(Req req,
 	return Void();
 }
 
-ACTOR template <class Resp>
-Future<Void> waitForQuorumReplies(std::vector<Future<Optional<ErrorOr<Resp>>>>* replies, int required) {
-	state int outstandingReplies = (int)replies->size();
-	state int requiredReplies = std::min(required, (int)replies->size());
-	state std::vector<Future<Optional<ErrorOr<Resp>>>> ongoingReplies;
-	loop {
-		ongoingReplies.clear();
-		for (auto& reply : (*replies)) {
-			if (!reply.isReady()) {
-				ongoingReplies.push_back(reply);
-			}
-		}
-		ASSERT(ongoingReplies.size() == outstandingReplies);
-
-		if (requiredReplies == 0 || outstandingReplies == 0) {
-			break;
-		}
-
-		wait(quorum(ongoingReplies, std::min(requiredReplies, outstandingReplies)));
-
-		for (auto& reply : ongoingReplies) {
-			if (reply.isReady()) {
-				outstandingReplies--;
-				if (!reply.isError() && reply.get().present() && !reply.get().get().isError()) {
-					Optional<LoadBalancedReply> lbReply = getLoadBalancedReply(&reply.get().get().get());
-					if (lbReply.present() && !lbReply.get().error.present()) {
-						requiredReplies--;
-					}
-				}
-			}
-		}
-	}
-
-	return Void();
-}
-
 ACTOR template <class Req, class Resp, class Interface, class Multi, bool P>
 Future<Void> replicaComparison(Req req,
                                Future<ErrorOr<Resp>> fSource,

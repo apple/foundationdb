@@ -31,7 +31,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/consistencyscan/ConsistencyScan.h"
-#include "fdbserver/core/StorageMetrics.actor.h"
+#include "fdbserver/core/StorageMetrics.h"
 #include "fdbserver/datadistributor/DataDistribution.h"
 #include "fdbserver/core/QuietDatabase.h"
 #include "fdbserver/core/TSSMappingUtil.h"

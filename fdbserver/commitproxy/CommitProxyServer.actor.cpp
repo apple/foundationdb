@@ -50,12 +50,12 @@
 #include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/MutationTracking.h"
-#include "fdbserver/core/ProxyCommitData.h"
+#include "ProxyCommitData.h"
 #include "fdbserver/core/RatekeeperInterface.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/WaitFailure.h"
-#include "fdbserver/commitproxy/CommitProxyServer.actor.h"
+#include "fdbserver/commitproxy/CommitProxyServer.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/CodeProbe.h"
@@ -1041,7 +1041,7 @@ void applyMetadataEffect(CommitBatchContext* self) {
 
 			if (committed) {
 				applyMetadataMutations(SpanContext(),
-				                       *self->pProxyCommitData,
+				                       self->pProxyCommitData->getApplyMetadataProxyContext(),
 				                       self->arena,
 				                       self->pProxyCommitData->logSystem,
 				                       self->resolution[0].stateMutations[versionIndex][transactionIndex].mutations,
@@ -1131,7 +1131,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 		    (!self->locked || trs[t].isLockAware())) {
 			self->commitCount++;
 			applyMetadataMutations(trs[t].spanContext,
-			                       *pProxyCommitData,
+			                       pProxyCommitData->getApplyMetadataProxyContext(),
 			                       self->arena,
 			                       pProxyCommitData->logSystem,
 			                       trs[t].transaction.mutations,
@@ -2108,14 +2108,14 @@ void addTagMapping(GetKeyServerLocationsReply& reply, ProxyCommitData* commitDat
 	}
 }
 
-ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsRequest req, ProxyCommitData* commitData) {
+static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsRequest req, ProxyCommitData* commitData) {
 	// We can't respond to these requests until we have valid txnStateStore
 	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKeyServersLocations;
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 
-	wait(commitData->validState.getFuture());
+	co_await commitData->validState.getFuture();
 
-	wait(delay(0, TaskPriority::DefaultEndpoint));
+	co_await delay(0, TaskPriority::DefaultEndpoint);
 
 	std::unordered_set<UID> tssMappingsIncluded;
 	GetKeyServerLocationsReply rep;
@@ -2165,7 +2165,6 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 	addTagMapping(rep, commitData);
 	req.reply.send(rep);
 	++commitData->stats.keyServerLocationOut;
-	return Void();
 }
 
 ACTOR static Future<Void> readRequestServer(CommitProxyInterface proxy,
@@ -2188,14 +2187,14 @@ ACTOR static Future<Void> readRequestServer(CommitProxyInterface proxy,
 	}
 }
 
-ACTOR static Future<Void> rejoinServer(CommitProxyInterface proxy, ProxyCommitData* commitData) {
+static Future<Void> rejoinServer(CommitProxyInterface proxy, ProxyCommitData* commitData) {
 	// We can't respond to these requests until we have valid txnStateStore
-	wait(commitData->validState.getFuture());
+	co_await commitData->validState.getFuture();
 
 	TraceEvent("ProxyReadyForReads", proxy.id()).log();
 
-	loop {
-		GetStorageServerRejoinInfoRequest req = waitNext(proxy.getStorageServerRejoinInfo.getFuture());
+	while (true) {
+		GetStorageServerRejoinInfoRequest req = co_await proxy.getStorageServerRejoinInfo.getFuture();
 		if (commitData->txnStateStore->readValue(serverListKeyFor(req.id)).get().present()) {
 			GetStorageServerRejoinInfoReply rep;
 			rep.version = commitData->version.get();
@@ -2337,7 +2336,7 @@ ACTOR Future<Void> monitorRemoteCommitted(ProxyCommitData* self) {
 	}
 }
 
-ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* commitData) {
+Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* commitData) {
 	TraceEvent("SnapCommitProxy_SnapReqEnter")
 	    .detail("SnapPayload", snapReq.snapPayload)
 	    .detail("SnapUID", snapReq.snapUID);
@@ -2378,33 +2377,35 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 			throw snap_log_anti_quorum_unsupported();
 		}
 
-		state int snapReqRetry = 0;
-		state double snapRetryBackoff = FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY;
-		loop {
+		int snapReqRetry = 0;
+		double snapRetryBackoff = FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY;
+		while (true) {
 			// send a snap request to DD
 			if (!commitData->db->get().distributor.present()) {
 				TraceEvent(SevWarnAlways, "DataDistributorNotPresent").detail("Operation", "SnapRequest");
 				throw dd_not_found();
 			}
+			Error err;
 			try {
 				Future<ErrorOr<Void>> ddSnapReq =
 				    commitData->db->get().distributor.get().distributorSnapReq.tryGetReply(
 				        DistributorSnapRequest(snapReq.snapPayload, snapReq.snapUID));
-				wait(throwErrorOr(ddSnapReq));
+				co_await throwErrorOr(ddSnapReq);
 				break;
 			} catch (Error& e) {
-				TraceEvent("SnapCommitProxy_DDSnapResponseError")
-				    .errorUnsuppressed(e)
-				    .detail("SnapPayload", snapReq.snapPayload)
-				    .detail("SnapUID", snapReq.snapUID)
-				    .detail("Retry", snapReqRetry);
-				// Retry if we have network issues
-				if (e.code() != error_code_request_maybe_delivered ||
-				    ++snapReqRetry > SERVER_KNOBS->SNAP_NETWORK_FAILURE_RETRY_LIMIT)
-					throw e;
-				wait(delay(snapRetryBackoff));
-				snapRetryBackoff = snapRetryBackoff * 2; // exponential backoff
+				err = e;
 			}
+			TraceEvent("SnapCommitProxy_DDSnapResponseError")
+			    .errorUnsuppressed(err)
+			    .detail("SnapPayload", snapReq.snapPayload)
+			    .detail("SnapUID", snapReq.snapUID)
+			    .detail("Retry", snapReqRetry);
+			// Retry if we have network issues
+			if (err.code() != error_code_request_maybe_delivered ||
+			    ++snapReqRetry > SERVER_KNOBS->SNAP_NETWORK_FAILURE_RETRY_LIMIT)
+				throw err;
+			co_await delay(snapRetryBackoff);
+			snapRetryBackoff = snapRetryBackoff * 2; // exponential backoff
 		}
 		snapReq.reply.send(Void());
 	} catch (Error& e) {
@@ -2421,36 +2422,33 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 	TraceEvent("SnapCommitProxy_SnapReqExit")
 	    .detail("SnapPayload", snapReq.snapPayload)
 	    .detail("SnapUID", snapReq.snapUID);
-	return Void();
 }
 
-ACTOR Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo> const> db,
-                                           ExclusionSafetyCheckRequest req) {
+Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo> const> db, ExclusionSafetyCheckRequest req) {
 	TraceEvent("SafetyCheckCommitProxyBegin").log();
-	state ExclusionSafetyCheckReply reply(false);
+	ExclusionSafetyCheckReply reply(false);
 	if (!db->get().distributor.present()) {
 		TraceEvent(SevWarnAlways, "DataDistributorNotPresent").detail("Operation", "ExclusionSafetyCheck");
 		req.reply.send(reply);
-		return Void();
+		co_return;
 	}
 	try {
-		state Future<ErrorOr<DistributorExclusionSafetyCheckReply>> ddSafeFuture =
+		Future<ErrorOr<DistributorExclusionSafetyCheckReply>> ddSafeFuture =
 		    db->get().distributor.get().distributorExclCheckReq.tryGetReply(
 		        DistributorExclusionSafetyCheckRequest(req.exclusions));
-		DistributorExclusionSafetyCheckReply _reply = wait(throwErrorOr(ddSafeFuture));
-		reply.safe = _reply.safe;
+		DistributorExclusionSafetyCheckReply ddReply = co_await throwErrorOr(ddSafeFuture);
+		reply.safe = ddReply.safe;
 	} catch (Error& e) {
 		TraceEvent("SafetyCheckCommitProxyResponseError").error(e);
 		if (e.code() != error_code_operation_cancelled) {
 			req.reply.sendError(e);
-			return Void();
+			co_return;
 		} else {
 			throw e;
 		}
 	}
 	TraceEvent("SafetyCheckCommitProxyFinish").log();
 	req.reply.send(reply);
-	return Void();
 }
 
 ACTOR Future<Void> reportTxnTagCommitCost(UID myID,
@@ -2609,17 +2607,17 @@ struct TransactionStateResolveContext {
 	}
 };
 
-ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolveContext* pContext) {
-	state KeyRange txnKeys = allKeys;
-	state std::map<Tag, UID> tag_uid;
+Future<Void> processCompleteTransactionStateRequest(TransactionStateResolveContext* pContext) {
+	KeyRange txnKeys = allKeys;
+	std::map<Tag, UID> tag_uid;
 
 	RangeResult UIDtoTagMap = pContext->pTxnStateStore->readRange(serverTagKeys).get();
 	for (const KeyValueRef& kv : UIDtoTagMap) {
 		tag_uid[decodeServerTagValue(kv.value)] = decodeServerTagKey(kv.key);
 	}
 
-	loop {
-		wait(yield());
+	while (true) {
+		co_await yield();
 
 		RangeResult data =
 		    pContext->pTxnStateStore
@@ -2634,7 +2632,6 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		std::vector<std::pair<MapPair<Key, ServerCacheInfo>, int>> keyInfoData;
 		std::vector<UID> src, dest;
 		ServerCacheInfo info;
-		// NOTE: An ACTOR will be compiled into several classes, the this pointer is from one of them.
 		auto updateTagInfo = [pContext = pContext](const std::vector<UID>& uids,
 		                                           std::vector<Tag>& tags,
 		                                           std::vector<Reference<StorageInfo>>& storageInfoItems) {
@@ -2682,7 +2679,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		Arena arena;
 		bool confChanges;
 		applyMetadataMutations(SpanContext(),
-		                       *pContext->pCommitData,
+		                       pContext->pCommitData->getApplyMetadataProxyContext(),
 		                       arena,
 		                       Reference<ILogSystem>(),
 		                       mutations,
@@ -2692,30 +2689,27 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		                       /* popVersion= */ 0,
 		                       /* initialCommit= */ true,
 		                       /* provisionalCommitProxy */ pContext->pCommitData->provisional);
-	} // loop
+	}
 
 	auto lockedKey = pContext->pTxnStateStore->readValue(databaseLockedKey).get();
 	pContext->pCommitData->locked = lockedKey.present() && lockedKey.get().size();
 	pContext->pCommitData->metadataVersion = pContext->pTxnStateStore->readValue(metadataVersionKey).get();
 
 	pContext->pTxnStateStore->enableSnapshot();
-
-	return Void();
 }
 
-ACTOR Future<Void> processTransactionStateRequestPart(TransactionStateResolveContext* pContext,
-                                                      TxnStateRequest request) {
+Future<Void> processTransactionStateRequestPart(TransactionStateResolveContext* pContext, TxnStateRequest request) {
 	ASSERT(pContext->pCommitData != nullptr);
 	ASSERT(pContext->pActors != nullptr);
 
 	if (pContext->receivedSequences.contains(request.sequence)) {
 		if (pContext->receivedSequences.size() == pContext->maxSequence) {
-			wait(pContext->txnRecovery);
+			co_await pContext->txnRecovery;
 		}
 		// This part is already received. Still we will re-broadcast it to other CommitProxies
 		pContext->pActors->send(broadcastTxnRequest(request, SERVER_KNOBS->TXN_STATE_SEND_AMOUNT, true));
-		wait(yield());
-		return Void();
+		co_await yield();
+		co_return;
 	}
 
 	if (request.last) {
@@ -2738,13 +2732,12 @@ ACTOR Future<Void> processTransactionStateRequestPart(TransactionStateResolveCon
 		// Received all components of the txnStateRequest
 		ASSERT(!pContext->processed);
 		pContext->txnRecovery = processCompleteTransactionStateRequest(pContext);
-		wait(pContext->txnRecovery);
+		co_await pContext->txnRecovery;
 		pContext->processed = true;
 	}
 
 	pContext->pActors->send(broadcastTxnRequest(request, SERVER_KNOBS->TXN_STATE_SEND_AMOUNT, true));
-	wait(yield());
-	return Void();
+	co_await yield();
 }
 
 } // anonymous namespace
@@ -2767,25 +2760,19 @@ ACTOR Future<Void> processTransactionStateRequestPart(TransactionStateResolveCon
 // `BURSTINESS_METRICS_ENABLED` knob to false. The reporting interval can be
 // adjusted by modifying the knob `BURSTINESS_METRICS_LOG_INTERVAL`.
 //
-ACTOR Future<Void> logDetailedMetrics(ProxyCommitData* commitData) {
-	state double startTime = 0;
-	state int64_t commitBatchInBaseline = 0;
-	state int64_t txnCommitInBaseline = 0;
-	state int64_t mutationsBaseline = 0;
-	state int64_t mutationBytesBaseline = 0;
-
-	loop {
+Future<Void> logDetailedMetrics(ProxyCommitData* commitData) {
+	while (true) {
 		if (!SERVER_KNOBS->BURSTINESS_METRICS_ENABLED) {
-			return Void();
+			co_return;
 		}
 
-		startTime = now();
-		commitBatchInBaseline = commitData->stats.commitBatchIn.getValue();
-		txnCommitInBaseline = commitData->stats.txnCommitIn.getValue();
-		mutationsBaseline = commitData->stats.mutations.getValue();
-		mutationBytesBaseline = commitData->stats.mutationBytes.getValue();
+		double startTime = now();
+		int64_t commitBatchInBaseline = commitData->stats.commitBatchIn.getValue();
+		int64_t txnCommitInBaseline = commitData->stats.txnCommitIn.getValue();
+		int64_t mutationsBaseline = commitData->stats.mutations.getValue();
+		int64_t mutationBytesBaseline = commitData->stats.mutationBytes.getValue();
 
-		wait(delay(SERVER_KNOBS->BURSTINESS_METRICS_LOG_INTERVAL));
+		co_await delay(SERVER_KNOBS->BURSTINESS_METRICS_LOG_INTERVAL);
 
 		int64_t commitBatchInReal = commitData->stats.commitBatchIn.getValue();
 		int64_t txnCommitInReal = commitData->stats.txnCommitIn.getValue();
@@ -2821,7 +2808,6 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
                                          uint16_t commitProxyIndex) {
 	state ProxyCommitData commitData(proxy.id(),
 	                                 master,
-	                                 proxy.getConsistentReadVersion,
 	                                 recoveryTransactionVersion,
 	                                 proxy.commit,
 	                                 db,
@@ -3007,14 +2993,14 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 }
 
 // only update the local Db info if the CP is not removed
-ACTOR Future<Void> updateLocalDbInfo(Reference<AsyncVar<ServerDBInfo> const> in,
-                                     Reference<AsyncVar<ServerDBInfo>> out,
-                                     uint64_t recoveryCount,
-                                     CommitProxyInterface myInterface) {
+Future<Void> updateLocalDbInfo(Reference<AsyncVar<ServerDBInfo> const> in,
+                               Reference<AsyncVar<ServerDBInfo>> out,
+                               uint64_t recoveryCount,
+                               CommitProxyInterface myInterface) {
 	// whether this CP already receive the db info including itself
-	state bool firstValidDbInfo = false;
+	bool firstValidDbInfo = false;
 
-	loop {
+	while (true) {
 		bool isIncluded =
 		    std::count(in->get().client.commitProxies.begin(), in->get().client.commitProxies.end(), myInterface);
 		if (in->get().recoveryCount >= recoveryCount && !isIncluded) {
@@ -3039,27 +3025,27 @@ ACTOR Future<Void> updateLocalDbInfo(Reference<AsyncVar<ServerDBInfo> const> in,
 			}
 		}
 
-		wait(in->onChange());
+		co_await in->onChange();
 	}
 }
 
-ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
-                                     InitializeCommitProxyRequest req,
-                                     Reference<AsyncVar<ServerDBInfo> const> db,
-                                     std::string whitelistBinPaths) {
+Future<Void> commitProxyServer(CommitProxyInterface proxy,
+                               InitializeCommitProxyRequest req,
+                               Reference<AsyncVar<ServerDBInfo> const> db,
+                               std::string whitelistBinPaths) {
 	try {
-		state Reference<AsyncVar<ServerDBInfo>> localDb = makeReference<AsyncVar<ServerDBInfo>>();
-		state Future<Void> core = commitProxyServerCore(proxy,
-		                                                req.master,
-		                                                req.masterLifetime,
-		                                                localDb,
-		                                                req.recoveryCount,
-		                                                req.recoveryTransactionVersion,
-		                                                req.firstProxy,
-		                                                whitelistBinPaths,
-		                                                proxy.provisional,
-		                                                req.commitProxyIndex);
-		wait(core || updateLocalDbInfo(db, localDb, req.recoveryCount, proxy));
+		auto localDb = makeReference<AsyncVar<ServerDBInfo>>();
+		Future<Void> core = commitProxyServerCore(proxy,
+		                                          req.master,
+		                                          req.masterLifetime,
+		                                          localDb,
+		                                          req.recoveryCount,
+		                                          req.recoveryTransactionVersion,
+		                                          req.firstProxy,
+		                                          whitelistBinPaths,
+		                                          proxy.provisional,
+		                                          req.commitProxyIndex);
+		co_await race(core, updateLocalDbInfo(db, localDb, req.recoveryCount, proxy));
 	} catch (Error& e) {
 		Severity sev = e.code() == error_code_failed_to_progress ? SevWarnAlways : SevInfo;
 		TraceEvent(sev, "CommitProxyTerminated", proxy.id()).errorUnsuppressed(e);
@@ -3072,7 +3058,6 @@ ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
 		}
 		CODE_PROBE(e.code() == error_code_failed_to_progress, "Commit proxy failed to progress");
 	}
-	return Void();
 }
 
 void forceLinkCommitProxyTests() {}

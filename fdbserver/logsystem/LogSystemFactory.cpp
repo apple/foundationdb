@@ -1,5 +1,5 @@
 #include "fdbserver/logsystem/LogSystemFactory.h"
-#include "fdbserver/logsystem/TagPartitionedLogSystem.actor.h"
+#include "fdbserver/logsystem/TagPartitionedLogSystem.h"
 
 Future<Void> recoverAndEndLogSystemEpoch(Reference<AsyncVar<Reference<ILogSystem>>> const& outLogSystem,
                                          UID const& dbgid,

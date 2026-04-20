@@ -20,7 +20,7 @@
 
 #include "flow/Error.h"
 #include "flow/OTELMetrics.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/TDMetric.h"
 #include "flow/flow.h"
 #include <cctype>
 #include <cstddef>

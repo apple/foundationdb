@@ -6896,7 +6896,7 @@ public:
 		if (!maxCutoff) {
 			// use pivot value as cutoff
 			auto ratio = KnobValueRef::create(double{ 0.7 });
-			IKnobCollection::getMutableGlobalKnobCollection().setKnob("cpu_pivot_ratio", ratio);
+			setServerKnob("cpu_pivot_ratio", ratio);
 		}
 		low_cpu.cpuUsage = SERVER_KNOBS->MAX_DEST_CPU_PERCENT - 60;
 		mid_cpu.cpuUsage = SERVER_KNOBS->MAX_DEST_CPU_PERCENT - 40;
