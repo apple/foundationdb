@@ -43,7 +43,7 @@ struct StatusWorkload : TestWorkload {
 	    errors("Status Errors"), totalSize("Status reply size sum") {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		requestsPerSecond = getOption(options, "requestsPerSecond"_sr, 0.5);
-		maxAcceptableStatusLatency = getOption(options, "maxStatusLatency"_sr, 0.0);
+		maxAcceptableStatusLatency = getOption(options, "maxAcceptableStatusLatency"_sr, 0.0);
 		enableLatencyBands = getOption(options, "enableLatencyBands"_sr, deterministicRandom()->random01() < 0.5);
 		auto statusSchemaStr = getOption(options, "schema"_sr, JSONSchemas::statusSchema);
 		if (!statusSchemaStr.empty()) {
