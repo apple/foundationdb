@@ -176,7 +176,7 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock> {
 
 	enum { NOT_TINY = 127, TINY_HEADER = 6 };
 
-	// int32_t referenceCount;    // 4 bytes (in ThreadSafeReferenceCounted)
+	// int32_t referenceCount;	  // 4 bytes (in ThreadSafeReferenceCounted)
 	bool secure : 1; // If this is set, block is zero-ed out after use
 	uint8_t tinySize : 7, tinyUsed; // If these == NOT_TINY, use bigSize, bigUsed instead
 	// if tinySize != NOT_TINY, following variables aren't used
