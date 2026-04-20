@@ -236,7 +236,7 @@ public:
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
 	// Get storage stats of a storage server from the cached healthy metrics if now() - lastUpdate < maxStaleness.
 	// Otherwise, ask GRVProxy for the up-to-date health metrics.
-	Future<Optional<HealthMetrics::StorageStats>> getStorageStats(const UID& id, double maxStaleness);
+	Future<Optional<HealthMetrics::StorageStats>> getStorageStats(UID id, double maxStaleness);
 	// Pass a negative value for `shardLimit` to indicate no limit on the shard number.
 	Future<StorageMetrics> getStorageMetrics(
 	    KeyRange const& keys,

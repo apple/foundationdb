@@ -647,7 +647,12 @@ public:
 		return begin;
 	}
 
-	void serializeBytes(void* data, int bytes) { memcpy(data, static_cast<Impl*>(this)->readBytes(bytes), bytes); }
+	void serializeBytes(void* data, int bytes) {
+		if (bytes == 0) {
+			return;
+		}
+		memcpy(data, static_cast<Impl*>(this)->readBytes(bytes), bytes);
+	}
 
 	template <class T>
 	void serializeBinaryItem(T& t) {
@@ -895,6 +900,9 @@ struct PacketWriter {
 	}
 
 	void serializeBytes(const void* data, int bytes) {
+		if (bytes == 0) {
+			return;
+		}
 		if (bytes <= buffer->bytes_unwritten()) {
 			memcpy(buffer->data() + buffer->bytes_written, data, bytes);
 			buffer->bytes_written += bytes;

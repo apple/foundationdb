@@ -52,7 +52,7 @@
 #include "fdbserver/core/OTELSpanContextMessage.h"
 #include "ReadLatencySamples.h"
 #include "fdbserver/core/RecoveryState.h"
-#include "fdbserver/core/RocksDBCheckpointUtils.actor.h"
+#include "fdbserver/core/RocksDBCheckpointUtils.h"
 #include "fdbserver/core/ServerCheckpoint.h"
 #include "fdbserver/core/SpanContextMessage.h"
 #include "fdbserver/storageserver/StorageCorruptionBug.h"
@@ -65,7 +65,7 @@
 #include "flow/Error.h"
 #include "flow/Hash3.h"
 #include "flow/Histogram.h"
-#include "flow/PriorityMultiLock.actor.h"
+#include "flow/PriorityMultiLock.h"
 #include "flow/IRandom.h"
 #include "flow/IndexedSet.h"
 #include "flow/SystemMonitor.h"
@@ -2107,30 +2107,6 @@ ACTOR Future<Version> waitForVersionNoTooOld(StorageServer* data, Version versio
 	}
 }
 
-ACTOR Future<Version> waitForMinVersion(StorageServer* data, Version version) {
-	// This could become an Actor transparently, but for now it just does the lookup
-	if (version == latestVersion)
-		version = std::max(Version(1), data->version.get());
-	if (version < data->oldestVersion.get() || version <= 0) {
-		return data->oldestVersion.get();
-	} else if (version <= data->version.get()) {
-		return version;
-	}
-	choose {
-		when(wait(data->version.whenAtLeast(version))) {
-			return version;
-		}
-		when(wait(delay(SERVER_KNOBS->FUTURE_VERSION_DELAY))) {
-			if (deterministicRandom()->random01() < 0.001)
-				TraceEvent(SevWarn, "ShardServerFutureVersion1000x", data->thisServerID)
-				    .detail("Version", version)
-				    .detail("MyVersion", data->version.get())
-				    .detail("ServerID", data->thisServerID);
-			throw future_version();
-		}
-	}
-}
-
 std::vector<StorageServerShard> StorageServer::getStorageServerShards(KeyRangeRef range) {
 	std::vector<StorageServerShard> res;
 	for (auto t : this->shards.intersectingRanges(range)) {
@@ -2491,9 +2467,9 @@ ACTOR Future<Void> watchValueSendReply(StorageServer* data,
 }
 
 // Finds a checkpoint.
-ACTOR Future<Void> getCheckpointQ(StorageServer* self, GetCheckpointRequest req) {
+Future<Void> getCheckpointQ(StorageServer* self, GetCheckpointRequest req) {
 	// Wait until the desired version is durable.
-	wait(self->durableVersion.whenAtLeast(req.version + 1));
+	co_await self->durableVersion.whenAtLeast(req.version + 1);
 
 	TraceEvent(SevDebug, "ServeGetCheckpointVersionSatisfied", self->thisServerID)
 	    .detail("Version", req.version)
@@ -2503,7 +2479,7 @@ ACTOR Future<Void> getCheckpointQ(StorageServer* self, GetCheckpointRequest req)
 	for (const auto& range : req.ranges) {
 		if (!self->isReadable(range)) {
 			req.reply.sendError(wrong_shard_server());
-			return Void();
+			co_return;
 		}
 	}
 
@@ -2528,46 +2504,45 @@ ACTOR Future<Void> getCheckpointQ(StorageServer* self, GetCheckpointRequest req)
 		}
 		req.reply.sendError(e);
 	}
-	return Void();
+	co_return;
 }
 
 // Delete the checkpoint from disk, as well as all related persisted meta data.
-ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, CheckpointMetaData checkpoint) {
-	wait(delay(0, TaskPriority::Low));
+Future<Void> deleteCheckpointQ(StorageServer* self, Version version, CheckpointMetaData checkpoint) {
+	co_await delay(0, TaskPriority::Low);
 
-	wait(self->durableVersion.whenAtLeast(version));
+	co_await self->durableVersion.whenAtLeast(version);
 
 	TraceEvent(SevInfo, "DeleteCheckpointBegin", self->thisServerID).detail("Checkpoint", checkpoint.toString());
 
 	self->checkpoints.erase(checkpoint.checkpointID);
 
 	try {
-		wait(deleteCheckpoint(checkpoint));
+		co_await deleteCheckpoint(checkpoint);
 	} catch (Error& e) {
 		// TODO: Handle errors more gracefully.
 		throw;
 	}
 
-	state Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
-	state Key pendingCheckpointKey(persistPendingCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
+	Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
+	Key pendingCheckpointKey(persistPendingCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
 	auto& mLV = self->addVersionToMutationLog(self->data().getLatestVersion());
 	self->addMutationToMutationLog(
 	    mLV, MutationRef(MutationRef::ClearRange, pendingCheckpointKey, keyAfter(pendingCheckpointKey)));
 	self->addMutationToMutationLog(
 	    mLV, MutationRef(MutationRef::ClearRange, persistCheckpointKey, keyAfter(persistCheckpointKey)));
 	TraceEvent(SevInfo, "DeleteCheckpointEnd", self->thisServerID).detail("Checkpoint", checkpoint.toString());
-
-	return Void();
 }
 
 // Serves FetchCheckpointRequests.
-ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest req) {
+Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest req) {
 	TraceEvent("ServeFetchCheckpointBegin", self->thisServerID)
 	    .detail("CheckpointID", req.checkpointID)
 	    .detail("Token", req.token);
 
-	state ICheckpointReader* reader = nullptr;
-	state int64_t totalSize = 0;
+	ICheckpointReader* reader = nullptr;
+	int64_t totalSize = 0;
+	Optional<Error> errToThrow;
 
 	req.reply.setByteLimit(SERVER_KNOBS->CHECKPOINT_TRANSFER_BLOCK_BYTES);
 
@@ -2576,16 +2551,16 @@ ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest 
 	if (it == self->checkpoints.end()) {
 		req.reply.sendError(checkpoint_not_found());
 		TraceEvent("ServeFetchCheckpointNotFound", self->thisServerID).detail("CheckpointID", req.checkpointID);
-		return Void();
+		co_return;
 	}
 
 	try {
 		reader = newCheckpointReader(it->second, CheckpointAsKeyValues::False, deterministicRandom()->randomUniqueID());
-		wait(reader->init(req.token));
+		co_await reader->init(req.token);
 
-		loop {
-			state Standalone<StringRef> data = wait(reader->nextChunk(CLIENT_KNOBS->REPLY_BYTE_LIMIT));
-			wait(req.reply.onReady());
+		while (true) {
+			Standalone<StringRef> data = co_await reader->nextChunk(CLIENT_KNOBS->REPLY_BYTE_LIMIT);
+			co_await req.reply.onReady();
 			FetchCheckpointReply reply(req.token);
 			reply.data = data;
 			req.reply.send(reply);
@@ -2607,22 +2582,22 @@ ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest 
 			if (canReplyWith(e)) {
 				req.reply.sendError(e);
 			}
-			state Error err = e;
-			if (reader != nullptr) {
-				wait(reader->close());
-			}
-			throw err;
+			errToThrow = e;
 		}
 	}
 
-	wait(reader->close());
-	return Void();
+	if (reader != nullptr) {
+		co_await reader->close();
+	}
+	if (errToThrow.present()) {
+		throw errToThrow.get();
+	}
 }
 
 // Serves FetchCheckpointKeyValuesRequest, reads local checkpoint and sends it to the client over wire.
-ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpointKeyValuesRequest req) {
-	wait(self->serveFetchCheckpointParallelismLock.take(TaskPriority::DefaultYield));
-	state FlowLock::Releaser holder(self->serveFetchCheckpointParallelismLock);
+Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpointKeyValuesRequest req) {
+	co_await self->serveFetchCheckpointParallelismLock.take(TaskPriority::DefaultYield);
+	FlowLock::Releaser holder(self->serveFetchCheckpointParallelismLock);
 
 	TraceEvent("ServeFetchCheckpointKeyValuesBegin", self->thisServerID)
 	    .detail("CheckpointID", req.checkpointID)
@@ -2635,10 +2610,10 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 	if (it == self->checkpoints.end()) {
 		req.reply.sendError(checkpoint_not_found());
 		TraceEvent("ServeFetchCheckpointNotFound", self->thisServerID).detail("CheckpointID", req.checkpointID);
-		return Void();
+		co_return;
 	}
 
-	state ICheckpointReader* reader = nullptr;
+	ICheckpointReader* reader = nullptr;
 	auto crIt = self->liveCheckpointReaders.find(req.checkpointID);
 	if (crIt != self->liveCheckpointReaders.end()) {
 		reader = crIt->second;
@@ -2647,14 +2622,13 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 		self->liveCheckpointReaders[req.checkpointID] = reader;
 	}
 
-	state std::unique_ptr<ICheckpointIterator> iter;
+	std::unique_ptr<ICheckpointIterator> iter;
 	try {
-		wait(reader->init(BinaryWriter::toValue(req.range, IncludeVersion())));
+		co_await reader->init(BinaryWriter::toValue(req.range, IncludeVersion()));
 		iter = reader->getIterator(req.range);
 
-		loop {
-			state RangeResult res =
-			    wait(iter->nextBatch(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
+		while (true) {
+			RangeResult res = co_await iter->nextBatch(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT);
 			if (!res.empty()) {
 				TraceEvent(SevDebug, "FetchCheckpontKeyValuesReadRange", self->thisServerID)
 				    .detail("CheckpointID", req.checkpointID)
@@ -2666,7 +2640,7 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 				    .detail("CheckpointID", req.checkpointID);
 			}
 
-			wait(req.reply.onReady());
+			co_await req.reply.onReady();
 			FetchCheckpointKeyValuesStreamReply reply;
 			reply.arena.dependsOn(res.arena());
 			for (int i = 0; i < res.size(); ++i) {
@@ -2696,9 +2670,8 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 	iter.reset();
 	if (!reader->inUse()) {
 		self->liveCheckpointReaders.erase(req.checkpointID);
-		wait(reader->close());
+		co_await reader->close();
 	}
-	return Void();
 }
 
 #ifdef NO_INTELLISENSE
@@ -6464,11 +6437,11 @@ void splitMutation(StorageServer* data, KeyRangeMap<T>& map, MutationRef const& 
 		ASSERT(false); // Unknown mutation type in splitMutations
 }
 
-ACTOR Future<Void> logFetchKeysWarning(AddingShard* shard) {
-	state double startTime = now();
-	loop {
-		state double waitSeconds = BUGGIFY ? 5.0 : 600.0;
-		wait(delay(waitSeconds));
+Future<Void> logFetchKeysWarning(AddingShard* shard) {
+	double startTime = now();
+	while (true) {
+		double waitSeconds = BUGGIFY ? 5.0 : 600.0;
+		co_await delay(waitSeconds);
 
 		const auto traceEventLevel =
 		    waitSeconds > SERVER_KNOBS->FETCH_KEYS_TOO_LONG_TIME_CRITERIA ? SevWarnAlways : SevInfo;
@@ -6577,26 +6550,26 @@ bool fetchKeyCanRetry(const Error& e) {
 	}
 }
 
-ACTOR Future<Void> bulkLoadFetchKeyValueFileToLoad(StorageServer* data,
-                                                   std::string dir,
-                                                   BulkLoadTaskState bulkLoadTaskState,
-                                                   std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets) {
+Future<Void> bulkLoadFetchKeyValueFileToLoad(StorageServer* data,
+                                             std::string dir,
+                                             BulkLoadTaskState bulkLoadTaskState,
+                                             std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets) {
 	localFileSets->clear();
 	ASSERT(bulkLoadTaskState.getLoadType() == BulkLoadType::SST);
 	TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchSSTFile", data->thisServerID)
 	    .detail("JobID", bulkLoadTaskState.getJobId().toString())
 	    .detail("TaskID", bulkLoadTaskState.getTaskId().toString())
 	    .detail("Dir", abspath(dir));
-	state double fetchStartTime = now();
+	double fetchStartTime = now();
 	// Download data file from fromRemoteFileSet to toLocalFileSet
-	state std::shared_ptr<BulkLoadFileSetKeyMap> fromRemoteFileSets = std::make_shared<BulkLoadFileSetKeyMap>();
+	std::shared_ptr<BulkLoadFileSetKeyMap> fromRemoteFileSets = std::make_shared<BulkLoadFileSetKeyMap>();
 	for (const auto& manifest : bulkLoadTaskState.getManifests()) {
 		fromRemoteFileSets->push_back(std::make_pair(manifest.getRange(), manifest.getFileSet()));
 		// Note that manifest.range may contain more than the task range. We will cut-off data outside the task
 		// range when we read the kvs.
 	}
-	wait(bulkLoadDownloadTaskFileSets(
-	    bulkLoadTaskState.getTransportMethod(), fromRemoteFileSets, localFileSets, dir, data->thisServerID));
+	co_await bulkLoadDownloadTaskFileSets(
+	    bulkLoadTaskState.getTransportMethod(), fromRemoteFileSets, localFileSets, dir, data->thisServerID);
 	// Do not need byte sampling locally in fetchKeys
 	const double duration = now() - fetchStartTime;
 	const int64_t totalBytes = bulkLoadTaskState.getTotalBytes();
@@ -6618,21 +6591,20 @@ ACTOR Future<Void> bulkLoadFetchKeyValueFileToLoad(StorageServer* data,
 	    .detail("Duration", duration)
 	    .detail("TotalBytes", totalBytes)
 	    .detail("Rate", duration == 0 ? -1.0 : (double)totalBytes / duration);
-	return Void();
 }
 
-ACTOR Future<Void> tryGetRangeForBulkLoadFromSST(PromiseStream<RangeResult> results,
-                                                 KeyRange keys,
-                                                 std::string sstFilePath,
-                                                 bool lastOne) {
-	state Key beginKey = keys.begin;
-	state Key endKey = keys.end;
+Future<Void> tryGetRangeForBulkLoadFromSST(PromiseStream<RangeResult> results,
+                                           KeyRange keys,
+                                           std::string sstFilePath,
+                                           bool lastOne) {
+	Key beginKey = keys.begin;
+	Key endKey = keys.end;
 	try {
-		state std::unique_ptr<IRocksDBSstFileReader> reader = newRocksDBSstFileReader(
+		std::unique_ptr<IRocksDBSstFileReader> reader = newRocksDBSstFileReader(
 		    keys, SERVER_KNOBS->SS_BULKLOAD_GETRANGE_BATCH_SIZE, SERVER_KNOBS->FETCH_BLOCK_BYTES);
 		// TODO(BulkLoad): this can be a slow task. We will make this as async call.
 		reader->open(abspath(sstFilePath));
-		loop {
+		while (true) {
 			// TODO(BulkLoad): this is a blocking call. We will make this as async call.
 			RangeResult rep = reader->getRange(KeyRangeRef(beginKey, endKey));
 			if (!rep.more) {
@@ -6640,7 +6612,7 @@ ACTOR Future<Void> tryGetRangeForBulkLoadFromSST(PromiseStream<RangeResult> resu
 					rep.more = false;
 					results.send(rep);
 					results.sendError(end_of_stream());
-					return Void();
+					co_return;
 				} else {
 					if (!rep.empty()) {
 						rep.more = true;
@@ -6648,13 +6620,13 @@ ACTOR Future<Void> tryGetRangeForBulkLoadFromSST(PromiseStream<RangeResult> resu
 						// The reply cannot be empty of the more is true
 						results.send(rep);
 					}
-					return Void();
+					co_return;
 				}
 			} else {
 				results.send(rep);
 			}
 			beginKey = keyAfter(rep.back().key);
-			wait(delay(0.1)); // context switch to avoid busy loop
+			co_await delay(0.1); // context switch to avoid busy loop
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
@@ -6665,14 +6637,14 @@ ACTOR Future<Void> tryGetRangeForBulkLoadFromSST(PromiseStream<RangeResult> resu
 	}
 }
 
-ACTOR Future<Void> tryGetRangeForBulkLoad(PromiseStream<RangeResult> results,
-                                          KeyRange keys /* only read data within the keys */,
-                                          std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets) {
+Future<Void> tryGetRangeForBulkLoad(PromiseStream<RangeResult> results,
+                                    KeyRange keys /* only read data within the keys */,
+                                    std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets) {
 	try {
 		// Build bulkLoadFileSetsToLoad
-		state std::vector<std::pair<KeyRange, BulkLoadFileSet>> bulkLoadFileSetsToLoad;
+		std::vector<std::pair<KeyRange, BulkLoadFileSet>> bulkLoadFileSetsToLoad;
 		KeyRangeMap<BulkLoadFileSet> localFileSetMap;
-		for (auto it = localFileSets->begin(); it < localFileSets->end(); it++) {
+		for (auto it = localFileSets->begin(); it < localFileSets->end(); ++it) {
 			localFileSetMap.insert(it->first, it->second);
 		}
 		for (auto range : localFileSetMap.intersectingRanges(keys)) {
@@ -6696,27 +6668,16 @@ ACTOR Future<Void> tryGetRangeForBulkLoad(PromiseStream<RangeResult> results,
 			emptyResult.more = false;
 			results.send(emptyResult);
 			results.sendError(end_of_stream());
-			return Void();
+			co_return;
 		}
 
-		// Streaming results given the input keys using bulkLoadFileSetsToLoad
-		state int i = 0;
-		if (bulkLoadFileSetsToLoad.empty()) {
-			// All ranges are empty - send empty result and signal completion
-			RangeResult emptyResult;
-			emptyResult.more = false;
-			results.send(emptyResult);
-			results.sendError(end_of_stream());
-			return Void();
-		}
-		for (; i < bulkLoadFileSetsToLoad.size(); i++) {
+		for (int i = 0; i < bulkLoadFileSetsToLoad.size(); ++i) {
 			std::string sstFilePath = bulkLoadFileSetsToLoad[i].second.getDataFileFullPath();
 			KeyRange rangeToLoad = bulkLoadFileSetsToLoad[i].first & keys;
 			ASSERT(!rangeToLoad.empty());
-			wait(tryGetRangeForBulkLoadFromSST(
-			    results, rangeToLoad, sstFilePath, i == bulkLoadFileSetsToLoad.size() - 1));
+			co_await tryGetRangeForBulkLoadFromSST(
+			    results, rangeToLoad, sstFilePath, i == bulkLoadFileSetsToLoad.size() - 1);
 		}
-		return Void();
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
 			throw;
@@ -7601,14 +7562,14 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
                                         EnablePhysicalShardMove enablePSM,
                                         ConductBulkLoad conductBulkLoad);
 
-ACTOR Future<Void> fallBackToAddingShard(StorageServer* data, MoveInShard* moveInShard) {
+Future<Void> fallBackToAddingShard(StorageServer* data, MoveInShard* moveInShard) {
 	if (moveInShard->getPhase() != MoveInPhase::Fetching && moveInShard->getPhase() != MoveInPhase::Ingesting) {
 		TraceEvent(SevError, "FallBackToAddingShardError", data->thisServerID)
 		    .detail("MoveInShard", moveInShard->meta->toString());
 		throw internal_error();
 	}
 	if (moveInShard->failed()) {
-		return Void();
+		co_return;
 	}
 	auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
 	TraceEvent(SevInfo, "FallBackToAddingShardBegin", data->thisServerID)
@@ -7634,15 +7595,13 @@ ACTOR Future<Void> fallBackToAddingShard(StorageServer* data, MoveInShard* moveI
 		}
 	}
 
-	wait(data->durableVersion.whenAtLeast(mLV.version + 1));
-
-	return Void();
+	co_await data->durableVersion.whenAtLeast(mLV.version + 1);
 }
 
-ACTOR Future<Void> bulkLoadFetchShardFileToLoad(StorageServer* data,
-                                                MoveInShard* moveInShard,
-                                                std::string localRoot,
-                                                BulkLoadTaskState bulkLoadTaskState) {
+Future<Void> bulkLoadFetchShardFileToLoad(StorageServer* data,
+                                          MoveInShard* moveInShard,
+                                          std::string localRoot,
+                                          BulkLoadTaskState bulkLoadTaskState) {
 	ASSERT(bulkLoadTaskState.getLoadType() == BulkLoadType::SST);
 	TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchShardFile", data->thisServerID)
 	    .detail("JobID", bulkLoadTaskState.getJobId().toString())
@@ -7650,13 +7609,13 @@ ACTOR Future<Void> bulkLoadFetchShardFileToLoad(StorageServer* data,
 	    .detail("MoveInShard", moveInShard->toString())
 	    .detail("LocalRoot", abspath(localRoot));
 
-	state double fetchStartTime = now();
+	double fetchStartTime = now();
 
 	// Step 1: Download files to localRoot
 	// TODO(BulkLoad): support bulkload task mutiple sst for sharded rocksdb.
 	ASSERT(SERVER_KNOBS->MANIFEST_COUNT_MAX_PER_BULKLOAD_TASK == 1);
 	ASSERT(bulkLoadTaskState.getManifests().size() == 1);
-	state BulkLoadFileSet fromRemoteFileSet = bulkLoadTaskState.getManifests()[0].getFileSet();
+	BulkLoadFileSet fromRemoteFileSet = bulkLoadTaskState.getManifests()[0].getFileSet();
 	BulkLoadByteSampleSetting currentClusterByteSampleSetting(
 	    0,
 	    "hashlittle2", // use function name to represent the method
@@ -7670,8 +7629,8 @@ ACTOR Future<Void> bulkLoadFetchShardFileToLoad(StorageServer* data,
 		fromRemoteFileSet.removeByteSampleFile();
 	}
 	// Download data file and byte sample file from fromRemoteFileSet to toLocalFileSet
-	state BulkLoadFileSet toLocalFileSet = wait(bulkLoadDownloadTaskFileSet(
-	    bulkLoadTaskState.getTransportMethod(), fromRemoteFileSet, localRoot, data->thisServerID));
+	BulkLoadFileSet toLocalFileSet = co_await bulkLoadDownloadTaskFileSet(
+	    bulkLoadTaskState.getTransportMethod(), fromRemoteFileSet, localRoot, data->thisServerID);
 	TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchShardSSTFileFetched", data->thisServerID)
 	    .detail("JobID", bulkLoadTaskState.getJobId().toString())
 	    .detail("TaskID", bulkLoadTaskState.getTaskId().toString())
@@ -7689,7 +7648,7 @@ ACTOR Future<Void> bulkLoadFetchShardFileToLoad(StorageServer* data,
 		    .detail("Reason", "No data to ingest for empty range");
 		// For empty ranges, directly move to Ingesting phase without adding any checkpoint
 		moveInShard->setPhase(MoveInPhase::Ingesting);
-		return Void();
+		co_return;
 	}
 
 	// Step 2: Do byte sampling locally if the remote byte sampling file is not valid nor existing
@@ -7699,11 +7658,11 @@ ACTOR Future<Void> bulkLoadFetchShardFileToLoad(StorageServer* data,
 		    .detail("JobID", bulkLoadTaskState.getJobId().toString())
 		    .detail("TaskID", bulkLoadTaskState.getTaskId().toString())
 		    .detail("LocalFileSet", toLocalFileSet.toString());
-		state std::string byteSampleFileName =
+		std::string byteSampleFileName =
 		    generateBulkLoadBytesSampleFileNameFromDataFileName(toLocalFileSet.getDataFileName());
 		std::string byteSampleFilePathLocal = abspath(joinPath(toLocalFileSet.getFolder(), byteSampleFileName));
-		bool bytesSampleFileGenerated = wait(doBytesSamplingOnDataFile(
-		    toLocalFileSet.getDataFileFullPath(), byteSampleFilePathLocal, data->thisServerID));
+		bool bytesSampleFileGenerated = co_await doBytesSamplingOnDataFile(
+		    toLocalFileSet.getDataFileFullPath(), byteSampleFilePathLocal, data->thisServerID);
 		if (bytesSampleFileGenerated) {
 			toLocalFileSet.setByteSampleFileName(byteSampleFileName);
 		}
@@ -7716,7 +7675,7 @@ ACTOR Future<Void> bulkLoadFetchShardFileToLoad(StorageServer* data,
 	    .detail("LocalFileSet", toLocalFileSet.toString());
 
 	// Step 3: Build LocalRecord used by ShardedRocksDB KVStore when injecting data
-	state CheckpointMetaData localRecord;
+	CheckpointMetaData localRecord;
 	localRecord.checkpointID = UID();
 	localRecord.dir = abspath(toLocalFileSet.getFolder());
 	for (const auto& range : moveInShard->ranges()) {
@@ -7759,7 +7718,6 @@ ACTOR Future<Void> bulkLoadFetchShardFileToLoad(StorageServer* data,
 
 	// Step 4: Update the moveInShard phase
 	moveInShard->setPhase(MoveInPhase::Ingesting);
-	return Void();
 }
 
 ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data, MoveInShard* moveInShard, std::string dir) {
@@ -7855,17 +7813,17 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data, MoveInShard* moveIn
 	return Void();
 }
 
-ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, MoveInShard* moveInShard) {
+Future<Void> fetchShardIngestCheckpoint(StorageServer* data, MoveInShard* moveInShard) {
 	TraceEvent(SevInfo, "FetchShardIngestCheckpointBegin", data->thisServerID)
 	    .detail("Checkpoints", describe(moveInShard->checkpoints()));
 	ASSERT(moveInShard->getPhase() == MoveInPhase::Ingesting);
-	state double startTime = now();
+	double startTime = now();
 
 	try {
-		wait(
-		    data->storage.restore(moveInShard->destShardIdString(), moveInShard->ranges(), moveInShard->checkpoints()));
+		co_await data->storage.restore(
+		    moveInShard->destShardIdString(), moveInShard->ranges(), moveInShard->checkpoints());
 	} catch (Error& e) {
-		state Error err = e;
+		Error err = e;
 		TraceEvent(SevWarn, "FetchShardIngestedCheckpointError", data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("MoveInShard", moveInShard->toString())
@@ -7873,7 +7831,7 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, MoveInShard* 
 		if (e.code() == error_code_failed_to_restore_checkpoint && !moveInShard->failed()) {
 			moveInShard->setPhase(MoveInPhase::Fetching);
 			updateMoveInShardMetaData(data, moveInShard);
-			return Void();
+			co_return;
 		}
 		throw err;
 	}
@@ -7883,7 +7841,7 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, MoveInShard* 
 	    .detail("Checkpoints", describe(moveInShard->checkpoints()));
 
 	if (moveInShard->failed()) {
-		return Void();
+		co_return;
 	}
 
 	for (const auto& range : moveInShard->ranges()) {
@@ -7933,8 +7891,6 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, MoveInShard* 
 	    .detail("Bytes", totalBytes)
 	    .detail("Duration", duration)
 	    .detail("Rate", static_cast<double>(totalBytes) / duration);
-
-	return Void();
 }
 
 ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
@@ -8085,11 +8041,11 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 	return Void();
 }
 
-ACTOR Future<Void> cleanUpMoveInShard(StorageServer* data, Version version, MoveInShard* moveInShard) {
+Future<Void> cleanUpMoveInShard(StorageServer* data, Version version, MoveInShard* moveInShard) {
 	TraceEvent(moveInShard->logSev, "CleanUpMoveInShardBegin", data->thisServerID)
 	    .detail("MoveInShard", moveInShard->meta->toString())
 	    .detail("Version", version);
-	wait(data->durableVersion.whenAtLeast(version));
+	co_await data->durableVersion.whenAtLeast(version);
 
 	platform::eraseDirectoryRecursive(fetchedCheckpointDir(data->folder, moveInShard->id()));
 
@@ -8098,7 +8054,7 @@ ACTOR Future<Void> cleanUpMoveInShard(StorageServer* data, Version version, Move
 	data->addMutationToMutationLog(
 	    mLV, MutationRef(MutationRef::ClearRange, persistUpdatesRange.begin, persistUpdatesRange.end));
 
-	state bool clearRecord = true;
+	bool clearRecord = true;
 	if (moveInShard->failed()) {
 		for (const auto& mir : moveInShard->ranges()) {
 			auto existingShards = data->shards.intersectingRanges(mir);
@@ -8114,13 +8070,13 @@ ACTOR Future<Void> cleanUpMoveInShard(StorageServer* data, Version version, Move
 		const Key persistKey = persistMoveInShardKey(moveInShard->id());
 		data->addMutationToMutationLog(mLV, MutationRef(MutationRef::ClearRange, persistKey, keyAfter(persistKey)));
 	}
-	wait(data->durableVersion.whenAtLeast(mLV.version + 1));
+	co_await data->durableVersion.whenAtLeast(mLV.version + 1);
 
 	if (clearRecord) {
 		data->moveInShards.erase(moveInShard->id());
 	}
 
-	return Void();
+	co_return;
 }
 
 // It works in the following sequences:
@@ -9523,11 +9479,11 @@ private:
 	}
 };
 
-ACTOR Future<Void> tssDelayForever() {
-	loop {
-		wait(delay(5.0));
+Future<Void> tssDelayForever() {
+	while (true) {
+		co_await delay(5.0);
 		if (g_simulator->speedUpSimulation) {
-			return Void();
+			co_return;
 		}
 	}
 }
@@ -10124,22 +10080,22 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 	return anyFileCreated;
 }
 
-ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData metaData) {
+Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData metaData) {
 	TraceEvent(SevDebug, "SSCreateCheckpoint", data->thisServerID).detail("CheckpointMeta", metaData.toString());
 	ASSERT(std::find(metaData.src.begin(), metaData.src.end(), data->thisServerID) != metaData.src.end() &&
 	       !metaData.ranges.empty());
-	state std::string checkpointDir = serverCheckpointDir(data->checkpointFolder, metaData.checkpointID);
-	state std::string bytesSampleFile = abspath(joinPath(checkpointDir, checkpointBytesSampleFileName));
-	state std::string bytesSampleTempDir = data->folder + checkpointBytesSampleTempFolder;
-	state std::string bytesSampleTempFile =
+	std::string checkpointDir = serverCheckpointDir(data->checkpointFolder, metaData.checkpointID);
+	std::string bytesSampleFile = abspath(joinPath(checkpointDir, checkpointBytesSampleFileName));
+	std::string bytesSampleTempDir = data->folder + checkpointBytesSampleTempFolder;
+	std::string bytesSampleTempFile =
 	    bytesSampleTempDir + "/" + metaData.checkpointID.toString() + "_" + checkpointBytesSampleFileName;
 	const CheckpointRequest req(metaData.version,
 	                            metaData.ranges,
 	                            static_cast<CheckpointFormat>(metaData.format),
 	                            metaData.checkpointID,
 	                            checkpointDir);
-	state CheckpointMetaData checkpointResult;
-	state bool sampleByteSstFileCreated;
+	CheckpointMetaData checkpointResult;
+	bool sampleByteSstFileCreated{ false };
 	std::vector<Future<Void>> createCheckpointActors;
 
 	try {
@@ -10151,7 +10107,7 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 		}
 		createCheckpointActors.push_back(store(
 		    sampleByteSstFileCreated, createSstFileForCheckpointShardBytesSample(data, metaData, bytesSampleTempFile)));
-		wait(waitForAll(createCheckpointActors));
+		co_await waitForAll(createCheckpointActors);
 		// Move sst file to the checkpoint folder
 		if (sampleByteSstFileCreated) {
 			ASSERT(directoryExists(abspath(checkpointDir)));
@@ -10187,7 +10143,7 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 		Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpointResult.checkpointID.toString());
 		data->storage.clearRange(singleKeyRange(pendingCheckpointKey));
 		data->storage.writeKeyValue(KeyValueRef(persistCheckpointKey, checkpointValue(checkpointResult)));
-		wait(data->storage.commit());
+		co_await data->storage.commit();
 		TraceEvent("StorageCreateCheckpointPersisted", data->thisServerID)
 		    .detail("Checkpoint", checkpointResult.toString());
 	} catch (Error& e) {
@@ -10201,8 +10157,6 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 		data->checkpoints[checkpointResult.checkpointID].setState(CheckpointMetaData::Deleting);
 		data->actors.add(deleteCheckpointQ(data, metaData.version, checkpointResult));
 	}
-
-	return Void();
 }
 
 struct UpdateStorageCommitStats {
@@ -11449,22 +11403,20 @@ void StorageServer::byteSampleApplyClear(KeyRangeRef range, Version ver) {
 #pragma region Core
 #endif
 
-ACTOR Future<Void> waitMetricsForReal_internal(StorageServer* self, WaitMetricsRequest req) {
+Future<Void> waitMetricsForReal_internal(StorageServer* self, WaitMetricsRequest req) {
 	if (!self->isReadable(req.keys)) {
 		self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 	} else {
-		wait(self->metrics.waitMetrics(req, delayJittered(SERVER_KNOBS->STORAGE_METRIC_TIMEOUT)));
+		co_await self->metrics.waitMetrics(req, delayJittered(SERVER_KNOBS->STORAGE_METRIC_TIMEOUT));
 	}
-	return Void();
 }
 
 Future<Void> StorageServer::waitMetricsForReal(const WaitMetricsRequest& req) {
 	return waitMetricsForReal_internal(this, req);
 }
 
-ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) {
-
-	wait(self->byteSampleRecovery);
+Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) {
+	co_await self->byteSampleRecovery;
 	TraceEvent("StorageServerRestoreDurableState", self->thisServerID).detail("RestoredBytes", self->bytesRestored);
 
 	// Logs all counters in `counters.cc` and reset the interval.
@@ -11518,8 +11470,7 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 		    }
 	    }));
 
-	wait(serveStorageMetricsRequests(self, ssi));
-	return Void();
+	co_await serveStorageMetricsRequests(self, ssi);
 }
 
 ACTOR Future<Void> logLongByteSampleRecovery(Future<Void> recovery) {
@@ -11533,16 +11484,17 @@ ACTOR Future<Void> logLongByteSampleRecovery(Future<Void> recovery) {
 	return Void();
 }
 
-ACTOR Future<Void> checkBehind(StorageServer* self) {
-	state int behindCount = 0;
-	loop {
-		wait(delay(SERVER_KNOBS->BEHIND_CHECK_DELAY));
-		state Transaction tr(self->cx);
-		loop {
+Future<Void> checkBehind(StorageServer* self) {
+	int behindCount = 0;
+	while (true) {
+		co_await delay(SERVER_KNOBS->BEHIND_CHECK_DELAY);
+		Transaction tr(self->cx);
+		while (true) {
+			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				Version readVersion = wait(tr.getRawReadVersion());
+				Version readVersion = co_await tr.getRawReadVersion();
 				if (readVersion > self->version.get() + SERVER_KNOBS->BEHIND_CHECK_VERSIONS) {
 					behindCount++;
 				} else {
@@ -11551,8 +11503,9 @@ ACTOR Future<Void> checkBehind(StorageServer* self) {
 				self->versionBehind = behindCount >= SERVER_KNOBS->BEHIND_CHECK_COUNT;
 				break;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 }
@@ -11920,8 +11873,8 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	self->actors.add(storageEngineConsistencyCheck(self));
 
 	self->transactionTagCounter.startNewInterval();
-	self->actors.add(
-	    recurring([&]() { self->transactionTagCounter.startNewInterval(); }, SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL));
+	self->actors.add(recurring(std::bind_front(&TransactionTagCounter::startNewInterval, &self->transactionTagCounter),
+	                           SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL));
 
 	self->coreStarted.send(Void());
 
@@ -12279,23 +12232,24 @@ ACTOR Future<Void> replaceInterface(StorageServer* self, StorageServerInterface 
 	return Void();
 }
 
-ACTOR Future<Void> replaceTSSInterface(StorageServer* self, StorageServerInterface ssi) {
+Future<Void> replaceTSSInterface(StorageServer* self, StorageServerInterface ssi) {
 	// RYW for KeyBackedMap
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
-	state KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
+	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+	KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
 
 	ASSERT(ssi.isTss());
 
-	loop {
+	while (true) {
+		Error err;
 		try {
-			state Tag myTag;
+			Tag myTag;
 
 			tr->reset();
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			Optional<Value> pairTagValue = wait(tr->get(serverTagKeyFor(self->tssPairID.get())));
+			Optional<Value> pairTagValue = co_await tr->get(serverTagKeyFor(self->tssPairID.get()));
 
 			if (!pairTagValue.present()) {
 				CODE_PROBE(true, "Race where tss was down, pair was removed, tss starts back up");
@@ -12313,50 +12267,41 @@ ACTOR Future<Void> replaceTSSInterface(StorageServer* self, StorageServerInterfa
 				tssMapDB.set(tr, self->tssPairID.get(), ssi.id());
 			}
 
-			wait(tr->commit());
+			co_await tr->commit();
 			self->tag = myTag;
-
 			break;
 		} catch (Error& e) {
-			wait(tr->onError(e));
+			err = e;
 		}
+		co_await tr->onError(err);
 	}
-
-	return Void();
 }
 
-ACTOR Future<Void> storageInterfaceRegistration(StorageServer* self,
-                                                StorageServerInterface ssi,
-                                                Optional<Future<Void>> readyToAcceptRequests) {
-
+Future<Void> storageInterfaceRegistration(StorageServer* self,
+                                          StorageServerInterface ssi,
+                                          Optional<Future<Void>> readyToAcceptRequests) {
 	if (readyToAcceptRequests.present()) {
-		wait(readyToAcceptRequests.get());
+		co_await readyToAcceptRequests.get();
 		ssi.startAcceptingRequests();
 	} else {
 		ssi.stopAcceptingRequests();
 	}
 
-	try {
-		if (self->isTss()) {
-			wait(replaceTSSInterface(self, ssi));
-		} else {
-			wait(replaceInterface(self, ssi));
-		}
-	} catch (Error& e) {
-		throw;
+	if (self->isTss()) {
+		co_await replaceTSSInterface(self, ssi);
+	} else {
+		co_await replaceInterface(self, ssi);
 	}
-
-	return Void();
 }
 
-ACTOR Future<Void> rocksdbLogCleaner(std::string folder) {
+Future<Void> rocksdbLogCleaner(std::string folder) {
 	std::replace(folder.begin(), folder.end(), '/', '_');
 	if (!folder.empty() && folder[0] == '_') {
 		folder.erase(0, 1);
 	}
 	try {
-		loop {
-			wait(delayJittered(SERVER_KNOBS->STORAGE_ROCKSDB_LOG_CLEAN_UP_DELAY));
+		while (true) {
+			co_await delayJittered(SERVER_KNOBS->STORAGE_ROCKSDB_LOG_CLEAN_UP_DELAY);
 			TraceEvent("CleanUpRocksDBLogs").detail("LogPrefix", folder);
 			auto logFiles = platform::listFiles(SERVER_KNOBS->LOG_DIRECTORY);
 			for (const auto& f : logFiles) {
@@ -12375,7 +12320,6 @@ ACTOR Future<Void> rocksdbLogCleaner(std::string folder) {
 			TraceEvent(SevError, "RocksDBLogCleanerError").errorUnsuppressed(e);
 		}
 	}
-	return Void();
 }
 
 // for creating a new storage server

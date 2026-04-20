@@ -518,20 +518,6 @@ ACTOR Future<Void> fdbClient() {
 	}
 }
 
-ACTOR Future<Void> fdbStatusStresser() {
-	state Database db = Database::createDatabase(clusterFile, 300);
-	state ReadYourWritesTransaction tx(db);
-	state Key statusJson(std::string("\xff\xff/status/json"));
-	loop {
-		try {
-			tx.reset();
-			Optional<Value> _ = wait(tx.get(statusJson));
-		} catch (Error& e) {
-			wait(tx.onError(e));
-		}
-	}
-}
-
 std::unordered_map<std::string, std::function<Future<Void>()>> actors = {
 	{ "timer", &simpleTimer }, // ./tutorial timer
 	{ "promiseDemo", &promiseDemo }, // ./tutorial promiseDemo
@@ -543,9 +529,8 @@ std::unordered_map<std::string, std::function<Future<Void>()>> actors = {
 	{ "multipleClients", &multipleClients }, // ./tutorial -s 127.0.0.1:6666 multipleClients
 	{ "fdbClientStream", &fdbClientStream }, // ./tutorial -C $CLUSTER_FILE_PATH fdbClientStream
 	{ "fdbClientGetRange", &fdbClientGetRange }, // ./tutorial -C $CLUSTER_FILE_PATH fdbClientGetRange
-	{ "fdbClient", &fdbClient }, // ./tutorial -C $CLUSTER_FILE_PATH fdbClient
-	{ "fdbStatusStresser", &fdbStatusStresser }
-}; // ./tutorial -C $CLUSTER_FILE_PATH fdbStatusStresser
+	{ "fdbClient", &fdbClient } // ./tutorial -C $CLUSTER_FILE_PATH fdbClient
+};
 
 int main(int argc, char* argv[]) {
 	bool isServer = false;

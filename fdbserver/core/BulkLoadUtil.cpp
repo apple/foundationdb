@@ -24,7 +24,7 @@
 #include "fdbclient/S3Client.h"
 #include "fdbserver/core/BulkLoadUtil.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/RocksDBCheckpointUtils.actor.h"
+#include "fdbserver/core/RocksDBCheckpointUtils.h"
 #include "fdbserver/core/StorageMetrics.h"
 #include "flow/genericactors.actor.h"
 

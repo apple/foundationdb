@@ -533,14 +533,14 @@ struct P2PNetworkTest {
 			while (numRequests > 0) {
 				if (incoming) {
 					// Wait for a request
-					co_await success(readMsg(self, conn));
+					co_await readMsg(self, conn);
 					// Send a reply
 					co_await writeMsg(self, conn, self->msgBuffer.substr(0, self->replyBytes.get()));
 				} else {
 					// Send a request
 					co_await writeMsg(self, conn, self->msgBuffer.substr(0, self->requestBytes.get()));
 					// Wait for a reply
-					co_await success(readMsg(self, conn));
+					co_await readMsg(self, conn);
 				}
 
 				if (--numRequests == 0) {

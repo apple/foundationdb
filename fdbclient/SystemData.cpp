@@ -1075,23 +1075,6 @@ const KeyRef backupProgressPrefix = backupProgressKeys.begin;
 const KeyRef backupStartedKey = "\xff\x02/backupStarted"_sr;
 extern const KeyRef backupPausedKey = "\xff\x02/backupPaused"_sr;
 
-// Backup keys related to Range Partitioned.
-const KeyRef backupRangePartitionedMapUploadedPrefix = "\xff\x02/backupRangePartitionedMapUploaded/"_sr;
-const KeyRangeRef backupRangePartitionedProgressKeys("\xff\x02/backupRangePartitionedProgress/"_sr,
-                                                     "\xff\x02/backupRangePartitionedProgress0"_sr);
-const KeyRef backupRangePartitionedProgressPrefix = backupRangePartitionedProgressKeys.begin;
-
-Key backupRangePartitionedMapUploadedKeyFor(Version v) {
-	return backupRangePartitionedMapUploadedPrefix.withSuffix(format("%lld", v));
-}
-
-Key backupRangePartitionedProgressKey(UID workerID) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes(backupRangePartitionedProgressPrefix);
-	wr << workerID;
-	return wr.toValue();
-}
-
 Key backupProgressKeyFor(UID workerID) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(backupProgressPrefix);
@@ -1135,6 +1118,43 @@ std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& va
 
 bool mutationForKey(const MutationRef& m, const KeyRef& key) {
 	return isSingleKeyMutation((MutationRef::Type)m.type) && m.param1 == key;
+}
+
+// Backup keys related to Range Partitioned.
+const KeyRef backupRangePartitionedMapUploadedPrefix = "\xff\x02/backupRangePartitionedMapUploaded/"_sr;
+const KeyRangeRef backupRangePartitionedProgressKeys("\xff\x02/backupRangePartitionedProgress/"_sr,
+                                                     "\xff\x02/backupRangePartitionedProgress0"_sr);
+const KeyRef backupRangePartitionedProgressPrefix = backupRangePartitionedProgressKeys.begin;
+
+Key backupRangePartitionedMapUploadedKeyFor(Version v) {
+	return backupRangePartitionedMapUploadedPrefix.withSuffix(format("%lld", v));
+}
+
+Key backupRangePartitionedProgressKey(UID workerID) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(backupRangePartitionedProgressPrefix);
+	wr << workerID;
+	return wr.toValue();
+}
+
+Value backupRangePartitionedProgressValue(const WorkerBackupStatus& status) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBackupProgressValue()));
+	wr << status;
+	return wr.toValue();
+}
+
+UID decodeBackupRangePartitionedProgressKey(const KeyRef& key) {
+	UID serverID;
+	BinaryReader rd(key.removePrefix(backupRangePartitionedProgressPrefix), Unversioned());
+	rd >> serverID;
+	return serverID;
+}
+
+WorkerBackupStatus decodeBackupRangePartitionedProgressValue(const ValueRef& value) {
+	WorkerBackupStatus status;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> status;
+	return status;
 }
 
 const KeyRef previousCoordinatorsKey = "\xff/previousCoordinators"_sr;

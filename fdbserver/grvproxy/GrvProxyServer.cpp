@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbclient/ClientKnobs.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/Notified.h"

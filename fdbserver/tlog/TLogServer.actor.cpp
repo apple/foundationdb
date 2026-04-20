@@ -862,8 +862,8 @@ void TLogQueue::updateVersionSizes(const TLogQueueEntry& result,
 	}
 }
 
-ACTOR Future<Void> tLogLock(TLogData* self, ReplyPromise<TLogLockResult> reply, Reference<LogData> logData) {
-	state Version stopVersion = logData->version.get();
+Future<Void> tLogLock(TLogData* self, ReplyPromise<TLogLockResult> reply, Reference<LogData> logData) {
+	Version stopVersion = logData->version.get();
 
 	CODE_PROBE(true, "TLog stopped by recovering cluster-controller");
 	CODE_PROBE(logData->stopped(), "logData already stopped");
@@ -881,7 +881,7 @@ ACTOR Future<Void> tLogLock(TLogData* self, ReplyPromise<TLogLockResult> reply, 
 	}
 
 	// Lock once the current version has been committed
-	wait(logData->queueCommittedVersion.whenAtLeast(stopVersion));
+	co_await logData->queueCommittedVersion.whenAtLeast(stopVersion);
 
 	ASSERT(stopVersion == logData->version.get());
 
@@ -900,7 +900,6 @@ ACTOR Future<Void> tLogLock(TLogData* self, ReplyPromise<TLogLockResult> reply, 
 	    .detail("KnownCommitted", result.knownCommittedVersion);
 
 	reply.send(result);
-	return Void();
 }
 
 void updatePersistentPopped(TLogData* self, Reference<LogData> logData, Reference<LogData::TagData> data) {
@@ -929,14 +928,14 @@ void updatePersistentPopped(TLogData* self, Reference<LogData> logData, Referenc
 	}
 }
 
-ACTOR Future<Void> updatePoppedLocation(TLogData* self, Reference<LogData> logData, Reference<LogData::TagData> data) {
+Future<Void> updatePoppedLocation(TLogData* self, Reference<LogData> logData, Reference<LogData::TagData> data) {
 	// For anything spilled by value, we do not need to track its popped location.
 	if (logData->shouldSpillByValue(data->tag)) {
-		return Void();
+		co_return;
 	}
 
 	if (data->versionForPoppedLocation >= data->persistentPopped) {
-		return Void();
+		co_return;
 	}
 	data->versionForPoppedLocation = data->persistentPopped;
 
@@ -944,10 +943,10 @@ ACTOR Future<Void> updatePoppedLocation(TLogData* self, Reference<LogData> logDa
 	// us to remove data that still is pointed to by SpilledData in the btree.
 	if (data->persistentPopped <= logData->persistentDataVersion) {
 		// Recover the next needed location in the Disk Queue from the index.
-		RangeResult kvrefs = wait(self->persistentData->readRange(
+		RangeResult kvrefs = co_await self->persistentData->readRange(
 		    KeyRangeRef(persistTagMessageRefsKey(logData->logId, data->tag, data->persistentPopped),
 		                persistTagMessageRefsKey(logData->logId, data->tag, logData->persistentDataVersion + 1)),
-		    1));
+		    1);
 
 		if (kvrefs.empty()) {
 			// Nothing was persistent after all.
@@ -979,8 +978,6 @@ ACTOR Future<Void> updatePoppedLocation(TLogData* self, Reference<LogData> logDa
 			// to avoid trying to track what the ending location of this TLog instance was.
 		}
 	}
-
-	return Void();
 }
 
 // It runs against the oldest TLog instance, calculates the first location in the disk queue that contains un-popped
@@ -1769,10 +1766,10 @@ void peekMessagesFromMemory(Reference<LogData> self,
 	}
 }
 
-ACTOR Future<std::vector<StringRef>> parseMessagesForTag(StringRef commitBlob, Tag tag, int logRouters) {
+Future<std::vector<StringRef>> parseMessagesForTag(StringRef commitBlob, Tag tag, int logRouters) {
 	// See the comment in LogSystem.cpp for the binary format of commitBlob.
-	state std::vector<StringRef> relevantMessages;
-	state BinaryReader rd(commitBlob, AssumeVersion(g_network->protocolVersion()));
+	std::vector<StringRef> relevantMessages;
+	BinaryReader rd(commitBlob, AssumeVersion(g_network->protocolVersion()));
 	while (!rd.empty()) {
 		TagsAndMessage tagsAndMessage;
 		tagsAndMessage.loadFromArena(&rd, nullptr);
@@ -1786,9 +1783,9 @@ ACTOR Future<std::vector<StringRef>> parseMessagesForTag(StringRef commitBlob, T
 				break;
 			}
 		}
-		wait(yield());
+		co_await yield();
 	}
-	return relevantMessages;
+	co_return relevantMessages;
 }
 
 // Common logics to peek TLog and create TLogPeekReply that serves both streaming peek or normal peek request
@@ -2543,11 +2540,11 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 	return Void();
 }
 
-ACTOR Future<Void> initPersistentState(TLogData* self, Reference<LogData> logData) {
-	wait(self->persistentDataCommitLock.take());
-	state FlowLock::Releaser commitLockReleaser(self->persistentDataCommitLock);
+Future<Void> initPersistentState(TLogData* self, Reference<LogData> logData) {
+	co_await self->persistentDataCommitLock.take();
+	FlowLock::Releaser commitLockReleaser(self->persistentDataCommitLock);
 
-	state IKeyValueStore* storage = self->persistentData;
+	IKeyValueStore* storage = self->persistentData;
 	storage->set(
 	    KeyValueRef(BinaryWriter::toValue(logData->logId, Unversioned()).withPrefix(persistCurrentVersionKeys.begin),
 	                BinaryWriter::toValue(logData->version.get(), Unversioned())));
@@ -2578,8 +2575,7 @@ ACTOR Future<Void> initPersistentState(TLogData* self, Reference<LogData> logDat
 	}
 
 	TraceEvent("TLogInitCommit", logData->logId);
-	wait(self->persistentData->commit());
-	return Void();
+	co_await self->persistentData->commit();
 }
 
 // send stopped promise instead of LogData* to avoid reference cycles
@@ -2655,10 +2651,10 @@ ACTOR Future<Void> rejoinClusterController(TLogData* self,
 	}
 }
 
-ACTOR Future<Void> respondToRecovered(TLogInterface tli, Promise<Void> recoveryComplete) {
-	state bool finishedRecovery = true;
+Future<Void> respondToRecovered(TLogInterface tli, Promise<Void> recoveryComplete) {
+	bool finishedRecovery = true;
 	try {
-		wait(recoveryComplete.getFuture());
+		co_await recoveryComplete.getFuture();
 	} catch (Error& e) {
 		if (e.code() != error_code_end_of_stream) {
 			throw;
@@ -2669,13 +2665,13 @@ ACTOR Future<Void> respondToRecovered(TLogInterface tli, Promise<Void> recoveryC
 	// This delay is added for testing purpose in simulation where by setting `disableTLogRecoveryFinish`, we disable
 	// TLogs to send back `TLogRecoveryFinishedRequest`.
 	while (g_network->isSimulated() && g_simulator->disableTLogRecoveryFinish) {
-		TraceEvent("WaitingToBeUnblocked", tli.id());
-		wait(delay(10));
+		TraceEvent("WaitingToBeUnblocked", tli.id()).suppressFor(60);
+		co_await delay(10);
 	}
 
 	TraceEvent("TLogRespondToRecovered", tli.id()).detail("Finished", finishedRecovery);
-	loop {
-		TLogRecoveryFinishedRequest req = waitNext(tli.recoveryFinished.getFuture());
+	while (true) {
+		TLogRecoveryFinishedRequest req = co_await tli.recoveryFinished.getFuture();
 		if (finishedRecovery) {
 			req.reply.send(Void());
 		} else {
@@ -2684,8 +2680,16 @@ ACTOR Future<Void> respondToRecovered(TLogInterface tli, Promise<Void> recoveryC
 	}
 }
 
-ACTOR Future<Void> trackRecoveryReq(TLogInterface tli, TrackTLogRecoveryRequest req, Reference<LogData> logData) {
-	loop {
+Future<Void> trackRecoveryReq(TLogInterface tli, TrackTLogRecoveryRequest req, Reference<LogData> logData) {
+	// Block recovery version tracking when disableTLogRecoveryFinish is set in simulation.
+	// This prevents recoveredVersion from advancing in trackTLogRecoveryActor, which in turn
+	// prevents purgeOldRecoveredGenerationsCoreState from GC'ing old TLog generations.
+	// Without this, the GcGenerations test accumulation phase races with generation GC.
+	while (g_network->isSimulated() && g_simulator->disableTLogRecoveryFinish) {
+		co_await delay(10);
+	}
+
+	while (true) {
 		Version oldestGenerationRecoverAtVersion = invalidVersion;
 		for (const auto& [tag, genVersions] : logData->tagUnpoppedOldGenerations) {
 			ASSERT(!genVersions.empty());
@@ -2704,20 +2708,19 @@ ACTOR Future<Void> trackRecoveryReq(TLogInterface tli, TrackTLogRecoveryRequest 
 			break;
 		}
 
-		wait(logData->updateGenerationRecovery.onTrigger());
+		co_await logData->updateGenerationRecovery.onTrigger();
 	}
-	return Void();
 }
 
-ACTOR Future<Void> respondToTrackRecovery(TLogInterface tli, Reference<LogData> logData) {
-	loop {
-		TrackTLogRecoveryRequest req = waitNext(tli.trackRecovery.getFuture());
+Future<Void> respondToTrackRecovery(TLogInterface tli, Reference<LogData> logData) {
+	while (true) {
+		TrackTLogRecoveryRequest req = co_await tli.trackRecovery.getFuture();
 		logData->addActor.send(trackRecoveryReq(tli, req, logData));
 	}
 }
 
-ACTOR Future<Void> cleanupPeekTrackers(LogData* logData) {
-	loop {
+Future<Void> cleanupPeekTrackers(LogData* logData) {
+	while (true) {
 		double minTimeUntilExpiration = SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME;
 		auto it = logData->peekTracker.begin();
 		while (it != logData->peekTracker.end()) {
@@ -2735,12 +2738,12 @@ ACTOR Future<Void> cleanupPeekTrackers(LogData* logData) {
 			}
 		}
 
-		wait(delay(minTimeUntilExpiration));
+		co_await delay(minTimeUntilExpiration);
 	}
 }
 
-ACTOR Future<Void> logPeekTrackers(LogData* logData) {
-	loop {
+Future<Void> logPeekTrackers(LogData* logData) {
+	while (true) {
 		int64_t logThreshold = 1;
 		if (logData->peekTracker.size() > SERVER_KNOBS->PEEK_LOGGING_AMOUNT) {
 			std::vector<int64_t> peekCounts;
@@ -2777,7 +2780,7 @@ ACTOR Future<Void> logPeekTrackers(LogData* logData) {
 			}
 		}
 
-		wait(delay(SERVER_KNOBS->PEEK_LOGGING_DELAY * std::max(1, logCount)));
+		co_await delay(SERVER_KNOBS->PEEK_LOGGING_DELAY * std::max(1, logCount));
 	}
 }
 
@@ -2793,13 +2796,13 @@ void getQueuingMetrics(TLogData* self, Reference<LogData> logData, TLogQueuingMe
 	req.reply.send(reply);
 }
 
-ACTOR Future<Void> tLogEnablePopReq(TLogEnablePopRequest enablePopReq, TLogData* self, Reference<LogData> logData) {
+Future<Void> tLogEnablePopReq(TLogEnablePopRequest enablePopReq, TLogData* self, Reference<LogData> logData) {
 	if (self->ignorePopUid != enablePopReq.snapUID.toString()) {
 		TraceEvent(SevWarn, "TLogPopDisableEnableUidMismatch")
 		    .detail("IgnorePopUid", self->ignorePopUid)
 		    .detail("UidStr", enablePopReq.snapUID.toString());
 		enablePopReq.reply.sendError(operation_failed());
-		return Void();
+		co_return;
 	}
 	TraceEvent("EnableTLogPlayAllIgnoredPops2", logData->logId)
 	    .detail("UidStr", enablePopReq.snapUID.toString())
@@ -2810,9 +2813,8 @@ ACTOR Future<Void> tLogEnablePopReq(TLogEnablePopRequest enablePopReq, TLogData*
 	    .detail("QueueCommittedVersion", logData->queueCommittedVersion.get())
 	    .detail("Version", logData->version.get());
 	self->ignorePopDeadline = 0;
-	wait(processPopRequests(self, logData));
+	co_await processPopRequests(self, logData);
 	enablePopReq.reply.send(Void());
-	return Void();
 }
 
 ACTOR Future<Void> serveTLogInterface(TLogData* self,
@@ -2983,6 +2985,20 @@ static void failIfTLogCannotAcceptNewData(TLogData* self, Reference<LogData> log
 	const double minAvailableSpaceRatio = effectiveTLogMinAvailableSpaceRatio();
 	if (self->shouldAcceptNewData(kvStoreBytes, queueBytes, minAvailableSpaceRatio)) {
 		return;
+	}
+	if (g_network->isSimulated() && !g_simulator->speedUpSimulation) {
+		TraceEvent(SevWarnAlways, "TLogPullAsyncDataLowDiskSpeedUpSimulation", logData->logId)
+		    .detail("MinAvailableSpaceRatio", minAvailableSpaceRatio)
+		    .detail("AvailableSpaceRatio", self->availableSpaceRatio(kvStoreBytes, queueBytes))
+		    .detail("KvstoreBytesAvailable", kvStoreBytes.available)
+		    .detail("KvstoreBytesTotal", kvStoreBytes.total)
+		    .detail("QueueDiskBytesAvailable", queueBytes.available)
+		    .detail("QueueDiskBytesTotal", queueBytes.total)
+		    .detail("Version", ver);
+		g_simulator->speedUpSimulation = true;
+		if (self->shouldAcceptNewData(kvStoreBytes, queueBytes, effectiveTLogMinAvailableSpaceRatio())) {
+			return;
+		}
 	}
 	CODE_PROBE(true, "pullAsyncData blocked by TLOG_MIN_AVAILABLE_SPACE_RATIO");
 	// Outside speedUpSimulation, fail recovery and temporarily exclude this worker from TLog recruitment until disk
@@ -3226,36 +3242,35 @@ ACTOR Future<Void> tLogCore(TLogData* self,
 	}
 }
 
-ACTOR Future<Void> checkEmptyQueue(TLogData* self) {
+Future<Void> checkEmptyQueue(TLogData* self) {
 	TraceEvent("TLogCheckEmptyQueueBegin", self->dbgid).log();
 	try {
-		bool recoveryFinished = wait(self->persistentQueue->initializeRecovery(0));
+		bool recoveryFinished = co_await self->persistentQueue->initializeRecovery(0);
 		if (recoveryFinished)
-			return Void();
-		TLogQueueEntry r = wait(self->persistentQueue->readNext(self));
+			co_return;
+		TLogQueueEntry r = co_await self->persistentQueue->readNext(self);
 		throw internal_error();
 	} catch (Error& e) {
 		if (e.code() != error_code_end_of_stream)
 			throw;
 		TraceEvent("TLogCheckEmptyQueueEnd", self->dbgid).log();
-		return Void();
+		co_return;
 	}
 }
 
-ACTOR Future<Void> initPersistentStorage(TLogData* self) {
+Future<Void> initPersistentStorage(TLogData* self) {
 	TraceEvent("TLogInitPersistentStorageStart", self->dbgid);
 
-	wait(self->persistentDataCommitLock.take());
-	state FlowLock::Releaser commitLockReleaser(self->persistentDataCommitLock);
+	co_await self->persistentDataCommitLock.take();
+	FlowLock::Releaser commitLockReleaser(self->persistentDataCommitLock);
 
 	// PERSIST: Initial setup of persistentData for a brand new tLog for a new database
-	state IKeyValueStore* storage = self->persistentData;
+	IKeyValueStore* storage = self->persistentData;
 	storage->set(persistFormat);
 
-	wait(storage->commit());
+	co_await storage->commit();
 
 	TraceEvent("TLogInitPersistentStorageDone", self->dbgid);
-	return Void();
 }
 
 // Recovery persistent state of tLog from disk
@@ -3569,11 +3584,11 @@ bool tlogTerminated(TLogData* self, IKeyValueStore* persistentData, TLogQueue* p
 		return false;
 }
 
-ACTOR Future<Void> updateLogSystem(TLogData* self,
-                                   Reference<LogData> logData,
-                                   LogSystemConfig recoverFrom,
-                                   Reference<AsyncVar<Reference<ILogSystem>>> logSystem) {
-	loop {
+Future<Void> updateLogSystem(TLogData* self,
+                             Reference<LogData> logData,
+                             LogSystemConfig recoverFrom,
+                             Reference<AsyncVar<Reference<ILogSystem>>> logSystem) {
+	while (true) {
 		bool found = self->dbInfo->get().logSystemConfig.recruitmentID == logData->recruitmentID;
 		if (found) {
 			if (self->dbInfo->get().logSystemConfig.isNextGenerationOf(recoverFrom)) {
@@ -3609,7 +3624,7 @@ ACTOR Future<Void> updateLogSystem(TLogData* self,
 		for (const auto& it : self->dbInfo->get().logSystemConfig.oldTLogs) {
 			TraceEvent("TLogUpdateOld", self->dbgid).detail("LogId", logData->logId).detail("DbInfo", it.toString());
 		}
-		wait(self->dbInfo->onChange());
+		co_await self->dbInfo->onChange();
 	}
 }
 
@@ -3831,8 +3846,8 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 	return Void();
 }
 
-ACTOR Future<Void> startSpillingInTenSeconds(TLogData* self, UID tlogId, Reference<AsyncVar<UID>> activeSharedTLog) {
-	wait(delay(10));
+Future<Void> startSpillingInTenSeconds(TLogData* self, UID tlogId, Reference<AsyncVar<UID>> activeSharedTLog) {
+	co_await delay(10);
 	if (activeSharedTLog->get() != tlogId) {
 		// TODO: This should fully spill, but currently doing so will cause us to no longer update poppedVersion
 		// and QuietDatabase will hang thinking our TLog is behind.
@@ -3841,7 +3856,6 @@ ACTOR Future<Void> startSpillingInTenSeconds(TLogData* self, UID tlogId, Referen
 	} else {
 		TraceEvent("SharedTLogSkipSpilling", self->dbgid).detail("NowActive", activeSharedTLog->get());
 	}
-	return Void();
 }
 
 // New tLog (if !recoverFrom.size()) or restore from network

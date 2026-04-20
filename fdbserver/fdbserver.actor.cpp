@@ -47,7 +47,7 @@
 #include "fdbrpc/WellKnownEndpoints.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbclient/SimpleIni.h"
-#include "fdbrpc/AsyncFileCached.actor.h"
+#include "fdbrpc/AsyncFileCached.h"
 #include "fdbrpc/IPAllowList.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/PerfMetric.h"

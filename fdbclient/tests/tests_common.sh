@@ -362,7 +362,7 @@ function get_use_s3_default {
   fi
 }
 
-# Common S3/MockS3 environment setup - shared across all S3 tests
+# Common S3/MockS3 environment setup - shared across all blob store tests
 # Prerequisites: USE_S3 and TLS_CA_FILE must be set before calling this function
 #   (use get_use_s3_default and setup_tls_ca_file)
 # $1 build directory, $2 scratch directory, $3 path prefix (used for temp dir naming)
@@ -397,6 +397,7 @@ function setup_s3_environment {
     if [[ -n "${TLS_CA_FILE:-}" ]]; then
       export FDB_TLS_CA_FILE="${TLS_CA_FILE}"
     fi
+
   else
     log "Testing against MockS3Server"
     # Source MockS3 fixture (use TESTS_COMMON_DIR for reliable path resolution)

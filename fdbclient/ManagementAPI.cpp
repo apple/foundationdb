@@ -2755,7 +2755,7 @@ Future<Void> addBulkLoadJobToHistory(Transaction* tr, BulkLoadJobState jobState)
 	tr->set(newJobKey, bulkLoadJobValue(jobState));
 }
 
-Future<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database cx) {
+AsyncResult<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database cx) {
 	RangeResult jobHistoryResult;
 	Key beginKey = bulkLoadJobHistoryKeys.begin;
 	Key endKey = bulkLoadJobHistoryKeys.end;
@@ -3639,7 +3639,7 @@ Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, RangeLockOwnerNa
 	}
 }
 
-Future<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx) {
+AsyncResult<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx) {
 	std::vector<RangeLockOwner> res;
 	Key beginKey = rangeLockOwnerKeys.begin;
 	Key endKey = rangeLockOwnerKeys.end;

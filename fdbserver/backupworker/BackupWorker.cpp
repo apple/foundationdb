@@ -588,7 +588,7 @@ Future<Void> monitorBackupProgress(BackupData* self) {
 		// check all workers have started by checking their progress is larger
 		// than the backup's start version.
 		Reference<BackupProgress> progress(new BackupProgress(self->myId, {}));
-		co_await getBackupProgress(self->cx, self->myId, progress, /*logging=*/false);
+		co_await getBackupProgress(self->cx, self->myId, progress, SevDebug);
 		std::map<Tag, Version> tagVersions = progress->getEpochStatus(self->recruitedEpoch);
 		std::map<UID, Version> savedLogVersions;
 		if (tagVersions.size() != self->totalTags) {

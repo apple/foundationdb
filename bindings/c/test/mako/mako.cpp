@@ -970,6 +970,9 @@ int parseTransaction(Arguments& args, char const* optarg) {
 		} else if (strncmp(ptr, "g", 1) == 0) {
 			op = OP_GET;
 			ptr++;
+		} else if (strncmp(ptr, "sj", 2) == 0) {
+			op = OP_STATUSJSON;
+			ptr += 2;
 		} else if (strncmp(ptr, "sgr", 3) == 0) {
 			op = OP_SGETRANGE;
 			rangeop = 1;

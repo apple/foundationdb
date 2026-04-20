@@ -421,8 +421,7 @@ struct AwaitableFutureStore {
 //
 // `PromiseType` is the coroutine promise object that owns the wait-state and
 // coroutine handle bookkeeping for the suspended actor.
-// `ValueType` is the logical `AsyncResult<T>` payload type being awaited; for
-// `AsyncResult<void>` the stored state still uses `Void` internally.
+// `ValueType` is the logical `AsyncResult<T>` payload type being awaited.
 template <class PromiseType, class ValueType>
 struct AwaitableAsyncResult : AwaitCancelHandler {
 	using StateType = typename AsyncResult<ValueType>::StoredT;
@@ -433,27 +432,27 @@ struct AwaitableAsyncResult : AwaitCancelHandler {
 	AwaitableAsyncResult(AsyncResult<ValueType>&& result, PromiseType* pt) : result(std::move(result)), pt(pt) {}
 
 	[[nodiscard]] bool await_ready() const {
-		ASSERT(result.state);
+		ASSERT(result.resultState);
 		if (actorWaitStateIsCancelled(pt->waitState())) {
 			pt->waitState() = ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK;
 			return true;
 		}
-		return result.state->isReady();
+		return result.resultState->isReady();
 	}
 
 	void await_suspend(n_coroutine::coroutine_handle<> h) {
-		ASSERT(result.state);
+		ASSERT(result.resultState);
 		pt->setHandle(h);
 		pt->waitState() = ACTOR_WAIT_STATE_WAITING;
-		result.state->registerContinuation(h);
+		result.resultState->registerContinuation(h);
 		pt->setCancelHandler(this);
 	}
 
 	void cancelWait() override {
 		// AsyncResultState only stores one waiting continuation, so cancelling
 		// this await means the continuation must no longer be resumed.
-		if (result.state) {
-			result.state->clearContinuation();
+		if (result.resultState) {
+			result.resultState->clearContinuation();
 		}
 	}
 
@@ -461,8 +460,8 @@ struct AwaitableAsyncResult : AwaitCancelHandler {
 		pt->clearCancelHandler(this);
 		switch (pt->waitState()) {
 		case ACTOR_WAIT_STATE_CANCELLED:
-			if (result.state) {
-				result.state->clearContinuation();
+			if (result.resultState) {
+				result.resultState->clearContinuation();
 			}
 		case ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK:
 			throw actor_cancelled();
@@ -470,7 +469,7 @@ struct AwaitableAsyncResult : AwaitCancelHandler {
 
 		bool wasReady = pt->waitState() == ACTOR_WAIT_STATE_NOT_WAITING;
 		if (actorWaitStateIsWaiting(pt->waitState())) {
-			result.state->clearContinuation();
+			result.resultState->clearContinuation();
 			pt->waitState() = ACTOR_WAIT_STATE_NOT_WAITING;
 		}
 		return wasReady;
@@ -480,8 +479,8 @@ struct AwaitableAsyncResult : AwaitCancelHandler {
 	    requires(std::is_void_v<ValueType>)
 	{
 		resumeImpl();
-		if (result.state->isError()) {
-			throw result.state->getError();
+		if (result.resultState->isError()) {
+			throw result.resultState->getError();
 		}
 	}
 
@@ -489,10 +488,10 @@ struct AwaitableAsyncResult : AwaitCancelHandler {
 	    requires(!std::is_void_v<ValueType>)
 	{
 		resumeImpl();
-		if (result.state->isError()) {
-			throw result.state->getError();
+		if (result.resultState->isError()) {
+			throw result.resultState->getError();
 		}
-		return result.state->take();
+		return result.resultState->take();
 	}
 };
 
@@ -1272,30 +1271,30 @@ struct AsyncResultAwaiter {
 	AsyncResult<ValueType> result;
 
 	[[nodiscard]] bool await_ready() const {
-		ASSERT(result.state);
-		return result.state->isReady();
+		ASSERT(result.resultState);
+		return result.resultState->isReady();
 	}
 
 	void await_suspend(n_coroutine::coroutine_handle<> h) {
-		ASSERT(result.state);
-		result.state->registerContinuation(h);
+		ASSERT(result.resultState);
+		result.resultState->registerContinuation(h);
 	}
 
 	void await_resume()
 	    requires(std::is_void_v<ValueType>)
 	{
-		if (result.state->isError()) {
-			throw result.state->getError();
+		if (result.resultState->isError()) {
+			throw result.resultState->getError();
 		}
 	}
 
 	ValueType await_resume()
 	    requires(!std::is_void_v<ValueType>)
 	{
-		if (result.state->isError()) {
-			throw result.state->getError();
+		if (result.resultState->isError()) {
+			throw result.resultState->getError();
 		}
-		return result.state->take();
+		return result.resultState->take();
 	}
 };
 
