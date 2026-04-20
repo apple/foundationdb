@@ -706,16 +706,16 @@ OpenDatabaseRequest ClientData::getRequest() {
 	return req;
 }
 
-ACTOR Future<Void> getClientInfoFromLeader(Reference<AsyncVar<Optional<ClusterControllerClientInterface>>> knownLeader,
-                                           ClientData* clientData) {
+Future<Void> getClientInfoFromLeader(Reference<AsyncVar<Optional<ClusterControllerClientInterface>>> knownLeader,
+                                     ClientData* clientData) {
 	while (!knownLeader->get().present()) {
-		wait(knownLeader->onChange());
+		co_await knownLeader->onChange();
 	}
 
-	state double lastRequestTime = now();
-	state OpenDatabaseRequest req = clientData->getRequest();
+	double lastRequestTime = now();
+	OpenDatabaseRequest req = clientData->getRequest();
 
-	loop {
+	while (true) {
 		if (now() - lastRequestTime > CLIENT_KNOBS->MAX_CLIENT_STATUS_AGE) {
 			lastRequestTime = now();
 			req = clientData->getRequest();
@@ -723,16 +723,16 @@ ACTOR Future<Void> getClientInfoFromLeader(Reference<AsyncVar<Optional<ClusterCo
 			resetReply(req);
 		}
 		req.knownClientInfoID = clientData->clientInfo->get().read().id;
-		choose {
-			when(ClientDBInfo ni =
-			         wait(brokenPromiseToNever(knownLeader->get().get().clientInterface.openDatabase.getReply(req)))) {
-				TraceEvent("GetClientInfoFromLeaderGotClientInfo", knownLeader->get().get().clientInterface.id())
-				    .detail("CommitProxy0", ni.commitProxies.size() ? ni.commitProxies[0].address().toString() : "")
-				    .detail("GrvProxy0", ni.grvProxies.size() ? ni.grvProxies[0].address().toString() : "")
-				    .detail("ClientID", ni.id);
-				clientData->clientInfo->set(CachedSerialization<ClientDBInfo>(ni));
-			}
-			when(wait(knownLeader->onChange())) {}
+		auto res =
+		    co_await race(brokenPromiseToNever(knownLeader->get().get().clientInterface.openDatabase.getReply(req)),
+		                  knownLeader->onChange());
+		if (res.index() == 0) {
+			ClientDBInfo ni = std::get<0>(std::move(res));
+			TraceEvent("GetClientInfoFromLeaderGotClientInfo", knownLeader->get().get().clientInterface.id())
+			    .detail("CommitProxy0", ni.commitProxies.size() ? ni.commitProxies[0].address().toString() : "")
+			    .detail("GrvProxy0", ni.grvProxies.size() ? ni.grvProxies[0].address().toString() : "")
+			    .detail("ClientID", ni.id);
+			clientData->clientInfo->set(CachedSerialization<ClientDBInfo>(ni));
 		}
 	}
 }
