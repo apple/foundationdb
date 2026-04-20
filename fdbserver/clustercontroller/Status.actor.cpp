@@ -3397,7 +3397,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	                                                      deadlineTimeout)));
 
 	if (result.isError()) {
-		status_incomplete_reasons.insert("Status collection threw.");
+		status_incomplete_reasons.insert( fmt::format("Status collection threw: {}", result.getError().what()));
 	} else if (!result.get().present()) {
 		status_incomplete_reasons.insert("Status collection deadline exceeded.");
 	}
