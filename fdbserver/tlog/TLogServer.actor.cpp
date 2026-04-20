@@ -3917,7 +3917,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 						self.sharedActors.send(
 						    self.tlogCache.removeOnReady(req.recruitmentID, tLogStart(&self, req, locality)));
 					} else {
-						forwardPromise(req.reply, self.tlogCache.get(req.recruitmentID));
+						forwardPromise(Uncancellable{}, req.reply, self.tlogCache.get(req.recruitmentID));
 					}
 				}
 				when(wait(error)) {
