@@ -1052,6 +1052,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SPRING_BYTES_TLOG,                                   400e6 ); if( smallTlogTarget ) SPRING_BYTES_TLOG = 200e3;
 	init( TARGET_BYTES_PER_TLOG_BATCH,                        1400e6 ); if( smallTlogTarget ) TARGET_BYTES_PER_TLOG_BATCH = 1400e3;
 	init( SPRING_BYTES_TLOG_BATCH,                             300e6 ); if( smallTlogTarget ) SPRING_BYTES_TLOG_BATCH = 150e3;
+	// Match MIN_AVAILABLE_SPACE_RATIO by default; buggified simulations exercise the earlier ramp.
+	init( TLOG_THROTTLE_START_AVAILABLE_SPACE_RATIO,            0.05 ); if( randomize && isSimulated && BUGGIFY ) TLOG_THROTTLE_START_AVAILABLE_SPACE_RATIO = 0.20;
 	init( TLOG_SPILL_THRESHOLD,                               1500e6 ); if( smallTlogTarget ) TLOG_SPILL_THRESHOLD = 1500e3; if( randomize && BUGGIFY ) TLOG_SPILL_THRESHOLD = 0;
 	init( REFERENCE_SPILL_UPDATE_STORAGE_BYTE_LIMIT,            20e6 ); if( (randomize && BUGGIFY) || smallTlogTarget ) REFERENCE_SPILL_UPDATE_STORAGE_BYTE_LIMIT = 1e6;
 	init( TLOG_HARD_LIMIT_BYTES,                              3000e6 ); if( smallTlogTarget ) TLOG_HARD_LIMIT_BYTES = 30e6;

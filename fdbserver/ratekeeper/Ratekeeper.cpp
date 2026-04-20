@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <algorithm>
+
 #include "fdbclient/Knobs.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/ServerDBInfo.h"
@@ -937,16 +939,31 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 
 		limitReason_t tlogLimitReason = limitReason_t::log_server_write_queue;
 
-		int64_t minFreeSpace = std::max(SERVER_KNOBS->MIN_AVAILABLE_SPACE,
-		                                (int64_t)(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO * tl.getSmoothTotalSpace()));
+		const auto smoothTotalSpace = tl.getSmoothTotalSpace();
+		const auto smoothFreeSpace = tl.getSmoothFreeSpace();
+		const auto minFreeSpaceByRatio =
+		    static_cast<int64_t>(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO * smoothTotalSpace);
+		const auto minFreeSpace = std::max(SERVER_KNOBS->MIN_AVAILABLE_SPACE, minFreeSpaceByRatio);
+		// Start shrinking the tlog queue budget once available space drops below the configured ratio,
+		// then ramp down linearly until reaching minFreeSpace.
+		const auto throttleStartSpaceByRatio =
+		    static_cast<int64_t>(SERVER_KNOBS->TLOG_THROTTLE_START_AVAILABLE_SPACE_RATIO * smoothTotalSpace);
+		const auto throttleStartSpace = std::max(minFreeSpace + 1, throttleStartSpaceByRatio);
+		const auto availableAboveMin = smoothFreeSpace - minFreeSpace;
+		const auto availableAboveMinBytes = static_cast<int64_t>(availableAboveMin);
+		const auto throttleWindow = static_cast<double>(throttleStartSpace - minFreeSpace);
+		const auto diskBudgetRatio = std::clamp(availableAboveMin / throttleWindow, 0.0, 1.0);
 
-		worstFreeSpaceTLog =
-		    std::min(worstFreeSpaceTLog, std::max((int64_t)tl.getSmoothFreeSpace() - minFreeSpace, (int64_t)0));
+		worstFreeSpaceTLog = std::min(worstFreeSpaceTLog, std::max(availableAboveMinBytes, int64_t{ 0 }));
 
-		int64_t springBytes = std::max<int64_t>(
-		    1, std::min<int64_t>(limits->logSpringBytes, (tl.getSmoothFreeSpace() - minFreeSpace) * 0.2));
-		int64_t targetBytes =
-		    std::max<int64_t>(1, std::min(limits->logTargetBytes, (int64_t)tl.getSmoothFreeSpace() - minFreeSpace));
+		const auto scaledSpringBytes = static_cast<int64_t>(limits->logSpringBytes * diskBudgetRatio);
+		const auto springBytes =
+		    std::max(int64_t{ 1 }, std::min(std::max(int64_t{ 1 }, scaledSpringBytes), availableAboveMinBytes));
+		const auto scaledTargetBytes = static_cast<int64_t>(limits->logTargetBytes * diskBudgetRatio);
+		const auto targetBytes =
+		    std::max(int64_t{ 1 }, std::min(std::max(int64_t{ 1 }, scaledTargetBytes), availableAboveMinBytes));
+
+		CODE_PROBE(diskBudgetRatio < 1.0, "Ratekeeper tlog disk budget ratio below one");
 		if (targetBytes != limits->logTargetBytes) {
 			if (minFreeSpace == SERVER_KNOBS->MIN_AVAILABLE_SPACE) {
 				tlogLimitReason = limitReason_t::log_server_min_free_space;
@@ -957,9 +974,11 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 				TraceEvent("RatekeeperLimitReasonDetails")
 				    .detail("TLogID", tl.id)
 				    .detail("Reason", tlogLimitReason)
-				    .detail("TLSmoothFreeSpace", tl.getSmoothFreeSpace())
-				    .detail("TLSmoothTotalSpace", tl.getSmoothTotalSpace())
+				    .detail("TLSmoothFreeSpace", smoothFreeSpace)
+				    .detail("TLSmoothTotalSpace", smoothTotalSpace)
 				    .detail("LimitsLogTargetBytes", limits->logTargetBytes)
+				    .detail("ThrottleStartSpace", throttleStartSpace)
+				    .detail("DiskBudgetRatio", diskBudgetRatio)
 				    .detail("TargetBytes", targetBytes)
 				    .detail("MinFreeSpace", minFreeSpace);
 			}
