@@ -20,7 +20,7 @@
 
 #include "flow/UnitTest.h"
 #include "flow/IAsyncFile.h"
-#include "fdbrpc/fdbrpc.h"
+#include "flow/FlowThread.h"
 #include "flow/Trace.h"
 #include "flow/TLSConfig.h"
 
@@ -1759,6 +1759,42 @@ void assertNoThrowOnCancelDestroyedAtWait(NoThrowOnCancelRecorder const& recorde
 	ASSERT_EQ(recorder.count(NoThrowOnCancelEvent::AfterWait), 0);
 }
 
+void assertNoThrowOnCancelCompleted(NoThrowOnCancelRecorder const& recorder) {
+	const std::vector<NoThrowOnCancelEvent> expected{
+		NoThrowOnCancelEvent::Start,
+		NoThrowOnCancelEvent::LifetimeConstructed,
+		NoThrowOnCancelEvent::WaitReturned,
+		NoThrowOnCancelEvent::AfterWait,
+		NoThrowOnCancelEvent::LifetimeDestroyed,
+	};
+	ASSERT(recorder.events == expected);
+	ASSERT_EQ(recorder.count(NoThrowOnCancelEvent::CatchBlock), 0);
+}
+
+void assertNoThrowOnCancelCaughtError(NoThrowOnCancelRecorder const& recorder) {
+	const std::vector<NoThrowOnCancelEvent> expected{
+		NoThrowOnCancelEvent::Start,
+		NoThrowOnCancelEvent::LifetimeConstructed,
+		NoThrowOnCancelEvent::CatchBlock,
+		NoThrowOnCancelEvent::AfterWait,
+		NoThrowOnCancelEvent::LifetimeDestroyed,
+	};
+	ASSERT(recorder.events == expected);
+	ASSERT_EQ(recorder.count(NoThrowOnCancelEvent::WaitReturned), 0);
+}
+
+void assertNoThrowOnCancelDestroyedAfterFirstWait(NoThrowOnCancelRecorder const& recorder) {
+	const std::vector<NoThrowOnCancelEvent> expected{
+		NoThrowOnCancelEvent::Start,
+		NoThrowOnCancelEvent::LifetimeConstructed,
+		NoThrowOnCancelEvent::WaitReturned,
+		NoThrowOnCancelEvent::LifetimeDestroyed,
+	};
+	ASSERT(recorder.events == expected);
+	ASSERT_EQ(recorder.count(NoThrowOnCancelEvent::CatchBlock), 0);
+	ASSERT_EQ(recorder.count(NoThrowOnCancelEvent::AfterWait), 0);
+}
+
 template <typename T>
 Future<Void> simple_await_test(std::stringstream& ss, Future<T> f) {
 	ss << "start. ";
@@ -1809,6 +1845,57 @@ Future<Void> noThrowOnCancelTest(NoThrowOnCancelRecorder& recorder, Future<Void>
 	}
 
 	recorder.record(NoThrowOnCancelEvent::AfterWait);
+}
+
+Future<int> noThrowOnCancelValueTest(NoThrowOnCancelRecorder& recorder, Future<Void> signal, NoThrowOnCancel = {}) {
+	recorder.record(NoThrowOnCancelEvent::Start);
+
+	NoThrowOnCancelLifetimeTracker tracker(recorder);
+
+	co_await signal;
+	recorder.record(NoThrowOnCancelEvent::WaitReturned);
+	recorder.record(NoThrowOnCancelEvent::AfterWait);
+	co_return 42;
+}
+
+Future<Void> noThrowOnCancelSequentialAwaitsTest(NoThrowOnCancelRecorder& recorder,
+                                                 Future<Void> firstSignal,
+                                                 Future<Void> secondSignal,
+                                                 NoThrowOnCancel = {}) {
+	recorder.record(NoThrowOnCancelEvent::Start);
+
+	NoThrowOnCancelLifetimeTracker tracker(recorder);
+
+	co_await firstSignal;
+	recorder.record(NoThrowOnCancelEvent::WaitReturned);
+	co_await secondSignal;
+	recorder.record(NoThrowOnCancelEvent::AfterWait);
+}
+
+Future<int> noThrowOnCancelFutureStreamTest(NoThrowOnCancelRecorder& recorder,
+                                            FutureStream<int> stream,
+                                            NoThrowOnCancel = {}) {
+	recorder.record(NoThrowOnCancelEvent::Start);
+
+	NoThrowOnCancelLifetimeTracker tracker(recorder);
+
+	int value = co_await stream;
+	recorder.record(NoThrowOnCancelEvent::WaitReturned);
+	recorder.record(NoThrowOnCancelEvent::AfterWait);
+	co_return value;
+}
+
+Future<int> noThrowOnCancelThreadFutureStreamTest(NoThrowOnCancelRecorder& recorder,
+                                                  ThreadFutureStream<int> stream,
+                                                  NoThrowOnCancel = {}) {
+	recorder.record(NoThrowOnCancelEvent::Start);
+
+	NoThrowOnCancelLifetimeTracker tracker(recorder);
+
+	int value = co_await stream;
+	recorder.record(NoThrowOnCancelEvent::WaitReturned);
+	recorder.record(NoThrowOnCancelEvent::AfterWait);
+	co_return value;
 }
 
 Future<Void> actor_throw_test(std::stringstream& ss) {
@@ -2408,6 +2495,91 @@ TEST_CASE("/flow/coro/actor") {
 	co_await testUncancellable2();
 	co_await futureStreamTest();
 	co_await stackMemoryTest();
+}
+
+TEST_CASE("/flow/coro/noThrowOnCancel/normalCompletionVoid") {
+	NoThrowOnCancelRecorder recorder;
+	Promise<Void> signal;
+	Future<Void> f = noThrowOnCancelTest(recorder, signal.getFuture());
+	ASSERT(signal.getFutureReferenceCount() > 0);
+
+	signal.send(Void());
+	ASSERT(f.isReady() && !f.isError());
+	ASSERT(signal.getFutureReferenceCount() == 0);
+	assertNoThrowOnCancelCompleted(recorder);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/noThrowOnCancel/normalCompletionValue") {
+	NoThrowOnCancelRecorder recorder;
+	Promise<Void> signal;
+	Future<int> f = noThrowOnCancelValueTest(recorder, signal.getFuture());
+	ASSERT(signal.getFutureReferenceCount() > 0);
+
+	signal.send(Void());
+	ASSERT(f.isReady() && !f.isError());
+	ASSERT_EQ(f.get(), 42);
+	ASSERT(signal.getFutureReferenceCount() == 0);
+	assertNoThrowOnCancelCompleted(recorder);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/noThrowOnCancel/awaitedFutureErrorRunsCatch") {
+	NoThrowOnCancelRecorder recorder;
+	Promise<Void> signal;
+	Future<Void> f = noThrowOnCancelTest(recorder, signal.getFuture());
+	ASSERT(signal.getFutureReferenceCount() > 0);
+
+	signal.sendError(io_error());
+	ASSERT(f.isReady() && !f.isError());
+	ASSERT(signal.getFutureReferenceCount() == 0);
+	assertNoThrowOnCancelCaughtError(recorder);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/noThrowOnCancel/sequentialAwaitsCancelSecond") {
+	NoThrowOnCancelRecorder recorder;
+	Promise<Void> firstSignal;
+	Promise<Void> secondSignal;
+	Future<Void> f =
+	    noThrowOnCancelSequentialAwaitsTest(recorder, firstSignal.getFuture(), secondSignal.getFuture());
+	ASSERT(firstSignal.getFutureReferenceCount() > 0);
+
+	firstSignal.send(Void());
+	ASSERT(!f.isReady());
+	ASSERT(secondSignal.getFutureReferenceCount() > 0);
+
+	f.cancel();
+	ASSERT(f.isReady() && f.isError() && f.getError().code() == error_code_actor_cancelled);
+	ASSERT(secondSignal.getFutureReferenceCount() == 0);
+	assertNoThrowOnCancelDestroyedAfterFirstWait(recorder);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/noThrowOnCancel/futureStreamCancel") {
+	NoThrowOnCancelRecorder recorder;
+	PromiseStream<int> stream;
+	Future<int> f = noThrowOnCancelFutureStreamTest(recorder, stream.getFuture());
+	ASSERT(stream.getFutureReferenceCount() > 0);
+
+	f.cancel();
+	ASSERT(f.isReady() && f.isError() && f.getError().code() == error_code_actor_cancelled);
+	ASSERT(stream.getFutureReferenceCount() == 0);
+	assertNoThrowOnCancelDestroyedAtWait(recorder);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/noThrowOnCancel/threadFutureStreamCancel") {
+	NoThrowOnCancelRecorder recorder;
+	ThreadReturnPromiseStream<int> stream;
+	Future<int> f = noThrowOnCancelThreadFutureStreamTest(recorder, stream.getFuture());
+	ASSERT(stream.getFutureReferenceCount() > 0);
+
+	f.cancel();
+	ASSERT(f.isReady() && f.isError() && f.getError().code() == error_code_actor_cancelled);
+	ASSERT(stream.getFutureReferenceCount() == 0);
+	assertNoThrowOnCancelDestroyedAtWait(recorder);
+	return Void();
 }
 
 TEST_CASE("/flow/coro/chooseCancelWaiting") {
