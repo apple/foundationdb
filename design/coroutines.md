@@ -19,6 +19,7 @@
     * [Don't Wait in Error-Handlers](#dont-wait-in-error-handlers)
     * [Make Static Functions Class Members](#make-static-functions-class-members)
     * [Initialization of Locals](#initialization-of-locals)
+* [Internals Reference](fdb-coroutines-internals.md) — deep dive into the coroutine runtime (SAV, Actor, awaiters, cancellation)
 
 ## Introduction
 

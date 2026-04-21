@@ -559,9 +559,23 @@ inside a `When` handler.
 
 ### `co_await race(future1, future2, ...)`
 
-Template-based alternative. Returns the value of whichever future completes
-first. Simpler API but less flexible (all futures must have compatible types
-or return `Void`).
+Template-based alternative that supports heterogeneous future types. Returns
+`Future<std::variant<T1, T2, ...>>` where each `Ti` is the value type of the
+corresponding future. When the first future completes, `race` cancels the
+others and constructs the variant with `std::in_place_index<N>` for the
+winning future's position.
+
+Use `result.index()` to determine which future won, and `std::get<N>(result)`
+or `std::visit(...)` to extract the value:
+
+```cpp
+auto result = co_await race(futureInt, futureString);
+if (result.index() == 0) {
+    int val = std::get<0>(result);
+} else {
+    std::string val = std::get<1>(result);
+}
+```
 
 ---
 
