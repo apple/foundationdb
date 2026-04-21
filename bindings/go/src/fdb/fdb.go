@@ -43,7 +43,7 @@ var (
 	// with the network thread while the network thread is no more running.
 	ErrNetworkIsStopped = errors.New("network is stopped")
 
-	// ErrNetworkAlreadyStopped for a too early call to StopNetwork().
+	// ErrNetworkNotStarted for a too early call to StopNetwork().
 	ErrNetworkNotStarted = errors.New("network has not been started")
 )
 

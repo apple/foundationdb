@@ -1,4 +1,5 @@
 //go:build ignore
+// +build ignore
 
 /*
  * main.go
@@ -25,11 +26,12 @@
 //
 // Usage:
 //
-//	go run internal/gen_errors/main.go <input.h> <output.go>
+//	go run internal/gen_errors/main.go -in <input.h> -out <output.go>
 package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"os"
 	"regexp"
@@ -90,14 +92,15 @@ func toPascalCase(s string) string {
 }
 
 func main() {
-	if len(os.Args) < 3 {
-		fmt.Fprintln(os.Stderr, "usage: gen_errors <input.h> <output.go>")
-		os.Exit(1)
-	}
+	var inFile string
+	var outFile string
+	flag.StringVar(&inFile, "in", "stdin", "Input file")
+	flag.StringVar(&outFile, "out", "stdout", "Output file")
+	flag.Parse()
 
-	f, err := os.Open(os.Args[1])
+	f, err := os.Open(inFile)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "open %s: %v\n", os.Args[1], err)
+		fmt.Fprintf(os.Stderr, "open %s: %v\n", inFile, err)
 		os.Exit(1)
 	}
 	defer f.Close()
@@ -120,9 +123,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	out, err := os.Create(os.Args[2])
+	out, err := os.Create(outFile)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "create %s: %v\n", os.Args[2], err)
+		fmt.Fprintf(os.Stderr, "create %s: %v\n", outFile, err)
 		os.Exit(1)
 	}
 	defer out.Close()
