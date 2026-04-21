@@ -25,6 +25,7 @@
 #include "fdbclient/SpecialKeySpace.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/MonitorLeader.h"
+#include "flow/CoroUtils.h"
 #include "flow/Util.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -1595,27 +1596,27 @@ Future<Optional<Value>> getJSON(Database db, std::string jsonField) {
 	co_return getValueFromJSON(statusObj);
 }
 
-ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> connRecord) {
-	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
-	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(connRecord, clusterInterface);
+Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> connRecord) {
+	Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
+	Future<Void> leaderMon = monitorLeader<ClusterInterface>(connRecord, clusterInterface);
 
-	loop {
-		choose {
-			when(std::vector<ClientWorkerInterface> workers =
-			         wait(clusterInterface->get().present()
-			                  ? brokenPromiseToNever(
-			                        clusterInterface->get().get().getClientWorkers.getReply(GetClientWorkersRequest()))
-			                  : Never())) {
-				RangeResult result;
-				for (auto& it : workers) {
-					result.push_back_deep(
-					    result.arena(),
-					    KeyValueRef(it.address().toString(), BinaryWriter::toValue(it, IncludeVersion())));
-				}
+	while (true) {
+		Future<std::vector<ClientWorkerInterface>> workersFuture =
+		    clusterInterface->get().present()
+		        ? brokenPromiseToNever(
+		              clusterInterface->get().get().getClientWorkers.getReply(GetClientWorkersRequest()))
+		        : Never();
+		auto res = co_await race(workersFuture, clusterInterface->onChange());
+		if (res.index() == 0) {
+			std::vector<ClientWorkerInterface> workers = std::get<0>(std::move(res));
 
-				return result;
+			RangeResult result;
+			for (auto& it : workers) {
+				result.push_back_deep(
+				    result.arena(), KeyValueRef(it.address().toString(), BinaryWriter::toValue(it, IncludeVersion())));
 			}
-			when(wait(clusterInterface->onChange())) {}
+
+			co_return result;
 		}
 	}
 }
