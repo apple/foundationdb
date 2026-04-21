@@ -164,7 +164,6 @@ std::vector<NetworkAddress> SimExternalConnection::resolveTCPEndpointBlocking(co
 		dnsCache->add(host, service, addrs);
 		return addrs;
 	} catch (...) {
-		dnsCache->remove(host, service);
 		throw lookup_failed();
 	}
 }
