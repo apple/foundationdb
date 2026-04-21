@@ -94,10 +94,55 @@ The compiler heap-allocates a "coroutine frame" containing:
 FDB overrides `operator new`/`operator delete` on promise types to use its
 `allocateFast`/`freeFast` allocator.
 
+A typical Clang-generated frame layout:
+
+```
++0    void (*__resume)(void*)          // resume function pointer
++8    void (*__destroy)(void*)         // destroy function pointer
++16   promise_type promise             // in FDB, contains the CoroActor / SAV
++??   uint32_t __suspend_index          // which suspend point we're at
++??   bool __initial_await_resume_called
++??   <parameters>                     // copies of function arguments
++??   <locals>                         // variables live across suspend points
++??   <awaiters>                       // one per co_await, alive during suspension
++??   <padding/alignment>
+```
+
+The layout is compiler-generated and not standardized. Everything that is live
+across a suspend point must be stored in the frame. Typical FDB coroutines
+range from ~200 bytes to over 1KB depending on the number of locals and
+`co_await` points.
+
+**Parameter storage caveat:** The frame stores copies of all function
+parameters. For `const&` parameters, the frame stores the *reference*, not a
+copy of the referent. If the caller passed a temporary, it will be destroyed
+before the coroutine resumes — leaving a dangling reference in the frame.
+Always copy `const&` parameters to a local before the first `co_await`.
+
+The compiler splits the original function into three pieces:
+
+1. **Ramp function** — the entry point the caller invokes. Allocates the frame,
+   constructs the promise, calls `get_return_object()` and
+   `initial_suspend()`, starts the body, and returns `retval` to the caller
+   when the coroutine first suspends.
+2. **Resume function** — called via `handle.resume()`. Jumps to the current
+   suspend point (via a switch on the saved index) and continues execution.
+3. **Destroy function** — called via `handle.destroy()`. Jumps to the current
+   suspend point and runs destructors for in-scope locals, then deallocates.
+
 ### `coroutine_handle<>`
 
-An opaque pointer to the coroutine frame. The compiler passes it to
-`await_suspend`. Key operations:
+A single pointer to the coroutine frame — **8 bytes**. The resume and destroy
+function pointers are stored in the frame itself (see layout above), not in
+the handle. Calling `handle.resume()` dereferences the frame pointer to find
+the resume function pointer, then makes an indirect call.
+
+`coroutine_handle<P>` (typed) and `coroutine_handle<void>` (erased) are the
+same size. The typed version adds a `promise()` accessor that returns a
+reference to the promise at a compiler-known offset in the frame. They are
+freely interconvertible.
+
+The compiler passes the handle to `await_suspend`. Key operations:
 
 - `handle.resume()` — resume the coroutine at its current suspend point
 - `handle.destroy()` — destroy the coroutine frame (runs destructors for
@@ -182,9 +227,9 @@ list sentinel) and `FastAllocated<SAV<T>>`.
 
 **Lifecycle rules:**
 
-- `delPromiseRef()`: if promises drops to 1 and the SAV is still unset, sends
-  `broken_promise()` to any waiting callbacks, then sets promises to 0. If
-  futures is also 0, calls `destroy()`.
+- `delPromiseRef()`: when the last promise ref is released (promises is 1) and
+  the SAV is still unset, sends `broken_promise()` to any waiting callbacks.
+  Then sets promises to 0. If futures is also 0, calls `destroy()`.
 - `delFutureRef()`: if futures drops to 0 and promises > 0, calls `cancel()`
   (this is how dropping the last Future cancels an actor). If promises is also
   0, calls `destroy()`.
@@ -209,10 +254,16 @@ int8_t actor_wait_state;
 
 | Value | Constant | Meaning |
 |---|---|---|
-| > 0 | `ACTOR_WAIT_STATE_WAITING` (1) | Suspended, waiting on a callback |
-| 0 | `ACTOR_WAIT_STATE_NOT_WAITING` | Running or completed |
+| > 0 | `ACTOR_WAIT_STATE_WAITING` (1) | Coroutine is suspended at a `co_await`; a callback is registered on some Future's SAV that will call `handle.resume()` when fired |
+| 0 | `ACTOR_WAIT_STATE_NOT_WAITING` | Coroutine is running (between `co_await` points) or has completed |
 | -1 | `ACTOR_WAIT_STATE_CANCELLED` | Cancellation requested |
-| -2 | `ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK` | Cancelled detected during `await_ready` |
+| -2 | `ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK` | Cancellation detected during `await_ready()` before the awaiter registered a callback |
+
+In actor-compiler-generated code, values >1 identify *which* callback group
+fired (the generated state machine uses the value to jump to the right
+continuation). For C++ coroutines this distinction is unnecessary — the
+`coroutine_handle` already encodes the suspend point — so the value is
+always 1.
 
 Constructed with `SAV(1, 1)`: starts with futures=1 and promises=1. The
 futures=1 is consumed by the `Future<T>` returned from `get_return_object()`.
@@ -231,8 +282,8 @@ flow/include/flow/flow.h:1091, 982
 futures, one promise. `getFuture()` calls `addFutureRef()` then returns
 `Future<T>(sav)`.
 
-`Future<T>` wraps a `SAV<T>*`. Copy constructor calls `addFutureRef()`.
-Destructor calls `delFutureRef()`. The explicit constructor
+`Future<T>` wraps a `SAV<T>*` — **8 bytes**. Copy constructor calls
+`addFutureRef()`. Destructor calls `delFutureRef()`. The explicit constructor
 `Future(SAV<T>* sav)` does **not** increment the refcount — it assumes
 the count is already correct (used by `get_return_object()`).
 
@@ -294,11 +345,15 @@ ReturnFutureType get_return_object() noexcept {
 }
 ```
 
-Stores the coroutine handle in the actor, then constructs a `Future<T>`
-pointing at the actor's SAV. The SAV was initialized with `futures=1` by the
-`Actor` constructor, and the explicit `Future(SAV*)` constructor does not
-increment the refcount — so the returned Future consumes that initial
-reference.
+`ReturnFutureType` is `Future<ReturnValue>` — an 8-byte wrapper around a
+`SAV<T>*` pointer. This constructs a `Future<T>` pointing at the actor's SAV.
+The SAV was initialized with `futures=1` by the `Actor` constructor, and the
+explicit `Future(SAV*)` constructor does not increment the refcount — so the
+returned Future consumes that initial reference.
+
+The compiler calls `get_return_object()` before the body executes. The caller
+receives this Future immediately (when the coroutine first suspends or
+completes without suspending).
 
 ### `initial_suspend()`
 
@@ -346,6 +401,11 @@ type:
 
 ## Awaiters: How `co_await` Suspends and Resumes
 
+All three awaiter methods — `await_ready()`, `await_suspend()`, and
+`await_resume()` — are called by the **compiler**, never by FDB code directly.
+The programmer implements them on the awaiter types; the compiler generates
+calls to them in the correct order at each `co_await` expression.
+
 ### `AwaitableFuture<PromiseType, ValueType, IsStream>`
 
 The most common awaiter. Used for `co_await someFuture` and
@@ -367,10 +427,16 @@ suspension). Also checks if the actor has been cancelled — if so, sets
    `addCallbackAndClear(this)` — this transfers the Future's reference to
    the callback list
 
-**`fire(value)` / `error(err)`** (inherited from Callback): Called by the
-Future's SAV when it is resolved. For streams, stores the value in a local
-`AwaitableFutureStore`. Then calls `pt->resume()` which calls
-`handle.resume()`, resuming the coroutine.
+**`fire(value)` / `error(err)`** (inherited from Callback): Called when the
+awaited Future is resolved — someone called `promise.send(value)` or
+`promise.sendError(err)`, and `SAV::send()` walked its callback list calling
+`fire()` on each node. This happens synchronously on whatever call stack
+resolved the Future (FDB is cooperative single-threaded — there is no
+scheduler). For streams, `fire()` first stores the value in a local
+`AwaitableFutureStore` (since the stream may yield further values). The
+awaiter's `fire()` then calls `pt->resume()` → `handle.resume()`, which
+resumes the coroutine at its suspend point. From the coroutine's perspective,
+control returns from the `co_await` expression.
 
 **`resumeImpl()`**: Called at the start of `await_resume()`. Checks
 `actor_wait_state`:
@@ -409,6 +475,10 @@ Future<Void> example() {
     //    → coroutine suspends, control returns to caller
     //
     // ... time passes, someone calls p.send(42) ...
+    //     (The coroutine is suspended. Execution has returned to whoever
+    //     called example(). That caller — or another coroutine that runs
+    //     later on the same thread — eventually calls p.send(42).
+    //     The send fires callbacks synchronously on that call stack.)
     //
     // 4. SAV::send() fires all callbacks → awaiter.fire(42)
     //    → calls promise.resume() → handle.resume()
@@ -631,8 +701,9 @@ the appropriate promise type.
 2. `cancel()` sets `actor_wait_state = CANCELLED`, resumes the coroutine
 3. Awaiter's `resumeImpl()` throws `actor_cancelled()`
 4. Exception unwinds through the body (running destructors and catch blocks)
-5. `unhandled_exception()` stores the error on the SAV
-6. `final_suspend()` completes the SAV, fires callbacks
+5. `unhandled_exception()` stores the error on the SAV (sets `error_state`)
+6. `final_suspend()` → `await_suspend` fires waiting callbacks via
+   `finishSendErrorAndDelPromiseRef()` and decrements the promise count
 7. Frame cleanup proceeds as in normal completion
 
 ### Cancellation (NoThrowOnCancel)
