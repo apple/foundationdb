@@ -105,10 +105,6 @@ class PTreeFinger {
 	size_t bound_sz_ = 0;
 
 public:
-	// Compacting roots usually visits one modified search path per retained root. Use the same path capacity as a
-	// reserve hint so compaction does not repeatedly rehash the visited set.
-	static constexpr size_t compactVisitedReservePerRoot = pathCapacity;
-
 	PTreeFinger() {}
 
 	// Explicit copy constructors ensure we copy the live values in entries_.
@@ -303,26 +299,6 @@ T get(PTreeFinger<T>& f) {
 	return f.back()->data;
 }
 
-// Modifies p to point to a PTree with x inserted
-template <class T>
-void insert(Reference<PTree<T>>& p, Version at, const T& x) {
-	if (!p) {
-		p = makeReference<PTree<T>>(x, at);
-	} else {
-		int c = ::compare(x, p->data);
-		if (c == 0) {
-			p = makeReference<PTree<T>>(p->priority, x, p->left(at), p->right(at), at);
-		} else {
-			const bool direction = !(c < 0);
-			Reference<PTree<T>> child = p->child(direction, at);
-			insert(child, at, x);
-			p = update(p, direction, child, at);
-			if (p->child(direction, at)->priority > p->priority)
-				rotate(p, at, !direction);
-		}
-	}
-}
-
 // Modifies p to point to a PTree with x inserted, using a caller-owned priority generator.
 template <class T>
 void insert(Reference<PTree<T>>& p, Version at, const T& x, IRandom& priorityRandom) {
@@ -341,6 +317,13 @@ void insert(Reference<PTree<T>>& p, Version at, const T& x, IRandom& priorityRan
 				rotate(p, at, !direction);
 		}
 	}
+}
+
+// Modifies p to point to a PTree with x inserted.
+template <class T>
+void insert(Reference<PTree<T>>& p, Version at, const T& x) {
+	auto priorityRandom = deterministicRandom();
+	insert(p, at, x, *priorityRandom);
 }
 
 template <class T>
@@ -857,7 +840,6 @@ public:
 		// auto newBegin = roots.lower_bound(newOldestVersion);
 		auto newBegin = lower_bound(roots.begin(), roots.end(), newOldestVersion, rootsComparator());
 		std::unordered_set<PTreeT*> visited;
-		visited.reserve((newBegin - roots.begin()) * PTreeFingerT::compactVisitedReservePerRoot);
 		for (auto root = roots.begin(); root != newBegin; ++root) {
 			if (root->second)
 				PTreeImpl::compact(root->second, newOldestVersion, visited);
@@ -911,112 +893,127 @@ public:
 		PTreeFingerT finger;
 	};
 
-	iterator latestBegin() const {
-		iterator i(roots.back().second, latestVersion);
-		PTreeImpl::first(roots.back().second, latestVersion, i.finger);
+	static iterator beginAt(Tree const& root, Version at) {
+		iterator i(root, at);
+		PTreeImpl::first(root, at, i.finger);
 		return i;
 	}
-	iterator latestEnd() const { return iterator(roots.back().second, latestVersion); }
+
+	static iterator endAt(Tree const& root, Version at) { return iterator(root, at); }
+
+	// Returns x such that key==*x, or end()
+	template <class X>
+	static iterator findAt(Tree const& root, Version at, const X& key) {
+		iterator i(root, at);
+		PTreeImpl::lower_bound(root, at, key, i.finger);
+		if (i && i.key() == key)
+			return i;
+		else
+			return endAt(root, at);
+	}
+
+	// Returns the smallest x such that *x>=key, or end()
+	template <class X>
+	static iterator lowerBoundAt(Tree const& root, Version at, const X& key) {
+		iterator i(root, at);
+		PTreeImpl::lower_bound(root, at, key, i.finger);
+		return i;
+	}
+
+	// Returns the smallest x such that *x>key, or end()
+	template <class X>
+	static iterator upperBoundAt(Tree const& root, Version at, const X& key) {
+		iterator i(root, at);
+		PTreeImpl::upper_bound(root, at, key, i.finger);
+		return i;
+	}
+
+	// Returns the largest x such that *x<=key, or end()
+	template <class X>
+	static iterator lastLessOrEqualAt(Tree const& root, Version at, const X& key) {
+		iterator i(root, at);
+		PTreeImpl::upper_bound(root, at, key, i.finger);
+		--i;
+		return i;
+	}
+
+	// Returns the largest x such that *x<key, or end()
+	template <class X>
+	static iterator lastLessAt(Tree const& root, Version at, const X& key) {
+		iterator i(root, at);
+		PTreeImpl::lower_bound(root, at, key, i.finger);
+		--i;
+		return i;
+	}
+
+	iterator latestBegin() const { return beginAt(roots.back().second, latestVersion); }
+	iterator latestEnd() const { return endAt(roots.back().second, latestVersion); }
 
 	// Returns x such that key==*x, or latestEnd()
 	template <class X>
 	iterator latestFind(const X& key) const {
-		iterator i(roots.back().second, latestVersion);
-		PTreeImpl::lower_bound(roots.back().second, latestVersion, key, i.finger);
-		if (i && i.key() == key)
-			return i;
-		else
-			return latestEnd();
+		return findAt(roots.back().second, latestVersion, key);
 	}
 
 	// Returns the smallest x such that *x>=key, or latestEnd()
 	template <class X>
 	iterator latestLowerBound(const X& key) const {
-		iterator i(roots.back().second, latestVersion);
-		PTreeImpl::lower_bound(roots.back().second, latestVersion, key, i.finger);
-		return i;
+		return lowerBoundAt(roots.back().second, latestVersion, key);
 	}
 
 	// Returns the smallest x such that *x>key, or latestEnd()
 	template <class X>
 	iterator latestUpperBound(const X& key) const {
-		iterator i(roots.back().second, latestVersion);
-		PTreeImpl::upper_bound(roots.back().second, latestVersion, key, i.finger);
-		return i;
+		return upperBoundAt(roots.back().second, latestVersion, key);
 	}
 
 	// Returns the largest x such that *x<=key, or latestEnd()
 	template <class X>
 	iterator latestLastLessOrEqual(const X& key) const {
-		iterator i(roots.back().second, latestVersion);
-		PTreeImpl::upper_bound(roots.back().second, latestVersion, key, i.finger);
-		--i;
-		return i;
+		return lastLessOrEqualAt(roots.back().second, latestVersion, key);
 	}
 
 	// Returns the largest x such that *x<key, or latestEnd()
 	template <class X>
 	iterator latestLastLess(const X& key) const {
-		iterator i(roots.back().second, latestVersion);
-		PTreeImpl::lower_bound(roots.back().second, latestVersion, key, i.finger);
-		--i;
-		return i;
+		return lastLessAt(roots.back().second, latestVersion, key);
 	}
 
 	class ViewAtVersion {
 	public:
 		ViewAtVersion(Tree const& root, Version at) : root(root), at(at) {}
 
-		iterator begin() const {
-			iterator i(root, at);
-			PTreeImpl::first(root, at, i.finger);
-			return i;
-		}
-		iterator end() const { return iterator(root, at); }
+		iterator begin() const { return VersionedMap::beginAt(root, at); }
+		iterator end() const { return VersionedMap::endAt(root, at); }
 
 		// Returns x such that key==*x, or end()
 		template <class X>
 		iterator find(const X& key) const {
-			iterator i(root, at);
-			PTreeImpl::lower_bound(root, at, key, i.finger);
-			if (i && i.key() == key)
-				return i;
-			else
-				return end();
+			return VersionedMap::findAt(root, at, key);
 		}
 
 		// Returns the smallest x such that *x>=key, or end()
 		template <class X>
 		iterator lower_bound(const X& key) const {
-			iterator i(root, at);
-			PTreeImpl::lower_bound(root, at, key, i.finger);
-			return i;
+			return VersionedMap::lowerBoundAt(root, at, key);
 		}
 
 		// Returns the smallest x such that *x>key, or end()
 		template <class X>
 		iterator upper_bound(const X& key) const {
-			iterator i(root, at);
-			PTreeImpl::upper_bound(root, at, key, i.finger);
-			return i;
+			return VersionedMap::upperBoundAt(root, at, key);
 		}
 
 		// Returns the largest x such that *x<=key, or end()
 		template <class X>
 		iterator lastLessOrEqual(const X& key) const {
-			iterator i(root, at);
-			PTreeImpl::upper_bound(root, at, key, i.finger);
-			--i;
-			return i;
+			return VersionedMap::lastLessOrEqualAt(root, at, key);
 		}
 
 		// Returns the largest x such that *x<key, or end()
 		template <class X>
 		iterator lastLess(const X& key) const {
-			iterator i(root, at);
-			PTreeImpl::lower_bound(root, at, key, i.finger);
-			--i;
-			return i;
+			return VersionedMap::lastLessAt(root, at, key);
 		}
 
 		void validate() {
