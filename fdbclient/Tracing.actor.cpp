@@ -30,11 +30,7 @@
 #include <memory>
 #include "flow/IUDPSocket.h"
 
-#include "flow/actorcompiler.h" // has to be last include
-
-#ifdef NO_INTELLISENSE
-namespace {
-#endif
+#include "flow/CoroUtils.h"
 
 // Initial size of buffer used to store serialized traces. Buffer will be
 // resized when necessary.
@@ -82,22 +78,22 @@ struct LogfileTracer : ITracer {
 };
 
 // A server listening for UDP trace messages, run only in simulation.
-ACTOR Future<Void> simulationStartServer() {
+Future<Void> simulationStartServer() {
 	// We're going to force the address to be loopback regardless of FLOW_KNOBS->TRACING_UDP_LISTENER_ADDR
 	// because we're in simulation testing mode.
 	TraceEvent(SevInfo, "UDPServerStarted")
 	    .detail("Address", "127.0.0.1")
 	    .detail("Port", FLOW_KNOBS->TRACING_UDP_LISTENER_PORT);
-	state NetworkAddress localAddress =
+	NetworkAddress localAddress =
 	    NetworkAddress::parse("127.0.0.1:" + std::to_string(FLOW_KNOBS->TRACING_UDP_LISTENER_PORT));
-	state Reference<IUDPSocket> serverSocket = wait(INetworkConnections::net()->createUDPSocket(localAddress));
+	Reference<IUDPSocket> serverSocket = co_await INetworkConnections::net()->createUDPSocket(localAddress);
 	serverSocket->bind(localAddress);
 
-	state Standalone<StringRef> packetString = makeString(IUDPSocket::MAX_PACKET_SIZE);
-	state uint8_t* packet = mutateString(packetString);
+	Standalone<StringRef> packetString = makeString(IUDPSocket::MAX_PACKET_SIZE);
+	uint8_t* packet = mutateString(packetString);
 
-	loop {
-		int size = wait(serverSocket->receive(packet, packet + IUDPSocket::MAX_PACKET_SIZE));
+	while (true) {
+		int size = co_await serverSocket->receive(packet, packet + IUDPSocket::MAX_PACKET_SIZE);
 		auto message = packetString.substr(0, size);
 
 		// For now, just check the first byte in the message matches. Data is
@@ -111,10 +107,10 @@ ACTOR Future<Void> simulationStartServer() {
 /*
 // Runs on an interval, printing debug information and performing other
 // connection tasks.
-ACTOR Future<Void> traceLog(int* pendingMessages, bool* sendError) {
-    state bool sendErrorReset = false;
+Future<Void> traceLog(int* pendingMessages, bool* sendError) {
+    bool sendErrorReset = false;
 
-    loop {
+    while (true) {
         TraceEvent("TracingSpanQueueSize").detail("PendingMessages", *pendingMessages);
 
         // Wait at least one full loop before attempting to send messages
@@ -126,7 +122,7 @@ ACTOR Future<Void> traceLog(int* pendingMessages, bool* sendError) {
             sendErrorReset = true;
         }
 
-        wait(delay(kQueueSizeLogInterval));
+        co_await delay(kQueueSizeLogInterval);
     }
 }
 */
@@ -224,10 +220,10 @@ private:
 };
 
 #ifndef WIN32
-ACTOR Future<Void> fastTraceLogger(int* unreadyMessages, int* failedMessages, int* totalMessages, bool* sendError) {
-	state bool sendErrorReset = false;
+Future<Void> fastTraceLogger(int* unreadyMessages, int* failedMessages, int* totalMessages, bool* sendError) {
+	bool sendErrorReset = false;
 
-	loop {
+	while (true) {
 		TraceEvent("TracingSpanStats")
 		    .detail("UnreadyMessages", *unreadyMessages)
 		    .detail("FailedMessages", *failedMessages)
@@ -241,7 +237,7 @@ ACTOR Future<Void> fastTraceLogger(int* unreadyMessages, int* failedMessages, in
 			sendErrorReset = true;
 		}
 
-		wait(delay(kQueueSizeLogInterval));
+		co_await delay(kQueueSizeLogInterval);
 	}
 }
 
@@ -331,10 +327,6 @@ private:
 #endif
 
 ITracer* g_tracer = new NoopTracer();
-
-#ifdef NO_INTELLISENSE
-} // namespace
-#endif
 
 void openTracer(TracerType type) {
 	if (g_tracer->type() == type) {
