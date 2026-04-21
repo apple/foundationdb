@@ -71,6 +71,86 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+static bool storageTeamOneReplicaLeftIsCritical(DatabaseConfiguration const& configuration) {
+	return configuration.initialized && configuration.storageTeamSize == 3;
+}
+
+ClusterControllerData::ClusterControllerData(ClusterControllerFullInterface const& ccInterface,
+                                             LocalityData const& locality,
+                                             ServerCoordinators const& coordinators,
+                                             Reference<AsyncVar<Optional<UID>>> clusterId)
+  : gotProcessClasses(false), gotFullyRecoveredConfig(false), shouldCommitSuicide(false),
+    clusterControllerProcessId(locality.processId()), clusterControllerDcId(locality.dcId()), id(ccInterface.id()),
+    clusterId(clusterId), ac(false),
+    clusterHealthWorkerEventProvider(makeReference<cluster_health::WorkerEventProvider>()),
+    clusterHealthMonitor(cluster_health::Monitor::create(clusterHealthWorkerEventProvider)),
+    outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()), startTime(now()),
+    goodRecruitmentTime(Never()), goodRemoteRecruitmentTime(Never()), dcLogServerVersionDifference(0),
+    dcStorageServerVersionDifference(0), datacenterVersionDifference(0), versionDifferenceUpdated(false),
+    remoteDCMonitorStarted(false), remoteTransactionSystemDegraded(false), recruitDistributor(false),
+    recruitRatekeeper(false), recruitConsistencyScan(false),
+    clusterControllerMetrics("ClusterController", id.toString()),
+    openDatabaseRequests("OpenDatabaseRequests", clusterControllerMetrics),
+    registerWorkerRequests("RegisterWorkerRequests", clusterControllerMetrics),
+    getWorkersRequests("GetWorkersRequests", clusterControllerMetrics),
+    getClientWorkersRequests("GetClientWorkersRequests", clusterControllerMetrics),
+    registerMasterRequests("RegisterMasterRequests", clusterControllerMetrics),
+    statusRequests("StatusRequests", clusterControllerMetrics),
+    recruitedMasterWorkerEventHolder(makeReference<EventCacheHolder>("RecruitedMasterWorker")) {
+	(void)coordinators;
+	auto serverInfo = ServerDBInfo();
+	serverInfo.id = deterministicRandom()->randomUniqueID();
+	serverInfo.infoGeneration = ++db.dbInfoCount;
+	serverInfo.masterLifetime.ccID = id;
+	serverInfo.clusterInterface = ccInterface;
+	serverInfo.myLocality = locality;
+	db.serverInfo->set(serverInfo);
+	cx = openDBOnServer(db.serverInfo, TaskPriority::DefaultEndpoint, LockAware::True);
+
+	specialCounter(clusterControllerMetrics, "ClientCount", [this]() { return db.clientCount; });
+	updateClusterHealthMonitorInputs();
+}
+
+void ClusterControllerData::updateClusterHealthMonitorInputs() {
+	std::vector<WorkerDetails> workers;
+	workers.reserve(id_worker.size());
+	for (auto const& [processId, workerInfo] : id_worker) {
+		(void)processId;
+		workers.push_back(workerInfo.details);
+	}
+	clusterHealthWorkerEventProvider->setWorkers(std::move(workers));
+	clusterHealthWorkerEventProvider->setRecoveryState(db.serverInfo->get().recoveryState);
+	clusterHealthWorkerEventProvider->setStorageTeamOneReplicaLeftIsCritical(
+	    storageTeamOneReplicaLeftIsCritical(db.config));
+
+	Optional<WorkerInterface> ratekeeperWorker;
+	if (db.serverInfo->get().ratekeeper.present()) {
+		auto workerIt = id_worker.find(db.serverInfo->get().ratekeeper.get().locality.processId());
+		if (workerIt != id_worker.end()) {
+			ratekeeperWorker = workerIt->second.details.interf;
+		}
+	}
+	clusterHealthWorkerEventProvider->setRatekeeperWorker(std::move(ratekeeperWorker));
+
+	Optional<WorkerInterface> dataDistributorWorker;
+	if (db.serverInfo->get().distributor.present()) {
+		auto workerIt = id_worker.find(db.serverInfo->get().distributor.get().locality.processId());
+		if (workerIt != id_worker.end()) {
+			dataDistributorWorker = workerIt->second.details.interf;
+		}
+	}
+	clusterHealthWorkerEventProvider->setDataDistributorWorker(std::move(dataDistributorWorker));
+
+	std::vector<StorageServerInterface> storageServers;
+	storageServers.reserve(storageStatusInfos.size());
+	for (auto const& storageStatusInfo : storageStatusInfos) {
+		storageServers.push_back(storageStatusInfo);
+	}
+	clusterHealthWorkerEventProvider->setStorageServers(std::move(storageServers));
+
+	clusterHealthWorkerEventProvider->setTLogs(db.serverInfo->get().logSystemConfig.allPresentLogs());
+}
+
 bool ClusterControllerData::processesInSameDC(const NetworkAddress& addr1, const NetworkAddress& addr2) const {
 	return this->addr_locality.contains(addr1) && this->addr_locality.contains(addr2) &&
 	       this->addr_locality.at(addr1).dcId().present() && this->addr_locality.at(addr2).dcId().present() &&
@@ -1042,6 +1122,7 @@ ACTOR Future<Void> workerAvailabilityWatch(WorkerInterface worker,
 						cluster->addr_locality.erase(worker.secondaryAddress().get());
 					}
 				}
+				cluster->updateClusterHealthMonitorInputs();
 				cluster->updateWorkerList.set(worker.locality.processId(), Optional<ProcessData>());
 				return Void();
 			}
@@ -1124,6 +1205,8 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	db->recoveryStalled = req.recoveryStalled;
 	if (req.configuration.present()) {
 		db->config = req.configuration.get();
+		self->clusterHealthWorkerEventProvider->setStorageTeamOneReplicaLeftIsCritical(
+		    storageTeamOneReplicaLeftIsCritical(db->config));
 
 		if (req.recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
 			self->gotFullyRecoveredConfig = true;
@@ -1203,6 +1286,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		dbInfo.id = deterministicRandom()->randomUniqueID();
 		dbInfo.infoGeneration = ++self->db.dbInfoCount;
 		self->db.serverInfo->set(dbInfo);
+		self->updateClusterHealthMonitorInputs();
 	}
 
 	checkOutstandingRequests(self);
@@ -1369,6 +1453,7 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 		    w.locality.processId() == self->db.serverInfo->get().master.locality.processId()) {
 			self->masterProcessId = w.locality.processId();
 		}
+		self->updateClusterHealthMonitorInputs();
 		self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
 		self->updateDBInfo.trigger();
 		checkOutstandingRequests(self);
@@ -1396,6 +1481,7 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 		}
 
 		// Re-registrations must refresh DBInfo delivery, otherwise rebooted workers can miss role updates.
+		self->updateClusterHealthMonitorInputs();
 		self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
 		self->updateDBInfo.trigger();
 		checkOutstandingRequests(self);
@@ -1784,6 +1870,7 @@ Future<Void> monitorStorageMetadata(ClusterControllerData* self) {
 			co_await tr->commit();
 
 			self->storageStatusInfos = std::move(servers);
+			self->updateClusterHealthMonitorInputs();
 			co_await watchFuture;
 			tr->reset();
 			continue;
@@ -2127,6 +2214,52 @@ Future<Void> updateRemoteDCHealth(ClusterControllerData* self) {
 			checkOutstandingRequests(self);
 		}
 		co_await delay(SERVER_KNOBS->CHECK_REMOTE_HEALTH_INTERVAL);
+	}
+}
+
+Future<Void> monitorRatekeeperTpsLimit(ClusterControllerData* self) {
+	while (true) {
+		try {
+			co_await delay(1.0);
+
+			if (self->db.config.usableRegions <= 1 ||
+			    self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+				self->ratekeeperMonitor.resetZeroRatekeeperTpsLimitObservation();
+				continue;
+			}
+
+			HealthMetrics healthMetrics = co_await self->db.db->getHealthMetrics(/*detailed=*/false);
+			if (!self->ratekeeperMonitor.hasSustainedZeroRatekeeperTpsLimit(healthMetrics.tpsLimit)) {
+				continue;
+			}
+
+			if (self->canSafelyTriggerFailoverToRemoteDc()) {
+				if (SERVER_KNOBS->CC_HEALTH_TRIGGER_FAILOVER &&
+				    self->triggerFailoverToRemoteDc("RatekeeperZeroTpsLimit", healthMetrics.tpsLimit)) {
+					CODE_PROBE(true, "Ratekeeper zero TPS limit triggered region failover", probe::decoration::rare);
+					self->ratekeeperMonitor.resetZeroRatekeeperTpsLimitObservation();
+				} else if (!SERVER_KNOBS->CC_HEALTH_TRIGGER_FAILOVER) {
+					TraceEvent(SevWarn, "RatekeeperZeroTpsLimitSuggestFailover", self->id)
+					    .suppressFor(std::max(1.0, SERVER_KNOBS->CC_FAILOVER_DUE_TO_TPS_LIMIT_DURATION))
+					    .detail("TPSLimit", healthMetrics.tpsLimit)
+					    .detail("ZeroTpsDuration", self->ratekeeperMonitor.getZeroRatekeeperTpsLimitDuration());
+				}
+			} else {
+				TraceEvent(SevWarn, "RatekeeperZeroTpsLimitSuggestFailover", self->id)
+				    .suppressFor(std::max(1.0, SERVER_KNOBS->CC_FAILOVER_DUE_TO_TPS_LIMIT_DURATION))
+				    .detail("TPSLimit", healthMetrics.tpsLimit)
+				    .detail("VersionDifferenceUpdated", self->versionDifferenceUpdated)
+				    .detail("DatacenterVersionDifference", self->datacenterVersionDifference)
+				    .detail("RemoteDcHealthy", self->remoteDCIsHealthy())
+				    .detail("ZeroTpsDuration", self->ratekeeperMonitor.getZeroRatekeeperTpsLimitDuration());
+			}
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "MonitorRatekeeperTpsLimitError", self->id).error(e);
+			self->ratekeeperMonitor.resetZeroRatekeeperTpsLimitObservation();
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+		}
 	}
 }
 
@@ -2672,22 +2805,18 @@ Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 						TraceEvent(SevWarn, "DegradedServerDetectedAndSuggestRecovery").log();
 					}
 				} else if (self->shouldTriggerFailoverDueToDegradedServers()) {
-					double ccUpTime = now() - machineStartTime();
-					if (SERVER_KNOBS->CC_HEALTH_TRIGGER_FAILOVER &&
-					    ccUpTime > SERVER_KNOBS->INITIAL_UPDATE_CROSS_DC_INFO_DELAY) {
+					const bool canSafelyFailover = self->canSafelyTriggerFailoverToRemoteDc();
+					const double ccUpTime = machineStartTime() == 0 ? 0.0 : now() - machineStartTime();
+					if (SERVER_KNOBS->CC_HEALTH_TRIGGER_FAILOVER && canSafelyFailover) {
 						TraceEvent(SevWarn, "DegradedServerDetectedAndTriggerFailover").log();
-						std::vector<Optional<Key>> dcPriority;
-						auto remoteDcId = self->db.config.regions[0].dcId == self->clusterControllerDcId.get()
-						                      ? self->db.config.regions[1].dcId
-						                      : self->db.config.regions[0].dcId;
-
-						// Switch the current primary DC and remote DC in desiredDcIds, so that the remote DC
-						// becomes the new primary, and the primary DC becomes the new remote.
-						dcPriority.push_back(remoteDcId);
-						dcPriority.push_back(self->clusterControllerDcId);
-						self->desiredDcIds.set(dcPriority);
+						self->triggerFailoverToRemoteDc("DegradedServers");
 					} else {
-						TraceEvent(SevWarn, "DegradedServerDetectedAndSuggestFailover").detail("CCUpTime", ccUpTime);
+						TraceEvent(SevWarn, "DegradedServerDetectedAndSuggestFailover")
+						    .detail("CCUpTime", ccUpTime)
+						    .detail("CanSafelyFailover", canSafelyFailover)
+						    .detail("VersionDifferenceUpdated", self->versionDifferenceUpdated)
+						    .detail("DatacenterVersionDifference", self->datacenterVersionDifference)
+						    .detail("RemoteDcHealthy", self->remoteDCIsHealthy());
 					}
 				}
 			}
@@ -2793,12 +2922,16 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(updatedChangingDatacenters(&self));
 	self.addActor.send(updatedChangedDatacenters(&self));
 	self.addActor.send(updateDatacenterVersionDifference(&self));
+	if (SERVER_KNOBS->CC_FAILOVER_DUE_TO_TPS_LIMIT_DURATION > 0) {
+		self.addActor.send(monitorRatekeeperTpsLimit(&self));
+	}
 	self.addActor.send(handleForcedRecoveries(&self, interf));
 	self.addActor.send(handleTriggerAuditStorage(&self, interf));
 	self.addActor.send(monitorDataDistributor(&self));
 	self.addActor.send(monitorRatekeeper(&self));
 
 	self.addActor.send(monitorConsistencyScan(&self));
+	self.addActor.send(self.clusterHealthMonitor.run());
 	self.addActor.send(dbInfoUpdater(&self));
 	self.addActor.send(updateClusterId(&self));
 	self.addActor.send(handleGetEncryptionAtRestMode(&self, interf));

@@ -74,6 +74,7 @@
 #include "fdbrpc/sim_validation.h"
 #include "flow/Arena.h"
 #include "flow/ActorCollection.h"
+#include "flow/CoroUtils.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Error.h"
 #include "flow/FastRef.h"
@@ -1187,15 +1188,15 @@ void updateTagMappings(Database cx, const GetKeyServerLocationsReply& reply) {
 
 // If isBackward == true, returns the shard containing the key before 'key' (an infinitely long, inexpressible key).
 // Otherwise returns the shard containing key
-ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
-                                                           Key key,
-                                                           SpanContext spanContext,
-                                                           Optional<UID> debugID,
-                                                           UseProvisionalProxies useProvisionalProxies,
-                                                           Reverse isBackward,
-                                                           Version version) {
+Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
+                                                     Key key,
+                                                     SpanContext spanContext,
+                                                     Optional<UID> debugID,
+                                                     UseProvisionalProxies useProvisionalProxies,
+                                                     Reverse isBackward,
+                                                     Version version) {
 
-	state Span span("NAPI:getKeyLocation"_loc, spanContext);
+	Span span("NAPI:getKeyLocation"_loc, spanContext);
 	if (isBackward) {
 		ASSERT(key != allKeys.begin && key <= allKeys.end);
 	} else {
@@ -1205,32 +1206,28 @@ ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
 	if (debugID.present())
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocation.Before");
 
-	loop {
+	while (true) {
 		try {
-			wait(cx->getBackoff());
+			co_await cx->getBackoff();
 			++cx->transactionKeyServerLocationRequests;
-			choose {
-				when(wait(cx->onProxiesChanged())) {}
-				when(GetKeyServerLocationsReply rep = wait(basicLoadBalance(
-				         cx->getCommitProxies(useProvisionalProxies),
-				         &CommitProxyInterface::getKeyServersLocations,
-				         GetKeyServerLocationsRequest(
-				             span.context, key, Optional<KeyRef>(), /*limit=*/100, isBackward, version, key.arena()),
-				         TaskPriority::DefaultPromiseEndpoint))) {
-					++cx->transactionKeyServerLocationRequestsCompleted;
-					if (debugID.present())
-						g_traceBatch.addEvent(
-						    "TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocation.After");
-					ASSERT(rep.results.size() == 1);
+			GetKeyServerLocationsReply rep = co_await commitProxyLoadBalance(
+			    cx,
+			    makeReqBuilder<GetKeyServerLocationsRequest>(
+			        span.context, key, Optional<KeyRef>(), /*limit=*/100, isBackward, version, key.arena()),
+			    &CommitProxyInterface::getKeyServersLocations,
+			    useProvisionalProxies,
+			    TaskPriority::DefaultPromiseEndpoint);
+			++cx->transactionKeyServerLocationRequestsCompleted;
+			if (debugID.present())
+				g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocation.After");
+			ASSERT(rep.results.size() == 1);
 
-					auto locationInfo = cx->setCachedLocation(rep.results[0].first, rep.results[0].second);
-					updateTssMappings(cx, rep);
-					updateTagMappings(cx, rep);
+			auto locationInfo = cx->setCachedLocation(rep.results[0].first, rep.results[0].second);
+			updateTssMappings(cx, rep);
+			updateTagMappings(cx, rep);
 
-					cx->updateBackoff(success());
-					return KeyRangeLocationInfo(KeyRange(rep.results[0].first, rep.arena), locationInfo);
-				}
-			}
+			cx->updateBackoff(success());
+			co_return KeyRangeLocationInfo(KeyRange(rep.results[0].first, rep.arena), locationInfo);
 		} catch (Error& e) {
 			if (e.code() == error_code_commit_proxy_memory_limit_exceeded) {
 				// Eats commit_proxy_memory_limit_exceeded error from commit proxies
@@ -1346,55 +1343,47 @@ void DatabaseContext::updateBackoff(const Error& err) {
 	}
 }
 
-ACTOR Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
-    Database cx,
-    KeyRange keys,
-    int limit,
-    Reverse reverse,
-    SpanContext spanContext,
-    Optional<UID> debugID,
-    UseProvisionalProxies useProvisionalProxies,
-    Version version) {
-	state Span span("NAPI:getKeyRangeLocations"_loc, spanContext);
+Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(Database cx,
+                                                                        KeyRange keys,
+                                                                        int limit,
+                                                                        Reverse reverse,
+                                                                        SpanContext spanContext,
+                                                                        Optional<UID> debugID,
+                                                                        UseProvisionalProxies useProvisionalProxies,
+                                                                        Version version) {
+	Span span("NAPI:getKeyRangeLocations"_loc, spanContext);
 	if (debugID.present())
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocations.Before");
 
-	loop {
+	while (true) {
 		try {
-			wait(cx->getBackoff());
+			co_await cx->getBackoff();
 			++cx->transactionKeyServerLocationRequests;
-			choose {
-				when(wait(cx->onProxiesChanged())) {}
-				when(GetKeyServerLocationsReply _rep = wait(basicLoadBalance(
-				         cx->getCommitProxies(useProvisionalProxies),
-				         &CommitProxyInterface::getKeyServersLocations,
-				         GetKeyServerLocationsRequest(
-				             span.context, keys.begin, keys.end, limit, reverse, version, keys.arena()),
-				         TaskPriority::DefaultPromiseEndpoint))) {
-					++cx->transactionKeyServerLocationRequestsCompleted;
-					state GetKeyServerLocationsReply rep = _rep;
-					if (debugID.present())
-						g_traceBatch.addEvent(
-						    "TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocations.After");
-					ASSERT(rep.results.size());
+			GetKeyServerLocationsReply rep = co_await commitProxyLoadBalance(
+			    cx,
+			    makeReqBuilder<GetKeyServerLocationsRequest>(
+			        span.context, keys.begin, keys.end, limit, reverse, version, keys.arena()),
+			    &CommitProxyInterface::getKeyServersLocations,
+			    useProvisionalProxies,
+			    TaskPriority::DefaultPromiseEndpoint);
+			++cx->transactionKeyServerLocationRequestsCompleted;
+			if (debugID.present())
+				g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocations.After");
+			ASSERT(rep.results.size());
 
-					state std::vector<KeyRangeLocationInfo> results;
-					state int shard = 0;
-					for (; shard < rep.results.size(); shard++) {
-						// FIXME: these shards are being inserted into the map sequentially, it would be much more CPU
-						// efficient to save the map pairs and insert them all at once.
-						results.emplace_back(
-						    (rep.results[shard].first & keys),
-						    cx->setCachedLocation(rep.results[shard].first, rep.results[shard].second));
-						wait(yield());
-					}
-					updateTssMappings(cx, rep);
-					updateTagMappings(cx, rep);
-
-					cx->updateBackoff(success());
-					return results;
-				}
+			std::vector<KeyRangeLocationInfo> results;
+			for (int shard = 0; shard < rep.results.size(); ++shard) {
+				// FIXME: these shards are being inserted into the map sequentially, it would be much more CPU
+				// efficient to save the map pairs and insert them all at once.
+				results.emplace_back((rep.results[shard].first & keys),
+				                     cx->setCachedLocation(rep.results[shard].first, rep.results[shard].second));
+				co_await yield();
 			}
+			updateTssMappings(cx, rep);
+			updateTagMappings(cx, rep);
+
+			cx->updateBackoff(success());
+			co_return results;
 		} catch (Error& e) {
 			if (e.code() == error_code_commit_proxy_memory_limit_exceeded) {
 				// Eats commit_proxy_memory_limit_exceeded error from commit proxies
@@ -1476,14 +1465,14 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Reference<Transac
 	                                : latestVersion);
 }
 
-ACTOR Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange keys) {
-	state int totalRanges = 0;
-	state int totalRequests = 0;
+Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange keys) {
+	int totalRanges = 0;
+	int totalRequests = 0;
 
-	wait(trState->startTransaction());
+	co_await trState->startTransaction();
 
-	loop {
-		std::vector<KeyRangeLocationInfo> locations = wait(getKeyRangeLocations_internal(
+	while (true) {
+		std::vector<KeyRangeLocationInfo> locations = co_await getKeyRangeLocations_internal(
 		    trState->cx,
 		    keys,
 		    CLIENT_KNOBS->WARM_RANGE_SHARD_LIMIT,
@@ -1491,7 +1480,7 @@ ACTOR Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange 
 		    trState->spanContext,
 		    trState->readOptions.present() ? trState->readOptions.get().debugID : Optional<UID>(),
 		    trState->useProvisionalProxies,
-		    trState->readVersion()));
+		    trState->readVersion());
 		totalRanges += CLIENT_KNOBS->WARM_RANGE_SHARD_LIMIT;
 		totalRequests++;
 		if (locations.size() == 0 || totalRanges >= trState->cx->locationCacheSize ||
@@ -1502,21 +1491,21 @@ ACTOR Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange 
 
 		if (totalRequests % 20 == 0) {
 			// To avoid blocking the proxies from starting other transactions, occasionally get a read version.
-			state Transaction tr(trState->cx);
-			loop {
+			Transaction tr(trState->cx);
+			while (true) {
+				Error err;
 				try {
 					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 					tr.setOption(FDBTransactionOptions::CAUSAL_READ_RISKY);
-					wait(success(tr.getReadVersion()));
+					co_await success(tr.getReadVersion());
 					break;
 				} catch (Error& e) {
-					wait(tr.onError(e));
+					err = e;
 				}
+				co_await tr.onError(err);
 			}
 		}
 	}
-
-	return Void();
 }
 
 SpanContext generateSpanID(bool transactionTracingSample, SpanContext parentContext = SpanContext()) {
@@ -4097,30 +4086,31 @@ Optional<KeyRangeRef> intersects(VectorRef<KeyRangeRef> lhs, VectorRef<KeyRangeR
 	return Optional<KeyRangeRef>();
 }
 
-ACTOR void checkWrites(Reference<TransactionState> trState,
-                       Future<Void> committed,
-                       Promise<Void> outCommitted,
-                       CommitTransactionRequest req) {
-	state Version version;
+Future<Void> checkWrites(Uncancellable,
+                         Reference<TransactionState> trState,
+                         Future<Void> committed,
+                         Promise<Void> outCommitted,
+                         CommitTransactionRequest req) {
+	Version version{ 0 };
 	try {
-		wait(committed);
+		co_await committed;
 		// If the commit is successful, by definition the transaction still exists for now.  Grab the version, and don't
 		// use it again.
 		version = trState->committedVersion;
 		outCommitted.send(Void());
 	} catch (Error& e) {
 		outCommitted.sendError(e);
-		return;
+		co_return;
 	}
 
-	wait(delay(deterministicRandom()->random01())); // delay between 0 and 1 seconds
+	co_await delay(deterministicRandom()->random01()); // delay between 0 and 1 seconds
 
-	state KeyRangeMap<MutationBlock> expectedValues;
+	KeyRangeMap<MutationBlock> expectedValues;
 
 	auto& mutations = req.transaction.mutations;
-	state int mCount = mutations.size(); // debugging info for traceEvent
+	const int mCount = mutations.size(); // debugging info for traceEvent
 
-	for (int idx = 0; idx < mutations.size(); idx++) {
+	for (int idx = 0; idx < mutations.size(); ++idx) {
 		if (mutations[idx].type == MutationRef::SetValue)
 			expectedValues.insert(singleKeyRange(mutations[idx].param1), MutationBlock(mutations[idx].param2));
 		else if (mutations[idx].type == MutationRef::ClearRange)
@@ -4128,26 +4118,25 @@ ACTOR void checkWrites(Reference<TransactionState> trState,
 	}
 
 	try {
-		state Transaction tr(trState->cx);
+		Transaction tr(trState->cx);
 		tr.setVersion(version);
-		state int checkedRanges = 0;
-		state KeyRangeMap<MutationBlock>::Ranges ranges = expectedValues.ranges();
-		state KeyRangeMap<MutationBlock>::iterator it = ranges.begin();
-		for (; it != ranges.end(); ++it) {
-			state MutationBlock m = it->value();
+		int checkedRanges = 0;
+		auto ranges = expectedValues.ranges();
+		for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+			MutationBlock m = it->value();
 			if (m.mutated) {
 				checkedRanges++;
 				if (m.cleared) {
-					RangeResult shouldBeEmpty = wait(tr.getRange(it->range(), 1));
+					RangeResult shouldBeEmpty = co_await tr.getRange(it->range(), 1);
 					if (shouldBeEmpty.size()) {
 						TraceEvent(SevError, "CheckWritesFailed")
 						    .detail("Class", "Clear")
 						    .detail("KeyBegin", it->range().begin)
 						    .detail("KeyEnd", it->range().end);
-						return;
+						co_return;
 					}
 				} else {
-					Optional<Value> val = wait(tr.get(it->range().begin));
+					Optional<Value> val = co_await tr.get(it->range().begin);
 					if (!val.present() || val.get() != m.setValue) {
 						TraceEvent evt(SevError, "CheckWritesFailed");
 						evt.detail("Class", "Set").detail("Key", it->range().begin).detail("Expected", m.setValue);
@@ -4155,7 +4144,7 @@ ACTOR void checkWrites(Reference<TransactionState> trState,
 							evt.detail("Actual", "_Value Missing_");
 						else
 							evt.detail("Actual", val.get());
-						return;
+						co_return;
 					}
 				}
 			}
@@ -4680,7 +4669,7 @@ Future<Void> Transaction::commitMutations() {
 
 		if (isCheckingWrites) {
 			Promise<Void> committed;
-			checkWrites(trState, commitResult, committed, tr);
+			checkWrites(Uncancellable(), trState, commitResult, committed, tr);
 			return committed.getFuture();
 		}
 		return commitResult;
@@ -6028,10 +6017,10 @@ Future<Standalone<VectorRef<KeyRef>>> Transaction::getRangeSplitPoints(KeyRange 
 	return ::getRangeSplitPoints(trState, keys, chunkSize);
 }
 
-ACTOR Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware) {
-	state ReadYourWritesTransaction tr(cx);
-	state Version version = invalidVersion;
-	loop {
+Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware) {
+	ReadYourWritesTransaction tr(cx);
+	while (true) {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			if (lockAware) {
@@ -6039,42 +6028,39 @@ ACTOR Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAw
 			}
 
 			tr.set(perpetualStorageWiggleKey, enable ? "1"_sr : "0"_sr);
-			wait(tr.commit());
-			version = tr.getCommittedVersion();
-			break;
+			co_await tr.commit();
+			co_return tr.getCommittedVersion();
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
-	return version;
 }
 
-ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,
-                                                                                      bool primary,
-                                                                                      bool use_system_priority) {
-	state StorageWiggleData wiggleState;
-	state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap =
-	    wiggleState.wigglingStorageServer(PrimaryRegion(primary));
+Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,
+                                                                                bool primary,
+                                                                                bool use_system_priority) {
+	StorageWiggleData wiggleState;
+	auto metadataMap = wiggleState.wigglingStorageServer(PrimaryRegion(primary));
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
 
-	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	state KeyBackedRangeResult<std::pair<UID, StorageWiggleValue>> res;
-
-	// read the wiggling pairs
-	loop {
+	while (true) {
+		Error err;
 		try {
+			KeyBackedRangeResult<std::pair<UID, StorageWiggleValue>> res;
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			if (use_system_priority) {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			}
-			wait(store(res, metadataMap.getRange(tr, UID(0, 0), Optional<UID>(), CLIENT_KNOBS->TOO_MANY)));
-			wait(tr->commit());
-			break;
+			co_await store(res, metadataMap.getRange(tr, UID(0, 0), Optional<UID>(), CLIENT_KNOBS->TOO_MANY));
+			co_await tr->commit();
+			co_return res.results;
 		} catch (Error& e) {
-			wait(tr->onError(e));
+			err = e;
 		}
+		co_await tr->onError(err);
 	}
-	return res.results;
 }
 
 ACTOR Future<Void> splitStorageMetricsStream(PromiseStream<Key> resultStream,
@@ -6562,16 +6548,16 @@ Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaDa
 	co_return res;
 }
 
-ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> exclusions) {
+Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> exclusions) {
 	TraceEvent("ExclusionSafetyCheckBegin")
 	    .detail("NumExclusion", exclusions.size())
 	    .detail("Exclusions", describe(exclusions));
-	state bool ddCheck;
+	bool ddCheck{ false };
 	try {
 		ExclusionSafetyCheckReply _ddCheck =
-		    wait(commitProxyLoadBalance(cx,
-		                                makeReqBuilder<ExclusionSafetyCheckRequest>(exclusions),
-		                                &CommitProxyInterface::exclusionSafetyCheckReq));
+		    co_await commitProxyLoadBalance(cx,
+		                                    makeReqBuilder<ExclusionSafetyCheckRequest>(exclusions),
+		                                    &CommitProxyInterface::exclusionSafetyCheckReq);
 		ddCheck = _ddCheck.safe;
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled) {
@@ -6583,10 +6569,10 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion
 		throw;
 	}
 	TraceEvent("ExclusionSafetyCheckCoordinators").log();
-	state ClientCoordinators coordinatorList(cx->getConnectionRecord());
-	state std::vector<Future<Optional<LeaderInfo>>> leaderServers;
+	ClientCoordinators coordinatorList(cx->getConnectionRecord());
+	std::vector<Future<Optional<LeaderInfo>>> leaderServers;
 	leaderServers.reserve(coordinatorList.clientLeaderServers.size());
-	for (int i = 0; i < coordinatorList.clientLeaderServers.size(); i++) {
+	for (int i = 0; i < coordinatorList.clientLeaderServers.size(); ++i) {
 		if (coordinatorList.clientLeaderServers[i].hostname.present()) {
 			leaderServers.push_back(retryGetReplyFromHostname(GetLeaderRequest(coordinatorList.clusterKey, UID()),
 			                                                  coordinatorList.clientLeaderServers[i].hostname.get(),
@@ -6599,16 +6585,14 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion
 		}
 	}
 	// Wait for quorum so we don't dismiss live coordinators as unreachable by acting too fast
-	choose {
-		when(wait(smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.0))) {}
-		when(wait(delay(3.0))) {
-			TraceEvent("ExclusionSafetyCheckNoCoordinatorQuorum").log();
-			return false;
-		}
+	auto res = co_await race(smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.0), delay(3.0));
+	if (res.index() == 1) {
+		TraceEvent("ExclusionSafetyCheckNoCoordinatorQuorum").log();
+		co_return false;
 	}
 	int attemptCoordinatorExclude = 0;
 	int coordinatorsUnavailable = 0;
-	for (int i = 0; i < leaderServers.size(); i++) {
+	for (int i = 0; i < leaderServers.size(); ++i) {
 		NetworkAddress leaderAddress =
 		    coordinatorList.clientLeaderServers[i].getLeader.getEndpoint().getPrimaryAddress();
 		if (leaderServers[i].isReady()) {
@@ -6631,7 +6615,7 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion
 	    .detail("CoordinatorCheck", coordinatorCheck)
 	    .detail("DataDistributorCheck", ddCheck);
 
-	return (ddCheck && coordinatorCheck);
+	co_return ddCheck&& coordinatorCheck;
 }
 
 // returns true if we can connect to the given worker interface

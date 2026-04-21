@@ -22,7 +22,6 @@
 
 #include <sstream>
 #include "fdbrpc/HTTP.h"
-#include "fdbclient/ClientKnobs.h"
 #include "fdbclient/Knobs.h"
 #include "flow/FastRef.h"
 #include "flow/IConnection.h"

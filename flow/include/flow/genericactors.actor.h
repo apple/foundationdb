@@ -1600,29 +1600,28 @@ inline Future<Void> operator||(Future<Void> const& lhs, Future<Void> const& rhs)
 	return chooseActor(lhs, rhs);
 }
 
-ACTOR template <class T>
+template <class T>
 Future<T> joinWith(Future<T> f, Future<Void> other) {
-	wait(other);
-	T t = wait(f);
-	return t;
+	co_await other;
+	co_return co_await f;
 }
 
 // wait <interval> then call what() in a loop forever
-ACTOR template <class Func>
+template <class Func>
 Future<Void> recurring(Func what, double interval, TaskPriority taskID = TaskPriority::DefaultDelay) {
-	loop choose {
-		when(wait(delay(interval, taskID))) {
-			what();
-		}
+	while (true) {
+		co_await delay(interval, taskID);
+		what();
 	}
 }
 
-ACTOR template <class Func>
+template <class Func>
 Future<Void> checkUntil(double checkInterval, Func f, TaskPriority taskID = TaskPriority::DefaultDelay) {
-	loop {
-		wait(delay(checkInterval, taskID));
-		if (f())
-			return Void();
+	while (true) {
+		co_await delay(checkInterval, taskID);
+		if (f()) {
+			co_return;
+		}
 	}
 }
 
@@ -2114,14 +2113,14 @@ private:
 	}
 };
 
-ACTOR template <class T>
+template <class T>
 Future<Void> yieldPromiseStream(FutureStream<T> input,
                                 PromiseStream<T> output,
                                 TaskPriority taskID = TaskPriority::DefaultYield) {
-	loop {
-		T f = waitNext(input);
+	while (true) {
+		T f = co_await input;
 		output.send(f);
-		wait(yield(taskID));
+		co_await yield(taskID);
 	}
 }
 
@@ -2344,18 +2343,6 @@ Future<decltype(std::declval<Fun>()(std::declval<T>()))> fmap(Fun fun, Future<T>
 	return fun(val);
 }
 
-ACTOR template <class T, class Fun>
-Future<decltype(std::declval<Fun>()(std::declval<T>()).getValue())> runAfter(Future<T> lhs, Fun rhs) {
-	T val1 = wait(lhs);
-	decltype(std::declval<Fun>()(std::declval<T>()).getValue()) res = wait(rhs(val1));
-	return res;
-}
-
-template <class T, class Fun>
-auto operator>>=(Future<T> lhs, Fun&& rhs) -> Future<decltype(rhs(std::declval<T>()))> {
-	return runAfter(lhs, std::forward<Fun>(rhs));
-}
-
 /*
  * NOTE: This implementation can't guarantee the doesn't really enforce the ACTOR execution order. See issue #7708
 ACTOR template <class T, class U>
@@ -2396,9 +2383,9 @@ class AsyncListener final : public IAsyncListener<Output> {
 	// Order matters here, output must outlive monitorActor
 	AsyncVar<Output> output;
 	Future<Void> monitorActor;
-	ACTOR static Future<Void> monitor(Reference<AsyncVar<Input> const> input, AsyncVar<Output>* output, F f) {
-		loop {
-			wait(input->onChange());
+	static Future<Void> monitor(Reference<AsyncVar<Input> const> input, AsyncVar<Output>* output, F f) {
+		while (true) {
+			co_await input->onChange();
 			output->set(f(input->get()));
 		}
 	}

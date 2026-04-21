@@ -357,6 +357,8 @@ public:
 	// Schedules cancellation of a data move.
 	void enqueueCancelledDataMove(UID dataMoveId, KeyRange range, const DDEnabledState* ddEnabledState);
 
+	void refreshCounter();
+
 	Future<Void> periodicalRefreshCounter();
 
 	int getUnhealthyRelocationCount() const override;
