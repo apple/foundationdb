@@ -8195,8 +8195,15 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
 			}
 		} catch (Error& e) {
 			retryCount++;
-			// Upgrade from SevDebug to SevWarn after 60 seconds of retrying
-			Severity sev = (now() - startTime > 60.0) ? SevWarn : SevDebug;
+			// Upgrade from SevDebug to SevWarn after 60 seconds of retrying,
+			// but rate-limit warns to avoid flooding the trace log on fast retries.
+			Severity sev = SevDebug;
+			if (now() - startTime > 60.0) {
+				if (now() - lastLogTime >= 10.0) {
+					sev = SevWarn;
+					lastLogTime = now();
+				}
+			}
 			TraceEvent(sev, "WaitStorageMetricsHandleError")
 			    .error(e)
 			    .detail("Keys", keys)

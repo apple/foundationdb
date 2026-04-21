@@ -2883,10 +2883,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			self->context->markTrackerCancelled();
 			state Error err = e;
 			TraceEvent("DataDistributorDestroyTeamCollections", self->ddId).error(e);
-			// Log every DD exit with the reason. movekeys_conflict is the most common
-			// non-kill cause — it's a normal internal restart, but was previously
-			// invisible because reportErrorsExcept suppresses logging for "normal" DD errors.
-			TraceEvent(SevWarn, "DDExiting", self->ddId).error(e);
 			state std::vector<UID> teamForDroppedRange;
 			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
 				// Choose a random healthy team to host the to-be-dropped range.
@@ -2909,6 +2905,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 					TraceEvent(SevWarn, "DataDistributorCancelled");
 				}
 				shards.clear();
+				TraceEvent(SevWarn, "DDExiting", self->ddId).error(e);
 				throw e;
 			} else {
 				wait(shards.clearAsync());
@@ -2920,12 +2917,14 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				wait(self->removeStorageServer(removeFailedServer.getFuture().get()));
 			} else {
 				if (err.code() != error_code_movekeys_conflict && err.code() != error_code_dd_config_changed) {
+					TraceEvent(SevWarn, "DDExiting", self->ddId).error(err);
 					throw err;
 				}
 
 				bool ddEnabled = wait(self->isDataDistributionEnabled());
 				TraceEvent("DataDistributionError", self->ddId).error(err).detail("DataDistributionEnabled", ddEnabled);
 				if (ddEnabled) {
+					TraceEvent(SevWarn, "DDExiting", self->ddId).error(err);
 					throw err;
 				}
 			}
@@ -5168,7 +5167,7 @@ ACTOR Future<Void> dataDistributor_impl(DataDistributorInterface di,
 	state std::map<UID, DistributorSnapRequest> ddSnapReqMap;
 	state std::map<UID, ErrorOr<Void>> ddSnapReqResultMap;
 
-	TraceEvent("DataDistributorRunning", di.id()).detail("IsMocked", isMocked);
+	TraceEvent("DDInitRunning", di.id()).detail("IsMocked", isMocked);
 	self->addActor.send(actors.getResult());
 	self->addActor.send(traceRole(Role::DATA_DISTRIBUTOR, di.id()));
 	self->addActor.send(waitFailureServer(di.waitFailure.getFuture()));
@@ -5183,10 +5182,6 @@ ACTOR Future<Void> dataDistributor_impl(DataDistributorInterface di,
 	                                                    &normalDataDistributorErrors());
 
 	try {
-		TraceEvent("DataDistributorRunning", di.id());
-		// DDInitRunning duplicates the above with DDInit* prefix so the full startup sequence
-		// can be queried with Type="DDInit*" in trace logs
-		TraceEvent("DDInitRunning", di.id());
 		loop choose {
 			when(wait(distributor || collection)) {
 				ASSERT(false);
