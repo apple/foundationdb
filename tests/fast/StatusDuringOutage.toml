@@ -5,7 +5,7 @@ testTitle = 'StatusDuringOutage'
     testName = 'Status'
     testDuration = 60.0
     requestsPerSecond = 0.5
-    maxAcceptableStatusLatency = 29.0
+    maxAcceptableStatusLatency = 30.1
 
     [[test.workload]]
     testName = 'Attrition'

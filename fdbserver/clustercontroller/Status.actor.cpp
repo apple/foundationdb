@@ -3370,34 +3370,34 @@ ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
 	}
 }
 
-Future<StatusReply> clusterGetStatus(Reference<AsyncVar<ServerDBInfo>> db,
-                                     Database cx,
-                                     std::vector<WorkerDetails> workers,
-                                     std::vector<ProcessIssues> workerIssues,
-                                     std::vector<StorageServerMetaInfo> storageMetadatas,
-                                     std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* clientStatus,
-                                     ServerCoordinators coordinators,
-                                     std::vector<NetworkAddress> incompatibleConnections,
-                                     Version datacenterVersionDifference,
-                                     Version dcLogServerVersionDifference,
-                                     Version dcStorageServerVersionDifference,
-                                     std::unordered_map<NetworkAddress, double> excludedDegradedServers,
-                                     double deadlineTimeout) {
-	JsonBuilderObject statusObj;
-	JsonBuilderArray messages;
-	std::set<std::string> status_incomplete_reasons;
+ACTOR Future<StatusReply> clusterGetStatus(Reference<AsyncVar<ServerDBInfo>> db,
+                                           Database cx,
+                                           std::vector<WorkerDetails> workers,
+                                           std::vector<ProcessIssues> workerIssues,
+                                           std::vector<StorageServerMetaInfo> storageMetadatas,
+                                           std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* clientStatus,
+                                           ServerCoordinators coordinators,
+                                           std::vector<NetworkAddress> incompatibleConnections,
+                                           Version datacenterVersionDifference,
+                                           Version dcLogServerVersionDifference,
+                                           Version dcStorageServerVersionDifference,
+                                           std::unordered_map<NetworkAddress, double> excludedDegradedServers,
+                                           double deadlineTimeout) {
+	state JsonBuilderObject statusObj;
+	state JsonBuilderArray messages;
+	state std::set<std::string> status_incomplete_reasons;
 
-	ErrorOr<Optional<Void>> result = co_await errorOr(timeout(clusterGetStatusImpl(&statusObj,
-	                                                                               &messages,
-	                                                                               &status_incomplete_reasons,
-	                                                                               db,
-	                                                                               cx,
-	                                                                               workers,
-	                                                                               workerIssues,
-	                                                                               storageMetadatas,
-	                                                                               coordinators,
-	                                                                               excludedDegradedServers),
-	                                                          deadlineTimeout));
+	ErrorOr<Optional<Void>> result = wait(errorOr(timeout(clusterGetStatusImpl(&statusObj,
+	                                                                           &messages,
+	                                                                           &status_incomplete_reasons,
+	                                                                           db,
+	                                                                           cx,
+	                                                                           workers,
+	                                                                           workerIssues,
+	                                                                           storageMetadatas,
+	                                                                           coordinators,
+	                                                                           excludedDegradedServers),
+	                                                      deadlineTimeout)));
 
 	if (result.isError()) {
 		status_incomplete_reasons.insert(fmt::format("Status collection threw: {}", result.getError().what()));
@@ -3440,7 +3440,7 @@ Future<StatusReply> clusterGetStatus(Reference<AsyncVar<ServerDBInfo>> db,
 	}
 	statusObj["messages"] = messages;
 
-	co_return StatusReply(statusObj.getJson());
+	return StatusReply(statusObj.getJson());
 }
 
 StatusReply clusterGetFaultToleranceStatus(const std::string& statusStr) {
