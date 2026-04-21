@@ -1,5 +1,8 @@
 # How C++ Coroutines Work in FoundationDB
 
+*Caveat: work in progress. This mentions code not yet submitted. Accuracy is believed to be good,
+but ongoing work to increase clarity is needed.*
+
 This document explains the coroutine infrastructure in FoundationDB, from the
 C++20 standard machinery down to FDB-specific implementation details.
 
