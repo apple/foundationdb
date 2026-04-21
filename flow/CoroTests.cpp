@@ -1761,11 +1761,8 @@ void assertNoThrowOnCancelDestroyedAtWait(NoThrowOnCancelRecorder const& recorde
 
 void assertNoThrowOnCancelCompleted(NoThrowOnCancelRecorder const& recorder) {
 	const std::vector<NoThrowOnCancelEvent> expected{
-		NoThrowOnCancelEvent::Start,
-		NoThrowOnCancelEvent::LifetimeConstructed,
-		NoThrowOnCancelEvent::WaitReturned,
-		NoThrowOnCancelEvent::AfterWait,
-		NoThrowOnCancelEvent::LifetimeDestroyed,
+		NoThrowOnCancelEvent::Start,     NoThrowOnCancelEvent::LifetimeConstructed, NoThrowOnCancelEvent::WaitReturned,
+		NoThrowOnCancelEvent::AfterWait, NoThrowOnCancelEvent::LifetimeDestroyed,
 	};
 	ASSERT(recorder.events == expected);
 	ASSERT_EQ(recorder.count(NoThrowOnCancelEvent::CatchBlock), 0);
@@ -1773,11 +1770,8 @@ void assertNoThrowOnCancelCompleted(NoThrowOnCancelRecorder const& recorder) {
 
 void assertNoThrowOnCancelCaughtError(NoThrowOnCancelRecorder const& recorder) {
 	const std::vector<NoThrowOnCancelEvent> expected{
-		NoThrowOnCancelEvent::Start,
-		NoThrowOnCancelEvent::LifetimeConstructed,
-		NoThrowOnCancelEvent::CatchBlock,
-		NoThrowOnCancelEvent::AfterWait,
-		NoThrowOnCancelEvent::LifetimeDestroyed,
+		NoThrowOnCancelEvent::Start,     NoThrowOnCancelEvent::LifetimeConstructed, NoThrowOnCancelEvent::CatchBlock,
+		NoThrowOnCancelEvent::AfterWait, NoThrowOnCancelEvent::LifetimeDestroyed,
 	};
 	ASSERT(recorder.events == expected);
 	ASSERT_EQ(recorder.count(NoThrowOnCancelEvent::WaitReturned), 0);
@@ -2541,8 +2535,7 @@ TEST_CASE("/flow/coro/noThrowOnCancel/sequentialAwaitsCancelSecond") {
 	NoThrowOnCancelRecorder recorder;
 	Promise<Void> firstSignal;
 	Promise<Void> secondSignal;
-	Future<Void> f =
-	    noThrowOnCancelSequentialAwaitsTest(recorder, firstSignal.getFuture(), secondSignal.getFuture());
+	Future<Void> f = noThrowOnCancelSequentialAwaitsTest(recorder, firstSignal.getFuture(), secondSignal.getFuture());
 	ASSERT(firstSignal.getFutureReferenceCount() > 0);
 
 	firstSignal.send(Void());
