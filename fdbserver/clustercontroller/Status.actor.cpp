@@ -3371,19 +3371,19 @@ ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
 }
 
 Future<StatusReply> clusterGetStatus(
-    Reference<AsyncVar<ServerDBInfo>> const& db,
-    Database const& cx,
-    std::vector<WorkerDetails> const& workers,
-    std::vector<ProcessIssues> const& workerIssues,
-    std::vector<StorageServerMetaInfo> const& storageMetadatas,
-    std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* const& clientStatus,
-    ServerCoordinators const& coordinators,
-    std::vector<NetworkAddress> const& incompatibleConnections,
-    Version const& datacenterVersionDifference,
-    Version const& dcLogServerVersionDifference,
-    Version const& dcStorageServerVersionDifference,
-    std::unordered_map<NetworkAddress, double> const& excludedDegradedServers,
-    double const& deadlineTimeout) {
+    Reference<AsyncVar<ServerDBInfo>> db,
+    Database cx,
+    std::vector<WorkerDetails> workers,
+    std::vector<ProcessIssues> workerIssues,
+    std::vector<StorageServerMetaInfo> storageMetadatas,
+    std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* clientStatus,
+    ServerCoordinators coordinators,
+    std::vector<NetworkAddress> incompatibleConnections,
+    Version datacenterVersionDifference,
+    Version dcLogServerVersionDifference,
+    Version dcStorageServerVersionDifference,
+    std::unordered_map<NetworkAddress, double> excludedDegradedServers,
+    double deadlineTimeout) {
 	JsonBuilderObject statusObj;
 	JsonBuilderArray messages;
 	std::set<std::string> status_incomplete_reasons;
