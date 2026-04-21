@@ -449,10 +449,48 @@ Future<Void> addBackupMutations(ProxyCommitData* self,
 	}
 }
 
+namespace {
+
+struct ReleaseResolvingAfterCallback final : Callback<Void>, FastAllocated<ReleaseResolvingAfterCallback> {
+	ProxyCommitData* self;
+	int64_t localBatchNumber;
+	Promise<Void> done;
+
+	ReleaseResolvingAfterCallback(ProxyCommitData* self, int64_t localBatchNumber, Promise<Void> done)
+	  : self(self), localBatchNumber(localBatchNumber), done(done) {}
+
+	void complete() {
+		Callback<Void>::remove();
+		ASSERT(self->latestLocalCommitBatchResolving.get() == localBatchNumber - 1);
+		self->latestLocalCommitBatchResolving.set(localBatchNumber);
+		done.send(Void());
+		delete this;
+	}
+
+	void fire(Void const&) override { complete(); }
+	void fire(Void&&) override { complete(); }
+
+	void error(Error e) override {
+		Callback<Void>::remove();
+		done.sendError(e);
+		delete this;
+	}
+};
+
+} // namespace
+
 Future<Void> releaseResolvingAfter(ProxyCommitData* self, Future<Void> releaseDelay, int64_t localBatchNumber) {
-	co_await releaseDelay;
-	ASSERT(self->latestLocalCommitBatchResolving.get() == localBatchNumber - 1);
-	self->latestLocalCommitBatchResolving.set(localBatchNumber);
+	if (releaseDelay.isReady()) {
+		releaseDelay.get();
+		ASSERT(self->latestLocalCommitBatchResolving.get() == localBatchNumber - 1);
+		self->latestLocalCommitBatchResolving.set(localBatchNumber);
+		return Void();
+	}
+
+	Promise<Void> done;
+	Future<Void> result = done.getFuture();
+	releaseDelay.addCallbackAndClear(new ReleaseResolvingAfterCallback(self, localBatchNumber, done));
+	return result;
 }
 
 static Future<ResolveTransactionBatchReply> trackResolutionMetrics(Reference<Histogram> dist,
@@ -906,12 +944,23 @@ Future<Void> getResolution(CommitBatchContext* self) {
 
 	pProxyCommitData->stats.txnCommitResolving += trs.size();
 	std::vector<Future<ResolveTransactionBatchReply>> replies;
-	for (int r = 0; r < pProxyCommitData->resolvers.size(); r++) {
-		requests.requests[r].debugID = self->debugID;
-		requests.requests[r].writtenTags = self->writtenTagsPreResolution;
-		replies.push_back(trackResolutionMetrics(pProxyCommitData->stats.resolverDist[r],
-		                                         brokenPromiseToNever(pProxyCommitData->resolvers[r].resolve.getReply(
-		                                             requests.requests[r], TaskPriority::ProxyResolverReply))));
+	Future<ResolveTransactionBatchReply> singleResolverReply;
+	double singleResolverStart = 0;
+	if (pProxyCommitData->resolvers.size() == 1) {
+		requests.requests[0].debugID = self->debugID;
+		requests.requests[0].writtenTags = self->writtenTagsPreResolution;
+		singleResolverStart = g_network->timer_monotonic();
+		singleResolverReply = brokenPromiseToNever(
+		    pProxyCommitData->resolvers[0].resolve.getReply(requests.requests[0], TaskPriority::ProxyResolverReply));
+	} else {
+		for (int r = 0; r < pProxyCommitData->resolvers.size(); r++) {
+			requests.requests[r].debugID = self->debugID;
+			requests.requests[r].writtenTags = self->writtenTagsPreResolution;
+			replies.push_back(
+			    trackResolutionMetrics(pProxyCommitData->stats.resolverDist[r],
+			                           brokenPromiseToNever(pProxyCommitData->resolvers[r].resolve.getReply(
+			                               requests.requests[r], TaskPriority::ProxyResolverReply))));
+		}
 	}
 
 	self->transactionResolverMap.swap(requests.transactionResolverMap);
@@ -935,8 +984,15 @@ Future<Void> getResolution(CommitBatchContext* self) {
 	}
 
 	// Wait for the final resolution
-	std::vector<ResolveTransactionBatchReply> resolutionResp = co_await getAll(replies);
-	self->resolution.swap(*const_cast<std::vector<ResolveTransactionBatchReply>*>(&resolutionResp));
+	if (pProxyCommitData->resolvers.size() == 1) {
+		ResolveTransactionBatchReply resolutionResp = co_await singleResolverReply;
+		pProxyCommitData->stats.resolverDist[0]->sampleSeconds(g_network->timer_monotonic() - singleResolverStart);
+		self->resolution.clear();
+		self->resolution.push_back(std::move(resolutionResp));
+	} else {
+		std::vector<ResolveTransactionBatchReply> resolutionResp = co_await getAll(replies);
+		self->resolution.swap(*const_cast<std::vector<ResolveTransactionBatchReply>*>(&resolutionResp));
+	}
 
 	self->pProxyCommitData->stats.resolutionDist->sampleSeconds(g_network->timer_monotonic() - resolutionStart);
 	if (self->debugID.present()) {
@@ -1107,6 +1163,14 @@ void determineCommittedTransactions(CommitBatchContext* self) {
 
 // This first pass through committed transactions deals with "metadata" effects (modifications of txnStateStore, changes
 // to storage servers' responsibilities)
+Future<Void> changeCoordinatorsForMetadata(CommitBatchContext* self) {
+	ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
+	co_await brokenPromiseToNever(pProxyCommitData->db->get().clusterInterface.changeCoordinators.getReply(
+	    ChangeCoordinatorsRequest(pProxyCommitData->txnStateStore->readValue(coordinatorsKey).get().get(),
+	                              self->pProxyCommitData->master.id())));
+	ASSERT(false); // ChangeCoordinatorsRequest should always throw
+}
+
 Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self) {
 	ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
 	auto& trs = self->trs;
@@ -1177,11 +1241,10 @@ Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self) {
 
 	if (!self->isMyFirstBatch &&
 	    pProxyCommitData->txnStateStore->readValue(coordinatorsKey).get().get() != self->previousCoordinators.get()) {
-		co_await brokenPromiseToNever(pProxyCommitData->db->get().clusterInterface.changeCoordinators.getReply(
-		    ChangeCoordinatorsRequest(pProxyCommitData->txnStateStore->readValue(coordinatorsKey).get().get(),
-		                              self->pProxyCommitData->master.id())));
-		ASSERT(false); // ChangeCoordinatorsRequest should always throw
+		return changeCoordinatorsForMetadata(self);
 	}
+
+	return Void();
 }
 
 WriteMutationRefVar writeMutation(CommitBatchContext* self, const MutationRef* mutation) {
