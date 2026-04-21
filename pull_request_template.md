@@ -5,7 +5,7 @@ Please describe the following in your PR description:
   * The nature of the solution.
   * Testing you have done, if any.
 
-We encourage you to use AI coding assistants to review diffs in advance.  Save your diff to a file first.  This can be done easily by
+We encourage you to use AI coding assistants to review diffs in advance. This can be done by saving your diff to a file:
 ```
 git diff upstream/main -- . > /tmp/pr.diff
 ```
