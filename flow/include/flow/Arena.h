@@ -384,6 +384,9 @@ public:
 		}
 	}
 	StringRef(const uint8_t* data, int length) : data(data), length(length) {}
+	// For string literals prefer "foo"_sr, which captures the length at compile time and
+	// avoids the runtime strlen walk this ctor performs. This ctor is for const char*
+	// values whose length isn't known at compile time (e.g: from  C APIs or interop).
 	// Borrows the pointer and computes length via strlen, like std::string_view.
 	// Marked explicit so that existing `f("literal")` calls that resolve against
 	// overload pairs like f(std::string) / f(StringRef) keep picking std::string,
