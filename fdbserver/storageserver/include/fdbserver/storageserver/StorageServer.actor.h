@@ -34,14 +34,14 @@ class IKeyValueStore;
 struct InitializeStorageReply;
 struct ServerDBInfo;
 
-ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
-                                 StorageServerInterface ssi,
-                                 Tag seedTag,
-                                 Version startVersion,
-                                 Version tssSeedVersion,
-                                 ReplyPromise<InitializeStorageReply> recruitReply,
-                                 Reference<AsyncVar<ServerDBInfo> const> db,
-                                 std::string folder);
+Future<Void> storageServer(IKeyValueStore* persistentData,
+                           StorageServerInterface ssi,
+                           Tag seedTag,
+                           Version startVersion,
+                           Version tssSeedVersion,
+                           ReplyPromise<InitializeStorageReply> recruitReply,
+                           Reference<AsyncVar<ServerDBInfo> const> db,
+                           std::string folder);
 
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
