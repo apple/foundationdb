@@ -1022,6 +1022,9 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 			if (rd.isRestore()) {
 				// Buffered isRestore move now overlaps with a newer in-flight relocation.
 				// Skip it — the newer relocation handles this range.
+				TraceEvent(SevWarn, "RestoreMoveSkippedOverlap", distributorId)
+				    .detail("DataMoveID", rd.dataMoveId)
+				    .detail("Range", rd.keys);
 				inFlightRestoreMoves--;
 			}
 			// logRelocation( rd, "SkippingOverlappingInFlight" );
@@ -1103,6 +1106,9 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 					// relocation. Treat sub-ranges as normal moves. The split sub-ranges
 					// will have dataMove reset, so relocationComplete won't see them as
 					// isRestore — adjust the counter here (once per move).
+					TraceEvent(SevWarn, "RestoreMoveSplitByOverlap", distributorId)
+					    .detail("DataMoveID", rd.dataMoveId)
+					    .detail("Range", rd.keys);
 					restoreMoveSplit = true;
 					inFlightRestoreMoves--;
 				}
@@ -2463,6 +2469,10 @@ struct DDQueueImpl {
 								self->launchQueuedWork(RelocateData(rs), ddEnabledState);
 							} else {
 								pendingRestoreMoves.push_back(rs);
+								TraceEvent("RestoreMoveThrottled", self->distributorId)
+								    .detail("PendingCount", pendingRestoreMoves.size())
+								    .detail("InFlight", self->inFlightRestoreMoves)
+								    .detail("Limit", SERVER_KNOBS->DD_MAX_INFLIGHT_RESTORE_MOVES);
 							}
 						} else if (rs.cancelled) {
 							self->enqueueCancelledDataMove(rs.dataMoveId, rs.keys, ddEnabledState);
@@ -2509,6 +2519,9 @@ struct DDQueueImpl {
 								self->inFlightRestoreMoves++;
 								self->launchQueuedWork(RelocateData(rs), ddEnabledState);
 							}
+							TraceEvent("RestoreMoveDrained", self->distributorId)
+							    .detail("InFlight", self->inFlightRestoreMoves)
+							    .detail("PendingCount", pendingRestoreMoves.size());
 						}
 						if (g_network->isSimulated() && debug_isCheckRelocationDuration() &&
 						    now() - done.startTime > 60) {

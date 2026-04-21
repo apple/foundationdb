@@ -19,8 +19,12 @@
  */
 
 // Test that DD survives restart when many \xff/dataMoves/ entries have accumulated.
-// Reproduces general scenario where isRestore moves overwhelmed DD absent scale.
-// Tests passing isRestore datamoves via canLaunchSrc 'works'.
+// Reproduces general scenario where isRestore moves overwhelmed DD absent throttling.
+// Validates the DD_MAX_INFLIGHT_RESTORE_MOVES throttle and that DD processes
+// persisted data moves with bounded concurrency after restart.
+//
+// Note: isRestore moves bypass canLaunchSrc — they are only gated by the
+// inflight restore move limit.
 //
 // Approach:
 // 1. Write data to create many small shards (via knobs)
