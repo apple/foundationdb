@@ -105,21 +105,28 @@ public:
 class DNSCache {
 public:
 	DNSCache() = default;
-	explicit DNSCache(const std::map<std::string, std::vector<NetworkAddress>>& dnsCache)
-	  : hostnameToAddresses(dnsCache) {}
+	explicit DNSCache(const std::map<std::string, std::vector<NetworkAddress>>& dnsCache);
 
 	Optional<std::vector<NetworkAddress>> find(const std::string& host, const std::string& service);
 	void add(const std::string& host, const std::string& service, const std::vector<NetworkAddress>& addresses);
+	// Replace a cached entry's addresses without bumping its last-access time.
+	void update(const std::string& host, const std::string& service, const std::vector<NetworkAddress>& addresses);
 	void remove(const std::string& host, const std::string& service);
 	void clear();
+	std::vector<std::string> getKeys() const;
+	Optional<double> getLastAccess(const std::string& host, const std::string& service) const;
 
-	// Convert hostnameToAddresses to string. The format is:
+	// Convert the cache to a string. The format is:
 	// hostname1,host1Address1,host1Address2;hostname2,host2Address1,host2Address2...
 	std::string toString();
 	static DNSCache parseFromString(const std::string& s);
 
 private:
-	std::map<std::string, std::vector<NetworkAddress>> hostnameToAddresses;
+	struct Entry {
+		std::vector<NetworkAddress> addresses;
+		double lastAccess = 0.0;
+	};
+	std::map<std::string, Entry> entries;
 };
 
 class IUDPSocket;

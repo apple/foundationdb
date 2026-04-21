@@ -244,37 +244,69 @@ std::string formatIpPort(const IPAddress& ip, uint16_t port) {
 	return format(patt, ip.toString().c_str(), port);
 }
 
+DNSCache::DNSCache(const std::map<std::string, std::vector<NetworkAddress>>& dnsCache) {
+	for (const auto& [key, addresses] : dnsCache) {
+		entries[key].addresses = addresses;
+	}
+}
+
 Optional<std::vector<NetworkAddress>> DNSCache::find(const std::string& host, const std::string& service) {
-	auto it = hostnameToAddresses.find(host + ":" + service);
-	if (it != hostnameToAddresses.end()) {
-		return it->second;
+	auto it = entries.find(host + ":" + service);
+	if (it != entries.end()) {
+		it->second.lastAccess = g_network->now();
+		return it->second.addresses;
 	}
 	return {};
 }
 
 void DNSCache::add(const std::string& host, const std::string& service, const std::vector<NetworkAddress>& addresses) {
-	hostnameToAddresses[host + ":" + service] = addresses;
+	Entry& entry = entries[host + ":" + service];
+	entry.addresses = addresses;
+	entry.lastAccess = g_network->now();
+}
+
+void DNSCache::update(const std::string& host,
+                      const std::string& service,
+                      const std::vector<NetworkAddress>& addresses) {
+	entries[host + ":" + service].addresses = addresses;
 }
 
 void DNSCache::remove(const std::string& host, const std::string& service) {
-	auto it = hostnameToAddresses.find(host + ":" + service);
-	if (it != hostnameToAddresses.end()) {
-		hostnameToAddresses.erase(it);
+	auto it = entries.find(host + ":" + service);
+	if (it != entries.end()) {
+		entries.erase(it);
 	}
 }
 
 void DNSCache::clear() {
-	hostnameToAddresses.clear();
+	entries.clear();
+}
+
+std::vector<std::string> DNSCache::getKeys() const {
+	std::vector<std::string> keys;
+	keys.reserve(entries.size());
+	for (const auto& [key, _] : entries) {
+		keys.push_back(key);
+	}
+	return keys;
+}
+
+Optional<double> DNSCache::getLastAccess(const std::string& host, const std::string& service) const {
+	auto it = entries.find(host + ":" + service);
+	if (it != entries.end()) {
+		return it->second.lastAccess;
+	}
+	return {};
 }
 
 std::string DNSCache::toString() {
 	std::string ret;
-	for (auto it = hostnameToAddresses.begin(); it != hostnameToAddresses.end(); ++it) {
-		if (it != hostnameToAddresses.begin()) {
+	for (auto it = entries.begin(); it != entries.end(); ++it) {
+		if (it != entries.begin()) {
 			ret += ';';
 		}
 		ret += it->first + ',';
-		const std::vector<NetworkAddress>& addresses = it->second;
+		const std::vector<NetworkAddress>& addresses = it->second.addresses;
 		for (int i = 0; i < addresses.size(); ++i) {
 			ret += addresses[i].toString();
 			if (i != addresses.size() - 1) {

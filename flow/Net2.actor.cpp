@@ -233,6 +233,7 @@ public:
 	TLSConfig tlsConfig;
 	Reference<TLSPolicy> activeTlsPolicy;
 	Future<Void> backgroundCertRefresh;
+	Future<Void> dnsCacheRefreshActor;
 	ETLSInitState tlsInitializedState;
 
 	INetworkConnections* network; // initially this, but can be changed
@@ -1315,6 +1316,8 @@ private:
 
 // 5MB for loading files into memory
 
+static Future<Void> coordinatorDNSCacheRefresh(Net2* self);
+
 Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
   : globals(enumGlobal::COUNT), useThreadPool(useThreadPool), reactor(this),
     sslContextVar({ ReferencedObject<boost::asio::ssl::context>::from(
@@ -1508,6 +1511,7 @@ void Net2::run() {
 	TraceEvent("Net2Running").log();
 
 	thread_network = this;
+	dnsCacheRefreshActor = coordinatorDNSCacheRefresh(this);
 
 	unsigned int tasksSinceReact = 0;
 
@@ -1959,15 +1963,57 @@ Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint(const std::string& 
 	return resolveTCPEndpoint_impl(this, host, service);
 }
 
+static Future<Void> coordinatorDNSCacheRefresh(Net2* self) {
+	if (!FLOW_KNOBS->ENABLE_COORDINATOR_DNS_CACHE) {
+		co_return;
+	}
+	loop {
+		co_await delay(FLOW_KNOBS->COORDINATOR_DNS_CACHE_REFRESH_INTERVAL);
+		std::vector<std::string> keys = self->dnsCache.getKeys();
+		for (int i = 0; i < keys.size(); i++) {
+			auto colonPos = keys[i].find(':');
+			if (colonPos == std::string::npos) {
+				continue;
+			}
+			std::string host = keys[i].substr(0, colonPos);
+			std::string service = keys[i].substr(colonPos + 1);
+
+			// Evict if stale
+			double secondsSinceLastAccess = now() - self->dnsCache.getLastAccess(host, service).orDefault(0.0);
+			if (secondsSinceLastAccess > FLOW_KNOBS->COORDINATOR_DNS_CACHE_TTL) {
+				self->dnsCache.remove(host, service);
+				TraceEvent("DNSCacheEntryEvicted")
+				    .detail("Host", host)
+				    .detail("Service", service)
+				    .detail("SecondsSinceLastAccess", secondsSinceLastAccess);
+				continue;
+			}
+
+			try {
+				std::vector<NetworkAddress> newAddrs = co_await resolveTCPEndpoint_impl(self, host, service);
+				self->dnsCache.update(host, service, newAddrs);
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
+				TraceEvent(SevWarn, "DNSCacheRefreshFailed").error(e).detail("Host", host).detail("Service", service);
+			}
+		}
+	}
+}
+
 Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpointWithDNSCache(const std::string& host,
                                                                          const std::string& service) {
 	if (FLOW_KNOBS->ENABLE_COORDINATOR_DNS_CACHE) {
 		Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
 		if (cache.present()) {
-			return cache.get();
+			co_return cache.get();
 		}
+		std::vector<NetworkAddress> addresses = co_await resolveTCPEndpoint_impl(this, host, service);
+		dnsCache.add(host, service, addresses);
+		co_return addresses;
 	}
-	return resolveTCPEndpoint_impl(this, host, service);
+	co_return co_await resolveTCPEndpoint_impl(this, host, service);
 }
 
 std::vector<NetworkAddress> Net2::resolveTCPEndpointBlocking(const std::string& host, const std::string& service) {
@@ -1991,7 +2037,6 @@ std::vector<NetworkAddress> Net2::resolveTCPEndpointBlocking(const std::string& 
 		}
 		return addrs;
 	} catch (...) {
-		dnsCache.remove(host, service);
 		throw lookup_failed();
 	}
 }
@@ -2004,7 +2049,11 @@ std::vector<NetworkAddress> Net2::resolveTCPEndpointBlockingWithDNSCache(const s
 			return cache.get();
 		}
 	}
-	return resolveTCPEndpointBlocking(host, service);
+	auto result = resolveTCPEndpointBlocking(host, service);
+	if (FLOW_KNOBS->ENABLE_COORDINATOR_DNS_CACHE) {
+		dnsCache.add(host, service, result);
+	}
+	return result;
 }
 
 bool Net2::isAddressOnThisHost(NetworkAddress const& addr) const {
