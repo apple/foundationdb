@@ -71,6 +71,11 @@ __GENERATE_BUGGIFY_VARIABLES(GENERAL, General, general)
 
 __GENERATE_BUGGIFY_VARIABLES(CLIENT, Client, client)
 
+// Knobs buggify category: allows buggifying knob values separately from general buggification.
+// In a non-simulated cluster, general buggify cannot be enabled (knobs must be uniform across
+// all processes), but knob buggify can be enabled independently.
+__GENERATE_BUGGIFY_VARIABLES(KNOBS, Knobs, knobs)
+
 #undef __GENERATE_BUGGIFY_VARIABLES
 
 #define __BUGGIFY_TO_STRING_HELPER(param) #param
@@ -86,6 +91,14 @@ __GENERATE_BUGGIFY_VARIABLES(CLIENT, Client, client)
 	(isClientBuggifyEnabled() && getClientSBVar(__FILE__, __LINE__, __FILE__ __BUGGIFY_TO_STRING(__LINE__)) &&         \
 	 deterministicRandom()->random01() < (x))
 #define CLIENT_BUGGIFY CLIENT_BUGGIFY_WITH_PROB(P_CLIENT_BUGGIFIED_SECTION_FIRES)
+
+// BUGGIFY_KNOB* macros: used inside knob initialization code to randomize knob values.
+// Unlike BUGGIFY, these check isKnobsBuggifyEnabled(), so they can be toggled independently
+// of general buggification (e.g., safe to enable in non-simulated clusters).
+#define BUGGIFY_KNOB_WITH_PROB(x)                                                                                      \
+	(isKnobsBuggifyEnabled() && getKnobsSBVar(__FILE__, __LINE__, __FILE__ __BUGGIFY_TO_STRING(__LINE__)) &&           \
+	 deterministicRandom()->random01() < (x))
+#define BUGGIFY_KNOB BUGGIFY_KNOB_WITH_PROB(P_KNOBS_BUGGIFIED_SECTION_FIRES)
 
 namespace SwiftBridging {
 

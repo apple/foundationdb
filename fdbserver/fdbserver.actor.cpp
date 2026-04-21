@@ -130,7 +130,7 @@ using namespace std::literals;
 enum {
 	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_TRACER, OPT_NEWCONSOLE,
 	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_RESEED_TIME, OPT_KEY, OPT_MEMLIMIT, OPT_VMEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID,
-	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
+	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_BUGGIFY_KNOBS, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_PRINT_CODE_PROBES, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
 	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIALS, OPT_PROXY, OPT_DEPRECATED_CONFIG_PATH, OPT_DEPRECATED_USE_TEST_CONFIG_DB, OPT_DEPRECATED_NO_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
@@ -195,6 +195,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_MACHINE_CLASS,         "--class",                     SO_REQ_SEP },
 	{ OPT_BUGGIFY,               "-b",                          SO_REQ_SEP },
 	{ OPT_BUGGIFY,               "--buggify",                   SO_REQ_SEP },
+	{ OPT_BUGGIFY_KNOBS,         "--buggify-knobs",             SO_REQ_SEP },
 	{ OPT_VERSION,               "-v",                          SO_NONE },
 	{ OPT_VERSION,               "--version",                   SO_NONE },
 	{ OPT_BUILD_FLAGS,           "--build-flags",               SO_NONE },
@@ -1084,7 +1085,7 @@ struct CLIOptions {
 	               // SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT
 	uint64_t virtualMemLimit = 0; // unlimited
 	uint64_t storageMemLimit = 1LL << 30;
-	bool buggifyEnabled = false, faultInjectionEnabled = true, restarting = false;
+	bool buggifyEnabled = false, faultInjectionEnabled = true, knobsBuggifyEnabled = false, restarting = false;
 	Optional<Standalone<StringRef>> zoneId;
 	Optional<Standalone<StringRef>> dcId;
 	ProcessClass processClass = ProcessClass(ProcessClass::UnsetClass, ProcessClass::CommandLineSource);
@@ -1628,6 +1629,17 @@ private:
 					flushAndExit(FDB_EXIT_ERROR);
 				}
 				break;
+			case OPT_BUGGIFY_KNOBS:
+				if (!strcmp(args.OptionArg(), "on"))
+					knobsBuggifyEnabled = true;
+				else if (!strcmp(args.OptionArg(), "off"))
+					knobsBuggifyEnabled = false;
+				else {
+					fprintf(stderr, "ERROR: Unknown buggify-knobs state `%s'\n", args.OptionArg());
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				break;
 			case OPT_FAULT_INJECTION:
 				if (!strcmp(args.OptionArg(), "on"))
 					faultInjectionEnabled = true;
@@ -1859,8 +1871,11 @@ private:
 
 		if (role == ServerRole::Simulation) {
 			Optional<bool> buggifyOverride = checkBuggifyOverride(testFile);
-			if (buggifyOverride.present())
+			if (buggifyOverride.present()) {
 				buggifyEnabled = buggifyOverride.get();
+				// In simulation, knob buggify follows general buggify unless explicitly overridden
+				knobsBuggifyEnabled = buggifyOverride.get();
+			}
 
 			Optional<bool> faultInjectionOverride = checkFaultInjectionOverride(testFile);
 			if (faultInjectionOverride.present())
@@ -1985,6 +2000,11 @@ int main(int argc, char* argv[]) {
 			enableGeneralBuggify();
 		} else {
 			disableGeneralBuggify();
+		}
+		if (opts.knobsBuggifyEnabled) {
+			enableKnobsBuggify();
+		} else {
+			disableKnobsBuggify();
 		}
 		enableFaultInjection(opts.faultInjectionEnabled);
 
