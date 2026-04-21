@@ -3217,9 +3217,6 @@ Future<Void> cancelBulkDumpJob(Database cx, UID jobId) {
 			bulkDumpResult.clear();
 			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 			bulkDumpResult = co_await krmGetRanges(&tr, bulkDumpPrefix, rangeToRead);
-			if (bulkDumpResult.empty()) {
-				break;
-			}
 			for (int i = 0; i < static_cast<int>(bulkDumpResult.size()) - 1; i++) {
 				if (bulkDumpResult[i].value.empty()) {
 					continue;

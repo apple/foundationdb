@@ -154,13 +154,16 @@ std::string BackupDescription::toString() const {
 	};
 
 	for (const KeyspaceSnapshotFile& m : snapshots) {
-		info.append(
-		    format("Snapshot:  startVersion=%s  endVersion=%s  totalBytes=%lld  restorable=%s  expiredPct=%.2f\n",
-		           formatVersion(m.beginVersion).c_str(),
-		           formatVersion(m.endVersion).c_str(),
-		           m.totalSize,
-		           m.restorable.orDefault(false) ? "true" : "false",
-		           m.expiredPct(expiredEndVersion)));
+		// Label snapshot type: BulkDump snapshots have totalSize=0 and single version
+		const char* snapshotType = (m.totalSize == 0 && m.isSingleVersion()) ? "bulkdump" : "rangefile";
+		info.append(format(
+		    "Snapshot:  type=%s  startVersion=%s  endVersion=%s  totalBytes=%lld  restorable=%s  expiredPct=%.2f\n",
+		    snapshotType,
+		    formatVersion(m.beginVersion).c_str(),
+		    formatVersion(m.endVersion).c_str(),
+		    m.totalSize,
+		    m.restorable.orDefault(false) ? "true" : "false",
+		    m.expiredPct(expiredEndVersion)));
 	}
 
 	info.append(format("SnapshotBytes: %lld\n", snapshotBytes));

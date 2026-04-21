@@ -921,6 +921,10 @@ public:
 	// BulkDump total keys - stored when BulkDump snapshot completes
 	KeyBackedProperty<int64_t> bulkDumpTotalKeys() { return configSpace.pack(__FUNCTION__sr); }
 
+	// BulkDump snapshot end version - set when BulkDump task completes
+	// Used for mode=BOTH to track that BulkDump data is available
+	KeyBackedProperty<Version> bulkDumpSnapshotEndVersion() { return configSpace.pack(__FUNCTION__sr); }
+
 	// Latest version for which all prior versions have had their log copy tasks completed
 	KeyBackedProperty<Version> latestLogEndVersion() { return configSpace.pack(__FUNCTION__sr); }
 
@@ -940,12 +944,45 @@ public:
 		auto plogEnabled = partitionedLogEnabled().get(tr);
 		auto workerVersion = latestBackupWorkerSavedVersion().get(tr);
 		auto incrementalBackup = incrementalBackupOnly().get(tr);
+		auto snapMode = snapshotMode().get(tr);
+		auto bulkDumpSnapshot = bulkDumpSnapshotEndVersion().get(tr);
 		return map(success(lastLog) && success(firstSnapshot) && success(plogEnabled) && success(workerVersion) &&
-		               success(incrementalBackup),
+		               success(incrementalBackup) && success(snapMode) && success(bulkDumpSnapshot),
 		           [=](Void) -> Optional<Version> {
 			           // The latest log greater than the oldest snapshot is the restorable version
 			           Optional<Version> logVersion =
 			               plogEnabled.get().present() && plogEnabled.get().get() ? workerVersion.get() : lastLog.get();
+
+			           // For mode=BOTH (2), require both rangefile and bulkdump snapshots to be complete
+			           int mode = snapMode.get().present() ? snapMode.get().get() : 0;
+			           if (mode == 2) {
+				           // BOTH mode: need both firstSnapshotEndVersion (rangefile) and bulkDumpSnapshotEndVersion
+				           if (!firstSnapshot.get().present() || !bulkDumpSnapshot.get().present()) {
+					           return {}; // Not restorable until both complete
+				           }
+				           // Use the minimum of both as the effective first snapshot version
+				           Version effectiveFirstSnapshot =
+				               std::min(firstSnapshot.get().get(), bulkDumpSnapshot.get().get());
+				           if (logVersion.present() && logVersion.get() > effectiveFirstSnapshot) {
+					           return std::max(logVersion.get() - 1, effectiveFirstSnapshot);
+				           }
+				           return {};
+			           }
+
+			           // For mode=BULKDUMP (1), use bulkDumpSnapshotEndVersion
+			           if (mode == 1) {
+				           if (logVersion.present() && bulkDumpSnapshot.get().present() &&
+				               logVersion.get() > bulkDumpSnapshot.get().get()) {
+					           return std::max(logVersion.get() - 1, bulkDumpSnapshot.get().get());
+				           }
+				           if (logVersion.present() && incrementalBackup.isReady() &&
+				               incrementalBackup.get().present() && incrementalBackup.get().get()) {
+					           return logVersion.get() - 1;
+				           }
+				           return {};
+			           }
+
+			           // For mode=RANGEFILE (0, default), use existing logic with firstSnapshotEndVersion
 			           if (logVersion.present() && firstSnapshot.get().present() &&
 			               logVersion.get() > firstSnapshot.get().get()) {
 				           return std::max(logVersion.get() - 1, firstSnapshot.get().get());
