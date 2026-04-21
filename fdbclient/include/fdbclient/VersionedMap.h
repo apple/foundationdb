@@ -309,7 +309,7 @@ void insert(Reference<PTree<T>>& p, Version at, const T& x, IRandom& priorityRan
 		if (c == 0) {
 			p = makeReference<PTree<T>>(p->priority, x, p->left(at), p->right(at), at);
 		} else {
-			const bool direction = !(c < 0);
+			const bool direction = c >= 0;
 			Reference<PTree<T>> child = p->child(direction, at);
 			insert(child, at, x, priorityRandom);
 			p = update(p, direction, child, at);
