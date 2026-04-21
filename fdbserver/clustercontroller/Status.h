@@ -33,18 +33,19 @@ struct ProcessIssues {
 	ProcessIssues(NetworkAddress address, Standalone<VectorRef<StringRef>> issues) : address(address), issues(issues) {}
 };
 
-Future<StatusReply> clusterGetStatus(Reference<AsyncVar<struct ServerDBInfo>> const& db,
-                                     Database const& cx,
-                                     std::vector<WorkerDetails> const& workers,
-                                     std::vector<ProcessIssues> const& workerIssues,
-                                     std::vector<StorageServerMetaInfo> const& storageMetadatas,
-                                     std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* const& clientStatus,
-                                     ServerCoordinators const& coordinators,
-                                     std::vector<NetworkAddress> const& incompatibleConnections,
-                                     Version const& datacenterVersionDifference,
-                                     Version const& dcLogServerVersionDifference,
-                                     Version const& dcStorageServerVersionDifference,
-                                     std::unordered_map<NetworkAddress, double> const& excludedDegradedServers,
-                                     double const& deadlineTimeout);
+Future<StatusReply> clusterGetStatus(
+    Reference<AsyncVar<struct ServerDBInfo>> const& db,
+    Database const& cx,
+    std::vector<WorkerDetails> const& workers,
+    std::vector<ProcessIssues> const& workerIssues,
+    std::vector<StorageServerMetaInfo> const& storageMetadatas,
+    std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* const& clientStatus,
+    ServerCoordinators const& coordinators,
+    std::vector<NetworkAddress> const& incompatibleConnections,
+    Version const& datacenterVersionDifference,
+    Version const& dcLogServerVersionDifference,
+    Version const& dcStorageServerVersionDifference,
+    std::unordered_map<NetworkAddress, double> const& excludedDegradedServers,
+    double const& deadlineTimeout);
 
 StatusReply clusterGetFaultToleranceStatus(const std::string& statusString);
