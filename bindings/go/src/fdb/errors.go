@@ -20,7 +20,7 @@
 
 // FoundationDB Go API
 
-//go:generate go run internal/gen_errors/main.go ../../../../flow/include/flow/error_definitions.h error_codes_generated.go
+//go:generate go run internal/gen_errors/main.go -in ../../../../flow/include/flow/error_definitions.h -out error_codes_generated.go
 
 package fdb
 
