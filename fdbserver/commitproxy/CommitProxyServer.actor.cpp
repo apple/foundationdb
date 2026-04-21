@@ -451,6 +451,10 @@ Future<Void> addBackupMutations(ProxyCommitData* self,
 
 namespace {
 
+// releaseResolvingAfter() is on the commit proxy hot path. This callback keeps the
+// non-ready Future case as a small one-shot continuation instead of spawning an
+// actor just to wait for releaseDelay, update latestLocalCommitBatchResolving in
+// order, and notify the caller.
 struct ReleaseResolvingAfterCallback final : Callback<Void>, FastAllocated<ReleaseResolvingAfterCallback> {
 	ProxyCommitData* self;
 	int64_t localBatchNumber;
