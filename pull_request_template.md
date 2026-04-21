@@ -1,18 +1,19 @@
-Replace this text with your description here...
+## PLEASE DELETE THIS TEMPLATE WHEN YOU POST YOUR PR FOR REVIEW
 
-# Code-Reviewer Section
+Please describe the following in your PR description:
+  * The problem being solved. If this is a bug you found, please describe how/where you encountered it.
+  * The nature of the solution.
+  * Testing you have done, if any.
 
-The general pull request guidelines can be found [here](https://github.com/apple/foundationdb/wiki/FoundationDB-Commit-Process).
+We encourage you to use AI coding assistants to review diffs in advance.  Save your diff to a file first.  This can be done easily by
+```
+git diff upstream/main -- . > /tmp/pr.diff
+```
 
-Please check each of the following things and check *all* boxes before accepting a PR.
+Then have your agent review the diff. We have had good results with the following prompt:
 
-- [ ] The PR has a description, explaining both the problem and the solution.
-- [ ] The description mentions which forms of testing were done and the testing seems reasonable.
-- [ ] Every function/class/actor that was touched is reasonably well documented.
+```
+Review /tmp/pr.diff. What is it trying to do? Is it correct? Are there bugs? Are there omissions? Are there better ways of doing things? Should this CL be LGTMd?
+```
 
-## For Release-Branches
-
-If this PR is made against a release-branch, please also check the following:
-
-- [ ] This change/bugfix is a cherry-pick from the next younger branch (younger `release-branch` or `main` if this is the youngest branch)
-- [ ] There is a good reason why this PR needs to go into a release branch and this reason is documented (either in the description above or in a linked GitHub issue)
+## END OF TEMPLATE TO DELETE
