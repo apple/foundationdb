@@ -35,6 +35,7 @@ namespace {
 constexpr uint32_t versionedMapBenchmarkSeed = 12345;
 
 void resetVersionedMapBenchmarkRandom() {
+	// VersionedMap priorities come from deterministicRandom(); keep benchmark tree shape stable across iterations.
 	setThreadLocalDeterministicRandomSeed(versionedMapBenchmarkSeed);
 }
 
@@ -70,6 +71,8 @@ struct VersionedMapHarness {
 	result end() const { return result(s.latestEnd()); }
 	result lower_bound(K const& k) const { return result(s.latestLowerBound(k)); }
 	result upper_bound(K const& k) const { return result(s.latestUpperBound(k)); }
+	result last_less_or_equal(K const& k) const { return result(s.latestLastLessOrEqual(k)); }
+	result last_less(K const& k) const { return result(s.latestLastLess(k)); }
 	void erase(K const& k) { s.erase(k); }
 };
 
@@ -100,6 +103,8 @@ struct IntFixture {
 			}
 		}
 		if (uniqueSortedKeys) {
+			// Duplicate inserts update the existing tree node, so the tree and key list both contain the same unique
+			// keys after this. Sorting after population preserves the random insertion stream used to build the tree.
 			sortUnique(fixture->keys);
 		}
 		return fixture;
@@ -136,6 +141,8 @@ struct StringRefFixture {
 			}
 		}
 		if (uniqueSortedKeys) {
+			// Duplicate inserts update the existing tree node, so the tree and key list both contain the same unique
+			// keys after this. Sorting after population preserves the random insertion stream used to build the tree.
 			sortUnique(fixture->keys);
 		}
 		return fixture;
@@ -222,6 +229,52 @@ static void bench_versioned_map_upper_bound(benchmark::State& state) {
 		state.ResumeTiming();
 	}
 	state.SetItemsProcessed(keyCount * state.iterations());
+}
+
+template <class Fixture>
+static void bench_versioned_map_last_less_or_equal(benchmark::State& state) {
+	const int64_t keyCount = state.range(0);
+	for (auto _ : state) {
+		state.PauseTiming();
+		auto fixture = Fixture::create(keyCount, true);
+		state.ResumeTiming();
+
+		for (const auto& key : fixture->keys) {
+			auto found = fixture->tree.last_less_or_equal(key);
+			ASSERT(found != fixture->tree.not_found());
+			ASSERT(key == *found);
+			benchmark::DoNotOptimize(found);
+		}
+
+		state.PauseTiming();
+		fixture.reset();
+		state.ResumeTiming();
+	}
+	state.SetItemsProcessed(keyCount * state.iterations());
+}
+
+template <class Fixture>
+static void bench_versioned_map_last_less(benchmark::State& state) {
+	const int64_t keyCount = state.range(0);
+	int64_t foundCount = 0;
+	for (auto _ : state) {
+		state.PauseTiming();
+		auto fixture = Fixture::create(keyCount, true, true);
+		state.ResumeTiming();
+
+		for (int64_t i = 1; i < fixture->keys.size(); ++i) {
+			auto found = fixture->tree.last_less(fixture->keys[i]);
+			ASSERT(found != fixture->tree.not_found());
+			ASSERT(fixture->keys[i - 1] == *found);
+			benchmark::DoNotOptimize(found);
+		}
+		foundCount += fixture->keys.size() - 1;
+
+		state.PauseTiming();
+		fixture.reset();
+		state.ResumeTiming();
+	}
+	state.SetItemsProcessed(foundCount);
 }
 
 template <class Fixture>
@@ -393,7 +446,7 @@ static void bench_versioned_map_multiversion_int(benchmark::State& state) {
 			}
 		}
 
-		benchmark::DoNotOptimize(map.roots.size());
+		benchmark::DoNotOptimize(map.getLatestVersion());
 		double iterationElapsed = timer() - totalStart;
 		state.SetIterationTime(iterationElapsed);
 	}
@@ -415,77 +468,97 @@ static void bench_versioned_map_multiversion_int(benchmark::State& state) {
 BENCHMARK_TEMPLATE(bench_versioned_map_insert, IntFixture)
     ->Name("VersionedMap/int/insert")
     ->Arg(1000000)
-    ->Iterations(1)
+    ->Iterations(3)
     ->Unit(benchmark::kMillisecond);
 BENCHMARK_TEMPLATE(bench_versioned_map_find, IntFixture)
     ->Name("VersionedMap/int/find")
     ->Arg(1000000)
-    ->Iterations(1)
+    ->Iterations(3)
     ->Unit(benchmark::kMillisecond);
 BENCHMARK_TEMPLATE(bench_versioned_map_lower_bound, IntFixture)
     ->Name("VersionedMap/int/lower_bound")
     ->Arg(1000000)
-    ->Iterations(1)
+    ->Iterations(3)
     ->Unit(benchmark::kMillisecond);
 BENCHMARK_TEMPLATE(bench_versioned_map_upper_bound, IntFixture)
     ->Name("VersionedMap/int/upper_bound")
     ->Arg(1000000)
-    ->Iterations(1)
+    ->Iterations(3)
+    ->Unit(benchmark::kMillisecond);
+BENCHMARK_TEMPLATE(bench_versioned_map_last_less_or_equal, IntFixture)
+    ->Name("VersionedMap/int/last_less_or_equal")
+    ->Arg(1000000)
+    ->Iterations(3)
+    ->Unit(benchmark::kMillisecond);
+BENCHMARK_TEMPLATE(bench_versioned_map_last_less, IntFixture)
+    ->Name("VersionedMap/int/last_less")
+    ->Arg(1000000)
+    ->Iterations(3)
     ->Unit(benchmark::kMillisecond);
 BENCHMARK_TEMPLATE(bench_versioned_map_scan, IntFixture)
     ->Name("VersionedMap/int/scan")
     ->Arg(1000000)
-    ->Iterations(1)
+    ->Iterations(3)
     ->Unit(benchmark::kMillisecond);
 BENCHMARK_TEMPLATE(bench_versioned_map_find_sorted, IntFixture)
     ->Name("VersionedMap/int/find_sorted")
     ->Arg(1000000)
-    ->Iterations(1)
+    ->Iterations(3)
     ->Unit(benchmark::kMillisecond);
 BENCHMARK_TEMPLATE(bench_versioned_map_erase, IntFixture)
     ->Name("VersionedMap/int/erase")
     ->Arg(1000000)
-    ->Iterations(1)
+    ->Iterations(3)
     ->Unit(benchmark::kMillisecond);
 
 BENCHMARK_TEMPLATE(bench_versioned_map_insert, StringRefFixture)
     ->Name("VersionedMap/StringRef/insert")
     ->Arg(1000000)
-    ->Iterations(1)
+    ->Iterations(3)
     ->Unit(benchmark::kMillisecond);
 BENCHMARK_TEMPLATE(bench_versioned_map_find, StringRefFixture)
     ->Name("VersionedMap/StringRef/find")
     ->Arg(1000000)
-    ->Iterations(1)
+    ->Iterations(3)
     ->Unit(benchmark::kMillisecond);
 BENCHMARK_TEMPLATE(bench_versioned_map_lower_bound, StringRefFixture)
     ->Name("VersionedMap/StringRef/lower_bound")
     ->Arg(1000000)
-    ->Iterations(1)
+    ->Iterations(3)
     ->Unit(benchmark::kMillisecond);
 BENCHMARK_TEMPLATE(bench_versioned_map_upper_bound, StringRefFixture)
     ->Name("VersionedMap/StringRef/upper_bound")
     ->Arg(1000000)
-    ->Iterations(1)
+    ->Iterations(3)
+    ->Unit(benchmark::kMillisecond);
+BENCHMARK_TEMPLATE(bench_versioned_map_last_less_or_equal, StringRefFixture)
+    ->Name("VersionedMap/StringRef/last_less_or_equal")
+    ->Arg(1000000)
+    ->Iterations(3)
+    ->Unit(benchmark::kMillisecond);
+BENCHMARK_TEMPLATE(bench_versioned_map_last_less, StringRefFixture)
+    ->Name("VersionedMap/StringRef/last_less")
+    ->Arg(1000000)
+    ->Iterations(3)
     ->Unit(benchmark::kMillisecond);
 BENCHMARK_TEMPLATE(bench_versioned_map_scan, StringRefFixture)
     ->Name("VersionedMap/StringRef/scan")
     ->Arg(1000000)
-    ->Iterations(1)
+    ->Iterations(3)
     ->Unit(benchmark::kMillisecond);
 BENCHMARK_TEMPLATE(bench_versioned_map_find_sorted, StringRefFixture)
     ->Name("VersionedMap/StringRef/find_sorted")
     ->Arg(1000000)
-    ->Iterations(1)
+    ->Iterations(3)
     ->Unit(benchmark::kMillisecond);
 BENCHMARK_TEMPLATE(bench_versioned_map_erase, StringRefFixture)
     ->Name("VersionedMap/StringRef/erase")
     ->Arg(1000000)
-    ->Iterations(1)
+    ->Iterations(3)
     ->Unit(benchmark::kMillisecond);
 
 BENCHMARK(bench_versioned_map_multiversion_int)
     ->Name("VersionedMap/int/multiversion")
-    ->Iterations(1)
+    ->Iterations(3)
     ->UseManualTime()
     ->Unit(benchmark::kMillisecond);

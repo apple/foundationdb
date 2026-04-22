@@ -39,6 +39,12 @@ namespace n_coroutine = ::std::experimental;
 
 struct Uncancellable {};
 
+// Marker parameter for coroutines that should destroy the coroutine frame on
+// cancellation instead of resuming it to throw actor_cancelled(). Coroutine
+// locals are cleaned up by RAII and catch blocks inside the coroutine are not
+// run for cancellation.
+struct NoThrowOnCancel {};
+
 // Marker parameter for coroutines that want `co_await Future<Void>` to
 // produce a value convertible to `Void` instead of `void`:
 //
@@ -68,7 +74,7 @@ struct AsyncResultState;
 template <class T>
 struct AsyncResultCallback;
 
-template <class T, bool IsCancellable, bool ReturnsExplicitVoid = false>
+template <class T, bool IsCancellable, bool ReturnsExplicitVoid = false, bool NoThrowOnCancel = false>
 struct AsyncResultPromise;
 
 template <class PromiseType, class ValueType>
@@ -172,7 +178,7 @@ private:
 
 	coro::AsyncResultState<StoredT>* resultState;
 
-	template <class U, bool IsCancellable, bool ReturnsExplicitVoid>
+	template <class U, bool IsCancellable, bool ReturnsExplicitVoid, bool NoThrowOnCancel>
 	friend struct coro::AsyncResultPromise;
 	template <class PromiseType, class ValueType>
 	friend struct coro::AwaitableAsyncResult;
@@ -303,19 +309,28 @@ public:
 
 template <typename ReturnValue, typename... Args>
 struct [[maybe_unused]] n_coroutine::coroutine_traits<Future<ReturnValue>, Args...> {
-	using promise_type =
-	    coro::CoroPromise<ReturnValue, !coro::hasUncancellable<Args...>, coro::hasExplicitVoid<Args...>>;
+	static_assert(!(coro::hasUncancellable<Args...> && coro::hasNoThrowOnCancel<Args...>),
+	              "NoThrowOnCancel and Uncancellable are mutually exclusive");
+	using promise_type = coro::CoroPromise<ReturnValue,
+	                                       !coro::hasUncancellable<Args...>,
+	                                       coro::hasExplicitVoid<Args...>,
+	                                       coro::hasNoThrowOnCancel<Args...>>;
 };
 
 template <typename ReturnValue, typename... Args>
 struct [[maybe_unused]] n_coroutine::coroutine_traits<AsyncResult<ReturnValue>, Args...> {
-	using promise_type =
-	    coro::AsyncResultPromise<ReturnValue, !coro::hasUncancellable<Args...>, coro::hasExplicitVoid<Args...>>;
+	static_assert(!(coro::hasUncancellable<Args...> && coro::hasNoThrowOnCancel<Args...>),
+	              "NoThrowOnCancel and Uncancellable are mutually exclusive");
+	using promise_type = coro::AsyncResultPromise<ReturnValue,
+	                                              !coro::hasUncancellable<Args...>,
+	                                              coro::hasExplicitVoid<Args...>,
+	                                              coro::hasNoThrowOnCancel<Args...>>;
 };
 
 template <typename ReturnValue, typename... Args>
 struct [[maybe_unused]] n_coroutine::coroutine_traits<AsyncGenerator<ReturnValue>, Args...> {
 	static_assert(!coro::hasUncancellable<Args...>, "AsyncGenerator can't be uncancellable");
+	static_assert(!coro::hasNoThrowOnCancel<Args...>, "AsyncGenerator can't use NoThrowOnCancel");
 	using promise_type = coro::AsyncGeneratorPromise<ReturnValue, coro::hasExplicitVoid<Args...>>;
 };
 

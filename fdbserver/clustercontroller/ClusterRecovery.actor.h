@@ -39,7 +39,7 @@
 #include "ClusterController.h"
 #include "fdbserver/core/DBCoreState.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/core/LogSystemConfig.h"
 #include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
@@ -199,7 +199,7 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 
 	ServerCoordinators coordinators;
 
-	Reference<ILogSystem> logSystem;
+	Reference<LogSystem> logSystem;
 	double lastVersionTime;
 	LogSystemDiskQueueAdapter* txnStateLogAdapter;
 	IKeyValueStore* txnStateStore;

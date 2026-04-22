@@ -7,7 +7,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-#include "flow/rte_memcpy.h"
+#include "rte_memcpy.h"
 #include "flow/IRandom.h"
 #include "flow/UnitTest.h"
 #include "flow/flow.h"

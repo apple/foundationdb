@@ -2541,7 +2541,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					InitializeBackupReply reply(recruited, req.backupEpoch);
 					backupReady.send(reply);
 				} else {
-					forwardPromise(req.reply, backupWorkerCache.get(req.reqId));
+					forwardPromise(Uncancellable{}, req.reply, backupWorkerCache.get(req.reqId));
 				}
 			}
 			when(InitializeTLogRequest req = waitNext(interf.tLog.getFuture())) {
@@ -2841,7 +2841,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 						logRouterReady.send(recruited);
 					}
 				} else {
-					forwardPromise(req.reply, logRouterCache.get(req.reqId));
+					forwardPromise(Uncancellable{}, req.reply, logRouterCache.get(req.reqId));
 				}
 			}
 			when(CoordinationPingMessage m = waitNext(interf.coordinationPing.getFuture())) {

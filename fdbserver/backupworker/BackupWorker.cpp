@@ -27,7 +27,7 @@
 #include "fdbserver/core/BackupProgress.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/LogProtocolMessage.h"
-#include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/WaitFailure.h"
@@ -114,7 +114,7 @@ struct BackupData {
 	Version minKnownCommittedVersion;
 	Version savedVersion; // Largest version saved to blob storage
 	Reference<AsyncVar<ServerDBInfo> const> db;
-	AsyncVar<Reference<ILogSystem>> logSystem;
+	AsyncVar<Reference<LogSystem>> logSystem;
 	Database cx;
 	std::vector<VersionedMessage> messages;
 	NotifiedVersion pulledVersion;
@@ -908,7 +908,7 @@ Future<Void> uploadData(BackupData* self) {
 // Pulls data from TLog servers using LogRouter tag.
 Future<Void> pullAsyncData(BackupData* self) {
 	Future<Void> logSystemChange = Void();
-	Reference<ILogSystem::IPeekCursor> r;
+	Reference<IPeekCursor> r;
 
 	Version tagAt = std::max({ self->pulledVersion.get(), self->startVersion, self->savedVersion });
 
@@ -937,7 +937,7 @@ Future<Void> pullAsyncData(BackupData* self) {
 					r = self->logSystem.get()->peekLogRouter(
 					    self->myId, tagAt, self->tag, SERVER_KNOBS->LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED);
 				} else {
-					r = Reference<ILogSystem::IPeekCursor>();
+					r = Reference<IPeekCursor>();
 				}
 				logSystemChange = self->logSystem.onChange();
 			}
@@ -1082,7 +1082,7 @@ Future<Void> backupWorker(BackupInterface interf,
 			auto res = co_await race(dbInfoChange, done, error);
 			if (res.index() == 0) {
 				dbInfoChange = db->onChange();
-				Reference<ILogSystem> ls = makeLogSystemFromServerDBInfo(self.myId, db->get(), true);
+				Reference<LogSystem> ls = makeLogSystemFromServerDBInfo(self.myId, db->get(), true);
 				bool hasPseudoLocality = ls.isValid() && ls->hasPseudoLocality(tagLocalityBackup);
 				if (hasPseudoLocality) {
 					self.logSystem.set(ls);
