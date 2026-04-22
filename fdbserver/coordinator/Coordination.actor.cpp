@@ -282,197 +282,291 @@ Future<Void> remoteMonitorLeader(int* clientCount,
 	}
 }
 
-// This actor implements a *single* leader-election register (essentially, it ignores
+// This class implements a *single* leader-election register (essentially, it ignores
 // the .key member of each request).  It returns any time the leader election is in the
 // default state, so that only active registers consume memory.
-ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
-	state std::set<LeaderInfo> availableCandidates;
-	state std::set<LeaderInfo> availableLeaders;
-	state Optional<LeaderInfo> currentNominee;
-	state Deque<ReplyPromise<Optional<LeaderInfo>>> notify;
-	state Future<Void> nextInterval;
-	state double candidateDelay = SERVER_KNOBS->CANDIDATE_MIN_DELAY;
-	state int leaderIntervalCount = 0;
-	state Future<Void> notifyCheck =
-	    delay(SERVER_KNOBS->NOTIFICATION_FULL_CLEAR_TIME / SERVER_KNOBS->MIN_NOTIFICATIONS);
-	state ClientData clientData;
-	state int clientCount = 0;
-	state Reference<AsyncVar<bool>> hasConnectedClients = makeReference<AsyncVar<bool>>(false);
-	state ActorCollection actors(false);
-	state Future<Void> leaderMon;
-	state AsyncVar<Value> leaderInterface;
-	state Reference<AsyncVar<Optional<LeaderInfo>>> currentElectedLeader =
-	    makeReference<AsyncVar<Optional<LeaderInfo>>>();
-	state LivenessChecker canConnectToLeader(SERVER_KNOBS->COORDINATOR_LEADER_CONNECTION_TIMEOUT);
-	state Future<Void> hasConnectedClientsOnChange = hasConnectedClients->onChange();
+class LeaderRegister : public ReferenceCounted<LeaderRegister>, NonCopyable {
+	LeaderElectionRegInterface interf;
+	Key key;
+	std::set<LeaderInfo> availableCandidates;
+	std::set<LeaderInfo> availableLeaders;
+	Optional<LeaderInfo> currentNominee;
+	Deque<ReplyPromise<Optional<LeaderInfo>>> notify;
+	Future<Void> nextInterval;
+	AsyncVar<int> nextIntervalGeneration;
+	double candidateDelay;
+	int leaderIntervalCount;
+	Future<Void> notifyCheck;
+	ClientData clientData;
+	int clientCount;
+	Reference<AsyncVar<bool>> hasConnectedClients;
+	ActorCollection actors;
+	Future<Void> leaderMon;
+	Reference<AsyncVar<Optional<LeaderInfo>>> currentElectedLeader;
+	LivenessChecker canConnectToLeader;
+	Future<Void> hasConnectedClientsOnChange;
 
-	loop choose {
-		when(OpenDatabaseCoordRequest req = waitNext(interf.openDatabase.getFuture())) {
-			if (clientData.clientInfo->get().read().id.isValid() &&
-			    clientData.clientInfo->get().read().id != req.knownClientInfoID &&
-			    !clientData.clientInfo->get().read().forward.present()) {
-				req.reply.send(clientData.clientInfo->get());
+	void setNextInterval(Future<Void> interval) {
+		nextInterval = interval;
+		nextIntervalGeneration.set(nextIntervalGeneration.get() + 1);
+	}
+
+	void ensureNextInterval() {
+		if (!nextInterval.isValid()) {
+			setNextInterval(delay(0));
+		}
+	}
+
+	void clearNextInterval() {
+		if (nextInterval.isValid()) {
+			setNextInterval(Future<Void>());
+		}
+	}
+
+	void sendNotifications(Optional<LeaderInfo> const& nominee) {
+		for (unsigned int i = 0; i < notify.size(); i++) {
+			notify[i].send(nominee);
+		}
+		notify.clear();
+	}
+
+	void sendNotifications(LeaderInfo const& info) {
+		for (unsigned int i = 0; i < notify.size(); i++) {
+			notify[i].send(info);
+		}
+		notify.clear();
+	}
+
+	bool checkNotificationLimit() {
+		if (notify.size() > SERVER_KNOBS->MAX_NOTIFICATIONS) {
+			TraceEvent(SevWarnAlways, "TooManyNotifications").detail("Amount", notify.size());
+			sendNotifications(currentNominee.get());
+			return true;
+		}
+		return false;
+	}
+
+	static Future<Void> serveOpenDatabaseRequests(Reference<LeaderRegister> self) {
+		while (true) {
+			OpenDatabaseCoordRequest req = co_await self->interf.openDatabase.getFuture();
+			if (self->clientData.clientInfo->get().read().id.isValid() &&
+			    self->clientData.clientInfo->get().read().id != req.knownClientInfoID &&
+			    !self->clientData.clientInfo->get().read().forward.present()) {
+				req.reply.send(self->clientData.clientInfo->get());
 			} else {
-				if (!leaderMon.isValid()) {
-					leaderMon = monitorLeaderAndGetClientInfo(
-					    req.clusterKey, req.hostnames, req.coordinators, &clientData, currentElectedLeader);
+				if (!self->leaderMon.isValid()) {
+					self->leaderMon = monitorLeaderAndGetClientInfo(
+					    req.clusterKey, req.hostnames, req.coordinators, &self->clientData, self->currentElectedLeader);
 				}
-				actors.add(
-				    openDatabase(&clientData, &clientCount, hasConnectedClients, req, canConnectToLeader.checkStuck()));
+				self->actors.add(openDatabase(&self->clientData,
+				                              &self->clientCount,
+				                              self->hasConnectedClients,
+				                              req,
+				                              self->canConnectToLeader.checkStuck()));
 			}
 		}
-		when(ElectionResultRequest req = waitNext(interf.electionResult.getFuture())) {
-			if (currentElectedLeader->get().present() &&
-			    req.knownLeader != currentElectedLeader->get().get().changeID) {
-				req.reply.send(currentElectedLeader->get());
+	}
+
+	static Future<Void> serveElectionResultRequests(Reference<LeaderRegister> self) {
+		while (true) {
+			ElectionResultRequest req = co_await self->interf.electionResult.getFuture();
+			if (self->currentElectedLeader->get().present() &&
+			    req.knownLeader != self->currentElectedLeader->get().get().changeID) {
+				req.reply.send(self->currentElectedLeader->get());
 			} else {
-				if (!leaderMon.isValid()) {
-					leaderMon = monitorLeaderAndGetClientInfo(
-					    req.key, req.hostnames, req.coordinators, &clientData, currentElectedLeader);
+				if (!self->leaderMon.isValid()) {
+					self->leaderMon = monitorLeaderAndGetClientInfo(
+					    req.key, req.hostnames, req.coordinators, &self->clientData, self->currentElectedLeader);
 				}
-				actors.add(remoteMonitorLeader(&clientCount, hasConnectedClients, currentElectedLeader, req));
+				self->actors.add(remoteMonitorLeader(
+				    &self->clientCount, self->hasConnectedClients, self->currentElectedLeader, req));
 			}
 		}
-		when(GetLeaderRequest req = waitNext(interf.getLeader.getFuture())) {
-			if (currentNominee.present() && currentNominee.get().changeID != req.knownLeader) {
-				req.reply.send(currentNominee.get());
+	}
+
+	static Future<Void> serveGetLeaderRequests(Reference<LeaderRegister> self) {
+		while (true) {
+			GetLeaderRequest req = co_await self->interf.getLeader.getFuture();
+			if (self->currentNominee.present() && self->currentNominee.get().changeID != req.knownLeader) {
+				req.reply.send(self->currentNominee.get());
 			} else {
-				notify.push_back(req.reply);
-				if (notify.size() > SERVER_KNOBS->MAX_NOTIFICATIONS) {
-					TraceEvent(SevWarnAlways, "TooManyNotifications").detail("Amount", notify.size());
-					for (uint32_t i = 0; i < notify.size(); i++)
-						notify[i].send(currentNominee.get());
-					notify.clear();
-				} else if (!nextInterval.isValid()) {
-					nextInterval = delay(0);
-				}
-			}
-		}
-		when(CandidacyRequest req = waitNext(interf.candidacy.getFuture())) {
-			if (!nextInterval.isValid()) {
-				nextInterval = delay(0);
-			}
-			availableCandidates.erase(LeaderInfo(req.prevChangeID));
-			availableCandidates.insert(req.myInfo);
-			if (currentNominee.present() && currentNominee.get().changeID != req.knownLeader) {
-				req.reply.send(currentNominee.get());
-			} else {
-				notify.push_back(req.reply);
-				if (notify.size() > SERVER_KNOBS->MAX_NOTIFICATIONS) {
-					TraceEvent(SevWarnAlways, "TooManyNotifications").detail("Amount", notify.size());
-					for (uint32_t i = 0; i < notify.size(); i++)
-						notify[i].send(currentNominee.get());
-					notify.clear();
+				self->notify.push_back(req.reply);
+				if (!self->checkNotificationLimit() && !self->nextInterval.isValid()) {
+					self->ensureNextInterval();
 				}
 			}
 		}
-		when(LeaderHeartbeatRequest req = waitNext(interf.leaderHeartbeat.getFuture())) {
-			if (!nextInterval.isValid()) {
-				nextInterval = delay(0);
+	}
+
+	static Future<Void> serveCandidacyRequests(Reference<LeaderRegister> self) {
+		while (true) {
+			CandidacyRequest req = co_await self->interf.candidacy.getFuture();
+			self->ensureNextInterval();
+			self->availableCandidates.erase(LeaderInfo(req.prevChangeID));
+			self->availableCandidates.insert(req.myInfo);
+			if (self->currentNominee.present() && self->currentNominee.get().changeID != req.knownLeader) {
+				req.reply.send(self->currentNominee.get());
+			} else {
+				self->notify.push_back(req.reply);
+				self->checkNotificationLimit();
 			}
+		}
+	}
+
+	static Future<Void> serveLeaderHeartbeatRequests(Reference<LeaderRegister> self) {
+		while (true) {
+			LeaderHeartbeatRequest req = co_await self->interf.leaderHeartbeat.getFuture();
+			self->ensureNextInterval();
 			// TODO: use notify to only send a heartbeat once per interval
-			availableLeaders.erase(LeaderInfo(req.prevChangeID));
-			availableLeaders.insert(req.myInfo);
-			bool const isCurrentLeader = currentNominee.present() && currentNominee.get().equalInternalId(req.myInfo);
+			self->availableLeaders.erase(LeaderInfo(req.prevChangeID));
+			self->availableLeaders.insert(req.myInfo);
+			bool const isCurrentLeader =
+			    self->currentNominee.present() && self->currentNominee.get().equalInternalId(req.myInfo);
 			if (isCurrentLeader) {
-				canConnectToLeader.confirmLiveness();
+				self->canConnectToLeader.confirmLiveness();
 			}
 			req.reply.send(LeaderHeartbeatReply{ isCurrentLeader });
 		}
-		when(ForwardRequest req = waitNext(interf.forward.getFuture())) {
+	}
+
+	static Future<Void> serveForwardRequests(Reference<LeaderRegister> self) {
+		while (true) {
+			ForwardRequest req = co_await self->interf.forward.getFuture();
 			LeaderInfo newInfo;
 			newInfo.forward = true;
 			newInfo.serializedInfo = req.conn.toString();
-			for (unsigned int i = 0; i < notify.size(); i++)
-				notify[i].send(newInfo);
-			notify.clear();
+			self->sendNotifications(newInfo);
 			ClientDBInfo outInfo;
 			outInfo.id = deterministicRandom()->randomUniqueID();
 			outInfo.forward = req.conn.toString();
-			clientData.clientInfo->set(CachedSerialization<ClientDBInfo>(outInfo));
+			self->clientData.clientInfo->set(CachedSerialization<ClientDBInfo>(outInfo));
 			req.reply.send(Void());
-			if (!hasConnectedClients->get()) {
-				return Void();
+			if (!self->hasConnectedClients->get()) {
+				co_return;
 			}
-			nextInterval = Future<Void>();
+			self->clearNextInterval();
 		}
-		when(wait(nextInterval.isValid() ? nextInterval : Never())) {
-			if (!availableLeaders.size() && !availableCandidates.size() && !notify.size() &&
-			    !currentNominee.present()) {
+	}
+
+	static Future<Void> monitorNextInterval(Reference<LeaderRegister> self) {
+		while (true) {
+			int generation = self->nextIntervalGeneration.get();
+			auto res = co_await race(self->nextInterval.isValid() ? self->nextInterval : Never(),
+			                         self->nextIntervalGeneration.onChange());
+			if (res.index() == 1 || generation != self->nextIntervalGeneration.get()) {
+				continue;
+			}
+			if (res.index() != 0) {
+				UNREACHABLE();
+			}
+
+			if (!self->availableLeaders.size() && !self->availableCandidates.size() && !self->notify.size() &&
+			    !self->currentNominee.present()) {
 				// Our state is back to the initial state, so we can safely stop this actor
 				TraceEvent("EndingLeaderNomination")
-				    .detail("Key", key)
-				    .detail("HasConnectedClients", hasConnectedClients->get());
-				if (!hasConnectedClients->get()) {
-					return Void();
+				    .detail("Key", self->key)
+				    .detail("HasConnectedClients", self->hasConnectedClients->get());
+				if (!self->hasConnectedClients->get()) {
+					co_return;
 				} else {
-					nextInterval = Future<Void>();
+					self->clearNextInterval();
 				}
 			} else {
 				Optional<LeaderInfo> nextNominee;
-				if (availableCandidates.size() &&
-				    (!availableLeaders.size() ||
-				     availableLeaders.begin()->leaderChangeRequired(*availableCandidates.begin()))) {
-					nextNominee = *availableCandidates.begin();
-				} else if (availableLeaders.size()) {
-					nextNominee = *availableLeaders.begin();
+				if (self->availableCandidates.size() &&
+				    (!self->availableLeaders.size() ||
+				     self->availableLeaders.begin()->leaderChangeRequired(*self->availableCandidates.begin()))) {
+					nextNominee = *self->availableCandidates.begin();
+				} else if (self->availableLeaders.size()) {
+					nextNominee = *self->availableLeaders.begin();
 				}
 
 				// If the current leader's priority became worse, we still need to notified all clients because now one
 				// of them might be better than the leader. In addition, even though FitnessRemote is better than
 				// FitnessUnknown, we still need to notified clients so that monitorLeaderRemotely has a chance to
 				// switch from passively monitoring the leader to actively attempting to become the leader.
-				if (!currentNominee.present() || !nextNominee.present() ||
-				    !currentNominee.get().equalInternalId(nextNominee.get()) ||
-				    nextNominee.get() > currentNominee.get() ||
-				    (currentNominee.get().getPriorityInfo().dcFitness ==
+				if (!self->currentNominee.present() || !nextNominee.present() ||
+				    !self->currentNominee.get().equalInternalId(nextNominee.get()) ||
+				    nextNominee.get() > self->currentNominee.get() ||
+				    (self->currentNominee.get().getPriorityInfo().dcFitness ==
 				         ClusterControllerPriorityInfo::FitnessUnknown &&
 				     nextNominee.get().getPriorityInfo().dcFitness == ClusterControllerPriorityInfo::FitnessRemote)) {
 					TraceEvent("NominatingLeader")
 					    .detail("NextNominee", nextNominee.present() ? nextNominee.get().changeID : UID())
-					    .detail("CurrentNominee", currentNominee.present() ? currentNominee.get().changeID : UID())
-					    .detail("Key", printable(key));
-					for (unsigned int i = 0; i < notify.size(); i++)
-						notify[i].send(nextNominee);
-					notify.clear();
+					    .detail("CurrentNominee",
+					            self->currentNominee.present() ? self->currentNominee.get().changeID : UID())
+					    .detail("Key", printable(self->key));
+					self->sendNotifications(nextNominee);
 				}
 
-				currentNominee = nextNominee;
+				self->currentNominee = nextNominee;
 
-				if (availableLeaders.size()) {
-					nextInterval = delay(SERVER_KNOBS->POLLING_FREQUENCY);
-					if (leaderIntervalCount++ > 5) {
-						candidateDelay = SERVER_KNOBS->CANDIDATE_MIN_DELAY;
+				if (self->availableLeaders.size()) {
+					self->setNextInterval(delay(SERVER_KNOBS->POLLING_FREQUENCY));
+					if (self->leaderIntervalCount++ > 5) {
+						self->candidateDelay = SERVER_KNOBS->CANDIDATE_MIN_DELAY;
 					}
 				} else {
-					nextInterval = delay(candidateDelay);
-					candidateDelay = std::min(SERVER_KNOBS->CANDIDATE_MAX_DELAY,
-					                          candidateDelay * SERVER_KNOBS->CANDIDATE_GROWTH_RATE);
-					leaderIntervalCount = 0;
+					self->setNextInterval(delay(self->candidateDelay));
+					self->candidateDelay = std::min(SERVER_KNOBS->CANDIDATE_MAX_DELAY,
+					                                self->candidateDelay * SERVER_KNOBS->CANDIDATE_GROWTH_RATE);
+					self->leaderIntervalCount = 0;
 				}
 
-				availableLeaders.clear();
-				availableCandidates.clear();
+				self->availableLeaders.clear();
+				self->availableCandidates.clear();
 			}
 		}
-		when(wait(notifyCheck)) {
-			notifyCheck = delay(SERVER_KNOBS->NOTIFICATION_FULL_CLEAR_TIME /
-			                    std::max<double>(SERVER_KNOBS->MIN_NOTIFICATIONS, notify.size()));
-			if (!notify.empty() && currentNominee.present()) {
-				notify.front().send(currentNominee.get());
-				notify.pop_front();
-			}
-		}
-		when(wait(hasConnectedClientsOnChange)) {
-			hasConnectedClientsOnChange = hasConnectedClients->onChange();
-			if (!hasConnectedClients->get() && !nextInterval.isValid()) {
-				TraceEvent("LeaderRegisterUnneeded").detail("Key", key);
-				return Void();
-			}
-		}
-		when(wait(actors.getResult())) {}
 	}
-}
+
+	static Future<Void> monitorNotifyCheck(Reference<LeaderRegister> self) {
+		while (true) {
+			co_await self->notifyCheck;
+			self->notifyCheck = delay(SERVER_KNOBS->NOTIFICATION_FULL_CLEAR_TIME /
+			                          std::max<double>(SERVER_KNOBS->MIN_NOTIFICATIONS, self->notify.size()));
+			if (!self->notify.empty() && self->currentNominee.present()) {
+				self->notify.front().send(self->currentNominee.get());
+				self->notify.pop_front();
+			}
+		}
+	}
+
+	static Future<Void> monitorConnectedClients(Reference<LeaderRegister> self) {
+		while (true) {
+			co_await self->hasConnectedClientsOnChange;
+			self->hasConnectedClientsOnChange = self->hasConnectedClients->onChange();
+			if (!self->hasConnectedClients->get() && !self->nextInterval.isValid()) {
+				TraceEvent("LeaderRegisterUnneeded").detail("Key", self->key);
+				co_return;
+			}
+		}
+	}
+
+	static Future<Void> monitorActors(Reference<LeaderRegister> self) { co_await self->actors.getResult(); }
+
+public:
+	LeaderRegister(LeaderElectionRegInterface interf, Key key)
+	  : interf(interf), key(key), nextIntervalGeneration(0), candidateDelay(SERVER_KNOBS->CANDIDATE_MIN_DELAY),
+	    leaderIntervalCount(0),
+	    notifyCheck(delay(SERVER_KNOBS->NOTIFICATION_FULL_CLEAR_TIME / SERVER_KNOBS->MIN_NOTIFICATIONS)),
+	    clientCount(0), hasConnectedClients(makeReference<AsyncVar<bool>>(false)), actors(false),
+	    currentElectedLeader(makeReference<AsyncVar<Optional<LeaderInfo>>>()),
+	    canConnectToLeader(SERVER_KNOBS->COORDINATOR_LEADER_CONNECTION_TIMEOUT),
+	    hasConnectedClientsOnChange(hasConnectedClients->onChange()) {}
+
+	static Future<Void> run(Reference<LeaderRegister> self) {
+		co_await race(serveOpenDatabaseRequests(self),
+		              serveElectionResultRequests(self),
+		              serveGetLeaderRequests(self),
+		              serveCandidacyRequests(self),
+		              serveLeaderHeartbeatRequests(self),
+		              serveForwardRequests(self),
+		              monitorNextInterval(self),
+		              monitorNotifyCheck(self),
+		              monitorConnectedClients(self),
+		              monitorActors(self));
+	}
+};
 
 // Generation register values are stored without prefixing in the coordinated state, but always begin with an
 // alphanumeric character (they are always derived from a ClusterConnectionString key). Forwarding values are stored in
@@ -565,7 +659,8 @@ struct LeaderRegisterCollection {
 		auto i = registerInterfaces.find(key);
 		if (i == registerInterfaces.end()) {
 			Key k = key;
-			Future<Void> a = wrap(this, k, leaderRegister(registerInterfaces[k], k), id);
+			Future<Void> a =
+			    wrap(this, k, LeaderRegister::run(makeReference<LeaderRegister>(registerInterfaces[k], k)), id);
 			if (a.isError())
 				throw a.getError();
 			ASSERT(!a.isReady());
