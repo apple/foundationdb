@@ -1511,10 +1511,7 @@ void BufferedCursor::advanceTo(LogMessageVersion n) {
 	ASSERT(false);
 }
 
-Future<Void> bufferedGetMoreLoader(BufferedCursor* self,
-                                   Reference<IPeekCursor> cursor,
-                                   int idx,
-                                   TaskPriority taskID) {
+Future<Void> bufferedGetMoreLoader(BufferedCursor* self, Reference<IPeekCursor> cursor, int idx, TaskPriority taskID) {
 	while (true) {
 		co_await yield();
 		if (cursor->version().version >= self->end || self->cursorMessages[idx].size() > self->targetQueueSize) {
