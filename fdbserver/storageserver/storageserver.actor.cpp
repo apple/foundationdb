@@ -12641,7 +12641,7 @@ void versionedMapTest() {
 	auto after = FastAllocator<ASIZE>::getTotalMemory();
 
 	int count = 0;
-	for (auto i = vm.atLatest().begin(); i != vm.atLatest().end(); ++i)
+	for (auto i = vm.latestBegin(); i != vm.latestEnd(); ++i)
 		++count;
 
 	printf("PTree node is %d bytes, allocated as %d bytes\n", NSIZE, ASIZE);
