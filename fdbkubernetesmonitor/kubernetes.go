@@ -26,6 +26,7 @@ import (
 	"os"
 	"path"
 	"strconv"
+	"sync"
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -49,6 +50,10 @@ var _ toolscache.ResourceEventHandler = (*kubernetesClient)(nil)
 
 // kubernetesClient is a wrapper around the Kubernetes API.
 type kubernetesClient struct {
+	// mu protects podMetadata and nodeMetadata from concurrent access by informer
+	// callbacks and the monitor goroutine.
+	mu sync.RWMutex
+
 	// podMetadata is the latest metadata that was seen by the fdb-kubernetes-monitor for the according Pod.
 	podMetadata *metav1.PartialObjectMetadata
 
@@ -193,6 +198,18 @@ func createPodClient(ctx context.Context, logger logr.Logger, enableNodeWatcher 
 	return podClient, nil
 }
 
+func (podClient *kubernetesClient) getPodMetadata() *metav1.PartialObjectMetadata {
+	podClient.mu.RLock()
+	defer podClient.mu.RUnlock()
+	return podClient.podMetadata
+}
+
+func (podClient *kubernetesClient) getNodeMetadata() *metav1.PartialObjectMetadata {
+	podClient.mu.RLock()
+	defer podClient.mu.RUnlock()
+	return podClient.nodeMetadata
+}
+
 // retrieveEnvironmentVariables extracts the environment variables we have for
 // an argument into a map.
 func retrieveEnvironmentVariables(monitor *monitor, argument api.Argument, target map[string]string) {
@@ -239,11 +256,12 @@ func (podClient *kubernetesClient) updateFdbClusterTimestampAnnotation() error {
 // updateAnnotationsOnPod will update the annotations with the provided annotationChanges. If an annotation exists, it
 // will be updated if the annotation is absent it will be added.
 func (podClient *kubernetesClient) updateAnnotationsOnPod(annotationChanges map[string]string) error {
-	if podClient.podMetadata == nil {
+	meta := podClient.getPodMetadata()
+	if meta == nil {
 		return fmt.Errorf("pod client has no metadata present")
 	}
 
-	if !podClient.podMetadata.DeletionTimestamp.IsZero() {
+	if !meta.DeletionTimestamp.IsZero() {
 		return fmt.Errorf("pod is marked for deletion, cannot update annotations")
 	}
 
@@ -251,7 +269,7 @@ func (podClient *kubernetesClient) updateAnnotationsOnPod(annotationChanges map[
 	return retry.OnError(retry.DefaultRetry, func(err error) bool {
 		podClient.Logger.Error(err, "could not update annotations of pod")
 		// If the pod is marked for deletion, we don't have to retry the patch.
-		if !podClient.podMetadata.DeletionTimestamp.IsZero() {
+		if !meta.DeletionTimestamp.IsZero() {
 			return false
 		}
 
@@ -262,7 +280,7 @@ func (podClient *kubernetesClient) updateAnnotationsOnPod(annotationChanges map[
 
 		return true
 	}, func() error {
-		currentAnnotations := podClient.podMetadata.Annotations
+		currentAnnotations := meta.Annotations
 		if len(currentAnnotations) == 0 {
 			currentAnnotations = map[string]string{}
 		}
@@ -288,8 +306,8 @@ func (podClient *kubernetesClient) updateAnnotationsOnPod(annotationChanges map[
 				APIVersion: "v1",
 			},
 			ObjectMeta: metav1.ObjectMeta{
-				Namespace:   podClient.podMetadata.Namespace,
-				Name:        podClient.podMetadata.Name,
+				Namespace:   meta.Namespace,
+				Name:        meta.Name,
 				Annotations: currentAnnotations,
 			},
 		})
@@ -310,16 +328,20 @@ func (podClient *kubernetesClient) OnAdd(obj interface{}, _ bool) {
 	switch castedObj := obj.(type) {
 	case *corev1.Pod:
 		podClient.Logger.Info("Got event for OnAdd for Pod resource", "name", castedObj.Name, "namespace", castedObj.Namespace)
+		podClient.mu.Lock()
 		podClient.podMetadata = &metav1.PartialObjectMetadata{
 			TypeMeta:   castedObj.TypeMeta,
 			ObjectMeta: castedObj.ObjectMeta,
 		}
+		podClient.mu.Unlock()
 	case *corev1.Node:
 		podClient.Logger.Info("Got event for OnAdd for Node resource", "name", castedObj.Name)
+		podClient.mu.Lock()
 		podClient.nodeMetadata = &metav1.PartialObjectMetadata{
 			TypeMeta:   castedObj.TypeMeta,
 			ObjectMeta: castedObj.ObjectMeta,
 		}
+		podClient.mu.Unlock()
 	}
 }
 
@@ -330,24 +352,30 @@ func (podClient *kubernetesClient) OnUpdate(_, newObj interface{}) {
 	switch castedObj := newObj.(type) {
 	case *corev1.Pod:
 		podClient.Logger.Info("Got event for OnUpdate for Pod resource", "name", castedObj.Name, "namespace", castedObj.Namespace, "generation", castedObj.Generation)
+
+		// Hold the write lock for the read-then-write of podMetadata, but
+		// release it before sending to TimestampFeed to avoid holding the lock
+		// while blocked on a channel send.
+		podClient.mu.Lock()
 		var previousAnnotations map[string]string
 		if podClient.podMetadata != nil {
 			previousAnnotations = podClient.podMetadata.Annotations
 		}
-
 		podClient.podMetadata = &metav1.PartialObjectMetadata{
 			TypeMeta:   castedObj.TypeMeta,
 			ObjectMeta: castedObj.ObjectMeta,
 		}
+		newAnnotations := podClient.podMetadata.Annotations
+		podClient.mu.Unlock()
 
-		if podClient.podMetadata.Annotations == nil {
+		if newAnnotations == nil {
 			return
 		}
 
 		// If the IsolateProcessGroupAnnotation changes force a reload of the configuration to make sure the processes
 		// will be shutdown.
 		previousIsolateProcessGroupAnnotationValue := previousAnnotations[api.IsolateProcessGroupAnnotation]
-		newIsolateProcessGroupAnnotationValue := podClient.podMetadata.Annotations[api.IsolateProcessGroupAnnotation]
+		newIsolateProcessGroupAnnotationValue := newAnnotations[api.IsolateProcessGroupAnnotation]
 		if previousIsolateProcessGroupAnnotationValue != newIsolateProcessGroupAnnotationValue {
 			podClient.Logger.Info("Got change in isolate process group annotation", "previous", previousIsolateProcessGroupAnnotationValue, "new", newIsolateProcessGroupAnnotationValue)
 			podClient.TimestampFeed <- time.Now().Unix()
@@ -355,7 +383,7 @@ func (podClient *kubernetesClient) OnUpdate(_, newObj interface{}) {
 			return
 		}
 
-		annotation := podClient.podMetadata.Annotations[api.OutdatedConfigMapAnnotation]
+		annotation := newAnnotations[api.OutdatedConfigMapAnnotation]
 		if annotation == "" {
 			return
 		}
@@ -369,10 +397,12 @@ func (podClient *kubernetesClient) OnUpdate(_, newObj interface{}) {
 		podClient.TimestampFeed <- timestamp
 	case *corev1.Node:
 		podClient.Logger.Info("Got event for OnUpdate for Node resource", "name", castedObj.Name)
+		podClient.mu.Lock()
 		podClient.nodeMetadata = &metav1.PartialObjectMetadata{
 			TypeMeta:   castedObj.TypeMeta,
 			ObjectMeta: castedObj.ObjectMeta,
 		}
+		podClient.mu.Unlock()
 	}
 }
 
@@ -384,9 +414,13 @@ func (podClient *kubernetesClient) OnDelete(obj interface{}) {
 	switch castedObj := obj.(type) {
 	case *corev1.Pod:
 		podClient.Logger.Info("Got event for OnDelete for Pod resource", "name", castedObj.Name, "namespace", castedObj.Namespace)
+		podClient.mu.Lock()
 		podClient.podMetadata = nil
+		podClient.mu.Unlock()
 	case *corev1.Node:
 		podClient.Logger.Info("Got event for OnDelete for Node resource", "name", castedObj.Name)
+		podClient.mu.Lock()
 		podClient.nodeMetadata = nil
+		podClient.mu.Unlock()
 	}
 }

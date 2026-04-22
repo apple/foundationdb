@@ -191,11 +191,12 @@ func startMonitor(ctx context.Context, logger logr.Logger, configFile string, cu
 // label "foundationdb.org/testing = awesome" the env variables NODE_LABEL_FOUNDATIONDB_ORG_TESTING = awesome" will be
 // generated.
 func (monitor *monitor) updateCustomEnvironmentFromNodeMetadata() {
-	if monitor.podClient.nodeMetadata == nil {
+	nodeMeta := monitor.podClient.getNodeMetadata()
+	if nodeMeta == nil {
 		return
 	}
 
-	nodeLabels := monitor.podClient.nodeMetadata.Labels
+	nodeLabels := nodeMeta.Labels
 	for key, value := range nodeLabels {
 		sanitizedKey := strings.ReplaceAll(key, "/", "_")
 		sanitizedKey = strings.ReplaceAll(sanitizedKey, ".", "_")
@@ -486,15 +487,16 @@ func (monitor *monitor) processRequired(processNumber int) bool {
 
 // processIsIsolated returns true if the IsolateProcessGroupAnnotation is set to "true".
 func (monitor *monitor) processIsIsolated() bool {
-	if monitor.podClient.podMetadata == nil {
+	podMeta := monitor.podClient.getPodMetadata()
+	if podMeta == nil {
 		return false
 	}
 
-	if monitor.podClient.podMetadata.Annotations == nil {
+	if podMeta.Annotations == nil {
 		return false
 	}
 
-	val, ok := monitor.podClient.podMetadata.Annotations[api.IsolateProcessGroupAnnotation]
+	val, ok := podMeta.Annotations[api.IsolateProcessGroupAnnotation]
 	if !ok {
 		return false
 	}
@@ -527,7 +529,7 @@ func addWatcher(fileName string, watcher *fsnotify.Watcher) error {
 	var err error
 	for retryCnt < maxRetryCnt {
 		err = watcher.Add(fileName)
-		if err != nil {
+		if err == nil {
 			return nil
 		}
 
@@ -620,12 +622,9 @@ func (monitor *monitor) run() {
 		monitor.processCount = 0
 		monitor.sendSignalToProcesses(latestSignal)
 
-		annotations := monitor.podClient.podMetadata.Annotations
-		if len(annotations) > 0 {
-			delayValue, ok := annotations[api.DelayShutdownAnnotation]
-			if ok {
-				delay, err := time.ParseDuration(delayValue)
-				if err == nil {
+		if podMeta := monitor.podClient.getPodMetadata(); podMeta != nil {
+			if delayValue, ok := podMeta.Annotations[api.DelayShutdownAnnotation]; ok {
+				if delay, err := time.ParseDuration(delayValue); err == nil {
 					time.Sleep(delay)
 				}
 			}
