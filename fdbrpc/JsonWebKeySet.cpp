@@ -25,9 +25,9 @@
 #include "flow/MkCert.h"
 #include "flow/PKey.h"
 #include "flow/UnitTest.h"
-#include "fdbrpc/Base64Encode.h"
-#include "fdbrpc/Base64Decode.h"
-#include "fdbrpc/JsonWebKeySet.h"
+#include "Base64Encode.h"
+#include "Base64Decode.h"
+#include "JsonWebKeySet.h"
 #include <openssl/bn.h>
 #include <openssl/ec.h>
 #include <openssl/err.h>

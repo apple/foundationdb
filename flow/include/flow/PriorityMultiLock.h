@@ -1,5 +1,5 @@
 /*
- * PriorityMultiLock.actor.h
+ * PriorityMultiLock.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,17 +20,8 @@
 
 #pragma once
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
-#if defined(NO_INTELLISENSE) && !defined(FLOW_PRIORITYMULTILOCK_ACTOR_G_H)
-#define FLOW_PRIORITYMULTILOCK_ACTOR_G_H
-#include "flow/PriorityMultiLock.actor.g.h"
-#elif !defined(PRIORITYMULTILOCK_ACTOR_H)
-#define PRIORITYMULTILOCK_ACTOR_H
-
 #include "flow/flow.h"
 #include <boost/intrusive/list.hpp>
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 #define PRIORITYMULTILOCK_DEBUG 0
 
@@ -252,15 +243,7 @@ private:
 	Promise<Void> brokenOnDestruct;
 	bool killed;
 
-	ACTOR static void handleRelease(Reference<PriorityMultiLock> self, Priority* priority, Future<Void> holder) {
-		pml_debug_printf("%f handleRelease self=%p start\n", now(), self.getPtr());
-		try {
-			wait(holder);
-			pml_debug_printf("%f handleRelease self=%p success\n", now(), self.getPtr());
-		} catch (Error& e) {
-			pml_debug_printf("%f handleRelease self=%p error %s\n", now(), self.getPtr(), e.what());
-		}
-
+	static void releaseRunner(Reference<PriorityMultiLock> self, Priority* priority) {
 		pml_debug_printf("lock release priority %d  %s\n", (int)(priority->priority), self->toString().c_str());
 
 		pml_debug_printf("%f handleRelease self=%p releasing\n", now(), self.getPtr());
@@ -271,6 +254,49 @@ private:
 		if (self->waiting > 0) {
 			self->wakeRunner.trigger();
 		}
+	}
+
+	// Keep this as a plain callback instead of a detached coroutine: this path runs once per granted
+	// lock, and the coroutine conversion added enough per-release overhead to regress the microbench.
+	struct ReleaseHandler final : Callback<Void>, FastAllocated<ReleaseHandler> {
+		Reference<PriorityMultiLock> self;
+		Priority* priority;
+
+		ReleaseHandler(Reference<PriorityMultiLock> self, Priority* priority)
+		  : self(std::move(self)), priority(priority) {}
+
+		void fire(Void const&) override {
+			Callback<Void>::remove();
+			pml_debug_printf("%f handleRelease self=%p success\n", now(), self.getPtr());
+			releaseRunner(std::move(self), priority);
+			delete this;
+		}
+
+		void error(Error e) override {
+			Callback<Void>::remove();
+			pml_debug_printf("%f handleRelease self=%p error %s\n", now(), self.getPtr(), e.what());
+			releaseRunner(std::move(self), priority);
+			delete this;
+		}
+	};
+
+	static void handleRelease(Reference<PriorityMultiLock> self, Priority* priority, Future<Void> holder) {
+		pml_debug_printf("%f handleRelease self=%p start\n", now(), self.getPtr());
+
+		// Handle immediately-ready releases inline so the hot path avoids allocating a callback object.
+		if (holder.isReady()) {
+			if (holder.isError()) {
+				pml_debug_printf("%f handleRelease self=%p error %s\n", now(), self.getPtr(), holder.getError().what());
+			} else {
+				holder.get();
+				pml_debug_printf("%f handleRelease self=%p success\n", now(), self.getPtr());
+			}
+
+			releaseRunner(std::move(self), priority);
+			return;
+		}
+
+		holder.addCallbackAndClear(new ReleaseHandler(std::move(self), priority));
 	}
 
 	void addRunner(Lock& lock, Priority* priority) {
@@ -287,18 +313,18 @@ private:
 		return ceil((float)weight / totalPendingWeights * concurrency);
 	}
 
-	ACTOR static Future<Void> runner(PriorityMultiLock* self) {
-		state Future<Void> error = self->brokenOnDestruct.getFuture();
+	static Future<Void> runner(PriorityMultiLock* self) {
+		Future<Void> error = self->brokenOnDestruct.getFuture();
 
 		// Priority to try to run tasks from next
-		state WaitingPrioritiesList::iterator p = self->waitingPriorities.end();
+		WaitingPrioritiesList::iterator p = self->waitingPriorities.end();
 
-		loop {
+		while (true) {
 			pml_debug_printf("runner loop start  priority=%d  %s\n", p->priority, self->toString().c_str());
 
 			// Wait for a runner to release its lock
 			pml_debug_printf("runner loop waitTrigger  priority=%d  %s\n", p->priority, self->toString().c_str());
-			wait(self->wakeRunner.onTrigger());
+			co_await self->wakeRunner.onTrigger();
 			pml_debug_printf("%f runner loop wake  priority=%d  %s\n", now(), p->priority, self->toString().c_str());
 
 			// While there are available slots and there are waiters, launch tasks
@@ -306,7 +332,7 @@ private:
 				pml_debug_printf("  launch loop start  priority=%d  %s\n", p->priority, self->toString().c_str());
 
 				// Find the next priority with waiters and capacity.  There must be at least one.
-				loop {
+				while (true) {
 					if (p == self->waitingPriorities.end()) {
 						p = self->waitingPriorities.begin();
 					}
@@ -357,7 +383,3 @@ private:
 		}
 	}
 };
-
-#include "flow/unactorcompiler.h"
-
-#endif

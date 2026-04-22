@@ -19,7 +19,7 @@
  */
 
 #include "flow/flow.h"
-#include "flow/JsonTraceLogFormatter.h"
+#include "JsonTraceLogFormatter.h"
 
 #include <sstream>
 

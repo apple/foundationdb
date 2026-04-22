@@ -28,7 +28,7 @@
 #include <sys/stat.h>
 #include <sys/eventfd.h>
 #include <sys/syscall.h>
-#include "fdbrpc/linux_kaio.h"
+#include "linux_kaio.h"
 #include "flow/Knobs.h"
 #include "fdbrpc/Stats.h"
 #include "crc32/crc32c.h"

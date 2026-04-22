@@ -20,7 +20,7 @@
 #ifdef FLOW_GRPC_ENABLED
 #include <fstream>
 
-#include <fdbrpc/FileTransfer.h>
+#include "FileTransfer.h"
 #include "flow/IRandom.h"
 #include "crc32/crc32c.h"
 
