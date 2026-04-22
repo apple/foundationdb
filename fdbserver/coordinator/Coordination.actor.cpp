@@ -50,8 +50,6 @@ class LivenessChecker {
 			auto res = co_await race(delayUntil(self->lastTime.get() + self->threshold), self->lastTime.onChange());
 			if (res.index() == 0) {
 				co_return;
-			} else if (res.index() != 1) {
-				UNREACHABLE();
 			}
 		}
 	}
@@ -226,20 +224,21 @@ Future<Void> openDatabase(ClientData* db,
 		auto res = co_await race(
 		    checkStuck, yieldedFuture(clientInfoOnChange), delayJittered(SERVER_KNOBS->CLIENT_REGISTER_INTERVAL));
 		if (res.index() == 0) {
+			// checkStuck fired:
 			replyContents = failed_to_progress();
 			break;
 		} else if (res.index() == 1) {
+			// clientInfoOnChange fired:
 			clientInfoOnChange = db->clientInfo->onChange();
 			replyContents = db->clientInfo->get();
 		} else if (res.index() == 2) {
+			// delay fired:
 			if (db->clientInfo->get().read().id.isValid()) {
 				replyContents = db->clientInfo->get();
 			}
 			// Otherwise, we still break out of the loop and return a default_error_or.
 			// The client might be long gone!
 			break;
-		} else {
-			UNREACHABLE();
 		}
 	}
 
@@ -271,10 +270,8 @@ Future<Void> remoteMonitorLeader(int* clientCount,
 		                         delayJittered(SERVER_KNOBS->CLIENT_REGISTER_INTERVAL));
 		if (res.index() == 0) {
 			currentElectedLeaderOnChange = currentElectedLeader->onChange();
-		} else if (res.index() == 1) {
-			break;
 		} else {
-			UNREACHABLE();
+			break;
 		}
 	}
 
