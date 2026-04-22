@@ -38,7 +38,7 @@
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/HealthMonitor.h"
-#include "fdbrpc/JsonWebKeySet.h"
+#include "JsonWebKeySet.h"
 #include "fdbrpc/genericactors.actor.h"
 #include "fdbrpc/IPAllowList.h"
 #include "fdbrpc/simulator.h"

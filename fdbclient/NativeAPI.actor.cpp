@@ -146,9 +146,6 @@ Future<Void> refreshTransaction(DatabaseContext* self, Transaction* tr) {
 	*tr = Transaction(Database(Reference<DatabaseContext>::addRef(self)));
 }
 
-// FIXME: get a prototype in a header file, ugh.
-ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> clusterRecord);
-
 Optional<KeyRangeLocationInfo> DatabaseContext::getCachedLocation(const KeyRef& key, Reverse isBackward) {
 	Arena arena;
 

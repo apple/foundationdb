@@ -21,7 +21,7 @@
 #include <cstdio>
 
 #include "fdbrpc/FlowGrpc.h"
-#include "fdbrpc/FlowGrpcTests.h"
+#include "FlowGrpcTests.h"
 #include "flow/UnitTest.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.

@@ -31,7 +31,7 @@
 #include <boost/range.hpp>
 #include <thread>
 
-#include "fdbrpc/SimExternalConnection.h"
+#include "SimExternalConnection.h"
 #include "flow/Net2Packet.h"
 #include "flow/Platform.h"
 #include "flow/SendBufferIterator.h"
