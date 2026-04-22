@@ -800,6 +800,32 @@ if [[ "${USE_S3}" == "true" ]]; then
     query_str='bucket='"${bucket}"'&region='"${region}"'&secure_connection=1'
   fi
   path_prefix="bulkload/test/s3client"
+elif [[ "${USE_MOCK_GCS:-false}" == "true" ]]; then
+  log "Testing GCS against MockS3Server"
+  # shellcheck source=/dev/null
+  if ! source "${cwd}/mocks3_fixture.sh"; then
+    err "Failed to source mocks3_fixture.sh"
+    exit 1
+  fi
+  if ! TEST_SCRATCH_DIR=$(mktemp -d "${scratch_dir}/mockgcs_test.XXXXXX"); then
+    err "Failed create of the mockgcs test dir." >&2
+    exit 1
+  fi
+  readonly TEST_SCRATCH_DIR
+  if ! start_mocks3 "${build_dir}" "${TEST_SCRATCH_DIR}/mocks3_data"; then
+    err "Failed to start MockS3Server"
+    exit 1
+  fi
+  readonly host="${MOCKS3_HOST}:${MOCKS3_PORT}"
+  readonly bucket="test-bucket"
+  readonly region=""
+  # GCS-format credential file with Bearer token.
+  # Key by hostname only (not host:port) — GCSBlobStoreEndpoint::credentialFileKey() is "@" + parsed host.
+  readonly blob_credentials_file="${TEST_SCRATCH_DIR}/blob_credentials.json"
+  echo "{\"accounts\": {\"@${MOCKS3_HOST}\": {\"token\": \"mock-gcs-token\"}}}" > "${blob_credentials_file}"
+  query_str='bucket='"${bucket}"'&p=gcs&secure_connection=0'
+  path_prefix="gcsclient"
+
 else
   log "Testing against MockS3Server"
   # Now source in the mocks3 fixture so we can use its methods in the below.

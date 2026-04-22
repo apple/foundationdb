@@ -33,8 +33,8 @@ struct StorageServer : IStorageMetricsService {
     NotifiedVersion durableVersion;                      // committed to disk
     
     // Log system connection
-    Reference<ILogSystem> logSystem;
-    Reference<ILogSystem::IPeekCursor> logCursor;
+    Reference<LogSystem> logSystem;
+    Reference<IPeekCursor> logCursor;
     
     // Storage engine
     StorageServerDisk storage;                           // wraps IKeyValueStore

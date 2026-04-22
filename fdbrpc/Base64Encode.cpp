@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/Base64Encode.h"
+#include "Base64Encode.h"
 
 namespace {
 

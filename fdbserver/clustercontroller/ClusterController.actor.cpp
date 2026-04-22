@@ -45,7 +45,7 @@
 #include "ClusterRecovery.actor.h"
 #include "fdbserver/core/DataDistributorInterface.h"
 #include "fdbserver/core/LeaderElection.h"
-#include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/core/LogSystemConfig.h"
 #include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/WaitFailure.h"
@@ -61,7 +61,7 @@
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
-#include "fdbserver/core/ApplyMetadataMutation.h"
+#include "fdbserver/logsystem/ApplyMetadataMutation.h"
 #include "fdbserver/core/BackupProgress.h"
 #include "fdbserver/core/DBCoreState.h"
 #include "fdbserver/core/MoveKeys.h"
@@ -289,7 +289,7 @@ Future<Void> recruitFailedLogRouters(ClusterControllerData* cluster,
                                      ClusterControllerData::DBInfo* db,
                                      std::vector<int> tagIds,
                                      int logSetIndex,
-                                     Reference<ILogSystem> logSystem,
+                                     Reference<LogSystem> logSystem,
                                      LogSystemConfig config) {
 	Optional<Key> targetDcId =
 	    db->recoveryData->remoteDcIds.size() ? db->recoveryData->remoteDcIds[0] : Optional<Key>();
@@ -398,7 +398,7 @@ Future<Void> recruitFailedLogRouters(ClusterControllerData* cluster,
 	TraceEvent("LogRoutersRecruitmentComplete", cluster->id).detail("Count", tagIds.size());
 }
 
-Future<std::vector<int>> monitorLogRouters(Reference<ILogSystem> logSystem, int logSetIndex) {
+Future<std::vector<int>> monitorLogRouters(Reference<LogSystem> logSystem, int logSetIndex) {
 	std::vector<Future<Void>> failures;
 	LogSystemConfig config = logSystem->getLogSystemConfig();
 	std::vector<int> failedTagIds;
@@ -504,7 +504,7 @@ Future<Void> monitorAndRecruitLogRouters(ClusterControllerData* self) {
 
 		ASSERT(self->db.recoveryData.isValid());
 		uint64_t recoveryCount = self->db.recoveryData->cstate.myDBState.recoveryCount;
-		Reference<ILogSystem> logSystem = self->db.recoveryData->logSystem;
+		Reference<LogSystem> logSystem = self->db.recoveryData->logSystem;
 		LogSystemConfig config = logSystem->getLogSystemConfig();
 
 		// Find the log set with log routers (should be remote/satellite)
