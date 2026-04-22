@@ -1210,21 +1210,24 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 
 		// If err is not present then r is valid.
 		// If r->code is in successCodes then record the successful request and return r.
-		if (!err.present() && successCodes.count(r->code) != 0) {
-			TraceEvent(SevDebug, "S3BlobStoreDoRequestSuccessful")
-			    .detail("Verb", verb)
-			    .detail("Error", err.present())
-			    .detail("ErrorString", err.present() ? err.get().name() : "")
-			    .detail("Resource", resource)
-			    .detail("ResponseCode", r->code)
-			    .detail("ResponseContentSize", r->data.content.size())
-			    .log();
-			bstore->s_stats.requests_successful++;
-			++bstore->blobStats->requestsSuccessful;
-			return r;
+		if (!err.present()) {
+			ASSERT(r);
+			if (successCodes.count(r->code) != 0) {
+				TraceEvent(SevDebug, "S3BlobStoreDoRequestSuccessful")
+				    .detail("Verb", verb)
+				    .detail("Error", err.present())
+				    .detail("ErrorString", err.present() ? err.get().name() : "")
+				    .detail("Resource", resource)
+				    .detail("ResponseCode", r->code)
+				    .detail("ResponseContentSize", r->data.content.size())
+				    .log();
+				bstore->s_stats.requests_successful++;
+				++bstore->blobStats->requestsSuccessful;
+				return r;
+			}
 		}
 
-		// Otherwise, this request is considered failed.  Update failure count.
+		// This request is considered failed.  Update failure count.
 		bstore->s_stats.requests_failed++;
 		++bstore->blobStats->requestsFailed;
 
@@ -1241,30 +1244,14 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		                 retryable ? (fastRetry ? "S3BlobStoreEndpointRequestFailedFastRetryable"
 		                                        : "S3BlobStoreEndpointRequestFailedRetryable")
 		                           : "S3BlobStoreEndpointRequestFailed");
+		event.suppressFor(1);
 
 		bool connectionFailed = false;
-		// Attach err to trace event if present, otherwise extract some stuff from the response
+
 		if (err.present()) {
 			event.errorUnsuppressed(err.get());
 			if (err.get().code() == error_code_connection_failed) {
 				connectionFailed = true;
-			}
-		}
-		event.suppressFor(60);
-
-		if (!err.present()) {
-			event.detail("ResponseCode", r->code);
-			std::string s3Error = parseErrorCodeFromS3(r->data.content);
-			event.detail("S3ErrorCode", s3Error);
-			if (r->code == badRequestCode) {
-				if (isS3TokenError(s3Error) || simulateS3TokenError) {
-					s3TokenError = true;
-				}
-				TraceEvent(SevWarnAlways, "S3BlobStoreBadRequest")
-				    .detail("HttpCode", r->code)
-				    .detail("HttpResponseContent", r->data.content)
-				    .detail("S3Error", s3Error)
-				    .log();
 			}
 		}
 
@@ -1280,6 +1267,16 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			event.detail("RemoteEndpoint", remoteAddress.get());
 		else
 			event.detail("RemoteHost", bstore->host);
+
+		if (r) {
+			event.detail("ResponseCode", r->code);
+			event.detail("HttpResponseContent", r->data.content);
+			std::string s3Error = parseErrorCodeFromS3(r->data.content);
+			event.detail("S3ErrorCode", s3Error);
+			if (r->code == badRequestCode && (isS3TokenError(s3Error) || simulateS3TokenError)) {
+				s3TokenError = true;
+			}
+		}
 
 		event.detail("Verb", verb)
 		    .detail("Resource", resource)
