@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -11,6 +12,8 @@ import (
 
 // CertLoader is used to reload certificates if needed.
 type CertLoader struct {
+	// mu protects cachedCert and cachedCertModTime from concurrent access.
+	mu sync.RWMutex
 	// CertFile specifies the path to the x509 certificate.
 	CertFile string
 	// CertFile specifies the path to the x509 private key.
@@ -41,16 +44,32 @@ func (certLoader *CertLoader) GetCertificate(_ *tls.ClientHelloInfo) (*tls.Certi
 		return nil, err
 	}
 
-	if certLoader.cachedCert == nil || stat.ModTime().After(certLoader.cachedCertModTime) {
-		certLoader.logger.Info("loading new certificates", "certFile", certLoader.CertFile, "keyFile", certLoader.KeyFile, "cachedModificationTime", certLoader.cachedCertModTime.String(), "currentModificationTime", stat.ModTime().String())
-		pair, err := tls.LoadX509KeyPair(certLoader.CertFile, certLoader.KeyFile)
-		if err != nil {
-			return nil, fmt.Errorf("failed loading tls key pair: %w", err)
-		}
+	// Fast path: return cached cert if it is still current.
+	certLoader.mu.RLock()
+	cached := certLoader.cachedCert
+	modTime := certLoader.cachedCertModTime
+	certLoader.mu.RUnlock()
 
-		certLoader.cachedCert = &pair
-		certLoader.cachedCertModTime = stat.ModTime()
+	if cached != nil && !stat.ModTime().After(modTime) {
+		return cached, nil
 	}
 
+	// Slow path: reload cert under write lock.
+	certLoader.mu.Lock()
+	defer certLoader.mu.Unlock()
+
+	// Re-check after acquiring the write lock; another goroutine may have reloaded already.
+	if certLoader.cachedCert != nil && !stat.ModTime().After(certLoader.cachedCertModTime) {
+		return certLoader.cachedCert, nil
+	}
+
+	certLoader.logger.Info("loading new certificates", "certFile", certLoader.CertFile, "keyFile", certLoader.KeyFile, "cachedModificationTime", certLoader.cachedCertModTime.String(), "currentModificationTime", stat.ModTime().String())
+	pair, err := tls.LoadX509KeyPair(certLoader.CertFile, certLoader.KeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed loading tls key pair: %w", err)
+	}
+
+	certLoader.cachedCert = &pair
+	certLoader.cachedCertModTime = stat.ModTime()
 	return certLoader.cachedCert, nil
 }

@@ -164,6 +164,7 @@ func startMonitor(ctx context.Context, logger logr.Logger, configFile string, cu
 			certLoader := certloader.NewCertLoader(logger, promConfig.certPath, promConfig.keyPath)
 			tlsConfig := &tls.Config{
 				GetCertificate: certLoader.GetCertificate,
+				MinVersion:     tls.VersionTLS12,
 			}
 			server := &http.Server{
 				Addr:      promConfig.listenAddr,
@@ -340,7 +341,7 @@ func (monitor *monitor) acceptConfiguration(configuration *api.ProcessConfigurat
 
 	// If the monitor has running processes but the processes shouldn't be running, kill them with SIGTERM.
 	if hasRunningProcesses && !monitor.activeConfiguration.ShouldRunServers() {
-		monitor.sendSignalToProcesses(syscall.SIGTERM)
+		monitor.signalProcesses(syscall.SIGTERM, monitor.processIDs)
 	}
 }
 
@@ -375,10 +376,18 @@ func (monitor *monitor) runProcess(processNumber int) {
 			errorCounter = 0
 		}
 
-		arguments, err := monitor.activeConfiguration.GenerateArguments(processNumber, monitor.customEnvironment)
+		monitor.mutex.Lock()
+		config := monitor.activeConfiguration
+		customEnv := make(map[string]string, len(monitor.customEnvironment))
+		for k, v := range monitor.customEnvironment {
+			customEnv[k] = v
+		}
+		monitor.mutex.Unlock()
+
+		arguments, err := config.GenerateArguments(processNumber, customEnv)
 		if err != nil {
 			backoffDuration := getBackoffDuration(errorCounter)
-			logger.Error(err, "Error generating arguments for subprocess", "configuration", monitor.activeConfiguration, "errorCounter", errorCounter, "backoffDuration", backoffDuration.String())
+			logger.Error(err, "Error generating arguments for subprocess", "configuration", config, "errorCounter", errorCounter, "backoffDuration", backoffDuration.String())
 			time.Sleep(backoffDuration)
 			errorCounter++
 			continue
@@ -410,7 +419,7 @@ func (monitor *monitor) runProcess(processNumber int) {
 		}
 
 		// Update the prometheus metrics for the process.
-		monitor.metrics.registerProcessStartup(processNumber, monitor.activeConfiguration.Version.String())
+		monitor.metrics.registerProcessStartup(processNumber, config.Version.String())
 
 		if cmd.Process != nil {
 			pid = cmd.Process.Pid
@@ -587,8 +596,11 @@ func (monitor *monitor) handleFileChange(changedFile string) {
 	monitor.loadConfiguration()
 }
 
-func (monitor *monitor) sendSignalToProcesses(signal os.Signal) {
-	for processNumber, processID := range monitor.processIDs {
+// signalProcesses sends the given signal to all processes in the provided slice.
+// Callers that already hold monitor.mutex should pass monitor.processIDs directly.
+// Callers that do not hold the mutex should snapshot processIDs under the mutex first.
+func (monitor *monitor) signalProcesses(signal os.Signal, processIDs []int) {
+	for processNumber, processID := range processIDs {
 		if processID <= 0 {
 			continue
 		}
@@ -618,9 +630,14 @@ func (monitor *monitor) run() {
 		latestSignal := <-signals
 		monitor.logger.Info("Received system signal", "signal", latestSignal)
 
-		// Reset the processCount to 0 to make sure the monitor doesn't try to restart the processes.
+		// Reset processCount and snapshot processIDs under the mutex, then signal
+		// outside the lock to avoid holding it during OS calls.
+		monitor.mutex.Lock()
 		monitor.processCount = 0
-		monitor.sendSignalToProcesses(latestSignal)
+		ids := make([]int, len(monitor.processIDs))
+		copy(ids, monitor.processIDs)
+		monitor.mutex.Unlock()
+		monitor.signalProcesses(latestSignal, ids)
 
 		if podMeta := monitor.podClient.getPodMetadata(); podMeta != nil {
 			if delayValue, ok := podMeta.Annotations[api.DelayShutdownAnnotation]; ok {
