@@ -133,7 +133,7 @@ std::string BackupDescription::toString() const {
 
 	info.append(format("URL: %s\n", url.c_str()));
 	info.append(format("Restorable: %s\n", maxRestorableVersion.present() ? "true" : "false"));
-	info.append(format("Partitioned logs: %s\n", partitioned ? "true" : "false"));
+	info.append(format("Mutation Log Type: %s\n", mutationLogTypeToString(mutationLogType).c_str()));
 	info.append(format("File-level encryption: %s\n", fileLevelEncryption ? "true" : "false"));
 	info.append(format("Encryption block size: %d\n", encryptionBlockSize));
 
@@ -195,7 +195,7 @@ std::string BackupDescription::toJSON() const {
 	doc.setKey("SchemaVersion", "1.0.0");
 	doc.setKey("URL", url.c_str());
 	doc.setKey("Restorable", maxRestorableVersion.present());
-	doc.setKey("Partitioned", partitioned);
+	doc.setKey("MutationLogType", mutationLogTypeToString(mutationLogType).c_str());
 	doc.setKey("FileLevelEncryption", fileLevelEncryption);
 	doc.setKey("EncryptionBlockSize", encryptionBlockSize);
 

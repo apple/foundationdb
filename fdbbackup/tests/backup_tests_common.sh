@@ -157,7 +157,7 @@ function run_backup {
   add_common_optional_args cmd_args "${blob_credentials}" "${backup_mode}" "${local_encryption_key_file}"
 
   if [[ "${USE_PARTITIONED_LOG:-false}" == "true" ]]; then
-    cmd_args+=("--partitioned-log-experimental")
+    cmd_args+=("--mutation-log-type" "partitioned-log-experimental")
   fi
 
   if [[ "${USE_ENCRYPTION_BLOCK_SIZE:-false}" == "true" ]]; then

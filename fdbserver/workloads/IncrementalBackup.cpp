@@ -199,7 +199,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 				                                  tag.toString(),
 				                                  backupRanges,
 				                                  StopWhenDone::False,
-				                                  UsePartitionedLog::False,
+				                                  MutationLogType::DEFAULT,
 				                                  IncrementalBackupOnly::True,
 				                                  encryptionKeyFileName,
 				                                  encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0,
