@@ -20,7 +20,7 @@
 
 #include "flow/flow.h"
 #include "flow/UnitTest.h"
-#include "flow/genericcoros.h"
+#include "genericcoros.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR Future<bool> allTrue(std::vector<Future<bool>> all) {
