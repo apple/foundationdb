@@ -5,7 +5,8 @@ testTitle = 'StatusDuringOutage'
     testName = 'Status'
     testDuration = 60.0
     requestsPerSecond = 0.5
-    maxAcceptableStatusLatency = 30.1
+    # STATUS_TIMEOUT is 30s, but RandomClogging can add network delay on top
+    maxAcceptableStatusLatency = 32.0
 
     [[test.workload]]
     testName = 'Attrition'
