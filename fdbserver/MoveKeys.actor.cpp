@@ -37,6 +37,13 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
+
+// Exponential backoff for transaction_too_old retries in finishMoveKeys.
+// Starts at 0.1s, doubles each retry, capped at 5.0s.
+double finishMoveKeysBackoff(int retries) {
+	return std::min(0.1 * (1 << std::min(retries, 6)), 5.0);
+}
+
 struct Shard {
 	Shard() = default;
 	Shard(KeyRangeRef range, const UID& id) : range(range), id(id) {}
@@ -1613,6 +1620,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 						txnCommitted->increment(1);
 
 						begin = endKey;
+						retries = 0;
 						break;
 					}
 					// This leads to a count of transactions starting that exceeds the sum of
@@ -1625,12 +1633,11 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 					state Error err = error;
 					wait(tr.onError(error));
 					retries++;
-					// tr.onError has no backoff for transaction_too_old — it returns immediately.
-					// With 15 FlowLock slots all retrying, this creates a retry storm. Add
-					// exponential backoff capped at 5s, and give up after too many retries so
-					// the move returns to the queue for reassignment.
+					// tr.onError delays are short for transaction_too_old. With 15
+					// FlowLock slots all retrying, this creates a retry storm. Add
+					// additional exponential backoff capped at 5s.
 					if (err.code() == error_code_transaction_too_old) {
-						double backoff = std::min(0.1 * (1 << std::min(retries, 6)), 5.0);
+						double backoff = finishMoveKeysBackoff(retries);
 						CODE_PROBE(true, "finishMoveKeys transaction_too_old backoff");
 						TraceEvent("FinishMoveKeysBackoff", relocationIntervalId)
 						    .detail("Retries", retries)
@@ -3506,19 +3513,16 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 //      finishMoveKeys may not be called if no moves are scheduled
 // So we test the backoff arithmetic directly.
 TEST_CASE("/fdbserver/MoveKeys/finishMoveKeysBackoff") {
-	// Verify exponential backoff formula: min(0.1 * (1 << min(retries, 6)), 5.0)
-	// retries=1: 0.2s, retries=2: 0.4s, ..., retries=6: 6.4->capped to 5.0s
-	auto backoffFor = [](int retries) { return std::min(0.1 * (1 << std::min(retries, 6)), 5.0); };
-
-	ASSERT(backoffFor(0) == 0.1);
-	ASSERT(backoffFor(1) == 0.2);
-	ASSERT(backoffFor(2) == 0.4);
-	ASSERT(backoffFor(3) == 0.8);
-	ASSERT(backoffFor(4) == 1.6);
-	ASSERT(backoffFor(5) == 3.2);
-	ASSERT(backoffFor(6) == 5.0); // capped
-	ASSERT(backoffFor(7) == 5.0); // still capped
-	ASSERT(backoffFor(100) == 5.0); // still capped
+	// Verify exponential backoff: 0.1s base, doubles each retry, capped at 5.0s
+	ASSERT(finishMoveKeysBackoff(0) == 0.1);
+	ASSERT(finishMoveKeysBackoff(1) == 0.2);
+	ASSERT(finishMoveKeysBackoff(2) == 0.4);
+	ASSERT(finishMoveKeysBackoff(3) == 0.8);
+	ASSERT(finishMoveKeysBackoff(4) == 1.6);
+	ASSERT(finishMoveKeysBackoff(5) == 3.2);
+	ASSERT(finishMoveKeysBackoff(6) == 5.0); // capped
+	ASSERT(finishMoveKeysBackoff(7) == 5.0); // still capped
+	ASSERT(finishMoveKeysBackoff(100) == 5.0); // still capped
 
 	// Verify the retry limit knob exists and has a reasonable default
 	ASSERT(SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES > 0);
