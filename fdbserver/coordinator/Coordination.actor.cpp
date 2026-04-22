@@ -33,6 +33,7 @@
 #include "fdbclient/MonitorLeader.h"
 #include "flow/network.h"
 
+#include "flow/CoroUtils.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // This module implements coordinationServer() plus the interfaces in CoordinationInterface.h
@@ -44,13 +45,13 @@ const std::string fileCoordinatorPrefix = "coordination-";
 class LivenessChecker {
 	double threshold;
 	AsyncVar<double> lastTime;
-	ACTOR static Future<Void> checkStuck(LivenessChecker const* self) {
-		loop {
-			choose {
-				when(wait(delayUntil(self->lastTime.get() + self->threshold))) {
-					return Void();
-				}
-				when(wait(self->lastTime.onChange())) {}
+	static Future<Void> checkStuck(LivenessChecker const* self) {
+		while (true) {
+			auto res = co_await race(delayUntil(self->lastTime.get() + self->threshold), self->lastTime.onChange());
+			if (res.index() == 0) {
+				co_return;
+			} else if (res.index() != 1) {
+				UNREACHABLE();
 			}
 		}
 	}
@@ -204,13 +205,13 @@ TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 	return Void();
 }
 
-ACTOR Future<Void> openDatabase(ClientData* db,
-                                int* clientCount,
-                                Reference<AsyncVar<bool>> hasConnectedClients,
-                                OpenDatabaseCoordRequest req,
-                                Future<Void> checkStuck) {
-	state ErrorOr<CachedSerialization<ClientDBInfo>> replyContents;
-	state Future<Void> clientInfoOnChange = db->clientInfo->onChange();
+Future<Void> openDatabase(ClientData* db,
+                          int* clientCount,
+                          Reference<AsyncVar<bool>> hasConnectedClients,
+                          OpenDatabaseCoordRequest req,
+                          Future<Void> checkStuck) {
+	ErrorOr<CachedSerialization<ClientDBInfo>> replyContents;
+	Future<Void> clientInfoOnChange = db->clientInfo->onChange();
 
 	++(*clientCount);
 	hasConnectedClients->set(true);
@@ -222,22 +223,23 @@ ACTOR Future<Void> openDatabase(ClientData* db,
 
 	while (!db->clientInfo->get().read().id.isValid() || (db->clientInfo->get().read().id == req.knownClientInfoID &&
 	                                                      !db->clientInfo->get().read().forward.present())) {
-		choose {
-			when(wait(checkStuck)) {
-				replyContents = failed_to_progress();
-				break;
-			}
-			when(wait(yieldedFuture(clientInfoOnChange))) {
-				clientInfoOnChange = db->clientInfo->onChange();
+		auto res = co_await race(
+		    checkStuck, yieldedFuture(clientInfoOnChange), delayJittered(SERVER_KNOBS->CLIENT_REGISTER_INTERVAL));
+		if (res.index() == 0) {
+			replyContents = failed_to_progress();
+			break;
+		} else if (res.index() == 1) {
+			clientInfoOnChange = db->clientInfo->onChange();
+			replyContents = db->clientInfo->get();
+		} else if (res.index() == 2) {
+			if (db->clientInfo->get().read().id.isValid()) {
 				replyContents = db->clientInfo->get();
 			}
-			when(wait(delayJittered(SERVER_KNOBS->CLIENT_REGISTER_INTERVAL))) {
-				if (db->clientInfo->get().read().id.isValid()) {
-					replyContents = db->clientInfo->get();
-				}
-				// Otherwise, we still break out of the loop and return a default_error_or.
-				break;
-			} // The client might be long gone!
+			// Otherwise, we still break out of the loop and return a default_error_or.
+			// The client might be long gone!
+			break;
+		} else {
+			UNREACHABLE();
 		}
 	}
 
@@ -254,26 +256,25 @@ ACTOR Future<Void> openDatabase(ClientData* db,
 	if (--(*clientCount) == 0) {
 		hasConnectedClients->set(false);
 	}
-
-	return Void();
 }
 
-ACTOR Future<Void> remoteMonitorLeader(int* clientCount,
-                                       Reference<AsyncVar<bool>> hasConnectedClients,
-                                       Reference<AsyncVar<Optional<LeaderInfo>>> currentElectedLeader,
-                                       ElectionResultRequest req) {
-	state Future<Void> currentElectedLeaderOnChange = currentElectedLeader->onChange();
+Future<Void> remoteMonitorLeader(int* clientCount,
+                                 Reference<AsyncVar<bool>> hasConnectedClients,
+                                 Reference<AsyncVar<Optional<LeaderInfo>>> currentElectedLeader,
+                                 ElectionResultRequest req) {
+	Future<Void> currentElectedLeaderOnChange = currentElectedLeader->onChange();
 	++(*clientCount);
 	hasConnectedClients->set(true);
 
 	while (!currentElectedLeader->get().present() || req.knownLeader == currentElectedLeader->get().get().changeID) {
-		choose {
-			when(wait(yieldedFuture(currentElectedLeaderOnChange))) {
-				currentElectedLeaderOnChange = currentElectedLeader->onChange();
-			}
-			when(wait(delayJittered(SERVER_KNOBS->CLIENT_REGISTER_INTERVAL))) {
-				break;
-			}
+		auto res = co_await race(yieldedFuture(currentElectedLeaderOnChange),
+		                         delayJittered(SERVER_KNOBS->CLIENT_REGISTER_INTERVAL));
+		if (res.index() == 0) {
+			currentElectedLeaderOnChange = currentElectedLeader->onChange();
+		} else if (res.index() == 1) {
+			break;
+		} else {
+			UNREACHABLE();
 		}
 	}
 
@@ -282,8 +283,6 @@ ACTOR Future<Void> remoteMonitorLeader(int* clientCount,
 	if (--(*clientCount) == 0) {
 		hasConnectedClients->set(false);
 	}
-
-	return Void();
 }
 
 // This actor implements a *single* leader-election register (essentially, it ignores
