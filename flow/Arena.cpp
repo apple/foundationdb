@@ -107,11 +107,18 @@ void makeUndefined(void*, size_t) {}
 #endif
 } // namespace
 
-Arena::Arena() : impl(nullptr) {}
+static SimpleCounter<int64_t>* arenasCreated(void) {
+	static SimpleCounter<int64_t>* p = SimpleCounter<int64_t>::makeCounter("/flow/arena/arenasCreated");
+	return p;
+}
+
+Arena::Arena() : impl(nullptr) {
+	arenasCreated()->increment(1);
+}
+
 Arena::Arena(size_t reservedSize) : impl(0) {
 	UNSTOPPABLE_ASSERT(reservedSize < std::numeric_limits<int>::max());
-	static SimpleCounter<int64_t>* created = SimpleCounter<int64_t>::makeCounter("/flow/arena/arenasCreated");
-	created->increment(1);
+	arenasCreated()->increment(1);
 	if (reservedSize) {
 		allowAccess(impl.getPtr());
 		ArenaBlock::create((int)reservedSize, impl);
