@@ -1512,7 +1512,7 @@ void BufferedCursor::advanceTo(LogMessageVersion n) {
 }
 
 Future<Void> bufferedGetMoreLoader(BufferedCursor* self,
-                                   Reference<ILogSystem::IPeekCursor> cursor,
+                                   Reference<IPeekCursor> cursor,
                                    int idx,
                                    TaskPriority taskID) {
 	while (true) {
