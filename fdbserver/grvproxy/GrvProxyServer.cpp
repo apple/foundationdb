@@ -29,7 +29,7 @@
 #include "fdbserver/grvproxy/GrvProxyServer.h"
 #include "GrvProxyTagThrottler.h"
 #include "GrvTransactionRateInfo.h"
-#include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/WaitFailure.h"
@@ -206,7 +206,7 @@ struct GrvProxyData {
 	GrvProxyStats stats;
 	MasterInterface master;
 	PublicRequestStream<GetReadVersionRequest> getConsistentReadVersion;
-	Reference<ILogSystem> logSystem;
+	Reference<LogSystem> logSystem;
 
 	Database cx;
 	Reference<AsyncVar<ServerDBInfo> const> db;

@@ -57,7 +57,6 @@ graph TB
     style Memory fill:#fce4ec,stroke:#e91e63
     style Diagnostics fill:#f3e5f5,stroke:#9c27b0
 ```
-
 ## Future/Promise Lifecycle
 
 ```mermaid
@@ -75,4 +74,3 @@ sequenceDiagram
     SAV->>Scheduler: enqueue callback
     Scheduler->>Consumer: Resume with value
 ```
-

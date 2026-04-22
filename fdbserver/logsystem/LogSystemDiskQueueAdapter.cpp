@@ -19,7 +19,7 @@
  */
 
 #include "fdbserver/core/IDiskQueue.h"
-#include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/Knobs.h"
 #include "flow/CoroUtils.h"
@@ -252,7 +252,7 @@ Future<LogSystemDiskQueueAdapter::CommitMessage> LogSystemDiskQueueAdapter::getC
 	return pcm.getFuture();
 }
 
-LogSystemDiskQueueAdapter* openDiskQueueAdapter(Reference<ILogSystem> logSystem,
+LogSystemDiskQueueAdapter* openDiskQueueAdapter(Reference<LogSystem> logSystem,
                                                 Reference<AsyncVar<PeekTxsInfo>> peekLocality,
                                                 Version txsPoppedVersion) {
 	return new LogSystemDiskQueueAdapter(logSystem, peekLocality, txsPoppedVersion, true);

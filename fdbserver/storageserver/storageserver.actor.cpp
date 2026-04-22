@@ -90,7 +90,7 @@
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/Stats.h"
-#include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/DataMovement.h"
@@ -1175,8 +1175,8 @@ public:
 
 	ProtocolVersion logProtocol;
 
-	Reference<ILogSystem> logSystem;
-	Reference<ILogSystem::IPeekCursor> logCursor;
+	Reference<LogSystem> logSystem;
+	Reference<IPeekCursor> logCursor;
 
 	// The version the cluster starts on. This value is not persisted and may
 	// not be valid after a recovery.
@@ -9559,7 +9559,7 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				co_await data->byteSampleClearsTooLarge.onChange();
 			}
 
-			Reference<ILogSystem::IPeekCursor> cursor = data->logCursor;
+			Reference<IPeekCursor> cursor = data->logCursor;
 
 			double beforeTLogCursorReads = now();
 			while (true) {
@@ -9598,7 +9598,7 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 			start = now();
 			FetchInjectionInfo fii;
-			Reference<ILogSystem::IPeekCursor> cloneCursor2 = cursor->cloneNoMore();
+			Reference<IPeekCursor> cloneCursor2 = cursor->cloneNoMore();
 
 			// Collect eager read keys.
 			while (true) {
@@ -9608,7 +9608,7 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				bool firstMutation = true;
 				bool dbgLastMessageWasProtocol = false;
 
-				Reference<ILogSystem::IPeekCursor> cloneCursor1 = cloneCursor2->cloneNoMore();
+				Reference<IPeekCursor> cloneCursor1 = cloneCursor2->cloneNoMore();
 
 				cloneCursor1->setProtocolVersion(data->logProtocol);
 

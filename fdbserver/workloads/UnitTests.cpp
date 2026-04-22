@@ -48,7 +48,7 @@ void forceLinkActorFuzzUnitTests();
 void forceLinkGrpcTests();
 void forceLinkGrpcTests2();
 void forceLinkSimpleCounterTests();
-void forceLinkTagPartitionedLogSystemRecoveryTests();
+void forceLinkLogSystemRecoveryTests();
 void forceLinkIPagerTests();
 void forceLinkMockS3ServerTests();
 void forceLinkClusterHealthMonitorTests();
@@ -119,7 +119,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkRandomKeyValueUtilsTests();
 		forceLinkActorFuzzUnitTests();
 		forceLinkSimpleCounterTests();
-		forceLinkTagPartitionedLogSystemRecoveryTests();
+		forceLinkLogSystemRecoveryTests();
 		forceLinkIPagerTests();
 		forceLinkMockS3ServerTests();
 		forceLinkClusterHealthMonitorTests();

@@ -26,11 +26,11 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/Stats.h"
-#include "fdbserver/core/ApplyMetadataMutation.h"
+#include "fdbserver/logsystem/ApplyMetadataMutation.h"
 #include "fdbserver/core/ConflictBatch.h"
 #include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/MasterInterface.h"
@@ -143,7 +143,7 @@ struct Resolver : ReferenceCounted<Resolver> {
 	// happens at commit proxies and we never "write" to the LogSystem at
 	// Resolvers.
 	LogSystemDiskQueueAdapter* logAdapter = nullptr;
-	Reference<ILogSystem> logSystem;
+	Reference<LogSystem> logSystem;
 	IKeyValueStore* txnStateStore = nullptr;
 	int localTLogCount = -1;
 

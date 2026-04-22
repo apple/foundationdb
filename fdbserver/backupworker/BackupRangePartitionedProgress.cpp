@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "BackupRangePartitionedProgress.h"
+#include "fdbserver/backupworker/BackupRangePartitionedProgress.h"
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
@@ -35,7 +35,6 @@ void BackupRangePartitionedProgress::addBackupStatus(const WorkerBackupStatus& s
 	}
 }
 
-// Save each tag's savedVersion for all epochs into "bStatus".
 Future<Void> getBackupRangePartitionedProgress(Database cx,
                                                UID dbgid,
                                                Reference<BackupRangePartitionedProgress> bStatus,
