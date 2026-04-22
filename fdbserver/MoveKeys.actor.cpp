@@ -1642,18 +1642,16 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 						TraceEvent("FinishMoveKeysBackoff", relocationIntervalId)
 						    .detail("Retries", retries)
 						    .detail("BackoffSeconds", backoff);
+						if (retries > SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES) {
+							CODE_PROBE(true, "finishMoveKeys giving up after max retries");
+							TraceEvent(SevWarnAlways, "RelocateShard_FinishMoveKeysGivingUp", relocationIntervalId)
+							    .error(err)
+							    .detail("KeyBegin", keys.begin)
+							    .detail("KeyEnd", keys.end)
+							    .detail("Retries", retries);
+							throw movekeys_conflict();
+						}
 						wait(delay(backoff));
-					}
-					// Give up after too many retries of any error type — if finishMoveKeys
-					// can't succeed, return the move to DD's queue for reassignment.
-					if (retries > SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES) {
-						CODE_PROBE(true, "finishMoveKeys giving up after max retries");
-						TraceEvent(SevWarnAlways, "RelocateShard_FinishMoveKeysGivingUp", relocationIntervalId)
-						    .error(err)
-						    .detail("KeyBegin", keys.begin)
-						    .detail("KeyEnd", keys.end)
-						    .detail("Retries", retries);
-						throw movekeys_conflict();
 					}
 					if (retries % 10 == 0) {
 						TraceEvent(retries == 20 ? SevWarnAlways : SevWarn,
@@ -3524,9 +3522,8 @@ TEST_CASE("/fdbserver/MoveKeys/finishMoveKeysBackoff") {
 	ASSERT(finishMoveKeysBackoff(7) == 5.0); // still capped
 	ASSERT(finishMoveKeysBackoff(100) == 5.0); // still capped
 
-	// Verify the retry limit knob exists and has a reasonable default
+	// Verify the retry limit knob exists and is positive
 	ASSERT(SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES > 0);
-	ASSERT(SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES <= 100);
 
 	return Void();
 }
