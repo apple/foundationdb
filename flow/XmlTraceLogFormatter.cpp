@@ -21,7 +21,7 @@
 #include "flow/flow.h"
 #include "flow/ScopeExit.h"
 #include "flow/UnitTest.h"
-#include "flow/XmlTraceLogFormatter.h"
+#include "XmlTraceLogFormatter.h"
 
 void XmlTraceLogFormatter::addref() {
 	ReferenceCounted<XmlTraceLogFormatter>::addref();

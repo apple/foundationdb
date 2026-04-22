@@ -39,12 +39,12 @@
 #include "fdbclient/TransactionLineage.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbserver/core/AccumulativeChecksumUtil.h"
-#include "fdbserver/core/ApplyMetadataMutation.h"
+#include "fdbserver/logsystem/ApplyMetadataMutation.h"
 #include "fdbserver/core/ConflictBatch.h"
 #include "fdbserver/core/DataDistributorInterface.h"
 #include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/kvstore/FDBExecHelper.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
@@ -1717,10 +1717,10 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		// Issue acs mutation at the end of this commit batch
 		addAccumulativeChecksumMutations(self);
 	}
-	const auto versionSet = ILogSystem::PushVersionSet{ self->prevVersion,
-		                                                self->commitVersion,
-		                                                pProxyCommitData->committedVersion.get(),
-		                                                pProxyCommitData->minKnownCommittedVersion };
+	const auto versionSet = LogPushVersionSet{ self->prevVersion,
+		                                       self->commitVersion,
+		                                       pProxyCommitData->committedVersion.get(),
+		                                       pProxyCommitData->minKnownCommittedVersion };
 	self->loggingComplete =
 	    pProxyCommitData->logSystem->push(versionSet, self->toCommit, span.context, self->debugID, tpcvMap);
 
@@ -2681,7 +2681,7 @@ Future<Void> processCompleteTransactionStateRequest(TransactionStateResolveConte
 		applyMetadataMutations(SpanContext(),
 		                       pContext->pCommitData->getApplyMetadataProxyContext(),
 		                       arena,
-		                       Reference<ILogSystem>(),
+		                       Reference<LogSystem>(),
 		                       mutations,
 		                       /* pToCommit= */ nullptr,
 		                       confChanges,

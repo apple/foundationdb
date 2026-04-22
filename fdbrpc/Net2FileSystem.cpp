@@ -36,14 +36,14 @@
 #define FILESYSTEM_IMPL 1
 
 #include "fdbrpc/AsyncFileCached.h"
-#include "fdbrpc/AsyncFileChaos.h"
-#include "fdbrpc/AsyncFileEIO.h"
+#include "AsyncFileChaos.h"
+#include "AsyncFileEIO.h"
 #include "fdbrpc/AsyncFileEncrypted.h"
-#include "fdbrpc/AsyncFileWinASIO.h"
-#include "fdbrpc/AsyncFileKAIO.h"
+#include "AsyncFileWinASIO.h"
+#include "AsyncFileKAIO.h"
 #include "flow/AsioReactor.h"
 #include "flow/Platform.h"
-#include "fdbrpc/AsyncFileWriteChecker.h"
+#include "AsyncFileWriteChecker.h"
 #include "flow/UnitTest.h"
 
 #ifdef __linux__

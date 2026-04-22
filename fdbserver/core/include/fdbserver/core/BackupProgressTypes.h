@@ -1,5 +1,5 @@
 /*
- * CoordinationServer.h
+ * BackupProgressTypes.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,13 +18,14 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_COORDINATOR_COORDINATIONSERVER_H
-#define FDBSERVER_COORDINATOR_COORDINATIONSERVER_H
 #pragma once
 
-#include "fdbserver/core/CoordinationInterface.h"
+#include "fdbclient/FDBTypes.h"
 
-Future<Void> coordinationServer(std::string dataFolder, Reference<IClusterConnectionRecord> ccf);
-Future<Void> coordChangeClusterKey(std::string dataFolder, KeyRef newClusterKey, KeyRef oldClusterKey);
+struct EpochTagsVersionsInfo {
+	int32_t logRouterTags;
+	Version epochBegin, epochEnd;
 
-#endif
+	explicit EpochTagsVersionsInfo(int32_t n, Version begin, Version end)
+	  : logRouterTags(n), epochBegin(begin), epochEnd(end) {}
+};

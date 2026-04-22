@@ -20,8 +20,8 @@
 
 #include <string_view>
 #include <fmt/format.h>
-#include "fdbrpc/Base64Encode.h"
-#include "fdbrpc/Base64Decode.h"
+#include "Base64Encode.h"
+#include "Base64Decode.h"
 #include "flow/flow.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"

@@ -2888,8 +2888,6 @@ Future<Optional<std::string>> FailedLocalitiesRangeImpl::commit(ReadYourWritesTr
 	return excludeLocalityCommitActor(ryw, true);
 }
 
-// Defined in ReadYourWrites.actor.cpp
-Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> const& clusterRecord);
 // Defined in NativeAPI.actor.cpp
 Future<bool> verifyInterfaceActor(Reference<FlowLock> const& connectLock, ClientWorkerInterface const& workerInterf);
 

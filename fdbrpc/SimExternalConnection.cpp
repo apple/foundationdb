@@ -31,7 +31,7 @@
 #include <boost/range.hpp>
 #include <thread>
 
-#include "fdbrpc/SimExternalConnection.h"
+#include "SimExternalConnection.h"
 #include "flow/Net2Packet.h"
 #include "flow/Platform.h"
 #include "flow/SendBufferIterator.h"
@@ -164,7 +164,6 @@ std::vector<NetworkAddress> SimExternalConnection::resolveTCPEndpointBlocking(co
 		dnsCache->add(host, service, addrs);
 		return addrs;
 	} catch (...) {
-		dnsCache->remove(host, service);
 		throw lookup_failed();
 	}
 }

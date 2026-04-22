@@ -29,7 +29,7 @@
 #include "fdbserver/grvproxy/GrvProxyServer.h"
 #include "GrvProxyTagThrottler.h"
 #include "GrvTransactionRateInfo.h"
-#include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/WaitFailure.h"
@@ -206,7 +206,7 @@ struct GrvProxyData {
 	GrvProxyStats stats;
 	MasterInterface master;
 	PublicRequestStream<GetReadVersionRequest> getConsistentReadVersion;
-	Reference<ILogSystem> logSystem;
+	Reference<LogSystem> logSystem;
 
 	Database cx;
 	Reference<AsyncVar<ServerDBInfo> const> db;
@@ -575,7 +575,8 @@ Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> const>
 					                      "GrvProxyServer.queueTransactionStartRequests.Before");
 
 				if (systemQueue->empty() && defaultQueue->empty() && batchQueue->empty()) {
-					forwardPromise(GRVTimer,
+					forwardPromise(Uncancellable{},
+					               GRVTimer,
 					               delayJittered(std::max(0.0, *GRVBatchTime - (now() - *lastGRVTime)),
 					                             TaskPriority::ProxyGRVTimer));
 				}
@@ -1045,6 +1046,7 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 
 		if (!systemQueue.empty() || !defaultQueue.empty() || !batchQueue.empty()) {
 			forwardPromise(
+			    Uncancellable{},
 			    GRVTimer,
 			    delayJittered(SERVER_KNOBS->START_TRANSACTION_BATCH_QUEUE_CHECK_INTERVAL, TaskPriority::ProxyGRVTimer));
 		}

@@ -33,7 +33,7 @@
 #ifndef BOOST_REGEX_NO_LIB
 #define BOOST_REGEX_NO_LIB
 #endif
-#include "fdbrpc/SimExternalConnection.h"
+#include "SimExternalConnection.h"
 #include "flow/ActorCollection.h"
 #include "flow/IRandom.h"
 #include "flow/CodeProbe.h"
@@ -44,7 +44,7 @@
 #include "fdbrpc/AsyncFileEncrypted.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/AsyncFileNonDurable.h"
-#include "fdbrpc/AsyncFileChaos.h"
+#include "AsyncFileChaos.h"
 #include "crc32/crc32c.h"
 #include "fdbrpc/TraceFileIO.h"
 #include "flow/flow.h"
@@ -56,7 +56,7 @@
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
-#include "fdbrpc/AsyncFileWriteChecker.h"
+#include "AsyncFileWriteChecker.h"
 #include "fdbrpc/genericactors.actor.h"
 #include "fdbrpc/WellKnownEndpoints.h"
 #include "flow/FaultInjection.h"
