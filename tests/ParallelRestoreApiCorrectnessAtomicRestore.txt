@@ -30,7 +30,7 @@ allowDefaultTenant=false
     startAfter=10.0
     restoreAfter=50.0
     fastRestore=true
-    usePartitionedLogs=true
+    mutationLogType = 1 # partitioned-log-experimental
 
     ; Each testName=RunRestoreWorkerWorkload creates a restore worker
     ; We need at least 3 restore workers: master, loader, and applier

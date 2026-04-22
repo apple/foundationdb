@@ -45,7 +45,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 	LockDB locked{ false };
 	bool allowPauses;
 	bool shareLogRange;
-	UsePartitionedLog usePartitionedLogs{ false };
+	MutationLogType mutationLogType{ MutationLogType::DEFAULT };
 	Key addPrefix, removePrefix; // Original key will be first applied removePrefix and then applied addPrefix
 	// CAVEAT: When removePrefix is used, we must ensure every key in backup have the removePrefix
 	Optional<std::string> encryptionKeyFileName;
@@ -83,7 +83,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		agentRequest = getOption(options, "simBackupAgents"_sr, true);
 		allowPauses = getOption(options, "allowPauses"_sr, true);
 		shareLogRange = getOption(options, "shareLogRange"_sr, false);
-		usePartitionedLogs.set(getOption(options, "usePartitionedLogs"_sr, deterministicRandom()->coinflip()));
+		mutationLogType = static_cast<MutationLogType>(
+		    getOption(options, "mutationLogType"_sr, deterministicRandom()->randomInt(0, 2)));
 		addPrefix = getOption(options, "addPrefix"_sr, ""_sr);
 		removePrefix = getOption(options, "removePrefix"_sr, ""_sr);
 
@@ -237,7 +238,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			                               backupRanges,
 			                               true,
 			                               StopWhenDone{ !stopDifferentialDelay },
-			                               self->usePartitionedLogs,
+			                               self->mutationLogType,
 			                               IncrementalBackupOnly::False,
 			                               self->encryptionKeyFileName));
 		} catch (Error& e) {
@@ -495,7 +496,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			if (!self->locked && BUGGIFY) {
 				TraceEvent("BARW_SubmitBackup2", randomID).detail("Tag", printable(self->backupTag));
 				try {
-					// Note the "partitionedLog" must be false, because we change
+					// Note the mutationLogType is default, because we change
 					// the configuration to disable backup workers before restore.
 					extraBackup = backupAgent.submitBackup(cx,
 					                                       "file://simfdb/backups/"_sr,
@@ -506,7 +507,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					                                       self->backupRanges,
 					                                       true,
 					                                       StopWhenDone::True,
-					                                       UsePartitionedLog::False,
+					                                       MutationLogType::DEFAULT,
 					                                       IncrementalBackupOnly::False,
 					                                       self->encryptionKeyFileName);
 				} catch (Error& e) {
@@ -552,7 +553,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				                                                 lastBackupContainer->getProxy(),
 				                                                 lastBackupContainer->getEncryptionKeyFileName());
 				BackupDescription desc = wait(container->describeBackup());
-				ASSERT(self->usePartitionedLogs == desc.partitioned);
+				ASSERT(self->mutationLogType == desc.mutationLogType);
 				ASSERT(desc.minRestorableVersion.present()); // We must have a valid backup now.
 
 				state Version targetVersion = -1;

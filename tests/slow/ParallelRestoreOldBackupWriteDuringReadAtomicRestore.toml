@@ -23,7 +23,7 @@ timeout = 360000
     startAfter = 10.0
     restoreAfter = 50.0
     fastRestore = true
-    usePartitionedLogs = false
+    mutationLogType = 0 # default logs
 
     [[test.workload]]
     testName = 'RandomClogging'
