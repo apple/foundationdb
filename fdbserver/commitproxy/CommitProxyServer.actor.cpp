@@ -449,39 +449,14 @@ Future<Void> addBackupMutations(ProxyCommitData* self,
 	}
 }
 
-namespace {
-
-// releaseResolvingAfter() is on the commit proxy hot path. This callback keeps the
-// non-ready Future case as a small one-shot continuation instead of spawning an
-// actor just to wait for releaseDelay, update latestLocalCommitBatchResolving in
-// order, and notify the caller.
-struct ReleaseResolvingAfterCallback final : Callback<Void>, FastAllocated<ReleaseResolvingAfterCallback> {
-	ProxyCommitData* self;
-	int64_t localBatchNumber;
-	Promise<Void> done;
-
-	ReleaseResolvingAfterCallback(ProxyCommitData* self, int64_t localBatchNumber, Promise<Void> done)
-	  : self(self), localBatchNumber(localBatchNumber), done(done) {}
-
-	void complete() {
-		Callback<Void>::remove();
-		ASSERT(self->latestLocalCommitBatchResolving.get() == localBatchNumber - 1);
-		self->latestLocalCommitBatchResolving.set(localBatchNumber);
-		done.send(Void());
-		delete this;
-	}
-
-	void fire(Void const&) override { complete(); }
-	void fire(Void&&) override { complete(); }
-
-	void error(Error e) override {
-		Callback<Void>::remove();
-		done.sendError(e);
-		delete this;
-	}
-};
-
-} // namespace
+static Future<Void> releaseResolvingAfterImpl(ProxyCommitData* self,
+                                              Future<Void> releaseDelay,
+                                              int64_t localBatchNumber) {
+	co_await releaseDelay;
+	ASSERT(self->latestLocalCommitBatchResolving.get() == localBatchNumber - 1);
+	self->latestLocalCommitBatchResolving.set(localBatchNumber);
+	co_return;
+}
 
 Future<Void> releaseResolvingAfter(ProxyCommitData* self, Future<Void> releaseDelay, int64_t localBatchNumber) {
 	if (releaseDelay.isReady()) {
@@ -491,10 +466,7 @@ Future<Void> releaseResolvingAfter(ProxyCommitData* self, Future<Void> releaseDe
 		return Void();
 	}
 
-	Promise<Void> done;
-	Future<Void> result = done.getFuture();
-	releaseDelay.addCallbackAndClear(new ReleaseResolvingAfterCallback(self, localBatchNumber, done));
-	return result;
+	return releaseResolvingAfterImpl(self, releaseDelay, localBatchNumber);
 }
 
 static Future<ResolveTransactionBatchReply> trackResolutionMetrics(Reference<Histogram> dist,
