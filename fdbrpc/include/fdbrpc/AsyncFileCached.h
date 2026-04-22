@@ -340,7 +340,7 @@ private:
 			TraceEvent("AFCUnderlyingOpenEnd").detail("Filename", filename);
 			int64_t l = co_await f->size();
 			TraceEvent("AFCUnderlyingSize").detail("Filename", filename).detail("Size", l);
-			Reference<AsyncFileCached> cachedFile = makeReference<AsyncFileCached>(f, filename, l, pageCache);
+			auto cachedFile = makeReference<AsyncFileCached>(f, filename, l, pageCache);
 			co_return Reference<IAsyncFile>(cachedFile);
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled)

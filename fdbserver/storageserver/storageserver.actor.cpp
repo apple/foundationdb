@@ -4729,10 +4729,10 @@ Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRequest 
 							serverListEntries.push_back(tr.get(serverListKeyFor(id)));
 						}
 					}
-					co_await store(serverListValues, getAll(serverListEntries));
+					serverListValues = co_await getAll(serverListEntries);
 
 					// Decide version to compare
-					co_await store(version, tr.getReadVersion());
+					version = co_await tr.getReadVersion();
 
 					// Read remote servers
 					for (const auto& v : serverListValues) {
@@ -5108,7 +5108,7 @@ Future<Void> getRangeDataToDump(StorageServer* data,
 			localReq.limitBytes = SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT;
 			localReq.tags = TagSet();
 			data->actors.add(getKeyValuesQ(data, localReq));
-			co_await store(rep, errorOr(localReq.reply.getFuture()));
+			rep = co_await errorOr(localReq.reply.getFuture());
 			if (rep.isError()) {
 				throw rep.getError();
 			}
@@ -5218,7 +5218,7 @@ Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 
 			// Get version to dump
 			tr.reset();
-			co_await store(versionToDump, tr.getReadVersion());
+			versionToDump = co_await tr.getReadVersion();
 
 			// Read data
 			// TODO(BulkDump): Read data from other servers at the versionToDump as much as possible
@@ -7746,12 +7746,11 @@ Future<Void> fetchShardCheckpoint(StorageServer* data, MoveInShard* moveInShard,
 		{
 			Error err;
 			try {
-				co_await store(records,
-				               getCheckpointMetaData(data->cx,
-				                                     moveInShard->ranges(),
-				                                     moveInShard->meta->createVersion,
-				                                     DataMoveRocksCF,
-				                                     moveInShard->dataMoveId()));
+				records = co_await getCheckpointMetaData(data->cx,
+				                                         moveInShard->ranges(),
+				                                         moveInShard->meta->createVersion,
+				                                         DataMoveRocksCF,
+				                                         moveInShard->dataMoveId());
 				if (moveInShard->failed()) {
 					co_return;
 				}
@@ -7778,7 +7777,7 @@ Future<Void> fetchShardCheckpoint(StorageServer* data, MoveInShard* moveInShard,
 					}
 					fFetchCheckpoint.push_back(fetchCheckpointRanges(data->cx, record, checkpointDir, { range }));
 				}
-				co_await store(localRecords, getAll(fFetchCheckpoint));
+				localRecords = co_await getAll(fFetchCheckpoint);
 				if (moveInShard->failed()) {
 					co_return;
 				}
@@ -8103,9 +8102,8 @@ Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 	bool conductBulkLoad = moveInShard->meta->conductBulkLoad;
 	if (conductBulkLoad) {
 		// Get the bulkload task metadata from the data move metadata. For details, see the comments in the fetchKeys.
-		co_await store(bulkLoadTaskState,
-		               getBulkLoadTaskStateFromDataMove(
-		                   data->cx, moveInShard->dataMoveId(), data->version.get(), data->thisServerID));
+		bulkLoadTaskState = co_await getBulkLoadTaskStateFromDataMove(
+		    data->cx, moveInShard->dataMoveId(), data->version.get(), data->thisServerID);
 	}
 
 	while (true) {
@@ -11578,7 +11576,7 @@ Future<Void> watchValueWaitForVersion(StorageServer* self,
 
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 	try {
-		co_await success(waitForVersionNoTooOld(self, req.version));
+		co_await waitForVersionNoTooOld(self, req.version);
 		stream.send(req);
 	} catch (Error& e) {
 		if (!canReplyWith(e))
@@ -12109,7 +12107,7 @@ Future<Void> memoryStoreRecover(IKeyValueStore* store, Reference<IClusterConnect
 	// create a temp client connect to DB
 	Database cx = Database::createDatabase(connRecord, ApiVersion::LATEST_VERSION);
 
-	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
 	int noCanRemoveCount = 0;
 	while (true) {
 		{
@@ -12236,7 +12234,7 @@ ACTOR Future<Void> replaceInterface(StorageServer* self, StorageServerInterface 
 
 Future<Void> replaceTSSInterface(StorageServer* self, StorageServerInterface ssi) {
 	// RYW for KeyBackedMap
-	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+	auto tr = makeReference<ReadYourWritesTransaction>(self->cx);
 	KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
 
 	ASSERT(ssi.isTss());
