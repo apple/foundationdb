@@ -105,6 +105,42 @@ struct AuditGetKeyServersRes {
 
 std::vector<KeyRange> coalesceRangeList(std::vector<KeyRange> ranges);
 Optional<std::pair<KeyRange, KeyRange>> rangesSame(std::vector<KeyRange> rangesA, std::vector<KeyRange> rangesB);
+
+struct LocationMetadataError {
+	std::string message;
+	UID serverId;
+	Optional<KeyRange> mismatchedRangeByKeyServer;
+	Optional<KeyRange> mismatchedRangeByServerKey;
+};
+
+std::vector<LocationMetadataError> checkLocationMetadataConsistency(
+    const std::unordered_map<UID, std::vector<KeyRange>>& mapFromKeyServers,
+    const std::unordered_map<UID, std::vector<KeyRange>>& mapFromServerKeys,
+    KeyRange claimRange);
+
+struct LocationMetadataMaps {
+	std::unordered_map<UID, std::vector<KeyRange>> fromKeyServers;
+	std::unordered_map<UID, std::vector<KeyRange>> fromServerKeys;
+	int64_t numValidatedKeyServers = 0;
+	int64_t numValidatedServerKeys = 0;
+};
+
+LocationMetadataMaps buildLocationMetadataMaps(
+    const std::unordered_map<UID, std::vector<KeyRange>>& mapFromKeyServersRaw,
+    const std::unordered_map<UID, std::vector<KeyRange>>& serverOwnRangesMap,
+    KeyRange claimRange,
+    Optional<UID> traceId = Optional<UID>());
+
+std::vector<KeyRange> buildOwnRangesFromServerKeysResult(const RangeResult& krmResult);
+
+struct KeyServersOwnershipMap {
+	std::unordered_map<UID, std::vector<KeyRange>> rangeOwnershipMap;
+	int64_t totalShardsCount = 0;
+	int64_t shardsInAnonymousPhysicalShardCount = 0;
+};
+
+KeyServersOwnershipMap buildOwnershipMapFromKeyServersResult(const RangeResult& krmResult,
+                                                             const RangeResult& uidToTagMap);
 Future<AuditGetServerKeysRes> getThisServerKeysFromServerKeys(UID serverID, Transaction* tr, KeyRange range);
 Future<AuditGetKeyServersRes> getShardMapFromKeyServers(UID auditServerId, Transaction* tr, KeyRange range);
 
