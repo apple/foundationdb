@@ -161,7 +161,8 @@ template <class Req>
 Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(Req request,
                                                   Hostname hostname,
                                                   WellKnownEndpoints token,
-                                                  TaskPriority taskID) {
+                                                  TaskPriority taskID,
+                                                  ExplicitVoid = {}) {
 	// Like tryGetReplyFromHostname, except that request_maybe_delivered results in re-resolving the hostname.
 	// Suitable for use with hostname, where RequestStream is NOT initialized yet.
 	// Not normally useful for endpoints initialized with NetworkAddress.
@@ -185,12 +186,7 @@ Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(Req request,
 				throw reply.getError();
 			}
 		} else {
-			if constexpr (std::is_same_v<REPLY_TYPE(Req), Void>) {
-				reply.get();
-				co_return;
-			} else {
-				co_return reply.get();
-			}
+			co_return reply.get();
 		}
 	}
 }
