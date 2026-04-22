@@ -42,6 +42,8 @@ namespace {
 
 const std::string fileCoordinatorPrefix = "coordination-";
 
+} // namespace
+
 class LivenessChecker {
 	double threshold;
 	AsyncVar<double> lastTime;
@@ -61,8 +63,6 @@ public:
 
 	Future<Void> checkStuck() const { return checkStuck(this); }
 };
-
-} // namespace
 
 struct GenerationRegVal {
 	UniqueGeneration readGen, writeGen;
