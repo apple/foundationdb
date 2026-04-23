@@ -201,7 +201,7 @@ Primary production engine.
 
 Legacy engine. Simple SQL-backed KV store.
 
-### Memory Engine -- [`KeyValueStoreMemory.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreMemory.actor.cpp)
+### Memory Engine -- [`KeyValueStoreMemory.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreMemory.cpp)
 
 In-memory map-based engine:
 - Used for testing
@@ -255,6 +255,6 @@ Client ──GetValueRequest──▶ StorageServer getValueQ()
 | [`fdbserver/kvstore/KeyValueStoreRocksDB.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreRocksDB.actor.cpp) | RocksDB engine implementation |
 | [`fdbserver/kvstore/KeyValueStoreShardedRocksDB.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreShardedRocksDB.actor.cpp) | Sharded RocksDB engine |
 | [`fdbserver/kvstore/KeyValueStoreSQLite.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreSQLite.actor.cpp) | SQLite engine |
-| [`fdbserver/kvstore/KeyValueStoreMemory.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreMemory.actor.cpp) | Memory engine |
+| [`fdbserver/kvstore/KeyValueStoreMemory.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreMemory.cpp) | Memory engine |
 | [`fdbserver/core/include/fdbserver/core/IKeyValueStore.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/IKeyValueStore.h) | IKeyValueStore interface |
 | [`fdbserver/core/StorageMetrics.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/StorageMetrics.cpp) | Storage metrics tracking |
