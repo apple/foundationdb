@@ -1394,6 +1394,11 @@ Future<Void> tLogPop(TLogData* self, TLogPopRequest req, Reference<LogData> logD
 	req.reply.send(Void());
 }
 
+double getTLogStorageUpdateDelayDuration() {
+	return BUGGIFY ? SERVER_KNOBS->BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL
+	               : SERVER_KNOBS->TLOG_STORAGE_MIN_UPDATE_INTERVAL;
+}
+
 // This function (and updatePersistentData, which is called by this function) run at a low priority and can soak up all
 // CPU resources. For this reason, they employ aggressive use of yields to avoid causing slow tasks that could introduce
 // latencies for more important work (e.g. commits).
@@ -1405,9 +1410,7 @@ Future<Void> updateStorage(TLogData* self) {
 	}
 
 	if (!self->spillOrder.size()) {
-		co_await delay(BUGGIFY ? SERVER_KNOBS->BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL
-		                       : SERVER_KNOBS->TLOG_STORAGE_MIN_UPDATE_INTERVAL,
-		               TaskPriority::UpdateStorage);
+		co_await delay(getTLogStorageUpdateDelayDuration(), TaskPriority::UpdateStorage);
 		co_return;
 	}
 
@@ -1447,9 +1450,7 @@ Future<Void> updateStorage(TLogData* self) {
 					}
 					commitLockReleaser.release();
 				} else {
-					co_await delay(BUGGIFY ? SERVER_KNOBS->BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL
-					                       : SERVER_KNOBS->TLOG_STORAGE_MIN_UPDATE_INTERVAL,
-					               TaskPriority::UpdateStorage);
+					co_await delay(getTLogStorageUpdateDelayDuration(), TaskPriority::UpdateStorage);
 				}
 
 				if (logData->removed.isReady()) {
@@ -1462,9 +1463,7 @@ Future<Void> updateStorage(TLogData* self) {
 			}
 			co_await delay(0.0, TaskPriority::UpdateStorage);
 		} else {
-			co_await delay(BUGGIFY ? SERVER_KNOBS->BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL
-			                       : SERVER_KNOBS->TLOG_STORAGE_MIN_UPDATE_INTERVAL,
-			               TaskPriority::UpdateStorage);
+			co_await delay(getTLogStorageUpdateDelayDuration(), TaskPriority::UpdateStorage);
 		}
 	} else if (logData->initialized) {
 		ASSERT(self->spillOrder.size() == 1);
@@ -1504,18 +1503,14 @@ Future<Void> updateStorage(TLogData* self) {
 		}
 
 		if (totalSize < SERVER_KNOBS->REFERENCE_SPILL_UPDATE_STORAGE_BYTE_LIMIT) {
-			co_await delay(BUGGIFY ? SERVER_KNOBS->BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL
-			                       : SERVER_KNOBS->TLOG_STORAGE_MIN_UPDATE_INTERVAL,
-			               TaskPriority::UpdateStorage);
+			co_await delay(getTLogStorageUpdateDelayDuration(), TaskPriority::UpdateStorage);
 		} else {
 			// recovery wants to commit to persistent data when updatePersistentData is not active, this delay ensures
 			// that immediately after updatePersist returns another one has not been started yet.
 			co_await delay(0.0, TaskPriority::UpdateStorage);
 		}
 	} else {
-		co_await delay(BUGGIFY ? SERVER_KNOBS->BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL
-		                       : SERVER_KNOBS->TLOG_STORAGE_MIN_UPDATE_INTERVAL,
-		               TaskPriority::UpdateStorage);
+		co_await delay(getTLogStorageUpdateDelayDuration(), TaskPriority::UpdateStorage);
 	}
 }
 
