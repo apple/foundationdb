@@ -39,7 +39,8 @@
 namespace {
 
 // Exponential backoff for transaction_too_old retries in finishMoveKeys.
-// Starts at 0.1s, doubles each retry, capped at 5.0s.
+// Formula: 0.1 * 2^retries, capped at 5.0s. Called with retries >= 1
+// (retries is incremented before the call), so effective start is 0.2s.
 double finishMoveKeysBackoff(int retries) {
 	return std::min(0.1 * (1 << std::min(retries, 6)), 5.0);
 }
@@ -3511,7 +3512,8 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 //      finishMoveKeys may not be called if no moves are scheduled
 // So we test the backoff arithmetic directly.
 TEST_CASE("/fdbserver/MoveKeys/finishMoveKeysBackoff") {
-	// Verify exponential backoff: 0.1s base, doubles each retry, capped at 5.0s
+	// Verify exponential backoff: 0.1 * 2^retries, capped at 5.0s.
+	// In production retries >= 1 at call site, so effective start is 0.2s.
 	ASSERT(finishMoveKeysBackoff(0) == 0.1);
 	ASSERT(finishMoveKeysBackoff(1) == 0.2);
 	ASSERT(finishMoveKeysBackoff(2) == 0.4);
