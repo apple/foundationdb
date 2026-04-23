@@ -48,6 +48,7 @@
 #include "flow/DebugTrace.h"
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
+#include "flow/CoroUtils.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
@@ -1678,22 +1679,19 @@ std::deque<std::pair<Version, LengthPrefixedStringRef>>& getVersionMessages(Refe
 	return tagData->versionMessages;
 };
 
-ACTOR Future<Void> waitForMessagesForTag(Reference<LogData> self, Tag reqTag, Version reqBegin, double timeout) {
+Future<Void> waitForMessagesForTag(Reference<LogData> self, Tag reqTag, Version reqBegin, double timeoutDelay) {
 	self->blockingPeeks += 1;
 	auto tagData = self->getTagData(reqTag);
 	if (tagData.isValid() && !tagData->versionMessages.empty() && tagData->versionMessages.back().first >= reqBegin) {
-		return Void();
+		co_return;
 	}
-	choose {
-		when(wait(self->waitingTags[reqTag].getFuture())) {
-			// we want the caller to finish first, otherwise the data structure it is building might not be complete
-			wait(delay(0.0));
-		}
-		when(wait(delay(timeout))) {
-			self->blockingPeekTimeouts += 1;
-		}
+	Optional<Void> ready = co_await timeout(self->waitingTags[reqTag].getFuture(), timeoutDelay);
+	if (ready.present()) {
+		// We want the caller to finish first, otherwise the data structure it is building might not be complete.
+		co_await delay(0.0);
+	} else {
+		self->blockingPeekTimeouts += 1;
 	}
-	return Void();
 }
 
 void peekMessagesFromMemory(Reference<LogData> self,
