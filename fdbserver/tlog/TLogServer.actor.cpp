@@ -2559,14 +2559,14 @@ Future<Void> initPersistentState(TLogData* self, Reference<LogData> logData) {
 }
 
 // send stopped promise instead of LogData* to avoid reference cycles
-ACTOR Future<Void> rejoinClusterController(TLogData* self,
-                                           TLogInterface tli,
-                                           DBRecoveryCount recoveryCount,
-                                           Promise<Void> stoppedPromise,
-                                           Future<Void> registerWithCC,
-                                           bool isPrimary) {
-	state LifetimeToken lastMasterLifetime;
-	loop {
+Future<Void> rejoinClusterController(TLogData* self,
+                                     TLogInterface tli,
+                                     DBRecoveryCount recoveryCount,
+                                     Promise<Void> stoppedPromise,
+                                     Future<Void> registerWithCC,
+                                     bool isPrimary) {
+	LifetimeToken lastMasterLifetime;
+	while (true) {
 		auto const& inf = self->dbInfo->get();
 		bool isDisplaced =
 		    std::find(inf.priorCommittedLogServers.begin(), inf.priorCommittedLogServers.end(), tli.id()) ==
@@ -2590,7 +2590,7 @@ ACTOR Future<Void> rejoinClusterController(TLogData* self,
 			    .detail("PriorLogs", describe(inf.priorCommittedLogServers))
 			    .detail("OldLogGens", inf.logSystemConfig.oldTLogs.size());
 			if (BUGGIFY)
-				wait(delay(SERVER_KNOBS->BUGGIFY_WORKER_REMOVED_MAX_LAG * deterministicRandom()->random01()));
+				co_await delay(SERVER_KNOBS->BUGGIFY_WORKER_REMOVED_MAX_LAG * deterministicRandom()->random01());
 			throw worker_removed();
 		} else if (inf.recoveryCount > recoveryCount && stoppedPromise.canBeSet()) {
 			CODE_PROBE(true, "Stopping tlog because new dbinfo has a higher recovery count");
@@ -2602,7 +2602,7 @@ ACTOR Future<Void> rejoinClusterController(TLogData* self,
 		}
 
 		if (self->terminated.isSet()) {
-			return Void();
+			co_return;
 		}
 
 		if (registerWithCC.isReady()) {
@@ -2614,19 +2614,21 @@ ACTOR Future<Void> rejoinClusterController(TLogData* self,
 				    .detail("ClusterController", self->dbInfo->get().clusterInterface.id())
 				    .detail("DbInfoMasterLifeTime", self->dbInfo->get().masterLifetime.toString())
 				    .detail("LastMasterLifeTime", lastMasterLifetime.toString());
-				choose {
-					when(TLogRejoinReply rep = wait(
-					         brokenPromiseToNever(self->dbInfo->get().clusterInterface.tlogRejoin.getReply(req)))) {
-						if (rep.masterIsRecovered)
-							lastMasterLifetime = self->dbInfo->get().masterLifetime;
-					}
-					when(wait(self->dbInfo->onChange())) {}
+				auto res =
+				    co_await race(brokenPromiseToNever(self->dbInfo->get().clusterInterface.tlogRejoin.getReply(req)),
+				                  self->dbInfo->onChange());
+				if (res.index() == 0) {
+					TLogRejoinReply rep = std::get<0>(std::move(res));
+					if (rep.masterIsRecovered)
+						lastMasterLifetime = self->dbInfo->get().masterLifetime;
+				} else {
+					ASSERT(res.index() == 1);
 				}
 			} else {
-				wait(self->dbInfo->onChange());
+				co_await self->dbInfo->onChange();
 			}
 		} else {
-			wait(registerWithCC || self->dbInfo->onChange());
+			co_await (registerWithCC || self->dbInfo->onChange());
 		}
 	}
 }
