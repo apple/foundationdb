@@ -299,7 +299,7 @@ struct RestoreThrottleWorkload : TestWorkload {
 		state int finalMoves = wait(countDataMoves(cx));
 
 		// Report
-		TraceEvent("RestoreThrottleReport")
+		TraceEvent(self->pass ? SevInfo : SevError, "RestoreThrottleReport")
 		    .detail("Result", self->pass ? "PASS" : "FAIL")
 		    .detail("Shards", shardCount)
 		    .detail("ServersExcluded", numToExclude)

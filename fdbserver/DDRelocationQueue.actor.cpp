@@ -2512,16 +2512,21 @@ struct DDQueueImpl {
 						    tag(delay(0, TaskPriority::DataDistributionLaunch), done.keys, rangesComplete));
 						if (done.isRestore()) {
 							self->inFlightRestoreMoves--;
+							int drained = 0;
 							while (!pendingRestoreMoves.empty() &&
 							       self->inFlightRestoreMoves < SERVER_KNOBS->DD_MAX_INFLIGHT_RESTORE_MOVES) {
 								auto rs = pendingRestoreMoves.front();
 								pendingRestoreMoves.pop_front();
 								self->inFlightRestoreMoves++;
+								drained++;
 								self->launchQueuedWork(RelocateData(rs), ddEnabledState);
 							}
-							TraceEvent("RestoreMoveDrained", self->distributorId)
-							    .detail("InFlight", self->inFlightRestoreMoves)
-							    .detail("PendingCount", pendingRestoreMoves.size());
+							if (drained > 0) {
+								TraceEvent("RestoreMoveDrained", self->distributorId)
+								    .detail("Drained", drained)
+								    .detail("InFlight", self->inFlightRestoreMoves)
+								    .detail("PendingCount", pendingRestoreMoves.size());
+							}
 						}
 						if (g_network->isSimulated() && debug_isCheckRelocationDuration() &&
 						    now() - done.startTime > 60) {
@@ -2578,6 +2583,7 @@ struct DDQueueImpl {
 						    .detail("PriorityTeam0Left", self->priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_0_LEFT])
 						    .detail("PrioritySplitShard",
 						            self->priority_relocations[SERVER_KNOBS->PRIORITY_SPLIT_SHARD])
+						    .detail("InFlightRestoreMoves", self->inFlightRestoreMoves)
 						    .trackLatest("MovingData"); // This trace event's trackLatest lifetime is controlled by
 						                                // DataDistributor::movingDataEventHolder. The track latest
 						                                // key we use here must match the key used in the holder.
