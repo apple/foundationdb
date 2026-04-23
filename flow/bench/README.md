@@ -55,6 +55,7 @@ Existing Benchmarks
 - `bench_stream` measures the performance of writing to and reading from a `PromiseStream`
 - `bench_random` measures the performance of `DeterministicRandom`.
 - `bench_timer` measures the performance of FoundationDB timers.
+- `Memcpy` compares `rte_memcpy_noinline` and `memcpy` across aligned/unaligned and cached/uncached copy cases.
 
 Future use cases
 ================
