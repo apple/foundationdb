@@ -2938,11 +2938,7 @@ struct DDQueueImpl {
 		}
 	}
 
-	Future<Void> propagateDataDistributionRelocatorErrors() {
-		while (true) {
-			co_await self->error.getFuture();
-		}
-	}
+	Future<Void> propagateDataDistributionRelocatorErrors() { co_await self->error.getFuture(); }
 
 	Future<Void> getUnhealthyRelocationCountRequests() {
 		while (true) {
