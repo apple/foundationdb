@@ -592,6 +592,31 @@ public:
 	// Initialize the required internal states of DataDistributor from system metadata. It's necessary before
 	// DataDistributor start working. Doesn't include initialization of optional components, like TenantCache, DDQueue,
 	// Tracker, TeamCollection. The components should call its own ::init methods.
+	//
+	// DD Startup Progress (trace events in order):
+	//   DDInitRunning                     - DD process recruited and starting init
+	//   DDInitTakingMoveKeysLock          - Acquiring move keys lock
+	//   DDInitTookMoveKeysLock            - Lock acquired
+	//   DDInitGotConfiguration            - Database configuration loaded
+	//   DDInitUpdatedReplicaKeys          - Replica keys updated
+	//   DDInitSlowDataMoveRead            - (SevWarn) dataMoveKeys read taking >5s
+	//   DDInitServerListAndDataMoveReadComplete - Server list + data moves read: NumDataMoves, NumServers,
+	//   ElapsedSeconds
+	//   DDInitKeyServerScanProgress       - (every 30s) keyServer scan: BeginKey, Batches, ShardsScanned
+	//   DDInitKeyServerScanComplete       - keyServer scan done: NumShards, ElapsedSeconds
+	//   DDInitGotInitialDD                - Init data loaded: NumShards, NumServers
+	//   DDInitDataLoaded                  - Init data loaded, ElapsedSeconds (does NOT mean DD is fully operational)
+	//
+	// After init(), the following startup events fire from other components:
+	//   DDInitResumeDataMovesProgress     - (every 30s) data move resume: ValidMoves, CancelledMoves, EmptyMoves
+	//   DDInitResumedDataMoves            - Data move resume complete with counts
+	//   TrackInitialShards                - Shard tracker setup started with InitialShardCount
+	//   TrackInitialShardsComplete        - Shard trackers created: ShardsTracked
+	//   DDTrackerStarting                 - Teams ready (fires from DDTeamCollection after readyToStart + delay)
+	//   TrackInitialShardsMetricsComplete - All shard metrics received: ElapsedSeconds
+	//                                       WaitStorageMetricsHandleError may fire (SevWarn after 60s) if a
+	//                                       shard's metrics read is stuck retrying: Keys, Retries
+	//   DDInitDone                        - DD is fully operational with all shard sizes loaded
 	ACTOR static Future<Void> init(Reference<DataDistributor> self) {
 		loop {
 			wait(self->waitDataDistributorEnabled());
@@ -650,6 +675,8 @@ public:
 				    .detail("E", self->initData->shards.end()[-1].key)
 				    .detail("Src", describe(self->initData->shards.end()[-2].primarySrc))
 				    .detail("Dest", describe(self->initData->shards.end()[-2].primaryDest))
+				    .detail("NumShards", self->initData->shards.size())
+				    .detail("NumServers", self->initData->allServers.size())
 				    .trackLatest(self->initialDDEventHolder->trackingKey);
 			} else {
 				TraceEvent("DDInitGotInitialDD", self->ddId)
@@ -657,6 +684,8 @@ public:
 				    .detail("E", "")
 				    .detail("Src", "[no items]")
 				    .detail("Dest", "[no items]")
+				    .detail("NumShards", self->initData->shards.size())
+				    .detail("NumServers", self->initData->allServers.size())
 				    .trackLatest(self->initialDDEventHolder->trackingKey);
 			}
 
@@ -853,6 +882,11 @@ public:
 	// TODO: unit test needed
 	ACTOR static Future<Void> resumeFromDataMoves(Reference<DataDistributor> self, Future<Void> readyToStart) {
 		state KeyRangeMap<std::shared_ptr<DataMove>>::iterator it = self->initData->dataMoveMap.ranges().begin();
+		state int validMoves = 0;
+		state int cancelledMoves = 0;
+		state int emptyMoves = 0;
+		state double resumeStart = now();
+		state double lastLogTime = now();
 
 		wait(readyToStart);
 
@@ -861,6 +895,7 @@ public:
 			DataMoveType dataMoveType = getDataMoveTypeFromDataMoveId(meta.id);
 			if (meta.ranges.empty()) {
 				TraceEvent(SevInfo, "EmptyDataMoveRange", self->ddId).detail("DataMoveMetaData", meta.toString());
+				emptyMoves++;
 				continue;
 			}
 			if (meta.bulkLoadTaskState.present()) {
@@ -891,6 +926,7 @@ public:
 				rs.cancelled = true;
 				self->relocationProducer.send(rs);
 				TraceEvent("DDInitScheduledCancelDataMove", self->ddId).detail("DataMove", meta.toString());
+				cancelledMoves++;
 			} else if (it.value()->valid) {
 				TraceEvent(SevDebug, "DDInitFoundDataMove", self->ddId).detail("DataMove", meta.toString());
 				ASSERT(meta.ranges.front() == it.range());
@@ -914,8 +950,23 @@ public:
 				self->shardsAffectedByTeamFailure->moveShard(rs.keys, teams);
 				self->relocationProducer.send(rs);
 				wait(yield(TaskPriority::DataDistribution));
+				validMoves++;
+			}
+			if (now() - lastLogTime >= 30.0) {
+				lastLogTime = now();
+				TraceEvent("DDInitResumeDataMovesProgress", self->ddId)
+				    .detail("ValidMoves", validMoves)
+				    .detail("CancelledMoves", cancelledMoves)
+				    .detail("EmptyMoves", emptyMoves)
+				    .detail("ElapsedSeconds", now() - resumeStart);
 			}
 		}
+
+		TraceEvent("DDInitResumedDataMoves", self->ddId)
+		    .detail("ValidMoves", validMoves)
+		    .detail("CancelledMoves", cancelledMoves)
+		    .detail("EmptyMoves", emptyMoves)
+		    .detail("ElapsedSeconds", now() - resumeStart);
 
 		// Trigger background cleanup for datamove tombstones
 		if (!self->txnProcessor->isMocked()) {
@@ -2588,6 +2639,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 	loop {
 		self->context->trackerCancelled = false;
+		state double ddStartTime = now();
 		// whether all initial shard are tracked
 		self->initialized = Promise<Void>();
 
@@ -2599,7 +2651,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			wait(DataDistributor::init(self));
 
-			TraceEvent(SevInfo, "DataDistributionInitProgress", self->ddId).detail("Phase", "Metadata Initialized");
+			TraceEvent("DDInitDataLoaded", self->ddId).detail("ElapsedSeconds", now() - ddStartTime);
 
 			// When/If this assertion fails, Evan owes Ben a pat on the back for his foresight
 			ASSERT(self->configuration.storageTeamSize > 0);
@@ -2853,6 +2905,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 					TraceEvent(SevWarn, "DataDistributorCancelled");
 				}
 				shards.clear();
+				TraceEvent(SevWarn, "DDExiting", self->ddId).error(e);
 				throw e;
 			} else {
 				wait(shards.clearAsync());
@@ -2864,12 +2917,14 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				wait(self->removeStorageServer(removeFailedServer.getFuture().get()));
 			} else {
 				if (err.code() != error_code_movekeys_conflict && err.code() != error_code_dd_config_changed) {
+					TraceEvent(SevWarn, "DDExiting", self->ddId).error(err);
 					throw err;
 				}
 
 				bool ddEnabled = wait(self->isDataDistributionEnabled());
 				TraceEvent("DataDistributionError", self->ddId).error(err).detail("DataDistributionEnabled", ddEnabled);
 				if (ddEnabled) {
+					TraceEvent(SevWarn, "DDExiting", self->ddId).error(err);
 					throw err;
 				}
 			}
@@ -5112,7 +5167,7 @@ ACTOR Future<Void> dataDistributor_impl(DataDistributorInterface di,
 	state std::map<UID, DistributorSnapRequest> ddSnapReqMap;
 	state std::map<UID, ErrorOr<Void>> ddSnapReqResultMap;
 
-	TraceEvent("DataDistributorRunning", di.id()).detail("IsMocked", isMocked);
+	TraceEvent("DDInitRunning", di.id()).detail("IsMocked", isMocked);
 	self->addActor.send(actors.getResult());
 	self->addActor.send(traceRole(Role::DATA_DISTRIBUTOR, di.id()));
 	self->addActor.send(waitFailureServer(di.waitFailure.getFuture()));

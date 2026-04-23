@@ -8144,6 +8144,9 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
     int expectedShardCount,
     Optional<Reference<TransactionState>> trState) {
 	state Span span("NAPI:WaitStorageMetrics"_loc, generateSpanID(cx->transactionTracingSample));
+	state double startTime = now();
+	state double lastLogTime = 0;
+	state int retryCount = 0;
 	loop {
 		if (trState.present()) {
 			wait(trState.get()->startTransaction());
@@ -8191,7 +8194,21 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
 				return std::make_pair(res, -1);
 			}
 		} catch (Error& e) {
-			TraceEvent(SevDebug, "WaitStorageMetricsHandleError").error(e);
+			retryCount++;
+			// Upgrade from SevDebug to SevWarn after 60 seconds of retrying,
+			// but rate-limit warns to avoid flooding the trace log on fast retries.
+			Severity sev = SevDebug;
+			if (now() - startTime > 60.0) {
+				if (now() - lastLogTime >= 10.0) {
+					sev = SevWarn;
+					lastLogTime = now();
+				}
+			}
+			TraceEvent(sev, "WaitStorageMetricsHandleError")
+			    .error(e)
+			    .detail("Keys", keys)
+			    .detail("Elapsed", now() - startTime)
+			    .detail("Retries", retryCount);
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
 				cx->invalidateCache(tenantInfo.prefix, keys);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
