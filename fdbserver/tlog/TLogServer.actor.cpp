@@ -2343,11 +2343,11 @@ Future<Void> doQueueCommit(TLogData* self,
 	}
 }
 
-ACTOR Future<Void> commitQueue(TLogData* self) {
-	state Reference<LogData> logData;
-	state std::vector<Reference<LogData>> missingFinalCommit;
+Future<Void> commitQueue(TLogData* self) {
+	Reference<LogData> logData;
+	std::vector<Reference<LogData>> missingFinalCommit;
 
-	loop {
+	while (true) {
 		int foundCount = 0;
 		for (auto it : self->id_data) {
 			if (!it.second->stopped()) {
@@ -2361,7 +2361,7 @@ ACTOR Future<Void> commitQueue(TLogData* self) {
 
 		ASSERT(foundCount < 2);
 		if (!foundCount) {
-			wait(self->newLogData.onTrigger());
+			co_await self->newLogData.onTrigger();
 			continue;
 		}
 
@@ -2374,16 +2374,16 @@ ACTOR Future<Void> commitQueue(TLogData* self) {
 			logData->committingQueue.send(Void());
 		}
 
-		loop {
+		while (true) {
 			// Insert enough of a delay to allow this tlog to be stopped and a new one registered
 			// before the commit is issued. These are the conditions which trigger a missingFinalCommit.
 			if (BUGGIFY_WITH_PROB(0.0001) && !g_simulator->speedUpSimulation) {
-				wait(delay(1.0));
+				co_await delay(1.0);
 			}
 
 			if (logData->stopped() && logData->version.get() == std::max(logData->queueCommittingVersion,
 			                                                             logData->queueCommittedVersion.get())) {
-				wait(logData->queueCommittedVersion.whenAtLeast(logData->version.get()));
+				co_await logData->queueCommittedVersion.whenAtLeast(logData->version.get());
 				break;
 			}
 
@@ -2391,21 +2391,22 @@ ACTOR Future<Void> commitQueue(TLogData* self) {
 				break;
 			}
 
-			choose {
-				when(wait(logData->version.whenAtLeast(
-				    std::max(logData->queueCommittingVersion, logData->queueCommittedVersion.get()) + 1))) {
-					while (self->queueCommitBegin != self->queueCommitEnd.get() &&
-					       !self->largeDiskQueueCommitBytes.get()) {
-						wait(self->queueCommitEnd.whenAtLeast(self->queueCommitBegin) ||
-						     self->largeDiskQueueCommitBytes.onChange());
-					}
-					if (logData->queueCommittedVersion.get() == std::numeric_limits<Version>::max()) {
-						break;
-					}
-					self->sharedActors.send(doQueueCommit(self, logData, missingFinalCommit));
-					missingFinalCommit.clear();
+			auto res =
+			    co_await race(logData->version.whenAtLeast(
+			                      std::max(logData->queueCommittingVersion, logData->queueCommittedVersion.get()) + 1),
+			                  self->newLogData.onTrigger());
+			if (res.index() == 0) {
+				while (self->queueCommitBegin != self->queueCommitEnd.get() && !self->largeDiskQueueCommitBytes.get()) {
+					co_await (self->queueCommitEnd.whenAtLeast(self->queueCommitBegin) ||
+					          self->largeDiskQueueCommitBytes.onChange());
 				}
-				when(wait(self->newLogData.onTrigger())) {}
+				if (logData->queueCommittedVersion.get() == std::numeric_limits<Version>::max()) {
+					break;
+				}
+				self->sharedActors.send(doQueueCommit(self, logData, missingFinalCommit));
+				missingFinalCommit.clear();
+			} else {
+				ASSERT(res.index() == 1);
 			}
 		}
 	}
