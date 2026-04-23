@@ -340,7 +340,7 @@ class LeaderRegister : public ReferenceCounted<LeaderRegister>, NonCopyable {
 	bool checkNotificationLimit() {
 		if (notify.size() > SERVER_KNOBS->MAX_NOTIFICATIONS) {
 			TraceEvent(SevWarnAlways, "TooManyNotifications").detail("Amount", notify.size());
-			sendNotifications(currentNominee.get());
+			sendNotifications(currentNominee);
 			return true;
 		}
 		return false;
