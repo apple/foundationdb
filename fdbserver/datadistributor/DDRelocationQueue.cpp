@@ -1,5 +1,5 @@
 /*
- * DataDistributionQueue.actor.cpp
+ * DDRelocationQueue.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -40,7 +40,6 @@
 #include "flow/DebugTrace.h"
 #include "DDRelocationQueue.h"
 #include "flow/CoroUtils.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 #define WORK_FULL_UTILIZATION 10000 // This is not a knob; it is a fixed point scaling factor!
 
@@ -76,7 +75,7 @@ inline bool isDataMovementForValleyFiller(DataMovementReason reason) {
 RelocateData::RelocateData()
   : priority(-1), boundaryPriority(-1), healthPriority(-1), reason(RelocateReason::OTHER), startTime(-1),
     dataMoveId(anonymousShardId), workFactor(0), wantsNewServers(false), cancellable(false),
-    interval("QueuedRelocation") {};
+    interval("QueuedRelocation"){};
 
 RelocateData::RelocateData(RelocateShard const& rs)
   : parent_range(rs.getParentRange()), keys(rs.keys), priority(rs.priority),
@@ -162,7 +161,7 @@ class ParallelTCInfo final : public ReferenceCounted<ParallelTCInfo>, public IDa
 
 public:
 	ParallelTCInfo() = default;
-	explicit ParallelTCInfo(ParallelTCInfo const& info) : teams(info.teams), tempServerIDs(info.tempServerIDs) {};
+	explicit ParallelTCInfo(ParallelTCInfo const& info) : teams(info.teams), tempServerIDs(info.tempServerIDs){};
 
 	void addTeam(Reference<IDataDistributionTeam> team) { teams.push_back(team); }
 
@@ -3009,18 +3008,21 @@ Future<Void> DDQueue::run(Reference<DDQueue> self,
 	self->ddEnabledState = ddEnabledState;
 	return DDQueueImpl::run(self, processingUnhealthy, processingWiggle, getUnhealthyRelocationCount);
 }
+
 TEST_CASE("/DataDistribution/DDQueue/ServerCounterTrace") {
-	state double duration = 2.5 * SERVER_KNOBS->DD_QUEUE_COUNTER_REFRESH_INTERVAL;
-	state DDQueue self;
-	state Future<Void> counterFuture = self.periodicalRefreshCounter();
-	state Future<Void> finishFuture = delay(duration);
+	double duration = 2.5 * SERVER_KNOBS->DD_QUEUE_COUNTER_REFRESH_INTERVAL;
+	DDQueue self;
+	Future<Void> counterFuture = self.periodicalRefreshCounter();
+	Future<Void> finishFuture = delay(duration);
 	std::cout << "Start trace counter unit test for " << duration << "s ...\n";
-	loop choose {
-		when(wait(counterFuture)) {}
-		when(wait(finishFuture)) {
+	while (true) {
+		auto result = co_await race(counterFuture, finishFuture, delayJittered(2.0));
+		if (result.index() == 0) {
+			// Propagate unexpected completion or errors from periodicalRefreshCounter().
+			co_await counterFuture;
+		} else if (result.index() == 1) {
 			break;
-		}
-		when(wait(delayJittered(2.0))) {
+		} else {
 			std::vector<UID> team(3);
 			for (int i = 0; i < team.size(); ++i) {
 				team[i] = UID(deterministicRandom()->randomInt(1, 400), 0);
@@ -3032,5 +3034,4 @@ TEST_CASE("/DataDistribution/DDQueue/ServerCounterTrace") {
 		}
 	}
 	std::cout << "Finished.";
-	return Void();
 }
