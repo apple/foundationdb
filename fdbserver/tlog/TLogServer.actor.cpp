@@ -3277,15 +3277,11 @@ Future<Void> restorePersistentState(TLogData* self,
 
 	// FIXME: metadata in queue?
 
-	co_await waitForAll(std::vector{ fFormat, fRecoveryLocation });
-	co_await waitForAll(std::vector{ fVers,
-	                                 fKnownCommitted,
-	                                 fLocality,
-	                                 fLogRouterTags,
-	                                 fTxsTags,
-	                                 fRecoverCounts,
-	                                 fProtocolVersions,
-	                                 fTLogSpillTypes });
+	std::vector<Future<Optional<Value>>> pointFutures = { fFormat, fRecoveryLocation };
+	co_await waitForAll(pointFutures);
+	std::vector<Future<RangeResult>> rangeFutures = { fVers,    fKnownCommitted, fLocality,         fLogRouterTags,
+		                                              fTxsTags, fRecoverCounts,  fProtocolVersions, fTLogSpillTypes };
+	co_await waitForAll(rangeFutures);
 
 	if (fFormat.get().present() && !persistFormatReadableRange.contains(fFormat.get().get())) {
 		// FIXME: remove when we no longer need to test upgrades from 4.X releases
