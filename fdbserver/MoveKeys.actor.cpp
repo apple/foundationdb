@@ -1194,6 +1194,13 @@ ACTOR Future<Void> waitForShardReady(StorageServerInterface server,
 			GetShardStateReply rep =
 			    wait(server.getShardState.getReply(GetShardStateRequest(keys, mode), TaskPriority::MoveKeys));
 			if (rep.first >= minVersion) {
+				// Inject delay to simulate slow shard readiness. When finishMoveKeys
+				// waits inside a transaction, this causes transaction_too_old on commit.
+				// With the fix (wait outside transaction), this delay is harmless.
+				if (BUGGIFY_WITH_PROB(0.05)) {
+					CODE_PROBE(true, "waitForShardReady artificial delay");
+					wait(delay(6.0));
+				}
 				return Void();
 			}
 			wait(delayJittered(SERVER_KNOBS->SHARD_READY_DELAY, TaskPriority::MoveKeys));
