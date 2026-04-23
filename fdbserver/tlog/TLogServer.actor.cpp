@@ -2989,17 +2989,17 @@ static void failIfTLogCannotAcceptNewData(TLogData* self, Reference<LogData> log
 }
 
 // remote tLog pull data from log routers
-ACTOR Future<Void> pullAsyncData(TLogData* self,
-                                 Reference<LogData> logData,
-                                 std::vector<Tag> tags,
-                                 Version beginVersion,
-                                 Optional<Version> endVersion,
-                                 bool poppedIsKnownCommitted) {
-	state Future<Void> dbInfoChange = Void();
-	state Reference<IPeekCursor> r;
-	state Version tagAt = beginVersion;
-	state Version lastVer = 0;
-	state double startTime = now();
+Future<Void> pullAsyncData(TLogData* self,
+                           Reference<LogData> logData,
+                           std::vector<Tag> tags,
+                           Version beginVersion,
+                           Optional<Version> endVersion,
+                           bool poppedIsKnownCommitted) {
+	Future<Void> dbInfoChange = Void();
+	Reference<IPeekCursor> r;
+	Version tagAt = beginVersion;
+	Version lastVer = 0;
+	double startTime = now();
 
 	if (endVersion.present()) {
 		TraceEvent("TLogRestoreReplicationFactor", self->dbgid)
@@ -3011,32 +3011,31 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 
 	while (!endVersion.present() || logData->version.get() < endVersion.get()) {
 		// When we just processed some data, we reset the warning start time.
-		state double lastPullAsyncDataWarningTime = now();
-		loop {
+		double lastPullAsyncDataWarningTime = now();
+		while (true) {
 			double waitTime = std::max(
 			    0.0, lastPullAsyncDataWarningTime + SERVER_KNOBS->TLOG_PULL_ASYNC_DATA_WARNING_TIMEOUT_SECS - now());
-			choose {
-				when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) {
-					break;
+			Future<Void> getMoreFuture = r ? r->getMore(TaskPriority::TLogCommit) : Never();
+			auto res = co_await race(getMoreFuture, dbInfoChange, delay(waitTime));
+			if (res.index() == 0) {
+				break;
+			} else if (res.index() == 1) {
+				if (logData->logSystem->get()) {
+					r = logData->logSystem->get()->peek(logData->logId, tagAt, endVersion, tags, true);
+				} else {
+					r = Reference<IPeekCursor>();
 				}
-				when(wait(dbInfoChange)) {
-					if (logData->logSystem->get()) {
-						r = logData->logSystem->get()->peek(logData->logId, tagAt, endVersion, tags, true);
-					} else {
-						r = Reference<IPeekCursor>();
-					}
-					dbInfoChange = logData->logSystem->onChange();
-				}
-				when(wait(delay(waitTime))) {
-					TraceEvent(SevWarn, "TLogPullAsyncDataSlow", logData->logId)
-					    .detail("Elapsed", now() - startTime)
-					    .detail("Version", logData->version.get());
-					lastPullAsyncDataWarningTime = now();
-				}
+				dbInfoChange = logData->logSystem->onChange();
+			} else {
+				ASSERT(res.index() == 2);
+				TraceEvent(SevWarn, "TLogPullAsyncDataSlow", logData->logId)
+				    .detail("Elapsed", now() - startTime)
+				    .detail("Version", logData->version.get());
+				lastPullAsyncDataWarningTime = now();
 			}
 		}
 
-		state double waitStartT = 0;
+		double waitStartT = 0;
 		while (self->bytesInput - self->bytesDurable >= SERVER_KNOBS->TLOG_HARD_LIMIT_BYTES && !logData->stopped()) {
 			if (now() - waitStartT >= 1) {
 				TraceEvent(SevWarn, "TLogUpdateLag", logData->logId)
@@ -3045,18 +3044,18 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 				    .detail("PersistentDataDurableVersion", logData->persistentDataDurableVersion);
 				waitStartT = now();
 			}
-			wait(delayJittered(.005, TaskPriority::TLogCommit));
+			co_await delayJittered(.005, TaskPriority::TLogCommit);
 		}
 
-		state Version ver = 0;
-		state std::vector<TagsAndMessage> messages;
-		loop {
-			state bool foundMessage = r->hasMessage();
+		Version ver = 0;
+		std::vector<TagsAndMessage> messages;
+		while (true) {
+			bool foundMessage = r->hasMessage();
 			if (!foundMessage || r->version().version != ver) {
 				ASSERT(r->version().version > lastVer);
 				if (ver) {
 					if (logData->stopped() || (endVersion.present() && ver > endVersion.get())) {
-						return Void();
+						co_return;
 					}
 
 					if (poppedIsKnownCommitted) {
@@ -3067,13 +3066,13 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 
 					failIfTLogCannotAcceptNewData(self, logData, ver);
 					if (logData->stopped()) {
-						return Void();
+						co_return;
 					}
 
 					commitMessages(self, logData, ver, messages);
 
 					if (self->terminated.isSet()) {
-						return Void();
+						co_return;
 					}
 
 					// Log the changes to the persistent queue, to be committed by commitQueue()
@@ -3092,7 +3091,7 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 					// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages
 					// actors
 					logData->version.set(ver);
-					wait(yield(TaskPriority::TLogCommit));
+					co_await yield(TaskPriority::TLogCommit);
 				}
 				lastVer = ver;
 				ver = r->version().version;
@@ -3102,7 +3101,7 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 					ver--;
 					if (ver > logData->version.get()) {
 						if (logData->stopped() || (endVersion.present() && ver > endVersion.get())) {
-							return Void();
+							co_return;
 						}
 
 						if (poppedIsKnownCommitted) {
@@ -3113,11 +3112,11 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 
 						failIfTLogCannotAcceptNewData(self, logData, ver);
 						if (logData->stopped()) {
-							return Void();
+							co_return;
 						}
 
 						if (self->terminated.isSet()) {
-							return Void();
+							co_return;
 						}
 
 						// Log the changes to the persistent queue, to be committed by commitQueue()
@@ -3136,7 +3135,7 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 						// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages
 						// actors
 						logData->version.set(ver);
-						wait(yield(TaskPriority::TLogCommit));
+						co_await yield(TaskPriority::TLogCommit);
 					}
 					break;
 				}
@@ -3148,7 +3147,6 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 
 		tagAt = std::max(r->version().version, logData->version.get() + 1);
 	}
-	return Void();
 }
 
 Future<Void> tLogCore(TLogData* self, Reference<LogData> logData, TLogInterface tli, bool pulledRecoveryVersions) {
