@@ -35,6 +35,7 @@
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include <time.h>
 #include "ClusterRecovery.actor.h"
+#include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbserver/core/CoordinationInterface.h"
 #include "fdbserver/datadistributor/DataDistribution.h"
 #include "fdbclient/ConsistencyScanInterface.h"
@@ -2377,7 +2378,7 @@ static JsonBuilderObject tlogFetcher(int* logFaultTolerance,
 	for (const auto& tLogSet : tLogs) {
 		if (tLogSet.tLogs.size() == 0) {
 			// We can have LogSets where there are no tLogs but some LogRouters. It's the way
-			// recruiting is implemented for old LogRouters in TagPartitionedLogSystem, where
+			// recruiting is implemented for old LogRouters in LogSystem, where
 			// it adds an empty LogSet for missing locality.
 			continue;
 		}
@@ -2856,24 +2857,22 @@ AsyncResult<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistribut
 }
 
 // constructs the cluster section of the json status output
-AsyncResult<StatusReply> clusterGetStatus(
-    Reference<AsyncVar<ServerDBInfo>> db,
-    Database cx,
-    std::vector<WorkerDetails> workers,
-    std::vector<ProcessIssues> workerIssues,
-    std::vector<StorageServerMetaInfo> storageMetadatas,
-    std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* clientStatus,
-    ServerCoordinators coordinators,
-    std::vector<NetworkAddress> incompatibleConnections,
-    Version datacenterVersionDifference,
-    Version dcLogServerVersionDifference,
-    Version dcStorageServerVersionDifference,
-    std::unordered_map<NetworkAddress, double> excludedDegradedServers) {
+static AsyncResult<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
+                                              JsonBuilderArray* pMessages,
+                                              std::set<std::string>* pStatusIncompleteReasons,
+                                              Reference<AsyncVar<ServerDBInfo>> db,
+                                              Database cx,
+                                              std::vector<WorkerDetails> workers,
+                                              std::vector<ProcessIssues> workerIssues,
+                                              std::vector<StorageServerMetaInfo> storageMetadatas,
+                                              ServerCoordinators coordinators,
+                                              std::unordered_map<NetworkAddress, double> excludedDegradedServers) {
+	JsonBuilderObject& statusObj = *pStatusObj;
+	JsonBuilderArray& messages = *pMessages;
+	std::set<std::string>& status_incomplete_reasons = *pStatusIncompleteReasons;
 
 	double tStart = timer();
 
-	JsonBuilderArray messages;
-	std::set<std::string> status_incomplete_reasons;
 	WorkerDetails mWorker; // Master worker
 	WorkerDetails ccWorker; // Cluster-Controller worker
 	WorkerDetails ddWorker; // DataDistributor worker
@@ -2881,9 +2880,6 @@ AsyncResult<StatusReply> clusterGetStatus(
 	WorkerDetails csWorker; // ConsistencyScan worker
 
 	try {
-
-		JsonBuilderObject statusObj;
-
 		// Get the master Worker interface
 		Optional<WorkerDetails> _mWorker = getWorker(workers, db->get().master.address());
 		if (_mWorker.present()) {
@@ -2985,18 +2981,46 @@ AsyncResult<StatusReply> clusterGetStatus(
 
 		// construct status information for cluster subsections
 		int statusCode = (int)RecoveryStatus::END;
-		std::vector<AsyncResult<JsonBuilderObject>> clusterSubsectionFetchers;
+		std::vector<AsyncResult<ErrorOr<JsonBuilderObject>>> clusterSubsectionFetchers;
 		clusterSubsectionFetchers.push_back(
-		    recoveryStateStatusFetcher(cx, ccWorker, mWorker, workers.size(), &status_incomplete_reasons, &statusCode));
-		clusterSubsectionFetchers.push_back(getIdmpKeyStatus(cx));
-		clusterSubsectionFetchers.push_back(versionEpochStatusFetcher(cx, &status_incomplete_reasons));
+		    errorOr(recoveryStateStatusFetcher(
+		        cx, ccWorker, mWorker, workers.size(), &status_incomplete_reasons, &statusCode)));
+		clusterSubsectionFetchers.push_back(errorOr(timeoutError(getIdmpKeyStatus(cx), 5.0)));
+		clusterSubsectionFetchers.push_back(errorOr(versionEpochStatusFetcher(cx, &status_incomplete_reasons)));
 
-		std::vector<JsonBuilderObject> clusterSubsectionStatuses =
+		std::vector<ErrorOr<JsonBuilderObject>> clusterSubsectionStatuses =
 		    co_await getAll(std::move(clusterSubsectionFetchers));
 
-		JsonBuilderObject recoveryStateStatus = clusterSubsectionStatuses[0];
-		JsonBuilderObject idmpKeyStatus = clusterSubsectionStatuses[1];
-		JsonBuilderObject versionEpochStatus = clusterSubsectionStatuses[2];
+		if (clusterSubsectionStatuses[0].isError()) {
+			throw clusterSubsectionStatuses[0].getError();
+		}
+		if (clusterSubsectionStatuses[2].isError()) {
+			throw clusterSubsectionStatuses[2].getError();
+		}
+
+		statusObj["newest_protocol_version"] = format("%" PRIx64, protocolVersion.newestProtocolVersion.version());
+		statusObj["lowest_compatible_protocol_version"] =
+		    format("%" PRIx64, protocolVersion.lowestCompatibleProtocolVersion.version());
+
+		statusObj["protocol_version"] = format("%" PRIx64, g_network->protocolVersion().version());
+		statusObj["connection_string"] = coordinators.ccr->getConnectionString().toString();
+		statusObj["bounce_impact"] = getBounceImpactInfo(statusCode);
+
+		JsonBuilderObject recoveryStateStatus = clusterSubsectionStatuses[0].get();
+		JsonBuilderObject idmpKeyStatus;
+		if (clusterSubsectionStatuses[1].present()) {
+			idmpKeyStatus = clusterSubsectionStatuses[1].get();
+		} else {
+			status_incomplete_reasons.insert("Unable to retrieve idempotency ID status.");
+		}
+		JsonBuilderObject versionEpochStatus = clusterSubsectionStatuses[2].get();
+
+		if (!recoveryStateStatus.empty()) {
+			statusObj["recovery_state"] = recoveryStateStatus;
+		}
+
+		statusObj["idempotency_ids"] = idmpKeyStatus;
+		statusObj["version_epoch"] = versionEpochStatus;
 
 		// machine metrics
 		WorkerEvents mMetrics = workerEventsVec[0].present() ? workerEventsVec[0].get().first : WorkerEvents();
@@ -3023,13 +3047,6 @@ AsyncResult<StatusReply> clusterGetStatus(
 		JsonBuilderObject metacluster;
 		JsonBuilderObject storageWiggler;
 		std::unordered_set<UID> wiggleServers;
-
-		statusObj["protocol_version"] = format("%" PRIx64, g_network->protocolVersion().version());
-		statusObj["connection_string"] = coordinators.ccr->getConnectionString().toString();
-		statusObj["bounce_impact"] = getBounceImpactInfo(statusCode);
-		statusObj["newest_protocol_version"] = format("%" PRIx64, protocolVersion.newestProtocolVersion.version());
-		statusObj["lowest_compatible_protocol_version"] =
-		    format("%" PRIx64, protocolVersion.lowestCompatibleProtocolVersion.version());
 
 		Optional<DatabaseConfiguration> configuration;
 		Optional<LoadConfigurationResult> loadResult;
@@ -3146,6 +3163,10 @@ AsyncResult<StatusReply> clusterGetStatus(
 			std::vector<JsonBuilderObject> workerStatuses = co_await getAll(std::move(statusSectionFetchers));
 			co_await primaryDCFO;
 
+			if (primaryDCFO.get().present()) {
+				statusObj["active_primary_dc"] = primaryDCFO.get().get();
+			}
+
 			ErrorOr<std::vector<NetworkAddress>> addresses =
 			    co_await errorOr(timeoutError(coordinators.ccr->getConnectionString().tryResolveHostnames(), 5.0));
 			if (addresses.present()) {
@@ -3174,9 +3195,6 @@ AsyncResult<StatusReply> clusterGetStatus(
 
 			JsonBuilderObject configObj = configurationFetcher(configuration, coordinators, &status_incomplete_reasons);
 
-			if (primaryDCFO.get().present()) {
-				statusObj["active_primary_dc"] = primaryDCFO.get().get();
-			}
 			// configArr could be empty
 			if (!configObj.empty()) {
 				statusObj["configuration"] = configObj;
@@ -3191,8 +3209,6 @@ AsyncResult<StatusReply> clusterGetStatus(
 			// Add qos section if it was populated
 			if (!qos.empty())
 				statusObj["qos"] = qos;
-
-			statusObj["version_epoch"] = versionEpochStatus;
 
 			// Merge dataOverlay into data
 			JsonBuilderObject& clusterDataSection = workerStatuses[0];
@@ -3281,16 +3297,6 @@ AsyncResult<StatusReply> clusterGetStatus(
 		                                  loadResult.present() ? loadResult.get().healthyZone : Optional<Key>(),
 		                                  &status_incomplete_reasons);
 		statusObj["processes"] = processStatus;
-		statusObj["clients"] = clientStatusFetcher(clientStatus);
-
-		JsonBuilderArray incompatibleConnectionsArray;
-		for (auto it : incompatibleConnections) {
-			incompatibleConnectionsArray.push_back(it.toString());
-		}
-		statusObj["incompatible_connections"] = incompatibleConnectionsArray;
-		statusObj["datacenter_lag"] = getLagObject(datacenterVersionDifference);
-		statusObj["logserver_lag"] = getLagObject(dcLogServerVersionDifference);
-		statusObj["storageserver_lag"] = getLagObject(dcStorageServerVersionDifference);
 
 		int activeTSSCount = 0;
 		JsonBuilderArray wiggleServerAddress;
@@ -3321,20 +3327,6 @@ AsyncResult<StatusReply> clusterGetStatus(
 			}
 		}
 		statusObj["degraded_processes"] = totalDegraded;
-
-		if (!recoveryStateStatus.empty())
-			statusObj["recovery_state"] = recoveryStateStatus;
-
-		statusObj["idempotency_ids"] = idmpKeyStatus;
-
-		// cluster messages subsection;
-		JsonBuilderArray clientIssuesArr = getClientIssuesAsMessages(clientStatus);
-		if (clientIssuesArr.size() > 0) {
-			JsonBuilderObject clientIssueMessage =
-			    JsonBuilder::makeMessage("client_issues", "Some clients of this cluster have issues.");
-			clientIssueMessage["issues"] = clientIssuesArr;
-			messages.push_back(clientIssueMessage);
-		}
 
 		// Fetch Consistency Scan Information
 		try {
@@ -3370,21 +3362,6 @@ AsyncResult<StatusReply> clusterGetStatus(
 			                                           "Fetching consistency scan state timed out."));
 		}
 
-		// Create the status_incomplete message if there were any reasons that the status is incomplete.
-		if (!status_incomplete_reasons.empty()) {
-			JsonBuilderObject incomplete_message =
-			    JsonBuilder::makeMessage("status_incomplete", "Unable to retrieve all status information.");
-			// Make a JSON array of all of the reasons in the status_incomplete_reasons set.
-			JsonBuilderArray reasons;
-			for (auto i : status_incomplete_reasons) {
-				reasons.push_back(JsonBuilderObject().setKey("description", i));
-			}
-			incomplete_message["reasons"] = reasons;
-			messages.push_back(incomplete_message);
-		}
-
-		statusObj["messages"] = messages;
-
 		int64_t clusterTime = g_network->timer();
 		if (clusterTime != -1) {
 			statusObj["cluster_controller_timestamp"] = clusterTime;
@@ -3398,12 +3375,88 @@ AsyncResult<StatusReply> clusterGetStatus(
 		    .detail("Duration", timer() - tStart)
 		    .detail("StatusSize", statusObj.getFinalLength());
 
-		co_return StatusReply(statusObj.getJson());
-
+		co_return;
 	} catch (Error& e) {
 		TraceEvent(SevError, "StatusError").error(e);
 		throw;
 	}
+}
+
+AsyncResult<StatusReply> clusterGetStatus(
+    Reference<AsyncVar<ServerDBInfo>> db,
+    Database cx,
+    std::vector<WorkerDetails> workers,
+    std::vector<ProcessIssues> workerIssues,
+    std::vector<StorageServerMetaInfo> storageMetadatas,
+    std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* clientStatus,
+    ServerCoordinators coordinators,
+    std::vector<NetworkAddress> incompatibleConnections,
+    Version datacenterVersionDifference,
+    Version dcLogServerVersionDifference,
+    Version dcStorageServerVersionDifference,
+    std::unordered_map<NetworkAddress, double> excludedDegradedServers,
+    double deadlineTimeout) {
+	JsonBuilderObject statusObj;
+	JsonBuilderArray messages;
+	std::set<std::string> status_incomplete_reasons;
+
+	auto result = co_await race(errorOr(clusterGetStatusImpl(&statusObj,
+	                                                         &messages,
+	                                                         &status_incomplete_reasons,
+	                                                         db,
+	                                                         cx,
+	                                                         workers,
+	                                                         workerIssues,
+	                                                         storageMetadatas,
+	                                                         coordinators,
+	                                                         excludedDegradedServers)),
+	                            delay(deadlineTimeout));
+
+	if (result.index() == 0) {
+		ErrorOr<Void> statusResult = std::get<0>(std::move(result));
+		if (statusResult.isError()) {
+			status_incomplete_reasons.insert(fmt::format("Status collection threw: {}", statusResult.getError().what()));
+		}
+	} else {
+		status_incomplete_reasons.insert("Status collection deadline exceeded.");
+	}
+
+	// Other construction bits
+	statusObj["clients"] = clientStatusFetcher(clientStatus);
+
+	// cluster messages subsection;
+	JsonBuilderArray clientIssuesArr = getClientIssuesAsMessages(clientStatus);
+	if (clientIssuesArr.size() > 0) {
+		JsonBuilderObject clientIssueMessage =
+		    JsonBuilder::makeMessage("client_issues", "Some clients of this cluster have issues.");
+		clientIssueMessage["issues"] = clientIssuesArr;
+		messages.push_back(clientIssueMessage);
+	}
+
+	JsonBuilderArray incompatibleConnectionsArray;
+	for (auto it : incompatibleConnections) {
+		incompatibleConnectionsArray.push_back(it.toString());
+	}
+	statusObj["incompatible_connections"] = incompatibleConnectionsArray;
+	statusObj["datacenter_lag"] = getLagObject(datacenterVersionDifference);
+	statusObj["logserver_lag"] = getLagObject(dcLogServerVersionDifference);
+	statusObj["storageserver_lag"] = getLagObject(dcStorageServerVersionDifference);
+
+	// Create the status_incomplete message if there were any reasons that the status is incomplete.
+	if (!status_incomplete_reasons.empty()) {
+		JsonBuilderObject incomplete_message =
+		    JsonBuilder::makeMessage("status_incomplete", "Unable to retrieve all status information.");
+		// Make a JSON array of all of the reasons in the status_incomplete_reasons set.
+		JsonBuilderArray reasons;
+		for (auto i : status_incomplete_reasons) {
+			reasons.push_back(JsonBuilderObject().setKey("description", i));
+		}
+		incomplete_message["reasons"] = reasons;
+		messages.push_back(incomplete_message);
+	}
+	statusObj["messages"] = messages;
+
+	co_return StatusReply(statusObj.getJson());
 }
 
 StatusReply clusterGetFaultToleranceStatus(const std::string& statusStr) {
@@ -3786,4 +3839,112 @@ TEST_CASE("/status/json/merging") {
 	}
 
 	return Void();
+}
+
+// Test that clusterGetStatus returns partial results within the specified deadline
+// even when the database is unavailable and transactions hang forever.
+TEST_CASE("/fdbserver/clustercontroller/clusterGetStatusTimeout") {
+	// Create mock ServerDBInfo with fake interfaces that will never respond
+	NetworkAddress masterAddr(IPAddress(0x01010101), 1);
+	NetworkAddress ccAddr(IPAddress(0x09090909), 1);
+	NetworkAddress proxyAddr(IPAddress(0x07070707), 1);
+	UID testUID(1, 2);
+
+	ServerDBInfo testDbInfo;
+	testDbInfo.clusterInterface.changeCoordinators =
+	    RequestStream<struct ChangeCoordinatorsRequest>(Endpoint({ ccAddr }, testUID));
+
+	MasterInterface mInterface;
+	mInterface.getCommitVersion = RequestStream<struct GetCommitVersionRequest>(Endpoint({ masterAddr }, testUID));
+	testDbInfo.master = mInterface;
+
+	// Add a GRV proxy that points to a non-existent address; any GRV request will hang.
+	GrvProxyInterface proxyInterf;
+	proxyInterf.getConsistentReadVersion =
+	    PublicRequestStream<struct GetReadVersionRequest>(Endpoint({ proxyAddr }, testUID));
+	testDbInfo.client.grvProxies.push_back(proxyInterf);
+
+	testDbInfo.recoveryState = RecoveryState::ACCEPTING_COMMITS;
+	testDbInfo.recoveryCount = 1;
+
+	Reference<AsyncVar<ServerDBInfo>> db = makeReference<AsyncVar<ServerDBInfo>>(testDbInfo);
+	Database cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True);
+
+	// Create minimal ServerCoordinators
+	ServerCoordinators coordinators(
+	    Reference<IClusterConnectionRecord>(new ClusterConnectionMemoryRecord(ClusterConnectionString())));
+
+	// Empty containers for other parameters
+	std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>> clientStatus;
+
+	// Call clusterGetStatus with a short timeout (1 second) to force the
+	// timeout path to trigger, since internal timeouts take ~13 seconds.
+	double startTime = now();
+	AsyncResult<StatusReply> statusFuture = clusterGetStatus(db,
+	                                                         cx,
+	                                                         std::vector<WorkerDetails>(),
+	                                                         std::vector<ProcessIssues>(),
+	                                                         std::vector<StorageServerMetaInfo>(),
+	                                                         &clientStatus,
+	                                                         coordinators,
+	                                                         std::vector<NetworkAddress>(),
+	                                                         Version(0),
+	                                                         Version(0),
+	                                                         Version(0),
+	                                                         std::unordered_map<NetworkAddress, double>(),
+	                                                         1.0);
+	// Since we set the timeout above to 1 second, 5 seconds should be more than enough to complete the test.
+	// If it takes any longer, then the test case has failed
+	const double MAX_ACCEPTABLE_DELAY = 5.0;
+	auto result = co_await race(std::move(statusFuture), delay(MAX_ACCEPTABLE_DELAY));
+	if (result.index() != 0) {
+		TraceEvent(SevError, "ClusterGetStatusTimeoutTestFailed").detail("Elapsed", now() - startTime);
+		ASSERT(false);
+	}
+
+	StatusReply reply = std::get<0>(std::move(result));
+	double elapsed = now() - startTime;
+
+	TraceEvent("ClusterGetStatusTimeoutTest")
+	    .detail("Elapsed", elapsed)
+	    .detail("StatusSize", reply.statusStr.size())
+	    .detail("StatusJSON", reply.statusStr);
+	fmt::print("=== Status JSON ({:.2f}s) ===\n{}\n=== End Status JSON ===\n", elapsed, reply.statusStr);
+
+	ASSERT_LT(elapsed, MAX_ACCEPTABLE_DELAY);
+
+	json_spirit::mValue mv = readJSONStrictly(reply.statusStr);
+	auto obj = mv.get_obj();
+
+	// Fields set in the outer clusterGetStatus are always present after deadline.
+	ASSERT(obj.count("messages") > 0);
+	ASSERT(obj.count("clients") > 0);
+	ASSERT(obj.count("incompatible_connections") > 0);
+	ASSERT(obj.count("datacenter_lag") > 0);
+
+	// Verify the deadline-exceeded message is in messages.
+	auto& messagesArr = obj["messages"].get_array();
+	bool foundTimeoutMsg = false;
+	bool foundIncomplete = false;
+	for (auto& msg : messagesArr) {
+		auto& msgObj = msg.get_obj();
+		if (msgObj.count("name") && msgObj["name"].get_str() == "status_incomplete") {
+			foundIncomplete = true;
+			if (msgObj.count("reasons")) {
+				for (auto& reason : msgObj["reasons"].get_array()) {
+					auto& reasonObj = reason.get_obj();
+					if (reasonObj.count("description") &&
+					    reasonObj["description"].get_str() == "Status collection deadline exceeded.") {
+						foundTimeoutMsg = true;
+					}
+				}
+			}
+		}
+	}
+	fmt::print("Found status_incomplete message: {}\n", foundIncomplete);
+	fmt::print("Found deadline exceeded reason: {}\n", foundTimeoutMsg);
+	ASSERT(foundIncomplete);
+	ASSERT(foundTimeoutMsg);
+
+	co_return;
 }

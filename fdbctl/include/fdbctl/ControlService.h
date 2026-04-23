@@ -25,7 +25,6 @@
 #include <grpcpp/support/status.h>
 
 #include "fdbctl/ControlCommands.h"
-#include "fdbclient/ClientKnobs.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/Knobs.h"
 #include "flow/ThreadHelper.actor.h"

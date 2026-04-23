@@ -25,9 +25,7 @@ void forceLinkIndexedSetTests();
 void forceLinkDequeTests();
 void forceLinkFlowTests();
 void forceLinkCoroTests();
-void forceLinkVersionedMapTests();
 void forceLinkMemcpyTests();
-void forceLinkMemcpyPerfTests();
 void forceLinkStreamCipherTests();
 void forceLinkSimExternalConnectionTests();
 void forceLinkMutationLogReaderTests();
@@ -49,9 +47,10 @@ void forceLinkActorFuzzUnitTests();
 void forceLinkGrpcTests();
 void forceLinkGrpcTests2();
 void forceLinkSimpleCounterTests();
-void forceLinkTagPartitionedLogSystemRecoveryTests();
+void forceLinkLogSystemRecoveryTests();
 void forceLinkIPagerTests();
 void forceLinkMockS3ServerTests();
+void forceLinkClusterHealthMonitorTests();
 
 struct UnitTestWorkload : TestWorkload {
 	static constexpr auto NAME = "UnitTests";
@@ -99,9 +98,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkDequeTests();
 		forceLinkFlowTests();
 		forceLinkCoroTests();
-		forceLinkVersionedMapTests();
 		forceLinkMemcpyTests();
-		forceLinkMemcpyPerfTests();
 		forceLinkStreamCipherTests();
 		forceLinkSimExternalConnectionTests();
 		forceLinkMutationLogReaderTests();
@@ -120,9 +117,10 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkRandomKeyValueUtilsTests();
 		forceLinkActorFuzzUnitTests();
 		forceLinkSimpleCounterTests();
-		forceLinkTagPartitionedLogSystemRecoveryTests();
+		forceLinkLogSystemRecoveryTests();
 		forceLinkIPagerTests();
 		forceLinkMockS3ServerTests();
+		forceLinkClusterHealthMonitorTests();
 
 #ifdef FLOW_GRPC_ENABLED
 		forceLinkGrpcTests();

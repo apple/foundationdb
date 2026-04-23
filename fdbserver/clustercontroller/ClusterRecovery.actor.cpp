@@ -23,7 +23,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/sim_validation.h"
-#include "fdbserver/core/ApplyMetadataMutation.h"
+#include "fdbserver/logsystem/ApplyMetadataMutation.h"
 #include "fdbserver/core/BackupProgress.h"
 #include "ClusterRecovery.actor.h"
 #include "fdbserver/core/Knobs.h"
@@ -253,7 +253,7 @@ Future<Void> newResolvers(Reference<ClusterRecoveryData> self, RecruitFromConfig
 
 Future<Void> newTLogServers(Reference<ClusterRecoveryData> self,
                             RecruitFromConfigurationReply recr,
-                            Reference<ILogSystem> oldLogSystem,
+                            Reference<LogSystem> oldLogSystem,
                             std::vector<Standalone<CommitTransactionRef>>* initialConfChanges) {
 	TraceEvent("NewTLogServersStarted", self->dbgid).detail("UsableRegions", self->configuration.usableRegions);
 	if (self->configuration.usableRegions > 1) {
@@ -299,29 +299,29 @@ Future<Void> newTLogServers(Reference<ClusterRecoveryData> self,
 		    clusterRecruitRemoteFromConfiguration(self->controllerData, recruitWorkersInfo);
 
 		self->primaryLocality = self->dcId_locality[recr.dcId];
-		self->logSystem = Reference<ILogSystem>(); // Cancels the actors in the previous log system.
-		Reference<ILogSystem> newLogSystem = co_await oldLogSystem->newEpoch(recr,
-		                                                                     fRemoteWorkers,
-		                                                                     self->configuration,
-		                                                                     self->cstate.myDBState.recoveryCount + 1,
-		                                                                     self->recoveryTransactionVersion,
-		                                                                     self->primaryLocality,
-		                                                                     self->dcId_locality[remoteDcId],
-		                                                                     self->allTags,
-		                                                                     self->recruitmentStalled);
+		self->logSystem = Reference<LogSystem>(); // Cancels the actors in the previous log system.
+		Reference<LogSystem> newLogSystem = co_await oldLogSystem->newEpoch(recr,
+		                                                                    fRemoteWorkers,
+		                                                                    self->configuration,
+		                                                                    self->cstate.myDBState.recoveryCount + 1,
+		                                                                    self->recoveryTransactionVersion,
+		                                                                    self->primaryLocality,
+		                                                                    self->dcId_locality[remoteDcId],
+		                                                                    self->allTags,
+		                                                                    self->recruitmentStalled);
 		self->logSystem = newLogSystem;
 	} else {
 		self->primaryLocality = tagLocalitySpecial;
-		self->logSystem = Reference<ILogSystem>(); // Cancels the actors in the previous log system.
-		Reference<ILogSystem> newLogSystem = co_await oldLogSystem->newEpoch(recr,
-		                                                                     Never(),
-		                                                                     self->configuration,
-		                                                                     self->cstate.myDBState.recoveryCount + 1,
-		                                                                     self->recoveryTransactionVersion,
-		                                                                     self->primaryLocality,
-		                                                                     tagLocalitySpecial,
-		                                                                     self->allTags,
-		                                                                     self->recruitmentStalled);
+		self->logSystem = Reference<LogSystem>(); // Cancels the actors in the previous log system.
+		Reference<LogSystem> newLogSystem = co_await oldLogSystem->newEpoch(recr,
+		                                                                    Never(),
+		                                                                    self->configuration,
+		                                                                    self->cstate.myDBState.recoveryCount + 1,
+		                                                                    self->recoveryTransactionVersion,
+		                                                                    self->primaryLocality,
+		                                                                    tagLocalitySpecial,
+		                                                                    self->allTags,
+		                                                                    self->recruitmentStalled);
 		self->logSystem = newLogSystem;
 	}
 	TraceEvent("NewTLogServersFinished", self->dbgid);
@@ -435,7 +435,7 @@ Future<Void> rejoinRequestHandler(Reference<ClusterRecoveryData> self) {
 
 // Keeps the coordinated state (cstate) updated as the set of recruited tlogs change through recovery.
 Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
-                               Reference<AsyncVar<Reference<ILogSystem>>> oldLogSystems,
+                               Reference<AsyncVar<Reference<LogSystem>>> oldLogSystems,
                                Future<Void> minRecoveryDuration) {
 	Future<Void> rejoinRequests = Never();
 	DBRecoveryCount recoverCount = self->cstate.myDBState.recoveryCount + 1;
@@ -799,7 +799,7 @@ void sendMasterRegistration(ClusterRecoveryData* self,
 	clusterRegisterMaster(self->controllerData, masterReq);
 }
 
-Future<Void> updateRegistration(Reference<ClusterRecoveryData> self, Reference<ILogSystem> logSystem) {
+Future<Void> updateRegistration(Reference<ClusterRecoveryData> self, Reference<LogSystem> logSystem) {
 	Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	Future<Void> trigger = self->registrationTrigger.onTrigger();
 	Future<Void> updateLogsKey;
@@ -988,7 +988,7 @@ Future<Void> monitorInitializingTxnSystem(int unfinishedRecoveries) {
 Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
     Reference<ClusterRecoveryData> self,
     std::vector<StorageServerInterface>* seedServers,
-    Reference<ILogSystem> oldLogSystem) {
+    Reference<LogSystem> oldLogSystem) {
 	if (!self->configuration.isValid()) {
 		RecoveryStatus::RecoveryStatus status;
 		if (self->configuration.initialized) {
@@ -1032,7 +1032,7 @@ Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	}
 
 	RecruitFromConfigurationRequest recruitReq(self->configuration, self->lastEpochEnd == 0, maxLogRouters);
-	Reference<RecruitWorkersInfo> recruitWorkersInfo = makeReference<RecruitWorkersInfo>(recruitReq);
+	auto recruitWorkersInfo = makeReference<RecruitWorkersInfo>(recruitReq);
 	recruitWorkersInfo->dbgId = self->dbgid;
 	co_await clusterRecruitFromConfiguration(self->controllerData, recruitWorkersInfo);
 	RecruitFromConfigurationReply recruits = recruitWorkersInfo->rep;
@@ -1106,7 +1106,7 @@ Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 }
 
 Future<Void> updateLocalityForDcId(Optional<Key> dcId,
-                                   Reference<ILogSystem> oldLogSystem,
+                                   Reference<LogSystem> oldLogSystem,
                                    Reference<AsyncVar<PeekTxsInfo>> locality) {
 	while (true) {
 		std::pair<int8_t, int8_t> loc = oldLogSystem->getLogSystemConfig().getLocalityForDcId(dcId);
@@ -1126,7 +1126,7 @@ Future<Void> updateLocalityForDcId(Optional<Key> dcId,
 }
 
 Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> self,
-                                        Reference<ILogSystem> oldLogSystem,
+                                        Reference<LogSystem> oldLogSystem,
                                         Version txsPoppedVersion) {
 	Reference<AsyncVar<PeekTxsInfo>> myLocality = Reference<AsyncVar<PeekTxsInfo>>(
 	    new AsyncVar<PeekTxsInfo>(PeekTxsInfo(tagLocalityInvalid, tagLocalityInvalid, invalidVersion)));
@@ -1333,10 +1333,11 @@ Future<Void> sendInitialCommitToResolvers(Reference<ClusterRecoveryData> self) {
 	    .detail("Step", "InitializedAllResolvers");
 }
 
-Future<Void> triggerUpdates(Reference<ClusterRecoveryData> self, Reference<ILogSystem> oldLogSystem) {
+Future<Void> triggerUpdates(Reference<ClusterRecoveryData> self, Reference<LogSystem> oldLogSystem) {
 	while (true) {
-		co_await (oldLogSystem->onLogSystemConfigChange() || self->cstate.fullyRecovered.getFuture() ||
-		          self->recruitmentStalled->onChange());
+		co_await race(oldLogSystem->onLogSystemConfigChange(),
+		              self->cstate.fullyRecovered.getFuture(),
+		              self->recruitmentStalled->onChange());
 		if (self->cstate.fullyRecovered.isSet())
 			co_return;
 
@@ -1393,7 +1394,7 @@ void updateConfigForForcedRecovery(Reference<ClusterRecoveryData> self,
 }
 
 ACTOR Future<Void> recoverFrom(Reference<ClusterRecoveryData> self,
-                               Reference<ILogSystem> oldLogSystem,
+                               Reference<LogSystem> oldLogSystem,
                                std::vector<StorageServerInterface>* seedServers,
                                std::vector<Standalone<CommitTransactionRef>>* initialConfChanges,
                                Future<Version> poppedTxsVersion) {
@@ -1541,7 +1542,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 		}
 	}
 
-	state Reference<AsyncVar<Reference<ILogSystem>>> oldLogSystems(new AsyncVar<Reference<ILogSystem>>);
+	state Reference<AsyncVar<Reference<LogSystem>>> oldLogSystems(new AsyncVar<Reference<LogSystem>>);
 	state Future<Void> recoverAndEndEpoch =
 	    recoverAndEndLogSystemEpoch(oldLogSystems,
 	                                self->dbgid,
@@ -1575,7 +1576,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	state Future<Version> poppedTxsVersion;
 
 	loop {
-		Reference<ILogSystem> oldLogSystem = oldLogSystems->get();
+		Reference<LogSystem> oldLogSystem = oldLogSystems->get();
 		if (oldLogSystem) {
 			logChanges = triggerUpdates(self, oldLogSystem);
 			if (!minRecoveryDuration.isValid()) {

@@ -29,6 +29,34 @@
 #include "flow/CoroUtils.h"
 #include "flow/flow.h"
 
+namespace {
+
+struct WaitMetricsMapStats {
+	int64_t rangeCount = 0;
+	int64_t nonEmptyRangeCount = 0;
+	int64_t watcherCount = 0;
+	int64_t watcherCapacity = 0;
+	int64_t maxWatchersPerRange = 0;
+};
+
+WaitMetricsMapStats summarizeWaitMetricsMap(
+    const KeyRangeMap<std::vector<PromiseStream<StorageMetrics>>>& waitMetricsMap) {
+	WaitMetricsMapStats stats;
+	for (auto it = waitMetricsMap.ranges().begin(); it != waitMetricsMap.ranges().end(); ++it) {
+		++stats.rangeCount;
+		const auto& watchers = it->cvalue();
+		if (!watchers.empty()) {
+			++stats.nonEmptyRangeCount;
+		}
+		stats.watcherCount += watchers.size();
+		stats.watcherCapacity += watchers.capacity();
+		stats.maxWatchersPerRange = std::max<int64_t>(stats.maxWatchersPerRange, watchers.size());
+	}
+	return stats;
+}
+
+} // namespace
+
 CommonStorageCounters::CommonStorageCounters(const std::string& name,
                                              const std::string& id,
                                              const StorageServerMetrics* metrics)
@@ -636,6 +664,40 @@ void StorageServerMetrics::add(KeyRangeMap<int>& map, KeyRangeRef const& keys, i
 	collapse(map, keys.end);
 }
 
+void StorageServerMetrics::traceWaitMetricsMapIfHighWatermark(const char* reason, KeyRangeRef keys) {
+	auto stats = summarizeWaitMetricsMap(waitMetricsMap);
+	if (stats.rangeCount <= waitMetricsMapHighWatermarks.rangeCount &&
+	    stats.nonEmptyRangeCount <= waitMetricsMapHighWatermarks.nonEmptyRangeCount &&
+	    stats.watcherCount <= waitMetricsMapHighWatermarks.watcherCount &&
+	    stats.watcherCapacity <= waitMetricsMapHighWatermarks.watcherCapacity &&
+	    stats.maxWatchersPerRange <= waitMetricsMapHighWatermarks.maxWatchersPerRange) {
+		return;
+	}
+
+	waitMetricsMapHighWatermarks.rangeCount = std::max(waitMetricsMapHighWatermarks.rangeCount, stats.rangeCount);
+	waitMetricsMapHighWatermarks.nonEmptyRangeCount =
+	    std::max(waitMetricsMapHighWatermarks.nonEmptyRangeCount, stats.nonEmptyRangeCount);
+	waitMetricsMapHighWatermarks.watcherCount = std::max(waitMetricsMapHighWatermarks.watcherCount, stats.watcherCount);
+	waitMetricsMapHighWatermarks.watcherCapacity =
+	    std::max(waitMetricsMapHighWatermarks.watcherCapacity, stats.watcherCapacity);
+	waitMetricsMapHighWatermarks.maxWatchersPerRange =
+	    std::max(waitMetricsMapHighWatermarks.maxWatchersPerRange, stats.maxWatchersPerRange);
+
+	TraceEvent(SevInfo, "WaitMetricsMapStats")
+	    .detail("Reason", reason)
+	    .detail("Keys", keys)
+	    .detail("RangeCount", stats.rangeCount)
+	    .detail("NonEmptyRangeCount", stats.nonEmptyRangeCount)
+	    .detail("WatcherCount", stats.watcherCount)
+	    .detail("WatcherCapacity", stats.watcherCapacity)
+	    .detail("MaxWatchersPerRange", stats.maxWatchersPerRange)
+	    .detail("RangeCountHighWatermark", waitMetricsMapHighWatermarks.rangeCount)
+	    .detail("NonEmptyRangeCountHighWatermark", waitMetricsMapHighWatermarks.nonEmptyRangeCount)
+	    .detail("WatcherCountHighWatermark", waitMetricsMapHighWatermarks.watcherCount)
+	    .detail("WatcherCapacityHighWatermark", waitMetricsMapHighWatermarks.watcherCapacity)
+	    .detail("MaxWatchersPerRangeHighWatermark", waitMetricsMapHighWatermarks.maxWatchersPerRange);
+}
+
 Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest req, Future<Void> timeout) {
 	PromiseStream<StorageMetrics> change;
 	StorageMetrics metrics = self->getMetrics(req.keys);
@@ -658,6 +720,7 @@ Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest req, Fut
 		for (auto r = rs.begin(); r != rs.end(); ++r) {
 			r->value().push_back(change);
 		}
+		self->traceWaitMetricsMapIfHighWatermark("Register", req.keys);
 		while (true) {
 			try {
 				auto res = co_await race(change.getFuture(), timeout);
@@ -704,6 +767,7 @@ Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest req, Fut
 		}
 	}
 	self->waitMetricsMap.coalesce(req.keys);
+	self->traceWaitMetricsMapIfHighWatermark("Cleanup", req.keys);
 
 	if (error.code() != error_code_success) {
 		if (error.code() != error_code_wrong_shard_server) {

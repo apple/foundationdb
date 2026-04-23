@@ -1286,7 +1286,7 @@ struct DataDistributionTrackerImpl {
 	}
 
 	static Future<Void> logDDTrackerStats(DataDistributionTracker* self) {
-		Reference<EventCacheHolder> ddTrackerStatsEventHolder = makeReference<EventCacheHolder>("DDTrackerStats");
+		auto ddTrackerStatsEventHolder = makeReference<EventCacheHolder>("DDTrackerStats");
 		while (true) {
 			TraceEvent("DDTrackerStats", self->distributorId)
 			    .detail("Shards", self->shards->size())

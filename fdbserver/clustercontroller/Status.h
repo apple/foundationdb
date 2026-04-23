@@ -45,6 +45,7 @@ AsyncResult<StatusReply> clusterGetStatus(
     Version datacenterVersionDifference,
     Version dcLogServerVersionDifference,
     Version dcStorageServerVersionDifference,
-    std::unordered_map<NetworkAddress, double /* latest time at which address was excluded */> excludedDegradedServers);
+    std::unordered_map<NetworkAddress, double /* latest time at which address was excluded */> excludedDegradedServers,
+    double deadlineTimeout);
 
 StatusReply clusterGetFaultToleranceStatus(const std::string& statusString);

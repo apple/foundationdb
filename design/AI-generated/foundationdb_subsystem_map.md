@@ -36,13 +36,13 @@ Plus supporting code: [`fdbserver/worker/`](https://github.com/apple/foundationd
 - **FutureStream<T> / PromiseStream<T>** — multi-value async channels. The primary request/reply pattern: send a struct containing a `ReplyPromise<T>` into a `RequestStream`, and the receiver sends the reply back through it (self-addressed envelope).
 - **ACTOR functions** — compiled by a custom C# actor compiler (`actorcompiler.exe`) into state machines. `wait(expr)` suspends; `state` variables persist across suspensions. Being migrated to C++20 coroutines (`co_await`).
 - **Arena / StringRef / Standalone<T>** — zero-copy memory management. `StringRef` is a non-owning pointer+length; `Arena` owns the backing memory; `Standalone<T>` bundles a T with its Arena.
-- **Net2** ([`Net2.actor.cpp`](https://github.com/apple/foundationdb/blob/main/flow/Net2.actor.cpp)) — the real event loop. Single-threaded, priority-based task scheduling over Boost.ASIO. Handles timers, yields, I/O multiplexing.
+- **Net2** ([`Net2.cpp`](https://github.com/apple/foundationdb/blob/main/flow/Net2.cpp)) — the real event loop. Single-threaded, priority-based task scheduling over Boost.ASIO. Handles timers, yields, I/O multiplexing.
 - **Deterministic random** ([`IRandom.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/IRandom.h)) — `deterministicRandom()` provides a seedable PRNG used everywhere, enabling reproducible simulation.
 - **Tracing** ([`Trace.cpp`](https://github.com/apple/foundationdb/blob/main/flow/Trace.cpp)) — structured event logging with `.detail()` chains, used for diagnostics and simulation analysis.
 
 **Key dynamic behavior:** Every server-side component is a collection of ACTOR coroutines scheduled on Net2's run loop. There is no threading within a process (except for disk I/O thread pools). All concurrency is cooperative, driven by Future resolution.
 
-**Principal files:** [`flow.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/flow.h), [`Arena.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/Arena.h), [`Error.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/Error.h), [`genericactors.actor.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/genericactors.actor.h), [`Net2.actor.cpp`](https://github.com/apple/foundationdb/blob/main/flow/Net2.actor.cpp), [`Trace.cpp`](https://github.com/apple/foundationdb/blob/main/flow/Trace.cpp), [`serialize.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/serialize.h), [`CoroutinesImpl.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/CoroutinesImpl.h)
+**Principal files:** [`flow.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/flow.h), [`Arena.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/Arena.h), [`Error.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/Error.h), [`genericactors.actor.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/genericactors.actor.h), [`Net2.cpp`](https://github.com/apple/foundationdb/blob/main/flow/Net2.cpp), [`Trace.cpp`](https://github.com/apple/foundationdb/blob/main/flow/Trace.cpp), [`serialize.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/serialize.h), [`CoroutinesImpl.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/CoroutinesImpl.h)
 
 ---
 
@@ -61,7 +61,7 @@ Plus supporting code: [`fdbserver/worker/`](https://github.com/apple/foundationd
 
 **Key dynamic behavior:** When Actor A on Process 1 sends a request to Actor B on Process 2, FlowTransport serializes the message, TCP delivers it, the receiver's EndpointMap dispatches it, and the reply flows back the same way. In simulation, this all happens in-process with virtual routing. The abstraction is seamless — actors don't know whether they're simulated or real.
 
-**Principal files:** [`fdbrpc.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/fdbrpc.h), [`FlowTransport.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/FlowTransport.h), [`FlowTransport.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbrpc/FlowTransport.actor.cpp), [`FailureMonitor.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/FailureMonitor.h), [`Locality.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/Locality.h), [`ReplicationPolicy.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/ReplicationPolicy.h), [`sim2.cpp`](https://github.com/apple/foundationdb/blob/main/fdbrpc/sim2.cpp), [`simulator.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/simulator.h)
+**Principal files:** [`fdbrpc.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/fdbrpc.h), [`FlowTransport.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/FlowTransport.h), [`FlowTransport.cpp`](https://github.com/apple/foundationdb/blob/main/fdbrpc/FlowTransport.cpp), [`FailureMonitor.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/FailureMonitor.h), [`Locality.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/Locality.h), [`ReplicationPolicy.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/ReplicationPolicy.h), [`sim2.cpp`](https://github.com/apple/foundationdb/blob/main/fdbrpc/sim2.cpp), [`simulator.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/simulator.h)
 
 ---
 
@@ -81,7 +81,7 @@ Plus supporting code: [`fdbserver/worker/`](https://github.com/apple/foundationd
 - **Retry loop**: `Transaction::onError()` handles `not_committed`, `transaction_too_old`, etc. by resetting and retrying with backoff. The canonical usage pattern is `loop { try { ... tr.commit(); break; } catch(Error& e) { wait(tr.onError(e)); } }`.
 - **Watches**: `tr.watch(key)` registers interest; the storage server notifies when the key changes.
 
-**Principal files:** [`NativeAPI.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbclient/NativeAPI.actor.cpp), [`ReadYourWrites.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbclient/ReadYourWrites.actor.cpp), [`DatabaseContext.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbclient/DatabaseContext.actor.cpp), [`MultiVersionTransaction.cpp`](https://github.com/apple/foundationdb/blob/main/fdbclient/MultiVersionTransaction.cpp), [`CommitTransaction.h`](https://github.com/apple/foundationdb/blob/main/fdbclient/include/fdbclient/CommitTransaction.h), [`SystemData.h`](https://github.com/apple/foundationdb/blob/main/fdbclient/include/fdbclient/SystemData.h), [`MonitorLeader.h`](https://github.com/apple/foundationdb/blob/main/fdbclient/include/fdbclient/MonitorLeader.h)
+**Principal files:** [`NativeAPI.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbclient/NativeAPI.actor.cpp), [`ReadYourWrites.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbclient/ReadYourWrites.actor.cpp), [`DatabaseContext.cpp`](https://github.com/apple/foundationdb/blob/main/fdbclient/DatabaseContext.cpp), [`MultiVersionTransaction.cpp`](https://github.com/apple/foundationdb/blob/main/fdbclient/MultiVersionTransaction.cpp), [`CommitTransaction.h`](https://github.com/apple/foundationdb/blob/main/fdbclient/include/fdbclient/CommitTransaction.h), [`SystemData.h`](https://github.com/apple/foundationdb/blob/main/fdbclient/include/fdbclient/SystemData.h), [`MonitorLeader.h`](https://github.com/apple/foundationdb/blob/main/fdbclient/include/fdbclient/MonitorLeader.h)
 
 ---
 
@@ -152,7 +152,7 @@ Phase 4: REPLY                      CommitProxy
 
 **Resolver** ([`Resolver.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/resolver/Resolver.actor.cpp), [`ConflictSet.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/resolver/ConflictSet.cpp)): Maintains a sliding window of committed write ranges. For each incoming batch, checks if any transaction's read ranges overlap with committed writes at versions newer than the transaction's read version. Pure conflict detection — no side effects.
 
-**Principal files:** [`CommitProxyServer.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/commitproxy/CommitProxyServer.actor.cpp), [`GrvProxyServer.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/grvproxy/GrvProxyServer.cpp), [`masterserver.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/sequencer/masterserver.actor.cpp), [`Resolver.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/resolver/Resolver.actor.cpp), [`ConflictSet.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/resolver/ConflictSet.cpp), [`LogSystem.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/LogSystem.h)
+**Principal files:** [`CommitProxyServer.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/commitproxy/CommitProxyServer.actor.cpp), [`GrvProxyServer.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/grvproxy/GrvProxyServer.cpp), [`masterserver.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/sequencer/masterserver.actor.cpp), [`Resolver.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/resolver/Resolver.actor.cpp), [`ConflictSet.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/resolver/ConflictSet.cpp), [`LogSystem.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/logsystem/include/fdbserver/logsystem/LogSystem.h)
 
 ---
 
@@ -167,10 +167,10 @@ Phase 4: REPLY                      CommitProxy
 - Provides `peek()` interface: storage servers pull mutations by tag and version range.
 - Quorum replication: a mutation is committed when `f+1` of `2f+1` TLog replicas acknowledge.
 
-**Log System** ([`TagPartitionedLogSystem.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/logsystem/TagPartitionedLogSystem.actor.cpp)):
+**Log System** ([`LogSystem.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/logsystem/LogSystem.cpp)):
 - Abstraction over the set of TLog replicas.
-- `ILogSystem::push()` — sends mutations to all relevant TLog replicas, waits for quorum.
-- `ILogSystem::peek()` → `IPeekCursor` — merges results from multiple TLogs for a given tag, handling multi-generation log sets during recovery.
+- `LogSystem::push()` — sends mutations to all relevant TLog replicas, waits for quorum.
+- `LogSystem::peek()` → `IPeekCursor` — merges results from multiple TLogs for a given tag, handling multi-generation log sets during recovery.
 - Manages log epochs: each recovery creates a new epoch of TLogs. Old epochs are kept until storage servers have consumed all their data.
 
 **Log Router** ([`LogRouter.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/logrouter/LogRouter.cpp)):
@@ -179,7 +179,7 @@ Phase 4: REPLY                      CommitProxy
 
 **Key dynamic behavior:** Storage servers are *consumers* of the log. They continuously peek their assigned tag, pulling committed mutations and applying them to local storage. This decoupling means commits don't wait for storage servers — only for TLog quorum.
 
-**Principal files:** [`TLogServer.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/tlog/TLogServer.actor.cpp), [`TagPartitionedLogSystem.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/logsystem/TagPartitionedLogSystem.actor.cpp), [`LogRouter.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/logrouter/LogRouter.cpp), [`LogSystem.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/LogSystem.h), [`LogSystemConfig.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/LogSystemConfig.h), [`IDiskQueue.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/IDiskQueue.h)
+**Principal files:** [`TLogServer.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/tlog/TLogServer.actor.cpp), [`LogSystem.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/logsystem/LogSystem.cpp), [`LogRouter.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/logrouter/LogRouter.cpp), [`LogSystem.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/logsystem/include/fdbserver/logsystem/LogSystem.h), [`LogSystemConfig.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/LogSystemConfig.h), [`IDiskQueue.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/IDiskQueue.h)
 
 ---
 
@@ -250,7 +250,7 @@ Phase 4: REPLY                      CommitProxy
 - `trackTlogRecovery()` — monitors TLog set completeness and writes coordinated state updates
 - `provisionalMaster()` — handles the gap between old and new transaction systems
 
-**Principal files:** [`ClusterRecovery.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterRecovery.actor.cpp), [`ClusterRecovery.actor.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterRecovery.actor.h), [`RecoveryState.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/RecoveryState.h), [`DBCoreState.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/DBCoreState.h), [`CoordinatedState.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/CoordinatedState.cpp), [`TagPartitionedLogSystem.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/logsystem/TagPartitionedLogSystem.actor.cpp) (newEpoch)
+**Principal files:** [`ClusterRecovery.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterRecovery.actor.cpp), [`ClusterRecovery.actor.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterRecovery.actor.h), [`RecoveryState.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/RecoveryState.h), [`DBCoreState.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/DBCoreState.h), [`CoordinatedState.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/CoordinatedState.cpp), [`LogSystem.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/logsystem/LogSystem.cpp) (newEpoch)
 
 ---
 

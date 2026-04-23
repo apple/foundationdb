@@ -20,7 +20,7 @@
 
 #include "flow/flow.h"
 #include "flow/UnitTest.h"
-#include "flow/genericcoros.h"
+#include "genericcoros.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR Future<bool> allTrue(std::vector<Future<bool>> all) {
@@ -412,19 +412,6 @@ TEST_CASE("/flow/genericcoros/Trigger") {
 	    wait(getVoidErrorCode(generic_coro::trigger(SetAsyncVarTrue{ called }, Future<Void>(operation_failed()))));
 	ASSERT_EQ(errorCode, error_code_operation_failed);
 	ASSERT(!called->get());
-
-	return Void();
-}
-
-TEST_CASE("/flow/genericcoros/TriggerOnError") {
-	state Reference<AsyncVar<bool>> called = makeReference<AsyncVar<bool>>(false);
-	wait(generic_coro::triggerOnError(SetAsyncVarTrue{ called }, Future<Void>(Void())));
-	ASSERT(!called->get());
-
-	int errorCode = wait(
-	    getVoidErrorCode(generic_coro::triggerOnError(SetAsyncVarTrue{ called }, Future<Void>(operation_failed()))));
-	ASSERT_EQ(errorCode, 0);
-	ASSERT(called->get());
 
 	return Void();
 }

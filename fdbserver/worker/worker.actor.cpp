@@ -437,7 +437,7 @@ TLogFn tLogFnForOptions(TLogOptions options) {
 }
 
 struct DiskStore {
-	enum COMPONENT { TLogData, Storage, BlobWorker, UNSET };
+	enum COMPONENT { TLogData, Storage, UNSET };
 
 	UID storeID = UID();
 	std::string filename = ""; // For KVStoreMemory just the base filename to be passed to IDiskQueue
@@ -2010,7 +2010,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state Reference<AsyncVar<UID>> activeSharedTLog(new AsyncVar<UID>());
 	state WorkerCache<InitializeBackupReply> backupWorkerCache;
 	state WorkerCache<TLogInterface> logRouterCache;
-	state Future<Void> blobWorkerFuture = Void();
 
 	state WorkerSnapRequest lastSnapReq;
 	// Here the key is UID+role, as we still send duplicate requests to a process which is both storage and tlog
@@ -2542,7 +2541,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					InitializeBackupReply reply(recruited, req.backupEpoch);
 					backupReady.send(reply);
 				} else {
-					forwardPromise(req.reply, backupWorkerCache.get(req.reqId));
+					forwardPromise(Uncancellable{}, req.reply, backupWorkerCache.get(req.reqId));
 				}
 			}
 			when(InitializeTLogRequest req = waitNext(interf.tLog.getFuture())) {
@@ -2754,7 +2753,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				startRole(Role::COMMIT_PROXY, recruited.id(), interf.id(), details);
 
 				DUMPTOKEN(recruited.commit);
-				DUMPTOKEN(recruited.getConsistentReadVersion);
 				DUMPTOKEN(recruited.getKeyServersLocations);
 				DUMPTOKEN(recruited.getStorageServerRejoinInfo);
 				DUMPTOKEN(recruited.waitFailure);
@@ -2843,7 +2841,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 						logRouterReady.send(recruited);
 					}
 				} else {
-					forwardPromise(req.reply, logRouterCache.get(req.reqId));
+					forwardPromise(Uncancellable{}, req.reply, logRouterCache.get(req.reqId));
 				}
 			}
 			when(CoordinationPingMessage m = waitNext(interf.coordinationPing.getFuture())) {
@@ -2983,9 +2981,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		endRole(Role::WORKER, interf.id(), "WorkerError", ok, e);
 		errorForwarders.clear(false);
 		sharedLogs.clear();
-		// blobWorkerFuture is also in errorForwarders so it's double refcounted. If we don't cancel it, it'll never
-		// close it's IKVS and this will hang, leaving a zombie worker
-		blobWorkerFuture.cancel();
 
 		if (e.code() != error_code_actor_cancelled) {
 			// actor_cancelled:
@@ -3500,7 +3495,7 @@ Future<UID> createAndLockProcessIdFile(std::string folder) {
 
 				int64_t fileSize = co_await lockFile.get()->size();
 				Key fileData = makeString(fileSize);
-				co_await success(lockFile.get()->read(mutateString(fileData), fileSize, 0));
+				co_await lockFile.get()->read(mutateString(fileData), fileSize, 0);
 				bool deleteCorruptProcessIdFile = false;
 				try {
 					processIDUid = BinaryReader::fromStringRef<UID>(fileData, IncludeVersion());
@@ -3562,11 +3557,10 @@ Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGeneration(
 
 		ErrorOr<Optional<LeaderInfo>> leader;
 		if (usingHostname) {
-			co_await store(
-			    leader,
-			    tryGetReplyFromHostname(request, interf.hostname.get(), WLTOKEN_LEADERELECTIONREG_ELECTIONRESULT));
+			leader = co_await tryGetReplyFromHostname(
+			    request, interf.hostname.get(), WLTOKEN_LEADERELECTIONREG_ELECTIONRESULT);
 		} else {
-			co_await store(leader, interf.electionResult.tryGetReply(request));
+			leader = co_await interf.electionResult.tryGetReply(request);
 		}
 
 		if (leader.present()) {

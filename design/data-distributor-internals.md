@@ -88,7 +88,7 @@ There are roughly 4 class of movement priorities
 * Boundary change priority. The movement will change current shard boundaries.
 * Others. Like resuming a in-flight movement.
 
-Each shard movement has a priority associating with the move attempt,  The explanation of each priority knob (`PRIORITY_<XXX>`) is in `ServerKnobs.h`.
+Each shard movement has a priority associating with the move attempt,  The explanation of each priority knob (`PRIORITY_<XXX>`) is in `Knobs.h`.
 
 In `status json` output, please look at field `.data.team_tracker.state` for team priority state.
 
