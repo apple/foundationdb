@@ -1,5 +1,5 @@
 /*
- * KeyValueStoreMemory.actor.cpp
+ * KeyValueStoreMemory.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
