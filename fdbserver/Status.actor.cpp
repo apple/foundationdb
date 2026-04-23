@@ -39,6 +39,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include <time.h>
 #include "fdbserver/ClusterRecovery.actor.h"
+#include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbclient/ConsistencyScanInterface.actor.h"
@@ -2133,7 +2134,6 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
     WorkerDetails rkWorker,
     JsonBuilderObject* qos,
     JsonBuilderObject* data_overlay,
-    JsonBuilderObject* tenants,
     std::set<std::string>* incomplete_reasons,
     Future<ErrorOr<std::vector<StorageServerStatusInfo>>> storageServerFuture) {
 	state JsonBuilderObject statusObj;
@@ -2216,9 +2216,6 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 
 		statusObj["transactions"] = transactions;
 
-		if (commitProxyStats.size() > 0) {
-			(*tenants)["num_tenants"] = commitProxyStats[0].getUint64("NumTenants");
-		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
@@ -3044,8 +3041,7 @@ ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
                                                std::vector<WorkerDetails> workers,
                                                std::vector<ProcessIssues> workerIssues,
                                                std::vector<StorageServerMetaInfo> storageMetadatas,
-                                               ServerCoordinators coordinators,
-                                               std::unordered_map<NetworkAddress, double> excludedDegradedServers) {
+                                               ServerCoordinators coordinators) {
 	state JsonBuilderObject& statusObj = *pStatusObj;
 	state JsonBuilderArray& messages = *pMessages;
 	state std::set<std::string>& status_incomplete_reasons = *pStatusIncompleteReasons;
@@ -3308,7 +3304,6 @@ ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
 			                                         rkWorker,
 			                                         &qos,
 			                                         &dataOverlay,
-			                                         &tenants,
 			                                         &status_incomplete_reasons,
 			                                         storageServerFuture));
 			futures2.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
@@ -3575,9 +3570,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
     ServerCoordinators coordinators,
     std::vector<NetworkAddress> incompatibleConnections,
     Version datacenterVersionDifference,
-    Version dcLogServerVersionDifference,
-    Version dcStorageServerVersionDifference,
-    std::unordered_map<NetworkAddress, double> excludedDegradedServers,
     double deadlineTimeout) {
 	state JsonBuilderObject statusObj;
 	state JsonBuilderArray messages;
@@ -3591,8 +3583,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	                                                                           workers,
 	                                                                           workerIssues,
 	                                                                           storageMetadatas,
-	                                                                           coordinators,
-	                                                                           excludedDegradedServers),
+	                                                                           coordinators),
 	                                                      deadlineTimeout)));
 
 	if (result.isError()) {
@@ -3619,8 +3610,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	}
 	statusObj["incompatible_connections"] = incompatibleConnectionsArray;
 	statusObj["datacenter_lag"] = getLagObject(datacenterVersionDifference);
-	statusObj["logserver_lag"] = getLagObject(dcLogServerVersionDifference);
-	statusObj["storageserver_lag"] = getLagObject(dcStorageServerVersionDifference);
 
 	// Create the status_incomplete message if there were any reasons that the status is incomplete.
 	if (!status_incomplete_reasons.empty()) {
@@ -4069,9 +4058,6 @@ TEST_CASE("/fdbserver/clustercontroller/clusterGetStatusTimeout") {
 	                                                          coordinators,
 	                                                          std::vector<NetworkAddress>(),
 	                                                          Version(0),
-	                                                          Version(0),
-	                                                          Version(0),
-	                                                          std::unordered_map<NetworkAddress, double>(),
 	                                                          1.0);
 	// Since we set the timeout above to 1 second, 5 seconds should be more than enough to complete the test.
 	// If it takes any longer, then the test case has failed

@@ -53,9 +53,6 @@ Future<StatusReply> clusterGetStatus(Reference<AsyncVar<struct ServerDBInfo>> db
                                      ServerCoordinators coordinators,
                                      std::vector<NetworkAddress> incompatibleConnections,
                                      Version datacenterVersionDifference,
-                                     Version dcLogServerVersionDifference,
-                                     Version dcStorageServerVersionDifference,
-                                     std::unordered_map<NetworkAddress, double> excludedDegradedServers,
                                      double deadlineTimeout);
 #else
 Future<StatusReply> clusterGetStatus(
@@ -68,9 +65,6 @@ Future<StatusReply> clusterGetStatus(
     ServerCoordinators const& coordinators,
     std::vector<NetworkAddress> const& incompatibleConnections,
     Version const& datacenterVersionDifference,
-    Version const& dcLogServerVersionDifference,
-    Version const& dcStorageServerVersionDifference,
-    std::unordered_map<NetworkAddress, double> const& excludedDegradedServers,
     double const& deadlineTimeout);
 #endif
 

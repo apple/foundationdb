@@ -1527,9 +1527,6 @@ ACTOR Future<Void> statusServer(FutureStream<StatusRequest> requests,
 			                             coordinators,
 			                             incompatibleConnections,
 			                             self->datacenterVersionDifference,
-			                             self->dcLogServerVersionDifference,
-			                             self->dcStorageServerVersionDifference,
-			                             self->excludedDegradedServers,
 			                             std::max(CLIENT_KNOBS->STATUS_TIMEOUT - SERVER_KNOBS->STATUS_TIMEOUT_BUFFER,
 			                                      SERVER_KNOBS->STATUS_TIMEOUT_BUFFER))));
 
