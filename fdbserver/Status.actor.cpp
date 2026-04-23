@@ -3622,36 +3622,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	return StatusReply(statusObj.getJson());
 }
 
-StatusReply clusterGetFaultToleranceStatus(const std::string& statusStr) {
-	double tStart = timer();
-
-	try {
-		json_spirit::mValue mv = readJSONStrictly(statusStr);
-		JSONDoc jsonDoc(mv);
-
-		std::string faultToleranceRelatedFields[] = {
-			"fault_tolerance", "data",    "logs", "maintenance_zone", "maintenance_seconds_remaining", "qos",
-			"recovery_state",  "messages"
-		};
-
-		JsonBuilderObject statusObj;
-		for (std::string& field : faultToleranceRelatedFields) {
-			if (jsonDoc.has(field)) {
-				statusObj[field] = jsonDoc.last();
-			}
-		}
-
-		TraceEvent("ClusterGetFaultToleranceStatus")
-		    .detail("Duration", timer() - tStart)
-		    .detail("StatusSize", statusObj.getFinalLength());
-
-		return StatusReply(statusObj.getJson());
-	} catch (Error& e) {
-		TraceEvent(SevError, "StatusError").error(e);
-		throw;
-	}
-}
-
 bool checkAsciiNumber(const char* s) {
 	JsonBuilderObject number;
 	number.setKeyRawNumber("number", s);
