@@ -1944,17 +1944,9 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* s
 		    }
 	    });
 
-	try {
-		wait(ready(result));
-	} catch (Error& e) {
-		if (e.code() == error_code_lookup_failed) {
-			self->dnsCache.remove(host, service);
-		}
-		throw e;
-	}
+	wait(ready(result));
 	tcpResolver.cancel();
 	std::vector<NetworkAddress> ret = result.get();
-	self->dnsCache.add(host, service, ret);
 
 	return ret;
 }
