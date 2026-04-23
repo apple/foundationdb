@@ -2747,7 +2747,7 @@ Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, DataMovem
 	}
 }
 
-struct DDQueueImpl {
+class DDQueueImpl {
 	Reference<DDQueue> self;
 	Reference<AsyncVar<bool>> processingUnhealthy;
 	Reference<AsyncVar<bool>> processingWiggle;
@@ -2768,6 +2768,16 @@ struct DDQueueImpl {
 	    getUnhealthyRelocationCount(getUnhealthyRelocationCount),
 	    onCleanUpDataMoveActorError(actorCollection(self->addBackgroundCleanUpDataMoveActor.getFuture())) {}
 
+public:
+	static Future<Void> run(Reference<DDQueue> self,
+	                        Reference<AsyncVar<bool>> processingUnhealthy,
+	                        Reference<AsyncVar<bool>> processingWiggle,
+	                        FutureStream<Promise<int>> getUnhealthyRelocationCount) {
+		DDQueueImpl queue(self, processingUnhealthy, processingWiggle, getUnhealthyRelocationCount);
+		co_await queue.run();
+	}
+
+private:
 	void triggerLaunchQueuedWork() { launchQueuedWorkTrigger.send(Void()); }
 
 	void addServersToLaunch(std::vector<UID> const& servers) {
@@ -2988,14 +2998,6 @@ struct DDQueueImpl {
 				TraceEvent(SevError, "DataDistributionQueueError", self->distributorId).error(e);
 			throw e;
 		}
-	}
-
-	static Future<Void> run(Reference<DDQueue> self,
-	                        Reference<AsyncVar<bool>> processingUnhealthy,
-	                        Reference<AsyncVar<bool>> processingWiggle,
-	                        FutureStream<Promise<int>> getUnhealthyRelocationCount) {
-		DDQueueImpl queue(self, processingUnhealthy, processingWiggle, getUnhealthyRelocationCount);
-		co_await queue.run();
 	}
 };
 
