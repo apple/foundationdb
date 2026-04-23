@@ -9,6 +9,7 @@ target_include_directories(fdbserver_workloads PRIVATE
 target_link_libraries(fdbserver_workloads PRIVATE
   fdbserver_consistencyscan
   fdbserver_core
+  fdbserver_kvstore
   fdbserver_worker
   fdbserver_tester
   fdbserver_datadistributor

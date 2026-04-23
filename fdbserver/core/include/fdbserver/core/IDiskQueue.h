@@ -23,7 +23,7 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbserver/core/IKeyValueStore.h"
+#include "fdbclient/IClosable.h"
 #include "flow/BooleanParam.h"
 
 FDB_BOOLEAN_PARAM(CheckHashes);
