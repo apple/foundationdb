@@ -10,7 +10,6 @@ add_fdbserver_link_test(fdbserver_workerlinktest
   fdbserver_coordinator
   fdbserver_datadistributor
   fdbserver_grvproxy
-  fdbserver_kvstore
   fdbserver_logrouter
   fdbserver_logsystem
   fdbserver_ratekeeper
@@ -45,7 +44,6 @@ target_link_libraries(fdbserver_worker
     fdbserver_coordinator
     fdbserver_datadistributor
     fdbserver_grvproxy
-    fdbserver_kvstore
     fdbserver_logrouter
     fdbserver_logsystem
     fdbserver_ratekeeper
