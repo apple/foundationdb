@@ -1650,7 +1650,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 							    .detail("KeyBegin", keys.begin)
 							    .detail("KeyEnd", keys.end)
 							    .detail("Retries", retries);
-							throw movekeys_conflict();
+							throw finish_move_keys_too_many_retries();
 						}
 						wait(delay(backoff));
 					}

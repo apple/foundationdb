@@ -1903,7 +1903,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 
 			//TraceEvent("RelocateShardFinished", distributorId).detail("RelocateId", relocateShardInterval.pairID);
 
-			if (error.code() != error_code_move_to_removed_server) {
+			if (error.code() != error_code_move_to_removed_server &&
+			    error.code() != error_code_finish_move_keys_too_many_retries) {
 				if (!error.code()) {
 					try {
 						wait(healthyDestinations

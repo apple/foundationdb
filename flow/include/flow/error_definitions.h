@@ -152,6 +152,7 @@ ERROR( cancel_audit_storage_failed, 1231, "Failed to cancel an audit" )
 ERROR( audit_storage_cancelled, 1232, "Audit has been cancelled" )
 ERROR( location_metadata_corruption, 1233, "Found location metadata corruption" )
 ERROR( audit_storage_task_outdated, 1234, "Audit task is scheduled by an outdated DD" )
+ERROR( finish_move_keys_too_many_retries, 1235, "finishMoveKeys exceeded retry limit" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
