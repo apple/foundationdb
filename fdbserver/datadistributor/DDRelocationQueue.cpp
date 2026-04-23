@@ -2746,7 +2746,7 @@ Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, DataMovem
 	}
 }
 
-class DDQueueImpl {
+class DDQueueImpl : public ReferenceCounted<DDQueueImpl> {
 	Reference<DDQueue> self;
 	Reference<AsyncVar<bool>> processingUnhealthy;
 	Reference<AsyncVar<bool>> processingWiggle;
@@ -2772,11 +2772,19 @@ public:
 	                        Reference<AsyncVar<bool>> processingUnhealthy,
 	                        Reference<AsyncVar<bool>> processingWiggle,
 	                        FutureStream<Promise<int>> getUnhealthyRelocationCount) {
-		DDQueueImpl queue(self, processingUnhealthy, processingWiggle, getUnhealthyRelocationCount);
-		co_await queue.run();
+		Reference<DDQueueImpl> queue = Reference<DDQueueImpl>(
+		    new DDQueueImpl(self, processingUnhealthy, processingWiggle, getUnhealthyRelocationCount));
+		co_await queue->run(queue);
 	}
 
 private:
+	using QueueLoop = Future<Void> (DDQueueImpl::*)();
+
+	static Future<Void> withQueueLifetime(Reference<DDQueueImpl> impl, QueueLoop queueLoop) {
+		Future<Void> running = (impl.getPtr()->*queueLoop)();
+		co_await running;
+	}
+
 	void triggerLaunchQueuedWork() { launchQueuedWorkTrigger.send(Void()); }
 
 	void addServersToLaunch(std::vector<UID> const& servers) {
@@ -2789,7 +2797,6 @@ private:
 	Future<Void> relocateShards() {
 		while (true) {
 			RelocateShard rs = co_await self->input;
-			self->validate();
 
 			if (rs.isRestore()) {
 				ASSERT(rs.dataMove != nullptr);
@@ -2811,7 +2818,6 @@ private:
 		while (true) {
 			co_await launchQueuedWorkTrigger.getFuture();
 			co_await delay(0, TaskPriority::DataDistributionLaunch);
-			self->validate();
 
 			if (!serversToLaunchFrom.empty()) {
 				self->launchQueuedWork(serversToLaunchFrom, self->ddEnabledState);
@@ -2823,7 +2829,6 @@ private:
 	Future<Void> processSourceFetchResults() {
 		while (true) {
 			RelocateData results = co_await self->fetchSourceServersComplete.getFuture();
-			self->validate();
 
 			// This stream is triggered by queueRelocation(), which is triggered by sending self->input.
 			self->completeSourceFetch(results);
@@ -2834,7 +2839,6 @@ private:
 	Future<Void> processDataTransferComplete() {
 		while (true) {
 			RelocateData done = co_await self->dataTransferComplete.getFuture();
-			self->validate();
 
 			complete(done, self->busymap, self->destBusymap);
 			addServersToLaunch(done.src);
@@ -2844,7 +2848,6 @@ private:
 	Future<Void> processRelocationComplete() {
 		while (true) {
 			RelocateData done = co_await self->relocationComplete.getFuture();
-			self->validate();
 
 			self->activeRelocations--;
 			TraceEvent(SevVerbose, "InFlightRelocationChange")
@@ -2865,7 +2868,6 @@ private:
 	Future<Void> launchCompletedRanges() {
 		while (true) {
 			KeyRange done = co_await rangesComplete.getFuture();
-			self->validate();
 			self->launchQueuedWork(done, self->ddEnabledState);
 		}
 	}
@@ -2873,7 +2875,6 @@ private:
 	Future<Void> recordMetricsLoop() {
 		while (true) {
 			co_await recordMetrics;
-			self->validate();
 
 			Promise<int64_t> req;
 			self->getAverageShardBytes.send(req);
@@ -2952,12 +2953,11 @@ private:
 	Future<Void> getUnhealthyRelocationCountRequests() {
 		while (true) {
 			Promise<int> r = co_await getUnhealthyRelocationCount;
-			self->validate();
 			r.send(self->getUnhealthyRelocationCount());
 		}
 	}
 
-	Future<Void> run() {
+	Future<Void> run(Reference<DDQueueImpl> impl) {
 
 		for (int i = 0; i < self->teamCollections.size(); i++) {
 			ddQueueFutures.push_back(
@@ -2976,16 +2976,16 @@ private:
 		ddQueueFutures.push_back(self->periodicalRefreshCounter());
 
 		try {
-			co_await race(relocateShards(),
-			              launchQueuedWork(),
-			              processSourceFetchResults(),
-			              processDataTransferComplete(),
-			              processRelocationComplete(),
-			              launchCompletedRanges(),
-			              recordMetricsLoop(),
-			              propagateDataDistributionRelocatorErrors(),
+			co_await race(withQueueLifetime(impl, &DDQueueImpl::relocateShards),
+			              withQueueLifetime(impl, &DDQueueImpl::launchQueuedWork),
+			              withQueueLifetime(impl, &DDQueueImpl::processSourceFetchResults),
+			              withQueueLifetime(impl, &DDQueueImpl::processDataTransferComplete),
+			              withQueueLifetime(impl, &DDQueueImpl::processRelocationComplete),
+			              withQueueLifetime(impl, &DDQueueImpl::launchCompletedRanges),
+			              withQueueLifetime(impl, &DDQueueImpl::recordMetricsLoop),
+			              withQueueLifetime(impl, &DDQueueImpl::propagateDataDistributionRelocatorErrors),
 			              waitForAll(ddQueueFutures),
-			              getUnhealthyRelocationCountRequests(),
+			              withQueueLifetime(impl, &DDQueueImpl::getUnhealthyRelocationCountRequests),
 			              onCleanUpDataMoveActorError);
 			ASSERT(false);
 			throw internal_error();
