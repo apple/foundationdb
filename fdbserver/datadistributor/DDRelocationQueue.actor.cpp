@@ -2748,22 +2748,211 @@ Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, DataMovem
 }
 
 struct DDQueueImpl {
-	ACTOR static Future<Void> run(Reference<DDQueue> self,
-	                              Reference<AsyncVar<bool>> processingUnhealthy,
-	                              Reference<AsyncVar<bool>> processingWiggle,
-	                              FutureStream<Promise<int>> getUnhealthyRelocationCount) {
+	Reference<DDQueue> self;
+	Reference<AsyncVar<bool>> processingUnhealthy;
+	Reference<AsyncVar<bool>> processingWiggle;
+	FutureStream<Promise<int>> getUnhealthyRelocationCount;
 
-		state std::set<UID> serversToLaunchFrom;
-		state KeyRange keysToLaunchFrom;
-		state RelocateData launchData;
-		state Future<Void> recordMetrics = delay(SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL);
+	std::set<UID> serversToLaunchFrom;
+	PromiseStream<Void> launchQueuedWorkTrigger;
+	PromiseStream<KeyRange> rangesComplete;
+	Future<Void> recordMetrics = delay(SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL);
+	std::vector<Future<Void>> ddQueueFutures;
+	Future<Void> onCleanUpDataMoveActorError;
 
-		state std::vector<Future<Void>> ddQueueFutures;
+	DDQueueImpl(Reference<DDQueue> self,
+	            Reference<AsyncVar<bool>> processingUnhealthy,
+	            Reference<AsyncVar<bool>> processingWiggle,
+	            FutureStream<Promise<int>> getUnhealthyRelocationCount)
+	  : self(self), processingUnhealthy(processingUnhealthy), processingWiggle(processingWiggle),
+	    getUnhealthyRelocationCount(getUnhealthyRelocationCount),
+	    onCleanUpDataMoveActorError(actorCollection(self->addBackgroundCleanUpDataMoveActor.getFuture())) {}
 
-		state PromiseStream<KeyRange> rangesComplete;
-		state Future<Void> launchQueuedWorkTimeout = Never();
-		state Future<Void> onCleanUpDataMoveActorError =
-		    actorCollection(self->addBackgroundCleanUpDataMoveActor.getFuture());
+	void triggerLaunchQueuedWork() { launchQueuedWorkTrigger.send(Void()); }
+
+	void addServersToLaunch(std::vector<UID> const& servers) {
+		if (serversToLaunchFrom.empty() && !servers.empty()) {
+			triggerLaunchQueuedWork();
+		}
+		serversToLaunchFrom.insert(servers.begin(), servers.end());
+	}
+
+	Future<Void> relocateShards() {
+		while (true) {
+			RelocateShard rs = co_await self->input;
+			self->validate();
+
+			if (rs.isRestore()) {
+				ASSERT(rs.dataMove != nullptr);
+				ASSERT(rs.dataMoveId.isValid());
+				self->launchQueuedWork(RelocateData(rs), self->ddEnabledState);
+			} else if (rs.cancelled) {
+				self->enqueueCancelledDataMove(rs.dataMoveId, rs.keys, self->ddEnabledState);
+			} else {
+				bool wasEmpty = serversToLaunchFrom.empty();
+				self->queueRelocation(rs, serversToLaunchFrom);
+				if (wasEmpty && !serversToLaunchFrom.empty()) {
+					triggerLaunchQueuedWork();
+				}
+			}
+		}
+	}
+
+	Future<Void> launchQueuedWork() {
+		while (true) {
+			co_await launchQueuedWorkTrigger.getFuture();
+			co_await delay(0, TaskPriority::DataDistributionLaunch);
+			self->validate();
+
+			if (!serversToLaunchFrom.empty()) {
+				self->launchQueuedWork(serversToLaunchFrom, self->ddEnabledState);
+				serversToLaunchFrom.clear();
+			}
+		}
+	}
+
+	Future<Void> processSourceFetchResults() {
+		while (true) {
+			RelocateData results = co_await self->fetchSourceServersComplete.getFuture();
+			self->validate();
+
+			// This stream is triggered by queueRelocation(), which is triggered by sending self->input.
+			self->completeSourceFetch(results);
+			self->launchQueuedWork(results, self->ddEnabledState);
+		}
+	}
+
+	Future<Void> processDataTransferComplete() {
+		while (true) {
+			RelocateData done = co_await self->dataTransferComplete.getFuture();
+			self->validate();
+
+			complete(done, self->busymap, self->destBusymap);
+			addServersToLaunch(done.src);
+		}
+	}
+
+	Future<Void> processRelocationComplete() {
+		while (true) {
+			RelocateData done = co_await self->relocationComplete.getFuture();
+			self->validate();
+
+			self->activeRelocations--;
+			TraceEvent(SevVerbose, "InFlightRelocationChange")
+			    .detail("Complete", done.dataMoveId)
+			    .detail("IsRestore", done.isRestore())
+			    .detail("Total", self->activeRelocations);
+			self->finishRelocation(done.priority, done.healthPriority);
+			self->fetchKeysComplete.erase(done);
+			// self->logRelocation( done, "ShardRelocatorDone" );
+			self->noErrorActors.add(tag(delay(0, TaskPriority::DataDistributionLaunch), done.keys, rangesComplete));
+			if (g_network->isSimulated() && debug_isCheckRelocationDuration() && now() - done.startTime > 60) {
+				TraceEvent(SevWarnAlways, "RelocationDurationTooLong").detail("Duration", now() - done.startTime);
+				debug_setCheckRelocationDuration(false);
+			}
+		}
+	}
+
+	Future<Void> launchCompletedRanges() {
+		while (true) {
+			KeyRange done = co_await rangesComplete.getFuture();
+			self->validate();
+			self->launchQueuedWork(done, self->ddEnabledState);
+		}
+	}
+
+	Future<Void> recordMetricsLoop() {
+		while (true) {
+			co_await recordMetrics;
+			self->validate();
+
+			Promise<int64_t> req;
+			self->getAverageShardBytes.send(req);
+
+			recordMetrics = delay(SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL, TaskPriority::FlushTrace);
+
+			auto const highestPriorityRelocation = self->getHighestPriorityRelocation();
+
+			TraceEvent("MovingData", self->distributorId)
+			    .detail("InFlight", self->activeRelocations)
+			    .detail("InQueue", self->queuedRelocations)
+			    .detail("AverageShardSize", req.getFuture().isReady() ? req.getFuture().get() : -1)
+			    .detail("UnhealthyRelocations", self->unhealthyRelocations)
+			    .detail("HighestPriority", highestPriorityRelocation)
+			    .detail("BytesWritten", self->moveBytesRate.getTotal())
+			    .detail("BytesWrittenAverageRate", self->moveBytesRate.getAverage())
+			    .detail("PriorityRecoverMove", self->priority_relocations[SERVER_KNOBS->PRIORITY_RECOVER_MOVE])
+			    .detail("PriorityRebalanceUnderutilizedTeam",
+			            self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM])
+			    .detail("PriorityRebalanceOverutilizedTeam",
+			            self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM])
+			    .detail("PriorityRebalanceReadUnderutilTeam",
+			            self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_READ_UNDERUTIL_TEAM])
+			    .detail("PriorityRebalanceReadOverutilTeam",
+			            self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_READ_OVERUTIL_TEAM])
+			    .detail("PriorityStorageWiggle",
+			            self->priority_relocations[SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE])
+			    .detail("PriorityTeamHealthy", self->priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_HEALTHY])
+			    .detail("PriorityTeamContainsUndesiredServer",
+			            self->priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER])
+			    .detail("PriorityTeamRedundant", self->priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT])
+			    .detail("PriorityMergeShard", self->priority_relocations[SERVER_KNOBS->PRIORITY_MERGE_SHARD])
+			    .detail("PriorityPopulateRegion", self->priority_relocations[SERVER_KNOBS->PRIORITY_POPULATE_REGION])
+			    .detail("PriorityTeamUnhealthy", self->priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY])
+			    .detail("PriorityTeam2Left", self->priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_2_LEFT])
+			    .detail("PriorityTeam1Left", self->priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_1_LEFT])
+			    .detail("PriorityTeam0Left", self->priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_0_LEFT])
+			    .detail("PrioritySplitShard", self->priority_relocations[SERVER_KNOBS->PRIORITY_SPLIT_SHARD])
+			    .trackLatest("MovingData"); // This trace event's trackLatest lifetime is controlled by
+			                                // DataDistributor::movingDataEventHolder. The track latest
+			                                // key we use here must match the key used in the holder.
+
+			if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+				TraceEvent("PhysicalShardMoveStats")
+				    .detail("MoveCreateNewPhysicalShard", self->moveCreateNewPhysicalShard)
+				    .detail("MoveReusePhysicalShard", self->moveReusePhysicalShard)
+				    .detail("RemoteBestTeamNotReady",
+				            self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::RemoteBestTeamNotReady])
+				    .detail("PrimaryNoHealthyTeam",
+				            self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::PrimaryNoHealthyTeam])
+				    .detail("RemoteNoHealthyTeam",
+				            self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::RemoteNoHealthyTeam])
+				    .detail("RemoteTeamIsFull",
+				            self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::RemoteTeamIsFull])
+				    .detail("RemoteTeamIsNotHealthy",
+				            self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::RemoteTeamIsNotHealthy])
+				    .detail("UnknownForceNew",
+				            self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::UnknownForceNew])
+				    .detail("NoAnyHealthy", self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::NoAnyHealthy])
+				    .detail("DstOverloaded", self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::DstOverloaded])
+				    .detail("NoAvailablePhysicalShard",
+				            self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::NoAvailablePhysicalShard])
+				    .detail("RetryLimitReached",
+				            self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::RetryLimitReached]);
+				self->moveCreateNewPhysicalShard = 0;
+				self->moveReusePhysicalShard = 0;
+				for (int i = 0; i < self->retryFindDstReasonCount.size(); ++i) {
+					self->retryFindDstReasonCount[i] = 0;
+				}
+			}
+		}
+	}
+
+	Future<Void> propagateDataDistributionRelocatorErrors() {
+		while (true) {
+			co_await self->error.getFuture();
+		}
+	}
+
+	Future<Void> getUnhealthyRelocationCountRequests() {
+		while (true) {
+			Promise<int> r = co_await getUnhealthyRelocationCount;
+			self->validate();
+			r.send(self->getUnhealthyRelocationCount());
+		}
+	}
+
+	Future<Void> run() {
 
 		for (int i = 0; i < self->teamCollections.size(); i++) {
 			ddQueueFutures.push_back(
@@ -2782,166 +2971,19 @@ struct DDQueueImpl {
 		ddQueueFutures.push_back(self->periodicalRefreshCounter());
 
 		try {
-			loop {
-				self->validate();
-
-				// For the given servers that caused us to go around the loop, find the next item(s) that can be
-				// launched.
-				if (launchData.startTime != -1) {
-					// Launch dataDistributionRelocator actor to relocate the launchData
-					self->launchQueuedWork(launchData, self->ddEnabledState);
-					launchData = RelocateData();
-				} else if (!keysToLaunchFrom.empty()) {
-					self->launchQueuedWork(keysToLaunchFrom, self->ddEnabledState);
-					keysToLaunchFrom = KeyRangeRef();
-				}
-
-				ASSERT(launchData.startTime == -1 && keysToLaunchFrom.empty());
-
-				choose {
-					when(RelocateShard rs = waitNext(self->input)) {
-						if (rs.isRestore()) {
-							ASSERT(rs.dataMove != nullptr);
-							ASSERT(rs.dataMoveId.isValid());
-							self->launchQueuedWork(RelocateData(rs), self->ddEnabledState);
-						} else if (rs.cancelled) {
-							self->enqueueCancelledDataMove(rs.dataMoveId, rs.keys, self->ddEnabledState);
-						} else {
-							bool wasEmpty = serversToLaunchFrom.empty();
-							self->queueRelocation(rs, serversToLaunchFrom);
-							if (wasEmpty && !serversToLaunchFrom.empty())
-								launchQueuedWorkTimeout = delay(0, TaskPriority::DataDistributionLaunch);
-						}
-					}
-					when(wait(launchQueuedWorkTimeout)) {
-						self->launchQueuedWork(serversToLaunchFrom, self->ddEnabledState);
-						serversToLaunchFrom = std::set<UID>();
-						launchQueuedWorkTimeout = Never();
-					}
-					when(RelocateData results = waitNext(self->fetchSourceServersComplete.getFuture())) {
-						// This when is triggered by queueRelocation() which is triggered by sending self->input
-						self->completeSourceFetch(results);
-						launchData = results;
-					}
-					when(RelocateData done = waitNext(self->dataTransferComplete.getFuture())) {
-						complete(done, self->busymap, self->destBusymap);
-						if (serversToLaunchFrom.empty() && !done.src.empty())
-							launchQueuedWorkTimeout = delay(0, TaskPriority::DataDistributionLaunch);
-						serversToLaunchFrom.insert(done.src.begin(), done.src.end());
-					}
-					when(RelocateData done = waitNext(self->relocationComplete.getFuture())) {
-						self->activeRelocations--;
-						TraceEvent(SevVerbose, "InFlightRelocationChange")
-						    .detail("Complete", done.dataMoveId)
-						    .detail("IsRestore", done.isRestore())
-						    .detail("Total", self->activeRelocations);
-						self->finishRelocation(done.priority, done.healthPriority);
-						self->fetchKeysComplete.erase(done);
-						// self->logRelocation( done, "ShardRelocatorDone" );
-						self->noErrorActors.add(
-						    tag(delay(0, TaskPriority::DataDistributionLaunch), done.keys, rangesComplete));
-						if (g_network->isSimulated() && debug_isCheckRelocationDuration() &&
-						    now() - done.startTime > 60) {
-							TraceEvent(SevWarnAlways, "RelocationDurationTooLong")
-							    .detail("Duration", now() - done.startTime);
-							debug_setCheckRelocationDuration(false);
-						}
-					}
-					when(KeyRange done = waitNext(rangesComplete.getFuture())) {
-						keysToLaunchFrom = done;
-					}
-					when(wait(recordMetrics)) {
-						Promise<int64_t> req;
-						self->getAverageShardBytes.send(req);
-
-						recordMetrics = delay(SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL, TaskPriority::FlushTrace);
-
-						auto const highestPriorityRelocation = self->getHighestPriorityRelocation();
-
-						TraceEvent("MovingData", self->distributorId)
-						    .detail("InFlight", self->activeRelocations)
-						    .detail("InQueue", self->queuedRelocations)
-						    .detail("AverageShardSize", req.getFuture().isReady() ? req.getFuture().get() : -1)
-						    .detail("UnhealthyRelocations", self->unhealthyRelocations)
-						    .detail("HighestPriority", highestPriorityRelocation)
-						    .detail("BytesWritten", self->moveBytesRate.getTotal())
-						    .detail("BytesWrittenAverageRate", self->moveBytesRate.getAverage())
-						    .detail("PriorityRecoverMove",
-						            self->priority_relocations[SERVER_KNOBS->PRIORITY_RECOVER_MOVE])
-						    .detail("PriorityRebalanceUnderutilizedTeam",
-						            self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM])
-						    .detail("PriorityRebalanceOverutilizedTeam",
-						            self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM])
-						    .detail("PriorityRebalanceReadUnderutilTeam",
-						            self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_READ_UNDERUTIL_TEAM])
-						    .detail("PriorityRebalanceReadOverutilTeam",
-						            self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_READ_OVERUTIL_TEAM])
-						    .detail("PriorityStorageWiggle",
-						            self->priority_relocations[SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE])
-						    .detail("PriorityTeamHealthy",
-						            self->priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_HEALTHY])
-						    .detail("PriorityTeamContainsUndesiredServer",
-						            self->priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER])
-						    .detail("PriorityTeamRedundant",
-						            self->priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT])
-						    .detail("PriorityMergeShard",
-						            self->priority_relocations[SERVER_KNOBS->PRIORITY_MERGE_SHARD])
-						    .detail("PriorityPopulateRegion",
-						            self->priority_relocations[SERVER_KNOBS->PRIORITY_POPULATE_REGION])
-						    .detail("PriorityTeamUnhealthy",
-						            self->priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY])
-						    .detail("PriorityTeam2Left", self->priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_2_LEFT])
-						    .detail("PriorityTeam1Left", self->priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_1_LEFT])
-						    .detail("PriorityTeam0Left", self->priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_0_LEFT])
-						    .detail("PrioritySplitShard",
-						            self->priority_relocations[SERVER_KNOBS->PRIORITY_SPLIT_SHARD])
-						    .trackLatest("MovingData"); // This trace event's trackLatest lifetime is controlled by
-						                                // DataDistributor::movingDataEventHolder. The track latest
-						                                // key we use here must match the key used in the holder.
-
-						if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
-							TraceEvent("PhysicalShardMoveStats")
-							    .detail("MoveCreateNewPhysicalShard", self->moveCreateNewPhysicalShard)
-							    .detail("MoveReusePhysicalShard", self->moveReusePhysicalShard)
-							    .detail(
-							        "RemoteBestTeamNotReady",
-							        self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::RemoteBestTeamNotReady])
-							    .detail(
-							        "PrimaryNoHealthyTeam",
-							        self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::PrimaryNoHealthyTeam])
-							    .detail("RemoteNoHealthyTeam",
-							            self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::RemoteNoHealthyTeam])
-							    .detail("RemoteTeamIsFull",
-							            self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::RemoteTeamIsFull])
-							    .detail(
-							        "RemoteTeamIsNotHealthy",
-							        self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::RemoteTeamIsNotHealthy])
-							    .detail("UnknownForceNew",
-							            self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::UnknownForceNew])
-							    .detail("NoAnyHealthy",
-							            self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::NoAnyHealthy])
-							    .detail("DstOverloaded",
-							            self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::DstOverloaded])
-							    .detail("NoAvailablePhysicalShard",
-							            self->retryFindDstReasonCount
-							                [DDQueue::RetryFindDstReason::NoAvailablePhysicalShard])
-							    .detail("RetryLimitReached",
-							            self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::RetryLimitReached]);
-							self->moveCreateNewPhysicalShard = 0;
-							self->moveReusePhysicalShard = 0;
-							for (int i = 0; i < self->retryFindDstReasonCount.size(); ++i) {
-								self->retryFindDstReasonCount[i] = 0;
-							}
-						}
-					}
-					when(wait(self->error.getFuture())) {} // Propagate errors from dataDistributionRelocator
-					when(wait(waitForAll(ddQueueFutures))) {}
-					when(Promise<int> r = waitNext(getUnhealthyRelocationCount)) {
-						r.send(self->getUnhealthyRelocationCount());
-					}
-					when(wait(onCleanUpDataMoveActorError)) {}
-				}
-			}
+			co_await race(relocateShards(),
+			              launchQueuedWork(),
+			              processSourceFetchResults(),
+			              processDataTransferComplete(),
+			              processRelocationComplete(),
+			              launchCompletedRanges(),
+			              recordMetricsLoop(),
+			              propagateDataDistributionRelocatorErrors(),
+			              waitForAll(ddQueueFutures),
+			              getUnhealthyRelocationCountRequests(),
+			              onCleanUpDataMoveActorError);
+			ASSERT(false);
+			throw internal_error();
 		} catch (Error& e) {
 			if (e.code() != error_code_broken_promise && // FIXME: Get rid of these broken_promise errors every time
 			                                             // we are killed by the master dying
@@ -2950,6 +2992,14 @@ struct DDQueueImpl {
 				TraceEvent(SevError, "DataDistributionQueueError", self->distributorId).error(e);
 			throw e;
 		}
+	}
+
+	static Future<Void> run(Reference<DDQueue> self,
+	                        Reference<AsyncVar<bool>> processingUnhealthy,
+	                        Reference<AsyncVar<bool>> processingWiggle,
+	                        FutureStream<Promise<int>> getUnhealthyRelocationCount) {
+		DDQueueImpl queue(self, processingUnhealthy, processingWiggle, getUnhealthyRelocationCount);
+		co_await queue.run();
 	}
 };
 
