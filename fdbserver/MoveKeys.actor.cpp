@@ -1638,9 +1638,8 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 						// while we were waiting, we must not commit stale metadata.
 						{
 							bool destChanged = convergenceCheckKeyServers.size() <= 1;
-							bool boundaryChanged =
-							    convergenceCheckKeyServers.size() <= 1 ||
-							    convergenceCheckKeyServers.back().key != endKey;
+							bool boundaryChanged = convergenceCheckKeyServers.size() <= 1 ||
+							                       convergenceCheckKeyServers.back().key != endKey;
 							std::vector<UID> mismatchedDest;
 							for (int i = 0; !destChanged && i + 1 < convergenceCheckKeyServers.size(); ++i) {
 								std::vector<UID> checkSrc, checkDest;
@@ -1654,8 +1653,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 								}
 							}
 							if (destChanged || boundaryChanged) {
-								CODE_PROBE(true,
-								           "finishMoveKeys dest changed during waitForShardReady");
+								CODE_PROBE(true, "finishMoveKeys dest changed during waitForShardReady");
 								TraceEvent(SevWarn, "FinishMoveKeysDestChanged", relocationIntervalId)
 								    .detail("KeyBegin", keys.begin)
 								    .detail("KeyEnd", keys.end)
