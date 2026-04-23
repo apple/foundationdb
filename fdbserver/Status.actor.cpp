@@ -33,7 +33,6 @@
 #include "flow/ITrace.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/Trace.h"
-#include "fdbclient/MetaclusterRegistration.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -3220,8 +3219,6 @@ ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
 
 		state JsonBuilderObject qos;
 		state JsonBuilderObject dataOverlay;
-		state JsonBuilderObject tenants;
-		state JsonBuilderObject metacluster;
 		state JsonBuilderObject storageWiggler;
 		state std::unordered_set<UID> wiggleServers;
 
@@ -3390,10 +3387,6 @@ ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
 				statusObj["workload"] = workerStatuses[1];
 
 			statusObj["layers"] = workerStatuses[2];
-			if (configBroadcaster) {
-				// TODO: Read from coordinators for more up-to-date config database status?
-				statusObj["configuration_database"] = configBroadcaster->getStatus();
-			}
 
 			// Add qos section if it was populated
 			if (!qos.empty())
@@ -3499,8 +3492,6 @@ ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
 		                              &status_incomplete_reasons));
 		statusObj["processes"] = processStatus;
 
-		statusObj["clients"] = clientStatusFetcher(clientStatus);
-
 		if (configuration.present() && configuration.get().blobGranulesEnabled) {
 			JsonBuilderObject blobGranuelsStatus =
 			    wait(timeoutError(blobGranulesStatusFetcher(
@@ -3511,13 +3502,6 @@ ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
 			    wait(timeoutError(blobRestoreStatusFetcher(cx, &status_incomplete_reasons), 2.0));
 			statusObj["blob_restore"] = blobRestoreStatus;
 		}
-
-		JsonBuilderArray incompatibleConnectionsArray;
-		for (auto it : incompatibleConnections) {
-			incompatibleConnectionsArray.push_back(it.toString());
-		}
-		statusObj["incompatible_connections"] = incompatibleConnectionsArray;
-		statusObj["datacenter_lag"] = getLagObject(datacenterVersionDifference);
 
 		int activeTSSCount = 0;
 		JsonBuilderArray wiggleServerAddress;

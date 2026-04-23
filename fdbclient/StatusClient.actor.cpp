@@ -418,10 +418,8 @@ ACTOR Future<StatusObject> clientStatusFetcher(Reference<IClusterConnectionRecor
 }
 
 // Cluster section of json output
-ACTOR Future<Optional<StatusObject>> clusterStatusFetcher(ClusterInterface cI,
-                                                         StatusArray* messages,
-                                                         std::string statusField) {
-	state StatusRequest req(statusField);
+ACTOR Future<Optional<StatusObject>> clusterStatusFetcher(ClusterInterface cI, StatusArray* messages) {
+	state StatusRequest req;
 	state Future<Void> clusterTimeout = delay(CLIENT_KNOBS->STATUS_TIMEOUT);
 	state Optional<StatusObject> oStatusObj;
 

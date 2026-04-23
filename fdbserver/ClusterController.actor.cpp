@@ -1517,7 +1517,7 @@ ACTOR Future<Void> statusServer(FutureStream<StatusRequest> requests,
 				}
 			}
 
-			ErrorOr<StatusReply> result = wait(
+			state ErrorOr<StatusReply> result = wait(
 			    errorOr(clusterGetStatus(self->db.serverInfo,
 			                             self->cx,
 			                             workers,
