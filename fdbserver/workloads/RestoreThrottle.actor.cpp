@@ -27,7 +27,8 @@
 // inflight restore move limit.
 //
 // Approach:
-// 1. Write data to create many small shards (~100+ via reduced shard size knobs)
+// 1. Write data to create many small shards (~100+ via reduced shard size knobs;
+//    kept modest to avoid OOM in simulation — each in-flight move holds metadata)
 // 2. Exclude storage servers to trigger many data moves
 // 3. Kill DD mid-flight so \xff/dataMoves/ entries persist
 // 4. New DD loads them via resumeFromDataMoves (isRestore)
