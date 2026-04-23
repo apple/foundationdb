@@ -1914,9 +1914,10 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		co_await (logData->version.whenAtLeast(logData->recoveryTxnVersion) || logData->stoppedPromise.getFuture());
 	}
 
+	FlowLock::Releaser globalReleaser;
 	if (logData->locality != tagLocalitySatellite && reqTag.locality == tagLocalityLogRouter) {
 		co_await self->concurrentLogRouterReads.take();
-		FlowLock::Releaser globalReleaser(self->concurrentLogRouterReads);
+		globalReleaser = FlowLock::Releaser(self->concurrentLogRouterReads);
 		co_await delay(0.0, TaskPriority::Low);
 	}
 
