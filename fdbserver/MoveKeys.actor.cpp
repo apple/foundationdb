@@ -1632,6 +1632,12 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 					if (error.code() == error_code_actor_cancelled)
 						throw;
 					state Error err = error;
+					// Inject transaction_too_old to exercise the retry limit and
+					// finish_move_keys_too_many_retries error path.
+					if (BUGGIFY_WITH_PROB(0.01)) {
+						CODE_PROBE(true, "finishMoveKeys injecting transaction_too_old");
+						err = transaction_too_old();
+					}
 					wait(tr.onError(error));
 					retries++;
 					// tr.onError delays are short for transaction_too_old. With 15
