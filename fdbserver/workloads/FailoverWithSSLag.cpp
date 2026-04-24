@@ -23,6 +23,7 @@
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbrpc/simulator.h"
@@ -46,7 +47,7 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 		    !clientId && g_network->isSimulated(); // only do this on the "first" client, and only when in simulation
 		testDuration = getOption(options, "testDuration"_sr, 400.0);
 		testSuccess = true;
-		g_simulator->usableRegions = 2;
+		fdbSimulationPolicyState().usableRegions = 2;
 	}
 
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("all"); }
@@ -100,7 +101,8 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 
 		// Find all remote storage servers.
 		for (const auto& process : g_simulator->getAllProcesses()) {
-			if (process->locality.dcId().present() && process->locality.dcId() == g_simulator->remoteDcId &&
+			if (process->locality.dcId().present() &&
+			    process->locality.dcId() == fdbSimulationPolicyState().remoteDcId &&
 			    g_simulator->hasRole(process->address, "StorageServer")) {
 				storages.push_back(process->address.ip);
 			}

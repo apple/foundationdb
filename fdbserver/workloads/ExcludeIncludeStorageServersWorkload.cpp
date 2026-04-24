@@ -21,6 +21,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
@@ -49,7 +50,7 @@ struct ExcludeIncludeStorageServersWorkload : TestWorkload {
 		enabled =
 		    !clientId && g_network->isSimulated(); // only do this on the "first" client, and only when in simulation
 		if (g_network->isSimulated()) {
-			g_simulator->allowLogSetKills = false;
+			fdbSimulationPolicyState().allowLogSetKills = false;
 		}
 	}
 

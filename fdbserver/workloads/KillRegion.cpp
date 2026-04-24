@@ -22,6 +22,7 @@
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/tester/workloads.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbrpc/simulator.h"
@@ -37,7 +38,7 @@ struct KillRegionWorkload : TestWorkload {
 		enabled =
 		    !clientId && g_network->isSimulated(); // only do this on the "first" client, and only when in simulation
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
-		g_simulator->usableRegions = 1;
+		fdbSimulationPolicyState().usableRegions = 1;
 	}
 
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("all"); }

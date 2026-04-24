@@ -30,6 +30,7 @@
 #include "flow/IRateControl.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/consistencyscan/ConsistencyScan.h"
 #include "fdbserver/core/StorageMetrics.h"
 #include "fdbserver/datadistributor/DataDistribution.h"
@@ -871,9 +872,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		// Check if master and cluster controller are in the desired DC for fearless cluster when running under
 		// simulation
 		// FIXME: g_simulator->datacenterDead could return false positives. Relaxing checks until it is fixed.
-		if (g_network->isSimulated() && config.usableRegions > 1 && g_simulator->primaryDcId.present() &&
-		    !g_simulator->datacenterDead(g_simulator->primaryDcId) &&
-		    !g_simulator->datacenterDead(g_simulator->remoteDcId)) {
+		if (g_network->isSimulated() && config.usableRegions > 1 && fdbSimulationPolicyState().primaryDcId.present() &&
+		    !g_simulator->datacenterDead(fdbSimulationPolicyState().primaryDcId) &&
+		    !g_simulator->datacenterDead(fdbSimulationPolicyState().remoteDcId)) {
 			expectedPrimaryDcId = config.regions[0].dcId;
 			expectedRemoteDcId = config.regions[1].dcId;
 			// If the priorities are equal, either could be the primary
@@ -992,9 +993,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		// Check LogRouter
-		if (g_network->isSimulated() && config.usableRegions > 1 && g_simulator->primaryDcId.present() &&
-		    !g_simulator->datacenterDead(g_simulator->primaryDcId) &&
-		    !g_simulator->datacenterDead(g_simulator->remoteDcId)) {
+		if (g_network->isSimulated() && config.usableRegions > 1 && fdbSimulationPolicyState().primaryDcId.present() &&
+		    !g_simulator->datacenterDead(fdbSimulationPolicyState().primaryDcId) &&
+		    !g_simulator->datacenterDead(fdbSimulationPolicyState().remoteDcId)) {
 			for (auto& tlogSet : db.logSystemConfig.tLogs) {
 				if (!tlogSet.isLocal && !tlogSet.logRouters.empty()) {
 					for (auto& logRouter : tlogSet.logRouters) {

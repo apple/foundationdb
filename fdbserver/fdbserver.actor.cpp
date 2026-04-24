@@ -63,7 +63,7 @@
 #include "fdbserver/kvstore/KVFileUtils.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/datadistributor/SimulatedCluster.h"
-#include "fdbserver/FDBSimulationPolicy.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/tester/TestEncryptionUtils.h"
 #include "fdbserver/tester/tester.h"
 #include "fdbserver/core/WorkerInterface.actor.h"

@@ -23,6 +23,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/TesterInterface.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbrpc/simulator.h"
 #include "flow/Knobs.h"
@@ -67,7 +68,8 @@ struct SaveAndKillWorkload : TestWorkload {
 		ini.SetValue("RESTORE", "isRestoring", format("%d", isRestoring).c_str());
 		ini.SetValue("META", "processesPerMachine", format("%d", g_simulator->processesPerMachine).c_str());
 		ini.SetValue("META", "listenersPerProcess", format("%d", g_simulator->listenersPerProcess).c_str());
-		ini.SetValue("META", "desiredCoordinators", format("%d", g_simulator->desiredCoordinators).c_str());
+		ini.SetValue(
+		    "META", "desiredCoordinators", format("%d", fdbSimulationPolicyState().desiredCoordinators).c_str());
 		ini.SetValue("META", "connectionString", g_simulator->connectionString.c_str());
 		ini.SetValue("META", "testerCount", format("%d", g_simulator->testerCount).c_str());
 		ini.SetValue("META", "tssMode", format("%d", g_simulator->tssMode).c_str());

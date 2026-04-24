@@ -21,6 +21,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
@@ -57,7 +58,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		kill2Timeout = getOption(options, "kill2Timeout"_sr, 6000.0);
 		killProcesses = deterministicRandom()->random01() < 0.5;
 		if (g_network->isSimulated()) {
-			g_simulator->allowLogSetKills = false;
+			fdbSimulationPolicyState().allowLogSetKills = false;
 		}
 	}
 
@@ -735,7 +736,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 			TraceEvent("RemoveAndKill", functionId)
 			    .detail("Step", "coordinators auto")
-			    .detail("DesiredCoordinators", g_simulator->desiredCoordinators)
+			    .detail("DesiredCoordinators", fdbSimulationPolicyState().desiredCoordinators)
 			    .detail("ClusterAvailable", g_simulator->isAvailable());
 
 			// Setup the coordinators BEFORE the exclusion
@@ -744,7 +745,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			int nQuorum{ 0 };
 			while (true) {
 				cycle++;
-				nQuorum = ((g_simulator->desiredCoordinators + 1) / 2) * 2 - 1;
+				nQuorum = ((fdbSimulationPolicyState().desiredCoordinators + 1) / 2) * 2 - 1;
 				CoordinatorsResult result = co_await changeQuorum(cx, autoQuorumChange(nQuorum));
 				TraceEvent(result == CoordinatorsResult::SUCCESS || result == CoordinatorsResult::SAME_NETWORK_ADDRESSES
 				               ? SevInfo
@@ -754,7 +755,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				    .detail("Result", (int)result)
 				    .detail("Attempt", cycle)
 				    .detail("Quorum", nQuorum)
-				    .detail("DesiredCoordinators", g_simulator->desiredCoordinators);
+				    .detail("DesiredCoordinators", fdbSimulationPolicyState().desiredCoordinators);
 				if (result == CoordinatorsResult::SUCCESS || result == CoordinatorsResult::SAME_NETWORK_ADDRESSES)
 					break;
 			}

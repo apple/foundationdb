@@ -38,6 +38,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/QuietDatabase.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbclient/ManagementAPI.h"
 #include "flow/CoroUtils.h"
 
@@ -631,7 +632,7 @@ Future<int64_t> getVersionOffset(Database cx,
 // Returns DC lag for simulation runs
 Future<Version> getDatacenterLag(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	while (true) {
-		if (!g_network->isSimulated() || g_simulator->usableRegions == 1) {
+		if (!g_network->isSimulated() || fdbSimulationPolicyState().usableRegions == 1) {
 			co_return 0;
 		}
 
@@ -686,9 +687,10 @@ Future<Version> getDatacenterLag(Database cx, Reference<AsyncVar<ServerDBInfo> c
 }
 
 Future<Void> repairDeadDatacenter(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo, std::string context) {
-	if (g_network->isSimulated() && g_simulator->usableRegions > 1 && !g_simulator->quiesced) {
-		bool primaryDead = g_simulator->datacenterDead(g_simulator->primaryDcId);
-		bool remoteDead = g_simulator->datacenterDead(g_simulator->remoteDcId);
+	if (g_network->isSimulated() && fdbSimulationPolicyState().usableRegions > 1 && !g_simulator->quiesced) {
+		auto& simPolicy = fdbSimulationPolicyState();
+		bool primaryDead = g_simulator->datacenterDead(simPolicy.primaryDcId);
+		bool remoteDead = g_simulator->datacenterDead(simPolicy.remoteDcId);
 
 		// FIXME: the primary and remote can both be considered dead because excludes are not handled properly by the
 		// datacenterDead function
@@ -698,8 +700,7 @@ Future<Void> repairDeadDatacenter(Database cx, Reference<AsyncVar<ServerDBInfo> 
 		}
 		if (primaryDead || remoteDead) {
 			if (remoteDead) {
-				std::vector<AddressExclusion> servers =
-				    g_simulator->getAllAddressesInDCToExclude(g_simulator->remoteDcId);
+				std::vector<AddressExclusion> servers = g_simulator->getAllAddressesInDCToExclude(simPolicy.remoteDcId);
 				TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration")
 				    .detail("Location", context)
 				    .detail("Stage", "ExcludeServers")
@@ -712,7 +713,7 @@ Future<Void> repairDeadDatacenter(Database cx, Reference<AsyncVar<ServerDBInfo> 
 			    .detail("Stage", "Repopulate")
 			    .detail("RemoteDead", remoteDead)
 			    .detail("PrimaryDead", primaryDead);
-			g_simulator->usableRegions = 1;
+			simPolicy.usableRegions = 1;
 
 			co_await ManagementAPI::changeConfig(
 			    cx.getReference(),

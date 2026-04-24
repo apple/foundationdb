@@ -69,10 +69,9 @@ thread_local ISimulator::ProcessInfo* ISimulator::currentProcess = nullptr;
 thread_local bool ISimulator::isMainThread = false;
 
 ISimulator::ISimulator()
-  : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), usableRegions(1),
-    allowLogSetKills(true), tssMode(TSSMode::Disabled), isStopped(false), lastConnectionFailure(0),
-    connectionFailuresDisableDuration(0), speedUpSimulation(false), connectionFailureEnableTime(0),
-    disableTLogRecoveryFinish(false), backupAgents(BackupAgentType::WaitForType),
+  : physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), tssMode(TSSMode::Disabled),
+    isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false),
+    connectionFailureEnableTime(0), disableTLogRecoveryFinish(false), backupAgents(BackupAgentType::WaitForType),
     drAgents(BackupAgentType::WaitForType), allSwapsDisabled(false) {}
 ISimulator::~ISimulator() = default;
 
@@ -1816,9 +1815,7 @@ public:
 				    .detail("Unavailable", unavailable)
 				    .detail("Excluded", excluded)
 				    .detail("Cleared", cleared)
-				    .detail("ProtectedTotal", protectedAddressCount())
-				    .detail("TLogPolicy", tLogPolicy->info())
-				    .detail("StoragePolicy", storagePolicy->info());
+				    .detail("ProtectedTotal", protectedAddressCount());
 			} else if ((kt == KillType::KillInstantly) || (kt == KillType::InjectFaults) ||
 			           (kt == KillType::FailDisk)) {
 				TraceEvent("DeadMachine")
@@ -1827,9 +1824,7 @@ public:
 				    .detail("ProcessesLeft", processesLeft.size())
 				    .detail("ProcessesDead", processesDead.size())
 				    .detail("TotalProcesses", machines.size())
-				    .detail("ProcessesPerMachine", processesPerMachine)
-				    .detail("TLogPolicy", tLogPolicy->info())
-				    .detail("StoragePolicy", storagePolicy->info());
+				    .detail("ProcessesPerMachine", processesPerMachine);
 				for (auto process : processesLeft) {
 					TraceEvent("DeadMachineSurvivors")
 					    .detail("MachineId", machineId)
@@ -1853,9 +1848,7 @@ public:
 				    .detail("ProcessesLeft", processesLeft.size())
 				    .detail("ProcessesDead", processesDead.size())
 				    .detail("TotalProcesses", machines.size())
-				    .detail("ProcessesPerMachine", processesPerMachine)
-				    .detail("TLogPolicy", tLogPolicy->info())
-				    .detail("StoragePolicy", storagePolicy->info());
+				    .detail("ProcessesPerMachine", processesPerMachine);
 				for (auto process : processesLeft) {
 					TraceEvent("ClearMachineSurvivors")
 					    .detail("MachineId", machineId)
@@ -2020,9 +2013,7 @@ public:
 				    .detail("DcZones", datacenterMachines.size())
 				    .detail("DcProcesses", dcProcesses)
 				    .detail("ProcessesDead", processesDead.size())
-				    .detail("ProcessesLeft", processesLeft.size())
-				    .detail("TLogPolicy", tLogPolicy->info())
-				    .detail("StoragePolicy", storagePolicy->info());
+				    .detail("ProcessesLeft", processesLeft.size());
 				for (auto process : processesLeft) {
 					TraceEvent("DeadDcSurvivors")
 					    .detail("MachineId", process->locality.machineId())

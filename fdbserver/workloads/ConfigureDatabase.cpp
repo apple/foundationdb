@@ -26,6 +26,7 @@
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/RunRYWTransaction.h"
 #include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
@@ -249,7 +250,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		waitStoreTypeCheck = getOption(options, "waitStoreTypeCheck"_sr, false);
 		downgradeTest1 = getOption(options, "downgradeTest1"_sr, false);
 		storageEngineExcludeTypes = getOption(options, "storageEngineExcludeTypes"_sr);
-		g_simulator->usableRegions = 1;
+		fdbSimulationPolicyState().usableRegions = 1;
 	}
 
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("Attrition"); }

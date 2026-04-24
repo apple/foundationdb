@@ -27,6 +27,7 @@
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/TesterInterface.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbrpc/simulator.h"
 #include "flow/CodeProbe.h"
@@ -107,8 +108,8 @@ struct GcGenerationsWorkload : TestWorkload {
 		std::vector<IPAddress> remoteIps; // all remote process IPs
 		for (const auto& process : g_simulator->getAllProcesses()) {
 			const auto& ip = process->address.ip;
-			if (process->locality.dcId().present() && process->locality.dcId() == g_simulator->remoteDcId &&
-			    !isCoordinator(coordinators, ip)) {
+			if (process->locality.dcId().present() &&
+			    process->locality.dcId() == fdbSimulationPolicyState().remoteDcId && !isCoordinator(coordinators, ip)) {
 				remoteIps.push_back(ip);
 			} else {
 				ips.push_back(ip);
@@ -127,7 +128,7 @@ struct GcGenerationsWorkload : TestWorkload {
 		}
 
 		TraceEvent("PartitionRemoteDc")
-		    .detail("RemoteDc", g_simulator->remoteDcId)
+		    .detail("RemoteDc", fdbSimulationPolicyState().remoteDcId)
 		    .detail("CloggedRemoteProcess", describe(remoteIps));
 	}
 
@@ -135,7 +136,7 @@ struct GcGenerationsWorkload : TestWorkload {
 		auto masterAddr = self->dbInfo->get().master.address();
 		auto* masterProc = g_simulator->getProcessByAddress(masterAddr);
 		return !masterProc || !masterProc->locality.dcId().present() ||
-		       masterProc->locality.dcId() == g_simulator->remoteDcId;
+		       masterProc->locality.dcId() == fdbSimulationPolicyState().remoteDcId;
 	}
 
 	// Wait for the DB to reach ACCEPTING_COMMITS. If the master is in the clogged

@@ -60,6 +60,7 @@
 #include "flow/FaultInjection.h"
 #include "flow/CodeProbeUtils.h"
 #include "fdbserver/datadistributor/SimulatedCluster.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "flow/IConnection.h"
 #include "fdbserver/datadistributor/MockGlobalState.h"
 #include "flow/CoroUtils.h"
@@ -1407,7 +1408,7 @@ Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			    processClass == ProcessClass::TesterClass ? "SimulatedTesterMachine" : "SimulatedMachine"));
 		}
 
-		g_simulator->desiredCoordinators = desiredCoordinators;
+		fdbSimulationPolicyState().desiredCoordinators = desiredCoordinators;
 		g_simulator->processesPerMachine = processesPerMachine;
 
 		uniquify(dcIds);
@@ -1441,7 +1442,7 @@ Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		g_simulator->restarted = true;
 
 		TraceEvent("RestartSimulatorSettings")
-		    .detail("DesiredCoordinators", g_simulator->desiredCoordinators)
+		    .detail("DesiredCoordinators", fdbSimulationPolicyState().desiredCoordinators)
 		    .detail("ProcessesPerMachine", g_simulator->processesPerMachine)
 		    .detail("ListenersPerProcess", listenersPerProcess);
 	} catch (Error& e) {
@@ -2592,12 +2593,12 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		    .detail("DcCoordinators", dcCoordinators);
 	}
 
-	g_simulator->desiredCoordinators = coordinatorCount;
+	fdbSimulationPolicyState().desiredCoordinators = coordinatorCount;
 	g_simulator->physicalDatacenters = dataCenters;
 	g_simulator->processesPerMachine = processesPerMachine;
 
 	TraceEvent("SetupSimulatorSettings")
-	    .detail("DesiredCoordinators", g_simulator->desiredCoordinators)
+	    .detail("DesiredCoordinators", fdbSimulationPolicyState().desiredCoordinators)
 	    .detail("PhysicalDatacenters", g_simulator->physicalDatacenters)
 	    .detail("ProcessesPerMachine", g_simulator->processesPerMachine);
 

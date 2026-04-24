@@ -335,33 +335,17 @@ public:
 	bool isProtectedAddress(NetworkAddress const& address) const { return protectedAddresses.contains(address); }
 	size_t protectedAddressCount() const { return protectedAddresses.size(); }
 
-	int desiredCoordinators;
 	int physicalDatacenters;
 	int processesPerMachine;
 	int listenersPerProcess;
 
 	std::map<NetworkAddress, ProcessInfo*> currentlyRebootingProcesses;
 	std::vector<std::string> extraDatabases;
-	Reference<IReplicationPolicy> storagePolicy;
-	Reference<IReplicationPolicy> tLogPolicy;
-	int32_t tLogWriteAntiQuorum;
-	Optional<Standalone<StringRef>> primaryDcId;
-	Reference<IReplicationPolicy> remoteTLogPolicy;
-	int32_t usableRegions;
 	bool quiesced = false;
 	std::string disablePrimary;
 	std::string disableRemote;
 	std::string originalRegions;
 	std::string startingDisabledConfiguration;
-	bool allowLogSetKills;
-	Optional<Standalone<StringRef>> remoteDcId;
-	bool hasSatelliteReplication;
-	Reference<IReplicationPolicy> satelliteTLogPolicy;
-	Reference<IReplicationPolicy> satelliteTLogPolicyFallback;
-	int32_t satelliteTLogWriteAntiQuorum;
-	int32_t satelliteTLogWriteAntiQuorumFallback;
-	std::vector<Optional<Standalone<StringRef>>> primarySatelliteDcIds;
-	std::vector<Optional<Standalone<StringRef>>> remoteSatelliteDcIds;
 	TSSMode tssMode;
 	std::map<NetworkAddress, bool> corruptWorkerMap;
 

@@ -42,6 +42,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/QuietDatabase.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/tester/KnobProtectiveGroups.h"
 #include "ConsistencyChecker.h"
 #include "DatabaseMaintenance.h"
@@ -424,10 +425,7 @@ Future<Void> initializeSimConfig(Database db) {
 
 		try {
 			DatabaseConfiguration dbConfig = co_await getDatabaseConfiguration(&tr);
-			g_simulator->storagePolicy = dbConfig.storagePolicy;
-			g_simulator->tLogPolicy = dbConfig.tLogPolicy;
-			g_simulator->tLogWriteAntiQuorum = dbConfig.tLogWriteAntiQuorum;
-			g_simulator->usableRegions = dbConfig.usableRegions;
+			updateFDBSimulationPolicy(dbConfig, false);
 
 			// If the same region is being shared between the remote and a satellite, then our simulated policy checking
 			// may fail to account for the total number of needed machines when deciding what can be killed. To work
@@ -455,15 +453,15 @@ Future<Void> initializeSimConfig(Database db) {
 			if (foundSharedDcId) {
 				int totalRequired = std::max(dbConfig.tLogReplicationFactor, dbConfig.remoteTLogReplicationFactor) +
 				                    maxSatelliteReplication;
-				g_simulator->remoteTLogPolicy = Reference<IReplicationPolicy>(
-				    new PolicyAcross(totalRequired, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+				setFDBSimulationPolicyRemoteTLogPolicy(Reference<IReplicationPolicy>(
+				    new PolicyAcross(totalRequired, "zoneid", Reference<IReplicationPolicy>(new PolicyOne()))));
 				TraceEvent("ChangingSimTLogPolicyForSharedRemote")
 				    .detail("TotalRequired", totalRequired)
 				    .detail("MaxSatelliteReplication", maxSatelliteReplication)
 				    .detail("ActualPolicy", dbConfig.getRemoteTLogPolicy()->info())
-				    .detail("SimulatorPolicy", g_simulator->remoteTLogPolicy->info());
+				    .detail("SimulatorPolicy", fdbSimulationPolicyState().remoteTLogPolicy->info());
 			} else {
-				g_simulator->remoteTLogPolicy = dbConfig.getRemoteTLogPolicy();
+				setFDBSimulationPolicyRemoteTLogPolicy(dbConfig.getRemoteTLogPolicy());
 			}
 
 			co_return;
@@ -631,52 +629,16 @@ Future<Void> runTests7(Reference<AsyncVar<Optional<struct ClusterControllerFullI
 	// Read cluster configuration
 	if (useDB && g_network->isSimulated()) {
 		DatabaseConfiguration configuration = co_await getDatabaseConfiguration(cx);
-
-		g_simulator->storagePolicy = configuration.storagePolicy;
-		g_simulator->tLogPolicy = configuration.tLogPolicy;
-		g_simulator->tLogWriteAntiQuorum = configuration.tLogWriteAntiQuorum;
-		g_simulator->remoteTLogPolicy = configuration.remoteTLogPolicy;
-		g_simulator->usableRegions = configuration.usableRegions;
-		if (!configuration.regions.empty()) {
-			g_simulator->primaryDcId = configuration.regions[0].dcId;
-			g_simulator->hasSatelliteReplication = configuration.regions[0].satelliteTLogReplicationFactor > 0;
-			if (configuration.regions[0].satelliteTLogUsableDcsFallback > 0) {
-				g_simulator->satelliteTLogPolicyFallback = configuration.regions[0].satelliteTLogPolicyFallback;
-				g_simulator->satelliteTLogWriteAntiQuorumFallback =
-				    configuration.regions[0].satelliteTLogWriteAntiQuorumFallback;
-			} else {
-				g_simulator->satelliteTLogPolicyFallback = configuration.regions[0].satelliteTLogPolicy;
-				g_simulator->satelliteTLogWriteAntiQuorumFallback =
-				    configuration.regions[0].satelliteTLogWriteAntiQuorum;
-			}
-			g_simulator->satelliteTLogPolicy = configuration.regions[0].satelliteTLogPolicy;
-			g_simulator->satelliteTLogWriteAntiQuorum = configuration.regions[0].satelliteTLogWriteAntiQuorum;
-
-			for (const auto& s : configuration.regions[0].satellites) {
-				g_simulator->primarySatelliteDcIds.push_back(s.dcId);
-			}
-		} else {
-			g_simulator->hasSatelliteReplication = false;
-			g_simulator->satelliteTLogWriteAntiQuorum = 0;
-		}
-
+		updateFDBSimulationPolicy(configuration, restartingTest);
+		auto const& simPolicy = fdbSimulationPolicyState();
 		if (configuration.regions.size() == 2) {
-			g_simulator->remoteDcId = configuration.regions[1].dcId;
 			ASSERT((!configuration.regions[0].satelliteTLogPolicy && !configuration.regions[1].satelliteTLogPolicy) ||
 			       configuration.regions[0].satelliteTLogPolicy->info() ==
 			           configuration.regions[1].satelliteTLogPolicy->info());
-
-			for (const auto& s : configuration.regions[1].satellites) {
-				g_simulator->remoteSatelliteDcIds.push_back(s.dcId);
-			}
 		}
 
-		if (restartingTest || g_simulator->usableRegions < 2 || !g_simulator->hasSatelliteReplication) {
-			g_simulator->allowLogSetKills = false;
-		}
-
-		ASSERT(g_simulator->storagePolicy && g_simulator->tLogPolicy);
-		ASSERT(!g_simulator->hasSatelliteReplication || g_simulator->satelliteTLogPolicy);
+		ASSERT(simPolicy.storagePolicy && simPolicy.tLogPolicy);
+		ASSERT(!simPolicy.hasSatelliteReplication || simPolicy.satelliteTLogPolicy);
 
 		// Randomly inject custom shard configuration
 		// TODO:  Move this to a workload representing non-failure behaviors which can be randomly added to any test
