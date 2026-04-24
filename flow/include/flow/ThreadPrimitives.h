@@ -113,7 +113,7 @@ public:
 };
 class ThreadUnsafeSpinLockHolder {
 public:
-	explicit ThreadUnsafeSpinLockHolder(ThreadUnsafeSpinLock&){};
+	explicit ThreadUnsafeSpinLockHolder(ThreadUnsafeSpinLock&) {};
 };
 
 #if FLOW_THREAD_SAFE

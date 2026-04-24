@@ -146,7 +146,9 @@ extern bool isAssertDisabled(int line);
 		}                                                                                                              \
 	} while (false)
 #define UNREACHABLE()                                                                                                  \
-	{ throw internal_error_impl("unreachable", __FILE__, __LINE__); }
+	{                                                                                                                  \
+		throw internal_error_impl("unreachable", __FILE__, __LINE__);                                                  \
+	}
 
 // TODO: magic so this works even if const-ness doesn't not match.
 template <typename T, typename U>

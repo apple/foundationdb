@@ -1092,7 +1092,7 @@ struct SSBulkLoadMetadata {
 public:
 	constexpr static FileIdentifier file_identifier = 1384506;
 
-	SSBulkLoadMetadata() : dataMoveId(UID()), conductBulkLoad(false){};
+	SSBulkLoadMetadata() : dataMoveId(UID()), conductBulkLoad(false) {};
 
 	explicit SSBulkLoadMetadata(const UID& dataMoveId) : dataMoveId(dataMoveId) {
 		conductBulkLoad = getConductBulkLoadFromDataMoveId(dataMoveId);
