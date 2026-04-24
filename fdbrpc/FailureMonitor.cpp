@@ -155,7 +155,7 @@ void SimpleFailureMonitor::notifyDisconnect(NetworkAddress const& address) {
 Future<Void> SimpleFailureMonitor::onDisconnectOrFailure(Endpoint const& endpoint) {
 	// If the endpoint or address is already failed, return right away
 	auto i = addressStatus.find(endpoint.getPrimaryAddress());
-	if (i == addressStatus.end() || i->second.isFailed() || failedEndpoints.count(endpoint)) {
+	if (i == addressStatus.end() || i->second.isFailed() || failedEndpoints.contains(endpoint)) {
 		TraceEvent event("AlreadyDisconnected");
 		if (endpoint.token.first() == 0xffffffffffffffff) {
 			// well known endpoint
@@ -186,14 +186,14 @@ Future<Void> SimpleFailureMonitor::onStateChanged(Endpoint const& endpoint) {
 	//   failure status for that endpoint can never change (and we could be spuriously triggered by setStatus)
 	// Also returns spuriously when notifyDisconnect is called (which doesn't actually change the state), but callers
 	//   check the state so it's OK
-	if (failedEndpoints.count(endpoint))
+	if (failedEndpoints.contains(endpoint))
 		return Never();
 	else
 		return endpointKnownFailed.onChange(endpoint);
 }
 
 FailureStatus SimpleFailureMonitor::getState(Endpoint const& endpoint) const {
-	if (failedEndpoints.count(endpoint))
+	if (failedEndpoints.contains(endpoint))
 		return FailureStatus(true);
 	else {
 		auto a = addressStatus.find(endpoint.getPrimaryAddress());
@@ -213,7 +213,7 @@ FailureStatus SimpleFailureMonitor::getState(NetworkAddress const& address) cons
 }
 
 bool SimpleFailureMonitor::onlyEndpointFailed(Endpoint const& endpoint) const {
-	if (!failedEndpoints.count(endpoint))
+	if (!failedEndpoints.contains(endpoint))
 		return false;
 	auto a = addressStatus.find(endpoint.getPrimaryAddress());
 	if (a == addressStatus.end())
@@ -223,7 +223,7 @@ bool SimpleFailureMonitor::onlyEndpointFailed(Endpoint const& endpoint) const {
 }
 
 bool SimpleFailureMonitor::permanentlyFailed(Endpoint const& endpoint) const {
-	return failedEndpoints.count(endpoint);
+	return failedEndpoints.contains(endpoint);
 }
 
 bool SimpleFailureMonitor::knownUnauthorized(Endpoint const& endpoint) const {

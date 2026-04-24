@@ -531,8 +531,8 @@ extern const KeyRef bulkDumpOwnerPrefix;
 // "\xff/bulkLoadOwner/[[jobId]]" := "[[BulkDumpOwnerInfo]]" (reuses same struct)
 extern const KeyRangeRef bulkLoadOwnerKeys;
 extern const KeyRef bulkLoadOwnerPrefix;
-const Key bulkDumpOwnerKeyFor(const UID& jobId);
-const Key bulkLoadOwnerKeyFor(const UID& jobId);
+Key bulkDumpOwnerKeyFor(const UID& jobId);
+Key bulkLoadOwnerKeyFor(const UID& jobId);
 
 extern const std::string rangeLockNameForBulkLoad;
 extern const KeyRangeRef rangeLockKeys;

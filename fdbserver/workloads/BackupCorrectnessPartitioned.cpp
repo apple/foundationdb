@@ -667,7 +667,7 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 					    co_await tr->getRange(KeyRange(KeyRangeRef(backupAgentKey, strinc(backupAgentKey))), 100);
 
 					// Error if the system keyspace for the backup tag is not empty
-					if (agentValues.size() > 0) {
+					if (!agentValues.empty()) {
 						displaySystemKeys++;
 						printf("BackupCorrectnessLeftOverMutationKeys: (%d) %s\n",
 						       agentValues.size(),
@@ -700,12 +700,12 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 
 					RangeResult versions = co_await tr->getRange(
 					    KeyRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath))), 1);
-					if (!shareLogRange || !versions.size()) {
+					if (!shareLogRange || versions.empty()) {
 						RangeResult logValues = co_await tr->getRange(
 						    KeyRange(KeyRangeRef(backupLogValuesKey, strinc(backupLogValuesKey))), 100);
 
 						// Error if the log/mutation keyspace for the backup tag  is not empty
-						if (logValues.size() > 0) {
+						if (!logValues.empty()) {
 							displaySystemKeys++;
 							printf("BackupCorrectnessLeftOverLogKeys: (%d) %s\n",
 							       logValues.size(),

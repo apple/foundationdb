@@ -81,7 +81,7 @@ Future<Void> unassignServerKeys(Transaction* tr, UID ssId, KeyRange range, std::
 
 	// Determine how far to extend this range at the beginning
 	auto beginRange = keys[0].get();
-	bool hasBegin = beginRange.size() > 0 && beginRange[0].key.startsWith(mapPrefix);
+	bool hasBegin = !beginRange.empty() && beginRange[0].key.startsWith(mapPrefix);
 	Value beginValue = hasBegin ? beginRange[0].value : serverKeysFalse;
 
 	Key beginKey = withPrefix.begin;
@@ -113,7 +113,7 @@ Future<Void> unassignServerKeys(Transaction* tr, UID ssId, KeyRange range, std::
 
 	// Determine how far to extend this range at the end
 	auto endRange = keys[1].get();
-	bool hasEnd = endRange.size() >= 1 && endRange[0].key.startsWith(mapPrefix) && endRange[0].key <= withPrefix.end;
+	bool hasEnd = !endRange.empty() && endRange[0].key.startsWith(mapPrefix) && endRange[0].key <= withPrefix.end;
 	bool hasNext = (endRange.size() == 2 && endRange[1].key.startsWith(mapPrefix)) ||
 	               (endRange.size() == 1 && withPrefix.end < endRange[0].key && endRange[0].key.startsWith(mapPrefix));
 	Value existingValue = hasEnd ? endRange[0].value : serverKeysFalse;
@@ -824,7 +824,7 @@ Future<std::vector<UID>> addReadWriteDestinations(KeyRangeRef shard,
 	co_await (waitForAll(srcChecks) && waitForAll(destChecks));
 
 	int healthySrcs = 0;
-	for (auto it : srcChecks) {
+	for (const auto& it : srcChecks) {
 		if (it.get().present()) {
 			healthySrcs++;
 		}
@@ -1246,7 +1246,7 @@ Future<Void> checkFetchingState(Database cx,
 
 			// If normal servers return normally, give TSS data movement a bit of a chance, but don't block on it, and
 			// ignore errors in tss requests
-			if (tssRequests.size()) {
+			if (!tssRequests.empty()) {
 				co_await timeout(waitForAllReady(tssRequests),
 				                 SERVER_KNOBS->SERVER_READY_QUORUM_TIMEOUT / 2,
 				                 Void(),
@@ -1432,7 +1432,7 @@ static Future<Void> finishMoveKeys(Database occ,
 							ASSERT(false);
 						}
 					}
-					if (!dest.size()) {
+					if (dest.empty()) {
 						CODE_PROBE(true,
 						           "A previous finishMoveKeys for this range committed just as it was cancelled to "
 						           "start this one?");
@@ -1515,7 +1515,7 @@ static Future<Void> finishMoveKeys(Database occ,
 					// Check to see if we're waiting only on tss. If so, decrement the waiting counter.
 					// If the waiting counter is zero, ignore the slow/non-responsive tss processes before finalizing
 					// the data move.
-					if (tssReady.size()) {
+					if (!tssReady.empty()) {
 						bool allSSDone = true;
 						for (auto& f : serverReady) {
 							allSSDone &= f.isReady() && !f.isError();
@@ -1555,7 +1555,7 @@ static Future<Void> finishMoveKeys(Database occ,
 
 					TraceEvent readyServersEv(SevDebug, waitInterval.end(), relocationIntervalId);
 					readyServersEv.detail("ReadyServers", count).detail("Dests", dest.size());
-					if (tssReady.size()) {
+					if (!tssReady.empty()) {
 						readyServersEv.detail("ReadyTSS", tssCount);
 					}
 
@@ -2578,7 +2578,7 @@ Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServerInter
 				std::sort(usedTags.begin(), usedTags.end());
 
 				int usedIdx = 0;
-				for (; usedTags.size() > 0 && tagId <= usedTags.end()[-1]; tagId++) {
+				for (; !usedTags.empty() && tagId <= usedTags.end()[-1]; tagId++) {
 					if (tagId < usedTags[usedIdx]) {
 						if (skipTags == 0)
 							break;
@@ -3335,7 +3335,7 @@ Future<Void> rawFinishMovement(Database occ,
 }
 
 Future<Void> moveKeys(Database occ, MoveKeysParams params) {
-	ASSERT(params.destinationTeam.size());
+	ASSERT(!params.destinationTeam.empty());
 	std::sort(params.destinationTeam.begin(), params.destinationTeam.end());
 
 	std::map<UID, StorageServerInterface> tssMapping;

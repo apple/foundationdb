@@ -73,7 +73,7 @@ Future<Void> setDDIgnoreRebalanceSwitch(Reference<IDatabase> db, uint8_t DDIgnor
 			Optional<Value> v = co_await safeThreadFutureToFuture(resultFuture);
 			uint8_t oldValue = DDIgnore::NONE; // nothing is disabled
 			if (v.present()) {
-				if (v.get().size() > 0) {
+				if (!v.get().empty()) {
 					oldValue = BinaryReader::fromStringRef<uint8_t>(v.get(), Unversioned());
 				} else {
 					// In old version (<= 7.1), the value is an empty string, which means all DD rebalance functions

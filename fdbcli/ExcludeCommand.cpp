@@ -44,7 +44,7 @@ Future<bool> excludeServersAndLocalities(Reference<IDatabase> db,
 		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		Error err;
 		try {
-			if (force && servers.size())
+			if (force && !servers.empty())
 				tr->set(failed ? fdb_cli::failedForceOptionSpecialKey : fdb_cli::excludedForceOptionSpecialKey,
 				        ValueRef());
 			for (const auto& s : servers) {
@@ -52,7 +52,7 @@ Future<bool> excludeServersAndLocalities(Reference<IDatabase> db,
 				                  : fdb_cli::excludedServersSpecialKeyRange.begin.withSuffix(s.toString());
 				tr->set(addr, ValueRef());
 			}
-			if (force && localities.size())
+			if (force && !localities.empty())
 				tr->set(failed ? fdb_cli::failedLocalityForceOptionSpecialKey
 				               : fdb_cli::excludedLocalityForceOptionSpecialKey,
 				        ValueRef());
@@ -307,8 +307,8 @@ Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef>
 		std::vector<std::string> failedAddresses = co_await getFailedServers(db);
 		std::vector<std::string> failedLocalities = co_await getFailedLocalities(db);
 
-		if (!excludedAddresses.size() && !excludedLocalities.size() && !failedAddresses.size() &&
-		    !failedLocalities.size()) {
+		if (excludedAddresses.empty() && excludedLocalities.empty() && failedAddresses.empty() &&
+		    failedLocalities.empty()) {
 			printf("There are currently no servers or localities excluded from the database.\n"
 			       "To learn how to exclude a server, type `help exclude'.\n");
 			co_return true;
@@ -321,7 +321,7 @@ Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef>
 		for (const auto& e : excludedLocalities)
 			printf("  %s\n", e.c_str());
 
-		if (excludedAddresses.size() || excludedLocalities.size()) {
+		if (!excludedAddresses.empty() || !excludedLocalities.empty()) {
 			printf("To find out whether it is safe to remove one or more of these\n"
 			       "servers from the cluster, type `exclude <addresses>'.\n"
 			       "To return one of these servers to the cluster, type `include <addresses>'.\n");
@@ -336,7 +336,7 @@ Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef>
 		for (const auto& f : failedLocalities)
 			printf("  %s\n", f.c_str());
 
-		if (failedAddresses.size() || failedLocalities.size()) {
+		if (!failedAddresses.empty() || !failedLocalities.empty()) {
 			printf("To return one of these servers to the cluster, type `include failed <addresses>'.\n");
 		}
 
@@ -425,7 +425,7 @@ Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef>
 		std::set<NetworkAddress> notExcludedServers =
 		    co_await checkForExcludingServers(db, exclusionSet, waitForAllExcluded);
 		std::map<IPAddress, std::set<uint16_t>> workerPorts;
-		for (auto addr : workers)
+		for (const auto& addr : workers)
 			workerPorts[addr.address.ip].insert(addr.address.port);
 
 		// Print a list of all excluded addresses that don't have a corresponding worker
@@ -434,7 +434,7 @@ Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef>
 			auto worker = workerPorts.find(addr.ip);
 			if (worker == workerPorts.end())
 				absentExclusions.insert(addr);
-			else if (addr.port > 0 && worker->second.count(addr.port) == 0)
+			else if (addr.port > 0 && !worker->second.contains(addr.port))
 				absentExclusions.insert(addr);
 		}
 

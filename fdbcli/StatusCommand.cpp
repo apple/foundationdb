@@ -116,7 +116,7 @@ std::string getDateInfoString(StatusObjectReader statusObj, std::string key) {
 }
 
 std::string getProcessAddressByServerID(StatusObjectReader processesMap, std::string serverID) {
-	if (serverID == "")
+	if (serverID.empty())
 		return "unknown";
 
 	for (auto proc : processesMap.obj()) {
@@ -184,11 +184,11 @@ void getBackupDRTags(StatusObjectReader& statusObjCluster,
 
 std::string logBackupDR(const char* context, std::map<std::string, std::string> const& tagMap) {
 	std::string outputString = "";
-	if (tagMap.size() > 0) {
+	if (!tagMap.empty()) {
 		outputString += format("\n\n%s:", context);
-		for (auto itr : tagMap) {
+		for (const auto& itr : tagMap) {
 			outputString += format("\n  %-22s", itr.first.c_str());
-			if (itr.second.size() > 0) {
+			if (!itr.second.empty()) {
 				outputString += format(" - %s", itr.second.c_str());
 			}
 		}
@@ -315,7 +315,7 @@ void printStatus(StatusObjectReader statusObj,
 									           numOfNonExcludedProcessesAndZones.second);
 								}
 							} else if (name == "locking_old_transaction_servers" &&
-							           recoveryState["missing_logs"].get_str().size()) {
+							           !recoveryState["missing_logs"].get_str().empty()) {
 								description += format("\nNeed one or more of the following log servers: %s",
 								                      recoveryState["missing_logs"].get_str().c_str());
 							}
@@ -338,7 +338,7 @@ void printStatus(StatusObjectReader statusObj,
 			// Check if cluster controllable is reachable
 			try {
 				// print any cluster messages
-				if (statusObjCluster.has("messages") && statusObjCluster.last().get_array().size()) {
+				if (statusObjCluster.has("messages") && !statusObjCluster.last().get_array().empty()) {
 
 					// any messages we don't want to display
 					std::set<std::string> skipMsgs = { "unreachable_process", "" };
@@ -357,7 +357,7 @@ void printStatus(StatusObjectReader statusObj,
 						if (!msgObj.get("name", messageName)) {
 							continue;
 						}
-						if (skipMsgs.count(messageName)) {
+						if (skipMsgs.contains(messageName)) {
 							continue;
 						} else if (messageName == "client_issues") {
 							if (msgObj.has("issues")) {
@@ -456,7 +456,7 @@ void printStatus(StatusObjectReader statusObj,
 				} else
 					outputString += "unknown";
 
-				if (excludedServersArr.size()) {
+				if (!excludedServersArr.empty()) {
 					outputString += format("\n  Exclusions             - %d (type `exclude' for details)",
 					                       excludedServersArr.size());
 				}
@@ -525,7 +525,7 @@ void printStatus(StatusObjectReader statusObj,
 							outputString += "\n    Region -";
 						}
 						outputString += format("\n        Datacenter                    - %s", regionDC.c_str());
-						if (regionSatelliteDCs.size() > 0) {
+						if (!regionSatelliteDCs.empty()) {
 							outputString += "\n        Satellite datacenters         - ";
 							for (int i = 0; i < regionSatelliteDCs.size(); i++) {
 								if (i != regionSatelliteDCs.size() - 1) {
@@ -584,7 +584,7 @@ void printStatus(StatusObjectReader statusObj,
 						if (excluded) {
 							processExclusions++;
 						}
-						if (process.has("messages") && process.last().get_array().size()) {
+						if (process.has("messages") && !process.last().get_array().empty()) {
 							errors++;
 						}
 
@@ -608,10 +608,10 @@ void printStatus(StatusObjectReader statusObj,
 				} else
 					outputString += "unknown";
 
-				if (zones.size() > 0) {
+				if (!zones.empty()) {
 					outputString += format("\n  Zones                  - %d", zones.size());
 					int zoneExclusions = 0;
-					for (auto itr : zones) {
+					for (const auto& itr : zones) {
 						if (itr.second == 0) {
 							++zoneExclusions;
 						}
@@ -735,7 +735,7 @@ void printStatus(StatusObjectReader statusObj,
 				}
 
 				std::string serverTime = getDateInfoString(statusObjCluster, "cluster_controller_timestamp");
-				if (serverTime != "") {
+				if (!serverTime.empty()) {
 					outputString += "\n  Server time            - " + serverTime;
 				}
 			} catch (std::runtime_error&) {
@@ -763,12 +763,12 @@ void printStatus(StatusObjectReader statusObj,
 
 				bool healthy;
 				if (statusObjDataState.get("healthy", healthy) && healthy) {
-					outputString += "Healthy" + (description != "" ? " (" + description + ")" : "");
+					outputString += "Healthy" + (!description.empty() ? " (" + description + ")" : "");
 				} else if (dataState == "missing_data") {
-					outputString += "UNHEALTHY" + (description != "" ? ": " + description : "");
+					outputString += "UNHEALTHY" + (!description.empty() ? ": " + description : "");
 				} else if (dataState == "healing") {
-					outputString += "HEALING" + (description != "" ? ": " + description : "");
-				} else if (description != "") {
+					outputString += "HEALING" + (!description.empty() ? ": " + description : "");
+				} else if (!description.empty()) {
 					outputString += description;
 				} else {
 					outputString += "unknown";
@@ -835,7 +835,7 @@ void printStatus(StatusObjectReader statusObj,
 			} catch (std::runtime_error&) {
 				storageWigglerString += "\n  Unable to retrieve storage wiggler status";
 			}
-			if (storageWigglerString.size()) {
+			if (!storageWigglerString.empty()) {
 				outputString += "\n\nStorage wiggle:";
 				outputString += storageWigglerString;
 			}
@@ -884,11 +884,11 @@ void printStatus(StatusObjectReader statusObj,
 						std::string serverID;
 						limit.get("reason_server_id", serverID);
 						std::string procAddr = getProcessAddressByServerID(processesMap, serverID);
-						performanceLimited = format("\n  Performance limited by %s: %s",
-						                            (procAddr == "unknown")
-						                                ? ("server" + (serverID == "" ? "" : (" " + serverID))).c_str()
-						                                : "process",
-						                            desc.c_str());
+						performanceLimited = format(
+						    "\n  Performance limited by %s: %s",
+						    (procAddr == "unknown") ? ("server" + (serverID.empty() ? "" : (" " + serverID))).c_str()
+						                            : "process",
+						    desc.c_str());
 						if (procAddr != "unknown")
 							performanceLimited += format("\n  Most limiting process: %s", procAddr.c_str());
 					}
@@ -938,7 +938,7 @@ void printStatus(StatusObjectReader statusObj,
 					}
 					if (process.has("messages")) {
 						StatusArray processMessagesArr = process.last().get_array();
-						if (processMessagesArr.size()) {
+						if (!processMessagesArr.empty()) {
 							for (StatusObjectReader msg : processMessagesArr) {
 								std::string desc;
 								std::string addr;
@@ -950,10 +950,10 @@ void printStatus(StatusObjectReader statusObj,
 						}
 					}
 				}
-				if (messagesAddrs.size()) {
+				if (!messagesAddrs.empty()) {
 					outputString += format("\n\n%d FoundationDB processes reported unable to update cluster file:",
 					                       messagesAddrs.size());
-					for (auto msg : messagesAddrs) {
+					for (const auto& msg : messagesAddrs) {
 						outputString += "\n  " + msg;
 					}
 				}
@@ -977,16 +977,16 @@ void printStatus(StatusObjectReader statusObj,
 			outputString += format("\n  Running backups        - %d", backupTags.size());
 			outputString += format("\n  Running DRs            - ");
 
-			if (drPrimaryTags.size() == 0 && drSecondaryTags.size() == 0) {
+			if (drPrimaryTags.empty() && drSecondaryTags.empty()) {
 				outputString += format("%d", 0);
 			} else {
-				if (drPrimaryTags.size() > 0) {
+				if (!drPrimaryTags.empty()) {
 					outputString += format("%d as primary", drPrimaryTags.size());
-					if (drSecondaryTags.size() > 0) {
+					if (!drSecondaryTags.empty()) {
 						outputString += ", ";
 					}
 				}
-				if (drSecondaryTags.size() > 0) {
+				if (!drSecondaryTags.empty()) {
 					outputString += format("%d as secondary", drSecondaryTags.size());
 				}
 			}
@@ -1095,7 +1095,7 @@ void printStatus(StatusObjectReader statusObj,
 							workerDetails[parsedAddress] = noMetrics;
 						}
 					}
-					for (auto w : workerDetails)
+					for (const auto& w : workerDetails)
 						outputString += "\n" + format("%s", w.second.c_str());
 				} catch (std::runtime_error&) {
 					outputString = outputStringCache;
@@ -1111,7 +1111,7 @@ void printStatus(StatusObjectReader statusObj,
 
 			// client time
 			std::string clientTime = getDateInfoString(statusObjClient, "timestamp");
-			if (clientTime != "") {
+			if (!clientTime.empty()) {
 				outputString += "\n\nClient time: " + clientTime;
 			}
 
