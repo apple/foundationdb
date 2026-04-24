@@ -958,6 +958,11 @@ public:
 			           if (mode == 2) {
 				           // BOTH mode: need both firstSnapshotEndVersion (rangefile) and bulkDumpSnapshotEndVersion
 				           if (!firstSnapshot.get().present() || !bulkDumpSnapshot.get().present()) {
+					           // Incremental-only backup doesn't need snapshots
+					           if (logVersion.present() && incrementalBackup.isReady() &&
+					               incrementalBackup.get().present() && incrementalBackup.get().get()) {
+						           return logVersion.get() - 1;
+					           }
 					           return {}; // Not restorable until both complete
 				           }
 				           // Use the minimum of both as the effective first snapshot version

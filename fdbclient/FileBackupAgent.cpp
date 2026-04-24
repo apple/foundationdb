@@ -598,6 +598,7 @@ Future<std::tuple<int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>> getBulk
 			err = e;
 		}
 		if (err.isValid() && err.code() != error_code_success) {
+			TraceEvent(SevWarn, "BulkLoadTaskProgressRetry").error(err).detail("JobId", jobId);
 			co_await tr->onError(err);
 		}
 	}
