@@ -27,6 +27,8 @@
 #include "flow/network.h"
 #include "SimpleOpt/SimpleOpt.h"
 
+#include <fmt/format.h>
+
 #include <algorithm>
 #include <cstdio>
 #include <cstdint>
@@ -83,21 +85,21 @@ CSimpleOpt::SOption flowTestOptions[] = { { OPT_HELP, "-h", SO_NONE },
 	                                      SO_END_OF_OPTIONS };
 
 void printUsage(const char* program) {
-	fprintf(stderr,
-	        "Usage: %s [OPTIONS]\n"
-	        "\n"
-	        "Run TEST_CASEs linked into the flow library.\n"
-	        "\n"
-	        "Options:\n"
-	        "  -f, --filter PREFIX       Run tests whose names start with PREFIX\n"
-	        "      --ignore PREFIX       Skip tests whose names start with PREFIX\n"
-	        "      --data-dir DIR        Per-test data directory (default: flow_test_data)\n"
-	        "      --seed N              Deterministic random seed (default: random)\n"
-	        "      --max-test-cases N    Stop after N matching tests\n"
-	        "      --no-cleanup          Keep the data directory after each test\n"
-	        "      --list                Print matching test names without running them\n"
-	        "  -h, --help                Show this help\n",
-	        program);
+	fmt::print(stderr,
+	           "Usage: {} [OPTIONS]\n"
+	           "\n"
+	           "Run TEST_CASEs linked into the flow library.\n"
+	           "\n"
+	           "Options:\n"
+	           "  -f, --filter PREFIX       Run tests whose names start with PREFIX\n"
+	           "      --ignore PREFIX       Skip tests whose names start with PREFIX\n"
+	           "      --data-dir DIR        Per-test data directory (default: flow_test_data)\n"
+	           "      --seed N              Deterministic random seed (default: random)\n"
+	           "      --max-test-cases N    Stop after N matching tests\n"
+	           "      --no-cleanup          Keep the data directory after each test\n"
+	           "      --list                Print matching test names without running them\n"
+	           "  -h, --help                Show this help\n",
+	           program);
 }
 
 bool parseInt(const char* text, int* value) {
@@ -126,19 +128,20 @@ bool parseArgs(int argc, char** argv, FlowTestOptions* options) {
 		if (auto err = args.LastError()) {
 			switch (err) {
 			case SO_ARG_INVALID_DATA:
-				fprintf(stderr, "ERROR: Invalid argument to option `%s'\n", args.OptionText());
+				fmt::print(stderr, "ERROR: Invalid argument to option `{}`\n", args.OptionText());
 				break;
 			case SO_ARG_INVALID:
-				fprintf(stderr, "ERROR: Argument given to no-argument option `%s'\n", args.OptionText());
+				fmt::print(stderr, "ERROR: Argument given to no-argument option `{}`\n", args.OptionText());
 				break;
 			case SO_ARG_MISSING:
-				fprintf(stderr, "ERROR: Argument missing for option `%s'\n", args.OptionText());
+				fmt::print(stderr, "ERROR: Argument missing for option `{}`\n", args.OptionText());
 				break;
 			case SO_OPT_INVALID:
-				fprintf(stderr, "ERROR: Unknown option `%s'\n", args.OptionText());
+				fmt::print(stderr, "ERROR: Unknown option `{}`\n", args.OptionText());
 				break;
 			default:
-				fprintf(stderr, "ERROR: Unknown error %d with option `%s'\n", static_cast<int>(err), args.OptionText());
+				fmt::print(
+				    stderr, "ERROR: Unknown error {} with option `{}`\n", static_cast<int>(err), args.OptionText());
 				break;
 			}
 			return false;
@@ -159,13 +162,13 @@ bool parseArgs(int argc, char** argv, FlowTestOptions* options) {
 			break;
 		case OPT_SEED:
 			if (!parseUInt32(args.OptionArg(), &options->randomSeed)) {
-				fprintf(stderr, "ERROR: --seed requires a uint32 value\n");
+				fmt::print(stderr, "ERROR: --seed requires a uint32 value\n");
 				return false;
 			}
 			break;
 		case OPT_MAX_TEST_CASES:
 			if (!parseInt(args.OptionArg(), &options->maxTestCases)) {
-				fprintf(stderr, "ERROR: --max-test-cases requires an integer value\n");
+				fmt::print(stderr, "ERROR: --max-test-cases requires an integer value\n");
 				return false;
 			}
 			break;
@@ -176,13 +179,13 @@ bool parseArgs(int argc, char** argv, FlowTestOptions* options) {
 			options->listTests = true;
 			break;
 		default:
-			fprintf(stderr, "ERROR: Unknown option id %d\n", args.OptionId());
+			fmt::print(stderr, "ERROR: Unknown option id {}\n", args.OptionId());
 			return false;
 		}
 	}
 
 	if (args.FileCount() > 0) {
-		fprintf(stderr, "ERROR: Unexpected argument `%s'\n", args.File(0));
+		fmt::print(stderr, "ERROR: Unexpected argument `{}`\n", args.File(0));
 		return false;
 	}
 
@@ -229,11 +232,11 @@ Future<Void> runFlowTests(const FlowTestOptions& options, FlowTestResult* result
 	std::vector<UnitTest*> tests = collectTests(options);
 	result->testsAvailable = tests.size();
 
-	fprintf(stdout, "Found %zu flow tests\n", tests.size());
+	fmt::print(stdout, "Found {} flow tests\n", tests.size());
 
 	if (options.listTests) {
 		for (auto test : tests) {
-			fprintf(stdout, "%s\n", test->name);
+			fmt::print(stdout, "{}\n", test->name);
 		}
 		co_return;
 	}
@@ -252,7 +255,7 @@ Future<Void> runFlowTests(const FlowTestOptions& options, FlowTestResult* result
 	testParams.setDataDir(options.dataDir);
 
 	for (auto test : tests) {
-		fprintf(stdout, "Testing %s\n", test->name);
+		fmt::print(stdout, "Testing {}\n", test->name);
 
 		TraceEvent(SevInfo, "RunningFlowTest")
 		    .detail("Name", test->name)
@@ -287,7 +290,7 @@ Future<Void> runFlowTests(const FlowTestOptions& options, FlowTestResult* result
 		    .detail("FlowTime", flowTime);
 
 		if (resultCode.code() != error_code_success) {
-			fprintf(stderr, "Test failed: %s: %s\n", test->name, resultCode.what());
+			fmt::print(stderr, "Test failed: {}: {}\n", test->name, resultCode.what());
 		}
 	}
 }
@@ -296,13 +299,13 @@ Future<Void> stopNetworkAfter(Future<Void> what, int* exitCode) {
 	try {
 		co_await what;
 	} catch (Error& e) {
-		fprintf(stderr, "Unexpected flow_test error: %s\n", e.what());
+		fmt::print(stderr, "Unexpected flow_test error: {}\n", e.what());
 		*exitCode = 1;
 	} catch (std::exception& e) {
-		fprintf(stderr, "Unexpected flow_test exception: %s\n", e.what());
+		fmt::print(stderr, "Unexpected flow_test exception: {}\n", e.what());
 		*exitCode = 1;
 	} catch (...) {
-		fprintf(stderr, "Unexpected flow_test exception\n");
+		fmt::print(stderr, "Unexpected flow_test exception\n");
 		*exitCode = 1;
 	}
 	g_network->stop();
@@ -330,13 +333,13 @@ int main(int argc, char** argv) {
 		options.randomSeed = platform::getRandomSeed();
 	}
 	setThreadLocalDeterministicRandomSeed(options.randomSeed);
-	fprintf(stdout, "Random seed is %u\n", options.randomSeed);
+	fmt::print(stdout, "Random seed is {}\n", options.randomSeed);
 
 	std::string originalWorkingDirectory = platform::getWorkingDirectory();
 	std::string runDirectory = joinPath("/tmp", format("flow_test.%d.%u", ::getpid(), options.randomSeed));
 	platform::createDirectory(runDirectory);
 	if (::chdir(runDirectory.c_str()) != 0) {
-		fprintf(stderr, "ERROR: Could not chdir to %s\n", runDirectory.c_str());
+		fmt::print(stderr, "ERROR: Could not chdir to {}\n", runDirectory);
 		return 1;
 	}
 
@@ -349,8 +352,8 @@ int main(int argc, char** argv) {
 	g_network->run();
 	flushTraceFileVoid();
 
-	fprintf(
-	    stdout, "\n%d tests passed; %d tests failed.\n", result.testsExecuted - result.testsFailed, result.testsFailed);
+	fmt::print(
+	    stdout, "\n{} tests passed; {} tests failed.\n", result.testsExecuted - result.testsFailed, result.testsFailed);
 
 	if (result.testsFailed != 0) {
 		exitCode = 1;
