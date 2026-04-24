@@ -321,10 +321,6 @@ public:
 	std::map<NetworkAddress, ProcessInfo*> currentlyRebootingProcesses;
 	std::vector<std::string> extraDatabases;
 	bool quiesced = false;
-	std::string disablePrimary;
-	std::string disableRemote;
-	std::string originalRegions;
-	std::string startingDisabledConfiguration;
 	TSSMode tssMode;
 	std::map<NetworkAddress, bool> corruptWorkerMap;
 
@@ -338,7 +334,6 @@ public:
 	bool speedUpSimulation;
 	double connectionFailureEnableTime; // Last time connection failure is enabled.
 	double connectionFailureDisableTime = 0; // Latest time connection failure should be disabled.
-	bool disableTLogRecoveryFinish;
 	bool willRestart = false;
 	bool restarted = false;
 	bool isConsistencyChecked = false;

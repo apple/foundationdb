@@ -210,7 +210,7 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 	Future<Void> failover(Database cx) {
 		TraceEvent("FailoverBegin").log();
 
-		co_await ManagementAPI::changeConfig(cx.getReference(), g_simulator->disablePrimary, true);
+		co_await ManagementAPI::changeConfig(cx.getReference(), fdbSimulationPolicyState().disablePrimary, true);
 		TraceEvent("Failover_WaitFor_PrimaryDatacenterKey").log();
 
 		// when failover, primaryDC should change to 1

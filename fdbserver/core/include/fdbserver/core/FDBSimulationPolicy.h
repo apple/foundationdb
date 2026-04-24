@@ -50,6 +50,11 @@ struct FDBSimulationPolicyState {
 	bool allowStorageMigrationTypeChange = false;
 	FDBBackupAgentType backupAgents = FDBBackupAgentType::WaitForType;
 	FDBBackupAgentType drAgents = FDBBackupAgentType::WaitForType;
+	bool disableTLogRecoveryFinish = false;
+	std::string disablePrimary;
+	std::string disableRemote;
+	std::string originalRegions;
+	std::string startingDisabledConfiguration;
 };
 
 void installFDBSimulationPolicy();

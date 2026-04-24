@@ -72,9 +72,9 @@ struct ChangeConfigWorkload : TestWorkload {
 		co_await delay(5 * deterministicRandom()->random01());
 		if (!configMode.empty()) {
 			bool existingDB = false;
-			if (!g_simulator->startingDisabledConfiguration.empty()) {
+			if (!fdbSimulationPolicyState().startingDisabledConfiguration.empty()) {
 				co_await ManagementAPI::changeConfig(
-				    db.getReference(), g_simulator->startingDisabledConfiguration, true);
+				    db.getReference(), fdbSimulationPolicyState().startingDisabledConfiguration, true);
 				TraceEvent("WaitForReplicasExtra").log();
 				co_await waitForFullReplication(db);
 				TraceEvent("WaitForReplicasExtraEnd").log();
@@ -116,9 +116,9 @@ struct ChangeConfigWorkload : TestWorkload {
 
 		if (!configMode.empty()) {
 			bool existingDB = false;
-			if (g_network->isSimulated() && !g_simulator->startingDisabledConfiguration.empty()) {
+			if (g_network->isSimulated() && !fdbSimulationPolicyState().startingDisabledConfiguration.empty()) {
 				co_await ManagementAPI::changeConfig(
-				    cx.getReference(), g_simulator->startingDisabledConfiguration, true);
+				    cx.getReference(), fdbSimulationPolicyState().startingDisabledConfiguration, true);
 				TraceEvent("WaitForReplicas").log();
 				co_await waitForFullReplication(cx);
 				TraceEvent("WaitForReplicasEnd").log();

@@ -1996,18 +1996,20 @@ void SimulationConfig::setRegions(const TestConfig& testConfig) {
 	}
 
 	if (needsRemote) {
-		g_simulator->originalRegions =
+		fdbSimulationPolicyState().originalRegions =
 		    "regions=" + json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none);
 
 		StatusArray disablePrimary = regionArr;
 		disablePrimary[0].get_obj()["datacenters"].get_array()[0].get_obj()["priority"] = -1;
-		g_simulator->disablePrimary = "regions=" + json_spirit::write_string(json_spirit::mValue(disablePrimary),
-		                                                                     json_spirit::Output_options::none);
+		fdbSimulationPolicyState().disablePrimary =
+		    "regions=" +
+		    json_spirit::write_string(json_spirit::mValue(disablePrimary), json_spirit::Output_options::none);
 
 		StatusArray disableRemote = regionArr;
 		disableRemote[1].get_obj()["datacenters"].get_array()[0].get_obj()["priority"] = -1;
-		g_simulator->disableRemote = "regions=" + json_spirit::write_string(json_spirit::mValue(disableRemote),
-		                                                                    json_spirit::Output_options::none);
+		fdbSimulationPolicyState().disableRemote =
+		    "regions=" +
+		    json_spirit::write_string(json_spirit::mValue(disableRemote), json_spirit::Output_options::none);
 	} else {
 		// In order to generate a starting configuration with the remote disabled, do not apply the region
 		// configuration to the DatabaseConfiguration until after creating the starting conf string.
@@ -2201,10 +2203,11 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		startingConfigString += format(" tss_storage_engine:=%d", simconfig.db.testingStorageServerStoreType);
 	}
 
-	if (!g_simulator->originalRegions.empty()) {
-		simconfig.set_config(g_simulator->originalRegions);
-		g_simulator->startingDisabledConfiguration = startingConfigString + " " + g_simulator->disableRemote;
-		startingConfigString += " " + g_simulator->originalRegions;
+	if (!fdbSimulationPolicyState().originalRegions.empty()) {
+		simconfig.set_config(fdbSimulationPolicyState().originalRegions);
+		fdbSimulationPolicyState().startingDisabledConfiguration =
+		    startingConfigString + " " + fdbSimulationPolicyState().disableRemote;
+		startingConfigString += " " + fdbSimulationPolicyState().originalRegions;
 	}
 
 	TraceEvent("SimulatorConfig").setMaxFieldLength(10000).detail("ConfigString", StringRef(startingConfigString));

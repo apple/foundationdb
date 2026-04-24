@@ -74,7 +74,7 @@ struct GcGenerationsWorkload : TestWorkload {
 		if (g_network && g_network->isSimulated()) {
 			unclogAll();
 			disableConnectionFailures("GcGenerations");
-			g_simulator->disableTLogRecoveryFinish = false;
+			fdbSimulationPolicyState().disableTLogRecoveryFinish = false;
 		}
 	}
 
@@ -219,7 +219,7 @@ struct GcGenerationsWorkload : TestWorkload {
 		TraceEvent("GcGenerations").detail("StartTime", startTime).detail("EndTime", workloadEnd);
 
 		// Block TLog recovery while creating generations to test generation accumulation during recovery
-		g_simulator->disableTLogRecoveryFinish = true;
+		fdbSimulationPolicyState().disableTLogRecoveryFinish = true;
 
 		co_await self->generateMultipleTxnGenerations(self, cx);
 		self->unclogAll();
@@ -230,7 +230,7 @@ struct GcGenerationsWorkload : TestWorkload {
 		// during accumulation. The current recovery's tracking is now stale (FinalUpdate
 		// will never fire), so we must trigger a fresh recovery by rebooting the master.
 		// The new recovery starts with clean tracking state, allowing GC to proceed.
-		g_simulator->disableTLogRecoveryFinish = false;
+		fdbSimulationPolicyState().disableTLogRecoveryFinish = false;
 
 		// Reboot the master to trigger fresh recoveries with clean tracking state.
 		// GC may need multiple recovery cycles: remote TLogs must catch up from old

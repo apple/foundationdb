@@ -717,7 +717,8 @@ Future<Void> repairDeadDatacenter(Database cx, Reference<AsyncVar<ServerDBInfo> 
 
 			co_await ManagementAPI::changeConfig(
 			    cx.getReference(),
-			    (primaryDead ? g_simulator->disablePrimary : g_simulator->disableRemote) + " repopulate_anti_quorum=1",
+			    (primaryDead ? fdbSimulationPolicyState().disablePrimary : fdbSimulationPolicyState().disableRemote) +
+			        " repopulate_anti_quorum=1",
 			    true);
 			while (dbInfo->get().recoveryState < RecoveryState::STORAGE_RECOVERED) {
 				co_await dbInfo->onChange();
