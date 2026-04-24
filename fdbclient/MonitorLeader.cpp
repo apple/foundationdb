@@ -642,7 +642,7 @@ Future<Void> monitorLeaderInternal(Reference<IClusterConnectionRecord> connRecor
 }
 
 Future<Void> asyncDeserializeClusterInterface(Reference<AsyncVar<Value>> serializedInfo,
-                                             Reference<AsyncVar<Optional<ClusterInterface>>> outKnownLeader) {
+                                              Reference<AsyncVar<Optional<ClusterInterface>>> outKnownLeader) {
 	Reference<AsyncVar<Optional<ClusterControllerClientInterface>>> knownLeader(
 	    new AsyncVar<Optional<ClusterControllerClientInterface>>{});
 	Future<Void> deserializer = asyncDeserialize(serializedInfo, knownLeader);
