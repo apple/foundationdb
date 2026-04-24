@@ -967,7 +967,7 @@ Future<Void> getResolution(CommitBatchContext* self) {
 		self->resolution.push_back(std::move(resolutionResp));
 	} else {
 		std::vector<ResolveTransactionBatchReply> resolutionResp = co_await getAll(replies);
-		self->resolution.swap(*const_cast<std::vector<ResolveTransactionBatchReply>*>(&resolutionResp));
+		self->resolution = std::move(resolutionResp);
 	}
 
 	self->pProxyCommitData->stats.resolutionDist->sampleSeconds(g_network->timer_monotonic() - resolutionStart);
