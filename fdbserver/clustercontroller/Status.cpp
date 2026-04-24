@@ -109,6 +109,12 @@ struct StorageServerStatusInfo : public StorageServerMetaInfo {
 	explicit StorageServerStatusInfo(const StorageServerMetaInfo& info) : StorageServerMetaInfo(info, info.metadata) {}
 };
 
+struct ClusterGetStatusState : ReferenceCounted<ClusterGetStatusState> {
+	JsonBuilderObject statusObj;
+	JsonBuilderArray messages;
+	std::set<std::string> statusIncompleteReasons;
+};
+
 static AsyncResult<Optional<TraceEventFields>> latestEventOnWorker(WorkerInterface worker, std::string eventName) {
 	try {
 		EventLogRequest req =
@@ -2857,9 +2863,7 @@ AsyncResult<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistribut
 }
 
 // constructs the cluster section of the json status output
-static AsyncResult<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
-                                              JsonBuilderArray* pMessages,
-                                              std::set<std::string>* pStatusIncompleteReasons,
+static AsyncResult<Void> clusterGetStatusImpl(Reference<ClusterGetStatusState> statusState,
                                               Reference<AsyncVar<ServerDBInfo>> db,
                                               Database cx,
                                               std::vector<WorkerDetails> workers,
@@ -2867,9 +2871,9 @@ static AsyncResult<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
                                               std::vector<StorageServerMetaInfo> storageMetadatas,
                                               ServerCoordinators coordinators,
                                               std::unordered_map<NetworkAddress, double> excludedDegradedServers) {
-	JsonBuilderObject& statusObj = *pStatusObj;
-	JsonBuilderArray& messages = *pMessages;
-	std::set<std::string>& status_incomplete_reasons = *pStatusIncompleteReasons;
+	JsonBuilderObject& statusObj = statusState->statusObj;
+	JsonBuilderArray& messages = statusState->messages;
+	std::set<std::string>& status_incomplete_reasons = statusState->statusIncompleteReasons;
 
 	double tStart = timer();
 
@@ -3396,21 +3400,15 @@ AsyncResult<StatusReply> clusterGetStatus(
     Version dcStorageServerVersionDifference,
     std::unordered_map<NetworkAddress, double> excludedDegradedServers,
     double deadlineTimeout) {
-	JsonBuilderObject statusObj;
-	JsonBuilderArray messages;
-	std::set<std::string> status_incomplete_reasons;
+	auto statusState = makeReference<ClusterGetStatusState>();
+	JsonBuilderObject& statusObj = statusState->statusObj;
+	JsonBuilderArray& messages = statusState->messages;
+	std::set<std::string>& status_incomplete_reasons = statusState->statusIncompleteReasons;
 
-	auto result = co_await race(errorOr(clusterGetStatusImpl(&statusObj,
-	                                                         &messages,
-	                                                         &status_incomplete_reasons,
-	                                                         db,
-	                                                         cx,
-	                                                         workers,
-	                                                         workerIssues,
-	                                                         storageMetadatas,
-	                                                         coordinators,
-	                                                         excludedDegradedServers)),
-	                            delay(deadlineTimeout));
+	auto result = co_await race(
+	    errorOr(clusterGetStatusImpl(
+	        statusState, db, cx, workers, workerIssues, storageMetadatas, coordinators, excludedDegradedServers)),
+	    delay(deadlineTimeout));
 
 	if (result.index() == 0) {
 		ErrorOr<Void> statusResult = std::get<0>(std::move(result));
