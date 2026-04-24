@@ -1,5 +1,5 @@
 /*
- * DiskQueue.actor.cpp
+ * DiskQueue.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -1551,7 +1551,7 @@ public:
 	                         DiskQueueVersion diskQueueVersion,
 	                         int64_t fileSizeWarningLimit)
 	  : queue(new DiskQueue(basename, fileExtension, dbgid, diskQueueVersion, fileSizeWarningLimit)), pushed(0),
-	    popped(0), committed(0) {};
+	    popped(0), committed(0){};
 
 	// IClosable
 	Future<Void> getError() const override { return queue->getError(); }
@@ -1644,17 +1644,16 @@ IDiskQueue* openDiskQueue(std::string basename,
 }
 
 TEST_CASE("performance/fdbserver/DiskQueue") {
-	state IDiskQueue* queue =
-	    openDiskQueue("test-", "fdq", deterministicRandom()->randomUniqueID(), DiskQueueVersion::V2);
-	state std::string valueString = std::string(10e6, '.');
-	state StringRef valueStr((uint8_t*)valueString.c_str(), 10e6);
-	state std::deque<IDiskQueue::location> locations;
-	state int loopCount = 0;
-	state Future<Void> lastCommit = Void();
-	bool fullyRecovered = wait(queue->initializeRecovery(0));
+	IDiskQueue* queue = openDiskQueue("test-", "fdq", deterministicRandom()->randomUniqueID(), DiskQueueVersion::V2);
+	std::string valueString = std::string(10e6, '.');
+	StringRef valueStr((uint8_t*)valueString.c_str(), 10e6);
+	std::deque<IDiskQueue::location> locations;
+	int loopCount = 0;
+	Future<Void> lastCommit = Void();
+	bool fullyRecovered = co_await queue->initializeRecovery(0);
 	if (!fullyRecovered) {
-		loop {
-			Standalone<StringRef> h = wait(queue->readNext(1e6));
+		while (true) {
+			Standalone<StringRef> h = co_await queue->readNext(1e6);
 			if (h.size() < 1e6) {
 				break;
 			}
@@ -1665,20 +1664,19 @@ TEST_CASE("performance/fdbserver/DiskQueue") {
 			printf("loop count: %d\n", loopCount);
 		}
 		if (++loopCount % 2 == 0) {
-			state IDiskQueue::location frontLocation = locations.front();
+			IDiskQueue::location frontLocation = locations.front();
 			locations.pop_front();
 			if (locations.size() > 10) {
-				Standalone<StringRef> r = wait(queue->read(frontLocation, locations.front(), CheckHashes::True));
+				Standalone<StringRef> r = co_await queue->read(frontLocation, locations.front(), CheckHashes::True);
 			}
 			queue->pop(frontLocation);
 		}
-		wait(delay(0.001));
+		co_await delay(0.001);
 		locations.push_back(queue->push(valueStr));
 		Future<Void> prevCommit = lastCommit;
 		lastCommit = queue->commit();
-		wait(prevCommit);
+		co_await prevCommit;
 	}
 	queue->dispose();
-	wait(queue->onClosed());
-	return Void();
+	co_await queue->onClosed();
 }
