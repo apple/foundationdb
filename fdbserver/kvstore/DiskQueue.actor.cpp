@@ -24,9 +24,8 @@
 #include "fdbrpc/simulator.h"
 #include "crc32/crc32c.h"
 #include "flow/genericactors.actor.h"
+#include "flow/UnitTest.h"
 #include "flow/xxhash.h"
-
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 using compare_pages = bool (*)(void*, void*);
 using loc_t = int64_t;
@@ -121,11 +120,10 @@ private:
 	Deque<Future<Void>> outstanding;
 	Reference<IAsyncFile> file;
 
-	ACTOR static Future<Void> waitAndSync(SyncQueue* self) {
-		wait(self->outstanding.front());
+	static Future<Void> waitAndSync(SyncQueue* self) {
+		co_await self->outstanding.front();
 		self->outstanding.pop_front();
-		wait(self->file->sync());
-		return Void();
+		co_await self->file->sync();
 	}
 };
 
@@ -195,7 +193,7 @@ public:
 	}
 
 	Future<Void> pushAndCommit(Standalone<StringRef> pageData, StringBuffer* pageMem, uint64_t poppedPages) {
-		return pushAndCommit(this, pageData, pageMem, poppedPages);
+		return pushAndCommit(Uncancellable(), this, pageData, pageMem, poppedPages);
 	}
 
 	void stall() {
@@ -204,7 +202,7 @@ public:
 	}
 
 	Future<Standalone<StringRef>> readFirstAndLastPages(compare_pages compare) {
-		return readFirstAndLastPages(this, compare);
+		return readFirstAndLastPages(Uncancellable(), this, compare);
 	}
 
 	void setStartPage(int file, int64_t page) {
@@ -221,14 +219,16 @@ public:
 	}
 
 	// FIXME: let the caller pass in where to write the data.
-	Future<Standalone<StringRef>> read(int file, int page, int nPages) { return read(this, file, page, nPages); }
-	Future<Standalone<StringRef>> readNextPage() { return readNextPage(this); }
+	Future<Standalone<StringRef>> read(int file, int page, int nPages) {
+		return read(Uncancellable(), this, file, page, nPages);
+	}
+	Future<Standalone<StringRef>> readNextPage() { return readNextPage(Uncancellable(), this); }
 	Future<Void> truncateBeforeLastReadPage() { return truncateBeforeLastReadPage(this); }
 
 	Future<Void> getError() { return onError; }
 	Future<Void> onClosed() { return onStopped; }
-	void dispose() { shutdown(this, true); }
-	void close() { shutdown(this, false); }
+	void dispose() { shutdown(Uncancellable(), this, true); }
+	void close() { shutdown(Uncancellable(), this, false); }
 
 	StorageBytes getStorageBytes() const {
 		int64_t free;
@@ -293,50 +293,51 @@ public:
 
 	Int64MetricHandle stallCount;
 
-	Future<Void> truncateFile(int file, int64_t pos) { return truncateFile(this, file, pos); }
+	Future<Void> truncateFile(int file, int64_t pos) { return truncateFile(Uncancellable(), this, file, pos); }
 
 	// FIXME: Merge this function with IAsyncFileSystem::incrementalDeleteFile().
-	ACTOR static void incrementalTruncate(Reference<IAsyncFile> file) {
-		state int64_t remainingFileSize = wait(file->size());
+	static Future<Void> incrementalTruncate(Uncancellable, Reference<IAsyncFile> file) {
+		int64_t remainingFileSize = co_await file->size();
 
 		for (; remainingFileSize > 0; remainingFileSize -= FLOW_KNOBS->INCREMENTAL_DELETE_TRUNCATE_AMOUNT) {
-			wait(file->truncate(remainingFileSize));
-			wait(file->sync());
-			wait(delay(FLOW_KNOBS->INCREMENTAL_DELETE_INTERVAL));
+			co_await file->truncate(remainingFileSize);
+			co_await file->sync();
+			co_await delay(FLOW_KNOBS->INCREMENTAL_DELETE_INTERVAL);
 		}
 
 		TraceEvent("DiskQueueReplaceTruncateEnded").detail("Filename", file->getFilename());
 	}
 
 #if defined(_WIN32)
-	ACTOR static Future<Reference<IAsyncFile>> replaceFile(Reference<IAsyncFile> toReplace) {
+	static Future<Reference<IAsyncFile>> replaceFile(Reference<IAsyncFile> toReplace) {
 		// Windows doesn't support a rename over an open file.
-		wait(toReplace->truncate(4 << 10));
-		return toReplace;
+		co_await toReplace->truncate(4 << 10);
+		co_return toReplace;
 	}
 #else
-	ACTOR static Future<Reference<IAsyncFile>> replaceFile(Reference<IAsyncFile> toReplace) {
-		incrementalTruncate(toReplace);
+	static Future<Reference<IAsyncFile>> replaceFile(Reference<IAsyncFile> toReplace) {
+		incrementalTruncate(Uncancellable(), toReplace);
 
-		Reference<IAsyncFile> _replacement = wait(IAsyncFileSystem::filesystem()->open(
+		Reference<IAsyncFile> _replacement = co_await IAsyncFileSystem::filesystem()->open(
 		    toReplace->getFilename(),
 		    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE |
 		        IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_LOCK,
-		    0600));
-		state Reference<IAsyncFile> replacement = _replacement;
-		wait(replacement->sync());
+		    0600);
+		Reference<IAsyncFile> replacement = _replacement;
+		co_await replacement->sync();
 
-		return replacement;
+		co_return replacement;
 	}
 #endif
 
 	Future<Future<Void>> push(Standalone<StringRef> pageData, std::vector<Reference<SyncQueue>>* toSync) {
-		return push(this, pageData, toSync);
+		return push(Uncancellable(), this, pageData, toSync);
 	}
 
-	ACTOR static UNCANCELLABLE Future<Future<Void>> push(RawDiskQueue_TwoFiles* self,
-	                                                     Standalone<StringRef> pageData,
-	                                                     std::vector<Reference<SyncQueue>>* toSync) {
+	static Future<Future<Void>> push(Uncancellable,
+	                                 RawDiskQueue_TwoFiles* self,
+	                                 Standalone<StringRef> pageData,
+	                                 std::vector<Reference<SyncQueue>>* toSync) {
 		// Write the given data (pageData) to the queue files, swapping or extending them if necessary.
 		// Don't do any syncs, but push the modified file(s) onto toSync.
 		ASSERT(self->readingFile == 2);
@@ -345,7 +346,7 @@ public:
 		ASSERT(self->writingPos % _PAGE_SIZE == 0);
 		ASSERT(self->files[0].size % _PAGE_SIZE == 0 && self->files[1].size % _PAGE_SIZE == 0);
 
-		state std::vector<Future<Void>> waitfor;
+		std::vector<Future<Void>> waitfor;
 
 		if (pageData.size() + self->writingPos > self->files[1].size) {
 			if (self->files[0].popped == self->files[0].size) {
@@ -383,7 +384,7 @@ public:
 						    .detail("Filename", self->files[1].f->getFilename())
 						    .detail("OldFileSize", self->files[1].size)
 						    .detail("ElidedTruncateSize", maxShrink);
-						Reference<IAsyncFile> newFile = wait(replaceFile(self->files[1].f));
+						Reference<IAsyncFile> newFile = co_await replaceFile(self->files[1].f);
 						self->files[1].setFile(newFile);
 						waitfor.push_back(self->files[1].f->truncate(self->fileExtensionBytes));
 						self->files[1].size = self->fileExtensionBytes;
@@ -429,21 +430,23 @@ public:
 		    holdWhile(pageData, self->files[1].f->write(pageData.begin(), pageData.size(), self->writingPos))));
 		self->writingPos += pageData.size();
 
-		return waitForAllReadyThenThrow(waitfor);
+		co_return waitForAllReadyThenThrow(waitfor);
 	}
 
 	// Write the given data (pageData) to the queue files of self, sync data to disk, and delete the memory (pageMem)
 	// that hold the pageData
-	ACTOR static UNCANCELLABLE Future<Void> pushAndCommit(RawDiskQueue_TwoFiles* self,
-	                                                      Standalone<StringRef> pageData,
-	                                                      StringBuffer* pageMem,
-	                                                      uint64_t poppedPages) {
-		state Promise<Void> pushing, committed;
-		state Promise<Void> errorPromise = self->error;
-		state std::string filename = self->files[0].dbgFilename;
-		state UID dbgid = self->dbgid;
-		state std::vector<Reference<SyncQueue>> syncFiles;
-		state Future<Void> lastCommit = self->lastCommit;
+	static Future<Void> pushAndCommit(Uncancellable,
+	                                  RawDiskQueue_TwoFiles* self,
+	                                  Standalone<StringRef> pageData,
+	                                  StringBuffer* pageMem,
+	                                  uint64_t poppedPages) {
+		Promise<Void> pushing;
+		Promise<Void> committed;
+		Promise<Void> errorPromise = self->error;
+		std::string filename = self->files[0].dbgFilename;
+		UID dbgid = self->dbgid;
+		std::vector<Reference<SyncQueue>> syncFiles;
+		Future<Void> lastCommit = self->lastCommit;
 		try {
 			// pushing might need to wait for previous pushes to start (to maintain order) or for
 			// a previous commit to finish if stall() was called
@@ -458,15 +461,15 @@ public:
 				self->readyToPush = self->lastCommit;
 			}
 
-			wait(ready);
+			co_await ready;
 
 			CODE_PROBE(pageData.size() > sizeof(Page), "push more than one page of data");
 
-			Future<Void> pushed = wait(self->push(pageData, &syncFiles));
+			Future<Void> pushed = co_await self->push(pageData, &syncFiles);
 			pushing.send(Void());
 			ASSERT(syncFiles.size() >= 1 && syncFiles.size() <= 2);
 			CODE_PROBE(2 == syncFiles.size(), "push spans both files");
-			wait(pushed);
+			co_await pushed;
 
 			delete pageMem;
 			pageMem = 0;
@@ -474,12 +477,12 @@ public:
 			Future<Void> sync = syncFiles[0]->onSync();
 			for (int i = 1; i < syncFiles.size(); i++)
 				sync = sync && syncFiles[i]->onSync();
-			wait(sync);
-			wait(lastCommit);
+			co_await sync;
+			co_await lastCommit;
 
 			// Calling check_yield instead of yield to avoid a destruction ordering problem in simulation
 			if (g_network->check_yield(g_network->getCurrentTask())) {
-				wait(delay(0, g_network->getCurrentTask()));
+				co_await delay(0, g_network->getCurrentTask());
 			}
 
 			self->updatePopped(poppedPages * sizeof(Page));
@@ -506,7 +509,6 @@ public:
 
 			throw e;
 		}
-		return Void();
 	}
 
 	void updatePopped(int64_t popped) {
@@ -516,7 +518,7 @@ public:
 	}
 
 	// Set the starting point of the ring buffer, i.e., the first useful page to be read (and poped)
-	ACTOR static Future<Void> setPoppedPage(RawDiskQueue_TwoFiles* self, int file, int64_t page, int64_t debugSeq) {
+	static Future<Void> setPoppedPage(RawDiskQueue_TwoFiles* self, int file, int64_t page, int64_t debugSeq) {
 		self->files[file].popped = page * sizeof(Page);
 		if (file)
 			self->files[0].popped = self->files[0].size;
@@ -529,20 +531,18 @@ public:
 		//  be sequenced before file 1, when in fact it contains many pages that follow file 1.  These ok pages may be
 		//  incorrectly read if the machine dies after overwritting the first page of file 0 and is then recovered
 		if (file == 1)
-			wait(self->truncateFile(self, 0, 0));
-
-		return Void();
+			co_await truncateFile(Uncancellable(), self, 0, 0);
 	}
 
-	ACTOR static Future<Void> openFiles(RawDiskQueue_TwoFiles* self) {
-		state std::vector<Future<Reference<IAsyncFile>>> fs;
+	static Future<Void> openFiles(RawDiskQueue_TwoFiles* self) {
+		std::vector<Future<Reference<IAsyncFile>>> fs;
 		fs.reserve(2);
 		for (int i = 0; i < 2; i++)
 			fs.push_back(IAsyncFileSystem::filesystem()->open(self->filename(i),
 			                                                  IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED |
 			                                                      IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_LOCK,
 			                                                  0));
-		wait(waitForAllReady(fs));
+		co_await waitForAllReady(fs);
 
 		// Treatment of errors here is important.  If only one of the two files is present
 		// (due to a power failure during creation or deletion, or administrative error) we don't want to
@@ -563,7 +563,7 @@ public:
 				    0600);
 
 			// Any error here is fatal
-			wait(waitForAll(fs));
+			co_await waitForAll(fs);
 
 			// sync on each file to actually create it will be done below
 		} else {
@@ -582,23 +582,21 @@ public:
 		syncs.reserve(fs.size());
 		for (int i = 0; i < fs.size(); i++)
 			syncs.push_back(fs[i].get()->sync());
-		wait(waitForAll(syncs));
+		co_await waitForAll(syncs);
 
 		// Successfully opened or created; fill in self->files[]
 		for (int i = 0; i < 2; i++)
 			self->files[i].setFile(fs[i].get());
-
-		return Void();
 	}
 
-	ACTOR static void shutdown(RawDiskQueue_TwoFiles* self, bool deleteFiles) {
+	static Future<Void> shutdown(Uncancellable, RawDiskQueue_TwoFiles* self, bool deleteFiles) {
 		// Wait for all reads and writes on the file, and all actors referencing self, to be finished
-		state Error error = success();
+		Error error = success();
 		try {
-			wait(success(errorOr(self->lastCommit)));
+			co_await success(errorOr(self->lastCommit));
 			// Wait for the pending operations (e.g., read) to finish before we destroy the DiskQueue, because
 			// tLog, instead of DiskQueue, hold the future of the pending operations.
-			wait(self->onSafeToDestruct());
+			co_await self->onSafeToDestruct();
 
 			for (int i = 0; i < 2; i++)
 				self->files[i].f.clear();
@@ -607,8 +605,8 @@ public:
 				TraceEvent("DiskQueueShutdownDeleting", self->dbgid)
 				    .detail("File0", self->filename(0))
 				    .detail("File1", self->filename(1));
-				wait(IAsyncFileSystem::filesystem()->incrementalDeleteFile(self->filename(0), false));
-				wait(IAsyncFileSystem::filesystem()->incrementalDeleteFile(self->filename(1), true));
+				co_await IAsyncFileSystem::filesystem()->incrementalDeleteFile(self->filename(0), false);
+				co_await IAsyncFileSystem::filesystem()->incrementalDeleteFile(self->filename(1), true);
 			}
 			TraceEvent("DiskQueueShutdownComplete", self->dbgid)
 			    .detail("DeleteFiles", deleteFiles)
@@ -630,20 +628,21 @@ public:
 	}
 
 	// Return the most recently written page, the page with largest seq number
-	ACTOR static UNCANCELLABLE Future<Standalone<StringRef>> readFirstAndLastPages(RawDiskQueue_TwoFiles* self,
-	                                                                               compare_pages compare) {
-		state TrackMe trackMe(self);
+	static Future<Standalone<StringRef>> readFirstAndLastPages(Uncancellable,
+	                                                           RawDiskQueue_TwoFiles* self,
+	                                                           compare_pages compare) {
+		TrackMe trackMe(self);
 
 		try {
 			// Open both files or create both files
-			wait(openFiles(self));
+			co_await openFiles(self);
 
 			// Get the file sizes
 			std::vector<Future<int64_t>> fsize;
 			fsize.reserve(2);
 			for (int i = 0; i < 2; i++)
 				fsize.push_back(self->files[i].f->size());
-			std::vector<int64_t> file_sizes = wait(getAll(fsize));
+			std::vector<int64_t> file_sizes = co_await getAll(fsize);
 			for (int i = 0; i < 2; i++) {
 				// SOMEDAY: If the file size is not a multiple of page size, it may never be shortened.  Change this?
 				self->files[i].size = file_sizes[i] - file_sizes[i] % sizeof(Page);
@@ -655,7 +654,7 @@ public:
 			for (int i = 0; i < 2; i++)
 				if (self->files[i].size > 0)
 					reads.push_back(self->files[i].f->read(self->firstPages[i], sizeof(Page), 0));
-			wait(waitForAllReadyThenThrow(reads));
+			co_await waitForAllReadyThenThrow(reads);
 
 			// Determine which file comes first
 			if (compare(self->firstPages[1], self->firstPages[0])) {
@@ -676,30 +675,30 @@ public:
 				std::vector<Future<Void>> truncates;
 				for (int i = 0; i < 2; ++i)
 					if (self->files[i].size > 0)
-						truncates.push_back(self->truncateFile(self, i, 0));
+						truncates.push_back(truncateFile(Uncancellable(), self, i, 0));
 
-				wait(waitForAll(truncates));
+				co_await waitForAll(truncates);
 
 				self->files[0].popped = self->files[0].size;
 				self->files[1].popped = 0;
 				memset(self->firstPages[1], 0xFF, sizeof(Page));
 				self->writingPos = 0;
 				self->readingFile = 2;
-				return Standalone<StringRef>();
+				co_return Standalone<StringRef>();
 			}
 
 			// A page in files[1] is "valid" iff compare(self->firstPages[1], page)
 			// Binary search to find a page in files[1] that is "valid" but the next page is not valid
 			// Invariant: the page at begin is valid, and the page at end is invalid
-			state int64_t begin = 0;
-			state int64_t end = self->files[1].size / sizeof(Page);
-			state Standalone<StringRef> middlePageAllocation = makeAlignedString(sizeof(Page), sizeof(Page));
-			state Page* middlePage = (Page*)middlePageAllocation.begin();
+			int64_t begin = 0;
+			int64_t end = self->files[1].size / sizeof(Page);
+			Standalone<StringRef> middlePageAllocation = makeAlignedString(sizeof(Page), sizeof(Page));
+			Page* middlePage = (Page*)middlePageAllocation.begin();
 			while (begin + 1 != end) {
-				state int64_t middle = (begin + end) / 2;
+				int64_t middle = (begin + end) / 2;
 				ASSERT(middle > begin && middle < end); // So the loop always changes begin or end
 
-				int len = wait(self->files[1].f->read(middlePage, sizeof(Page), middle * sizeof(Page)));
+				int len = co_await self->files[1].f->read(middlePage, sizeof(Page), middle * sizeof(Page));
 				ASSERT(len == sizeof(Page));
 
 				bool middleValid = compare(self->firstPages[1], middlePage);
@@ -718,11 +717,11 @@ public:
 			}
 			// Now by the invariant and the loop condition, begin is a valid page and begin+1 is an invalid page
 			// Check that begin+1 is invalid
-			int len1 = wait(self->files[1].f->read(middlePage, sizeof(Page), (begin + 1) * sizeof(Page)));
+			int len1 = co_await self->files[1].f->read(middlePage, sizeof(Page), (begin + 1) * sizeof(Page));
 			ASSERT(!(len1 == sizeof(Page) && compare(self->firstPages[1], middlePage)));
 
 			// Read it
-			int len2 = wait(self->files[1].f->read(middlePage, sizeof(Page), begin * sizeof(Page)));
+			int len2 = co_await self->files[1].f->read(middlePage, sizeof(Page), begin * sizeof(Page));
 			ASSERT(len2 == sizeof(Page) && compare(self->firstPages[1], middlePage));
 
 			TraceEvent("RDQEndFound", self->dbgid)
@@ -730,7 +729,7 @@ public:
 			    .detail("Pos", begin)
 			    .detail("FileSize", self->files[1].size);
 
-			return middlePageAllocation;
+			co_return middlePageAllocation;
 		} catch (Error& e) {
 			bool ok = e.code() == error_code_file_not_found;
 			TraceEvent(ok ? SevInfo : SevError, "RDQReadFirstAndLastPagesError", self->dbgid)
@@ -743,19 +742,20 @@ public:
 	}
 
 	// Read nPages from pageOffset*sizeof(Page) offset in file self->files[file]
-	ACTOR static UNCANCELLABLE Future<Standalone<StringRef>> read(RawDiskQueue_TwoFiles* self,
-	                                                              int file,
-	                                                              int pageOffset,
-	                                                              int nPages) {
-		state TrackMe trackMe(self);
-		state const size_t bytesRequested = nPages * sizeof(Page);
-		state Standalone<StringRef> result = makeAlignedString(sizeof(Page), bytesRequested);
+	static Future<Standalone<StringRef>> read(Uncancellable,
+	                                          RawDiskQueue_TwoFiles* self,
+	                                          int file,
+	                                          int pageOffset,
+	                                          int nPages) {
+		TrackMe trackMe(self);
+		const size_t bytesRequested = nPages * sizeof(Page);
+		Standalone<StringRef> result = makeAlignedString(sizeof(Page), bytesRequested);
 		if (file == 1)
 			ASSERT_WE_THINK(pageOffset * sizeof(Page) + bytesRequested <= self->writingPos);
 		int bytesRead =
-		    wait(self->files[file].f->read(mutateString(result), bytesRequested, pageOffset * sizeof(Page)));
+		    co_await self->files[file].f->read(mutateString(result), bytesRequested, pageOffset * sizeof(Page));
 		ASSERT_WE_THINK(bytesRead == bytesRequested);
-		return result;
+		co_return result;
 	}
 
 	Future<int> fillReadingBuffer() {
@@ -785,28 +785,28 @@ public:
 		return files[readingFile].f->read(p, len, pos);
 	}
 
-	ACTOR static UNCANCELLABLE Future<Standalone<StringRef>> readNextPage(RawDiskQueue_TwoFiles* self) {
-		state TrackMe trackMe(self);
+	static Future<Standalone<StringRef>> readNextPage(Uncancellable, RawDiskQueue_TwoFiles* self) {
+		TrackMe trackMe(self);
 
 		try {
 			ASSERT(self->readingFile < 2);
 			ASSERT(self->files[0].f && self->files[1].f);
 
 			if (!self->readingBuffer.size()) {
-				state Future<Void> f = Void();
+				Future<Void> f = Void();
 				// if (BUGGIFY) f = delay( deterministicRandom()->random01() * 0.1 );
 
-				int read = wait(self->fillReadingBuffer());
+				int read = co_await self->fillReadingBuffer();
 				ASSERT(read == self->readingBuffer.size());
 
-				wait(f);
+				co_await f;
 			}
 			if (!self->readingBuffer.size())
-				return Standalone<StringRef>();
+				co_return Standalone<StringRef>();
 
 			ASSERT(self->readingBuffer.size() >= sizeof(Page));
 			Standalone<StringRef> result = self->readingBuffer.pop_front(sizeof(Page));
-			return result;
+			co_return result;
 		} catch (Error& e) {
 			CODE_PROBE(true, "Read next page error");
 			TraceEvent(SevError, "RDQReadNextPageError", self->dbgid)
@@ -819,29 +819,28 @@ public:
 	}
 
 	// Set zero and free the memory from pos to the end of file self->files[file].
-	ACTOR static UNCANCELLABLE Future<Void> truncateFile(RawDiskQueue_TwoFiles* self, int file, int64_t pos) {
-		state TrackMe trackMe(self);
+	static Future<Void> truncateFile(Uncancellable, RawDiskQueue_TwoFiles* self, int file, int64_t pos) {
+		TrackMe trackMe(self);
 		TraceEvent("DQTruncateFile", self->dbgid)
 		    .detail("File", file)
 		    .detail("Pos", pos)
 		    .detail("File0Name", self->files[0].dbgFilename);
-		state Reference<IAsyncFile> f =
-		    self->files[file].f; // Hold onto a reference in the off-chance that the DQ is removed from underneath us.
+		// Hold onto a reference in the off-chance that the DQ is removed from underneath us.
+		Reference<IAsyncFile> f = self->files[file].f;
 		if (pos == 0) {
 			memset(self->firstPages[file], 0xFF, _PAGE_SIZE);
 		}
-		wait(f->zeroRange(pos, self->files[file].size - pos));
-		wait(self->files[file].syncQueue->onSync());
+		co_await f->zeroRange(pos, self->files[file].size - pos);
+		co_await self->files[file].syncQueue->onSync();
 		// We intentionally don't return the f->zero future, so that TrackMe is destructed after f->zero finishes.
-		return Void();
 	}
 
-	ACTOR static Future<Void> truncateBeforeLastReadPage(RawDiskQueue_TwoFiles* self) {
+	static Future<Void> truncateBeforeLastReadPage(RawDiskQueue_TwoFiles* self) {
 		try {
-			state int file = self->readingFile;
-			state int64_t pos = (self->readingPage - self->readingBuffer.size() / sizeof(Page) - 1) * sizeof(Page);
-			state std::vector<Future<Void>> commits;
-			state bool swap = file == 0;
+			int file = self->readingFile;
+			int64_t pos = (self->readingPage - self->readingBuffer.size() / sizeof(Page) - 1) * sizeof(Page);
+			std::vector<Future<Void>> commits;
+			bool swap = file == 0;
 
 			CODE_PROBE(file == 0, "truncate before last read page on file 0");
 			CODE_PROBE(file == 1 && pos != self->files[1].size, "truncate before last read page on file 1");
@@ -851,12 +850,12 @@ public:
 			self->writingPos = pos;
 
 			while (file < 2) {
-				commits.push_back(self->truncateFile(self, file, pos));
+				commits.push_back(truncateFile(Uncancellable(), self, file, pos));
 				file++;
 				pos = 0;
 			}
 
-			wait(waitForAll(commits));
+			co_await waitForAll(commits);
 
 			if (swap) {
 				std::swap(self->files[0], self->files[1]);
@@ -864,7 +863,6 @@ public:
 				self->files[0].popped = self->files[0].size;
 			}
 
-			return Void();
 		} catch (Error& e) {
 			TraceEvent(SevError, "RDQTruncateBeforeLastReadPageError", self->dbgid)
 			    .error(e)
@@ -1012,7 +1010,7 @@ public:
 		    .detail("PoppedSeq", poppedSeq)
 		    .detail("NextPageSeq", nextPageSeq)
 		    .detail("File0Name", rawQueue->files[0].dbgFilename);
-		dispose(this);
+		dispose(Uncancellable(), this);
 	}
 
 	void close() override {
@@ -1023,21 +1021,21 @@ public:
 		    .detail("PoppedCommitted",
 		            rawQueue->dbg_file0BeginSeq + rawQueue->files[0].popped + rawQueue->files[1].popped)
 		    .detail("File0Name", rawQueue->files[0].dbgFilename);
-		close(this);
+		close(Uncancellable(), this);
 	}
 
 	StorageBytes getStorageBytes() const override { return rawQueue->getStorageBytes(); }
 
 private:
-	ACTOR static void dispose(DiskQueue* self) {
-		wait(self->onSafeToDestruct());
+	static Future<Void> dispose(Uncancellable, DiskQueue* self) {
+		co_await self->onSafeToDestruct();
 		TraceEvent("DQDestroyDone", self->dbgid).detail("File0Name", self->rawQueue->files[0].dbgFilename);
 		self->rawQueue->dispose();
 		delete self;
 	}
 
-	ACTOR static void close(DiskQueue* self) {
-		wait(self->onSafeToDestruct());
+	static Future<Void> close(Uncancellable, DiskQueue* self) {
+		co_await self->onSafeToDestruct();
 		TraceEvent("DQCloseDone", self->dbgid).detail("File0Name", self->rawQueue->files[0].dbgFilename);
 		self->rawQueue->close();
 		delete self;
@@ -1166,13 +1164,13 @@ private:
 	}
 
 	// Read pages from [start, end) bytes
-	ACTOR static Future<Standalone<StringRef>> readPages(DiskQueue* self, location start, location end) {
-		state TrackMe trackme(self);
-		state int fromFile;
-		state int toFile;
-		state int64_t fromPage;
-		state int64_t toPage;
-		state uint64_t file0size =
+	static Future<Standalone<StringRef>> readPages(DiskQueue* self, location start, location end) {
+		TrackMe trackme(self);
+		int fromFile{ 0 };
+		int toFile{ 0 };
+		int64_t fromPage{ 0 };
+		int64_t toPage{ 0 };
+		uint64_t file0size =
 		    self->rawQueue->files[0].size ? self->firstPages(1).seq - self->firstPages(0).seq : self->firstPages(1).seq;
 		ASSERT(end > start);
 		ASSERT(start.lo >= self->firstPages(0).seq || start.lo >= self->firstPages(1).seq);
@@ -1193,7 +1191,7 @@ private:
 		}
 		if (fromFile == toFile) {
 			ASSERT(toPage >= fromPage);
-			Standalone<StringRef> pagedData = wait(self->rawQueue->read(fromFile, fromPage, toPage - fromPage + 1));
+			Standalone<StringRef> pagedData = co_await self->rawQueue->read(fromFile, fromPage, toPage - fromPage + 1);
 			if (std::min(self->firstPages(0).seq, self->firstPages(1).seq) > start.lo) {
 				// Simulation allows for reads to be delayed and executed after overlapping subsequent
 				// write operations.  This means that by the time our read was executed, it's possible
@@ -1206,13 +1204,14 @@ private:
 			ASSERT(pagedData.size() == (toPage - fromPage + 1) * _PAGE_SIZE);
 
 			ASSERT(((Page*)pagedData.end() - 1)->seq == pageFloor(end.lo - 1));
-			return pagedData;
+			co_return pagedData;
 		} else {
 			ASSERT(fromFile == 0);
-			state Standalone<StringRef> firstChunk;
-			state Standalone<StringRef> secondChunk;
-			wait(store(firstChunk, self->rawQueue->read(fromFile, fromPage, (file0size / sizeof(Page)) - fromPage)) &&
-			     store(secondChunk, self->rawQueue->read(toFile, 0, toPage + 1)));
+			Standalone<StringRef> firstChunk;
+			Standalone<StringRef> secondChunk;
+			co_await (
+			    store(firstChunk, self->rawQueue->read(fromFile, fromPage, (file0size / sizeof(Page)) - fromPage)) &&
+			    store(secondChunk, self->rawQueue->read(toFile, 0, toPage + 1)));
 			if (std::min(self->firstPages(0).seq, self->firstPages(1).seq) > start.lo) {
 				// See above.
 				throw io_error();
@@ -1221,14 +1220,12 @@ private:
 			ASSERT(((Page*)firstChunk.begin())->seq == pageFloor(start.lo));
 			ASSERT(secondChunk.size() == (toPage + 1) * _PAGE_SIZE);
 			ASSERT(((Page*)secondChunk.end() - 1)->seq == pageFloor(end.lo - 1));
-			return firstChunk.withSuffix(secondChunk);
+			co_return firstChunk.withSuffix(secondChunk);
 		}
 	}
 
-	ACTOR static Future<Standalone<StringRef>> read(DiskQueue* self, location start, location end, CheckHashes ch) {
-		// This `state` is unnecessary, but works around pagedData wrongly becoming const
-		// due to the actor compiler.
-		state Standalone<StringRef> pagedData = wait(readPages(self, start, end));
+	static Future<Standalone<StringRef>> read(DiskQueue* self, location start, location end, CheckHashes ch) {
+		Standalone<StringRef> pagedData = co_await readPages(self, start, end);
 		ASSERT(start.lo % sizeof(Page) == 0 || start.lo % sizeof(Page) >= sizeof(PageHeader));
 		int startingOffset = start.lo % sizeof(Page);
 		if (startingOffset > 0)
@@ -1249,7 +1246,7 @@ private:
 			if (!ch && data->payloadSize > Page::maxPayload)
 				throw io_error();
 			pagedData.contents() = pagedData.substr(sizeof(PageHeader) + startingOffset, endingOffset - startingOffset);
-			return pagedData;
+			co_return pagedData;
 		} else {
 			// Reusing pagedData wastes # of pages * sizeof(PageHeader) bytes, but means
 			// we don't have to double allocate in a hot, memory hungry call.
@@ -1293,7 +1290,7 @@ private:
 
 			memset(buf, 0, pagedData.size() - (buf - pagedData.begin()));
 			Standalone<StringRef> unpagedData = pagedData.substr(0, buf - pagedData.begin());
-			return unpagedData;
+			co_return unpagedData;
 		}
 	}
 
@@ -1310,36 +1307,36 @@ private:
 		nextReadLocation += len;
 	}
 
-	ACTOR static Future<Standalone<StringRef>> readNext(DiskQueue* self, int bytes) {
-		state StringBuffer result(self->dbgid);
+	static Future<Standalone<StringRef>> readNext(DiskQueue* self, int bytes) {
+		StringBuffer result(self->dbgid);
 		ASSERT(bytes >= 0);
 		result.clearReserve(bytes);
 
 		ASSERT(!self->recovered);
 
 		if (!self->initialized) {
-			bool recoveryComplete = wait(initializeRecovery(self, 0));
+			bool recoveryComplete = co_await initializeRecovery(self, 0);
 
 			if (recoveryComplete) {
 				ASSERT(self->poppedSeq <= self->endLocation());
 
-				return Standalone<StringRef>();
+				co_return Standalone<StringRef>();
 			}
 		}
 
-		loop {
+		while (true) {
 			if (self->readBufPage) {
 				self->readFromBuffer(&result, &bytes);
 				// if done, return
 				if (!bytes)
-					return result.str;
+					co_return result.str;
 				ASSERT(self->readBufPos == self->readBufPage->payloadSize);
 				self->readBufPage = 0;
 				self->nextReadLocation += sizeof(Page) - self->readBufPos;
 				self->readBufPos = 0;
 			}
 
-			Standalone<StringRef> page = wait(self->rawQueue->readNextPage());
+			Standalone<StringRef> page = co_await self->rawQueue->readNextPage();
 			if (!page.size()) {
 				TraceEvent("DQRecEOF", self->dbgid)
 				    .detail("NextReadLocation", self->nextReadLocation)
@@ -1357,7 +1354,7 @@ private:
 				    .detail("Seq", self->readBufPage->seq)
 				    .detail("Expect", pageFloor(self->nextReadLocation))
 				    .detail("File0Name", self->rawQueue->files[0].dbgFilename);
-				wait(self->rawQueue->truncateBeforeLastReadPage());
+				co_await self->rawQueue->truncateBeforeLastReadPage();
 				break;
 			}
 			//TraceEvent("DQRecPage", self->dbgid).detail("NextReadLoc", self->nextReadLocation).detail("Seq", self->readBufPage->seq).detail("Pop", self->readBufPage->popped).detail("Payload", self->readBufPage->payloadSize).detail("File0Name", self->rawQueue->files[0].dbgFilename);
@@ -1372,7 +1369,7 @@ private:
 		bool poppedNotDurable = self->lastPoppedSeq / sizeof(Page) != self->poppedSeq / sizeof(Page);
 		CODE_PROBE(poppedNotDurable, "DiskQueue: Recovery popped position not fully durable");
 		self->findPhysicalLocation(self->lastPoppedSeq, &f, &p, "lastPoppedSeq");
-		wait(self->rawQueue->setPoppedPage(f, p, pageFloor(self->lastPoppedSeq)));
+		co_await self->rawQueue->setPoppedPage(f, p, pageFloor(self->lastPoppedSeq));
 
 		// Writes go at the end of our reads (but on the next page)
 		self->nextPageSeq = pageFloor(self->nextReadLocation);
@@ -1394,17 +1391,17 @@ private:
 		// check an ASSERTion
 		self->lastCommittedSeq = self->nextReadLocation;
 
-		return result.str;
+		co_return result.str;
 	}
 
 	// recoverAt is the minimum position in the disk queue file that needs to be read to restore log's states.
 	// This allows log to read only a small portion of the most recent data from a large (e.g., 10GB) disk file.
 	// This is particularly useful for logSpilling feature.
-	ACTOR static Future<bool> initializeRecovery(DiskQueue* self, location recoverAt) {
+	static Future<bool> initializeRecovery(DiskQueue* self, location recoverAt) {
 		if (self->initialized) {
-			return self->recovered;
+			co_return self->recovered;
 		}
-		Standalone<StringRef> lastPageData = wait(self->rawQueue->readFirstAndLastPages(&comparePages));
+		Standalone<StringRef> lastPageData = co_await self->rawQueue->readFirstAndLastPages(&comparePages);
 		self->initialized = true;
 
 		if (!lastPageData.size()) {
@@ -1412,7 +1409,7 @@ private:
 			self->nextReadLocation = 0;
 			self->lastCommittedSeq = 0;
 			self->recovered = true;
-			return true;
+			co_return true;
 		}
 
 		Page* lastPage = (Page*)lastPageData.begin();
@@ -1448,7 +1445,7 @@ private:
 		    .detail("MinRecoverAt", recoverAt)
 		    .detail("File0Name", self->rawQueue->files[0].dbgFilename);
 
-		return false;
+		co_return false;
 	}
 
 	Page& firstPages(int i) {
@@ -1629,12 +1626,12 @@ private:
 	location popped;
 	location committed;
 
-	ACTOR static Future<Standalone<StringRef>> readNext(DiskQueue_PopUncommitted* self, int bytes) {
-		Standalone<StringRef> str = wait(self->queue->readNext(bytes));
+	static Future<Standalone<StringRef>> readNext(DiskQueue_PopUncommitted* self, int bytes) {
+		Standalone<StringRef> str = co_await self->queue->readNext(bytes);
 		if (str.size() < bytes)
 			self->pushed = self->getNextReadLocation();
 
-		return str;
+		co_return str;
 	}
 };
 
