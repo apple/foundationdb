@@ -380,6 +380,7 @@ Future<ErrorOr<X>> waitValueOrSignal(Future<X> value,
 				when(wait(peer.isValid() ? peer->disconnect.getFuture() : Never())) {
 					CODE_PROBE(true, "waitValueOrSignal detected peer disconnect");
 					TraceEvent("WaitValueOrSignalPeerDisconnect")
+					    .suppressFor(1.0)
 					    .detail("Endpoint", endpoint.getPrimaryAddress())
 					    .detail("Token", endpoint.token);
 					return ErrorOr<X>(request_maybe_delivered());
