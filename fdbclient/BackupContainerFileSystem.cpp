@@ -25,8 +25,8 @@
 #include "fdbclient/BackupContainerAzureBlobStore.h"
 #endif
 #include "fdbclient/BackupContainerFileSystem.h"
-#include "fdbclient/BackupContainerLocalDirectory.h"
-#include "fdbclient/BackupContainerBlobStore.h"
+#include "BackupContainerLocalDirectory.h"
+#include "BackupContainerBlobStore.h"
 #include "fdbclient/JsonBuilder.h"
 #include "flow/StreamCipher.h"
 #include "flow/UnitTest.h"

@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/RESTUtils.h"
+#include "RESTUtils.h"
 #include "fdbclient/Knobs.h"
 
 #include "flow/flat_buffers.h"
