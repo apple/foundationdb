@@ -109,6 +109,9 @@ struct StorageServerStatusInfo : public StorageServerMetaInfo {
 	explicit StorageServerStatusInfo(const StorageServerMetaInfo& info) : StorageServerMetaInfo(info, info.metadata) {}
 };
 
+// Shared output state for clusterGetStatus() and clusterGetStatusImpl().
+// The inner status collection can outlive the outer deadline race, so these
+// objects must not be stack locals referenced through raw pointers.
 struct ClusterGetStatusState : ReferenceCounted<ClusterGetStatusState> {
 	JsonBuilderObject statusObj;
 	JsonBuilderArray messages;
