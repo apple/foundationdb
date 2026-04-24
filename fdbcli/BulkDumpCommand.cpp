@@ -183,21 +183,24 @@ Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> tokens) {
 		fmt::println(" Range: {}{}", progress.jobRange.toString(), ownerSuffix);
 		fmt::println("");
 		fmt::println("Progress:");
-		fmt::println(" Tasks completed - {} / {} ({:.1f}%)",
-		             progress.completeTasks,
-		             progress.totalTasks,
-		             progress.progressPercent());
+		int runningTasks = progress.totalTasks - progress.completeTasks - progress.errorTasks;
+		if (progress.totalTasks > 0) {
+			fmt::println(" Tasks: {}/{} complete ({:.1f}%)  |  {} running{}",
+			             progress.completeTasks,
+			             progress.totalTasks,
+			             progress.progressPercent(),
+			             runningTasks > 0 ? runningTasks : 0,
+			             progress.errorTasks > 0 ? fmt::format(", {} error", progress.errorTasks) : "");
+		}
 
-		fmt::println(" Bytes completed - {}", formatBytesProgress(progress.completedBytes, progress.totalBytes));
+		fmt::println(" Bytes: {}", formatBytesProgress(progress.completedBytes, progress.totalBytes));
 
 		printProgressMetrics(progress.avgBytesPerSecond(), progress.etaSeconds(), progress.elapsedSeconds);
 
-		printBulkAnalysis(progress.avgBytesPerSecond(),
-		                  progress.elapsedSeconds,
-		                  progress.completeTasks,
-		                  progress.totalTasks,
-		                  progress.errorTasks,
-		                  progress.stalledTasks);
+		if (progress.errorTasks > 0) {
+			fmt::println("");
+			fmt::println("WARNING: {} tasks in error state", progress.errorTasks);
+		}
 
 		co_return UID();
 

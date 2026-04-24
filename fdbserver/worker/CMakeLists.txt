@@ -25,7 +25,6 @@ configure_fdbserver_common_includes(fdbserver_worker)
 target_include_directories(fdbserver_worker
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_BINARY_DIR}/include
   PRIVATE
     ${CMAKE_SOURCE_DIR}/fdbserver/include
     ${CMAKE_BINARY_DIR}/fdbserver/include

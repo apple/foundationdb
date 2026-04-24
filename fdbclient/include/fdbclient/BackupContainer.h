@@ -135,7 +135,9 @@ struct KeyspaceSnapshotFile {
 	std::string fileName;
 	int64_t totalSize;
 	Optional<bool> restorable; // Whether or not the snapshot can be used in a restore, if known
+	std::string snapshotType; // "bulkdump" or "rangefile" (empty if not present in filename)
 	bool isSingleVersion() const { return beginVersion == endVersion; }
+	bool isBulkDump() const { return snapshotType == "bulkdump"; }
 	double expiredPct(Optional<Version> expiredEnd) const {
 		double pctExpired = 0;
 		if (expiredEnd.present() && expiredEnd.get() > beginVersion) {

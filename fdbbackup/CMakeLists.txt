@@ -3,20 +3,20 @@ set(FDBBACKUP_SRCS
 	backup.cpp)
 
 add_flow_target(EXECUTABLE NAME fdbbackup SRCS ${FDBBACKUP_SRCS})
-target_include_directories(fdbbackup PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
+target_include_directories(fdbbackup PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(fdbbackup PRIVATE fdbclient)
 
 set(FDBCONVERT_SRCS
 	FileConverter.cpp)
 add_flow_target(EXECUTABLE NAME fdbconvert SRCS ${FDBCONVERT_SRCS})
-target_include_directories(fdbconvert PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
+target_include_directories(fdbconvert PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(fdbconvert PRIVATE fdbclient)
 
 set(FDBDECODE_SRCS
 	Decode.cpp
 	FileDecoder.cpp)
 add_flow_target(EXECUTABLE NAME fdbdecode SRCS ${FDBDECODE_SRCS})
-target_include_directories(fdbdecode PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
+target_include_directories(fdbdecode PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(fdbdecode PRIVATE fdbclient)
 
 if(NOT OPEN_FOR_IDE)
@@ -45,7 +45,7 @@ if(NOT OPEN_FOR_IDE)
 
   # Test version of backup.cpp without main() function
   add_flow_target(EXECUTABLE NAME backup_tests SRCS backup.cpp)
-  target_include_directories(backup_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
+  target_include_directories(backup_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
   target_link_libraries(backup_tests PRIVATE fdbclient)
   target_compile_definitions(backup_tests PRIVATE EXCLUDE_MAIN_FUNCTION=1)
   add_test(NAME BackupTests COMMAND backup_tests)

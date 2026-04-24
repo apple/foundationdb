@@ -8003,7 +8003,7 @@ Future<Void> verifyRangeBTreeCursor(VersionedBTree* btree,
 		             start.printable().c_str(),
 		             end.printable().c_str(),
 		             randomKey.toString().c_str());
-		co_await success(cur.seek(randomKey));
+		co_await cur.seek(randomKey);
 	}
 
 	debug_printf(

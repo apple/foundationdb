@@ -2885,7 +2885,7 @@ Future<Void> LogSystem::epochEnd(Reference<AsyncVar<Reference<LogSystem>>> outLo
 		if (maxEnd > 0 && (!lastEnd.present() || maxEnd < lastEnd.get() || knownLockedTLogIdsChanged)) {
 			CODE_PROBE(lastEnd.present(), "Restarting recovery at an earlier point");
 
-			Reference<LogSystem> logSystem = makeReference<LogSystem>(dbgid, locality, prevState.recoveryCount);
+			auto logSystem = makeReference<LogSystem>(dbgid, locality, prevState.recoveryCount);
 
 			logSystem->recoverAt = minEnd;
 			lastEnd = minEnd;
