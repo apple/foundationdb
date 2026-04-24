@@ -24,7 +24,7 @@
 #include "flow/IRandom.h"
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/DDSketch.h"
-#include "fdbrpc/ContinuousSample.h"
+#include "ContinuousSample.h"
 #include "flow/Histogram.h"
 
 static void bench_ddsketchUnsigned(benchmark::State& state) {

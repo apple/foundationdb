@@ -191,7 +191,7 @@ Future<std::pair<int64_t, int64_t>> getTLogQueueInfo(Database cx, Reference<Asyn
 
 	auto workers = co_await getWorkers(dbInfo);
 	std::map<NetworkAddress, WorkerInterface> workersMap;
-	for (auto worker : workers) {
+	for (const auto& worker : workers) {
 		workersMap[worker.interf.address()] = worker.interf;
 	}
 
@@ -384,7 +384,7 @@ Future<int64_t> getMaxStorageServerQueueSize(Database cx,
 	auto workers = co_await workersFuture;
 
 	std::map<NetworkAddress, WorkerInterface> workersMap;
-	for (auto worker : workers) {
+	for (const auto& worker : workers) {
 		workersMap[worker.interf.address()] = worker.interf;
 	}
 

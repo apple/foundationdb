@@ -22,7 +22,7 @@
 
 #include "flow/flow.h"
 #include "flow/ThreadHelper.actor.h"
-#include "flow/PriorityMultiLock.actor.h"
+#include "flow/PriorityMultiLock.h"
 #include <deque>
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include "fmt/printf.h"

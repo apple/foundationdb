@@ -48,7 +48,7 @@ Future<Void> printProcessClass(Reference<IDatabase> db) {
 			RangeResult processTypeList = classTypeFuture.get();
 			RangeResult processSourceList = classSourceFuture.get();
 			ASSERT(processSourceList.size() == processTypeList.size());
-			if (!processTypeList.size())
+			if (processTypeList.empty())
 				printf("No processes are registered in the database.\n");
 			fmt::print("There are currently {} processes in the database:\n", processTypeList.size());
 			for (int index = 0; index < processTypeList.size(); index++) {

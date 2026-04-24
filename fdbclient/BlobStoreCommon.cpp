@@ -20,7 +20,8 @@
 
 #include "fdbclient/IBlobStore.h"
 #include "fdbclient/S3BlobStore.h"
-#include "fdbclient/ClientKnobs.h"
+#include "fdbclient/GCSBlobStore.h"
+#include "fdbclient/Knobs.h"
 #include "flow/Hostname.h"
 #include "flow/IAsyncFile.h"
 #include "flow/IConnection.h"
@@ -325,6 +326,8 @@ Reference<IBlobStoreEndpoint> IBlobStoreEndpoint::fromString(const std::string& 
 		StringRef service = h.eat();
 
 		std::string region;
+		std::string gcsProjectId;
+		std::string provider = "s3";
 
 		BlobKnobs knobs;
 		HTTP::Headers extraHeaders;
@@ -361,6 +364,16 @@ Reference<IBlobStoreEndpoint> IBlobStoreEndpoint::fromString(const std::string& 
 				continue;
 			}
 
+			if (name == "gcs_project_id"_sr || name == "gcspid"_sr) {
+				gcsProjectId = value.toString();
+				continue;
+			}
+
+			if (name == "provider"_sr || name == "p"_sr) {
+				provider = value.toString();
+				continue;
+			}
+
 			// See if the parameter is a knob
 			// First try setting a dummy value (all knobs are currently numeric) just to see if this parameter is
 			// known. If it is, then we will set it to a good value or throw below, so the dummy set has no bad
@@ -390,6 +403,11 @@ Reference<IBlobStoreEndpoint> IBlobStoreEndpoint::fromString(const std::string& 
 
 		if (resourceFromURL != nullptr)
 			*resourceFromURL = resource.toString();
+
+		if (provider == "gcs") {
+			return makeReference<GCSBlobStoreEndpoint>(
+			    host.toString(), service.toString(), proxyHost, proxyPort, cred, gcsProjectId, knobs, extraHeaders);
+		}
 
 		return makeReference<S3BlobStoreEndpoint>(
 		    host.toString(), service.toString(), region, proxyHost, proxyPort, cred, knobs, extraHeaders);
@@ -892,7 +910,7 @@ Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<IBlobStoreEnd
 				connectionFailed = true;
 			}
 		}
-		event.suppressFor(60);
+		event.suppressFor(1);
 		if (!err.present()) {
 			event.detail("ResponseCode", r->code);
 		}

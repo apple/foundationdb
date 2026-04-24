@@ -33,6 +33,25 @@ struct ProcessIssues {
 	ProcessIssues(NetworkAddress address, Standalone<VectorRef<StringRef>> issues) : address(address), issues(issues) {}
 };
 
+// In actor compiler builds, the ACTOR macro in Status.actor.cpp generates
+// a declaration with const& params. In clang-ide builds (NO_INTELLISENSE
+// not defined), the ACTOR macro is a no-op so we need this explicit
+// declaration with value params to match.
+#ifndef NO_INTELLISENSE
+Future<StatusReply> clusterGetStatus(Reference<AsyncVar<struct ServerDBInfo>> db,
+                                     Database cx,
+                                     std::vector<WorkerDetails> workers,
+                                     std::vector<ProcessIssues> workerIssues,
+                                     std::vector<StorageServerMetaInfo> storageMetadatas,
+                                     std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* clientStatus,
+                                     ServerCoordinators coordinators,
+                                     std::vector<NetworkAddress> incompatibleConnections,
+                                     Version datacenterVersionDifference,
+                                     Version dcLogServerVersionDifference,
+                                     Version dcStorageServerVersionDifference,
+                                     std::unordered_map<NetworkAddress, double> excludedDegradedServers,
+                                     double deadlineTimeout);
+#else
 Future<StatusReply> clusterGetStatus(
     Reference<AsyncVar<struct ServerDBInfo>> const& db,
     Database const& cx,
@@ -45,7 +64,8 @@ Future<StatusReply> clusterGetStatus(
     Version const& datacenterVersionDifference,
     Version const& dcLogServerVersionDifference,
     Version const& dcStorageServerVersionDifference,
-    std::unordered_map<NetworkAddress, double /* latest time at which address was excluded */> const&
-        excludedDegradedServers);
+    std::unordered_map<NetworkAddress, double> const& excludedDegradedServers,
+    double const& deadlineTimeout);
+#endif
 
 StatusReply clusterGetFaultToleranceStatus(const std::string& statusString);

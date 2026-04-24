@@ -33,8 +33,8 @@ struct StorageServer : IStorageMetricsService {
     NotifiedVersion durableVersion;                      // committed to disk
     
     // Log system connection
-    Reference<ILogSystem> logSystem;
-    Reference<ILogSystem::IPeekCursor> logCursor;
+    Reference<LogSystem> logSystem;
+    Reference<IPeekCursor> logCursor;
     
     // Storage engine
     StorageServerDisk storage;                           // wraps IKeyValueStore
@@ -201,7 +201,7 @@ Primary production engine.
 
 Legacy engine. Simple SQL-backed KV store.
 
-### Memory Engine -- [`KeyValueStoreMemory.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreMemory.actor.cpp)
+### Memory Engine -- [`KeyValueStoreMemory.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreMemory.cpp)
 
 In-memory key-value store backed by a [`DiskQueue`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/DiskQueue.actor.cpp) (append-only circular log) for durability:
 - All mutations are logged to `.fdq` files (a pair of alternating files, checksummed with xxhash3)
@@ -263,6 +263,6 @@ Client ──GetValueRequest──▶ StorageServer getValueQ()
 | [`fdbserver/kvstore/KeyValueStoreRocksDB.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreRocksDB.actor.cpp) | RocksDB engine implementation |
 | [`fdbserver/kvstore/KeyValueStoreShardedRocksDB.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreShardedRocksDB.actor.cpp) | Sharded RocksDB engine |
 | [`fdbserver/kvstore/KeyValueStoreSQLite.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreSQLite.actor.cpp) | SQLite engine |
-| [`fdbserver/kvstore/KeyValueStoreMemory.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreMemory.actor.cpp) | Memory engine |
+| [`fdbserver/kvstore/KeyValueStoreMemory.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreMemory.cpp) | Memory engine |
 | [`fdbserver/core/include/fdbserver/core/IKeyValueStore.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/IKeyValueStore.h) | IKeyValueStore interface |
 | [`fdbserver/core/StorageMetrics.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/StorageMetrics.cpp) | Storage metrics tracking |

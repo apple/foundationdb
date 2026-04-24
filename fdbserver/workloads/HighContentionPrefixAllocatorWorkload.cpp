@@ -61,7 +61,7 @@ struct HighContentionPrefixAllocatorWorkload : TestWorkload {
 				co_await waitForAll(futures);
 				co_await tr->commit();
 
-				for (auto f : futures) {
+				for (const auto& f : futures) {
 					Key prefix = f.get();
 
 					// There should be no previously allocated prefix that is prefixed by our newly allocated one

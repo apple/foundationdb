@@ -80,12 +80,12 @@ void ExecCmdValueString::parseCmdValue() {
 	this->binaryPath = param.eat(" "_sr);
 
 	// no arguments provided
-	if (param == StringRef()) {
+	if (param.empty()) {
 		return;
 	}
 
 	// extract the arguments
-	while (param != StringRef()) {
+	while (!param.empty()) {
 		StringRef token = param.eat(" "_sr);
 		this->binaryArgs.push_back(this->binaryArgs.arena(), token);
 	}

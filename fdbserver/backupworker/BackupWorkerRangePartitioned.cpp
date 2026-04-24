@@ -25,9 +25,9 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tracing.h"
 #include "BackupPartitionMap.h"
-#include "BackupRangePartitionedProgress.h"
+#include "fdbserver/backupworker/BackupRangePartitionedProgress.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "flow/CoroUtils.h"
@@ -79,7 +79,7 @@ struct BackupRangePartitionedData {
 	Version savedVersion; // Largest version saved to blob storage
 	NotifiedVersion pulledVersion;
 	Version logFolderBaseVersion;
-	AsyncVar<Reference<ILogSystem>> logSystem;
+	AsyncVar<Reference<LogSystem>> logSystem;
 	AsyncVar<bool> paused; // Track if "backupPausedKey" is set.
 	Reference<FlowLock> lock;
 	AsyncTrigger doneTrigger;
@@ -331,7 +331,7 @@ Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
 }
 
 Future<Version> pullPartitionMapFromTLog(BackupRangePartitionedData* self, PartitionMap* outPartitionMap) {
-	Reference<ILogSystem::IPeekCursor> cursor;
+	Reference<IPeekCursor> cursor;
 	Version partitionMapVersion = invalidVersion;
 	Future<Void> logSystemChange = Void();
 
@@ -344,7 +344,7 @@ Future<Version> pullPartitionMapFromTLog(BackupRangePartitionedData* self, Parti
 				if (self->logSystem.get()) {
 					cursor = self->logSystem.get()->peekSingle(self->myId, self->startVersion, self->tag);
 				} else {
-					cursor = Reference<ILogSystem::IPeekCursor>();
+					cursor = Reference<IPeekCursor>();
 				}
 				logSystemChange = self->logSystem.onChange();
 			} else {
@@ -500,7 +500,7 @@ Future<Void> waitAndProcessPartitionMap(BackupRangePartitionedData* self) {
 // Pulls mutations from TLog servers.
 Future<Void> pullAsyncData(BackupRangePartitionedData* self) {
 	Future<Void> logSystemChange = Void();
-	Reference<ILogSystem::IPeekCursor> cursor;
+	Reference<IPeekCursor> cursor;
 
 	Version tagAt = std::max({ self->pulledVersion.get(), self->startVersion, self->savedVersion });
 
@@ -528,7 +528,7 @@ Future<Void> pullAsyncData(BackupRangePartitionedData* self) {
 					// expected.
 					cursor = self->logSystem.get()->peekSingle(self->myId, tagAt, self->tag);
 				} else {
-					cursor = Reference<ILogSystem::IPeekCursor>();
+					cursor = Reference<IPeekCursor>();
 				}
 				logSystemChange = self->logSystem.onChange();
 			} else {
@@ -658,7 +658,7 @@ Future<Void> saveMutationsToFile(BackupRangePartitionedData* self, Version lastV
 			}
 
 			std::pair<UID, int32_t> bpKey(backupUid, partitionId);
-			if (fileIndexByBackupPartition.count(bpKey)) {
+			if (fileIndexByBackupPartition.contains(bpKey)) {
 				continue;
 			}
 
@@ -983,7 +983,7 @@ Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
 			auto res = co_await race(dbInfoChange, done, error);
 			if (res.index() == 0) {
 				dbInfoChange = db->onChange();
-				Reference<ILogSystem> ls = makeLogSystemFromServerDBInfo(self.myId, db->get(), true);
+				Reference<LogSystem> ls = makeLogSystemFromServerDBInfo(self.myId, db->get(), true);
 
 				if (ls.isValid()) {
 					self.logSystem.set(ls);

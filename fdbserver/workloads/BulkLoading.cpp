@@ -421,7 +421,7 @@ struct BulkLoading : TestWorkload {
 
 		res.setByteSampleFileName(sampleFileName);
 		std::string bytesSampleFile = res.getBytesSampleFileFullPath();
-		if (bytesSample.size() > 0) {
+		if (!bytesSample.empty()) {
 			sstWriter->open(abspath(bytesSampleFile));
 			for (const auto& kv : bytesSample) {
 				sstWriter->write(kv.key, kv.value);

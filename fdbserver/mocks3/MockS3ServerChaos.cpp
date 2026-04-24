@@ -297,10 +297,10 @@ Future<Void> registerMockS3ChaosServer(std::string ip, std::string port) {
 	    .detail("Port", port)
 	    .detail("ServerKey", serverKey)
 	    .detail("IsSimulated", g_network->isSimulated())
-	    .detail("AlreadyRegistered", g_simulator->registeredMockS3ChaosServers.count(serverKey) > 0);
+	    .detail("AlreadyRegistered", g_simulator->registeredMockS3ChaosServers.contains(serverKey));
 
 	// Check if server is already registered using truly simulator-global registry
-	if (g_simulator->registeredMockS3ChaosServers.count(serverKey)) {
+	if (g_simulator->registeredMockS3ChaosServers.contains(serverKey)) {
 		TraceEvent(SevWarn, "MockS3ChaosServerAlreadyRegistered").detail("Address", serverKey);
 		co_return;
 	}

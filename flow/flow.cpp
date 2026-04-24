@@ -33,7 +33,7 @@
 #include "flow/Error.h"
 #include "flow/Hostname.h"
 #include "flow/Util.h"
-#include "flow/rte_memcpy.h"
+#include "rte_memcpy.h"
 #include "flow/UnitTest.h"
 
 #ifdef WITH_FOLLY_MEMCPY

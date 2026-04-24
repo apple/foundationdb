@@ -109,7 +109,7 @@ Reference<DirectorySubspace> DirectoryLayer::openInternal(Standalone<StringRef> 
 	if (!allowOpen) {
 		throw directory_already_exists();
 	}
-	if (layer.size() > 0 && layer != existingNode.layer) {
+	if (!layer.empty() && layer != existingNode.layer) {
 		throw mismatched_layer();
 	}
 
@@ -160,7 +160,7 @@ Future<Standalone<StringRef>> getPrefix(Reference<DirectoryLayer> dirLayer,
 
 		FDBStandalone<RangeResultRef> result = co_await tr->getRange(KeyRangeRef(finalPrefix, strinc(finalPrefix)), 1);
 
-		if (result.size() > 0) {
+		if (!result.empty()) {
 			throw directory_prefix_not_empty();
 		}
 
@@ -181,7 +181,7 @@ Future<Optional<Subspace>> nodeContainingKey(Reference<DirectoryLayer> dirLayer,
 	KeyRange range = KeyRangeRef(dirLayer->nodeSubspace.range().begin, keyAfter(dirLayer->nodeSubspace.pack(key)));
 	FDBStandalone<RangeResultRef> result = co_await tr->getRange(range, 1, snapshot, true);
 
-	if (result.size() > 0) {
+	if (!result.empty()) {
 		Standalone<StringRef> prevPrefix = dirLayer->nodeSubspace.unpack(result[0].key).getString(0);
 		if (key.startsWith(prevPrefix)) {
 			co_return dirLayer->nodeWithPrefix(prevPrefix);
@@ -195,7 +195,7 @@ Future<bool> isPrefixFree(Reference<DirectoryLayer> dirLayer,
                           Reference<Transaction> tr,
                           Standalone<StringRef> prefix,
                           bool snapshot) {
-	if (!prefix.size()) {
+	if (prefix.empty()) {
 		co_return false;
 	}
 
@@ -206,7 +206,7 @@ Future<bool> isPrefixFree(Reference<DirectoryLayer> dirLayer,
 
 	FDBStandalone<RangeResultRef> result = co_await tr->getRange(
 	    KeyRangeRef(dirLayer->nodeSubspace.pack(prefix), dirLayer->nodeSubspace.pack(strinc(prefix))), 1, snapshot);
-	co_return !result.size();
+	co_return result.empty();
 }
 
 Future<Subspace> getParentNode(Reference<DirectoryLayer> dirLayer, Reference<Transaction> tr, IDirectory::Path path) {
@@ -262,14 +262,14 @@ Future<Reference<DirectorySubspace>> _createOrOpenInternal(Reference<DirectoryLa
 	co_await dirLayer->checkVersion(tr, false);
 
 	if (prefix.present() && !dirLayer->allowManualPrefixes) {
-		if (!dirLayer->getPath().size()) {
+		if (dirLayer->getPath().empty()) {
 			throw manual_prefixes_not_enabled();
 		} else {
 			throw prefix_in_partition();
 		}
 	}
 
-	if (!path.size()) {
+	if (path.empty()) {
 		throw cannot_open_root_directory();
 	}
 
@@ -367,7 +367,7 @@ bool pathsEqual(IDirectory::Path const& path1,
 }
 
 Future<Void> removeFromParent(Reference<DirectoryLayer> dirLayer, Reference<Transaction> tr, IDirectory::Path path) {
-	ASSERT(path.size() >= 1);
+	ASSERT(!path.empty());
 	DirectoryLayer::Node parentNode = co_await find(dirLayer, tr, IDirectory::Path(path.begin(), path.end() - 1));
 	if (parentNode.subspace.present()) {
 		tr->clear(parentNode.subspace.get().get(DirectoryLayer::SUB_DIR_KEY).get(path.back(), true).key());

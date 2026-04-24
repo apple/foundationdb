@@ -1258,7 +1258,7 @@ BulkDumpState decodeBulkDumpState(const ValueRef& value) {
 const KeyRangeRef bulkDumpOwnerKeys = KeyRangeRef("\xff/bulkDumpOwner/"_sr, "\xff/bulkDumpOwner0"_sr);
 const KeyRef bulkDumpOwnerPrefix = bulkDumpOwnerKeys.begin;
 
-const Key bulkDumpOwnerKeyFor(const UID& jobId) {
+Key bulkDumpOwnerKeyFor(const UID& jobId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(bulkDumpOwnerPrefix);
 	wr << jobId;
@@ -1269,7 +1269,7 @@ const Key bulkDumpOwnerKeyFor(const UID& jobId) {
 const KeyRangeRef bulkLoadOwnerKeys = KeyRangeRef("\xff/bulkLoadOwner/"_sr, "\xff/bulkLoadOwner0"_sr);
 const KeyRef bulkLoadOwnerPrefix = bulkLoadOwnerKeys.begin;
 
-const Key bulkLoadOwnerKeyFor(const UID& jobId) {
+Key bulkLoadOwnerKeyFor(const UID& jobId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(bulkLoadOwnerPrefix);
 	wr << jobId;

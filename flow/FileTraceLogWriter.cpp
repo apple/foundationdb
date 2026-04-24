@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "flow/FileTraceLogWriter.h"
+#include "FileTraceLogWriter.h"
 #include "flow/Platform.h"
 #include "flow/flow.h"
 #include "flow/ThreadHelper.actor.h"

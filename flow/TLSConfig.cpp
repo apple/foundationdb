@@ -59,7 +59,7 @@ TLSPolicy::~TLSPolicy() {}
 #include "flow/genericactors.actor.h"
 
 std::vector<std::string> LoadedTLSConfig::getVerifyPeers() const {
-	if (tlsVerifyPeers.size()) {
+	if (!tlsVerifyPeers.empty()) {
 		return tlsVerifyPeers;
 	}
 
@@ -76,7 +76,7 @@ bool LoadedTLSConfig::getDisablePlainTextConnection() const {
 }
 
 std::string LoadedTLSConfig::getPassword() const {
-	if (tlsPassword.size()) {
+	if (!tlsPassword.empty()) {
 		return tlsPassword;
 	}
 
@@ -130,18 +130,18 @@ void ConfigureSSLContext(const LoadedTLSConfig& loaded, boost::asio::ssl::contex
 		                                  size_t, boost::asio::ssl::context::password_purpose) { return password; });
 
 		const std::string& CABytes = loaded.getCABytes();
-		if (CABytes.size()) {
+		if (!CABytes.empty()) {
 			context.add_certificate_authority(boost::asio::buffer(CABytes.data(), CABytes.size()));
 		}
 
 		const std::string& keyBytes = loaded.getKeyBytes();
-		if (keyBytes.size()) {
+		if (!keyBytes.empty()) {
 			context.use_private_key(boost::asio::buffer(keyBytes.data(), keyBytes.size()),
 			                        boost::asio::ssl::context::pem);
 		}
 
 		const std::string& certBytes = loaded.getCertificateBytes();
-		if (certBytes.size()) {
+		if (!certBytes.empty()) {
 			context.use_certificate_chain(boost::asio::buffer(certBytes.data(), certBytes.size()));
 		}
 	} catch (boost::system::system_error& e) {
@@ -180,7 +180,7 @@ void ConfigureSSLStream(Reference<TLSPolicy> policy,
 }
 
 std::string TLSConfig::getCertificatePathSync() const {
-	if (tlsCertPath.size()) {
+	if (!tlsCertPath.empty()) {
 		return tlsCertPath;
 	}
 
@@ -198,7 +198,7 @@ std::string TLSConfig::getCertificatePathSync() const {
 }
 
 std::string TLSConfig::getKeyPathSync() const {
-	if (tlsKeyPath.size()) {
+	if (!tlsKeyPath.empty()) {
 		return tlsKeyPath;
 	}
 
@@ -216,7 +216,7 @@ std::string TLSConfig::getKeyPathSync() const {
 }
 
 std::string TLSConfig::getCAPathSync() const {
-	if (tlsCAPath.size()) {
+	if (!tlsCAPath.empty()) {
 		return tlsCAPath;
 	}
 
@@ -245,7 +245,7 @@ LoadedTLSConfig TLSConfig::loadSync() const {
 	LoadedTLSConfig loaded;
 
 	const std::string certPath = getCertificatePathSync();
-	if (certPath.size()) {
+	if (!certPath.empty()) {
 		try {
 			loaded.tlsCertBytes = readFileBytes(certPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE);
 		} catch (Error& e) {
@@ -257,7 +257,7 @@ LoadedTLSConfig TLSConfig::loadSync() const {
 	}
 
 	const std::string keyPath = getKeyPathSync();
-	if (keyPath.size()) {
+	if (!keyPath.empty()) {
 		try {
 			loaded.tlsKeyBytes = readFileBytes(keyPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE);
 		} catch (Error& e) {
@@ -269,7 +269,7 @@ LoadedTLSConfig TLSConfig::loadSync() const {
 	}
 
 	const std::string CAPath = getCAPathSync();
-	if (CAPath.size()) {
+	if (!CAPath.empty()) {
 		try {
 			loaded.tlsCABytes = readFileBytes(CAPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE);
 		} catch (Error& e) {
@@ -315,7 +315,7 @@ Future<LoadedTLSConfig> TLSConfig::loadAsync(const TLSConfig* self) {
 	int32_t caIdx = -1;
 
 	std::string certPath = self->getCertificatePathSync();
-	if (certPath.size()) {
+	if (!certPath.empty()) {
 		reads.push_back(readEntireFile(certPath, &loaded.tlsCertBytes));
 		certIdx = reads.size() - 1;
 	} else {
@@ -323,7 +323,7 @@ Future<LoadedTLSConfig> TLSConfig::loadAsync(const TLSConfig* self) {
 	}
 
 	std::string keyPath = self->getKeyPathSync();
-	if (keyPath.size()) {
+	if (!keyPath.empty()) {
 		reads.push_back(readEntireFile(keyPath, &loaded.tlsKeyBytes));
 		keyIdx = reads.size() - 1;
 	} else {
@@ -331,7 +331,7 @@ Future<LoadedTLSConfig> TLSConfig::loadAsync(const TLSConfig* self) {
 	}
 
 	std::string CAPath = self->getCAPathSync();
-	if (CAPath.size()) {
+	if (!CAPath.empty()) {
 		reads.push_back(readEntireFile(CAPath, &loaded.tlsCABytes));
 		caIdx = reads.size() - 1;
 	} else {
@@ -736,7 +736,7 @@ public:
 	bool isOk() const noexcept { return m_verified; }
 	bool isErr() const noexcept { return !isOk(); }
 	const std::vector<std::string>& getFailureReasons() const noexcept { return m_failureReasons; }
-	const std::string_view getSuccessReason() const noexcept { return m_successReason; }
+	std::string_view getSuccessReason() const noexcept { return m_successReason; }
 };
 
 std::string getX509Name(const X509_NAME* name) {
@@ -944,7 +944,7 @@ bool PeerVerifier::verifyRule(const TLSPolicy::Rule& rule) {
 }
 
 bool PeerVerifier::verify() {
-	if (m_rules.size() == 0) {
+	if (m_rules.empty()) {
 		m_successReason = "No rule defined"sv;
 		return true;
 	}
