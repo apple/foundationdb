@@ -2205,6 +2205,82 @@ Future<Void> bulkLoadJobCore(Reference<DataDistributor> self, Future<Void> ready
 	}
 }
 
+// Monitor bulkLoadMode changes and dynamically spawn bulkload actors when mode becomes enabled.
+// This is necessary because the restore agent sets bulkLoadMode=1 AFTER DD has already initialized.
+// Without dynamic monitoring, bulkload jobs submitted by restore would never be processed.
+Future<Void> monitorBulkLoadModeAndSpawnActors(Reference<DataDistributor> self, Future<Void> readyToStart) {
+	// If bulkload is already enabled at startup, don't need to monitor
+	if (self->bulkLoadEnabled) {
+		co_return;
+	}
+
+	// Only monitor if SHARD_ENCODE_LOCATION_METADATA is enabled (required for bulkload)
+	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		TraceEvent(SevInfo, "DDBulkLoadModeMonitorSkipped", self->ddId)
+		    .detail("Reason", "SHARD_ENCODE_LOCATION_METADATA is disabled");
+		co_return;
+	}
+
+	Database cx = self->txnProcessor->context();
+	Transaction tr(cx);
+
+	TraceEvent(SevInfo, "DDBulkLoadModeMonitorStarted", self->ddId);
+
+	// Wait for mode to be enabled
+	while (true) {
+		bool hadError = false;
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			Optional<Value> modeValue = co_await tr.get(bulkLoadModeKey);
+			int mode = 0;
+			if (modeValue.present()) {
+				BinaryReader rd(modeValue.get(), Unversioned());
+				rd >> mode;
+			}
+
+			if (bulkLoadIsEnabled(mode) && !self->bulkLoadEnabled) {
+				TraceEvent(SevInfo, "DDBulkLoadModeDynamicallyEnabled", self->ddId)
+				    .detail("UsableRegions", self->configuration.usableRegions);
+				self->bulkLoadEnabled = true;
+				break;
+			}
+
+			tr.reset();
+			co_await delay(1.0); // Check every second
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			err = e;
+			hadError = true;
+		}
+		if (hadError) {
+			co_await tr.onError(err);
+		}
+	}
+
+	// Mode is now enabled - run the bulkload actors directly
+	TraceEvent(SevInfo, "DDBulkLoadModeActorsSpawning", self->ddId);
+
+	std::vector<Future<Void>> bulkLoadActors;
+	if (self->configuration.usableRegions > 1) {
+		bulkLoadActors.push_back(bulkLoadTaskCore(self, readyToStart && remoteRecovered(self->dbInfo)));
+		bulkLoadActors.push_back(bulkLoadJobCore(self, readyToStart && remoteRecovered(self->dbInfo)));
+	} else {
+		bulkLoadActors.push_back(bulkLoadTaskCore(self, readyToStart));
+		bulkLoadActors.push_back(bulkLoadJobCore(self, readyToStart));
+	}
+
+	TraceEvent(SevInfo, "DDBulkLoadModeActorsSpawned", self->ddId);
+
+	// Wait for all bulkload actors (they run forever unless cancelled)
+	co_await waitForAll(bulkLoadActors);
+}
+
 // The actor spawned by DD dedicated to listen on a SS bulkdump task and holding a budget of parallelismLimitor.
 // The parallelismLimitor is used to limit the maximum concurrent bulkloading tasks spawned by DD.
 // Each DD spawned task corresponds to an actual alive SS bulk dumping task.
@@ -2817,6 +2893,9 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 				}
 			} else {
 				self->bulkLoadTaskCollection->removeBulkLoadJobRange();
+				// Monitor for bulkLoadMode changes and spawn actors dynamically.
+				// This is critical for restore operations which set bulkLoadMode=1 after DD starts.
+				actors.push_back(monitorBulkLoadModeAndSpawnActors(self, self->initialized.getFuture()));
 			}
 
 			// Always spawn bulkDumpCore - it will dynamically check the mode
