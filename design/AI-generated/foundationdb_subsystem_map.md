@@ -93,7 +93,8 @@ Plus supporting code: [`fdbserver/worker/`](https://github.com/apple/foundationd
 - Coordinators (typically 3 or 5, addresses in the cluster file) run a `leaderRegister` actor.
 - CC candidates send `CandidacyRequest`s. Coordinators track candidates and nominate based on process class fitness (encoded in top bits of `LeaderInfo.changeID`).
 - The winner becomes CC; losers detect this via `monitorLeader()` and defer.
-- Uses a generation register (`localGenerationReg`) for safe state transitions — reads and writes carry generation numbers to prevent stale updates.
+- Uses a generation register (`localGenerationReg`) for safe state transitions — reads and writes carry generation numbers to prevent stale updates. This protocol is isomorphic to single-decree Paxos (generation = ballot, read = prepare, write = accept), with quorum voting in `CoordinatedState`.
+- Coordinator state is persisted via `KeyValueStoreMemory` backed by a `DiskQueue` (`.fdq` files) -- the same engine used by TLogs.
 
 **Role recruitment:**
 - Worker processes register with CC via `registrationClient()` ([`worker.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/worker/worker.actor.cpp)).
@@ -106,7 +107,7 @@ Plus supporting code: [`fdbserver/worker/`](https://github.com/apple/foundationd
 - `ServerDBInfo` is the cluster-wide configuration broadcast. Contains: master interface, proxy lists, log system config, recovery state, latency band config.
 - Updated by CC and distributed to all workers. Workers react to changes (e.g., new proxy set).
 
-**Principal files:** [`ClusterController.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterController.actor.cpp), `ClusterControllerData.h`, [`Coordination.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/coordinator/Coordination.actor.cpp), [`LeaderElection.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/LeaderElection.actor.cpp), [`CoordinatedState.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/CoordinatedState.cpp), [`WorkerInterface.actor.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/WorkerInterface.actor.h)
+**Principal files:** [`ClusterController.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterController.actor.cpp), `ClusterController.h`, [`Coordination.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/coordinator/Coordination.actor.cpp), [`LeaderElection.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/LeaderElection.actor.cpp), [`CoordinatedState.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/CoordinatedState.cpp), [`WorkerInterface.actor.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/WorkerInterface.actor.h)
 
 ---
 
@@ -233,15 +234,16 @@ Phase 4: REPLY                      CommitProxy
 
 **What it is:** The state machine that reconstitutes the entire transaction system after a failure (master crash, network partition, coordinator change, etc.).
 
-**The 9 recovery states** (from [`RecoveryState.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/RecoveryState.h)):
-1. **UNINITIALIZED** — starting
-2. **READING_CSTATE** — read coordinated state from coordinators (learn about previous epoch)
-3. **LOCKING_CSTATE** — lock old TLogs to prevent split-brain
-4. **RECRUITING** — recruit new TLogs, CommitProxies, GrvProxies, Resolvers
-5. **RECOVERY_TRANSACTION** — replay the last epoch's committed-but-unapplied mutations; establish the recovery version
-6. **WRITING_CSTATE** — write the new epoch's coordinated state to coordinators
-7. **ACCEPTING_COMMITS** — new transaction system is live, accepting commits
-8. **ALL_LOGS_RECRUITED** — all TLog sets (including remote region) are populated
+**The 10 recovery states** (from [`RecoveryState.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/RecoveryState.h)):
+0. **UNINITIALIZED** — starting
+1. **READING_CSTATE** — read coordinated state from coordinators (learn about previous epoch)
+2. **LOCKING_CSTATE** — lock old TLogs to prevent split-brain
+3. **RECRUITING** — recruit new TLogs, CommitProxies, GrvProxies, Resolvers
+4. **RECOVERY_TRANSACTION** — replay the last epoch's committed-but-unapplied mutations; establish the recovery version
+5. **WRITING_CSTATE** — write the new epoch's coordinated state to coordinators
+6. **ACCEPTING_COMMITS** — new transaction system is live, accepting commits
+7. **ALL_LOGS_RECRUITED** — all TLog sets (including remote region) are populated
+8. **STORAGE_RECOVERED** — storage servers have recovered their data from the new TLogs
 9. **FULLY_RECOVERED** — old TLog data fully consumed; old generations can be discarded
 
 **Key operations during recovery:**
