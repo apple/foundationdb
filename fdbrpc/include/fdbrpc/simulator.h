@@ -369,11 +369,8 @@ public:
 	bool hasDiffProtocolProcess; // true if simulator is testing a process with a different version
 	bool setDiffProtocol; // true if a process with a different protocol version has been started
 
-	bool allowStorageMigrationTypeChange = false;
 	double injectTargetedSSRestartTime = std::numeric_limits<double>::max();
 	double injectSSDelayTime = std::numeric_limits<double>::max();
-	double injectTargetedBMRestartTime = std::numeric_limits<double>::max();
-	double injectTargetedBWRestartTime = std::numeric_limits<double>::max();
 
 	enum SimConsistencyScanState {
 		DisabledStart = 0,
@@ -425,10 +422,6 @@ public:
 	std::set<IPAddress> httpServerIps;
 	int nextHTTPPort = 5000;
 	bool httpProtected = false;
-
-	// Truly simulator-global registry for MockS3ServerChaos to prevent duplicate registrations
-	// across all simulated processes (must stay in sync with httpHandlers)
-	std::set<std::string> registeredMockS3ChaosServers;
 
 	flowGlobalType global(int id) const final;
 	void setGlobal(size_t id, flowGlobalType v) final;

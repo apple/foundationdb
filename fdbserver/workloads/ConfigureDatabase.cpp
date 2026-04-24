@@ -244,8 +244,8 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		testDuration = getOption(options, "testDuration"_sr, 200.0);
 		allowDescriptorChange =
 		    getOption(options, "allowDescriptorChange"_sr, SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT);
-		allowTestStorageMigration =
-		    getOption(options, "allowTestStorageMigration"_sr, false) && g_simulator->allowStorageMigrationTypeChange;
+		allowTestStorageMigration = getOption(options, "allowTestStorageMigration"_sr, false) &&
+		                            fdbSimulationPolicyState().allowStorageMigrationTypeChange;
 		storageMigrationCompatibleConf = getOption(options, "storageMigrationCompatibleConf"_sr, false);
 		waitStoreTypeCheck = getOption(options, "waitStoreTypeCheck"_sr, false);
 		downgradeTest1 = getOption(options, "downgradeTest1"_sr, false);

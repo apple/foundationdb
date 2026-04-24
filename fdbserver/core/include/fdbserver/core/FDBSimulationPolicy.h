@@ -41,6 +41,7 @@ struct FDBSimulationPolicyState {
 	int32_t satelliteTLogWriteAntiQuorumFallback = 0;
 	std::vector<Optional<Standalone<StringRef>>> primarySatelliteDcIds;
 	std::vector<Optional<Standalone<StringRef>>> remoteSatelliteDcIds;
+	bool allowStorageMigrationTypeChange = false;
 };
 
 void installFDBSimulationPolicy();

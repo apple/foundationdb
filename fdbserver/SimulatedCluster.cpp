@@ -2639,7 +2639,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	// save some state that we only need when restarting the simulator.
 	g_simulator->connectionString = conn.toString();
 	g_simulator->testerCount = testerCount;
-	g_simulator->allowStorageMigrationTypeChange = gradualMigrationPossible;
+	fdbSimulationPolicyState().allowStorageMigrationTypeChange = gradualMigrationPossible;
 	g_simulator->willRestart = testConfig.isFirstTestInRestart;
 
 	TraceEvent("SimulatedClusterStarted")
@@ -2704,14 +2704,6 @@ static Future<Void> simulationSetupAndRunImpl(std::string dataFolder,
 
 	if (testConfig.injectSSDelay && deterministicRandom()->random01() < 0.25) {
 		g_simulator->injectSSDelayTime = 60.0 + 240.0 * deterministicRandom()->random01();
-	}
-
-	if (deterministicRandom()->random01() < 0.25) {
-		g_simulator->injectTargetedBMRestartTime = 60.0 + 340.0 * deterministicRandom()->random01();
-	}
-
-	if (deterministicRandom()->random01() < 0.25) {
-		g_simulator->injectTargetedBWRestartTime = 60.0 + 340.0 * deterministicRandom()->random01();
 	}
 
 	// Build simulator allow list
