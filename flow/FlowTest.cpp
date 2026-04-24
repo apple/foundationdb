@@ -25,12 +25,12 @@
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/network.h"
+#include "SimpleOpt/SimpleOpt.h"
 
 #include <algorithm>
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>
-#include <cstring>
 #include <exception>
 #include <string>
 #include <string_view>
@@ -58,6 +58,29 @@ struct FlowTestResult {
 	int testsExecuted = 0;
 	int testsFailed = 0;
 };
+
+enum FlowTestOption {
+	OPT_HELP,
+	OPT_FILTER,
+	OPT_IGNORE,
+	OPT_DATA_DIR,
+	OPT_SEED,
+	OPT_MAX_TEST_CASES,
+	OPT_NO_CLEANUP,
+	OPT_LIST,
+};
+
+CSimpleOpt::SOption flowTestOptions[] = { { OPT_HELP, "-h", SO_NONE },
+	                                      { OPT_HELP, "--help", SO_NONE },
+	                                      { OPT_FILTER, "-f", SO_REQ_SEP },
+	                                      { OPT_FILTER, "--filter", SO_REQ_SEP },
+	                                      { OPT_IGNORE, "--ignore", SO_REQ_SEP },
+	                                      { OPT_DATA_DIR, "--data-dir", SO_REQ_SEP },
+	                                      { OPT_SEED, "--seed", SO_REQ_SEP },
+	                                      { OPT_MAX_TEST_CASES, "--max-test-cases", SO_REQ_SEP },
+	                                      { OPT_NO_CLEANUP, "--no-cleanup", SO_NONE },
+	                                      { OPT_LIST, "--list", SO_NONE },
+	                                      SO_END_OF_OPTIONS };
 
 void printUsage(const char* program) {
 	fprintf(stderr,
@@ -98,57 +121,71 @@ bool parseUInt32(const char* text, uint32_t* value) {
 }
 
 bool parseArgs(int argc, char** argv, FlowTestOptions* options) {
-	for (int i = 1; i < argc; ++i) {
-		auto nextArg = [&](const char* name) -> const char* {
-			if (i + 1 >= argc) {
-				fprintf(stderr, "ERROR: %s requires an argument\n", name);
-				return nullptr;
+	CSimpleOpt args(argc, argv, flowTestOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+	while (args.Next()) {
+		if (auto err = args.LastError()) {
+			switch (err) {
+			case SO_ARG_INVALID_DATA:
+				fprintf(stderr, "ERROR: Invalid argument to option `%s'\n", args.OptionText());
+				break;
+			case SO_ARG_INVALID:
+				fprintf(stderr, "ERROR: Argument given to no-argument option `%s'\n", args.OptionText());
+				break;
+			case SO_ARG_MISSING:
+				fprintf(stderr, "ERROR: Argument missing for option `%s'\n", args.OptionText());
+				break;
+			case SO_OPT_INVALID:
+				fprintf(stderr, "ERROR: Unknown option `%s'\n", args.OptionText());
+				break;
+			default:
+				fprintf(stderr, "ERROR: Unknown error %d with option `%s'\n", static_cast<int>(err), args.OptionText());
+				break;
 			}
-			return argv[++i];
-		};
+			return false;
+		}
 
-		if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
+		switch (args.OptionId()) {
+		case OPT_HELP:
 			options->showHelp = true;
 			return true;
-		} else if (!strcmp(argv[i], "-f") || !strcmp(argv[i], "--filter")) {
-			const char* value = nextArg(argv[i]);
-			if (!value) {
-				return false;
-			}
-			options->testPattern = value;
-		} else if (!strcmp(argv[i], "--ignore")) {
-			const char* value = nextArg(argv[i]);
-			if (!value) {
-				return false;
-			}
-			options->testsIgnored.emplace_back(value);
-		} else if (!strcmp(argv[i], "--data-dir")) {
-			const char* value = nextArg(argv[i]);
-			if (!value) {
-				return false;
-			}
-			options->dataDir = value;
-		} else if (!strcmp(argv[i], "--seed")) {
-			const char* value = nextArg(argv[i]);
-			if (!value || !parseUInt32(value, &options->randomSeed)) {
+		case OPT_FILTER:
+			options->testPattern = args.OptionArg();
+			break;
+		case OPT_IGNORE:
+			options->testsIgnored.emplace_back(args.OptionArg());
+			break;
+		case OPT_DATA_DIR:
+			options->dataDir = args.OptionArg();
+			break;
+		case OPT_SEED:
+			if (!parseUInt32(args.OptionArg(), &options->randomSeed)) {
 				fprintf(stderr, "ERROR: --seed requires a uint32 value\n");
 				return false;
 			}
-		} else if (!strcmp(argv[i], "--max-test-cases")) {
-			const char* value = nextArg(argv[i]);
-			if (!value || !parseInt(value, &options->maxTestCases)) {
+			break;
+		case OPT_MAX_TEST_CASES:
+			if (!parseInt(args.OptionArg(), &options->maxTestCases)) {
 				fprintf(stderr, "ERROR: --max-test-cases requires an integer value\n");
 				return false;
 			}
-		} else if (!strcmp(argv[i], "--no-cleanup")) {
+			break;
+		case OPT_NO_CLEANUP:
 			options->cleanupAfterTests = false;
-		} else if (!strcmp(argv[i], "--list")) {
+			break;
+		case OPT_LIST:
 			options->listTests = true;
-		} else {
-			fprintf(stderr, "ERROR: Unknown option `%s'\n", argv[i]);
+			break;
+		default:
+			fprintf(stderr, "ERROR: Unknown option id %d\n", args.OptionId());
 			return false;
 		}
 	}
+
+	if (args.FileCount() > 0) {
+		fprintf(stderr, "ERROR: Unexpected argument `%s'\n", args.File(0));
+		return false;
+	}
+
 	return true;
 }
 
