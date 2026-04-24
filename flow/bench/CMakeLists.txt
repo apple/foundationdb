@@ -8,11 +8,8 @@ fdb_setup_googlebenchmark()
 target_include_directories(
   flow_bench
   PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}"
-          "${CMAKE_CURRENT_BINARY_DIR}"
           "${CMAKE_CURRENT_SOURCE_DIR}/.."
-          "${CMAKE_CURRENT_BINARY_DIR}/.."
-          "${CMAKE_CURRENT_SOURCE_DIR}/include"
-          "${CMAKE_CURRENT_BINARY_DIR}/include")
+          "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 if(FLOW_USE_ZSTD)
   target_include_directories(flow_bench PRIVATE ${ZSTD_LIB_INCLUDE_DIR})
