@@ -2989,9 +2989,8 @@ static AsyncResult<Void> clusterGetStatusImpl(Reference<ClusterGetStatusState> s
 		// construct status information for cluster subsections
 		int statusCode = (int)RecoveryStatus::END;
 		std::vector<AsyncResult<ErrorOr<JsonBuilderObject>>> clusterSubsectionFetchers;
-		clusterSubsectionFetchers.push_back(
-		    errorOr(recoveryStateStatusFetcher(
-		        cx, ccWorker, mWorker, workers.size(), &status_incomplete_reasons, &statusCode)));
+		clusterSubsectionFetchers.push_back(errorOr(recoveryStateStatusFetcher(
+		    cx, ccWorker, mWorker, workers.size(), &status_incomplete_reasons, &statusCode)));
 		clusterSubsectionFetchers.push_back(errorOr(timeoutError(getIdmpKeyStatus(cx), 5.0)));
 		clusterSubsectionFetchers.push_back(errorOr(versionEpochStatusFetcher(cx, &status_incomplete_reasons)));
 
@@ -3416,7 +3415,8 @@ AsyncResult<StatusReply> clusterGetStatus(
 	if (result.index() == 0) {
 		ErrorOr<Void> statusResult = std::get<0>(std::move(result));
 		if (statusResult.isError()) {
-			status_incomplete_reasons.insert(fmt::format("Status collection threw: {}", statusResult.getError().what()));
+			status_incomplete_reasons.insert(
+			    fmt::format("Status collection threw: {}", statusResult.getError().what()));
 		}
 	} else {
 		status_incomplete_reasons.insert("Status collection deadline exceeded.");
