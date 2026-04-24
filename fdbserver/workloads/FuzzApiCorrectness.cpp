@@ -153,7 +153,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	// Map from tenant number to key prefix
 	std::map<int, std::string> keyPrefixes;
 
-	FuzzApiCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), operationId(0), success(true) {
+	explicit FuzzApiCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), operationId(0), success(true) {
 		std::call_once(onceFlag, [&]() { addTestCases(); });
 
 		testDuration = getOption(options, "testDuration"_sr, 60.0);

@@ -139,7 +139,7 @@ private:
 	class ReadyQueue : public std::priority_queue<T, std::vector<T>> {
 	public:
 		typedef typename std::priority_queue<T, std::vector<T>>::size_type size_type;
-		ReadyQueue(size_type capacity = 0) { reserve(capacity); };
+		explicit ReadyQueue(size_type capacity = 0) { reserve(capacity); };
 		void reserve(size_type capacity) { this->c.reserve(capacity); }
 	};
 

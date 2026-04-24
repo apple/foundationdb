@@ -50,7 +50,7 @@ struct ReadAfterWriteWorkload : KVWorkload {
 	double testDuration;
 	DDSketch<double> propagationLatency;
 
-	ReadAfterWriteWorkload(WorkloadContext const& wcx) : KVWorkload(wcx), propagationLatency() {
+	explicit ReadAfterWriteWorkload(WorkloadContext const& wcx) : KVWorkload(wcx), propagationLatency() {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 	}
 

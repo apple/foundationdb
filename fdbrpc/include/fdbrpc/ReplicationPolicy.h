@@ -121,7 +121,7 @@ inline void save(Archive& ar, const Reference<IReplicationPolicy>& value) {
 }
 
 struct PolicyOne final : IReplicationPolicy {
-	PolicyOne() {};
+	PolicyOne(){};
 	explicit PolicyOne(const PolicyOne& o) {}
 	std::string name() const override { return "One"; }
 	std::string info() const override { return "1"; }
@@ -216,7 +216,8 @@ protected:
 
 struct PolicyAnd final : IReplicationPolicy {
 	friend struct serializable_traits<PolicyAnd*>;
-	PolicyAnd(std::vector<Reference<IReplicationPolicy>> policies) : _policies(policies), _sortedPolicies(policies) {
+	explicit PolicyAnd(std::vector<Reference<IReplicationPolicy>> policies)
+	  : _policies(policies), _sortedPolicies(policies) {
 		// Sort the policy array
 		std::sort(_sortedPolicies.begin(), _sortedPolicies.end(), PolicyAnd::comparePolicy);
 	}

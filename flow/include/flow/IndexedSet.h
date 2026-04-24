@@ -73,7 +73,7 @@ private: // Forward-declare IndexedSet::Node because Clang is much stricter abou
 		  : data(std::forward<T_>(data)), balance(0), total(std::forward<Metric_>(m)), parent(parent) {
 			child[0] = child[1] = nullptr;
 		}
-		Node(Node const&) = delete;
+		explicit(false) Node(Node const&) = delete;
 		Node& operator=(Node const&) = delete;
 		~Node() {
 			delete child[0];
@@ -95,7 +95,7 @@ private: // Forward-declare IndexedSet::Node because Clang is much stricter abou
 			static_assert(isConst);
 		}
 
-		explicit IteratorImpl(decltype(node) n = nullptr) : node(n) {};
+		explicit IteratorImpl(decltype(node) n = nullptr) : node(n){};
 
 		typename std::conditional_t<isConst, const T, T>& operator*() const { return node->data; }
 
@@ -149,9 +149,9 @@ public:
 	using iterator = IteratorImpl<false>;
 	using const_iterator = IteratorImpl<true>;
 
-	IndexedSet() : root(nullptr) {};
+	IndexedSet() : root(nullptr){};
 	~IndexedSet() { delete root; }
-	IndexedSet(IndexedSet&& r) noexcept : root(r.root) { r.root = nullptr; }
+	explicit(false) IndexedSet(IndexedSet&& r) noexcept : root(r.root) { r.root = nullptr; }
 	IndexedSet& operator=(IndexedSet&& r) noexcept {
 		delete root;
 		root = r.root;
@@ -311,7 +311,7 @@ public:
 
 private:
 	// Copy operations unimplemented.  SOMEDAY: Implement and make public.
-	IndexedSet(const IndexedSet&);
+	explicit(false) IndexedSet(const IndexedSet&);
 	IndexedSet& operator=(const IndexedSet&);
 
 	Node* root;
@@ -358,7 +358,7 @@ public: // but testonly
 class NoMetric {
 public:
 	NoMetric() {}
-	NoMetric(int) {} // NoMetric(1)
+	explicit(false) NoMetric(int) {} // NoMetric(1)
 	NoMetric operator+(NoMetric const&) const { return NoMetric(); }
 	NoMetric operator-(NoMetric const&) const { return NoMetric(); }
 	bool operator<(NoMetric const&) const { return false; }
@@ -376,9 +376,9 @@ public:
 		key = rhs.key;
 		value = rhs.value;
 	}
-	MapPair(MapPair const& rhs) : key(rhs.key), value(rhs.value) {}
+	explicit(false) MapPair(MapPair const& rhs) : key(rhs.key), value(rhs.value) {}
 
-	MapPair(MapPair&& r) noexcept : key(std::move(r.key)), value(std::move(r.value)) {}
+	explicit(false) MapPair(MapPair&& r) noexcept : key(std::move(r.key)), value(std::move(r.value)) {}
 	void operator=(MapPair&& r) noexcept {
 		key = std::move(r.key);
 		value = std::move(r.value);
@@ -531,13 +531,13 @@ public:
 
 	static int getElementBytes() { return IndexedSet<Pair, Metric>::getElementBytes(); }
 
-	Map(Map&& r) noexcept : set(std::move(r.set)) {}
+	explicit(false) Map(Map&& r) noexcept : set(std::move(r.set)) {}
 	void operator=(Map&& r) noexcept { set = std::move(r.set); }
 
 	Future<Void> clearAsync();
 
 private:
-	Map(Map<Key, Value, Pair> const&); // unimplemented
+	explicit(false) Map(Map<Key, Value, Pair> const&); // unimplemented
 	void operator=(Map<Key, Value, Pair> const&); // unimplemented
 
 	IndexedSet<Pair, Metric> set;

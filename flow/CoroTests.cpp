@@ -1173,8 +1173,8 @@ Future<int> Outer::Foo5::foo() {
 struct Tracker {
 	int copied;
 	bool moved;
-	Tracker(int copied = 0) : copied(copied), moved(false) {}
-	Tracker(Tracker&& other) : Tracker(other.copied) {
+	explicit Tracker(int copied = 0) : copied(copied), moved(false) {}
+	explicit(false) Tracker(Tracker&& other) : Tracker(other.copied) {
 		ASSERT(!other.moved);
 		other.moved = true;
 	}
@@ -1185,7 +1185,7 @@ struct Tracker {
 		this->copied = other.copied;
 		return *this;
 	}
-	Tracker(const Tracker& other) : Tracker(other.copied + 1) { ASSERT(!other.moved); }
+	explicit(false) Tracker(const Tracker& other) : Tracker(other.copied + 1) { ASSERT(!other.moved); }
 	Tracker& operator=(const Tracker& other) {
 		ASSERT(!other.moved);
 		this->moved = false;
@@ -1205,8 +1205,8 @@ struct LifetimeTracked {
 	inline static int liveCount = 0;
 
 	LifetimeTracked() { ++liveCount; }
-	LifetimeTracked(const LifetimeTracked&) { ++liveCount; }
-	LifetimeTracked(LifetimeTracked&&) noexcept { ++liveCount; }
+	explicit(false) LifetimeTracked(const LifetimeTracked&) { ++liveCount; }
+	explicit(false) LifetimeTracked(LifetimeTracked&&) noexcept { ++liveCount; }
 	LifetimeTracked& operator=(const LifetimeTracked&) = default;
 	LifetimeTracked& operator=(LifetimeTracked&&) noexcept = default;
 	~LifetimeTracked() { --liveCount; }

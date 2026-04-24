@@ -100,8 +100,8 @@ class ThreadSpinLockHolder {
 	ThreadSpinLock& lock;
 
 public:
-	ThreadSpinLockHolder(ThreadSpinLock& lock) : lock(lock) { lock.enter(); }
-	ThreadSpinLockHolder(const ThreadSpinLockHolder& lock) = delete;
+	explicit ThreadSpinLockHolder(ThreadSpinLock& lock) : lock(lock) { lock.enter(); }
+	explicit(false) ThreadSpinLockHolder(const ThreadSpinLockHolder& lock) = delete;
 	~ThreadSpinLockHolder() { lock.leave(); }
 };
 
@@ -113,7 +113,7 @@ public:
 };
 class ThreadUnsafeSpinLockHolder {
 public:
-	ThreadUnsafeSpinLockHolder(ThreadUnsafeSpinLock&) {};
+	explicit ThreadUnsafeSpinLockHolder(ThreadUnsafeSpinLock&){};
 };
 
 #if FLOW_THREAD_SAFE
@@ -156,7 +156,7 @@ class MutexHolder {
 	Mutex& lock;
 
 public:
-	MutexHolder(Mutex& lock) : lock(lock) { lock.enter(); }
+	explicit MutexHolder(Mutex& lock) : lock(lock) { lock.enter(); }
 	~MutexHolder() { lock.leave(); }
 };
 

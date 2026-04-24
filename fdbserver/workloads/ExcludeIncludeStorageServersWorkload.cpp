@@ -45,7 +45,7 @@ struct ExcludeIncludeStorageServersWorkload : TestWorkload {
 
 	std::map<AddressExclusion, std::set<AddressExclusion>> machineProcesses; // ip -> ip:port
 
-	ExcludeIncludeStorageServersWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit ExcludeIncludeStorageServersWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled =
 		    !clientId && g_network->isSimulated(); // only do this on the "first" client, and only when in simulation
 		if (g_network->isSimulated()) {

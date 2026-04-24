@@ -297,10 +297,11 @@ public:
 		const SI_CHAR* pComment;
 		int nOrder;
 
-		Entry(const SI_CHAR* a_pszItem = NULL, int a_nOrder = 0) : pItem(a_pszItem), pComment(NULL), nOrder(a_nOrder) {}
+		explicit(false) Entry(const SI_CHAR* a_pszItem = NULL, int a_nOrder = 0)
+		  : pItem(a_pszItem), pComment(NULL), nOrder(a_nOrder) {}
 		Entry(const SI_CHAR* a_pszItem, const SI_CHAR* a_pszComment, int a_nOrder)
 		  : pItem(a_pszItem), pComment(a_pszComment), nOrder(a_nOrder) {}
-		Entry(const Entry& rhs) { operator=(rhs); }
+		explicit(false) Entry(const Entry& rhs) { operator=(rhs); }
 		Entry& operator=(const Entry& rhs) {
 			pItem = rhs.pItem;
 			pComment = rhs.pComment;
@@ -354,7 +355,7 @@ public:
 		virtual void Write(const char* a_pBuf) = 0;
 
 	private:
-		OutputWriter(const OutputWriter&); // disable
+		explicit(false) OutputWriter(const OutputWriter&); // disable
 		OutputWriter& operator=(const OutputWriter&); // disable
 	};
 
@@ -363,11 +364,11 @@ public:
 		FILE* m_file;
 
 	public:
-		FileWriter(FILE* a_file) : m_file(a_file) {}
+		explicit FileWriter(FILE* a_file) : m_file(a_file) {}
 		void Write(const char* a_pBuf) { fputs(a_pBuf, m_file); }
 
 	private:
-		FileWriter(const FileWriter&); // disable
+		explicit(false) FileWriter(const FileWriter&); // disable
 		FileWriter& operator=(const FileWriter&); // disable
 	};
 
@@ -376,11 +377,11 @@ public:
 		std::string& m_string;
 
 	public:
-		StringWriter(std::string& a_string) : m_string(a_string) {}
+		explicit StringWriter(std::string& a_string) : m_string(a_string) {}
 		void Write(const char* a_pBuf) { m_string.append(a_pBuf); }
 
 	private:
-		StringWriter(const StringWriter&); // disable
+		explicit(false) StringWriter(const StringWriter&); // disable
 		StringWriter& operator=(const StringWriter&); // disable
 	};
 
@@ -390,11 +391,11 @@ public:
 		std::ostream& m_ostream;
 
 	public:
-		StreamWriter(std::ostream& a_ostream) : m_ostream(a_ostream) {}
+		explicit StreamWriter(std::ostream& a_ostream) : m_ostream(a_ostream) {}
 		void Write(const char* a_pBuf) { m_ostream << a_pBuf; }
 
 	private:
-		StreamWriter(const StreamWriter&); // disable
+		explicit(false) StreamWriter(const StreamWriter&); // disable
 		StreamWriter& operator=(const StreamWriter&); // disable
 	};
 #endif // SI_SUPPORT_IOSTREAMS
@@ -405,8 +406,8 @@ public:
 	class Converter : private SI_CONVERTER {
 	public:
 		using SI_CONVERTER::SizeToStore;
-		Converter(bool a_bStoreIsUtf8) : SI_CONVERTER(a_bStoreIsUtf8) { m_scratch.resize(1024); }
-		Converter(const Converter& rhs) { operator=(rhs); }
+		explicit Converter(bool a_bStoreIsUtf8) : SI_CONVERTER(a_bStoreIsUtf8) { m_scratch.resize(1024); }
+		explicit(false) Converter(const Converter& rhs) { operator=(rhs); }
 		Converter& operator=(const Converter& rhs) {
 			m_scratch = rhs.m_scratch;
 			return *this;
@@ -436,7 +437,7 @@ public:
 	    @param a_bMultiKey   See the method SetMultiKey() for details.
 	    @param a_bMultiLine  See the method SetMultiLine() for details.
 	 */
-	CSimpleIniTempl(bool a_bIsUtf8 = false, bool a_bMultiKey = false, bool a_bMultiLine = false);
+	explicit CSimpleIniTempl(bool a_bIsUtf8 = false, bool a_bMultiKey = false, bool a_bMultiLine = false);
 
 	/** Destructor */
 	~CSimpleIniTempl();
@@ -1011,7 +1012,7 @@ public:
 
 private:
 	// copying is not permitted
-	CSimpleIniTempl(const CSimpleIniTempl&); // disabled
+	explicit(false) CSimpleIniTempl(const CSimpleIniTempl&); // disabled
 	CSimpleIniTempl& operator=(const CSimpleIniTempl&); // disabled
 
 	/** Parse the data looking for a file comment and store it if found.
@@ -2431,10 +2432,10 @@ protected:
 	SI_ConvertA() {}
 
 public:
-	SI_ConvertA(bool a_bStoreIsUtf8) : m_bStoreIsUtf8(a_bStoreIsUtf8) {}
+	explicit SI_ConvertA(bool a_bStoreIsUtf8) : m_bStoreIsUtf8(a_bStoreIsUtf8) {}
 
 	/* copy and assignment */
-	SI_ConvertA(const SI_ConvertA& rhs) { operator=(rhs); }
+	explicit(false) SI_ConvertA(const SI_ConvertA& rhs) { operator=(rhs); }
 	SI_ConvertA& operator=(const SI_ConvertA& rhs) {
 		m_bStoreIsUtf8 = rhs.m_bStoreIsUtf8;
 		return *this;
@@ -2550,10 +2551,10 @@ protected:
 	SI_ConvertW() {}
 
 public:
-	SI_ConvertW(bool a_bStoreIsUtf8) : m_bStoreIsUtf8(a_bStoreIsUtf8) {}
+	explicit SI_ConvertW(bool a_bStoreIsUtf8) : m_bStoreIsUtf8(a_bStoreIsUtf8) {}
 
 	/* copy and assignment */
-	SI_ConvertW(const SI_ConvertW& rhs) { operator=(rhs); }
+	explicit(false) SI_ConvertW(const SI_ConvertW& rhs) { operator=(rhs); }
 	SI_ConvertW& operator=(const SI_ConvertW& rhs) {
 		m_bStoreIsUtf8 = rhs.m_bStoreIsUtf8;
 		return *this;
@@ -2731,10 +2732,10 @@ protected:
 	SI_ConvertW() : m_pEncoding(NULL), m_pConverter(NULL) {}
 
 public:
-	SI_ConvertW(bool a_bStoreIsUtf8) : m_pConverter(NULL) { m_pEncoding = a_bStoreIsUtf8 ? "UTF-8" : NULL; }
+	explicit SI_ConvertW(bool a_bStoreIsUtf8) : m_pConverter(NULL) { m_pEncoding = a_bStoreIsUtf8 ? "UTF-8" : NULL; }
 
 	/* copy and assignment */
-	SI_ConvertW(const SI_ConvertW& rhs) { operator=(rhs); }
+	explicit(false) SI_ConvertW(const SI_ConvertW& rhs) { operator=(rhs); }
 	SI_ConvertW& operator=(const SI_ConvertW& rhs) {
 		m_pEncoding = rhs.m_pEncoding;
 		m_pConverter = NULL;
@@ -2938,10 +2939,10 @@ protected:
 	SI_ConvertW() {}
 
 public:
-	SI_ConvertW(bool a_bStoreIsUtf8) { m_uCodePage = a_bStoreIsUtf8 ? CP_UTF8 : CP_ACP; }
+	explicit SI_ConvertW(bool a_bStoreIsUtf8) { m_uCodePage = a_bStoreIsUtf8 ? CP_UTF8 : CP_ACP; }
 
 	/* copy and assignment */
-	SI_ConvertW(const SI_ConvertW& rhs) { operator=(rhs); }
+	explicit(false) SI_ConvertW(const SI_ConvertW& rhs) { operator=(rhs); }
 	SI_ConvertW& operator=(const SI_ConvertW& rhs) {
 		m_uCodePage = rhs.m_uCodePage;
 		return *this;

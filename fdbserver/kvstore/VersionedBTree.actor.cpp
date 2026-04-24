@@ -445,7 +445,7 @@ public:
 		}
 
 		// Since cursors can have async operations pending which modify their state they can't be copied cleanly
-		Cursor(const Cursor& other) = delete;
+		explicit(false) Cursor(const Cursor& other) = delete;
 
 		~Cursor() { cancel(); }
 
@@ -925,7 +925,7 @@ public:
 		newTailPage.cancel();
 	}
 
-	FIFOQueue(const FIFOQueue& other) = delete;
+	explicit(false) FIFOQueue(const FIFOQueue& other) = delete;
 	void operator=(const FIFOQueue& rhs) = delete;
 
 	// Create a new queue at newPageID

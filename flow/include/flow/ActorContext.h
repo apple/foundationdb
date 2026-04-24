@@ -75,7 +75,7 @@ class ActiveActorHelper {
 public:
 	ActorID actorID;
 
-	ActiveActorHelper(const ActorIdentifier& actorIdentifier);
+	explicit ActiveActorHelper(const ActorIdentifier& actorIdentifier);
 	~ActiveActorHelper();
 };
 
@@ -127,7 +127,7 @@ using ActorBlockIdentifier = UID;
 struct ActorExecutionContext {};
 struct ActiveActor {};
 struct ActiveActorHelper {
-	ActiveActorHelper(const ActorIdentifier&) {}
+	explicit ActiveActorHelper(const ActorIdentifier&) {}
 };
 struct ActorExecutionContextHelper {
 	ActorExecutionContextHelper(const ActorID&, const ActorBlockIdentifier&);

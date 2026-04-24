@@ -50,7 +50,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 	bool pass;
 	NetworkAddress addr;
 
-	DataLossRecoveryWorkload(WorkloadContext const& wcx)
+	explicit DataLossRecoveryWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), startMoveKeysParallelismLock(5), finishMoveKeysParallelismLock(5), enabled(!clientId),
 	    pass(true) {}
 

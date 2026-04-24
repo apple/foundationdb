@@ -34,7 +34,7 @@ struct MetricLoggingWorkload : TestWorkload {
 	std::vector<BoolMetricHandle> boolMetrics;
 	std::vector<Int64MetricHandle> int64Metrics;
 
-	MetricLoggingWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), changes("Changes") {
+	explicit MetricLoggingWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), changes("Changes") {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		actorCount = getOption(options, "actorCount"_sr, 1);
 		metricCount = getOption(options, "metricCount"_sr, 1);

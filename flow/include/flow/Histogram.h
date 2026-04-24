@@ -61,12 +61,12 @@ public:
 	enum class Unit { milliseconds = 0, bytes, bytes_per_second, percentageLinear, countLinear, MAXHISTOGRAMUNIT };
 	static const char* const UnitToStringMapper[];
 
-	Histogram(Reference<HistogramRegistry> regis,
-	          std::string const& group = "",
-	          std::string const& op = "",
-	          Unit unit = Unit::MAXHISTOGRAMUNIT,
-	          uint32_t lower = 0,
-	          uint32_t upper = UINT32_MAX)
+	explicit Histogram(Reference<HistogramRegistry> regis,
+	                   std::string const& group = "",
+	                   std::string const& op = "",
+	                   Unit unit = Unit::MAXHISTOGRAMUNIT,
+	                   uint32_t lower = 0,
+	                   uint32_t upper = UINT32_MAX)
 	  : group(group), op(op), unit(unit), registry(regis), lowerBound(lower), upperBound(upper) {
 
 		ASSERT(unit <= Unit::MAXHISTOGRAMUNIT);

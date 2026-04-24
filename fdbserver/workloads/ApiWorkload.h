@@ -267,7 +267,7 @@ struct ApiWorkload : TestWorkload {
 	bool useExtraDB;
 	Database extraDB;
 
-	ApiWorkload(WorkloadContext const& wcx, int maxClients = -1)
+	explicit ApiWorkload(WorkloadContext const& wcx, int maxClients = -1)
 	  : TestWorkload(wcx), maxClients(maxClients), success(true), transactionFactory(nullptr) {
 		clientPrefixInt = getOption(options, "clientId"_sr, clientId);
 		clientPrefix = format("%010d", clientPrefixInt);

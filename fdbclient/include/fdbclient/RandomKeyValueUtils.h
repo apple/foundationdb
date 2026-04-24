@@ -35,7 +35,7 @@ struct IGenerator {
 	virtual T last() const = 0;
 	virtual std::string toString() const = 0;
 	virtual T next(int distance, bool wrap = false) { throw unsupported_operation(); }
-	virtual ~IGenerator() {};
+	virtual ~IGenerator(){};
 };
 
 struct IKeyGenerator : public IGenerator<Key> {
@@ -68,7 +68,7 @@ struct RandomIntGenerator : IGenerator<unsigned int> {
 		}
 	}
 
-	RandomIntGenerator(unsigned int only = 0) : min(only), max(only) {}
+	explicit RandomIntGenerator(unsigned int only = 0) : min(only), max(only) {}
 	RandomIntGenerator(unsigned int first, unsigned int last, bool skewTowardFirst = false) : min(first), max(last) {
 		if (first != last && skewTowardFirst) {
 			skew = (first < last) ? SMALL : LARGE;
@@ -77,9 +77,9 @@ struct RandomIntGenerator : IGenerator<unsigned int> {
 			std::swap(min, max);
 		}
 	}
-	RandomIntGenerator(const char* cstr) : RandomIntGenerator(std::string(cstr)) {}
-	RandomIntGenerator(std::string str) : RandomIntGenerator(StringRef(str)) {}
-	RandomIntGenerator(StringRef str) {
+	explicit(false) RandomIntGenerator(const char* cstr) : RandomIntGenerator(std::string(cstr)) {}
+	explicit(false) RandomIntGenerator(std::string str) : RandomIntGenerator(StringRef(str)) {}
+	explicit(false) RandomIntGenerator(StringRef str) {
 		bool skewTowardFirst = false;
 		if (!str.empty() && str[0] == '^') {
 			skewTowardFirst = true;
@@ -143,9 +143,9 @@ struct RandomIntGenerator : IGenerator<unsigned int> {
 struct RandomStringGenerator : IKeyGenerator {
 	RandomStringGenerator() {}
 	RandomStringGenerator(RandomIntGenerator size, RandomIntGenerator byteset) : size(size), bytes(byteset) {}
-	RandomStringGenerator(const char* cstr) : RandomStringGenerator(std::string(cstr)) {}
-	RandomStringGenerator(std::string str) : RandomStringGenerator(StringRef(str)) {}
-	RandomStringGenerator(StringRef str) {
+	explicit(false) RandomStringGenerator(const char* cstr) : RandomStringGenerator(std::string(cstr)) {}
+	explicit(false) RandomStringGenerator(std::string str) : RandomStringGenerator(StringRef(str)) {}
+	explicit(false) RandomStringGenerator(StringRef str) {
 		StringRef sSize = str.eat("/");
 		StringRef sBytes = str;
 		if (sBytes.size() == 0) {
@@ -179,7 +179,7 @@ struct RandomStringGenerator : IKeyGenerator {
 // It uses a large pre-generated string and generates random substrings from it.
 struct RandomValueGenerator {
 	template <typename... Args>
-	RandomValueGenerator(Args&&... args) : strings(std::forward<Args>(args)...) {
+	explicit RandomValueGenerator(Args&&... args) : strings(std::forward<Args>(args)...) {
 		// Make a similar RandomStringGenerator to generate the noise block from
 		noise = RandomStringGenerator(RandomIntGenerator(std::max<int>(2e6, strings.size.max)), strings.bytes).next();
 	}
@@ -282,11 +282,11 @@ struct RandomStringSetGenerator : public RandomStringSetGeneratorBase {
 	  : indexGen(indexGen), stringGen(stringGen) {
 		init(indexGen, stringGen);
 	}
-	RandomStringSetGenerator(const char* cstr) : RandomStringSetGenerator(std::string(cstr)) {}
-	RandomStringSetGenerator(std::string str) : RandomStringSetGenerator(StringRef(str)) {}
-	RandomStringSetGenerator(StringRef str) {
+	explicit(false) RandomStringSetGenerator(const char* cstr) : RandomStringSetGenerator(std::string(cstr)) {}
+	explicit(false) RandomStringSetGenerator(std::string str) : RandomStringSetGenerator(StringRef(str)) {}
+	explicit(false) RandomStringSetGenerator(StringRef str) {
 		indexGen = str.eat("::");
-		stringGen = str;
+		stringGen = StringGenT(str);
 		init(indexGen, stringGen);
 	}
 
@@ -301,10 +301,10 @@ typedef RandomStringSetGenerator<RandomStringGenerator> RandomKeySetGenerator;
 // Generate random keys which are composed of tuple segments from a list of RandomKeySets
 // String Definition Format: RandomKeySet[,RandomKeySet]...
 struct RandomKeyTupleGenerator : public IKeyGenerator {
-	RandomKeyTupleGenerator() {};
-	RandomKeyTupleGenerator(std::vector<RandomKeySetGenerator> tupleParts) : tuples(tupleParts) {}
-	RandomKeyTupleGenerator(std::string s) : RandomKeyTupleGenerator(StringRef(s)) {}
-	RandomKeyTupleGenerator(StringRef s) {
+	RandomKeyTupleGenerator(){};
+	explicit RandomKeyTupleGenerator(std::vector<RandomKeySetGenerator> tupleParts) : tuples(tupleParts) {}
+	explicit RandomKeyTupleGenerator(std::string s) : RandomKeyTupleGenerator(StringRef(s)) {}
+	explicit RandomKeyTupleGenerator(StringRef s) {
 		while (!s.empty()) {
 			tuples.push_back(s.eat(","));
 		}

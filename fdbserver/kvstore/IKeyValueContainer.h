@@ -36,7 +36,7 @@ struct KeyValueMapPair {
 		key = rhs.key;
 		value = rhs.value;
 	}
-	KeyValueMapPair(KeyValueMapPair const& rhs) : arena(rhs.arena), key(rhs.key), value(rhs.value) {}
+	explicit(false) KeyValueMapPair(KeyValueMapPair const& rhs) : arena(rhs.arena), key(rhs.key), value(rhs.value) {}
 
 	KeyValueMapPair(KeyRef key, ValueRef value)
 	  : arena(key.expectedSize() + value.expectedSize()), key(arena, key), value(arena, value) {}
@@ -115,7 +115,7 @@ public:
 	static constexpr int getElementBytes() { return IndexedSet<KeyValueMapPair, uint64_t>::getElementBytes(); }
 
 private:
-	IKeyValueContainer(IKeyValueContainer const&); // unimplemented
+	explicit(false) IKeyValueContainer(IKeyValueContainer const&); // unimplemented
 	void operator=(IKeyValueContainer const&); // unimplemented
 	IndexedSet<KeyValueMapPair, uint64_t> data;
 };

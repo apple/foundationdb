@@ -110,7 +110,7 @@ class GrpcServer {
 public:
 	using ServiceList = std::vector<std::shared_ptr<grpc::Service>>;
 
-	GrpcServer(const NetworkAddress& addr, std::shared_ptr<GrpcCredentialProvider> provider = nullptr);
+	explicit GrpcServer(const NetworkAddress& addr, std::shared_ptr<GrpcCredentialProvider> provider = nullptr);
 	~GrpcServer();
 
 	// Returns the singleton instance.

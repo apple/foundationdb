@@ -324,7 +324,7 @@ public:
 	struct Mirror : FastAllocated<Mirror> {
 		friend class Cursor;
 
-		Mirror(const void* treePtr = nullptr, const T* lowerBound = nullptr, const T* upperBound = nullptr)
+		explicit Mirror(const void* treePtr = nullptr, const T* lowerBound = nullptr, const T* upperBound = nullptr)
 		  : tree((DeltaTree*)treePtr), lower(lowerBound), upper(upperBound) {
 			lower = new (arena) T(arena, *lower);
 			upper = new (arena) T(arena, *upper);
@@ -485,7 +485,7 @@ public:
 	public:
 		Cursor() : mirror(nullptr), node(nullptr) {}
 
-		Cursor(Mirror* r) : mirror(r), node(mirror->root) {}
+		explicit Cursor(Mirror* r) : mirror(r), node(mirror->root) {}
 
 		Mirror* mirror;
 		DecodedNode* node;
@@ -1061,7 +1061,7 @@ public:
 	// DecodedNodes are stored in a contiguous vector, which sometimes must be expanded, so care
 	// must be taken to resolve DecodedNode pointers again after the DecodeCache has new entries added.
 	struct DecodeCache : FastAllocated<DecodeCache>, ReferenceCounted<DecodeCache> {
-		DecodeCache(const T& lowerBound = T(), const T& upperBound = T(), int64_t* pMemoryTracker = nullptr)
+		explicit DecodeCache(const T& lowerBound = T(), const T& upperBound = T(), int64_t* pMemoryTracker = nullptr)
 		  : lowerBound(arena, lowerBound), upperBound(arena, upperBound), lastKnownUsedMemory(0),
 		    pMemoryTracker(pMemoryTracker) {
 			decodedNodes.reserve(10);
@@ -1149,7 +1149,7 @@ public:
 		  : tree(tree), cache(cache), nodeIndex(nodeIndex) {}
 
 		// Copy constructor does not copy item because normally a copied cursor will be immediately moved.
-		Cursor(const Cursor& c) : tree(c.tree), cache(c.cache), nodeIndex(c.nodeIndex) {}
+		explicit(false) Cursor(const Cursor& c) : tree(c.tree), cache(c.cache), nodeIndex(c.nodeIndex) {}
 
 		~Cursor() {
 			if (cache.isValid()) {

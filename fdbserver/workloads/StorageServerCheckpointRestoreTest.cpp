@@ -47,7 +47,8 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 	const bool enabled;
 	bool pass;
 
-	SSCheckpointRestoreWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(!clientId), pass(true) {}
+	explicit SSCheckpointRestoreWorkload(WorkloadContext const& wcx)
+	  : TestWorkload(wcx), enabled(!clientId), pass(true) {}
 
 	void validationFailed(ErrorOr<Optional<Value>> expectedValue, ErrorOr<Optional<Value>> actualValue) {
 		TraceEvent(SevError, "TestFailed")

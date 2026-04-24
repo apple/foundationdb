@@ -28,7 +28,7 @@ class ScopeExit {
 	std::decay_t<Func> fn;
 
 public:
-	ScopeExit(Func&& fn) : fn(std::forward<Func>(fn)) {}
+	explicit ScopeExit(Func&& fn) : fn(std::forward<Func>(fn)) {}
 
 	~ScopeExit() { fn(); }
 };

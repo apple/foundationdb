@@ -93,7 +93,7 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 		iterate = true;
 	}
 
-	MachineAttritionWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
+	explicit MachineAttritionWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
 		// only do this on the "first" client, and only when in simulation and only when fault injection is enabled
 		enabled = !clientId && g_network->isSimulated() && faultInjectionActivated;
 		machinesToKill = getOption(options, "machinesToKill"_sr, machinesToKill);

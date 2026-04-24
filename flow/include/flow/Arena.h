@@ -77,8 +77,8 @@ struct TrackIt {
 	}
 
 	TrackIt() { printf("TrackItCreate\t%s\t%p\t%s\n", __trackit__type(), this, platform::get_backtrace().c_str()); }
-	TrackIt(const TrackIt& o) : TrackIt() {}
-	TrackIt(const TrackIt&& o) : TrackIt() {}
+	explicit(false) TrackIt(const TrackIt& o) : TrackIt() {}
+	explicit(false) TrackIt(const TrackIt&& o) : TrackIt() {}
 	TrackIt& operator=(const TrackIt& o) {
 		printf("TrackItAssigned\t%s\t%p<%p\t%s\n", __trackit__type(), this, &o, platform::get_backtrace().c_str());
 		return *this;
@@ -91,9 +91,9 @@ class NonCopyable {
 protected:
 	NonCopyable() = default;
 	~NonCopyable() = default; /// Protected non-virtual destructor
-	NonCopyable(NonCopyable&&) = default;
+	explicit(false) NonCopyable(NonCopyable&&) = default;
 	NonCopyable& operator=(NonCopyable&&) = default;
-	NonCopyable(const NonCopyable&) = delete;
+	explicit(false) NonCopyable(const NonCopyable&) = delete;
 	NonCopyable& operator=(const NonCopyable&) = delete;
 };
 
@@ -112,8 +112,8 @@ public:
 	Arena();
 	explicit Arena(size_t reservedSize);
 	//~Arena();
-	Arena(const Arena&);
-	Arena(Arena&& r) noexcept;
+	explicit(false) Arena(const Arena&);
+	explicit(false) Arena(Arena&& r) noexcept;
 	Arena& operator=(const Arena&);
 	Arena& operator=(Arena&&) noexcept;
 
@@ -306,7 +306,7 @@ public:
 	T const& contents() const { return *(T const*)this; }
 
 	Standalone() {}
-	Standalone(const T& t) : Arena(t.expectedSize()), T(arena(), t) {}
+	explicit(false) Standalone(const T& t) : Arena(t.expectedSize()), T(arena(), t) {}
 	Standalone<T>& operator=(const T& t) {
 		Arena old = std::move(arena()); // We want to defer the destruction of the arena until after we have copied t,
 		                                // in case it cross-references our previous value
@@ -316,9 +316,9 @@ public:
 	}
 
 	Standalone(const T& t, const Arena& arena) : Arena(arena), T(t) {}
-	Standalone(const Standalone<T>&) = default;
+	explicit(false) Standalone(const Standalone<T>&) = default;
 	Standalone<T>& operator=(const Standalone<T>&) = default;
-	Standalone(Standalone<T>&&) = default;
+	explicit(false) Standalone(Standalone<T>&&) = default;
 	Standalone<T>& operator=(Standalone<T>&&) = default;
 	~Standalone() = default;
 
@@ -338,7 +338,7 @@ public:
 
 private:
 	template <class U>
-	Standalone(Standalone<U> const&); // unimplemented
+	explicit(false) Standalone(Standalone<U> const&); // unimplemented
 	template <class U>
 	Standalone<T> const& operator=(Standalone<U> const&); // unimplemented
 };
@@ -378,7 +378,7 @@ public:
 		}
 	}
 	StringRef(const uint8_t* data, int length) : data(data), length(length) {}
-	StringRef(const std::string& s) : data((const uint8_t*)s.c_str()), length((int)s.size()) {
+	explicit(false) StringRef(const std::string& s) : data((const uint8_t*)s.c_str()), length((int)s.size()) {
 		if (s.size() > std::numeric_limits<int>::max())
 			abort();
 	}
@@ -579,7 +579,7 @@ public:
 
 private:
 	// Unimplemented; blocks conversion through std::string
-	StringRef(char*);
+	explicit StringRef(char*);
 
 	const uint8_t* data;
 	int length;
@@ -866,11 +866,11 @@ enum class VecSerStrategy { FlatBuffers, String };
 template <class T, VecSerStrategy>
 struct VectorRefPreserializer {
 	VectorRefPreserializer() {}
-	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) noexcept {}
+	explicit(false) VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) noexcept {}
 	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) noexcept {
 		return *this;
 	}
-	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::String>&) noexcept {}
+	explicit(false) VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::String>&) noexcept {}
 	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::String>&) noexcept {
 		return *this;
 	}
@@ -887,13 +887,14 @@ struct VectorRefPreserializer<T, VecSerStrategy::String> {
 	string_serialized_traits<T> _string_traits;
 
 	VectorRefPreserializer() : _cached_size(0) {}
-	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::String>& other) noexcept
+	explicit(false) VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::String>& other) noexcept
 	  : _cached_size(other._cached_size) {}
 	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::String>& other) noexcept {
 		_cached_size = other._cached_size;
 		return *this;
 	}
-	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) noexcept : _cached_size(-1) {}
+	explicit(false) VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) noexcept
+	  : _cached_size(-1) {}
 	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) noexcept {
 		_cached_size = -1;
 		return *this;
@@ -932,7 +933,7 @@ public:
 	VectorRef() : data(0), m_size(0), m_capacity(0) {}
 
 	template <VecSerStrategy S>
-	VectorRef(const VectorRef<T, S>& other)
+	explicit(false) VectorRef(const VectorRef<T, S>& other)
 	  : VPS(other), data(other.data), m_size(other.m_size), m_capacity(other.m_capacity) {}
 	template <VecSerStrategy S>
 	VectorRef& operator=(const VectorRef<T, S>& other) {
@@ -1287,7 +1288,7 @@ public:
 public: // Construction
 	static_assert(std::is_trivially_destructible_v<T>);
 	SmallVectorRef() {}
-	SmallVectorRef(const SmallVectorRef<T, InlineMembers>& other)
+	explicit(false) SmallVectorRef(const SmallVectorRef<T, InlineMembers>& other)
 	  : m_size(other.m_size), arr(other.arr), data(other.data) {}
 	SmallVectorRef& operator=(const SmallVectorRef<T, InlineMembers>& other) {
 		m_size = other.m_size;

@@ -42,7 +42,7 @@ struct BackupWorkload : TestWorkload {
 	bool allowPauses;
 	Optional<std::string> encryptionKeyFileName;
 
-	BackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit BackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		locked.set(sharedRandomNumber % 2);
 		bool partitioned = getOption(options, "usePartitionedLog"_sr, true);
 		usePartitionedLog.set(partitioned);

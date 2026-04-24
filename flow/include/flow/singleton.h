@@ -64,7 +64,7 @@ public:
 		}
 	}
 
-	WinLockGuard(const WinLockGuard&) = delete;
+	explicit(false) WinLockGuard(const WinLockGuard&) = delete;
 	WinLockGuard& operator=(const WinLockGuard&) = delete;
 };
 #define MUTEX_GUARD WinLockGuard
@@ -91,7 +91,7 @@ struct create_static {
 		double double_;
 		long double longDouble_;
 		struct Test;
-		int Test::* pMember_;
+		int Test::*pMember_;
 		int (Test::*pMemberFn_)(int);
 	};
 

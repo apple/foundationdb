@@ -44,7 +44,7 @@ class StreamCipherKey : NonCopyable {
 	int keySize;
 
 public:
-	StreamCipherKey(int size);
+	explicit StreamCipherKey(int size);
 	~StreamCipherKey();
 
 	int size() const { return keySize; }
@@ -69,7 +69,7 @@ class StreamCipher final : NonCopyable {
 
 public:
 	StreamCipher();
-	StreamCipher(int KeySize);
+	explicit StreamCipher(int KeySize);
 	~StreamCipher();
 	EVP_CIPHER_CTX* getCtx();
 	HMAC_CTX* getHmacCtx();

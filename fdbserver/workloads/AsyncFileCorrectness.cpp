@@ -73,7 +73,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 	double averageCpuUtilization;
 	PerfIntCounter numOperations;
 
-	AsyncFileCorrectnessWorkload(WorkloadContext const& wcx)
+	explicit AsyncFileCorrectnessWorkload(WorkloadContext const& wcx)
 	  : AsyncFileWorkload(wcx), memoryFile(nullptr), success(true), numOperations("Num Operations") {
 		maxOperationSize = getOption(options, "maxOperationSize"_sr, 4096);
 		numSimultaneousOperations = getOption(options, "numSimultaneousOperations"_sr, 10);

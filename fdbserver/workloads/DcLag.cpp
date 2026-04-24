@@ -49,7 +49,7 @@ struct DcLagWorkload : TestWorkload {
 	double startDelay;
 	std::vector<std::pair<IPAddress, IPAddress>> cloggedPairs;
 
-	DcLagWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit DcLagWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
 		testDuration = getOption(options, "testDuration"_sr, 1000.0);
 		startDelay = getOption(options, "startDelay"_sr, 10.0);

@@ -315,7 +315,7 @@ public:
 	boost::interprocess::permissions permission;
 
 private:
-	WorldReadablePermissions(const WorldReadablePermissions& rhs) {}
+	explicit(false) WorldReadablePermissions(const WorldReadablePermissions& rhs) {}
 #ifdef _WIN32
 	SECURITY_ATTRIBUTES sa;
 #endif

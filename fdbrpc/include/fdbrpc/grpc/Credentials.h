@@ -41,7 +41,7 @@ namespace ge = grpc::experimental;
 // provide secure or insecure credentials based on the underlying configuration.
 class GrpcCredentialProvider {
 public:
-	virtual ~GrpcCredentialProvider() {};
+	virtual ~GrpcCredentialProvider(){};
 
 	virtual std::shared_ptr<grpc::ServerCredentials> serverCredentials() const = 0;
 	virtual std::shared_ptr<grpc::ChannelCredentials> clientCredentials() const = 0;
@@ -77,7 +77,7 @@ public:
 // a valid certificate for authentication.
 class GrpcTlsCredentialProvider : public GrpcCredentialProvider {
 public:
-	GrpcTlsCredentialProvider(TLSConfig* config)
+	explicit GrpcTlsCredentialProvider(TLSConfig* config)
 	  : provider_(std::make_shared<ge::FileWatcherCertificateProvider>(config->getKeyPathSync(),
 	                                                                   config->getCertificatePathSync(),
 	                                                                   config->getCAPathSync(),

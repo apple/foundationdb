@@ -54,7 +54,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 		out.insert({ "RandomRangeLock" });
 	}
 
-	BackupToDBCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit BackupToDBCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		locked.set(sharedRandomNumber % 2);
 		backupAfter = getOption(options, "backupAfter"_sr, 10.0);
 		double minBackupAfter = getOption(options, "minBackupAfter"_sr, backupAfter);

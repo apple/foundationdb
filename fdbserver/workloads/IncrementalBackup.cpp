@@ -55,7 +55,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 	Standalone<StringRef> blobManifestUrl;
 	Optional<std::string> encryptionKeyFileName;
 
-	IncrementalBackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit IncrementalBackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		backupDir = getOption(options, "backupDir"_sr, "file://simfdb/backups/"_sr);
 		tag = getOption(options, "tag"_sr, "default"_sr);
 		submitOnly = getOption(options, "submitOnly"_sr, false);

@@ -39,7 +39,7 @@ struct SpanContextMessage {
 	SpanID spanContext;
 
 	SpanContextMessage() {}
-	SpanContextMessage(SpanID const& spanContext) : spanContext(spanContext) {}
+	explicit SpanContextMessage(SpanID const& spanContext) : spanContext(spanContext) {}
 
 	std::string toString() const {
 		return format(

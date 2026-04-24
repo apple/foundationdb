@@ -38,7 +38,7 @@ struct StatusWorkload : TestWorkload {
 	double worstLatency = 0;
 	Optional<StatusObject> parsedSchema;
 
-	StatusWorkload(WorkloadContext const& wcx)
+	explicit StatusWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), requests("Status requests issued"), replies("Status replies received"),
 	    errors("Status Errors"), totalSize("Status reply size sum") {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);

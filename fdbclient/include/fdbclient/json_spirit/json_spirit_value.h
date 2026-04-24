@@ -45,23 +45,24 @@ public:
 	typedef typename String_type::const_pointer Const_str_ptr; // eg const char*
 
 	Value_impl(); // creates null value
-	Value_impl(Const_str_ptr value);
-	Value_impl(const String_type& value);
-	Value_impl(const Object& value);
-	Value_impl(const Array& value);
-	Value_impl(bool value);
-	Value_impl(int value);
-	Value_impl(int64_t value);
-	Value_impl(uint64_t value);
-	Value_impl(double value);
+	explicit(false) Value_impl(Const_str_ptr value);
+	explicit(false) Value_impl(const String_type& value);
+	explicit(false) Value_impl(const Object& value);
+	explicit(false) Value_impl(const Array& value);
+	explicit(false) Value_impl(bool value);
+	explicit(false) Value_impl(int value);
+	explicit(false) Value_impl(int64_t value);
+	explicit(false) Value_impl(uint64_t value);
+	explicit(false) Value_impl(double value);
 
 	template <class Iter>
 	Value_impl(Iter first, Iter last); // constructor from containers, e.g. std::vector or std::list
 
 	template <BOOST_VARIANT_ENUM_PARAMS(typename T)>
-	Value_impl(const boost::variant<BOOST_VARIANT_ENUM_PARAMS(T)>& variant); // constructor for compatible variant types
+	explicit(false) Value_impl(
+	    const boost::variant<BOOST_VARIANT_ENUM_PARAMS(T)>& variant); // constructor for compatible variant types
 
-	Value_impl(const Value_impl& other);
+	explicit(false) Value_impl(const Value_impl& other);
 
 	bool operator==(const Value_impl& lhs) const;
 

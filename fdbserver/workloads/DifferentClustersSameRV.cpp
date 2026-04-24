@@ -43,7 +43,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 	Value keyToWatch;
 	bool switchComplete = false;
 
-	DifferentClustersSameRVWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit DifferentClustersSameRVWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		ASSERT(g_simulator->extraDatabases.size() == 1);
 		extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0]);
 		testDuration = getOption(options, "testDuration"_sr, 100.0);

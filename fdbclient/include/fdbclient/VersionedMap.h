@@ -90,7 +90,7 @@ struct PTree : public ReferenceCounted<PTree<T>>, FastAllocated<PTree<T>>, NonCo
 	}
 
 private:
-	PTree(PTree const&);
+	explicit(false) PTree(PTree const&);
 };
 
 template <class T>
@@ -108,8 +108,8 @@ public:
 	PTreeFinger() {}
 
 	// Explicit copy constructors ensure we copy the live values in entries_.
-	PTreeFinger(PTreeFinger const& f) { *this = f; }
-	PTreeFinger(PTreeFinger&& f) { *this = f; }
+	explicit(false) PTreeFinger(PTreeFinger const& f) { *this = f; }
+	explicit(false) PTreeFinger(PTreeFinger&& f) { *this = f; }
 
 	PTreeFinger& operator=(PTreeFinger const& f) {
 		size_ = f.size_;
@@ -737,7 +737,7 @@ public:
 	VersionedMap() : oldestVersion(0), latestVersion(0), priorityRandom(deterministicRandom()) {
 		roots.emplace_back(0, Tree());
 	}
-	VersionedMap(VersionedMap&& v) noexcept
+	explicit(false) VersionedMap(VersionedMap&& v) noexcept
 	  : oldestVersion(v.oldestVersion), latestVersion(v.latestVersion), priorityRandom(std::move(v.priorityRandom)),
 	    roots(std::move(v.roots)) {}
 	void operator=(VersionedMap&& v) noexcept {

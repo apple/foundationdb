@@ -44,7 +44,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	Standalone<VectorRef<KeyRangeRef>> keys;
 	Standalone<VectorRef<KeyRangeRef>> rwKeys;
 
-	SpecialKeySpaceCorrectnessWorkload(WorkloadContext const& wcx)
+	explicit SpecialKeySpaceCorrectnessWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), wrongResults("Wrong Results"), keysCount("Number of generated keys") {
 		minKeysPerRange = getOption(options, "minKeysPerRange"_sr, 1);
 		maxKeysPerRange = getOption(options, "maxKeysPerRange"_sr, 100);

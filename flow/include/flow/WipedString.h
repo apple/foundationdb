@@ -110,8 +110,8 @@ public:
 		}
 	}
 
-	WipedString(const WipedString& other) noexcept = default;
-	WipedString(WipedString&& other) noexcept = default;
+	explicit(false) WipedString(const WipedString& other) noexcept = default;
+	explicit(false) WipedString(WipedString&& other) noexcept = default;
 	WipedString& operator=(const WipedString& other) noexcept = default;
 	WipedString& operator=(WipedString&& other) noexcept = default;
 

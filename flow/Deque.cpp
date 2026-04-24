@@ -84,7 +84,7 @@ struct RandomlyThrows {
 	RandomlyThrows() = default;
 	explicit RandomlyThrows(int data) : data(data) {}
 	~RandomlyThrows() = default;
-	RandomlyThrows(const RandomlyThrows& other) : data(other.data) { randomlyThrow(); }
+	explicit(false) RandomlyThrows(const RandomlyThrows& other) : data(other.data) { randomlyThrow(); }
 	RandomlyThrows& operator=(const RandomlyThrows& other) {
 		data = other.data;
 		randomlyThrow();

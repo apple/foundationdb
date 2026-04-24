@@ -44,7 +44,7 @@ struct SaveAndKillWorkload : TestWorkload {
 	double testDuration;
 	int isRestoring;
 
-	SaveAndKillWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit SaveAndKillWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		restartInfo = getOption(options, "restartInfoLocation"_sr, "simfdb/restartInfo.ini"_sr).toString();
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		isRestoring = getOption(options, "isRestoring"_sr, 0);

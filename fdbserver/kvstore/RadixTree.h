@@ -89,7 +89,7 @@ private:
 		// constructor for all kinds of node (root/internal/leaf)
 		node() : m_is_leaf(0), m_is_inline(0), m_inline_length(0), m_depth(0), key(), arena(), m_parent(nullptr) {}
 
-		node(const node&) = delete; // delete
+		explicit(false) node(const node&) = delete; // delete
 		node& operator=(const node& other) {
 			m_is_leaf = other.m_is_leaf;
 			m_is_inline = other.m_is_inline;
@@ -151,7 +151,7 @@ private:
 	};
 
 	struct leafNode : FastAllocated<leafNode> {
-		leafNode(const StringRef& content) : base(), is_inline(0), inline_length(0), arena() {
+		explicit leafNode(const StringRef& content) : base(), is_inline(0), inline_length(0), arena() {
 			base.m_is_leaf = 1;
 			setValue(content);
 		}
@@ -235,8 +235,8 @@ public:
 		node* m_pointee;
 
 		iterator() : m_pointee(nullptr) {}
-		iterator(const iterator& r) : m_pointee(r.m_pointee) {}
-		iterator(node* p) : m_pointee(p) {}
+		explicit(false) iterator(const iterator& r) : m_pointee(r.m_pointee) {}
+		explicit(false) iterator(node* p) : m_pointee(p) {}
 		iterator& operator=(const iterator& r) {
 			m_pointee = r.m_pointee;
 			return *this;
@@ -262,7 +262,7 @@ public:
 
 	~radix_tree() {}
 
-	radix_tree(const radix_tree& other) = delete; // delete
+	explicit(false) radix_tree(const radix_tree& other) = delete; // delete
 	radix_tree& operator=(const radix_tree other) = delete; // delete
 
 	inline std::tuple<size_type, size_type, size_type> size() const {

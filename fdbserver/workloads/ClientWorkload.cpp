@@ -34,7 +34,7 @@ class WorkloadProcessState {
 	Future<Void> processActor;
 	Promise<Void> init;
 
-	WorkloadProcessState(int clientId) : clientId(clientId) { processActor = processStart(); }
+	explicit WorkloadProcessState(int clientId) : clientId(clientId) { processActor = processStart(); }
 
 	~WorkloadProcessState() {
 		TraceEvent("ShutdownClientForWorkload", id).log();

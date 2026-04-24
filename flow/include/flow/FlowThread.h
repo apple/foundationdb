@@ -196,8 +196,8 @@ template <class T>
 class ThreadFutureStream {
 public:
 	ThreadFutureStream() : queue(nullptr) {}
-	ThreadFutureStream(const ThreadFutureStream& rhs) : queue(rhs.queue) { queue->addFutureRef(); }
-	ThreadFutureStream(ThreadFutureStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
+	explicit(false) ThreadFutureStream(const ThreadFutureStream& rhs) : queue(rhs.queue) { queue->addFutureRef(); }
+	explicit(false) ThreadFutureStream(ThreadFutureStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
 	explicit ThreadFutureStream(ThreadNotifiedQueue<T>* queue) : queue(queue) {}
 	~ThreadFutureStream() {
 		if (queue)
@@ -255,8 +255,10 @@ template <class T>
 class ThreadReturnPromiseStream {
 public:
 	ThreadReturnPromiseStream() : queue(new ThreadNotifiedQueue<T>(0, 1)) {}
-	ThreadReturnPromiseStream(const ThreadReturnPromiseStream& rhs) = delete;
-	ThreadReturnPromiseStream(ThreadReturnPromiseStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
+	explicit(false) ThreadReturnPromiseStream(const ThreadReturnPromiseStream& rhs) = delete;
+	explicit(false) ThreadReturnPromiseStream(ThreadReturnPromiseStream&& rhs) noexcept : queue(rhs.queue) {
+		rhs.queue = 0;
+	}
 	~ThreadReturnPromiseStream() {
 		if (queue)
 			queue->delPromiseRef();

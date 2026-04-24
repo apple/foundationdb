@@ -330,14 +330,14 @@ protected:
 
 	public:
 		constexpr State() noexcept : value(Type::DISABLED) {}
-		State(Severity severity) noexcept;
+		explicit State(Severity severity) noexcept;
 		State(Severity severity, AuditedEvent) noexcept : State(severity) {
 			if (*this)
 				value = Type::FORCED;
 		}
 
-		State(const State& other) noexcept = default;
-		State(State&& other) noexcept : value(other.value) { other.value = Type::DISABLED; }
+		explicit(false) State(const State& other) noexcept = default;
+		explicit(false) State(State&& other) noexcept : value(other.value) { other.value = Type::DISABLED; }
 		State& operator=(const State& other) noexcept = default;
 		State& operator=(State&& other) noexcept {
 			if (this != &other) {
@@ -512,7 +512,7 @@ struct SWIFT_CXX_IMPORT_OWNED TraceEvent : public BaseTraceEvent {
 class StringRef;
 
 struct TraceInterval {
-	TraceInterval(const char* type, UID id = UID()) : type(type), pairID(id), count(-1), severity(SevInfo) {}
+	explicit TraceInterval(const char* type, UID id = UID()) : type(type), pairID(id), count(-1), severity(SevInfo) {}
 
 	TraceInterval& begin();
 	TraceInterval& end() { return *this; }
@@ -547,7 +547,7 @@ extern LatestEventCache latestEventCache;
 struct EventCacheHolder : public ReferenceCounted<EventCacheHolder> {
 	std::string trackingKey;
 
-	EventCacheHolder(const std::string& trackingKey) : trackingKey(trackingKey) {}
+	explicit EventCacheHolder(const std::string& trackingKey) : trackingKey(trackingKey) {}
 
 	~EventCacheHolder() { latestEventCache.clear(trackingKey); }
 };

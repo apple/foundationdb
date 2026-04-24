@@ -68,8 +68,8 @@ struct KeyValueMap final : public ReferenceCounted<KeyValueMap> {
 	std::vector<AttribRecord> _keyvaluearray;
 
 	KeyValueMap() {}
-	KeyValueMap(const LocalityData& data);
-	KeyValueMap(const KeyValueMap& entry) : _keyvaluearray(entry._keyvaluearray) {}
+	explicit KeyValueMap(const LocalityData& data);
+	explicit(false) KeyValueMap(const KeyValueMap& entry) : _keyvaluearray(entry._keyvaluearray) {}
 	KeyValueMap& operator=(KeyValueMap const& source) {
 		_keyvaluearray = source._keyvaluearray;
 		return *this;
@@ -110,7 +110,8 @@ struct LocalityRecord final : public ReferenceCounted<LocalityRecord> {
 	LocalityEntry _entryIndex;
 	LocalityRecord(Reference<KeyValueMap> const& dataMap, int arrayIndex)
 	  : _dataMap(dataMap), _entryIndex(arrayIndex) {}
-	LocalityRecord(LocalityRecord const& entry) : _dataMap(entry._dataMap), _entryIndex(entry._entryIndex) {}
+	explicit(false) LocalityRecord(LocalityRecord const& entry)
+	  : _dataMap(entry._dataMap), _entryIndex(entry._entryIndex) {}
 	LocalityRecord& operator=(LocalityRecord const& source) {
 		_dataMap = source._dataMap;
 		_entryIndex = source._entryIndex;
@@ -143,7 +144,8 @@ struct StringToIntMap final : public ReferenceCounted<StringToIntMap> {
 	std::map<std::string, int> _hashmap;
 	std::vector<std::string> _lookuparray;
 	StringToIntMap() {}
-	StringToIntMap(StringToIntMap const& source) : _hashmap(source._hashmap), _lookuparray(source._lookuparray) {}
+	explicit(false) StringToIntMap(StringToIntMap const& source)
+	  : _hashmap(source._hashmap), _lookuparray(source._lookuparray) {}
 	StringToIntMap& operator=(StringToIntMap const& source) {
 		_hashmap = source._hashmap;
 		_lookuparray = source._lookuparray;

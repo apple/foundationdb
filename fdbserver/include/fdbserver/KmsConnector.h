@@ -33,7 +33,7 @@
 
 class KmsConnector : public NonCopyable {
 public:
-	KmsConnector(const std::string& conStr) : connectorStr(conStr) {}
+	explicit KmsConnector(const std::string& conStr) : connectorStr(conStr) {}
 	virtual ~KmsConnector() {}
 
 	virtual Future<Void> connectorCore(struct KmsConnectorInterface interf) = 0;

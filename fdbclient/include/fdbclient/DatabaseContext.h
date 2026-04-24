@@ -66,8 +66,8 @@ struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>
 	  : Locations(v) {}
 	LocationInfo(const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& v, bool hasCaches)
 	  : Locations(v), hasCaches(hasCaches) {}
-	LocationInfo(const LocationInfo&) = delete;
-	LocationInfo(LocationInfo&&) = delete;
+	explicit(false) LocationInfo(const LocationInfo&) = delete;
+	explicit(false) LocationInfo(LocationInfo&&) = delete;
 	LocationInfo& operator=(const LocationInfo&) = delete;
 	LocationInfo& operator=(LocationInfo&&) = delete;
 	bool hasCaches = false;
@@ -88,7 +88,7 @@ private:
 	Smoother smoothReleased;
 
 public:
-	ClientTagThrottleData(ClientTagThrottleLimits const& limits)
+	explicit ClientTagThrottleData(ClientTagThrottleLimits const& limits)
 	  : tpsRate(limits.tpsRate), expiration(limits.expiration), lastCheck(now()),
 	    smoothRate(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW),
 	    smoothReleased(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW) {
@@ -151,7 +151,7 @@ public:
 
 	Reference<const WatchParameters> parameters;
 
-	WatchMetadata(Reference<const WatchParameters> parameters) : parameters(parameters) {}
+	explicit WatchMetadata(Reference<const WatchParameters> parameters) : parameters(parameters) {}
 };
 
 struct MutationAndVersionStream {
@@ -378,7 +378,9 @@ public:
 		TagSet tags;
 		Optional<UID> debugID;
 
-		VersionRequest(SpanContext spanContext, TagSet tags = TagSet(), Optional<UID> debugID = Optional<UID>())
+		explicit VersionRequest(SpanContext spanContext,
+		                        TagSet tags = TagSet(),
+		                        Optional<UID> debugID = Optional<UID>())
 		  : spanContext(spanContext), tags(tags), debugID(debugID) {}
 	};
 
@@ -665,7 +667,8 @@ private:
 
 // Similar to tr.onError(), but doesn't require a DatabaseContext.
 struct Backoff {
-	Backoff(double backoff = CLIENT_KNOBS->DEFAULT_BACKOFF, double maxBackoff = CLIENT_KNOBS->DEFAULT_MAX_BACKOFF)
+	explicit Backoff(double backoff = CLIENT_KNOBS->DEFAULT_BACKOFF,
+	                 double maxBackoff = CLIENT_KNOBS->DEFAULT_MAX_BACKOFF)
 	  : backoff(backoff), maxBackoff(maxBackoff) {}
 
 	Future<Void> onError() {

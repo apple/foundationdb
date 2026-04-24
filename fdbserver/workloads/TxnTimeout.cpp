@@ -42,7 +42,7 @@ struct TxnTimeout : TestWorkload {
 	int txnsSucceeded{ 0 }; // Number of transactions that completed successfully
 	int txnsFailed{ 0 }; // Number of transactions that failed with unexpected errors
 
-	TxnTimeout(const WorkloadContext& wctx) : TestWorkload(wctx) {
+	explicit TxnTimeout(const WorkloadContext& wctx) : TestWorkload(wctx) {
 		// Parse workload configuration from TOML test definition
 		testDuration = getOption(options, "testDuration"_sr, 120.0);
 		actorsPerClient = getOption(options, "actorsPerClient"_sr, 1);

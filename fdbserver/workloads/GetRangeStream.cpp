@@ -31,7 +31,7 @@ struct GetRangeStream : TestWorkload {
 	Key end;
 	bool printKVPairs;
 
-	GetRangeStream(WorkloadContext const& wcx) : TestWorkload(wcx), bytesRead("BytesRead") {
+	explicit GetRangeStream(WorkloadContext const& wcx) : TestWorkload(wcx), bytesRead("BytesRead") {
 		useGetRange = getOption(options, "useGetRange"_sr, false);
 		begin = getOption(options, "begin"_sr, normalKeys.begin);
 		end = getOption(options, "end"_sr, normalKeys.end);

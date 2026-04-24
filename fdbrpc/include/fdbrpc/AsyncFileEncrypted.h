@@ -54,7 +54,7 @@ private:
 		size_t evict();
 
 	public:
-		RandomCache(size_t maxSize);
+		explicit RandomCache(size_t maxSize);
 		void insert(uint32_t block, const Standalone<StringRef>& value);
 		Optional<Standalone<StringRef>> get(uint32_t block) const;
 	} readBuffers;

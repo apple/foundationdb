@@ -120,7 +120,7 @@ TEST_CASE("/flow/XmlTraceEscape") {
 	                            "<<even more>\n";
 
 	auto defaultSeverity = xmlIllegalCharSeverity;
-	ScopeExit cleanup = [&]() { xmlIllegalCharSeverity = defaultSeverity; };
+	ScopeExit cleanup([&]() { xmlIllegalCharSeverity = defaultSeverity; });
 
 	xmlIllegalCharSeverity = SevInfo;
 

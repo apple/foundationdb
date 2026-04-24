@@ -34,7 +34,7 @@ struct StatusObject : json_spirit::mObject {
 	typedef json_spirit::mArray Array;
 
 	StatusObject() {}
-	StatusObject(json_spirit::mObject const& o) : json_spirit::mObject(o) {}
+	explicit(false) StatusObject(json_spirit::mObject const& o) : json_spirit::mObject(o) {}
 };
 
 template <class Ar>
@@ -61,12 +61,12 @@ void save(Ar& ar, StatusObject const& statusObj) {
 
 struct StatusArray : json_spirit::mArray {
 	StatusArray() {}
-	StatusArray(json_spirit::mArray const& o) : json_spirit::mArray(o.begin(), o.end()) {}
+	explicit(false) StatusArray(json_spirit::mArray const& o) : json_spirit::mArray(o.begin(), o.end()) {}
 };
 
 struct StatusValue : json_spirit::mValue {
 	StatusValue() {}
-	StatusValue(json_spirit::mValue const& o) : json_spirit::mValue(o) {}
+	explicit StatusValue(json_spirit::mValue const& o) : json_spirit::mValue(o) {}
 };
 
 enum class MessageType {

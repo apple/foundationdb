@@ -35,7 +35,8 @@ struct WatchAndWaitWorkload : TestWorkload {
 	std::vector<Future<Void>> clients;
 	PerfIntCounter triggers, retries;
 
-	WatchAndWaitWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), triggers("Triggers"), retries("Retries") {
+	explicit WatchAndWaitWorkload(WorkloadContext const& wcx)
+	  : TestWorkload(wcx), triggers("Triggers"), retries("Retries") {
 		testDuration = getOption(options, "testDuration"_sr, 600.0);
 		watchCount = getOption(options, "watchCount"_sr, (uint64_t)10000);
 		nodeCount = getOption(options, "nodeCount"_sr, (uint64_t)100000);

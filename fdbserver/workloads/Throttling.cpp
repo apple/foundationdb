@@ -45,7 +45,7 @@ struct TokenBucket {
 		}
 	}
 
-	TokenBucket(double maxBurst = 1000) : transactionRate(0), maxBurst(maxBurst), bucketSize(maxBurst) {
+	explicit TokenBucket(double maxBurst = 1000) : transactionRate(0), maxBurst(maxBurst), bucketSize(maxBurst) {
 		tokenAdderActor = tokenAdder();
 	}
 
@@ -81,7 +81,7 @@ struct ThrottlingWorkload : KVWorkload {
 
 	static constexpr auto NAME = "Throttling";
 
-	ThrottlingWorkload(WorkloadContext const& wcx) : KVWorkload(wcx), transactionsCommitted(0) {
+	explicit ThrottlingWorkload(WorkloadContext const& wcx) : KVWorkload(wcx), transactionsCommitted(0) {
 		testDuration = getOption(options, "testDuration"_sr, 60.0);
 		actorsPerClient = getOption(options, "actorsPerClient"_sr, 10);
 		writesPerTransaction = getOption(options, "writesPerTransaction"_sr, 10);

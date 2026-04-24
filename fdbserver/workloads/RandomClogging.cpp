@@ -38,7 +38,7 @@ struct RandomCloggingWorkload : FailureInjectionWorkload {
 
 	RandomCloggingWorkload(WorkloadContext const& wcx, NoOptions) : FailureInjectionWorkload(wcx) {}
 
-	RandomCloggingWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
+	explicit RandomCloggingWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
 		testDuration = getOption(options, "testDuration"_sr, testDuration);
 		scale = getOption(options, "scale"_sr, scale);

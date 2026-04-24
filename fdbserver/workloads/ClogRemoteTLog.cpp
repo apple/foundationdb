@@ -51,7 +51,7 @@ struct ClogRemoteTLog : TestWorkload {
 	    cloggedRemoteTLog; // set after clogging is done, we use this state to ensure that it's
 	                       // eventually not present in dbInfo (which implies it was excluded by gray failure)
 
-	ClogRemoteTLog(const WorkloadContext& wctx) : TestWorkload(wctx) {
+	explicit ClogRemoteTLog(const WorkloadContext& wctx) : TestWorkload(wctx) {
 		enabled =
 		    (clientId == 0); // only run this workload for a single client, and that too the first client (by its id)
 		testDuration = getOption(options, "testDuration"_sr, 120);

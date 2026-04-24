@@ -94,7 +94,7 @@ struct KeyWithWriter {
 
 	KeyWithWriter(Standalone<StringRef> const& key, BinaryWriter& writer, int writerOffset = 0)
 	  : key(key), writer(std::move(writer)), writerOffset(writerOffset) {}
-	KeyWithWriter(KeyWithWriter&& r)
+	explicit(false) KeyWithWriter(KeyWithWriter&& r)
 	  : key(std::move(r.key)), writer(std::move(r.writer)), writerOffset(r.writerOffset) {}
 	void operator=(KeyWithWriter&& r) {
 		key = std::move(r.key);
@@ -271,7 +271,7 @@ struct MetricData {
 	  : start(0), rollTime(std::numeric_limits<uint64_t>::max()), appendStart(appendStart),
 	    writer(AssumeVersion(g_network->protocolVersion())) {}
 
-	MetricData(MetricData&& r) noexcept
+	explicit(false) MetricData(MetricData&& r) noexcept
 	  : start(r.start), rollTime(r.rollTime), appendStart(r.appendStart), writer(std::move(r.writer)) {}
 
 	void operator=(MetricData&& r) noexcept {
@@ -373,18 +373,20 @@ auto tuple_zip_invoke(F f, const Tuples&... ts) -> decltype(f(std::get<I>(ts)...
 }
 
 template <typename F, size_t... Is, typename... Tuples>
-auto tuple_map_impl(F f, index_sequence<Is...>, const Tuples&... ts)
-    -> decltype(std::make_tuple(tuple_zip_invoke<Is>(f, ts...)...)) {
+auto tuple_map_impl(F f,
+                    index_sequence<Is...>,
+                    const Tuples&... ts) -> decltype(std::make_tuple(tuple_zip_invoke<Is>(f, ts...)...)) {
 	return std::make_tuple(tuple_zip_invoke<Is>(f, ts...)...);
 }
 
 // tuple_map( f(a,b), (a1,a2,a3), (b1,b2,b3) ) = (f(a1,b1), f(a2,b2), f(a3,b3))
 template <typename F, typename Tuple, typename... Tuples>
-auto tuple_map(F f, const Tuple& t, const Tuples&... ts) -> decltype(tuple_map_impl(
-    f,
-    typename make_index_sequence_impl<0, index_sequence<>, std::tuple_size<Tuple>::value>::type(),
-    t,
-    ts...)) {
+auto tuple_map(F f, const Tuple& t, const Tuples&... ts)
+    -> decltype(tuple_map_impl(
+        f,
+        typename make_index_sequence_impl<0, index_sequence<>, std::tuple_size<Tuple>::value>::type(),
+        t,
+        ts...)) {
 	return tuple_map_impl(
 	    f, typename make_index_sequence_impl<0, index_sequence<>, std::tuple_size<Tuple>::value>::type(), t, ts...);
 }
@@ -430,7 +432,7 @@ template <auto MemberPtr>
 struct MemberPointerTraits;
 
 // DescribeField only takes a member pointer at the call site; recover the owning class and field type here.
-template <class Class, class FieldType, FieldType Class::* MemberPtr>
+template <class Class, class FieldType, FieldType Class::*MemberPtr>
 struct MemberPointerTraits<MemberPtr> {
 	using class_type = Class;
 	using field_type = FieldType;
@@ -784,7 +786,7 @@ template <class T, class Descriptor = NullDescriptor, class FieldLevelType = Fie
 struct EventField : public Descriptor {
 	std::vector<FieldLevelType> levels;
 
-	EventField(EventField&& r) noexcept : Descriptor(r), levels(std::move(r.levels)) {}
+	explicit(false) EventField(EventField&& r) noexcept : Descriptor(r), levels(std::move(r.levels)) {}
 
 	void operator=(EventField&& r) noexcept { levels = std::move(r.levels); }
 

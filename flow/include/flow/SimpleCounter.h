@@ -74,12 +74,12 @@ class SimpleCounter {
 	static_assert(std::is_same_v<T, int64_t> || std::is_same_v<T, double>, "T must be int64_t or double");
 
 private:
-	SimpleCounter(std::string_view n) : value(T(0)), name_(n) {}
+	explicit SimpleCounter(std::string_view n) : value(T(0)), name_(n) {}
 
 	// Not copyable or movable.
-	SimpleCounter(const SimpleCounter&) = delete;
+	explicit(false) SimpleCounter(const SimpleCounter&) = delete;
 	SimpleCounter& operator=(const SimpleCounter&) = delete;
-	SimpleCounter(SimpleCounter&&) = delete;
+	explicit(false) SimpleCounter(SimpleCounter&&) = delete;
 	SimpleCounter& operator=(SimpleCounter&&) = delete;
 
 private:

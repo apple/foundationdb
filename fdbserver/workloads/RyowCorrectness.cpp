@@ -61,7 +61,7 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 	// The number of operations to perform on a transaction in between commits
 	int opsPerTransaction;
 
-	RyowCorrectnessWorkload(WorkloadContext const& wcx) : ApiWorkload(wcx, 1) {
+	explicit RyowCorrectnessWorkload(WorkloadContext const& wcx) : ApiWorkload(wcx, 1) {
 		duration = getOption(options, "duration"_sr, 60);
 		opsPerTransaction = getOption(options, "opsPerTransaction"_sr, 50);
 	}

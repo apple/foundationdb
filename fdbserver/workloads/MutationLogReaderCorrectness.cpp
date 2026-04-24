@@ -52,7 +52,7 @@ struct MutationLogReaderCorrectnessWorkload : TestWorkload {
 		return StringRef(format("%lld (%llx)", static_cast<long long>(v), static_cast<long long>(v)));
 	}
 
-	MutationLogReaderCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit MutationLogReaderCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
 		uid = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned());
 		baLogRangePrefix = uid.withPrefix(backupLogKeys.begin);

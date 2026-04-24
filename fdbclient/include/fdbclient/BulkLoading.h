@@ -189,7 +189,7 @@ public:
 		}
 	}
 
-	BulkLoadFileSet(const std::string& rootPath) : rootPath(rootPath) {
+	explicit BulkLoadFileSet(const std::string& rootPath) : rootPath(rootPath) {
 		if (rootPath.empty()) {
 			TraceEvent(SevError, "BulkLoadFileSetProvideInvalidPath")
 			    .suppressFor(10.0)
@@ -380,7 +380,7 @@ public:
 	// [ByteSampleOverhead]: 100, [ByteSampleMinimalProbability]: 0.500000, [loadType]: 1, [TransportMethod]: 1"
 	// To decode the string, we firstly split the string by ", ". Then, for each part, we remove "[*]: ". Finally, we
 	// convert the remain string for each part to the fields defined in the BulkLoadManifest.
-	BulkLoadManifest(const std::string& rawString) {
+	explicit BulkLoadManifest(const std::string& rawString) {
 		try {
 			std::vector<std::string> parts = splitString(rawString, ", ");
 			formatVersion = std::stoi(stringRemovePrefix(parts[0], "[FormatVersion]: "));
@@ -566,7 +566,7 @@ public:
 
 	BulkLoadManifestSet() = default;
 
-	BulkLoadManifestSet(int inputMaxCount) { maxCount = inputMaxCount; }
+	explicit BulkLoadManifestSet(int inputMaxCount) { maxCount = inputMaxCount; }
 
 	bool isValid() const {
 		if (maxCount == 0) {
@@ -965,7 +965,7 @@ public:
 	// "[FormatVersion]: 1, [ManifestCount]: 2"
 	// To decode the string, we firstly split the string by ", ". Then, for each part, we remove "[*]: ". Finally,
 	// we convert the remain string for each part to the fields defined in the BulkLoadJobManifestFileHeader.
-	BulkLoadJobManifestFileHeader(const std::string& rawString) {
+	explicit BulkLoadJobManifestFileHeader(const std::string& rawString) {
 		try {
 			std::vector<std::string> parts = splitString(rawString, ", ");
 			formatVersion = std::stoi(stringRemovePrefix(parts[0], "[FormatVersion]: "));
@@ -1017,7 +1017,7 @@ public:
 	// 50705947, [Bytes]: 6889" To decode the string, we firstly split the string by ", ". Then, for each part, we
 	// remove "[*]: ". Finally, we convert the remain string for each part to the fields defined in the
 	// BulkLoadJobFileManifestEntry.
-	BulkLoadJobFileManifestEntry(const std::string& rawString) {
+	explicit BulkLoadJobFileManifestEntry(const std::string& rawString) {
 		try {
 			std::vector<std::string> parts = splitString(rawString, ", ");
 			if (parts.size() != 5) {
@@ -1043,7 +1043,7 @@ public:
 	}
 
 	// Used when dumping
-	BulkLoadJobFileManifestEntry(const BulkLoadManifest& manifest)
+	explicit BulkLoadJobFileManifestEntry(const BulkLoadManifest& manifest)
 	  : beginKey(manifest.getBeginKey()), endKey(manifest.getEndKey()),
 	    manifestRelativePath(manifest.getManifestRelativePath()), version(manifest.getVersion()),
 	    bytes(manifest.getTotalBytes()) {
@@ -1092,9 +1092,9 @@ struct SSBulkLoadMetadata {
 public:
 	constexpr static FileIdentifier file_identifier = 1384506;
 
-	SSBulkLoadMetadata() : dataMoveId(UID()), conductBulkLoad(false) {};
+	SSBulkLoadMetadata() : dataMoveId(UID()), conductBulkLoad(false){};
 
-	SSBulkLoadMetadata(const UID& dataMoveId) : dataMoveId(dataMoveId) {
+	explicit SSBulkLoadMetadata(const UID& dataMoveId) : dataMoveId(dataMoveId) {
 		conductBulkLoad = getConductBulkLoadFromDataMoveId(dataMoveId);
 		return;
 	}

@@ -193,7 +193,7 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 
 	PerfIntCounter getCount, putCount, connectCount, failedConnectCount;
 
-	HTTPKeyValueStoreWorkload(WorkloadContext const& wcx)
+	explicit HTTPKeyValueStoreWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), putCount("PutCount"), getCount("GetCount"), connectCount("ConnectCount"),
 	    failedConnectCount("FailedConnectCount") {
 		testDuration = getOption(options, "testDuration"_sr, 30.0);

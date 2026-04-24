@@ -49,7 +49,7 @@ public:
 
 	struct DDRangeLocations {
 		DDRangeLocations() = default;
-		DDRangeLocations(KeyRangeRef range) : range(range) {}
+		explicit DDRangeLocations(KeyRangeRef range) : range(range) {}
 
 		// A map of dcId : list of servers
 		std::map<std::string, std::vector<StorageServerInterface>> servers;
@@ -256,7 +256,7 @@ protected:
 	std::vector<DDShardInfo> getDDShardInfos() const;
 
 public:
-	explicit DDMockTxnProcessor(std::shared_ptr<MockGlobalState> mgs = nullptr) : mgs(std::move(mgs)) {};
+	explicit DDMockTxnProcessor(std::shared_ptr<MockGlobalState> mgs = nullptr) : mgs(std::move(mgs)){};
 
 	Future<ServerWorkerInfos> getServerListAndProcessClasses() override;
 

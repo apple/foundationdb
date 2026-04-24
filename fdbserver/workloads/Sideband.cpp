@@ -57,7 +57,7 @@ struct SidebandWorkload : TestWorkload {
 	std::vector<Future<Void>> clients;
 	PerfIntCounter messages, consistencyErrors, keysUnexpectedlyPresent;
 
-	SidebandWorkload(WorkloadContext const& wcx)
+	explicit SidebandWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), messages("Messages"), consistencyErrors("Causal Consistency Errors"),
 	    keysUnexpectedlyPresent("KeysUnexpectedlyPresent") {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);

@@ -30,15 +30,15 @@ struct NetworkTestInterface {
 	RequestStream<struct NetworkTestRequest> test;
 	RequestStream<struct NetworkTestStreamingRequest> testStream;
 	NetworkTestInterface() {}
-	NetworkTestInterface(NetworkAddress remote);
-	NetworkTestInterface(INetwork* local);
+	explicit NetworkTestInterface(NetworkAddress remote);
+	explicit NetworkTestInterface(INetwork* local);
 };
 
 struct NetworkTestReply {
 	constexpr static FileIdentifier file_identifier = 14465374;
 	Value value;
 	NetworkTestReply() {}
-	NetworkTestReply(Value value) : value(value) {}
+	explicit NetworkTestReply(Value value) : value(value) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, value);

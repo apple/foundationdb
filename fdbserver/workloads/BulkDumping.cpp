@@ -71,7 +71,7 @@ struct BulkDumping : TestWorkload {
 		             "BulkLoading" });
 	}
 
-	BulkDumping(WorkloadContext const& wcx)
+	explicit BulkDumping(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), enabled(true), pass(true), cancelTimes(0),
 	    maxCancelTimes(getOption(options, "maxCancelTimes"_sr, deterministicRandom()->randomInt(0, 2))),
 	    bulkLoadTransportMethod(

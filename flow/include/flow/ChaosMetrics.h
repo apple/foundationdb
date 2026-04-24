@@ -68,7 +68,7 @@ private: // members
 
 private: // construction
 	DiskFailureInjector() = default;
-	DiskFailureInjector(DiskFailureInjector const&) = delete;
+	explicit(false) DiskFailureInjector(DiskFailureInjector const&) = delete;
 };
 
 struct BitFlipper {
@@ -82,7 +82,7 @@ private: // members
 
 private: // construction
 	BitFlipper() = default;
-	BitFlipper(BitFlipper const&) = delete;
+	explicit(false) BitFlipper(BitFlipper const&) = delete;
 };
 
 // S3 Fault Injector - Controls chaos injection rates for S3 operations
@@ -126,7 +126,7 @@ private: // members
 
 private: // construction
 	S3FaultInjector() = default;
-	S3FaultInjector(S3FaultInjector const&) = delete;
+	explicit(false) S3FaultInjector(S3FaultInjector const&) = delete;
 };
 
 #endif // FLOW_CHAOSMETRICS_H

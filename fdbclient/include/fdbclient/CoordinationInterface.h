@@ -39,9 +39,9 @@ struct ClientLeaderRegInterface {
 	Optional<Hostname> hostname;
 
 	ClientLeaderRegInterface() {}
-	ClientLeaderRegInterface(NetworkAddress remote);
-	ClientLeaderRegInterface(INetwork* local);
-	ClientLeaderRegInterface(Hostname hostname) : hostname(hostname) {}
+	explicit ClientLeaderRegInterface(NetworkAddress remote);
+	explicit ClientLeaderRegInterface(INetwork* local);
+	explicit ClientLeaderRegInterface(Hostname hostname) : hostname(hostname) {}
 
 	bool operator==(const ClientLeaderRegInterface& rhs) const {
 		return getLeader == rhs.getLeader && openDatabase == rhs.openDatabase;
@@ -66,7 +66,7 @@ public:
 	constexpr static FileIdentifier file_identifier = 13602011;
 
 	ClusterConnectionString() {}
-	ClusterConnectionString(const std::string& connectionString);
+	explicit ClusterConnectionString(const std::string& connectionString);
 	ClusterConnectionString(const std::vector<NetworkAddress>& coordinators, Key key);
 	ClusterConnectionString(const std::vector<Hostname>& hosts, Key key);
 
@@ -119,7 +119,7 @@ FDB_BOOLEAN_PARAM(ConnectionStringNeedsPersisted);
 // one that is only stored in memory.
 class IClusterConnectionRecord {
 public:
-	IClusterConnectionRecord(ConnectionStringNeedsPersisted connectionStringNeedsPersisted)
+	explicit IClusterConnectionRecord(ConnectionStringNeedsPersisted connectionStringNeedsPersisted)
 	  : connectionStringNeedsPersisted(connectionStringNeedsPersisted) {}
 	virtual ~IClusterConnectionRecord() {}
 
@@ -194,7 +194,7 @@ struct LeaderInfo {
 	bool forward;
 
 	LeaderInfo() : forward(false) {}
-	LeaderInfo(UID changeID) : changeID(changeID), forward(false) {}
+	explicit LeaderInfo(UID changeID) : changeID(changeID), forward(false) {}
 
 	bool operator<(LeaderInfo const& r) const { return changeID < r.changeID; }
 	bool operator>(LeaderInfo const& r) const { return r < *this; }

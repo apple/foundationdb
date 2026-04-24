@@ -35,7 +35,7 @@ struct DDMetricsExcludeWorkload : TestWorkload {
 	double peakInFlight;
 	double movingDataPerSec;
 
-	DDMetricsExcludeWorkload(WorkloadContext const& wcx)
+	explicit DDMetricsExcludeWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), ddDone(0.0), peakMovingData(0.0), peakInQueue(0.0), peakInFlight(0.0),
 	    movingDataPerSec(0.0) {
 		excludeIp = getOption(options, "excludeIp"_sr, Value("127.0.0.1"_sr));
