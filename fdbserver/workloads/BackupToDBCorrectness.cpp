@@ -775,9 +775,9 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 			}
 
 			// SOMEDAY: Remove after backup agents can exist quiescently
-			if ((g_simulator->drAgents == ISimulator::BackupAgentType::BackupToDB) &&
+			if ((fdbSimulationPolicyState().drAgents == FDBBackupAgentType::BackupToDB) &&
 			    (!BackupToDBCorrectnessWorkload::drAgentRequests)) {
-				g_simulator->drAgents = ISimulator::BackupAgentType::NoBackupAgents;
+				fdbSimulationPolicyState().drAgents = FDBBackupAgentType::NoBackupAgents;
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "BackupAndRestoreCorrectness").error(e);

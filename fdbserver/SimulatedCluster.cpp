@@ -563,18 +563,18 @@ Future<Void> runBackup(Reference<IClusterConnectionRecord> connRecord) {
 	Future<Void> agentFuture;
 	FileBackupAgent fileAgent;
 
-	while (g_simulator->backupAgents == ISimulator::BackupAgentType::WaitForType) {
+	while (fdbSimulationPolicyState().backupAgents == FDBBackupAgentType::WaitForType) {
 		co_await delay(1.0);
 	}
 
-	if (g_simulator->backupAgents == ISimulator::BackupAgentType::BackupToFile) {
+	if (fdbSimulationPolicyState().backupAgents == FDBBackupAgentType::BackupToFile) {
 		Database cx = Database::createDatabase(connRecord, ApiVersion::LATEST_VERSION);
 
 		TraceEvent("SimBackupAgentsStarting").log();
 		agentFuture =
 		    fileAgent.run(cx, 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT);
 
-		while (g_simulator->backupAgents == ISimulator::BackupAgentType::BackupToFile) {
+		while (fdbSimulationPolicyState().backupAgents == FDBBackupAgentType::BackupToFile) {
 			co_await delay(1.0);
 		}
 
@@ -589,11 +589,11 @@ Future<Void> runBackup(Reference<IClusterConnectionRecord> connRecord) {
 Future<Void> runDr(Reference<IClusterConnectionRecord> connRecord) {
 	std::vector<Future<Void>> agentFutures;
 
-	while (g_simulator->drAgents == ISimulator::BackupAgentType::WaitForType) {
+	while (fdbSimulationPolicyState().drAgents == FDBBackupAgentType::WaitForType) {
 		co_await delay(1.0);
 	}
 
-	if (g_simulator->drAgents == ISimulator::BackupAgentType::BackupToDB) {
+	if (fdbSimulationPolicyState().drAgents == FDBBackupAgentType::BackupToDB) {
 		ASSERT(g_simulator->extraDatabases.size() == 1);
 		Database cx = Database::createDatabase(connRecord, ApiVersion::LATEST_VERSION);
 
@@ -611,7 +611,7 @@ Future<Void> runDr(Reference<IClusterConnectionRecord> connRecord) {
 		agentFutures.push_back(extraAgent.run(cx, drPollDelay, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT));
 		agentFutures.push_back(dbAgent.run(drDatabase, drPollDelay, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT));
 
-		while (g_simulator->drAgents == ISimulator::BackupAgentType::BackupToDB) {
+		while (fdbSimulationPolicyState().drAgents == FDBBackupAgentType::BackupToDB) {
 			co_await delay(1.0);
 		}
 

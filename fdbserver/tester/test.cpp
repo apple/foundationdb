@@ -527,8 +527,8 @@ Future<Void> runTests7(Reference<AsyncVar<Optional<struct ClusterControllerFullI
 	bool backupWorkerEnabled = false;
 	double startDelay = 0.0;
 	double databasePingDelay = 1e9;
-	ISimulator::BackupAgentType simBackupAgents = ISimulator::BackupAgentType::NoBackupAgents;
-	ISimulator::BackupAgentType simDrAgents = ISimulator::BackupAgentType::NoBackupAgents;
+	FDBBackupAgentType simBackupAgents = FDBBackupAgentType::NoBackupAgents;
+	FDBBackupAgentType simDrAgents = FDBBackupAgentType::NoBackupAgents;
 	bool enableDD = false;
 	TesterConsistencyScanState consistencyScanState;
 
@@ -557,19 +557,19 @@ Future<Void> runTests7(Reference<AsyncVar<Optional<struct ClusterControllerFullI
 		}
 		startDelay = std::max(startDelay, iter->startDelay);
 		databasePingDelay = std::min(databasePingDelay, iter->databasePingDelay);
-		if (iter->simBackupAgents != ISimulator::BackupAgentType::NoBackupAgents) {
+		if (iter->simBackupAgents != FDBBackupAgentType::NoBackupAgents) {
 			simBackupAgents = iter->simBackupAgents;
 		}
 
-		if (iter->simDrAgents != ISimulator::BackupAgentType::NoBackupAgents) {
+		if (iter->simDrAgents != FDBBackupAgentType::NoBackupAgents) {
 			simDrAgents = iter->simDrAgents;
 		}
 		enableDD = enableDD || getOption(iter->options[0], "enableDD"_sr, false);
 	}
 
 	if (g_network->isSimulated()) {
-		g_simulator->backupAgents = simBackupAgents;
-		g_simulator->drAgents = simDrAgents;
+		fdbSimulationPolicyState().backupAgents = simBackupAgents;
+		fdbSimulationPolicyState().drAgents = simDrAgents;
 	}
 
 	// turn off the database ping functionality if the suite of tests are not going to be using the database

@@ -28,6 +28,7 @@
 #include <vector>
 
 enum class FDBExtraDatabaseMode { Disabled, LocalOrSingle, Single, Local, Multiple };
+enum class FDBBackupAgentType { NoBackupAgents, WaitForType, BackupToFile, BackupToDB };
 
 struct FDBSimulationPolicyState {
 	int desiredCoordinators = 1;
@@ -47,6 +48,8 @@ struct FDBSimulationPolicyState {
 	std::vector<Optional<Standalone<StringRef>>> primarySatelliteDcIds;
 	std::vector<Optional<Standalone<StringRef>>> remoteSatelliteDcIds;
 	bool allowStorageMigrationTypeChange = false;
+	FDBBackupAgentType backupAgents = FDBBackupAgentType::WaitForType;
+	FDBBackupAgentType drAgents = FDBBackupAgentType::WaitForType;
 };
 
 void installFDBSimulationPolicy();

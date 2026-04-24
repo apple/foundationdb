@@ -518,8 +518,8 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 
 			TraceEvent("DRU_Complete").detail("BackupTag", printable(backupTag));
 
-			if (g_simulator->drAgents == ISimulator::BackupAgentType::BackupToDB) {
-				g_simulator->drAgents = ISimulator::BackupAgentType::NoBackupAgents;
+			if (fdbSimulationPolicyState().drAgents == FDBBackupAgentType::BackupToDB) {
+				fdbSimulationPolicyState().drAgents = FDBBackupAgentType::NoBackupAgents;
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "BackupAndRestoreCorrectnessError").error(e);

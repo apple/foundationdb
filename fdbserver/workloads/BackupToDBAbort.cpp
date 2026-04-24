@@ -89,8 +89,8 @@ struct BackupToDBAbort : TestWorkload {
 		TraceEvent("BDBA_End").log();
 
 		// SOMEDAY: Remove after backup agents can exist quiescently
-		if (g_simulator->drAgents == ISimulator::BackupAgentType::BackupToDB) {
-			g_simulator->drAgents = ISimulator::BackupAgentType::NoBackupAgents;
+		if (fdbSimulationPolicyState().drAgents == FDBBackupAgentType::BackupToDB) {
+			fdbSimulationPolicyState().drAgents = FDBBackupAgentType::NoBackupAgents;
 		}
 	}
 

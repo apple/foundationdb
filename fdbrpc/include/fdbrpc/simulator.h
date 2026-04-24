@@ -93,8 +93,6 @@ public:
 	// Order matters! all modes >= 2 are fault injection modes
 	enum TSSMode { Disabled, EnabledNormal, EnabledAddDelay, EnabledDropMutations };
 
-	enum class BackupAgentType { NoBackupAgents, WaitForType, BackupToFile, BackupToDB };
-
 	ProcessInfo* getProcess(Endpoint const& endpoint) { return getProcessByAddress(endpoint.getPrimaryAddress()); }
 
 	// Returns currently executing process in simulation.
@@ -341,8 +339,6 @@ public:
 	double connectionFailureEnableTime; // Last time connection failure is enabled.
 	double connectionFailureDisableTime = 0; // Latest time connection failure should be disabled.
 	bool disableTLogRecoveryFinish;
-	BackupAgentType backupAgents;
-	BackupAgentType drAgents;
 	bool willRestart = false;
 	bool restarted = false;
 	bool isConsistencyChecked = false;
