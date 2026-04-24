@@ -1551,7 +1551,7 @@ public:
 	                         DiskQueueVersion diskQueueVersion,
 	                         int64_t fileSizeWarningLimit)
 	  : queue(new DiskQueue(basename, fileExtension, dbgid, diskQueueVersion, fileSizeWarningLimit)), pushed(0),
-	    popped(0), committed(0){};
+	    popped(0), committed(0) {};
 
 	// IClosable
 	Future<Void> getError() const override { return queue->getError(); }
