@@ -696,7 +696,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					    .detail("ProcessPrimaryAddress", p->address)
 					    .detail("ProcessAddresses", p->addresses.toString())
 					    .detail("DataStoreID", id)
-					    .detail("Protected", g_simulator->protectedAddresses.contains(itr->interf.address()))
+					    .detail("Protected", g_simulator->isProtectedAddress(itr->interf.address()))
 					    .detail("Reliable", p->isReliable())
 					    .detail("ReliableInfo", p->getReliableInfo())
 					    .detail("KillOrRebootProcess", p->address);

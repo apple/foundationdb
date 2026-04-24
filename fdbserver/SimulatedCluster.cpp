@@ -2367,10 +2367,10 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		TraceEvent("ProtectCoordinator")
 		    .detail("Address", coordinatorAddresses[i])
 		    .detail("Coordinators", describe(coordinatorAddresses));
-		g_simulator->protectedAddresses.insert(NetworkAddress(
+		g_simulator->protectAddress(NetworkAddress(
 		    coordinatorAddresses[i].ip, coordinatorAddresses[i].port, true, coordinatorAddresses[i].isTLS()));
 		if (coordinatorAddresses[i].port == 2) {
-			g_simulator->protectedAddresses.insert(NetworkAddress(coordinatorAddresses[i].ip, 1, true, true));
+			g_simulator->protectAddress(NetworkAddress(coordinatorAddresses[i].ip, 1, true, true));
 		}
 	}
 	deterministicRandom()->randomShuffle(coordinatorAddresses);
@@ -2380,10 +2380,10 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			TraceEvent("ProtectCoordinator")
 			    .detail("Address", coordinators[i])
 			    .detail("Coordinators", describe(coordinators));
-			g_simulator->protectedAddresses.insert(
+			g_simulator->protectAddress(
 			    NetworkAddress(coordinators[i].ip, coordinators[i].port, true, coordinators[i].isTLS()));
 			if (coordinators[i].port == 2) {
-				g_simulator->protectedAddresses.insert(NetworkAddress(coordinators[i].ip, 1, true, true));
+				g_simulator->protectAddress(NetworkAddress(coordinators[i].ip, 1, true, true));
 			}
 		}
 	}
@@ -2810,10 +2810,10 @@ static Future<Void> simulationSetupAndRunImpl(std::string dataFolder,
 				TraceEvent("ProtectCoordinator")
 				    .detail("Address", coordinatorAddresses[i])
 				    .detail("Coordinators", describe(coordinatorAddresses));
-				g_simulator->protectedAddresses.insert(NetworkAddress(
+				g_simulator->protectAddress(NetworkAddress(
 				    coordinatorAddresses[i].ip, coordinatorAddresses[i].port, true, coordinatorAddresses[i].isTLS()));
 				if (coordinatorAddresses[i].port == 2) {
-					g_simulator->protectedAddresses.insert(NetworkAddress(coordinatorAddresses[i].ip, 1, true, true));
+					g_simulator->protectAddress(NetworkAddress(coordinatorAddresses[i].ip, 1, true, true));
 				}
 			}
 		}

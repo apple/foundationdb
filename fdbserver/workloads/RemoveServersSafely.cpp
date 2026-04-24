@@ -82,7 +82,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			    .detail("Zoneid", it->locality.zoneId().get().toString())
 			    .detail("MachineId", it->locality.machineId().get().toString());
 
-			if (!g_simulator->protectedAddresses.contains(it->address))
+			if (!g_simulator->isProtectedAddress(it->address))
 				processAddrs.push_back(pAddr);
 			machineProcesses[machineIp].insert(pAddr);
 
@@ -191,7 +191,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				    .detail("Failed", processInfo->failed)
 				    .detail("Excluded", processInfo->excluded)
 				    .detail("Rebooting", processInfo->rebooting)
-				    .detail("Protected", g_simulator->protectedAddresses.contains(processInfo->address));
+				    .detail("Protected", g_simulator->isProtectedAddress(processInfo->address));
 			} else {
 				TraceEvent("RemoveAndKill", functionId)
 				    .detail("Step", "ProcessNotToKill")
@@ -200,7 +200,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				    .detail("Failed", processInfo->failed)
 				    .detail("Excluded", processInfo->excluded)
 				    .detail("Rebooting", processInfo->rebooting)
-				    .detail("Protected", g_simulator->protectedAddresses.contains(processInfo->address));
+				    .detail("Protected", g_simulator->isProtectedAddress(processInfo->address));
 			}
 		}
 		TraceEvent("RemoveAndKill", functionId)
@@ -456,14 +456,14 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			    .detail("ClusterAvailable", g_simulator->isAvailable())
 			    .detail("RemoveViaClear", removeViaClear);
 			for (auto& killProcess : killProcArray) {
-				if (g_simulator->protectedAddresses.contains(killProcess->address))
+				if (g_simulator->isProtectedAddress(killProcess->address))
 					TraceEvent("RemoveAndKill", functionId)
 					    .detail("Step", "NoKill Process")
 					    .detail("Process", describe(*killProcess))
 					    .detail("Failed", killProcess->failed)
 					    .detail("Rebooting", killProcess->rebooting)
 					    .detail("ClusterAvailable", g_simulator->isAvailable())
-					    .detail("Protected", g_simulator->protectedAddresses.contains(killProcess->address));
+					    .detail("Protected", g_simulator->isProtectedAddress(killProcess->address));
 				else if (removeViaClear) {
 					g_simulator->rebootProcess(killProcess, ISimulator::KillType::RebootProcessAndDelete);
 					TraceEvent("RemoveAndKill", functionId)
@@ -472,12 +472,12 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 					    .detail("Failed", killProcess->failed)
 					    .detail("Rebooting", killProcess->rebooting)
 					    .detail("ClusterAvailable", g_simulator->isAvailable())
-					    .detail("Protected", g_simulator->protectedAddresses.contains(killProcess->address));
+					    .detail("Protected", g_simulator->isProtectedAddress(killProcess->address));
 				}
 				/*
 				                else {
 				                    g_simulator->killProcess( killProcess, ISimulator::KillType::KillInstantly );
-				                    TraceEvent("RemoveAndKill", functionId).detail("Step", "Kill Process").detail("Process", describe(*killProcess)).detail("Failed", killProcess->failed).detail("Rebooting", killProcess->rebooting).detail("ClusterAvailable", g_simulator->isAvailable()).detail("Protected", g_simulator->protectedAddresses.contains(killProcess->address));
+				                    TraceEvent("RemoveAndKill", functionId).detail("Step", "Kill Process").detail("Process", describe(*killProcess)).detail("Failed", killProcess->failed).detail("Rebooting", killProcess->rebooting).detail("ClusterAvailable", g_simulator->isAvailable()).detail("Protected", g_simulator->isProtectedAddress(killProcess->address));
 				                }
 				*/
 			}

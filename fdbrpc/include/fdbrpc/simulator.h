@@ -56,6 +56,33 @@ constexpr double DISABLE_CONNECTION_FAILURE_FOREVER = 1e6;
 // Minimum interval to disable connection failures. If less than this, connection failures are always disabled.
 constexpr double DISABLE_CONNECTION_FAILURE_MIN_INTERVAL = 1e-3;
 
+class ISimulationPolicy : public ReferenceCounted<ISimulationPolicy> {
+public:
+	using KillType = simulator::KillType;
+	using ProcessInfo = simulator::ProcessInfo;
+
+	virtual bool shouldProtectNewProcess(ProcessInfo const&) const { return false; }
+	virtual bool isAvailable(std::vector<ProcessInfo*> const&,
+	                         std::vector<ProcessInfo*> const& availableProcesses,
+	                         std::vector<ProcessInfo*> const& deadProcesses) const {
+		return canKillProcesses(availableProcesses, deadProcesses, KillType::KillInstantly, nullptr);
+	}
+	virtual bool datacenterDead(Optional<Standalone<StringRef>>, std::vector<ProcessInfo*> const&) const {
+		return false;
+	}
+	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses,
+	                              std::vector<ProcessInfo*> const& deadProcesses,
+	                              KillType kt,
+	                              KillType* newKillType) const {
+		if (newKillType) {
+			*newKillType = kt;
+		}
+		return true;
+	}
+
+	virtual ~ISimulationPolicy() = default;
+};
+
 class ISimulator : public INetwork {
 
 public:
@@ -301,16 +328,17 @@ public:
 	                                           std::string service,
 	                                           Reference<HTTP::IRequestHandler> requestHandler) = 0;
 
+	void setSimulationPolicy(Reference<ISimulationPolicy> policy) { simulationPolicy = policy; }
+	Reference<ISimulationPolicy> getSimulationPolicy() const { return simulationPolicy; }
+
+	void protectAddress(NetworkAddress const& address) { protectedAddresses.insert(address); }
+	bool isProtectedAddress(NetworkAddress const& address) const { return protectedAddresses.contains(address); }
+	size_t protectedAddressCount() const { return protectedAddresses.size(); }
+
 	int desiredCoordinators;
 	int physicalDatacenters;
 	int processesPerMachine;
 	int listenersPerProcess;
-
-	// We won't kill machines in this set, but we might reboot
-	// them.  This is a conservative mechanism to prevent the
-	// simulator from killing off important processes and rendering
-	// the cluster unrecoverable, e.g. a quorum of coordinators.
-	std::set<NetworkAddress> protectedAddresses;
 
 	std::map<NetworkAddress, ProcessInfo*> currentlyRebootingProcesses;
 	std::vector<std::string> extraDatabases;
@@ -439,6 +467,10 @@ protected:
 	Mutex mutex;
 
 private:
+	Reference<ISimulationPolicy> simulationPolicy;
+	// We won't kill machines in this set, but we might reboot them. This lets
+	// higher-level simulation policies protect important processes.
+	std::set<NetworkAddress> protectedAddresses;
 	std::set<Optional<Standalone<StringRef>>> swapsDisabled;
 	std::map<NetworkAddress, int> excludedAddresses;
 	std::map<NetworkAddress, int> clearedAddresses;
