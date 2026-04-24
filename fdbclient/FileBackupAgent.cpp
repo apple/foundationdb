@@ -624,8 +624,7 @@ Future<bool> monitorBulkLoadJobCompletionWithProgress(Database cx,
 
 		// Update progress based on completed bulkload tasks
 		try {
-			auto [completed, submitted, triggered, running, total, bytes] =
-			    co_await getBulkLoadTaskProgress(cx, jobId);
+			auto [completed, submitted, triggered, running, total, bytes] = co_await getBulkLoadTaskProgress(cx, jobId);
 			if (total > 0) {
 				// For bulkload restores, fileBlockCount is 0, so use task count as "blocks"
 				// This provides meaningful progress tracking for the restore status display
