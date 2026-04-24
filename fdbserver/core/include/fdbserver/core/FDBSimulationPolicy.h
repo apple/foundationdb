@@ -24,6 +24,11 @@
 
 #include "fdbclient/DatabaseConfiguration.h"
 
+#include <string>
+#include <vector>
+
+enum class FDBExtraDatabaseMode { Disabled, LocalOrSingle, Single, Local, Multiple };
+
 struct FDBSimulationPolicyState {
 	int desiredCoordinators = 1;
 	Reference<IReplicationPolicy> storagePolicy;
@@ -46,6 +51,7 @@ struct FDBSimulationPolicyState {
 
 void installFDBSimulationPolicy();
 FDBSimulationPolicyState& fdbSimulationPolicyState();
+FDBExtraDatabaseMode stringToFDBExtraDatabaseMode(const std::string& databaseMode);
 void updateFDBSimulationPolicy(DatabaseConfiguration const& configuration, bool restartingTest);
 void setFDBSimulationPolicyRemoteTLogPolicy(Reference<IReplicationPolicy> remoteTLogPolicy);
 

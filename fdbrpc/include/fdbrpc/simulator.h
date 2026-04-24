@@ -94,25 +94,6 @@ public:
 	enum TSSMode { Disabled, EnabledNormal, EnabledAddDelay, EnabledDropMutations };
 
 	enum class BackupAgentType { NoBackupAgents, WaitForType, BackupToFile, BackupToDB };
-	enum class ExtraDatabaseMode { Disabled, LocalOrSingle, Single, Local, Multiple };
-
-	static ExtraDatabaseMode stringToExtraDatabaseMode(const std::string& databaseMode) {
-		if (databaseMode == "Disabled") {
-			return ExtraDatabaseMode::Disabled;
-		} else if (databaseMode == "LocalOrSingle") {
-			return ExtraDatabaseMode::LocalOrSingle;
-		} else if (databaseMode == "Single") {
-			return ExtraDatabaseMode::Single;
-		} else if (databaseMode == "Local") {
-			return ExtraDatabaseMode::Local;
-		} else if (databaseMode == "Multiple") {
-			return ExtraDatabaseMode::Multiple;
-		} else {
-			TraceEvent(SevError, "UnknownExtraDatabaseMode").detail("DatabaseMode", databaseMode);
-			ASSERT(false);
-			throw internal_error();
-		}
-	};
 
 	ProcessInfo* getProcess(Endpoint const& endpoint) { return getProcessByAddress(endpoint.getPrimaryAddress()); }
 

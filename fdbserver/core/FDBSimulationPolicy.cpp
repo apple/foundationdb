@@ -29,6 +29,24 @@
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/simulator.h"
 
+FDBExtraDatabaseMode stringToFDBExtraDatabaseMode(const std::string& databaseMode) {
+	if (databaseMode == "Disabled") {
+		return FDBExtraDatabaseMode::Disabled;
+	} else if (databaseMode == "LocalOrSingle") {
+		return FDBExtraDatabaseMode::LocalOrSingle;
+	} else if (databaseMode == "Single") {
+		return FDBExtraDatabaseMode::Single;
+	} else if (databaseMode == "Local") {
+		return FDBExtraDatabaseMode::Local;
+	} else if (databaseMode == "Multiple") {
+		return FDBExtraDatabaseMode::Multiple;
+	} else {
+		TraceEvent(SevError, "UnknownExtraDatabaseMode").detail("DatabaseMode", databaseMode);
+		ASSERT(false);
+		throw internal_error();
+	}
+}
+
 namespace {
 
 FDBSimulationPolicyState policyState;

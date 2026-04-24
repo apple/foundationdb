@@ -310,7 +310,7 @@ class TestConfig : public BasicTestConfig {
 			std::string value = removeWhitespace(line.substr(found + 1));
 
 			if (attrib == "extraDatabaseMode") {
-				extraDatabaseMode = ISimulator::stringToExtraDatabaseMode(value);
+				extraDatabaseMode = stringToFDBExtraDatabaseMode(value);
 			}
 
 			if (attrib == "extraDatabaseCount") {
@@ -386,7 +386,7 @@ class TestConfig : public BasicTestConfig {
 
 public:
 	int extraDB = 0;
-	ISimulator::ExtraDatabaseMode extraDatabaseMode = ISimulator::ExtraDatabaseMode::Disabled;
+	FDBExtraDatabaseMode extraDatabaseMode = FDBExtraDatabaseMode::Disabled;
 	// The number of extra database used if the database mode is MULTIPLE
 	int extraDatabaseCount = 1;
 	bool extraDatabaseBackupAgents = false;
@@ -525,7 +525,7 @@ public:
 				isFirstTestInRestart = tomlKeyPresent(file, "restartInfoLocation");
 			}
 			if (!extraDatabaseModeStr.empty()) {
-				extraDatabaseMode = ISimulator::stringToExtraDatabaseMode(extraDatabaseModeStr);
+				extraDatabaseMode = stringToFDBExtraDatabaseMode(extraDatabaseModeStr);
 			}
 		} catch (std::exception& e) {
 			std::cerr << e.what() << std::endl;
@@ -1299,7 +1299,7 @@ Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			g_simulator->tssMode = (ISimulator::TSSMode)atoi(tssModeStr);
 		}
 		ClusterConnectionString conn(ini.GetValue("META", "connectionString"));
-		if (testConfig->extraDatabaseMode == ISimulator::ExtraDatabaseMode::Local) {
+		if (testConfig->extraDatabaseMode == FDBExtraDatabaseMode::Local) {
 			g_simulator->extraDatabases.clear();
 			g_simulator->extraDatabases.push_back(conn.toString());
 		}
@@ -1455,7 +1455,7 @@ Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActors,
 // Configuration details compiled in a structure used when setting up a simulated cluster
 struct SimulationConfig : public BasicSimulationConfig {
 	explicit SimulationConfig(const TestConfig& testConfig);
-	ISimulator::ExtraDatabaseMode extraDatabaseMode;
+	FDBExtraDatabaseMode extraDatabaseMode;
 	int extraDatabaseCount;
 	bool generateFearless;
 
@@ -2040,8 +2040,7 @@ void SimulationConfig::setMachineCount(const TestConfig& testConfig) {
 		                         ((db.minDatacentersRequired() > 0) ? datacenters : 1) *
 		                             std::max(3, db.minZonesRequiredPerDatacenter()));
 		machine_count = deterministicRandom()->randomInt(
-		    machine_count,
-		    std::max(machine_count + 1, extraDatabaseMode == ISimulator::ExtraDatabaseMode::Disabled ? 10 : 6));
+		    machine_count, std::max(machine_count + 1, extraDatabaseMode == FDBExtraDatabaseMode::Disabled ? 10 : 6));
 		// generateMachineTeamTestConfig set up the number of servers per machine and the number of machines such that
 		// if we do not remove the surplus server and machine teams, the simulation test will report error.
 		// This is needed to make sure the number of server (and machine) teams is no larger than the desired number.
@@ -2051,9 +2050,9 @@ void SimulationConfig::setMachineCount(const TestConfig& testConfig) {
 			// while the max possible machine team number is 10.
 			// If machine_count > 5, we can still test the effectivenss of machine teams
 			// Note: machine_count may be much larger than 5 because we may have a big replication factor
-			machine_count = std::max(machine_count,
-			                         deterministicRandom()->randomInt(
-			                             5, extraDatabaseMode == ISimulator::ExtraDatabaseMode::Disabled ? 10 : 6));
+			machine_count = std::max(
+			    machine_count,
+			    deterministicRandom()->randomInt(5, extraDatabaseMode == FDBExtraDatabaseMode::Disabled ? 10 : 6));
 		}
 	}
 	machine_count += datacenters * (testConfig.extraMachineCountDC + testConfig.extraStorageMachineCountPerDC);
@@ -2081,7 +2080,7 @@ void SimulationConfig::setProcessesPerMachine(const TestConfig& testConfig) {
 		processes_per_machine = 1;
 	} else {
 		processes_per_machine = deterministicRandom()->randomInt(
-		    1, (extraDatabaseMode == ISimulator::ExtraDatabaseMode::Disabled ? 28 : 14) / machine_count + 2);
+		    1, (extraDatabaseMode == FDBExtraDatabaseMode::Disabled ? 28 : 14) / machine_count + 2);
 	}
 }
 
@@ -2239,11 +2238,11 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	    useHostname ? NetworkAddressFromHostname::True : NetworkAddressFromHostname::False;
 
 	int extraDatabaseCount = 0;
-	bool useLocalDatabase = (testConfig.extraDatabaseMode == ISimulator::ExtraDatabaseMode::LocalOrSingle && BUGGIFY) ||
-	                        testConfig.extraDatabaseMode == ISimulator::ExtraDatabaseMode::Local;
-	if (!useLocalDatabase && testConfig.extraDatabaseMode != ISimulator::ExtraDatabaseMode::Disabled) {
+	bool useLocalDatabase = (testConfig.extraDatabaseMode == FDBExtraDatabaseMode::LocalOrSingle && BUGGIFY) ||
+	                        testConfig.extraDatabaseMode == FDBExtraDatabaseMode::Local;
+	if (!useLocalDatabase && testConfig.extraDatabaseMode != FDBExtraDatabaseMode::Disabled) {
 		extraDatabaseCount =
-		    testConfig.extraDatabaseMode == ISimulator::ExtraDatabaseMode::Multiple && testConfig.extraDatabaseCount > 0
+		    testConfig.extraDatabaseMode == FDBExtraDatabaseMode::Multiple && testConfig.extraDatabaseCount > 0
 		        ? testConfig.extraDatabaseCount
 		        : 1;
 	}
@@ -2399,7 +2398,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		g_simulator->extraDatabases.push_back(
 		    useHostname ? ClusterConnectionString(coordinatorHostnames, "TestCluster:0"_sr).toString()
 		                : ClusterConnectionString(coordinatorAddresses, "TestCluster:0"_sr).toString());
-	} else if (testConfig.extraDatabaseMode != ISimulator::ExtraDatabaseMode::Disabled) {
+	} else if (testConfig.extraDatabaseMode != FDBExtraDatabaseMode::Disabled) {
 		for (int i = 0; i < extraDatabaseCount; ++i) {
 			g_simulator->extraDatabases.push_back(
 			    useHostname
