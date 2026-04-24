@@ -111,7 +111,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				               Value(deterministicRandom()->randomAlphaNumeric(self->valBytes)));
 			}
 		}
-		ASSERT(rwImpls.size() > 0);
+		ASSERT(!rwImpls.empty());
 
 		return Void();
 	}
@@ -257,7 +257,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	}
 
 	KeyRange randomRWKeyRange() {
-		ASSERT(rwImpls.size() > 0);
+		ASSERT(!rwImpls.empty());
 		Key prefix = rwImpls[deterministicRandom()->randomInt(0, rwImpls.size())]->getKeyRange().begin;
 		Key rkey1 = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, keyBytes)))
 		                .withPrefix(prefix);
@@ -461,7 +461,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			RangeResult result =
 			    co_await tx->getRange(KeyRangeRef(startKey, endKey), GetRangeLimits(CLIENT_KNOBS->TOO_MANY));
 			// The whole transaction module should be empty
-			ASSERT(!result.size());
+			ASSERT(result.empty());
 			tx->reset();
 		} catch (Error& e) {
 			throw;
@@ -586,7 +586,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			    co_await tx->getRange(KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr),
 			                          CLIENT_KNOBS->TOO_MANY);
 			// Note: there's possibility we get zero workers
-			if (result.size()) {
+			if (!result.empty()) {
 				KeyValueRef entry = deterministicRandom()->randomChoice(result);
 				Optional<Value> singleRes = co_await tx->get(entry.key);
 				if (singleRes.present())
@@ -916,7 +916,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 						tx->setOption(FDBTransactionOptions::RAW_ACCESS);
 						tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 						for (const auto& address : old_coordinators_processes) {
-							new_processes_key += new_processes_key.size() ? "," : "";
+							new_processes_key += !new_processes_key.empty() ? "," : "";
 							new_processes_key += address;
 						}
 						tx->set(
@@ -968,7 +968,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				RangeResult maintenanceKVs = co_await tx->getRange(
 				    SpecialKeySpace::getManagementApiCommandRange("maintenance"), CLIENT_KNOBS->TOO_MANY);
 				// By default, no maintenance is going on
-				ASSERT(!maintenanceKVs.more && !maintenanceKVs.size());
+				ASSERT(!maintenanceKVs.more && maintenanceKVs.empty());
 				// datadistribution
 				RangeResult ddKVs = co_await tx->getRange(
 				    SpecialKeySpace::getManagementApiCommandRange("datadistribution"), CLIENT_KNOBS->TOO_MANY);

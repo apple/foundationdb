@@ -111,7 +111,6 @@ S3BlobStoreEndpoint::S3BlobStoreEndpoint(std::string const& host,
                        extraHeaders),
     credentials(parseS3Credentials(creds)), lookupKey(credentials.present() && credentials.get().key.empty()),
     lookupSecret(credentials.present() && credentials.get().secret.empty()) {
-
 	if (this->region.empty() && CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER) {
 		throw std::string(
 		    "Failed to get region from host or parameter in url, region is required for aws v4 signature");
@@ -422,6 +421,10 @@ bool isS3TokenError(const std::string& s3Error) {
 	return s3Error == "InvalidToken" || s3Error == "ExpiredToken";
 }
 
+// S3 returns HTTP 400 for token/auth errors (InvalidToken, ExpiredToken).
+// Used by processRequestFailure, preRetryCheck, and simulateRequestFailure.
+constexpr int s3BadRequestCode = 400;
+
 void S3BlobStoreEndpoint::setRequestHeaders(std::string const& verb,
                                             std::string const& resource,
                                             HTTP::Headers& headers) {
@@ -494,7 +497,7 @@ void S3BlobStoreEndpoint::simulateRequestFailure(std::string const& verb,
 	bool isMultipartComplete = verb == "POST" && resource.find("uploadId=") != std::string::npos &&
 	                           resource.find("partNumber=") == std::string::npos;
 	if (!isMultipartComplete) {
-		r->code = 400;
+		r->code = s3BadRequestCode;
 		simulatedTokenError = true;
 	}
 }
@@ -509,15 +512,10 @@ void S3BlobStoreEndpoint::processRequestFailure(Reference<HTTP::IncomingResponse
 		s3Error = parseErrorCodeFromS3(r->data.content);
 	}
 	event.detail("S3ErrorCode", s3Error);
+	event.detail("HttpResponseContent", r->data.content);
 
-	if (r->code == 400) {
-		if (isS3TokenError(s3Error) || simulatedTokenError) {
-			retryExtended = true;
-		}
-		TraceEvent(SevWarnAlways, "S3BlobStoreBadRequest")
-		    .detail("HttpCode", r->code)
-		    .detail("HttpResponseContent", r->data.content)
-		    .detail("S3Error", s3Error);
+	if (r->code == s3BadRequestCode && (isS3TokenError(s3Error) || simulatedTokenError)) {
+		retryExtended = true;
 	}
 }
 
@@ -560,7 +558,7 @@ Future<bool> S3BlobStoreEndpoint::preRetryCheck(std::string const& verb,
 		s3Error = parseErrorCodeFromS3(dryrunR->data.content);
 	}
 
-	if (dryrunR->code == 400 && isS3TokenError(s3Error)) {
+	if (dryrunR->code == s3BadRequestCode && isS3TokenError(s3Error)) {
 		// Token still bad — delay and skip this iteration
 		co_await ::delay(knobs.max_delay_retryable_error);
 		co_return false;

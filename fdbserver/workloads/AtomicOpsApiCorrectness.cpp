@@ -492,7 +492,7 @@ public:
 		    cx, self, MutationRef::Min, key, [](uint64_t val1, uint64_t val2) { return val1 < val2 ? val1 : val2; });
 		co_await self->testAtomicOpOnEmptyValue(cx, self, MutationRef::Min, key, [](Value v1, Value v2) -> Value {
 			uint64_t zeroVal = 0;
-			if (v2.size() == 0)
+			if (v2.empty())
 				return StringRef();
 			else
 				return StringRef((const uint8_t*)&zeroVal, sizeof(zeroVal));
@@ -507,7 +507,7 @@ public:
 		    cx, self, MutationRef::Min, key, [](uint64_t val1, uint64_t val2) { return val1 < val2 ? val1 : val2; });
 		co_await self->testAtomicOpOnEmptyValue(cx, self, MutationRef::Min, key, [](Value v1, Value v2) -> Value {
 			uint64_t zeroVal = 0;
-			if (v2.size() == 0)
+			if (v2.empty())
 				return StringRef();
 			else
 				return StringRef((const uint8_t*)&zeroVal, sizeof(zeroVal));
@@ -521,8 +521,9 @@ public:
 		co_await self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::Max, key);
 		co_await self->testAtomicOpApi(
 		    cx, self, MutationRef::Max, key, [](uint64_t val1, uint64_t val2) { return val1 > val2 ? val1 : val2; });
-		co_await self->testAtomicOpOnEmptyValue(
-		    cx, self, MutationRef::Max, key, [](Value v1, Value v2) -> Value { return v2.size() ? v2 : StringRef(); });
+		co_await self->testAtomicOpOnEmptyValue(cx, self, MutationRef::Max, key, [](Value v1, Value v2) -> Value {
+			return !v2.empty() ? v2 : StringRef();
+		});
 	}
 
 	Future<Void> testAnd(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
@@ -538,7 +539,7 @@ public:
 		    cx, self, MutationRef::And, key, [](uint64_t val1, uint64_t val2) { return val1 & val2; });
 		co_await self->testAtomicOpOnEmptyValue(cx, self, MutationRef::And, key, [](Value v1, Value v2) -> Value {
 			uint64_t zeroVal = 0;
-			if (v2.size() == 0)
+			if (v2.empty())
 				return StringRef();
 			else
 				return StringRef((const uint8_t*)&zeroVal, sizeof(zeroVal));
@@ -553,7 +554,7 @@ public:
 		    cx, self, MutationRef::And, key, [](uint64_t val1, uint64_t val2) { return val1 & val2; });
 		co_await self->testAtomicOpOnEmptyValue(cx, self, MutationRef::And, key, [](Value v1, Value v2) -> Value {
 			uint64_t zeroVal = 0;
-			if (v2.size() == 0)
+			if (v2.empty())
 				return StringRef();
 			else
 				return StringRef((const uint8_t*)&zeroVal, sizeof(zeroVal));
@@ -568,7 +569,7 @@ public:
 		co_await self->testAtomicOpApi(
 		    cx, self, MutationRef::Or, key, [](uint64_t val1, uint64_t val2) { return val1 | val2; });
 		co_await self->testAtomicOpOnEmptyValue(
-		    cx, self, MutationRef::Or, key, [](Value v1, Value v2) -> Value { return v2.size() ? v2 : StringRef(); });
+		    cx, self, MutationRef::Or, key, [](Value v1, Value v2) -> Value { return !v2.empty() ? v2 : StringRef(); });
 	}
 
 	Future<Void> testXor(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
@@ -578,8 +579,9 @@ public:
 		co_await self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::Xor, key);
 		co_await self->testAtomicOpApi(
 		    cx, self, MutationRef::Xor, key, [](uint64_t val1, uint64_t val2) { return val1 ^ val2; });
-		co_await self->testAtomicOpOnEmptyValue(
-		    cx, self, MutationRef::Xor, key, [](Value v1, Value v2) -> Value { return v2.size() ? v2 : StringRef(); });
+		co_await self->testAtomicOpOnEmptyValue(cx, self, MutationRef::Xor, key, [](Value v1, Value v2) -> Value {
+			return !v2.empty() ? v2 : StringRef();
+		});
 	}
 
 	Future<Void> testAdd(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
@@ -589,7 +591,7 @@ public:
 		co_await self->testAtomicOpApi(
 		    cx, self, MutationRef::AddValue, key, [](uint64_t val1, uint64_t val2) { return val1 + val2; });
 		co_await self->testAtomicOpOnEmptyValue(cx, self, MutationRef::AddValue, key, [](Value v1, Value v2) -> Value {
-			return v2.size() ? v2 : StringRef();
+			return !v2.empty() ? v2 : StringRef();
 		});
 	}
 
@@ -625,7 +627,7 @@ public:
 			           : val2;
 		});
 		co_await self->testAtomicOpOnEmptyValue(
-		    cx, self, MutationRef::ByteMax, key, [](Value v1, Value v2) -> Value { return v1.size() ? v1 : v2; });
+		    cx, self, MutationRef::ByteMax, key, [](Value v1, Value v2) -> Value { return !v1.empty() ? v1 : v2; });
 	}
 };
 

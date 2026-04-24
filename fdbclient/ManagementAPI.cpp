@@ -388,13 +388,13 @@ ConfigurationResult buildConfiguration(std::vector<StringRef> const& modeTokens,
 	for (auto it : modeTokens) {
 		std::string mode = it.toString();
 		auto m = configForToken(mode);
-		if (!m.size()) {
+		if (m.empty()) {
 			TraceEvent(SevWarnAlways, "UnknownOption").detail("Option", mode);
 			return ConfigurationResult::UNKNOWN_OPTION;
 		}
 
 		for (auto t = m.begin(); t != m.end(); ++t) {
-			if (outConf.count(t->first)) {
+			if (outConf.contains(t->first)) {
 				TraceEvent(SevWarnAlways, "ConflictingOption")
 				    .detail("Option", t->first)
 				    .detail("Value", t->second)
@@ -405,7 +405,7 @@ ConfigurationResult buildConfiguration(std::vector<StringRef> const& modeTokens,
 		}
 	}
 	auto p = configKeysPrefix.toString();
-	if (!outConf.count(p + "storage_replication_policy") && outConf.count(p + "storage_replicas")) {
+	if (!outConf.contains(p + "storage_replication_policy") && outConf.contains(p + "storage_replicas")) {
 		int storageCount = stoi(outConf[p + "storage_replicas"]);
 		Reference<IReplicationPolicy> storagePolicy = Reference<IReplicationPolicy>(
 		    new PolicyAcross(storageCount, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
@@ -414,7 +414,7 @@ ConfigurationResult buildConfiguration(std::vector<StringRef> const& modeTokens,
 		outConf[p + "storage_replication_policy"] = policyWriter.toValue().toString();
 	}
 
-	if (!outConf.count(p + "log_replication_policy") && outConf.count(p + "log_replicas")) {
+	if (!outConf.contains(p + "log_replication_policy") && outConf.contains(p + "log_replicas")) {
 		int logCount = stoi(outConf[p + "log_replicas"]);
 		Reference<IReplicationPolicy> logPolicy = Reference<IReplicationPolicy>(
 		    new PolicyAcross(logCount, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
@@ -422,17 +422,17 @@ ConfigurationResult buildConfiguration(std::vector<StringRef> const& modeTokens,
 		serializeReplicationPolicy(policyWriter, logPolicy);
 		outConf[p + "log_replication_policy"] = policyWriter.toValue().toString();
 	}
-	if (outConf.count(p + "istss")) {
+	if (outConf.contains(p + "istss")) {
 		// redo config parameters to be tss config instead of normal config
 
 		// save param values from parsing as a normal config
-		bool isNew = outConf.count(p + "initialized");
+		bool isNew = outConf.contains(p + "initialized");
 		Optional<std::string> count;
 		Optional<std::string> storageEngine;
-		if (outConf.count(p + "count")) {
+		if (outConf.contains(p + "count")) {
 			count = Optional<std::string>(outConf[p + "count"]);
 		}
-		if (outConf.count(p + "storage_engine")) {
+		if (outConf.contains(p + "storage_engine")) {
 			storageEngine = Optional<std::string>(outConf[p + "storage_engine"]);
 		}
 
@@ -754,7 +754,7 @@ ConfigureAutoResult parseConfig(StatusObject const& status) {
 
 	// if one process on a machine is transaction class, make them all transaction class
 	for (auto& it : count_processes) {
-		if (machinesWithTransaction.count(it.first.second) && !machinesWithStorage.count(it.first.second)) {
+		if (machinesWithTransaction.contains(it.first.second) && !machinesWithStorage.contains(it.first.second)) {
 			for (auto& proc : it.second) {
 				if (proc.second == ProcessClass::UnsetClass &&
 				    proc.second.classSource() == ProcessClass::CommandLineSource) {
@@ -773,7 +773,7 @@ ConfigureAutoResult parseConfig(StatusObject const& status) {
 		if (machinesWithTransaction.size() >= logCount && totalTransactionProcesses >= desiredTotalTransactionProcesses)
 			break;
 
-		if (!machinesWithTransaction.count(it.first.second) && !machinesWithStorage.count(it.first.second)) {
+		if (!machinesWithTransaction.contains(it.first.second) && !machinesWithStorage.contains(it.first.second)) {
 			for (auto& proc : it.second) {
 				if (proc.second == ProcessClass::UnsetClass &&
 				    proc.second.classSource() == ProcessClass::CommandLineSource) {
@@ -891,7 +891,7 @@ Future<Optional<ClusterConnectionString>> getClusterConnectionStringFromStorageS
 			// and we are breaking the promises we make with
 			// commit_unknown_result (the transaction must no longer be in
 			// progress when receiving commit_unknown_result).
-			int n = connectionStrings.size() > 0 ? connectionStrings.size() - 1 : 0; // avoid underflow
+			int n = !connectionStrings.empty() ? connectionStrings.size() - 1 : 0; // avoid underflow
 			for (int i = 0; i < n; ++i) {
 				ASSERT(currentKey.get() != connectionStrings.at(i));
 			}
@@ -1071,7 +1071,7 @@ Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChange> ch
 
 			std::vector<NetworkAddress> oldCoordinators = co_await oldClusterConnectionString.tryResolveHostnames();
 			CoordinatorsResult result = CoordinatorsResult::SUCCESS;
-			if (!desiredCoordinators.size()) {
+			if (desiredCoordinators.empty()) {
 				std::vector<NetworkAddress> _desiredCoordinators = co_await change->getDesiredCoordinators(
 				    &tr,
 				    oldCoordinators,
@@ -1090,7 +1090,7 @@ Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChange> ch
 			}
 			if (result != CoordinatorsResult::SUCCESS)
 				co_return result;
-			if (!desiredCoordinators.size())
+			if (desiredCoordinators.empty())
 				co_return CoordinatorsResult::INVALID_NETWORK_ADDRESSES;
 			std::sort(desiredCoordinators.begin(), desiredCoordinators.end());
 
@@ -1276,7 +1276,7 @@ struct AutoQuorumChange final : IQuorumChange {
 		std::vector<ProcessData> workers = _workers;
 
 		std::map<NetworkAddress, LocalityData> addr_locality;
-		for (auto w : workers)
+		for (const auto& w : workers)
 			addr_locality[w.address] = w.locality;
 
 		// since we don't have the locality data for oldCoordinators:
@@ -1286,7 +1286,7 @@ struct AutoQuorumChange final : IQuorumChange {
 		std::set<Optional<Standalone<StringRef>>> checkDuplicates;
 		for (auto addr : oldCoordinators) {
 			auto findResult = addr_locality.find(addr);
-			if (findResult == addr_locality.end() || checkDuplicates.count(findResult->second.zoneId())) {
+			if (findResult == addr_locality.end() || checkDuplicates.contains(findResult->second.zoneId())) {
 				checkAcceptable = false;
 				break;
 			}
@@ -2157,8 +2157,8 @@ Future<bool> checkForExcludingServersTxActor(ReadYourWritesTransaction* tr,
                                              std::set<AddressExclusion>* exclusions,
                                              std::set<NetworkAddress>* inProgressExclusion) {
 	// TODO : replace using ExclusionInProgressRangeImpl in special key space
-	ASSERT(inProgressExclusion->size() == 0); //  Make sure every time it is cleared beforehand
-	if (!exclusions->size())
+	ASSERT(inProgressExclusion->empty()); //  Make sure every time it is cleared beforehand
+	if (exclusions->empty())
 		co_return true;
 
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -2272,7 +2272,7 @@ Future<Void> waitForFullReplication(Database cx) {
 				}
 			}
 
-			if (!watchFutures.size() || (config.usableRegions == 1 && watchFutures.size() < config.regions.size())) {
+			if (watchFutures.empty() || (config.usableRegions == 1 && watchFutures.size() < config.regions.size())) {
 				co_return;
 			}
 
@@ -2669,7 +2669,7 @@ Future<BulkLoadTaskState> getBulkLoadTask(Transaction* tr,
 		    .backtrace();
 		throw bulkload_task_outdated();
 	}
-	if (phases.size() > 0 && !bulkLoadTaskState.onAnyPhase(phases)) {
+	if (!phases.empty() && !bulkLoadTaskState.onAnyPhase(phases)) {
 		TraceEvent(SevWarn, "GetBulkLoadTaskError")
 		    .detail("Reason", "PhaseMismatch")
 		    .detail("Range", printable(range))
@@ -4017,7 +4017,7 @@ bool schemaMatch(json_spirit::mValue const& schemaValue,
 					schemaCoverage(spath);
 				}
 
-				if (!schema.count(key)) {
+				if (!schema.contains(key)) {
 					errorStr += format("ERROR: Unknown key `%s'\n", kpath.c_str());
 					TraceEvent(sev, "SchemaMismatch").detail("Path", kpath).detail("SchemaPath", spath);
 					ok = false;
@@ -4025,7 +4025,7 @@ bool schemaMatch(json_spirit::mValue const& schemaValue,
 				}
 				auto& sv = schema.at(key);
 
-				if (sv.type() == json_spirit::obj_type && sv.get_obj().count("$enum")) {
+				if (sv.type() == json_spirit::obj_type && sv.get_obj().contains("$enum")) {
 					auto& enum_values = sv.get_obj().at("$enum").get_array();
 
 					bool any_match = false;
@@ -4050,7 +4050,7 @@ bool schemaMatch(json_spirit::mValue const& schemaValue,
 						}
 						ok = false;
 					}
-				} else if (sv.type() == json_spirit::obj_type && sv.get_obj().count("$map")) {
+				} else if (sv.type() == json_spirit::obj_type && sv.get_obj().contains("$map")) {
 					if (rv.type() != json_spirit::obj_type) {
 						errorStr += format("ERROR: Expected an object as the value for key `%s'\n", kpath.c_str());
 						TraceEvent(sev, "SchemaMismatch")
@@ -4094,9 +4094,9 @@ bool schemaMatch(json_spirit::mValue const& schemaValue,
 		} else if (resultValue.type() == json_spirit::array_type) {
 			auto& valueArray = resultValue.get_array();
 			auto& schemaArray = schemaValue.get_array();
-			if (!schemaArray.size()) {
+			if (schemaArray.empty()) {
 				// An empty schema array means that the value array is required to be empty
-				if (valueArray.size()) {
+				if (!valueArray.empty()) {
 					errorStr += format("ERROR: Expected an empty array for key `%s'\n", path.c_str());
 					TraceEvent(sev, "SchemaMismatch")
 					    .detail("Path", path)

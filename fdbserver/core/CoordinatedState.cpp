@@ -256,7 +256,7 @@ struct MovableCoordinatedStateImpl {
 	static Future<Value> read(MovableCoordinatedStateImpl* self) {
 		MovableValue moveState;
 		Value rawValue = co_await self->cs.read();
-		if (rawValue.size()) {
+		if (!rawValue.empty()) {
 			BinaryReader r(rawValue, IncludeVersion());
 			if (!r.protocolVersion().hasMovableCoordinatedState()) {
 				// Old coordinated state, not a MovableValue
@@ -301,7 +301,7 @@ struct MovableCoordinatedStateImpl {
 			}
 			ASSERT(res.index() == 1);
 			Value ncInitialValue = std::get<1>(std::move(res));
-			ASSERT(!ncInitialValue.size()); // The new coordinators must be uninitialized!
+			ASSERT(ncInitialValue.empty()); // The new coordinators must be uninitialized!
 		}
 		TraceEvent("FinishedRead").detail("ConnectionString", nc.toString());
 

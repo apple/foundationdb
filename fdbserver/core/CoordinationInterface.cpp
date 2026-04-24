@@ -44,7 +44,7 @@ LeaderElectionRegInterface::LeaderElectionRegInterface(INetwork* local) : Client
 
 ServerCoordinators::ServerCoordinators(Reference<IClusterConnectionRecord> ccr) : ClientCoordinators(ccr) {
 	ClusterConnectionString cs = ccr->getConnectionString();
-	for (auto h : cs.hostnames) {
+	for (const auto& h : cs.hostnames) {
 		leaderElectionServers.emplace_back(h);
 		stateServers.emplace_back(h);
 	}

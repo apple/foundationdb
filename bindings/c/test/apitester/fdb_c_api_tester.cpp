@@ -325,7 +325,7 @@ void applyNetworkOptions(TesterOptions& options) {
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_RETAIN_CLIENT_LIBRARY_COPIES);
 	}
 
-	for (auto knob : options.testSpec.knobs) {
+	for (const auto& knob : options.testSpec.knobs) {
 		fmt::print(stderr, "Setting knob {}={}\n", knob.first.c_str(), knob.second.c_str());
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_KNOB,
 		                        fmt::format("{}={}", knob.first.c_str(), knob.second.c_str()));

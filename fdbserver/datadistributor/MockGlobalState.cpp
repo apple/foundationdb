@@ -657,7 +657,7 @@ void MockGlobalState::addStorageServer(StorageServerInterface server, uint64_t d
 }
 
 void MockGlobalState::addStoragePerProcess(uint64_t defaultDiskSpace) {
-	for (auto p : processes) {
+	for (const auto& p : processes) {
 		if (p->ssInterfaces.empty()) {
 			p->ssInterfaces.emplace_back(deterministicRandom()->randomUniqueID());
 			p->ssInterfaces.back().locality = p->locality;

@@ -79,7 +79,7 @@ struct DcLagWorkload : TestWorkload {
 				ips.push_back(ip);
 			}
 		}
-		ASSERT(ips.size() > 0);
+		ASSERT(!ips.empty());
 
 		// Find all primary satellite tlogs
 		std::vector<NetworkAddress> logs; // all primary satellite logs
