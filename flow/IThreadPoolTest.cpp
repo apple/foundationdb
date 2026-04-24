@@ -57,25 +57,34 @@ struct ThreadNameReceiver final : IThreadPoolReceiver {
 	}
 };
 
+Future<std::string> getThreadName(Reference<IThreadPool> pool) {
+	auto* a = new ThreadNameReceiver::GetNameAction();
+	auto fut = a->name.getFuture();
+	pool->post(a);
+	return fut;
+}
+
+Future<Void> waitForThreadName(Reference<IThreadPool> pool, std::string const& expectedName) {
+	double deadline = now() + 5.0;
+	std::string lastName;
+	while (now() < deadline) {
+		lastName = co_await getThreadName(pool);
+		if (lastName == expectedName) {
+			co_return;
+		}
+		co_await delay(0.01);
+	}
+	std::cout << "Incorrect thread name: " << lastName << std::endl;
+	ASSERT(false);
+}
+
 TEST_CASE("/flow/IThreadPool/NamedThread") {
 	noUnseed = true;
 
 	Reference<IThreadPool> pool = createGenericThreadPool();
 	pool->addThread(new ThreadNameReceiver(), "thread-foo");
 
-	// Warning: this action is a little racy with the call to `pthread_setname_np`. In practice,
-	// ~nothing should depend on the thread name being set instantaneously. If this test ever
-	// flakes, we can make `startThread` in platform a little bit more complex to clearly order
-	// the actions.
-	auto* a = new ThreadNameReceiver::GetNameAction();
-	auto fut = a->name.getFuture();
-	pool->post(a);
-
-	std::string name = co_await fut;
-	if (name != "thread-foo") {
-		std::cout << "Incorrect thread name: " << name << std::endl;
-		ASSERT(false);
-	}
+	co_await waitForThreadName(pool, "thread-foo");
 
 	co_await pool->stop();
 }
@@ -124,13 +133,28 @@ TEST_CASE("/flow/IThreadPool/ThreadReturnPromiseStream") {
 	// ~nothing should depend on the thread name being set instantaneously. If this test ever
 	// flakes, we can make `startThread` in platform a little bit more complex to clearly order
 	// the actions.
+	ThreadFutureStream<std::string> futs = notifications->getFuture();
+	double deadline = now() + 5.0;
+	std::string lastName;
+	while (now() < deadline) {
+		auto* a = new ThreadSafePromiseStreamSender::GetNameAction();
+		pool->post(a);
+		lastName = co_await futs;
+		if (lastName == "thread-foo") {
+			break;
+		}
+		co_await delay(0.01);
+	}
+	if (lastName != "thread-foo") {
+		std::cout << "Incorrect thread name: " << lastName << std::endl;
+		ASSERT(false);
+	}
+
 	int num = 3;
 	for (int i = 0; i < num; ++i) {
 		auto* a = new ThreadSafePromiseStreamSender::GetNameAction();
 		pool->post(a);
 	}
-
-	ThreadFutureStream<std::string> futs = notifications->getFuture();
 
 	int n = 0;
 	while (n < num) {

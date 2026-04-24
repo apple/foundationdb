@@ -2382,7 +2382,9 @@ TEST_CASE("/flow/coro/generators") {
 	testFibDivisible();
 	co_await testEmptyGenerator();
 	co_await testSimpleGenerator();
-	co_await testReadLines();
+	if (IAsyncFileSystem::filesystem() != nullptr) {
+		co_await testReadLines();
+	}
 	testElementWalker();
 }
 
