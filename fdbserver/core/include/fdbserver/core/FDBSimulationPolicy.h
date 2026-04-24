@@ -55,6 +55,10 @@ struct FDBSimulationPolicyState {
 	std::string disableRemote;
 	std::string originalRegions;
 	std::string startingDisabledConfiguration;
+	int testerCount = 0;
+	std::string connectionString;
+	bool hasDiffProtocolProcess = false;
+	bool setDiffProtocol = false;
 };
 
 void installFDBSimulationPolicy();

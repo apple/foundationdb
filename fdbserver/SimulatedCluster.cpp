@@ -1013,7 +1013,8 @@ Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				}
 				const int listenPort = i * listenPerProcess + 1;
 
-				if (g_simulator->hasDiffProtocolProcess && !g_simulator->setDiffProtocol && ipProcessMode == FDBDOnly) {
+				if (fdbSimulationPolicyState().hasDiffProtocolProcess && !fdbSimulationPolicyState().setDiffProtocol &&
+				    ipProcessMode == FDBDOnly) {
 					processes.push_back(simulatedFDBDRebooter(clusterFile,
 					                                          ips[i],
 					                                          sslEnabled,
@@ -1031,7 +1032,7 @@ Future<Void> simulatedMachine(ClusterConnectionString connStr,
 					                                          whitelistBinPaths,
 					                                          protocolVersion,
 					                                          isDr));
-					g_simulator->setDiffProtocol = true;
+					fdbSimulationPolicyState().setDiffProtocol = true;
 				} else {
 					processes.push_back(simulatedFDBDRebooter(clusterFile,
 					                                          ips[i],
@@ -2632,15 +2633,15 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		                 "SimulatedTesterMachine"));
 	}
 
-	if (g_simulator->setDiffProtocol) {
+	if (fdbSimulationPolicyState().setDiffProtocol) {
 		--(*pTesterCount);
 	}
 
 	*pStartingConfiguration = startingConfigString;
 
 	// save some state that we only need when restarting the simulator.
-	g_simulator->connectionString = conn.toString();
-	g_simulator->testerCount = testerCount;
+	fdbSimulationPolicyState().connectionString = conn.toString();
+	fdbSimulationPolicyState().testerCount = testerCount;
 	fdbSimulationPolicyState().allowStorageMigrationTypeChange = gradualMigrationPossible;
 	g_simulator->willRestart = testConfig.isFirstTestInRestart;
 
@@ -2698,8 +2699,8 @@ static Future<Void> simulationSetupAndRunImpl(std::string dataFolder,
 	TestConfig testConfig;
 	IPAllowList allowList;
 	testConfig.readFromConfig(testFile);
-	g_simulator->hasDiffProtocolProcess = testConfig.startIncompatibleProcess;
-	g_simulator->setDiffProtocol = false;
+	fdbSimulationPolicyState().hasDiffProtocolProcess = testConfig.startIncompatibleProcess;
+	fdbSimulationPolicyState().setDiffProtocol = false;
 	if (testConfig.injectTargetedSSRestart && deterministicRandom()->random01() < 0.25) {
 		g_simulator->injectTargetedSSRestartTime = 60.0 + 340.0 * deterministicRandom()->random01();
 	}

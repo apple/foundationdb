@@ -70,8 +70,8 @@ struct SaveAndKillWorkload : TestWorkload {
 		ini.SetValue("META", "listenersPerProcess", format("%d", g_simulator->listenersPerProcess).c_str());
 		ini.SetValue(
 		    "META", "desiredCoordinators", format("%d", fdbSimulationPolicyState().desiredCoordinators).c_str());
-		ini.SetValue("META", "connectionString", g_simulator->connectionString.c_str());
-		ini.SetValue("META", "testerCount", format("%d", g_simulator->testerCount).c_str());
+		ini.SetValue("META", "connectionString", fdbSimulationPolicyState().connectionString.c_str());
+		ini.SetValue("META", "testerCount", format("%d", fdbSimulationPolicyState().testerCount).c_str());
 		ini.SetValue("META", "tssMode", format("%d", g_simulator->tssMode).c_str());
 		ini.SetValue("META", "mockDNS", INetworkConnections::net()->convertMockDNSToString().c_str());
 		ini.SetBoolValue("META", "enableShardEncodeLocationMetadata", SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);

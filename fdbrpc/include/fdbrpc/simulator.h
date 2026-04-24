@@ -324,10 +324,6 @@ public:
 	TSSMode tssMode;
 	std::map<NetworkAddress, bool> corruptWorkerMap;
 
-	// Used by workloads that perform reconfigurations
-	int testerCount;
-	std::string connectionString;
-
 	bool isStopped;
 	double lastConnectionFailure;
 	double connectionFailuresDisableDuration;
@@ -337,9 +333,6 @@ public:
 	bool willRestart = false;
 	bool restarted = false;
 	bool isConsistencyChecked = false;
-
-	bool hasDiffProtocolProcess; // true if simulator is testing a process with a different version
-	bool setDiffProtocol; // true if a process with a different protocol version has been started
 
 	double injectTargetedSSRestartTime = std::numeric_limits<double>::max();
 	double injectSSDelayTime = std::numeric_limits<double>::max();
