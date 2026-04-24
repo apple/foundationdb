@@ -37,6 +37,14 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
+
+// Exponential backoff for transaction_too_old retries in finishMoveKeys.
+// Formula: 0.1 * 2^retries, capped at 5.0s. Called with retries >= 1
+// (retries is incremented before the call), so effective start is 0.2s.
+double finishMoveKeysBackoff(int retries) {
+	return std::min(0.1 * (1 << std::min(retries, 6)), 5.0);
+}
+
 struct Shard {
 	Shard() = default;
 	Shard(KeyRangeRef range, const UID& id) : range(range), id(id) {}
@@ -1608,10 +1616,18 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 						}
 
 						wait(waitForAll(actors));
+
+						// Inject transaction_too_old before commit to exercise the
+						// retry limit and finish_move_keys_too_many_retries path.
+						if (BUGGIFY_WITH_PROB(0.01)) {
+							CODE_PROBE(true, "finishMoveKeys injecting transaction_too_old before commit");
+							throw transaction_too_old();
+						}
 						wait(tr.commit());
 						txnCommitted->increment(1);
 
 						begin = endKey;
+						retries = 0;
 						break;
 					}
 					// This leads to a count of transactions starting that exceeds the sum of
@@ -1624,6 +1640,26 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 					state Error err = error;
 					wait(tr.onError(error));
 					retries++;
+					// tr.onError delays are short for transaction_too_old. With 15
+					// FlowLock slots all retrying, this creates a retry storm. Add
+					// additional exponential backoff capped at 5s.
+					if (err.code() == error_code_transaction_too_old) {
+						double backoff = finishMoveKeysBackoff(retries);
+						CODE_PROBE(true, "finishMoveKeys transaction_too_old backoff");
+						TraceEvent("FinishMoveKeysBackoff", relocationIntervalId)
+						    .detail("Retries", retries)
+						    .detail("BackoffSeconds", backoff);
+						if (retries > SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES) {
+							CODE_PROBE(true, "finishMoveKeys giving up after max retries");
+							TraceEvent(SevWarnAlways, "RelocateShard_FinishMoveKeysGivingUp", relocationIntervalId)
+							    .error(err)
+							    .detail("KeyBegin", keys.begin)
+							    .detail("KeyEnd", keys.end)
+							    .detail("Retries", retries);
+							throw finish_move_keys_too_many_retries();
+						}
+						wait(delay(backoff));
+					}
 					if (retries % 10 == 0) {
 						TraceEvent(retries == 20 ? SevWarnAlways : SevWarn,
 						           "RelocateShard_FinishMoveKeysRetrying",
@@ -3472,4 +3508,30 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 			    tr, arena, serverKeysPrefixFor(s.id()), allKeys, serverKeysTrue, serverKeysFalse);
 		}
 	}
+}
+
+// Unit test for the finishMoveKeys backoff formula. A simulation workload can't reliably
+// trigger transaction_too_old in finishMoveKeys because:
+//   1. finishMoveKeys only runs when DD schedules data moves, which depends on cluster
+//      configuration and shard placement — not guaranteed in all simulation configs
+//   2. Even with injection, the injection point must fire before check() runs, but
+//      finishMoveKeys may not be called if no moves are scheduled
+// So we test the backoff arithmetic directly.
+TEST_CASE("/fdbserver/MoveKeys/finishMoveKeysBackoff") {
+	// Verify exponential backoff: 0.1 * 2^retries, capped at 5.0s.
+	// In production retries >= 1 at call site, so effective start is 0.2s.
+	ASSERT(finishMoveKeysBackoff(0) == 0.1);
+	ASSERT(finishMoveKeysBackoff(1) == 0.2);
+	ASSERT(finishMoveKeysBackoff(2) == 0.4);
+	ASSERT(finishMoveKeysBackoff(3) == 0.8);
+	ASSERT(finishMoveKeysBackoff(4) == 1.6);
+	ASSERT(finishMoveKeysBackoff(5) == 3.2);
+	ASSERT(finishMoveKeysBackoff(6) == 5.0); // capped
+	ASSERT(finishMoveKeysBackoff(7) == 5.0); // still capped
+	ASSERT(finishMoveKeysBackoff(100) == 5.0); // still capped
+
+	// Verify the retry limit knob exists and is positive
+	ASSERT(SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES > 0);
+
+	return Void();
 }

@@ -307,6 +307,7 @@ static std::set<int> const& normalDDQueueErrors() {
 		s.insert(error_code_broken_promise);
 		s.insert(error_code_data_move_cancelled);
 		s.insert(error_code_data_move_dest_team_not_found);
+		s.insert(error_code_finish_move_keys_too_many_retries);
 	}
 	return s;
 }
