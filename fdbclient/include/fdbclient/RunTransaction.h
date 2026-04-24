@@ -129,7 +129,10 @@ auto SystemDB(Reference<DB> db, bool write = false, bool lockAware = false, bool
 // SystemDB with all options true
 template <typename DB>
 auto SystemDBWriteLockedNow(Reference<DB> db) {
-	return makeReference<SystemTransactionGenerator<DB>>(db, true, true, true);
+	constexpr bool write = true;
+	constexpr bool lockAware = true;
+	constexpr bool immediate = true;
+	return makeReference<SystemTransactionGenerator<DB>>(db, write, lockAware, immediate);
 }
 
 #if defined(__GNUC__) && !defined(__clang__)
