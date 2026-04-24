@@ -544,8 +544,7 @@ using RestoreFile = RestoreConfig::RestoreFile;
 //   - Triggered: assigned to storage server, waiting to start
 //   - Running: storage server actively downloading/ingesting SST files
 Future<std::tuple<int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>> getBulkLoadTaskProgress(Database cx,
-                                                                                                 UID jobId,
-                                                                                                 bool lockAware) {
+                                                                                                 UID jobId) {
 	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	Key readBegin = normalKeys.begin;
 	Key readEnd = normalKeys.end;
@@ -560,9 +559,7 @@ Future<std::tuple<int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>> getBulk
 		Error err;
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			if (lockAware) {
-				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			}
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			RangeResult rangeResult = co_await krmGetRanges(tr, bulkLoadTaskPrefix, KeyRangeRef(readBegin, readEnd));
 			if (rangeResult.empty()) {
 				break;
@@ -628,7 +625,7 @@ Future<bool> monitorBulkLoadJobCompletionWithProgress(Database cx,
 		// Update progress based on completed bulkload tasks
 		try {
 			auto [completed, submitted, triggered, running, total, bytes] =
-			    co_await getBulkLoadTaskProgress(cx, jobId, lockAware);
+			    co_await getBulkLoadTaskProgress(cx, jobId);
 			if (total > 0) {
 				// For bulkload restores, fileBlockCount is 0, so use task count as "blocks"
 				// This provides meaningful progress tracking for the restore status display
