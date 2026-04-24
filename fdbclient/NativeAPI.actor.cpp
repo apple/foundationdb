@@ -1494,7 +1494,7 @@ Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange keys) 
 				try {
 					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 					tr.setOption(FDBTransactionOptions::CAUSAL_READ_RISKY);
-					co_await success(tr.getReadVersion());
+					co_await tr.getReadVersion();
 					break;
 				} catch (Error& e) {
 					err = e;
@@ -2064,7 +2064,7 @@ Future<Void> sameVersionDiffValue(Database cx, Reference<WatchParameters> parame
 				cx->setWatchMetadata(metadata);
 
 				metadata->watchFutureSS = watchStorageServerResp(parameters->key, cx);
-				co_await success(metadata->watchPromise.getFuture());
+				co_await metadata->watchPromise.getFuture();
 			}
 
 			co_return;
@@ -6050,7 +6050,7 @@ Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(
 			if (use_system_priority) {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			}
-			co_await store(res, metadataMap.getRange(tr, UID(0, 0), Optional<UID>(), CLIENT_KNOBS->TOO_MANY));
+			res = co_await metadataMap.getRange(tr, UID(0, 0), Optional<UID>(), CLIENT_KNOBS->TOO_MANY);
 			co_await tr->commit();
 			co_return res.results;
 		} catch (Error& e) {

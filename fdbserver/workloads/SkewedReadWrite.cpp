@@ -61,7 +61,7 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 
 	void debugPrintServerShards() const {
 		std::cout << std::hex;
-		for (auto it : this->serverShards) {
+		for (const auto& it : this->serverShards) {
 			std::cout << serverInterfaces.at(it.first).address().toString() << ": [";
 			for (auto p : it.second) {
 				std::cout << "[" << p.first << "," << p.second << "], ";
@@ -143,9 +143,9 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 				}
 			}
 		}
-		ASSERT(beginServers.size() == 0 || beginServers.begin()->first >= workloadBegin);
+		ASSERT(beginServers.empty() || beginServers.begin()->first >= workloadBegin);
 		// handle the left boundary
-		if (beginServers.size() == 0 || beginServers.begin()->first > workloadBegin) {
+		if (beginServers.empty() || beginServers.begin()->first > workloadBegin) {
 			beginServers[workloadBegin] = leftServer;
 		}
 		Standalone<VectorRef<KeyRef>> keyBegins;
@@ -168,7 +168,7 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 			++i;
 		}
 		// self->serverShards is ordered by UID
-		for (auto it : serverShards) {
+		for (const auto& it : serverShards) {
 			this->serverShards.emplace_back(it);
 		}
 		//		if (self->clientId == 0) {
@@ -178,7 +178,7 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 
 	template <class Trans>
 	Future<Void> readOp(Trans* tr, std::vector<int64_t> keys, SkewedReadWriteWorkload* self, bool shouldRecord) {
-		if (!keys.size())
+		if (keys.empty())
 			co_return;
 
 		std::vector<Future<Void>> readers;

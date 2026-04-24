@@ -232,7 +232,7 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 				ASSERT(self->getRangeResultInOrder(result));
 				// check correctness of classType of each process
 				std::vector<ProcessData> workers = co_await getWorkers(&tx->getTransaction());
-				if (workers.size()) {
+				if (!workers.empty()) {
 					for (const auto& worker : workers) {
 						Key addr =
 						    Key("process/class_type/" + formatIpPort(worker.address.ip, worker.address.port))
@@ -308,7 +308,7 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 				ASSERT(self->getRangeResultInOrder(class_source_result));
 				// check correctness of classType of each process
 				std::vector<ProcessData> workers = co_await getWorkers(&tx->getTransaction());
-				if (workers.size()) {
+				if (!workers.empty()) {
 					for (const auto& worker : workers) {
 						Key addr =
 						    Key("process/class_source/" + formatIpPort(worker.address.ip, worker.address.port))

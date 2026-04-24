@@ -24,7 +24,7 @@
 #include <tuple>
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/LogSystem.h"
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 

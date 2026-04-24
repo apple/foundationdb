@@ -423,7 +423,7 @@ AsyncResult<Optional<StatusObject>> clusterStatusFetcher(ClusterInterface cI,
                                                          StatusArray* messages,
                                                          std::string statusField) {
 	StatusRequest req(statusField);
-	Future<Void> clusterTimeout = delay(30.0);
+	Future<Void> clusterTimeout = delay(CLIENT_KNOBS->STATUS_TIMEOUT);
 	Optional<StatusObject> oStatusObj;
 
 	co_await delay(0.0); // make sure the cluster controller is marked as not failed

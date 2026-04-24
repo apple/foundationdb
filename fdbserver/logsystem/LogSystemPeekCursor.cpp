@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/logsystem/LogSystemTypes.h"
+#include "fdbserver/logsystem/LogSystem.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MutationTracking.h"
@@ -99,7 +99,7 @@ ServerPeekCursor::ServerPeekCursor(TLogPeekReply const& results,
 	advanceTo(messageVersion);
 }
 
-Reference<ILogSystem::IPeekCursor> ServerPeekCursor::cloneNoMore() {
+Reference<IPeekCursor> ServerPeekCursor::cloneNoMore() {
 	return makeReference<ServerPeekCursor>(results, messageVersion, end, messageAndTags, hasMsg, poppedVersion, tag);
 }
 
@@ -658,7 +658,7 @@ static bool canReturnEmptyVersionRange(
 	return false;
 }
 
-MergedPeekCursor::MergedPeekCursor(std::vector<Reference<ILogSystem::IPeekCursor>> const& serverCursors, Version begin)
+MergedPeekCursor::MergedPeekCursor(std::vector<Reference<IPeekCursor>> const& serverCursors, Version begin)
   : serverCursors(serverCursors), tag(invalidTag), bestServer(-1), currentCursor(0), readQuorum(serverCursors.size()),
     messageVersion(begin), hasNextMessage(false), randomID(deterministicRandom()->randomUniqueID()),
     tLogReplicationFactor(0) {
@@ -704,7 +704,7 @@ MergedPeekCursor::MergedPeekCursor(std::vector<Reference<AsyncVar<OptionalInterf
 	sortedVersions.resize(serverCursors.size());
 }
 
-MergedPeekCursor::MergedPeekCursor(std::vector<Reference<ILogSystem::IPeekCursor>> const& serverCursors,
+MergedPeekCursor::MergedPeekCursor(std::vector<Reference<IPeekCursor>> const& serverCursors,
                                    LogMessageVersion const& messageVersion,
                                    int bestServer,
                                    int readQuorum,
@@ -718,8 +718,8 @@ MergedPeekCursor::MergedPeekCursor(std::vector<Reference<ILogSystem::IPeekCursor
 	calcHasMessage();
 }
 
-Reference<ILogSystem::IPeekCursor> MergedPeekCursor::cloneNoMore() {
-	std::vector<Reference<ILogSystem::IPeekCursor>> cursors;
+Reference<IPeekCursor> MergedPeekCursor::cloneNoMore() {
+	std::vector<Reference<IPeekCursor>> cursors;
 	for (auto it : serverCursors) {
 		cursors.push_back(it->cloneNoMore());
 	}
@@ -994,7 +994,7 @@ SetPeekCursor::SetPeekCursor(std::vector<Reference<LogSet>> const& logSets,
 }
 
 SetPeekCursor::SetPeekCursor(std::vector<Reference<LogSet>> const& logSets,
-                             std::vector<std::vector<Reference<ILogSystem::IPeekCursor>>> const& serverCursors,
+                             std::vector<std::vector<Reference<IPeekCursor>>> const& serverCursors,
                              LogMessageVersion const& messageVersion,
                              int bestSet,
                              int bestServer,
@@ -1011,8 +1011,8 @@ SetPeekCursor::SetPeekCursor(std::vector<Reference<LogSet>> const& logSets,
 	calcHasMessage();
 }
 
-Reference<ILogSystem::IPeekCursor> SetPeekCursor::cloneNoMore() {
-	std::vector<std::vector<Reference<ILogSystem::IPeekCursor>>> cursors;
+Reference<IPeekCursor> SetPeekCursor::cloneNoMore() {
+	std::vector<std::vector<Reference<IPeekCursor>>> cursors;
 	cursors.resize(logSets.size());
 	for (int i = 0; i < logSets.size(); i++) {
 		for (int j = 0; j < logSets[i]->logServers.size(); j++) {
@@ -1334,15 +1334,14 @@ Version SetPeekCursor::popped() const {
 	return poppedVersion;
 }
 
-MultiCursor::MultiCursor(std::vector<Reference<ILogSystem::IPeekCursor>> cursors,
-                         std::vector<LogMessageVersion> epochEnds)
+MultiCursor::MultiCursor(std::vector<Reference<IPeekCursor>> cursors, std::vector<LogMessageVersion> epochEnds)
   : cursors(cursors), epochEnds(epochEnds), poppedVersion(0) {
 	for (int i = 0; i < std::min<int>(cursors.size(), SERVER_KNOBS->MULTI_CURSOR_PRE_FETCH_LIMIT); i++) {
 		cursors[cursors.size() - i - 1]->getMore();
 	}
 }
 
-Reference<ILogSystem::IPeekCursor> MultiCursor::cloneNoMore() {
+Reference<IPeekCursor> MultiCursor::cloneNoMore() {
 	return cursors.back()->cloneNoMore();
 }
 
@@ -1432,7 +1431,7 @@ Version MultiCursor::popped() const {
 	return std::max(poppedVersion, cursors.back()->popped());
 }
 
-BufferedCursor::BufferedCursor(std::vector<Reference<ILogSystem::IPeekCursor>> cursors,
+BufferedCursor::BufferedCursor(std::vector<Reference<IPeekCursor>> cursors,
                                Version begin,
                                Version end,
                                bool withTags,
@@ -1462,9 +1461,9 @@ BufferedCursor::BufferedCursor(std::vector<Reference<AsyncVar<OptionalInterface<
 	}
 }
 
-Reference<ILogSystem::IPeekCursor> BufferedCursor::cloneNoMore() {
+Reference<IPeekCursor> BufferedCursor::cloneNoMore() {
 	ASSERT(false);
-	return Reference<ILogSystem::IPeekCursor>();
+	return Reference<IPeekCursor>();
 }
 
 void BufferedCursor::setProtocolVersion(ProtocolVersion version) {
@@ -1512,10 +1511,7 @@ void BufferedCursor::advanceTo(LogMessageVersion n) {
 	ASSERT(false);
 }
 
-Future<Void> bufferedGetMoreLoader(BufferedCursor* self,
-                                   Reference<ILogSystem::IPeekCursor> cursor,
-                                   int idx,
-                                   TaskPriority taskID) {
+Future<Void> bufferedGetMoreLoader(BufferedCursor* self, Reference<IPeekCursor> cursor, int idx, TaskPriority taskID) {
 	while (true) {
 		co_await yield();
 		if (cursor->version().version >= self->end || self->cursorMessages[idx].size() > self->targetQueueSize) {

@@ -577,7 +577,7 @@ public:
 
 	void addUniversalTraceField(const std::string& name, const std::string& value) {
 		MutexHolder holder(mutex);
-		ASSERT(universalFields.count(name) == 0);
+		ASSERT(!universalFields.contains(name));
 		universalFields[name] = value;
 	}
 

@@ -312,7 +312,7 @@ Future<Void> Ratekeeper::monitorHotShards(Reference<AsyncVar<ServerDBInfo> const
 			TraceEvent(SevWarn, "CannotMonitorHotShardForSS").detail("SS", ssi);
 			continue;
 		}
-		if (!setReq.throttledShards.size()) {
+		if (setReq.throttledShards.empty()) {
 			continue;
 		}
 		setReq.expirationTime = now() + SERVER_KNOBS->HOT_SHARD_THROTTLING_EXPIRE_AFTER;
@@ -390,13 +390,13 @@ Future<Void> Ratekeeper::handleGetRateInfoReqs(RatekeeperInterface rkInterf,
 			if (SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES) {
 				auto proxyThrottledTags = tagThrottler->getProxyRates(grvProxyInfo.size());
 				if (!SERVER_KNOBS->GLOBAL_TAG_THROTTLING_REPORT_ONLY) {
-					returningTagsToProxy = proxyThrottledTags.size() > 0;
+					returningTagsToProxy = !proxyThrottledTags.empty();
 					reply.proxyThrottledTags = std::move(proxyThrottledTags);
 				}
 			} else {
 				auto clientThrottledTags = tagThrottler->getClientRates();
 				if (!SERVER_KNOBS->GLOBAL_TAG_THROTTLING_REPORT_ONLY) {
-					returningTagsToProxy = clientThrottledTags.size() > 0;
+					returningTagsToProxy = !clientThrottledTags.empty();
 					reply.clientThrottledTags = std::move(clientThrottledTags);
 				}
 			}
@@ -638,7 +638,7 @@ static std::string getIgnoredZonesReasons(
 		}
 		ignoredZoneReasons += "] ";
 	}
-	return ignoredZoneReasons.length() ? ignoredZoneReasons : "None";
+	return !ignoredZoneReasons.empty() ? ignoredZoneReasons : "None";
 }
 
 void Ratekeeper::updateRate(RatekeeperLimits* limits) {

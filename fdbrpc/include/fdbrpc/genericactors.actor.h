@@ -33,63 +33,64 @@
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/WellKnownEndpoints.h"
 
+#include <type_traits>
+
+#include "flow/CoroUtils.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // To avoid directly access INetworkConnection::net()->removeCachedDNS(), which will require heavy include budget, put
 // the call to FlowTransport.cpp as a external function.
 extern void removeCachedDNS(const std::string& host, const std::string& service);
 
-ACTOR template <class Req, bool P>
+template <class Req, bool P>
 Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req, P> to, Req request) {
 	// Like to.getReply(request), except that a broken_promise exception results in retrying request immediately.
 	// Suitable for use with well known endpoints, which are likely to return to existence after the other process
 	// restarts. Not normally useful for ordinary endpoints, which conventionally are permanently destroyed after
 	// replying with broken_promise.
-	loop {
+	while (true) {
 		try {
-			REPLY_TYPE(Req) reply = wait(to.getReply(request));
-			return reply;
+			co_return co_await to.getReply(request);
 		} catch (Error& e) {
 			if (e.code() != error_code_broken_promise)
 				throw;
-			resetReply(request);
-			wait(delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
-			CODE_PROBE(true, "retryBrokenPromise");
 		}
+		resetReply(request);
+		co_await delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
+		CODE_PROBE(true, "retryBrokenPromise");
 	}
 }
 
-ACTOR template <class Req, bool P>
+template <class Req, bool P>
 Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req, P> to, Req request, TaskPriority taskID) {
 	// Like to.getReply(request), except that a broken_promise exception results in retrying request immediately.
 	// Suitable for use with well known endpoints, which are likely to return to existence after the other process
 	// restarts. Not normally useful for ordinary endpoints, which conventionally are permanently destroyed after
 	// replying with broken_promise.
-	loop {
+	while (true) {
 		try {
-			REPLY_TYPE(Req) reply = wait(to.getReply(request, taskID));
-			return reply;
+			co_return co_await to.getReply(request, taskID);
 		} catch (Error& e) {
 			if (e.code() != error_code_broken_promise)
 				throw;
-			resetReply(request);
-			wait(delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY, taskID));
-			CODE_PROBE(true, "retryBrokenPromise with taskID");
 		}
+		resetReply(request);
+		co_await delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY, taskID);
+		CODE_PROBE(true, "retryBrokenPromise with taskID");
 	}
 }
 
-ACTOR template <class Req>
+template <class Req>
 Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(Req request, Hostname hostname, WellKnownEndpoints token) {
 	// A wrapper of tryGetReply(request), except that the request is sent to an address resolved from a hostname.
 	// If resolving fails, return lookup_failed().
 	// Otherwise, return tryGetReply(request).
-	Optional<NetworkAddress> address = wait(hostname.resolve());
+	Optional<NetworkAddress> address = co_await hostname.resolve();
 	if (!address.present()) {
-		return ErrorOr<REPLY_TYPE(Req)>(lookup_failed());
+		co_return ErrorOr<REPLY_TYPE(Req)>(lookup_failed());
 	}
 	RequestStream<Req> to(Endpoint::wellKnown({ address.get() }, token));
-	state ErrorOr<REPLY_TYPE(Req)> reply = wait(to.tryGetReply(request));
+	ErrorOr<REPLY_TYPE(Req)> reply = co_await to.tryGetReply(request);
 	if (reply.isError()) {
 		resetReply(request);
 		if (reply.getError().code() == error_code_request_maybe_delivered) {
@@ -97,10 +98,10 @@ Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(Req request, Hostname h
 			removeCachedDNS(hostname.host, hostname.service);
 		}
 	}
-	return reply;
+	co_return reply;
 }
 
-ACTOR template <class Req>
+template <class Req>
 Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(Req request,
                                                          Hostname hostname,
                                                          WellKnownEndpoints token,
@@ -108,12 +109,12 @@ Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(Req request,
 	// A wrapper of tryGetReply(request), except that the request is sent to an address resolved from a hostname.
 	// If resolving fails, return lookup_failed().
 	// Otherwise, return tryGetReply(request).
-	Optional<NetworkAddress> address = wait(hostname.resolve());
+	Optional<NetworkAddress> address = co_await hostname.resolve();
 	if (!address.present()) {
-		return ErrorOr<REPLY_TYPE(Req)>(lookup_failed());
+		co_return ErrorOr<REPLY_TYPE(Req)>(lookup_failed());
 	}
 	RequestStream<Req> to(Endpoint::wellKnown({ address.get() }, token));
-	state ErrorOr<REPLY_TYPE(Req)> reply = wait(to.tryGetReply(request, taskID));
+	ErrorOr<REPLY_TYPE(Req)> reply = co_await to.tryGetReply(request, taskID);
 	if (reply.isError()) {
 		resetReply(request);
 		if (reply.getError().code() == error_code_request_maybe_delivered) {
@@ -121,59 +122,63 @@ Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(Req request,
 			removeCachedDNS(hostname.host, hostname.service);
 		}
 	}
-	return reply;
+	co_return reply;
 }
 
-ACTOR template <class Req>
-Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(Req request, Hostname hostname, WellKnownEndpoints token) {
+template <class Req>
+Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(Req request,
+                                                  Hostname hostname,
+                                                  WellKnownEndpoints token,
+                                                  ExplicitVoid = {}) {
 	// Like tryGetReplyFromHostname, except that request_maybe_delivered results in re-resolving the hostname.
 	// Suitable for use with hostname, where RequestStream is NOT initialized yet.
 	// Not normally useful for endpoints initialized with NetworkAddress.
-	state double reconnectInterval = FLOW_KNOBS->HOSTNAME_RECONNECT_INIT_INTERVAL;
-	state std::unique_ptr<RequestStream<Req>> to;
-	loop {
-		NetworkAddress address = wait(hostname.resolveWithRetry());
+	double reconnectInterval = FLOW_KNOBS->HOSTNAME_RECONNECT_INIT_INTERVAL;
+	std::unique_ptr<RequestStream<Req>> to;
+	while (true) {
+		NetworkAddress address = co_await hostname.resolveWithRetry();
 		if (to == nullptr || to->getEndpoint().getPrimaryAddress() != address) {
 			to = std::make_unique<RequestStream<Req>>(Endpoint::wellKnown({ address }, token));
 		}
-		state ErrorOr<REPLY_TYPE(Req)> reply = wait(to->tryGetReply(request));
+		ErrorOr<REPLY_TYPE(Req)> reply = co_await to->tryGetReply(request);
 		if (reply.isError()) {
 			resetReply(request);
 			if (reply.getError().code() == error_code_request_maybe_delivered) {
 				// Connection failure.
-				wait(delay(reconnectInterval));
+				co_await delay(reconnectInterval);
 				reconnectInterval = std::min(2 * reconnectInterval, FLOW_KNOBS->HOSTNAME_RECONNECT_MAX_INTERVAL);
 				removeCachedDNS(hostname.host, hostname.service);
 			} else {
 				throw reply.getError();
 			}
 		} else {
-			return reply.get();
+			co_return reply.get();
 		}
 	}
 }
 
-ACTOR template <class Req>
+template <class Req>
 Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(Req request,
                                                   Hostname hostname,
                                                   WellKnownEndpoints token,
-                                                  TaskPriority taskID) {
+                                                  TaskPriority taskID,
+                                                  ExplicitVoid = {}) {
 	// Like tryGetReplyFromHostname, except that request_maybe_delivered results in re-resolving the hostname.
 	// Suitable for use with hostname, where RequestStream is NOT initialized yet.
 	// Not normally useful for endpoints initialized with NetworkAddress.
-	state double reconnectInitInterval = FLOW_KNOBS->HOSTNAME_RECONNECT_INIT_INTERVAL;
-	state std::unique_ptr<RequestStream<Req>> to;
-	loop {
-		NetworkAddress address = wait(hostname.resolveWithRetry());
+	double reconnectInitInterval = FLOW_KNOBS->HOSTNAME_RECONNECT_INIT_INTERVAL;
+	std::unique_ptr<RequestStream<Req>> to;
+	while (true) {
+		NetworkAddress address = co_await hostname.resolveWithRetry();
 		if (to == nullptr || to->getEndpoint().getPrimaryAddress() != address) {
 			to = std::make_unique<RequestStream<Req>>(Endpoint::wellKnown({ address }, token));
 		}
-		state ErrorOr<REPLY_TYPE(Req)> reply = wait(to->tryGetReply(request, taskID));
+		ErrorOr<REPLY_TYPE(Req)> reply = co_await to->tryGetReply(request, taskID);
 		if (reply.isError()) {
 			resetReply(request);
 			if (reply.getError().code() == error_code_request_maybe_delivered) {
 				// Connection failure.
-				wait(delay(reconnectInitInterval));
+				co_await delay(reconnectInitInterval);
 				reconnectInitInterval =
 				    std::min(2 * reconnectInitInterval, FLOW_KNOBS->HOSTNAME_RECONNECT_MAX_INTERVAL);
 				removeCachedDNS(hostname.host, hostname.service);
@@ -181,7 +186,7 @@ Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(Req request,
 				throw reply.getError();
 			}
 		} else {
-			return reply.get();
+			co_return reply.get();
 		}
 	}
 }
@@ -200,102 +205,113 @@ Future<T> timeoutWarning(Future<T> what, double time, PromiseStream<Void> output
 	}
 }
 
-ACTOR template <class T>
-void forwardPromise(Promise<T> output, Future<T> input) {
+template <class T>
+Future<Void> forwardPromise(Uncancellable, Promise<T> output, Future<T> input, ExplicitVoid = {}) {
 	try {
-		T value = wait(input);
-		output.send(value);
+		T value = co_await input;
+		output.send(std::move(value));
 	} catch (Error& err) {
 		output.sendError(err);
 	}
+	co_return Void();
 }
 
-ACTOR template <class T>
-void forwardPromise(ReplyPromise<T> output, Future<T> input) {
+template <class T>
+Future<Void> forwardPromise(Uncancellable, ReplyPromise<T> output, Future<T> input, ExplicitVoid = {}) {
 	try {
-		T value = wait(input);
-		output.send(value);
+		T value = co_await input;
+		output.send(std::move(value));
 	} catch (Error& err) {
 		output.sendError(err);
 	}
+	co_return Void();
 }
 
-ACTOR template <class T>
-void forwardPromise(PromiseStream<T> output, Future<T> input) {
+template <class T>
+Future<Void> forwardPromise(Uncancellable, PromiseStream<T> output, Future<T> input, ExplicitVoid = {}) {
 	try {
-		T value = wait(input);
-		output.send(value);
+		T value = co_await input;
+		output.send(std::move(value));
 	} catch (Error& e) {
 		output.sendError(e);
 	}
+	co_return Void();
 }
 
-ACTOR template <class T>
-Future<Void> broadcast(Future<T> input, std::vector<Promise<T>> output) {
-	T value = wait(input);
-	for (int i = 0; i < output.size(); i++)
+template <class T>
+Future<Void> broadcast(Future<T> input, std::vector<Promise<T>> output, ExplicitVoid = {}) {
+	T value = co_await input;
+	for (int i = 0; i < output.size(); i++) {
 		output[i].send(value);
-	return Void();
+	}
+	co_return Void();
 }
 
-ACTOR template <class T>
-Future<Void> broadcast(Future<T> input, std::vector<ReplyPromise<T>> output) {
-	T value = wait(input);
-	for (int i = 0; i < output.size(); i++)
+template <class T>
+Future<Void> broadcast(Future<T> input, std::vector<ReplyPromise<T>> output, ExplicitVoid = {}) {
+	T value = co_await input;
+	for (int i = 0; i < output.size(); i++) {
 		output[i].send(value);
-	return Void();
+	}
+	co_return Void();
 }
 
-ACTOR template <class T>
-Future<Void> incrementalBroadcast(Future<T> input, std::vector<Promise<T>> output, int batchSize) {
-	state T value = wait(input);
-	state int i = 0;
-	for (; i < output.size(); i++) {
+template <class T>
+Future<Void> incrementalBroadcast(Future<T> input, std::vector<Promise<T>> output, int batchSize, ExplicitVoid = {}) {
+	T value = co_await input;
+	for (int i = 0; i < output.size(); i++) {
 		output[i].send(value);
 		if ((i + 1) % batchSize == 0) {
-			wait(delay(0));
+			co_await delay(0);
 		}
 	}
-	return Void();
+	co_return Void();
 }
 
-ACTOR template <class T>
-Future<Void> incrementalBroadcast(Future<T> input, std::vector<ReplyPromise<T>> output, int batchSize) {
-	state T value = wait(input);
-	state int i = 0;
-	for (; i < output.size(); i++) {
+template <class T>
+Future<Void> incrementalBroadcast(Future<T> input,
+                                  std::vector<ReplyPromise<T>> output,
+                                  int batchSize,
+                                  ExplicitVoid = {}) {
+	T value = co_await input;
+	for (int i = 0; i < output.size(); i++) {
 		output[i].send(value);
 		if ((i + 1) % batchSize == 0) {
-			wait(delay(0));
+			co_await delay(0);
 		}
 	}
-	return Void();
+	co_return Void();
 }
 
-ACTOR template <class T>
-Future<Void> incrementalBroadcastWithError(Future<T> input, std::vector<Promise<T>> output, int batchSize) {
-	state int i = 0;
+template <class T>
+Future<Void> incrementalBroadcastWithError(Future<T> input,
+                                           std::vector<Promise<T>> output,
+                                           int batchSize,
+                                           ExplicitVoid = {}) {
+	int i = 0;
+	Error err;
 	try {
-		state T value = wait(input);
+		T value = co_await input;
 		for (; i < output.size(); i++) {
 			output[i].send(value);
 			if ((i + 1) % batchSize == 0) {
-				wait(delay(0));
+				co_await delay(0);
 			}
 		}
-	} catch (Error& _e) {
-		if (_e.code() == error_code_operation_cancelled) {
-			throw _e;
-		}
-		state Error e = _e;
-		for (; i < output.size(); i++) {
-			output[i].sendError(e);
-			if ((i + 1) % batchSize == 0) {
-				wait(delay(0));
-			}
+		co_return Void();
+	} catch (Error& e) {
+		err = e;
+	}
+	if (err.code() == error_code_operation_cancelled) {
+		throw err;
+	}
+	for (; i < output.size(); i++) {
+		output[i].sendError(err);
+		if ((i + 1) % batchSize == 0) {
+			co_await delay(0);
 		}
 	}
-	return Void();
+	co_return Void();
 }
 
 // Needed for the call to endpointNotFound()
@@ -423,11 +439,10 @@ Future<T> sendCanceler(ReplyPromise<T> reply, ReliablePacket* send, Endpoint end
 	}
 }
 
-ACTOR template <class X>
-Future<X> reportEndpointFailure(Future<X> value, Endpoint endpoint) {
+template <class X>
+Future<X> reportEndpointFailure(Future<X> value, Endpoint endpoint, ExplicitVoid = {}) {
 	try {
-		X x = wait(value);
-		return x;
+		co_return co_await value;
 	} catch (Error& e) {
 		if (e.code() == error_code_broken_promise) {
 			IFailureMonitor::failureMonitor().endpointNotFound(endpoint);

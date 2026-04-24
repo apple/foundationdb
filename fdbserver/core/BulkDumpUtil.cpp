@@ -124,7 +124,7 @@ Future<BulkLoadManifest> dumpDataFileToLocalDirectory(UID logId,
 
 	// Step 2: Dump data to file
 	bool containDataFile = false;
-	if (rangeDumpRawData->kvs.size() > 0) {
+	if (!rangeDumpRawData->kvs.empty()) {
 		writeKVSToSSTFile(abspath(localFileSet.getDataFileFullPath()), rangeDumpRawData->kvs, logId);
 		containDataFile = true;
 	} else {
@@ -134,7 +134,7 @@ Future<BulkLoadManifest> dumpDataFileToLocalDirectory(UID logId,
 
 	// Step 3: Dump sample to file
 	bool containByteSampleFile = false;
-	if (rangeDumpRawData->sampled.size() > 0) {
+	if (!rangeDumpRawData->sampled.empty()) {
 		writeKVSToSSTFile(abspath(localFileSet.getBytesSampleFileFullPath()), rangeDumpRawData->sampled, logId);
 		containByteSampleFile = true;
 	} else {

@@ -1,5 +1,5 @@
 /*
- * TagPartitionedLogSystemRecoveryTests.cpp
+ * LogSystemRecoveryTests.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/logsystem/TagPartitionedLogSystem.h"
+#include "fdbserver/logsystem/LogSystem.h"
 #include "flow/UnitTest.h"
 
 namespace {
@@ -55,9 +55,9 @@ std::tuple<int, std::vector<TLogLockResult>, bool> makeLogGroupResults(
 
 } // namespace
 
-void forceLinkTagPartitionedLogSystemRecoveryTests() {}
+void forceLinkLogSystemRecoveryTests() {}
 
-TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/Simple") {
+TEST_CASE("/LogSystem/GetRecoverVersionUnicast/Simple") {
 	if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 		return Void();
 	}
@@ -91,7 +91,7 @@ TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/Simple") {
 	return Void();
 }
 
-TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/FallbackToMaxKCV") {
+TEST_CASE("/LogSystem/GetRecoverVersionUnicast/FallbackToMaxKCV") {
 	if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 		return Void();
 	}
@@ -122,7 +122,7 @@ TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/FallbackToMaxKCV") 
 	return Void();
 }
 
-TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/HaltOnMissingDelivery") {
+TEST_CASE("/LogSystem/GetRecoverVersionUnicast/HaltOnMissingDelivery") {
 	if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 		return Void();
 	}
@@ -160,7 +160,7 @@ TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/HaltOnMissingDelive
 	return Void();
 }
 
-TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/PolicyNotSatisfied") {
+TEST_CASE("/LogSystem/GetRecoverVersionUnicast/PolicyNotSatisfied") {
 	if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 		return Void();
 	}
@@ -198,7 +198,7 @@ TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/PolicyNotSatisfied"
 	return Void();
 }
 
-TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/MinDVRespected") {
+TEST_CASE("/LogSystem/GetRecoverVersionUnicast/MinDVRespected") {
 	if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 		return Void();
 	}
@@ -234,7 +234,7 @@ TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/MinDVRespected") {
 	return Void();
 }
 
-TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/BrokenChain") {
+TEST_CASE("/LogSystem/GetRecoverVersionUnicast/BrokenChain") {
 	if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 		return Void();
 	}
@@ -273,7 +273,7 @@ TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/BrokenChain") {
 	return Void();
 }
 
-TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/MultipleLogSets") {
+TEST_CASE("/LogSystem/GetRecoverVersionUnicast/MultipleLogSets") {
 	if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 		return Void();
 	}
@@ -312,7 +312,7 @@ TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/MultipleLogSets") {
 	return Void();
 }
 
-TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/PartialAvailabilityPolicyFail") {
+TEST_CASE("/LogSystem/GetRecoverVersionUnicast/PartialAvailabilityPolicyFail") {
 	if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 		return Void();
 	}
@@ -351,7 +351,7 @@ TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/PartialAvailability
 	return Void();
 }
 
-TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/VersionsBelowMaxKCV") {
+TEST_CASE("/LogSystem/GetRecoverVersionUnicast/VersionsBelowMaxKCV") {
 	if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 		return Void();
 	}
@@ -388,7 +388,7 @@ TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/VersionsBelowMaxKCV
 	return Void();
 }
 
-TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/RandomVersionsPartialDelivery") {
+TEST_CASE("/LogSystem/GetRecoverVersionUnicast/RandomVersionsPartialDelivery") {
 	if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 		return Void();
 	}

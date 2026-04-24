@@ -57,7 +57,7 @@ void testCompressedInt(IntType n, StringRef rep = StringRef()) {
 	CompressedInt<IntType> cn(n);
 
 	w << cn;
-	if (rep.size() != 0 && w.toValue() != rep) {
+	if (!rep.empty() && w.toValue() != rep) {
 		printf("WRONG ENCODING:\n");
 		printf("  test value (BigE):  ");
 		printBitsLittle(sizeof(IntType), &n);
