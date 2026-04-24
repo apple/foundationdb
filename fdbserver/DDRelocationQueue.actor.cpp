@@ -1297,6 +1297,23 @@ bool getWantTrueBestIfMoveout(int priority) {
 	}
 }
 
+struct RelocatorLatencySample {
+	DDSketch<double>& successSketch;
+	DDSketch<double>& errorSketch;
+	double start;
+	bool armed;
+	bool succeeded;
+	RelocatorLatencySample(DDSketch<double>& success, DDSketch<double>& error)
+	  : successSketch(success), errorSketch(error), start(now()), armed(true), succeeded(false) {}
+	void disarm() { armed = false; }
+	void markSucceeded() { succeeded = true; }
+	~RelocatorLatencySample() {
+		if (armed) {
+			(succeeded ? successSketch : errorSketch).addSample(now() - start);
+		}
+	}
+};
+
 // This actor relocates the specified keys to a good place.
 // The inFlightActor key range map stores the actor for each RelocateData
 ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
@@ -1319,6 +1336,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 	state int stuckCount = 0;
 	state std::vector<std::pair<Reference<IDataDistributionTeam>, bool>> bestTeams;
 	state double startTime = now();
+	state RelocatorLatencySample latencySample(self->relocatorLatency, self->relocatorErrorLatency);
 	state std::vector<UID> destIds;
 	state WantTrueBest wantTrueBest(isValleyFillerPriority(rd.priority));
 	state WantTrueBestIfMoveout wantTrueBestIfMoveout(getWantTrueBestIfMoveout(rd.priority));
@@ -1973,6 +1991,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						    rd.keys, rd.isRestore(), selectedTeams, rd.dataMoveId.first(), metrics, debugID);
 					}
 
+					latencySample.markSucceeded();
 					return Void();
 				} else {
 					throw error;
@@ -1998,6 +2017,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 		}
 	} catch (Error& e) {
 		state Error err = e;
+		if (err.code() == error_code_actor_cancelled || err.code() == error_code_data_move_cancelled) {
+			latencySample.disarm();
+		}
 		TraceEvent(relocateShardInterval.end(), distributorId)
 		    .errorUnsuppressed(err)
 		    .detail("Duration", now() - startTime);
@@ -2399,6 +2421,8 @@ struct DDQueueImpl {
 		state KeyRange keysToLaunchFrom;
 		state RelocateData launchData;
 		state Future<Void> recordMetrics = delay(SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL);
+		state Future<Void> recordRelocatorLatency =
+		    delay(SERVER_KNOBS->DD_RELOCATOR_LATENCY_LOGGING_INTERVAL);
 
 		state std::vector<Future<Void>> ddQueueFutures;
 
@@ -2575,6 +2599,31 @@ struct DDQueueImpl {
 								self->retryFindDstReasonCount[i] = 0;
 							}
 						}
+					}
+					when(wait(recordRelocatorLatency)) {
+						recordRelocatorLatency =
+						    delay(SERVER_KNOBS->DD_RELOCATOR_LATENCY_LOGGING_INTERVAL, TaskPriority::FlushTrace);
+						auto& s = self->relocatorLatency;
+						auto& e = self->relocatorErrorLatency;
+						TraceEvent("RelocatorLatency", self->distributorId)
+						    .detail("Count", s.getPopulationSize())
+						    .detail("Mean", s.mean())
+						    .detail("Min", s.getPopulationSize() > 0 ? s.min() : 0)
+						    .detail("P50", s.median())
+						    .detail("P90", s.percentile(0.9))
+						    .detail("P95", s.percentile(0.95))
+						    .detail("P99", s.percentile(0.99))
+						    .detail("Max", s.getPopulationSize() > 0 ? s.max() : 0)
+						    .detail("ErrorCount", e.getPopulationSize())
+						    .detail("ErrorMean", e.mean())
+						    .detail("ErrorMin", e.getPopulationSize() > 0 ? e.min() : 0)
+						    .detail("ErrorP50", e.median())
+						    .detail("ErrorP90", e.percentile(0.9))
+						    .detail("ErrorP95", e.percentile(0.95))
+						    .detail("ErrorP99", e.percentile(0.99))
+						    .detail("ErrorMax", e.getPopulationSize() > 0 ? e.max() : 0);
+						s.clear();
+						e.clear();
 					}
 					when(wait(self->error.getFuture())) {} // Propagate errors from dataDistributionRelocator
 					when(wait(waitForAll(ddQueueFutures))) {}
