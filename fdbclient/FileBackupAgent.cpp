@@ -545,7 +545,7 @@ using RestoreFile = RestoreConfig::RestoreFile;
 //   - Running: storage server actively downloading/ingesting SST files
 Future<std::tuple<int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>> getBulkLoadTaskProgress(Database cx,
                                                                                                  UID jobId) {
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	Transaction tr(cx);
 	Key readBegin = normalKeys.begin;
 	Key readEnd = normalKeys.end;
 	int64_t completedTasks = 0;
@@ -558,9 +558,9 @@ Future<std::tuple<int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>> getBulk
 	while (readBegin < readEnd) {
 		Error err;
 		try {
-			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			RangeResult rangeResult = co_await krmGetRanges(tr, bulkLoadTaskPrefix, KeyRangeRef(readBegin, readEnd));
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			RangeResult rangeResult = co_await krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(readBegin, readEnd));
 			if (rangeResult.empty()) {
 				break;
 			}
@@ -596,7 +596,7 @@ Future<std::tuple<int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>> getBulk
 		}
 		if (err.isValid() && err.code() != error_code_success) {
 			TraceEvent(SevWarn, "BulkLoadTaskProgressRetry").error(err).detail("JobId", jobId);
-			co_await tr->onError(err);
+			co_await tr.onError(err);
 		}
 	}
 	co_return std::make_tuple(completedTasks, submittedTasks, triggeredTasks, runningTasks, totalTasks, completedBytes);
