@@ -1297,23 +1297,6 @@ bool getWantTrueBestIfMoveout(int priority) {
 	}
 }
 
-struct RelocatorLatencySample {
-	DDSketch<double>& successSketch;
-	DDSketch<double>& errorSketch;
-	double start;
-	bool armed;
-	bool succeeded;
-	RelocatorLatencySample(DDSketch<double>& success, DDSketch<double>& error)
-	  : successSketch(success), errorSketch(error), start(now()), armed(true), succeeded(false) {}
-	void disarm() { armed = false; }
-	void markSucceeded() { succeeded = true; }
-	~RelocatorLatencySample() {
-		if (armed) {
-			(succeeded ? successSketch : errorSketch).addSample(now() - start);
-		}
-	}
-};
-
 // This actor relocates the specified keys to a good place.
 // The inFlightActor key range map stores the actor for each RelocateData
 ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
@@ -1336,7 +1319,6 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 	state int stuckCount = 0;
 	state std::vector<std::pair<Reference<IDataDistributionTeam>, bool>> bestTeams;
 	state double startTime = now();
-	state RelocatorLatencySample latencySample(self->relocatorLatency, self->relocatorErrorLatency);
 	state std::vector<UID> destIds;
 	state WantTrueBest wantTrueBest(isValleyFillerPriority(rd.priority));
 	state WantTrueBestIfMoveout wantTrueBestIfMoveout(getWantTrueBestIfMoveout(rd.priority));
@@ -1991,7 +1973,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						    rd.keys, rd.isRestore(), selectedTeams, rd.dataMoveId.first(), metrics, debugID);
 					}
 
-					latencySample.markSucceeded();
+					self->relocatorLatency.addSample(now() - startTime);
 					return Void();
 				} else {
 					throw error;
@@ -2017,8 +1999,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 		}
 	} catch (Error& e) {
 		state Error err = e;
-		if (err.code() == error_code_actor_cancelled || err.code() == error_code_data_move_cancelled) {
-			latencySample.disarm();
+		if (err.code() != error_code_actor_cancelled && err.code() != error_code_data_move_cancelled) {
+			self->relocatorErrorLatency.addSample(now() - startTime);
 		}
 		TraceEvent(relocateShardInterval.end(), distributorId)
 		    .errorUnsuppressed(err)
