@@ -1325,15 +1325,18 @@ public:
 		KeyspaceSnapshotFile f;
 		f.fileName = path;
 		int len;
+		char typeBuf[64] = {};
 
 		// Try new format with type suffix: snapshot,beginVersion,endVersion,totalSize,type
 		if (sscanf(name.c_str(),
-		           "snapshot,%" SCNd64 ",%" SCNd64 ",%" SCNd64 ",%*[^,]%n",
+		           "snapshot,%" SCNd64 ",%" SCNd64 ",%" SCNd64 ",%63[^,]%n",
 		           &f.beginVersion,
 		           &f.endVersion,
 		           &f.totalSize,
-		           &len) == 3 &&
+		           typeBuf,
+		           &len) == 4 &&
 		    len == name.size()) {
+			f.snapshotType = typeBuf;
 			out = f;
 			return true;
 		}

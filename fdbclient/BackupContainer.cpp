@@ -154,10 +154,7 @@ std::string BackupDescription::toString() const {
 	};
 
 	for (const KeyspaceSnapshotFile& m : snapshots) {
-		// Heuristic: BulkDump snapshots are point-in-time (single version) with no range file data (totalSize=0).
-		// This is imperfect — an empty rangefile snapshot would also match — but snapshot file metadata
-		// doesn't currently expose the snapshot type directly.
-		const char* snapshotType = (m.totalSize == 0 && m.isSingleVersion()) ? "bulkdump(inferred)" : "rangefile";
+		const char* snapshotType = m.isBulkDump() ? "bulkdump" : "rangefile";
 		info.append(format(
 		    "Snapshot:  type=%s  startVersion=%s  endVersion=%s  totalBytes=%lld  restorable=%s  expiredPct=%.2f\n",
 		    snapshotType,
