@@ -4956,8 +4956,8 @@ public:
 		m_latestCommit = m_init;
 	}
 
-	ACTOR static Future<Reference<ArenaPage>> makeEmptyRoot(VersionedBTree* self) {
-		state Reference<ArenaPage> page = self->m_pager->newPageBuffer();
+	static Future<Reference<ArenaPage>> makeEmptyRoot(VersionedBTree* self) {
+		Reference<ArenaPage> page = self->m_pager->newPageBuffer();
 		page->init(self->m_encodingType, PageType::BTreeNode, 1);
 
 		BTreePage* btpage = (BTreePage*)page->mutateData();

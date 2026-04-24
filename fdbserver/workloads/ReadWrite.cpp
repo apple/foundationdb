@@ -469,7 +469,7 @@ struct ReadWriteWorkload : ReadWriteCommon {
 
 	template <class Trans>
 	Future<Void> readOp(Trans* tr, std::vector<int64_t> keys, bool shouldRecord) {
-		if (!keys.size())
+		if (keys.empty())
 			co_return;
 		if (!dependentReads) {
 			std::vector<Future<Void>> readers;

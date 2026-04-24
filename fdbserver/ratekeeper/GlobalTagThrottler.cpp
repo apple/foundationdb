@@ -273,7 +273,7 @@ class GlobalTagThrottlerImpl {
 
 	void removeUnseenQuotas(std::unordered_set<TransactionTag> const& tagsWithQuota) {
 		for (auto& [tag, stats] : tagStatistics) {
-			if (!tagsWithQuota.count(tag)) {
+			if (!tagsWithQuota.contains(tag)) {
 				stats.clearQuota();
 			}
 		}

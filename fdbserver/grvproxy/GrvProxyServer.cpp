@@ -786,7 +786,7 @@ Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 
 		if (request.isTagged()) {
 			auto& priorityThrottledTags = clientThrottledTags[request.priority];
-			for (auto tag : request.tags) {
+			for (const auto& tag : request.tags) {
 				auto tagItr = priorityThrottledTags.find(tag.first);
 				if (tagItr != priorityThrottledTags.end()) {
 					if (tagItr->second.expiration > now()) {
@@ -1019,7 +1019,7 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 				grvProxyData->stats.batchTxnGRVTimeInQueue.addMeasurement(currentTime - req.requestTime());
 				--grvProxyData->stats.batchGRVQueueSize;
 			}
-			for (auto tag : req.tags) {
+			for (const auto& tag : req.tags) {
 				transactionTagCounter[tag.first] += tag.second;
 			}
 			start[req.flags & 1].push_back(std::move(req));
@@ -1085,7 +1085,7 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 		int defaultGRVProcessed = 0;
 		int batchGRVProcessed = 0;
 		for (int i = 0; i < start.size(); i++) {
-			if (start[i].size()) {
+			if (!start[i].empty()) {
 				std::vector<SpanContext> spanContexts;
 				spanContexts.reserve(start[i].size());
 				for (const GetReadVersionRequest& request : start[i]) {
