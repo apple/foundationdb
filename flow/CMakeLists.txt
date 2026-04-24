@@ -129,8 +129,7 @@ foreach(ft flow flow_sampling flowlinktest)
     PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include"
            "${CMAKE_CURRENT_BINARY_DIR}/include"
            "${CMAKE_SOURCE_DIR}/contrib/libb64/include"
-    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}"
-            "${CMAKE_CURRENT_BINARY_DIR}")
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 
   if(FLOW_USE_ZSTD)
     target_include_directories(${ft} PRIVATE SYSTEM ${ZSTD_LIB_INCLUDE_DIR})

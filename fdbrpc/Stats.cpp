@@ -182,8 +182,8 @@ LatencyBands::LatencyBands(std::string const& name,
   : name(name), id(id), loggingInterval(loggingInterval), decorator(decorator) {}
 
 void LatencyBands::addThreshold(double value) {
-	if (value > 0 && bands.count(value) == 0) {
-		if (bands.size() == 0) {
+	if (value > 0 && !bands.contains(value)) {
+		if (bands.empty()) {
 			ASSERT(!cc && !filteredCount);
 			cc = std::make_unique<CounterCollection>(name, id.toString());
 			logger = cc->traceCounters(name, id, loggingInterval, id.toString() + "/" + name, decorator);
@@ -198,7 +198,7 @@ void LatencyBands::addThreshold(double value) {
 void LatencyBands::addMeasurement(double measurement, int count, Filtered filtered) {
 	if (filtered && filteredCount) {
 		(*filteredCount) += count;
-	} else if (bands.size() > 0) {
+	} else if (!bands.empty()) {
 		auto itr = bands.upper_bound(measurement);
 		ASSERT(itr != bands.end());
 		(*itr->second) += count;

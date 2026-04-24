@@ -658,7 +658,7 @@ Future<Void> saveMutationsToFile(BackupRangePartitionedData* self, Version lastV
 			}
 
 			std::pair<UID, int32_t> bpKey(backupUid, partitionId);
-			if (fileIndexByBackupPartition.count(bpKey)) {
+			if (fileIndexByBackupPartition.contains(bpKey)) {
 				continue;
 			}
 

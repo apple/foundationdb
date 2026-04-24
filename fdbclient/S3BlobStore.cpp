@@ -111,7 +111,6 @@ S3BlobStoreEndpoint::S3BlobStoreEndpoint(std::string const& host,
                        extraHeaders),
     credentials(parseS3Credentials(creds)), lookupKey(credentials.present() && credentials.get().key.empty()),
     lookupSecret(credentials.present() && credentials.get().secret.empty()) {
-
 	if (this->region.empty() && CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER) {
 		throw std::string(
 		    "Failed to get region from host or parameter in url, region is required for aws v4 signature");

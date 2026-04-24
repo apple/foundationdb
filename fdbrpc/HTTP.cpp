@@ -450,7 +450,7 @@ Future<Void> readHTTPData(HTTPData<std::string>* r,
 	}
 
 	// If there is actual response content, check the MD5 sum against the Content-MD5 response header
-	if (r->content.size() > 0) {
+	if (!r->content.empty()) {
 		if (skipCheckMD5) {
 			co_return;
 		}

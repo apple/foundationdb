@@ -109,8 +109,8 @@ struct LeaderDeserializer {
 	}
 };
 
-Future<Void> asyncDeserializeClusterInterface(const Reference<AsyncVar<Value>>& serializedInfo,
-                                              const Reference<AsyncVar<Optional<ClusterInterface>>>& outKnownLeader);
+Future<Void> asyncDeserializeClusterInterface(Reference<AsyncVar<Value>> serializedInfo,
+                                              Reference<AsyncVar<Optional<ClusterInterface>>> outKnownLeader);
 
 template <>
 struct LeaderDeserializer<ClusterInterface> {

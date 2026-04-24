@@ -27,7 +27,7 @@ AsyncResult<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEven
 		std::vector<Future<ErrorOr<TraceEventFields>>> eventTraces;
 		for (int c = 0; c < workers.size(); c++) {
 			EventLogRequest req =
-			    eventName.size() > 0 ? EventLogRequest(Standalone<StringRef>(eventName)) : EventLogRequest();
+			    !eventName.empty() ? EventLogRequest(Standalone<StringRef>(eventName)) : EventLogRequest();
 			eventTraces.push_back(errorOr(timeoutError(workers[c].interf.eventLogRequest.getReply(req), 2.0)));
 		}
 

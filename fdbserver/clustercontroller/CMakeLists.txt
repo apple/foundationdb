@@ -11,7 +11,6 @@ configure_fdbserver_common_includes(fdbserver_clustercontroller)
 target_include_directories(fdbserver_clustercontroller
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_BINARY_DIR}/include
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_BINARY_DIR}

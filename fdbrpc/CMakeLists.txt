@@ -67,7 +67,6 @@ target_include_directories(fdbrpc
     "${CMAKE_CURRENT_BINARY_DIR}/include"
   PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
-    "${CMAKE_CURRENT_BINARY_DIR}"
     "${CMAKE_CURRENT_SOURCE_DIR}/libeio")
 target_link_libraries(fdbrpc PUBLIC flow libb64 md5 PRIVATE rapidjson)
 
@@ -91,7 +90,6 @@ target_include_directories(fdbrpc_sampling
     "${CMAKE_CURRENT_BINARY_DIR}/include"
   PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
-    "${CMAKE_CURRENT_BINARY_DIR}"
     "${CMAKE_CURRENT_SOURCE_DIR}/libeio")
 target_link_libraries(fdbrpc_sampling PUBLIC flow_sampling libb64 md5 PRIVATE rapidjson)
 

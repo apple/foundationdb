@@ -196,7 +196,7 @@ Future<int64_t> doFetchCheckpointFile(Database cx,
 			co_await IAsyncFileSystem::filesystem()->deleteFile(localFile, true);
 			const int64_t flags = IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE |
 			                      IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO;
-			co_await store(asyncFile, IAsyncFileSystem::filesystem()->open(localFile, flags, 0666));
+			asyncFile = co_await IAsyncFileSystem::filesystem()->open(localFile, flags, 0666);
 
 			ReplyPromiseStream<FetchCheckpointReply> stream =
 			    ssi.fetchCheckpoint.getReplyStream(FetchCheckpointRequest(checkpointId, remoteFile));
@@ -257,8 +257,7 @@ Future<Void> fetchCheckpointBytesSampleFile(Database cx,
 	ASSERT(!metaData->src.empty());
 	UID ssId = metaData->src.front();
 
-	co_await success(
-	    doFetchCheckpointFile(cx, metaData->bytesSampleFile.get(), localFile, ssId, metaData->checkpointID));
+	co_await doFetchCheckpointFile(cx, metaData->bytesSampleFile.get(), localFile, ssId, metaData->checkpointID);
 	metaData->bytesSampleFile = localFile;
 	if (cFun) {
 		co_await cFun(*metaData);
@@ -1040,7 +1039,7 @@ Future<Void> fetchCheckpointFile(Database cx,
 	ASSERT_EQ(metaData->src.size(), 1);
 	const UID ssId = metaData->src.front();
 
-	co_await success(doFetchCheckpointFile(cx, remoteFile, localFile, ssId, metaData->checkpointID));
+	co_await doFetchCheckpointFile(cx, remoteFile, localFile, ssId, metaData->checkpointID);
 	rocksCF.sstFiles[idx].db_path = dir;
 	rocksCF.sstFiles[idx].fetched = true;
 	metaData->setSerializedCheckpoint(ObjectWriter::toValue(rocksCF, IncludeVersion()));
