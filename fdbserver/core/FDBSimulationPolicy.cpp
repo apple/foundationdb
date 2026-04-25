@@ -365,7 +365,6 @@ void updateFDBSimulationPolicy(DatabaseConfiguration const& configuration, bool 
 	state.satelliteTLogWriteAntiQuorumFallback = 0;
 	state.primarySatelliteDcIds.clear();
 	state.remoteSatelliteDcIds.clear();
-	state.allowLogSetKills = true;
 
 	if (!configuration.regions.empty()) {
 		state.primaryDcId = configuration.regions[0].dcId;
