@@ -25,10 +25,21 @@
 #include "fdbclient/DatabaseConfiguration.h"
 
 #include <string>
+#include <utility>
 #include <vector>
 
 enum class FDBExtraDatabaseMode { Disabled, LocalOrSingle, Single, Local, Multiple };
 enum class FDBBackupAgentType { NoBackupAgents, WaitForType, BackupToFile, BackupToDB };
+enum FDBSimConsistencyScanState {
+	DisabledStart = 0,
+	Enabling = 1,
+	Enabled = 2,
+	Enabled_InjectCorruption = 3,
+	Enabled_FoundCorruption = 4,
+	Complete = 5,
+	DisabledEnd = 6
+};
+enum FDBSimConsistencyScanCorruptionType { FlipMoreFlag = 0, AddToEmpty = 1, RemoveLastRow = 2, ChangeFirstValue = 3 };
 
 struct FDBSimulationPolicyState {
 	int desiredCoordinators = 1;
@@ -61,6 +72,27 @@ struct FDBSimulationPolicyState {
 	bool setDiffProtocol = false;
 	bool isConsistencyChecked = false;
 	Optional<std::string> dataAtRestPlaintextMarker;
+	FDBSimConsistencyScanState consistencyScanState = FDBSimConsistencyScanState::DisabledStart;
+	Optional<FDBSimConsistencyScanCorruptionType> consistencyScanInjectedCorruptionType;
+	Optional<UID> consistencyScanInjectedCorruptionDestination;
+	Optional<bool> doInjectConsistencyScanCorruption;
+	Optional<Standalone<StringRef>> consistencyScanCorruptRequestKey;
+	Optional<std::pair<UID, NetworkAddress>> consistencyScanCorruptor;
+
+	bool updateConsistencyScanState(FDBSimConsistencyScanState expectedCurrent, FDBSimConsistencyScanState desired) {
+		if (consistencyScanState == expectedCurrent && desired > consistencyScanState) {
+			consistencyScanState = desired;
+
+			if (desired == FDBSimConsistencyScanState::Enabled_FoundCorruption) {
+				consistencyScanInjectedCorruptionType = {};
+				consistencyScanCorruptRequestKey = {};
+				consistencyScanCorruptor = {};
+			}
+
+			return true;
+		}
+		return false;
+	}
 };
 
 void installFDBSimulationPolicy();

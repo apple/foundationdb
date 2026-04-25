@@ -41,6 +41,7 @@
 #include "fdbserver/core/AccumulativeChecksumUtil.h"
 #include "fdbserver/core/BulkDumpUtil.h"
 #include "fdbserver/core/BulkLoadUtil.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/FDBRocksDBVersion.h"
 #include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
@@ -3240,31 +3241,31 @@ KeyRange getShardKeyRange(StorageServer* data, const KeySelectorRef& sel)
 }
 
 void maybeInjectConsistencyScanCorruption(UID thisServerID, GetKeyValuesRequest const& req, GetKeyValuesReply& reply) {
-	if (g_simulator->consistencyScanState != ISimulator::SimConsistencyScanState::Enabled_InjectCorruption ||
+	if (fdbSimulationPolicyState().consistencyScanState != FDBSimConsistencyScanState::Enabled_InjectCorruption ||
 	    !req.options.present() || !req.options.get().consistencyCheckStartVersion.present() ||
-	    !g_simulator->consistencyScanCorruptRequestKey.present()) {
+	    !fdbSimulationPolicyState().consistencyScanCorruptRequestKey.present()) {
 		return;
 	}
 
 	UID destination = req.reply.getEndpoint().token;
 
-	ASSERT(g_simulator->consistencyScanInjectedCorruptionType.present() ==
-	       g_simulator->consistencyScanInjectedCorruptionDestination.present());
+	ASSERT(fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.present() ==
+	       fdbSimulationPolicyState().consistencyScanInjectedCorruptionDestination.present());
 	// if we already injected a corruption, reinject it if this request was a retransmit of the same one we corrupted
 	// could also check that this storage sent the corruption but the reply endpoints should be globally unique so this
 	// covers it
-	if (g_simulator->consistencyScanInjectedCorruptionDestination.present() &&
-	    (g_simulator->consistencyScanInjectedCorruptionDestination.get() != destination)) {
+	if (fdbSimulationPolicyState().consistencyScanInjectedCorruptionDestination.present() &&
+	    (fdbSimulationPolicyState().consistencyScanInjectedCorruptionDestination.get() != destination)) {
 		return;
 	}
 
 	CODE_PROBE(true, "consistency check injecting corruption");
-	CODE_PROBE(g_simulator->consistencyScanInjectedCorruptionDestination.present() &&
-	               g_simulator->consistencyScanInjectedCorruptionDestination.get() == destination,
+	CODE_PROBE(fdbSimulationPolicyState().consistencyScanInjectedCorruptionDestination.present() &&
+	               fdbSimulationPolicyState().consistencyScanInjectedCorruptionDestination.get() == destination,
 	           "consistency check re-injecting corruption after retransmit",
 	           probe::decoration::rare);
 
-	g_simulator->consistencyScanInjectedCorruptionDestination = destination;
+	fdbSimulationPolicyState().consistencyScanInjectedCorruptionDestination = destination;
 	// FIXME: reinject same type of corruption once we enable other types
 
 	// FIXME: code probe for each type?
@@ -3272,7 +3273,8 @@ void maybeInjectConsistencyScanCorruption(UID thisServerID, GetKeyValuesRequest 
 	if (true /*deterministicRandom()->random01() < 0.3*/) {
 		// flip more flag
 		reply.more = !reply.more;
-		g_simulator->consistencyScanInjectedCorruptionType = ISimulator::SimConsistencyScanCorruptionType::FlipMoreFlag;
+		fdbSimulationPolicyState().consistencyScanInjectedCorruptionType =
+		    FDBSimConsistencyScanCorruptionType::FlipMoreFlag;
 	} else {
 		// FIXME: weird memory issues when messing with actual response data, enable and figure out later
 		ASSERT(false);
@@ -3286,27 +3288,27 @@ void maybeInjectConsistencyScanCorruption(UID thisServerID, GetKeyValuesRequest 
 
 		if (reply.data.empty()) {
 			// add row to empty response
-			g_simulator->consistencyScanInjectedCorruptionType =
-			    ISimulator::SimConsistencyScanCorruptionType::AddToEmpty;
-			reply.data.push_back_deep(
-			    reply.arena,
-			    KeyValueRef(g_simulator->consistencyScanCorruptRequestKey.get(), "consistencyCheckCorruptValue"_sr));
+			fdbSimulationPolicyState().consistencyScanInjectedCorruptionType =
+			    FDBSimConsistencyScanCorruptionType::AddToEmpty;
+			reply.data.push_back_deep(reply.arena,
+			                          KeyValueRef(fdbSimulationPolicyState().consistencyScanCorruptRequestKey.get(),
+			                                      "consistencyCheckCorruptValue"_sr));
 		} else if (deterministicRandom()->coinflip() || reply.data.back().value.empty()) {
 			// change value in non-empty response
-			g_simulator->consistencyScanInjectedCorruptionType =
-			    ISimulator::SimConsistencyScanCorruptionType::RemoveLastRow;
+			fdbSimulationPolicyState().consistencyScanInjectedCorruptionType =
+			    FDBSimConsistencyScanCorruptionType::RemoveLastRow;
 			reply.data.pop_back();
 		} else {
 			// chop off last byte of first value
-			g_simulator->consistencyScanInjectedCorruptionType =
-			    ISimulator::SimConsistencyScanCorruptionType::ChangeFirstValue;
+			fdbSimulationPolicyState().consistencyScanInjectedCorruptionType =
+			    FDBSimConsistencyScanCorruptionType::ChangeFirstValue;
 
 			reply.data[0].value = reply.data[0].value.substr(0, reply.data[0].value.size() - 1);
 		}
 	}
 
 	TraceEvent(SevWarnAlways, "InjectedConsistencyScanCorruption", thisServerID)
-	    .detail("CorruptionType", g_simulator->consistencyScanInjectedCorruptionType.get())
+	    .detail("CorruptionType", fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get())
 	    .detail("Version", req.version)
 	    .detail("Count", reply.data.size());
 }
