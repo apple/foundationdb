@@ -29,8 +29,11 @@ static std::map<int64_t, double> timedVersionsValidationData;
 static std::set<UID> disabledMachines;
 
 static bool versionValidationDisabled() {
+	if (!g_network->isSimulated()) {
+		return true;
+	}
 	auto policy = g_simulator->getSimulationPolicy();
-	return !g_network->isSimulated() || (policy && !policy->shouldRunVersionValidation());
+	return policy && !policy->shouldRunVersionValidation();
 }
 
 void debug_setVersionCheckEnabled(UID uid, bool enabled) {
