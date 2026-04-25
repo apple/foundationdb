@@ -49,7 +49,10 @@ FDBExtraDatabaseMode stringToFDBExtraDatabaseMode(const std::string& databaseMod
 
 namespace {
 
-FDBSimulationPolicyState policyState;
+FDBSimulationPolicyState& policyState() {
+	static auto* state = new FDBSimulationPolicyState;
+	return *state;
+}
 
 class FDBSimulationPolicy final : public ISimulationPolicy {
 public:
@@ -318,7 +321,7 @@ void installFDBSimulationPolicy() {
 }
 
 FDBSimulationPolicyState& fdbSimulationPolicyState() {
-	return policyState;
+	return policyState();
 }
 
 void updateFDBSimulationPolicy(DatabaseConfiguration const& configuration, bool restartingTest) {

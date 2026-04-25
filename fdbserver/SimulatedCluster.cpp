@@ -2703,11 +2703,11 @@ static Future<Void> simulationSetupAndRunImpl(std::string dataFolder,
 	fdbSimulationPolicyState().hasDiffProtocolProcess = testConfig.startIncompatibleProcess;
 	fdbSimulationPolicyState().setDiffProtocol = false;
 	if (testConfig.injectTargetedSSRestart && deterministicRandom()->random01() < 0.25) {
-		g_simulator->injectTargetedSSRestartTime = 60.0 + 340.0 * deterministicRandom()->random01();
+		fdbSimulationPolicyState().injectTargetedSSRestartTime = 60.0 + 340.0 * deterministicRandom()->random01();
 	}
 
 	if (testConfig.injectSSDelay && deterministicRandom()->random01() < 0.25) {
-		g_simulator->injectSSDelayTime = 60.0 + 240.0 * deterministicRandom()->random01();
+		fdbSimulationPolicyState().injectSSDelayTime = 60.0 + 240.0 * deterministicRandom()->random01();
 	}
 
 	// Build simulator allow list

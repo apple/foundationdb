@@ -335,9 +335,6 @@ public:
 	bool willRestart = false;
 	bool restarted = false;
 
-	double injectTargetedSSRestartTime = std::numeric_limits<double>::max();
-	double injectSSDelayTime = std::numeric_limits<double>::max();
-
 	std::unordered_map<Standalone<StringRef>, PrivateKey> authKeys;
 
 	std::set<std::pair<std::string, unsigned>> corruptedBlocks;
