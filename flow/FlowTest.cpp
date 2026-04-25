@@ -196,10 +196,6 @@ bool startsWith(std::string_view value, std::string_view prefix) {
 	return value.size() >= prefix.size() && value.substr(0, prefix.size()) == prefix;
 }
 
-bool isFlowSource(std::string_view file) {
-	return startsWith(file, "flow/") || file.find("/flow/") != std::string_view::npos;
-}
-
 bool testMatched(const FlowTestOptions& options, std::string_view testName) {
 	if (!startsWith(testName, options.testPattern)) {
 		return false;
@@ -217,7 +213,7 @@ bool testMatched(const FlowTestOptions& options, std::string_view testName) {
 std::vector<UnitTest*> collectTests(const FlowTestOptions& options) {
 	std::vector<UnitTest*> tests;
 	for (auto test = g_unittests.tests; test != nullptr; test = test->next) {
-		if (isFlowSource(test->file) && testMatched(options, test->name)) {
+		if (testMatched(options, test->name)) {
 			tests.push_back(test);
 		}
 	}
