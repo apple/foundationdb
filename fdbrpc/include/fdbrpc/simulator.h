@@ -61,6 +61,14 @@ public:
 	using KillType = simulator::KillType;
 	using ProcessInfo = simulator::ProcessInfo;
 
+	enum class Capability {
+		WarnOnStorageMismatch,
+		StorageReplicaFaultInjection,
+		StorageReplicaDelay,
+		StorageReplicaMutationDrop,
+		LimitStorageServerReadBytes
+	};
+
 	virtual bool shouldProtectNewProcess(ProcessInfo const&) const { return false; }
 	virtual bool isAvailable(std::vector<ProcessInfo*> const&,
 	                         std::vector<ProcessInfo*> const& availableProcesses,
@@ -73,6 +81,7 @@ public:
 	virtual bool shouldRunVersionValidation() const { return true; }
 	virtual bool canSwapToMachine(Optional<Standalone<StringRef>> const&) const { return true; }
 	virtual bool checkInjectedCorruption(NetworkAddress const&) const { return false; }
+	virtual bool hasCapability(Capability) const { return false; }
 	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses,
 	                              std::vector<ProcessInfo*> const& deadProcesses,
 	                              KillType kt,
@@ -92,9 +101,6 @@ public:
 	using KillType = simulator::KillType;
 	using ProcessInfo = simulator::ProcessInfo;
 	using MachineInfo = simulator::MachineInfo;
-
-	// Order matters! all modes >= 2 are fault injection modes
-	enum TSSMode { Disabled, EnabledNormal, EnabledAddDelay, EnabledDropMutations };
 
 	ProcessInfo* getProcess(Endpoint const& endpoint) { return getProcessByAddress(endpoint.getPrimaryAddress()); }
 
@@ -324,7 +330,6 @@ public:
 
 	std::map<NetworkAddress, ProcessInfo*> currentlyRebootingProcesses;
 	bool quiesced = false;
-	TSSMode tssMode;
 
 	bool isStopped;
 	double lastConnectionFailure;
@@ -381,6 +386,13 @@ private:
 };
 
 extern ISimulator* g_simulator;
+
+inline bool simulationPolicyHasCapability(ISimulationPolicy::Capability capability) {
+	if (!g_network || !g_network->isSimulated() || !g_simulator || !g_simulator->getSimulationPolicy()) {
+		return false;
+	}
+	return g_simulator->getSimulationPolicy()->hasCapability(capability);
+}
 
 void startNewSimulator(bool printSimTime);
 

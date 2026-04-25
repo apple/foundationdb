@@ -390,9 +390,9 @@ Future<int> consistencyCheckReadData(UID myId,
 
 					bool isTss = (*storageServerInterfaces)[j].isTss() ||
 					             (*storageServerInterfaces)[firstValidServer->get()].isTss();
-					bool isExpectedTSSMismatch = g_network->isSimulated() &&
-					                             g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations &&
-					                             isTss;
+					bool isExpectedTSSMismatch =
+					    g_network->isSimulated() &&
+					    simulationPolicyHasCapability(ISimulationPolicy::Capability::WarnOnStorageMismatch) && isTss;
 					// It's possible that the storage servers are inconsistent in KillRegion
 					// workload where a forced recovery is performed. The killed storage server
 					// in the killed region returned first with a higher version, and a later
@@ -1987,9 +1987,11 @@ Future<Void> checkDataConsistency(Database cx,
 						}
 
 						break;
-					} else if (estimatedBytes[j] < 0 && ((g_network->isSimulated() &&
-					                                      g_simulator->tssMode <= ISimulator::TSSMode::EnabledNormal) ||
-					                                     !storageServerInterfaces[j].isTss())) {
+					} else if (estimatedBytes[j] < 0 &&
+					           ((g_network->isSimulated() &&
+					             !simulationPolicyHasCapability(
+					                 ISimulationPolicy::Capability::StorageReplicaFaultInjection)) ||
+					            !storageServerInterfaces[j].isTss())) {
 						// Ignore a non-responding TSS outside of simulation, or if tss fault injection is enabled
 						break;
 					}

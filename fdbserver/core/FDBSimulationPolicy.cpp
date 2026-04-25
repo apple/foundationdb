@@ -107,6 +107,22 @@ public:
 		return false;
 	}
 
+	bool hasCapability(Capability capability) const override {
+		switch (capability) {
+		case Capability::WarnOnStorageMismatch:
+			return fdbSimulationPolicyState().tssMode == FDBTSSMode::EnabledDropMutations;
+		case Capability::StorageReplicaFaultInjection:
+			return fdbSimulationPolicyState().tssMode >= FDBTSSMode::EnabledAddDelay;
+		case Capability::StorageReplicaDelay:
+			return fdbSimulationPolicyState().tssMode == FDBTSSMode::EnabledAddDelay;
+		case Capability::StorageReplicaMutationDrop:
+			return fdbSimulationPolicyState().tssMode == FDBTSSMode::EnabledDropMutations;
+		case Capability::LimitStorageServerReadBytes:
+			return fdbSimulationPolicyState().tssMode == FDBTSSMode::Disabled;
+		}
+		UNREACHABLE();
+	}
+
 	bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses,
 	                      std::vector<ProcessInfo*> const& deadProcesses,
 	                      KillType kt,

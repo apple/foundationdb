@@ -1297,7 +1297,7 @@ Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		int testerCount = atoi(ini.GetValue("META", "testerCount"));
 		auto tssModeStr = ini.GetValue("META", "tssMode");
 		if (tssModeStr != nullptr) {
-			g_simulator->tssMode = (ISimulator::TSSMode)atoi(tssModeStr);
+			fdbSimulationPolicyState().tssMode = static_cast<FDBTSSMode>(atoi(tssModeStr));
 		}
 		ClusterConnectionString conn(ini.GetValue("META", "connectionString"));
 		if (testConfig->extraDatabaseMode == FDBExtraDatabaseMode::Local) {
@@ -2107,16 +2107,18 @@ void SimulationConfig::setTss(const TestConfig& testConfig) {
 		double tssRandom = deterministicRandom()->random01();
 		if (tssRandom > 0.5 || !faultInjectionActivated) {
 			// normal tss mode
-			g_simulator->tssMode = ISimulator::TSSMode::EnabledNormal;
+			fdbSimulationPolicyState().tssMode = FDBTSSMode::EnabledNormal;
 		} else if (tssRandom < 0.25 && !testConfig.isFirstTestInRestart) {
 			// fault injection - don't enable in first test in restart because second test won't know it intentionally
 			// lost data
-			g_simulator->tssMode = ISimulator::TSSMode::EnabledDropMutations;
+			fdbSimulationPolicyState().tssMode = FDBTSSMode::EnabledDropMutations;
 		} else {
 			// delay injection
-			g_simulator->tssMode = ISimulator::TSSMode::EnabledAddDelay;
+			fdbSimulationPolicyState().tssMode = FDBTSSMode::EnabledAddDelay;
 		}
-		printf("enabling tss for simulation in mode %d: %s\n", g_simulator->tssMode, confStr.c_str());
+		printf("enabling tss for simulation in mode %d: %s\n",
+		       static_cast<int>(fdbSimulationPolicyState().tssMode),
+		       confStr.c_str());
 	}
 }
 

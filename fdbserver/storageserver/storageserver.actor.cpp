@@ -1107,10 +1107,10 @@ public:
 		// With fault injection enabled, the tss will start acting normal for a bit, then after the specified delay
 		// start behaving incorrectly.
 		if (g_network->isSimulated() && !g_simulator->speedUpSimulation &&
-		    g_simulator->tssMode >= ISimulator::TSSMode::EnabledAddDelay) {
+		    simulationPolicyHasCapability(ISimulationPolicy::Capability::StorageReplicaFaultInjection)) {
 			tssFaultInjectTime = now() + deterministicRandom()->randomInt(60, 300);
 			TraceEvent(SevWarnAlways, "TSSInjectFaultEnabled", thisServerID)
-			    .detail("Mode", g_simulator->tssMode)
+			    .detail("Mode", static_cast<int>(fdbSimulationPolicyState().tssMode))
 			    .detail("At", tssFaultInjectTime.get());
 		}
 	}
@@ -3144,9 +3144,11 @@ Future<Key> findKey(StorageServer* data,
 	if (sel.offset <= 1 && sel.offset >= 0)
 		maxBytes = std::numeric_limits<int>::max();
 	else
-		maxBytes = (g_network->isSimulated() && g_simulator->tssMode == ISimulator::TSSMode::Disabled && BUGGIFY)
-		               ? SERVER_KNOBS->BUGGIFY_LIMIT_BYTES
-		               : SERVER_KNOBS->STORAGE_LIMIT_BYTES;
+		maxBytes =
+		    (g_network->isSimulated() &&
+		     simulationPolicyHasCapability(ISimulationPolicy::Capability::LimitStorageServerReadBytes) && BUGGIFY)
+		        ? SERVER_KNOBS->BUGGIFY_LIMIT_BYTES
+		        : SERVER_KNOBS->STORAGE_LIMIT_BYTES;
 
 	GetKeyValuesReply rep = co_await readRange(data,
 	                                           version,
@@ -5916,7 +5918,8 @@ Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest 
 				// Even if TSS mode is Disabled, this may be the second test in a restarting test where the first run
 				// had it enabled.
 				int byteLimit =
-				    (BUGGIFY && g_network->isSimulated() && g_simulator->tssMode == ISimulator::TSSMode::Disabled &&
+				    (BUGGIFY && g_network->isSimulated() &&
+				     simulationPolicyHasCapability(ISimulationPolicy::Capability::LimitStorageServerReadBytes) &&
 				     !data->isTss() && !data->isSSWithTSSPair())
 				        ? 1
 				        : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
@@ -9613,8 +9616,9 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			}
 
 			if (g_network->isSimulated() && data->isTss() &&
-			    g_simulator->tssMode == ISimulator::TSSMode::EnabledAddDelay && !g_simulator->speedUpSimulation &&
-			    data->tssFaultInjectTime.present() && data->tssFaultInjectTime.get() < now()) {
+			    simulationPolicyHasCapability(ISimulationPolicy::Capability::StorageReplicaDelay) &&
+			    !g_simulator->speedUpSimulation && data->tssFaultInjectTime.present() &&
+			    data->tssFaultInjectTime.get() < now()) {
 				if (deterministicRandom()->random01() < 0.01) {
 					TraceEvent(SevWarnAlways, "TSSInjectDelayForever", data->thisServerID).log();
 					// small random chance to just completely get stuck here, each tss should eventually hit this in
@@ -9862,7 +9866,7 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					// Drop non-private mutations if TSS fault injection is enabled in simulation, or if this is a TSS
 					// in quarantine.
 					if (g_network->isSimulated() && data->isTss() && !g_simulator->speedUpSimulation &&
-					    g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations &&
+					    simulationPolicyHasCapability(ISimulationPolicy::Capability::StorageReplicaMutationDrop) &&
 					    data->tssFaultInjectTime.present() && data->tssFaultInjectTime.get() < now() &&
 					    (msg.type == MutationRef::SetValue || msg.type == MutationRef::ClearRange) &&
 					    (msg.param1.size() < 2 || msg.param1[0] != 0xff || msg.param1[1] != 0xff) &&

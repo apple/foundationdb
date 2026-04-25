@@ -32,6 +32,8 @@
 
 enum class FDBExtraDatabaseMode { Disabled, LocalOrSingle, Single, Local, Multiple };
 enum class FDBBackupAgentType { NoBackupAgents, WaitForType, BackupToFile, BackupToDB };
+// Order matters: all modes >= EnabledAddDelay are fault injection modes.
+enum class FDBTSSMode { Disabled, EnabledNormal, EnabledAddDelay, EnabledDropMutations };
 enum FDBSimConsistencyScanState {
 	DisabledStart = 0,
 	Enabling = 1,
@@ -84,6 +86,7 @@ struct FDBSimulationPolicyState {
 	double injectTargetedSSRestartTime = std::numeric_limits<double>::max();
 	double injectSSDelayTime = std::numeric_limits<double>::max();
 	std::map<NetworkAddress, bool> corruptWorkerMap;
+	FDBTSSMode tssMode = FDBTSSMode::Disabled;
 
 	bool updateConsistencyScanState(FDBSimConsistencyScanState expectedCurrent, FDBSimConsistencyScanState desired) {
 		if (consistencyScanState == expectedCurrent && desired > consistencyScanState) {

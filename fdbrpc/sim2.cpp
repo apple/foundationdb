@@ -69,9 +69,9 @@ thread_local ISimulator::ProcessInfo* ISimulator::currentProcess = nullptr;
 thread_local bool ISimulator::isMainThread = false;
 
 ISimulator::ISimulator()
-  : physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), tssMode(TSSMode::Disabled),
-    isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false),
-    connectionFailureEnableTime(0), allSwapsDisabled(false) {}
+  : physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), isStopped(false), lastConnectionFailure(0),
+    connectionFailuresDisableDuration(0), speedUpSimulation(false), connectionFailureEnableTime(0),
+    allSwapsDisabled(false) {}
 ISimulator::~ISimulator() = default;
 
 bool simulator_should_inject_fault(const char* context, const char* file, int line, int error_code) {
