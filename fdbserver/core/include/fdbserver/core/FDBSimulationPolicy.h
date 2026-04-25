@@ -72,6 +72,7 @@ struct FDBSimulationPolicyState {
 	bool setDiffProtocol = false;
 	bool isConsistencyChecked = false;
 	Optional<std::string> dataAtRestPlaintextMarker;
+	std::vector<std::string> extraDatabases;
 	FDBSimConsistencyScanState consistencyScanState = FDBSimConsistencyScanState::DisabledStart;
 	Optional<FDBSimConsistencyScanCorruptionType> consistencyScanInjectedCorruptionType;
 	Optional<UID> consistencyScanInjectedCorruptionDestination;

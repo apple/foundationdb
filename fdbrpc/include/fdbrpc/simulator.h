@@ -70,6 +70,8 @@ public:
 	virtual bool datacenterDead(Optional<Standalone<StringRef>>, std::vector<ProcessInfo*> const&) const {
 		return false;
 	}
+	virtual bool shouldRunVersionValidation() const { return true; }
+	virtual bool canSwapToMachine(Optional<Standalone<StringRef>> const&) const { return true; }
 	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses,
 	                              std::vector<ProcessInfo*> const& deadProcesses,
 	                              KillType kt,
@@ -277,7 +279,8 @@ public:
 		allSwapsDisabled = false;
 	}
 	bool canSwapToMachine(Optional<Standalone<StringRef>> zoneId) const {
-		return swapsDisabled.count(zoneId) == 0 && !allSwapsDisabled && extraDatabases.empty();
+		return swapsDisabled.count(zoneId) == 0 && !allSwapsDisabled &&
+		       (!simulationPolicy || simulationPolicy->canSwapToMachine(zoneId));
 	}
 	void enableSwapsToAll() {
 		swapsDisabled.clear();
@@ -319,7 +322,6 @@ public:
 	int listenersPerProcess;
 
 	std::map<NetworkAddress, ProcessInfo*> currentlyRebootingProcesses;
-	std::vector<std::string> extraDatabases;
 	bool quiesced = false;
 	TSSMode tssMode;
 	std::map<NetworkAddress, bool> corruptWorkerMap;

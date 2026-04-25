@@ -97,7 +97,7 @@ struct ChangeConfigWorkload : TestWorkload {
 	Future<Void> configureExtraDatabases() {
 		std::vector<Future<Void>> futures;
 		if (g_network->isSimulated()) {
-			for (const auto& extraDatabase : g_simulator->extraDatabases) {
+			for (const auto& extraDatabase : fdbSimulationPolicyState().extraDatabases) {
 				Database db = Database::createSimulatedExtraDatabase(extraDatabase);
 				futures.push_back(configureExtraDatabase(db));
 			}

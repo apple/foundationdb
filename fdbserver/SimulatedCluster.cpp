@@ -594,14 +594,14 @@ Future<Void> runDr(Reference<IClusterConnectionRecord> connRecord) {
 	}
 
 	if (fdbSimulationPolicyState().drAgents == FDBBackupAgentType::BackupToDB) {
-		ASSERT(g_simulator->extraDatabases.size() == 1);
+		ASSERT(fdbSimulationPolicyState().extraDatabases.size() == 1);
 		Database cx = Database::createDatabase(connRecord, ApiVersion::LATEST_VERSION);
 
-		Database drDatabase = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0]);
+		Database drDatabase = Database::createSimulatedExtraDatabase(fdbSimulationPolicyState().extraDatabases[0]);
 
 		TraceEvent("StartingDrAgents")
 		    .detail("ConnectionString", connRecord->getConnectionString().toString())
-		    .detail("ExtraString", g_simulator->extraDatabases[0]);
+		    .detail("ExtraString", fdbSimulationPolicyState().extraDatabases[0]);
 
 		DatabaseBackupAgent dbAgent = DatabaseBackupAgent(cx);
 		DatabaseBackupAgent extraAgent = DatabaseBackupAgent(drDatabase);
@@ -1301,8 +1301,8 @@ Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		}
 		ClusterConnectionString conn(ini.GetValue("META", "connectionString"));
 		if (testConfig->extraDatabaseMode == FDBExtraDatabaseMode::Local) {
-			g_simulator->extraDatabases.clear();
-			g_simulator->extraDatabases.push_back(conn.toString());
+			fdbSimulationPolicyState().extraDatabases.clear();
+			fdbSimulationPolicyState().extraDatabases.push_back(conn.toString());
 		}
 		if (!testConfig->disableHostname) {
 			auto mockDNSStr = ini.GetValue("META", "mockDNS");
@@ -2399,12 +2399,12 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	}
 
 	if (useLocalDatabase) {
-		g_simulator->extraDatabases.push_back(
+		fdbSimulationPolicyState().extraDatabases.push_back(
 		    useHostname ? ClusterConnectionString(coordinatorHostnames, "TestCluster:0"_sr).toString()
 		                : ClusterConnectionString(coordinatorAddresses, "TestCluster:0"_sr).toString());
 	} else if (testConfig.extraDatabaseMode != FDBExtraDatabaseMode::Disabled) {
 		for (int i = 0; i < extraDatabaseCount; ++i) {
-			g_simulator->extraDatabases.push_back(
+			fdbSimulationPolicyState().extraDatabases.push_back(
 			    useHostname
 			        ? ClusterConnectionString(extraCoordinatorHostnames[i], StringRef(format("ExtraCluster%04d:0", i)))
 			              .toString()
@@ -2419,7 +2419,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	    .detail("String", conn.toString())
 	    .detail("ConfigString", startingConfigString);
 
-	bool requiresExtraDBMachines = !g_simulator->extraDatabases.empty() && !useLocalDatabase;
+	bool requiresExtraDBMachines = !fdbSimulationPolicyState().extraDatabases.empty() && !useLocalDatabase;
 	int assignedMachines = 0;
 	bool gradualMigrationPossible = true;
 	std::vector<ProcessClass::ClassType> processClassesSubSet = { ProcessClass::UnsetClass,
@@ -2526,8 +2526,9 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			localities.set("data_hall"_sr, dcUID);
 			systemActors->push_back(reportErrors(
 			    simulatedMachine(conn,
-			                     requiresExtraDBMachines ? ClusterConnectionString(g_simulator->extraDatabases.at(0))
-			                                             : ClusterConnectionString(),
+			                     requiresExtraDBMachines
+			                         ? ClusterConnectionString(fdbSimulationPolicyState().extraDatabases.at(0))
+			                         : ClusterConnectionString(),
 			                     ips,
 			                     sslEnabled,
 			                     localities,
@@ -2544,7 +2545,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 
 			if (requiresExtraDBMachines) {
 				int cluster = 4;
-				for (const auto& extraDatabase : g_simulator->extraDatabases) {
+				for (const auto& extraDatabase : fdbSimulationPolicyState().extraDatabases) {
 					std::vector<IPAddress> extraIps;
 					extraIps.reserve(processesPerMachine);
 					for (int i = 0; i < processesPerMachine; i++) {

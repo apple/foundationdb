@@ -721,7 +721,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 
 	Future<bool> checkWorkerList(Database cx, ConsistencyCheckWorkload* self) {
-		if (!g_simulator->extraDatabases.empty()) {
+		if (!fdbSimulationPolicyState().extraDatabases.empty()) {
 			co_return true;
 		}
 

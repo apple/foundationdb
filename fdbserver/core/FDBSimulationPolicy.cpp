@@ -89,6 +89,12 @@ public:
 		return primaryTLogsDead || primaryProcessesDead.validate(state.storagePolicy);
 	}
 
+	bool shouldRunVersionValidation() const override { return fdbSimulationPolicyState().extraDatabases.empty(); }
+
+	bool canSwapToMachine(Optional<Standalone<StringRef>> const&) const override {
+		return fdbSimulationPolicyState().extraDatabases.empty();
+	}
+
 	bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses,
 	                      std::vector<ProcessInfo*> const& deadProcesses,
 	                      KillType kt,
