@@ -332,7 +332,6 @@ public:
 	double connectionFailureDisableTime = 0; // Latest time connection failure should be disabled.
 	bool willRestart = false;
 	bool restarted = false;
-	bool isConsistencyChecked = false;
 
 	double injectTargetedSSRestartTime = std::numeric_limits<double>::max();
 	double injectSSDelayTime = std::numeric_limits<double>::max();
@@ -376,11 +375,6 @@ public:
 	std::unordered_map<Standalone<StringRef>, PrivateKey> authKeys;
 
 	std::set<std::pair<std::string, unsigned>> corruptedBlocks;
-
-	// Validate at-rest encryption guarantees. If enabled, tests should inject a known 'marker' in Key and/or Values
-	// inserted into FDB by the workload. On shutdown, all test generated files (under simfdb/) are scanned to find if
-	// 'plaintext marker' is present.
-	Optional<std::string> dataAtRestPlaintextMarker;
 
 	std::unordered_map<std::string, Reference<HTTP::SimRegisteredHandlerContext>> httpHandlers;
 	std::vector<std::pair<ProcessInfo*, Reference<HTTP::SimServerContext>>> httpServerProcesses;

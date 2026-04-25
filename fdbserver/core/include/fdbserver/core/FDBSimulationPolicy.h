@@ -59,6 +59,8 @@ struct FDBSimulationPolicyState {
 	std::string connectionString;
 	bool hasDiffProtocolProcess = false;
 	bool setDiffProtocol = false;
+	bool isConsistencyChecked = false;
+	Optional<std::string> dataAtRestPlaintextMarker;
 };
 
 void installFDBSimulationPolicy();
