@@ -39,6 +39,7 @@
 #include "ClusterController.h"
 #include "fdbserver/core/DBCoreState.h"
 #include "fdbserver/core/Knobs.h"
+#include "fdbserver/kvstore/IKeyValueStore.h"
 #include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/core/LogSystemConfig.h"
 #include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
@@ -49,7 +50,6 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 class ClusterControllerData;
-
 typedef enum {
 	CLUSTER_RECOVERY_STATE_EVENT_NAME,
 	CLUSTER_RECOVERY_COMMIT_TLOG_EVENT_NAME,

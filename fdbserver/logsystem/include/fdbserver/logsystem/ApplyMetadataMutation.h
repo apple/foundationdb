@@ -33,7 +33,7 @@
 #include "fdbclient/Notified.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/core/IKeyValueStore.h"
+#include "fdbserver/kvstore/IKeyValueStore.h"
 #include "fdbserver/core/LogProtocolMessage.h"
 #include "fdbserver/logsystem/LogSystem.h"
 #include "flow/FastRef.h"

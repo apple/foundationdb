@@ -4,7 +4,6 @@ add_flow_target(STATIC_LIBRARY NAME fdbserver_clustercontroller SRCS ${FDBSERVER
 add_fdbserver_link_test(fdbserver_clustercontrollerlinktest
   fdbserver_clustercontroller
   fdbserver_logsystem
-  fdbserver_kvstore
   fdbserver_core)
 
 configure_fdbserver_common_includes(fdbserver_clustercontroller)
