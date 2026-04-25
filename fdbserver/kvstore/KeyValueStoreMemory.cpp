@@ -26,7 +26,7 @@
 #include "DeltaTree.h"
 #include "fdbserver/kvstore/IDiskQueue.h"
 #include "IKeyValueContainer.h"
-#include "fdbserver/core/IKeyValueStore.h"
+#include "fdbserver/kvstore/IKeyValueStore.h"
 #include "RadixTree.h"
 #include "TransactionStoreMutationTracking.h"
 #include "flow/ActorCollection.h"

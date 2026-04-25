@@ -21,7 +21,6 @@
 #include <cstdint>
 
 #include "fdbserver/coordinator/CoordinationServer.h"
-#include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
 #include "OnDemandStore.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
