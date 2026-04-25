@@ -28,17 +28,48 @@
 #include "flow/IRandom.h"
 #include <unordered_set>
 
+// Drains old PTree roots without recursive Reference destruction, including if
+// the cleanup coroutine is cancelled while suspended at yield().
 template <class Tree>
-Future<Void> deferredCleanupActor(std::vector<Tree> toFree, TaskPriority taskID = TaskPriority::DefaultYield) {
-	int freeCount = 0;
-	while (!toFree.empty()) {
+class DeferredCleanupWorklist {
+public:
+	explicit DeferredCleanupWorklist(std::vector<Tree>&& toFree) : toFree(std::move(toFree)) {}
+	~DeferredCleanupWorklist() { drain(); }
+
+	bool empty() const { return toFree.empty(); }
+	void cleanupOne() {
 		Tree a = std::move(toFree.back());
 		toFree.pop_back();
 
-		for (int c = 0; c < 3; c++) {
-			if (a->pointer[c] && a->pointer[c]->isSoleOwner())
-				toFree.push_back(std::move(a->pointer[c]));
+		auto* node = a.extractPtr();
+		if (node == nullptr || !node->delref_no_destroy()) {
+			return;
 		}
+
+		for (auto& child : node->pointer) {
+			if (child) {
+				toFree.push_back(std::move(child));
+			}
+		}
+		delete node;
+	}
+
+private:
+	void drain() {
+		while (!toFree.empty()) {
+			cleanupOne();
+		}
+	}
+
+	std::vector<Tree> toFree;
+};
+
+template <class Tree>
+Future<Void> deferredCleanupActor(std::vector<Tree> toFree, TaskPriority taskID = TaskPriority::DefaultYield) {
+	DeferredCleanupWorklist<Tree> cleanup(std::move(toFree));
+	int freeCount = 0;
+	while (!cleanup.empty()) {
+		cleanup.cleanupOne();
 
 		if (++freeCount % 100 == 0)
 			co_await yield(taskID);
