@@ -126,10 +126,7 @@ double ISimulator::checkDisabled(const std::string& desc) const {
 }
 
 bool ISimulator::checkInjectedCorruption() {
-	auto iter = corruptWorkerMap.find(currentProcess->address);
-	if (iter != corruptWorkerMap.end())
-		return iter->second;
-	return false;
+	return simulationPolicy && simulationPolicy->checkInjectedCorruption(currentProcess->address);
 }
 
 flowGlobalType ISimulator::global(int id) const {

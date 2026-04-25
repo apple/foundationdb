@@ -25,6 +25,7 @@
 #include "fdbclient/DatabaseConfiguration.h"
 
 #include <limits>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -82,6 +83,7 @@ struct FDBSimulationPolicyState {
 	Optional<std::pair<UID, NetworkAddress>> consistencyScanCorruptor;
 	double injectTargetedSSRestartTime = std::numeric_limits<double>::max();
 	double injectSSDelayTime = std::numeric_limits<double>::max();
+	std::map<NetworkAddress, bool> corruptWorkerMap;
 
 	bool updateConsistencyScanState(FDBSimConsistencyScanState expectedCurrent, FDBSimConsistencyScanState desired) {
 		if (consistencyScanState == expectedCurrent && desired > consistencyScanState) {

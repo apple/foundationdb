@@ -174,7 +174,7 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 				injectDiskDelays(machine, stallInterval, stallPeriod, throttlePeriod);
 			if (corruptFile && (corruptedWorkers++ < workersToCorrupt)) {
 				if (g_simulator == g_network)
-					g_simulator->corruptWorkerMap[machine.address()] = true;
+					fdbSimulationPolicyState().corruptWorkerMap[machine.address()] = true;
 				injectBitFlips(machine, percentBitFlips);
 			}
 		}
@@ -205,7 +205,7 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 				}
 				if (corruptFile && (corruptedWorkers++ < workersToCorrupt)) {
 					if (g_simulator == g_network)
-						g_simulator->corruptWorkerMap[workerAddress] = true;
+						fdbSimulationPolicyState().corruptWorkerMap[workerAddress] = true;
 					injectBitFlips(itr->second, percentBitFlips);
 				}
 			}

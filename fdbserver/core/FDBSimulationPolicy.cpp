@@ -98,6 +98,15 @@ public:
 		return fdbSimulationPolicyState().extraDatabases.empty();
 	}
 
+	bool checkInjectedCorruption(NetworkAddress const& address) const override {
+		auto const& corruptWorkerMap = fdbSimulationPolicyState().corruptWorkerMap;
+		auto iter = corruptWorkerMap.find(address);
+		if (iter != corruptWorkerMap.end()) {
+			return iter->second;
+		}
+		return false;
+	}
+
 	bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses,
 	                      std::vector<ProcessInfo*> const& deadProcesses,
 	                      KillType kt,

@@ -72,6 +72,7 @@ public:
 	}
 	virtual bool shouldRunVersionValidation() const { return true; }
 	virtual bool canSwapToMachine(Optional<Standalone<StringRef>> const&) const { return true; }
+	virtual bool checkInjectedCorruption(NetworkAddress const&) const { return false; }
 	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses,
 	                              std::vector<ProcessInfo*> const& deadProcesses,
 	                              KillType kt,
@@ -324,7 +325,6 @@ public:
 	std::map<NetworkAddress, ProcessInfo*> currentlyRebootingProcesses;
 	bool quiesced = false;
 	TSSMode tssMode;
-	std::map<NetworkAddress, bool> corruptWorkerMap;
 
 	bool isStopped;
 	double lastConnectionFailure;
