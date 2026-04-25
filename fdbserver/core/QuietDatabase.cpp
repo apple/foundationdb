@@ -687,7 +687,8 @@ Future<Version> getDatacenterLag(Database cx, Reference<AsyncVar<ServerDBInfo> c
 }
 
 Future<Void> repairDeadDatacenter(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo, std::string context) {
-	if (g_network->isSimulated() && fdbSimulationPolicyState().usableRegions > 1 && !g_simulator->quiesced) {
+	if (g_network->isSimulated() && fdbSimulationPolicyState().usableRegions > 1 &&
+	    !fdbSimulationPolicyState().quiesced) {
 		auto& simPolicy = fdbSimulationPolicyState();
 		bool primaryDead = g_simulator->datacenterDead(simPolicy.primaryDcId);
 		bool remoteDead = g_simulator->datacenterDead(simPolicy.remoteDcId);
@@ -840,7 +841,7 @@ Future<Void> enableConsistencyScanInSim(Database db) {
 				                                                      FDBSimConsistencyScanState::Enabling);
 				config.enabled = true;
 			} else {
-				if (config.enabled && g_simulator->restarted &&
+				if (config.enabled && fdbSimulationPolicyState().restarted &&
 				    fdbSimulationPolicyState().consistencyScanState == FDBSimConsistencyScanState::DisabledStart) {
 					TraceEvent("ConsistencyScan_SimEnableAlreadyDoneFromRestart").log();
 					fdbSimulationPolicyState().updateConsistencyScanState(FDBSimConsistencyScanState::DisabledStart,

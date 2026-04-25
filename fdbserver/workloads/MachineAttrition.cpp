@@ -22,6 +22,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbserver/core/TesterInterface.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbrpc/simulator.h"
@@ -413,7 +414,7 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 						CODE_PROBE(true, "Marked a zone for maintenance before killing it");
 						co_await setHealthyZone(
 						    cx, targetMachine.zoneId().get(), deterministicRandom()->random01() * 20);
-					} else if (!g_simulator->willRestart && BUGGIFY_WITH_PROB(0.005)) {
+					} else if (!fdbSimulationPolicyState().willRestart && BUGGIFY_WITH_PROB(0.005)) {
 						// don't do this in restarting test, since test could exit before it is unset, and restarted
 						// test would never unset it
 						CODE_PROBE(true, "Disable DD for all storage server failures");

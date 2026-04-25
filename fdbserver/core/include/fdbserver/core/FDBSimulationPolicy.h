@@ -70,11 +70,15 @@ struct FDBSimulationPolicyState {
 	std::string disableRemote;
 	std::string originalRegions;
 	std::string startingDisabledConfiguration;
+	int physicalDatacenters = 1;
 	int testerCount = 0;
 	std::string connectionString;
 	bool hasDiffProtocolProcess = false;
 	bool setDiffProtocol = false;
 	bool isConsistencyChecked = false;
+	bool quiesced = false;
+	bool willRestart = false;
+	bool restarted = false;
 	Optional<std::string> dataAtRestPlaintextMarker;
 	std::vector<std::string> extraDatabases;
 	FDBSimConsistencyScanState consistencyScanState = FDBSimConsistencyScanState::DisabledStart;

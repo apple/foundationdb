@@ -149,8 +149,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				        cx, self->dbInfo, "ConsistencyCheckStart", 0, 1e5, 0, 0, 30e6, 1e6, self->maxDDRunTime),
 				    self->maxDDRunTime); // FIXME: should be zero?
 				if (g_network->isSimulated()) {
-					g_simulator->quiesced = true;
-					TraceEvent("ConsistencyCheckQuiesced").detail("Quiesced", g_simulator->quiesced);
+					fdbSimulationPolicyState().quiesced = true;
+					TraceEvent("ConsistencyCheckQuiesced").detail("Quiesced", fdbSimulationPolicyState().quiesced);
 				}
 			} catch (Error& e) {
 				TraceEvent("ConsistencyCheck_QuietDatabaseError").error(e);
@@ -227,8 +227,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			}
 		}
 		if (self->firstClient && g_network->isSimulated() && self->performQuiescentChecks) {
-			g_simulator->quiesced = false;
-			TraceEvent("ConsistencyCheckQuiescedEnd").detail("Quiesced", g_simulator->quiesced);
+			fdbSimulationPolicyState().quiesced = false;
+			TraceEvent("ConsistencyCheckQuiescedEnd").detail("Quiesced", fdbSimulationPolicyState().quiesced);
 		}
 	}
 

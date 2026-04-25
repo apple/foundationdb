@@ -1440,7 +1440,7 @@ Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			    json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none);
 		}
 
-		g_simulator->restarted = true;
+		fdbSimulationPolicyState().restarted = true;
 
 		TraceEvent("RestartSimulatorSettings")
 		    .detail("DesiredCoordinators", fdbSimulationPolicyState().desiredCoordinators)
@@ -2600,12 +2600,12 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	}
 
 	fdbSimulationPolicyState().desiredCoordinators = coordinatorCount;
-	g_simulator->physicalDatacenters = dataCenters;
+	fdbSimulationPolicyState().physicalDatacenters = dataCenters;
 	g_simulator->processesPerMachine = processesPerMachine;
 
 	TraceEvent("SetupSimulatorSettings")
 	    .detail("DesiredCoordinators", fdbSimulationPolicyState().desiredCoordinators)
-	    .detail("PhysicalDatacenters", g_simulator->physicalDatacenters)
+	    .detail("PhysicalDatacenters", fdbSimulationPolicyState().physicalDatacenters)
 	    .detail("ProcessesPerMachine", g_simulator->processesPerMachine);
 
 	// SOMEDAY: add locality for testers to simulate network topology
@@ -2646,7 +2646,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	fdbSimulationPolicyState().connectionString = conn.toString();
 	fdbSimulationPolicyState().testerCount = testerCount;
 	fdbSimulationPolicyState().allowStorageMigrationTypeChange = gradualMigrationPossible;
-	g_simulator->willRestart = testConfig.isFirstTestInRestart;
+	fdbSimulationPolicyState().willRestart = testConfig.isFirstTestInRestart;
 
 	TraceEvent("SimulatedClusterStarted")
 	    .detail("DataCenters", dataCenters)

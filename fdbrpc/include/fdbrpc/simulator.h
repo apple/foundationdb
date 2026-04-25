@@ -324,12 +324,10 @@ public:
 	bool isProtectedAddress(NetworkAddress const& address) const { return protectedAddresses.contains(address); }
 	size_t protectedAddressCount() const { return protectedAddresses.size(); }
 
-	int physicalDatacenters;
 	int processesPerMachine;
 	int listenersPerProcess;
 
 	std::map<NetworkAddress, ProcessInfo*> currentlyRebootingProcesses;
-	bool quiesced = false;
 
 	bool isStopped;
 	double lastConnectionFailure;
@@ -337,8 +335,6 @@ public:
 	bool speedUpSimulation;
 	double connectionFailureEnableTime; // Last time connection failure is enabled.
 	double connectionFailureDisableTime = 0; // Latest time connection failure should be disabled.
-	bool willRestart = false;
-	bool restarted = false;
 
 	std::unordered_map<Standalone<StringRef>, PrivateKey> authKeys;
 
