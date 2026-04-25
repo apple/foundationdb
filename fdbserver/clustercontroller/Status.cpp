@@ -118,6 +118,15 @@ struct ClusterGetStatusState : ReferenceCounted<ClusterGetStatusState> {
 	std::set<std::string> statusIncompleteReasons;
 };
 
+struct LatencyProbeState : ReferenceCounted<LatencyProbeState> {
+	explicit LatencyProbeState(Database cx) : trImmediate(cx), trDefault(cx), trBatch(cx), trWrite(cx) {}
+
+	Transaction trImmediate;
+	Transaction trDefault;
+	Transaction trBatch;
+	Transaction trWrite;
+};
+
 static AsyncResult<Optional<TraceEventFields>> latestEventOnWorker(WorkerInterface worker, std::string eventName) {
 	try {
 		EventLogRequest req =
@@ -1256,28 +1265,33 @@ static AsyncResult<JsonBuilderObject> recoveryStateStatusFetcher(Database cx,
 }
 
 static Future<double> doGrvProbe(
-    Transaction* tr,
+    Reference<LatencyProbeState> probeState,
+    Transaction LatencyProbeState::*trMember,
     Optional<FDBTransactionOptions::Option> priority = Optional<FDBTransactionOptions::Option>()) {
+	Transaction& tr = probeState.getPtr()->*trMember;
 	double start = g_network->timer_monotonic();
 
 	while (true) {
 		Error err;
 		try {
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			if (priority.present()) {
-				tr->setOption(priority.get());
+				tr.setOption(priority.get());
 			}
 
-			co_await tr->getReadVersion();
+			co_await tr.getReadVersion();
 			co_return g_network->timer_monotonic() - start;
 		} catch (Error& e) {
 			err = e;
 		}
-		co_await tr->onError(err);
+		co_await tr.onError(err);
 	}
 }
 
-static Future<double> doReadProbe(Future<double> grvProbe, Transaction* tr) {
+static Future<double> doReadProbe(Reference<LatencyProbeState> probeState,
+                                  Future<double> grvProbe,
+                                  Transaction LatencyProbeState::*trMember) {
+	Transaction& tr = probeState.getPtr()->*trMember;
 	ErrorOr<double> grv = co_await errorOr(grvProbe);
 	if (grv.isError()) {
 		throw grv.getError();
@@ -1286,44 +1300,49 @@ static Future<double> doReadProbe(Future<double> grvProbe, Transaction* tr) {
 	double start = g_network->timer_monotonic();
 
 	while (true) {
-		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		Error err;
 		try {
-			Optional<Standalone<StringRef>> _ = co_await tr->get("\xff/StatusJsonTestKey62793"_sr);
+			Optional<Standalone<StringRef>> _ = co_await tr.get("\xff/StatusJsonTestKey62793"_sr);
 			co_return g_network->timer_monotonic() - start;
 		} catch (Error& e) {
 			err = e;
 		}
-		co_await tr->onError(err);
-		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		co_await tr.onError(err);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	}
 }
 
-static Future<double> doCommitProbe(Future<double> grvProbe, Transaction* sourceTr, Transaction* tr) {
+static Future<double> doCommitProbe(Reference<LatencyProbeState> probeState,
+                                    Future<double> grvProbe,
+                                    Transaction LatencyProbeState::*sourceTrMember,
+                                    Transaction LatencyProbeState::*trMember) {
+	Transaction& sourceTr = probeState.getPtr()->*sourceTrMember;
+	Transaction& tr = probeState.getPtr()->*trMember;
 	ErrorOr<double> grv = co_await errorOr(grvProbe);
 	if (grv.isError()) {
 		throw grv.getError();
 	}
 
-	ASSERT(sourceTr->getReadVersion().isReady());
-	tr->setVersion(sourceTr->getReadVersion().get());
-	tr->getDatabase()->ssVersionVectorCache = sourceTr->getDatabase()->ssVersionVectorCache;
-	tr->trState->readVersionObtainedFromGrvProxy = sourceTr->trState->readVersionObtainedFromGrvProxy;
+	ASSERT(sourceTr.getReadVersion().isReady());
+	tr.setVersion(sourceTr.getReadVersion().get());
+	tr.getDatabase()->ssVersionVectorCache = sourceTr.getDatabase()->ssVersionVectorCache;
+	tr.trState->readVersionObtainedFromGrvProxy = sourceTr.trState->readVersionObtainedFromGrvProxy;
 
 	double start = g_network->timer_monotonic();
 
 	while (true) {
 		Error err;
 		try {
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr->makeSelfConflicting();
-			co_await tr->commit();
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.makeSelfConflicting();
+			co_await tr.commit();
 			co_return g_network->timer_monotonic() - start;
 		} catch (Error& e) {
 			err = e;
 		}
-		co_await tr->onError(err);
+		co_await tr.onError(err);
 	}
 }
 
@@ -1360,20 +1379,20 @@ static AsyncResult<JsonBuilderObject> latencyProbeFetcher(Database cx,
                                                           JsonBuilderArray* messages,
                                                           std::set<std::string>* incomplete_reasons,
                                                           bool* isAvailable) {
-	Transaction trImmediate(cx);
-	Transaction trDefault(cx);
-	Transaction trBatch(cx);
-	Transaction trWrite(cx);
+	Reference<LatencyProbeState> probeState = makeReference<LatencyProbeState>(cx);
 
 	JsonBuilderObject statusObj;
 
 	try {
-		Future<double> immediateGrvProbe = doGrvProbe(&trImmediate, FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-		Future<double> defaultGrvProbe = doGrvProbe(&trDefault);
-		Future<double> batchGrvProbe = doGrvProbe(&trBatch, FDBTransactionOptions::PRIORITY_BATCH);
+		Future<double> immediateGrvProbe =
+		    doGrvProbe(probeState, &LatencyProbeState::trImmediate, FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		Future<double> defaultGrvProbe = doGrvProbe(probeState, &LatencyProbeState::trDefault);
+		Future<double> batchGrvProbe =
+		    doGrvProbe(probeState, &LatencyProbeState::trBatch, FDBTransactionOptions::PRIORITY_BATCH);
 
-		Future<double> readProbe = doReadProbe(immediateGrvProbe, &trImmediate);
-		Future<double> commitProbe = doCommitProbe(immediateGrvProbe, &trImmediate, &trWrite);
+		Future<double> readProbe = doReadProbe(probeState, immediateGrvProbe, &LatencyProbeState::trImmediate);
+		Future<double> commitProbe =
+		    doCommitProbe(probeState, immediateGrvProbe, &LatencyProbeState::trImmediate, &LatencyProbeState::trWrite);
 
 		int timeoutSeconds = 5;
 
