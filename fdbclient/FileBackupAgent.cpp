@@ -99,32 +99,6 @@ Future<bool> monitorBulkDumpJobCompletion(Database cx, UID jobId, double timeout
 	}
 }
 
-// Helper function to monitor BulkLoad job completion
-// Returns true if job completed successfully, false if timed out
-// lockAware must be true when DB is locked (e.g., during restore)
-Future<bool> monitorBulkLoadJobCompletion(Database cx,
-                                          UID jobId,
-                                          double timeoutDuration,
-                                          double pollInterval,
-                                          bool lockAware) {
-	double timeoutStart = now();
-
-	while (true) {
-		Optional<BulkLoadJobState> currentJob = co_await getRunningBulkLoadJob(cx, lockAware);
-		bool stillRunning = currentJob.present() && currentJob.get().getJobId() == jobId;
-
-		if (!stillRunning) {
-			co_return true; // Job completed successfully
-		}
-
-		if (now() - timeoutStart > timeoutDuration) {
-			co_return false; // Timed out
-		}
-
-		co_await delay(pollInterval);
-	}
-}
-
 // Verify that a complete BulkDump dataset exists for BulkLoad restore
 // Returns true if dataset is complete, false if incomplete
 // JobId corresponds to a single BulkDump job which represents one snapshot at a specific version
@@ -356,6 +330,11 @@ public:
 	KeyBackedBinaryValue<int64_t> fileCount() { return configSpace.pack(__FUNCTION__sr); }
 	// Total number of file blocks in the fileMap
 	KeyBackedBinaryValue<int64_t> fileBlockCount() { return configSpace.pack(__FUNCTION__sr); }
+	// BulkLoad sub-phase task counts for detailed progress tracking
+	KeyBackedBinaryValue<int64_t> bulkLoadSubmittedTasks() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedBinaryValue<int64_t> bulkLoadTriggeredTasks() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedBinaryValue<int64_t> bulkLoadRunningTasks() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedBinaryValue<int64_t> bulkLoadTotalTasks() { return configSpace.pack(__FUNCTION__sr); }
 
 	Future<std::vector<KeyRange>> getRestoreRangesOrDefault(Reference<ReadYourWritesTransaction> tr) {
 		return getRestoreRangesOrDefault_impl(this, tr);
@@ -558,6 +537,146 @@ public:
 
 using RestoreFile = RestoreConfig::RestoreFile;
 
+// Helper to count bulkload task progress for a job
+// Returns: <completedTasks, submittedTasks, triggeredTasks, runningTasks, totalTasks, completedBytes>
+// Sub-phases help track progress during the long "running" period:
+//   - Submitted: task created, waiting to be picked up by DD
+//   - Triggered: assigned to storage server, waiting to start
+//   - Running: storage server actively downloading/ingesting SST files
+Future<std::tuple<int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>> getBulkLoadTaskProgress(Database cx,
+                                                                                                 UID jobId) {
+	Transaction tr(cx);
+	Key readBegin = normalKeys.begin;
+	Key readEnd = normalKeys.end;
+	int64_t completedTasks = 0;
+	int64_t submittedTasks = 0;
+	int64_t triggeredTasks = 0;
+	int64_t runningTasks = 0;
+	int64_t totalTasks = 0;
+	int64_t completedBytes = 0;
+
+	while (readBegin < readEnd) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			RangeResult rangeResult = co_await krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(readBegin, readEnd));
+			if (rangeResult.empty()) {
+				break;
+			}
+			for (int i = 0; i < static_cast<int>(rangeResult.size()) - 1; ++i) {
+				if (rangeResult[i].value.empty()) {
+					continue;
+				}
+				BulkLoadTaskState task = decodeBulkLoadTaskState(rangeResult[i].value);
+				if (task.getJobId() != jobId) {
+					// Different job, stop counting
+					co_return std::make_tuple(
+					    completedTasks, submittedTasks, triggeredTasks, runningTasks, totalTasks, completedBytes);
+				}
+				int manifestCount = task.getManifests().size();
+				totalTasks += manifestCount;
+				if (task.phase == BulkLoadPhase::Complete) {
+					completedTasks += manifestCount;
+					// Sum bytes from manifest data sizes
+					for (const auto& manifest : task.getManifests()) {
+						completedBytes += manifest.getTotalBytes();
+					}
+				} else if (task.phase == BulkLoadPhase::Submitted) {
+					submittedTasks += manifestCount;
+				} else if (task.phase == BulkLoadPhase::Triggered) {
+					triggeredTasks += manifestCount;
+				} else if (task.phase == BulkLoadPhase::Running) {
+					runningTasks += manifestCount;
+				}
+			}
+			readBegin = rangeResult.back().key;
+		} catch (Error& e) {
+			err = e;
+		}
+		if (err.isValid() && err.code() != error_code_success) {
+			TraceEvent(SevWarn, "BulkLoadTaskProgressRetry").error(err).detail("JobId", jobId);
+			co_await tr.onError(err);
+		}
+	}
+	co_return std::make_tuple(completedTasks, submittedTasks, triggeredTasks, runningTasks, totalTasks, completedBytes);
+}
+
+// Monitor BulkLoad job completion and update restore progress counters
+// restoreUid is used to update the RestoreConfig progress
+Future<bool> monitorBulkLoadJobCompletionWithProgress(Database cx,
+                                                      UID jobId,
+                                                      UID restoreUid,
+                                                      int64_t totalBlocks,
+                                                      double timeoutDuration,
+                                                      double pollInterval,
+                                                      bool lockAware) {
+	double timeoutStart = now();
+	RestoreConfig restore(restoreUid);
+
+	while (true) {
+		Optional<BulkLoadJobState> currentJob = co_await getRunningBulkLoadJob(cx, lockAware);
+		bool stillRunning = currentJob.present() && currentJob.get().getJobId() == jobId;
+
+		if (!stillRunning) {
+			co_return true;
+		}
+
+		// Update progress based on completed bulkload tasks
+		try {
+			auto [completed, submitted, triggered, running, total, bytes] = co_await getBulkLoadTaskProgress(cx, jobId);
+			if (total > 0) {
+				// For bulkload restores, fileBlockCount is 0, so use task count as "blocks"
+				// This provides meaningful progress tracking for the restore status display
+				// Include all in-progress tasks in dispatched count to show scheduling progress
+				int64_t inProgress = submitted + triggered + running;
+				int64_t effectiveTotalBlocks = totalBlocks > 0 ? totalBlocks : total;
+				int64_t blocksFinished = totalBlocks > 0 ? (totalBlocks * completed) / total : completed;
+				int64_t blocksDispatched =
+				    totalBlocks > 0 ? (totalBlocks * (completed + inProgress)) / total : (completed + inProgress);
+
+				Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				if (lockAware) {
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				}
+				restore.fileBlocksFinished().set(tr, blocksFinished);
+				restore.filesBlocksDispatched().set(tr, blocksDispatched);
+				restore.fileBlockCount().set(tr, effectiveTotalBlocks);
+				restore.bytesWritten().set(tr, bytes);
+				// Store sub-phase counts for detailed progress display
+				restore.bulkLoadSubmittedTasks().set(tr, submitted);
+				restore.bulkLoadTriggeredTasks().set(tr, triggered);
+				restore.bulkLoadRunningTasks().set(tr, running);
+				restore.bulkLoadTotalTasks().set(tr, total);
+				co_await tr->commit();
+
+				TraceEvent("BulkLoadRestoreProgress")
+				    .detail("RestoreUID", restoreUid)
+				    .detail("JobId", jobId)
+				    .detail("CompletedTasks", completed)
+				    .detail("SubmittedTasks", submitted)
+				    .detail("TriggeredTasks", triggered)
+				    .detail("RunningTasks", running)
+				    .detail("TotalTasks", total)
+				    .detail("BlocksFinished", blocksFinished)
+				    .detail("BlocksDispatched", blocksDispatched)
+				    .detail("EffectiveTotalBlocks", effectiveTotalBlocks)
+				    .detail("BytesWritten", bytes);
+			}
+		} catch (Error& e) {
+			// Log but don't fail - progress updates are best-effort
+			TraceEvent(SevWarn, "BulkLoadRestoreProgressError").error(e).detail("JobId", jobId);
+		}
+
+		if (now() - timeoutStart > timeoutDuration) {
+			co_return false; // Timed out
+		}
+
+		co_await delay(pollInterval);
+	}
+}
+
 Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore, Reference<ReadYourWritesTransaction> tr) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -573,12 +692,18 @@ Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore, Refer
 	Future<Version> firstConsistentVersion = restore.firstConsistentVersion().getD(tr);
 	Future<std::string> tag = restore.tag().getD(tr);
 	Future<std::pair<std::string, Version>> lastError = restore.lastError().getD(tr);
+	// BulkLoad sub-phase counts for detailed progress
+	Future<int64_t> submittedTasks = restore.bulkLoadSubmittedTasks().getD(tr);
+	Future<int64_t> triggeredTasks = restore.bulkLoadTriggeredTasks().getD(tr);
+	Future<int64_t> runningTasks = restore.bulkLoadRunningTasks().getD(tr);
+	Future<int64_t> totalTasks = restore.bulkLoadTotalTasks().getD(tr);
 
 	// restore might no longer be valid after the first wait so make sure it is not needed anymore.
 	UID uid = restore.getUid();
 	co_await (success(fileCount) && success(fileBlockCount) && success(fileBlocksDispatched) &&
 	          success(fileBlocksFinished) && success(bytesWritten) && success(status) && success(currentVersion) &&
-	          success(lag) && success(firstConsistentVersion) && success(tag) && success(lastError));
+	          success(lag) && success(firstConsistentVersion) && success(tag) && success(lastError) &&
+	          success(submittedTasks) && success(triggeredTasks) && success(runningTasks) && success(totalTasks));
 
 	std::string errstr = "None";
 	if (lastError.get().second != 0)
@@ -594,19 +719,28 @@ Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore, Refer
 	    .detail("FileBlocksFinished", fileBlocksFinished.get())
 	    .detail("FileBlocksTotal", fileBlockCount.get())
 	    .detail("FileBlocksInProgress", fileBlocksDispatched.get() - fileBlocksFinished.get())
+	    .detail("SubmittedTasks", submittedTasks.get())
+	    .detail("TriggeredTasks", triggeredTasks.get())
+	    .detail("RunningTasks", runningTasks.get())
+	    .detail("TotalTasks", totalTasks.get())
 	    .detail("BytesWritten", bytesWritten.get())
 	    .detail("CurrentVersion", currentVersion.get())
 	    .detail("FirstConsistentVersion", firstConsistentVersion.get())
 	    .detail("ApplyLag", lag.get());
 
-	co_return format("Tag: %s  UID: %s  State: %s  Blocks: %lld/%lld  BlocksInProgress: %lld  Files: %lld  "
-	                 "BytesWritten: %lld  ApplyVersionLag: %lld  LastError: %s",
+	co_return format("Tag: %s  UID: %s  State: %s  Blocks: %lld/%lld  BlocksInProgress: %lld  "
+	                 "Submitted: %lld  Triggered: %lld  Running: %lld  TotalTasks: %lld  "
+	                 "Files: %lld  BytesWritten: %lld  ApplyVersionLag: %lld  LastError: %s",
 	                 tag.get().c_str(),
 	                 uid.toString().c_str(),
 	                 status.get().toString().c_str(),
 	                 fileBlocksFinished.get(),
 	                 fileBlockCount.get(),
 	                 fileBlocksDispatched.get() - fileBlocksFinished.get(),
+	                 submittedTasks.get(),
+	                 triggeredTasks.get(),
+	                 runningTasks.get(),
+	                 totalTasks.get(),
 	                 fileCount.get(),
 	                 bytesWritten.get(),
 	                 lag.get(),
@@ -2019,6 +2153,15 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 	                                    Version version) {
 		co_await file->finish();
 
+		TraceEvent("BackupRangeFileFinished")
+		    .detail("BackupUID", BackupConfig(task).getUid())
+		    .detail("FileName", file->getFileName())
+		    .detail("FileSize", file->size())
+		    .detail("RangeBegin", range.begin.printable())
+		    .detail("RangeEnd", range.end.printable())
+		    .detail("RangeEmpty", range.empty())
+		    .detail("Version", version);
+
 		// Ignore empty ranges.
 		if (range.empty())
 			co_return false;
@@ -2606,6 +2749,17 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 		// In this context "all" refers to all of the shards relevant for this particular backup
 		int countAllShards = countShardsDone + countShardsNotDone;
 
+		// Log backup ranges and shard counts for debugging mode=BOTH issues
+		TraceEvent("FileBackupSnapshotDispatchShardCount")
+		    .detail("BackupUID", config.getUid())
+		    .detail("BackupRangesCount", backupRanges.size())
+		    .detail("FirstRangeBegin", backupRanges.empty() ? ""_sr : backupRanges.front().begin.printable())
+		    .detail("FirstRangeEnd", backupRanges.empty() ? ""_sr : backupRanges.front().end.printable())
+		    .detail("CountAllShards", countAllShards)
+		    .detail("CountShardsDone", countShardsDone)
+		    .detail("CountShardsNotDone", countShardsNotDone)
+		    .detail("LatestSnapshotEndVersion", latestSnapshotEndVersion.orDefault(-1));
+
 		// NOTE: Don't finish here even if countShardsNotDone == 0. We need to dispatch tasks first.
 		// The completion check after dispatch (with dispatchedInThisIteration guard) prevents
 		// finishing in the same iteration we dispatch the last tasks.
@@ -2887,10 +3041,18 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 
 		Reference<TaskFuture> snapshotFinishedFuture = task->getDoneFuture(futureBucket);
 
+		bool snapshotFinished = Params.snapshotFinished().getOrDefault(task, false);
+		TraceEvent("FileBackupSnapshotDispatchFinish")
+		    .detail("BackupUID", config.getUid())
+		    .detail("SnapshotFinished", snapshotFinished)
+		    .detail("ShardsBehind", Params.shardsBehind().getOrDefault(task, 0))
+		    .detail("NextDispatchVersion", Params.nextDispatchVersion().getOrDefault(task, -1));
+
 		// If the snapshot is finished, the next task is to write a snapshot manifest, otherwise it's another
 		// snapshot dispatch task. In either case, the task should wait for snapshotBatchFuture. The snapshot done
 		// key, passed to the current task, is also passed on.
-		if (Params.snapshotFinished().getOrDefault(task, false)) {
+		if (snapshotFinished) {
+			TraceEvent("FileBackupSnapshotDispatchAddingManifestTask").detail("BackupUID", config.getUid());
 			co_await addSnapshotManifestTask(
 			    tr, taskBucket, task, TaskCompletionKey::signal(snapshotFinishedFuture), snapshotBatchFuture);
 		} else {
@@ -3490,6 +3652,7 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 	static constexpr uint32_t version = 1;
 	static struct {
 		static TaskParam<Version> endVersion() { return __FUNCTION__sr; }
+		static TaskParam<int64_t> totalBytes() { return __FUNCTION__sr; }
 	} Params;
 
 	static Future<Void> _execute(Database cx,
@@ -3584,7 +3747,17 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 			}
 		}
 
+		// Log what range files were found for debugging mode=BOTH issues
+		TraceEvent("BackupSnapshotManifestRangeFileSummary")
+		    .detail("BackupUID", config.getUid())
+		    .detail("LocalMapSize", localmap.size())
+		    .detail("FilesFound", files.size())
+		    .detail("TotalBytes", totalBytes)
+		    .detail("MinVersion", minVer == std::numeric_limits<Version>::max() ? -1 : minVer)
+		    .detail("MaxVersion", maxVer);
+
 		Params.endVersion().set(task, maxVer);
+		Params.totalBytes().set(task, totalBytes);
 
 		// Avoid keyRange filtering optimization for 'manifest' files
 		co_await bc->writeKeyspaceSnapshotFile(files, beginEndKeys, totalBytes, IncludeKeyRangeMap::True);
@@ -3627,6 +3800,8 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 			FileBackupAgent().setLastRestorable(tr, StringRef(tag.get()), restorableVersion.get());
 		}
 
+		// Always set firstSnapshotEndVersion if not already set
+		// This is required for getLatestRestorableVersion() to work correctly
 		if (!firstSnapshotEndVersion.present()) {
 			config.firstSnapshotEndVersion().set(tr, Params.endVersion().get(task));
 		}
@@ -3910,25 +4085,46 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 	                            Reference<Task> task) {
 		BackupConfig config(task);
 		Version snapshotVersion = Params.snapshotVersion().get(task);
+		std::string jobId = Params.bulkDumpJobId().getOrDefault(task, "");
 
 		TraceEvent("BulkDumpTaskFinishStart")
 		    .detail("BackupUID", config.getUid())
-		    .detail("SnapshotVersion", snapshotVersion);
+		    .detail("SnapshotVersion", snapshotVersion)
+		    .detail("BulkDumpJobId", jobId);
 
 		// Set latestSnapshotEndVersion so BackupLogsDispatchTask knows we're restorable
 		// This is critical for the backup to complete when using BulkDump
 		config.latestSnapshotEndVersion().set(tr, snapshotVersion);
 
-		// Also set firstSnapshotEndVersion if not already set (first snapshot)
-		Optional<Version> firstSnapshotEnd = co_await config.firstSnapshotEndVersion().get(tr);
-		if (!firstSnapshotEnd.present()) {
-			config.firstSnapshotEndVersion().set(tr, snapshotVersion);
+		// Set bulkDumpSnapshotEndVersion to track that BulkDump data is available
+		// This is used by getLatestRestorableVersion() for mode=BOTH to ensure both
+		// rangefile and bulkdump data exist before marking backup as restorable
+		config.bulkDumpSnapshotEndVersion().set(tr, snapshotVersion);
+
+		// CRITICAL: Set bulkDumpJobId on the backup CONFIG so that status checks
+		// and restore operations can find it. Without this, the backup status shows
+		// "BulkLoad Compatible: no" and bulkload restore fails with "Missing backup data".
+		if (!jobId.empty()) {
+			config.bulkDumpJobId().set(tr, jobId);
+		}
+
+		// Set firstSnapshotEndVersion if not already set, BUT only if we're NOT in
+		// mode=BOTH. In mode=BOTH, firstSnapshotEndVersion tracks the rangefile snapshot
+		// completion and must only be set by BackupSnapshotManifest::_finish().
+		// Setting it here would make getLatestRestorableVersion() think both snapshots
+		// are complete when only bulkdump is done.
+		Optional<int> mode = co_await config.snapshotMode().get(tr);
+		if (!mode.present() || mode.get() != 2) {
+			Optional<Version> firstSnapshotEnd = co_await config.firstSnapshotEndVersion().get(tr);
+			if (!firstSnapshotEnd.present()) {
+				config.firstSnapshotEndVersion().set(tr, snapshotVersion);
+			}
 		}
 
 		TraceEvent("BulkDumpTaskFinishSetVersions")
 		    .detail("BackupUID", config.getUid())
 		    .detail("SnapshotVersion", snapshotVersion)
-		    .detail("FirstSnapshotWasSet", !firstSnapshotEnd.present());
+		    .detail("Mode", mode.present() ? mode.get() : 0);
 
 		Reference<TaskFuture> taskFuture = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 		co_await taskFuture->set(tr, taskBucket);
@@ -4289,20 +4485,40 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 				if (!bulkDumpJobId.empty()) {
 					dumpJobUid = UID::fromString(bulkDumpJobId);
 				} else {
-					// No BulkDump job ID found - this is an error for BulkLoad restore
+					// No BulkDump job ID found - this is a permanent error for BulkLoad restore.
+					// Abort the restore immediately instead of retrying forever.
 					TraceEvent(SevError, "BulkLoadRestoreNoBulkDumpJobId")
 					    .detail("RestoreUID", restore.getUid())
-					    .detail("BackupUrl", backupUrl);
+					    .detail("BackupUrl", backupUrl)
+					    .detail("Action", "Aborting restore - backup is not BulkLoad compatible");
+					co_await restore.logError(
+					    cx, restore_missing_data(), "BulkLoad restore failed: backup has no bulkdump data", nullptr);
+					// Abort the restore by setting state to ABORTED
+					Reference<ReadYourWritesTransaction> abortTr(new ReadYourWritesTransaction(cx));
+					abortTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					abortTr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					restore.stateEnum().set(abortTr, ERestoreState::ABORTED);
+					co_await abortTr->commit();
 					throw restore_missing_data();
 				}
 
 				// Verify BulkDump dataset completeness before proceeding
 				bool datasetComplete = co_await verifyBulkDumpDatasetCompleteness(bcRef, bulkDumpJobId);
 				if (!datasetComplete) {
-					TraceEvent(SevWarn, "BulkLoadRestoreDatasetIncomplete")
+					// Dataset is incomplete - abort the restore permanently
+					TraceEvent(SevError, "BulkLoadRestoreDatasetIncomplete")
 					    .detail("RestoreUID", restore.getUid())
 					    .detail("BulkDumpJobId", bulkDumpJobId)
-					    .detail("BackupUrl", backupUrl);
+					    .detail("BackupUrl", backupUrl)
+					    .detail("Action", "Aborting restore - bulkdump dataset is incomplete");
+					co_await restore.logError(
+					    cx, restore_missing_data(), "BulkLoad restore failed: bulkdump dataset incomplete", nullptr);
+					// Abort the restore by setting state to ABORTED
+					Reference<ReadYourWritesTransaction> abortTr(new ReadYourWritesTransaction(cx));
+					abortTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					abortTr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					restore.stateEnum().set(abortTr, ERestoreState::ABORTED);
+					co_await abortTr->commit();
 					throw restore_missing_data();
 				}
 				TraceEvent("BulkLoadRestoreDatasetVerified")
@@ -4351,13 +4567,19 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 				    .detail("RestoreUID", restore.getUid())
 				    .detail("BulkLoadJobId", bulkLoadJob.getJobId());
 
+				// Get total block count for progress tracking
+				int64_t totalBlocks = co_await restore.fileBlockCount().getD(cx.getReference(), Snapshot::False, 0);
+
 				// Monitor BulkLoad progress - timeout is configurable for large datasets
 				// Must be lockAware since DB is locked during restore
-				bool completed = co_await monitorBulkLoadJobCompletion(cx,
-				                                                       bulkLoadJob.getJobId(),
-				                                                       CLIENT_KNOBS->BULKLOAD_JOB_TIMEOUT,
-				                                                       5.0, // Poll every 5 seconds
-				                                                       true); // lockAware
+				// Use the progress-tracking version to update restore counters
+				bool completed = co_await monitorBulkLoadJobCompletionWithProgress(cx,
+				                                                                   bulkLoadJob.getJobId(),
+				                                                                   restore.getUid(),
+				                                                                   totalBlocks,
+				                                                                   CLIENT_KNOBS->BULKLOAD_JOB_TIMEOUT,
+				                                                                   5.0, // Poll every 5 seconds
+				                                                                   true); // lockAware
 
 				if (!completed) {
 					TraceEvent(SevWarn, "BulkLoadRestoreTimeout")

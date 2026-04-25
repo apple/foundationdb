@@ -721,7 +721,7 @@ private:
 
 	static Future<Void> poll(Uncancellable, Reference<IEventFD> ev) {
 		while (true) {
-			co_await success(ev->read());
+			co_await ev->read();
 
 			co_await delay(0, TaskPriority::DiskIOComplete);
 

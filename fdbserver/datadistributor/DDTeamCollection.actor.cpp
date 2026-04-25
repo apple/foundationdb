@@ -1582,33 +1582,33 @@ public:
 						bool restartRecruiting = newInterface.first.waitFailure.getEndpoint().getPrimaryAddress() !=
 						                         lastKnownInterface.waitFailure.getEndpoint().getPrimaryAddress();
 						bool localityChanged = lastKnownInterface.locality != newInterface.first.locality;
-						bool machineLocalityChanged =
+						bool zoneLocalityChanged =
 						    lastKnownInterface.locality.zoneId().get() != newInterface.first.locality.zoneId().get();
 						TraceEvent("StorageServerInterfaceChanged", self->distributorId)
 						    .detail("ServerID", server->getId())
 						    .detail("NewWaitFailureToken", newInterface.first.waitFailure.getEndpoint().token)
 						    .detail("OldWaitFailureToken", lastKnownInterface.waitFailure.getEndpoint().token)
 						    .detail("LocalityChanged", localityChanged)
-						    .detail("MachineLocalityChanged", machineLocalityChanged);
+						    .detail("ZoneLocalityChanged", zoneLocalityChanged);
 
 						server->updateLastKnown(newInterface.first, newInterface.second);
 						if (localityChanged && !isTss) {
 							CODE_PROBE(true, "Server locality changed");
 
-							// The locality change of a server will affect machine teams related to the server if
-							// the server's machine locality is changed
-							if (machineLocalityChanged) {
-								// First handle the impact on the machine of the server on the old locality
+							// Machine teams are keyed by zone ID, so zone locality changes require updating
+							// machine-team membership for this server.
+							if (zoneLocalityChanged) {
+								// First handle the impact on the server's old zone-keyed machine.
 								Reference<TCMachineInfo> machine = server->machine;
 								ASSERT_GE(machine->serversOnMachine.size(), 1);
 								if (machine->serversOnMachine.size() == 1) {
-									// When server is the last server on the machine,
-									// remove the machine and the related machine team
+									// When this is the last server on the zone-keyed machine,
+									// remove the machine and related machine teams.
 									self->removeMachine(machine);
 									server->machine = Reference<TCMachineInfo>();
 								} else {
-									// we remove the server from the machine, and
-									// update locality entry for the machine and the global machineLocalityMap
+									// Remove the server from the zone-keyed machine. The representative locality
+									// entry is left stale until machineLocalityMap is rebuilt.
 									int serverIndex = -1;
 									for (int i = 0; i < machine->serversOnMachine.size(); ++i) {
 										if (machine->serversOnMachine[i].getPtr() == server) {
@@ -1625,9 +1625,8 @@ public:
 									// its representative server is changed.
 								}
 
-								// Second handle the impact on the destination machine where the server's new locality
-								// is; If the destination machine is new, create one; otherwise, add server to an
-								// existing one Update server's machine reference to the destination machine
+								// Next handle the destination zone-keyed machine. Create it if necessary;
+								// otherwise add the server and update its machine reference.
 								Reference<TCMachineInfo> destMachine =
 								    self->checkAndCreateMachine(self->server_info[server->getId()]);
 								ASSERT(destMachine.isValid());
@@ -1641,7 +1640,7 @@ public:
 									newBadTeams.push_back(serverTeam);
 									continue;
 								}
-								if (machineLocalityChanged) {
+								if (zoneLocalityChanged) {
 									Reference<TCMachineTeamInfo> machineTeam =
 									    self->checkAndCreateMachineTeam(serverTeam);
 									ASSERT(machineTeam.isValid());
@@ -2069,7 +2068,7 @@ public:
 
 				TraceEvent("MachineTeamRemover", self->distributorId)
 				    .detail("MachineTeamIDToRemove", mt->id().shortString())
-				    .detail("MachineTeamToRemove", mt->getMachineIDsStr())
+				    .detail("ZoneIDsToRemove", mt->getMachineIDsStr())
 				    .detail("NumProcessTeamsOnTheMachineTeam", minNumProcessTeams)
 				    .detail("CurrentMachineTeams", self->machineTeams.size())
 				    .detail("DesiredMachineTeams", desiredMachineTeams);
@@ -3590,7 +3589,7 @@ public:
 				    .detail("ServerInfoIndex", i)
 				    .detail("ServerID", server->first.toString())
 				    .detail("ServerTeamOwned", server->second->getTeams().size())
-				    .detail("MachineID", server->second->machine->machineID.contents().toString())
+				    .detail("ZoneID", server->second->machine->machineID.contents().toString())
 				    .detail("Primary", self->isPrimary())
 				    .detail("IsInDesiredDC", server->second->isInDesiredDC())
 				    .detail("DataInFlightToServer", server->second->getDataInFlightToServer())
@@ -3686,9 +3685,9 @@ public:
 			bool isMachineHealthy = false;
 			for (i = 0; i < machine_info.size(); i++) {
 				Reference<TCMachineInfo> _machine = machine->second;
-				bool machineIDFound = machine_info.find(_machine->machineID) != machine_info.end();
+				bool zoneIDFound = machine_info.find(_machine->machineID) != machine_info.end();
 				bool zeroHealthyServersOnMachine = true;
-				if (!_machine.isValid() || !machineIDFound || _machine->serversOnMachine.empty()) {
+				if (!_machine.isValid() || !zoneIDFound || _machine->serversOnMachine.empty()) {
 					isMachineHealthy = false;
 				}
 
@@ -3708,10 +3707,10 @@ public:
 				TraceEvent("MachineInfo", self->getDistributorId())
 				    .detail("MachineInfoIndex", i)
 				    .detail("Healthy", isMachineHealthy)
-				    .detail("MachineIDFound", machineIDFound)
+				    .detail("ZoneIDFound", zoneIDFound)
 				    .detail("ZeroServersOnMachine", _machine->serversOnMachine.empty())
 				    .detail("ZeroHealthyServersOnMachine", zeroHealthyServersOnMachine)
-				    .detail("MachineID", machine->first.contents().toString())
+				    .detail("ZoneID", machine->first.contents().toString())
 				    .detail("MachineTeamOwned", machine->second->machineTeams.size())
 				    .detail("ServerNumOnMachine", machine->second->serversOnMachine.size())
 				    .detail("ServersID", machine->second->getServersIDStr())
@@ -3730,7 +3729,7 @@ public:
 				const auto& team = machineTeams[i];
 				TraceEvent(g_network->isSimulated() ? SevVerbose : SevInfo, "MachineTeamInfo", self->getDistributorId())
 				    .detail("TeamIndex", i)
-				    .detail("MachineIDs", team->getMachineIDsStr())
+				    .detail("ZoneIDs", team->getMachineIDsStr())
 				    .detail("ServerTeams", team->getServerTeams().size())
 				    .detail("Primary", self->isPrimary());
 				if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
@@ -3934,7 +3933,7 @@ void DDTeamCollection::traceServerInfo() const {
 		    .detail("ServerInfoIndex", i++)
 		    .detail("ServerID", serverID.toString())
 		    .detail("ServerTeamOwned", server->getTeams().size())
-		    .detail("MachineID", server->machine->machineID.contents().toString())
+		    .detail("ZoneID", server->machine->machineID.contents().toString())
 		    .detail("StoreType", server->getStoreType().toString())
 		    .detail("InDesiredDC", server->isInDesiredDC());
 	}
@@ -4584,7 +4583,6 @@ void DDTeamCollection::evaluateTeamQuality() const {
 			minTeams = std::min(minTeams, stc);
 			maxTeams = std::max(maxTeams, stc);
 			varTeams += (stc - teamsPerServer) * (stc - teamsPerServer);
-			// Use zoneId as server's machine id
 			machineTeams[info->getLastKnownInterface().locality.zoneId()] += stc;
 			// Check invariant: if latest buildTeam succeeds, then each server must have at least
 			// targetTeamNumPerServer serverTeams
@@ -4935,7 +4933,7 @@ Reference<TCMachineTeamInfo> DDTeamCollection::addMachineTeam(std::vector<Standa
 		if (machine_info.find(*i) != machine_info.end()) {
 			machines.push_back(machine_info[*i]);
 		} else {
-			TraceEvent(SevWarn, "AddMachineTeamError").detail("MachineIDNotExist", i->contents().toString());
+			TraceEvent(SevWarn, "AddMachineTeamError").detail("ZoneIDNotExist", i->contents().toString());
 		}
 	}
 
@@ -4984,7 +4982,7 @@ void DDTeamCollection::traceMachineInfo() const {
 		TraceEvent("MachineInfo", distributorId)
 		    .detail("MachineInfoIndex", i++)
 		    .detail("Healthy", isMachineHealthy(machineInfo))
-		    .detail("MachineID", machineName.contents().toString())
+		    .detail("ZoneID", machineName.contents().toString())
 		    .detail("MachineTeamOwned", machineInfo->machineTeams.size())
 		    .detail("ServerNumOnMachine", machineInfo->serversOnMachine.size())
 		    .detail("ServersID", machineInfo->getServersIDStr());
@@ -4998,7 +4996,7 @@ void DDTeamCollection::traceMachineTeamInfo() const {
 	for (auto& team : machineTeams) {
 		TraceEvent("MachineTeamInfo", distributorId)
 		    .detail("TeamIndex", i++)
-		    .detail("MachineIDs", team->getMachineIDsStr())
+		    .detail("ZoneIDs", team->getMachineIDsStr())
 		    .detail("ServerTeams", team->getServerTeams().size());
 	}
 }
@@ -5142,7 +5140,7 @@ int DDTeamCollection::addBestMachineTeams(int machineTeamsToBuild) {
 				forcedAttributes.push_back(process);
 				TraceEvent("ChosenMachine")
 				    .suppressFor(30.0)
-				    .detail("MachineInfo", tcMachineInfo->machineID)
+				    .detail("ZoneID", tcMachineInfo->machineID)
 				    .detail("LeaseUsedMachinesSize", leastUsedMachines.size())
 				    .detail("ForcedAttributesSize", forcedAttributes.size());
 			} else {
@@ -5177,8 +5175,8 @@ int DDTeamCollection::addBestMachineTeams(int machineTeamsToBuild) {
 			for (auto process = team.begin(); process != team.end(); process++) {
 				Reference<TCServerInfo> server = server_info[**process];
 				score += server->machine->machineTeams.size();
-				Standalone<StringRef> machine_id = server->getLastKnownInterface().locality.zoneId().get();
-				machineIDs.push_back(machine_id);
+				Standalone<StringRef> zone_id = server->getLastKnownInterface().locality.zoneId().get();
+				machineIDs.push_back(zone_id);
 			}
 
 			// Only choose healthy machines into machine team
@@ -5369,7 +5367,7 @@ bool DDTeamCollection::isServerTeamCountCorrect(Reference<TCMachineTeamInfo> con
 	if (num != mt->getServerTeams().size()) {
 		ret = false;
 		TraceEvent(SevError, "ServerTeamCountOnMachineIncorrect")
-		    .detail("MachineTeam", mt->getMachineIDsStr())
+		    .detail("ZoneIDs", mt->getMachineIDsStr())
 		    .detail("ServerTeamsSize", mt->getServerTeams().size())
 		    .detail("CountedServerTeams", num);
 	}
@@ -5831,22 +5829,22 @@ bool DDTeamCollection::removeTeam(Reference<TCTeamInfo> team) {
 Reference<TCMachineInfo> DDTeamCollection::checkAndCreateMachine(Reference<TCServerInfo> server) {
 	ASSERT(server.isValid() && server_info.find(server->getId()) != server_info.end());
 	auto const& locality = server->getLastKnownInterface().locality;
-	Standalone<StringRef> machine_id = locality.zoneId().get(); // locality to machine_id with std::string type
+	Standalone<StringRef> zone_id = locality.zoneId().get();
 
 	Reference<TCMachineInfo> machineInfo;
-	if (machine_info.find(machine_id) == machine_info.end()) {
-		// uid is the first storage server process on the machine
-		CODE_PROBE(true, "First storage server in process on the machine");
-		// For each machine, store the first server's localityEntry into machineInfo for later use.
+	if (machine_info.find(zone_id) == machine_info.end()) {
+		// uid is the first storage server process on the zone-keyed machine.
+		CODE_PROBE(true, "First storage server in process on the zone-keyed machine");
+		// Store the first server's localityEntry for this zone-keyed machine for later use.
 		LocalityEntry localityEntry = machineLocalityMap.add(locality, &server->getId());
 		machineInfo = makeReference<TCMachineInfo>(server, localityEntry);
-		machine_info.insert(std::make_pair(machine_id, machineInfo));
+		machine_info.insert(std::make_pair(zone_id, machineInfo));
 	} else {
-		machineInfo = machine_info.find(machine_id)->second;
+		machineInfo = machine_info.find(zone_id)->second;
 		machineInfo->serversOnMachine.push_back(server);
 	}
 	server->machine = machineInfo;
-	ASSERT(machineInfo->machineID == machine_id); // invariant for TC to work
+	ASSERT(machineInfo->machineID == zone_id); // invariant for TC to work
 
 	return machineInfo;
 }
@@ -5903,9 +5901,9 @@ void DDTeamCollection::removeMachine(Reference<TCMachineInfo> removedMachineInfo
 
 	// Remove removedMachineInfo from machine's global info
 	machine_info.erase(removedMachineInfo->machineID);
-	TraceEvent("MachineLocalityMapUpdate").detail("MachineUIDRemoved", removedMachineInfo->machineID.toString());
+	TraceEvent("MachineLocalityMapUpdate").detail("ZoneIDRemoved", removedMachineInfo->machineID.toString());
 
-	// We do not update macineLocalityMap when a machine is removed because we will do so when we use it in
+	// We do not update machineLocalityMap when a machine is removed because we will do so when we use it in
 	// addBestMachineTeams()
 	// rebuildMachineLocalityMap();
 }
@@ -6338,9 +6336,9 @@ public:
 
 		int result = collection->addTeamsBestOf(200, desiredTeams, maxTeams);
 
-		// The maximum number of available server teams without considering machine locality is 120
-		// The maximum number of available server teams with machine locality constraint is 120 - 40, because
-		// the 40 (5*4*2) server teams whose servers come from the same machine are invalid.
+		// The maximum number of available server teams without considering zone locality is 120
+		// The maximum number of available server teams with zone locality constraint is 120 - 40, because
+		// the 40 (5*4*2) server teams whose servers come from the same zone are invalid.
 		ASSERT(result == 80);
 	}
 
