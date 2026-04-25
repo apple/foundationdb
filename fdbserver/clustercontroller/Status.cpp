@@ -1266,7 +1266,7 @@ static AsyncResult<JsonBuilderObject> recoveryStateStatusFetcher(Database cx,
 
 static Future<double> doGrvProbe(
     Reference<LatencyProbeState> probeState,
-    Transaction LatencyProbeState::*trMember,
+    Transaction LatencyProbeState::* trMember,
     Optional<FDBTransactionOptions::Option> priority = Optional<FDBTransactionOptions::Option>()) {
 	Transaction& tr = probeState.getPtr()->*trMember;
 	double start = g_network->timer_monotonic();
@@ -1290,7 +1290,7 @@ static Future<double> doGrvProbe(
 
 static Future<double> doReadProbe(Reference<LatencyProbeState> probeState,
                                   Future<double> grvProbe,
-                                  Transaction LatencyProbeState::*trMember) {
+                                  Transaction LatencyProbeState::* trMember) {
 	Transaction& tr = probeState.getPtr()->*trMember;
 	ErrorOr<double> grv = co_await errorOr(grvProbe);
 	if (grv.isError()) {
@@ -1315,8 +1315,8 @@ static Future<double> doReadProbe(Reference<LatencyProbeState> probeState,
 
 static Future<double> doCommitProbe(Reference<LatencyProbeState> probeState,
                                     Future<double> grvProbe,
-                                    Transaction LatencyProbeState::*sourceTrMember,
-                                    Transaction LatencyProbeState::*trMember) {
+                                    Transaction LatencyProbeState::* sourceTrMember,
+                                    Transaction LatencyProbeState::* trMember) {
 	Transaction& sourceTr = probeState.getPtr()->*sourceTrMember;
 	Transaction& tr = probeState.getPtr()->*trMember;
 	ErrorOr<double> grv = co_await errorOr(grvProbe);
