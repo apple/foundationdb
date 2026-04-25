@@ -416,7 +416,7 @@ Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFu
 	}
 }
 
-Future<Void> initializeSimConfig(Database db) {
+Future<Void> initializeSimConfig(Database db, bool restartingTest) {
 	Transaction tr(db);
 	ASSERT(g_network->isSimulated());
 	while (true) {
@@ -425,7 +425,7 @@ Future<Void> initializeSimConfig(Database db) {
 
 		try {
 			DatabaseConfiguration dbConfig = co_await getDatabaseConfiguration(&tr);
-			updateFDBSimulationPolicy(dbConfig, false);
+			updateFDBSimulationPolicy(dbConfig, restartingTest);
 
 			// If the same region is being shared between the remote and a satellite, then our simulated policy checking
 			// may fail to account for the total number of needed machines when deciding what can be killed. To work
@@ -650,7 +650,7 @@ Future<Void> runTests7(Reference<AsyncVar<Optional<struct ClusterControllerFullI
 
 	if (useDB) {
 		if (g_network->isSimulated()) {
-			co_await initializeSimConfig(cx);
+			co_await initializeSimConfig(cx, restartingTest);
 		}
 	}
 
