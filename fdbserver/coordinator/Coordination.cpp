@@ -197,7 +197,6 @@ TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 
 		ASSERT(!actor.isReady());
 	}
-	return Void();
 }
 
 Future<Void> openDatabase(ClientData* db,
