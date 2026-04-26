@@ -20,9 +20,8 @@
 
 #include "fdbrpc/Stats.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/logrouter/LogRouter.h"
-#include "fdbserver/logsystem/LogSystemTypes.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/core/RecoveryState.h"
@@ -72,7 +71,7 @@ struct LogRouterData {
 	};
 
 	const UID dbgid;
-	Reference<AsyncVar<Reference<ILogSystem>>> logSystem;
+	Reference<AsyncVar<Reference<LogSystem>>> logSystem;
 	Future<Void> logSystemChanged = Void();
 	Optional<UID> primaryPeekLocation;
 	NotifiedVersion version; // The largest version at which the log router has peeked mutations
@@ -131,7 +130,7 @@ struct LogRouterData {
 	}
 
 	LogRouterData(UID dbgid, const InitializeLogRouterRequest& req)
-	  : dbgid(dbgid), logSystem(new AsyncVar<Reference<ILogSystem>>()), version(req.startVersion - 1), minPopped(0),
+	  : dbgid(dbgid), logSystem(new AsyncVar<Reference<LogSystem>>()), version(req.startVersion - 1), minPopped(0),
 	    startVersion(req.startVersion), minKnownCommittedVersion(0), poppedVersion(0), routerTag(req.routerTag),
 	    allowPops(false), foundEpochEnd(false), generation(req.recoveryCount),
 	    peekLatencyDist(Histogram::getHistogram("LogRouter"_sr, "PeekTLogLatency"_sr, Histogram::Unit::milliseconds)),
@@ -241,8 +240,7 @@ struct LogRouterData {
 	// recovery version.
 	Future<Void> pullAsyncData();
 
-	Future<Reference<ILogSystem::IPeekCursor>> getPeekCursorData(Reference<ILogSystem::IPeekCursor> r,
-	                                                             Version beginVersion);
+	Future<Reference<IPeekCursor>> getPeekCursorData(Reference<IPeekCursor> r, Version beginVersion);
 
 	// Future<Void> logRouterPop(const TLogPopRequest& req);
 	Future<Void> cleanupPeekTrackers();
@@ -366,9 +364,8 @@ Future<Void> LogRouterData::waitForVersionAndLog(Version ver) {
 	}
 }
 
-Future<Reference<ILogSystem::IPeekCursor>> LogRouterData::getPeekCursorData(Reference<ILogSystem::IPeekCursor> r,
-                                                                            Version beginVersion) {
-	Reference<ILogSystem::IPeekCursor> result = r;
+Future<Reference<IPeekCursor>> LogRouterData::getPeekCursorData(Reference<IPeekCursor> r, Version beginVersion) {
+	Reference<IPeekCursor> result = r;
 	bool useSatellite = SERVER_KNOBS->LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED;
 	uint32_t noPrimaryPeekLocation = 0;
 
@@ -405,7 +402,7 @@ Future<Reference<ILogSystem::IPeekCursor>> LogRouterData::getPeekCursorData(Refe
 				              .detail("LogID", result->getPrimaryPeekLocation())
 				              .trackLatest(eventCacheHolder->trackingKey);
 			          } else {
-				          result = Reference<ILogSystem::IPeekCursor>();
+				          result = Reference<IPeekCursor>();
 			          }
 			          logSystemChanged = logSystem->onChange();
 		          })
@@ -439,7 +436,7 @@ Future<Reference<ILogSystem::IPeekCursor>> LogRouterData::getPeekCursorData(Refe
 }
 
 Future<Void> LogRouterData::pullAsyncData() {
-	Reference<ILogSystem::IPeekCursor> r;
+	Reference<IPeekCursor> r;
 	Version tagAt = version.get() + 1;
 	Version lastVer = 0;
 	std::vector<int> tags; // an optimization to avoid reallocating vector memory in every loop

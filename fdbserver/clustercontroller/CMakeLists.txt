@@ -4,14 +4,12 @@ add_flow_target(STATIC_LIBRARY NAME fdbserver_clustercontroller SRCS ${FDBSERVER
 add_fdbserver_link_test(fdbserver_clustercontrollerlinktest
   fdbserver_clustercontroller
   fdbserver_logsystem
-  fdbserver_kvstore
   fdbserver_core)
 
 configure_fdbserver_common_includes(fdbserver_clustercontroller)
 target_include_directories(fdbserver_clustercontroller
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_BINARY_DIR}/include
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_BINARY_DIR}

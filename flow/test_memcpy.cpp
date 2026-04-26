@@ -10,7 +10,7 @@
 #ifdef WITH_FOLLY_MEMCPY
 #include "folly_memcpy.h"
 #endif
-#include "flow/rte_memcpy.h"
+#include "rte_memcpy.h"
 #include "flow/IRandom.h"
 
 #include "flow/UnitTest.h"

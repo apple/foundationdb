@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbclient/ClientKnobs.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/Notified.h"
@@ -30,7 +29,7 @@
 #include "fdbserver/grvproxy/GrvProxyServer.h"
 #include "GrvProxyTagThrottler.h"
 #include "GrvTransactionRateInfo.h"
-#include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/WaitFailure.h"
@@ -207,7 +206,7 @@ struct GrvProxyData {
 	GrvProxyStats stats;
 	MasterInterface master;
 	PublicRequestStream<GetReadVersionRequest> getConsistentReadVersion;
-	Reference<ILogSystem> logSystem;
+	Reference<LogSystem> logSystem;
 
 	Database cx;
 	Reference<AsyncVar<ServerDBInfo> const> db;
@@ -660,7 +659,8 @@ Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> const>
 					                      "GrvProxyServer.queueTransactionStartRequests.Before");
 
 				if (systemQueue->empty() && defaultQueue->empty() && batchQueue->empty()) {
-					forwardPromise(GRVTimer,
+					forwardPromise(Uncancellable{},
+					               GRVTimer,
 					               delayJittered(std::max(0.0, *GRVBatchTime - (now() - *lastGRVTime)),
 					                             TaskPriority::ProxyGRVTimer));
 				}
@@ -870,7 +870,7 @@ Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 
 		if (request.isTagged()) {
 			auto& priorityThrottledTags = clientThrottledTags[request.priority];
-			for (auto tag : request.tags) {
+			for (const auto& tag : request.tags) {
 				auto tagItr = priorityThrottledTags.find(tag.first);
 				if (tagItr != priorityThrottledTags.end()) {
 					if (tagItr->second.expiration > now()) {
@@ -1124,7 +1124,7 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 				grvProxyData->stats.batchTxnGRVTimeInQueue.addMeasurement(currentTime - req.requestTime());
 				--grvProxyData->stats.batchGRVQueueSize;
 			}
-			for (auto tag : req.tags) {
+			for (const auto& tag : req.tags) {
 				transactionTagCounter[tag.first] += tag.second;
 			}
 			start[req.flags & 1].push_back(std::move(req));
@@ -1151,6 +1151,7 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 
 		if (!systemQueue.empty() || !defaultQueue.empty() || !batchQueue.empty()) {
 			forwardPromise(
+			    Uncancellable{},
 			    GRVTimer,
 			    delayJittered(SERVER_KNOBS->START_TRANSACTION_BATCH_QUEUE_CHECK_INTERVAL, TaskPriority::ProxyGRVTimer));
 		}
@@ -1189,7 +1190,7 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 		int defaultGRVProcessed = 0;
 		int batchGRVProcessed = 0;
 		for (int i = 0; i < start.size(); i++) {
-			if (start[i].size()) {
+			if (!start[i].empty()) {
 				std::vector<SpanContext> spanContexts;
 				spanContexts.reserve(start[i].size());
 				for (const GetReadVersionRequest& request : start[i]) {

@@ -1163,7 +1163,7 @@ struct StorageBytes {
 };
 struct LogMessageVersion {
 	// Each message pushed into the log system has a unique, totally ordered LogMessageVersion
-	// See ILogSystem::push() for how these are assigned
+	// See LogSystem::push() for how these are assigned
 	Version version;
 	uint32_t sub;
 

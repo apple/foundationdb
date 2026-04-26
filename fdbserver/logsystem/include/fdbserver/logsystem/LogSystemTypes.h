@@ -22,7 +22,6 @@
 #define FDBSERVER_LOGSYSTEM_LOGSYSTEMTYPES_H
 #pragma once
 
-#include "fdbserver/core/LogSystem.h"
 #include "fdbserver/core/LogSystemConfig.h"
 #include "fdbserver/core/DBCoreState.h"
 
@@ -74,7 +73,7 @@ private:
 	std::vector<int> newLocations;
 };
 
-class ServerPeekCursor final : public ILogSystem::IPeekCursor, public ReferenceCounted<ServerPeekCursor> {
+class ServerPeekCursor final : public IPeekCursor, public ReferenceCounted<ServerPeekCursor> {
 public:
 	Reference<AsyncVar<OptionalInterface<TLogInterface>>> interf;
 	const Tag tag;
@@ -116,7 +115,7 @@ public:
 	                 Version poppedVersion,
 	                 Tag tag);
 
-	Reference<ILogSystem::IPeekCursor> cloneNoMore() override;
+	Reference<IPeekCursor> cloneNoMore() override;
 	void setProtocolVersion(ProtocolVersion version) override;
 	Arena& arena() override;
 	ArenaReader* reader() override;
@@ -140,10 +139,10 @@ public:
 	Version getMaxKnownVersion() const override { return results.maxKnownVersion; }
 };
 
-class MergedPeekCursor final : public ILogSystem::IPeekCursor, public ReferenceCounted<MergedPeekCursor> {
+class MergedPeekCursor final : public IPeekCursor, public ReferenceCounted<MergedPeekCursor> {
 public:
 	Reference<LogSet> logSet;
-	std::vector<Reference<ILogSystem::IPeekCursor>> serverCursors;
+	std::vector<Reference<IPeekCursor>> serverCursors;
 	std::vector<LocalityEntry> locations;
 	std::vector<std::pair<LogMessageVersion, int>> sortedVersions;
 	Tag tag;
@@ -155,7 +154,7 @@ public:
 	int tLogReplicationFactor;
 	Future<Void> more;
 
-	MergedPeekCursor(std::vector<Reference<ILogSystem::IPeekCursor>> const& serverCursors, Version begin);
+	MergedPeekCursor(std::vector<Reference<IPeekCursor>> const& serverCursors, Version begin);
 	MergedPeekCursor(std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers,
 	                 int bestServer,
 	                 int readQuorum,
@@ -167,7 +166,7 @@ public:
 	                 Reference<IReplicationPolicy> const tLogPolicy,
 	                 int tLogReplicationFactor,
 	                 const Optional<std::vector<uint16_t>>& knownLockedTLogIds = Optional<std::vector<uint16_t>>());
-	MergedPeekCursor(std::vector<Reference<ILogSystem::IPeekCursor>> const& serverCursors,
+	MergedPeekCursor(std::vector<Reference<IPeekCursor>> const& serverCursors,
 	                 LogMessageVersion const& messageVersion,
 	                 int bestServer,
 	                 int readQuorum,
@@ -175,7 +174,7 @@ public:
 	                 Reference<LogSet> logSet,
 	                 int tLogReplicationFactor);
 
-	Reference<ILogSystem::IPeekCursor> cloneNoMore() override;
+	Reference<IPeekCursor> cloneNoMore() override;
 	void setProtocolVersion(ProtocolVersion version) override;
 	Arena& arena() override;
 	ArenaReader* reader() override;
@@ -200,10 +199,10 @@ public:
 	void delref() override { ReferenceCounted<MergedPeekCursor>::delref(); }
 };
 
-class SetPeekCursor final : public ILogSystem::IPeekCursor, public ReferenceCounted<SetPeekCursor> {
+class SetPeekCursor final : public IPeekCursor, public ReferenceCounted<SetPeekCursor> {
 public:
 	std::vector<Reference<LogSet>> logSets;
-	std::vector<std::vector<Reference<ILogSystem::IPeekCursor>>> serverCursors;
+	std::vector<std::vector<Reference<IPeekCursor>>> serverCursors;
 	Tag tag;
 	int bestSet, bestServer, currentSet, currentCursor;
 	std::vector<LocalityEntry> locations;
@@ -225,14 +224,14 @@ public:
 	              bool parallelGetMore,
 	              const Optional<std::vector<uint16_t>>& knownLockedTLogIds = Optional<std::vector<uint16_t>>());
 	SetPeekCursor(std::vector<Reference<LogSet>> const& logSets,
-	              std::vector<std::vector<Reference<ILogSystem::IPeekCursor>>> const& serverCursors,
+	              std::vector<std::vector<Reference<IPeekCursor>>> const& serverCursors,
 	              LogMessageVersion const& messageVersion,
 	              int bestSet,
 	              int bestServer,
 	              Optional<LogMessageVersion> nextVersion,
 	              bool useBestSet);
 
-	Reference<ILogSystem::IPeekCursor> cloneNoMore() override;
+	Reference<IPeekCursor> cloneNoMore() override;
 	void setProtocolVersion(ProtocolVersion version) override;
 	Arena& arena() override;
 	ArenaReader* reader() override;
@@ -257,15 +256,15 @@ public:
 	void delref() override { ReferenceCounted<SetPeekCursor>::delref(); }
 };
 
-class MultiCursor final : public ILogSystem::IPeekCursor, public ReferenceCounted<MultiCursor> {
+class MultiCursor final : public IPeekCursor, public ReferenceCounted<MultiCursor> {
 public:
-	std::vector<Reference<ILogSystem::IPeekCursor>> cursors;
+	std::vector<Reference<IPeekCursor>> cursors;
 	std::vector<LogMessageVersion> epochEnds;
 	Version poppedVersion;
 
-	MultiCursor(std::vector<Reference<ILogSystem::IPeekCursor>> cursors, std::vector<LogMessageVersion> epochEnds);
+	MultiCursor(std::vector<Reference<IPeekCursor>> cursors, std::vector<LogMessageVersion> epochEnds);
 
-	Reference<ILogSystem::IPeekCursor> cloneNoMore() override;
+	Reference<IPeekCursor> cloneNoMore() override;
 	void setProtocolVersion(ProtocolVersion version) override;
 	Arena& arena() override;
 	ArenaReader* reader() override;
@@ -288,7 +287,7 @@ public:
 	void delref() override { ReferenceCounted<MultiCursor>::delref(); }
 };
 
-class BufferedCursor final : public ILogSystem::IPeekCursor, public ReferenceCounted<BufferedCursor> {
+class BufferedCursor final : public IPeekCursor, public ReferenceCounted<BufferedCursor> {
 public:
 	struct BufferedMessage {
 		Arena arena;
@@ -305,7 +304,7 @@ public:
 		bool operator==(BufferedMessage const& r) const { return version == r.version; }
 	};
 
-	std::vector<Reference<ILogSystem::IPeekCursor>> cursors;
+	std::vector<Reference<IPeekCursor>> cursors;
 	std::vector<Deque<BufferedMessage>> cursorMessages;
 	std::vector<BufferedMessage> messages;
 	int messageIndex;
@@ -322,7 +321,7 @@ public:
 	int targetQueueSize;
 	UID randomID;
 
-	BufferedCursor(std::vector<Reference<ILogSystem::IPeekCursor>> cursors,
+	BufferedCursor(std::vector<Reference<IPeekCursor>> cursors,
 	               Version begin,
 	               Version end,
 	               bool withTags,
@@ -333,7 +332,7 @@ public:
 	               Version end,
 	               bool parallelGetMore);
 
-	Reference<ILogSystem::IPeekCursor> cloneNoMore() override;
+	Reference<IPeekCursor> cloneNoMore() override;
 	void setProtocolVersion(ProtocolVersion version) override;
 	Arena& arena() override;
 	ArenaReader* reader() override;

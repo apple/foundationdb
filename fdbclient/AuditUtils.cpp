@@ -24,7 +24,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbclient/ClientKnobs.h"
+#include "fdbclient/Knobs.h"
 #include "flow/CoroUtils.h"
 #include <fmt/format.h>
 
@@ -336,7 +336,7 @@ Future<UID> persistNewAuditState(Database cx, AuditStorageState auditState, Move
 				co_await checkMoveKeysLockForAudit(&tr, lock, ddEnabled, true);
 				RangeResult res =
 				    co_await tr.getRange(auditKeyRange(auditState.getType()), 1, Snapshot::False, Reverse::True);
-				ASSERT(res.size() == 0 || res.size() == 1);
+				ASSERT(res.empty() || res.size() == 1);
 				uint64_t nextId = 1;
 				if (!res.empty()) {
 					latestExistingAuditState = decodeAuditStorageState(res[0].value);

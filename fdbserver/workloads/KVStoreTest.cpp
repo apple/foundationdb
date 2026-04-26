@@ -24,7 +24,7 @@
 #include "fmt/format.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/tester/workloads.h"
-#include "fdbserver/core/IKeyValueStore.h"
+#include "fdbserver/kvstore/IKeyValueStore.h"
 #include "flow/ActorCollection.h"
 #include "flow/CoroUtils.h"
 
@@ -368,14 +368,14 @@ Future<Void> testKVStoreMain(KVStoreTestWorkload* workload, KVTest* ptest) {
 }
 
 Future<Void> testKVStore(KVStoreTestWorkload* workload) {
-	KVTest test(workload->nodeCount, !workload->filename.size(), workload->keyBytes);
+	KVTest test(workload->nodeCount, workload->filename.empty(), workload->keyBytes);
 	Error err;
 
 	// wait( delay(1) );
 	TraceEvent("GO").log();
 
 	UID id = deterministicRandom()->randomUniqueID();
-	std::string fn = workload->filename.size() ? workload->filename : id.toString();
+	std::string fn = !workload->filename.empty() ? workload->filename : id.toString();
 	if (workload->storeType == KeyValueStoreType::SSD_BTREE_V2) {
 		test.store = keyValueStoreSQLite(fn, id, KeyValueStoreType::SSD_BTREE_V2);
 	} else if (workload->storeType == KeyValueStoreType::SSD_BTREE_V1) {

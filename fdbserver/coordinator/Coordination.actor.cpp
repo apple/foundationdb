@@ -21,7 +21,6 @@
 #include <cstdint>
 
 #include "fdbserver/coordinator/CoordinationServer.h"
-#include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
 #include "OnDemandStore.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
@@ -29,9 +28,11 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
 #include "flow/IndexedSet.h"
+#include "flow/genericactors.actor.h"
 #include "fdbclient/MonitorLeader.h"
 #include "flow/network.h"
 
+#include "flow/CoroUtils.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // This module implements coordinationServer() plus the interfaces in CoordinationInterface.h
@@ -40,16 +41,16 @@ namespace {
 
 const std::string fileCoordinatorPrefix = "coordination-";
 
+} // namespace
+
 class LivenessChecker {
 	double threshold;
 	AsyncVar<double> lastTime;
-	ACTOR static Future<Void> checkStuck(LivenessChecker const* self) {
-		loop {
-			choose {
-				when(wait(delayUntil(self->lastTime.get() + self->threshold))) {
-					return Void();
-				}
-				when(wait(self->lastTime.onChange())) {}
+	static Future<Void> checkStuck(LivenessChecker const* self) {
+		while (true) {
+			auto res = co_await race(delayUntil(self->lastTime.get() + self->threshold), self->lastTime.onChange());
+			if (res.index() == 0) {
+				co_return;
 			}
 		}
 	}
@@ -61,8 +62,6 @@ public:
 
 	Future<Void> checkStuck() const { return checkStuck(this); }
 };
-
-} // namespace
 
 struct GenerationRegVal {
 	UniqueGeneration readGen, writeGen;
@@ -76,19 +75,33 @@ struct GenerationRegVal {
 	}
 };
 
-ACTOR Future<Void> localGenerationReg(GenerationRegInterface interf, OnDemandStore* pstore) {
-	state GenerationRegVal v;
-	state OnDemandStore& store = *pstore;
-	// SOMEDAY: concurrent access to different keys?
-	loop choose {
-		when(GenerationRegReadRequest _req = waitNext(interf.read.getFuture())) {
+class LocalGenerationReg {
+public:
+	LocalGenerationReg(GenerationRegInterface interf, OnDemandStore* pstore)
+	  : readReqs(interf.read.getFuture()), writeReqs(interf.write.getFuture()), pStore(pstore),
+	    storeLock(new FlowLock(1)) {}
+
+	Future<Void> run() {
+		return serveReadReqs(readReqs, pStore, storeLock) || serveWriteReqs(writeReqs, pStore, storeLock);
+	}
+
+private:
+	static Future<Void> serveReadReqs(FutureStream<GenerationRegReadRequest> readReqs,
+	                                  OnDemandStore* pstore,
+	                                  Reference<FlowLock> storeLock) {
+		OnDemandStore& store = *pstore;
+		while (true) {
+			GenerationRegReadRequest req = co_await readReqs;
 			TraceEvent("GenerationRegReadRequest")
-			    .detail("From", _req.reply.getEndpoint().getPrimaryAddress())
-			    .detail("K", _req.key);
-			state GenerationRegReadRequest req = _req;
-			Optional<Value> rawV = wait(store->readValue(req.key));
-			v = rawV.present() ? BinaryReader::fromStringRef<GenerationRegVal>(rawV.get(), IncludeVersion())
-			                   : GenerationRegVal();
+			    .detail("From", req.reply.getEndpoint().getPrimaryAddress())
+			    .detail("K", req.key);
+			// SOMEDAY: concurrent access to different keys?
+			co_await storeLock->take();
+			FlowLock::Releaser storeLockReleaser(*storeLock);
+			Optional<Value> rawV = co_await store->readValue(req.key);
+			GenerationRegVal v = rawV.present()
+			                         ? BinaryReader::fromStringRef<GenerationRegVal>(rawV.get(), IncludeVersion())
+			                         : GenerationRegVal();
 			TraceEvent("GenerationRegReadReply")
 			    .detail("RVSize", rawV.present() ? rawV.get().size() : -1)
 			    .detail("VWG", v.writeGen.generation);
@@ -96,21 +109,31 @@ ACTOR Future<Void> localGenerationReg(GenerationRegInterface interf, OnDemandSto
 				v.readGen = req.gen;
 				store->set(KeyValueRef(
 				    req.key, BinaryWriter::toValue(v, IncludeVersion(ProtocolVersion::withGenerationRegVal()))));
-				wait(store->commit());
+				co_await store->commit();
 			}
 			req.reply.send(GenerationRegReadReply(v.val, v.writeGen, v.readGen));
 		}
-		when(GenerationRegWriteRequest _wrq = waitNext(interf.write.getFuture())) {
-			state GenerationRegWriteRequest wrq = _wrq;
-			Optional<Value> rawV = wait(store->readValue(wrq.kv.key));
-			v = rawV.present() ? BinaryReader::fromStringRef<GenerationRegVal>(rawV.get(), IncludeVersion())
-			                   : GenerationRegVal();
+	}
+
+	static Future<Void> serveWriteReqs(FutureStream<GenerationRegWriteRequest> writeReqs,
+	                                   OnDemandStore* pstore,
+	                                   Reference<FlowLock> storeLock) {
+		OnDemandStore& store = *pstore;
+		while (true) {
+			GenerationRegWriteRequest wrq = co_await writeReqs;
+			// SOMEDAY: concurrent access to different keys?
+			co_await storeLock->take();
+			FlowLock::Releaser storeLockReleaser(*storeLock);
+			Optional<Value> rawV = co_await store->readValue(wrq.kv.key);
+			GenerationRegVal v = rawV.present()
+			                         ? BinaryReader::fromStringRef<GenerationRegVal>(rawV.get(), IncludeVersion())
+			                         : GenerationRegVal();
 			if (v.readGen <= wrq.gen && v.writeGen < wrq.gen) {
 				v.writeGen = wrq.gen;
 				v.val = wrq.kv.value;
 				store->set(KeyValueRef(
 				    wrq.kv.key, BinaryWriter::toValue(v, IncludeVersion(ProtocolVersion::withGenerationRegVal()))));
-				wait(store->commit());
+				co_await store->commit();
 				TraceEvent("GenerationRegWrote")
 				    .detail("From", wrq.reply.getEndpoint().getPrimaryAddress())
 				    .detail("Key", wrq.kv.key)
@@ -128,12 +151,18 @@ ACTOR Future<Void> localGenerationReg(GenerationRegInterface interf, OnDemandSto
 			}
 		}
 	}
-}
+
+	FutureStream<GenerationRegReadRequest> readReqs;
+	FutureStream<GenerationRegWriteRequest> writeReqs;
+	OnDemandStore* pStore;
+	Reference<FlowLock> storeLock;
+};
 
 TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 	state GenerationRegInterface reg;
 	state OnDemandStore store(params.getDataDir(), deterministicRandom()->randomUniqueID(), fileCoordinatorPrefix);
-	state Future<Void> actor = localGenerationReg(reg, &store);
+	LocalGenerationReg generationReg(reg, &store);
+	state Future<Void> actor = generationReg.run();
 	state Key the_key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, 10)));
 
 	state UniqueGeneration firstGen(0, deterministicRandom()->randomUniqueID());
@@ -173,13 +202,13 @@ TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 	return Void();
 }
 
-ACTOR Future<Void> openDatabase(ClientData* db,
-                                int* clientCount,
-                                Reference<AsyncVar<bool>> hasConnectedClients,
-                                OpenDatabaseCoordRequest req,
-                                Future<Void> checkStuck) {
-	state ErrorOr<CachedSerialization<ClientDBInfo>> replyContents;
-	state Future<Void> clientInfoOnChange = db->clientInfo->onChange();
+Future<Void> openDatabase(ClientData* db,
+                          int* clientCount,
+                          Reference<AsyncVar<bool>> hasConnectedClients,
+                          OpenDatabaseCoordRequest req,
+                          Future<Void> checkStuck) {
+	ErrorOr<CachedSerialization<ClientDBInfo>> replyContents;
+	Future<Void> clientInfoOnChange = db->clientInfo->onChange();
 
 	++(*clientCount);
 	hasConnectedClients->set(true);
@@ -191,22 +220,24 @@ ACTOR Future<Void> openDatabase(ClientData* db,
 
 	while (!db->clientInfo->get().read().id.isValid() || (db->clientInfo->get().read().id == req.knownClientInfoID &&
 	                                                      !db->clientInfo->get().read().forward.present())) {
-		choose {
-			when(wait(checkStuck)) {
-				replyContents = failed_to_progress();
-				break;
-			}
-			when(wait(yieldedFuture(clientInfoOnChange))) {
-				clientInfoOnChange = db->clientInfo->onChange();
+		auto res = co_await race(
+		    checkStuck, yieldedFuture(clientInfoOnChange), delayJittered(SERVER_KNOBS->CLIENT_REGISTER_INTERVAL));
+		if (res.index() == 0) {
+			// checkStuck fired:
+			replyContents = failed_to_progress();
+			break;
+		} else if (res.index() == 1) {
+			// clientInfoOnChange fired:
+			clientInfoOnChange = db->clientInfo->onChange();
+			replyContents = db->clientInfo->get();
+		} else if (res.index() == 2) {
+			// delay fired:
+			if (db->clientInfo->get().read().id.isValid()) {
 				replyContents = db->clientInfo->get();
 			}
-			when(wait(delayJittered(SERVER_KNOBS->CLIENT_REGISTER_INTERVAL))) {
-				if (db->clientInfo->get().read().id.isValid()) {
-					replyContents = db->clientInfo->get();
-				}
-				// Otherwise, we still break out of the loop and return a default_error_or.
-				break;
-			} // The client might be long gone!
+			// Otherwise, we still break out of the loop and return a default_error_or.
+			// The client might be long gone!
+			break;
 		}
 	}
 
@@ -223,26 +254,23 @@ ACTOR Future<Void> openDatabase(ClientData* db,
 	if (--(*clientCount) == 0) {
 		hasConnectedClients->set(false);
 	}
-
-	return Void();
 }
 
-ACTOR Future<Void> remoteMonitorLeader(int* clientCount,
-                                       Reference<AsyncVar<bool>> hasConnectedClients,
-                                       Reference<AsyncVar<Optional<LeaderInfo>>> currentElectedLeader,
-                                       ElectionResultRequest req) {
-	state Future<Void> currentElectedLeaderOnChange = currentElectedLeader->onChange();
+Future<Void> remoteMonitorLeader(int* clientCount,
+                                 Reference<AsyncVar<bool>> hasConnectedClients,
+                                 Reference<AsyncVar<Optional<LeaderInfo>>> currentElectedLeader,
+                                 ElectionResultRequest req) {
+	Future<Void> currentElectedLeaderOnChange = currentElectedLeader->onChange();
 	++(*clientCount);
 	hasConnectedClients->set(true);
 
 	while (!currentElectedLeader->get().present() || req.knownLeader == currentElectedLeader->get().get().changeID) {
-		choose {
-			when(wait(yieldedFuture(currentElectedLeaderOnChange))) {
-				currentElectedLeaderOnChange = currentElectedLeader->onChange();
-			}
-			when(wait(delayJittered(SERVER_KNOBS->CLIENT_REGISTER_INTERVAL))) {
-				break;
-			}
+		auto res = co_await race(yieldedFuture(currentElectedLeaderOnChange),
+		                         delayJittered(SERVER_KNOBS->CLIENT_REGISTER_INTERVAL));
+		if (res.index() == 0) {
+			currentElectedLeaderOnChange = currentElectedLeader->onChange();
+		} else {
+			break;
 		}
 	}
 
@@ -251,36 +279,75 @@ ACTOR Future<Void> remoteMonitorLeader(int* clientCount,
 	if (--(*clientCount) == 0) {
 		hasConnectedClients->set(false);
 	}
-
-	return Void();
 }
 
-// This actor implements a *single* leader-election register (essentially, it ignores
+// This class implements a *single* leader-election register (essentially, it ignores
 // the .key member of each request).  It returns any time the leader election is in the
 // default state, so that only active registers consume memory.
-ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
-	state std::set<LeaderInfo> availableCandidates;
-	state std::set<LeaderInfo> availableLeaders;
-	state Optional<LeaderInfo> currentNominee;
-	state Deque<ReplyPromise<Optional<LeaderInfo>>> notify;
-	state Future<Void> nextInterval;
-	state double candidateDelay = SERVER_KNOBS->CANDIDATE_MIN_DELAY;
-	state int leaderIntervalCount = 0;
-	state Future<Void> notifyCheck =
-	    delay(SERVER_KNOBS->NOTIFICATION_FULL_CLEAR_TIME / SERVER_KNOBS->MIN_NOTIFICATIONS);
-	state ClientData clientData;
-	state int clientCount = 0;
-	state Reference<AsyncVar<bool>> hasConnectedClients = makeReference<AsyncVar<bool>>(false);
-	state ActorCollection actors(false);
-	state Future<Void> leaderMon;
-	state AsyncVar<Value> leaderInterface;
-	state Reference<AsyncVar<Optional<LeaderInfo>>> currentElectedLeader =
-	    makeReference<AsyncVar<Optional<LeaderInfo>>>();
-	state LivenessChecker canConnectToLeader(SERVER_KNOBS->COORDINATOR_LEADER_CONNECTION_TIMEOUT);
-	state Future<Void> hasConnectedClientsOnChange = hasConnectedClients->onChange();
+class LeaderRegister : public ReferenceCounted<LeaderRegister>, NonCopyable {
+	LeaderElectionRegInterface interf;
+	Key key;
+	std::set<LeaderInfo> availableCandidates;
+	std::set<LeaderInfo> availableLeaders;
+	Optional<LeaderInfo> currentNominee;
+	Deque<ReplyPromise<Optional<LeaderInfo>>> notify;
+	Future<Void> nextInterval;
+	AsyncVar<int> nextIntervalGeneration;
+	double candidateDelay;
+	int leaderIntervalCount;
+	Future<Void> notifyCheck;
+	ClientData clientData;
+	int clientCount;
+	Reference<AsyncVar<bool>> hasConnectedClients;
+	ActorCollection actors;
+	Future<Void> leaderMon;
+	Reference<AsyncVar<Optional<LeaderInfo>>> currentElectedLeader;
+	LivenessChecker canConnectToLeader;
+	Future<Void> hasConnectedClientsOnChange;
 
-	loop choose {
-		when(OpenDatabaseCoordRequest req = waitNext(interf.openDatabase.getFuture())) {
+	void setNextInterval(Future<Void> interval) {
+		nextInterval = interval;
+		nextIntervalGeneration.set(nextIntervalGeneration.get() + 1);
+	}
+
+	void ensureNextInterval() {
+		if (!nextInterval.isValid()) {
+			setNextInterval(delay(0));
+		}
+	}
+
+	void clearNextInterval() {
+		if (nextInterval.isValid()) {
+			setNextInterval(Future<Void>());
+		}
+	}
+
+	void sendNotifications(Optional<LeaderInfo> const& nominee) {
+		for (unsigned int i = 0; i < notify.size(); i++) {
+			notify[i].send(nominee);
+		}
+		notify.clear();
+	}
+
+	void sendNotifications(LeaderInfo const& info) {
+		for (unsigned int i = 0; i < notify.size(); i++) {
+			notify[i].send(info);
+		}
+		notify.clear();
+	}
+
+	bool checkNotificationLimit() {
+		if (notify.size() > SERVER_KNOBS->MAX_NOTIFICATIONS) {
+			TraceEvent(SevWarnAlways, "TooManyNotifications").detail("Amount", notify.size());
+			sendNotifications(currentNominee);
+			return true;
+		}
+		return false;
+	}
+
+	Future<Void> serveOpenDatabaseRequests() {
+		while (true) {
+			OpenDatabaseCoordRequest req = co_await interf.openDatabase.getFuture();
 			if (clientData.clientInfo->get().read().id.isValid() &&
 			    clientData.clientInfo->get().read().id != req.knownClientInfoID &&
 			    !clientData.clientInfo->get().read().forward.present()) {
@@ -294,7 +361,11 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				    openDatabase(&clientData, &clientCount, hasConnectedClients, req, canConnectToLeader.checkStuck()));
 			}
 		}
-		when(ElectionResultRequest req = waitNext(interf.electionResult.getFuture())) {
+	}
+
+	Future<Void> serveElectionResultRequests() {
+		while (true) {
+			ElectionResultRequest req = co_await interf.electionResult.getFuture();
 			if (currentElectedLeader->get().present() &&
 			    req.knownLeader != currentElectedLeader->get().get().changeID) {
 				req.reply.send(currentElectedLeader->get());
@@ -306,43 +377,41 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				actors.add(remoteMonitorLeader(&clientCount, hasConnectedClients, currentElectedLeader, req));
 			}
 		}
-		when(GetLeaderRequest req = waitNext(interf.getLeader.getFuture())) {
+	}
+
+	Future<Void> serveGetLeaderRequests() {
+		while (true) {
+			GetLeaderRequest req = co_await interf.getLeader.getFuture();
 			if (currentNominee.present() && currentNominee.get().changeID != req.knownLeader) {
 				req.reply.send(currentNominee.get());
 			} else {
 				notify.push_back(req.reply);
-				if (notify.size() > SERVER_KNOBS->MAX_NOTIFICATIONS) {
-					TraceEvent(SevWarnAlways, "TooManyNotifications").detail("Amount", notify.size());
-					for (uint32_t i = 0; i < notify.size(); i++)
-						notify[i].send(currentNominee.get());
-					notify.clear();
-				} else if (!nextInterval.isValid()) {
-					nextInterval = delay(0);
+				if (!checkNotificationLimit() && !nextInterval.isValid()) {
+					ensureNextInterval();
 				}
 			}
 		}
-		when(CandidacyRequest req = waitNext(interf.candidacy.getFuture())) {
-			if (!nextInterval.isValid()) {
-				nextInterval = delay(0);
-			}
+	}
+
+	Future<Void> serveCandidacyRequests() {
+		while (true) {
+			CandidacyRequest req = co_await interf.candidacy.getFuture();
+			ensureNextInterval();
 			availableCandidates.erase(LeaderInfo(req.prevChangeID));
 			availableCandidates.insert(req.myInfo);
 			if (currentNominee.present() && currentNominee.get().changeID != req.knownLeader) {
 				req.reply.send(currentNominee.get());
 			} else {
 				notify.push_back(req.reply);
-				if (notify.size() > SERVER_KNOBS->MAX_NOTIFICATIONS) {
-					TraceEvent(SevWarnAlways, "TooManyNotifications").detail("Amount", notify.size());
-					for (uint32_t i = 0; i < notify.size(); i++)
-						notify[i].send(currentNominee.get());
-					notify.clear();
-				}
+				checkNotificationLimit();
 			}
 		}
-		when(LeaderHeartbeatRequest req = waitNext(interf.leaderHeartbeat.getFuture())) {
-			if (!nextInterval.isValid()) {
-				nextInterval = delay(0);
-			}
+	}
+
+	Future<Void> serveLeaderHeartbeatRequests() {
+		while (true) {
+			LeaderHeartbeatRequest req = co_await interf.leaderHeartbeat.getFuture();
+			ensureNextInterval();
 			// TODO: use notify to only send a heartbeat once per interval
 			availableLeaders.erase(LeaderInfo(req.prevChangeID));
 			availableLeaders.insert(req.myInfo);
@@ -352,24 +421,39 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 			}
 			req.reply.send(LeaderHeartbeatReply{ isCurrentLeader });
 		}
-		when(ForwardRequest req = waitNext(interf.forward.getFuture())) {
+	}
+
+	Future<Void> serveForwardRequests() {
+		while (true) {
+			ForwardRequest req = co_await interf.forward.getFuture();
 			LeaderInfo newInfo;
 			newInfo.forward = true;
 			newInfo.serializedInfo = req.conn.toString();
-			for (unsigned int i = 0; i < notify.size(); i++)
-				notify[i].send(newInfo);
-			notify.clear();
+			sendNotifications(newInfo);
 			ClientDBInfo outInfo;
 			outInfo.id = deterministicRandom()->randomUniqueID();
 			outInfo.forward = req.conn.toString();
 			clientData.clientInfo->set(CachedSerialization<ClientDBInfo>(outInfo));
 			req.reply.send(Void());
 			if (!hasConnectedClients->get()) {
-				return Void();
+				co_return;
 			}
-			nextInterval = Future<Void>();
+			clearNextInterval();
 		}
-		when(wait(nextInterval.isValid() ? nextInterval : Never())) {
+	}
+
+	Future<Void> monitorNextInterval() {
+		while (true) {
+			int generation = nextIntervalGeneration.get();
+			auto res =
+			    co_await race(nextInterval.isValid() ? nextInterval : Never(), nextIntervalGeneration.onChange());
+			if (res.index() == 1 || generation != nextIntervalGeneration.get()) {
+				continue;
+			}
+			if (res.index() != 0) {
+				UNREACHABLE();
+			}
+
 			if (!availableLeaders.size() && !availableCandidates.size() && !notify.size() &&
 			    !currentNominee.present()) {
 				// Our state is back to the initial state, so we can safely stop this actor
@@ -377,9 +461,9 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				    .detail("Key", key)
 				    .detail("HasConnectedClients", hasConnectedClients->get());
 				if (!hasConnectedClients->get()) {
-					return Void();
+					co_return;
 				} else {
-					nextInterval = Future<Void>();
+					clearNextInterval();
 				}
 			} else {
 				Optional<LeaderInfo> nextNominee;
@@ -405,20 +489,18 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 					    .detail("NextNominee", nextNominee.present() ? nextNominee.get().changeID : UID())
 					    .detail("CurrentNominee", currentNominee.present() ? currentNominee.get().changeID : UID())
 					    .detail("Key", printable(key));
-					for (unsigned int i = 0; i < notify.size(); i++)
-						notify[i].send(nextNominee);
-					notify.clear();
+					sendNotifications(nextNominee);
 				}
 
 				currentNominee = nextNominee;
 
 				if (availableLeaders.size()) {
-					nextInterval = delay(SERVER_KNOBS->POLLING_FREQUENCY);
+					setNextInterval(delay(SERVER_KNOBS->POLLING_FREQUENCY));
 					if (leaderIntervalCount++ > 5) {
 						candidateDelay = SERVER_KNOBS->CANDIDATE_MIN_DELAY;
 					}
 				} else {
-					nextInterval = delay(candidateDelay);
+					setNextInterval(delay(candidateDelay));
 					candidateDelay = std::min(SERVER_KNOBS->CANDIDATE_MAX_DELAY,
 					                          candidateDelay * SERVER_KNOBS->CANDIDATE_GROWTH_RATE);
 					leaderIntervalCount = 0;
@@ -428,7 +510,11 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				availableCandidates.clear();
 			}
 		}
-		when(wait(notifyCheck)) {
+	}
+
+	Future<Void> monitorNotifyCheck() {
+		while (true) {
+			co_await notifyCheck;
 			notifyCheck = delay(SERVER_KNOBS->NOTIFICATION_FULL_CLEAR_TIME /
 			                    std::max<double>(SERVER_KNOBS->MIN_NOTIFICATIONS, notify.size()));
 			if (!notify.empty() && currentNominee.present()) {
@@ -436,16 +522,44 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				notify.pop_front();
 			}
 		}
-		when(wait(hasConnectedClientsOnChange)) {
+	}
+
+	Future<Void> monitorConnectedClients() {
+		while (true) {
+			co_await hasConnectedClientsOnChange;
 			hasConnectedClientsOnChange = hasConnectedClients->onChange();
 			if (!hasConnectedClients->get() && !nextInterval.isValid()) {
 				TraceEvent("LeaderRegisterUnneeded").detail("Key", key);
-				return Void();
+				co_return;
 			}
 		}
-		when(wait(actors.getResult())) {}
 	}
-}
+
+	Future<Void> monitorActors() { co_await actors.getResult(); }
+
+public:
+	LeaderRegister(LeaderElectionRegInterface interf, Key key)
+	  : interf(interf), key(key), nextIntervalGeneration(0), candidateDelay(SERVER_KNOBS->CANDIDATE_MIN_DELAY),
+	    leaderIntervalCount(0),
+	    notifyCheck(delay(SERVER_KNOBS->NOTIFICATION_FULL_CLEAR_TIME / SERVER_KNOBS->MIN_NOTIFICATIONS)),
+	    clientCount(0), hasConnectedClients(makeReference<AsyncVar<bool>>(false)), actors(false),
+	    currentElectedLeader(makeReference<AsyncVar<Optional<LeaderInfo>>>()),
+	    canConnectToLeader(SERVER_KNOBS->COORDINATOR_LEADER_CONNECTION_TIMEOUT),
+	    hasConnectedClientsOnChange(hasConnectedClients->onChange()) {}
+
+	static Future<Void> run(Reference<LeaderRegister> self) {
+		co_await race(self->serveOpenDatabaseRequests(),
+		              self->serveElectionResultRequests(),
+		              self->serveGetLeaderRequests(),
+		              self->serveCandidacyRequests(),
+		              self->serveLeaderHeartbeatRequests(),
+		              self->serveForwardRequests(),
+		              self->monitorNextInterval(),
+		              self->monitorNotifyCheck(),
+		              self->monitorConnectedClients(),
+		              self->monitorActors());
+	}
+};
 
 // Generation register values are stored without prefixing in the coordinated state, but always begin with an
 // alphanumeric character (they are always derived from a ClusterConnectionString key). Forwarding values are stored in
@@ -470,13 +584,13 @@ struct LeaderRegisterCollection {
 
 	explicit LeaderRegisterCollection(OnDemandStore* pStore) : actors(false), pStore(pStore) {}
 
-	ACTOR static Future<Void> init(LeaderRegisterCollection* self) {
+	static Future<Void> init(LeaderRegisterCollection* self) {
 		if (!self->pStore->exists())
-			return Void();
+			co_return;
 		OnDemandStore& store = *self->pStore;
-		state Future<Standalone<RangeResultRef>> forwardingInfoF = store->readRange(fwdKeys);
-		state Future<Standalone<RangeResultRef>> forwardingTimeF = store->readRange(fwdTimeKeys);
-		wait(success(forwardingInfoF) && success(forwardingTimeF));
+		Future<Standalone<RangeResultRef>> forwardingInfoF = store->readRange(fwdKeys);
+		Future<Standalone<RangeResultRef>> forwardingTimeF = store->readRange(fwdTimeKeys);
+		co_await (success(forwardingInfoF) && success(forwardingTimeF));
 		Standalone<RangeResultRef> forwardingInfo = forwardingInfoF.get();
 		Standalone<RangeResultRef> forwardingTime = forwardingTimeF.get();
 		for (int i = 0; i < forwardingInfo.size(); i++) {
@@ -489,7 +603,6 @@ struct LeaderRegisterCollection {
 			double time = BinaryReader::fromStringRef<double>(forwardingTime[i].value, Unversioned());
 			self->forwardStartTime[forwardingTime[i].key.removePrefix(fwdTimeKeys.begin)] = time;
 		}
-		return Void();
 	}
 
 	Future<Void> onError() const { return actors.getResult(); }
@@ -516,11 +629,11 @@ struct LeaderRegisterCollection {
 	// When the lead coordinator changes, store the new connection ID in the "fwd" keyspace.
 	// If a request arrives using an old connection id, resend it to the new coordinator using the stored connection id.
 	// Store when this change took place in the fwdTime keyspace.
-	ACTOR static Future<Void> setForward(LeaderRegisterCollection* self,
-	                                     KeyRef key,
-	                                     ClusterConnectionString conn,
-	                                     ForwardRequest req,
-	                                     UID id) {
+	static Future<Void> setForward(LeaderRegisterCollection* self,
+	                               KeyRef key,
+	                               ClusterConnectionString conn,
+	                               ForwardRequest req,
+	                               UID id) {
 		double forwardTime = now();
 		LeaderInfo forwardInfo;
 		forwardInfo.forward = true;
@@ -530,17 +643,17 @@ struct LeaderRegisterCollection {
 		OnDemandStore& store = *self->pStore;
 		store->set(KeyValueRef(key.withPrefix(fwdKeys.begin), conn.toString()));
 		store->set(KeyValueRef(key.withPrefix(fwdTimeKeys.begin), BinaryWriter::toValue(forwardTime, Unversioned())));
-		wait(store->commit());
+		co_await store->commit();
 		// Do not process a forwarding request until after it has been made durable in case the coordinator restarts
 		self->getInterface(req.key, id).forward.send(req);
-		return Void();
 	}
 
 	LeaderElectionRegInterface& getInterface(KeyRef key, UID id) {
 		auto i = registerInterfaces.find(key);
 		if (i == registerInterfaces.end()) {
 			Key k = key;
-			Future<Void> a = wrap(this, k, leaderRegister(registerInterfaces[k], k), id);
+			Future<Void> a =
+			    wrap(this, k, LeaderRegister::run(makeReference<LeaderRegister>(registerInterfaces[k], k)), id);
 			if (a.isError())
 				throw a.getError();
 			ASSERT(!a.isReady());
@@ -551,12 +664,12 @@ struct LeaderRegisterCollection {
 		return i->value;
 	}
 
-	ACTOR static Future<Void> wrap(LeaderRegisterCollection* self, Key key, Future<Void> actor, UID id) {
-		state Error e;
+	static Future<Void> wrap(LeaderRegisterCollection* self, Key key, Future<Void> actor, UID id) {
+		Error e;
 		try {
 			// FIXME: Get worker ID here
 			startRole(Role::COORDINATOR, id, UID());
-			wait(actor || traceRole(Role::COORDINATOR, id));
+			co_await (actor || traceRole(Role::COORDINATOR, id));
 			endRole(Role::COORDINATOR, id, "Coordinator changed");
 		} catch (Error& err) {
 			endRole(Role::COORDINATOR, id, err.what(), err.code() == error_code_actor_cancelled, err);
@@ -567,7 +680,6 @@ struct LeaderRegisterCollection {
 		self->registerInterfaces.erase(key);
 		if (e.code() != invalid_error_code)
 			throw e;
-		return Void();
 	}
 };
 
@@ -713,97 +825,97 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 	}
 }
 
-ACTOR Future<Void> coordinationServer(std::string dataFolder, Reference<IClusterConnectionRecord> ccr) {
-	state UID myID = deterministicRandom()->randomUniqueID();
-	state LeaderElectionRegInterface myLeaderInterface(g_network);
-	state GenerationRegInterface myInterface(g_network);
-	state OnDemandStore store(dataFolder, myID, fileCoordinatorPrefix);
+Future<Void> coordinationServer(std::string dataFolder, Reference<IClusterConnectionRecord> ccr) {
+	UID myID = deterministicRandom()->randomUniqueID();
+	LeaderElectionRegInterface myLeaderInterface(g_network);
+	GenerationRegInterface myInterface(g_network);
+	OnDemandStore store(dataFolder, myID, fileCoordinatorPrefix);
 	TraceEvent("CoordinationServer", myID)
 	    .detail("MyInterfaceAddr", myInterface.read.getEndpoint().getPrimaryAddress())
 	    .detail("Folder", dataFolder);
 
+	Error err;
 	try {
-		wait(localGenerationReg(myInterface, &store) || leaderServer(myLeaderInterface, &store, myID, ccr) ||
-		     store.getError());
+		LocalGenerationReg generationReg(myInterface, &store);
+		co_await (generationReg.run() || leaderServer(myLeaderInterface, &store, myID, ccr) || store.getError());
 		throw internal_error();
 	} catch (Error& e) {
-		state Error err = e;
-		TraceEvent("CoordinationServerError", myID).errorUnsuppressed(e);
-
-		// Handle a rare issue where the coordinator crashes during creation of
-		// its disk queue files. A disk queue consists of two files, created in
-		// the following manner:
-		//
-		//   1. Create two .part files.
-		//   2. Rename each .part file to remove its .part suffix.
-		//
-		// Step 2 can crash in between removing the .part suffix of the first
-		// and second file. If this occurs, the disk queue will refuse to open
-		// on subsequent attempts because it only sees one of its files,
-		// causing a process crash with the file_not_found error. Normally this
-		// behavior is fine, but in simulation it can occasionally cause
-		// problems. Simulation does not take into account injected errors can
-		// cause permanent process death. In most cases this is true. But if
-		// this inconsistent disk queue state occurs on a coordinator, the
-		// coordinator will enter a reboot loop, continuously failing to open
-		// its disk queue and crashing. If the simulation run has a small
-		// number of processes and another process is colocated with the
-		// coordinator, the run may get stuck because the coordinator crashing
-		// brings the other role offline as well. This has been observed in a
-		// stuck simulation run where a tlog colocated with a coordinator that
-		// ran into this issue meant the tlog replication policy couldn't be
-		// achieved.
-		//
-		// As a short term fix, catch file_not_found and fix inconsistent disk
-		// queue state on the coordinator. In the long term, we should either
-		// modify simulation to consider injected errors as fatal or allow the
-		// coordinator to manually fix disk queue state in real clusters.
-		if (g_network->isSimulated() && g_simulator->speedUpSimulation && e.code() == error_code_file_not_found) {
-			state std::vector<Future<Reference<IAsyncFile>>> fs;
-			fs.reserve(2);
-			for (int i = 0; i < 2; ++i) {
-				std::string file = joinPath(dataFolder, format("%s%d.fdq", fileCoordinatorPrefix.c_str(), i));
-				fs.push_back(
-				    IAsyncFileSystem::filesystem()->open(file,
-				                                         IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED |
-				                                             IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_LOCK,
-				                                         0));
-			}
-			wait(waitForAllReady(fs));
-
-			// Make sure one of the disk queue files is missing. This should be
-			// the only cause of the file_not_found error.
-			ASSERT(((fs[0].isError() && fs[0].getError().code() == error_code_file_not_found) ||
-			        (fs[1].isError() && fs[1].getError().code() == error_code_file_not_found)) &&
-			       fs[0].isError() != fs[1].isError());
-
-			TraceEvent(SevWarnAlways, "CoordinatorDiskQueueInconsistentState")
-			    .detail("File0Missing", fs[0].isError())
-			    .detail("File1Missing", fs[1].isError());
-			;
-
-			// Remove the remaining disk queue file to allow the coordinator to
-			// create new files on next boot.
-			if (fs[0].isError()) {
-				ASSERT(fs[0].getError().code() == error_code_file_not_found);
-				wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(dataFolder, fileCoordinatorPrefix + "1.fdq"),
-				                                                true));
-			}
-			if (fs[1].isError()) {
-				ASSERT(fs[1].getError().code() == error_code_file_not_found);
-				wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(dataFolder, fileCoordinatorPrefix + "0.fdq"),
-				                                                true));
-			}
-		}
-
-		throw err;
+		err = e;
 	}
+	TraceEvent("CoordinationServerError", myID).errorUnsuppressed(err);
+
+	// Handle a rare issue where the coordinator crashes during creation of
+	// its disk queue files. A disk queue consists of two files, created in
+	// the following manner:
+	//
+	//   1. Create two .part files.
+	//   2. Rename each .part file to remove its .part suffix.
+	//
+	// Step 2 can crash in between removing the .part suffix of the first
+	// and second file. If this occurs, the disk queue will refuse to open
+	// on subsequent attempts because it only sees one of its files,
+	// causing a process crash with the file_not_found error. Normally this
+	// behavior is fine, but in simulation it can occasionally cause
+	// problems. Simulation does not take into account injected errors can
+	// cause permanent process death. In most cases this is true. But if
+	// this inconsistent disk queue state occurs on a coordinator, the
+	// coordinator will enter a reboot loop, continuously failing to open
+	// its disk queue and crashing. If the simulation run has a small
+	// number of processes and another process is colocated with the
+	// coordinator, the run may get stuck because the coordinator crashing
+	// brings the other role offline as well. This has been observed in a
+	// stuck simulation run where a tlog colocated with a coordinator that
+	// ran into this issue meant the tlog replication policy couldn't be
+	// achieved.
+	//
+	// As a short term fix, catch file_not_found and fix inconsistent disk
+	// queue state on the coordinator. In the long term, we should either
+	// modify simulation to consider injected errors as fatal or allow the
+	// coordinator to manually fix disk queue state in real clusters.
+	if (g_network->isSimulated() && g_simulator->speedUpSimulation && err.code() == error_code_file_not_found) {
+		std::vector<Future<Reference<IAsyncFile>>> fs;
+		fs.reserve(2);
+		for (int i = 0; i < 2; ++i) {
+			std::string file = joinPath(dataFolder, format("%s%d.fdq", fileCoordinatorPrefix.c_str(), i));
+			fs.push_back(IAsyncFileSystem::filesystem()->open(file,
+			                                                  IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED |
+			                                                      IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_LOCK,
+			                                                  0));
+		}
+		co_await waitForAllReady(fs);
+
+		// Make sure one of the disk queue files is missing. This should be
+		// the only cause of the file_not_found error.
+		ASSERT(((fs[0].isError() && fs[0].getError().code() == error_code_file_not_found) ||
+		        (fs[1].isError() && fs[1].getError().code() == error_code_file_not_found)) &&
+		       fs[0].isError() != fs[1].isError());
+
+		TraceEvent(SevWarnAlways, "CoordinatorDiskQueueInconsistentState")
+		    .detail("File0Missing", fs[0].isError())
+		    .detail("File1Missing", fs[1].isError());
+		;
+
+		// Remove the remaining disk queue file to allow the coordinator to
+		// create new files on next boot.
+		if (fs[0].isError()) {
+			ASSERT(fs[0].getError().code() == error_code_file_not_found);
+			co_await IAsyncFileSystem::filesystem()->deleteFile(joinPath(dataFolder, fileCoordinatorPrefix + "1.fdq"),
+			                                                    true);
+		}
+		if (fs[1].isError()) {
+			ASSERT(fs[1].getError().code() == error_code_file_not_found);
+			co_await IAsyncFileSystem::filesystem()->deleteFile(joinPath(dataFolder, fileCoordinatorPrefix + "0.fdq"),
+			                                                    true);
+		}
+	}
+
+	throw err;
 }
 
-ACTOR Future<Void> changeClusterDescription(std::string datafolder, KeyRef newClusterKey, KeyRef oldClusterKey) {
-	state UID myID = deterministicRandom()->randomUniqueID();
-	state OnDemandStore store(datafolder, myID, fileCoordinatorPrefix);
-	RangeResult res = wait(store->readRange(allKeys));
+Future<Void> changeClusterDescription(std::string datafolder, KeyRef newClusterKey, KeyRef oldClusterKey) {
+	UID myID = deterministicRandom()->randomUniqueID();
+	OnDemandStore store(datafolder, myID, fileCoordinatorPrefix);
+	RangeResult res = co_await store->readRange(allKeys);
 	// Context, in coordinators' kv-store
 	// cluster description and the random id are always appear together as the clusterKey
 	// The old cluster key, (call it oldCKey) below can appear in the following scenarios:
@@ -843,8 +955,7 @@ ACTOR Future<Void> changeClusterDescription(std::string datafolder, KeyRef newCl
 			}
 		}
 	}
-	wait(store->commit());
-	return Void();
+	co_await store->commit();
 }
 
 Future<Void> coordChangeClusterKey(std::string dataFolder, KeyRef newClusterKey, KeyRef oldClusterKey) {

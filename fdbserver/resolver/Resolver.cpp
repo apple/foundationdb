@@ -1,5 +1,5 @@
 /*
- * Resolver.actor.cpp
+ * Resolver.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -26,11 +26,11 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/Stats.h"
-#include "fdbserver/core/ApplyMetadataMutation.h"
+#include "fdbserver/logsystem/ApplyMetadataMutation.h"
 #include "fdbserver/core/ConflictBatch.h"
-#include "fdbserver/core/IKeyValueStore.h"
+#include "fdbserver/kvstore/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/MasterInterface.h"
@@ -45,7 +45,7 @@
 #include "flow/Error.h"
 #include "flow/Histogram.h"
 
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/CoroUtils.h"
 
 namespace {
 struct ProxyRequestsInfo {
@@ -143,7 +143,7 @@ struct Resolver : ReferenceCounted<Resolver> {
 	// happens at commit proxies and we never "write" to the LogSystem at
 	// Resolvers.
 	LogSystemDiskQueueAdapter* logAdapter = nullptr;
-	Reference<ILogSystem> logSystem;
+	Reference<LogSystem> logSystem;
 	IKeyValueStore* txnStateStore = nullptr;
 	int localTLogCount = -1;
 
@@ -221,8 +221,8 @@ struct Resolver : ReferenceCounted<Resolver> {
 };
 } // namespace
 
-ACTOR Future<Void> versionReady(Resolver* self, ProxyRequestsInfo* proxyInfo, Version prevVersion) {
-	loop {
+Future<Void> versionReady(Resolver* self, ProxyRequestsInfo* proxyInfo, Version prevVersion) {
+	while (true) {
 		if (self->recentStateTransactionsInfo.size() &&
 		    proxyInfo->lastVersion <= self->recentStateTransactionsInfo.firstVersion()) {
 			self->neededVersion.set(std::max(self->neededVersion.get(), prevVersion));
@@ -235,13 +235,13 @@ ACTOR Future<Void> versionReady(Resolver* self, ProxyRequestsInfo* proxyInfo, Ve
 		}
 		self->queueDepthDist->sampleRecordCounter(waiters);
 
-		choose {
-			when(wait(self->version.whenAtLeast(prevVersion))) {
-				// Update queue depth metric after waiting.
-				self->queueDepthDist->sampleRecordCounter(self->version.numWaiting());
-				return Void();
-			}
-			when(wait(self->checkNeededVersion.onTrigger())) {}
+		auto res = co_await race(self->version.whenAtLeast(prevVersion), self->checkNeededVersion.onTrigger());
+		if (res.index() == 0) {
+			// Update queue depth metric after waiting.
+			self->queueDepthDist->sampleRecordCounter(self->version.numWaiting());
+			co_return;
+		} else if (res.index() != 1) {
+			UNREACHABLE();
 		}
 	}
 }
@@ -258,16 +258,13 @@ static bool hasNonLogRouterTags(const std::set<Tag>& allTags) {
 	return false;
 }
 
-ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
-                                ResolveTransactionBatchRequest req,
-                                Reference<AsyncVar<ServerDBInfo> const> db) {
-	state Optional<UID> debugID;
-	state Span span("R:resolveBatch"_loc, req.spanContext);
+Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatchRequest req) {
+	Optional<UID> debugID;
+	Span span("R:resolveBatch"_loc, req.spanContext);
 
 	// The first request (prevVersion < 0) comes from the master
-	state NetworkAddress proxyAddress =
-	    req.prevVersion >= 0 ? req.reply.getEndpoint().getPrimaryAddress() : NetworkAddress();
-	state ProxyRequestsInfo& proxyInfo = self->proxyInfoMap[proxyAddress];
+	NetworkAddress proxyAddress = req.prevVersion >= 0 ? req.reply.getEndpoint().getPrimaryAddress() : NetworkAddress();
+	ProxyRequestsInfo& proxyInfo = self->proxyInfoMap[proxyAddress];
 
 	++self->resolveBatchIn;
 
@@ -292,17 +289,17 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 	 .detail("LastVersion", proxyInfo.lastVersion).detail("RequestVersion", req.version).detail("NeededVersion",
 		     self->neededVersion.get()) .detail("RecentStateVer", self->recentStateTransactionsInfo.firstVersion());*/
 
-		wait(self->totalStateBytes.onChange() || self->neededVersion.onChange());
+		co_await (self->totalStateBytes.onChange() || self->neededVersion.onChange());
 	}
 
 	if (debugID.present()) {
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "Resolver.resolveBatch.AfterQueueSizeCheck");
 	}
 
-	wait(versionReady(self.getPtr(), &proxyInfo, req.prevVersion));
+	co_await versionReady(self.getPtr(), &proxyInfo, req.prevVersion);
 
 	if (check_yield(TaskPriority::DefaultEndpoint)) {
-		wait(delay(0, TaskPriority::Low) || delay(SERVER_KNOBS->COMMIT_SLEEP_TIME)); // FIXME: Is this still right?
+		co_await (delay(0, TaskPriority::Low) || delay(SERVER_KNOBS->COMMIT_SLEEP_TIME)); // FIXME: Is this still right?
 		g_network->setCurrentTask(TaskPriority::DefaultEndpoint);
 	}
 
@@ -560,8 +557,43 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 	self->resolverLatencyDist->sampleSeconds(endTime - req.requestTime());
 
 	++self->resolveBatchOut;
+}
 
-	return Void();
+Future<Void> resolveBatches(Reference<Resolver> self,
+                            FutureStream<ResolveTransactionBatchRequest> resolveRequests,
+                            ActorCollection* actors) {
+	while (true) {
+		ResolveTransactionBatchRequest batch = co_await resolveRequests;
+		actors->add(resolveBatch(self, batch));
+	}
+}
+
+Future<Void> resolveMetricsRequests(Reference<Resolver> self, FutureStream<ResolutionMetricsRequest> metricsRequests) {
+	while (true) {
+		ResolutionMetricsRequest req = co_await metricsRequests;
+		++self->metricsRequests;
+		req.reply.send(
+		    self->iopsSample.getEstimate(SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? normalKeys : allKeys));
+	}
+}
+
+Future<Void> resolveSplitRequests(Reference<Resolver> self, FutureStream<ResolutionSplitRequest> splitRequests) {
+	while (true) {
+		ResolutionSplitRequest req = co_await splitRequests;
+		++self->splitRequests;
+		ResolutionSplitReply rep;
+		rep.key = self->iopsSample.splitEstimate(req.range, req.offset, req.front);
+		rep.used = self->iopsSample.getEstimate(req.front ? KeyRangeRef(req.range.begin, rep.key)
+		                                                  : KeyRangeRef(rep.key, req.range.end));
+		req.reply.send(rep);
+	}
+}
+
+Future<Void> pollMetrics(Reference<Resolver> self) {
+	while (true) {
+		self->iopsSample.poll();
+		co_await delay(SERVER_KNOBS->SAMPLE_POLL_TIME);
+	}
 }
 
 namespace {
@@ -595,19 +627,17 @@ struct TransactionStateResolveContext {
 	}
 };
 
-ACTOR Future<Void> processCompleteTransactionStateRequest(Reference<Resolver> self,
-                                                          TransactionStateResolveContext* pContext,
-                                                          Reference<AsyncVar<ServerDBInfo> const> db) {
-	state KeyRange txnKeys = allKeys;
-	state std::map<Tag, UID> tag_uid;
+Future<Void> processCompleteTransactionStateRequest(TransactionStateResolveContext* pContext) {
+	KeyRange txnKeys = allKeys;
+	std::map<Tag, UID> tag_uid;
 
 	RangeResult UIDtoTagMap = pContext->pTxnStateStore->readRange(serverTagKeys).get();
 	for (const KeyValueRef& kv : UIDtoTagMap) {
 		tag_uid[decodeServerTagValue(kv.value)] = decodeServerTagKey(kv.key);
 	}
 
-	loop {
-		wait(yield());
+	while (true) {
+		co_await yield();
 
 		RangeResult data =
 		    pContext->pTxnStateStore
@@ -622,7 +652,6 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(Reference<Resolver> se
 		std::vector<std::pair<MapPair<Key, ServerCacheInfo>, int>> keyInfoData;
 		std::vector<UID> src, dest;
 		ServerCacheInfo info;
-		// NOTE: An ACTOR will be compiled into several classes, the this pointer is from one of them.
 		auto updateTagInfo = [pContext = pContext](const std::vector<UID>& uids,
 		                                           std::vector<Tag>& tags,
 		                                           std::vector<Reference<StorageInfo>>& storageInfoItems) {
@@ -665,29 +694,24 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(Reference<Resolver> se
 		ResolverData resolverData(
 		    pContext->pResolverData->dbgid, pContext->pTxnStateStore, &pContext->pResolverData->keyInfo, confChanges);
 		applyMetadataMutations(SpanContext(), resolverData, mutations);
-	} // loop
+	}
 
-	auto lockedKey = pContext->pTxnStateStore->readValue(databaseLockedKey).get();
+	[[maybe_unused]] auto lockedKey = pContext->pTxnStateStore->readValue(databaseLockedKey).get();
 	// pContext->pCommitData->locked = lockedKey.present() && lockedKey.get().size();
 	// pContext->pCommitData->metadataVersion = pContext->pTxnStateStore->readValue(metadataVersionKey).get();
 
 	pContext->pTxnStateStore->enableSnapshot();
-
-	return Void();
 }
 
-ACTOR Future<Void> processTransactionStateRequestPart(Reference<Resolver> self,
-                                                      TransactionStateResolveContext* pContext,
-                                                      TxnStateRequest request,
-                                                      Reference<AsyncVar<ServerDBInfo> const> db) {
+Future<Void> processTransactionStateRequestPart(TransactionStateResolveContext* pContext, TxnStateRequest request) {
 	ASSERT(pContext->pResolverData.getPtr() != nullptr);
 	ASSERT(pContext->pActors != nullptr);
 
 	if (pContext->receivedSequences.contains(request.sequence)) {
 		// This part is already received. Still we will re-broadcast it to other CommitProxies & Resolvers
 		pContext->pActors->send(broadcastTxnRequest(request, SERVER_KNOBS->TXN_STATE_SEND_AMOUNT, true));
-		wait(yield());
-		return Void();
+		co_await yield();
+		co_return;
 	}
 
 	if (request.last) {
@@ -706,24 +730,32 @@ ACTOR Future<Void> processTransactionStateRequestPart(Reference<Resolver> self,
 	if (pContext->receivedSequences.size() == pContext->maxSequence) {
 		// Received all components of the txnStateRequest
 		ASSERT(!pContext->processed);
-		wait(processCompleteTransactionStateRequest(self, pContext, db));
+		co_await processCompleteTransactionStateRequest(pContext);
 		pContext->processed = true;
 	}
 
 	pContext->pActors->send(broadcastTxnRequest(request, SERVER_KNOBS->TXN_STATE_SEND_AMOUNT, true));
-	wait(yield());
-	return Void();
+	co_await yield();
+}
+
+Future<Void> resolveTxnStateRequests(FutureStream<TxnStateRequest> txnStateRequests,
+                                     TransactionStateResolveContext* pContext,
+                                     PromiseStream<Future<Void>>* addActor) {
+	while (true) {
+		TxnStateRequest request = co_await txnStateRequests;
+		ASSERT(SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS);
+		addActor->send(processTransactionStateRequestPart(pContext, request));
+	}
 }
 
 } // anonymous namespace
 
-ACTOR Future<Void> resolverCore(ResolverInterface resolver,
-                                InitializeResolverRequest initReq,
-                                Reference<AsyncVar<ServerDBInfo> const> db) {
-	state Reference<Resolver> self(new Resolver(resolver.id(), initReq.commitProxyCount, initReq.resolverCount));
-	state ActorCollection actors(false);
-	state Future<Void> doPollMetrics = self->resolverCount > 1 ? Void() : Future<Void>(Never());
-	state PromiseStream<Future<Void>> addActor;
+Future<Void> resolverCore(ResolverInterface resolver,
+                          InitializeResolverRequest initReq,
+                          Reference<AsyncVar<ServerDBInfo> const> db) {
+	Reference<Resolver> self(new Resolver(resolver.id(), initReq.commitProxyCount, initReq.resolverCount));
+	ActorCollection actors(false);
+	PromiseStream<Future<Void>> addActor;
 	actors.add(waitFailureServer(resolver.waitFailure.getFuture()));
 	actors.add(traceRole(Role::RESOLVER, resolver.id()));
 
@@ -733,22 +765,21 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 	while (!(initReq.masterLifetime.isEqual(db->get().masterLifetime) &&
 	         db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION)) {
 		// TraceEvent("ResolverInit2", resolver.id()).detail("LSEpoch", db->get().logSystemConfig.epoch);
-		wait(db->onChange());
+		co_await db->onChange();
 	}
 
 	// Initialize txnStateStore
 	self->logSystem = makeLogSystemFromServerDBInfo(resolver.id(), db->get(), false, addActor);
 	self->localTLogCount = db->get().logSystemConfig.numLogs();
-	state Future<Void> onError =
-	    transformError(actorCollection(addActor.getFuture()), broken_promise(), resolver_failed());
-	state TransactionStateResolveContext transactionStateResolveContext;
+	Future<Void> onError = transformError(actorCollection(addActor.getFuture()), broken_promise(), resolver_failed());
+	TransactionStateResolveContext transactionStateResolveContext;
 	if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
 		self->logAdapter = new LogSystemDiskQueueAdapter(self->logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
 		self->txnStateStore = keyValueStoreLogSystem(
 		    self->logAdapter, db, resolver.id(), 2e9, DisableSnapshot::True, ReplaceContent::True, ExactRecovery::True);
 
 		// wait for txnStateStore recovery
-		wait(success(self->txnStateStore->readValue(StringRef())));
+		co_await self->txnStateStore->readValue(StringRef());
 
 		// This has to be declared after the self->txnStateStore get initialized
 		transactionStateResolveContext = TransactionStateResolveContext(self, &addActor);
@@ -760,49 +791,29 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 		}
 	}
 
-	loop choose {
-		when(ResolveTransactionBatchRequest batch = waitNext(resolver.resolve.getFuture())) {
-			actors.add(resolveBatch(self, batch, db));
-		}
-		when(ResolutionMetricsRequest req = waitNext(resolver.metrics.getFuture())) {
-			++self->metricsRequests;
-			req.reply.send(self->iopsSample.getEstimate(SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? normalKeys
-			                                                                                               : allKeys));
-		}
-		when(ResolutionSplitRequest req = waitNext(resolver.split.getFuture())) {
-			++self->splitRequests;
-			ResolutionSplitReply rep;
-			rep.key = self->iopsSample.splitEstimate(req.range, req.offset, req.front);
-			rep.used = self->iopsSample.getEstimate(req.front ? KeyRangeRef(req.range.begin, rep.key)
-			                                                  : KeyRangeRef(rep.key, req.range.end));
-			req.reply.send(rep);
-		}
-		when(wait(actors.getResult())) {}
-		when(wait(onError)) {}
-		when(wait(doPollMetrics)) {
-			self->iopsSample.poll();
-			doPollMetrics = delay(SERVER_KNOBS->SAMPLE_POLL_TIME);
-		}
-		when(TxnStateRequest request = waitNext(resolver.txnState.getFuture())) {
-			if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
-				addActor.send(processTransactionStateRequestPart(self, &transactionStateResolveContext, request, db));
-			} else {
-				ASSERT(false);
-			}
-		}
+	actors.add(resolveBatches(self, resolver.resolve.getFuture(), &actors));
+	actors.add(resolveMetricsRequests(self, resolver.metrics.getFuture()));
+	actors.add(resolveSplitRequests(self, resolver.split.getFuture()));
+	actors.add(resolveTxnStateRequests(resolver.txnState.getFuture(), &transactionStateResolveContext, &addActor));
+	if (self->resolverCount > 1) {
+		actors.add(pollMetrics(self));
 	}
+
+	co_await race(actors.getResult(), onError);
+	// The above futures should never be ready
+	UNSTOPPABLE_ASSERT(false);
 }
 
-ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
-                                uint64_t recoveryCount,
-                                ResolverInterface myInterface) {
-	loop {
+Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
+                          uint64_t recoveryCount,
+                          ResolverInterface myInterface) {
+	while (true) {
 		if (db->get().recoveryCount >= recoveryCount &&
 		    std::find(db->get().resolvers.begin(), db->get().resolvers.end(), myInterface) ==
 		        db->get().resolvers.end()) {
 			throw worker_removed();
 		}
-		wait(db->onChange());
+		co_await db->onChange();
 	}
 }
 

@@ -1,5 +1,5 @@
 /*
- * KeyValueStoreSQLite.actor.cpp
+ * KeyValueStoreSQLite.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -22,7 +22,7 @@
 #define SQLITE_THREADSAFE 0 // also in sqlite3.amalgamation.c!
 #include "fmt/format.h"
 #include "crc32/crc32c.h"
-#include "fdbserver/core/IKeyValueStore.h"
+#include "fdbserver/kvstore/IKeyValueStore.h"
 #include "fdbserver/kvstore/KVFileUtils.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/core/Knobs.h"
@@ -1612,8 +1612,8 @@ struct ThreadSafeCounter {
 
 class KeyValueStoreSQLite final : public IKeyValueStore {
 public:
-	void dispose() override { doClose(this, true); }
-	void close() override { doClose(this, false); }
+	void dispose() override { doClose(Uncancellable(), this, true); }
+	void close() override { doClose(Uncancellable(), this, false); }
 
 	Future<Void> getError() const override { return delayed(readThreads->getError() || writeThread->getError()); }
 	Future<Void> onClosed() const override { return stopped.getFuture(); }
@@ -1958,7 +1958,7 @@ private:
 			                   std::max(1, SERVER_KNOBS->SPRING_CLEANING_LAZY_DELETE_BATCH_SIZE));
 			bool vacuumFinished = false;
 
-			loop {
+			while (true) {
 				double begin = now();
 				bool canDelete = !freeTableEmpty &&
 				                 (now() < lazyDeleteEnd || workPerformed.lazyDeletePages <
@@ -2084,8 +2084,8 @@ private:
 		}
 	}
 
-	ACTOR static void doClose(KeyValueStoreSQLite* self, bool deleteOnClose) {
-		state Error error = success();
+	static Future<Void> doClose(Uncancellable, KeyValueStoreSQLite* self, bool deleteOnClose) {
+		Error error = success();
 
 		self->disableRateControl();
 
@@ -2094,10 +2094,10 @@ private:
 			self->starting.cancel();
 			self->cleaning.cancel();
 			self->logging.cancel();
-			wait(self->readThreads->stop() && self->writeThread->stop());
+			co_await (self->readThreads->stop() && self->writeThread->stop());
 			if (deleteOnClose) {
-				wait(IAsyncFileSystem::filesystem()->incrementalDeleteFile(self->filename, true));
-				wait(IAsyncFileSystem::filesystem()->incrementalDeleteFile(self->filename + "-wal", false));
+				co_await IAsyncFileSystem::filesystem()->incrementalDeleteFile(self->filename, true);
+				co_await IAsyncFileSystem::filesystem()->incrementalDeleteFile(self->filename + "-wal", false);
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "KVDoCloseError", self->logID)
@@ -2325,7 +2325,7 @@ Future<Void> KVFileCheck(std::string filename, bool integrity) {
 	ASSERT(store != nullptr);
 
 	// Wait for integry check to finish
-	co_await success(store->readValue(StringRef()));
+	co_await store->readValue(StringRef());
 
 	if (store->getError().isError())
 		co_await store->getError();

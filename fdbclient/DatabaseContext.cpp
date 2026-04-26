@@ -107,7 +107,7 @@
 #else
 #include <time.h>
 #endif
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/CoroUtils.h"
 
 Reference<WatchMetadata> DatabaseContext::getWatchMetadata(KeyRef key) const {
 	const auto it = watchMap.find(WatchMapKey(key));
@@ -478,13 +478,13 @@ Future<HealthMetrics> DatabaseContext::getHealthMetrics(bool detailed = false) {
 	return getHealthMetricsActor(this, detailed, sendDetailedRequest);
 }
 
-Future<Optional<HealthMetrics::StorageStats>> DatabaseContext::getStorageStats(const UID& id, double maxStaleness) {
+Future<Optional<HealthMetrics::StorageStats>> DatabaseContext::getStorageStats(UID id, double maxStaleness) {
 	if (now() - detailedHealthMetricsLastUpdated < maxStaleness) {
 		auto it = healthMetrics.storageStats.find(id);
 		return it == healthMetrics.storageStats.end() ? Optional<HealthMetrics::StorageStats>() : it->second;
 	}
 
-	return map(getHealthMetricsActor(this, true, true), [&id](auto metrics) -> Optional<HealthMetrics::StorageStats> {
+	return map(getHealthMetricsActor(this, true, true), [id](auto metrics) -> Optional<HealthMetrics::StorageStats> {
 		auto it = metrics.storageStats.find(id);
 		return it == metrics.storageStats.end() ? Optional<HealthMetrics::StorageStats>() : it->second;
 	});
@@ -543,10 +543,10 @@ void traceTSSPercentiles(TraceEvent& ev,
 	}
 }
 
-ACTOR Future<Void> tssLogger(DatabaseContext* cx) {
-	state double lastLogged = 0;
-	loop {
-		wait(delay(CLIENT_KNOBS->TSS_METRICS_LOGGING_INTERVAL, TaskPriority::FlushTrace));
+Future<Void> tssLogger(DatabaseContext* cx) {
+	double lastLogged = 0;
+	while (true) {
+		co_await delay(CLIENT_KNOBS->TSS_METRICS_LOGGING_INTERVAL, TaskPriority::FlushTrace);
 
 		// Log each TSS pair separately
 		for (const auto& it : cx->tssMetrics) {
@@ -587,10 +587,10 @@ ACTOR Future<Void> tssLogger(DatabaseContext* cx) {
 	}
 }
 
-ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
-	state double lastLogged = 0;
-	loop {
-		wait(delay(CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, TaskPriority::FlushTrace));
+Future<Void> databaseLogger(DatabaseContext* cx) {
+	double lastLogged = 0;
+	while (true) {
+		co_await delay(CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, TaskPriority::FlushTrace);
 
 		bool logMetrics = !g_network->isSimulated() || BUGGIFY_WITH_PROB(0.01);
 		if (logMetrics) {
@@ -648,15 +648,16 @@ struct TrInfoChunk {
 static const Key CLIENT_LATENCY_INFO_PREFIX = "client_latency/"_sr;
 static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = "client_latency_counter/"_sr;
 
-ACTOR static Future<Void> transactionInfoCommitActor(Transaction* tr, std::vector<TrInfoChunk>* chunks) {
-	state const Key clientLatencyAtomicCtr = CLIENT_LATENCY_INFO_CTR_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin);
-	state int retryCount = 0;
-	loop {
+static Future<Void> transactionInfoCommitActor(Transaction* tr, std::vector<TrInfoChunk>* chunks) {
+	const Key clientLatencyAtomicCtr = CLIENT_LATENCY_INFO_CTR_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin);
+	int retryCount = 0;
+	while (true) {
+		Error err;
 		try {
 			tr->reset();
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			state Future<Standalone<StringRef>> vstamp = tr->getVersionstamp();
+			[[maybe_unused]] Future<Standalone<StringRef>> vstamp = tr->getVersionstamp();
 			int64_t numCommitBytes = 0;
 			for (auto& chunk : *chunks) {
 				tr->atomicOp(chunk.key, chunk.value, MutationRef::SetVersionstampedKey);
@@ -664,47 +665,49 @@ ACTOR static Future<Void> transactionInfoCommitActor(Transaction* tr, std::vecto
 				                  4; // subtract number of bytes of key that denotes version stamp index
 			}
 			tr->atomicOp(clientLatencyAtomicCtr, StringRef((uint8_t*)&numCommitBytes, 8), MutationRef::AddValue);
-			wait(tr->commit());
-			return Void();
+			co_await tr->commit();
+			co_return;
 		} catch (Error& e) {
-			retryCount++;
-			if (retryCount == 10)
-				throw;
-			wait(tr->onError(e));
+			err = e;
 		}
+		retryCount++;
+		if (retryCount == 10)
+			throw err;
+		co_await tr->onError(err);
 	}
 }
 
-ACTOR static Future<Void> delExcessClntTxnEntriesActor(Transaction* tr, int64_t clientTxInfoSizeLimit) {
-	state const Key clientLatencyName = CLIENT_LATENCY_INFO_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin);
-	state const Key clientLatencyAtomicCtr = CLIENT_LATENCY_INFO_CTR_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin);
+static Future<Void> delExcessClntTxnEntriesActor(Transaction* tr, int64_t clientTxInfoSizeLimit) {
+	const Key clientLatencyName = CLIENT_LATENCY_INFO_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin);
+	const Key clientLatencyAtomicCtr = CLIENT_LATENCY_INFO_CTR_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin);
 	TraceEvent(SevInfo, "DelExcessClntTxnEntriesCalled").log();
 
 	// If we don't limit it with retries, the DatabaseContext will never cleanup as Transaction
 	// object will be alive and hold reference to DatabaseContext.
-	state int retries = 0;
-	loop {
+	int retries = 0;
+	while (true) {
+		Error err;
 		try {
 			tr->reset();
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<Value> ctrValue = wait(tr->get(KeyRef(clientLatencyAtomicCtr), Snapshot::True));
+			Optional<Value> ctrValue = co_await tr->get(KeyRef(clientLatencyAtomicCtr), Snapshot::True);
 			if (!ctrValue.present()) {
 				TraceEvent(SevInfo, "NumClntTxnEntriesNotFound").log();
-				return Void();
+				co_return;
 			}
-			state int64_t txInfoSize = 0;
+			int64_t txInfoSize = 0;
 			ASSERT(ctrValue.get().size() == sizeof(int64_t));
 			memcpy(&txInfoSize, ctrValue.get().begin(), ctrValue.get().size());
 			if (txInfoSize < clientTxInfoSizeLimit)
-				return Void();
+				co_return;
 			int getRangeByteLimit = (txInfoSize - clientTxInfoSizeLimit) < CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT
 			                            ? (txInfoSize - clientTxInfoSizeLimit)
 			                            : CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 			GetRangeLimits limit(GetRangeLimits::ROW_LIMIT_UNLIMITED, getRangeByteLimit);
 			RangeResult txEntries =
-			    wait(tr->getRange(KeyRangeRef(clientLatencyName, strinc(clientLatencyName)), limit));
-			state int64_t numBytesToDel = 0;
+			    co_await tr->getRange(KeyRangeRef(clientLatencyName, strinc(clientLatencyName)), limit);
+			int64_t numBytesToDel = 0;
 			KeyRef endKey;
 			for (auto& kv : txEntries) {
 				endKey = kv.key;
@@ -718,17 +721,19 @@ ACTOR static Future<Void> delExcessClntTxnEntriesActor(Transaction* tr, int64_t 
 				int64_t bytesDel = -numBytesToDel;
 
 				tr->atomicOp(clientLatencyAtomicCtr, StringRef((uint8_t*)&bytesDel, 8), MutationRef::AddValue);
-				wait(tr->commit());
+				co_await tr->commit();
 			}
 			if (txInfoSize - numBytesToDel <= clientTxInfoSizeLimit)
-				return Void();
+				co_return;
+			continue;
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled || retries++ >= 10) {
-				throw;
-			}
-
-			wait(tr->onError(e));
+			err = e;
 		}
+		if (err.code() == error_code_actor_cancelled || retries++ >= 10) {
+			throw err;
+		}
+
+		co_await tr->onError(err);
 	}
 }
 
@@ -736,26 +741,27 @@ ACTOR static Future<Void> delExcessClntTxnEntriesActor(Transaction* tr, int64_t 
 // The reason for getting a pointer to DatabaseContext instead of a reference counted object is because reference
 // counting will increment reference count for DatabaseContext which holds the future of this actor. This creates a
 // cyclic reference and hence this actor and Database object will not be destroyed at all.
-ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
-	state const std::string clientLatencyName =
+static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
+	const std::string clientLatencyName =
 	    CLIENT_LATENCY_INFO_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin).toString();
-	state Transaction tr;
-	state std::vector<TrInfoChunk> commitQ;
-	state int txBytes = 0;
+	Transaction tr;
+	std::vector<TrInfoChunk> commitQ;
+	int txBytes = 0;
 
-	loop {
+	while (true) {
 		// Make sure we are connected to the server. Otherwise we may just try to keep reconnecting
 		// with incompatible clusters.
-		wait(cx->onConnected());
+		co_await cx->onConnected();
 
 		// Need to make sure that we eventually destroy tr. We can't rely on getting cancelled to do
 		// this because of the cyclic reference to self.
-		wait(refreshTransaction(cx, &tr));
+		co_await refreshTransaction(cx, &tr);
+		Error err;
 		try {
 			ASSERT(cx->clientStatusUpdater.outStatusQ.empty());
 			cx->clientStatusUpdater.inStatusQ.swap(cx->clientStatusUpdater.outStatusQ);
 			// Split Transaction Info into chunks
-			state std::vector<TrInfoChunk> trChunksQ;
+			std::vector<TrInfoChunk> trChunksQ;
 			for (auto& entry : cx->clientStatusUpdater.outStatusQ) {
 				auto& bw = entry.second;
 				int64_t value_size_limit = BUGGIFY
@@ -784,19 +790,19 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 			}
 
 			// Commit the chunks splitting into different transactions if needed
-			state int64_t dataSizeLimit =
+			int64_t dataSizeLimit =
 			    BUGGIFY ? deterministicRandom()->randomInt(200e3, 1.5 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT)
 			            : 0.8 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
-			state std::vector<TrInfoChunk>::iterator tracking_iter = trChunksQ.begin();
+			std::vector<TrInfoChunk>::iterator tracking_iter = trChunksQ.begin();
 			ASSERT(commitQ.empty() && (txBytes == 0));
-			loop {
-				state std::vector<TrInfoChunk>::iterator iter = tracking_iter;
+			while (true) {
+				std::vector<TrInfoChunk>::iterator iter = tracking_iter;
 				txBytes = 0;
 				commitQ.clear();
 				try {
 					while (iter != trChunksQ.end()) {
 						if (iter->value.size() + iter->key.size() + txBytes > dataSizeLimit) {
-							wait(transactionInfoCommitActor(&tr, &commitQ));
+							co_await transactionInfoCommitActor(&tr, &commitQ);
 							tracking_iter = iter;
 							commitQ.clear();
 							txBytes = 0;
@@ -806,7 +812,7 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 						++iter;
 					}
 					if (!commitQ.empty()) {
-						wait(transactionInfoCommitActor(&tr, &commitQ));
+						co_await transactionInfoCommitActor(&tr, &commitQ);
 						commitQ.clear();
 						txBytes = 0;
 					}
@@ -824,7 +830,7 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 				}
 			}
 			cx->clientStatusUpdater.outStatusQ.clear();
-			wait(cx->globalConfig->onInitialized());
+			co_await cx->globalConfig->onInitialized();
 			double sampleRate =
 			    cx->globalConfig->get<double>(fdbClientInfoTxnSampleRate, std::numeric_limits<double>::infinity());
 			double clientSamplingProbability =
@@ -832,28 +838,30 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 			int64_t sizeLimit = cx->globalConfig->get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
 			int64_t clientTxnInfoSizeLimit = sizeLimit == -1 ? CLIENT_KNOBS->CSI_SIZE_LIMIT : sizeLimit;
 			if (!trChunksQ.empty() && deterministicRandom()->random01() < clientSamplingProbability)
-				wait(delExcessClntTxnEntriesActor(&tr, clientTxnInfoSizeLimit));
+				co_await delExcessClntTxnEntriesActor(&tr, clientTxnInfoSizeLimit);
 
 			// Cleanup Transaction sooner than later, so that we don't hold reference to context.
 			tr = Transaction();
-			wait(delay(CLIENT_KNOBS->CSI_STATUS_DELAY));
+			co_await delay(CLIENT_KNOBS->CSI_STATUS_DELAY);
+			continue;
 		} catch (Error& e) {
-			TraceEvent(SevWarnAlways, "UnableToWriteClientStatus").error(e);
-			if (e.code() == error_code_actor_cancelled) {
-				throw;
-			}
-			cx->clientStatusUpdater.outStatusQ.clear();
-
-			// Cleanup Transaction sooner than later, so that we don't hold reference to context.
-			tr = Transaction();
-			wait(delay(10.0));
+			err = e;
 		}
+		TraceEvent(SevWarnAlways, "UnableToWriteClientStatus").error(err);
+		if (err.code() == error_code_actor_cancelled) {
+			throw err;
+		}
+		cx->clientStatusUpdater.outStatusQ.clear();
+
+		// Cleanup Transaction sooner than later, so that we don't hold reference to context.
+		tr = Transaction();
+		co_await delay(10.0);
 	}
 }
 
-ACTOR Future<Void> assertFailure(GrvProxyInterface remote, Future<ErrorOr<GetReadVersionReply>> reply) {
+Future<Void> assertFailure(GrvProxyInterface remote, Future<ErrorOr<GetReadVersionReply>> reply) {
 	try {
-		ErrorOr<GetReadVersionReply> res = wait(reply);
+		ErrorOr<GetReadVersionReply> res = co_await reply;
 		if (!res.isError()) {
 			TraceEvent(SevError, "GotStaleReadVersion")
 			    .detail("Remote", remote.getConsistentReadVersion.getEndpoint().addresses.address.toString())
@@ -867,7 +875,6 @@ ACTOR Future<Void> assertFailure(GrvProxyInterface remote, Future<ErrorOr<GetRea
 		}
 		// we want this to fail -- so getting here is good, we'll just ignore the error.
 	}
-	return Void();
 }
 
 Future<Void> attemptGRVFromOldProxies(std::vector<GrvProxyInterface> oldProxies,
@@ -897,45 +904,45 @@ Future<Void> attemptGRVFromOldProxies(std::vector<GrvProxyInterface> oldProxies,
 	return waitForAll(replies);
 }
 
-ACTOR static Future<Void> monitorClientDBInfoChange(DatabaseContext* cx,
-                                                    Reference<AsyncVar<ClientDBInfo> const> clientDBInfo,
-                                                    AsyncTrigger* proxiesChangeTrigger) {
-	state std::vector<CommitProxyInterface> curCommitProxies;
-	state std::vector<GrvProxyInterface> curGrvProxies;
-	state ActorCollection actors(false);
-	state Future<Void> clientDBInfoOnChange = clientDBInfo->onChange();
+static Future<Void> monitorClientDBInfoChange(DatabaseContext* cx,
+                                              Reference<AsyncVar<ClientDBInfo> const> clientDBInfo,
+                                              AsyncTrigger* proxiesChangeTrigger) {
+	std::vector<CommitProxyInterface> curCommitProxies;
+	std::vector<GrvProxyInterface> curGrvProxies;
+	ActorCollection actors(false);
+	Future<Void> clientDBInfoOnChange = clientDBInfo->onChange();
 	curCommitProxies = clientDBInfo->get().commitProxies;
 	curGrvProxies = clientDBInfo->get().grvProxies;
 
-	loop {
-		choose {
-			when(wait(clientDBInfoOnChange)) {
-				clientDBInfoOnChange = clientDBInfo->onChange();
-				if (clientDBInfo->get().commitProxies != curCommitProxies ||
-				    clientDBInfo->get().grvProxies != curGrvProxies) {
-					// This condition is a bit complicated. Here we want to verify that we're unable to receive a read
-					// version from a proxy of an old generation after a successful recovery. The conditions are:
-					// 1. We only do this with a configured probability.
-					// 2. If the old set of Grv proxies is empty, there's nothing to do
-					// 3. If the new set of Grv proxies is empty, it means the recovery is not complete. So if an old
-					//    Grv proxy still gives out read versions, this would be correct behavior.
-					// 4. If we see a provisional proxy, it means the recovery didn't complete yet, so the same as (3)
-					//    applies.
-					if (deterministicRandom()->random01() < cx->verifyCausalReadsProp && !curGrvProxies.empty() &&
-					    !clientDBInfo->get().grvProxies.empty() && !clientDBInfo->get().grvProxies[0].provisional) {
-						actors.add(attemptGRVFromOldProxies(curGrvProxies, clientDBInfo->get().grvProxies));
-					}
-					curCommitProxies = clientDBInfo->get().commitProxies;
-					curGrvProxies = clientDBInfo->get().grvProxies;
-					// Commits in the previous epoch may have been recovered but not included in the version vector.
-					// Clear the version vector to ensure the latest commit versions are received.
-					cx->ssVersionVectorCache.clear();
-					proxiesChangeTrigger->trigger();
+	while (true) {
+		auto res = co_await race(clientDBInfoOnChange, actors.getResult());
+		if (res.index() == 0) {
+			clientDBInfoOnChange = clientDBInfo->onChange();
+			if (clientDBInfo->get().commitProxies != curCommitProxies ||
+			    clientDBInfo->get().grvProxies != curGrvProxies) {
+				// This condition is a bit complicated. Here we want to verify that we're unable to receive a read
+				// version from a proxy of an old generation after a successful recovery. The conditions are:
+				// 1. We only do this with a configured probability.
+				// 2. If the old set of Grv proxies is empty, there's nothing to do
+				// 3. If the new set of Grv proxies is empty, it means the recovery is not complete. So if an old
+				//    Grv proxy still gives out read versions, this would be correct behavior.
+				// 4. If we see a provisional proxy, it means the recovery didn't complete yet, so the same as (3)
+				//    applies.
+				if (deterministicRandom()->random01() < cx->verifyCausalReadsProp && !curGrvProxies.empty() &&
+				    !clientDBInfo->get().grvProxies.empty() && !clientDBInfo->get().grvProxies[0].provisional) {
+					actors.add(attemptGRVFromOldProxies(curGrvProxies, clientDBInfo->get().grvProxies));
 				}
+				curCommitProxies = clientDBInfo->get().commitProxies;
+				curGrvProxies = clientDBInfo->get().grvProxies;
+				// Commits in the previous epoch may have been recovered but not included in the version vector.
+				// Clear the version vector to ensure the latest commit versions are received.
+				cx->ssVersionVectorCache.clear();
+				proxiesChangeTrigger->trigger();
 			}
-			when(wait(actors.getResult())) {
-				UNSTOPPABLE_ASSERT(false);
-			}
+		} else if (res.index() == 1) {
+			UNSTOPPABLE_ASSERT(false);
+		} else {
+			UNREACHABLE();
 		}
 	}
 }
@@ -975,19 +982,19 @@ Reference<LocationInfo> addCaches(const Reference<LocationInfo>& loc,
 	return makeReference<LocationInfo>(interfaces, true);
 }
 
-ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
-	state Reference<ReadYourWritesTransaction> tr;
-	state KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
-	state KeyBackedMap<Tuple, std::string> tssMismatchDB = KeyBackedMap<Tuple, std::string>(tssMismatchKeys.begin);
-	loop {
+static Future<Void> handleTssMismatches(DatabaseContext* cx) {
+	Reference<ReadYourWritesTransaction> tr;
+	KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
+	KeyBackedMap<Tuple, std::string> tssMismatchDB = KeyBackedMap<Tuple, std::string>(tssMismatchKeys.begin);
+	while (true) {
 		// return to calling actor, cx might be destroyed already with the tr reset below.
 		// This gives ~DatabaseContext a chance to cancel this actor.
-		wait(delay(0));
+		co_await delay(0);
 
 		// <tssid, list of detailed mismatch data>
-		state std::pair<UID, std::vector<DetailedTSSMismatch>> data = waitNext(cx->tssMismatchStream.getFuture());
+		std::pair<UID, std::vector<DetailedTSSMismatch>> data = co_await cx->tssMismatchStream.getFuture();
 		// find ss pair id so we can remove it from the mapping
-		state UID tssPairID;
+		UID tssPairID;
 		bool found = false;
 		for (const auto& it : cx->tssMapping) {
 			if (it.second.id() == data.first) {
@@ -997,15 +1004,16 @@ ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 			}
 		}
 		if (found) {
-			state bool quarantine = CLIENT_KNOBS->QUARANTINE_TSS_ON_MISMATCH;
+			bool quarantine = CLIENT_KNOBS->QUARANTINE_TSS_ON_MISMATCH;
 			TraceEvent(SevWarnAlways, quarantine ? "TSS_QuarantineMismatch" : "TSS_KillMismatch")
 			    .detail("TSSID", data.first.toString());
 			CODE_PROBE(quarantine, "Quarantining TSS because it got mismatch");
 			CODE_PROBE(!quarantine, "Killing TSS because it got mismatch");
 
 			tr = makeReference<ReadYourWritesTransaction>(Database(Reference<DatabaseContext>::addRef(cx)));
-			state int tries = 0;
-			loop {
+			int tries = 0;
+			while (true) {
+				Error err;
 				try {
 					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -1023,12 +1031,13 @@ ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 						                  d.traceString);
 					}
 
-					wait(tr->commit());
+					co_await tr->commit();
 
 					break;
 				} catch (Error& e) {
-					wait(tr->onError(e));
+					err = e;
 				}
+				co_await tr->onError(err);
 				tries++;
 				if (tries > 10) {
 					// Give up, it'll get another mismatch or a human will investigate eventually
@@ -1142,12 +1151,12 @@ static RangeResult healthMetricsToKVPairs(const HealthMetrics& metrics, KeyRange
 	return result;
 }
 
-ACTOR static Future<RangeResult> healthMetricsGetRangeActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
-	HealthMetrics metrics = wait(ryw->getDatabase()->getHealthMetrics(
+static Future<RangeResult> healthMetricsGetRangeActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
+	HealthMetrics metrics = co_await ryw->getDatabase()->getHealthMetrics(
 	    /*detailed ("per process")*/ kr.intersects(
 	        KeyRangeRef("\xff\xff/metrics/health/storage/"_sr, "\xff\xff/metrics/health/storage0"_sr)) ||
-	    kr.intersects(KeyRangeRef("\xff\xff/metrics/health/log/"_sr, "\xff\xff/metrics/health/log0"_sr))));
-	return healthMetricsToKVPairs(metrics, kr);
+	    kr.intersects(KeyRangeRef("\xff\xff/metrics/health/log/"_sr, "\xff\xff/metrics/health/log0"_sr)));
+	co_return healthMetricsToKVPairs(metrics, kr);
 }
 
 HealthMetricsRangeImpl::HealthMetricsRangeImpl(KeyRangeRef kr) : SpecialKeyRangeAsyncImpl(kr) {}
@@ -1158,11 +1167,11 @@ Future<RangeResult> HealthMetricsRangeImpl::getRange(ReadYourWritesTransaction* 
 	return healthMetricsGetRangeActor(ryw, kr);
 }
 
-ACTOR Future<UID> getClusterId(Database db) {
+Future<UID> getClusterId(Database db) {
 	while (!db->clientInfo->get().clusterId.isValid()) {
-		wait(db->clientInfo->onChange());
+		co_await db->clientInfo->onChange();
 	}
-	return db->clientInfo->get().clusterId;
+	co_return db->clientInfo->get().clusterId;
 }
 
 void DatabaseContext::initializeSpecialCounters() {

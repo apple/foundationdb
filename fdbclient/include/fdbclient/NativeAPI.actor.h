@@ -580,7 +580,7 @@ Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaDa
     double timeout = 5.0);
 
 // Checks with Data Distributor that it is safe to mark all servers in exclusions as failed
-ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> exclusions);
+Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> exclusions);
 
 // Measured in bytes, rounded up to the nearest page size. Multiply by fungibility ratio
 // because writes are more expensive than reads.
@@ -605,11 +605,11 @@ inline uint64_t getReadOperationCost(uint64_t bytes) {
 // Create a transaction to set the value of system key \xff/conf/perpetual_storage_wiggle. If enable == true, the value
 // will be 1. Otherwise, the value will be 0. The caller should take care of the reset of StorageWiggleMetrics if
 // necessary. Returns the FDB version at which the transaction was committed.
-ACTOR Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware = LockAware::False);
+Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware = LockAware::False);
 
-ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,
-                                                                                      bool primary,
-                                                                                      bool use_system_priority);
+Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,
+                                                                                bool primary,
+                                                                                bool use_system_priority);
 
 // Returns the maximum legal size of a key. This size will be determined by the prefix of the passed in key
 // (system keys have a larger maximum size). This should be used for generic max key size requests.
@@ -645,16 +645,18 @@ ACTOR Future<Optional<Standalone<VectorRef<KeyRef>>>> splitStorageMetricsWithLoc
     StorageMetrics estimated,
     Optional<int> minSplitBytes);
 
+Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> clusterRecord);
+
 namespace NativeAPI {
 Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(Transaction* tr);
 }
-ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
-                                                           Key key,
-                                                           SpanContext spanContext,
-                                                           Optional<UID> debugID,
-                                                           UseProvisionalProxies useProvisionalProxies,
-                                                           Reverse isBackward,
-                                                           Version version);
+Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
+                                                     Key key,
+                                                     SpanContext spanContext,
+                                                     Optional<UID> debugID,
+                                                     UseProvisionalProxies useProvisionalProxies,
+                                                     Reverse isBackward,
+                                                     Version version);
 
 Future<Void> refreshTransaction(DatabaseContext* self, Transaction* tr);
 

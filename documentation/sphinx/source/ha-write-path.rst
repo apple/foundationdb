@@ -118,9 +118,9 @@ tLogs also maintain two properties:
 At primary SS
 -------------
 
-**Primary tLog of a SS.** Since a SS’s tag is identically mapped to one tLog. The tLog has all mutations for the SS and is the primary tLog for the SS. When the SS peeks data from tLogs, it will prefer to peek data from its primary tLog. If the primary tLog crashes, it will contact the rest of tLogs, ask for mutations with the SS’s tag, and merge them together. This complex merge operation is abstracted in the TagPartitionedLogSystem interface.
+**Primary tLog of a SS.** Since a SS’s tag is identically mapped to one tLog. The tLog has all mutations for the SS and is the primary tLog for the SS. When the SS peeks data from tLogs, it will prefer to peek data from its primary tLog. If the primary tLog crashes, it will contact the rest of tLogs, ask for mutations with the SS’s tag, and merge them together. This complex merge operation is abstracted in the LogSystem interface.
 
-**Pulling data from tLogs.** Each SS in the primary DC keeps pulling mutations, whose tag is the SS’s tag, from tLogs. Once mutations before a version V1 are made durable on a SS, the SS pops the tag upto the version V1 from *all* tLogs. The pop operation is an RPC to tLogs through the TagPartitionedLogSystem interface.
+**Pulling data from tLogs.** Each SS in the primary DC keeps pulling mutations, whose tag is the SS’s tag, from tLogs. Once mutations before a version V1 are made durable on a SS, the SS pops the tag upto the version V1 from *all* tLogs. The pop operation is an RPC to tLogs through the LogSystem interface.
 
 Since the mutation m1 has three tags for primary SSes, the mutation will be made durable on three primary SSes. This marks the end of the mutation’s journey in the primary DC. 
 
@@ -164,7 +164,7 @@ https://github.com/apple/foundationdb/blob/7eabdf784a21bca102f84e7eaf14bafc54605
 Mutation Serialization (WiP)
 ============================
 
-This section will go into detail on how mutations are serialized as preparation for ingestion into the TagPartitionedLogSystem. This has also been covered at:
+This section will go into detail on how mutations are serialized as preparation for ingestion into the LogSystem. This has also been covered at:
 
 https://drive.google.com/file/d/1OaP5bqH2kst1VxD6RWj8h2cdr9rhhBHy/view
 

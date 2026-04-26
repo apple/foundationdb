@@ -45,7 +45,7 @@
 #include "ClusterRecovery.actor.h"
 #include "fdbserver/core/DataDistributorInterface.h"
 #include "fdbserver/core/LeaderElection.h"
-#include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/core/LogSystemConfig.h"
 #include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/WaitFailure.h"
@@ -61,7 +61,7 @@
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
-#include "fdbserver/core/ApplyMetadataMutation.h"
+#include "fdbserver/logsystem/ApplyMetadataMutation.h"
 #include "fdbserver/core/BackupProgress.h"
 #include "fdbserver/core/DBCoreState.h"
 #include "fdbserver/core/MoveKeys.h"
@@ -289,7 +289,7 @@ Future<Void> recruitFailedLogRouters(ClusterControllerData* cluster,
                                      ClusterControllerData::DBInfo* db,
                                      std::vector<int> tagIds,
                                      int logSetIndex,
-                                     Reference<ILogSystem> logSystem,
+                                     Reference<LogSystem> logSystem,
                                      LogSystemConfig config) {
 	Optional<Key> targetDcId =
 	    db->recoveryData->remoteDcIds.size() ? db->recoveryData->remoteDcIds[0] : Optional<Key>();
@@ -398,7 +398,7 @@ Future<Void> recruitFailedLogRouters(ClusterControllerData* cluster,
 	TraceEvent("LogRoutersRecruitmentComplete", cluster->id).detail("Count", tagIds.size());
 }
 
-Future<std::vector<int>> monitorLogRouters(Reference<ILogSystem> logSystem, int logSetIndex) {
+Future<std::vector<int>> monitorLogRouters(Reference<LogSystem> logSystem, int logSetIndex) {
 	std::vector<Future<Void>> failures;
 	LogSystemConfig config = logSystem->getLogSystemConfig();
 	std::vector<int> failedTagIds;
@@ -504,7 +504,7 @@ Future<Void> monitorAndRecruitLogRouters(ClusterControllerData* self) {
 
 		ASSERT(self->db.recoveryData.isValid());
 		uint64_t recoveryCount = self->db.recoveryData->cstate.myDBState.recoveryCount;
-		Reference<ILogSystem> logSystem = self->db.recoveryData->logSystem;
+		Reference<LogSystem> logSystem = self->db.recoveryData->logSystem;
 		LogSystemConfig config = logSystem->getLogSystemConfig();
 
 		// Find the log set with log routers (should be remote/satellite)
@@ -1655,18 +1655,21 @@ Future<Void> statusServer(FutureStream<StatusRequest> requests,
 				}
 			}
 
-			ErrorOr<StatusReply> result = co_await errorOr(clusterGetStatus(self->db.serverInfo,
-			                                                                self->cx,
-			                                                                workers,
-			                                                                workerIssues,
-			                                                                self->storageStatusInfos,
-			                                                                &self->db.clientStatus,
-			                                                                coordinators,
-			                                                                incompatibleConnections,
-			                                                                self->datacenterVersionDifference,
-			                                                                self->dcLogServerVersionDifference,
-			                                                                self->dcStorageServerVersionDifference,
-			                                                                self->excludedDegradedServers));
+			ErrorOr<StatusReply> result = co_await errorOr(
+			    clusterGetStatus(self->db.serverInfo,
+			                     self->cx,
+			                     workers,
+			                     workerIssues,
+			                     self->storageStatusInfos,
+			                     &self->db.clientStatus,
+			                     coordinators,
+			                     incompatibleConnections,
+			                     self->datacenterVersionDifference,
+			                     self->dcLogServerVersionDifference,
+			                     self->dcStorageServerVersionDifference,
+			                     self->excludedDegradedServers,
+			                     std::max(CLIENT_KNOBS->STATUS_TIMEOUT - SERVER_KNOBS->STATUS_TIMEOUT_BUFFER,
+			                              SERVER_KNOBS->STATUS_TIMEOUT_BUFFER)));
 
 			if (result.isError() && result.getError().code() == error_code_actor_cancelled)
 				throw result.getError();
@@ -2217,6 +2220,52 @@ Future<Void> updateRemoteDCHealth(ClusterControllerData* self) {
 	}
 }
 
+Future<Void> monitorRatekeeperTpsLimit(ClusterControllerData* self) {
+	while (true) {
+		try {
+			co_await delay(1.0);
+
+			if (self->db.config.usableRegions <= 1 ||
+			    self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+				self->ratekeeperMonitor.resetZeroRatekeeperTpsLimitObservation();
+				continue;
+			}
+
+			HealthMetrics healthMetrics = co_await self->db.db->getHealthMetrics(/*detailed=*/false);
+			if (!self->ratekeeperMonitor.hasSustainedZeroRatekeeperTpsLimit(healthMetrics.tpsLimit)) {
+				continue;
+			}
+
+			if (self->canSafelyTriggerFailoverToRemoteDc()) {
+				if (SERVER_KNOBS->CC_HEALTH_TRIGGER_FAILOVER &&
+				    self->triggerFailoverToRemoteDc("RatekeeperZeroTpsLimit", healthMetrics.tpsLimit)) {
+					CODE_PROBE(true, "Ratekeeper zero TPS limit triggered region failover", probe::decoration::rare);
+					self->ratekeeperMonitor.resetZeroRatekeeperTpsLimitObservation();
+				} else if (!SERVER_KNOBS->CC_HEALTH_TRIGGER_FAILOVER) {
+					TraceEvent(SevWarn, "RatekeeperZeroTpsLimitSuggestFailover", self->id)
+					    .suppressFor(std::max(1.0, SERVER_KNOBS->CC_FAILOVER_DUE_TO_TPS_LIMIT_DURATION))
+					    .detail("TPSLimit", healthMetrics.tpsLimit)
+					    .detail("ZeroTpsDuration", self->ratekeeperMonitor.getZeroRatekeeperTpsLimitDuration());
+				}
+			} else {
+				TraceEvent(SevWarn, "RatekeeperZeroTpsLimitSuggestFailover", self->id)
+				    .suppressFor(std::max(1.0, SERVER_KNOBS->CC_FAILOVER_DUE_TO_TPS_LIMIT_DURATION))
+				    .detail("TPSLimit", healthMetrics.tpsLimit)
+				    .detail("VersionDifferenceUpdated", self->versionDifferenceUpdated)
+				    .detail("DatacenterVersionDifference", self->datacenterVersionDifference)
+				    .detail("RemoteDcHealthy", self->remoteDCIsHealthy())
+				    .detail("ZeroTpsDuration", self->ratekeeperMonitor.getZeroRatekeeperTpsLimitDuration());
+			}
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "MonitorRatekeeperTpsLimitError", self->id).error(e);
+			self->ratekeeperMonitor.resetZeroRatekeeperTpsLimitObservation();
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+		}
+	}
+}
+
 Future<Void> doEmptyCommit(Database cx) {
 	Transaction tr(cx);
 	while (true) {
@@ -2759,22 +2808,18 @@ Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 						TraceEvent(SevWarn, "DegradedServerDetectedAndSuggestRecovery").log();
 					}
 				} else if (self->shouldTriggerFailoverDueToDegradedServers()) {
-					double ccUpTime = now() - machineStartTime();
-					if (SERVER_KNOBS->CC_HEALTH_TRIGGER_FAILOVER &&
-					    ccUpTime > SERVER_KNOBS->INITIAL_UPDATE_CROSS_DC_INFO_DELAY) {
+					const bool canSafelyFailover = self->canSafelyTriggerFailoverToRemoteDc();
+					const double ccUpTime = machineStartTime() == 0 ? 0.0 : now() - machineStartTime();
+					if (SERVER_KNOBS->CC_HEALTH_TRIGGER_FAILOVER && canSafelyFailover) {
 						TraceEvent(SevWarn, "DegradedServerDetectedAndTriggerFailover").log();
-						std::vector<Optional<Key>> dcPriority;
-						auto remoteDcId = self->db.config.regions[0].dcId == self->clusterControllerDcId.get()
-						                      ? self->db.config.regions[1].dcId
-						                      : self->db.config.regions[0].dcId;
-
-						// Switch the current primary DC and remote DC in desiredDcIds, so that the remote DC
-						// becomes the new primary, and the primary DC becomes the new remote.
-						dcPriority.push_back(remoteDcId);
-						dcPriority.push_back(self->clusterControllerDcId);
-						self->desiredDcIds.set(dcPriority);
+						self->triggerFailoverToRemoteDc("DegradedServers");
 					} else {
-						TraceEvent(SevWarn, "DegradedServerDetectedAndSuggestFailover").detail("CCUpTime", ccUpTime);
+						TraceEvent(SevWarn, "DegradedServerDetectedAndSuggestFailover")
+						    .detail("CCUpTime", ccUpTime)
+						    .detail("CanSafelyFailover", canSafelyFailover)
+						    .detail("VersionDifferenceUpdated", self->versionDifferenceUpdated)
+						    .detail("DatacenterVersionDifference", self->datacenterVersionDifference)
+						    .detail("RemoteDcHealthy", self->remoteDCIsHealthy());
 					}
 				}
 			}
@@ -2880,6 +2925,9 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(updatedChangingDatacenters(&self));
 	self.addActor.send(updatedChangedDatacenters(&self));
 	self.addActor.send(updateDatacenterVersionDifference(&self));
+	if (SERVER_KNOBS->CC_FAILOVER_DUE_TO_TPS_LIMIT_DURATION > 0) {
+		self.addActor.send(monitorRatekeeperTpsLimit(&self));
+	}
 	self.addActor.send(handleForcedRecoveries(&self, interf));
 	self.addActor.send(handleTriggerAuditStorage(&self, interf));
 	self.addActor.send(monitorDataDistributor(&self));

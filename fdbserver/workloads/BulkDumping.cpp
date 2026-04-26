@@ -627,7 +627,7 @@ struct BulkDumping : TestWorkload {
 			if (useMockS3 && g_network->isSimulated()) {
 				// Check if 127.0.0.1:8080 is already registered in simulator's httpHandlers
 				std::string serverKey = "127.0.0.1:8080";
-				bool alreadyRegistered = g_simulator->httpHandlers.count(serverKey) > 0;
+				bool alreadyRegistered = g_simulator->httpHandlers.contains(serverKey);
 
 				if (alreadyRegistered) {
 					TraceEvent("BulkDumpingWorkload")

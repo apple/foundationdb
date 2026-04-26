@@ -40,7 +40,7 @@
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
 #include "flow/ObjectSerializer.h"
-#include "flow/PriorityMultiLock.actor.h"
+#include "flow/PriorityMultiLock.h"
 #include "flow/network.h"
 #include "flow/serialize.h"
 #include "flow/Trace.h"
@@ -4956,8 +4956,8 @@ public:
 		m_latestCommit = m_init;
 	}
 
-	ACTOR static Future<Reference<ArenaPage>> makeEmptyRoot(VersionedBTree* self) {
-		state Reference<ArenaPage> page = self->m_pager->newPageBuffer();
+	static Future<Reference<ArenaPage>> makeEmptyRoot(VersionedBTree* self) {
+		Reference<ArenaPage> page = self->m_pager->newPageBuffer();
 		page->init(self->m_encodingType, PageType::BTreeNode, 1);
 
 		BTreePage* btpage = (BTreePage*)page->mutateData();
@@ -8003,7 +8003,7 @@ Future<Void> verifyRangeBTreeCursor(VersionedBTree* btree,
 		             start.printable().c_str(),
 		             end.printable().c_str(),
 		             randomKey.toString().c_str());
-		co_await success(cur.seek(randomKey));
+		co_await cur.seek(randomKey);
 	}
 
 	debug_printf(

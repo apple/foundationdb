@@ -26,7 +26,7 @@ struct ClusterRecoveryData {
     DatabaseConfiguration configuration;
     std::vector<Optional<Key>> primaryDcId, remoteDcIds;
     
-    Reference<ILogSystem> logSystem;
+    Reference<LogSystem> logSystem;
     IKeyValueStore* txnStateStore;               // in-memory metadata store
     LogSystemDiskQueueAdapter* txnStateLogAdapter;
     
@@ -212,4 +212,4 @@ loop {
 | [`fdbserver/core/include/fdbserver/core/RecoveryState.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/RecoveryState.h) | RecoveryState enum |
 | [`fdbserver/core/include/fdbserver/core/DBCoreState.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/DBCoreState.h) | DBCoreState (coordinated TLog config) |
 | [`fdbserver/core/CoordinatedState.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/CoordinatedState.cpp) | Replicated read/write over generation registers |
-| [`fdbserver/logsystem/TagPartitionedLogSystem.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/logsystem/TagPartitionedLogSystem.actor.cpp) | newEpoch() for creating new TLog generations |
+| [`fdbserver/logsystem/LogSystem.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/logsystem/LogSystem.cpp) | newEpoch() for creating new TLog generations |
