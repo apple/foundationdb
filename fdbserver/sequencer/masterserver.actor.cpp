@@ -30,11 +30,10 @@
 #include "ResolutionBalancer.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "flow/ActorCollection.h"
+#include "flow/CoroUtils.h"
 #include "flow/Trace.h"
 #include "fdbclient/VersionVector.h"
 #include "MasterData.h"
-
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 template class ReplyPromise<MasterInterface>;
 template struct NetSAV<MasterInterface>;
@@ -226,14 +225,17 @@ MasterData::MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
 
 MasterData::~MasterData() {}
 
-ACTOR Future<Void> provideVersionsCxx(Reference<MasterData> self) {
-	state ActorCollection versionActors(false);
+Future<Void> provideVersionsCxx(Reference<MasterData> self) {
+	ActorCollection versionActors(false);
 
-	loop choose {
-		when(GetCommitVersionRequest req = waitNext(self->myInterface.getCommitVersion.getFuture())) {
+	while (true) {
+		auto res = co_await race(self->myInterface.getCommitVersion.getFuture(), versionActors.getResult());
+		if (res.index() == 0) {
+			GetCommitVersionRequest req = std::get<0>(std::move(res));
 			versionActors.add(getVersion(self, req));
+		} else if (res.index() != 1) {
+			UNREACHABLE();
 		}
-		when(wait(versionActors.getResult())) {}
 	}
 }
 
@@ -269,42 +271,44 @@ void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVe
 	return updateLiveCommittedVersionCxx(self, req);
 }
 
-ACTOR Future<Void> serveLiveCommittedVersionCxx(Reference<MasterData> self) {
-	loop {
-		choose {
-			when(GetRawCommittedVersionRequest req = waitNext(self->myInterface.getLiveCommittedVersion.getFuture())) {
-				if (req.debugID.present())
-					g_traceBatch.addEvent("TransactionDebug",
-					                      req.debugID.get().first(),
-					                      "MasterServer.serveLiveCommittedVersion.GetRawCommittedVersion");
+Future<Void> serveLiveCommittedVersionCxx(Reference<MasterData> self) {
+	while (true) {
+		auto res = co_await race(self->myInterface.getLiveCommittedVersion.getFuture(),
+		                         self->myInterface.reportLiveCommittedVersion.getFuture());
+		if (res.index() == 0) {
+			GetRawCommittedVersionRequest req = std::get<0>(std::move(res));
+			if (req.debugID.present())
+				g_traceBatch.addEvent("TransactionDebug",
+				                      req.debugID.get().first(),
+				                      "MasterServer.serveLiveCommittedVersion.GetRawCommittedVersion");
 
-				if (self->liveCommittedVersion.get() == invalidVersion) {
-					self->liveCommittedVersion.set(self->recoveryTransactionVersion);
-				}
-				++self->getLiveCommittedVersionRequests;
-				GetRawCommittedVersionReply reply;
-				reply.version = self->liveCommittedVersion.get();
-				reply.locked = self->databaseLocked;
-				reply.metadataVersion = self->proxyMetadataVersion;
-				reply.minKnownCommittedVersion = self->minKnownCommittedVersion;
-				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
-					self->ssVersionVector.getDelta(req.maxVersion, reply.ssVersionVectorDelta);
-					self->versionVectorSizeOnCVReply->addMeasurement(reply.ssVersionVectorDelta.size());
-				}
-				req.reply.send(reply);
+			if (self->liveCommittedVersion.get() == invalidVersion) {
+				self->liveCommittedVersion.set(self->recoveryTransactionVersion);
 			}
-			when(ReportRawCommittedVersionRequest req =
-			         waitNext(self->myInterface.reportLiveCommittedVersion.getFuture())) {
-				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.prevVersion.present() &&
-				    (self->liveCommittedVersion.get() != invalidVersion) &&
-				    (self->liveCommittedVersion.get() < req.prevVersion.get())) {
-					self->addActor.send(waitForPrev(self, req));
-				} else {
-					updateLiveCommittedVersion(self, req);
-					++self->nonWaitForPrevCommitRequests;
-					req.reply.send(Void());
-				}
+			++self->getLiveCommittedVersionRequests;
+			GetRawCommittedVersionReply reply;
+			reply.version = self->liveCommittedVersion.get();
+			reply.locked = self->databaseLocked;
+			reply.metadataVersion = self->proxyMetadataVersion;
+			reply.minKnownCommittedVersion = self->minKnownCommittedVersion;
+			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+				self->ssVersionVector.getDelta(req.maxVersion, reply.ssVersionVectorDelta);
+				self->versionVectorSizeOnCVReply->addMeasurement(reply.ssVersionVectorDelta.size());
 			}
+			req.reply.send(reply);
+		} else if (res.index() == 1) {
+			ReportRawCommittedVersionRequest req = std::get<1>(std::move(res));
+			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.prevVersion.present() &&
+			    (self->liveCommittedVersion.get() != invalidVersion) &&
+			    (self->liveCommittedVersion.get() < req.prevVersion.get())) {
+				self->addActor.send(waitForPrev(self, req));
+			} else {
+				updateLiveCommittedVersion(self, req);
+				++self->nonWaitForPrevCommitRequests;
+				req.reply.send(Void());
+			}
+		} else {
+			UNREACHABLE();
 		}
 	}
 }
@@ -380,30 +384,30 @@ static std::set<int> const& normalMasterErrors() {
 	return s;
 }
 
-ACTOR Future<Void> masterServerCxx(MasterInterface mi,
-                                   Reference<AsyncVar<ServerDBInfo> const> db,
-                                   Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
-                                   ServerCoordinators coordinators,
-                                   LifetimeToken lifetime,
-                                   bool forceRecovery) {
-	state Future<Void> ccTimeout = delay(SERVER_KNOBS->CC_INTERFACE_TIMEOUT);
+Future<Void> masterServerCxx(MasterInterface mi,
+                             Reference<AsyncVar<ServerDBInfo> const> db,
+                             Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
+                             ServerCoordinators coordinators,
+                             LifetimeToken lifetime,
+                             bool forceRecovery) {
+	Future<Void> ccTimeout = delay(SERVER_KNOBS->CC_INTERFACE_TIMEOUT);
 	while (!ccInterface->get().present() || db->get().clusterInterface != ccInterface->get().get()) {
-		wait(ccInterface->onChange() || db->onChange() || ccTimeout);
+		co_await race(ccInterface->onChange(), db->onChange(), ccTimeout);
 		if (ccTimeout.isReady()) {
 			TraceEvent("MasterTerminated", mi.id())
 			    .detail("Reason", "Timeout")
 			    .detail("CCInterface", ccInterface->get().present() ? ccInterface->get().get().id() : UID())
 			    .detail("DBInfoInterface", db->get().clusterInterface.id());
-			return Void();
+			co_return;
 		}
 	}
 
-	state Future<Void> onDBChange = Void();
-	wait(onDBChange);
-	state PromiseStream<Future<Void>> addActor;
-	state Reference<MasterData> self(
+	Future<Void> onDBChange = Void();
+	co_await onDBChange;
+	PromiseStream<Future<Void>> addActor;
+	Reference<MasterData> self(
 	    new MasterData(db, mi, coordinators, db->get().clusterInterface, ""_sr, addActor, forceRecovery));
-	state Future<Void> collection = actorCollection(addActor.getFuture());
+	Future<Void> collection = actorCollection(addActor.getFuture());
 
 	addActor.send(traceRole(Role::MASTER, mi.id()));
 	addActor.send(provideVersions(self));
@@ -414,9 +418,11 @@ ACTOR Future<Void> masterServerCxx(MasterInterface mi,
 	           "Master born doomed");
 	TraceEvent("MasterLifetime", self->dbgid).detail("LifetimeToken", lifetime.toString());
 
+	Error err;
 	try {
-		loop choose {
-			when(wait(onDBChange)) {
+		while (true) {
+			auto res = co_await race(onDBChange, collection);
+			if (res.index() == 0) {
 				onDBChange = db->onChange();
 				if (!lifetime.isStillValid(db->get().masterLifetime, mi.id() == db->get().master.id())) {
 					TraceEvent("MasterTerminated", mi.id())
@@ -424,31 +430,34 @@ ACTOR Future<Void> masterServerCxx(MasterInterface mi,
 					    .detail("MyToken", lifetime.toString())
 					    .detail("CurrentToken", db->get().masterLifetime.toString());
 					CODE_PROBE(true, "Master replaced, dying");
-					if (BUGGIFY)
-						wait(delay(5));
+					if (BUGGIFY) {
+						co_await delay(5);
+					}
 					throw worker_removed();
 				}
-			}
-			when(wait(collection)) {
+			} else if (res.index() == 1) {
 				ASSERT(false);
 				throw internal_error();
+			} else {
+				UNREACHABLE();
 			}
 		}
 	} catch (Error& e) {
-		state Error err = e;
-		if (e.code() != error_code_actor_cancelled) {
-			wait(delay(0.0));
-		}
-		while (!addActor.isEmpty()) {
-			addActor.getFuture().pop();
-		}
-
-		if (normalMasterErrors().contains(err.code())) {
-			TraceEvent("MasterTerminated", mi.id()).error(err);
-			return Void();
-		}
-		throw err;
+		err = e;
 	}
+
+	if (err.code() != error_code_actor_cancelled) {
+		co_await delay(0.0);
+	}
+	while (!addActor.isEmpty()) {
+		addActor.getFuture().pop();
+	}
+
+	if (normalMasterErrors().contains(err.code())) {
+		TraceEvent("MasterTerminated", mi.id()).error(err);
+		co_return;
+	}
+	throw err;
 }
 
 Future<Void> masterServerImpl(MasterInterface mi,
