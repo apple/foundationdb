@@ -229,8 +229,8 @@ Future<Void> provideVersionsCxx(Reference<MasterData> self) {
 	ActorCollection versionActors(false);
 
 	while (true) {
-		GetCommitVersionRequest req = co_await waitOrError(
-		    waitAndForward(self->myInterface.getCommitVersion.getFuture()), versionActors.getResult());
+		GetCommitVersionRequest req =
+		    co_await waitOrError(self->myInterface.getCommitVersion.getFuture(), versionActors.getResult());
 		versionActors.add(getVersion(self, req));
 	}
 }
