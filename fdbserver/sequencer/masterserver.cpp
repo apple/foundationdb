@@ -40,12 +40,12 @@ template struct NetSAV<MasterInterface>;
 
 void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVersionRequest req);
 
-Version figureVersionCxx(Version current,
-                         double now,
-                         Version reference,
-                         int64_t toAdd,
-                         double maxVersionRateModifier,
-                         int64_t maxVersionRateOffset) {
+Version figureVersion(Version current,
+                      double now,
+                      Version reference,
+                      int64_t toAdd,
+                      double maxVersionRateModifier,
+                      int64_t maxVersionRateOffset) {
 	// Versions should roughly follow wall-clock time, based on the
 	// system clock of the current machine and an FDB-specific epoch.
 	// Calculate the expected version and determine whether we need to
@@ -62,15 +62,6 @@ Version figureVersionCxx(Version current,
 	return std::clamp(expected, current + toAdd - maxOffset, current + toAdd + maxOffset);
 }
 
-Version figureVersion(Version current,
-                      double now,
-                      Version reference,
-                      int64_t toAdd,
-                      double maxVersionRateModifier,
-                      int64_t maxVersionRateOffset) {
-	return figureVersionCxx(current, now, reference, toAdd, maxVersionRateModifier, maxVersionRateOffset);
-}
-
 Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
 	double startTime = now();
 	co_await self->liveCommittedVersion.whenAtLeast(req.prevVersion.get());
@@ -80,7 +71,7 @@ Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVersionRe
 	req.reply.send(Void());
 }
 
-Future<Void> getVersionCxx(Reference<MasterData> self, GetCommitVersionRequest req) {
+Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
 	Span span("M:getVersion"_loc, req.spanContext);
 	std::map<UID, CommitProxyVersionReplies>::iterator proxyItr =
 	    self->lastCommitProxyVersionReplies.find(req.requestingProxy); // lastCommitProxyVersionReplies never changes
@@ -165,10 +156,6 @@ Future<Void> getVersionCxx(Reference<MasterData> self, GetCommitVersionRequest r
 	}
 }
 
-Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
-	co_await getVersionCxx(self, req);
-}
-
 CounterValue::CounterValue(std::string const& name, CounterCollection& collection)
   : value(std::make_shared<Counter>(name, collection)) {}
 
@@ -225,7 +212,7 @@ MasterData::MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
 
 MasterData::~MasterData() {}
 
-Future<Void> provideVersionsCxx(Reference<MasterData> self) {
+Future<Void> provideVersions(Reference<MasterData> self) {
 	ActorCollection versionActors(false);
 
 	while (true) {
@@ -235,11 +222,7 @@ Future<Void> provideVersionsCxx(Reference<MasterData> self) {
 	}
 }
 
-Future<Void> provideVersions(Reference<MasterData> self) {
-	co_await provideVersionsCxx(self);
-}
-
-void updateLiveCommittedVersionCxx(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
+void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
 	self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, req.minKnownCommittedVersion);
 
 	if (req.version > self->liveCommittedVersion.get()) {
@@ -261,10 +244,6 @@ void updateLiveCommittedVersionCxx(Reference<MasterData> self, ReportRawCommitte
 		self->liveCommittedVersion.set(req.version);
 	}
 	++self->reportLiveCommittedVersionRequests;
-}
-
-void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
-	return updateLiveCommittedVersionCxx(self, req);
 }
 
 class LiveCommittedVersionServer {
@@ -316,16 +295,12 @@ public:
 	Future<Void> run() { co_await race(serveGetLiveCommittedVersion(), serveReportLiveCommittedVersion()); }
 };
 
-Future<Void> serveLiveCommittedVersionCxx(Reference<MasterData> self) {
+Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 	LiveCommittedVersionServer server(self);
 	co_await server.run();
 }
 
-Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
-	co_await serveLiveCommittedVersionCxx(self);
-}
-
-Future<Void> updateRecoveryDataCxx(Reference<MasterData> self) {
+Future<Void> updateRecoveryData(Reference<MasterData> self) {
 	while (true) {
 		UpdateRecoveryDataRequest req = co_await self->myInterface.updateRecoveryData.getFuture();
 		TraceEvent("UpdateRecoveryData", self->dbgid)
@@ -367,10 +342,6 @@ Future<Void> updateRecoveryDataCxx(Reference<MasterData> self) {
 	}
 }
 
-Future<Void> updateRecoveryData(Reference<MasterData> self) {
-	co_await updateRecoveryDataCxx(self);
-}
-
 static std::set<int> const& normalMasterErrors() {
 	static std::set<int> s;
 	if (s.empty()) {
@@ -392,12 +363,12 @@ static std::set<int> const& normalMasterErrors() {
 	return s;
 }
 
-Future<Void> masterServerCxx(MasterInterface mi,
-                             Reference<AsyncVar<ServerDBInfo> const> db,
-                             Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
-                             ServerCoordinators coordinators,
-                             LifetimeToken lifetime,
-                             bool forceRecovery) {
+Future<Void> masterServer(MasterInterface mi,
+                          Reference<AsyncVar<ServerDBInfo> const> db,
+                          Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
+                          ServerCoordinators coordinators,
+                          LifetimeToken lifetime,
+                          bool forceRecovery) {
 	Future<Void> ccTimeout = delay(SERVER_KNOBS->CC_INTERFACE_TIMEOUT);
 	while (!ccInterface->get().present() || db->get().clusterInterface != ccInterface->get().get()) {
 		co_await race(ccInterface->onChange(), db->onChange(), ccTimeout);
@@ -420,7 +391,7 @@ Future<Void> masterServerCxx(MasterInterface mi,
 	addActor.send(traceRole(Role::MASTER, mi.id()));
 	addActor.send(provideVersions(self));
 	addActor.send(serveLiveCommittedVersion(self));
-	addActor.send(updateRecoveryDataCxx(self));
+	addActor.send(updateRecoveryData(self));
 
 	CODE_PROBE(!lifetime.isStillValid(db->get().masterLifetime, mi.id() == db->get().master.id()),
 	           "Master born doomed");
@@ -459,38 +430,6 @@ Future<Void> masterServerCxx(MasterInterface mi,
 		co_return;
 	}
 	throw err;
-}
-
-Future<Void> masterServerImpl(MasterInterface mi,
-                              Reference<AsyncVar<ServerDBInfo> const> db,
-                              Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
-                              ServerCoordinators coordinators,
-                              LifetimeToken lifetime,
-                              bool forceRecovery) {
-	co_await masterServerCxx(mi, db, ccInterface, coordinators, lifetime, forceRecovery);
-}
-
-Future<Void> masterServer(MasterInterface mi,
-                          Reference<AsyncVar<ServerDBInfo> const> db,
-                          Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
-                          ServerCoordinators coordinators,
-                          LifetimeToken lifetime,
-                          bool forceRecovery) {
-
-	Future<Void> ccTimeout = delay(SERVER_KNOBS->CC_INTERFACE_TIMEOUT);
-	while (!ccInterface->get().present() || db->get().clusterInterface != ccInterface->get().get()) {
-		co_await race(ccInterface->onChange(), db->onChange(), ccTimeout);
-		if (ccTimeout.isReady()) {
-			TraceEvent("MasterTerminated", mi.id())
-			    .detail("Reason", "Timeout")
-			    .detail("CCInterface", ccInterface->get().present() ? ccInterface->get().get().id() : UID())
-			    .detail("DBInfoInterface", db->get().clusterInterface.id());
-			co_return;
-		}
-	}
-
-	co_await Future<Void>(Void());
-	co_await masterServerImpl(mi, db, ccInterface, coordinators, lifetime, forceRecovery);
 }
 
 TEST_CASE("/fdbserver/MasterServer/FigureVersion/Simple") {
