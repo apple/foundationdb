@@ -1,5 +1,5 @@
 /*
- * Coordination.actor.cpp
+ * Coordination.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -31,9 +31,7 @@
 #include "flow/genericactors.actor.h"
 #include "fdbclient/MonitorLeader.h"
 #include "flow/network.h"
-
 #include "flow/CoroUtils.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 // This module implements coordinationServer() plus the interfaces in CoordinationInterface.h
 
@@ -159,16 +157,16 @@ private:
 };
 
 TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
-	state GenerationRegInterface reg;
-	state OnDemandStore store(params.getDataDir(), deterministicRandom()->randomUniqueID(), fileCoordinatorPrefix);
+	GenerationRegInterface reg;
+	OnDemandStore store(params.getDataDir(), deterministicRandom()->randomUniqueID(), fileCoordinatorPrefix);
 	LocalGenerationReg generationReg(reg, &store);
-	state Future<Void> actor = generationReg.run();
-	state Key the_key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, 10)));
+	Future<Void> actor = generationReg.run();
+	Key the_key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, 10)));
 
-	state UniqueGeneration firstGen(0, deterministicRandom()->randomUniqueID());
+	UniqueGeneration firstGen(0, deterministicRandom()->randomUniqueID());
 
 	{
-		GenerationRegReadReply r = wait(reg.read.getReply(GenerationRegReadRequest(the_key, firstGen)));
+		GenerationRegReadReply r = co_await reg.read.getReply(GenerationRegReadRequest(the_key, firstGen));
 		//   If there was no prior write(_,_,0) or a data loss fault,
 		//     returns (Optional(),0,gen2)
 		ASSERT(!r.value.present());
@@ -178,13 +176,13 @@ TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 
 	{
 		UniqueGeneration g =
-		    wait(reg.write.getReply(GenerationRegWriteRequest(KeyValueRef(the_key, "Value1"_sr), firstGen)));
+		    co_await reg.write.getReply(GenerationRegWriteRequest(KeyValueRef(the_key, "Value1"_sr), firstGen));
 		//   (gen1==gen is considered a "successful" write)
 		ASSERT(g == firstGen);
 	}
 
 	{
-		GenerationRegReadReply r = wait(reg.read.getReply(GenerationRegReadRequest(the_key, UniqueGeneration())));
+		GenerationRegReadReply r = co_await reg.read.getReply(GenerationRegReadRequest(the_key, UniqueGeneration()));
 		// read(key,gen2) returns (value,gen,rgen).
 		//     There was some earlier or concurrent write(key,value,gen).
 		ASSERT(r.value == "Value1"_sr);
