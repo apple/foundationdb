@@ -267,12 +267,12 @@ void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVe
 	return updateLiveCommittedVersionCxx(self, req);
 }
 
-Future<Void> serveLiveCommittedVersionCxx(Reference<MasterData> self) {
-	while (true) {
-		auto res = co_await race(self->myInterface.getLiveCommittedVersion.getFuture(),
-		                         self->myInterface.reportLiveCommittedVersion.getFuture());
-		if (res.index() == 0) {
-			GetRawCommittedVersionRequest req = std::get<0>(std::move(res));
+class LiveCommittedVersionServer {
+	Reference<MasterData> self;
+
+	Future<Void> serveGetLiveCommittedVersion() {
+		while (true) {
+			GetRawCommittedVersionRequest req = co_await self->myInterface.getLiveCommittedVersion.getFuture();
 			if (req.debugID.present())
 				g_traceBatch.addEvent("TransactionDebug",
 				                      req.debugID.get().first(),
@@ -292,8 +292,12 @@ Future<Void> serveLiveCommittedVersionCxx(Reference<MasterData> self) {
 				self->versionVectorSizeOnCVReply->addMeasurement(reply.ssVersionVectorDelta.size());
 			}
 			req.reply.send(reply);
-		} else if (res.index() == 1) {
-			ReportRawCommittedVersionRequest req = std::get<1>(std::move(res));
+		}
+	}
+
+	Future<Void> serveReportLiveCommittedVersion() {
+		while (true) {
+			ReportRawCommittedVersionRequest req = co_await self->myInterface.reportLiveCommittedVersion.getFuture();
 			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.prevVersion.present() &&
 			    (self->liveCommittedVersion.get() != invalidVersion) &&
 			    (self->liveCommittedVersion.get() < req.prevVersion.get())) {
@@ -303,10 +307,18 @@ Future<Void> serveLiveCommittedVersionCxx(Reference<MasterData> self) {
 				++self->nonWaitForPrevCommitRequests;
 				req.reply.send(Void());
 			}
-		} else {
-			UNREACHABLE();
 		}
 	}
+
+public:
+	explicit LiveCommittedVersionServer(Reference<MasterData> self) : self(self) {}
+
+	Future<Void> run() { co_await race(serveGetLiveCommittedVersion(), serveReportLiveCommittedVersion()); }
+};
+
+Future<Void> serveLiveCommittedVersionCxx(Reference<MasterData> self) {
+	LiveCommittedVersionServer server(self);
+	co_await server.run();
 }
 
 Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
