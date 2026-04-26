@@ -229,13 +229,9 @@ Future<Void> provideVersionsCxx(Reference<MasterData> self) {
 	ActorCollection versionActors(false);
 
 	while (true) {
-		auto res = co_await race(self->myInterface.getCommitVersion.getFuture(), versionActors.getResult());
-		if (res.index() == 0) {
-			GetCommitVersionRequest req = std::get<0>(std::move(res));
-			versionActors.add(getVersion(self, req));
-		} else if (res.index() != 1) {
-			UNREACHABLE();
-		}
+		GetCommitVersionRequest req = co_await waitOrError(
+		    waitAndForward(self->myInterface.getCommitVersion.getFuture()), versionActors.getResult());
+		versionActors.add(getVersion(self, req));
 	}
 }
 
