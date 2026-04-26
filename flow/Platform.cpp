@@ -2867,21 +2867,12 @@ THREAD_HANDLE startThread(void (*func)(void*), void* arg, int stackSize, const c
 struct ThreadCreateArgs {
 	void* (*func)(void* arg);
 	void* arg;
-	std::string name;
-	ThreadCreateArgs(void* (*f)(void*), void* a, const char* n) : func(f), arg(a), name(n != nullptr ? n : "") {}
+	ThreadCreateArgs(void* (*f)(void*), void* a) : func(f), arg(a) {}
 };
 
 void* runFunc(void* a) {
 	auto* args = (ThreadCreateArgs*)a;
 	try {
-#if defined(__linux__)
-		if (!args->name.empty()) {
-			int retVal = pthread_setname_np(pthread_self(), args->name.c_str());
-			if (retVal != 0) {
-				TraceEvent(SevWarn, "PthreadSetNameNp").detail("Name", args->name).detail("ReturnCode", retVal);
-			}
-		}
-#endif
 		(void)args->func(args->arg);
 	} catch (std::exception& e) {
 		fprintf(stderr,
@@ -2910,9 +2901,27 @@ THREAD_HANDLE startThread(void* (*func)(void*), void* arg, int stackSize, const 
 		};
 	}
 
-	auto* args = new ThreadCreateArgs(func, arg, name);
+	auto* args = new ThreadCreateArgs(func, arg);
 	pthread_create(&t, &attr, &runFunc, args);
 	pthread_attr_destroy(&attr);
+
+#if defined(__linux__)
+	if (name != nullptr) {
+		// TODO: Should this just truncate?
+		int retVal = pthread_setname_np(t, name);
+		if (!retVal)
+			return t;
+		// In simulation and unit testing a thread may return before the name can be set, this will
+		// return ENOENT or ESRCH. We'll log when ENOENT or ESRCH is encountered and continue, otherwise we'll log and
+		// throw a platform_error.
+		if (errno == ENOENT || errno == ESRCH) {
+			TraceEvent(SevWarn, "PthreadSetNameNp").detail("Name", name).detail("ReturnCode", retVal).GetLastError();
+		} else {
+			TraceEvent(SevError, "PthreadSetNameNp").detail("Name", name).detail("ReturnCode", retVal).GetLastError();
+			throw platform_error();
+		}
+	}
+#endif
 
 	return t;
 }
