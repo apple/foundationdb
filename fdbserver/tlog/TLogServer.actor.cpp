@@ -2800,14 +2800,16 @@ Future<Void> tLogEnablePopReq(TLogEnablePopRequest enablePopReq, TLogData* self,
 	enablePopReq.reply.send(Void());
 }
 
-ACTOR Future<Void> serveTLogInterface(TLogData* self,
-                                      TLogInterface tli,
-                                      Reference<LogData> logData,
-                                      PromiseStream<Void> warningCollectorInput) {
-	state Future<Void> dbInfoChange = Void();
+class ServeTLogInterface {
+	TLogData* self;
+	TLogInterface tli;
+	Reference<LogData> logData;
+	PromiseStream<Void> warningCollectorInput;
+	Future<Void> dbInfoChange;
 
-	loop choose {
-		when(wait(dbInfoChange)) {
+	Future<Void> updateDbInfo() {
+		while (true) {
+			co_await dbInfoChange;
 			dbInfoChange = self->dbInfo->onChange();
 			bool found = false;
 			if (self->dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
@@ -2835,12 +2837,20 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 				logData->logSystem->set(Reference<LogSystem>());
 			}
 		}
-		when(TLogPeekStreamRequest req = waitNext(tli.peekStreamMessages.getFuture())) {
+	}
+
+	Future<Void> servePeekStreams() {
+		while (true) {
+			TLogPeekStreamRequest req = co_await tli.peekStreamMessages.getFuture();
 			TraceEvent(SevDebug, "TLogPeekStream", logData->logId)
 			    .detail("Token", tli.peekStreamMessages.getEndpoint().token);
 			logData->addActor.send(tLogPeekStream(self, req, logData));
 		}
-		when(TLogPeekRequest req = waitNext(tli.peekMessages.getFuture())) {
+	}
+
+	Future<Void> servePeeks() {
+		while (true) {
+			TLogPeekRequest req = co_await tli.peekMessages.getFuture();
 			logData->addActor.send(tLogPeekMessages(req.reply,
 			                                        self,
 			                                        logData,
@@ -2852,10 +2862,18 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 			                                        req.end,
 			                                        req.returnEmptyIfStopped));
 		}
-		when(TLogPopRequest req = waitNext(tli.popMessages.getFuture())) {
+	}
+
+	Future<Void> servePops() {
+		while (true) {
+			TLogPopRequest req = co_await tli.popMessages.getFuture();
 			logData->addActor.send(tLogPop(self, req, logData));
 		}
-		when(TLogCommitRequest req = waitNext(tli.commit.getFuture())) {
+	}
+
+	Future<Void> serveCommits() {
+		while (true) {
+			TLogCommitRequest req = co_await tli.commit.getFuture();
 			//TraceEvent("TLogCommitReq", logData->logId).detail("Ver", req.version).detail("PrevVer", req.prevVersion).detail("LogVer", logData->version.get());
 			ASSERT(logData->isPrimary);
 			CODE_PROBE(logData->stopped(), "TLogCommitRequest while stopped");
@@ -2865,13 +2883,25 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 				logData->addActor.send(tLogCommit(self, req, logData, warningCollectorInput));
 			}
 		}
-		when(ReplyPromise<TLogLockResult> reply = waitNext(tli.lock.getFuture())) {
+	}
+
+	Future<Void> serveLocks() {
+		while (true) {
+			ReplyPromise<TLogLockResult> reply = co_await tli.lock.getFuture();
 			logData->addActor.send(tLogLock(self, reply, logData));
 		}
-		when(TLogQueuingMetricsRequest req = waitNext(tli.getQueuingMetrics.getFuture())) {
+	}
+
+	Future<Void> serveQueuingMetrics() {
+		while (true) {
+			TLogQueuingMetricsRequest req = co_await tli.getQueuingMetrics.getFuture();
 			getQueuingMetrics(self, logData, req);
 		}
-		when(TLogConfirmRunningRequest req = waitNext(tli.confirmRunning.getFuture())) {
+	}
+
+	Future<Void> serveConfirmRunning() {
+		while (true) {
+			TLogConfirmRunningRequest req = co_await tli.confirmRunning.getFuture();
 			if (req.debugID.present()) {
 				UID tlogDebugID = nondeterministicRandom()->randomUniqueID();
 				g_traceBatch.addAttach("TransactionAttachID", req.debugID.get().first(), tlogDebugID.first());
@@ -2882,7 +2912,11 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 			else
 				req.reply.sendError(tlog_stopped());
 		}
-		when(TLogDisablePopRequest req = waitNext(tli.disablePopRequest.getFuture())) {
+	}
+
+	Future<Void> serveDisablePop() {
+		while (true) {
+			TLogDisablePopRequest req = co_await tli.disablePopRequest.getFuture();
 			if (self->ignorePopUid != "") {
 				TraceEvent(SevWarn, "TLogPopDisableonDisable")
 				    .detail("IgnorePopUid", self->ignorePopUid)
@@ -2899,10 +2933,42 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 				req.reply.send(Void());
 			}
 		}
-		when(TLogEnablePopRequest enablePopReq = waitNext(tli.enablePopRequest.getFuture())) {
+	}
+
+	Future<Void> serveEnablePop() {
+		while (true) {
+			TLogEnablePopRequest enablePopReq = co_await tli.enablePopRequest.getFuture();
 			logData->addActor.send(tLogEnablePopReq(enablePopReq, self, logData));
 		}
 	}
+
+public:
+	ServeTLogInterface(TLogData* self,
+	                   TLogInterface tli,
+	                   Reference<LogData> logData,
+	                   PromiseStream<Void> warningCollectorInput)
+	  : self(self), tli(tli), logData(logData), warningCollectorInput(warningCollectorInput), dbInfoChange(Void()) {}
+
+	Future<Void> run() {
+		co_await race(updateDbInfo(),
+		              servePeekStreams(),
+		              servePeeks(),
+		              servePops(),
+		              serveCommits(),
+		              serveLocks(),
+		              serveQueuingMetrics(),
+		              serveConfirmRunning(),
+		              serveDisablePop(),
+		              serveEnablePop());
+	}
+};
+
+Future<Void> serveTLogInterface(TLogData* self,
+                                TLogInterface tli,
+                                Reference<LogData> logData,
+                                PromiseStream<Void> warningCollectorInput) {
+	ServeTLogInterface server(self, tli, logData, warningCollectorInput);
+	co_await server.run();
 }
 
 void removeLog(TLogData* self, Reference<LogData> logData, bool terminateWorkerIfEmpty = true) {
