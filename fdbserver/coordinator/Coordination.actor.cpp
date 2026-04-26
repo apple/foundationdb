@@ -689,25 +689,26 @@ StringRef getClusterDescriptor(Key key) {
 	return str.eat(":");
 }
 
-// leaderServer multiplexes multiple leaderRegisters onto a single LeaderElectionRegInterface,
-// creating and destroying them on demand.
-ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
-                                OnDemandStore* pStore,
-                                UID id,
-                                Reference<IClusterConnectionRecord> ccr) {
-	state LeaderRegisterCollection regs(pStore);
-	state ActorCollection forwarders(false);
+class LeaderServer {
+	LeaderElectionRegInterface interf;
+	UID id;
+	Reference<IClusterConnectionRecord> ccr;
+	LeaderRegisterCollection regs;
+	ActorCollection forwarders;
 
-	wait(LeaderRegisterCollection::init(&regs));
-
-	loop choose {
-		when(CheckDescriptorMutableRequest req = waitNext(interf.checkDescriptorMutable.getFuture())) {
+	Future<Void> serveCheckDescriptorMutableRequests() {
+		while (true) {
+			CheckDescriptorMutableRequest req = co_await interf.checkDescriptorMutable.getFuture();
 			// Note the response returns the value of a knob enforced by checking only one coordinator. It is not
 			// quorum based.
 			CheckDescriptorMutableReply rep(SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT);
 			req.reply.send(rep);
 		}
-		when(OpenDatabaseCoordRequest req = waitNext(interf.openDatabase.getFuture())) {
+	}
+
+	Future<Void> serveOpenDatabaseRequests() {
+		while (true) {
+			OpenDatabaseCoordRequest req = co_await interf.openDatabase.getFuture();
 			Optional<LeaderInfo> forward = regs.getForward(req.clusterKey);
 			if (forward.present()) {
 				ClientDBInfo info;
@@ -729,7 +730,11 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 				}
 			}
 		}
-		when(ElectionResultRequest req = waitNext(interf.electionResult.getFuture())) {
+	}
+
+	Future<Void> serveElectionResultRequests() {
+		while (true) {
+			ElectionResultRequest req = co_await interf.electionResult.getFuture();
 			Optional<LeaderInfo> forward = regs.getForward(req.key);
 			if (forward.present()) {
 				req.reply.send(forward.get());
@@ -748,7 +753,11 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 				}
 			}
 		}
-		when(GetLeaderRequest req = waitNext(interf.getLeader.getFuture())) {
+	}
+
+	Future<Void> serveGetLeaderRequests() {
+		while (true) {
+			GetLeaderRequest req = co_await interf.getLeader.getFuture();
 			Optional<LeaderInfo> forward = regs.getForward(req.key);
 			if (forward.present())
 				req.reply.send(forward.get());
@@ -766,7 +775,11 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 				}
 			}
 		}
-		when(CandidacyRequest req = waitNext(interf.candidacy.getFuture())) {
+	}
+
+	Future<Void> serveCandidacyRequests() {
+		while (true) {
+			CandidacyRequest req = co_await interf.candidacy.getFuture();
 			Optional<LeaderInfo> forward = regs.getForward(req.key);
 			if (forward.present())
 				req.reply.send(forward.get());
@@ -783,7 +796,11 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 				}
 			}
 		}
-		when(LeaderHeartbeatRequest req = waitNext(interf.leaderHeartbeat.getFuture())) {
+	}
+
+	Future<Void> serveLeaderHeartbeatRequests() {
+		while (true) {
+			LeaderHeartbeatRequest req = co_await interf.leaderHeartbeat.getFuture();
 			Optional<LeaderInfo> forward = regs.getForward(req.key);
 			if (forward.present())
 				req.reply.send(LeaderHeartbeatReply{ false });
@@ -800,7 +817,11 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 				}
 			}
 		}
-		when(ForwardRequest req = waitNext(interf.forward.getFuture())) {
+	}
+
+	Future<Void> serveForwardRequests() {
+		while (true) {
+			ForwardRequest req = co_await interf.forward.getFuture();
 			Optional<LeaderInfo> forward = regs.getForward(req.key);
 			if (forward.present()) {
 				req.reply.send(Void());
@@ -818,11 +839,42 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 				}
 			}
 		}
-		when(wait(forwarders.getResult())) {
-			ASSERT(false);
-			throw internal_error();
-		}
 	}
+
+	Future<Void> monitorForwarders() {
+		co_await forwarders.getResult();
+		ASSERT(false);
+		throw internal_error();
+	}
+
+public:
+	LeaderServer(LeaderElectionRegInterface interf,
+	             OnDemandStore* pStore,
+	             UID id,
+	             Reference<IClusterConnectionRecord> ccr)
+	  : interf(interf), id(id), ccr(ccr), regs(pStore), forwarders(false) {}
+
+	Future<Void> run() {
+		co_await LeaderRegisterCollection::init(&regs);
+		co_await race(serveCheckDescriptorMutableRequests(),
+		              serveOpenDatabaseRequests(),
+		              serveElectionResultRequests(),
+		              serveGetLeaderRequests(),
+		              serveCandidacyRequests(),
+		              serveLeaderHeartbeatRequests(),
+		              serveForwardRequests(),
+		              monitorForwarders());
+	}
+};
+
+// leaderServer multiplexes multiple leaderRegisters onto a single LeaderElectionRegInterface,
+// creating and destroying them on demand.
+Future<Void> leaderServer(LeaderElectionRegInterface interf,
+                          OnDemandStore* pStore,
+                          UID id,
+                          Reference<IClusterConnectionRecord> ccr) {
+	LeaderServer server(interf, pStore, id, ccr);
+	co_await server.run();
 }
 
 Future<Void> coordinationServer(std::string dataFolder, Reference<IClusterConnectionRecord> ccr) {
