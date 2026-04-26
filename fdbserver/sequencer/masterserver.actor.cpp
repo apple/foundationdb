@@ -72,20 +72,18 @@ Version figureVersion(Version current,
 	return figureVersionCxx(current, now, reference, toAdd, maxVersionRateModifier, maxVersionRateOffset);
 }
 
-ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
-	state double startTime = now();
-	wait(self->liveCommittedVersion.whenAtLeast(req.prevVersion.get()));
+Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
+	double startTime = now();
+	co_await self->liveCommittedVersion.whenAtLeast(req.prevVersion.get());
 	self->waitForPrevLatencies->addMeasurement(now() - startTime);
 	++self->waitForPrevCommitRequests;
 	updateLiveCommittedVersion(self, req);
 	req.reply.send(Void());
-
-	return Void();
 }
 
-ACTOR Future<Void> getVersionCxx(Reference<MasterData> self, GetCommitVersionRequest req) {
-	state Span span("M:getVersion"_loc, req.spanContext);
-	state std::map<UID, CommitProxyVersionReplies>::iterator proxyItr =
+Future<Void> getVersionCxx(Reference<MasterData> self, GetCommitVersionRequest req) {
+	Span span("M:getVersion"_loc, req.spanContext);
+	std::map<UID, CommitProxyVersionReplies>::iterator proxyItr =
 	    self->lastCommitProxyVersionReplies.find(req.requestingProxy); // lastCommitProxyVersionReplies never changes
 
 	++self->getCommitVersionRequests;
@@ -93,13 +91,13 @@ ACTOR Future<Void> getVersionCxx(Reference<MasterData> self, GetCommitVersionReq
 	if (proxyItr == self->lastCommitProxyVersionReplies.end()) {
 		// Request from invalid proxy (e.g. from duplicate recruitment request)
 		req.reply.send(Never());
-		return Void();
+		co_return;
 	}
 
 	CODE_PROBE(proxyItr->second.latestRequestNum.get() < req.requestNum - 1,
 	           "Commit version request queued up",
 	           probe::decoration::rare);
-	wait(proxyItr->second.latestRequestNum.whenAtLeast(req.requestNum - 1));
+	co_await proxyItr->second.latestRequestNum.whenAtLeast(req.requestNum - 1);
 
 	auto itr = proxyItr->second.replies.find(req.requestNum);
 	if (itr != proxyItr->second.replies.end()) {
@@ -166,13 +164,10 @@ ACTOR Future<Void> getVersionCxx(Reference<MasterData> self, GetCommitVersionReq
 		ASSERT(proxyItr->second.latestRequestNum.get() == req.requestNum - 1);
 		proxyItr->second.latestRequestNum.set(req.requestNum);
 	}
-
-	return Void();
 }
 
-ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
-	wait(getVersionCxx(self, req));
-	return Void();
+Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
+	co_await getVersionCxx(self, req);
 }
 
 CounterValue::CounterValue(std::string const& name, CounterCollection& collection)
@@ -242,9 +237,8 @@ ACTOR Future<Void> provideVersionsCxx(Reference<MasterData> self) {
 	}
 }
 
-ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
-	wait(provideVersionsCxx(self));
-	return Void();
+Future<Void> provideVersions(Reference<MasterData> self) {
+	co_await provideVersionsCxx(self);
 }
 
 void updateLiveCommittedVersionCxx(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
@@ -315,14 +309,13 @@ ACTOR Future<Void> serveLiveCommittedVersionCxx(Reference<MasterData> self) {
 	}
 }
 
-ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
-	wait(serveLiveCommittedVersionCxx(self));
-	return Void();
+Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
+	co_await serveLiveCommittedVersionCxx(self);
 }
 
-ACTOR Future<Void> updateRecoveryDataCxx(Reference<MasterData> self) {
-	loop {
-		UpdateRecoveryDataRequest req = waitNext(self->myInterface.updateRecoveryData.getFuture());
+Future<Void> updateRecoveryDataCxx(Reference<MasterData> self) {
+	while (true) {
+		UpdateRecoveryDataRequest req = co_await self->myInterface.updateRecoveryData.getFuture();
 		TraceEvent("UpdateRecoveryData", self->dbgid)
 		    .detail("ReceivedRecoveryTxnVersion", req.recoveryTransactionVersion)
 		    .detail("ReceivedLastEpochEnd", req.lastEpochEnd)
@@ -362,9 +355,8 @@ ACTOR Future<Void> updateRecoveryDataCxx(Reference<MasterData> self) {
 	}
 }
 
-ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
-	wait(updateRecoveryDataCxx(self));
-	return Void();
+Future<Void> updateRecoveryData(Reference<MasterData> self) {
+	co_await updateRecoveryDataCxx(self);
 }
 
 static std::set<int> const& normalMasterErrors() {
@@ -459,14 +451,13 @@ ACTOR Future<Void> masterServerCxx(MasterInterface mi,
 	}
 }
 
-ACTOR Future<Void> masterServerImpl(MasterInterface mi,
-                                    Reference<AsyncVar<ServerDBInfo> const> db,
-                                    Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
-                                    ServerCoordinators coordinators,
-                                    LifetimeToken lifetime,
-                                    bool forceRecovery) {
-	wait(masterServerCxx(mi, db, ccInterface, coordinators, lifetime, forceRecovery));
-	return Void();
+Future<Void> masterServerImpl(MasterInterface mi,
+                              Reference<AsyncVar<ServerDBInfo> const> db,
+                              Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
+                              ServerCoordinators coordinators,
+                              LifetimeToken lifetime,
+                              bool forceRecovery) {
+	co_await masterServerCxx(mi, db, ccInterface, coordinators, lifetime, forceRecovery);
 }
 
 Future<Void> masterServer(MasterInterface mi,
