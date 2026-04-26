@@ -2274,23 +2274,20 @@ static Future<Void> rejoinServer(CommitProxyInterface proxy, ProxyCommitData* co
 
 ACTOR Future<Void> ddMetricsRequestServer(CommitProxyInterface proxy, Reference<AsyncVar<ServerDBInfo> const> db) {
 	loop {
-		choose {
-			when(state GetDDMetricsRequest req = waitNext(proxy.getDDMetrics.getFuture())) {
-				if (!db->get().distributor.present()) {
-					req.reply.sendError(dd_not_found());
-					continue;
-				}
-				ErrorOr<GetDataDistributorMetricsReply> reply =
-				    wait(errorOr(db->get().distributor.get().dataDistributorMetrics.getReply(
-				        GetDataDistributorMetricsRequest(req.keys, req.shardLimit))));
-				if (reply.isError()) {
-					req.reply.sendError(reply.getError());
-				} else {
-					GetDDMetricsReply newReply;
-					newReply.storageMetricsList = reply.get().storageMetricsList;
-					req.reply.send(newReply);
-				}
-			}
+		state GetDDMetricsRequest req = waitNext(proxy.getDDMetrics.getFuture());
+		if (!db->get().distributor.present()) {
+			req.reply.sendError(dd_not_found());
+			continue;
+		}
+		ErrorOr<GetDataDistributorMetricsReply> reply =
+		    wait(errorOr(db->get().distributor.get().dataDistributorMetrics.getReply(
+		        GetDataDistributorMetricsRequest(req.keys, req.shardLimit))));
+		if (reply.isError()) {
+			req.reply.sendError(reply.getError());
+		} else {
+			GetDDMetricsReply newReply;
+			newReply.storageMetricsList = reply.get().storageMetricsList;
+			req.reply.send(newReply);
 		}
 	}
 }
