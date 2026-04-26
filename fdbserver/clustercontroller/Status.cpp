@@ -118,6 +118,9 @@ struct ClusterGetStatusState : ReferenceCounted<ClusterGetStatusState> {
 	std::set<std::string> statusIncompleteReasons;
 };
 
+// Owns the transactions used by the latency probe child actors. Those actors
+// may continue running after latencyProbeFetcher() times out, so the
+// transactions cannot live as stack locals in the parent coroutine frame.
 struct LatencyProbeState : ReferenceCounted<LatencyProbeState> {
 	explicit LatencyProbeState(Database cx) : trImmediate(cx), trDefault(cx), trBatch(cx), trWrite(cx) {}
 
