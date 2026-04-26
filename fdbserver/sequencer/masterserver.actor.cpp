@@ -417,25 +417,18 @@ Future<Void> masterServerCxx(MasterInterface mi,
 	Error err;
 	try {
 		while (true) {
-			auto res = co_await race(onDBChange, collection);
-			if (res.index() == 0) {
-				onDBChange = db->onChange();
-				if (!lifetime.isStillValid(db->get().masterLifetime, mi.id() == db->get().master.id())) {
-					TraceEvent("MasterTerminated", mi.id())
-					    .detail("Reason", "LifetimeToken")
-					    .detail("MyToken", lifetime.toString())
-					    .detail("CurrentToken", db->get().masterLifetime.toString());
-					CODE_PROBE(true, "Master replaced, dying");
-					if (BUGGIFY) {
-						co_await delay(5);
-					}
-					throw worker_removed();
+			co_await waitOrError(onDBChange, collection);
+			onDBChange = db->onChange();
+			if (!lifetime.isStillValid(db->get().masterLifetime, mi.id() == db->get().master.id())) {
+				TraceEvent("MasterTerminated", mi.id())
+				    .detail("Reason", "LifetimeToken")
+				    .detail("MyToken", lifetime.toString())
+				    .detail("CurrentToken", db->get().masterLifetime.toString());
+				CODE_PROBE(true, "Master replaced, dying");
+				if (BUGGIFY) {
+					co_await delay(5);
 				}
-			} else if (res.index() == 1) {
-				ASSERT(false);
-				throw internal_error();
-			} else {
-				UNREACHABLE();
+				throw worker_removed();
 			}
 		}
 	} catch (Error& e) {
