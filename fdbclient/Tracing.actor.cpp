@@ -32,6 +32,8 @@
 
 #include "flow/CoroUtils.h"
 
+namespace {
+
 // Initial size of buffer used to store serialized traces. Buffer will be
 // resized when necessary.
 constexpr int kTraceBufferSize = 1024;
@@ -89,12 +91,12 @@ Future<Void> simulationStartServer() {
 	Reference<IUDPSocket> serverSocket = co_await INetworkConnections::net()->createUDPSocket(localAddress);
 	serverSocket->bind(localAddress);
 
-	Standalone<StringRef> packetString = makeString(IUDPSocket::MAX_PACKET_SIZE);
-	uint8_t* packet = mutateString(packetString);
+	auto packet = std::make_unique<uint8_t[]>(IUDPSocket::MAX_PACKET_SIZE);
 
 	while (true) {
-		int size = co_await serverSocket->receive(packet, packet + IUDPSocket::MAX_PACKET_SIZE);
-		auto message = packetString.substr(0, size);
+		uint8_t* packetBegin = packet.get();
+		int size = co_await serverSocket->receive(packetBegin, packetBegin + IUDPSocket::MAX_PACKET_SIZE);
+		auto message = StringRef(packetBegin, size);
 
 		// For now, just check the first byte in the message matches. Data is
 		// currently written as an array, so first byte should match msgpack
@@ -327,6 +329,8 @@ private:
 #endif
 
 ITracer* g_tracer = new NoopTracer();
+
+} // namespace
 
 void openTracer(TracerType type) {
 	if (g_tracer->type() == type) {
