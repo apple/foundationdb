@@ -1,5 +1,5 @@
 /*
- * Status.actor.cpp
+ * Status.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -46,7 +46,6 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/StorageWiggleMetrics.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 const char* RecoveryStatus::names[] = { "reading_coordinated_state",
 	                                    "locking_coordinated_state",
@@ -110,24 +109,46 @@ struct StorageServerStatusInfo : public StorageServerMetaInfo {
 	explicit StorageServerStatusInfo(const StorageServerMetaInfo& info) : StorageServerMetaInfo(info, info.metadata) {}
 };
 
-ACTOR static Future<Optional<TraceEventFields>> latestEventOnWorker(WorkerInterface worker, std::string eventName) {
+// Shared output state for clusterGetStatus() and clusterGetStatusImpl().
+// The inner status collection can outlive the outer deadline race, so these
+// objects must not be stack locals referenced through raw pointers.
+struct ClusterGetStatusState : ReferenceCounted<ClusterGetStatusState> {
+	JsonBuilderObject statusObj;
+	JsonBuilderArray messages;
+	std::set<std::string> statusIncompleteReasons;
+};
+
+// Owns the transactions used by the latency probe child actors. Those actors
+// may continue running after latencyProbeFetcher() times out, so the
+// transactions cannot live as stack locals in the parent coroutine frame.
+struct LatencyProbeState : ReferenceCounted<LatencyProbeState> {
+	explicit LatencyProbeState(Database cx) : trImmediate(cx), trDefault(cx), trBatch(cx), trWrite(cx) {}
+
+	Transaction trImmediate;
+	Transaction trDefault;
+	Transaction trBatch;
+	Transaction trWrite;
+};
+
+static AsyncResult<Optional<TraceEventFields>> latestEventOnWorker(WorkerInterface worker, std::string eventName) {
 	try {
 		EventLogRequest req =
 		    eventName.size() > 0 ? EventLogRequest(Standalone<StringRef>(eventName)) : EventLogRequest();
-		ErrorOr<TraceEventFields> eventTrace = wait(errorOr(timeoutError(worker.eventLogRequest.getReply(req), 2.0)));
+		ErrorOr<TraceEventFields> eventTrace =
+		    co_await errorOr(timeoutError(worker.eventLogRequest.getReply(req), 2.0));
 
 		if (eventTrace.isError()) {
-			return Optional<TraceEventFields>();
+			co_return Optional<TraceEventFields>();
 		}
-		return eventTrace.get();
+		co_return eventTrace.get();
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
-		return Optional<TraceEventFields>();
+		co_return Optional<TraceEventFields>();
 	}
 }
 
-static Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestErrorOnWorkers(
+static AsyncResult<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestErrorOnWorkers(
     std::vector<WorkerDetails> workers) {
 	return latestEventOnWorkers(workers, "");
 }
@@ -715,7 +736,7 @@ struct RolesInfo {
 	}
 };
 
-ACTOR static Future<JsonBuilderObject> processStatusFetcher(
+static AsyncResult<JsonBuilderObject> processStatusFetcher(
     Reference<AsyncVar<ServerDBInfo>> db,
     std::vector<WorkerDetails> workers,
     WorkerEvents pMetrics,
@@ -736,15 +757,15 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
     Optional<Key> healthyZone,
     std::set<std::string>* incomplete_reasons) {
 
-	state JsonBuilderObject processMap;
+	JsonBuilderObject processMap;
 
 	// construct a map from a process address to a status object containing a trace file open error
 	// this is later added to the messages subsection
-	state std::map<std::string, JsonBuilderObject> tracefileOpenErrorMap;
-	state WorkerEvents::iterator traceFileErrorsItr;
+	std::map<std::string, JsonBuilderObject> tracefileOpenErrorMap;
+	WorkerEvents::iterator traceFileErrorsItr;
 	for (traceFileErrorsItr = traceFileOpenErrors.begin(); traceFileErrorsItr != traceFileOpenErrors.end();
 	     ++traceFileErrorsItr) {
-		wait(yield());
+		co_await yield();
 		if (traceFileErrorsItr->second.size()) {
 			try {
 				// Have event fields, parse it and turn it into a message object describing the trace file opening error
@@ -767,11 +788,11 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		}
 	}
 
-	state std::map<Optional<Standalone<StringRef>>, MachineMemoryInfo> machineMemoryUsage;
-	state std::vector<WorkerDetails>::iterator workerItr;
+	std::map<Optional<Standalone<StringRef>>, MachineMemoryInfo> machineMemoryUsage;
+	std::vector<WorkerDetails>::iterator workerItr;
 	for (workerItr = workers.begin(); workerItr != workers.end(); ++workerItr) {
-		wait(yield());
-		state std::map<Optional<Standalone<StringRef>>, MachineMemoryInfo>::iterator memInfo =
+		co_await yield();
+		std::map<Optional<Standalone<StringRef>>, MachineMemoryInfo>::iterator memInfo =
 		    machineMemoryUsage.insert(std::make_pair(workerItr->interf.locality.machineId(), MachineMemoryInfo()))
 		        .first;
 		try {
@@ -792,7 +813,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		}
 	}
 
-	state RolesInfo roles;
+	RolesInfo roles;
 
 	roles.addRole("master", db->get().master);
 	roles.addRole("cluster_controller", db->get().clusterInterface.clientInterface);
@@ -817,8 +838,8 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		}
 	}
 
-	state std::vector<OldTLogConf>::const_iterator oldTLogIter;
-	state std::vector<OldTLogConf> oldTLogs = db->get().logSystemConfig.oldTLogs;
+	std::vector<OldTLogConf>::const_iterator oldTLogIter;
+	std::vector<OldTLogConf> oldTLogs = db->get().logSystemConfig.oldTLogs;
 	for (oldTLogIter = oldTLogs.begin(); oldTLogIter != oldTLogs.end(); ++oldTLogIter) {
 		for (auto& tLogSet : oldTLogIter->tLogs) {
 			for (auto& it : tLogSet.tLogs) {
@@ -832,57 +853,57 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 				}
 			}
 		}
-		wait(yield());
+		co_await yield();
 	}
 
 	for (const auto& coordinator : coordinatorAddresses) {
 		roles.addCoordinatorRole(coordinator);
 	}
 
-	state std::vector<std::pair<CommitProxyInterface, EventMap>>::iterator commit_proxy;
+	std::vector<std::pair<CommitProxyInterface, EventMap>>::iterator commit_proxy;
 	for (commit_proxy = commitProxies.begin(); commit_proxy != commitProxies.end(); ++commit_proxy) {
 		roles.addRole("commit_proxy", commit_proxy->first, commit_proxy->second);
-		wait(yield());
+		co_await yield();
 	}
 
-	state std::vector<std::pair<GrvProxyInterface, EventMap>>::iterator grvProxy;
+	std::vector<std::pair<GrvProxyInterface, EventMap>>::iterator grvProxy;
 	for (grvProxy = grvProxies.begin(); grvProxy != grvProxies.end(); ++grvProxy) {
 		roles.addRole("grv_proxy", grvProxy->first, grvProxy->second);
-		wait(yield());
+		co_await yield();
 	}
 
-	state std::vector<std::pair<TLogInterface, EventMap>>::iterator log;
-	state Version maxTLogVersion = 0;
+	std::vector<std::pair<TLogInterface, EventMap>>::iterator log;
+	Version maxTLogVersion = 0;
 
 	// Get largest TLog version
 	for (log = tLogs.begin(); log != tLogs.end(); ++log) {
 		Version tLogVersion = 0;
 		roles.addRole("log", log->first, log->second, &tLogVersion);
 		maxTLogVersion = std::max(maxTLogVersion, tLogVersion);
-		wait(yield());
+		co_await yield();
 	}
 
-	state std::vector<StorageServerStatusInfo>::iterator ss;
-	state std::map<NetworkAddress, double> ssLag;
-	state double lagSeconds;
+	std::vector<StorageServerStatusInfo>::iterator ss;
+	std::map<NetworkAddress, double> ssLag;
+	double lagSeconds{ 0 };
 	for (ss = storageServers.begin(); ss != storageServers.end(); ++ss) {
 		roles.addRole("storage", *ss, maxTLogVersion, &lagSeconds);
 		if (lagSeconds != -1.0) {
 			ssLag[ss->address()] = lagSeconds;
 		}
-		wait(yield());
+		co_await yield();
 	}
 
-	state std::vector<ResolverInterface>::const_iterator res;
-	state std::vector<ResolverInterface> resolvers = db->get().resolvers;
+	std::vector<ResolverInterface>::const_iterator res;
+	std::vector<ResolverInterface> resolvers = db->get().resolvers;
 	for (res = resolvers.begin(); res != resolvers.end(); ++res) {
 		roles.addRole("resolver", *res);
-		wait(yield());
+		co_await yield();
 	}
 
 	for (workerItr = workers.begin(); workerItr != workers.end(); ++workerItr) {
-		wait(yield());
-		state JsonBuilderObject statusObj;
+		co_await yield();
+		JsonBuilderObject statusObj;
 		try {
 			ASSERT(pMetrics.contains(workerItr->interf.address()));
 
@@ -1075,7 +1096,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 
 		processMap[printable(workerItr->interf.locality.processId())] = statusObj;
 	}
-	return processMap;
+	co_return processMap;
 }
 
 static JsonBuilderObject grayFailureStatus(const std::unordered_map<NetworkAddress, double>& excludedDegradedServers) {
@@ -1159,31 +1180,31 @@ static JsonBuilderObject clientStatusFetcher(
 	return clientStatus;
 }
 
-ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx,
-                                                                  WorkerDetails ccWorker,
-                                                                  WorkerDetails mWorker,
-                                                                  int workerCount,
-                                                                  std::set<std::string>* incomplete_reasons,
-                                                                  int* statusCode) {
-	state JsonBuilderObject message;
-	state Transaction tr(cx);
+static AsyncResult<JsonBuilderObject> recoveryStateStatusFetcher(Database cx,
+                                                                 WorkerDetails ccWorker,
+                                                                 WorkerDetails mWorker,
+                                                                 int workerCount,
+                                                                 std::set<std::string>* incomplete_reasons,
+                                                                 int* statusCode) {
+	JsonBuilderObject message;
+	Transaction tr(cx);
 	try {
-		state Future<TraceEventFields> mdActiveGensF =
+		Future<TraceEventFields> mdActiveGensF =
 		    timeoutError(ccWorker.interf.eventLogRequest.getReply(EventLogRequest(StringRef(
 		                     getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_GENERATION_EVENT_NAME)))),
 		                 1.0);
-		state Future<TraceEventFields> mdF =
+		Future<TraceEventFields> mdF =
 		    timeoutError(ccWorker.interf.eventLogRequest.getReply(EventLogRequest(StringRef(
 		                     getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME)))),
 		                 1.0);
-		state Future<TraceEventFields> mDBAvailableF =
+		Future<TraceEventFields> mDBAvailableF =
 		    timeoutError(ccWorker.interf.eventLogRequest.getReply(EventLogRequest(StringRef(
 		                     getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_AVAILABLE_EVENT_NAME)))),
 		                 1.0);
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-		state Future<ErrorOr<Version>> rvF = errorOr(timeoutError(tr.getReadVersion(), 1.0));
+		Future<ErrorOr<Version>> rvF = errorOr(timeoutError(tr.getReadVersion(), 1.0));
 
-		wait(success(mdActiveGensF) && success(mdF) && success(rvF) && success(mDBAvailableF));
+		co_await (success(mdActiveGensF) && success(mdF) && success(rvF) && success(mDBAvailableF));
 
 		const TraceEventFields& md = mdF.get();
 		int mStatusCode = md.getInt("StatusCode");
@@ -1243,96 +1264,103 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx,
 		incomplete_reasons->insert("Recovery Status unavailable.");
 	}
 
-	return message;
+	co_return message;
 }
 
-ACTOR static Future<double> doGrvProbe(
-    Transaction* tr,
+static Future<double> doGrvProbe(
+    Reference<LatencyProbeState> probeState,
+    Transaction LatencyProbeState::* trMember,
     Optional<FDBTransactionOptions::Option> priority = Optional<FDBTransactionOptions::Option>()) {
-	state double start = g_network->timer_monotonic();
+	Transaction& tr = probeState.getPtr()->*trMember;
+	double start = g_network->timer_monotonic();
 
-	loop {
+	while (true) {
+		Error err;
 		try {
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			if (priority.present()) {
-				tr->setOption(priority.get());
+				tr.setOption(priority.get());
 			}
 
-			wait(success(tr->getReadVersion()));
-			return g_network->timer_monotonic() - start;
+			co_await tr.getReadVersion();
+			co_return g_network->timer_monotonic() - start;
 		} catch (Error& e) {
-			wait(tr->onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
-ACTOR static Future<double> doReadProbe(Future<double> grvProbe, Transaction* tr) {
-	ErrorOr<double> grv = wait(errorOr(grvProbe));
+static Future<double> doReadProbe(Reference<LatencyProbeState> probeState,
+                                  Future<double> grvProbe,
+                                  Transaction LatencyProbeState::* trMember) {
+	Transaction& tr = probeState.getPtr()->*trMember;
+	ErrorOr<double> grv = co_await errorOr(grvProbe);
 	if (grv.isError()) {
 		throw grv.getError();
 	}
 
-	state double start = g_network->timer_monotonic();
+	double start = g_network->timer_monotonic();
 
-	loop {
-		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	while (true) {
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		Error err;
 		try {
-			Optional<Standalone<StringRef>> _ = wait(tr->get("\xff/StatusJsonTestKey62793"_sr));
-			return g_network->timer_monotonic() - start;
+			Optional<Standalone<StringRef>> _ = co_await tr.get("\xff/StatusJsonTestKey62793"_sr);
+			co_return g_network->timer_monotonic() - start;
 		} catch (Error& e) {
-			wait(tr->onError(e));
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			err = e;
 		}
+		co_await tr.onError(err);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	}
 }
 
-ACTOR static Future<double> doCommitProbe(Future<double> grvProbe, Transaction* sourceTr, Transaction* tr) {
-	ErrorOr<double> grv = wait(errorOr(grvProbe));
+static Future<double> doCommitProbe(Reference<LatencyProbeState> probeState,
+                                    Future<double> grvProbe,
+                                    Transaction LatencyProbeState::* sourceTrMember,
+                                    Transaction LatencyProbeState::* trMember) {
+	Transaction& sourceTr = probeState.getPtr()->*sourceTrMember;
+	Transaction& tr = probeState.getPtr()->*trMember;
+	ErrorOr<double> grv = co_await errorOr(grvProbe);
 	if (grv.isError()) {
 		throw grv.getError();
 	}
 
-	ASSERT(sourceTr->getReadVersion().isReady());
-	tr->setVersion(sourceTr->getReadVersion().get());
-	tr->getDatabase()->ssVersionVectorCache = sourceTr->getDatabase()->ssVersionVectorCache;
-	tr->trState->readVersionObtainedFromGrvProxy = sourceTr->trState->readVersionObtainedFromGrvProxy;
+	ASSERT(sourceTr.getReadVersion().isReady());
+	tr.setVersion(sourceTr.getReadVersion().get());
+	tr.getDatabase()->ssVersionVectorCache = sourceTr.getDatabase()->ssVersionVectorCache;
+	tr.trState->readVersionObtainedFromGrvProxy = sourceTr.trState->readVersionObtainedFromGrvProxy;
 
-	state double start = g_network->timer_monotonic();
+	double start = g_network->timer_monotonic();
 
-	loop {
+	while (true) {
+		Error err;
 		try {
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr->makeSelfConflicting();
-			wait(tr->commit());
-			return g_network->timer_monotonic() - start;
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.makeSelfConflicting();
+			co_await tr.commit();
+			co_return g_network->timer_monotonic() - start;
 		} catch (Error& e) {
-			wait(tr->onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
-ACTOR static Future<Void> doProbe(Future<double> probe,
-                                  int timeoutSeconds,
-                                  const char* prefix,
-                                  const char* description,
-                                  JsonBuilderObject* probeObj,
-                                  JsonBuilderArray* messages,
-                                  std::set<std::string>* incomplete_reasons,
-                                  bool* isAvailable = nullptr) {
-	choose {
-		when(ErrorOr<double> result = wait(errorOr(probe))) {
-			if (result.isError()) {
-				if (isAvailable != nullptr) {
-					*isAvailable = false;
-				}
-				incomplete_reasons->insert(format(
-				    "Unable to retrieve latency probe information (%s: %s).", description, result.getError().what()));
-			} else {
-				(*probeObj)[format("%s_seconds", prefix).c_str()] = result.get();
-			}
-		}
-		when(wait(delay(timeoutSeconds))) {
+static Future<Void> doProbe(Future<double> probe,
+                            int timeoutSeconds,
+                            const char* prefix,
+                            const char* description,
+                            JsonBuilderObject* probeObj,
+                            JsonBuilderArray* messages,
+                            std::set<std::string>* incomplete_reasons,
+                            bool* isAvailable = nullptr) {
+	try {
+		if (auto const latency = co_await timeout(probe, timeoutSeconds); latency.present()) {
+			(*probeObj)[format("%s_seconds", prefix).c_str()] = latency.get();
+		} else {
 			if (isAvailable != nullptr) {
 				*isAvailable = false;
 			}
@@ -1340,29 +1368,34 @@ ACTOR static Future<Void> doProbe(Future<double> probe,
 			    JsonString::makeMessage(format("%s_probe_timeout", prefix).c_str(),
 			                            format("Unable to %s after %d seconds.", description, timeoutSeconds).c_str()));
 		}
+	} catch (Error& e) {
+		if (isAvailable != nullptr) {
+			*isAvailable = false;
+		}
+		incomplete_reasons->insert(
+		    format("Unable to retrieve latency probe information (%s: %s).", description, e.what()));
 	}
-
-	return Void();
+	co_return;
 }
 
-ACTOR static Future<JsonBuilderObject> latencyProbeFetcher(Database cx,
-                                                           JsonBuilderArray* messages,
-                                                           std::set<std::string>* incomplete_reasons,
-                                                           bool* isAvailable) {
-	state Transaction trImmediate(cx);
-	state Transaction trDefault(cx);
-	state Transaction trBatch(cx);
-	state Transaction trWrite(cx);
+static AsyncResult<JsonBuilderObject> latencyProbeFetcher(Database cx,
+                                                          JsonBuilderArray* messages,
+                                                          std::set<std::string>* incomplete_reasons,
+                                                          bool* isAvailable) {
+	Reference<LatencyProbeState> probeState = makeReference<LatencyProbeState>(cx);
 
-	state JsonBuilderObject statusObj;
+	JsonBuilderObject statusObj;
 
 	try {
-		Future<double> immediateGrvProbe = doGrvProbe(&trImmediate, FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-		Future<double> defaultGrvProbe = doGrvProbe(&trDefault);
-		Future<double> batchGrvProbe = doGrvProbe(&trBatch, FDBTransactionOptions::PRIORITY_BATCH);
+		Future<double> immediateGrvProbe =
+		    doGrvProbe(probeState, &LatencyProbeState::trImmediate, FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		Future<double> defaultGrvProbe = doGrvProbe(probeState, &LatencyProbeState::trDefault);
+		Future<double> batchGrvProbe =
+		    doGrvProbe(probeState, &LatencyProbeState::trBatch, FDBTransactionOptions::PRIORITY_BATCH);
 
-		Future<double> readProbe = doReadProbe(immediateGrvProbe, &trImmediate);
-		Future<double> commitProbe = doCommitProbe(immediateGrvProbe, &trImmediate, &trWrite);
+		Future<double> readProbe = doReadProbe(probeState, immediateGrvProbe, &LatencyProbeState::trImmediate);
+		Future<double> commitProbe =
+		    doCommitProbe(probeState, immediateGrvProbe, &LatencyProbeState::trImmediate, &LatencyProbeState::trWrite);
 
 		int timeoutSeconds = 5;
 
@@ -1394,7 +1427,7 @@ ACTOR static Future<JsonBuilderObject> latencyProbeFetcher(Database cx,
 		probes.push_back(doProbe(
 		    commitProbe, timeoutSeconds, "commit", "commit", &statusObj, messages, incomplete_reasons, isAvailable));
 
-		wait(waitForAll(probes));
+		co_await waitForAll(probes);
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
 			throw;
@@ -1402,20 +1435,22 @@ ACTOR static Future<JsonBuilderObject> latencyProbeFetcher(Database cx,
 		incomplete_reasons->insert(format("Unable to retrieve latency probe information (%s).", e.what()));
 	}
 
-	return statusObj;
+	co_return statusObj;
 }
 
-ACTOR static Future<JsonBuilderObject> versionEpochStatusFetcher(Database cx,
-                                                                 std::set<std::string>* incomplete_reasons) {
-	state JsonBuilderObject message;
+static AsyncResult<JsonBuilderObject> versionEpochStatusFetcher(Database cx,
+                                                                std::set<std::string>* incomplete_reasons) {
+	JsonBuilderObject message;
 	try {
-		state Transaction tr(cx);
-		loop {
+		Transaction tr(cx);
+		while (true) {
+			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				Optional<Value> versionEpochVal = wait(timeoutError(BUGGIFY ? Never() : tr.get(versionEpochKey), 5.0));
+				Optional<Value> versionEpochVal =
+				    co_await timeoutError(BUGGIFY ? Never() : tr.get(versionEpochKey), 5.0);
 				message["enabled"] = versionEpochVal.present();
 				if (!versionEpochVal.present()) {
 					break;
@@ -1424,8 +1459,9 @@ ACTOR static Future<JsonBuilderObject> versionEpochStatusFetcher(Database cx,
 				message["epoch"] = std::to_string(versionEpoch);
 				break;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
@@ -1433,21 +1469,22 @@ ACTOR static Future<JsonBuilderObject> versionEpochStatusFetcher(Database cx,
 		}
 		incomplete_reasons->insert(format("Unable to retrieve version epoch information (%s).", e.what()));
 	}
-	return message;
+	co_return message;
 }
 
-ACTOR static Future<Void> consistencyCheckStatusFetcher(Database cx,
-                                                        JsonBuilderArray* messages,
-                                                        std::set<std::string>* incomplete_reasons) {
+static Future<Void> consistencyCheckStatusFetcher(Database cx,
+                                                  JsonBuilderArray* messages,
+                                                  std::set<std::string>* incomplete_reasons) {
 	try {
-		state Transaction tr(cx);
-		loop {
+		Transaction tr(cx);
+		while (true) {
+			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				Optional<Value> ccSuspendVal =
-				    wait(timeoutError(BUGGIFY ? Never() : tr.get(fdbShouldConsistencyCheckBeSuspended), 5.0));
+				    co_await timeoutError(BUGGIFY ? Never() : tr.get(fdbShouldConsistencyCheckBeSuspended), 5.0);
 				bool ccSuspend = ccSuspendVal.present()
 				                     ? BinaryReader::fromStringRef<bool>(ccSuspendVal.get(), Unversioned())
 				                     : false;
@@ -1457,16 +1494,17 @@ ACTOR static Future<Void> consistencyCheckStatusFetcher(Database cx,
 				}
 				break;
 			} catch (Error& e) {
-				if (e.code() == error_code_timed_out) {
-					messages->push_back(
-					    JsonString::makeMessage("consistencycheck_suspendkey_fetch_timeout",
-					                            format("Timed out trying to fetch `%s` from the database.",
-					                                   printable(fdbShouldConsistencyCheckBeSuspended).c_str())
-					                                .c_str()));
-					break;
-				}
-				wait(tr.onError(e));
+				err = e;
 			}
+			if (err.code() == error_code_timed_out) {
+				messages->push_back(
+				    JsonString::makeMessage("consistencycheck_suspendkey_fetch_timeout",
+				                            format("Timed out trying to fetch `%s` from the database.",
+				                                   printable(fdbShouldConsistencyCheckBeSuspended).c_str())
+				                                .c_str()));
+				break;
+			}
+			co_await tr.onError(err);
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
@@ -1474,7 +1512,6 @@ ACTOR static Future<Void> consistencyCheckStatusFetcher(Database cx,
 		}
 		incomplete_reasons->insert(format("Unable to retrieve consistency check settings (%s).", e.what()));
 	}
-	return Void();
 }
 
 struct LogRangeAndUID {
@@ -1492,22 +1529,23 @@ struct LogRangeAndUID {
 	}
 };
 
-ACTOR static Future<Void> logRangeWarningFetcher(Database cx,
-                                                 JsonBuilderArray* messages,
-                                                 std::set<std::string>* incomplete_reasons) {
+static Future<Void> logRangeWarningFetcher(Database cx,
+                                           JsonBuilderArray* messages,
+                                           std::set<std::string>* incomplete_reasons) {
 	try {
-		state Transaction tr(cx);
-		state Future<Void> timeoutFuture = timeoutError(Future<Void>(Never()), 5.0);
-		loop {
+		Transaction tr(cx);
+		Future<Void> timeoutFuture = timeoutError(Future<Void>(Never()), 5.0);
+		while (true) {
+			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-				state Future<RangeResult> existingDestUidValues =
+				Future<RangeResult> existingDestUidValues =
 				    tr.getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY);
-				state Future<RangeResult> existingLogRanges = tr.getRange(logRangesRange, CLIENT_KNOBS->TOO_MANY);
-				wait((success(existingDestUidValues) && success(existingLogRanges)) || timeoutFuture);
+				Future<RangeResult> existingLogRanges = tr.getRange(logRangesRange, CLIENT_KNOBS->TOO_MANY);
+				co_await ((success(existingDestUidValues) && success(existingLogRanges)) || timeoutFuture);
 
 				std::set<LogRangeAndUID> loggingRanges;
 				for (auto& it : existingLogRanges.get()) {
@@ -1541,19 +1579,19 @@ ACTOR static Future<Void> logRangeWarningFetcher(Database cx,
 						existingRanges.insert(rangePair);
 					}
 				}
-				wait(tr.commit() || timeoutFuture);
+				co_await (tr.commit() || timeoutFuture);
 				break;
 			} catch (Error& e) {
-				if (e.code() == error_code_timed_out) {
-					messages->push_back(
-					    JsonString::makeMessage("duplicate_mutation_fetch_timeout",
-					                            format("Timed out trying to fetch `%s` from the database.",
-					                                   printable(destUidLookupPrefix).c_str())
-					                                .c_str()));
-					break;
-				}
-				wait(tr.onError(e));
+				err = e;
 			}
+			if (err.code() == error_code_timed_out) {
+				messages->push_back(JsonString::makeMessage(
+				    "duplicate_mutation_fetch_timeout",
+				    format("Timed out trying to fetch `%s` from the database.", printable(destUidLookupPrefix).c_str())
+				        .c_str()));
+				break;
+			}
+			co_await tr.onError(err);
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
@@ -1561,7 +1599,6 @@ ACTOR static Future<Void> logRangeWarningFetcher(Database cx,
 		}
 		incomplete_reasons->insert(format("Unable to retrieve log ranges (%s).", e.what()));
 	}
-	return Void();
 }
 
 struct ProtocolVersionData {
@@ -1575,27 +1612,27 @@ struct ProtocolVersionData {
 	    lowestCompatibleProtocolVersion(lowestCompatibleProtocolVersionValue) {}
 };
 
-ACTOR Future<ProtocolVersionData> getNewestProtocolVersion(Database cx, WorkerDetails ccWorker) {
+Future<ProtocolVersionData> getNewestProtocolVersion(Database cx, WorkerDetails ccWorker) {
 
 	try {
-		state Future<TraceEventFields> swVersionF = timeoutError(
+		Future<TraceEventFields> swVersionF = timeoutError(
 		    ccWorker.interf.eventLogRequest.getReply(EventLogRequest("SWVersionCompatibilityChecked"_sr)), 1.0);
 
-		wait(success(swVersionF));
+		co_await swVersionF;
 		const TraceEventFields& swVersionTrace = swVersionF.get();
 		int64_t newestProtocolVersionValue =
 		    std::stoull(swVersionTrace.getValue("NewestProtocolVersion").c_str(), nullptr, 16);
 		int64_t lowestCompatibleProtocolVersionValue =
 		    std::stoull(swVersionTrace.getValue("LowestCompatibleProtocolVersion").c_str(), nullptr, 16);
 
-		return ProtocolVersionData(newestProtocolVersionValue, lowestCompatibleProtocolVersionValue);
+		co_return ProtocolVersionData(newestProtocolVersionValue, lowestCompatibleProtocolVersionValue);
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
 
 		TraceEvent(SevWarnAlways, "SWVersionStatusFailed").error(e);
 
-		return ProtocolVersionData();
+		co_return ProtocolVersionData();
 	}
 }
 
@@ -1612,98 +1649,98 @@ struct LoadConfigurationResult {
 	  : fullReplication(true), healthyZoneSeconds(0), rebalanceDDIgnored(false), dataDistributionDisabled(false) {}
 };
 
-ACTOR static Future<std::pair<Optional<DatabaseConfiguration>, Optional<LoadConfigurationResult>>>
+static Future<std::pair<Optional<DatabaseConfiguration>, Optional<LoadConfigurationResult>>>
 loadConfiguration(Database cx, JsonBuilderArray* messages, std::set<std::string>* status_incomplete_reasons) {
-	state Optional<DatabaseConfiguration> result;
-	state Optional<LoadConfigurationResult> loadResult;
-	state Transaction tr(cx);
-	state Future<Void> getConfTimeout = delay(5.0);
+	Optional<DatabaseConfiguration> result;
+	Optional<LoadConfigurationResult> loadResult;
+	Transaction tr(cx);
+	Future<Void> getConfTimeout = delay(5.0);
 
-	loop {
+	while (true) {
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		tr.setOption(FDBTransactionOptions::CAUSAL_READ_RISKY);
+		Error err;
 		try {
-			choose {
-				when(RangeResult res = wait(tr.getRange(configKeys, SERVER_KNOBS->CONFIGURATION_ROWS_TO_FETCH))) {
-					DatabaseConfiguration configuration;
-					if (res.size() == SERVER_KNOBS->CONFIGURATION_ROWS_TO_FETCH) {
-						status_incomplete_reasons->insert("Too many configuration parameters set.");
-					} else {
-						configuration.fromKeyValues((VectorRef<KeyValueRef>)res);
-					}
-
-					result = configuration;
+			auto configResult =
+			    co_await race(tr.getRange(configKeys, SERVER_KNOBS->CONFIGURATION_ROWS_TO_FETCH), getConfTimeout);
+			if (configResult.index() == 0) {
+				RangeResult res = std::get<0>(std::move(configResult));
+				DatabaseConfiguration configuration;
+				if (res.size() == SERVER_KNOBS->CONFIGURATION_ROWS_TO_FETCH) {
+					status_incomplete_reasons->insert("Too many configuration parameters set.");
+				} else {
+					configuration.fromKeyValues((VectorRef<KeyValueRef>)res);
 				}
-				when(wait(getConfTimeout)) {
-					if (!result.present()) {
-						messages->push_back(JsonString::makeMessage("unreadable_configuration",
-						                                            "Unable to read database configuration."));
-					} else {
-						messages->push_back(
-						    JsonString::makeMessage("full_replication_timeout", "Unable to read datacenter replicas."));
-					}
-					break;
-				}
-			}
 
-			ASSERT(result.present());
-			state std::vector<Future<Optional<Value>>> replicasFutures;
-			for (auto& region : result.get().regions) {
-				replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(region.dcId)));
-			}
-			state Future<Optional<Value>> healthyZoneValue = tr.get(healthyZoneKey);
-			state Future<Optional<Value>> rebalanceDDIgnored = tr.get(rebalanceDDIgnoreKey);
-			state Future<Optional<Value>> ddModeKey = tr.get(dataDistributionModeKey);
-
-			choose {
-				when(wait(waitForAll(replicasFutures) && success(healthyZoneValue) && success(rebalanceDDIgnored) &&
-				          success(ddModeKey))) {
-					int unreplicated = 0;
-					for (int i = 0; i < result.get().regions.size(); i++) {
-						if (!replicasFutures[i].get().present() ||
-						    decodeDatacenterReplicasValue(replicasFutures[i].get().get()) <
-						        result.get().storageTeamSize) {
-							unreplicated++;
-						}
-					}
-					LoadConfigurationResult res;
-					res.fullReplication = (!unreplicated || (result.get().usableRegions == 1 &&
-					                                         unreplicated < result.get().regions.size()));
-					if (healthyZoneValue.get().present()) {
-						auto healthyZone = decodeHealthyZoneValue(healthyZoneValue.get().get());
-						if (healthyZone.first == ignoreSSFailuresZoneString) {
-							res.healthyZone = healthyZone.first;
-						} else if (healthyZone.second > tr.getReadVersion().get()) {
-							res.healthyZone = healthyZone.first;
-							res.healthyZoneSeconds =
-							    (healthyZone.second - tr.getReadVersion().get()) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
-						}
-					}
-					res.rebalanceDDIgnored = rebalanceDDIgnored.get().present();
-					if (res.rebalanceDDIgnored) {
-						res.rebalanceDDIgnoreHex = rebalanceDDIgnored.get().get().toHexString();
-					}
-					if (ddModeKey.get().present()) {
-						BinaryReader rd(ddModeKey.get().get(), Unversioned());
-						int currentMode;
-						rd >> currentMode;
-						if (currentMode == 0) {
-							res.dataDistributionDisabled = true;
-						}
-					}
-					loadResult = res;
-				}
-				when(wait(getConfTimeout)) {
+				result = configuration;
+			} else {
+				if (!result.present()) {
+					messages->push_back(
+					    JsonString::makeMessage("unreadable_configuration", "Unable to read database configuration."));
+				} else {
 					messages->push_back(
 					    JsonString::makeMessage("full_replication_timeout", "Unable to read datacenter replicas."));
 				}
+				break;
+			}
+
+			ASSERT(result.present());
+			std::vector<Future<Optional<Value>>> replicasFutures;
+			for (auto& region : result.get().regions) {
+				replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(region.dcId)));
+			}
+			Future<Optional<Value>> healthyZoneValue = tr.get(healthyZoneKey);
+			Future<Optional<Value>> rebalanceDDIgnored = tr.get(rebalanceDDIgnoreKey);
+			Future<Optional<Value>> ddModeKey = tr.get(dataDistributionModeKey);
+			Future<Void> replicaStateReady = waitForAll(replicasFutures) && success(healthyZoneValue) &&
+			                                 success(rebalanceDDIgnored) && success(ddModeKey);
+
+			auto replicaLoadResult = co_await race(replicaStateReady, getConfTimeout);
+			if (replicaLoadResult.index() == 0) {
+				int unreplicated = 0;
+				for (int i = 0; i < result.get().regions.size(); ++i) {
+					if (!replicasFutures[i].get().present() ||
+					    decodeDatacenterReplicasValue(replicasFutures[i].get().get()) < result.get().storageTeamSize) {
+						unreplicated++;
+					}
+				}
+				LoadConfigurationResult res;
+				res.fullReplication =
+				    (!unreplicated || (result.get().usableRegions == 1 && unreplicated < result.get().regions.size()));
+				if (healthyZoneValue.get().present()) {
+					auto healthyZone = decodeHealthyZoneValue(healthyZoneValue.get().get());
+					if (healthyZone.first == ignoreSSFailuresZoneString) {
+						res.healthyZone = healthyZone.first;
+					} else if (healthyZone.second > tr.getReadVersion().get()) {
+						res.healthyZone = healthyZone.first;
+						res.healthyZoneSeconds =
+						    (healthyZone.second - tr.getReadVersion().get()) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+					}
+				}
+				res.rebalanceDDIgnored = rebalanceDDIgnored.get().present();
+				if (res.rebalanceDDIgnored) {
+					res.rebalanceDDIgnoreHex = rebalanceDDIgnored.get().get().toHexString();
+				}
+				if (ddModeKey.get().present()) {
+					BinaryReader rd(ddModeKey.get().get(), Unversioned());
+					int currentMode;
+					rd >> currentMode;
+					if (currentMode == 0) {
+						res.dataDistributionDisabled = true;
+					}
+				}
+				loadResult = res;
+			} else {
+				messages->push_back(
+				    JsonString::makeMessage("full_replication_timeout", "Unable to read datacenter replicas."));
 			}
 			break;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
-	return std::make_pair(result, loadResult);
+	co_return std::make_pair(result, loadResult);
 }
 
 static JsonBuilderObject configurationFetcher(Optional<DatabaseConfiguration> conf,
@@ -1741,10 +1778,10 @@ static JsonBuilderObject configurationFetcher(Optional<DatabaseConfiguration> co
 	return statusObj;
 }
 
-ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
-                                                         DatabaseConfiguration configuration,
-                                                         int* minStorageReplicasRemaining) {
-	state JsonBuilderObject statusObjData;
+static AsyncResult<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
+                                                        DatabaseConfiguration configuration,
+                                                        int* minStorageReplicasRemaining) {
+	JsonBuilderObject statusObjData;
 
 	try {
 		std::vector<Future<TraceEventFields>> futures;
@@ -1761,7 +1798,7 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 		futures.push_back(
 		    timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest("TotalDataInFlightRemote"_sr)), 1.0));
 
-		std::vector<TraceEventFields> dataInfo = wait(getAll(futures));
+		std::vector<TraceEventFields> dataInfo = co_await getAll(futures);
 
 		TraceEventFields startingStats = dataInfo[0];
 		TraceEventFields dataStats = dataInfo[1];
@@ -1771,7 +1808,7 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 			stateSectionObj["name"] = "initializing";
 			stateSectionObj["description"] = "(Re)initializing automatic data distribution";
 			statusObjData["state"] = stateSectionObj;
-			return statusObjData;
+			co_return statusObjData;
 		}
 
 		TraceEventFields md = dataInfo[2];
@@ -1907,38 +1944,38 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 		// not from the "cluster" perspective - from the client perspective it is not but that is indicated elsewhere.
 	}
 
-	return statusObjData;
+	co_return statusObjData;
 }
 
-ACTOR template <class iface>
-static Future<std::vector<std::pair<iface, EventMap>>> getServerMetrics(
+template <class iface>
+static AsyncResult<std::vector<std::pair<iface, EventMap>>> getServerMetrics(
     std::vector<iface> servers,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers,
     std::vector<std::string> eventNames) {
-	state std::vector<Future<Optional<TraceEventFields>>> futures;
+	std::vector<AsyncResult<Optional<TraceEventFields>>> futures;
 	for (auto s : servers) {
 		for (auto name : eventNames) {
 			futures.push_back(latestEventOnWorker(address_workers[s.address()], s.id().toString() + "/" + name));
 		}
 	}
 
-	wait(waitForAll(futures));
+	std::vector<Optional<TraceEventFields>> eventTraces = co_await getAll(std::move(futures));
 
 	std::vector<std::pair<iface, EventMap>> results;
-	auto futureItr = futures.begin();
+	auto eventTraceItr = eventTraces.begin();
 
 	for (int i = 0; i < servers.size(); i++) {
 		EventMap serverResults;
 		for (auto name : eventNames) {
-			ASSERT(futureItr != futures.end());
-			serverResults[name] = futureItr->get().present() ? futureItr->get().get() : TraceEventFields();
-			++futureItr;
+			ASSERT(eventTraceItr != eventTraces.end());
+			serverResults[name] = eventTraceItr->present() ? eventTraceItr->get() : TraceEventFields();
+			++eventTraceItr;
 		}
 
 		results.emplace_back(servers[i], serverResults);
 	}
 
-	return results;
+	co_return results;
 }
 
 namespace {
@@ -1948,53 +1985,52 @@ const std::vector<std::string> STORAGE_SERVER_METRICS_LIST{ "StorageMetrics", "R
 
 } // namespace
 
-ACTOR static Future<std::vector<StorageServerStatusInfo>> getStorageServerStatusInfos(
+static Future<std::vector<StorageServerStatusInfo>> getStorageServerStatusInfos(
     std::vector<StorageServerMetaInfo> storageMetadatas,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers,
     WorkerDetails rkWorker) {
-	state std::vector<StorageServerStatusInfo> servers;
+	std::vector<StorageServerStatusInfo> servers;
 	servers.reserve(storageMetadatas.size());
 	for (const auto& meta : storageMetadatas) {
 		servers.push_back(StorageServerStatusInfo(meta));
 	}
-	state std::vector<std::pair<StorageServerStatusInfo, EventMap>> results;
-	wait(store(results, getServerMetrics(servers, address_workers, STORAGE_SERVER_METRICS_LIST)));
+	std::vector<std::pair<StorageServerStatusInfo, EventMap>> results =
+	    co_await getServerMetrics(servers, address_workers, STORAGE_SERVER_METRICS_LIST);
 	for (int i = 0; i < results.size(); ++i) {
 		servers[i].eventMap = std::move(results[i].second);
 	}
-	return servers;
+	co_return servers;
 }
 
-ACTOR static Future<std::vector<std::pair<TLogInterface, EventMap>>> getTLogsAndMetrics(
+static Future<std::vector<std::pair<TLogInterface, EventMap>>> getTLogsAndMetrics(
     Reference<AsyncVar<ServerDBInfo>> db,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
 	std::vector<TLogInterface> servers = db->get().logSystemConfig.allPresentLogs();
+	std::vector<std::string> eventNames{ "TLogMetrics" };
 	std::vector<std::pair<TLogInterface, EventMap>> results =
-	    wait(getServerMetrics(servers, address_workers, std::vector<std::string>{ "TLogMetrics" }));
+	    co_await getServerMetrics(servers, address_workers, std::move(eventNames));
 
-	return results;
+	co_return results;
 }
 
 // Returns list of tuples of grv proxy interfaces and their latency metrics
-ACTOR static Future<std::vector<std::pair<CommitProxyInterface, EventMap>>> getCommitProxiesAndMetrics(
+static Future<std::vector<std::pair<CommitProxyInterface, EventMap>>> getCommitProxiesAndMetrics(
     Reference<AsyncVar<ServerDBInfo>> db,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
-	std::vector<std::pair<CommitProxyInterface, EventMap>> results = wait(getServerMetrics(
-	    db->get().client.commitProxies,
-	    address_workers,
-	    std::vector<std::string>{ "CommitLatencyMetrics", "CommitLatencyBands", "CommitBatchingWindowSize" }));
+	std::vector<std::string> eventNames{ "CommitLatencyMetrics", "CommitLatencyBands", "CommitBatchingWindowSize" };
+	std::vector<std::pair<CommitProxyInterface, EventMap>> results =
+	    co_await getServerMetrics(db->get().client.commitProxies, address_workers, std::move(eventNames));
 
-	return results;
+	co_return results;
 }
 
-ACTOR static Future<std::vector<std::pair<GrvProxyInterface, EventMap>>> getGrvProxiesAndMetrics(
+static Future<std::vector<std::pair<GrvProxyInterface, EventMap>>> getGrvProxiesAndMetrics(
     Reference<AsyncVar<ServerDBInfo>> db,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
-	std::vector<std::pair<GrvProxyInterface, EventMap>> results = wait(
-	    getServerMetrics(db->get().client.grvProxies,
-	                     address_workers,
-	                     std::vector<std::string>{ "GRVLatencyMetrics", "GRVLatencyBands", "GRVBatchLatencyMetrics" }));
-	return results;
+	std::vector<std::string> eventNames{ "GRVLatencyMetrics", "GRVLatencyBands", "GRVBatchLatencyMetrics" };
+	std::vector<std::pair<GrvProxyInterface, EventMap>> results =
+	    co_await getServerMetrics(db->get().client.grvProxies, address_workers, std::move(eventNames));
+	co_return results;
 }
 
 // Returns the number of zones eligible for recruiting new tLogs after zone failures, to maintain the current
@@ -2071,7 +2107,7 @@ JsonBuilderObject getPerfLimit(TraceEventFields const& ratekeeper, double transP
 	return perfLimit;
 }
 
-ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
+static AsyncResult<JsonBuilderObject> workloadStatusFetcher(
     Reference<AsyncVar<ServerDBInfo>> db,
     std::vector<WorkerDetails> workers,
     WorkerDetails mWorker,
@@ -2080,15 +2116,15 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
     JsonBuilderObject* data_overlay,
     std::set<std::string>* incomplete_reasons,
     Future<ErrorOr<std::vector<StorageServerStatusInfo>>> storageServerFuture) {
-	state JsonBuilderObject statusObj;
-	state JsonBuilderObject operationsObj;
-	state JsonBuilderObject bytesObj;
-	state JsonBuilderObject keysObj;
+	JsonBuilderObject statusObj;
+	JsonBuilderObject operationsObj;
+	JsonBuilderObject bytesObj;
+	JsonBuilderObject keysObj;
 
 	// Writes and conflicts
 	try {
-		state std::vector<Future<TraceEventFields>> commitProxyStatFutures;
-		state std::vector<Future<TraceEventFields>> grvProxyStatFutures;
+		std::vector<Future<TraceEventFields>> commitProxyStatFutures;
+		std::vector<Future<TraceEventFields>> grvProxyStatFutures;
 		std::map<NetworkAddress, WorkerDetails> workersMap;
 		for (auto const& w : workers) {
 			workersMap[w.interf.address()] = w;
@@ -2109,8 +2145,8 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 			else
 				throw all_alternatives_failed(); // We need data from all proxies for this result to be trustworthy
 		}
-		state std::vector<TraceEventFields> commitProxyStats = wait(getAll(commitProxyStatFutures));
-		state std::vector<TraceEventFields> grvProxyStats = wait(getAll(grvProxyStatFutures));
+		std::vector<TraceEventFields> commitProxyStats = co_await getAll(commitProxyStatFutures);
+		std::vector<TraceEventFields> grvProxyStats = co_await getAll(grvProxyStatFutures);
 
 		StatusCounter txnStartOut;
 		StatusCounter txnSystemPriorityStartOut;
@@ -2167,11 +2203,11 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 
 	// Transactions
 	try {
-		state Future<TraceEventFields> f1 =
+		Future<TraceEventFields> f1 =
 		    timeoutError(rkWorker.interf.eventLogRequest.getReply(EventLogRequest("RkUpdate"_sr)), 1.0);
-		state Future<TraceEventFields> f2 =
+		Future<TraceEventFields> f2 =
 		    timeoutError(rkWorker.interf.eventLogRequest.getReply(EventLogRequest("RkUpdateBatch"_sr)), 1.0);
-		wait(success(f1) && success(f2));
+		co_await (success(f1) && success(f2));
 		TraceEventFields ratekeeper = f1.get();
 		TraceEventFields batchRatekeeper = f2.get();
 
@@ -2252,7 +2288,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 
 	// Reads
 	try {
-		ErrorOr<std::vector<StorageServerStatusInfo>> storageServers = wait(storageServerFuture);
+		ErrorOr<std::vector<StorageServerStatusInfo>> storageServers = co_await storageServerFuture;
 		if (!storageServers.present()) {
 			throw storageServers.getError();
 		}
@@ -2290,19 +2326,19 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 	statusObj["keys"] = keysObj;
 	statusObj["bytes"] = bytesObj;
 
-	return statusObj;
+	co_return statusObj;
 }
 
-ACTOR static Future<JsonBuilderObject> clusterSummaryStatisticsFetcher(
+static AsyncResult<JsonBuilderObject> clusterSummaryStatisticsFetcher(
     WorkerEvents pMetrics,
     Future<ErrorOr<std::vector<StorageServerStatusInfo>>> storageServerFuture,
     Future<ErrorOr<std::vector<std::pair<TLogInterface, EventMap>>>> tlogFuture,
     std::set<std::string>* incomplete_reasons) {
-	state JsonBuilderObject statusObj;
+	JsonBuilderObject statusObj;
 	try {
-		state JsonBuilderObject cacheStatistics;
+		JsonBuilderObject cacheStatistics;
 
-		ErrorOr<std::vector<StorageServerStatusInfo>> storageServers = wait(storageServerFuture);
+		ErrorOr<std::vector<StorageServerStatusInfo>> storageServers = co_await storageServerFuture;
 
 		if (!storageServers.present()) {
 			throw storageServers.getError();
@@ -2325,7 +2361,7 @@ ACTOR static Future<JsonBuilderObject> clusterSummaryStatisticsFetcher(
 		cacheStatistics["storage_hit_rate"] =
 		    (storageCacheMissesHz == 0) ? 1.0 : storageCacheHitsHz / (storageCacheHitsHz + storageCacheMissesHz);
 
-		ErrorOr<std::vector<std::pair<TLogInterface, EventMap>>> tlogServers = wait(tlogFuture);
+		ErrorOr<std::vector<std::pair<TLogInterface, EventMap>>> tlogServers = co_await tlogFuture;
 
 		if (!tlogServers.present()) {
 			throw tlogServers.getError();
@@ -2355,7 +2391,7 @@ ACTOR static Future<JsonBuilderObject> clusterSummaryStatisticsFetcher(
 		incomplete_reasons->insert("Unknown cache statistics.");
 	}
 
-	return statusObj;
+	co_return statusObj;
 }
 
 static JsonBuilderObject tlogFetcher(int* logFaultTolerance,
@@ -2627,44 +2663,44 @@ static JsonBuilderArray getClientIssuesAsMessages(
 	return issuesList;
 }
 
-ACTOR Future<JsonBuilderObject> layerStatusFetcher(Database cx,
-                                                   JsonBuilderArray* messages,
-                                                   std::set<std::string>* incomplete_reasons) {
-	state StatusObject result;
-	state JSONDoc json(result);
-	state double tStart = now();
+AsyncResult<JsonBuilderObject> layerStatusFetcher(Database cx,
+                                                  JsonBuilderArray* messages,
+                                                  std::set<std::string>* incomplete_reasons) {
+	StatusObject result;
+	JSONDoc json(result);
+	double tStart = now();
 
 	try {
-		state ReadYourWritesTransaction tr(cx);
-		loop {
+		ReadYourWritesTransaction tr(cx);
+		while (true) {
+			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				int64_t timeout_ms = 3000;
 				tr.setOption(FDBTransactionOptions::TIMEOUT, StringRef((uint8_t*)&timeout_ms, sizeof(int64_t)));
 
 				std::string jsonPrefix = layerStatusMetaPrefixRange.begin.toString() + "json/";
-				RangeResult jsonLayers = wait(tr.getRange(KeyRangeRef(jsonPrefix, strinc(jsonPrefix)), 1000));
+				RangeResult jsonLayers = co_await tr.getRange(KeyRangeRef(jsonPrefix, strinc(jsonPrefix)), 1000);
 				// TODO:  Also fetch other linked subtrees of meta keys
 
-				state std::vector<Future<RangeResult>> docFutures;
-				state int i;
-				for (i = 0; i < jsonLayers.size(); ++i)
+				std::vector<Future<RangeResult>> docFutures;
+				for (int i = 0; i < jsonLayers.size(); ++i) {
 					docFutures.push_back(
 					    tr.getRange(KeyRangeRef(jsonLayers[i].value, strinc(jsonLayers[i].value)), 1000));
+				}
 
 				result.clear();
 				JSONDoc::expires_reference_version = (uint64_t)tr.getReadVersion().get();
 
-				for (i = 0; i < docFutures.size(); ++i) {
-					state RangeResult docs = wait(docFutures[i]);
-					state int j;
-					for (j = 0; j < docs.size(); ++j) {
-						state json_spirit::mValue doc;
+				for (int i = 0; i < docFutures.size(); ++i) {
+					RangeResult docs = co_await docFutures[i];
+					for (int j = 0; j < docs.size(); ++j) {
+						json_spirit::mValue doc;
 						try {
 							json_spirit::read_string(docs[j].value.toString(), doc);
-							wait(yield());
+							co_await yield();
 							json.absorb(doc.get_obj());
-							wait(yield());
+							co_await yield();
 						} catch (Error& e) {
 							TraceEvent(SevWarn, "LayerStatusBadJSON").detail("Key", docs[j].key);
 						}
@@ -2673,8 +2709,9 @@ ACTOR Future<JsonBuilderObject> layerStatusFetcher(Database cx,
 				json.create("_valid") = true;
 				break;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "LayerStatusError").error(e);
@@ -2692,68 +2729,69 @@ ACTOR Future<JsonBuilderObject> layerStatusFetcher(Database cx,
 	TraceEvent("LayerStatusFetcher")
 	    .detail("Duration", now() - tStart)
 	    .detail("StatusSize", statusObj.getFinalLength());
-	return statusObj;
+	co_return statusObj;
 }
 
-ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Database cx,
-                                                    JsonBuilderArray* messages,
-                                                    std::set<std::string>* incomplete_reasons) {
-	state JsonBuilderObject statusObj;
+AsyncResult<JsonBuilderObject> lockedStatusFetcher(Database cx,
+                                                   JsonBuilderArray* messages,
+                                                   std::set<std::string>* incomplete_reasons) {
+	JsonBuilderObject statusObj;
+	Transaction tr(cx);
+	int timeoutSeconds = 5;
+	Future<Void> getTimeout = delay(timeoutSeconds);
 
-	state Transaction tr(cx);
-	state int timeoutSeconds = 5;
-	state Future<Void> getTimeout = delay(timeoutSeconds);
-
-	loop {
+	while (true) {
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+		Error err;
 		try {
-			choose {
-				when(Optional<Value> lockUID = wait(tr.get(databaseLockedKey))) {
-					if (lockUID.present()) {
-						statusObj["locked"] = true;
-						statusObj["lock_uid"] =
-						    BinaryReader::fromStringRef<UID>(lockUID.get().substr(10), Unversioned()).toString();
-					} else {
-						statusObj["locked"] = false;
-					}
+			auto res = co_await race(tr.get(databaseLockedKey), getTimeout);
+			if (res.index() == 0) {
+				Optional<Value> lockUID = std::get<0>(std::move(res));
+				if (lockUID.present()) {
+					statusObj["locked"] = true;
+					statusObj["lock_uid"] =
+					    BinaryReader::fromStringRef<UID>(lockUID.get().substr(10), Unversioned()).toString();
+				} else {
+					statusObj["locked"] = false;
 				}
-				when(wait(getTimeout)) {
-					incomplete_reasons->insert(
-					    format("Unable to determine if database is locked after %d seconds.", timeoutSeconds));
-				}
+			} else {
+				incomplete_reasons->insert(
+				    format("Unable to determine if database is locked after %d seconds.", timeoutSeconds));
 			}
 			break;
 		} catch (Error& e) {
-			try {
-				wait(tr.onError(e));
-			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled)
-					throw;
+			err = e;
+		}
+		try {
+			co_await tr.onError(err);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 
-				incomplete_reasons->insert(format("Unable to determine if database is locked (%s).", e.what()));
-				break;
-			}
+			incomplete_reasons->insert(format("Unable to determine if database is locked (%s).", e.what()));
+			break;
 		}
 	}
-	return statusObj;
+	co_return statusObj;
 }
 
-ACTOR Future<Optional<Value>> getActivePrimaryDC(Database cx, int* fullyReplicatedRegions, JsonBuilderArray* messages) {
-	state ReadYourWritesTransaction tr(cx);
+Future<Optional<Value>> getActivePrimaryDC(Database cx, int* fullyReplicatedRegions, JsonBuilderArray* messages) {
+	ReadYourWritesTransaction tr(cx);
 
-	state Future<Void> readTimeout = delay(5); // so that we won't loop forever
-	loop {
+	Future<Void> readTimeout = delay(5); // so that we won't loop forever
+	while (true) {
+		Error err;
 		try {
 			if (readTimeout.isReady()) {
 				throw timed_out();
 			}
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			state Future<RangeResult> fReplicaKeys = tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY);
-			state Future<Optional<Value>> fPrimaryDatacenterKey = tr.get(primaryDatacenterKey);
-			wait(timeoutError(success(fPrimaryDatacenterKey) && success(fReplicaKeys), 5));
+			Future<RangeResult> fReplicaKeys = tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY);
+			Future<Optional<Value>> fPrimaryDatacenterKey = tr.get(primaryDatacenterKey);
+			co_await timeoutError(success(fPrimaryDatacenterKey) && success(fReplicaKeys), 5);
 
 			*fullyReplicatedRegions = fReplicaKeys.get().size();
 
@@ -2761,58 +2799,59 @@ ACTOR Future<Optional<Value>> getActivePrimaryDC(Database cx, int* fullyReplicat
 				messages->push_back(
 				    JsonString::makeMessage("primary_dc_missing", "Unable to determine primary datacenter."));
 			}
-			return fPrimaryDatacenterKey.get();
+			co_return fPrimaryDatacenterKey.get();
 		} catch (Error& e) {
-			if (e.code() == error_code_timed_out) {
-				messages->push_back(
-				    JsonString::makeMessage("fetch_primary_dc_timeout", "Fetching primary DC timed out."));
-				return Optional<Value>();
-			} else {
-				wait(tr.onError(e));
-			}
+			err = e;
 		}
+		if (err.code() == error_code_timed_out) {
+			messages->push_back(JsonString::makeMessage("fetch_primary_dc_timeout", "Fetching primary DC timed out."));
+			co_return Optional<Value>();
+		}
+		co_await tr.onError(err);
 	}
 }
 
-ACTOR Future<std::pair<Optional<StorageWiggleMetrics>, Optional<StorageWiggleMetrics>>> readStorageWiggleMetrics(
+Future<std::pair<Optional<StorageWiggleMetrics>, Optional<StorageWiggleMetrics>>> readStorageWiggleMetrics(
     Database cx,
     bool use_system_priority) {
-	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	state Optional<StorageWiggleMetrics> primaryV;
-	state Optional<StorageWiggleMetrics> remoteV;
-	state StorageWiggleData wiggleState;
-	loop {
+	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	Optional<StorageWiggleMetrics> primaryV;
+	Optional<StorageWiggleMetrics> remoteV;
+	StorageWiggleData wiggleState;
+	while (true) {
+		Error err;
 		try {
 			if (use_system_priority) {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			}
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-			wait(store(primaryV, wiggleState.storageWiggleMetrics(PrimaryRegion(true)).get(tr)) &&
-			     store(remoteV, wiggleState.storageWiggleMetrics(PrimaryRegion(false)).get(tr)));
-			return std::make_pair(primaryV, remoteV);
+			co_await (store(primaryV, wiggleState.storageWiggleMetrics(PrimaryRegion(true)).get(tr)) &&
+			          store(remoteV, wiggleState.storageWiggleMetrics(PrimaryRegion(false)).get(tr)));
+			co_return std::make_pair(primaryV, remoteV);
 		} catch (Error& e) {
-			wait(tr->onError(e));
+			err = e;
 		}
+		co_await tr->onError(err);
 	}
 }
 
 // read storageWigglerStats through Read-only tx, then convert it to JSON field
-ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistributorInterface> ddWorker,
-                                                           DatabaseConfiguration conf,
-                                                           Database cx,
-                                                           bool use_system_priority,
-                                                           JsonBuilderArray* messages) {
+AsyncResult<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistributorInterface> ddWorker,
+                                                          DatabaseConfiguration conf,
+                                                          Database cx,
+                                                          bool use_system_priority,
+                                                          JsonBuilderArray* messages) {
 
-	state Future<GetStorageWigglerStateReply> stateFut;
-	state Future<std::pair<Optional<StorageWiggleMetrics>, Optional<StorageWiggleMetrics>>> wiggleMetricsFut =
+	Future<GetStorageWigglerStateReply> stateFut;
+	Future<std::pair<Optional<StorageWiggleMetrics>, Optional<StorageWiggleMetrics>>> wiggleMetricsFut =
 	    timeoutError(readStorageWiggleMetrics(cx, use_system_priority), 2.0);
-	state JsonBuilderObject res;
+	JsonBuilderObject res;
 	if (ddWorker.present()) {
 		stateFut = timeoutError(ddWorker.get().storageWigglerState.getReply(GetStorageWigglerStateRequest()), 2.0);
-		wait(ready(stateFut));
+		co_await ready(stateFut);
 	} else {
-		return res;
+		co_return res;
 	}
 
 	try {
@@ -2820,7 +2859,7 @@ ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistribu
 			throw timed_out();
 		}
 
-		wait(success(wiggleMetricsFut) && success(stateFut));
+		co_await (success(wiggleMetricsFut) && success(stateFut));
 		auto [primaryV, remoteV] = wiggleMetricsFut.get();
 		if (primaryV.present()) {
 			auto obj = primaryV.get().toJSON();
@@ -2838,38 +2877,36 @@ ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistribu
 			obj["last_state_change_datetime"] = epochsToGMTString(reply.lastStateChangeRemote);
 			res["remote"] = obj;
 		}
-		return res;
+		co_return res;
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
 		messages->push_back(JsonString::makeMessage("fetch_storage_wiggler_stats_timeout",
 		                                            "Fetching storage wiggler stats timed out."));
 	}
-	return res;
+	co_return res;
 }
 
 // constructs the cluster section of the json status output
-ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
-                                               JsonBuilderArray* pMessages,
-                                               std::set<std::string>* pStatusIncompleteReasons,
-                                               Reference<AsyncVar<ServerDBInfo>> db,
-                                               Database cx,
-                                               std::vector<WorkerDetails> workers,
-                                               std::vector<ProcessIssues> workerIssues,
-                                               std::vector<StorageServerMetaInfo> storageMetadatas,
-                                               ServerCoordinators coordinators,
-                                               std::unordered_map<NetworkAddress, double> excludedDegradedServers) {
-	state JsonBuilderObject& statusObj = *pStatusObj;
-	state JsonBuilderArray& messages = *pMessages;
-	state std::set<std::string>& status_incomplete_reasons = *pStatusIncompleteReasons;
+static AsyncResult<Void> clusterGetStatusImpl(Reference<ClusterGetStatusState> statusState,
+                                              Reference<AsyncVar<ServerDBInfo>> db,
+                                              Database cx,
+                                              std::vector<WorkerDetails> workers,
+                                              std::vector<ProcessIssues> workerIssues,
+                                              std::vector<StorageServerMetaInfo> storageMetadatas,
+                                              ServerCoordinators coordinators,
+                                              std::unordered_map<NetworkAddress, double> excludedDegradedServers) {
+	JsonBuilderObject& statusObj = statusState->statusObj;
+	JsonBuilderArray& messages = statusState->messages;
+	std::set<std::string>& status_incomplete_reasons = statusState->statusIncompleteReasons;
 
-	state double tStart = timer();
+	double tStart = timer();
 
-	state WorkerDetails mWorker; // Master worker
-	state WorkerDetails ccWorker; // Cluster-Controller worker
-	state WorkerDetails ddWorker; // DataDistributor worker
-	state WorkerDetails rkWorker; // Ratekeeper worker
-	state WorkerDetails csWorker; // ConsistencyScan worker
+	WorkerDetails mWorker; // Master worker
+	WorkerDetails ccWorker; // Cluster-Controller worker
+	WorkerDetails ddWorker; // DataDistributor worker
+	WorkerDetails rkWorker; // Ratekeeper worker
+	WorkerDetails csWorker; // ConsistencyScan worker
 
 	try {
 		// Get the master Worker interface
@@ -2932,17 +2969,17 @@ ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
 		// Get latest events for various event types from ALL workers
 		// WorkerEvents is a map of worker's NetworkAddress to its event string
 		// The pair represents worker responses and a set of worker NetworkAddress strings which did not respond.
-		std::vector<Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>>> futures;
-		futures.push_back(latestEventOnWorkers(workers, "MachineMetrics"));
-		futures.push_back(latestEventOnWorkers(workers, "ProcessMetrics"));
-		futures.push_back(latestEventOnWorkers(workers, "NetworkMetrics"));
-		futures.push_back(latestErrorOnWorkers(workers)); // Get all latest errors.
-		futures.push_back(latestEventOnWorkers(workers, "TraceFileOpenError"));
-		futures.push_back(latestEventOnWorkers(workers, "ProgramStart"));
+		std::vector<AsyncResult<Optional<std::pair<WorkerEvents, std::set<std::string>>>>> workerEventFetchers;
+		workerEventFetchers.push_back(latestEventOnWorkers(workers, "MachineMetrics"));
+		workerEventFetchers.push_back(latestEventOnWorkers(workers, "ProcessMetrics"));
+		workerEventFetchers.push_back(latestEventOnWorkers(workers, "NetworkMetrics"));
+		workerEventFetchers.push_back(latestErrorOnWorkers(workers)); // Get all latest errors.
+		workerEventFetchers.push_back(latestEventOnWorkers(workers, "TraceFileOpenError"));
+		workerEventFetchers.push_back(latestEventOnWorkers(workers, "ProgramStart"));
 
 		// Wait for all response pairs.
-		state std::vector<Optional<std::pair<WorkerEvents, std::set<std::string>>>> workerEventsVec =
-		    wait(getAll(futures));
+		std::vector<Optional<std::pair<WorkerEvents, std::set<std::string>>>> workerEventsVec =
+		    co_await getAll(std::move(workerEventFetchers));
 
 		// Create a unique set of all workers who were unreachable for 1 or more of the event requests above.
 		// Since each event request is independent and to all workers, workers can have responded to some
@@ -2969,12 +3006,25 @@ ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
 			messages.push_back(message);
 		}
 
-		state ProtocolVersionData protocolVersion = wait(getNewestProtocolVersion(cx, ccWorker));
+		ProtocolVersionData protocolVersion = co_await getNewestProtocolVersion(cx, ccWorker);
 
 		// construct status information for cluster subsections
-		state int statusCode = (int)RecoveryStatus::END;
-		state Future<JsonBuilderObject> recoveryStateStatusFuture =
-		    recoveryStateStatusFetcher(cx, ccWorker, mWorker, workers.size(), &status_incomplete_reasons, &statusCode);
+		int statusCode = (int)RecoveryStatus::END;
+		std::vector<AsyncResult<ErrorOr<JsonBuilderObject>>> clusterSubsectionFetchers;
+		clusterSubsectionFetchers.push_back(errorOr(recoveryStateStatusFetcher(
+		    cx, ccWorker, mWorker, workers.size(), &status_incomplete_reasons, &statusCode)));
+		clusterSubsectionFetchers.push_back(errorOr(timeoutError(getIdmpKeyStatus(cx), 5.0)));
+		clusterSubsectionFetchers.push_back(errorOr(versionEpochStatusFetcher(cx, &status_incomplete_reasons)));
+
+		std::vector<ErrorOr<JsonBuilderObject>> clusterSubsectionStatuses =
+		    co_await getAll(std::move(clusterSubsectionFetchers));
+
+		if (clusterSubsectionStatuses[0].isError()) {
+			throw clusterSubsectionStatuses[0].getError();
+		}
+		if (clusterSubsectionStatuses[2].isError()) {
+			throw clusterSubsectionStatuses[2].getError();
+		}
 
 		statusObj["newest_protocol_version"] = format("%" PRIx64, protocolVersion.newestProtocolVersion.version());
 		statusObj["lowest_compatible_protocol_version"] =
@@ -2984,21 +3034,14 @@ ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
 		statusObj["connection_string"] = coordinators.ccr->getConnectionString().toString();
 		statusObj["bounce_impact"] = getBounceImpactInfo(statusCode);
 
-		state Future<ErrorOr<JsonBuilderObject>> idmpKeyStatusFuture = errorOr(timeoutError(getIdmpKeyStatus(cx), 5.0));
-
-		state Future<JsonBuilderObject> versionEpochStatusFuture =
-		    versionEpochStatusFetcher(cx, &status_incomplete_reasons);
-
-		wait(success(recoveryStateStatusFuture) && success(idmpKeyStatusFuture) && success(versionEpochStatusFuture));
-
-		state JsonBuilderObject recoveryStateStatus = recoveryStateStatusFuture.get();
-		state JsonBuilderObject idmpKeyStatus;
-		if (idmpKeyStatusFuture.get().present()) {
-			idmpKeyStatus = idmpKeyStatusFuture.get().get();
+		JsonBuilderObject recoveryStateStatus = clusterSubsectionStatuses[0].get();
+		JsonBuilderObject idmpKeyStatus;
+		if (clusterSubsectionStatuses[1].present()) {
+			idmpKeyStatus = clusterSubsectionStatuses[1].get();
 		} else {
 			status_incomplete_reasons.insert("Unable to retrieve idempotency ID status.");
 		}
-		state JsonBuilderObject versionEpochStatus = versionEpochStatusFuture.get();
+		JsonBuilderObject versionEpochStatus = clusterSubsectionStatuses[2].get();
 
 		if (!recoveryStateStatus.empty()) {
 			statusObj["recovery_state"] = recoveryStateStatus;
@@ -3008,41 +3051,38 @@ ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
 		statusObj["version_epoch"] = versionEpochStatus;
 
 		// machine metrics
-		state WorkerEvents mMetrics = workerEventsVec[0].present() ? workerEventsVec[0].get().first : WorkerEvents();
+		WorkerEvents mMetrics = workerEventsVec[0].present() ? workerEventsVec[0].get().first : WorkerEvents();
 		// process metrics
-		state WorkerEvents pMetrics = workerEventsVec[1].present() ? workerEventsVec[1].get().first : WorkerEvents();
-		state WorkerEvents networkMetrics =
-		    workerEventsVec[2].present() ? workerEventsVec[2].get().first : WorkerEvents();
-		state WorkerEvents latestError = workerEventsVec[3].present() ? workerEventsVec[3].get().first : WorkerEvents();
-		state WorkerEvents traceFileOpenErrors =
+		WorkerEvents pMetrics = workerEventsVec[1].present() ? workerEventsVec[1].get().first : WorkerEvents();
+		WorkerEvents networkMetrics = workerEventsVec[2].present() ? workerEventsVec[2].get().first : WorkerEvents();
+		WorkerEvents latestError = workerEventsVec[3].present() ? workerEventsVec[3].get().first : WorkerEvents();
+		WorkerEvents traceFileOpenErrors =
 		    workerEventsVec[4].present() ? workerEventsVec[4].get().first : WorkerEvents();
-		state WorkerEvents programStarts =
-		    workerEventsVec[5].present() ? workerEventsVec[5].get().first : WorkerEvents();
+		WorkerEvents programStarts = workerEventsVec[5].present() ? workerEventsVec[5].get().first : WorkerEvents();
 
 		if (db->get().recoveryCount > 0) {
 			statusObj["generation"] = db->get().recoveryCount;
 		}
 
-		state std::map<std::string, std::vector<JsonBuilderObject>> processIssues =
-		    getProcessIssuesAsMessages(workerIssues);
-		state std::vector<StorageServerStatusInfo> storageServers;
-		state std::vector<std::pair<TLogInterface, EventMap>> tLogs;
-		state std::vector<std::pair<CommitProxyInterface, EventMap>> commitProxies;
-		state std::vector<std::pair<GrvProxyInterface, EventMap>> grvProxies;
+		std::map<std::string, std::vector<JsonBuilderObject>> processIssues = getProcessIssuesAsMessages(workerIssues);
+		std::vector<StorageServerStatusInfo> storageServers;
+		std::vector<std::pair<TLogInterface, EventMap>> tLogs;
+		std::vector<std::pair<CommitProxyInterface, EventMap>> commitProxies;
+		std::vector<std::pair<GrvProxyInterface, EventMap>> grvProxies;
 
-		state JsonBuilderObject qos;
-		state JsonBuilderObject dataOverlay;
-		state JsonBuilderObject metacluster;
-		state JsonBuilderObject storageWiggler;
-		state std::unordered_set<UID> wiggleServers;
+		JsonBuilderObject qos;
+		JsonBuilderObject dataOverlay;
+		JsonBuilderObject metacluster;
+		JsonBuilderObject storageWiggler;
+		std::unordered_set<UID> wiggleServers;
 
-		state Optional<DatabaseConfiguration> configuration;
-		state Optional<LoadConfigurationResult> loadResult;
-		state std::unordered_map<NetworkAddress, WorkerInterface> address_workers;
+		Optional<DatabaseConfiguration> configuration;
+		Optional<LoadConfigurationResult> loadResult;
+		std::unordered_map<NetworkAddress, WorkerInterface> address_workers;
 
 		if (statusCode != RecoveryStatus::configuration_missing) {
 			std::pair<Optional<DatabaseConfiguration>, Optional<LoadConfigurationResult>> loadResults =
-			    wait(loadConfiguration(cx, &messages, &status_incomplete_reasons));
+			    co_await loadConfiguration(cx, &messages, &status_incomplete_reasons);
 			configuration = loadResults.first;
 			loadResult = loadResults.second;
 		}
@@ -3069,19 +3109,19 @@ ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
 
 		statusObj["machines"] = machineStatusFetcher(mMetrics, workers, configuration, &status_incomplete_reasons);
 
-		state std::vector<NetworkAddress> coordinatorAddresses;
+		std::vector<NetworkAddress> coordinatorAddresses;
 		if (configuration.present()) {
 			// Do the latency probe by itself to avoid interference from other status activities
-			state bool isAvailable = true;
+			bool isAvailable = true;
 			JsonBuilderObject latencyProbeResults =
-			    wait(latencyProbeFetcher(cx, &messages, &status_incomplete_reasons, &isAvailable));
+			    co_await latencyProbeFetcher(cx, &messages, &status_incomplete_reasons, &isAvailable);
 
 			statusObj["database_available"] = isAvailable;
 			if (!latencyProbeResults.empty()) {
 				statusObj["latency_probe"] = latencyProbeResults;
 			}
 
-			state std::vector<Future<Void>> warningFutures;
+			std::vector<Future<Void>> warningFutures;
 			if (isAvailable) {
 				warningFutures.push_back(consistencyCheckStatusFetcher(cx, &messages, &status_incomplete_reasons));
 				if (!SERVER_KNOBS->DISABLE_DUPLICATE_LOG_WARNING) {
@@ -3096,38 +3136,40 @@ ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
 				address_workers[worker.interf.address()] = worker.interf;
 			}
 
-			state Future<ErrorOr<std::vector<StorageServerStatusInfo>>> storageServerFuture =
+			Future<ErrorOr<std::vector<StorageServerStatusInfo>>> storageServerFuture =
 			    errorOr(getStorageServerStatusInfos(storageMetadatas, address_workers, rkWorker));
-			state Future<ErrorOr<std::vector<std::pair<TLogInterface, EventMap>>>> tLogFuture =
+			Future<ErrorOr<std::vector<std::pair<TLogInterface, EventMap>>>> tLogFuture =
 			    errorOr(getTLogsAndMetrics(db, address_workers));
-			state Future<ErrorOr<std::vector<std::pair<CommitProxyInterface, EventMap>>>> commitProxyFuture =
+			Future<ErrorOr<std::vector<std::pair<CommitProxyInterface, EventMap>>>> commitProxyFuture =
 			    errorOr(getCommitProxiesAndMetrics(db, address_workers));
-			state Future<ErrorOr<std::vector<std::pair<GrvProxyInterface, EventMap>>>> grvProxyFuture =
+			Future<ErrorOr<std::vector<std::pair<GrvProxyInterface, EventMap>>>> grvProxyFuture =
 			    errorOr(getGrvProxiesAndMetrics(db, address_workers));
 
-			state int minStorageReplicasRemaining = -1;
-			state int fullyReplicatedRegions = -1;
+			int minStorageReplicasRemaining = -1;
+			int fullyReplicatedRegions = -1;
 			// NOTE: here we should start all the transaction before wait in order to overlay latency
-			state Future<Optional<Value>> primaryDCFO = getActivePrimaryDC(cx, &fullyReplicatedRegions, &messages);
-			state std::vector<Future<JsonBuilderObject>> futures2;
-			futures2.push_back(dataStatusFetcher(ddWorker, configuration.get(), &minStorageReplicasRemaining));
-			futures2.push_back(workloadStatusFetcher(
+			Future<Optional<Value>> primaryDCFO = getActivePrimaryDC(cx, &fullyReplicatedRegions, &messages);
+			std::vector<AsyncResult<JsonBuilderObject>> statusSectionFetchers;
+			statusSectionFetchers.push_back(
+			    dataStatusFetcher(ddWorker, configuration.get(), &minStorageReplicasRemaining));
+			statusSectionFetchers.push_back(workloadStatusFetcher(
 			    db, workers, mWorker, rkWorker, &qos, &dataOverlay, &status_incomplete_reasons, storageServerFuture));
-			futures2.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
-			futures2.push_back(lockedStatusFetcher(cx, &messages, &status_incomplete_reasons));
-			futures2.push_back(
+			statusSectionFetchers.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
+			statusSectionFetchers.push_back(lockedStatusFetcher(cx, &messages, &status_incomplete_reasons));
+			statusSectionFetchers.push_back(
 			    clusterSummaryStatisticsFetcher(pMetrics, storageServerFuture, tLogFuture, &status_incomplete_reasons));
 
 			if (configuration.get().perpetualStorageWiggleSpeed > 0) {
-				state Future<std::vector<std::pair<UID, StorageWiggleValue>>> primaryWiggleValues;
-				state Future<std::vector<std::pair<UID, StorageWiggleValue>>> remoteWiggleValues;
+				Future<std::vector<std::pair<UID, StorageWiggleValue>>> primaryWiggleValues;
+				Future<std::vector<std::pair<UID, StorageWiggleValue>>> remoteWiggleValues;
+				AsyncResult<JsonBuilderObject> storageWigglerFetcher;
 				double timeout = g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01) ? 0.0 : 2.0;
 				primaryWiggleValues = timeoutError(readStorageWiggleValues(cx, true, true), timeout);
 				remoteWiggleValues = timeoutError(readStorageWiggleValues(cx, false, true), timeout);
-				wait(store(
-				         storageWiggler,
-				         storageWigglerStatsFetcher(db->get().distributor, configuration.get(), cx, true, &messages)) &&
-				     ready(primaryWiggleValues) && ready(remoteWiggleValues));
+				storageWigglerFetcher =
+				    storageWigglerStatsFetcher(db->get().distributor, configuration.get(), cx, true, &messages);
+				co_await (ready(primaryWiggleValues) && ready(remoteWiggleValues));
+				storageWiggler = co_await std::move(storageWigglerFetcher);
 
 				if (primaryWiggleValues.canGet()) {
 					for (auto& p : primaryWiggleValues.get())
@@ -3146,14 +3188,15 @@ ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
 				}
 			}
 
-			wait(success(primaryDCFO));
+			std::vector<JsonBuilderObject> workerStatuses = co_await getAll(std::move(statusSectionFetchers));
+			co_await primaryDCFO;
 
 			if (primaryDCFO.get().present()) {
 				statusObj["active_primary_dc"] = primaryDCFO.get().get();
 			}
 
 			ErrorOr<std::vector<NetworkAddress>> addresses =
-			    wait(errorOr(timeoutError(coordinators.ccr->getConnectionString().tryResolveHostnames(), 5.0)));
+			    co_await errorOr(timeoutError(coordinators.ccr->getConnectionString().tryResolveHostnames(), 5.0));
 			if (addresses.present()) {
 				coordinatorAddresses = std::move(addresses.get());
 			} else {
@@ -3178,15 +3221,12 @@ ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
 			                                fullyReplicatedRegions,
 			                                loadResult.present() && loadResult.get().healthyZone.present());
 
-			state JsonBuilderObject configObj =
-			    configurationFetcher(configuration, coordinators, &status_incomplete_reasons);
+			JsonBuilderObject configObj = configurationFetcher(configuration, coordinators, &status_incomplete_reasons);
 
 			// configArr could be empty
 			if (!configObj.empty()) {
 				statusObj["configuration"] = configObj;
 			}
-
-			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
 
 			// workloadStatusFetcher returns the workload section but also optionally writes the qos section and
 			// adds to the dataOverlay object
@@ -3220,7 +3260,7 @@ ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
 			}
 
 			// Need storage servers now for processStatusFetcher() below.
-			ErrorOr<std::vector<StorageServerStatusInfo>> _storageServers = wait(storageServerFuture);
+			ErrorOr<std::vector<StorageServerStatusInfo>> _storageServers = co_await storageServerFuture;
 			if (_storageServers.present()) {
 				storageServers = _storageServers.get();
 			} else {
@@ -3229,7 +3269,7 @@ ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
 			}
 
 			// ...also tlogs
-			ErrorOr<std::vector<std::pair<TLogInterface, EventMap>>> _tLogs = wait(tLogFuture);
+			ErrorOr<std::vector<std::pair<TLogInterface, EventMap>>> _tLogs = co_await tLogFuture;
 			if (_tLogs.present()) {
 				tLogs = _tLogs.get();
 			} else {
@@ -3238,7 +3278,7 @@ ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
 			}
 
 			// ...also commit proxies
-			ErrorOr<std::vector<std::pair<CommitProxyInterface, EventMap>>> _commitProxies = wait(commitProxyFuture);
+			ErrorOr<std::vector<std::pair<CommitProxyInterface, EventMap>>> _commitProxies = co_await commitProxyFuture;
 			if (_commitProxies.present()) {
 				commitProxies = _commitProxies.get();
 			} else {
@@ -3247,7 +3287,7 @@ ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
 			}
 
 			// ...also grv proxies
-			ErrorOr<std::vector<std::pair<GrvProxyInterface, EventMap>>> _grvProxies = wait(grvProxyFuture);
+			ErrorOr<std::vector<std::pair<GrvProxyInterface, EventMap>>> _grvProxies = co_await grvProxyFuture;
 			if (_grvProxies.present()) {
 				grvProxies = _grvProxies.get();
 			} else {
@@ -3255,7 +3295,7 @@ ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
 				    JsonBuilder::makeMessage("grv_proxies_error", "Timed out trying to retrieve grv proxies."));
 			}
 
-			wait(waitForAll(warningFutures));
+			co_await waitForAll(warningFutures);
 		} else {
 			// Set layers status to { _valid: false, error: "configurationMissing"}
 			JsonBuilderObject layers;
@@ -3265,25 +3305,25 @@ ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
 		}
 
 		JsonBuilderObject processStatus =
-		    wait(processStatusFetcher(db,
-		                              workers,
-		                              pMetrics,
-		                              mMetrics,
-		                              networkMetrics,
-		                              latestError,
-		                              traceFileOpenErrors,
-		                              programStarts,
-		                              processIssues,
-		                              storageServers,
-		                              tLogs,
-		                              commitProxies,
-		                              grvProxies,
-		                              coordinators,
-		                              coordinatorAddresses,
-		                              cx,
-		                              configuration,
-		                              loadResult.present() ? loadResult.get().healthyZone : Optional<Key>(),
-		                              &status_incomplete_reasons));
+		    co_await processStatusFetcher(db,
+		                                  workers,
+		                                  pMetrics,
+		                                  mMetrics,
+		                                  networkMetrics,
+		                                  latestError,
+		                                  traceFileOpenErrors,
+		                                  programStarts,
+		                                  processIssues,
+		                                  storageServers,
+		                                  tLogs,
+		                                  commitProxies,
+		                                  grvProxies,
+		                                  coordinators,
+		                                  coordinatorAddresses,
+		                                  cx,
+		                                  configuration,
+		                                  loadResult.present() ? loadResult.get().healthyZone : Optional<Key>(),
+		                                  &status_incomplete_reasons);
 		statusObj["processes"] = processStatus;
 
 		int activeTSSCount = 0;
@@ -3318,20 +3358,20 @@ ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
 
 		// Fetch Consistency Scan Information
 		try {
-			state ConsistencyScanState cs;
-			state ConsistencyScanState::Config config;
-			state ConsistencyScanState::RoundStats currentRound;
-			state ConsistencyScanState::LifetimeStats lifetime;
-			state ConsistencyScanState::StatsHistoryMap::RangeResultType olderStats;
+			ConsistencyScanState cs;
+			ConsistencyScanState::Config config;
+			ConsistencyScanState::RoundStats currentRound;
+			ConsistencyScanState::LifetimeStats lifetime;
+			ConsistencyScanState::StatsHistoryMap::RangeResultType olderStats;
 			auto sysDB = SystemDBWriteLockedNow(cx.getReference());
 
 			// TODO: Use the same transaction.
-			wait(timeoutError(
+			co_await timeoutError(
 			    store(config, cs.config().getD(sysDB)) && store(currentRound, cs.currentRoundStats().getD(sysDB)) &&
 			        store(lifetime, cs.lifetimeStats().getD(sysDB)) &&
 			        store(olderStats,
 			              cs.roundStatsHistory().getRange(sysDB, {}, {}, 5, Snapshot::False, Reverse::True)),
-			    2.0));
+			    2.0);
 			json_spirit::mObject csDoc;
 			csDoc["configuration"] = config.toJSON();
 			csDoc["lifetime_stats"] = lifetime.toJSON();
@@ -3363,14 +3403,14 @@ ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
 		    .detail("Duration", timer() - tStart)
 		    .detail("StatusSize", statusObj.getFinalLength());
 
-		return Void();
+		co_return;
 	} catch (Error& e) {
 		TraceEvent(SevError, "StatusError").error(e);
 		throw;
 	}
 }
 
-ACTOR Future<StatusReply> clusterGetStatus(
+AsyncResult<StatusReply> clusterGetStatus(
     Reference<AsyncVar<ServerDBInfo>> db,
     Database cx,
     std::vector<WorkerDetails> workers,
@@ -3384,25 +3424,23 @@ ACTOR Future<StatusReply> clusterGetStatus(
     Version dcStorageServerVersionDifference,
     std::unordered_map<NetworkAddress, double> excludedDegradedServers,
     double deadlineTimeout) {
-	state JsonBuilderObject statusObj;
-	state JsonBuilderArray messages;
-	state std::set<std::string> status_incomplete_reasons;
+	auto statusState = makeReference<ClusterGetStatusState>();
+	JsonBuilderObject& statusObj = statusState->statusObj;
+	JsonBuilderArray& messages = statusState->messages;
+	std::set<std::string>& status_incomplete_reasons = statusState->statusIncompleteReasons;
 
-	ErrorOr<Optional<Void>> result = wait(errorOr(timeout(clusterGetStatusImpl(&statusObj,
-	                                                                           &messages,
-	                                                                           &status_incomplete_reasons,
-	                                                                           db,
-	                                                                           cx,
-	                                                                           workers,
-	                                                                           workerIssues,
-	                                                                           storageMetadatas,
-	                                                                           coordinators,
-	                                                                           excludedDegradedServers),
-	                                                      deadlineTimeout)));
+	auto result = co_await race(
+	    errorOr(clusterGetStatusImpl(
+	        statusState, db, cx, workers, workerIssues, storageMetadatas, coordinators, excludedDegradedServers)),
+	    delay(deadlineTimeout));
 
-	if (result.isError()) {
-		status_incomplete_reasons.insert(fmt::format("Status collection threw: {}", result.getError().what()));
-	} else if (!result.get().present()) {
+	if (result.index() == 0) {
+		ErrorOr<Void> statusResult = std::get<0>(std::move(result));
+		if (statusResult.isError()) {
+			status_incomplete_reasons.insert(
+			    fmt::format("Status collection threw: {}", statusResult.getError().what()));
+		}
+	} else {
 		status_incomplete_reasons.insert("Status collection deadline exceeded.");
 	}
 
@@ -3441,7 +3479,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	}
 	statusObj["messages"] = messages;
 
-	return StatusReply(statusObj.getJson());
+	co_return StatusReply(statusObj.getJson());
 }
 
 StatusReply clusterGetFaultToleranceStatus(const std::string& statusStr) {
@@ -3843,7 +3881,7 @@ TEST_CASE("/fdbserver/clustercontroller/clusterGetStatusTimeout") {
 	mInterface.getCommitVersion = RequestStream<struct GetCommitVersionRequest>(Endpoint({ masterAddr }, testUID));
 	testDbInfo.master = mInterface;
 
-	// Add a GRV proxy that points to a non-existent address — any GRV request will hang
+	// Add a GRV proxy that points to a non-existent address; any GRV request will hang.
 	GrvProxyInterface proxyInterf;
 	proxyInterf.getConsistentReadVersion =
 	    PublicRequestStream<struct GetReadVersionRequest>(Endpoint({ proxyAddr }, testUID));
@@ -3852,87 +3890,84 @@ TEST_CASE("/fdbserver/clustercontroller/clusterGetStatusTimeout") {
 	testDbInfo.recoveryState = RecoveryState::ACCEPTING_COMMITS;
 	testDbInfo.recoveryCount = 1;
 
-	state Reference<AsyncVar<ServerDBInfo>> db = makeReference<AsyncVar<ServerDBInfo>>(testDbInfo);
-	state Database cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True);
+	Reference<AsyncVar<ServerDBInfo>> db = makeReference<AsyncVar<ServerDBInfo>>(testDbInfo);
+	Database cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True);
 
 	// Create minimal ServerCoordinators
-	state ServerCoordinators coordinators(
+	ServerCoordinators coordinators(
 	    Reference<IClusterConnectionRecord>(new ClusterConnectionMemoryRecord(ClusterConnectionString())));
 
 	// Empty containers for other parameters
-	state std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>> clientStatus;
+	std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>> clientStatus;
 
 	// Call clusterGetStatus with a short timeout (1 second) to force the
 	// timeout path to trigger, since internal timeouts take ~13 seconds.
-	state double startTime = now();
-	state Future<StatusReply> statusFuture = clusterGetStatus(db,
-	                                                          cx,
-	                                                          std::vector<WorkerDetails>(),
-	                                                          std::vector<ProcessIssues>(),
-	                                                          std::vector<StorageServerMetaInfo>(),
-	                                                          &clientStatus,
-	                                                          coordinators,
-	                                                          std::vector<NetworkAddress>(),
-	                                                          Version(0),
-	                                                          Version(0),
-	                                                          Version(0),
-	                                                          std::unordered_map<NetworkAddress, double>(),
-	                                                          1.0);
+	double startTime = now();
+	AsyncResult<StatusReply> statusFuture = clusterGetStatus(db,
+	                                                         cx,
+	                                                         std::vector<WorkerDetails>(),
+	                                                         std::vector<ProcessIssues>(),
+	                                                         std::vector<StorageServerMetaInfo>(),
+	                                                         &clientStatus,
+	                                                         coordinators,
+	                                                         std::vector<NetworkAddress>(),
+	                                                         Version(0),
+	                                                         Version(0),
+	                                                         Version(0),
+	                                                         std::unordered_map<NetworkAddress, double>(),
+	                                                         1.0);
 	// Since we set the timeout above to 1 second, 5 seconds should be more than enough to complete the test.
 	// If it takes any longer, then the test case has failed
-	state double MAX_ACCEPTABLE_DELAY = 5.0;
-	state Future<Void> timeout = delay(MAX_ACCEPTABLE_DELAY);
+	const double MAX_ACCEPTABLE_DELAY = 5.0;
+	auto result = co_await race(std::move(statusFuture), delay(MAX_ACCEPTABLE_DELAY));
+	if (result.index() != 0) {
+		TraceEvent(SevError, "ClusterGetStatusTimeoutTestFailed").detail("Elapsed", now() - startTime);
+		ASSERT(false);
+	}
 
-	choose {
-		when(StatusReply reply = wait(statusFuture)) {
-			double elapsed = now() - startTime;
+	StatusReply reply = std::get<0>(std::move(result));
+	double elapsed = now() - startTime;
 
-			TraceEvent("ClusterGetStatusTimeoutTest")
-			    .detail("Elapsed", elapsed)
-			    .detail("StatusSize", reply.statusStr.size())
-			    .detail("StatusJSON", reply.statusStr);
-			fmt::print("=== Status JSON ({:.2f}s) ===\n{}\n=== End Status JSON ===\n", elapsed, reply.statusStr);
+	TraceEvent("ClusterGetStatusTimeoutTest")
+	    .detail("Elapsed", elapsed)
+	    .detail("StatusSize", reply.statusStr.size())
+	    .detail("StatusJSON", reply.statusStr);
+	fmt::print("=== Status JSON ({:.2f}s) ===\n{}\n=== End Status JSON ===\n", elapsed, reply.statusStr);
 
-			ASSERT_LT(elapsed, MAX_ACCEPTABLE_DELAY);
+	ASSERT_LT(elapsed, MAX_ACCEPTABLE_DELAY);
 
-			json_spirit::mValue mv = readJSONStrictly(reply.statusStr);
-			auto obj = mv.get_obj();
+	json_spirit::mValue mv = readJSONStrictly(reply.statusStr);
+	auto obj = mv.get_obj();
 
-			// Fields set in the outer clusterGetStatus — always present even after deadline
-			ASSERT(obj.count("messages") > 0);
-			ASSERT(obj.count("clients") > 0);
-			ASSERT(obj.count("incompatible_connections") > 0);
-			ASSERT(obj.count("datacenter_lag") > 0);
+	// Fields set in the outer clusterGetStatus are always present after deadline.
+	ASSERT(obj.count("messages") > 0);
+	ASSERT(obj.count("clients") > 0);
+	ASSERT(obj.count("incompatible_connections") > 0);
+	ASSERT(obj.count("datacenter_lag") > 0);
 
-			// Verify the deadline-exceeded message is in messages
-			auto& messagesArr = obj["messages"].get_array();
-			bool foundTimeoutMsg = false;
-			bool foundIncomplete = false;
-			for (auto& msg : messagesArr) {
-				auto& msgObj = msg.get_obj();
-				if (msgObj.count("name") && msgObj["name"].get_str() == "status_incomplete") {
-					foundIncomplete = true;
-					if (msgObj.count("reasons")) {
-						for (auto& reason : msgObj["reasons"].get_array()) {
-							auto& reasonObj = reason.get_obj();
-							if (reasonObj.count("description") &&
-							    reasonObj["description"].get_str() == "Status collection deadline exceeded.") {
-								foundTimeoutMsg = true;
-							}
-						}
+	// Verify the deadline-exceeded message is in messages.
+	auto& messagesArr = obj["messages"].get_array();
+	bool foundTimeoutMsg = false;
+	bool foundIncomplete = false;
+	for (auto& msg : messagesArr) {
+		auto& msgObj = msg.get_obj();
+		if (msgObj.count("name") && msgObj["name"].get_str() == "status_incomplete") {
+			foundIncomplete = true;
+			if (msgObj.count("reasons")) {
+				for (auto& reason : msgObj["reasons"].get_array()) {
+					auto& reasonObj = reason.get_obj();
+					if (reasonObj.count("description") &&
+					    reasonObj["description"].get_str() == "Status collection deadline exceeded.") {
+						foundTimeoutMsg = true;
 					}
 				}
 			}
-			fmt::print("Found status_incomplete message: {}\n", foundIncomplete);
-			fmt::print("Found deadline exceeded reason: {}\n", foundTimeoutMsg);
-			ASSERT(foundIncomplete);
-			ASSERT(foundTimeoutMsg);
-		}
-		when(wait(timeout)) {
-			TraceEvent(SevError, "ClusterGetStatusTimeoutTestFailed").detail("Elapsed", now() - startTime);
-			ASSERT(false);
 		}
 	}
+	fmt::print("Found status_incomplete message: {}\n", foundIncomplete);
+	fmt::print("Found deadline exceeded reason: {}\n", foundTimeoutMsg);
+	ASSERT(foundIncomplete);
+	ASSERT(foundTimeoutMsg);
 
-	return Void();
+	co_return;
 }
