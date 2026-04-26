@@ -546,14 +546,6 @@ void rejectForMaxGrvQueueDelay(GetReadVersionRequest const& req, GrvProxyStats* 
 	++stats->txnRequestErrors;
 }
 
-void rejectQueuedForMaxGrvQueueDelay(Deque<GetReadVersionRequest>* queue,
-                                     GrvProxyStats* stats,
-                                     double estimatedRemainingDelay) {
-	rejectForMaxGrvQueueDelay(queue->front(), stats, estimatedRemainingDelay);
-	++stats->txnRequestOut;
-	queue->pop_front();
-}
-
 bool rejectIncomingForMaxGrvQueueDelay(GetReadVersionRequest const& req,
                                        Deque<GetReadVersionRequest> const& systemQueue,
                                        Deque<GetReadVersionRequest> const& defaultQueue,
@@ -1077,29 +1069,9 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 
 			if (req.priority < TransactionPriority::DEFAULT &&
 			    !batchRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1], tc)) {
-				double estimatedDelay =
-				    batchRateInfo.estimateDelay(transactionsStarted[0] + transactionsStarted[1], tc);
-				if (shouldRejectForMaxGrvQueueDelay(req, estimatedDelay)) {
-					rejectQueuedForMaxGrvQueueDelay(transactionQueue, &grvProxyData->stats, estimatedDelay);
-					if (transactionQueue == &batchQueue) {
-						--grvProxyData->stats.batchGRVQueueSize;
-					}
-					continue;
-				}
 				break;
 			} else if (req.priority < TransactionPriority::IMMEDIATE &&
 			           !normalRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1], tc)) {
-				double estimatedDelay =
-				    normalRateInfo.estimateDelay(transactionsStarted[0] + transactionsStarted[1], tc);
-				if (shouldRejectForMaxGrvQueueDelay(req, estimatedDelay)) {
-					rejectQueuedForMaxGrvQueueDelay(transactionQueue, &grvProxyData->stats, estimatedDelay);
-					if (transactionQueue == &defaultQueue) {
-						--grvProxyData->stats.defaultGRVQueueSize;
-					} else if (transactionQueue == &batchQueue) {
-						--grvProxyData->stats.batchGRVQueueSize;
-					}
-					continue;
-				}
 				break;
 			}
 
