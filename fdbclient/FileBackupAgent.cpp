@@ -7167,12 +7167,6 @@ public:
 			backupContainer = joinPath(backupContainer, std::string("backup-") + nowStr.toString());
 		}
 
-		// TODO: Remove
-		if (encryptionKeyFileName.present() && encryptionBlockSize == 0) {
-			assert(false);
-			encryptionBlockSize = DEFAULT_ENCRYPTION_BLOCK_SIZE;
-		}
-
 		Reference<IBackupContainer> bc =
 		    IBackupContainer::openContainer(backupContainer, proxy, encryptionKeyFileName, encryptionBlockSize);
 		try {
@@ -7346,11 +7340,6 @@ public:
 		// Point the tag to the new uid
 		tag.set(tr, { uid, false });
 
-		// TODO akanksha: Remove.
-		if (encryptionKeyFileName.present() && encryptionBlockSize == 0) {
-			assert(false);
-			encryptionBlockSize = DEFAULT_ENCRYPTION_BLOCK_SIZE;
-		}
 		Reference<IBackupContainer> bc =
 		    IBackupContainer::openContainer(backupURL.toString(), proxy, encryptionKeyFileName, encryptionBlockSize);
 
