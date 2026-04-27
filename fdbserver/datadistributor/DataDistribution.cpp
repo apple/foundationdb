@@ -5246,4 +5246,3 @@ TEST_CASE("/DataDistribution/Initialization/ResumeFromShard") {
 	self->shardsAffectedByTeamFailure->check();
 	co_return;
 }
-
