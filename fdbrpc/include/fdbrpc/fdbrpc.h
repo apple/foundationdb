@@ -848,7 +848,7 @@ public:
 			} else {
 				Reference<Peer> peer =
 				    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
-				endStreamOnDisconnect(disc, p, getEndpoint(), peer);
+				endStreamOnDisconnect(Uncancellable(), disc, p, getEndpoint(), peer);
 			}
 			return p;
 		} else {
@@ -989,4 +989,4 @@ struct serializable_traits<RequestStream<T, P>> : std::true_type {
 };
 
 #endif
-#include "fdbrpc/genericactors.actor.h"
+#include "fdbrpc/genericactors.h"
