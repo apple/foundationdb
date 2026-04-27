@@ -21,15 +21,48 @@
 package api
 
 import (
-	//"encoding/json"
-	//"os"
+	"encoding/json"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
 
 var _ = Describe("[api] FDBVersion", func() {
-	// TODO test a json marshal and unmarshl!
+	When("marshaling and unmarshaling a Version as JSON", func() {
+		It("should round-trip a stable version", func() {
+			original := Version{Major: 7, Minor: 3, Patch: 27}
+			data, err := json.Marshal(&original)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(data)).To(Equal(`"7.3.27"`))
+
+			var decoded Version
+			Expect(json.Unmarshal(data, &decoded)).To(Succeed())
+			Expect(decoded).To(Equal(original))
+		})
+
+		It("should round-trip a release candidate version", func() {
+			original := Version{Major: 7, Minor: 0, Patch: 0, ReleaseCandidate: 3}
+			data, err := json.Marshal(&original)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(data)).To(Equal(`"7.0.0-rc3"`))
+
+			var decoded Version
+			Expect(json.Unmarshal(data, &decoded)).To(Succeed())
+			Expect(decoded).To(Equal(original))
+		})
+
+		It("should return an error when unmarshaling an invalid version string", func() {
+			var decoded Version
+			Err := json.Unmarshal([]byte(`"not-a-version"`), &decoded)
+			Expect(Err).To(HaveOccurred())
+		})
+
+		It("should return an error when unmarshaling a version with missing patch", func() {
+			var decoded Version
+			Err := json.Unmarshal([]byte(`"7.3"`), &decoded)
+			Expect(Err).To(HaveOccurred())
+		})
+	})
 
 	When("checking if the protocol and the version are compatible", func() {
 		It("should return the correct compatibility", func() {
