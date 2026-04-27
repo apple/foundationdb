@@ -642,7 +642,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SHARDED_ROCKSDB_REUSE_ITERATORS,                     false ); if( isSimulated ) SHARDED_ROCKSDB_REUSE_ITERATORS = deterministicRandom()->coinflip();
 	init( ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS,          false ); if( randomize && BUGGIFY ) ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS = deterministicRandom()->coinflip();
 	init( ROCKSDB_READ_RANGE_BOUNDED_ITERATORS_MAX_LIMIT,        200 );
-	// By default all reads are cached. If this option is enabled, based on txn.readOptions caching is enabled/diabled accordingly.
 	init( ROCKSDB_USE_CACHE_RESULT_OPTION,                     false ); if( isSimulated ) ROCKSDB_USE_CACHE_RESULT_OPTION = deterministicRandom()->coinflip();
 	// Probability that RocksDB can disable block cache in simulation
 	init( ROCKSDB_PROBABILITY_DISABLE_CACHE_SIM,                 0.1 );

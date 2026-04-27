@@ -520,9 +520,10 @@ struct ReadIterator {
 	             bool cacheResult = true)
 	  : index(index), inUse(true), creationTime(now()), keyRange(keyRange) {
 		rocksdb::ReadOptions readOptions = sharedState->getReadOptions();
-		// Disable block cache if the read request says so.
+		// Honor the txn.ReadOptions.CacheResult setting when this ROCKSDB_USE_CACHE_RESULT_OPTION is enabled.
 		if (g_network->isSimulated()) {
-			// Disabling cache in simulation can cause slow down, so disabling only for 10% requests.
+			// Disabling rocksdb cache in simulation can cause slow down, so honoring txn.ReadOptions.CacheResult
+			// option only for few requests, controlled by SERVER_KNOBS->ROCKSDB_PROBABILITY_DISABLE_CACHE_SIM.
 			if (SERVER_KNOBS->ROCKSDB_USE_CACHE_RESULT_OPTION &&
 			    deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_PROBABILITY_DISABLE_CACHE_SIM)
 				readOptions.fill_cache = cacheResult;
@@ -592,6 +593,8 @@ public:
 			return iter;
 		}
 
+		// When ROCKSDB_READ_RANGE_REUSE_ITERATORS is true, the iterator is not bounded
+		// and reused, so txn.ReadOptions.CacheResult is ignored and always reads are cached.
 		if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
 			mutex.lock();
 			for (it = iteratorsMap.begin(); it != iteratorsMap.end(); it++) {
@@ -630,8 +633,8 @@ public:
 			mutex.unlock();
 
 			ReadIterator iter(cf, readIteratorIndex, db, sharedState, keyRange, cacheResult);
-			// If cacheResult is false, less probability to get the read in the same range, so don't
-			// save the iterator for reuse.
+			// If txn.ReadOptions.CacheResult is false, less probability to get the read in
+			// the same range, so don't save the iterator for reuse.
 			if (iteratorsMap.size() < SERVER_KNOBS->ROCKSDB_READ_RANGE_BOUNDED_ITERATORS_MAX_LIMIT && cacheResult) {
 				// Not storing more than ROCKSDB_READ_RANGE_BOUNDED_ITERATORS_MAX_LIMIT of iterators
 				// to avoid 'out of memory' issues.
@@ -2252,8 +2255,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			    !SERVER_KNOBS->ROCKSDB_FORCE_DELETERANGE_FOR_CLEARRANGE && maxDeletes > 0) {
 				++counters.convertedDeleteRangeReqs;
 				rocksdb::ReadOptions readOptions = sharedState->getReadOptions();
+				// Below does a read operation for the deleteRange request, so disable rocksdb cache.
 				if (g_network->isSimulated()) {
-					// Disabling cache in simulation can cause slow down, so disabling only for 10% requests.
+					// Disabling rocksdb cache in simulation can cause slow down, so disabling only for
+					// few requests controlled by SERVER_KNOBS->ROCKSDB_PROBABILITY_DISABLE_CACHE_SIM.
 					if (SERVER_KNOBS->ROCKSDB_USE_CACHE_RESULT_OPTION &&
 					    deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_PROBABILITY_DISABLE_CACHE_SIM)
 						readOptions.fill_cache = false;

@@ -531,6 +531,8 @@ public:
 	bool SHARDED_ROCKSDB_REUSE_ITERATORS;
 	bool ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS;
 	int ROCKSDB_READ_RANGE_BOUNDED_ITERATORS_MAX_LIMIT;
+	// By default all reads to rocksdb are cached. If this knob is set to true, based on
+	// txn.ReadOptions.CacheResult, rocksdb caching is enabled/disabled accordingly for that read.
 	bool ROCKSDB_USE_CACHE_RESULT_OPTION;
 	double ROCKSDB_PROBABILITY_DISABLE_CACHE_SIM;
 	int64_t ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC;
