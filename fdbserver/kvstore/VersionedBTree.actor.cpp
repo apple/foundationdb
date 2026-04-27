@@ -675,8 +675,7 @@ public:
 
 			// If we have to wait for the mutex because it's busy, or we need a new page, then wait for the mutex.
 			if (mustWait || needNewPage) {
-				FlowMutex::Lock _lock = co_await self->mutex.take();
-				lock = _lock;
+				lock = co_await self->mutex.take();
 
 				// If we had to wait because the mutex was busy, then update needNewPage as another writer
 				// would have changed the cursor state
@@ -778,7 +777,7 @@ public:
 			if (load) {
 				debug_printf("FIFOQueue::Cursor(%s) waitThenReadNext waiting for page load\n",
 				             self->toString().c_str());
-				co_await success(self->nextPageReader);
+				co_await self->nextPageReader;
 			}
 
 			Optional<T> result = co_await self->readNext(inclusiveMaximum, &localLock);
@@ -5819,8 +5818,7 @@ private:
 				}
 
 				childPageID.resize(records.arena(), p->blockCount);
-				int i = 0;
-				for (i = 0; i < childPageID.size(); ++i) {
+				for (int i = 0; i < childPageID.size(); ++i) {
 					LogicalPageID id = co_await self->m_pager->newPageID();
 					childPageID[i] = id;
 				}
@@ -8273,7 +8271,11 @@ Future<Void> randomReader(VersionedBTree* btree, int64_t* pRecordsRead) {
 		bool direction = deterministicRandom()->coinflip();
 		while (cur.isValid() && c-- > 0) {
 			++*pRecordsRead;
-			co_await success(direction ? cur.moveNext() : cur.movePrev());
+			if (direction) {
+				co_await cur.moveNext();
+			} else {
+				co_await cur.movePrev();
+			}
 			co_await yield();
 		}
 	}
@@ -10181,7 +10183,11 @@ Future<Void> randomScans(VersionedBTree* btree,
 
 		while (w > 0 && cur.isValid()) {
 			totalScanBytes += cur.get().expectedSize();
-			co_await success(directionFwd ? cur.moveNext() : cur.movePrev());
+			if (directionFwd) {
+				co_await cur.moveNext();
+			} else {
+				co_await cur.movePrev();
+			}
 			--w;
 		}
 	}
