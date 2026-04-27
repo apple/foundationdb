@@ -74,9 +74,7 @@ public:
 		int bytesRead = 0;
 		ASSERT(self->mode == AsyncFileEncrypted::Mode::READ_ONLY);
 		for (block = firstBlock; block <= lastBlock; ++block) {
-			Standalone<StringRef> plaintext;
-
-			plaintext = co_await readBlock(self.getPtr(), block);
+			Standalone<StringRef> plaintext = co_await readBlock(self.getPtr(), block);
 			auto start = (block == firstBlock) ? plaintext.begin() + (offset % FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE)
 			                                   : plaintext.begin();
 			auto end = (block == lastBlock)
