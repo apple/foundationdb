@@ -34,10 +34,9 @@
 #include "fdbserver/core/WorkerEvents.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include <time.h>
-#include "ClusterRecovery.actor.h"
+#include "ClusterRecovery.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbserver/core/CoordinationInterface.h"
-#include "fdbserver/datadistributor/DataDistribution.h"
 #include "fdbclient/ConsistencyScanInterface.h"
 #include "flow/UnitTest.h"
 #include "fdbserver/core/QuietDatabase.h"
@@ -2864,7 +2863,7 @@ AsyncResult<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistribut
 		if (primaryV.present()) {
 			auto obj = primaryV.get().toJSON();
 			auto& reply = stateFut.get();
-			obj["state"] = StorageWiggler::getWiggleStateStr(static_cast<StorageWiggler::State>(reply.primary));
+			obj["state"] = StorageWigglerState::toString(static_cast<StorageWigglerState::Value>(reply.primary));
 			obj["last_state_change_timestamp"] = reply.lastStateChangePrimary;
 			obj["last_state_change_datetime"] = epochsToGMTString(reply.lastStateChangePrimary);
 			res["primary"] = obj;
@@ -2872,7 +2871,7 @@ AsyncResult<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistribut
 		if (conf.regions.size() > 1 && remoteV.present()) {
 			auto obj = remoteV.get().toJSON();
 			auto& reply = stateFut.get();
-			obj["state"] = StorageWiggler::getWiggleStateStr(static_cast<StorageWiggler::State>(reply.remote));
+			obj["state"] = StorageWigglerState::toString(static_cast<StorageWigglerState::Value>(reply.remote));
 			obj["last_state_change_timestamp"] = reply.lastStateChangeRemote;
 			obj["last_state_change_datetime"] = epochsToGMTString(reply.lastStateChangeRemote);
 			res["remote"] = obj;
