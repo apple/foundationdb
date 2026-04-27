@@ -32,7 +32,6 @@ import (
 	"net/http/pprof"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path"
 	"strconv"
 	"strings"
@@ -132,7 +131,7 @@ func startMonitor(ctx context.Context, logger logr.Logger, configFile string, cu
 		currentContainerVersion: currentContainerVersion,
 	}
 
-	go func() { mon.watchPodTimestamps() }()
+	go func() { mon.watchPodTimestamps(ctx) }()
 
 	mux := http.NewServeMux()
 	// Enable pprof endpoints for debugging purposes.
@@ -184,17 +183,21 @@ func startMonitor(ctx context.Context, logger logr.Logger, configFile string, cu
 		}
 	}()
 
-	mon.run()
+	mon.run(ctx)
 }
 
 // updateCustomEnvironment will add the node labels and their values to the custom environment map. All the generated
 // environment variables will start with NODE_LABEL and "/" and "." will be replaced in the key as "_", e.g. from the
 // label "foundationdb.org/testing = awesome" the env variables NODE_LABEL_FOUNDATIONDB_ORG_TESTING = awesome" will be
 // generated.
-func (monitor *monitor) updateCustomEnvironmentFromNodeMetadata() {
-	nodeMeta := monitor.podClient.getNodeMetadata()
+func (monitor *monitor) updateCustomEnvironmentFromNodeMetadata(ctx context.Context) error {
+	nodeMeta, err := monitor.podClient.getNodeMetadata(ctx)
+	if err != nil {
+		return err
+	}
+
 	if nodeMeta == nil {
-		return
+		return nil
 	}
 
 	nodeLabels := nodeMeta.Labels
@@ -217,10 +220,12 @@ func (monitor *monitor) updateCustomEnvironmentFromNodeMetadata() {
 		monitor.customEnvironment[envKey] = value
 		continue
 	}
+
+	return nil
 }
 
 // readConfiguration reads the latest configuration from the monitor file.
-func (monitor *monitor) readConfiguration() (*api.ProcessConfiguration, []byte) {
+func (monitor *monitor) readConfiguration(ctx context.Context) (*api.ProcessConfiguration, []byte) {
 	file, err := os.Open(monitor.configFile)
 	if err != nil {
 		monitor.logger.Error(err, "Error reading monitor config file", "monitorConfigPath", monitor.configFile)
@@ -262,7 +267,11 @@ func (monitor *monitor) readConfiguration() (*api.ProcessConfiguration, []byte) 
 		return nil, nil
 	}
 
-	monitor.updateCustomEnvironmentFromNodeMetadata()
+	err = monitor.updateCustomEnvironmentFromNodeMetadata(ctx)
+	if err != nil {
+		monitor.logger.Error(err, "Error updating custom environment from node metadata", "configuration", configuration, "binaryPath", configuration.BinaryPath)
+		return nil, nil
+	}
 	_, err = configuration.GenerateArguments(1, monitor.customEnvironment)
 	if err != nil {
 		monitor.logger.Error(err, "Error generating arguments for latest configuration", "configuration", configuration, "binaryPath", configuration.BinaryPath)
@@ -272,7 +281,7 @@ func (monitor *monitor) readConfiguration() (*api.ProcessConfiguration, []byte) 
 	if configuration.ShouldRunServers() {
 		// In case that the process is isolated we don't want to start the servers and we should terminate the running fdbserver
 		// instances.
-		if monitor.processIsIsolated() {
+		if monitor.processIsIsolated(ctx) {
 			configuration.RunServers = pointer.Bool(false)
 		}
 	}
@@ -281,8 +290,8 @@ func (monitor *monitor) readConfiguration() (*api.ProcessConfiguration, []byte) 
 }
 
 // loadConfiguration loads the latest configuration from the config file.
-func (monitor *monitor) loadConfiguration() {
-	configuration, configurationBytes := monitor.readConfiguration()
+func (monitor *monitor) loadConfiguration(ctx context.Context) {
+	configuration, configurationBytes := monitor.readConfiguration(ctx)
 	if configuration == nil || len(configurationBytes) == 0 {
 		return
 	}
@@ -290,7 +299,7 @@ func (monitor *monitor) loadConfiguration() {
 	monitor.acceptConfiguration(configuration, configurationBytes)
 	// Always update the annotations if needed to handle cases where the fdb-kubernetes-monitor
 	// has loaded the new configuration but was not able to update the annotations.
-	err := monitor.podClient.updateAnnotations(monitor)
+	err := monitor.podClient.updateAnnotations(ctx, monitor)
 	if err != nil {
 		monitor.logger.Error(err, "Error updating pod annotations")
 	}
@@ -495,8 +504,12 @@ func (monitor *monitor) processRequired(processNumber int) bool {
 }
 
 // processIsIsolated returns true if the IsolateProcessGroupAnnotation is set to "true".
-func (monitor *monitor) processIsIsolated() bool {
-	podMeta := monitor.podClient.getPodMetadata()
+func (monitor *monitor) processIsIsolated(ctx context.Context) bool {
+	podMeta, err := monitor.podClient.getPodMetadata(ctx)
+	if err != nil {
+		return false
+	}
+
 	if podMeta == nil {
 		return false
 	}
@@ -556,7 +569,7 @@ func addWatcher(fileName string, watcher *fsnotify.Watcher) error {
 }
 
 // watchConfiguration detects changes to the monitor configuration file.
-func (monitor *monitor) watchConfiguration(watcher *fsnotify.Watcher) {
+func (monitor *monitor) watchConfiguration(ctx context.Context, watcher *fsnotify.Watcher) {
 	for {
 		select {
 		case event, ok := <-watcher.Events:
@@ -566,34 +579,37 @@ func (monitor *monitor) watchConfiguration(watcher *fsnotify.Watcher) {
 
 			monitor.logger.Info("Detected event on monitor conf file or cluster file", "event", event)
 			if event.Op&fsnotify.Write == fsnotify.Write || event.Op&fsnotify.Create == fsnotify.Create {
-				monitor.handleFileChange(event.Name)
+				monitor.handleFileChange(ctx, event.Name)
 			} else if event.Op&fsnotify.Remove == fsnotify.Remove {
 				err := addWatcher(event.Name, watcher)
 				if err != nil {
 					panic(err)
 				}
-				monitor.handleFileChange(event.Name)
+				monitor.handleFileChange(ctx, event.Name)
 			}
 		case err, ok := <-watcher.Errors:
 			if !ok {
 				return
 			}
 			monitor.logger.Error(err, "Error watching for file system events")
+		// Stop watching if the context is shutdown.
+		case <-ctx.Done():
+			return
 		}
 	}
 }
 
 // handleFileChange will perform the required action based on the changed/modified file.
-func (monitor *monitor) handleFileChange(changedFile string) {
+func (monitor *monitor) handleFileChange(ctx context.Context, changedFile string) {
 	if changedFile == fdbClusterFilePath {
-		err := monitor.podClient.updateFdbClusterTimestampAnnotation()
+		err := monitor.podClient.updateFdbClusterTimestampAnnotation(ctx)
 		if err != nil {
 			monitor.logger.Error(err, fmt.Sprintf("could not update %s annotation", api.ClusterFileChangeDetectedAnnotation))
 		}
 		return
 	}
 
-	monitor.loadConfiguration()
+	monitor.loadConfiguration(ctx)
 }
 
 // signalProcesses sends the given signal to all processes in the provided slice.
@@ -621,14 +637,27 @@ func (monitor *monitor) signalProcesses(signal os.Signal, processIDs []int) {
 }
 
 // run runs the monitor loop.
-func (monitor *monitor) run() {
+func (monitor *monitor) run(ctx context.Context) {
 	done := make(chan bool, 1)
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
-		latestSignal := <-signals
-		monitor.logger.Info("Received system signal", "signal", latestSignal)
+		<-ctx.Done()
+		monitor.logger.Info("Received system signal")
+
+		var delayShutdown time.Duration
+		// We cannot use ctx here as the context as cancelled.
+		podMeta, err := monitor.podClient.getPodMetadata(context.Background())
+		if err != nil {
+			monitor.logger.Error(err, "Could not read pod metadata for delayed shutdown")
+		}
+
+		if podMeta != nil {
+			if delayValue, ok := podMeta.Annotations[api.DelayShutdownAnnotation]; ok {
+				if delay, err := time.ParseDuration(delayValue); err == nil {
+					delayShutdown = delay
+				}
+			}
+		}
 
 		// Reset processCount and snapshot processIDs under the mutex, then signal
 		// outside the lock to avoid holding it during OS calls.
@@ -637,20 +666,14 @@ func (monitor *monitor) run() {
 		ids := make([]int, len(monitor.processIDs))
 		copy(ids, monitor.processIDs)
 		monitor.mutex.Unlock()
-		monitor.signalProcesses(latestSignal, ids)
+		monitor.signalProcesses(syscall.SIGTERM, ids)
 
-		if podMeta := monitor.podClient.getPodMetadata(); podMeta != nil {
-			if delayValue, ok := podMeta.Annotations[api.DelayShutdownAnnotation]; ok {
-				if delay, err := time.ParseDuration(delayValue); err == nil {
-					time.Sleep(delay)
-				}
-			}
-		}
+		time.Sleep(delayShutdown)
 
 		done <- true
 	}()
 
-	monitor.loadConfiguration()
+	monitor.loadConfiguration(ctx)
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		panic(err)
@@ -662,12 +685,12 @@ func (monitor *monitor) run() {
 	}
 
 	defer func(watcher *fsnotify.Watcher) {
-		err := watcher.Close()
+		err = watcher.Close()
 		if err != nil {
 			monitor.logger.Error(err, "could not close watcher")
 		}
 	}(watcher)
-	go func() { monitor.watchConfiguration(watcher) }()
+	go func() { monitor.watchConfiguration(ctx, watcher) }()
 
 	// The cluster file will be created and managed by the fdbserver processes, so we have to wait until the fdbserver
 	// processes have been started. Except for the initial cluster creation this file should be present as soon as the
@@ -692,10 +715,18 @@ func (monitor *monitor) run() {
 }
 
 // watchPodTimestamps watches the timestamp feed to reload the configuration.
-func (monitor *monitor) watchPodTimestamps() {
-	for timestamp := range monitor.podClient.TimestampFeed {
-		if timestamp > monitor.lastConfigurationTime.Unix() {
-			monitor.loadConfiguration()
+func (monitor *monitor) watchPodTimestamps(ctx context.Context) {
+	for {
+		select {
+		case timestamp, ok := <-monitor.podClient.TimestampFeed:
+			if !ok {
+				return
+			}
+			if timestamp > monitor.lastConfigurationTime.Unix() {
+				monitor.loadConfiguration(ctx)
+			}
+		case <-ctx.Done():
+			return
 		}
 	}
 }

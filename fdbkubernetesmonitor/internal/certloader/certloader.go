@@ -13,7 +13,7 @@ import (
 // CertLoader is used to reload certificates if needed.
 type CertLoader struct {
 	// mu protects cachedCert and cachedCertModTime from concurrent access.
-	mu sync.RWMutex
+	mu sync.Mutex
 	// CertFile specifies the path to the x509 certificate.
 	CertFile string
 	// CertFile specifies the path to the x509 private key.
@@ -44,23 +44,14 @@ func (certLoader *CertLoader) GetCertificate(_ *tls.ClientHelloInfo) (*tls.Certi
 		return nil, err
 	}
 
-	// Fast path: return cached cert if it is still current.
-	certLoader.mu.RLock()
+	// Lock to avoid concurrent access to cachedCert and cachedCertModTime.
+	certLoader.mu.Lock()
+	defer certLoader.mu.Unlock()
 	cached := certLoader.cachedCert
 	modTime := certLoader.cachedCertModTime
-	certLoader.mu.RUnlock()
 
 	if cached != nil && !stat.ModTime().After(modTime) {
 		return cached, nil
-	}
-
-	// Slow path: reload cert under write lock.
-	certLoader.mu.Lock()
-	defer certLoader.mu.Unlock()
-
-	// Re-check after acquiring the write lock; another goroutine may have reloaded already.
-	if certLoader.cachedCert != nil && !stat.ModTime().After(certLoader.cachedCertModTime) {
-		return certLoader.cachedCert, nil
 	}
 
 	certLoader.logger.Info("loading new certificates", "certFile", certLoader.CertFile, "keyFile", certLoader.KeyFile, "cachedModificationTime", certLoader.cachedCertModTime.String(), "currentModificationTime", stat.ModTime().String())
