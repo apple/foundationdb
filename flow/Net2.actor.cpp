@@ -1544,9 +1544,7 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* s
 
 	wait(ready(result));
 	tcpResolver.cancel();
-	std::vector<NetworkAddress> ret = result.get();
-
-	return ret;
+	return result.get();
 }
 
 Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint(const std::string& host, const std::string& service) {
