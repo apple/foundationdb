@@ -20,16 +20,8 @@
 
 #pragma once
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
 #include "flow/Trace.h"
 #include <utility>
-
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CLUSTERCONTROLLER_CLUSTERRECOVERY_ACTOR_G_H)
-#define FDBSERVER_CLUSTERCONTROLLER_CLUSTERRECOVERY_ACTOR_G_H
-#include "ClusterRecovery.actor.g.h"
-#elif !defined(FDBSERVER_CLUSTERCONTROLLER_CLUSTERRECOVERY_ACTOR_H)
-#define FDBSERVER_CLUSTERCONTROLLER_CLUSTERRECOVERY_ACTOR_H
 
 #include "fdbclient/DatabaseContext.h"
 #include "fdbrpc/Replication.h"
@@ -44,10 +36,9 @@
 #include "fdbserver/core/LogSystemConfig.h"
 #include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
+#include "flow/CoroUtils.h"
 #include "flow/Error.h"
 #include "flow/SystemMonitor.h"
-
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 class ClusterControllerData;
 typedef enum {
@@ -105,8 +96,8 @@ private:
 	Promise<Void> switchedState;
 	UID dbgid;
 
-	ACTOR Future<Void> _read(ReusableCoordinatedState* self) {
-		Value prevDBStateRaw = wait(self->cstate.read());
+	Future<Void> _read(ReusableCoordinatedState* self) {
+		Value prevDBStateRaw = co_await self->cstate.read();
 		Future<Void> onConflict = recoveryTerminateOnConflict(
 		    self->dbgid, self->fullyRecovered, self->cstate.onConflict(), self->switchedState.getFuture());
 		if (onConflict.isReady() && onConflict.isError()) {
@@ -118,13 +109,11 @@ private:
 			self->prevDBState = BinaryReader::fromStringRef<DBCoreState>(prevDBStateRaw, IncludeVersion());
 			self->myDBState = self->prevDBState;
 		}
-
-		return Void();
 	}
 
-	ACTOR Future<Void> _write(ReusableCoordinatedState* self, DBCoreState newState, bool finalWrite) {
+	Future<Void> _write(ReusableCoordinatedState* self, DBCoreState newState, bool finalWrite) {
 		if (self->finalWriteStarted) {
-			wait(Future<Void>(Never()));
+			co_await Future<Void>(Never());
 		}
 
 		if (finalWrite) {
@@ -138,11 +127,11 @@ private:
 			// TODO(gglass): figure out what the above means post-encryption-at-rest deletion.
 			// It's not clear the protocol versioning scheme contemplates the possibility of features being removed.
 			if (SERVER_KNOBS->RECORD_RECOVER_AT_IN_CSTATE) {
-				wait(self->cstate.setExclusive(
-				    BinaryWriter::toValue(newState, IncludeVersion(ProtocolVersion::withGcTxnGenerations()))));
+				co_await self->cstate.setExclusive(
+				    BinaryWriter::toValue(newState, IncludeVersion(ProtocolVersion::withGcTxnGenerations())));
 			} else {
-				wait(self->cstate.setExclusive(
-				    BinaryWriter::toValue(newState, IncludeVersion(ProtocolVersion::withEncryptionAtRest()))));
+				co_await self->cstate.setExclusive(
+				    BinaryWriter::toValue(newState, IncludeVersion(ProtocolVersion::withEncryptionAtRest())));
 			}
 		} catch (Error& e) {
 			CODE_PROBE(true, "Master displaced during writeMasterState");
@@ -154,7 +143,7 @@ private:
 		if (!finalWrite) {
 			self->switchedState.send(Void());
 			self->cstate = MovableCoordinatedState(self->coordinators);
-			Value rereadDBStateRaw = wait(self->cstate.read());
+			Value rereadDBStateRaw = co_await self->cstate.read();
 			DBCoreState readState;
 			if (rereadDBStateRaw.size())
 				readState = BinaryReader::fromStringRef<DBCoreState>(rereadDBStateRaw, IncludeVersion());
@@ -170,8 +159,6 @@ private:
 		} else {
 			self->fullyRecovered.send(Void());
 		}
-
-		return Void();
 	}
 };
 
@@ -321,10 +308,7 @@ Future<Void> recruitNewMaster(ClusterControllerData* cluster,
                               ClusterControllerData::DBInfo* db,
                               MasterInterface* newMaster);
 Future<Void> cleanupRecoveryActorCollection(Reference<ClusterRecoveryData> self);
-ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self);
+Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self);
 bool isNormalClusterRecoveryError(const Error&);
 
-#include "flow/unactorcompiler.h"
 #include "fdbserver/core/MoveKeys.h"
-
-#endif
