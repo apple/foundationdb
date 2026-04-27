@@ -1793,20 +1793,19 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	return Void();
 }
 
-ACTOR Future<Void> transactionLogging(CommitBatchContext* self) {
-	state double tLoggingStart = g_network->timer_monotonic();
-	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
-	state Span span("MP:transactionLogging"_loc, self->span.context);
+Future<Void> transactionLogging(CommitBatchContext* self) {
+	double tLoggingStart = g_network->timer_monotonic();
+	ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
+	Span span("MP:transactionLogging"_loc, self->span.context);
 
 	try {
-		choose {
-			when(Version ver = wait(self->loggingComplete)) {
-				if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-					pProxyCommitData->minKnownCommittedVersion =
-					    std::max(pProxyCommitData->minKnownCommittedVersion, ver);
-				}
+		auto res = co_await race(self->loggingComplete,
+		                         pProxyCommitData->committedVersion.whenAtLeast(self->commitVersion + 1));
+		if (res.index() == 0) {
+			Version ver = std::get<0>(std::move(res));
+			if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+				pProxyCommitData->minKnownCommittedVersion = std::max(pProxyCommitData->minKnownCommittedVersion, ver);
 			}
-			when(wait(pProxyCommitData->committedVersion.whenAtLeast(self->commitVersion + 1))) {}
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_broken_promise) {
@@ -1818,7 +1817,7 @@ ACTOR Future<Void> transactionLogging(CommitBatchContext* self) {
 	pProxyCommitData->lastCommitLatency = now() - self->commitStartTime;
 	pProxyCommitData->lastCommitTime = std::max(pProxyCommitData->lastCommitTime.get(), self->commitStartTime);
 
-	wait(yield(TaskPriority::ProxyCommitYield2));
+	co_await yield(TaskPriority::ProxyCommitYield2);
 
 	if (pProxyCommitData->popRemoteTxs &&
 	    self->msg.popTo > (pProxyCommitData->txsPopVersions.size() ? pProxyCommitData->txsPopVersions.back().second
@@ -1832,7 +1831,6 @@ ACTOR Future<Void> transactionLogging(CommitBatchContext* self) {
 	}
 	pProxyCommitData->logSystem->popTxs(self->msg.popTo);
 	pProxyCommitData->stats.tlogLoggingDist->sampleSeconds(g_network->timer_monotonic() - tLoggingStart);
-	return Void();
 }
 
 Future<Void> reply(CommitBatchContext* self) {
