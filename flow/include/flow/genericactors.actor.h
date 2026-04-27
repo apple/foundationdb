@@ -1742,6 +1742,19 @@ Future<T> waitOrError(Future<T> f, Future<Void> errorSignal) {
 	}
 }
 
+ACTOR template <class T>
+Future<T> waitOrError(FutureStream<T> f, Future<Void> errorSignal) {
+	choose {
+		when(T val = waitNext(f)) {
+			return val;
+		}
+		when(wait(errorSignal)) {
+			ASSERT(false);
+			throw internal_error();
+		}
+	}
+}
+
 // A simple counter designed to track an ongoing count of something, such as how many actors are in a critical section,
 // how many bytes are currently being processed, etc... Can be explicitly released idempotently, or will automatically
 // release when destructed to handle actor ending or errors.
