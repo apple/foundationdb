@@ -1068,7 +1068,7 @@ LocationMetadataMaps buildLocationMetadataMaps(
 				continue;
 			}
 			if (traceId.present()) {
-				TraceEvent(SevVerbose, "AuditLocationMetadataAddToServerKeyMap", traceId.get())
+				TraceEvent(SevVerbose, "DDAuditLocationMetadataAddToServerKeyMap", traceId.get())
 				    .detail("RawRange", range)
 				    .detail("ClaimRange", claimRange)
 				    .detail("Range", overlappingRange)
@@ -1086,7 +1086,7 @@ LocationMetadataMaps buildLocationMetadataMaps(
 				continue;
 			}
 			if (traceId.present()) {
-				TraceEvent(SevVerbose, "AuditLocationMetadataAddToKeyServerMap", traceId.get())
+				TraceEvent(SevVerbose, "DDAuditLocationMetadataAddToKeyServerMap", traceId.get())
 				    .detail("RawRange", range)
 				    .detail("ClaimRange", claimRange)
 				    .detail("Range", overlappingRange)
