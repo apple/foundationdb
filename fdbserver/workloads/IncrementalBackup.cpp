@@ -131,8 +131,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 					    .detail("Size", containers.size())
 					    .detail("First", containers.front());
 					if (!containers.empty()) {
-						backupContainer =
-						    IBackupContainer::openContainer(containers.front(), {}, {}, 0);
+						backupContainer = IBackupContainer::openContainer(containers.front(), {}, {}, 0);
 					}
 				}
 				bool e = co_await backupContainer->exists();
