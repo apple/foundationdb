@@ -2465,39 +2465,58 @@ Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo> const> db,
 	req.reply.send(reply);
 }
 
-ACTOR Future<Void> reportTxnTagCommitCost(UID myID,
-                                          Reference<AsyncVar<ServerDBInfo> const> db,
-                                          UIDTransactionTagMap<TransactionCommitCostEstimation>* ssTrTagCommitCost) {
-	state Future<Void> nextRequestTimer = Never();
-	state Future<Void> nextReply = Never();
-	if (db->get().ratekeeper.present())
-		nextRequestTimer = Void();
-	loop choose {
-		when(wait(db->onChange())) {
+class TxnTagCommitCostReporter {
+	UID myID;
+	Reference<AsyncVar<ServerDBInfo> const> db;
+	UIDTransactionTagMap<TransactionCommitCostEstimation>* ssTrTagCommitCost;
+
+	Future<Void> traceRatekeeperChanges() {
+		while (true) {
+			co_await db->onChange();
 			if (db->get().ratekeeper.present()) {
 				TraceEvent("ProxyRatekeeperChanged", myID).detail("RKID", db->get().ratekeeper.get().id());
-				nextRequestTimer = Void();
 			} else {
 				TraceEvent("ProxyRatekeeperDied", myID).log();
-				nextRequestTimer = Never();
 			}
-		}
-		when(wait(nextRequestTimer)) {
-			nextRequestTimer = Never();
-			if (db->get().ratekeeper.present()) {
-				nextReply = brokenPromiseToNever(db->get().ratekeeper.get().reportCommitCostEstimation.getReply(
-				    ReportCommitCostEstimationRequest(std::move(*ssTrTagCommitCost))));
-				ssTrTagCommitCost->clear();
-			} else {
-				nextReply = Never();
-			}
-		}
-		when(wait(nextReply)) {
-			nextReply = Never();
-			nextRequestTimer = delay(SERVER_KNOBS->REPORT_TRANSACTION_COST_ESTIMATION_DELAY);
 		}
 	}
-}
+
+	Future<Void> reportCommitCosts() {
+		bool sendImmediately = db->get().ratekeeper.present();
+		while (true) {
+			if (!sendImmediately) {
+				co_await db->onChange();
+			}
+			sendImmediately = false;
+
+			if (!db->get().ratekeeper.present()) {
+				continue;
+			}
+
+			auto reply = brokenPromiseToNever(db->get().ratekeeper.get().reportCommitCostEstimation.getReply(
+			    ReportCommitCostEstimationRequest(std::move(*ssTrTagCommitCost))));
+			ssTrTagCommitCost->clear();
+
+			auto dbChanged = db->onChange();
+			auto replyOrChange = co_await race(reply, dbChanged);
+			if (replyOrChange.index() == 1) {
+				sendImmediately = true;
+				continue;
+			}
+
+			co_await race(delay(SERVER_KNOBS->REPORT_TRANSACTION_COST_ESTIMATION_DELAY), dbChanged);
+			sendImmediately = true;
+		}
+	}
+
+public:
+	TxnTagCommitCostReporter(UID myID,
+	                         Reference<AsyncVar<ServerDBInfo> const> db,
+	                         UIDTransactionTagMap<TransactionCommitCostEstimation>* ssTrTagCommitCost)
+	  : myID(myID), db(db), ssTrTagCommitCost(ssTrTagCommitCost) {}
+
+	Future<Void> run() { co_await race(traceRatekeeperChanges(), reportCommitCosts()); }
+};
 
 namespace {
 struct ExpireServerEntry {
@@ -2834,6 +2853,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	state PromiseStream<std::pair<std::vector<CommitTransactionRequest>, int>> batchedCommits;
 	state Future<Void> commitBatcherActor;
 	state Future<Void> lastCommitComplete = Void();
+	state TxnTagCommitCostReporter txnTagCommitCostReporter(proxy.id(), db, &commitData.ssTrTagCommitCost);
 
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> onError = transformError(actorCollection(addActor.getFuture()), broken_promise(), tlog_failed());
@@ -2902,7 +2922,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	addActor.send(readRequestServer(proxy, addActor, &commitData));
 	addActor.send(rejoinServer(proxy, &commitData));
 	addActor.send(ddMetricsRequestServer(proxy, db));
-	addActor.send(reportTxnTagCommitCost(proxy.id(), db, &commitData.ssTrTagCommitCost));
+	addActor.send(txnTagCommitCostReporter.run());
 	addActor.send(logDetailedMetrics(&commitData));
 
 	auto openDb = openDBOnServer(db);
