@@ -1,5 +1,5 @@
 /*
- * networksender.actor.h
+ * networksender.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,33 +18,28 @@
  * limitations under the License.
  */
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
-#if defined(NO_INTELLISENSE) && !defined(FDBRPC_NETWORKSENDER_ACTOR_G_H)
-#define FDBRPC_NETWORKSENDER_ACTOR_G_H
-#include "fdbrpc/networksender.actor.g.h"
-#elif !defined(RPCNETWORKSENDER_ACTOR_H)
-#define RPCNETWORKSENDER_ACTOR_H
+#ifndef FDBRPC_NETWORKSENDER_H
+#define FDBRPC_NETWORKSENDER_H
+#pragma once
 
 #include "fdbrpc/FlowTransport.h"
 #include "flow/flow.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
-// This actor is used by FlowTransport to serialize the response to a ReplyPromise across the network
-ACTOR template <class T>
-void networkSender(Future<T> input, Endpoint endpoint) {
+// Used by FlowTransport to serialize the response to a ReplyPromise across the network.
+template <class T>
+Future<Void> networkSender(Uncancellable, Future<T> input, Endpoint endpoint, ExplicitVoid = {}) {
 	try {
-		T value = wait(input);
+		T value = co_await input;
 		FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(value), endpoint, false);
 	} catch (Error& err) {
 		// if (err.code() == error_code_broken_promise) return;
 		if (err.code() == error_code_never_reply) {
-			return;
+			co_return Void();
 		}
 		ASSERT(err.code() != error_code_actor_cancelled);
 		FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(err), endpoint, false);
 	}
+	co_return Void();
 }
-#include "flow/unactorcompiler.h"
 
 #endif
