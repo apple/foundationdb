@@ -34,7 +34,7 @@ namespace cluster_health {
 
 namespace {
 
-Future<LatestWorkerEvents> latestEventOnWorker(WorkerInterface worker, std::string eventName) {
+AsyncResult<LatestWorkerEvents> latestEventOnWorker(WorkerInterface worker, std::string eventName) {
 	try {
 		EventLogRequest req = eventName.empty() ? EventLogRequest() : EventLogRequest(Standalone<StringRef>(eventName));
 		ErrorOr<TraceEventFields> traceEvent =
@@ -57,9 +57,10 @@ Future<LatestWorkerEvents> latestEventOnWorker(WorkerInterface worker, std::stri
 }
 
 template <class Interface>
-Future<LatestWorkerEvents> latestEventOnInterfaces(std::vector<Interface> interfaces,
-                                                   std::unordered_map<NetworkAddress, WorkerInterface> addressWorkers,
-                                                   std::string eventName) {
+AsyncResult<LatestWorkerEvents> latestEventOnInterfaces(
+    std::vector<Interface> interfaces,
+    std::unordered_map<NetworkAddress, WorkerInterface> addressWorkers,
+    std::string eventName) {
 	try {
 		std::vector<Future<ErrorOr<TraceEventFields>>> eventTraces;
 		std::vector<NetworkAddress> addresses;
@@ -177,25 +178,26 @@ bool WorkerEventProvider::shouldTreatStorageTeamOneReplicaLeftAsCritical() const
 	return storageTeamOneReplicaLeftIsCritical;
 }
 
-Future<LatestWorkerEvents> WorkerEventProvider::getLatestEvents(std::string const& eventName) const {
+AsyncResult<LatestWorkerEvents> WorkerEventProvider::getLatestEvents(std::string const& eventName) const {
 	return latestEventOnWorkers(workers, eventName);
 }
 
-Future<LatestWorkerEvents> WorkerEventProvider::getLatestRatekeeperEvents(std::string const& eventName) const {
+AsyncResult<LatestWorkerEvents> WorkerEventProvider::getLatestRatekeeperEvents(std::string const& eventName) const {
 	if (!ratekeeperWorker.present()) {
-		return LatestWorkerEvents();
+		co_return LatestWorkerEvents();
 	}
-	return latestEventOnWorker(ratekeeperWorker.get(), eventName);
+	co_return co_await latestEventOnWorker(ratekeeperWorker.get(), eventName);
 }
 
-Future<LatestWorkerEvents> WorkerEventProvider::getLatestDataDistributorEvents(std::string const& eventName) const {
+AsyncResult<LatestWorkerEvents> WorkerEventProvider::getLatestDataDistributorEvents(
+    std::string const& eventName) const {
 	if (!dataDistributorWorker.present()) {
-		return LatestWorkerEvents();
+		co_return LatestWorkerEvents();
 	}
-	return latestEventOnWorker(dataDistributorWorker.get(), eventName);
+	co_return co_await latestEventOnWorker(dataDistributorWorker.get(), eventName);
 }
 
-Future<LatestWorkerEvents> WorkerEventProvider::getLatestStorageServerEvents(std::string const& eventName) const {
+AsyncResult<LatestWorkerEvents> WorkerEventProvider::getLatestStorageServerEvents(std::string const& eventName) const {
 	std::unordered_map<NetworkAddress, WorkerInterface> addressWorkers;
 	addressWorkers.reserve(workers.size());
 	for (auto const& worker : workers) {
@@ -204,7 +206,7 @@ Future<LatestWorkerEvents> WorkerEventProvider::getLatestStorageServerEvents(std
 	return latestEventOnInterfaces(storageServers, std::move(addressWorkers), eventName);
 }
 
-Future<LatestWorkerEvents> WorkerEventProvider::getLatestTLogEvents(std::string const& eventName) const {
+AsyncResult<LatestWorkerEvents> WorkerEventProvider::getLatestTLogEvents(std::string const& eventName) const {
 	std::unordered_map<NetworkAddress, WorkerInterface> addressWorkers;
 	addressWorkers.reserve(workers.size());
 	for (auto const& worker : workers) {

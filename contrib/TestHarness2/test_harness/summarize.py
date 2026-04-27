@@ -500,6 +500,13 @@ class Summary:
                 ):
                     # When running ASAN we expect to see this message. Boost coroutine should be using the correct asan annotations so that it shouldn't produce any false positives.
                     continue
+                if "WARNING: ASan is ignoring requested __asan_handle_no_return: stack type:" in line:
+                    # ASAN emits this with makecontext/swapcontext coroutine stacks.
+                    continue
+                if line == "False positive error reports may follow":
+                    continue
+                if line == "For details see https://github.com/google/sanitizers/issues/189":
+                    continue
                 if line.endswith("Warning: unimplemented fcntl command: 1036"):
                     # Valgrind produces this warning when F_SET_RW_HINT is used
                     continue

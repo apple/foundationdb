@@ -24,7 +24,7 @@
 #include "fmt/format.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/tester/workloads.h"
-#include "fdbserver/core/IKeyValueStore.h"
+#include "fdbserver/kvstore/IKeyValueStore.h"
 #include "flow/ActorCollection.h"
 #include "flow/CoroUtils.h"
 

@@ -69,48 +69,48 @@ public:
 		latestTLogEventsByName[std::move(eventName)] = std::move(latestEvents);
 	}
 
-	Future<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const override {
+	AsyncResult<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const override {
 		auto it = latestEventsByName.find(eventName);
 		if (it == latestEventsByName.end()) {
-			return LatestWorkerEvents();
+			co_return LatestWorkerEvents();
 		}
-		return it->second;
+		co_return it->second;
 	}
 
 	Optional<RecoveryState> getRecoveryState() const override { return recoveryState; }
 
 	bool shouldTreatStorageTeamOneReplicaLeftAsCritical() const override { return storageTeamOneReplicaLeftIsCritical; }
 
-	Future<LatestWorkerEvents> getLatestRatekeeperEvents(std::string const& eventName) const override {
+	AsyncResult<LatestWorkerEvents> getLatestRatekeeperEvents(std::string const& eventName) const override {
 		auto it = latestRatekeeperEventsByName.find(eventName);
 		if (it != latestRatekeeperEventsByName.end()) {
-			return it->second;
+			co_return it->second;
 		}
-		return getLatestEvents(eventName);
+		co_return co_await getLatestEvents(eventName);
 	}
 
-	Future<LatestWorkerEvents> getLatestDataDistributorEvents(std::string const& eventName) const override {
+	AsyncResult<LatestWorkerEvents> getLatestDataDistributorEvents(std::string const& eventName) const override {
 		auto it = latestDataDistributorEventsByName.find(eventName);
 		if (it != latestDataDistributorEventsByName.end()) {
-			return it->second;
+			co_return it->second;
 		}
-		return getLatestEvents(eventName);
+		co_return co_await getLatestEvents(eventName);
 	}
 
-	Future<LatestWorkerEvents> getLatestStorageServerEvents(std::string const& eventName) const override {
+	AsyncResult<LatestWorkerEvents> getLatestStorageServerEvents(std::string const& eventName) const override {
 		auto it = latestStorageServerEventsByName.find(eventName);
 		if (it == latestStorageServerEventsByName.end()) {
-			return LatestWorkerEvents();
+			co_return LatestWorkerEvents();
 		}
-		return it->second;
+		co_return it->second;
 	}
 
-	Future<LatestWorkerEvents> getLatestTLogEvents(std::string const& eventName) const override {
+	AsyncResult<LatestWorkerEvents> getLatestTLogEvents(std::string const& eventName) const override {
 		auto it = latestTLogEventsByName.find(eventName);
 		if (it == latestTLogEventsByName.end()) {
-			return LatestWorkerEvents();
+			co_return LatestWorkerEvents();
 		}
-		return it->second;
+		co_return it->second;
 	}
 };
 

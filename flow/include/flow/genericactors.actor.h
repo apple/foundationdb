@@ -129,6 +129,15 @@ ErrorOr<T> errorOr(T t) {
 	return ErrorOr<T>(t);
 }
 
+template <class T>
+AsyncResult<ErrorOr<T>> errorOr(AsyncResult<T> result) {
+	try {
+		co_return ErrorOr<T>(co_await std::move(result));
+	} catch (Error& e) {
+		co_return ErrorOr<T>(e);
+	}
+}
+
 ACTOR template <class T>
 Future<ErrorOr<T>> errorOr(Future<T> f) {
 	try {
@@ -1724,6 +1733,19 @@ ACTOR template <class T>
 Future<T> waitOrError(Future<T> f, Future<Void> errorSignal) {
 	choose {
 		when(T val = wait(f)) {
+			return val;
+		}
+		when(wait(errorSignal)) {
+			ASSERT(false);
+			throw internal_error();
+		}
+	}
+}
+
+ACTOR template <class T>
+Future<T> waitOrError(FutureStream<T> f, Future<Void> errorSignal) {
+	choose {
+		when(T val = waitNext(f)) {
 			return val;
 		}
 		when(wait(errorSignal)) {
