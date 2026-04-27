@@ -2547,50 +2547,15 @@ struct hash<IdempotencyKey> {
 
 } // namespace std
 
-ACTOR static Future<Void> idempotencyIdsExpireServer(
-    Database db,
-    PublicRequestStream<ExpireIdempotencyIdRequest> expireIdempotencyId,
-    PromiseStream<ExpectedIdempotencyIdCountForKey> expectedIdempotencyIdCountForKey,
-    Standalone<VectorRef<MutationRef>>* idempotencyClears) {
-	state std::unordered_map<IdempotencyKey, ExpireServerEntry> idStatus;
-	state std::unordered_map<IdempotencyKey, ExpireServerEntry>::iterator iter;
-	state int64_t purgeBefore;
-	state IdempotencyKey key;
-	state ExpireServerEntry* status = nullptr;
-	state Future<Void> purgeOld = Void();
-	loop {
-		choose {
-			when(ExpireIdempotencyIdRequest req = waitNext(expireIdempotencyId.getFuture())) {
-				key = IdempotencyKey{ req.commitVersion, req.batchIndexHighByte };
-				status = &idStatus[key];
-				status->receivedCount += 1;
-				CODE_PROBE(status->expectedCount == 0, "ExpireIdempotencyIdRequest received before count is known");
-				if (status->expectedCount > 0) {
-					ASSERT_LE(status->receivedCount, status->expectedCount);
-				}
-			}
-			when(ExpectedIdempotencyIdCountForKey req = waitNext(expectedIdempotencyIdCountForKey.getFuture())) {
-				key = IdempotencyKey{ req.commitVersion, req.batchIndexHighByte };
-				status = &idStatus[key];
-				ASSERT_EQ(status->expectedCount, 0);
-				status->expectedCount = req.idempotencyIdCount;
-			}
-			when(wait(purgeOld)) {
-				purgeOld = delay(SERVER_KNOBS->IDEMPOTENCY_ID_IN_MEMORY_LIFETIME);
-				purgeBefore = now() - SERVER_KNOBS->IDEMPOTENCY_ID_IN_MEMORY_LIFETIME;
-				for (iter = idStatus.begin(); iter != idStatus.end();) {
-					// We have exclusive access to idStatus in this when block, so iter will still be valid after the
-					// wait
-					wait(yield());
-					if (iter->second.timeReceived < purgeBefore) {
-						iter = idStatus.erase(iter);
-					} else {
-						++iter;
-					}
-				}
-				continue;
-			}
-		}
+namespace {
+
+class IdempotencyIdsExpireServer {
+	PublicRequestStream<ExpireIdempotencyIdRequest> expireIdempotencyId;
+	PromiseStream<ExpectedIdempotencyIdCountForKey> expectedIdempotencyIdCountForKey;
+	Standalone<VectorRef<MutationRef>>* idempotencyClears;
+	std::unordered_map<IdempotencyKey, ExpireServerEntry> idStatus;
+
+	void updateStatus(IdempotencyKey key, ExpireServerEntry* status) {
 		if (status->initialized) {
 			if (status->receivedCount == status->expectedCount) {
 				auto keyRange =
@@ -2604,9 +2569,65 @@ ACTOR static Future<Void> idempotencyIdsExpireServer(
 			status->initialized = true;
 		}
 	}
-}
 
-namespace {
+	Future<Void> receiveExpireRequests() {
+		while (true) {
+			ExpireIdempotencyIdRequest req = co_await expireIdempotencyId.getFuture();
+			IdempotencyKey key{ req.commitVersion, req.batchIndexHighByte };
+			ExpireServerEntry* status = &idStatus[key];
+			status->receivedCount += 1;
+			CODE_PROBE(status->expectedCount == 0, "ExpireIdempotencyIdRequest received before count is known");
+			if (status->expectedCount > 0) {
+				ASSERT_LE(status->receivedCount, status->expectedCount);
+			}
+			updateStatus(key, status);
+		}
+	}
+
+	Future<Void> receiveExpectedCounts() {
+		while (true) {
+			ExpectedIdempotencyIdCountForKey req = co_await expectedIdempotencyIdCountForKey.getFuture();
+			IdempotencyKey key{ req.commitVersion, req.batchIndexHighByte };
+			ExpireServerEntry* status = &idStatus[key];
+			ASSERT_EQ(status->expectedCount, 0);
+			status->expectedCount = req.idempotencyIdCount;
+			updateStatus(key, status);
+		}
+	}
+
+	Future<Void> purgeOldEntries() {
+		while (true) {
+			co_await delay(SERVER_KNOBS->IDEMPOTENCY_ID_IN_MEMORY_LIFETIME);
+			int64_t purgeBefore = now() - SERVER_KNOBS->IDEMPOTENCY_ID_IN_MEMORY_LIFETIME;
+			std::vector<IdempotencyKey> keys;
+			keys.reserve(idStatus.size());
+			for (const auto& entry : idStatus) {
+				keys.push_back(entry.first);
+			}
+
+			std::vector<IdempotencyKey> keysToErase;
+			for (const auto& key : keys) {
+				co_await yield();
+				auto status = idStatus.find(key);
+				if (status != idStatus.end() && status->second.timeReceived < purgeBefore) {
+					keysToErase.push_back(key);
+				}
+			}
+			for (const auto& key : keysToErase) {
+				idStatus.erase(key);
+			}
+		}
+	}
+
+public:
+	IdempotencyIdsExpireServer(PublicRequestStream<ExpireIdempotencyIdRequest> expireIdempotencyId,
+	                           PromiseStream<ExpectedIdempotencyIdCountForKey> expectedIdempotencyIdCountForKey,
+	                           Standalone<VectorRef<MutationRef>>* idempotencyClears)
+	  : expireIdempotencyId(expireIdempotencyId), expectedIdempotencyIdCountForKey(expectedIdempotencyIdCountForKey),
+	    idempotencyClears(idempotencyClears) {}
+
+	Future<Void> run() { co_await race(receiveExpireRequests(), receiveExpectedCounts(), purgeOldEntries()); }
+};
 
 struct TransactionStateResolveContext {
 	// Maximum sequence for txnStateRequest, this is defined when the request last flag is set.
@@ -2852,6 +2873,8 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	state Future<Void> commitBatcherActor;
 	state Future<Void> lastCommitComplete = Void();
 	state TxnTagCommitCostReporter txnTagCommitCostReporter(proxy.id(), db, &commitData.ssTrTagCommitCost);
+	state IdempotencyIdsExpireServer idempotencyIdsExpireServer(
+	    proxy.expireIdempotencyId, commitData.expectedIdempotencyIdCountForKey, &commitData.idempotencyClears);
 
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> onError = transformError(actorCollection(addActor.getFuture()), broken_promise(), tlog_failed());
@@ -2932,8 +2955,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 		    true,
 		    SERVER_KNOBS->IDEMPOTENCY_IDS_CLEANER_POLLING_INTERVAL));
 	}
-	addActor.send(idempotencyIdsExpireServer(
-	    openDb, proxy.expireIdempotencyId, commitData.expectedIdempotencyIdCountForKey, &commitData.idempotencyClears));
+	addActor.send(idempotencyIdsExpireServer.run());
 
 	// wait for txnStateStore recovery
 	wait(success(commitData.txnStateStore->readValue(StringRef())));
