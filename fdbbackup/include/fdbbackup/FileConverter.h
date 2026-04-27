@@ -52,6 +52,7 @@ enum {
 	OPT_END_VERSION_FILTER,
 	OPT_KNOB,
 	OPT_SAVE_FILE,
+	OPT_ENCRYPTION_KEY_FILE,
 	OPT_HELP
 };
 
@@ -84,6 +85,7 @@ CSimpleOpt::SOption gConverterOptions[] = { { OPT_CONTAINER, "-r", SO_REQ_SEP },
 	                                        { OPT_KNOB, "--knob-", SO_REQ_SEP },
 	                                        { OPT_SAVE_FILE, "-s", SO_NONE },
 	                                        { OPT_SAVE_FILE, "--save", SO_NONE },
+	                                        { OPT_ENCRYPTION_KEY_FILE, "--encryption-key-file", SO_REQ_SEP },
 	                                        { OPT_HELP, "-?", SO_NONE },
 	                                        { OPT_HELP, "-h", SO_NONE },
 	                                        { OPT_HELP, "--help", SO_NONE },
