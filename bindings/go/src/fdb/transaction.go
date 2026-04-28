@@ -421,7 +421,7 @@ func (t Transaction) GetCommittedVersion() (int64, error) {
 	var version C.int64_t
 
 	if err := C.fdb_transaction_get_committed_version(t.ptr, &version); err != 0 {
-		return 0, Error{int(err)}
+		return 0, fmt.Errorf("failed to get committed version: %w", Error{int(err)})
 	}
 
 	return int64(version), nil
@@ -515,7 +515,7 @@ func addConflictRange(t *transaction, er ExactRange, crtype conflictRangeType) e
 		C.int(len(ekb)),
 		C.FDBConflictRangeType(crtype),
 	); err != 0 {
-		return Error{int(err)}
+		return fmt.Errorf("failed to add conflict range: %w", Error{int(err)})
 	}
 
 	return nil
