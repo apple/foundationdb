@@ -30,7 +30,8 @@ public:
 	// the filename.
 	static auto getFirstBlockIV(const std::string& filename) {
 		StreamCipher::IV iv;
-		auto salt = basename(filename);
+		auto slashPos = filename.rfind('/');
+		auto salt = (slashPos == std::string::npos) ? filename : filename.substr(slashPos + 1);
 		auto pos = salt.find('.');
 		salt = salt.substr(0, pos);
 		auto hash = XXH3_128bits(salt.c_str(), salt.size());
