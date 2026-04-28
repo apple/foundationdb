@@ -24,6 +24,7 @@
 #include "fdbclient/json_spirit/json_spirit_writer_options.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
 #include "fdbserver/consistencyscan/ConsistencyScan.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/IRandom.h"
 #include "flow/IndexedSet.h"
@@ -254,15 +255,16 @@ Future<int> consistencyCheckReadData(UID myId,
 
 	bool expectInjected =
 	    storageServerInterfaces->size() > 1 && g_network->isSimulated() && consistencyCheckStartVersion.present() &&
-	    g_simulator->consistencyScanState == ISimulator::SimConsistencyScanState::Enabled_InjectCorruption &&
-	    g_simulator->consistencyScanCorruptRequestKey.present() && g_simulator->consistencyScanCorruptor.present() &&
-	    g_simulator->consistencyScanCorruptor.get().first == myId &&
-	    range.contains(g_simulator->consistencyScanCorruptRequestKey.get());
+	    fdbSimulationPolicyState().consistencyScanState == FDBSimConsistencyScanState::Enabled_InjectCorruption &&
+	    fdbSimulationPolicyState().consistencyScanCorruptRequestKey.present() &&
+	    fdbSimulationPolicyState().consistencyScanCorruptor.present() &&
+	    fdbSimulationPolicyState().consistencyScanCorruptor.get().first == myId &&
+	    range.contains(fdbSimulationPolicyState().consistencyScanCorruptRequestKey.get());
 	if (expectInjected) {
 		TraceEvent(SevWarnAlways, "ConsistencyScanExpectingInjectedCorruption", myId)
 		    .detail("StorageServers", storageServerInterfaces->size())
-		    .detail("ScanState", g_simulator->consistencyScanState)
-		    .detail("CorruptKey", g_simulator->consistencyScanCorruptRequestKey.get())
+		    .detail("ScanState", fdbSimulationPolicyState().consistencyScanState)
+		    .detail("CorruptKey", fdbSimulationPolicyState().consistencyScanCorruptRequestKey.get())
 		    .detail("ReqRange", range)
 		    .detail("CCStartVersion",
 		            consistencyCheckStartVersion.present() ? consistencyCheckStartVersion.get() : invalidVersion);
@@ -388,9 +390,9 @@ Future<int> consistencyCheckReadData(UID myId,
 
 					bool isTss = (*storageServerInterfaces)[j].isTss() ||
 					             (*storageServerInterfaces)[firstValidServer->get()].isTss();
-					bool isExpectedTSSMismatch = g_network->isSimulated() &&
-					                             g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations &&
-					                             isTss;
+					bool isExpectedTSSMismatch =
+					    g_network->isSimulated() &&
+					    simulationPolicyHasCapability(ISimulationPolicy::Capability::WarnOnStorageMismatch) && isTss;
 					// It's possible that the storage servers are inconsistent in KillRegion
 					// workload where a forced recovery is performed. The killed storage server
 					// in the killed region returned first with a higher version, and a later
@@ -408,23 +410,24 @@ Future<int> consistencyCheckReadData(UID myId,
 
 					if (!isTss && !isFailed && expectInjected) {
 						// Ensure the only corruption we see is the one that was expected to be injected
-						ASSERT(g_simulator->consistencyScanInjectedCorruptionType.present());
-						if (g_simulator->consistencyScanInjectedCorruptionType.get() ==
-						    ISimulator::SimConsistencyScanCorruptionType::FlipMoreFlag) {
+						ASSERT(fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.present());
+						if (fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get() ==
+						    FDBSimConsistencyScanCorruptionType::FlipMoreFlag) {
 							// only more flag should be different
 							expectInjected = (current.more != reference.more && currentUniques == 0 &&
 							                  referenceUniques == 0 && valueMismatches == 0);
-						} else if (g_simulator->consistencyScanInjectedCorruptionType.get() ==
-						           ISimulator::SimConsistencyScanCorruptionType::AddToEmpty) {
+						} else if (fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get() ==
+						           FDBSimConsistencyScanCorruptionType::AddToEmpty) {
 							expectInjected =
 							    (current.more == reference.more && current.data.size() + reference.data.size() == 1);
 							if (expectInjected) {
 								KeyValueRef& kv = current.data.empty() ? reference.data[0] : current.data[0];
-								expectInjected = kv.key == g_simulator->consistencyScanCorruptRequestKey.get() &&
-								                 kv.value == "consistencyCheckCorruptValue"_sr;
+								expectInjected =
+								    kv.key == fdbSimulationPolicyState().consistencyScanCorruptRequestKey.get() &&
+								    kv.value == "consistencyCheckCorruptValue"_sr;
 							}
-						} else if (g_simulator->consistencyScanInjectedCorruptionType.get() ==
-						           ISimulator::SimConsistencyScanCorruptionType::RemoveLastRow) {
+						} else if (fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get() ==
+						           FDBSimConsistencyScanCorruptionType::RemoveLastRow) {
 							expectInjected = (current.more == reference.more && valueMismatches == 0 &&
 							                  currentUniques + referenceUniques == 1 &&
 							                  std::abs(current.data.size() - reference.data.size()) == 1);
@@ -437,8 +440,8 @@ Future<int> consistencyCheckReadData(UID myId,
 									}
 								}
 							}
-						} else if (g_simulator->consistencyScanInjectedCorruptionType.get() ==
-						           ISimulator::SimConsistencyScanCorruptionType::ChangeFirstValue) {
+						} else if (fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get() ==
+						           FDBSimConsistencyScanCorruptionType::ChangeFirstValue) {
 							expectInjected =
 							    (current.more == reference.more && valueMismatches == 1 && currentUniques == 0 &&
 							     referenceUniques == 0 && valueMismatchKey == current.data[0].key &&
@@ -483,11 +486,12 @@ Future<int> consistencyCheckReadData(UID myId,
 						CODE_PROBE(true, "consistency check detected injected corruption");
 						// we found the injected corruption, clear the state
 						TraceEvent(SevWarnAlways, "ConsistencyScanFoundInjectedCorruption", myId)
-						    .detail("CorruptionType", g_simulator->consistencyScanInjectedCorruptionType.get())
+						    .detail("CorruptionType",
+						            fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get())
 						    .detail("Version", req.version);
-						g_simulator->updateConsistencyScanState(
-						    ISimulator::SimConsistencyScanState::Enabled_InjectCorruption,
-						    ISimulator::SimConsistencyScanState::Enabled_FoundCorruption);
+						fdbSimulationPolicyState().updateConsistencyScanState(
+						    FDBSimConsistencyScanState::Enabled_InjectCorruption,
+						    FDBSimConsistencyScanState::Enabled_FoundCorruption);
 					}
 
 					if (!isExpectedTSSMismatch) {
@@ -516,8 +520,8 @@ Future<int> consistencyCheckReadData(UID myId,
 			           "consistency check potentially missed injected corruption due to failures",
 			           probe::decoration::rare);
 			TraceEvent(SevInfo, "ConsistencyCheck_MissedCorruptionDueToFailures");
-			g_simulator->updateConsistencyScanState(ISimulator::SimConsistencyScanState::Enabled_InjectCorruption,
-			                                        ISimulator::SimConsistencyScanState::Enabled_FoundCorruption);
+			fdbSimulationPolicyState().updateConsistencyScanState(FDBSimConsistencyScanState::Enabled_InjectCorruption,
+			                                                      FDBSimConsistencyScanState::Enabled_FoundCorruption);
 		}
 	}
 
@@ -801,9 +805,9 @@ Future<Void> consistencyScanCore(Database db, Reference<ConsistencyScanMemorySta
 					if (scanRange) {
 						// inject corruption if desired in simulation
 						if (g_network->isSimulated() &&
-						    g_simulator->consistencyScanState == ISimulator::SimConsistencyScanState::Enabled &&
-						    g_simulator->doInjectConsistencyScanCorruption.present() &&
-						    g_simulator->doInjectConsistencyScanCorruption.get() &&
+						    fdbSimulationPolicyState().consistencyScanState == FDBSimConsistencyScanState::Enabled &&
+						    fdbSimulationPolicyState().doInjectConsistencyScanCorruption.present() &&
+						    fdbSimulationPolicyState().doInjectConsistencyScanCorruption.get() &&
 						    (deterministicRandom()->random01() < 0.1 || targetRange.end == allKeys.end)) {
 							if (storageServerInterfaces.size() > 1) {
 								// sometimes do the first key in the range, sometimes try to do a later key in the range
@@ -814,13 +818,13 @@ Future<Void> consistencyScanCore(Database db, Reference<ConsistencyScanMemorySta
 										corruptKey = corruptKey2;
 									}
 								}
-								g_simulator->consistencyScanCorruptRequestKey = corruptKey;
+								fdbSimulationPolicyState().consistencyScanCorruptRequestKey = corruptKey;
 								std::pair<UID, NetworkAddress> meCorruptor = { memState->csId,
 									                                           g_network->getLocalAddress() };
-								g_simulator->consistencyScanCorruptor = meCorruptor;
-								g_simulator->updateConsistencyScanState(
-								    ISimulator::SimConsistencyScanState::Enabled,
-								    ISimulator::SimConsistencyScanState::Enabled_InjectCorruption);
+								fdbSimulationPolicyState().consistencyScanCorruptor = meCorruptor;
+								fdbSimulationPolicyState().updateConsistencyScanState(
+								    FDBSimConsistencyScanState::Enabled,
+								    FDBSimConsistencyScanState::Enabled_InjectCorruption);
 								TraceEvent(
 								    SevWarnAlways, "ConsistencyScanProgressScanRangeInjectCorruption", memState->csId)
 								    .detail("StartKey", targetRange.begin)
@@ -829,9 +833,9 @@ Future<Void> consistencyScanCore(Database db, Reference<ConsistencyScanMemorySta
 							} else {
 								// since we can't notice the corruption with only 1 server, just skip it
 								CODE_PROBE(true, "skipping consistency scan corruption check because only 1 replica");
-								g_simulator->updateConsistencyScanState(
-								    ISimulator::SimConsistencyScanState::Enabled,
-								    ISimulator::SimConsistencyScanState::Enabled_FoundCorruption);
+								fdbSimulationPolicyState().updateConsistencyScanState(
+								    FDBSimConsistencyScanState::Enabled,
+								    FDBSimConsistencyScanState::Enabled_FoundCorruption);
 								TraceEvent(SevWarnAlways,
 								           "ConsistencyScanProgressScanRangeSkipInjectCorruption",
 								           memState->csId)
@@ -1138,13 +1142,13 @@ void resetSimCorruptionCheckOnDeath(Reference<ConsistencyScanMemoryState> memSta
 	if (!g_network->isSimulated()) {
 		return;
 	}
-	if (g_simulator->consistencyScanCorruptor.present() &&
-	    g_simulator->consistencyScanCorruptor.get().first == memState->csId) {
+	if (fdbSimulationPolicyState().consistencyScanCorruptor.present() &&
+	    fdbSimulationPolicyState().consistencyScanCorruptor.get().first == memState->csId) {
 		TraceEvent("ConsistencyScan_ResetCorruptionOnDeath");
 		CODE_PROBE(
 		    true, "Consistency Scan skipped corruption check because scan died in the middle", probe::decoration::rare);
-		g_simulator->updateConsistencyScanState(ISimulator::SimConsistencyScanState::Enabled_InjectCorruption,
-		                                        ISimulator::SimConsistencyScanState::Enabled_FoundCorruption);
+		fdbSimulationPolicyState().updateConsistencyScanState(FDBSimConsistencyScanState::Enabled_InjectCorruption,
+		                                                      FDBSimConsistencyScanState::Enabled_FoundCorruption);
 	}
 }
 
@@ -1164,14 +1168,15 @@ Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<AsyncV
 
 		// Check if previous consistency scan was terminated without getting actor_cancelled in the middle of a
 		// corruption injection
-		if (g_simulator->consistencyScanCorruptor.present() &&
-		    csInterf.id() != g_simulator->consistencyScanCorruptor.get().first &&
-		    g_simulator->getProcessByAddress(g_simulator->consistencyScanCorruptor.get().second)->failed &&
-		    g_simulator->consistencyScanState == ISimulator::SimConsistencyScanState::Enabled_InjectCorruption) {
+		if (fdbSimulationPolicyState().consistencyScanCorruptor.present() &&
+		    csInterf.id() != fdbSimulationPolicyState().consistencyScanCorruptor.get().first &&
+		    g_simulator->getProcessByAddress(fdbSimulationPolicyState().consistencyScanCorruptor.get().second)
+		        ->failed &&
+		    fdbSimulationPolicyState().consistencyScanState == FDBSimConsistencyScanState::Enabled_InjectCorruption) {
 			TraceEvent("ConsistencyScan_ResetCorruptionOnPreviousScanDeath");
 			// noop if state isn't already Enabled_InjectCorruption
-			g_simulator->updateConsistencyScanState(ISimulator::SimConsistencyScanState::Enabled_InjectCorruption,
-			                                        ISimulator::SimConsistencyScanState::Enabled_FoundCorruption);
+			fdbSimulationPolicyState().updateConsistencyScanState(FDBSimConsistencyScanState::Enabled_InjectCorruption,
+			                                                      FDBSimConsistencyScanState::Enabled_FoundCorruption);
 		}
 	}
 
@@ -1982,9 +1987,11 @@ Future<Void> checkDataConsistency(Database cx,
 						}
 
 						break;
-					} else if (estimatedBytes[j] < 0 && ((g_network->isSimulated() &&
-					                                      g_simulator->tssMode <= ISimulator::TSSMode::EnabledNormal) ||
-					                                     !storageServerInterfaces[j].isTss())) {
+					} else if (estimatedBytes[j] < 0 &&
+					           ((g_network->isSimulated() &&
+					             !simulationPolicyHasCapability(
+					                 ISimulationPolicy::Capability::StorageReplicaFaultInjection)) ||
+					            !storageServerInterfaces[j].isTss())) {
 						// Ignore a non-responding TSS outside of simulation, or if tss fault injection is enabled
 						break;
 					}

@@ -2937,7 +2937,7 @@ static Future<Void> tssStreamComparison(Request request,
 			if ((!ssEndOfStream || !tssEndOfStream) && !TSS_doCompare(ssReply.get(), tssReply.get())) {
 				CODE_PROBE(true, "TSS mismatch in stream comparison");
 				TraceEvent mismatchEvent(
-				    (g_network->isSimulated() && g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations)
+				    (simulationPolicyHasCapability(ISimulationPolicy::Capability::WarnOnStorageMismatch))
 				        ? SevWarnAlways
 				        : SevError,
 				    LB_mismatchTraceName(request, TSS_COMPARISON));
@@ -2959,11 +2959,12 @@ static Future<Void> tssStreamComparison(Request request,
 						tssData.metrics->recordDetailedMismatchData(mismatchUID, mismatchEvent.getFields().toString());
 
 						// record a summarized trace event instead
-						TraceEvent summaryEvent((g_network->isSimulated() &&
-						                         g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations)
-						                            ? SevWarnAlways
-						                            : SevError,
-						                        LB_mismatchTraceName(request, TSS_COMPARISON));
+						TraceEvent summaryEvent(
+						    (g_network->isSimulated() &&
+						     simulationPolicyHasCapability(ISimulationPolicy::Capability::WarnOnStorageMismatch))
+						        ? SevWarnAlways
+						        : SevError,
+						    LB_mismatchTraceName(request, TSS_COMPARISON));
 						summaryEvent.detail("TSSID", tssData.tssId).detail("MismatchId", mismatchUID);
 					}
 				} else {
