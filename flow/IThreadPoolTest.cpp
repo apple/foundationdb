@@ -87,7 +87,7 @@ TEST_CASE("/flow/IThreadPool/NamedThread") {
 	Reference<IThreadPool> pool = createGenericThreadPool();
 	pool->addThread(new ThreadNameReceiver(), "thread-foo");
 
-	co_await waitForThreadName(pool, "thread-foo");
+	ASSERT(co_await waitForThreadName(pool, "thread-foo"));
 
 	co_await pool->stop();
 }
