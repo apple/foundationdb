@@ -2821,8 +2821,7 @@ struct DDQueueImpl {
 		state KeyRange keysToLaunchFrom;
 		state RelocateData launchData;
 		state Future<Void> recordMetrics = delay(SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL);
-		state Future<Void> recordRelocatorLatency =
-		    delay(SERVER_KNOBS->DD_RELOCATOR_LATENCY_LOGGING_INTERVAL);
+		state Future<Void> recordRelocatorLatency = delay(SERVER_KNOBS->DD_RELOCATOR_LATENCY_LOGGING_INTERVAL);
 
 		state std::vector<Future<Void>> ddQueueFutures;
 
