@@ -40,7 +40,7 @@
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.h"
 #include "PartitionedLogIterator.h"
-#include "fdbclient/RestoreInterface.h"
+#include "RestoreInterface.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TaskBucket.h"

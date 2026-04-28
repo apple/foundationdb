@@ -22,7 +22,7 @@
 #include "flow/singleton.h"
 #include "flow/IAsyncFile.h"
 #include "fdbclient/ActorLineageProfiler.h"
-#include "fdbclient/NameLineage.h"
+#include "NameLineage.h"
 #include <msgpack.hpp>
 #include <memory>
 #include <typeindex>
