@@ -512,9 +512,25 @@ struct ReadIterator {
 	std::shared_ptr<rocksdb::Slice> beginSlice, endSlice;
 	ReadIterator(CF& cf, uint64_t index, DB& db, std::shared_ptr<SharedRocksDBState> sharedState)
 	  : index(index), inUse(true), creationTime(now()), iter(db->NewIterator(sharedState->getReadOptions(), cf)) {}
-	ReadIterator(CF& cf, uint64_t index, DB& db, std::shared_ptr<SharedRocksDBState> sharedState, KeyRange keyRange)
+	ReadIterator(CF& cf,
+	             uint64_t index,
+	             DB& db,
+	             std::shared_ptr<SharedRocksDBState> sharedState,
+	             KeyRange keyRange,
+	             bool cacheResult = true)
 	  : index(index), inUse(true), creationTime(now()), keyRange(keyRange) {
 		rocksdb::ReadOptions readOptions = sharedState->getReadOptions();
+		// Honor the txn.ReadOptions.CacheResult setting when this ROCKSDB_USE_CACHE_RESULT_OPTION is enabled.
+		if (g_network->isSimulated()) {
+			// Disabling rocksdb cache in simulation can cause slow down, so honoring txn.ReadOptions.CacheResult
+			// option only for few requests, controlled by SERVER_KNOBS->ROCKSDB_PROBABILITY_DISABLE_CACHE_SIM.
+			if (SERVER_KNOBS->ROCKSDB_USE_CACHE_RESULT_OPTION &&
+			    deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_PROBABILITY_DISABLE_CACHE_SIM)
+				readOptions.fill_cache = cacheResult;
+		} else {
+			if (SERVER_KNOBS->ROCKSDB_USE_CACHE_RESULT_OPTION)
+				readOptions.fill_cache = cacheResult;
+		}
 		beginSlice = std::shared_ptr<rocksdb::Slice>(new rocksdb::Slice(toSlice(keyRange.begin)));
 		readOptions.iterate_lower_bound = beginSlice.get();
 		endSlice = std::shared_ptr<rocksdb::Slice>(new rocksdb::Slice(toSlice(keyRange.end)));
@@ -567,16 +583,18 @@ public:
 	}
 
 	// Called on every read operation.
-	ReadIterator getIterator(KeyRange keyRange) {
+	ReadIterator getIterator(KeyRange keyRange, bool cacheResult = true) {
 		// Reusing iterator in simulation can cause slow down
 		// We avoid to always reuse iterator in simulation to speed up the simulation
 		if (g_network->isSimulated() &&
 		    deterministicRandom()->random01() > SERVER_KNOBS->ROCKSDB_PROBABILITY_REUSE_ITERATOR_SIM) {
 			index++;
-			ReadIterator iter(cf, index, db, sharedState, keyRange);
+			ReadIterator iter(cf, index, db, sharedState, keyRange, cacheResult);
 			return iter;
 		}
 
+		// When ROCKSDB_READ_RANGE_REUSE_ITERATORS is true, the iterator is not bounded
+		// and reused, so txn.ReadOptions.CacheResult is ignored and always reads are cached.
 		if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
 			mutex.lock();
 			for (it = iteratorsMap.begin(); it != iteratorsMap.end(); it++) {
@@ -614,8 +632,10 @@ public:
 			uint64_t readIteratorIndex = index;
 			mutex.unlock();
 
-			ReadIterator iter(cf, readIteratorIndex, db, sharedState, keyRange);
-			if (iteratorsMap.size() < SERVER_KNOBS->ROCKSDB_READ_RANGE_BOUNDED_ITERATORS_MAX_LIMIT) {
+			ReadIterator iter(cf, readIteratorIndex, db, sharedState, keyRange, cacheResult);
+			// If txn.ReadOptions.CacheResult is false, less probability to get the read in
+			// the same range, so don't save the iterator for reuse.
+			if (iteratorsMap.size() < SERVER_KNOBS->ROCKSDB_READ_RANGE_BOUNDED_ITERATORS_MAX_LIMIT && cacheResult) {
 				// Not storing more than ROCKSDB_READ_RANGE_BOUNDED_ITERATORS_MAX_LIMIT of iterators
 				// to avoid 'out of memory' issues.
 				mutex.lock();
@@ -625,7 +645,7 @@ public:
 			return iter;
 		} else {
 			index++;
-			ReadIterator iter(cf, index, db, sharedState, keyRange);
+			ReadIterator iter(cf, index, db, sharedState, keyRange, cacheResult);
 			return iter;
 		}
 	}
@@ -1677,12 +1697,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		struct ReadValueAction : TypedAction<Reader, ReadValueAction> {
 			Key key;
 			ReadType type;
+			bool cacheResult;
 			Optional<UID> debugID;
 			double startTime;
 			bool getHistograms;
 			ThreadReturnPromise<Optional<Value>> result;
-			ReadValueAction(KeyRef key, ReadType type, Optional<UID> debugID)
-			  : key(key), type(type), debugID(debugID), startTime(timer_monotonic()),
+			ReadValueAction(KeyRef key, ReadType type, bool cacheResult, Optional<UID> debugID)
+			  : key(key), type(type), cacheResult(cacheResult), debugID(debugID), startTime(timer_monotonic()),
 			    getHistograms(deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
@@ -1716,6 +1737,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			rocksdb::PinnableSlice value;
 			rocksdb::ReadOptions readOptions = sharedState->getReadOptions();
+			if (SERVER_KNOBS->ROCKSDB_USE_CACHE_RESULT_OPTION)
+				readOptions.fill_cache = a.cacheResult;
 			if (shouldThrottle(a.type, a.key) && SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT) {
 				uint64_t deadlineMircos =
 				    db->GetEnv()->NowMicros() + (readValueTimeout - (readBeginTime - a.startTime)) * 1000000;
@@ -1759,12 +1782,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			Key key;
 			int maxLength;
 			ReadType type;
+			bool cacheResult;
 			Optional<UID> debugID;
 			double startTime;
 			bool getHistograms;
 			ThreadReturnPromise<Optional<Value>> result;
-			ReadValuePrefixAction(Key key, int maxLength, ReadType type, Optional<UID> debugID)
-			  : key(key), maxLength(maxLength), type(type), debugID(debugID), startTime(timer_monotonic()),
+			ReadValuePrefixAction(Key key, int maxLength, ReadType type, bool cacheResult, Optional<UID> debugID)
+			  : key(key), maxLength(maxLength), type(type), cacheResult(cacheResult), debugID(debugID),
+			    startTime(timer_monotonic()),
 			    getHistograms(deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
@@ -1799,6 +1824,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			rocksdb::PinnableSlice value;
 			rocksdb::ReadOptions readOptions = sharedState->getReadOptions();
+			if (SERVER_KNOBS->ROCKSDB_USE_CACHE_RESULT_OPTION)
+				readOptions.fill_cache = a.cacheResult;
 			if (shouldThrottle(a.type, a.key) && SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT) {
 				uint64_t deadlineMircos =
 				    db->GetEnv()->NowMicros() + (readValuePrefixTimeout - (readBeginTime - a.startTime)) * 1000000;
@@ -1839,11 +1866,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			KeyRange keys;
 			int rowLimit, byteLimit;
 			ReadType type;
+			bool cacheResult;
 			double startTime;
 			bool getHistograms;
 			ThreadReturnPromise<RangeResult> result;
-			ReadRangeAction(KeyRange keys, int rowLimit, int byteLimit, ReadType type)
-			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit), type(type), startTime(timer_monotonic()),
+			ReadRangeAction(KeyRange keys, int rowLimit, int byteLimit, ReadType type, bool cacheResult)
+			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit), type(type), cacheResult(cacheResult),
+			    startTime(timer_monotonic()),
 			    getHistograms(deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
@@ -1879,7 +1908,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			rocksdb::Status s;
 			if (a.rowLimit >= 0) {
 				double iterCreationBeginTime = a.getHistograms ? timer_monotonic() : 0;
-				ReadIterator readIter = readIterPool->getIterator(a.keys);
+				ReadIterator readIter = readIterPool->getIterator(a.keys, a.cacheResult);
 				if (a.getHistograms) {
 					metricPromiseStream->send(std::make_pair(ROCKSDB_READRANGE_NEWITERATOR_HISTOGRAM.toString(),
 					                                         timer_monotonic() - iterCreationBeginTime));
@@ -1909,7 +1938,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				readIterPool->returnIterator(readIter);
 			} else {
 				double iterCreationBeginTime = a.getHistograms ? timer_monotonic() : 0;
-				ReadIterator readIter = readIterPool->getIterator(a.keys);
+				ReadIterator readIter = readIterPool->getIterator(a.keys, a.cacheResult);
 				if (a.getHistograms) {
 					metricPromiseStream->send(std::make_pair(ROCKSDB_READRANGE_NEWITERATOR_HISTOGRAM.toString(),
 					                                         timer_monotonic() - iterCreationBeginTime));
@@ -2226,6 +2255,17 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			    !SERVER_KNOBS->ROCKSDB_FORCE_DELETERANGE_FOR_CLEARRANGE && maxDeletes > 0) {
 				++counters.convertedDeleteRangeReqs;
 				rocksdb::ReadOptions readOptions = sharedState->getReadOptions();
+				// Below does a read operation for the deleteRange request, so disable rocksdb cache.
+				if (g_network->isSimulated()) {
+					// Disabling rocksdb cache in simulation can cause slow down, so disabling only for
+					// few requests controlled by SERVER_KNOBS->ROCKSDB_PROBABILITY_DISABLE_CACHE_SIM.
+					if (SERVER_KNOBS->ROCKSDB_USE_CACHE_RESULT_OPTION &&
+					    deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_PROBABILITY_DISABLE_CACHE_SIM)
+						readOptions.fill_cache = false;
+				} else {
+					if (SERVER_KNOBS->ROCKSDB_USE_CACHE_RESULT_OPTION)
+						readOptions.fill_cache = false;
+				}
 				auto beginSlice = toSlice(keyRange.begin);
 				auto endSlice = toSlice(keyRange.end);
 				readOptions.iterate_lower_bound = &beginSlice;
@@ -2364,15 +2404,17 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	Future<Optional<Value>> readValue(KeyRef key, Optional<ReadOptions> options) override {
 		ReadType type = ReadType::NORMAL;
+		bool cacheResult = true;
 		Optional<UID> debugID;
 
 		if (options.present()) {
 			type = options.get().type;
+			cacheResult = options.get().cacheResult;
 			debugID = options.get().debugID;
 		}
 
 		if (!shouldThrottle(type, key)) {
-			auto a = new Reader::ReadValueAction(key, type, debugID);
+			auto a = new Reader::ReadValueAction(key, type, cacheResult, debugID);
 			auto res = a->result.getFuture();
 			readThreads->post(a);
 			return res;
@@ -2382,21 +2424,23 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		int maxWaiters = (type == ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
 
 		checkWaiters(semaphore, maxWaiters);
-		auto a = std::make_unique<Reader::ReadValueAction>(key, type, debugID);
+		auto a = std::make_unique<Reader::ReadValueAction>(key, type, cacheResult, debugID);
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
 	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<ReadOptions> options) override {
 		ReadType type = ReadType::NORMAL;
+		bool cacheResult = true;
 		Optional<UID> debugID;
 
 		if (options.present()) {
 			type = options.get().type;
+			cacheResult = options.get().cacheResult;
 			debugID = options.get().debugID;
 		}
 
 		if (!shouldThrottle(type, key)) {
-			auto a = new Reader::ReadValuePrefixAction(key, maxLength, type, debugID);
+			auto a = new Reader::ReadValuePrefixAction(key, maxLength, type, cacheResult, debugID);
 			auto res = a->result.getFuture();
 			readThreads->post(a);
 			return res;
@@ -2406,7 +2450,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		int maxWaiters = (type == ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
 
 		checkWaiters(semaphore, maxWaiters);
-		auto a = std::make_unique<Reader::ReadValuePrefixAction>(key, maxLength, type, debugID);
+		auto a = std::make_unique<Reader::ReadValuePrefixAction>(key, maxLength, type, cacheResult, debugID);
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
@@ -2435,14 +2479,16 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	                              int byteLimit,
 	                              Optional<ReadOptions> options) override {
 		ReadType type = ReadType::NORMAL;
+		bool cacheResult = true;
 
 		if (options.present()) {
 			type = options.get().type;
+			cacheResult = options.get().cacheResult;
 		}
 
 		if (!shouldThrottle(type, keys.begin)) {
 			++counters.rocksdbReadRangeQueries;
-			auto a = new Reader::ReadRangeAction(keys, rowLimit, byteLimit, type);
+			auto a = new Reader::ReadRangeAction(keys, rowLimit, byteLimit, type, cacheResult);
 			auto res = a->result.getFuture();
 			readThreads->post(a);
 			return res;
@@ -2453,7 +2499,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		checkWaiters(semaphore, maxWaiters);
 		++counters.rocksdbReadRangeQueries;
-		auto a = std::make_unique<Reader::ReadRangeAction>(keys, rowLimit, byteLimit, type);
+		auto a = std::make_unique<Reader::ReadRangeAction>(keys, rowLimit, byteLimit, type, cacheResult);
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 

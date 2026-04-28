@@ -1,5 +1,5 @@
 /*
- * masterserver.actor.cpp
+ * masterserver.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -30,28 +30,22 @@
 #include "ResolutionBalancer.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "flow/ActorCollection.h"
+#include "flow/CoroUtils.h"
 #include "flow/Trace.h"
-#include "flow/swift_support.h"
 #include "fdbclient/VersionVector.h"
 #include "MasterData.h"
-
-#ifdef WITH_SWIFT
-#include "SwiftModules/FDBServer"
-#endif
-
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 template class ReplyPromise<MasterInterface>;
 template struct NetSAV<MasterInterface>;
 
 void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVersionRequest req);
 
-Version figureVersionCxx(Version current,
-                         double now,
-                         Version reference,
-                         int64_t toAdd,
-                         double maxVersionRateModifier,
-                         int64_t maxVersionRateOffset) {
+Version figureVersion(Version current,
+                      double now,
+                      Version reference,
+                      int64_t toAdd,
+                      double maxVersionRateModifier,
+                      int64_t maxVersionRateOffset) {
 	// Versions should roughly follow wall-clock time, based on the
 	// system clock of the current machine and an FDB-specific epoch.
 	// Calculate the expected version and determine whether we need to
@@ -68,68 +62,18 @@ Version figureVersionCxx(Version current,
 	return std::clamp(expected, current + toAdd - maxOffset, current + toAdd + maxOffset);
 }
 
-#ifdef WITH_SWIFT
-Version figureVersion(Version current,
-                      double now,
-                      Version reference,
-                      int64_t toAdd,
-                      double maxVersionRateModifier,
-                      int64_t maxVersionRateOffset) {
-	auto impl = SERVER_KNOBS->FLOW_WITH_SWIFT ? fdbserver_swift::figureVersion : figureVersionCxx;
-	return impl(current, now, reference, toAdd, maxVersionRateModifier, maxVersionRateOffset);
-}
-#else
-Version figureVersion(Version current,
-                      double now,
-                      Version reference,
-                      int64_t toAdd,
-                      double maxVersionRateModifier,
-                      int64_t maxVersionRateOffset) {
-	return figureVersionCxx(current, now, reference, toAdd, maxVersionRateModifier, maxVersionRateOffset);
-}
-#endif
-
-#ifdef WITH_SWIFT
-SWIFT_ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
-	if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
-		auto future = self->swiftImpl->waitForPrev(self.getPtr(), req);
-		wait(future);
-	} else {
-		state double startTime = now();
-		wait(self->liveCommittedVersion.whenAtLeast(req.prevVersion.get()));
-		double latency = now() - startTime;
-		self->waitForPrevLatencies->addMeasurement(latency);
-		++self->waitForPrevCommitRequests;
-		updateLiveCommittedVersion(self, req);
-		req.reply.send(Void());
-	}
-
-	return Void();
-}
-#else
-ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
-	state double startTime = now();
-	wait(self->liveCommittedVersion.whenAtLeast(req.prevVersion.get()));
+Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
+	double startTime = now();
+	co_await self->liveCommittedVersion.whenAtLeast(req.prevVersion.get());
 	self->waitForPrevLatencies->addMeasurement(now() - startTime);
 	++self->waitForPrevCommitRequests;
 	updateLiveCommittedVersion(self, req);
 	req.reply.send(Void());
-
-	return Void();
 }
-#endif
 
-#ifdef WITH_SWIFT
-SWIFT_ACTOR Future<Void> getVersionSwift(Reference<MasterData> self, GetCommitVersionRequest req) {
-	auto future = self->swiftImpl->getVersion(self.getPtr(), req);
-	wait(future);
-	return Void();
-}
-#endif
-
-ACTOR Future<Void> getVersionCxx(Reference<MasterData> self, GetCommitVersionRequest req) {
-	state Span span("M:getVersion"_loc, req.spanContext);
-	state std::map<UID, CommitProxyVersionReplies>::iterator proxyItr =
+Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
+	Span span("M:getVersion"_loc, req.spanContext);
+	std::map<UID, CommitProxyVersionReplies>::iterator proxyItr =
 	    self->lastCommitProxyVersionReplies.find(req.requestingProxy); // lastCommitProxyVersionReplies never changes
 
 	++self->getCommitVersionRequests;
@@ -137,13 +81,13 @@ ACTOR Future<Void> getVersionCxx(Reference<MasterData> self, GetCommitVersionReq
 	if (proxyItr == self->lastCommitProxyVersionReplies.end()) {
 		// Request from invalid proxy (e.g. from duplicate recruitment request)
 		req.reply.send(Never());
-		return Void();
+		co_return;
 	}
 
 	CODE_PROBE(proxyItr->second.latestRequestNum.get() < req.requestNum - 1,
 	           "Commit version request queued up",
 	           probe::decoration::rare);
-	wait(proxyItr->second.latestRequestNum.whenAtLeast(req.requestNum - 1));
+	co_await proxyItr->second.latestRequestNum.whenAtLeast(req.requestNum - 1);
 
 	auto itr = proxyItr->second.replies.find(req.requestNum);
 	if (itr != proxyItr->second.replies.end()) {
@@ -210,26 +154,7 @@ ACTOR Future<Void> getVersionCxx(Reference<MasterData> self, GetCommitVersionReq
 		ASSERT(proxyItr->second.latestRequestNum.get() == req.requestNum - 1);
 		proxyItr->second.latestRequestNum.set(req.requestNum);
 	}
-
-	return Void();
 }
-
-#ifdef WITH_SWIFT
-ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
-	if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
-		wait(getVersionSwift(self, req));
-		return Void();
-	} else {
-		wait(getVersionCxx(self, req));
-		return Void();
-	}
-}
-#else
-ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
-	wait(getVersionCxx(self, req));
-	return Void();
-}
-#endif
 
 CounterValue::CounterValue(std::string const& name, CounterCollection& collection)
   : value(std::make_shared<Counter>(name, collection)) {}
@@ -283,65 +208,21 @@ MasterData::MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
 		                                                       SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 		                                                       SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
 	}
-
-#ifdef WITH_SWIFT
-	using namespace fdbserver_swift;
-	// FIXME(swift): can we make a cleaner init?
-	swiftImpl.reset(new MasterDataActor((const MasterDataActor&)MasterDataActor::init()));
-#endif
 }
-
-#ifdef WITH_SWIFT
-void MasterData::setSwiftImpl(fdbserver_swift::MasterDataActor* impl) {
-	swiftImpl.reset(impl);
-}
-#endif
 
 MasterData::~MasterData() {}
 
-ACTOR Future<Void> provideVersionsCxx(Reference<MasterData> self) {
-	state ActorCollection versionActors(false);
+Future<Void> provideVersions(Reference<MasterData> self) {
+	ActorCollection versionActors(false);
 
-	loop choose {
-		when(GetCommitVersionRequest req = waitNext(self->myInterface.getCommitVersion.getFuture())) {
-			versionActors.add(getVersion(self, req));
-		}
-		when(wait(versionActors.getResult())) {}
+	while (true) {
+		GetCommitVersionRequest req =
+		    co_await waitOrError(self->myInterface.getCommitVersion.getFuture(), versionActors.getResult());
+		versionActors.add(getVersion(self, req));
 	}
 }
 
-#ifdef WITH_SWIFT
-SWIFT_ACTOR Future<Void> provideVersionsSwift(Reference<MasterData> self) {
-	auto future = self->swiftImpl->provideVersions(self.getPtr());
-	wait(future);
-	return Void();
-}
-#endif
-
-#ifdef WITH_SWIFT
-ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
-	if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
-		wait(provideVersionsSwift(self));
-	} else {
-		wait(provideVersionsCxx(self));
-	}
-
-	return Void();
-}
-#else
-ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
-	wait(provideVersionsCxx(self));
-	return Void();
-}
-#endif
-
-#ifdef WITH_SWIFT
-void updateLiveCommittedVersionSwift(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
-	fdbserver_swift::updateLiveCommittedVersion(self.getPtr(), req);
-}
-#endif
-
-void updateLiveCommittedVersionCxx(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
+void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
 	self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, req.minKnownCommittedVersion);
 
 	if (req.version > self->liveCommittedVersion.get()) {
@@ -365,95 +246,63 @@ void updateLiveCommittedVersionCxx(Reference<MasterData> self, ReportRawCommitte
 	++self->reportLiveCommittedVersionRequests;
 }
 
-#ifdef WITH_SWIFT
-void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
-	if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
-		return updateLiveCommittedVersionSwift(self, req);
-	} else {
-		return updateLiveCommittedVersionCxx(self, req);
-	}
-}
-#else
-void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
-	return updateLiveCommittedVersionCxx(self, req);
-}
-#endif
+class LiveCommittedVersionServer {
+	Reference<MasterData> self;
 
-#ifdef WITH_SWIFT
-SWIFT_ACTOR Future<Void> serveLiveCommittedVersionSwift(Reference<MasterData> self) {
-	auto future = self->swiftImpl->serveLiveCommittedVersion(self.getPtr());
-	wait(future);
-	return Void();
-}
-#endif
+	Future<Void> serveGetLiveCommittedVersion() {
+		while (true) {
+			GetRawCommittedVersionRequest req = co_await self->myInterface.getLiveCommittedVersion.getFuture();
+			if (req.debugID.present())
+				g_traceBatch.addEvent("TransactionDebug",
+				                      req.debugID.get().first(),
+				                      "MasterServer.serveLiveCommittedVersion.GetRawCommittedVersion");
 
-ACTOR Future<Void> serveLiveCommittedVersionCxx(Reference<MasterData> self) {
-	loop {
-		choose {
-			when(GetRawCommittedVersionRequest req = waitNext(self->myInterface.getLiveCommittedVersion.getFuture())) {
-				if (req.debugID.present())
-					g_traceBatch.addEvent("TransactionDebug",
-					                      req.debugID.get().first(),
-					                      "MasterServer.serveLiveCommittedVersion.GetRawCommittedVersion");
-
-				if (self->liveCommittedVersion.get() == invalidVersion) {
-					self->liveCommittedVersion.set(self->recoveryTransactionVersion);
-				}
-				++self->getLiveCommittedVersionRequests;
-				GetRawCommittedVersionReply reply;
-				reply.version = self->liveCommittedVersion.get();
-				reply.locked = self->databaseLocked;
-				reply.metadataVersion = self->proxyMetadataVersion;
-				reply.minKnownCommittedVersion = self->minKnownCommittedVersion;
-				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
-					self->ssVersionVector.getDelta(req.maxVersion, reply.ssVersionVectorDelta);
-					self->versionVectorSizeOnCVReply->addMeasurement(reply.ssVersionVectorDelta.size());
-				}
-				req.reply.send(reply);
+			if (self->liveCommittedVersion.get() == invalidVersion) {
+				self->liveCommittedVersion.set(self->recoveryTransactionVersion);
 			}
-			when(ReportRawCommittedVersionRequest req =
-			         waitNext(self->myInterface.reportLiveCommittedVersion.getFuture())) {
-				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.prevVersion.present() &&
-				    (self->liveCommittedVersion.get() != invalidVersion) &&
-				    (self->liveCommittedVersion.get() < req.prevVersion.get())) {
-					self->addActor.send(waitForPrev(self, req));
-				} else {
-					updateLiveCommittedVersion(self, req);
-					++self->nonWaitForPrevCommitRequests;
-					req.reply.send(Void());
-				}
+			++self->getLiveCommittedVersionRequests;
+			GetRawCommittedVersionReply reply;
+			reply.version = self->liveCommittedVersion.get();
+			reply.locked = self->databaseLocked;
+			reply.metadataVersion = self->proxyMetadataVersion;
+			reply.minKnownCommittedVersion = self->minKnownCommittedVersion;
+			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+				self->ssVersionVector.getDelta(req.maxVersion, reply.ssVersionVectorDelta);
+				self->versionVectorSizeOnCVReply->addMeasurement(reply.ssVersionVectorDelta.size());
+			}
+			req.reply.send(reply);
+		}
+	}
+
+	Future<Void> serveReportLiveCommittedVersion() {
+		while (true) {
+			ReportRawCommittedVersionRequest req = co_await self->myInterface.reportLiveCommittedVersion.getFuture();
+			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.prevVersion.present() &&
+			    (self->liveCommittedVersion.get() != invalidVersion) &&
+			    (self->liveCommittedVersion.get() < req.prevVersion.get())) {
+				self->addActor.send(waitForPrev(self, req));
+			} else {
+				updateLiveCommittedVersion(self, req);
+				++self->nonWaitForPrevCommitRequests;
+				req.reply.send(Void());
 			}
 		}
 	}
+
+public:
+	explicit LiveCommittedVersionServer(Reference<MasterData> self) : self(self) {}
+
+	Future<Void> run() { co_await race(serveGetLiveCommittedVersion(), serveReportLiveCommittedVersion()); }
+};
+
+Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
+	LiveCommittedVersionServer server(self);
+	co_await server.run();
 }
 
-#ifdef WITH_SWIFT
-ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
-	if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
-		wait(serveLiveCommittedVersionSwift(self));
-	} else {
-		wait(serveLiveCommittedVersionCxx(self));
-	}
-	return Void();
-}
-#else
-ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
-	wait(serveLiveCommittedVersionCxx(self));
-	return Void();
-}
-#endif
-
-#ifdef WITH_SWIFT
-SWIFT_ACTOR Future<Void> updateRecoveryDataSwift(Reference<MasterData> self) {
-	auto future = self->swiftImpl->serveUpdateRecoveryData(self.getPtr());
-	wait(future);
-	return Void();
-}
-#endif
-
-ACTOR Future<Void> updateRecoveryDataCxx(Reference<MasterData> self) {
-	loop {
-		UpdateRecoveryDataRequest req = waitNext(self->myInterface.updateRecoveryData.getFuture());
+Future<Void> updateRecoveryData(Reference<MasterData> self) {
+	while (true) {
+		UpdateRecoveryDataRequest req = co_await self->myInterface.updateRecoveryData.getFuture();
 		TraceEvent("UpdateRecoveryData", self->dbgid)
 		    .detail("ReceivedRecoveryTxnVersion", req.recoveryTransactionVersion)
 		    .detail("ReceivedLastEpochEnd", req.lastEpochEnd)
@@ -493,22 +342,6 @@ ACTOR Future<Void> updateRecoveryDataCxx(Reference<MasterData> self) {
 	}
 }
 
-#ifdef WITH_SWIFT
-ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
-	if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
-		wait(updateRecoveryDataSwift(self));
-	} else {
-		wait(updateRecoveryDataCxx(self));
-	}
-	return Void();
-}
-#else
-ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
-	wait(updateRecoveryDataCxx(self));
-	return Void();
-}
-#endif
-
 static std::set<int> const& normalMasterErrors() {
 	static std::set<int> s;
 	if (s.empty()) {
@@ -530,125 +363,12 @@ static std::set<int> const& normalMasterErrors() {
 	return s;
 }
 
-ACTOR Future<Void> masterServerCxx(MasterInterface mi,
-                                   Reference<AsyncVar<ServerDBInfo> const> db,
-                                   Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
-                                   ServerCoordinators coordinators,
-                                   LifetimeToken lifetime,
-                                   bool forceRecovery) {
-	state Future<Void> ccTimeout = delay(SERVER_KNOBS->CC_INTERFACE_TIMEOUT);
-	while (!ccInterface->get().present() || db->get().clusterInterface != ccInterface->get().get()) {
-		wait(ccInterface->onChange() || db->onChange() || ccTimeout);
-		if (ccTimeout.isReady()) {
-			TraceEvent("MasterTerminated", mi.id())
-			    .detail("Reason", "Timeout")
-			    .detail("CCInterface", ccInterface->get().present() ? ccInterface->get().get().id() : UID())
-			    .detail("DBInfoInterface", db->get().clusterInterface.id());
-			return Void();
-		}
-	}
-
-	state Future<Void> onDBChange = Void();
-	wait(onDBChange);
-	state PromiseStream<Future<Void>> addActor;
-	state Reference<MasterData> self(
-	    new MasterData(db, mi, coordinators, db->get().clusterInterface, ""_sr, addActor, forceRecovery));
-	state Future<Void> collection = actorCollection(addActor.getFuture());
-
-	addActor.send(traceRole(Role::MASTER, mi.id()));
-	addActor.send(provideVersions(self));
-	addActor.send(serveLiveCommittedVersion(self));
-	addActor.send(updateRecoveryDataCxx(self));
-
-	CODE_PROBE(!lifetime.isStillValid(db->get().masterLifetime, mi.id() == db->get().master.id()),
-	           "Master born doomed");
-	TraceEvent("MasterLifetime", self->dbgid).detail("LifetimeToken", lifetime.toString());
-
-	try {
-		loop choose {
-			when(wait(onDBChange)) {
-				onDBChange = db->onChange();
-				if (!lifetime.isStillValid(db->get().masterLifetime, mi.id() == db->get().master.id())) {
-					TraceEvent("MasterTerminated", mi.id())
-					    .detail("Reason", "LifetimeToken")
-					    .detail("MyToken", lifetime.toString())
-					    .detail("CurrentToken", db->get().masterLifetime.toString());
-					CODE_PROBE(true, "Master replaced, dying");
-					if (BUGGIFY)
-						wait(delay(5));
-					throw worker_removed();
-				}
-			}
-			when(wait(collection)) {
-				ASSERT(false);
-				throw internal_error();
-			}
-		}
-	} catch (Error& e) {
-		state Error err = e;
-		if (e.code() != error_code_actor_cancelled) {
-			wait(delay(0.0));
-		}
-		while (!addActor.isEmpty()) {
-			addActor.getFuture().pop();
-		}
-
-		if (normalMasterErrors().contains(err.code())) {
-			TraceEvent("MasterTerminated", mi.id()).error(err);
-			return Void();
-		}
-		throw err;
-	}
-}
-
-#ifdef WITH_SWIFT
-ACTOR Future<Void> masterServerImpl(MasterInterface mi,
-                                    Reference<AsyncVar<ServerDBInfo> const> db,
-                                    Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
-                                    ServerCoordinators coordinators,
-                                    LifetimeToken lifetime,
-                                    bool forceRecovery) {
-	if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
-		auto promise = Promise<Void>();
-		state PromiseStream<Future<Void>> addActor;
-		state Reference<MasterData> self(
-		    new MasterData(db, mi, coordinators, db->get().clusterInterface, ""_sr, addActor, forceRecovery));
-		fdbserver_swift::masterServerSwift(
-		    mi,
-		    const_cast<AsyncVar<ServerDBInfo>*>(db.getPtr()),
-		    const_cast<AsyncVar<Optional<ClusterControllerFullInterface>>*>(ccInterface.getPtr()),
-		    coordinators,
-		    lifetime,
-		    forceRecovery,
-		    self.getPtr(),
-		    /*result=*/promise);
-		Future<Void> f = promise.getFuture();
-		wait(f);
-		return Void();
-	} else {
-		wait(masterServerCxx(mi, db, ccInterface, coordinators, lifetime, forceRecovery));
-		return Void();
-	}
-}
-#else
-ACTOR Future<Void> masterServerImpl(MasterInterface mi,
-                                    Reference<AsyncVar<ServerDBInfo> const> db,
-                                    Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
-                                    ServerCoordinators coordinators,
-                                    LifetimeToken lifetime,
-                                    bool forceRecovery) {
-	wait(masterServerCxx(mi, db, ccInterface, coordinators, lifetime, forceRecovery));
-	return Void();
-}
-#endif
-
 Future<Void> masterServer(MasterInterface mi,
                           Reference<AsyncVar<ServerDBInfo> const> db,
                           Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                           ServerCoordinators coordinators,
                           LifetimeToken lifetime,
                           bool forceRecovery) {
-
 	Future<Void> ccTimeout = delay(SERVER_KNOBS->CC_INTERFACE_TIMEOUT);
 	while (!ccInterface->get().present() || db->get().clusterInterface != ccInterface->get().get()) {
 		co_await race(ccInterface->onChange(), db->onChange(), ccTimeout);
@@ -661,8 +381,55 @@ Future<Void> masterServer(MasterInterface mi,
 		}
 	}
 
-	co_await Future<Void>(Void());
-	co_await masterServerImpl(mi, db, ccInterface, coordinators, lifetime, forceRecovery);
+	Future<Void> onDBChange = Void();
+	co_await onDBChange;
+	PromiseStream<Future<Void>> addActor;
+	Reference<MasterData> self(
+	    new MasterData(db, mi, coordinators, db->get().clusterInterface, ""_sr, addActor, forceRecovery));
+	Future<Void> collection = actorCollection(addActor.getFuture());
+
+	addActor.send(traceRole(Role::MASTER, mi.id()));
+	addActor.send(provideVersions(self));
+	addActor.send(serveLiveCommittedVersion(self));
+	addActor.send(updateRecoveryData(self));
+
+	CODE_PROBE(!lifetime.isStillValid(db->get().masterLifetime, mi.id() == db->get().master.id()),
+	           "Master born doomed");
+	TraceEvent("MasterLifetime", self->dbgid).detail("LifetimeToken", lifetime.toString());
+
+	Error err;
+	try {
+		while (true) {
+			co_await waitOrError(onDBChange, collection);
+			onDBChange = db->onChange();
+			if (!lifetime.isStillValid(db->get().masterLifetime, mi.id() == db->get().master.id())) {
+				TraceEvent("MasterTerminated", mi.id())
+				    .detail("Reason", "LifetimeToken")
+				    .detail("MyToken", lifetime.toString())
+				    .detail("CurrentToken", db->get().masterLifetime.toString());
+				CODE_PROBE(true, "Master replaced, dying");
+				if (BUGGIFY) {
+					co_await delay(5);
+				}
+				throw worker_removed();
+			}
+		}
+	} catch (Error& e) {
+		err = e;
+	}
+
+	if (err.code() != error_code_actor_cancelled) {
+		co_await delay(0.0);
+	}
+	while (!addActor.isEmpty()) {
+		addActor.getFuture().pop();
+	}
+
+	if (normalMasterErrors().contains(err.code())) {
+		TraceEvent("MasterTerminated", mi.id()).error(err);
+		co_return;
+	}
+	throw err;
 }
 
 TEST_CASE("/fdbserver/MasterServer/FigureVersion/Simple") {
