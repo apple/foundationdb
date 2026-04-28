@@ -202,8 +202,8 @@ struct IncrementalBackupWorkload : TestWorkload {
 				                                  UsePartitionedLog::False,
 				                                  IncrementalBackupOnly::True,
 				                                  encryptionKeyFileName,
-				                                  0,
-				                                  encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0);
+				                                  encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0,
+				                                  0);
 			} catch (Error& e) {
 				TraceEvent("IBackupSubmitError").error(e);
 				if (e.code() != error_code_backup_duplicate) {

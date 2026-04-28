@@ -585,10 +585,22 @@ public:
 				    .detail("IsEncryptionEnabled", enabled)
 				    .detail("EncryptionBlockSize", blockSize);
 				co_return std::make_pair(enabled, blockSize);
+			} else {
+				throw backup_invalid_info();
 			}
 		} catch (Error& e) {
+			if (e.code() == error_code_file_not_found) {
+				TraceEvent(SevWarn, "BackupContainerEncryptionMetadataNotFound")
+				    .detail("URL", bc->getURL())
+				    .detail("File", BackupContainerFileSystem::encryptionMetadataFileName());
+				co_return std::make_pair(false, 0);
+			}
+			TraceEvent(SevError, "BackupContainerReadEncryptionMetadataError")
+			    .error(e)
+			    .detail("URL", bc->getURL())
+			    .detail("File", BackupContainerFileSystem::encryptionMetadataFileName());
+			throw;
 		}
-		co_return std::make_pair(false, 0);
 	}
 
 	static Future<BackupDescription> describeBackup(Reference<BackupContainerFileSystem> bc,

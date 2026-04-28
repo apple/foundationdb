@@ -7126,8 +7126,8 @@ public:
 	                                 UsePartitionedLog partitionedLog,
 	                                 IncrementalBackupOnly incrementalBackupOnly,
 	                                 Optional<std::string> encryptionKeyFileName,
-	                                 int snapshotMode,
-	                                 int encryptionBlockSize) {
+	                                 int encryptionBlockSize,
+	                                 int snapshotMode) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
@@ -8591,8 +8591,8 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
                                            UsePartitionedLog partitionedLog,
                                            IncrementalBackupOnly incrementalBackupOnly,
                                            Optional<std::string> const& encryptionKeyFileName,
-                                           int snapshotMode,
-                                           int encryptionBlockSize) {
+                                           int encryptionBlockSize,
+                                           int snapshotMode) {
 	return FileBackupAgentImpl::submitBackup(this,
 	                                         tr,
 	                                         outContainer,
@@ -8605,8 +8605,8 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
 	                                         partitionedLog,
 	                                         incrementalBackupOnly,
 	                                         encryptionKeyFileName,
-	                                         snapshotMode,
-	                                         encryptionBlockSize);
+	                                         encryptionBlockSize,
+	                                         snapshotMode);
 }
 
 Future<Void> FileBackupAgent::discontinueBackup(Reference<ReadYourWritesTransaction> tr, Key tagName) {

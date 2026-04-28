@@ -2092,8 +2092,8 @@ Future<Void> submitBackup(Database db,
 			                                  usePartitionedLog,
 			                                  incrementalBackupOnly,
 			                                  encryptionKeyFile,
-			                                  static_cast<int>(snapshotMode),
-			                                  encryptionBlockSize);
+			                                  encryptionBlockSize,
+			                                  static_cast<int>(snapshotMode));
 
 			// Wait for the backup to complete, if requested
 			if (waitForCompletion) {
@@ -3867,7 +3867,13 @@ int main(int argc, char* argv[]) {
 				modifyOptions.encryptionKeyFile = encryptionKeyFile;
 				break;
 			case OPT_ENCRYPTION_BLOCK_SIZE:
-				encryptionBlockSize = std::stoi(args->OptionArg());
+				try {
+					encryptionBlockSize = std::stoi(args->OptionArg());
+				} catch (std::exception&) {
+					fprintf(stderr, "ERROR: Invalid encryption block size `%s'\n", args->OptionArg());
+					printHelpTeaser(newArgV[0]);
+					return FDB_EXIT_ERROR;
+				}
 				if (encryptionBlockSize <= 0) {
 					fprintf(stderr, "ERROR: Invalid encryption block size `%s'\n", args->OptionArg());
 					printHelpTeaser(newArgV[0]);

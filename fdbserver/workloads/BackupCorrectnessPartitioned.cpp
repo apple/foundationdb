@@ -317,8 +317,8 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 			                                   UsePartitionedLog::True, // enable partitioned log here
 			                                   IncrementalBackupOnly::False,
 			                                   encryptionKeyFileName,
-			                                   /*snapshotMode=*/0,
-			                                   encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0);
+			                                   encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0,
+			                                   /*snapshotMode=*/0);
 		} catch (Error& e) {
 			TraceEvent("BARW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
