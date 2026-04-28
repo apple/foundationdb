@@ -49,6 +49,7 @@
 #include "flow/Buggify.h"
 #include "flow/Error.h"
 #include "flow/Platform.h"
+#include "flow/SimpleCounter.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/flow.h"
@@ -403,6 +404,19 @@ struct DDBulkDumpJobManager {
 	bool isValid() const { return jobState.isValid(); }
 };
 
+static SimpleCounter<int64_t>* counterRemoveDataMoveTombstoneStarted() {
+	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/removeDataMoveTombstone/started");
+	return c;
+}
+static SimpleCounter<int64_t>* counterRemoveDataMoveTombstoneCommitted() {
+	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/removeDataMoveTombstone/committed");
+	return c;
+}
+static SimpleCounter<int64_t>* counterRemoveDataMoveTombstoneAborted() {
+	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/removeDataMoveTombstone/aborted");
+	return c;
+}
+
 struct DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
 public:
 	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
@@ -710,11 +724,15 @@ public:
 	}
 
 	static Future<Void> removeDataMoveTombstoneBackground(Reference<DataDistributor> self) {
+		auto* txnStarted = counterRemoveDataMoveTombstoneStarted();
+		auto* txnCommitted = counterRemoveDataMoveTombstoneCommitted();
+		auto* txnAborted = counterRemoveDataMoveTombstoneAborted();
 		UID currentID;
 		try {
 			Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 			Transaction tr(cx);
 			while (true) {
+				txnStarted->increment(1);
 				Error err;
 				try {
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -725,8 +743,10 @@ public:
 						TraceEvent(SevDebug, "RemoveDataMoveTombstone", self->ddId).detail("DataMoveID", currentID);
 					}
 					co_await tr.commit();
+					txnCommitted->increment(1);
 					break;
 				} catch (Error& e) {
+					txnAborted->increment(1);
 					err = e;
 				}
 				co_await tr.onError(err);
@@ -3158,14 +3178,46 @@ Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> getSta
 	}
 }
 
+static SimpleCounter<int64_t>* counterDdSnapSetRecoveryStarted() {
+	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/ddSnapSetRecovery/started");
+	return c;
+}
+static SimpleCounter<int64_t>* counterDdSnapSetRecoveryCommitted() {
+	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/ddSnapSetRecovery/committed");
+	return c;
+}
+static SimpleCounter<int64_t>* counterDdSnapSetRecoveryAborted() {
+	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/ddSnapSetRecovery/aborted");
+	return c;
+}
+static SimpleCounter<int64_t>* counterDdSnapClearRecoveryStarted() {
+	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/ddSnapClearRecovery/started");
+	return c;
+}
+static SimpleCounter<int64_t>* counterDdSnapClearRecoveryCommitted() {
+	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/ddSnapClearRecovery/committed");
+	return c;
+}
+static SimpleCounter<int64_t>* counterDdSnapClearRecoveryAborted() {
+	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/ddSnapClearRecovery/aborted");
+	return c;
+}
+
 // Coordinates the data-distributor side of snapshot creation by preventing
 // recovery, pausing TLog pops, snapshotting stateful workers, and resuming
 // TLog pops before reporting completion.
 Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar<ServerDBInfo> const> db) {
 	Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, LockAware::True);
+	auto* setRecoveryStarted = counterDdSnapSetRecoveryStarted();
+	auto* setRecoveryCommitted = counterDdSnapSetRecoveryCommitted();
+	auto* setRecoveryAborted = counterDdSnapSetRecoveryAborted();
+	auto* clearRecoveryStarted = counterDdSnapClearRecoveryStarted();
+	auto* clearRecoveryCommitted = counterDdSnapClearRecoveryCommitted();
+	auto* clearRecoveryAborted = counterDdSnapClearRecoveryAborted();
 
 	ReadYourWritesTransaction tr(cx);
 	while (true) {
+		setRecoveryStarted->increment(1);
 		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -3175,8 +3227,10 @@ Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar
 			    .detail("SnapUID", snapReq.snapUID);
 			tr.set(writeRecoveryKey, writeRecoveryKeyTrue);
 			co_await tr.commit();
+			setRecoveryCommitted->increment(1);
 			break;
 		} catch (Error& e) {
+			setRecoveryAborted->increment(1);
 			err = e;
 		}
 		TraceEvent("SnapDataDistributor_WriteFlagError").error(err);
@@ -3269,6 +3323,7 @@ Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar
 		    .detail("SnapUID", snapReq.snapUID);
 		tr.reset();
 		while (true) {
+			clearRecoveryStarted->increment(1);
 			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -3278,8 +3333,10 @@ Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar
 				    .detail("SnapUID", snapReq.snapUID);
 				tr.clear(writeRecoveryKey);
 				co_await tr.commit();
+				clearRecoveryCommitted->increment(1);
 				break;
 			} catch (Error& e) {
+				clearRecoveryAborted->increment(1);
 				err = e;
 			}
 			TraceEvent("SnapDataDistributor_ClearFlagError").error(err);
