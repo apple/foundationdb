@@ -177,7 +177,6 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 
 	//AsyncFileEncrypted
 	init( ENCRYPTION_BLOCK_SIZE,                              4096 );
-	init( MAX_DECRYPTED_BLOCKS,                                 10 );
 
 	//AsyncFileKAIO
 	init( MAX_OUTSTANDING,                                      64 );
