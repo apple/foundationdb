@@ -1492,10 +1492,6 @@ void SimulationConfig::set_config(std::string config) {
 		db.set(configKey, configValue);
 }
 
-[[maybe_unused]] StringRef StringRefOf(const char* s) {
-	return StringRef((uint8_t*)s, strlen(s));
-}
-
 // Set the randomly generated options of the config. Compiled here to easily observe and trace random options
 void SimulationConfig::setRandomConfig() {
 	if (deterministicRandom()->random01() < 0.25) {
@@ -2653,9 +2649,6 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 }
 
 using namespace std::literals;
-
-// Populates the TestConfig fields according to what is found in the test file.
-[[maybe_unused]] void checkTestConf(const char* testFile, TestConfig* testConfig) {}
 
 // Actor that waits for a specified simulation time and then resets the random seed
 Future<Void> reseedRandomAtTime(double waitTime, uint32_t newSeed) {
