@@ -26,13 +26,9 @@
 #pragma once
 
 #include "fdbrpc/fdbrpc.h"
-#include "fdbserver/ConfigBroadcaster.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbclient/ClusterInterface.h"
-#include "fdbclient/MetaclusterRegistration.h"
-
-#include "metacluster/MetaclusterMetrics.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -43,6 +39,22 @@ struct ProcessIssues {
 	ProcessIssues(NetworkAddress address, Standalone<VectorRef<StringRef>> issues) : address(address), issues(issues) {}
 };
 
+// In actor compiler builds, the ACTOR macro in Status.actor.cpp generates
+// a declaration with const& params. In clang-ide builds (NO_INTELLISENSE
+// not defined), the ACTOR macro is a no-op so we need this explicit
+// declaration with value params to match.
+#ifndef NO_INTELLISENSE
+Future<StatusReply> clusterGetStatus(Reference<AsyncVar<struct ServerDBInfo>> db,
+                                     Database cx,
+                                     std::vector<WorkerDetails> workers,
+                                     std::vector<ProcessIssues> workerIssues,
+                                     std::vector<StorageServerMetaInfo> storageMetadatas,
+                                     std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* clientStatus,
+                                     ServerCoordinators coordinators,
+                                     std::vector<NetworkAddress> incompatibleConnections,
+                                     Version datacenterVersionDifference,
+                                     double deadlineTimeout);
+#else
 Future<StatusReply> clusterGetStatus(
     Reference<AsyncVar<struct ServerDBInfo>> const& db,
     Database const& cx,
@@ -53,9 +65,8 @@ Future<StatusReply> clusterGetStatus(
     ServerCoordinators const& coordinators,
     std::vector<NetworkAddress> const& incompatibleConnections,
     Version const& datacenterVersionDifference,
-    ConfigBroadcaster const* const& conifgBroadcaster,
-    Optional<MetaclusterRegistrationEntry> const& metaclusterRegistration,
-    metacluster::MetaclusterMetrics const& metaclusterMetrics);
+    double const& deadlineTimeout);
+#endif
 
 struct WorkerEvents : std::map<NetworkAddress, TraceEventFields> {};
 ACTOR Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventOnWorkers(

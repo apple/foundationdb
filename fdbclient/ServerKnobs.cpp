@@ -136,6 +136,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BG_REBALANCE_MAX_POLLING_INTERVAL,                    10.0 );
 	init( BG_REBALANCE_SWITCH_CHECK_INTERVAL,                    5.0 ); if (randomize && BUGGIFY) BG_REBALANCE_SWITCH_CHECK_INTERVAL = 1.0;
 	init( DD_QUEUE_LOGGING_INTERVAL,                             5.0 );
+	init( DD_RELOCATOR_LATENCY_LOGGING_INTERVAL,               300.0 );
 	init( DD_QUEUE_COUNTER_REFRESH_INTERVAL,                    60.0 );
 	// 100 / 60 < 2 trace/sec ~ 2 * 200 = 400b/sec
 	init( DD_QUEUE_COUNTER_MAX_LOG,                              100 ); if( randomize && BUGGIFY ) DD_QUEUE_COUNTER_MAX_LOG = 1;
@@ -1131,6 +1132,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// Status
 	init( STATUS_MIN_TIME_BETWEEN_REQUESTS,                      0.0 );
 	init( MAX_STATUS_REQUESTS_PER_SECOND,                      256.0 );
+	init( STATUS_TIMEOUT_BUFFER,                                 5.0 );
 	init( CONFIGURATION_ROWS_TO_FETCH,                         20000 );
 	init( DISABLE_DUPLICATE_LOG_WARNING,                       false );
 	init( HISTOGRAM_REPORT_INTERVAL,                           300.0 );

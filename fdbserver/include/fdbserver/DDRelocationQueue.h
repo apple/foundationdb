@@ -22,6 +22,7 @@
 
 #include <numeric>
 
+#include "fdbrpc/DDSketch.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/MovingWindow.h"
 
@@ -257,6 +258,10 @@ public:
 	// rebalance on time bases because the read workload sample update has delay after the previous moving
 	std::map<UID, double> lastAsSource;
 	ServerCounter serverCounter;
+
+	// Declared before inFlightActors so it outlives the relocator actors (reverse destruction order).
+	DDSketch<double> relocatorLatency;
+	DDSketch<double> relocatorErrorLatency;
 
 	KeyRangeMap<RelocateData> inFlight;
 	// Track all actors that relocates specified keys to a good place; Key: keyRange; Value: actor
