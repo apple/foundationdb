@@ -1517,18 +1517,18 @@ ACTOR Future<Void> statusServer(FutureStream<StatusRequest> requests,
 				}
 			}
 
-			state ErrorOr<StatusReply> result = wait(errorOr(clusterGetStatus(self->db.serverInfo,
-			                                                                  self->cx,
-			                                                                  workers,
-			                                                                  workerIssues,
-			                                                                  self->storageStatusInfos,
-			                                                                  &self->db.clientStatus,
-			                                                                  coordinators,
-			                                                                  incompatibleConnections,
-			                                                                  self->datacenterVersionDifference,
-			                                                                  configBroadcaster,
-			                                                                  self->db.metaclusterRegistration,
-			                                                                  self->db.metaclusterMetrics)));
+			state ErrorOr<StatusReply> result = wait(
+			    errorOr(clusterGetStatus(self->db.serverInfo,
+			                             self->cx,
+			                             workers,
+			                             workerIssues,
+			                             self->storageStatusInfos,
+			                             &self->db.clientStatus,
+			                             coordinators,
+			                             incompatibleConnections,
+			                             self->datacenterVersionDifference,
+			                             std::max(CLIENT_KNOBS->STATUS_TIMEOUT - SERVER_KNOBS->STATUS_TIMEOUT_BUFFER,
+			                                      SERVER_KNOBS->STATUS_TIMEOUT_BUFFER))));
 
 			if (result.isError() && result.getError().code() == error_code_actor_cancelled)
 				throw result.getError();

@@ -420,7 +420,7 @@ ACTOR Future<StatusObject> clientStatusFetcher(Reference<IClusterConnectionRecor
 // Cluster section of json output
 ACTOR Future<Optional<StatusObject>> clusterStatusFetcher(ClusterInterface cI, StatusArray* messages) {
 	state StatusRequest req;
-	state Future<Void> clusterTimeout = delay(30.0);
+	state Future<Void> clusterTimeout = delay(CLIENT_KNOBS->STATUS_TIMEOUT);
 	state Optional<StatusObject> oStatusObj;
 
 	wait(delay(0.0)); // make sure the cluster controller is marked as not failed
