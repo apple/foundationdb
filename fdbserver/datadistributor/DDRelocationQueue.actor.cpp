@@ -570,13 +570,12 @@ DDQueue::DDQueue(DDQueueInitParams const& params)
     cleanUpDataMoveParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
     fetchSourceLock(new FlowLock(SERVER_KNOBS->DD_FETCH_SOURCE_PARALLELISM)), activeRelocations(0),
     queuedRelocations(0), bytesWritten(0), teamSize(params.teamSize), singleRegionTeamSize(params.singleRegionTeamSize),
-    pipelineFull(new AsyncVar<bool>(false)),
-    output(params.relocationProducer), input(params.relocationConsumer), getShardMetrics(params.getShardMetrics),
-    getTopKMetrics(params.getTopKMetrics), lastInterval(0), suppressIntervals(0),
-    rawProcessingUnhealthy(new AsyncVar<bool>(false)), rawProcessingWiggle(new AsyncVar<bool>(false)),
-    unhealthyRelocations(0), movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")),
-    moveReusePhysicalShard(0), moveCreateNewPhysicalShard(0),
-    retryFindDstReasonCount(static_cast<int>(RetryFindDstReason::NumberOfTypes), 0),
+    pipelineFull(new AsyncVar<bool>(false)), output(params.relocationProducer), input(params.relocationConsumer),
+    getShardMetrics(params.getShardMetrics), getTopKMetrics(params.getTopKMetrics), lastInterval(0),
+    suppressIntervals(0), rawProcessingUnhealthy(new AsyncVar<bool>(false)),
+    rawProcessingWiggle(new AsyncVar<bool>(false)), unhealthyRelocations(0),
+    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")), moveReusePhysicalShard(0),
+    moveCreateNewPhysicalShard(0), retryFindDstReasonCount(static_cast<int>(RetryFindDstReason::NumberOfTypes), 0),
     moveBytesRate(SERVER_KNOBS->DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL) {}
 
 void DDQueue::startRelocation(int priority, int healthPriority) {

@@ -143,8 +143,8 @@ struct RelocateShard {
 	Optional<KeyRange> getParentRange() const;
 
 	RelocateShard()
-		: priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::OTHER),
-		  moveReason(DataMovementReason::INVALID) {}
+	  : priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::OTHER),
+	    moveReason(DataMovementReason::INVALID) {}
 
 private:
 	// If this rs comes from a splitting, parent range is the original range.
