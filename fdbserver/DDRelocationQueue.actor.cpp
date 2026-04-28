@@ -2509,8 +2509,7 @@ struct DDQueueImpl {
 						}
 						if (drained > 0) {
 							counterRelocationBatchDrained()->increment(drained);
-							TraceEvent("RelocationCompleteBatchDrain", self->distributorId)
-							    .detail("Drained", drained);
+							TraceEvent("RelocationCompleteBatchDrain", self->distributorId).detail("Drained", drained);
 						}
 					}
 					when(KeyRange done = waitNext(rangesComplete.getFuture())) {
