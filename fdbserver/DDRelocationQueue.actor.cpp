@@ -38,6 +38,7 @@
 #include "fdbserver/DDTxnProcessor.h"
 #include "flow/DebugTrace.h"
 #include "fdbserver/DDRelocationQueue.h"
+#include "flow/SimpleCounter.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #define WORK_FULL_UTILIZATION 10000 // This is not a knob; it is a fixed point scaling factor!
@@ -759,6 +760,25 @@ void DDQueue::validate() {
 		for (auto it = priority_relocations.begin(); it != priority_relocations.end(); ++it)
 			testActive += it->second;
 		ASSERT(activeRelocations + queuedRelocations == testActive);
+	}
+}
+
+static SimpleCounter<int64_t>* counterRelocationBatchDrained() {
+	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/queue/relocationComplete/batchDrained");
+	return c;
+}
+
+void DDQueue::processRelocationComplete(const RelocateData& done) {
+	activeRelocations--;
+	TraceEvent(SevVerbose, "InFlightRelocationChange")
+	    .detail("Complete", done.dataMoveId)
+	    .detail("IsRestore", done.isRestore())
+	    .detail("Total", activeRelocations);
+	finishRelocation(done.priority, done.healthPriority);
+	fetchKeysComplete.erase(done);
+	if (g_network->isSimulated() && debug_isCheckRelocationDuration() && now() - done.startTime > 60) {
+		TraceEvent(SevWarnAlways, "RelocationDurationTooLong").detail("Duration", now() - done.startTime);
+		debug_setCheckRelocationDuration(false);
 	}
 }
 
@@ -2400,6 +2420,7 @@ struct DDQueueImpl {
 		state KeyRange keysToLaunchFrom;
 		state RelocateData launchData;
 		state Future<Void> recordMetrics = delay(SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL);
+		state FutureStream<RelocateData> completedRelocations = self->relocationComplete.getFuture();
 
 		state std::vector<Future<Void>> ddQueueFutures;
 
@@ -2472,22 +2493,23 @@ struct DDQueueImpl {
 							launchQueuedWorkTimeout = delay(0, TaskPriority::DataDistributionLaunch);
 						serversToLaunchFrom.insert(done.src.begin(), done.src.end());
 					}
-					when(RelocateData done = waitNext(self->relocationComplete.getFuture())) {
-						self->activeRelocations--;
-						TraceEvent(SevVerbose, "InFlightRelocationChange")
-						    .detail("Complete", done.dataMoveId)
-						    .detail("IsRestore", done.isRestore())
-						    .detail("Total", self->activeRelocations);
-						self->finishRelocation(done.priority, done.healthPriority);
-						self->fetchKeysComplete.erase(done);
-						// self->logRelocation( done, "ShardRelocatorDone" );
+					when(RelocateData done = waitNext(completedRelocations)) {
+						self->processRelocationComplete(done);
 						self->noErrorActors.add(
 						    tag(delay(0, TaskPriority::DataDistributionLaunch), done.keys, rangesComplete));
-						if (g_network->isSimulated() && debug_isCheckRelocationDuration() &&
-						    now() - done.startTime > 60) {
-							TraceEvent(SevWarnAlways, "RelocationDurationTooLong")
-							    .detail("Duration", now() - done.startTime);
-							debug_setCheckRelocationDuration(false);
+						// Batch drain: process all remaining ready completions without
+						// returning to the choose loop. Prevents fetchKeysComplete from
+						// growing unboundedly when completions are starved by other events.
+						int drained = 0;
+						while (completedRelocations.isReady() && drained++ < 1000) {
+							RelocateData next = completedRelocations.pop();
+							self->processRelocationComplete(next);
+							self->noErrorActors.add(
+							    tag(delay(0, TaskPriority::DataDistributionLaunch), next.keys, rangesComplete));
+						}
+						if (drained > 0) {
+							counterRelocationBatchDrained()->increment(drained);
+							TraceEvent("RelocationCompleteBatchDrain", self->distributorId).detail("Drained", drained);
 						}
 					}
 					when(KeyRange done = waitNext(rangesComplete.getFuture())) {
@@ -2627,5 +2649,62 @@ TEST_CASE("/DataDistribution/DDQueue/ServerCounterTrace") {
 		}
 	}
 	std::cout << "Finished.";
+	return Void();
+}
+
+// Test that the batch drain in the relocationComplete handler processes all
+// queued completions in one iteration. This reproduces the starvation scenario
+// where fetchKeysComplete grows unboundedly: completions are sent faster than
+// the choose loop can process them one-at-a-time.
+TEST_CASE("/DataDistribution/DDQueue/BatchDrainRelocationComplete") {
+	state DDQueue self;
+	self.rawProcessingUnhealthy = makeReference<AsyncVar<bool>>(false);
+	self.rawProcessingWiggle = makeReference<AsyncVar<bool>>(false);
+	state int N = 100;
+
+	// Create N distinct RelocateData entries with unique key ranges.
+	// Insert them into fetchKeysComplete and send them to relocationComplete
+	// to simulate a burst of completions arriving at once.
+	state std::vector<RelocateData> entries;
+	for (int i = 0; i < N; i++) {
+		RelocateData rd;
+		// Give each entry a unique key range so they are distinct in the set.
+		// Use Key (Standalone<StringRef>) to own the memory.
+		Key begin = Key(format("key/%05d", i));
+		Key end = Key(format("key/%05d/", i));
+		rd.keys = KeyRangeRef(begin, end);
+		rd.startTime = now();
+		entries.push_back(rd);
+	}
+
+	self.activeRelocations = N;
+	for (auto& rd : entries) {
+		self.fetchKeysComplete.insert(rd);
+		self.relocationComplete.send(rd);
+	}
+
+	ASSERT(self.fetchKeysComplete.size() == N);
+	ASSERT(self.activeRelocations == N);
+
+	// Process the first completion via waitNext (as the choose loop does),
+	// then drain the rest via isReady()/pop() (the batch drain pattern).
+	state FutureStream<RelocateData> completions = self.relocationComplete.getFuture();
+	RelocateData first = waitNext(completions);
+	self.processRelocationComplete(first);
+
+	int drained = 0;
+	while (completions.isReady() && drained++ < 1000) {
+		RelocateData next = completions.pop();
+		self.processRelocationComplete(next);
+	}
+
+	// All N completions should have been processed: fetchKeysComplete empty,
+	// activeRelocations back to zero.
+	ASSERT(drained > 0);
+	ASSERT(self.fetchKeysComplete.size() == 0);
+	ASSERT(self.activeRelocations == 0);
+	ASSERT(drained == N - 1); // first was processed via waitNext
+
+	std::cout << "BatchDrainRelocationComplete: drained " << drained << " of " << N << " completions\n";
 	return Void();
 }
