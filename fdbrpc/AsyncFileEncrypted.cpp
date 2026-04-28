@@ -75,8 +75,6 @@ public:
 		ASSERT(self->mode == AsyncFileEncrypted::Mode::READ_ONLY);
 		for (block = firstBlock; block <= lastBlock; ++block) {
 			Standalone<StringRef> plaintext = co_await readBlock(self.getPtr(), block);
-			self->readBuffers.insert(block, plaintext);
-		
 			auto start =
 			    (block == firstBlock) ? plaintext.begin() + (offset % self->encryptionBlockSize) : plaintext.begin();
 			auto end = (block == lastBlock) ? plaintext.begin() + ((offset + length) % self->encryptionBlockSize)
@@ -141,8 +139,7 @@ public:
 };
 
 AsyncFileEncrypted::AsyncFileEncrypted(Reference<IAsyncFile> file, Mode mode, int blockSize)
-  : file(file), mode(mode), currentBlock(0),
-    encryptionBlockSize(blockSize) {
+  : file(file), mode(mode), currentBlock(0), encryptionBlockSize(blockSize) {
 	ASSERT(encryptionBlockSize > 0);
 	firstBlockIV = AsyncFileEncryptedImpl::getFirstBlockIV(file->getFilename());
 	if (mode == Mode::APPEND_ONLY) {
