@@ -81,6 +81,10 @@ struct LogfileTracer : ITracer {
 
 // A server listening for UDP trace messages, run only in simulation.
 Future<Void> simulationStartServer() {
+	// Preserve the actor scheduling boundary so UDP listener setup does not run synchronously
+	// from the first sampled Span destructor after coroutine conversion.
+	co_await delay(0);
+
 	// We're going to force the address to be loopback regardless of FLOW_KNOBS->TRACING_UDP_LISTENER_ADDR
 	// because we're in simulation testing mode.
 	TraceEvent(SevInfo, "UDPServerStarted")
