@@ -37,7 +37,7 @@
 
 namespace ph = std::placeholders;
 
-// FIXME(gglass): figure out what this test is actually tring to test, and
+// FIXME(gglass): figure out what this test is actually trying to test, and
 // restructure it to be useful in a post-tenant world.  For now leave the
 // tenant crap in so that the distribution of keys/values generated is
 // actually sane.  An earlier attempt at removing the tenant stuff caused
@@ -54,7 +54,7 @@ using TenantGroupName = Standalone<TenantGroupNameRef>;
 
 // This allows us to dictate which exceptions we SHOULD get.
 // We can use this to suppress expected exceptions, and take action
-// if we don't get an exception wqe should have gotten.
+// if we don't get an exception we should have gotten.
 struct ExceptionContract {
 	enum occurance_t { Never = 0, Possible = 1, Always = 2 };
 

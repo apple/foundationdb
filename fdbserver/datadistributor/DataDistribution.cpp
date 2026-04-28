@@ -3158,7 +3158,9 @@ Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> getSta
 	}
 }
 
-// FIXME: explain what this is trying to accomplish
+// Coordinates the data-distributor side of snapshot creation by preventing
+// recovery, pausing TLog pops, snapshotting stateful workers, and resuming
+// TLog pops before reporting completion.
 Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar<ServerDBInfo> const> db) {
 	Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, LockAware::True);
 
@@ -3208,8 +3210,8 @@ Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar
 		    .detail("SnapUID", snapReq.snapUID)
 		    .detail("StorageFaultTolerance", storageFaultTolerance);
 
-		// we need to snapshot storage nodes before snapshot any tlogs
-		// FIXME: if it's non-obvious enough to comment about, then also explain why
+		// Snapshot storage nodes before TLogs so storage files are captured
+		// while TLogs still retain the mutations needed to recover them.
 		std::vector<Future<ErrorOr<Void>>> storageSnapReqs;
 		for (const auto& [addr, entry] : statefulWorkers) {
 			auto& [interf, role] = entry;
