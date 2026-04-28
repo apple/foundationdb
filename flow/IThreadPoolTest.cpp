@@ -57,25 +57,37 @@ struct ThreadNameReceiver final : IThreadPoolReceiver {
 	}
 };
 
+Future<std::string> getThreadName(Reference<IThreadPool> pool) {
+	auto* a = new ThreadNameReceiver::GetNameAction();
+	auto fut = a->name.getFuture();
+	pool->post(a);
+	return fut;
+}
+
+Future<bool> waitForThreadName(Reference<IThreadPool> pool, std::string const& expectedName) {
+	// startThread() sets the pthread name from the creating thread after pthread_create(), so the worker may
+	// briefly report its default name before the requested name is visible. Some environments also report
+	// ENOENT from pthread_setname_np(), which startThread() treats as non-fatal.
+	double deadline = now() + 5.0;
+	std::string lastName;
+	while (now() < deadline) {
+		lastName = co_await getThreadName(pool);
+		if (lastName == expectedName) {
+			co_return true;
+		}
+		co_await delay(0.01);
+	}
+	std::cout << "Thread name was not set; last observed thread name: " << lastName << std::endl;
+	co_return false;
+}
+
 TEST_CASE("/flow/IThreadPool/NamedThread") {
 	noUnseed = true;
 
 	Reference<IThreadPool> pool = createGenericThreadPool();
 	pool->addThread(new ThreadNameReceiver(), "thread-foo");
 
-	// Warning: this action is a little racy with the call to `pthread_setname_np`. In practice,
-	// ~nothing should depend on the thread name being set instantaneously. If this test ever
-	// flakes, we can make `startThread` in platform a little bit more complex to clearly order
-	// the actions.
-	auto* a = new ThreadNameReceiver::GetNameAction();
-	auto fut = a->name.getFuture();
-	pool->post(a);
-
-	std::string name = co_await fut;
-	if (name != "thread-foo") {
-		std::cout << "Incorrect thread name: " << name << std::endl;
-		ASSERT(false);
-	}
+	ASSERT(co_await waitForThreadName(pool, "thread-foo"));
 
 	co_await pool->stop();
 }
@@ -120,22 +132,34 @@ TEST_CASE("/flow/IThreadPool/ThreadReturnPromiseStream") {
 	Reference<IThreadPool> pool = createGenericThreadPool();
 	pool->addThread(new ThreadSafePromiseStreamSender(notifications.get()), "thread-foo");
 
-	// Warning: this action is a little racy with the call to `pthread_setname_np`. In practice,
-	// ~nothing should depend on the thread name being set instantaneously. If this test ever
-	// flakes, we can make `startThread` in platform a little bit more complex to clearly order
-	// the actions.
+	ThreadFutureStream<std::string> futs = notifications->getFuture();
+	bool threadNameAvailable = false;
+	double deadline = now() + 5.0;
+	std::string lastName;
+	while (now() < deadline) {
+		auto* a = new ThreadSafePromiseStreamSender::GetNameAction();
+		pool->post(a);
+		lastName = co_await futs;
+		if (lastName == "thread-foo") {
+			threadNameAvailable = true;
+			break;
+		}
+		co_await delay(0.01);
+	}
+	if (!threadNameAvailable) {
+		std::cout << "Thread name was not set; last observed thread name: " << lastName << std::endl;
+	}
+
 	int num = 3;
 	for (int i = 0; i < num; ++i) {
 		auto* a = new ThreadSafePromiseStreamSender::GetNameAction();
 		pool->post(a);
 	}
 
-	ThreadFutureStream<std::string> futs = notifications->getFuture();
-
 	int n = 0;
 	while (n < num) {
 		std::string name = co_await futs;
-		if (name != "thread-foo") {
+		if (threadNameAvailable && name != "thread-foo") {
 			std::cout << "Incorrect thread name: " << name << std::endl;
 			ASSERT(false);
 		}

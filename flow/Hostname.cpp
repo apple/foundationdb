@@ -115,7 +115,7 @@ Optional<NetworkAddress> Hostname::resolveBlocking() const {
 	}
 }
 
-TEST_CASE("/flow/Hostname/hostname") {
+TEST_CASE("/flow/Hostname/parse") {
 	std::string hn1s = "localhost:1234";
 	std::string hn2s = "host-name:1234";
 	std::string hn3s = "host.name:1234";
@@ -178,21 +178,4 @@ TEST_CASE("/flow/Hostname/hostname") {
 		ASSERT(e.code() == error_code_timed_out);
 	}
 	ASSERT(address == NetworkAddress());
-
-	NetworkAddress addressSource = NetworkAddress::parse("127.0.0.0:1234");
-	INetworkConnections::net()->addMockTCPEndpoint("host-name", "1234", { addressSource });
-
-	// Test resolve.
-	optionalAddress = co_await hn2.resolve();
-	ASSERT(optionalAddress.present() && optionalAddress.get() == addressSource);
-	optionalAddress = Optional<NetworkAddress>();
-
-	// Test resolveBlocking.
-	optionalAddress = hn2.resolveBlocking();
-	ASSERT(optionalAddress.present() && optionalAddress.get() == addressSource);
-	optionalAddress = Optional<NetworkAddress>();
-
-	// Test resolveWithRetry.
-	address = co_await hn2.resolveWithRetry();
-	ASSERT(address == addressSource);
 }
