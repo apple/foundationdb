@@ -4827,7 +4827,7 @@ Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 	AuditStorageState res(audit->coreState.id,
 	                      audit->coreState.getType()); // we will set range of audit later
 	std::vector<Future<Void>> actors;
-	std::vector<std::string> errors;
+	std::vector<LocationMetadataError> errors;
 	AuditGetKeyServersRes keyServerRes;
 	std::unordered_map<UID, AuditGetServerKeysRes> serverKeyResMap;
 	Version readAtVersion{ 0 };
@@ -4912,101 +4912,33 @@ Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 					remoteReadBytes += serverKeyRes.readBytes;
 				}
 				// Use claimRange to get mapFromServerKeys and mapFromKeyServers to compare
-				int64_t numValidatedServerKeys = 0;
+				std::unordered_map<UID, std::vector<KeyRange>> serverOwnRangesMap;
 				for (auto& [ssid, serverKeyRes] : serverKeyResMap) {
-					for (auto& range : serverKeyRes.ownRanges) {
-						KeyRange overlappingRange = range & claimRange;
-						if (overlappingRange.empty()) {
-							continue;
-						}
-						TraceEvent(SevVerbose, "DDDoAuditLocationMetadataAddToServerKeyMap", self->ddId)
-						    .detail("RawRange", range)
-						    .detail("ClaimRange", claimRange)
-						    .detail("Range", overlappingRange)
-						    .detail("SSID", ssid);
-						mapFromServerKeys[ssid].push_back(overlappingRange);
-						numValidatedServerKeys++;
-					}
+					serverOwnRangesMap[ssid] = serverKeyRes.ownRanges;
 				}
-				cumulatedValidatedServerKeysNum = cumulatedValidatedServerKeysNum + numValidatedServerKeys;
-
-				int64_t numValidatedKeyServers = 0;
-				for (auto& [ssid, ranges] : mapFromKeyServersRaw) {
-					std::vector mergedRanges = coalesceRangeList(ranges);
-					for (auto& range : mergedRanges) {
-						KeyRange overlappingRange = range & claimRange;
-						if (overlappingRange.empty()) {
-							continue;
-						}
-						TraceEvent(SevVerbose, "DDDoAuditLocationMetadataAddToKeyServerMap", self->ddId)
-						    .detail("RawRange", range)
-						    .detail("ClaimRange", claimRange)
-						    .detail("Range", overlappingRange)
-						    .detail("SSID", ssid);
-						mapFromKeyServers[ssid].push_back(overlappingRange);
-						numValidatedKeyServers++;
-					}
-				}
-				cumulatedValidatedKeyServersNum = cumulatedValidatedKeyServersNum + numValidatedKeyServers;
+				LocationMetadataMaps builtMaps =
+				    buildLocationMetadataMaps(mapFromKeyServersRaw, serverOwnRangesMap, claimRange, self->ddId);
+				mapFromServerKeys = std::move(builtMaps.fromServerKeys);
+				mapFromKeyServers = std::move(builtMaps.fromKeyServers);
+				cumulatedValidatedServerKeysNum += builtMaps.numValidatedServerKeys;
+				cumulatedValidatedKeyServersNum += builtMaps.numValidatedKeyServers;
 
 				// Compare: check if mapFromKeyServers === mapFromServerKeys
-				// 1. check mapFromKeyServers => mapFromServerKeys
-				for (auto& [ssid, keyServerRanges] : mapFromKeyServers) {
-					if (!mapFromServerKeys.contains(ssid)) {
-						std::string error =
-						    format("KeyServers and serverKeys mismatch: Some key in range(%s, %s) exists "
-						           "on Server(%s) in KeyServers but not ServerKeys",
-						           claimRange.toString().c_str(),
-						           claimRange.toString().c_str(),
-						           ssid.toString().c_str());
-						errors.push_back(error);
-						TraceEvent(SevError, "DDDoAuditLocationMetadataError", self->ddId)
-						    .setMaxFieldLength(-1)
-						    .setMaxEventLength(-1)
-						    .detail("AuditId", audit->coreState.id)
-						    .detail("AuditRange", auditRange)
-						    .detail("ClaimRange", claimRange)
-						    .detail("ErrorMessage", error);
+				errors = checkLocationMetadataConsistency(mapFromKeyServers, mapFromServerKeys, claimRange);
+				for (const auto& error : errors) {
+					auto te = TraceEvent(SevError, "DDDoAuditLocationMetadataError", self->ddId);
+					te.setMaxFieldLength(-1)
+					    .setMaxEventLength(-1)
+					    .detail("AuditId", audit->coreState.id)
+					    .detail("AuditRange", auditRange)
+					    .detail("ClaimRange", claimRange)
+					    .detail("ErrorMessage", error.message)
+					    .detail("ServerId", error.serverId);
+					if (error.mismatchedRangeByKeyServer.present()) {
+						te.detail("MismatchedRangeByKeyServer", error.mismatchedRangeByKeyServer.get());
 					}
-					std::vector<KeyRange> serverKeyRanges = mapFromServerKeys[ssid];
-					Optional<std::pair<KeyRange, KeyRange>> anyMismatch = rangesSame(keyServerRanges, serverKeyRanges);
-					if (anyMismatch.present()) { // mismatch detected
-						KeyRange mismatchedRangeByKeyServer = anyMismatch.get().first;
-						KeyRange mismatchedRangeByServerKey = anyMismatch.get().second;
-						std::string error =
-						    format("KeyServers and serverKeys mismatch on Server(%s): KeyServer: %s; ServerKey: %s",
-						           ssid.toString().c_str(),
-						           mismatchedRangeByKeyServer.toString().c_str(),
-						           mismatchedRangeByServerKey.toString().c_str());
-						errors.push_back(error);
-						TraceEvent(SevError, "DDDoAuditLocationMetadataError", self->ddId)
-						    .setMaxFieldLength(-1)
-						    .setMaxEventLength(-1)
-						    .detail("AuditId", audit->coreState.id)
-						    .detail("AuditRange", auditRange)
-						    .detail("ClaimRange", claimRange)
-						    .detail("ErrorMessage", error)
-						    .detail("MismatchedRangeByKeyServer", mismatchedRangeByKeyServer)
-						    .detail("MismatchedRangeByServerKey", mismatchedRangeByServerKey);
-					}
-				}
-				// 2. check mapFromServerKeys => mapFromKeyServers
-				for (auto& [ssid, serverKeyRanges] : mapFromServerKeys) {
-					if (!mapFromKeyServers.contains(ssid)) {
-						std::string error =
-						    format("KeyServers and serverKeys mismatch: Some key of range(%s, %s) exists "
-						           "on Server(%s) in ServerKeys but not KeyServers",
-						           claimRange.toString().c_str(),
-						           claimRange.toString().c_str(),
-						           ssid.toString().c_str());
-						errors.push_back(error);
-						TraceEvent(SevError, "DDDoAuditLocationMetadataError", self->ddId)
-						    .setMaxFieldLength(-1)
-						    .setMaxEventLength(-1)
-						    .detail("AuditId", audit->coreState.id)
-						    .detail("AuditRange", auditRange)
-						    .detail("ClaimRange", claimRange)
-						    .detail("ErrorMessage", error);
+					if (error.mismatchedRangeByServerKey.present()) {
+						te.detail("MismatchedRangeByServerKey", error.mismatchedRangeByServerKey.get());
 					}
 				}
 
@@ -5016,8 +4948,8 @@ Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 				    .detail("AuditType", audit->coreState.getType())
 				    .detail("AuditId", audit->coreState.id)
 				    .detail("AuditRange", auditRange)
-				    .detail("CurrentValidatedServerKeysNum", numValidatedServerKeys)
-				    .detail("CurrentValidatedKeyServersNum", numValidatedServerKeys)
+				    .detail("CurrentValidatedServerKeysNum", builtMaps.numValidatedServerKeys)
+				    .detail("CurrentValidatedKeyServersNum", builtMaps.numValidatedKeyServers)
 				    .detail("CurrentValidatedInclusiveRange", claimRange)
 				    .detail("CumulatedValidatedServerKeysNum", cumulatedValidatedServerKeysNum)
 				    .detail("CumulatedValidatedKeyServersNum", cumulatedValidatedKeyServersNum)
