@@ -33,7 +33,7 @@
 #ifndef BOOST_REGEX_NO_LIB
 #define BOOST_REGEX_NO_LIB
 #endif
-#include "fdbrpc/SimExternalConnection.h"
+#include "SimExternalConnection.h"
 #include "flow/ActorCollection.h"
 #include "flow/IRandom.h"
 #include "flow/CodeProbe.h"
@@ -44,7 +44,7 @@
 #include "fdbrpc/AsyncFileEncrypted.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/AsyncFileNonDurable.h"
-#include "fdbrpc/AsyncFileChaos.h"
+#include "AsyncFileChaos.h"
 #include "crc32/crc32c.h"
 #include "fdbrpc/TraceFileIO.h"
 #include "flow/flow.h"
@@ -56,7 +56,7 @@
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
-#include "fdbrpc/AsyncFileWriteChecker.h"
+#include "AsyncFileWriteChecker.h"
 #include "fdbrpc/genericactors.actor.h"
 #include "fdbrpc/WellKnownEndpoints.h"
 #include "flow/FaultInjection.h"
@@ -210,14 +210,14 @@ struct SimClogging {
 		if (!g_simulator->speedUpSimulation && !stableConnection)
 			t += clogPairLatency[pair];
 
-		if (!g_simulator->speedUpSimulation && !stableConnection && clogPairUntil.count(pair))
+		if (!g_simulator->speedUpSimulation && !stableConnection && clogPairUntil.contains(pair))
 			t = std::max(t, clogPairUntil[pair]);
 
 		auto p = std::make_pair(from, to);
-		if (!g_simulator->speedUpSimulation && !stableConnection && clogProcessPairUntil.count(p))
+		if (!g_simulator->speedUpSimulation && !stableConnection && clogProcessPairUntil.contains(p))
 			t = std::max(t, clogProcessPairUntil[p]);
 
-		if (!g_simulator->speedUpSimulation && !stableConnection && clogRecvUntil.count(to.ip))
+		if (!g_simulator->speedUpSimulation && !stableConnection && clogRecvUntil.contains(to.ip))
 			t = std::max(t, clogRecvUntil[to.ip]);
 
 		return t - tnow;
@@ -575,7 +575,7 @@ private:
 
 	static Future<Void> trackLeakedConnection(Sim2Conn* self) {
 		// FIXME: we could also just implement connection idle closing for sim http server instead
-		if (g_simulator->httpServerIps.count(self->process->address.ip)) {
+		if (g_simulator->httpServerIps.contains(self->process->address.ip)) {
 			co_return;
 		}
 		co_await g_simulator->onProcess(self->process);
@@ -904,7 +904,7 @@ private:
 			auto& machineCache = g_simulator->getCurrentProcess()->machine->openFiles;
 			std::string sourceFilename = self->filename + ".part";
 
-			if (machineCache.count(sourceFilename)) {
+			if (machineCache.contains(sourceFilename)) {
 				// it seems gcc has some trouble with these types. Aliasing with typename is ugly, but seems to work.
 				using block_value_type = typename decltype(g_simulator->corruptedBlocks)::key_type::second_type;
 				TraceEvent("SimpleFileRename")
@@ -1112,7 +1112,7 @@ public:
 	Future<Reference<IConnection>> connect(NetworkAddress toAddr,
 	                                       boost::asio::ip::tcp::socket* existingSocket = nullptr) override {
 		ASSERT(existingSocket == nullptr);
-		if (!addressMap.count(toAddr)) {
+		if (!addressMap.contains(toAddr)) {
 			return waitForProcessAndConnect(toAddr, this);
 		}
 		auto peerp = getProcessByAddress(toAddr);
@@ -1139,7 +1139,7 @@ public:
 
 	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr) override {
 		// If sim http connection, do connect instead of external connect
-		if (httpServerIps.count(toAddr.ip)) {
+		if (httpServerIps.contains(toAddr.ip)) {
 			return connect(toAddr);
 		}
 		return SimExternalConnection::connect(toAddr);
@@ -1231,7 +1231,7 @@ public:
 		// We have to be able to connect to processes that don't yet exist, so we do some silly polling
 		loop {
 			co_await ::delay(0.1 * deterministicRandom()->random01());
-			if (g_sim2.addressMap.count(toAddr)) {
+			if (g_sim2.addressMap.contains(toAddr)) {
 				Reference<IConnection> c = co_await self->connect(toAddr);
 				co_return c;
 			}
@@ -1334,7 +1334,7 @@ public:
 		// This is a _rudimentary_ simulation of the untrustworthiness of non-durable deletes and the possibility of
 		// rebooting during a durable one.  It isn't perfect: for example, on real filesystems testing
 		// for the existence of a non-durably deleted file BEFORE a reboot will show that it apparently doesn't exist.
-		if (g_simulator->getCurrentProcess()->machine->openFiles.count(filename)) {
+		if (g_simulator->getCurrentProcess()->machine->openFiles.contains(filename)) {
 			g_simulator->getCurrentProcess()->machine->openFiles.erase(filename);
 			g_simulator->getCurrentProcess()->machine->deletingOrClosingFiles.insert(filename);
 		}
@@ -1862,10 +1862,10 @@ public:
 		} else {
 			ASSERT(false);
 		}
-		ASSERT(!protectedAddresses.count(machine->address) || machine->rebooting || machine->isSpawnedKVProcess());
+		ASSERT(!protectedAddresses.contains(machine->address) || machine->rebooting || machine->isSpawnedKVProcess());
 	}
 	void rebootProcess(ProcessInfo* process, KillType kt) override {
-		if (kt == KillType::RebootProcessAndDelete && protectedAddresses.count(process->address)) {
+		if (kt == KillType::RebootProcessAndDelete && protectedAddresses.contains(process->address)) {
 			TraceEvent("RebootChanged")
 			    .detail("ZoneId", process->locality.describeZone())
 			    .detail("KillType", KillType::RebootProcess)
@@ -1888,14 +1888,14 @@ public:
 					swapAndPop(&processes, i--);
 				}
 			}
-			if (processes.size())
+			if (!processes.empty())
 				doReboot(Uncancellable(), deterministicRandom()->randomChoice(processes), KillType::RebootProcess);
 		}
 	}
 	void killProcess(ProcessInfo* machine, KillType kt) override {
 		TraceEvent("AttemptingKillProcess").detail("ProcessInfo", machine->toString());
 		// Refuse to kill a protected process.
-		if (kt < KillType::RebootAndDelete && protectedAddresses.count(machine->address) == 0) {
+		if (kt < KillType::RebootAndDelete && !protectedAddresses.contains(machine->address)) {
 			killProcess_internal(machine, kt);
 		}
 	}
@@ -1904,7 +1904,7 @@ public:
 			std::vector<ProcessInfo*>& processes = machines[addressMap[address]->locality.machineId()].processes;
 			for (auto& process : processes) {
 				// Refuse to kill a protected process.
-				if (protectedAddresses.count(process->address) == 0) {
+				if (!protectedAddresses.contains(process->address)) {
 					killProcess_internal(process, kt);
 				}
 			}
@@ -1984,7 +1984,7 @@ public:
 		KillType originalKt = kt;
 		// Reboot if any of the processes are protected and count the number of processes not rebooting
 		for (auto& process : machines[machineId].processes) {
-			if (protectedAddresses.count(process->address) && kt != KillType::RebootProcessAndSwitch) {
+			if (protectedAddresses.contains(process->address) && kt != KillType::RebootProcessAndSwitch) {
 				kt = KillType::Reboot;
 			}
 
@@ -2027,7 +2027,7 @@ public:
 					} else if (!processInfo->isAvailable()) {
 						processesDead.push_back(processInfo);
 						unavailable++;
-					} else if (protectedAddresses.count(processInfo->address)) {
+					} else if (protectedAddresses.contains(processInfo->address)) {
 						processesLeft.push_back(processInfo);
 						protectedWorker++;
 					} else if (processInfo->locality.machineId() != machineId) {
@@ -2205,7 +2205,7 @@ public:
 			auto processMachineId = procRecord->locality.machineId();
 			ASSERT(processMachineId.present());
 			if (processDcId.present() && (processDcId == dcId)) {
-				if ((kt != KillType::Reboot) && (protectedAddresses.count(procRecord->address))) {
+				if ((kt != KillType::Reboot) && (protectedAddresses.contains(procRecord->address))) {
 					kt = KillType::Reboot;
 					TraceEvent(SevWarn, "DcKillChanged")
 					    .detail("DataCenter", dcId)
@@ -2233,7 +2233,7 @@ public:
 				if (processInfo->isAvailableClass()) {
 					if (processInfo->isExcluded() || processInfo->isCleared() || !processInfo->isAvailable()) {
 						processesDead.push_back(processInfo);
-					} else if (protectedAddresses.count(processInfo->address) ||
+					} else if (protectedAddresses.contains(processInfo->address) ||
 					           datacenterMachines.find(processInfo->locality.machineId()) == datacenterMachines.end()) {
 						processesLeft.push_back(processInfo);
 					} else {
@@ -2485,7 +2485,7 @@ public:
 	                                               std::string service,
 	                                               Reference<HTTP::IRequestHandler> requestHandler) {
 		std::string id = hostname + ":" + service;
-		ASSERT(!self->httpHandlers.count(id));
+		ASSERT(!self->httpHandlers.contains(id));
 
 		// check not too many servers
 		ASSERT(self->httpHandlers.size() < 1000);
@@ -2884,7 +2884,7 @@ Future<Void> doReboot(Uncancellable, ISimulator::ProcessInfo* p, ISimulator::Kil
 		} else if (p->isSpawnedKVProcess()) {
 			TraceEvent(SevDebug, "DoRebootFailed").detail("Name", p->name).detail("Address", p->address);
 			co_return;
-		} else if (p->getChilds().size()) {
+		} else if (!p->getChilds().empty()) {
 			TraceEvent(SevDebug, "DoRebootFailedOnParentProcess").detail("Address", p->address);
 			co_return;
 		}

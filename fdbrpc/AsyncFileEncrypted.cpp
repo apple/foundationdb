@@ -29,7 +29,8 @@ public:
 	// the filename.
 	static auto getFirstBlockIV(const std::string& filename) {
 		StreamCipher::IV iv;
-		auto salt = basename(filename);
+		auto slashPos = filename.rfind('/');
+		auto salt = (slashPos == std::string::npos) ? filename : filename.substr(slashPos + 1);
 		auto pos = salt.find('.');
 		salt = salt.substr(0, pos);
 		auto hash = XXH3_128bits(salt.c_str(), salt.size());
@@ -46,7 +47,7 @@ public:
 	// Read a single block of size ENCRYPTION_BLOCK_SIZE bytes, and decrypt.
 	static Future<Standalone<StringRef>> readBlock(AsyncFileEncrypted* self, uint32_t block) {
 		Arena arena;
-		unsigned char* encrypted = new (arena) unsigned char[FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE];
+		auto* encrypted = new (arena) unsigned char[FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE];
 		int bytes = co_await uncancellable(holdWhile(
 		    arena,
 		    self->file->read(encrypted, FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE, FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE * block)));
@@ -70,19 +71,11 @@ public:
 		uint32_t firstBlock = offset / FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE;
 		uint32_t lastBlock = (offset + length - 1) / FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE;
 		uint32_t block{ 0 };
-		unsigned char* output = reinterpret_cast<unsigned char*>(data);
+		auto* output = reinterpret_cast<unsigned char*>(data);
 		int bytesRead = 0;
 		ASSERT(self->mode == AsyncFileEncrypted::Mode::READ_ONLY);
 		for (block = firstBlock; block <= lastBlock; ++block) {
-			Standalone<StringRef> plaintext;
-
-			auto cachedBlock = self->readBuffers.get(block);
-			if (cachedBlock.present()) {
-				plaintext = cachedBlock.get();
-			} else {
-				plaintext = co_await readBlock(self.getPtr(), block);
-				self->readBuffers.insert(block, plaintext);
-			}
+			Standalone<StringRef> plaintext = co_await readBlock(self.getPtr(), block);
 			auto start = (block == firstBlock) ? plaintext.begin() + (offset % FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE)
 			                                   : plaintext.begin();
 			auto end = (block == lastBlock)
@@ -110,7 +103,7 @@ public:
 		ASSERT(self->mode == AsyncFileEncrypted::Mode::APPEND_ONLY);
 		// All writes must append to the end of the file:
 		ASSERT_EQ(offset, self->currentBlock * FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE + self->offsetInBlock);
-		unsigned char const* input = reinterpret_cast<unsigned char const*>(data);
+		auto const* input = reinterpret_cast<unsigned char const*>(data);
 		while (length > 0) {
 			const auto chunkSize = std::min(length, FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE - self->offsetInBlock);
 			Arena arena;
@@ -148,7 +141,7 @@ public:
 };
 
 AsyncFileEncrypted::AsyncFileEncrypted(Reference<IAsyncFile> file, Mode mode)
-  : file(file), mode(mode), readBuffers(FLOW_KNOBS->MAX_DECRYPTED_BLOCKS), currentBlock(0) {
+  : file(file), mode(mode), currentBlock(0) {
 	firstBlockIV = AsyncFileEncryptedImpl::getFirstBlockIV(file->getFilename());
 	if (mode == Mode::APPEND_ONLY) {
 		encryptor =
@@ -229,38 +222,6 @@ Future<Void> AsyncFileEncrypted::writeLastBlockToFile() {
 	return uncancellable(
 	    holdWhile(Reference<AsyncFileEncrypted>::addRef(this),
 	              file->write(&writeBuffer[0], offsetInBlock, currentBlock * FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE)));
-}
-
-size_t AsyncFileEncrypted::RandomCache::evict() {
-	ASSERT_EQ(vec.size(), maxSize);
-	auto index = deterministicRandom()->randomInt(0, maxSize);
-	hashMap.erase(vec[index]);
-	return index;
-}
-
-AsyncFileEncrypted::RandomCache::RandomCache(size_t maxSize) : maxSize(maxSize) {
-	vec.reserve(maxSize);
-}
-
-void AsyncFileEncrypted::RandomCache::insert(uint32_t block, const Standalone<StringRef>& value) {
-	auto [_, found] = hashMap.insert({ block, value });
-	if (found) {
-		return;
-	} else if (vec.size() < maxSize) {
-		vec.push_back(block);
-	} else {
-		auto index = evict();
-		vec[index] = block;
-	}
-}
-
-Optional<Standalone<StringRef>> AsyncFileEncrypted::RandomCache::get(uint32_t block) const {
-	auto it = hashMap.find(block);
-	if (it == hashMap.end()) {
-		return {};
-	} else {
-		return it->second;
-	}
 }
 
 // This test writes random data into an encrypted file in random increments,

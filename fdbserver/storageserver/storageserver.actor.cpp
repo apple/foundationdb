@@ -42,7 +42,7 @@
 #include "fdbserver/core/BulkDumpUtil.h"
 #include "fdbserver/core/BulkLoadUtil.h"
 #include "fdbserver/core/FDBRocksDBVersion.h"
-#include "fdbserver/core/IKeyValueStore.h"
+#include "fdbserver/kvstore/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/kvstore/FDBExecHelper.h"
 #include "fdbserver/core/LatencyBandConfig.h"
@@ -90,7 +90,7 @@
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/Stats.h"
-#include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/DataMovement.h"
@@ -1175,8 +1175,8 @@ public:
 
 	ProtocolVersion logProtocol;
 
-	Reference<ILogSystem> logSystem;
-	Reference<ILogSystem::IPeekCursor> logCursor;
+	Reference<LogSystem> logSystem;
+	Reference<IPeekCursor> logCursor;
 
 	// The version the cluster starts on. This value is not persisted and may
 	// not be valid after a recovery.
@@ -4282,61 +4282,68 @@ static Future<std::pair<GetKeyValuesReply, GetKeyValuesReply>> fetchSourceAndRes
 	    .detail("Limit", limit)
 	    .detail("LimitBytes", limitBytes);
 
-	// Read source data from user key range (this SS must own it since DD sent request here)
-	Future<ErrorOr<GetKeyValuesReply>> sourceFuture =
-	    issueGetKeyValuesRequest(data, rangeToRead, version, limit, limitBytes);
-
-	// Read restored data from system key space
-	// NOTE: Use database transaction to read system keys since this SS might not own them
-	// IMPORTANT: Use same byte limits as source query to ensure comparable results, since restored keys
-	// are larger (include prefix), which could cause fewer keys to be returned when byte limit is reached
+	// Read BOTH source and restored data via database transactions to ensure consistent
+	// key ranges regardless of shard boundaries. Using the local SS for source reads
+	// can miss keys at shard boundaries after a bulkload restore.
+	ErrorOr<GetKeyValuesReply> sourceResult;
 	ErrorOr<GetKeyValuesReply> restoredResult;
 	try {
 		Transaction tr(data->cx);
 		tr.setVersion(version);
-		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-		GetRangeLimits limits(limit, limitBytes);
-		RangeResult restoredData = co_await tr.getRange(restoredRange, limits, Snapshot::False, Reverse::False);
+		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+		GetRangeLimits sourceLimits(limit, limitBytes);
+		RangeResult sourceData = co_await tr.getRange(rangeToRead, sourceLimits, Snapshot::False, Reverse::False);
 
-		// Convert RangeResult to GetKeyValuesReply format
+		// Convert source to GetKeyValuesReply format
+		GetKeyValuesReply sourceReply;
+		sourceReply.data.append_deep(sourceReply.arena, sourceData.begin(), sourceData.size());
+		sourceReply.more = sourceData.more;
+		sourceReply.version = version;
+		sourceResult = sourceReply;
+
+		// Read restored data with the same limits as source to ensure comparable results
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		GetRangeLimits restoredLimits(limit, limitBytes);
+		RangeResult restoredData = co_await tr.getRange(restoredRange, restoredLimits, Snapshot::False, Reverse::False);
+
+		// Convert restored to GetKeyValuesReply format
 		GetKeyValuesReply restoredReply;
 		restoredReply.data.append_deep(restoredReply.arena, restoredData.begin(), restoredData.size());
 		restoredReply.more = restoredData.more;
 		restoredReply.version = version;
 		restoredResult = restoredReply;
 	} catch (Error& e) {
-		restoredResult = e;
+		if (sourceResult.isError() || !sourceResult.present()) {
+			sourceResult = e;
+		} else {
+			restoredResult = e;
+		}
 	}
-
-	Future<ErrorOr<GetKeyValuesReply>> restoredFuture = Future<ErrorOr<GetKeyValuesReply>>(restoredResult);
-
-	co_await (success(sourceFuture) && success(restoredFuture));
 
 	// Check for errors
-	if (sourceFuture.get().isError()) {
-		throw sourceFuture.get().getError();
+	if (sourceResult.isError()) {
+		throw sourceResult.getError();
 	}
-	if (restoredFuture.get().isError()) {
-		throw restoredFuture.get().getError();
+	if (sourceResult.get().error.present()) {
+		throw sourceResult.get().error.get();
 	}
-	if (sourceFuture.get().get().error.present()) {
-		throw sourceFuture.get().get().error.get();
+	if (restoredResult.isError()) {
+		throw restoredResult.getError();
 	}
-	if (restoredFuture.get().get().error.present()) {
-		throw restoredFuture.get().get().error.get();
+	if (restoredResult.get().error.present()) {
+		throw restoredResult.get().error.get();
 	}
 
 	// Log what we fetched
 	TraceEvent("SSAuditRestoreFetchResult", data->thisServerID)
-	    .detail("SourceKeys", sourceFuture.get().get().data.size())
-	    .detail("RestoredKeys", restoredFuture.get().get().data.size())
-	    .detail("SourceBytes", sourceFuture.get().get().data.expectedSize())
-	    .detail("RestoredBytes", restoredFuture.get().get().data.expectedSize())
-	    .detail("SourceMore", sourceFuture.get().get().more)
-	    .detail("RestoredMore", restoredFuture.get().get().more);
+	    .detail("SourceKeys", sourceResult.get().data.size())
+	    .detail("RestoredKeys", restoredResult.get().data.size())
+	    .detail("SourceBytes", sourceResult.get().data.expectedSize())
+	    .detail("RestoredBytes", restoredResult.get().data.expectedSize())
+	    .detail("SourceMore", sourceResult.get().more)
+	    .detail("RestoredMore", restoredResult.get().more);
 
-	co_return std::make_pair(sourceFuture.get().get(), restoredFuture.get().get());
+	co_return std::make_pair(sourceResult.get(), restoredResult.get());
 }
 
 // Helper: Compare source and restored data, returning validation errors
@@ -4514,11 +4521,13 @@ Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
 	KeyRange rangeToRead = req.range;
 	Key rangeToReadBegin = req.range.begin;
 	KeyRange claimRange;
-	int limit = 1e4;
+	int limit = SERVER_KNOBS->AUDIT_RESTORE_BATCH_KEY_LIMIT; // Use knob instead of hardcoded 10K
 	int limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 	int64_t readBytes = 0;
+	Error nonRetryableError;
 	int64_t numValidatedKeys = 0;
 	int64_t validatedBytes = 0;
+	int64_t lastPersistBytes = 0; // Track when we last persisted progress
 	bool complete = false;
 	double startTime = now();
 	Reference<IRateControl> rateLimiter =
@@ -4554,6 +4563,53 @@ Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
 					readBytes = sourceReply.data.expectedSize() + restoredReply.data.expectedSize();
 					validatedBytes += readBytes;
 
+					// FAST-PATH: Detect completely empty sides early and fail immediately.
+					// This prevents iterating through millions of keys when one side is empty.
+
+					// Case 1: Baseline (restored) is completely empty but source has data
+					// This catches the case where mode=BOTH backup created empty range files.
+					if (numValidatedKeys == 0 && restoredReply.data.empty() && !restoredReply.more &&
+					    !sourceReply.data.empty()) {
+						std::string error =
+						    format("Baseline restore data is completely empty but source has %d keys! "
+						           "This likely means the backup's range file snapshot was empty (mode=BOTH bug). "
+						           "First source key: %s",
+						           sourceReply.data.size(),
+						           sourceReply.data.size() > 0
+						               ? Traceable<StringRef>::toString(sourceReply.data[0].key).c_str()
+						               : "N/A");
+						TraceEvent(SevError, "SSAuditRestoreEmptyBaseline", data->thisServerID)
+						    .detail("AuditID", req.id)
+						    .detail("AuditRange", req.range)
+						    .detail("SourceKeyCount", sourceReply.data.size())
+						    .detail("RestoredKeyCount", restoredReply.data.size())
+						    .detail("ErrorMessage", error);
+						errors.push_back(error);
+						break; // Exit loop immediately
+					}
+
+					// Case 2: Source (bulkload restore) is completely empty but baseline has data
+					// This catches the case where bulkload restore failed but baseline worked.
+					if (numValidatedKeys == 0 && sourceReply.data.empty() && !sourceReply.more &&
+					    !restoredReply.data.empty()) {
+						std::string error =
+						    format("Bulkload restore data is completely empty but baseline has %d keys! "
+						           "This likely means the bulkload restore failed. "
+						           "First baseline key: %s",
+						           restoredReply.data.size(),
+						           restoredReply.data.size() > 0
+						               ? Traceable<StringRef>::toString(restoredReply.data[0].key).c_str()
+						               : "N/A");
+						TraceEvent(SevError, "SSAuditRestoreEmptySource", data->thisServerID)
+						    .detail("AuditID", req.id)
+						    .detail("AuditRange", req.range)
+						    .detail("SourceKeyCount", sourceReply.data.size())
+						    .detail("RestoredKeyCount", restoredReply.data.size())
+						    .detail("ErrorMessage", error);
+						errors.push_back(error);
+						break; // Exit loop immediately
+					}
+
 					// Check if we've completed reading
 					if (!sourceReply.more) {
 						complete = true;
@@ -4573,15 +4629,19 @@ Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
 					                                      lastKey,
 					                                      numValidatedKeys);
 
-					// Update progress in the database
+					// Update progress in the database (only persist periodically to reduce transaction overhead)
 					KeyRange completeRange = Standalone(KeyRangeRef(rangeToRead.begin, keyAfter(lastKey)));
-					if (!complete && !completeRange.empty() && claimRange.begin == completeRange.begin) {
+					bool shouldPersist =
+					    (validatedBytes - lastPersistBytes) >= SERVER_KNOBS->AUDIT_PROGRESS_PERSIST_BYTES_INTERVAL;
+					if (!complete && shouldPersist && !completeRange.empty() &&
+					    claimRange.begin == completeRange.begin) {
 						claimRange = claimRange & completeRange;
 						AuditStorageState progressState(req.id, claimRange, req.getType());
 						progressState.setPhase(AuditPhase::Running);
 						progressState.ddId = req.ddId;
 						progressState.auditServerId = data->thisServerID;
 						co_await persistAuditStateByRange(data->cx, progressState);
+						lastPersistBytes = validatedBytes;
 					}
 
 					// Apply rate limiting
@@ -4603,7 +4663,23 @@ Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
 					if (e.code() == error_code_actor_cancelled) {
 						throw e;
 					}
-					throw;
+					nonRetryableError = e;
+				}
+				// Handle errors outside catch — co_await not allowed in handlers
+				if (nonRetryableError.isValid() && nonRetryableError.code() != error_code_success) {
+					if (nonRetryableError.code() == error_code_future_version ||
+					    nonRetryableError.code() == error_code_transaction_too_old ||
+					    nonRetryableError.code() == error_code_server_overloaded) {
+						TraceEvent(SevWarn, "SSAuditRestoreRetryableError", data->thisServerID)
+						    .detail("AuditID", req.id)
+						    .detail("Error", nonRetryableError.what())
+						    .detail("Version", version)
+						    .detail("Range", rangeToRead);
+						nonRetryableError = Error();
+						co_await delay(1.0);
+						continue;
+					}
+					throw nonRetryableError;
 				}
 			}
 
@@ -4729,10 +4805,10 @@ Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRequest 
 							serverListEntries.push_back(tr.get(serverListKeyFor(id)));
 						}
 					}
-					co_await store(serverListValues, getAll(serverListEntries));
+					serverListValues = co_await getAll(serverListEntries);
 
 					// Decide version to compare
-					co_await store(version, tr.getReadVersion());
+					version = co_await tr.getReadVersion();
 
 					// Read remote servers
 					for (const auto& v : serverListValues) {
@@ -5108,7 +5184,7 @@ Future<Void> getRangeDataToDump(StorageServer* data,
 			localReq.limitBytes = SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT;
 			localReq.tags = TagSet();
 			data->actors.add(getKeyValuesQ(data, localReq));
-			co_await store(rep, errorOr(localReq.reply.getFuture()));
+			rep = co_await errorOr(localReq.reply.getFuture());
 			if (rep.isError()) {
 				throw rep.getError();
 			}
@@ -5218,7 +5294,7 @@ Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 
 			// Get version to dump
 			tr.reset();
-			co_await store(versionToDump, tr.getReadVersion());
+			versionToDump = co_await tr.getReadVersion();
 
 			// Read data
 			// TODO(BulkDump): Read data from other servers at the versionToDump as much as possible
@@ -7746,12 +7822,11 @@ Future<Void> fetchShardCheckpoint(StorageServer* data, MoveInShard* moveInShard,
 		{
 			Error err;
 			try {
-				co_await store(records,
-				               getCheckpointMetaData(data->cx,
-				                                     moveInShard->ranges(),
-				                                     moveInShard->meta->createVersion,
-				                                     DataMoveRocksCF,
-				                                     moveInShard->dataMoveId()));
+				records = co_await getCheckpointMetaData(data->cx,
+				                                         moveInShard->ranges(),
+				                                         moveInShard->meta->createVersion,
+				                                         DataMoveRocksCF,
+				                                         moveInShard->dataMoveId());
 				if (moveInShard->failed()) {
 					co_return;
 				}
@@ -7778,7 +7853,7 @@ Future<Void> fetchShardCheckpoint(StorageServer* data, MoveInShard* moveInShard,
 					}
 					fFetchCheckpoint.push_back(fetchCheckpointRanges(data->cx, record, checkpointDir, { range }));
 				}
-				co_await store(localRecords, getAll(fFetchCheckpoint));
+				localRecords = co_await getAll(fFetchCheckpoint);
 				if (moveInShard->failed()) {
 					co_return;
 				}
@@ -8103,9 +8178,8 @@ Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 	bool conductBulkLoad = moveInShard->meta->conductBulkLoad;
 	if (conductBulkLoad) {
 		// Get the bulkload task metadata from the data move metadata. For details, see the comments in the fetchKeys.
-		co_await store(bulkLoadTaskState,
-		               getBulkLoadTaskStateFromDataMove(
-		                   data->cx, moveInShard->dataMoveId(), data->version.get(), data->thisServerID));
+		bulkLoadTaskState = co_await getBulkLoadTaskStateFromDataMove(
+		    data->cx, moveInShard->dataMoveId(), data->version.get(), data->thisServerID);
 	}
 
 	while (true) {
@@ -9559,7 +9633,7 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				co_await data->byteSampleClearsTooLarge.onChange();
 			}
 
-			Reference<ILogSystem::IPeekCursor> cursor = data->logCursor;
+			Reference<IPeekCursor> cursor = data->logCursor;
 
 			double beforeTLogCursorReads = now();
 			while (true) {
@@ -9598,7 +9672,7 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 			start = now();
 			FetchInjectionInfo fii;
-			Reference<ILogSystem::IPeekCursor> cloneCursor2 = cursor->cloneNoMore();
+			Reference<IPeekCursor> cloneCursor2 = cursor->cloneNoMore();
 
 			// Collect eager read keys.
 			while (true) {
@@ -9608,7 +9682,7 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				bool firstMutation = true;
 				bool dbgLastMessageWasProtocol = false;
 
-				Reference<ILogSystem::IPeekCursor> cloneCursor1 = cloneCursor2->cloneNoMore();
+				Reference<IPeekCursor> cloneCursor1 = cloneCursor2->cloneNoMore();
 
 				cloneCursor1->setProtocolVersion(data->logProtocol);
 
@@ -11578,7 +11652,7 @@ Future<Void> watchValueWaitForVersion(StorageServer* self,
 
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 	try {
-		co_await success(waitForVersionNoTooOld(self, req.version));
+		co_await waitForVersionNoTooOld(self, req.version);
 		stream.send(req);
 	} catch (Error& e) {
 		if (!canReplyWith(e))
@@ -12109,7 +12183,7 @@ Future<Void> memoryStoreRecover(IKeyValueStore* store, Reference<IClusterConnect
 	// create a temp client connect to DB
 	Database cx = Database::createDatabase(connRecord, ApiVersion::LATEST_VERSION);
 
-	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
 	int noCanRemoveCount = 0;
 	while (true) {
 		{
@@ -12236,7 +12310,7 @@ ACTOR Future<Void> replaceInterface(StorageServer* self, StorageServerInterface 
 
 Future<Void> replaceTSSInterface(StorageServer* self, StorageServerInterface ssi) {
 	// RYW for KeyBackedMap
-	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+	auto tr = makeReference<ReadYourWritesTransaction>(self->cx);
 	KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
 
 	ASSERT(ssi.isTss());
@@ -12641,7 +12715,7 @@ void versionedMapTest() {
 	auto after = FastAllocator<ASIZE>::getTotalMemory();
 
 	int count = 0;
-	for (auto i = vm.atLatest().begin(); i != vm.atLatest().end(); ++i)
+	for (auto i = vm.latestBegin(); i != vm.latestEnd(); ++i)
 		++count;
 
 	printf("PTree node is %d bytes, allocated as %d bytes\n", NSIZE, ASIZE);

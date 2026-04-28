@@ -114,8 +114,8 @@ struct GcGenerationsWorkload : TestWorkload {
 				ips.push_back(ip);
 			}
 		}
-		ASSERT(ips.size() > 0);
-		ASSERT(remoteIps.size() > 0);
+		ASSERT(!ips.empty());
+		ASSERT(!remoteIps.empty());
 
 		for (const auto& ip : ips) {
 			for (const auto& remoteIp : remoteIps) {

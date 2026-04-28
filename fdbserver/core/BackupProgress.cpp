@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <algorithm>
+
 #include "fdbserver/core/BackupProgress.h"
 
 #include "fdbclient/NativeAPI.actor.h"
@@ -117,7 +119,6 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 				if (savedMore > 0) {
 					// The logRouterTags are the same
 					// ASSERT(info.logRouterTags == epochTags[rit->first]);
-
 					updateTagVersions(&tagVersions, &tags, rit->second, info.epochEnd, adjustedBeginVersion, epoch);
 					if (tags.empty())
 						break;
@@ -179,11 +180,11 @@ Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupProgress>
 }
 
 TEST_CASE("/BackupProgress/Unfinished") {
-	std::map<LogEpoch, ILogSystem::EpochTagsVersionsInfo> epochInfos;
+	std::map<LogEpoch, EpochTagsVersionsInfo> epochInfos;
 
 	const int epoch1 = 2, begin1 = 1, end1 = 100;
 	const Tag tag1(tagLocalityLogRouter, 0);
-	epochInfos.insert({ epoch1, ILogSystem::EpochTagsVersionsInfo(1, begin1, end1) });
+	epochInfos.insert({ epoch1, EpochTagsVersionsInfo(1, begin1, end1) });
 	BackupProgress progress(UID(0, 0), epochInfos);
 	progress.setBackupStartedValue(Optional<Value>("1"_sr));
 

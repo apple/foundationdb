@@ -21,17 +21,17 @@
 #pragma once
 
 #include <map>
+#include <set>
 #include <tuple>
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbserver/core/LogSystem.h"
+#include "fdbserver/core/BackupProgressTypes.h"
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 
 class BackupProgress : NonCopyable, ReferenceCounted<BackupProgress> {
 public:
-	BackupProgress(UID id, const std::map<LogEpoch, ILogSystem::EpochTagsVersionsInfo>& infos)
-	  : dbgid(id), epochInfos(infos) {}
+	BackupProgress(UID id, const std::map<LogEpoch, EpochTagsVersionsInfo>& infos) : dbgid(id), epochInfos(infos) {}
 	~BackupProgress() {}
 
 	// Adds a backup status. If the tag already has an entry, then the max of
@@ -84,7 +84,7 @@ private:
 	const UID dbgid;
 
 	// Note this MUST be iterated in ascending order.
-	const std::map<LogEpoch, ILogSystem::EpochTagsVersionsInfo> epochInfos;
+	const std::map<LogEpoch, EpochTagsVersionsInfo> epochInfos;
 
 	// Backup progress saved in the system keyspace. Note there can be multiple
 	// progress status for a tag in an epoch due to later epoch trying to fill

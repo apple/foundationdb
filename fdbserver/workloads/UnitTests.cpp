@@ -26,7 +26,6 @@ void forceLinkDequeTests();
 void forceLinkFlowTests();
 void forceLinkCoroTests();
 void forceLinkMemcpyTests();
-void forceLinkMemcpyPerfTests();
 void forceLinkStreamCipherTests();
 void forceLinkSimExternalConnectionTests();
 void forceLinkMutationLogReaderTests();
@@ -48,7 +47,7 @@ void forceLinkActorFuzzUnitTests();
 void forceLinkGrpcTests();
 void forceLinkGrpcTests2();
 void forceLinkSimpleCounterTests();
-void forceLinkTagPartitionedLogSystemRecoveryTests();
+void forceLinkLogSystemRecoveryTests();
 void forceLinkIPagerTests();
 void forceLinkMockS3ServerTests();
 void forceLinkClusterHealthMonitorTests();
@@ -90,7 +89,7 @@ struct UnitTestWorkload : TestWorkload {
 
 		// Consume all remaining options as testParams which the unit test can access
 		for (auto& kv : options) {
-			if (kv.value.size() != 0) {
+			if (!kv.value.empty()) {
 				testParams.set(kv.key.toString(), getOption(options, kv.key, StringRef()).toString());
 			}
 		}
@@ -100,7 +99,6 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkFlowTests();
 		forceLinkCoroTests();
 		forceLinkMemcpyTests();
-		forceLinkMemcpyPerfTests();
 		forceLinkStreamCipherTests();
 		forceLinkSimExternalConnectionTests();
 		forceLinkMutationLogReaderTests();
@@ -119,7 +117,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkRandomKeyValueUtilsTests();
 		forceLinkActorFuzzUnitTests();
 		forceLinkSimpleCounterTests();
-		forceLinkTagPartitionedLogSystemRecoveryTests();
+		forceLinkLogSystemRecoveryTests();
 		forceLinkIPagerTests();
 		forceLinkMockS3ServerTests();
 		forceLinkClusterHealthMonitorTests();
@@ -153,7 +151,7 @@ struct UnitTestWorkload : TestWorkload {
 			return false;
 		}
 
-		for (auto ignorePatt : testsIgnored) {
+		for (const auto& ignorePatt : testsIgnored) {
 			if (StringRef(testName).startsWith(ignorePatt)) {
 				return false;
 			}
@@ -178,7 +176,7 @@ struct UnitTestWorkload : TestWorkload {
 
 		fprintf(stdout, "Found %zu tests\n", tests.size());
 
-		if (tests.size() == 0) {
+		if (tests.empty()) {
 			TraceEvent(SevError, "NoMatchingUnitTests")
 			    .detail("TestPattern", testPattern)
 			    .detail("TestsIgnored", testsIgnored);

@@ -910,7 +910,7 @@ Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<IBlobStoreEnd
 				connectionFailed = true;
 			}
 		}
-		event.suppressFor(60);
+		event.suppressFor(1);
 		if (!err.present()) {
 			event.detail("ResponseCode", r->code);
 		}

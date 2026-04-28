@@ -28,7 +28,7 @@
 #include <sys/stat.h>
 #include <sys/eventfd.h>
 #include <sys/syscall.h>
-#include "fdbrpc/linux_kaio.h"
+#include "linux_kaio.h"
 #include "flow/Knobs.h"
 #include "fdbrpc/Stats.h"
 #include "crc32/crc32c.h"
@@ -721,7 +721,7 @@ private:
 
 	static Future<Void> poll(Uncancellable, Reference<IEventFD> ev) {
 		while (true) {
-			co_await success(ev->read());
+			co_await ev->read();
 
 			co_await delay(0, TaskPriority::DiskIOComplete);
 

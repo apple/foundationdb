@@ -22,7 +22,7 @@
 #define SQLITE_THREADSAFE 0 // also in sqlite3.amalgamation.c!
 #include "fmt/format.h"
 #include "crc32/crc32c.h"
-#include "fdbserver/core/IKeyValueStore.h"
+#include "fdbserver/kvstore/IKeyValueStore.h"
 #include "fdbserver/kvstore/KVFileUtils.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/core/Knobs.h"
@@ -2325,7 +2325,7 @@ Future<Void> KVFileCheck(std::string filename, bool integrity) {
 	ASSERT(store != nullptr);
 
 	// Wait for integry check to finish
-	co_await success(store->readValue(StringRef()));
+	co_await store->readValue(StringRef());
 
 	if (store->getError().isError())
 		co_await store->getError();

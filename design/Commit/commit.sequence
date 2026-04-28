@@ -10,7 +10,7 @@ end
 participantgroup **CommitProxy** (CommitProxyServer.actor.cpp)
 	participant "commitBatcher" as cB
     participant "commitBatch" as Batch
-    participant "TagPartitionedLogSystem" as TPLS
+    participant "LogSystem" as TPLS
 end
 
 participantgroup **Master** 

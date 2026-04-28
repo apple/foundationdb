@@ -241,38 +241,30 @@ Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens) {
 		fmt::println(" Range: {}{}", progress.jobRange.toString(), ownerSuffix);
 		fmt::println("");
 		fmt::println("Progress:");
-		fmt::println(" Tasks - {} submitted, {} triggered, {} running, {} complete, {} error",
-		             progress.submittedTasks,
-		             progress.triggeredTasks,
-		             progress.runningTasks,
-		             progress.completeTasks,
-		             progress.errorTasks);
 
 		int totalTasks = progress.submittedTasks + progress.triggeredTasks + progress.runningTasks +
 		                 progress.completeTasks + progress.errorTasks;
 		if (totalTasks > 0) {
-			fmt::println(" Tasks completed - {} / {} ({:.1f}%)",
+			fmt::println(" Tasks: {}/{} complete ({:.1f}%)  |  {} submitted, {} triggered, {} running{}",
 			             progress.completeTasks,
 			             totalTasks,
-			             100.0 * progress.completeTasks / totalTasks);
+			             100.0 * progress.completeTasks / totalTasks,
+			             progress.submittedTasks,
+			             progress.triggeredTasks,
+			             progress.runningTasks,
+			             progress.errorTasks > 0 ? fmt::format(", {} error", progress.errorTasks) : "");
 		}
 
-		fmt::println(" Bytes completed - {}", formatBytesProgress(progress.completedBytes, progress.totalBytes));
+		fmt::println(" Bytes: {}", formatBytesProgress(progress.completedBytes, progress.totalBytes));
 
 		printProgressMetrics(progress.avgBytesPerSecond(), progress.etaSeconds(), progress.elapsedSeconds);
 
-		printTaskBreakdown(progress.submittedTasks,
-		                   progress.triggeredTasks,
-		                   progress.runningTasks,
-		                   progress.completeTasks,
-		                   progress.errorTasks);
-
-		printBulkAnalysis(progress.avgBytesPerSecond(),
-		                  progress.elapsedSeconds,
-		                  progress.completeTasks,
-		                  totalTasks,
-		                  progress.errorTasks,
-		                  progress.stalledTasks);
+		// Only show warnings for actual problems (stalled tasks, errors)
+		printStalledTasks(progress.stalledTasks);
+		if (progress.errorTasks > 0) {
+			fmt::println("");
+			fmt::println("WARNING: {} tasks in error state", progress.errorTasks);
+		}
 
 		co_return UID();
 
@@ -363,7 +355,7 @@ Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens) {
 			co_return UID();
 		}
 		std::vector<RangeLockOwner> owners = co_await getAllRangeLockOwners(cx);
-		for (const auto owner : owners) {
+		for (const auto& owner : owners) {
 			fmt::println("{}", owner.toString());
 		}
 		co_return UID();

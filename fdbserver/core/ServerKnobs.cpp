@@ -187,7 +187,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( MAX_MESSAGE_SIZE,            std::max<int>(LOG_SYSTEM_PUSHED_DATA_BLOCK_SIZE, 1e5 + 2e4 + 1) + 8 ); // VALUE_SIZE_LIMIT + SYSTEM_KEY_SIZE_LIMIT + 9 bytes (4 bytes for length, 4 bytes for sequence number, and 1 byte for mutation type)
 	init( TLOG_MESSAGE_BLOCK_BYTES,                             10e6 );
 	init( TLOG_MESSAGE_BLOCK_OVERHEAD_FACTOR,      double(TLOG_MESSAGE_BLOCK_BYTES) / (TLOG_MESSAGE_BLOCK_BYTES - MAX_MESSAGE_SIZE) ); //1.0121466709838096006362758832473
-	init( PEEK_TRACKER_EXPIRATION_TIME,                          600 ); if( randomize && BUGGIFY ) PEEK_TRACKER_EXPIRATION_TIME = 120; // Cannot be buggified lower without changing the following assert in LogSystemPeekCursor.actor.cpp: ASSERT_WE_THINK(e.code() == error_code_operation_obsolete || SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME < 10);
+	init( PEEK_TRACKER_EXPIRATION_TIME,                          600 ); if( randomize && BUGGIFY ) PEEK_TRACKER_EXPIRATION_TIME = 120; // Cannot be buggified lower without changing the following assert in LogSystemPeekCursor.cpp: ASSERT_WE_THINK(e.code() == error_code_operation_obsolete || SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME < 10);
 	init( PEEK_USING_STREAMING,                                false ); if( randomize && isSimulated && BUGGIFY ) PEEK_USING_STREAMING = true;
 	init( PARALLEL_GET_MORE_REQUESTS,                             32 ); if( randomize && BUGGIFY ) PARALLEL_GET_MORE_REQUESTS = 2;
 	init( MULTI_CURSOR_PRE_FETCH_LIMIT,                           10 );
@@ -639,9 +639,12 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME,             30.0 ); if( randomize && BUGGIFY ) ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME = 0.1;
 	init( ROCKSDB_PROBABILITY_REUSE_ITERATOR_SIM,               0.01 );
 	init( ROCKSDB_READ_RANGE_REUSE_ITERATORS,                  false ); if( randomize && BUGGIFY ) ROCKSDB_READ_RANGE_REUSE_ITERATORS = deterministicRandom()->coinflip();
-	init( SHARDED_ROCKSDB_REUSE_ITERATORS,                     false ); if (isSimulated) SHARDED_ROCKSDB_REUSE_ITERATORS = deterministicRandom()->coinflip(); 
+	init( SHARDED_ROCKSDB_REUSE_ITERATORS,                     false ); if( isSimulated ) SHARDED_ROCKSDB_REUSE_ITERATORS = deterministicRandom()->coinflip();
 	init( ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS,          false ); if( randomize && BUGGIFY ) ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS = deterministicRandom()->coinflip();
 	init( ROCKSDB_READ_RANGE_BOUNDED_ITERATORS_MAX_LIMIT,        200 );
+	init( ROCKSDB_USE_CACHE_RESULT_OPTION,                     false ); if( isSimulated ) ROCKSDB_USE_CACHE_RESULT_OPTION = deterministicRandom()->coinflip();
+	// Probability that RocksDB can disable block cache in simulation
+	init( ROCKSDB_PROBABILITY_DISABLE_CACHE_SIM,                 0.1 );
 	// Set to 0 to disable rocksdb write rate limiting. Rate limiter unit: bytes per second.
 	init( ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC,        200000000 );
 	init( ROCKSDB_WRITE_RATE_LIMITER_FAIRNESS,                    10 ); // RocksDB default 10
@@ -1168,6 +1171,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( AUDIT_DATAMOVE_POST_CHECK,                           false ); if ( isSimulated ) AUDIT_DATAMOVE_POST_CHECK = true;
 	init( AUDIT_DATAMOVE_POST_CHECK_RETRY_COUNT_MAX,              50 );
 	init( AUDIT_STORAGE_RATE_PER_SERVER_MAX,                    50e6 ); // per second
+	init( AUDIT_RESTORE_BATCH_KEY_LIMIT,                      100000 ); // 100K keys per batch (was hardcoded 10K)
+	init( AUDIT_PROGRESS_PERSIST_BYTES_INTERVAL,           100000000 ); // 100MB - only persist progress after this many bytes
 	init( ENABLE_AUDIT_VERBOSE_TRACE,                          false );
 	init( LOGGING_STORAGE_COMMIT_WHEN_IO_TIMEOUT,               true );
 	init( LOGGING_RECENT_STORAGE_COMMIT_SIZE,                     20 );
@@ -1307,6 +1312,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// Status
 	init( STATUS_MIN_TIME_BETWEEN_REQUESTS,                      0.0 );
 	init( MAX_STATUS_REQUESTS_PER_SECOND,                      256.0 );
+	init( STATUS_TIMEOUT_BUFFER,                                 5.0 );
 	init( CONFIGURATION_ROWS_TO_FETCH,                         20000 );
 	init( DISABLE_DUPLICATE_LOG_WARNING,                       false );
 	init( HISTOGRAM_REPORT_INTERVAL,                           300.0 );

@@ -55,7 +55,7 @@ struct WorkerErrorsWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override {
 		std::vector<WorkerDetails> workers = co_await getWorkers(dbInfo);
 		std::vector<TraceEventFields> errors = co_await latestEventOnWorkers(workers);
-		for (auto e : errors) {
+		for (const auto& e : errors) {
 			printf("%s\n", e.toString().c_str());
 		}
 	}

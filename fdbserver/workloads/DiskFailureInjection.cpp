@@ -187,7 +187,7 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 		int corruptedWorkers = 0;
 		std::map<NetworkAddress, WorkerInterface> workersMap;
 		std::vector<WorkerDetails> workers = co_await getWorkers(dbInfo);
-		for (auto worker : workers) {
+		for (const auto& worker : workers) {
 			workersMap[worker.interf.address()] = worker.interf;
 		}
 		TraceEvent("ResendChaos")
@@ -217,9 +217,9 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 		int foundChaosMetrics = 0;
 		std::vector<WorkerDetails> workers = co_await getWorkers(dbInfo);
 
-		Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventsFuture;
-		latestEventsFuture = latestEventOnWorkers(workers, "ChaosMetrics");
-		Optional<std::pair<WorkerEvents, std::set<std::string>>> workerEvents = co_await latestEventsFuture;
+		AsyncResult<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventsFuture =
+		    latestEventOnWorkers(workers, "ChaosMetrics");
+		Optional<std::pair<WorkerEvents, std::set<std::string>>> workerEvents = co_await std::move(latestEventsFuture);
 
 		WorkerEvents cMetrics = workerEvents.present() ? workerEvents.get().first : WorkerEvents();
 

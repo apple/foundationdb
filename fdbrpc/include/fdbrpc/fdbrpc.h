@@ -27,7 +27,7 @@
 #include "flow/serialize.h"
 #include "fdbrpc/FlowTransport.h" // NetworkMessageReceiver Endpoint
 #include "fdbrpc/FailureMonitor.h"
-#include "fdbrpc/networksender.actor.h"
+#include "fdbrpc/networksender.h"
 #include "fdbrpc/simulator.h"
 #ifdef WITH_SWIFT
 #include <swift/bridging>
@@ -215,7 +215,7 @@ void load(Ar& ar, ReplyPromise<T>& value) {
 	ar >> token;
 	Endpoint endpoint = FlowTransport::transport().loadedEndpoint(token);
 	value = ReplyPromise<T>(endpoint);
-	networkSender(value.getFuture(), endpoint);
+	networkSender(Uncancellable(), value.getFuture(), endpoint);
 }
 
 template <class T>
@@ -227,7 +227,7 @@ struct serializable_traits<ReplyPromise<T>> : std::true_type {
 			serializer(ar, token);
 			auto endpoint = FlowTransport::transport().loadedEndpoint(token);
 			p = ReplyPromise<T>(endpoint);
-			networkSender(p.getFuture(), endpoint);
+			networkSender(Uncancellable(), p.getFuture(), endpoint);
 		} else {
 			const auto& ep = p.getEndpoint().token;
 			serializer(ar, ep);
