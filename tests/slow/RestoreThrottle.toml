@@ -1,0 +1,53 @@
+# Test: DD survives restart with many accumulated \xff/dataMoves/ entries (isRestore).
+# Reproduces the p127/p131 incident scenario at simulation scale.
+#
+# The test excludes a server to create data moves, kills DD mid-flight so
+# \xff/dataMoves/ entries persist, then verifies DD survives restart via isRestore.
+# After verifying, it includes the server back and waits for DD to drain all moves.
+#
+# Only 1 server is excluded to keep cleanup time within the simulation timeout.
+# With 1 excluded server and small shards, the test gets 100-200+ isRestore entries.
+#
+# runConsistencyCheck = false: after the test includes the server back, DD needs time
+#   to rebalance. The post-test consistency check requires DD queue to be empty, but
+#   with many small shards the rebalance takes longer than the check's 1000s timeout.
+#   In simulation with buggify=false, the quiescence check ignores waitForQuiescence
+#   and always requires quiet (line 2007 in tester.actor.cpp). The test itself verifies
+#   DD health directly.
+#
+# buggify = false: required so shard knobs aren't overridden by buggify randomization.
+# simpleConfig = true: avoids multi-region configs that complicate DD behavior.
+# storageEngineType = 1 (ssd-2): uses less memory per shard than sharded-rocksdb.
+# Small shard knobs: create many shards from modest data (20K keys × 500 bytes = 10MB).
+# dd_enable_verbose_tracing = false: reduces trace output from data movement.
+
+[configuration]
+config = 'triple'
+storageEngineType = 1
+processesPerMachine = 1
+coordinators = 3
+machineCount = 15
+allowDefaultTenant = false
+disableTss = true
+buggify = false
+simpleConfig = true
+
+[[knobs]]
+shard_encode_location_metadata = true
+min_shard_bytes = 10000
+max_shard_bytes = 50000
+shard_bytes_ratio = 2
+shard_bytes_per_sqrt_bytes = 0
+dd_enable_verbose_tracing = false
+
+[[test]]
+testTitle = 'RestoreThrottle'
+useDB = true
+timeout = 3600
+waitForQuiescence = false
+runConsistencyCheck = false
+
+    [[test.workload]]
+    testName = 'RestoreThrottle'
+    minDataMoves = 100
+    testDuration = 120.0

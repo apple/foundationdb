@@ -240,6 +240,7 @@ public:
 
 	int activeRelocations;
 	int queuedRelocations;
+	int inFlightRestoreMoves; // count-based cap for isRestore data moves
 	int64_t bytesWritten;
 	int teamSize;
 	int singleRegionTeamSize;
