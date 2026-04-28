@@ -3174,16 +3174,20 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> monitorHealthyTeams(DDTeamCollection* self) {
+	static Future<Void> monitorHealthyTeams(DDTeamCollection* self) {
 		TraceEvent("DDMonitorHealthyTeamsStart").detail("ZeroHealthyTeams", self->zeroHealthyTeams->get());
-		loop choose {
-			when(wait(self->zeroHealthyTeams->get()
-			              ? delay(SERVER_KNOBS->DD_ZERO_HEALTHY_TEAM_DELAY, TaskPriority::DataDistribution)
-			              : Never())) {
-				self->doBuildTeams = true;
-				wait(self->checkBuildTeams());
+		while (true) {
+			if (self->zeroHealthyTeams->get()) {
+				auto const zeroHealthyTeamsChanged = co_await timeout(self->zeroHealthyTeams->onChange(),
+				                                                      SERVER_KNOBS->DD_ZERO_HEALTHY_TEAM_DELAY,
+				                                                      TaskPriority::DataDistribution);
+				if (!zeroHealthyTeamsChanged.present()) {
+					self->doBuildTeams = true;
+					co_await self->checkBuildTeams();
+				}
+			} else {
+				co_await self->zeroHealthyTeams->onChange();
 			}
-			when(wait(self->zeroHealthyTeams->onChange())) {}
 		}
 	}
 
