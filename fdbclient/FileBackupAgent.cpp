@@ -5534,7 +5534,6 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 	static Future<std::pair<Version, bool>> findNextVersion(std::vector<Reference<PartitionedLogIterator>> iterators) {
 		Version minVersion = std::numeric_limits<int64_t>::max();
 		bool atLeastOneIteratorHasNext = false;
-		std::vector<Version> minVs(iterators.size(), 0); // can be removed or leave for debugging
 
 		for (int k = 0; k < iterators.size(); k++) {
 			if (!iterators[k]->hasNext()) {
@@ -5542,7 +5541,6 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 			}
 			atLeastOneIteratorHasNext = true;
 			Version v = co_await iterators[k]->peekNextVersion();
-			minVs[k] = v;
 			minVersion = std::min(minVersion, v);
 		}
 		co_return std::make_pair(minVersion, atLeastOneIteratorHasNext);
