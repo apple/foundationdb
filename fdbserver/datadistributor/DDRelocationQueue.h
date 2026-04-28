@@ -258,6 +258,10 @@ public:
 	int teamSize;
 	int singleRegionTeamSize;
 
+	int pipelineSize() const { return activeRelocations + queuedRelocations; }
+
+	Reference<AsyncVar<bool>> pipelineFull;
+
 	std::map<UID, Busyness> busymap; // UID is serverID
 	std::map<UID, Busyness> destBusymap; // UID is serverID
 

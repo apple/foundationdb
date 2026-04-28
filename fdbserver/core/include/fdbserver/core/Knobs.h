@@ -151,6 +151,7 @@ public:
 	double MERGE_RELOCATION_PARALLELISM_PER_TEAM;
 	int DD_QUEUE_MAX_KEY_SERVERS;
 	int DD_REBALANCE_PARALLELISM;
+	int DD_MAX_PIPELINE_MOVES; // Hard limit on total moves tracked by DD (queued + active). Bounds persistent metadata.
 	int DD_REBALANCE_RESET_AMOUNT;
 	double INFLIGHT_PENALTY_HEALTHY;
 	double INFLIGHT_PENALTY_REDUNDANT;
