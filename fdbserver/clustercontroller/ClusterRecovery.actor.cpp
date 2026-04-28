@@ -845,33 +845,30 @@ Future<Void> updateRegistration(Reference<ClusterRecoveryData> self, Reference<L
 	}
 }
 
-ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<ClusterRecoveryData> parent,
-                                                                 Future<Void> activate) {
-	wait(activate);
+class ProvisionalMaster {
+	Reference<ClusterRecoveryData> parent;
+	bool locked = false;
+	Optional<Value> metadataVersion;
 
-	// Register a fake commit proxy (to be provided right here) to make ourselves available to clients
-	parent->provisionalCommitProxies = std::vector<CommitProxyInterface>(1);
-	parent->provisionalCommitProxies[0].provisional = true;
-	parent->provisionalCommitProxies[0].initEndpoints();
-	parent->provisionalGrvProxies = std::vector<GrvProxyInterface>(1);
-	parent->provisionalGrvProxies[0].provisional = true;
-	parent->provisionalGrvProxies[0].initEndpoints();
-	state Future<Void> waitCommitProxyFailure =
-	    waitFailureServer(parent->provisionalCommitProxies[0].waitFailure.getFuture());
-	state Future<Void> waitGrvProxyFailure =
-	    waitFailureServer(parent->provisionalGrvProxies[0].waitFailure.getFuture());
-	parent->registrationTrigger.trigger();
+	void initializeProxies() {
+		// Register a fake commit proxy (to be provided right here) to make ourselves available to clients
+		parent->provisionalCommitProxies = std::vector<CommitProxyInterface>(1);
+		parent->provisionalCommitProxies[0].provisional = true;
+		parent->provisionalCommitProxies[0].initEndpoints();
+		parent->provisionalGrvProxies = std::vector<GrvProxyInterface>(1);
+		parent->provisionalGrvProxies[0].provisional = true;
+		parent->provisionalGrvProxies[0].initEndpoints();
+		parent->registrationTrigger.trigger();
 
-	auto lockedKey = parent->txnStateStore->readValue(databaseLockedKey).get();
-	state bool locked = lockedKey.present() && lockedKey.get().size();
+		auto lockedKey = parent->txnStateStore->readValue(databaseLockedKey).get();
+		locked = lockedKey.present() && lockedKey.get().size();
 
-	state Optional<Value> metadataVersion = parent->txnStateStore->readValue(metadataVersionKey).get();
+		metadataVersion = parent->txnStateStore->readValue(metadataVersionKey).get();
+	}
 
-	// We respond to a minimal subset of the commit proxy protocol.  Our sole purpose is to receive a single write-only
-	// transaction which might repair our configuration, and return it.
-	loop choose {
-		when(GetReadVersionRequest req =
-		         waitNext(parent->provisionalGrvProxies[0].getConsistentReadVersion.getFuture())) {
+	Future<Void> serveGetReadVersions() {
+		while (true) {
+			GetReadVersionRequest req = co_await parent->provisionalGrvProxies[0].getConsistentReadVersion.getFuture();
 			if ((req.flags & GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY) &&
 			    (req.flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES) && parent->lastEpochEnd) {
 				GetReadVersionReply rep;
@@ -880,10 +877,15 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<Clust
 				rep.metadataVersion = metadataVersion;
 				rep.proxyId = parent->provisionalGrvProxies[0].id();
 				req.reply.send(rep);
-			} else
+			} else {
 				req.reply.send(Never()); // We can't perform causally consistent reads without recovering
+			}
 		}
-		when(CommitTransactionRequest req = waitNext(parent->provisionalCommitProxies[0].commit.getFuture())) {
+	}
+
+	Future<Standalone<CommitTransactionRef>> serveCommits() {
+		while (true) {
+			CommitTransactionRequest req = co_await parent->provisionalCommitProxies[0].commit.getFuture();
 			req.reply.send(Never()); // don't reply (clients always get commit_unknown_result)
 			auto t = &req.transaction;
 			if (t->read_snapshot == parent->lastEpochEnd && //< So no transactions can fall between the read snapshot
@@ -908,22 +910,52 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<Clust
 						out.mutations.append_deep(out.arena(), t->mutations.begin(), t->mutations.size());
 						out.write_conflict_ranges.append_deep(
 						    out.arena(), t->write_conflict_ranges.begin(), t->write_conflict_ranges.size());
-						return out;
+						co_return out;
 					}
 				}
 			}
 		}
-		when(GetKeyServerLocationsRequest req =
-		         waitNext(parent->provisionalCommitProxies[0].getKeyServersLocations.getFuture())) {
+	}
+
+	Future<Void> serveGetKeyServerLocations() {
+		while (true) {
+			GetKeyServerLocationsRequest req =
+			    co_await parent->provisionalCommitProxies[0].getKeyServersLocations.getFuture();
 			req.reply.send(Never());
 		}
-		when(wait(waitCommitProxyFailure)) {
-			throw worker_removed();
-		}
-		when(wait(waitGrvProxyFailure)) {
-			throw worker_removed();
-		}
 	}
+
+	Future<Void> waitForCommitProxyFailure() {
+		co_await waitFailureServer(parent->provisionalCommitProxies[0].waitFailure.getFuture());
+		throw worker_removed();
+	}
+
+	Future<Void> waitForGrvProxyFailure() {
+		co_await waitFailureServer(parent->provisionalGrvProxies[0].waitFailure.getFuture());
+		throw worker_removed();
+	}
+
+public:
+	explicit ProvisionalMaster(Reference<ClusterRecoveryData> parent) : parent(parent) {}
+
+	Future<Standalone<CommitTransactionRef>> run(Future<Void> activate) {
+		co_await activate;
+		initializeProxies();
+
+		auto result = co_await race(serveCommits(),
+		                            serveGetReadVersions(),
+		                            serveGetKeyServerLocations(),
+		                            waitForCommitProxyFailure(),
+		                            waitForGrvProxyFailure());
+		ASSERT(result.index() == 0);
+		co_return std::get<0>(std::move(result));
+	}
+};
+
+Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<ClusterRecoveryData> parent,
+                                                           Future<Void> activate) {
+	ProvisionalMaster master(parent);
+	co_return co_await master.run(activate);
 }
 
 // Monitors the initialization of transaction system roles (commit proxies, GRV proxies, resolvers, TLogs, LogRouters)
