@@ -2654,11 +2654,11 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> initializeStorage(DDTeamCollection* self,
-	                                            RecruitStorageReply candidateWorker,
-	                                            const DDEnabledState* ddEnabledState,
-	                                            bool recruitTss,
-	                                            Reference<TSSPairState> tssState) {
+	static Future<Void> initializeStorage(DDTeamCollection* self,
+	                                      RecruitStorageReply candidateWorker,
+	                                      const DDEnabledState* ddEnabledState,
+	                                      bool recruitTss,
+	                                      Reference<TSSPairState> tssState) {
 		// SOMEDAY: Cluster controller waits for availability, retry quickly if a server's Locality changes
 		self->recruitingStream.set(self->recruitingStream.get() + 1);
 
@@ -2670,14 +2670,14 @@ public:
 			// Only allow at most 2 storage servers on an address, because
 			// too many storage server on the same address (i.e., process) can cause OOM.
 			// Ask the candidateWorker to initialize a SS only if the worker does not have a pending request
-			state UID interfaceId = deterministicRandom()->randomUniqueID();
+			UID interfaceId = deterministicRandom()->randomUniqueID();
 
 			// insert recruiting localities BEFORE actor waits, to ensure we don't send many recruitment requests to the
 			// same storage
 			self->recruitingIds.insert(interfaceId);
 			self->recruitingLocalities.insert(candidateWorker.worker.stableAddress());
 
-			state InitializeStorageRequest isr;
+			InitializeStorageRequest isr;
 			isr.storeType = recruitTss ? self->configuration.testingStorageServerStoreType
 			                           : self->configuration.storageServerStoreType;
 
@@ -2701,7 +2701,7 @@ public:
 			isr.interfaceId = interfaceId;
 
 			// if tss, wait for pair ss to finish and add its id to isr. If pair fails, don't recruit tss
-			state bool doRecruit = true;
+			bool doRecruit = true;
 			if (recruitTss) {
 				TraceEvent("TSS_Recruit", self->distributorId)
 				    .detail("ReqID", isr.reqId)
@@ -2711,7 +2711,7 @@ public:
 				    .detail("TSSLocality", candidateWorker.worker.locality.toString())
 				    .detail("Primary", self->primary);
 
-				Optional<std::pair<UID, Version>> ssPairInfoResult = wait(tssState->waitOnSS());
+				Optional<std::pair<UID, Version>> ssPairInfoResult = co_await tssState->waitOnSS();
 				if (ssPairInfoResult.present()) {
 					isr.tssPairIDAndVersion = ssPairInfoResult.get();
 
@@ -2754,7 +2754,7 @@ public:
 			        ? candidateWorker.worker.storage.tryGetReply(isr, TaskPriority::DataDistribution)
 			        : Future<ErrorOr<InitializeStorageReply>>(ErrorOr<InitializeStorageReply>(recruitment_failed()));
 
-			state ErrorOr<InitializeStorageReply> newServer = wait(fRecruit);
+			ErrorOr<InitializeStorageReply> newServer = co_await fRecruit;
 
 			if (doRecruit && newServer.isError()) {
 				TraceEvent(SevWarn, "DDRecruitmentError").error(newServer.getError());
@@ -2763,7 +2763,7 @@ public:
 					tssState->markComplete();
 					throw newServer.getError();
 				}
-				wait(delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY, TaskPriority::DataDistribution));
+				co_await delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY, TaskPriority::DataDistribution);
 			}
 
 			if (!recruitTss && newServer.present() &&
@@ -2780,7 +2780,7 @@ public:
 
 				// wait for timeout, but eventually move on if no TSS pair recruited
 				Optional<bool> tssSuccessful =
-				    wait(timeout(tssState->waitOnTSS(), SERVER_KNOBS->TSS_RECRUITMENT_TIMEOUT));
+				    co_await timeout(tssState->waitOnTSS(), SERVER_KNOBS->TSS_RECRUITMENT_TIMEOUT);
 
 				if (tssSuccessful.present() && tssSuccessful.get()) {
 					TraceEvent("TSS_Recruit", self->distributorId)
@@ -2863,8 +2863,6 @@ public:
 
 		self->recruitingStream.set(self->recruitingStream.get() - 1);
 		self->restartRecruiting.trigger();
-
-		return Void();
 	}
 
 	ACTOR static Future<Void> storageRecruiter(
