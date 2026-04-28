@@ -3553,15 +3553,6 @@ ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
 			}
 		}
 
-		JsonBuilderArray incompatibleConnectionsArray;
-		for (auto it : incompatibleConnections) {
-			incompatibleConnectionsArray.push_back(it.toString());
-		}
-		statusObj["incompatible_connections"] = incompatibleConnectionsArray;
-		statusObj["datacenter_lag"] = getLagObject(datacenterVersionDifference);
-		statusObj["logserver_lag"] = getLagObject(dcLogServerVersionDifference);
-		statusObj["storageserver_lag"] = getLagObject(dcStorageServerVersionDifference);
-
 		int activeTSSCount = 0;
 		JsonBuilderArray wiggleServerAddress;
 		for (auto& it : storageServers) {
@@ -3656,6 +3647,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
     ServerCoordinators coordinators,
     std::vector<NetworkAddress> incompatibleConnections,
     Version datacenterVersionDifference,
+	Version dcLogServerVersionDifference,
+	Version dcStorageServerVersionDifference,
     double deadlineTimeout) {
 	state JsonBuilderObject statusObj;
 	state JsonBuilderArray messages;
@@ -3696,6 +3689,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	}
 	statusObj["incompatible_connections"] = incompatibleConnectionsArray;
 	statusObj["datacenter_lag"] = getLagObject(datacenterVersionDifference);
+	statusObj["logserver_lag"] = getLagObject(dcLogServerVersionDifference);
+	statusObj["storageserver_lag"] = getLagObject(dcStorageServerVersionDifference);
 
 	// Create the status_incomplete message if there were any reasons that the status is incomplete.
 	if (!status_incomplete_reasons.empty()) {
