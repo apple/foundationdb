@@ -36,7 +36,6 @@
 #include "flow/Trace.h"
 
 #include "flow/CoroUtils.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 static std::set<int> const& normalClusterRecoveryErrors() {
 	static std::set<int> s;
@@ -1426,11 +1425,11 @@ void updateConfigForForcedRecovery(Reference<ClusterRecoveryData> self,
 	initialConfChanges->push_back(regionCommit);
 }
 
-ACTOR Future<Void> recoverFrom(Reference<ClusterRecoveryData> self,
-                               Reference<LogSystem> oldLogSystem,
-                               std::vector<StorageServerInterface>* seedServers,
-                               std::vector<Standalone<CommitTransactionRef>>* initialConfChanges,
-                               Future<Version> poppedTxsVersion) {
+Future<Void> recoverFrom(Reference<ClusterRecoveryData> self,
+                         Reference<LogSystem> oldLogSystem,
+                         std::vector<StorageServerInterface>* seedServers,
+                         std::vector<Standalone<CommitTransactionRef>>* initialConfChanges,
+                         Future<Version> poppedTxsVersion) {
 	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(), self->dbgid)
 	    .detail("StatusCode", RecoveryStatus::reading_transaction_system_state)
 	    .detail("Status", RecoveryStatus::names[RecoveryStatus::reading_transaction_system_state])
@@ -1438,10 +1437,10 @@ ACTOR Future<Void> recoverFrom(Reference<ClusterRecoveryData> self,
 	self->hasConfiguration = false;
 
 	if (BUGGIFY)
-		wait(delay(10.0));
+		co_await delay(10.0);
 
-	Version txsPoppedVersion = wait(poppedTxsVersion);
-	wait(readTransactionSystemState(self, oldLogSystem, txsPoppedVersion));
+	Version txsPoppedVersion = co_await poppedTxsVersion;
+	co_await readTransactionSystemState(self, oldLogSystem, txsPoppedVersion);
 	for (auto& itr : *initialConfChanges) {
 		for (auto& m : itr.mutations) {
 			self->configuration.applyMutation(m);
@@ -1458,58 +1457,57 @@ ACTOR Future<Void> recoverFrom(Reference<ClusterRecoveryData> self,
 	// second, a provisional master is initialized, and an "emergency transaction" is submitted that might change the
 	// configuration so that we can finish recovery.
 
-	state std::map<Optional<Value>, int8_t> originalLocalityMap = self->dcId_locality;
-	state Future<std::vector<Standalone<CommitTransactionRef>>> recruitments =
+	std::map<Optional<Value>, int8_t> originalLocalityMap = self->dcId_locality;
+	Future<std::vector<Standalone<CommitTransactionRef>>> recruitments =
 	    recruitEverything(self, seedServers, oldLogSystem);
-	state double provisionalDelay = SERVER_KNOBS->PROVISIONAL_START_DELAY;
-	loop {
-		state Future<Standalone<CommitTransactionRef>> provisional = provisionalMaster(self, delay(provisionalDelay));
+	double provisionalDelay = SERVER_KNOBS->PROVISIONAL_START_DELAY;
+	while (true) {
+		Future<Standalone<CommitTransactionRef>> provisional = provisionalMaster(self, delay(provisionalDelay));
 		provisionalDelay =
 		    std::min(SERVER_KNOBS->PROVISIONAL_MAX_DELAY, provisionalDelay * SERVER_KNOBS->PROVISIONAL_DELAY_GROWTH);
-		choose {
-			when(std::vector<Standalone<CommitTransactionRef>> confChanges = wait(recruitments)) {
-				initialConfChanges->insert(initialConfChanges->end(), confChanges.begin(), confChanges.end());
-				provisional.cancel();
-				break;
-			}
-			when(Standalone<CommitTransactionRef> _req = wait(provisional)) {
-				state Standalone<CommitTransactionRef> req = _req; // mutable
-				CODE_PROBE(true, "Emergency transaction processing during recovery");
-				TraceEvent("EmergencyTransaction", self->dbgid).log();
-				for (auto m = req.mutations.begin(); m != req.mutations.end(); ++m)
-					TraceEvent("EmergencyTransactionMutation", self->dbgid)
-					    .detail("MType", m->type)
-					    .detail("P1", m->param1)
-					    .detail("P2", m->param2);
+		auto res = co_await race(recruitments, provisional);
+		if (res.index() == 0) {
+			std::vector<Standalone<CommitTransactionRef>> confChanges = std::get<0>(std::move(res));
+			initialConfChanges->insert(initialConfChanges->end(), confChanges.begin(), confChanges.end());
+			provisional.cancel();
+			break;
+		} else if (res.index() == 1) {
+			Standalone<CommitTransactionRef> req = std::get<1>(std::move(res));
+			CODE_PROBE(true, "Emergency transaction processing during recovery");
+			TraceEvent("EmergencyTransaction", self->dbgid).log();
+			for (auto m = req.mutations.begin(); m != req.mutations.end(); ++m)
+				TraceEvent("EmergencyTransactionMutation", self->dbgid)
+				    .detail("MType", m->type)
+				    .detail("P1", m->param1)
+				    .detail("P2", m->param2);
 
-				DatabaseConfiguration oldConf = self->configuration;
+			DatabaseConfiguration oldConf = self->configuration;
+			self->configuration = self->originalConfiguration;
+			for (auto& m : req.mutations)
+				self->configuration.applyMutation(m);
+
+			initialConfChanges->clear();
+			if (self->originalConfiguration.isValid() &&
+			    self->configuration.usableRegions != self->originalConfiguration.usableRegions) {
+				TraceEvent(SevWarnAlways, "CannotChangeUsableRegions", self->dbgid).log();
 				self->configuration = self->originalConfiguration;
-				for (auto& m : req.mutations)
-					self->configuration.applyMutation(m);
-
-				initialConfChanges->clear();
-				if (self->originalConfiguration.isValid() &&
-				    self->configuration.usableRegions != self->originalConfiguration.usableRegions) {
-					TraceEvent(SevWarnAlways, "CannotChangeUsableRegions", self->dbgid).log();
-					self->configuration = self->originalConfiguration;
-				} else {
-					initialConfChanges->push_back(req);
-				}
-				if (self->forceRecovery) {
-					updateConfigForForcedRecovery(self, initialConfChanges);
-				}
-
-				if (self->configuration != oldConf) { // confChange does not trigger when including servers
-					self->dcId_locality = originalLocalityMap;
-					recruitments = recruitEverything(self, seedServers, oldLogSystem);
-				}
+			} else {
+				initialConfChanges->push_back(req);
 			}
+			if (self->forceRecovery) {
+				updateConfigForForcedRecovery(self, initialConfChanges);
+			}
+
+			if (self->configuration != oldConf) { // confChange does not trigger when including servers
+				self->dcId_locality = originalLocalityMap;
+				recruitments = recruitEverything(self, seedServers, oldLogSystem);
+			}
+		} else {
+			UNREACHABLE();
 		}
 
 		provisional.cancel();
 	}
-
-	return Void();
 }
 
 Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
