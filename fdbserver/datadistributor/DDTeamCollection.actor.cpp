@@ -2677,7 +2677,7 @@ public:
 			self->recruitingIds.insert(interfaceId);
 			self->recruitingLocalities.insert(candidateWorker.worker.stableAddress());
 
-			InitializeStorageRequest isr;
+			InitializeStorageRequest isr{};
 			isr.storeType = recruitTss ? self->configuration.testingStorageServerStoreType
 			                           : self->configuration.storageServerStoreType;
 
