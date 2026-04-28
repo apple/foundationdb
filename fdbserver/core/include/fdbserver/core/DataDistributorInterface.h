@@ -159,7 +159,8 @@ struct GetDataDistributorMetricsRequest {
 	}
 };
 
-// FIXME: explain purpose
+// Request sent to the data distributor to coordinate a snapshot across
+// stateful workers for a single snapshot UID.
 struct DistributorSnapRequest {
 	constexpr static FileIdentifier file_identifier = 5427684;
 	Arena arena;
