@@ -2344,25 +2344,21 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> perpetualStorageWiggleIterator(DDTeamCollection* teamCollection,
-	                                                         AsyncVar<bool>* stopSignal,
-	                                                         FutureStream<Void> finishStorageWiggleSignal) {
-		loop {
-			choose {
-				when(wait(stopSignal->onChange())) {}
-				when(waitNext(finishStorageWiggleSignal)) {
-					// delay to avoid delete and update ServerList too frequently, which could result busy loop or over
-					// utilize the disk of other active SS
-					wait(perpetualStorageWiggleRest(teamCollection));
-					wait(updateNextWigglingStorageID(teamCollection));
-				}
+	static Future<Void> perpetualStorageWiggleIterator(DDTeamCollection* teamCollection,
+	                                                   AsyncVar<bool>* stopSignal,
+	                                                   FutureStream<Void> finishStorageWiggleSignal) {
+		while (true) {
+			auto res = co_await race(stopSignal->onChange(), finishStorageWiggleSignal);
+			if (res.index() == 1) {
+				// delay to avoid delete and update ServerList too frequently, which could result busy loop or over
+				// utilize the disk of other active SS
+				co_await perpetualStorageWiggleRest(teamCollection);
+				co_await updateNextWigglingStorageID(teamCollection);
 			}
 			if (stopSignal->get()) {
 				break;
 			}
 		}
-
-		return Void();
 	}
 
 	static Future<Void> clusterHealthCheckForPerpetualWiggle(DDTeamCollection* self, int* extraTeamCount) {
