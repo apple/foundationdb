@@ -1502,8 +1502,6 @@ Future<Void> recoverFrom(Reference<ClusterRecoveryData> self,
 				self->dcId_locality = originalLocalityMap;
 				recruitments = recruitEverything(self, seedServers, oldLogSystem);
 			}
-		} else {
-			UNREACHABLE();
 		}
 
 		provisional.cancel();
