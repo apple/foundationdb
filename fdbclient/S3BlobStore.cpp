@@ -31,7 +31,7 @@
 
 #include "md5/md5.h"
 #include "libb64/encode.h"
-#include "fdbclient/sha1/SHA1.h"
+#include "sha1/SHA1.h"
 #include <climits>
 #include <iostream>
 #include <time.h>
@@ -48,7 +48,7 @@
 #include "flow/UnitTest.h"
 #include "rapidxml/rapidxml.hpp"
 #ifdef WITH_AWS_BACKUP
-#include "fdbclient/FDBAWSCredentialsProvider.h"
+#include "FDBAWSCredentialsProvider.h"
 #endif
 
 #include "flow/CoroUtils.h"

@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/AsyncFileBlobStore.h"
-#include "fdbclient/BackupContainerBlobStore.h"
+#include "BackupContainerBlobStore.h"
 #include "fdbclient/IBlobStore.h"
 #include "fdbrpc/AsyncFileEncrypted.h"
 #include "fdbrpc/AsyncFileReadAhead.h"

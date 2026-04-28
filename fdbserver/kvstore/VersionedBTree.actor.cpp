@@ -28,6 +28,7 @@
 #include "fdbserver/kvstore/IKeyValueStore.h"
 #include "IPager.h"
 #include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "VersionedBTreeDebug.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
@@ -2185,7 +2186,7 @@ public:
 					// If this is a restarted sim test, assume this situation was created by the first phase being
 					// killed during initialization so the second phase found the file on disk but it is not
 					// recoverable.
-					if (g_network->isSimulated() && g_simulator->restarted) {
+					if (g_network->isSimulated() && fdbSimulationPolicyState().restarted) {
 						throw e.asInjectedFault();
 					}
 
@@ -4689,7 +4690,7 @@ public:
 	static DecodeBoundaryVerifier* getVerifier(std::string name) {
 		static std::map<std::string, DecodeBoundaryVerifier> verifiers;
 		// Only use verifier in a non-restarted simulation so that all page writes are captured
-		if (g_network->isSimulated() && !g_simulator->restarted) {
+		if (g_network->isSimulated() && !fdbSimulationPolicyState().restarted) {
 			return &verifiers[name];
 		}
 		return nullptr;

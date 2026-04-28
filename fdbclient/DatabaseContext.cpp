@@ -59,7 +59,7 @@
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/ManagementAPI.h"
-#include "fdbclient/NameLineage.h"
+#include "NameLineage.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/MutationList.h"
@@ -737,7 +737,8 @@ static Future<Void> delExcessClntTxnEntriesActor(Transaction* tr, int64_t client
 	}
 }
 
-// FIXME: explain what "client status" is
+// Client status is the client-side transaction profiling data persisted under
+// fdbClientInfoPrefixRange for status reporting.
 // The reason for getting a pointer to DatabaseContext instead of a reference counted object is because reference
 // counting will increment reference count for DatabaseContext which holds the future of this actor. This creates a
 // cyclic reference and hence this actor and Database object will not be destroyed at all.

@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/RestoreInterface.h"
+#include "RestoreInterface.h"
 #include "flow/serialize.h"
 
 const KeyRef restoreRequestDoneKey = "\xff\x02/restoreRequestDone"_sr;

@@ -39,8 +39,8 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 
 		addDefaultBackupRanges(backupRanges);
 
-		ASSERT(g_simulator->extraDatabases.size() == 1);
-		extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0]);
+		ASSERT(fdbSimulationPolicyState().extraDatabases.size() == 1);
+		extraDB = Database::createSimulatedExtraDatabase(fdbSimulationPolicyState().extraDatabases[0]);
 	}
 
 	Future<Void> setup(Database const& cx) override {
@@ -187,8 +187,8 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 		TraceEvent("AS_Done").log();
 
 		// SOMEDAY: Remove after backup agents can exist quiescently
-		if (g_simulator->drAgents == ISimulator::BackupAgentType::BackupToDB) {
-			g_simulator->drAgents = ISimulator::BackupAgentType::NoBackupAgents;
+		if (fdbSimulationPolicyState().drAgents == FDBBackupAgentType::BackupToDB) {
+			fdbSimulationPolicyState().drAgents = FDBBackupAgentType::NoBackupAgents;
 		}
 	}
 };

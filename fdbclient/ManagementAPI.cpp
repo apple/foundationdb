@@ -1002,9 +1002,9 @@ Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 				continue;
 			}
 
-			g_simulator->protectedAddresses.insert(process->addresses.address);
+			g_simulator->protectAddress(process->addresses.address);
 			if (addresses.secondaryAddress.present()) {
-				g_simulator->protectedAddresses.insert(process->addresses.secondaryAddress.get());
+				g_simulator->protectAddress(process->addresses.secondaryAddress.get());
 			}
 			TraceEvent("ProtectCoordinator").detail("Address", desiredCoordinators[i]).backtrace();
 			protectedCount++;
@@ -1110,9 +1110,9 @@ Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChange> ch
 					auto process = g_simulator->getProcessByAddress(desiredCoordinators[i]);
 					ASSERT(process->isReliable() || process->rebooting);
 
-					g_simulator->protectedAddresses.insert(process->addresses.address);
+					g_simulator->protectAddress(process->addresses.address);
 					if (process->addresses.secondaryAddress.present()) {
-						g_simulator->protectedAddresses.insert(process->addresses.secondaryAddress.get());
+						g_simulator->protectAddress(process->addresses.secondaryAddress.get());
 					}
 					TraceEvent("ProtectCoordinator").detail("Address", desiredCoordinators[i]).backtrace();
 				}

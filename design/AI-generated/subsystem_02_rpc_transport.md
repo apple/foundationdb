@@ -21,7 +21,7 @@ FlowTransport is the layer that lets actors on different processes (or simulated
 A globally unique address for a message receiver:
 
 ```
-struct Endpoint {
+class Endpoint {
     NetworkAddressList addresses;  // primary + optional secondary (TLS/non-TLS)
     Token token;                   // UID: 128-bit unique identifier
 };

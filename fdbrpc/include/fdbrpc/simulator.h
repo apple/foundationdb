@@ -56,36 +56,51 @@ constexpr double DISABLE_CONNECTION_FAILURE_FOREVER = 1e6;
 // Minimum interval to disable connection failures. If less than this, connection failures are always disabled.
 constexpr double DISABLE_CONNECTION_FAILURE_MIN_INTERVAL = 1e-3;
 
+class ISimulationPolicy : public ReferenceCounted<ISimulationPolicy> {
+public:
+	using KillType = simulator::KillType;
+	using ProcessInfo = simulator::ProcessInfo;
+
+	enum class Capability {
+		WarnOnStorageMismatch,
+		StorageReplicaFaultInjection,
+		StorageReplicaDelay,
+		StorageReplicaMutationDrop,
+		LimitStorageServerReadBytes
+	};
+
+	virtual bool shouldProtectNewProcess(ProcessInfo const&) const { return false; }
+	virtual bool isAvailable(std::vector<ProcessInfo*> const&,
+	                         std::vector<ProcessInfo*> const& availableProcesses,
+	                         std::vector<ProcessInfo*> const& deadProcesses) const {
+		return canKillProcesses(availableProcesses, deadProcesses, KillType::KillInstantly, nullptr);
+	}
+	virtual bool datacenterDead(Optional<Standalone<StringRef>>, std::vector<ProcessInfo*> const&) const {
+		return false;
+	}
+	virtual bool shouldRunVersionValidation() const { return true; }
+	virtual bool canSwapToMachine(Optional<Standalone<StringRef>> const&) const { return true; }
+	virtual bool checkInjectedCorruption(NetworkAddress const&) const { return false; }
+	virtual bool hasCapability(Capability) const { return false; }
+	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses,
+	                              std::vector<ProcessInfo*> const& deadProcesses,
+	                              KillType kt,
+	                              KillType* newKillType) const {
+		if (newKillType) {
+			*newKillType = kt;
+		}
+		return true;
+	}
+
+	virtual ~ISimulationPolicy() = default;
+};
+
 class ISimulator : public INetwork {
 
 public:
 	using KillType = simulator::KillType;
 	using ProcessInfo = simulator::ProcessInfo;
 	using MachineInfo = simulator::MachineInfo;
-
-	// Order matters! all modes >= 2 are fault injection modes
-	enum TSSMode { Disabled, EnabledNormal, EnabledAddDelay, EnabledDropMutations };
-
-	enum class BackupAgentType { NoBackupAgents, WaitForType, BackupToFile, BackupToDB };
-	enum class ExtraDatabaseMode { Disabled, LocalOrSingle, Single, Local, Multiple };
-
-	static ExtraDatabaseMode stringToExtraDatabaseMode(const std::string& databaseMode) {
-		if (databaseMode == "Disabled") {
-			return ExtraDatabaseMode::Disabled;
-		} else if (databaseMode == "LocalOrSingle") {
-			return ExtraDatabaseMode::LocalOrSingle;
-		} else if (databaseMode == "Single") {
-			return ExtraDatabaseMode::Single;
-		} else if (databaseMode == "Local") {
-			return ExtraDatabaseMode::Local;
-		} else if (databaseMode == "Multiple") {
-			return ExtraDatabaseMode::Multiple;
-		} else {
-			TraceEvent(SevError, "UnknownExtraDatabaseMode").detail("DatabaseMode", databaseMode);
-			ASSERT(false);
-			throw internal_error();
-		}
-	};
 
 	ProcessInfo* getProcess(Endpoint const& endpoint) { return getProcessByAddress(endpoint.getPrimaryAddress()); }
 
@@ -271,7 +286,8 @@ public:
 		allSwapsDisabled = false;
 	}
 	bool canSwapToMachine(Optional<Standalone<StringRef>> zoneId) const {
-		return swapsDisabled.count(zoneId) == 0 && !allSwapsDisabled && extraDatabases.empty();
+		return swapsDisabled.count(zoneId) == 0 && !allSwapsDisabled &&
+		       (!simulationPolicy || simulationPolicy->canSwapToMachine(zoneId));
 	}
 	void enableSwapsToAll() {
 		swapsDisabled.clear();
@@ -301,45 +317,17 @@ public:
 	                                           std::string service,
 	                                           Reference<HTTP::IRequestHandler> requestHandler) = 0;
 
-	int desiredCoordinators;
-	int physicalDatacenters;
+	void setSimulationPolicy(Reference<ISimulationPolicy> policy) { simulationPolicy = policy; }
+	Reference<ISimulationPolicy> getSimulationPolicy() const { return simulationPolicy; }
+
+	void protectAddress(NetworkAddress const& address) { protectedAddresses.insert(address); }
+	bool isProtectedAddress(NetworkAddress const& address) const { return protectedAddresses.contains(address); }
+	size_t protectedAddressCount() const { return protectedAddresses.size(); }
+
 	int processesPerMachine;
 	int listenersPerProcess;
 
-	// We won't kill machines in this set, but we might reboot
-	// them.  This is a conservative mechanism to prevent the
-	// simulator from killing off important processes and rendering
-	// the cluster unrecoverable, e.g. a quorum of coordinators.
-	std::set<NetworkAddress> protectedAddresses;
-
 	std::map<NetworkAddress, ProcessInfo*> currentlyRebootingProcesses;
-	std::vector<std::string> extraDatabases;
-	Reference<IReplicationPolicy> storagePolicy;
-	Reference<IReplicationPolicy> tLogPolicy;
-	int32_t tLogWriteAntiQuorum;
-	Optional<Standalone<StringRef>> primaryDcId;
-	Reference<IReplicationPolicy> remoteTLogPolicy;
-	int32_t usableRegions;
-	bool quiesced = false;
-	std::string disablePrimary;
-	std::string disableRemote;
-	std::string originalRegions;
-	std::string startingDisabledConfiguration;
-	bool allowLogSetKills;
-	Optional<Standalone<StringRef>> remoteDcId;
-	bool hasSatelliteReplication;
-	Reference<IReplicationPolicy> satelliteTLogPolicy;
-	Reference<IReplicationPolicy> satelliteTLogPolicyFallback;
-	int32_t satelliteTLogWriteAntiQuorum;
-	int32_t satelliteTLogWriteAntiQuorumFallback;
-	std::vector<Optional<Standalone<StringRef>>> primarySatelliteDcIds;
-	std::vector<Optional<Standalone<StringRef>>> remoteSatelliteDcIds;
-	TSSMode tssMode;
-	std::map<NetworkAddress, bool> corruptWorkerMap;
-
-	// Used by workloads that perform reconfigurations
-	int testerCount;
-	std::string connectionString;
 
 	bool isStopped;
 	double lastConnectionFailure;
@@ -347,76 +335,16 @@ public:
 	bool speedUpSimulation;
 	double connectionFailureEnableTime; // Last time connection failure is enabled.
 	double connectionFailureDisableTime = 0; // Latest time connection failure should be disabled.
-	bool disableTLogRecoveryFinish;
-	BackupAgentType backupAgents;
-	BackupAgentType drAgents;
-	bool willRestart = false;
-	bool restarted = false;
-	bool isConsistencyChecked = false;
-
-	bool hasDiffProtocolProcess; // true if simulator is testing a process with a different version
-	bool setDiffProtocol; // true if a process with a different protocol version has been started
-
-	bool allowStorageMigrationTypeChange = false;
-	double injectTargetedSSRestartTime = std::numeric_limits<double>::max();
-	double injectSSDelayTime = std::numeric_limits<double>::max();
-	double injectTargetedBMRestartTime = std::numeric_limits<double>::max();
-	double injectTargetedBWRestartTime = std::numeric_limits<double>::max();
-
-	enum SimConsistencyScanState {
-		DisabledStart = 0,
-		Enabling = 1,
-		Enabled = 2,
-		Enabled_InjectCorruption = 3,
-		Enabled_FoundCorruption = 4,
-		Complete = 5,
-		DisabledEnd = 6
-	};
-	SimConsistencyScanState consistencyScanState = SimConsistencyScanState::DisabledStart;
-
-	// check that validates that the state transition is valid
-	bool updateConsistencyScanState(SimConsistencyScanState expectedCurrent, SimConsistencyScanState desired) {
-		if (consistencyScanState == expectedCurrent && desired > consistencyScanState) {
-			consistencyScanState = desired;
-
-			if (desired == SimConsistencyScanState::Enabled_FoundCorruption) {
-				// reset other metadata
-				consistencyScanInjectedCorruptionType = {};
-				consistencyScanCorruptRequestKey = {};
-				consistencyScanCorruptor = {};
-			}
-
-			return true;
-		}
-		return false;
-	}
-
-	// Inject corruption only in consistency scan reads to ensure scan finds it.
-	enum SimConsistencyScanCorruptionType { FlipMoreFlag = 0, AddToEmpty = 1, RemoveLastRow = 2, ChangeFirstValue = 3 };
-	Optional<SimConsistencyScanCorruptionType> consistencyScanInjectedCorruptionType;
-	Optional<UID> consistencyScanInjectedCorruptionDestination;
-	Optional<bool> doInjectConsistencyScanCorruption;
-	Optional<Standalone<StringRef>> consistencyScanCorruptRequestKey;
-	Optional<std::pair<UID, NetworkAddress>> consistencyScanCorruptor;
 
 	std::unordered_map<Standalone<StringRef>, PrivateKey> authKeys;
 
 	std::set<std::pair<std::string, unsigned>> corruptedBlocks;
-
-	// Validate at-rest encryption guarantees. If enabled, tests should inject a known 'marker' in Key and/or Values
-	// inserted into FDB by the workload. On shutdown, all test generated files (under simfdb/) are scanned to find if
-	// 'plaintext marker' is present.
-	Optional<std::string> dataAtRestPlaintextMarker;
 
 	std::unordered_map<std::string, Reference<HTTP::SimRegisteredHandlerContext>> httpHandlers;
 	std::vector<std::pair<ProcessInfo*, Reference<HTTP::SimServerContext>>> httpServerProcesses;
 	std::set<IPAddress> httpServerIps;
 	int nextHTTPPort = 5000;
 	bool httpProtected = false;
-
-	// Truly simulator-global registry for MockS3ServerChaos to prevent duplicate registrations
-	// across all simulated processes (must stay in sync with httpHandlers)
-	std::set<std::string> registeredMockS3ChaosServers;
 
 	flowGlobalType global(int id) const final;
 	void setGlobal(size_t id, flowGlobalType v) final;
@@ -439,6 +367,10 @@ protected:
 	Mutex mutex;
 
 private:
+	Reference<ISimulationPolicy> simulationPolicy;
+	// We won't kill machines in this set, but we might reboot them. This lets
+	// higher-level simulation policies protect important processes.
+	std::set<NetworkAddress> protectedAddresses;
 	std::set<Optional<Standalone<StringRef>>> swapsDisabled;
 	std::map<NetworkAddress, int> excludedAddresses;
 	std::map<NetworkAddress, int> clearedAddresses;
@@ -450,6 +382,13 @@ private:
 };
 
 extern ISimulator* g_simulator;
+
+inline bool simulationPolicyHasCapability(ISimulationPolicy::Capability capability) {
+	if (!g_network || !g_network->isSimulated() || !g_simulator || !g_simulator->getSimulationPolicy()) {
+		return false;
+	}
+	return g_simulator->getSimulationPolicy()->hasCapability(capability);
+}
 
 void startNewSimulator(bool printSimTime);
 
