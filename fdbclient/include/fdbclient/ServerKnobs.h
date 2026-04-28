@@ -124,6 +124,7 @@ public:
 	double BG_REBALANCE_MAX_POLLING_INTERVAL;
 	double BG_REBALANCE_SWITCH_CHECK_INTERVAL;
 	double DD_QUEUE_LOGGING_INTERVAL;
+	double DD_RELOCATOR_LATENCY_LOGGING_INTERVAL;
 	double DD_QUEUE_COUNTER_REFRESH_INTERVAL;
 	double DD_QUEUE_COUNTER_MAX_LOG; // max number of servers for which trace events will be generated in each round of
 	                                 // DD_QUEUE_COUNTER_REFRESH_INTERVAL duration
