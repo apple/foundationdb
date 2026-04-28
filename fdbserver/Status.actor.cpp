@@ -3649,6 +3649,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
     Version datacenterVersionDifference,
 	Version dcLogServerVersionDifference,
 	Version dcStorageServerVersionDifference,
+    std::unordered_map<NetworkAddress, double> excludedDegradedServers,
     double deadlineTimeout) {
 	state JsonBuilderObject statusObj;
 	state JsonBuilderArray messages;
@@ -3662,7 +3663,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	                                                                           workers,
 	                                                                           workerIssues,
 	                                                                           storageMetadatas,
-	                                                                           coordinators),
+	                                                                           coordinators,
+	                                                                           excludedDegradedServers),
 	                                                      deadlineTimeout)));
 
 	if (result.isError()) {
@@ -3707,6 +3709,36 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	statusObj["messages"] = messages;
 
 	return StatusReply(statusObj.getJson());
+}
+
+StatusReply clusterGetFaultToleranceStatus(const std::string& statusStr) {
+	double tStart = timer();
+
+	try {
+		json_spirit::mValue mv = readJSONStrictly(statusStr);
+		JSONDoc jsonDoc(mv);
+
+		std::string faultToleranceRelatedFields[] = {
+			"fault_tolerance", "data",    "logs", "maintenance_zone", "maintenance_seconds_remaining", "qos",
+			"recovery_state",  "messages"
+		};
+
+		JsonBuilderObject statusObj;
+		for (std::string& field : faultToleranceRelatedFields) {
+			if (jsonDoc.has(field)) {
+				statusObj[field] = jsonDoc.last();
+			}
+		}
+
+		TraceEvent("ClusterGetFaultToleranceStatus")
+		    .detail("Duration", timer() - tStart)
+		    .detail("StatusSize", statusObj.getFinalLength());
+
+		return StatusReply(statusObj.getJson());
+	} catch (Error& e) {
+		TraceEvent(SevError, "StatusError").error(e);
+		throw;
+	}
 }
 
 bool checkAsciiNumber(const char* s) {
@@ -4109,6 +4141,9 @@ TEST_CASE("/fdbserver/clustercontroller/clusterGetStatusTimeout") {
 	                                                          coordinators,
 	                                                          std::vector<NetworkAddress>(),
 	                                                          Version(0),
+	                                                          Version(0),
+	                                                          Version(0),
+	                                                          std::unordered_map<NetworkAddress, double>(),
 	                                                          1.0);
 	// Since we set the timeout above to 1 second, 5 seconds should be more than enough to complete the test.
 	// If it takes any longer, then the test case has failed
