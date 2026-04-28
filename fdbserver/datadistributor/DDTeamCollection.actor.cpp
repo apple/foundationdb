@@ -824,21 +824,22 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> buildTeams(DDTeamCollection* self) {
-		state int desiredTeams;
-		state int serverCount = 0;
-		state std::set<Optional<Standalone<StringRef>>> machines;
+	static Future<Void> buildTeams(DDTeamCollection* self) {
+		int desiredTeams{ 0 };
+		int serverCount = 0;
+		std::set<Optional<Standalone<StringRef>>> machines;
 
 		// wait to see whether restartTeamBuilder is triggered
-		wait(delay(0, g_network->getCurrentTask()));
+		co_await delay(0, g_network->getCurrentTask());
 		// make team builder don't build team during the interval between excluding the wiggled process and recruited a
 		// new SS to avoid redundant teams
 		while (self->pauseWiggle && !self->pauseWiggle->get() && self->waitUntilRecruited.get()) {
-			choose {
-				when(wait(self->waitUntilRecruited.onChange() || self->pauseWiggle->onChange())) {}
-				when(wait(delay(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY, g_network->getCurrentTask()))) {
-					break;
-				}
+			auto const recruitedOrPauseChanged =
+			    co_await timeout(self->waitUntilRecruited.onChange() || self->pauseWiggle->onChange(),
+			                     SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY,
+			                     g_network->getCurrentTask());
+			if (!recruitedOrPauseChanged.present()) {
+				break;
 			}
 		}
 
@@ -879,8 +880,7 @@ public:
 
 			// teamsToBuild is calculated such that we will not build too many teams in the situation
 			// when all (or most of) teams become unhealthy temporarily and then healthy again
-			state int teamsToBuild;
-			teamsToBuild = std::max(0, std::min(desiredTeams - teamCount, maxTeams - totalTeamCount));
+			int teamsToBuild = std::max(0, std::min(desiredTeams - teamCount, maxTeams - totalTeamCount));
 
 			if (teamCount == 0 && teamsToBuild == 0 && SERVER_KNOBS->DD_BUILD_EXTRA_TEAMS_OVERRIDE > 0) {
 				// Use DD_BUILD_EXTRA_TEAMS_OVERRIDE > 0 as the feature flag: Set to 0 to disable it
@@ -910,8 +910,6 @@ public:
 
 			self->lastBuildTeamsFailed = false;
 			if (teamsToBuild > 0 || self->notEnoughTeamsForAServer()) {
-				state std::vector<std::vector<UID>> builtTeams;
-
 				// addTeamsBestOf() will not add more teams than needed.
 				// If the team number is more than the desired, the extra teams are added in the code path when
 				// a team is added as an initial team
@@ -972,9 +970,7 @@ public:
 
 		// Building teams can cause servers to become undesired, which can make teams unhealthy.
 		// Let all of these changes get worked out before responding to the get team request
-		wait(delay(0, TaskPriority::DataDistributionLaunch));
-
-		return Void();
+		co_await delay(0, TaskPriority::DataDistributionLaunch);
 	}
 
 	// Track a team and issue RelocateShards when the level of degradation changes
