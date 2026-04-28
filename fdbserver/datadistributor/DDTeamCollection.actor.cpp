@@ -1472,7 +1472,7 @@ public:
 				}
 				otherChanges.push_back(self->excludedServers.onChange(worstAddr));
 
-				// FIXME: explain the 3 here
+				// Check the remaining exclusion forms: primary IP, secondary address and port, and secondary IP.
 				for (int i = 0; i < 3; i++) {
 					if (i > 0 && !server->getLastKnownInterface().secondaryAddress().present()) {
 						break;
