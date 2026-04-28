@@ -50,6 +50,7 @@ void forceLinkSimpleCounterTests();
 void forceLinkLogSystemRecoveryTests();
 void forceLinkIPagerTests();
 void forceLinkMockS3ServerTests();
+void forceLinkAuditUtilsTests();
 void forceLinkClusterHealthMonitorTests();
 
 struct UnitTestWorkload : TestWorkload {
@@ -120,6 +121,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkLogSystemRecoveryTests();
 		forceLinkIPagerTests();
 		forceLinkMockS3ServerTests();
+		forceLinkAuditUtilsTests();
 		forceLinkClusterHealthMonitorTests();
 
 #ifdef FLOW_GRPC_ENABLED
