@@ -1,5 +1,5 @@
 /*
- * BenchStream.actor.cpp
+ * BenchPriorityMultiLock.cpp
  *
  * This source file is part of the FoundationDB open source project
  *

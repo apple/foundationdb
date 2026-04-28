@@ -1,5 +1,5 @@
 /*
- * BenchNet2.actor.cpp
+ * BenchNet2Actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
