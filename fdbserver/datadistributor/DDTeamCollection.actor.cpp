@@ -149,18 +149,16 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> interruptableBuildTeams(DDTeamCollection* self) {
+	static Future<Void> interruptableBuildTeams(DDTeamCollection* self) {
 		if (!self->addSubsetComplete.isSet()) {
-			wait(addSubsetOfEmergencyTeams(self));
+			co_await addSubsetOfEmergencyTeams(self);
 			self->addSubsetComplete.send(Void());
 		}
 
-		loop {
-			choose {
-				when(wait(self->buildTeams())) {
-					return Void();
-				}
-				when(wait(self->restartTeamBuilder.onTrigger())) {}
+		while (true) {
+			auto res = co_await race(self->buildTeams(), self->restartTeamBuilder.onTrigger());
+			if (res.index() == 0) {
+				co_return;
 			}
 		}
 	}
