@@ -2804,9 +2804,11 @@ private:
 				self->launchQueuedWork(RelocateData(rs), self->ddEnabledState);
 			} else if (rs.cancelled) {
 				self->enqueueCancelledDataMove(rs.dataMoveId, rs.keys, self->ddEnabledState);
+				self->validate();
 			} else {
 				bool wasEmpty = serversToLaunchFrom.empty();
 				self->queueRelocation(rs, serversToLaunchFrom);
+				self->validate();
 				if (wasEmpty && !serversToLaunchFrom.empty()) {
 					triggerLaunchQueuedWork();
 				}
@@ -2820,6 +2822,7 @@ private:
 			co_await delay(0, TaskPriority::DataDistributionLaunch);
 
 			if (!serversToLaunchFrom.empty()) {
+				self->validate();
 				self->launchQueuedWork(serversToLaunchFrom, self->ddEnabledState);
 				serversToLaunchFrom.clear();
 			}
@@ -2832,6 +2835,7 @@ private:
 
 			// This stream is triggered by queueRelocation(), which is triggered by sending self->input.
 			self->completeSourceFetch(results);
+			self->validate();
 			self->launchQueuedWork(results, self->ddEnabledState);
 		}
 	}
@@ -2842,6 +2846,7 @@ private:
 
 			complete(done, self->busymap, self->destBusymap);
 			addServersToLaunch(done.src);
+			self->validate();
 		}
 	}
 
@@ -2862,12 +2867,14 @@ private:
 				TraceEvent(SevWarnAlways, "RelocationDurationTooLong").detail("Duration", now() - done.startTime);
 				debug_setCheckRelocationDuration(false);
 			}
+			self->validate();
 		}
 	}
 
 	Future<Void> launchCompletedRanges() {
 		while (true) {
 			KeyRange done = co_await rangesComplete.getFuture();
+			self->validate();
 			self->launchQueuedWork(done, self->ddEnabledState);
 		}
 	}
@@ -2953,6 +2960,7 @@ private:
 	Future<Void> getUnhealthyRelocationCountRequests() {
 		while (true) {
 			Promise<int> r = co_await getUnhealthyRelocationCount;
+			self->validate();
 			r.send(self->getUnhealthyRelocationCount());
 		}
 	}
