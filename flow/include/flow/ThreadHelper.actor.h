@@ -48,7 +48,7 @@ void doOnMainThreadVoid(Future<Void> signal, F f) {
 }
 
 ACTOR template <class F, class T>
-void doOnMainThreadVoid(Future<Void> signal, F f, T* t, Error T::* member) {
+void doOnMainThreadVoid(Future<Void> signal, F f, T* t, Error T::*member) {
 	wait(signal);
 	if (t && (t->*member).code() != invalid_error_code)
 		return;
@@ -77,7 +77,7 @@ void doOnMainThreadVoid(Future<Void> signal, F f, T* t, Error T::* member) {
 //
 // `onMainThreadVoid` is defined here because of the dependency in `ThreadSingleAssignmentVarBase`.
 template <class F, class T>
-void onMainThreadVoid(F f, T* t, Error T::* member, TaskPriority taskID = TaskPriority::DefaultOnMainThread) {
+void onMainThreadVoid(F f, T* t, Error T::*member, TaskPriority taskID = TaskPriority::DefaultOnMainThread) {
 	Promise<Void> signal;
 	internal_thread_helper::doOnMainThreadVoid(signal.getFuture(), f, t, member);
 	g_network->onMainThread(std::move(signal), taskID);
@@ -784,14 +784,14 @@ template <typename T>
 struct allow_anonymous_future<Optional<Standalone<T>>> : std::false_type {};
 
 template <class T>
-typename std::enable_if<allow_anonymous_future<T>::value, Future<T>>::type safeThreadFutureToFuture(
-    const ThreadFuture<T>& threadFuture) {
+    requires(allow_anonymous_future<T>::value)
+Future<T> safeThreadFutureToFuture(const ThreadFuture<T>& threadFuture) {
 	return safeThreadFutureToFutureImpl(threadFuture);
 }
 
 template <class T>
-typename std::enable_if<!allow_anonymous_future<T>::value, Future<T>>::type safeThreadFutureToFuture(
-    ThreadFuture<T>& threadFuture) {
+    requires(!allow_anonymous_future<T>::value)
+Future<T> safeThreadFutureToFuture(ThreadFuture<T>& threadFuture) {
 	Future<T> f = safeThreadFutureToFutureImpl(threadFuture);
 	if (BUGGIFY) {
 		return removeArenaFromStandalone(f);
@@ -800,15 +800,15 @@ typename std::enable_if<!allow_anonymous_future<T>::value, Future<T>>::type safe
 }
 
 template <class T>
-typename std::enable_if<allow_anonymous_future<T>::value, Future<T>>::type safeThreadFutureToFuture(
-    const Future<T>& future) {
+    requires(allow_anonymous_future<T>::value)
+Future<T> safeThreadFutureToFuture(const Future<T>& future) {
 	// Do nothing
 	return future;
 }
 
 template <class T>
-typename std::enable_if<!allow_anonymous_future<T>::value, Future<T>>::type safeThreadFutureToFuture(
-    Future<T>& future) {
+    requires(!allow_anonymous_future<T>::value)
+Future<T> safeThreadFutureToFuture(Future<T>& future) {
 	if (BUGGIFY) {
 		return removeArenaFromStandalone(future);
 	}

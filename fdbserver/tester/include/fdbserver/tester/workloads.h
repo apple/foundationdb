@@ -74,7 +74,7 @@ struct TestWorkload : NonCopyable, WorkloadContext, ReferenceCounted<TestWorkloa
 		if (runSetup)
 			phases |= TestWorkload::SETUP;
 	}
-	virtual ~TestWorkload() {};
+	virtual ~TestWorkload(){};
 	virtual Future<Void> initialized() { return Void(); }
 	// WARNING: this method must not be implemented by a workload directly. Instead, this will be implemented by
 	// the workload factory. Instead, provide a static member variable called name.
@@ -109,7 +109,8 @@ struct TestWorkloadImpl : Workload {
 
 	explicit(false) TestWorkloadImpl(WorkloadContext const& wcx) : Workload(wcx) {}
 	template <bool E = isFailureInjectionWorkload>
-	TestWorkloadImpl(WorkloadContext const& wcx, std::enable_if_t<E, NoOptions> o) : Workload(wcx, o) {}
+	    requires(E)
+	TestWorkloadImpl(WorkloadContext const& wcx, NoOptions o) : Workload(wcx, o) {}
 
 	std::string description() const override { return Workload::NAME; }
 };

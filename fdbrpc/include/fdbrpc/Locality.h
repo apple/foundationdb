@@ -345,7 +345,8 @@ struct LBLocalityData {
 // Template specialization that only works for interfaces with a .locality member.
 //   If an interface has a .locality it must also have a .address()
 template <class Interface>
-struct LBLocalityData<Interface, typename std::enable_if<Interface::LocationAwareLoadBalance>::type> {
+    requires(static_cast<bool>(Interface::LocationAwareLoadBalance))
+struct LBLocalityData<Interface> {
 	enum { Present = 1 };
 	static LocalityData getLocality(Interface const& i) { return i.locality; }
 	static NetworkAddress getAddress(Interface const& i) { return i.address(); }

@@ -53,9 +53,8 @@ struct OrContext {
 };
 
 template <class Left, class Right>
-constexpr std::enable_if_t<Left::type == AnnotationType::Context && Right::type == AnnotationType::Context,
-                           OrContext<Left, Right>>
-operator|(Left const& lhs, Right const& rhs) {
+    requires(Left::type == AnnotationType::Context && Right::type == AnnotationType::Context)
+constexpr OrContext<Left, Right> operator|(Left const& lhs, Right const& rhs) {
 	return OrContext<Left, Right>(lhs, rhs);
 }
 
@@ -92,20 +91,19 @@ struct AssertNot {
 };
 
 template <class Left, class Right>
-constexpr std::enable_if_t<Left::type == AnnotationType::Assertion && Right::type == AnnotationType::Assertion,
-                           AssertOr<Left, Right>>
-operator||(Left const& lhs, Right const& rhs) {
+    requires(Left::type == AnnotationType::Assertion && Right::type == AnnotationType::Assertion)
+constexpr AssertOr<Left, Right> operator||(Left const& lhs, Right const& rhs) {
 	return AssertOr<Left, Right>();
 }
 template <class Left, class Right>
-constexpr std::enable_if_t<Left::type == AnnotationType::Assertion && Right::type == AnnotationType::Assertion,
-                           AssertAnd<Left, Right>>
-operator&&(Left const& lhs, Right const& rhs) {
+    requires(Left::type == AnnotationType::Assertion && Right::type == AnnotationType::Assertion)
+constexpr AssertAnd<Left, Right> operator&&(Left const& lhs, Right const& rhs) {
 	return AssertAnd<Left, Right>();
 }
 
 template <class T>
-constexpr std::enable_if_t<T::type == AnnotationType::Assertion, AssertNot<T>> operator!(T const&) {
+    requires(T::type == AnnotationType::Assertion)
+constexpr AssertNot<T> operator!(T const&) {
 	return AssertNot<T>();
 }
 

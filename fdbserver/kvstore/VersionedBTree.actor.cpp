@@ -272,7 +272,8 @@ struct FIFOQueueCodec {
 };
 
 template <typename T>
-struct FIFOQueueCodec<T, typename std::enable_if<std::is_trivially_copyable<T>::value>::type> {
+    requires(std::is_trivially_copyable_v<T>)
+struct FIFOQueueCodec<T> {
 	static_assert(std::is_trivially_copyable<T>::value);
 	static T readFromBytes(const uint8_t* src, int& bytesRead) {
 		bytesRead = sizeof(T);

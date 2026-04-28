@@ -1637,8 +1637,8 @@ public:
 	using isLoadBalancedReply = std::is_base_of<LoadBalancedReply, Reply>;
 
 	template <class Reply>
-	typename std::enable_if<isLoadBalancedReply<Reply>::value, void>::type
-	sendErrorWithPenalty(const ReplyPromise<Reply>& promise, const Error& err, double penalty) {
+	    requires(isLoadBalancedReply<Reply>::value)
+	void sendErrorWithPenalty(const ReplyPromise<Reply>& promise, const Error& err, double penalty) {
 		if (err.code() == error_code_wrong_shard_server) {
 			++counters.wrongShardServer;
 		}
@@ -1649,8 +1649,8 @@ public:
 	}
 
 	template <class Reply>
-	typename std::enable_if<!isLoadBalancedReply<Reply>::value, void>::type
-	sendErrorWithPenalty(const ReplyPromise<Reply>& promise, const Error& err, double) {
+	    requires(!isLoadBalancedReply<Reply>::value)
+	void sendErrorWithPenalty(const ReplyPromise<Reply>& promise, const Error& err, double) {
 		if (err.code() == error_code_wrong_shard_server) {
 			++counters.wrongShardServer;
 		}
