@@ -1974,6 +1974,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						    rd.keys, rd.isRestore(), selectedTeams, rd.dataMoveId.first(), metrics, debugID);
 					}
 
+					self->relocatorLatency.addSample(now() - startTime);
 					return Void();
 				} else {
 					throw error;
@@ -1999,6 +2000,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 		}
 	} catch (Error& e) {
 		state Error err = e;
+		if (err.code() != error_code_actor_cancelled && err.code() != error_code_data_move_cancelled) {
+			self->relocatorErrorLatency.addSample(now() - startTime);
+		}
 		TraceEvent(relocateShardInterval.end(), distributorId)
 		    .errorUnsuppressed(err)
 		    .detail("Duration", now() - startTime);
@@ -2400,6 +2404,8 @@ struct DDQueueImpl {
 		state KeyRange keysToLaunchFrom;
 		state RelocateData launchData;
 		state Future<Void> recordMetrics = delay(SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL);
+		state Future<Void> recordRelocatorLatency =
+		    delay(SERVER_KNOBS->DD_RELOCATOR_LATENCY_LOGGING_INTERVAL);
 
 		state std::vector<Future<Void>> ddQueueFutures;
 
@@ -2576,6 +2582,31 @@ struct DDQueueImpl {
 								self->retryFindDstReasonCount[i] = 0;
 							}
 						}
+					}
+					when(wait(recordRelocatorLatency)) {
+						recordRelocatorLatency =
+						    delay(SERVER_KNOBS->DD_RELOCATOR_LATENCY_LOGGING_INTERVAL, TaskPriority::FlushTrace);
+						auto& s = self->relocatorLatency;
+						auto& e = self->relocatorErrorLatency;
+						TraceEvent("RelocatorLatency", self->distributorId)
+						    .detail("Count", s.getPopulationSize())
+						    .detail("Mean", s.mean())
+						    .detail("Min", s.getPopulationSize() > 0 ? s.min() : 0)
+						    .detail("P50", s.median())
+						    .detail("P90", s.percentile(0.9))
+						    .detail("P95", s.percentile(0.95))
+						    .detail("P99", s.percentile(0.99))
+						    .detail("Max", s.getPopulationSize() > 0 ? s.max() : 0)
+						    .detail("ErrorCount", e.getPopulationSize())
+						    .detail("ErrorMean", e.mean())
+						    .detail("ErrorMin", e.getPopulationSize() > 0 ? e.min() : 0)
+						    .detail("ErrorP50", e.median())
+						    .detail("ErrorP90", e.percentile(0.9))
+						    .detail("ErrorP95", e.percentile(0.95))
+						    .detail("ErrorP99", e.percentile(0.99))
+						    .detail("ErrorMax", e.getPopulationSize() > 0 ? e.max() : 0);
+						s.clear();
+						e.clear();
 					}
 					when(wait(self->error.getFuture())) {} // Propagate errors from dataDistributionRelocator
 					when(wait(waitForAll(ddQueueFutures))) {}
