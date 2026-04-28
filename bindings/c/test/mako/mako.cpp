@@ -1582,8 +1582,8 @@ int Arguments::validate() {
 			logr.error("--transaction_timeout_[tx|db] must be a non-negative integer");
 			return -1;
 		}
-		if (max_grv_queue_delay_ms < -1) {
-			logr.error("--max_grv_queue_delay must be a non-negative integer");
+		if (max_grv_queue_delay_ms < -1 || max_grv_queue_delay_ms == 0) {
+			logr.error("--max_grv_queue_delay must be a positive integer");
 			return -1;
 		}
 		if (warmup_seconds < 0) {

@@ -215,7 +215,7 @@ inline void setTransactionOptionsIfEnabled(const Arguments& args, fdb::Transacti
 	if (args.transaction_timeout_tx > 0) {
 		tx.setOption(FDB_TR_OPTION_TIMEOUT, args.transaction_timeout_tx);
 	}
-	if (args.max_grv_queue_delay_ms >= 0) {
+	if (args.max_grv_queue_delay_ms > 0) {
 		tx.setOption(FDB_TR_OPTION_MAX_GRV_QUEUE_DELAY, args.max_grv_queue_delay_ms);
 	}
 }
