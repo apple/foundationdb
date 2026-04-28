@@ -352,9 +352,9 @@ struct RestoreWorkload : TestWorkload {
 			}
 
 			// SOMEDAY: Remove after backup agents can exist quiescently
-			if ((g_simulator->backupAgents == ISimulator::BackupAgentType::BackupToFile) &&
+			if ((fdbSimulationPolicyState().backupAgents == FDBBackupAgentType::BackupToFile) &&
 			    (!RestoreWorkload::backupAgentRequests)) {
-				g_simulator->backupAgents = ISimulator::BackupAgentType::NoBackupAgents;
+				fdbSimulationPolicyState().backupAgents = FDBBackupAgentType::NoBackupAgents;
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "BackupAndRestorePartitionedCorrectness").error(e).GetLastError();

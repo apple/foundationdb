@@ -687,7 +687,8 @@ struct HasVerify_t<T, decltype(void(std::declval<T>().verify()), 0)> : std::true
 template <class T>
 constexpr bool HasVerify = HasVerify_t<T>::value;
 
-// FIXME: explain what IsPublic means here
+// IsPublic streams accept messages from clients outside the cluster and verify
+// each request before delivering it to the local queue.
 template <class T, bool IsPublic>
 struct NetNotifiedQueue final : NotifiedQueue<T>, FlowReceiver, FastAllocated<NetNotifiedQueue<T, IsPublic>> {
 	using FastAllocated<NetNotifiedQueue<T, IsPublic>>::operator new;
@@ -948,7 +949,8 @@ private:
 	NetNotifiedQueue<T, IsPublic>* queue;
 };
 
-// FIXME: explain what Public and Private mean here
+// Public request streams require T::verify() and reject unauthorized messages.
+// Private request streams are used for trusted intra-cluster traffic.
 template <class T>
 using PrivateRequestStream = RequestStream<T, false>;
 template <class T>

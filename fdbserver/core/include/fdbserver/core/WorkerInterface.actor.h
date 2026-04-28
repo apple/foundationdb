@@ -843,7 +843,7 @@ struct ExecuteRequest {
 	}
 };
 
-// FIXME: describe purpose
+// Request sent to a worker to run the snapshot command for one local role.
 struct WorkerSnapRequest {
 	constexpr static FileIdentifier file_identifier = 8194122;
 	ReplyPromise<Void> reply;

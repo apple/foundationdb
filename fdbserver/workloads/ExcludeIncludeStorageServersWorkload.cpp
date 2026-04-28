@@ -21,6 +21,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
@@ -49,7 +50,7 @@ struct ExcludeIncludeStorageServersWorkload : TestWorkload {
 		enabled =
 		    !clientId && g_network->isSimulated(); // only do this on the "first" client, and only when in simulation
 		if (g_network->isSimulated()) {
-			g_simulator->allowLogSetKills = false;
+			fdbSimulationPolicyState().allowLogSetKills = false;
 		}
 	}
 
@@ -102,7 +103,7 @@ struct ExcludeIncludeStorageServersWorkload : TestWorkload {
 				std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
 				    co_await NativeAPI::getServerListAndProcessClasses(&tr);
 				for (auto& [ssi, p] : results) {
-					if (!g_simulator->protectedAddresses.contains(ssi.address())) {
+					if (!g_simulator->isProtectedAddress(ssi.address())) {
 						servers.insert(AddressExclusion(ssi.address().ip, ssi.address().port));
 					}
 				}

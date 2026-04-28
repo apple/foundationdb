@@ -25,6 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/fdbrpc.h"
+#include <string>
 #include <unordered_set>
 
 FDB_BOOLEAN_PARAM(IsMocked);
@@ -158,7 +159,8 @@ struct GetDataDistributorMetricsRequest {
 	}
 };
 
-// FIXME: explain purpose
+// Request sent to the data distributor to coordinate a snapshot across
+// stateful workers for a single snapshot UID.
 struct DistributorSnapRequest {
 	constexpr static FileIdentifier file_identifier = 5427684;
 	Arena arena;
@@ -221,9 +223,24 @@ struct DistributorSplitRangeRequest {
 	}
 };
 
+struct StorageWigglerState {
+	enum Value : uint8_t { INVALID = 0, RUN = 1, PAUSE = 2 };
+
+	static std::string toString(Value state) {
+		switch (state) {
+		case RUN:
+			return "running";
+		case PAUSE:
+			return "paused";
+		default:
+			return "unknown";
+		}
+	}
+};
+
 struct GetStorageWigglerStateReply {
 	constexpr static FileIdentifier file_identifier = 356721;
-	uint8_t primary = 0, remote = 0; // StorageWiggler::State enum
+	uint8_t primary = 0, remote = 0; // StorageWigglerState::Value enum
 	double lastStateChangePrimary = 0.0, lastStateChangeRemote = 0.0;
 
 	GetStorageWigglerStateReply() = default;

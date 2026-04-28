@@ -23,8 +23,8 @@
 
 namespace simulator {
 
-// Order matters!
-// FIXME: explain why it matters.
+// Order matters: simulation code compares kill types to decide whether one fault mode is
+// more destructive than another.
 enum KillType {
 	KillInstantly,
 	InjectFaults,
