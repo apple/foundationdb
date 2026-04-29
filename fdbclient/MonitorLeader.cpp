@@ -24,7 +24,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/UnitTest.h"
-#include "fdbrpc/genericactors.actor.h"
+#include "fdbrpc/genericactors.h"
 #include "flow/Platform.h"
 #include "flow/IConnection.h"
 #include "flow/CoroUtils.h"

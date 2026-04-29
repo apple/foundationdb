@@ -55,7 +55,7 @@
 #include "flow/TLSConfig.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "AsyncFileWriteChecker.h"
-#include "fdbrpc/genericactors.actor.h"
+#include "fdbrpc/genericactors.h"
 #include "fdbrpc/WellKnownEndpoints.h"
 #include "flow/FaultInjection.h"
 #include "flow/TaskQueue.h"

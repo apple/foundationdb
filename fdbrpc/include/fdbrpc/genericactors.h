@@ -1,5 +1,5 @@
 /*
- * genericactors.actor.h
+ * genericactors.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,13 +18,7 @@
  * limitations under the License.
  */
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
-#if defined(NO_INTELLISENSE) && !defined(FDBRPC_GENERICACTORS_ACTOR_G_H)
-#define FDBRPC_GENERICACTORS_ACTOR_G_H
-#include "fdbrpc/genericactors.actor.g.h"
-#elif !defined(RPCGENERICACTORS_ACTOR_H)
-#define RPCGENERICACTORS_ACTOR_H
+#pragma once
 
 #include "flow/genericactors.actor.h"
 #include "flow/CodeProbe.h"
@@ -36,7 +30,6 @@
 #include <type_traits>
 
 #include "flow/CoroUtils.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 // To avoid directly access INetworkConnection::net()->removeCachedDNS(), which will require heavy include budget, put
 // the call to FlowTransport.cpp as a external function.
@@ -191,14 +184,14 @@ Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(Req request,
 	}
 }
 
-ACTOR template <class T>
-Future<T> timeoutWarning(Future<T> what, double time, PromiseStream<Void> output) {
-	state Future<Void> end = delay(time);
-	loop choose {
-		when(T t = wait(what)) {
-			return t;
-		}
-		when(wait(end)) {
+template <class T>
+Future<T> timeoutWarning(Future<T> what, double time, PromiseStream<Void> output, ExplicitVoid = {}) {
+	Future<Void> end = delay(time);
+	while (true) {
+		auto res = co_await race(what, end);
+		if (res.index() == 0) {
+			co_return std::get<0>(std::move(res));
+		} else if (res.index() == 1) {
 			output.send(Void());
 			end = delay(time);
 		}
@@ -331,65 +324,68 @@ struct PeerHolder {
 	}
 };
 
-// Implements getReplyStream, this a void actor with the same lifetime as the input ReplyPromiseStream.
-// Because this actor holds a reference to the stream, normally it would be impossible to know when there are no other
-// references. To get around this, there is a SAV inside the stream that has one less promise reference than it should
-// (caused by getErrorFutureAndDelPromiseRef()). When that SAV gets a broken promise because no one besides this void
-// actor is referencing it, this void actor will get a broken_promise dropping the final reference to the full
+// Implements getReplyStream, this coroutine has the same lifetime as the input ReplyPromiseStream.
+// Because this coroutine holds a reference to the stream, normally it would be impossible to know when there are no
+// other references. To get around this, there is a SAV inside the stream that has one less promise reference than it
+// should (caused by getErrorFutureAndDelPromiseRef()). When that SAV gets a broken promise because no one besides this
+// coroutine is referencing it, this coroutine will get a broken_promise dropping the final reference to the full
 // ReplyPromiseStream
-ACTOR template <class X>
-void endStreamOnDisconnect(Future<Void> signal,
-                           ReplyPromiseStream<X> stream,
-                           Endpoint endpoint,
-                           Reference<Peer> peer = Reference<Peer>()) {
-	state PeerHolder holder = PeerHolder(peer);
+template <class X>
+Future<Void> endStreamOnDisconnect(Uncancellable,
+                                   Future<Void> signal,
+                                   ReplyPromiseStream<X> stream,
+                                   Endpoint endpoint,
+                                   Reference<Peer> peer = Reference<Peer>()) {
+	PeerHolder holder = PeerHolder(peer);
 	stream.setRequestStreamEndpoint(endpoint);
+	Error err;
 	try {
-		choose {
-			when(wait(signal)) {
-				stream.sendError(connection_failed());
-			}
-			when(wait(peer.isValid() ? peer->disconnect.getFuture() : Never())) {
-				stream.sendError(connection_failed());
-			}
-			when(wait(stream.getErrorFutureAndDelPromiseRef())) {}
+		auto res = co_await race(
+		    signal, peer.isValid() ? peer->disconnect.getFuture() : Never(), stream.getErrorFutureAndDelPromiseRef());
+		if (res.index() == 0) {
+			stream.sendError(connection_failed());
+		} else if (res.index() == 1) {
+			stream.sendError(connection_failed());
 		}
+		co_return;
 	} catch (Error& e) {
-		if (e.code() == error_code_broken_promise) {
-			// getErrorFutureAndDelPromiseRef returned, wait on stream connect or error
-			if (!stream.connected()) {
-				wait(signal || stream.onConnected());
-			}
-		}
-		// Notify BEFORE dropping last reference, causing broken_promise to send on stream before destructor is called
-		stream.notifyFailed();
+		err = e;
 	}
+	if (err.code() == error_code_broken_promise) {
+		// getErrorFutureAndDelPromiseRef returned, wait on stream connect or error
+		if (!stream.connected()) {
+			co_await (signal || stream.onConnected());
+		}
+	}
+	// Notify BEFORE dropping last reference, causing broken_promise to send on stream before destructor is called
+	stream.notifyFailed();
 }
 
 // Implements tryGetReply, getReplyUnlessFailedFor
-ACTOR template <class X>
+template <class X>
 Future<ErrorOr<X>> waitValueOrSignal(Future<X> value,
                                      Future<Void> signal,
                                      Endpoint endpoint,
                                      ReplyPromise<X> holdme = ReplyPromise<X>(),
                                      Reference<Peer> peer = Reference<Peer>()) {
-	state PeerHolder holder = PeerHolder(peer);
-	loop {
+	PeerHolder holder = PeerHolder(peer);
+	while (true) {
 		try {
-			choose {
-				when(X x = wait(value)) {
-					return x;
-				}
-				when(wait(signal)) {
-					return ErrorOr<X>(IFailureMonitor::failureMonitor().knownUnauthorized(endpoint)
-					                      ? unauthorized_attempt()
-					                      : request_maybe_delivered());
-				}
+			auto res = co_await race(value, signal);
+			if (res.index() == 0) {
+				X x = std::get<0>(std::move(res));
+
+				co_return x;
+			} else if (res.index() == 1) {
+
+				co_return ErrorOr<X>(IFailureMonitor::failureMonitor().knownUnauthorized(endpoint)
+				                         ? unauthorized_attempt()
+				                         : request_maybe_delivered());
 			}
 		} catch (Error& e) {
 			if (signal.isError()) {
 				TraceEvent(SevError, "WaitValueOrSignalError").error(signal.getError());
-				return ErrorOr<X>(internal_error());
+				co_return ErrorOr<X>(internal_error());
 			}
 
 			if (e.code() == error_code_actor_cancelled)
@@ -398,34 +394,34 @@ Future<ErrorOr<X>> waitValueOrSignal(Future<X> value,
 			// broken_promise error normally means an endpoint failure, which in tryGetReply has the same semantics as
 			// receiving the failure signal
 			if (e.code() != error_code_broken_promise || signal.isError())
-				return ErrorOr<X>(e);
+				co_return ErrorOr<X>(e);
 			IFailureMonitor::failureMonitor().endpointNotFound(endpoint);
 			value = Never();
 		}
 	}
 }
 
-ACTOR template <class T>
-Future<T> sendCanceler(ReplyPromise<T> reply, ReliablePacket* send, Endpoint endpoint) {
-	state bool didCancelReliable = false;
+template <class T>
+Future<T> sendCanceler(ReplyPromise<T> reply, ReliablePacket* send, Endpoint endpoint, ExplicitVoid = {}) {
+	bool didCancelReliable = false;
 	try {
-		loop {
+		while (true) {
 			if (IFailureMonitor::failureMonitor().permanentlyFailed(endpoint)) {
 				FlowTransport::transport().cancelReliable(send);
 				didCancelReliable = true;
 				if (IFailureMonitor::failureMonitor().knownUnauthorized(endpoint)) {
 					throw unauthorized_attempt();
 				} else {
-					wait(Never());
+					co_await Future<Void>(Never());
 				}
 			}
-			choose {
-				when(T t = wait(reply.getFuture())) {
-					FlowTransport::transport().cancelReliable(send);
-					didCancelReliable = true;
-					return t;
-				}
-				when(wait(IFailureMonitor::failureMonitor().onStateChanged(endpoint))) {}
+			auto res = co_await race(reply.getFuture(), IFailureMonitor::failureMonitor().onStateChanged(endpoint));
+			if (res.index() == 0) {
+				T t = std::get<0>(std::move(res));
+
+				FlowTransport::transport().cancelReliable(send);
+				didCancelReliable = true;
+				co_return t;
 			}
 		}
 	} catch (Error& e) {
@@ -450,7 +446,3 @@ Future<X> reportEndpointFailure(Future<X> value, Endpoint endpoint, ExplicitVoid
 		throw;
 	}
 }
-
-#include "flow/unactorcompiler.h"
-
-#endif
