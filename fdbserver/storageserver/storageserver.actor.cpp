@@ -95,7 +95,7 @@
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/DataMovement.h"
-#include "fdbserver/storageserver/StorageServer.actor.h"
+#include "fdbserver/storageserver/StorageServer.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "StorageServerUtils.h"
 #include "flow/ActorCollection.h"
@@ -105,6 +105,7 @@
 #include "flow/Histogram.h"
 #include "flow/IRandom.h"
 #include "flow/IndexedSet.h"
+#include "flow/CoroUtils.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TDMetric.h"
 #include "flow/Trace.h"
@@ -12539,14 +12540,14 @@ Future<Void> storageServer(IKeyValueStore* persistentData,
 }
 
 // for recovering an existing storage server
-ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
-                                 StorageServerInterface ssi,
-                                 Reference<AsyncVar<ServerDBInfo> const> db,
-                                 std::string folder,
-                                 Promise<Void> recovered,
-                                 Reference<IClusterConnectionRecord> connRecord) {
-	state StorageServer self(persistentData, db, ssi);
-	state Future<Void> ssCore;
+Future<Void> storageServer(IKeyValueStore* persistentData,
+                           StorageServerInterface ssi,
+                           Reference<AsyncVar<ServerDBInfo> const> db,
+                           std::string folder,
+                           Promise<Void> recovered,
+                           Reference<IClusterConnectionRecord> connRecord) {
+	StorageServer self(persistentData, db, ssi);
+	Future<Void> ssCore;
 	self.folder = folder;
 	self.checkpointFolder = joinPath(self.folder, serverCheckpointFolder);
 	self.fetchedCheckpointFolder = joinPath(self.folder, fetchedCheckpointFolder);
@@ -12566,28 +12567,30 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	clearFileFolder(self.bulkLoadFolder, self.thisServerID, /*ignoreError=*/false);
 
 	self.actors.add(rocksdbLogCleaner(folder));
+	Error err;
 	try {
-		state double start = now();
+		double start = now();
 		TraceEvent("StorageServerRebootStart", self.thisServerID).log();
 
-		wait(self.storage.init());
-		choose {
-			// after a rollback there might be uncommitted changes.
-			// for memory storage engine type, wait until recovery is done before commit
-			when(wait(self.storage.commit())) {}
-
-			when(wait(memoryStoreRecover(persistentData, connRecord, self.thisServerID))) {
-				TraceEvent("DisposeStorageServer", self.thisServerID).log();
-				throw worker_removed();
-			}
+		co_await self.storage.init();
+		// after a rollback there might be uncommitted changes.
+		// for memory storage engine type, wait until recovery is done before commit
+		auto res =
+		    co_await race(self.storage.commit(), memoryStoreRecover(persistentData, connRecord, self.thisServerID));
+		if (res.index() == 1) {
+			TraceEvent("DisposeStorageServer", self.thisServerID).log();
+			throw worker_removed();
+		} else if (res.index() != 0) {
+			UNREACHABLE();
 		}
+
 		++self.counters.kvCommits;
 
-		bool ok = wait(self.storage.restoreDurableState());
+		bool ok = co_await self.storage.restoreDurableState();
 		if (!ok) {
 			if (recovered.canBeSet())
 				recovered.send(Void());
-			return Void();
+			co_return;
 		}
 		TraceEvent("SSTimeRestoreDurableState", self.thisServerID).detail("TimeTaken", now() - start);
 
@@ -12610,48 +12613,48 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		if (recovered.canBeSet())
 			recovered.send(Void());
 
-		state Future<Void> f = storageInterfaceRegistration(&self, ssi, {});
-		wait(delay(0));
-		ErrorOr<Void> e = wait(errorOr(f));
+		Future<Void> f = storageInterfaceRegistration(&self, ssi, {});
+		co_await delay(0);
+		ErrorOr<Void> e = co_await errorOr(f);
 		if (e.isError()) {
 			throw f.getError();
 		}
 
 		self.interfaceRegistered =
 		    storageInterfaceRegistration(&self, ssi, self.registerInterfaceAcceptingRequests.getFuture());
-		wait(delay(0));
+		co_await delay(0);
 
 		TraceEvent("StorageServerStartingCore", self.thisServerID).detail("TimeTaken", now() - start);
 
 		ssCore = storageServerCore(&self, ssi);
-		wait(ssCore);
+		co_await ssCore;
 
 		throw internal_error();
 	} catch (Error& e) {
+		err = e;
+	}
 
-		self.ssLock->halt();
+	self.ssLock->halt();
 
-		if (self.byteSampleRecovery.isValid()) {
-			self.byteSampleRecovery.cancel();
-		}
+	if (self.byteSampleRecovery.isValid()) {
+		self.byteSampleRecovery.cancel();
+	}
 
-		if (recovered.canBeSet())
-			recovered.send(Void());
+	if (recovered.canBeSet())
+		recovered.send(Void());
 
-		// If the storage server dies while something that uses self is still on the stack,
-		// we want that actor to complete before we terminate and that memory goes out of scope
-		state Error err = e;
-		if (storageServerTerminated(self, persistentData, err)) {
-			ssCore.cancel();
-			self.actors = ActorCollection(false);
-			wait(delay(0));
-			return Void();
-		}
+	// If the storage server dies while something that uses self is still on the stack,
+	// we want that actor to complete before we terminate and that memory goes out of scope
+	if (storageServerTerminated(self, persistentData, err)) {
 		ssCore.cancel();
 		self.actors = ActorCollection(false);
-		wait(delay(0));
-		throw err;
+		co_await delay(0);
+		co_return;
 	}
+	ssCore.cancel();
+	self.actors = ActorCollection(false);
+	co_await delay(0);
+	throw err;
 }
 
 #ifndef __INTEL_COMPILER
