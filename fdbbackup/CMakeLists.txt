@@ -50,6 +50,12 @@ if(NOT OPEN_FOR_IDE)
   target_compile_definitions(backup_tests PRIVATE EXCLUDE_MAIN_FUNCTION=1)
   add_test(NAME BackupTests COMMAND backup_tests)
 
+  # Test version of FileDecoder.cpp without main() function
+  add_flow_target(EXECUTABLE NAME fdbdecode_tests SRCS Decode.cpp FileDecoder.cpp)
+  target_include_directories(fdbdecode_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+  target_link_libraries(fdbdecode_tests PRIVATE fdbclient)
+  target_compile_definitions(fdbdecode_tests PRIVATE EXCLUDE_MAIN_FUNCTION=1)
+  add_test(NAME FileDecoderTests COMMAND fdbdecode_tests)
 endif()
 
 if (GPERFTOOLS_FOUND)

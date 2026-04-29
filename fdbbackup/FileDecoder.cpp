@@ -135,6 +135,8 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 
 	bool overlap(Version version) const { return version >= beginVersionFilter && version < endVersionFilter; }
 
+	bool validVersionFilters() { return beginVersionFilter < endVersionFilter; }
+
 	void updateRangeMap() { filters.updateFilters(prefixes); }
 
 	bool matchFilters(const MutationRef& m) const {
@@ -858,6 +860,7 @@ Future<Void> decode_logs(Reference<DecodeParams> params) {
 
 } // namespace file_converter
 
+#ifndef EXCLUDE_MAIN_FUNCTION
 int main(int argc, char** argv) {
 	std::string commandLine;
 	for (int a = 0; a < argc; a++) {
@@ -876,6 +879,15 @@ int main(int argc, char** argv) {
 		if (status != FDB_EXIT_SUCCESS) {
 			file_converter::printDecodeUsage();
 			return status;
+		}
+
+		// Check if the beginVersionFilter is greater than the endVersionFilter, otherwise the filtering will be
+		// invalid.
+		if (!param->validVersionFilters()) {
+			std::cerr << "--begin-version-filter " << param->beginVersionFilter
+			          << " cannot be equal or greater than --end-version-filter" << param->endVersionFilter << "\n";
+			file_converter::printDecodeUsage();
+			return FDB_EXIT_ERROR;
 		}
 
 		if (param->log_enabled) {
@@ -940,3 +952,36 @@ int main(int argc, char** argv) {
 		return FDB_EXIT_MAIN_EXCEPTION;
 	}
 }
+#else // EXCLUDE_MAIN_FUNCTION
+
+int main() {
+	auto assertValid = [](file_converter::DecodeParams& p, bool expected, const char* label) {
+		bool result = p.validVersionFilters();
+		if (result != expected) {
+			fprintf(stderr, "FAIL [%s]: expected %s\n", label, expected ? "valid" : "invalid");
+			return false;
+		}
+		printf("PASS [%s]\n", label);
+		return true;
+	};
+
+	bool ok = true;
+	file_converter::DecodeParams p;
+
+	ok &= assertValid(p, true, "defaults");
+
+	p.beginVersionFilter = 100;
+	p.endVersionFilter = 200;
+	ok &= assertValid(p, true, "begin < end");
+
+	p.beginVersionFilter = 200;
+	p.endVersionFilter = 200;
+	ok &= assertValid(p, false, "begin == end");
+
+	p.beginVersionFilter = 300;
+	p.endVersionFilter = 200;
+	ok &= assertValid(p, false, "begin > end");
+
+	return ok ? 0 : 1;
+}
+#endif // EXCLUDE_MAIN_FUNCTION
