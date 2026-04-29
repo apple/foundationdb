@@ -599,7 +599,7 @@ void DDQueue::startRelocation(int priority, int healthPriority) {
 	if (pipelineSize() >= SERVER_KNOBS->DD_MAX_PIPELINE_MOVES && !pipelineFull->get()) {
 		pipelineFull->set(true);
 		TraceEvent("DDPipelineFullSet", distributorId)
-		    .suppressFor(1.0)
+		    .suppressFor(30.0)
 		    .detail("PipelineSize", pipelineSize())
 		    .detail("PipelineLimit", SERVER_KNOBS->DD_MAX_PIPELINE_MOVES);
 	}
@@ -621,7 +621,7 @@ void DDQueue::finishRelocation(int priority, int healthPriority) {
 	if (pipelineSize() < SERVER_KNOBS->DD_MAX_PIPELINE_MOVES && pipelineFull->get()) {
 		pipelineFull->set(false);
 		TraceEvent("DDPipelineFullCleared", distributorId)
-		    .suppressFor(1.0)
+		    .suppressFor(30.0)
 		    .detail("PipelineSize", pipelineSize())
 		    .detail("PipelineLimit", SERVER_KNOBS->DD_MAX_PIPELINE_MOVES);
 	}
@@ -779,7 +779,7 @@ void DDQueue::validate() {
 	// for diagnosis; the gating mechanism itself is working correctly.
 	if (pipelineSize() > SERVER_KNOBS->DD_MAX_PIPELINE_MOVES * 2) {
 		TraceEvent(SevWarnAlways, "DDPipelineSizeExceeded", distributorId)
-		    .suppressFor(1.0)
+		    .suppressFor(30.0)
 		    .detail("PipelineSize", pipelineSize())
 		    .detail("PipelineLimit", SERVER_KNOBS->DD_MAX_PIPELINE_MOVES)
 		    .detail("ActiveRelocations", activeRelocations)
@@ -2787,7 +2787,7 @@ ACTOR Future<Void> pipelineGateActor(FutureStream<RelocateShard> input,
 		if (!rs.cancelled) {
 			while (pipelineFull->get()) {
 				TraceEvent("DDPipelineFull", distributorId)
-				    .suppressFor(5.0)
+				    .suppressFor(30.0)
 				    .detail("PipelineFull", pipelineFull->get());
 				wait(pipelineFull->onChange());
 			}
