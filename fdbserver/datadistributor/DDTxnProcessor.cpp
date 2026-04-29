@@ -23,7 +23,7 @@
 #include "fdbclient/ManagementAPI.h"
 #include "fdbserver/datadistributor/DataDistribution.h"
 #include "fdbclient/DatabaseContext.h"
-#include "flow/SimpleCounter.h"
+#include "flow/TxnCounters.h"
 #include "flow/CoroUtils.h"
 #include "flow/genericactors.actor.h"
 
@@ -41,43 +41,6 @@ static void updateServersAndCompleteSources(std::set<UID>& servers,
 			}
 		}
 	}
-}
-
-static SimpleCounter<int64_t>* counterUpdateReplicaKeysStarted() {
-	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/updateReplicaKeys/started");
-	return c;
-}
-static SimpleCounter<int64_t>* counterUpdateReplicaKeysCommitted() {
-	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/updateReplicaKeys/committed");
-	return c;
-}
-static SimpleCounter<int64_t>* counterUpdateReplicaKeysAborted() {
-	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/updateReplicaKeys/aborted");
-	return c;
-}
-static SimpleCounter<int64_t>* counterTryUpdateReplicasKeyForDcStarted() {
-	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/tryUpdateReplicasKeyForDc/started");
-	return c;
-}
-static SimpleCounter<int64_t>* counterTryUpdateReplicasKeyForDcCommitted() {
-	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/tryUpdateReplicasKeyForDc/committed");
-	return c;
-}
-static SimpleCounter<int64_t>* counterTryUpdateReplicasKeyForDcAborted() {
-	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/tryUpdateReplicasKeyForDc/aborted");
-	return c;
-}
-static SimpleCounter<int64_t>* counterWaitDDTeamInfoPrintSignalStarted() {
-	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/waitDDTeamInfoPrintSignal/started");
-	return c;
-}
-static SimpleCounter<int64_t>* counterWaitDDTeamInfoPrintSignalCommitted() {
-	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/waitDDTeamInfoPrintSignal/committed");
-	return c;
-}
-static SimpleCounter<int64_t>* counterWaitDDTeamInfoPrintSignalAborted() {
-	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/waitDDTeamInfoPrintSignal/aborted");
-	return c;
 }
 
 class DDTxnProcessorImpl {
@@ -223,12 +186,10 @@ class DDTxnProcessorImpl {
 	                                      std::vector<Optional<Key>> primaryDcId,
 	                                      std::vector<Optional<Key>> remoteDcIds,
 	                                      DatabaseConfiguration configuration) {
-		auto* txnStarted = counterUpdateReplicaKeysStarted();
-		auto* txnCommitted = counterUpdateReplicaKeysCommitted();
-		auto* txnAborted = counterUpdateReplicaKeysAborted();
+		static auto* counters = makeCounters("/dd/updateReplicaKeys");
 		Transaction tr(cx);
 		while (true) {
-			txnStarted->increment(1);
+			counters->started->increment(1);
 			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -250,10 +211,10 @@ class DDTxnProcessorImpl {
 				}
 
 				co_await tr.commit();
-				txnCommitted->increment(1);
+				counters->committed->increment(1);
 				break;
 			} catch (Error& e) {
-				txnAborted->increment(1);
+				counters->aborted->increment(1);
 				err = e;
 			}
 			co_await tr.onError(err);
@@ -261,12 +222,10 @@ class DDTxnProcessorImpl {
 	}
 
 	static Future<int> tryUpdateReplicasKeyForDc(Database cx, Optional<Key> dcId, int storageTeamSize) {
-		auto* txnStarted = counterTryUpdateReplicasKeyForDcStarted();
-		auto* txnCommitted = counterTryUpdateReplicasKeyForDcCommitted();
-		auto* txnAborted = counterTryUpdateReplicasKeyForDcAborted();
+		static auto* counters = makeCounters("/dd/tryUpdateReplicasKeyForDc");
 		Transaction tr(cx);
 		while (true) {
-			txnStarted->increment(1);
+			counters->started->increment(1);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
@@ -282,11 +241,11 @@ class DDTxnProcessorImpl {
 				}
 				tr.set(datacenterReplicasKeyFor(dcId), datacenterReplicasValue(storageTeamSize));
 				co_await tr.commit();
-				txnCommitted->increment(1);
+				counters->committed->increment(1);
 
 				co_return oldReplicas;
 			} catch (Error& e) {
-				txnAborted->increment(1);
+				counters->aborted->increment(1);
 				err = e;
 			}
 			co_await tr.onError(err);
@@ -736,22 +695,20 @@ class DDTxnProcessorImpl {
 	}
 
 	static Future<Void> waitDDTeamInfoPrintSignal(Database cx) {
-		auto* txnStarted = counterWaitDDTeamInfoPrintSignalStarted();
-		auto* txnCommitted = counterWaitDDTeamInfoPrintSignalCommitted();
-		auto* txnAborted = counterWaitDDTeamInfoPrintSignalAborted();
+		static auto* counters = makeCounters("/dd/waitDDTeamInfoPrintSignal");
 		ReadYourWritesTransaction tr(cx);
 		while (true) {
-			txnStarted->increment(1);
+			counters->started->increment(1);
 			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				Future<Void> watchFuture = tr.watch(triggerDDTeamInfoPrintKey);
 				co_await tr.commit();
-				txnCommitted->increment(1);
+				counters->committed->increment(1);
 				co_await watchFuture;
 				co_return;
 			} catch (Error& e) {
-				txnAborted->increment(1);
+				counters->aborted->increment(1);
 				err = e;
 			}
 			co_await tr.onError(err);

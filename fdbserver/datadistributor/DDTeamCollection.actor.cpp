@@ -30,7 +30,7 @@
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/network.h"
-#include "flow/SimpleCounter.h"
+#include "flow/TxnCounters.h"
 
 #include "flow/CoroUtils.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -76,52 +76,20 @@ int EligibilityCounter::getCount(int combinedType) const {
 
 } // namespace data_distribution
 
-static SimpleCounter<int64_t>* counterUpdateNextWigglingStorageIDStarted() {
-	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/updateNextWigglingStorageID/started");
+static TxnCounters* updateNextWigglingStorageIDCounters() {
+	static auto* c = makeCounters("/dd/updateNextWigglingStorageID");
 	return c;
 }
-static SimpleCounter<int64_t>* counterUpdateNextWigglingStorageIDCommitted() {
-	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/updateNextWigglingStorageID/committed");
+static TxnCounters* perpetualStorageWigglerCounters() {
+	static auto* c = makeCounters("/dd/perpetualStorageWiggler");
 	return c;
 }
-static SimpleCounter<int64_t>* counterUpdateNextWigglingStorageIDAborted() {
-	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/updateNextWigglingStorageID/aborted");
+static TxnCounters* waitHealthyZoneChangeCounters() {
+	static auto* c = makeCounters("/dd/waitHealthyZoneChange");
 	return c;
 }
-static SimpleCounter<int64_t>* counterPerpetualStorageWigglerStarted() {
-	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/perpetualStorageWiggler/started");
-	return c;
-}
-static SimpleCounter<int64_t>* counterPerpetualStorageWigglerCommitted() {
-	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/perpetualStorageWiggler/committed");
-	return c;
-}
-static SimpleCounter<int64_t>* counterPerpetualStorageWigglerAborted() {
-	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/perpetualStorageWiggler/aborted");
-	return c;
-}
-static SimpleCounter<int64_t>* counterWaitHealthyZoneChangeStarted() {
-	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/waitHealthyZoneChange/started");
-	return c;
-}
-static SimpleCounter<int64_t>* counterWaitHealthyZoneChangeCommitted() {
-	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/waitHealthyZoneChange/committed");
-	return c;
-}
-static SimpleCounter<int64_t>* counterWaitHealthyZoneChangeAborted() {
-	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/waitHealthyZoneChange/aborted");
-	return c;
-}
-static SimpleCounter<int64_t>* counterUpdateStorageMetadataStarted() {
-	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/updateStorageMetadata/started");
-	return c;
-}
-static SimpleCounter<int64_t>* counterUpdateStorageMetadataCommitted() {
-	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/updateStorageMetadata/committed");
-	return c;
-}
-static SimpleCounter<int64_t>* counterUpdateStorageMetadataAborted() {
-	static auto* c = SimpleCounter<int64_t>::makeCounter("/dd/updateStorageMetadata/aborted");
+static TxnCounters* updateStorageMetadataCounters() {
+	static auto* c = makeCounters("/dd/updateStorageMetadata");
 	return c;
 }
 
@@ -2279,9 +2247,7 @@ public:
 	}
 
 	static Future<Void> updateNextWigglingStorageID(DDTeamCollection* self) {
-		auto* txnStarted = counterUpdateNextWigglingStorageIDStarted();
-		auto* txnCommitted = counterUpdateNextWigglingStorageIDCommitted();
-		auto* txnAborted = counterUpdateNextWigglingStorageIDAborted();
+		auto* counters = updateNextWigglingStorageIDCounters();
 		StorageWiggleData wiggleState;
 		KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap =
 		    wiggleState.wigglingStorageServer(PrimaryRegion(self->primary));
@@ -2290,17 +2256,17 @@ public:
 		StorageWiggleValue value(nextId);
 		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->dbContext()));
 		while (true) {
-			txnStarted->increment(1);
+			counters->started->increment(1);
 			// write the next server id
 			Error err;
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				metadataMap.set(tr, nextId, value);
 				co_await tr->commit();
-				txnCommitted->increment(1);
+				counters->committed->increment(1);
 				break;
 			} catch (Error& e) {
-				txnAborted->increment(1);
+				counters->aborted->increment(1);
 				err = e;
 			}
 			co_await tr->onError(err);
@@ -2568,9 +2534,7 @@ public:
 	// command `configure perpetual_storage_wiggle=$value` if the value is 1, this actor start 2 actors,
 	// `perpetualStorageWiggleIterator` and `perpetualStorageWiggler`. Otherwise, it sends stop signal to them.
 	static Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* self) {
-		auto* txnPSWStarted = counterPerpetualStorageWigglerStarted();
-		auto* txnPSWCommitted = counterPerpetualStorageWigglerCommitted();
-		auto* txnPSWAborted = counterPerpetualStorageWigglerAborted();
+		auto* counters = perpetualStorageWigglerCounters();
 		int speed = 0;
 		PromiseStream<Void> finishStorageWiggleSignal;
 		SignalableActorCollection collection;
@@ -2580,7 +2544,7 @@ public:
 		while (true) {
 			ReadYourWritesTransaction tr(self->dbContext());
 			while (true) {
-				txnPSWStarted->increment(1);
+				counters->started->increment(1);
 				Error err;
 				try {
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -2591,7 +2555,7 @@ public:
 					}
 					Future<Void> watchFuture = tr.watch(perpetualStorageWiggleKey);
 					co_await tr.commit();
-					txnPSWCommitted->increment(1);
+					counters->committed->increment(1);
 
 					ASSERT(speed == 1 || speed == 0);
 					if (speed == 1 && self->storageWiggler->isStopped()) { // avoid duplicated start
@@ -2614,7 +2578,7 @@ public:
 					co_await watchFuture;
 					break;
 				} catch (Error& e) {
-					txnPSWAborted->increment(1);
+					counters->aborted->increment(1);
 					err = e;
 				}
 				co_await tr.onError(err);
@@ -2623,12 +2587,10 @@ public:
 	}
 
 	static Future<Void> waitHealthyZoneChange(DDTeamCollection* self) {
-		auto* txnStarted = counterWaitHealthyZoneChangeStarted();
-		auto* txnCommitted = counterWaitHealthyZoneChangeCommitted();
-		auto* txnAborted = counterWaitHealthyZoneChangeAborted();
+		auto* counters = waitHealthyZoneChangeCounters();
 		ReadYourWritesTransaction tr(self->dbContext());
 		while (true) {
-			txnStarted->increment(1);
+			counters->started->increment(1);
 			Error err;
 			bool hasErr = false;
 			try {
@@ -2671,11 +2633,11 @@ public:
 
 				Future<Void> watchFuture = tr.watch(healthyZoneKey);
 				co_await tr.commit();
-				txnCommitted->increment(1);
+				counters->committed->increment(1);
 				co_await (watchFuture || healthyZoneTimeout);
 				tr.reset();
 			} catch (Error& e) {
-				txnAborted->increment(1);
+				counters->aborted->increment(1);
 				err = e;
 				hasErr = true;
 			}
@@ -3399,9 +3361,7 @@ public:
 	}
 
 	ACTOR static Future<Void> updateStorageMetadata(DDTeamCollection* self, TCServerInfo* server) {
-		state SimpleCounter<int64_t>* txnStarted = counterUpdateStorageMetadataStarted();
-		state SimpleCounter<int64_t>* txnCommitted = counterUpdateStorageMetadataCommitted();
-		state SimpleCounter<int64_t>* txnAborted = counterUpdateStorageMetadataAborted();
+		state TxnCounters* counters = updateStorageMetadataCounters();
 		state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(
 		    serverMetadataKeys.begin, IncludeVersion());
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dbContext());
@@ -3425,7 +3385,7 @@ public:
 
 		// read storage metadata
 		loop {
-			txnStarted->increment(1);
+			counters->started->increment(1);
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				Optional<Value> serverInterfaceValue = wait(tr->get(serverListKeyFor(server->getId())));
@@ -3446,10 +3406,10 @@ public:
 				metadataMap.set(tr, server->getId(), data);
 				tr->set(serverMetadataChangeKey, deterministicRandom()->randomUniqueID().toString());
 				wait(tr->commit());
-				txnCommitted->increment(1);
+				counters->committed->increment(1);
 				break;
 			} catch (Error& e) {
-				txnAborted->increment(1);
+				counters->aborted->increment(1);
 				wait(tr->onError(e));
 			}
 		}
