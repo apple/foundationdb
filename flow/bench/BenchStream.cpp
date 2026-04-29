@@ -1,5 +1,5 @@
 /*
- * BenchStream.actor.cpp
+ * BenchStream.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -28,25 +28,21 @@
 
 #include <thread>
 
-#include "flow/actorcompiler.h" // This must be the last #include.
-
-ACTOR static Future<Void> benchStreamActor(benchmark::State* benchState) {
-	state size_t items = benchState->range(0);
+static Future<Void> benchStreamActor(benchmark::State* benchState) {
+	size_t items = benchState->range(0);
 	size_t size = benchState->range(1);
-	state StringRef key = getString(size);
-	state PromiseStream<StringRef> stream;
-	state int i;
+	StringRef key = getString(size);
+	PromiseStream<StringRef> stream;
 	while (benchState->KeepRunning()) {
-		for (i = 0; i < items; ++i) {
+		for (int i = 0; i < items; ++i) {
 			stream.send(key);
 		}
-		for (i = 0; i < items; ++i) {
-			StringRef receivedKey = waitNext(stream.getFuture());
+		for (int i = 0; i < items; ++i) {
+			StringRef receivedKey = co_await stream.getFuture();
 			benchmark::DoNotOptimize(receivedKey);
 		}
 	}
 	benchState->SetItemsProcessed(items * static_cast<long>(benchState->iterations()));
-	return Void();
 }
 
 static void bench_stream(benchmark::State& benchState) {
