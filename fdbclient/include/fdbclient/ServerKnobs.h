@@ -124,6 +124,7 @@ public:
 	double BG_REBALANCE_MAX_POLLING_INTERVAL;
 	double BG_REBALANCE_SWITCH_CHECK_INTERVAL;
 	double DD_QUEUE_LOGGING_INTERVAL;
+	double DD_RELOCATOR_LATENCY_LOGGING_INTERVAL;
 	double DD_QUEUE_COUNTER_REFRESH_INTERVAL;
 	double DD_QUEUE_COUNTER_MAX_LOG; // max number of servers for which trace events will be generated in each round of
 	                                 // DD_QUEUE_COUNTER_REFRESH_INTERVAL duration
@@ -525,6 +526,10 @@ public:
 	bool SHARDED_ROCKSDB_REUSE_ITERATORS;
 	bool ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS;
 	int ROCKSDB_READ_RANGE_BOUNDED_ITERATORS_MAX_LIMIT;
+	// By default all reads to rocksdb are cached. If this knob is set to true, based on
+	// txn.ReadOptions.CacheResult, rocksdb caching is enabled/disabled accordingly for that read.
+	bool ROCKSDB_USE_CACHE_RESULT_OPTION;
+	double ROCKSDB_PROBABILITY_DISABLE_CACHE_SIM;
 	int64_t ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC;
 	int ROCKSDB_WRITE_RATE_LIMITER_FAIRNESS;
 	bool ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE;
