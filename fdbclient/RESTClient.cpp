@@ -22,7 +22,7 @@
 
 #include "fdbrpc/HTTP.h"
 #include "flow/IRateControl.h"
-#include "fdbclient/RESTUtils.h"
+#include "RESTUtils.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
 #include "flow/FastRef.h"

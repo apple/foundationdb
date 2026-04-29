@@ -20,7 +20,7 @@
 
 #include "fdbclient/IBlobStore.h"
 #include "fdbclient/S3BlobStore.h"
-#include "fdbclient/GCSBlobStore.h"
+#include "GCSBlobStore.h"
 #include "fdbclient/Knobs.h"
 #include "flow/Hostname.h"
 #include "flow/IAsyncFile.h"

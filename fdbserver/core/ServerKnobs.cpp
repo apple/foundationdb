@@ -639,9 +639,12 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME,             30.0 ); if( randomize && BUGGIFY ) ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME = 0.1;
 	init( ROCKSDB_PROBABILITY_REUSE_ITERATOR_SIM,               0.01 );
 	init( ROCKSDB_READ_RANGE_REUSE_ITERATORS,                  false ); if( randomize && BUGGIFY ) ROCKSDB_READ_RANGE_REUSE_ITERATORS = deterministicRandom()->coinflip();
-	init( SHARDED_ROCKSDB_REUSE_ITERATORS,                     false ); if (isSimulated) SHARDED_ROCKSDB_REUSE_ITERATORS = deterministicRandom()->coinflip(); 
+	init( SHARDED_ROCKSDB_REUSE_ITERATORS,                     false ); if( isSimulated ) SHARDED_ROCKSDB_REUSE_ITERATORS = deterministicRandom()->coinflip();
 	init( ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS,          false ); if( randomize && BUGGIFY ) ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS = deterministicRandom()->coinflip();
 	init( ROCKSDB_READ_RANGE_BOUNDED_ITERATORS_MAX_LIMIT,        200 );
+	init( ROCKSDB_USE_CACHE_RESULT_OPTION,                     false ); if( isSimulated ) ROCKSDB_USE_CACHE_RESULT_OPTION = deterministicRandom()->coinflip();
+	// Probability that RocksDB can disable block cache in simulation
+	init( ROCKSDB_PROBABILITY_DISABLE_CACHE_SIM,                 0.1 );
 	// Set to 0 to disable rocksdb write rate limiting. Rate limiter unit: bytes per second.
 	init( ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC,        200000000 );
 	init( ROCKSDB_WRITE_RATE_LIMITER_FAIRNESS,                    10 ); // RocksDB default 10
@@ -1355,40 +1358,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ENCRYPTION_LOGGING_INTERVAL,                           5.0 );
 	init( DISABLED_ENCRYPTION_PROBABILITY_SIM,                  0.95 );
 
-	// KMS connector type
-	init( KMS_CONNECTOR_TYPE,                     "RESTKmsConnector" );
-
 	// Blob Metadata
 	init( BLOB_METADATA_CACHE_TTL,  isSimulated ? 120 : 24 * 60 * 60 );
 	if ( randomize && BUGGIFY) { BLOB_METADATA_CACHE_TTL = deterministicRandom()->randomInt(50, 100); }
-
-	// HTTP KMS Connector
-	init( REST_KMS_CONNECTOR_KMS_DISCOVERY_URL_MODE,           "file");
-	init( REST_KMS_CONNECTOR_VALIDATION_TOKEN_MODE,            "file");
-	init( REST_KMS_CONNECTOR_VALIDATION_TOKEN_MAX_SIZE,          1024);
-	init( REST_KMS_CONNECTOR_VALIDATION_TOKENS_MAX_PAYLOAD_SIZE, 10 * 1024);
-	init( REST_KMS_CONNECTOR_REFRESH_KMS_URLS,                   true);
-	init( REST_KMS_CONNECTOR_REFRESH_KMS_URLS_INTERVAL_SEC,       600);
-	// Below KMS configurations are responsible for:
-	// Discovering KMS URLs, fetch encryption keys endpoint and validation token details.
-	// Configurations are expected to be passed as command-line arguments.
-	// NOTE: Care must be taken when attempting to update below configurations for a up/running FDB cluster.
-	init( REST_KMS_CONNECTOR_DISCOVER_KMS_URL_FILE,                "");
-	init( REST_KMS_CONNECTOR_GET_ENCRYPTION_KEYS_ENDPOINT,         "");
-	init( REST_KMS_CONNECTOR_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT,  "");
-	init( REST_KMS_CONNECTOR_GET_BLOB_METADATA_ENDPOINT,           "");
-	// Details to fetch validation token from a localhost file
-	// acceptable format: "<token_name1>$<absolute_file_path1>,<token_name2>$<absolute_file_path2>,.."
-	// NOTE: 'token-name" can NOT contain '$' character
-	init( REST_KMS_CONNECTOR_VALIDATION_TOKEN_DETAILS,             "");
-	init( ENABLE_REST_KMS_COMMUNICATION,                        false); if( randomize && BUGGIFY ) ENABLE_REST_KMS_COMMUNICATION = true;
-	init( REST_KMS_CONNECTOR_REMOVE_TRAILING_NEWLINE,           false);
-	init( REST_KMS_CURRENT_BLOB_METADATA_REQUEST_VERSION,           1);
-	init( REST_KMS_MAX_BLOB_METADATA_REQUEST_VERSION,               1);
-	init( REST_KMS_CURRENT_CIPHER_REQUEST_VERSION,                  1);
-	init( REST_KMS_MAX_CIPHER_REQUEST_VERSION,                      1);
-	init( REST_SIM_KMS_VAULT_DIR,                                  "");
-	init( REST_KMS_STABILITY_CHECK_INTERVAL,                      5.0);
 
 	init( CONSISTENCY_SCAN_ACTIVE_THROTTLE_RATIO,                0.5 ); if( randomize && BUGGIFY ) CONSISTENCY_SCAN_ACTIVE_THROTTLE_RATIO = deterministicRandom()->random01();
 

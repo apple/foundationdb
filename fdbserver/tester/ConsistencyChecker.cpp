@@ -150,7 +150,7 @@ Future<Void> checkConsistency(Database cx,
 		// NOTE: the value will be reset after consistency check
 		connectionFailures = g_simulator->connectionFailuresDisableDuration;
 		disableConnectionFailures("ConsistencyCheck");
-		g_simulator->isConsistencyChecked = true;
+		fdbSimulationPolicyState().isConsistencyChecked = true;
 	}
 
 	Standalone<VectorRef<KeyValueRef>> options;
@@ -182,7 +182,7 @@ Future<Void> checkConsistency(Database cx,
 		if (testResults.ok() || lastRun) {
 			if (g_network->isSimulated()) {
 				g_simulator->connectionFailuresDisableDuration = connectionFailures;
-				g_simulator->isConsistencyChecked = false;
+				fdbSimulationPolicyState().isConsistencyChecked = false;
 			}
 			co_return;
 		}
