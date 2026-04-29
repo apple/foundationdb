@@ -49,6 +49,8 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( HOSTNAME_RECONNECT_INIT_INTERVAL,                    .05 );
 	init( HOSTNAME_RECONNECT_MAX_INTERVAL,                     1.0 );
 	init( ENABLE_COORDINATOR_DNS_CACHE,                      false ); if( randomize && BUGGIFY ) ENABLE_COORDINATOR_DNS_CACHE = true;
+	init( COORDINATOR_DNS_CACHE_REFRESH_INTERVAL,             3.0 );
+	init( COORDINATOR_DNS_CACHE_TTL,                         30.0 );
 	init( CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED, 1.0 );
 
 	init( DELAY_JITTER_OFFSET,                                 0.9 );
