@@ -2755,6 +2755,7 @@ class DDQueueImpl : public ReferenceCounted<DDQueueImpl> {
 	std::set<UID> serversToLaunchFrom;
 	PromiseStream<Void> launchQueuedWorkTrigger;
 	PromiseStream<KeyRange> rangesComplete;
+	FlowLock queueMutationLock;
 	Future<Void> recordMetrics = delay(SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL);
 	std::vector<Future<Void>> ddQueueFutures;
 	Future<Void> onCleanUpDataMoveActorError;
@@ -2764,7 +2765,7 @@ class DDQueueImpl : public ReferenceCounted<DDQueueImpl> {
 	            Reference<AsyncVar<bool>> processingWiggle,
 	            FutureStream<Promise<int>> getUnhealthyRelocationCount)
 	  : self(self), processingUnhealthy(processingUnhealthy), processingWiggle(processingWiggle),
-	    getUnhealthyRelocationCount(getUnhealthyRelocationCount),
+	    getUnhealthyRelocationCount(getUnhealthyRelocationCount), queueMutationLock(1),
 	    onCleanUpDataMoveActorError(actorCollection(self->addBackgroundCleanUpDataMoveActor.getFuture())) {}
 
 public:
@@ -2797,6 +2798,8 @@ private:
 	Future<Void> relocateShards() {
 		while (true) {
 			RelocateShard rs = co_await self->input;
+			co_await queueMutationLock.take(TaskPriority::DataDistributionLaunch);
+			FlowLock::Releaser releaser(queueMutationLock);
 
 			if (rs.isRestore()) {
 				ASSERT(rs.dataMove != nullptr);
@@ -2820,6 +2823,8 @@ private:
 		while (true) {
 			co_await launchQueuedWorkTrigger.getFuture();
 			co_await delay(0, TaskPriority::DataDistributionLaunch);
+			co_await queueMutationLock.take(TaskPriority::DataDistributionLaunch);
+			FlowLock::Releaser releaser(queueMutationLock);
 
 			if (!serversToLaunchFrom.empty()) {
 				self->validate();
@@ -2832,6 +2837,8 @@ private:
 	Future<Void> processSourceFetchResults() {
 		while (true) {
 			RelocateData results = co_await self->fetchSourceServersComplete.getFuture();
+			co_await queueMutationLock.take(TaskPriority::DataDistributionLaunch);
+			FlowLock::Releaser releaser(queueMutationLock);
 
 			// This stream is triggered by queueRelocation(), which is triggered by sending self->input.
 			self->completeSourceFetch(results);
@@ -2843,6 +2850,8 @@ private:
 	Future<Void> processDataTransferComplete() {
 		while (true) {
 			RelocateData done = co_await self->dataTransferComplete.getFuture();
+			co_await queueMutationLock.take(TaskPriority::DataDistributionLaunch);
+			FlowLock::Releaser releaser(queueMutationLock);
 
 			complete(done, self->busymap, self->destBusymap);
 			addServersToLaunch(done.src);
@@ -2853,6 +2862,8 @@ private:
 	Future<Void> processRelocationComplete() {
 		while (true) {
 			RelocateData done = co_await self->relocationComplete.getFuture();
+			co_await queueMutationLock.take(TaskPriority::DataDistributionLaunch);
+			FlowLock::Releaser releaser(queueMutationLock);
 
 			self->activeRelocations--;
 			TraceEvent(SevVerbose, "InFlightRelocationChange")
@@ -2874,6 +2885,9 @@ private:
 	Future<Void> launchCompletedRanges() {
 		while (true) {
 			KeyRange done = co_await rangesComplete.getFuture();
+			co_await queueMutationLock.take(TaskPriority::DataDistributionLaunch);
+			FlowLock::Releaser releaser(queueMutationLock);
+
 			self->validate();
 			self->launchQueuedWork(done, self->ddEnabledState);
 		}
@@ -2882,6 +2896,8 @@ private:
 	Future<Void> recordMetricsLoop() {
 		while (true) {
 			co_await recordMetrics;
+			co_await queueMutationLock.take(TaskPriority::FlushTrace);
+			FlowLock::Releaser releaser(queueMutationLock);
 
 			Promise<int64_t> req;
 			self->getAverageShardBytes.send(req);
@@ -2960,6 +2976,9 @@ private:
 	Future<Void> getUnhealthyRelocationCountRequests() {
 		while (true) {
 			Promise<int> r = co_await getUnhealthyRelocationCount;
+			co_await queueMutationLock.take(TaskPriority::DataDistributionLaunch);
+			FlowLock::Releaser releaser(queueMutationLock);
+
 			self->validate();
 			r.send(self->getUnhealthyRelocationCount());
 		}
