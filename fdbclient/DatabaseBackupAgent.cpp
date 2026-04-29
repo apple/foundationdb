@@ -221,7 +221,7 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 			                            task->params[DatabaseBackupAgent::keyEndKey],
 			                            CLIENT_KNOBS->BACKUP_SHARD_TASK_LIMIT);
 		    });
-		if (keys.size() > 0) {
+		if (!keys.empty()) {
 			task->params[BackupRangeTaskFunc::keyAddBackupRangeTasks] = BinaryWriter::toValue(keys, IncludeVersion());
 			co_return;
 		}
@@ -361,10 +361,10 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 					}
 
 					bool prevAdjacent =
-					    prevRange.get().size() && prevRange.get()[0].value.size() &&
+					    !prevRange.get().empty() && !prevRange.get()[0].value.empty() &&
 					    BinaryReader::fromStringRef<Version>(prevRange.get()[0].value, Unversioned()) != invalidVersion;
 					bool nextAdjacent =
-					    nextRange.get().size() && nextRange.get()[0].value.size() &&
+					    !nextRange.get().empty() && !nextRange.get()[0].value.empty() &&
 					    BinaryReader::fromStringRef<Version>(nextRange.get()[0].value, Unversioned()) != invalidVersion;
 
 					if ((!prevAdjacent || !nextAdjacent) &&
@@ -413,10 +413,10 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 							break;
 
 						if (backupVersions.get()[versionLoc + 1].key ==
-						    (removePrefix == StringRef() ? allKeys.end : strinc(removePrefix))) {
+						    (removePrefix.empty() ? allKeys.end : strinc(removePrefix))) {
 							tr->clear(KeyRangeRef(
 							    backupVersions.get()[versionLoc].key.removePrefix(removePrefix).withPrefix(addPrefix),
-							    addPrefix == StringRef() ? allKeys.end : strinc(addPrefix)));
+							    addPrefix.empty() ? allKeys.end : strinc(addPrefix)));
 						} else {
 							tr->clear(KeyRangeRef(backupVersions.get()[versionLoc].key,
 							                      backupVersions.get()[versionLoc + 1].key)
@@ -531,7 +531,7 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 		} else if (task->params.find(BackupRangeTaskFunc::keyBackupRangeBeginKey) != task->params.end() &&
 		           task->params[BackupRangeTaskFunc::keyBackupRangeBeginKey] <
 		               task->params[BackupAgentBase::keyEndKey]) {
-			ASSERT(taskFuture->key.size() > 0);
+			ASSERT(!taskFuture->key.empty());
 			co_await (success(BackupRangeTaskFunc::addTask(tr,
 			                                               taskBucket,
 			                                               task,
@@ -808,7 +808,7 @@ struct CopyLogRangeTaskFunc : TaskFuncBase {
 						int64_t bytesSet = 0;
 
 						bool first = true;
-						for (auto m : mutations) {
+						for (const auto& m : mutations) {
 							for (auto kv : m) {
 								if (isTimeoutOccurred) {
 									Version newVersion = getLogKeyVersion(kv.key);
@@ -1566,7 +1566,7 @@ struct OldCopyLogRangeTaskFunc : TaskFuncBase {
 						int64_t bytesSet = 0;
 
 						bool first = true;
-						for (auto m : mutations) {
+						for (const auto& m : mutations) {
 							for (auto kv : m) {
 								if (first) {
 									tr.addReadConflictRange(singleKeyRange(kv.key));
@@ -1926,7 +1926,7 @@ struct CopyDiffLogsUpgradeTaskFunc : TaskFuncBase {
 		co_await checkTaskVersion(tr, task, CopyDiffLogsUpgradeTaskFunc::name, CopyDiffLogsUpgradeTaskFunc::version);
 		Reference<TaskFuture> onDone = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 
-		if (task->params[BackupAgentBase::destUid].size() == 0) {
+		if (task->params[BackupAgentBase::destUid].empty()) {
 			TraceEvent("DBA_CopyDiffLogsUpgradeTaskFuncAbortInUpgrade").log();
 			co_await AbortOldBackupTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::signal(onDone));
 		} else {
@@ -2113,9 +2113,8 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 		co_await checkTaskVersion(cx, task, StartFullBackupTaskFunc::name, StartFullBackupTaskFunc::version);
 		Key destUidValue(logUidValue);
 
-		Standalone<VectorRef<KeyRangeRef>> backupRanges =
-		    BinaryReader::fromStringRef<Standalone<VectorRef<KeyRangeRef>>>(
-		        task->params[DatabaseBackupAgent::keyConfigBackupRanges], IncludeVersion());
+		auto backupRanges = BinaryReader::fromStringRef<Standalone<VectorRef<KeyRangeRef>>>(
+		    task->params[DatabaseBackupAgent::keyConfigBackupRanges], IncludeVersion());
 		Key beginVersionKey;
 
 		Reference<ReadYourWritesTransaction> srcTr(new ReadYourWritesTransaction(taskBucket->src));
@@ -2287,9 +2286,8 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 
 		Version beginVersion =
 		    BinaryReader::fromStringRef<Version>(task->params[BackupAgentBase::keyBeginVersion], Unversioned());
-		Standalone<VectorRef<KeyRangeRef>> backupRanges =
-		    BinaryReader::fromStringRef<Standalone<VectorRef<KeyRangeRef>>>(
-		        task->params[DatabaseBackupAgent::keyConfigBackupRanges], IncludeVersion());
+		auto backupRanges = BinaryReader::fromStringRef<Standalone<VectorRef<KeyRangeRef>>>(
+		    task->params[DatabaseBackupAgent::keyConfigBackupRanges], IncludeVersion());
 
 		tr->set(logUidValue.withPrefix(applyMutationsBeginRange.begin),
 		        BinaryWriter::toValue(beginVersion, Unversioned()));
@@ -2402,7 +2400,7 @@ std::set<std::string> getDRAgentsIds(StatusObjectReader statusObj, const char* c
 		StatusObjectReader instances;
 		std::string path = format("%s.instances", context);
 		if (statusObjLayers.tryGet(path, instances)) {
-			for (auto itr : instances.obj()) {
+			for (const auto& itr : instances.obj()) {
 				drBackupAgents.insert(itr.first);
 			}
 		}
@@ -2670,8 +2668,8 @@ public:
 				    tr->getRange(backupRange.removePrefix(removePrefix).withPrefix(addPrefix), 1));
 			}
 			co_await waitForAll(backupIntoResults);
-			for (auto result : backupIntoResults) {
-				if (result.get().size() > 0) {
+			for (const auto& result : backupIntoResults) {
+				if (!result.get().empty()) {
 					// One of the ranges we will be backing up into has pre-existing data.
 					throw restore_destination_not_empty();
 				}
@@ -2984,7 +2982,7 @@ public:
 				UID destUid = destUidFuture.get();
 				if (destUid.isValid()) {
 					destUidValue = BinaryWriter::toValue(destUid, Unversioned());
-				} else if (destUidValue.size() == 0 && waitForDestUID) {
+				} else if (destUidValue.empty() && waitForDestUID) {
 					// Give DR task a chance to update destUid to avoid the problem of
 					// leftover version key. If we got an commit_unknown_result before,
 					// reuse the previous destUidValue.
@@ -3284,7 +3282,7 @@ public:
 					RangeResult values = co_await fErrorValues;
 
 					// Display the errors, if any
-					if (values.size() > 0) {
+					if (!values.empty()) {
 						// Inform the user that the list of errors is complete or partial
 						statusText += (values.size() < errorLimit)
 						                  ? "WARNING: Some DR agents have reported issues:\n"

@@ -28,7 +28,7 @@
 #include "fdbrpc/Stats.h"
 #include "fdbserver/logsystem/ApplyMetadataMutation.h"
 #include "fdbserver/core/ConflictBatch.h"
-#include "fdbserver/core/IKeyValueStore.h"
+#include "fdbserver/kvstore/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
@@ -779,7 +779,7 @@ Future<Void> resolverCore(ResolverInterface resolver,
 		    self->logAdapter, db, resolver.id(), 2e9, DisableSnapshot::True, ReplaceContent::True, ExactRecovery::True);
 
 		// wait for txnStateStore recovery
-		co_await success(self->txnStateStore->readValue(StringRef()));
+		co_await self->txnStateStore->readValue(StringRef());
 
 		// This has to be declared after the self->txnStateStore get initialized
 		transactionStateResolveContext = TransactionStateResolveContext(self, &addActor);

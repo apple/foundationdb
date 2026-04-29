@@ -21,6 +21,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
@@ -57,7 +58,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		kill2Timeout = getOption(options, "kill2Timeout"_sr, 6000.0);
 		killProcesses = deterministicRandom()->random01() < 0.5;
 		if (g_network->isSimulated()) {
-			g_simulator->allowLogSetKills = false;
+			fdbSimulationPolicyState().allowLogSetKills = false;
 		}
 	}
 
@@ -82,7 +83,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			    .detail("Zoneid", it->locality.zoneId().get().toString())
 			    .detail("MachineId", it->locality.machineId().get().toString());
 
-			if (!g_simulator->protectedAddresses.contains(it->address))
+			if (!g_simulator->isProtectedAddress(it->address))
 				processAddrs.push_back(pAddr);
 			machineProcesses[machineIp].insert(pAddr);
 
@@ -172,7 +173,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		for (auto& netAddr : netAddrs) {
 			auto machineIpPorts = machineProcesses.find(netAddr);
 			if (machineIpPorts != machineProcesses.end()) {
-				ASSERT(machineIpPorts->second.size());
+				ASSERT(!machineIpPorts->second.empty());
 				for (auto& processAdd : machineIpPorts->second)
 					processAddrs.insert(processAdd);
 			} else {
@@ -191,7 +192,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				    .detail("Failed", processInfo->failed)
 				    .detail("Excluded", processInfo->excluded)
 				    .detail("Rebooting", processInfo->rebooting)
-				    .detail("Protected", g_simulator->protectedAddresses.contains(processInfo->address));
+				    .detail("Protected", g_simulator->isProtectedAddress(processInfo->address));
 			} else {
 				TraceEvent("RemoveAndKill", functionId)
 				    .detail("Step", "ProcessNotToKill")
@@ -200,7 +201,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				    .detail("Failed", processInfo->failed)
 				    .detail("Excluded", processInfo->excluded)
 				    .detail("Rebooting", processInfo->rebooting)
-				    .detail("Protected", g_simulator->protectedAddresses.contains(processInfo->address));
+				    .detail("Protected", g_simulator->isProtectedAddress(processInfo->address));
 			}
 		}
 		TraceEvent("RemoveAndKill", functionId)
@@ -456,14 +457,14 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			    .detail("ClusterAvailable", g_simulator->isAvailable())
 			    .detail("RemoveViaClear", removeViaClear);
 			for (auto& killProcess : killProcArray) {
-				if (g_simulator->protectedAddresses.contains(killProcess->address))
+				if (g_simulator->isProtectedAddress(killProcess->address))
 					TraceEvent("RemoveAndKill", functionId)
 					    .detail("Step", "NoKill Process")
 					    .detail("Process", describe(*killProcess))
 					    .detail("Failed", killProcess->failed)
 					    .detail("Rebooting", killProcess->rebooting)
 					    .detail("ClusterAvailable", g_simulator->isAvailable())
-					    .detail("Protected", g_simulator->protectedAddresses.contains(killProcess->address));
+					    .detail("Protected", g_simulator->isProtectedAddress(killProcess->address));
 				else if (removeViaClear) {
 					g_simulator->rebootProcess(killProcess, ISimulator::KillType::RebootProcessAndDelete);
 					TraceEvent("RemoveAndKill", functionId)
@@ -472,12 +473,12 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 					    .detail("Failed", killProcess->failed)
 					    .detail("Rebooting", killProcess->rebooting)
 					    .detail("ClusterAvailable", g_simulator->isAvailable())
-					    .detail("Protected", g_simulator->protectedAddresses.contains(killProcess->address));
+					    .detail("Protected", g_simulator->isProtectedAddress(killProcess->address));
 				}
 				/*
 				                else {
 				                    g_simulator->killProcess( killProcess, ISimulator::KillType::KillInstantly );
-				                    TraceEvent("RemoveAndKill", functionId).detail("Step", "Kill Process").detail("Process", describe(*killProcess)).detail("Failed", killProcess->failed).detail("Rebooting", killProcess->rebooting).detail("ClusterAvailable", g_simulator->isAvailable()).detail("Protected", g_simulator->protectedAddresses.contains(killProcess->address));
+				                    TraceEvent("RemoveAndKill", functionId).detail("Step", "Kill Process").detail("Process", describe(*killProcess)).detail("Failed", killProcess->failed).detail("Rebooting", killProcess->rebooting).detail("ClusterAvailable", g_simulator->isAvailable()).detail("Protected", g_simulator->isProtectedAddress(killProcess->address));
 				                }
 				*/
 			}
@@ -577,7 +578,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		std::vector<AddressExclusion> toKillMarkFailedArray;
 		AddressExclusion coordExcl;
 		// Exclude a coordinator under buggify, but only if fault tolerance is > 0 and kill set is non-empty already
-		if (BUGGIFY && toKill.size()) {
+		if (BUGGIFY && !toKill.empty()) {
 			Optional<ClusterConnectionString> csOptional = co_await getConnectionString(cx);
 			std::vector<NetworkAddress> coordinators;
 			if (csOptional.present()) {
@@ -678,7 +679,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		std::unordered_set<std::string> toKillLocalitiesFailed;
 		if (markExcludeAsFailed) {
 			toKillLocalitiesFailed = getLocalitiesFromAddresses(toKillMarkFailedArray);
-			if (excludeLocalitiesInsteadOfServers && toKillLocalitiesFailed.size() > 0) {
+			if (excludeLocalitiesInsteadOfServers && !toKillLocalitiesFailed.empty()) {
 				TraceEvent("RemoveAndKill", functionId)
 				    .detail("Step", "Excluding localities with failed option")
 				    .detail("FailedAddressesSize", toKillMarkFailedArray.size())
@@ -698,7 +699,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		}
 
 		std::unordered_set<std::string> toKillLocalities = getLocalitiesFromAddresses(toKillArray);
-		if (excludeLocalitiesInsteadOfServers && toKillLocalities.size() > 0) {
+		if (excludeLocalitiesInsteadOfServers && !toKillLocalities.empty()) {
 			TraceEvent("RemoveAndKill", functionId)
 			    .detail("Step", "Excluding localities without failed option")
 			    .detail("AddressesSize", toKillArray.size())
@@ -718,7 +719,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 		// We need to skip at least the quorum change if there's nothing to kill, because there might not be enough
 		// servers left alive to do a coordinators auto (?)
-		if (toKill.size()) {
+		if (!toKill.empty()) {
 			// Wait for removal to be safe
 			TraceEvent("RemoveAndKill", functionId)
 			    .detail("Step", "Wait For Server Exclusion")
@@ -728,14 +729,14 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				co_await (
 				    success(checkForExcludingServers(cx, toKillArray, true /* wait for exclusion */)) ||
 				    checkLocalityChange(
-				        cx, toKillArray, toKillLocalities, markExcludeAsFailed && toKillLocalitiesFailed.size() > 0));
+				        cx, toKillArray, toKillLocalities, markExcludeAsFailed && !toKillLocalitiesFailed.empty()));
 			} else {
 				co_await checkForExcludingServers(cx, toKillArray, true /* wait for exclusion */);
 			}
 
 			TraceEvent("RemoveAndKill", functionId)
 			    .detail("Step", "coordinators auto")
-			    .detail("DesiredCoordinators", g_simulator->desiredCoordinators)
+			    .detail("DesiredCoordinators", fdbSimulationPolicyState().desiredCoordinators)
 			    .detail("ClusterAvailable", g_simulator->isAvailable());
 
 			// Setup the coordinators BEFORE the exclusion
@@ -744,7 +745,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			int nQuorum{ 0 };
 			while (true) {
 				cycle++;
-				nQuorum = ((g_simulator->desiredCoordinators + 1) / 2) * 2 - 1;
+				nQuorum = ((fdbSimulationPolicyState().desiredCoordinators + 1) / 2) * 2 - 1;
 				CoordinatorsResult result = co_await changeQuorum(cx, autoQuorumChange(nQuorum));
 				TraceEvent(result == CoordinatorsResult::SUCCESS || result == CoordinatorsResult::SAME_NETWORK_ADDRESSES
 				               ? SevInfo
@@ -754,7 +755,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				    .detail("Result", (int)result)
 				    .detail("Attempt", cycle)
 				    .detail("Quorum", nQuorum)
-				    .detail("DesiredCoordinators", g_simulator->desiredCoordinators);
+				    .detail("DesiredCoordinators", fdbSimulationPolicyState().desiredCoordinators);
 				if (result == CoordinatorsResult::SUCCESS || result == CoordinatorsResult::SAME_NETWORK_ADDRESSES)
 					break;
 			}

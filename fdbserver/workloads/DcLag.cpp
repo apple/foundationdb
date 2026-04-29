@@ -26,6 +26,7 @@
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/TesterInterface.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbrpc/simulator.h"
 #include "flow/CodeProbe.h"
@@ -75,11 +76,12 @@ struct DcLagWorkload : TestWorkload {
 		std::vector<IPAddress> ips; // all remote process IPs
 		for (const auto& process : g_simulator->getAllProcesses()) {
 			const auto& ip = process->address.ip;
-			if (process->locality.dcId().present() && process->locality.dcId() == g_simulator->remoteDcId) {
+			if (process->locality.dcId().present() &&
+			    process->locality.dcId() == fdbSimulationPolicyState().remoteDcId) {
 				ips.push_back(ip);
 			}
 		}
-		ASSERT(ips.size() > 0);
+		ASSERT(!ips.empty());
 
 		// Find all primary satellite tlogs
 		std::vector<NetworkAddress> logs; // all primary satellite logs

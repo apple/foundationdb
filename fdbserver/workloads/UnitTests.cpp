@@ -26,11 +26,11 @@ void forceLinkDequeTests();
 void forceLinkFlowTests();
 void forceLinkCoroTests();
 void forceLinkMemcpyTests();
-void forceLinkMemcpyPerfTests();
 void forceLinkStreamCipherTests();
 void forceLinkSimExternalConnectionTests();
 void forceLinkMutationLogReaderTests();
 void forceLinkIThreadPoolTests();
+void forceLinkNet2FileSystemTests();
 void forceLinkJsonWebKeySetTests();
 void forceLinkVersionVectorTests();
 void forceLinkRESTClientTests();
@@ -51,6 +51,7 @@ void forceLinkSimpleCounterTests();
 void forceLinkLogSystemRecoveryTests();
 void forceLinkIPagerTests();
 void forceLinkMockS3ServerTests();
+void forceLinkAuditUtilsTests();
 void forceLinkClusterHealthMonitorTests();
 
 struct UnitTestWorkload : TestWorkload {
@@ -90,7 +91,7 @@ struct UnitTestWorkload : TestWorkload {
 
 		// Consume all remaining options as testParams which the unit test can access
 		for (auto& kv : options) {
-			if (kv.value.size() != 0) {
+			if (!kv.value.empty()) {
 				testParams.set(kv.key.toString(), getOption(options, kv.key, StringRef()).toString());
 			}
 		}
@@ -100,11 +101,11 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkFlowTests();
 		forceLinkCoroTests();
 		forceLinkMemcpyTests();
-		forceLinkMemcpyPerfTests();
 		forceLinkStreamCipherTests();
 		forceLinkSimExternalConnectionTests();
 		forceLinkMutationLogReaderTests();
 		forceLinkIThreadPoolTests();
+		forceLinkNet2FileSystemTests();
 		forceLinkJsonWebKeySetTests();
 		forceLinkVersionVectorTests();
 		forceLinkRESTClientTests();
@@ -122,6 +123,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkLogSystemRecoveryTests();
 		forceLinkIPagerTests();
 		forceLinkMockS3ServerTests();
+		forceLinkAuditUtilsTests();
 		forceLinkClusterHealthMonitorTests();
 
 #ifdef FLOW_GRPC_ENABLED
@@ -153,7 +155,7 @@ struct UnitTestWorkload : TestWorkload {
 			return false;
 		}
 
-		for (auto ignorePatt : testsIgnored) {
+		for (const auto& ignorePatt : testsIgnored) {
 			if (StringRef(testName).startsWith(ignorePatt)) {
 				return false;
 			}
@@ -178,7 +180,7 @@ struct UnitTestWorkload : TestWorkload {
 
 		fprintf(stdout, "Found %zu tests\n", tests.size());
 
-		if (tests.size() == 0) {
+		if (tests.empty()) {
 			TraceEvent(SevError, "NoMatchingUnitTests")
 			    .detail("TestPattern", testPattern)
 			    .detail("TestsIgnored", testsIgnored);

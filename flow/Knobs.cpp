@@ -177,7 +177,6 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 
 	//AsyncFileEncrypted
 	init( ENCRYPTION_BLOCK_SIZE,                              4096 );
-	init( MAX_DECRYPTED_BLOCKS,                                 10 );
 
 	//AsyncFileKAIO
 	init( MAX_OUTSTANDING,                                      64 );
@@ -413,13 +412,13 @@ ParsedKnobValue Knobs::parseKnobValue(std::string const& knob, std::string const
 	try {
 		if (double_knobs.contains(knob)) {
 			return safe_stod(value);
-		} else if (bool_knobs.count(knob)) {
+		} else if (bool_knobs.contains(knob)) {
 			return safe_stob(value);
-		} else if (int64_knobs.count(knob)) {
+		} else if (int64_knobs.contains(knob)) {
 			return safe_stoi64(value);
-		} else if (int_knobs.count(knob)) {
+		} else if (int_knobs.contains(knob)) {
 			return safe_stoi(value);
-		} else if (string_knobs.count(knob)) {
+		} else if (string_knobs.contains(knob)) {
 			return value;
 		}
 		return NoKnobFound{};

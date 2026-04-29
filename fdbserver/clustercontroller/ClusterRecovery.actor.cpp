@@ -25,7 +25,7 @@
 #include "fdbrpc/sim_validation.h"
 #include "fdbserver/logsystem/ApplyMetadataMutation.h"
 #include "fdbserver/core/BackupProgress.h"
-#include "ClusterRecovery.actor.h"
+#include "ClusterRecovery.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/SeedShardServers.h"
@@ -35,6 +35,7 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/Trace.h"
 
+#include "flow/CoroUtils.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 static std::set<int> const& normalClusterRecoveryErrors() {
@@ -1479,9 +1480,9 @@ ACTOR Future<Void> recoverFrom(Reference<ClusterRecoveryData> self,
 	return Void();
 }
 
-ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
-	state TraceInterval recoveryInterval("ClusterRecovery");
-	state double recoverStartTime = now();
+Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
+	TraceInterval recoveryInterval("ClusterRecovery");
+	double recoverStartTime = now();
 
 	self->addActor.send(waitFailureServer(self->masterInterface.waitFailure.getFuture()));
 
@@ -1493,7 +1494,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	    .detail("Status", RecoveryStatus::names[RecoveryStatus::reading_coordinated_state])
 	    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
 
-	wait(self->cstate.read());
+	co_await self->cstate.read();
 
 	if (self->cstate.prevDBState.lowestCompatibleProtocolVersion > currentProtocolVersion()) {
 		TraceEvent(SevWarnAlways, "IncompatibleProtocolVersion", self->dbgid).log();
@@ -1526,7 +1527,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 			            "Recovery stopped because too many recoveries have happened since the last time the cluster "
 			            "was fully_recovered. Set --knob-max-generations-override on your server processes to a value "
 			            "larger than OldGenerations to resume recovery once the underlying problem has been fixed.");
-			wait(Future<Void>(Never()));
+			co_await Future<Void>(Never());
 		} else if (self->cstate.myDBState.oldTLogData.size() > CLIENT_KNOBS->RECOVERY_DELAY_START_GENERATION) {
 			TraceEvent(SevError, "RecoveryDelayedTooManyOldGenerations")
 			    .detail("OldGenerations", self->cstate.myDBState.oldTLogData.size())
@@ -1534,22 +1535,21 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 			            "Recovery is delayed because too many recoveries have happened since the last time the cluster "
 			            "was fully_recovered. Set --knob-max-generations-override on your server processes to a value "
 			            "larger than OldGenerations to resume recovery once the underlying problem has been fixed.");
-			wait(delay(CLIENT_KNOBS->RECOVERY_DELAY_SECONDS_PER_GENERATION *
-			           (self->cstate.myDBState.oldTLogData.size() - CLIENT_KNOBS->RECOVERY_DELAY_START_GENERATION)));
+			co_await delay(CLIENT_KNOBS->RECOVERY_DELAY_SECONDS_PER_GENERATION *
+			               (self->cstate.myDBState.oldTLogData.size() - CLIENT_KNOBS->RECOVERY_DELAY_START_GENERATION));
 		}
 		if (g_network->isSimulated() && self->cstate.myDBState.oldTLogData.size() > CLIENT_KNOBS->MAX_GENERATIONS_SIM) {
 			disableConnectionFailures("TooManyGenerations");
 		}
 	}
 
-	state Reference<AsyncVar<Reference<LogSystem>>> oldLogSystems(new AsyncVar<Reference<LogSystem>>);
-	state Future<Void> recoverAndEndEpoch =
-	    recoverAndEndLogSystemEpoch(oldLogSystems,
-	                                self->dbgid,
-	                                self->cstate.prevDBState,
-	                                self->clusterController.tlogRejoin.getFuture(),
-	                                self->controllerData->db.serverInfo->get().myLocality,
-	                                std::addressof(self->forceRecovery));
+	Reference<AsyncVar<Reference<LogSystem>>> oldLogSystems(new AsyncVar<Reference<LogSystem>>);
+	Future<Void> recoverAndEndEpoch = recoverAndEndLogSystemEpoch(oldLogSystems,
+	                                                              self->dbgid,
+	                                                              self->cstate.prevDBState,
+	                                                              self->clusterController.tlogRejoin.getFuture(),
+	                                                              self->controllerData->db.serverInfo->get().myLocality,
+	                                                              std::addressof(self->forceRecovery));
 
 	DBCoreState newState = self->cstate.myDBState;
 	newState.recoveryCount++;
@@ -1560,7 +1560,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 		newState.newestProtocolVersion = currentProtocolVersion();
 		newState.lowestCompatibleProtocolVersion = minCompatibleProtocolVersion;
 	}
-	wait(self->cstate.write(newState) || recoverAndEndEpoch);
+	co_await (self->cstate.write(newState) || recoverAndEndEpoch);
 
 	TraceEvent("ProtocolVersionCompatibilityChecked", self->dbgid)
 	    .detail("NewestProtocolVersion", self->cstate.myDBState.newestProtocolVersion)
@@ -1569,13 +1569,13 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 
 	self->recoveryState = RecoveryState::RECRUITING;
 
-	state std::vector<StorageServerInterface> seedServers;
-	state std::vector<Standalone<CommitTransactionRef>> initialConfChanges;
-	state Future<Void> logChanges;
-	state Future<Void> minRecoveryDuration;
-	state Future<Version> poppedTxsVersion;
+	std::vector<StorageServerInterface> seedServers;
+	std::vector<Standalone<CommitTransactionRef>> initialConfChanges;
+	Future<Void> logChanges;
+	Future<Void> minRecoveryDuration;
+	Future<Version> poppedTxsVersion;
 
-	loop {
+	while (true) {
 		Reference<LogSystem> oldLogSystem = oldLogSystems->get();
 		if (oldLogSystem) {
 			logChanges = triggerUpdates(self, oldLogSystem);
@@ -1585,24 +1585,26 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 			}
 		}
 
-		state Future<Void> reg = oldLogSystem ? updateRegistration(self, oldLogSystem) : Never();
+		Future<Void> reg = oldLogSystem ? updateRegistration(self, oldLogSystem) : Never();
 		self->registrationTrigger.trigger();
 
-		choose {
-			when(wait(oldLogSystem
-			              ? recoverFrom(self, oldLogSystem, &seedServers, &initialConfChanges, poppedTxsVersion)
-			              : Never())) {
-				reg.cancel();
-				break;
-			}
-			when(wait(oldLogSystems->onChange())) {}
-			when(wait(reg)) {
-				throw internal_error();
-			}
-			when(wait(recoverAndEndEpoch)) {
-				throw internal_error();
-			}
+		auto res = co_await race(
+		    oldLogSystem ? recoverFrom(self, oldLogSystem, &seedServers, &initialConfChanges, poppedTxsVersion)
+		                 : Never(),
+		    oldLogSystems->onChange(),
+		    reg,
+		    recoverAndEndEpoch);
+		if (res.index() == 0) {
+			reg.cancel();
+			break;
 		}
+		if (res.index() == 1) {
+			continue;
+		}
+		if (res.index() == 2 || res.index() == 3) {
+			throw internal_error();
+		}
+		UNREACHABLE();
 	}
 
 	if (self->neverCreated) {
@@ -1628,7 +1630,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
 
 	// Recovery transaction
-	state bool debugResult = debug_checkMinRestoredVersion(UID(), self->lastEpochEnd, "DBRecovery", SevWarn);
+	bool debugResult = debug_checkMinRestoredVersion(UID(), self->lastEpochEnd, "DBRecovery", SevWarn);
 
 	CommitTransactionRequest recoveryCommitRequest;
 	recoveryCommitRequest.flags = recoveryCommitRequest.flags | CommitTransactionRequest::FLAG_IS_LOCK_AWARE;
@@ -1725,7 +1727,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 
 	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_COMMIT_EVENT_NAME).c_str(), self->dbgid);
 
-	state Future<ErrorOr<CommitID>> recoveryCommit = self->commitProxies[0].commit.tryGetReply(recoveryCommitRequest);
+	Future<ErrorOr<CommitID>> recoveryCommit = self->commitProxies[0].commit.tryGetReply(recoveryCommitRequest);
 	self->addActor.send(self->logSystem->onError());
 	self->addActor.send(waitResolverFailure(self->resolvers));
 	self->addActor.send(waitCommitProxyFailure(self->commitProxies));
@@ -1733,13 +1735,13 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	self->addActor.send(reportErrors(updateRegistration(self, self->logSystem), "UpdateRegistration", self->dbgid));
 	self->registrationTrigger.trigger();
 
-	wait(traceAfter(discardCommit(self->txnStateStore, self->txnStateLogAdapter), "DiscardCommitFinished"));
+	co_await traceAfter(discardCommit(self->txnStateStore, self->txnStateLogAdapter), "DiscardCommitFinished");
 
 	// Wait for the recovery transaction to complete.
 	// SOMEDAY: For faster recovery, do this and setDBState asynchronously and don't wait for them
 	// unless we want to change TLogs
-	wait(traceAfter(success(recoveryCommit), "RecoveryCommitFinished") &&
-	     traceAfter(sendInitialCommitToResolvers(self), "InitialCommitToResolversFinished"));
+	co_await (traceAfter(success(recoveryCommit), "RecoveryCommitFinished") &&
+	          traceAfter(sendInitialCommitToResolvers(self), "InitialCommitToResolversFinished"));
 	if (recoveryCommit.isReady() && recoveryCommit.get().isError()) {
 		TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_COMMIT_EVENT_NAME).c_str(),
 		           self->dbgid)
@@ -1770,7 +1772,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 
 	self->addActor.send(trackTlogRecovery(self, oldLogSystems, minRecoveryDuration));
 	debug_advanceMaxCommittedVersion(UID(), self->recoveryTransactionVersion);
-	wait(self->cstateUpdated.getFuture());
+	co_await self->cstateUpdated.getFuture();
 	debug_advanceMinCommittedVersion(UID(), self->recoveryTransactionVersion);
 
 	if (debugResult) {
@@ -1816,7 +1818,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 		self->logSystem->setOldestBackupEpoch(self->cstate.myDBState.recoveryCount);
 	}
 
-	wait(Future<Void>(Never()));
+	co_await Future<Void>(Never());
 	throw internal_error();
 }
 

@@ -1,5 +1,5 @@
 /*
- * KeyValueStoreMemory.actor.cpp
+ * KeyValueStoreMemory.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -26,13 +26,12 @@
 #include "DeltaTree.h"
 #include "fdbserver/kvstore/IDiskQueue.h"
 #include "IKeyValueContainer.h"
-#include "fdbserver/core/IKeyValueStore.h"
+#include "fdbserver/kvstore/IKeyValueStore.h"
 #include "RadixTree.h"
 #include "TransactionStoreMutationTracking.h"
 #include "flow/ActorCollection.h"
 #include "flow/EncryptUtils.h"
 #include "flow/Knobs.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 #define OP_DISK_OVERHEAD (sizeof(OpHeader) + 1)
 static_assert(sizeof(uint32_t) == 4);
@@ -465,52 +464,52 @@ private:
 		return loc;
 	}
 
-	ACTOR static Future<Standalone<StringRef>> readOpData(KeyValueStoreMemory* self,
-	                                                      OpHeader h,
-	                                                      bool* isZeroFilled,
-	                                                      int* zeroFillSize) {
-		state int remainingBytes = h.len1 + h.len2 + 1;
-		state Standalone<StringRef> data = wait(self->log->readNext(remainingBytes));
+	static Future<Standalone<StringRef>> readOpData(KeyValueStoreMemory* self,
+	                                                OpHeader h,
+	                                                bool* isZeroFilled,
+	                                                int* zeroFillSize) {
+		int remainingBytes = h.len1 + h.len2 + 1;
+		Standalone<StringRef> data = co_await self->log->readNext(remainingBytes);
 		ASSERT(data.size() <= remainingBytes);
 		*zeroFillSize = remainingBytes - data.size();
 		if (*zeroFillSize == 0) {
 			*isZeroFilled = (data[data.size() - 1] == 0);
 		}
-		return data;
+		co_return data;
 	}
 
-	ACTOR static Future<Void> recover(KeyValueStoreMemory* self, bool exactRecovery) {
-		loop {
+	static Future<Void> recover(KeyValueStoreMemory* self, bool exactRecovery) {
+		while (true) {
 			// 'uncommitted' variables track something that might be rolled back by an OpRollback, and are copied into
 			// permanent variables (in self) in OpCommit.  OpRollback does the reverse (copying the permanent versions
 			// over the uncommitted versions) the uncommitted and committed variables should be equal initially (to
 			// whatever makes sense if there are no committed transactions recovered)
-			state Key uncommittedNextKey = self->recoveredSnapshotKey;
-			state IDiskQueue::location uncommittedPrevSnapshotEnd = self->previousSnapshotEnd =
+			Key uncommittedNextKey = self->recoveredSnapshotKey;
+			IDiskQueue::location uncommittedPrevSnapshotEnd = self->previousSnapshotEnd =
 			    self->log->getNextReadLocation(); // not really, but popping up to here does nothing
-			state IDiskQueue::location uncommittedSnapshotEnd = self->currentSnapshotEnd = uncommittedPrevSnapshotEnd;
+			IDiskQueue::location uncommittedSnapshotEnd = self->currentSnapshotEnd = uncommittedPrevSnapshotEnd;
 
-			state int zeroFillSize = 0;
-			state int dbgSnapshotItemCount = 0;
-			state int dbgSnapshotEndCount = 0;
-			state int dbgMutationCount = 0;
-			state int dbgCommitCount = 0;
-			state double startt = now();
-			state UID dbgid = self->id;
+			int zeroFillSize = 0;
+			int dbgSnapshotItemCount = 0;
+			int dbgSnapshotEndCount = 0;
+			int dbgMutationCount = 0;
+			int dbgCommitCount = 0;
+			double startt = now();
+			UID dbgid = self->id;
 
-			state Future<Void> loggingDelay = delay(1.0);
+			Future<Void> loggingDelay = delay(1.0);
 
-			state OpQueue recoveryQueue;
-			state OpHeader h;
-			state Standalone<StringRef> lastSnapshotKey;
-			state bool isZeroFilled;
+			OpQueue recoveryQueue;
+			OpHeader h;
+			Standalone<StringRef> lastSnapshotKey;
+			bool isZeroFilled{ false };
 
 			TraceEvent("KVSMemRecoveryStarted", self->id).detail("SnapshotEndLocation", uncommittedSnapshotEnd);
 
 			try {
-				loop {
+				while (true) {
 					{
-						Standalone<StringRef> data = wait(self->log->readNext(sizeof(OpHeader)));
+						Standalone<StringRef> data = co_await self->log->readNext(sizeof(OpHeader));
 						if (data.size() != sizeof(OpHeader)) {
 							if (data.size()) {
 								CODE_PROBE(
@@ -530,7 +529,7 @@ private:
 						h = *(OpHeader*)data.begin();
 						ASSERT(h.op != OpEncrypted_Deprecated);
 					}
-					state Standalone<StringRef> data = wait(readOpData(self, h, &isZeroFilled, &zeroFillSize));
+					Standalone<StringRef> data = co_await readOpData(self, h, &isZeroFilled, &zeroFillSize);
 					if (zeroFillSize > 0) {
 						TraceEvent("KVSMemRecoveryComplete", self->id)
 						    .detail("Reason", "data specified by header does not exist")
@@ -635,7 +634,7 @@ private:
 						loggingDelay = delay(1.0);
 					}
 
-					wait(yield());
+					co_await yield();
 				}
 
 				if (zeroFillSize) {
@@ -665,7 +664,7 @@ private:
 
 				self->semiCommit();
 
-				return Void();
+				co_return;
 			} catch (Error& e) {
 				bool ok = e.code() == error_code_operation_cancelled || e.code() == error_code_file_not_found ||
 				          e.code() == error_code_disk_adapter_reset;
@@ -705,27 +704,27 @@ private:
 		currentSnapshotEnd = log_op(OpSnapshotEnd, StringRef(), StringRef());
 	}
 
-	ACTOR static Future<Void> snapshot(KeyValueStoreMemory* self) {
-		wait(self->recovering);
+	static Future<Void> snapshot(KeyValueStoreMemory* self) {
+		co_await self->recovering;
 
-		state Key nextKey = self->recoveredSnapshotKey;
-		state bool nextKeyAfter = false; // setting this to true is equilvent to setting nextKey = keyAfter(nextKey)
-		state uint64_t snapshotTotalWrittenBytes = 0;
-		state int lastDiff = 0;
-		state int snapItems = 0;
-		state uint64_t snapshotBytes = 0;
+		Key nextKey = self->recoveredSnapshotKey;
+		bool nextKeyAfter = false; // setting this to true is equilvent to setting nextKey = keyAfter(nextKey)
+		uint64_t snapshotTotalWrittenBytes = 0;
+		int lastDiff = 0;
+		int snapItems = 0;
+		uint64_t snapshotBytes = 0;
 
 		// Snapshot keys will be alternately written to two preallocated buffers.
 		// This allows consecutive snapshot keys to be compared for delta compression while only copying each key's
 		// bytes once.
-		state Key lastSnapshotKeyA = makeString(CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
-		state Key lastSnapshotKeyB = makeString(CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
-		state bool lastSnapshotKeyUsingA = true;
+		Key lastSnapshotKeyA = makeString(CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
+		Key lastSnapshotKeyB = makeString(CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
+		bool lastSnapshotKeyUsingA = true;
 
 		TraceEvent("KVSMemStartingSnapshot", self->id).detail("StartKey", nextKey);
 
-		loop {
-			wait(self->notifiedCommittedWriteBytes.whenAtLeast(snapshotTotalWrittenBytes + 1));
+		while (true) {
+			co_await self->notifiedCommittedWriteBytes.whenAtLeast(snapshotTotalWrittenBytes + 1);
 
 			if (self->resetSnapshot) {
 				nextKey = Key();
@@ -751,7 +750,7 @@ private:
 			bool useDelta = false;
 
 			// Write snapshot items until the wait above would block because we've used up all of the byte budget
-			loop {
+			while (true) {
 
 				if (next == self->data.end()) {
 					// After a snapshot end is logged, recovery may not see the last snapshot item logged before it so
@@ -862,38 +861,34 @@ private:
 		}
 	}
 
-	ACTOR static Future<Optional<Value>> waitAndReadValue(KeyValueStoreMemory* self,
+	static Future<Optional<Value>> waitAndReadValue(KeyValueStoreMemory* self, Key key, Optional<ReadOptions> options) {
+		co_await self->recovering;
+		co_return static_cast<IKeyValueStore*>(self)->readValue(key, options).get();
+	}
+	static Future<Optional<Value>> waitAndReadValuePrefix(KeyValueStoreMemory* self,
 	                                                      Key key,
+	                                                      int maxLength,
 	                                                      Optional<ReadOptions> options) {
-		wait(self->recovering);
-		return static_cast<IKeyValueStore*>(self)->readValue(key, options).get();
+		co_await self->recovering;
+		co_return static_cast<IKeyValueStore*>(self)->readValuePrefix(key, maxLength, options).get();
 	}
-	ACTOR static Future<Optional<Value>> waitAndReadValuePrefix(KeyValueStoreMemory* self,
-	                                                            Key key,
-	                                                            int maxLength,
-	                                                            Optional<ReadOptions> options) {
-		wait(self->recovering);
-		return static_cast<IKeyValueStore*>(self)->readValuePrefix(key, maxLength, options).get();
+	static Future<RangeResult> waitAndReadRange(KeyValueStoreMemory* self,
+	                                            KeyRange keys,
+	                                            int rowLimit,
+	                                            int byteLimit,
+	                                            Optional<ReadOptions> options) {
+		co_await self->recovering;
+		co_return static_cast<IKeyValueStore*>(self)->readRange(keys, rowLimit, byteLimit, options).get();
 	}
-	ACTOR static Future<RangeResult> waitAndReadRange(KeyValueStoreMemory* self,
-	                                                  KeyRange keys,
-	                                                  int rowLimit,
-	                                                  int byteLimit,
-	                                                  Optional<ReadOptions> options) {
-		wait(self->recovering);
-		return static_cast<IKeyValueStore*>(self)->readRange(keys, rowLimit, byteLimit, options).get();
+	static Future<Void> waitAndCommit(KeyValueStoreMemory* self, bool sequential) {
+		co_await self->recovering;
+		co_await self->commit(sequential);
 	}
-	ACTOR static Future<Void> waitAndCommit(KeyValueStoreMemory* self, bool sequential) {
-		wait(self->recovering);
-		wait(self->commit(sequential));
-		return Void();
-	}
-	ACTOR static Future<Void> commitAndUpdateVersions(KeyValueStoreMemory* self,
-	                                                  Future<Void> commit,
-	                                                  IDiskQueue::location location) {
-		wait(commit);
+	static Future<Void> commitAndUpdateVersions(KeyValueStoreMemory* self,
+	                                            Future<Void> commit,
+	                                            IDiskQueue::location location) {
+		co_await commit;
 		self->log->pop(location);
-		return Void();
 	}
 };
 

@@ -9,8 +9,6 @@ configure_fdbserver_common_includes(fdbserver_datadistributor)
 target_include_directories(fdbserver_datadistributor
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_BINARY_DIR}/include
   PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_BINARY_DIR})
+    ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(fdbserver_datadistributor PRIVATE fdbserver_core)

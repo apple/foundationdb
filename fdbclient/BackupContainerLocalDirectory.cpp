@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/BackupContainerLocalDirectory.h"
+#include "BackupContainerLocalDirectory.h"
 #include "fdbrpc/AsyncFileReadAhead.h"
 #include "flow/IAsyncFile.h"
 #include "flow/FaultInjection.h"
@@ -320,7 +320,7 @@ Future<Void> BackupContainerLocalDirectory::deleteContainer(int* pNumDeleted) {
 	// and make sure it has something in it.
 	return map(describeBackup(false, invalidVersion), [=](BackupDescription const& desc) {
 		// If the backup has no snapshots and no logs then it's probably not a valid backup
-		if (desc.snapshots.size() == 0 && !desc.minLogBegin.present())
+		if (desc.snapshots.empty() && !desc.minLogBegin.present())
 			throw backup_invalid_url();
 
 		int count = platform::eraseDirectoryRecursive(m_path);

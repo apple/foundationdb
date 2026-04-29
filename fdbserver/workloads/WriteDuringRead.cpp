@@ -91,10 +91,10 @@ struct WriteDuringReadWorkload : TestWorkload {
 		CODE_PROBE(adjacentKeys && (nodes + minNode) > CLIENT_KNOBS->KEY_SIZE_LIMIT,
 		           "WriteDuringReadWorkload testing large keys");
 
-		useExtraDB = g_network->isSimulated() && !g_simulator->extraDatabases.empty();
+		useExtraDB = g_network->isSimulated() && !fdbSimulationPolicyState().extraDatabases.empty();
 		if (useExtraDB) {
-			ASSERT(g_simulator->extraDatabases.size() == 1);
-			extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0]);
+			ASSERT(fdbSimulationPolicyState().extraDatabases.size() == 1);
+			extraDB = Database::createSimulatedExtraDatabase(fdbSimulationPolicyState().extraDatabases[0]);
 			useSystemKeys = false;
 		}
 
@@ -330,7 +330,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 				}
 			} else {
 				if (res.size() > memRes.size() || (res.size() < memRes.size() && !res.more) ||
-				    (res.size() == 0 && res.more && !resized)) {
+				    (res.empty() && res.more && !resized)) {
 					TraceEvent(SevError, "WDRGetRangeWrongResult", randomID)
 					    .detail("BeginKey", begin.getKey())
 					    .detail("BeginOffset", begin.offset)

@@ -27,6 +27,7 @@
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/TesterInterface.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbrpc/simulator.h"
 #include "flow/CodeProbe.h"
@@ -73,7 +74,7 @@ struct GcGenerationsWorkload : TestWorkload {
 		if (g_network && g_network->isSimulated()) {
 			unclogAll();
 			disableConnectionFailures("GcGenerations");
-			g_simulator->disableTLogRecoveryFinish = false;
+			fdbSimulationPolicyState().disableTLogRecoveryFinish = false;
 		}
 	}
 
@@ -107,15 +108,15 @@ struct GcGenerationsWorkload : TestWorkload {
 		std::vector<IPAddress> remoteIps; // all remote process IPs
 		for (const auto& process : g_simulator->getAllProcesses()) {
 			const auto& ip = process->address.ip;
-			if (process->locality.dcId().present() && process->locality.dcId() == g_simulator->remoteDcId &&
-			    !isCoordinator(coordinators, ip)) {
+			if (process->locality.dcId().present() &&
+			    process->locality.dcId() == fdbSimulationPolicyState().remoteDcId && !isCoordinator(coordinators, ip)) {
 				remoteIps.push_back(ip);
 			} else {
 				ips.push_back(ip);
 			}
 		}
-		ASSERT(ips.size() > 0);
-		ASSERT(remoteIps.size() > 0);
+		ASSERT(!ips.empty());
+		ASSERT(!remoteIps.empty());
 
 		for (const auto& ip : ips) {
 			for (const auto& remoteIp : remoteIps) {
@@ -127,7 +128,7 @@ struct GcGenerationsWorkload : TestWorkload {
 		}
 
 		TraceEvent("PartitionRemoteDc")
-		    .detail("RemoteDc", g_simulator->remoteDcId)
+		    .detail("RemoteDc", fdbSimulationPolicyState().remoteDcId)
 		    .detail("CloggedRemoteProcess", describe(remoteIps));
 	}
 
@@ -135,7 +136,7 @@ struct GcGenerationsWorkload : TestWorkload {
 		auto masterAddr = self->dbInfo->get().master.address();
 		auto* masterProc = g_simulator->getProcessByAddress(masterAddr);
 		return !masterProc || !masterProc->locality.dcId().present() ||
-		       masterProc->locality.dcId() == g_simulator->remoteDcId;
+		       masterProc->locality.dcId() == fdbSimulationPolicyState().remoteDcId;
 	}
 
 	// Wait for the DB to reach ACCEPTING_COMMITS. If the master is in the clogged
@@ -218,7 +219,7 @@ struct GcGenerationsWorkload : TestWorkload {
 		TraceEvent("GcGenerations").detail("StartTime", startTime).detail("EndTime", workloadEnd);
 
 		// Block TLog recovery while creating generations to test generation accumulation during recovery
-		g_simulator->disableTLogRecoveryFinish = true;
+		fdbSimulationPolicyState().disableTLogRecoveryFinish = true;
 
 		co_await self->generateMultipleTxnGenerations(self, cx);
 		self->unclogAll();
@@ -229,7 +230,7 @@ struct GcGenerationsWorkload : TestWorkload {
 		// during accumulation. The current recovery's tracking is now stale (FinalUpdate
 		// will never fire), so we must trigger a fresh recovery by rebooting the master.
 		// The new recovery starts with clean tracking state, allowing GC to proceed.
-		g_simulator->disableTLogRecoveryFinish = false;
+		fdbSimulationPolicyState().disableTLogRecoveryFinish = false;
 
 		// Reboot the master to trigger fresh recoveries with clean tracking state.
 		// GC may need multiple recovery cycles: remote TLogs must catch up from old

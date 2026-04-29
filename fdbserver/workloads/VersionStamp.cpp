@@ -154,8 +154,8 @@ struct VersionStampWorkload : TestWorkload {
 
 	Future<bool> _check(Database cx, VersionStampWorkload* self) {
 		if (self->validateExtraDB) {
-			ASSERT(g_simulator->extraDatabases.size() == 1);
-			cx = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0]);
+			ASSERT(fdbSimulationPolicyState().extraDatabases.size() == 1);
+			cx = Database::createSimulatedExtraDatabase(fdbSimulationPolicyState().extraDatabases[0]);
 		}
 		ReadYourWritesTransaction tr(cx);
 		// We specifically wish to grab the smallest read version that we can get and maintain it, to
@@ -209,7 +209,7 @@ struct VersionStampWorkload : TestWorkload {
 				if (self->failIfDataLost) {
 					ASSERT(result.size() == self->key_commit.size());
 				} else {
-					CODE_PROBE(result.size() > 0, "Not all data should always be lost.");
+					CODE_PROBE(!result.empty(), "Not all data should always be lost.");
 				}
 
 				//TraceEvent("VST_Check0").detail("Size", result.size()).detail("NodeCount", self->nodeCount).detail("KeyCommit", self->key_commit.size()).detail("ReadVersion", readVersion);
@@ -264,7 +264,7 @@ struct VersionStampWorkload : TestWorkload {
 				if (self->failIfDataLost) {
 					ASSERT(result.size() == self->versionStampKey_commit.size());
 				} else {
-					CODE_PROBE(result.size() > 0, "Not all data should always be lost (2)");
+					CODE_PROBE(!result.empty(), "Not all data should always be lost (2)");
 				}
 
 				//TraceEvent("VST_Check1").detail("Size", result.size()).detail("VsKeyCommitSize", self->versionStampKey_commit.size());
@@ -317,9 +317,9 @@ struct VersionStampWorkload : TestWorkload {
 		double lastTime = now();
 		Database extraDB;
 
-		if (!g_simulator->extraDatabases.empty()) {
-			ASSERT(g_simulator->extraDatabases.size() == 1);
-			extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0]);
+		if (!fdbSimulationPolicyState().extraDatabases.empty()) {
+			ASSERT(fdbSimulationPolicyState().extraDatabases.size() == 1);
+			extraDB = Database::createSimulatedExtraDatabase(fdbSimulationPolicyState().extraDatabases[0]);
 		}
 
 		Future<Void> metadataWatch = Void();
@@ -389,7 +389,8 @@ struct VersionStampWorkload : TestWorkload {
 					}
 					if (caughtErr.present()) {
 						err = caughtErr.get();
-						if (err.get().code() == error_code_database_locked && !g_simulator->extraDatabases.empty()) {
+						if (err.get().code() == error_code_database_locked &&
+						    !fdbSimulationPolicyState().extraDatabases.empty()) {
 							//TraceEvent("VST_CommitDatabaseLocked");
 							cx_is_primary = !cx_is_primary;
 							tr = ReadYourWritesTransaction(cx_is_primary ? cx : extraDB);

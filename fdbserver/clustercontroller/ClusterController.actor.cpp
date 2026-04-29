@@ -42,7 +42,7 @@
 #include "fdbserver/core/CoordinationInterface.h" // copy constructors for ServerCoordinators class
 #include "fdbserver/clustercontroller/ClusterController.h"
 #include "ClusterController.h"
-#include "ClusterRecovery.actor.h"
+#include "ClusterRecovery.h"
 #include "fdbserver/core/DataDistributorInterface.h"
 #include "fdbserver/core/LeaderElection.h"
 #include "fdbserver/logsystem/LogSystem.h"
@@ -1655,18 +1655,21 @@ Future<Void> statusServer(FutureStream<StatusRequest> requests,
 				}
 			}
 
-			ErrorOr<StatusReply> result = co_await errorOr(clusterGetStatus(self->db.serverInfo,
-			                                                                self->cx,
-			                                                                workers,
-			                                                                workerIssues,
-			                                                                self->storageStatusInfos,
-			                                                                &self->db.clientStatus,
-			                                                                coordinators,
-			                                                                incompatibleConnections,
-			                                                                self->datacenterVersionDifference,
-			                                                                self->dcLogServerVersionDifference,
-			                                                                self->dcStorageServerVersionDifference,
-			                                                                self->excludedDegradedServers));
+			ErrorOr<StatusReply> result = co_await errorOr(
+			    clusterGetStatus(self->db.serverInfo,
+			                     self->cx,
+			                     workers,
+			                     workerIssues,
+			                     self->storageStatusInfos,
+			                     &self->db.clientStatus,
+			                     coordinators,
+			                     incompatibleConnections,
+			                     self->datacenterVersionDifference,
+			                     self->dcLogServerVersionDifference,
+			                     self->dcStorageServerVersionDifference,
+			                     self->excludedDegradedServers,
+			                     std::max(CLIENT_KNOBS->STATUS_TIMEOUT - SERVER_KNOBS->STATUS_TIMEOUT_BUFFER,
+			                              SERVER_KNOBS->STATUS_TIMEOUT_BUFFER)));
 
 			if (result.isError() && result.getError().code() == error_code_actor_cancelled)
 				throw result.getError();

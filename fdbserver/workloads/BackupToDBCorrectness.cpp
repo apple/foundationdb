@@ -102,7 +102,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				backupPrefix = backupPrefix.withPrefix("\x00\x00\00"_sr);
 			}
 
-			ASSERT(backupPrefix != StringRef());
+			ASSERT(!backupPrefix.empty());
 		}
 
 		KeyRef beginRange;
@@ -147,8 +147,8 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 			}
 		}
 
-		ASSERT(g_simulator->extraDatabases.size() == 1);
-		extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0]);
+		ASSERT(fdbSimulationPolicyState().extraDatabases.size() == 1);
+		extraDB = Database::createSimulatedExtraDatabase(fdbSimulationPolicyState().extraDatabases[0]);
 
 		TraceEvent("BARW_Start").detail("Locked", locked);
 	}
@@ -195,7 +195,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				co_await waitForAll(results);
 
 				std::vector<RangeResult> ret;
-				for (auto result : results) {
+				for (const auto& result : results) {
 					ret.push_back(result.get());
 				}
 				co_return ret;
@@ -491,7 +491,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				    co_await tr->getRange(KeyRange(KeyRangeRef(backupAgentKey, strinc(backupAgentKey))), 100);
 
 				// Error if the system keyspace for the backup tag is not empty
-				if (agentValues.size() > 0) {
+				if (!agentValues.empty()) {
 					displaySystemKeys++;
 					printf("BackupCorrectnessLeftoverMutationKeys: (%d) %s\n",
 					       agentValues.size(),
@@ -524,12 +524,12 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 				RangeResult versions = co_await tr->getRange(
 				    KeyRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath))), 1);
-				if (!shareLogRange || !versions.size()) {
+				if (!shareLogRange || versions.empty()) {
 					RangeResult logValues = co_await tr->getRange(
 					    KeyRange(KeyRangeRef(backupLogValuesKey, strinc(backupLogValuesKey))), 100);
 
 					// Error if the log/mutation keyspace for the backup tag is not empty
-					if (logValues.size() > 0) {
+					if (!logValues.empty()) {
 						displaySystemKeys++;
 						printf("BackupCorrectnessLeftoverLogKeys: (%d) %s\n",
 						       logValues.size(),
@@ -775,9 +775,9 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 			}
 
 			// SOMEDAY: Remove after backup agents can exist quiescently
-			if ((g_simulator->drAgents == ISimulator::BackupAgentType::BackupToDB) &&
+			if ((fdbSimulationPolicyState().drAgents == FDBBackupAgentType::BackupToDB) &&
 			    (!BackupToDBCorrectnessWorkload::drAgentRequests)) {
-				g_simulator->drAgents = ISimulator::BackupAgentType::NoBackupAgents;
+				fdbSimulationPolicyState().drAgents = FDBBackupAgentType::NoBackupAgents;
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "BackupAndRestoreCorrectness").error(e);

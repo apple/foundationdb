@@ -899,7 +899,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					    co_await tr->getRange(KeyRange(KeyRangeRef(backupAgentKey, strinc(backupAgentKey))), 100);
 
 					// Error if the system keyspace for the backup tag is not empty
-					if (agentValues.size() > 0) {
+					if (!agentValues.empty()) {
 						displaySystemKeys++;
 						printf("BackupCorrectnessLeftOverMutationKeys: (%d) %s\n",
 						       agentValues.size(),
@@ -932,12 +932,12 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 					RangeResult versions = co_await tr->getRange(
 					    KeyRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath))), 1);
-					if (!shareLogRange || !versions.size()) {
+					if (!shareLogRange || versions.empty()) {
 						RangeResult logValues = co_await tr->getRange(
 						    KeyRange(KeyRangeRef(backupLogValuesKey, strinc(backupLogValuesKey))), 100);
 
 						// Error if the log/mutation keyspace for the backup tag  is not empty
-						if (logValues.size() > 0) {
+						if (!logValues.empty()) {
 							displaySystemKeys++;
 							printf("BackupCorrectnessLeftOverLogKeys: (%d) %s\n",
 							       logValues.size(),
@@ -971,9 +971,9 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			}
 
 			// SOMEDAY: Remove after backup agents can exist quiescently
-			if ((g_simulator->backupAgents == ISimulator::BackupAgentType::BackupToFile) &&
+			if ((fdbSimulationPolicyState().backupAgents == FDBBackupAgentType::BackupToFile) &&
 			    (!BackupAndRestoreCorrectnessWorkload::backupAgentRequests)) {
-				g_simulator->backupAgents = ISimulator::BackupAgentType::NoBackupAgents;
+				fdbSimulationPolicyState().backupAgents = FDBBackupAgentType::NoBackupAgents;
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "BackupAndRestoreCorrectness").error(e).GetLastError();

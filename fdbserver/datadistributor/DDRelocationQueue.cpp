@@ -1598,7 +1598,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 			    brokenPromiseToNever(self->getShardMetrics.getReply(GetMetricsRequest(rd.getParentRange().get())));
 			co_await (store(metrics, metricsF) && store(parentMetrics, parentMetricsF));
 		} else {
-			co_await store(metrics, metricsF);
+			metrics = co_await metricsF;
 		}
 
 		std::unordered_set<uint64_t> excludedDstPhysicalShards;

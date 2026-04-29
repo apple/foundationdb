@@ -463,7 +463,7 @@ static Future<Void> persistMultipartState(std::string uploadId) {
 		co_await atomicWriteFile(statePath, stateJson);
 
 		// Persist each part
-		std::map<int, std::pair<std::string, std::string>>::iterator partIter = parts.begin();
+		auto partIter = parts.begin();
 		while (partIter != parts.end()) {
 			int partNum = partIter->first;
 			std::string etag = partIter->second.first;
@@ -599,10 +599,10 @@ public:
 			    .detail("QueryParamCount", queryParams.size());
 
 			// Route to appropriate handler based on operation type
-			if (queryParams.count("uploads")) {
+			if (queryParams.contains("uploads")) {
 				co_await self->handleMultipartStart(self, req, response, bucket, object);
-			} else if (queryParams.count("uploadId")) {
-				if (queryParams.count("partNumber")) {
+			} else if (queryParams.contains("uploadId")) {
+				if (queryParams.contains("partNumber")) {
 					co_await self->handleUploadPart(self, req, response, bucket, object, queryParams);
 				} else if (req->verb == "POST") {
 					co_await self->handleMultipartComplete(self, req, response, bucket, object, queryParams);
@@ -612,7 +612,7 @@ public:
 					self->sendError(
 					    response, HTTP::HTTP_STATUS_CODE_BAD_GATEWAY, "InvalidRequest", "Unknown multipart operation");
 				}
-			} else if (queryParams.count("tagging")) {
+			} else if (queryParams.contains("tagging")) {
 				if (req->verb == "PUT") {
 					co_await self->handlePutObjectTags(self, req, response, bucket, object);
 				} else if (req->verb == "GET") {
@@ -623,7 +623,7 @@ public:
 					                "MethodNotAllowed",
 					                "Method not allowed for tagging");
 				}
-			} else if (queryParams.count("list-type") || (req->verb == "GET" && object.empty())) {
+			} else if (queryParams.contains("list-type") || (req->verb == "GET" && object.empty())) {
 				// ListObjects operation (when GET request to bucket)
 				co_await self->handleListObjects(self, req, response, bucket, queryParams);
 			} else if (object.empty()) {
@@ -816,7 +816,7 @@ public:
 		    .detail("ContentLength", req->data.contentLen)
 		    .detail("ActualContentSize", req->data.content.size())
 		    .detail("ContentPreview",
-		            req->data.content.size() > 0
+		            !req->data.content.empty()
 		                ? req->data.content.substr(0, std::min((size_t)20, req->data.content.size()))
 		                : "EMPTY");
 
@@ -875,8 +875,8 @@ public:
 		    .detail("PartsCount", uploadIter->second.parts.size())
 		    .detail("CombinedSize", combinedContent.size())
 		    .detail("CombinedPreview",
-		            combinedContent.size() > 0 ? combinedContent.substr(0, std::min((size_t)20, combinedContent.size()))
-		                                       : "EMPTY");
+		            !combinedContent.empty() ? combinedContent.substr(0, std::min((size_t)20, combinedContent.size()))
+		                                     : "EMPTY");
 
 		// Create final object
 		ObjectData obj(combinedContent);
@@ -886,7 +886,7 @@ public:
 		    .detail("UploadId", uploadId)
 		    .detail("StoredSize", getGlobalStorage().buckets[bucket][object].content.size())
 		    .detail("StoredPreview",
-		            getGlobalStorage().buckets[bucket][object].content.size() > 0
+		            !getGlobalStorage().buckets[bucket][object].content.empty()
 		                ? getGlobalStorage().buckets[bucket][object].content.substr(
 		                      0, std::min((size_t)20, getGlobalStorage().buckets[bucket][object].content.size()))
 		                : "EMPTY");
@@ -1234,12 +1234,12 @@ public:
 		TraceEvent("MockS3ListObjects").detail("Bucket", bucket).detail("QueryParamCount", queryParams.size());
 
 		// Get query parameters for listing
-		std::string prefix = queryParams.count("prefix") ? queryParams.at("prefix") : "";
-		std::string delimiter = queryParams.count("delimiter") ? queryParams.at("delimiter") : "";
-		std::string marker = queryParams.count("marker") ? queryParams.at("marker") : "";
+		std::string prefix = queryParams.contains("prefix") ? queryParams.at("prefix") : "";
+		std::string delimiter = queryParams.contains("delimiter") ? queryParams.at("delimiter") : "";
+		std::string marker = queryParams.contains("marker") ? queryParams.at("marker") : "";
 		std::string continuationToken =
-		    queryParams.count("continuation-token") ? queryParams.at("continuation-token") : "";
-		int maxKeys = queryParams.count("max-keys") ? std::stoi(queryParams.at("max-keys")) : 1000;
+		    queryParams.contains("continuation-token") ? queryParams.at("continuation-token") : "";
+		int maxKeys = queryParams.contains("max-keys") ? std::stoi(queryParams.at("max-keys")) : 1000;
 
 		TraceEvent("MockS3ListObjectsDebug")
 		    .detail("Bucket", bucket)
@@ -1415,7 +1415,7 @@ public:
 		TraceEvent("MockS3SendXMLResponse_Start")
 		    .detail("Code", code)
 		    .detail("XMLSize", xml.size())
-		    .detail("XMLPreview", xml.size() > 0 ? xml.substr(0, std::min((size_t)50, xml.size())) : "EMPTY");
+		    .detail("XMLPreview", !xml.empty() ? xml.substr(0, std::min((size_t)50, xml.size())) : "EMPTY");
 
 		response->code = code;
 		response->data.headers["Content-Type"] = "application/xml";
@@ -1521,10 +1521,10 @@ Future<Void> registerMockS3Server_impl(std::string ip, std::string port) {
 	    .detail("Port", port)
 	    .detail("ServerKey", serverKey)
 	    .detail("IsSimulated", g_network->isSimulated())
-	    .detail("AlreadyRegistered", registeredServers.count(serverKey) > 0);
+	    .detail("AlreadyRegistered", registeredServers.contains(serverKey));
 
 	// Check if server is already registered
-	if (registeredServers.count(serverKey)) {
+	if (registeredServers.contains(serverKey)) {
 		TraceEvent(SevWarn, "MockS3ServerAlreadyRegistered").detail("Address", serverKey);
 		co_return;
 	}
@@ -1822,7 +1822,7 @@ TEST_CASE("/MockS3Server/parseS3Request/ValidBucketParameter") {
 	server.parseS3Request(resource, bucket, object, queryParams);
 
 	ASSERT(bucket == "testbucket");
-	ASSERT(object == "");
+	ASSERT(object.empty());
 	ASSERT(queryParams["region"] == "us-east-1");
 
 	return Void();
@@ -1920,7 +1920,7 @@ TEST_CASE("/MockS3Server/parseS3Request/EmptyPath") {
 	server.parseS3Request(resource, bucket, object, queryParams);
 
 	ASSERT(bucket == "testbucket");
-	ASSERT(object == "");
+	ASSERT(object.empty());
 	ASSERT(queryParams["region"] == "us-east-1");
 
 	return Void();
@@ -1936,7 +1936,7 @@ TEST_CASE("/MockS3Server/parseS3Request/OnlyBucketInPath") {
 	server.parseS3Request(resource, bucket, object, queryParams);
 
 	ASSERT(bucket == "testbucket"); // Should use path (like real S3)
-	ASSERT(object == "");
+	ASSERT(object.empty());
 	ASSERT(queryParams["region"] == "us-east-1");
 
 	return Void();
@@ -1970,7 +1970,7 @@ TEST_CASE("/MockS3Server/parseS3Request/ParametersWithoutValues") {
 	server.parseS3Request(resource, bucket, object, queryParams);
 
 	ASSERT(bucket == "testbucket");
-	ASSERT(queryParams["flag"] == ""); // Parameter without value should be empty string
+	ASSERT(queryParams["flag"].empty()); // Parameter without value should be empty string
 	ASSERT(queryParams["region"] == "us-east-1");
 
 	return Void();

@@ -46,7 +46,6 @@
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
-#include "flow/Trace.h"
 
 #ifdef __unixish__
 #include <fcntl.h>
@@ -1660,7 +1659,7 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 	// Reapply database options on the new database
 	if (newDb) {
 		optionLock.enter();
-		for (auto option : options) {
+		for (const auto& option : options) {
 			try {
 				// In practice, this will set a deferred error instead of throwing. If that happens, the database
 				// will be unusable (attempts to use it will throw errors).
@@ -1794,7 +1793,7 @@ Standalone<StringRef> MultiVersionDatabase::DatabaseState::getClientStatus(
 		statusObj["InitializationError"] = initializationError.code();
 	}
 	json_spirit::mArray clientArr;
-	for (auto [protocolVersion, client] : this->clients) {
+	for (const auto& [protocolVersion, client] : this->clients) {
 		json_spirit::mObject clientDesc;
 		clientDesc["ProtocolVersion"] = format("%llx", client->protocolVersion.version());
 		clientDesc["ReleaseVersion"] = client->releaseVersion;
@@ -1920,10 +1919,10 @@ void validateOption(Optional<StringRef> value,
                     CanBeEmpty canBeEmpty = CanBeEmpty::True) {
 	ASSERT(canBePresent || canBeAbsent);
 
-	if (!canBePresent && value.present() && (!canBeEmpty || value.get().size() > 0)) {
+	if (!canBePresent && value.present() && (!canBeEmpty || !value.get().empty())) {
 		throw invalid_option_value();
 	}
-	if (!canBeAbsent && (!value.present() || (!canBeEmpty && value.get().size() == 0))) {
+	if (!canBeAbsent && (!value.present() || (!canBeEmpty && value.get().empty()))) {
 		throw invalid_option_value();
 	}
 }
@@ -1964,7 +1963,7 @@ void MultiVersionApi::addExternalLibrary(std::string path, bool useFutureVersion
 	// library.
 	threadCount = std::max(threadCount, 1);
 
-	if (externalClientDescriptions.count(filename) == 0) {
+	if (!externalClientDescriptions.contains(filename)) {
 		TraceEvent("AddingExternalClient").detail("LibraryPath", filename).detail("UseFutureVersion", useFutureVersion);
 		externalClientDescriptions.emplace(std::make_pair(filename, ClientDesc(path, true, useFutureVersion)));
 	}
@@ -1983,9 +1982,9 @@ void MultiVersionApi::addExternalLibraryDirectory(std::string path) {
 	// library.
 	threadCount = std::max(threadCount, 1);
 
-	for (auto filename : files) {
+	for (const auto& filename : files) {
 		std::string lib = abspath(joinPath(path, filename));
-		if (externalClientDescriptions.count(filename) == 0) {
+		if (!externalClientDescriptions.contains(filename)) {
 			TraceEvent("AddingExternalClient").detail("LibraryPath", filename);
 			externalClientDescriptions.emplace(std::make_pair(filename, ClientDesc(lib, true, false)));
 		}
@@ -2251,13 +2250,13 @@ void MultiVersionApi::setupNetwork() {
 				ignoreExternalClientFailures = true;
 			}
 
-			for (auto i : externalClientDescriptions) {
+			for (const auto& i : externalClientDescriptions) {
 				std::string path = i.second.libPath;
 				std::string filename = basename(path);
 				bool useFutureVersion = i.second.useFutureVersion;
 
 				// Copy external lib for each thread
-				if (externalClients.count(filename) == 0) {
+				if (!externalClients.contains(filename)) {
 					externalClients[filename] = {};
 					auto libCopies = copyExternalLibraryPerThread(path);
 					for (int idx = 0; idx < libCopies.size(); ++idx) {
@@ -2298,7 +2297,7 @@ void MultiVersionApi::setupNetwork() {
 			MutexHolder holder(lock);
 			runOnExternalClientsAllThreads(
 			    [this, transportId, baseTraceFileId](Reference<ClientInfo> client) {
-				    for (auto option : options) {
+				    for (const auto& option : options) {
 					    client->api->setNetworkOption(option.first, option.second.castTo<StringRef>());
 				    }
 				    client->api->setNetworkOption(FDBNetworkOptions::EXTERNAL_CLIENT_TRANSPORT_ID,
@@ -2598,13 +2597,13 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 		return;
 	}
 
-	for (auto option : FDBNetworkOptions::optionInfo) {
+	for (const auto& option : FDBNetworkOptions::optionInfo) {
 		if (!option.second.hidden) {
 			std::string valueStr;
 			try {
 				if (platform::getEnvironmentVar(("FDB_NETWORK_OPTION_" + option.second.name).c_str(), valueStr)) {
 					FDBOptionInfo::ParamType curParamType = option.second.paramType;
-					for (auto value : parseOptionValues(valueStr)) {
+					for (const auto& value : parseOptionValues(valueStr)) {
 						Standalone<StringRef> currentValue;
 						int64_t intParamVal;
 						if (curParamType == FDBOptionInfo::ParamType::Int) {
@@ -2627,7 +2626,7 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 						}
 						{ // lock scope
 							MutexHolder holder(lock);
-							if (setEnvOptions[option.first].count(currentValue) == 0) {
+							if (!setEnvOptions[option.first].contains(currentValue)) {
 								setNetworkOptionInternal(option.first, currentValue);
 								setEnvOptions[option.first].insert(currentValue);
 							}
@@ -2704,7 +2703,7 @@ TEST_CASE("/fdbclient/multiversionclient/EnvironmentVariableParsing") {
 	ASSERT(vals.size() == 1 && vals[0] == "abcde");
 
 	vals = parseOptionValues("");
-	ASSERT(vals.size() == 1 && vals[0] == "");
+	ASSERT(vals.size() == 1 && vals[0].empty());
 
 	vals = parseOptionValues("a:b:c:d:e");
 	ASSERT(vals.size() == 5 && vals[0] == "a" && vals[1] == "b" && vals[2] == "c" && vals[3] == "d" && vals[4] == "e");
@@ -2713,13 +2712,13 @@ TEST_CASE("/fdbclient/multiversionclient/EnvironmentVariableParsing") {
 	ASSERT(vals.size() == 3 && vals[0] == "\\a:" && vals[1] == ":b" && vals[2] == "\\");
 
 	vals = parseOptionValues("abcd:");
-	ASSERT(vals.size() == 2 && vals[0] == "abcd" && vals[1] == "");
+	ASSERT(vals.size() == 2 && vals[0] == "abcd" && vals[1].empty());
 
 	vals = parseOptionValues(":abcd");
-	ASSERT(vals.size() == 2 && vals[0] == "" && vals[1] == "abcd");
+	ASSERT(vals.size() == 2 && vals[0].empty() && vals[1] == "abcd");
 
 	vals = parseOptionValues(":");
-	ASSERT(vals.size() == 2 && vals[0] == "" && vals[1] == "");
+	ASSERT(vals.size() == 2 && vals[0].empty() && vals[1].empty());
 
 	try {
 		vals = parseOptionValues("\\x");
@@ -2744,7 +2743,7 @@ public:
 	}
 
 	void error(const Error& e, int& userParam) override {
-		ASSERT(legalErrors.count(e.code()) > 0 ||
+		ASSERT(legalErrors.contains(e.code()) ||
 		       (f.isError() && expectedValue.isError() && f.getError().code() == expectedValue.getError().code()));
 		delete this;
 	}
@@ -3081,7 +3080,7 @@ struct MapTest {
 		newFuture.legalErrors = f.legalErrors;
 		newFuture.future = mapThreadFuture<int, int>(f.future, [f, newFuture](ErrorOr<int> v) {
 			if (v.isError()) {
-				ASSERT(f.legalErrors.count(v.getError().code()) > 0 ||
+				ASSERT(f.legalErrors.contains(v.getError().code()) ||
 				       (f.expectedValue.isError() && f.expectedValue.getError().code() == v.getError().code()));
 			} else {
 				ASSERT(!f.expectedValue.isError() && f.expectedValue.get() == v.get());
@@ -3114,7 +3113,7 @@ struct FlatMapTest {
 		        f.future,
 		        [f, mapFuture](ErrorOr<int> v) {
 			        if (v.isError()) {
-				        ASSERT(f.legalErrors.count(v.getError().code()) > 0 ||
+				        ASSERT(f.legalErrors.contains(v.getError().code()) ||
 				               (f.expectedValue.isError() && f.expectedValue.getError().code() == v.getError().code()));
 			        } else {
 				        ASSERT(!f.expectedValue.isError() && f.expectedValue.get() == v.get());

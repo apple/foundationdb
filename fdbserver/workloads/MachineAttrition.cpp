@@ -22,6 +22,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbserver/core/TesterInterface.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbrpc/simulator.h"
@@ -110,10 +111,10 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 		killProcess = getOption(options, "killProcess"_sr, killProcess);
 		killZone = getOption(options, "killZone"_sr, killZone);
 		killSelf = getOption(options, "killSelf"_sr, killSelf);
-		killAll =
-		    getOption(options,
-		              "killAll"_sr,
-		              g_network->isSimulated() && !g_simulator->extraDatabases.empty() && BUGGIFY_WITH_PROB(0.01));
+		killAll = getOption(options,
+		                    "killAll"_sr,
+		                    g_network->isSimulated() && !fdbSimulationPolicyState().extraDatabases.empty() &&
+		                        BUGGIFY_WITH_PROB(0.01));
 		targetIds = getOption(options, "targetIds"_sr, std::vector<std::string>());
 		replacement = getOption(options, "replacement"_sr, reboot && deterministicRandom()->random01() < 0.5);
 		waitForVersion = getOption(options, "waitForVersion"_sr, waitForVersion);
@@ -123,7 +124,7 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 	bool shouldInject(DeterministicRandom& random,
 	                  const WorkloadRequest& work,
 	                  const unsigned alreadyAdded) const override {
-		if (g_network->isSimulated() && !g_simulator->extraDatabases.empty()) {
+		if (g_network->isSimulated() && !fdbSimulationPolicyState().extraDatabases.empty()) {
 			// Remove this as soon as we track extra databases properly
 			return false;
 		}
@@ -144,9 +145,9 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 				dataHalls.emplace(process->locality.dataHallId().castTo<StringRef>());
 				zones.emplace(process->locality.zoneId().castTo<StringRef>());
 			}
-			killDc = dataCenters.size() > 0 && random.random01() > (dataHalls.size() < 0 ? 0.1 : 0.25);
-			killDatahall = dataHalls.size() > 0 && killDc && random.random01() < 0.5;
-			killZone = zones.size() > 0 && random.random01() < 0.2;
+			killDc = !dataCenters.empty() && random.random01() > (dataHalls.size() < 0 ? 0.1 : 0.25);
+			killDatahall = !dataHalls.empty() && killDc && random.random01() < 0.5;
+			killZone = !zones.empty() && random.random01() < 0.2;
 		}
 		TraceEvent("AddingFailureInjection")
 		    .detail("Reboot", reboot)
@@ -336,7 +337,7 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 				co_await delay(delayBeforeKill);
 
 				// decide on a machine to kill
-				ASSERT(machines.size());
+				ASSERT(!machines.empty());
 				Optional<Standalone<StringRef>> target = machines.back().dcId();
 
 				ISimulator::KillType kt = ISimulator::KillType::Reboot;
@@ -413,7 +414,7 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 						CODE_PROBE(true, "Marked a zone for maintenance before killing it");
 						co_await setHealthyZone(
 						    cx, targetMachine.zoneId().get(), deterministicRandom()->random01() * 20);
-					} else if (!g_simulator->willRestart && BUGGIFY_WITH_PROB(0.005)) {
+					} else if (!fdbSimulationPolicyState().willRestart && BUGGIFY_WITH_PROB(0.005)) {
 						// don't do this in restarting test, since test could exit before it is unset, and restarted
 						// test would never unset it
 						CODE_PROBE(true, "Disable DD for all storage server failures");

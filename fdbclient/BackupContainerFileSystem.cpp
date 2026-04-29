@@ -25,8 +25,8 @@
 #include "fdbclient/BackupContainerAzureBlobStore.h"
 #endif
 #include "fdbclient/BackupContainerFileSystem.h"
-#include "fdbclient/BackupContainerLocalDirectory.h"
-#include "fdbclient/BackupContainerBlobStore.h"
+#include "BackupContainerLocalDirectory.h"
+#include "BackupContainerBlobStore.h"
 #include "fdbclient/JsonBuilder.h"
 #include "flow/StreamCipher.h"
 #include "flow/UnitTest.h"
@@ -1325,15 +1325,18 @@ public:
 		KeyspaceSnapshotFile f;
 		f.fileName = path;
 		int len;
+		char typeBuf[64] = {};
 
 		// Try new format with type suffix: snapshot,beginVersion,endVersion,totalSize,type
 		if (sscanf(name.c_str(),
-		           "snapshot,%" SCNd64 ",%" SCNd64 ",%" SCNd64 ",%*[^,]%n",
+		           "snapshot,%" SCNd64 ",%" SCNd64 ",%" SCNd64 ",%63[^,]%n",
 		           &f.beginVersion,
 		           &f.endVersion,
 		           &f.totalSize,
-		           &len) == 3 &&
+		           typeBuf,
+		           &len) == 4 &&
 		    len == name.size()) {
+			f.snapshotType = typeBuf;
 			out = f;
 			return true;
 		}

@@ -20,6 +20,8 @@
 
 // Design: design/mocks3server_chaos_design.md
 
+#include <set>
+
 #include "fdbserver/mocks3/MockS3ServerChaos.h"
 #include "fdbserver/mocks3/MockS3Server.h"
 #include "flow/ChaosMetrics.h"
@@ -27,14 +29,23 @@
 #include "flow/Trace.h"
 #include "flow/IRandom.h"
 
+namespace {
+
+std::set<std::string>& registeredMockS3ChaosServers() {
+	static std::set<std::string> servers;
+	return servers;
+}
+
+} // namespace
+
 // Clear the chaos server registry (for testing/debugging only)
 // NOTE: In production simulation tests, the registry should NOT be cleared between tests,
 // as it must stay in sync with the simulator's persistent httpHandlers map to prevent
 // duplicate registration attempts that would trigger assertions.
 void clearMockS3ChaosRegistry() {
 	if (g_network && g_simulator) {
-		size_t previousSize = g_simulator->registeredMockS3ChaosServers.size();
-		g_simulator->registeredMockS3ChaosServers.clear();
+		size_t previousSize = registeredMockS3ChaosServers().size();
+		registeredMockS3ChaosServers().clear();
 		TraceEvent("MockS3ChaosRegistryCleared").detail("PreviousSize", previousSize);
 	}
 }
@@ -297,10 +308,10 @@ Future<Void> registerMockS3ChaosServer(std::string ip, std::string port) {
 	    .detail("Port", port)
 	    .detail("ServerKey", serverKey)
 	    .detail("IsSimulated", g_network->isSimulated())
-	    .detail("AlreadyRegistered", g_simulator->registeredMockS3ChaosServers.count(serverKey) > 0);
+	    .detail("AlreadyRegistered", registeredMockS3ChaosServers().contains(serverKey));
 
 	// Check if server is already registered using truly simulator-global registry
-	if (g_simulator->registeredMockS3ChaosServers.count(serverKey)) {
+	if (registeredMockS3ChaosServers().contains(serverKey)) {
 		TraceEvent(SevWarn, "MockS3ChaosServerAlreadyRegistered").detail("Address", serverKey);
 		co_return;
 	}
@@ -320,7 +331,7 @@ Future<Void> registerMockS3ChaosServer(std::string ip, std::string port) {
 		}
 
 		co_await g_simulator->registerSimHTTPServer(ip, port, makeReference<MockS3ChaosRequestHandler>());
-		g_simulator->registeredMockS3ChaosServers.insert(serverKey);
+		registeredMockS3ChaosServers().insert(serverKey);
 
 		// Enable persistence automatically for all MockS3 instances (including chaos)
 		co_await initializeMockS3Persistence(serverKey);
@@ -328,7 +339,7 @@ Future<Void> registerMockS3ChaosServer(std::string ip, std::string port) {
 		TraceEvent("MockS3ChaosServerRegistered")
 		    .detail("Address", serverKey)
 		    .detail("Success", true)
-		    .detail("TotalRegistered", g_simulator->registeredMockS3ChaosServers.size());
+		    .detail("TotalRegistered", registeredMockS3ChaosServers().size());
 
 	} catch (Error& e) {
 		TraceEvent(SevError, "MockS3ChaosServerRegistrationFailed")
