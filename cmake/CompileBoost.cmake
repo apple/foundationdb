@@ -221,7 +221,7 @@ set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores an
 #      message(FATAL_ERROR "Unacceptable precompiled boost found")
 #
 if(Boost_FOUND AND NOT FORCE_BOOST_BUILD)
-  message(STATUS "Found Boost @ ${Boost_DIR}")
+  message(STATUS "Found Boost: ${Boost_DIR}")
   add_library(boost_target INTERFACE)
   target_link_libraries(boost_target
                         INTERFACE Boost::boost
