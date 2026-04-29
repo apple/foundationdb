@@ -4,13 +4,13 @@
 
 **Location:** [`fdbserver/clustercontroller/ClusterRecovery.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterRecovery.actor.cpp), [`fdbserver/core/RecoveryState.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/RecoveryState.h)
 **Size:** Part of ClusterController files  
-**Role:** 9-phase state machine to reconstitute the transaction system after failures.
+**Role:** 10-state recovery state machine to reconstitute the transaction system after failures.
 
 ---
 
 ## Overview
 
-Recovery is triggered when the master (sequencer) fails, a network partition heals, or coordinators change. The Cluster Controller drives a 9-state state machine that locks old TLogs, recruits a new transaction system, replays uncommitted data, and resumes accepting commits.
+Recovery is triggered when the master (sequencer) fails, a network partition heals, or coordinators change. The Cluster Controller drives a 10-state state machine that locks old TLogs, recruits a new transaction system, replays uncommitted data, and resumes accepting commits.
 
 ---
 
@@ -45,7 +45,7 @@ struct ClusterRecoveryData {
 
 ---
 
-## The 9 Recovery States -- [`RecoveryState.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/RecoveryState.h)`:31-42`
+## The 10 Recovery States -- [`RecoveryState.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/RecoveryState.h)`:31-42`
 
 ```
 enum class RecoveryState {

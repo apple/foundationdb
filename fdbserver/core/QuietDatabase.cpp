@@ -38,6 +38,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/QuietDatabase.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbclient/ManagementAPI.h"
 #include "flow/CoroUtils.h"
 
@@ -631,7 +632,7 @@ Future<int64_t> getVersionOffset(Database cx,
 // Returns DC lag for simulation runs
 Future<Version> getDatacenterLag(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	while (true) {
-		if (!g_network->isSimulated() || g_simulator->usableRegions == 1) {
+		if (!g_network->isSimulated() || fdbSimulationPolicyState().usableRegions == 1) {
 			co_return 0;
 		}
 
@@ -686,9 +687,11 @@ Future<Version> getDatacenterLag(Database cx, Reference<AsyncVar<ServerDBInfo> c
 }
 
 Future<Void> repairDeadDatacenter(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo, std::string context) {
-	if (g_network->isSimulated() && g_simulator->usableRegions > 1 && !g_simulator->quiesced) {
-		bool primaryDead = g_simulator->datacenterDead(g_simulator->primaryDcId);
-		bool remoteDead = g_simulator->datacenterDead(g_simulator->remoteDcId);
+	if (g_network->isSimulated() && fdbSimulationPolicyState().usableRegions > 1 &&
+	    !fdbSimulationPolicyState().quiesced) {
+		auto& simPolicy = fdbSimulationPolicyState();
+		bool primaryDead = g_simulator->datacenterDead(simPolicy.primaryDcId);
+		bool remoteDead = g_simulator->datacenterDead(simPolicy.remoteDcId);
 
 		// FIXME: the primary and remote can both be considered dead because excludes are not handled properly by the
 		// datacenterDead function
@@ -698,8 +701,7 @@ Future<Void> repairDeadDatacenter(Database cx, Reference<AsyncVar<ServerDBInfo> 
 		}
 		if (primaryDead || remoteDead) {
 			if (remoteDead) {
-				std::vector<AddressExclusion> servers =
-				    g_simulator->getAllAddressesInDCToExclude(g_simulator->remoteDcId);
+				std::vector<AddressExclusion> servers = g_simulator->getAllAddressesInDCToExclude(simPolicy.remoteDcId);
 				TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration")
 				    .detail("Location", context)
 				    .detail("Stage", "ExcludeServers")
@@ -712,11 +714,12 @@ Future<Void> repairDeadDatacenter(Database cx, Reference<AsyncVar<ServerDBInfo> 
 			    .detail("Stage", "Repopulate")
 			    .detail("RemoteDead", remoteDead)
 			    .detail("PrimaryDead", primaryDead);
-			g_simulator->usableRegions = 1;
+			simPolicy.usableRegions = 1;
 
 			co_await ManagementAPI::changeConfig(
 			    cx.getReference(),
-			    (primaryDead ? g_simulator->disablePrimary : g_simulator->disableRemote) + " repopulate_anti_quorum=1",
+			    (primaryDead ? fdbSimulationPolicyState().disablePrimary : fdbSimulationPolicyState().disableRemote) +
+			        " repopulate_anti_quorum=1",
 			    true);
 			while (dbInfo->get().recoveryState < RecoveryState::STORAGE_RECOVERED) {
 				co_await dbInfo->onChange();
@@ -826,22 +829,23 @@ Future<Void> enableConsistencyScanInSim(Database db) {
 			ConsistencyScanState::Config config = co_await cs.config().getD(tr);
 
 			// Enable if disabled, otherwise sometimes update the scan min version to restart it
-			if (!config.enabled && g_simulator->consistencyScanState < ISimulator::SimConsistencyScanState::Enabled) {
-				if (!g_simulator->doInjectConsistencyScanCorruption.present()) {
-					g_simulator->doInjectConsistencyScanCorruption = BUGGIFY_WITH_PROB(0.1);
+			if (!config.enabled &&
+			    fdbSimulationPolicyState().consistencyScanState < FDBSimConsistencyScanState::Enabled) {
+				if (!fdbSimulationPolicyState().doInjectConsistencyScanCorruption.present()) {
+					fdbSimulationPolicyState().doInjectConsistencyScanCorruption = BUGGIFY_WITH_PROB(0.1);
 					TraceEvent("ConsistencyScan_DoInjectCorruption")
-					    .detail("Val", g_simulator->doInjectConsistencyScanCorruption.get());
+					    .detail("Val", fdbSimulationPolicyState().doInjectConsistencyScanCorruption.get());
 				}
 
-				g_simulator->updateConsistencyScanState(ISimulator::SimConsistencyScanState::DisabledStart,
-				                                        ISimulator::SimConsistencyScanState::Enabling);
+				fdbSimulationPolicyState().updateConsistencyScanState(FDBSimConsistencyScanState::DisabledStart,
+				                                                      FDBSimConsistencyScanState::Enabling);
 				config.enabled = true;
 			} else {
-				if (config.enabled && g_simulator->restarted &&
-				    g_simulator->consistencyScanState == ISimulator::SimConsistencyScanState::DisabledStart) {
+				if (config.enabled && fdbSimulationPolicyState().restarted &&
+				    fdbSimulationPolicyState().consistencyScanState == FDBSimConsistencyScanState::DisabledStart) {
 					TraceEvent("ConsistencyScan_SimEnableAlreadyDoneFromRestart").log();
-					g_simulator->updateConsistencyScanState(ISimulator::SimConsistencyScanState::DisabledStart,
-					                                        ISimulator::SimConsistencyScanState::Enabling);
+					fdbSimulationPolicyState().updateConsistencyScanState(FDBSimConsistencyScanState::DisabledStart,
+					                                                      FDBSimConsistencyScanState::Enabling);
 				}
 				if (BUGGIFY_WITH_PROB(0.5)) {
 					config.minStartVersion = tr->getReadVersion().get();
@@ -856,8 +860,8 @@ Future<Void> enableConsistencyScanInSim(Database db) {
 				cs.config().set(tr, config);
 				co_await tr->commit();
 
-				g_simulator->updateConsistencyScanState(ISimulator::SimConsistencyScanState::Enabling,
-				                                        ISimulator::SimConsistencyScanState::Enabled);
+				fdbSimulationPolicyState().updateConsistencyScanState(FDBSimConsistencyScanState::Enabling,
+				                                                      FDBSimConsistencyScanState::Enabled);
 				TraceEvent("ConsistencyScan_SimEnabled")
 				    .detail("MaxReadByteRate", config.maxReadByteRate)
 				    .detail("TargetRoundTimeSeconds", config.targetRoundTimeSeconds)
@@ -884,12 +888,12 @@ Future<Void> disableConsistencyScanInSim(Database db, bool waitForCompletion) {
 		TraceEvent("ConsistencyScan_SimDisableWaiting").log();
 		printf("Waiting for consistency scan to complete...\n");
 		while (true) {
-			bool waitForCorruption = g_simulator->doInjectConsistencyScanCorruption.present() &&
-			                         g_simulator->doInjectConsistencyScanCorruption.get();
-			if (((waitForCorruption &&
-			      g_simulator->consistencyScanState >= ISimulator::SimConsistencyScanState::Enabled_FoundCorruption) ||
+			bool waitForCorruption = fdbSimulationPolicyState().doInjectConsistencyScanCorruption.present() &&
+			                         fdbSimulationPolicyState().doInjectConsistencyScanCorruption.get();
+			if (((waitForCorruption && fdbSimulationPolicyState().consistencyScanState >=
+			                               FDBSimConsistencyScanState::Enabled_FoundCorruption) ||
 			     (!waitForCorruption &&
-			      g_simulator->consistencyScanState >= ISimulator::SimConsistencyScanState::Enabled))) {
+			      fdbSimulationPolicyState().consistencyScanState >= FDBSimConsistencyScanState::Enabled))) {
 				break;
 			}
 			co_await delay(1.0);
@@ -916,10 +920,10 @@ Future<Void> disableConsistencyScanInSim(Database db, bool waitForCompletion) {
 			// Enable if disable, else set the scan min version to restart it
 			if (config.enabled) {
 				// state was either enabled or enabled_foundcorruption
-				g_simulator->updateConsistencyScanState(ISimulator::SimConsistencyScanState::Enabled,
-				                                        ISimulator::SimConsistencyScanState::Complete);
-				g_simulator->updateConsistencyScanState(ISimulator::SimConsistencyScanState::Enabled_FoundCorruption,
-				                                        ISimulator::SimConsistencyScanState::Complete);
+				fdbSimulationPolicyState().updateConsistencyScanState(FDBSimConsistencyScanState::Enabled,
+				                                                      FDBSimConsistencyScanState::Complete);
+				fdbSimulationPolicyState().updateConsistencyScanState(
+				    FDBSimConsistencyScanState::Enabled_FoundCorruption, FDBSimConsistencyScanState::Complete);
 				config.enabled = false;
 			} else {
 				TraceEvent("ConsistencyScan_SimDisableAlreadyDisabled").log();
@@ -942,8 +946,8 @@ Future<Void> disableConsistencyScanInSim(Database db, bool waitForCompletion) {
 		co_await tr->onError(err);
 	}
 
-	g_simulator->updateConsistencyScanState(ISimulator::SimConsistencyScanState::Complete,
-	                                        ISimulator::SimConsistencyScanState::DisabledEnd);
+	fdbSimulationPolicyState().updateConsistencyScanState(FDBSimConsistencyScanState::Complete,
+	                                                      FDBSimConsistencyScanState::DisabledEnd);
 	CODE_PROBE(true, "Consistency Scan disabled in simulation");
 	TraceEvent("ConsistencyScan_SimDisabled").log();
 	printf("Consistency scan complete.\n");

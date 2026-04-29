@@ -176,7 +176,7 @@ Keeps versions roughly aligned with wall-clock microseconds while maintaining mo
 
 ---
 
-## Resolver -- [`Resolver.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/resolver/Resolver.actor.cpp), [`ConflictSet.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/resolver/ConflictSet.cpp)
+## Resolver -- [`Resolver.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/resolver/Resolver.cpp), [`ConflictSet.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/resolver/ConflictSet.cpp)
 
 Pure conflict detection. Maintains a sliding window of committed write ranges.
 
@@ -251,5 +251,5 @@ Tags connect mutations to storage servers:
 | [`fdbserver/grvproxy/GrvProxyServer.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/grvproxy/GrvProxyServer.cpp) | Read version assignment, rate limiting |
 | [`fdbserver/sequencer/masterserver.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/sequencer/masterserver.actor.cpp) | Version assignment, wall-clock alignment |
 | `fdbserver/sequencer/MasterData.h` | MasterData, version tracking |
-| [`fdbserver/resolver/Resolver.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/resolver/Resolver.actor.cpp) | Conflict detection, batch resolution |
+| [`fdbserver/resolver/Resolver.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/resolver/Resolver.cpp) | Conflict detection, batch resolution |
 | [`fdbserver/resolver/ConflictSet.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/resolver/ConflictSet.cpp) | SkipList-based conflict range tracking |

@@ -42,7 +42,7 @@
 #include "fdbserver/core/CoordinationInterface.h" // copy constructors for ServerCoordinators class
 #include "fdbserver/clustercontroller/ClusterController.h"
 #include "ClusterController.h"
-#include "ClusterRecovery.actor.h"
+#include "ClusterRecovery.h"
 #include "fdbserver/core/DataDistributorInterface.h"
 #include "fdbserver/core/LeaderElection.h"
 #include "fdbserver/logsystem/LogSystem.h"

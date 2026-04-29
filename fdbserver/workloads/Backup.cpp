@@ -342,7 +342,7 @@ struct BackupWorkload : TestWorkload {
 			co_await startRestore;
 
 			// We can't remove after backup agents since the restore also needs them.
-			// I.e., g_simulator->backupAgents = ISimulator::BackupAgentType::NoBackupAgents
+			// I.e., fdbSimulationPolicyState().backupAgents = FDBBackupAgentType::NoBackupAgents
 		} catch (Error& e) {
 			TraceEvent(SevError, "BackupCorrectness").error(e).GetLastError();
 			throw;

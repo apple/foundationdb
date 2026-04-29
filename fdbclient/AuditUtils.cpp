@@ -1007,6 +1007,131 @@ Optional<std::pair<KeyRange, KeyRange>> rangesSame(std::vector<KeyRange> rangesA
 	return Optional<std::pair<KeyRange, KeyRange>>();
 }
 
+std::vector<LocationMetadataError> checkLocationMetadataConsistency(
+    const std::unordered_map<UID, std::vector<KeyRange>>& mapFromKeyServers,
+    const std::unordered_map<UID, std::vector<KeyRange>>& mapFromServerKeys,
+    KeyRange claimRange) {
+	std::vector<LocationMetadataError> errors;
+	// Check mapFromKeyServers => mapFromServerKeys
+	for (const auto& [ssid, keyServerRanges] : mapFromKeyServers) {
+		auto it = mapFromServerKeys.find(ssid);
+		if (it == mapFromServerKeys.end()) {
+			LocationMetadataError err;
+			err.serverId = ssid;
+			err.message = format("KeyServers and serverKeys mismatch: Some key in range(%s, %s) exists "
+			                     "on Server(%s) in KeyServers but not ServerKeys",
+			                     claimRange.begin.printable().c_str(),
+			                     claimRange.end.printable().c_str(),
+			                     ssid.toString().c_str());
+			errors.push_back(std::move(err));
+			continue;
+		}
+		Optional<std::pair<KeyRange, KeyRange>> anyMismatch = rangesSame(keyServerRanges, it->second);
+		if (anyMismatch.present()) {
+			LocationMetadataError err;
+			err.serverId = ssid;
+			err.mismatchedRangeByKeyServer = anyMismatch.get().first;
+			err.mismatchedRangeByServerKey = anyMismatch.get().second;
+			err.message = format("KeyServers and serverKeys mismatch on Server(%s): KeyServer: %s; ServerKey: %s",
+			                     ssid.toString().c_str(),
+			                     anyMismatch.get().first.toString().c_str(),
+			                     anyMismatch.get().second.toString().c_str());
+			errors.push_back(std::move(err));
+		}
+	}
+	// Check mapFromServerKeys => mapFromKeyServers
+	for (const auto& [ssid, serverKeyRanges] : mapFromServerKeys) {
+		if (!mapFromKeyServers.contains(ssid)) {
+			LocationMetadataError err;
+			err.serverId = ssid;
+			err.message = format("KeyServers and serverKeys mismatch: Some key of range(%s, %s) exists "
+			                     "on Server(%s) in ServerKeys but not KeyServers",
+			                     claimRange.begin.printable().c_str(),
+			                     claimRange.end.printable().c_str(),
+			                     ssid.toString().c_str());
+			errors.push_back(std::move(err));
+		}
+	}
+	return errors;
+}
+
+LocationMetadataMaps buildLocationMetadataMaps(
+    const std::unordered_map<UID, std::vector<KeyRange>>& mapFromKeyServersRaw,
+    const std::unordered_map<UID, std::vector<KeyRange>>& serverOwnRangesMap,
+    KeyRange claimRange,
+    Optional<UID> traceId) {
+	LocationMetadataMaps result;
+	for (const auto& [ssid, ownRanges] : serverOwnRangesMap) {
+		for (const auto& range : ownRanges) {
+			KeyRange overlappingRange = range & claimRange;
+			if (overlappingRange.empty()) {
+				continue;
+			}
+			if (traceId.present()) {
+				TraceEvent(SevVerbose, "DDAuditLocationMetadataAddToServerKeyMap", traceId.get())
+				    .detail("RawRange", range)
+				    .detail("ClaimRange", claimRange)
+				    .detail("Range", overlappingRange)
+				    .detail("SSID", ssid);
+			}
+			result.fromServerKeys[ssid].push_back(overlappingRange);
+			result.numValidatedServerKeys++;
+		}
+	}
+	for (const auto& [ssid, ranges] : mapFromKeyServersRaw) {
+		std::vector mergedRanges = coalesceRangeList(ranges);
+		for (const auto& range : mergedRanges) {
+			KeyRange overlappingRange = range & claimRange;
+			if (overlappingRange.empty()) {
+				continue;
+			}
+			if (traceId.present()) {
+				TraceEvent(SevVerbose, "DDAuditLocationMetadataAddToKeyServerMap", traceId.get())
+				    .detail("RawRange", range)
+				    .detail("ClaimRange", claimRange)
+				    .detail("Range", overlappingRange)
+				    .detail("SSID", ssid);
+			}
+			result.fromKeyServers[ssid].push_back(overlappingRange);
+			result.numValidatedKeyServers++;
+		}
+	}
+	return result;
+}
+
+std::vector<KeyRange> buildOwnRangesFromServerKeysResult(const RangeResult& krmResult) {
+	std::vector<KeyRange> ownRanges;
+	for (int i = 0; i < krmResult.size() - 1; ++i) {
+		if (serverHasKey(krmResult[i].value)) {
+			ownRanges.push_back(Standalone(KeyRangeRef(krmResult[i].key, krmResult[i + 1].key)));
+		}
+	}
+	return ownRanges;
+}
+
+// src and dest UIDs from decodeKeyServersValue are expected to be sorted by the encoder
+KeyServersOwnershipMap buildOwnershipMapFromKeyServersResult(const RangeResult& krmResult,
+                                                             const RangeResult& uidToTagMap) {
+	KeyServersOwnershipMap result;
+	for (int i = 0; i < krmResult.size() - 1; ++i) {
+		std::vector<UID> src;
+		std::vector<UID> dest;
+		UID srcID;
+		UID destID;
+		decodeKeyServersValue(uidToTagMap, krmResult[i].value, src, dest, srcID, destID);
+		if (srcID == anonymousShardId) {
+			result.shardsInAnonymousPhysicalShardCount++;
+		}
+		result.totalShardsCount++;
+		std::vector<UID> servers(src.size() + dest.size());
+		std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
+		for (auto& ssid : servers) {
+			result.rangeOwnershipMap[ssid].push_back(Standalone(KeyRangeRef(krmResult[i].key, krmResult[i + 1].key)));
+		}
+	}
+	return result;
+}
+
 // Given an input server, get ranges within the input range via the input transaction
 // from the perspective of ServerKeys system key space
 // Input: (1) SS id; (2) transaction tr; (3) within range
@@ -1035,16 +1160,13 @@ Future<AuditGetServerKeysRes> getThisServerKeysFromServerKeys(UID serverID, Tran
 		    .detail("ResultSize", readResult.size())
 		    .detail("AuditServerID", serverID);
 
-		std::vector<KeyRange> ownRanges;
+		std::vector<KeyRange> ownRanges = buildOwnRangesFromServerKeysResult(readResult);
 		for (int i = 0; i < readResult.size() - 1; ++i) {
 			TraceEvent(SevVerbose, "AuditUtilGetThisServerKeysFromServerKeysAddToResult", serverID)
 			    .detail("ValueIsServerKeysFalse", readResult[i].value == serverKeysFalse)
 			    .detail("ServerHasKey", serverHasKey(readResult[i].value))
 			    .detail("Range", KeyRangeRef(readResult[i].key, readResult[i + 1].key))
 			    .detail("AuditServerID", serverID);
-			if (serverHasKey(readResult[i].value)) {
-				ownRanges.push_back(Standalone(KeyRangeRef(readResult[i].key, readResult[i + 1].key)));
-			}
 		}
 		const KeyRange completeRange = Standalone(KeyRangeRef(range.begin, readResult.back().key));
 		TraceEvent(SevVerbose, "AuditUtilGetThisServerKeysFromServerKeysEnd", serverID)
@@ -1076,8 +1198,6 @@ Future<AuditGetKeyServersRes> getShardMapFromKeyServers(UID auditServerId, Trans
 	std::vector<Future<Void>> actors;
 	RangeResult readResult;
 	RangeResult UIDtoTagMap;
-	int64_t totalShardsCount = 0;
-	int64_t shardsInAnonymousPhysicalShardCount = 0;
 
 	try {
 		// read
@@ -1108,31 +1228,16 @@ Future<AuditGetKeyServersRes> getShardMapFromKeyServers(UID auditServerId, Trans
 		    .detail("AuditServerID", auditServerId);
 
 		// produce result
-		std::unordered_map<UID, std::vector<KeyRange>> serverOwnRanges;
-		for (int i = 0; i < readResult.size() - 1; ++i) {
-			std::vector<UID> src;
-			std::vector<UID> dest;
-			UID srcID;
-			UID destID;
-			decodeKeyServersValue(UIDtoTagMap, readResult[i].value, src, dest, srcID, destID);
-			if (srcID == anonymousShardId) {
-				shardsInAnonymousPhysicalShardCount++;
-			}
-			totalShardsCount++;
-			std::vector<UID> servers(src.size() + dest.size());
-			std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
-			for (auto& ssid : servers) {
-				serverOwnRanges[ssid].push_back(Standalone(KeyRangeRef(readResult[i].key, readResult[i + 1].key)));
-			}
-		}
+		KeyServersOwnershipMap ownershipResult = buildOwnershipMapFromKeyServersResult(readResult, UIDtoTagMap);
 		const KeyRange completeRange = Standalone(KeyRangeRef(range.begin, readResult.back().key));
 		TraceEvent(SevInfo, "AuditUtilGetThisServerKeysFromKeyServersEnd", auditServerId)
 		    .detail("Range", range)
 		    .detail("CompleteRange", completeRange)
 		    .detail("AtVersion", readAtVersion)
-		    .detail("ShardsInAnonymousPhysicalShardCount", shardsInAnonymousPhysicalShardCount)
-		    .detail("TotalShardsCount", totalShardsCount);
-		res = AuditGetKeyServersRes(completeRange, readAtVersion, serverOwnRanges, readResult.logicalSize());
+		    .detail("ShardsInAnonymousPhysicalShardCount", ownershipResult.shardsInAnonymousPhysicalShardCount)
+		    .detail("TotalShardsCount", ownershipResult.totalShardsCount);
+		res = AuditGetKeyServersRes(
+		    completeRange, readAtVersion, std::move(ownershipResult.rangeOwnershipMap), readResult.logicalSize());
 
 	} catch (Error& e) {
 		TraceEvent(SevDebug, "AuditUtilGetThisServerKeysFromKeyServersError", auditServerId)

@@ -229,7 +229,6 @@ public:
 
 	// AsyncFileEncrypted
 	int ENCRYPTION_BLOCK_SIZE;
-	int MAX_DECRYPTED_BLOCKS;
 
 	// AsyncFileKAIO
 	int MAX_OUTSTANDING;

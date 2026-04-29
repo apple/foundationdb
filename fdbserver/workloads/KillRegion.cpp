@@ -22,6 +22,7 @@
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/tester/workloads.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbrpc/simulator.h"
@@ -37,7 +38,7 @@ struct KillRegionWorkload : TestWorkload {
 		enabled =
 		    !clientId && g_network->isSimulated(); // only do this on the "first" client, and only when in simulation
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
-		g_simulator->usableRegions = 1;
+		fdbSimulationPolicyState().usableRegions = 1;
 	}
 
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("all"); }
@@ -59,7 +60,7 @@ struct KillRegionWorkload : TestWorkload {
 
 	Future<Void> _setup(Database cx) {
 		TraceEvent("ForceRecovery_DisablePrimaryBegin").log();
-		co_await ManagementAPI::changeConfig(cx.getReference(), g_simulator->disablePrimary, true);
+		co_await ManagementAPI::changeConfig(cx.getReference(), fdbSimulationPolicyState().disablePrimary, true);
 		TraceEvent("ForceRecovery_WaitForRemote").log();
 		co_await waitForPrimaryDC(cx, "1"_sr);
 		TraceEvent("ForceRecovery_DisablePrimaryComplete").log();
@@ -75,11 +76,11 @@ struct KillRegionWorkload : TestWorkload {
 		ASSERT(g_network->isSimulated());
 		if (deterministicRandom()->random01() < 0.5) {
 			TraceEvent("ForceRecovery_DisableRemoteBegin").log();
-			co_await ManagementAPI::changeConfig(cx.getReference(), g_simulator->disableRemote, true);
+			co_await ManagementAPI::changeConfig(cx.getReference(), fdbSimulationPolicyState().disableRemote, true);
 			TraceEvent("ForceRecovery_WaitForPrimary").log();
 			co_await waitForPrimaryDC(cx, "0"_sr);
 			TraceEvent("ForceRecovery_DisableRemoteComplete").log();
-			co_await ManagementAPI::changeConfig(cx.getReference(), g_simulator->originalRegions, true);
+			co_await ManagementAPI::changeConfig(cx.getReference(), fdbSimulationPolicyState().originalRegions, true);
 		}
 		TraceEvent("ForceRecovery_Wait").log();
 		co_await delay(deterministicRandom()->random01() * testDuration);
@@ -116,7 +117,7 @@ struct KillRegionWorkload : TestWorkload {
 			while (true) {
 				// only needed if force recovery was unnecessary and we killed the secondary
 				co_await ManagementAPI::changeConfig(
-				    cx.getReference(), g_simulator->disablePrimary + " repopulate_anti_quorum=1", true);
+				    cx.getReference(), fdbSimulationPolicyState().disablePrimary + " repopulate_anti_quorum=1", true);
 				auto result = co_await race(waitForStorageRecovered(), delay(300.0));
 				if (result.index() == 0) {
 					break;

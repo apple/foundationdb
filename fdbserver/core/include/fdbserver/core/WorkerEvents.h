@@ -29,6 +29,6 @@
 
 struct WorkerEvents : std::map<NetworkAddress, TraceEventFields> {};
 
-Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventOnWorkers(
+AsyncResult<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventOnWorkers(
     std::vector<WorkerDetails> workers,
     std::string eventName);

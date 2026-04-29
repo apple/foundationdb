@@ -85,8 +85,8 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			}
 		}
 
-		ASSERT(g_simulator->extraDatabases.size() == 1);
-		extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0]);
+		ASSERT(fdbSimulationPolicyState().extraDatabases.size() == 1);
+		extraDB = Database::createSimulatedExtraDatabase(fdbSimulationPolicyState().extraDatabases[0]);
 
 		TraceEvent("DRU_Start").log();
 	}
@@ -518,8 +518,8 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 
 			TraceEvent("DRU_Complete").detail("BackupTag", printable(backupTag));
 
-			if (g_simulator->drAgents == ISimulator::BackupAgentType::BackupToDB) {
-				g_simulator->drAgents = ISimulator::BackupAgentType::NoBackupAgents;
+			if (fdbSimulationPolicyState().drAgents == FDBBackupAgentType::BackupToDB) {
+				fdbSimulationPolicyState().drAgents = FDBBackupAgentType::NoBackupAgents;
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "BackupAndRestoreCorrectnessError").error(e);
