@@ -1301,11 +1301,8 @@ public:
 		// Count of all fetchKey clearRange operations to the storage engine.
 		Counter kvClearRangesInFetchKeys;
 
-		// Bytes fetched by fetchChangeFeed for data movements.
-		Counter feedBytesFetched;
-
 		Counter sampledBytesCleared;
-		Counter atomicMutations, changeFeedMutations, changeFeedMutationsDurable;
+		Counter atomicMutations;
 		Counter updateBatches, updateVersions;
 		Counter loops;
 		Counter fetchWaitingMS, fetchWaitingCount, fetchExecutingMS, fetchExecutingCount;
@@ -1330,8 +1327,6 @@ public:
 		Counter kvScans;
 		// The count of commit operation to the storage engine.
 		Counter kvCommits;
-		// The count of change feed reads that hit disk
-		Counter changeFeedDiskReads;
 		// The count of ChangeServerKeys actions.
 		Counter changeServerKeysAssigned;
 		Counter changeServerKeysUnassigned;
@@ -1361,10 +1356,9 @@ public:
 		    logicalBytesInput("LogicalBytesInput", cc), logicalBytesMoveInOverhead("LogicalBytesMoveInOverhead", cc),
 		    kvCommitLogicalBytes("KVCommitLogicalBytes", cc), kvClearRanges("KVClearRanges", cc),
 		    kvClearSingleKey("KVClearSingleKey", cc), kvSystemClearRanges("KVSystemClearRanges", cc),
-		    bytesDurable("BytesDurable", cc), feedBytesFetched("FeedBytesFetched", cc),
+		    bytesDurable("BytesDurable", cc),
 		    sampledBytesCleared("SampledBytesCleared", cc), atomicMutations("AtomicMutations", cc),
-		    changeFeedMutations("ChangeFeedMutations", cc),
-		    changeFeedMutationsDurable("ChangeFeedMutationsDurable", cc), updateBatches("UpdateBatches", cc),
+		    updateBatches("UpdateBatches", cc),
 		    updateVersions("UpdateVersions", cc), loops("Loops", cc), fetchWaitingMS("FetchWaitingMS", cc),
 		    fetchWaitingCount("FetchWaitingCount", cc), fetchExecutingMS("FetchExecutingMS", cc),
 		    fetchExecutingCount("FetchExecutingCount", cc), readsRejected("ReadsRejected", cc),
@@ -1373,7 +1367,7 @@ public:
 		    quickGetValueMiss("QuickGetValueMiss", cc), quickGetKeyValuesHit("QuickGetKeyValuesHit", cc),
 		    quickGetKeyValuesMiss("QuickGetKeyValuesMiss", cc), kvScanBytes("KVScanBytes", cc),
 		    kvGetBytes("KVGetBytes", cc), eagerReadsKeys("EagerReadsKeys", cc), kvGets("KVGets", cc),
-		    kvScans("KVScans", cc), kvCommits("KVCommits", cc), changeFeedDiskReads("ChangeFeedDiskReads", cc),
+		    kvScans("KVScans", cc), kvCommits("KVCommits", cc),
 		    getMappedRangeBytesQueried("GetMappedRangeBytesQueried", cc),
 		    finishedGetMappedRangeQueries("FinishedGetMappedRangeQueries", cc),
 		    finishedGetMappedRangeSecondaryQueries("FinishedGetMappedRangeSecondaryQueries", cc),
@@ -1943,8 +1937,6 @@ void validate(StorageServer* data, bool force = false) {
 					ASSERT(shard->getShardId() != 0UL && shard->getDesiredShardId() != 0UL);
 				}
 			}
-
-			// FIXME: do some change feed validation?
 
 			latest.validate();
 			validateRange(latest, allKeys, data->version.get(), data->thisServerID, data->durableVersion.get());
@@ -9227,15 +9219,12 @@ void StorageServer::addMutation(Version version,
                                 KeyRangeRef const& shard,
                                 UpdateEagerReadInfo* eagerReads) {
 	MutationRef expanded = mutation;
-	MutationRef
-	    nonExpanded; // need to keep non-expanded but atomic converted version of clear mutations for change feeds
 	auto& mLog = addVersionToMutationLog(version);
 
 	if (!convertAtomicOp(expanded, data(), eagerReads, mLog.arena())) {
 		return;
 	}
 	if (expanded.type == MutationRef::ClearRange) {
-		nonExpanded = expanded;
 		expandClear(expanded, data(), eagerReads, shard.end);
 	}
 	expanded = addMutationToMutationLog(mLog, expanded);
