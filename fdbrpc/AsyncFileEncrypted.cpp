@@ -29,7 +29,8 @@ public:
 	// the filename.
 	static auto getFirstBlockIV(const std::string& filename) {
 		StreamCipher::IV iv;
-		auto salt = basename(filename);
+		auto slashPos = filename.rfind('/');
+		auto salt = (slashPos == std::string::npos) ? filename : filename.substr(slashPos + 1);
 		auto pos = salt.find('.');
 		salt = salt.substr(0, pos);
 		auto hash = XXH3_128bits(salt.c_str(), salt.size());
@@ -74,15 +75,7 @@ public:
 		int bytesRead = 0;
 		ASSERT(self->mode == AsyncFileEncrypted::Mode::READ_ONLY);
 		for (block = firstBlock; block <= lastBlock; ++block) {
-			Standalone<StringRef> plaintext;
-
-			auto cachedBlock = self->readBuffers.get(block);
-			if (cachedBlock.present()) {
-				plaintext = cachedBlock.get();
-			} else {
-				plaintext = co_await readBlock(self.getPtr(), block);
-				self->readBuffers.insert(block, plaintext);
-			}
+			Standalone<StringRef> plaintext = co_await readBlock(self.getPtr(), block);
 			auto start = (block == firstBlock) ? plaintext.begin() + (offset % FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE)
 			                                   : plaintext.begin();
 			auto end = (block == lastBlock)
@@ -148,7 +141,7 @@ public:
 };
 
 AsyncFileEncrypted::AsyncFileEncrypted(Reference<IAsyncFile> file, Mode mode)
-  : file(file), mode(mode), readBuffers(FLOW_KNOBS->MAX_DECRYPTED_BLOCKS), currentBlock(0) {
+  : file(file), mode(mode), currentBlock(0) {
 	firstBlockIV = AsyncFileEncryptedImpl::getFirstBlockIV(file->getFilename());
 	if (mode == Mode::APPEND_ONLY) {
 		encryptor =
@@ -229,38 +222,6 @@ Future<Void> AsyncFileEncrypted::writeLastBlockToFile() {
 	return uncancellable(
 	    holdWhile(Reference<AsyncFileEncrypted>::addRef(this),
 	              file->write(&writeBuffer[0], offsetInBlock, currentBlock * FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE)));
-}
-
-size_t AsyncFileEncrypted::RandomCache::evict() {
-	ASSERT_EQ(vec.size(), maxSize);
-	auto index = deterministicRandom()->randomInt(0, maxSize);
-	hashMap.erase(vec[index]);
-	return index;
-}
-
-AsyncFileEncrypted::RandomCache::RandomCache(size_t maxSize) : maxSize(maxSize) {
-	vec.reserve(maxSize);
-}
-
-void AsyncFileEncrypted::RandomCache::insert(uint32_t block, const Standalone<StringRef>& value) {
-	auto [_, found] = hashMap.insert({ block, value });
-	if (found) {
-		return;
-	} else if (vec.size() < maxSize) {
-		vec.push_back(block);
-	} else {
-		auto index = evict();
-		vec[index] = block;
-	}
-}
-
-Optional<Standalone<StringRef>> AsyncFileEncrypted::RandomCache::get(uint32_t block) const {
-	auto it = hashMap.find(block);
-	if (it == hashMap.end()) {
-		return {};
-	} else {
-		return it->second;
-	}
 }
 
 // This test writes random data into an encrypted file in random increments,

@@ -22,8 +22,9 @@
 
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/simulator.h"
-#include "fdbserver/datadistributor/DDTeamCollection.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/Knobs.h"
+#include "fdbserver/datadistributor/DDTeamCollection.h"
 #include "fdbserver/datadistributor/DataDistributionTeam.h"
 #include "ExclusionTracker.h"
 #include "flow/IRandom.h"
@@ -1472,7 +1473,7 @@ public:
 				}
 				otherChanges.push_back(self->excludedServers.onChange(worstAddr));
 
-				// FIXME: explain the 3 here
+				// Check the remaining exclusion forms: primary IP, secondary address and port, and secondary IP.
 				for (int i = 0; i < 3; i++) {
 					if (i > 0 && !server->getLastKnownInterface().secondaryAddress().present()) {
 						break;
@@ -2256,7 +2257,7 @@ public:
 	}
 
 	static Future<Void> waitPerpetualWiggleDelay(DDTeamCollection* self) {
-		if (g_network->isSimulated() && g_simulator->isConsistencyChecked) {
+		if (g_network->isSimulated() && fdbSimulationPolicyState().isConsistencyChecked) {
 			// Wiggle can cause consistency check to repeatedly restart. So we want to
 			// slow it down to avoid consistency check timeout.
 			co_await delay(300);

@@ -41,6 +41,7 @@
 #include "fdbserver/core/AccumulativeChecksumUtil.h"
 #include "fdbserver/core/BulkDumpUtil.h"
 #include "fdbserver/core/BulkLoadUtil.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/FDBRocksDBVersion.h"
 #include "fdbserver/kvstore/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
@@ -94,7 +95,7 @@
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/DataMovement.h"
-#include "fdbserver/storageserver/StorageServer.actor.h"
+#include "fdbserver/storageserver/StorageServer.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "StorageServerUtils.h"
 #include "flow/ActorCollection.h"
@@ -104,6 +105,7 @@
 #include "flow/Histogram.h"
 #include "flow/IRandom.h"
 #include "flow/IndexedSet.h"
+#include "flow/CoroUtils.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TDMetric.h"
 #include "flow/Trace.h"
@@ -1106,10 +1108,10 @@ public:
 		// With fault injection enabled, the tss will start acting normal for a bit, then after the specified delay
 		// start behaving incorrectly.
 		if (g_network->isSimulated() && !g_simulator->speedUpSimulation &&
-		    g_simulator->tssMode >= ISimulator::TSSMode::EnabledAddDelay) {
+		    simulationPolicyHasCapability(ISimulationPolicy::Capability::StorageReplicaFaultInjection)) {
 			tssFaultInjectTime = now() + deterministicRandom()->randomInt(60, 300);
 			TraceEvent(SevWarnAlways, "TSSInjectFaultEnabled", thisServerID)
-			    .detail("Mode", g_simulator->tssMode)
+			    .detail("Mode", static_cast<int>(fdbSimulationPolicyState().tssMode))
 			    .detail("At", tssFaultInjectTime.get());
 		}
 	}
@@ -1691,20 +1693,21 @@ public:
 	void maybeInjectTargetedRestart(Version v) {
 		// inject an SS restart at most once per test
 		if (g_network->isSimulated() && !g_simulator->speedUpSimulation &&
-		    now() > g_simulator->injectTargetedSSRestartTime &&
+		    now() > fdbSimulationPolicyState().injectTargetedSSRestartTime &&
 		    rebootAfterDurableVersion == std::numeric_limits<Version>::max()) {
 			CODE_PROBE(true, "Injecting SS targeted restart");
 			TraceEvent("SimSSInjectTargetedRestart", thisServerID).detail("Version", v);
 			rebootAfterDurableVersion = v;
-			g_simulator->injectTargetedSSRestartTime = std::numeric_limits<double>::max();
+			fdbSimulationPolicyState().injectTargetedSSRestartTime = std::numeric_limits<double>::max();
 		}
 	}
 
 	bool maybeInjectDelay() {
-		if (g_network->isSimulated() && !g_simulator->speedUpSimulation && now() > g_simulator->injectSSDelayTime) {
+		if (g_network->isSimulated() && !g_simulator->speedUpSimulation &&
+		    now() > fdbSimulationPolicyState().injectSSDelayTime) {
 			CODE_PROBE(true, "Injecting SS targeted delay");
 			TraceEvent("SimSSInjectDelay", thisServerID).log();
-			g_simulator->injectSSDelayTime = std::numeric_limits<double>::max();
+			fdbSimulationPolicyState().injectSSDelayTime = std::numeric_limits<double>::max();
 			return true;
 		}
 		return false;
@@ -3142,9 +3145,11 @@ Future<Key> findKey(StorageServer* data,
 	if (sel.offset <= 1 && sel.offset >= 0)
 		maxBytes = std::numeric_limits<int>::max();
 	else
-		maxBytes = (g_network->isSimulated() && g_simulator->tssMode == ISimulator::TSSMode::Disabled && BUGGIFY)
-		               ? SERVER_KNOBS->BUGGIFY_LIMIT_BYTES
-		               : SERVER_KNOBS->STORAGE_LIMIT_BYTES;
+		maxBytes =
+		    (g_network->isSimulated() &&
+		     simulationPolicyHasCapability(ISimulationPolicy::Capability::LimitStorageServerReadBytes) && BUGGIFY)
+		        ? SERVER_KNOBS->BUGGIFY_LIMIT_BYTES
+		        : SERVER_KNOBS->STORAGE_LIMIT_BYTES;
 
 	GetKeyValuesReply rep = co_await readRange(data,
 	                                           version,
@@ -3240,31 +3245,31 @@ KeyRange getShardKeyRange(StorageServer* data, const KeySelectorRef& sel)
 }
 
 void maybeInjectConsistencyScanCorruption(UID thisServerID, GetKeyValuesRequest const& req, GetKeyValuesReply& reply) {
-	if (g_simulator->consistencyScanState != ISimulator::SimConsistencyScanState::Enabled_InjectCorruption ||
+	if (fdbSimulationPolicyState().consistencyScanState != FDBSimConsistencyScanState::Enabled_InjectCorruption ||
 	    !req.options.present() || !req.options.get().consistencyCheckStartVersion.present() ||
-	    !g_simulator->consistencyScanCorruptRequestKey.present()) {
+	    !fdbSimulationPolicyState().consistencyScanCorruptRequestKey.present()) {
 		return;
 	}
 
 	UID destination = req.reply.getEndpoint().token;
 
-	ASSERT(g_simulator->consistencyScanInjectedCorruptionType.present() ==
-	       g_simulator->consistencyScanInjectedCorruptionDestination.present());
+	ASSERT(fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.present() ==
+	       fdbSimulationPolicyState().consistencyScanInjectedCorruptionDestination.present());
 	// if we already injected a corruption, reinject it if this request was a retransmit of the same one we corrupted
 	// could also check that this storage sent the corruption but the reply endpoints should be globally unique so this
 	// covers it
-	if (g_simulator->consistencyScanInjectedCorruptionDestination.present() &&
-	    (g_simulator->consistencyScanInjectedCorruptionDestination.get() != destination)) {
+	if (fdbSimulationPolicyState().consistencyScanInjectedCorruptionDestination.present() &&
+	    (fdbSimulationPolicyState().consistencyScanInjectedCorruptionDestination.get() != destination)) {
 		return;
 	}
 
 	CODE_PROBE(true, "consistency check injecting corruption");
-	CODE_PROBE(g_simulator->consistencyScanInjectedCorruptionDestination.present() &&
-	               g_simulator->consistencyScanInjectedCorruptionDestination.get() == destination,
+	CODE_PROBE(fdbSimulationPolicyState().consistencyScanInjectedCorruptionDestination.present() &&
+	               fdbSimulationPolicyState().consistencyScanInjectedCorruptionDestination.get() == destination,
 	           "consistency check re-injecting corruption after retransmit",
 	           probe::decoration::rare);
 
-	g_simulator->consistencyScanInjectedCorruptionDestination = destination;
+	fdbSimulationPolicyState().consistencyScanInjectedCorruptionDestination = destination;
 	// FIXME: reinject same type of corruption once we enable other types
 
 	// FIXME: code probe for each type?
@@ -3272,7 +3277,8 @@ void maybeInjectConsistencyScanCorruption(UID thisServerID, GetKeyValuesRequest 
 	if (true /*deterministicRandom()->random01() < 0.3*/) {
 		// flip more flag
 		reply.more = !reply.more;
-		g_simulator->consistencyScanInjectedCorruptionType = ISimulator::SimConsistencyScanCorruptionType::FlipMoreFlag;
+		fdbSimulationPolicyState().consistencyScanInjectedCorruptionType =
+		    FDBSimConsistencyScanCorruptionType::FlipMoreFlag;
 	} else {
 		// FIXME: weird memory issues when messing with actual response data, enable and figure out later
 		ASSERT(false);
@@ -3286,27 +3292,27 @@ void maybeInjectConsistencyScanCorruption(UID thisServerID, GetKeyValuesRequest 
 
 		if (reply.data.empty()) {
 			// add row to empty response
-			g_simulator->consistencyScanInjectedCorruptionType =
-			    ISimulator::SimConsistencyScanCorruptionType::AddToEmpty;
-			reply.data.push_back_deep(
-			    reply.arena,
-			    KeyValueRef(g_simulator->consistencyScanCorruptRequestKey.get(), "consistencyCheckCorruptValue"_sr));
+			fdbSimulationPolicyState().consistencyScanInjectedCorruptionType =
+			    FDBSimConsistencyScanCorruptionType::AddToEmpty;
+			reply.data.push_back_deep(reply.arena,
+			                          KeyValueRef(fdbSimulationPolicyState().consistencyScanCorruptRequestKey.get(),
+			                                      "consistencyCheckCorruptValue"_sr));
 		} else if (deterministicRandom()->coinflip() || reply.data.back().value.empty()) {
 			// change value in non-empty response
-			g_simulator->consistencyScanInjectedCorruptionType =
-			    ISimulator::SimConsistencyScanCorruptionType::RemoveLastRow;
+			fdbSimulationPolicyState().consistencyScanInjectedCorruptionType =
+			    FDBSimConsistencyScanCorruptionType::RemoveLastRow;
 			reply.data.pop_back();
 		} else {
 			// chop off last byte of first value
-			g_simulator->consistencyScanInjectedCorruptionType =
-			    ISimulator::SimConsistencyScanCorruptionType::ChangeFirstValue;
+			fdbSimulationPolicyState().consistencyScanInjectedCorruptionType =
+			    FDBSimConsistencyScanCorruptionType::ChangeFirstValue;
 
 			reply.data[0].value = reply.data[0].value.substr(0, reply.data[0].value.size() - 1);
 		}
 	}
 
 	TraceEvent(SevWarnAlways, "InjectedConsistencyScanCorruption", thisServerID)
-	    .detail("CorruptionType", g_simulator->consistencyScanInjectedCorruptionType.get())
+	    .detail("CorruptionType", fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get())
 	    .detail("Version", req.version)
 	    .detail("Count", reply.data.size());
 }
@@ -5913,7 +5919,8 @@ Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest 
 				// Even if TSS mode is Disabled, this may be the second test in a restarting test where the first run
 				// had it enabled.
 				int byteLimit =
-				    (BUGGIFY && g_network->isSimulated() && g_simulator->tssMode == ISimulator::TSSMode::Disabled &&
+				    (BUGGIFY && g_network->isSimulated() &&
+				     simulationPolicyHasCapability(ISimulationPolicy::Capability::LimitStorageServerReadBytes) &&
 				     !data->isTss() && !data->isSSWithTSSPair())
 				        ? 1
 				        : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
@@ -9610,8 +9617,9 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			}
 
 			if (g_network->isSimulated() && data->isTss() &&
-			    g_simulator->tssMode == ISimulator::TSSMode::EnabledAddDelay && !g_simulator->speedUpSimulation &&
-			    data->tssFaultInjectTime.present() && data->tssFaultInjectTime.get() < now()) {
+			    simulationPolicyHasCapability(ISimulationPolicy::Capability::StorageReplicaDelay) &&
+			    !g_simulator->speedUpSimulation && data->tssFaultInjectTime.present() &&
+			    data->tssFaultInjectTime.get() < now()) {
 				if (deterministicRandom()->random01() < 0.01) {
 					TraceEvent(SevWarnAlways, "TSSInjectDelayForever", data->thisServerID).log();
 					// small random chance to just completely get stuck here, each tss should eventually hit this in
@@ -9859,7 +9867,7 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					// Drop non-private mutations if TSS fault injection is enabled in simulation, or if this is a TSS
 					// in quarantine.
 					if (g_network->isSimulated() && data->isTss() && !g_simulator->speedUpSimulation &&
-					    g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations &&
+					    simulationPolicyHasCapability(ISimulationPolicy::Capability::StorageReplicaMutationDrop) &&
 					    data->tssFaultInjectTime.present() && data->tssFaultInjectTime.get() < now() &&
 					    (msg.type == MutationRef::SetValue || msg.type == MutationRef::ClearRange) &&
 					    (msg.param1.size() < 2 || msg.param1[0] != 0xff || msg.param1[1] != 0xff) &&
@@ -12532,14 +12540,14 @@ Future<Void> storageServer(IKeyValueStore* persistentData,
 }
 
 // for recovering an existing storage server
-ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
-                                 StorageServerInterface ssi,
-                                 Reference<AsyncVar<ServerDBInfo> const> db,
-                                 std::string folder,
-                                 Promise<Void> recovered,
-                                 Reference<IClusterConnectionRecord> connRecord) {
-	state StorageServer self(persistentData, db, ssi);
-	state Future<Void> ssCore;
+Future<Void> storageServer(IKeyValueStore* persistentData,
+                           StorageServerInterface ssi,
+                           Reference<AsyncVar<ServerDBInfo> const> db,
+                           std::string folder,
+                           Promise<Void> recovered,
+                           Reference<IClusterConnectionRecord> connRecord) {
+	StorageServer self(persistentData, db, ssi);
+	Future<Void> ssCore;
 	self.folder = folder;
 	self.checkpointFolder = joinPath(self.folder, serverCheckpointFolder);
 	self.fetchedCheckpointFolder = joinPath(self.folder, fetchedCheckpointFolder);
@@ -12559,28 +12567,30 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	clearFileFolder(self.bulkLoadFolder, self.thisServerID, /*ignoreError=*/false);
 
 	self.actors.add(rocksdbLogCleaner(folder));
+	Error err;
 	try {
-		state double start = now();
+		double start = now();
 		TraceEvent("StorageServerRebootStart", self.thisServerID).log();
 
-		wait(self.storage.init());
-		choose {
-			// after a rollback there might be uncommitted changes.
-			// for memory storage engine type, wait until recovery is done before commit
-			when(wait(self.storage.commit())) {}
-
-			when(wait(memoryStoreRecover(persistentData, connRecord, self.thisServerID))) {
-				TraceEvent("DisposeStorageServer", self.thisServerID).log();
-				throw worker_removed();
-			}
+		co_await self.storage.init();
+		// after a rollback there might be uncommitted changes.
+		// for memory storage engine type, wait until recovery is done before commit
+		auto res =
+		    co_await race(self.storage.commit(), memoryStoreRecover(persistentData, connRecord, self.thisServerID));
+		if (res.index() == 1) {
+			TraceEvent("DisposeStorageServer", self.thisServerID).log();
+			throw worker_removed();
+		} else if (res.index() != 0) {
+			UNREACHABLE();
 		}
+
 		++self.counters.kvCommits;
 
-		bool ok = wait(self.storage.restoreDurableState());
+		bool ok = co_await self.storage.restoreDurableState();
 		if (!ok) {
 			if (recovered.canBeSet())
 				recovered.send(Void());
-			return Void();
+			co_return;
 		}
 		TraceEvent("SSTimeRestoreDurableState", self.thisServerID).detail("TimeTaken", now() - start);
 
@@ -12603,48 +12613,48 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		if (recovered.canBeSet())
 			recovered.send(Void());
 
-		state Future<Void> f = storageInterfaceRegistration(&self, ssi, {});
-		wait(delay(0));
-		ErrorOr<Void> e = wait(errorOr(f));
+		Future<Void> f = storageInterfaceRegistration(&self, ssi, {});
+		co_await delay(0);
+		ErrorOr<Void> e = co_await errorOr(f);
 		if (e.isError()) {
 			throw f.getError();
 		}
 
 		self.interfaceRegistered =
 		    storageInterfaceRegistration(&self, ssi, self.registerInterfaceAcceptingRequests.getFuture());
-		wait(delay(0));
+		co_await delay(0);
 
 		TraceEvent("StorageServerStartingCore", self.thisServerID).detail("TimeTaken", now() - start);
 
 		ssCore = storageServerCore(&self, ssi);
-		wait(ssCore);
+		co_await ssCore;
 
 		throw internal_error();
 	} catch (Error& e) {
+		err = e;
+	}
 
-		self.ssLock->halt();
+	self.ssLock->halt();
 
-		if (self.byteSampleRecovery.isValid()) {
-			self.byteSampleRecovery.cancel();
-		}
+	if (self.byteSampleRecovery.isValid()) {
+		self.byteSampleRecovery.cancel();
+	}
 
-		if (recovered.canBeSet())
-			recovered.send(Void());
+	if (recovered.canBeSet())
+		recovered.send(Void());
 
-		// If the storage server dies while something that uses self is still on the stack,
-		// we want that actor to complete before we terminate and that memory goes out of scope
-		state Error err = e;
-		if (storageServerTerminated(self, persistentData, err)) {
-			ssCore.cancel();
-			self.actors = ActorCollection(false);
-			wait(delay(0));
-			return Void();
-		}
+	// If the storage server dies while something that uses self is still on the stack,
+	// we want that actor to complete before we terminate and that memory goes out of scope
+	if (storageServerTerminated(self, persistentData, err)) {
 		ssCore.cancel();
 		self.actors = ActorCollection(false);
-		wait(delay(0));
-		throw err;
+		co_await delay(0);
+		co_return;
 	}
+	ssCore.cancel();
+	self.actors = ActorCollection(false);
+	co_await delay(0);
+	throw err;
 }
 
 #ifndef __INTEL_COMPILER

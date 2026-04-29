@@ -1,5 +1,5 @@
 /*
- * BenchCallback.actor.cpp
+ * BenchCallbackActor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -25,21 +25,18 @@
 #include "flow/flow.h"
 #include "flow/ThreadHelper.actor.h"
 
-#include "flow/actorcompiler.h" // This must be the last #include.
-
-ACTOR template <size_t Size>
+template <size_t Size>
 static Future<Void> increment(Future<Void> f, uint32_t* sum) {
-	state std::array<uint8_t, Size> arr;
-	wait(f);
+	std::array<uint8_t, Size> arr;
+	co_await f;
 	benchmark::DoNotOptimize(arr);
 	++(*sum);
-	return Void();
 }
 
-ACTOR template <size_t Size>
+template <size_t Size>
 static Future<Void> benchCallbackActor(benchmark::State* benchState) {
-	state size_t actorCount = benchState->range(0);
-	state uint32_t sum;
+	size_t actorCount = benchState->range(0);
+	uint32_t sum{ 0 };
 	while (benchState->KeepRunning()) {
 		sum = 0;
 		Promise<Void> trigger;
@@ -49,12 +46,11 @@ static Future<Void> benchCallbackActor(benchmark::State* benchState) {
 			futures.push_back(increment<Size>(trigger.getFuture(), &sum));
 		}
 		trigger.send(Void());
-		wait(waitForAll(futures));
+		co_await waitForAll(futures);
 		benchmark::DoNotOptimize(sum);
 	}
 	benchState->SetItemsProcessed(actorCount * static_cast<long>(benchState->iterations()));
 	benchState->SetBytesProcessed(actorCount * Size * static_cast<long>(benchState->iterations()));
-	return Void();
 }
 
 template <size_t Size>

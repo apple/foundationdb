@@ -1,5 +1,5 @@
 /*
- * BenchNet2.actor.cpp
+ * BenchNet2Actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -26,22 +26,19 @@
 #include "flow/network.h"
 #include "flow/ThreadHelper.actor.h"
 
-#include "flow/actorcompiler.h" // This must be the last #include.
-
-ACTOR static Future<Void> increment(TaskPriority priority, uint32_t* sum) {
-	wait(delay(0, priority));
+static Future<Void> increment(TaskPriority priority, uint32_t* sum) {
+	co_await delay(0, priority);
 	++(*sum);
-	return Void();
 }
 
 static inline TaskPriority getRandomTaskPriority(DeterministicRandom& rand) {
 	return static_cast<TaskPriority>(rand.randomInt(0, 100));
 }
 
-ACTOR static Future<Void> benchNet2Actor(benchmark::State* benchState) {
-	state size_t actorCount = benchState->range(0);
-	state uint32_t sum;
-	state int seed = platform::getRandomSeed();
+static Future<Void> benchNet2Actor(benchmark::State* benchState) {
+	size_t actorCount = benchState->range(0);
+	uint32_t sum{ 0 };
+	int seed = platform::getRandomSeed();
 	while (benchState->KeepRunning()) {
 		sum = 0;
 		std::vector<Future<Void>> futures;
@@ -50,11 +47,10 @@ ACTOR static Future<Void> benchNet2Actor(benchmark::State* benchState) {
 		for (int i = 0; i < actorCount; ++i) {
 			futures.push_back(increment(getRandomTaskPriority(rand), &sum));
 		}
-		wait(waitForAll(futures));
+		co_await waitForAll(futures);
 		benchmark::DoNotOptimize(sum);
 	}
 	benchState->SetItemsProcessed(actorCount * static_cast<long>(benchState->iterations()));
-	return Void();
 }
 
 static void bench_net2(benchmark::State& benchState) {
@@ -66,27 +62,44 @@ BENCHMARK(bench_net2)->Range(1, 1 << 16)->ReportAggregatesOnly(true);
 static constexpr bool DELAY = false;
 static constexpr bool YIELD = true;
 
-ACTOR template <bool useYield>
-static Future<Void> benchDelay(benchmark::State* benchState) {
+static std::vector<Future<Void>> populateTimers(int64_t timerCount) {
 	// Number of random delays to start to just to populate the run loop
 	// priority queue
-	state int64_t timerCount = benchState->range(0);
-	state std::vector<Future<Void>> futures;
-	state DeterministicRandom rand(platform::getRandomSeed());
+	std::vector<Future<Void>> futures;
+	DeterministicRandom rand(platform::getRandomSeed());
 	while (--timerCount > 0) {
 		futures.push_back(delay(1.0 + rand.random01(), getRandomTaskPriority(rand)));
 	}
+	return futures;
+}
+
+static Future<Void> benchDelayLoop(benchmark::State* benchState) {
+	std::vector<Future<Void>> futures = populateTimers(benchState->range(0));
 
 	while (benchState->KeepRunning()) {
-		wait(useYield ? yield() : delay(0));
+		co_await delay(0);
 	}
 	benchState->SetItemsProcessed(static_cast<long>(benchState->iterations()));
-	return Void();
+}
+
+static Future<Void> benchYieldLoop(benchmark::State* benchState) {
+	std::vector<Future<Void>> futures = populateTimers(benchState->range(0));
+
+	while (benchState->KeepRunning()) {
+		co_await yield();
+	}
+	benchState->SetItemsProcessed(static_cast<long>(benchState->iterations()));
 }
 
 template <bool useYield>
 static void bench_delay(benchmark::State& benchState) {
-	onMainThread([&benchState] { return benchDelay<useYield>(&benchState); }).blockUntilReady();
+	onMainThread([&benchState] {
+		if constexpr (useYield) {
+			return benchYieldLoop(&benchState);
+		} else {
+			return benchDelayLoop(&benchState);
+		}
+	}).blockUntilReady();
 }
 
 BENCHMARK_TEMPLATE(bench_delay, DELAY)->Range(0, 1 << 16)->ReportAggregatesOnly(true);
