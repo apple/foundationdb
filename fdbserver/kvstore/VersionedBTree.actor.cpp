@@ -492,12 +492,10 @@ public:
 		// Wait for all operations started before now to be ready, which is done by
 		// obtaining and releasing the mutex.
 		Future<Void> notBusy() {
-			return isBusy() ? map(mutex.take(),
-			                      [&](FlowMutex::Lock lock) {
-				                      lock.release();
-				                      return Void();
-			                      })
-			                : Void();
+			if (isBusy()) {
+				FlowMutex::Lock lock = co_await mutex.take();
+				lock.release();
+			}
 		}
 
 		// Returns true if any items have been written to the last page
@@ -526,11 +524,8 @@ public:
 		Future<Void> loadExtent() {
 			ASSERT(mode == POP | mode == READONLY);
 			debug_printf("FIFOQueue::Cursor(%s) loadExtent\n", toString().c_str());
-			return map(queue->pager->readExtent(pageID), [=](Reference<ArenaPage> p) {
-				page = p;
-				debug_printf("FIFOQueue::Cursor(%s) loadExtent done. Page: %p\n", toString().c_str(), page->rawData());
-				return Void();
-			});
+			page = co_await queue->pager->readExtent(pageID);
+			debug_printf("FIFOQueue::Cursor(%s) loadExtent done. Page: %p\n", toString().c_str(), page->rawData());
 		}
 
 		void writePage() {
@@ -2614,6 +2609,16 @@ public:
 		    PagerEventReasons::MetaData, nonBtreeLevel, VectorRef<PhysicalPageID>(&pageID, 1), page, true);
 	}
 
+	static Future<Void> writePhysicalPageAfter(DWALPager* self,
+	                                           Future<Void> after,
+	                                           PagerEventReasons reason,
+	                                           unsigned int level,
+	                                           Standalone<VectorRef<LogicalPageID>> pageIDs,
+	                                           Reference<ArenaPage> data) {
+		co_await after;
+		co_await self->writePhysicalPage(reason, level, pageIDs, data);
+	}
+
 	void updatePage(PagerEventReasons reason,
 	                unsigned int level,
 	                Standalone<VectorRef<LogicalPageID>> pageIDs,
@@ -2642,8 +2647,8 @@ public:
 		} else if (cacheEntry.reading()) {
 			// This is very unlikely, maybe impossible in the current pager use cases
 			// Wait for the outstanding read to finish, then start the write
-			cacheEntry.writeFuture = mapAsync(success(cacheEntry.readFuture),
-			                                  [=](Void) { return writePhysicalPage(reason, level, pageIDs, data); });
+			cacheEntry.writeFuture =
+			    writePhysicalPageAfter(this, success(cacheEntry.readFuture), reason, level, pageIDs, data);
 		}
 
 		// If the page is being written, wait for this write before issuing the new write to ensure the
@@ -2651,8 +2656,7 @@ public:
 		else if (cacheEntry.writing()) {
 			// This is very unlikely, maybe impossible in the current pager use cases
 			// Wait for the previous write to finish, then start new write
-			cacheEntry.writeFuture =
-			    mapAsync(cacheEntry.writeFuture, [=](Void) { return writePhysicalPage(reason, level, pageIDs, data); });
+			cacheEntry.writeFuture = writePhysicalPageAfter(this, cacheEntry.writeFuture, reason, level, pageIDs, data);
 		} else {
 			cacheEntry.writeFuture = detach(writePhysicalPage(reason, level, pageIDs, data));
 		}
@@ -2667,26 +2671,23 @@ public:
 	                                       Reference<ArenaPage> data,
 	                                       Version v) override {
 		debug_printf("DWALPager(%s) op=writeAtomic %s @%" PRId64 "\n", filename.c_str(), toString(pageID).c_str(), v);
-		Future<LogicalPageID> f = map(newPageID(), [=](LogicalPageID newPageID) {
-			updatePage(reason, level, VectorRef<LogicalPageID>(&newPageID, 1), data);
-			// TODO:  Possibly limit size of remap queue since it must be recovered on cold start
-			RemappedPage r{ v, pageID, newPageID };
-			remapQueue.pushBack(r);
-			auto& versionedMap = remappedPages[pageID];
+		LogicalPageID newID = co_await newPageID();
+		updatePage(reason, level, VectorRef<LogicalPageID>(&newID, 1), data);
+		// TODO:  Possibly limit size of remap queue since it must be recovered on cold start
+		RemappedPage r{ v, pageID, newID };
+		remapQueue.pushBack(r);
+		auto& versionedMap = remappedPages[pageID];
 
-			if (SERVER_KNOBS->REDWOOD_EVICT_UPDATED_PAGES) {
-				// An update page is unlikely to have its old version read again soon, so prioritize its cache eviction
-				// If the versioned map is empty for this page then the prior version of the page is at stored at the
-				// PhysicalPageID pageID, otherwise it is the last mapped value in the version-ordered map.
-				pageCache.prioritizeEviction(versionedMap.empty() ? pageID : versionedMap.rbegin()->second);
-			}
-			versionedMap[v] = newPageID;
+		if (SERVER_KNOBS->REDWOOD_EVICT_UPDATED_PAGES) {
+			// An update page is unlikely to have its old version read again soon, so prioritize its cache eviction
+			// If the versioned map is empty for this page then the prior version of the page is at stored at the
+			// PhysicalPageID pageID, otherwise it is the last mapped value in the version-ordered map.
+			pageCache.prioritizeEviction(versionedMap.empty() ? pageID : versionedMap.rbegin()->second);
+		}
+		versionedMap[v] = newID;
 
-			debug_printf("DWALPager(%s) pushed %s\n", filename.c_str(), RemappedPage(r).toString().c_str());
-			return pageID;
-		});
-
-		return f;
+		debug_printf("DWALPager(%s) pushed %s\n", filename.c_str(), RemappedPage(r).toString().c_str());
+		co_return pageID;
 	}
 
 	// Free pageID as of version v.  This means that once the oldest readable pager snapshot is at version v, pageID is
@@ -3734,26 +3735,25 @@ public:
 
 	// Get the number of pages in use by the pager's user
 	Future<int64_t> getUserPageCount() override {
-		return map(getUserPageCount_cleanup(this), [=](Void) {
-			int64_t userPages =
-			    header.pageCount - 2 - freeList.numPages - freeList.numEntries - delayedFreeList.numPages -
-			    delayedFreeList.numEntries - ((((remapQueue.numPages - 1) / pagesPerExtent) + 1) * pagesPerExtent) -
-			    extentFreeList.numPages - (pagesPerExtent * extentFreeList.numEntries) - extentUsedList.numPages;
+		co_await getUserPageCount_cleanup(this);
+		int64_t userPages =
+		    header.pageCount - 2 - freeList.numPages - freeList.numEntries - delayedFreeList.numPages -
+		    delayedFreeList.numEntries - ((((remapQueue.numPages - 1) / pagesPerExtent) + 1) * pagesPerExtent) -
+		    extentFreeList.numPages - (pagesPerExtent * extentFreeList.numEntries) - extentUsedList.numPages;
 
-			debug_printf("DWALPager(%s) userPages=%" PRId64 " totalPageCount=%" PRId64 " freeQueuePages=%" PRId64
-			             " freeQueueCount=%" PRId64 " delayedFreeQueuePages=%" PRId64 " delayedFreeQueueCount=%" PRId64
-			             " remapQueuePages=%" PRId64 " remapQueueCount=%" PRId64 "\n",
-			             filename.c_str(),
-			             userPages,
-			             header.pageCount,
-			             freeList.numPages,
-			             freeList.numEntries,
-			             delayedFreeList.numPages,
-			             delayedFreeList.numEntries,
-			             remapQueue.numPages,
-			             remapQueue.numEntries);
-			return userPages;
-		});
+		debug_printf("DWALPager(%s) userPages=%" PRId64 " totalPageCount=%" PRId64 " freeQueuePages=%" PRId64
+		             " freeQueueCount=%" PRId64 " delayedFreeQueuePages=%" PRId64 " delayedFreeQueueCount=%" PRId64
+		             " remapQueuePages=%" PRId64 " remapQueueCount=%" PRId64 "\n",
+		             filename.c_str(),
+		             userPages,
+		             header.pageCount,
+		             freeList.numPages,
+		             freeList.numEntries,
+		             delayedFreeList.numPages,
+		             delayedFreeList.numEntries,
+		             remapQueue.numPages,
+		             remapQueue.numEntries);
+		co_return userPages;
 	}
 
 	Future<Void> init() override { return recoverFuture; }
@@ -3936,8 +3936,9 @@ public:
 	                                                   bool cacheable,
 	                                                   bool noHit) override {
 
-		return map(pager->readPageAtVersion(reason, level, pageID, priority, version, cacheable, noHit),
-		           [=](Reference<ArenaPage> p) { return Reference<const ArenaPage>(std::move(p)); });
+		Reference<ArenaPage> page =
+		    co_await pager->readPageAtVersion(reason, level, pageID, priority, version, cacheable, noHit);
+		co_return Reference<const ArenaPage>(std::move(page));
 	}
 
 	Future<Reference<const ArenaPage>> getMultiPhysicalPage(PagerEventReasons reason,
@@ -3947,8 +3948,8 @@ public:
 	                                                        bool cacheable,
 	                                                        bool noHit) override {
 
-		return map(pager->readMultiPage(reason, level, pageIDs, priority, cacheable, noHit),
-		           [=](Reference<ArenaPage> p) { return Reference<const ArenaPage>(std::move(p)); });
+		Reference<ArenaPage> page = co_await pager->readMultiPage(reason, level, pageIDs, priority, cacheable, noHit);
+		co_return Reference<const ArenaPage>(std::move(page));
 	}
 
 	Key getMetaKey() const override { return metaKey; }
@@ -7318,44 +7319,41 @@ public:
 
 		Future<Void> pushPage(const BTreePage::BinaryTree::Cursor& link) {
 			debug_printf("pushPage(link=%s)\n", link.get().toString(false).c_str());
-			return map(readPage(btree,
-			                    reason,
-			                    path.back().btPage()->height - 1,
-			                    pager.getPtr(),
-			                    link.get().getChildPage(),
-			                    ioMaxPriority,
-			                    false,
-			                    !options.present() || options.get().cacheResult || path.back().btPage()->height != 2),
-			           [=](Reference<const ArenaPage> p) {
-				           BTreePage::BinaryTree::Cursor cursor = btree->getCursor(p.getPtr(), link);
+			BTreePage::BinaryTree::Cursor linkCopy = link;
+			Reference<const ArenaPage> p =
+			    co_await readPage(btree,
+			                      reason,
+			                      path.back().btPage()->height - 1,
+			                      pager.getPtr(),
+			                      linkCopy.get().getChildPage(),
+			                      ioMaxPriority,
+			                      false,
+			                      !options.present() || options.get().cacheResult || path.back().btPage()->height != 2);
+			BTreePage::BinaryTree::Cursor cursor = btree->getCursor(p.getPtr(), linkCopy);
 #if REDWOOD_DEBUG
-				           path.push_back({ p, cursor, link.get().getChildPage() });
+			path.push_back({ p, cursor, linkCopy.get().getChildPage() });
 #else
-					    path.push_back({ p, cursor });
+			path.push_back({ p, cursor });
 #endif
 
-				           if (btree->m_pBoundaryVerifier != nullptr) {
-					           ASSERT(btree->m_pBoundaryVerifier->verify(link.get().getChildPage().front(),
-					                                                     pager->getVersion(),
-					                                                     link.get().key,
-					                                                     link.next().getOrUpperBound().key,
-					                                                     cursor));
-				           }
-				           return Void();
-			           });
+			if (btree->m_pBoundaryVerifier != nullptr) {
+				ASSERT(btree->m_pBoundaryVerifier->verify(linkCopy.get().getChildPage().front(),
+				                                          pager->getVersion(),
+				                                          linkCopy.get().key,
+				                                          linkCopy.next().getOrUpperBound().key,
+				                                          cursor));
+			}
 		}
 
 		Future<Void> pushPage(BTreeNodeLinkRef id) {
 			debug_printf("pushPage(root=%s)\n", ::toString(id).c_str());
-			return map(readPage(btree, reason, btree->m_header.height, pager.getPtr(), id, ioMaxPriority, false, true),
-			           [=](Reference<const ArenaPage> p) {
+			Reference<const ArenaPage> p = co_await readPage(
+			    btree, reason, btree->m_header.height, pager.getPtr(), id, ioMaxPriority, false, true);
 #if REDWOOD_DEBUG
-				           path.push_back({ p, btree->getCursor(p.getPtr(), dbBegin, dbEnd), id });
+			path.push_back({ p, btree->getCursor(p.getPtr(), dbBegin, dbEnd), id });
 #else
-					    path.push_back({ p, btree->getCursor(p.getPtr(), dbBegin, dbEnd) });
+			path.push_back({ p, btree->getCursor(p.getPtr(), dbBegin, dbEnd) });
 #endif
-				           return Void();
-			           });
 		}
 
 		// Initialize or reinitialize cursor
@@ -7879,13 +7877,19 @@ public:
 		return catchError(readValue_impl(this, key, options));
 	}
 
+	static Future<Optional<Value>> readValuePrefix_impl(KeyValueStoreRedwood* self,
+	                                                    Key key,
+	                                                    int maxLength,
+	                                                    Optional<ReadOptions> options) {
+		Optional<Value> v = co_await readValue_impl(self, key, options);
+		if (v.present() && v.get().size() > maxLength) {
+			v.get().contents() = v.get().substr(0, maxLength);
+		}
+		co_return v;
+	}
+
 	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<ReadOptions> options) override {
-		return catchError(map(readValue_impl(this, key, options), [maxLength](Optional<Value> v) {
-			if (v.present() && v.get().size() > maxLength) {
-				v.get().contents() = v.get().substr(0, maxLength);
-			}
-			return v;
-		}));
+		return catchError(readValuePrefix_impl(this, key, maxLength, options));
 	}
 
 	~KeyValueStoreRedwood() override = default;
@@ -9691,6 +9695,57 @@ double getExternalTimeoutThreshold(const UnitTestParameters& params) {
 	return ret;
 }
 
+Future<Void> commitAndReportCorrectnessProgress(
+    VersionedBTree* btree,
+    Version version,
+    int64_t* totalPageOps,
+    int64_t maxPageOps,
+    std::map<std::pair<std::string, Version>, Optional<std::string>>* written,
+    int maxVerificationMapEntries,
+    int64_t* totalRecordsRead,
+    int64_t maxRecordsRead,
+    PromiseStream<Version> committedVersions) {
+	co_await btree->commit(version);
+
+	// Update pager ops before clearing metrics
+	*totalPageOps += g_redwoodMetrics.pageOps();
+	fmt::print("Committed {0} PageOps {1}/{2} ({3:.2f}%)  VerificationMapEntries {4}/{5} ({6:.2f}%)  "
+	           "RecordsRead {7}/{8} ({9:.2f}%)\n",
+	           toString(version).c_str(),
+	           *totalPageOps,
+	           maxPageOps,
+	           *totalPageOps * 100.0 / maxPageOps,
+	           written->size(),
+	           maxVerificationMapEntries,
+	           written->size() * 100.0 / maxVerificationMapEntries,
+	           *totalRecordsRead,
+	           maxRecordsRead,
+	           *totalRecordsRead * 100.0 / maxRecordsRead);
+	printf("Committed:\n%s\n", g_redwoodMetrics.toString(true).c_str());
+
+	// Notify the background verifier that version is committed and therefore readable
+	committedVersions.send(version);
+}
+
+Future<Void> commitAndReportLoadProgress(VersionedBTree* btree,
+                                         Version version,
+                                         bool traceMetrics,
+                                         int64_t keyValueBytes,
+                                         int records,
+                                         double* intervalStart) {
+	co_await btree->commit(version);
+	if (!traceMetrics) {
+		printf("%s\n", g_redwoodMetrics.toString(true).c_str());
+	}
+	double elapsed = timer() - *intervalStart;
+	printf("Committed %" PRId64 " keyValueBytes in %d records in %f seconds, %.2f MB/s\n",
+	       keyValueBytes,
+	       records,
+	       elapsed,
+	       keyValueBytes / elapsed / 1e6);
+	*intervalStart = timer();
+}
+
 } // namespace
 
 TEST_CASE("Lredwood/correctness/btree") {
@@ -10000,27 +10055,15 @@ TEST_CASE("Lredwood/correctness/btree") {
 				        0, btree->getLastCommittedVersion() - btree->getOldestReadableVersion() + 1));
 			}
 
-			commit = map(btree->commit(version), [&, v = version](Void) {
-				// Update pager ops before clearing metrics
-				totalPageOps += g_redwoodMetrics.pageOps();
-				fmt::print("Committed {0} PageOps {1}/{2} ({3:.2f}%)  VerificationMapEntries {4}/{5} ({6:.2f}%)  "
-				           "RecordsRead {7}/{8} ({9:.2f}%)\n",
-				           toString(v).c_str(),
-				           totalPageOps,
-				           maxPageOps,
-				           totalPageOps * 100.0 / maxPageOps,
-				           written.size(),
-				           maxVerificationMapEntries,
-				           written.size() * 100.0 / maxVerificationMapEntries,
-				           totalRecordsRead,
-				           maxRecordsRead,
-				           totalRecordsRead * 100.0 / maxRecordsRead);
-				printf("Committed:\n%s\n", g_redwoodMetrics.toString(true).c_str());
-
-				// Notify the background verifier that version is committed and therefore readable
-				committedVersions.send(v);
-				return Void();
-			});
+			commit = commitAndReportCorrectnessProgress(btree,
+			                                            version,
+			                                            &totalPageOps,
+			                                            maxPageOps,
+			                                            &written,
+			                                            maxVerificationMapEntries,
+			                                            &totalRecordsRead,
+			                                            maxRecordsRead,
+			                                            committedVersions);
 			++commitOps;
 
 			if (serialTest) {
@@ -10504,27 +10547,11 @@ TEST_CASE(":/redwood/performance/set") {
 				       kvBytesTotal / 1e6,
 				       kvBytesTotal / (timer() - start) / 1e6);
 
-				// Avoid capturing via this to freeze counter values
-				int recs = recordsThisCommit;
-				int kvb = kvBytesThisCommit;
-
-				// Capturing invervalStart via this->intervalStart makes IDE's unhappy as they do not know about the
-				// actor state object
+				// Pass intervalStart by pointer to avoid capturing actor state in the commit coroutine.
 				double* pIntervalStart = &intervalStart;
 
-				commit = map(btree->commit(++version), [=](Void result) {
-					if (!traceMetrics) {
-						printf("%s\n", g_redwoodMetrics.toString(true).c_str());
-					}
-					double elapsed = timer() - *pIntervalStart;
-					printf("Committed %d keyValueBytes in %d records in %f seconds, %.2f MB/s\n",
-					       kvb,
-					       recs,
-					       elapsed,
-					       kvb / elapsed / 1e6);
-					*pIntervalStart = timer();
-					return Void();
-				});
+				commit = commitAndReportLoadProgress(
+				    btree, ++version, traceMetrics, kvBytesThisCommit, recordsThisCommit, pIntervalStart);
 
 				kvBytesTotal += kvBytesThisCommit;
 				kvBytesThisCommit = 0;
