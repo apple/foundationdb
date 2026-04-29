@@ -351,6 +351,7 @@ Future<UID> launchAudit(Reference<DataDistributor> self,
                         AuditType auditType,
                         KeyValueStoreType auditStorageEngineType);
 Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req);
+Future<Void> periodicAuditLocationMetadata(Reference<DataDistributor> self);
 void loadAndDispatchAudit(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
 Future<Void> dispatchAuditStorageServerShard(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
 Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> self,
@@ -2968,6 +2969,8 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 			    .detail("InitialMode", self->initData->bulkDumpMode);
 			actors.push_back(bulkDumpCore(self, self->initialized.getFuture()));
 
+			actors.push_back(periodicAuditLocationMetadata(self));
+
 			co_await waitForAll(actors);
 			ASSERT_WE_THINK(false);
 			co_return;
@@ -3990,6 +3993,30 @@ Future<Void> cancelAuditStorage(Reference<DataDistributor> self, TriggerAuditReq
 		    .detail("AuditID", req.id)
 		    .detail("AuditType", req.getType());
 		req.reply.sendError(cancel_audit_storage_failed());
+	}
+}
+
+Future<Void> periodicAuditLocationMetadata(Reference<DataDistributor> self) {
+	if (SERVER_KNOBS->AUDIT_LOCATION_METADATA_INTERVAL <= 0) {
+		co_return;
+	}
+	co_await self->auditStorageInitialized.getFuture();
+	TraceEvent("PeriodicAuditLocationMetadataEnabled", self->ddId)
+	    .detail("IntervalSeconds", SERVER_KNOBS->AUDIT_LOCATION_METADATA_INTERVAL);
+	while (true) {
+		co_await delay(SERVER_KNOBS->AUDIT_LOCATION_METADATA_INTERVAL);
+		try {
+			co_await self->auditStorageLocationMetadataLaunchingLock.take(TaskPriority::DefaultYield);
+			FlowLock::Releaser holder(self->auditStorageLocationMetadataLaunchingLock);
+			UID auditID =
+			    co_await launchAudit(self, allKeys, AuditType::ValidateLocationMetadata, KeyValueStoreType::END);
+			TraceEvent("PeriodicAuditLocationMetadataLaunched", self->ddId).detail("AuditID", auditID);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			TraceEvent(SevWarn, "PeriodicAuditLocationMetadataError", self->ddId).error(e);
+		}
 	}
 }
 
