@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/BackupContainerLocalDirectory.h"
+#include "BackupContainerLocalDirectory.h"
 #include "fdbrpc/AsyncFileReadAhead.h"
 #include "flow/IAsyncFile.h"
 #include "flow/FaultInjection.h"

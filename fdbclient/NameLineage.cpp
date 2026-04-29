@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/NameLineage.h"
+#include "NameLineage.h"
 
 namespace {
 NameLineageCollector nameLineageCollector;

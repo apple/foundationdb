@@ -147,8 +147,8 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 			}
 		}
 
-		ASSERT(g_simulator->extraDatabases.size() == 1);
-		extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0]);
+		ASSERT(fdbSimulationPolicyState().extraDatabases.size() == 1);
+		extraDB = Database::createSimulatedExtraDatabase(fdbSimulationPolicyState().extraDatabases[0]);
 
 		TraceEvent("BARW_Start").detail("Locked", locked);
 	}
@@ -775,9 +775,9 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 			}
 
 			// SOMEDAY: Remove after backup agents can exist quiescently
-			if ((g_simulator->drAgents == ISimulator::BackupAgentType::BackupToDB) &&
+			if ((fdbSimulationPolicyState().drAgents == FDBBackupAgentType::BackupToDB) &&
 			    (!BackupToDBCorrectnessWorkload::drAgentRequests)) {
-				g_simulator->drAgents = ISimulator::BackupAgentType::NoBackupAgents;
+				fdbSimulationPolicyState().drAgents = FDBBackupAgentType::NoBackupAgents;
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "BackupAndRestoreCorrectness").error(e);

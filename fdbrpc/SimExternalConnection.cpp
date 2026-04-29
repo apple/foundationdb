@@ -32,11 +32,13 @@
 #include <thread>
 
 #include "SimExternalConnection.h"
+#include "flow/Hostname.h"
+#include "flow/IConnection.h"
 #include "flow/Net2Packet.h"
 #include "flow/Platform.h"
 #include "flow/SendBufferIterator.h"
 #include "flow/UnitTest.h"
-#include "flow/IConnection.h"
+#include "flow/network.h"
 
 using namespace boost::asio;
 
@@ -258,6 +260,25 @@ TEST_CASE("fdbrpc/MockDNS") {
 	ASSERT(resolvedNetworkAddresses.size() == 2);
 	ASSERT(std::find(resolvedNetworkAddresses.begin(), resolvedNetworkAddresses.end(), address2) !=
 	       resolvedNetworkAddresses.end());
+}
+
+TEST_CASE("/fdbrpc/Hostname/hostname") {
+	if (!g_network->isSimulated()) {
+		co_return;
+	}
+
+	Hostname hostname = Hostname::parse("host-name:1234");
+	NetworkAddress addressSource = NetworkAddress::parse("127.0.0.0:1234");
+	INetworkConnections::net()->addMockTCPEndpoint(hostname.host, hostname.service, { addressSource });
+
+	Optional<NetworkAddress> optionalAddress = co_await hostname.resolve();
+	ASSERT(optionalAddress.present() && optionalAddress.get() == addressSource);
+
+	optionalAddress = hostname.resolveBlocking();
+	ASSERT(optionalAddress.present() && optionalAddress.get() == addressSource);
+
+	NetworkAddress address = co_await hostname.resolveWithRetry();
+	ASSERT(address == addressSource);
 }
 
 void forceLinkSimExternalConnectionTests() {}

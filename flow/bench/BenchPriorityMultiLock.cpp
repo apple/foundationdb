@@ -1,5 +1,5 @@
 /*
- * BenchStream.actor.cpp
+ * BenchPriorityMultiLock.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -24,46 +24,45 @@
 #include "flow/ThreadHelper.actor.h"
 #include "flow/PriorityMultiLock.h"
 #include <deque>
-#include "flow/actorcompiler.h" // This must be the last #include.
 #include "fmt/printf.h"
 
-ACTOR static Future<Void> benchPriorityMultiLock(benchmark::State* benchState) {
+static Future<Void> benchPriorityMultiLock(benchmark::State* benchState) {
 	// Arg1 is the number of active priorities to use
 	// Arg2 is the number of inactive priorities to use
-	state int active = benchState->range(0);
-	state int inactive = benchState->range(1);
+	int active = benchState->range(0);
+	int inactive = benchState->range(1);
 
 	// Set up priority list with limits 10, 20, 30, ...
-	state std::vector<int> priorities;
+	std::vector<int> priorities;
 	while (priorities.size() < active + inactive) {
 		priorities.push_back(10 * (priorities.size() + 1));
 	}
 
-	state int concurrency = priorities.size() * 10;
-	state Reference<PriorityMultiLock> pml = makeReference<PriorityMultiLock>(concurrency, priorities);
+	int concurrency = priorities.size() * 10;
+	Reference<PriorityMultiLock> pml = makeReference<PriorityMultiLock>(concurrency, priorities);
 
 	// Clog the lock buy taking n=concurrency locks
-	state std::deque<Future<PriorityMultiLock::Lock>> lockFutures;
+	std::deque<Future<PriorityMultiLock::Lock>> lockFutures;
 	for (int j = 0; j < concurrency; ++j) {
 		lockFutures.push_back(pml->lock(j % active));
 	}
 	// Wait for all of the initial locks to be taken
 	// This will work regardless of their priorities as there are only n = concurrency of them
-	wait(waitForAll(std::vector<Future<PriorityMultiLock::Lock>>(lockFutures.begin(), lockFutures.end())));
+	co_await waitForAll(std::vector<Future<PriorityMultiLock::Lock>>(lockFutures.begin(), lockFutures.end()));
 
 	// For each iteration of the loop, one new lock user is created, for a total of
 	// concurrency + 1 users.  The new user replaces an old one, which is then waited
 	// on.  This will succeed regardless of the lock priorities used because prior to
 	// new user there were only n = concurrency users so they will all be served before
 	// the new user.
-	state int p = 0;
-	state int i = 0;
+	int p = 0;
+	int i = 0;
 	while (benchState->KeepRunning()) {
 		// Get and replace the i'th lock future with a new lock waiter
 		Future<PriorityMultiLock::Lock> f = lockFutures[i];
 		lockFutures[i] = pml->lock(p);
 
-		PriorityMultiLock::Lock lock = wait(f);
+		PriorityMultiLock::Lock lock = co_await f;
 
 		// Rotate to another priority
 		if (++p == active) {
@@ -77,8 +76,6 @@ ACTOR static Future<Void> benchPriorityMultiLock(benchmark::State* benchState) {
 	}
 
 	benchState->SetItemsProcessed(static_cast<long>(benchState->iterations()));
-
-	return Void();
 }
 
 static void bench_priorityMultiLock(benchmark::State& benchState) {

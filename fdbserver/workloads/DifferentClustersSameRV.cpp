@@ -44,8 +44,8 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 	bool switchComplete = false;
 
 	DifferentClustersSameRVWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		ASSERT(g_simulator->extraDatabases.size() == 1);
-		extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0]);
+		ASSERT(fdbSimulationPolicyState().extraDatabases.size() == 1);
+		extraDB = Database::createSimulatedExtraDatabase(fdbSimulationPolicyState().extraDatabases[0]);
 		testDuration = getOption(options, "testDuration"_sr, 100.0);
 		switchAfter = getOption(options, "switchAfter"_sr, 50.0);
 		keyToRead = getOption(options, "keyToRead"_sr, "someKey"_sr);
