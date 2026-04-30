@@ -34,6 +34,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/core/TSSMappingUtil.h"
+#include "flow/TxnCounters.h"
 
 template <typename... T>
 static inline void dprint(fmt::format_string<T...> fmt, T&&... args) {
@@ -277,8 +278,10 @@ Future<MoveKeysLock> readMoveKeysLock(Database cx) {
 }
 
 Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId) {
+	static auto* counters = makeCounters("/movekeys/takeMoveKeysLock");
 	Transaction tr(cx);
 	while (true) {
+		counters->started->increment(1);
 		Error err;
 		try {
 			MoveKeysLock lock;
@@ -294,6 +297,7 @@ Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId) {
 			lock.myOwner = deterministicRandom()->randomUniqueID();
 			tr.set(moveKeysLockOwnerKey, BinaryWriter::toValue(lock.myOwner, Unversioned()));
 			co_await tr.commit();
+			counters->committed->increment(1);
 			TraceEvent("TakeMoveKeysLockTransaction", ddId)
 			    .detail("TransactionUID", txnId)
 			    .detail("PrevOwner", lock.prevOwner.toString())
@@ -301,6 +305,7 @@ Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId) {
 			    .detail("MyOwner", lock.myOwner.toString());
 			co_return lock;
 		} catch (Error& e) {
+			counters->aborted->increment(1);
 			err = e;
 		}
 		co_await tr.onError(err);
@@ -678,10 +683,12 @@ Future<Void> cleanUpSingleShardDataMove(Database occ,
                                         const DDEnabledState* ddEnabledState) {
 	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	TraceEvent(SevInfo, "CleanUpSingleShardDataMoveBegin", dataMoveId).detail("Range", keys);
+	static auto* counters = makeCounters("/movekeys/cleanUpSingleShardDataMove");
 
 	bool runPreCheck = true;
 
 	while (true) {
+		counters->started->increment(1);
 		Transaction tr(occ);
 
 		Error err;
@@ -744,6 +751,7 @@ Future<Void> cleanUpSingleShardDataMove(Database occ,
 			co_await waitForAll(actors);
 
 			co_await tr.commit();
+			counters->committed->increment(1);
 
 			// Post validate consistency of update of keyServers and serverKeys
 			if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
@@ -751,6 +759,7 @@ Future<Void> cleanUpSingleShardDataMove(Database occ,
 			}
 			break;
 		} catch (Error& e) {
+			counters->aborted->increment(1);
 			err = e;
 		}
 		if (err.code() == error_code_location_metadata_corruption) {
@@ -971,6 +980,7 @@ static Future<Void> startMoveKeys(Database occ,
 	TraceInterval interval("RelocateShard_StartMoveKeys");
 	Future<Void> warningLogger = logWarningAfter("StartMoveKeysTooLong", 600, servers);
 	// state TraceInterval waitInterval("");
+	static auto* counters = makeCounters("/movekeys/startMoveKeys");
 
 	co_await startMoveKeysLock->take(TaskPriority::DataDistributionLaunch);
 	FlowLock::Releaser releaser(*startMoveKeysLock);
@@ -996,6 +1006,7 @@ static Future<Void> startMoveKeys(Database occ,
 			int retries = 0;
 
 			while (true) {
+				counters->started->increment(1);
 				Error err;
 				try {
 					retries++;
@@ -1126,6 +1137,7 @@ static Future<Void> startMoveKeys(Database occ,
 					co_await waitForAll(actors);
 
 					co_await tr->commit();
+					counters->committed->increment(1);
 
 					/*TraceEvent("StartMoveKeysCommitDone", relocationIntervalId)
 					    .detail("CommitVersion", tr.getCommittedVersion())
@@ -1134,6 +1146,7 @@ static Future<Void> startMoveKeys(Database occ,
 					shards += old.size() - 1;
 					break;
 				} catch (Error& e) {
+					counters->aborted->increment(1);
 					err = e;
 				}
 				if (err.code() == error_code_move_to_removed_server)
@@ -1281,6 +1294,7 @@ static Future<Void> finishMoveKeys(Database occ,
 	TraceInterval interval("RelocateShard_FinishMoveKeys");
 	TraceInterval waitInterval("");
 	Future<Void> warningLogger = logWarningAfter("FinishMoveKeysTooLong", 600, destinationTeam);
+	static auto* counters = makeCounters("/movekeys/finishMoveKeys");
 	Key begin = keys.begin;
 	Key endKey;
 	int retries = 0;
@@ -1304,8 +1318,8 @@ static Future<Void> finishMoveKeys(Database occ,
 
 			Transaction tr(occ);
 
-			// printf("finishMoveKeys( '%s'-'%s' )\n", begin.toString().c_str(), keys.end.toString().c_str());
 			while (true) {
+				counters->started->increment(1);
 				Error err;
 				try {
 					tr.trState->taskID = TaskPriority::MoveKeys;
@@ -1580,13 +1594,17 @@ static Future<Void> finishMoveKeys(Database occ,
 
 						co_await waitForAll(actors);
 						co_await tr.commit();
+						counters->committed->increment(1);
 
 						begin = endKey;
 						break;
 					}
+					// This leads to a count of transactions starting that exceeds the sum of
+					// committed or aborted, but this is intentional here.
 					tr.reset();
 					continue;
 				} catch (Error& error) {
+					counters->aborted->increment(1);
 					err = error;
 				}
 				if (err.code() == error_code_actor_cancelled)
@@ -1631,7 +1649,7 @@ static Future<Void> startMoveShards(Database occ,
                                     CancelConflictingDataMoves cancelConflictingDataMoves,
                                     Optional<BulkLoadTaskState> bulkLoadTaskState) {
 	Future<Void> warningLogger = logWarningAfter("StartMoveShardsTooLong", 600, servers);
-
+	static auto* counters = makeCounters("/movekeys/startMoveShards");
 	co_await startMoveKeysLock->take(TaskPriority::DataDistributionLaunch);
 	FlowLock::Releaser releaser(*startMoveKeysLock);
 	bool loadedTssMapping = false;
@@ -1650,6 +1668,7 @@ static Future<Void> startMoveShards(Database occ,
 	bool runPreCheck = true;
 	try {
 		while (true) {
+			counters->started->increment(1);
 			Key begin = keys.begin;
 			KeyRange currentKeys = keys;
 
@@ -1927,6 +1946,7 @@ static Future<Void> startMoveShards(Database occ,
 				co_await waitForAll(actors);
 
 				co_await tr.commit();
+				counters->committed->increment(1);
 
 				if (currentKeys.end == keys.end && bulkLoadTaskState.present()) {
 					Version commitVersion = tr.getCommittedVersion();
@@ -1958,6 +1978,7 @@ static Future<Void> startMoveShards(Database occ,
 				}
 				continue;
 			} catch (Error& e) {
+				counters->aborted->increment(1);
 				err = e;
 			}
 			if (err.code() == error_code_location_metadata_corruption) {
@@ -2068,6 +2089,7 @@ static Future<Void> finishMoveShards(Database occ,
 	ASSERT(targetRanges.size() == 1);
 	KeyRange keys = targetRanges[0];
 	Future<Void> warningLogger = logWarningAfter("FinishMoveShardsTooLong", 600, destinationTeam);
+	static auto* counters = makeCounters("/movekeys/finishMoveShards");
 	int retries = 0;
 	DataMoveMetaData dataMove;
 	bool cancelDataMove = false;
@@ -2089,6 +2111,7 @@ static Future<Void> finishMoveShards(Database occ,
 		// This process can be split up into multiple transactions if getRange() doesn't return the entire
 		// target range.
 		while (true) {
+			counters->started->increment(1);
 			std::vector<UID> completeSrc;
 			std::vector<UID> destServers;
 			std::unordered_set<UID> allServers;
@@ -2376,6 +2399,7 @@ static Future<Void> finishMoveShards(Database occ,
 					}
 
 					co_await tr.commit();
+					counters->committed->increment(1);
 
 					if (range.end == dataMove.ranges.front().end && bulkLoadTaskState.present()) {
 						Version commitVersion = tr.getCommittedVersion();
@@ -2402,6 +2426,7 @@ static Future<Void> finishMoveShards(Database occ,
 					continue;
 				}
 			} catch (Error& error) {
+				counters->aborted->increment(1);
 				err = error;
 			}
 			TraceEvent(SevWarn, "TryFinishMoveShardsError", relocationIntervalId)
@@ -2442,6 +2467,7 @@ static Future<Void> finishMoveShards(Database occ,
 }; // anonymous namespace
 
 Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServerInterface server) {
+	static auto* counters = makeCounters("/movekeys/addStorageServer");
 	auto tr = makeReference<ReadYourWritesTransaction>(cx);
 	KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
 	KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(serverMetadataKeys.begin,
@@ -2450,6 +2476,7 @@ Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServerInter
 	int maxSkipTags = 1;
 
 	while (true) {
+		counters->started->increment(1);
 		Error err;
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -2609,12 +2636,14 @@ Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServerInter
 
 			tr->set(serverListKeyFor(server.id()), serverListValue(server));
 			co_await tr->commit();
+			counters->committed->increment(1);
 			TraceEvent("AddedStorageServerSystemKey")
 			    .detail("ServerID", server.id())
 			    .detail("CommitVersion", tr->getCommittedVersion());
 
 			co_return std::make_pair(tr->getCommittedVersion(), tag);
 		} catch (Error& e) {
+			counters->aborted->increment(1);
 			err = e;
 		}
 		if (err.code() == error_code_commit_unknown_result)
@@ -2663,6 +2692,7 @@ Future<Void> removeStorageServer(Database cx,
                                  Optional<UID> tssPairID,
                                  MoveKeysLock lock,
                                  const DDEnabledState* ddEnabledState) {
+	static auto* counters = makeCounters("/movekeys/removeStorageServer");
 	KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
 	KeyBackedObjectMap<UID, StorageMigrationType, decltype(IncludeVersion())> metadataMap(serverMetadataKeys.begin,
 	                                                                                      IncludeVersion());
@@ -2671,6 +2701,7 @@ Future<Void> removeStorageServer(Database cx,
 	int noCanRemoveCount = 0;
 
 	while (true) {
+		counters->started->increment(1);
 		Error err;
 		try {
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -2770,6 +2801,7 @@ Future<Void> removeStorageServer(Database cx,
 
 				retry = true;
 				co_await tr->commit();
+				counters->committed->increment(1);
 				TraceEvent("RemoveStorageServer")
 				    .detail("State", "Success")
 				    .detail("ServerID", serverID)
@@ -2777,6 +2809,7 @@ Future<Void> removeStorageServer(Database cx,
 				co_return;
 			}
 		} catch (Error& e) {
+			counters->aborted->increment(1);
 			err = e;
 		}
 		co_await tr->onError(err);
@@ -2792,6 +2825,7 @@ Future<Void> removeKeysFromFailedServer(Database cx,
                                         std::vector<UID> teamForDroppedRange,
                                         MoveKeysLock lock,
                                         const DDEnabledState* ddEnabledState) {
+	static auto* counters = makeCounters("/movekeys/removeKeysFromFailedServer");
 	Key begin = allKeys.begin;
 
 	std::vector<UID> src;
@@ -2802,6 +2836,7 @@ Future<Void> removeKeysFromFailedServer(Database cx,
 	while (begin < allKeys.end) {
 		Transaction tr(cx);
 		while (true) {
+			counters->started->increment(1);
 			Error err;
 			try {
 				tr.trState->taskID = TaskPriority::MoveKeys;
@@ -2951,6 +2986,7 @@ Future<Void> removeKeysFromFailedServer(Database cx,
 				co_await krmSetRangeCoalescing(
 				    &tr, serverKeysPrefixFor(serverID), currentKeys, allKeys, serverKeysFalse);
 				co_await tr.commit();
+				counters->committed->increment(1);
 				TraceEvent(SevDebug, "FailedServerCommitSuccess", serverID)
 				    .detail("Begin", currentKeys.begin)
 				    .detail("End", currentKeys.end)
@@ -2959,6 +2995,7 @@ Future<Void> removeKeysFromFailedServer(Database cx,
 				begin = currentKeys.end;
 				break;
 			} catch (Error& e) {
+				counters->aborted->increment(1);
 				err = e;
 			}
 			TraceEvent("FailedServerError", serverID).error(err);
@@ -2993,6 +3030,7 @@ Future<Void> cleanUpDataMoveBackground(Database occ,
                                        KeyRange keys,
                                        const DDEnabledState* ddEnabledState,
                                        double delaySeconds) {
+	static auto* counters = makeCounters("/movekeys/cleanUpDataMoveBackground");
 	co_await delay(std::max(10.0, delaySeconds));
 	TraceEvent(SevDebug, "CleanUpDataMoveBackgroundBegin", dataMoveId)
 	    .detail("DataMoveID", dataMoveId)
@@ -3002,6 +3040,7 @@ Future<Void> cleanUpDataMoveBackground(Database occ,
 	DataMoveMetaData dataMove;
 	Transaction tr(occ);
 	while (true) {
+		counters->started->increment(1);
 		Error err;
 		try {
 			tr.trState->taskID = TaskPriority::MoveKeys;
@@ -3018,8 +3057,10 @@ Future<Void> cleanUpDataMoveBackground(Database occ,
 			ASSERT(dataMove.getPhase() == DataMoveMetaData::Deleting);
 			tr.clear(dataMoveKeyFor(dataMoveId));
 			co_await tr.commit();
+			counters->committed->increment(1);
 			break;
 		} catch (Error& e) {
+			counters->aborted->increment(1);
 			err = e;
 		}
 		TraceEvent(SevWarn, "CleanUpDataMoveBackgroundFail", dataMoveId).errorUnsuppressed(err);
@@ -3037,6 +3078,7 @@ Future<Void> cleanUpDataMoveCore(Database occ,
                                  FlowLock* cleanUpDataMoveParallelismLock,
                                  KeyRange keys,
                                  const DDEnabledState* ddEnabledState) {
+	static auto* counters = makeCounters("/movekeys/cleanUpDataMoveCore");
 	KeyRange range;
 	Severity sevDm = static_cast<Severity>(SERVER_KNOBS->PHYSICAL_SHARD_MOVE_LOG_SEVERITY);
 	TraceEvent(SevInfo, "CleanUpDataMoveBegin", dataMoveId).detail("DataMoveID", dataMoveId).detail("Range", keys);
@@ -3048,6 +3090,7 @@ Future<Void> cleanUpDataMoveCore(Database occ,
 
 	try {
 		while (true) {
+			counters->started->increment(1);
 			Transaction tr(occ);
 			std::unordered_map<UID, std::vector<Shard>> physicalShardMap;
 			std::set<UID> oldDests;
@@ -3186,6 +3229,7 @@ Future<Void> cleanUpDataMoveCore(Database occ,
 				co_await waitForAll(actors);
 
 				co_await tr.commit();
+				counters->committed->increment(1);
 
 				TraceEvent(sevDm, "CleanUpDataMoveCommitted", dataMoveId)
 				    .detail("DataMoveID", dataMoveId)
@@ -3201,6 +3245,7 @@ Future<Void> cleanUpDataMoveCore(Database occ,
 				}
 				continue;
 			} catch (Error& e) {
+				counters->aborted->increment(1);
 				err = e;
 			}
 			if (err.code() == error_code_location_metadata_corruption) {

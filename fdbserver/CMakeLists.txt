@@ -202,7 +202,7 @@ if(USE_JEMALLOC)
   target_link_libraries(fdbserver PRIVATE jemalloc::jemalloc)
 endif()
 
-target_link_libraries(fdbserver PRIVATE toml11_target rapidjson)
+target_link_libraries(fdbserver PRIVATE toml11::toml11 rapidjson)
 if(WITH_ROCKSDB)
   target_compile_definitions(fdbserver PRIVATE WITH_ROCKSDB)
 endif()
