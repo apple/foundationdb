@@ -35,6 +35,7 @@
 #include "fdbserver/datadistributor/DataDistribution.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MoveKeys.h"
+#include "fdbserver/core/QuietDatabase.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/datadistributor/DDTxnProcessor.h"
 #include "flow/DebugTrace.h"
@@ -2775,21 +2776,25 @@ Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, DataMovem
 	}
 }
 
-// Gates the relocation input stream by the pipeline limit. Cancellations always pass through
-// immediately. All other relocations (new moves and restores) are held when the pipeline is full,
-// waiting for pipelineFull to become false before forwarding.
+// Gates the relocation input stream by the pipeline limit. Cancellations and high-priority
+// moves (>= PRIORITY_TEAM_UNHEALTHY) always pass through immediately so that failure recovery
+// is never blocked by stuck or zombie moves holding pipeline slots. All other relocations are
+// held when the pipeline is full, waiting for pipelineFull to become false before forwarding.
+// The global isDDPipelineControlEnabled() flag (cleared by disableDDPipelineControl()) also
+// bypasses the gate, allowing the test harness to open up the pipeline so DD can quiesce.
+// We poll it via delay() rather than AsyncVar to avoid cross-process callbacks in simulation.
 ACTOR Future<Void> pipelineGateActor(FutureStream<RelocateShard> input,
                                      PromiseStream<RelocateShard> output,
                                      Reference<AsyncVar<bool>> pipelineFull,
                                      UID distributorId) {
 	loop {
 		state RelocateShard rs = waitNext(input);
-		if (!rs.cancelled) {
-			while (pipelineFull->get()) {
+		if (!rs.cancelled && rs.priority < SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY) {
+			while (pipelineFull->get() && isDDPipelineControlEnabled()) {
 				TraceEvent("DDPipelineFull", distributorId)
 				    .suppressFor(30.0)
 				    .detail("PipelineFull", pipelineFull->get());
-				wait(pipelineFull->onChange());
+				wait(pipelineFull->onChange() || delay(1.0));
 			}
 		}
 		output.send(rs);
