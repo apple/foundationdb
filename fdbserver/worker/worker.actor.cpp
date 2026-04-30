@@ -63,7 +63,7 @@
 #include "fdbserver/ratekeeper/Ratekeeper.h"
 #include "fdbserver/resolver/Resolver.h"
 #include "fdbserver/sequencer/MasterServer.h"
-#include "fdbserver/storageserver/StorageServer.actor.h"
+#include "fdbserver/storageserver/StorageServer.h"
 #include "fdbserver/tlog/TLogServer.actor.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/tester/tester.h"

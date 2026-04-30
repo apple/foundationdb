@@ -108,8 +108,6 @@ struct RatekeeperLimits {
 	int64_t lastDurabilityLag;
 	double durabilityLagLimit;
 
-	double bwLagTarget;
-
 	TransactionPriority priority;
 	std::string context;
 
@@ -122,8 +120,7 @@ struct RatekeeperLimits {
 	                 int64_t logTargetBytes,
 	                 int64_t logSpringBytes,
 	                 double maxVersionDifference,
-	                 int64_t durabilityLagTargetVersions,
-	                 double bwLagTarget);
+	                 int64_t durabilityLagTargetVersions);
 };
 
 class Ratekeeper {
@@ -174,12 +171,9 @@ class Ratekeeper {
 
 	Deque<double> actualTpsHistory;
 	Version maxVersion;
-	double blobWorkerTime;
 	double unblockedAssignmentTime;
 	std::map<Version, Ratekeeper::VersionInfo> version_transactions;
 	std::map<Version, std::pair<double, Optional<double>>> version_recovery;
-	Deque<std::pair<double, Version>> blobWorkerVersionHistory;
-	bool anyBlobRanges;
 	Optional<Key> remoteDC;
 	Optional<UID> ssHighWriteQueue;
 
@@ -212,7 +206,6 @@ class Ratekeeper {
 	void tryAutoThrottleTag(TransactionTag, double rate, double busyness, TagThrottledReason);
 	void tryAutoThrottleTag(StorageQueueInfo&, int64_t storageQueue, int64_t storageDurabilityLag);
 	Future<Void> monitorThrottlingChanges();
-	Future<Void> monitorBlobWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 	Future<Void> monitorHotShards(Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 	Future<Void> handleReportCommitCostEstimationReqs(RatekeeperInterface rkInterf);
 	Future<Void> handleGetSSVersionLagReqs(RatekeeperInterface rkInterf);

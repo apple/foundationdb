@@ -55,6 +55,8 @@ FDB_BOOLEAN_PARAM(ReadLowPriority);
 
 extern Optional<std::string> fileBackupAgentProxy;
 
+constexpr int DEFAULT_ENCRYPTION_BLOCK_SIZE = 1048576;
+
 class BackupAgentBase : NonCopyable {
 public:
 	// Time formatter for anything backup or restore related
@@ -276,6 +278,7 @@ public:
 	                          UsePartitionedLog = UsePartitionedLog::False,
 	                          IncrementalBackupOnly = IncrementalBackupOnly::False,
 	                          Optional<std::string> const& encryptionKeyFileName = {},
+	                          int encryptionBlockSize = 0,
 	                          int snapshotMode = 0);
 	// snapshotMode: 0=RANGEFILE (default), 1=BULKDUMP, 2=BOTH
 	Future<Void> submitBackup(Database cx,
@@ -289,6 +292,7 @@ public:
 	                          UsePartitionedLog partitionedLog = UsePartitionedLog::False,
 	                          IncrementalBackupOnly incrementalBackupOnly = IncrementalBackupOnly::False,
 	                          Optional<std::string> const& encryptionKeyFileName = {},
+	                          int encryptionBlockSize = 0,
 	                          int snapshotMode = 0) {
 		// Note: Do NOT call checkAndDisableBackupWorkers here. That function is for cleanup
 		// when backups END (abort/discontinue), not when they START. Calling it here causes
@@ -306,6 +310,7 @@ public:
 			                    partitionedLog,
 			                    incrementalBackupOnly,
 			                    encryptionKeyFileName,
+			                    encryptionBlockSize,
 			                    snapshotMode);
 		});
 	}
@@ -763,6 +768,7 @@ inline Standalone<StringRef> TupleCodec<Reference<IBackupContainer>>::pack(Refer
 		tuple.append(StringRef());
 	}
 
+	tuple.append((int64_t)bc->getEncryptionBlockSize());
 	return tuple.pack();
 }
 template <>
@@ -782,7 +788,11 @@ inline Reference<IBackupContainer> TupleCodec<Reference<IBackupContainer>>::unpa
 		proxy = t.getString(2).toString();
 	}
 
-	return IBackupContainer::openContainer(url, proxy, encryptionKeyFileName);
+	int blockSize = 0;
+	if (t.size() > 3) {
+		blockSize = (int)t.getInt(3);
+	}
+	return IBackupContainer::openContainer(url, proxy, encryptionKeyFileName, blockSize);
 }
 
 class BackupConfig : public KeyBackedTaskConfig {

@@ -1,4 +1,4 @@
-find_package(fmt 11.1.4 EXACT QUIET CONFIG)
+find_package(fmt 11.1.4 EXACT CONFIG)
 
 if(NOT fmt_FOUND)
   include(FetchContent)

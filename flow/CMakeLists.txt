@@ -16,6 +16,7 @@ list(REMOVE_ITEM FLOW_SRCS LinkTest.cpp)
 list(REMOVE_ITEM FLOW_SRCS TLSTest.cpp)
 list(REMOVE_ITEM FLOW_SRCS MkCertCli.cpp)
 list(REMOVE_ITEM FLOW_SRCS acac.cpp)
+list(REMOVE_ITEM FLOW_SRCS FlowTest.cpp)
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
   list(APPEND FLOW_SRCS aarch64/memcmp.S aarch64/memcpy.S)
@@ -118,12 +119,16 @@ endif()
 add_flow_target(LINK_TEST NAME flowlinktest SRCS LinkTest.cpp)
 target_link_libraries(flowlinktest PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,flow>" stacktrace)
 
+add_flow_target(EXECUTABLE NAME flow_test SRCS FlowTest.cpp)
+set_target_properties(flow_test PROPERTIES EXCLUDE_FROM_ALL TRUE)
+target_link_libraries(flow_test PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,flow>")
+
 set(IS_ARM_MAC NO)
 if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
   set(IS_ARM_MAC YES)
 endif()
 
-foreach(ft flow flow_sampling flowlinktest)
+foreach(ft flow flow_sampling flowlinktest flow_test)
   target_include_directories(
     ${ft}
     PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include"
@@ -136,6 +141,9 @@ foreach(ft flow flow_sampling flowlinktest)
   endif()
   if(USE_JEMALLOC)
     target_include_directories(${ft} PRIVATE ${jemalloc_INCLUDE_DIRS})
+    if(ft STREQUAL "flowlinktest" OR ft STREQUAL "flow_test")
+      target_link_libraries(${ft} PRIVATE jemalloc::jemalloc)
+    endif()
   endif()
 
   target_link_libraries(${ft} PRIVATE stacktrace)
