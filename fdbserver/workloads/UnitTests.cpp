@@ -52,6 +52,7 @@ void forceLinkIPagerTests();
 void forceLinkMockS3ServerTests();
 void forceLinkAuditUtilsTests();
 void forceLinkClusterHealthMonitorTests();
+void forceLinkGrvQueueDelayTests();
 
 struct UnitTestWorkload : TestWorkload {
 	static constexpr auto NAME = "UnitTests";
@@ -123,6 +124,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkMockS3ServerTests();
 		forceLinkAuditUtilsTests();
 		forceLinkClusterHealthMonitorTests();
+		forceLinkGrvQueueDelayTests();
 
 #ifdef FLOW_GRPC_ENABLED
 		forceLinkGrpcTests();
