@@ -22,6 +22,9 @@
 
 package fdb
 
+// To regenerate this file from the bindings/go/src directory
+// go run ../internal/gen_errors/main.go -in ../../../../flow/include/flow/error_definitions.h -out error_codes_generated.go
+//
 // Error sentinel variables derived from flow/include/flow/error_definitions.h.
 // Use with errors.Is to match a specific FoundationDB error code:
 //
