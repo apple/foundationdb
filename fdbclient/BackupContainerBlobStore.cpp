@@ -158,9 +158,11 @@ BackupContainerBlobStore::BackupContainerBlobStore(Reference<IBlobStoreEndpoint>
                                                    const std::string& name,
                                                    const IBlobStoreEndpoint::ParametersT& params,
                                                    const Optional<std::string>& encryptionKeyFileName,
-                                                   bool isBackup)
+                                                   bool isBackup,
+                                                   int encryptionBlockSize)
   : m_bstore(bstore), m_name(name), m_bucket("FDB_BACKUPS_V2"), isBackup(isBackup) {
 	setEncryptionKey(encryptionKeyFileName);
+	this->encryptionBlockSize = encryptionBlockSize;
 	// Currently only one parameter is supported, "bucket"
 	for (const auto& [name, value] : params) {
 		if (name == "bucket") {
@@ -197,7 +199,7 @@ Future<Reference<IAsyncFile>> BackupContainerBlobStore::readFile(const std::stri
 	Reference<IAsyncFile> f = makeReference<AsyncFileBlobStoreRead>(m_bstore, m_bucket, dataPath(path));
 
 	if (usesEncryption() && !StringRef(path).startsWith("properties/"_sr)) {
-		f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::READ_ONLY);
+		f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::READ_ONLY, encryptionBlockSize);
 	}
 	if (m_bstore->knobs.enable_read_cache) {
 		f = makeReference<AsyncFileReadAheadCache>(f,
@@ -217,7 +219,7 @@ Future<std::vector<std::string>> BackupContainerBlobStore::listURLs(Reference<IB
 Future<Reference<IBackupFile>> BackupContainerBlobStore::writeFile(const std::string& path) {
 	Reference<IAsyncFile> f = makeReference<AsyncFileBlobStoreWrite>(m_bstore, m_bucket, dataPath(path));
 	if (usesEncryption() && !StringRef(path).startsWith("properties/"_sr)) {
-		f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::APPEND_ONLY);
+		f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::APPEND_ONLY, encryptionBlockSize);
 	}
 	return Future<Reference<IBackupFile>>(makeReference<BackupContainerBlobStoreImpl::BackupFile>(path, f));
 }

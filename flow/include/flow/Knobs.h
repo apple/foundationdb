@@ -226,9 +226,6 @@ public:
 	int EIO_MAX_PARALLELISM;
 	int EIO_USE_ODIRECT;
 
-	// AsyncFileEncrypted
-	int ENCRYPTION_BLOCK_SIZE;
-
 	// AsyncFileKAIO
 	int MAX_OUTSTANDING;
 	int MIN_SUBMIT;
