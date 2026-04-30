@@ -471,6 +471,64 @@ def get_value_from_status_json(retry, *args):
     return result
 
 
+def status_json_file_region_failover_message():
+    status_json = {
+        "client": {
+            "cluster_file": {"path": "fdb.cluster", "up_to_date": True},
+            "coordinators": {"coordinators": [], "quorum_reachable": True},
+            "database_status": {"available": True, "healthy": False},
+            "messages": [],
+            "timestamp": 1417807090,
+        },
+        "cluster": {
+            "configuration": {
+                "redundancy_mode": "three_data_hall",
+                "storage_engine": "ssd-2",
+                "coordinators_count": 3,
+                "excluded_servers": [],
+            },
+            "data": {"state": {"name": "healthy", "healthy": True}},
+            "fault_tolerance": {
+                "max_zone_failures_without_losing_availability": -1,
+                "max_zone_failures_without_losing_data": -1,
+            },
+            "logs": [
+                {
+                    "epoch": 1,
+                    "current": True,
+                    "begin_version": 1,
+                    "possibly_losing_data": False,
+                    "log_interfaces": [
+                        {
+                            "id": "aaaaaaaaaaaaaaaa",
+                            "healthy": False,
+                            "address": "1.1.1.1:4500",
+                        }
+                    ],
+                }
+            ],
+            "machines": {},
+            "processes": {},
+        },
+    }
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json") as status_file:
+        json.dump(status_json, status_file)
+        status_file.flush()
+        result = subprocess.run(
+            [command_template[0], "--status-json-file", status_file.name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=fdbcli_env,
+        )
+
+    stdout = result.stdout.decode("utf-8")
+    stderr = result.stderr.decode("utf-8")
+    assert result.returncode == 0, stderr
+    assert "Warning: the database may have availability loss." in stdout
+    assert "may have data loss" not in stdout
+
+
 @enable_logging()
 def consistencycheck(logger):
     consistency_check_on_output = "ConsistencyCheck is on"
@@ -948,6 +1006,7 @@ if __name__ == "__main__":
         versionepoch()
         integer_options()
         tls_address_suffix()
+        status_json_file_region_failover_message()
         # TODO: fix the issue when running through the external client
         # quota()
         idempotency_ids()

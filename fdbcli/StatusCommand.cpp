@@ -102,6 +102,23 @@ int getNumofNonExcludedMachines(StatusObjectReader statusObjCluster) {
 	return numOfNonExcludedMachines;
 }
 
+bool logEpochsMayBeLosingData(StatusObjectReader statusObjCluster) {
+	if (!statusObjCluster.has("logs")) {
+		return true;
+	}
+
+	bool sawLogEpoch = false;
+	for (StatusObjectReader logEpoch : statusObjCluster.last().get_array()) {
+		sawLogEpoch = true;
+		bool possiblyLosingData = true;
+		if (!logEpoch.get("possibly_losing_data", possiblyLosingData) || possiblyLosingData) {
+			return true;
+		}
+	}
+
+	return !sawLogEpoch;
+}
+
 std::string getDateInfoString(StatusObjectReader statusObj, std::string key) {
 	time_t curTime;
 	if (!statusObj.has(key)) {
@@ -689,16 +706,22 @@ void printStatus(StatusObjectReader statusObj,
 
 						if (dataLoss == -1) {
 							ASSERT_WE_THINK(availLoss == -1);
-							outputString += format(
-							    "\n\n  Warning: the database may have data loss and availability loss. Please restart "
-							    "following tlog interfaces, otherwise storage servers may never be able to catch "
-							    "up.\n");
-							StatusObjectReader logs;
+							const bool possiblyLosingData = logEpochsMayBeLosingData(statusObjCluster);
+							if (possiblyLosingData) {
+								outputString += format(
+								    "\n\n  Warning: the database may have data loss and availability loss. Please "
+								    "restart following tlog interfaces, otherwise storage servers may never be able "
+								    "to catch up.\n");
+							} else {
+								outputString += format(
+								    "\n\n  Warning: the database may have availability loss. The current log state "
+								    "does not indicate data loss.\n");
+							}
 							if (statusObjCluster.has("logs")) {
 								for (StatusObjectReader logEpoch : statusObjCluster.last().get_array()) {
-									bool possiblyLosingData;
-									if (logEpoch.get("possibly_losing_data", possiblyLosingData) &&
-									    !possiblyLosingData) {
+									bool logEpochPossiblyLosingData;
+									if (logEpoch.get("possibly_losing_data", logEpochPossiblyLosingData) &&
+									    !logEpochPossiblyLosingData) {
 										continue;
 									}
 									// Current epoch doesn't have an end version.
