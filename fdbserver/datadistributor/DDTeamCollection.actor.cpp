@@ -30,6 +30,7 @@
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/network.h"
+#include "flow/TxnCounters.h"
 
 #include "flow/CoroUtils.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -74,6 +75,23 @@ int EligibilityCounter::getCount(int combinedType) const {
 }
 
 } // namespace data_distribution
+
+static TxnCounters* updateNextWigglingStorageIDCounters() {
+	static auto* c = makeCounters("/dd/updateNextWigglingStorageID");
+	return c;
+}
+static TxnCounters* perpetualStorageWigglerCounters() {
+	static auto* c = makeCounters("/dd/perpetualStorageWiggler");
+	return c;
+}
+static TxnCounters* waitHealthyZoneChangeCounters() {
+	static auto* c = makeCounters("/dd/waitHealthyZoneChange");
+	return c;
+}
+static TxnCounters* updateStorageMetadataCounters() {
+	static auto* c = makeCounters("/dd/updateStorageMetadata");
+	return c;
+}
 
 class DDTeamCollectionImpl {
 	static Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
@@ -2223,6 +2241,7 @@ public:
 	}
 
 	static Future<Void> updateNextWigglingStorageID(DDTeamCollection* self) {
+		auto* counters = updateNextWigglingStorageIDCounters();
 		StorageWiggleData wiggleState;
 		KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap =
 		    wiggleState.wigglingStorageServer(PrimaryRegion(self->primary));
@@ -2231,14 +2250,17 @@ public:
 		StorageWiggleValue value(nextId);
 		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->dbContext()));
 		while (true) {
+			counters->started->increment(1);
 			// write the next server id
 			Error err;
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				metadataMap.set(tr, nextId, value);
 				co_await tr->commit();
+				counters->committed->increment(1);
 				break;
 			} catch (Error& e) {
+				counters->aborted->increment(1);
 				err = e;
 			}
 			co_await tr->onError(err);
@@ -2502,6 +2524,7 @@ public:
 	// command `configure perpetual_storage_wiggle=$value` if the value is 1, this actor start 2 actors,
 	// `perpetualStorageWiggleIterator` and `perpetualStorageWiggler`. Otherwise, it sends stop signal to them.
 	static Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* self) {
+		auto* counters = perpetualStorageWigglerCounters();
 		int speed = 0;
 		PromiseStream<Void> finishStorageWiggleSignal;
 		SignalableActorCollection collection;
@@ -2511,6 +2534,7 @@ public:
 		while (true) {
 			ReadYourWritesTransaction tr(self->dbContext());
 			while (true) {
+				counters->started->increment(1);
 				Error err;
 				try {
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -2521,6 +2545,7 @@ public:
 					}
 					Future<Void> watchFuture = tr.watch(perpetualStorageWiggleKey);
 					co_await tr.commit();
+					counters->committed->increment(1);
 
 					ASSERT(speed == 1 || speed == 0);
 					if (speed == 1 && self->storageWiggler->isStopped()) { // avoid duplicated start
@@ -2543,6 +2568,7 @@ public:
 					co_await watchFuture;
 					break;
 				} catch (Error& e) {
+					counters->aborted->increment(1);
 					err = e;
 				}
 				co_await tr.onError(err);
@@ -2551,8 +2577,10 @@ public:
 	}
 
 	static Future<Void> waitHealthyZoneChange(DDTeamCollection* self) {
+		auto* counters = waitHealthyZoneChangeCounters();
 		ReadYourWritesTransaction tr(self->dbContext());
 		while (true) {
+			counters->started->increment(1);
 			Error err;
 			bool hasErr = false;
 			try {
@@ -2595,9 +2623,11 @@ public:
 
 				Future<Void> watchFuture = tr.watch(healthyZoneKey);
 				co_await tr.commit();
+				counters->committed->increment(1);
 				co_await (watchFuture || healthyZoneTimeout);
 				tr.reset();
 			} catch (Error& e) {
+				counters->aborted->increment(1);
 				err = e;
 				hasErr = true;
 			}
@@ -3323,6 +3353,7 @@ public:
 	}
 
 	ACTOR static Future<Void> updateStorageMetadata(DDTeamCollection* self, TCServerInfo* server) {
+		state TxnCounters* counters = updateStorageMetadataCounters();
 		state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(
 		    serverMetadataKeys.begin, IncludeVersion());
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dbContext());
@@ -3346,6 +3377,7 @@ public:
 
 		// read storage metadata
 		loop {
+			counters->started->increment(1);
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				Optional<Value> serverInterfaceValue = wait(tr->get(serverListKeyFor(server->getId())));
@@ -3366,8 +3398,10 @@ public:
 				metadataMap.set(tr, server->getId(), data);
 				tr->set(serverMetadataChangeKey, deterministicRandom()->randomUniqueID().toString());
 				wait(tr->commit());
+				counters->committed->increment(1);
 				break;
 			} catch (Error& e) {
+				counters->aborted->increment(1);
 				wait(tr->onError(e));
 			}
 		}

@@ -1,5 +1,5 @@
 /*
- * utils.go
+ * TxnCounters.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,34 +18,25 @@
  * limitations under the License.
  */
 
-package main
+#ifndef FLOW_TXNCOUNTERS_H
+#define FLOW_TXNCOUNTERS_H
+#pragma once
 
-import (
-	"encoding/json"
-	"fmt"
-	"log"
-	"net/http"
-)
+#include "flow/SimpleCounter.h"
 
-type ErrorDetail struct {
-	Detail string `json:"details"`
+struct TxnCounters {
+	SimpleCounter<int64_t>* started;
+	SimpleCounter<int64_t>* committed;
+	SimpleCounter<int64_t>* aborted;
+};
+
+inline TxnCounters* makeCounters(const char* prefix) {
+	std::string p(prefix);
+	auto* c = new TxnCounters();
+	c->started = SimpleCounter<int64_t>::makeCounter(p + "/started");
+	c->committed = SimpleCounter<int64_t>::makeCounter(p + "/committed");
+	c->aborted = SimpleCounter<int64_t>::makeCounter(p + "/aborted");
+	return c;
 }
 
-type ErrorResponse struct {
-	Err ErrorDetail `json:"error"`
-}
-
-func sendErrorResponse(w http.ResponseWriter, err error) {
-	e := ErrorDetail{}
-	e.Detail = fmt.Sprintf("Error: %s", err.Error())
-	resp := ErrorResponse{
-		Err: e,
-	}
-
-	mResp, err := json.Marshal(resp)
-	if err != nil {
-		log.Printf("Error marshalling error response %s", err.Error())
-		panic(err)
-	}
-	fmt.Fprintf(w, string(mResp))
-}
+#endif
