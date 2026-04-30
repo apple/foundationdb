@@ -162,11 +162,10 @@ set(Boost_USE_STATIC_LIBS ON)
 if (UNIX AND CMAKE_CXX_COMPILER_ID MATCHES "Clang$" AND USE_LIBCXX)
   list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_86_0_clang)
   set(BOOST_HINT_PATHS /opt/boost_1_86_0_clang)
-  message(STATUS "Using Clang version of boost")
+  message(STATUS "Preferring _clang build of boost ...")
 else ()
   list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_86_0)
   set(BOOST_HINT_PATHS /opt/boost_1_86_0)
-  message(STATUS "Using g++ version of boost")
 endif ()
 
 if(BOOST_ROOT)
@@ -180,16 +179,24 @@ if(WIN32)
   # I think depending on the cmake version this will cause weird warnings
   find_package(Boost 1.86 COMPONENTS filesystem iostreams serialization system program_options url)
   add_library(boost_target INTERFACE)
-  target_link_libraries(boost_target INTERFACE Boost::boost Boost::filesystem Boost::iostreams Boost::serialization Boost::system Boost::url)
-
+  target_link_libraries(boost_target
+                        INTERFACE Boost::boost
+                                  Boost::filesystem
+                                  Boost::iostreams
+                                  Boost::serialization
+                                  Boost::system
+                                  Boost::url
+  )
   add_library(boost_target_program_options INTERFACE)
   target_link_libraries(boost_target_program_options INTERFACE Boost::boost Boost::program_options)
   return()
 endif()
 
-find_package(Boost 1.86.0 EXACT QUIET COMPONENTS context filesystem iostreams program_options serialization system url CONFIG PATHS ${BOOST_HINT_PATHS})
-set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores any installed boost")
+find_package(Boost 1.86.0 EXACT QUIET
+             COMPONENTS context filesystem iostreams program_options serialization system url
+             CONFIG PATHS ${BOOST_HINT_PATHS})
 
+set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores any installed boost")
 # The precompiled boost silently broke in CI.  While investigating, I considered extending
 # the old check with something like this, so that it would fail loudly if it found a bad
 # pre-existing boost.  It turns out the error messages we get from CMake explain what is
@@ -204,9 +211,17 @@ set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores an
 #      message(FATAL_ERROR "Unacceptable precompiled boost found")
 #
 if(Boost_FOUND AND NOT FORCE_BOOST_BUILD)
+  message(STATUS "Found Boost: ${Boost_DIR}")
   add_library(boost_target INTERFACE)
-  target_link_libraries(boost_target INTERFACE Boost::boost Boost::context Boost::filesystem Boost::iostreams Boost::serialization Boost::system Boost::url)
-
+  target_link_libraries(boost_target
+                        INTERFACE Boost::boost
+                                  Boost::context
+                                  Boost::filesystem
+                                  Boost::iostreams
+                                  Boost::serialization
+                                  Boost::system
+                                  Boost::url
+  )
   add_library(boost_target_program_options INTERFACE)
   target_link_libraries(boost_target_program_options INTERFACE Boost::boost Boost::program_options)
 elseif(WIN32)
