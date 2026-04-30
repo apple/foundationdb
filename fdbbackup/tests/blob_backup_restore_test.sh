@@ -131,10 +131,12 @@ function test_s3_backup_and_restore {
     err "Failed verification of data in fdb"
     return 1
   fi
-  
-  # Cleanup test data.
-  if ! s3_cleanup_url "${local_build_dir}" "${local_scratch_dir}" "${edited_url}" "${credentials}"; then
-    return 1
+
+  # Cleanup test data (skip if preserving test data for debugging).
+  if [[ "${PRESERVE_TEST_DATA:-0}" != "1" ]]; then
+    if ! s3_cleanup_url "${local_build_dir}" "${local_scratch_dir}" "${edited_url}" "${credentials}"; then
+      return 1
+    fi
   fi
   log "Check for Severity=40 errors"
   if ! grep_for_severity40 "${local_scratch_dir}"; then
@@ -150,42 +152,13 @@ set -o pipefail
 set -o noclobber
 
 # Parse command line arguments
-USE_ENCRYPTION=false
+USE_ENCRYPTION=$(((RANDOM % 2)) && echo true || echo false )
 USE_PARTITIONED_LOG=$(((RANDOM % 2)) && echo true || echo false )
-PARAMS=()
 
-while (( "$#" )); do
-  case "$1" in
-    --encrypt)
-      USE_ENCRYPTION=true
-      shift
-      ;;
-    --encrypt-at-random)
-      USE_ENCRYPTION=$(((RANDOM % 2)) && echo true || echo false )
-      shift
-      ;;
-    --partitioned-log-experimental)
-      USE_PARTITIONED_LOG=true
-      shift
-      ;;
-    --partitioned-log-experimental-at-random)
-      USE_PARTITIONED_LOG=$(((RANDOM % 2)) && echo true || echo false )
-      shift
-      ;;
-    -*|--*=) # unsupported flags
-      err "Error: Unsupported flag $1" >&2
-      exit 1
-      ;;
-    *) # preserve positional arguments
-      PARAMS+=("$1")
-      shift
-      ;;
-  esac
-done
-
-# Set positional arguments in their proper place
-if [ ${#PARAMS[@]} -ne 0 ]; then
-  set -- "${PARAMS[@]}"
+# Set USE_ENCRYPTION_BLOCK_SIZE only if encryption is enabled
+USE_ENCRYPTION_BLOCK_SIZE=false
+if [[ "${USE_ENCRYPTION}" == "true" ]]; then
+  USE_ENCRYPTION_BLOCK_SIZE=$(((RANDOM % 2)) && echo true || echo false)
 fi
 
 # Get the working directory for this script.
@@ -257,6 +230,7 @@ else
 fi
 readonly ENCRYPTION_KEY_FILE
 readonly USE_PARTITIONED_LOG
+readonly USE_ENCRYPTION_BLOCK_SIZE
 
 # Setup S3/MockS3 environment using common function
 readonly temp_dir_prefix="mocks3_backup_test"

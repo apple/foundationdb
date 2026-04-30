@@ -160,6 +160,10 @@ function run_backup {
     cmd_args+=("--partitioned-log-experimental")
   fi
 
+  if [[ "${USE_ENCRYPTION_BLOCK_SIZE:-false}" == "true" ]]; then
+    cmd_args+=("--encryption-block-size" "4096")
+  fi
+
   # Start backup without -w flag to avoid hanging
   if ! "${local_build_dir}"/bin/fdbbackup start "${cmd_args[@]}"; then
     err "Start fdbbackup failed"
@@ -421,7 +425,9 @@ function test_encryption_mismatches {
 
     if [[ ${exit_code1} -eq 0 ]]; then
       err "Restore without encryption on encrypted backup succeeded when it should have failed!"
-      rm -rf "${mismatch_logdir}"
+      if [[ "${PRESERVE_TEST_DATA:-0}" != "1" ]]; then
+        rm -rf "${mismatch_logdir}"
+      fi
       return 1
     fi
     log "SUCCESS: Restore without encryption on encrypted backup failed as expected (exit code: ${exit_code1})"
@@ -443,7 +449,9 @@ function test_encryption_mismatches {
 
     if [[ ${exit_code2} -eq 0 ]]; then
       err "Restore with wrong encryption key succeeded when it should have failed!"
-      rm -rf "${mismatch_logdir}"
+      if [[ "${PRESERVE_TEST_DATA:-0}" != "1" ]]; then
+        rm -rf "${mismatch_logdir}"
+      fi
       return 1
     fi
     log "SUCCESS: Restore with wrong encryption key failed as expected (exit code: ${exit_code2})"
@@ -469,14 +477,18 @@ function test_encryption_mismatches {
 
     if [[ ${exit_code} -eq 0 ]]; then
       err "Restore with encryption on unencrypted backup succeeded when it should have failed!"
-      rm -rf "${mismatch_logdir}"
+      if [[ "${PRESERVE_TEST_DATA:-0}" != "1" ]]; then
+        rm -rf "${mismatch_logdir}"
+      fi
       return 1
     fi
     log "SUCCESS: Restore with encryption on unencrypted backup failed as expected (exit code: ${exit_code})"
   fi
 
   # Clean up separate log directory
-  rm -rf "${mismatch_logdir}"
+  if [[ "${PRESERVE_TEST_DATA:-0}" != "1" ]]; then
+    rm -rf "${mismatch_logdir}"
+  fi
 
   log "All encryption mismatch tests completed successfully"
   return 0
