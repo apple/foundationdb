@@ -7988,8 +7988,8 @@ public:
 
 						if (showRangeFile) {
 							statusText += "\nRangefile Snapshot:\n";
-							statusText +=
-							    format(" Bytes written: %s\n", formatBytesHumanReadable(rangeBytesWritten.orDefault(0)).c_str());
+							statusText += format(" Bytes written: %s\n",
+							                     formatBytesHumanReadable(rangeBytesWritten.orDefault(0)).c_str());
 
 							std::string rangefileStatus;
 							if (backupState == EBackupState::STATE_RUNNING_DIFFERENTIAL) {
@@ -8004,7 +8004,8 @@ public:
 						}
 
 						statusText += format("\nMutation Logs:\n");
-						statusText += format(" Bytes written: %s\n", formatBytesHumanReadable(logBytesWritten.orDefault(0)).c_str());
+						statusText += format(" Bytes written: %s\n",
+						                     formatBytesHumanReadable(logBytesWritten.orDefault(0)).c_str());
 						statusText += format(" Last complete version: %s (%s)\n",
 						                     versionToString(latestLogEndVersion).c_str(),
 						                     timeStampToString(latestLogEndVersionTimestamp).c_str());
