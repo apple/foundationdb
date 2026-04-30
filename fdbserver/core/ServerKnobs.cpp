@@ -264,7 +264,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( MERGE_RELOCATION_PARALLELISM_PER_TEAM,                   6 ); if (randomize && BUGGIFY ) MERGE_RELOCATION_PARALLELISM_PER_TEAM = 1;
 	init( DD_QUEUE_MAX_KEY_SERVERS,                              100 ); // Do not buggify
 	init( DD_REBALANCE_PARALLELISM,                               50 );
-	// Large busy clusters have been observed doing 200-300GB of moves with ~1000 in flight. No need to go higher.
+	// Hard cap on total relocations DD tracks (queued + in-flight). 1000 corresponds to a 500-server
+	// cluster with two concurrent shard moves per storage server. Observed large busy clusters peak
+	// at 200-300GB of moves with ~1000 in flight; no need to go higher.
 	init( DD_MAX_PIPELINE_MOVES,                                1000 ); if( randomize && BUGGIFY ) DD_MAX_PIPELINE_MOVES = 5;
 	init( DD_REBALANCE_RESET_AMOUNT,                              30 );
 	init( INFLIGHT_PENALTY_HEALTHY,                              1.0 );
