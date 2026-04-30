@@ -2672,8 +2672,7 @@ ACTOR Future<Void> expireBackupData(const char* name,
                                     Database db,
                                     bool force,
                                     Version restorableAfterVersion,
-                                    std::string restorableAfterDatetime,
-                                    Optional<std::string> encryptionKeyFile) {
+                                    std::string restorableAfterDatetime) {
 	if (!endDatetime.empty()) {
 		Version v = wait(timeKeeperVersionFromDatetime(endDatetime, db));
 		endVersion = v;
@@ -2692,7 +2691,7 @@ ACTOR Future<Void> expireBackupData(const char* name,
 	}
 
 	try {
-		Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer, proxy, encryptionKeyFile);
+		Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer, proxy, {});
 
 		state IBackupContainer::ExpireProgress progress;
 		state std::string lastProgress;
@@ -2781,10 +2780,9 @@ ACTOR Future<Void> describeBackup(const char* name,
                                   Optional<std::string> proxy,
                                   bool deep,
                                   Optional<Database> cx,
-                                  bool json,
-                                  Optional<std::string> encryptionKeyFile) {
+                                  bool json) {
 	try {
-		Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer, proxy, encryptionKeyFile);
+		Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer, proxy, {});
 		state BackupDescription desc = wait(c->describeBackup(deep));
 		if (cx.present())
 			wait(desc.resolveVersionTimes(cx.get()));
@@ -4411,8 +4409,7 @@ int main(int argc, char* argv[]) {
 				                               db,
 				                               forceAction,
 				                               expireRestorableAfterVersion,
-				                               expireRestorableAfterDatetime,
-				                               encryptionKeyFile));
+				                               expireRestorableAfterDatetime));
 				break;
 
 			case BackupType::DELETE_BACKUP:
@@ -4433,8 +4430,7 @@ int main(int argc, char* argv[]) {
 				                             proxy,
 				                             describeDeep,
 				                             describeTimestamps ? Optional<Database>(db) : Optional<Database>(),
-				                             jsonOutput,
-				                             encryptionKeyFile));
+				                             jsonOutput));
 				break;
 
 			case BackupType::LIST:
