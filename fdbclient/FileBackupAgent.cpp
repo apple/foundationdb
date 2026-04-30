@@ -705,7 +705,7 @@ Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore, Refer
 	          success(submittedTasks) && success(triggeredTasks) && success(runningTasks) && success(totalTasks) &&
 	          success(useRangeFileRestore));
 
-	bool useRangeFile = useRangeFileRestore.get().present() && useRangeFileRestore.get().get();
+	bool useRangeFile = !useRangeFileRestore.get().present() || useRangeFileRestore.get().get();
 
 	std::string errstr = "None";
 	if (lastError.get().second != 0)
@@ -749,12 +749,11 @@ Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore, Refer
 		                      submittedTasks.get(),
 		                      triggeredTasks.get(),
 		                      runningTasks.get());
-		progressStr += format(" Tasks complete: %lld / %lld total\n", triggeredTasks.get(), totalTasks.get());
+		progressStr += format(" Tasks triggered: %lld / %lld total\n", triggeredTasks.get(), totalTasks.get());
 		progressStr += format(" Bytes written: %s\n", formatBytesHumanReadable(bytesWritten.get()).c_str());
-		double throughput =
-		    triggeredTasks.get() > 0 && totalTasks.get() > 0 ? (double)bytesWritten.get() / totalTasks.get() : 0;
-		if (throughput > 0) {
-			progressStr += format(" Avg bytes/task: %s\n", formatBytesHumanReadable((int64_t)throughput).c_str());
+		double avgBytesPerTask = triggeredTasks.get() > 0 ? (double)bytesWritten.get() / triggeredTasks.get() : 0;
+		if (avgBytesPerTask > 0) {
+			progressStr += format(" Avg bytes/task: %s\n", formatBytesHumanReadable((int64_t)avgBytesPerTask).c_str());
 		}
 	}
 
@@ -7991,7 +7990,6 @@ public:
 							statusText += format(" Bytes written: %s\n",
 							                     formatBytesHumanReadable(rangeBytesWritten.orDefault(0)).c_str());
 
-							std::string rangefileStatus;
 							if (backupState == EBackupState::STATE_RUNNING_DIFFERENTIAL) {
 								double pct = 100.0 * (recentReadVersion - snapshotBeginVersion) /
 								             (snapshotTargetEndVersion - snapshotBeginVersion);
