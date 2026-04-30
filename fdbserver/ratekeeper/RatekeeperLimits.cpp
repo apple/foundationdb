@@ -28,8 +28,7 @@ RatekeeperLimits::RatekeeperLimits(TransactionPriority priority,
                                    int64_t logTargetBytes,
                                    int64_t logSpringBytes,
                                    double maxVersionDifference,
-                                   int64_t durabilityLagTargetVersions,
-                                   double bwLagTarget)
+                                   int64_t durabilityLagTargetVersions)
   : tpsLimit(std::numeric_limits<double>::infinity()), tpsLimitMetric(StringRef("Ratekeeper.TPSLimit" + context)),
     reasonMetric(StringRef("Ratekeeper.Reason" + context)), storageTargetBytes(storageTargetBytes),
     storageSpringBytes(storageSpringBytes), logTargetBytes(logTargetBytes), logSpringBytes(logSpringBytes),
@@ -38,6 +37,5 @@ RatekeeperLimits::RatekeeperLimits(TransactionPriority priority,
                                 SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS), // The read transaction life versions
                                                                                    // are expected to not
     // be durable on the storage servers
-    lastDurabilityLag(0), durabilityLagLimit(std::numeric_limits<double>::infinity()), bwLagTarget(bwLagTarget),
-    priority(priority), context(context),
-    rkUpdateEventCacheHolder(makeReference<EventCacheHolder>("RkUpdate" + context)) {}
+    lastDurabilityLag(0), durabilityLagLimit(std::numeric_limits<double>::infinity()), priority(priority),
+    context(context), rkUpdateEventCacheHolder(makeReference<EventCacheHolder>("RkUpdate" + context)) {}
