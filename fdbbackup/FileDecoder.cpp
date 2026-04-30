@@ -885,7 +885,7 @@ int main(int argc, char** argv) {
 		// invalid.
 		if (!param->validVersionFilters()) {
 			std::cerr << "--begin-version-filter " << param->beginVersionFilter
-			          << " cannot be equal or greater than --end-version-filter" << param->endVersionFilter << "\n";
+			          << " cannot be equal or greater than --end-version-filter " << param->endVersionFilter << "\n";
 			file_converter::printDecodeUsage();
 			return FDB_EXIT_ERROR;
 		}
