@@ -2228,7 +2228,7 @@ int getRandomSeed() {
 }
 
 void generateSecureRandomBytes(void* buf, size_t len) {
-	INJECT_FAULT(platform_error, "generateSecureRandomBytes");
+	ASSERT(len == 0 || buf != nullptr);
 #ifdef _WIN32
 	size_t pos = 0;
 	while (pos < len) {
@@ -2251,10 +2251,17 @@ void generateSecureRandomBytes(void* buf, size_t len) {
 	while (pos < len) {
 		ssize_t nbytes = read(fd, static_cast<uint8_t*>(buf) + pos, len - pos);
 		if (nbytes == -1) {
+			if (errno == EINTR)
+				continue;
 			int savedErrno = errno;
 			close(fd);
 			errno = savedErrno;
 			TraceEvent(SevError, "ReadURandomSecureBytes").GetLastError();
+			throw platform_error();
+		}
+		if (nbytes == 0) {
+			close(fd);
+			TraceEvent(SevError, "ReadURandomSecureBytesEOF").log();
 			throw platform_error();
 		}
 		pos += nbytes;
