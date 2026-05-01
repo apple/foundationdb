@@ -1195,7 +1195,7 @@ void asyncMapTest() {
 void dsltest() {
 	double startt, endt;
 
-	setThreadLocalDeterministicRandomSeed(40);
+	setThreadLocalDeterministicRandomSeed(uint32_t(40));
 
 	asyncMapTest();
 

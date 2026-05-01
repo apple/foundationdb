@@ -37,7 +37,7 @@ struct ThreadInfo {
 	DeterministicRandom random;
 
 	ThreadInfo(int id, ThreadSafetyWorkload* self)
-	  : id(id), self(self), random(deterministicRandom()->randomInt(1, 1e9)) {}
+	  : id(id), self(self), random(static_cast<uint32_t>(deterministicRandom()->randomInt(1, 1e9))) {}
 };
 
 // A thread barrier implementation. Reached() method blocks until the required number of threads reach it.

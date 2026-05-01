@@ -210,6 +210,7 @@ extern FILE* randLog;
 
 // Sets the seed for the deterministic random number generator on the current thread
 void setThreadLocalDeterministicRandomSeed(uint32_t seed);
+void setThreadLocalDeterministicRandomSeed(uint64_t seed);
 
 // Returns the random number generator that can be seeded. This generator should only
 // be used in contexts where the choice to call it is deterministic.

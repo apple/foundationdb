@@ -1581,7 +1581,7 @@ Future<Void> checkDataConsistency(Database cx,
 	for (int k = 0; k < ranges.size(); k++)
 		shardOrder.push_back(k);
 	if (shuffleShards) {
-		DeterministicRandom sharedRandom(sharedRandomNumber + repetitions);
+		DeterministicRandom sharedRandom(static_cast<uint32_t>(sharedRandomNumber + repetitions));
 		sharedRandom.randomShuffle(shardOrder);
 	}
 

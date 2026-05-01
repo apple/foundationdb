@@ -41,7 +41,7 @@ static inline TaskPriority getRandomTaskPriority(DeterministicRandom& rand) {
 static Future<Void> benchNet2Actor(benchmark::State* benchState) {
 	size_t actorCount = benchState->range(0);
 	uint32_t sum;
-	int seed = platform::getRandomSeed();
+	uint32_t seed = uint32_t(platform::getRandomSeed());
 	while (benchState->KeepRunning()) {
 		sum = 0;
 		std::vector<Future<Void>> futures;

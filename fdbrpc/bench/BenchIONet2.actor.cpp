@@ -32,7 +32,7 @@
 
 ACTOR static Future<Void> increment(TaskPriority priority, uint32_t* sum) {
 	wait(delay(0, priority));
-	DeterministicRandom rand(1);
+	DeterministicRandom rand(uint32_t(1));
 	int randSum = 0;
 	for (int i = 0; i < 1e6; ++i) {
 		randSum += rand.randomInt(0, 3);
@@ -49,7 +49,7 @@ static inline TaskPriority getRandomTaskPriority(DeterministicRandom& rand) {
 ACTOR static Future<Void> benchIONet2Actor(benchmark::State* benchState) {
 	state size_t actorCount = benchState->range(0);
 	state uint32_t sum;
-	state int seed = platform::getRandomSeed();
+	state uint32_t seed = uint32_t(platform::getRandomSeed());
 	state std::unique_ptr<char[]> data(new char[4096]);
 	memset(data.get(), 0, 4096);
 	while (benchState->KeepRunning()) {

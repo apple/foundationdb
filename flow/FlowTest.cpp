@@ -326,7 +326,7 @@ int main(int argc, char** argv) {
 	}
 
 	if (options.randomSeed == 0) {
-		options.randomSeed = platform::getRandomSeed();
+		options.randomSeed = uint32_t(platform::getRandomSeed());
 	}
 	setThreadLocalDeterministicRandomSeed(options.randomSeed);
 	fmt::print(stdout, "Random seed is {}\n", options.randomSeed);

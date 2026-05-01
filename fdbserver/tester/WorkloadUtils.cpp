@@ -364,7 +364,7 @@ void CompoundWorkload::addFailureInjection(WorkloadRequest& work) {
 		return;
 	}
 	auto& factories = IFailureInjectorFactory::factories();
-	DeterministicRandom random(sharedRandomNumber);
+	DeterministicRandom random(static_cast<uint32_t>(sharedRandomNumber));
 	for (auto& factory : factories) {
 		auto workload = factory->create(*this);
 		if (disabledWorkloads.contains(workload->description())) {

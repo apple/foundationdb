@@ -2813,7 +2813,7 @@ static Future<Void> simulationSetupAndRunImpl(std::string dataFolder,
 		// If reseedTime is set, schedule a random seed reset at a random time between [0, reseedTime]
 		if (reseedTime >= 0.0) {
 			double actualReseedTime = nondeterministicRandom()->random01() * reseedTime;
-			uint32_t newSeed = platform::getRandomSeed();
+			uint32_t newSeed = uint32_t(platform::getRandomSeed());
 			TraceEvent("SchedulingRandomSeedReset")
 			    .detail("ReseedTimeMax", reseedTime)
 			    .detail("ActualReseedTime", actualReseedTime)

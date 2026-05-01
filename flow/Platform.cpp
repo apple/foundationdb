@@ -100,6 +100,9 @@ static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<u
 #include <sys/time.h>
 #include <unistd.h>
 #include <sys/statvfs.h> /* Needed for disk capacity */
+#if defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
+#include <sys/random.h> /* getentropy */
+#endif
 
 #if !defined(__aarch64__) && !defined(__powerpc64__)
 #include <cpuid.h>
@@ -2201,30 +2204,23 @@ void setAffinity(int proc) {
 
 namespace platform {
 
-int getRandomSeed() {
+uint64_t getRandomSeed() {
 	INJECT_FAULT(platform_error, "getRandomSeed"); // getting a random seed failed
-	int randomSeed;
-
+	uint64_t seed;
 #ifdef _WIN32
-	if (rand_s((unsigned int*)&randomSeed) != 0) {
+	uint32_t lo, hi;
+	if (rand_s(&lo) != 0 || rand_s(&hi) != 0) {
 		TraceEvent(SevError, "WindowsRandomSeedError").log();
 		throw platform_error();
 	}
+	seed = (uint64_t(hi) << 32) | lo;
 #else
-	int devRandom = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
-	if (devRandom == -1) {
-		TraceEvent(SevError, "OpenURandom").GetLastError();
-		throw platform_error();
-	}
-	int nbytes = read(devRandom, &randomSeed, sizeof(randomSeed));
-	close(devRandom);
-	if (nbytes != sizeof(randomSeed)) {
-		TraceEvent(SevError, "ReadURandom").GetLastError();
+	if (getentropy(&seed, sizeof(seed)) != 0) {
+		TraceEvent(SevError, "GetEntropyError").detail("errno", errno);
 		throw platform_error();
 	}
 #endif
-
-	return randomSeed;
+	return seed;
 }
 } // namespace platform
 

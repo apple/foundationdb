@@ -117,7 +117,7 @@ static std::string genUncompressedData() {
 		std::printf("Load test data %s: %ld bytes\n", dataFileName, size);
 		return buf;
 	} else {
-		DeterministicRandom random(0x1234567, true);
+		DeterministicRandom random(uint32_t(0x1234567), true);
 		return random.randomAlphaNumeric(1048576);
 	}
 }

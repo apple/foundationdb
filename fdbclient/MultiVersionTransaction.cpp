@@ -2237,8 +2237,7 @@ void MultiVersionApi::setupNetwork() {
 			}
 
 			if (!bypassMultiClientApi) {
-				transportId =
-				    (uint64_t(uint32_t(platform::getRandomSeed())) << 32) ^ uint32_t(platform::getRandomSeed());
+				transportId = platform::getRandomSeed();
 				if (transportId <= 1)
 					transportId += 2;
 				localClient->api->setNetworkOption(FDBNetworkOptions::EXTERNAL_CLIENT_TRANSPORT_ID,

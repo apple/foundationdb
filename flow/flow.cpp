@@ -113,6 +113,11 @@ void setThreadLocalDeterministicRandomSeed(uint32_t seed) {
 	seededDebugRandom = Reference<IRandom>(new DeterministicRandom(seed));
 }
 
+void setThreadLocalDeterministicRandomSeed(uint64_t seed) {
+	seededRandom = Reference<IRandom>(new DeterministicRandom(seed, true));
+	seededDebugRandom = Reference<IRandom>(new DeterministicRandom(seed));
+}
+
 Reference<IRandom> debugRandom() {
 	return seededDebugRandom;
 }

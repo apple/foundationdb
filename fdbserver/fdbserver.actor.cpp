@@ -1068,7 +1068,7 @@ struct CLIOptions {
 	bool maxLogsSet = false;
 
 	ServerRole role = ServerRole::FDBD;
-	uint32_t randomSeed = platform::getRandomSeed();
+	uint32_t randomSeed = uint32_t(platform::getRandomSeed());
 	double reseedTime = -1.0; // Time in seconds when to reset random seed in simulation (-1 = disabled)
 
 	const char* testFile = "tests/default.txt";

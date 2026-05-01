@@ -1847,7 +1847,7 @@ int main(int argc, char** argv) {
 	try {
 		platformInit();
 		registerCrashHandler();
-		setThreadLocalDeterministicRandomSeed(1);
+		setThreadLocalDeterministicRandomSeed(uint32_t(1));
 
 		// Get arguments
 		if (argc < 3) {

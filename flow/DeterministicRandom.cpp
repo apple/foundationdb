@@ -35,17 +35,26 @@ uint64_t DeterministicRandom::gen64() {
 	// know if the first call was used for the higher order bits and
 	// the second call for the low order bits, or vice-versa.
 	// See https://en.cppreference.com/w/cpp/language/eval_order.html
-	next = (uint64_t(rng()) << 32);
-	next ^= rng();
+	if (wide) {
+		next = rng64();
+	} else {
+		next = (uint64_t(rng()) << 32);
+		next ^= rng();
+	}
 	if (TRACE_SAMPLE())
 		TraceEvent(SevSample, "Random").log();
 	return curr;
 }
 
 DeterministicRandom::DeterministicRandom(uint32_t seed, bool useRandLog)
-  : rng((unsigned long)seed), next(0), useRandLog(useRandLog) {
+  : rng((unsigned long)seed), rng64(0), wide(false), next(0), useRandLog(useRandLog) {
 	next = (uint64_t(rng()) << 32);
 	next ^= rng();
+}
+
+DeterministicRandom::DeterministicRandom(uint64_t seed, bool useRandLog)
+  : rng(0), rng64(seed), wide(true), next(0), useRandLog(useRandLog) {
+	next = rng64();
 }
 
 double DeterministicRandom::random01() {
@@ -107,7 +116,7 @@ uint32_t DeterministicRandom::randomSkewedUInt32(uint32_t min, uint32_t maxPlusO
 	ASSERT_LT(min, maxPlusOne);
 	std::uniform_real_distribution<double> distribution(std::log(std::max<double>(min, 1.0 / M_E)),
 	                                                    std::log(maxPlusOne));
-	double exponent = distribution(rng);
+	double exponent = wide ? distribution(rng64) : distribution(rng);
 	uint32_t value = static_cast<uint32_t>(std::pow(M_E, exponent));
 	return std::max(std::min(value, maxPlusOne - 1), min);
 }
@@ -165,9 +174,16 @@ uint64_t DeterministicRandom::peek() const {
 }
 
 void DeterministicRandom::resetSeed(uint32_t seed) {
+	wide = false;
 	rng.seed((unsigned long)seed);
 	next = (uint64_t(rng()) << 32);
 	next ^= rng();
+}
+
+void DeterministicRandom::resetSeed(uint64_t seed) {
+	wide = true;
+	rng64.seed(seed);
+	next = rng64();
 }
 
 void DeterministicRandom::addref() {
@@ -193,7 +209,7 @@ TEST_CASE("/flow/DeterministicRandom/truePercent") {
 
 	{
 		// Test with a fixed seed for reproducibility
-		DeterministicRandom rng(12345);
+		DeterministicRandom rng(uint32_t(12345));
 
 		// Test 1% probability - should be rare
 		int trueCount1 = 0;
@@ -210,7 +226,7 @@ TEST_CASE("/flow/DeterministicRandom/truePercent") {
 
 	{
 		// Test with a fixed seed for reproducibility
-		DeterministicRandom rng(54321);
+		DeterministicRandom rng(uint32_t(54321));
 
 		// Test 50% probability - should be roughly half
 		int trueCount50 = 0;
@@ -227,7 +243,7 @@ TEST_CASE("/flow/DeterministicRandom/truePercent") {
 
 	{
 		// Test with a fixed seed for reproducibility
-		DeterministicRandom rng(99999);
+		DeterministicRandom rng(uint32_t(99999));
 
 		// Test 99% probability - should be almost always true
 		int trueCount99 = 0;
@@ -244,8 +260,8 @@ TEST_CASE("/flow/DeterministicRandom/truePercent") {
 
 	{
 		// Test determinism - same seed should produce same results
-		DeterministicRandom rng1(7777);
-		DeterministicRandom rng2(7777);
+		DeterministicRandom rng1(uint32_t(7777));
+		DeterministicRandom rng2(uint32_t(7777));
 		for (int i = 0; i < 100; i++) {
 			ASSERT(rng1.truePercent(75) == rng2.truePercent(75));
 		}
@@ -253,12 +269,12 @@ TEST_CASE("/flow/DeterministicRandom/truePercent") {
 
 	{
 		// Test with a fixed seed for reproducibility
-		DeterministicRandom rng(8888);
+		DeterministicRandom rng(uint32_t(8888));
 
 		// Test different percentages produce expected ordering
 		int count10 = 0, count30 = 0, count70 = 0, count90 = 0;
 		for (int i = 0; i < trials; i++) {
-			DeterministicRandom rngTemp(8888 + i); // Different seed for each trial
+			DeterministicRandom rngTemp(uint32_t(8888 + i)); // Different seed for each trial
 			if (rngTemp.truePercent(10))
 				count10++;
 			if (rngTemp.truePercent(30))
@@ -273,6 +289,68 @@ TEST_CASE("/flow/DeterministicRandom/truePercent") {
 		ASSERT(count10 < count30);
 		ASSERT(count30 < count70);
 		ASSERT(count70 < count90);
+	}
+
+	return Void();
+}
+
+TEST_CASE("/flow/DeterministicRandom/wide") {
+	// Same seed must produce the same sequence (determinism for the 64-bit path).
+	{
+		DeterministicRandom rng1(uint64_t(0xDEADBEEFCAFEBABEULL));
+		DeterministicRandom rng2(uint64_t(0xDEADBEEFCAFEBABEULL));
+		for (int i = 0; i < 1000; i++) {
+			ASSERT_EQ(rng1.randomUInt64(), rng2.randomUInt64());
+		}
+	}
+
+	// Different seeds must produce different sequences.
+	{
+		DeterministicRandom rng1(uint64_t(1));
+		DeterministicRandom rng2(uint64_t(2));
+		bool differ = false;
+		for (int i = 0; i < 100; i++) {
+			if (rng1.randomUInt64() != rng2.randomUInt64()) {
+				differ = true;
+				break;
+			}
+		}
+		ASSERT(differ);
+	}
+
+	// randomSkewedUInt32 must stay within bounds for wide instances.
+	{
+		DeterministicRandom rng(uint64_t(0x123456789ABCDEF0ULL));
+		for (int i = 0; i < 1000; i++) {
+			uint32_t v = rng.randomSkewedUInt32(1, 100);
+			ASSERT(v >= 1 && v < 100);
+		}
+	}
+
+	// Wide instances seeded differently must not all produce the same
+	// randomSkewedUInt32 sequence (guards against the "rng always seeded 0" bug).
+	{
+		DeterministicRandom rng1(uint64_t(0xAAAAAAAAAAAAAAAAULL));
+		DeterministicRandom rng2(uint64_t(0x5555555555555555ULL));
+		bool differ = false;
+		for (int i = 0; i < 100; i++) {
+			if (rng1.randomSkewedUInt32(1, 1000) != rng2.randomSkewedUInt32(1, 1000)) {
+				differ = true;
+				break;
+			}
+		}
+		ASSERT(differ);
+	}
+
+	// resetSeed(uint64_t) must restore the same sequence as constructing with that seed.
+	{
+		const uint64_t seed = 0xFEDCBA9876543210ULL;
+		DeterministicRandom rng1(seed);
+		DeterministicRandom rng2(uint64_t(1)); // different seed first
+		rng2.resetSeed(seed);
+		for (int i = 0; i < 1000; i++) {
+			ASSERT_EQ(rng1.randomUInt64(), rng2.randomUInt64());
+		}
 	}
 
 	return Void();

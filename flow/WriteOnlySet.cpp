@@ -218,7 +218,7 @@ void testCopier(std::shared_ptr<TestSet> set, std::chrono::seconds runFor) {
 void writer(std::shared_ptr<TestSet> set, std::chrono::seconds runFor) {
 	auto start = Clock::now();
 	std::random_device rDev;
-	DeterministicRandom rnd(rDev());
+	DeterministicRandom rnd(static_cast<uint32_t>(rDev()));
 	while (true) {
 		unsigned inserts = 0, erases = 0;
 		if (Clock::now() - start > runFor) {

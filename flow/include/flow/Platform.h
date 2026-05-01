@@ -440,7 +440,7 @@ void setCloseOnExec(int fd);
 // Logs an out of memory error and exits the program
 void outOfMemory();
 
-int getRandomSeed();
+uint64_t getRandomSeed();
 
 bool getEnvironmentVar(const char* name, std::string& value);
 int setEnvironmentVar(const char* name, const char* value, int overwrite);

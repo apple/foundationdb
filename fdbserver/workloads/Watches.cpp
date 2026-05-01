@@ -45,7 +45,7 @@ struct WatchesWorkload : TestWorkload {
 
 		for (int i = 0; i < nodes + 1; i++)
 			nodeOrder.push_back(i);
-		DeterministicRandom tempRand(1);
+		DeterministicRandom tempRand(uint32_t(1));
 		tempRand.randomShuffle(nodeOrder);
 	}
 
