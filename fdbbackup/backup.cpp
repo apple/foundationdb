@@ -2355,7 +2355,7 @@ Reference<IBackupContainer> openBackupContainer(const char* name,
                                                 const std::string& destinationContainer,
                                                 const Optional<std::string>& proxy,
                                                 const Optional<std::string>& encryptionKeyFile,
-                                                int encryptionBlockSize = 0) {
+                                                int encryptionBlockSize) {
 	// Error, if no dest container was specified
 	if (destinationContainer.empty()) {
 		fprintf(stderr, "ERROR: No backup destination was specified.\n");
@@ -2440,7 +2440,7 @@ Future<Void> runRestore(Database db,
 		FileBackupAgent backupAgent;
 
 		Reference<IBackupContainer> bc =
-		    openBackupContainer(exeRestore.toString().c_str(), container, proxy, encryptionKeyFile);
+		    openBackupContainer(exeRestore.toString().c_str(), container, proxy, encryptionKeyFile, 0);
 		// If targetVersion is unset then use the maximum restorable version from the backup description
 		if (targetVersion == invalidVersion) {
 			if (verbose)
@@ -2515,7 +2515,7 @@ Future<Void> dumpBackupData(const char* name,
                             Optional<std::string> proxy,
                             Version beginVersion,
                             Version endVersion) {
-	Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer, proxy, {});
+	Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer, proxy, {}, 0);
 
 	if (beginVersion < 0 || endVersion < 0) {
 		BackupDescription desc = co_await c->describeBackup();
@@ -2565,7 +2565,7 @@ Future<Void> expireBackupData(const char* name,
 	}
 
 	try {
-		Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer, proxy, {});
+		Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer, proxy, {}, 0);
 
 		IBackupContainer::ExpireProgress progress;
 		std::string lastProgress;
@@ -2610,7 +2610,7 @@ Future<Void> expireBackupData(const char* name,
 
 Future<Void> deleteBackupContainer(const char* name, std::string destinationContainer, Optional<std::string> proxy) {
 	try {
-		Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer, proxy, {});
+		Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer, proxy, {}, 0);
 		int numDeleted = 0;
 		Future<Void> done = c->deleteContainer(&numDeleted);
 
@@ -2644,7 +2644,7 @@ Future<Void> describeBackup(const char* name,
                             Optional<Database> cx,
                             bool json) {
 	try {
-		Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer, proxy, {});
+		Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer, proxy, {}, 0);
 		BackupDescription desc = co_await c->describeBackup(deep);
 		if (cx.present())
 			co_await desc.resolveVersionTimes(cx.get());
@@ -2740,7 +2740,7 @@ Future<Void> queryBackup(const char* name,
 	JsonBuilderArray rangeFilesJson;
 	JsonBuilderArray logFilesJson;
 	try {
-		Reference<IBackupContainer> bc = openBackupContainer(name, destinationContainer, proxy, {});
+		Reference<IBackupContainer> bc = openBackupContainer(name, destinationContainer, proxy, {}, 0);
 		BackupDescription desc = co_await bc->describeBackup();
 		// Use continuous log end version for the maximum restorable version for the key ranges when a restorable
 		// version doesn't exist.
@@ -2994,7 +2994,7 @@ Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOptions 
 				    .detail("EncryptionKeyFile",
 				            options.encryptionKeyFile.present() ? options.encryptionKeyFile.get() : "None");
 				bc = openBackupContainer(
-				    exeBackup.toString().c_str(), options.destURL.get(), options.proxy, options.encryptionKeyFile);
+				    exeBackup.toString().c_str(), options.destURL.get(), options.proxy, options.encryptionKeyFile, 0);
 				try {
 					co_await timeoutError(bc->create(), 30);
 				} catch (Error& e) {

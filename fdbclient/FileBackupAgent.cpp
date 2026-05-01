@@ -7275,9 +7275,9 @@ public:
 	                                  Version beginVersion,
 	                                  UID uid,
 	                                  MutationLogType mutationLogType,
-	                                  bool useRangeFileRestore = true,
-	                                  int encryptionBlockSize = 0,
-	                                  Optional<std::string> encryptionKeyFileName = {}) {
+	                                  Optional<std::string> encryptionKeyFileName,
+	                                  int encryptionBlockSize,
+	                                  bool useRangeFileRestore = true) {
 		KeyRangeMap<int> restoreRangeSet;
 		for (auto& range : ranges) {
 			restoreRangeSet.insert(range, 1);
@@ -8204,9 +8204,9 @@ public:
 				                       beginVersion,
 				                       randomUid,
 				                       desc.mutationLogType,
-				                       useRangeFileRestore,
+				                       encryptionKeyFileName,
 				                       desc.encryptionBlockSize,
-				                       encryptionKeyFileName);
+				                       useRangeFileRestore);
 				co_await tr->commit();
 				break;
 			} catch (Error& e) {

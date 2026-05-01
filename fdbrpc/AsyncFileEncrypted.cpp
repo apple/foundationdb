@@ -138,8 +138,8 @@ public:
 	}
 };
 
-AsyncFileEncrypted::AsyncFileEncrypted(Reference<IAsyncFile> file, Mode mode, int blockSize)
-  : file(file), mode(mode), currentBlock(0), encryptionBlockSize(blockSize) {
+AsyncFileEncrypted::AsyncFileEncrypted(Reference<IAsyncFile> file, Mode mode, int encryptionBlockSize)
+  : file(file), mode(mode), currentBlock(0), encryptionBlockSize(encryptionBlockSize) {
 	ASSERT(encryptionBlockSize > 0);
 	firstBlockIV = AsyncFileEncryptedImpl::getFirstBlockIV(file->getFilename());
 	if (mode == Mode::APPEND_ONLY) {

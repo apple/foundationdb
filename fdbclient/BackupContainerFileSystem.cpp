@@ -583,10 +583,16 @@ public:
 				    .detail("EncryptionBlockSize", blockSize);
 				co_return std::make_pair(enabled, blockSize);
 			} else {
-				throw backup_invalid_info();
+				// If the file is malformed, log the error and return encryption disabled, don't throw since this file
+				// may be written with older format.
+				TraceEvent(SevWarn, "BackupContainerReadEncryptionMetadataMalformed")
+				    .detail("URL", bc->getURL())
+				    .detail("File", BackupContainerFileSystem::encryptionMetadataFileName());
+				co_return std::make_pair(false, 0);
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_file_not_found) {
+				// File may not be present for older backups, return encryption disabled.
 				TraceEvent(SevWarn, "BackupContainerEncryptionMetadataNotFound")
 				    .detail("URL", bc->getURL())
 				    .detail("File", BackupContainerFileSystem::encryptionMetadataFileName());
@@ -1821,9 +1827,6 @@ BackupContainerFileSystem::VersionProperty BackupContainerFileSystem::unreliable
 BackupContainerFileSystem::VersionProperty BackupContainerFileSystem::logType() {
 	return { Reference<BackupContainerFileSystem>::addRef(this), "mutation_log_type" };
 }
-BackupContainerFileSystem::VersionProperty BackupContainerFileSystem::fileLevelEncryption() {
-	return { Reference<BackupContainerFileSystem>::addRef(this), "file_level_encryption" };
-}
 
 std::string BackupContainerFileSystem::encryptionMetadataFileName() {
 	return "properties/file_level_encryption";
@@ -1890,7 +1893,7 @@ Reference<BackupContainerFileSystem> BackupContainerFileSystem::openContainerFS(
 
 			BackupContainerBlobStore::validateBackupUrl(resource);
 			r = makeReference<BackupContainerBlobStore>(
-			    bstore, resource, backupParams, encryptionKeyFileName, isBackup, encryptionBlockSize);
+			    bstore, resource, backupParams, encryptionKeyFileName, encryptionBlockSize, isBackup);
 		}
 #ifdef BUILD_AZURE_BACKUP
 		else if (u.startsWith("azure://"_sr)) {
