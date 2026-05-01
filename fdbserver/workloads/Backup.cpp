@@ -178,7 +178,9 @@ struct BackupWorkload : TestWorkload {
 			                                   StopWhenDone{ !stopDifferentialDelay },
 			                                   usePartitionedLog,
 			                                   IncrementalBackupOnly::False,
-			                                   encryptionKeyFileName);
+			                                   encryptionKeyFileName,
+			                                   encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0,
+			                                   /*snapshotMode=*/0);
 		} catch (Error& e) {
 			TraceEvent("BW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
@@ -342,7 +344,7 @@ struct BackupWorkload : TestWorkload {
 			co_await startRestore;
 
 			// We can't remove after backup agents since the restore also needs them.
-			// I.e., g_simulator->backupAgents = ISimulator::BackupAgentType::NoBackupAgents
+			// I.e., fdbSimulationPolicyState().backupAgents = FDBBackupAgentType::NoBackupAgents
 		} catch (Error& e) {
 			TraceEvent(SevError, "BackupCorrectness").error(e).GetLastError();
 			throw;

@@ -22,13 +22,15 @@
 
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/simulator.h"
-#include "fdbserver/datadistributor/DDTeamCollection.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/Knobs.h"
+#include "fdbserver/datadistributor/DDTeamCollection.h"
 #include "fdbserver/datadistributor/DataDistributionTeam.h"
 #include "ExclusionTracker.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/network.h"
+#include "flow/TxnCounters.h"
 
 #include "flow/CoroUtils.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -73,6 +75,23 @@ int EligibilityCounter::getCount(int combinedType) const {
 }
 
 } // namespace data_distribution
+
+static TxnCounters* updateNextWigglingStorageIDCounters() {
+	static auto* c = makeCounters("/dd/updateNextWigglingStorageID");
+	return c;
+}
+static TxnCounters* perpetualStorageWigglerCounters() {
+	static auto* c = makeCounters("/dd/perpetualStorageWiggler");
+	return c;
+}
+static TxnCounters* waitHealthyZoneChangeCounters() {
+	static auto* c = makeCounters("/dd/waitHealthyZoneChange");
+	return c;
+}
+static TxnCounters* updateStorageMetadataCounters() {
+	static auto* c = makeCounters("/dd/updateStorageMetadata");
+	return c;
+}
 
 class DDTeamCollectionImpl {
 	static Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
@@ -149,18 +168,16 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> interruptableBuildTeams(DDTeamCollection* self) {
+	static Future<Void> interruptableBuildTeams(DDTeamCollection* self) {
 		if (!self->addSubsetComplete.isSet()) {
-			wait(addSubsetOfEmergencyTeams(self));
+			co_await addSubsetOfEmergencyTeams(self);
 			self->addSubsetComplete.send(Void());
 		}
 
-		loop {
-			choose {
-				when(wait(self->buildTeams())) {
-					return Void();
-				}
-				when(wait(self->restartTeamBuilder.onTrigger())) {}
+		while (true) {
+			auto res = co_await race(self->buildTeams(), self->restartTeamBuilder.onTrigger());
+			if (res.index() == 0) {
+				co_return;
 			}
 		}
 	}
@@ -826,21 +843,22 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> buildTeams(DDTeamCollection* self) {
-		state int desiredTeams;
-		state int serverCount = 0;
-		state std::set<Optional<Standalone<StringRef>>> machines;
+	static Future<Void> buildTeams(DDTeamCollection* self) {
+		int desiredTeams{ 0 };
+		int serverCount = 0;
+		std::set<Optional<Standalone<StringRef>>> machines;
 
 		// wait to see whether restartTeamBuilder is triggered
-		wait(delay(0, g_network->getCurrentTask()));
+		co_await delay(0, g_network->getCurrentTask());
 		// make team builder don't build team during the interval between excluding the wiggled process and recruited a
 		// new SS to avoid redundant teams
 		while (self->pauseWiggle && !self->pauseWiggle->get() && self->waitUntilRecruited.get()) {
-			choose {
-				when(wait(self->waitUntilRecruited.onChange() || self->pauseWiggle->onChange())) {}
-				when(wait(delay(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY, g_network->getCurrentTask()))) {
-					break;
-				}
+			auto const recruitedOrPauseChanged =
+			    co_await timeout(self->waitUntilRecruited.onChange() || self->pauseWiggle->onChange(),
+			                     SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY,
+			                     g_network->getCurrentTask());
+			if (!recruitedOrPauseChanged.present()) {
+				break;
 			}
 		}
 
@@ -881,8 +899,7 @@ public:
 
 			// teamsToBuild is calculated such that we will not build too many teams in the situation
 			// when all (or most of) teams become unhealthy temporarily and then healthy again
-			state int teamsToBuild;
-			teamsToBuild = std::max(0, std::min(desiredTeams - teamCount, maxTeams - totalTeamCount));
+			int teamsToBuild = std::max(0, std::min(desiredTeams - teamCount, maxTeams - totalTeamCount));
 
 			if (teamCount == 0 && teamsToBuild == 0 && SERVER_KNOBS->DD_BUILD_EXTRA_TEAMS_OVERRIDE > 0) {
 				// Use DD_BUILD_EXTRA_TEAMS_OVERRIDE > 0 as the feature flag: Set to 0 to disable it
@@ -912,8 +929,6 @@ public:
 
 			self->lastBuildTeamsFailed = false;
 			if (teamsToBuild > 0 || self->notEnoughTeamsForAServer()) {
-				state std::vector<std::vector<UID>> builtTeams;
-
 				// addTeamsBestOf() will not add more teams than needed.
 				// If the team number is more than the desired, the extra teams are added in the code path when
 				// a team is added as an initial team
@@ -974,9 +989,7 @@ public:
 
 		// Building teams can cause servers to become undesired, which can make teams unhealthy.
 		// Let all of these changes get worked out before responding to the get team request
-		wait(delay(0, TaskPriority::DataDistributionLaunch));
-
-		return Void();
+		co_await delay(0, TaskPriority::DataDistributionLaunch);
 	}
 
 	// Track a team and issue RelocateShards when the level of degradation changes
@@ -2228,6 +2241,7 @@ public:
 	}
 
 	static Future<Void> updateNextWigglingStorageID(DDTeamCollection* self) {
+		auto* counters = updateNextWigglingStorageIDCounters();
 		StorageWiggleData wiggleState;
 		KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap =
 		    wiggleState.wigglingStorageServer(PrimaryRegion(self->primary));
@@ -2236,14 +2250,17 @@ public:
 		StorageWiggleValue value(nextId);
 		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->dbContext()));
 		while (true) {
+			counters->started->increment(1);
 			// write the next server id
 			Error err;
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				metadataMap.set(tr, nextId, value);
 				co_await tr->commit();
+				counters->committed->increment(1);
 				break;
 			} catch (Error& e) {
+				counters->aborted->increment(1);
 				err = e;
 			}
 			co_await tr->onError(err);
@@ -2256,7 +2273,7 @@ public:
 	}
 
 	static Future<Void> waitPerpetualWiggleDelay(DDTeamCollection* self) {
-		if (g_network->isSimulated() && g_simulator->isConsistencyChecked) {
+		if (g_network->isSimulated() && fdbSimulationPolicyState().isConsistencyChecked) {
 			// Wiggle can cause consistency check to repeatedly restart. So we want to
 			// slow it down to avoid consistency check timeout.
 			co_await delay(300);
@@ -2346,25 +2363,21 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> perpetualStorageWiggleIterator(DDTeamCollection* teamCollection,
-	                                                         AsyncVar<bool>* stopSignal,
-	                                                         FutureStream<Void> finishStorageWiggleSignal) {
-		loop {
-			choose {
-				when(wait(stopSignal->onChange())) {}
-				when(waitNext(finishStorageWiggleSignal)) {
-					// delay to avoid delete and update ServerList too frequently, which could result busy loop or over
-					// utilize the disk of other active SS
-					wait(perpetualStorageWiggleRest(teamCollection));
-					wait(updateNextWigglingStorageID(teamCollection));
-				}
+	static Future<Void> perpetualStorageWiggleIterator(DDTeamCollection* teamCollection,
+	                                                   AsyncVar<bool>* stopSignal,
+	                                                   FutureStream<Void> finishStorageWiggleSignal) {
+		while (true) {
+			auto res = co_await race(stopSignal->onChange(), finishStorageWiggleSignal);
+			if (res.index() == 1) {
+				// delay to avoid delete and update ServerList too frequently, which could result busy loop or over
+				// utilize the disk of other active SS
+				co_await perpetualStorageWiggleRest(teamCollection);
+				co_await updateNextWigglingStorageID(teamCollection);
 			}
 			if (stopSignal->get()) {
 				break;
 			}
 		}
-
-		return Void();
 	}
 
 	static Future<Void> clusterHealthCheckForPerpetualWiggle(DDTeamCollection* self, int* extraTeamCount) {
@@ -2511,6 +2524,7 @@ public:
 	// command `configure perpetual_storage_wiggle=$value` if the value is 1, this actor start 2 actors,
 	// `perpetualStorageWiggleIterator` and `perpetualStorageWiggler`. Otherwise, it sends stop signal to them.
 	static Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* self) {
+		auto* counters = perpetualStorageWigglerCounters();
 		int speed = 0;
 		PromiseStream<Void> finishStorageWiggleSignal;
 		SignalableActorCollection collection;
@@ -2520,6 +2534,7 @@ public:
 		while (true) {
 			ReadYourWritesTransaction tr(self->dbContext());
 			while (true) {
+				counters->started->increment(1);
 				Error err;
 				try {
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -2530,6 +2545,7 @@ public:
 					}
 					Future<Void> watchFuture = tr.watch(perpetualStorageWiggleKey);
 					co_await tr.commit();
+					counters->committed->increment(1);
 
 					ASSERT(speed == 1 || speed == 0);
 					if (speed == 1 && self->storageWiggler->isStopped()) { // avoid duplicated start
@@ -2552,6 +2568,7 @@ public:
 					co_await watchFuture;
 					break;
 				} catch (Error& e) {
+					counters->aborted->increment(1);
 					err = e;
 				}
 				co_await tr.onError(err);
@@ -2560,8 +2577,10 @@ public:
 	}
 
 	static Future<Void> waitHealthyZoneChange(DDTeamCollection* self) {
+		auto* counters = waitHealthyZoneChangeCounters();
 		ReadYourWritesTransaction tr(self->dbContext());
 		while (true) {
+			counters->started->increment(1);
 			Error err;
 			bool hasErr = false;
 			try {
@@ -2604,9 +2623,11 @@ public:
 
 				Future<Void> watchFuture = tr.watch(healthyZoneKey);
 				co_await tr.commit();
+				counters->committed->increment(1);
 				co_await (watchFuture || healthyZoneTimeout);
 				tr.reset();
 			} catch (Error& e) {
+				counters->aborted->increment(1);
 				err = e;
 				hasErr = true;
 			}
@@ -2664,11 +2685,11 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> initializeStorage(DDTeamCollection* self,
-	                                            RecruitStorageReply candidateWorker,
-	                                            const DDEnabledState* ddEnabledState,
-	                                            bool recruitTss,
-	                                            Reference<TSSPairState> tssState) {
+	static Future<Void> initializeStorage(DDTeamCollection* self,
+	                                      RecruitStorageReply candidateWorker,
+	                                      const DDEnabledState* ddEnabledState,
+	                                      bool recruitTss,
+	                                      Reference<TSSPairState> tssState) {
 		// SOMEDAY: Cluster controller waits for availability, retry quickly if a server's Locality changes
 		self->recruitingStream.set(self->recruitingStream.get() + 1);
 
@@ -2680,14 +2701,14 @@ public:
 			// Only allow at most 2 storage servers on an address, because
 			// too many storage server on the same address (i.e., process) can cause OOM.
 			// Ask the candidateWorker to initialize a SS only if the worker does not have a pending request
-			state UID interfaceId = deterministicRandom()->randomUniqueID();
+			UID interfaceId = deterministicRandom()->randomUniqueID();
 
 			// insert recruiting localities BEFORE actor waits, to ensure we don't send many recruitment requests to the
 			// same storage
 			self->recruitingIds.insert(interfaceId);
 			self->recruitingLocalities.insert(candidateWorker.worker.stableAddress());
 
-			state InitializeStorageRequest isr;
+			InitializeStorageRequest isr{};
 			isr.storeType = recruitTss ? self->configuration.testingStorageServerStoreType
 			                           : self->configuration.storageServerStoreType;
 
@@ -2711,7 +2732,7 @@ public:
 			isr.interfaceId = interfaceId;
 
 			// if tss, wait for pair ss to finish and add its id to isr. If pair fails, don't recruit tss
-			state bool doRecruit = true;
+			bool doRecruit = true;
 			if (recruitTss) {
 				TraceEvent("TSS_Recruit", self->distributorId)
 				    .detail("ReqID", isr.reqId)
@@ -2721,7 +2742,7 @@ public:
 				    .detail("TSSLocality", candidateWorker.worker.locality.toString())
 				    .detail("Primary", self->primary);
 
-				Optional<std::pair<UID, Version>> ssPairInfoResult = wait(tssState->waitOnSS());
+				Optional<std::pair<UID, Version>> ssPairInfoResult = co_await tssState->waitOnSS();
 				if (ssPairInfoResult.present()) {
 					isr.tssPairIDAndVersion = ssPairInfoResult.get();
 
@@ -2764,7 +2785,7 @@ public:
 			        ? candidateWorker.worker.storage.tryGetReply(isr, TaskPriority::DataDistribution)
 			        : Future<ErrorOr<InitializeStorageReply>>(ErrorOr<InitializeStorageReply>(recruitment_failed()));
 
-			state ErrorOr<InitializeStorageReply> newServer = wait(fRecruit);
+			ErrorOr<InitializeStorageReply> newServer = co_await fRecruit;
 
 			if (doRecruit && newServer.isError()) {
 				TraceEvent(SevWarn, "DDRecruitmentError").error(newServer.getError());
@@ -2773,7 +2794,7 @@ public:
 					tssState->markComplete();
 					throw newServer.getError();
 				}
-				wait(delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY, TaskPriority::DataDistribution));
+				co_await delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY, TaskPriority::DataDistribution);
 			}
 
 			if (!recruitTss && newServer.present() &&
@@ -2790,7 +2811,7 @@ public:
 
 				// wait for timeout, but eventually move on if no TSS pair recruited
 				Optional<bool> tssSuccessful =
-				    wait(timeout(tssState->waitOnTSS(), SERVER_KNOBS->TSS_RECRUITMENT_TIMEOUT));
+				    co_await timeout(tssState->waitOnTSS(), SERVER_KNOBS->TSS_RECRUITMENT_TIMEOUT);
 
 				if (tssSuccessful.present() && tssSuccessful.get()) {
 					TraceEvent("TSS_Recruit", self->distributorId)
@@ -2873,8 +2894,6 @@ public:
 
 		self->recruitingStream.set(self->recruitingStream.get() - 1);
 		self->restartRecruiting.trigger();
-
-		return Void();
 	}
 
 	ACTOR static Future<Void> storageRecruiter(
@@ -3180,16 +3199,20 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> monitorHealthyTeams(DDTeamCollection* self) {
+	static Future<Void> monitorHealthyTeams(DDTeamCollection* self) {
 		TraceEvent("DDMonitorHealthyTeamsStart").detail("ZeroHealthyTeams", self->zeroHealthyTeams->get());
-		loop choose {
-			when(wait(self->zeroHealthyTeams->get()
-			              ? delay(SERVER_KNOBS->DD_ZERO_HEALTHY_TEAM_DELAY, TaskPriority::DataDistribution)
-			              : Never())) {
-				self->doBuildTeams = true;
-				wait(self->checkBuildTeams());
+		while (true) {
+			if (self->zeroHealthyTeams->get()) {
+				auto const zeroHealthyTeamsChanged = co_await timeout(self->zeroHealthyTeams->onChange(),
+				                                                      SERVER_KNOBS->DD_ZERO_HEALTHY_TEAM_DELAY,
+				                                                      TaskPriority::DataDistribution);
+				if (!zeroHealthyTeamsChanged.present()) {
+					self->doBuildTeams = true;
+					co_await self->checkBuildTeams();
+				}
+			} else {
+				co_await self->zeroHealthyTeams->onChange();
 			}
-			when(wait(self->zeroHealthyTeams->onChange())) {}
 		}
 	}
 
@@ -3330,6 +3353,7 @@ public:
 	}
 
 	ACTOR static Future<Void> updateStorageMetadata(DDTeamCollection* self, TCServerInfo* server) {
+		state TxnCounters* counters = updateStorageMetadataCounters();
 		state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(
 		    serverMetadataKeys.begin, IncludeVersion());
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dbContext());
@@ -3353,6 +3377,7 @@ public:
 
 		// read storage metadata
 		loop {
+			counters->started->increment(1);
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				Optional<Value> serverInterfaceValue = wait(tr->get(serverListKeyFor(server->getId())));
@@ -3373,8 +3398,10 @@ public:
 				metadataMap.set(tr, server->getId(), data);
 				tr->set(serverMetadataChangeKey, deterministicRandom()->randomUniqueID().toString());
 				wait(tr->commit());
+				counters->committed->increment(1);
 				break;
 			} catch (Error& e) {
+				counters->aborted->increment(1);
 				wait(tr->onError(e));
 			}
 		}

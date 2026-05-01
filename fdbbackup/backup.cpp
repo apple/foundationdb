@@ -146,6 +146,7 @@ enum {
 	OPT_BACKUPKEYS_FILTER,
 	OPT_INCREMENTALONLY,
 	OPT_ENCRYPTION_KEY_FILE,
+	OPT_ENCRYPTION_BLOCK_SIZE,
 
 	// Backup Modify
 	OPT_MOD_ACTIVE_INTERVAL,
@@ -283,6 +284,7 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
 	{ OPT_INCREMENTALONLY, "--incremental", SO_NONE },
 	{ OPT_ENCRYPTION_KEY_FILE, "--encryption-key-file", SO_REQ_SEP },
+	{ OPT_ENCRYPTION_BLOCK_SIZE, "--encryption-block-size", SO_REQ_SEP },
 	{ OPT_MODE, "--mode", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
@@ -1139,6 +1141,9 @@ static void printBackupUsage(bool devhelp) {
 	       "                 For modify operations, need to pass encryption key file only if Backup container URL is "
 	       "changed to "
 	       "re-encrypt all future backup files. \n");
+	printf("  --encryption-block-size"
+	       "                 Block size in bytes for file encryption. Only used with fdbbackup start command. Default "
+	       "is 1048576 (1MB).\n");
 
 	printf(TLS_HELP);
 	printf("  -w, --wait     Wait for the backup to complete (allowed with `start' and `discontinue').\n");
@@ -2032,6 +2037,7 @@ Future<Void> submitBackup(Database db,
                           UsePartitionedLog usePartitionedLog,
                           IncrementalBackupOnly incrementalBackupOnly,
                           Optional<std::string> encryptionKeyFile,
+                          int encryptionBlockSize,
                           SnapshotMode snapshotMode = SnapshotMode::RANGEFILE) {
 	try {
 		FileBackupAgent backupAgent;
@@ -2086,6 +2092,7 @@ Future<Void> submitBackup(Database db,
 			                                  usePartitionedLog,
 			                                  incrementalBackupOnly,
 			                                  encryptionKeyFile,
+			                                  encryptionBlockSize,
 			                                  static_cast<int>(snapshotMode));
 
 			// Wait for the backup to complete, if requested
@@ -2336,7 +2343,8 @@ Future<Void> changeDBBackupResumed(Database src, Database dest, bool pause) {
 Reference<IBackupContainer> openBackupContainer(const char* name,
                                                 const std::string& destinationContainer,
                                                 const Optional<std::string>& proxy,
-                                                const Optional<std::string>& encryptionKeyFile) {
+                                                const Optional<std::string>& encryptionKeyFile,
+                                                int encryptionBlockSize = 0) {
 	// Error, if no dest container was specified
 	if (destinationContainer.empty()) {
 		fprintf(stderr, "ERROR: No backup destination was specified.\n");
@@ -2353,7 +2361,7 @@ Reference<IBackupContainer> openBackupContainer(const char* name,
 
 	Reference<IBackupContainer> c;
 	try {
-		c = IBackupContainer::openContainer(destinationContainer, proxy, encryptionKeyFile);
+		c = IBackupContainer::openContainer(destinationContainer, proxy, encryptionKeyFile, encryptionBlockSize);
 	} catch (Error& e) {
 		std::string msg = format("ERROR: '%s' on URL '%s'", e.what(), destinationContainer.c_str());
 		if (e.code() == error_code_backup_invalid_url && !IBackupContainer::lastOpenError.empty()) {
@@ -2422,7 +2430,6 @@ Future<Void> runRestore(Database db,
 
 		Reference<IBackupContainer> bc =
 		    openBackupContainer(exeRestore.toString().c_str(), container, proxy, encryptionKeyFile);
-
 		// If targetVersion is unset then use the maximum restorable version from the backup description
 		if (targetVersion == invalidVersion) {
 			if (verbose)
@@ -2990,7 +2997,7 @@ Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOptions 
 				}
 
 				config.backupContainer().set(tr, bc);
-				co_await bc->writeEncryptionMetadata();
+				co_await bc->writeEncryptionMetadata(bc->getEncryptionBlockSize());
 			} else if (options.encryptionKeyFile.present()) {
 				fprintf(stdout,
 				        " Encryption key file specified without a new destination URL."
@@ -3595,6 +3602,7 @@ int main(int argc, char* argv[]) {
 		bool jsonOutput = false;
 		DeleteData deleteData{ false };
 		Optional<std::string> encryptionKeyFile;
+		int encryptionBlockSize = 0;
 		Optional<std::string> blobManifestUrl;
 		SnapshotMode snapshotMode = SnapshotMode::RANGEFILE; // Default to legacy rangefile mode
 
@@ -3857,6 +3865,20 @@ int main(int argc, char* argv[]) {
 			case OPT_ENCRYPTION_KEY_FILE:
 				encryptionKeyFile = args->OptionArg();
 				modifyOptions.encryptionKeyFile = encryptionKeyFile;
+				break;
+			case OPT_ENCRYPTION_BLOCK_SIZE:
+				try {
+					encryptionBlockSize = std::stoi(args->OptionArg());
+				} catch (std::exception&) {
+					fprintf(stderr, "ERROR: Invalid encryption block size `%s'\n", args->OptionArg());
+					printHelpTeaser(newArgV[0]);
+					return FDB_EXIT_ERROR;
+				}
+				if (encryptionBlockSize <= 0) {
+					fprintf(stderr, "ERROR: Invalid encryption block size `%s'\n", args->OptionArg());
+					printHelpTeaser(newArgV[0]);
+					return FDB_EXIT_ERROR;
+				}
 				break;
 			case OPT_RESTORECONTAINER:
 				restoreContainer = args->OptionArg();
@@ -4228,6 +4250,15 @@ int main(int argc, char* argv[]) {
 			return result.present();
 		};
 
+		if (encryptionKeyFile.present() && encryptionBlockSize == 0) {
+			encryptionBlockSize = DEFAULT_ENCRYPTION_BLOCK_SIZE;
+		}
+
+		if (encryptionBlockSize > 0 && !encryptionKeyFile.present()) {
+			fprintf(stderr, "ERROR: --encryption-block-size option requires --encryption-key-file to be set\n");
+			return FDB_EXIT_ERROR;
+		}
+
 		if (!restoreSystemKeys && !restoreUserKeys && backupKeys.empty()) {
 			addDefaultBackupRanges(backupKeys);
 		}
@@ -4260,7 +4291,7 @@ int main(int argc, char* argv[]) {
 					return FDB_EXIT_ERROR;
 				// Test out the backup url to make sure it parses.  Doesn't test to make sure it's actually
 				// writeable.
-				openBackupContainer(newArgV[0], destinationContainer, proxy, encryptionKeyFile);
+				openBackupContainer(newArgV[0], destinationContainer, proxy, encryptionKeyFile, encryptionBlockSize);
 				f = stopAfter(submitBackup(db,
 				                           destinationContainer,
 				                           proxy,
@@ -4274,6 +4305,7 @@ int main(int argc, char* argv[]) {
 				                           usePartitionedLog,
 				                           incrementalBackupOnly,
 				                           encryptionKeyFile,
+				                           encryptionBlockSize,
 				                           snapshotMode));
 				break;
 			}

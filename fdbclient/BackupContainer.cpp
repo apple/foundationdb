@@ -39,8 +39,8 @@
 #include "fdbclient/BackupContainerAzureBlobStore.h"
 #endif
 #include "fdbclient/BackupContainerFileSystem.h"
-#include "fdbclient/BackupContainerLocalDirectory.h"
-#include "fdbclient/BackupContainerBlobStore.h"
+#include "BackupContainerLocalDirectory.h"
+#include "BackupContainerBlobStore.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -135,6 +135,7 @@ std::string BackupDescription::toString() const {
 	info.append(format("Restorable: %s\n", maxRestorableVersion.present() ? "true" : "false"));
 	info.append(format("Partitioned logs: %s\n", partitioned ? "true" : "false"));
 	info.append(format("File-level encryption: %s\n", fileLevelEncryption ? "true" : "false"));
+	info.append(format("Encryption block size: %d\n", encryptionBlockSize));
 
 	auto formatVersion = [&](Version v) {
 		std::string s;
@@ -196,6 +197,7 @@ std::string BackupDescription::toJSON() const {
 	doc.setKey("Restorable", maxRestorableVersion.present());
 	doc.setKey("Partitioned", partitioned);
 	doc.setKey("FileLevelEncryption", fileLevelEncryption);
+	doc.setKey("EncryptionBlockSize", encryptionBlockSize);
 
 	auto formatVersion = [&](Version v) {
 		JsonBuilderObject doc;
@@ -263,7 +265,8 @@ std::vector<std::string> IBackupContainer::getURLFormats() {
 // Get an IBackupContainer based on a container URL string
 Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& url,
                                                             const Optional<std::string>& proxy,
-                                                            const Optional<std::string>& encryptionKeyFileName) {
+                                                            const Optional<std::string>& encryptionKeyFileName,
+                                                            int encryptionBlockSize) {
 	static std::map<std::string, Reference<IBackupContainer>> m_cache;
 
 	// In simulation, disable caching for blobstore:// URLs to prevent cross-process connection issues.
@@ -276,21 +279,23 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 	//   "g_simulator->getCurrentProcess() == self->peerProcess" at sim2.cpp:500
 	//
 	// Fix: Disable caching for blobstore:// URLs in simulation so each process creates its own
-	// container with its own connection pool. File-based backups don't have this issue because they
-	// don't use process-bound network connections.
+	// container with its own connection pool. Also disable caching for file:// URLs in simulation:
+	// multiple concurrent backups to the same base URL can have different encryption settings.
 	//
 	// Note: This only affects simulation; production always uses the cache for performance.
-	bool skipCache = g_network && g_network->isSimulated() && isBlobstoreUrl(url);
+	bool skipCache = g_network && g_network->isSimulated() && (isBlobstoreUrl(url) || url.find("file://") == 0);
 
 	// Use a reference to the cache entry (for automatic cache population) unless we're skipping cache
 	Reference<IBackupContainer> r_local;
 	Reference<IBackupContainer>& r = skipCache ? r_local : m_cache[url];
-	if (r)
+	if (r) {
 		return r;
+	}
+
 	try {
 		StringRef u(url);
 		if (u.startsWith("file://"_sr)) {
-			r = makeReference<BackupContainerLocalDirectory>(url, encryptionKeyFileName);
+			r = makeReference<BackupContainerLocalDirectory>(url, encryptionKeyFileName, encryptionBlockSize);
 		} else if (u.startsWith("blobstore://"_sr)) {
 			std::string resource;
 			Optional<std::string> blobstoreProxy;
@@ -309,7 +314,8 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 			    IBlobStoreEndpoint::fromString(url, blobstoreProxy, &resource, &lastOpenError, &backupParams);
 
 			BackupContainerBlobStore::validateBackupUrl(resource);
-			r = makeReference<BackupContainerBlobStore>(bstore, resource, backupParams, encryptionKeyFileName, true);
+			r = makeReference<BackupContainerBlobStore>(
+			    bstore, resource, backupParams, encryptionKeyFileName, /*isBackup=*/true, encryptionBlockSize);
 		}
 #ifdef BUILD_AZURE_BACKUP
 		else if (u.startsWith("azure://"_sr)) {
@@ -402,7 +408,12 @@ Future<std::vector<std::string>> listContainers_impl(std::string baseURL, Option
 			}
 
 			// Create a dummy container to parse the backup-specific parameters from the URL and get a final bucket name
-			BackupContainerBlobStore dummy(bstore, "dummy", backupParams, {}, true);
+			BackupContainerBlobStore dummy(bstore,
+			                               "dummy",
+			                               backupParams,
+			                               /*encryptionKeyFileName=*/{},
+			                               /*isBackup=*/true,
+			                               /*encryptionBlockSize=*/0);
 
 			std::vector<std::string> results = co_await BackupContainerBlobStore::listURLs(bstore, dummy.getBucket());
 			co_return results;
@@ -418,7 +429,6 @@ Future<std::vector<std::string>> listContainers_impl(std::string baseURL, Option
 			IBackupContainer::lastOpenError = "invalid URL prefix";
 			throw backup_invalid_url();
 		}
-
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;

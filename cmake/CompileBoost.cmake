@@ -162,11 +162,10 @@ set(Boost_USE_STATIC_LIBS ON)
 if (UNIX AND CMAKE_CXX_COMPILER_ID MATCHES "Clang$" AND USE_LIBCXX)
   list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_86_0_clang)
   set(BOOST_HINT_PATHS /opt/boost_1_86_0_clang)
-  message(STATUS "Using Clang version of boost")
+  message(STATUS "Preferring _clang build of boost ...")
 else ()
   list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_86_0)
   set(BOOST_HINT_PATHS /opt/boost_1_86_0)
-  message(STATUS "Using g++ version of boost")
 endif ()
 
 if(BOOST_ROOT)
@@ -176,10 +175,18 @@ endif()
 if(WIN32)
   # Use CONFIG mode to prefer Boost's BoostConfig.cmake over deprecated FindBoost module
   # This is required for CMake 3.30+ compatibility (policy CMP0167)
-  find_package(Boost 1.86.0 QUIET COMPONENTS filesystem iostreams serialization system program_options url CONFIG PATHS ${BOOST_HINT_PATHS})
+  find_package(Boost 1.86.0 QUIET
+               COMPONENTS filesystem iostreams serialization system program_options url
+               CONFIG PATHS ${BOOST_HINT_PATHS})
   add_library(boost_target INTERFACE)
-  target_link_libraries(boost_target INTERFACE Boost::boost Boost::filesystem Boost::iostreams Boost::serialization Boost::system Boost::url)
-  
+  target_link_libraries(boost_target
+                        INTERFACE Boost::boost
+                                  Boost::filesystem
+                                  Boost::iostreams
+                                  Boost::serialization
+                                  Boost::system
+                                  Boost::url
+  )
   # Add zstd library since boost::iostreams may depend on it
   find_package(PkgConfig QUIET)
   if(PkgConfig_FOUND)
@@ -189,15 +196,17 @@ if(WIN32)
       target_link_directories(boost_target INTERFACE ${ZSTD_LIBRARY_DIRS})
     endif()
   endif()
-
   add_library(boost_target_program_options INTERFACE)
   target_link_libraries(boost_target_program_options INTERFACE Boost::boost Boost::program_options)
   return()
 endif()
 
-find_package(Boost 1.86.0 EXACT QUIET COMPONENTS context filesystem iostreams program_options serialization system url CONFIG PATHS ${BOOST_HINT_PATHS})
-set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores any installed boost")
 
+find_package(Boost 1.86.0 EXACT QUIET
+             COMPONENTS context filesystem iostreams program_options serialization system url
+             CONFIG PATHS ${BOOST_HINT_PATHS})
+
+set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores any installed boost")
 # The precompiled boost silently broke in CI.  While investigating, I considered extending
 # the old check with something like this, so that it would fail loudly if it found a bad
 # pre-existing boost.  It turns out the error messages we get from CMake explain what is
@@ -212,9 +221,17 @@ set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores an
 #      message(FATAL_ERROR "Unacceptable precompiled boost found")
 #
 if(Boost_FOUND AND NOT FORCE_BOOST_BUILD)
+  message(STATUS "Found Boost: ${Boost_DIR}")
   add_library(boost_target INTERFACE)
-  target_link_libraries(boost_target INTERFACE Boost::boost Boost::context Boost::filesystem Boost::iostreams Boost::serialization Boost::system Boost::url)
-  
+  target_link_libraries(boost_target
+                        INTERFACE Boost::boost
+                                  Boost::context
+                                  Boost::filesystem
+                                  Boost::iostreams
+                                  Boost::serialization
+                                  Boost::system
+                                  Boost::url
+  )
   # Add zstd library since boost::iostreams may depend on it when compiled with homebrew on macOS
   if(APPLE)
     find_package(PkgConfig QUIET)
@@ -226,7 +243,6 @@ if(Boost_FOUND AND NOT FORCE_BOOST_BUILD)
       endif()
     endif()
   endif()
-
   add_library(boost_target_program_options INTERFACE)
   target_link_libraries(boost_target_program_options INTERFACE Boost::boost Boost::program_options)
 elseif(WIN32)

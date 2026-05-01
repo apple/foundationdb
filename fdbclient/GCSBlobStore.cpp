@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/GCSBlobStore.h"
+#include "GCSBlobStore.h"
 #include "fdbclient/JSONDoc.h"
 #include "flow/Trace.h"
 
