@@ -454,7 +454,7 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 		    .detail("URL", url)
 		    .detail("Proxy", proxy.present() ? proxy.get() : "");
 		bcUrl = url;
-		bc = IBackupContainer::openContainer(url.toString(), proxy, {});
+		bc = IBackupContainer::openContainer(url.toString(), proxy, {}, 0);
 	}
 };
 

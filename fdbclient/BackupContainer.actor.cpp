@@ -135,6 +135,7 @@ std::string BackupDescription::toString() const {
 	info.append(format("Restorable: %s\n", maxRestorableVersion.present() ? "true" : "false"));
 	info.append(format("Partitioned logs: %s\n", partitioned ? "true" : "false"));
 	info.append(format("File-level encryption: %s\n", fileLevelEncryption ? "true" : "false"));
+	info.append(format("Encryption block size: %d\n", encryptionBlockSize));
 
 	auto formatVersion = [&](Version v) {
 		std::string s;
@@ -194,6 +195,7 @@ std::string BackupDescription::toJSON() const {
 	doc.setKey("Restorable", maxRestorableVersion.present());
 	doc.setKey("Partitioned", partitioned);
 	doc.setKey("FileLevelEncryption", fileLevelEncryption);
+	doc.setKey("EncryptionBlockSize", encryptionBlockSize);
 
 	auto formatVersion = [&](Version v) {
 		JsonBuilderObject doc;
@@ -261,17 +263,27 @@ std::vector<std::string> IBackupContainer::getURLFormats() {
 // Get an IBackupContainer based on a container URL string
 Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& url,
                                                             const Optional<std::string>& proxy,
-                                                            const Optional<std::string>& encryptionKeyFileName) {
+                                                            const Optional<std::string>& encryptionKeyFileName,
+                                                            int encryptionBlockSize) {
 	static std::map<std::string, Reference<IBackupContainer>> m_cache;
 
-	Reference<IBackupContainer>& r = m_cache[url];
-	if (r)
+	// disable caching for file:// URLs in simulation:
+	// multiple concurrent backups to the same base URL can have different encryption settings.
+	//
+	// Note: This only affects simulation; production always uses the cache for performance.
+	bool skipCache = g_network && g_network->isSimulated() && url.find("file://") == 0;
+
+	// Use a reference to the cache entry (for automatic cache population) unless we're skipping cache
+	Reference<IBackupContainer> r_local;
+	Reference<IBackupContainer>& r = skipCache ? r_local : m_cache[url];
+	if (r) {
 		return r;
+	}
 
 	try {
 		StringRef u(url);
 		if (u.startsWith("file://"_sr)) {
-			r = makeReference<BackupContainerLocalDirectory>(url, encryptionKeyFileName);
+			r = makeReference<BackupContainerLocalDirectory>(url, encryptionKeyFileName, encryptionBlockSize);
 		} else if (u.startsWith("blobstore://"_sr)) {
 			std::string resource;
 			Optional<std::string> blobstoreProxy;
@@ -294,7 +306,8 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 			for (auto c : resource)
 				if (!isalnum(c) && c != '_' && c != '-' && c != '.' && c != '/')
 					throw backup_invalid_url();
-			r = makeReference<BackupContainerS3BlobStore>(bstore, resource, backupParams, encryptionKeyFileName, true);
+			r = makeReference<BackupContainerS3BlobStore>(
+			    bstore, resource, backupParams, encryptionKeyFileName, encryptionBlockSize, true);
 		}
 #ifdef BUILD_AZURE_BACKUP
 		else if (u.startsWith("azure://"_sr)) {
@@ -387,7 +400,7 @@ ACTOR Future<std::vector<std::string>> listContainers_impl(std::string baseURL, 
 			}
 
 			// Create a dummy container to parse the backup-specific parameters from the URL and get a final bucket name
-			BackupContainerS3BlobStore dummy(bstore, "dummy", backupParams, {}, true);
+			BackupContainerS3BlobStore dummy(bstore, "dummy", backupParams, {}, 0, true);
 
 			std::vector<std::string> results = wait(BackupContainerS3BlobStore::listURLs(bstore, dummy.getBucket()));
 			return results;
