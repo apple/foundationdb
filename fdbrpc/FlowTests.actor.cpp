@@ -1730,8 +1730,9 @@ TEST_CASE("/fdbrpc/waitValueOrSignal/peerDisconnect") {
 	// This reproduces the bug where DD would hang forever because waitValueOrSignal didn't
 	// watch peer->disconnect, so dead connections (e.g., from K8s NAT timeouts) were never detected.
 
-	// Construct a minimal Peer. We pass nullptr for TransportData since waitValueOrSignal
-	// only accesses peer->disconnect and PeerHolder only touches outstandingReplies.
+	// Construct a minimal Peer. We pass nullptr for TransportData because this test only relies on
+	// peer->disconnect, and PeerHolder only touches outstandingReplies. Note that Peer construction
+	// also updates the global failure monitor status for fakeAddr.
 	NetworkAddress fakeAddr = NetworkAddress::parse("1.2.3.4:1234");
 	state Reference<Peer> peer = makeReference<Peer>(nullptr, fakeAddr);
 
