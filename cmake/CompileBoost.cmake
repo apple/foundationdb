@@ -42,10 +42,11 @@ function(compile_boost)
     if (NOT APPLE)
       list(APPEND BOOST_LINK_FLAGS -static-libgcc)
     endif()
+    # Remove this after boost 1.81 or above is used
     # avoid unary_function errors with macOS 26 toolchain using c++17:
     #  > no template named 'unary_function' in namespace 'std'; did you mean '__unary_function'?
     if (APPLE)
-      list(APPEND BOOST_COMPILER_FLAGS -std=c++14)
+      list(APPEND BOOST_COMPILER_FLAGS -D_LIBCPP_ENABLE_CXX17_REMOVED_UNARY_BINARY_FUNCTION)
     endif()
   endif()
 
@@ -134,11 +135,10 @@ set(Boost_USE_STATIC_LIBS ON)
 if (UNIX AND CMAKE_CXX_COMPILER_ID MATCHES "Clang$")
   list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_78_0_clang)
   set(BOOST_HINT_PATHS /opt/boost_1_78_0_clang)
-  message(STATUS "Using Clang version of boost::context boost::filesystem and boost::iostreams")
+  message(STATUS "Preferring _clang build of boost ...")
 else ()
   list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_78_0)
   set(BOOST_HINT_PATHS /opt/boost_1_78_0)
-  message(STATUS "Using g++ version of boost::context boost::filesystem and boost::iostreams")
 endif ()
 
 if(BOOST_ROOT)
@@ -173,8 +173,16 @@ set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores an
 #      message(FATAL_ERROR "Unacceptable precompiled boost found")
 #
 if(Boost_FOUND AND NOT FORCE_BOOST_BUILD)
+  message(STATUS "Found Boost: ${Boost_DIR}")
   add_library(boost_target INTERFACE)
-  target_link_libraries(boost_target INTERFACE Boost::boost Boost::context Boost::filesystem Boost::iostreams Boost::serialization Boost::system)
+  target_link_libraries(boost_target
+                        INTERFACE Boost::boost
+                                  Boost::context
+                                  Boost::filesystem
+                                  Boost::iostreams
+                                  Boost::serialization
+                                  Boost::system
+  )
 elseif(WIN32)
   message(FATAL_ERROR "Could not find Boost")
 else()
