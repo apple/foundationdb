@@ -2247,14 +2247,19 @@ void generateSecureRandomBytes(void* buf, size_t len) {
 		TraceEvent(SevError, "OpenURandomSecureBytes").GetLastError();
 		throw platform_error();
 	}
-	ssize_t nbytes = read(fd, buf, len);
-	int savedErrno = errno;
-	close(fd);
-	if (nbytes != static_cast<ssize_t>(len)) {
-		errno = savedErrno;
-		TraceEvent(SevError, "ReadURandomSecureBytes").GetLastError();
-		throw platform_error();
+	size_t pos = 0;
+	while (pos < len) {
+		ssize_t nbytes = read(fd, static_cast<uint8_t*>(buf) + pos, len - pos);
+		if (nbytes == -1) {
+			int savedErrno = errno;
+			close(fd);
+			errno = savedErrno;
+			TraceEvent(SevError, "ReadURandomSecureBytes").GetLastError();
+			throw platform_error();
+		}
+		pos += nbytes;
 	}
+	close(fd);
 #endif
 }
 } // namespace platform
