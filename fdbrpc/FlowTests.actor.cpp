@@ -30,7 +30,6 @@
 #include "flow/IThreadPool.h"
 #include "flow/WriteOnlySet.h"
 #include "fdbrpc/fdbrpc.h"
-#include "fdbrpc/FlowTransport.h"
 #include "flow/IAsyncFile.h"
 #include "flow/TLSConfig.h"
 #include "fdbrpc/grpc/AsyncTaskExecutor.h"
