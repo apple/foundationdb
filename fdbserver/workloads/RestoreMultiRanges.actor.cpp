@@ -146,7 +146,9 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 			                                    StopWhenDone::True,
 			                                    UsePartitionedLog::False,
 			                                    IncrementalBackupOnly::False,
-			                                    self->encryptionKeyFileName));
+			                                    self->encryptionKeyFileName,
+			                                    self->encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE
+			                                                                          : 0));
 		} catch (Error& e) {
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 				throw;

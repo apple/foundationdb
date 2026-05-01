@@ -2472,7 +2472,7 @@ ACTOR static Future<JsonBuilderObject> blobGranulesStatusFetcher(
 		state std::string mlogsUrl = wait(getMutationLogUrl());
 		statusObj["mutation_log_location"] = mlogsUrl;
 		if (mlogsUrl != "") {
-			state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {});
+			state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {}, 0);
 			BackupDescription desc = wait(timeoutError(bc->describeBackup(), 2.0));
 			if (desc.contiguousLogEnd.present()) {
 				statusObj["mutation_log_end_version"] = desc.contiguousLogEnd.get();

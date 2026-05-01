@@ -108,7 +108,7 @@ struct BlobRestoreWorkload : TestWorkload {
 			fmt::print("missing mutation logs {}\n", baseUrl);
 			throw restore_missing_data();
 		}
-		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(containers.front(), {}, {});
+		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(containers.front(), {}, {}, 0);
 		BackupDescription desc = wait(bc->describeBackup(true));
 		if (!desc.contiguousLogEnd.present()) {
 			fmt::print("missing mutation logs {}\n", baseUrl);

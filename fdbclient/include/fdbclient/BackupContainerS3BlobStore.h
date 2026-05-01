@@ -48,6 +48,7 @@ public:
 	                           const std::string& name,
 	                           const S3BlobStoreEndpoint::ParametersT& params,
 	                           const Optional<std::string>& encryptionKeyFileName,
+	                           int encryptionBlockSize,
 	                           bool isBackup);
 
 	void addref() override;

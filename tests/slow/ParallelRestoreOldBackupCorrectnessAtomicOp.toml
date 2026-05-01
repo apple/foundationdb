@@ -36,6 +36,7 @@ timeout = 360000
     backupRangesCount = -1
     #    use old backup
     usePartitionedLogs = false
+    encrypted = false
 
     [[test.workload]]
     testName = 'RandomClogging'

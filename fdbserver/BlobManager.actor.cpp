@@ -5635,7 +5635,7 @@ ACTOR Future<Void> truncateMutationLogs(Reference<BlobManagerData> bmData) {
 			}
 
 			state std::string mlogsUrl = wait(getMutationLogUrl());
-			state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {});
+			state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {}, 0);
 			state BackupDescription desc = wait(bc->describeBackup());
 			if (!desc.contiguousLogEnd.present()) {
 				TraceEvent("SkipBlobGranulesFlush").detail("LogUrl", mlogsUrl);

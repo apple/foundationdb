@@ -58,6 +58,7 @@ FDB_BOOLEAN_PARAM(SetValidation);
 FDB_BOOLEAN_PARAM(PartialBackup);
 
 extern Optional<std::string> fileBackupAgentProxy;
+constexpr int DEFAULT_ENCRYPTION_BLOCK_SIZE = 1048576;
 
 class BackupAgentBase : NonCopyable {
 public:
@@ -278,7 +279,8 @@ public:
 	                          StopWhenDone = StopWhenDone::True,
 	                          UsePartitionedLog = UsePartitionedLog::False,
 	                          IncrementalBackupOnly = IncrementalBackupOnly::False,
-	                          Optional<std::string> const& encryptionKeyFileName = {});
+	                          Optional<std::string> const& encryptionKeyFileName = {},
+	                          int encryptionBlockSize = 0);
 	Future<Void> submitBackup(Database cx,
 	                          Key outContainer,
 	                          Optional<std::string> proxy,
@@ -290,7 +292,8 @@ public:
 	                          StopWhenDone stopWhenDone = StopWhenDone::True,
 	                          UsePartitionedLog partitionedLog = UsePartitionedLog::False,
 	                          IncrementalBackupOnly incrementalBackupOnly = IncrementalBackupOnly::False,
-	                          Optional<std::string> const& encryptionKeyFileName = {}) {
+	                          Optional<std::string> const& encryptionKeyFileName = {},
+	                          int encryptionBlockSize = 0) {
 		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			return submitBackup(tr,
 			                    outContainer,
@@ -303,7 +306,8 @@ public:
 			                    stopWhenDone,
 			                    partitionedLog,
 			                    incrementalBackupOnly,
-			                    encryptionKeyFileName);
+			                    encryptionKeyFileName,
+			                    encryptionBlockSize);
 		});
 	}
 
@@ -752,6 +756,8 @@ inline Standalone<StringRef> TupleCodec<Reference<IBackupContainer>>::pack(Refer
 		tuple.append(StringRef());
 	}
 
+	tuple.append((int64_t)bc->getEncryptionBlockSize());
+
 	return tuple.pack();
 }
 template <>
@@ -771,7 +777,11 @@ inline Reference<IBackupContainer> TupleCodec<Reference<IBackupContainer>>::unpa
 		proxy = t.getString(2).toString();
 	}
 
-	return IBackupContainer::openContainer(url, proxy, encryptionKeyFileName);
+	int encryptionBlockSize = 0;
+	if (t.size() > 3) {
+		encryptionBlockSize = (int)t.getInt(3);
+	}
+	return IBackupContainer::openContainer(url, proxy, encryptionKeyFileName, encryptionBlockSize);
 }
 
 class BackupConfig : public KeyBackedTaskConfig {
