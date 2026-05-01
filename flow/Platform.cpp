@@ -100,6 +100,9 @@ static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<u
 #include <sys/time.h>
 #include <unistd.h>
 #include <sys/statvfs.h> /* Needed for disk capacity */
+#if defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
+#include <sys/random.h> /* getentropy */
+#endif
 
 #if !defined(__aarch64__) && !defined(__powerpc64__)
 #include <cpuid.h>
@@ -2242,31 +2245,12 @@ void generateSecureRandomBytes(void* buf, size_t len) {
 		pos += chunk;
 	}
 #else
-	int fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
-	if (fd == -1) {
-		TraceEvent(SevError, "OpenURandomSecureBytes").GetLastError();
+	// getentropy() is available on Linux (glibc 2.25+), macOS 10.12+, and FreeBSD.
+	// It is atomic for requests <= 256 bytes and needs no fd management.
+	if (getentropy(buf, len) != 0) {
+		TraceEvent(SevError, "GetEntropyError").GetLastError();
 		throw platform_error();
 	}
-	size_t pos = 0;
-	while (pos < len) {
-		ssize_t nbytes = read(fd, static_cast<uint8_t*>(buf) + pos, len - pos);
-		if (nbytes == -1) {
-			if (errno == EINTR)
-				continue;
-			int savedErrno = errno;
-			close(fd);
-			errno = savedErrno;
-			TraceEvent(SevError, "ReadURandomSecureBytes").GetLastError();
-			throw platform_error();
-		}
-		if (nbytes == 0) {
-			close(fd);
-			TraceEvent(SevError, "ReadURandomSecureBytesEOF").log();
-			throw platform_error();
-		}
-		pos += nbytes;
-	}
-	close(fd);
 #endif
 }
 } // namespace platform
