@@ -62,7 +62,6 @@ public class SerialIteration {
 				t.join();
 				rowsPerSecond += t.getAverageRowsPerSecond();
 			} catch (InterruptedException e) {
-				// TODO Auto-generated catch block
 				e.printStackTrace();
 			}
 		}
@@ -90,7 +89,6 @@ public class SerialIteration {
 			try {
 				Thread.sleep(r.nextInt(1000));
 			} catch (InterruptedException e) {
-				// TODO Auto-generated catch block
 				e.printStackTrace();
 			}
 			long totalTime = 0;
