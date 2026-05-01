@@ -388,8 +388,8 @@ Future<ErrorOr<X>> waitValueOrSignal(Future<X> value,
 				    .detail("Endpoint", endpoint.getPrimaryAddress())
 				    .detail("Token", endpoint.token);
 				co_return ErrorOr<X>(IFailureMonitor::failureMonitor().knownUnauthorized(endpoint)
-			                         ? unauthorized_attempt()
-			                         : request_maybe_delivered());
+				                         ? unauthorized_attempt()
+				                         : request_maybe_delivered());
 			}
 		} catch (Error& e) {
 			if (signal.isError()) {
