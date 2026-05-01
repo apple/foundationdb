@@ -516,7 +516,7 @@ def status_json_file_region_failover_message():
         json.dump(status_json, status_file)
         status_file.flush()
         result = subprocess.run(
-            [command_template[0], "--status-json-file", status_file.name],
+            [command_template[0], "--status-from-json", status_file.name],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=fdbcli_env,
