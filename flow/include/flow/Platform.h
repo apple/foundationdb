@@ -442,6 +442,9 @@ void outOfMemory();
 
 int getRandomSeed();
 
+// Fill buf with len cryptographically-secure random bytes.
+void generateSecureRandomBytes(void* buf, size_t len);
+
 bool getEnvironmentVar(const char* name, std::string& value);
 int setEnvironmentVar(const char* name, const char* value, int overwrite);
 

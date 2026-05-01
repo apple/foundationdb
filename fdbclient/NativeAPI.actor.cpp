@@ -4966,9 +4966,17 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 	case FDBTransactionOptions::AUTOMATIC_IDEMPOTENCY:
 		validateOptionValueNotPresent(value);
 		if (!tr.idempotencyId.valid()) {
-			tr.idempotencyId = IdempotencyIdRef(
-			    tr.arena,
-			    IdempotencyIdRef(BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned())));
+			StringRef id = makeString(16, tr.arena);
+			if (g_network->isSimulated()) {
+				// In simulation use deterministicRandom() so runs remain reproducible.
+				deterministicRandom()->randomBytes(mutateString(id), 16);
+			} else {
+				// In production use the platform secure random source directly.
+				// deterministicRandom() is seeded with only 32 bits, which limits the
+				// effective ID space to 2^32 states and makes collisions likely at scale.
+				platform::generateSecureRandomBytes(mutateString(id), 16);
+			}
+			tr.idempotencyId = IdempotencyIdRef(tr.arena, IdempotencyIdRef(id));
 		}
 		trState->automaticIdempotency = true;
 		break;

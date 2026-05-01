@@ -2226,6 +2226,37 @@ int getRandomSeed() {
 
 	return randomSeed;
 }
+
+void generateSecureRandomBytes(void* buf, size_t len) {
+	INJECT_FAULT(platform_error, "generateSecureRandomBytes");
+#ifdef _WIN32
+	size_t pos = 0;
+	while (pos < len) {
+		unsigned int val;
+		if (rand_s(&val) != 0) {
+			TraceEvent(SevError, "WindowsSecureRandomBytesError").log();
+			throw platform_error();
+		}
+		size_t chunk = std::min(sizeof(val), len - pos);
+		memcpy(static_cast<uint8_t*>(buf) + pos, &val, chunk);
+		pos += chunk;
+	}
+#else
+	int fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+	if (fd == -1) {
+		TraceEvent(SevError, "OpenURandomSecureBytes").GetLastError();
+		throw platform_error();
+	}
+	ssize_t nbytes = read(fd, buf, len);
+	int savedErrno = errno;
+	close(fd);
+	if (nbytes != static_cast<ssize_t>(len)) {
+		errno = savedErrno;
+		TraceEvent(SevError, "ReadURandomSecureBytes").GetLastError();
+		throw platform_error();
+	}
+#endif
+}
 } // namespace platform
 
 std::string joinPath(std::string const& directory, std::string const& filename) {
