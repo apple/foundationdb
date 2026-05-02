@@ -33,8 +33,7 @@ uint64_t DeterministicRandom::gen64() {
 	return curr;
 }
 
-DeterministicRandom::DeterministicRandom(uint64_t seed, bool useRandLog)
-  : rng(seed), next(0), useRandLog(useRandLog) {
+DeterministicRandom::DeterministicRandom(uint64_t seed, bool useRandLog) : rng(seed), next(0), useRandLog(useRandLog) {
 	next = rng();
 }
 
