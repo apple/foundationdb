@@ -100,9 +100,7 @@ static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<u
 #include <sys/time.h>
 #include <unistd.h>
 #include <sys/statvfs.h> /* Needed for disk capacity */
-#if defined(__linux__) || defined(__FreeBSD__)
 #include <sys/random.h>
-#endif
 
 #if !defined(__aarch64__) && !defined(__powerpc64__)
 #include <cpuid.h>
@@ -2231,6 +2229,7 @@ int getRandomSeed() {
 }
 
 void getRandomBytes(void* buf, size_t len) {
+	INJECT_FAULT(platform_error, "getRandomBytes");
 	ASSERT(len == 0 || buf != nullptr);
 #ifdef _WIN32
 	size_t pos = 0;
@@ -2245,9 +2244,15 @@ void getRandomBytes(void* buf, size_t len) {
 		pos += chunk;
 	}
 #else
-	if (getentropy(buf, len) != 0) {
-		TraceEvent(SevError, "GetEntropyError").detail("errno", errno);
-		throw platform_error();
+	uint8_t* p = static_cast<uint8_t*>(buf);
+	while (len > 0) {
+		size_t chunk = std::min(len, size_t(256));
+		if (getentropy(p, chunk) != 0) {
+			TraceEvent(SevError, "GetEntropyError").detail("Errno", errno);
+			throw platform_error();
+		}
+		p += chunk;
+		len -= chunk;
 	}
 #endif
 }
