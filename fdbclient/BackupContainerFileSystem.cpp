@@ -2041,7 +2041,7 @@ Future<Void> testBackupContainer(std::string url,
 
 	printf("BackupContainerTest URL %s\n", url.c_str());
 
-	int encryptionBlockSize = encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0;
+	int encryptionBlockSize = encryptionKeyFileName.present() ? 4096 : 0;
 	Reference<IBackupContainer> c =
 	    IBackupContainer::openContainer(url, proxy, encryptionKeyFileName, encryptionBlockSize);
 
