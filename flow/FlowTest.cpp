@@ -112,13 +112,13 @@ bool parseInt(const char* text, int* value) {
 	return true;
 }
 
-bool parseUInt32(const char* text, uint32_t* value) {
+bool parseUInt64(const char* text, uint64_t* value) {
 	char* end = nullptr;
-	unsigned long parsed = strtoul(text, &end, 10);
-	if (*text == '\0' || *end != '\0' || parsed > UINT32_MAX) {
+	uint64_t parsed = strtoull(text, &end, 10);
+	if (*text == '\0' || *end != '\0') {
 		return false;
 	}
-	*value = static_cast<uint32_t>(parsed);
+	*value = parsed;
 	return true;
 }
 
