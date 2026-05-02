@@ -27,7 +27,7 @@
 #include "flow/serialize.h"
 #include "fdbrpc/FlowTransport.h" // NetworkMessageReceiver Endpoint
 #include "fdbrpc/FailureMonitor.h"
-#include "fdbrpc/networksender.actor.h"
+#include "fdbrpc/networksender.h"
 #include "fdbrpc/simulator.h"
 #ifdef WITH_SWIFT
 #include <swift/bridging>
@@ -213,7 +213,7 @@ void load(Ar& ar, ReplyPromise<T>& value) {
 	ar >> token;
 	Endpoint endpoint = FlowTransport::transport().loadedEndpoint(token);
 	value = ReplyPromise<T>(endpoint);
-	networkSender(value.getFuture(), endpoint);
+	networkSender(Uncancellable(), value.getFuture(), endpoint);
 }
 
 template <class T>
@@ -225,7 +225,7 @@ struct serializable_traits<ReplyPromise<T>> : std::true_type {
 			serializer(ar, token);
 			auto endpoint = FlowTransport::transport().loadedEndpoint(token);
 			p = ReplyPromise<T>(endpoint);
-			networkSender(p.getFuture(), endpoint);
+			networkSender(Uncancellable(), p.getFuture(), endpoint);
 		} else {
 			const auto& ep = p.getEndpoint().token;
 			serializer(ar, ep);
@@ -686,7 +686,8 @@ struct HasVerify_t<T, decltype(void(std::declval<T>().verify()), 0)> : std::true
 template <class T>
 constexpr bool HasVerify = HasVerify_t<T>::value;
 
-// FIXME: explain what IsPublic means here
+// IsPublic streams accept messages from clients outside the cluster and verify
+// each request before delivering it to the local queue.
 template <class T, bool IsPublic>
 struct NetNotifiedQueue final : NotifiedQueue<T>, FlowReceiver, FastAllocated<NetNotifiedQueue<T, IsPublic>> {
 	using FastAllocated<NetNotifiedQueue<T, IsPublic>>::operator new;
@@ -847,7 +848,7 @@ public:
 			} else {
 				Reference<Peer> peer =
 				    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
-				endStreamOnDisconnect(disc, p, getEndpoint(), peer);
+				endStreamOnDisconnect(Uncancellable(), disc, p, getEndpoint(), peer);
 			}
 			return p;
 		} else {
@@ -947,7 +948,8 @@ private:
 	NetNotifiedQueue<T, IsPublic>* queue;
 };
 
-// FIXME: explain what Public and Private mean here
+// Public request streams require T::verify() and reject unauthorized messages.
+// Private request streams are used for trusted intra-cluster traffic.
 template <class T>
 using PrivateRequestStream = RequestStream<T, false>;
 template <class T>
@@ -988,4 +990,4 @@ struct serializable_traits<RequestStream<T, P>> : std::true_type {
 };
 
 #endif
-#include "fdbrpc/genericactors.actor.h"
+#include "fdbrpc/genericactors.h"

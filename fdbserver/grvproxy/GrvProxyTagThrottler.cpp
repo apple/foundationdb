@@ -23,6 +23,8 @@
 #include "fdbserver/core/Knobs.h"
 #include "flow/UnitTest.h"
 
+#include <map>
+
 uint64_t GrvProxyTagThrottler::DelayedRequest::lastSequenceNumber = 0;
 
 void GrvProxyTagThrottler::DelayedRequest::updateProxyTagThrottledDuration(LatencyBandsMap& latencyBandsMap) {
@@ -90,15 +92,10 @@ void GrvProxyTagThrottler::updateRates(TransactionTagMap<double> const& newRates
 		}
 	}
 
-	// TODO: Use std::erase_if in C++20
-	for (auto it = queues.begin(); it != queues.end();) {
-		const auto& [tag, queue] = *it;
-		if (queue.requests.empty() && !queue.rateInfo.present()) {
-			it = queues.erase(it);
-		} else {
-			++it;
-		}
-	}
+	std::erase_if(queues, [](const auto& entry) {
+		const auto& queue = entry.second;
+		return queue.requests.empty() && !queue.rateInfo.present();
+	});
 }
 
 void GrvProxyTagThrottler::addRequest(GetReadVersionRequest const& req) {

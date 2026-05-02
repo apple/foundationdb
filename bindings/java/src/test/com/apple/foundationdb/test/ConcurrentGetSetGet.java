@@ -65,7 +65,6 @@ public class ConcurrentGetSetGet {
 				System.out.println(" sem: " + semaphore);
 				System.out.println();
 			} catch (InterruptedException e) {
-				// TODO Auto-generated catch block
 				e.printStackTrace();
 			}
 

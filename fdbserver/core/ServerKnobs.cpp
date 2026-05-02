@@ -639,9 +639,12 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME,             30.0 ); if( randomize && BUGGIFY ) ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME = 0.1;
 	init( ROCKSDB_PROBABILITY_REUSE_ITERATOR_SIM,               0.01 );
 	init( ROCKSDB_READ_RANGE_REUSE_ITERATORS,                  false ); if( randomize && BUGGIFY ) ROCKSDB_READ_RANGE_REUSE_ITERATORS = deterministicRandom()->coinflip();
-	init( SHARDED_ROCKSDB_REUSE_ITERATORS,                     false ); if (isSimulated) SHARDED_ROCKSDB_REUSE_ITERATORS = deterministicRandom()->coinflip(); 
+	init( SHARDED_ROCKSDB_REUSE_ITERATORS,                     false ); if( isSimulated ) SHARDED_ROCKSDB_REUSE_ITERATORS = deterministicRandom()->coinflip();
 	init( ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS,          false ); if( randomize && BUGGIFY ) ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS = deterministicRandom()->coinflip();
 	init( ROCKSDB_READ_RANGE_BOUNDED_ITERATORS_MAX_LIMIT,        200 );
+	init( ROCKSDB_USE_CACHE_RESULT_OPTION,                     false ); if( isSimulated ) ROCKSDB_USE_CACHE_RESULT_OPTION = deterministicRandom()->coinflip();
+	// Probability that RocksDB can disable block cache in simulation
+	init( ROCKSDB_PROBABILITY_DISABLE_CACHE_SIM,                 0.1 );
 	// Set to 0 to disable rocksdb write rate limiting. Rate limiter unit: bytes per second.
 	init( ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC,        200000000 );
 	init( ROCKSDB_WRITE_RATE_LIMITER_FAIRNESS,                    10 ); // RocksDB default 10
@@ -1081,20 +1084,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DURABILITY_LAG_REDUCTION_RATE,                      0.9999 );
 	init( DURABILITY_LAG_INCREASE_RATE,                        1.001 );
 	init( STORAGE_SERVER_LIST_FETCH_TIMEOUT,                    20.0 );
-	init( BW_THROTTLING_ENABLED,                                true );
-
-	bool buggifySmallBWLag = randomize && BUGGIFY;
-	init( TARGET_BW_LAG,                                       90.0 ); if(buggifySmallBWLag) TARGET_BW_LAG = 10.0;
-	init( TARGET_BW_LAG_BATCH,                                 60.0 ); if(buggifySmallBWLag) TARGET_BW_LAG_BATCH = 4.0;
-	init( TARGET_BW_LAG_UPDATE,                                  9.0 ); if(buggifySmallBWLag) TARGET_BW_LAG_UPDATE = 1.0;
-	init( MIN_BW_HISTORY,                                         10 );
-	init( BW_ESTIMATION_INTERVAL,                               10.0 ); if(buggifySmallBWLag) BW_ESTIMATION_INTERVAL = 2.0;
-	init( BW_LAG_INCREASE_AMOUNT,                                1.1 );
-	init( BW_LAG_DECREASE_AMOUNT,                                0.9 );
-	init( BW_FETCH_WORKERS_INTERVAL,                             5.0 );
-	init( BW_RW_LOGGING_INTERVAL,                                5.0 );
-	init( BW_MAX_BLOCKED_INTERVAL,                              10.0 ); if(buggifySmallBWLag) BW_MAX_BLOCKED_INTERVAL = 2.0;
-	init( BW_RK_SIM_QUIESCE_DELAY,                             400.0 );
 
 	init( MAX_AUTO_THROTTLED_TRANSACTION_TAGS,                     5 ); if(randomize && BUGGIFY) MAX_AUTO_THROTTLED_TRANSACTION_TAGS = 1;
 	init( MAX_MANUAL_THROTTLED_TRANSACTION_TAGS,                  40 ); if(randomize && BUGGIFY) MAX_MANUAL_THROTTLED_TRANSACTION_TAGS = 1;
@@ -1168,6 +1157,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( AUDIT_DATAMOVE_POST_CHECK,                           false ); if ( isSimulated ) AUDIT_DATAMOVE_POST_CHECK = true;
 	init( AUDIT_DATAMOVE_POST_CHECK_RETRY_COUNT_MAX,              50 );
 	init( AUDIT_STORAGE_RATE_PER_SERVER_MAX,                    50e6 ); // per second
+	init( AUDIT_RESTORE_BATCH_KEY_LIMIT,                      100000 ); // 100K keys per batch (was hardcoded 10K)
+	init( AUDIT_PROGRESS_PERSIST_BYTES_INTERVAL,           100000000 ); // 100MB - only persist progress after this many bytes
 	init( ENABLE_AUDIT_VERBOSE_TRACE,                          false );
 	init( LOGGING_STORAGE_COMMIT_WHEN_IO_TIMEOUT,               true );
 	init( LOGGING_RECENT_STORAGE_COMMIT_SIZE,                     20 );
@@ -1353,40 +1344,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ENCRYPTION_LOGGING_INTERVAL,                           5.0 );
 	init( DISABLED_ENCRYPTION_PROBABILITY_SIM,                  0.95 );
 
-	// KMS connector type
-	init( KMS_CONNECTOR_TYPE,                     "RESTKmsConnector" );
-
 	// Blob Metadata
 	init( BLOB_METADATA_CACHE_TTL,  isSimulated ? 120 : 24 * 60 * 60 );
 	if ( randomize && BUGGIFY) { BLOB_METADATA_CACHE_TTL = deterministicRandom()->randomInt(50, 100); }
-
-	// HTTP KMS Connector
-	init( REST_KMS_CONNECTOR_KMS_DISCOVERY_URL_MODE,           "file");
-	init( REST_KMS_CONNECTOR_VALIDATION_TOKEN_MODE,            "file");
-	init( REST_KMS_CONNECTOR_VALIDATION_TOKEN_MAX_SIZE,          1024);
-	init( REST_KMS_CONNECTOR_VALIDATION_TOKENS_MAX_PAYLOAD_SIZE, 10 * 1024);
-	init( REST_KMS_CONNECTOR_REFRESH_KMS_URLS,                   true);
-	init( REST_KMS_CONNECTOR_REFRESH_KMS_URLS_INTERVAL_SEC,       600);
-	// Below KMS configurations are responsible for:
-	// Discovering KMS URLs, fetch encryption keys endpoint and validation token details.
-	// Configurations are expected to be passed as command-line arguments.
-	// NOTE: Care must be taken when attempting to update below configurations for a up/running FDB cluster.
-	init( REST_KMS_CONNECTOR_DISCOVER_KMS_URL_FILE,                "");
-	init( REST_KMS_CONNECTOR_GET_ENCRYPTION_KEYS_ENDPOINT,         "");
-	init( REST_KMS_CONNECTOR_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT,  "");
-	init( REST_KMS_CONNECTOR_GET_BLOB_METADATA_ENDPOINT,           "");
-	// Details to fetch validation token from a localhost file
-	// acceptable format: "<token_name1>$<absolute_file_path1>,<token_name2>$<absolute_file_path2>,.."
-	// NOTE: 'token-name" can NOT contain '$' character
-	init( REST_KMS_CONNECTOR_VALIDATION_TOKEN_DETAILS,             "");
-	init( ENABLE_REST_KMS_COMMUNICATION,                        false); if( randomize && BUGGIFY ) ENABLE_REST_KMS_COMMUNICATION = true;
-	init( REST_KMS_CONNECTOR_REMOVE_TRAILING_NEWLINE,           false);
-	init( REST_KMS_CURRENT_BLOB_METADATA_REQUEST_VERSION,           1);
-	init( REST_KMS_MAX_BLOB_METADATA_REQUEST_VERSION,               1);
-	init( REST_KMS_CURRENT_CIPHER_REQUEST_VERSION,                  1);
-	init( REST_KMS_MAX_CIPHER_REQUEST_VERSION,                      1);
-	init( REST_SIM_KMS_VAULT_DIR,                                  "");
-	init( REST_KMS_STABILITY_CHECK_INTERVAL,                      5.0);
 
 	init( CONSISTENCY_SCAN_ACTIVE_THROTTLE_RATIO,                0.5 ); if( randomize && BUGGIFY ) CONSISTENCY_SCAN_ACTIVE_THROTTLE_RATIO = deterministicRandom()->random01();
 

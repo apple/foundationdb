@@ -133,7 +133,7 @@ CommandFactory setClassFactory(
                 "`default' resets the process class to the class specified on the command line. The available "
                 "classes are `unset', `storage', `transaction', `resolution', `commit_proxy', `grv_proxy', "
                 "`master', `test', "
-                "`stateless', `log', `router', `cluster_controller', `fast_restore', `data_distributor', "
+                "`stateless', `log', `router', `cluster_controller', `data_distributor', "
                 "`coordinator', `ratekeeper', `backup', and `default'."));
 
 } // namespace fdb_cli

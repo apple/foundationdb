@@ -30,6 +30,7 @@
 #include "flow/IRateControl.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/consistencyscan/ConsistencyScan.h"
 #include "fdbserver/core/StorageMetrics.h"
 #include "fdbserver/datadistributor/DataDistribution.h"
@@ -148,8 +149,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				        cx, self->dbInfo, "ConsistencyCheckStart", 0, 1e5, 0, 0, 30e6, 1e6, self->maxDDRunTime),
 				    self->maxDDRunTime); // FIXME: should be zero?
 				if (g_network->isSimulated()) {
-					g_simulator->quiesced = true;
-					TraceEvent("ConsistencyCheckQuiesced").detail("Quiesced", g_simulator->quiesced);
+					fdbSimulationPolicyState().quiesced = true;
+					TraceEvent("ConsistencyCheckQuiesced").detail("Quiesced", fdbSimulationPolicyState().quiesced);
 				}
 			} catch (Error& e) {
 				TraceEvent("ConsistencyCheck_QuietDatabaseError").error(e);
@@ -226,8 +227,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			}
 		}
 		if (self->firstClient && g_network->isSimulated() && self->performQuiescentChecks) {
-			g_simulator->quiesced = false;
-			TraceEvent("ConsistencyCheckQuiescedEnd").detail("Quiesced", g_simulator->quiesced);
+			fdbSimulationPolicyState().quiesced = false;
+			TraceEvent("ConsistencyCheckQuiescedEnd").detail("Quiesced", fdbSimulationPolicyState().quiesced);
 		}
 	}
 
@@ -696,7 +697,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					    .detail("ProcessPrimaryAddress", p->address)
 					    .detail("ProcessAddresses", p->addresses.toString())
 					    .detail("DataStoreID", id)
-					    .detail("Protected", g_simulator->protectedAddresses.contains(itr->interf.address()))
+					    .detail("Protected", g_simulator->isProtectedAddress(itr->interf.address()))
 					    .detail("Reliable", p->isReliable())
 					    .detail("ReliableInfo", p->getReliableInfo())
 					    .detail("KillOrRebootProcess", p->address);
@@ -720,7 +721,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 
 	Future<bool> checkWorkerList(Database cx, ConsistencyCheckWorkload* self) {
-		if (!g_simulator->extraDatabases.empty()) {
+		if (!fdbSimulationPolicyState().extraDatabases.empty()) {
 			co_return true;
 		}
 
@@ -871,9 +872,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		// Check if master and cluster controller are in the desired DC for fearless cluster when running under
 		// simulation
 		// FIXME: g_simulator->datacenterDead could return false positives. Relaxing checks until it is fixed.
-		if (g_network->isSimulated() && config.usableRegions > 1 && g_simulator->primaryDcId.present() &&
-		    !g_simulator->datacenterDead(g_simulator->primaryDcId) &&
-		    !g_simulator->datacenterDead(g_simulator->remoteDcId)) {
+		if (g_network->isSimulated() && config.usableRegions > 1 && fdbSimulationPolicyState().primaryDcId.present() &&
+		    !g_simulator->datacenterDead(fdbSimulationPolicyState().primaryDcId) &&
+		    !g_simulator->datacenterDead(fdbSimulationPolicyState().remoteDcId)) {
 			expectedPrimaryDcId = config.regions[0].dcId;
 			expectedRemoteDcId = config.regions[1].dcId;
 			// If the priorities are equal, either could be the primary
@@ -992,9 +993,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		// Check LogRouter
-		if (g_network->isSimulated() && config.usableRegions > 1 && g_simulator->primaryDcId.present() &&
-		    !g_simulator->datacenterDead(g_simulator->primaryDcId) &&
-		    !g_simulator->datacenterDead(g_simulator->remoteDcId)) {
+		if (g_network->isSimulated() && config.usableRegions > 1 && fdbSimulationPolicyState().primaryDcId.present() &&
+		    !g_simulator->datacenterDead(fdbSimulationPolicyState().primaryDcId) &&
+		    !g_simulator->datacenterDead(fdbSimulationPolicyState().remoteDcId)) {
 			for (auto& tlogSet : db.logSystemConfig.tLogs) {
 				if (!tlogSet.isLocal && !tlogSet.logRouters.empty()) {
 					for (auto& logRouter : tlogSet.logRouters) {

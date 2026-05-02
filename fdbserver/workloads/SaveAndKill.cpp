@@ -23,6 +23,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/TesterInterface.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbrpc/simulator.h"
 #include "flow/Knobs.h"
@@ -67,10 +68,11 @@ struct SaveAndKillWorkload : TestWorkload {
 		ini.SetValue("RESTORE", "isRestoring", format("%d", isRestoring).c_str());
 		ini.SetValue("META", "processesPerMachine", format("%d", g_simulator->processesPerMachine).c_str());
 		ini.SetValue("META", "listenersPerProcess", format("%d", g_simulator->listenersPerProcess).c_str());
-		ini.SetValue("META", "desiredCoordinators", format("%d", g_simulator->desiredCoordinators).c_str());
-		ini.SetValue("META", "connectionString", g_simulator->connectionString.c_str());
-		ini.SetValue("META", "testerCount", format("%d", g_simulator->testerCount).c_str());
-		ini.SetValue("META", "tssMode", format("%d", g_simulator->tssMode).c_str());
+		ini.SetValue(
+		    "META", "desiredCoordinators", format("%d", fdbSimulationPolicyState().desiredCoordinators).c_str());
+		ini.SetValue("META", "connectionString", fdbSimulationPolicyState().connectionString.c_str());
+		ini.SetValue("META", "testerCount", format("%d", fdbSimulationPolicyState().testerCount).c_str());
+		ini.SetValue("META", "tssMode", format("%d", static_cast<int>(fdbSimulationPolicyState().tssMode)).c_str());
 		ini.SetValue("META", "mockDNS", INetworkConnections::net()->convertMockDNSToString().c_str());
 		ini.SetBoolValue("META", "enableShardEncodeLocationMetadata", SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 		ini.SetBoolValue("META", "encryptHeaderAuthTokenEnabled", FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED);

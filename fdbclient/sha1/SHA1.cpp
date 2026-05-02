@@ -13,7 +13,7 @@
         -- Volker Grabsch <vog@notjusthosting.com>
 */
 
-#include "fdbclient/sha1/SHA1.h"
+#include "SHA1.h"
 #include <sstream>
 #include <iomanip>
 #include <fstream>

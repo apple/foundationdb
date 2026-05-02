@@ -124,8 +124,8 @@ struct AtomicRestoreWorkload : TestWorkload {
 		}
 
 		// SOMEDAY: Remove after backup agents can exist quiescently
-		if (g_simulator->backupAgents == ISimulator::BackupAgentType::BackupToFile) {
-			g_simulator->backupAgents = ISimulator::BackupAgentType::NoBackupAgents;
+		if (fdbSimulationPolicyState().backupAgents == FDBBackupAgentType::BackupToFile) {
+			fdbSimulationPolicyState().backupAgents = FDBBackupAgentType::NoBackupAgents;
 		}
 
 		TraceEvent("AtomicRestore_Done").log();

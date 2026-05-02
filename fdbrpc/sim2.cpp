@@ -41,7 +41,6 @@
 #include "flow/Util.h"
 #include "flow/IAsyncFile.h"
 #include "fdbrpc/AsyncFileCached.h"
-#include "fdbrpc/AsyncFileEncrypted.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/AsyncFileNonDurable.h"
 #include "AsyncFileChaos.h"
@@ -54,10 +53,8 @@
 #include "flow/network.h"
 #include "flow/TLSConfig.h"
 #include "fdbrpc/Net2FileSystem.h"
-#include "fdbrpc/Replication.h"
-#include "fdbrpc/ReplicationUtils.h"
 #include "AsyncFileWriteChecker.h"
-#include "fdbrpc/genericactors.actor.h"
+#include "fdbrpc/genericactors.h"
 #include "fdbrpc/WellKnownEndpoints.h"
 #include "flow/FaultInjection.h"
 #include "flow/TaskQueue.h"
@@ -71,11 +68,9 @@ thread_local ISimulator::ProcessInfo* ISimulator::currentProcess = nullptr;
 thread_local bool ISimulator::isMainThread = false;
 
 ISimulator::ISimulator()
-  : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), usableRegions(1),
-    allowLogSetKills(true), tssMode(TSSMode::Disabled), isStopped(false), lastConnectionFailure(0),
+  : processesPerMachine(0), listenersPerProcess(1), isStopped(false), lastConnectionFailure(0),
     connectionFailuresDisableDuration(0), speedUpSimulation(false), connectionFailureEnableTime(0),
-    disableTLogRecoveryFinish(false), backupAgents(BackupAgentType::WaitForType),
-    drAgents(BackupAgentType::WaitForType), allSwapsDisabled(false) {}
+    allSwapsDisabled(false) {}
 ISimulator::~ISimulator() = default;
 
 bool simulator_should_inject_fault(const char* context, const char* file, int line, int error_code) {
@@ -130,10 +125,7 @@ double ISimulator::checkDisabled(const std::string& desc) const {
 }
 
 bool ISimulator::checkInjectedCorruption() {
-	auto iter = corruptWorkerMap.find(currentProcess->address);
-	if (iter != corruptWorkerMap.end())
-		return iter->second;
-	return false;
+	return simulationPolicy && simulationPolicy->checkInjectedCorruption(currentProcess->address);
 }
 
 flowGlobalType ISimulator::global(int id) const {
@@ -1489,8 +1481,9 @@ public:
 		    .detail("Cleared", m->cleared)
 		    .detail("DrProcess", m->drProcess);
 
-		if (std::string(name) == "remote flow process") {
-			protectedAddresses.insert(m->address);
+		if (std::string(name) == "remote flow process" ||
+		    (getSimulationPolicy() && getSimulationPolicy()->shouldProtectNewProcess(*m))) {
+			protectAddress(m->address);
 			TraceEvent(SevDebug, "NewFlowProcessProtected").detail("Address", m->address);
 		}
 
@@ -1500,7 +1493,8 @@ public:
 	}
 	bool isAvailable() const override {
 		std::vector<ProcessInfo*> processesLeft, processesDead;
-		for (auto processInfo : getAllProcesses()) {
+		auto processes = getAllProcesses();
+		for (auto processInfo : processes) {
 			if (processInfo->isAvailableClass()) {
 				if (processInfo->isExcluded() || processInfo->isCleared() || !processInfo->isAvailable()) {
 					processesDead.push_back(processInfo);
@@ -1509,7 +1503,10 @@ public:
 				}
 			}
 		}
-		return canKillProcesses(processesLeft, processesDead, KillType::KillInstantly, nullptr);
+		if (getSimulationPolicy()) {
+			return getSimulationPolicy()->isAvailable(processes, processesLeft, processesDead);
+		}
+		return true;
 	}
 
 	std::vector<AddressExclusion> getAllAddressesInDCToExclude(Optional<Standalone<StringRef>> dcId) const override {
@@ -1526,36 +1523,10 @@ public:
 	}
 
 	bool datacenterDead(Optional<Standalone<StringRef>> dcId) const override {
-		if (!dcId.present()) {
-			return false;
+		if (getSimulationPolicy()) {
+			return getSimulationPolicy()->datacenterDead(dcId, getAllProcesses());
 		}
-
-		LocalityGroup primaryProcessesLeft, primaryProcessesDead;
-		std::vector<LocalityData> primaryLocalitiesDead, primaryLocalitiesLeft;
-
-		for (auto processInfo : getAllProcesses()) {
-			if (!processInfo->isSpawnedKVProcess() && processInfo->isAvailableClass() &&
-			    processInfo->locality.dcId() == dcId) {
-				if (processInfo->isExcluded() || processInfo->isCleared() || !processInfo->isAvailable()) {
-					primaryProcessesDead.add(processInfo->locality);
-					primaryLocalitiesDead.push_back(processInfo->locality);
-				} else {
-					primaryProcessesLeft.add(processInfo->locality);
-					primaryLocalitiesLeft.push_back(processInfo->locality);
-				}
-			}
-		}
-
-		std::vector<LocalityData> badCombo;
-		bool primaryTLogsDead =
-		    tLogWriteAntiQuorum
-		        ? !validateAllCombinations(
-		              badCombo, primaryProcessesDead, tLogPolicy, primaryLocalitiesLeft, tLogWriteAntiQuorum, false)
-		        : primaryProcessesDead.validate(tLogPolicy);
-		if (usableRegions > 1 && remoteTLogPolicy && !primaryTLogsDead) {
-			primaryTLogsDead = primaryProcessesDead.validate(remoteTLogPolicy);
-		}
-		return primaryTLogsDead || primaryProcessesDead.validate(storagePolicy);
+		return false;
 	}
 
 	// The following function will determine if the specified configuration of available and dead processes can allow
@@ -1564,224 +1535,13 @@ public:
 	                      std::vector<ProcessInfo*> const& deadProcesses,
 	                      KillType kt,
 	                      KillType* newKillType) const override {
-		bool canSurvive = true;
-		int nQuorum = ((desiredCoordinators + 1) / 2) * 2 - 1;
-
-		KillType newKt = kt;
-		if ((kt == KillType::KillInstantly) || (kt == KillType::InjectFaults) || (kt == KillType::FailDisk) ||
-		    (kt == KillType::RebootAndDelete) || (kt == KillType::RebootProcessAndDelete)) {
-			LocalityGroup primaryProcessesLeft, primaryProcessesDead;
-			LocalityGroup primarySatelliteProcessesLeft, primarySatelliteProcessesDead;
-			LocalityGroup remoteProcessesLeft, remoteProcessesDead;
-			LocalityGroup remoteSatelliteProcessesLeft, remoteSatelliteProcessesDead;
-
-			std::vector<LocalityData> primaryLocalitiesDead, primaryLocalitiesLeft;
-			std::vector<LocalityData> primarySatelliteLocalitiesDead, primarySatelliteLocalitiesLeft;
-			std::vector<LocalityData> remoteLocalitiesDead, remoteLocalitiesLeft;
-			std::vector<LocalityData> remoteSatelliteLocalitiesDead, remoteSatelliteLocalitiesLeft;
-
-			std::vector<LocalityData> badCombo;
-			std::set<Optional<Standalone<StringRef>>> uniqueMachines;
-
-			if (!primaryDcId.present() || usableRegions == 1) {
-				for (auto processInfo : availableProcesses) {
-					primaryProcessesLeft.add(processInfo->locality);
-					primaryLocalitiesLeft.push_back(processInfo->locality);
-					uniqueMachines.insert(processInfo->locality.zoneId());
-				}
-				for (auto processInfo : deadProcesses) {
-					primaryProcessesDead.add(processInfo->locality);
-					primaryLocalitiesDead.push_back(processInfo->locality);
-				}
-			} else {
-				for (auto processInfo : availableProcesses) {
-					uniqueMachines.insert(processInfo->locality.zoneId());
-					if (processInfo->locality.dcId() == primaryDcId) {
-						primaryProcessesLeft.add(processInfo->locality);
-						primaryLocalitiesLeft.push_back(processInfo->locality);
-					}
-					if (processInfo->locality.dcId() == remoteDcId) {
-						remoteProcessesLeft.add(processInfo->locality);
-						remoteLocalitiesLeft.push_back(processInfo->locality);
-					}
-					if (std::find(primarySatelliteDcIds.begin(),
-					              primarySatelliteDcIds.end(),
-					              processInfo->locality.dcId()) != primarySatelliteDcIds.end()) {
-						primarySatelliteProcessesLeft.add(processInfo->locality);
-						primarySatelliteLocalitiesLeft.push_back(processInfo->locality);
-					}
-					if (std::find(remoteSatelliteDcIds.begin(),
-					              remoteSatelliteDcIds.end(),
-					              processInfo->locality.dcId()) != remoteSatelliteDcIds.end()) {
-						remoteSatelliteProcessesLeft.add(processInfo->locality);
-						remoteSatelliteLocalitiesLeft.push_back(processInfo->locality);
-					}
-				}
-				for (auto processInfo : deadProcesses) {
-					if (processInfo->locality.dcId() == primaryDcId) {
-						primaryProcessesDead.add(processInfo->locality);
-						primaryLocalitiesDead.push_back(processInfo->locality);
-					}
-					if (processInfo->locality.dcId() == remoteDcId) {
-						remoteProcessesDead.add(processInfo->locality);
-						remoteLocalitiesDead.push_back(processInfo->locality);
-					}
-					if (std::find(primarySatelliteDcIds.begin(),
-					              primarySatelliteDcIds.end(),
-					              processInfo->locality.dcId()) != primarySatelliteDcIds.end()) {
-						primarySatelliteProcessesDead.add(processInfo->locality);
-						primarySatelliteLocalitiesDead.push_back(processInfo->locality);
-					}
-					if (std::find(remoteSatelliteDcIds.begin(),
-					              remoteSatelliteDcIds.end(),
-					              processInfo->locality.dcId()) != remoteSatelliteDcIds.end()) {
-						remoteSatelliteProcessesDead.add(processInfo->locality);
-						remoteSatelliteLocalitiesDead.push_back(processInfo->locality);
-					}
-				}
-			}
-
-			bool tooManyDead = false;
-			bool notEnoughLeft = false;
-			bool primaryTLogsDead =
-			    tLogWriteAntiQuorum
-			        ? !validateAllCombinations(
-			              badCombo, primaryProcessesDead, tLogPolicy, primaryLocalitiesLeft, tLogWriteAntiQuorum, false)
-			        : primaryProcessesDead.validate(tLogPolicy);
-			if (usableRegions > 1 && remoteTLogPolicy && !primaryTLogsDead) {
-				primaryTLogsDead = primaryProcessesDead.validate(remoteTLogPolicy);
-			}
-
-			if (!primaryDcId.present()) {
-				tooManyDead = primaryTLogsDead || primaryProcessesDead.validate(storagePolicy);
-				notEnoughLeft =
-				    !primaryProcessesLeft.validate(tLogPolicy) || !primaryProcessesLeft.validate(storagePolicy);
-			} else {
-				bool remoteTLogsDead = tLogWriteAntiQuorum ? !validateAllCombinations(badCombo,
-				                                                                      remoteProcessesDead,
-				                                                                      tLogPolicy,
-				                                                                      remoteLocalitiesLeft,
-				                                                                      tLogWriteAntiQuorum,
-				                                                                      false)
-				                                           : remoteProcessesDead.validate(tLogPolicy);
-				if (usableRegions > 1 && remoteTLogPolicy && !remoteTLogsDead) {
-					remoteTLogsDead = remoteProcessesDead.validate(remoteTLogPolicy);
-				}
-
-				if (!hasSatelliteReplication) {
-					if (usableRegions > 1) {
-						tooManyDead = primaryTLogsDead || remoteTLogsDead ||
-						              (primaryProcessesDead.validate(storagePolicy) &&
-						               remoteProcessesDead.validate(storagePolicy));
-						notEnoughLeft = !primaryProcessesLeft.validate(tLogPolicy) ||
-						                !primaryProcessesLeft.validate(remoteTLogPolicy) ||
-						                !primaryProcessesLeft.validate(storagePolicy) ||
-						                !remoteProcessesLeft.validate(tLogPolicy) ||
-						                !remoteProcessesLeft.validate(remoteTLogPolicy) ||
-						                !remoteProcessesLeft.validate(storagePolicy);
-					} else {
-						tooManyDead = primaryTLogsDead || remoteTLogsDead ||
-						              primaryProcessesDead.validate(storagePolicy) ||
-						              remoteProcessesDead.validate(storagePolicy);
-						notEnoughLeft = !primaryProcessesLeft.validate(tLogPolicy) ||
-						                !primaryProcessesLeft.validate(storagePolicy) ||
-						                !remoteProcessesLeft.validate(tLogPolicy) ||
-						                !remoteProcessesLeft.validate(storagePolicy);
-					}
-				} else {
-					bool primarySatelliteTLogsDead =
-					    satelliteTLogWriteAntiQuorumFallback
-					        ? !validateAllCombinations(badCombo,
-					                                   primarySatelliteProcessesDead,
-					                                   satelliteTLogPolicyFallback,
-					                                   primarySatelliteLocalitiesLeft,
-					                                   satelliteTLogWriteAntiQuorumFallback,
-					                                   false)
-					        : primarySatelliteProcessesDead.validate(satelliteTLogPolicyFallback);
-					// Ignore remoteSatelliteTLogsDead because remote satellites are not used and
-					// not affecting recovery.
-					/* bool remoteSatelliteTLogsDead =
-					    satelliteTLogWriteAntiQuorumFallback
-					        ? !validateAllCombinations(badCombo,
-					                                   remoteSatelliteProcessesDead,
-					                                   satelliteTLogPolicyFallback,
-					                                   remoteSatelliteLocalitiesLeft,
-					                                   satelliteTLogWriteAntiQuorumFallback,
-					                                   false)
-					        : remoteSatelliteProcessesDead.validate(satelliteTLogPolicyFallback); */
-
-					if (usableRegions > 1) {
-						notEnoughLeft = !primaryProcessesLeft.validate(tLogPolicy) ||
-						                !primaryProcessesLeft.validate(remoteTLogPolicy) ||
-						                !primaryProcessesLeft.validate(storagePolicy) ||
-						                !primarySatelliteProcessesLeft.validate(satelliteTLogPolicy) ||
-						                !remoteProcessesLeft.validate(tLogPolicy) ||
-						                !remoteProcessesLeft.validate(remoteTLogPolicy) ||
-						                !remoteProcessesLeft.validate(storagePolicy) ||
-						                !remoteSatelliteProcessesLeft.validate(satelliteTLogPolicy);
-					} else {
-						notEnoughLeft = !primaryProcessesLeft.validate(tLogPolicy) ||
-						                !primaryProcessesLeft.validate(storagePolicy) ||
-						                !primarySatelliteProcessesLeft.validate(satelliteTLogPolicy) ||
-						                !remoteProcessesLeft.validate(tLogPolicy) ||
-						                !remoteProcessesLeft.validate(storagePolicy) ||
-						                !remoteSatelliteProcessesLeft.validate(satelliteTLogPolicy);
-					}
-
-					if (usableRegions > 1 && allowLogSetKills) {
-						tooManyDead = (primaryTLogsDead && primarySatelliteTLogsDead) || remoteTLogsDead ||
-						              (primaryTLogsDead && remoteTLogsDead) ||
-						              (primaryProcessesDead.validate(storagePolicy) &&
-						               remoteProcessesDead.validate(storagePolicy));
-					} else {
-						tooManyDead = primaryTLogsDead || remoteTLogsDead ||
-						              primaryProcessesDead.validate(storagePolicy) ||
-						              remoteProcessesDead.validate(storagePolicy);
-					}
-				}
-			}
-
-			// Reboot if dead machines do fulfill policies
-			if (tooManyDead || (usableRegions > 1 && notEnoughLeft)) {
-				newKt = KillType::Reboot;
-				canSurvive = false;
-				TraceEvent("KillChanged")
-				    .detail("KillType", kt)
-				    .detail("NewKillType", newKt)
-				    .detail("TLogPolicy", tLogPolicy->info())
-				    .detail("Reason", "Too many dead processes that cannot satisfy tLogPolicy.");
-			}
-			// Reboot and Delete if remaining machines do NOT fulfill policies
-			else if ((kt < KillType::RebootAndDelete) && notEnoughLeft) {
-				newKt = KillType::RebootAndDelete;
-				canSurvive = false;
-				TraceEvent("KillChanged")
-				    .detail("KillType", kt)
-				    .detail("NewKillType", newKt)
-				    .detail("TLogPolicy", tLogPolicy->info())
-				    .detail("Reason", "Not enough tLog left to satisfy tLogPolicy.");
-			} else if ((kt < KillType::RebootAndDelete) && (nQuorum > uniqueMachines.size())) {
-				newKt = KillType::RebootAndDelete;
-				canSurvive = false;
-				TraceEvent("KillChanged")
-				    .detail("KillType", kt)
-				    .detail("NewKillType", newKt)
-				    .detail("StoragePolicy", storagePolicy->info())
-				    .detail("Quorum", nQuorum)
-				    .detail("Machines", uniqueMachines.size())
-				    .detail("Reason", "Not enough unique machines to perform auto configuration of coordinators.");
-			} else {
-				TraceEvent("CanSurviveKills")
-				    .detail("KillType", kt)
-				    .detail("TLogPolicy", tLogPolicy->info())
-				    .detail("StoragePolicy", storagePolicy->info())
-				    .detail("Quorum", nQuorum)
-				    .detail("Machines", uniqueMachines.size());
-			}
+		if (getSimulationPolicy()) {
+			return getSimulationPolicy()->canKillProcesses(availableProcesses, deadProcesses, kt, newKillType);
 		}
-		if (newKillType)
-			*newKillType = newKt;
-		return canSurvive;
+		if (newKillType) {
+			*newKillType = kt;
+		}
+		return true;
 	}
 
 	void destroyProcess(ISimulator::ProcessInfo* p) override {
@@ -1830,7 +1590,7 @@ public:
 			    .detail("ZoneId", machine->locality.zoneId())
 			    .detail("Process", machine->toString())
 			    .detail("Rebooting", machine->rebooting)
-			    .detail("Protected", protectedAddresses.count(machine->address))
+			    .detail("Protected", isProtectedAddress(machine->address))
 			    .backtrace();
 			// This will remove all the "tracked" messages that came from the machine being killed
 			if (!machine->isSpawnedKVProcess())
@@ -1843,7 +1603,7 @@ public:
 			    .detail("ZoneId", machine->locality.zoneId())
 			    .detail("Process", machine->toString())
 			    .detail("Rebooting", machine->rebooting)
-			    .detail("Protected", protectedAddresses.count(machine->address))
+			    .detail("Protected", isProtectedAddress(machine->address))
 			    .backtrace();
 			should_inject_fault = simulator_should_inject_fault;
 			machine->fault_injection_r = deterministicRandom()->randomUniqueID().first();
@@ -1856,16 +1616,16 @@ public:
 			    .detail("ZoneId", machine->locality.zoneId())
 			    .detail("Process", machine->toString())
 			    .detail("Rebooting", machine->rebooting)
-			    .detail("Protected", protectedAddresses.count(machine->address))
+			    .detail("Protected", isProtectedAddress(machine->address))
 			    .backtrace();
 			machine->failedDisk = true;
 		} else {
 			ASSERT(false);
 		}
-		ASSERT(!protectedAddresses.contains(machine->address) || machine->rebooting || machine->isSpawnedKVProcess());
+		ASSERT(!isProtectedAddress(machine->address) || machine->rebooting || machine->isSpawnedKVProcess());
 	}
 	void rebootProcess(ProcessInfo* process, KillType kt) override {
-		if (kt == KillType::RebootProcessAndDelete && protectedAddresses.contains(process->address)) {
+		if (kt == KillType::RebootProcessAndDelete && isProtectedAddress(process->address)) {
 			TraceEvent("RebootChanged")
 			    .detail("ZoneId", process->locality.describeZone())
 			    .detail("KillType", KillType::RebootProcess)
@@ -1895,7 +1655,7 @@ public:
 	void killProcess(ProcessInfo* machine, KillType kt) override {
 		TraceEvent("AttemptingKillProcess").detail("ProcessInfo", machine->toString());
 		// Refuse to kill a protected process.
-		if (kt < KillType::RebootAndDelete && !protectedAddresses.contains(machine->address)) {
+		if (kt < KillType::RebootAndDelete && !isProtectedAddress(machine->address)) {
 			killProcess_internal(machine, kt);
 		}
 	}
@@ -1904,7 +1664,7 @@ public:
 			std::vector<ProcessInfo*>& processes = machines[addressMap[address]->locality.machineId()].processes;
 			for (auto& process : processes) {
 				// Refuse to kill a protected process.
-				if (!protectedAddresses.contains(process->address)) {
+				if (!isProtectedAddress(process->address)) {
 					killProcess_internal(process, kt);
 				}
 			}
@@ -1984,7 +1744,7 @@ public:
 		KillType originalKt = kt;
 		// Reboot if any of the processes are protected and count the number of processes not rebooting
 		for (auto& process : machines[machineId].processes) {
-			if (protectedAddresses.contains(process->address) && kt != KillType::RebootProcessAndSwitch) {
+			if (isProtectedAddress(process->address) && kt != KillType::RebootProcessAndSwitch) {
 				kt = KillType::Reboot;
 			}
 
@@ -2027,7 +1787,7 @@ public:
 					} else if (!processInfo->isAvailable()) {
 						processesDead.push_back(processInfo);
 						unavailable++;
-					} else if (protectedAddresses.contains(processInfo->address)) {
+					} else if (isProtectedAddress(processInfo->address)) {
 						processesLeft.push_back(processInfo);
 						protectedWorker++;
 					} else if (processInfo->locality.machineId() != machineId) {
@@ -2050,9 +1810,7 @@ public:
 				    .detail("Unavailable", unavailable)
 				    .detail("Excluded", excluded)
 				    .detail("Cleared", cleared)
-				    .detail("ProtectedTotal", protectedAddresses.size())
-				    .detail("TLogPolicy", tLogPolicy->info())
-				    .detail("StoragePolicy", storagePolicy->info());
+				    .detail("ProtectedTotal", protectedAddressCount());
 			} else if ((kt == KillType::KillInstantly) || (kt == KillType::InjectFaults) ||
 			           (kt == KillType::FailDisk)) {
 				TraceEvent("DeadMachine")
@@ -2061,9 +1819,7 @@ public:
 				    .detail("ProcessesLeft", processesLeft.size())
 				    .detail("ProcessesDead", processesDead.size())
 				    .detail("TotalProcesses", machines.size())
-				    .detail("ProcessesPerMachine", processesPerMachine)
-				    .detail("TLogPolicy", tLogPolicy->info())
-				    .detail("StoragePolicy", storagePolicy->info());
+				    .detail("ProcessesPerMachine", processesPerMachine);
 				for (auto process : processesLeft) {
 					TraceEvent("DeadMachineSurvivors")
 					    .detail("MachineId", machineId)
@@ -2087,9 +1843,7 @@ public:
 				    .detail("ProcessesLeft", processesLeft.size())
 				    .detail("ProcessesDead", processesDead.size())
 				    .detail("TotalProcesses", machines.size())
-				    .detail("ProcessesPerMachine", processesPerMachine)
-				    .detail("TLogPolicy", tLogPolicy->info())
-				    .detail("StoragePolicy", storagePolicy->info());
+				    .detail("ProcessesPerMachine", processesPerMachine);
 				for (auto process : processesLeft) {
 					TraceEvent("ClearMachineSurvivors")
 					    .detail("MachineId", machineId)
@@ -2205,7 +1959,7 @@ public:
 			auto processMachineId = procRecord->locality.machineId();
 			ASSERT(processMachineId.present());
 			if (processDcId.present() && (processDcId == dcId)) {
-				if ((kt != KillType::Reboot) && (protectedAddresses.contains(procRecord->address))) {
+				if ((kt != KillType::Reboot) && (isProtectedAddress(procRecord->address))) {
 					kt = KillType::Reboot;
 					TraceEvent(SevWarn, "DcKillChanged")
 					    .detail("DataCenter", dcId)
@@ -2233,7 +1987,7 @@ public:
 				if (processInfo->isAvailableClass()) {
 					if (processInfo->isExcluded() || processInfo->isCleared() || !processInfo->isAvailable()) {
 						processesDead.push_back(processInfo);
-					} else if (protectedAddresses.contains(processInfo->address) ||
+					} else if (isProtectedAddress(processInfo->address) ||
 					           datacenterMachines.find(processInfo->locality.machineId()) == datacenterMachines.end()) {
 						processesLeft.push_back(processInfo);
 					} else {
@@ -2254,9 +2008,7 @@ public:
 				    .detail("DcZones", datacenterMachines.size())
 				    .detail("DcProcesses", dcProcesses)
 				    .detail("ProcessesDead", processesDead.size())
-				    .detail("ProcessesLeft", processesLeft.size())
-				    .detail("TLogPolicy", tLogPolicy->info())
-				    .detail("StoragePolicy", storagePolicy->info());
+				    .detail("ProcessesLeft", processesLeft.size());
 				for (auto process : processesLeft) {
 					TraceEvent("DeadDcSurvivors")
 					    .detail("MachineId", process->locality.machineId())
@@ -2447,7 +2199,7 @@ public:
 			fmt::print("SimHTTPServer protecting {0}\n", p->address.toString());
 			TraceEvent(SevDebug, "HTTPProcessProtected").detail("Address", p->address);
 			g_simulator->httpProtected = true;
-			protectedAddresses.insert(p->address);
+			protectAddress(p->address);
 		}
 		// make sure this process isn't already added
 		for (int i = 0; i < httpServerProcesses.size(); i++) {
@@ -3051,12 +2803,6 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 		f = AsyncFileDetachable::open(f);
 		if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES)
 			f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileChaos(r)); });
-		if (flags & IAsyncFile::OPEN_ENCRYPTED)
-			f = map(f, [flags](Reference<IAsyncFile> r) {
-				auto mode = flags & IAsyncFile::OPEN_READWRITE ? AsyncFileEncrypted::Mode::APPEND_ONLY
-				                                               : AsyncFileEncrypted::Mode::READ_ONLY;
-				return Reference<IAsyncFile>(new AsyncFileEncrypted(r, mode));
-			});
 		return f;
 	} else
 		return AsyncFileCached::open(filename, flags, mode);

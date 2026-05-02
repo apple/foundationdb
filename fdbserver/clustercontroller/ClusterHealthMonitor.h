@@ -53,11 +53,11 @@ public:
 	virtual void delref() const = 0;
 	virtual Optional<RecoveryState> getRecoveryState() const = 0;
 	virtual bool shouldTreatStorageTeamOneReplicaLeftAsCritical() const = 0;
-	virtual Future<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const = 0;
-	virtual Future<LatestWorkerEvents> getLatestRatekeeperEvents(std::string const& eventName) const = 0;
-	virtual Future<LatestWorkerEvents> getLatestDataDistributorEvents(std::string const& eventName) const = 0;
-	virtual Future<LatestWorkerEvents> getLatestStorageServerEvents(std::string const& eventName) const = 0;
-	virtual Future<LatestWorkerEvents> getLatestTLogEvents(std::string const& eventName) const = 0;
+	virtual AsyncResult<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const = 0;
+	virtual AsyncResult<LatestWorkerEvents> getLatestRatekeeperEvents(std::string const& eventName) const = 0;
+	virtual AsyncResult<LatestWorkerEvents> getLatestDataDistributorEvents(std::string const& eventName) const = 0;
+	virtual AsyncResult<LatestWorkerEvents> getLatestStorageServerEvents(std::string const& eventName) const = 0;
+	virtual AsyncResult<LatestWorkerEvents> getLatestTLogEvents(std::string const& eventName) const = 0;
 };
 
 // Production event provider backed by worker event-log RPCs.
@@ -82,11 +82,11 @@ public:
 	void setTLogs(std::vector<TLogInterface> tlogs);
 	Optional<RecoveryState> getRecoveryState() const override;
 	bool shouldTreatStorageTeamOneReplicaLeftAsCritical() const override;
-	Future<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const override;
-	Future<LatestWorkerEvents> getLatestRatekeeperEvents(std::string const& eventName) const override;
-	Future<LatestWorkerEvents> getLatestDataDistributorEvents(std::string const& eventName) const override;
-	Future<LatestWorkerEvents> getLatestStorageServerEvents(std::string const& eventName) const override;
-	Future<LatestWorkerEvents> getLatestTLogEvents(std::string const& eventName) const override;
+	AsyncResult<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const override;
+	AsyncResult<LatestWorkerEvents> getLatestRatekeeperEvents(std::string const& eventName) const override;
+	AsyncResult<LatestWorkerEvents> getLatestDataDistributorEvents(std::string const& eventName) const override;
+	AsyncResult<LatestWorkerEvents> getLatestStorageServerEvents(std::string const& eventName) const override;
+	AsyncResult<LatestWorkerEvents> getLatestTLogEvents(std::string const& eventName) const override;
 };
 
 // Periodically evaluates factors and logs the aggregate cluster-health metric.

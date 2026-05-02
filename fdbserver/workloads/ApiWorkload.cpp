@@ -24,6 +24,7 @@
 #include "fdbclient/MultiVersionTransaction.h"
 
 #include "fdbrpc/simulator.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
@@ -257,14 +258,14 @@ Key ApiWorkload::generateKey(VectorRef<KeyValueRef> const& data,
 	}
 
 	// If encryption validation is enabled; slip "marker pattern" at random location in generated key
-	if (g_network->isSimulated() && g_simulator->dataAtRestPlaintextMarker.present() &&
-	    keyLength + 1 > g_simulator->dataAtRestPlaintextMarker.get().size()) {
-		int len = keyLength - g_simulator->dataAtRestPlaintextMarker.get().size();
+	if (g_network->isSimulated() && fdbSimulationPolicyState().dataAtRestPlaintextMarker.present() &&
+	    keyLength + 1 > fdbSimulationPolicyState().dataAtRestPlaintextMarker.get().size()) {
+		int len = keyLength - fdbSimulationPolicyState().dataAtRestPlaintextMarker.get().size();
 		// Avoid updating the first byte of the key
 		int idx = len > 1 ? deterministicRandom()->randomInt(1, len) : 1;
 		memcpy(&keyBuffer[idx],
-		       g_simulator->dataAtRestPlaintextMarker.get().c_str(),
-		       g_simulator->dataAtRestPlaintextMarker.get().size());
+		       fdbSimulationPolicyState().dataAtRestPlaintextMarker.get().c_str(),
+		       fdbSimulationPolicyState().dataAtRestPlaintextMarker.get().size());
 		//TraceEvent(SevDebug, "ModifiedKey").suppressFor(5).detail("Key", keyBuffer);
 	}
 
@@ -298,13 +299,13 @@ Value ApiWorkload::generateValue(int minValueLength, int maxValueLength) {
 	std::string ret(std::string(valueLength, 'x'));
 
 	// If encryption validation is enabled; slip "marker pattern" at random location in generated key
-	if (g_network->isSimulated() && g_simulator->dataAtRestPlaintextMarker.present() &&
-	    valueLength > g_simulator->dataAtRestPlaintextMarker.get().size()) {
-		int len = valueLength - g_simulator->dataAtRestPlaintextMarker.get().size();
+	if (g_network->isSimulated() && fdbSimulationPolicyState().dataAtRestPlaintextMarker.present() &&
+	    valueLength > fdbSimulationPolicyState().dataAtRestPlaintextMarker.get().size()) {
+		int len = valueLength - fdbSimulationPolicyState().dataAtRestPlaintextMarker.get().size();
 		int idx = deterministicRandom()->randomInt(0, len);
 		memcpy(&ret[idx],
-		       g_simulator->dataAtRestPlaintextMarker.get().c_str(),
-		       g_simulator->dataAtRestPlaintextMarker.get().size());
+		       fdbSimulationPolicyState().dataAtRestPlaintextMarker.get().c_str(),
+		       fdbSimulationPolicyState().dataAtRestPlaintextMarker.get().size());
 		//TraceEvent("ModifiedValue").suppressFor(5).detail("Value", ret);
 	}
 	return Value(ret);

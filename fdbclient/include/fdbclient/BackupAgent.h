@@ -55,6 +55,8 @@ FDB_BOOLEAN_PARAM(ReadLowPriority);
 
 extern Optional<std::string> fileBackupAgentProxy;
 
+constexpr int DEFAULT_ENCRYPTION_BLOCK_SIZE = 1048576;
+
 class BackupAgentBase : NonCopyable {
 public:
 	// Time formatter for anything backup or restore related
@@ -276,6 +278,7 @@ public:
 	                          UsePartitionedLog = UsePartitionedLog::False,
 	                          IncrementalBackupOnly = IncrementalBackupOnly::False,
 	                          Optional<std::string> const& encryptionKeyFileName = {},
+	                          int encryptionBlockSize = 0,
 	                          int snapshotMode = 0);
 	// snapshotMode: 0=RANGEFILE (default), 1=BULKDUMP, 2=BOTH
 	Future<Void> submitBackup(Database cx,
@@ -289,6 +292,7 @@ public:
 	                          UsePartitionedLog partitionedLog = UsePartitionedLog::False,
 	                          IncrementalBackupOnly incrementalBackupOnly = IncrementalBackupOnly::False,
 	                          Optional<std::string> const& encryptionKeyFileName = {},
+	                          int encryptionBlockSize = 0,
 	                          int snapshotMode = 0) {
 		// Note: Do NOT call checkAndDisableBackupWorkers here. That function is for cleanup
 		// when backups END (abort/discontinue), not when they START. Calling it here causes
@@ -306,6 +310,7 @@ public:
 			                    partitionedLog,
 			                    incrementalBackupOnly,
 			                    encryptionKeyFileName,
+			                    encryptionBlockSize,
 			                    snapshotMode);
 		});
 	}
@@ -763,6 +768,7 @@ inline Standalone<StringRef> TupleCodec<Reference<IBackupContainer>>::pack(Refer
 		tuple.append(StringRef());
 	}
 
+	tuple.append((int64_t)bc->getEncryptionBlockSize());
 	return tuple.pack();
 }
 template <>
@@ -782,7 +788,11 @@ inline Reference<IBackupContainer> TupleCodec<Reference<IBackupContainer>>::unpa
 		proxy = t.getString(2).toString();
 	}
 
-	return IBackupContainer::openContainer(url, proxy, encryptionKeyFileName);
+	int blockSize = 0;
+	if (t.size() > 3) {
+		blockSize = (int)t.getInt(3);
+	}
+	return IBackupContainer::openContainer(url, proxy, encryptionKeyFileName, blockSize);
 }
 
 class BackupConfig : public KeyBackedTaskConfig {
@@ -921,6 +931,10 @@ public:
 	// BulkDump total keys - stored when BulkDump snapshot completes
 	KeyBackedProperty<int64_t> bulkDumpTotalKeys() { return configSpace.pack(__FUNCTION__sr); }
 
+	// BulkDump snapshot end version - set when BulkDump task completes
+	// Used for mode=BOTH to track that BulkDump data is available
+	KeyBackedProperty<Version> bulkDumpSnapshotEndVersion() { return configSpace.pack(__FUNCTION__sr); }
+
 	// Latest version for which all prior versions have had their log copy tasks completed
 	KeyBackedProperty<Version> latestLogEndVersion() { return configSpace.pack(__FUNCTION__sr); }
 
@@ -940,12 +954,50 @@ public:
 		auto plogEnabled = partitionedLogEnabled().get(tr);
 		auto workerVersion = latestBackupWorkerSavedVersion().get(tr);
 		auto incrementalBackup = incrementalBackupOnly().get(tr);
+		auto snapMode = snapshotMode().get(tr);
+		auto bulkDumpSnapshot = bulkDumpSnapshotEndVersion().get(tr);
 		return map(success(lastLog) && success(firstSnapshot) && success(plogEnabled) && success(workerVersion) &&
-		               success(incrementalBackup),
+		               success(incrementalBackup) && success(snapMode) && success(bulkDumpSnapshot),
 		           [=](Void) -> Optional<Version> {
 			           // The latest log greater than the oldest snapshot is the restorable version
 			           Optional<Version> logVersion =
 			               plogEnabled.get().present() && plogEnabled.get().get() ? workerVersion.get() : lastLog.get();
+
+			           // For mode=BOTH (2), require both rangefile and bulkdump snapshots to be complete
+			           int mode = snapMode.get().present() ? snapMode.get().get() : 0;
+			           if (mode == 2) {
+				           // BOTH mode: need both firstSnapshotEndVersion (rangefile) and bulkDumpSnapshotEndVersion
+				           if (!firstSnapshot.get().present() || !bulkDumpSnapshot.get().present()) {
+					           // Incremental-only backup doesn't need snapshots
+					           if (logVersion.present() && incrementalBackup.isReady() &&
+					               incrementalBackup.get().present() && incrementalBackup.get().get()) {
+						           return logVersion.get() - 1;
+					           }
+					           return {}; // Not restorable until both complete
+				           }
+				           // Use the minimum of both as the effective first snapshot version
+				           Version effectiveFirstSnapshot =
+				               std::min(firstSnapshot.get().get(), bulkDumpSnapshot.get().get());
+				           if (logVersion.present() && logVersion.get() > effectiveFirstSnapshot) {
+					           return std::max(logVersion.get() - 1, effectiveFirstSnapshot);
+				           }
+				           return {};
+			           }
+
+			           // For mode=BULKDUMP (1), use bulkDumpSnapshotEndVersion
+			           if (mode == 1) {
+				           if (logVersion.present() && bulkDumpSnapshot.get().present() &&
+				               logVersion.get() > bulkDumpSnapshot.get().get()) {
+					           return std::max(logVersion.get() - 1, bulkDumpSnapshot.get().get());
+				           }
+				           if (logVersion.present() && incrementalBackup.isReady() &&
+				               incrementalBackup.get().present() && incrementalBackup.get().get()) {
+					           return logVersion.get() - 1;
+				           }
+				           return {};
+			           }
+
+			           // For mode=RANGEFILE (0, default), use existing logic with firstSnapshotEndVersion
 			           if (logVersion.present() && firstSnapshot.get().present() &&
 			               logVersion.get() > firstSnapshot.get().get()) {
 				           return std::max(logVersion.get() - 1, firstSnapshot.get().get());

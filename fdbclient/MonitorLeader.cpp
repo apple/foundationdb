@@ -1,5 +1,5 @@
 /*
- * MonitorLeader.actor.cpp
+ * MonitorLeader.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -24,11 +24,10 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/UnitTest.h"
-#include "fdbrpc/genericactors.actor.h"
+#include "fdbrpc/genericactors.h"
 #include "flow/Platform.h"
 #include "flow/IConnection.h"
 #include "flow/CoroUtils.h"
-#include "flow/actorcompiler.h" // has to be last include
 
 namespace {
 
@@ -127,7 +126,7 @@ ClusterConnectionString::ClusterConnectionString(const std::string& connectionSt
 }
 
 TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/addresses") {
-	state std::string input;
+	std::string input;
 
 	{
 		input = "asdf:2345@1.1.1.1:345";
@@ -187,7 +186,7 @@ TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/addresses") {
 }
 
 TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/hostnames") {
-	state std::string input;
+	std::string input;
 
 	{
 		input = "asdf:2345@localhost:1234";
@@ -296,16 +295,14 @@ TEST_CASE("/fdbclient/MonitorLeader/PartialResolve") {
 	std::string connectionString = "TestCluster:0@host.name:1234,host-name:5678";
 	std::string hn = "host-name", port = "5678";
 
-	state NetworkAddress address = NetworkAddress::parse("1.0.0.0:5678");
+	NetworkAddress address = NetworkAddress::parse("1.0.0.0:5678");
 
 	INetworkConnections::net()->addMockTCPEndpoint(hn, port, { address });
 
 	ClusterConnectionString cs(connectionString);
-	std::vector<NetworkAddress> allCoordinators = wait(cs.tryResolveHostnames());
+	std::vector<NetworkAddress> allCoordinators = co_await cs.tryResolveHostnames();
 	ASSERT(allCoordinators.size() == 1 &&
 	       std::find(allCoordinators.begin(), allCoordinators.end(), address) != allCoordinators.end());
-
-	return Void();
 }
 
 TEST_CASE("/flow/FlatBuffers/LeaderInfo") {
@@ -644,23 +641,23 @@ Future<Void> monitorLeaderInternal(Reference<IClusterConnectionRecord> connRecor
 	}
 }
 
-ACTOR Future<Void> asyncDeserializeClusterInterface(Reference<AsyncVar<Value>> serializedInfo,
-                                                    Reference<AsyncVar<Optional<ClusterInterface>>> outKnownLeader) {
-	state Reference<AsyncVar<Optional<ClusterControllerClientInterface>>> knownLeader(
+Future<Void> asyncDeserializeClusterInterface(Reference<AsyncVar<Value>> serializedInfo,
+                                              Reference<AsyncVar<Optional<ClusterInterface>>> outKnownLeader) {
+	Reference<AsyncVar<Optional<ClusterControllerClientInterface>>> knownLeader(
 	    new AsyncVar<Optional<ClusterControllerClientInterface>>{});
-	state Future<Void> deserializer = asyncDeserialize(serializedInfo, knownLeader);
-	loop {
-		choose {
-			when(wait(deserializer)) {
-				UNSTOPPABLE_ASSERT(false);
+	Future<Void> deserializer = asyncDeserialize(serializedInfo, knownLeader);
+	while (true) {
+		auto res = co_await race(deserializer, knownLeader->onChange());
+		if (res.index() == 0) {
+			UNSTOPPABLE_ASSERT(false);
+		} else if (res.index() == 1) {
+			if (knownLeader->get().present()) {
+				outKnownLeader->set(knownLeader->get().get().clientInterface);
+			} else {
+				outKnownLeader->set(Optional<ClusterInterface>{});
 			}
-			when(wait(knownLeader->onChange())) {
-				if (knownLeader->get().present()) {
-					outKnownLeader->set(knownLeader->get().get().clientInterface);
-				} else {
-					outKnownLeader->set(Optional<ClusterInterface>{});
-				}
-			}
+		} else {
+			UNREACHABLE();
 		}
 	}
 }

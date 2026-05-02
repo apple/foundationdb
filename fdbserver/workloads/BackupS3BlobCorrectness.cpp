@@ -522,6 +522,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			                                   UsePartitionedLog::False,
 			                                   IncrementalBackupOnly::False,
 			                                   encryptionKeyFileName,
+			                                   encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0,
 			                                   snapshotMode);
 		} catch (Error& e) {
 			TraceEvent("BS3BCW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));

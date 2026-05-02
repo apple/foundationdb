@@ -666,7 +666,7 @@ inline static uintptr_t getAlignedUpperBound(uintptr_t value, uintptr_t alignmen
 
 // makeString is used to allocate a Standalone<StringRef> of a known length for later
 // mutation (via mutateString).  If you need to append to a string of unknown length,
-// consider factoring StringBuffer from DiskQueue.actor.cpp.
+// consider factoring StringBuffer from DiskQueue.cpp.
 inline static Standalone<StringRef> makeString(int length) {
 	Standalone<StringRef> returnString;
 	uint8_t* outData = new (returnString.arena()) uint8_t[length];

@@ -26,8 +26,6 @@
 #include "flow/IRandom.h"
 #include "flow/StreamCipher.h"
 
-#include <array>
-
 /*
  * Append-only file encrypted using AES-256-GCM.
  * */
@@ -46,28 +44,16 @@ private:
 	friend class AsyncFileEncryptedImpl;
 	int64_t fileSize = -1;
 
-	// Reading:
-	class RandomCache {
-		size_t maxSize;
-		std::vector<uint32_t> vec;
-		std::unordered_map<uint32_t, Standalone<StringRef>> hashMap;
-		size_t evict();
-
-	public:
-		explicit RandomCache(size_t maxSize);
-		void insert(uint32_t block, const Standalone<StringRef>& value);
-		Optional<Standalone<StringRef>> get(uint32_t block) const;
-	} readBuffers;
-
 	// Writing (append only):
 	std::unique_ptr<EncryptionStreamCipher> encryptor;
 	uint32_t currentBlock{ 0 };
 	int offsetInBlock{ 0 };
 	std::vector<unsigned char> writeBuffer;
+	int encryptionBlockSize{ 0 };
 	Future<Void> initialize();
 
 public:
-	AsyncFileEncrypted(Reference<IAsyncFile>, Mode);
+	AsyncFileEncrypted(Reference<IAsyncFile>, Mode, int blockSize);
 	void addref() override;
 	void delref() override;
 	Future<int> read(void* data, int length, int64_t offset) override;

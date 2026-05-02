@@ -26,6 +26,7 @@
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/RunRYWTransaction.h"
 #include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
@@ -53,9 +54,9 @@ static const char* backupTypes[] = { "backup_worker_enabled:=0", "backup_worker_
 
 std::string generateRegions() {
 	std::string result;
-	if (g_simulator->physicalDatacenters == 1 ||
-	    (g_simulator->physicalDatacenters == 2 && deterministicRandom()->random01() < 0.25) ||
-	    g_simulator->physicalDatacenters == 3) {
+	if (fdbSimulationPolicyState().physicalDatacenters == 1 ||
+	    (fdbSimulationPolicyState().physicalDatacenters == 2 && deterministicRandom()->random01() < 0.25) ||
+	    fdbSimulationPolicyState().physicalDatacenters == 3) {
 		return " usable_regions=1 regions=\"\"";
 	}
 
@@ -90,7 +91,7 @@ std::string generateRegions() {
 
 	int maxSatelliteLogs = getMaxSatelliteLogs();
 
-	if (g_simulator->physicalDatacenters > 3 && deterministicRandom()->random01() < 0.5) {
+	if (fdbSimulationPolicyState().physicalDatacenters > 3 && deterministicRandom()->random01() < 0.5) {
 		StatusObject primarySatelliteObj;
 		primarySatelliteObj["id"] = "2";
 		primarySatelliteObj["priority"] = 1;
@@ -107,7 +108,7 @@ std::string generateRegions() {
 			remoteSatelliteObj["satellite_logs"] = deterministicRandom()->randomInt(1, maxSatelliteLogs + 1);
 		remoteDcArr.push_back(remoteSatelliteObj);
 
-		if (g_simulator->physicalDatacenters > 5 && deterministicRandom()->random01() < 0.5) {
+		if (fdbSimulationPolicyState().physicalDatacenters > 5 && deterministicRandom()->random01() < 0.5) {
 			StatusObject primarySatelliteObjB;
 			primarySatelliteObjB["id"] = "4";
 			primarySatelliteObjB["priority"] = 1;
@@ -243,13 +244,13 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		testDuration = getOption(options, "testDuration"_sr, 200.0);
 		allowDescriptorChange =
 		    getOption(options, "allowDescriptorChange"_sr, SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT);
-		allowTestStorageMigration =
-		    getOption(options, "allowTestStorageMigration"_sr, false) && g_simulator->allowStorageMigrationTypeChange;
+		allowTestStorageMigration = getOption(options, "allowTestStorageMigration"_sr, false) &&
+		                            fdbSimulationPolicyState().allowStorageMigrationTypeChange;
 		storageMigrationCompatibleConf = getOption(options, "storageMigrationCompatibleConf"_sr, false);
 		waitStoreTypeCheck = getOption(options, "waitStoreTypeCheck"_sr, false);
 		downgradeTest1 = getOption(options, "downgradeTest1"_sr, false);
 		storageEngineExcludeTypes = getOption(options, "storageEngineExcludeTypes"_sr);
-		g_simulator->usableRegions = 1;
+		fdbSimulationPolicyState().usableRegions = 1;
 	}
 
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("Attrition"); }
@@ -402,14 +403,15 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 			} else if (randomChoice == 3) {
 				//TraceEvent("ConfigureTestConfigureBegin").detail("NewConfig", newConfig);
 				int maxRedundancies = sizeof(redundancies) / sizeof(redundancies[0]);
-				if (g_simulator->physicalDatacenters == 2 || g_simulator->physicalDatacenters > 3) {
+				if (fdbSimulationPolicyState().physicalDatacenters == 2 ||
+				    fdbSimulationPolicyState().physicalDatacenters > 3) {
 					maxRedundancies--; // There are not enough machines for triple replication in fearless
 					                   // configurations
 				}
 				int redundancy = deterministicRandom()->randomInt(0, maxRedundancies);
 				std::string config = redundancies[redundancy];
 
-				if (config == "triple" && g_simulator->physicalDatacenters == 3) {
+				if (config == "triple" && fdbSimulationPolicyState().physicalDatacenters == 3) {
 					config = "three_data_hall ";
 				}
 

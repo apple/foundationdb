@@ -77,7 +77,9 @@ struct SubmitBackupWorkload : TestWorkload {
 			                                  stopWhenDone,
 			                                  UsePartitionedLog::False,
 			                                  incremental,
-			                                  encryptionKeyFileName);
+			                                  encryptionKeyFileName,
+			                                  encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0,
+			                                  0);
 		} catch (Error& e) {
 			TraceEvent("BackupSubmitError").error(e);
 			if (e.code() != error_code_backup_duplicate) {

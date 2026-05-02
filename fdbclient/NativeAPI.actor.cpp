@@ -57,7 +57,7 @@
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/ManagementAPI.h"
-#include "fdbclient/NameLineage.h"
+#include "NameLineage.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/MutationList.h"
@@ -1494,7 +1494,7 @@ Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange keys) 
 				try {
 					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 					tr.setOption(FDBTransactionOptions::CAUSAL_READ_RISKY);
-					co_await success(tr.getReadVersion());
+					co_await tr.getReadVersion();
 					break;
 				} catch (Error& e) {
 					err = e;
@@ -2064,7 +2064,7 @@ Future<Void> sameVersionDiffValue(Database cx, Reference<WatchParameters> parame
 				cx->setWatchMetadata(metadata);
 
 				metadata->watchFutureSS = watchStorageServerResp(parameters->key, cx);
-				co_await success(metadata->watchPromise.getFuture());
+				co_await metadata->watchPromise.getFuture();
 			}
 
 			co_return;
@@ -2937,7 +2937,7 @@ static Future<Void> tssStreamComparison(Request request,
 			if ((!ssEndOfStream || !tssEndOfStream) && !TSS_doCompare(ssReply.get(), tssReply.get())) {
 				CODE_PROBE(true, "TSS mismatch in stream comparison");
 				TraceEvent mismatchEvent(
-				    (g_network->isSimulated() && g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations)
+				    (simulationPolicyHasCapability(ISimulationPolicy::Capability::WarnOnStorageMismatch))
 				        ? SevWarnAlways
 				        : SevError,
 				    LB_mismatchTraceName(request, TSS_COMPARISON));
@@ -2959,11 +2959,12 @@ static Future<Void> tssStreamComparison(Request request,
 						tssData.metrics->recordDetailedMismatchData(mismatchUID, mismatchEvent.getFields().toString());
 
 						// record a summarized trace event instead
-						TraceEvent summaryEvent((g_network->isSimulated() &&
-						                         g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations)
-						                            ? SevWarnAlways
-						                            : SevError,
-						                        LB_mismatchTraceName(request, TSS_COMPARISON));
+						TraceEvent summaryEvent(
+						    (g_network->isSimulated() &&
+						     simulationPolicyHasCapability(ISimulationPolicy::Capability::WarnOnStorageMismatch))
+						        ? SevWarnAlways
+						        : SevError,
+						    LB_mismatchTraceName(request, TSS_COMPARISON));
 						summaryEvent.detail("TSSID", tssData.tssId).detail("MismatchId", mismatchUID);
 					}
 				} else {
@@ -6050,7 +6051,7 @@ Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(
 			if (use_system_priority) {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			}
-			co_await store(res, metadataMap.getRange(tr, UID(0, 0), Optional<UID>(), CLIENT_KNOBS->TOO_MANY));
+			res = co_await metadataMap.getRange(tr, UID(0, 0), Optional<UID>(), CLIENT_KNOBS->TOO_MANY);
 			co_await tr->commit();
 			co_return res.results;
 		} catch (Error& e) {

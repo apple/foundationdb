@@ -82,10 +82,6 @@ struct SystemKey : Key {
 	explicit SystemKey(Key const& k);
 };
 
-struct RestoreLoaderInterface;
-struct RestoreApplierInterface;
-struct RestoreMasterInterface;
-
 extern const KeyRangeRef normalKeys; // '' to systemKeys.begin
 extern const KeyRangeRef systemKeys; // [FF] to [FF][FF]
 extern const KeyRangeRef nonMetadataSystemKeys; // [FF][00] to [FF][01]

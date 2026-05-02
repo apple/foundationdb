@@ -135,7 +135,9 @@ struct KeyspaceSnapshotFile {
 	std::string fileName;
 	int64_t totalSize;
 	Optional<bool> restorable; // Whether or not the snapshot can be used in a restore, if known
+	std::string snapshotType; // "bulkdump" or "rangefile" (empty if not present in filename)
 	bool isSingleVersion() const { return beginVersion == endVersion; }
+	bool isBulkDump() const { return snapshotType == "bulkdump"; }
 	double expiredPct(Optional<Version> expiredEnd) const {
 		double pctExpired = 0;
 		if (expiredEnd.present() && expiredEnd.get() > beginVersion) {
@@ -208,6 +210,7 @@ struct BackupDescription {
 	std::string extendedDetail; // Freeform container-specific info.
 	bool partitioned; // If this backup contains partitioned mutation logs.
 	bool fileLevelEncryption; // If this backup contains encrypted files.
+	int encryptionBlockSize; // Block size used for file encryption, 0 if not encrypted.
 
 	// Resolves the versions above to timestamps using a given database's TimeKeeper data.
 	// toString will use this information if present.
@@ -343,7 +346,8 @@ public:
 	// Get an IBackupContainer based on a container spec string
 	static Reference<IBackupContainer> openContainer(const std::string& url,
 	                                                 const Optional<std::string>& proxy,
-	                                                 const Optional<std::string>& encryptionKeyFileName);
+	                                                 const Optional<std::string>& encryptionKeyFileName,
+	                                                 int encryptionBlockSize);
 	static std::vector<std::string> getURLFormats();
 	static Future<std::vector<std::string>> listContainers(const std::string& baseURL,
 	                                                       const Optional<std::string>& proxy);
@@ -352,11 +356,14 @@ public:
 	Optional<std::string> const& getProxy() const { return proxy; }
 	Optional<std::string> const& getEncryptionKeyFileName() const { return encryptionKeyFileName; }
 
-	virtual Future<Void> writeEncryptionMetadata() = 0;
+	virtual Future<Void> writeEncryptionMetadata(int encryptionBlockSize) = 0;
 
 	static std::string lastOpenError;
 
 	virtual Future<Void> encryptionSetupComplete() const = 0;
+
+	virtual int getEncryptionBlockSize() const { return 0; }
+	virtual void setEncryptionBlockSize(int blockSize) {}
 
 	// TODO: change the following back to `private` once blob obj access is refactored
 protected:

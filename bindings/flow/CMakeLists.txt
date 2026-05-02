@@ -21,10 +21,8 @@ target_link_libraries(fdb_flow PUBLIC fdb_c)
 target_link_libraries(fdb_flow PUBLIC fdbclient)
 target_include_directories(fdb_flow PUBLIC
   "${CMAKE_SOURCE_DIR}"
-  "${CMAKE_CURRENT_BINARY_DIR}"
   "${CMAKE_CURRENT_SOURCE_DIR}"
   "${CMAKE_CURRENT_SOURCE_DIR}/tester"
-  "${CMAKE_CURRENT_BINARY_DIR}/tester"
   )
 
 add_subdirectory(tester)

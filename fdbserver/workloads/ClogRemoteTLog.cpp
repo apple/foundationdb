@@ -8,6 +8,7 @@
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/tester/workloads.h"
 #include "flow/Buggify.h"
@@ -258,8 +259,8 @@ struct ClogRemoteTLog : TestWorkload {
 				std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
 				    co_await NativeAPI::getServerListAndProcessClasses(&tr);
 				for (auto& [ssi, p] : results) {
-					if (ssi.locality.dcId().present() && g_simulator->remoteDcId.present() &&
-					    ssi.locality.dcId().get() == g_simulator->remoteDcId.get()) {
+					if (ssi.locality.dcId().present() && fdbSimulationPolicyState().remoteDcId.present() &&
+					    ssi.locality.dcId().get() == fdbSimulationPolicyState().remoteDcId.get()) {
 						ret.push_back(ssi.address().ip);
 					}
 				}

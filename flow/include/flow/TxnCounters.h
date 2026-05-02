@@ -1,5 +1,5 @@
 /*
- * RESTKmsConnector.actor.h
+ * TxnCounters.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,16 +18,25 @@
  * limitations under the License.
  */
 
-#ifndef REST_KMS_CONNECTOR_H
-#define REST_KMS_CONNECTOR_H
+#ifndef FLOW_TXNCOUNTERS_H
+#define FLOW_TXNCOUNTERS_H
 #pragma once
 
-#include "fdbserver/KmsConnector.h"
+#include "flow/SimpleCounter.h"
 
-class RESTKmsConnector : public KmsConnector {
-public:
-	explicit RESTKmsConnector(const std::string& conStr) : KmsConnector(conStr) {}
-	Future<Void> connectorCore(KmsConnectorInterface interf);
+struct TxnCounters {
+	SimpleCounter<int64_t>* started;
+	SimpleCounter<int64_t>* committed;
+	SimpleCounter<int64_t>* aborted;
 };
+
+inline TxnCounters* makeCounters(const char* prefix) {
+	std::string p(prefix);
+	auto* c = new TxnCounters();
+	c->started = SimpleCounter<int64_t>::makeCounter(p + "/started");
+	c->committed = SimpleCounter<int64_t>::makeCounter(p + "/committed");
+	c->aborted = SimpleCounter<int64_t>::makeCounter(p + "/aborted");
+	return c;
+}
 
 #endif

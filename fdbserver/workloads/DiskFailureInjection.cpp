@@ -174,7 +174,7 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 				injectDiskDelays(machine, stallInterval, stallPeriod, throttlePeriod);
 			if (corruptFile && (corruptedWorkers++ < workersToCorrupt)) {
 				if (g_simulator == g_network)
-					g_simulator->corruptWorkerMap[machine.address()] = true;
+					fdbSimulationPolicyState().corruptWorkerMap[machine.address()] = true;
 				injectBitFlips(machine, percentBitFlips);
 			}
 		}
@@ -205,7 +205,7 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 				}
 				if (corruptFile && (corruptedWorkers++ < workersToCorrupt)) {
 					if (g_simulator == g_network)
-						g_simulator->corruptWorkerMap[workerAddress] = true;
+						fdbSimulationPolicyState().corruptWorkerMap[workerAddress] = true;
 					injectBitFlips(itr->second, percentBitFlips);
 				}
 			}
@@ -217,9 +217,9 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 		int foundChaosMetrics = 0;
 		std::vector<WorkerDetails> workers = co_await getWorkers(dbInfo);
 
-		Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventsFuture;
-		latestEventsFuture = latestEventOnWorkers(workers, "ChaosMetrics");
-		Optional<std::pair<WorkerEvents, std::set<std::string>>> workerEvents = co_await latestEventsFuture;
+		AsyncResult<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventsFuture =
+		    latestEventOnWorkers(workers, "ChaosMetrics");
+		Optional<std::pair<WorkerEvents, std::set<std::string>>> workerEvents = co_await std::move(latestEventsFuture);
 
 		WorkerEvents cMetrics = workerEvents.present() ? workerEvents.get().first : WorkerEvents();
 

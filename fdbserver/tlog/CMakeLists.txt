@@ -4,7 +4,6 @@ add_flow_target(STATIC_LIBRARY NAME fdbserver_tlog SRCS ${FDBSERVER_TLOG_SRCS})
 add_fdbserver_link_test(fdbserver_tloglinktest
   fdbserver_tlog
   fdbserver_logsystem
-  fdbserver_kvstore
   fdbserver_core)
 
 configure_fdbserver_common_includes(fdbserver_tlog)

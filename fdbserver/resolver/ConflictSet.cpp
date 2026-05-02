@@ -486,41 +486,6 @@ public:
 		}
 	}
 
-	// Splits the version history represented by this skiplist into separate key ranges
-	//   delimited by the given array of keys.  This SkipList is left empty.  this->partition
-	//   is intended to be followed by a call to this->concatenate() recombining the same
-	//   partitions.  In between, operations on each partition must not touch any keys outside
-	//   the partition.  Specifically, the partition to the left of 'key' must not have a range
-	//	 [...,key) inserted, since that would insert an entry at 'key'.
-	// Note this function is not used.
-	void partition(StringRef* begin, int splitCount, SkipList* output) {
-		for (int i = splitCount - 1; i >= 0; i--) {
-			Finger f(header, begin[i]);
-			while (!f.finished())
-				f.nextLevel();
-			split(f, output[i + 1]);
-		}
-		swap(output[0]);
-	}
-
-	// Concatenates multiple SkipList objects into one and stores in input[0].
-	// Note this function is not used.
-	void concatenate(SkipList* input, int count) {
-		std::vector<Finger> ends(count - 1);
-		for (int i = 0; i < ends.size(); i++)
-			input[i].getEnd(ends[i]);
-
-		for (int l = 0; l < MaxLevels; l++) {
-			for (int i = ends.size() - 1; i >= 0; i--) {
-				ends[i].finger[l]->setNext(l, input[i + 1].header->getNext(l));
-				if (l && (!i || ends[i].finger[l] != input[i].header))
-					ends[i].finger[l]->calcVersionForLevel(l);
-				input[i + 1].header->setNext(l, nullptr);
-			}
-		}
-		swap(input[0]);
-	}
-
 	void find(const StringRef* values, Finger* results, int* temp, int count) {
 		// Relying on the ordering of values, descend until the values aren't all in the
 		// same part of the tree

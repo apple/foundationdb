@@ -41,8 +41,9 @@
 #include "fdbserver/core/AccumulativeChecksumUtil.h"
 #include "fdbserver/core/BulkDumpUtil.h"
 #include "fdbserver/core/BulkLoadUtil.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/FDBRocksDBVersion.h"
-#include "fdbserver/core/IKeyValueStore.h"
+#include "fdbserver/kvstore/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/kvstore/FDBExecHelper.h"
 #include "fdbserver/core/LatencyBandConfig.h"
@@ -94,7 +95,7 @@
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/DataMovement.h"
-#include "fdbserver/storageserver/StorageServer.actor.h"
+#include "fdbserver/storageserver/StorageServer.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "StorageServerUtils.h"
 #include "flow/ActorCollection.h"
@@ -104,6 +105,7 @@
 #include "flow/Histogram.h"
 #include "flow/IRandom.h"
 #include "flow/IndexedSet.h"
+#include "flow/CoroUtils.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TDMetric.h"
 #include "flow/Trace.h"
@@ -1106,10 +1108,10 @@ public:
 		// With fault injection enabled, the tss will start acting normal for a bit, then after the specified delay
 		// start behaving incorrectly.
 		if (g_network->isSimulated() && !g_simulator->speedUpSimulation &&
-		    g_simulator->tssMode >= ISimulator::TSSMode::EnabledAddDelay) {
+		    simulationPolicyHasCapability(ISimulationPolicy::Capability::StorageReplicaFaultInjection)) {
 			tssFaultInjectTime = now() + deterministicRandom()->randomInt(60, 300);
 			TraceEvent(SevWarnAlways, "TSSInjectFaultEnabled", thisServerID)
-			    .detail("Mode", g_simulator->tssMode)
+			    .detail("Mode", static_cast<int>(fdbSimulationPolicyState().tssMode))
 			    .detail("At", tssFaultInjectTime.get());
 		}
 	}
@@ -1299,11 +1301,8 @@ public:
 		// Count of all fetchKey clearRange operations to the storage engine.
 		Counter kvClearRangesInFetchKeys;
 
-		// Bytes fetched by fetchChangeFeed for data movements.
-		Counter feedBytesFetched;
-
 		Counter sampledBytesCleared;
-		Counter atomicMutations, changeFeedMutations, changeFeedMutationsDurable;
+		Counter atomicMutations;
 		Counter updateBatches, updateVersions;
 		Counter loops;
 		Counter fetchWaitingMS, fetchWaitingCount, fetchExecutingMS, fetchExecutingCount;
@@ -1328,8 +1327,6 @@ public:
 		Counter kvScans;
 		// The count of commit operation to the storage engine.
 		Counter kvCommits;
-		// The count of change feed reads that hit disk
-		Counter changeFeedDiskReads;
 		// The count of ChangeServerKeys actions.
 		Counter changeServerKeysAssigned;
 		Counter changeServerKeysUnassigned;
@@ -1359,10 +1356,8 @@ public:
 		    logicalBytesInput("LogicalBytesInput", cc), logicalBytesMoveInOverhead("LogicalBytesMoveInOverhead", cc),
 		    kvCommitLogicalBytes("KVCommitLogicalBytes", cc), kvClearRanges("KVClearRanges", cc),
 		    kvClearSingleKey("KVClearSingleKey", cc), kvSystemClearRanges("KVSystemClearRanges", cc),
-		    bytesDurable("BytesDurable", cc), feedBytesFetched("FeedBytesFetched", cc),
-		    sampledBytesCleared("SampledBytesCleared", cc), atomicMutations("AtomicMutations", cc),
-		    changeFeedMutations("ChangeFeedMutations", cc),
-		    changeFeedMutationsDurable("ChangeFeedMutationsDurable", cc), updateBatches("UpdateBatches", cc),
+		    bytesDurable("BytesDurable", cc), sampledBytesCleared("SampledBytesCleared", cc),
+		    atomicMutations("AtomicMutations", cc), updateBatches("UpdateBatches", cc),
 		    updateVersions("UpdateVersions", cc), loops("Loops", cc), fetchWaitingMS("FetchWaitingMS", cc),
 		    fetchWaitingCount("FetchWaitingCount", cc), fetchExecutingMS("FetchExecutingMS", cc),
 		    fetchExecutingCount("FetchExecutingCount", cc), readsRejected("ReadsRejected", cc),
@@ -1371,7 +1366,7 @@ public:
 		    quickGetValueMiss("QuickGetValueMiss", cc), quickGetKeyValuesHit("QuickGetKeyValuesHit", cc),
 		    quickGetKeyValuesMiss("QuickGetKeyValuesMiss", cc), kvScanBytes("KVScanBytes", cc),
 		    kvGetBytes("KVGetBytes", cc), eagerReadsKeys("EagerReadsKeys", cc), kvGets("KVGets", cc),
-		    kvScans("KVScans", cc), kvCommits("KVCommits", cc), changeFeedDiskReads("ChangeFeedDiskReads", cc),
+		    kvScans("KVScans", cc), kvCommits("KVCommits", cc),
 		    getMappedRangeBytesQueried("GetMappedRangeBytesQueried", cc),
 		    finishedGetMappedRangeQueries("FinishedGetMappedRangeQueries", cc),
 		    finishedGetMappedRangeSecondaryQueries("FinishedGetMappedRangeSecondaryQueries", cc),
@@ -1691,20 +1686,21 @@ public:
 	void maybeInjectTargetedRestart(Version v) {
 		// inject an SS restart at most once per test
 		if (g_network->isSimulated() && !g_simulator->speedUpSimulation &&
-		    now() > g_simulator->injectTargetedSSRestartTime &&
+		    now() > fdbSimulationPolicyState().injectTargetedSSRestartTime &&
 		    rebootAfterDurableVersion == std::numeric_limits<Version>::max()) {
 			CODE_PROBE(true, "Injecting SS targeted restart");
 			TraceEvent("SimSSInjectTargetedRestart", thisServerID).detail("Version", v);
 			rebootAfterDurableVersion = v;
-			g_simulator->injectTargetedSSRestartTime = std::numeric_limits<double>::max();
+			fdbSimulationPolicyState().injectTargetedSSRestartTime = std::numeric_limits<double>::max();
 		}
 	}
 
 	bool maybeInjectDelay() {
-		if (g_network->isSimulated() && !g_simulator->speedUpSimulation && now() > g_simulator->injectSSDelayTime) {
+		if (g_network->isSimulated() && !g_simulator->speedUpSimulation &&
+		    now() > fdbSimulationPolicyState().injectSSDelayTime) {
 			CODE_PROBE(true, "Injecting SS targeted delay");
 			TraceEvent("SimSSInjectDelay", thisServerID).log();
-			g_simulator->injectSSDelayTime = std::numeric_limits<double>::max();
+			fdbSimulationPolicyState().injectSSDelayTime = std::numeric_limits<double>::max();
 			return true;
 		}
 		return false;
@@ -1940,8 +1936,6 @@ void validate(StorageServer* data, bool force = false) {
 					ASSERT(shard->getShardId() != 0UL && shard->getDesiredShardId() != 0UL);
 				}
 			}
-
-			// FIXME: do some change feed validation?
 
 			latest.validate();
 			validateRange(latest, allKeys, data->version.get(), data->thisServerID, data->durableVersion.get());
@@ -3142,9 +3136,11 @@ Future<Key> findKey(StorageServer* data,
 	if (sel.offset <= 1 && sel.offset >= 0)
 		maxBytes = std::numeric_limits<int>::max();
 	else
-		maxBytes = (g_network->isSimulated() && g_simulator->tssMode == ISimulator::TSSMode::Disabled && BUGGIFY)
-		               ? SERVER_KNOBS->BUGGIFY_LIMIT_BYTES
-		               : SERVER_KNOBS->STORAGE_LIMIT_BYTES;
+		maxBytes =
+		    (g_network->isSimulated() &&
+		     simulationPolicyHasCapability(ISimulationPolicy::Capability::LimitStorageServerReadBytes) && BUGGIFY)
+		        ? SERVER_KNOBS->BUGGIFY_LIMIT_BYTES
+		        : SERVER_KNOBS->STORAGE_LIMIT_BYTES;
 
 	GetKeyValuesReply rep = co_await readRange(data,
 	                                           version,
@@ -3240,31 +3236,31 @@ KeyRange getShardKeyRange(StorageServer* data, const KeySelectorRef& sel)
 }
 
 void maybeInjectConsistencyScanCorruption(UID thisServerID, GetKeyValuesRequest const& req, GetKeyValuesReply& reply) {
-	if (g_simulator->consistencyScanState != ISimulator::SimConsistencyScanState::Enabled_InjectCorruption ||
+	if (fdbSimulationPolicyState().consistencyScanState != FDBSimConsistencyScanState::Enabled_InjectCorruption ||
 	    !req.options.present() || !req.options.get().consistencyCheckStartVersion.present() ||
-	    !g_simulator->consistencyScanCorruptRequestKey.present()) {
+	    !fdbSimulationPolicyState().consistencyScanCorruptRequestKey.present()) {
 		return;
 	}
 
 	UID destination = req.reply.getEndpoint().token;
 
-	ASSERT(g_simulator->consistencyScanInjectedCorruptionType.present() ==
-	       g_simulator->consistencyScanInjectedCorruptionDestination.present());
+	ASSERT(fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.present() ==
+	       fdbSimulationPolicyState().consistencyScanInjectedCorruptionDestination.present());
 	// if we already injected a corruption, reinject it if this request was a retransmit of the same one we corrupted
 	// could also check that this storage sent the corruption but the reply endpoints should be globally unique so this
 	// covers it
-	if (g_simulator->consistencyScanInjectedCorruptionDestination.present() &&
-	    (g_simulator->consistencyScanInjectedCorruptionDestination.get() != destination)) {
+	if (fdbSimulationPolicyState().consistencyScanInjectedCorruptionDestination.present() &&
+	    (fdbSimulationPolicyState().consistencyScanInjectedCorruptionDestination.get() != destination)) {
 		return;
 	}
 
 	CODE_PROBE(true, "consistency check injecting corruption");
-	CODE_PROBE(g_simulator->consistencyScanInjectedCorruptionDestination.present() &&
-	               g_simulator->consistencyScanInjectedCorruptionDestination.get() == destination,
+	CODE_PROBE(fdbSimulationPolicyState().consistencyScanInjectedCorruptionDestination.present() &&
+	               fdbSimulationPolicyState().consistencyScanInjectedCorruptionDestination.get() == destination,
 	           "consistency check re-injecting corruption after retransmit",
 	           probe::decoration::rare);
 
-	g_simulator->consistencyScanInjectedCorruptionDestination = destination;
+	fdbSimulationPolicyState().consistencyScanInjectedCorruptionDestination = destination;
 	// FIXME: reinject same type of corruption once we enable other types
 
 	// FIXME: code probe for each type?
@@ -3272,7 +3268,8 @@ void maybeInjectConsistencyScanCorruption(UID thisServerID, GetKeyValuesRequest 
 	if (true /*deterministicRandom()->random01() < 0.3*/) {
 		// flip more flag
 		reply.more = !reply.more;
-		g_simulator->consistencyScanInjectedCorruptionType = ISimulator::SimConsistencyScanCorruptionType::FlipMoreFlag;
+		fdbSimulationPolicyState().consistencyScanInjectedCorruptionType =
+		    FDBSimConsistencyScanCorruptionType::FlipMoreFlag;
 	} else {
 		// FIXME: weird memory issues when messing with actual response data, enable and figure out later
 		ASSERT(false);
@@ -3286,27 +3283,27 @@ void maybeInjectConsistencyScanCorruption(UID thisServerID, GetKeyValuesRequest 
 
 		if (reply.data.empty()) {
 			// add row to empty response
-			g_simulator->consistencyScanInjectedCorruptionType =
-			    ISimulator::SimConsistencyScanCorruptionType::AddToEmpty;
-			reply.data.push_back_deep(
-			    reply.arena,
-			    KeyValueRef(g_simulator->consistencyScanCorruptRequestKey.get(), "consistencyCheckCorruptValue"_sr));
+			fdbSimulationPolicyState().consistencyScanInjectedCorruptionType =
+			    FDBSimConsistencyScanCorruptionType::AddToEmpty;
+			reply.data.push_back_deep(reply.arena,
+			                          KeyValueRef(fdbSimulationPolicyState().consistencyScanCorruptRequestKey.get(),
+			                                      "consistencyCheckCorruptValue"_sr));
 		} else if (deterministicRandom()->coinflip() || reply.data.back().value.empty()) {
 			// change value in non-empty response
-			g_simulator->consistencyScanInjectedCorruptionType =
-			    ISimulator::SimConsistencyScanCorruptionType::RemoveLastRow;
+			fdbSimulationPolicyState().consistencyScanInjectedCorruptionType =
+			    FDBSimConsistencyScanCorruptionType::RemoveLastRow;
 			reply.data.pop_back();
 		} else {
 			// chop off last byte of first value
-			g_simulator->consistencyScanInjectedCorruptionType =
-			    ISimulator::SimConsistencyScanCorruptionType::ChangeFirstValue;
+			fdbSimulationPolicyState().consistencyScanInjectedCorruptionType =
+			    FDBSimConsistencyScanCorruptionType::ChangeFirstValue;
 
 			reply.data[0].value = reply.data[0].value.substr(0, reply.data[0].value.size() - 1);
 		}
 	}
 
 	TraceEvent(SevWarnAlways, "InjectedConsistencyScanCorruption", thisServerID)
-	    .detail("CorruptionType", g_simulator->consistencyScanInjectedCorruptionType.get())
+	    .detail("CorruptionType", fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get())
 	    .detail("Version", req.version)
 	    .detail("Count", reply.data.size());
 }
@@ -4282,61 +4279,68 @@ static Future<std::pair<GetKeyValuesReply, GetKeyValuesReply>> fetchSourceAndRes
 	    .detail("Limit", limit)
 	    .detail("LimitBytes", limitBytes);
 
-	// Read source data from user key range (this SS must own it since DD sent request here)
-	Future<ErrorOr<GetKeyValuesReply>> sourceFuture =
-	    issueGetKeyValuesRequest(data, rangeToRead, version, limit, limitBytes);
-
-	// Read restored data from system key space
-	// NOTE: Use database transaction to read system keys since this SS might not own them
-	// IMPORTANT: Use same byte limits as source query to ensure comparable results, since restored keys
-	// are larger (include prefix), which could cause fewer keys to be returned when byte limit is reached
+	// Read BOTH source and restored data via database transactions to ensure consistent
+	// key ranges regardless of shard boundaries. Using the local SS for source reads
+	// can miss keys at shard boundaries after a bulkload restore.
+	ErrorOr<GetKeyValuesReply> sourceResult;
 	ErrorOr<GetKeyValuesReply> restoredResult;
 	try {
 		Transaction tr(data->cx);
 		tr.setVersion(version);
-		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-		GetRangeLimits limits(limit, limitBytes);
-		RangeResult restoredData = co_await tr.getRange(restoredRange, limits, Snapshot::False, Reverse::False);
+		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+		GetRangeLimits sourceLimits(limit, limitBytes);
+		RangeResult sourceData = co_await tr.getRange(rangeToRead, sourceLimits, Snapshot::False, Reverse::False);
 
-		// Convert RangeResult to GetKeyValuesReply format
+		// Convert source to GetKeyValuesReply format
+		GetKeyValuesReply sourceReply;
+		sourceReply.data.append_deep(sourceReply.arena, sourceData.begin(), sourceData.size());
+		sourceReply.more = sourceData.more;
+		sourceReply.version = version;
+		sourceResult = sourceReply;
+
+		// Read restored data with the same limits as source to ensure comparable results
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		GetRangeLimits restoredLimits(limit, limitBytes);
+		RangeResult restoredData = co_await tr.getRange(restoredRange, restoredLimits, Snapshot::False, Reverse::False);
+
+		// Convert restored to GetKeyValuesReply format
 		GetKeyValuesReply restoredReply;
 		restoredReply.data.append_deep(restoredReply.arena, restoredData.begin(), restoredData.size());
 		restoredReply.more = restoredData.more;
 		restoredReply.version = version;
 		restoredResult = restoredReply;
 	} catch (Error& e) {
-		restoredResult = e;
+		if (sourceResult.isError() || !sourceResult.present()) {
+			sourceResult = e;
+		} else {
+			restoredResult = e;
+		}
 	}
-
-	Future<ErrorOr<GetKeyValuesReply>> restoredFuture = Future<ErrorOr<GetKeyValuesReply>>(restoredResult);
-
-	co_await (success(sourceFuture) && success(restoredFuture));
 
 	// Check for errors
-	if (sourceFuture.get().isError()) {
-		throw sourceFuture.get().getError();
+	if (sourceResult.isError()) {
+		throw sourceResult.getError();
 	}
-	if (restoredFuture.get().isError()) {
-		throw restoredFuture.get().getError();
+	if (sourceResult.get().error.present()) {
+		throw sourceResult.get().error.get();
 	}
-	if (sourceFuture.get().get().error.present()) {
-		throw sourceFuture.get().get().error.get();
+	if (restoredResult.isError()) {
+		throw restoredResult.getError();
 	}
-	if (restoredFuture.get().get().error.present()) {
-		throw restoredFuture.get().get().error.get();
+	if (restoredResult.get().error.present()) {
+		throw restoredResult.get().error.get();
 	}
 
 	// Log what we fetched
 	TraceEvent("SSAuditRestoreFetchResult", data->thisServerID)
-	    .detail("SourceKeys", sourceFuture.get().get().data.size())
-	    .detail("RestoredKeys", restoredFuture.get().get().data.size())
-	    .detail("SourceBytes", sourceFuture.get().get().data.expectedSize())
-	    .detail("RestoredBytes", restoredFuture.get().get().data.expectedSize())
-	    .detail("SourceMore", sourceFuture.get().get().more)
-	    .detail("RestoredMore", restoredFuture.get().get().more);
+	    .detail("SourceKeys", sourceResult.get().data.size())
+	    .detail("RestoredKeys", restoredResult.get().data.size())
+	    .detail("SourceBytes", sourceResult.get().data.expectedSize())
+	    .detail("RestoredBytes", restoredResult.get().data.expectedSize())
+	    .detail("SourceMore", sourceResult.get().more)
+	    .detail("RestoredMore", restoredResult.get().more);
 
-	co_return std::make_pair(sourceFuture.get().get(), restoredFuture.get().get());
+	co_return std::make_pair(sourceResult.get(), restoredResult.get());
 }
 
 // Helper: Compare source and restored data, returning validation errors
@@ -4514,11 +4518,13 @@ Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
 	KeyRange rangeToRead = req.range;
 	Key rangeToReadBegin = req.range.begin;
 	KeyRange claimRange;
-	int limit = 1e4;
+	int limit = SERVER_KNOBS->AUDIT_RESTORE_BATCH_KEY_LIMIT; // Use knob instead of hardcoded 10K
 	int limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 	int64_t readBytes = 0;
+	Error nonRetryableError;
 	int64_t numValidatedKeys = 0;
 	int64_t validatedBytes = 0;
+	int64_t lastPersistBytes = 0; // Track when we last persisted progress
 	bool complete = false;
 	double startTime = now();
 	Reference<IRateControl> rateLimiter =
@@ -4554,6 +4560,53 @@ Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
 					readBytes = sourceReply.data.expectedSize() + restoredReply.data.expectedSize();
 					validatedBytes += readBytes;
 
+					// FAST-PATH: Detect completely empty sides early and fail immediately.
+					// This prevents iterating through millions of keys when one side is empty.
+
+					// Case 1: Baseline (restored) is completely empty but source has data
+					// This catches the case where mode=BOTH backup created empty range files.
+					if (numValidatedKeys == 0 && restoredReply.data.empty() && !restoredReply.more &&
+					    !sourceReply.data.empty()) {
+						std::string error =
+						    format("Baseline restore data is completely empty but source has %d keys! "
+						           "This likely means the backup's range file snapshot was empty (mode=BOTH bug). "
+						           "First source key: %s",
+						           sourceReply.data.size(),
+						           sourceReply.data.size() > 0
+						               ? Traceable<StringRef>::toString(sourceReply.data[0].key).c_str()
+						               : "N/A");
+						TraceEvent(SevError, "SSAuditRestoreEmptyBaseline", data->thisServerID)
+						    .detail("AuditID", req.id)
+						    .detail("AuditRange", req.range)
+						    .detail("SourceKeyCount", sourceReply.data.size())
+						    .detail("RestoredKeyCount", restoredReply.data.size())
+						    .detail("ErrorMessage", error);
+						errors.push_back(error);
+						break; // Exit loop immediately
+					}
+
+					// Case 2: Source (bulkload restore) is completely empty but baseline has data
+					// This catches the case where bulkload restore failed but baseline worked.
+					if (numValidatedKeys == 0 && sourceReply.data.empty() && !sourceReply.more &&
+					    !restoredReply.data.empty()) {
+						std::string error =
+						    format("Bulkload restore data is completely empty but baseline has %d keys! "
+						           "This likely means the bulkload restore failed. "
+						           "First baseline key: %s",
+						           restoredReply.data.size(),
+						           restoredReply.data.size() > 0
+						               ? Traceable<StringRef>::toString(restoredReply.data[0].key).c_str()
+						               : "N/A");
+						TraceEvent(SevError, "SSAuditRestoreEmptySource", data->thisServerID)
+						    .detail("AuditID", req.id)
+						    .detail("AuditRange", req.range)
+						    .detail("SourceKeyCount", sourceReply.data.size())
+						    .detail("RestoredKeyCount", restoredReply.data.size())
+						    .detail("ErrorMessage", error);
+						errors.push_back(error);
+						break; // Exit loop immediately
+					}
+
 					// Check if we've completed reading
 					if (!sourceReply.more) {
 						complete = true;
@@ -4573,15 +4626,19 @@ Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
 					                                      lastKey,
 					                                      numValidatedKeys);
 
-					// Update progress in the database
+					// Update progress in the database (only persist periodically to reduce transaction overhead)
 					KeyRange completeRange = Standalone(KeyRangeRef(rangeToRead.begin, keyAfter(lastKey)));
-					if (!complete && !completeRange.empty() && claimRange.begin == completeRange.begin) {
+					bool shouldPersist =
+					    (validatedBytes - lastPersistBytes) >= SERVER_KNOBS->AUDIT_PROGRESS_PERSIST_BYTES_INTERVAL;
+					if (!complete && shouldPersist && !completeRange.empty() &&
+					    claimRange.begin == completeRange.begin) {
 						claimRange = claimRange & completeRange;
 						AuditStorageState progressState(req.id, claimRange, req.getType());
 						progressState.setPhase(AuditPhase::Running);
 						progressState.ddId = req.ddId;
 						progressState.auditServerId = data->thisServerID;
 						co_await persistAuditStateByRange(data->cx, progressState);
+						lastPersistBytes = validatedBytes;
 					}
 
 					// Apply rate limiting
@@ -4603,7 +4660,23 @@ Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
 					if (e.code() == error_code_actor_cancelled) {
 						throw e;
 					}
-					throw;
+					nonRetryableError = e;
+				}
+				// Handle errors outside catch — co_await not allowed in handlers
+				if (nonRetryableError.isValid() && nonRetryableError.code() != error_code_success) {
+					if (nonRetryableError.code() == error_code_future_version ||
+					    nonRetryableError.code() == error_code_transaction_too_old ||
+					    nonRetryableError.code() == error_code_server_overloaded) {
+						TraceEvent(SevWarn, "SSAuditRestoreRetryableError", data->thisServerID)
+						    .detail("AuditID", req.id)
+						    .detail("Error", nonRetryableError.what())
+						    .detail("Version", version)
+						    .detail("Range", rangeToRead);
+						nonRetryableError = Error();
+						co_await delay(1.0);
+						continue;
+					}
+					throw nonRetryableError;
 				}
 			}
 
@@ -4729,10 +4802,10 @@ Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRequest 
 							serverListEntries.push_back(tr.get(serverListKeyFor(id)));
 						}
 					}
-					co_await store(serverListValues, getAll(serverListEntries));
+					serverListValues = co_await getAll(serverListEntries);
 
 					// Decide version to compare
-					co_await store(version, tr.getReadVersion());
+					version = co_await tr.getReadVersion();
 
 					// Read remote servers
 					for (const auto& v : serverListValues) {
@@ -5108,7 +5181,7 @@ Future<Void> getRangeDataToDump(StorageServer* data,
 			localReq.limitBytes = SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT;
 			localReq.tags = TagSet();
 			data->actors.add(getKeyValuesQ(data, localReq));
-			co_await store(rep, errorOr(localReq.reply.getFuture()));
+			rep = co_await errorOr(localReq.reply.getFuture());
 			if (rep.isError()) {
 				throw rep.getError();
 			}
@@ -5218,7 +5291,7 @@ Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 
 			// Get version to dump
 			tr.reset();
-			co_await store(versionToDump, tr.getReadVersion());
+			versionToDump = co_await tr.getReadVersion();
 
 			// Read data
 			// TODO(BulkDump): Read data from other servers at the versionToDump as much as possible
@@ -5837,7 +5910,8 @@ Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest 
 				// Even if TSS mode is Disabled, this may be the second test in a restarting test where the first run
 				// had it enabled.
 				int byteLimit =
-				    (BUGGIFY && g_network->isSimulated() && g_simulator->tssMode == ISimulator::TSSMode::Disabled &&
+				    (BUGGIFY && g_network->isSimulated() &&
+				     simulationPolicyHasCapability(ISimulationPolicy::Capability::LimitStorageServerReadBytes) &&
 				     !data->isTss() && !data->isSSWithTSSPair())
 				        ? 1
 				        : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
@@ -7746,12 +7820,11 @@ Future<Void> fetchShardCheckpoint(StorageServer* data, MoveInShard* moveInShard,
 		{
 			Error err;
 			try {
-				co_await store(records,
-				               getCheckpointMetaData(data->cx,
-				                                     moveInShard->ranges(),
-				                                     moveInShard->meta->createVersion,
-				                                     DataMoveRocksCF,
-				                                     moveInShard->dataMoveId()));
+				records = co_await getCheckpointMetaData(data->cx,
+				                                         moveInShard->ranges(),
+				                                         moveInShard->meta->createVersion,
+				                                         DataMoveRocksCF,
+				                                         moveInShard->dataMoveId());
 				if (moveInShard->failed()) {
 					co_return;
 				}
@@ -7778,7 +7851,7 @@ Future<Void> fetchShardCheckpoint(StorageServer* data, MoveInShard* moveInShard,
 					}
 					fFetchCheckpoint.push_back(fetchCheckpointRanges(data->cx, record, checkpointDir, { range }));
 				}
-				co_await store(localRecords, getAll(fFetchCheckpoint));
+				localRecords = co_await getAll(fFetchCheckpoint);
 				if (moveInShard->failed()) {
 					co_return;
 				}
@@ -8103,9 +8176,8 @@ Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 	bool conductBulkLoad = moveInShard->meta->conductBulkLoad;
 	if (conductBulkLoad) {
 		// Get the bulkload task metadata from the data move metadata. For details, see the comments in the fetchKeys.
-		co_await store(bulkLoadTaskState,
-		               getBulkLoadTaskStateFromDataMove(
-		                   data->cx, moveInShard->dataMoveId(), data->version.get(), data->thisServerID));
+		bulkLoadTaskState = co_await getBulkLoadTaskStateFromDataMove(
+		    data->cx, moveInShard->dataMoveId(), data->version.get(), data->thisServerID);
 	}
 
 	while (true) {
@@ -9146,15 +9218,12 @@ void StorageServer::addMutation(Version version,
                                 KeyRangeRef const& shard,
                                 UpdateEagerReadInfo* eagerReads) {
 	MutationRef expanded = mutation;
-	MutationRef
-	    nonExpanded; // need to keep non-expanded but atomic converted version of clear mutations for change feeds
 	auto& mLog = addVersionToMutationLog(version);
 
 	if (!convertAtomicOp(expanded, data(), eagerReads, mLog.arena())) {
 		return;
 	}
 	if (expanded.type == MutationRef::ClearRange) {
-		nonExpanded = expanded;
 		expandClear(expanded, data(), eagerReads, shard.end);
 	}
 	expanded = addMutationToMutationLog(mLog, expanded);
@@ -9536,8 +9605,9 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			}
 
 			if (g_network->isSimulated() && data->isTss() &&
-			    g_simulator->tssMode == ISimulator::TSSMode::EnabledAddDelay && !g_simulator->speedUpSimulation &&
-			    data->tssFaultInjectTime.present() && data->tssFaultInjectTime.get() < now()) {
+			    simulationPolicyHasCapability(ISimulationPolicy::Capability::StorageReplicaDelay) &&
+			    !g_simulator->speedUpSimulation && data->tssFaultInjectTime.present() &&
+			    data->tssFaultInjectTime.get() < now()) {
 				if (deterministicRandom()->random01() < 0.01) {
 					TraceEvent(SevWarnAlways, "TSSInjectDelayForever", data->thisServerID).log();
 					// small random chance to just completely get stuck here, each tss should eventually hit this in
@@ -9785,7 +9855,7 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					// Drop non-private mutations if TSS fault injection is enabled in simulation, or if this is a TSS
 					// in quarantine.
 					if (g_network->isSimulated() && data->isTss() && !g_simulator->speedUpSimulation &&
-					    g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations &&
+					    simulationPolicyHasCapability(ISimulationPolicy::Capability::StorageReplicaMutationDrop) &&
 					    data->tssFaultInjectTime.present() && data->tssFaultInjectTime.get() < now() &&
 					    (msg.type == MutationRef::SetValue || msg.type == MutationRef::ClearRange) &&
 					    (msg.param1.size() < 2 || msg.param1[0] != 0xff || msg.param1[1] != 0xff) &&
@@ -11578,7 +11648,7 @@ Future<Void> watchValueWaitForVersion(StorageServer* self,
 
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 	try {
-		co_await success(waitForVersionNoTooOld(self, req.version));
+		co_await waitForVersionNoTooOld(self, req.version);
 		stream.send(req);
 	} catch (Error& e) {
 		if (!canReplyWith(e))
@@ -12109,7 +12179,7 @@ Future<Void> memoryStoreRecover(IKeyValueStore* store, Reference<IClusterConnect
 	// create a temp client connect to DB
 	Database cx = Database::createDatabase(connRecord, ApiVersion::LATEST_VERSION);
 
-	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
 	int noCanRemoveCount = 0;
 	while (true) {
 		{
@@ -12236,7 +12306,7 @@ ACTOR Future<Void> replaceInterface(StorageServer* self, StorageServerInterface 
 
 Future<Void> replaceTSSInterface(StorageServer* self, StorageServerInterface ssi) {
 	// RYW for KeyBackedMap
-	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+	auto tr = makeReference<ReadYourWritesTransaction>(self->cx);
 	KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
 
 	ASSERT(ssi.isTss());
@@ -12458,14 +12528,14 @@ Future<Void> storageServer(IKeyValueStore* persistentData,
 }
 
 // for recovering an existing storage server
-ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
-                                 StorageServerInterface ssi,
-                                 Reference<AsyncVar<ServerDBInfo> const> db,
-                                 std::string folder,
-                                 Promise<Void> recovered,
-                                 Reference<IClusterConnectionRecord> connRecord) {
-	state StorageServer self(persistentData, db, ssi);
-	state Future<Void> ssCore;
+Future<Void> storageServer(IKeyValueStore* persistentData,
+                           StorageServerInterface ssi,
+                           Reference<AsyncVar<ServerDBInfo> const> db,
+                           std::string folder,
+                           Promise<Void> recovered,
+                           Reference<IClusterConnectionRecord> connRecord) {
+	StorageServer self(persistentData, db, ssi);
+	Future<Void> ssCore;
 	self.folder = folder;
 	self.checkpointFolder = joinPath(self.folder, serverCheckpointFolder);
 	self.fetchedCheckpointFolder = joinPath(self.folder, fetchedCheckpointFolder);
@@ -12485,28 +12555,30 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	clearFileFolder(self.bulkLoadFolder, self.thisServerID, /*ignoreError=*/false);
 
 	self.actors.add(rocksdbLogCleaner(folder));
+	Error err;
 	try {
-		state double start = now();
+		double start = now();
 		TraceEvent("StorageServerRebootStart", self.thisServerID).log();
 
-		wait(self.storage.init());
-		choose {
-			// after a rollback there might be uncommitted changes.
-			// for memory storage engine type, wait until recovery is done before commit
-			when(wait(self.storage.commit())) {}
-
-			when(wait(memoryStoreRecover(persistentData, connRecord, self.thisServerID))) {
-				TraceEvent("DisposeStorageServer", self.thisServerID).log();
-				throw worker_removed();
-			}
+		co_await self.storage.init();
+		// after a rollback there might be uncommitted changes.
+		// for memory storage engine type, wait until recovery is done before commit
+		auto res =
+		    co_await race(self.storage.commit(), memoryStoreRecover(persistentData, connRecord, self.thisServerID));
+		if (res.index() == 1) {
+			TraceEvent("DisposeStorageServer", self.thisServerID).log();
+			throw worker_removed();
+		} else if (res.index() != 0) {
+			UNREACHABLE();
 		}
+
 		++self.counters.kvCommits;
 
-		bool ok = wait(self.storage.restoreDurableState());
+		bool ok = co_await self.storage.restoreDurableState();
 		if (!ok) {
 			if (recovered.canBeSet())
 				recovered.send(Void());
-			return Void();
+			co_return;
 		}
 		TraceEvent("SSTimeRestoreDurableState", self.thisServerID).detail("TimeTaken", now() - start);
 
@@ -12529,48 +12601,48 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		if (recovered.canBeSet())
 			recovered.send(Void());
 
-		state Future<Void> f = storageInterfaceRegistration(&self, ssi, {});
-		wait(delay(0));
-		ErrorOr<Void> e = wait(errorOr(f));
+		Future<Void> f = storageInterfaceRegistration(&self, ssi, {});
+		co_await delay(0);
+		ErrorOr<Void> e = co_await errorOr(f);
 		if (e.isError()) {
 			throw f.getError();
 		}
 
 		self.interfaceRegistered =
 		    storageInterfaceRegistration(&self, ssi, self.registerInterfaceAcceptingRequests.getFuture());
-		wait(delay(0));
+		co_await delay(0);
 
 		TraceEvent("StorageServerStartingCore", self.thisServerID).detail("TimeTaken", now() - start);
 
 		ssCore = storageServerCore(&self, ssi);
-		wait(ssCore);
+		co_await ssCore;
 
 		throw internal_error();
 	} catch (Error& e) {
+		err = e;
+	}
 
-		self.ssLock->halt();
+	self.ssLock->halt();
 
-		if (self.byteSampleRecovery.isValid()) {
-			self.byteSampleRecovery.cancel();
-		}
+	if (self.byteSampleRecovery.isValid()) {
+		self.byteSampleRecovery.cancel();
+	}
 
-		if (recovered.canBeSet())
-			recovered.send(Void());
+	if (recovered.canBeSet())
+		recovered.send(Void());
 
-		// If the storage server dies while something that uses self is still on the stack,
-		// we want that actor to complete before we terminate and that memory goes out of scope
-		state Error err = e;
-		if (storageServerTerminated(self, persistentData, err)) {
-			ssCore.cancel();
-			self.actors = ActorCollection(false);
-			wait(delay(0));
-			return Void();
-		}
+	// If the storage server dies while something that uses self is still on the stack,
+	// we want that actor to complete before we terminate and that memory goes out of scope
+	if (storageServerTerminated(self, persistentData, err)) {
 		ssCore.cancel();
 		self.actors = ActorCollection(false);
-		wait(delay(0));
-		throw err;
+		co_await delay(0);
+		co_return;
 	}
+	ssCore.cancel();
+	self.actors = ActorCollection(false);
+	co_await delay(0);
+	throw err;
 }
 
 #ifndef __INTEL_COMPILER
