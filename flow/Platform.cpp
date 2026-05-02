@@ -170,6 +170,8 @@ static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<u
 #include <netinet/in.h>
 #include <sys/mount.h>
 #include <sys/param.h>
+/* Needed for getentropy() */
+#include <sys/random.h>
 #include <sys/sysctl.h>
 #include <sys/syslimits.h>
 #include <sys/uio.h>
@@ -2201,31 +2203,25 @@ void setAffinity(int proc) {
 
 namespace platform {
 
-int getRandomSeed() {
+uint64_t getRandomSeed() {
 	INJECT_FAULT(platform_error, "getRandomSeed"); // getting a random seed failed
-	int randomSeed;
-
+	uint64_t randomSeed;
 #ifdef _WIN32
-	if (rand_s((unsigned int*)&randomSeed) != 0) {
+	uint32_t high, low;
+	if (rand_s(&low) != 0 || rand_s(&high) != 0 {
 		TraceEvent(SevError, "WindowsRandomSeedError").log();
 		throw platform_error();
 	}
+	randomSeed = (uint64_t(high) << 32) | uint64_t(low);
 #else
-	int devRandom = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
-	if (devRandom == -1) {
-		TraceEvent(SevError, "OpenURandom").GetLastError();
-		throw platform_error();
-	}
-	int nbytes = read(devRandom, &randomSeed, sizeof(randomSeed));
-	close(devRandom);
-	if (nbytes != sizeof(randomSeed)) {
-		TraceEvent(SevError, "ReadURandom").GetLastError();
+	if (getentropy(&randomSeed, sizeof(randomSeed)) != 0) {
+		TraceEvent(SevError, "GetEntropyError").GetLastError();
 		throw platform_error();
 	}
 #endif
-
 	return randomSeed;
 }
+
 } // namespace platform
 
 std::string joinPath(std::string const& directory, std::string const& filename) {

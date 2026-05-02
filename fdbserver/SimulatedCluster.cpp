@@ -2658,7 +2658,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 using namespace std::literals;
 
 // Actor that waits for a specified simulation time and then resets the random seed
-Future<Void> reseedRandomAtTime(double waitTime, uint32_t newSeed) {
+Future<Void> reseedRandomAtTime(double waitTime, uint64_t newSeed) {
 	co_await delay(waitTime);
 	TraceEvent("ResettingRandomSeed").detail("WaitTime", waitTime).detail("NewSeed", newSeed);
 	deterministicRandom()->resetSeed(newSeed);
@@ -2813,7 +2813,7 @@ static Future<Void> simulationSetupAndRunImpl(std::string dataFolder,
 		// If reseedTime is set, schedule a random seed reset at a random time between [0, reseedTime]
 		if (reseedTime >= 0.0) {
 			double actualReseedTime = nondeterministicRandom()->random01() * reseedTime;
-			uint32_t newSeed = platform::getRandomSeed();
+			uint64_t newSeed = platform::getRandomSeed();
 			TraceEvent("SchedulingRandomSeedReset")
 			    .detail("ReseedTimeMax", reseedTime)
 			    .detail("ActualReseedTime", actualReseedTime)

@@ -48,7 +48,7 @@ struct FlowTestOptions {
 	std::string testPattern;
 	std::vector<std::string> testsIgnored;
 	std::string dataDir = "flow_test_data";
-	uint32_t randomSeed = 0;
+	uint64_t randomSeed = 0;
 	int maxTestCases = -1;
 	bool cleanupAfterTests = true;
 	bool listTests = false;
@@ -161,7 +161,7 @@ bool parseArgs(int argc, char** argv, FlowTestOptions* options) {
 			options->dataDir = args.OptionArg();
 			break;
 		case OPT_SEED:
-			if (!parseUInt32(args.OptionArg(), &options->randomSeed)) {
+			if (!parseUInt64(args.OptionArg(), &options->randomSeed)) {
 				fmt::print(stderr, "ERROR: --seed requires a uint32 value\n");
 				return false;
 			}
@@ -332,7 +332,7 @@ int main(int argc, char** argv) {
 	fmt::print(stdout, "Random seed is {}\n", options.randomSeed);
 
 	std::string originalWorkingDirectory = platform::getWorkingDirectory();
-	std::string runDirectory = joinPath("/tmp", format("flow_test.%d.%u", ::getpid(), options.randomSeed));
+	std::string runDirectory = joinPath("/tmp", format("flow_test.%d.%llu", ::getpid(), options.randomSeed));
 	platform::createDirectory(runDirectory);
 	if (::chdir(runDirectory.c_str()) != 0) {
 		fmt::print(stderr, "ERROR: Could not chdir to {}\n", runDirectory);
