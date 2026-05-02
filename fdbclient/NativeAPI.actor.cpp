@@ -25,6 +25,7 @@
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <random>
 #include <regex>
 #include <string>
 #include <unordered_set>
@@ -4966,9 +4967,19 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 	case FDBTransactionOptions::AUTOMATIC_IDEMPOTENCY:
 		validateOptionValueNotPresent(value);
 		if (!tr.idempotencyId.valid()) {
-			tr.idempotencyId = IdempotencyIdRef(
-			    tr.arena,
-			    IdempotencyIdRef(BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned())));
+			StringRef id = makeString(16, tr.arena);
+			if (g_network->isSimulated()) {
+				deterministicRandom()->randomBytes(mutateString(id), 16);
+			} else {
+				// Seeded once per thread from OS entropy; mt19937_64 is sufficient
+				// since idempotency IDs require collision resistance, not cryptographic
+				// unpredictability.
+				static thread_local std::mt19937_64 rng(
+				    (uint64_t(uint32_t(platform::getRandomSeed())) << 32) | uint32_t(platform::getRandomSeed()));
+				uint64_t buf[2] = { rng(), rng() };
+				memcpy(mutateString(id), buf, 16);
+			}
+			tr.idempotencyId = IdempotencyIdRef(id);
 		}
 		trState->automaticIdempotency = true;
 		break;
