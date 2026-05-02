@@ -4971,11 +4971,15 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 			if (g_network->isSimulated()) {
 				deterministicRandom()->randomBytes(mutateString(id), 16);
 			} else {
-				// Seeded once per thread from OS entropy; mt19937_64 is sufficient
-				// since idempotency IDs require collision resistance, not cryptographic
-				// unpredictability.
-				static thread_local std::mt19937_64 rng(
-				    (uint64_t(uint32_t(platform::getRandomSeed())) << 32) | uint32_t(platform::getRandomSeed()));
+				// Seeded once per thread with 256 bytes of OS entropy via seed_seq;
+				// mt19937_64 is sufficient since idempotency IDs require collision
+				// resistance, not cryptographic unpredictability.
+				static thread_local std::mt19937_64 rng = []() {
+					uint32_t seed_data[64];
+					platform::getRandomBytes(seed_data, sizeof(seed_data));
+					std::seed_seq seq(seed_data, seed_data + 64);
+					return std::mt19937_64(seq);
+				}();
 				uint64_t buf[2] = { rng(), rng() };
 				memcpy(mutateString(id), buf, 16);
 			}
