@@ -254,11 +254,14 @@ public:
 
 	int activeRelocations;
 	int queuedRelocations;
+	int pendingGateRelocations; // forwarded by pipelineGateActor but not yet consumed by DDQueue
 	int64_t bytesWritten;
 	int teamSize;
 	int singleRegionTeamSize;
 
-	int pipelineSize() const { return activeRelocations + queuedRelocations; }
+	int pipelineSize() const { return pendingGateRelocations + activeRelocations + queuedRelocations; }
+
+	void updatePipelineFull();
 
 	Reference<AsyncVar<bool>> pipelineFull;
 

@@ -570,14 +570,33 @@ DDQueue::DDQueue(DDQueueInitParams const& params)
     finishMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
     cleanUpDataMoveParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
     fetchSourceLock(new FlowLock(SERVER_KNOBS->DD_FETCH_SOURCE_PARALLELISM)), activeRelocations(0),
-    queuedRelocations(0), bytesWritten(0), teamSize(params.teamSize), singleRegionTeamSize(params.singleRegionTeamSize),
-    pipelineFull(new AsyncVar<bool>(false)), output(params.relocationProducer), input(params.relocationConsumer),
-    getShardMetrics(params.getShardMetrics), getTopKMetrics(params.getTopKMetrics), lastInterval(0),
-    suppressIntervals(0), rawProcessingUnhealthy(new AsyncVar<bool>(false)),
-    rawProcessingWiggle(new AsyncVar<bool>(false)), unhealthyRelocations(0),
-    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")), moveReusePhysicalShard(0),
-    moveCreateNewPhysicalShard(0), retryFindDstReasonCount(static_cast<int>(RetryFindDstReason::NumberOfTypes), 0),
+    queuedRelocations(0), pendingGateRelocations(0), bytesWritten(0), teamSize(params.teamSize),
+    singleRegionTeamSize(params.singleRegionTeamSize), pipelineFull(new AsyncVar<bool>(false)),
+    output(params.relocationProducer), input(params.relocationConsumer), getShardMetrics(params.getShardMetrics),
+    getTopKMetrics(params.getTopKMetrics), lastInterval(0), suppressIntervals(0),
+    rawProcessingUnhealthy(new AsyncVar<bool>(false)), rawProcessingWiggle(new AsyncVar<bool>(false)),
+    unhealthyRelocations(0), movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")),
+    moveReusePhysicalShard(0), moveCreateNewPhysicalShard(0),
+    retryFindDstReasonCount(static_cast<int>(RetryFindDstReason::NumberOfTypes), 0),
     moveBytesRate(SERVER_KNOBS->DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL) {}
+
+void DDQueue::updatePipelineFull() {
+	if (pipelineSize() >= SERVER_KNOBS->DD_MAX_PIPELINE_MOVES && !pipelineFull->get()) {
+		pipelineFull->set(true);
+		TraceEvent("DDPipelineFullSet", distributorId)
+		    .suppressFor(30.0)
+		    .detail("PipelineSize", pipelineSize())
+		    .detail("PendingGateRelocations", pendingGateRelocations)
+		    .detail("PipelineLimit", SERVER_KNOBS->DD_MAX_PIPELINE_MOVES);
+	} else if (pipelineSize() < SERVER_KNOBS->DD_MAX_PIPELINE_MOVES && pipelineFull->get()) {
+		pipelineFull->set(false);
+		TraceEvent("DDPipelineFullCleared", distributorId)
+		    .suppressFor(30.0)
+		    .detail("PipelineSize", pipelineSize())
+		    .detail("PendingGateRelocations", pendingGateRelocations)
+		    .detail("PipelineLimit", SERVER_KNOBS->DD_MAX_PIPELINE_MOVES);
+	}
+}
 
 void DDQueue::startRelocation(int priority, int healthPriority) {
 	// Although PRIORITY_TEAM_REDUNDANT has lower priority than split and merge shard movement,
@@ -597,13 +616,7 @@ void DDQueue::startRelocation(int priority, int healthPriority) {
 		rawProcessingWiggle->set(true);
 	}
 	priority_relocations[priority]++;
-	if (pipelineSize() >= SERVER_KNOBS->DD_MAX_PIPELINE_MOVES && !pipelineFull->get()) {
-		pipelineFull->set(true);
-		TraceEvent("DDPipelineFullSet", distributorId)
-		    .suppressFor(30.0)
-		    .detail("PipelineSize", pipelineSize())
-		    .detail("PipelineLimit", SERVER_KNOBS->DD_MAX_PIPELINE_MOVES);
-	}
+	updatePipelineFull();
 }
 
 void DDQueue::finishRelocation(int priority, int healthPriority) {
@@ -619,13 +632,7 @@ void DDQueue::finishRelocation(int priority, int healthPriority) {
 		}
 	}
 	priority_relocations[priority]--;
-	if (pipelineSize() < SERVER_KNOBS->DD_MAX_PIPELINE_MOVES && pipelineFull->get()) {
-		pipelineFull->set(false);
-		TraceEvent("DDPipelineFullCleared", distributorId)
-		    .suppressFor(30.0)
-		    .detail("PipelineSize", pipelineSize())
-		    .detail("PipelineLimit", SERVER_KNOBS->DD_MAX_PIPELINE_MOVES);
-	}
+	updatePipelineFull();
 	if (priority_relocations[SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE] == 0) {
 		rawProcessingWiggle->set(false);
 	}
@@ -771,20 +778,6 @@ void DDQueue::validate() {
 		for (auto it = priority_relocations.begin(); it != priority_relocations.end(); ++it)
 			testActive += it->second;
 		ASSERT(activeRelocations + queuedRelocations == testActive);
-	}
-
-	// launchQueuedWork can inflate activeRelocations beyond the gate limit because a single
-	// queued item may split into N sub-ranges when it overlaps existing in-flight ranges,
-	// and cancelled in-flight actors don't decrement activeRelocations. With small BUGGIFY
-	// limits (e.g., 5), this inflation can be a large multiple of the limit. Log a warning
-	// for diagnosis; the gating mechanism itself is working correctly.
-	if (pipelineSize() > SERVER_KNOBS->DD_MAX_PIPELINE_MOVES * 2) {
-		TraceEvent(SevWarnAlways, "DDPipelineSizeExceeded", distributorId)
-		    .suppressFor(30.0)
-		    .detail("PipelineSize", pipelineSize())
-		    .detail("PipelineLimit", SERVER_KNOBS->DD_MAX_PIPELINE_MOVES)
-		    .detail("ActiveRelocations", activeRelocations)
-		    .detail("QueuedRelocations", queuedRelocations);
 	}
 }
 
@@ -2783,20 +2776,21 @@ Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, DataMovem
 // The global isDDPipelineControlEnabled() flag (cleared by disableDDPipelineControl()) also
 // bypasses the gate, allowing the test harness to open up the pipeline so DD can quiesce.
 // We poll it via delay() rather than AsyncVar to avoid cross-process callbacks in simulation.
-ACTOR Future<Void> pipelineGateActor(FutureStream<RelocateShard> input,
-                                     PromiseStream<RelocateShard> output,
-                                     Reference<AsyncVar<bool>> pipelineFull,
-                                     UID distributorId) {
+ACTOR Future<Void> pipelineGateActor(Reference<DDQueue> self,
+                                     FutureStream<RelocateShard> input,
+                                     PromiseStream<RelocateShard> output) {
 	loop {
 		state RelocateShard rs = waitNext(input);
 		if (!rs.cancelled && rs.priority < SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY) {
-			while (pipelineFull->get() && isDDPipelineControlEnabled()) {
-				TraceEvent("DDPipelineFull", distributorId)
+			while (self->pipelineFull->get() && isDDPipelineControlEnabled()) {
+				TraceEvent("DDPipelineFull", self->distributorId)
 				    .suppressFor(30.0)
-				    .detail("PipelineFull", pipelineFull->get());
-				wait(pipelineFull->onChange() || delay(1.0));
+				    .detail("PipelineFull", self->pipelineFull->get());
+				wait(self->pipelineFull->onChange() || delay(1.0));
 			}
 		}
+		self->pendingGateRelocations++;
+		self->updatePipelineFull();
 		output.send(rs);
 	}
 }
@@ -2822,8 +2816,7 @@ struct DDQueueImpl {
 		// Gate the input stream by the pipeline limit so that DD never tracks more
 		// than DD_MAX_PIPELINE_MOVES relocations at once (queued + in-flight).
 		state PromiseStream<RelocateShard> gatedRelocationStream;
-		state Future<Void> pipelineGate =
-		    pipelineGateActor(self->input, gatedRelocationStream, self->pipelineFull, self->distributorId);
+		state Future<Void> pipelineGate = pipelineGateActor(self, self->input, gatedRelocationStream);
 
 		for (int i = 0; i < self->teamCollections.size(); i++) {
 			ddQueueFutures.push_back(
@@ -2860,6 +2853,7 @@ struct DDQueueImpl {
 
 				choose {
 					when(RelocateShard rs = waitNext(gatedRelocationStream.getFuture())) {
+						self->pendingGateRelocations--;
 						if (rs.isRestore()) {
 							ASSERT(rs.dataMove != nullptr);
 							ASSERT(rs.dataMoveId.isValid());
@@ -2928,6 +2922,7 @@ struct DDQueueImpl {
 						    .detail("BytesWrittenAverageRate", self->moveBytesRate.getAverage())
 						    .detail("PipelineSize", self->pipelineSize())
 						    .detail("PipelineLimit", SERVER_KNOBS->DD_MAX_PIPELINE_MOVES)
+						    .detail("PendingGateRelocations", self->pendingGateRelocations)
 						    .detail("PriorityRecoverMove",
 						            self->priority_relocations[SERVER_KNOBS->PRIORITY_RECOVER_MOVE])
 						    .detail("PriorityRebalanceUnderutilizedTeam",
