@@ -35,6 +35,8 @@ struct ValueType {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
+		// `automatic` is appended after the original two fields. Safe with Unversioned() because
+		// this struct is only written and read within the same test run — never persisted across binaries.
 		serializer(ar, idempotencyId, createdTime, automatic);
 	}
 };
@@ -293,46 +295,62 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 	}
 
 	// Only non-automatic IDs are deleted exclusively by the cleaner, so use them to track cleaner progress.
+	// Returns -1 if no non-automatic IDs remain (either none were created or all have been cleaned up).
 	Future<int64_t> getOldestCreatedTime(Database db) {
-		ReadYourWritesTransaction tr(db);
-		Key key;
-		Version commitVersion{ 0 };
-
 		RangeResult result = co_await runRYWTransaction(db, [](Reference<ReadYourWritesTransaction> tr) {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			return tr->getRange(idempotencyIdKeys, CLIENT_KNOBS->TOO_MANY);
 		});
+
+		ASSERT(!result.more);
 
 		if (result.empty()) {
 			TraceEvent("AutomaticIdempotencyNoIdsLeft").log();
 			co_return -1;
 		}
 
-		for (const auto& kv : result) {
-			int64_t timestamp;
-			std::vector<Key> keys = idempotencyKeyValueToTestKeys(kv, &commitVersion, &timestamp);
-
-			for (const auto& currentKey : keys) {
-				key = currentKey;
-				// We use a different transaction because we set READ_SYSTEM_KEYS above, and we might be using a tenant.
-				Optional<Value> entry = co_await runRYWTransaction(
-				    db, [key = key](Reference<ReadYourWritesTransaction> tr) { return tr->get(key); });
-
-				if (!entry.present()) {
-					TraceEvent(SevError, "AutomaticIdempotencyKeyMissing")
-					    .detail("Key", key)
-					    .detail("CommitVersion", commitVersion)
-					    .detail("ReadVersion", tr.getReadVersion().get());
-					continue;
-				}
-
-				auto e = ObjectReader::fromStringRef<ValueType>(entry.get(), Unversioned());
-				if (!e.automatic) {
-					co_return e.createdTime;
+		// Collect all test keys in commit-version order before issuing any reads.
+		std::vector<Key> allKeys;
+		{
+			Version commitVersion{ 0 };
+			for (const auto& kv : result) {
+				int64_t timestamp;
+				for (auto& k : idempotencyKeyValueToTestKeys(kv, &commitVersion, &timestamp)) {
+					allKeys.push_back(std::move(k));
 				}
 			}
 		}
-		co_return -1;
+
+		// Batch-read all test entries in one transaction to avoid per-key round-trips.
+		// We use a separate transaction because READ_SYSTEM_KEYS was set above, and we might be using a tenant.
+		ReadYourWritesTransaction tr(db);
+		while (true) {
+			Error err;
+			try {
+				std::vector<Future<Optional<Value>>> futures;
+				futures.reserve(allKeys.size());
+				for (const auto& k : allKeys) {
+					futures.push_back(tr.get(k));
+				}
+				co_await waitForAll(futures);
+
+				for (int i = 0; i < static_cast<int>(futures.size()); ++i) {
+					const auto& entry = futures[i].get();
+					if (!entry.present()) {
+						TraceEvent(SevError, "AutomaticIdempotencyKeyMissing").detail("Key", allKeys[i]);
+						continue;
+					}
+					auto e = ObjectReader::fromStringRef<ValueType>(entry.get(), Unversioned());
+					if (!e.automatic) {
+						co_return e.createdTime;
+					}
+				}
+				co_return -1;
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
 	}
 
 	Future<bool> testCleanerOneIteration(Database db,
@@ -429,7 +447,10 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		int64_t minAgeSeconds{ 0 };
 		std::vector<int64_t> createdTimes;
 
-		// Initialize minAgeSeconds to match the current status
+		// Initialize minAgeSeconds to match the current status. getOldestCreatedTime returns -1 if no
+		// non-automatic IDs remain; fmap then produces now()+1. The first outer-loop iteration passes
+		// this large value to testCleanerOneIteration, which also finds no non-automatic IDs and
+		// returns done=true, breaking the loop — the correct early-out for this case.
 		co_await (store(minAgeSeconds, fmap([](int64_t t) { return int64_t(now()) - t; }, getOldestCreatedTime(db))) &&
 		          store(createdTimes, runRYWTransaction(db, [this](Reference<ReadYourWritesTransaction> tr) {
 			                return getCreatedTimes(tr);
