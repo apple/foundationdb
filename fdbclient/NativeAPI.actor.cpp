@@ -4372,11 +4372,8 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState, CommitT
 
 	try {
 		if (CLIENT_BUGGIFY) {
-			throw deterministicRandom()->randomChoice(std::vector<Error>{ not_committed(),
-			                                                              transaction_too_old(),
-			                                                              commit_proxy_memory_limit_exceeded(),
-			                                                              grv_proxy_memory_limit_exceeded(),
-			                                                              commit_unknown_result() });
+			throw deterministicRandom()->randomChoice(
+			    std::vector<Error>{ not_committed(), transaction_too_old() });
 		}
 
 		if (req.tagSet.present() && trState->options.priority < TransactionPriority::IMMEDIATE) {
@@ -4389,6 +4386,10 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState, CommitT
 		}
 
 		req.transaction.read_snapshot = trState->readVersion();
+
+		if (CLIENT_BUGGIFY) {
+			throw commit_proxy_memory_limit_exceeded();
+		}
 
 		startTime = now();
 		state Optional<UID> commitID = Optional<UID>();
@@ -5182,6 +5183,9 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
                                          Promise<Optional<Value>> metadataVersion) {
 	state Span span(spanContext, location, trState->spanContext);
 	GetReadVersionReply rep = wait(f);
+	if (CLIENT_BUGGIFY) {
+		throw grv_proxy_memory_limit_exceeded();
+	}
 	double replyTime = now();
 	double latency = replyTime - trState->startTime;
 	trState->cx->lastProxyRequestTime = trState->startTime;
