@@ -186,9 +186,25 @@ struct BackupFileList {
 	void toStream(FILE* fout) const;
 };
 
+// Mutation log types for backup
+enum class MutationLogType { DEFAULT = 0, PARTITIONED_LOG, RANGE_PARTITIONED_LOG };
+
+inline std::string mutationLogTypeToString(MutationLogType type) {
+	switch (type) {
+	case MutationLogType::DEFAULT:
+		return "default";
+	case MutationLogType::PARTITIONED_LOG:
+		return "partitioned-log-experimental";
+	case MutationLogType::RANGE_PARTITIONED_LOG:
+		return "range-partitioned-log-experimental";
+	default:
+		return "unknown";
+	}
+}
+
 // The byte counts here only include usable log files and byte counts from kvrange manifests
 struct BackupDescription {
-	BackupDescription() : snapshotBytes(0) {}
+	BackupDescription() : snapshotBytes(0), mutationLogType(MutationLogType::DEFAULT) {}
 	std::string url;
 	Optional<std::string> proxy;
 	std::vector<KeyspaceSnapshotFile> snapshots;
@@ -208,7 +224,7 @@ struct BackupDescription {
 	// The minimum version which this backup can be used to restore to
 	Optional<Version> minRestorableVersion;
 	std::string extendedDetail; // Freeform container-specific info.
-	bool partitioned; // If this backup contains partitioned mutation logs.
+	MutationLogType mutationLogType;
 	bool fileLevelEncryption; // If this backup contains encrypted files.
 	int encryptionBlockSize; // Block size used for file encryption, 0 if not encrypted.
 

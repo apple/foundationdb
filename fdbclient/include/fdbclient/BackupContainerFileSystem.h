@@ -139,8 +139,10 @@ public:
 	Future<Void> writePartitionListFile(Version v, std::string contents) override;
 
 	// List log files, unsorted, which contain data at any version >= beginVersion and <= targetVersion.
-	// "partitioned" flag indicates if new partitioned mutation logs or old logs should be listed.
-	Future<std::vector<LogFile>> listLogFiles(Version beginVersion, Version targetVersion, bool partitioned);
+	// "mutationLogType" value indicates which mutation log files should be listed.
+	Future<std::vector<LogFile>> listLogFiles(Version beginVersion,
+	                                          Version targetVersion,
+	                                          MutationLogType mutationLogType);
 
 	// List range files, unsorted, which contain data at or between beginVersion and endVersion
 	// Note: The contents of each top level snapshot.N folder do not necessarily constitute a valid snapshot

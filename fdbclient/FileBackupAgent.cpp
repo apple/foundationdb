@@ -269,13 +269,14 @@ Future<bool> anyPartitionedBackupRunning(Reference<ReadYourWritesTransaction> tr
 	int i = 0;
 	for (i = 0; i < futures.size(); i++) {
 		if (futures[i].get().present()) {
-			Optional<bool> partitionedLog;
+			Optional<MutationLogType> mutationLogType;
 			EBackupState eState;
 			BackupConfig config(futures[i].get().get().first);
 
 			co_await (store(eState, config.stateEnum().getD(tr, Snapshot::False, EBackupState::STATE_NEVERRAN)) &&
-			          store(partitionedLog, config.partitionedLogEnabled().get(tr)));
-			if (FileBackupAgent::isRunnable(eState) && partitionedLog.present() && partitionedLog.get()) {
+			          store(mutationLogType, config.mutationLogType().get(tr)));
+			if (FileBackupAgent::isRunnable(eState) &&
+			    mutationLogType.orDefault(MutationLogType::DEFAULT) == MutationLogType::PARTITIONED_LOG) {
 				co_return true;
 			}
 		}
@@ -298,7 +299,7 @@ public:
 	KeyBackedProperty<bool> onlyApplyMutationLogs() { return configSpace.pack(__FUNCTION__sr); }
 	KeyBackedProperty<bool> inconsistentSnapshotOnly() { return configSpace.pack(__FUNCTION__sr); }
 	KeyBackedProperty<bool> unlockDBAfterRestore() { return configSpace.pack(__FUNCTION__sr); }
-	KeyBackedProperty<bool> transformPartitionedLog() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<MutationLogType> mutationLogType() { return configSpace.pack(__FUNCTION__sr); }
 	// BulkLoad integration properties
 	KeyBackedProperty<bool> useRangeFileRestore() { return configSpace.pack(__FUNCTION__sr); }
 	KeyBackedProperty<std::string> bulkDumpJobId() { return configSpace.pack(__FUNCTION__sr); }
@@ -3445,13 +3446,13 @@ struct BackupLogsDispatchTask : BackupTaskFuncBase {
 		EBackupState backupState;
 		Optional<std::string> tag;
 		Optional<Version> latestSnapshotEndVersion;
-		Optional<bool> partitionedLog;
+		Optional<MutationLogType> mutationLogType;
 
 		co_await (store(stopWhenDone, config.stopWhenDone().getOrThrow(tr)) &&
 		          store(restorableVersion, config.getLatestRestorableVersion(tr)) &&
 		          store(backupState, config.stateEnum().getOrThrow(tr)) && store(tag, config.tag().get(tr)) &&
 		          store(latestSnapshotEndVersion, config.latestSnapshotEndVersion().get(tr)) &&
-		          store(partitionedLog, config.partitionedLogEnabled().get(tr)));
+		          store(mutationLogType, config.mutationLogType().get(tr)));
 
 		// If restorable, update the last restorable version for this tag
 		if (restorableVersion.present() && tag.present()) {
@@ -3490,7 +3491,7 @@ struct BackupLogsDispatchTask : BackupTaskFuncBase {
 		// If a snapshot has ended for this backup then mutations are higher priority to reduce backup lag
 		int priority = latestSnapshotEndVersion.present() ? 1 : 0;
 
-		if (!partitionedLog.present() || !partitionedLog.get()) {
+		if (!mutationLogType.present() || mutationLogType.get() == MutationLogType::DEFAULT) {
 			// Add the initial log range task to read/copy the mutations and the next logs dispatch task which will
 			// run after this batch is done
 			// read blog/ prefix and write those (param1, param2) into files
@@ -4177,14 +4178,14 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 
 		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		BackupConfig config(task);
-		Future<Optional<bool>> partitionedLog;
+		Future<Optional<MutationLogType>> mutationLogType;
 		while (true) {
 			Error err;
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				partitionedLog = config.partitionedLogEnabled().get(tr);
-				co_await partitionedLog;
+				mutationLogType = config.mutationLogType().get(tr);
+				co_await mutationLogType;
 				break;
 			} catch (Error& e) {
 				err = e;
@@ -4195,7 +4196,8 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 		// Check if backup worker is enabled
 		DatabaseConfiguration dbConfig = co_await getDatabaseConfiguration(cx);
 		bool backupWorkerEnabled = dbConfig.backupWorkerEnabled;
-		if (!backupWorkerEnabled && partitionedLog.get().present() && partitionedLog.get().get()) {
+		if (!backupWorkerEnabled && mutationLogType.get().present() &&
+		    mutationLogType.get().get() == MutationLogType::PARTITIONED_LOG) {
 			// Change configuration only when we set to use partitioned logs and
 			// the flag was not set before.
 			co_await ManagementAPI::changeConfig(cx.getReference(), "backup_worker_enabled:=1", true);
@@ -4233,10 +4235,10 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 
 				Future<Optional<Value>> started = tr->get(backupStartedKey);
 				Future<Optional<Value>> taskStarted = tr->get(config.allWorkerStarted().key);
-				partitionedLog = config.partitionedLogEnabled().get(tr);
-				co_await (success(started) && success(taskStarted) && success(partitionedLog));
+				mutationLogType = config.mutationLogType().get(tr);
+				co_await (success(started) && success(taskStarted) && success(mutationLogType));
 
-				if (!partitionedLog.get().present() || !partitionedLog.get().get()) {
+				if (!mutationLogType.get().present() || mutationLogType.get().get() == MutationLogType::DEFAULT) {
 					co_return; // Skip if not using partitioned logs
 				}
 
@@ -4282,15 +4284,15 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 
 		Future<std::vector<KeyRange>> backupRangesFuture = config.backupRanges().getOrThrow(tr);
 		Future<Key> destUidValueFuture = config.destUidValue().getOrThrow(tr);
-		Future<Optional<bool>> partitionedLog = config.partitionedLogEnabled().get(tr);
+		Future<Optional<MutationLogType>> mutationLogType = config.mutationLogType().get(tr);
 		Future<Optional<bool>> incrementalBackupOnly = config.incrementalBackupOnly().get(tr);
-		co_await (success(backupRangesFuture) && success(destUidValueFuture) && success(partitionedLog) &&
+		co_await (success(backupRangesFuture) && success(destUidValueFuture) && success(mutationLogType) &&
 		          success(incrementalBackupOnly));
 		std::vector<KeyRange> backupRanges = backupRangesFuture.get();
 		Key destUidValue = destUidValueFuture.get();
 
 		// Start logging the mutations for the specified ranges of the tag if needed
-		if (!partitionedLog.get().present() || !partitionedLog.get().get()) {
+		if (!mutationLogType.get().present() || mutationLogType.get().get() == MutationLogType::DEFAULT) {
 			for (auto& backupRange : backupRanges) {
 				config.startMutationLogs(tr, backupRange, destUidValue);
 			}
@@ -6902,7 +6904,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 	                            Reference<FutureBucket> futureBucket,
 	                            Reference<Task> task) {
 		RestoreConfig restore(task);
-		bool transformPartitionedLog{ false };
+		MutationLogType mutationLogType{ MutationLogType::DEFAULT };
 		Version restoreVersion{ 0 };
 		Version firstVersion = Params.firstVersion().getOrDefault(task, invalidVersion);
 		bool useRangeFileRestore = false;
@@ -6927,7 +6929,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		restore.setApplyEndVersion(tr, firstVersion);
 
 		// Apply range data using either BulkLoad or traditional range file restore
-		transformPartitionedLog = co_await restore.transformPartitionedLog().getD(tr, Snapshot::False, false);
+		mutationLogType = co_await restore.mutationLogType().getD(tr, Snapshot::False, MutationLogType::DEFAULT);
 		restoreVersion = co_await restore.restoreVersion().getOrThrow(tr);
 
 		if (!useRangeFileRestore) {
@@ -6977,7 +6979,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			                                          0,
 			                                          TaskCompletionKey::noSignal(),
 			                                          bulkLoadDone);
-		} else if (transformPartitionedLog) {
+		} else if (mutationLogType == MutationLogType::PARTITIONED_LOG) {
 			// Traditional restore with partitioned logs
 			Version endVersion =
 			    std::min(firstVersion + CLIENT_KNOBS->RESTORE_PARTITIONED_BATCH_VERSION_SIZE, restoreVersion);
@@ -7123,7 +7125,7 @@ public:
 	                                 std::string tagName,
 	                                 Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                                 StopWhenDone stopWhenDone,
-	                                 UsePartitionedLog partitionedLog,
+	                                 MutationLogType mutationLogType,
 	                                 IncrementalBackupOnly incrementalBackupOnly,
 	                                 Optional<std::string> encryptionKeyFileName,
 	                                 int encryptionBlockSize,
@@ -7135,7 +7137,7 @@ public:
 		TraceEvent(SevInfo, "FBA_SubmitBackup")
 		    .detail("TagName", tagName.c_str())
 		    .detail("StopWhenDone", stopWhenDone)
-		    .detail("UsePartitionedLog", partitionedLog)
+		    .detail("MutationLogType", mutationLogType)
 		    .detail("OutContainer", outContainer.toString())
 		    .detail("EncryptionKeyFileName", encryptionKeyFileName.present() ? encryptionKeyFileName.get() : "None")
 		    .detail("EncryptionBlockSize", encryptionBlockSize);
@@ -7248,7 +7250,7 @@ public:
 		config.backupRanges().set(tr, normalizedRanges);
 		config.initialSnapshotIntervalSeconds().set(tr, initialSnapshotIntervalSeconds);
 		config.snapshotIntervalSeconds().set(tr, snapshotIntervalSeconds);
-		config.partitionedLogEnabled().set(tr, partitionedLog);
+		config.mutationLogType().set(tr, mutationLogType);
 		config.incrementalBackupOnly().set(tr, incrementalBackupOnly);
 		config.snapshotMode().set(tr, snapshotMode);
 		Key taskKey = co_await fileBackup::StartFullBackupTaskFunc::addTask(
@@ -7272,7 +7274,7 @@ public:
 	                                  InconsistentSnapshotOnly inconsistentSnapshotOnly,
 	                                  Version beginVersion,
 	                                  UID uid,
-	                                  TransformPartitionedLog transformPartitionedLog,
+	                                  MutationLogType mutationLogType,
 	                                  bool useRangeFileRestore = true,
 	                                  int encryptionBlockSize = 0,
 	                                  Optional<std::string> encryptionKeyFileName = {}) {
@@ -7352,7 +7354,7 @@ public:
 		restore.inconsistentSnapshotOnly().set(tr, inconsistentSnapshotOnly);
 		restore.beginVersion().set(tr, beginVersion);
 		restore.unlockDBAfterRestore().set(tr, unlockDB);
-		restore.transformPartitionedLog().set(tr, transformPartitionedLog);
+		restore.mutationLogType().set(tr, mutationLogType);
 		restore.useRangeFileRestore().set(tr, useRangeFileRestore);
 		if (BUGGIFY && restoreRanges.size() == 1) {
 			restore.restoreRange().set(tr, restoreRanges[0]);
@@ -8201,7 +8203,7 @@ public:
 				                       inconsistentSnapshotOnly,
 				                       beginVersion,
 				                       randomUid,
-				                       TransformPartitionedLog(desc.partitioned),
+				                       desc.mutationLogType,
 				                       useRangeFileRestore,
 				                       desc.encryptionBlockSize,
 				                       encryptionKeyFileName);
@@ -8588,7 +8590,7 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
                                            std::string const& tagName,
                                            Standalone<VectorRef<KeyRangeRef>> backupRanges,
                                            StopWhenDone stopWhenDone,
-                                           UsePartitionedLog partitionedLog,
+                                           MutationLogType mutationLogType,
                                            IncrementalBackupOnly incrementalBackupOnly,
                                            Optional<std::string> const& encryptionKeyFileName,
                                            int encryptionBlockSize,
@@ -8602,7 +8604,7 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
 	                                         tagName,
 	                                         backupRanges,
 	                                         stopWhenDone,
-	                                         partitionedLog,
+	                                         mutationLogType,
 	                                         incrementalBackupOnly,
 	                                         encryptionKeyFileName,
 	                                         encryptionBlockSize,
