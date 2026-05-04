@@ -100,7 +100,6 @@ static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<u
 #include <sys/time.h>
 #include <unistd.h>
 #include <sys/statvfs.h> /* Needed for disk capacity */
-#include <sys/random.h>
 
 #if !defined(__aarch64__) && !defined(__powerpc64__)
 #include <cpuid.h>
@@ -162,6 +161,7 @@ static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<u
 
 #ifdef __APPLE__
 /* Needed for cross-platform 'environ' */
+#include <sys/random.h>
 #include <crt_externs.h>
 #include <mach-o/dyld.h>
 #include <mach/mach.h>
@@ -2229,7 +2229,7 @@ int getRandomSeed() {
 }
 
 void getRandomBytes(void* buf, size_t len) {
-	INJECT_FAULT(platform_error, "getRandomBytes");
+	INJECT_FAULT(platform_error, "getRandomBytes"); // getting random bytes failed
 	ASSERT(len == 0 || buf != nullptr);
 #ifdef _WIN32
 	size_t pos = 0;
