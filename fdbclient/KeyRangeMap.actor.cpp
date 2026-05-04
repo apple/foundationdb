@@ -23,6 +23,7 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/IKnobCollection.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -221,6 +222,15 @@ ACTOR Future<Void> krmSetRange(Reference<ReadYourWritesTransaction> tr, Key mapP
 }
 
 // Sets a range of keys in a key range map, coalescing with adjacent regions if the values match
+static bool shouldTolerateUncoalescedKRM() {
+	try {
+		return IKnobCollection::getGlobalKnobCollection().getServerKnobs().DD_TOLERATE_UNCOALESCED_KRM;
+	} catch (Error&) {
+		// Client-only processes (e.g. fdbbackup) don't have server knobs.
+		return false;
+	}
+}
+
 // Ranges outside of maxRange will not be coalesced
 // CAUTION: use care when attempting to coalesce multiple ranges in the same prefix in a single transaction
 ACTOR template <class Transaction>
@@ -292,12 +302,26 @@ static Future<Void> krmSetRangeCoalescing_(Transaction* tr,
 		endValue = existingValue;
 	}
 
-	tr->clear(KeyRangeRef(beginKey, endKey));
+	// Check for uncoalesced data: if value equals endValue but we're not at maxWithPrefix.end,
+	// there are redundant entries beyond what we read. With the knob enabled, warn and continue
+	// (may write an uncoalesced boundary at endKey, but dropping the operation is worse).
+	// Without knob, ASSERT as before.
+	if (value == endValue && endKey != maxWithPrefix.end) {
+		if (shouldTolerateUncoalescedKRM()) {
+			TraceEvent(SevWarnAlways, "KRMToleratingUncoalescedEntries")
+			    .detail("MapPrefix", mapPrefix)
+			    .detail("BeginKey", beginKey)
+			    .detail("EndKey", endKey)
+			    .detail("MaxEnd", maxWithPrefix.end)
+			    .detail("Value", value);
+		} else {
+			ASSERT(false); // Uncoalesced KRM entries detected; set DD_TOLERATE_UNCOALESCED_KRM=true to tolerate
+		}
+	}
 
-	ASSERT(value != endValue || endKey == maxWithPrefix.end);
+	tr->clear(KeyRangeRef(beginKey, endKey));
 	tr->set(beginKey, value);
 	tr->set(endKey, endValue);
-
 	return Void();
 }
 Future<Void> krmSetRangeCoalescing(Transaction* const& tr,

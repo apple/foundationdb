@@ -163,8 +163,20 @@ ACTOR Future<Void> unassignServerKeys(Transaction* tr, UID ssId, KeyRange range,
 
 	tr->clear(KeyRangeRef(beginKey, endKey));
 
+	// Write entries in pairs, checking for uncoalesced entries (adjacent with same value).
 	for (int i = 0; i < kvs.size() - 1; ++i) {
-		ASSERT(kvs[i].value != kvs[i + 1].value || kvs[i + 1].key.removePrefix(mapPrefix) == allKeys.end);
+		bool atEnd = kvs[i + 1].key.removePrefix(mapPrefix) == allKeys.end;
+		if (kvs[i].value == kvs[i + 1].value && !atEnd) {
+			if (SERVER_KNOBS->DD_TOLERATE_UNCOALESCED_KRM) {
+				TraceEvent(SevWarnAlways, "MoveKeysUncoalescedDetected", logId)
+				    .detail("SSID", ssId)
+				    .detail("Key1", kvs[i].key)
+				    .detail("Key2", kvs[i + 1].key)
+				    .detail("Value", kvs[i].value);
+			} else {
+				ASSERT(false); // Uncoalesced KRM entries detected; set DD_TOLERATE_UNCOALESCED_KRM=true to tolerate
+			}
+		}
 		tr->set(kvs[i].key, kvs[i].value);
 		tr->set(kvs[i + 1].key, kvs[i + 1].value);
 	}
