@@ -175,13 +175,14 @@ ACTOR Future<bool> anyPartitionedBackupRunning(Reference<ReadYourWritesTransacti
 	state int i = 0;
 	for (i = 0; i < futures.size(); i++) {
 		if (futures[i].get().present()) {
-			state Optional<bool> partitionedLog;
+			state Optional<MutationLogType> mutationLogType;
 			state EBackupState state;
 			BackupConfig config(futures[i].get().get().first);
 
 			wait(store(state, config.stateEnum().getD(tr, Snapshot::False, EBackupState::STATE_NEVERRAN)) &&
-			     store(partitionedLog, config.partitionedLogEnabled().get(tr)));
-			if (FileBackupAgent::isRunnable(state) && partitionedLog.present() && partitionedLog.get()) {
+			     store(mutationLogType, config.mutationLogType().get(tr)));
+			if (FileBackupAgent::isRunnable(state) &&
+			    mutationLogType.orDefault(MutationLogType::DEFAULT) == MutationLogType::PARTITIONED_LOG) {
 				return true;
 			}
 		}
@@ -204,7 +205,7 @@ public:
 	KeyBackedProperty<bool> onlyApplyMutationLogs() { return configSpace.pack(__FUNCTION__sr); }
 	KeyBackedProperty<bool> inconsistentSnapshotOnly() { return configSpace.pack(__FUNCTION__sr); }
 	KeyBackedProperty<bool> unlockDBAfterRestore() { return configSpace.pack(__FUNCTION__sr); }
-	KeyBackedProperty<bool> transformPartitionedLog() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<MutationLogType> mutationLogType() { return configSpace.pack(__FUNCTION__sr); }
 	// XXX: Remove restoreRange() once it is safe to remove. It has been changed to restoreRanges
 	KeyBackedProperty<KeyRange> restoreRange() { return configSpace.pack(__FUNCTION__sr); }
 	// XXX: Changed to restoreRangeSet. It can be removed.
@@ -3653,13 +3654,13 @@ struct BackupLogsDispatchTask : BackupTaskFuncBase {
 		state EBackupState backupState;
 		state Optional<std::string> tag;
 		state Optional<Version> latestSnapshotEndVersion;
-		state Optional<bool> partitionedLog;
+		state Optional<MutationLogType> mutationLogType;
 
 		wait(store(stopWhenDone, config.stopWhenDone().getOrThrow(tr)) &&
 		     store(restorableVersion, config.getLatestRestorableVersion(tr)) &&
 		     store(backupState, config.stateEnum().getOrThrow(tr)) && store(tag, config.tag().get(tr)) &&
 		     store(latestSnapshotEndVersion, config.latestSnapshotEndVersion().get(tr)) &&
-		     store(partitionedLog, config.partitionedLogEnabled().get(tr)));
+		     store(mutationLogType, config.mutationLogType().get(tr)));
 
 		// If restorable, update the last restorable version for this tag
 		if (restorableVersion.present() && tag.present()) {
@@ -3698,7 +3699,7 @@ struct BackupLogsDispatchTask : BackupTaskFuncBase {
 		// If a snapshot has ended for this backup then mutations are higher priority to reduce backup lag
 		state int priority = latestSnapshotEndVersion.present() ? 1 : 0;
 
-		if (!partitionedLog.present() || !partitionedLog.get()) {
+		if (!mutationLogType.present() || mutationLogType.get() == MutationLogType::DEFAULT) {
 			// Add the initial log range task to read/copy the mutations and the next logs dispatch task which will
 			// run after this batch is done
 			// read blog/ prefix and write those (param1, param2) into files
@@ -4080,13 +4081,13 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		state BackupConfig config(task);
-		state Future<Optional<bool>> partitionedLog;
+		state Future<Optional<MutationLogType>> mutationLogType;
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				partitionedLog = config.partitionedLogEnabled().get(tr);
-				wait(success(partitionedLog));
+				mutationLogType = config.mutationLogType().get(tr);
+				wait(success(mutationLogType));
 				break;
 			} catch (Error& e) {
 				wait(tr->onError(e));
@@ -4096,7 +4097,8 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 		// Check if backup worker is enabled
 		DatabaseConfiguration dbConfig = wait(getDatabaseConfiguration(cx));
 		state bool backupWorkerEnabled = dbConfig.backupWorkerEnabled;
-		if (!backupWorkerEnabled && partitionedLog.get().present() && partitionedLog.get().get()) {
+		if (!backupWorkerEnabled && mutationLogType.get().present() &&
+		    mutationLogType.get().get() == MutationLogType::PARTITIONED_LOG) {
 			// Change configuration only when we set to use partitioned logs and
 			// the flag was not set before.
 			wait(success(ManagementAPI::changeConfig(cx.getReference(), "backup_worker_enabled:=1", true)));
@@ -4131,10 +4133,10 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 
 				state Future<Optional<Value>> started = tr->get(backupStartedKey);
 				state Future<Optional<Value>> taskStarted = tr->get(config.allWorkerStarted().key);
-				partitionedLog = config.partitionedLogEnabled().get(tr);
-				wait(success(started) && success(taskStarted) && success(partitionedLog));
+				mutationLogType = config.mutationLogType().get(tr);
+				wait(success(started) && success(taskStarted) && success(mutationLogType));
 
-				if (!partitionedLog.get().present() || !partitionedLog.get().get()) {
+				if (!mutationLogType.get().present() || mutationLogType.get().get() == MutationLogType::DEFAULT) {
 					return Void(); // Skip if not using partitioned logs
 				}
 
@@ -4179,15 +4181,15 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 
 		state Future<std::vector<KeyRange>> backupRangesFuture = config.backupRanges().getOrThrow(tr);
 		state Future<Key> destUidValueFuture = config.destUidValue().getOrThrow(tr);
-		state Future<Optional<bool>> partitionedLog = config.partitionedLogEnabled().get(tr);
+		state Future<Optional<MutationLogType>> mutationLogType = config.mutationLogType().get(tr);
 		state Future<Optional<bool>> incrementalBackupOnly = config.incrementalBackupOnly().get(tr);
-		wait(success(backupRangesFuture) && success(destUidValueFuture) && success(partitionedLog) &&
+		wait(success(backupRangesFuture) && success(destUidValueFuture) && success(mutationLogType) &&
 		     success(incrementalBackupOnly));
 		std::vector<KeyRange> backupRanges = backupRangesFuture.get();
 		Key destUidValue = destUidValueFuture.get();
 
 		// Start logging the mutations for the specified ranges of the tag if needed
-		if (!partitionedLog.get().present() || !partitionedLog.get().get()) {
+		if (!mutationLogType.get().present() || mutationLogType.get().get() == MutationLogType::DEFAULT) {
 			for (auto& backupRange : backupRanges) {
 				config.startMutationLogs(tr, backupRange, destUidValue);
 			}
@@ -6542,7 +6544,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 	                                  Reference<FutureBucket> futureBucket,
 	                                  Reference<Task> task) {
 		state RestoreConfig restore(task);
-		state bool transformPartitionedLog;
+		state MutationLogType mutationLogType = MutationLogType::DEFAULT;
 		state Version restoreVersion;
 		state Version firstVersion = Params.firstVersion().getOrDefault(task, invalidVersion);
 		state bool isBlobGranuleRestore;
@@ -6578,10 +6580,10 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		restore.setApplyEndVersion(tr, firstVersion);
 
 		// Apply range data and log data in order
-		wait(store(transformPartitionedLog, restore.transformPartitionedLog().getD(tr, Snapshot::False, false)));
+		wait(store(mutationLogType, restore.mutationLogType().getD(tr, Snapshot::False, MutationLogType::DEFAULT)));
 		wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)));
 
-		if (transformPartitionedLog) {
+		if (mutationLogType == MutationLogType::PARTITIONED_LOG) {
 			Version endVersion =
 			    std::min(firstVersion + CLIENT_KNOBS->RESTORE_PARTITIONED_BATCH_VERSION_SIZE, restoreVersion);
 			wait(success(RestoreDispatchPartitionedTaskFunc::addTask(
@@ -6872,7 +6874,7 @@ public:
 	                                       Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                                       bool encryptionEnabled,
 	                                       StopWhenDone stopWhenDone,
-	                                       UsePartitionedLog partitionedLog,
+	                                       MutationLogType mutationLogType,
 	                                       IncrementalBackupOnly incrementalBackupOnly,
 	                                       Optional<std::string> encryptionKeyFileName,
 	                                       Optional<std::string> blobManifestUrl) {
@@ -6883,7 +6885,7 @@ public:
 		TraceEvent(SevInfo, "FBA_SubmitBackup")
 		    .detail("TagName", tagName.c_str())
 		    .detail("StopWhenDone", stopWhenDone)
-		    .detail("UsePartitionedLog", partitionedLog)
+		    .detail("MutationLogType", mutationLogType)
 		    .detail("OutContainer", outContainer.toString());
 
 		state KeyBackedTag tag = makeBackupTag(tagName);
@@ -7009,7 +7011,7 @@ public:
 		config.backupRanges().set(tr, normalizedRanges);
 		config.initialSnapshotIntervalSeconds().set(tr, initialSnapshotIntervalSeconds);
 		config.snapshotIntervalSeconds().set(tr, snapshotIntervalSeconds);
-		config.partitionedLogEnabled().set(tr, partitionedLog);
+		config.mutationLogType().set(tr, mutationLogType);
 		config.incrementalBackupOnly().set(tr, incrementalBackupOnly);
 		config.enableSnapshotBackupEncryption().set(tr, encryptionEnabled);
 		config.blobBackupEnabled().set(tr, blobManifestUrl.present());
@@ -7036,7 +7038,7 @@ public:
 	                                        Version beginVersion,
 	                                        UID uid,
 	                                        Optional<std::string> blobManifestUrl,
-	                                        TransformPartitionedLog transformPartitionedLog) {
+	                                        MutationLogType mutationLogType) {
 		KeyRangeMap<int> restoreRangeSet;
 		for (auto& range : ranges) {
 			restoreRangeSet.insert(range, 1);
@@ -7112,7 +7114,7 @@ public:
 		restore.inconsistentSnapshotOnly().set(tr, inconsistentSnapshotOnly);
 		restore.beginVersion().set(tr, beginVersion);
 		restore.unlockDBAfterRestore().set(tr, unlockDB);
-		restore.transformPartitionedLog().set(tr, transformPartitionedLog);
+		restore.mutationLogType().set(tr, mutationLogType);
 		if (BUGGIFY && restoreRanges.size() == 1) {
 			restore.restoreRange().set(tr, restoreRanges[0]);
 		} else {
@@ -7822,7 +7824,7 @@ public:
 				                   beginVersion,
 				                   randomUid,
 				                   blobManifestUrl,
-				                   TransformPartitionedLog(desc.partitioned)));
+				                   desc.mutationLogType));
 				wait(tr->commit());
 				break;
 			} catch (Error& e) {
@@ -7850,7 +7852,7 @@ public:
 	                                           Standalone<VectorRef<KeyRangeRef>> ranges,
 	                                           Key addPrefix,
 	                                           Key removePrefix,
-	                                           UsePartitionedLog fastRestore) {
+	                                           MutationLogType mutationLogType) {
 		state Reference<ReadYourWritesTransaction> ryw_tr =
 		    Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
 		state BackupConfig backupConfig;
@@ -7949,7 +7951,7 @@ public:
 
 		bc = fileBackup::getBackupContainerWithProxy(bc);
 
-		if (fastRestore) {
+		if (mutationLogType == MutationLogType::PARTITIONED_LOG) {
 			TraceEvent("AtomicParallelRestoreStartRestore").log();
 			Version targetVersion = ::invalidVersion;
 			wait(submitParallelRestore(cx,
@@ -8062,7 +8064,7 @@ public:
 	                                          Key addPrefix,
 	                                          Key removePrefix) {
 		return success(
-		    atomicRestore(backupAgent, cx, tagName, ranges, addPrefix, removePrefix, UsePartitionedLog::True));
+		    atomicRestore(backupAgent, cx, tagName, ranges, addPrefix, removePrefix, MutationLogType::PARTITIONED_LOG));
 	}
 };
 
@@ -8243,7 +8245,7 @@ Future<Version> FileBackupAgent::atomicRestore(Database cx,
                                                Key addPrefix,
                                                Key removePrefix) {
 	return FileBackupAgentImpl::atomicRestore(
-	    this, cx, tagName, ranges, addPrefix, removePrefix, UsePartitionedLog::False);
+	    this, cx, tagName, ranges, addPrefix, removePrefix, MutationLogType::DEFAULT);
 }
 
 Future<ERestoreState> FileBackupAgent::abortRestore(Reference<ReadYourWritesTransaction> tr, Key tagName) {
@@ -8271,7 +8273,7 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
                                            Standalone<VectorRef<KeyRangeRef>> backupRanges,
                                            bool encryptionEnabled,
                                            StopWhenDone stopWhenDone,
-                                           UsePartitionedLog partitionedLog,
+                                           MutationLogType mutationLogType,
                                            IncrementalBackupOnly incrementalBackupOnly,
                                            Optional<std::string> const& encryptionKeyFileName,
                                            Optional<std::string> const& blobManifestUrl) {
@@ -8285,7 +8287,7 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
 	                                         backupRanges,
 	                                         encryptionEnabled,
 	                                         stopWhenDone,
-	                                         partitionedLog,
+	                                         mutationLogType,
 	                                         incrementalBackupOnly,
 	                                         encryptionKeyFileName,
 	                                         blobManifestUrl);

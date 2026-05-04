@@ -144,7 +144,7 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 			                                    backupRanges,
 			                                    true,
 			                                    StopWhenDone::True,
-			                                    UsePartitionedLog::False,
+			                                    MutationLogType::DEFAULT,
 			                                    IncrementalBackupOnly::False,
 			                                    self->encryptionKeyFileName));
 		} catch (Error& e) {

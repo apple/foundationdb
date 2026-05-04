@@ -348,7 +348,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			                               backupRanges,
 			                               true,
 			                               StopWhenDone{ !stopDifferentialDelay },
-			                               UsePartitionedLog::False,
+			                               MutationLogType::DEFAULT,
 			                               IncrementalBackupOnly::False,
 			                               self->encryptionKeyFileName));
 		} catch (Error& e) {

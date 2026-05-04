@@ -197,7 +197,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 				                                    backupRanges,
 				                                    true,
 				                                    StopWhenDone::False,
-				                                    UsePartitionedLog::False,
+				                                    MutationLogType::DEFAULT,
 				                                    IncrementalBackupOnly::True,
 				                                    self->encryptionKeyFileName,
 				                                    blobManifestUrl));

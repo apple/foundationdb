@@ -45,8 +45,6 @@ FDB_BOOLEAN_PARAM(WaitForComplete);
 FDB_BOOLEAN_PARAM(ForceAction);
 FDB_BOOLEAN_PARAM(Terminator);
 FDB_BOOLEAN_PARAM(IncrementalBackupOnly);
-FDB_BOOLEAN_PARAM(UsePartitionedLog);
-FDB_BOOLEAN_PARAM(TransformPartitionedLog);
 FDB_BOOLEAN_PARAM(OnlyApplyMutationLogs);
 FDB_BOOLEAN_PARAM(SnapshotBackupUseTenantCache);
 FDB_BOOLEAN_PARAM(InconsistentSnapshotOnly);
@@ -283,7 +281,7 @@ public:
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                          bool encryptionEnabled,
 	                          StopWhenDone = StopWhenDone::True,
-	                          UsePartitionedLog = UsePartitionedLog::False,
+	                          MutationLogType mutationLogType = MutationLogType::DEFAULT,
 	                          IncrementalBackupOnly = IncrementalBackupOnly::False,
 	                          Optional<std::string> const& encryptionKeyFileName = {},
 	                          Optional<std::string> const& blobManifestUrl = {});
@@ -296,7 +294,7 @@ public:
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                          bool encryptionEnabled,
 	                          StopWhenDone stopWhenDone = StopWhenDone::True,
-	                          UsePartitionedLog partitionedLog = UsePartitionedLog::False,
+	                          MutationLogType mutationLogType = MutationLogType::DEFAULT,
 	                          IncrementalBackupOnly incrementalBackupOnly = IncrementalBackupOnly::False,
 	                          Optional<std::string> const& encryptionKeyFileName = {},
 	                          Optional<std::string> const& blobManifestUrl = {}) {
@@ -310,7 +308,7 @@ public:
 			                    backupRanges,
 			                    encryptionEnabled,
 			                    stopWhenDone,
-			                    partitionedLog,
+			                    mutationLogType,
 			                    incrementalBackupOnly,
 			                    encryptionKeyFileName,
 			                    blobManifestUrl) +
@@ -902,8 +900,8 @@ public:
 		return configSpace.pack(__FUNCTION__sr);
 	}
 
-	// Set to true if partitioned log is enabled (only useful if backup worker is also enabled).
-	KeyBackedProperty<bool> partitionedLogEnabled() { return configSpace.pack(__FUNCTION__sr); }
+	// Mutation log type: 0 - DEFAULT (backup v1), 1 = PARTITIONED_LOG.
+	KeyBackedProperty<MutationLogType> mutationLogType() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Set to true if only requesting incremental backup without base snapshot.
 	KeyBackedProperty<bool> incrementalBackupOnly() { return configSpace.pack(__FUNCTION__sr); }
@@ -933,15 +931,17 @@ public:
 		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 		auto lastLog = latestLogEndVersion().get(tr);
 		auto firstSnapshot = firstSnapshotEndVersion().get(tr);
-		auto plogEnabled = partitionedLogEnabled().get(tr);
+		auto mutLogType = mutationLogType().get(tr);
 		auto workerVersion = latestBackupWorkerSavedVersion().get(tr);
 		auto incrementalBackup = incrementalBackupOnly().get(tr);
-		return map(success(lastLog) && success(firstSnapshot) && success(plogEnabled) && success(workerVersion) &&
+		return map(success(lastLog) && success(firstSnapshot) && success(mutLogType) && success(workerVersion) &&
 		               success(incrementalBackup),
 		           [=](Void) -> Optional<Version> {
+			           MutationLogType mutationLogType =
+			               mutLogType.get().present() ? mutLogType.get().get() : MutationLogType::DEFAULT;
 			           // The latest log greater than the oldest snapshot is the restorable version
 			           Optional<Version> logVersion =
-			               plogEnabled.get().present() && plogEnabled.get().get() ? workerVersion.get() : lastLog.get();
+			               mutationLogType == MutationLogType::PARTITIONED_LOG ? workerVersion.get() : lastLog.get();
 			           if (logVersion.present() && firstSnapshot.get().present() &&
 			               logVersion.get() > firstSnapshot.get().get()) {
 				           return std::max(logVersion.get() - 1, firstSnapshot.get().get());

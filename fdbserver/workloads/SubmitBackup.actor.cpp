@@ -76,7 +76,7 @@ struct SubmitBackupWorkload : TestWorkload {
 			                                    backupRanges,
 			                                    true,
 			                                    self->stopWhenDone,
-			                                    UsePartitionedLog::False,
+			                                    MutationLogType::DEFAULT,
 			                                    self->incremental,
 			                                    self->encryptionKeyFileName));
 		} catch (Error& e) {
