@@ -314,7 +314,7 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 			                                   tag.toString(),
 			                                   backupRanges,
 			                                   StopWhenDone{ !stopDifferentialDelay },
-			                                   UsePartitionedLog::True, // enable partitioned log here
+			                                   MutationLogType::PARTITIONED_LOG, // enable partitioned log here
 			                                   IncrementalBackupOnly::False,
 			                                   encryptionKeyFileName,
 			                                   encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0,
