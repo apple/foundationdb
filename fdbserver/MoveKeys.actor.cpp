@@ -1202,6 +1202,13 @@ ACTOR Future<Void> waitForShardReady(StorageServerInterface server,
 			GetShardStateReply rep =
 			    wait(server.getShardState.getReply(GetShardStateRequest(keys, mode), TaskPriority::MoveKeys));
 			if (rep.first >= minVersion) {
+				// Inject delay to simulate slow shard readiness. When finishMoveKeys
+				// waits inside a transaction, this causes transaction_too_old on commit.
+				// With the fix (wait outside transaction), this delay is harmless.
+				if (BUGGIFY_WITH_PROB(0.05)) {
+					CODE_PROBE(true, "waitForShardReady artificial delay");
+					wait(delay(6.0));
+				}
 				return Void();
 			}
 			wait(delayJittered(SERVER_KNOBS->SHARD_READY_DELAY, TaskPriority::MoveKeys));
@@ -1509,7 +1516,29 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 						serverListEntries.push_back(tr.get(serverListKeyFor(newDestinations[s])));
 					state std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
 
+					// Save the read version before dropping the transaction. waitForShardReady
+					// needs a minimum version the dest server must reach. A fresh transaction
+					// later will have a newer version, and the server will already be past this
+					// older version, so the readiness guarantee still holds.
+					//
+					// Correctness of the two-transaction split:
+					// Between the wait and the second transaction's commit, the shard assignment
+					// could change (e.g. another DD instance reassigns the shard after a
+					// movekeys_conflict restart). The second transaction handles this by:
+					//   1. checkMoveKeysLock verifies our DD instance still owns the move
+					//   2. Re-reading keyServers and verifying dest is unchanged
+					//   3. If dest changed, we retry the entire inner loop
+					// The dest servers confirmed readiness at version V1. The second transaction
+					// reads at V2 >= V1, so the readiness guarantee carries forward.
+					state Version readVersion = tr.getReadVersion().get();
+
 					releaser.release();
+
+					// Drop the transaction BEFORE the potentially long wait. The 15-second
+					// SERVER_READY_QUORUM_TIMEOUT exceeds the ~5-second transaction lifetime,
+					// so waiting inside the transaction guarantees transaction_too_old on commit
+					// when destination servers are slow to respond.
+					tr.reset();
 
 					for (int s = 0; s < serverListValues.size(); s++) {
 						ASSERT(serverListValues[s]
@@ -1519,31 +1548,27 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 						storageServerInterfaces.push_back(si);
 					}
 
-					// update client info in case tss mapping changed or server got updated
-
-					// Wait for new destination servers to fetch the keys
+					// Wait for new destination servers to fetch the keys (OUTSIDE any transaction)
 
 					serverReady.reserve(storageServerInterfaces.size());
 					tssReady.reserve(storageServerInterfaces.size());
 					tssReadyInterfs.reserve(storageServerInterfaces.size());
 					for (int s = 0; s < storageServerInterfaces.size(); s++) {
-						serverReady.push_back(waitForShardReady(storageServerInterfaces[s],
-						                                        keys,
-						                                        tr.getReadVersion().get(),
-						                                        GetShardStateRequest::READABLE));
+						serverReady.push_back(waitForShardReady(
+						    storageServerInterfaces[s], keys, readVersion, GetShardStateRequest::READABLE));
 
 						auto tssPair = tssMapping.find(storageServerInterfaces[s].id());
 
 						if (tssPair != tssMapping.end() && waitForTSSCounter > 0 &&
 						    !tssToIgnore.count(tssPair->second.id())) {
 							tssReadyInterfs.push_back(tssPair->second);
-							tssReady.push_back(waitForShardReady(
-							    tssPair->second, keys, tr.getReadVersion().get(), GetShardStateRequest::READABLE));
+							tssReady.push_back(
+							    waitForShardReady(tssPair->second, keys, readVersion, GetShardStateRequest::READABLE));
 						}
 					}
 
 					// Wait for all storage server moves, and explicitly swallow errors for tss ones with
-					// waitForAllReady If this takes too long the transaction will time out and retry, which is ok
+					// waitForAllReady. The 15s timeout is safe here — no transaction clock is ticking.
 					wait(timeout(waitForAll(serverReady) && waitForAllReady(tssReady),
 					             SERVER_KNOBS->SERVER_READY_QUORUM_TIMEOUT,
 					             Void(),
@@ -1597,6 +1622,65 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 					}
 
 					if (count == dest.size()) {
+						// All destination servers are ready. Start a fresh transaction to
+						// verify dest hasn't changed and commit the metadata update.
+						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+						tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						tr.trState->taskID = TaskPriority::MoveKeys;
+						wait(checkMoveKeysLock(&tr, lock, ddEnabledState));
+
+						// Re-read keyServers to verify dest hasn't changed while we waited
+						state RangeResult convergenceCheckUIDtoTagMap =
+						    wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+						ASSERT(!convergenceCheckUIDtoTagMap.more &&
+						       convergenceCheckUIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+						state RangeResult convergenceCheckKeyServers =
+						    wait(krmGetRanges(&tr,
+						                      keyServersPrefix,
+						                      currentKeys,
+						                      SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
+						                      SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
+
+						// Verify dest is unchanged across the full currentKeys range — if
+						// another DD instance split or reassigned any overlapping subrange
+						// while we were waiting, we must not commit stale metadata.
+						{
+							bool destChanged = convergenceCheckKeyServers.size() <= 1;
+							bool boundaryChanged = convergenceCheckKeyServers.size() <= 1 ||
+							                       convergenceCheckKeyServers.back().key != endKey;
+							std::vector<UID> mismatchedDest;
+							for (int i = 0; !destChanged && i + 1 < convergenceCheckKeyServers.size(); ++i) {
+								std::vector<UID> checkSrc, checkDest;
+								decodeKeyServersValue(convergenceCheckUIDtoTagMap,
+								                      convergenceCheckKeyServers[i].value,
+								                      checkSrc,
+								                      checkDest);
+								if (checkDest != dest) {
+									destChanged = true;
+									mismatchedDest = checkDest;
+								}
+							}
+							if (destChanged || boundaryChanged) {
+								CODE_PROBE(true, "finishMoveKeys dest changed during waitForShardReady");
+								TraceEvent(SevWarn, "FinishMoveKeysDestChanged", relocationIntervalId)
+								    .detail("KeyBegin", keys.begin)
+								    .detail("KeyEnd", keys.end)
+								    .detail("CurrentKeysBegin", currentKeys.begin)
+								    .detail("CurrentKeysEnd", currentKeys.end)
+								    .detail("OrigDest", describe(dest))
+								    .detail("NewDest", describe(mismatchedDest))
+								    .detail("ExpectedEndKey", endKey)
+								    .detail("ObservedEndKey",
+								            convergenceCheckKeyServers.size() > 0
+								                ? convergenceCheckKeyServers.back().key
+								                : KeyRef())
+								    .detail("DestChanged", destChanged)
+								    .detail("BoundaryChanged", boundaryChanged);
+								tr.reset();
+								continue; // retry the inner loop
+							}
+						}
+
 						// update keyServers, serverKeys
 						// SOMEDAY: Doing these in parallel is safe because none of them overlap or touch (one per
 						// server)
