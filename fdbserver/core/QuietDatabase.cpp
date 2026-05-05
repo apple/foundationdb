@@ -42,6 +42,17 @@
 #include "fdbclient/ManagementAPI.h"
 #include "flow/CoroUtils.h"
 
+static bool g_ddPipelineControlEnabled = true;
+
+bool isDDPipelineControlEnabled() {
+	return g_ddPipelineControlEnabled;
+}
+
+void disableDDPipelineControl() {
+	TraceEvent("DDPipelineControlDisabled");
+	g_ddPipelineControlEnabled = false;
+}
+
 Future<std::vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo, int flags) {
 	while (true) {
 		auto res = co_await race(
@@ -1003,6 +1014,10 @@ Future<Void> waitForQuietDatabase(Database cx,
 	printf("Disabled backup worker.\n");
 
 	co_await disableConsistencyScanInSim(cx, false);
+
+	if (g_network->isSimulated()) {
+		disableDDPipelineControl();
+	}
 
 	// Require 3 consecutive successful quiet database checks spaced 2 second apart
 	int numSuccesses = 0;
