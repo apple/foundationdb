@@ -934,8 +934,8 @@ Future<Void> runTests(Reference<IClusterConnectionRecord> const& connRecordUnsaf
 		options.push_back_deep(options.arena(), KeyValueRef("testName"_sr, "UnitTests"_sr));
 		options.push_back_deep(options.arena(), KeyValueRef("testsMatching"_sr, fileName));
 		// Add unit test options as test spec options
-		for (auto& kv : testOptions.params) {
-			options.push_back_deep(options.arena(), KeyValueRef(kv.first, kv.second));
+		for (auto& [key, value] : testOptions.params) {
+			options.push_back_deep(options.arena(), KeyValueRef(key, value));
 		}
 		spec.options.push_back_deep(spec.options.arena(), options);
 		testSet.testSpecs.push_back(spec);
@@ -1058,8 +1058,8 @@ Future<Void> testExpectedErrorImpl(Future<Void> test,
 	ASSERT(!details.contains("ActualErrorCode"));
 	ASSERT(!details.contains("Reason"));
 
-	for (auto& p : details) {
-		evt.detail(p.first.c_str(), p.second);
+	for (auto& [key, value] : details) {
+		evt.detail(key.c_str(), value);
 	}
 	if (throwOnError.present()) {
 		throw throwOnError.get();

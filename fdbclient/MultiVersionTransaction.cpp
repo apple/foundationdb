@@ -853,16 +853,16 @@ void MultiVersionTransaction::updateTransaction(bool setPersistentOptions) {
 	// need to set it.
 	if (setPersistentOptions || !newTr.transaction) {
 		Optional<StringRef> timeout;
-		for (auto const& option : persistentOptions) {
-			if (option.first == FDBTransactionOptions::TIMEOUT) {
-				timeout = option.second.castTo<StringRef>();
+		for (auto const& [option, value] : persistentOptions) {
+			if (option == FDBTransactionOptions::TIMEOUT) {
+				timeout = value.castTo<StringRef>();
 			} else if (newTr.transaction) {
-				newTr.transaction->setOption(option.first, option.second.castTo<StringRef>());
+				newTr.transaction->setOption(option, value.castTo<StringRef>());
 			}
 		}
 		if (newTr.transaction) {
-			for (auto const& option : sensitivePersistentOptions) {
-				newTr.transaction->setOption(option.first, option.second.castTo<StringRef>());
+			for (auto const& [option, value] : sensitivePersistentOptions) {
+				newTr.transaction->setOption(option, value.castTo<StringRef>());
 			}
 		}
 
@@ -1659,19 +1659,19 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 	// Reapply database options on the new database
 	if (newDb) {
 		optionLock.enter();
-		for (const auto& option : options) {
+		for (const auto& [option, value] : options) {
 			try {
 				// In practice, this will set a deferred error instead of throwing. If that happens, the database
 				// will be unusable (attempts to use it will throw errors).
-				newDb->setOption(option.first, option.second.castTo<StringRef>());
+				newDb->setOption(option, value.castTo<StringRef>());
 			} catch (Error& e) {
 				optionLock.leave();
 
 				// If we can't set all of the options on a cluster, we abandon the client
 				TraceEvent(SevError, "ClusterVersionChangeOptionError")
 				    .error(e)
-				    .detail("Option", option.first)
-				    .detail("OptionValue", option.second)
+				    .detail("Option", option)
+				    .detail("OptionValue", value)
 				    .detail("LibPath", client->libPath);
 				client->failed = true;
 				MultiVersionApi::api->updateSupportedVersions();
@@ -2297,8 +2297,8 @@ void MultiVersionApi::setupNetwork() {
 			MutexHolder holder(lock);
 			runOnExternalClientsAllThreads(
 			    [this, transportId, baseTraceFileId](Reference<ClientInfo> client) {
-				    for (const auto& option : options) {
-					    client->api->setNetworkOption(option.first, option.second.castTo<StringRef>());
+				    for (const auto& [option, value] : options) {
+					    client->api->setNetworkOption(option, value.castTo<StringRef>());
 				    }
 				    client->api->setNetworkOption(FDBNetworkOptions::EXTERNAL_CLIENT_TRANSPORT_ID,
 				                                  std::to_string(transportId));

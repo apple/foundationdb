@@ -1164,11 +1164,11 @@ void updateTssMappings(Database cx, const GetKeyServerLocationsReply& reply) {
 		}
 	}
 
-	for (const auto& mapping : reply.resultsTssMapping) {
-		auto ssi = ssiById.find(mapping.first);
+	for (const auto& [storageServerId, tss] : reply.resultsTssMapping) {
+		auto ssi = ssiById.find(storageServerId);
 		ASSERT(ssi != ssiById.end());
-		cx->addTssMapping(*ssi->second, mapping.second);
-		ssiById.erase(mapping.first);
+		cx->addTssMapping(*ssi->second, tss);
+		ssiById.erase(storageServerId);
 	}
 
 	// if SS didn't have a mapping above, it's still in the ssiById map, so remove its tss mapping
@@ -1178,8 +1178,8 @@ void updateTssMappings(Database cx, const GetKeyServerLocationsReply& reply) {
 }
 
 void updateTagMappings(Database cx, const GetKeyServerLocationsReply& reply) {
-	for (const auto& mapping : reply.resultsTagMapping) {
-		cx->addSSIdTagMapping(mapping.first, mapping.second);
+	for (const auto& [storageServerId, tag] : reply.resultsTagMapping) {
+		cx->addSSIdTagMapping(storageServerId, tag);
 	}
 }
 
