@@ -175,6 +175,7 @@ func startMonitor(ctx context.Context, logger logr.Logger, configFile string, cu
 				logger.Error(err, "could not start HTTPS server")
 				os.Exit(1)
 			}
+			return
 		}
 		err := http.ListenAndServe(promConfig.listenAddr, mux)
 		if err != nil {
@@ -527,7 +528,7 @@ func addWatcher(fileName string, watcher *fsnotify.Watcher) error {
 	var err error
 	for retryCnt < maxRetryCnt {
 		err = watcher.Add(fileName)
-		if err != nil {
+		if err == nil {
 			return nil
 		}
 
