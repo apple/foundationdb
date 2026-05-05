@@ -263,9 +263,9 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 				continue; // Skip to the next shard
 			}
 
-			// Step 2: Get server interfaces. During relocation, the destination team is the one expected to serve
-			// current reads; source replicas may legitimately lag while they are being moved away.
-			std::vector<UID> storageServers = destStorageServers.empty() ? sourceStorageServers : destStorageServers;
+			// Step 2: Get server interfaces. The source team remains canonical until relocation commits because the
+			// move can still be cancelled while it is in progress.
+			std::vector<UID> storageServers = sourceStorageServers;
 			std::vector<StorageServerInterface> storageServerInterfaces;
 			retryCount = 0;
 			while (true) {
