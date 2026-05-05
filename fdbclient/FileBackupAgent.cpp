@@ -693,18 +693,20 @@ Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore, Refer
 	Future<Version> firstConsistentVersion = restore.firstConsistentVersion().getD(tr);
 	Future<std::string> tag = restore.tag().getD(tr);
 	Future<std::pair<std::string, Version>> lastError = restore.lastError().getD(tr);
-	// BulkLoad sub-phase counts for detailed progress
 	Future<int64_t> submittedTasks = restore.bulkLoadSubmittedTasks().getD(tr);
 	Future<int64_t> triggeredTasks = restore.bulkLoadTriggeredTasks().getD(tr);
 	Future<int64_t> runningTasks = restore.bulkLoadRunningTasks().getD(tr);
 	Future<int64_t> totalTasks = restore.bulkLoadTotalTasks().getD(tr);
+	Future<Optional<bool>> useRangeFileRestore = restore.useRangeFileRestore().get(tr);
 
-	// restore might no longer be valid after the first wait so make sure it is not needed anymore.
 	UID uid = restore.getUid();
 	co_await (success(fileCount) && success(fileBlockCount) && success(fileBlocksDispatched) &&
 	          success(fileBlocksFinished) && success(bytesWritten) && success(status) && success(currentVersion) &&
 	          success(lag) && success(firstConsistentVersion) && success(tag) && success(lastError) &&
-	          success(submittedTasks) && success(triggeredTasks) && success(runningTasks) && success(totalTasks));
+	          success(submittedTasks) && success(triggeredTasks) && success(runningTasks) && success(totalTasks) &&
+	          success(useRangeFileRestore));
+
+	bool useRangeFile = !useRangeFileRestore.get().present() || useRangeFileRestore.get().get();
 
 	std::string errstr = "None";
 	if (lastError.get().second != 0)
@@ -729,23 +731,34 @@ Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore, Refer
 	    .detail("FirstConsistentVersion", firstConsistentVersion.get())
 	    .detail("ApplyLag", lag.get());
 
-	co_return format("Tag: %s  UID: %s  State: %s  Blocks: %lld/%lld  BlocksInProgress: %lld  "
-	                 "Submitted: %lld  Triggered: %lld  Running: %lld  TotalTasks: %lld  "
-	                 "Files: %lld  BytesWritten: %lld  ApplyVersionLag: %lld  LastError: %s",
-	                 tag.get().c_str(),
-	                 uid.toString().c_str(),
-	                 status.get().toString().c_str(),
-	                 fileBlocksFinished.get(),
-	                 fileBlockCount.get(),
-	                 fileBlocksDispatched.get() - fileBlocksFinished.get(),
-	                 submittedTasks.get(),
-	                 triggeredTasks.get(),
-	                 runningTasks.get(),
-	                 totalTasks.get(),
-	                 fileCount.get(),
-	                 bytesWritten.get(),
-	                 lag.get(),
-	                 errstr.c_str());
+	std::string progressStr;
+	if (useRangeFile) {
+		progressStr = format("Tag: %s  UID: %s  State: %s\n",
+		                     tag.get().c_str(),
+		                     uid.toString().c_str(),
+		                     status.get().toString().c_str());
+		progressStr += format(" Blocks: %lld/%lld complete\n", fileBlocksFinished.get(), fileBlockCount.get());
+		progressStr += format(" Files: %lld\n", fileCount.get());
+		progressStr += format(" Bytes written: %s\n", formatBytesHumanReadable(bytesWritten.get()).c_str());
+		progressStr += format(" Apply version lag: %s\n", versionToString(lag.get()).c_str());
+	} else {
+		progressStr = format("Tag: %s  UID: %s  State: %s\n",
+		                     tag.get().c_str(),
+		                     uid.toString().c_str(),
+		                     status.get().toString().c_str());
+		progressStr += format(" Tasks submitted: %lld  triggered: %lld  running: %lld\n",
+		                      submittedTasks.get(),
+		                      triggeredTasks.get(),
+		                      runningTasks.get());
+		progressStr += format(" Tasks triggered: %lld / %lld total\n", triggeredTasks.get(), totalTasks.get());
+		progressStr += format(" Bytes written: %s\n", formatBytesHumanReadable(bytesWritten.get()).c_str());
+		double avgBytesPerTask = triggeredTasks.get() > 0 ? (double)bytesWritten.get() / triggeredTasks.get() : 0;
+		if (avgBytesPerTask > 0) {
+			progressStr += format(" Avg bytes/task: %s\n", formatBytesHumanReadable((int64_t)avgBytesPerTask).c_str());
+		}
+	}
+
+	co_return progressStr;
 }
 
 Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restore, Reference<ReadYourWritesTransaction> tr) {
@@ -7896,55 +7909,8 @@ public:
 					bool bulkLoadCompatible = bulkDumpJobIdOpt.present() && !bulkDumpJobIdOpt.get().empty();
 					statusText += format("BulkLoad Compatible: %s\n", bulkLoadCompatible ? "yes" : "no");
 
-					// If using bulkdump mode, show bulkdump progress
-					if (snapshotModeValue == 1 || snapshotModeValue == 2) {
-						Optional<BulkDumpProgress> bulkDumpProgressOpt = co_await getBulkDumpProgress(cx);
-						if (bulkDumpProgressOpt.present()) {
-							BulkDumpProgress bdProgress = bulkDumpProgressOpt.get();
-							statusText += "\nBulkDump progress:\n";
-							statusText += format(" Tasks completed - %d / %d (%.1f%%)\n",
-							                     bdProgress.completeTasks,
-							                     bdProgress.totalTasks,
-							                     bdProgress.progressPercent());
-
-							statusText +=
-							    format(" Bytes completed - %s\n",
-							           formatBytesProgress(bdProgress.completedBytes, bdProgress.totalBytes).c_str());
-
-							double throughput = bdProgress.avgBytesPerSecond();
-							if (throughput > 0) {
-								statusText += format(" Throughput - %.1f MB/s\n", throughput / 1048576.0);
-							}
-
-							if (bdProgress.etaSeconds().present()) {
-								statusText +=
-								    format(" Estimated time remaining - %s\n",
-								           formatDurationHumanReadable((int)bdProgress.etaSeconds().get()).c_str());
-							}
-
-							if (bdProgress.elapsedSeconds > 0) {
-								statusText +=
-								    format(" Elapsed time - %s\n",
-								           formatDurationHumanReadable((int)bdProgress.elapsedSeconds).c_str());
-							}
-
-							// Show stalled tasks as warnings
-							if (!bdProgress.stalledTasks.empty()) {
-								statusText += format("\nWARNING: %zu stalled tasks (no progress > 60s):\n",
-								                     bdProgress.stalledTasks.size());
-								for (const auto& stalled : bdProgress.stalledTasks) {
-									statusText += format(" Task %s: %s, stalled %.0fs, %d restarts\n",
-									                     stalled.taskId.shortString().c_str(),
-									                     stalled.range.toString().c_str(),
-									                     stalled.stalledSeconds,
-									                     stalled.restartCount);
-									if (!stalled.lastError.empty()) {
-										statusText += format("           Last error: %s\n", stalled.lastError.c_str());
-									}
-								}
-							}
-						}
-					}
+					bool showBulkDump = (snapshotModeValue == 1 || snapshotModeValue == 2);
+					bool showRangeFile = (snapshotModeValue == 0 || snapshotModeValue == 2);
 
 					if (snapshotProgress) {
 						int64_t snapshotInterval{ 0 };
@@ -7978,32 +7944,80 @@ public:
 						    store(snapshotTargetEndVersionTimestamp,
 						          timeKeeperEpochsFromVersion(snapshotTargetEndVersion, tr)));
 
-						statusText += format("Snapshot interval is %lld seconds.  ", snapshotInterval);
-						if (backupState == EBackupState::STATE_RUNNING_DIFFERENTIAL)
-							statusText += format("Current snapshot progress target is %3.2f%% (>100%% means the "
-							                     "snapshot is supposed to be done)\n",
-							                     100.0 * (recentReadVersion - snapshotBeginVersion) /
-							                         (snapshotTargetEndVersion - snapshotBeginVersion));
-						else
-							statusText += "The initial snapshot is still running.\n";
+						if (showBulkDump) {
+							Optional<BulkDumpProgress> bulkDumpProgressOpt = co_await getBulkDumpProgress(cx);
+							statusText += "\nBulkDump Snapshot:\n";
+							if (bulkDumpProgressOpt.present()) {
+								BulkDumpProgress bdProgress = bulkDumpProgressOpt.get();
+								statusText += format(" Tasks: %d/%d complete (%.1f%%)\n",
+								                     bdProgress.completeTasks,
+								                     bdProgress.totalTasks,
+								                     bdProgress.progressPercent());
+								statusText += format(
+								    " Bytes: %s\n",
+								    formatBytesProgress(bdProgress.completedBytes, bdProgress.totalBytes).c_str());
 
-						statusText += format("\nDetails:\n LogBytes written - %lld\n RangeBytes written - %lld\n "
-						                     "Last complete log version and timestamp        - %s, %s\n "
-						                     "Last complete snapshot version and timestamp   - %s, %s\n "
-						                     "Current Snapshot start version and timestamp   - %s, %s\n "
-						                     "Expected snapshot end version and timestamp    - %s, %s\n "
-						                     "Backup supposed to stop at next snapshot completion - %s\n",
-						                     logBytesWritten.orDefault(0),
-						                     rangeBytesWritten.orDefault(0),
+								double throughput = bdProgress.avgBytesPerSecond();
+								if (throughput > 0) {
+									statusText += format(" Throughput: %.1f MB/s\n", throughput / 1048576.0);
+								}
+
+								if (bdProgress.elapsedSeconds > 0) {
+									statusText +=
+									    format(" Elapsed: %s\n",
+									           formatDurationHumanReadable((int)bdProgress.elapsedSeconds).c_str());
+								}
+
+								if (bdProgress.etaSeconds().present()) {
+									statusText +=
+									    format(" ETA: %s\n",
+									           formatDurationHumanReadable((int)bdProgress.etaSeconds().get()).c_str());
+								}
+
+								if (!bdProgress.stalledTasks.empty()) {
+									statusText += format("\nWARNING: %zu stalled tasks (no progress > 60s):\n",
+									                     bdProgress.stalledTasks.size());
+									for (const auto& stalled : bdProgress.stalledTasks) {
+										statusText += format(" Task %s: %s, stalled %.0fs, %d restarts\n",
+										                     stalled.taskId.shortString().c_str(),
+										                     stalled.range.toString().c_str(),
+										                     stalled.stalledSeconds,
+										                     stalled.restartCount);
+										if (!stalled.lastError.empty()) {
+											statusText +=
+											    format("           Last error: %s\n", stalled.lastError.c_str());
+										}
+									}
+								}
+							} else {
+								statusText += " Status: pending\n";
+							}
+						}
+
+						if (showRangeFile) {
+							statusText += "\nRangefile Snapshot:\n";
+							statusText += format(" Bytes written: %s\n",
+							                     formatBytesHumanReadable(rangeBytesWritten.orDefault(0)).c_str());
+
+							if (backupState == EBackupState::STATE_RUNNING_DIFFERENTIAL) {
+								double pct = 100.0 * (recentReadVersion - snapshotBeginVersion) /
+								             (snapshotTargetEndVersion - snapshotBeginVersion);
+								statusText += format(" Progress: %.2f%%\n", pct);
+							} else {
+								statusText += " Status: Initial snapshot still running\n";
+							}
+							statusText +=
+							    format(" Started: %s\n", timeStampToString(snapshotBeginVersionTimestamp).c_str());
+						}
+
+						statusText += format("\nMutation Logs:\n");
+						statusText += format(" Bytes written: %s\n",
+						                     formatBytesHumanReadable(logBytesWritten.orDefault(0)).c_str());
+						statusText += format(" Last complete version: %s (%s)\n",
 						                     versionToString(latestLogEndVersion).c_str(),
-						                     timeStampToString(latestLogEndVersionTimestamp).c_str(),
-						                     versionToString(latestSnapshotEndVersion).c_str(),
-						                     timeStampToString(latestSnapshotEndVersionTimestamp).c_str(),
-						                     versionToString(snapshotBeginVersion).c_str(),
-						                     timeStampToString(snapshotBeginVersionTimestamp).c_str(),
-						                     versionToString(snapshotTargetEndVersion).c_str(),
-						                     timeStampToString(snapshotTargetEndVersionTimestamp).c_str(),
-						                     boolToYesOrNo(stopWhenDone).c_str());
+						                     timeStampToString(latestLogEndVersionTimestamp).c_str());
+
+						statusText += format("\nSnapshot interval is %lld seconds.\n", snapshotInterval);
 					}
 
 					// Append the errors, if requested
