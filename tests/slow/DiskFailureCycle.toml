@@ -3,7 +3,7 @@ buggify = false
 minimumReplication = 3
 minimumRegions = 3
 logAntiQuorum = 0
-storageEngineExcludeTypes = [1, 2, 4, 5]
+storageEngineExcludeTypes = ["memory", "memory-radixtree", "ssd-rocksdb-v1", "ssd-sharded-rocksdb"]
 
 [[test]]
 testTitle = 'DiskFailureCycle'
