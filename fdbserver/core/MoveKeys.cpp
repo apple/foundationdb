@@ -986,7 +986,8 @@ static Future<Void> startMoveKeys(Database occ,
                                   FlowLock* startMoveKeysLock,
                                   UID relocationIntervalId,
                                   std::map<UID, StorageServerInterface>* tssMapping,
-                                  const DDEnabledState* ddEnabledState) {
+                                  const DDEnabledState* ddEnabledState,
+                                  UID dataMoveId = UID()) {
 	TraceInterval interval("RelocateShard_StartMoveKeys");
 	Future<Void> warningLogger = logWarningAfter("StartMoveKeysTooLong", 600, servers);
 	// state TraceInterval waitInterval("");
@@ -1140,11 +1141,44 @@ static Future<Void> startMoveKeys(Database occ,
 						// Since we are setting this for the entire range, serverKeys and keyServers aren't guaranteed
 						// to have the same shard boundaries If that invariant was important, we would have to move this
 						// inside the loop above and also set it for the src servers
+						Value skValue = dataMoveId.isValid() ? serverKeysValue(dataMoveId) : serverKeysTrue;
 						actors.push_back(krmSetRangeCoalescing(
-						    tr, serverKeysPrefixFor(servers[i]), currentKeys, allKeys, serverKeysTrue));
+						    tr, serverKeysPrefixFor(servers[i]), currentKeys, allKeys, skValue));
 					}
 
 					co_await waitForAll(actors);
+
+					// If this is the last batch of a bulk load move, update the task phase
+					// to Running in the same transaction for atomicity.
+					if (endKey >= keys.end && dataMoveId.isValid()) {
+						bool assigned, emptyRange;
+						DataMoveType dmType;
+						DataMovementReason dmReason;
+						decodeDataMoveId(dataMoveId, assigned, emptyRange, dmType, dmReason);
+						if (dmType == DataMoveType::LOGICAL_BULKLOAD ||
+						    dmType == DataMoveType::PHYSICAL_BULKLOAD) {
+							RangeResult result = co_await krmGetRanges(tr, bulkLoadTaskPrefix, keys);
+							if (result.size() >= 2 && !result[0].value.empty()) {
+								BulkLoadTaskState taskState = decodeBulkLoadTaskState(result[0].value);
+								if (taskState.isValid() &&
+								    (taskState.phase == BulkLoadPhase::Triggered ||
+								     taskState.phase == BulkLoadPhase::Running)) {
+									taskState.phase = BulkLoadPhase::Running;
+									taskState.setDataMoveId(dataMoveId);
+									taskState.startTime = now();
+									co_await krmSetRange(tr,
+									                     bulkLoadTaskPrefix,
+									                     taskState.getRange(),
+									                     bulkLoadTaskStateValue(taskState));
+									TraceEvent(SevInfo, "StartMoveKeysBulkLoadSetRunning", relocationIntervalId)
+									    .detail("DataMoveID", dataMoveId)
+									    .detail("TaskID", taskState.getTaskId())
+									    .detail("TaskRange", taskState.getRange())
+									    .detail("MoveRange", keys);
+								}
+							}
+						}
+					}
 
 					co_await tr->commit();
 					counters->committed->increment(1);
@@ -1312,7 +1346,8 @@ static Future<Void> finishMoveKeys(Database occ,
                                    bool hasRemote,
                                    UID relocationIntervalId,
                                    std::map<UID, StorageServerInterface> tssMapping,
-                                   const DDEnabledState* ddEnabledState) {
+                                   const DDEnabledState* ddEnabledState,
+                                   UID dataMoveId = UID()) {
 	TraceInterval interval("RelocateShard_FinishMoveKeys");
 	TraceInterval waitInterval("");
 	Future<Void> warningLogger = logWarningAfter("FinishMoveKeysTooLong", 600, destinationTeam);
@@ -1622,6 +1657,35 @@ static Future<Void> finishMoveKeys(Database occ,
 							CODE_PROBE(true, "finishMoveKeys injecting transaction_too_old before commit");
 							throw transaction_too_old();
 						}
+
+						// If this is the last batch of a bulk load move, update the task phase
+						// to Complete in the same transaction for atomicity.
+						if (endKey >= keys.end && dataMoveId.isValid()) {
+							bool assigned, emptyRange;
+							DataMoveType dmType;
+							DataMovementReason dmReason;
+							decodeDataMoveId(dataMoveId, assigned, emptyRange, dmType, dmReason);
+							if (dmType == DataMoveType::LOGICAL_BULKLOAD ||
+							    dmType == DataMoveType::PHYSICAL_BULKLOAD) {
+								RangeResult result = co_await krmGetRanges(&tr, bulkLoadTaskPrefix, keys);
+								if (result.size() >= 2 && !result[0].value.empty()) {
+									BulkLoadTaskState taskState = decodeBulkLoadTaskState(result[0].value);
+									if (taskState.isValid() && taskState.phase == BulkLoadPhase::Running) {
+										taskState.phase = BulkLoadPhase::Complete;
+										co_await krmSetRange(&tr,
+										                     bulkLoadTaskPrefix,
+										                     taskState.getRange(),
+										                     bulkLoadTaskStateValue(taskState));
+										TraceEvent(SevInfo, "FinishMoveKeysBulkLoadSetComplete", relocationIntervalId)
+										    .detail("DataMoveID", dataMoveId)
+										    .detail("TaskID", taskState.getTaskId())
+										    .detail("TaskRange", taskState.getRange())
+										    .detail("MoveRange", keys);
+									}
+								}
+							}
+						}
+
 						co_await tr.commit();
 						counters->committed->increment(1);
 
@@ -3389,7 +3453,8 @@ Future<Void> rawStartMovement(Database occ,
 	                     params.startMoveKeysParallelismLock,
 	                     params.relocationIntervalId,
 	                     &tssMapping,
-	                     params.ddEnabledState);
+	                     params.ddEnabledState,
+	                     params.dataMoveId);
 }
 
 Future<Void> rawCheckFetchingState(const Database& cx,
@@ -3441,7 +3506,8 @@ Future<Void> rawFinishMovement(Database occ,
 	                      params.hasRemote,
 	                      params.relocationIntervalId,
 	                      tssMapping,
-	                      params.ddEnabledState);
+	                      params.ddEnabledState,
+	                      params.dataMoveId);
 }
 
 Future<Void> moveKeys(Database occ, MoveKeysParams params) {
