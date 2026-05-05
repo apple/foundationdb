@@ -4,12 +4,9 @@ storageEngineExcludeTypes = [5] #FIXME: remove after allowing to do bulkloading 
 disableTss = true # TODO(BulkLoad): support TSS. finishMoveShard should wait for TSS if a data move is bulkload data move.
 
 [[knobs]]
-# This knob is commented out since the knob override is done *after* the simulation system is set up. However,
-# this is not going to completely work:
-# The purpose of setting the knob to true was to enable the shard rocksdb storage engine
-# The shard rocksdb storage engine is set up before this knob is overridden
-# The temporary fix is that in SimulatedCluster.cpp:simulationSetupAndRun, we are doing one additional check.
-shard_encode_location_metadata = true
+# Disable shard_encode_location_metadata to test bulk loading without
+# DataMoveMetaData dependency (uses direct range-based task lookup).
+shard_encode_location_metadata = false
 
 # Rely on RangeLock
 enable_read_lock_on_range = true

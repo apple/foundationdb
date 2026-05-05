@@ -7095,26 +7095,18 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			Future<Void> hold;
 			KeyRef rangeEnd;
 			if (conductBulkLoad) {
-				ASSERT(dataMoveIdIsValidForBulkLoad(dataMoveId)); // TODO(BulkLoad): remove dangerous assert
-				// Get the bulkload task metadata from the data move metadata. Note that a SS can receive a data move
-				// mutation before the bulkload task metadata is persisted. In this case, the SS will not be able to
-				// read the bulkload task. SS will wait at this point until the bulkload task metadata is persisted.
-				// Moreover, the bulkload task metadata is persist at a verison at least the version when this SS
-				// receives the datamove mutation. Therefore, the SS should read the bulkload task metadata at a version
-				// at least this SS version.
-				// Note that it is possible that this SS can never get the bulkload metadata because the bulkload data
-				// move is cancelled or replaced by another data move. In this case, while
-				// getBulkLoadTaskStateFromDataMove get stuck, this fetchKeys is guaranteed to be cancelled.
-				BulkLoadTaskState bulkLoadTaskState = co_await getBulkLoadTaskStateFromDataMove(
-				    data->cx, dataMoveId, /*atLeastVersion=*/data->version.get(), data->thisServerID);
+				// Get the bulkload task metadata directly from bulkLoadTaskKeys by range.
+				// This does not depend on DataMoveMetaData or a valid dataMoveId.
+				// Note that a SS can receive a data move mutation before the bulkload task metadata
+				// is persisted. In this case, the SS will wait until the task metadata is available.
+				// If the bulkload data move is cancelled or replaced, this fetchKeys is cancelled.
+				BulkLoadTaskState bulkLoadTaskState = co_await getBulkLoadTaskStateByRange(
+				    data->cx, keys, /*atLeastVersion=*/data->version.get(), data->thisServerID);
 				TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
 				    .detail("DataMoveId", dataMoveId.toString())
 				    .detail("Range", keys)
 				    .detail("Phase", "Got task metadata")
 				    .detail("FKID", fetchKeysID);
-				// Check the correctness: bulkLoadTaskMetadata stored in dataMoveMetadata must have the same
-				// dataMoveId.
-				ASSERT(bulkLoadTaskState.getDataMoveId() == dataMoveId);
 				// We download the data file to local disk and pass the data file path to read in the next step.
 				localBulkLoadFileSets = std::make_shared<BulkLoadFileSetKeyMap>();
 				// A bulkload task can do file ingestion if the task range is aligned with manifests' range.
@@ -8175,9 +8167,10 @@ Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 	BulkLoadTaskState bulkLoadTaskState;
 	bool conductBulkLoad = moveInShard->meta->conductBulkLoad;
 	if (conductBulkLoad) {
-		// Get the bulkload task metadata from the data move metadata. For details, see the comments in the fetchKeys.
-		bulkLoadTaskState = co_await getBulkLoadTaskStateFromDataMove(
-		    data->cx, moveInShard->dataMoveId(), data->version.get(), data->thisServerID);
+		// Look up bulk load task directly by range, without going through DataMoveMetaData.
+		ASSERT(!moveInShard->meta->ranges.empty());
+		bulkLoadTaskState = co_await getBulkLoadTaskStateByRange(
+		    data->cx, moveInShard->meta->ranges.front(), data->version.get(), data->thisServerID);
 	}
 
 	while (true) {
@@ -8188,9 +8181,6 @@ Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 			// Pending = 0, Fetching = 1, Ingesting = 2, ApplyingUpdates = 3, Complete = 4, Deleting = 4, Fail = 6,
 			if (phase == MoveInPhase::Fetching) {
 				if (conductBulkLoad) {
-					// Check the correctness: bulkLoadTaskMetadata stored in dataMoveMetadata must have the same
-					// dataMoveId.
-					ASSERT(bulkLoadTaskState.getDataMoveId() != moveInShard->dataMoveId());
 					co_await bulkLoadFetchShardFileToLoad(data, moveInShard, dir, bulkLoadTaskState);
 				} else {
 					co_await fetchShardCheckpoint(data, moveInShard, dir);
@@ -9365,22 +9355,8 @@ private:
 			                                    dataMoveType == DataMoveType::PHYSICAL_BULKLOAD);
 			conductBulkLoad = ConductBulkLoad(dataMoveType == DataMoveType::LOGICAL_BULKLOAD ||
 			                                  dataMoveType == DataMoveType::PHYSICAL_BULKLOAD);
-			// conductBulkLoad represents the intention of the data move, which is ONLY used to suggest whether needs to
-			// read data move metadata to get the bulk load task from system metadata. We rely on the existence of data
-			// move metadata to decide if the SS should do bulk load task, rather than relying on the data move ID.
-			if (conductBulkLoad && (dataMoveId == anonymousShardId || !dataMoveId.isValid())) {
-				// If conductBulkLoad == true but dataMoveId is not usable, SS should ignore the request by setting the
-				// conductBulkLoad to false. Then, a normal data move is triggered.
-				TraceEvent(SevError, "SSBulkLoadTaskDataMoveIdInvalid", data->thisServerID)
-				    .detail("Message",
-				            "A bulkload request is converted to a normal data move because the data move id is either "
-				            "anonymousShardId or invalid. Please check DD setting to see if the bulkload dependency is "
-				            "correctly set.")
-				    .detail("DataMoveType", dataMoveType)
-				    .detail("KVStoreType", data->storage.getKeyValueStoreType())
-				    .detail("DataMoveId", dataMoveId.toString());
-				conductBulkLoad = ConductBulkLoad::False;
-			}
+			// conductBulkLoad represents the intention of the data move. SS will look up the bulk load
+			// task directly by range from bulkLoadTaskKeys, so a valid dataMoveId is not required.
 			processedStartKey = true;
 		} else if (m.type == MutationRef::SetValue && m.param1 == lastEpochEndPrivateKey) {
 			// lastEpochEnd transactions are guaranteed by the master to be alone in their own batch (version)

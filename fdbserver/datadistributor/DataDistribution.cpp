@@ -764,8 +764,9 @@ public:
 		}
 
 		std::vector<Key> customBoundaries;
-		if (bulkLoadIsEnabled(self->initData->bulkLoadMode)) {
-			// Bulk load does not allow boundary change
+		if (bulkLoadIsEnabled(self->initData->bulkLoadMode) && SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+			// When SHARD_ENCODE_LOCATION_METADATA is enabled, bulk load uses the startMoveShards path
+			// which manages boundaries differently. Skip custom boundary enforcement in that case.
 			TraceEvent(SevInfo, "DDInitCustomRangeConfigDisabledByBulkLoadMode", self->ddId);
 		} else {
 			for (auto it : self->initData->userRangeConfig->ranges()) {
@@ -2219,12 +2220,8 @@ Future<Void> monitorBulkLoadModeAndSpawnActors(Reference<DataDistributor> self, 
 		co_return;
 	}
 
-	// Only monitor if SHARD_ENCODE_LOCATION_METADATA is enabled (required for bulkload)
-	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-		TraceEvent(SevInfo, "DDBulkLoadModeMonitorSkipped", self->ddId)
-		    .detail("Reason", "SHARD_ENCODE_LOCATION_METADATA is disabled");
-		co_return;
-	}
+	// Bulk load no longer requires SHARD_ENCODE_LOCATION_METADATA.
+	// SS looks up bulk load tasks directly by range from bulkLoadTaskKeys.
 
 	Database cx = self->txnProcessor->context();
 	Transaction tr(cx);
