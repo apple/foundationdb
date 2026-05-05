@@ -21,7 +21,7 @@
 testClass = "Backup"
 
 [configuration]
-storageEngineExcludeTypes = [5] # FIXME: remove after allowing bulkloading with fetchKey and shardedrocksdb
+storageEngineExcludeTypes = ["ssd-sharded-rocksdb"] # FIXME: remove after allowing bulkloading with fetchKey and shardedrocksdb
 disableTss = true # TODO(BulkLoad): support TSS
 
 # HA (multi-region) configuration - randomly enabled for test coverage
