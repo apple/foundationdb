@@ -19,15 +19,9 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_TLOGSERVER_ACTOR_G_H)
-#define FDBSERVER_TLOGSERVER_ACTOR_G_H
-#include "fdbserver/tlog/TLogServer.actor.g.h"
-#elif !defined(FDBSERVER_TLOGSERVER_ACTOR_H)
-#define FDBSERVER_TLOGSERVER_ACTOR_H
 
 #include "fdbserver/core/TLogInterface.h"
 #include "flow/flow.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 class IDiskQueue;
 class IKeyValueStore;
@@ -36,23 +30,20 @@ struct ServerDBInfo;
 
 double effectiveTLogMinAvailableSpaceRatio();
 
-ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
-                        IDiskQueue* persistentQueue,
-                        Reference<AsyncVar<ServerDBInfo> const> db,
-                        LocalityData locality,
-                        PromiseStream<InitializeTLogRequest> tlogRequests,
-                        UID tlogId,
-                        UID workerID,
-                        bool restoreFromDisk,
-                        Promise<Void> oldLog,
-                        Promise<Void> recovered,
-                        std::string folder,
-                        Reference<AsyncVar<bool>> degraded,
-                        Reference<AsyncVar<bool>> lowDiskTLogExclusion,
-                        Reference<AsyncVar<UID>> activeSharedTLog,
-                        Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck);
+Future<Void> tLog(IKeyValueStore* persistentData,
+                  IDiskQueue* persistentQueue,
+                  Reference<AsyncVar<ServerDBInfo> const> db,
+                  LocalityData locality,
+                  PromiseStream<InitializeTLogRequest> tlogRequests,
+                  UID tlogId,
+                  UID workerID,
+                  bool restoreFromDisk,
+                  Promise<Void> oldLog,
+                  Promise<Void> recovered,
+                  std::string folder,
+                  Reference<AsyncVar<bool>> degraded,
+                  Reference<AsyncVar<bool>> lowDiskTLogExclusion,
+                  Reference<AsyncVar<UID>> activeSharedTLog,
+                  Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck);
 
 using TLogFn = decltype(&tLog);
-
-#include "flow/unactorcompiler.h"
-#endif
