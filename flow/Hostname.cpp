@@ -130,6 +130,8 @@ TEST_CASE("/flow/Hostname/parse") {
 	std::string hn11s = "[::1]:4800";
 	std::string hn12s = "[::1]:4800:tls";
 	std::string hn13s = "1234";
+	// This host name is guaranteed not to be resolvable:
+	// https://www.rfc-editor.org/rfc/rfc2606.html
 	std::string unresolvableHostnameString = "host-name.invalid:1234";
 
 	auto hn1 = Hostname::parse(hn1s);
