@@ -59,7 +59,7 @@ public:
 	std::unordered_map<RESTConnectionPoolKey, std::queue<ReusableConnection>, boost::hash<RESTConnectionPoolKey>>
 	    connectionPoolMap;
 
-	RESTConnectionPool(const int maxConnsPerKey) : maxConnPerConnectKey(maxConnsPerKey) {}
+	explicit RESTConnectionPool(const int maxConnsPerKey) : maxConnPerConnectKey(maxConnsPerKey) {}
 
 	// Destructor implementation in RESTUtils.cpp
 	// In simulation, explicitly closes all pooled connections before destruction

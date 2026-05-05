@@ -38,7 +38,7 @@ struct TargetedKillWorkload : TestWorkload {
 	bool reboot;
 	double suspendDuration;
 
-	TargetedKillWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit TargetedKillWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
 		killAt = getOption(options, "killAt"_sr, 5.0);
 		reboot = getOption(options, "reboot"_sr, false);

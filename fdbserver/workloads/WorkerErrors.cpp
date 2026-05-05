@@ -29,7 +29,7 @@
 struct WorkerErrorsWorkload : TestWorkload {
 	static constexpr auto NAME = "WorkerErrors";
 
-	WorkerErrorsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
+	explicit WorkerErrorsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	void getMetrics(std::vector<PerfMetric>& m) override {}

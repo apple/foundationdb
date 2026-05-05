@@ -40,7 +40,7 @@ struct ClientMetricWorkload : TestWorkload {
 	int64_t trInfoSizeLimit;
 	std::vector<Future<Void>> clients;
 
-	ClientMetricWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit ClientMetricWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		samplingProbability = getOption(options,
 		                                "samplingProbability"_sr,
 		                                deterministicRandom()->random01()); // rand range 0 - 1

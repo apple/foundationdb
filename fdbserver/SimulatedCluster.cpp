@@ -899,8 +899,7 @@ Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConnectionR
 				writeFile(joinPath(*dataFolder, "fdb.cluster"), connStr.toString());
 				connRecord = makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"));
 			} else {
-				connRecord =
-				    makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"), connStr.toString());
+				connRecord = makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"), connStr);
 			}
 		} else if (onShutdown.get() == ISimulator::KillType::RebootProcessAndSwitch) {
 			TraceEvent("SimulatedFDBDRebootAndSwitch")
@@ -918,7 +917,8 @@ Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConnectionR
 			if (otherConnStr.toString().size() > 1) {
 				std::string newConnStr =
 				    g_simulator->hasSwitchedCluster(process->address) ? otherConnStr.toString() : connStr.toString();
-				connRecord = makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"), newConnStr);
+				connRecord = makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"),
+				                                                  ClusterConnectionString(newConnStr));
 			}
 		} else {
 			TraceEvent("SimulatedFDBDJustRepeat")
@@ -1007,9 +1007,9 @@ Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				if (ipProcessMode != SimHTTPServer) {
 					// Fall back to use seed string if fdb.cluster not present
 					// It can happen when a process failed before it persisted the connection string to disk
-					clusterFile = Reference<IClusterConnectionRecord>(
-					    useSeedFile || !fileExists(path) ? new ClusterConnectionFile(path, connStr.toString())
-					                                     : new ClusterConnectionFile(path));
+					clusterFile = Reference<IClusterConnectionRecord>(useSeedFile || !fileExists(path)
+					                                                      ? new ClusterConnectionFile(path, connStr)
+					                                                      : new ClusterConnectionFile(path));
 				}
 				const int listenPort = i * listenPerProcess + 1;
 

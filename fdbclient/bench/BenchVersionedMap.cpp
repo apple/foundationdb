@@ -47,7 +47,7 @@ struct VersionedMapHarness {
 	struct result {
 		typename map::iterator it;
 
-		result(typename map::iterator it) : it(it) {}
+		explicit result(typename map::iterator it) : it(it) {}
 
 		result& operator++() {
 			++it;

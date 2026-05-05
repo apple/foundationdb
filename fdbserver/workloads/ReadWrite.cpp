@@ -365,7 +365,7 @@ struct ReadWriteWorkload : ReadWriteCommon {
 	// hot traffic pattern
 	double hotKeyFraction, forceHotProbability = 0; // key based hot traffic setting
 
-	ReadWriteWorkload(WorkloadContext const& wcx)
+	explicit ReadWriteWorkload(WorkloadContext const& wcx)
 	  : ReadWriteCommon(wcx), dependentReads(false), adjacentReads(false), adjacentWrites(false) {
 		extraReadConflictRangesPerTransaction = getOption(options, "extraReadConflictRangesPerTransaction"_sr, 0);
 		extraWriteConflictRangesPerTransaction = getOption(options, "extraWriteConflictRangesPerTransaction"_sr, 0);

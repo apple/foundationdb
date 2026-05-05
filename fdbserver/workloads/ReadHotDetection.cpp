@@ -37,7 +37,7 @@ struct ReadHotDetectionWorkload : TestWorkload {
 	KeyRange wholeRange;
 	bool passed;
 
-	ReadHotDetectionWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit ReadHotDetectionWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		testDuration = getOption(options, "testDuration"_sr, 120.0);
 		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 1000.0) / clientCount;
 		actorCount = getOption(options, "actorsPerClient"_sr, transactionsPerSecond / 5);

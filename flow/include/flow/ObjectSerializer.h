@@ -32,7 +32,7 @@ template <class Ar>
 struct LoadContext {
 	Ar* ar;
 
-	LoadContext(Ar* ar) : ar(ar) {}
+	explicit LoadContext(Ar* ar) : ar(ar) {}
 
 	Arena& arena() { return ar->arena(); }
 
@@ -307,7 +307,7 @@ namespace detail {
 
 template <class T, class Context>
 struct LoadSaveHelper<Standalone<T>, Context> : Context {
-	LoadSaveHelper(const Context& context) : Context(context), helper(context) {}
+	explicit LoadSaveHelper(const Context& context) : Context(context), helper(context) {}
 
 	void load(Standalone<T>& member, const uint8_t* current) {
 		helper.load(member.contents(), current);

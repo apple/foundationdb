@@ -181,7 +181,7 @@ struct LogSystemConfig {
 	LogEpoch oldestBackupEpoch;
 	std::map<uint8_t, std::vector<uint16_t>> knownLockedTLogIds;
 
-	LogSystemConfig(LogEpoch e = 0)
+	explicit LogSystemConfig(LogEpoch e = 0)
 	  : logSystemType(LogSystemType::empty), logRouterTags(0), txsTags(0), expectedLogSets(0), stopped(false), epoch(e),
 	    oldestBackupEpoch(e) {}
 

@@ -43,7 +43,7 @@ struct VersionVector {
 	                    // version in the "versions" map.)
 
 	VersionVector() : maxVersion(invalidVersion), cachedEncodedSize(InvalidEncodedSize) {}
-	VersionVector(Version version) : maxVersion(version), cachedEncodedSize(InvalidEncodedSize) {}
+	explicit VersionVector(Version version) : maxVersion(version), cachedEncodedSize(InvalidEncodedSize) {}
 
 private:
 	// Only invoked by getDelta() and applyDelta(), where tag has been validated

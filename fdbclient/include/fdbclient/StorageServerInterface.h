@@ -174,8 +174,8 @@ struct StorageInfo : NonCopyable, public ReferenceCounted<StorageInfo> {
 struct StorageServerMetaInfo : public StorageServerInterface {
 	Optional<StorageMetadataType> metadata;
 
-	StorageServerMetaInfo(const StorageServerInterface& interface,
-	                      Optional<StorageMetadataType> metadata = Optional<StorageMetadataType>())
+	explicit StorageServerMetaInfo(const StorageServerInterface& interface,
+	                               Optional<StorageMetadataType> metadata = Optional<StorageMetadataType>())
 	  : StorageServerInterface(interface), metadata(metadata) {}
 };
 
@@ -406,7 +406,7 @@ struct GetKeyValuesStreamReply : public ReplyPromiseStreamReply {
 	bool cached = false;
 
 	GetKeyValuesStreamReply() : version(invalidVersion), more(false), cached(false) {}
-	GetKeyValuesStreamReply(GetKeyValuesReply r)
+	explicit GetKeyValuesStreamReply(GetKeyValuesReply r)
 	  : arena(r.arena), data(r.data), version(r.version), more(r.more), cached(r.cached) {}
 
 	int expectedSize() const { return sizeof(GetKeyValuesStreamReply) + data.expectedSize(); }
@@ -752,7 +752,7 @@ struct ReadHotSubRangeRequest {
 	int chunkCount = 1;
 
 	ReadHotSubRangeRequest() {}
-	ReadHotSubRangeRequest(KeyRangeRef const& keys, SplitType type = SplitType::BYTES, int chunkCount = 1)
+	explicit ReadHotSubRangeRequest(KeyRangeRef const& keys, SplitType type = SplitType::BYTES, int chunkCount = 1)
 	  : keys(arena, keys), type(type), chunkCount(chunkCount) {}
 
 	template <class Ar>
@@ -902,7 +902,7 @@ struct FetchCheckpointReply : public ReplyPromiseStreamReply {
 	Standalone<StringRef> data;
 
 	FetchCheckpointReply() {}
-	FetchCheckpointReply(StringRef token) : token(token) {}
+	explicit FetchCheckpointReply(StringRef token) : token(token) {}
 
 	int expectedSize() const { return data.expectedSize(); }
 

@@ -61,7 +61,7 @@ struct ReferencedInterface : public ReferenceCounted<ReferencedInterface<T>> {
 	T interf;
 	int8_t distance; // one of enum values in struct LBDistance
 	std::string toString() const { return interf.toString(); }
-	ReferencedInterface(T const& interf, LocalityData const& locality = LocalityData()) : interf(interf) {
+	explicit ReferencedInterface(T const& interf, LocalityData const& locality = LocalityData()) : interf(interf) {
 		distance = LBLocalityData<T>::Present ? loadBalanceDistance(locality,
 		                                                            LBLocalityData<T>::getLocality(interf),
 		                                                            LBLocalityData<T>::getAddress(interf))
@@ -184,7 +184,7 @@ private:
 
 template <class T>
 class MultiInterface : public ReferenceCounted<MultiInterface<T>> {
-	MultiInterface(const std::vector<T>& v, LocalityData const& locality = LocalityData()) {
+	explicit MultiInterface(const std::vector<T>& v, LocalityData const& locality = LocalityData()) {
 		// This version of MultInterface is no longer used, but was kept around because of templating
 		ASSERT(false);
 	}
@@ -195,7 +195,7 @@ class MultiInterface : public ReferenceCounted<MultiInterface<T>> {
 template <class T>
 class MultiInterface<ReferencedInterface<T>> : public ReferenceCounted<MultiInterface<ReferencedInterface<T>>> {
 public:
-	MultiInterface(const std::vector<Reference<ReferencedInterface<T>>>& v) : alternatives(v), bestCount(0) {
+	explicit MultiInterface(const std::vector<Reference<ReferencedInterface<T>>>& v) : alternatives(v), bestCount(0) {
 		deterministicRandom()->randomShuffle(alternatives);
 		if (LBLocalityData<T>::Present) {
 			std::stable_sort(alternatives.begin(), alternatives.end(), ReferencedInterface<T>::sort_by_distance);

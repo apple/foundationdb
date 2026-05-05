@@ -33,7 +33,7 @@ struct PubSubMultiplesWorkload : TestWorkload {
 	std::vector<Future<Void>> inboxWatchers;
 	PerfIntCounter messages;
 
-	PubSubMultiplesWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), messages("Messages") {
+	explicit PubSubMultiplesWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), messages("Messages") {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		messagesPerSecond = getOption(options, "messagesPerSecond"_sr, 500.0) / clientCount;
 		actorCount = getOption(options, "actorsPerClient"_sr, 20);

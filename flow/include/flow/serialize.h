@@ -450,7 +450,7 @@ public:
 	explicit BinaryWriter(VersionOptions vo) : data(nullptr), size(0), allocated(0) {
 		vo.write(*this);
 	}
-	BinaryWriter(BinaryWriter&& rhs)
+	explicit(false) BinaryWriter(BinaryWriter&& rhs)
 	  : arena(std::move(rhs.arena)), data(rhs.data), size(rhs.size), allocated(rhs.allocated),
 	    m_protocolVersion(rhs.m_protocolVersion) {
 		rhs.size = 0;
@@ -987,7 +987,7 @@ template <class T>
 struct SerializeSource : MakeSerializeSource<SerializeSource<T>, T> {
 	using value_type = T;
 	T const& value;
-	SerializeSource(T const& value) : value(value) {}
+	explicit SerializeSource(T const& value) : value(value) {}
 	void serializeObjectWriter(ObjectWriter& w) const override { w.serialize(value); }
 	T const& get() const override { return value; }
 };

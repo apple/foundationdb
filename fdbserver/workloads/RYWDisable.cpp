@@ -30,7 +30,7 @@ struct RYWDisableWorkload : TestWorkload {
 	double testDuration;
 	std::vector<Future<Void>> clients;
 
-	RYWDisableWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit RYWDisableWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		testDuration = getOption(options, "testDuration"_sr, 600.0);
 		nodes = getOption(options, "nodes"_sr, 100);
 		keyBytes = std::max(getOption(options, "keyBytes"_sr, 16), 16);

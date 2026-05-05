@@ -52,7 +52,7 @@ public:
 	// d2i_PUBKEY
 	PublicKey(DerEncoded, StringRef der);
 
-	PublicKey(const PublicKey& other) noexcept = default;
+	explicit(false) PublicKey(const PublicKey& other) noexcept = default;
 
 	PublicKey& operator=(const PublicKey& other) noexcept = default;
 
@@ -87,7 +87,7 @@ public:
 	// d2i_AutoPrivateKey
 	PrivateKey(DerEncoded, StringRef der);
 
-	PrivateKey(const PrivateKey& other) noexcept = default;
+	explicit(false) PrivateKey(const PrivateKey& other) noexcept = default;
 
 	PrivateKey& operator=(const PrivateKey& other) noexcept = default;
 

@@ -79,7 +79,7 @@ struct StreamingRangeReadWorkload : KVWorkload {
 	double testDuration;
 	Future<Void> client;
 
-	StreamingRangeReadWorkload(WorkloadContext const& wcx) : KVWorkload(wcx) {
+	explicit StreamingRangeReadWorkload(WorkloadContext const& wcx) : KVWorkload(wcx) {
 		testDuration = getOption(options, "testDuration"_sr, 60.0);
 	}
 

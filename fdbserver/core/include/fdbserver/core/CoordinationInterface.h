@@ -51,9 +51,9 @@ struct GenerationRegInterface {
 	// the v2 of the previous generation is the v1 of the next.
 
 	GenerationRegInterface() {}
-	GenerationRegInterface(NetworkAddress const& remote);
-	GenerationRegInterface(INetwork* local);
-	GenerationRegInterface(Hostname const& hostname) : hostname(hostname) {};
+	explicit GenerationRegInterface(NetworkAddress const& remote);
+	explicit GenerationRegInterface(INetwork* local);
+	explicit GenerationRegInterface(Hostname const& hostname) : hostname(hostname) {};
 };
 
 struct UniqueGeneration {
@@ -126,9 +126,9 @@ struct LeaderElectionRegInterface : ClientLeaderRegInterface {
 	RequestStream<struct ForwardRequest> forward;
 
 	LeaderElectionRegInterface() {}
-	LeaderElectionRegInterface(NetworkAddress const& remote);
-	LeaderElectionRegInterface(INetwork* local);
-	LeaderElectionRegInterface(Hostname const& hostname) : ClientLeaderRegInterface(hostname) {}
+	explicit LeaderElectionRegInterface(NetworkAddress const& remote);
+	explicit LeaderElectionRegInterface(INetwork* local);
+	explicit LeaderElectionRegInterface(Hostname const& hostname) : ClientLeaderRegInterface(hostname) {}
 };
 
 struct CandidacyRequest {

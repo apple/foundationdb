@@ -28,7 +28,7 @@ struct DDMetricsWorkload : TestWorkload {
 	static constexpr auto NAME = "DDMetrics";
 	double startDelay, ddDone;
 
-	DDMetricsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), ddDone(0.0) {
+	explicit DDMetricsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), ddDone(0.0) {
 		startDelay = getOption(options, "beginPoll"_sr, 10.0);
 	}
 

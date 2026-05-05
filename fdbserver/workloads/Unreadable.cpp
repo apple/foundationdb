@@ -30,7 +30,7 @@ struct UnreadableWorkload : TestWorkload {
 	double testDuration;
 	std::vector<Future<Void>> clients;
 
-	UnreadableWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit UnreadableWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		testDuration = getOption(options, "testDuration"_sr, 600.0);
 		nodeCount = getOption(options, "nodeCount"_sr, (uint64_t)100000);
 	}

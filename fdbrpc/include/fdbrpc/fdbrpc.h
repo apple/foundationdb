@@ -134,18 +134,16 @@ public:
 	void send(U&& value) const {
 		sav->send(std::forward<U>(value));
 	}
-    // Swift can't call method that takes in a universal references (U&&),
-    // so provide a callable `send` method that copies the value.
-    void sendCopy(const T& valueCopy) const SWIFT_NAME(send(_:)) {
-        sav->send(valueCopy);
-    }
+	// Swift can't call method that takes in a universal references (U&&),
+	// so provide a callable `send` method that copies the value.
+	void sendCopy(const T& valueCopy) const SWIFT_NAME(send(_:)) { sav->send(valueCopy); }
 	template <class E>
 	void sendError(const E& exc) const {
 		sav->sendError(exc);
 	}
 
 	void send(Never) { sendError(never_reply()); }
-  // SWIFT: Convenience method, since there is also a Swift.Never, so Never() could be confusing
+	// SWIFT: Convenience method, since there is also a Swift.Never, so Never() could be confusing
 	void sendNever() const { send(Never()); }
 
 	Future<T> getFuture() const {
@@ -158,14 +156,14 @@ public:
 	explicit ReplyPromise(const PeerCompatibilityPolicy& policy) : ReplyPromise() {
 		sav->setPeerCompatibilityPolicy(policy);
 	}
-	ReplyPromise(const ReplyPromise& rhs) : sav(rhs.sav) { sav->addPromiseRef(); }
-	ReplyPromise(ReplyPromise&& rhs) noexcept : sav(rhs.sav) { rhs.sav = 0; }
+	explicit(false) ReplyPromise(const ReplyPromise& rhs) : sav(rhs.sav) { sav->addPromiseRef(); }
+	explicit(false) ReplyPromise(ReplyPromise&& rhs) noexcept : sav(rhs.sav) { rhs.sav = 0; }
 	~ReplyPromise() {
 		if (sav)
 			sav->delPromiseRef();
 	}
 
-	ReplyPromise(const Endpoint& endpoint) : sav(new NetSAV<T>(0, 1, endpoint)) {}
+	explicit ReplyPromise(const Endpoint& endpoint) : sav(new NetSAV<T>(0, 1, endpoint)) {}
 	const Endpoint& getEndpoint(TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint) const {
 		return sav->getEndpoint(taskID);
 	}
@@ -310,7 +308,8 @@ struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<Acknowledgeme
 	Future<Void> failures;
 
 	AcknowledgementReceiver() : ready(nullptr) {}
-	AcknowledgementReceiver(const Endpoint& remoteEndpoint) : FlowReceiver(remoteEndpoint, false), ready(nullptr) {}
+	explicit AcknowledgementReceiver(const Endpoint& remoteEndpoint)
+	  : FlowReceiver(remoteEndpoint, false), ready(nullptr) {}
 
 	bool isPublic() const override { return true; }
 
@@ -502,13 +501,13 @@ public:
 		return FutureStream<T>(queue);
 	}
 	ReplyPromiseStream() : queue(new NetNotifiedQueueWithAcknowledgements<T>(0, 1)), errors(new SAV<Void>(0, 1)) {}
-	ReplyPromiseStream(const ReplyPromiseStream& rhs) : queue(rhs.queue), errors(rhs.errors) {
+	explicit(false) ReplyPromiseStream(const ReplyPromiseStream& rhs) : queue(rhs.queue), errors(rhs.errors) {
 		queue->addPromiseRef();
 		if (errors) {
 			errors->addPromiseRef();
 		}
 	}
-	ReplyPromiseStream(ReplyPromiseStream&& rhs) noexcept : queue(rhs.queue), errors(rhs.errors) {
+	explicit(false) ReplyPromiseStream(ReplyPromiseStream&& rhs) noexcept : queue(rhs.queue), errors(rhs.errors) {
 		rhs.queue = nullptr;
 		rhs.errors = nullptr;
 	}
@@ -906,8 +905,8 @@ public:
 	explicit RequestStream(PeerCompatibilityPolicy policy) : RequestStream() {
 		queue->setPeerCompatibilityPolicy(policy);
 	}
-	RequestStream(const RequestStream& rhs) : queue(rhs.queue) { queue->addPromiseRef(); }
-	RequestStream(RequestStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
+	explicit(false) RequestStream(const RequestStream& rhs) : queue(rhs.queue) { queue->addPromiseRef(); }
+	explicit(false) RequestStream(RequestStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
 	void operator=(const RequestStream& rhs) {
 		rhs.queue->addPromiseRef();
 		if (queue)

@@ -38,7 +38,7 @@ struct StreamingReadWorkload : TestWorkload {
 	PerfIntCounter readValueBytes;
 	DDSketch<double> latencies;
 
-	StreamingReadWorkload(WorkloadContext const& wcx)
+	explicit StreamingReadWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), transactions("Transactions"), readKeys("Keys Read"), readValueBytes("Value Bytes Read"),
 	    latencies() {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);

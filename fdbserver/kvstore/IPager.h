@@ -130,7 +130,7 @@ enum PageType : uint8_t {
 //   x.setReference(new SomeReferenceCountedType()); //
 struct ArbitraryObject {
 	ArbitraryObject() : ptr(nullptr), onDestruct(nullptr) {}
-	ArbitraryObject(const ArbitraryObject&) = delete;
+	explicit(false) ArbitraryObject(const ArbitraryObject&) = delete;
 
 	~ArbitraryObject() { destructOnly(); }
 

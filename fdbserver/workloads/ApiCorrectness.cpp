@@ -102,7 +102,7 @@ public:
 	// Maximum time to reset DB to the original state
 	double resetDBTimeout;
 
-	ApiCorrectnessWorkload(WorkloadContext const& wcx)
+	explicit ApiCorrectnessWorkload(WorkloadContext const& wcx)
 	  : ApiWorkload(wcx), numRandomOperations("Num Random Operations") {
 		numGets = getOption(options, "numGets"_sr, 1000);
 		numGetRanges = getOption(options, "numGetRanges"_sr, 100);

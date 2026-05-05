@@ -31,7 +31,7 @@ namespace {
 template <class T>
 struct FDBPromiseImpl : FDBPromise {
 	Promise<T> impl;
-	FDBPromiseImpl(Promise<T> impl) : impl(impl) {}
+	explicit FDBPromiseImpl(Promise<T> impl) : impl(impl) {}
 	void send(void* value) override {
 		if (g_network->isOnMainThread()) {
 			impl.send(*reinterpret_cast<T*>(value));
@@ -262,7 +262,7 @@ private:
 	capi::FDBWorkload::FDBWorkload_VT* vt;
 
 public:
-	Workload(capi::FDBWorkload c_workload) : inner(c_workload.inner), vt(c_workload.vt) {}
+	explicit Workload(capi::FDBWorkload c_workload) : inner(c_workload.inner), vt(c_workload.vt) {}
 	~Workload() { this->vt->free(this->inner); }
 
 	bool init(FDBWorkloadContext* context) override { return true; }

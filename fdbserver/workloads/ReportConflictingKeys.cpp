@@ -42,7 +42,7 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 		out.insert({ "RandomRangeLock" });
 	}
 
-	ReportConflictingKeysWorkload(WorkloadContext const& wcx)
+	explicit ReportConflictingKeysWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), invalidReports("InvalidReports"), commits("commits"), conflicts("Conflicts"),
 	    xacts("Transactions") {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);

@@ -68,7 +68,7 @@ struct UnitTestWorkload : TestWorkload {
 	PerfIntCounter testsAvailable, testsExecuted, testsFailed;
 	PerfDoubleCounter totalWallTime, totalSimTime;
 
-	UnitTestWorkload(WorkloadContext const& wcx)
+	explicit UnitTestWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), testsAvailable("Test Cases Available"), testsExecuted("Test Cases Executed"),
 	    testsFailed("Test Cases Failed"), totalWallTime("Total wall clock time (s)"),
 	    totalSimTime("Total flow time (s)") {

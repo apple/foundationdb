@@ -40,7 +40,7 @@ private:
 	}
 
 public:
-	AtomicOpsApiCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit AtomicOpsApiCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		opType = getOption(options, "opType"_sr, -1);
 	}
 

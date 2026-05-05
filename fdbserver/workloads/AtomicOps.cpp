@@ -38,7 +38,7 @@ struct AtomicOpsWorkload : TestWorkload {
 	std::vector<Future<Void>> clients;
 	uint64_t lbsum, ubsum; // The lower bound and upper bound sum of operations when opType = AddValue
 
-	AtomicOpsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), opNum(0) {
+	explicit AtomicOpsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), opNum(0) {
 		testDuration = getOption(options, "testDuration"_sr, 600.0);
 		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0) / clientCount;
 		actorCount = getOption(options, "actorsPerClient"_sr, transactionsPerSecond / 5);

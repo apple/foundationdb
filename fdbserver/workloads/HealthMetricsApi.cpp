@@ -56,7 +56,7 @@ struct HealthMetricsApiWorkload : TestWorkload {
 	bool gotMetrics = false;
 	static constexpr auto NAME = "HealthMetricsApi";
 
-	HealthMetricsApiWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit HealthMetricsApiWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		testDuration = getOption(options, "testDuration"_sr, 120.0);
 		healthMetricsCheckInterval = getOption(options, "healthMetricsCheckInterval"_sr, 1.0);
 		sendDetailedHealthMetrics = getOption(options, "sendDetailedHealthMetrics"_sr, true);

@@ -55,7 +55,7 @@ class RkTagThrottleCollection : NonCopyable {
 
 public:
 	RkTagThrottleCollection() = default;
-	RkTagThrottleCollection(RkTagThrottleCollection&& other);
+	explicit(false) RkTagThrottleCollection(RkTagThrottleCollection&& other);
 	RkTagThrottleCollection& operator=(RkTagThrottleCollection&& other);
 
 	Optional<double> autoThrottleTag(UID id,

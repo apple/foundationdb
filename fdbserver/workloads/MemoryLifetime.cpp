@@ -29,7 +29,7 @@ struct MemoryLifetime : KVWorkload {
 	double testDuration;
 	std::vector<Future<Void>> clients;
 
-	MemoryLifetime(WorkloadContext const& wcx) : KVWorkload(wcx) {
+	explicit MemoryLifetime(WorkloadContext const& wcx) : KVWorkload(wcx) {
 		testDuration = getOption(options, "testDuration"_sr, 60.0);
 	}
 

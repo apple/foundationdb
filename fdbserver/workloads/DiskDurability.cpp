@@ -27,7 +27,7 @@
 struct DiskDurabilityWorkload : public AsyncFileWorkload {
 	static constexpr auto NAME = "DiskDurability";
 	struct FileBlock {
-		FileBlock(int blockNum) : blockNum(blockNum), lastData(0), lock(new FlowLock(1)) {}
+		explicit FileBlock(int blockNum) : blockNum(blockNum), lastData(0), lock(new FlowLock(1)) {}
 		~FileBlock() = default;
 		int blockNum;
 		int64_t lastData;
@@ -82,7 +82,7 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 	int writers;
 	double syncInterval;
 
-	DiskDurabilityWorkload(WorkloadContext const& wcx) : AsyncFileWorkload(wcx) {
+	explicit DiskDurabilityWorkload(WorkloadContext const& wcx) : AsyncFileWorkload(wcx) {
 		writers = getOption(options, "writers"_sr, 1);
 		filePages = getOption(options, "filePages"_sr, 1000000);
 		fileSize = filePages * _PAGE_SIZE;

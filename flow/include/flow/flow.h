@@ -47,7 +47,6 @@
 #include "flow/network.h"
 #include "flow/serialize.h"
 
-
 #ifdef WITH_SWIFT
 #include <swift/bridging>
 
@@ -67,7 +66,6 @@
 	do {                                                                                                               \
 		static_assert(false, "TEST macros are deprecated, please use CODE_PROBE instead");                             \
 	} while (false)
-
 
 extern Optional<uint64_t> parse_with_suffix(std::string const& toparse, std::string const& default_unit = "");
 extern Optional<uint64_t> parseDuration(std::string const& str, std::string const& defaultUnit = "");
@@ -128,10 +126,10 @@ public:
 	using ValueType = T;
 
 	ErrorOr() : ErrorOr(default_error_or()) {}
-	ErrorOr(Error const& error) : value(std::in_place_type<Error>, error) {}
+	explicit(false) ErrorOr(Error const& error) : value(std::in_place_type<Error>, error) {}
 
 	template <class U>
-	ErrorOr(U const& t) : value(std::in_place_type<T>, t) {}
+	explicit(false) ErrorOr(U const& t) : value(std::in_place_type<T>, t) {}
 
 	ErrorOr(Arena& a, ErrorOr<T> const& o) {
 		if (o.present()) {
@@ -436,7 +434,7 @@ namespace detail {
 
 template <class T, class Context>
 struct LoadSaveHelper<CachedSerialization<T>, Context> : Context {
-	LoadSaveHelper(const Context& context) : Context(context), helper(context) {}
+	explicit LoadSaveHelper(const Context& context) : Context(context), helper(context) {}
 
 	void load(CachedSerialization<T>& member, const uint8_t* current) { helper.load(member.mutate(), current); }
 
@@ -659,8 +657,9 @@ class LineageReference : public Reference<ActorLineage> {
 public:
 	LineageReference() : Reference<ActorLineage>(nullptr), actorName_(""), allocated_(false) {}
 	explicit LineageReference(ActorLineage* ptr) : Reference<ActorLineage>(ptr), actorName_(""), allocated_(false) {}
-	LineageReference(const LineageReference& r) : Reference<ActorLineage>(r), actorName_(""), allocated_(false) {}
-	LineageReference(LineageReference&& r)
+	explicit(false) LineageReference(const LineageReference& r)
+	  : Reference<ActorLineage>(r), actorName_(""), allocated_(false) {}
+	explicit(false) LineageReference(LineageReference&& r)
 	  : Reference<ActorLineage>(r.getPtr()), actorName_(r.actorName_), allocated_(r.allocated_) {
 		r.setPtrUnsafe(nullptr);
 		r.actorName_ = "";
@@ -703,7 +702,7 @@ struct StackLineage : LineageProperties<StackLineage> {
 #ifdef ENABLE_SAMPLING
 struct LineageScope {
 	LineageReference* oldLineage;
-	LineageScope(LineageReference* with) : oldLineage(currentLineage) { replaceLineage(with); }
+	explicit LineageScope(LineageReference* with) : oldLineage(currentLineage) { replaceLineage(with); }
 	~LineageScope() { replaceLineage(oldLineage); }
 };
 #endif
@@ -920,12 +919,12 @@ class Promise;
 #ifndef SWIFT_HIDE_CHECKED_CONTINUTATION
 using flow_swift::FlowCheckedContinuation;
 
-template<class T>
+template <class T>
 class
 #ifdef WITH_SWIFT
-SWIFT_CONFORMS_TO_PROTOCOL(flow_swift.FlowCallbackForSwiftContinuationT)
+    SWIFT_CONFORMS_TO_PROTOCOL(flow_swift.FlowCallbackForSwiftContinuationT)
 #endif
-FlowCallbackForSwiftContinuation : Callback<T> {
+        FlowCallbackForSwiftContinuation : Callback<T> {
 public:
 	using SwiftCC = flow_swift::FlowCheckedContinuation<T>;
 	using AssociatedFuture = Future<T>;
@@ -1159,7 +1158,8 @@ private:
 template <class T>
 struct NotifiedQueue : private SingleCallback<T>
 #ifndef WITH_SWIFT
-   , FastAllocated<NotifiedQueue<T>> // FIXME(swift): Swift can't deal with this type yet
+  ,
+                       FastAllocated<NotifiedQueue<T>> // FIXME(swift): Swift can't deal with this type yet
 #endif /* WITH_SWIFT */
 {
 	int promises; // one for each promise (and one for an active actor if this is an actor)
@@ -1504,8 +1504,7 @@ struct Actor : SAV<ReturnValue> {
 	int8_t actor_wait_state; // Negative values mean cancellation, 0 means not waiting, positive values identify the
 	                         // waiting callback group.
 
-	Actor() : SAV<ReturnValue>(1, 1), actor_wait_state(ACTOR_WAIT_STATE_NOT_WAITING) { /*++actorCount;*/
-	}
+	Actor() : SAV<ReturnValue>(1, 1), actor_wait_state(ACTOR_WAIT_STATE_NOT_WAITING) { /*++actorCount;*/ }
 	// ~Actor() { --actorCount; }
 
 #ifdef ENABLE_SAMPLING
@@ -1522,8 +1521,7 @@ struct Actor<void> {
 #endif
 	int8_t actor_wait_state; // 0 means not waiting, positive values identify the waiting callback group.
 
-	Actor() : actor_wait_state(ACTOR_WAIT_STATE_NOT_WAITING) { /*++actorCount;*/
-	}
+	Actor() : actor_wait_state(ACTOR_WAIT_STATE_NOT_WAITING) { /*++actorCount;*/ }
 	// ~Actor() { --actorCount; }
 
 #ifdef ENABLE_SAMPLING

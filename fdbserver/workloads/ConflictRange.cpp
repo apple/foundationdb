@@ -42,7 +42,7 @@ struct ConflictRangeWorkload : TestWorkload {
 		out.insert({ "RandomRangeLock" });
 	}
 
-	ConflictRangeWorkload(WorkloadContext const& wcx)
+	explicit ConflictRangeWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), withConflicts("WithConflicts"), withoutConflicts("withoutConflicts"), retries("Retries") {
 		minOperationsPerTransaction = getOption(options, "minOperationsPerTransaction"_sr, 2);
 		maxOperationsPerTransaction = getOption(options, "minOperationsPerTransaction"_sr, 4);

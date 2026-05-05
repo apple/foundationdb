@@ -64,7 +64,7 @@ struct WorkerInfo : NonCopyable {
 	  : watcher(watcher), reply(reply), gen(gen), reboots(0), initialClass(initialClass), priorityInfo(priorityInfo),
 	    details(interf, processClass, degraded, recoveredDiskFiles), issues(issues) {}
 
-	WorkerInfo(WorkerInfo&& r) noexcept
+	explicit(false) WorkerInfo(WorkerInfo&& r) noexcept
 	  : watcher(std::move(r.watcher)), reply(std::move(r.reply)), gen(r.gen), reboots(r.reboots),
 	    initialClass(r.initialClass), priorityInfo(r.priorityInfo), details(std::move(r.details)),
 	    haltRatekeeper(r.haltRatekeeper), haltDistributor(r.haltDistributor),

@@ -61,7 +61,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 	static constexpr int MIN_TAGS_PER_TRANSACTION = 1;
 	static constexpr int MIN_TRANSACTION_TAG_LENGTH = 2;
 
-	WriteTagThrottlingWorkload(WorkloadContext const& wcx)
+	explicit WriteTagThrottlingWorkload(WorkloadContext const& wcx)
 	  : KVWorkload(wcx), badActorReadLatency(), goodActorReadLatency(), badActorCommitLatency(),
 	    goodActorCommitLatency() {
 		testDuration = getOption(options, "testDuration"_sr, 120.0);

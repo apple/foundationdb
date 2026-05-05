@@ -70,7 +70,7 @@ private:
 		}
 
 	public:
-		EventFD(ASIOReactor* reactor) : sd(reactor->ios, open()) {}
+		explicit EventFD(ASIOReactor* reactor) : sd(reactor->ios, open()) {}
 		~EventFD() override {
 			sd.close(); // Also closes the fd, I assume...
 		}

@@ -54,7 +54,7 @@ struct LocalRatekeeperWorkload : TestWorkload {
 	double blockWritesFor;
 	bool testFailed = false;
 
-	LocalRatekeeperWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit LocalRatekeeperWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		startAfter = getOption(options, "startAfter"_sr, startAfter);
 		blockWritesFor = getOption(
 		    options, "blockWritesFor"_sr, double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX) / double(1e6));

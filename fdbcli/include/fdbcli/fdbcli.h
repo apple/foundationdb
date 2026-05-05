@@ -69,7 +69,7 @@ struct CommandFactory {
 			hintGenerators()[name] = hintFunc;
 		}
 	}
-	CommandFactory(const char* name) { hiddenCommands().insert(name); }
+	explicit CommandFactory(const char* name) { hiddenCommands().insert(name); }
 	static std::map<std::string, CommandHelp>& commands() {
 		static std::map<std::string, CommandHelp> helpMap;
 		return helpMap;

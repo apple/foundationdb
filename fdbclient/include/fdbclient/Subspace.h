@@ -28,8 +28,8 @@
 
 class Subspace {
 public:
-	Subspace(Tuple const& tuple = Tuple(), StringRef const& rawPrefix = StringRef());
-	Subspace(StringRef const& rawPrefix);
+	explicit Subspace(Tuple const& tuple = Tuple(), StringRef const& rawPrefix = StringRef());
+	explicit(false) Subspace(StringRef const& rawPrefix);
 
 	virtual ~Subspace();
 

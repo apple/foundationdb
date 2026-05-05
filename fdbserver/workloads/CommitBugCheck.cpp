@@ -26,7 +26,7 @@ struct CommitBugWorkload : TestWorkload {
 	static constexpr auto NAME = "CommitBug";
 	bool success;
 
-	CommitBugWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) { success = true; }
+	explicit CommitBugWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) { success = true; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 

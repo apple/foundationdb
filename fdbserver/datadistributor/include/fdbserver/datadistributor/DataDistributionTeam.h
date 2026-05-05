@@ -116,7 +116,7 @@ public:
 		WANT_TRUE_BEST, // Ask for the most or least utilized team in the cluster
 	};
 	TeamSelect() : value(ANY) {}
-	TeamSelect(Value v) : value(v) {}
+	explicit(false) TeamSelect(Value v) : value(v) {}
 	std::string toString() const {
 		switch (value) {
 		case WANT_COMPLETE_SRCS:
@@ -177,7 +177,7 @@ struct GetTeamRequest {
 	    preferLowerReadUtil(preferLowerReadUtil), preferWithinShardLimit(preferWithinShardLimit),
 	    inflightPenalty(inflightPenalty), findTeamByServers(FindTeamByServers::False),
 	    findTeamForBulkLoad(FindTeamForBulkLoad::False), keys(keys), wantTrueBestIfMoveout(false) {}
-	GetTeamRequest(std::vector<UID> servers)
+	explicit GetTeamRequest(std::vector<UID> servers)
 	  : teamSelect(TeamSelect::WANT_COMPLETE_SRCS), storageQueueAware(false),
 	    preferLowerDiskUtil(PreferLowerDiskUtil::False), teamMustHaveShards(TeamMustHaveShards::False),
 	    forReadBalance(ForReadBalance::False), preferLowerReadUtil(PreferLowerReadUtil::False),

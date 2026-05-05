@@ -45,7 +45,7 @@ public:
 
 struct RatekeeperSingleton : Singleton<RatekeeperInterface> {
 
-	RatekeeperSingleton(const Optional<RatekeeperInterface>& interface) : Singleton(interface) {}
+	explicit RatekeeperSingleton(const Optional<RatekeeperInterface>& interface) : Singleton(interface) {}
 
 	Role getRole() const { return Role::RATEKEEPER; }
 	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::Ratekeeper; }
@@ -70,7 +70,7 @@ struct RatekeeperSingleton : Singleton<RatekeeperInterface> {
 
 struct DataDistributorSingleton : Singleton<DataDistributorInterface> {
 
-	DataDistributorSingleton(const Optional<DataDistributorInterface>& interface) : Singleton(interface) {}
+	explicit DataDistributorSingleton(const Optional<DataDistributorInterface>& interface) : Singleton(interface) {}
 
 	Role getRole() const { return Role::DATA_DISTRIBUTOR; }
 	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::DataDistributor; }
@@ -95,7 +95,7 @@ struct DataDistributorSingleton : Singleton<DataDistributorInterface> {
 
 struct ConsistencyScanSingleton : Singleton<ConsistencyScanInterface> {
 
-	ConsistencyScanSingleton(const Optional<ConsistencyScanInterface>& interface) : Singleton(interface) {}
+	explicit ConsistencyScanSingleton(const Optional<ConsistencyScanInterface>& interface) : Singleton(interface) {}
 
 	Role getRole() const { return Role::CONSISTENCYSCAN; }
 	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::ConsistencyScan; }

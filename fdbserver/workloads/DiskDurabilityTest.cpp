@@ -30,7 +30,7 @@ struct DiskDurabilityTest : TestWorkload {
 	std::string filename;
 	KeyRange range, metrics;
 
-	DiskDurabilityTest(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit DiskDurabilityTest(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
 		filename = getOption(options, "filename"_sr, "durability_test.bin"_sr).toString();
 		auto prefix = getOption(options, "prefix"_sr, "/DiskDurabilityTest/"_sr);

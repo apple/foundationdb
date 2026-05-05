@@ -51,7 +51,8 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 	const bool enabled;
 	bool pass;
 
-	PhysicalShardMoveWorkLoad(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(!clientId), pass(true) {}
+	explicit PhysicalShardMoveWorkLoad(WorkloadContext const& wcx)
+	  : TestWorkload(wcx), enabled(!clientId), pass(true) {}
 
 	void validationFailed(ErrorOr<Optional<Value>> expectedValue, ErrorOr<Optional<Value>> actualValue) {
 		TraceEvent(SevError, "TestFailed")

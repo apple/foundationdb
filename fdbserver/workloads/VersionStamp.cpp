@@ -45,7 +45,7 @@ struct VersionStampWorkload : TestWorkload {
 	bool soleOwnerOfMetadataVersionKey;
 	bool allowMetadataVersionKey;
 
-	VersionStampWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit VersionStampWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		testDuration = getOption(options, "testDuration"_sr, 60.0);
 		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0);
 		nodeCount = getOption(options, "nodeCount"_sr, (uint64_t)10000);

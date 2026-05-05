@@ -58,7 +58,7 @@ class SampleSender : public std::enable_shared_from_this<SampleSender<Protocol, 
 		const char* data;
 		const unsigned size;
 		Buf(const char* data, unsigned size) : data(data), size(size) {}
-		Buf(Buf const&) = delete;
+		explicit(false) Buf(Buf const&) = delete;
 		Buf& operator=(Buf const&) = delete;
 		~Buf() { delete[] data; }
 	};
@@ -137,7 +137,7 @@ struct FluentDSocketImpl : FluentDSocket, std::enable_shared_from_this<FluentDSo
 	static constexpr unsigned MAX_QUEUE_SIZE = 100;
 	boost::asio::io_context& context;
 	typename Protocol::socket socket;
-	FluentDSocketImpl(boost::asio::io_context& context) : context(context), socket(context) {}
+	explicit FluentDSocketImpl(boost::asio::io_context& context) : context(context), socket(context) {}
 	bool ready = false;
 	std::deque<std::shared_ptr<Sample>> queue;
 	boost::system::error_code _failed;

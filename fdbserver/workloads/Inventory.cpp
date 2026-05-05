@@ -36,7 +36,7 @@ struct InventoryTestWorkload : TestWorkload {
 	PerfIntCounter transactions, retries;
 	PerfDoubleCounter totalLatency;
 
-	InventoryTestWorkload(WorkloadContext const& wcx)
+	explicit InventoryTestWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"), totalLatency("Latency") {
 		actorCount = getOption(options, "actorCount"_sr, 500);
 		nProducts = getOption(options, "nProducts"_sr, 100000);

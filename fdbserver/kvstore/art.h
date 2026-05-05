@@ -299,7 +299,7 @@ private:
 	void add_child4(art_node4* n, art_node** ref, unsigned char c, void* child);
 
 public:
-	art_tree(Arena& a) {
+	explicit art_tree(Arena& a) {
 		this->arena = &a;
 		this->root = alloc_node(ART_NODE4); // Sentinel node. Also needed for empty key
 		this->size = 0;
@@ -322,9 +322,9 @@ private:
 	art_tree::art_leaf* leaf;
 
 public:
-	art_iterator(art_tree::art_leaf* l) { leaf = l; }
+	explicit art_iterator(art_tree::art_leaf* l) { leaf = l; }
 
-	art_iterator(const art_iterator& i) { leaf = i.leaf; }
+	explicit(false) art_iterator(const art_iterator& i) { leaf = i.leaf; }
 
 	art_iterator() { leaf = nullptr; }
 

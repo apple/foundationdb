@@ -245,7 +245,7 @@ private:
 template <class T>
 class DDSketchSlow : public DDSketchBase<DDSketchSlow<T>, T> {
 public:
-	DDSketchSlow(double errorGuarantee = 0.1)
+	explicit DDSketchSlow(double errorGuarantee = 0.1)
 	  : DDSketchBase<DDSketchSlow<T>, T>(errorGuarantee), gamma((1.0 + errorGuarantee) / (1.0 - errorGuarantee)),
 	    logGamma(log(gamma)) {
 		offset = getIndex(1.0 / DDSketchBase<DDSketch<T>, T>::EPS) + 5;

@@ -46,7 +46,7 @@ public:
 	// void init();
 	static void stop();
 
-	Net2FileSystem(double ioTimeout = 0.0, const std::string& fileSystemPath = "");
+	explicit Net2FileSystem(double ioTimeout = 0.0, const std::string& fileSystemPath = "");
 
 	~Net2FileSystem() override {}
 

@@ -49,8 +49,8 @@ public:
 	LogSet()
 	  : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), locality(tagLocalityInvalid),
 	    startVersion(invalidVersion) {}
-	LogSet(const TLogSet& tlogSet);
-	LogSet(const CoreTLogSet& coreSet);
+	explicit LogSet(const TLogSet& tlogSet);
+	explicit LogSet(const CoreTLogSet& coreSet);
 
 	std::string logRouterString();
 	bool hasLogRouter(UID id) const;

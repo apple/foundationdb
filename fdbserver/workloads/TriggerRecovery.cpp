@@ -35,7 +35,7 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 	Optional<int32_t> originalNumOfResolvers;
 	Optional<int32_t> currentNumOfResolvers;
 
-	TriggerRecoveryLoopWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit TriggerRecoveryLoopWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		startTime = getOption(options, "startTime"_sr, 0.0);
 		numRecoveries = getOption(options, "numRecoveries"_sr, deterministicRandom()->randomInt(1, 10));
 		delayBetweenRecoveries = getOption(options, "delayBetweenRecoveries"_sr, 0.0);

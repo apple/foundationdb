@@ -35,7 +35,7 @@ struct BulkLoadWorkload : TestWorkload {
 	PerfIntCounter transactions, retries;
 	DDSketch<double> latencies;
 
-	BulkLoadWorkload(WorkloadContext const& wcx)
+	explicit BulkLoadWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), clientCount(wcx.clientCount), transactions("Transactions"), retries("Retries"), latencies() {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		actorCount = getOption(options, "actorCount"_sr, 20);

@@ -62,7 +62,7 @@ private:
 	}
 
 public:
-	LRU2(std::string _fileName) {
+	explicit LRU2(std::string _fileName) {
 		fileName = _fileName;
 		maxFullPagePlusOne = 0;
 		start = new node(0, AsyncFileWriteChecker::WriteInfo());

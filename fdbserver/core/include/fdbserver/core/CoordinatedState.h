@@ -28,7 +28,7 @@
 class CoordinatedState : NonCopyable {
 public:
 	// Callers must ensure that any outstanding operations have been cancelled before destructing *this!
-	CoordinatedState(class ServerCoordinators const&);
+	explicit CoordinatedState(class ServerCoordinators const&);
 	~CoordinatedState();
 
 	Future<Value> read();
@@ -62,7 +62,7 @@ private:
 
 class MovableCoordinatedState : NonCopyable {
 public:
-	MovableCoordinatedState(class ServerCoordinators const&);
+	explicit MovableCoordinatedState(class ServerCoordinators const&);
 	MovableCoordinatedState& operator=(MovableCoordinatedState&& av);
 	~MovableCoordinatedState();
 

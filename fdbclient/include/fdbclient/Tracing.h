@@ -50,7 +50,7 @@ struct SpanContext {
 	SpanContext() : traceID(UID()), spanID(0), m_Flags(TraceFlags::unsampled) {}
 	SpanContext(UID traceID, uint64_t spanID, TraceFlags flags) : traceID(traceID), spanID(spanID), m_Flags(flags) {}
 	SpanContext(UID traceID, uint64_t spanID) : traceID(traceID), spanID(spanID), m_Flags(TraceFlags::unsampled) {}
-	SpanContext(const SpanContext& span) = default;
+	explicit(false) SpanContext(const SpanContext& span) = default;
 	bool isSampled() const { return (m_Flags & TraceFlags::sampled) == TraceFlags::sampled; }
 	std::string toString() const { return format("%016llx%016llx%016llx", traceID.first(), traceID.second(), spanID); };
 	bool isValid() const { return traceID.first() != 0 && traceID.second() != 0 && spanID != 0; }
@@ -159,8 +159,8 @@ public:
 	// TODO: review and address in subsequent PRs.
 	explicit Span(const Location& location) : Span(location, SpanContext()) {}
 
-	Span(const Span&) = delete;
-	Span(Span&& o) {
+	explicit(false) Span(const Span&) = delete;
+	explicit(false) Span(Span&& o) {
 		arena = std::move(o.arena);
 		context = o.context;
 		location = o.location;

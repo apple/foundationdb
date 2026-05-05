@@ -29,7 +29,8 @@
 
 struct ExtStringRef {
 	ExtStringRef() : extra_zero_bytes(0) {}
-	ExtStringRef(StringRef const& s, int extra_zero_bytes = 0) : base(s), extra_zero_bytes(extra_zero_bytes) {}
+	explicit(false) ExtStringRef(StringRef const& s, int extra_zero_bytes = 0)
+	  : base(s), extra_zero_bytes(extra_zero_bytes) {}
 
 	Standalone<StringRef> toStandaloneStringRef() const {
 		auto s = makeString(size());
@@ -180,7 +181,7 @@ public:
 		// Note that an uncached range stops at the next individual key that is known, even though we might want to read
 		// through that key.  In RYWIterator, it might also stop at a dependent write which is not known at all!
 
-		iterator(SnapshotCache* cache) : parent(cache), it(cache->entries.begin()), offset(0) {
+		explicit iterator(SnapshotCache* cache) : parent(cache), it(cache->entries.begin()), offset(0) {
 			//++*this;  // gives begin
 		}
 
@@ -311,7 +312,7 @@ public:
 		entries.insert(Entry(allKeys.end, afterAllKeys, VectorRef<KeyValueRef>()), NoMetric(), true);
 	}
 	// Visual Studio refuses to generate these, apparently despite the standard
-	SnapshotCache(SnapshotCache&& r) noexcept : arena(r.arena), entries(std::move(r.entries)) {}
+	explicit(false) SnapshotCache(SnapshotCache&& r) noexcept : arena(r.arena), entries(std::move(r.entries)) {}
 	SnapshotCache& operator=(SnapshotCache&& r) noexcept {
 		entries = std::move(r.entries);
 		arena = r.arena;

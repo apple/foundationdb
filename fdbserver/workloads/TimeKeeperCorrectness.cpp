@@ -29,7 +29,7 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 	double testDuration;
 	std::map<int64_t, Version> inMemTimeKeeper;
 
-	TimeKeeperCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit TimeKeeperCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		testDuration = getOption(options, "testDuration"_sr, 20.0);
 	}
 

@@ -65,7 +65,7 @@ struct NetworkMetrics {
 		double windowedTimer = 0;
 		double maxDuration = 0;
 
-		PriorityStats(TaskPriority priority) : priority(priority) {}
+		explicit PriorityStats(TaskPriority priority) : priority(priority) {}
 	};
 
 	std::unordered_map<TaskPriority, struct PriorityStats> activeTrackers;

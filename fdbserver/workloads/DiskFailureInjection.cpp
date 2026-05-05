@@ -49,7 +49,7 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 
 	DiskFailureInjectionWorkload(WorkloadContext const& wcx, NoOptions) : FailureInjectionWorkload(wcx) {}
 
-	DiskFailureInjectionWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
+	explicit DiskFailureInjectionWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
 		startDelay = getOption(options, "startDelay"_sr, startDelay);
 		testDuration = getOption(options, "testDuration"_sr, testDuration);

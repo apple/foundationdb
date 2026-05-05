@@ -34,7 +34,7 @@ struct RandomSelectorWorkload : TestWorkload {
 	std::vector<Future<Void>> clients;
 	PerfIntCounter transactions, retries;
 
-	RandomSelectorWorkload(WorkloadContext const& wcx)
+	explicit RandomSelectorWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries") {
 
 		minOperationsPerTransaction = getOption(options, "minOperationsPerTransaction"_sr, 10);

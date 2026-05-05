@@ -53,8 +53,8 @@ class ThreadSafeQueue : NonCopyable {
 
 	struct Node : BaseNode, FastAllocated<Node> {
 		T data;
-		Node(T const& data) : data(data) {}
-		Node(T&& data) : data(std::move(data)) {}
+		explicit Node(T const& data) : data(data) {}
+		explicit Node(T&& data) : data(std::move(data)) {}
 	};
 	std::atomic<BaseNode*> head;
 	BaseNode* tail;

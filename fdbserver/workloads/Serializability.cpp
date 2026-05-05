@@ -65,7 +65,7 @@ struct SerializabilityWorkload : TestWorkload {
 		Optional<KeyRange> readConflictOp;
 	};
 
-	SerializabilityWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), success(true) {
+	explicit SerializabilityWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), success(true) {
 		testDuration = getOption(options, "testDuration"_sr, 30.0);
 		numOps = getOption(options, "numOps"_sr, 21);
 		nodes = getOption(options, "nodes"_sr, 1000);

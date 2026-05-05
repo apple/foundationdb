@@ -201,7 +201,7 @@ struct CommitTransactionRequest : TimedRequest {
 	bool verify() const { return true; }
 
 	CommitTransactionRequest() : CommitTransactionRequest(SpanContext()) {}
-	CommitTransactionRequest(SpanContext const& context) : spanContext(context), flags(0) {}
+	explicit CommitTransactionRequest(SpanContext const& context) : spanContext(context), flags(0) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

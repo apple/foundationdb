@@ -71,7 +71,7 @@ private:
 public: // Internal use only
 	enum class ConnectionRecordType { FILE, CONNECTION_STRING };
 	ThreadSafeDatabase(ConnectionRecordType connectionRecordType, std::string connectionRecord, int apiVersion);
-	ThreadSafeDatabase(DatabaseContext* db) : db(db) {}
+	explicit ThreadSafeDatabase(DatabaseContext* db) : db(db) {}
 	DatabaseContext* unsafeGetPtr() const { return db; }
 };
 
@@ -156,7 +156,7 @@ public:
 	// These are to permit use as state variables in actors:
 	ThreadSafeTransaction() : tr(nullptr), initialized(std::make_shared<std::atomic_bool>(false)) {}
 	void operator=(ThreadSafeTransaction&& r) noexcept;
-	ThreadSafeTransaction(ThreadSafeTransaction&& r) noexcept;
+	explicit(false) ThreadSafeTransaction(ThreadSafeTransaction&& r) noexcept;
 
 	void reset() override;
 

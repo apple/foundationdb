@@ -54,7 +54,7 @@ struct RestoreValidationWorkload : TestWorkload {
 	double checkInterval;
 	double maxWaitTime;
 
-	RestoreValidationWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit RestoreValidationWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		validateAfter = getOption(options, "validateAfter"_sr, 50.0);
 		validationRange = normalKeys;
 		expectedPhase = getOption(options, "expectedPhase"_sr, (int)AuditPhase::Complete);

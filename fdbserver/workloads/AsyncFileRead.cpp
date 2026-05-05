@@ -171,7 +171,8 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 	IOLog* ioLog;
 	RandomByteGenerator rbg;
 
-	AsyncFileReadWorkload(WorkloadContext const& wcx) : AsyncFileWorkload(wcx), bytesRead("Bytes Read"), ioLog(0) {
+	explicit AsyncFileReadWorkload(WorkloadContext const& wcx)
+	  : AsyncFileWorkload(wcx), bytesRead("Bytes Read"), ioLog(0) {
 		// Only run on one client
 		numParallelReads = getOption(options, "numParallelReads"_sr, 0);
 		readSize = getOption(options, "readSize"_sr, _PAGE_SIZE);

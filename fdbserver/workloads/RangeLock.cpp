@@ -42,8 +42,8 @@ struct RangeLocking : TestWorkload {
 	struct KVOperation {
 		std::variant<KeyRange, KeyValue> params;
 
-		KVOperation(KeyRange range) : params(range) {}
-		KVOperation(KeyValue keyValue) : params(keyValue) {}
+		explicit KVOperation(KeyRange range) : params(range) {}
+		explicit KVOperation(KeyValue keyValue) : params(keyValue) {}
 
 		std::string toString() const {
 			std::string res = "KVOperation: ";
@@ -78,7 +78,7 @@ struct RangeLocking : TestWorkload {
 	std::vector<KVOperation> kvOperations;
 	std::map<Key, Value> kvs;
 
-	RangeLocking(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(true), pass(true) {
+	explicit RangeLocking(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(true), pass(true) {
 		lockedRangeMap.insert(allKeys, false);
 	}
 

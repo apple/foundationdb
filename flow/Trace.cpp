@@ -261,7 +261,7 @@ public:
 		struct WriteBuffer final : TypedAction<WriterThread, WriteBuffer> {
 			std::vector<TraceEventFields> events;
 
-			WriteBuffer(std::vector<TraceEventFields> events) : events(events) {}
+			explicit WriteBuffer(std::vector<TraceEventFields> events) : events(events) {}
 			double getTimeEstimate() const override { return .001; }
 		};
 		void action(WriteBuffer& a) {

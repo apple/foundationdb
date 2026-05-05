@@ -48,7 +48,7 @@ struct IALPCollector : IALPCollectorBase {
 struct Sample : std::enable_shared_from_this<Sample> {
 	double time = 0.0;
 	Sample() {}
-	Sample(Sample const&) = delete;
+	explicit(false) Sample(Sample const&) = delete;
 	Sample& operator=(Sample const&) = delete;
 	std::unordered_map<WaitState, std::pair<char*, unsigned>> data;
 	~Sample() {
@@ -103,7 +103,7 @@ private: // members
 
 private: // construction
 	ProfilerConfigT() {}
-	ProfilerConfigT(ProfilerConfigT const&) = delete;
+	explicit(false) ProfilerConfigT(ProfilerConfigT const&) = delete;
 	ProfilerConfigT& operator=(ProfilerConfigT const&) = delete;
 	void setBackend(std::shared_ptr<SampleIngestor> ingestor) { this->ingestor = ingestor; }
 

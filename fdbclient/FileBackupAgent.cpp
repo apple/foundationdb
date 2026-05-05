@@ -316,8 +316,8 @@ Future<bool> anyRangePartitionedBackupRunning(Reference<ReadYourWritesTransactio
 
 class RestoreConfig : public KeyBackedTaskConfig {
 public:
-	RestoreConfig(UID uid = UID()) : KeyBackedTaskConfig(fileRestorePrefixRange.begin, uid) {}
-	RestoreConfig(Reference<Task> task) : KeyBackedTaskConfig(fileRestorePrefixRange.begin, task) {}
+	explicit RestoreConfig(UID uid = UID()) : KeyBackedTaskConfig(fileRestorePrefixRange.begin, uid) {}
+	explicit RestoreConfig(Reference<Task> task) : KeyBackedTaskConfig(fileRestorePrefixRange.begin, task) {}
 
 	KeyBackedProperty<ERestoreState> stateEnum() { return configSpace.pack(__FUNCTION__sr); }
 	Future<StringRef> stateText(Reference<ReadYourWritesTransaction> tr) {
@@ -859,7 +859,7 @@ public:
 		size_t size;
 		int index;
 		int capacity;
-		IteratorBuffer(int _capacity) {
+		explicit IteratorBuffer(int _capacity) {
 			capacity = _capacity;
 			data = std::shared_ptr<char[]>(new char[capacity]());
 			fetchingData.reset();
@@ -1555,7 +1555,7 @@ public:
 //   then the space after the final key to the next 1MB boundary would
 //   just be padding anyway.
 struct RangeFileWriter : public IRangeFileWriter {
-	RangeFileWriter(Reference<IBackupFile> file = Reference<IBackupFile>(), int blockSize = 0)
+	explicit RangeFileWriter(Reference<IBackupFile> file = Reference<IBackupFile>(), int blockSize = 0)
 	  : file(file), blockSize(blockSize), blockEnd(0), fileVersion(BACKUP_AGENT_SNAPSHOT_FILE_VERSION) {}
 
 	// Handles the first block and internal blocks.  Ends current block if needed.
@@ -1766,7 +1766,7 @@ Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsync
 // Very simple format compared to KeyRange files.
 // Header, [Key, Value]... Key len
 struct LogFileWriter {
-	LogFileWriter(Reference<IBackupFile> file = Reference<IBackupFile>(), int blockSize = 0)
+	explicit LogFileWriter(Reference<IBackupFile> file = Reference<IBackupFile>(), int blockSize = 0)
 	  : file(file), blockSize(blockSize), blockEnd(0) {}
 
 	// Start a new block if needed, then write the key and value
@@ -1897,7 +1897,7 @@ static Future<Void> abortFiveZeroBackup(FileBackupAgent* backupAgent,
 
 	Subspace statusSpace = backupAgent->subspace.get(BackupAgentBase::keyStates).get(uid.toString());
 	Subspace globalConfig = backupAgent->subspace.get(BackupAgentBase::keyConfig).get(uid.toString());
-	Subspace newConfigSpace = uidPrefixKey("uid->config/"_sr.withPrefix(fileBackupPrefixRange.begin), uid);
+	Subspace newConfigSpace(uidPrefixKey("uid->config/"_sr.withPrefix(fileBackupPrefixRange.begin), uid));
 
 	Optional<Value> statusStr = co_await tr->get(statusSpace.pack(FileBackupAgent::keyStateStatus));
 	EBackupState status =

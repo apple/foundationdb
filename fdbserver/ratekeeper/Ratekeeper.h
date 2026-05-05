@@ -88,7 +88,7 @@ public:
 	double getSmoothInputBytesRate() const { return smoothInputBytes.smoothRate(); }
 	double getVerySmoothDurableBytesRate() const { return verySmoothDurableBytes.smoothRate(); }
 
-	TLogQueueInfo(UID id);
+	explicit TLogQueueInfo(UID id);
 	Version getLastCommittedVersion() const { return lastReply.v; }
 	void update(TLogQueuingMetricsReply const& reply, Smoother& smoothTotalDurableBytes);
 };
