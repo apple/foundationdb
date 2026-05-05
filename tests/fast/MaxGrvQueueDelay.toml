@@ -9,7 +9,9 @@ testTitle = 'MaxGrvQueueDelay'
 
     [[test.workload]]
     testName = 'MaxGrvQueueDelay'
-    startAfter = 5.0
+    # Run before idle GRV admission credit accumulates, otherwise the burst can
+    # be admitted without queueing on some randomized simulator seeds.
+    startAfter = 0.0
     testTimeout = 30.0
     requestCount = 250
     minRejected = 1
