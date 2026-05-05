@@ -4509,7 +4509,8 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState, CommitT
 			}
 		}
 	} catch (Error& e) {
-		if (e.code() == error_code_request_maybe_delivered || e.code() == error_code_commit_unknown_result) {
+		if (e.code() == error_code_request_maybe_delivered || e.code() == error_code_commit_unknown_result ||
+		    e.code() == error_code_never_reply) {
 			// We don't know if the commit happened, and it might even still be in flight.
 
 			if (!trState->options.causalWriteRisky || req.idempotencyId.valid()) {
