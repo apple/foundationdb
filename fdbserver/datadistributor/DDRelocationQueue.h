@@ -126,7 +126,7 @@ class DDQueue : public IDDRelocationQueue, public ReferenceCounted<DDQueue> {
 	const DDEnabledState* ddEnabledState = nullptr;
 
 public:
-	friend struct DDQueueImpl;
+	friend class DDQueueImpl;
 
 	typedef Reference<IDataDistributionTeam> ITeamRef;
 	typedef std::pair<ITeamRef, ITeamRef> SrcDestTeamPair;
