@@ -106,7 +106,7 @@ In the restore mechanism, we define five core tasks:
 
         2. `RESTORE_DISPATCH_ADDTASK_SIZE` specifies how many works are dispatched by a single transaction, where we do not want this value too large to make the transaction too large to commit successfully. We do not want this value too small to have too much overhead of transactions to dispatch tasks.
 
-    - When `usePartitionedLog` is set, the `StartFullRestoreTaskFunc` spawns `RestoreDispatchPartitionedTaskFunc` instead, as the core of Restore V2. We omit it here since we focus on the Restore V1.
+    - When `mutation-log-type partitioned-log-experimental` is set, the `StartFullRestoreTaskFunc` spawns `RestoreDispatchPartitionedTaskFunc` instead, as the core of Restore V2. We omit it here since we focus on the Restore V1.
 
 3. `RestoreRangeTaskFunc` (aka. snapshot restore task)
 

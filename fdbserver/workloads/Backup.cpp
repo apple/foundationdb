@@ -38,14 +38,14 @@ struct BackupWorkload : TestWorkload {
 	bool differentialBackup;
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
 	LockDB locked{ false };
-	UsePartitionedLog usePartitionedLog{ true };
+	MutationLogType mutationLogType{ MutationLogType::PARTITIONED_LOG };
 	bool allowPauses;
 	Optional<std::string> encryptionKeyFileName;
 
 	BackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		locked.set(sharedRandomNumber % 2);
-		bool partitioned = getOption(options, "usePartitionedLog"_sr, true);
-		usePartitionedLog.set(partitioned);
+		mutationLogType = static_cast<MutationLogType>(
+		    getOption(options, "mutationLogType"_sr, static_cast<int>(MutationLogType::PARTITIONED_LOG)));
 		backupAfter = getOption(options, "backupAfter"_sr, 10.0);
 		double minBackupAfter = getOption(options, "minBackupAfter"_sr, backupAfter);
 		if (backupAfter > minBackupAfter) {
@@ -176,7 +176,7 @@ struct BackupWorkload : TestWorkload {
 			                                   tag.toString(),
 			                                   backupRanges,
 			                                   StopWhenDone{ !stopDifferentialDelay },
-			                                   usePartitionedLog,
+			                                   mutationLogType,
 			                                   IncrementalBackupOnly::False,
 			                                   encryptionKeyFileName,
 			                                   encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0,

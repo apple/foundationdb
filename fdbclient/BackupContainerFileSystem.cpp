@@ -127,10 +127,6 @@ public:
 		co_return std::make_pair(results, fileKeyRanges);
 	}
 
-	// Backup log types
-	static constexpr Version NON_PARTITIONED_MUTATION_LOG = 0;
-	static constexpr Version PARTITIONED_MUTATION_LOG = 1;
-
 	// Find what should be the filename of a path by finding whatever is after the last forward or backward slash, or
 	// failing to find those, the whole string.
 	static std::string fileNameOnly(const std::string& path) {
@@ -288,8 +284,9 @@ public:
 		std::vector<LogFile> logs;
 		std::vector<LogFile> pLogs;
 
-		co_await (success(fRanges) && success(fSnapshots) && store(logs, bc->listLogFiles(begin, end, false)) &&
-		          store(pLogs, bc->listLogFiles(begin, end, true)));
+		co_await (success(fRanges) && success(fSnapshots) &&
+		          store(logs, bc->listLogFiles(begin, end, MutationLogType::DEFAULT)) &&
+		          store(pLogs, bc->listLogFiles(begin, end, MutationLogType::PARTITIONED_LOG)));
 		logs.insert(logs.end(), std::make_move_iterator(pLogs.begin()), std::make_move_iterator(pLogs.end()));
 
 		co_return BackupFileList({ fRanges.get(), std::move(logs), fSnapshots.get() });
@@ -728,8 +725,8 @@ public:
 		std::vector<LogFile> plogs;
 		TraceEvent("BackupContainerListFiles").detail("URL", bc->getURL());
 
-		co_await (store(logs, bc->listLogFiles(scanBegin, scanEnd, false)) &&
-		          store(plogs, bc->listLogFiles(scanBegin, scanEnd, true)) &&
+		co_await (store(logs, bc->listLogFiles(scanBegin, scanEnd, MutationLogType::DEFAULT)) &&
+		          store(plogs, bc->listLogFiles(scanBegin, scanEnd, MutationLogType::PARTITIONED_LOG)) &&
 		          store(desc.snapshots, bc->listKeyspaceSnapshots()));
 
 		TraceEvent("BackupContainerListFiles")
@@ -739,11 +736,11 @@ public:
 		    .detail("Snapshots", desc.snapshots.size());
 
 		if (!plogs.empty()) {
-			desc.partitioned = true;
+			desc.mutationLogType = MutationLogType::PARTITIONED_LOG;
 			logs.swap(plogs);
 		} else {
-			desc.partitioned =
-			    metaLogType.present() && metaLogType.get() == BackupContainerFileSystemImpl::PARTITIONED_MUTATION_LOG;
+			desc.mutationLogType =
+			    metaLogType.present() ? static_cast<MutationLogType>(metaLogType.get()) : MutationLogType::DEFAULT;
 		}
 
 		desc.fileLevelEncryption = fileLevelEncryptionEnabled;
@@ -758,7 +755,7 @@ public:
 			// If we didn't get log versions above then seed them using the first log file
 			if (!desc.contiguousLogEnd.present()) {
 				desc.minLogBegin = logs.begin()->beginVersion;
-				if (desc.partitioned) {
+				if (desc.mutationLogType == MutationLogType::PARTITIONED_LOG) {
 					// Cannot use the first file's end version, which may not be contiguous
 					// for other partitions. Set to its beginVersion to be safe.
 					desc.contiguousLogEnd = logs.begin()->beginVersion;
@@ -767,7 +764,7 @@ public:
 				}
 			}
 
-			if (desc.partitioned) {
+			if (desc.mutationLogType == MutationLogType::PARTITIONED_LOG) {
 				updatePartitionedLogsContinuousEnd(&desc, logs, scanBegin, scanEnd);
 			} else {
 				Version& end = desc.contiguousLogEnd.get();
@@ -794,10 +791,7 @@ public:
 				}
 
 				if (!metaLogType.present()) {
-					updates =
-					    updates && bc->logType().set(desc.partitioned
-					                                     ? BackupContainerFileSystemImpl::PARTITIONED_MUTATION_LOG
-					                                     : BackupContainerFileSystemImpl::NON_PARTITIONED_MUTATION_LOG);
+					updates = updates && bc->logType().set(static_cast<int>(desc.mutationLogType));
 				}
 
 				co_await updates;
@@ -820,7 +814,7 @@ public:
 				// If there is logs gap after contiguousLogEnd, then check whether the current snapshot
 				// can be restored from the logs available after contiguousLogEnd.
 				if (desc.contiguousLogEnd.present() && desc.contiguousLogEnd.get() <= s.beginVersion) {
-					if (desc.partitioned)
+					if (desc.mutationLogType == MutationLogType::PARTITIONED_LOG)
 						s.restorable = isPartitionedLogsContinuous(logs, s.beginVersion, s.endVersion);
 					else
 						s.restorable = hasContinuousLogsForSnapshot(logs, s.beginVersion, s.endVersion);
@@ -866,7 +860,7 @@ public:
 				if (desc.minRestorableVersion.present() && desc.maxRestorableVersion.present()) {
 					// check if we have contiguous logs from minRestorableVersion to current snapshot endVersion
 					bool contiguousLogs = false;
-					if (desc.partitioned)
+					if (desc.mutationLogType == MutationLogType::PARTITIONED_LOG)
 						contiguousLogs =
 						    isPartitionedLogsContinuous(logs, desc.minRestorableVersion.get(), s.endVersion);
 					else
@@ -891,7 +885,7 @@ public:
 
 				// Find the continuousLogEnd after snapshotEndVersion and set it as
 				// maxRestorableVersion.
-				if (desc.partitioned) {
+				if (desc.mutationLogType == MutationLogType::PARTITIONED_LOG) {
 					// TO DO: Yet to implement similar function findContinuousLogEnd for partitioned logs.
 					desc.maxRestorableVersion = s.endVersion;
 				} else {
@@ -976,8 +970,8 @@ public:
 			progress->step = "Listing files";
 		}
 		// Get log files or range files that contain any data at or before expireEndVersion
-		co_await (store(logs, bc->listLogFiles(scanBegin, expireEndVersion - 1, false)) &&
-		          store(pLogs, bc->listLogFiles(scanBegin, expireEndVersion - 1, true)) &&
+		co_await (store(logs, bc->listLogFiles(scanBegin, expireEndVersion - 1, MutationLogType::DEFAULT)) &&
+		          store(pLogs, bc->listLogFiles(scanBegin, expireEndVersion - 1, MutationLogType::PARTITIONED_LOG)) &&
 		          store(ranges, bc->listRangeFiles(scanBegin, expireEndVersion - 1)));
 		logs.insert(logs.end(), std::make_move_iterator(pLogs.begin()), std::make_move_iterator(pLogs.end()));
 
@@ -1182,7 +1176,7 @@ public:
 			restorableSet.targetVersion = targetVersion;
 			std::vector<LogFile> logFiles;
 			Version begin = beginVersion == invalidVersion ? 0 : beginVersion;
-			logFiles = co_await bc->listLogFiles(begin, targetVersion, false);
+			logFiles = co_await bc->listLogFiles(begin, targetVersion, MutationLogType::DEFAULT);
 			// List logs in version order so log continuity can be analyzed
 			std::sort(logFiles.begin(), logFiles.end());
 			if (!logFiles.empty()) {
@@ -1249,8 +1243,11 @@ public:
 			// FIXME: check if there are tagged logs. for each tag, there is no version gap.
 			std::vector<LogFile> logs;
 			std::vector<LogFile> plogs;
-			co_await (store(logs, bc->listLogFiles(minKeyRangeVersion, restorable.targetVersion, false)) &&
-			          store(plogs, bc->listLogFiles(minKeyRangeVersion, restorable.targetVersion, true)));
+			co_await (
+			    store(logs, bc->listLogFiles(minKeyRangeVersion, restorable.targetVersion, MutationLogType::DEFAULT)) &&
+			    store(
+			        plogs,
+			        bc->listLogFiles(minKeyRangeVersion, restorable.targetVersion, MutationLogType::PARTITIONED_LOG)));
 
 			if (!plogs.empty()) {
 				logs.swap(plogs);
@@ -1327,8 +1324,10 @@ public:
 
 	// The innermost folder covers 100,000 seconds (1e11 versions) which is 5,000 mutation log files at current
 	// settings.
-	static std::string logVersionFolderString(Version v, bool partitioned) {
-		return format("%s/%s/", (partitioned ? "plogs" : "logs"), versionFolderString(v, 11).c_str());
+	static std::string logVersionFolderString(Version v, MutationLogType mutationLogType) {
+		return format("%s/%s/",
+		              (mutationLogType == MutationLogType::PARTITIONED_LOG ? "plogs" : "logs"),
+		              versionFolderString(v, 11).c_str());
 	}
 
 	static std::string logVersionFolderStringForRangePartitioned(Version v, Version baseVersion) {
@@ -1490,7 +1489,7 @@ public:
 Future<Reference<IBackupFile>> BackupContainerFileSystem::writeLogFile(Version beginVersion,
                                                                        Version endVersion,
                                                                        int blockSize) {
-	return writeFile(BackupContainerFileSystemImpl::logVersionFolderString(beginVersion, false) +
+	return writeFile(BackupContainerFileSystemImpl::logVersionFolderString(beginVersion, MutationLogType::DEFAULT) +
 	                 format("log,%lld,%lld,%s,%d",
 	                        beginVersion,
 	                        endVersion,
@@ -1503,14 +1502,15 @@ Future<Reference<IBackupFile>> BackupContainerFileSystem::writeTaggedLogFile(Ver
                                                                              int blockSize,
                                                                              uint16_t tagId,
                                                                              int totalTags) {
-	return writeFile(BackupContainerFileSystemImpl::logVersionFolderString(beginVersion, true) +
-	                 format("log,%lld,%lld,%s,%d-of-%d,%d",
-	                        beginVersion,
-	                        endVersion,
-	                        deterministicRandom()->randomUniqueID().toString().c_str(),
-	                        tagId,
-	                        totalTags,
-	                        blockSize));
+	return writeFile(
+	    BackupContainerFileSystemImpl::logVersionFolderString(beginVersion, MutationLogType::PARTITIONED_LOG) +
+	    format("log,%lld,%lld,%s,%d-of-%d,%d",
+	           beginVersion,
+	           endVersion,
+	           deterministicRandom()->randomUniqueID().toString().c_str(),
+	           tagId,
+	           totalTags,
+	           blockSize));
 }
 
 Future<Reference<IBackupFile>> BackupContainerFileSystem::writeRangePartitionedLogFile(Version beginVersion,
@@ -1566,7 +1566,7 @@ Future<Void> BackupContainerFileSystem::writeKeyspaceSnapshotFile(const std::vec
 
 Future<std::vector<LogFile>> BackupContainerFileSystem::listLogFiles(Version beginVersion,
                                                                      Version targetVersion,
-                                                                     bool partitioned) {
+                                                                     MutationLogType mutationLogType) {
 	// The first relevant log file could have a begin version less than beginVersion based on the knobs which
 	// determine log file range size, so start at an earlier version adjusted by how many versions a file could
 	// contain.
@@ -1576,9 +1576,9 @@ Future<std::vector<LogFile>> BackupContainerFileSystem::listLogFiles(Version beg
 	    BackupContainerFileSystemImpl::cleanFolderString(BackupContainerFileSystemImpl::logVersionFolderString(
 	        std::max<Version>(0,
 	                          beginVersion - CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES * CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE),
-	        partitioned));
+	        mutationLogType));
 	std::string lastPath = BackupContainerFileSystemImpl::cleanFolderString(
-	    BackupContainerFileSystemImpl::logVersionFolderString(targetVersion, partitioned));
+	    BackupContainerFileSystemImpl::logVersionFolderString(targetVersion, mutationLogType));
 
 	std::function<bool(std::string const&)> pathFilter = [=](const std::string& folderPath) {
 		// Remove slashes in the given folder path so that the '/' positions in the version folder string do not
@@ -1589,16 +1589,17 @@ Future<std::vector<LogFile>> BackupContainerFileSystem::listLogFiles(Version beg
 		       (cleaned > firstPath && cleaned < lastPath);
 	};
 
-	return map(listFiles((partitioned ? "plogs/" : "logs/"), pathFilter), [=](const FilesAndSizesT& files) {
-		std::vector<LogFile> results;
-		LogFile lf;
-		for (auto& f : files) {
-			if (BackupContainerFileSystemImpl::pathToLogFile(lf, f.first, f.second) && lf.endVersion > beginVersion &&
-			    lf.beginVersion <= targetVersion)
-				results.push_back(lf);
-		}
-		return results;
-	});
+	return map(listFiles((mutationLogType == MutationLogType::PARTITIONED_LOG ? "plogs/" : "logs/"), pathFilter),
+	           [=](const FilesAndSizesT& files) {
+		           std::vector<LogFile> results;
+		           LogFile lf;
+		           for (auto& f : files) {
+			           if (BackupContainerFileSystemImpl::pathToLogFile(lf, f.first, f.second) &&
+			               lf.endVersion > beginVersion && lf.beginVersion <= targetVersion)
+				           results.push_back(lf);
+		           }
+		           return results;
+	           });
 }
 
 Future<std::vector<RangeFile>> BackupContainerFileSystem::old_listRangeFiles(Version beginVersion, Version endVersion) {
@@ -2041,7 +2042,7 @@ Future<Void> testBackupContainer(std::string url,
 
 	printf("BackupContainerTest URL %s\n", url.c_str());
 
-	int encryptionBlockSize = encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0;
+	int encryptionBlockSize = encryptionKeyFileName.present() ? 4096 : 0;
 	Reference<IBackupContainer> c =
 	    IBackupContainer::openContainer(url, proxy, encryptionKeyFileName, encryptionBlockSize);
 
