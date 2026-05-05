@@ -44,7 +44,7 @@ namespace {
 // start is ~0.2s. Jitter prevents FlowLock slots from retrying in lockstep.
 double finishMoveKeysBackoff(int retries) {
 	double base = std::min(0.1 * (1 << std::min(retries, 6)), 5.0);
-	return base * (0.75 + 0.5 * deterministicRandom()->random01()); // jitter: [0.75x, 1.25x]
+	return std::min(base * (0.75 + 0.5 * deterministicRandom()->random01()), 5.0); // jitter: [0.75x, 1.25x], capped
 }
 
 struct Shard {
@@ -3530,9 +3530,9 @@ TEST_CASE("/fdbserver/MoveKeys/finishMoveKeysBackoff") {
 		double v3 = finishMoveKeysBackoff(3);
 		ASSERT(v3 >= 0.8 * 0.75 && v3 <= 0.8 * 1.25);
 		double v6 = finishMoveKeysBackoff(6);
-		ASSERT(v6 >= 5.0 * 0.75 && v6 <= 5.0 * 1.25); // capped at 5.0 base
+		ASSERT(v6 >= 5.0 * 0.75 && v6 <= 5.0); // capped at 5.0
 		double v100 = finishMoveKeysBackoff(100);
-		ASSERT(v100 >= 5.0 * 0.75 && v100 <= 5.0 * 1.25); // still capped
+		ASSERT(v100 >= 5.0 * 0.75 && v100 <= 5.0); // still capped
 	}
 
 	// Verify the retry limit knob exists and is positive
