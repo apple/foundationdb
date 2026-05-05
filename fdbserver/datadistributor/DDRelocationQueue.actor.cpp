@@ -2854,7 +2854,7 @@ struct DDQueueImpl {
 				choose {
 					when(RelocateShard rs = waitNext(gatedRelocationStream.getFuture())) {
 						self->pendingGateRelocations--;
-						updatePipelineFull();
+						self->updatePipelineFull();
 						if (rs.isRestore()) {
 							ASSERT(rs.dataMove != nullptr);
 							ASSERT(rs.dataMoveId.isValid());
