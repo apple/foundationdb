@@ -284,6 +284,36 @@ Future<bool> anyPartitionedBackupRunning(Reference<ReadYourWritesTransaction> tr
 	co_return false;
 }
 
+// Lists all backups and find if any range-partitioned backup is running.
+Future<bool> anyRangePartitionedBackupRunning(Reference<ReadYourWritesTransaction> tr) {
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	std::vector<KeyBackedTag> tags = co_await getAllBackupTags(tr);
+
+	std::vector<Future<Optional<UidAndAbortedFlagT>>> futures;
+	for (const auto& tag : tags) {
+		futures.push_back(tag.get(tr));
+	}
+
+	co_await waitForAll(futures);
+	int i = 0;
+	for (i = 0; i < futures.size(); i++) {
+		if (futures[i].get().present()) {
+			Optional<MutationLogType> mutationLogType;
+			EBackupState eState;
+			BackupConfig config(futures[i].get().get().first);
+
+			co_await (store(eState, config.stateEnum().getD(tr, Snapshot::False, EBackupState::STATE_NEVERRAN)) &&
+			          store(mutationLogType, config.mutationLogType().get(tr)));
+			if (FileBackupAgent::isRunnable(eState) &&
+			    mutationLogType.orDefault(MutationLogType::DEFAULT) == MutationLogType::RANGE_PARTITIONED_LOG) {
+				co_return true;
+			}
+		}
+	}
+	co_return false;
+}
+
 class RestoreConfig : public KeyBackedTaskConfig {
 public:
 	RestoreConfig(UID uid = UID()) : KeyBackedTaskConfig(fileRestorePrefixRange.begin, uid) {}
@@ -7167,6 +7197,32 @@ public:
 
 			// Now is time to clear prev backup config space. We have no more use for it.
 			prevConfig.clear(tr);
+		}
+
+		// PARTITIONED_LOG and RANGE_PARTITIONED_LOG backups are mutually exclusive: backup worker
+		// recruitment is determined by the active non-default type, so both cannot run concurrently.
+		if (mutationLogType == MutationLogType::PARTITIONED_LOG) {
+			if (co_await anyRangePartitionedBackupRunning(tr)) {
+				TraceEvent(SevError, "FBA_SubmitBackupMutationLogTypeConflict")
+				    .detail("TagName", tagName)
+				    .detail("RequestedType", mutationLogTypeToString(MutationLogType::PARTITIONED_LOG))
+				    .detail("ConflictingType", mutationLogTypeToString(MutationLogType::RANGE_PARTITIONED_LOG));
+				fprintf(stderr,
+				        "ERROR: Cannot start a backup with mutation-log-type `partitioned-log' while a "
+				        "range-partitioned-log backup is running.\n");
+				throw backup_error();
+			}
+		} else if (mutationLogType == MutationLogType::RANGE_PARTITIONED_LOG) {
+			if (co_await anyPartitionedBackupRunning(tr)) {
+				TraceEvent(SevError, "FBA_SubmitBackupMutationLogTypeConflict")
+				    .detail("TagName", tagName)
+				    .detail("RequestedType", mutationLogTypeToString(MutationLogType::RANGE_PARTITIONED_LOG))
+				    .detail("ConflictingType", mutationLogTypeToString(MutationLogType::PARTITIONED_LOG));
+				fprintf(stderr,
+				        "ERROR: Cannot start a backup with mutation-log-type `range-partitioned-log' while a "
+				        "partitioned-log backup is running.\n");
+				throw backup_error();
+			}
 		}
 
 		BackupConfig config(deterministicRandom()->randomUniqueID());
