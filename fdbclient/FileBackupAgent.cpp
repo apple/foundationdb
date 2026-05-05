@@ -269,13 +269,44 @@ Future<bool> anyPartitionedBackupRunning(Reference<ReadYourWritesTransaction> tr
 	int i = 0;
 	for (i = 0; i < futures.size(); i++) {
 		if (futures[i].get().present()) {
-			Optional<bool> partitionedLog;
+			Optional<MutationLogType> mutationLogType;
 			EBackupState eState;
 			BackupConfig config(futures[i].get().get().first);
 
 			co_await (store(eState, config.stateEnum().getD(tr, Snapshot::False, EBackupState::STATE_NEVERRAN)) &&
-			          store(partitionedLog, config.partitionedLogEnabled().get(tr)));
-			if (FileBackupAgent::isRunnable(eState) && partitionedLog.present() && partitionedLog.get()) {
+			          store(mutationLogType, config.mutationLogType().get(tr)));
+			if (FileBackupAgent::isRunnable(eState) &&
+			    mutationLogType.orDefault(MutationLogType::DEFAULT) == MutationLogType::PARTITIONED_LOG) {
+				co_return true;
+			}
+		}
+	}
+	co_return false;
+}
+
+// Lists all backups and find if any range-partitioned backup is running.
+Future<bool> anyRangePartitionedBackupRunning(Reference<ReadYourWritesTransaction> tr) {
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	std::vector<KeyBackedTag> tags = co_await getAllBackupTags(tr);
+
+	std::vector<Future<Optional<UidAndAbortedFlagT>>> futures;
+	for (const auto& tag : tags) {
+		futures.push_back(tag.get(tr));
+	}
+
+	co_await waitForAll(futures);
+	int i = 0;
+	for (i = 0; i < futures.size(); i++) {
+		if (futures[i].get().present()) {
+			Optional<MutationLogType> mutationLogType;
+			EBackupState eState;
+			BackupConfig config(futures[i].get().get().first);
+
+			co_await (store(eState, config.stateEnum().getD(tr, Snapshot::False, EBackupState::STATE_NEVERRAN)) &&
+			          store(mutationLogType, config.mutationLogType().get(tr)));
+			if (FileBackupAgent::isRunnable(eState) &&
+			    mutationLogType.orDefault(MutationLogType::DEFAULT) == MutationLogType::RANGE_PARTITIONED_LOG) {
 				co_return true;
 			}
 		}
@@ -298,7 +329,7 @@ public:
 	KeyBackedProperty<bool> onlyApplyMutationLogs() { return configSpace.pack(__FUNCTION__sr); }
 	KeyBackedProperty<bool> inconsistentSnapshotOnly() { return configSpace.pack(__FUNCTION__sr); }
 	KeyBackedProperty<bool> unlockDBAfterRestore() { return configSpace.pack(__FUNCTION__sr); }
-	KeyBackedProperty<bool> transformPartitionedLog() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<MutationLogType> mutationLogType() { return configSpace.pack(__FUNCTION__sr); }
 	// BulkLoad integration properties
 	KeyBackedProperty<bool> useRangeFileRestore() { return configSpace.pack(__FUNCTION__sr); }
 	KeyBackedProperty<std::string> bulkDumpJobId() { return configSpace.pack(__FUNCTION__sr); }
@@ -692,18 +723,20 @@ Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore, Refer
 	Future<Version> firstConsistentVersion = restore.firstConsistentVersion().getD(tr);
 	Future<std::string> tag = restore.tag().getD(tr);
 	Future<std::pair<std::string, Version>> lastError = restore.lastError().getD(tr);
-	// BulkLoad sub-phase counts for detailed progress
 	Future<int64_t> submittedTasks = restore.bulkLoadSubmittedTasks().getD(tr);
 	Future<int64_t> triggeredTasks = restore.bulkLoadTriggeredTasks().getD(tr);
 	Future<int64_t> runningTasks = restore.bulkLoadRunningTasks().getD(tr);
 	Future<int64_t> totalTasks = restore.bulkLoadTotalTasks().getD(tr);
+	Future<Optional<bool>> useRangeFileRestore = restore.useRangeFileRestore().get(tr);
 
-	// restore might no longer be valid after the first wait so make sure it is not needed anymore.
 	UID uid = restore.getUid();
 	co_await (success(fileCount) && success(fileBlockCount) && success(fileBlocksDispatched) &&
 	          success(fileBlocksFinished) && success(bytesWritten) && success(status) && success(currentVersion) &&
 	          success(lag) && success(firstConsistentVersion) && success(tag) && success(lastError) &&
-	          success(submittedTasks) && success(triggeredTasks) && success(runningTasks) && success(totalTasks));
+	          success(submittedTasks) && success(triggeredTasks) && success(runningTasks) && success(totalTasks) &&
+	          success(useRangeFileRestore));
+
+	bool useRangeFile = !useRangeFileRestore.get().present() || useRangeFileRestore.get().get();
 
 	std::string errstr = "None";
 	if (lastError.get().second != 0)
@@ -728,23 +761,34 @@ Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore, Refer
 	    .detail("FirstConsistentVersion", firstConsistentVersion.get())
 	    .detail("ApplyLag", lag.get());
 
-	co_return format("Tag: %s  UID: %s  State: %s  Blocks: %lld/%lld  BlocksInProgress: %lld  "
-	                 "Submitted: %lld  Triggered: %lld  Running: %lld  TotalTasks: %lld  "
-	                 "Files: %lld  BytesWritten: %lld  ApplyVersionLag: %lld  LastError: %s",
-	                 tag.get().c_str(),
-	                 uid.toString().c_str(),
-	                 status.get().toString().c_str(),
-	                 fileBlocksFinished.get(),
-	                 fileBlockCount.get(),
-	                 fileBlocksDispatched.get() - fileBlocksFinished.get(),
-	                 submittedTasks.get(),
-	                 triggeredTasks.get(),
-	                 runningTasks.get(),
-	                 totalTasks.get(),
-	                 fileCount.get(),
-	                 bytesWritten.get(),
-	                 lag.get(),
-	                 errstr.c_str());
+	std::string progressStr;
+	if (useRangeFile) {
+		progressStr = format("Tag: %s  UID: %s  State: %s\n",
+		                     tag.get().c_str(),
+		                     uid.toString().c_str(),
+		                     status.get().toString().c_str());
+		progressStr += format(" Blocks: %lld/%lld complete\n", fileBlocksFinished.get(), fileBlockCount.get());
+		progressStr += format(" Files: %lld\n", fileCount.get());
+		progressStr += format(" Bytes written: %s\n", formatBytesHumanReadable(bytesWritten.get()).c_str());
+		progressStr += format(" Apply version lag: %s\n", versionToString(lag.get()).c_str());
+	} else {
+		progressStr = format("Tag: %s  UID: %s  State: %s\n",
+		                     tag.get().c_str(),
+		                     uid.toString().c_str(),
+		                     status.get().toString().c_str());
+		progressStr += format(" Tasks submitted: %lld  triggered: %lld  running: %lld\n",
+		                      submittedTasks.get(),
+		                      triggeredTasks.get(),
+		                      runningTasks.get());
+		progressStr += format(" Tasks triggered: %lld / %lld total\n", triggeredTasks.get(), totalTasks.get());
+		progressStr += format(" Bytes written: %s\n", formatBytesHumanReadable(bytesWritten.get()).c_str());
+		double avgBytesPerTask = triggeredTasks.get() > 0 ? (double)bytesWritten.get() / triggeredTasks.get() : 0;
+		if (avgBytesPerTask > 0) {
+			progressStr += format(" Avg bytes/task: %s\n", formatBytesHumanReadable((int64_t)avgBytesPerTask).c_str());
+		}
+	}
+
+	co_return progressStr;
 }
 
 Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restore, Reference<ReadYourWritesTransaction> tr) {
@@ -3445,13 +3489,13 @@ struct BackupLogsDispatchTask : BackupTaskFuncBase {
 		EBackupState backupState;
 		Optional<std::string> tag;
 		Optional<Version> latestSnapshotEndVersion;
-		Optional<bool> partitionedLog;
+		Optional<MutationLogType> mutationLogType;
 
 		co_await (store(stopWhenDone, config.stopWhenDone().getOrThrow(tr)) &&
 		          store(restorableVersion, config.getLatestRestorableVersion(tr)) &&
 		          store(backupState, config.stateEnum().getOrThrow(tr)) && store(tag, config.tag().get(tr)) &&
 		          store(latestSnapshotEndVersion, config.latestSnapshotEndVersion().get(tr)) &&
-		          store(partitionedLog, config.partitionedLogEnabled().get(tr)));
+		          store(mutationLogType, config.mutationLogType().get(tr)));
 
 		// If restorable, update the last restorable version for this tag
 		if (restorableVersion.present() && tag.present()) {
@@ -3490,7 +3534,7 @@ struct BackupLogsDispatchTask : BackupTaskFuncBase {
 		// If a snapshot has ended for this backup then mutations are higher priority to reduce backup lag
 		int priority = latestSnapshotEndVersion.present() ? 1 : 0;
 
-		if (!partitionedLog.present() || !partitionedLog.get()) {
+		if (!mutationLogType.present() || mutationLogType.get() == MutationLogType::DEFAULT) {
 			// Add the initial log range task to read/copy the mutations and the next logs dispatch task which will
 			// run after this batch is done
 			// read blog/ prefix and write those (param1, param2) into files
@@ -4177,14 +4221,14 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 
 		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		BackupConfig config(task);
-		Future<Optional<bool>> partitionedLog;
+		Future<Optional<MutationLogType>> mutationLogType;
 		while (true) {
 			Error err;
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				partitionedLog = config.partitionedLogEnabled().get(tr);
-				co_await partitionedLog;
+				mutationLogType = config.mutationLogType().get(tr);
+				co_await mutationLogType;
 				break;
 			} catch (Error& e) {
 				err = e;
@@ -4195,7 +4239,8 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 		// Check if backup worker is enabled
 		DatabaseConfiguration dbConfig = co_await getDatabaseConfiguration(cx);
 		bool backupWorkerEnabled = dbConfig.backupWorkerEnabled;
-		if (!backupWorkerEnabled && partitionedLog.get().present() && partitionedLog.get().get()) {
+		if (!backupWorkerEnabled && mutationLogType.get().present() &&
+		    mutationLogType.get().get() == MutationLogType::PARTITIONED_LOG) {
 			// Change configuration only when we set to use partitioned logs and
 			// the flag was not set before.
 			co_await ManagementAPI::changeConfig(cx.getReference(), "backup_worker_enabled:=1", true);
@@ -4233,10 +4278,10 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 
 				Future<Optional<Value>> started = tr->get(backupStartedKey);
 				Future<Optional<Value>> taskStarted = tr->get(config.allWorkerStarted().key);
-				partitionedLog = config.partitionedLogEnabled().get(tr);
-				co_await (success(started) && success(taskStarted) && success(partitionedLog));
+				mutationLogType = config.mutationLogType().get(tr);
+				co_await (success(started) && success(taskStarted) && success(mutationLogType));
 
-				if (!partitionedLog.get().present() || !partitionedLog.get().get()) {
+				if (!mutationLogType.get().present() || mutationLogType.get().get() == MutationLogType::DEFAULT) {
 					co_return; // Skip if not using partitioned logs
 				}
 
@@ -4282,15 +4327,15 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 
 		Future<std::vector<KeyRange>> backupRangesFuture = config.backupRanges().getOrThrow(tr);
 		Future<Key> destUidValueFuture = config.destUidValue().getOrThrow(tr);
-		Future<Optional<bool>> partitionedLog = config.partitionedLogEnabled().get(tr);
+		Future<Optional<MutationLogType>> mutationLogType = config.mutationLogType().get(tr);
 		Future<Optional<bool>> incrementalBackupOnly = config.incrementalBackupOnly().get(tr);
-		co_await (success(backupRangesFuture) && success(destUidValueFuture) && success(partitionedLog) &&
+		co_await (success(backupRangesFuture) && success(destUidValueFuture) && success(mutationLogType) &&
 		          success(incrementalBackupOnly));
 		std::vector<KeyRange> backupRanges = backupRangesFuture.get();
 		Key destUidValue = destUidValueFuture.get();
 
 		// Start logging the mutations for the specified ranges of the tag if needed
-		if (!partitionedLog.get().present() || !partitionedLog.get().get()) {
+		if (!mutationLogType.get().present() || mutationLogType.get().get() == MutationLogType::DEFAULT) {
 			for (auto& backupRange : backupRanges) {
 				config.startMutationLogs(tr, backupRange, destUidValue);
 			}
@@ -6902,7 +6947,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 	                            Reference<FutureBucket> futureBucket,
 	                            Reference<Task> task) {
 		RestoreConfig restore(task);
-		bool transformPartitionedLog{ false };
+		MutationLogType mutationLogType{ MutationLogType::DEFAULT };
 		Version restoreVersion{ 0 };
 		Version firstVersion = Params.firstVersion().getOrDefault(task, invalidVersion);
 		bool useRangeFileRestore = false;
@@ -6927,7 +6972,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		restore.setApplyEndVersion(tr, firstVersion);
 
 		// Apply range data using either BulkLoad or traditional range file restore
-		transformPartitionedLog = co_await restore.transformPartitionedLog().getD(tr, Snapshot::False, false);
+		mutationLogType = co_await restore.mutationLogType().getD(tr, Snapshot::False, MutationLogType::DEFAULT);
 		restoreVersion = co_await restore.restoreVersion().getOrThrow(tr);
 
 		if (!useRangeFileRestore) {
@@ -6977,7 +7022,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			                                          0,
 			                                          TaskCompletionKey::noSignal(),
 			                                          bulkLoadDone);
-		} else if (transformPartitionedLog) {
+		} else if (mutationLogType == MutationLogType::PARTITIONED_LOG) {
 			// Traditional restore with partitioned logs
 			Version endVersion =
 			    std::min(firstVersion + CLIENT_KNOBS->RESTORE_PARTITIONED_BATCH_VERSION_SIZE, restoreVersion);
@@ -7123,7 +7168,7 @@ public:
 	                                 std::string tagName,
 	                                 Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                                 StopWhenDone stopWhenDone,
-	                                 UsePartitionedLog partitionedLog,
+	                                 MutationLogType mutationLogType,
 	                                 IncrementalBackupOnly incrementalBackupOnly,
 	                                 Optional<std::string> encryptionKeyFileName,
 	                                 int encryptionBlockSize,
@@ -7135,7 +7180,7 @@ public:
 		TraceEvent(SevInfo, "FBA_SubmitBackup")
 		    .detail("TagName", tagName.c_str())
 		    .detail("StopWhenDone", stopWhenDone)
-		    .detail("UsePartitionedLog", partitionedLog)
+		    .detail("MutationLogType", mutationLogType)
 		    .detail("OutContainer", outContainer.toString())
 		    .detail("EncryptionKeyFileName", encryptionKeyFileName.present() ? encryptionKeyFileName.get() : "None")
 		    .detail("EncryptionBlockSize", encryptionBlockSize);
@@ -7152,6 +7197,32 @@ public:
 
 			// Now is time to clear prev backup config space. We have no more use for it.
 			prevConfig.clear(tr);
+		}
+
+		// PARTITIONED_LOG and RANGE_PARTITIONED_LOG backups are mutually exclusive: backup worker
+		// recruitment is determined by the active non-default type, so both cannot run concurrently.
+		if (mutationLogType == MutationLogType::PARTITIONED_LOG) {
+			if (co_await anyRangePartitionedBackupRunning(tr)) {
+				TraceEvent(SevError, "FBA_SubmitBackupMutationLogTypeConflict")
+				    .detail("TagName", tagName)
+				    .detail("RequestedType", mutationLogTypeToString(MutationLogType::PARTITIONED_LOG))
+				    .detail("ConflictingType", mutationLogTypeToString(MutationLogType::RANGE_PARTITIONED_LOG));
+				fprintf(stderr,
+				        "ERROR: Cannot start a backup with mutation-log-type `partitioned-log' while a "
+				        "range-partitioned-log backup is running.\n");
+				throw backup_error();
+			}
+		} else if (mutationLogType == MutationLogType::RANGE_PARTITIONED_LOG) {
+			if (co_await anyPartitionedBackupRunning(tr)) {
+				TraceEvent(SevError, "FBA_SubmitBackupMutationLogTypeConflict")
+				    .detail("TagName", tagName)
+				    .detail("RequestedType", mutationLogTypeToString(MutationLogType::RANGE_PARTITIONED_LOG))
+				    .detail("ConflictingType", mutationLogTypeToString(MutationLogType::PARTITIONED_LOG));
+				fprintf(stderr,
+				        "ERROR: Cannot start a backup with mutation-log-type `range-partitioned-log' while a "
+				        "partitioned-log backup is running.\n");
+				throw backup_error();
+			}
 		}
 
 		BackupConfig config(deterministicRandom()->randomUniqueID());
@@ -7248,7 +7319,7 @@ public:
 		config.backupRanges().set(tr, normalizedRanges);
 		config.initialSnapshotIntervalSeconds().set(tr, initialSnapshotIntervalSeconds);
 		config.snapshotIntervalSeconds().set(tr, snapshotIntervalSeconds);
-		config.partitionedLogEnabled().set(tr, partitionedLog);
+		config.mutationLogType().set(tr, mutationLogType);
 		config.incrementalBackupOnly().set(tr, incrementalBackupOnly);
 		config.snapshotMode().set(tr, snapshotMode);
 		Key taskKey = co_await fileBackup::StartFullBackupTaskFunc::addTask(
@@ -7272,7 +7343,7 @@ public:
 	                                  InconsistentSnapshotOnly inconsistentSnapshotOnly,
 	                                  Version beginVersion,
 	                                  UID uid,
-	                                  TransformPartitionedLog transformPartitionedLog,
+	                                  MutationLogType mutationLogType,
 	                                  bool useRangeFileRestore = true,
 	                                  int encryptionBlockSize = 0,
 	                                  Optional<std::string> encryptionKeyFileName = {}) {
@@ -7352,7 +7423,7 @@ public:
 		restore.inconsistentSnapshotOnly().set(tr, inconsistentSnapshotOnly);
 		restore.beginVersion().set(tr, beginVersion);
 		restore.unlockDBAfterRestore().set(tr, unlockDB);
-		restore.transformPartitionedLog().set(tr, transformPartitionedLog);
+		restore.mutationLogType().set(tr, mutationLogType);
 		restore.useRangeFileRestore().set(tr, useRangeFileRestore);
 		if (BUGGIFY && restoreRanges.size() == 1) {
 			restore.restoreRange().set(tr, restoreRanges[0]);
@@ -7894,55 +7965,8 @@ public:
 					bool bulkLoadCompatible = bulkDumpJobIdOpt.present() && !bulkDumpJobIdOpt.get().empty();
 					statusText += format("BulkLoad Compatible: %s\n", bulkLoadCompatible ? "yes" : "no");
 
-					// If using bulkdump mode, show bulkdump progress
-					if (snapshotModeValue == 1 || snapshotModeValue == 2) {
-						Optional<BulkDumpProgress> bulkDumpProgressOpt = co_await getBulkDumpProgress(cx);
-						if (bulkDumpProgressOpt.present()) {
-							BulkDumpProgress bdProgress = bulkDumpProgressOpt.get();
-							statusText += "\nBulkDump progress:\n";
-							statusText += format(" Tasks completed - %d / %d (%.1f%%)\n",
-							                     bdProgress.completeTasks,
-							                     bdProgress.totalTasks,
-							                     bdProgress.progressPercent());
-
-							statusText +=
-							    format(" Bytes completed - %s\n",
-							           formatBytesProgress(bdProgress.completedBytes, bdProgress.totalBytes).c_str());
-
-							double throughput = bdProgress.avgBytesPerSecond();
-							if (throughput > 0) {
-								statusText += format(" Throughput - %.1f MB/s\n", throughput / 1048576.0);
-							}
-
-							if (bdProgress.etaSeconds().present()) {
-								statusText +=
-								    format(" Estimated time remaining - %s\n",
-								           formatDurationHumanReadable((int)bdProgress.etaSeconds().get()).c_str());
-							}
-
-							if (bdProgress.elapsedSeconds > 0) {
-								statusText +=
-								    format(" Elapsed time - %s\n",
-								           formatDurationHumanReadable((int)bdProgress.elapsedSeconds).c_str());
-							}
-
-							// Show stalled tasks as warnings
-							if (!bdProgress.stalledTasks.empty()) {
-								statusText += format("\nWARNING: %zu stalled tasks (no progress > 60s):\n",
-								                     bdProgress.stalledTasks.size());
-								for (const auto& stalled : bdProgress.stalledTasks) {
-									statusText += format(" Task %s: %s, stalled %.0fs, %d restarts\n",
-									                     stalled.taskId.shortString().c_str(),
-									                     stalled.range.toString().c_str(),
-									                     stalled.stalledSeconds,
-									                     stalled.restartCount);
-									if (!stalled.lastError.empty()) {
-										statusText += format("           Last error: %s\n", stalled.lastError.c_str());
-									}
-								}
-							}
-						}
-					}
+					bool showBulkDump = (snapshotModeValue == 1 || snapshotModeValue == 2);
+					bool showRangeFile = (snapshotModeValue == 0 || snapshotModeValue == 2);
 
 					if (snapshotProgress) {
 						int64_t snapshotInterval{ 0 };
@@ -7976,32 +8000,80 @@ public:
 						    store(snapshotTargetEndVersionTimestamp,
 						          timeKeeperEpochsFromVersion(snapshotTargetEndVersion, tr)));
 
-						statusText += format("Snapshot interval is %lld seconds.  ", snapshotInterval);
-						if (backupState == EBackupState::STATE_RUNNING_DIFFERENTIAL)
-							statusText += format("Current snapshot progress target is %3.2f%% (>100%% means the "
-							                     "snapshot is supposed to be done)\n",
-							                     100.0 * (recentReadVersion - snapshotBeginVersion) /
-							                         (snapshotTargetEndVersion - snapshotBeginVersion));
-						else
-							statusText += "The initial snapshot is still running.\n";
+						if (showBulkDump) {
+							Optional<BulkDumpProgress> bulkDumpProgressOpt = co_await getBulkDumpProgress(cx);
+							statusText += "\nBulkDump Snapshot:\n";
+							if (bulkDumpProgressOpt.present()) {
+								BulkDumpProgress bdProgress = bulkDumpProgressOpt.get();
+								statusText += format(" Tasks: %d/%d complete (%.1f%%)\n",
+								                     bdProgress.completeTasks,
+								                     bdProgress.totalTasks,
+								                     bdProgress.progressPercent());
+								statusText += format(
+								    " Bytes: %s\n",
+								    formatBytesProgress(bdProgress.completedBytes, bdProgress.totalBytes).c_str());
 
-						statusText += format("\nDetails:\n LogBytes written - %lld\n RangeBytes written - %lld\n "
-						                     "Last complete log version and timestamp        - %s, %s\n "
-						                     "Last complete snapshot version and timestamp   - %s, %s\n "
-						                     "Current Snapshot start version and timestamp   - %s, %s\n "
-						                     "Expected snapshot end version and timestamp    - %s, %s\n "
-						                     "Backup supposed to stop at next snapshot completion - %s\n",
-						                     logBytesWritten.orDefault(0),
-						                     rangeBytesWritten.orDefault(0),
+								double throughput = bdProgress.avgBytesPerSecond();
+								if (throughput > 0) {
+									statusText += format(" Throughput: %.1f MB/s\n", throughput / 1048576.0);
+								}
+
+								if (bdProgress.elapsedSeconds > 0) {
+									statusText +=
+									    format(" Elapsed: %s\n",
+									           formatDurationHumanReadable((int)bdProgress.elapsedSeconds).c_str());
+								}
+
+								if (bdProgress.etaSeconds().present()) {
+									statusText +=
+									    format(" ETA: %s\n",
+									           formatDurationHumanReadable((int)bdProgress.etaSeconds().get()).c_str());
+								}
+
+								if (!bdProgress.stalledTasks.empty()) {
+									statusText += format("\nWARNING: %zu stalled tasks (no progress > 60s):\n",
+									                     bdProgress.stalledTasks.size());
+									for (const auto& stalled : bdProgress.stalledTasks) {
+										statusText += format(" Task %s: %s, stalled %.0fs, %d restarts\n",
+										                     stalled.taskId.shortString().c_str(),
+										                     stalled.range.toString().c_str(),
+										                     stalled.stalledSeconds,
+										                     stalled.restartCount);
+										if (!stalled.lastError.empty()) {
+											statusText +=
+											    format("           Last error: %s\n", stalled.lastError.c_str());
+										}
+									}
+								}
+							} else {
+								statusText += " Status: pending\n";
+							}
+						}
+
+						if (showRangeFile) {
+							statusText += "\nRangefile Snapshot:\n";
+							statusText += format(" Bytes written: %s\n",
+							                     formatBytesHumanReadable(rangeBytesWritten.orDefault(0)).c_str());
+
+							if (backupState == EBackupState::STATE_RUNNING_DIFFERENTIAL) {
+								double pct = 100.0 * (recentReadVersion - snapshotBeginVersion) /
+								             (snapshotTargetEndVersion - snapshotBeginVersion);
+								statusText += format(" Progress: %.2f%%\n", pct);
+							} else {
+								statusText += " Status: Initial snapshot still running\n";
+							}
+							statusText +=
+							    format(" Started: %s\n", timeStampToString(snapshotBeginVersionTimestamp).c_str());
+						}
+
+						statusText += format("\nMutation Logs:\n");
+						statusText += format(" Bytes written: %s\n",
+						                     formatBytesHumanReadable(logBytesWritten.orDefault(0)).c_str());
+						statusText += format(" Last complete version: %s (%s)\n",
 						                     versionToString(latestLogEndVersion).c_str(),
-						                     timeStampToString(latestLogEndVersionTimestamp).c_str(),
-						                     versionToString(latestSnapshotEndVersion).c_str(),
-						                     timeStampToString(latestSnapshotEndVersionTimestamp).c_str(),
-						                     versionToString(snapshotBeginVersion).c_str(),
-						                     timeStampToString(snapshotBeginVersionTimestamp).c_str(),
-						                     versionToString(snapshotTargetEndVersion).c_str(),
-						                     timeStampToString(snapshotTargetEndVersionTimestamp).c_str(),
-						                     boolToYesOrNo(stopWhenDone).c_str());
+						                     timeStampToString(latestLogEndVersionTimestamp).c_str());
+
+						statusText += format("\nSnapshot interval is %lld seconds.\n", snapshotInterval);
 					}
 
 					// Append the errors, if requested
@@ -8201,7 +8273,7 @@ public:
 				                       inconsistentSnapshotOnly,
 				                       beginVersion,
 				                       randomUid,
-				                       TransformPartitionedLog(desc.partitioned),
+				                       desc.mutationLogType,
 				                       useRangeFileRestore,
 				                       desc.encryptionBlockSize,
 				                       encryptionKeyFileName);
@@ -8588,7 +8660,7 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
                                            std::string const& tagName,
                                            Standalone<VectorRef<KeyRangeRef>> backupRanges,
                                            StopWhenDone stopWhenDone,
-                                           UsePartitionedLog partitionedLog,
+                                           MutationLogType mutationLogType,
                                            IncrementalBackupOnly incrementalBackupOnly,
                                            Optional<std::string> const& encryptionKeyFileName,
                                            int encryptionBlockSize,
@@ -8602,7 +8674,7 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
 	                                         tagName,
 	                                         backupRanges,
 	                                         stopWhenDone,
-	                                         partitionedLog,
+	                                         mutationLogType,
 	                                         incrementalBackupOnly,
 	                                         encryptionKeyFileName,
 	                                         encryptionBlockSize,

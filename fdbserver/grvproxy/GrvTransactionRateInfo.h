@@ -55,6 +55,10 @@ public:
 	// current release window.
 	bool canStart(int64_t numAlreadyStarted, int64_t count) const;
 
+	// Estimates how long it will take before canStart returns true for the
+	// same arguments. Returns zero when the request can start now.
+	double estimateDelay(int64_t numAlreadyStarted, int64_t count) const;
+
 	// Updates the budget to accumulate any extra capacity available or remove any excess that was used.
 	// Call at the end of a release window.
 	void endReleaseWindow(int64_t numStarted, bool queueEmpty, double elapsed);

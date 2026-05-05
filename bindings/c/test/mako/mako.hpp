@@ -89,6 +89,7 @@ enum ArgKind {
 	ARG_TRANSACTION_TIMEOUT_TX,
 	ARG_TRANSACTION_TIMEOUT_DB,
 	ARG_WARMUP_SECONDS,
+	ARG_MAX_GRV_QUEUE_DELAY,
 };
 
 constexpr const int OP_COUNT = 0;
@@ -206,12 +207,16 @@ struct Arguments {
 	std::optional<std::string> private_key_pem;
 	int transaction_timeout_db;
 	int transaction_timeout_tx;
+	int max_grv_queue_delay_ms;
 };
 
 // helper functions
-inline void setTransactionTimeoutIfEnabled(const Arguments& args, fdb::Transaction& tx) {
+inline void setTransactionOptionsIfEnabled(const Arguments& args, fdb::Transaction& tx) {
 	if (args.transaction_timeout_tx > 0) {
 		tx.setOption(FDB_TR_OPTION_TIMEOUT, args.transaction_timeout_tx);
+	}
+	if (args.max_grv_queue_delay_ms > 0) {
+		tx.setOption(FDB_TR_OPTION_MAX_GRV_QUEUE_DELAY, args.max_grv_queue_delay_ms);
 	}
 }
 

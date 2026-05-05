@@ -134,7 +134,7 @@ enum {
 	OPT_JSON,
 	OPT_DELETE_DATA,
 	OPT_MIN_CLEANUP_SECONDS,
-	OPT_USE_PARTITIONED_LOG,
+	OPT_MUTATION_LOG_TYPE,
 	OPT_MODE,
 
 	// Backup and Restore constants
@@ -253,9 +253,7 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_DESTCONTAINER, "-d", SO_REQ_SEP },
 	{ OPT_DESTCONTAINER, "--destcontainer", SO_REQ_SEP },
 	{ OPT_PROXY, "--proxy", SO_REQ_SEP },
-	// Enable "-p" option after GA
-	// { OPT_USE_PARTITIONED_LOG, "-p",                 SO_NONE },
-	{ OPT_USE_PARTITIONED_LOG, "--partitioned-log-experimental", SO_NONE },
+	{ OPT_MUTATION_LOG_TYPE, "--mutation-log-type", SO_REQ_SEP },
 	{ OPT_SNAPSHOTINTERVAL, "-s", SO_REQ_SEP },
 	{ OPT_SNAPSHOTINTERVAL, "--snapshot-interval", SO_REQ_SEP },
 	{ OPT_INITIAL_SNAPSHOT_INTERVAL, "--initial-snapshot-interval", SO_REQ_SEP },
@@ -1115,7 +1113,10 @@ static void printBackupUsage(bool devhelp) {
 	       "                 If not specified, the entire database will be backed up or no filter will be applied.\n");
 	printf("  --keys-file FILE\n"
 	       "                 Same as -k option, except keys are specified in the input file.\n");
-	printf("  --partitioned-log-experimental  Starts with new type of backup system using partitioned logs.\n");
+	printf("  --mutation-log-type TYPE\n"
+	       "                 Specifies the mutation log type. Valid values are: "
+	       "partitioned-log-experimental, range-partitioned-log-experimental.\n"
+	       "If not specified, default log type is used.\n");
 	printf("  -n, --dryrun   For backup start or restore start, performs a trial run with no actual changes made.\n");
 	printf("  --log          Enables trace file logging for the CLI session.\n"
 	       "  --logdir PATH  Specifies the output directory for trace files. If\n"
@@ -1492,6 +1493,16 @@ Optional<RestoreMode> getRestoreMode(std::string mode) {
 	if (mode == "bulkload")
 		return RestoreMode::BULKLOAD;
 	return Optional<RestoreMode>();
+}
+
+Optional<MutationLogType> getMutationLogType(std::string type) {
+	std::transform(type.begin(), type.end(), type.begin(), ::tolower);
+
+	if (type == "partitioned-log-experimental")
+		return MutationLogType::PARTITIONED_LOG;
+	if (type == "range-partitioned-log-experimental")
+		return MutationLogType::RANGE_PARTITIONED_LOG;
+	return Optional<MutationLogType>();
 }
 
 RestoreType getRestoreType(std::string name) {
@@ -2034,7 +2045,7 @@ Future<Void> submitBackup(Database db,
                           bool dryRun,
                           WaitForComplete waitForCompletion,
                           StopWhenDone stopWhenDone,
-                          UsePartitionedLog usePartitionedLog,
+                          MutationLogType mutationLogType,
                           IncrementalBackupOnly incrementalBackupOnly,
                           Optional<std::string> encryptionKeyFile,
                           int encryptionBlockSize,
@@ -2089,7 +2100,7 @@ Future<Void> submitBackup(Database db,
 			                                  tagName,
 			                                  backupRanges,
 			                                  stopWhenDone,
-			                                  usePartitionedLog,
+			                                  mutationLogType,
 			                                  incrementalBackupOnly,
 			                                  encryptionKeyFile,
 			                                  encryptionBlockSize,
@@ -3571,7 +3582,7 @@ int main(int argc, char* argv[]) {
 		std::string restoreTimestamp;
 		WaitForComplete waitForDone{ false };
 		StopWhenDone stopWhenDone{ true };
-		UsePartitionedLog usePartitionedLog{ false }; // Set to true to use new backup system
+		MutationLogType mutationLogType{ MutationLogType::DEFAULT };
 		IncrementalBackupOnly incrementalBackupOnly{ false };
 		OnlyApplyMutationLogs onlyApplyMutationLogs{ false };
 		InconsistentSnapshotOnly inconsistentSnapshotOnly{ false };
@@ -3855,9 +3866,18 @@ int main(int argc, char* argv[]) {
 			case OPT_NOSTOPWHENDONE:
 				stopWhenDone.set(false);
 				break;
-			case OPT_USE_PARTITIONED_LOG:
-				usePartitionedLog.set(true);
+			case OPT_MUTATION_LOG_TYPE: {
+				auto parsedType = getMutationLogType(args->OptionArg());
+				if (!parsedType.present()) {
+					fprintf(stderr,
+					        "ERROR: Unknown mutation log type '%s'. Valid modes are: partitioned-log-experimental, "
+					        "range-partitioned-log-experimental\n",
+					        args->OptionArg());
+					return FDB_EXIT_ERROR;
+				}
+				mutationLogType = parsedType.get();
 				break;
+			}
 			case OPT_INCREMENTALONLY:
 				incrementalBackupOnly.set(true);
 				onlyApplyMutationLogs.set(true);
@@ -4302,7 +4322,7 @@ int main(int argc, char* argv[]) {
 				                           dryRun,
 				                           waitForDone,
 				                           stopWhenDone,
-				                           usePartitionedLog,
+				                           mutationLogType,
 				                           incrementalBackupOnly,
 				                           encryptionKeyFile,
 				                           encryptionBlockSize,
