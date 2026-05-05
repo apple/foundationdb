@@ -134,7 +134,7 @@ enum {
 	OPT_JSON,
 	OPT_DELETE_DATA,
 	OPT_MIN_CLEANUP_SECONDS,
-	OPT_USE_PARTITIONED_LOG,
+	OPT_MUTATION_LOG_TYPE,
 	OPT_MODE,
 
 	// Backup and Restore constants
@@ -146,6 +146,7 @@ enum {
 	OPT_BACKUPKEYS_FILTER,
 	OPT_INCREMENTALONLY,
 	OPT_ENCRYPTION_KEY_FILE,
+	OPT_ENCRYPTION_BLOCK_SIZE,
 
 	// Backup Modify
 	OPT_MOD_ACTIVE_INTERVAL,
@@ -252,9 +253,7 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_DESTCONTAINER, "-d", SO_REQ_SEP },
 	{ OPT_DESTCONTAINER, "--destcontainer", SO_REQ_SEP },
 	{ OPT_PROXY, "--proxy", SO_REQ_SEP },
-	// Enable "-p" option after GA
-	// { OPT_USE_PARTITIONED_LOG, "-p",                 SO_NONE },
-	{ OPT_USE_PARTITIONED_LOG, "--partitioned-log-experimental", SO_NONE },
+	{ OPT_MUTATION_LOG_TYPE, "--mutation-log-type", SO_REQ_SEP },
 	{ OPT_SNAPSHOTINTERVAL, "-s", SO_REQ_SEP },
 	{ OPT_SNAPSHOTINTERVAL, "--snapshot-interval", SO_REQ_SEP },
 	{ OPT_INITIAL_SNAPSHOT_INTERVAL, "--initial-snapshot-interval", SO_REQ_SEP },
@@ -283,6 +282,7 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
 	{ OPT_INCREMENTALONLY, "--incremental", SO_NONE },
 	{ OPT_ENCRYPTION_KEY_FILE, "--encryption-key-file", SO_REQ_SEP },
+	{ OPT_ENCRYPTION_BLOCK_SIZE, "--encryption-block-size", SO_REQ_SEP },
 	{ OPT_MODE, "--mode", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
@@ -1113,7 +1113,10 @@ static void printBackupUsage(bool devhelp) {
 	       "                 If not specified, the entire database will be backed up or no filter will be applied.\n");
 	printf("  --keys-file FILE\n"
 	       "                 Same as -k option, except keys are specified in the input file.\n");
-	printf("  --partitioned-log-experimental  Starts with new type of backup system using partitioned logs.\n");
+	printf("  --mutation-log-type TYPE\n"
+	       "                 Specifies the mutation log type. Valid values are: "
+	       "partitioned-log-experimental, range-partitioned-log-experimental.\n"
+	       "If not specified, default log type is used.\n");
 	printf("  -n, --dryrun   For backup start or restore start, performs a trial run with no actual changes made.\n");
 	printf("  --log          Enables trace file logging for the CLI session.\n"
 	       "  --logdir PATH  Specifies the output directory for trace files. If\n"
@@ -1139,6 +1142,9 @@ static void printBackupUsage(bool devhelp) {
 	       "                 For modify operations, need to pass encryption key file only if Backup container URL is "
 	       "changed to "
 	       "re-encrypt all future backup files. \n");
+	printf("  --encryption-block-size"
+	       "                 Block size in bytes for file encryption. Only used with fdbbackup start command. Default "
+	       "is 1048576 (1MB).\n");
 
 	printf(TLS_HELP);
 	printf("  -w, --wait     Wait for the backup to complete (allowed with `start' and `discontinue').\n");
@@ -1487,6 +1493,16 @@ Optional<RestoreMode> getRestoreMode(std::string mode) {
 	if (mode == "bulkload")
 		return RestoreMode::BULKLOAD;
 	return Optional<RestoreMode>();
+}
+
+Optional<MutationLogType> getMutationLogType(std::string type) {
+	std::transform(type.begin(), type.end(), type.begin(), ::tolower);
+
+	if (type == "partitioned-log-experimental")
+		return MutationLogType::PARTITIONED_LOG;
+	if (type == "range-partitioned-log-experimental")
+		return MutationLogType::RANGE_PARTITIONED_LOG;
+	return Optional<MutationLogType>();
 }
 
 RestoreType getRestoreType(std::string name) {
@@ -2029,9 +2045,10 @@ Future<Void> submitBackup(Database db,
                           bool dryRun,
                           WaitForComplete waitForCompletion,
                           StopWhenDone stopWhenDone,
-                          UsePartitionedLog usePartitionedLog,
+                          MutationLogType mutationLogType,
                           IncrementalBackupOnly incrementalBackupOnly,
                           Optional<std::string> encryptionKeyFile,
+                          int encryptionBlockSize,
                           SnapshotMode snapshotMode = SnapshotMode::RANGEFILE) {
 	try {
 		FileBackupAgent backupAgent;
@@ -2083,9 +2100,10 @@ Future<Void> submitBackup(Database db,
 			                                  tagName,
 			                                  backupRanges,
 			                                  stopWhenDone,
-			                                  usePartitionedLog,
+			                                  mutationLogType,
 			                                  incrementalBackupOnly,
 			                                  encryptionKeyFile,
+			                                  encryptionBlockSize,
 			                                  static_cast<int>(snapshotMode));
 
 			// Wait for the backup to complete, if requested
@@ -2336,7 +2354,8 @@ Future<Void> changeDBBackupResumed(Database src, Database dest, bool pause) {
 Reference<IBackupContainer> openBackupContainer(const char* name,
                                                 const std::string& destinationContainer,
                                                 const Optional<std::string>& proxy,
-                                                const Optional<std::string>& encryptionKeyFile) {
+                                                const Optional<std::string>& encryptionKeyFile,
+                                                int encryptionBlockSize = 0) {
 	// Error, if no dest container was specified
 	if (destinationContainer.empty()) {
 		fprintf(stderr, "ERROR: No backup destination was specified.\n");
@@ -2353,7 +2372,7 @@ Reference<IBackupContainer> openBackupContainer(const char* name,
 
 	Reference<IBackupContainer> c;
 	try {
-		c = IBackupContainer::openContainer(destinationContainer, proxy, encryptionKeyFile);
+		c = IBackupContainer::openContainer(destinationContainer, proxy, encryptionKeyFile, encryptionBlockSize);
 	} catch (Error& e) {
 		std::string msg = format("ERROR: '%s' on URL '%s'", e.what(), destinationContainer.c_str());
 		if (e.code() == error_code_backup_invalid_url && !IBackupContainer::lastOpenError.empty()) {
@@ -2422,7 +2441,6 @@ Future<Void> runRestore(Database db,
 
 		Reference<IBackupContainer> bc =
 		    openBackupContainer(exeRestore.toString().c_str(), container, proxy, encryptionKeyFile);
-
 		// If targetVersion is unset then use the maximum restorable version from the backup description
 		if (targetVersion == invalidVersion) {
 			if (verbose)
@@ -2990,7 +3008,7 @@ Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOptions 
 				}
 
 				config.backupContainer().set(tr, bc);
-				co_await bc->writeEncryptionMetadata();
+				co_await bc->writeEncryptionMetadata(bc->getEncryptionBlockSize());
 			} else if (options.encryptionKeyFile.present()) {
 				fprintf(stdout,
 				        " Encryption key file specified without a new destination URL."
@@ -3564,7 +3582,7 @@ int main(int argc, char* argv[]) {
 		std::string restoreTimestamp;
 		WaitForComplete waitForDone{ false };
 		StopWhenDone stopWhenDone{ true };
-		UsePartitionedLog usePartitionedLog{ false }; // Set to true to use new backup system
+		MutationLogType mutationLogType{ MutationLogType::DEFAULT };
 		IncrementalBackupOnly incrementalBackupOnly{ false };
 		OnlyApplyMutationLogs onlyApplyMutationLogs{ false };
 		InconsistentSnapshotOnly inconsistentSnapshotOnly{ false };
@@ -3595,6 +3613,7 @@ int main(int argc, char* argv[]) {
 		bool jsonOutput = false;
 		DeleteData deleteData{ false };
 		Optional<std::string> encryptionKeyFile;
+		int encryptionBlockSize = 0;
 		Optional<std::string> blobManifestUrl;
 		SnapshotMode snapshotMode = SnapshotMode::RANGEFILE; // Default to legacy rangefile mode
 
@@ -3847,9 +3866,18 @@ int main(int argc, char* argv[]) {
 			case OPT_NOSTOPWHENDONE:
 				stopWhenDone.set(false);
 				break;
-			case OPT_USE_PARTITIONED_LOG:
-				usePartitionedLog.set(true);
+			case OPT_MUTATION_LOG_TYPE: {
+				auto parsedType = getMutationLogType(args->OptionArg());
+				if (!parsedType.present()) {
+					fprintf(stderr,
+					        "ERROR: Unknown mutation log type '%s'. Valid modes are: partitioned-log-experimental, "
+					        "range-partitioned-log-experimental\n",
+					        args->OptionArg());
+					return FDB_EXIT_ERROR;
+				}
+				mutationLogType = parsedType.get();
 				break;
+			}
 			case OPT_INCREMENTALONLY:
 				incrementalBackupOnly.set(true);
 				onlyApplyMutationLogs.set(true);
@@ -3857,6 +3885,20 @@ int main(int argc, char* argv[]) {
 			case OPT_ENCRYPTION_KEY_FILE:
 				encryptionKeyFile = args->OptionArg();
 				modifyOptions.encryptionKeyFile = encryptionKeyFile;
+				break;
+			case OPT_ENCRYPTION_BLOCK_SIZE:
+				try {
+					encryptionBlockSize = std::stoi(args->OptionArg());
+				} catch (std::exception&) {
+					fprintf(stderr, "ERROR: Invalid encryption block size `%s'\n", args->OptionArg());
+					printHelpTeaser(newArgV[0]);
+					return FDB_EXIT_ERROR;
+				}
+				if (encryptionBlockSize <= 0) {
+					fprintf(stderr, "ERROR: Invalid encryption block size `%s'\n", args->OptionArg());
+					printHelpTeaser(newArgV[0]);
+					return FDB_EXIT_ERROR;
+				}
 				break;
 			case OPT_RESTORECONTAINER:
 				restoreContainer = args->OptionArg();
@@ -4228,6 +4270,15 @@ int main(int argc, char* argv[]) {
 			return result.present();
 		};
 
+		if (encryptionKeyFile.present() && encryptionBlockSize == 0) {
+			encryptionBlockSize = DEFAULT_ENCRYPTION_BLOCK_SIZE;
+		}
+
+		if (encryptionBlockSize > 0 && !encryptionKeyFile.present()) {
+			fprintf(stderr, "ERROR: --encryption-block-size option requires --encryption-key-file to be set\n");
+			return FDB_EXIT_ERROR;
+		}
+
 		if (!restoreSystemKeys && !restoreUserKeys && backupKeys.empty()) {
 			addDefaultBackupRanges(backupKeys);
 		}
@@ -4260,7 +4311,7 @@ int main(int argc, char* argv[]) {
 					return FDB_EXIT_ERROR;
 				// Test out the backup url to make sure it parses.  Doesn't test to make sure it's actually
 				// writeable.
-				openBackupContainer(newArgV[0], destinationContainer, proxy, encryptionKeyFile);
+				openBackupContainer(newArgV[0], destinationContainer, proxy, encryptionKeyFile, encryptionBlockSize);
 				f = stopAfter(submitBackup(db,
 				                           destinationContainer,
 				                           proxy,
@@ -4271,9 +4322,10 @@ int main(int argc, char* argv[]) {
 				                           dryRun,
 				                           waitForDone,
 				                           stopWhenDone,
-				                           usePartitionedLog,
+				                           mutationLogType,
 				                           incrementalBackupOnly,
 				                           encryptionKeyFile,
+				                           encryptionBlockSize,
 				                           snapshotMode));
 				break;
 			}

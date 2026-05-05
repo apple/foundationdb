@@ -106,7 +106,7 @@ When in-memory data exceeds `targetVolatileBytes`:
 
 Abstraction over the set of TLog replicas.
 
-### LogSystem Interface -- [`LogSystem.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/logsystem/include/fdbserver/logsystem/LogSystem.h)`:57-347`
+### LogSystem Interface -- [`LogSystem.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/logsystem/include/fdbserver/logsystem/LogSystem.h)`:260-601`
 
 **Core methods:**
 

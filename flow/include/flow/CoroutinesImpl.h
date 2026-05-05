@@ -389,19 +389,22 @@ public:
 
 template <class U>
 struct AwaitableFutureStore {
-	std::variant<Error, U> data;
+	std::variant<std::monostate, Error, U> data;
 
-	constexpr bool isSet() const noexcept { return data.index() != 0 || std::get<0>(data).isValid(); }
+	constexpr bool isSet() const noexcept { return data.index() != 0; }
 	void copy(U v) { data = std::move(v); }
 	void set(U&& v) { data = std::move(v); }
 	void set(U const& v) { data = v; }
+	void setError(Error error) { data = std::move(error); }
 
 	const U& getRef() const {
 		switch (data.index()) {
 		case 0:
-			throw std::get<0>(data);
+			throw internal_error();
 		case 1:
-			return std::get<1>(data);
+			throw std::get<1>(data);
+		case 2:
+			return std::get<2>(data);
 		}
 		UNREACHABLE();
 	}
@@ -409,9 +412,11 @@ struct AwaitableFutureStore {
 	U&& get() && {
 		switch (data.index()) {
 		case 0:
-			throw std::get<0>(data);
+			throw internal_error();
 		case 1:
-			return std::get<1>(std::move(data));
+			throw std::get<1>(data);
+		case 2:
+			return std::get<2>(std::move(data));
 		}
 		UNREACHABLE();
 	}
@@ -478,7 +483,9 @@ struct AwaitableAsyncResult : AwaitCancelHandler {
 	void await_resume()
 	    requires(std::is_void_v<ValueType>)
 	{
-		resumeImpl();
+		if (pt->waitState() != ACTOR_WAIT_STATE_NOT_WAITING) {
+			resumeImpl();
+		}
 		if (result.resultState->isError()) {
 			throw result.resultState->getError();
 		}
@@ -487,7 +494,9 @@ struct AwaitableAsyncResult : AwaitCancelHandler {
 	ValueType await_resume()
 	    requires(!std::is_void_v<ValueType>)
 	{
-		resumeImpl();
+		if (pt->waitState() != ACTOR_WAIT_STATE_NOT_WAITING) {
+			resumeImpl();
+		}
 		if (result.resultState->isError()) {
 			throw result.resultState->getError();
 		}
@@ -505,7 +514,9 @@ template <class Awaiter>
 struct AwaitableResume<Awaiter, Void, /* IsStream = */ false, /* ReturnsExplicitVoid = */ false> {
 	[[maybe_unused]] void await_resume() {
 		auto self = static_cast<Awaiter*>(this);
-		self->resumeImpl();
+		if (self->pt->waitState() != ACTOR_WAIT_STATE_NOT_WAITING) {
+			self->resumeImpl();
+		}
 		if (self->future.isError()) {
 			throw self->future.getError();
 		}
@@ -516,7 +527,9 @@ template <class Awaiter, class ValueType>
 struct AwaitableResume<Awaiter, ValueType, /* IsStream = */ false, /* ReturnsExplicitVoid = */ false> {
 	ValueType const& await_resume() {
 		auto self = static_cast<Awaiter*>(this);
-		self->resumeImpl();
+		if (self->pt->waitState() != ACTOR_WAIT_STATE_NOT_WAITING) {
+			self->resumeImpl();
+		}
 		if (self->future.isError()) {
 			throw self->future.getError();
 		}
@@ -532,7 +545,9 @@ template <class Awaiter>
 struct AwaitableResume<Awaiter, Void, /* IsStream = */ false, /* ReturnsExplicitVoid = */ true> {
 	[[maybe_unused]] ExplicitVoid await_resume() {
 		auto self = static_cast<Awaiter*>(this);
-		self->resumeImpl();
+		if (self->pt->waitState() != ACTOR_WAIT_STATE_NOT_WAITING) {
+			self->resumeImpl();
+		}
 		if (self->future.isError()) {
 			throw self->future.getError();
 		}
@@ -544,6 +559,12 @@ template <class Awaiter, class ValueType>
 struct AwaitableResume<Awaiter, ValueType, /* IsStream = */ true, /* ReturnsExplicitVoid = */ false> {
 	ValueType await_resume() {
 		auto self = static_cast<Awaiter*>(this);
+		if (self->pt->waitState() == ACTOR_WAIT_STATE_NOT_WAITING) {
+			if (self->future.isError()) {
+				throw self->future.getError();
+			}
+			return self->future.pop();
+		}
 		if (self->resumeImpl()) {
 			if (self->future.isError()) {
 				throw self->future.getError();
@@ -594,7 +615,7 @@ struct AwaitableFuture
 
 	void error(Error error) override {
 		if constexpr (IsStream) {
-			store.data = error;
+			store.setError(error);
 		}
 		pt->resume();
 	}
@@ -710,7 +731,9 @@ struct AwaitableFutureIgnore : AwaitableFutureOwning<PromiseType, ValueType> {
 
 	Void await_resume() {
 		auto self = static_cast<Base*>(this);
-		self->resumeImpl();
+		if (self->pt->waitState() != ACTOR_WAIT_STATE_NOT_WAITING) {
+			self->resumeImpl();
+		}
 		// Preserve normal Future<T> error propagation while discarding any
 		// successful T payload.
 		if (self->future.isError()) {
@@ -729,7 +752,9 @@ struct AwaitableFutureErrorOr : AwaitableFutureOwning<PromiseType, SourceValue> 
 
 	ResultType await_resume() {
 		auto self = static_cast<Base*>(this);
-		self->resumeImpl();
+		if (self->pt->waitState() != ACTOR_WAIT_STATE_NOT_WAITING) {
+			self->resumeImpl();
+		}
 		// Convert failed Future<T> awaits into ErrorOr instead of throwing so
 		// callers can cheaply observe completion-only state.
 		if (self->future.isError()) {
@@ -770,7 +795,7 @@ struct ThreadAwaitableFutureStream
 	}
 
 	void error(Error error) override {
-		store.data = error;
+		store.setError(error);
 		pt->resume();
 	}
 

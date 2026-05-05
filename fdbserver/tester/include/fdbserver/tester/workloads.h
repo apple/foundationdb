@@ -24,6 +24,7 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/DatabaseContext.h" // for clone()
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/WorkloadKeys.h"
 

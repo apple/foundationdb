@@ -187,15 +187,15 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	{ "simBackupAgents",
 	  [](const std::string& value, TestSpec* spec) {
 	      if (value == "BackupToFile" || value == "BackupToFileAndDB")
-		      spec->simBackupAgents = ISimulator::BackupAgentType::BackupToFile;
+		      spec->simBackupAgents = FDBBackupAgentType::BackupToFile;
 	      else
-		      spec->simBackupAgents = ISimulator::BackupAgentType::NoBackupAgents;
+		      spec->simBackupAgents = FDBBackupAgentType::NoBackupAgents;
 	      TraceEvent("TestParserTest").detail("ParsedSimBackupAgents", spec->simBackupAgents);
 
 	      if (value == "BackupToDB" || value == "BackupToFileAndDB")
-		      spec->simDrAgents = ISimulator::BackupAgentType::BackupToDB;
+		      spec->simDrAgents = FDBBackupAgentType::BackupToDB;
 	      else
-		      spec->simDrAgents = ISimulator::BackupAgentType::NoBackupAgents;
+		      spec->simDrAgents = FDBBackupAgentType::NoBackupAgents;
 	      TraceEvent("TestParserTest").detail("ParsedSimDrAgents", spec->simDrAgents);
 	  } },
 	{ "checkOnly",

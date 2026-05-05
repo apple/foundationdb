@@ -38,14 +38,14 @@ struct BackupWorkload : TestWorkload {
 	bool differentialBackup;
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
 	LockDB locked{ false };
-	UsePartitionedLog usePartitionedLog{ true };
+	MutationLogType mutationLogType{ MutationLogType::PARTITIONED_LOG };
 	bool allowPauses;
 	Optional<std::string> encryptionKeyFileName;
 
 	BackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		locked.set(sharedRandomNumber % 2);
-		bool partitioned = getOption(options, "usePartitionedLog"_sr, true);
-		usePartitionedLog.set(partitioned);
+		mutationLogType = static_cast<MutationLogType>(
+		    getOption(options, "mutationLogType"_sr, static_cast<int>(MutationLogType::PARTITIONED_LOG)));
 		backupAfter = getOption(options, "backupAfter"_sr, 10.0);
 		double minBackupAfter = getOption(options, "minBackupAfter"_sr, backupAfter);
 		if (backupAfter > minBackupAfter) {
@@ -176,9 +176,11 @@ struct BackupWorkload : TestWorkload {
 			                                   tag.toString(),
 			                                   backupRanges,
 			                                   StopWhenDone{ !stopDifferentialDelay },
-			                                   usePartitionedLog,
+			                                   mutationLogType,
 			                                   IncrementalBackupOnly::False,
-			                                   encryptionKeyFileName);
+			                                   encryptionKeyFileName,
+			                                   encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0,
+			                                   /*snapshotMode=*/0);
 		} catch (Error& e) {
 			TraceEvent("BW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
@@ -342,7 +344,7 @@ struct BackupWorkload : TestWorkload {
 			co_await startRestore;
 
 			// We can't remove after backup agents since the restore also needs them.
-			// I.e., g_simulator->backupAgents = ISimulator::BackupAgentType::NoBackupAgents
+			// I.e., fdbSimulationPolicyState().backupAgents = FDBBackupAgentType::NoBackupAgents
 		} catch (Error& e) {
 			TraceEvent(SevError, "BackupCorrectness").error(e).GetLastError();
 			throw;

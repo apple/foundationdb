@@ -23,54 +23,55 @@
 #include "fdbserver/core/CoordinationInterface.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbclient/MonitorLeader.h"
+#include "flow/CoroUtils.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // Keep trying to become a leader by submitting itself to all coordinators.
 // Monitor the health of all coordinators at the same time.
-ACTOR Future<Void> submitCandidacy(Key key,
-                                   LeaderElectionRegInterface coord,
-                                   LeaderInfo myInfo,
-                                   UID prevChangeID,
-                                   AsyncTrigger* nomineeChange,
-                                   Optional<LeaderInfo>* nominee) {
-	loop {
-		state Optional<LeaderInfo> li;
+Future<Void> submitCandidacy(Key key,
+                             LeaderElectionRegInterface coord,
+                             LeaderInfo myInfo,
+                             UID prevChangeID,
+                             AsyncTrigger* nomineeChange,
+                             Optional<LeaderInfo>* nominee) {
+	while (true) {
+		Optional<LeaderInfo> li;
 		if (coord.hostname.present()) {
-			wait(store(
+			co_await store(
 			    li,
 			    retryGetReplyFromHostname(
 			        CandidacyRequest(key, myInfo, nominee->present() ? nominee->get().changeID : UID(), prevChangeID),
 			        coord.hostname.get(),
 			        WLTOKEN_LEADERELECTIONREG_CANDIDACY,
-			        TaskPriority::CoordinationReply)));
+			        TaskPriority::CoordinationReply));
 		} else {
-			wait(store(
+			co_await store(
 			    li,
 			    retryBrokenPromise(
 			        coord.candidacy,
 			        CandidacyRequest(key, myInfo, nominee->present() ? nominee->get().changeID : UID(), prevChangeID),
-			        TaskPriority::CoordinationReply)));
+			        TaskPriority::CoordinationReply));
 		}
 
-		wait(Future<Void>(Void())); // Make sure we weren't cancelled
+		co_await Future<Void>(Void()); // Make sure we weren't cancelled
 
 		if (li != *nominee) {
 			*nominee = li;
 			nomineeChange->trigger();
 
 			if (li.present() && li.get().forward)
-				wait(Future<Void>(Never()));
+				co_await Future<Void>(Never());
 		}
 	}
 }
 
-ACTOR template <class T>
+template <class T>
 Future<Void> buggifyDelayedAsyncVar(Reference<AsyncVar<T>> in, Reference<AsyncVar<T>> out) {
 	try {
-		loop {
-			wait(delay(SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * deterministicRandom()->random01()));
+		while (true) {
+			co_await delay(SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * deterministicRandom()->random01());
 			out->set(in->get());
-			wait(in->onChange());
+			co_await in->onChange();
 		}
 	} catch (Error& e) {
 		out->set(in->get());
@@ -86,7 +87,9 @@ Future<Void> buggifyDelayedAsyncVar(Reference<AsyncVar<T>>& var) {
 	return f;
 }
 
-ACTOR Future<Void> changeLeaderCoordinators(ServerCoordinators coordinators, Value forwardingInfo) {
+namespace {
+
+Future<Void> changeLeaderCoordinatorsImpl(ServerCoordinators coordinators, Value forwardingInfo) {
 	std::vector<Future<Void>> forwardRequests;
 	forwardRequests.reserve(coordinators.leaderElectionServers.size());
 	for (int i = 0; i < coordinators.leaderElectionServers.size(); i++) {
@@ -100,8 +103,13 @@ ACTOR Future<Void> changeLeaderCoordinators(ServerCoordinators coordinators, Val
 		}
 	}
 	int quorum_size = forwardRequests.size() / 2 + 1;
-	wait(quorum(forwardRequests, quorum_size));
-	return Void();
+	co_await quorum(forwardRequests, quorum_size);
+}
+
+} // namespace
+
+Future<Void> changeLeaderCoordinators(ServerCoordinators const& coordinators, Value const& forwardingInfo) {
+	return changeLeaderCoordinatorsImpl(coordinators, forwardingInfo);
 }
 
 ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,

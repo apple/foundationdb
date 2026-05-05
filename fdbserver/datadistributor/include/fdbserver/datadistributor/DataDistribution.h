@@ -24,6 +24,7 @@
 
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/core/DataDistributorInterface.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/DataMovement.h"
@@ -141,13 +142,13 @@ struct RelocateShard {
 	void setParentRange(KeyRange const& parent);
 	Optional<KeyRange> getParentRange() const;
 
-private:
-	// If this rs comes from a splitting, parent range is the original range.
-	Optional<KeyRange> parent_range;
-
 	RelocateShard()
 	  : priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::OTHER),
 	    moveReason(DataMovementReason::INVALID) {}
+
+private:
+	// If this rs comes from a splitting, parent range is the original range.
+	Optional<KeyRange> parent_range;
 };
 
 struct GetMetricsRequest {
@@ -748,7 +749,10 @@ class DDTeamCollection;
 
 struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	static constexpr double MIN_ON_CHECK_DELAY_SEC = 5.0;
-	enum State : uint8_t { INVALID = 0, RUN = 1, PAUSE = 2 };
+	using State = StorageWigglerState::Value;
+	static constexpr State INVALID = StorageWigglerState::INVALID;
+	static constexpr State RUN = StorageWigglerState::RUN;
+	static constexpr State PAUSE = StorageWigglerState::PAUSE;
 
 	DDTeamCollection const* teamCollection;
 	StorageWiggleData wiggleData; // the wiggle related data persistent in database
@@ -762,7 +766,7 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	    wiggle_pq;
 	std::unordered_map<UID, decltype(wiggle_pq)::handle_type> pq_handles;
 
-	State wiggleState = State::INVALID;
+	State wiggleState = INVALID;
 	double lastStateChangeTs = 0.0; // timestamp describes when did the state change
 
 	explicit StorageWiggler(DDTeamCollection* collection) : teamCollection(collection), stopWiggleSignal(true) {};
@@ -792,16 +796,7 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 			lastStateChangeTs = g_network->now();
 		}
 	}
-	static std::string getWiggleStateStr(State s) {
-		switch (s) {
-		case State::RUN:
-			return "running";
-		case State::PAUSE:
-			return "paused";
-		default:
-			return "unknown";
-		}
-	}
+	static std::string getWiggleStateStr(State s) { return StorageWigglerState::toString(s); }
 
 	// -- statistic update
 

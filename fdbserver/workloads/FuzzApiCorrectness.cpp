@@ -37,7 +37,7 @@
 
 namespace ph = std::placeholders;
 
-// FIXME(gglass): figure out what this test is actually tring to test, and
+// FIXME(gglass): figure out what this test is actually trying to test, and
 // restructure it to be useful in a post-tenant world.  For now leave the
 // tenant crap in so that the distribution of keys/values generated is
 // actually sane.  An earlier attempt at removing the tenant stuff caused
@@ -49,12 +49,10 @@ namespace ph = std::placeholders;
 // Putting back some tenant crap so that this test works
 using TenantNameRef = StringRef;
 using TenantName = Standalone<TenantNameRef>;
-using TenantGroupNameRef = StringRef;
-using TenantGroupName = Standalone<TenantGroupNameRef>;
 
 // This allows us to dictate which exceptions we SHOULD get.
 // We can use this to suppress expected exceptions, and take action
-// if we don't get an exception wqe should have gotten.
+// if we don't get an exception we should have gotten.
 struct ExceptionContract {
 	enum occurance_t { Never = 0, Possible = 1, Always = 2 };
 
@@ -147,7 +145,6 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 	std::set<TenantName> createdTenants;
 	int numTenants;
-	int numTenantGroups;
 	int minTenantNum = -1;
 
 	// Map from tenant number to key prefix
@@ -170,7 +167,6 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		specialKeysWritesEnabled = useSystemKeys && deterministicRandom()->coinflip();
 
 		numTenants = 0;
-		numTenantGroups = 0;
 
 		// See https://github.com/apple/foundationdb/issues/2424
 		if (BUGGIFY) {
@@ -223,14 +219,6 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	}
 
 	static TenantName getTenant(int num) { return TenantNameRef(format("tenant_%d", num)); }
-	Optional<TenantGroupName> getTenantGroup(int num) {
-		int groupNum = num % (numTenantGroups + 1);
-		if (groupNum == numTenantGroups - 1) {
-			return Optional<TenantGroupName>();
-		} else {
-			return TenantGroupNameRef(format("tenantgroup_%d", groupNum));
-		}
-	}
 	bool canUseTenant(Optional<TenantName> tenant) {
 		return !tenant.present() || createdTenants.contains(tenant.get());
 	}

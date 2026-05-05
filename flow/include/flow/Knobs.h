@@ -214,7 +214,6 @@ public:
 	int64_t SIM_PAGE_CACHE_64K;
 	int64_t BUGGIFY_SIM_PAGE_CACHE_4K;
 	int64_t BUGGIFY_SIM_PAGE_CACHE_64K;
-	int64_t BLOB_WORKER_PAGE_CACHE;
 	std::string CACHE_EVICTION_POLICY; // for now, "random", "lru", are supported
 	int MAX_EVICT_ATTEMPTS;
 	double PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION;
@@ -226,9 +225,6 @@ public:
 	// AsyncFileEIO
 	int EIO_MAX_PARALLELISM;
 	int EIO_USE_ODIRECT;
-
-	// AsyncFileEncrypted
-	int ENCRYPTION_BLOCK_SIZE;
 
 	// AsyncFileKAIO
 	int MAX_OUTSTANDING;
