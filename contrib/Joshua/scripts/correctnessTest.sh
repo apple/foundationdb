@@ -99,6 +99,10 @@
 #                                Maps to: --long-running
 #                                Values: true/false (default: false)
 #
+# TH_DISABLE_CODE_PROBES        Disable code probe collection and ensemble coverage checks
+#                                Maps to: --disable-code-probes
+#                                Values: true/false (default: false)
+#
 # TH_RANDOM_SEED                Force specific random seed for debugging
 #                                Maps to: --random-seed
 #                                Default: auto-generated

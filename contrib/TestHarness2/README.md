@@ -76,6 +76,7 @@ TestHarness2 supports environment variables for configuration. Most variables fo
 - **`TH_BUGGIFY`**: Buggify mode (`on`, `off`, or `random`, default: `random`)
 - **`TH_USE_VALGRIND`**: Run tests under valgrind (`true`/`false`, default: `false`)
 - **`TH_LONG_RUNNING`**: Enable long-running test mode (`true`/`false`, default: `false`)
+- **`TH_DISABLE_CODE_PROBES`**: Disable code probe collection and ensemble coverage checks (`true`/`false`, default: `false`)
 - **`TH_FDBSERVER_MEMORY`**: Pass `--memory SIZE` to `fdbserver` (for example `12288MiB`)
 
 **Optional Configuration:**
