@@ -263,9 +263,8 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 				continue; // Skip to the next shard
 			}
 
-			// Step 2: Get server interfaces. The source team remains canonical until relocation commits because the
-			// move can still be cancelled while it is in progress.
-			std::vector<UID> storageServers = sourceStorageServers;
+			// Step 2: Get server interfaces
+			std::vector<UID> storageServers = sourceStorageServers; // We check source server
 			std::vector<StorageServerInterface> storageServerInterfaces;
 			retryCount = 0;
 			while (true) {
