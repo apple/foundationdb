@@ -1,5 +1,5 @@
 /*
- * TLogServer.actor.cpp
+ * TLogServer.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -35,7 +35,7 @@
 #include "fdbserver/core/SpanContextMessage.h"
 #include "fdbserver/core/TLogInterface.h"
 #include "fdbserver/core/WaitFailure.h"
-#include "fdbserver/tlog/TLogServer.actor.h"
+#include "fdbserver/tlog/TLogServer.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/FailureMonitor.h"
