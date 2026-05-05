@@ -2439,8 +2439,10 @@ Future<Void> runRestore(Database db,
 	try {
 		FileBackupAgent backupAgent;
 
-		Reference<IBackupContainer> bc =
-		    openBackupContainer(exeRestore.toString().c_str(), container, proxy, encryptionKeyFile, 0);
+		// encryptionBlockSize is passed 0 because we don't know about the block size yet and it will be read in the
+		// describeBackup call after this.
+		Reference<IBackupContainer> bc = openBackupContainer(
+		    exeRestore.toString().c_str(), container, proxy, encryptionKeyFile, /*encryptionBlockSize=*/0);
 		// If targetVersion is unset then use the maximum restorable version from the backup description
 		if (targetVersion == invalidVersion) {
 			if (verbose)
@@ -2993,8 +2995,11 @@ Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOptions 
 				    .detail("DestURL", options.destURL.get())
 				    .detail("EncryptionKeyFile",
 				            options.encryptionKeyFile.present() ? options.encryptionKeyFile.get() : "None");
-				bc = openBackupContainer(
-				    exeBackup.toString().c_str(), options.destURL.get(), options.proxy, options.encryptionKeyFile, 0);
+				bc = openBackupContainer(exeBackup.toString().c_str(),
+				                         options.destURL.get(),
+				                         options.proxy,
+				                         options.encryptionKeyFile,
+				                         prevContainer->getEncryptionBlockSize());
 				try {
 					co_await timeoutError(bc->create(), 30);
 				} catch (Error& e) {
@@ -3006,7 +3011,6 @@ Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOptions 
 					        e.what());
 					throw backup_error();
 				}
-
 				config.backupContainer().set(tr, bc);
 				co_await bc->writeEncryptionMetadata(bc->getEncryptionBlockSize());
 			} else if (options.encryptionKeyFile.present()) {
