@@ -179,6 +179,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/LocalRatekeeper.toml)
   add_fdb_test(TEST_FILES fast/LongStackWriteDuringRead.toml)
   add_fdb_test(TEST_FILES fast/LowLatency.toml)
+  add_fdb_test(TEST_FILES fast/MaxGrvQueueDelay.toml)
 
   # TODO: Fix failures and re-enable this test:
   add_fdb_test(TEST_FILES fast/LowLatencySingleClog.toml IGNORE)

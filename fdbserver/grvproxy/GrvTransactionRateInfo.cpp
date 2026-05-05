@@ -34,6 +34,18 @@ bool GrvTransactionRateInfo::canStart(int64_t numAlreadyStarted, int64_t count) 
 	       std::min(limit + budget, SERVER_KNOBS->START_TRANSACTION_MAX_TRANSACTIONS_TO_START);
 }
 
+double GrvTransactionRateInfo::estimateDelay(int64_t numAlreadyStarted, int64_t count) const {
+	if (canStart(numAlreadyStarted, count) || disabled) {
+		return 0.0;
+	}
+	if (rate <= 0.0) {
+		return std::numeric_limits<double>::infinity();
+	}
+	double capacity = std::min(limit + budget, double(SERVER_KNOBS->START_TRANSACTION_MAX_TRANSACTIONS_TO_START));
+	double deficit = numAlreadyStarted + count - capacity;
+	return std::max(0.0, deficit / rate);
+}
+
 void GrvTransactionRateInfo::endReleaseWindow(int64_t numStarted, bool queueEmpty, double elapsed) {
 	// Update the budget to accumulate any extra capacity available or remove any excess that was used.
 	// The actual delta is the portion of the limit we didn't use multiplied by the fraction of the rate window that

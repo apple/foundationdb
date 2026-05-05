@@ -1,4 +1,6 @@
 [configuration]
+# FIXME: remove after bulkloading with fetchKey supports shardedrocksdb
+storageEngineExcludeTypes = [5]
 
 [[test]]
 testTitle = 'PreLoad'
