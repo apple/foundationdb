@@ -653,19 +653,16 @@ struct RequestData : NonCopyable {
 // interfaces. If too many interfaces in the same DC are bad, try remote interfaces.
 // If compareReplicas is set, does a consistency check by fetching and comparing results from storage
 // replicas (as many as specified by "requiredReplicas") and throws an exception if an inconsistency is found.
-// FIXME: reformat this minus the long inline comment about one parameter, so that the indentation of
-// the parameters is more to the right and not confusingly lined up with the code of this function.
 ACTOR template <class Interface, class Request, class Multi, bool P>
-Future<REPLY_TYPE(Request)> loadBalance(
-    Reference<MultiInterface<Multi>> alternatives,
-    RequestStream<Request, P> Interface::* channel,
-    Request request = Request(),
-    TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
-    AtMostOnce atMostOnce =
-        AtMostOnce::False, // if true, throws request_maybe_delivered() instead of retrying automatically
-    QueueModel* model = nullptr,
-    bool compareReplicas = false,
-    int requiredReplicas = 0) {
+Future<REPLY_TYPE(Request)> loadBalance(Reference<MultiInterface<Multi>> alternatives,
+                                        RequestStream<Request, P> Interface::* channel,
+                                        Request request = Request(),
+                                        TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
+                                        // If true, throws request_maybe_delivered() instead of retrying automatically.
+                                        AtMostOnce atMostOnce = AtMostOnce::False,
+                                        QueueModel* model = nullptr,
+                                        bool compareReplicas = false,
+                                        int requiredReplicas = 0) {
 
 	state RequestData<Request, Interface, Multi, P> firstRequestData(compareReplicas);
 	state RequestData<Request, Interface, Multi, P> secondRequestData(compareReplicas);
