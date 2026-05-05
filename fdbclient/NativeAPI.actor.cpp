@@ -1138,18 +1138,18 @@ Future<Optional<std::vector<StorageServerInterface>>> transactionalGetServerInte
     std::vector<UID> ids) {
 	std::vector<Future<Optional<StorageServerInterface>>> serverListEntries;
 	serverListEntries.reserve(ids.size());
-	for (int s = 0; s < ids.size(); s++) {
-		serverListEntries.push_back(fetchServerInterface(trState, ids[s]));
+	for (const auto& id : ids) {
+		serverListEntries.push_back(fetchServerInterface(trState, id));
 	}
 
 	std::vector<Optional<StorageServerInterface>> serverListValues = co_await getAll(serverListEntries);
 	std::vector<StorageServerInterface> serverInterfaces;
-	for (int s = 0; s < serverListValues.size(); s++) {
-		if (!serverListValues[s].present()) {
+	for (const auto& serverListValue : serverListValues) {
+		if (!serverListValue.present()) {
 			// A storage server has been removed from ServerList since we read keyServers
 			co_return Optional<std::vector<StorageServerInterface>>();
 		}
-		serverInterfaces.push_back(serverListValues[s].get());
+		serverInterfaces.push_back(serverListValue.get());
 	}
 	co_return serverInterfaces;
 }
@@ -4109,11 +4109,11 @@ Future<Void> checkWrites(Uncancellable,
 	auto& mutations = req.transaction.mutations;
 	const int mCount = mutations.size(); // debugging info for traceEvent
 
-	for (int idx = 0; idx < mutations.size(); ++idx) {
-		if (mutations[idx].type == MutationRef::SetValue)
-			expectedValues.insert(singleKeyRange(mutations[idx].param1), MutationBlock(mutations[idx].param2));
-		else if (mutations[idx].type == MutationRef::ClearRange)
-			expectedValues.insert(KeyRangeRef(mutations[idx].param1, mutations[idx].param2), MutationBlock(true));
+	for (const auto& mutation : mutations) {
+		if (mutation.type == MutationRef::SetValue)
+			expectedValues.insert(singleKeyRange(mutation.param1), MutationBlock(mutation.param2));
+		else if (mutation.type == MutationRef::ClearRange)
+			expectedValues.insert(KeyRangeRef(mutation.param1, mutation.param2), MutationBlock(true));
 	}
 
 	try {
@@ -4613,11 +4613,10 @@ Future<Void> Transaction::commitMutations() {
 		}
 
 		bool isCheckingWrites = trState->options.checkWritesEnabled && deterministicRandom()->random01() < 0.01;
-		for (int i = 0; i < extraConflictRanges.size(); i++)
-			if (extraConflictRanges[i].isReady() &&
-			    extraConflictRanges[i].get().first < extraConflictRanges[i].get().second)
+		for (const auto& extraConflictRange : extraConflictRanges)
+			if (extraConflictRange.isReady() && extraConflictRange.get().first < extraConflictRange.get().second)
 				tr.transaction.read_conflict_ranges.emplace_back(
-				    tr.arena, extraConflictRanges[i].get().first, extraConflictRanges[i].get().second);
+				    tr.arena, extraConflictRange.get().first, extraConflictRange.get().second);
 
 		if (tr.idempotencyId.valid()) {
 			// We need to be able confirm that this transaction is no longer in
@@ -6585,14 +6584,14 @@ Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> excl
 	ClientCoordinators coordinatorList(cx->getConnectionRecord());
 	std::vector<Future<Optional<LeaderInfo>>> leaderServers;
 	leaderServers.reserve(coordinatorList.clientLeaderServers.size());
-	for (int i = 0; i < coordinatorList.clientLeaderServers.size(); ++i) {
-		if (coordinatorList.clientLeaderServers[i].hostname.present()) {
+	for (const auto& clientLeaderServer : coordinatorList.clientLeaderServers) {
+		if (clientLeaderServer.hostname.present()) {
 			leaderServers.push_back(retryGetReplyFromHostname(GetLeaderRequest(coordinatorList.clusterKey, UID()),
-			                                                  coordinatorList.clientLeaderServers[i].hostname.get(),
+			                                                  clientLeaderServer.hostname.get(),
 			                                                  WLTOKEN_CLIENTLEADERREG_GETLEADER,
 			                                                  TaskPriority::CoordinationReply));
 		} else {
-			leaderServers.push_back(retryBrokenPromise(coordinatorList.clientLeaderServers[i].getLeader,
+			leaderServers.push_back(retryBrokenPromise(clientLeaderServer.getLeader,
 			                                           GetLeaderRequest(coordinatorList.clusterKey, UID()),
 			                                           TaskPriority::CoordinationReply));
 		}
@@ -6797,12 +6796,12 @@ Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerLi
 	ASSERT(!serverList.get().more && serverList.get().size() < CLIENT_KNOBS->TOO_MANY);
 
 	std::map<Optional<Standalone<StringRef>>, ProcessData> id_data;
-	for (int i = 0; i < workers.get().size(); i++)
-		id_data[workers.get()[i].locality.processId()] = workers.get()[i];
+	for (const auto& worker : workers.get())
+		id_data[worker.locality.processId()] = worker;
 
 	std::vector<std::pair<StorageServerInterface, ProcessClass>> results;
-	for (int i = 0; i < serverList.get().size(); i++) {
-		auto ssi = decodeServerListValue(serverList.get()[i].value);
+	for (const auto& server : serverList.get()) {
+		auto ssi = decodeServerListValue(server.value);
 		results.emplace_back(ssi, id_data[ssi.locality.processId()].processClass);
 	}
 

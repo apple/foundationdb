@@ -2857,28 +2857,23 @@ THREAD_FUNC cancel(void* arg) {
 }
 
 Future<Void> checkUndestroyedFutures(std::vector<ThreadSingleAssignmentVar<int>*> undestroyed) {
-	ThreadSingleAssignmentVar<int>* f;
 	double start = now();
 
-	for (int fNum = 0; fNum < undestroyed.size(); ++fNum) {
-		f = undestroyed[fNum];
-
-		while (!f->isReady() && start + 5 >= now()) {
+	for (auto* undestroyedFuture : undestroyed) {
+		while (!undestroyedFuture->isReady() && start + 5 >= now()) {
 			co_await delay(1.0);
 		}
 
-		ASSERT(f->isReady());
+		ASSERT(undestroyedFuture->isReady());
 	}
 
 	co_await delay(1.0);
 
-	for (int fNum = 0; fNum < undestroyed.size(); ++fNum) {
-		f = undestroyed[fNum];
+	for (auto* undestroyedFuture : undestroyed) {
+		ASSERT_EQ(undestroyedFuture->debugGetReferenceCount(), 1);
+		ASSERT(undestroyedFuture->isReady());
 
-		ASSERT_EQ(f->debugGetReferenceCount(), 1);
-		ASSERT(f->isReady());
-
-		f->cancel();
+		undestroyedFuture->cancel();
 	}
 }
 
