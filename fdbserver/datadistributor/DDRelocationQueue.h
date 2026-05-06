@@ -254,9 +254,16 @@ public:
 
 	int activeRelocations;
 	int queuedRelocations;
+	int pendingGateRelocations; // forwarded by pipelineGateActor but not yet consumed by DDQueue
 	int64_t bytesWritten;
 	int teamSize;
 	int singleRegionTeamSize;
+
+	int pipelineSize() const { return pendingGateRelocations + activeRelocations + queuedRelocations; }
+
+	void updatePipelineFull();
+
+	Reference<AsyncVar<bool>> pipelineFull;
 
 	std::map<UID, Busyness> busymap; // UID is serverID
 	std::map<UID, Busyness> destBusymap; // UID is serverID
