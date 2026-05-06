@@ -106,12 +106,14 @@ void CounterCollection::logToTraceEvent(TraceEvent& te) {
 				metrics->sumMap[c->id].points.back().addAttribute("ip", ip_str);
 				metrics->sumMap[c->id].points.back().addAttribute("port", port_str);
 				metrics->sumMap[c->id].points.back().startTime = logTime;
+				break;
 			}
 			case MetricsDataModel::STATSD: {
 				std::vector<std::pair<std::string, std::string>> statsd_attributes{ { "ip", ip_str },
 					                                                                { "port", port_str } };
 				metrics->statsd_message.push_back(createStatsdMessage(
 				    c->getName(), StatsDMetric::COUNTER, std::to_string(val) /*, statsd_attributes*/));
+				break;
 			}
 			case MetricsDataModel::NONE:
 			default: {
@@ -310,4 +312,32 @@ void LatencySample::logSample() {
 	}
 	sketch.clear();
 	sampleEmit = now();
+}
+
+TEST_CASE("/fdbrpc/Stats/CounterCollectionFallthrough") {
+    // Regression test: CounterCollection::logToTraceEvent had a switch
+    // on c->model with no break between OTLP and STATSD cases. With
+    // model=OTLP, control would fall through to STATSD and populate
+    // statsd_message even though OTLP was configured.
+    
+    // Force OTLP mode for this test by temporarily overriding the knob
+    auto savedModel = FLOW_KNOBS->METRICS_DATA_MODEL;
+    const_cast<FlowKnobs*>(FLOW_KNOBS)->METRICS_DATA_MODEL = "otel";
+    
+    CounterCollection cc("TestCC", "0");
+    Counter testCounter("TestCounter", cc);
+    testCounter += 42;
+    
+    TraceEvent te("CounterFallthroughTestEvent");
+    cc.logToTraceEvent(te);
+    
+    MetricCollection* metrics = MetricCollection::getMetricCollection();
+    ASSERT(metrics != nullptr);
+    ASSERT_GT(metrics->sumMap.size(), 0);
+    ASSERT_EQ(metrics->statsd_message.size(), 0);
+    
+    // Restore
+    const_cast<FlowKnobs*>(FLOW_KNOBS)->METRICS_DATA_MODEL = savedModel;
+    
+    return Void();
 }
