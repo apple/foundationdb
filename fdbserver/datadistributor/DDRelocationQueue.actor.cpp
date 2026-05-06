@@ -1203,13 +1203,21 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 						    .detail("DataMoveReason", static_cast<int>(rrs.dmReason));
 					}
 				} else {
-					rrs.dataMoveId = anonymousShardId;
+					if (rrs.bulkLoadTask.present()) {
+						// Bulk load needs a proper dataMoveId to encode LOGICAL_BULKLOAD type,
+						// even without SHARD_ENCODE_LOCATION_METADATA. Defer assignment until
+						// after prevCleanup in dataDistributionRelocator.
+						rrs.dataMoveId = UID();
+					} else {
+						rrs.dataMoveId = anonymousShardId;
+					}
 					TraceEvent(SevInfo, "NewDataMoveWithAnonymousDestID", this->distributorId)
 					    .detail("DataMoveID", rrs.dataMoveId.toString())
 					    .detail("TrackID", rrs.randomId)
 					    .detail("Range", rrs.keys)
 					    .detail("Reason", rrs.reason.toString())
-					    .detail("DataMoveReason", static_cast<int>(rrs.dmReason));
+					    .detail("DataMoveReason", static_cast<int>(rrs.dmReason))
+					    .detail("BulkLoad", rrs.bulkLoadTask.present());
 				}
 			}
 
@@ -1609,6 +1617,60 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 			// Currently, the relocator is triggered based on the inflightActor info.
 			// In future, we should assert at here that the intersecting DataMove in self->dataMoves
 			// are all invalid. i.e. the range of new relocators is match to the range of prevCleanup.
+		} else if (doBulkLoading) {
+			// Bulk load without SHARD_ENCODE_LOCATION_METADATA: validate task and assign dataMoveId.
+			// Mark as non-cancellable before waiting, to avoid DDQueueValidateError13.
+			auto inFlightRange = self->inFlight.rangeContaining(rd.keys.begin);
+			ASSERT(inFlightRange.range() == rd.keys);
+			inFlightRange.value().cancellable = false;
+
+			co_await prevCleanup;
+
+			Transaction tr(self->txnProcessor->context());
+			while (true) {
+				Error innerErr;
+				try {
+					BulkLoadTaskState currentBulkLoadTaskState =
+					    co_await getBulkLoadTask(&tr,
+					                             rd.bulkLoadTask.get().coreState.getRange(),
+					                             rd.bulkLoadTask.get().coreState.getTaskId(),
+					                             { BulkLoadPhase::Triggered, BulkLoadPhase::Running });
+					TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskDataMoveLaunched", self->distributorId)
+					    .detail("TrackID", rd.randomId)
+					    .detail("DataMovePriority", rd.priority)
+					    .detail("JobID", rd.bulkLoadTask.get().coreState.getJobId())
+					    .detail("TaskID", rd.bulkLoadTask.get().coreState.getTaskId())
+					    .detail("TaskRange", rd.bulkLoadTask.get().coreState.getRange());
+					break;
+				} catch (Error& e) {
+					innerErr = e;
+				}
+				if (innerErr.code() == error_code_bulkload_task_outdated) {
+					if (rd.bulkLoadTask.get().completeAck.canBeSet()) {
+						rd.bulkLoadTask.get().completeAck.sendError(bulkload_task_outdated());
+					}
+					doBulkLoading = false;
+					TraceEvent(SevWarn, "DDBulkLoadTaskFallbackToNormalDataMove", self->distributorId)
+					    .detail("TrackID", rd.randomId)
+					    .detail("DataMovePriority", rd.priority)
+					    .detail("JobID", rd.bulkLoadTask.get().coreState.getJobId())
+					    .detail("TaskID", rd.bulkLoadTask.get().coreState.getTaskId())
+					    .detail("TaskRange", rd.bulkLoadTask.get().coreState.getRange());
+					break;
+				}
+				co_await tr.onError(innerErr);
+			}
+			DataMoveType dataMoveType = newDataMoveType(doBulkLoading);
+			rd.dataMoveId = newDataMoveId(
+			    deterministicRandom()->randomUInt64(), AssignEmptyRange::False, dataMoveType, rd.dmReason);
+			TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskNewDataMoveID", self->distributorId)
+			    .detail("DataMoveID", rd.dataMoveId.toString())
+			    .detail("TrackID", rd.randomId)
+			    .detail("Range", rd.keys)
+			    .detail("Priority", rd.priority)
+			    .detail("DataMoveType", dataMoveType)
+			    .detail("DoBulkLoading", doBulkLoading)
+			    .detail("DataMoveReason", static_cast<int>(rd.dmReason));
 		}
 
 		Optional<StorageMetrics> parentMetrics;

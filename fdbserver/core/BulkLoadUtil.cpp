@@ -20,8 +20,10 @@
 
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/S3Client.h"
+#include "fdbclient/SystemData.h"
 #include "fdbserver/core/BulkLoadUtil.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/RocksDBCheckpointUtils.h"
@@ -174,6 +176,81 @@ Future<BulkLoadTaskState> getBulkLoadTaskStateFromDataMove(Database cx,
 			    .detail("ElapsedSec", now() - startTime);
 			co_await Future<Void>(Never());
 			throw internal_error(); // does not happen
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr.onError(err);
+	}
+}
+
+// Look up BulkLoadTaskState directly from bulkLoadTaskKeys by range, without going through DataMoveMetaData.
+// This allows bulk load to work without SHARD_ENCODE_LOCATION_METADATA / dataMoveId.
+// The function retries until the read version >= atLeastVersion and a valid task is found.
+// If no task exists for the range, blocks forever (caller is expected to cancel via fetchKeys cancellation).
+Future<BulkLoadTaskState> getBulkLoadTaskStateByRange(Database cx, KeyRange range, Version atLeastVersion, UID logId) {
+	Transaction tr(cx);
+	int retryCount = 0;
+	int metadataRetryCount = 0;
+	double startTime = now();
+	tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+	while (true) {
+		Error err;
+		try {
+			RangeResult result = co_await krmGetRanges(&tr, bulkLoadTaskPrefix, range);
+			ASSERT(tr.getReadVersion().isReady());
+			if (tr.getReadVersion().get() < atLeastVersion) {
+				retryCount++;
+				if (retryCount % 100 == 0) {
+					TraceEvent(SevWarn, "SSBulkLoadTaskByRangeWaitingForVersion", logId)
+					    .detail("Range", range)
+					    .detail("ReadVersion", tr.getReadVersion().get())
+					    .detail("AtLeastVersion", atLeastVersion)
+					    .detail("RetryCount", retryCount)
+					    .detail("ElapsedSec", now() - startTime);
+				}
+				co_await delay(0.1);
+				tr.reset();
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				continue;
+			}
+			if (result.size() >= 2 && !result[0].value.empty()) {
+				BulkLoadTaskState bulkLoadTaskState = decodeBulkLoadTaskState(result[0].value);
+				if (bulkLoadTaskState.isValid()) {
+					if (metadataRetryCount > 0 || retryCount > 0) {
+						TraceEvent(SevInfo, "SSBulkLoadTaskByRangeGotMetadata", logId)
+						    .detail("Range", range)
+						    .detail("TaskID", bulkLoadTaskState.getTaskId())
+						    .detail("TaskRange", bulkLoadTaskState.getRange())
+						    .detail("MetadataRetryCount", metadataRetryCount)
+						    .detail("VersionRetryCount", retryCount)
+						    .detail("ElapsedSec", now() - startTime);
+					}
+					// Log if the task range doesn't match the requested range
+					if (bulkLoadTaskState.getRange() != range) {
+						TraceEvent(SevWarn, "SSBulkLoadTaskByRangeRangeMismatch", logId)
+						    .detail("RequestedRange", range)
+						    .detail("TaskRange", bulkLoadTaskState.getRange())
+						    .detail("TaskID", bulkLoadTaskState.getTaskId());
+					}
+					co_return bulkLoadTaskState;
+				}
+			}
+
+			metadataRetryCount++;
+			if (metadataRetryCount % 100 == 0) {
+				TraceEvent(SevWarn, "SSBulkLoadTaskByRangeWaitingForMetadata", logId)
+				    .detail("Range", range)
+				    .detail("MetadataRetryCount", metadataRetryCount)
+				    .detail("ElapsedSec", now() - startTime)
+				    .detail("Message", "BulkLoadTaskState not yet written for this range");
+			}
+			co_await delay(0.1);
+			tr.reset();
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			continue;
 		} catch (Error& e) {
 			err = e;
 		}
