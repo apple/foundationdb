@@ -239,19 +239,19 @@ struct ResolutionRequestBuilder {
 	}
 };
 
-ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
-                                 PromiseStream<std::pair<std::vector<CommitTransactionRequest>, int>> out,
-                                 FutureStream<CommitTransactionRequest> in,
-                                 int desiredBytes,
-                                 int64_t memBytesLimit) {
-	wait(delayJittered(commitData->commitBatchInterval, TaskPriority::ProxyCommitBatcher));
+Future<Void> commitBatcher(ProxyCommitData* commitData,
+                           PromiseStream<std::pair<std::vector<CommitTransactionRequest>, int>> out,
+                           FutureStream<CommitTransactionRequest> in,
+                           int desiredBytes,
+                           int64_t memBytesLimit) {
+	co_await delayJittered(commitData->commitBatchInterval, TaskPriority::ProxyCommitBatcher);
 
-	state double lastBatch = 0;
+	double lastBatch = 0;
 
-	loop {
-		state Future<Void> timeout;
-		state std::vector<CommitTransactionRequest> batch;
-		state int batchBytes = 0;
+	while (true) {
+		Future<Void> timeout;
+		std::vector<CommitTransactionRequest> batch;
+		int batchBytes = 0;
 		// TODO: Enable this assertion (currently failing with gcc)
 		// static_assert(std::is_nothrow_move_constructible_v<CommitTransactionRequest>);
 
@@ -263,70 +263,71 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 
 		while (!timeout.isReady() &&
 		       !(batch.size() == SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_COUNT_MAX || batchBytes >= desiredBytes)) {
-			choose {
-				when(CommitTransactionRequest req = waitNext(in)) {
-					// WARNING: this code is run at a high priority, so it needs to do as little work as possible
-					int bytes = getBytes(req);
+			auto res = co_await race(in, timeout, commitData->triggerCommit.onChange());
+			if (res.index() == 0) {
+				CommitTransactionRequest req = std::get<0>(std::move(res));
 
-					// Drop requests if memory is under severe pressure
-					if (commitData->commitBatchesMemBytesCount + bytes > memBytesLimit) {
-						++commitData->stats.txnCommitErrors;
-						req.reply.sendError(commit_proxy_memory_limit_exceeded());
-						TraceEvent(SevWarnAlways, "ProxyCommitBatchMemoryThresholdExceeded")
-						    .suppressFor(60)
-						    .detail("MemBytesCount", commitData->commitBatchesMemBytesCount)
-						    .detail("MemLimit", memBytesLimit);
-						continue;
-					}
+				// WARNING: this code is run at a high priority, so it needs to do as little work as possible
+				int bytes = getBytes(req);
 
-					if (bytes > FLOW_KNOBS->PACKET_WARNING) {
-						TraceEvent(SevWarn, "LargeTransaction")
-						    .suppressFor(1.0)
-						    .detail("Size", bytes)
-						    .detail("Client", req.reply.getEndpoint().getPrimaryAddress());
-					}
-
-					++commitData->stats.txnCommitIn;
-					commitData->stats.uniqueClients.insert(req.reply.getEndpoint().getPrimaryAddress());
-
-					if (req.debugID.present()) {
-						g_traceBatch.addEvent("CommitDebug", req.debugID.get().first(), "CommitProxyServer.batcher");
-					}
-
-					if (!batch.size()) {
-						if (now() - lastBatch > commitData->commitBatchInterval) {
-							timeout = delayJittered(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE,
-							                        TaskPriority::ProxyCommitBatcher);
-						} else {
-							timeout = delayJittered(commitData->commitBatchInterval - (now() - lastBatch),
-							                        TaskPriority::ProxyCommitBatcher);
-						}
-					}
-
-					if ((batchBytes + bytes > CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT || req.firstInBatch()) &&
-					    batch.size()) {
-						commitData->triggerCommit.set(false);
-						out.send({ std::move(batch), batchBytes });
-						lastBatch = now();
-						timeout = delayJittered(commitData->commitBatchInterval, TaskPriority::ProxyCommitBatcher);
-						batch.clear();
-						batchBytes = 0;
-					}
-
-					batch.push_back(req);
-					batchBytes += bytes;
-					commitData->commitBatchesMemBytesCount += bytes;
+				// Drop requests if memory is under severe pressure
+				if (commitData->commitBatchesMemBytesCount + bytes > memBytesLimit) {
+					++commitData->stats.txnCommitErrors;
+					req.reply.sendError(commit_proxy_memory_limit_exceeded());
+					TraceEvent(SevWarnAlways, "ProxyCommitBatchMemoryThresholdExceeded")
+					    .suppressFor(60)
+					    .detail("MemBytesCount", commitData->commitBatchesMemBytesCount)
+					    .detail("MemLimit", memBytesLimit);
+					continue;
 				}
-				when(wait(timeout)) {}
-				when(wait(commitData->triggerCommit.onChange())) {
-					ASSERT(commitData->triggerCommit.get());
-					double commitTime = lastBatch + SERVER_KNOBS->COMMIT_TRIGGER_DELAY;
-					if (now() > commitTime) {
-						break;
-					}
 
-					timeout = timeout || delayJittered(commitTime - now(), TaskPriority::ProxyCommitBatcher);
+				if (bytes > FLOW_KNOBS->PACKET_WARNING) {
+					TraceEvent(SevWarn, "LargeTransaction")
+					    .suppressFor(1.0)
+					    .detail("Size", bytes)
+					    .detail("Client", req.reply.getEndpoint().getPrimaryAddress());
 				}
+
+				++commitData->stats.txnCommitIn;
+				commitData->stats.uniqueClients.insert(req.reply.getEndpoint().getPrimaryAddress());
+
+				if (req.debugID.present()) {
+					g_traceBatch.addEvent("CommitDebug", req.debugID.get().first(), "CommitProxyServer.batcher");
+				}
+
+				if (!batch.size()) {
+					if (now() - lastBatch > commitData->commitBatchInterval) {
+						timeout = delayJittered(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE,
+						                        TaskPriority::ProxyCommitBatcher);
+					} else {
+						timeout = delayJittered(commitData->commitBatchInterval - (now() - lastBatch),
+						                        TaskPriority::ProxyCommitBatcher);
+					}
+				}
+
+				if ((batchBytes + bytes > CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT || req.firstInBatch()) && batch.size()) {
+					commitData->triggerCommit.set(false);
+					out.send({ std::move(batch), batchBytes });
+					lastBatch = now();
+					timeout = delayJittered(commitData->commitBatchInterval, TaskPriority::ProxyCommitBatcher);
+					batch.clear();
+					batchBytes = 0;
+				}
+
+				batch.push_back(req);
+				batchBytes += bytes;
+				commitData->commitBatchesMemBytesCount += bytes;
+			} else if (res.index() == 1) {
+			} else if (res.index() == 2) {
+				ASSERT(commitData->triggerCommit.get());
+				double commitTime = lastBatch + SERVER_KNOBS->COMMIT_TRIGGER_DELAY;
+				if (now() > commitTime) {
+					break;
+				}
+
+				timeout = timeout || delayJittered(commitTime - now(), TaskPriority::ProxyCommitBatcher);
+			} else {
+				UNREACHABLE();
 			}
 		}
 		commitData->triggerCommit.set(false);
@@ -1515,20 +1516,20 @@ Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 	}
 }
 
-ACTOR Future<Void> postResolution(CommitBatchContext* self) {
-	state double postResolutionStart = g_network->timer_monotonic();
-	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
-	state std::vector<CommitTransactionRequest>& trs = self->trs;
-	state const int64_t localBatchNumber = self->localBatchNumber;
-	state const Optional<UID>& debugID = self->debugID;
-	state Span span("MP:postResolution"_loc, self->span.context);
+Future<Void> postResolution(CommitBatchContext* self) {
+	double postResolutionStart = g_network->timer_monotonic();
+	ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
+	std::vector<CommitTransactionRequest>& trs = self->trs;
+	const int64_t localBatchNumber = self->localBatchNumber;
+	const Optional<UID>& debugID = self->debugID;
+	Span span("MP:postResolution"_loc, self->span.context);
 
 	bool queuedCommits = pProxyCommitData->latestLocalCommitBatchLogging.get() < localBatchNumber - 1;
 	CODE_PROBE(queuedCommits, "Queuing post-resolution commit processing");
-	wait(pProxyCommitData->latestLocalCommitBatchLogging.whenAtLeast(localBatchNumber - 1));
-	state double postResolutionQueuing = g_network->timer_monotonic();
+	co_await pProxyCommitData->latestLocalCommitBatchLogging.whenAtLeast(localBatchNumber - 1);
+	double postResolutionQueuing = g_network->timer_monotonic();
 	pProxyCommitData->stats.postResolutionDist->sampleSeconds(postResolutionQueuing - postResolutionStart);
-	wait(yield(TaskPriority::ProxyCommitYield1));
+	co_await yield(TaskPriority::ProxyCommitYield1);
 
 	self->computeStart = g_network->timer_monotonic();
 
@@ -1559,11 +1560,11 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	}
 
 	if (self->forceRecovery) {
-		wait(Future<Void>(Never()));
+		co_await Future<Void>(Never());
 	}
 
 	// First pass
-	wait(applyMetadataToCommittedTransactions(self));
+	co_await applyMetadataToCommittedTransactions(self);
 
 	if (debugID.present()) {
 		g_traceBatch.addEvent(
@@ -1578,7 +1579,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	}
 
 	// Second pass
-	wait(assignMutationsToStorageServers(self));
+	co_await assignMutationsToStorageServers(self);
 
 	if (debugID.present()) {
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.AssignMutationToSS");
@@ -1586,12 +1587,12 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 
 	// Serialize and backup the mutations as a single mutation
 	if ((pProxyCommitData->vecBackupKeys.size() > 1) && self->logRangeMutations.size()) {
-		wait(addBackupMutations(pProxyCommitData,
-		                        &self->logRangeMutations,
-		                        &self->toCommit,
-		                        self->commitVersion,
-		                        &self->computeDuration,
-		                        &self->computeStart));
+		co_await addBackupMutations(pProxyCommitData,
+		                            &self->logRangeMutations,
+		                            &self->toCommit,
+		                            self->commitVersion,
+		                            &self->computeDuration,
+		                            &self->computeStart);
 	}
 
 	// When version vector is enabled, idempotency entries should only be created or cleared
@@ -1629,8 +1630,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 
 	if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST ||
 	    pProxyCommitData->db->get().logSystemConfig.numLogs() == self->tpcvMap.size()) {
-		state int i = 0;
-		for (i = 0; i < pProxyCommitData->idempotencyClears.size(); i++) {
+		for (int i = 0; i < pProxyCommitData->idempotencyClears.size(); i++) {
 			auto& tags = pProxyCommitData->tagsForKey(pProxyCommitData->idempotencyClears[i].param1);
 			self->toCommit.addTags(tags);
 			if (pProxyCommitData->acsBuilder != nullptr) {
@@ -1660,7 +1660,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	if (pProxyCommitData->committedVersion.get() <
 	    self->commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
 		self->computeDuration += g_network->timer_monotonic() - self->computeStart;
-		state Span waitVersionSpan;
+		Span waitVersionSpan;
 		while (pProxyCommitData->committedVersion.get() <
 		       self->commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
 			// This should be *extremely* rare in the real world, but knob buggification should make it happen in
@@ -1668,29 +1668,35 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 			CODE_PROBE(true, "Semi-committed pipeline limited by MVCC window");
 			//TraceEvent("ProxyWaitingForCommitted", pProxyCommitData->dbgid).detail("CommittedVersion", pProxyCommitData->committedVersion.get()).detail("NeedToCommit", commitVersion);
 			waitVersionSpan = Span("MP:overMaxReadTransactionLifeVersions"_loc, span.context);
-			choose {
-				when(wait(pProxyCommitData->committedVersion.whenAtLeast(
-				    self->commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS))) {
-					wait(yield());
-					break;
-				}
-				when(wait(pProxyCommitData->cx->onProxiesChanged())) {}
-				// @todo probably there is no need to get the (entire) version vector from the sequencer
-				// in this case, and if so, consider adding a flag to the request to tell the sequencer
-				// to not send the version vector information.
-				when(GetRawCommittedVersionReply v = wait(pProxyCommitData->master.getLiveCommittedVersion.getReply(
-				         GetRawCommittedVersionRequest(waitVersionSpan.context, debugID, invalidVersion),
-				         TaskPriority::GetLiveCommittedVersionReply))) {
-					if (v.version > pProxyCommitData->committedVersion.get()) {
-						pProxyCommitData->locked = v.locked;
-						pProxyCommitData->metadataVersion = v.metadataVersion;
-						pProxyCommitData->committedVersion.set(v.version);
-					}
+			// @todo probably there is no need to get the (entire) version vector from the sequencer
+			// in this case, and if so, consider adding a flag to the request to tell the sequencer
+			// to not send the version vector information.
+			auto res =
+			    co_await race(pProxyCommitData->committedVersion.whenAtLeast(
+			                      self->commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS),
+			                  pProxyCommitData->cx->onProxiesChanged(),
+			                  pProxyCommitData->master.getLiveCommittedVersion.getReply(
+			                      GetRawCommittedVersionRequest(waitVersionSpan.context, debugID, invalidVersion),
+			                      TaskPriority::GetLiveCommittedVersionReply));
+			if (res.index() == 0) {
+				co_await yield();
+				break;
+			} else if (res.index() == 1) {
+			} else if (res.index() == 2) {
+				GetRawCommittedVersionReply v = std::get<2>(std::move(res));
 
-					if (pProxyCommitData->committedVersion.get() <
-					    self->commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)
-						wait(delay(SERVER_KNOBS->PROXY_SPIN_DELAY));
+				if (v.version > pProxyCommitData->committedVersion.get()) {
+					pProxyCommitData->locked = v.locked;
+					pProxyCommitData->metadataVersion = v.metadataVersion;
+					pProxyCommitData->committedVersion.set(v.version);
 				}
+
+				if (pProxyCommitData->committedVersion.get() <
+				    self->commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
+					co_await delay(SERVER_KNOBS->PROXY_SPIN_DELAY);
+				}
+			} else {
+				UNREACHABLE();
 			}
 		}
 		waitVersionSpan = Span{};
@@ -1790,7 +1796,6 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	}
 
 	pProxyCommitData->stats.processingMutationDist->sampleSeconds(g_network->timer_monotonic() - postResolutionQueuing);
-	return Void();
 }
 
 Future<Void> transactionLogging(CommitBatchContext* self) {
