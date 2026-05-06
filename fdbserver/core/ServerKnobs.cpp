@@ -1165,6 +1165,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( AUDIT_RESTORE_BATCH_KEY_LIMIT,                      100000 ); // 100K keys per batch (was hardcoded 10K)
 	init( AUDIT_PROGRESS_PERSIST_BYTES_INTERVAL,           100000000 ); // 100MB - only persist progress after this many bytes
 	init( ENABLE_AUDIT_VERBOSE_TRACE,                          false );
+	// Disabled in simulation: audit_storage locationmetadata already runs at controlled times in sim,
+	// and periodic triggering interferes with DD quiescence checks and the test harness audit checks.
+	init( AUDIT_LOCATION_METADATA_INTERVAL,                  3600.0 ); if ( isSimulated ) AUDIT_LOCATION_METADATA_INTERVAL = 0;
 	init( LOGGING_STORAGE_COMMIT_WHEN_IO_TIMEOUT,               true );
 	init( LOGGING_RECENT_STORAGE_COMMIT_SIZE,                     20 );
 	init( LOGGING_COMPLETE_STORAGE_COMMIT_PROBABILITY,         0.001 );
