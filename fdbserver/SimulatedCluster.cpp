@@ -2451,6 +2451,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	bool gradualMigrationPossible = true;
 	std::vector<ProcessClass::ClassType> processClassesSubSet = { ProcessClass::UnsetClass,
 		                                                          ProcessClass::StatelessClass };
+	Optional<ProcessClass::ClassType> processClassForFifthAssignedMachine;
 	for (int dc = 0; dc < dataCenters; dc++) {
 		// FIXME: test unset dcID
 		Optional<Standalone<StringRef>> dcUID = StringRef(format("%d", dc));
@@ -2482,10 +2483,22 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		Standalone<StringRef> zoneId;
 		Standalone<StringRef> newZoneId;
 
+		if (!processClassForFifthAssignedMachine.present() && assignClasses && simconfig.db.regions.empty() &&
+		    assignedMachines <= 4 && 4 < assignedMachines + totalMachines) {
+			processClassForFifthAssignedMachine =
+			    processClassesSubSet[deterministicRandom()->randomInt(0, processClassesSubSet.size())];
+		}
+
 		Optional<int> desiredStatelessClasses;
 		int actualStatelessClasses = 0;
 		if (testConfig.statelessProcessClassesPerDC.present()) {
 			desiredStatelessClasses = testConfig.statelessProcessClassesPerDC.get();
+		} else if (processClassForFifthAssignedMachine.present() &&
+		           processClassForFifthAssignedMachine.get() == ProcessClass::StatelessClass &&
+		           assignedMachines <= 4 && 4 < assignedMachines + totalMachines) {
+			desiredStatelessClasses = std::max({ simconfig.db.getDesiredCommitProxies(),
+			                                     simconfig.db.getDesiredGrvProxies(),
+			                                     simconfig.db.getDesiredResolvers() });
 		}
 
 		for (int machine = 0; machine < totalMachines; machine++) {
@@ -2503,9 +2516,8 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 					processClass = ProcessClass((ProcessClass::ClassType)deterministicRandom()->randomInt(0, 2),
 					                            ProcessClass::CommandLineSource); // Unset or Storage
 				else if (assignedMachines == 4 && simconfig.db.regions.empty())
-					processClass = ProcessClass(
-					    processClassesSubSet[deterministicRandom()->randomInt(0, processClassesSubSet.size())],
-					    ProcessClass::CommandLineSource); // Unset or Stateless
+					processClass = ProcessClass(processClassForFifthAssignedMachine.get(),
+					                            ProcessClass::CommandLineSource); // Unset or Stateless
 				else
 					processClass = ProcessClass((ProcessClass::ClassType)deterministicRandom()->randomInt(0, 3),
 					                            ProcessClass::CommandLineSource); // Unset, Storage, or Transaction
@@ -2515,13 +2527,8 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 				}
 			}
 
-			if (processClass == ProcessClass::StatelessClass && !desiredStatelessClasses.present()) {
-				desiredStatelessClasses = std::max({ simconfig.db.getDesiredCommitProxies(),
-				                                     simconfig.db.getDesiredGrvProxies(),
-				                                     simconfig.db.getDesiredResolvers() });
-			}
-
-			if (desiredStatelessClasses.present() && actualStatelessClasses < desiredStatelessClasses.get()) {
+			if (machine < machines && desiredStatelessClasses.present() &&
+			    actualStatelessClasses < desiredStatelessClasses.get()) {
 				processClass = ProcessClass(ProcessClass::StatelessClass, ProcessClass::CommandLineSource);
 				actualStatelessClasses++;
 			}
