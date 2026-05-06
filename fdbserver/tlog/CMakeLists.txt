@@ -10,8 +10,6 @@ configure_fdbserver_common_includes(fdbserver_tlog)
 target_include_directories(fdbserver_tlog
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_BINARY_DIR}/include
   PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_BINARY_DIR})
+    ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(fdbserver_tlog PRIVATE fdbserver_core fdbserver_kvstore fdbserver_logsystem)

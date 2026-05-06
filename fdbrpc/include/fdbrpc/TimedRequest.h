@@ -34,6 +34,8 @@ public:
 		return _requestTime;
 	}
 
+	void setRequestTime(double requestTime) { _requestTime = requestTime; }
+
 	TimedRequest() {
 		if (!FlowTransport::isClient()) {
 			_requestTime = g_network->timer();
