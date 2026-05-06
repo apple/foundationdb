@@ -219,7 +219,6 @@ private:
 	VersionProperty expiredEndVersion();
 	VersionProperty unreliableEndVersion();
 	VersionProperty logType();
-	VersionProperty fileLevelEncryption();
 
 	static std::string encryptionMetadataFileName();
 
