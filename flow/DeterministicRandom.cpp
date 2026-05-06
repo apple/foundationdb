@@ -27,25 +27,14 @@
 
 uint64_t DeterministicRandom::gen64() {
 	uint64_t curr = next;
-
-	// RE: the previous implementation of this function: order of
-	// evaluation of arguments to the ^ operator is not specified, so
-	// two rng() calls in the same ^ expression may not produce a
-	// consistent 64-bit value across compilations, because we don't
-	// know if the first call was used for the higher order bits and
-	// the second call for the low order bits, or vice-versa.
-	// See https://en.cppreference.com/w/cpp/language/eval_order.html
-	next = (uint64_t(rng()) << 32);
-	next ^= rng();
+	next = rng();
 	if (TRACE_SAMPLE())
 		TraceEvent(SevSample, "Random").log();
 	return curr;
 }
 
-DeterministicRandom::DeterministicRandom(uint32_t seed, bool useRandLog)
-  : rng((unsigned long)seed), next(0), useRandLog(useRandLog) {
-	next = (uint64_t(rng()) << 32);
-	next ^= rng();
+DeterministicRandom::DeterministicRandom(uint64_t seed, bool useRandLog) : rng(seed), next(0), useRandLog(useRandLog) {
+	next = rng();
 }
 
 double DeterministicRandom::random01() {
@@ -164,10 +153,9 @@ uint64_t DeterministicRandom::peek() const {
 	return next;
 }
 
-void DeterministicRandom::resetSeed(uint32_t seed) {
-	rng.seed((unsigned long)seed);
-	next = (uint64_t(rng()) << 32);
-	next ^= rng();
+void DeterministicRandom::resetSeed(uint64_t seed) {
+	rng.seed(seed);
+	next = rng();
 }
 
 void DeterministicRandom::addref() {

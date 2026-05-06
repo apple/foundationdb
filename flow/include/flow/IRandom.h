@@ -164,7 +164,7 @@ public:
 	                                   // Deterministic (and idempotent) for a deterministic generator.
 
 	// Reset the random number generator with a new seed (only supported by deterministic generators)
-	virtual void resetSeed(uint32_t seed) {}
+	virtual void resetSeed(uint64_t seed) {}
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;
@@ -209,7 +209,7 @@ public:
 extern FILE* randLog;
 
 // Sets the seed for the deterministic random number generator on the current thread
-void setThreadLocalDeterministicRandomSeed(uint32_t seed);
+void setThreadLocalDeterministicRandomSeed(uint64_t seed);
 
 // Returns the random number generator that can be seeded. This generator should only
 // be used in contexts where the choice to call it is deterministic.
