@@ -419,6 +419,9 @@ Value backupProgressValue(const WorkerBackupStatus& status);
 UID decodeBackupProgressKey(const KeyRef& key);
 WorkerBackupStatus decodeBackupProgressValue(const ValueRef& value);
 
+//============ System Keys used by Range Partitioned Backup ============//
+
+// The key to signal backup workers a new backup job is submitted.
 //   "\xff\x02/backupRangePartitionedProgress/[[workerID]]" := "[[WorkerBackupStatus]]"
 extern const KeyRangeRef backupRangePartitionedProgressKeys;
 extern const KeyRef backupRangePartitionedProgressPrefix;
@@ -431,6 +434,20 @@ WorkerBackupStatus decodeBackupRangePartitionedProgressValue(const ValueRef& val
 //    "\xff\x02/backupRangePartitionedMapUploaded/<version>" := "1"
 extern const KeyRef backupRangePartitionedMapUploadedPrefix;
 Key backupRangePartitionedMapUploadedKeyFor(Version v);
+
+// The key to signal backup workers a new backup job is submitted.
+//    "\xff\x02/backupRangePartitionedStarted" := "[[vector<UID,Version1>]]"
+extern const KeyRef backupRangePartitionedStartedKey;
+Value encodeBackupRangePartitionedStartedValue(const std::vector<std::pair<UID, Version>>& ids);
+std::vector<std::pair<UID, Version>> decodeBackupRangePartitionedStartedValue(const ValueRef& value);
+
+// The key to signal backup workers that they should resume or pause.
+//    "\xff\x02/backupRangePartitionedPaused" := "[[0|1]]"
+// 0 = Send a signal to resume/already resumed.
+// 1 = Send a signal to pause/already paused.
+extern const KeyRef backupRangePartitionedPausedKey;
+
+//============ End of System Keys used by Range Partitioned Backup ============//
 
 // The key to signal backup workers a new backup job is submitted.
 //    "\xff\x02/backupStarted" := "[[vector<UID,Version1>]]"

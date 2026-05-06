@@ -71,3 +71,9 @@ Future<Void> getBackupRangePartitionedProgress(Database cx,
 		co_await tr.onError(err);
 	}
 }
+
+// TODO akanksha: Placeholder -> Implement when recovery code is implemented.
+std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>>
+BackupRangePartitionedProgress::getUnfinishedBackup() {
+	return {};
+}
