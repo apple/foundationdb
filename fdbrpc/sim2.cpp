@@ -2167,11 +2167,10 @@ public:
 		machines.erase(machineId);
 	}
 
-	// Assumes the simulator is already onProcess for proc
-	// FIXME: delete the above comment and add an ASSERT about this condition.
 	void startRequestHandlerOnProcess(ProcessInfo* process,
 	                                  Reference<HTTP::SimServerContext> serverContext,
 	                                  Reference<HTTP::SimRegisteredHandlerContext> handlerContext) {
+		ASSERT(getCurrentProcess() == process);
 		try {
 			NetworkAddress addr = NetworkAddress(g_simulator->getCurrentProcess()->address.ip,
 			                                     handlerContext->port,
