@@ -2484,7 +2484,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		Standalone<StringRef> newZoneId;
 
 		if (!processClassForFifthAssignedMachine.present() && assignClasses && simconfig.db.regions.empty() &&
-		    assignedMachines <= 4 && 4 < assignedMachines + totalMachines) {
+		    assignedMachines <= 4 && 4 < assignedMachines + machines) {
 			processClassForFifthAssignedMachine =
 			    processClassesSubSet[deterministicRandom()->randomInt(0, processClassesSubSet.size())];
 		}
@@ -2494,8 +2494,8 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		if (testConfig.statelessProcessClassesPerDC.present()) {
 			desiredStatelessClasses = testConfig.statelessProcessClassesPerDC.get();
 		} else if (processClassForFifthAssignedMachine.present() &&
-		           processClassForFifthAssignedMachine.get() == ProcessClass::StatelessClass &&
-		           assignedMachines <= 4 && 4 < assignedMachines + totalMachines) {
+		           processClassForFifthAssignedMachine.get() == ProcessClass::StatelessClass && assignedMachines <= 4 &&
+		           4 < assignedMachines + machines) {
 			desiredStatelessClasses = std::max({ simconfig.db.getDesiredCommitProxies(),
 			                                     simconfig.db.getDesiredGrvProxies(),
 			                                     simconfig.db.getDesiredResolvers() });
@@ -2516,8 +2516,11 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 					processClass = ProcessClass((ProcessClass::ClassType)deterministicRandom()->randomInt(0, 2),
 					                            ProcessClass::CommandLineSource); // Unset or Storage
 				else if (assignedMachines == 4 && simconfig.db.regions.empty())
-					processClass = ProcessClass(processClassForFifthAssignedMachine.get(),
-					                            ProcessClass::CommandLineSource); // Unset or Stateless
+					processClass = ProcessClass(
+					    processClassForFifthAssignedMachine.present()
+					        ? processClassForFifthAssignedMachine.get()
+					        : processClassesSubSet[deterministicRandom()->randomInt(0, processClassesSubSet.size())],
+					    ProcessClass::CommandLineSource); // Unset or Stateless
 				else
 					processClass = ProcessClass((ProcessClass::ClassType)deterministicRandom()->randomInt(0, 3),
 					                            ProcessClass::CommandLineSource); // Unset, Storage, or Transaction
