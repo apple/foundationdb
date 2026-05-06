@@ -1,7 +1,5 @@
 [configuration]
 storageEngineExcludeTypes = [3]
-encryptModes = ['disabled']
-tenantModes = ['disabled']
 
 [[test]]
 testTitle = 'SubmitBackup'
