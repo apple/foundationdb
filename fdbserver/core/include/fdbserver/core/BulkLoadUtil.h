@@ -47,10 +47,7 @@ Future<BulkLoadTaskState> getBulkLoadTaskStateFromDataMove(Database cx,
 
 // Look up BulkLoadTaskState directly from bulkLoadTaskKeys by range.
 // Does not require DataMoveMetaData or a valid dataMoveId.
-Future<BulkLoadTaskState> getBulkLoadTaskStateByRange(Database cx,
-                                                      KeyRange range,
-                                                      Version atLeastVersion,
-                                                      UID logId);
+Future<BulkLoadTaskState> getBulkLoadTaskStateByRange(Database cx, KeyRange range, Version atLeastVersion, UID logId);
 
 Future<BulkLoadFileSet> bulkLoadDownloadTaskFileSet(BulkLoadTransportMethod transportMethod,
                                                     BulkLoadFileSet fromRemoteFileSet,
