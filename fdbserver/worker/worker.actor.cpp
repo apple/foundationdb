@@ -64,7 +64,7 @@
 #include "fdbserver/resolver/Resolver.h"
 #include "fdbserver/sequencer/MasterServer.h"
 #include "fdbserver/storageserver/StorageServer.h"
-#include "fdbserver/tlog/TLogServer.actor.h"
+#include "fdbserver/tlog/TLogServer.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/tester/tester.h"
 #include "fdbserver/kvstore/IDiskQueue.h"
