@@ -354,6 +354,12 @@ private:
 		return bytesCopied;
 	}
 
+	// Delegated-to by StringRef(const char*) so strlen runs once and overflow is checked before truncation.
+	StringRef(const char* str, size_t len)
+	  : data(reinterpret_cast<const uint8_t*>(str)), length(static_cast<int>(len)) {
+		UNSTOPPABLE_ASSERT(len <= std::numeric_limits<int>::max());
+	}
+
 public:
 	constexpr static FileIdentifier file_identifier = 13300811;
 	StringRef() : data(0), length(0) {}
@@ -378,6 +384,20 @@ public:
 		}
 	}
 	StringRef(const uint8_t* data, int length) : data(data), length(length) {}
+	// For string literals prefer "foo"_sr, which captures the length at compile time and
+	// avoids the runtime strlen walk this ctor performs. This ctor is for const char*
+	// values whose length isn't known at compile time (e.g: from  C APIs or interop).
+	// Borrows the pointer and computes length via strlen, like std::string_view.
+	// Marked explicit so that existing `f("literal")` calls that resolve against
+	// overload pairs like f(std::string) / f(StringRef) keep picking std::string,
+	// avoiding ambiguity. Direct-init `StringRef s("literal")` still selects this
+	// constructor — which is the actual use-after-free case this guards against.
+	// Precondition: str is not null.
+	explicit StringRef(const char* str) : StringRef(str, strlen(str)) {}
+	StringRef(std::nullptr_t) = delete;
+	// Reject integer literals (e.g. StringRef(0)), which would otherwise pick the const char*
+	// overload via null-pointer conversion and crash in strlen.
+	StringRef(int) = delete;
 	StringRef(const std::string& s) : data((const uint8_t*)s.c_str()), length((int)s.size()) {
 		if (s.size() > std::numeric_limits<int>::max())
 			abort();
