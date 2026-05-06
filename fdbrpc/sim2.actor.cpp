@@ -45,7 +45,6 @@
 #include "flow/WriteOnlySet.h"
 #include "flow/IAsyncFile.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
-#include "fdbrpc/AsyncFileEncrypted.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/AsyncFileNonDurable.actor.h"
 #include "fdbrpc/AsyncFileChaos.h"
@@ -3071,12 +3070,6 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 		f = AsyncFileDetachable::open(f);
 		if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES)
 			f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileChaos(r)); });
-		if (flags & IAsyncFile::OPEN_ENCRYPTED)
-			f = map(f, [flags](Reference<IAsyncFile> r) {
-				auto mode = flags & IAsyncFile::OPEN_READWRITE ? AsyncFileEncrypted::Mode::APPEND_ONLY
-				                                               : AsyncFileEncrypted::Mode::READ_ONLY;
-				return Reference<IAsyncFile>(new AsyncFileEncrypted(r, mode));
-			});
 		return f;
 	} else
 		return AsyncFileCached::open(filename, flags, mode);
