@@ -1593,6 +1593,12 @@ Reference<IPeekCursor> LogSystem::peekLogRouter(
 			}
 		}
 		if (found) {
+			Version oldEnd = firstOld && recoveredAt.present() ? recoveredAt.get() + 1 : old.epochEnd;
+			if (begin >= oldEnd) {
+				firstOld = false;
+				continue;
+			}
+
 			int bestPrimarySet = 0;
 			int bestSatelliteSet = -1;
 			std::vector<Reference<LogSet>> localSets;
@@ -1623,14 +1629,8 @@ Reference<IPeekCursor> LogSystem::peekLogRouter(
 			    .detail("FirstOld", firstOld);
 			// FIXME: do this merge on one of the logs in the other data center to avoid sending multiple copies
 			// across the WAN
-			return makeReference<SetPeekCursor>(localSets,
-			                                    bestSet,
-			                                    localSets[bestSet]->bestLocationFor(tag),
-			                                    tag,
-			                                    begin,
-			                                    firstOld && recoveredAt.present() ? recoveredAt.get() + 1
-			                                                                      : old.epochEnd,
-			                                    true);
+			return makeReference<SetPeekCursor>(
+			    localSets, bestSet, localSets[bestSet]->bestLocationFor(tag), tag, begin, oldEnd, true);
 		}
 		firstOld = false;
 	}
