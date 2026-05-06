@@ -282,11 +282,17 @@ Future<bool> runTest(Database cx,
 		if (spec.runConsistencyCheck) {
 			bool quiescent = g_network->isSimulated() ? !BUGGIFY : spec.waitForQuiescenceEnd;
 			try {
-				printf("Running urgent consistency check...\n");
-				TraceEvent("TestProgress").log("Running urgent consistency check");
-				co_await timeoutError(checkConsistencyUrgentSim(cx, testers), 20000.0);
-				printf("Urgent consistency check done\nRunning consistency check...\n");
-				TraceEvent("TestProgress").log("Urgent consistency check done; now invoking checkConsistency()");
+				if (quiescent) {
+					printf("Running urgent consistency check...\n");
+					TraceEvent("TestProgress").log("Running urgent consistency check");
+					co_await timeoutError(checkConsistencyUrgentSim(cx, testers), 20000.0);
+					printf("Urgent consistency check done\n");
+					TraceEvent("TestProgress").log("Urgent consistency check done");
+				} else {
+					TraceEvent("TestProgress").log("Skipping urgent consistency check for non-quiescent end state");
+				}
+				printf("Running consistency check...\n");
+				TraceEvent("TestProgress").log("Invoking checkConsistency()");
 				co_await timeoutError(checkConsistency(cx,
 				                                       testers,
 				                                       quiescent,

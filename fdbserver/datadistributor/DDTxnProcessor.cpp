@@ -329,6 +329,8 @@ class DDTxnProcessorImpl {
 		CODE_PROBE((bool)skipDDModeCheck, "DD Mode won't prevent read initial data distribution.");
 		// Get the server list in its own try/catch block since it modifies result.  We don't want a subsequent failure
 		// causing entries to be duplicated
+		// Phase 1: Single transaction to read server list and all persisted data moves
+		double serverListAndDataMoveReadStart = now();
 		while (true) {
 			numDataMoves = 0;
 			server_dc.clear();
@@ -390,7 +392,12 @@ class DDTxnProcessorImpl {
 					}
 				}
 
+				double dataMoveReadStart = now();
 				RangeResult dms = co_await tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY);
+				if (now() - dataMoveReadStart > 5.0) {
+					TraceEvent(SevWarn, "DDInitSlowDataMoveRead", distributorId)
+					    .detail("ElapsedSeconds", now() - dataMoveReadStart);
+				}
 				ASSERT(!dms.more && dms.size() < CLIENT_KNOBS->TOO_MANY);
 				// For each data move, find out the src or dst servers are in primary or remote DC.
 				for (int i = 0; i < dms.size(); ++i) {
@@ -438,6 +445,11 @@ class DDTxnProcessorImpl {
 
 				succeeded = true;
 
+				TraceEvent("DDInitServerListAndDataMoveReadComplete", distributorId)
+				    .detail("NumDataMoves", numDataMoves)
+				    .detail("NumServers", result->allServers.size())
+				    .detail("ElapsedSeconds", now() - serverListAndDataMoveReadStart);
+
 				break;
 			} catch (Error& e) {
 				err = e;
@@ -450,6 +462,10 @@ class DDTxnProcessorImpl {
 
 		// If keyServers is too large to read in a single transaction, then we will have to break this process up into
 		// multiple transactions. In that case, each iteration should begin where the previous left off
+		// Scan keyServers in batches to build the shard map
+		double keyServerScanStart = now();
+		double lastScanLogTime = now();
+		int scanBatchCount = 0;
 		while (beginKey < allKeys.end) {
 			CODE_PROBE(beginKey > allKeys.begin, "Multi-transactional getInitialDataDistribution");
 			while (true) {
@@ -537,6 +553,15 @@ class DDTxnProcessorImpl {
 
 					ASSERT_GT(keyServers.size(), 0);
 					beginKey = keyServers.end()[-1].key;
+					scanBatchCount++;
+					if (now() - lastScanLogTime >= 30.0) {
+						lastScanLogTime = now();
+						TraceEvent("DDInitKeyServerScanProgress", distributorId)
+						    .detail("BeginKey", beginKey)
+						    .detail("Batches", scanBatchCount)
+						    .detail("ShardsScanned", result->shards.size())
+						    .detail("ElapsedSeconds", now() - keyServerScanStart);
+					}
 					break;
 				} catch (Error& e) {
 					err = e;
@@ -552,6 +577,10 @@ class DDTxnProcessorImpl {
 
 		// a dummy shard at the end with no keys or servers makes life easier for trackInitialShards()
 		result->shards.push_back(DDShardInfo(allKeys.end));
+
+		TraceEvent("DDInitKeyServerScanComplete", distributorId)
+		    .detail("NumShards", result->shards.size())
+		    .detail("ElapsedSeconds", now() - keyServerScanStart);
 
 		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && numDataMoves > 0) {
 			for (int shard = 0; shard < result->shards.size() - 1; ++shard) {
