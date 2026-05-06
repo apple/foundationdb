@@ -317,7 +317,6 @@ void configureGenerator(const char* text,
 		                   "resolvers=",
 		                   "perpetual_storage_wiggle=",
 		                   "perpetual_storage_wiggle_locality=",
-		                   // TODO(zhewu): update fdbcli command documentation.
 		                   "perpetual_storage_wiggle_engine=",
 		                   "storage_migration_type=",
 		                   nullptr };
@@ -331,7 +330,8 @@ CommandFactory configureFactory(
         "<single|double|triple|three_data_hall|three_datacenter|ssd|memory|memory-radixtree|proxies=<PROXIES>|"
         "commit_proxies=<COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*|"
         "count=<TSS_COUNT>|perpetual_storage_wiggle=<WIGGLE_SPEED>|perpetual_storage_wiggle_locality="
-        "<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>|storage_migration_type={disabled|gradual|aggressive}"
+        "<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>|perpetual_storage_wiggle_engine=<ENGINE>|"
+        "storage_migration_type={disabled|gradual|aggressive}"
         "|exclude=<ADDRESS...>",
         "change the database configuration",
         "The `new' option, if present, initializes a new database with the given configuration rather than changing "

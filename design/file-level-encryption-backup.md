@@ -133,7 +133,7 @@ fdbrestore start \
 ```
 
 `fdbrestore` does **not** take `--encryption-block-size`; the block size
-is read from the backup's `file_level_encryption` metadata file.
+is read from the backup's `encryption_metadata` file.
 
 ### 4.4 Modify a backup destination
 
@@ -320,7 +320,7 @@ without decrypting the entire file.
 Per-block IVs are derived deterministically: the first 12 bytes come from
 a hash of the filename, and the last 4 bytes are the block index. This
 gives every block a unique IV while keeping reads seekable. On restore,
-the `file_level_encryption` metadata file is read first to recover the
+the `encryption_metadata` file is read first to recover the
 enable flag and the block size, so the reader splits each file into the
 exact same blocks that were produced at backup time.
 
@@ -331,12 +331,12 @@ stays unencrypted.
 
 | File                       | Contents                            | Purpose                                                                                |
 | -------------------------- | ----------------------------------- | -------------------------------------------------------------------------------------- |
-| `file_level_encryption`    | JSON object (see below)             | Indicates whether the backup is encrypted and the encryption block size used.          |
+| `encryption_metadata`      | JSON object (see below)             | Indicates whether the backup is encrypted and the encryption block size used.          |
 | `mutation_log_type`        | `"1"` or `"0"` (1 byte)             | Whether the backup uses partitioned mutation logs.                                     |
 | `log_begin_version`        | Version number as text (10 bytes)   | Earliest mutation-log version present in the backup.                                   |
 | `log_end_version`          | Version number as text (10 bytes)   | Latest mutation-log version present in the backup.                                     |
 
-`file_level_encryption` is a JSON object containing both the on/off flag
+`encryption_metadata` is a JSON object containing both the on/off flag
 and the block size used to encrypt the data files:
 
 ```json
@@ -353,7 +353,7 @@ and the block size used to encrypt the data files:
   what restore/decode tools use for the same backup, so it is persisted
   with the backup itself.
 
-The `file_level_encryption` metadata file is created immediately when a
+The `encryption_metadata` metadata file is created immediately when a
 backup starts. The other metadata files are generated only when
 `fdbrestore` or `fdbbackup describe` runs. Those operations scan
 filenames only, not file contents, when reconstructing the on-disk view.
@@ -363,8 +363,8 @@ Example container layout:
 ```
 ls -ltrh properties/
 total 16K
--rw-r--r-- 1 root root  74 Sep 15 21:04 file_level_encryption
--rw-r--r-- 1 root root   1 Sep 15 21:06 mutation_log_type
--rw-r--r-- 1 root root  10 Sep 15 21:41 log_end_version
--rw-r--r-- 1 root root  10 Sep 15 21:41 log_begin_version
+-rw-r--r-- 1 root root  74 May 5 21:04 encryption_metadata
+-rw-r--r-- 1 root root   1 May 5 21:06 mutation_log_type
+-rw-r--r-- 1 root root  10 May 5 21:41 log_end_version
+-rw-r--r-- 1 root root  10 May 5 21:41 log_begin_version
 ```
