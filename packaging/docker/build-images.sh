@@ -35,6 +35,9 @@ function create_fake_website_directory () {
     fi
     local stripped_binaries_and_from_where="${1}"
     fdb_binaries=( 'fdbbackup' 'fdbcli' 'fdbserver' 'fdbmonitor' )
+    if [ "${BUILD_MAKO:-0}" -eq 1 ]; then
+        fdb_binaries+=( 'mako' )
+    fi
     logg "PREPARING WEBSITE"
     website_directory="${script_dir}/website"
     rm -rf "${website_directory}"
@@ -208,6 +211,7 @@ function build_and_push_images () {
               [ "${image}" == 'foundationdb-kubernetes-sidecar' ] || \
               [ "${image}" == 'fdb-aws-s3-credentials-fetcher-sidecar' ] || \
               [ "${image}" == 'ycsb' ] || \
+              [ "${image}" == 'mako' ] || \
               [ "${image}" == 'fdb-kubernetes-monitor' ]; then
             tags_to_push+=("${image_tag}")
         fi
@@ -262,6 +266,9 @@ image_list=(
     'foundationdb-kubernetes-sidecar'
     'ycsb'
 )
+if [ "${BUILD_MAKO:-0}" -eq 1 ]; then
+    image_list+=( 'mako' )
+fi
 registry=""
 tag_base="foundationdb/"
 
