@@ -187,10 +187,7 @@ Future<BulkLoadTaskState> getBulkLoadTaskStateFromDataMove(Database cx,
 // This allows bulk load to work without SHARD_ENCODE_LOCATION_METADATA / dataMoveId.
 // The function retries until the read version >= atLeastVersion and a valid task is found.
 // If no task exists for the range, blocks forever (caller is expected to cancel via fetchKeys cancellation).
-Future<BulkLoadTaskState> getBulkLoadTaskStateByRange(Database cx,
-                                                      KeyRange range,
-                                                      Version atLeastVersion,
-                                                      UID logId) {
+Future<BulkLoadTaskState> getBulkLoadTaskStateByRange(Database cx, KeyRange range, Version atLeastVersion, UID logId) {
 	Transaction tr(cx);
 	int retryCount = 0;
 	int metadataRetryCount = 0;

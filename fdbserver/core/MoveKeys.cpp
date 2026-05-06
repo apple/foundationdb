@@ -1141,9 +1141,11 @@ static Future<Void> startMoveKeys(Database occ,
 						// Since we are setting this for the entire range, serverKeys and keyServers aren't guaranteed
 						// to have the same shard boundaries If that invariant was important, we would have to move this
 						// inside the loop above and also set it for the src servers
-						Value skValue = dataMoveId.isValid() ? serverKeysValue(dataMoveId) : serverKeysTrue;
-						actors.push_back(krmSetRangeCoalescing(
-						    tr, serverKeysPrefixFor(servers[i]), currentKeys, allKeys, skValue));
+						Value skValue = (dataMoveId.isValid() && dataMoveId != anonymousShardId)
+					                    ? serverKeysValue(dataMoveId)
+					                    : serverKeysTrue;
+						actors.push_back(
+						    krmSetRangeCoalescing(tr, serverKeysPrefixFor(servers[i]), currentKeys, allKeys, skValue));
 					}
 
 					co_await waitForAll(actors);
@@ -1155,14 +1157,12 @@ static Future<Void> startMoveKeys(Database occ,
 						DataMoveType dmType;
 						DataMovementReason dmReason;
 						decodeDataMoveId(dataMoveId, assigned, emptyRange, dmType, dmReason);
-						if (dmType == DataMoveType::LOGICAL_BULKLOAD ||
-						    dmType == DataMoveType::PHYSICAL_BULKLOAD) {
+						if (dmType == DataMoveType::LOGICAL_BULKLOAD || dmType == DataMoveType::PHYSICAL_BULKLOAD) {
 							RangeResult result = co_await krmGetRanges(tr, bulkLoadTaskPrefix, keys);
 							if (result.size() >= 2 && !result[0].value.empty()) {
 								BulkLoadTaskState taskState = decodeBulkLoadTaskState(result[0].value);
-								if (taskState.isValid() &&
-								    (taskState.phase == BulkLoadPhase::Triggered ||
-								     taskState.phase == BulkLoadPhase::Running)) {
+								if (taskState.isValid() && (taskState.phase == BulkLoadPhase::Triggered ||
+								                            taskState.phase == BulkLoadPhase::Running)) {
 									taskState.phase = BulkLoadPhase::Running;
 									taskState.setDataMoveId(dataMoveId);
 									taskState.startTime = now();
@@ -1665,8 +1665,7 @@ static Future<Void> finishMoveKeys(Database occ,
 							DataMoveType dmType;
 							DataMovementReason dmReason;
 							decodeDataMoveId(dataMoveId, assigned, emptyRange, dmType, dmReason);
-							if (dmType == DataMoveType::LOGICAL_BULKLOAD ||
-							    dmType == DataMoveType::PHYSICAL_BULKLOAD) {
+							if (dmType == DataMoveType::LOGICAL_BULKLOAD || dmType == DataMoveType::PHYSICAL_BULKLOAD) {
 								RangeResult result = co_await krmGetRanges(&tr, bulkLoadTaskPrefix, keys);
 								if (result.size() >= 2 && !result[0].value.empty()) {
 									BulkLoadTaskState taskState = decodeBulkLoadTaskState(result[0].value);
