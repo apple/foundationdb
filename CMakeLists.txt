@@ -297,6 +297,7 @@ if(NOT WIN32)
   if(NOT FOUNDATIONDB_CROSS_COMPILING) # FIXME(swift): make this work when
                                        # x-compiling.
     add_subdirectory(fdbmonitor)
+    add_subdirectory(fdbkubernetesmonitor)
   endif()
 endif()
 add_subdirectory(fdbbackup)

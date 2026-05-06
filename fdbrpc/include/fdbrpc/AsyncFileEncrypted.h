@@ -53,7 +53,7 @@ private:
 	Future<Void> initialize();
 
 public:
-	AsyncFileEncrypted(Reference<IAsyncFile>, Mode, int blockSize);
+	AsyncFileEncrypted(Reference<IAsyncFile>, Mode, int);
 	void addref() override;
 	void delref() override;
 	Future<int> read(void* data, int length, int64_t offset) override;
