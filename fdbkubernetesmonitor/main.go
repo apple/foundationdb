@@ -174,7 +174,11 @@ func main() {
 			logger.Error(err, "Error parsing container version", "currentContainerVersion", currentContainerVersion)
 			os.Exit(1)
 		}
-		startMonitor(context.Background(), logger, path.Join(inputDir, monitorConfFile), customEnvironment, processCount, promConfig, enablePprof, parsedVersion, enableNodeWatch)
+
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+
+		startMonitor(ctx, logger, path.Join(inputDir, monitorConfFile), customEnvironment, processCount, promConfig, enablePprof, parsedVersion, enableNodeWatch)
 	case executionModeInit:
 		err = copyFiles(logger, outputDir, copyDetails, requiredCopies)
 		if err != nil {
