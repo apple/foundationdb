@@ -2515,6 +2515,12 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 				}
 			}
 
+			if (processClass == ProcessClass::StatelessClass && !desiredStatelessClasses.present()) {
+				desiredStatelessClasses = std::max({ simconfig.db.getDesiredCommitProxies(),
+				                                     simconfig.db.getDesiredGrvProxies(),
+				                                     simconfig.db.getDesiredResolvers() });
+			}
+
 			if (desiredStatelessClasses.present() && actualStatelessClasses < desiredStatelessClasses.get()) {
 				processClass = ProcessClass(ProcessClass::StatelessClass, ProcessClass::CommandLineSource);
 				actualStatelessClasses++;
