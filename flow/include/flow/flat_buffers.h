@@ -498,7 +498,7 @@ void swapWithThreadLocalGlobal(std::vector<int>& writeToOffsets);
 
 template <class Context>
 struct PrecomputeSize : Context {
-	PrecomputeSize(const Context& context) : Context(context) {
+	explicit PrecomputeSize(const Context& context) : Context(context) {
 		swapWithThreadLocalGlobal(writeToOffsets);
 		writeToOffsets.clear();
 	}
@@ -700,7 +700,7 @@ struct InsertVTableLambda;
 
 template <class Context>
 struct TraverseMessageTypes : Context {
-	TraverseMessageTypes(InsertVTableLambda<Context>& context) : Context(context), f(context) {}
+	explicit TraverseMessageTypes(InsertVTableLambda<Context>& context) : Context(context), f(context) {}
 
 	InsertVTableLambda<Context>& f;
 
@@ -1073,7 +1073,7 @@ void for_each_i(F&& f) {
 
 template <class, class Context>
 struct LoadSaveHelper : Context {
-	LoadSaveHelper(const Context& context) : Context(context) {}
+	explicit LoadSaveHelper(const Context& context) : Context(context) {}
 	template <class U>
 	    requires(is_scalar<U>)
 	void load(U& member, const uint8_t* current) {
@@ -1241,7 +1241,7 @@ struct LoadSaveHelper : Context {
 template <class Alloc, class Context>
 struct LoadSaveHelper<std::vector<bool, Alloc>, Context> : Context {
 
-	LoadSaveHelper(const Context& context) : Context(context) {}
+	explicit LoadSaveHelper(const Context& context) : Context(context) {}
 
 	void load(std::vector<bool, Alloc>& member, const uint8_t* current) {
 		uint32_t current_offset = interpret_as<uint32_t>(current);
@@ -1293,7 +1293,7 @@ template <class... Members>
 struct FakeRoot {
 	std::tuple<Members&...> members;
 
-	FakeRoot(Members&... members) : members(members...) {}
+	explicit FakeRoot(Members&... members) : members(members...) {}
 
 	template <class Archive>
 	void serialize(Archive& archive) {
@@ -1373,7 +1373,7 @@ template <class T>
 struct EnsureTable
   : std::conditional_t<HasFileIdentifier<T>::value, detail::YesFileIdentifier<T>, detail::NoFileIdentifier> {
 	EnsureTable() : t() {}
-	EnsureTable(const T& t) : t(t) {}
+	explicit EnsureTable(const T& t) : t(t) {}
 	template <class Archive>
 	void serialize(Archive& ar) {
 		if constexpr (is_fb_function<Archive>) {
@@ -1403,7 +1403,7 @@ namespace detail {
 // Ensure if there's a LoadSaveHelper specialization available for T it gets used.
 template <class T, class Context>
 struct LoadSaveHelper<EnsureTable<T>, Context> : Context {
-	LoadSaveHelper(const Context& context) : Context(context), alreadyATable(context), wrapInTable(context) {}
+	explicit LoadSaveHelper(const Context& context) : Context(context), alreadyATable(context), wrapInTable(context) {}
 
 	void load(EnsureTable<T>& member, const uint8_t* current) {
 		if constexpr (expect_serialize_member<T>) {

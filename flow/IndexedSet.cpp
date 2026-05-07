@@ -429,9 +429,9 @@ TEST_CASE("/flow/IndexedSet/data constructor and destructor calls match") {
 	count = 0;
 	struct Counter {
 		int value;
-		Counter(int value) : value(value) { count++; }
+		explicit Counter(int value) : value(value) { count++; }
 		~Counter() { count--; }
-		Counter(const Counter& r) : value(r.value) { count++; }
+		explicit(false) Counter(const Counter& r) : value(r.value) { count++; }
 		void operator=(const Counter& r) { value = r.value; }
 		int compare(const Counter& r) const { return ::compare(value, r.value); }
 		bool operator<(const Counter& r) const { return value < r.value; }

@@ -306,7 +306,7 @@ class TransactionCostWorkload : public TestWorkload {
 	}
 
 public:
-	TransactionCostWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit TransactionCostWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		iterations = getOption(options, "iterations"_sr, 1000);
 		prefix = getOption(options, "prefix"_sr, "transactionCost/"_sr);
 		debugTransactions = getOption(options, "debug"_sr, false);

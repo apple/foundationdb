@@ -96,7 +96,7 @@ class AttributeNotFoundError : public Error {
 	std::string missingAttribute;
 
 public:
-	AttributeNotFoundError(const std::string&);
+	explicit AttributeNotFoundError(const std::string&);
 
 	const std::string& getMissingAttribute() const;
 };

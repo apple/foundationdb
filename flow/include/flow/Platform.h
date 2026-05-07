@@ -475,7 +475,7 @@ int eraseDirectoryRecursive(std::string const& directory);
 struct TmpFile {
 public:
 	TmpFile();
-	TmpFile(const std::string& tempDir);
+	explicit TmpFile(const std::string& tempDir);
 	TmpFile(const std::string& tempDir, std::string const& prefix);
 	~TmpFile();
 	size_t read(uint8_t* buff, size_t len);

@@ -35,7 +35,7 @@ struct SimpleAtomicAddWorkload : TestWorkload {
 	double testDuration;
 	std::vector<Future<Void>> clients;
 
-	SimpleAtomicAddWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit SimpleAtomicAddWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		addValue = getOption(options, "addValue"_sr, 1);
 		iterations = getOption(options, "iterations"_sr, 100);

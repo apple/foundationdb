@@ -35,7 +35,7 @@ struct DDBalanceWorkload : TestWorkload {
 	PerfIntCounter bin_shifts, operations, retries;
 	DDSketch<double> latencies;
 
-	DDBalanceWorkload(WorkloadContext const& wcx)
+	explicit DDBalanceWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), bin_shifts("Bin_Shifts"), operations("Operations"), retries("Retries"), latencies() {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		binCount = getOption(options, "binCount"_sr, 1000);

@@ -393,7 +393,7 @@ private:
 // The DL prefix stands for "dynamic library".
 class DLApi : public IClientApi {
 public:
-	DLApi(std::string fdbCPath, bool unlinkOnLoad = false);
+	explicit DLApi(std::string fdbCPath, bool unlinkOnLoad = false);
 
 	void selectApiVersion(int apiVersion) override;
 	const char* getClientVersion() override;
@@ -585,7 +585,7 @@ struct ClientInfo : ClientDesc, ThreadSafeReferenceCounted<ClientInfo> {
 	ClientInfo()
 	  : ClientDesc(std::string(), false, false), protocolVersion(0), api(nullptr), failed(true), initialized(false),
 	    threadIndex(0) {}
-	ClientInfo(IClientApi* api)
+	explicit ClientInfo(IClientApi* api)
 	  : ClientDesc("internal", false, false), protocolVersion(0), api(api), failed(false), initialized(false),
 	    threadIndex(0) {}
 	ClientInfo(IClientApi* api, std::string libPath, bool useFutureVersion, int threadIndex)

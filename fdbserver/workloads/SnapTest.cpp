@@ -48,7 +48,7 @@ public: // variables
 	bool attemptDuplicateSnapshot = false;
 
 public: // ctor & dtor
-	SnapTestWorkload(WorkloadContext const& wcx)
+	explicit SnapTestWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), numSnaps(0), maxSnapDelay(0.0), testID(0), snapUID() {
 		TraceEvent("SnapTestWorkloadConstructor").log();
 		std::string workloadName = "SnapTest";

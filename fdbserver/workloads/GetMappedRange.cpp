@@ -51,7 +51,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	double checkStorageQueueSeconds;
 	uint64_t queueMaxLength;
 
-	GetMappedRangeWorkload(WorkloadContext const& wcx) : ApiWorkload(wcx) {
+	explicit GetMappedRangeWorkload(WorkloadContext const& wcx) : ApiWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
 		checkStorageQueueSeconds = getOption(options, "checkStorageQueueSeconds"_sr, 60.0);
 		queueMaxLength = getOption(options, "queueMaxLength"_sr, UINT64_C(100));
