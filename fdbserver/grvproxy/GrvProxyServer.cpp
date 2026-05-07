@@ -1084,8 +1084,8 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 				grvProxyData->stats.batchTxnGRVTimeInQueue.addMeasurement(currentTime - req.requestTime());
 				--grvProxyData->stats.batchGRVQueueSize;
 			}
-			for (const auto& tag : req.tags) {
-				transactionTagCounter[tag.first] += tag.second;
+			for (const auto& [tag, count] : req.tags) {
+				transactionTagCounter[tag] += count;
 			}
 			queueTransactionCounts.remove(req);
 			start[req.flags & 1].push_back(std::move(req));
