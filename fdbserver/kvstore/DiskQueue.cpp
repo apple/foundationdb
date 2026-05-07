@@ -593,7 +593,7 @@ public:
 		// Wait for all reads and writes on the file, and all actors referencing self, to be finished
 		Error error = success();
 		try {
-			co_await success(errorOr(self->lastCommit));
+			co_await errorOr(self->lastCommit);
 			// Wait for the pending operations (e.g., read) to finish before we destroy the DiskQueue, because
 			// tLog, instead of DiskQueue, hold the future of the pending operations.
 			co_await self->onSafeToDestruct();
