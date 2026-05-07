@@ -2892,8 +2892,7 @@ class CommitProxyServerCore {
 
 	Future<Void> serveBatchedCommits() {
 		while (true) {
-			std::pair<std::vector<CommitTransactionRequest>, int> batchedRequests =
-			    co_await batchedCommits.getFuture();
+			std::pair<std::vector<CommitTransactionRequest>, int> batchedRequests = co_await batchedCommits.getFuture();
 
 			// WARNING: this code is run at a high priority, so it needs to do as little work as possible
 			/*
@@ -2978,19 +2977,19 @@ public:
 	                      bool provisional,
 	                      uint16_t commitProxyIndex)
 	  : proxy(proxy), masterLifetime(masterLifetime), db(db), firstProxy(firstProxy),
-	    whitelistBinPaths(std::move(whitelistBinPaths)),
-	    commitData(proxy.id(),
-	               master,
-	               recoveryTransactionVersion,
-	               proxy.commit,
-	               db,
-	               firstProxy,
-	               provisional,
-	               commitProxyIndex,
-	               epoch),
+	    whitelistBinPaths(std::move(whitelistBinPaths)), commitData(proxy.id(),
+	                                                                master,
+	                                                                recoveryTransactionVersion,
+	                                                                proxy.commit,
+	                                                                db,
+	                                                                firstProxy,
+	                                                                provisional,
+	                                                                commitProxyIndex,
+	                                                                epoch),
 	    txnTagCommitCostReporter(proxy.id(), db, &commitData.ssTrTagCommitCost),
-	    idempotencyIdsExpireServer(
-	        proxy.expireIdempotencyId, commitData.expectedIdempotencyIdCountForKey, &commitData.idempotencyClears),
+	    idempotencyIdsExpireServer(proxy.expireIdempotencyId,
+	                               commitData.expectedIdempotencyIdCountForKey,
+	                               &commitData.idempotencyClears),
 	    onError(transformError(actorCollection(addActor.getFuture()), broken_promise(), tlog_failed())) {}
 
 	Future<Void> run() {
@@ -3012,10 +3011,10 @@ public:
 		commitData.localTLogCount = commitData.db->get().logSystemConfig.numLogs();
 		ASSERT(commitData.resolvers.size() != 0);
 		for (int i = 0; i < commitData.resolvers.size(); ++i) {
-			commitData.stats.resolverDist.push_back(Histogram::getHistogram("CommitProxy"_sr,
-			                                                                "ToResolver_" +
-			                                                                    commitData.resolvers[i].id().toString(),
-			                                                                Histogram::Unit::milliseconds));
+			commitData.stats.resolverDist.push_back(
+			    Histogram::getHistogram("CommitProxy"_sr,
+			                            "ToResolver_" + commitData.resolvers[i].id().toString(),
+			                            Histogram::Unit::milliseconds));
 		}
 
 		// Initialize keyResolvers map
@@ -3046,9 +3045,9 @@ public:
 		if (SERVER_KNOBS->SERVER_MEM_LIMIT > 0) {
 			commitBatchesMemoryLimit =
 			    std::min(commitBatchesMemoryLimit,
-			             static_cast<int64_t>((SERVER_KNOBS->SERVER_MEM_LIMIT *
-			                                   SERVER_KNOBS->COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL) /
-			                                  SERVER_KNOBS->COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR));
+			             static_cast<int64_t>(
+			                 (SERVER_KNOBS->SERVER_MEM_LIMIT * SERVER_KNOBS->COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL) /
+			                 SERVER_KNOBS->COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR));
 		}
 		TraceEvent(SevInfo, "CommitBatchesMemoryLimit").detail("BytesLimit", commitBatchesMemoryLimit);
 
@@ -3069,7 +3068,9 @@ public:
 
 		if (firstProxy) {
 			addActor.send(recurringAsync(
-			    [openDb = openDb]() { return cleanIdempotencyIds(openDb, SERVER_KNOBS->IDEMPOTENCY_IDS_MIN_AGE_SECONDS); },
+			    [openDb = openDb]() {
+				    return cleanIdempotencyIds(openDb, SERVER_KNOBS->IDEMPOTENCY_IDS_MIN_AGE_SECONDS);
+			    },
 			    SERVER_KNOBS->IDEMPOTENCY_IDS_CLEANER_POLLING_INTERVAL,
 			    true,
 			    SERVER_KNOBS->IDEMPOTENCY_IDS_CLEANER_POLLING_INTERVAL));
