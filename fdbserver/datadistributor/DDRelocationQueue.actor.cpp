@@ -1619,7 +1619,11 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 			// are all invalid. i.e. the range of new relocators is match to the range of prevCleanup.
 		} else if (doBulkLoading) {
 			// Bulk load without SHARD_ENCODE_LOCATION_METADATA: validate task and assign dataMoveId.
-			// Mark as non-cancellable before waiting, to avoid DDQueueValidateError13.
+			// Set cancellable=false before co_await prevCleanup to prevent DDQueueValidateError13:
+			// the DD validation loop checks that any range marked cancellable in inFlight has a live
+			// relocator actor. During prevCleanup, there's a window where the old actor is cancelled
+			// but this actor hasn't progressed past the wait — without this, the validation would see
+			// a cancellable entry with no live actor and fire the error.
 			auto inFlightRange = self->inFlight.rangeContaining(rd.keys.begin);
 			ASSERT(inFlightRange.range() == rd.keys);
 			inFlightRange.value().cancellable = false;

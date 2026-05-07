@@ -8165,7 +8165,9 @@ Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 	bool conductBulkLoad = moveInShard->meta->conductBulkLoad;
 	if (conductBulkLoad) {
 		// Look up bulk load task directly by range, without going through DataMoveMetaData.
+		// Bulk load moves always operate on a single range.
 		ASSERT(!moveInShard->meta->ranges.empty());
+		ASSERT(moveInShard->meta->ranges.size() == 1);
 		bulkLoadTaskState = co_await getBulkLoadTaskStateByRange(
 		    data->cx, moveInShard->meta->ranges.front(), data->version.get(), data->thisServerID);
 	}

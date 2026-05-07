@@ -227,9 +227,11 @@ Future<BulkLoadTaskState> getBulkLoadTaskStateByRange(Database cx, KeyRange rang
 						    .detail("VersionRetryCount", retryCount)
 						    .detail("ElapsedSec", now() - startTime);
 					}
-					// Log if the task range doesn't match the requested range
+					// The task range may not exactly match the requested range if the shard was
+					// split within the task's range. This is expected — the SS will only load
+					// keys within its own assigned range from the task's data.
 					if (bulkLoadTaskState.getRange() != range) {
-						TraceEvent(SevWarn, "SSBulkLoadTaskByRangeRangeMismatch", logId)
+						TraceEvent(SevInfo, "SSBulkLoadTaskByRangeRangeMismatch", logId)
 						    .detail("RequestedRange", range)
 						    .detail("TaskRange", bulkLoadTaskState.getRange())
 						    .detail("TaskID", bulkLoadTaskState.getTaskId());
