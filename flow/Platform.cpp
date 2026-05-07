@@ -161,6 +161,7 @@ static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<u
 
 #ifdef __APPLE__
 /* Needed for cross-platform 'environ' */
+#include <sys/random.h>
 #include <crt_externs.h>
 #include <mach-o/dyld.h>
 #include <mach/mach.h>
@@ -2225,6 +2226,35 @@ int getRandomSeed() {
 #endif
 
 	return randomSeed;
+}
+
+void getRandomBytes(void* buf, size_t len) {
+	INJECT_FAULT(platform_error, "getRandomBytes"); // getting random bytes failed
+	ASSERT(len == 0 || buf != nullptr);
+#ifdef _WIN32
+	size_t pos = 0;
+	while (pos < len) {
+		unsigned int val;
+		if (rand_s(&val) != 0) {
+			TraceEvent(SevError, "WindowsRandomBytesError").log();
+			throw platform_error();
+		}
+		size_t chunk = std::min(sizeof(val), len - pos);
+		memcpy(static_cast<uint8_t*>(buf) + pos, &val, chunk);
+		pos += chunk;
+	}
+#else
+	uint8_t* p = static_cast<uint8_t*>(buf);
+	while (len > 0) {
+		size_t chunk = std::min(len, size_t(256));
+		if (getentropy(p, chunk) != 0) {
+			TraceEvent(SevError, "GetEntropyError").detail("Errno", errno);
+			throw platform_error();
+		}
+		p += chunk;
+		len -= chunk;
+	}
+#endif
 }
 } // namespace platform
 
