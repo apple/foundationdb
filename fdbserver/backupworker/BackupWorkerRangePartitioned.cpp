@@ -848,7 +848,7 @@ Future<Void> saveProgress(BackupRangePartitionedData* self, Version backupVersio
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			// CHECK: Don't save progress if backup workers are disabled
-			Optional<Value> backupWorkerEnabled = co_await tr.get(backupWorkerEnabledKey);
+			Optional<Value> backupWorkerEnabled = co_await tr.get(rangeBackupWorkerEnabledKey);
 			if (!backupWorkerEnabled.present() || backupWorkerEnabled.get() == "0"_sr) {
 				TraceEvent("BWRangePartitionedProgressSkipped", self->myId).detail("Reason", "BackupWorkersDisabled");
 				co_return;

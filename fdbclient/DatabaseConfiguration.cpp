@@ -52,6 +52,7 @@ void DatabaseConfiguration::resetInternal() {
 	remoteDesiredTLogCount = -1;
 	remoteTLogReplicationFactor = repopulateRegionAntiQuorum = 0;
 	backupWorkerEnabled = false;
+	rangeBackupWorkerEnabled = false;
 	perpetualStorageWiggleSpeed = 0;
 	perpetualStorageWiggleLocality = "0";
 	storageMigrationType = StorageMigrationType::DEFAULT;
@@ -430,6 +431,7 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	}
 
 	result["backup_worker_enabled"] = (int32_t)backupWorkerEnabled;
+	result["range_backup_worker_enabled"] = (int32_t)rangeBackupWorkerEnabled;
 	result["perpetual_storage_wiggle"] = perpetualStorageWiggleSpeed;
 	result["perpetual_storage_wiggle_locality"] = perpetualStorageWiggleLocality;
 	if (perpetualStoreType.storeType() != KeyValueStoreType::END) {
@@ -700,6 +702,9 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	} else if (ck == "backup_worker_enabled"_sr) {
 		parse((&type), value);
 		backupWorkerEnabled = (type != 0);
+	} else if (ck == "range_backup_worker_enabled"_sr) {
+		parse((&type), value);
+		rangeBackupWorkerEnabled = (type != 0);
 	} else if (ck == "usable_regions"_sr) {
 		parse(&usableRegions, value);
 	} else if (ck == "repopulate_anti_quorum"_sr) {

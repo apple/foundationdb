@@ -503,6 +503,34 @@ Future<Void> enableBackupWorker(Database cx) {
 	}
 }
 
+Future<Void> enableRangeBackupWorker(Database cx) {
+	DatabaseConfiguration configuration = co_await getDatabaseConfiguration(cx);
+	if (configuration.rangeBackupWorkerEnabled) {
+		TraceEvent("RangeBackupWorkerAlreadyEnabled");
+		co_return;
+	}
+	ConfigurationResult res =
+	    co_await ManagementAPI::changeConfig(cx.getReference(), "range_backup_worker_enabled:=1", true);
+	if (res != ConfigurationResult::SUCCESS) {
+		TraceEvent("RangeBackupWorkerEnableFailed").detail("Result", res);
+		throw operation_failed();
+	}
+}
+
+Future<Void> disableRangeBackupWorker(Database cx) {
+	DatabaseConfiguration configuration = co_await getDatabaseConfiguration(cx);
+	if (!configuration.rangeBackupWorkerEnabled) {
+		TraceEvent("RangeBackupWorkerAlreadyDisabled");
+		co_return;
+	}
+	ConfigurationResult res =
+	    co_await ManagementAPI::changeConfig(cx.getReference(), "range_backup_worker_enabled:=0", true);
+	if (res != ConfigurationResult::SUCCESS) {
+		TraceEvent("RangeBackupWorkerDisableFailed").detail("Result", res);
+		throw operation_failed();
+	}
+}
+
 Future<DatabaseConfiguration> getDatabaseConfiguration(Transaction* tr, bool useSystemPriority) {
 	if (useSystemPriority) {
 		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
