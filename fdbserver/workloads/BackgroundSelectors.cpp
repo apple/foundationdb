@@ -36,7 +36,7 @@ struct BackgroundSelectorWorkload : TestWorkload {
 	std::vector<Future<Void>> clients;
 	PerfIntCounter operations, checks, retries;
 
-	BackgroundSelectorWorkload(WorkloadContext const& wcx)
+	explicit BackgroundSelectorWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), operations("Operations"), checks("Checks"), retries("Retries") {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		actorsPerClient = std::max(getOption(options, "actorsPerClient"_sr, 1), 1);

@@ -121,7 +121,7 @@ struct Tuple {
 	}
 
 private:
-	Tuple(const StringRef& data, bool exclude_incomplete = false, bool exclude_user_type = false);
+	explicit Tuple(const StringRef& data, bool exclude_incomplete = false, bool exclude_user_type = false);
 	Standalone<VectorRef<uint8_t>> data;
 	std::vector<size_t> offsets;
 };

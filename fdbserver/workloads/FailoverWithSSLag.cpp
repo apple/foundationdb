@@ -42,7 +42,7 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 	std::vector<IPAddress> tlogs; // remote tlogs
 	std::vector<IPAddress> storages; // remote storages
 
-	FailoverWithSSLagWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit FailoverWithSSLagWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled =
 		    !clientId && g_network->isSimulated(); // only do this on the "first" client, and only when in simulation
 		testDuration = getOption(options, "testDuration"_sr, 400.0);

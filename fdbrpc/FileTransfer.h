@@ -57,7 +57,8 @@ private:
 
 class FileTransferClient {
 public:
-	FileTransferClient(std::shared_ptr<grpc::Channel> channel) : stub_(fdbrpc::FileTransferService::NewStub(channel)) {}
+	explicit FileTransferClient(std::shared_ptr<grpc::Channel> channel)
+	  : stub_(fdbrpc::FileTransferService::NewStub(channel)) {}
 
 	std::optional<fdbrpc::GetFileInfoReply> GetFileInfo(const std::string& filename, bool get_crc_checksum = false);
 

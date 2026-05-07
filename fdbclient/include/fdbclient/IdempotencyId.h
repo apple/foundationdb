@@ -85,9 +85,9 @@ struct IdempotencyIdRef {
 
 	bool operator==(const IdempotencyIdRef& other) const { return asStringRefUnsafe() == other.asStringRefUnsafe(); }
 
-	IdempotencyIdRef(IdempotencyIdRef&& other) = default;
+	explicit(false) IdempotencyIdRef(IdempotencyIdRef&& other) = default;
 	IdempotencyIdRef& operator=(IdempotencyIdRef&& other) = default;
-	IdempotencyIdRef(const IdempotencyIdRef& other) = default;
+	explicit(false) IdempotencyIdRef(const IdempotencyIdRef& other) = default;
 	IdempotencyIdRef& operator=(const IdempotencyIdRef& other) = default;
 
 	template <class Archive>

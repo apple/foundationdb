@@ -32,7 +32,7 @@ struct StorageCorruptionWorkload : TestWorkload {
 	SimBugInjector bugInjector;
 	double testDuration;
 
-	StorageCorruptionWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit StorageCorruptionWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		bugInjector.enable();
 		bug = bugInjector.enable<StorageCorruptionBug>(StorageCorruptionBugID());
 		bugInjector.disable();

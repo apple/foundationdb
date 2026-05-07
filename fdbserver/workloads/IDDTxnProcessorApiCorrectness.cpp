@@ -125,7 +125,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 	// counters
 	int testRawStart = 0, testAll = 0, testRawFinish = 0;
 
-	IDDTxnProcessorApiWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), ddContext(UID()) {
+	explicit IDDTxnProcessorApiWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), ddContext(UID()) {
 		enabled = !clientId && g_network->isSimulated(); // only do this on the "first" client
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		testStartOnly = getOption(options, "testStartOnly"_sr, false);

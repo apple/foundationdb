@@ -42,7 +42,7 @@ struct FileSystemWorkload : TestWorkload {
 		virtual ~FileSystemOp() = default;
 	};
 
-	FileSystemWorkload(WorkloadContext const& wcx)
+	explicit FileSystemWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), queries("Queries"), writes("Latency"), latencies(), writeLatencies() {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0) / clientCount;

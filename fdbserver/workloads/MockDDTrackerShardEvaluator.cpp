@@ -50,7 +50,7 @@ public:
 	int checkMinSizeSplit = 0;
 	int checkMinWriteSplit = 0;
 
-	MockDDTrackerShardEvaluatorWorkload(WorkloadContext const& wcx)
+	explicit MockDDTrackerShardEvaluatorWorkload(WorkloadContext const& wcx)
 	  : MockDDTestWorkload(wcx), ddcx(deterministicRandom()->randomUniqueID()) {
 		checkMinShardCount = getOption(options, "checkMinShardCount"_sr, checkMinShardCount);
 		checkMinSizeSplit = getOption(options, "checkMinSizeSplit"_sr, checkMinSizeSplit);

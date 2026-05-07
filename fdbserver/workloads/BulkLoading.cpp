@@ -78,7 +78,7 @@ struct BulkLoading : TestWorkload {
 		             "BulkDumping" });
 	}
 
-	BulkLoading(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(true), pass(true) {}
+	explicit BulkLoading(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(true), pass(true) {}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 

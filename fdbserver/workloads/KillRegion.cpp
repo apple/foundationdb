@@ -34,7 +34,7 @@ struct KillRegionWorkload : TestWorkload {
 	bool enabled;
 	double testDuration;
 
-	KillRegionWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit KillRegionWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled =
 		    !clientId && g_network->isSimulated(); // only do this on the "first" client, and only when in simulation
 		testDuration = getOption(options, "testDuration"_sr, 10.0);

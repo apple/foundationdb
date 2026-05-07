@@ -37,7 +37,7 @@ struct WatchesWorkload : TestWorkload {
 	DDSketch<double> cycleLatencies;
 	std::vector<int> nodeOrder;
 
-	WatchesWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), cycles("Cycles"), cycleLatencies() {
+	explicit WatchesWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), cycles("Cycles"), cycleLatencies() {
 		testDuration = getOption(options, "testDuration"_sr, 600.0);
 		nodes = getOption(options, "nodeCount"_sr, 100);
 		extraPerNode = getOption(options, "extraPerNode"_sr, 1000);

@@ -31,7 +31,7 @@ struct LockDatabaseWorkload : TestWorkload {
 	bool ok;
 	bool onlyCheckLocked;
 
-	LockDatabaseWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), ok(true) {
+	explicit LockDatabaseWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), ok(true) {
 		lockAfter = getOption(options, "lockAfter"_sr, 0.0);
 		unlockAfter = getOption(options, "unlockAfter"_sr, 10.0);
 		onlyCheckLocked = getOption(options, "onlyCheckLocked"_sr, false);

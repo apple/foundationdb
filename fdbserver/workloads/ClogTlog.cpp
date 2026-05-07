@@ -51,7 +51,7 @@ struct ClogTlogWorkload : TestWorkload {
 	Optional<NetworkAddress> tlog; // the tlog to be clogged with all other processes except the CC
 	std::vector<std::pair<IPAddress, IPAddress>> cloggedPairs;
 
-	ClogTlogWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit ClogTlogWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
 		testDuration = getOption(options, "testDuration"_sr, 1000.0);
 	}

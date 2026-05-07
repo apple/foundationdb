@@ -125,7 +125,7 @@ struct LengthPrefixedStringRef {
 	uint32_t* getLengthPtr() const { return length; }
 
 	LengthPrefixedStringRef() : length(nullptr) {}
-	LengthPrefixedStringRef(uint32_t* length) : length(length) {}
+	explicit LengthPrefixedStringRef(uint32_t* length) : length(length) {}
 };
 
 struct LogPushData : NonCopyable {

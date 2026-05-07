@@ -85,7 +85,7 @@ class ThreadReturnPromise : NonCopyable {
 public:
 	ThreadReturnPromise() {}
 	ThreadReturnPromise(const ThreadReturnPromise& p) = delete;
-	ThreadReturnPromise(ThreadReturnPromise&& other) : promise(std::move(other.promise)) {}
+	explicit(false) ThreadReturnPromise(ThreadReturnPromise&& other) : promise(std::move(other.promise)) {}
 
 	~ThreadReturnPromise() {
 		if (promise.isValid())

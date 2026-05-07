@@ -31,7 +31,7 @@
 
 class SimExternalConnection final : public IConnection, public ReferenceCounted<SimExternalConnection> {
 	boost::asio::ip::tcp::socket socket;
-	SimExternalConnection(boost::asio::ip::tcp::socket&& socket);
+	explicit SimExternalConnection(boost::asio::ip::tcp::socket&& socket);
 	UID dbgid;
 	std::deque<uint8_t> readBuffer;
 	AsyncTrigger onReadableTrigger;

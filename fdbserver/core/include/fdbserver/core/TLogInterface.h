@@ -164,7 +164,7 @@ struct TLogConfirmRunningRequest {
 	ReplyPromise<Void> reply;
 
 	TLogConfirmRunningRequest() {}
-	TLogConfirmRunningRequest(Optional<UID> debugID) : debugID(debugID) {}
+	explicit TLogConfirmRunningRequest(Optional<UID> debugID) : debugID(debugID) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -403,7 +403,7 @@ struct TLogDisablePopRequest {
 	Optional<UID> debugID;
 
 	TLogDisablePopRequest() = default;
-	TLogDisablePopRequest(const UID uid) : snapUID(uid) {}
+	explicit TLogDisablePopRequest(const UID uid) : snapUID(uid) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -418,7 +418,7 @@ struct TLogEnablePopRequest {
 	Optional<UID> debugID;
 
 	TLogEnablePopRequest() = default;
-	TLogEnablePopRequest(const UID uid) : snapUID(uid) {}
+	explicit TLogEnablePopRequest(const UID uid) : snapUID(uid) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -468,7 +468,7 @@ struct TrackTLogRecoveryRequest {
 	ReplyPromise<TrackTLogRecoveryReply> reply;
 
 	TrackTLogRecoveryRequest() {}
-	TrackTLogRecoveryRequest(Version oldestGenRecoverAtVersion)
+	explicit TrackTLogRecoveryRequest(Version oldestGenRecoverAtVersion)
 	  : oldestGenRecoverAtVersion(oldestGenRecoverAtVersion) {}
 
 	template <class Ar>

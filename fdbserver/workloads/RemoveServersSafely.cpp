@@ -45,7 +45,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 	std::map<AddressExclusion, Optional<Standalone<StringRef>>> machine_ids; // ip -> Locality Zone id
 	std::map<AddressExclusion, std::set<AddressExclusion>> machineProcesses; // ip -> ip:port
 
-	RemoveServersSafelyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit RemoveServersSafelyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled =
 		    !clientId && g_network->isSimulated(); // only do this on the "first" client, and only when in simulation
 		minMachinesToKill = getOption(options, "minMachinesToKill"_sr, 1);

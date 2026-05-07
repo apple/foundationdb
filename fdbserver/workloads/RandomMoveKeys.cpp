@@ -42,7 +42,7 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 		enabled = !clientId && g_network->isSimulated(); // only do this on the "first" client
 	}
 
-	MoveKeysWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
+	explicit MoveKeysWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
 		enabled = !clientId && g_network->isSimulated(); // only do this on the "first" client
 		meanDelay = getOption(options, "meanDelay"_sr, meanDelay);
 		testDuration = getOption(options, "testDuration"_sr, testDuration);

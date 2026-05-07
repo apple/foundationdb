@@ -36,7 +36,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 	Key addPrefix, removePrefix; // Original key will be first applied removePrefix and then applied addPrefix
 	// CAVEAT: When removePrefix is used, we must ensure every key in backup have the removePrefix
 
-	AtomicRestoreWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit AtomicRestoreWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 
 		startAfter = getOption(options, "startAfter"_sr, 10.0);
 		restoreAfter = getOption(options, "restoreAfter"_sr, 20.0);
