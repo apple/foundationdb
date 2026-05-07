@@ -35,7 +35,7 @@ struct HighContentionPrefixAllocatorWorkload : TestWorkload {
 	int expectedPrefixes = 0;
 	std::set<Key> allocatedPrefixes;
 
-	HighContentionPrefixAllocatorWorkload(WorkloadContext const& wcx)
+	explicit HighContentionPrefixAllocatorWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), allocatorSubspace("test_subspace"_sr), allocator(allocatorSubspace) {
 		numRounds = getOption(options, "numRounds"_sr, 100);
 		maxTransactionsPerRound = getOption(options, "maxTransactionsPerRound"_sr, 20);

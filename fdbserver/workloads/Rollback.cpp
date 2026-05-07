@@ -39,7 +39,7 @@ struct RollbackWorkload : FailureInjectionWorkload {
 
 	RollbackWorkload(WorkloadContext const& wcx, NoOptions) : FailureInjectionWorkload(wcx) {}
 
-	RollbackWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
+	explicit RollbackWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
 		meanDelay = getOption(options, "meanDelay"_sr, meanDelay); // Only matters if multiple==true
 		clogDuration = getOption(options, "clogDuration"_sr, clogDuration);

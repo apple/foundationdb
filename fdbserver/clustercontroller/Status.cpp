@@ -1381,7 +1381,7 @@ static AsyncResult<JsonBuilderObject> latencyProbeFetcher(Database cx,
                                                           JsonBuilderArray* messages,
                                                           std::set<std::string>* incomplete_reasons,
                                                           bool* isAvailable) {
-	Reference<LatencyProbeState> probeState = makeReference<LatencyProbeState>(cx);
+	auto probeState = makeReference<LatencyProbeState>(cx);
 
 	JsonBuilderObject statusObj;
 
@@ -3889,7 +3889,7 @@ TEST_CASE("/fdbserver/clustercontroller/clusterGetStatusTimeout") {
 	testDbInfo.recoveryState = RecoveryState::ACCEPTING_COMMITS;
 	testDbInfo.recoveryCount = 1;
 
-	Reference<AsyncVar<ServerDBInfo>> db = makeReference<AsyncVar<ServerDBInfo>>(testDbInfo);
+	auto db = makeReference<AsyncVar<ServerDBInfo>>(testDbInfo);
 	Database cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True);
 
 	// Create minimal ServerCoordinators

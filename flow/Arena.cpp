@@ -930,6 +930,25 @@ TEST_CASE("flow/StringRef/eat") {
 	return Void();
 }
 
+// Verifies StringRef(const char*) borrows the pointer directly (like std::string_view)
+// rather than routing through a temporary std::string, which would leave a dangling pointer.
+TEST_CASE("/flow/StringRef/ConstCharConstructor") {
+	StringRef s("Hello world!");
+	ASSERT(s == "Hello world!"_sr);
+	ASSERT(s.size() == 12);
+
+	const char* cstr = "another string";
+	StringRef s2(cstr);
+	ASSERT(s2 == "another string"_sr);
+	ASSERT(s2.begin() == reinterpret_cast<const uint8_t*>(cstr));
+
+	StringRef empty("");
+	ASSERT(empty.empty());
+	ASSERT(empty.size() == 0);
+
+	return Void();
+}
+
 struct TestOptionalMapClass {
 	StringRef value;
 	Optional<StringRef> optionalValue;

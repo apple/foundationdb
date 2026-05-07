@@ -71,7 +71,7 @@ protected:
 
 	/// Assign to a multi-bit field.
 	template <unsigned FirstBit, unsigned BitWidth, typename FieldType = IntType>
-	void setField(typename std::enable_if<true, FieldType>::type value) {
+	void setField(std::type_identity_t<FieldType> value) {
 		// Note that we suppress template argument deduction for FieldType.
 		assert(IntType(value) <= lowMaskFor<BitWidth>() && "value out of range");
 		Bits = (Bits & ~maskFor<FirstBit, BitWidth>()) | (IntType(value) << FirstBit);

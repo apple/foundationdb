@@ -53,6 +53,7 @@ void forceLinkIPagerTests();
 void forceLinkMockS3ServerTests();
 void forceLinkAuditUtilsTests();
 void forceLinkClusterHealthMonitorTests();
+void forceLinkGrvQueueDelayTests();
 
 struct UnitTestWorkload : TestWorkload {
 	static constexpr auto NAME = "UnitTests";
@@ -67,7 +68,7 @@ struct UnitTestWorkload : TestWorkload {
 	PerfIntCounter testsAvailable, testsExecuted, testsFailed;
 	PerfDoubleCounter totalWallTime, totalSimTime;
 
-	UnitTestWorkload(WorkloadContext const& wcx)
+	explicit UnitTestWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), testsAvailable("Test Cases Available"), testsExecuted("Test Cases Executed"),
 	    testsFailed("Test Cases Failed"), totalWallTime("Total wall clock time (s)"),
 	    totalSimTime("Total flow time (s)") {
@@ -125,6 +126,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkMockS3ServerTests();
 		forceLinkAuditUtilsTests();
 		forceLinkClusterHealthMonitorTests();
+		forceLinkGrvQueueDelayTests();
 
 #ifdef FLOW_GRPC_ENABLED
 		forceLinkGrpcTests();

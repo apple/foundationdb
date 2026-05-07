@@ -191,7 +191,7 @@ public:
 		}
 
 		// CROSS_PROCESS_FIX: Copy constructor with cross-process detection
-		ReusableConnection(const ReusableConnection& other)
+		explicit(false) ReusableConnection(const ReusableConnection& other)
 		  : conn(other.conn), expirationTime(other.expirationTime), creatingProcess(other.creatingProcess) {
 			if (g_network && g_network->isSimulated() && creatingProcess.isValid() &&
 			    creatingProcess != g_network->getLocalAddress()) {
@@ -243,7 +243,7 @@ public:
 		std::string etag;
 		std::string checksum; // MD5 or SHA256 depending on integrity check setting
 		PartInfo() = default;
-		PartInfo(std::string e, std::string c = "") : etag(e), checksum(c) {}
+		explicit PartInfo(std::string e, std::string c = "") : etag(e), checksum(c) {}
 	};
 
 	using ParametersT = std::map<std::string, std::string>;

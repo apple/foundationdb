@@ -97,7 +97,7 @@ class Monitor {
 	Monitor(std::vector<std::unique_ptr<IFactor>>&& factors, Reference<IWorkerEventProvider const> workerEventProvider);
 
 public:
-	Monitor(Monitor&&) noexcept = default;
+	explicit(false) Monitor(Monitor&&) noexcept = default;
 	Monitor& operator=(Monitor&&) noexcept = default;
 
 	static Monitor create(Reference<IWorkerEventProvider const> workerEventProvider);

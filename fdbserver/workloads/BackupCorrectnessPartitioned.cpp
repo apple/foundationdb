@@ -57,7 +57,7 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 	bool defaultBackup;
 	Optional<std::string> encryptionKeyFileName;
 
-	BackupAndRestorePartitionedCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit BackupAndRestorePartitionedCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		locked.set(sharedRandomNumber % 2);
 		backupAfter = getOption(options, "backupAfter"_sr, 10.0);
 		double minBackupAfter = getOption(options, "minBackupAfter"_sr, backupAfter);
@@ -314,7 +314,7 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 			                                   tag.toString(),
 			                                   backupRanges,
 			                                   StopWhenDone{ !stopDifferentialDelay },
-			                                   UsePartitionedLog::True, // enable partitioned log here
+			                                   MutationLogType::PARTITIONED_LOG, // enable partitioned log here
 			                                   IncrementalBackupOnly::False,
 			                                   encryptionKeyFileName,
 			                                   encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0,

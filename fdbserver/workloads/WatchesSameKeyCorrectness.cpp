@@ -30,7 +30,7 @@ struct WatchesSameKeyWorkload : TestWorkload {
 	int numWatches;
 	std::vector<Future<Void>> cases;
 
-	WatchesSameKeyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit WatchesSameKeyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		numWatches = getOption(options, "numWatches"_sr, 3);
 	}
 

@@ -70,7 +70,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 	KeyBackedProperty<SharedConfiguration, TupleCodec<SharedConfiguration>, false> sharedConfigProperty;
 	SharedConfiguration sharedConfig;
 
-	AutomaticIdempotencyWorkload(WorkloadContext const& wcx)
+	explicit AutomaticIdempotencyWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), sharedConfigProperty("/testConfig"_sr) {
 		numTransactions = getOption(options, "numTransactions"_sr, 500);
 		keyPrefix = KeyRef(getOption(options, "keyPrefix"_sr, "/autoIdempotency/"_sr));

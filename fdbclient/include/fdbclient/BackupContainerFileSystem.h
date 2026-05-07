@@ -78,13 +78,6 @@ public:
 	Future<Void> create() override = 0;
 	Future<bool> exists() override = 0;
 
-	// TODO: refactor this to separate out the "deal with blob store" stuff from the backup business logic
-	static Reference<BackupContainerFileSystem> openContainerFS(const std::string& url,
-	                                                            const Optional<std::string>& proxy,
-	                                                            const Optional<std::string>& encryptionKeyFileName,
-	                                                            int encryptionBlockSize,
-	                                                            bool isBackup = true);
-
 	// Get a list of fileNames and their sizes in the container under the given path
 	// Although not required, an implementation can avoid traversing unwanted subfolders
 	// by calling folderPathFilter(absoluteFolderPath) and checking for a false return value.
@@ -139,8 +132,10 @@ public:
 	Future<Void> writePartitionListFile(Version v, std::string contents) override;
 
 	// List log files, unsorted, which contain data at any version >= beginVersion and <= targetVersion.
-	// "partitioned" flag indicates if new partitioned mutation logs or old logs should be listed.
-	Future<std::vector<LogFile>> listLogFiles(Version beginVersion, Version targetVersion, bool partitioned);
+	// "mutationLogType" value indicates which mutation log files should be listed.
+	Future<std::vector<LogFile>> listLogFiles(Version beginVersion,
+	                                          Version targetVersion,
+	                                          MutationLogType mutationLogType);
 
 	// List range files, unsorted, which contain data at or between beginVersion and endVersion
 	// Note: The contents of each top level snapshot.N folder do not necessarily constitute a valid snapshot
@@ -217,7 +212,6 @@ private:
 	VersionProperty expiredEndVersion();
 	VersionProperty unreliableEndVersion();
 	VersionProperty logType();
-	VersionProperty fileLevelEncryption();
 
 	static std::string encryptionMetadataFileName();
 

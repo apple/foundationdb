@@ -448,7 +448,7 @@ struct Int {
 	constexpr static FileIdentifier file_identifier = 12345;
 	uint32_t value;
 	Int() = default;
-	Int(uint32_t value) : value(value) {}
+	explicit Int(uint32_t value) : value(value) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, value);

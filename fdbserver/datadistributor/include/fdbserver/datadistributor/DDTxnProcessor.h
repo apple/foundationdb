@@ -49,7 +49,7 @@ public:
 
 	struct DDRangeLocations {
 		DDRangeLocations() = default;
-		DDRangeLocations(KeyRangeRef range) : range(range) {}
+		explicit DDRangeLocations(KeyRangeRef range) : range(range) {}
 
 		// A map of dcId : list of servers
 		std::map<std::string, std::vector<StorageServerInterface>> servers;

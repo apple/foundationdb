@@ -110,8 +110,8 @@ public:
 
 	Database() {} // an uninitialized database can be destructed or reassigned safely; that's it
 	void operator=(Database const& rhs) { db = rhs.db; }
-	Database(Database const& rhs) : db(rhs.db) {}
-	Database(Database&& r) noexcept : db(std::move(r.db)) {}
+	explicit(false) Database(Database const& rhs) : db(rhs.db) {}
+	explicit(false) Database(Database&& r) noexcept : db(std::move(r.db)) {}
 	void operator=(Database&& r) noexcept { db = std::move(r.db); }
 
 	// For internal use by the native client:
@@ -175,6 +175,7 @@ struct TransactionOptions {
 	bool rawAccess : 1;
 	bool bypassStorageQuota : 1;
 	bool enableReplicaConsistencyCheck : 1;
+	Optional<int64_t> maxGrvQueueDelayMS;
 	int requiredReplicas;
 
 	TransactionPriority priority;

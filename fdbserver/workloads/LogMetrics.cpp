@@ -36,7 +36,7 @@ struct LogMetricsWorkload : TestWorkload {
 	std::string dataFolder;
 	double logAt, logDuration, logsPerSecond;
 
-	LogMetricsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit LogMetricsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		logAt = getOption(options, "logAt"_sr, 0.0);
 		logDuration = getOption(options, "logDuration"_sr, 30.0);
 		logsPerSecond = getOption(options, "logsPerSecond"_sr, 20);

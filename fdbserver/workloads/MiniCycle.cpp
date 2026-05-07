@@ -42,7 +42,7 @@ struct MiniCycleWorkload : TestWorkload {
 	PerfIntCounter transactions, retries, tooOldRetries, commitFailedRetries;
 	PerfDoubleCounter totalLatency;
 
-	MiniCycleWorkload(WorkloadContext const& wcx)
+	explicit MiniCycleWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"), tooOldRetries("Retries.too_old"),
 	    commitFailedRetries("Retries.commit_failed"), totalLatency("Latency") {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);

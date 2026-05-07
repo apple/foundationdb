@@ -33,7 +33,7 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 	Reference<IBackupContainer> backupContainer;
 	Optional<std::string> encryptionKeyFileName;
 
-	RestoreMultiRangesWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit RestoreMultiRangesWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		if (getOption(options, "encrypted"_sr, deterministicRandom()->random01() < 0.5)) {
 			encryptionKeyFileName = "simfdb/" + getTestEncryptionFileName();
 		}
@@ -149,7 +149,7 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 			                                  tagName,
 			                                  backupRanges,
 			                                  StopWhenDone::True,
-			                                  UsePartitionedLog::False,
+			                                  MutationLogType::DEFAULT,
 			                                  IncrementalBackupOnly::False,
 			                                  encryptionKeyFileName,
 			                                  encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0,

@@ -97,7 +97,7 @@ function backup {
   fi
 
   if [[ "${USE_PARTITIONED_LOG}" == "true" ]]; then
-    cmd_args+=("--partitioned-log-experimental")
+    cmd_args+=("--mutation-log-type" "partitioned-log-experimental")
   fi
 
   if ! "${local_build_dir}"/bin/fdbbackup start "${cmd_args[@]}"; then

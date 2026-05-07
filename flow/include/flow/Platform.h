@@ -441,6 +441,7 @@ void setCloseOnExec(int fd);
 void outOfMemory();
 
 uint64_t getRandomSeed();
+void getRandomBytes(void* buf, size_t len);
 
 bool getEnvironmentVar(const char* name, std::string& value);
 int setEnvironmentVar(const char* name, const char* value, int overwrite);
@@ -475,7 +476,7 @@ int eraseDirectoryRecursive(std::string const& directory);
 struct TmpFile {
 public:
 	TmpFile();
-	TmpFile(const std::string& tempDir);
+	explicit TmpFile(const std::string& tempDir);
 	TmpFile(const std::string& tempDir, std::string const& prefix);
 	~TmpFile();
 	size_t read(uint8_t* buff, size_t len);

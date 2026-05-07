@@ -48,8 +48,8 @@ public:
 	                         const std::string& name,
 	                         const IBlobStoreEndpoint::ParametersT& params,
 	                         const Optional<std::string>& encryptionKeyFileName,
-	                         bool isBackup,
-	                         int encryptionBlockSize);
+	                         int encryptionBlockSize,
+	                         bool isBackup);
 
 	void addref() override;
 	void delref() override;

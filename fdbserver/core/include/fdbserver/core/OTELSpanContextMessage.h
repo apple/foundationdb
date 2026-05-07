@@ -40,7 +40,7 @@ struct OTELSpanContextMessage {
 	SpanContext spanContext;
 
 	OTELSpanContextMessage() {}
-	OTELSpanContextMessage(SpanContext const& spanContext) : spanContext(spanContext) {}
+	explicit OTELSpanContextMessage(SpanContext const& spanContext) : spanContext(spanContext) {}
 
 	std::string toString() const {
 		return format("code: %d, span context: %s",

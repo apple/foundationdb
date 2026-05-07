@@ -42,7 +42,7 @@ struct VersionHistory {
 	constexpr static FileIdentifier file_identifier = 5863456;
 
 	VersionHistory() {}
-	VersionHistory(Version v) : version(v) {}
+	explicit VersionHistory(Version v) : version(v) {}
 
 	Version version;
 	Standalone<VectorRef<MutationRef>> mutations;
@@ -128,7 +128,8 @@ public:
 	// For arithmetic value types, returns a copy of the value for the given
 	// key, or the supplied default value if the framework does not know about
 	// the key.
-	template <typename T, typename std::enable_if<std::is_arithmetic<T>{}, bool>::type = true>
+	template <typename T>
+	    requires(std::is_arithmetic_v<T>)
 	const T get(KeyRef name, T defaultVal) {
 		try {
 			auto configValue = get(name);

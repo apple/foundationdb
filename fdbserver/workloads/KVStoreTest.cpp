@@ -33,7 +33,7 @@ extern IKeyValueStore* makeDummyKeyValueStore();
 template <class T>
 class TestHistogram {
 public:
-	TestHistogram(int minSamples = 100) : minSamples(minSamples) { reset(); }
+	explicit TestHistogram(int minSamples = 100) : minSamples(minSamples) { reset(); }
 
 	void reset() {
 		N = 0;
@@ -208,7 +208,7 @@ struct KVStoreTestWorkload : TestWorkload {
 	double setupTook;
 	KeyValueStoreType storeType;
 
-	KVStoreTestWorkload(WorkloadContext const& wcx)
+	explicit KVStoreTestWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), reads("Reads"), sets("Sets"), commits("Commits"), setupTook(0) {
 		enabled = !clientId; // only do this on the "first" client
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
