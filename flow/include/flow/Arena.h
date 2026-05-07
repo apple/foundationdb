@@ -633,16 +633,14 @@ struct hash<Optional<T>> {
 };
 } // namespace std
 
-template <class T, class V = std::void_t<>>
-struct boost_hashable : std::false_type {};
-
 template <class T>
-struct boost_hashable<T, std::void_t<decltype(boost::hash_value(std::declval<T>()))>> : std::true_type {};
+concept boost_hashable = requires(T const& value) { boost::hash_value(value); };
 
 // Using boost hash functions on types that depend on member hashes (e.g. std::pair) expect the members
 // to be boost hashable. This provides a default boost hash function based on std::hash.
 template <class T>
-std::enable_if_t<!boost_hashable<T>::value, std::size_t> hash_value(const T& v) {
+    requires(!boost_hashable<T>)
+std::size_t hash_value(const T& v) {
 	return std::hash<T>{}(v);
 }
 
@@ -965,7 +963,8 @@ public:
 
 	// Arena constructor for non-Ref types, identified by !flow_ref
 	template <class T2 = T, VecSerStrategy S>
-	VectorRef(Arena& p, const VectorRef<T, S>& toCopy, typename std::enable_if<!flow_ref<T2>::value, int>::type = 0)
+	    requires(!flow_ref<T2>::value)
+	VectorRef(Arena& p, const VectorRef<T, S>& toCopy)
 	  : VPS(toCopy), data((T*)new(p) uint8_t[sizeof(T) * toCopy.size()]), m_size(toCopy.size()),
 	    m_capacity(toCopy.size()) {
 		if (m_size > 0) {
@@ -975,7 +974,8 @@ public:
 
 	// Arena constructor for Ref types, which must have an Arena constructor
 	template <class T2 = T, VecSerStrategy S>
-	VectorRef(Arena& p, const VectorRef<T, S>& toCopy, typename std::enable_if<flow_ref<T2>::value, int>::type = 0)
+	    requires(flow_ref<T2>::value)
+	VectorRef(Arena& p, const VectorRef<T, S>& toCopy)
 	  : VPS(), data((T*)new(p) uint8_t[sizeof(T) * toCopy.size()]), m_size(toCopy.size()), m_capacity(toCopy.size()) {
 		for (int i = 0; i < m_size; i++) {
 			auto ptr = new (&data[i]) T(p, toCopy[i]);
@@ -998,7 +998,8 @@ public:
 	// toCopy.m_capacity ) {} VectorRef<T>& operator=( const VectorRef<T>& );
 
 	template <VecSerStrategy S = SerStrategy>
-	typename std::enable_if<S == VecSerStrategy::String, uint32_t>::type serializedSize() const {
+	    requires(S == VecSerStrategy::String)
+	uint32_t serializedSize() const {
 		uint32_t result = sizeof(uint32_t);
 		string_serialized_traits<T> t;
 		if (VPS::_cached_size >= 0) {
@@ -1029,7 +1030,8 @@ public:
 	std::reverse_iterator<const T*> rend() const { return std::reverse_iterator<const T*>(begin()); }
 
 	template <VecSerStrategy S = SerStrategy>
-	typename std::enable_if<S == VecSerStrategy::FlatBuffers, VectorRef>::type slice(int begin, int end) const {
+	    requires(S == VecSerStrategy::FlatBuffers)
+	VectorRef slice(int begin, int end) const {
 		return VectorRef(data + begin, end - begin);
 	}
 
@@ -1163,13 +1165,15 @@ public:
 
 	// expectedSize() for non-Ref types, identified by !flow_ref
 	template <class T2 = T>
-	typename std::enable_if<!flow_ref<T2>::value, size_t>::type expectedSize() const {
+	    requires(!flow_ref<T2>::value)
+	size_t expectedSize() const {
 		return sizeof(T) * m_size;
 	}
 
 	// expectedSize() for Ref types, which must in turn have expectedSize() implemented.
 	template <class T2 = T>
-	typename std::enable_if<flow_ref<T2>::value, size_t>::type expectedSize() const {
+	    requires(flow_ref<T2>::value)
+	size_t expectedSize() const {
 		size_t t = sizeof(T) * m_size;
 		for (int i = 0; i < m_size; i++)
 			t += data[i].expectedSize();
@@ -1317,18 +1321,14 @@ public: // Construction
 	}
 
 	template <class T2 = T, int IM = InlineMembers>
-	SmallVectorRef(Arena& arena,
-	               const SmallVectorRef<T, IM>& toCopy,
-	               typename std::enable_if<!flow_ref<T2>::value, int>::type = 0)
-	  : m_size(0) {
+	    requires(!flow_ref<T2>::value)
+	SmallVectorRef(Arena& arena, const SmallVectorRef<T, IM>& toCopy, int = 0) : m_size(0) {
 		append(arena, toCopy.begin(), toCopy.size());
 	}
 
 	template <class T2 = T, int IM = InlineMembers>
-	SmallVectorRef(Arena& arena,
-	               const SmallVectorRef<T2, IM>& toCopy,
-	               typename std::enable_if<flow_ref<T2>::value, int>::type = 0)
-	  : m_size(0) {
+	    requires(flow_ref<T2>::value)
+	SmallVectorRef(Arena& arena, const SmallVectorRef<T2, IM>& toCopy, int = 0) : m_size(0) {
 		append_deep(arena, toCopy.begin(), toCopy.size());
 	}
 
