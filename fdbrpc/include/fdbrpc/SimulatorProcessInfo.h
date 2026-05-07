@@ -90,6 +90,9 @@ struct ProcessInfo : NonCopyable {
 	}
 
 	Future<KillType> onShutdown() { return shutdownSignal.getFuture(); }
+	// Fires for both hard kills and reboot-style shutdowns. Connection code cannot rely on onShutdown(), because
+	// KillInstantly sets failed without sending shutdownSignal.
+	Future<Void> onTerminated() { return terminatedSignal.getFuture(); }
 
 	bool isSpawnedKVProcess() const {
 		// SOMEDAY: use a separate bool may be better?
@@ -167,6 +170,7 @@ struct ProcessInfo : NonCopyable {
 
 	// Members not for external use
 	Promise<KillType> shutdownSignal;
+	Promise<Void> terminatedSignal;
 };
 
 } // namespace simulator
