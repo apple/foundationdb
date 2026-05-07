@@ -92,7 +92,7 @@ public:
 	// to update the given *it to point to the key that was read, so that the corresponding overload of
 	// addConflictRange() can make use of it.
 
-	ACTOR template <class Iter>
+	template <class Iter>
 	static Future<Optional<Value>> read(ReadYourWritesTransaction* ryw, GetValueReq read, Iter* it) {
 		// This overload is required to provide postcondition: it->extractWriteMapIterator().segmentContains(read.key)
 
@@ -100,29 +100,29 @@ public:
 			it->bypassUnreadableProtection();
 		}
 		it->skip(read.key);
-		state bool dependent = it->is_dependent();
+		bool dependent = it->is_dependent();
 		if (it->is_kv()) {
 			const KeyValueRef* result = it->kv(ryw->arena);
 			if (result != nullptr) {
-				return result->value;
+				co_return result->value;
 			} else {
-				return Optional<Value>();
+				co_return Optional<Value>();
 			}
 		} else if (it->is_empty_range()) {
-			return Optional<Value>();
+			co_return Optional<Value>();
 		} else {
-			Optional<Value> res = wait(ryw->tr.get(read.key, Snapshot::True));
+			Optional<Value> res = co_await ryw->tr.get(read.key, Snapshot::True);
 			KeyRef k(ryw->arena, read.key);
 
 			if (res.present()) {
 				if (ryw->cache.insert(k, res.get()))
 					ryw->arena.dependsOn(res.get().arena());
 				if (!dependent)
-					return res;
+					co_return res;
 			} else {
 				ryw->cache.insert(k, Optional<ValueRef>());
 				if (!dependent)
-					return Optional<Value>();
+					co_return Optional<Value>();
 			}
 
 			// There was a dependent write at the key, so we need to lookup the iterator again
@@ -131,32 +131,32 @@ public:
 			ASSERT(it->is_kv());
 			const KeyValueRef* result = it->kv(ryw->arena);
 			if (result != nullptr) {
-				return result->value;
+				co_return result->value;
 			} else {
-				return Optional<Value>();
+				co_return Optional<Value>();
 			}
 		}
 	}
 
-	ACTOR template <class Iter>
+	template <class Iter>
 	static Future<Key> read(ReadYourWritesTransaction* ryw, GetKeyReq read, Iter* it) {
 		if (read.key.offset > 0) {
 			RangeResult result =
-			    wait(getRangeValue(ryw, read.key, firstGreaterOrEqual(ryw->getMaxReadKey()), GetRangeLimits(1), it));
+			    co_await getRangeValue(ryw, read.key, firstGreaterOrEqual(ryw->getMaxReadKey()), GetRangeLimits(1), it);
 			if (result.readToBegin)
-				return allKeys.begin;
+				co_return allKeys.begin;
 			if (result.readThroughEnd || !result.size())
-				return ryw->getMaxReadKey();
-			return result[0].key;
+				co_return ryw->getMaxReadKey();
+			co_return result[0].key;
 		} else {
 			read.key.offset++;
 			RangeResult result =
-			    wait(getRangeValueBack(ryw, firstGreaterOrEqual(allKeys.begin), read.key, GetRangeLimits(1), it));
+			    co_await getRangeValueBack(ryw, firstGreaterOrEqual(allKeys.begin), read.key, GetRangeLimits(1), it);
 			if (result.readThroughEnd)
-				return ryw->getMaxReadKey();
+				co_return ryw->getMaxReadKey();
 			if (result.readToBegin || !result.size())
-				return allKeys.begin;
-			return result[0].key;
+				co_return allKeys.begin;
+			co_return result[0].key;
 		}
 	};
 
@@ -178,41 +178,41 @@ public:
 		return ryw->tr.get(read.key, snapshot);
 	}
 
-	ACTOR static Future<Key> readThrough(ReadYourWritesTransaction* ryw, GetKeyReq read, Snapshot snapshot) {
-		Key key = wait(ryw->tr.getKey(read.key, snapshot));
+	static Future<Key> readThrough(ReadYourWritesTransaction* ryw, GetKeyReq read, Snapshot snapshot) {
+		Key key = co_await ryw->tr.getKey(read.key, snapshot);
 		if (ryw->getMaxReadKey() < key)
-			return ryw->getMaxReadKey(); // Filter out results in the system keys if they are not accessible
-		return key;
+			co_return ryw->getMaxReadKey(); // Filter out results in the system keys if they are not accessible
+		co_return key;
 	}
 
-	ACTOR template <bool backwards>
+	template <bool backwards>
 	static Future<RangeResult> readThrough(ReadYourWritesTransaction* ryw,
 	                                       GetRangeReq<backwards> read,
 	                                       Snapshot snapshot) {
 		if (backwards && read.end.offset > 1) {
 			// FIXME: Optimistically assume that this will not run into the system keys, and only reissue if the result
 			// actually does.
-			Key key = wait(ryw->tr.getKey(read.end, snapshot));
+			Key key = co_await ryw->tr.getKey(read.end, snapshot);
 			if (key > ryw->getMaxReadKey())
 				read.end = firstGreaterOrEqual(ryw->getMaxReadKey());
 			else
 				read.end = KeySelector(firstGreaterOrEqual(key), key.arena());
 		}
 
-		RangeResult v = wait(
-		    ryw->tr.getRange(read.begin, read.end, read.limits, snapshot, backwards ? Reverse::True : Reverse::False));
+		RangeResult v = co_await ryw->tr.getRange(
+		    read.begin, read.end, read.limits, snapshot, backwards ? Reverse::True : Reverse::False);
 		KeyRef maxKey = ryw->getMaxReadKey();
 		if (v.size() > 0) {
 			if (!backwards && v[v.size() - 1].key >= maxKey) {
-				state RangeResult _v = v;
+				RangeResult _v = v;
 				int i = _v.size() - 2;
 				for (; i >= 0 && _v[i].key >= maxKey; --i) {
 				}
-				return RangeResult(RangeResultRef(VectorRef<KeyValueRef>(&_v[0], i + 1), false), _v.arena());
+				co_return RangeResult(RangeResultRef(VectorRef<KeyValueRef>(&_v[0], i + 1), false), _v.arena());
 			}
 		}
 
-		return v;
+		co_return v;
 	}
 
 	// addConflictRange(ryw,read,result) is called after a serializable read and is responsible for adding the relevant
@@ -591,45 +591,45 @@ public:
 	}
 
 	// TODO: read to begin, read through end flags for result
-	ACTOR template <class Iter>
+	template <class Iter>
 	static Future<RangeResult> getRangeValue(ReadYourWritesTransaction* ryw,
 	                                         KeySelector begin,
 	                                         KeySelector end,
 	                                         GetRangeLimits limits,
 	                                         Iter* pit) {
-		state Iter& it(*pit);
-		state Iter itEnd(*pit);
-		state RangeResult result;
-		state int64_t additionalRows = 0;
-		state int itemsPastEnd = 0;
-		state int requestCount = 0;
-		state bool readToBegin = false;
-		state bool readThroughEnd = false;
-		state int actualBeginOffset = begin.offset;
-		state int actualEndOffset = end.offset;
+		Iter& it(*pit);
+		Iter itEnd(*pit);
+		RangeResult result;
+		int64_t additionalRows = 0;
+		int itemsPastEnd = 0;
+		int requestCount = 0;
+		bool readToBegin = false;
+		bool readThroughEnd = false;
+		int actualBeginOffset = begin.offset;
+		int actualEndOffset = end.offset;
 		// state UID randomID = nondeterministicRandom()->randomUniqueID();
 
 		resolveKeySelectorFromCache(begin, it, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualBeginOffset);
 		resolveKeySelectorFromCache(end, itEnd, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualEndOffset);
 
 		if (actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey()) {
-			return RangeResultRef(false, false);
+			co_return RangeResultRef(false, false);
 		} else if ((begin.isFirstGreaterOrEqual() && begin.getKey() == ryw->getMaxReadKey()) ||
 		           (end.isFirstGreaterOrEqual() && end.getKey() == allKeys.begin)) {
-			return RangeResultRef(readToBegin, readThroughEnd);
+			co_return RangeResultRef(readToBegin, readThroughEnd);
 		}
 
 		if (!end.isFirstGreaterOrEqual() && begin.getKey() > end.getKey()) {
-			Key resolvedEnd = wait(read(ryw, GetKeyReq(end), pit));
+			Key resolvedEnd = co_await read(ryw, GetKeyReq(end), pit);
 			if (resolvedEnd == allKeys.begin)
 				readToBegin = true;
 			if (resolvedEnd == ryw->getMaxReadKey())
 				readThroughEnd = true;
 
 			if (begin.getKey() >= resolvedEnd && !begin.isBackward()) {
-				return RangeResultRef(false, false);
+				co_return RangeResultRef(false, false);
 			} else if (resolvedEnd == allKeys.begin) {
-				return RangeResultRef(readToBegin, readThroughEnd);
+				co_return RangeResultRef(readToBegin, readThroughEnd);
 			}
 
 			resolveKeySelectorFromCache(
@@ -640,7 +640,7 @@ public:
 
 		//TraceEvent("RYWSelectorsStartForward", randomID).detail("ByteLimit", limits.bytes).detail("RowLimit", limits.rows);
 
-		loop {
+		while (true) {
 			/*TraceEvent("RYWSelectors", randomID).detail("Begin", begin.toString())
 			    .detail("End", end.toString())
 			    .detail("Reached", limits.isReached())
@@ -652,11 +652,11 @@ public:
 			    .detail("Requests", requestCount);*/
 
 			if (!result.size() && actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey()) {
-				return RangeResultRef(false, false);
+				co_return RangeResultRef(false, false);
 			}
 
 			if (end.offset <= 1 && end.getKey() == allKeys.begin) {
-				return RangeResultRef(readToBegin, readThroughEnd);
+				co_return RangeResultRef(readToBegin, readThroughEnd);
 			}
 
 			if ((begin.offset >= end.offset && begin.getKey() >= end.getKey()) ||
@@ -665,10 +665,10 @@ public:
 					break;
 				if (!result.size())
 					break;
-				Key resolvedEnd =
-				    wait(read(ryw,
-				              GetKeyReq(end),
-				              pit)); // do not worry about iterator invalidation, because we are breaking for the loop
+				Key resolvedEnd = co_await read(
+				    ryw,
+				    GetKeyReq(end),
+				    pit); // do not worry about iterator invalidation, because we are breaking for the loop
 				if (resolvedEnd == allKeys.begin)
 					readToBegin = true;
 				if (resolvedEnd == ryw->getMaxReadKey())
@@ -680,7 +680,7 @@ public:
 			if (!it.is_unreadable() && !it.is_unknown_range() && it.beginKey() > itEnd.beginKey()) {
 				if (end.isFirstGreaterOrEqual())
 					break;
-				return RangeResultRef(readToBegin, readThroughEnd);
+				co_return RangeResultRef(readToBegin, readThroughEnd);
 			}
 
 			if (limits.isReached() && itemsPastEnd >= 1 - end.offset)
@@ -703,7 +703,7 @@ public:
 				if (it.beginKey() < itEnd.beginKey())
 					singleClears = std::min(skipUncached(ucEnd, itEnd, BUGGIFY ? 0 : clearLimit + 100), clearLimit);
 
-				state KeySelector read_end;
+				KeySelector read_end;
 				if (ucEnd != itEnd) {
 					Key k = ucEnd.endKey().toStandaloneStringRef();
 					read_end = KeySelector(firstGreaterOrEqual(k), k.arena());
@@ -723,7 +723,7 @@ public:
 
 				additionalRows += singleClears;
 
-				state KeySelector read_begin;
+				KeySelector read_begin;
 				if (begin.isFirstGreaterOrEqual()) {
 					Key k = it.beginKey() > begin.getKey() ? it.beginKey().toStandaloneStringRef()
 					                                       : Key(begin.getKey(), begin.arena());
@@ -746,7 +746,7 @@ public:
 					read_end.arena().dependsOn(read_begin.arena());
 				}
 
-				state GetRangeLimits requestLimit = limits;
+				GetRangeLimits requestLimit = limits;
 				setRequestLimits(requestLimit, additionalRows, 2 - read_begin.offset, requestCount);
 				requestCount++;
 
@@ -757,7 +757,7 @@ public:
 
 				additionalRows = 0;
 				RangeResult snapshot_read =
-				    wait(ryw->tr.getRange(read_begin, read_end, requestLimit, Snapshot::True, Reverse::False));
+				    co_await ryw->tr.getRange(read_begin, read_end, requestLimit, Snapshot::True, Reverse::False);
 				KeyRangeRef range = getKnownKeyRange(snapshot_read, read_begin, read_end, ryw->arena);
 
 				//TraceEvent("RYWCacheInsert", randomID).detail("Range", range).detail("ExpectedSize", snapshot_read.expectedSize()).detail("Rows", snapshot_read.size()).detail("Results", snapshot_read).detail("More", snapshot_read.more).detail("ReadToBegin", snapshot_read.readToBegin).detail("ReadThroughEnd", snapshot_read.readThroughEnd).detail("ReadThrough", snapshot_read.readThrough);
@@ -811,7 +811,7 @@ public:
 		result.readThroughEnd = !result.more && readThroughEnd;
 		result.arena().dependsOn(ryw->arena);
 
-		return result;
+		co_return result;
 	}
 
 	static KeyRangeRef getKnownKeyRangeBack(RangeResultRef data, KeySelector begin, KeySelector end, Arena& arena) {
@@ -894,22 +894,22 @@ public:
 		return singleEmpty;
 	}
 
-	ACTOR template <class Iter>
+	template <class Iter>
 	static Future<RangeResult> getRangeValueBack(ReadYourWritesTransaction* ryw,
 	                                             KeySelector begin,
 	                                             KeySelector end,
 	                                             GetRangeLimits limits,
 	                                             Iter* pit) {
-		state Iter& it(*pit);
-		state Iter itEnd(*pit);
-		state RangeResult result;
-		state int64_t additionalRows = 0;
-		state int itemsPastBegin = 0;
-		state int requestCount = 0;
-		state bool readToBegin = false;
-		state bool readThroughEnd = false;
-		state int actualBeginOffset = begin.offset;
-		state int actualEndOffset = end.offset;
+		Iter& it(*pit);
+		Iter itEnd(*pit);
+		RangeResult result;
+		int64_t additionalRows = 0;
+		int itemsPastBegin = 0;
+		int requestCount = 0;
+		bool readToBegin = false;
+		bool readThroughEnd = false;
+		int actualBeginOffset = begin.offset;
+		int actualEndOffset = end.offset;
 		// state UID randomID = nondeterministicRandom()->randomUniqueID();
 
 		resolveKeySelectorFromCache(end, it, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualEndOffset);
@@ -917,23 +917,23 @@ public:
 		    begin, itEnd, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualBeginOffset);
 
 		if (actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey()) {
-			return RangeResultRef(false, false);
+			co_return RangeResultRef(false, false);
 		} else if ((begin.isFirstGreaterOrEqual() && begin.getKey() == ryw->getMaxReadKey()) ||
 		           (end.isFirstGreaterOrEqual() && end.getKey() == allKeys.begin)) {
-			return RangeResultRef(readToBegin, readThroughEnd);
+			co_return RangeResultRef(readToBegin, readThroughEnd);
 		}
 
 		if (!begin.isFirstGreaterOrEqual() && begin.getKey() > end.getKey()) {
-			Key resolvedBegin = wait(read(ryw, GetKeyReq(begin), pit));
+			Key resolvedBegin = co_await read(ryw, GetKeyReq(begin), pit);
 			if (resolvedBegin == allKeys.begin)
 				readToBegin = true;
 			if (resolvedBegin == ryw->getMaxReadKey())
 				readThroughEnd = true;
 
 			if (resolvedBegin >= end.getKey() && end.offset <= 1) {
-				return RangeResultRef(false, false);
+				co_return RangeResultRef(false, false);
 			} else if (resolvedBegin == ryw->getMaxReadKey()) {
-				return RangeResultRef(readToBegin, readThroughEnd);
+				co_return RangeResultRef(readToBegin, readThroughEnd);
 			}
 
 			resolveKeySelectorFromCache(end, it, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualEndOffset);
@@ -943,7 +943,7 @@ public:
 
 		//TraceEvent("RYWSelectorsStartReverse", randomID).detail("ByteLimit", limits.bytes).detail("RowLimit", limits.rows);
 
-		loop {
+		while (true) {
 			/*TraceEvent("RYWSelectors", randomID).detail("Begin", begin.toString())
 			    .detail("End", end.toString())
 			    .detail("Reached", limits.isReached())
@@ -956,11 +956,11 @@ public:
 			    .detail("Requests", requestCount);*/
 
 			if (!result.size() && actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey()) {
-				return RangeResultRef(false, false);
+				co_return RangeResultRef(false, false);
 			}
 
 			if (!begin.isBackward() && begin.getKey() >= ryw->getMaxReadKey()) {
-				return RangeResultRef(readToBegin, readThroughEnd);
+				co_return RangeResultRef(readToBegin, readThroughEnd);
 			}
 
 			if ((begin.offset >= end.offset && begin.getKey() >= end.getKey()) ||
@@ -969,10 +969,10 @@ public:
 					break;
 				if (!result.size())
 					break;
-				Key resolvedBegin =
-				    wait(read(ryw,
-				              GetKeyReq(begin),
-				              pit)); // do not worry about iterator invalidation, because we are breaking for the loop
+				Key resolvedBegin = co_await read(
+				    ryw,
+				    GetKeyReq(begin),
+				    pit); // do not worry about iterator invalidation, because we are breaking for the loop
 				if (resolvedBegin == allKeys.begin)
 					readToBegin = true;
 				if (resolvedBegin == ryw->getMaxReadKey())
@@ -985,7 +985,7 @@ public:
 			    it.beginKey() < itEnd.beginKey()) {
 				if (begin.isFirstGreaterOrEqual())
 					break;
-				return RangeResultRef(readToBegin, readThroughEnd);
+				co_return RangeResultRef(readToBegin, readThroughEnd);
 			}
 
 			if (limits.isReached() && itemsPastBegin >= begin.offset - 1)
@@ -1009,7 +1009,7 @@ public:
 				if (it.beginKey() > itEnd.beginKey())
 					singleClears = std::min(skipUncachedBack(ucEnd, itEnd, BUGGIFY ? 0 : clearLimit + 100), clearLimit);
 
-				state KeySelector read_begin;
+				KeySelector read_begin;
 				if (ucEnd != itEnd) {
 					Key k = ucEnd.beginKey().toStandaloneStringRef();
 					read_begin = KeySelector(firstGreaterOrEqual(k), k.arena());
@@ -1028,7 +1028,7 @@ public:
 
 				additionalRows += singleClears;
 
-				state KeySelector read_end;
+				KeySelector read_end;
 				if (end.isFirstGreaterOrEqual()) {
 					Key k = it.endKey() < end.getKey() ? it.endKey().toStandaloneStringRef() : end.getKey();
 					end = KeySelector(firstGreaterOrEqual(k), k.arena());
@@ -1050,7 +1050,7 @@ public:
 					read_begin.arena().dependsOn(read_end.arena());
 				}
 
-				state GetRangeLimits requestLimit = limits;
+				GetRangeLimits requestLimit = limits;
 				setRequestLimits(requestLimit, additionalRows, read_end.offset, requestCount);
 				requestCount++;
 
@@ -1061,7 +1061,7 @@ public:
 
 				additionalRows = 0;
 				RangeResult snapshot_read =
-				    wait(ryw->tr.getRange(read_begin, read_end, requestLimit, Snapshot::True, Reverse::True));
+				    co_await ryw->tr.getRange(read_begin, read_end, requestLimit, Snapshot::True, Reverse::True);
 				KeyRangeRef range = getKnownKeyRangeBack(snapshot_read, read_begin, read_end, ryw->arena);
 
 				//TraceEvent("RYWCacheInsert", randomID).detail("Range", range).detail("ExpectedSize", snapshot_read.expectedSize()).detail("Rows", snapshot_read.size()).detail("Results", snapshot_read).detail("More", snapshot_read.more).detail("ReadToBegin", snapshot_read.readToBegin).detail("ReadThroughEnd", snapshot_read.readThroughEnd).detail("ReadThrough", snapshot_read.readThrough);
@@ -1124,7 +1124,7 @@ public:
 		result.readThroughEnd = readThroughEnd;
 		result.arena().dependsOn(ryw->arena);
 
-		return result;
+		co_return result;
 	}
 
 #ifndef __INTEL_COMPILER
@@ -1143,22 +1143,22 @@ public:
 		// read.limits, it);
 	};
 
-	ACTOR template <bool backwards>
+	template <bool backwards>
 	static Future<MappedRangeResult> readThrough(ReadYourWritesTransaction* ryw,
 	                                             GetMappedRangeReq<backwards> read,
 	                                             Snapshot snapshot) {
 		if (backwards && read.end.offset > 1) {
 			// FIXME: Optimistically assume that this will not run into the system keys, and only reissue if the result
 			// actually does.
-			Key key = wait(ryw->tr.getKey(read.end, snapshot));
+			Key key = co_await ryw->tr.getKey(read.end, snapshot);
 			if (key > ryw->getMaxReadKey())
 				read.end = firstGreaterOrEqual(ryw->getMaxReadKey());
 			else
 				read.end = KeySelector(firstGreaterOrEqual(key), key.arena());
 		}
-		MappedRangeResult v = wait(ryw->tr.getMappedRange(
-		    read.begin, read.end, read.mapper, read.limits, snapshot, backwards ? Reverse::True : Reverse::False));
-		return v;
+		MappedRangeResult v = co_await ryw->tr.getMappedRange(
+		    read.begin, read.end, read.mapper, read.limits, snapshot, backwards ? Reverse::True : Reverse::False);
+		co_return v;
 	}
 
 	template <bool backwards>
@@ -1282,11 +1282,11 @@ public:
 		triggerWatches(ryw, singleKeyRange(key), val, valueKnown);
 	}
 
-	ACTOR static Future<Void> watch(ReadYourWritesTransaction* ryw, Key key) {
-		state Future<Optional<Value>> val;
-		state Future<Void> watchFuture;
-		state Reference<Watch> watch(new Watch(key));
-		state Promise<Void> done;
+	static Future<Void> watch(ReadYourWritesTransaction* ryw, Key key) {
+		Future<Optional<Value>> val;
+		Future<Void> watchFuture;
+		Reference<Watch> watch(new Watch(key));
+		Promise<Void> done;
 
 		ryw->reading.add(done.getFuture());
 
@@ -1299,7 +1299,7 @@ public:
 		}
 
 		try {
-			wait(ryw->resetPromise.getFuture() || success(val) || watch->onChangeTrigger.getFuture());
+			co_await (ryw->resetPromise.getFuture() || success(val) || watch->onChangeTrigger.getFuture());
 		} catch (Error& e) {
 			done.send(Void());
 			throw;
@@ -1309,7 +1309,7 @@ public:
 			done.send(Void());
 			if (watch->onChangeTrigger.getFuture().isError())
 				throw watch->onChangeTrigger.getFuture().getError();
-			return Void();
+			co_return;
 		}
 
 		watch->valuePresent = true;
@@ -1319,7 +1319,7 @@ public:
 		                          (watch->value.present() && watch->setValue.get() != watch->value.get()))) {
 			watch->onChangeTrigger.send(Void());
 			done.send(Void());
-			return Void();
+			co_return;
 		}
 
 		try {
@@ -1330,35 +1330,33 @@ public:
 		}
 		done.send(Void());
 
-		wait(watchFuture);
-
-		return Void();
+		co_await watchFuture;
 	}
 
-	ACTOR static void simulateTimeoutInFlightCommit(ReadYourWritesTransaction* ryw_) {
-		state Reference<ReadYourWritesTransaction> ryw = Reference<ReadYourWritesTransaction>::addRef(ryw_);
+	static Future<Void> simulateTimeoutInFlightCommit(Uncancellable, ReadYourWritesTransaction* ryw_) {
+		Reference<ReadYourWritesTransaction> ryw = Reference<ReadYourWritesTransaction>::addRef(ryw_);
 		ASSERT(ryw->options.timeoutInSeconds > 0);
 		// An actual in-flight commit (i.e. one that's past the point where cancelling the transaction would stop it)
 		// would already have a read version. We need to get a read version too, otherwise committing a conflicting
 		// transaction may not ensure this transaction is no longer in-flight, since this transaction could get a read
 		// version _after_.
-		wait(success(ryw->getReadVersion()));
+		co_await success(ryw->getReadVersion());
 		if (!ryw->resetPromise.isSet())
 			ryw->resetPromise.sendError(transaction_timed_out());
-		wait(delay(deterministicRandom()->random01() * 5));
+		co_await delay(deterministicRandom()->random01() * 5);
 		TraceEvent("ClientBuggifyInFlightCommit").log();
-		wait(ryw->tr.commit());
+		co_await ryw->tr.commit();
 	}
 
-	ACTOR static Future<Void> commit(ReadYourWritesTransaction* ryw) {
+	static Future<Void> commit(ReadYourWritesTransaction* ryw) {
 		try {
 			ryw->commitStarted = true;
 
 			if (ryw->options.specialKeySpaceChangeConfiguration)
-				wait(ryw->getDatabase()->specialKeySpace->commit(ryw));
+				co_await ryw->getDatabase()->specialKeySpace->commit(ryw);
 
 			Future<Void> ready = ryw->reading;
-			wait(ryw->resetPromise.getFuture() || ready);
+			co_await (ryw->resetPromise.getFuture() || ready);
 
 			if (ryw->options.readYourWritesDisabled) {
 
@@ -1376,10 +1374,10 @@ public:
 				if (ryw->resetPromise.isSet())
 					throw ryw->resetPromise.getFuture().getError();
 				if (CLIENT_BUGGIFY && ryw->options.timeoutInSeconds > 0) {
-					simulateTimeoutInFlightCommit(ryw);
+					simulateTimeoutInFlightCommit(Uncancellable(), ryw);
 					throw transaction_timed_out();
 				}
-				wait(ryw->resetPromise.getFuture() || ryw->tr.commit());
+				co_await (ryw->resetPromise.getFuture() || ryw->tr.commit());
 
 				ryw->debugLogRetries();
 
@@ -1387,7 +1385,7 @@ public:
 					ryw->reset();
 				}
 
-				return Void();
+				co_return;
 			}
 
 			ryw->writeRangeToNativeTransaction(KeyRangeRef(StringRef(), allKeys.end));
@@ -1400,17 +1398,17 @@ public:
 			}
 
 			if (CLIENT_BUGGIFY && ryw->options.timeoutInSeconds > 0) {
-				simulateTimeoutInFlightCommit(ryw);
+				simulateTimeoutInFlightCommit(Uncancellable(), ryw);
 				throw transaction_timed_out();
 			}
-			wait(ryw->resetPromise.getFuture() || ryw->tr.commit());
+			co_await (ryw->resetPromise.getFuture() || ryw->tr.commit());
 
 			ryw->debugLogRetries();
 			if (!ryw->tr.apiVersionAtLeast(410)) {
 				ryw->reset();
 			}
 
-			return Void();
+			co_return;
 		} catch (Error& e) {
 			if (!ryw->tr.apiVersionAtLeast(410)) {
 				ryw->commitStarted = false;
@@ -1429,21 +1427,21 @@ public:
 	// the future in the output. If commitFuture isn't specified, then the transaction will
 	// be reported uncommitted. In that case, an optional error can be provided to indicate
 	// why the transaction was uncommitted.
-	ACTOR static Future<Void> printDebugMessages(ReadYourWritesTransaction* self,
-	                                             Optional<Future<Void>> commitFuture,
-	                                             Optional<Error> error = Optional<Error>()) {
-		state std::string prefix;
-		state std::string commitResult;
-		state ErrorOr<Void> result;
-		state std::vector<BaseTraceEvent> debugTraces = std::move(self->debugTraces);
-		state std::vector<std::string> debugMessages = std::move(self->debugMessages);
+	static Future<Void> printDebugMessages(ReadYourWritesTransaction* self,
+	                                       Optional<Future<Void>> commitFuture,
+	                                       Optional<Error> error = Optional<Error>()) {
+		std::string prefix;
+		std::string commitResult;
+		ErrorOr<Void> result;
+		std::vector<BaseTraceEvent> debugTraces = std::move(self->debugTraces);
+		std::vector<std::string> debugMessages = std::move(self->debugMessages);
 
 		self->debugTraces.clear();
 		self->debugMessages.clear();
 
 		if (commitFuture.present()) {
 			try {
-				wait(store(result, errorOr(commitFuture.get())));
+				result = co_await errorOr(commitFuture.get());
 			} catch (Error& e) {
 				result = e;
 			}
@@ -1493,11 +1491,9 @@ public:
 		if (result.isError()) {
 			throw result.getError();
 		}
-
-		return Void();
 	}
 
-	ACTOR static Future<Void> onError(ReadYourWritesTransaction* ryw, Error e) {
+	static Future<Void> onError(ReadYourWritesTransaction* ryw, Error e) {
 		if (ryw->debugTraces.size() > 0 || ryw->debugMessages.size() > 0) {
 			// printDebugMessages returns a future but will not block if called with an empty second argument
 			ASSERT(printDebugMessages(ryw, {}, e).isReady());
@@ -1515,12 +1511,12 @@ public:
 				throw e;
 			}
 
-			wait(ryw->resetPromise.getFuture() || ryw->tr.onError(e));
+			co_await (ryw->resetPromise.getFuture() || ryw->tr.onError(e));
 
 			ryw->debugLogRetries(e);
 
 			ryw->resetRyow();
-			return Void();
+			co_return;
 		} catch (Error& e) {
 			if (!ryw->resetPromise.isSet()) {
 				if (ryw->tr.apiVersionAtLeast(610)) {
