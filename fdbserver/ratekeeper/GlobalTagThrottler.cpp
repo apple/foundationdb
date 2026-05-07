@@ -25,7 +25,6 @@
 #include "ServerThroughputTracker.h"
 #include "TagThrottler.h"
 
-#include <limits>
 
 // In the function names below, several terms are used repeatedly. The context-specific are defined here:
 //
