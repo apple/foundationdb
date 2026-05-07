@@ -1595,6 +1595,11 @@ Reference<IPeekCursor> LogSystem::peekLogRouter(
 		if (found) {
 			Version oldEnd = firstOld && recoveredAt.present() ? recoveredAt.get() + 1 : old.epochEnd;
 			if (begin >= oldEnd) {
+				TraceEvent("TLogPeekLogRouterSkipEmptyOldRange", dbgid)
+				    .detail("Tag", tag.toString())
+				    .detail("Begin", begin)
+				    .detail("OldEnd", oldEnd)
+				    .detail("FirstOld", firstOld);
 				firstOld = false;
 				continue;
 			}
