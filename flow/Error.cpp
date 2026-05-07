@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include <iostream>
 
 #include "flow/Error.h"
 #include "flow/Knobs.h"

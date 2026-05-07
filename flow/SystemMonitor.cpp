@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include <fstream>
 
 #include "flow/flow.h"
 #include "flow/Histogram.h"

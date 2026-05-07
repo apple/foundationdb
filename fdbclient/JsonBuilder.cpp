@@ -19,7 +19,6 @@
  */
 
 #include "fdbclient/JsonBuilder.h"
-#include <iostream>
 
 JsonBuilderObject JsonBuilder::makeMessage(const char* name, const char* description) {
 	JsonBuilderObject out;

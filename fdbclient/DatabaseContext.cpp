@@ -21,16 +21,12 @@
 // TODO: prune down the list of includes. This was copied from NativeAPI.actor.cpp.
 #include "fdbclient/NativeAPI.actor.h"
 
-#include <algorithm>
 #include <cstdio>
 #include <functional>
 #include <iterator>
 #include <limits>
 #include <memory>
-#include <regex>
 #include <string>
-#include <unordered_set>
-#include <tuple>
 #include <utility>
 #include <vector>
 

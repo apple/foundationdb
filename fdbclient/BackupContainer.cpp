@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include <cstdlib>
 #include <ostream>
 
 // FIXME: Trim this down

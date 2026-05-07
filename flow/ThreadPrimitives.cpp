@@ -21,7 +21,6 @@
 #include "flow/ThreadPrimitives.h"
 #include "flow/Trace.h"
 #include <stdint.h>
-#include <iostream>
 #include <errno.h>
 #include <string.h>
 #include <stdio.h>
