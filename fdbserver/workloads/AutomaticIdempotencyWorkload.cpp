@@ -31,10 +31,13 @@ struct ValueType {
 
 	Value idempotencyId;
 	int64_t createdTime;
+	bool automatic;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, idempotencyId, createdTime);
+		// `automatic` is appended after the original two fields. Safe with Unversioned() because
+		// this struct is only written and read within the same test run — never persisted across binaries.
+		serializer(ar, idempotencyId, createdTime, automatic);
 	}
 };
 } // namespace
@@ -119,7 +122,8 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 				    // If we don't set AUTOMATIC_IDEMPOTENCY the idempotency id won't automatically get cleaned up, so
 				    // it should create work for the cleaner.
 				    tr->setOption(FDBTransactionOptions::IDEMPOTENCY_ID, idempotencyId);
-				    if (deterministicRandom()->random01() < automaticPercentage) {
+				    bool useAutomatic = deterministicRandom()->random01() < automaticPercentage;
+				    if (useAutomatic) {
 					    // We also want to exercise the automatic idempotency code path.
 					    tr->setOption(FDBTransactionOptions::AUTOMATIC_IDEMPOTENCY);
 				    }
@@ -128,7 +132,8 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 				    memset(mutateString(suffix), 0, 10);
 				    memcpy(mutateString(suffix) + 10, &index, 4);
 				    tr->atomicOp(keyPrefix.withSuffix(suffix),
-				                 ObjectWriter::toValue(ValueType{ idempotencyId, int64_t(now()) }, Unversioned()),
+				                 ObjectWriter::toValue(ValueType{ idempotencyId, int64_t(now()), useAutomatic },
+				                                       Unversioned()),
 				                 MutationRef::SetVersionstampedKey);
 				    return Future<Void>(Void());
 			    });
@@ -289,39 +294,63 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		}
 	}
 
+	// Only non-automatic IDs are deleted exclusively by the cleaner, so use them to track cleaner progress.
+	// Returns -1 if no non-automatic IDs remain (either none were created or all have been cleaned up).
 	Future<int64_t> getOldestCreatedTime(Database db) {
-		ReadYourWritesTransaction tr(db);
-		Key key;
-		Version commitVersion{ 0 };
-
 		RangeResult result = co_await runRYWTransaction(db, [](Reference<ReadYourWritesTransaction> tr) {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			return tr->getRange(idempotencyIdKeys, 1);
+			return tr->getRange(idempotencyIdKeys, CLIENT_KNOBS->TOO_MANY);
 		});
+
+		ASSERT(!result.more);
 
 		if (result.empty()) {
 			TraceEvent("AutomaticIdempotencyNoIdsLeft").log();
 			co_return -1;
 		}
 
-		int64_t timestamp;
-		key = idempotencyKeyValueToTestKeys(result[0], &commitVersion, &timestamp)[0];
-
-		// We need to use a different transaction because we set READ_SYSTEM_KEYS on this one, and we might
-		// be using a tenant.
-		Optional<Value> entry = co_await runRYWTransaction(
-		    db, [key = key](Reference<ReadYourWritesTransaction> tr) { return tr->get(key); });
-
-		if (!entry.present()) {
-			TraceEvent(SevError, "AutomaticIdempotencyKeyMissing")
-			    .detail("Key", key)
-			    .detail("CommitVersion", commitVersion)
-			    .detail("ReadVersion", tr.getReadVersion().get());
+		// Collect all test keys in commit-version order before issuing any reads.
+		std::vector<Key> allKeys;
+		{
+			Version commitVersion{ 0 };
+			for (const auto& kv : result) {
+				int64_t timestamp;
+				for (auto& k : idempotencyKeyValueToTestKeys(kv, &commitVersion, &timestamp)) {
+					allKeys.push_back(std::move(k));
+				}
+			}
 		}
-		ASSERT(entry.present());
 
-		auto e = ObjectReader::fromStringRef<ValueType>(entry.get(), Unversioned());
-		co_return e.createdTime;
+		// Batch-read all test entries in one transaction to avoid per-key round-trips.
+		// We use a separate transaction because READ_SYSTEM_KEYS was set above, and we might be using a tenant.
+		ReadYourWritesTransaction tr(db);
+		while (true) {
+			Error err;
+			try {
+				std::vector<Future<Optional<Value>>> futures;
+				futures.reserve(allKeys.size());
+				for (const auto& k : allKeys) {
+					futures.push_back(tr.get(k));
+				}
+				co_await waitForAll(futures);
+
+				for (int i = 0; i < static_cast<int>(futures.size()); ++i) {
+					const auto& entry = futures[i].get();
+					if (!entry.present()) {
+						TraceEvent(SevError, "AutomaticIdempotencyKeyMissing").detail("Key", allKeys[i]);
+						continue;
+					}
+					auto e = ObjectReader::fromStringRef<ValueType>(entry.get(), Unversioned());
+					if (!e.automatic) {
+						co_return e.createdTime;
+					}
+				}
+				co_return -1;
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
 	}
 
 	Future<bool> testCleanerOneIteration(Database db,
@@ -400,9 +429,13 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		RangeResult result = co_await tr->getRange(prefixRange(keyPrefix), CLIENT_KNOBS->TOO_MANY);
 		ASSERT(!result.more);
 		std::vector<int64_t> createdTimes;
+
+		// Only non-automatic IDs reflect cleaner progress; auto IDs can be deleted immediately.
 		for (const auto& [k, v] : result) {
 			auto e = ObjectReader::fromStringRef<ValueType>(v, Unversioned());
-			createdTimes.emplace_back(e.createdTime);
+			if (!e.automatic) {
+				createdTimes.emplace_back(e.createdTime);
+			}
 		}
 		std::sort(createdTimes.begin(), createdTimes.end());
 		co_return createdTimes;
@@ -414,7 +447,10 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		int64_t minAgeSeconds{ 0 };
 		std::vector<int64_t> createdTimes;
 
-		// Initialize minAgeSeconds to match the current status
+		// Initialize minAgeSeconds to match the current status. getOldestCreatedTime returns -1 if no
+		// non-automatic IDs remain; fmap then produces now()+1. The first outer-loop iteration passes
+		// this large value to testCleanerOneIteration, which also finds no non-automatic IDs and
+		// returns done=true, breaking the loop — the correct early-out for this case.
 		co_await (store(minAgeSeconds, fmap([](int64_t t) { return int64_t(now()) - t; }, getOldestCreatedTime(db))) &&
 		          store(createdTimes, runRYWTransaction(db, [this](Reference<ReadYourWritesTransaction> tr) {
 			                return getCreatedTimes(tr);
