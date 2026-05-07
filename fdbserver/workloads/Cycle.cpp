@@ -43,7 +43,7 @@ struct CycleWorkload : TestWorkload, Arena {
 	PerfIntCounter transactions, retries, tooOldRetries, commitFailedRetries;
 	PerfDoubleCounter totalLatency;
 
-	CycleWorkload(WorkloadContext const& wcx)
+	explicit CycleWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"), tooOldRetries("Retries.too_old"),
 	    commitFailedRetries("Retries.commit_failed"), totalLatency("Latency") {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);

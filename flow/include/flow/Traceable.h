@@ -109,7 +109,8 @@ FORMAT_TRACEABLE(volatile unsigned long long, "%llu");
 FORMAT_TRACEABLE(volatile double, "%g");
 
 template <class Enum>
-struct Traceable<Enum, std::enable_if_t<std::is_enum_v<Enum>>> : std::true_type {
+    requires(std::is_enum_v<Enum>)
+struct Traceable<Enum> : std::true_type {
 	static std::string toString(Enum e) { return format("%lld", (int64_t)e); }
 };
 
@@ -250,7 +251,8 @@ struct Traceable<std::atomic<T>> : std::true_type {
 };
 
 template <class BooleanParamSub>
-struct Traceable<BooleanParamSub, std::enable_if_t<std::is_base_of_v<BooleanParam, BooleanParamSub>>> : std::true_type {
+    requires(std::is_base_of_v<BooleanParam, BooleanParamSub>)
+struct Traceable<BooleanParamSub> : std::true_type {
 	static std::string toString(BooleanParamSub const& value) { return Traceable<bool>::toString(value); }
 };
 

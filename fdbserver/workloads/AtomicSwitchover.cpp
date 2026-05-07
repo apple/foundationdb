@@ -31,7 +31,7 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
 	Database extraDB;
 
-	AtomicSwitchoverWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit AtomicSwitchoverWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 
 		switch1delay = getOption(options, "switch1delay"_sr, 50.0);
 		switch2delay = getOption(options, "switch2delay"_sr, 50.0);

@@ -38,7 +38,7 @@ struct BackupAndRestoreValidationWorkload : TestWorkload {
 	Key backupTag;
 	Key addPrefix; // Prefix to add during restore (e.g., \xff\x02/rlog/)
 
-	BackupAndRestoreValidationWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit BackupAndRestoreValidationWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		backupAfter = getOption(options, "backupAfter"_sr, 10.0);
 		restoreAfter = getOption(options, "restoreAfter"_sr, 30.0);
 		backupTag = getOption(options, "backupTag"_sr, BackupAgentBase::getDefaultTag());

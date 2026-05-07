@@ -29,7 +29,7 @@ struct ClearSingleRange : TestWorkload {
 	Key end;
 	double startDelay;
 
-	ClearSingleRange(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit ClearSingleRange(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		begin = getOption(options, "begin"_sr, normalKeys.begin);
 		end = getOption(options, "end"_sr, normalKeys.end);
 		startDelay = getOption(options, "beginClearRange"_sr, 10.0);

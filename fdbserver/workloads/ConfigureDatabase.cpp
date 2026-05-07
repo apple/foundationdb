@@ -240,7 +240,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	std::vector<Future<Void>> clients;
 	PerfIntCounter retries;
 
-	ConfigureDatabaseWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), retries("Retries") {
+	explicit ConfigureDatabaseWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), retries("Retries") {
 		testDuration = getOption(options, "testDuration"_sr, 200.0);
 		allowDescriptorChange =
 		    getOption(options, "allowDescriptorChange"_sr, SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT);

@@ -71,19 +71,19 @@ struct JSONDoc {
 
 	// Construction from const json_spirit::mObject, trivial and will never throw.
 	// Resulting JSONDoc will not allow modifications.
-	JSONDoc(const json_spirit::mObject& o) : pObj(&o), wpObj(nullptr) {}
+	explicit(false) JSONDoc(const json_spirit::mObject& o) : pObj(&o), wpObj(nullptr) {}
 
 	// Construction from json_spirit::mObject.  Allows modifications.
-	JSONDoc(json_spirit::mObject& o) : pObj(&o), wpObj(&o) {}
+	explicit(false) JSONDoc(json_spirit::mObject& o) : pObj(&o), wpObj(&o) {}
 
 	// Construction from const json_spirit::mValue (which is a Variant type) which will try to
 	// convert it to an mObject.  This will throw if that fails, just as it would
 	// if the caller called get_obj() itself and used the previous constructor instead.
-	JSONDoc(const json_spirit::mValue& v) : pObj(&v.get_obj()), wpObj(nullptr) {}
+	explicit(false) JSONDoc(const json_spirit::mValue& v) : pObj(&v.get_obj()), wpObj(nullptr) {}
 
 	// Construction from non-const json_spirit::mValue - will convert the mValue to
 	// an object if it isn't already and then attach to it.
-	JSONDoc(json_spirit::mValue& v) {
+	explicit(false) JSONDoc(json_spirit::mValue& v) {
 		if (v.type() != json_spirit::obj_type)
 			v = json_spirit::mObject();
 		wpObj = &v.get_obj();

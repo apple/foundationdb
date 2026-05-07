@@ -45,7 +45,7 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 		enabled &= (clientId == 0) && g_network->isSimulated();
 	}
 
-	RandomRangeLockWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
+	explicit RandomRangeLockWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
 		enabled = (clientId == 0) && g_network->isSimulated();
 		maxLockDuration = getOption(options, "maxLockDuration"_sr, maxLockDuration);
 		maxStartDelay = getOption(options, "maxStartDelay"_sr, maxStartDelay);

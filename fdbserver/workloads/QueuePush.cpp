@@ -40,7 +40,7 @@ struct QueuePushWorkload : TestWorkload {
 	PerfIntCounter transactions, retries;
 	DDSketch<double> commitLatencies, GRVLatencies;
 
-	QueuePushWorkload(WorkloadContext const& wcx)
+	explicit QueuePushWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"), commitLatencies(), GRVLatencies() {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		actorCount = getOption(options, "actorCount"_sr, 50);

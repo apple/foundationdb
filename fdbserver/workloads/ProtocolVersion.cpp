@@ -24,7 +24,7 @@
 struct ProtocolVersionWorkload : TestWorkload {
 	static constexpr auto NAME = "ProtocolVersion";
 
-	ProtocolVersionWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
+	explicit ProtocolVersionWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
 
 	Future<Void> start(Database const& cx) override {
 		std::vector<ISimulator::ProcessInfo*> allProcesses = g_simulator->getAllProcesses();

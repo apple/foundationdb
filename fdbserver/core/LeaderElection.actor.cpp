@@ -37,20 +37,16 @@ Future<Void> submitCandidacy(Key key,
 	while (true) {
 		Optional<LeaderInfo> li;
 		if (coord.hostname.present()) {
-			co_await store(
-			    li,
-			    retryGetReplyFromHostname(
-			        CandidacyRequest(key, myInfo, nominee->present() ? nominee->get().changeID : UID(), prevChangeID),
-			        coord.hostname.get(),
-			        WLTOKEN_LEADERELECTIONREG_CANDIDACY,
-			        TaskPriority::CoordinationReply));
+			li = co_await retryGetReplyFromHostname(
+			    CandidacyRequest(key, myInfo, nominee->present() ? nominee->get().changeID : UID(), prevChangeID),
+			    coord.hostname.get(),
+			    WLTOKEN_LEADERELECTIONREG_CANDIDACY,
+			    TaskPriority::CoordinationReply);
 		} else {
-			co_await store(
-			    li,
-			    retryBrokenPromise(
-			        coord.candidacy,
-			        CandidacyRequest(key, myInfo, nominee->present() ? nominee->get().changeID : UID(), prevChangeID),
-			        TaskPriority::CoordinationReply));
+			li = co_await retryBrokenPromise(
+			    coord.candidacy,
+			    CandidacyRequest(key, myInfo, nominee->present() ? nominee->get().changeID : UID(), prevChangeID),
+			    TaskPriority::CoordinationReply);
 		}
 
 		co_await Future<Void>(Void()); // Make sure we weren't cancelled

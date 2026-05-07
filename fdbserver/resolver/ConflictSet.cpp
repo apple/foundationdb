@@ -421,7 +421,7 @@ public:
 		}
 	}
 	~SkipList() { destroy(); }
-	SkipList(SkipList&& other) noexcept : header(other.header) { other.header = nullptr; }
+	explicit(false) SkipList(SkipList&& other) noexcept : header(other.header) { other.header = nullptr; }
 	void operator=(SkipList&& other) noexcept {
 		destroy();
 		header = other.header;

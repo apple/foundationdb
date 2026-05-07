@@ -33,7 +33,7 @@ struct SuspendProcessesWorkload : TestWorkload {
 	double suspendTimeDuration;
 	double waitTimeDuration;
 
-	SuspendProcessesWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit SuspendProcessesWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		prefixSuspendProcesses = getOption(options, "prefixesSuspendProcesses"_sr, std::vector<std::string>());
 		waitTimeDuration = getOption(options, "waitTimeDuration"_sr, 0);
 		suspendTimeDuration = getOption(options, "suspendTimeDuration"_sr, 0);

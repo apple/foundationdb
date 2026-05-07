@@ -38,7 +38,7 @@ struct PerformanceWorkload : TestWorkload {
 	PerfMetric latencyBaseline, latencySaturation;
 	PerfMetric maxAchievedTPS;
 
-	PerformanceWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit PerformanceWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		probeWorkload = getOption(options, "probeWorkload"_sr, "ReadWrite"_sr);
 
 		// "Consume" all options and save for later tests

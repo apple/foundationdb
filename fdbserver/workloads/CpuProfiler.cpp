@@ -41,7 +41,7 @@ struct CpuProfilerWorkload : TestWorkload {
 	// A list of worker interfaces which have had profiling turned on
 	std::vector<WorkerInterface> profilingWorkers;
 
-	CpuProfilerWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit CpuProfilerWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		initialDelay = getOption(options, "initialDelay"_sr, 0.0);
 		duration = getOption(options, "duration"_sr, -1.0);
 		roles = getOption(options, "roles"_sr, std::vector<std::string>());

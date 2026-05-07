@@ -32,7 +32,7 @@ struct Increment : TestWorkload {
 	PerfIntCounter transactions, retries, tooOldRetries, commitFailedRetries;
 	PerfDoubleCounter totalLatency;
 
-	Increment(WorkloadContext const& wcx)
+	explicit Increment(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"), tooOldRetries("Retries.too_old"),
 	    commitFailedRetries("Retries.commit_failed"), totalLatency("Latency") {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
