@@ -26,7 +26,7 @@
 #include "fdbclient/Status.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
 #include "fdbclient/json_spirit/json_spirit_reader_template.h"
-#include "fdbrpc/genericactors.actor.h"
+#include "fdbrpc/genericactors.h"
 #include "flow/CoroUtils.h"
 #include <cstdint>
 

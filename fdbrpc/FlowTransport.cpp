@@ -39,7 +39,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/HealthMonitor.h"
 #include "JsonWebKeySet.h"
-#include "fdbrpc/genericactors.actor.h"
+#include "fdbrpc/genericactors.h"
 #include "fdbrpc/IPAllowList.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"

@@ -1,5 +1,5 @@
 /*
- * StorageServer.actor.h
+ * StorageServer.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,15 +19,11 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_STORAGESERVER_ACTOR_G_H)
-#define FDBSERVER_STORAGESERVER_ACTOR_G_H
-#include "fdbserver/storageserver/StorageServer.actor.g.h"
-#elif !defined(FDBSERVER_STORAGESERVER_ACTOR_H)
-#define FDBSERVER_STORAGESERVER_ACTOR_H
+#ifndef FDBSERVER_STORAGESERVER_STORAGE_SERVER_H
+#define FDBSERVER_STORAGESERVER_STORAGE_SERVER_H
 
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/flow.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 class IClusterConnectionRecord;
 class IKeyValueStore;
@@ -43,12 +39,11 @@ Future<Void> storageServer(IKeyValueStore* persistentData,
                            Reference<AsyncVar<ServerDBInfo> const> db,
                            std::string folder);
 
-ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
-                                 StorageServerInterface ssi,
-                                 Reference<AsyncVar<ServerDBInfo> const> db,
-                                 std::string folder,
-                                 Promise<Void> recovered,
-                                 Reference<IClusterConnectionRecord> connRecord);
+Future<Void> storageServer(IKeyValueStore* persistentData,
+                           StorageServerInterface ssi,
+                           Reference<AsyncVar<ServerDBInfo> const> db,
+                           std::string folder,
+                           Promise<Void> recovered,
+                           Reference<IClusterConnectionRecord> connRecord);
 
-#include "flow/unactorcompiler.h"
 #endif

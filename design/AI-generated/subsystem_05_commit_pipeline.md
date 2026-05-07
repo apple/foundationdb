@@ -31,7 +31,7 @@ Phase 4: REPLY                          ▼
 
 The workhorse of the commit pipeline. Batches client commits and drives them through all phases.
 
-### ProxyCommitData -- `ProxyCommitData.h:182-340`
+### ProxyCommitData -- `ProxyCommitData.h:183`
 
 ```
 struct ProxyCommitData {
@@ -51,7 +51,7 @@ struct ProxyCommitData {
 
 ### commitBatch() -- 5-Phase Pipeline
 
-**CommitBatchContext** (`CommitProxyServer.actor.cpp:487-586`):
+**CommitBatchContext** (`CommitProxyServer.actor.cpp:491`):
 ```
 struct CommitBatchContext {
     std::vector<CommitTransactionRequest> trs;        // batch of transactions
@@ -93,9 +93,9 @@ struct CommitBatchContext {
 
 ## GRV Proxy -- [`GrvProxyServer.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/grvproxy/GrvProxyServer.cpp)
 
-Assigns read versions to client transactions.
+Assigns read versions to client transactions. The GRV proxy is the primary enforcement point for cluster-wide flow control: it is where ratekeeper's back-pressure decisions become concrete delays and rejections applied to client requests.
 
-### GrvProxyData (lines 203-264)
+### GrvProxyData (line 202)
 
 ```
 struct GrvProxyData {
@@ -106,30 +106,82 @@ struct GrvProxyData {
 };
 ```
 
+### End-to-End Flow Control: Ratekeeper → GRV Proxy → Client
+
+Flow control is the mechanism that prevents the cluster from being overwhelmed when storage servers or TLogs fall behind. It works as a feedback loop:
+
+**1. Ratekeeper computes global TPS limits** (`Ratekeeper::updateRate()`, `Ratekeeper.cpp:642`):
+- Runs periodically (every `METRIC_UPDATE_RATE` seconds, default 0.1s).
+- Polls every storage server and TLog for queue depths, durable bytes rates, and free disk space.
+- Computes a `tpsLimit` for both `normalLimits` (DEFAULT + SYSTEM priority) and `batchLimits` (BATCH priority) independently.
+- The core formula scales `actualTps` (smoothed observed transaction rate) by the ratio of durable-bytes throughput to input-bytes rate, further modulated by a `targetRateRatio` derived from how full the storage/TLog queue is relative to target and spring thresholds. The result is: if queues are within target, `tpsLimit ≈ infinity`; as queues grow past the target, the limit ramps down toward zero.
+- Batch limits use more aggressive thresholds (larger `storageTargetBytes`, `logTargetBytes`) so batch transactions are throttled first.
+
+**2. Ratekeeper sends per-proxy rate limits** (`handleGetRateInfoReqs()`, `Ratekeeper.cpp:347`):
+- Each GRV proxy periodically sends a `GetRateInfoRequest` to ratekeeper (every `leaseDuration/2` seconds, jittered).
+- Ratekeeper replies with `transactionRate = normalLimits.tpsLimit / numProxies` and `batchTransactionRate = batchLimits.tpsLimit / numProxies` — the global limit divided evenly across all GRV proxies.
+- The reply also includes a `leaseDuration` (default `METRIC_UPDATE_RATE` = 0.1s). If the proxy doesn't hear back within the lease, it disables rate limiting (sets rate to 0 via `GrvTransactionRateInfo::disable()`), which smoothly ramps the allowed rate to zero and stops releasing transactions.
+- Optionally includes per-tag throttle information for `GrvProxyTagThrottler`.
+
+**3. GRV proxy enforces the rate via a token bucket** (`GrvTransactionRateInfo`, `GrvTransactionRateInfo.h`):
+- Each proxy maintains two `GrvTransactionRateInfo` objects: `normalRateInfo` (for SYSTEM + DEFAULT) and `batchRateInfo` (for BATCH).
+- Each object is a smoothed token bucket: `setRate()` feeds the ratekeeper-provided rate through a `Smoother`, and `startReleaseWindow()` computes a `limit` from the smoothed difference between the allowed rate and the actual release rate, times the rate window.
+- `canStart(numAlreadyStarted, count)` checks if `numAlreadyStarted + count <= limit + budget`. The `budget` accumulates unused capacity across release windows, bounded by `maxEmptyQueueBudget` when queues are empty (to avoid stale budget causing bursts).
+- The smoothing prevents sudden rate changes from causing oscillation.
+
+**4. The `transactionStarter` loop releases batches** (`transactionStarter()`, line 877):
+- On each GRVTimer tick, it drains the three priority queues in strict order: SYSTEM first, then DEFAULT, then BATCH.
+- SYSTEM transactions bypass rate limiting entirely (`canStart` is never checked for them).
+- DEFAULT transactions are gated by `normalRateInfo.canStart()`.
+- BATCH transactions are gated by `batchRateInfo.canStart()`, which uses the more aggressive batch rate limit.
+- Transactions that pass rate-limiting are batched into a single `getLiveCommittedVersion()` call to the master, and replies are sent to all clients in the batch simultaneously.
+
+### Dynamic Batching Based on Reply Latency
+
+The GRV batch interval is adaptively tuned based on observed round-trip latency (`queueGetReadVersionRequests`, line 518):
+
+- After each batch of non-risky-read requests completes, `timeReply()` measures the round-trip time and feeds it into a `normalGRVLatency` stream.
+- The `queueGetReadVersionRequests` actor receives this latency and computes:
+  ```
+  target_latency = reply_latency * START_TRANSACTION_BATCH_INTERVAL_LATENCY_FRACTION
+  GRVBatchTime = α * target_latency + (1 - α) * GRVBatchTime
+  ```
+  clamped to `[START_TRANSACTION_BATCH_INTERVAL_MIN, START_TRANSACTION_BATCH_INTERVAL_MAX]`.
+- When the first request arrives into empty queues, a GRVTimer is scheduled with delay `max(0, GRVBatchTime - timeSinceLastGRV)`. This means: when the system is fast, batching intervals shrink (lower latency for clients); when the system is slow, batches grow larger (better amortization of the master round-trip).
+
+### Lower Priorities Dropped Under Pressure
+
+When the total GRV queue depth exceeds `START_TRANSACTION_MAX_QUEUE_SIZE`, the proxy drops lower-priority requests to make room (`queueGetReadVersionRequests`, line 541):
+
+- A new **BATCH** request is rejected immediately with `grv_proxy_memory_limit_exceeded`.
+- A new **DEFAULT** request evicts one BATCH request from the front of its queue (if any); if none exist, the DEFAULT request itself is rejected.
+- A new **SYSTEM** request evicts one BATCH request, or failing that one DEFAULT request; only if both queues are empty is the SYSTEM request itself rejected.
+- Additionally, when the batch rate from ratekeeper drops to effectively zero (`batchRateInfo.getRate() <= 1/numProxies`), BATCH requests are immediately rejected with `batch_transaction_throttled` before even being queued (line 605).
+
 ### GetReadVersion Flow
 
-1. **Queue management** (`queueGetReadVersionRequests`, lines 519-638):
+1. **Queuing** (`queueGetReadVersionRequests`, line 518):
    - Three priority queues: SYSTEM, DEFAULT, BATCH
-   - Dynamic batching based on reply latency
-   - Lower priorities dropped under pressure
+   - Tagged requests optionally routed to `GrvProxyTagThrottler` for per-tag rate limiting
+   - Dynamic batching as described above
 
-2. **Version fetch** (`getLiveCommittedVersion`, lines 670-699):
+2. **Version fetch** (`getLiveCommittedVersion`, line 670):
    - Request to master: `master.getLiveCommittedVersion.getReply()`
-   - Causal read check: `updateLastCommit()` to ensure epoch durability
-   - Version vector integration if enabled
+   - Causal read check (unless `CAUSAL_READ_RISKY`): `updateLastCommit()` confirms epoch is still live by calling `logSystem->confirmEpochLive()`. This ensures the version returned actually represents committed state.
+   - Version vector integration if enabled: applies delta from master to local SS version cache
 
-3. **Rate limiting**:
-   - Communicates with Ratekeeper via `GetRateInfoRequest`
-   - Enforces transaction rate limits by delaying responses
-   - Per-tag throttling via `GrvProxyTagThrottler`
+3. **Reply** (`sendGrvReplies`, line 747):
+   - Sends the version to all requests in the batch
+   - Attaches per-tag throttle information so clients can self-throttle
+   - Sets `rkBatchThrottled` / `rkDefaultThrottled` flags if sustained throttling detected (sustained for `GRV_SUSTAINED_THROTTLING_THRESHOLD` seconds), signaling clients to back off
 
 ---
 
-## Master/Sequencer -- [`masterserver.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/sequencer/masterserver.actor.cpp)
+## Master/Sequencer -- [`masterserver.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/sequencer/masterserver.cpp)
 
 Assigns monotonically increasing commit versions.
 
-### MasterData -- `MasterData.h:80-157`
+### MasterData -- `MasterData.h:50`
 
 ```
 struct MasterData {
@@ -146,7 +198,7 @@ struct MasterData {
 };
 ```
 
-### Version Assignment -- `getVersion()` (lines 130-232)
+### Version Assignment -- `getVersion()` (lines 74-178)
 
 1. **Proxy validation**: Check proxy is known
 2. **Request ordering**: Wait for prior request (`latestRequestNum.whenAtLeast(requestNum - 1)`)
@@ -159,7 +211,7 @@ struct MasterData {
    If `referenceVersion` set, align to wall clock via `figureVersion()`
 5. **Reply**: `GetCommitVersionReply` with `prevVersion` and `version`
 
-### figureVersion() -- Wall-Clock Alignment (lines 49-89)
+### figureVersion() -- Wall-Clock Alignment (lines 43-72)
 
 ```
 expectedVersion = now * VERSIONS_PER_SECOND - referenceVersion
@@ -180,7 +232,7 @@ Keeps versions roughly aligned with wall-clock microseconds while maintaining mo
 
 Pure conflict detection. Maintains a sliding window of committed write ranges.
 
-### Resolver Structure (lines 128-221)
+### Resolver Structure (line 128)
 
 ```
 struct Resolver {
@@ -202,7 +254,7 @@ struct ConflictSet {
 };
 ```
 
-### resolveBatch() (lines 261-519)
+### resolveBatch() (line 261)
 
 1. **Memory check**: Block if `totalStateBytes > RESOLVER_STATE_MEMORY_LIMIT`
 2. **Version ordering** (`versionReady()`): Wait for resolver to reach `prevVersion`
@@ -248,8 +300,10 @@ Tags connect mutations to storage servers:
 |------|---------|
 | [`fdbserver/commitproxy/CommitProxyServer.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/commitproxy/CommitProxyServer.actor.cpp) | 5-phase commit batch pipeline |
 | `fdbserver/commitproxy/ProxyCommitData.h` | ProxyCommitData, tag lookup |
-| [`fdbserver/grvproxy/GrvProxyServer.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/grvproxy/GrvProxyServer.cpp) | Read version assignment, rate limiting |
-| [`fdbserver/sequencer/masterserver.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/sequencer/masterserver.actor.cpp) | Version assignment, wall-clock alignment |
+| [`fdbserver/grvproxy/GrvProxyServer.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/grvproxy/GrvProxyServer.cpp) | Read version assignment, rate limiting enforcement |
+| `fdbserver/grvproxy/GrvTransactionRateInfo.h` | Token-bucket rate limiter driven by ratekeeper |
+| `fdbserver/grvproxy/GrvProxyTagThrottler.h` | Per-tag throttling on proxy side |
+| [`fdbserver/sequencer/masterserver.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/sequencer/masterserver.cpp) | Version assignment, wall-clock alignment |
 | `fdbserver/sequencer/MasterData.h` | MasterData, version tracking |
 | [`fdbserver/resolver/Resolver.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/resolver/Resolver.cpp) | Conflict detection, batch resolution |
 | [`fdbserver/resolver/ConflictSet.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/resolver/ConflictSet.cpp) | SkipList-based conflict range tracking |

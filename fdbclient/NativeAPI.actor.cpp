@@ -4005,6 +4005,7 @@ void TransactionOptions::clear() {
 	rawAccess = false;
 	bypassStorageQuota = false;
 	enableReplicaConsistencyCheck = false;
+	maxGrvQueueDelayMS = Optional<int64_t>();
 	requiredReplicas = 0;
 }
 
@@ -4509,7 +4510,8 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState, CommitT
 			}
 		}
 	} catch (Error& e) {
-		if (e.code() == error_code_request_maybe_delivered || e.code() == error_code_commit_unknown_result) {
+		if (e.code() == error_code_request_maybe_delivered || e.code() == error_code_commit_unknown_result ||
+		    e.code() == error_code_never_reply) {
 			// We don't know if the commit happened, and it might even still be in flight.
 
 			if (!trState->options.causalWriteRisky || req.idempotencyId.valid()) {
@@ -4844,6 +4846,11 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		trState->options.maxBackoff = extractIntOption(value, 0, std::numeric_limits<int32_t>::max()) / 1000.0;
 		break;
 
+	case FDBTransactionOptions::MAX_GRV_QUEUE_DELAY:
+		validateOptionValuePresent(value);
+		trState->options.maxGrvQueueDelayMS = extractIntOption(value, 0, std::numeric_limits<int32_t>::max());
+		break;
+
 	case FDBTransactionOptions::SIZE_LIMIT:
 		validateOptionValuePresent(value);
 		trState->options.sizeLimit = extractIntOption(value, 32, CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT);
@@ -5013,7 +5020,8 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanContext parentSpa
                                                            TransactionPriority priority,
                                                            uint32_t flags,
                                                            TransactionTagMap<uint32_t> tags,
-                                                           Optional<UID> debugID) {
+                                                           Optional<UID> debugID,
+                                                           Optional<int64_t> maxGrvQueueDelayMS) {
 	state Span span("NAPI:getConsistentReadVersion"_loc, parentSpan);
 
 	++cx->transactionReadVersionBatches;
@@ -5027,7 +5035,8 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanContext parentSpa
 			                                cx->ssVersionVectorCache.getMaxVersion(),
 			                                flags,
 			                                tags,
-			                                debugID);
+			                                debugID,
+			                                maxGrvQueueDelayMS);
 			state Future<Void> onProxiesChanged = cx->onProxiesChanged();
 
 			choose {
@@ -5076,7 +5085,8 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanContext parentSpa
 			}
 		} catch (Error& e) {
 			if (e.code() != error_code_broken_promise && e.code() != error_code_batch_transaction_throttled &&
-			    e.code() != error_code_grv_proxy_memory_limit_exceeded && e.code() != error_code_proxy_tag_throttled)
+			    e.code() != error_code_grv_proxy_memory_limit_exceeded && e.code() != error_code_proxy_tag_throttled &&
+			    e.code() != error_code_transaction_grv_queue_rejected)
 				TraceEvent(SevError, "GetConsistentReadVersionError").error(e);
 			throw;
 		}
@@ -5086,7 +5096,8 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanContext parentSpa
 ACTOR Future<Void> readVersionBatcher(DatabaseContext* cx,
                                       FutureStream<DatabaseContext::VersionRequest> versionStream,
                                       TransactionPriority priority,
-                                      uint32_t flags) {
+                                      uint32_t flags,
+                                      Optional<int64_t> maxGrvQueueDelayMS) {
 	state std::vector<Promise<GetReadVersionReply>> requests;
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> collection = actorCollection(addActor.getFuture());
@@ -5161,7 +5172,8 @@ ACTOR Future<Void> readVersionBatcher(DatabaseContext* cx,
 			addActor.send(ready(timeReply(GRVReply.getFuture(), replyTimes)));
 
 			Future<Void> batch = incrementalBroadcastWithError(
-			    getConsistentReadVersion(span.context, cx, count, priority, flags, std::move(tags), std::move(debugID)),
+			    getConsistentReadVersion(
+			        span.context, cx, count, priority, flags, std::move(tags), std::move(debugID), maxGrvQueueDelayMS),
 			    std::move(requests),
 			    CLIENT_KNOBS->BROADCAST_BATCH_SIZE);
 
@@ -5393,14 +5405,18 @@ Future<Version> TransactionState::getReadVersion(uint32_t flags) {
 		}
 	}
 
-	auto& batcher = cx->versionBatcher[flags];
-	if (!batcher.actor.isValid()) {
-		batcher.actor = readVersionBatcher(cx.getPtr(), batcher.stream.getFuture(), options.priority, flags);
-	}
-
 	Location location = "NAPI:getReadVersion"_loc;
 	SpanContext derivedSpanContext = generateSpanID(cx->transactionTracingSample, spanContext);
 	Optional<UID> versionDebugID = readOptions.present() ? readOptions.get().debugID : Optional<UID>();
+
+	// Include the max GRV queue delay in the batcher key so coalesced requests
+	// share the same proxy-side admission threshold.
+	auto& batcher = cx->versionBatcher[DatabaseContext::VersionBatcherKey(flags, options.maxGrvQueueDelayMS)];
+	if (!batcher.actor.isValid()) {
+		batcher.actor = readVersionBatcher(
+		    cx.getPtr(), batcher.stream.getFuture(), options.priority, flags, options.maxGrvQueueDelayMS);
+	}
+
 	auto const req = DatabaseContext::VersionRequest(derivedSpanContext, options.tags, versionDebugID);
 	batcher.stream.send(req);
 	startTime = now();
@@ -5849,6 +5865,8 @@ Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(Database cx,
                                                                     int expectedShardCount,
                                                                     Optional<Reference<TransactionState>> trState) {
 	Span span("NAPI:WaitStorageMetrics"_loc, generateSpanID(cx->transactionTracingSample));
+	double startTime = now();
+	int retryCount = 0;
 	while (true) {
 		if (trState.present()) {
 			co_await trState.get()->startTransaction();
@@ -5895,7 +5913,14 @@ Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(Database cx,
 		} catch (Error& e) {
 			err = e;
 		}
-		TraceEvent(SevDebug, "WaitStorageMetricsHandleError").error(err);
+		retryCount++;
+		// Upgrade from SevDebug to SevWarn after 60 seconds of retrying
+		Severity sev = (now() - startTime > 60.0) ? SevWarn : SevDebug;
+		TraceEvent(sev, "WaitStorageMetricsHandleError")
+		    .error(err)
+		    .detail("Keys", keys)
+		    .detail("Elapsed", now() - startTime)
+		    .detail("Retries", retryCount);
 		if (err.code() == error_code_wrong_shard_server || err.code() == error_code_all_alternatives_failed) {
 			cx->invalidateCache(keys);
 			co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution);

@@ -39,8 +39,6 @@ FDB_BOOLEAN_PARAM(WaitForComplete);
 FDB_BOOLEAN_PARAM(ForceAction);
 FDB_BOOLEAN_PARAM(Terminator);
 FDB_BOOLEAN_PARAM(IncrementalBackupOnly);
-FDB_BOOLEAN_PARAM(UsePartitionedLog);
-FDB_BOOLEAN_PARAM(TransformPartitionedLog);
 FDB_BOOLEAN_PARAM(OnlyApplyMutationLogs);
 FDB_BOOLEAN_PARAM(InconsistentSnapshotOnly);
 FDB_BOOLEAN_PARAM(ShowErrors);
@@ -54,6 +52,8 @@ FDB_BOOLEAN_PARAM(PartialBackup);
 FDB_BOOLEAN_PARAM(ReadLowPriority);
 
 extern Optional<std::string> fileBackupAgentProxy;
+
+constexpr int DEFAULT_ENCRYPTION_BLOCK_SIZE = 1048576;
 
 class BackupAgentBase : NonCopyable {
 public:
@@ -273,9 +273,10 @@ public:
 	                          std::string const& tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                          StopWhenDone = StopWhenDone::True,
-	                          UsePartitionedLog = UsePartitionedLog::False,
+	                          MutationLogType mutationLogType = MutationLogType::DEFAULT,
 	                          IncrementalBackupOnly = IncrementalBackupOnly::False,
 	                          Optional<std::string> const& encryptionKeyFileName = {},
+	                          int encryptionBlockSize = 0,
 	                          int snapshotMode = 0);
 	// snapshotMode: 0=RANGEFILE (default), 1=BULKDUMP, 2=BOTH
 	Future<Void> submitBackup(Database cx,
@@ -286,9 +287,10 @@ public:
 	                          std::string const& tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                          StopWhenDone stopWhenDone = StopWhenDone::True,
-	                          UsePartitionedLog partitionedLog = UsePartitionedLog::False,
+	                          MutationLogType mutationLogType = MutationLogType::DEFAULT,
 	                          IncrementalBackupOnly incrementalBackupOnly = IncrementalBackupOnly::False,
 	                          Optional<std::string> const& encryptionKeyFileName = {},
+	                          int encryptionBlockSize = 0,
 	                          int snapshotMode = 0) {
 		// Note: Do NOT call checkAndDisableBackupWorkers here. That function is for cleanup
 		// when backups END (abort/discontinue), not when they START. Calling it here causes
@@ -303,9 +305,10 @@ public:
 			                    tagName,
 			                    backupRanges,
 			                    stopWhenDone,
-			                    partitionedLog,
+			                    mutationLogType,
 			                    incrementalBackupOnly,
 			                    encryptionKeyFileName,
+			                    encryptionBlockSize,
 			                    snapshotMode);
 		});
 	}
@@ -763,6 +766,7 @@ inline Standalone<StringRef> TupleCodec<Reference<IBackupContainer>>::pack(Refer
 		tuple.append(StringRef());
 	}
 
+	tuple.append((int64_t)bc->getEncryptionBlockSize());
 	return tuple.pack();
 }
 template <>
@@ -782,7 +786,11 @@ inline Reference<IBackupContainer> TupleCodec<Reference<IBackupContainer>>::unpa
 		proxy = t.getString(2).toString();
 	}
 
-	return IBackupContainer::openContainer(url, proxy, encryptionKeyFileName);
+	int blockSize = 0;
+	if (t.size() > 3) {
+		blockSize = (int)t.getInt(3);
+	}
+	return IBackupContainer::openContainer(url, proxy, encryptionKeyFileName, blockSize);
 }
 
 class BackupConfig : public KeyBackedTaskConfig {
@@ -894,8 +902,8 @@ public:
 		return configSpace.pack(__FUNCTION__sr);
 	}
 
-	// Set to true if partitioned log is enabled (only useful if backup worker is also enabled).
-	KeyBackedProperty<bool> partitionedLogEnabled() { return configSpace.pack(__FUNCTION__sr); }
+	// Mutation log type: 0 - DEFAULT (backup v1), 1 = PARTITIONED_LOG, 2 = RANGE_PARTITIONED_LOG.
+	KeyBackedProperty<MutationLogType> mutationLogType() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Set to true if only requesting incremental backup without base snapshot.
 	KeyBackedProperty<bool> incrementalBackupOnly() { return configSpace.pack(__FUNCTION__sr); }
@@ -941,17 +949,19 @@ public:
 		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 		auto lastLog = latestLogEndVersion().get(tr);
 		auto firstSnapshot = firstSnapshotEndVersion().get(tr);
-		auto plogEnabled = partitionedLogEnabled().get(tr);
+		auto mutLogType = mutationLogType().get(tr);
 		auto workerVersion = latestBackupWorkerSavedVersion().get(tr);
 		auto incrementalBackup = incrementalBackupOnly().get(tr);
 		auto snapMode = snapshotMode().get(tr);
 		auto bulkDumpSnapshot = bulkDumpSnapshotEndVersion().get(tr);
-		return map(success(lastLog) && success(firstSnapshot) && success(plogEnabled) && success(workerVersion) &&
+		return map(success(lastLog) && success(firstSnapshot) && success(mutLogType) && success(workerVersion) &&
 		               success(incrementalBackup) && success(snapMode) && success(bulkDumpSnapshot),
 		           [=](Void) -> Optional<Version> {
+			           MutationLogType mutationLogType =
+			               mutLogType.get().present() ? mutLogType.get().get() : MutationLogType::DEFAULT;
 			           // The latest log greater than the oldest snapshot is the restorable version
 			           Optional<Version> logVersion =
-			               plogEnabled.get().present() && plogEnabled.get().get() ? workerVersion.get() : lastLog.get();
+			               mutationLogType == MutationLogType::PARTITIONED_LOG ? workerVersion.get() : lastLog.get();
 
 			           // For mode=BOTH (2), require both rangefile and bulkdump snapshots to be complete
 			           int mode = snapMode.get().present() ? snapMode.get().get() : 0;

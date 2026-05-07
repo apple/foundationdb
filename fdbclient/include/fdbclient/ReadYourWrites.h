@@ -205,7 +205,8 @@ public:
 	template <typename Type>
 	using FutureT = Future<Type>;
 
-	virtual void debugTrace(BaseTraceEvent&& event);
+	// not virtual because final class
+	void debugTrace(BaseTraceEvent&& event);
 	void debugPrint(std::string const& message);
 
 	// Used by ThreadSafeTransaction for exceptions thrown in void methods.

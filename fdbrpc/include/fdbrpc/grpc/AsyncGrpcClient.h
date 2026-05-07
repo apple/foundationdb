@@ -108,7 +108,7 @@ public:
 				promise.send(response);
 			} else {
 				// std::cout << "Error: " << status.error_message() << std::endl;
-				promise.sendError(grpc_error()); // TODO (Vishesh): Propogate the gRPC error codes.
+				promise.sendError(grpc_error()); // TODO (Vishesh): Propagate the gRPC error codes.
 			}
 		});
 
@@ -141,7 +141,7 @@ public:
 				std::cout << "sent end of stream from client.\n";
 				promise.sendError(end_of_stream());
 			} else {
-				promise.sendError(grpc_error()); // TODO (Vishesh): Propogate the gRPC error codes.
+				promise.sendError(grpc_error()); // TODO (Vishesh): Propagate the gRPC error codes.
 			}
 		});
 
@@ -164,7 +164,7 @@ public:
 	// 		if (status.ok()) {
 	// 			promise->sendError(end_of_stream());
 	// 		} else {
-	// 			promise->sendError(grpc_error()); // TODO (Vishesh): Propogate the gRPC error codes.
+	// 			promise->sendError(grpc_error()); // TODO (Vishesh): Propagate the gRPC error codes.
 	// 		}
 	// 	});
 

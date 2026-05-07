@@ -326,7 +326,7 @@ function log_test_result {
 # $1 Dir to search under.
 function grep_for_severity40 {
   local dir="${1}"
-  if grep -r -C 3 -e "Severity=\"40\"" "${dir}"; then
+  if grep -r --exclude-dir=encryption_mismatch_logs -C 3 -e "Severity=\"40\"" "${dir}"; then
     err "Found 'Severity=40' errors"
     return 1
   fi

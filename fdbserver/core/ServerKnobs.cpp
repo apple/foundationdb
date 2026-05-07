@@ -264,6 +264,11 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( MERGE_RELOCATION_PARALLELISM_PER_TEAM,                   6 ); if (randomize && BUGGIFY ) MERGE_RELOCATION_PARALLELISM_PER_TEAM = 1;
 	init( DD_QUEUE_MAX_KEY_SERVERS,                              100 ); // Do not buggify
 	init( DD_REBALANCE_PARALLELISM,                               50 );
+	// Hard cap on total relocations DD tracks (queued + in-flight). 1000 corresponds to a 500-server
+	// cluster with two concurrent shard moves per storage server.  We have observed large clusters doing
+	// 25-30GB in flight, or closer to 100 shards at a time, so this has plenty of margin of safety
+	// built in.
+	init( DD_MAX_PIPELINE_MOVES,                                1000 ); if( randomize && BUGGIFY ) DD_MAX_PIPELINE_MOVES = 5;
 	init( DD_REBALANCE_RESET_AMOUNT,                              30 );
 	init( INFLIGHT_PENALTY_HEALTHY,                              1.0 );
 	init( INFLIGHT_PENALTY_UNHEALTHY,                          500.0 );
@@ -1084,20 +1089,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DURABILITY_LAG_REDUCTION_RATE,                      0.9999 );
 	init( DURABILITY_LAG_INCREASE_RATE,                        1.001 );
 	init( STORAGE_SERVER_LIST_FETCH_TIMEOUT,                    20.0 );
-	init( BW_THROTTLING_ENABLED,                                true );
-
-	bool buggifySmallBWLag = randomize && BUGGIFY;
-	init( TARGET_BW_LAG,                                       90.0 ); if(buggifySmallBWLag) TARGET_BW_LAG = 10.0;
-	init( TARGET_BW_LAG_BATCH,                                 60.0 ); if(buggifySmallBWLag) TARGET_BW_LAG_BATCH = 4.0;
-	init( TARGET_BW_LAG_UPDATE,                                  9.0 ); if(buggifySmallBWLag) TARGET_BW_LAG_UPDATE = 1.0;
-	init( MIN_BW_HISTORY,                                         10 );
-	init( BW_ESTIMATION_INTERVAL,                               10.0 ); if(buggifySmallBWLag) BW_ESTIMATION_INTERVAL = 2.0;
-	init( BW_LAG_INCREASE_AMOUNT,                                1.1 );
-	init( BW_LAG_DECREASE_AMOUNT,                                0.9 );
-	init( BW_FETCH_WORKERS_INTERVAL,                             5.0 );
-	init( BW_RW_LOGGING_INTERVAL,                                5.0 );
-	init( BW_MAX_BLOCKED_INTERVAL,                              10.0 ); if(buggifySmallBWLag) BW_MAX_BLOCKED_INTERVAL = 2.0;
-	init( BW_RK_SIM_QUIESCE_DELAY,                             400.0 );
 
 	init( MAX_AUTO_THROTTLED_TRANSACTION_TAGS,                     5 ); if(randomize && BUGGIFY) MAX_AUTO_THROTTLED_TRANSACTION_TAGS = 1;
 	init( MAX_MANUAL_THROTTLED_TRANSACTION_TAGS,                  40 ); if(randomize && BUGGIFY) MAX_MANUAL_THROTTLED_TRANSACTION_TAGS = 1;

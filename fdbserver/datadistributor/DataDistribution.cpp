@@ -49,6 +49,7 @@
 #include "flow/Buggify.h"
 #include "flow/Error.h"
 #include "flow/Platform.h"
+#include "flow/TxnCounters.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/flow.h"
@@ -594,6 +595,31 @@ public:
 	// Initialize the required internal states of DataDistributor from system metadata. It's necessary before
 	// DataDistributor start working. Doesn't include initialization of optional components, like DDQueue,
 	// Tracker, TeamCollection. The components should call its own ::init methods.
+	//
+	// DD Startup Progress (trace events in order):
+	//   DDInitRunning                     - DD process recruited and starting init
+	//   DDInitTakingMoveKeysLock          - Acquiring move keys lock
+	//   DDInitTookMoveKeysLock            - Lock acquired
+	//   DDInitGotConfiguration            - Database configuration loaded
+	//   DDInitUpdatedReplicaKeys          - Replica keys updated
+	//   DDInitSlowDataMoveRead            - (SevWarn) dataMoveKeys read taking >5s
+	//   DDInitServerListAndDataMoveReadComplete - Server list + data moves read: NumDataMoves, NumServers,
+	//   ElapsedSeconds
+	//   DDInitKeyServerScanProgress       - (every 30s) keyServer scan: BeginKey, Batches, ShardsScanned
+	//   DDInitKeyServerScanComplete       - keyServer scan done: NumShards, ElapsedSeconds
+	//   DDInitGotInitialDD                - Init data loaded: NumShards, NumServers
+	//   DDInitDataLoaded                  - Init data loaded, ElapsedSeconds (does NOT mean DD is fully operational)
+	//
+	// After init(), the following startup events fire from other components:
+	//   DDInitResumeDataMovesProgress     - (every 30s) data move resume: ValidMoves, CancelledMoves, EmptyMoves
+	//   DDInitResumedDataMoves            - Data move resume complete with counts
+	//   TrackInitialShards                - Shard tracker setup started with InitialShardCount
+	//   TrackInitialShardsComplete        - Shard trackers created: ShardsTracked
+	//   DDTrackerStarting                 - Teams ready (fires from DDTeamCollection after readyToStart + delay)
+	//   TrackInitialShardsMetricsComplete - All shard metrics received: ElapsedSeconds
+	//                                       WaitStorageMetricsHandleError may fire (SevWarn after 60s) if a
+	//                                       shard's metrics read is stuck retrying: Keys, Retries
+	//   DDInitDone                        - DD is fully operational with all shard sizes loaded
 	static Future<Void> init(Reference<DataDistributor> self) {
 		while (true) {
 			co_await self->waitDataDistributorEnabled();
@@ -652,6 +678,8 @@ public:
 				    .detail("E", self->initData->shards.end()[-1].key)
 				    .detail("Src", describe(self->initData->shards.end()[-2].primarySrc))
 				    .detail("Dest", describe(self->initData->shards.end()[-2].primaryDest))
+				    .detail("NumShards", self->initData->shards.size())
+				    .detail("NumServers", self->initData->allServers.size())
 				    .trackLatest(self->initialDDEventHolder->trackingKey);
 			} else {
 				TraceEvent("DDInitGotInitialDD", self->ddId)
@@ -659,6 +687,8 @@ public:
 				    .detail("E", "")
 				    .detail("Src", "[no items]")
 				    .detail("Dest", "[no items]")
+				    .detail("NumShards", self->initData->shards.size())
+				    .detail("NumServers", self->initData->allServers.size())
 				    .trackLatest(self->initialDDEventHolder->trackingKey);
 			}
 
@@ -710,11 +740,13 @@ public:
 	}
 
 	static Future<Void> removeDataMoveTombstoneBackground(Reference<DataDistributor> self) {
+		static auto* counters = makeCounters("/dd/removeDataMoveTombstone");
 		UID currentID;
 		try {
 			Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 			Transaction tr(cx);
 			while (true) {
+				counters->started->increment(1);
 				Error err;
 				try {
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -725,8 +757,10 @@ public:
 						TraceEvent(SevDebug, "RemoveDataMoveTombstone", self->ddId).detail("DataMoveID", currentID);
 					}
 					co_await tr.commit();
+					counters->committed->increment(1);
 					break;
 				} catch (Error& e) {
+					counters->aborted->increment(1);
 					err = e;
 				}
 				co_await tr.onError(err);
@@ -854,6 +888,11 @@ public:
 	// TODO: unit test needed
 	static Future<Void> resumeFromDataMoves(Reference<DataDistributor> self, Future<Void> readyToStart) {
 		KeyRangeMap<std::shared_ptr<DataMove>>::iterator it = self->initData->dataMoveMap.ranges().begin();
+		int validMoves = 0;
+		int cancelledMoves = 0;
+		int emptyMoves = 0;
+		double resumeStart = now();
+		double lastLogTime = now();
 
 		co_await readyToStart;
 
@@ -862,6 +901,7 @@ public:
 			DataMoveType dataMoveType = getDataMoveTypeFromDataMoveId(meta.id);
 			if (meta.ranges.empty()) {
 				TraceEvent(SevInfo, "EmptyDataMoveRange", self->ddId).detail("DataMoveMetaData", meta.toString());
+				emptyMoves++;
 				continue;
 			}
 			if (meta.bulkLoadTaskState.present()) {
@@ -874,6 +914,7 @@ public:
 				TraceEvent(SevWarnAlways, "DDBulkLoadTaskCancelDataMove", self->ddId)
 				    .detail("Reason", "DDInit")
 				    .detail("DataMove", meta.toString());
+				cancelledMoves++;
 			} else if (dataMoveType == DataMoveType::LOGICAL_BULKLOAD ||
 			           dataMoveType == DataMoveType::PHYSICAL_BULKLOAD) {
 				// The metadata is from the old system
@@ -885,6 +926,7 @@ public:
 				    .detail("Reason", "WrongTypeWhenDDInit")
 				    .detail("DataMoveType", dataMoveType)
 				    .detail("DataMove", meta.toString());
+				cancelledMoves++;
 			} else if (it.value()->isCancelled() ||
 			           (it.value()->valid && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
 				RelocateShard rs(meta.ranges.front(), DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
@@ -892,6 +934,7 @@ public:
 				rs.cancelled = true;
 				self->relocationProducer.send(rs);
 				TraceEvent("DDInitScheduledCancelDataMove", self->ddId).detail("DataMove", meta.toString());
+				cancelledMoves++;
 			} else if (it.value()->valid) {
 				TraceEvent(SevDebug, "DDInitFoundDataMove", self->ddId).detail("DataMove", meta.toString());
 				ASSERT(meta.ranges.front() == it.range());
@@ -915,8 +958,23 @@ public:
 				self->shardsAffectedByTeamFailure->moveShard(rs.keys, teams);
 				self->relocationProducer.send(rs);
 				co_await yield(TaskPriority::DataDistribution);
+				validMoves++;
+			}
+			if (now() - lastLogTime >= 30.0) {
+				lastLogTime = now();
+				TraceEvent("DDInitResumeDataMovesProgress", self->ddId)
+				    .detail("ValidMoves", validMoves)
+				    .detail("CancelledMoves", cancelledMoves)
+				    .detail("EmptyMoves", emptyMoves)
+				    .detail("ElapsedSeconds", now() - resumeStart);
 			}
 		}
+
+		TraceEvent("DDInitResumedDataMoves", self->ddId)
+		    .detail("ValidMoves", validMoves)
+		    .detail("CancelledMoves", cancelledMoves)
+		    .detail("EmptyMoves", emptyMoves)
+		    .detail("ElapsedSeconds", now() - resumeStart);
 
 		// Trigger background cleanup for datamove tombstones
 		if (!self->txnProcessor->isMocked()) {
@@ -2696,6 +2754,7 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 	TraceEvent(SevInfo, "DataDistributionInitProgress", self->ddId).detail("Phase", "DDConfigWatch Initialized");
 
 	while (true) {
+		double ddStartTime = now();
 		self->context->trackerCancelled = false;
 		// whether all initial shard are tracked
 		self->initialized = Promise<Void>();
@@ -2708,6 +2767,8 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 		bool hasCaughtErr = false;
 		try {
 			co_await DataDistributor::init(self);
+
+			TraceEvent("DDInitDataLoaded", self->ddId).detail("ElapsedSeconds", now() - ddStartTime);
 
 			TraceEvent(SevInfo, "DataDistributionInitProgress", self->ddId).detail("Phase", "Metadata Initialized");
 
@@ -2920,6 +2981,7 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 			self->context->markTrackerCancelled();
 			Error err = caughtErr;
 			TraceEvent("DataDistributorDestroyTeamCollections", self->ddId).error(caughtErr);
+			TraceEvent(SevWarn, "DDExiting", self->ddId).error(caughtErr);
 			std::vector<UID> teamForDroppedRange;
 			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
 				// Choose a random healthy team to host the to-be-dropped range.
@@ -3163,9 +3225,12 @@ Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> getSta
 // TLog pops before reporting completion.
 Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar<ServerDBInfo> const> db) {
 	Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, LockAware::True);
+	static auto* setRecoveryCounters = makeCounters("/dd/ddSnapSetRecovery");
+	static auto* clearRecoveryCounters = makeCounters("/dd/ddSnapClearRecovery");
 
 	ReadYourWritesTransaction tr(cx);
 	while (true) {
+		setRecoveryCounters->started->increment(1);
 		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -3175,8 +3240,10 @@ Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar
 			    .detail("SnapUID", snapReq.snapUID);
 			tr.set(writeRecoveryKey, writeRecoveryKeyTrue);
 			co_await tr.commit();
+			setRecoveryCounters->committed->increment(1);
 			break;
 		} catch (Error& e) {
+			setRecoveryCounters->aborted->increment(1);
 			err = e;
 		}
 		TraceEvent("SnapDataDistributor_WriteFlagError").error(err);
@@ -3269,6 +3336,7 @@ Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar
 		    .detail("SnapUID", snapReq.snapUID);
 		tr.reset();
 		while (true) {
+			clearRecoveryCounters->started->increment(1);
 			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -3278,8 +3346,10 @@ Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar
 				    .detail("SnapUID", snapReq.snapUID);
 				tr.clear(writeRecoveryKey);
 				co_await tr.commit();
+				clearRecoveryCounters->committed->increment(1);
 				break;
 			} catch (Error& e) {
+				clearRecoveryCounters->aborted->increment(1);
 				err = e;
 			}
 			TraceEvent("SnapDataDistributor_ClearFlagError").error(err);
@@ -5056,6 +5126,9 @@ Future<Void> dataDistributor_impl(DataDistributorInterface di, Reference<DataDis
 	std::map<UID, ErrorOr<Void>> ddSnapReqResultMap;
 
 	TraceEvent("DataDistributorRunning", di.id()).detail("IsMocked", isMocked);
+	// DDInitRunning duplicates the above with DDInit* prefix so the full startup sequence
+	// can be queried with Type="DDInit*" in trace logs
+	TraceEvent("DDInitRunning", di.id());
 	self->addActor.send(actors.getResult());
 	self->addActor.send(traceRole(Role::DATA_DISTRIBUTOR, di.id()));
 	self->addActor.send(waitFailureServer(di.waitFailure.getFuture()));

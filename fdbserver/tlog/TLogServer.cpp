@@ -1,5 +1,5 @@
 /*
- * TLogServer.actor.cpp
+ * TLogServer.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -35,7 +35,7 @@
 #include "fdbserver/core/SpanContextMessage.h"
 #include "fdbserver/core/TLogInterface.h"
 #include "fdbserver/core/WaitFailure.h"
-#include "fdbserver/tlog/TLogServer.actor.h"
+#include "fdbserver/tlog/TLogServer.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/FailureMonitor.h"
@@ -50,7 +50,6 @@
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/CoroUtils.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
 
@@ -2801,14 +2800,16 @@ Future<Void> tLogEnablePopReq(TLogEnablePopRequest enablePopReq, TLogData* self,
 	enablePopReq.reply.send(Void());
 }
 
-ACTOR Future<Void> serveTLogInterface(TLogData* self,
-                                      TLogInterface tli,
-                                      Reference<LogData> logData,
-                                      PromiseStream<Void> warningCollectorInput) {
-	state Future<Void> dbInfoChange = Void();
+class ServeTLogInterface {
+	TLogData* self;
+	TLogInterface tli;
+	Reference<LogData> logData;
+	PromiseStream<Void> warningCollectorInput;
+	Future<Void> dbInfoChange;
 
-	loop choose {
-		when(wait(dbInfoChange)) {
+	Future<Void> updateDbInfo() {
+		while (true) {
+			co_await dbInfoChange;
 			dbInfoChange = self->dbInfo->onChange();
 			bool found = false;
 			if (self->dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
@@ -2836,12 +2837,20 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 				logData->logSystem->set(Reference<LogSystem>());
 			}
 		}
-		when(TLogPeekStreamRequest req = waitNext(tli.peekStreamMessages.getFuture())) {
+	}
+
+	Future<Void> servePeekStreams() {
+		while (true) {
+			TLogPeekStreamRequest req = co_await tli.peekStreamMessages.getFuture();
 			TraceEvent(SevDebug, "TLogPeekStream", logData->logId)
 			    .detail("Token", tli.peekStreamMessages.getEndpoint().token);
 			logData->addActor.send(tLogPeekStream(self, req, logData));
 		}
-		when(TLogPeekRequest req = waitNext(tli.peekMessages.getFuture())) {
+	}
+
+	Future<Void> servePeeks() {
+		while (true) {
+			TLogPeekRequest req = co_await tli.peekMessages.getFuture();
 			logData->addActor.send(tLogPeekMessages(req.reply,
 			                                        self,
 			                                        logData,
@@ -2853,10 +2862,18 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 			                                        req.end,
 			                                        req.returnEmptyIfStopped));
 		}
-		when(TLogPopRequest req = waitNext(tli.popMessages.getFuture())) {
+	}
+
+	Future<Void> servePops() {
+		while (true) {
+			TLogPopRequest req = co_await tli.popMessages.getFuture();
 			logData->addActor.send(tLogPop(self, req, logData));
 		}
-		when(TLogCommitRequest req = waitNext(tli.commit.getFuture())) {
+	}
+
+	Future<Void> serveCommits() {
+		while (true) {
+			TLogCommitRequest req = co_await tli.commit.getFuture();
 			//TraceEvent("TLogCommitReq", logData->logId).detail("Ver", req.version).detail("PrevVer", req.prevVersion).detail("LogVer", logData->version.get());
 			ASSERT(logData->isPrimary);
 			CODE_PROBE(logData->stopped(), "TLogCommitRequest while stopped");
@@ -2866,13 +2883,25 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 				logData->addActor.send(tLogCommit(self, req, logData, warningCollectorInput));
 			}
 		}
-		when(ReplyPromise<TLogLockResult> reply = waitNext(tli.lock.getFuture())) {
+	}
+
+	Future<Void> serveLocks() {
+		while (true) {
+			ReplyPromise<TLogLockResult> reply = co_await tli.lock.getFuture();
 			logData->addActor.send(tLogLock(self, reply, logData));
 		}
-		when(TLogQueuingMetricsRequest req = waitNext(tli.getQueuingMetrics.getFuture())) {
+	}
+
+	Future<Void> serveQueuingMetrics() {
+		while (true) {
+			TLogQueuingMetricsRequest req = co_await tli.getQueuingMetrics.getFuture();
 			getQueuingMetrics(self, logData, req);
 		}
-		when(TLogConfirmRunningRequest req = waitNext(tli.confirmRunning.getFuture())) {
+	}
+
+	Future<Void> serveConfirmRunning() {
+		while (true) {
+			TLogConfirmRunningRequest req = co_await tli.confirmRunning.getFuture();
 			if (req.debugID.present()) {
 				UID tlogDebugID = nondeterministicRandom()->randomUniqueID();
 				g_traceBatch.addAttach("TransactionAttachID", req.debugID.get().first(), tlogDebugID.first());
@@ -2883,7 +2912,11 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 			else
 				req.reply.sendError(tlog_stopped());
 		}
-		when(TLogDisablePopRequest req = waitNext(tli.disablePopRequest.getFuture())) {
+	}
+
+	Future<Void> serveDisablePop() {
+		while (true) {
+			TLogDisablePopRequest req = co_await tli.disablePopRequest.getFuture();
 			if (self->ignorePopUid != "") {
 				TraceEvent(SevWarn, "TLogPopDisableonDisable")
 				    .detail("IgnorePopUid", self->ignorePopUid)
@@ -2900,10 +2933,42 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 				req.reply.send(Void());
 			}
 		}
-		when(TLogEnablePopRequest enablePopReq = waitNext(tli.enablePopRequest.getFuture())) {
+	}
+
+	Future<Void> serveEnablePop() {
+		while (true) {
+			TLogEnablePopRequest enablePopReq = co_await tli.enablePopRequest.getFuture();
 			logData->addActor.send(tLogEnablePopReq(enablePopReq, self, logData));
 		}
 	}
+
+public:
+	ServeTLogInterface(TLogData* self,
+	                   TLogInterface tli,
+	                   Reference<LogData> logData,
+	                   PromiseStream<Void> warningCollectorInput)
+	  : self(self), tli(tli), logData(logData), warningCollectorInput(warningCollectorInput), dbInfoChange(Void()) {}
+
+	Future<Void> run() {
+		co_await race(updateDbInfo(),
+		              servePeekStreams(),
+		              servePeeks(),
+		              servePops(),
+		              serveCommits(),
+		              serveLocks(),
+		              serveQueuingMetrics(),
+		              serveConfirmRunning(),
+		              serveDisablePop(),
+		              serveEnablePop());
+	}
+};
+
+Future<Void> serveTLogInterface(TLogData* self,
+                                TLogInterface tli,
+                                Reference<LogData> logData,
+                                PromiseStream<Void> warningCollectorInput) {
+	ServeTLogInterface server(self, tli, logData, warningCollectorInput);
+	co_await server.run();
 }
 
 void removeLog(TLogData* self, Reference<LogData> logData, bool terminateWorkerIfEmpty = true) {
@@ -3833,46 +3898,46 @@ Future<Void> startSpillingInTenSeconds(TLogData* self, UID tlogId, Reference<Asy
 }
 
 // New tLog (if !recoverFrom.size()) or restore from network
-ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
-                        IDiskQueue* persistentQueue,
-                        Reference<AsyncVar<ServerDBInfo> const> db,
-                        LocalityData locality,
-                        PromiseStream<InitializeTLogRequest> tlogRequests,
-                        UID tlogId,
-                        UID workerID,
-                        bool restoreFromDisk,
-                        Promise<Void> oldLog,
-                        Promise<Void> recovered,
-                        std::string folder,
-                        Reference<AsyncVar<bool>> degraded,
-                        Reference<AsyncVar<bool>> lowDiskTLogExclusion,
-                        Reference<AsyncVar<UID>> activeSharedTLog,
-                        Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck) {
-	state TLogData self(tlogId,
-	                    workerID,
-	                    persistentData,
-	                    persistentQueue,
-	                    db,
-	                    degraded,
-	                    lowDiskTLogExclusion,
-	                    folder,
-	                    enablePrimaryTxnSystemHealthCheck);
-	state Future<Void> error = actorCollection(self.sharedActors.getFuture());
+Future<Void> tLog(IKeyValueStore* persistentData,
+                  IDiskQueue* persistentQueue,
+                  Reference<AsyncVar<ServerDBInfo> const> db,
+                  LocalityData locality,
+                  PromiseStream<InitializeTLogRequest> tlogRequests,
+                  UID tlogId,
+                  UID workerID,
+                  bool restoreFromDisk,
+                  Promise<Void> oldLog,
+                  Promise<Void> recovered,
+                  std::string folder,
+                  Reference<AsyncVar<bool>> degraded,
+                  Reference<AsyncVar<bool>> lowDiskTLogExclusion,
+                  Reference<AsyncVar<UID>> activeSharedTLog,
+                  Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck) {
+	TLogData self(tlogId,
+	              workerID,
+	              persistentData,
+	              persistentQueue,
+	              db,
+	              degraded,
+	              lowDiskTLogExclusion,
+	              folder,
+	              enablePrimaryTxnSystemHealthCheck);
+	Future<Void> error = actorCollection(self.sharedActors.getFuture());
 
 	TraceEvent("SharedTLog", tlogId);
 	try {
-		wait(ioTimeoutError(persistentData->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION, "TLogInit"));
+		co_await ioTimeoutError(persistentData->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION, "TLogInit");
 
 		if (restoreFromDisk) {
-			wait(restorePersistentState(&self, locality, oldLog, recovered, tlogRequests));
+			co_await restorePersistentState(&self, locality, oldLog, recovered, tlogRequests);
 		} else {
-			wait(ioTimeoutError(checkEmptyQueue(&self) && initPersistentStorage(&self),
-			                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION,
-			                    "TLogInit"));
+			co_await ioTimeoutError(checkEmptyQueue(&self) && initPersistentStorage(&self),
+			                        SERVER_KNOBS->TLOG_MAX_CREATE_DURATION,
+			                        "TLogInit");
 		}
 
 		// Disk errors need a chance to kill this actor.
-		wait(delay(0.000001));
+		co_await delay(0.000001);
 
 		if (recovered.canBeSet()) {
 			recovered.send(Void());
@@ -3881,33 +3946,34 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 		self.sharedActors.send(commitQueue(&self));
 		self.sharedActors.send(updateStorageLoop(&self));
 		self.sharedActors.send(traceRole(Role::SHARED_TRANSACTION_LOG, tlogId));
-		state Future<Void> activeSharedChange = Void();
+		Future<Void> activeSharedChange = Void();
 
-		loop {
-			choose {
-				when(state InitializeTLogRequest req = waitNext(tlogRequests.getFuture())) {
-					if (!self.tlogCache.exists(req.recruitmentID)) {
-						self.tlogCache.set(req.recruitmentID, req.reply.getFuture());
-						self.sharedActors.send(
-						    self.tlogCache.removeOnReady(req.recruitmentID, tLogStart(&self, req, locality)));
-					} else {
-						forwardPromise(Uncancellable{}, req.reply, self.tlogCache.get(req.recruitmentID));
-					}
+		while (true) {
+			auto res = co_await race(tlogRequests.getFuture(), error, activeSharedChange);
+			if (res.index() == 0) {
+				InitializeTLogRequest req = std::get<0>(std::move(res));
+
+				if (!self.tlogCache.exists(req.recruitmentID)) {
+					self.tlogCache.set(req.recruitmentID, req.reply.getFuture());
+					self.sharedActors.send(
+					    self.tlogCache.removeOnReady(req.recruitmentID, tLogStart(&self, req, locality)));
+				} else {
+					forwardPromise(Uncancellable{}, req.reply, self.tlogCache.get(req.recruitmentID));
 				}
-				when(wait(error)) {
-					throw internal_error();
+			} else if (res.index() == 1) {
+				throw internal_error();
+			} else if (res.index() == 2) {
+				if (activeSharedTLog->get() == tlogId) {
+					TraceEvent("SharedTLogNowActive", self.dbgid).detail("NowActive", activeSharedTLog->get());
+					self.targetVolatileBytes = SERVER_KNOBS->TLOG_SPILL_THRESHOLD;
+				} else {
+					stopAllTLogs(&self, tlogId);
+					TraceEvent("SharedTLogQueueSpilling", self.dbgid).detail("NowActive", activeSharedTLog->get());
+					self.sharedActors.send(startSpillingInTenSeconds(&self, tlogId, activeSharedTLog));
 				}
-				when(wait(activeSharedChange)) {
-					if (activeSharedTLog->get() == tlogId) {
-						TraceEvent("SharedTLogNowActive", self.dbgid).detail("NowActive", activeSharedTLog->get());
-						self.targetVolatileBytes = SERVER_KNOBS->TLOG_SPILL_THRESHOLD;
-					} else {
-						stopAllTLogs(&self, tlogId);
-						TraceEvent("SharedTLogQueueSpilling", self.dbgid).detail("NowActive", activeSharedTLog->get());
-						self.sharedActors.send(startSpillingInTenSeconds(&self, tlogId, activeSharedTLog));
-					}
-					activeSharedChange = activeSharedTLog->onChange();
-				}
+				activeSharedChange = activeSharedTLog->onChange();
+			} else {
+				UNREACHABLE();
 			}
 		}
 	} catch (Error& e) {
@@ -3926,9 +3992,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 			}
 		}
 
-		if (tlogTerminated(&self, persistentData, self.persistentQueue, e)) {
-			return Void();
-		} else {
+		if (!tlogTerminated(&self, persistentData, self.persistentQueue, e)) {
 			throw;
 		}
 	}

@@ -20,7 +20,7 @@ One process is elected Cluster Controller (CC). It is the "brain" of the cluster
 
 Typically 3 or 5 processes (addresses hardcoded in cluster file) that run a `leaderRegister` actor. They don't store user data -- only coordination metadata. Coordinators are not involved in committing transactions; they hold ~1KB of state that changes only during recovery.
 
-### Generation Register (Paxos Acceptor) -- [`Coordination.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/coordinator/Coordination.actor.cpp)`:121-173`
+### Generation Register (Paxos Acceptor) -- [`Coordination.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/coordinator/Coordination.cpp)`:121-173`
 
 The fundamental primitive: a register with generation numbers that prevents stale writes. Each coordinator runs a `localGenerationReg()` actor that implements a single Paxos acceptor. The generation register protocol is isomorphic to single-decree Paxos:
 
@@ -106,7 +106,7 @@ struct CoordinatedStateImpl {
 
 Used by recovery to store/update `DBCoreState` (log system configuration). This is the only mutable state managed by coordinators.
 
-### Coordinator Storage -- [`OnDemandStore`](https://github.com/apple/foundationdb/blob/main/fdbserver/coordinator/OnDemandStore.cpp), [`DiskQueue`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/DiskQueue.actor.cpp)
+### Coordinator Storage -- [`OnDemandStore`](https://github.com/apple/foundationdb/blob/main/fdbserver/coordinator/OnDemandStore.cpp), [`DiskQueue`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/DiskQueue.cpp)
 
 Each coordinator's Paxos state (generation numbers and the coordinated value) is persisted via `KeyValueStoreMemory` -- an in-memory key-value store backed by a `DiskQueue` for durability.
 
@@ -229,7 +229,7 @@ struct RoleFitness {
 - `getWorkersForTlogsSimple()` -- TLog recruitment respecting zone distribution
 - `getWorkersForTlogsComplex()` -- TLog recruitment for cross-zone policies
 
-### Recruitment Functions -- `ClusterRecovery.actor.cpp`
+### Recruitment Functions -- `ClusterRecovery.cpp`
 
 | Function | Role Recruited |
 |----------|---------------|
@@ -312,7 +312,7 @@ RPCs exposed by every worker process:
 |------|---------|
 | [`fdbserver/clustercontroller/ClusterController.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterController.actor.cpp) | CC main loop, worker registration, event handling |
 | `fdbserver/clustercontroller/ClusterController.h` | ClusterControllerData, fitness calculation, recruitment |
-| [`fdbserver/coordinator/Coordination.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/coordinator/Coordination.actor.cpp) | leaderRegister, generation register, coordination |
+| [`fdbserver/coordinator/Coordination.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/coordinator/Coordination.cpp) | leaderRegister, generation register, coordination |
 | [`fdbserver/core/LeaderElection.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/LeaderElection.actor.cpp) | tryBecomeLeaderInternal, candidacy, heartbeat |
 | [`fdbserver/core/CoordinatedState.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/CoordinatedState.cpp) | Replicated read/write over generation registers |
 | [`fdbserver/core/include/fdbserver/core/WorkerInterface.actor.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/WorkerInterface.actor.h) | WorkerInterface, ClusterControllerFullInterface |

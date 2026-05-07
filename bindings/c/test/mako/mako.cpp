@@ -292,6 +292,9 @@ transaction_begin:
 			if (future_rc == FutureRC::ABORT) {
 				return -1;
 			}
+			setTransactionOptionsIfEnabled(args, tx);
+			if (token)
+				tx.setOption(FDB_TR_OPTION_AUTHORIZATION_TOKEN, *token);
 			// retry from first op
 			op_iter = getOpBegin(args);
 			needs_commit = false;
@@ -305,6 +308,7 @@ transaction_begin:
 				stats.addLatency(OP_COMMIT, step_latency);
 			}
 			tx.reset();
+			setTransactionOptionsIfEnabled(args, tx);
 			if (token)
 				tx.setOption(FDB_TR_OPTION_AUTHORIZATION_TOKEN, *token);
 			stats.incrOpCount(OP_COMMIT);
@@ -332,8 +336,9 @@ transaction_begin:
 		const auto rc = waitAndHandleError(tx, f, "COMMIT_AT_TX_END", args.isAnyTimeoutEnabled());
 		updateErrorStatsRunMode(stats, f.error(), OP_COMMIT);
 		watch_commit.stop();
-		auto tx_resetter = ExitGuard([&tx, &token]() {
+		auto tx_resetter = ExitGuard([&tx, &token, &args]() {
 			tx.reset();
+			setTransactionOptionsIfEnabled(args, tx);
 			if (token)
 				tx.setOption(FDB_TR_OPTION_AUTHORIZATION_TOKEN, *token);
 		});
@@ -419,7 +424,7 @@ int runWorkload(Database db,
 
 		if (current_tps > 0 || thread_tps == 0 /* throttling off */) {
 			auto [tx, token] = createNewTransaction(db, args, -1);
-			setTransactionTimeoutIfEnabled(args, tx);
+			setTransactionOptionsIfEnabled(args, tx);
 
 			/* enable transaction trace */
 			if (dotrace) {
@@ -825,6 +830,7 @@ Arguments::Arguments() {
 	distributed_tracer_client = 0;
 	transaction_timeout_db = 0;
 	transaction_timeout_tx = 0;
+	max_grv_queue_delay_ms = -1;
 	num_report_files = 0;
 }
 
@@ -1143,6 +1149,9 @@ void usage() {
 	printf("%-24s %s\n",
 	       "    --transaction_timeout_tx=DURATION",
 	       "Duration in milliseconds after which a transaction times out in run mode. Set as transaction option");
+	printf("%-24s %s\n",
+	       "    --max_grv_queue_delay=DURATION",
+	       "Maximum estimated GRV proxy queue delay in milliseconds. Set as transaction option in run mode.");
 }
 
 /* parse benchmark parameters */
@@ -1198,6 +1207,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			  ARG_AUTHORIZATION_PRIVATE_KEY_PEM_FILE },
 			{ "transaction_timeout_tx", required_argument, nullptr, ARG_TRANSACTION_TIMEOUT_TX },
 			{ "transaction_timeout_db", required_argument, nullptr, ARG_TRANSACTION_TIMEOUT_DB },
+			{ "max_grv_queue_delay", required_argument, nullptr, ARG_MAX_GRV_QUEUE_DELAY },
 			/* options which may or may not have an argument */
 			{ "json_report", optional_argument, nullptr, ARG_JSON_REPORT },
 			{ "stats_export_path", optional_argument, nullptr, ARG_EXPORT_PATH },
@@ -1472,6 +1482,9 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 		case ARG_TRANSACTION_TIMEOUT_DB:
 			args.transaction_timeout_db = atoi(optarg);
 			break;
+		case ARG_MAX_GRV_QUEUE_DELAY:
+			args.max_grv_queue_delay_ms = atoi(optarg);
+			break;
 		case ARG_WARMUP_SECONDS:
 			args.warmup_seconds = atoi(optarg);
 			break;
@@ -1569,6 +1582,10 @@ int Arguments::validate() {
 			logr.error("--transaction_timeout_[tx|db] must be a non-negative integer");
 			return -1;
 		}
+		if (max_grv_queue_delay_ms < -1 || max_grv_queue_delay_ms == 0) {
+			logr.error("--max_grv_queue_delay must be a positive integer");
+			return -1;
+		}
 		if (warmup_seconds < 0) {
 			logr.error("--warmup_seconds must be a non-negative integer");
 			return -1;
@@ -1585,6 +1602,10 @@ int Arguments::validate() {
 
 	if (mode != MODE_RUN && (transaction_timeout_db != 0 || transaction_timeout_tx != 0)) {
 		logr.error("--transaction_timeout_[tx|db] only supported in run mode");
+		return -1;
+	}
+	if (mode != MODE_RUN && max_grv_queue_delay_ms != -1) {
+		logr.error("--max_grv_queue_delay only supported in run mode");
 		return -1;
 	}
 	if (mode != MODE_RUN && warmup_seconds != 0) {
@@ -2295,6 +2316,7 @@ int statsProcessMain(Arguments const& args,
 		fmt::fprintf(fp, "\"disable_ryw\": %d,", args.disable_ryw);
 		fmt::fprintf(fp, "\"transaction_timeout_db\": %d,", args.transaction_timeout_db);
 		fmt::fprintf(fp, "\"transaction_timeout_tx\": %d,", args.transaction_timeout_tx);
+		fmt::fprintf(fp, "\"max_grv_queue_delay_ms\": %d,", args.max_grv_queue_delay_ms);
 		fmt::fprintf(fp, "\"json_output_path\": \"%s\"", args.json_output_path);
 		fmt::fprintf(fp, "},\"samples\": [");
 	}

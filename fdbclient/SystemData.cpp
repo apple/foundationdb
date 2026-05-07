@@ -628,49 +628,6 @@ void decodeServerKeysValue(const ValueRef& value,
 	}
 }
 
-const KeyRef cacheKeysPrefix = "\xff\x02/cacheKeys/"_sr;
-
-Key cacheKeysKey(uint16_t idx, const KeyRef& key) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes(cacheKeysPrefix);
-	wr << idx;
-	wr.serializeBytes("/"_sr);
-	wr.serializeBytes(key);
-	return wr.toValue();
-}
-Key cacheKeysPrefixFor(uint16_t idx) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes(cacheKeysPrefix);
-	wr << idx;
-	wr.serializeBytes("/"_sr);
-	return wr.toValue();
-}
-uint16_t cacheKeysDecodeIndex(const KeyRef& key) {
-	uint16_t idx;
-	BinaryReader rd(key.removePrefix(cacheKeysPrefix), Unversioned());
-	rd >> idx;
-	return idx;
-}
-KeyRef cacheKeysDecodeKey(const KeyRef& key) {
-	return key.substr(cacheKeysPrefix.size() + sizeof(uint16_t) + 1);
-}
-
-const KeyRef cacheChangeKey = "\xff\x02/cacheChangeKey"_sr;
-const KeyRangeRef cacheChangeKeys("\xff\x02/cacheChangeKeys/"_sr, "\xff\x02/cacheChangeKeys0"_sr);
-const KeyRef cacheChangePrefix = cacheChangeKeys.begin;
-Key cacheChangeKeyFor(uint16_t idx) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes(cacheChangePrefix);
-	wr << idx;
-	return wr.toValue();
-}
-uint16_t cacheChangeKeyDecodeIndex(const KeyRef& key) {
-	uint16_t idx;
-	BinaryReader rd(key.removePrefix(cacheChangePrefix), Unversioned());
-	rd >> idx;
-	return idx;
-}
-
 const KeyRangeRef tssMappingKeys("\xff/tss/"_sr, "\xff/tss0"_sr);
 
 const KeyRangeRef tssQuarantineKeys("\xff/tssQ/"_sr, "\xff/tssQ0"_sr);

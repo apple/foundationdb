@@ -1173,7 +1173,7 @@ Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterConnecti
 
 			// Don't put dangerous commands in the command history
 			if (line.find("writemode") == std::string::npos && line.find("expensive_data_check") == std::string::npos &&
-			    line.find("unlock") == std::string::npos && line.find("blobrange") == std::string::npos)
+			    line.find("unlock") == std::string::npos)
 				linenoise.historyAdd(line);
 		}
 

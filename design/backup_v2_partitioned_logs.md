@@ -70,7 +70,7 @@ A command line tool `fdbconvert` has been written to convert new backup logs int
 * How to start a new type backup: e.g.,
 
   ```
-  fdbbackup start -C fdb.cluster --partitioned-log-experimental -d blob_url
+  fdbbackup start -C fdb.cluster --mutation-log-type partitioned-log-experimental -d blob_url
   ```
 
 ### KPI's and Health
@@ -224,7 +224,7 @@ We strive to keep the operational interface the same as the old backup system. T
 
 By default, backup workers are not enabled in the system. When operators submit a new backup request for the first time, the database performs a configuration change (`backup_worker_enabled:=1`) that enables backup workers.
 
-The operator’s backup request can indicate if an old backup or a new backup is used. This is a command line option (i.e., `--partitioned-log-experimental`) in the `fdbbackup` command. A backup request of the new type is started in the following steps:
+The operator’s backup request can indicate if an old backup or a new backup is used. This is a command line option (i.e., `--mutation-log-type partitioned-log-experimental`) in the `fdbbackup` command. A backup request of the new type is started in the following steps:
 
 1. Operators use `fdbbackup` tool to write the backup range to a system key, i.e., `\xff\x02/backupStarted`.
 2. All backup workers monitor the key `\xff\x02/backupStarted`, see the change, and start logging mutations.

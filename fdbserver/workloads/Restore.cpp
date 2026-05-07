@@ -155,7 +155,8 @@ struct RestoreWorkload : TestWorkload {
 			if (lastBackupContainer && performRestore) {
 				auto container = IBackupContainer::openContainer(lastBackupContainer->getURL(),
 				                                                 lastBackupContainer->getProxy(),
-				                                                 lastBackupContainer->getEncryptionKeyFileName());
+				                                                 lastBackupContainer->getEncryptionKeyFileName(),
+				                                                 lastBackupContainer->getEncryptionBlockSize());
 				BackupDescription desc = co_await container->describeBackup();
 				TraceEvent("RW_Restore", randomID)
 				    .setMaxEventLength(12000)

@@ -1517,10 +1517,6 @@ struct Traceable<EncryptionAtRestModeDeprecated> : std::true_type {
 	static std::string toString(const EncryptionAtRestModeDeprecated& mode) { return mode.toString(); }
 };
 
-typedef StringRef ClusterNameRef;
-typedef Standalone<ClusterNameRef> ClusterName;
-
-// TODO(gglass): delete metacluster code and tenant code and reassess the need for this enum
 enum class ClusterType { STANDALONE, LEGACY_UNUSED_METACLUSTER_MANAGEMENT, LEGACY_UNUSED_METACLUSTER_DATA };
 
 struct GRVCacheSpace {
@@ -1665,11 +1661,12 @@ struct ReadOptions {
 
 // Can be used to identify types (e.g. IDatabase) that can be used to create transactions with a `createTransaction`
 // function
-template <typename, typename = void>
+template <typename>
 struct transaction_creator_traits : std::false_type {};
 
 template <typename T>
-struct transaction_creator_traits<T, std::void_t<typename T::TransactionT>> : std::true_type {};
+    requires requires { typename T::TransactionT; }
+struct transaction_creator_traits<T> : std::true_type {};
 
 template <typename T>
 struct transaction_creator_traits<Reference<T>> : transaction_creator_traits<T> {};

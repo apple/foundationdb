@@ -711,6 +711,13 @@ func (o TransactionOptions) SetUseGrvCache() error {
 	return o.setOpt(1101, nil)
 }
 
+// Rejects a GRV request with ``transaction_grv_queue_rejected`` if the GRV proxy estimates that ratekeeper throttling will keep the request queued longer than this limit. Valid parameter values are ``[0, INT_MAX]``. The estimate is advisory and only accounts for time spent queued at the GRV proxy due to ratekeeper throttling.
+//
+// Parameter: value in milliseconds of maximum estimated GRV queue delay
+func (o TransactionOptions) SetMaxGrvQueueDelay(param int64) error {
+	return o.setOpt(1103, int64ToBytes(param))
+}
+
 // Attach given authorization token to the transaction such that subsequent tenant-aware requests are authorized
 //
 // Parameter: A JSON Web Token authorized to access data belonging to one or more tenants, indicated by 'tenants' claim of the token's payload.

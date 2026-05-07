@@ -43,6 +43,11 @@ class TestSidecar(unittest.TestCase):
         self.mock_config = MagicMock()
         # We don't want to use TLS for the local tests for now.
         self.mock_config.enable_tls = False
+        self.mock_config.require_not_empty = []
+        self.mock_config.copy_files = []
+        self.mock_config.copy_binaries = []
+        self.mock_config.copy_libraries = []
+        self.mock_config.input_monitor_conf = None
         self.mock_config.output_dir = tempfile.mkdtemp()
 
         handler = partial(
@@ -146,8 +151,17 @@ class TestSidecar(unittest.TestCase):
         self.assertEqual(r.status_code, 404)
         self.assertRegex(r.text, "Path /foobar not found")
 
+    def test_post_copy_files(self):
+        r = requests.post(f"{self.server_url}/copy_files")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.text, "OK\n")
 
-# TODO(johscheuer): Add test cases for post requests.
+    def test_post_not_found(self):
+        r = requests.post(f"{self.server_url}/foobar")
+        self.assertEqual(r.status_code, 404)
+        self.assertRegex(r.text, "Path not found")
+
+
 # TODO(johscheuer): Add test cases for TLS.
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,5 @@
 /*
- * Tracing.actor.cpp
+ * Tracing.cpp
  *
  * This source file is part of the FoundationDB open source project
  *

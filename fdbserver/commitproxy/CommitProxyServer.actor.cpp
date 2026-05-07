@@ -1793,20 +1793,19 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	return Void();
 }
 
-ACTOR Future<Void> transactionLogging(CommitBatchContext* self) {
-	state double tLoggingStart = g_network->timer_monotonic();
-	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
-	state Span span("MP:transactionLogging"_loc, self->span.context);
+Future<Void> transactionLogging(CommitBatchContext* self) {
+	double tLoggingStart = g_network->timer_monotonic();
+	ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
+	Span span("MP:transactionLogging"_loc, self->span.context);
 
 	try {
-		choose {
-			when(Version ver = wait(self->loggingComplete)) {
-				if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-					pProxyCommitData->minKnownCommittedVersion =
-					    std::max(pProxyCommitData->minKnownCommittedVersion, ver);
-				}
+		auto res = co_await race(self->loggingComplete,
+		                         pProxyCommitData->committedVersion.whenAtLeast(self->commitVersion + 1));
+		if (res.index() == 0) {
+			Version ver = std::get<0>(std::move(res));
+			if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+				pProxyCommitData->minKnownCommittedVersion = std::max(pProxyCommitData->minKnownCommittedVersion, ver);
 			}
-			when(wait(pProxyCommitData->committedVersion.whenAtLeast(self->commitVersion + 1))) {}
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_broken_promise) {
@@ -1818,7 +1817,7 @@ ACTOR Future<Void> transactionLogging(CommitBatchContext* self) {
 	pProxyCommitData->lastCommitLatency = now() - self->commitStartTime;
 	pProxyCommitData->lastCommitTime = std::max(pProxyCommitData->lastCommitTime.get(), self->commitStartTime);
 
-	wait(yield(TaskPriority::ProxyCommitYield2));
+	co_await yield(TaskPriority::ProxyCommitYield2);
 
 	if (pProxyCommitData->popRemoteTxs &&
 	    self->msg.popTo > (pProxyCommitData->txsPopVersions.size() ? pProxyCommitData->txsPopVersions.back().second
@@ -1832,7 +1831,6 @@ ACTOR Future<Void> transactionLogging(CommitBatchContext* self) {
 	}
 	pProxyCommitData->logSystem->popTxs(self->msg.popTo);
 	pProxyCommitData->stats.tlogLoggingDist->sampleSeconds(g_network->timer_monotonic() - tLoggingStart);
-	return Void();
 }
 
 Future<Void> reply(CommitBatchContext* self) {
@@ -2272,25 +2270,22 @@ static Future<Void> rejoinServer(CommitProxyInterface proxy, ProxyCommitData* co
 	}
 }
 
-ACTOR Future<Void> ddMetricsRequestServer(CommitProxyInterface proxy, Reference<AsyncVar<ServerDBInfo> const> db) {
-	loop {
-		choose {
-			when(state GetDDMetricsRequest req = waitNext(proxy.getDDMetrics.getFuture())) {
-				if (!db->get().distributor.present()) {
-					req.reply.sendError(dd_not_found());
-					continue;
-				}
-				ErrorOr<GetDataDistributorMetricsReply> reply =
-				    wait(errorOr(db->get().distributor.get().dataDistributorMetrics.getReply(
-				        GetDataDistributorMetricsRequest(req.keys, req.shardLimit))));
-				if (reply.isError()) {
-					req.reply.sendError(reply.getError());
-				} else {
-					GetDDMetricsReply newReply;
-					newReply.storageMetricsList = reply.get().storageMetricsList;
-					req.reply.send(newReply);
-				}
-			}
+Future<Void> ddMetricsRequestServer(CommitProxyInterface proxy, Reference<AsyncVar<ServerDBInfo> const> db) {
+	while (true) {
+		GetDDMetricsRequest req = co_await proxy.getDDMetrics.getFuture();
+		if (!db->get().distributor.present()) {
+			req.reply.sendError(dd_not_found());
+			continue;
+		}
+		ErrorOr<GetDataDistributorMetricsReply> reply =
+		    co_await errorOr(db->get().distributor.get().dataDistributorMetrics.getReply(
+		        GetDataDistributorMetricsRequest(req.keys, req.shardLimit)));
+		if (reply.isError()) {
+			req.reply.sendError(reply.getError());
+		} else {
+			GetDDMetricsReply newReply;
+			newReply.storageMetricsList = reply.get().storageMetricsList;
+			req.reply.send(newReply);
 		}
 	}
 }
@@ -2468,39 +2463,58 @@ Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo> const> db,
 	req.reply.send(reply);
 }
 
-ACTOR Future<Void> reportTxnTagCommitCost(UID myID,
-                                          Reference<AsyncVar<ServerDBInfo> const> db,
-                                          UIDTransactionTagMap<TransactionCommitCostEstimation>* ssTrTagCommitCost) {
-	state Future<Void> nextRequestTimer = Never();
-	state Future<Void> nextReply = Never();
-	if (db->get().ratekeeper.present())
-		nextRequestTimer = Void();
-	loop choose {
-		when(wait(db->onChange())) {
+class TxnTagCommitCostReporter {
+	UID myID;
+	Reference<AsyncVar<ServerDBInfo> const> db;
+	UIDTransactionTagMap<TransactionCommitCostEstimation>* ssTrTagCommitCost;
+
+	Future<Void> traceRatekeeperChanges() {
+		while (true) {
+			co_await db->onChange();
 			if (db->get().ratekeeper.present()) {
 				TraceEvent("ProxyRatekeeperChanged", myID).detail("RKID", db->get().ratekeeper.get().id());
-				nextRequestTimer = Void();
 			} else {
 				TraceEvent("ProxyRatekeeperDied", myID).log();
-				nextRequestTimer = Never();
 			}
-		}
-		when(wait(nextRequestTimer)) {
-			nextRequestTimer = Never();
-			if (db->get().ratekeeper.present()) {
-				nextReply = brokenPromiseToNever(db->get().ratekeeper.get().reportCommitCostEstimation.getReply(
-				    ReportCommitCostEstimationRequest(std::move(*ssTrTagCommitCost))));
-				ssTrTagCommitCost->clear();
-			} else {
-				nextReply = Never();
-			}
-		}
-		when(wait(nextReply)) {
-			nextReply = Never();
-			nextRequestTimer = delay(SERVER_KNOBS->REPORT_TRANSACTION_COST_ESTIMATION_DELAY);
 		}
 	}
-}
+
+	Future<Void> reportCommitCosts() {
+		bool sendImmediately = db->get().ratekeeper.present();
+		while (true) {
+			if (!sendImmediately) {
+				co_await db->onChange();
+			}
+			sendImmediately = false;
+
+			if (!db->get().ratekeeper.present()) {
+				continue;
+			}
+
+			auto reply = brokenPromiseToNever(db->get().ratekeeper.get().reportCommitCostEstimation.getReply(
+			    ReportCommitCostEstimationRequest(std::move(*ssTrTagCommitCost))));
+			ssTrTagCommitCost->clear();
+
+			auto dbChanged = db->onChange();
+			auto replyOrChange = co_await race(reply, dbChanged);
+			if (replyOrChange.index() == 1) {
+				sendImmediately = true;
+				continue;
+			}
+
+			co_await race(delay(SERVER_KNOBS->REPORT_TRANSACTION_COST_ESTIMATION_DELAY), dbChanged);
+			sendImmediately = true;
+		}
+	}
+
+public:
+	TxnTagCommitCostReporter(UID myID,
+	                         Reference<AsyncVar<ServerDBInfo> const> db,
+	                         UIDTransactionTagMap<TransactionCommitCostEstimation>* ssTrTagCommitCost)
+	  : myID(myID), db(db), ssTrTagCommitCost(ssTrTagCommitCost) {}
+
+	Future<Void> run() { co_await race(traceRatekeeperChanges(), reportCommitCosts()); }
+};
 
 namespace {
 struct ExpireServerEntry {
@@ -2533,50 +2547,15 @@ struct hash<IdempotencyKey> {
 
 } // namespace std
 
-ACTOR static Future<Void> idempotencyIdsExpireServer(
-    Database db,
-    PublicRequestStream<ExpireIdempotencyIdRequest> expireIdempotencyId,
-    PromiseStream<ExpectedIdempotencyIdCountForKey> expectedIdempotencyIdCountForKey,
-    Standalone<VectorRef<MutationRef>>* idempotencyClears) {
-	state std::unordered_map<IdempotencyKey, ExpireServerEntry> idStatus;
-	state std::unordered_map<IdempotencyKey, ExpireServerEntry>::iterator iter;
-	state int64_t purgeBefore;
-	state IdempotencyKey key;
-	state ExpireServerEntry* status = nullptr;
-	state Future<Void> purgeOld = Void();
-	loop {
-		choose {
-			when(ExpireIdempotencyIdRequest req = waitNext(expireIdempotencyId.getFuture())) {
-				key = IdempotencyKey{ req.commitVersion, req.batchIndexHighByte };
-				status = &idStatus[key];
-				status->receivedCount += 1;
-				CODE_PROBE(status->expectedCount == 0, "ExpireIdempotencyIdRequest received before count is known");
-				if (status->expectedCount > 0) {
-					ASSERT_LE(status->receivedCount, status->expectedCount);
-				}
-			}
-			when(ExpectedIdempotencyIdCountForKey req = waitNext(expectedIdempotencyIdCountForKey.getFuture())) {
-				key = IdempotencyKey{ req.commitVersion, req.batchIndexHighByte };
-				status = &idStatus[key];
-				ASSERT_EQ(status->expectedCount, 0);
-				status->expectedCount = req.idempotencyIdCount;
-			}
-			when(wait(purgeOld)) {
-				purgeOld = delay(SERVER_KNOBS->IDEMPOTENCY_ID_IN_MEMORY_LIFETIME);
-				purgeBefore = now() - SERVER_KNOBS->IDEMPOTENCY_ID_IN_MEMORY_LIFETIME;
-				for (iter = idStatus.begin(); iter != idStatus.end();) {
-					// We have exclusive access to idStatus in this when block, so iter will still be valid after the
-					// wait
-					wait(yield());
-					if (iter->second.timeReceived < purgeBefore) {
-						iter = idStatus.erase(iter);
-					} else {
-						++iter;
-					}
-				}
-				continue;
-			}
-		}
+namespace {
+
+class IdempotencyIdsExpireServer {
+	PublicRequestStream<ExpireIdempotencyIdRequest> expireIdempotencyId;
+	PromiseStream<ExpectedIdempotencyIdCountForKey> expectedIdempotencyIdCountForKey;
+	Standalone<VectorRef<MutationRef>>* idempotencyClears;
+	std::unordered_map<IdempotencyKey, ExpireServerEntry> idStatus;
+
+	void updateStatus(IdempotencyKey key, ExpireServerEntry* status) {
 		if (status->initialized) {
 			if (status->receivedCount == status->expectedCount) {
 				auto keyRange =
@@ -2590,9 +2569,65 @@ ACTOR static Future<Void> idempotencyIdsExpireServer(
 			status->initialized = true;
 		}
 	}
-}
 
-namespace {
+	Future<Void> receiveExpireRequests() {
+		while (true) {
+			ExpireIdempotencyIdRequest req = co_await expireIdempotencyId.getFuture();
+			IdempotencyKey key{ req.commitVersion, req.batchIndexHighByte };
+			ExpireServerEntry* status = &idStatus[key];
+			status->receivedCount += 1;
+			CODE_PROBE(status->expectedCount == 0, "ExpireIdempotencyIdRequest received before count is known");
+			if (status->expectedCount > 0) {
+				ASSERT_LE(status->receivedCount, status->expectedCount);
+			}
+			updateStatus(key, status);
+		}
+	}
+
+	Future<Void> receiveExpectedCounts() {
+		while (true) {
+			ExpectedIdempotencyIdCountForKey req = co_await expectedIdempotencyIdCountForKey.getFuture();
+			IdempotencyKey key{ req.commitVersion, req.batchIndexHighByte };
+			ExpireServerEntry* status = &idStatus[key];
+			ASSERT_EQ(status->expectedCount, 0);
+			status->expectedCount = req.idempotencyIdCount;
+			updateStatus(key, status);
+		}
+	}
+
+	Future<Void> purgeOldEntries() {
+		while (true) {
+			co_await delay(SERVER_KNOBS->IDEMPOTENCY_ID_IN_MEMORY_LIFETIME);
+			int64_t purgeBefore = now() - SERVER_KNOBS->IDEMPOTENCY_ID_IN_MEMORY_LIFETIME;
+			std::vector<IdempotencyKey> keys;
+			keys.reserve(idStatus.size());
+			for (const auto& entry : idStatus) {
+				keys.push_back(entry.first);
+			}
+
+			std::vector<IdempotencyKey> keysToErase;
+			for (const auto& key : keys) {
+				co_await yield();
+				auto status = idStatus.find(key);
+				if (status != idStatus.end() && status->second.timeReceived < purgeBefore) {
+					keysToErase.push_back(key);
+				}
+			}
+			for (const auto& key : keysToErase) {
+				idStatus.erase(key);
+			}
+		}
+	}
+
+public:
+	IdempotencyIdsExpireServer(PublicRequestStream<ExpireIdempotencyIdRequest> expireIdempotencyId,
+	                           PromiseStream<ExpectedIdempotencyIdCountForKey> expectedIdempotencyIdCountForKey,
+	                           Standalone<VectorRef<MutationRef>>* idempotencyClears)
+	  : expireIdempotencyId(expireIdempotencyId), expectedIdempotencyIdCountForKey(expectedIdempotencyIdCountForKey),
+	    idempotencyClears(idempotencyClears) {}
+
+	Future<Void> run() { co_await race(receiveExpireRequests(), receiveExpectedCounts(), purgeOldEntries()); }
+};
 
 struct TransactionStateResolveContext {
 	// Maximum sequence for txnStateRequest, this is defined when the request last flag is set.
@@ -2837,6 +2872,9 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	state PromiseStream<std::pair<std::vector<CommitTransactionRequest>, int>> batchedCommits;
 	state Future<Void> commitBatcherActor;
 	state Future<Void> lastCommitComplete = Void();
+	state TxnTagCommitCostReporter txnTagCommitCostReporter(proxy.id(), db, &commitData.ssTrTagCommitCost);
+	state IdempotencyIdsExpireServer idempotencyIdsExpireServer(
+	    proxy.expireIdempotencyId, commitData.expectedIdempotencyIdCountForKey, &commitData.idempotencyClears);
 
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> onError = transformError(actorCollection(addActor.getFuture()), broken_promise(), tlog_failed());
@@ -2905,7 +2943,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	addActor.send(readRequestServer(proxy, addActor, &commitData));
 	addActor.send(rejoinServer(proxy, &commitData));
 	addActor.send(ddMetricsRequestServer(proxy, db));
-	addActor.send(reportTxnTagCommitCost(proxy.id(), db, &commitData.ssTrTagCommitCost));
+	addActor.send(txnTagCommitCostReporter.run());
 	addActor.send(logDetailedMetrics(&commitData));
 
 	auto openDb = openDBOnServer(db);
@@ -2917,8 +2955,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 		    true,
 		    SERVER_KNOBS->IDEMPOTENCY_IDS_CLEANER_POLLING_INTERVAL));
 	}
-	addActor.send(idempotencyIdsExpireServer(
-	    openDb, proxy.expireIdempotencyId, commitData.expectedIdempotencyIdCountForKey, &commitData.idempotencyClears));
+	addActor.send(idempotencyIdsExpireServer.run());
 
 	// wait for txnStateStore recovery
 	wait(success(commitData.txnStateStore->readValue(StringRef())));

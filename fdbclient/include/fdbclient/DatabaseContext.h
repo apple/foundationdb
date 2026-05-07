@@ -28,6 +28,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/IRandom.h"
 #include "flow/genericactors.actor.h"
+#include <compare>
 #include <vector>
 #include <unordered_map>
 #pragma once
@@ -387,7 +388,16 @@ public:
 		PromiseStream<VersionRequest> stream;
 		Future<Void> actor;
 	};
-	std::map<uint32_t, VersionBatcher> versionBatcher;
+	struct VersionBatcherKey {
+		uint32_t flags;
+		Optional<int64_t> maxGrvQueueDelayMS;
+
+		VersionBatcherKey(uint32_t flags, Optional<int64_t> maxGrvQueueDelayMS)
+		  : flags(flags), maxGrvQueueDelayMS(maxGrvQueueDelayMS) {}
+
+		std::strong_ordering operator<=>(VersionBatcherKey const& rhs) const = default;
+	};
+	std::map<VersionBatcherKey, VersionBatcher> versionBatcher;
 
 	AsyncTrigger connectionFileChangedTrigger;
 

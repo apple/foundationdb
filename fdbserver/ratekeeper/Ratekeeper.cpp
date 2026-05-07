@@ -594,8 +594,7 @@ Ratekeeper::Ratekeeper(UID id, Database db)
                                                                     SERVER_KNOBS->TARGET_BYTES_PER_TLOG,
                                                                     SERVER_KNOBS->SPRING_BYTES_TLOG,
                                                                     SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE,
-                                                                    SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS,
-                                                                    SERVER_KNOBS->TARGET_BW_LAG),
+                                                                    SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS),
     batchLimits(TransactionPriority::BATCH,
                 "Batch",
                 SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER_BATCH,
@@ -603,9 +602,8 @@ Ratekeeper::Ratekeeper(UID id, Database db)
                 SERVER_KNOBS->TARGET_BYTES_PER_TLOG_BATCH,
                 SERVER_KNOBS->SPRING_BYTES_TLOG_BATCH,
                 SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH,
-                SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH,
-                SERVER_KNOBS->TARGET_BW_LAG_BATCH),
-    maxVersion(0), blobWorkerTime(now()), unblockedAssignmentTime(now()), anyBlobRanges(false) {
+                SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH),
+    maxVersion(0), unblockedAssignmentTime(now()) {
 	if (SERVER_KNOBS->GLOBAL_TAG_THROTTLING) {
 		tagThrottler = std::make_unique<GlobalTagThrottler>(
 		    db, id, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND, SERVER_KNOBS->GLOBAL_TAG_THROTTLING_LIMITING_THRESHOLD);

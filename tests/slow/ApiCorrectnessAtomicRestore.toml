@@ -37,4 +37,4 @@ runSetup = true
     startAfter = 10.0
     restoreAfter = 50.0
     # This test file uses old restore, which does not work on new backup format
-    usePartitionedLogs = false
+    mutationLogType = 0 # default logs

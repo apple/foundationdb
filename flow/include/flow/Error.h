@@ -150,7 +150,7 @@ extern bool isAssertDisabled(int line);
 		throw internal_error_impl("unreachable", __FILE__, __LINE__);                                                  \
 	}
 
-// TODO: magic so this works even if const-ness doesn't not match.
+// TODO: magic so this works even if const-ness doesn't match.
 template <typename T, typename U>
 void assert_impl(char const* a_nm,
                  T const& a,
