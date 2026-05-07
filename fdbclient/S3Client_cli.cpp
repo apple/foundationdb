@@ -18,23 +18,18 @@
  * limitations under the License.
  */
 
-#include <algorithm>
-#include <cctype>
 #include <cstdlib>
-#include <fstream>
 #include <iostream>
 #include <limits>
 #include <memory>
 #include <string>
 #include <vector>
-#include <fcntl.h>
 #include <filesystem>
 
 #ifdef _WIN32
 #include <io.h>
 #endif
 
-#include <boost/algorithm/hex.hpp>
 #include "fdbclient/BuildFlags.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #import "fdbclient/BackupTLSConfig.h"
