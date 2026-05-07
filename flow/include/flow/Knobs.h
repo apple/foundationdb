@@ -47,7 +47,7 @@ protected:
 	};
 
 	Knobs() = default;
-	explicit(false) Knobs(Knobs const&) = delete;
+	Knobs(Knobs const&) = delete;
 	Knobs& operator=(Knobs const&) = delete;
 	void initKnob(double& knob, double value, std::string const& name);
 	void initKnob(int64_t& knob, int64_t value, std::string const& name);

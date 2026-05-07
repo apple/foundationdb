@@ -692,7 +692,7 @@ public:
 	AsyncTrigger printDetailedTeamsInfo;
 	Reference<LocalitySet> storageServerSet;
 
-	explicit(false) DDTeamCollection(DDTeamCollectionInitParams const& params);
+	explicit DDTeamCollection(DDTeamCollectionInitParams const& params);
 
 	~DDTeamCollection();
 

@@ -101,7 +101,7 @@ class ThreadSpinLockHolder {
 
 public:
 	explicit ThreadSpinLockHolder(ThreadSpinLock& lock) : lock(lock) { lock.enter(); }
-	explicit(false) ThreadSpinLockHolder(const ThreadSpinLockHolder& lock) = delete;
+	ThreadSpinLockHolder(const ThreadSpinLockHolder& lock) = delete;
 	~ThreadSpinLockHolder() { lock.leave(); }
 };
 

@@ -93,7 +93,7 @@ protected:
 	~NonCopyable() = default; /// Protected non-virtual destructor
 	explicit(false) NonCopyable(NonCopyable&&) = default;
 	NonCopyable& operator=(NonCopyable&&) = default;
-	explicit(false) NonCopyable(const NonCopyable&) = delete;
+	NonCopyable(const NonCopyable&) = delete;
 	NonCopyable& operator=(const NonCopyable&) = delete;
 };
 

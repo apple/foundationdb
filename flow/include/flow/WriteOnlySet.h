@@ -50,8 +50,8 @@ public:
 	constexpr static IndexType capacity = CAPACITY;
 
 	explicit WriteOnlySet();
-	explicit(false) WriteOnlySet(const WriteOnlySet&) = delete;
-	explicit(false) WriteOnlySet(WriteOnlySet&&) = delete;
+	WriteOnlySet(const WriteOnlySet&) = delete;
+	WriteOnlySet(WriteOnlySet&&) = delete;
 	WriteOnlySet& operator=(const WriteOnlySet&) = delete;
 	WriteOnlySet& operator=(WriteOnlySet&&) = delete;
 

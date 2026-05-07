@@ -66,8 +66,8 @@ struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>
 	  : Locations(v) {}
 	LocationInfo(const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& v, bool hasCaches)
 	  : Locations(v), hasCaches(hasCaches) {}
-	explicit(false) LocationInfo(const LocationInfo&) = delete;
-	explicit(false) LocationInfo(LocationInfo&&) = delete;
+	LocationInfo(const LocationInfo&) = delete;
+	LocationInfo(LocationInfo&&) = delete;
 	LocationInfo& operator=(const LocationInfo&) = delete;
 	LocationInfo& operator=(LocationInfo&&) = delete;
 	bool hasCaches = false;

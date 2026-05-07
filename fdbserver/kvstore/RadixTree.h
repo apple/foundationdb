@@ -89,7 +89,7 @@ private:
 		// constructor for all kinds of node (root/internal/leaf)
 		node() : m_is_leaf(0), m_is_inline(0), m_inline_length(0), m_depth(0), key(), arena(), m_parent(nullptr) {}
 
-		explicit(false) node(const node&) = delete; // delete
+		node(const node&) = delete; // delete
 		node& operator=(const node& other) {
 			m_is_leaf = other.m_is_leaf;
 			m_is_inline = other.m_is_inline;
@@ -262,7 +262,7 @@ public:
 
 	~radix_tree() {}
 
-	explicit(false) radix_tree(const radix_tree& other) = delete; // delete
+	radix_tree(const radix_tree& other) = delete; // delete
 	radix_tree& operator=(const radix_tree other) = delete; // delete
 
 	inline std::tuple<size_type, size_type, size_type> size() const {

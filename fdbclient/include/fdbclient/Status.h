@@ -66,7 +66,7 @@ struct StatusArray : json_spirit::mArray {
 
 struct StatusValue : json_spirit::mValue {
 	StatusValue() {}
-	explicit StatusValue(json_spirit::mValue const& o) : json_spirit::mValue(o) {}
+	explicit(false) StatusValue(json_spirit::mValue const& o) : json_spirit::mValue(o) {}
 };
 
 enum class MessageType {

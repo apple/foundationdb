@@ -73,7 +73,7 @@ private: // Forward-declare IndexedSet::Node because Clang is much stricter abou
 		  : data(std::forward<T_>(data)), balance(0), total(std::forward<Metric_>(m)), parent(parent) {
 			child[0] = child[1] = nullptr;
 		}
-		explicit(false) Node(Node const&) = delete;
+		Node(Node const&) = delete;
 		Node& operator=(Node const&) = delete;
 		~Node() {
 			delete child[0];

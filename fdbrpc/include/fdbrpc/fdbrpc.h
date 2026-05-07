@@ -134,16 +134,18 @@ public:
 	void send(U&& value) const {
 		sav->send(std::forward<U>(value));
 	}
-	// Swift can't call method that takes in a universal references (U&&),
-	// so provide a callable `send` method that copies the value.
-	void sendCopy(const T& valueCopy) const SWIFT_NAME(send(_:)) { sav->send(valueCopy); }
+    // Swift can't call method that takes in a universal references (U&&),
+    // so provide a callable `send` method that copies the value.
+    void sendCopy(const T& valueCopy) const SWIFT_NAME(send(_:)) {
+        sav->send(valueCopy);
+    }
 	template <class E>
 	void sendError(const E& exc) const {
 		sav->sendError(exc);
 	}
 
 	void send(Never) { sendError(never_reply()); }
-	// SWIFT: Convenience method, since there is also a Swift.Never, so Never() could be confusing
+  // SWIFT: Convenience method, since there is also a Swift.Never, so Never() could be confusing
 	void sendNever() const { send(Never()); }
 
 	Future<T> getFuture() const {

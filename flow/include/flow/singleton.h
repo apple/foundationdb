@@ -64,7 +64,7 @@ public:
 		}
 	}
 
-	explicit(false) WinLockGuard(const WinLockGuard&) = delete;
+	WinLockGuard(const WinLockGuard&) = delete;
 	WinLockGuard& operator=(const WinLockGuard&) = delete;
 };
 #define MUTEX_GUARD WinLockGuard

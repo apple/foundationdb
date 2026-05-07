@@ -42,8 +42,8 @@ struct AnnotateActor {
 #endif
 	}
 
-	explicit(false) AnnotateActor(const AnnotateActor& other) = delete;
-	explicit(false) AnnotateActor(AnnotateActor&& other) = delete;
+	AnnotateActor(const AnnotateActor& other) = delete;
+	AnnotateActor(AnnotateActor&& other) = delete;
 	AnnotateActor& operator=(const AnnotateActor& other) = delete;
 
 	AnnotateActor& operator=(AnnotateActor&& other) {

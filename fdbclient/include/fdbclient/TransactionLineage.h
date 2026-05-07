@@ -122,7 +122,7 @@ public:
 		o.release();
 		return *this;
 	}
-	explicit(false) ScopedLineage(const ScopedLineage<T, V>&) = delete;
+	ScopedLineage(const ScopedLineage<T, V>&) = delete;
 	ScopedLineage& operator=(const ScopedLineage<T, V>&) = delete;
 	void release() { valid = false; }
 };

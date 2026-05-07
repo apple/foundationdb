@@ -255,7 +255,7 @@ template <class T>
 class ThreadReturnPromiseStream {
 public:
 	ThreadReturnPromiseStream() : queue(new ThreadNotifiedQueue<T>(0, 1)) {}
-	explicit(false) ThreadReturnPromiseStream(const ThreadReturnPromiseStream& rhs) = delete;
+	ThreadReturnPromiseStream(const ThreadReturnPromiseStream& rhs) = delete;
 	explicit(false) ThreadReturnPromiseStream(ThreadReturnPromiseStream&& rhs) noexcept : queue(rhs.queue) {
 		rhs.queue = 0;
 	}

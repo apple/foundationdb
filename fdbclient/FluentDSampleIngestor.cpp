@@ -58,7 +58,7 @@ class SampleSender : public std::enable_shared_from_this<SampleSender<Protocol, 
 		const char* data;
 		const unsigned size;
 		Buf(const char* data, unsigned size) : data(data), size(size) {}
-		explicit(false) Buf(Buf const&) = delete;
+		Buf(Buf const&) = delete;
 		Buf& operator=(Buf const&) = delete;
 		~Buf() { delete[] data; }
 	};

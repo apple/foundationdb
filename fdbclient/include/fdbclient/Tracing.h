@@ -159,7 +159,7 @@ public:
 	// TODO: review and address in subsequent PRs.
 	explicit Span(const Location& location) : Span(location, SpanContext()) {}
 
-	explicit(false) Span(const Span&) = delete;
+	Span(const Span&) = delete;
 	explicit(false) Span(Span&& o) {
 		arena = std::move(o.arena);
 		context = o.context;

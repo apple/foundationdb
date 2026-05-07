@@ -84,7 +84,7 @@ template <class T>
 class ThreadReturnPromise : NonCopyable {
 public:
 	ThreadReturnPromise() {}
-	explicit(false) ThreadReturnPromise(const ThreadReturnPromise& p) = delete;
+	ThreadReturnPromise(const ThreadReturnPromise& p) = delete;
 	explicit(false) ThreadReturnPromise(ThreadReturnPromise&& other) : promise(std::move(other.promise)) {}
 
 	~ThreadReturnPromise() {

@@ -77,9 +77,9 @@ private:
 	explicit SimpleCounter(std::string_view n) : value(T(0)), name_(n) {}
 
 	// Not copyable or movable.
-	explicit(false) SimpleCounter(const SimpleCounter&) = delete;
+	SimpleCounter(const SimpleCounter&) = delete;
 	SimpleCounter& operator=(const SimpleCounter&) = delete;
-	explicit(false) SimpleCounter(SimpleCounter&&) = delete;
+	SimpleCounter(SimpleCounter&&) = delete;
 	SimpleCounter& operator=(SimpleCounter&&) = delete;
 
 private:
