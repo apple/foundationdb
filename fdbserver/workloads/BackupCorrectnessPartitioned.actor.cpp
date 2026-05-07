@@ -344,7 +344,7 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 			                               backupRanges,
 			                               false,
 			                               StopWhenDone{ !stopDifferentialDelay },
-			                               UsePartitionedLog::True, // enable partitioned log here
+			                               MutationLogType::PARTITIONED_LOG, // enable partitioned log here
 			                               IncrementalBackupOnly::False,
 			                               self->encryptionKeyFileName));
 		} catch (Error& e) {
