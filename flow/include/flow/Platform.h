@@ -441,6 +441,7 @@ void setCloseOnExec(int fd);
 void outOfMemory();
 
 int getRandomSeed();
+void getRandomBytes(void* buf, size_t len);
 
 bool getEnvironmentVar(const char* name, std::string& value);
 int setEnvironmentVar(const char* name, const char* value, int overwrite);

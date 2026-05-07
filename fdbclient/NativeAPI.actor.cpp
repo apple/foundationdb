@@ -25,6 +25,7 @@
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <random>
 #include <regex>
 #include <string>
 #include <unordered_set>
@@ -4727,6 +4728,18 @@ Future<Void> Transaction::commit() {
 	return committing;
 }
 
+// Returns a thread-local mt19937_64 seeded once with 32 bytes of OS entropy.
+// Used for AUTOMATIC_IDEMPOTENCY ID generation in non-simulation runs.
+static std::mt19937_64& getIdempotencyRng() {
+	static thread_local std::mt19937_64 rng = []() {
+		uint32_t seed_data[8];
+		platform::getRandomBytes(seed_data, sizeof(seed_data));
+		std::seed_seq seq(seed_data, seed_data + 8);
+		return std::mt19937_64(seq);
+	}();
+	return rng;
+}
+
 void Transaction::setOption(FDBTransactionOptions::Option option, Optional<StringRef> value) {
 	switch (option) {
 	case FDBTransactionOptions::INITIALIZE_NEW_DATABASE:
@@ -4973,9 +4986,15 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 	case FDBTransactionOptions::AUTOMATIC_IDEMPOTENCY:
 		validateOptionValueNotPresent(value);
 		if (!tr.idempotencyId.valid()) {
-			tr.idempotencyId = IdempotencyIdRef(
-			    tr.arena,
-			    IdempotencyIdRef(BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned())));
+			StringRef id = makeString(16, tr.arena);
+			if (g_network->isSimulated()) {
+				deterministicRandom()->randomBytes(mutateString(id), 16);
+			} else {
+				auto& rng = getIdempotencyRng();
+				uint64_t buf[2] = { rng(), rng() };
+				memcpy(mutateString(id), buf, 16);
+			}
+			tr.idempotencyId = IdempotencyIdRef(id);
 		}
 		trState->automaticIdempotency = true;
 		break;
