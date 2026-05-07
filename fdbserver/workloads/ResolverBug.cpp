@@ -32,7 +32,7 @@ struct ResolverBugWorkload : TestWorkload {
 	KeyRef controlKey = "workload_control"_sr;
 	Promise<Void> bugFound;
 
-	ResolverBugWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit ResolverBugWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		disableFailureInjections = getOption(options, "disableFailureInjections"_sr, true);
 		resolverBug.ignoreTooOldProbability = getOption(options, "ignoreTooOldProbability"_sr, 0.0);
 		resolverBug.ignoreWriteSetProbability = getOption(options, "ignoreWriteSetProbability"_sr, 0.0);
@@ -93,7 +93,7 @@ struct ResolverBugWorkload : TestWorkload {
 
 	struct OnTestFailure {
 		std::shared_ptr<ResolverBug> bug;
-		OnTestFailure(std::shared_ptr<ResolverBug> bug) : bug(bug) {}
+		explicit OnTestFailure(std::shared_ptr<ResolverBug> bug) : bug(bug) {}
 
 		void operator()(StringRef, auto const& data, Error const&) {
 			auto* trace = std::any_cast<BaseTraceEvent*>(data);

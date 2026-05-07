@@ -54,7 +54,7 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 
 	int64_t consistencyCheckerId;
 
-	ConsistencyCheckUrgentWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit ConsistencyCheckUrgentWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		consistencyCheckerId = sharedRandomNumber;
 	}
 

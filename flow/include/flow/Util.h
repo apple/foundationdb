@@ -79,7 +79,7 @@ void swapAndPop(C* container, int index) {
 // Adds n to pCount upon construction, subtracts in upon destruction
 template <typename T>
 struct Hold {
-	Hold(T* pCount = nullptr, T n = 1) : pCount(pCount), n(n) {
+	explicit Hold(T* pCount = nullptr, T n = 1) : pCount(pCount), n(n) {
 		if (pCount != nullptr) {
 			*pCount += n;
 		}
@@ -90,7 +90,7 @@ struct Hold {
 		}
 	}
 
-	Hold(Hold&& other) {
+	explicit(false) Hold(Hold&& other) {
 		pCount = other.pCount;
 		other.pCount = nullptr;
 		n = other.n;

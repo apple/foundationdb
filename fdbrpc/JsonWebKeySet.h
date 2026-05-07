@@ -30,9 +30,9 @@ struct PublicOrPrivateKey {
 
 	PublicOrPrivateKey() noexcept = default;
 
-	PublicOrPrivateKey(PublicKey key) noexcept : key(std::in_place_type<PublicKey>, key) {}
+	explicit PublicOrPrivateKey(PublicKey key) noexcept : key(std::in_place_type<PublicKey>, key) {}
 
-	PublicOrPrivateKey(PrivateKey key) noexcept : key(std::in_place_type<PrivateKey>, key) {}
+	explicit PublicOrPrivateKey(PrivateKey key) noexcept : key(std::in_place_type<PrivateKey>, key) {}
 
 	bool isPublic() const noexcept { return std::holds_alternative<PublicKey>(key); }
 

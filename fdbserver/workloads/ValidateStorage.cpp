@@ -89,7 +89,7 @@ struct ValidateStorage : TestWorkload {
 		pass = false;
 	}
 
-	ValidateStorage(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(!clientId), pass(true) {}
+	explicit ValidateStorage(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(!clientId), pass(true) {}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 

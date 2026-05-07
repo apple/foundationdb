@@ -2083,7 +2083,7 @@ struct LatencyMetrics {
 	                                                 Histogram::Unit::milliseconds)) {}
 
 	// Delete copy constructors.
-	explicit(false) LatencyMetrics(const LatencyMetrics&) = delete;
+	LatencyMetrics(const LatencyMetrics&) = delete;
 	LatencyMetrics& operator=(const LatencyMetrics&) = delete;
 };
 

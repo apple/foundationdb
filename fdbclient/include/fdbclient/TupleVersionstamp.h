@@ -33,7 +33,7 @@ struct TupleVersionstamp {
 	    "\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x00"_sr;
 
 	TupleVersionstamp() : data(DEFAULT_VERSIONSTAMP) {}
-	TupleVersionstamp(StringRef);
+	explicit TupleVersionstamp(StringRef);
 	TupleVersionstamp(int64_t version, uint16_t batchNumber, uint16_t userVersion = 0);
 
 	int64_t getVersion() const;

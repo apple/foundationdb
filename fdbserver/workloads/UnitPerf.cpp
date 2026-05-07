@@ -50,7 +50,7 @@ struct UnitPerfWorkload : TestWorkload {
 	static constexpr auto NAME = "UnitPerf";
 	bool enabled;
 
-	UnitPerfWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit UnitPerfWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
 	}
 

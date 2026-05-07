@@ -73,9 +73,9 @@ public:
 	DataPointFlags flags; // 1 byte in msgpack
 	// If we take the sum of above, we get 51 bytes
 	static const uint32_t MsgpackBytes = 51;
-	NumberDataPoint(int64_t v) : recordTime{ now() }, val{ v }, flags{ DataPointFlags::FLAG_NONE } {}
+	explicit NumberDataPoint(int64_t v) : recordTime{ now() }, val{ v }, flags{ DataPointFlags::FLAG_NONE } {}
 
-	NumberDataPoint(double v) : recordTime{ now() }, val{ v }, flags{ DataPointFlags::FLAG_NONE } {}
+	explicit NumberDataPoint(double v) : recordTime{ now() }, val{ v }, flags{ DataPointFlags::FLAG_NONE } {}
 
 	NumberDataPoint& addAttribute(const std::string& key, const std::string& value) {
 		attributes.emplace_back(Attribute(key, value));
@@ -92,7 +92,8 @@ public:
 	AggregationTemporality aggregation;
 	bool isMonotonic;
 	OTELSum() : aggregation{ AGGREGATION_TEMPORALITY_CUMULATIVE }, isMonotonic{ true } {}
-	OTELSum(const std::string& n) : name{ n }, aggregation{ AGGREGATION_TEMPORALITY_CUMULATIVE }, isMonotonic{ true } {}
+	explicit OTELSum(const std::string& n)
+	  : name{ n }, aggregation{ AGGREGATION_TEMPORALITY_CUMULATIVE }, isMonotonic{ true } {}
 	OTELSum(const std::string& n, int64_t v)
 	  : name{ n }, aggregation{ AGGREGATION_TEMPORALITY_CUMULATIVE }, isMonotonic{ true } {
 		points.emplace_back(v);
@@ -113,7 +114,7 @@ public:
 	std::string name;
 	std::vector<NumberDataPoint> points;
 	OTELGauge() {}
-	OTELGauge(const std::string& n) : name{ n } {}
+	explicit OTELGauge(const std::string& n) : name{ n } {}
 	OTELGauge(const std::string& n, double v) : name{ n } { points.emplace_back(v); }
 };
 

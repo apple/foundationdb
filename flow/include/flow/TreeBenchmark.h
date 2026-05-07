@@ -53,7 +53,7 @@ struct MapHarness {
 	struct result {
 		typename map::const_iterator it;
 
-		result(typename map::const_iterator it) : it(it) {}
+		explicit result(typename map::const_iterator it) : it(it) {}
 
 		result& operator++() {
 			it++;

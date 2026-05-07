@@ -30,7 +30,7 @@
 
 class BackupRangePartitionedProgress : NonCopyable, ReferenceCounted<BackupRangePartitionedProgress> {
 public:
-	BackupRangePartitionedProgress(UID id) : dbgid(id) {}
+	explicit BackupRangePartitionedProgress(UID id) : dbgid(id) {}
 	~BackupRangePartitionedProgress() {}
 
 	// Adds a backup status. If the tag already has an entry, then the max of

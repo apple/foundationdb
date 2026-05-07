@@ -131,7 +131,7 @@ struct DDTeamCollectionTester : public DDTeamCollection {
 		ASSERT(storageWiggleStatsEqual(storageWiggler->metrics, metrics));
 	}
 
-	DDTeamCollectionTester(DDTeamCollectionInitParams const& params) : DDTeamCollection(params) {}
+	explicit DDTeamCollectionTester(DDTeamCollectionInitParams const& params) : DDTeamCollection(params) {}
 };
 
 StorageWiggleMetrics getRandomWiggleMetrics() {
@@ -148,7 +148,7 @@ struct PerpetualWiggleStatsWorkload : public TestWorkload {
 	static constexpr auto NAME = "PerpetualWiggleStatsWorkload";
 	StorageWiggleMetrics lastMetrics;
 
-	PerpetualWiggleStatsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
+	explicit PerpetualWiggleStatsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
 
 	Future<Void> _setup(Database cx) {
 		co_await setDDMode(cx, 0);

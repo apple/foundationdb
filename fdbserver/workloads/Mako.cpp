@@ -72,7 +72,7 @@ struct MakoWorkload : TestWorkload {
 		                                              "SGETRANGE", "UPDATE",   "INSERT",     "INSERTRANGE",
 		                                              "CLEAR",     "SETCLEAR", "CLEARRANGE", "SETCLEARRANGE",
 		                                              "COMMIT" };
-	MakoWorkload(WorkloadContext const& wcx)
+	explicit MakoWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), loadTime(0.0), xacts("Transactions"), retries("Retries"), conflicts("Conflicts"),
 	    commits("Commits"), totalOps("Operations") {
 		// init parameters from test file
