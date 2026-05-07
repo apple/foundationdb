@@ -82,10 +82,8 @@ struct struct_like_traits<std::tuple<Ts...>> : std::true_type {
 };
 
 template <class T>
-struct scalar_traits<
-    T,
-    std::enable_if_t<std::is_integral<T>::value || std::is_floating_point<T>::value || std::is_enum<T>::value>>
-  : std::true_type {
+    requires(std::is_integral_v<T> || std::is_floating_point_v<T> || std::is_enum_v<T>)
+struct scalar_traits<T> : std::true_type {
 	constexpr static size_t size = sizeof(T);
 	template <class Context>
 	static void save(uint8_t* out, const T& t, Context&) {
@@ -510,7 +508,8 @@ struct PrecomputeSize : Context {
 	void write(const void*, int offset, int /*len*/) { current_buffer_size = std::max(current_buffer_size, offset); }
 
 	template <class T>
-	std::enable_if_t<is_dynamic_size<T>, bool> visitDynamicSize(const T& t) {
+	    requires(is_dynamic_size<T>)
+	bool visitDynamicSize(const T& t) {
 		uint32_t size = dynamic_size_traits<T>::size(t, this->context());
 		if (size == 0 && emptyVector.value != -1) {
 			return true;
@@ -609,7 +608,8 @@ struct WriteToBuffer : Context {
 	}
 
 	template <class T>
-	std::enable_if_t<is_dynamic_size<T>, bool> visitDynamicSize(const T& t) {
+	    requires(is_dynamic_size<T>)
+	bool visitDynamicSize(const T& t) {
 		uint32_t size = dynamic_size_traits<T>::size(t, this->context());
 		if (size == 0 && emptyVector.value != -1) {
 			return true;
@@ -705,7 +705,8 @@ struct TraverseMessageTypes : Context {
 	InsertVTableLambda<Context>& f;
 
 	template <class Member>
-	std::enable_if_t<expect_serialize_member<Member>> operator()(const Member& member) {
+	    requires(expect_serialize_member<Member>)
+	void operator()(const Member& member) {
 		if constexpr (serializable_traits<Member>::value) {
 			serializable_traits<Member>::serialize(f, const_cast<Member&>(member));
 		} else {
@@ -714,10 +715,12 @@ struct TraverseMessageTypes : Context {
 	};
 
 	template <class T>
-	std::enable_if_t<!expect_serialize_member<T> && !is_vector_like<T> && !is_union_like<T>> operator()(const T&) {}
+	    requires(!expect_serialize_member<T> && !is_vector_like<T> && !is_union_like<T>)
+	void operator()(const T&) {}
 
 	template <class VectorLike>
-	std::enable_if_t<is_vector_like<VectorLike>> operator()(const VectorLike& members) {
+	    requires(is_vector_like<VectorLike>)
+	void operator()(const VectorLike& members) {
 		using VectorTraits = vector_like_traits<VectorLike>;
 		using T = typename VectorTraits::value_type;
 		// we don't need to check for recursion here because the next call
@@ -728,7 +731,8 @@ struct TraverseMessageTypes : Context {
 	}
 
 	template <class UnionLike>
-	std::enable_if_t<is_union_like<UnionLike>> operator()(const UnionLike& members) {
+	    requires(is_union_like<UnionLike>)
+	void operator()(const UnionLike& members) {
 		using UnionTraits = union_like_traits<UnionLike>;
 		static_assert(pack_size(typename UnionTraits::alternatives{}) <= 254,
 		              "Up to 254 alternatives are supported for unions");
@@ -1071,12 +1075,14 @@ template <class, class Context>
 struct LoadSaveHelper : Context {
 	LoadSaveHelper(const Context& context) : Context(context) {}
 	template <class U>
-	std::enable_if_t<is_scalar<U>> load(U& member, const uint8_t* current) {
+	    requires(is_scalar<U>)
+	void load(U& member, const uint8_t* current) {
 		scalar_traits<U>::load(current, member, this->context());
 	}
 
 	template <class U>
-	std::enable_if_t<is_struct_like<U>> load(U& member, const uint8_t* current) {
+	    requires(is_struct_like<U>)
+	void load(U& member, const uint8_t* current) {
 		using StructTraits = struct_like_traits<U>;
 		using types = typename StructTraits::types;
 		for_each_i<pack_size(types{})>([&](auto i_type) {
@@ -1089,7 +1095,8 @@ struct LoadSaveHelper : Context {
 	}
 
 	template <class U>
-	std::enable_if_t<is_dynamic_size<U>> load(U& member, const uint8_t* current) {
+	    requires(is_dynamic_size<U>)
+	void load(U& member, const uint8_t* current) {
 		uint32_t current_offset = interpret_as<uint32_t>(current);
 		current += current_offset;
 		uint32_t size = interpret_as<uint32_t>(current);
@@ -1124,7 +1131,8 @@ struct LoadSaveHelper : Context {
 	};
 
 	template <class Member>
-	std::enable_if_t<expect_serialize_member<Member>> load(Member& member, const uint8_t* current) {
+	    requires(expect_serialize_member<Member>)
+	void load(Member& member, const uint8_t* current) {
 		SerializeFun fun(current, this->context());
 		if constexpr (serializable_traits<Member>::value) {
 			serializable_traits<Member>::serialize(fun, member);
@@ -1134,7 +1142,8 @@ struct LoadSaveHelper : Context {
 	}
 
 	template <class VectorLike>
-	std::enable_if_t<is_vector_like<VectorLike>> load(VectorLike& member, const uint8_t* current) {
+	    requires(is_vector_like<VectorLike>)
+	void load(VectorLike& member, const uint8_t* current) {
 		using VectorTraits = vector_like_traits<VectorLike>;
 		using T = typename VectorTraits::value_type;
 		uint32_t current_offset = interpret_as<uint32_t>(current);
@@ -1151,7 +1160,8 @@ struct LoadSaveHelper : Context {
 		}
 	}
 
-	template <class U, class Writer, typename = std::enable_if_t<is_scalar<U>>>
+	template <class U, class Writer>
+	    requires(is_scalar<U>)
 	auto save(const U& message, Writer& writer, const VTableSet*) {
 		constexpr auto size = scalar_traits<U>::size;
 		std::array<uint8_t, size> result = {};
@@ -1162,10 +1172,8 @@ struct LoadSaveHelper : Context {
 	}
 
 	template <class U, class Writer>
-	auto save(const U& message,
-	          Writer& writer,
-	          const VTableSet* vtables,
-	          std::enable_if_t<is_struct_like<U>, int> _ = 0) {
+	    requires(is_struct_like<U>)
+	auto save(const U& message, Writer& writer, const VTableSet* vtables) {
 		using StructTraits = struct_like_traits<U>;
 		using types = typename StructTraits::types;
 		constexpr auto size = struct_size(types{});
@@ -1179,21 +1187,17 @@ struct LoadSaveHelper : Context {
 		return struct_bytes;
 	}
 
-	template <class U, class Writer, typename = std::enable_if_t<is_dynamic_size<U>>>
-	RelativeOffset save(const U& message,
-	                    Writer& writer,
-	                    const VTableSet*,
-	                    std::enable_if_t<is_dynamic_size<U>, int> _ = 0) {
+	template <class U, class Writer>
+	    requires(is_dynamic_size<U>)
+	RelativeOffset save(const U& message, Writer& writer, const VTableSet*) {
 		if (writer.visitDynamicSize(message))
 			return writer.emptyVector;
 		return RelativeOffset{ writer.current_buffer_size };
 	}
 
 	template <class Member, class Writer>
-	RelativeOffset save(const Member& member,
-	                    Writer& writer,
-	                    const VTableSet* vtables,
-	                    std::enable_if_t<expect_serialize_member<Member>, int> _ = 0) {
+	    requires(expect_serialize_member<Member>)
+	RelativeOffset save(const Member& member, Writer& writer, const VTableSet* vtables) {
 		SaveVisitorLambda<Writer, Context> l{ *this, vtables, writer };
 		if constexpr (serializable_traits<Member>::value) {
 			serializable_traits<Member>::serialize(l, const_cast<Member&>(member));
@@ -1203,7 +1207,8 @@ struct LoadSaveHelper : Context {
 		return RelativeOffset{ writer.current_buffer_size };
 	}
 
-	template <class VectorLike, class Writer, typename = std::enable_if_t<is_vector_like<VectorLike>>>
+	template <class VectorLike, class Writer>
+	    requires(is_vector_like<VectorLike>)
 	RelativeOffset save(const VectorLike& members, Writer& writer, const VTableSet* vtables) {
 		using VectorTraits = vector_like_traits<VectorLike>;
 		using T = typename VectorTraits::value_type;

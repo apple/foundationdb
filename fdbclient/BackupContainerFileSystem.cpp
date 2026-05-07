@@ -566,37 +566,61 @@ public:
 			json_spirit::mValue json;
 			if (json_spirit::read_string(content, json) && json.type() == json_spirit::obj_type) {
 				auto& obj = json.get_obj();
-				bool enabled = false;
-				int blockSize = 0;
 
-				if (obj.count("is_encryption_enabled") &&
-				    obj.at("is_encryption_enabled").type() == json_spirit::bool_type) {
-					enabled = obj.at("is_encryption_enabled").get_bool();
+				// Both fields must be present with correct types.
+				if (!obj.count("is_encryption_enabled") ||
+				    obj.at("is_encryption_enabled").type() != json_spirit::bool_type ||
+				    !obj.count("encryption_block_size") ||
+				    obj.at("encryption_block_size").type() != json_spirit::int_type) {
+					fprintf(stderr, "ERROR: Encryption metadata file is missing required fields or has wrong types.\n");
+					TraceEvent(SevError, "BackupContainerReadEncryptionMetadataMalformed")
+					    .detail("URL", bc->getURL())
+					    .detail("File", BackupContainerFileSystem::encryptionMetadataFileName());
+					throw file_corrupt();
 				}
-				if (obj.count("encryption_block_size") &&
-				    obj.at("encryption_block_size").type() == json_spirit::int_type) {
-					blockSize = obj.at("encryption_block_size").get_int();
+
+				bool enabled = obj.at("is_encryption_enabled").get_bool();
+				int blockSize = obj.at("encryption_block_size").get_int();
+
+				if ((enabled && blockSize <= 0) || (!enabled && blockSize != 0)) {
+					fprintf(stderr,
+					        "ERROR: Encryption metadata is inconsistent (enabled=%d, blockSize=%d).\n",
+					        enabled,
+					        blockSize);
+					TraceEvent(SevError, "BackupContainerReadEncryptionMetadataInconsistent")
+					    .detail("URL", bc->getURL())
+					    .detail("IsEncryptionEnabled", enabled)
+					    .detail("EncryptionBlockSize", blockSize);
+					throw file_corrupt();
 				}
+
 				TraceEvent("BackupContainerReadEncryptionMetadata")
 				    .detail("URL", bc->getURL())
 				    .detail("IsEncryptionEnabled", enabled)
 				    .detail("EncryptionBlockSize", blockSize);
 				co_return std::make_pair(enabled, blockSize);
 			} else {
-				throw backup_invalid_info();
+				// If the file is malformed, throw an error.
+				fprintf(stderr, "ERROR: Failed to read encryption_metadata file due to incorrect format\n");
+				TraceEvent(SevError, "BackupContainerReadEncryptionMetadataMalformed")
+				    .detail("URL", bc->getURL())
+				    .detail("File", BackupContainerFileSystem::encryptionMetadataFileName());
+				throw file_corrupt();
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_file_not_found) {
+				// File may not be present for older backups, return encryption disabled.
 				TraceEvent(SevWarn, "BackupContainerEncryptionMetadataNotFound")
 				    .detail("URL", bc->getURL())
 				    .detail("File", BackupContainerFileSystem::encryptionMetadataFileName());
 				co_return std::make_pair(false, 0);
 			}
+			fprintf(stderr, "ERROR: Failed to read encryption_metadata file due to an error.\n");
 			TraceEvent(SevError, "BackupContainerReadEncryptionMetadataError")
 			    .error(e)
 			    .detail("URL", bc->getURL())
 			    .detail("File", BackupContainerFileSystem::encryptionMetadataFileName());
-			throw;
+			throw file_not_readable();
 		}
 	}
 
@@ -1474,8 +1498,9 @@ public:
 		}
 
 		// Write JSON with encryption metadata
+		bool enabled = bc->encryptionKeyFileName.present();
 		JsonBuilderObject doc;
-		doc.setKey("is_encryption_enabled", bc->encryptionKeyFileName.present());
+		doc.setKey("is_encryption_enabled", enabled);
 		doc.setKey("encryption_block_size", encryptionBlockSize);
 
 		std::string jsonStr = doc.getJson();
@@ -1821,12 +1846,9 @@ BackupContainerFileSystem::VersionProperty BackupContainerFileSystem::unreliable
 BackupContainerFileSystem::VersionProperty BackupContainerFileSystem::logType() {
 	return { Reference<BackupContainerFileSystem>::addRef(this), "mutation_log_type" };
 }
-BackupContainerFileSystem::VersionProperty BackupContainerFileSystem::fileLevelEncryption() {
-	return { Reference<BackupContainerFileSystem>::addRef(this), "file_level_encryption" };
-}
 
 std::string BackupContainerFileSystem::encryptionMetadataFileName() {
-	return "properties/file_level_encryption";
+	return "properties/encryption_metadata";
 }
 
 bool BackupContainerFileSystem::usesEncryption() const {
@@ -1890,7 +1912,7 @@ Reference<BackupContainerFileSystem> BackupContainerFileSystem::openContainerFS(
 
 			BackupContainerBlobStore::validateBackupUrl(resource);
 			r = makeReference<BackupContainerBlobStore>(
-			    bstore, resource, backupParams, encryptionKeyFileName, isBackup, encryptionBlockSize);
+			    bstore, resource, backupParams, encryptionKeyFileName, encryptionBlockSize, isBackup);
 		}
 #ifdef BUILD_AZURE_BACKUP
 		else if (u.startsWith("azure://"_sr)) {

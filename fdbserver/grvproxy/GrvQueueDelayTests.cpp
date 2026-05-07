@@ -170,6 +170,7 @@ TEST_CASE("/fdbserver/grvproxy/maxGrvQueueDelay/rejectDecision/table") {
 
 	for (auto const& c : cases) {
 		GetReadVersionRequest req;
+		req.setRequestTime(now());
 		req.maxGrvQueueDelayMS = c.maxDelayMS;
 		req.proxyTagThrottledDuration = c.proxyTagThrottledDuration;
 

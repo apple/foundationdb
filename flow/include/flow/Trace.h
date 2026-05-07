@@ -286,8 +286,8 @@ struct SWIFT_CXX_IMPORT_OWNED BaseTraceEvent {
 	static std::string printRealTime(double time);
 
 	template <class T>
-	typename std::enable_if<Traceable<T>::value && !std::is_enum_v<T>, BaseTraceEvent&>::type detail(std::string&& key,
-	                                                                                                 const T& value) {
+	    requires(Traceable<T>::value && !std::is_enum_v<T>)
+	BaseTraceEvent& detail(std::string&& key, const T& value) {
 		if (enabled && init()) {
 			auto s = Traceable<T>::toString(value);
 			addMetric(key.c_str(), value, s);
@@ -297,8 +297,8 @@ struct SWIFT_CXX_IMPORT_OWNED BaseTraceEvent {
 	}
 
 	template <class T>
-	typename std::enable_if<Traceable<T>::value && !std::is_enum_v<T>, BaseTraceEvent&>::type detail(const char* key,
-	                                                                                                 const T& value) {
+	    requires(Traceable<T>::value && !std::is_enum_v<T>)
+	BaseTraceEvent& detail(const char* key, const T& value) {
 		if (enabled && init()) {
 			auto s = Traceable<T>::toString(value);
 			addMetric(key, value, s);
@@ -307,7 +307,8 @@ struct SWIFT_CXX_IMPORT_OWNED BaseTraceEvent {
 		return *this;
 	}
 	template <class T>
-	typename std::enable_if<std::is_enum<T>::value, BaseTraceEvent&>::type detail(const char* key, T value) {
+	    requires(std::is_enum_v<T>)
+	BaseTraceEvent& detail(const char* key, T value) {
 		if (enabled && init()) {
 			setField(key, int64_t(value));
 			return detailImpl(std::string(key), format("%d", value), false);
@@ -370,16 +371,14 @@ protected:
 	BaseTraceEvent(Severity, const char* type, UID id = UID());
 
 	template <class T>
-	typename std::enable_if<SpecialTraceMetricType<T>::value, void>::type addMetric(const char* key,
-	                                                                                const T& value,
-	                                                                                const std::string&) {
+	    requires(SpecialTraceMetricType<T>::value)
+	void addMetric(const char* key, const T& value, const std::string&) {
 		setField(key, SpecialTraceMetricType<T>::getValue(value));
 	}
 
 	template <class T>
-	typename std::enable_if<!SpecialTraceMetricType<T>::value, void>::type addMetric(const char* key,
-	                                                                                 const T&,
-	                                                                                 const std::string& value) {
+	    requires(!SpecialTraceMetricType<T>::value)
+	void addMetric(const char* key, const T&, const std::string& value) {
 		setField(key, value);
 	}
 
@@ -498,7 +497,7 @@ struct SWIFT_CXX_IMPORT_OWNED TraceEvent : public BaseTraceEvent {
 	BaseTraceEvent& sample(double sampleRate, bool logSampleRate = true);
 	BaseTraceEvent& suppressFor(double duration, bool logSuppressedEventCount = true);
 
-	// Exposed for Swift which cannot use std::enable_if
+	// Exposed for Swift which cannot use constrained overloads.
 	template <class T>
 	void addDetail(std::string key, const T& value) {
 		if (enabled && init()) {

@@ -1051,9 +1051,19 @@ Future<Void> trackInitialShards(DataDistributionTracker* self, Reference<Initial
 		co_await yield(TaskPriority::DataDistribution);
 	}
 
+	TraceEvent("TrackInitialShardsComplete", self->distributorId).detail("ShardsTracked", s);
+
+	double changeSizesStart = now();
 	Future<Void> initialSize = changeSizes(self, KeyRangeRef(allKeys.begin, allKeys.end), 0, "ShardInit");
 	self->readyToStart.send(Void());
 	co_await initialSize;
+
+	TraceEvent("TrackInitialShardsMetricsComplete", self->distributorId)
+	    .detail("ElapsedSeconds", now() - changeSizesStart);
+
+	// DDInitDone bookends DDInitRunning — marks DD fully operational. Uses DD* prefix so
+	// the full startup sequence can be queried with Type="DDInit*" in trace logs.
+	TraceEvent("DDInitDone", self->distributorId);
 	self->maxShardSizeUpdater = updateMaxShardSize(self->dbSizeEstimate, self->maxShardSize);
 }
 
