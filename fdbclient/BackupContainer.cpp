@@ -315,7 +315,7 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 
 			BackupContainerBlobStore::validateBackupUrl(resource);
 			r = makeReference<BackupContainerBlobStore>(
-			    bstore, resource, backupParams, encryptionKeyFileName, /*isBackup=*/true, encryptionBlockSize);
+			    bstore, resource, backupParams, encryptionKeyFileName, encryptionBlockSize, /*isBackup=*/true);
 		}
 #ifdef BUILD_AZURE_BACKUP
 		else if (u.startsWith("azure://"_sr)) {

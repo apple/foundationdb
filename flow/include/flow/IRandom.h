@@ -39,7 +39,8 @@
 // This is as good a place as any, I guess.
 
 template <typename T>
-typename std::enable_if<std::is_integral<T>::value, int>::type compare(T l, T r) {
+    requires(std::is_integral_v<T>)
+int compare(T l, T r) {
 	const int gt = l > r;
 	const int lt = l < r;
 	return gt - lt;
@@ -49,7 +50,8 @@ typename std::enable_if<std::is_integral<T>::value, int>::type compare(T l, T r)
 }
 
 template <typename T, typename U>
-typename std::enable_if<!std::is_integral<T>::value, int>::type compare(T const& l, U const& r) {
+    requires(!std::is_integral_v<T>)
+int compare(T const& l, U const& r) {
 	return l.compare(r);
 }
 

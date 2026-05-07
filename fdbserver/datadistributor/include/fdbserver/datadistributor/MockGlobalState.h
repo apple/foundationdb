@@ -161,9 +161,8 @@ public:
 	static constexpr bool isLoadBalancedReply = std::is_base_of_v<LoadBalancedReply, Reply>;
 
 	template <class Reply>
-	typename std::enable_if_t<isLoadBalancedReply<Reply>, void> sendErrorWithPenalty(const ReplyPromise<Reply>& promise,
-	                                                                                 const Error& err,
-	                                                                                 double penalty) {
+	    requires(isLoadBalancedReply<Reply>)
+	void sendErrorWithPenalty(const ReplyPromise<Reply>& promise, const Error& err, double penalty) {
 		Reply reply;
 		reply.error = err;
 		reply.penalty = penalty;
@@ -171,8 +170,8 @@ public:
 	}
 
 	template <class Reply>
-	typename std::enable_if_t<!isLoadBalancedReply<Reply>, void>
-	sendErrorWithPenalty(const ReplyPromise<Reply>& promise, const Error& err, double) {
+	    requires(!isLoadBalancedReply<Reply>)
+	void sendErrorWithPenalty(const ReplyPromise<Reply>& promise, const Error& err, double) {
 		promise.sendError(err);
 	}
 
