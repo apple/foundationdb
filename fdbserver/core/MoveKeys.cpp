@@ -43,6 +43,16 @@ static inline void dprint(fmt::format_string<T...> fmt, T&&... args) {
 }
 
 namespace {
+
+// Exponential backoff with jitter for transaction_too_old retries in finishMoveKeys.
+// Base formula: 0.1 * 2^retries, capped at 5.0s, then jittered to [0.75x, 1.25x].
+// Called with retries >= 1 (retries is incremented before the call), so effective
+// start is ~0.2s. Jitter prevents FlowLock slots from retrying in lockstep.
+double finishMoveKeysBackoff(int retries) {
+	double base = std::min(0.1 * (1 << std::min(retries, 6)), 5.0);
+	return std::min(base * (0.75 + 0.5 * deterministicRandom()->random01()), 5.0); // jitter: [0.75x, 1.25x], capped
+}
+
 struct Shard {
 	Shard() = default;
 	Shard(KeyRangeRef range, const UID& id) : range(range), id(id) {}
@@ -1593,10 +1603,18 @@ static Future<Void> finishMoveKeys(Database occ,
 						}
 
 						co_await waitForAll(actors);
+
+						// Inject transaction_too_old before commit to exercise the
+						// retry limit and finish_move_keys_too_many_retries path.
+						if (BUGGIFY_WITH_PROB(0.01)) {
+							CODE_PROBE(true, "finishMoveKeys injecting transaction_too_old before commit");
+							throw transaction_too_old();
+						}
 						co_await tr.commit();
 						counters->committed->increment(1);
 
 						begin = endKey;
+						retries = 0;
 						break;
 					}
 					// This leads to a count of transactions starting that exceeds the sum of
@@ -1611,6 +1629,27 @@ static Future<Void> finishMoveKeys(Database occ,
 					throw err;
 				co_await tr.onError(err);
 				retries++;
+				// tr.onError delays are short for transaction_too_old. With 15
+				// FlowLock slots all retrying, this creates a retry storm. Add
+				// additional exponential backoff capped at 5s.
+				if (err.code() == error_code_transaction_too_old) {
+					double backoff = finishMoveKeysBackoff(retries);
+					CODE_PROBE(true, "finishMoveKeys transaction_too_old backoff");
+					TraceEvent("FinishMoveKeysBackoff", relocationIntervalId)
+					    .suppressFor(1.0)
+					    .detail("Retries", retries)
+					    .detail("BackoffSeconds", backoff);
+					if (retries > SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES) {
+						CODE_PROBE(true, "finishMoveKeys giving up after max retries");
+						TraceEvent(SevWarnAlways, "RelocateShard_FinishMoveKeysGivingUp", relocationIntervalId)
+						    .error(err)
+						    .detail("KeyBegin", keys.begin)
+						    .detail("KeyEnd", keys.end)
+						    .detail("Retries", retries);
+						throw finish_move_keys_too_many_retries();
+					}
+					co_await delay(backoff);
+				}
 				if (retries % 10 == 0) {
 					TraceEvent(retries == 20 ? SevWarnAlways : SevWarn,
 					           "RelocateShard_FinishMoveKeysRetrying",
@@ -3429,4 +3468,33 @@ Future<Void> unassignServerKeys(UID traceId, TrType tr, KeyRangeRef keys, std::s
 			TraceEvent("UnassignKeys", traceId).detail("Keys", keys).detail("SS", id);
 		}
 	}
+}
+
+// Unit test for the finishMoveKeys backoff formula. A simulation workload can't reliably
+// trigger transaction_too_old in finishMoveKeys because:
+//   1. finishMoveKeys only runs when DD schedules data moves, which depends on cluster
+//      configuration and shard placement — not guaranteed in all simulation configs
+//   2. Even with injection, the injection point must fire before check() runs, but
+//      finishMoveKeys may not be called if no moves are scheduled
+// So we test the backoff arithmetic directly.
+TEST_CASE("/fdbserver/MoveKeys/finishMoveKeysBackoff") {
+	// Verify exponential backoff with jitter: base = 0.1 * 2^retries capped at 5.0s,
+	// then jittered to [0.75x, 1.25x]. In production retries >= 1 at call site.
+	for (int i = 0; i < 100; i++) {
+		double v0 = finishMoveKeysBackoff(0);
+		ASSERT(v0 >= 0.1 * 0.75 && v0 <= 0.1 * 1.25);
+		double v1 = finishMoveKeysBackoff(1);
+		ASSERT(v1 >= 0.2 * 0.75 && v1 <= 0.2 * 1.25);
+		double v3 = finishMoveKeysBackoff(3);
+		ASSERT(v3 >= 0.8 * 0.75 && v3 <= 0.8 * 1.25);
+		double v6 = finishMoveKeysBackoff(6);
+		ASSERT(v6 >= 5.0 * 0.75 && v6 <= 5.0); // capped at 5.0
+		double v100 = finishMoveKeysBackoff(100);
+		ASSERT(v100 >= 5.0 * 0.75 && v100 <= 5.0); // still capped
+	}
+
+	// Verify the retry limit knob exists and is positive
+	ASSERT(SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES > 0);
+
+	return Void();
 }
