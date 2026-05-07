@@ -203,7 +203,8 @@ inline KeyRange TupleCodec<KeyRange>::unpack(Standalone<StringRef> const& val) {
 }
 
 template <class Enum>
-struct TupleCodec<Enum, std::enable_if_t<std::is_enum_v<Enum>>> {
+    requires(std::is_enum_v<Enum>)
+struct TupleCodec<Enum> {
 	static inline Standalone<StringRef> pack(Enum const& val) {
 		return Tuple::makeTuple(static_cast<int64_t>(val)).pack();
 	}
@@ -425,8 +426,8 @@ public:
 	}
 
 	template <class TransactionContext>
-	std::enable_if_t<is_transaction_creator<TransactionContext>, Future<Void>> set(TransactionContext tcx,
-	                                                                               T const& val) {
+	    requires(is_transaction_creator<TransactionContext>)
+	Future<Void> set(TransactionContext tcx, T const& val) {
 		return runTransaction(tcx, [this, val](decltype(tcx->createTransaction()) tr) {
 			if constexpr (SystemAccess) {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -438,7 +439,8 @@ public:
 	}
 
 	template <class Transaction>
-	std::enable_if_t<!is_transaction_creator<Transaction>, void> set(Transaction tr, T const& val) {
+	    requires(!is_transaction_creator<Transaction>)
+	void set(Transaction tr, T const& val) {
 		tr->set(key, packValue(val));
 		if (trigger.present()) {
 			trigger->update(tr);
@@ -446,7 +448,8 @@ public:
 	}
 
 	template <class TransactionContext>
-	std::enable_if_t<is_transaction_creator<TransactionContext>, Future<Void>> clear(TransactionContext tcx) {
+	    requires(is_transaction_creator<TransactionContext>)
+	Future<Void> clear(TransactionContext tcx) {
 		return runTransaction(tcx, [this](decltype(tcx->createTransaction()) tr) {
 			if constexpr (SystemAccess) {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -458,7 +461,8 @@ public:
 	}
 
 	template <class Transaction>
-	std::enable_if_t<!is_transaction_creator<Transaction>, void> clear(Transaction tr) {
+	    requires(!is_transaction_creator<Transaction>)
+	void clear(Transaction tr) {
 		tr->clear(key);
 		if (trigger.present()) {
 			trigger->update(tr);

@@ -136,7 +136,8 @@ KeyRangeArray copyKeyRangeArray(fdb::future_var::KeyRangeRefArray::Type array);
 static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "Do not support non-little-endian systems");
 
 // Converts a little-endian encoded number into an integral type.
-template <class T, typename = std::enable_if_t<std::is_integral<T>::value>>
+template <class T>
+    requires(std::is_integral_v<T>)
 static T toInteger(fdb::BytesRef value) {
 	ASSERT(value.size() == sizeof(T));
 	T output;
@@ -145,7 +146,8 @@ static T toInteger(fdb::BytesRef value) {
 }
 
 // Converts an integral type to a little-endian encoded byte string.
-template <class T, typename = std::enable_if_t<std::is_integral<T>::value>>
+template <class T>
+    requires(std::is_integral_v<T>)
 static fdb::ByteString toByteString(T value) {
 	fdb::ByteString output(sizeof(T), 0);
 	memcpy(output.data(), (const uint8_t*)&value, sizeof(value));

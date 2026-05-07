@@ -153,13 +153,15 @@ inline void save(Archive& ar, const std::string& value) {
 }
 
 template <class Archive, class T>
-class Serializer<Archive, T, typename std::enable_if_t<is_binary_serializable<T>::value>> {
+    requires(is_binary_serializable<T>::value)
+class Serializer<Archive, T> {
 public:
 	static void serialize(Archive& ar, T& t) { ar.serializeBinaryItem(t); }
 };
 
 template <class Archive, class T>
-class Serializer<Archive, T, typename std::enable_if_t<std::is_enum_v<T>>> {
+    requires(std::is_enum_v<T>)
+class Serializer<Archive, T> {
 public:
 	static void serialize(Archive& ar, T& t) {
 		static_assert(is_binary_serializable<std::underlying_type_t<T>>::value);

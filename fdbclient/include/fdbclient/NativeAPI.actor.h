@@ -175,6 +175,7 @@ struct TransactionOptions {
 	bool rawAccess : 1;
 	bool bypassStorageQuota : 1;
 	bool enableReplicaConsistencyCheck : 1;
+	Optional<int64_t> maxGrvQueueDelayMS;
 	int requiredReplicas;
 
 	TransactionPriority priority;

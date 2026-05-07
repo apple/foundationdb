@@ -75,7 +75,7 @@ struct SubmitBackupWorkload : TestWorkload {
 			                                  tag.toString(),
 			                                  backupRanges,
 			                                  stopWhenDone,
-			                                  UsePartitionedLog::False,
+			                                  MutationLogType::DEFAULT,
 			                                  incremental,
 			                                  encryptionKeyFileName,
 			                                  encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0,

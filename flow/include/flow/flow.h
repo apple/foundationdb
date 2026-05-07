@@ -149,18 +149,16 @@ private:
 	template <class F>
 	using MapRet = std::decay_t<std::invoke_result_t<F, T>>;
 
-	template <class F>
-	using EnableIfNotMemberPointer =
-	    std::enable_if_t<!std::is_member_object_pointer_v<F> && !std::is_member_function_pointer_v<F>>;
-
 public:
 	// If the ErrorOr is set, calls the function f on the value and returns the value. Otherwise, returns an ErrorOr
 	// with the same error value as this ErrorOr.
-	template <class F, typename = EnableIfNotMemberPointer<F>>
+	template <class F>
+	    requires(!std::is_member_object_pointer_v<F> && !std::is_member_function_pointer_v<F>)
 	ErrorOr<MapRet<F>> map(const F& f) const& {
 		return present() ? ErrorOr<MapRet<F>>(f(get())) : ErrorOr<MapRet<F>>(getError());
 	}
-	template <class F, typename = EnableIfNotMemberPointer<F>>
+	template <class F>
+	    requires(!std::is_member_object_pointer_v<F> && !std::is_member_function_pointer_v<F>)
 	ErrorOr<MapRet<F>> map(const F& f) && {
 		return present() ? ErrorOr<MapRet<F>>(f(std::move(*this).get())) : ErrorOr<MapRet<F>>(getError());
 	}
@@ -169,13 +167,13 @@ public:
 	//
 	// v.map(&T::member) is equivalent to v.map<R>([](T t) { return t.member; })
 	template <class R, class Rp = std::decay_t<R>>
-	std::enable_if_t<std::is_class_v<T>, ErrorOr<Rp>> map(
-	    R std::conditional_t<std::is_class_v<T>, T, Void>::*member) const& {
+	    requires(std::is_class_v<T>)
+	ErrorOr<Rp> map(R std::conditional_t<std::is_class_v<T>, T, Void>::*member) const& {
 		return present() ? ErrorOr<Rp>(get().*member) : ErrorOr<Rp>(getError());
 	}
 	template <class R, class Rp = std::decay_t<R>>
-	std::enable_if_t<std::is_class_v<T>, ErrorOr<Rp>> map(
-	    R std::conditional_t<std::is_class_v<T>, T, Void>::*member) && {
+	    requires(std::is_class_v<T>)
+	ErrorOr<Rp> map(R std::conditional_t<std::is_class_v<T>, T, Void>::*member) && {
 		return present() ? ErrorOr<Rp>(std::move(*this).get().*member) : ErrorOr<Rp>(getError());
 	}
 
@@ -184,15 +182,15 @@ public:
 	// v.map(&T::memberFunc, arg1, arg2, ...) is equivalent to
 	// v.map<R>([](T t) { return t.memberFunc(arg1, arg2, ...); })
 	template <class R, class... Args, class Rp = std::decay_t<R>>
-	std::enable_if_t<std::is_class_v<T>, ErrorOr<Rp>> map(
-	    R (std::conditional_t<std::is_class_v<T>, T, Void>::*memberFunc)(Args...) const,
-	    Args&&... args) const& {
+	    requires(std::is_class_v<T>)
+	ErrorOr<Rp> map(R (std::conditional_t<std::is_class_v<T>, T, Void>::*memberFunc)(Args...) const,
+	                Args&&... args) const& {
 		return present() ? ErrorOr<Rp>((get().*memberFunc)(std::forward<Args>(args)...)) : ErrorOr<Rp>(getError());
 	}
 	template <class R, class... Args, class Rp = std::decay_t<R>>
-	std::enable_if_t<std::is_class_v<T>, ErrorOr<Rp>> map(
-	    R (std::conditional_t<std::is_class_v<T>, T, Void>::*memberFunc)(Args...) const,
-	    Args&&... args) && {
+	    requires(std::is_class_v<T>)
+	ErrorOr<Rp> map(R (std::conditional_t<std::is_class_v<T>, T, Void>::*memberFunc)(Args...) const,
+	                Args&&... args) && {
 		return present() ? ErrorOr<Rp>((std::move(*this).get().*memberFunc)(std::forward<Args>(args)...))
 		                 : ErrorOr<Rp>(getError());
 	}
@@ -203,7 +201,8 @@ public:
 	//
 	// v.mapRef(&P::member) is equivalent to ErrorOr<R>(v.get()->member) if v is present and non-null
 	template <class P, class R, class Rp = std::decay_t<R>>
-	std::enable_if_t<std::is_class_v<T> || std::is_pointer_v<T>, ErrorOr<Rp>> mapRef(R P::*member) const& {
+	    requires(std::is_class_v<T> || std::is_pointer_v<T>)
+	ErrorOr<Rp> mapRef(R P::*member) const& {
 
 		if (!present()) {
 			return ErrorOr<Rp>(getError());
@@ -222,8 +221,8 @@ public:
 	// v.map(&T::memberFunc, arg1, arg2, ...) is equivalent to ErrorOr<R>(v.get()->memberFunc(arg1, arg2, ...)) if v is
 	// present and non-null
 	template <class P, class R, class... Args, class Rp = std::decay_t<R>>
-	std::enable_if_t<std::is_class_v<T> || std::is_pointer_v<T>, ErrorOr<Rp>> mapRef(R (P::*memberFunc)(Args...) const,
-	                                                                                 Args&&... args) const& {
+	    requires(std::is_class_v<T> || std::is_pointer_v<T>)
+	ErrorOr<Rp> mapRef(R (P::*memberFunc)(Args...) const, Args&&... args) const& {
 		if (!present()) {
 			return ErrorOr<Rp>(getError());
 		} else if (!get()) {
@@ -1011,7 +1010,8 @@ public:
 
 #ifndef NO_INTELLISENSE
 	template <class U>
-	Future(const U&, typename std::enable_if<std::is_assignable<T, U>::value, int*>::type = 0) {}
+	    requires(std::is_assignable_v<T, U>)
+	Future(const U&) {}
 #endif
 
 	~Future() {

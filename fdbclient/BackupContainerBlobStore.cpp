@@ -158,8 +158,8 @@ BackupContainerBlobStore::BackupContainerBlobStore(Reference<IBlobStoreEndpoint>
                                                    const std::string& name,
                                                    const IBlobStoreEndpoint::ParametersT& params,
                                                    const Optional<std::string>& encryptionKeyFileName,
-                                                   bool isBackup,
-                                                   int encryptionBlockSize)
+                                                   int encryptionBlockSize,
+                                                   bool isBackup)
   : m_bstore(bstore), m_name(name), m_bucket("FDB_BACKUPS_V2"), isBackup(isBackup) {
 	setEncryptionKey(encryptionKeyFileName);
 	this->encryptionBlockSize = encryptionBlockSize;

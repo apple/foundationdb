@@ -148,6 +148,9 @@ Arguments
 - | ``--transaction_timeout_db <duration>``
   | Duration in milliseconds after which a transaction times out in run mode. Set as database option.
 
+- | ``--max_grv_queue_delay <duration>``
+  | Maximum estimated GRV proxy queue delay in milliseconds. Set as transaction option in run mode.
+
 Transaction Specification
 =========================
 | A transaction may contain multiple operations of various types.
