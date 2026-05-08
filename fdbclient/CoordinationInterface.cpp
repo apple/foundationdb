@@ -18,8 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/Platform.h"
-
 #ifndef BOOST_SYSTEM_NO_LIB
 #define BOOST_SYSTEM_NO_LIB
 #endif

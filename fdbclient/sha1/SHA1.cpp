@@ -15,7 +15,6 @@
 
 #include "SHA1.h"
 #include <sstream>
-#include <iomanip>
 
 /* Help macros */
 #define SHA1_ROL(value, bits) (((value) << (bits)) | (((value) & 0xffffffff) >> (32 - (bits))))

@@ -19,11 +19,6 @@
  */
 
 #include "flow/ThreadPrimitives.h"
-#include "flow/Trace.h"
-#include <stdint.h>
-#include <errno.h>
-#include <string.h>
-#include <stdio.h>
 
 #ifdef _WIN32
 #include <windows.h>

@@ -37,7 +37,6 @@
 #include "fdbrpc/AsyncFileCached.h"
 #include "AsyncFileChaos.h"
 #include "AsyncFileEIO.h"
-#include "AsyncFileWinASIO.h"
 #include "AsyncFileKAIO.h"
 #include "flow/AsioReactor.h"
 #include "flow/Platform.h"

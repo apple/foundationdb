@@ -31,13 +31,10 @@
 #endif
 
 #include "fdbclient/BuildFlags.h"
-#include "fdbclient/BackupContainerFileSystem.h"
 #import "fdbclient/BackupTLSConfig.h"
-#include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/S3Client.h"
-#include "fdbclient/BackupAgent.h"
 #include "flow/Platform.h"
 #include "flow/ArgParseUtil.h"
 #include "flow/FastRef.h"

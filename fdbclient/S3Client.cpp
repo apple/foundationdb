@@ -21,8 +21,6 @@
 #include <string>
 #include <vector>
 #include <algorithm>
-#include <sstream>
-#include <iomanip>
 
 #ifdef _WIN32
 #include <io.h>
@@ -31,7 +29,6 @@
 #include "fdbclient/S3Client.h"
 #include "flow/IAsyncFile.h"
 #include "flow/Trace.h"
-#include "flow/Traceable.h"
 #include "flow/flow.h"
 #include "flow/xxhash.h"
 #include "flow/Error.h"

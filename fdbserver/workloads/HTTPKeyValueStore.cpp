@@ -21,7 +21,6 @@
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
-#include "flow/Util.h"
 #include "flow/serialize.h"
 #include "fdbrpc/HTTP.h"
 #include "fdbserver/tester/workloads.h"
