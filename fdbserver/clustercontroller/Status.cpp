@@ -1958,7 +1958,7 @@ static AsyncResult<std::vector<std::pair<iface, EventMap>>> getServerMetrics(
 		}
 	}
 
-	std::vector<Optional<TraceEventFields>> eventTraces = co_await getAll(std::move(futures));
+	std::vector<Optional<TraceEventFields>> eventTraces = co_await getAllAsync(std::move(futures));
 
 	std::vector<std::pair<iface, EventMap>> results;
 	auto eventTraceItr = eventTraces.begin();
@@ -2978,7 +2978,7 @@ static AsyncResult<Void> clusterGetStatusImpl(Reference<ClusterGetStatusState> s
 
 		// Wait for all response pairs.
 		std::vector<Optional<std::pair<WorkerEvents, std::set<std::string>>>> workerEventsVec =
-		    co_await getAll(std::move(workerEventFetchers));
+		    co_await getAllAsync(std::move(workerEventFetchers));
 
 		// Create a unique set of all workers who were unreachable for 1 or more of the event requests above.
 		// Since each event request is independent and to all workers, workers can have responded to some
@@ -3016,7 +3016,7 @@ static AsyncResult<Void> clusterGetStatusImpl(Reference<ClusterGetStatusState> s
 		clusterSubsectionFetchers.push_back(errorOr(versionEpochStatusFetcher(cx, &status_incomplete_reasons)));
 
 		std::vector<ErrorOr<JsonBuilderObject>> clusterSubsectionStatuses =
-		    co_await getAll(std::move(clusterSubsectionFetchers));
+		    co_await getAllAsync(std::move(clusterSubsectionFetchers));
 
 		if (clusterSubsectionStatuses[0].isError()) {
 			throw clusterSubsectionStatuses[0].getError();

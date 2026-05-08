@@ -1504,6 +1504,17 @@ TEST_CASE("/flow/coro/getAllAsyncResultReady") {
 	ASSERT_EQ(output[1], 5);
 }
 
+TEST_CASE("/flow/coro/getAllAsyncResultMoveReady") {
+	std::vector<AsyncResult<int>> results;
+	results.push_back(immediateAsyncResultInt(3));
+	results.push_back(immediateAsyncResultInt(5));
+
+	std::vector<int> output = co_await getAllAsync(std::move(results));
+	ASSERT_EQ(output.size(), 2);
+	ASSERT_EQ(output[0], 3);
+	ASSERT_EQ(output[1], 5);
+}
+
 TEST_CASE("/flow/coro/getAllAsyncResultSuccess") {
 	Promise<Void> signal1;
 	Promise<Void> signal2;
@@ -1518,6 +1529,25 @@ TEST_CASE("/flow/coro/getAllAsyncResultSuccess") {
 	signal1.send(Void());
 
 	std::vector<int> output = co_await all;
+	ASSERT_EQ(output.size(), 2);
+	ASSERT_EQ(output[0], 7);
+	ASSERT_EQ(output[1], 11);
+}
+
+TEST_CASE("/flow/coro/getAllAsyncResultMoveSuccess") {
+	Promise<Void> signal1;
+	Promise<Void> signal2;
+	std::vector<AsyncResult<int>> results;
+	results.push_back(delayedAsyncResultInt(signal1.getFuture(), 7));
+	results.push_back(delayedAsyncResultInt(signal2.getFuture(), 11));
+
+	AsyncResult<std::vector<int>> all = getAllAsync(std::move(results));
+	ASSERT(!all.isReady());
+	signal2.send(Void());
+	ASSERT(!all.isReady());
+	signal1.send(Void());
+
+	std::vector<int> output = co_await std::move(all);
 	ASSERT_EQ(output.size(), 2);
 	ASSERT_EQ(output[0], 7);
 	ASSERT_EQ(output[1], 11);

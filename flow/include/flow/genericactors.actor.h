@@ -1395,6 +1395,19 @@ template <class T>
 Future<std::vector<T>> getAll(std::vector<AsyncResult<T>>& input) = delete;
 
 template <class T>
+// Collect already-started AsyncResult values by ownership transfer. All producers
+// are live before entry, so the success path remains concurrent while avoiding
+// the final aggregate copy imposed by Future<std::vector<T>>.
+AsyncResult<std::vector<T>> getAllAsync(std::vector<AsyncResult<T>> input) {
+	std::vector<T> output;
+	output.reserve(input.size());
+	for (auto& item : input) {
+		output.push_back(co_await std::move(item));
+	}
+	co_return output;
+}
+
+template <class T>
 Future<std::vector<T>> getAll(std::vector<AsyncResult<T>>&& input) {
 	if (input.empty())
 		return std::vector<T>();

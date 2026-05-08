@@ -53,6 +53,7 @@ AsyncResult<ExpensivePayload> returnAsyncResultPayload(ExpensivePayload const& p
 
 enum class AwaitImpl { Future, AsyncResult };
 enum class GetAllImpl { Future, AsyncResult };
+enum class GetAllAsyncResultImpl { FutureAggregate, SequentialAsyncResult };
 
 template <AwaitImpl Impl>
 Future<Void> benchAwaitPayloadActor(benchmark::State* state) {
@@ -141,6 +142,57 @@ BENCHMARK_TEMPLATE(benchGetAllPayload, GetAllImpl::Future)
 
 BENCHMARK_TEMPLATE(benchGetAllPayload, GetAllImpl::AsyncResult)
     ->Name("CoroutineGetAllPayload/AsyncResult")
+    ->Arg(1 << 10)
+    ->Arg(1 << 14)
+    ->ReportAggregatesOnly(true);
+
+template <GetAllAsyncResultImpl Impl>
+Future<Void> benchGetAllAsyncResultPayloadActor(benchmark::State* state) {
+	const size_t payloadBytes = state->range(0);
+	const ExpensivePayload source(payloadBytes);
+	uint64_t sink = 0;
+
+	while (state->KeepRunning()) {
+		std::vector<AsyncResult<ExpensivePayload>> inputs;
+		inputs.reserve(8);
+		for (int i = 0; i < 8; ++i) {
+			inputs.push_back(returnAsyncResultPayload(source));
+		}
+
+		if constexpr (Impl == GetAllAsyncResultImpl::FutureAggregate) {
+			std::vector<ExpensivePayload> payloads = co_await getAll(std::move(inputs));
+			for (auto const& payload : payloads) {
+				sink += payload.touch();
+			}
+			benchmark::DoNotOptimize(payloads.data());
+		} else {
+			std::vector<ExpensivePayload> payloads = co_await getAllAsync(std::move(inputs));
+			for (auto const& payload : payloads) {
+				sink += payload.touch();
+			}
+			benchmark::DoNotOptimize(payloads.data());
+		}
+		benchmark::ClobberMemory();
+	}
+
+	state->SetBytesProcessed(static_cast<int64_t>(state->iterations()) * payloadBytes * 8);
+	benchmark::DoNotOptimize(sink);
+	co_return;
+}
+
+template <GetAllAsyncResultImpl Impl>
+void benchGetAllAsyncResultPayload(benchmark::State& state) {
+	onMainThread([&state] { return benchGetAllAsyncResultPayloadActor<Impl>(&state); }).blockUntilReady();
+}
+
+BENCHMARK_TEMPLATE(benchGetAllAsyncResultPayload, GetAllAsyncResultImpl::FutureAggregate)
+    ->Name("CoroutineGetAllAsyncResultPayload/FutureAggregate")
+    ->Arg(1 << 10)
+    ->Arg(1 << 14)
+    ->ReportAggregatesOnly(true);
+
+BENCHMARK_TEMPLATE(benchGetAllAsyncResultPayload, GetAllAsyncResultImpl::SequentialAsyncResult)
+    ->Name("CoroutineGetAllAsyncResultPayload/SequentialAsyncResult")
     ->Arg(1 << 10)
     ->Arg(1 << 14)
     ->ReportAggregatesOnly(true);
