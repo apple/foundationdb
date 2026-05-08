@@ -157,10 +157,10 @@ private:
 			Error err;
 			try {
 				std::vector<Future<Void>> actors;
-				actors.push_back(krmSetRangeCoalescing(
-				    tr, testPrefix, KeyRangeRef("c"_sr, "e"_sr), allKeys, serverKeysFalse));
-				actors.push_back(krmSetRangeCoalescing(
-				    tr, testPrefix, KeyRangeRef("g"_sr, "k"_sr), allKeys, serverKeysFalse));
+				actors.push_back(
+				    krmSetRangeCoalescing(tr, testPrefix, KeyRangeRef("c"_sr, "e"_sr), allKeys, serverKeysFalse));
+				actors.push_back(
+				    krmSetRangeCoalescing(tr, testPrefix, KeyRangeRef("g"_sr, "k"_sr), allKeys, serverKeysFalse));
 				co_await waitForAll(actors);
 				co_await tr->commit();
 				break;
