@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-
 #include "fdbrpc/simulator.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"

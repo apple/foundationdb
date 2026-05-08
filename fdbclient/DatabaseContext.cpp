@@ -29,7 +29,6 @@
 #include <utility>
 #include <vector>
 
-
 #include "fdbclient/Knobs.h"
 #include "flow/CodeProbe.h"
 
