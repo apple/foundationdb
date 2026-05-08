@@ -35,7 +35,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 	double startAfter, restoreAfter;
 	bool fastRestore; // true: use fast restore, false: use old style restore
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
-	UsePartitionedLog usePartitionedLogs{ false };
+	MutationLogType mutationLogType{ MutationLogType::DEFAULT };
 	Key addPrefix, removePrefix; // Original key will be first applied removePrefix and then applied addPrefix
 	// CAVEAT: When removePrefix is used, we must ensure every key in backup have the removePrefix
 
@@ -50,8 +50,8 @@ struct AtomicRestoreWorkload : TestWorkload {
 			// Fast restore doesn't support multiple ranges yet
 			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 		}
-		usePartitionedLogs.set(
-		    getOption(options, "usePartitionedLogs"_sr, deterministicRandom()->random01() < 0.5 ? true : false));
+		mutationLogType = static_cast<MutationLogType>(
+		    getOption(options, "mutationLogType"_sr, deterministicRandom()->randomInt(0, 2)));
 
 		addPrefix = getOption(options, "addPrefix"_sr, ""_sr);
 		removePrefix = getOption(options, "removePrefix"_sr, ""_sr);
@@ -94,7 +94,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 		state FileBackupAgent backupAgent;
 
 		wait(delay(self->startAfter * deterministicRandom()->random01()));
-		TraceEvent("AtomicRestore_Start").detail("UsePartitionedLog", self->usePartitionedLogs);
+		TraceEvent("AtomicRestore_Start").detail("MutationLogType", mutationLogTypeToString(self->mutationLogType));
 
 		state std::string backupContainer = "file://simfdb/backups/";
 		try {
@@ -107,7 +107,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 			                              self->backupRanges,
 			                              true,
 			                              StopWhenDone::False,
-			                              self->usePartitionedLogs,
+			                              self->mutationLogType,
 			                              IncrementalBackupOnly::False,
 			                              {}));
 		} catch (Error& e) {

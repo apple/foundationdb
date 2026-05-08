@@ -35,7 +35,7 @@ timeout = 360000
     restoreAfter = 60.0
     backupRangesCount = -1
     # use new backup
-    usePartitionedLogs = true
+    mutationLogType = 1 # partitioned-log-experimental
 
     [[test.workload]]
     testName = 'RandomClogging'
