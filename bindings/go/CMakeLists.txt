@@ -149,3 +149,15 @@ add_test(
   NAME update_bindings_go_src_fdb_generated_go
   COMMAND ${CMAKE_COMMAND} -E compare_files ${go_options_file} ${CMAKE_CURRENT_SOURCE_DIR}/src/fdb/generated.go
 )
+
+# gofmt should be installed with go, but it's better to check if the binary is available.
+find_program(GOFMT_EXECUTABLE gofmt HINTS /usr/local/go/bin/)
+if(GOFMT_EXECUTABLE)
+  add_test(
+    NAME fdb-go-fmt
+    # gofmt -d doesn't return a non-zero exit code, so we have to check if the output is empty.
+    COMMAND bash -c "out=$(\"${GOFMT_EXECUTABLE}\" -d \"${CMAKE_CURRENT_SOURCE_DIR}\"); test -z \"$out\" || { echo \"$out\"; exit 1; }"
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+else()
+  message(WARNING "gofmt not found. The 'fdb-go-fmt' test will not be available.")
+endif()
