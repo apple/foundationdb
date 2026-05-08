@@ -1572,6 +1572,25 @@ TEST_CASE("/flow/coro/getAllAsyncResultError") {
 	successSignal.send(Void());
 }
 
+TEST_CASE("/flow/coro/getAllAsyncResultMoveError") {
+	Promise<Void> successSignal;
+	Promise<Void> errorSignal;
+	std::vector<AsyncResult<int>> results;
+	results.push_back(delayedAsyncResultInt(successSignal.getFuture(), 13));
+	results.push_back(failingAsyncResultInt(errorSignal.getFuture()));
+
+	AsyncResult<std::vector<int>> all = getAllAsync(std::move(results));
+	ASSERT(!all.isReady());
+	errorSignal.send(Void());
+	try {
+		co_await std::move(all);
+		ASSERT(false);
+	} catch (Error const& e) {
+		ASSERT_EQ(e.code(), error_code_io_error);
+	}
+	successSignal.send(Void());
+}
+
 TEST_CASE("/flow/coro/getAllAsyncResultErrorCancelsRemainingProducers") {
 	ASSERT_EQ(LifetimeTracked::liveCount, 0);
 
@@ -1597,6 +1616,31 @@ TEST_CASE("/flow/coro/getAllAsyncResultErrorCancelsRemainingProducers") {
 	ASSERT_EQ(LifetimeTracked::liveCount, 0);
 }
 
+TEST_CASE("/flow/coro/getAllAsyncResultMoveErrorCancelsRemainingProducers") {
+	ASSERT_EQ(LifetimeTracked::liveCount, 0);
+
+	int cancelledCount = 0;
+	int completedCount = 0;
+	Promise<Void> successSignal;
+	Promise<Void> errorSignal;
+	std::vector<AsyncResult<int>> results;
+	results.push_back(trackedAsyncResultInt(successSignal.getFuture(), 17, &cancelledCount, &completedCount));
+	results.push_back(failingAsyncResultInt(errorSignal.getFuture()));
+
+	AsyncResult<std::vector<int>> all = getAllAsync(std::move(results));
+	errorSignal.send(Void());
+	try {
+		co_await std::move(all);
+		ASSERT(false);
+	} catch (Error const& e) {
+		ASSERT_EQ(e.code(), error_code_io_error);
+	}
+
+	ASSERT_EQ(completedCount, 0);
+	ASSERT_EQ(cancelledCount, 1);
+	ASSERT_EQ(LifetimeTracked::liveCount, 0);
+}
+
 TEST_CASE("/flow/coro/getAllAsyncResultDropCancelsProducers") {
 	ASSERT_EQ(LifetimeTracked::liveCount, 0);
 
@@ -1610,6 +1654,28 @@ TEST_CASE("/flow/coro/getAllAsyncResultDropCancelsProducers") {
 		}
 
 		Future<std::vector<int>> all = getAll(std::move(results));
+		ASSERT(!all.isReady());
+	}
+
+	ASSERT_EQ(completedCount, 0);
+	ASSERT_EQ(cancelledCount, 2);
+	ASSERT_EQ(LifetimeTracked::liveCount, 0);
+	co_return;
+}
+
+TEST_CASE("/flow/coro/getAllAsyncResultMoveDropCancelsProducers") {
+	ASSERT_EQ(LifetimeTracked::liveCount, 0);
+
+	int cancelledCount = 0;
+	int completedCount = 0;
+	std::vector<Promise<Void>> signals(2);
+	{
+		std::vector<AsyncResult<int>> results;
+		for (int i = 0; i < signals.size(); ++i) {
+			results.push_back(trackedAsyncResultInt(signals[i].getFuture(), i, &cancelledCount, &completedCount));
+		}
+
+		AsyncResult<std::vector<int>> all = getAllAsync(std::move(results));
 		ASSERT(!all.isReady());
 	}
 

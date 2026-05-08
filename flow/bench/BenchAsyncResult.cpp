@@ -53,7 +53,7 @@ AsyncResult<ExpensivePayload> returnAsyncResultPayload(ExpensivePayload const& p
 
 enum class AwaitImpl { Future, AsyncResult };
 enum class GetAllImpl { Future, AsyncResult };
-enum class GetAllAsyncResultImpl { FutureAggregate, SequentialAsyncResult };
+enum class GetAllAsyncResultImpl { FutureAggregate, AsyncResultAggregate };
 
 template <AwaitImpl Impl>
 Future<Void> benchAwaitPayloadActor(benchmark::State* state) {
@@ -191,8 +191,8 @@ BENCHMARK_TEMPLATE(benchGetAllAsyncResultPayload, GetAllAsyncResultImpl::FutureA
     ->Arg(1 << 14)
     ->ReportAggregatesOnly(true);
 
-BENCHMARK_TEMPLATE(benchGetAllAsyncResultPayload, GetAllAsyncResultImpl::SequentialAsyncResult)
-    ->Name("CoroutineGetAllAsyncResultPayload/SequentialAsyncResult")
+BENCHMARK_TEMPLATE(benchGetAllAsyncResultPayload, GetAllAsyncResultImpl::AsyncResultAggregate)
+    ->Name("CoroutineGetAllAsyncResultPayload/AsyncResultAggregate")
     ->Arg(1 << 10)
     ->Arg(1 << 14)
     ->ReportAggregatesOnly(true);
