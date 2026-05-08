@@ -1584,6 +1584,15 @@ static Future<Void> finishMoveKeys(Database occ,
 					}
 
 					if (count == dest.size()) {
+						// Inject a "servers not ready" condition to exercise the
+						// timeout retry and finish_move_keys_too_many_retries path.
+						if (BUGGIFY_WITH_PROB(0.01)) {
+							CODE_PROBE(true, "finishMoveKeys injecting servers not ready");
+							count = 0;
+						}
+					}
+
+					if (count == dest.size()) {
 						// update keyServers, serverKeys
 						// SOMEDAY: Doing these in parallel is safe because none of them overlap or touch (one per
 						// server)
@@ -1621,17 +1630,18 @@ static Future<Void> finishMoveKeys(Database occ,
 					// committed or aborted, but this is intentional here.
 					retries++;
 					if (retries > SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES) {
-						TraceEvent(SevWarnAlways, "RelocateShard_FinishMoveKeysGaveUp", relocationIntervalId)
+						CODE_PROBE(true, "finishMoveKeys giving up due to timeout on dest servers");
+						TraceEvent(SevWarnAlways, "RelocateShard_FinishMoveKeysDestNotReady", relocationIntervalId)
 						    .detail("KeyBegin", keys.begin)
 						    .detail("KeyEnd", keys.end)
 						    .detail("Retries", retries)
 						    .detail("ReadyCount", count)
 						    .detail("DestCount", dest.size());
-						throw move_to_removed_server();
+						throw finish_move_keys_too_many_retries();
 					}
 					serverReady.clear();
 					tssReady.clear();
-					co_await delay(std::min(0.1 * (1 << std::min(retries, 6)), 5.0));
+					co_await delay(finishMoveKeysBackoff(retries));
 					tr.reset();
 					continue;
 				} catch (Error& error) {
