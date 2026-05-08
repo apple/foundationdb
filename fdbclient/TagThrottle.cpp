@@ -18,8 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbclient/CommitProxyInterface.h"
-#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TagThrottle.h"
 #include "fdbclient/Tuple.h"
