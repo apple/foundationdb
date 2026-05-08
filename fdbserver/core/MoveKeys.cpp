@@ -1619,6 +1619,19 @@ static Future<Void> finishMoveKeys(Database occ,
 					}
 					// This leads to a count of transactions starting that exceeds the sum of
 					// committed or aborted, but this is intentional here.
+					retries++;
+					if (retries > SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES) {
+						TraceEvent(SevWarnAlways, "RelocateShard_FinishMoveKeysGaveUp", relocationIntervalId)
+						    .detail("KeyBegin", keys.begin)
+						    .detail("KeyEnd", keys.end)
+						    .detail("Retries", retries)
+						    .detail("ReadyCount", count)
+						    .detail("DestCount", dest.size());
+						throw move_to_removed_server();
+					}
+					serverReady.clear();
+					tssReady.clear();
+					co_await delay(std::min(0.1 * (1 << std::min(retries, 6)), 5.0));
 					tr.reset();
 					continue;
 				} catch (Error& error) {

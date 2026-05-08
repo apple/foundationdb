@@ -916,6 +916,7 @@ public:
 	double SHARD_READY_DELAY;
 	double SERVER_READY_QUORUM_INTERVAL;
 	double SERVER_READY_QUORUM_TIMEOUT;
+	int FINISH_MOVE_KEYS_MAX_RETRIES;
 	double REMOVE_RETRY_DELAY;
 	int MOVE_KEYS_KRM_LIMIT;
 	int FINISH_MOVE_KEYS_MAX_RETRIES; // Max retries in finishMoveKeys before returning move to queue; set very high to
