@@ -1389,6 +1389,22 @@ TEST_CASE("/flow/coro/AsyncResult/noThrowOnCancel") {
 	return Void();
 }
 
+TEST_CASE("/flow/coro/StrictFuture/move") {
+	Promise<int> promise;
+	Future<int> future = promise.getFuture();
+	ASSERT(future.isValid());
+	ASSERT_EQ(future.getFutureReferenceCount(), 1);
+
+	StrictFuture<int> strictFuture(std::move(future));
+	ASSERT(!future.isValid());
+	ASSERT_EQ(strictFuture.getFutureReferenceCount(), 1);
+
+	promise.send(42);
+	ASSERT(strictFuture.isReady());
+	ASSERT_EQ(strictFuture.get(), 42);
+	return Void();
+}
+
 TEST_CASE("/flow/coro/quorumAsyncResultReady") {
 	std::vector<AsyncResult<int>> results;
 	results.push_back(immediateAsyncResultInt(1));
@@ -1491,6 +1507,25 @@ TEST_CASE("/flow/coro/quorumAsyncResultDropCancelsProducers") {
 	ASSERT_EQ(cancelledCount, 2);
 	ASSERT_EQ(LifetimeTracked::liveCount, 0);
 	co_return;
+}
+
+TEST_CASE("/flow/coro/getAllFutureAsyncSuccess") {
+	Promise<int> signal1;
+	Promise<int> signal2;
+	std::vector<Future<int>> results;
+	results.push_back(signal1.getFuture());
+	results.push_back(signal2.getFuture());
+
+	AsyncResult<std::vector<int>> all = getAllAsync(results);
+	ASSERT(!all.isReady());
+	signal2.send(11);
+	ASSERT(!all.isReady());
+	signal1.send(7);
+
+	std::vector<int> output = co_await std::move(all);
+	ASSERT_EQ(output.size(), 2);
+	ASSERT_EQ(output[0], 7);
+	ASSERT_EQ(output[1], 11);
 }
 
 TEST_CASE("/flow/coro/getAllAsyncResultReady") {

@@ -1365,9 +1365,7 @@ struct GetAllAsyncResultState final : ReferenceCounted<GetAllAsyncResultState<T>
 
 namespace coro {
 template <class T>
-void GetAllAsyncResultStateCallback<T>::attach(AsyncResult<T>& result,
-                                               GetAllAsyncResultState<T>* head,
-                                               int idx) {
+void GetAllAsyncResultStateCallback<T>::attach(AsyncResult<T>& result, GetAllAsyncResultState<T>* head, int idx) {
 	resultState = result.resultState;
 	this->head = head;
 	this->idx = idx;
