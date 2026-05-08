@@ -1797,7 +1797,7 @@ static AsyncResult<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 		futures.push_back(
 		    timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest("TotalDataInFlightRemote"_sr)), 1.0));
 
-		std::vector<TraceEventFields> dataInfo = co_await getAll(futures);
+		std::vector<TraceEventFields> dataInfo = co_await getAllAsync(futures);
 
 		TraceEventFields startingStats = dataInfo[0];
 		TraceEventFields dataStats = dataInfo[1];
@@ -2144,8 +2144,8 @@ static AsyncResult<JsonBuilderObject> workloadStatusFetcher(
 			else
 				throw all_alternatives_failed(); // We need data from all proxies for this result to be trustworthy
 		}
-		std::vector<TraceEventFields> commitProxyStats = co_await getAll(commitProxyStatFutures);
-		std::vector<TraceEventFields> grvProxyStats = co_await getAll(grvProxyStatFutures);
+		std::vector<TraceEventFields> commitProxyStats = co_await getAllAsync(commitProxyStatFutures);
+		std::vector<TraceEventFields> grvProxyStats = co_await getAllAsync(grvProxyStatFutures);
 
 		StatusCounter txnStartOut;
 		StatusCounter txnSystemPriorityStartOut;

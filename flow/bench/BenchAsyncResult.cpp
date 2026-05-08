@@ -22,6 +22,7 @@
 
 #include "flow/ThreadHelper.actor.h"
 #include "flow/flow.h"
+#include "flow/genericactors.actor.h"
 
 #include <cstdint>
 #include <numeric>
@@ -51,6 +52,7 @@ AsyncResult<ExpensivePayload> returnAsyncResultPayload(ExpensivePayload const& p
 }
 
 enum class AwaitImpl { Future, AsyncResult };
+enum class GetAllImpl { Future, AsyncResult };
 
 template <AwaitImpl Impl>
 Future<Void> benchAwaitPayloadActor(benchmark::State* state) {
@@ -91,6 +93,56 @@ BENCHMARK_TEMPLATE(benchAwaitPayload, AwaitImpl::AsyncResult)
     ->Name("CoroutineAwaitPayload/AsyncResult")
     ->RangeMultiplier(4)
     ->Range(1 << 10, 1 << 20)
+    ->ReportAggregatesOnly(true);
+
+template <GetAllImpl Impl>
+Future<Void> benchGetAllPayloadActor(benchmark::State* state) {
+	const size_t payloadBytes = state->range(0);
+	const ExpensivePayload source(payloadBytes);
+	std::vector<Future<ExpensivePayload>> inputs;
+	inputs.reserve(8);
+	for (int i = 0; i < 8; ++i) {
+		inputs.emplace_back(source);
+	}
+
+	uint64_t sink = 0;
+	while (state->KeepRunning()) {
+		if constexpr (Impl == GetAllImpl::Future) {
+			std::vector<ExpensivePayload> payloads = co_await getAll(inputs);
+			for (auto const& payload : payloads) {
+				sink += payload.touch();
+			}
+			benchmark::DoNotOptimize(payloads.data());
+		} else {
+			std::vector<ExpensivePayload> payloads = co_await getAllAsync(inputs);
+			for (auto const& payload : payloads) {
+				sink += payload.touch();
+			}
+			benchmark::DoNotOptimize(payloads.data());
+		}
+		benchmark::ClobberMemory();
+	}
+
+	state->SetBytesProcessed(static_cast<int64_t>(state->iterations()) * payloadBytes * 8);
+	benchmark::DoNotOptimize(sink);
+	co_return;
+}
+
+template <GetAllImpl Impl>
+void benchGetAllPayload(benchmark::State& state) {
+	onMainThread([&state] { return benchGetAllPayloadActor<Impl>(&state); }).blockUntilReady();
+}
+
+BENCHMARK_TEMPLATE(benchGetAllPayload, GetAllImpl::Future)
+    ->Name("CoroutineGetAllPayload/Future")
+    ->Arg(1 << 10)
+    ->Arg(1 << 14)
+    ->ReportAggregatesOnly(true);
+
+BENCHMARK_TEMPLATE(benchGetAllPayload, GetAllImpl::AsyncResult)
+    ->Name("CoroutineGetAllPayload/AsyncResult")
+    ->Arg(1 << 10)
+    ->Arg(1 << 14)
     ->ReportAggregatesOnly(true);
 
 } // namespace

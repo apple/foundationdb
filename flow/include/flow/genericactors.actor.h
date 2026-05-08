@@ -1376,6 +1376,20 @@ Future<std::vector<T>> getAll(std::vector<Future<T>> input) {
 }
 
 template <class T>
+AsyncResult<std::vector<T>> getAllAsync(std::vector<Future<T>> input) {
+	if (input.empty())
+		co_return std::vector<T>();
+	co_await quorum(input, input.size());
+
+	std::vector<T> output;
+	output.reserve(input.size());
+	for (int i = 0; i < input.size(); ++i) {
+		output.push_back(input[i].get());
+	}
+	co_return output;
+}
+
+template <class T>
 // AsyncResult is single-consumer, so getAll requires an explicit ownership
 // transfer from vector callers.
 Future<std::vector<T>> getAll(std::vector<AsyncResult<T>>& input) = delete;
