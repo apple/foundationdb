@@ -21,6 +21,7 @@
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/SystemData.h"
 #include "fdbserver/tester/workloads.h"
 
 // Reproduces the krmSetRangeCoalescing fragmentation bug from
@@ -74,22 +75,24 @@ struct KRMCoalescingFragmentationWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 private:
-	KeyRange testRange() const { return KeyRangeRef(""_sr, "\xff"_sr); }
-
 	// Establish initial KRM state mimicking a server with alternating
 	// owned/unowned sub-ranges:
 	//
-	//   "" -> "1"    "d" -> ""    "j" -> "1"    "\xff" -> ""
+	//   "" -> "1"    "d" -> ""    "j" -> "1"    "\xff\xff" -> ""
 	//
-	// Server owns ["","d") and ["j","\xff") with a gap at ["d","j").
+	// Server owns ["","d") and ["j","\xff\xff") with a gap at ["d","j").
 	// The "" entry at "d" is what causes both gap actors to extend their
 	// coalescing through it, creating the overlapping clears.
+	//
+	// Uses allKeys = ["", "\xff\xff") as maxRange and serverKeysTrue/False
+	// values, matching exactly how removeOldDestinations is called in
+	// startMoveKeys (MoveKeys.cpp:797).
 	Future<Void> setupInitialState(Database cx) {
 		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		loop {
 			Error err;
 			try {
-				co_await krmSetRange(tr, testPrefix, testRange(), "1"_sr);
+				co_await krmSetRange(tr, testPrefix, allKeys, serverKeysTrue);
 				co_await tr->commit();
 				break;
 			} catch (Error& e) {
@@ -102,7 +105,7 @@ private:
 		loop {
 			Error err;
 			try {
-				co_await krmSetRange(tr, testPrefix, KeyRangeRef("d"_sr, "j"_sr), ""_sr);
+				co_await krmSetRange(tr, testPrefix, KeyRangeRef("d"_sr, "j"_sr), serverKeysFalse);
 				co_await tr->commit();
 				break;
 			} catch (Error& e) {
@@ -115,11 +118,12 @@ private:
 		loop {
 			Error err;
 			try {
-				RangeResult result = co_await krmGetRanges(tr, testPrefix, testRange());
+				RangeResult result = co_await krmGetRanges(tr, testPrefix, allKeys);
 				ASSERT(result.size() == 4);
-				ASSERT(result[0].key == ""_sr && result[0].value == "1"_sr);
-				ASSERT(result[1].key == "d"_sr && result[1].value == ""_sr);
-				ASSERT(result[2].key == "j"_sr && result[2].value == "1"_sr);
+				ASSERT(result[0].key == allKeys.begin && result[0].value == serverKeysTrue);
+				ASSERT(result[1].key == "d"_sr && result[1].value == serverKeysFalse);
+				ASSERT(result[2].key == "j"_sr && result[2].value == serverKeysTrue);
+				ASSERT(result[3].key == allKeys.end);
 				TraceEvent("KRMFragTestSetupDone").detail("Entries", result.size());
 				break;
 			} catch (Error& e) {
@@ -132,7 +136,12 @@ private:
 	// Reproduce the removeOldDestinations pattern, then trigger the assert.
 	Future<Void> triggerFragmentation(Database cx) {
 		// Step 1: Two concurrent krmSetRangeCoalescing calls clearing gaps
-		// ["c","e") and ["g","k") on the same prefix with value "".
+		// ["c","e") and ["g","k") on the same prefix with value serverKeysFalse.
+		//
+		// This is exactly the pattern in removeOldDestinations (MoveKeys.cpp:787-804):
+		// each gap between source shards gets its own krmSetRangeCoalescing call,
+		// all fired concurrently via waitForAll on the same RYW transaction.
+		//
 		// Each call's coalescing extends through the existing "" entry at "d":
 		//
 		//   Gap 1 ["c","e"): end query finds "d"->""  matching value "",
@@ -148,10 +157,10 @@ private:
 			Error err;
 			try {
 				std::vector<Future<Void>> actors;
-				actors.push_back(
-				    krmSetRangeCoalescing(tr, testPrefix, KeyRangeRef("c"_sr, "e"_sr), testRange(), ""_sr));
-				actors.push_back(
-				    krmSetRangeCoalescing(tr, testPrefix, KeyRangeRef("g"_sr, "k"_sr), testRange(), ""_sr));
+				actors.push_back(krmSetRangeCoalescing(
+				    tr, testPrefix, KeyRangeRef("c"_sr, "e"_sr), allKeys, serverKeysFalse));
+				actors.push_back(krmSetRangeCoalescing(
+				    tr, testPrefix, KeyRangeRef("g"_sr, "k"_sr), allKeys, serverKeysFalse));
 				co_await waitForAll(actors);
 				co_await tr->commit();
 				break;
@@ -163,9 +172,9 @@ private:
 
 		// Step 2: Read back and find the fragmented pair.
 		// Depending on execution order, we get one of:
-		//   Order 1: "" -> "1", "c" -> "", "d" -> "", "k" -> "1", "\xff" -> ""
+		//   Order 1: "" -> "1", "c" -> "", "d" -> "", "k" -> "1", "\xff\xff" -> ""
 		//                       ^^^^^^^^^^^^^^^^ fragmented
-		//   Order 2: "" -> "1", "c" -> "", "j" -> "1", "k" -> "1", "\xff" -> ""
+		//   Order 2: "" -> "1", "c" -> "", "j" -> "1", "k" -> "1", "\xff\xff" -> ""
 		//                                  ^^^^^^^^^^^^^^^^^^ fragmented
 		Key fragKey1;
 		Key fragKey2;
@@ -175,7 +184,7 @@ private:
 		loop {
 			Error err;
 			try {
-				RangeResult result = co_await krmGetRanges(tr, testPrefix, testRange());
+				RangeResult result = co_await krmGetRanges(tr, testPrefix, allKeys);
 				TraceEvent evt("KRMFragTestResult");
 				evt.detail("NumEntries", result.size());
 				for (int i = 0; i < result.size(); i++) {
@@ -218,23 +227,24 @@ private:
 		// We call krmSetRangeCoalescing with:
 		//   - range.end landing between the two fragmented keys
 		//   - value equal to the fragmented entries' value
+		//   - maxRange = allKeys (matching DD's usage)
 		//
 		// The end query reads both fragmented entries. Case 1 sets:
 		//   endKey = fragKey2, endValue = fragKey2's value = fragValue
 		// Since value == endValue and endKey != maxWithPrefix.end, the ASSERT fires.
 		//
 		// Example with Order 1 fragmentation ("c"->""  "d"->""):
-		//   krmSetRangeCoalescing(tr, prefix, ["a", "c\x00"), ["","\xff"), "")
+		//   krmSetRangeCoalescing(tr, prefix, ["a", "c\x00"), allKeys, "")
 		//   End query for "c\x00": lastLessOrEqual -> "c"->""
 		//                          next entry      -> "d"->""
 		//   Case 1: endKey="d", endValue=""
-		//   ASSERT("" != "" || "d" == "\xff") -> ASSERT(false) -> internal_error
+		//   ASSERT("" != "" || "d" == "\xff\xff") -> ASSERT(false) -> internal_error
 		Key triggerEnd = keyAfter(fragKey1);
 		ASSERT(triggerEnd < fragKey2);
 
 		tr = makeReference<ReadYourWritesTransaction>(cx);
 		try {
-			co_await krmSetRangeCoalescing(tr, testPrefix, KeyRangeRef("a"_sr, triggerEnd), testRange(), fragValue);
+			co_await krmSetRangeCoalescing(tr, testPrefix, KeyRangeRef("a"_sr, triggerEnd), allKeys, fragValue);
 
 			TraceEvent(SevWarn, "KRMFragTestAssertDidNotFire")
 			    .detail("TriggerEnd", triggerEnd)
