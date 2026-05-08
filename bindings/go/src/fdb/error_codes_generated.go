@@ -22,8 +22,8 @@
 
 package fdb
 
-// To regenerate this file from the bindings/go/src directory
-// go run ../internal/gen_errors/main.go -in ../../../../flow/include/flow/error_definitions.h -out error_codes_generated.go
+// To regenerate this file run this command:
+// go run ./bindings/go/src/internal/gen_errors/main.go -in ./flow/include/flow/error_definitions.h -out ./bindings/go/src/fdb/error_codes_generated.go
 //
 // Error sentinel variables derived from flow/include/flow/error_definitions.h.
 // Use with errors.Is to match a specific FoundationDB error code:
@@ -280,6 +280,10 @@ var (
 	ErrBulkloadDatasetNotCoverRequiredRange = Error{Code: 1249}
 	// BulkLoad requires cluster configuration with both shard_encode_location_metadata=1 and enable_read_lock_on_range=1
 	ErrBulkloadInvalidConfiguration = Error{Code: 1250}
+	// GRV request rejected because estimated queue wait exceeds transaction limit
+	ErrTransactionGRVQueueRejected = Error{Code: 1251}
+	// finishMoveKeys exceeded retry limit
+	ErrFinishMoveKeysTooManyRetries = Error{Code: 1252}
 	// Platform error
 	ErrPlatformError = Error{Code: 1500}
 	// Large block allocation failed
