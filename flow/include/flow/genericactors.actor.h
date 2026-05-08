@@ -1530,13 +1530,13 @@ AsyncResult<std::vector<T>> getAllAsync(std::vector<AsyncResult<T>> input) {
 	if (input.empty())
 		co_return std::vector<T>();
 
-	Reference<GetAllAsyncResultState<T>> state = makeReference<GetAllAsyncResultState<T>>(input.size());
-	state->attach(input);
-	co_await state->completion.getFuture();
+	Reference<GetAllAsyncResultState<T>> aggregateState = makeReference<GetAllAsyncResultState<T>>(input.size());
+	aggregateState->attach(input);
+	co_await aggregateState->completion.getFuture();
 
 	std::vector<T> output;
-	output.reserve(state->count);
-	for (auto& item : state->values) {
+	output.reserve(aggregateState->count);
+	for (auto& item : aggregateState->values) {
 		output.push_back(std::move(*item));
 	}
 	co_return output;
