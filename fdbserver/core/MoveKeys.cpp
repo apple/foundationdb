@@ -1161,6 +1161,16 @@ static Future<Void> startMoveKeys(Database occ,
 				}
 				if (err.code() == error_code_move_to_removed_server)
 					throw err;
+				if (retries > SERVER_KNOBS->START_MOVE_KEYS_MAX_RETRIES) {
+					CODE_PROBE(true, "startMoveKeys giving up after max retries");
+					TraceEvent(SevWarnAlways, "RelocateShard_StartMoveKeysGivingUp", relocationIntervalId)
+					    .error(err)
+					    .detail("KeyBegin", keys.begin)
+					    .detail("KeyEnd", keys.end)
+					    .detail("BeginKey", begin)
+					    .detail("Retries", retries);
+					throw start_move_keys_too_many_retries();
+				}
 				co_await tr->onError(err);
 
 				if (retries % 10 == 0) {
@@ -1583,16 +1593,7 @@ static Future<Void> finishMoveKeys(Database occ,
 						readyServersEv.detail("ReadyTSS", tssCount);
 					}
 
-					if (count == dest.size()) {
-						// Inject a "servers not ready" condition to exercise the
-						// timeout retry and finish_move_keys_too_many_retries path.
-						if (BUGGIFY_WITH_PROB(0.01)) {
-							CODE_PROBE(true, "finishMoveKeys injecting servers not ready");
-							count = 0;
-						}
-					}
-
-					if (count == dest.size()) {
+				if (count == dest.size()) {
 						// update keyServers, serverKeys
 						// SOMEDAY: Doing these in parallel is safe because none of them overlap or touch (one per
 						// server)
