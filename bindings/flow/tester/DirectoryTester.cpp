@@ -139,7 +139,7 @@ struct DirectoryCreateLayerFunc : InstructionFunc {
 			             nodeSubspace->key().printable().c_str(),
 			             allowManualPrefixes));
 			data->directoryData.push(
-			    Reference<IDirectory>(new DirectoryLayer(*nodeSubspace, *contentSubspace, allowManualPrefixes)));
+			    makeReference<DirectoryLayer>(*nodeSubspace, *contentSubspace, allowManualPrefixes));
 		}
 	}
 };

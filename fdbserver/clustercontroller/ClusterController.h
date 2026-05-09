@@ -356,7 +356,7 @@ public:
 	    Optional<Optional<Standalone<StringRef>>> const& dcId = Optional<Optional<Standalone<StringRef>>>()) {
 		std::map<ProcessClass::Fitness, std::vector<WorkerDetails>> fitness_workers;
 		std::vector<WorkerDetails> results;
-		Reference<LocalitySet> logServerSet = Reference<LocalitySet>(new LocalityMap<WorkerDetails>());
+		Reference<LocalitySet> logServerSet = makeReference<LocalityMap<WorkerDetails>>();
 		LocalityMap<WorkerDetails>* logServerMap = (LocalityMap<WorkerDetails>*)logServerSet.getPtr();
 		bool bCompleted = false;
 
@@ -997,7 +997,7 @@ public:
 	    const std::vector<UID>& exclusionWorkerIds = {}) {
 		std::map<std::tuple<ProcessClass::Fitness, int, bool, bool>, std::vector<WorkerDetails>> fitness_workers;
 		std::vector<WorkerDetails> results;
-		Reference<LocalitySet> logServerSet = Reference<LocalitySet>(new LocalityMap<WorkerDetails>());
+		Reference<LocalitySet> logServerSet = makeReference<LocalityMap<WorkerDetails>>();
 		LocalityMap<WorkerDetails>* logServerMap = (LocalityMap<WorkerDetails>*)logServerSet.getPtr();
 		bool bCompleted = false;
 		desired = std::max(required, desired);

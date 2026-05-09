@@ -104,7 +104,7 @@ public:
 			throw lock_file_failure();
 		}
 
-		co_return Reference<IAsyncFile>(new AsyncFileEIO(r->result, flags, filename));
+		co_return makeReference<AsyncFileEIO>(r->result, flags, filename);
 	}
 	static Future<Void> deleteFile(std::string filename, bool mustBeDurable) {
 		::deleteFile(filename);

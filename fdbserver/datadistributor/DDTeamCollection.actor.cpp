@@ -723,7 +723,7 @@ public:
 		int idx = 0;
 		std::vector<Reference<TCServerInfo>> servers;
 		std::vector<UID> serverIds;
-		Reference<LocalitySet> tempSet = Reference<LocalitySet>(new LocalityMap<UID>());
+		Reference<LocalitySet> tempSet = makeReference<LocalityMap<UID>>();
 		LocalityMap<UID>* tempMap = nullptr;
 		std::vector<Reference<TCTeamInfo>> largeOrBadTeams = self->badTeams;
 		largeOrBadTeams.insert(largeOrBadTeams.end(), self->largeTeams.begin(), self->largeTeams.end());
@@ -4415,7 +4415,7 @@ Future<Void> DDTeamCollection::updateStorageMetadata(TCServerInfo* server) {
 }
 
 void DDTeamCollection::resetLocalitySet() {
-	storageServerSet = Reference<LocalitySet>(new LocalityMap<UID>());
+	storageServerSet = makeReference<LocalityMap<UID>>();
 	auto* storageServerMap = static_cast<LocalityMap<UID>*>(storageServerSet.getPtr());
 
 	for (auto& it : server_info) {
@@ -4853,7 +4853,7 @@ Reference<TCTeamInfo> DDTeamCollection::buildLargeTeam(int teamSize) {
 		    .detail("SatisfiesPolicy", satisfiesPolicy(candidateTeam));
 		return Reference<TCTeamInfo>();
 	} else if (candidateTeam.size() > teamSize) {
-		Reference<LocalitySet> tempSet = Reference<LocalitySet>(new LocalityMap<UID>());
+		Reference<LocalitySet> tempSet = makeReference<LocalityMap<UID>>();
 		auto* tempMap = static_cast<LocalityMap<UID>*>(tempSet.getPtr());
 		tempSet->clear();
 		for (auto& it : candidateTeam) {
@@ -6220,7 +6220,7 @@ public:
 	    Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure) {
 		Database database = DatabaseContext::create(
 		    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::False);
-		auto txnProcessor = Reference<IDDTxnProcessor>(new DDTxnProcessor(database));
+		auto txnProcessor = makeReference<DDTxnProcessor>(database);
 		DatabaseConfiguration conf;
 		conf.storageTeamSize = teamSize;
 		conf.storagePolicy = policy;
@@ -6275,7 +6275,7 @@ public:
 	                                                                   int processCount) {
 		Database database = DatabaseContext::create(
 		    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::False);
-		auto txnProcessor = Reference<IDDTxnProcessor>(new DDTxnProcessor(database));
+		auto txnProcessor = makeReference<DDTxnProcessor>(database);
 		DatabaseConfiguration conf;
 		conf.storageTeamSize = teamSize;
 		conf.storagePolicy = policy;
@@ -6342,8 +6342,7 @@ public:
 		int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
 		int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
 
-		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(teamSize, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(teamSize, "zoneid", makeReference<PolicyOne>());
 		std::unique_ptr<DDTeamCollection> collection = testMachineTeamCollection(teamSize, policy, processSize);
 
 		collection->addTeamsBestOf(30, desiredTeams, maxTeams);
@@ -6359,8 +6358,7 @@ public:
 		int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
 		int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
 
-		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(teamSize, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(teamSize, "zoneid", makeReference<PolicyOne>());
 		std::unique_ptr<DDTeamCollection> collection = testMachineTeamCollection(teamSize, policy, processSize);
 
 		if (collection == nullptr) {
@@ -7155,7 +7153,7 @@ TEST_CASE("/DataDistribution/StorageWiggler/NextIdWithMinAge") {
 
 TEST_CASE("/DataDistribution/StorageWiggler/NextIdWithTSS") {
 	state std::unique_ptr<DDTeamCollection> collection =
-	    DDTeamCollectionUnitTest::testMachineTeamCollection(1, Reference<IReplicationPolicy>(new PolicyOne()), 5);
+	    DDTeamCollectionUnitTest::testMachineTeamCollection(1, makeReference<PolicyOne>(), 5);
 	state Reference<StorageWiggler> wiggler = makeReference<StorageWiggler>(collection.get());
 
 	std::cout << "Test when need TSS ... \n";

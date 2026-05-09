@@ -68,7 +68,7 @@ public:
 		if (err) {
 			co_return Reference<IConnection>();
 		} else {
-			co_return Reference<IConnection>(new SimExternalConnection(std::move(socket)));
+			co_return makeReference<SimExternalConnection>(std::move(socket));
 		}
 	}
 };

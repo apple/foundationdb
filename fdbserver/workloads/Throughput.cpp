@@ -334,38 +334,37 @@ struct ThroughputWorkload : TestWorkload {
 		double sweepDelay = getOption(options, "sweepDelay"_sr, 0);
 		double zeroPaddingRatio = getOption(options, "zeroPaddingRatio"_sr, 0.15);
 
-		auto AType = Reference<ITransactor>(new RWTransactor(getOption(options, "readsPerTransactionA"_sr, 10),
+		auto AType = makeReference<RWTransactor>(getOption(options, "readsPerTransactionA"_sr, 10),
 		                                                     getOption(options, "writesPerTransactionA"_sr, 0),
 		                                                     keyCount,
 		                                                     keyBytes,
 		                                                     minValueBytes,
 		                                                     maxValueBytes,
-		                                                     zeroPaddingRatio));
-		auto BType = Reference<ITransactor>(new RWTransactor(getOption(options, "readsPerTransactionB"_sr, 5),
+		                                                     zeroPaddingRatio);
+		auto BType = makeReference<RWTransactor>(getOption(options, "readsPerTransactionB"_sr, 5),
 		                                                     getOption(options, "writesPerTransactionB"_sr, 5),
 		                                                     keyCount,
 		                                                     keyBytes,
 		                                                     minValueBytes,
 		                                                     maxValueBytes,
-		                                                     zeroPaddingRatio));
+		                                                     zeroPaddingRatio);
 
 		if (sweepDuration > 0) {
-			op = Reference<ITransactor>(new SweepTransactor(sweepDuration, sweepDelay, AType, BType));
+			op = makeReference<SweepTransactor>(sweepDuration, sweepDelay, AType, BType);
 		} else {
-			op = Reference<ITransactor>(new ABTransactor(getOption(options, "alpha"_sr, 0.1), AType, BType));
+			op = makeReference<ABTransactor>(getOption(options, "alpha"_sr, 0.1), AType, BType);
 		}
 
 		double measureDelay = getOption(options, "measureDelay"_sr, 50.0);
 		double measureDuration = getOption(options, "measureDuration"_sr, 10.0);
-		multi->ms.push_back(Reference<IMeasurer>(new MeasureSinglePeriod(measureDelay, measureDuration)));
+		multi->ms.push_back(makeReference<MeasureSinglePeriod>(measureDelay, measureDuration));
 
 		double measurePeriod = getOption(options, "measurePeriod"_sr, 0.0);
 		std::vector<std::string> periodicMetrics =
 		    getOption(options, "measurePeriodicMetrics"_sr, std::vector<std::string>());
 		if (measurePeriod) {
 			ASSERT(!periodicMetrics.empty());
-			multi->ms.push_back(Reference<IMeasurer>(new MeasurePeriodically(
-			    measurePeriod, std::set<std::string>(periodicMetrics.begin(), periodicMetrics.end()))));
+			multi->ms.push_back(makeReference<MeasurePeriodically>(measurePeriod, std::set<std::string>(periodicMetrics.begin(), periodicMetrics.end())));
 		}
 
 		Pgain = getOption(options, "ProportionalGain"_sr, 0.1);

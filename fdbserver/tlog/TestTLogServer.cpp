@@ -388,7 +388,7 @@ Future<Void> buildTLogSet(Reference<TLogTestContext> pTLogTestContext) {
 	TLogSet tLogSet;
 
 	tLogSet.tLogLocalities.push_back(LocalityData());
-	tLogSet.tLogPolicy = Reference<IReplicationPolicy>(new PolicyOne());
+	tLogSet.tLogPolicy = makeReference<PolicyOne>();
 	tLogSet.locality = pTLogTestContext->primaryLocality;
 	tLogSet.isLocal = true;
 	tLogSet.tLogVersion = TLogVersion::V6;

@@ -2741,7 +2741,7 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 	if (!isMocked) {
 		Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, LockAware::True);
 		cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
-		self->txnProcessor = Reference<IDDTxnProcessor>(new DDTxnProcessor(cx));
+		self->txnProcessor = makeReference<DDTxnProcessor>(cx);
 	} else {
 		ASSERT(self->txnProcessor.isValid() && self->txnProcessor->isMocked());
 	}
@@ -4922,7 +4922,7 @@ Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 	int64_t cumulatedValidatedServerKeysNum = 0;
 	int64_t cumulatedValidatedKeyServersNum = 0;
 	Reference<IRateControl> rateLimiter =
-	    Reference<IRateControl>(new SpeedLimit(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1));
+	    makeReference<SpeedLimit>(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1);
 	int64_t remoteReadBytes = 0;
 	double lastRateLimiterWaitTime = 0;
 	double rateLimiterBeforeWaitTime = 0;

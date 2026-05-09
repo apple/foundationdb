@@ -3825,7 +3825,7 @@ Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageRequest r
 	int64_t cumulatedValidatedLocalShardsNum = 0;
 	int64_t cumulatedValidatedServerKeysNum = 0;
 	Reference<IRateControl> rateLimiter =
-	    Reference<IRateControl>(new SpeedLimit(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1));
+	    makeReference<SpeedLimit>(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1);
 	int64_t remoteReadBytes = 0;
 	double startTime = now();
 	double lastRateLimiterWaitTime = 0;
@@ -4528,7 +4528,7 @@ Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
 	bool complete = false;
 	double startTime = now();
 	Reference<IRateControl> rateLimiter =
-	    Reference<IRateControl>(new SpeedLimit(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1));
+	    makeReference<SpeedLimit>(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1);
 
 	{
 		Optional<Error> err;
@@ -4770,7 +4770,7 @@ Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRequest 
 	double rateLimiterBeforeWaitTime = 0;
 	double rateLimiterTotalWaitTime = 0;
 	Reference<IRateControl> rateLimiter =
-	    Reference<IRateControl>(new SpeedLimit(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1));
+	    makeReference<SpeedLimit>(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1);
 	try {
 		while (true) {
 			{

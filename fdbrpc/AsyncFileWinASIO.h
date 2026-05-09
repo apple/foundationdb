@@ -69,7 +69,7 @@ public:
 			    .detail("Mode", mode);
 			return e;
 		}
-		return Reference<IAsyncFile>(new AsyncFileWinASIO(*ios, h, flags, filename));
+		return makeReference<AsyncFileWinASIO>(*ios, h, flags, filename);
 	}
 	static Future<Void> deleteFile(std::string filename, bool mustBeDurable) {
 		::deleteFile(filename);
