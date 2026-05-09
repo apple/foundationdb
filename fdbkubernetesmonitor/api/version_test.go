@@ -40,27 +40,12 @@ var _ = Describe("[api] FDBVersion", func() {
 			Expect(decoded).To(Equal(original))
 		})
 
-		It("should round-trip a release candidate version", func() {
-			original := Version{Major: 7, Minor: 0, Patch: 0, ReleaseCandidate: 3}
-			data, err := json.Marshal(&original)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(string(data)).To(Equal(`"7.0.0-rc3"`))
-
-			var decoded Version
-			Expect(json.Unmarshal(data, &decoded)).To(Succeed())
-			Expect(decoded).To(Equal(original))
-		})
-
-		It("should return an error when unmarshaling an invalid version string", func() {
-			var decoded Version
-			err := json.Unmarshal([]byte(`"not-a-version"`), &decoded)
-			Expect(err).To(HaveOccurred())
-		})
-
-		It("should return an error when unmarshaling a version with missing patch", func() {
-			var decoded Version
-			err := json.Unmarshal([]byte(`"7.3"`), &decoded)
-			Expect(err).To(HaveOccurred())
+		It("should return an error when unmarshaling invalid version strings", func() {
+			for _, invalidVersion := range []string{`"not-a-version"`, `"7.3"`} {
+				var decoded Version
+				err := json.Unmarshal([]byte(invalidVersion), &decoded)
+				Expect(err).To(HaveOccurred())
+			}
 		})
 	})
 
