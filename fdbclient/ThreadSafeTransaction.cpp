@@ -142,8 +142,8 @@ ThreadSafeDatabase::ThreadSafeDatabase(ConnectionRecordType connectionRecordType
 			Reference<IClusterConnectionRecord> connectionRecord =
 			    connectionRecordType == ConnectionRecordType::FILE
 			        ? Reference<IClusterConnectionRecord>(ClusterConnectionFile::openOrDefault(connectionRecordString))
-			        : Reference<IClusterConnectionRecord>(
-			              makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(connectionRecordString)));
+			        : Reference<IClusterConnectionRecord>(makeReference<ClusterConnectionMemoryRecord>(
+			              ClusterConnectionString(connectionRecordString)));
 
 			Database::createDatabase(connectionRecord, apiVersion, IsInternal::False, LocalityData(), db).extractPtr();
 		} catch (Error& e) {
