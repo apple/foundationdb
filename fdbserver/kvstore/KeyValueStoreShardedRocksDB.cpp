@@ -3880,7 +3880,8 @@ Future<Void> testCheckpointRestore(IKeyValueStore* kvStore, std::vector<KeyRange
 	co_await restoreKv->init();
 	try {
 		const std::string shardId = "restoredShard";
-		co_await restoreKv->restore(shardId, ranges, { checkpoint });
+		std::vector<CheckpointMetaData> checkpoints{ checkpoint };
+		co_await restoreKv->restore(shardId, ranges, checkpoints);
 	} catch (Error& e) {
 		TraceEvent(SevWarnAlways, "TestRestoreCheckpointError")
 		    .errorUnsuppressed(e)
@@ -4589,7 +4590,8 @@ TEST_CASE("noSim/ShardedRocksDBCheckpoint/CheckpointRestore") {
 
 	Error err;
 	try {
-		co_await testCheckpointRestore(kvStore, { rangeK });
+		std::vector<KeyRange> ranges{ rangeK };
+		co_await testCheckpointRestore(kvStore, ranges);
 	} catch (Error& e) {
 		TraceEvent(SevError, "TestCheckpointRestoreError").errorUnsuppressed(e);
 		err = e;
@@ -4598,7 +4600,8 @@ TEST_CASE("noSim/ShardedRocksDBCheckpoint/CheckpointRestore") {
 	// ASSERT(err.code() == error_code_failed_to_restore_checkpoint);
 
 	try {
-		co_await testCheckpointRestore(kvStore, { rangeKz });
+		std::vector<KeyRange> ranges{ rangeKz };
+		co_await testCheckpointRestore(kvStore, ranges);
 	} catch (Error& e) {
 		TraceEvent("TestCheckpointRestoreError").errorUnsuppressed(e);
 		err = e;
