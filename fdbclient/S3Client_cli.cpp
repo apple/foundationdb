@@ -33,6 +33,7 @@
 #include "fdbclient/BuildFlags.h"
 #import "fdbclient/BackupTLSConfig.h"
 #include "fdbclient/Knobs.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/S3Client.h"
 #include "flow/Platform.h"
