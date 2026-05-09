@@ -120,8 +120,6 @@ class MasterData;
 #include "SwiftModules/Flow"
 #endif
 
-#include "flow/actorcompiler.h" // This must be the last #include.
-
 // FIXME(swift): remove those
 extern "C" void swiftCallMeFuture(void* _Nonnull opaqueResultPromisePtr) noexcept;
 
@@ -337,7 +335,7 @@ UID getSharedMemoryMachineId() {
 	// On windows, this means that we have to create an elaborate workaround for DACLs
 	WorldReadablePermissions p;
 	std::string sharedMemoryIdentifier = "fdbserver_shared_memory_id";
-	loop {
+	while (true) {
 		try {
 			// "0" is the default netPrefix "addr"
 			boost::interprocess::managed_shared_memory segment(
@@ -369,8 +367,8 @@ UID getSharedMemoryMachineId() {
 #endif
 }
 
-ACTOR void failAfter(Future<Void> trigger, ISimulator::ProcessInfo* m = g_simulator->getCurrentProcess()) {
-	wait(trigger);
+Future<Void> failAfter(Future<Void> trigger, ISimulator::ProcessInfo* m = g_simulator->getCurrentProcess()) {
+	co_await trigger;
 	if (enableFailures) {
 		printf("Killing machine: %s at %f\n", m->address.toString().c_str(), now());
 		g_simulator->killProcess(m, ISimulator::KillType::KillInstantly);
@@ -383,26 +381,26 @@ void failAfter(Future<Void> trigger, Endpoint e) {
 }
 
 #ifdef WITH_SWIFT
-ACTOR void swiftTestRunner() {
+Future<Void> swiftTestRunner() {
 	auto p = PromiseVoid();
 	fdbserver_swift::swiftyTestRunner(p);
-	wait(p.getFuture());
+	co_await p.getFuture();
 
 	flushAndExit(0);
 }
 #endif
 
-ACTOR Future<Void> histogramReport() {
-	loop {
-		wait(delay(SERVER_KNOBS->HISTOGRAM_REPORT_INTERVAL));
+Future<Void> histogramReport() {
+	while (true) {
+		co_await delay(SERVER_KNOBS->HISTOGRAM_REPORT_INTERVAL);
 
 		GetHistogramRegistry().logReport();
 	}
 }
 
-ACTOR Future<Void> metricsReport() {
-	loop {
-		wait(delay(SERVER_KNOBS->GENERIC_METRICS_REPORT_INTERVAL));
+Future<Void> metricsReport() {
+	while (true) {
+		co_await delay(SERVER_KNOBS->GENERIC_METRICS_REPORT_INTERVAL);
 
 		simpleCounterReport();
 	}
