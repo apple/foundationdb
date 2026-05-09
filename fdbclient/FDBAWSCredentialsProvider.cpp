@@ -19,7 +19,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/FDBAWSCredentialsProvider.h"
+#include "FDBAWSCredentialsProvider.h"
 #include "fdbclient/Tracing.h"
 
 #ifdef WITH_AWS_BACKUP

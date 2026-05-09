@@ -321,8 +321,10 @@ Future<Optional<BulkDumpProgress>> getBulkDumpProgress(Database cx);
 // Reads task metadata from system keys and computes aggregate metrics
 Future<Optional<BulkLoadProgress>> getBulkLoadProgress(Database cx);
 
-// Threshold in seconds for considering a task "stalled"
-constexpr double BULK_TASK_STALL_THRESHOLD_SECONDS = 60.0;
+// Threshold in seconds for considering a task "stalled".
+// SST file downloads from blobstore can take 5-10 minutes per task,
+// so this needs to be well above normal download times.
+constexpr double BULK_TASK_STALL_THRESHOLD_SECONDS = 600.0;
 
 // BulkDump owner tracking - stored in separate system keys for backward compatibility
 struct BulkDumpOwnerInfo {

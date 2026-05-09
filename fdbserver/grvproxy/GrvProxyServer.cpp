@@ -27,9 +27,10 @@
 #include "fdbclient/GrvProxyInterface.h"
 #include "fdbclient/VersionVector.h"
 #include "fdbserver/grvproxy/GrvProxyServer.h"
+#include "GrvQueueDelay.h"
 #include "GrvProxyTagThrottler.h"
 #include "GrvTransactionRateInfo.h"
-#include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/WaitFailure.h"
@@ -206,7 +207,7 @@ struct GrvProxyData {
 	GrvProxyStats stats;
 	MasterInterface master;
 	PublicRequestStream<GetReadVersionRequest> getConsistentReadVersion;
-	Reference<ILogSystem> logSystem;
+	Reference<LogSystem> logSystem;
 
 	Database cx;
 	Reference<AsyncVar<ServerDBInfo> const> db;
@@ -508,10 +509,59 @@ void proxyGRVThresholdExceeded(const GetReadVersionRequest* req, GrvProxyStats* 
 }
 
 // Drop a GetReadVersion request from a queue, by responding an error to the request.
-void dropRequestFromQueue(Deque<GetReadVersionRequest>* queue, GrvProxyStats* stats) {
+void dropRequestFromQueue(Deque<GetReadVersionRequest>* queue,
+                          GrvProxyStats* stats,
+                          GrvQueueTransactionCounts* queueTransactionCounts) {
 	proxyGRVThresholdExceeded(&queue->front(), stats);
 	++stats->txnRequestOut;
+	queueTransactionCounts->remove(queue->front());
 	queue->pop_front();
+}
+
+void rejectForMaxGrvQueueDelay(GetReadVersionRequest const& req, GrvProxyStats* stats, double estimatedRemainingDelay) {
+	double elapsedQueueDelay = std::max(0.0, now() - req.requestTime() - req.proxyTagThrottledDuration);
+	TraceEvent("ProxyGRVQueueDelayExceeded")
+	    .suppressFor(5.0)
+	    .detail("Priority", static_cast<int>(req.priority))
+	    .detail("TransactionCount", req.transactionCount)
+	    .detail("ElapsedQueueDelay", elapsedQueueDelay)
+	    .detail("EstimatedRemainingDelay", estimatedRemainingDelay)
+	    .detail("MaxGrvQueueDelayMS", req.maxGrvQueueDelayMS.orDefault(-1));
+	req.reply.sendError(transaction_grv_queue_rejected());
+	stats->txnThrottled += req.transactionCount;
+	++stats->txnRequestErrors;
+}
+
+bool rejectIncomingForMaxGrvQueueDelay(GetReadVersionRequest const& req,
+                                       GrvQueueTransactionCounts const& queueTransactionCounts,
+                                       GrvProxyStats* stats,
+                                       GrvTransactionRateInfo const* normalRateInfo,
+                                       GrvTransactionRateInfo const* batchRateInfo) {
+	// Requests with this option should be rejected before normal queue accounting
+	// or insertion. The estimate uses normal-rate work for every request and adds
+	// batch-rate work for batch-priority requests.
+	if (!req.maxGrvQueueDelayMS.present()) {
+		return false;
+	}
+	if (req.priority >= TransactionPriority::IMMEDIATE) {
+		return false;
+	}
+
+	auto estimate = estimateRemainingGrvQueueDelay(
+	    req.priority, req.transactionCount, queueTransactionCounts, normalRateInfo, batchRateInfo);
+	if (estimate.batchRateDelay.present()) {
+		if (shouldRejectForMaxGrvQueueDelay(req, estimate.batchRateDelay.get())) {
+			rejectForMaxGrvQueueDelay(req, stats, estimate.batchRateDelay.get());
+			return true;
+		}
+	}
+
+	if (shouldRejectForMaxGrvQueueDelay(req, estimate.normalRateDelay)) {
+		rejectForMaxGrvQueueDelay(req, stats, estimate.normalRateDelay);
+		return true;
+	}
+
+	return false;
 }
 
 // Put a GetReadVersion request into the queue corresponding to its priority.
@@ -525,7 +575,9 @@ Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> const>
                                          double* GRVBatchTime,
                                          FutureStream<double> normalGRVLatency,
                                          GrvProxyStats* stats,
+                                         GrvTransactionRateInfo* normalRateInfo,
                                          GrvTransactionRateInfo* batchRateInfo,
+                                         GrvQueueTransactionCounts* queueTransactionCounts,
                                          GrvProxyTagThrottler* tagThrottler) {
 	getCurrentLineage()->modify(&TransactionLineage::operation) =
 	    TransactionLineage::Operation::GetConsistentReadVersion;
@@ -547,17 +599,17 @@ Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> const>
 					canBeQueued = false;
 				} else if (req.priority == TransactionPriority::DEFAULT) {
 					if (!batchQueue->empty()) {
-						dropRequestFromQueue(batchQueue, stats);
+						dropRequestFromQueue(batchQueue, stats, queueTransactionCounts);
 						--stats->batchGRVQueueSize;
 					} else {
 						canBeQueued = false;
 					}
 				} else {
 					if (!batchQueue->empty()) {
-						dropRequestFromQueue(batchQueue, stats);
+						dropRequestFromQueue(batchQueue, stats, queueTransactionCounts);
 						--stats->batchGRVQueueSize;
 					} else if (!defaultQueue->empty()) {
-						dropRequestFromQueue(defaultQueue, stats);
+						dropRequestFromQueue(defaultQueue, stats, queueTransactionCounts);
 						--stats->defaultGRVQueueSize;
 					} else {
 						canBeQueued = false;
@@ -567,6 +619,11 @@ Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> const>
 			if (!canBeQueued) {
 				proxyGRVThresholdExceeded(&req, stats);
 			} else {
+				if (rejectIncomingForMaxGrvQueueDelay(
+				        req, *queueTransactionCounts, stats, normalRateInfo, batchRateInfo)) {
+					continue;
+				}
+
 				stats->addRequest(req.transactionCount);
 
 				if (req.debugID.present())
@@ -575,7 +632,8 @@ Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> const>
 					                      "GrvProxyServer.queueTransactionStartRequests.Before");
 
 				if (systemQueue->empty() && defaultQueue->empty() && batchQueue->empty()) {
-					forwardPromise(GRVTimer,
+					forwardPromise(Uncancellable{},
+					               GRVTimer,
 					               delayJittered(std::max(0.0, *GRVBatchTime - (now() - *lastGRVTime)),
 					                             TaskPriority::ProxyGRVTimer));
 				}
@@ -585,6 +643,7 @@ Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> const>
 					stats->txnStartIn += req.transactionCount;
 					stats->txnSystemPriorityStartIn += req.transactionCount;
 					++stats->systemGRVQueueSize;
+					queueTransactionCounts->add(req);
 					systemQueue->push_back(req);
 				} else if (req.priority >= TransactionPriority::DEFAULT) {
 					if (SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES && req.isTagged()) {
@@ -596,6 +655,7 @@ Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> const>
 						stats->txnStartIn += req.transactionCount;
 						stats->txnDefaultPriorityStartIn += req.transactionCount;
 						++stats->defaultGRVQueueSize;
+						queueTransactionCounts->add(req);
 						defaultQueue->push_back(req);
 					}
 				} else {
@@ -614,6 +674,7 @@ Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> const>
 							stats->txnStartIn += req.transactionCount;
 							stats->txnBatchPriorityStartIn += req.transactionCount;
 							++stats->batchGRVQueueSize;
+							queueTransactionCounts->add(req);
 							batchQueue->push_back(req);
 						}
 					}
@@ -785,7 +846,7 @@ Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 
 		if (request.isTagged()) {
 			auto& priorityThrottledTags = clientThrottledTags[request.priority];
-			for (auto tag : request.tags) {
+			for (const auto& tag : request.tags) {
 				auto tagItr = priorityThrottledTags.find(tag.first);
 				if (tagItr != priorityThrottledTags.end()) {
 					if (tagItr->second.expiration > now()) {
@@ -895,6 +956,7 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	Deque<GetReadVersionRequest> systemQueue;
 	Deque<GetReadVersionRequest> defaultQueue;
 	Deque<GetReadVersionRequest> batchQueue;
+	GrvQueueTransactionCounts queueTransactionCounts;
 
 	TransactionTagMap<uint64_t> transactionTagCounter;
 	PrioritizedTransactionTagMap<ClientTagThrottleLimits> clientThrottledTags;
@@ -928,7 +990,9 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	                                          &GRVBatchTime,
 	                                          normalGRVLatency.getFuture(),
 	                                          &grvProxyData->stats,
+	                                          &normalRateInfo,
 	                                          &batchRateInfo,
+	                                          &queueTransactionCounts,
 	                                          &grvProxyData->tagThrottler));
 
 	while (std::find(db->get().client.grvProxies.begin(), db->get().client.grvProxies.end(), proxy) ==
@@ -952,7 +1016,9 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 			elapsed = 1e-15;
 		}
 
-		grvProxyData->stats.update(grvProxyData->tagThrottler.releaseTransactions(elapsed, batchQueue, defaultQueue));
+		auto tagReleaseStats = grvProxyData->tagThrottler.releaseTransactions(elapsed, batchQueue, defaultQueue);
+		grvProxyData->stats.update(tagReleaseStats);
+		queueTransactionCounts.add(tagReleaseStats);
 
 		normalRateInfo.startReleaseWindow();
 		batchRateInfo.startReleaseWindow();
@@ -1018,9 +1084,10 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 				grvProxyData->stats.batchTxnGRVTimeInQueue.addMeasurement(currentTime - req.requestTime());
 				--grvProxyData->stats.batchGRVQueueSize;
 			}
-			for (auto tag : req.tags) {
-				transactionTagCounter[tag.first] += tag.second;
+			for (const auto& [tag, count] : req.tags) {
+				transactionTagCounter[tag] += count;
 			}
+			queueTransactionCounts.remove(req);
 			start[req.flags & 1].push_back(std::move(req));
 			static_assert(GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY == 1, "Implementation dependent on flag value");
 			transactionQueue->pop_front();
@@ -1045,6 +1112,7 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 
 		if (!systemQueue.empty() || !defaultQueue.empty() || !batchQueue.empty()) {
 			forwardPromise(
+			    Uncancellable{},
 			    GRVTimer,
 			    delayJittered(SERVER_KNOBS->START_TRANSACTION_BATCH_QUEUE_CHECK_INTERVAL, TaskPriority::ProxyGRVTimer));
 		}
@@ -1083,7 +1151,7 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 		int defaultGRVProcessed = 0;
 		int batchGRVProcessed = 0;
 		for (int i = 0; i < start.size(); i++) {
-			if (start[i].size()) {
+			if (!start[i].empty()) {
 				std::vector<SpanContext> spanContexts;
 				spanContexts.reserve(start[i].size());
 				for (const GetReadVersionRequest& request : start[i]) {

@@ -201,7 +201,7 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 	double samplingProbability;
 	int64_t trInfoSizeLimit;
 
-	ClientTransactionProfileCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit ClientTransactionProfileCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		samplingProbability = getOption(options,
 		                                "samplingProbability"_sr,
 		                                deterministicRandom()->random01() / 10); // rand range 0 - 0.1

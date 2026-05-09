@@ -129,6 +129,15 @@ ErrorOr<T> errorOr(T t) {
 	return ErrorOr<T>(t);
 }
 
+template <class T>
+AsyncResult<ErrorOr<T>> errorOr(AsyncResult<T> result) {
+	try {
+		co_return ErrorOr<T>(co_await std::move(result));
+	} catch (Error& e) {
+		co_return ErrorOr<T>(e);
+	}
+}
+
 ACTOR template <class T>
 Future<ErrorOr<T>> errorOr(Future<T> f) {
 	try {
@@ -329,19 +338,6 @@ template <class T, class X>
 		return Void();
 	});
 }
-
-#if false
-// NOTE: Think twice whether create a new struct for a complex return type is better before using tuple.
-// If we just use the return type once, is it worth to create a new struct?
-// And enable the unit test in genericactors.actor.cpp
-template <class A, class... Bs>
-Future<Void> storeTuple(Future<std::tuple<A, Bs...>> what, A& a, Bs&... b) {
-	return map(what, [&](std::tuple<A, Bs...> const& v) {
-		std::tie(a, b...) = v;
-		return Void();
-	});
-}
-#endif
 
 template <class T>
 Future<Void> storeOrThrow(T& out, Future<Optional<T>> what, Error e = key_not_found()) {
@@ -662,7 +658,7 @@ public:
 	ReferencedObject() : value() {}
 	explicit ReferencedObject(V const& v) : value(v) {}
 	explicit ReferencedObject(V&& v) : value(std::move(v)) {}
-	ReferencedObject(ReferencedObject&& r) : value(std::move(r.value)) {}
+	explicit(false) ReferencedObject(ReferencedObject&& r) : value(std::move(r.value)) {}
 
 	void operator=(ReferencedObject&& r) { value = std::move(r.value); }
 
@@ -729,7 +725,7 @@ private:
 class AsyncTrigger : NonCopyable {
 public:
 	AsyncTrigger() {}
-	AsyncTrigger(AsyncTrigger&& at) : v(std::move(at.v)) {}
+	explicit(false) AsyncTrigger(AsyncTrigger&& at) : v(std::move(at.v)) {}
 	void operator=(AsyncTrigger&& at) { v = std::move(at.v); }
 	Future<Void> onTrigger() const { return v.onChange(); }
 	void trigger() { v.trigger(); }
@@ -751,7 +747,7 @@ Future<Void> forward(Reference<AsyncVar<T> const> from, AsyncTrigger* to) {
 class Debouncer : NonCopyable {
 public:
 	explicit Debouncer(double delay) { worker = debounceWorker(this, delay); }
-	Debouncer(Debouncer&& at) = default;
+	explicit(false) Debouncer(Debouncer&& at) = default;
 	Debouncer& operator=(Debouncer&& at) = default;
 	Future<Void> onTrigger() { return output.onChange(); }
 	void trigger() { input.setUnconditional(Void()); }
@@ -1733,6 +1729,19 @@ Future<T> waitOrError(Future<T> f, Future<Void> errorSignal) {
 	}
 }
 
+ACTOR template <class T>
+Future<T> waitOrError(FutureStream<T> f, Future<Void> errorSignal) {
+	choose {
+		when(T val = waitNext(f)) {
+			return val;
+		}
+		when(wait(errorSignal)) {
+			ASSERT(false);
+			throw internal_error();
+		}
+	}
+}
+
 // A simple counter designed to track an ongoing count of something, such as how many actors are in a critical section,
 // how many bytes are currently being processed, etc... Can be explicitly released idempotently, or will automatically
 // release when destructed to handle actor ending or errors.
@@ -1757,7 +1766,8 @@ struct ActiveCounter {
 		  : parent(parent), delta(delta), releaseCallback(releaseCallback) {
 			parent->counter += delta;
 		}
-		Releaser(Releaser&& r) noexcept : parent(r.parent), delta(r.delta), releaseCallback(r.releaseCallback) {
+		explicit(false) Releaser(Releaser&& r) noexcept
+		  : parent(r.parent), delta(r.delta), releaseCallback(r.releaseCallback) {
 			r.parent = nullptr;
 		}
 		void operator=(Releaser&& r) {
@@ -1860,7 +1870,7 @@ struct FlowLock : NonCopyable, public ReferenceCounted<FlowLock> {
 		int remaining;
 		Releaser() : lock(0), remaining(0) {}
 		explicit(false) Releaser(FlowLock& lock, int64_t amount = 1) : lock(&lock), remaining(amount) {}
-		Releaser(Releaser&& r) noexcept : lock(r.lock), remaining(r.remaining) { r.remaining = 0; }
+		explicit(false) Releaser(Releaser&& r) noexcept : lock(r.lock), remaining(r.remaining) { r.remaining = 0; }
 		void operator=(Releaser&& r) {
 			if (remaining)
 				lock->release(remaining);
@@ -2029,7 +2039,7 @@ struct NotifiedInt {
 
 	void operator=(int64_t v) { set(v); }
 
-	NotifiedInt(NotifiedInt&& r) noexcept : waiting(std::move(r.waiting)), val(r.val) {}
+	explicit(false) NotifiedInt(NotifiedInt&& r) noexcept : waiting(std::move(r.waiting)), val(r.val) {}
 	void operator=(NotifiedInt&& r) noexcept {
 		waiting = std::move(r.waiting);
 		val = r.val;
@@ -2055,7 +2065,9 @@ struct BoundedFlowLock : NonCopyable, public ReferenceCounted<BoundedFlowLock> {
 		int64_t permitNumber;
 		Releaser() : lock(nullptr), permitNumber(0) {}
 		Releaser(BoundedFlowLock* lock, int64_t permitNumber) : lock(lock), permitNumber(permitNumber) {}
-		Releaser(Releaser&& r) noexcept : lock(r.lock), permitNumber(r.permitNumber) { r.permitNumber = 0; }
+		explicit(false) Releaser(Releaser&& r) noexcept : lock(r.lock), permitNumber(r.permitNumber) {
+			r.permitNumber = 0;
+		}
 		void operator=(Releaser&& r) {
 			if (permitNumber)
 				lock->release(permitNumber);
@@ -2239,8 +2251,8 @@ public:
 class AndFuture {
 public:
 	AndFuture() = default;
-	AndFuture(AndFuture const& f) = default;
-	AndFuture(AndFuture&& f) noexcept = default;
+	explicit(false) AndFuture(AndFuture const& f) = default;
+	explicit(false) AndFuture(AndFuture&& f) noexcept = default;
 	AndFuture& operator=(AndFuture const& f) = default;
 	AndFuture& operator=(AndFuture&& f) noexcept = default;
 

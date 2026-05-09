@@ -18,7 +18,7 @@ simBackupAgents = 'BackupToFile'
 
     [[test.workload]]
     testName = 'Backup'
-    usePartitionedLog = false
+    mutationLogType = 0 # default logs
     backupTag = 'oldBackup'
     backupAfter = 10.0
     restoreAfter = 60.0
@@ -40,7 +40,7 @@ simBackupAgents = 'BackupToFile'
 
     [[test.workload]]
     testName = 'Backup'
-    usePartitionedLog = true
+    mutationLogType = 1 # partitioned-log-experimental
     backupTag = 'newBackup'
     backupAfter = 10.0
     restoreAfter = 60.0

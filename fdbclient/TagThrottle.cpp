@@ -18,8 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbclient/CommitProxyInterface.h"
-#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TagThrottle.h"
 #include "fdbclient/Tuple.h"
@@ -95,7 +93,7 @@ Key TagThrottleKey::toKey() const {
 
 	for (auto tag : tags) {
 		*(str++) = (uint8_t)tag.size();
-		if (tag.size() > 0) {
+		if (!tag.empty()) {
 			memcpy(str, tag.begin(), tag.size());
 			str += tag.size();
 		}

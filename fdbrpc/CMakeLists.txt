@@ -61,8 +61,13 @@ if(${COROUTINE_IMPL} STREQUAL libcoro)
   endif()
 endif()
 
-target_include_directories(fdbrpc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_include_directories(fdbrpc PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include" PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
+target_include_directories(fdbrpc
+  PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_BINARY_DIR}/include"
+  PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/libeio")
 target_link_libraries(fdbrpc PUBLIC flow libb64 md5 PRIVATE rapidjson)
 
 if (WITH_GRPC)
@@ -79,7 +84,13 @@ if (WITH_GRPC)
   target_link_libraries(fdbrpc_sampling PUBLIC proto_fdbrpc_test proto_fdbrpc_file_transfer)
 endif()
 
-target_include_directories(fdbrpc_sampling PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include" PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
+target_include_directories(fdbrpc_sampling
+  PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_BINARY_DIR}/include"
+  PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/libeio")
 target_link_libraries(fdbrpc_sampling PUBLIC flow_sampling libb64 md5 PRIVATE rapidjson)
 
 if(${COROUTINE_IMPL} STREQUAL libcoro)

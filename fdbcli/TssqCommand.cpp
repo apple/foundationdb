@@ -43,7 +43,7 @@ Future<Void> tssQuarantineList(Reference<IDatabase> db) {
 			RangeResult result = co_await safeThreadFutureToFuture(resultFuture);
 			// shouldn't have many quarantined TSSes
 			ASSERT(!result.more);
-			printf("Found %d quarantined TSS processes%s\n", result.size(), result.size() == 0 ? "." : ":");
+			printf("Found %d quarantined TSS processes%s\n", result.size(), result.empty() ? "." : ":");
 			for (auto& it : result) {
 				printf("  %s\n", decodeTssQuarantineKey(it.key).toString().c_str());
 			}

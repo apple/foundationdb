@@ -45,7 +45,7 @@
 #endif // WITH_ROCKSDB
 
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/IKeyValueStore.h"
+#include "fdbserver/kvstore/IKeyValueStore.h"
 #include "fdbserver/core/RocksDBCheckpointUtils.h"
 #include "RocksDBCommon.h"
 #include "flow/actorcompiler.h" // has to be last include
@@ -2083,7 +2083,7 @@ struct LatencyMetrics {
 	                                                 Histogram::Unit::milliseconds)) {}
 
 	// Delete copy constructors.
-	explicit(false) LatencyMetrics(const LatencyMetrics&) = delete;
+	LatencyMetrics(const LatencyMetrics&) = delete;
 	LatencyMetrics& operator=(const LatencyMetrics&) = delete;
 };
 

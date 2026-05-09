@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "flow/CompressionUtils.h"
+#include "CompressionUtils.h"
 
 #include "flow/Arena.h"
 #include "flow/Error.h"

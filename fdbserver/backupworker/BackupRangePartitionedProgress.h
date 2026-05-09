@@ -24,13 +24,13 @@
 #include <tuple>
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/LogSystem.h"
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 
 class BackupRangePartitionedProgress : NonCopyable, ReferenceCounted<BackupRangePartitionedProgress> {
 public:
-	BackupRangePartitionedProgress(UID id) : dbgid(id) {}
+	explicit BackupRangePartitionedProgress(UID id) : dbgid(id) {}
 	~BackupRangePartitionedProgress() {}
 
 	// Adds a backup status. If the tag already has an entry, then the max of

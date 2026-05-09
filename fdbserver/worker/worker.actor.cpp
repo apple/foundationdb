@@ -63,8 +63,8 @@
 #include "fdbserver/ratekeeper/Ratekeeper.h"
 #include "fdbserver/resolver/Resolver.h"
 #include "fdbserver/sequencer/MasterServer.h"
-#include "fdbserver/storageserver/StorageServer.actor.h"
-#include "fdbserver/tlog/TLogServer.actor.h"
+#include "fdbserver/storageserver/StorageServer.h"
+#include "fdbserver/tlog/TLogServer.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/tester/tester.h"
 #include "fdbserver/kvstore/IDiskQueue.h"
@@ -2541,7 +2541,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					InitializeBackupReply reply(recruited, req.backupEpoch);
 					backupReady.send(reply);
 				} else {
-					forwardPromise(req.reply, backupWorkerCache.get(req.reqId));
+					forwardPromise(Uncancellable{}, req.reply, backupWorkerCache.get(req.reqId));
 				}
 			}
 			when(InitializeTLogRequest req = waitNext(interf.tLog.getFuture())) {
@@ -2841,7 +2841,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 						logRouterReady.send(recruited);
 					}
 				} else {
-					forwardPromise(req.reply, logRouterCache.get(req.reqId));
+					forwardPromise(Uncancellable{}, req.reply, logRouterCache.get(req.reqId));
 				}
 			}
 			when(CoordinationPingMessage m = waitNext(interf.coordinationPing.getFuture())) {

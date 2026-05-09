@@ -41,7 +41,7 @@ struct StorefrontWorkload : TestWorkload {
 	PerfIntCounter transactions, retries, spuriousCommitFailures;
 	PerfDoubleCounter totalLatency;
 
-	StorefrontWorkload(WorkloadContext const& wcx)
+	explicit StorefrontWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"),
 	    spuriousCommitFailures("Spurious Commit Failures"), totalLatency("Total Latency") {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);

@@ -7,7 +7,6 @@ fdb_setup_googlebenchmark()
 
 target_include_directories(
   fdbclient_bench
-  PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}"
-          "${CMAKE_CURRENT_BINARY_DIR}")
+  PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 
 target_link_libraries(fdbclient_bench PRIVATE Threads::Threads fdb_google_benchmark fdbclient)

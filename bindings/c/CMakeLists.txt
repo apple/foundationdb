@@ -211,7 +211,7 @@ if(NOT WIN32)
   target_link_libraries(fdb_c_client_memory_test PRIVATE fdb_c Threads::Threads)
 
   target_include_directories(fdb_c_api_tester_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/ ${CMAKE_SOURCE_DIR}/flow/include ${CMAKE_BINARY_DIR}/flow/include)
-  target_link_libraries(fdb_c_api_tester_impl PRIVATE fdb_cpp toml11_target Threads::Threads fmt::fmt boost_target)
+  target_link_libraries(fdb_c_api_tester_impl PRIVATE fdb_cpp toml11::toml11 Threads::Threads fmt::fmt boost_target)
   if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     target_link_libraries(fdb_c_api_tester_impl PRIVATE stdc++fs)
   endif()
@@ -230,6 +230,9 @@ if(NOT WIN32)
   # do not set RPATH for mako
   set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
   target_link_libraries(mako PRIVATE fdb_c fdbclient fmt::fmt Threads::Threads fdb_cpp boost_target rapidjson)
+  if(NOT OPEN_FOR_IDE)
+    strip_debug_symbols(mako)
+  endif()
 
   if(NOT OPEN_FOR_IDE)
     # Make sure that fdb_c.h is compatible with c90

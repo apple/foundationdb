@@ -21,10 +21,8 @@
 #include "flow/DeterministicRandom.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
-#include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct RandomCloggingWorkload : FailureInjectionWorkload {
 	static constexpr auto NAME = "RandomClogging";
@@ -38,7 +36,7 @@ struct RandomCloggingWorkload : FailureInjectionWorkload {
 
 	RandomCloggingWorkload(WorkloadContext const& wcx, NoOptions) : FailureInjectionWorkload(wcx) {}
 
-	RandomCloggingWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
+	explicit RandomCloggingWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
 		testDuration = getOption(options, "testDuration"_sr, testDuration);
 		scale = getOption(options, "scale"_sr, scale);

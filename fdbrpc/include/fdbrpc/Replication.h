@@ -28,11 +28,11 @@
 
 struct LocalitySet : public ReferenceCounted<LocalitySet> {
 public:
-	LocalitySet(LocalitySet const& source)
+	explicit(false) LocalitySet(LocalitySet const& source)
 	  : _keymap(source._keymap), _entryArray(source._entryArray), _mutableEntryArray(source._mutableEntryArray),
 	    _keyValueArray(source._keyValueArray), _keyIndexArray(source._keyIndexArray), _cacheArray(source._cacheArray),
 	    _localitygroup(source._localitygroup), _cachehits(source._cachehits), _cachemisses(source._cachemisses) {}
-	LocalitySet(LocalitySet& localityGroup)
+	explicit(false) LocalitySet(LocalitySet& localityGroup)
 	  : _keymap(new StringToIntMap()), _localitygroup(&localityGroup), _cachehits(0), _cachemisses(0) {}
 	virtual ~LocalitySet() {}
 
@@ -466,7 +466,7 @@ protected:
 		Reference<LocalitySet> _resultset;
 		LocalityCacheRecord(AttribRecord const& attribute, Reference<LocalitySet> resultset)
 		  : _attribute(attribute), _resultset(resultset) {}
-		LocalityCacheRecord(LocalityCacheRecord const& source)
+		explicit(false) LocalityCacheRecord(LocalityCacheRecord const& source)
 		  : _attribute(source._attribute), _resultset(source._resultset) {}
 		virtual ~LocalityCacheRecord() {}
 		LocalityCacheRecord& operator=(LocalityCacheRecord const& source) {
@@ -518,7 +518,7 @@ protected:
 
 struct LocalityGroup : public LocalitySet {
 	LocalityGroup() : LocalitySet(*this), _valuemap(new StringToIntMap()) {}
-	LocalityGroup(LocalityGroup const& source)
+	explicit(false) LocalityGroup(LocalityGroup const& source)
 	  : LocalitySet(source), _recordArray(source._recordArray), _valuemap(source._valuemap) {}
 	~LocalityGroup() override {}
 
@@ -596,7 +596,7 @@ protected:
 template <class V>
 struct LocalityMap : public LocalityGroup {
 	LocalityMap() : LocalityGroup() {}
-	LocalityMap(LocalityMap const& source) : LocalityGroup(source), _objectArray(source._objectArray) {}
+	explicit(false) LocalityMap(LocalityMap const& source) : LocalityGroup(source), _objectArray(source._objectArray) {}
 	~LocalityMap() override {}
 
 	bool selectReplicas(Reference<IReplicationPolicy> const& policy,

@@ -23,6 +23,7 @@
 #include "fdbclient/ManagementAPI.h"
 #include "fdbserver/datadistributor/DataDistribution.h"
 #include "fdbclient/DatabaseContext.h"
+#include "flow/TxnCounters.h"
 #include "flow/CoroUtils.h"
 #include "flow/genericactors.actor.h"
 
@@ -89,11 +90,11 @@ class DDTxnProcessorImpl {
 					for (int shard = 0; shard < keyServersEntries.size(); shard++) {
 						std::vector<UID> src, dest;
 						decodeKeyServersValue(UIDtoTagMap, keyServersEntries[shard].value, src, dest);
-						ASSERT(src.size());
+						ASSERT(!src.empty());
 						updateServersAndCompleteSources(servers, completeSources, shard, src);
 					}
 
-					ASSERT(servers.size() > 0);
+					ASSERT(!servers.empty());
 				}
 
 				// If the size of keyServerEntries is large, then just assume we are using all storage servers
@@ -107,7 +108,7 @@ class DDTxnProcessorImpl {
 					for (auto s = serverList.begin(); s != serverList.end(); ++s)
 						servers.insert(decodeServerListValue(s->value).id());
 
-					ASSERT(servers.size() > 0);
+					ASSERT(!servers.empty());
 				}
 
 				break;
@@ -185,8 +186,10 @@ class DDTxnProcessorImpl {
 	                                      std::vector<Optional<Key>> primaryDcId,
 	                                      std::vector<Optional<Key>> remoteDcIds,
 	                                      DatabaseConfiguration configuration) {
+		static auto* counters = makeCounters("/dd/updateReplicaKeys");
 		Transaction tr(cx);
 		while (true) {
+			counters->started->increment(1);
 			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -197,8 +200,8 @@ class DDTxnProcessorImpl {
 				for (auto& kv : replicaKeys) {
 					auto dcId = decodeDatacenterReplicasKey(kv.key);
 					auto replicas = decodeDatacenterReplicasValue(kv.value);
-					if ((primaryDcId.size() && primaryDcId.at(0) == dcId) ||
-					    (remoteDcIds.size() && remoteDcIds.at(0) == dcId && configuration.usableRegions > 1)) {
+					if ((!primaryDcId.empty() && primaryDcId.at(0) == dcId) ||
+					    (!remoteDcIds.empty() && remoteDcIds.at(0) == dcId && configuration.usableRegions > 1)) {
 						if (replicas > configuration.storageTeamSize) {
 							tr.set(kv.key, datacenterReplicasValue(configuration.storageTeamSize));
 						}
@@ -208,8 +211,10 @@ class DDTxnProcessorImpl {
 				}
 
 				co_await tr.commit();
+				counters->committed->increment(1);
 				break;
 			} catch (Error& e) {
+				counters->aborted->increment(1);
 				err = e;
 			}
 			co_await tr.onError(err);
@@ -217,8 +222,10 @@ class DDTxnProcessorImpl {
 	}
 
 	static Future<int> tryUpdateReplicasKeyForDc(Database cx, Optional<Key> dcId, int storageTeamSize) {
+		static auto* counters = makeCounters("/dd/tryUpdateReplicasKeyForDc");
 		Transaction tr(cx);
 		while (true) {
+			counters->started->increment(1);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
@@ -234,9 +241,11 @@ class DDTxnProcessorImpl {
 				}
 				tr.set(datacenterReplicasKeyFor(dcId), datacenterReplicasValue(storageTeamSize));
 				co_await tr.commit();
+				counters->committed->increment(1);
 
 				co_return oldReplicas;
 			} catch (Error& e) {
+				counters->aborted->increment(1);
 				err = e;
 			}
 			co_await tr.onError(err);
@@ -320,6 +329,8 @@ class DDTxnProcessorImpl {
 		CODE_PROBE((bool)skipDDModeCheck, "DD Mode won't prevent read initial data distribution.");
 		// Get the server list in its own try/catch block since it modifies result.  We don't want a subsequent failure
 		// causing entries to be duplicated
+		// Phase 1: Single transaction to read server list and all persisted data moves
+		double serverListAndDataMoveReadStart = now();
 		while (true) {
 			numDataMoves = 0;
 			server_dc.clear();
@@ -381,7 +392,12 @@ class DDTxnProcessorImpl {
 					}
 				}
 
+				double dataMoveReadStart = now();
 				RangeResult dms = co_await tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY);
+				if (now() - dataMoveReadStart > 5.0) {
+					TraceEvent(SevWarn, "DDInitSlowDataMoveRead", distributorId)
+					    .detail("ElapsedSeconds", now() - dataMoveReadStart);
+				}
 				ASSERT(!dms.more && dms.size() < CLIENT_KNOBS->TOO_MANY);
 				// For each data move, find out the src or dst servers are in primary or remote DC.
 				for (int i = 0; i < dms.size(); ++i) {
@@ -429,6 +445,11 @@ class DDTxnProcessorImpl {
 
 				succeeded = true;
 
+				TraceEvent("DDInitServerListAndDataMoveReadComplete", distributorId)
+				    .detail("NumDataMoves", numDataMoves)
+				    .detail("NumServers", result->allServers.size())
+				    .detail("ElapsedSeconds", now() - serverListAndDataMoveReadStart);
+
 				break;
 			} catch (Error& e) {
 				err = e;
@@ -441,6 +462,10 @@ class DDTxnProcessorImpl {
 
 		// If keyServers is too large to read in a single transaction, then we will have to break this process up into
 		// multiple transactions. In that case, each iteration should begin where the previous left off
+		// Scan keyServers in batches to build the shard map
+		double keyServerScanStart = now();
+		double lastScanLogTime = now();
+		int scanBatchCount = 0;
 		while (beginKey < allKeys.end) {
 			CODE_PROBE(beginKey > allKeys.begin, "Multi-transactional getInitialDataDistribution");
 			while (true) {
@@ -467,7 +492,7 @@ class DDTxnProcessorImpl {
 					for (int i = 0; i < keyServers.size() - 1; i++) {
 						decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest, srcId, destId);
 						DDShardInfo info(keyServers[i].key, srcId, destId);
-						if (remoteDcIds.size()) {
+						if (!remoteDcIds.empty()) {
 							auto srcIter = team_cache.find(src);
 							if (srcIter == team_cache.end()) {
 								for (auto& id : src) {
@@ -485,7 +510,7 @@ class DDTxnProcessorImpl {
 								info.primarySrc = srcIter->second.first;
 								info.remoteSrc = srcIter->second.second;
 							}
-							if (dest.size()) {
+							if (!dest.empty()) {
 								info.hasDest = true;
 								auto destIter = team_cache.find(dest);
 								if (destIter == team_cache.end()) {
@@ -513,7 +538,7 @@ class DDTxnProcessorImpl {
 								result->primaryTeams.insert(src);
 								team_cache[src] = std::pair<std::vector<UID>, std::vector<UID>>();
 							}
-							if (dest.size()) {
+							if (!dest.empty()) {
 								info.hasDest = true;
 								info.primaryDest = dest;
 								auto destIter = team_cache.find(dest);
@@ -528,6 +553,15 @@ class DDTxnProcessorImpl {
 
 					ASSERT_GT(keyServers.size(), 0);
 					beginKey = keyServers.end()[-1].key;
+					scanBatchCount++;
+					if (now() - lastScanLogTime >= 30.0) {
+						lastScanLogTime = now();
+						TraceEvent("DDInitKeyServerScanProgress", distributorId)
+						    .detail("BeginKey", beginKey)
+						    .detail("Batches", scanBatchCount)
+						    .detail("ShardsScanned", result->shards.size())
+						    .detail("ElapsedSeconds", now() - keyServerScanStart);
+					}
 					break;
 				} catch (Error& e) {
 					err = e;
@@ -543,6 +577,10 @@ class DDTxnProcessorImpl {
 
 		// a dummy shard at the end with no keys or servers makes life easier for trackInitialShards()
 		result->shards.push_back(DDShardInfo(allKeys.end));
+
+		TraceEvent("DDInitKeyServerScanComplete", distributorId)
+		    .detail("NumShards", result->shards.size())
+		    .detail("ElapsedSeconds", now() - keyServerScanStart);
 
 		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && numDataMoves > 0) {
 			for (int shard = 0; shard < result->shards.size() - 1; ++shard) {
@@ -686,16 +724,20 @@ class DDTxnProcessorImpl {
 	}
 
 	static Future<Void> waitDDTeamInfoPrintSignal(Database cx) {
+		static auto* counters = makeCounters("/dd/waitDDTeamInfoPrintSignal");
 		ReadYourWritesTransaction tr(cx);
 		while (true) {
+			counters->started->increment(1);
 			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				Future<Void> watchFuture = tr.watch(triggerDDTeamInfoPrintKey);
 				co_await tr.commit();
+				counters->committed->increment(1);
 				co_await watchFuture;
 				co_return;
 			} catch (Error& e) {
+				counters->aborted->increment(1);
 				err = e;
 			}
 			co_await tr.onError(err);

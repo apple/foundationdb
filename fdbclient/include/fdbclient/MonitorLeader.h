@@ -75,19 +75,18 @@ Future<Void> monitorLeader(Reference<IClusterConnectionRecord> const& connFile,
 // This is one place where the leader election algorithm is run. The coodinator contacts all coodinators to collect
 // nominees, the nominee with the most nomination is the leader, and collects client data from the leader. This function
 // also monitors the change of the leader.
-Future<Void> monitorLeaderAndGetClientInfo(Key const& clusterKey,
-                                           std::vector<Hostname> const& hostnames,
-                                           std::vector<NetworkAddress> const& coordinators,
-                                           ClientData* const& clientData,
-                                           Reference<AsyncVar<Optional<LeaderInfo>>> const& leaderInfo);
+Future<Void> monitorLeaderAndGetClientInfo(Key clusterKey,
+                                           std::vector<Hostname> hostnames,
+                                           std::vector<NetworkAddress> coordinators,
+                                           ClientData* clientData,
+                                           Reference<AsyncVar<Optional<LeaderInfo>>> leaderInfo);
 
-Future<Void> monitorProxies(
-    Reference<AsyncVar<Reference<IClusterConnectionRecord>>> const& connRecord,
-    Reference<AsyncVar<ClientDBInfo>> const& clientInfo,
-    Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> const& coordinator,
-    Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> const& supportedVersions,
-    Key const& traceLogGroup,
-    IsInternal const& internal);
+Future<Void> monitorProxies(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connRecord,
+                            Reference<AsyncVar<ClientDBInfo>> clientInfo,
+                            Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
+                            Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions,
+                            Key traceLogGroup,
+                            IsInternal internal);
 
 void shrinkProxyList(ClientDBInfo& ni,
                      std::vector<UID>& lastCommitProxyUIDs,
@@ -99,8 +98,8 @@ void shrinkProxyList(ClientDBInfo& ni,
 #pragma region Implementation
 #endif
 
-Future<Void> monitorLeaderInternal(Reference<IClusterConnectionRecord> const& connRecord,
-                                   Reference<AsyncVar<Value>> const& outSerializedLeaderInfo);
+Future<Void> monitorLeaderInternal(Reference<IClusterConnectionRecord> connRecord,
+                                   Reference<AsyncVar<Value>> outSerializedLeaderInfo);
 
 template <class LeaderInterface>
 struct LeaderDeserializer {
@@ -110,8 +109,8 @@ struct LeaderDeserializer {
 	}
 };
 
-Future<Void> asyncDeserializeClusterInterface(const Reference<AsyncVar<Value>>& serializedInfo,
-                                              const Reference<AsyncVar<Optional<ClusterInterface>>>& outKnownLeader);
+Future<Void> asyncDeserializeClusterInterface(Reference<AsyncVar<Value>> serializedInfo,
+                                              Reference<AsyncVar<Optional<ClusterInterface>>> outKnownLeader);
 
 template <>
 struct LeaderDeserializer<ClusterInterface> {

@@ -28,7 +28,7 @@
 struct SlowTaskWorkload : TestWorkload {
 	static constexpr auto NAME = "SlowTaskWorkload";
 
-	SlowTaskWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
+	explicit SlowTaskWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
 
 	Future<Void> start(Database const& cx) override {
 		setupRunLoopProfiler();

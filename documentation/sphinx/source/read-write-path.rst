@@ -179,7 +179,7 @@ Implementation of FDB read path
     * Proxy confirm queuing system is alive:
       https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbserver/MasterProxyServer.actor.cpp#L1199
     * How is confirmEpochLive(..) implemented for the above item:
-      https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbserver/TagPartitionedLogSystem.actor.cpp#L1216-L1225
+      https://github.com/apple/foundationdb/blob/main/fdbserver/logsystem/LogSystem.cpp
 
 * **Step 4 (Locality request)**:
   https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbclient/NativeAPI.actor.cpp#L1312-L1313

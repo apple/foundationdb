@@ -52,7 +52,7 @@ Future<bool> rangeConfigCommandActor(Database cx, std::vector<StringRef> tokens)
 		return boost::lexical_cast<int>(nextArg().toString());
 	};
 
-	if (args.size() < 1) {
+	if (args.empty()) {
 		co_return fail("No subcommand given.");
 	}
 

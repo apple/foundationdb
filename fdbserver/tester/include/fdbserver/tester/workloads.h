@@ -24,6 +24,7 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/DatabaseContext.h" // for clone()
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/WorkloadKeys.h"
 
@@ -109,7 +110,8 @@ struct TestWorkloadImpl : Workload {
 
 	explicit(false) TestWorkloadImpl(WorkloadContext const& wcx) : Workload(wcx) {}
 	template <bool E = isFailureInjectionWorkload>
-	TestWorkloadImpl(WorkloadContext const& wcx, std::enable_if_t<E, NoOptions> o) : Workload(wcx, o) {}
+	    requires(E)
+	TestWorkloadImpl(WorkloadContext const& wcx, NoOptions o) : Workload(wcx, o) {}
 
 	std::string description() const override { return Workload::NAME; }
 };

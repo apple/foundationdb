@@ -79,12 +79,8 @@ enum class DataMovementReason : uint8_t {
 // SystemKey is just a Key but with a special type so that instances of it can be found easily throughput the code base
 // and in simulation constructions will verify that no SystemKey is a direct prefix of any other.
 struct SystemKey : Key {
-	SystemKey(Key const& k);
+	explicit SystemKey(Key const& k);
 };
-
-struct RestoreLoaderInterface;
-struct RestoreApplierInterface;
-struct RestoreMasterInterface;
 
 extern const KeyRangeRef normalKeys; // '' to systemKeys.begin
 extern const KeyRangeRef systemKeys; // [FF] to [FF][FF]
@@ -531,8 +527,8 @@ extern const KeyRef bulkDumpOwnerPrefix;
 // "\xff/bulkLoadOwner/[[jobId]]" := "[[BulkDumpOwnerInfo]]" (reuses same struct)
 extern const KeyRangeRef bulkLoadOwnerKeys;
 extern const KeyRef bulkLoadOwnerPrefix;
-const Key bulkDumpOwnerKeyFor(const UID& jobId);
-const Key bulkLoadOwnerKeyFor(const UID& jobId);
+Key bulkDumpOwnerKeyFor(const UID& jobId);
+Key bulkLoadOwnerKeyFor(const UID& jobId);
 
 extern const std::string rangeLockNameForBulkLoad;
 extern const KeyRangeRef rangeLockKeys;

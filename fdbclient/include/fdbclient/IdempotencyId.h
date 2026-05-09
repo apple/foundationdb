@@ -85,9 +85,9 @@ struct IdempotencyIdRef {
 
 	bool operator==(const IdempotencyIdRef& other) const { return asStringRefUnsafe() == other.asStringRefUnsafe(); }
 
-	IdempotencyIdRef(IdempotencyIdRef&& other) = default;
+	explicit(false) IdempotencyIdRef(IdempotencyIdRef&& other) = default;
 	IdempotencyIdRef& operator=(IdempotencyIdRef&& other) = default;
-	IdempotencyIdRef(const IdempotencyIdRef& other) = default;
+	explicit(false) IdempotencyIdRef(const IdempotencyIdRef& other) = default;
 	IdempotencyIdRef& operator=(const IdempotencyIdRef& other) = default;
 
 	template <class Archive>
@@ -180,7 +180,7 @@ KeyRangeRef makeIdempotencySingleKeyRange(Arena& arena, Version version, uint8_t
 
 void decodeIdempotencyKey(KeyRef key, Version& commitVersion, uint8_t& highOrderBatchIndex);
 
-Future<JsonBuilderObject> getIdmpKeyStatus(Database db);
+AsyncResult<JsonBuilderObject> getIdmpKeyStatus(Database db);
 
 // Delete zero or more idempotency ids older than minAgeSeconds
 //

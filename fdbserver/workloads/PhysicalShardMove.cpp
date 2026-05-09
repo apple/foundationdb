@@ -21,7 +21,7 @@
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbrpc/simulator.h"
-#include "fdbserver/core/IKeyValueStore.h"
+#include "fdbserver/kvstore/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/QuietDatabase.h"
@@ -51,7 +51,8 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 	const bool enabled;
 	bool pass;
 
-	PhysicalShardMoveWorkLoad(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(!clientId), pass(true) {}
+	explicit PhysicalShardMoveWorkLoad(WorkloadContext const& wcx)
+	  : TestWorkload(wcx), enabled(!clientId), pass(true) {}
 
 	void validationFailed(ErrorOr<Optional<Value>> expectedValue, ErrorOr<Optional<Value>> actualValue) {
 		TraceEvent(SevError, "TestFailed")

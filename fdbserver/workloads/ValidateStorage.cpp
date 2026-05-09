@@ -30,7 +30,6 @@
 #include "flow/IRandom.h"
 #include "flow/flow.h"
 #include <cstdint>
-#include <limits>
 
 namespace {
 std::string printValue(const ErrorOr<Optional<Value>>& value) {
@@ -89,7 +88,7 @@ struct ValidateStorage : TestWorkload {
 		pass = false;
 	}
 
-	ValidateStorage(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(!clientId), pass(true) {}
+	explicit ValidateStorage(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(!clientId), pass(true) {}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -514,14 +513,14 @@ struct ValidateStorage : TestWorkload {
 		}
 		std::vector<AuditStorageState> res2 =
 		    co_await getAuditStates(cx, type, /*newFirst=*/true, CLIENT_KNOBS->TOO_MANY, AuditPhase::Invalid);
-		if (res2.size() != 0) {
+		if (!res2.empty()) {
 			TraceEvent(SevError, "TestExistingInvalidAudit")
 			    .detail("ActualResSize", res2.size())
 			    .detail("InputPhase", AuditPhase::Invalid);
 		}
 		std::vector<AuditStorageState> res3 =
 		    co_await getAuditStates(cx, type, /*newFirst=*/true, CLIENT_KNOBS->TOO_MANY, AuditPhase::Running);
-		if (res3.size() != 0) {
+		if (!res3.empty()) {
 			TraceEvent(SevError, "TestExistingRunningAudit")
 			    .detail("ActualResSize", res3.size())
 			    .detail("InputPhase", AuditPhase::Running);

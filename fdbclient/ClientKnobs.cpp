@@ -160,6 +160,7 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( MAX_COMMIT_PROXY_CONNECTIONS,              5 ); if( randomize && BUGGIFY ) MAX_COMMIT_PROXY_CONNECTIONS = 1;
 	init( MAX_GRV_PROXY_CONNECTIONS,                 3 ); if( randomize && BUGGIFY ) MAX_GRV_PROXY_CONNECTIONS = 1;
 	init( STATUS_IDLE_TIMEOUT,                   120.0 );
+	init( STATUS_TIMEOUT,                         30.0 );
 	init( GRPC_CTL_SERVICE_DEFAULT_TIMEOUT,        5.0 );
 	init( SEND_ENTIRE_VERSION_VECTOR,            false );
 

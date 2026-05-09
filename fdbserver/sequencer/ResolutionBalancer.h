@@ -30,8 +30,7 @@
 #include "flow/IRandom.h"
 #include "flow/genericactors.actor.h"
 
-struct __attribute__((swift_attr("import_reference"))) __attribute__((swift_attr("retain:immortal")))
-__attribute__((swift_attr("release:immortal"))) ResolutionBalancer {
+struct ResolutionBalancer {
 	AsyncVar<Standalone<VectorRef<ResolverMoveRef>>> resolverChanges;
 	Version resolverChangesVersion = invalidVersion;
 	std::set<UID> resolverNeedingChanges;

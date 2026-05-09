@@ -55,7 +55,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 	Standalone<StringRef> blobManifestUrl;
 	Optional<std::string> encryptionKeyFileName;
 
-	IncrementalBackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit IncrementalBackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		backupDir = getOption(options, "backupDir"_sr, "file://simfdb/backups/"_sr);
 		tag = getOption(options, "tag"_sr, "default"_sr);
 		submitOnly = getOption(options, "submitOnly"_sr, false);
@@ -131,8 +131,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 					    .detail("Size", containers.size())
 					    .detail("First", containers.front());
 					if (!containers.empty()) {
-						backupContainer =
-						    IBackupContainer::openContainer(containers.front(), {}, restoreEncryptionKeyFileName);
+						backupContainer = IBackupContainer::openContainer(containers.front(), {}, {}, 0);
 					}
 				}
 				bool e = co_await backupContainer->exists();
@@ -200,9 +199,11 @@ struct IncrementalBackupWorkload : TestWorkload {
 				                                  tag.toString(),
 				                                  backupRanges,
 				                                  StopWhenDone::False,
-				                                  UsePartitionedLog::False,
+				                                  MutationLogType::DEFAULT,
 				                                  IncrementalBackupOnly::True,
-				                                  encryptionKeyFileName);
+				                                  encryptionKeyFileName,
+				                                  encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0,
+				                                  0);
 			} catch (Error& e) {
 				TraceEvent("IBackupSubmitError").error(e);
 				if (e.code() != error_code_backup_duplicate) {

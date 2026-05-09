@@ -221,7 +221,7 @@ Future<Void> updateFeedWatchers(Transaction* tr, uint64_t feed) {
 		    co_await (*tr).getRange(firstGreaterOrEqual(keyForFeedWatcher(feed, first ? 0 : highestInbox + 1)),
 		                            firstGreaterOrEqual(keyForFeedWatcher(feed, UINT64_MAX)),
 		                            100); // REVIEW: does 100 make sense?
-		if (!watchingInboxes.size())
+		if (watchingInboxes.empty())
 			// If there are no watchers, return.
 			co_return;
 		first = false;
@@ -267,7 +267,7 @@ Future<uint64_t> _postMessage(Database cx, uint64_t feed, Standalone<StringRef> 
 			// Get globally latest message, set our ID to that less one
 			RangeResult latestMessage = co_await tr.getRange(
 			    firstGreaterOrEqual(keyForMessage(0)), firstGreaterOrEqual(keyForMessage(UINT64_MAX)), 1);
-			if (!latestMessage.size()) {
+			if (latestMessage.empty()) {
 				messageId = UINT64_MAX - 1;
 			} else {
 				StringRef messageStr = latestMessage[0].key.removePrefix(messagePrefix);
@@ -330,7 +330,7 @@ Future<int> singlePassInboxCacheUpdate(Database cx, uint64_t inbox, int swath) {
 			                                              firstGreaterOrEqual(keyForInboxStaleFeed(inbox, UINT64_MAX)),
 			                                              swath); // REVIEW: does 100 make sense?
 			// printf("  --> stale feeds list size: %d\n", staleFeeds.size());
-			if (!staleFeeds.size())
+			if (staleFeeds.empty())
 				// If there are no stale feeds, return.
 				co_return 0;
 			StringRef stalePrefix = keyForInboxStalePrefix(inbox);
@@ -385,7 +385,7 @@ Future<MessageId> getFeedLatestAtOrAfter(Transaction* tr, Feed feed, MessageId p
 	RangeResult lastMessageRange = co_await (*tr).getRange(firstGreaterOrEqual(keyForFeedMessage(feed, position)),
 	                                                       firstGreaterOrEqual(keyForFeedMessage(feed, UINT64_MAX)),
 	                                                       1);
-	if (!lastMessageRange.size())
+	if (lastMessageRange.empty())
 		co_return uint64_t(0);
 	KeyValueRef m = lastMessageRange[0];
 	StringRef prefix = keyForFeedMessagePrefix(feed);
@@ -422,7 +422,7 @@ Future<std::vector<Message>> _listInboxMessages(Database cx, uint64_t inbox, int
 			RangeResult feeds = co_await tr.getRange(firstGreaterOrEqual(keyForInboxCacheByID(inbox, 0)),
 			                                         firstGreaterOrEqual(keyForInboxCacheByID(inbox, UINT64_MAX)),
 			                                         subscriptions);
-			if (!feeds.size())
+			if (feeds.empty())
 				co_return messages;
 
 			// read cache into map, replace entries newer than cursor with the newest older than cursor
@@ -443,7 +443,7 @@ Future<std::vector<Message>> _listInboxMessages(Database cx, uint64_t inbox, int
 				}
 			}
 			// There were some cached feeds, but none with messages older than "cursor"
-			if (!feedLatest.size())
+			if (feedLatest.empty())
 				co_return messages;
 
 			// Check the list of dispatching messages to make sure there are no older ones than ours
@@ -453,12 +453,12 @@ Future<std::vector<Message>> _listInboxMessages(Database cx, uint64_t inbox, int
 			                                               1);
 			// If there are messages "older" than ours, try this again
 			//  (with a new transaction and a flush of the "stale" feeds
-			if (dispatching.size()) {
+			if (!dispatching.empty()) {
 				std::vector<Message> r = co_await _listInboxMessages(cx, inbox, count, earliestMessage);
 				co_return r;
 			}
 
-			while (messages.size() < count && feedLatest.size() > 0) {
+			while (messages.size() < count && !feedLatest.empty()) {
 				auto latest = feedLatest.begin();
 				MessageId id = latest->first;
 				Feed f = latest->second;
@@ -495,7 +495,7 @@ Future<std::vector<Message>> _listFeedMessages(Database cx, Feed feed, int count
 			RangeResult messageIds = co_await tr.getRange(firstGreaterOrEqual(keyForFeedMessage(feed, cursor)),
 			                                              firstGreaterOrEqual(keyForFeedMessage(feed, UINT64_MAX)),
 			                                              count);
-			if (!messageIds.size())
+			if (messageIds.empty())
 				co_return messages;
 
 			for (int idx = 0; idx < messageIds.size(); idx++) {

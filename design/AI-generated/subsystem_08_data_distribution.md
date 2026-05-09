@@ -131,7 +131,7 @@ struct RelocateData {
     DataMovementReason dmReason;
     KeyRange keys;                  // range to move
     std::vector<UID> src;           // source server IDs
-    double workFactor;              // estimated cost
+    int workFactor;                 // estimated cost
     UID dataMoveId;
     double startTime;
 };

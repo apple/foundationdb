@@ -25,7 +25,7 @@
 
 #include "fdbclient/JSONDoc.h"
 #include "fdbrpc/HTTP.h"
-#include "fdbclient/RESTUtils.h"
+#include "RESTUtils.h"
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/flow.h"

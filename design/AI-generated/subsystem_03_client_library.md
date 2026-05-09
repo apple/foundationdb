@@ -283,6 +283,6 @@ Management API exposed as key-value operations:
 | `fdbclient/include/fdbclient/DatabaseContext.h` | DatabaseContext: location cache, proxy tracking, watches |
 | [`fdbclient/include/fdbclient/CommitTransaction.h`](https://github.com/apple/foundationdb/blob/main/fdbclient/include/fdbclient/CommitTransaction.h) | MutationRef, CommitTransactionRef |
 | [`fdbclient/MultiVersionTransaction.cpp`](https://github.com/apple/foundationdb/blob/main/fdbclient/MultiVersionTransaction.cpp) | Multi-version client, DLTransaction |
-| `fdbclient/MonitorLeader.actor.cpp` | Cluster discovery, leader tracking |
+| `fdbclient/MonitorLeader.cpp` | Cluster discovery, leader tracking |
 | [`fdbclient/include/fdbclient/SystemData.h`](https://github.com/apple/foundationdb/blob/main/fdbclient/include/fdbclient/SystemData.h) | System key range definitions |
 | `fdbclient/ProxyLoadBalance.h` | Proxy load balancing templates |

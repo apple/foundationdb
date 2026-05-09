@@ -3,20 +3,20 @@ set(FDBBACKUP_SRCS
 	backup.cpp)
 
 add_flow_target(EXECUTABLE NAME fdbbackup SRCS ${FDBBACKUP_SRCS})
-target_include_directories(fdbbackup PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
+target_include_directories(fdbbackup PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(fdbbackup PRIVATE fdbclient)
 
 set(FDBCONVERT_SRCS
 	FileConverter.cpp)
 add_flow_target(EXECUTABLE NAME fdbconvert SRCS ${FDBCONVERT_SRCS})
-target_include_directories(fdbconvert PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
+target_include_directories(fdbconvert PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(fdbconvert PRIVATE fdbclient)
 
 set(FDBDECODE_SRCS
 	Decode.cpp
 	FileDecoder.cpp)
 add_flow_target(EXECUTABLE NAME fdbdecode SRCS ${FDBDECODE_SRCS})
-target_include_directories(fdbdecode PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
+target_include_directories(fdbdecode PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(fdbdecode PRIVATE fdbclient)
 
 if(NOT OPEN_FOR_IDE)
@@ -45,11 +45,17 @@ if(NOT OPEN_FOR_IDE)
 
   # Test version of backup.cpp without main() function
   add_flow_target(EXECUTABLE NAME backup_tests SRCS backup.cpp)
-  target_include_directories(backup_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
+  target_include_directories(backup_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
   target_link_libraries(backup_tests PRIVATE fdbclient)
   target_compile_definitions(backup_tests PRIVATE EXCLUDE_MAIN_FUNCTION=1)
   add_test(NAME BackupTests COMMAND backup_tests)
 
+  # Test version of FileDecoder.cpp without main() function
+  add_flow_target(EXECUTABLE NAME fdbdecode_tests SRCS Decode.cpp FileDecoder.cpp)
+  target_include_directories(fdbdecode_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+  target_link_libraries(fdbdecode_tests PRIVATE fdbclient)
+  target_compile_definitions(fdbdecode_tests PRIVATE EXCLUDE_MAIN_FUNCTION=1)
+  add_test(NAME FileDecoderTests COMMAND fdbdecode_tests)
 endif()
 
 if (GPERFTOOLS_FOUND)
@@ -60,7 +66,7 @@ endif()
 if (NOT WIN32 AND NOT OPEN_FOR_IDE)
   enable_testing()
   add_test(NAME dir_backup_tests COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/dir_backup_test.sh ${CMAKE_SOURCE_DIR} ${CMAKE_BINARY_DIR})
-  add_test(NAME blob_backup_restore_tests COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/blob_backup_restore_test.sh ${CMAKE_SOURCE_DIR} ${CMAKE_BINARY_DIR} --encrypt-at-random)
+  add_test(NAME blob_backup_restore_tests COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/blob_backup_restore_test.sh ${CMAKE_SOURCE_DIR} ${CMAKE_BINARY_DIR})
   # Note: No --encrypt flag - BulkLoad doesn't support encryption yet
   add_test(NAME s3_backup_bulkdump_bulkload_tests COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/s3_backup_bulkdump_bulkload.sh ${CMAKE_SOURCE_DIR} ${CMAKE_BINARY_DIR})
 endif()

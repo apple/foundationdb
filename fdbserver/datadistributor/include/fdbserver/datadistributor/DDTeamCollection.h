@@ -32,7 +32,6 @@
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/RunRYWTransaction.h"
 #include "fdbrpc/Replication.h"
-#include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/TLogInterface.h"
@@ -65,7 +64,7 @@ struct TSSPairState : ReferenceCounted<TSSPairState>, NonCopyable {
 
 	TSSPairState() : active(false) {}
 
-	TSSPairState(const LocalityData& locality)
+	explicit TSSPairState(const LocalityData& locality)
 	  : dcId(locality.dcId()), dataHallId(locality.dataHallId()), active(true) {}
 
 	bool inDataZone(const LocalityData& locality) const {
@@ -148,7 +147,7 @@ public:
 	LocalityData locality;
 	ServerStatus()
 	  : isWiggling(false), isFailed(true), isUndesired(false), isWrongConfiguration(false), initialized(false) {}
-	ServerStatus(LocalityData const& locality)
+	explicit ServerStatus(LocalityData const& locality)
 	  : ServerStatus(IsFailed::False, IsUndesired::False, IsWiggling::False, locality) {}
 	ServerStatus(IsFailed isFailed, IsUndesired isUndesired, IsWiggling isWiggling, LocalityData const& locality)
 	  : isWiggling(isWiggling), isFailed(isFailed), isUndesired(isUndesired), isWrongConfiguration(false),
@@ -693,7 +692,7 @@ public:
 	AsyncTrigger printDetailedTeamsInfo;
 	Reference<LocalitySet> storageServerSet;
 
-	DDTeamCollection(DDTeamCollectionInitParams const& params);
+	explicit DDTeamCollection(DDTeamCollectionInitParams const& params);
 
 	~DDTeamCollection();
 

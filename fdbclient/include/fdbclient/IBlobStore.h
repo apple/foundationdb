@@ -91,7 +91,8 @@ struct BlobKnobs {
 			"sdk_auth (or sa)                      Use AWS SDK to resolve credentials. Only valid if "
 			"BUILD_AWS_BACKUP is enabled.",
 			"enable_object_integrity_check (or eoic) Enable integrity check on GET requests (Default: false).",
-			"global_connection_pool (or gcp)       Enable shared connection pool between all blobstore instances."
+			"global_connection_pool (or gcp)       Enable shared connection pool between all blobstore instances.",
+			"provider (or p)                       Blob store provider: s3 (default) or gcs."
 		};
 	}
 
@@ -190,7 +191,7 @@ public:
 		}
 
 		// CROSS_PROCESS_FIX: Copy constructor with cross-process detection
-		ReusableConnection(const ReusableConnection& other)
+		explicit(false) ReusableConnection(const ReusableConnection& other)
 		  : conn(other.conn), expirationTime(other.expirationTime), creatingProcess(other.creatingProcess) {
 			if (g_network && g_network->isSimulated() && creatingProcess.isValid() &&
 			    creatingProcess != g_network->getLocalAddress()) {
@@ -242,7 +243,7 @@ public:
 		std::string etag;
 		std::string checksum; // MD5 or SHA256 depending on integrity check setting
 		PartInfo() = default;
-		PartInfo(std::string e, std::string c = "") : etag(e), checksum(c) {}
+		explicit PartInfo(std::string e, std::string c = "") : etag(e), checksum(c) {}
 	};
 
 	using ParametersT = std::map<std::string, std::string>;

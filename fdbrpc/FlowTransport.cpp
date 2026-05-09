@@ -33,13 +33,11 @@
 #include <memcheck.h>
 #endif
 
-#include <boost/unordered_map.hpp>
-
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/HealthMonitor.h"
-#include "fdbrpc/JsonWebKeySet.h"
-#include "fdbrpc/genericactors.actor.h"
+#include "JsonWebKeySet.h"
+#include "fdbrpc/genericactors.h"
 #include "fdbrpc/IPAllowList.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
@@ -51,7 +49,6 @@
 #include "flow/ObjectSerializer.h"
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
-#include "flow/UnitTest.h"
 #include "flow/WatchFile.h"
 #include "flow/IConnection.h"
 #define XXH_INLINE_ALL
@@ -2258,7 +2255,7 @@ static Future<Void> watchPublicKeyJwksFile(std::string filePath, TransportData* 
 				TraceEvent(SevWarn, "AuthzPublicKeySetEmpty").suppressFor(60);
 				continue;
 			}
-			co_await success(file->read(&json[0], filesize, 0));
+			co_await file->read(&json[0], filesize, 0);
 			self->applyPublicKeySet(StringRef(json));
 			errorCount = 0;
 		} catch (Error& e) {

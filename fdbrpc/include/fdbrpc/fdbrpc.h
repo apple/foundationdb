@@ -27,7 +27,7 @@
 #include "flow/serialize.h"
 #include "fdbrpc/FlowTransport.h" // NetworkMessageReceiver Endpoint
 #include "fdbrpc/FailureMonitor.h"
-#include "fdbrpc/networksender.actor.h"
+#include "fdbrpc/networksender.h"
 #include "fdbrpc/simulator.h"
 #ifdef WITH_SWIFT
 #include <swift/bridging>
@@ -158,14 +158,14 @@ public:
 	explicit ReplyPromise(const PeerCompatibilityPolicy& policy) : ReplyPromise() {
 		sav->setPeerCompatibilityPolicy(policy);
 	}
-	ReplyPromise(const ReplyPromise& rhs) : sav(rhs.sav) { sav->addPromiseRef(); }
-	ReplyPromise(ReplyPromise&& rhs) noexcept : sav(rhs.sav) { rhs.sav = 0; }
+	explicit(false) ReplyPromise(const ReplyPromise& rhs) : sav(rhs.sav) { sav->addPromiseRef(); }
+	explicit(false) ReplyPromise(ReplyPromise&& rhs) noexcept : sav(rhs.sav) { rhs.sav = 0; }
 	~ReplyPromise() {
 		if (sav)
 			sav->delPromiseRef();
 	}
 
-	ReplyPromise(const Endpoint& endpoint) : sav(new NetSAV<T>(0, 1, endpoint)) {}
+	explicit ReplyPromise(const Endpoint& endpoint) : sav(new NetSAV<T>(0, 1, endpoint)) {}
 	const Endpoint& getEndpoint(TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint) const {
 		return sav->getEndpoint(taskID);
 	}
@@ -215,7 +215,7 @@ void load(Ar& ar, ReplyPromise<T>& value) {
 	ar >> token;
 	Endpoint endpoint = FlowTransport::transport().loadedEndpoint(token);
 	value = ReplyPromise<T>(endpoint);
-	networkSender(value.getFuture(), endpoint);
+	networkSender(Uncancellable(), value.getFuture(), endpoint);
 }
 
 template <class T>
@@ -227,7 +227,7 @@ struct serializable_traits<ReplyPromise<T>> : std::true_type {
 			serializer(ar, token);
 			auto endpoint = FlowTransport::transport().loadedEndpoint(token);
 			p = ReplyPromise<T>(endpoint);
-			networkSender(p.getFuture(), endpoint);
+			networkSender(Uncancellable(), p.getFuture(), endpoint);
 		} else {
 			const auto& ep = p.getEndpoint().token;
 			serializer(ar, ep);
@@ -310,7 +310,8 @@ struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<Acknowledgeme
 	Future<Void> failures;
 
 	AcknowledgementReceiver() : ready(nullptr) {}
-	AcknowledgementReceiver(const Endpoint& remoteEndpoint) : FlowReceiver(remoteEndpoint, false), ready(nullptr) {}
+	explicit AcknowledgementReceiver(const Endpoint& remoteEndpoint)
+	  : FlowReceiver(remoteEndpoint, false), ready(nullptr) {}
 
 	bool isPublic() const override { return true; }
 
@@ -502,13 +503,13 @@ public:
 		return FutureStream<T>(queue);
 	}
 	ReplyPromiseStream() : queue(new NetNotifiedQueueWithAcknowledgements<T>(0, 1)), errors(new SAV<Void>(0, 1)) {}
-	ReplyPromiseStream(const ReplyPromiseStream& rhs) : queue(rhs.queue), errors(rhs.errors) {
+	explicit(false) ReplyPromiseStream(const ReplyPromiseStream& rhs) : queue(rhs.queue), errors(rhs.errors) {
 		queue->addPromiseRef();
 		if (errors) {
 			errors->addPromiseRef();
 		}
 	}
-	ReplyPromiseStream(ReplyPromiseStream&& rhs) noexcept : queue(rhs.queue), errors(rhs.errors) {
+	explicit(false) ReplyPromiseStream(ReplyPromiseStream&& rhs) noexcept : queue(rhs.queue), errors(rhs.errors) {
 		rhs.queue = nullptr;
 		rhs.errors = nullptr;
 	}
@@ -687,7 +688,8 @@ struct HasVerify_t<T, decltype(void(std::declval<T>().verify()), 0)> : std::true
 template <class T>
 constexpr bool HasVerify = HasVerify_t<T>::value;
 
-// FIXME: explain what IsPublic means here
+// IsPublic streams accept messages from clients outside the cluster and verify
+// each request before delivering it to the local queue.
 template <class T, bool IsPublic>
 struct NetNotifiedQueue final : NotifiedQueue<T>, FlowReceiver, FastAllocated<NetNotifiedQueue<T, IsPublic>> {
 	using FastAllocated<NetNotifiedQueue<T, IsPublic>>::operator new;
@@ -848,7 +850,7 @@ public:
 			} else {
 				Reference<Peer> peer =
 				    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
-				endStreamOnDisconnect(disc, p, getEndpoint(), peer);
+				endStreamOnDisconnect(Uncancellable(), disc, p, getEndpoint(), peer);
 			}
 			return p;
 		} else {
@@ -905,8 +907,8 @@ public:
 	explicit RequestStream(PeerCompatibilityPolicy policy) : RequestStream() {
 		queue->setPeerCompatibilityPolicy(policy);
 	}
-	RequestStream(const RequestStream& rhs) : queue(rhs.queue) { queue->addPromiseRef(); }
-	RequestStream(RequestStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
+	explicit(false) RequestStream(const RequestStream& rhs) : queue(rhs.queue) { queue->addPromiseRef(); }
+	explicit(false) RequestStream(RequestStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
 	void operator=(const RequestStream& rhs) {
 		rhs.queue->addPromiseRef();
 		if (queue)
@@ -948,7 +950,8 @@ private:
 	NetNotifiedQueue<T, IsPublic>* queue;
 };
 
-// FIXME: explain what Public and Private mean here
+// Public request streams require T::verify() and reject unauthorized messages.
+// Private request streams are used for trusted intra-cluster traffic.
 template <class T>
 using PrivateRequestStream = RequestStream<T, false>;
 template <class T>
@@ -989,4 +992,4 @@ struct serializable_traits<RequestStream<T, P>> : std::true_type {
 };
 
 #endif
-#include "fdbrpc/genericactors.actor.h"
+#include "fdbrpc/genericactors.h"

@@ -119,13 +119,13 @@ Key Task::reservedTaskParamValidValue = "_validvalue"_sr;
 // be set for non-default constructor arguments.  To change this behavior look at all
 // Task() default constructions to see if they require params to be empty and call clear.
 Task::Task(Value type, uint32_t version, Value done, unsigned int priority) : extendMutex(1) {
-	if (type.size())
+	if (!type.empty())
 		params[Task::reservedTaskParamKeyType] = type;
 
 	if (version > 0)
 		params[Task::reservedTaskParamKeyVersion] = BinaryWriter::toValue(version, Unversioned());
 
-	if (done.size())
+	if (!done.empty())
 		params[Task::reservedTaskParamKeyDone] = done;
 
 	priority = std::min<int64_t>(priority, CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY);
@@ -612,12 +612,12 @@ public:
 		// If any priority levels have any keys then the taskbucket is not empty so return false
 		for (int i = 0; i < resultFutures.size(); ++i) {
 			RangeResult results = co_await resultFutures[i];
-			if (results.size() > 0)
+			if (!results.empty())
 				co_return false;
 		}
 
 		RangeResult values = co_await tr->getRange(taskBucket->timeouts.range(), 1);
-		if (values.size() > 0)
+		if (!values.empty())
 			co_return false;
 
 		co_return true;
@@ -634,7 +634,7 @@ public:
 		// If any priority levels have any keys then return true as the level is 'busy'
 		for (int i = 0; i < resultFutures.size(); ++i) {
 			RangeResult results = co_await resultFutures[i];
-			if (results.size() > 0)
+			if (!results.empty())
 				co_return true;
 		}
 
@@ -649,7 +649,7 @@ public:
 
 		Tuple t = Tuple::makeTuple(task->timeoutVersion, task->key);
 		RangeResult values = co_await tr->getRange(taskBucket->timeouts.range(t), 1);
-		if (values.size() > 0)
+		if (!values.empty())
 			co_return false;
 
 		co_return true;
@@ -779,14 +779,14 @@ public:
 			for (auto& p : task.params)
 				tr->set(space.pack(p.key), p.value);
 
-			if (values.size() > 0) {
+			if (!values.empty()) {
 				tr->clear(range);
 				co_return true;
 			}
 			co_return false;
 		}
 
-		ASSERT(lastKey != Key());
+		ASSERT(!lastKey.empty());
 		tr->clear(KeyRangeRef(range.begin, lastKey));
 		co_return true;
 	}
@@ -1108,7 +1108,7 @@ public:
 		taskFuture->futureBucket->setOptions(tr);
 
 		RangeResult values = co_await tr->getRange(taskFuture->blocks.range(), 1);
-		if (values.size() > 0)
+		if (!values.empty())
 			co_return false;
 
 		co_return true;
@@ -1169,7 +1169,7 @@ public:
 
 		std::vector<Future<Void>> actions;
 
-		if (values.size() != 0) {
+		if (!values.empty()) {
 			Reference<Task> task(new Task());
 			Key lastTaskID;
 			for (auto& s : values) {
@@ -1178,7 +1178,7 @@ public:
 				Key key = t.getString(1);
 				// If we see a new task ID and the old one isn't empty then process the task accumulated so far and make
 				// a new task
-				if (taskID.size() != 0 && taskID != lastTaskID) {
+				if (!taskID.empty() && taskID != lastTaskID) {
 					actions.push_back(performAction(tr, taskBucket, taskFuture, task));
 					task = makeReference<Task>();
 				}
@@ -1257,7 +1257,7 @@ public:
 TaskFuture::TaskFuture() = default;
 
 TaskFuture::TaskFuture(const Reference<FutureBucket> bucket, Key k) : futureBucket(bucket), key(k) {
-	if (k.size() == 0) {
+	if (k.empty()) {
 		key = deterministicRandom()->randomUniqueID().toString();
 	}
 

@@ -102,7 +102,7 @@ public:
 	// Maximum time to reset DB to the original state
 	double resetDBTimeout;
 
-	ApiCorrectnessWorkload(WorkloadContext const& wcx)
+	explicit ApiCorrectnessWorkload(WorkloadContext const& wcx)
 	  : ApiWorkload(wcx), numRandomOperations("Num Random Operations") {
 		numGets = getOption(options, "numGets"_sr, 1000);
 		numGetRanges = getOption(options, "numGetRanges"_sr, 100);
@@ -504,7 +504,7 @@ public:
 				keys[i] = self->store.getKey(selectors[i]);
 
 				if (keys[i].startsWith(StringRef(self->clientPrefix)) ||
-				    (keys[i].size() == 0 && self->clientPrefixInt == 0) ||
+				    (keys[i].empty() && self->clientPrefixInt == 0) ||
 				    (keys[i].startsWith("\xff"_sr) && self->clientPrefixInt == self->clientCount - 1)) {
 					break;
 				}

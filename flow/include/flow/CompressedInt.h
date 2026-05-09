@@ -47,7 +47,7 @@
 //   1111 1111 1111 1111 110n nnnn N{15}  125 bits  18 bytes
 template <typename IntType>
 struct CompressedInt {
-	CompressedInt(IntType i = 0) : value(i) {}
+	explicit CompressedInt(IntType i = 0) : value(i) {}
 	IntType value;
 	template <class Ar>
 	void serialize(Ar& ar) {

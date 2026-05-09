@@ -48,7 +48,7 @@ Future<Void> printProcessClass(Reference<IDatabase> db) {
 			RangeResult processTypeList = classTypeFuture.get();
 			RangeResult processSourceList = classSourceFuture.get();
 			ASSERT(processSourceList.size() == processTypeList.size());
-			if (!processTypeList.size())
+			if (processTypeList.empty())
 				printf("No processes are registered in the database.\n");
 			fmt::print("There are currently {} processes in the database:\n", processTypeList.size());
 			for (int index = 0; index < processTypeList.size(); index++) {
@@ -133,7 +133,7 @@ CommandFactory setClassFactory(
                 "`default' resets the process class to the class specified on the command line. The available "
                 "classes are `unset', `storage', `transaction', `resolution', `commit_proxy', `grv_proxy', "
                 "`master', `test', "
-                "`stateless', `log', `router', `cluster_controller', `fast_restore', `data_distributor', "
+                "`stateless', `log', `router', `cluster_controller', `data_distributor', "
                 "`coordinator', `ratekeeper', `backup', and `default'."));
 
 } // namespace fdb_cli

@@ -25,8 +25,8 @@
 #include "fdbclient/BackupContainerAzureBlobStore.h"
 #endif
 #include "fdbclient/BackupContainerFileSystem.h"
-#include "fdbclient/BackupContainerLocalDirectory.h"
-#include "fdbclient/BackupContainerBlobStore.h"
+#include "BackupContainerLocalDirectory.h"
+#include "BackupContainerBlobStore.h"
 #include "fdbclient/JsonBuilder.h"
 #include "flow/StreamCipher.h"
 #include "flow/UnitTest.h"
@@ -126,10 +126,6 @@ public:
 
 		co_return std::make_pair(results, fileKeyRanges);
 	}
-
-	// Backup log types
-	static constexpr Version NON_PARTITIONED_MUTATION_LOG = 0;
-	static constexpr Version PARTITIONED_MUTATION_LOG = 1;
 
 	// Find what should be the filename of a path by finding whatever is after the last forward or backward slash, or
 	// failing to find those, the whole string.
@@ -288,8 +284,9 @@ public:
 		std::vector<LogFile> logs;
 		std::vector<LogFile> pLogs;
 
-		co_await (success(fRanges) && success(fSnapshots) && store(logs, bc->listLogFiles(begin, end, false)) &&
-		          store(pLogs, bc->listLogFiles(begin, end, true)));
+		co_await (success(fRanges) && success(fSnapshots) &&
+		          store(logs, bc->listLogFiles(begin, end, MutationLogType::DEFAULT)) &&
+		          store(pLogs, bc->listLogFiles(begin, end, MutationLogType::PARTITIONED_LOG)));
 		logs.insert(logs.end(), std::make_move_iterator(pLogs.begin()), std::make_move_iterator(pLogs.end()));
 
 		co_return BackupFileList({ fRanges.get(), std::move(logs), fSnapshots.get() });
@@ -557,6 +554,76 @@ public:
 		return prevEnd;
 	}
 
+	// Read encryption metadata from JSON file
+	static Future<std::pair<bool, int>> readEncryptionMetadata(Reference<BackupContainerFileSystem> bc) {
+		try {
+			Reference<IAsyncFile> f = co_await bc->readFile(BackupContainerFileSystem::encryptionMetadataFileName());
+			int64_t size = co_await f->size();
+			std::string content;
+			content.resize(size);
+			co_await f->read((uint8_t*)content.data(), size, 0);
+
+			json_spirit::mValue json;
+			if (json_spirit::read_string(content, json) && json.type() == json_spirit::obj_type) {
+				auto& obj = json.get_obj();
+
+				// Both fields must be present with correct types.
+				if (!obj.count("is_encryption_enabled") ||
+				    obj.at("is_encryption_enabled").type() != json_spirit::bool_type ||
+				    !obj.count("encryption_block_size") ||
+				    obj.at("encryption_block_size").type() != json_spirit::int_type) {
+					fprintf(stderr, "ERROR: Encryption metadata file is missing required fields or has wrong types.\n");
+					TraceEvent(SevError, "BackupContainerReadEncryptionMetadataMalformed")
+					    .detail("URL", bc->getURL())
+					    .detail("File", BackupContainerFileSystem::encryptionMetadataFileName());
+					throw file_corrupt();
+				}
+
+				bool enabled = obj.at("is_encryption_enabled").get_bool();
+				int blockSize = obj.at("encryption_block_size").get_int();
+
+				if ((enabled && blockSize <= 0) || (!enabled && blockSize != 0)) {
+					fprintf(stderr,
+					        "ERROR: Encryption metadata is inconsistent (enabled=%d, blockSize=%d).\n",
+					        enabled,
+					        blockSize);
+					TraceEvent(SevError, "BackupContainerReadEncryptionMetadataInconsistent")
+					    .detail("URL", bc->getURL())
+					    .detail("IsEncryptionEnabled", enabled)
+					    .detail("EncryptionBlockSize", blockSize);
+					throw file_corrupt();
+				}
+
+				TraceEvent("BackupContainerReadEncryptionMetadata")
+				    .detail("URL", bc->getURL())
+				    .detail("IsEncryptionEnabled", enabled)
+				    .detail("EncryptionBlockSize", blockSize);
+				co_return std::make_pair(enabled, blockSize);
+			} else {
+				// If the file is malformed, throw an error.
+				fprintf(stderr, "ERROR: Failed to read encryption_metadata file due to incorrect format\n");
+				TraceEvent(SevError, "BackupContainerReadEncryptionMetadataMalformed")
+				    .detail("URL", bc->getURL())
+				    .detail("File", BackupContainerFileSystem::encryptionMetadataFileName());
+				throw file_corrupt();
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_file_not_found) {
+				// File may not be present for older backups, return encryption disabled.
+				TraceEvent(SevWarn, "BackupContainerEncryptionMetadataNotFound")
+				    .detail("URL", bc->getURL())
+				    .detail("File", BackupContainerFileSystem::encryptionMetadataFileName());
+				co_return std::make_pair(false, 0);
+			}
+			fprintf(stderr, "ERROR: Failed to read encryption_metadata file due to an error.\n");
+			TraceEvent(SevError, "BackupContainerReadEncryptionMetadataError")
+			    .error(e)
+			    .detail("URL", bc->getURL())
+			    .detail("File", BackupContainerFileSystem::encryptionMetadataFileName());
+			throw file_not_readable();
+		}
+	}
+
 	static Future<BackupDescription> describeBackup(Reference<BackupContainerFileSystem> bc,
 	                                                bool deepScan,
 	                                                Version logStartVersionOverride) {
@@ -590,13 +657,13 @@ public:
 		Optional<Version> metaExpiredEnd;
 		Optional<Version> metaUnreliableEnd;
 		Optional<Version> metaLogType;
-		Optional<Version> fileLevelEncryption;
+		bool fileLevelEncryptionEnabled = false;
+		int encryptionBlockSize = 0;
 
 		std::vector<Future<Void>> metaReads;
 		metaReads.push_back(store(metaExpiredEnd, bc->expiredEndVersion().get()));
 		metaReads.push_back(store(metaUnreliableEnd, bc->unreliableEndVersion().get()));
 		metaReads.push_back(store(metaLogType, bc->logType().get()));
-		metaReads.push_back(store(fileLevelEncryption, bc->fileLevelEncryption().get()));
 
 		// Only read log begin/end versions if not doing a deep scan, otherwise scan files and recalculate them.
 		if (!deepScan) {
@@ -606,6 +673,10 @@ public:
 
 		co_await waitForAll(metaReads);
 
+		std::pair<bool, int> encryptionMeta = co_await readEncryptionMetadata(bc);
+		fileLevelEncryptionEnabled = encryptionMeta.first;
+		encryptionBlockSize = encryptionMeta.second;
+
 		TraceEvent("BackupContainerDescribe2")
 		    .detail("URL", bc->getURL())
 		    .detail("LogStartVersionOverride", logStartVersionOverride)
@@ -613,7 +684,9 @@ public:
 		    .detail("UnreliableEndVersion", metaUnreliableEnd.orDefault(invalidVersion))
 		    .detail("LogBeginVersion", metaLogBegin.orDefault(invalidVersion))
 		    .detail("LogEndVersion", metaLogEnd.orDefault(invalidVersion))
-		    .detail("LogType", metaLogType.orDefault(-1));
+		    .detail("LogType", metaLogType.orDefault(-1))
+		    .detail("FileLevelEncryption", fileLevelEncryptionEnabled)
+		    .detail("EncryptionBlockSize", encryptionBlockSize);
 
 		// If the logStartVersionOverride is positive (not relative) then ensure that unreliableEndVersion is equal or
 		// greater
@@ -676,8 +749,8 @@ public:
 		std::vector<LogFile> plogs;
 		TraceEvent("BackupContainerListFiles").detail("URL", bc->getURL());
 
-		co_await (store(logs, bc->listLogFiles(scanBegin, scanEnd, false)) &&
-		          store(plogs, bc->listLogFiles(scanBegin, scanEnd, true)) &&
+		co_await (store(logs, bc->listLogFiles(scanBegin, scanEnd, MutationLogType::DEFAULT)) &&
+		          store(plogs, bc->listLogFiles(scanBegin, scanEnd, MutationLogType::PARTITIONED_LOG)) &&
 		          store(desc.snapshots, bc->listKeyspaceSnapshots()));
 
 		TraceEvent("BackupContainerListFiles")
@@ -687,18 +760,15 @@ public:
 		    .detail("Snapshots", desc.snapshots.size());
 
 		if (!plogs.empty()) {
-			desc.partitioned = true;
+			desc.mutationLogType = MutationLogType::PARTITIONED_LOG;
 			logs.swap(plogs);
 		} else {
-			desc.partitioned =
-			    metaLogType.present() && metaLogType.get() == BackupContainerFileSystemImpl::PARTITIONED_MUTATION_LOG;
+			desc.mutationLogType =
+			    metaLogType.present() ? static_cast<MutationLogType>(metaLogType.get()) : MutationLogType::DEFAULT;
 		}
 
-		if (fileLevelEncryption.present() && fileLevelEncryption.get() != 0) {
-			desc.fileLevelEncryption = true;
-		} else {
-			desc.fileLevelEncryption = false;
-		}
+		desc.fileLevelEncryption = fileLevelEncryptionEnabled;
+		desc.encryptionBlockSize = encryptionBlockSize;
 
 		// List logs in version order so log continuity can be analyzed
 		std::sort(logs.begin(), logs.end());
@@ -709,7 +779,7 @@ public:
 			// If we didn't get log versions above then seed them using the first log file
 			if (!desc.contiguousLogEnd.present()) {
 				desc.minLogBegin = logs.begin()->beginVersion;
-				if (desc.partitioned) {
+				if (desc.mutationLogType == MutationLogType::PARTITIONED_LOG) {
 					// Cannot use the first file's end version, which may not be contiguous
 					// for other partitions. Set to its beginVersion to be safe.
 					desc.contiguousLogEnd = logs.begin()->beginVersion;
@@ -718,7 +788,7 @@ public:
 				}
 			}
 
-			if (desc.partitioned) {
+			if (desc.mutationLogType == MutationLogType::PARTITIONED_LOG) {
 				updatePartitionedLogsContinuousEnd(&desc, logs, scanBegin, scanEnd);
 			} else {
 				Version& end = desc.contiguousLogEnd.get();
@@ -745,10 +815,7 @@ public:
 				}
 
 				if (!metaLogType.present()) {
-					updates =
-					    updates && bc->logType().set(desc.partitioned
-					                                     ? BackupContainerFileSystemImpl::PARTITIONED_MUTATION_LOG
-					                                     : BackupContainerFileSystemImpl::NON_PARTITIONED_MUTATION_LOG);
+					updates = updates && bc->logType().set(static_cast<int>(desc.mutationLogType));
 				}
 
 				co_await updates;
@@ -771,7 +838,7 @@ public:
 				// If there is logs gap after contiguousLogEnd, then check whether the current snapshot
 				// can be restored from the logs available after contiguousLogEnd.
 				if (desc.contiguousLogEnd.present() && desc.contiguousLogEnd.get() <= s.beginVersion) {
-					if (desc.partitioned)
+					if (desc.mutationLogType == MutationLogType::PARTITIONED_LOG)
 						s.restorable = isPartitionedLogsContinuous(logs, s.beginVersion, s.endVersion);
 					else
 						s.restorable = hasContinuousLogsForSnapshot(logs, s.beginVersion, s.endVersion);
@@ -817,7 +884,7 @@ public:
 				if (desc.minRestorableVersion.present() && desc.maxRestorableVersion.present()) {
 					// check if we have contiguous logs from minRestorableVersion to current snapshot endVersion
 					bool contiguousLogs = false;
-					if (desc.partitioned)
+					if (desc.mutationLogType == MutationLogType::PARTITIONED_LOG)
 						contiguousLogs =
 						    isPartitionedLogsContinuous(logs, desc.minRestorableVersion.get(), s.endVersion);
 					else
@@ -842,7 +909,7 @@ public:
 
 				// Find the continuousLogEnd after snapshotEndVersion and set it as
 				// maxRestorableVersion.
-				if (desc.partitioned) {
+				if (desc.mutationLogType == MutationLogType::PARTITIONED_LOG) {
 					// TO DO: Yet to implement similar function findContinuousLogEnd for partitioned logs.
 					desc.maxRestorableVersion = s.endVersion;
 				} else {
@@ -927,8 +994,8 @@ public:
 			progress->step = "Listing files";
 		}
 		// Get log files or range files that contain any data at or before expireEndVersion
-		co_await (store(logs, bc->listLogFiles(scanBegin, expireEndVersion - 1, false)) &&
-		          store(pLogs, bc->listLogFiles(scanBegin, expireEndVersion - 1, true)) &&
+		co_await (store(logs, bc->listLogFiles(scanBegin, expireEndVersion - 1, MutationLogType::DEFAULT)) &&
+		          store(pLogs, bc->listLogFiles(scanBegin, expireEndVersion - 1, MutationLogType::PARTITIONED_LOG)) &&
 		          store(ranges, bc->listRangeFiles(scanBegin, expireEndVersion - 1)));
 		logs.insert(logs.end(), std::make_move_iterator(pLogs.begin()), std::make_move_iterator(pLogs.end()));
 
@@ -1133,7 +1200,7 @@ public:
 			restorableSet.targetVersion = targetVersion;
 			std::vector<LogFile> logFiles;
 			Version begin = beginVersion == invalidVersion ? 0 : beginVersion;
-			logFiles = co_await bc->listLogFiles(begin, targetVersion, false);
+			logFiles = co_await bc->listLogFiles(begin, targetVersion, MutationLogType::DEFAULT);
 			// List logs in version order so log continuity can be analyzed
 			std::sort(logFiles.begin(), logFiles.end());
 			if (!logFiles.empty()) {
@@ -1200,8 +1267,11 @@ public:
 			// FIXME: check if there are tagged logs. for each tag, there is no version gap.
 			std::vector<LogFile> logs;
 			std::vector<LogFile> plogs;
-			co_await (store(logs, bc->listLogFiles(minKeyRangeVersion, restorable.targetVersion, false)) &&
-			          store(plogs, bc->listLogFiles(minKeyRangeVersion, restorable.targetVersion, true)));
+			co_await (
+			    store(logs, bc->listLogFiles(minKeyRangeVersion, restorable.targetVersion, MutationLogType::DEFAULT)) &&
+			    store(
+			        plogs,
+			        bc->listLogFiles(minKeyRangeVersion, restorable.targetVersion, MutationLogType::PARTITIONED_LOG)));
 
 			if (!plogs.empty()) {
 				logs.swap(plogs);
@@ -1278,8 +1348,10 @@ public:
 
 	// The innermost folder covers 100,000 seconds (1e11 versions) which is 5,000 mutation log files at current
 	// settings.
-	static std::string logVersionFolderString(Version v, bool partitioned) {
-		return format("%s/%s/", (partitioned ? "plogs" : "logs"), versionFolderString(v, 11).c_str());
+	static std::string logVersionFolderString(Version v, MutationLogType mutationLogType) {
+		return format("%s/%s/",
+		              (mutationLogType == MutationLogType::PARTITIONED_LOG ? "plogs" : "logs"),
+		              versionFolderString(v, 11).c_str());
 	}
 
 	static std::string logVersionFolderStringForRangePartitioned(Version v, Version baseVersion) {
@@ -1325,15 +1397,18 @@ public:
 		KeyspaceSnapshotFile f;
 		f.fileName = path;
 		int len;
+		char typeBuf[64] = {};
 
 		// Try new format with type suffix: snapshot,beginVersion,endVersion,totalSize,type
 		if (sscanf(name.c_str(),
-		           "snapshot,%" SCNd64 ",%" SCNd64 ",%" SCNd64 ",%*[^,]%n",
+		           "snapshot,%" SCNd64 ",%" SCNd64 ",%" SCNd64 ",%63[^,]%n",
 		           &f.beginVersion,
 		           &f.endVersion,
 		           &f.totalSize,
-		           &len) == 3 &&
+		           typeBuf,
+		           &len) == 4 &&
 		    len == name.size()) {
+			f.snapshotType = typeBuf;
 			out = f;
 			return true;
 		}
@@ -1402,16 +1477,36 @@ public:
 		ASSERT_EQ(bytesRead, cipherKey->size());
 	}
 
-	static Future<Void> writeEncryptionMetadataIfNotExists(Reference<BackupContainerFileSystem> bc) {
-		Optional<Version> existingEncryptionMetadata = co_await bc->fileLevelEncryption().get();
-
-		if (!existingEncryptionMetadata.present()) {
-			bool exists = co_await bc->exists();
-			if (!exists) {
-				co_await bc->create();
+	static Future<Void> writeEncryptionMetadataIfNotExists(Reference<BackupContainerFileSystem> bc,
+	                                                       int encryptionBlockSize) {
+		try {
+			Reference<IAsyncFile> f = co_await bc->readFile(BackupContainerFileSystem::encryptionMetadataFileName());
+			int64_t size = co_await f->size();
+			TraceEvent("WriteEncryptionMetadataAlreadyExists").detail("URL", bc->getURL()).detail("FileSize", size);
+			co_return;
+		} catch (Error& e) {
+			if (e.code() != error_code_file_not_found) {
+				TraceEvent(SevWarn, "WriteEncryptionMetadataReadError").error(e).detail("URL", bc->getURL());
+				throw e;
 			}
-			co_await bc->fileLevelEncryption().set(bc->encryptionKeyFileName.present() ? 1 : 0);
 		}
+
+		bool exists = co_await bc->exists();
+		if (!exists) {
+			TraceEvent("WriteEncryptionMetadataCreatingContainer").detail("URL", bc->getURL());
+			co_await bc->create();
+		}
+
+		// Write JSON with encryption metadata
+		bool enabled = bc->encryptionKeyFileName.present();
+		JsonBuilderObject doc;
+		doc.setKey("is_encryption_enabled", enabled);
+		doc.setKey("encryption_block_size", encryptionBlockSize);
+
+		std::string jsonStr = doc.getJson();
+		TraceEvent("WriteEncryptionMetadataCompleted").detail("URL", bc->getURL()).detail("JSON", jsonStr);
+
+		co_await bc->writeEntireFile(BackupContainerFileSystem::encryptionMetadataFileName(), jsonStr);
 	}
 
 }; // class BackupContainerFileSystemImpl
@@ -1419,7 +1514,7 @@ public:
 Future<Reference<IBackupFile>> BackupContainerFileSystem::writeLogFile(Version beginVersion,
                                                                        Version endVersion,
                                                                        int blockSize) {
-	return writeFile(BackupContainerFileSystemImpl::logVersionFolderString(beginVersion, false) +
+	return writeFile(BackupContainerFileSystemImpl::logVersionFolderString(beginVersion, MutationLogType::DEFAULT) +
 	                 format("log,%lld,%lld,%s,%d",
 	                        beginVersion,
 	                        endVersion,
@@ -1432,14 +1527,15 @@ Future<Reference<IBackupFile>> BackupContainerFileSystem::writeTaggedLogFile(Ver
                                                                              int blockSize,
                                                                              uint16_t tagId,
                                                                              int totalTags) {
-	return writeFile(BackupContainerFileSystemImpl::logVersionFolderString(beginVersion, true) +
-	                 format("log,%lld,%lld,%s,%d-of-%d,%d",
-	                        beginVersion,
-	                        endVersion,
-	                        deterministicRandom()->randomUniqueID().toString().c_str(),
-	                        tagId,
-	                        totalTags,
-	                        blockSize));
+	return writeFile(
+	    BackupContainerFileSystemImpl::logVersionFolderString(beginVersion, MutationLogType::PARTITIONED_LOG) +
+	    format("log,%lld,%lld,%s,%d-of-%d,%d",
+	           beginVersion,
+	           endVersion,
+	           deterministicRandom()->randomUniqueID().toString().c_str(),
+	           tagId,
+	           totalTags,
+	           blockSize));
 }
 
 Future<Reference<IBackupFile>> BackupContainerFileSystem::writeRangePartitionedLogFile(Version beginVersion,
@@ -1495,7 +1591,7 @@ Future<Void> BackupContainerFileSystem::writeKeyspaceSnapshotFile(const std::vec
 
 Future<std::vector<LogFile>> BackupContainerFileSystem::listLogFiles(Version beginVersion,
                                                                      Version targetVersion,
-                                                                     bool partitioned) {
+                                                                     MutationLogType mutationLogType) {
 	// The first relevant log file could have a begin version less than beginVersion based on the knobs which
 	// determine log file range size, so start at an earlier version adjusted by how many versions a file could
 	// contain.
@@ -1505,9 +1601,9 @@ Future<std::vector<LogFile>> BackupContainerFileSystem::listLogFiles(Version beg
 	    BackupContainerFileSystemImpl::cleanFolderString(BackupContainerFileSystemImpl::logVersionFolderString(
 	        std::max<Version>(0,
 	                          beginVersion - CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES * CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE),
-	        partitioned));
+	        mutationLogType));
 	std::string lastPath = BackupContainerFileSystemImpl::cleanFolderString(
-	    BackupContainerFileSystemImpl::logVersionFolderString(targetVersion, partitioned));
+	    BackupContainerFileSystemImpl::logVersionFolderString(targetVersion, mutationLogType));
 
 	std::function<bool(std::string const&)> pathFilter = [=](const std::string& folderPath) {
 		// Remove slashes in the given folder path so that the '/' positions in the version folder string do not
@@ -1518,16 +1614,17 @@ Future<std::vector<LogFile>> BackupContainerFileSystem::listLogFiles(Version beg
 		       (cleaned > firstPath && cleaned < lastPath);
 	};
 
-	return map(listFiles((partitioned ? "plogs/" : "logs/"), pathFilter), [=](const FilesAndSizesT& files) {
-		std::vector<LogFile> results;
-		LogFile lf;
-		for (auto& f : files) {
-			if (BackupContainerFileSystemImpl::pathToLogFile(lf, f.first, f.second) && lf.endVersion > beginVersion &&
-			    lf.beginVersion <= targetVersion)
-				results.push_back(lf);
-		}
-		return results;
-	});
+	return map(listFiles((mutationLogType == MutationLogType::PARTITIONED_LOG ? "plogs/" : "logs/"), pathFilter),
+	           [=](const FilesAndSizesT& files) {
+		           std::vector<LogFile> results;
+		           LogFile lf;
+		           for (auto& f : files) {
+			           if (BackupContainerFileSystemImpl::pathToLogFile(lf, f.first, f.second) &&
+			               lf.endVersion > beginVersion && lf.beginVersion <= targetVersion)
+				           results.push_back(lf);
+		           }
+		           return results;
+	           });
 }
 
 Future<std::vector<RangeFile>> BackupContainerFileSystem::old_listRangeFiles(Version beginVersion, Version endVersion) {
@@ -1619,9 +1716,9 @@ Future<Void> BackupContainerFileSystem::expireData(Version expireEndVersion,
 	    Reference<BackupContainerFileSystem>::addRef(this), expireEndVersion, force, progress, restorableBeginVersion);
 }
 
-Future<Void> BackupContainerFileSystem::writeEncryptionMetadata() {
+Future<Void> BackupContainerFileSystem::writeEncryptionMetadata(int encryptionBlockSize) {
 	return BackupContainerFileSystemImpl::writeEncryptionMetadataIfNotExists(
-	    Reference<BackupContainerFileSystem>::addRef(this));
+	    Reference<BackupContainerFileSystem>::addRef(this), encryptionBlockSize);
 }
 
 static Future<KeyRange> getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem> bc,
@@ -1749,8 +1846,9 @@ BackupContainerFileSystem::VersionProperty BackupContainerFileSystem::unreliable
 BackupContainerFileSystem::VersionProperty BackupContainerFileSystem::logType() {
 	return { Reference<BackupContainerFileSystem>::addRef(this), "mutation_log_type" };
 }
-BackupContainerFileSystem::VersionProperty BackupContainerFileSystem::fileLevelEncryption() {
-	return { Reference<BackupContainerFileSystem>::addRef(this), "file_level_encryption" };
+
+std::string BackupContainerFileSystem::encryptionMetadataFileName() {
+	return "properties/encryption_metadata";
 }
 
 bool BackupContainerFileSystem::usesEncryption() const {
@@ -1771,115 +1869,9 @@ void BackupContainerFileSystem::setEncryptionKey(Optional<std::string> const& en
 		encryptionSetupFuture = BackupContainerFileSystemImpl::readEncryptionKey(encryptionKeyFileName.get());
 	}
 }
+
 Future<Void> BackupContainerFileSystem::createTestEncryptionKeyFile(std::string const& filename) {
 	return BackupContainerFileSystemImpl::createTestEncryptionKeyFile(filename);
-}
-
-// Get a BackupContainerFileSystem based on a container URL string
-// TODO: refactor to not duplicate IBackupContainer::openContainer. It's the exact same
-// code but returning a different template type because you can't cast between them
-Reference<BackupContainerFileSystem> BackupContainerFileSystem::openContainerFS(
-    const std::string& url,
-    const Optional<std::string>& proxy,
-    const Optional<std::string>& encryptionKeyFileName,
-    bool isBackup) {
-	static std::map<std::string, Reference<BackupContainerFileSystem>> m_cache;
-
-	Reference<BackupContainerFileSystem>& r = m_cache[url];
-	if (r)
-		return r;
-
-	try {
-		StringRef u(url);
-		if (u.startsWith("file://"_sr)) {
-			r = makeReference<BackupContainerLocalDirectory>(url, encryptionKeyFileName);
-		} else if (u.startsWith("blobstore://"_sr)) {
-			std::string resource;
-			Optional<std::string> blobstoreProxy;
-
-			// If no proxy is passed down to the openContainer method, try to fallback to the
-			// fileBackupAgentProxy which is a global variable and will be set for the backup_agent.
-			if (proxy.present()) {
-				blobstoreProxy = proxy.get();
-			} else if (fileBackupAgentProxy.present()) {
-				blobstoreProxy = fileBackupAgentProxy.get();
-			}
-
-			// The URL parameters contain blobstore endpoint tunables as well as possible backup-specific options.
-			IBlobStoreEndpoint::ParametersT backupParams;
-			Reference<IBlobStoreEndpoint> bstore =
-			    IBlobStoreEndpoint::fromString(url, blobstoreProxy, &resource, &lastOpenError, &backupParams);
-
-			BackupContainerBlobStore::validateBackupUrl(resource);
-			r = makeReference<BackupContainerBlobStore>(
-			    bstore, resource, backupParams, encryptionKeyFileName, isBackup);
-		}
-#ifdef BUILD_AZURE_BACKUP
-		else if (u.startsWith("azure://"_sr)) {
-			u.eat("azure://"_sr);
-			auto address = u.eat("/"_sr);
-			if (address.endsWith(std::string(azure::storage_lite::constants::default_endpoint_suffix))) {
-				CODE_PROBE(true, "Azure backup url with standard azure storage account endpoint");
-				// <account>.<service>.core.windows.net/<resource_path>
-				auto endPoint = address.toString();
-				auto accountName = address.eat("."_sr).toString();
-				auto containerName = u.eat("/"_sr).toString();
-				r = makeReference<BackupContainerAzureBlobStore>(
-				    endPoint, accountName, containerName, encryptionKeyFileName);
-			} else {
-				// resolve the network address if necessary
-				std::string endpoint(address.toString());
-				Optional<NetworkAddress> parsedAddress = NetworkAddress::parseOptional(endpoint);
-				if (!parsedAddress.present()) {
-					try {
-						auto hostname = Hostname::parse(endpoint);
-						auto resolvedAddress = hostname.resolveBlocking();
-						if (resolvedAddress.present()) {
-							CODE_PROBE(true, "Azure backup url with hostname in the endpoint");
-							parsedAddress = resolvedAddress.get();
-						}
-					} catch (Error& e) {
-						TraceEvent(SevError, "InvalidAzureBackupUrl").error(e).detail("Endpoint", endpoint);
-						throw backup_invalid_url();
-					}
-				}
-				if (!parsedAddress.present()) {
-					TraceEvent(SevError, "InvalidAzureBackupUrl").detail("Endpoint", endpoint);
-					throw backup_invalid_url();
-				}
-				auto accountName = u.eat("/"_sr).toString();
-				// Avoid including ":tls" and "(fromHostname)"
-				// note: the endpoint needs to contain the account name
-				// so either "<account_name>.blob.core.windows.net" or "<ip>:<port>/<account_name>"
-				endpoint =
-				    fmt::format("{}/{}", formatIpPort(parsedAddress.get().ip, parsedAddress.get().port), accountName);
-				auto containerName = u.eat("/"_sr).toString();
-				r = makeReference<BackupContainerAzureBlobStore>(
-				    endpoint, accountName, containerName, encryptionKeyFileName);
-			}
-		}
-#endif
-		else {
-			lastOpenError = "invalid URL prefix";
-			throw backup_invalid_url();
-		}
-
-		r->encryptionKeyFileName = encryptionKeyFileName;
-		r->URL = url;
-		return r;
-	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled)
-			throw;
-
-		TraceEvent m(SevWarn, "BackupContainer");
-		m.error(e);
-		m.detail("Description", "Invalid container specification.  See help.");
-		m.detail("URL", url);
-		if (e.code() == error_code_backup_invalid_url)
-			m.detail("LastOpenError", lastOpenError);
-
-		throw;
-	}
 }
 
 namespace backup_test {
@@ -1964,7 +1956,9 @@ Future<Void> testBackupContainer(std::string url,
 
 	printf("BackupContainerTest URL %s\n", url.c_str());
 
-	Reference<IBackupContainer> c = IBackupContainer::openContainer(url, proxy, encryptionKeyFileName);
+	int encryptionBlockSize = encryptionKeyFileName.present() ? 4096 : 0;
+	Reference<IBackupContainer> c =
+	    IBackupContainer::openContainer(url, proxy, encryptionKeyFileName, encryptionBlockSize);
 
 	// Make sure container doesn't exist, then create it.
 	try {
@@ -2396,7 +2390,8 @@ Future<Void> testBackupContainerWithMissingLogRanges(std::string url, Optional<s
 	FlowLock lock(100e6);
 	printf("BackupContainerTest URL %s\n", url.c_str());
 
-	Reference<IBackupContainer> c = IBackupContainer::openContainer(url, proxy, {});
+	Reference<IBackupContainer> c =
+	    IBackupContainer::openContainer(url, proxy, /*encryptionKeyFileName=*/{}, /*encryptionBlockSize=*/0);
 	// Make sure container doesn't exist, then create it.
 	try {
 		co_await c->deleteContainer();
@@ -2530,7 +2525,8 @@ TEST_CASE("/backup/containers/localdir/missingLogRangesRestorability") {
 Future<Void> testBackupContinuousLogEndVer(std::string url, Optional<std::string> proxy) {
 	FlowLock lock(100e6);
 	printf("BackupContainerTest URL %s\n", url.c_str());
-	Reference<IBackupContainer> c = IBackupContainer::openContainer(url, proxy, {});
+	Reference<IBackupContainer> c =
+	    IBackupContainer::openContainer(url, proxy, /*encryptionKeyFileName=*/{}, /*encryptionBlockSize=*/0);
 
 	// Make sure container doesn't exist, then create it.
 	try {

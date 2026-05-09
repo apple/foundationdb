@@ -57,7 +57,7 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 	bool defaultBackup;
 	Optional<std::string> encryptionKeyFileName;
 
-	BackupAndRestorePartitionedCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit BackupAndRestorePartitionedCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		locked.set(sharedRandomNumber % 2);
 		backupAfter = getOption(options, "backupAfter"_sr, 10.0);
 		double minBackupAfter = getOption(options, "minBackupAfter"_sr, backupAfter);
@@ -314,9 +314,11 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 			                                   tag.toString(),
 			                                   backupRanges,
 			                                   StopWhenDone{ !stopDifferentialDelay },
-			                                   UsePartitionedLog::True, // enable partitioned log here
+			                                   MutationLogType::PARTITIONED_LOG, // enable partitioned log here
 			                                   IncrementalBackupOnly::False,
-			                                   encryptionKeyFileName);
+			                                   encryptionKeyFileName,
+			                                   encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0,
+			                                   /*snapshotMode=*/0);
 		} catch (Error& e) {
 			TraceEvent("BARW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
@@ -535,7 +537,8 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 			if (lastBackupContainer && performRestore) {
 				auto container = IBackupContainer::openContainer(lastBackupContainer->getURL(),
 				                                                 lastBackupContainer->getProxy(),
-				                                                 lastBackupContainer->getEncryptionKeyFileName());
+				                                                 lastBackupContainer->getEncryptionKeyFileName(),
+				                                                 lastBackupContainer->getEncryptionBlockSize());
 				BackupDescription desc = co_await container->describeBackup();
 				Version targetVersion = -1;
 				if (desc.maxRestorableVersion.present()) {
@@ -667,7 +670,7 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 					    co_await tr->getRange(KeyRange(KeyRangeRef(backupAgentKey, strinc(backupAgentKey))), 100);
 
 					// Error if the system keyspace for the backup tag is not empty
-					if (agentValues.size() > 0) {
+					if (!agentValues.empty()) {
 						displaySystemKeys++;
 						printf("BackupCorrectnessLeftOverMutationKeys: (%d) %s\n",
 						       agentValues.size(),
@@ -700,12 +703,12 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 
 					RangeResult versions = co_await tr->getRange(
 					    KeyRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath))), 1);
-					if (!shareLogRange || !versions.size()) {
+					if (!shareLogRange || versions.empty()) {
 						RangeResult logValues = co_await tr->getRange(
 						    KeyRange(KeyRangeRef(backupLogValuesKey, strinc(backupLogValuesKey))), 100);
 
 						// Error if the log/mutation keyspace for the backup tag  is not empty
-						if (logValues.size() > 0) {
+						if (!logValues.empty()) {
 							displaySystemKeys++;
 							printf("BackupCorrectnessLeftOverLogKeys: (%d) %s\n",
 							       logValues.size(),
@@ -739,9 +742,9 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 			}
 
 			// SOMEDAY: Remove after backup agents can exist quiescently
-			if ((g_simulator->backupAgents == ISimulator::BackupAgentType::BackupToFile) &&
+			if ((fdbSimulationPolicyState().backupAgents == FDBBackupAgentType::BackupToFile) &&
 			    (!BackupAndRestorePartitionedCorrectnessWorkload::backupAgentRequests)) {
-				g_simulator->backupAgents = ISimulator::BackupAgentType::NoBackupAgents;
+				fdbSimulationPolicyState().backupAgents = FDBBackupAgentType::NoBackupAgents;
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "BackupAndRestorePartitionedCorrectness").error(e).GetLastError();

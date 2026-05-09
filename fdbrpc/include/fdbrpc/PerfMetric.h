@@ -59,7 +59,7 @@ private:
 };
 
 struct PerfIntCounter {
-	PerfIntCounter(std::string name) : name(name), value(0) {}
+	explicit PerfIntCounter(std::string name) : name(name), value(0) {}
 	PerfIntCounter(std::string name, std::vector<PerfIntCounter*>& v) : name(name), value(0) { v.push_back(this); }
 	void operator+=(int64_t delta) { value += delta; }
 	void operator++() { value += 1; }
@@ -73,7 +73,7 @@ private:
 };
 
 struct PerfDoubleCounter {
-	PerfDoubleCounter(std::string name) : name(name), value(0) {}
+	explicit PerfDoubleCounter(std::string name) : name(name), value(0) {}
 	PerfDoubleCounter(std::string name, std::vector<PerfDoubleCounter*>& v) : name(name), value(0) {
 		v.push_back(this);
 	}

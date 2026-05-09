@@ -145,13 +145,13 @@ TEST_CASE("/BackupPartitionMap/calculateBackupPartitionKeyRanges/VaryingSizes") 
 		                                                     { KeyRangeRef(key1, key2), 200000 },
 		                                                     { KeyRangeRef(key2, key3), 10000 },
 		                                                     { KeyRangeRef(key3, key4), 90000 } };
-	for (const auto& shard : testShards) {
+	for (const auto& [range, bytes] : testShards) {
 		ShardTrackedData data;
 		StorageMetrics metrics;
-		metrics.bytes = shard.second;
+		metrics.bytes = bytes;
 		ShardMetrics shardMetrics(metrics, 0.0, 1);
 		data.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>(shardMetrics);
-		shards.insert(shard.first, data);
+		shards.insert(range, data);
 	}
 	std::vector<KeyRange> partitions = co_await calculateBackupPartitionKeyRanges(&shards);
 
@@ -178,13 +178,13 @@ TEST_CASE("/BackupPartitionMap/calculateBackupPartitionKeyRanges/ZeroSizeShards"
 		                                                     { KeyRangeRef(key1, key2), 1000000 },
 		                                                     { KeyRangeRef(key2, key3), 0 } };
 
-	for (const auto& shard : testShards) {
+	for (const auto& [range, bytes] : testShards) {
 		ShardTrackedData data;
 		StorageMetrics metrics;
-		metrics.bytes = shard.second;
+		metrics.bytes = bytes;
 		ShardMetrics shardMetrics(metrics, 0.0, 1);
 		data.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>(shardMetrics);
-		shards.insert(shard.first, data);
+		shards.insert(range, data);
 	}
 	std::vector<KeyRange> partitions = co_await calculateBackupPartitionKeyRanges(&shards);
 	ASSERT(partitions.size() == 2);

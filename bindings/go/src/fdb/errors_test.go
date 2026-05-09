@@ -60,3 +60,30 @@ func TestErrorWrapping(t *testing.T) {
 		}
 	}
 }
+
+func TestErrorIs(t *testing.T) {
+	// value sentinel — direct match
+	if !errors.Is(Error{Code: 1007}, ErrTransactionTooOld) {
+		t.Error("expected match: Error{1007} vs ErrTransactionTooOld")
+	}
+	// pointer target (user takes address of sentinel var)
+	if !errors.Is(Error{Code: 1007}, &ErrTransactionTooOld) {
+		t.Error("expected match: Error{1007} vs &ErrTransactionTooOld")
+	}
+	// wrapped value
+	if !errors.Is(fmt.Errorf("wrap: %w", Error{Code: 1007}), ErrTransactionTooOld) {
+		t.Error("expected match through wrapping")
+	}
+	// wrapped pointer
+	if !errors.Is(fmt.Errorf("wrap: %w", &Error{Code: 1007}), ErrTransactionTooOld) {
+		t.Error("expected match through wrapped *Error")
+	}
+	// no false positive: wrong code
+	if errors.Is(Error{Code: 1008}, ErrTransactionTooOld) {
+		t.Error("expected no match: Error{1008} vs ErrTransactionTooOld")
+	}
+	// no false positive: unrelated error
+	if errors.Is(errors.New("other"), ErrTransactionTooOld) {
+		t.Error("expected no match: non-fdb error vs ErrTransactionTooOld")
+	}
+}

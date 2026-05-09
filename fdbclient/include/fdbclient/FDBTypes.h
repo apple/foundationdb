@@ -981,7 +981,7 @@ struct KeyValueStoreType {
 	};
 
 	KeyValueStoreType() : type(END) {}
-	KeyValueStoreType(StoreType type) : type(type) {
+	explicit(false) KeyValueStoreType(StoreType type) : type(type) {
 		if ((uint32_t)type > END)
 			this->type = END;
 	}
@@ -1038,7 +1038,7 @@ struct TLogVersion {
 	} version;
 
 	TLogVersion() : version(UNSET) {}
-	TLogVersion(Version v) : version(v) {}
+	explicit(false) TLogVersion(Version v) : version(v) {}
 
 	operator Version() const { return version; }
 
@@ -1083,7 +1083,7 @@ struct TLogSpillType {
 	};
 
 	TLogSpillType() : type(DEFAULT) {}
-	TLogSpillType(SpillType type) : type(type) {
+	explicit(false) TLogSpillType(SpillType type) : type(type) {
 		if ((uint32_t)type >= END) {
 			this->type = UNSET;
 		}
@@ -1163,7 +1163,7 @@ struct StorageBytes {
 };
 struct LogMessageVersion {
 	// Each message pushed into the log system has a unique, totally ordered LogMessageVersion
-	// See ILogSystem::push() for how these are assigned
+	// See LogSystem::push() for how these are assigned
 	Version version;
 	uint32_t sub;
 
@@ -1392,7 +1392,7 @@ struct StorageMigrationType {
 	enum MigrationType { DEFAULT = 1, UNSET = 0, DISABLED = 1, AGGRESSIVE = 2, GRADUAL = 3, END = 4 };
 
 	StorageMigrationType() : type(UNSET) {}
-	StorageMigrationType(MigrationType type) : type(type) {
+	explicit(false) StorageMigrationType(MigrationType type) : type(type) {
 		if ((uint32_t)type >= END) {
 			this->type = UNSET;
 		}
@@ -1436,7 +1436,7 @@ struct EncryptionAtRestModeDeprecated {
 	};
 
 	EncryptionAtRestModeDeprecated() : mode(DISABLED) {}
-	EncryptionAtRestModeDeprecated(Mode mode) : mode(mode) {
+	explicit(false) EncryptionAtRestModeDeprecated(Mode mode) : mode(mode) {
 		if ((uint32_t)mode >= END) {
 			this->mode = DISABLED;
 		}
@@ -1517,10 +1517,6 @@ struct Traceable<EncryptionAtRestModeDeprecated> : std::true_type {
 	static std::string toString(const EncryptionAtRestModeDeprecated& mode) { return mode.toString(); }
 };
 
-typedef StringRef ClusterNameRef;
-typedef Standalone<ClusterNameRef> ClusterName;
-
-// TODO(gglass): delete metacluster code and tenant code and reassess the need for this enum
 enum class ClusterType { STANDALONE, LEGACY_UNUSED_METACLUSTER_MANAGEMENT, LEGACY_UNUSED_METACLUSTER_DATA };
 
 struct GRVCacheSpace {
@@ -1579,9 +1575,9 @@ struct StorageMetadataType {
 	bool wrongConfiguredForWiggle = false;
 
 	StorageMetadataType() : createdTime(0) {}
-	StorageMetadataType(double t,
-	                    KeyValueStoreType storeType = KeyValueStoreType::END,
-	                    bool wrongConfiguredForWiggle = false)
+	explicit StorageMetadataType(double t,
+	                             KeyValueStoreType storeType = KeyValueStoreType::END,
+	                             bool wrongConfiguredForWiggle = false)
 	  : createdTime(t), storeType(storeType), wrongConfiguredForWiggle(wrongConfiguredForWiggle) {}
 
 	static double currentTime() { return g_network->timer(); }
@@ -1622,7 +1618,7 @@ struct StorageWiggleValue {
 	constexpr static FileIdentifier file_identifier = 732124;
 	UID id; // storage id
 
-	StorageWiggleValue(UID id = UID(0, 0)) : id(id) {}
+	explicit StorageWiggleValue(UID id = UID(0, 0)) : id(id) {}
 
 	// To change this serialization, ProtocolVersion::PerpetualWiggleMetadata must be updated, and downgrades need
 	// to be considered
@@ -1649,13 +1645,13 @@ struct ReadOptions {
 	Optional<UID> debugID;
 	Optional<Version> consistencyCheckStartVersion;
 
-	ReadOptions(Optional<UID> debugID = Optional<UID>(),
-	            ReadType type = ReadType::NORMAL,
-	            CacheResult cache = CacheResult::True,
-	            Optional<Version> version = Optional<Version>())
+	explicit ReadOptions(Optional<UID> debugID = Optional<UID>(),
+	                     ReadType type = ReadType::NORMAL,
+	                     CacheResult cache = CacheResult::True,
+	                     Optional<Version> version = Optional<Version>())
 	  : type(type), cacheResult(cache), debugID(debugID), consistencyCheckStartVersion(version) {}
 
-	ReadOptions(ReadType type, CacheResult cache = CacheResult::True) : ReadOptions({}, type, cache) {}
+	explicit ReadOptions(ReadType type, CacheResult cache = CacheResult::True) : ReadOptions({}, type, cache) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -1665,11 +1661,12 @@ struct ReadOptions {
 
 // Can be used to identify types (e.g. IDatabase) that can be used to create transactions with a `createTransaction`
 // function
-template <typename, typename = void>
+template <typename>
 struct transaction_creator_traits : std::false_type {};
 
 template <typename T>
-struct transaction_creator_traits<T, std::void_t<typename T::TransactionT>> : std::true_type {};
+    requires requires { typename T::TransactionT; }
+struct transaction_creator_traits<T> : std::true_type {};
 
 template <typename T>
 struct transaction_creator_traits<Reference<T>> : transaction_creator_traits<T> {};
@@ -1692,7 +1689,7 @@ struct Versionstamp {
 
 	Versionstamp() {}
 	Versionstamp(Version version, uint16_t batchNumber) : version(version), batchNumber(batchNumber) {}
-	Versionstamp(Standalone<StringRef> str) {
+	explicit Versionstamp(Standalone<StringRef> str) {
 		ASSERT(str.size() == sizeof(Version) + sizeof(batchNumber));
 		version = bigEndian64(*reinterpret_cast<const Version*>(str.begin()));
 		batchNumber = bigEndian16(*reinterpret_cast<const uint16_t*>(str.begin() + sizeof(Version)));

@@ -253,7 +253,7 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 		std::cout << msg << "\n  ";
 		for (const auto& fp : fileProgress) {
 			std::cout << fp->fd->getFilename() << " " << fp->mutations.size() << " mutations";
-			if (fp->mutations.size() > 0) {
+			if (!fp->mutations.empty()) {
 				std::cout << ", range " << fp->mutations[0].version.toString() << " "
 				          << fp->mutations.back().version.toString() << "\n";
 			} else {
@@ -447,7 +447,7 @@ private:
 };
 
 Future<Void> convert(ConvertParams params) {
-	Reference<IBackupContainer> container = IBackupContainer::openContainer(params.container_url, params.proxy, {});
+	Reference<IBackupContainer> container = IBackupContainer::openContainer(params.container_url, params.proxy, {}, 0);
 	BackupFileList listing = co_await container->dumpFileList();
 	std::sort(listing.logs.begin(), listing.logs.end());
 	TraceEvent("Container").detail("URL", params.container_url).detail("Logs", listing.logs.size());

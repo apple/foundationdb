@@ -50,7 +50,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 	bool pass;
 	NetworkAddress addr;
 
-	DataLossRecoveryWorkload(WorkloadContext const& wcx)
+	explicit DataLossRecoveryWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), startMoveKeysParallelismLock(5), finishMoveKeysParallelismLock(5), enabled(!clientId),
 	    pass(true) {}
 
@@ -193,7 +193,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 			std::vector<StorageServerInterface> interfs = co_await getStorageServers(cx);
 			if (!interfs.empty()) {
 				StorageServerInterface interf = interfs[deterministicRandom()->randomInt(0, interfs.size())];
-				if (!g_simulator->protectedAddresses.contains(interf.address())) {
+				if (!g_simulator->isProtectedAddress(interf.address())) {
 					// We need to avoid selecting a storage server that is already dead at this point, otherwise
 					// the test will hang. This is achieved by sending a GetStorageMetrics RPC. This is a necessary
 					// check for this test because DD has been disabled and the proper mechanism that removes bad

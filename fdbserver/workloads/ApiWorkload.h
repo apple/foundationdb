@@ -267,7 +267,7 @@ struct ApiWorkload : TestWorkload {
 	bool useExtraDB;
 	Database extraDB;
 
-	ApiWorkload(WorkloadContext const& wcx, int maxClients = -1)
+	explicit ApiWorkload(WorkloadContext const& wcx, int maxClients = -1)
 	  : TestWorkload(wcx), maxClients(maxClients), success(true), transactionFactory(nullptr) {
 		clientPrefixInt = getOption(options, "clientId"_sr, clientId);
 		clientPrefix = format("%010d", clientPrefixInt);
@@ -282,10 +282,10 @@ struct ApiWorkload : TestWorkload {
 		minValueLength = getOption(options, "minValueLength"_sr, 1);
 		maxValueLength = getOption(options, "maxValueLength"_sr, 10000);
 
-		useExtraDB = g_network->isSimulated() && !g_simulator->extraDatabases.empty();
+		useExtraDB = g_network->isSimulated() && !fdbSimulationPolicyState().extraDatabases.empty();
 		if (useExtraDB) {
-			ASSERT(g_simulator->extraDatabases.size() == 1);
-			extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0]);
+			ASSERT(fdbSimulationPolicyState().extraDatabases.size() == 1);
+			extraDB = Database::createSimulatedExtraDatabase(fdbSimulationPolicyState().extraDatabases[0]);
 		}
 	}
 

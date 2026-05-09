@@ -64,7 +64,7 @@ struct CertKind {
 	CertKind() noexcept = default;
 
 	template <class Kind>
-	CertKind(Kind kind) noexcept : value(std::in_place_type<Kind>, kind) {}
+	explicit CertKind(Kind kind) noexcept : value(std::in_place_type<Kind>, kind) {}
 
 	template <class Kind>
 	bool is() const noexcept {

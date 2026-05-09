@@ -37,7 +37,7 @@ public class MicroSpatial {
 		zLabel = new Subspace(Tuple.from("Z"));
 	}
 
-	// TODO These three methods, xyToZ, zToXy, and setLocation, are allin the recipe book.
+	// TODO These three methods, xyToZ, zToXy, and setLocation, are all in the recipe book.
 	public long xyToZ(long[] p){
 		long x,y,z;
 		x = p[0]; y = p[1];

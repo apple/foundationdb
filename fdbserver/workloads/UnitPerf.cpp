@@ -18,8 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ActorFuzz.h"
-#include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.h"
 
 Future<Void> sleepyActor(double interval, int* counter) {
@@ -50,7 +48,7 @@ struct UnitPerfWorkload : TestWorkload {
 	static constexpr auto NAME = "UnitPerf";
 	bool enabled;
 
-	UnitPerfWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit UnitPerfWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
 	}
 

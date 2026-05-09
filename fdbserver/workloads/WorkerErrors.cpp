@@ -29,7 +29,7 @@
 struct WorkerErrorsWorkload : TestWorkload {
 	static constexpr auto NAME = "WorkerErrors";
 
-	WorkerErrorsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
+	explicit WorkerErrorsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
@@ -55,7 +55,7 @@ struct WorkerErrorsWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override {
 		std::vector<WorkerDetails> workers = co_await getWorkers(dbInfo);
 		std::vector<TraceEventFields> errors = co_await latestEventOnWorkers(workers);
-		for (auto e : errors) {
+		for (const auto& e : errors) {
 			printf("%s\n", e.toString().c_str());
 		}
 	}

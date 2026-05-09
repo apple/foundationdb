@@ -63,6 +63,7 @@
 #include "fdbserver/kvstore/KVFileUtils.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/datadistributor/SimulatedCluster.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/tester/TestEncryptionUtils.h"
 #include "fdbserver/tester/tester.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
@@ -315,7 +316,7 @@ public:
 	boost::interprocess::permissions permission;
 
 private:
-	WorldReadablePermissions(const WorldReadablePermissions& rhs) {}
+	explicit(false) WorldReadablePermissions(const WorldReadablePermissions& rhs) {}
 #ifdef _WIN32
 	SECURITY_ATTRIBUTES sa;
 #endif
@@ -1067,7 +1068,7 @@ struct CLIOptions {
 	bool maxLogsSet = false;
 
 	ServerRole role = ServerRole::FDBD;
-	uint32_t randomSeed = platform::getRandomSeed();
+	uint64_t randomSeed = platform::getRandomSeed();
 	double reseedTime = -1.0; // Time in seconds when to reset random seed in simulation (-1 = disabled)
 
 	const char* testFile = "tests/default.txt";
@@ -1538,7 +1539,7 @@ private:
 				break;
 			case OPT_RANDOMSEED: {
 				char* end;
-				randomSeed = (uint32_t)strtoul(args.OptionArg(), &end, 0);
+				randomSeed = strtoull(args.OptionArg(), &end, 0);
 				if (*end) {
 					fprintf(stderr, "ERROR: Could not parse random seed `%s'\n", args.OptionArg());
 					printHelpTeaser(argv[0]);
@@ -1974,7 +1975,7 @@ int main(int argc, char* argv[]) {
 		const auto role = opts.role;
 
 		if (role == ServerRole::Simulation) {
-			printf("Random seed is %u...\n", opts.randomSeed);
+			printf("Random seed is %llu...\n", opts.randomSeed);
 			bindDeterministicRandomToOpenssl();
 		}
 
@@ -2041,6 +2042,7 @@ int main(int argc, char* argv[]) {
 			// startOldSimulator();
 			opts.buildNetwork(argv[0]);
 			startNewSimulator(opts.printSimTime);
+			installFDBSimulationPolicy();
 
 			if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
 				// TODO (Swift): Make it TraceEvent

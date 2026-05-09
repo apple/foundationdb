@@ -3,10 +3,9 @@
 ```mermaid
 graph TB
     subgraph LogSystem["Log System Abstraction"]
-        ILogSystem["ILogSystem"]
+        LogSystemType["LogSystem"]
         Push["push(mutations, version)\n→ quorum write"]
         Peek["peek(tag, fromVersion)\n→ IPeekCursor"]
-        TPLS["TagPartitionedLogSystem\n(concrete implementation)"]
     end
 
     subgraph TLogInstance["TLog Server Instance"]
@@ -35,9 +34,8 @@ graph TB
         BW["Backup Worker\n(peek mutations)"]
     end
 
-    ILogSystem --> TPLS
-    TPLS --> Push
-    TPLS --> Peek
+    LogSystemType --> Push
+    LogSystemType --> Peek
 
     Push --> TLog1
     Push --> TLog2

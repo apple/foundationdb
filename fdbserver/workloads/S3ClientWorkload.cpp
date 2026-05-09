@@ -56,7 +56,7 @@ struct S3ClientWorkload : TestWorkload {
 	double corruptionRate;
 	double maxDelay;
 
-	S3ClientWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(true), pass(true) {
+	explicit S3ClientWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(true), pass(true) {
 		s3Url = getOption(options, "s3Url"_sr, ""_sr).toString();
 		if (s3Url.empty()) {
 			// Default location for s3 instance.
@@ -314,7 +314,7 @@ private:
 			if (useMockS3 && g_network->isSimulated()) {
 				// Check if 127.0.0.1:8080 is already registered in simulator's httpHandlers
 				std::string serverKey = "127.0.0.1:8080";
-				bool alreadyRegistered = g_simulator->httpHandlers.count(serverKey) > 0;
+				bool alreadyRegistered = g_simulator->httpHandlers.contains(serverKey);
 
 				if (alreadyRegistered) {
 					TraceEvent("S3ClientWorkload")

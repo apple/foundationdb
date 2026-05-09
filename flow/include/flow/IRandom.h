@@ -39,7 +39,8 @@
 // This is as good a place as any, I guess.
 
 template <typename T>
-typename std::enable_if<std::is_integral<T>::value, int>::type compare(T l, T r) {
+    requires(std::is_integral_v<T>)
+int compare(T l, T r) {
 	const int gt = l > r;
 	const int lt = l < r;
 	return gt - lt;
@@ -49,7 +50,8 @@ typename std::enable_if<std::is_integral<T>::value, int>::type compare(T l, T r)
 }
 
 template <typename T, typename U>
-typename std::enable_if<!std::is_integral<T>::value, int>::type compare(T const& l, U const& r) {
+    requires(!std::is_integral_v<T>)
+int compare(T const& l, U const& r) {
 	return l.compare(r);
 }
 
@@ -164,7 +166,7 @@ public:
 	                                   // Deterministic (and idempotent) for a deterministic generator.
 
 	// Reset the random number generator with a new seed (only supported by deterministic generators)
-	virtual void resetSeed(uint32_t seed) {}
+	virtual void resetSeed(uint64_t seed) {}
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;
@@ -209,7 +211,7 @@ public:
 extern FILE* randLog;
 
 // Sets the seed for the deterministic random number generator on the current thread
-void setThreadLocalDeterministicRandomSeed(uint32_t seed);
+void setThreadLocalDeterministicRandomSeed(uint64_t seed);
 
 // Returns the random number generator that can be seeded. This generator should only
 // be used in contexts where the choice to call it is deterministic.

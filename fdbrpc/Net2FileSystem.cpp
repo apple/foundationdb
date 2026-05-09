@@ -21,7 +21,6 @@
 #include "fdbrpc/Net2FileSystem.h"
 
 // Define boost::asio::io_service
-#include <algorithm>
 #ifndef BOOST_SYSTEM_NO_LIB
 #define BOOST_SYSTEM_NO_LIB
 #endif
@@ -36,14 +35,13 @@
 #define FILESYSTEM_IMPL 1
 
 #include "fdbrpc/AsyncFileCached.h"
-#include "fdbrpc/AsyncFileChaos.h"
-#include "fdbrpc/AsyncFileEIO.h"
-#include "fdbrpc/AsyncFileEncrypted.h"
-#include "fdbrpc/AsyncFileWinASIO.h"
-#include "fdbrpc/AsyncFileKAIO.h"
+#include "AsyncFileChaos.h"
+#include "AsyncFileEIO.h"
+#include "AsyncFileWinASIO.h"
+#include "AsyncFileKAIO.h"
 #include "flow/AsioReactor.h"
 #include "flow/Platform.h"
-#include "fdbrpc/AsyncFileWriteChecker.h"
+#include "AsyncFileWriteChecker.h"
 #include "flow/UnitTest.h"
 
 #ifdef __linux__
@@ -170,12 +168,6 @@ Future<Reference<class IAsyncFile>> Net2FileSystem::open(const std::string& file
 		f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileWriteChecker(r)); });
 	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES)
 		f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileChaos(r)); });
-	if (flags & IAsyncFile::OPEN_ENCRYPTED)
-		f = map(f, [flags](Reference<IAsyncFile> r) {
-			auto mode = flags & IAsyncFile::OPEN_READWRITE ? AsyncFileEncrypted::Mode::APPEND_ONLY
-			                                               : AsyncFileEncrypted::Mode::READ_ONLY;
-			return Reference<IAsyncFile>(new AsyncFileEncrypted(r, mode));
-		});
 	return f;
 }
 

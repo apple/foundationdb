@@ -370,7 +370,7 @@ struct PopFunc : InstructionFunc {
 
 	static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		std::vector<StackItem> items = data->stack.pop();
-		for (StackItem item : items) {
+		for (const StackItem& item : items) {
 			co_await item.value;
 		}
 	}
@@ -408,7 +408,7 @@ struct LogStackFunc : InstructionFunc {
 			Reference<Transaction> tr = data->db->createTransaction();
 			Error err;
 			try {
-				for (auto it : entries) {
+				for (const auto& it : entries) {
 					Tuple tk;
 					tk.append(it.first);
 					tk.append((int64_t)it.second.index);
@@ -435,7 +435,7 @@ struct LogStackFunc : InstructionFunc {
 		Standalone<StringRef> prefix = Tuple::unpack(s1).getString(0);
 
 		std::map<int, StackItem> entries;
-		while (data->stack.data.size() > 0) {
+		while (!data->stack.data.empty()) {
 			std::vector<StackItem> it = data->stack.pop();
 			ASSERT(it.size() == 1);
 			entries[data->stack.data.size()] = it.front();
@@ -558,7 +558,7 @@ struct UseTransactionFunc : InstructionFunc {
 		Standalone<StringRef> name = co_await items[0].value;
 		data->trName = name;
 
-		if (trMap.count(data->trName) == 0) {
+		if (!trMap.contains(data->trName)) {
 			trMap[data->trName] = data->db->createTransaction();
 		}
 	}
@@ -1393,7 +1393,7 @@ struct WaitEmptyFunc : InstructionFunc {
 private:
 	static Future<Void> checkEmptyPrefix(Reference<ReadTransaction> tr, Standalone<StringRef> prefix) {
 		FDBStandalone<RangeResultRef> results = co_await tr->getRange(KeyRangeRef(prefix, strinc(prefix)), 1);
-		if (results.size() > 0) {
+		if (!results.empty()) {
 			throw not_committed();
 		}
 	}
@@ -1705,7 +1705,7 @@ static Future<Void> doInstructions(Reference<FlowTesterData> data) {
 			}
 
 			if (isDirectory) {
-				if (opsThatCreateDirectories.count(op.toString())) {
+				if (opsThatCreateDirectories.contains(op.toString())) {
 					data->directoryData.directoryList.push_back(DirectoryOrSubspace());
 				}
 				data->stack.pushTuple("DIRECTORY_ERROR"_sr);

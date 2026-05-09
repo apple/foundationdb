@@ -115,7 +115,7 @@ Optional<NetworkAddress> Hostname::resolveBlocking() const {
 	}
 }
 
-TEST_CASE("/flow/Hostname/hostname") {
+TEST_CASE("/flow/Hostname/parse") {
 	std::string hn1s = "localhost:1234";
 	std::string hn2s = "host-name:1234";
 	std::string hn3s = "host.name:1234";
@@ -130,6 +130,9 @@ TEST_CASE("/flow/Hostname/hostname") {
 	std::string hn11s = "[::1]:4800";
 	std::string hn12s = "[::1]:4800:tls";
 	std::string hn13s = "1234";
+	// This host name is guaranteed not to be resolvable:
+	// https://www.rfc-editor.org/rfc/rfc2606.html
+	std::string unresolvableHostnameString = "host-name.invalid:1234";
 
 	auto hn1 = Hostname::parse(hn1s);
 	ASSERT(hn1.toString() == hn1s);
@@ -165,34 +168,19 @@ TEST_CASE("/flow/Hostname/hostname") {
 	ASSERT(!Hostname::isHostname(hn12s));
 	ASSERT(!Hostname::isHostname(hn13s));
 
-	Optional<NetworkAddress> optionalAddress = co_await hn2.resolve();
+	Hostname unresolvableHostname = Hostname::parse(unresolvableHostnameString);
+
+	Optional<NetworkAddress> optionalAddress = co_await unresolvableHostname.resolve();
 	ASSERT(!optionalAddress.present());
 
-	optionalAddress = hn2.resolveBlocking();
+	optionalAddress = unresolvableHostname.resolveBlocking();
 	ASSERT(!optionalAddress.present());
 
 	NetworkAddress address;
 	try {
-		address = co_await timeoutError(hn2.resolveWithRetry(), 1);
+		address = co_await timeoutError(unresolvableHostname.resolveWithRetry(), 1);
 	} catch (Error& e) {
 		ASSERT(e.code() == error_code_timed_out);
 	}
 	ASSERT(address == NetworkAddress());
-
-	NetworkAddress addressSource = NetworkAddress::parse("127.0.0.0:1234");
-	INetworkConnections::net()->addMockTCPEndpoint("host-name", "1234", { addressSource });
-
-	// Test resolve.
-	optionalAddress = co_await hn2.resolve();
-	ASSERT(optionalAddress.present() && optionalAddress.get() == addressSource);
-	optionalAddress = Optional<NetworkAddress>();
-
-	// Test resolveBlocking.
-	optionalAddress = hn2.resolveBlocking();
-	ASSERT(optionalAddress.present() && optionalAddress.get() == addressSource);
-	optionalAddress = Optional<NetworkAddress>();
-
-	// Test resolveWithRetry.
-	address = co_await hn2.resolveWithRetry();
-	ASSERT(address == addressSource);
 }

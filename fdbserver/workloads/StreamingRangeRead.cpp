@@ -28,7 +28,6 @@
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/serialize.h"
-#include <cstring>
 
 Future<Void> streamUsingGetRange(PromiseStream<RangeResult> results, Transaction* tr, KeyRange keys) {
 	KeySelectorRef begin = firstGreaterOrEqual(keys.begin);
@@ -79,7 +78,7 @@ struct StreamingRangeReadWorkload : KVWorkload {
 	double testDuration;
 	Future<Void> client;
 
-	StreamingRangeReadWorkload(WorkloadContext const& wcx) : KVWorkload(wcx) {
+	explicit StreamingRangeReadWorkload(WorkloadContext const& wcx) : KVWorkload(wcx) {
 		testDuration = getOption(options, "testDuration"_sr, 60.0);
 	}
 

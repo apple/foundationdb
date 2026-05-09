@@ -8,6 +8,7 @@
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/tester/workloads.h"
 #include "flow/Buggify.h"
@@ -51,7 +52,7 @@ struct ClogRemoteTLog : TestWorkload {
 	    cloggedRemoteTLog; // set after clogging is done, we use this state to ensure that it's
 	                       // eventually not present in dbInfo (which implies it was excluded by gray failure)
 
-	ClogRemoteTLog(const WorkloadContext& wctx) : TestWorkload(wctx) {
+	explicit ClogRemoteTLog(const WorkloadContext& wctx) : TestWorkload(wctx) {
 		enabled =
 		    (clientId == 0); // only run this workload for a single client, and that too the first client (by its id)
 		testDuration = getOption(options, "testDuration"_sr, 120);
@@ -258,8 +259,8 @@ struct ClogRemoteTLog : TestWorkload {
 				std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
 				    co_await NativeAPI::getServerListAndProcessClasses(&tr);
 				for (auto& [ssi, p] : results) {
-					if (ssi.locality.dcId().present() && g_simulator->remoteDcId.present() &&
-					    ssi.locality.dcId().get() == g_simulator->remoteDcId.get()) {
+					if (ssi.locality.dcId().present() && fdbSimulationPolicyState().remoteDcId.present() &&
+					    ssi.locality.dcId().get() == fdbSimulationPolicyState().remoteDcId.get()) {
 						ret.push_back(ssi.address().ip);
 					}
 				}

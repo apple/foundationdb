@@ -35,7 +35,7 @@ struct HighContentionPrefixAllocatorWorkload : TestWorkload {
 	int expectedPrefixes = 0;
 	std::set<Key> allocatedPrefixes;
 
-	HighContentionPrefixAllocatorWorkload(WorkloadContext const& wcx)
+	explicit HighContentionPrefixAllocatorWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), allocatorSubspace("test_subspace"_sr), allocator(allocatorSubspace) {
 		numRounds = getOption(options, "numRounds"_sr, 100);
 		maxTransactionsPerRound = getOption(options, "maxTransactionsPerRound"_sr, 20);
@@ -61,7 +61,7 @@ struct HighContentionPrefixAllocatorWorkload : TestWorkload {
 				co_await waitForAll(futures);
 				co_await tr->commit();
 
-				for (auto f : futures) {
+				for (const auto& f : futures) {
 					Key prefix = f.get();
 
 					// There should be no previously allocated prefix that is prefixed by our newly allocated one

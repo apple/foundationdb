@@ -18,80 +18,47 @@
  * limitations under the License.
  */
 
-// TODO: prune down the list of includes. This was copied from NativeAPI.actor.cpp.
 #include "fdbclient/NativeAPI.actor.h"
 
-#include <algorithm>
-#include <cstdio>
 #include <functional>
 #include <iterator>
 #include <limits>
 #include <memory>
-#include <regex>
 #include <string>
-#include <unordered_set>
-#include <tuple>
 #include <utility>
 #include <vector>
 
-#include "boost/algorithm/string.hpp"
-
 #include "fdbclient/Knobs.h"
 #include "flow/CodeProbe.h"
-#include "fmt/format.h"
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/MultiInterface.h"
 
-#include "fdbclient/ActorLineageProfiler.h"
 #include "fdbclient/AnnotateActor.h"
-#include "fdbclient/Atomic.h"
 #include "fdbclient/ClusterInterface.h"
-#include "fdbclient/ClusterConnectionFile.h"
-#include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.h"
-#include "fdbclient/JsonBuilder.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "fdbclient/ManagementAPI.h"
-#include "fdbclient/NameLineage.h"
 #include "fdbclient/CommitProxyInterface.h"
-#include "fdbclient/MonitorLeader.h"
-#include "fdbclient/MutationList.h"
 #include "ProxyLoadBalance.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SpecialKeySpace.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/TransactionLineage.h"
-#include "fdbclient/versions.h"
-#include "fdbrpc/WellKnownEndpoints.h"
-#include "fdbrpc/LoadBalance.h"
-#include "fdbrpc/Net2FileSystem.h"
-#include "fdbrpc/simulator.h"
-#include "fdbrpc/sim_validation.h"
 #include "flow/Arena.h"
 #include "flow/ActorCollection.h"
-#include "flow/DeterministicRandom.h"
 #include "flow/Error.h"
 #include "flow/FastRef.h"
-#include "flow/GetSourceVersion.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
-#include "flow/ProtocolVersion.h"
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
-#include "flow/Knobs.h"
 #include "flow/Platform.h"
-#include "flow/SystemMonitor.h"
-#include "flow/TLSConfig.h"
 #include "fdbclient/Tracing.h"
-#include "flow/UnitTest.h"
 #include "flow/network.h"
 #include "flow/serialize.h"
 
@@ -105,7 +72,6 @@
 #undef min
 #undef max
 #else
-#include <time.h>
 #endif
 #include "flow/CoroUtils.h"
 
@@ -737,7 +703,8 @@ static Future<Void> delExcessClntTxnEntriesActor(Transaction* tr, int64_t client
 	}
 }
 
-// FIXME: explain what "client status" is
+// Client status is the client-side transaction profiling data persisted under
+// fdbClientInfoPrefixRange for status reporting.
 // The reason for getting a pointer to DatabaseContext instead of a reference counted object is because reference
 // counting will increment reference count for DatabaseContext which holds the future of this actor. This creates a
 // cyclic reference and hence this actor and Database object will not be destroyed at all.

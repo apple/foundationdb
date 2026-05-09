@@ -211,7 +211,7 @@ public:
 
 	void operator=(RangeMap&& r) noexcept { map = std::move(r.map); }
 
-	RangeMap(RangeMap&& source) = default;
+	explicit(false) RangeMap(RangeMap&& source) = default;
 	// void clear( const Val& value ) { ranges.clear(); ranges.insert(std::make_pair(Key(),value)); }
 	void clear() { map.clear(); }
 

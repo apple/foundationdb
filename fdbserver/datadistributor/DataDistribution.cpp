@@ -49,6 +49,7 @@
 #include "flow/Buggify.h"
 #include "flow/Error.h"
 #include "flow/Platform.h"
+#include "flow/TxnCounters.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/flow.h"
@@ -82,7 +83,8 @@ std::set<int> const& normalDDQueueErrors() {
 	static std::set<int> s{ error_code_movekeys_conflict,
 		                    error_code_broken_promise,
 		                    error_code_data_move_cancelled,
-		                    error_code_data_move_dest_team_not_found };
+		                    error_code_data_move_dest_team_not_found,
+		                    error_code_finish_move_keys_too_many_retries };
 	return s;
 }
 
@@ -511,7 +513,7 @@ public:
 		primaryDcId.clear();
 		remoteDcIds.clear();
 		const std::vector<RegionInfo>& regions = configuration.regions;
-		if (configuration.regions.size() > 0) {
+		if (!configuration.regions.empty()) {
 			primaryDcId.push_back(regions[0].dcId);
 		}
 		if (configuration.regions.size() > 1) {
@@ -594,6 +596,31 @@ public:
 	// Initialize the required internal states of DataDistributor from system metadata. It's necessary before
 	// DataDistributor start working. Doesn't include initialization of optional components, like DDQueue,
 	// Tracker, TeamCollection. The components should call its own ::init methods.
+	//
+	// DD Startup Progress (trace events in order):
+	//   DDInitRunning                     - DD process recruited and starting init
+	//   DDInitTakingMoveKeysLock          - Acquiring move keys lock
+	//   DDInitTookMoveKeysLock            - Lock acquired
+	//   DDInitGotConfiguration            - Database configuration loaded
+	//   DDInitUpdatedReplicaKeys          - Replica keys updated
+	//   DDInitSlowDataMoveRead            - (SevWarn) dataMoveKeys read taking >5s
+	//   DDInitServerListAndDataMoveReadComplete - Server list + data moves read: NumDataMoves, NumServers,
+	//   ElapsedSeconds
+	//   DDInitKeyServerScanProgress       - (every 30s) keyServer scan: BeginKey, Batches, ShardsScanned
+	//   DDInitKeyServerScanComplete       - keyServer scan done: NumShards, ElapsedSeconds
+	//   DDInitGotInitialDD                - Init data loaded: NumShards, NumServers
+	//   DDInitDataLoaded                  - Init data loaded, ElapsedSeconds (does NOT mean DD is fully operational)
+	//
+	// After init(), the following startup events fire from other components:
+	//   DDInitResumeDataMovesProgress     - (every 30s) data move resume: ValidMoves, CancelledMoves, EmptyMoves
+	//   DDInitResumedDataMoves            - Data move resume complete with counts
+	//   TrackInitialShards                - Shard tracker setup started with InitialShardCount
+	//   TrackInitialShardsComplete        - Shard trackers created: ShardsTracked
+	//   DDTrackerStarting                 - Teams ready (fires from DDTeamCollection after readyToStart + delay)
+	//   TrackInitialShardsMetricsComplete - All shard metrics received: ElapsedSeconds
+	//                                       WaitStorageMetricsHandleError may fire (SevWarn after 60s) if a
+	//                                       shard's metrics read is stuck retrying: Keys, Retries
+	//   DDInitDone                        - DD is fully operational with all shard sizes loaded
 	static Future<Void> init(Reference<DataDistributor> self) {
 		while (true) {
 			co_await self->waitDataDistributorEnabled();
@@ -652,6 +679,8 @@ public:
 				    .detail("E", self->initData->shards.end()[-1].key)
 				    .detail("Src", describe(self->initData->shards.end()[-2].primarySrc))
 				    .detail("Dest", describe(self->initData->shards.end()[-2].primaryDest))
+				    .detail("NumShards", self->initData->shards.size())
+				    .detail("NumServers", self->initData->allServers.size())
 				    .trackLatest(self->initialDDEventHolder->trackingKey);
 			} else {
 				TraceEvent("DDInitGotInitialDD", self->ddId)
@@ -659,6 +688,8 @@ public:
 				    .detail("E", "")
 				    .detail("Src", "[no items]")
 				    .detail("Dest", "[no items]")
+				    .detail("NumShards", self->initData->shards.size())
+				    .detail("NumServers", self->initData->allServers.size())
 				    .trackLatest(self->initialDDEventHolder->trackingKey);
 			}
 
@@ -710,11 +741,13 @@ public:
 	}
 
 	static Future<Void> removeDataMoveTombstoneBackground(Reference<DataDistributor> self) {
+		static auto* counters = makeCounters("/dd/removeDataMoveTombstone");
 		UID currentID;
 		try {
 			Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 			Transaction tr(cx);
 			while (true) {
+				counters->started->increment(1);
 				Error err;
 				try {
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -725,8 +758,10 @@ public:
 						TraceEvent(SevDebug, "RemoveDataMoveTombstone", self->ddId).detail("DataMoveID", currentID);
 					}
 					co_await tr.commit();
+					counters->committed->increment(1);
 					break;
 				} catch (Error& e) {
+					counters->aborted->increment(1);
 					err = e;
 				}
 				co_await tr.onError(err);
@@ -854,6 +889,11 @@ public:
 	// TODO: unit test needed
 	static Future<Void> resumeFromDataMoves(Reference<DataDistributor> self, Future<Void> readyToStart) {
 		KeyRangeMap<std::shared_ptr<DataMove>>::iterator it = self->initData->dataMoveMap.ranges().begin();
+		int validMoves = 0;
+		int cancelledMoves = 0;
+		int emptyMoves = 0;
+		double resumeStart = now();
+		double lastLogTime = now();
 
 		co_await readyToStart;
 
@@ -862,6 +902,7 @@ public:
 			DataMoveType dataMoveType = getDataMoveTypeFromDataMoveId(meta.id);
 			if (meta.ranges.empty()) {
 				TraceEvent(SevInfo, "EmptyDataMoveRange", self->ddId).detail("DataMoveMetaData", meta.toString());
+				emptyMoves++;
 				continue;
 			}
 			if (meta.bulkLoadTaskState.present()) {
@@ -874,6 +915,7 @@ public:
 				TraceEvent(SevWarnAlways, "DDBulkLoadTaskCancelDataMove", self->ddId)
 				    .detail("Reason", "DDInit")
 				    .detail("DataMove", meta.toString());
+				cancelledMoves++;
 			} else if (dataMoveType == DataMoveType::LOGICAL_BULKLOAD ||
 			           dataMoveType == DataMoveType::PHYSICAL_BULKLOAD) {
 				// The metadata is from the old system
@@ -885,6 +927,7 @@ public:
 				    .detail("Reason", "WrongTypeWhenDDInit")
 				    .detail("DataMoveType", dataMoveType)
 				    .detail("DataMove", meta.toString());
+				cancelledMoves++;
 			} else if (it.value()->isCancelled() ||
 			           (it.value()->valid && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
 				RelocateShard rs(meta.ranges.front(), DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
@@ -892,6 +935,7 @@ public:
 				rs.cancelled = true;
 				self->relocationProducer.send(rs);
 				TraceEvent("DDInitScheduledCancelDataMove", self->ddId).detail("DataMove", meta.toString());
+				cancelledMoves++;
 			} else if (it.value()->valid) {
 				TraceEvent(SevDebug, "DDInitFoundDataMove", self->ddId).detail("DataMove", meta.toString());
 				ASSERT(meta.ranges.front() == it.range());
@@ -915,8 +959,23 @@ public:
 				self->shardsAffectedByTeamFailure->moveShard(rs.keys, teams);
 				self->relocationProducer.send(rs);
 				co_await yield(TaskPriority::DataDistribution);
+				validMoves++;
+			}
+			if (now() - lastLogTime >= 30.0) {
+				lastLogTime = now();
+				TraceEvent("DDInitResumeDataMovesProgress", self->ddId)
+				    .detail("ValidMoves", validMoves)
+				    .detail("CancelledMoves", cancelledMoves)
+				    .detail("EmptyMoves", emptyMoves)
+				    .detail("ElapsedSeconds", now() - resumeStart);
 			}
 		}
+
+		TraceEvent("DDInitResumedDataMoves", self->ddId)
+		    .detail("ValidMoves", validMoves)
+		    .detail("CancelledMoves", cancelledMoves)
+		    .detail("EmptyMoves", emptyMoves)
+		    .detail("ElapsedSeconds", now() - resumeStart);
 
 		// Trigger background cleanup for datamove tombstones
 		if (!self->txnProcessor->isMocked()) {
@@ -2205,6 +2264,82 @@ Future<Void> bulkLoadJobCore(Reference<DataDistributor> self, Future<Void> ready
 	}
 }
 
+// Monitor bulkLoadMode changes and dynamically spawn bulkload actors when mode becomes enabled.
+// This is necessary because the restore agent sets bulkLoadMode=1 AFTER DD has already initialized.
+// Without dynamic monitoring, bulkload jobs submitted by restore would never be processed.
+Future<Void> monitorBulkLoadModeAndSpawnActors(Reference<DataDistributor> self, Future<Void> readyToStart) {
+	// If bulkload is already enabled at startup, don't need to monitor
+	if (self->bulkLoadEnabled) {
+		co_return;
+	}
+
+	// Only monitor if SHARD_ENCODE_LOCATION_METADATA is enabled (required for bulkload)
+	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		TraceEvent(SevInfo, "DDBulkLoadModeMonitorSkipped", self->ddId)
+		    .detail("Reason", "SHARD_ENCODE_LOCATION_METADATA is disabled");
+		co_return;
+	}
+
+	Database cx = self->txnProcessor->context();
+	Transaction tr(cx);
+
+	TraceEvent(SevInfo, "DDBulkLoadModeMonitorStarted", self->ddId);
+
+	// Wait for mode to be enabled
+	while (true) {
+		bool hadError = false;
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			Optional<Value> modeValue = co_await tr.get(bulkLoadModeKey);
+			int mode = 0;
+			if (modeValue.present()) {
+				BinaryReader rd(modeValue.get(), Unversioned());
+				rd >> mode;
+			}
+
+			if (bulkLoadIsEnabled(mode) && !self->bulkLoadEnabled) {
+				TraceEvent(SevInfo, "DDBulkLoadModeDynamicallyEnabled", self->ddId)
+				    .detail("UsableRegions", self->configuration.usableRegions);
+				self->bulkLoadEnabled = true;
+				break;
+			}
+
+			tr.reset();
+			co_await delay(1.0); // Check every second
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			err = e;
+			hadError = true;
+		}
+		if (hadError) {
+			co_await tr.onError(err);
+		}
+	}
+
+	// Mode is now enabled - run the bulkload actors directly
+	TraceEvent(SevInfo, "DDBulkLoadModeActorsSpawning", self->ddId);
+
+	std::vector<Future<Void>> bulkLoadActors;
+	if (self->configuration.usableRegions > 1) {
+		bulkLoadActors.push_back(bulkLoadTaskCore(self, readyToStart && remoteRecovered(self->dbInfo)));
+		bulkLoadActors.push_back(bulkLoadJobCore(self, readyToStart && remoteRecovered(self->dbInfo)));
+	} else {
+		bulkLoadActors.push_back(bulkLoadTaskCore(self, readyToStart));
+		bulkLoadActors.push_back(bulkLoadJobCore(self, readyToStart));
+	}
+
+	TraceEvent(SevInfo, "DDBulkLoadModeActorsSpawned", self->ddId);
+
+	// Wait for all bulkload actors (they run forever unless cancelled)
+	co_await waitForAll(bulkLoadActors);
+}
+
 // The actor spawned by DD dedicated to listen on a SS bulkdump task and holding a budget of parallelismLimitor.
 // The parallelismLimitor is used to limit the maximum concurrent bulkloading tasks spawned by DD.
 // Each DD spawned task corresponds to an actual alive SS bulk dumping task.
@@ -2420,7 +2555,7 @@ Future<Void> generateLocalBulkDumpJobManifestFile(Reference<DataDistributor> sel
 	    BulkLoadJobManifestFileHeader(bulkLoadManifestFormatVersion, self->bulkDumpJobManager.taskManifestMap.size())
 	        .toString());
 	content->append(bulkLoadJobManifestLineTerminator);
-	std::map<Key, BulkLoadManifest>::iterator iter = self->bulkDumpJobManager.taskManifestMap.begin();
+	auto iter = self->bulkDumpJobManager.taskManifestMap.begin();
 	for (; iter != self->bulkDumpJobManager.taskManifestMap.end(); iter++) {
 		content->append(BulkLoadJobFileManifestEntry(iter->second).toString());
 		content->append(bulkLoadJobManifestLineTerminator);
@@ -2620,6 +2755,7 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 	TraceEvent(SevInfo, "DataDistributionInitProgress", self->ddId).detail("Phase", "DDConfigWatch Initialized");
 
 	while (true) {
+		double ddStartTime = now();
 		self->context->trackerCancelled = false;
 		// whether all initial shard are tracked
 		self->initialized = Promise<Void>();
@@ -2632,6 +2768,8 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 		bool hasCaughtErr = false;
 		try {
 			co_await DataDistributor::init(self);
+
+			TraceEvent("DDInitDataLoaded", self->ddId).detail("ElapsedSeconds", now() - ddStartTime);
 
 			TraceEvent(SevInfo, "DataDistributionInitProgress", self->ddId).detail("Phase", "Metadata Initialized");
 
@@ -2817,6 +2955,9 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 				}
 			} else {
 				self->bulkLoadTaskCollection->removeBulkLoadJobRange();
+				// Monitor for bulkLoadMode changes and spawn actors dynamically.
+				// This is critical for restore operations which set bulkLoadMode=1 after DD starts.
+				actors.push_back(monitorBulkLoadModeAndSpawnActors(self, self->initialized.getFuture()));
 			}
 
 			// Always spawn bulkDumpCore - it will dynamically check the mode
@@ -2841,6 +2982,7 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 			self->context->markTrackerCancelled();
 			Error err = caughtErr;
 			TraceEvent("DataDistributorDestroyTeamCollections", self->ddId).error(caughtErr);
+			TraceEvent(SevWarn, "DDExiting", self->ddId).error(caughtErr);
 			std::vector<UID> teamForDroppedRange;
 			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
 				// Choose a random healthy team to host the to-be-dropped range.
@@ -3079,12 +3221,17 @@ Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> getSta
 	}
 }
 
-// FIXME: explain what this is trying to accomplish
+// Coordinates the data-distributor side of snapshot creation by preventing
+// recovery, pausing TLog pops, snapshotting stateful workers, and resuming
+// TLog pops before reporting completion.
 Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar<ServerDBInfo> const> db) {
 	Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, LockAware::True);
+	static auto* setRecoveryCounters = makeCounters("/dd/ddSnapSetRecovery");
+	static auto* clearRecoveryCounters = makeCounters("/dd/ddSnapClearRecovery");
 
 	ReadYourWritesTransaction tr(cx);
 	while (true) {
+		setRecoveryCounters->started->increment(1);
 		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -3094,8 +3241,10 @@ Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar
 			    .detail("SnapUID", snapReq.snapUID);
 			tr.set(writeRecoveryKey, writeRecoveryKeyTrue);
 			co_await tr.commit();
+			setRecoveryCounters->committed->increment(1);
 			break;
 		} catch (Error& e) {
+			setRecoveryCounters->aborted->increment(1);
 			err = e;
 		}
 		TraceEvent("SnapDataDistributor_WriteFlagError").error(err);
@@ -3129,8 +3278,8 @@ Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar
 		    .detail("SnapUID", snapReq.snapUID)
 		    .detail("StorageFaultTolerance", storageFaultTolerance);
 
-		// we need to snapshot storage nodes before snapshot any tlogs
-		// FIXME: if it's non-obvious enough to comment about, then also explain why
+		// Snapshot storage nodes before TLogs so storage files are captured
+		// while TLogs still retain the mutations needed to recover them.
 		std::vector<Future<ErrorOr<Void>>> storageSnapReqs;
 		for (const auto& [addr, entry] : statefulWorkers) {
 			auto& [interf, role] = entry;
@@ -3188,6 +3337,7 @@ Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar
 		    .detail("SnapUID", snapReq.snapUID);
 		tr.reset();
 		while (true) {
+			clearRecoveryCounters->started->increment(1);
 			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -3197,8 +3347,10 @@ Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar
 				    .detail("SnapUID", snapReq.snapUID);
 				tr.clear(writeRecoveryKey);
 				co_await tr.commit();
+				clearRecoveryCounters->committed->increment(1);
 				break;
 			} catch (Error& e) {
+				clearRecoveryCounters->aborted->increment(1);
 				err = e;
 			}
 			TraceEvent("SnapDataDistributor_ClearFlagError").error(err);
@@ -4748,7 +4900,7 @@ Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 	AuditStorageState res(audit->coreState.id,
 	                      audit->coreState.getType()); // we will set range of audit later
 	std::vector<Future<Void>> actors;
-	std::vector<std::string> errors;
+	std::vector<LocationMetadataError> errors;
 	AuditGetKeyServersRes keyServerRes;
 	std::unordered_map<UID, AuditGetServerKeysRes> serverKeyResMap;
 	Version readAtVersion{ 0 };
@@ -4833,101 +4985,33 @@ Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 					remoteReadBytes += serverKeyRes.readBytes;
 				}
 				// Use claimRange to get mapFromServerKeys and mapFromKeyServers to compare
-				int64_t numValidatedServerKeys = 0;
+				std::unordered_map<UID, std::vector<KeyRange>> serverOwnRangesMap;
 				for (auto& [ssid, serverKeyRes] : serverKeyResMap) {
-					for (auto& range : serverKeyRes.ownRanges) {
-						KeyRange overlappingRange = range & claimRange;
-						if (overlappingRange.empty()) {
-							continue;
-						}
-						TraceEvent(SevVerbose, "DDDoAuditLocationMetadataAddToServerKeyMap", self->ddId)
-						    .detail("RawRange", range)
-						    .detail("ClaimRange", claimRange)
-						    .detail("Range", overlappingRange)
-						    .detail("SSID", ssid);
-						mapFromServerKeys[ssid].push_back(overlappingRange);
-						numValidatedServerKeys++;
-					}
+					serverOwnRangesMap[ssid] = serverKeyRes.ownRanges;
 				}
-				cumulatedValidatedServerKeysNum = cumulatedValidatedServerKeysNum + numValidatedServerKeys;
-
-				int64_t numValidatedKeyServers = 0;
-				for (auto& [ssid, ranges] : mapFromKeyServersRaw) {
-					std::vector mergedRanges = coalesceRangeList(ranges);
-					for (auto& range : mergedRanges) {
-						KeyRange overlappingRange = range & claimRange;
-						if (overlappingRange.empty()) {
-							continue;
-						}
-						TraceEvent(SevVerbose, "DDDoAuditLocationMetadataAddToKeyServerMap", self->ddId)
-						    .detail("RawRange", range)
-						    .detail("ClaimRange", claimRange)
-						    .detail("Range", overlappingRange)
-						    .detail("SSID", ssid);
-						mapFromKeyServers[ssid].push_back(overlappingRange);
-						numValidatedKeyServers++;
-					}
-				}
-				cumulatedValidatedKeyServersNum = cumulatedValidatedKeyServersNum + numValidatedKeyServers;
+				LocationMetadataMaps builtMaps =
+				    buildLocationMetadataMaps(mapFromKeyServersRaw, serverOwnRangesMap, claimRange, self->ddId);
+				mapFromServerKeys = std::move(builtMaps.fromServerKeys);
+				mapFromKeyServers = std::move(builtMaps.fromKeyServers);
+				cumulatedValidatedServerKeysNum += builtMaps.numValidatedServerKeys;
+				cumulatedValidatedKeyServersNum += builtMaps.numValidatedKeyServers;
 
 				// Compare: check if mapFromKeyServers === mapFromServerKeys
-				// 1. check mapFromKeyServers => mapFromServerKeys
-				for (auto& [ssid, keyServerRanges] : mapFromKeyServers) {
-					if (!mapFromServerKeys.contains(ssid)) {
-						std::string error =
-						    format("KeyServers and serverKeys mismatch: Some key in range(%s, %s) exists "
-						           "on Server(%s) in KeyServers but not ServerKeys",
-						           claimRange.toString().c_str(),
-						           claimRange.toString().c_str(),
-						           ssid.toString().c_str());
-						errors.push_back(error);
-						TraceEvent(SevError, "DDDoAuditLocationMetadataError", self->ddId)
-						    .setMaxFieldLength(-1)
-						    .setMaxEventLength(-1)
-						    .detail("AuditId", audit->coreState.id)
-						    .detail("AuditRange", auditRange)
-						    .detail("ClaimRange", claimRange)
-						    .detail("ErrorMessage", error);
+				errors = checkLocationMetadataConsistency(mapFromKeyServers, mapFromServerKeys, claimRange);
+				for (const auto& error : errors) {
+					auto te = TraceEvent(SevError, "DDDoAuditLocationMetadataError", self->ddId);
+					te.setMaxFieldLength(-1)
+					    .setMaxEventLength(-1)
+					    .detail("AuditId", audit->coreState.id)
+					    .detail("AuditRange", auditRange)
+					    .detail("ClaimRange", claimRange)
+					    .detail("ErrorMessage", error.message)
+					    .detail("ServerId", error.serverId);
+					if (error.mismatchedRangeByKeyServer.present()) {
+						te.detail("MismatchedRangeByKeyServer", error.mismatchedRangeByKeyServer.get());
 					}
-					std::vector<KeyRange> serverKeyRanges = mapFromServerKeys[ssid];
-					Optional<std::pair<KeyRange, KeyRange>> anyMismatch = rangesSame(keyServerRanges, serverKeyRanges);
-					if (anyMismatch.present()) { // mismatch detected
-						KeyRange mismatchedRangeByKeyServer = anyMismatch.get().first;
-						KeyRange mismatchedRangeByServerKey = anyMismatch.get().second;
-						std::string error =
-						    format("KeyServers and serverKeys mismatch on Server(%s): KeyServer: %s; ServerKey: %s",
-						           ssid.toString().c_str(),
-						           mismatchedRangeByKeyServer.toString().c_str(),
-						           mismatchedRangeByServerKey.toString().c_str());
-						errors.push_back(error);
-						TraceEvent(SevError, "DDDoAuditLocationMetadataError", self->ddId)
-						    .setMaxFieldLength(-1)
-						    .setMaxEventLength(-1)
-						    .detail("AuditId", audit->coreState.id)
-						    .detail("AuditRange", auditRange)
-						    .detail("ClaimRange", claimRange)
-						    .detail("ErrorMessage", error)
-						    .detail("MismatchedRangeByKeyServer", mismatchedRangeByKeyServer)
-						    .detail("MismatchedRangeByServerKey", mismatchedRangeByServerKey);
-					}
-				}
-				// 2. check mapFromServerKeys => mapFromKeyServers
-				for (auto& [ssid, serverKeyRanges] : mapFromServerKeys) {
-					if (!mapFromKeyServers.contains(ssid)) {
-						std::string error =
-						    format("KeyServers and serverKeys mismatch: Some key of range(%s, %s) exists "
-						           "on Server(%s) in ServerKeys but not KeyServers",
-						           claimRange.toString().c_str(),
-						           claimRange.toString().c_str(),
-						           ssid.toString().c_str());
-						errors.push_back(error);
-						TraceEvent(SevError, "DDDoAuditLocationMetadataError", self->ddId)
-						    .setMaxFieldLength(-1)
-						    .setMaxEventLength(-1)
-						    .detail("AuditId", audit->coreState.id)
-						    .detail("AuditRange", auditRange)
-						    .detail("ClaimRange", claimRange)
-						    .detail("ErrorMessage", error);
+					if (error.mismatchedRangeByServerKey.present()) {
+						te.detail("MismatchedRangeByServerKey", error.mismatchedRangeByServerKey.get());
 					}
 				}
 
@@ -4937,8 +5021,8 @@ Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 				    .detail("AuditType", audit->coreState.getType())
 				    .detail("AuditId", audit->coreState.id)
 				    .detail("AuditRange", auditRange)
-				    .detail("CurrentValidatedServerKeysNum", numValidatedServerKeys)
-				    .detail("CurrentValidatedKeyServersNum", numValidatedServerKeys)
+				    .detail("CurrentValidatedServerKeysNum", builtMaps.numValidatedServerKeys)
+				    .detail("CurrentValidatedKeyServersNum", builtMaps.numValidatedKeyServers)
 				    .detail("CurrentValidatedInclusiveRange", claimRange)
 				    .detail("CumulatedValidatedServerKeysNum", cumulatedValidatedServerKeysNum)
 				    .detail("CumulatedValidatedKeyServersNum", cumulatedValidatedKeyServersNum)
@@ -5043,6 +5127,9 @@ Future<Void> dataDistributor_impl(DataDistributorInterface di, Reference<DataDis
 	std::map<UID, ErrorOr<Void>> ddSnapReqResultMap;
 
 	TraceEvent("DataDistributorRunning", di.id()).detail("IsMocked", isMocked);
+	// DDInitRunning duplicates the above with DDInit* prefix so the full startup sequence
+	// can be queried with Type="DDInit*" in trace logs
+	TraceEvent("DDInitRunning", di.id());
 	self->addActor.send(actors.getResult());
 	self->addActor.send(traceRole(Role::DATA_DISTRIBUTOR, di.id()));
 	self->addActor.send(waitFailureServer(di.waitFailure.getFuture()));

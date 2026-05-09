@@ -36,7 +36,7 @@ public:
 	using pointer = boost::asio::const_buffer*;
 	using reference = boost::asio::const_buffer&;
 
-	SendBufferIterator(SendBuffer const* p = nullptr, int limit = std::numeric_limits<int>::max());
+	explicit SendBufferIterator(SendBuffer const* p = nullptr, int limit = std::numeric_limits<int>::max());
 
 	bool operator==(SendBufferIterator const& r) const { return p == r.p; }
 	bool operator!=(SendBufferIterator const& r) const { return p != r.p; }

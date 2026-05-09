@@ -22,7 +22,7 @@
 
 #include "fdbrpc/HTTP.h"
 #include "flow/IRateControl.h"
-#include "fdbclient/RESTUtils.h"
+#include "RESTUtils.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
 #include "flow/FastRef.h"
@@ -111,7 +111,7 @@ Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTClient> c
 		TraceEvent("RESTDoRequestImpl").detail("Url", url.toString());
 	}
 
-	if (url.body.size() > 0) {
+	if (!url.body.empty()) {
 		PacketWriter pw(req->data.content->getWriteBuffer(url.body.size()), nullptr, Unversioned());
 		pw.serializeBytes(url.body);
 	}
@@ -174,7 +174,7 @@ Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTClient> c
 
 		// If err is not present then r is valid.
 		// If r->code is in successCodes then record the successful request and return r.
-		if (!err.present() && successCodes.count(r->code) != 0) {
+		if (!err.present() && successCodes.contains(r->code)) {
 			statsPtr->requests_successful++;
 			co_return r;
 		}

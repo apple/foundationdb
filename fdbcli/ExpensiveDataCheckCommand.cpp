@@ -48,19 +48,19 @@ Future<bool> expensiveDataCheckCommandActor(
 		co_await getWorkerInterfaces(tr, address_interface, true);
 	}
 	if (tokens.size() == 1 || tokencmp(tokens[1], "list")) {
-		if (address_interface->size() == 0) {
+		if (address_interface->empty()) {
 			printf("\nNo addresses can be checked.\n");
 		} else if (address_interface->size() == 1) {
 			printf("\nThe following address can be checked:\n");
 		} else {
 			printf("\nThe following %zu addresses can be checked:\n", address_interface->size());
 		}
-		for (auto it : *address_interface) {
+		for (const auto& it : *address_interface) {
 			printf("%s\n", printable(it.first).c_str());
 		}
 		printf("\n");
 	} else if (tokencmp(tokens[1], "all")) {
-		if (address_interface->size() == 0) {
+		if (address_interface->empty()) {
 			fprintf(stderr,
 			        "ERROR: no processes to check. You must run the `expensive_data_check’ "
 			        "command before running `expensive_data_check all’.\n");

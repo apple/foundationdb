@@ -35,7 +35,6 @@ void BackupRangePartitionedProgress::addBackupStatus(const WorkerBackupStatus& s
 	}
 }
 
-// Save each tag's savedVersion for all epochs into "bStatus".
 Future<Void> getBackupRangePartitionedProgress(Database cx,
                                                UID dbgid,
                                                Reference<BackupRangePartitionedProgress> bStatus,

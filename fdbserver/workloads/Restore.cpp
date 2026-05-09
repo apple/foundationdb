@@ -45,7 +45,7 @@ struct RestoreWorkload : TestWorkload {
 	bool shouldSkipRestoreRanges;
 	UID randomID;
 
-	RestoreWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit RestoreWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		locked.set(sharedRandomNumber % 2);
 		performRestore = getOption(options, "performRestore"_sr, true);
 		backupTag1 = getOption(options, "backupTag1"_sr, BackupAgentBase::getDefaultTag());
@@ -155,7 +155,8 @@ struct RestoreWorkload : TestWorkload {
 			if (lastBackupContainer && performRestore) {
 				auto container = IBackupContainer::openContainer(lastBackupContainer->getURL(),
 				                                                 lastBackupContainer->getProxy(),
-				                                                 lastBackupContainer->getEncryptionKeyFileName());
+				                                                 lastBackupContainer->getEncryptionKeyFileName(),
+				                                                 lastBackupContainer->getEncryptionBlockSize());
 				BackupDescription desc = co_await container->describeBackup();
 				TraceEvent("RW_Restore", randomID)
 				    .setMaxEventLength(12000)
@@ -352,9 +353,9 @@ struct RestoreWorkload : TestWorkload {
 			}
 
 			// SOMEDAY: Remove after backup agents can exist quiescently
-			if ((g_simulator->backupAgents == ISimulator::BackupAgentType::BackupToFile) &&
+			if ((fdbSimulationPolicyState().backupAgents == FDBBackupAgentType::BackupToFile) &&
 			    (!RestoreWorkload::backupAgentRequests)) {
-				g_simulator->backupAgents = ISimulator::BackupAgentType::NoBackupAgents;
+				fdbSimulationPolicyState().backupAgents = FDBBackupAgentType::NoBackupAgents;
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "BackupAndRestorePartitionedCorrectness").error(e).GetLastError();

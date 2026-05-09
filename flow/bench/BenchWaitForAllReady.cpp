@@ -22,7 +22,7 @@
 
 #include "flow/ThreadHelper.actor.h"
 #include "flow/genericactors.actor.h"
-#include "flow/genericcoros.h"
+#include "genericcoros.h"
 
 #include <vector>
 

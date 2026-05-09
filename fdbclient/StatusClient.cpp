@@ -26,7 +26,7 @@
 #include "fdbclient/Status.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
 #include "fdbclient/json_spirit/json_spirit_reader_template.h"
-#include "fdbrpc/genericactors.actor.h"
+#include "fdbrpc/genericactors.h"
 #include "flow/CoroUtils.h"
 #include <cstdint>
 
@@ -423,7 +423,7 @@ AsyncResult<Optional<StatusObject>> clusterStatusFetcher(ClusterInterface cI,
                                                          StatusArray* messages,
                                                          std::string statusField) {
 	StatusRequest req(statusField);
-	Future<Void> clusterTimeout = delay(30.0);
+	Future<Void> clusterTimeout = delay(CLIENT_KNOBS->STATUS_TIMEOUT);
 	Optional<StatusObject> oStatusObj;
 
 	co_await delay(0.0); // make sure the cluster controller is marked as not failed

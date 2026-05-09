@@ -34,8 +34,6 @@ namespace fdb_cli {
 
 constexpr char msgTypeKey[] = "type";
 constexpr char msgClusterKey[] = "cluster";
-constexpr char msgClusterTypeKey[] = "cluster_type";
-constexpr char msgDataClustersKey[] = "data_clusters";
 constexpr char msgCapacityKey[] = "capacity";
 constexpr char msgAllocatedKey[] = "allocated";
 constexpr char msgErrorKey[] = "error";
@@ -71,7 +69,7 @@ struct CommandFactory {
 			hintGenerators()[name] = hintFunc;
 		}
 	}
-	CommandFactory(const char* name) { hiddenCommands().insert(name); }
+	explicit CommandFactory(const char* name) { hiddenCommands().insert(name); }
 	static std::map<std::string, CommandHelp>& commands() {
 		static std::map<std::string, CommandHelp> helpMap;
 		return helpMap;
@@ -293,8 +291,6 @@ Future<bool> killCommandActor(Reference<IDatabase> db,
 Future<bool> lockCommandActor(Reference<IDatabase> db, std::vector<StringRef> const& tokens);
 Future<bool> unlockDatabaseActor(Reference<IDatabase> db, UID uid);
 
-// blobrestore command
-Future<bool> blobRestoreCommandActor(Database localDb, std::vector<StringRef> tokens);
 // hotrange command
 Future<bool> hotRangeCommandActor(Database localDb,
                                   Reference<IDatabase> db,

@@ -26,11 +26,11 @@ void forceLinkDequeTests();
 void forceLinkFlowTests();
 void forceLinkCoroTests();
 void forceLinkMemcpyTests();
-void forceLinkMemcpyPerfTests();
 void forceLinkStreamCipherTests();
 void forceLinkSimExternalConnectionTests();
 void forceLinkMutationLogReaderTests();
 void forceLinkIThreadPoolTests();
+void forceLinkNet2FileSystemTests();
 void forceLinkJsonWebKeySetTests();
 void forceLinkVersionVectorTests();
 void forceLinkRESTClientTests();
@@ -48,10 +48,12 @@ void forceLinkActorFuzzUnitTests();
 void forceLinkGrpcTests();
 void forceLinkGrpcTests2();
 void forceLinkSimpleCounterTests();
-void forceLinkTagPartitionedLogSystemRecoveryTests();
+void forceLinkLogSystemRecoveryTests();
 void forceLinkIPagerTests();
 void forceLinkMockS3ServerTests();
+void forceLinkAuditUtilsTests();
 void forceLinkClusterHealthMonitorTests();
+void forceLinkGrvQueueDelayTests();
 
 struct UnitTestWorkload : TestWorkload {
 	static constexpr auto NAME = "UnitTests";
@@ -66,7 +68,7 @@ struct UnitTestWorkload : TestWorkload {
 	PerfIntCounter testsAvailable, testsExecuted, testsFailed;
 	PerfDoubleCounter totalWallTime, totalSimTime;
 
-	UnitTestWorkload(WorkloadContext const& wcx)
+	explicit UnitTestWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), testsAvailable("Test Cases Available"), testsExecuted("Test Cases Executed"),
 	    testsFailed("Test Cases Failed"), totalWallTime("Total wall clock time (s)"),
 	    totalSimTime("Total flow time (s)") {
@@ -90,7 +92,7 @@ struct UnitTestWorkload : TestWorkload {
 
 		// Consume all remaining options as testParams which the unit test can access
 		for (auto& kv : options) {
-			if (kv.value.size() != 0) {
+			if (!kv.value.empty()) {
 				testParams.set(kv.key.toString(), getOption(options, kv.key, StringRef()).toString());
 			}
 		}
@@ -100,11 +102,11 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkFlowTests();
 		forceLinkCoroTests();
 		forceLinkMemcpyTests();
-		forceLinkMemcpyPerfTests();
 		forceLinkStreamCipherTests();
 		forceLinkSimExternalConnectionTests();
 		forceLinkMutationLogReaderTests();
 		forceLinkIThreadPoolTests();
+		forceLinkNet2FileSystemTests();
 		forceLinkJsonWebKeySetTests();
 		forceLinkVersionVectorTests();
 		forceLinkRESTClientTests();
@@ -119,10 +121,12 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkRandomKeyValueUtilsTests();
 		forceLinkActorFuzzUnitTests();
 		forceLinkSimpleCounterTests();
-		forceLinkTagPartitionedLogSystemRecoveryTests();
+		forceLinkLogSystemRecoveryTests();
 		forceLinkIPagerTests();
 		forceLinkMockS3ServerTests();
+		forceLinkAuditUtilsTests();
 		forceLinkClusterHealthMonitorTests();
+		forceLinkGrvQueueDelayTests();
 
 #ifdef FLOW_GRPC_ENABLED
 		forceLinkGrpcTests();
@@ -153,7 +157,7 @@ struct UnitTestWorkload : TestWorkload {
 			return false;
 		}
 
-		for (auto ignorePatt : testsIgnored) {
+		for (const auto& ignorePatt : testsIgnored) {
 			if (StringRef(testName).startsWith(ignorePatt)) {
 				return false;
 			}
@@ -178,7 +182,7 @@ struct UnitTestWorkload : TestWorkload {
 
 		fprintf(stdout, "Found %zu tests\n", tests.size());
 
-		if (tests.size() == 0) {
+		if (tests.empty()) {
 			TraceEvent(SevError, "NoMatchingUnitTests")
 			    .detail("TestPattern", testPattern)
 			    .detail("TestsIgnored", testsIgnored);

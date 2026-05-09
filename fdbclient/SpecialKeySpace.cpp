@@ -48,7 +48,7 @@ const std::string kTracingTokenKey = "token";
 
 static bool isAlphaNumeric(const std::string& key) {
 	// [A-Za-z0-9_]+
-	if (!key.size())
+	if (key.empty())
 		return false;
 	for (const char& c : key) {
 		if (!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_'))
@@ -167,7 +167,7 @@ Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeReadImpl* skrImp
 		result = result_;
 	}
 
-	if (result.size() == 0) {
+	if (result.empty()) {
 		TraceEvent(SevDebug, "ZeroElementsIntheRange").detail("Start", startKey).detail("End", endKey);
 		co_return;
 	}
@@ -456,7 +456,7 @@ Future<Optional<Value>> SpecialKeySpace::getActor(SpecialKeySpace* sks, ReadYour
 	                                            GetRangeLimits(CLIENT_KNOBS->TOO_MANY),
 	                                            Reverse::False);
 	ASSERT(result.size() <= 1);
-	if (result.size()) {
+	if (!result.empty()) {
 		co_return Optional<Value>(result[0].value);
 	} else {
 		co_return Optional<Value>();
@@ -944,7 +944,7 @@ Future<bool> checkExclusion(Database db,
 	// is excluded by locality.
 	for (const auto& locality : localities) {
 		std::pair<std::string, std::string> locality_key_value = decodeLocality(locality);
-		if (locality_key_value.first == "") {
+		if (locality_key_value.first.empty()) {
 			continue;
 		}
 
@@ -1189,7 +1189,7 @@ Future<Optional<std::string>> excludeCommitActor(ReadYourWritesTransaction* ryw,
 	auto force = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
 	    failed ? "failed" : "excluded", "force")];
 	// Only do safety check when we have servers to be excluded and the force option key is not set
-	if (addresses.size() && !(force.first && force.second.present())) {
+	if (!addresses.empty() && !(force.first && force.second.present())) {
 		bool safe = co_await checkExclusion(ryw->getDatabase(), addresses, exclusions, localities, failed, &result);
 		if (!safe)
 			co_return result;
@@ -1803,7 +1803,7 @@ Future<RangeResult> coordinatorsGetRangeActor(ReadYourWritesTransaction* ryw, Ke
 	          [](const NetworkAddress& lhs, const NetworkAddress& rhs) { return lhs.toString() < rhs.toString(); });
 	std::string processes_str;
 	for (const auto& w : coordinator_processes) {
-		if (processes_str.size())
+		if (!processes_str.empty())
 			processes_str += ",";
 		processes_str += w.toString();
 	}
@@ -1835,7 +1835,7 @@ static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWritesTrans
 		ASSERT(processes_entry.second.present()); // no clear should be seen here
 		auto processesStr = processes_entry.second.get().toString();
 		boost::split(process_address_or_hostname_strs, processesStr, [](char c) { return c == ','; });
-		if (!process_address_or_hostname_strs.size()) {
+		if (process_address_or_hostname_strs.empty()) {
 			co_return ManagementAPIError::toJsonString(
 			    false,
 			    "coordinators",
@@ -1955,16 +1955,16 @@ static Future<RangeResult> CoordinatorsAutoImplActor(ReadYourWritesTransaction* 
 
 	if (result == CoordinatorsResult::SAME_NETWORK_ADDRESSES) {
 		for (const auto& host : old.hostnames) {
-			autoCoordinatorsKey += autoCoordinatorsKey.size() ? "," : "";
+			autoCoordinatorsKey += autoCoordinatorsKey.empty() ? "" : ",";
 			autoCoordinatorsKey += host.toString();
 		}
 		for (const auto& coord : old.coords) {
-			autoCoordinatorsKey += autoCoordinatorsKey.size() ? "," : "";
+			autoCoordinatorsKey += autoCoordinatorsKey.empty() ? "" : ",";
 			autoCoordinatorsKey += coord.toString();
 		}
 	} else {
 		for (const auto& address : _desiredCoordinators) {
-			autoCoordinatorsKey += autoCoordinatorsKey.size() ? "," : "";
+			autoCoordinatorsKey += autoCoordinatorsKey.empty() ? "" : ",";
 			autoCoordinatorsKey += address.toString();
 		}
 	}
@@ -2419,7 +2419,7 @@ static Future<RangeResult> actorLineageGetRangeActor(ReadYourWritesTransaction* 
 			result.push_back_deep(result.arena(), KeyValueRef(streamKey.str(), stream.str()));
 		}
 
-		if (sample.data.size() == 0) {
+		if (sample.data.empty()) {
 			std::ostringstream streamKey;
 			if (SpecialKeySpace::getActorLineageApiCommandRange("state").contains(kr)) {
 				streamKey << SpecialKeySpace::getActorLineageApiCommandPrefix("state").toString() << host.toString()
@@ -2818,7 +2818,7 @@ Future<Optional<std::string>> excludeLocalityCommitActor(ReadYourWritesTransacti
 	auto force = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
 	    failed ? "failed_locality" : "excluded_locality", "force")];
 	// only do safety check when we have localities to be excluded and the force option key is not set
-	if (localities.size() && !(force.first && force.second.present())) {
+	if (!localities.empty() && !(force.first && force.second.present())) {
 		bool safe = co_await checkExclusion(ryw->getDatabase(), addresses, exclusions, localities, failed, &result);
 		if (!safe)
 			co_return result;
@@ -2888,8 +2888,6 @@ Future<Optional<std::string>> FailedLocalitiesRangeImpl::commit(ReadYourWritesTr
 	return excludeLocalityCommitActor(ryw, true);
 }
 
-// Defined in ReadYourWrites.actor.cpp
-Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> const& clusterRecord);
 // Defined in NativeAPI.actor.cpp
 Future<bool> verifyInterfaceActor(Reference<FlowLock> const& connectLock, ClientWorkerInterface const& workerInterf);
 
@@ -2972,7 +2970,7 @@ Future<Void> validateSpecialSubrangeRead(ReadYourWritesTransaction* ryw,
                                          GetRangeLimits limits,
                                          Reverse reverse,
                                          RangeResult result) {
-	if (!result.size()) {
+	if (result.empty()) {
 		RangeResult testResult = co_await ryw->getRange(begin, end, limits, Snapshot::True, reverse);
 		ASSERT(testResult == result);
 		co_return;

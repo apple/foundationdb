@@ -390,7 +390,11 @@ class Summary:
             return
         self.summarize_files(trace_files[0])
         # Skip write_coverage for old binaries in restarting tests
-        if config.joshua_dir is not None and not self.is_old_binary:
+        if (
+            config.joshua_dir is not None
+            and not self.is_old_binary
+            and not config.disable_code_probes
+        ):
             import test_harness.fdb
 
             test_harness.fdb.write_coverage(
@@ -424,7 +428,7 @@ class Summary:
         return (not self.error) != self.is_negative_test
 
     def done(self):
-        if config.print_coverage:
+        if config.print_coverage and not config.disable_code_probes:
             for k, v in self.coverage.items():
                 child = SummaryTree("CodeCoverage")
                 child.attributes["File"] = k.file
@@ -499,6 +503,13 @@ class Summary:
                     "WARNING: ASan doesn't fully support makecontext/swapcontext functions and may produce false positives in some cases!"
                 ):
                     # When running ASAN we expect to see this message. Boost coroutine should be using the correct asan annotations so that it shouldn't produce any false positives.
+                    continue
+                if "WARNING: ASan is ignoring requested __asan_handle_no_return: stack type:" in line:
+                    # ASAN emits this with makecontext/swapcontext coroutine stacks.
+                    continue
+                if line == "False positive error reports may follow":
+                    continue
+                if line == "For details see https://github.com/google/sanitizers/issues/189":
                     continue
                 if line.endswith("Warning: unimplemented fcntl command: 1036"):
                     # Valgrind produces this warning when F_SET_RW_HINT is used
@@ -695,6 +706,8 @@ class Summary:
         self.handler.add_handler(("Severity", "40"), parse_error)
 
         def coverage(attrs: Dict[str, str]):
+            if config.disable_code_probes:
+                return
             covered = True
             if "Covered" in attrs:
                 covered = int(attrs["Covered"]) != 0

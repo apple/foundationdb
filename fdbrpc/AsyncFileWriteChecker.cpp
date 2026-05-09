@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/AsyncFileWriteChecker.h"
+#include "AsyncFileWriteChecker.h"
 #include "flow/UnitTest.h"
 
 Optional<int> AsyncFileWriteChecker::checksumHistoryBudget = {};
@@ -62,7 +62,7 @@ private:
 	}
 
 public:
-	LRU2(std::string _fileName) {
+	explicit LRU2(std::string _fileName) {
 		fileName = _fileName;
 		maxFullPagePlusOne = 0;
 		start = new node(0, AsyncFileWriteChecker::WriteInfo());

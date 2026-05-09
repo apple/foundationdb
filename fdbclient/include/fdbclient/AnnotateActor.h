@@ -33,7 +33,7 @@ struct AnnotateActor {
 
 	AnnotateActor() : set(false) {}
 
-	AnnotateActor(LineageReference* lineage) : set(false) {
+	explicit AnnotateActor(LineageReference* lineage) : set(false) {
 #ifdef ENABLE_SAMPLING
 		if (lineage->getPtr() != 0) {
 			index = g_network->getActorLineageSet().insert(*lineage);

@@ -113,6 +113,18 @@ var _ = Describe("[api] FDBVersion", func() {
 			Expect(err.Error()).To(Equal("could not parse FDB version from 6.2"))
 		})
 
+		It("should marshal and unmarshal JSON strings", func() {
+			version := Version{Major: 7, Minor: 1, Patch: 0, ReleaseCandidate: 39}
+			data, err := json.Marshal(&version)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(data).To(Equal([]byte(`"7.1.0-rc39"`)))
+
+			var decoded Version
+			err = json.Unmarshal(data, &decoded)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(decoded).To(Equal(version))
+		})
+
 		It("should format the version correctly", func() {
 			version := Version{Major: 6, Minor: 2, Patch: 11}
 			Expect(version.String()).To(Equal("6.2.11"))

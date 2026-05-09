@@ -312,7 +312,7 @@ Future<Void> Ratekeeper::monitorHotShards(Reference<AsyncVar<ServerDBInfo> const
 			TraceEvent(SevWarn, "CannotMonitorHotShardForSS").detail("SS", ssi);
 			continue;
 		}
-		if (!setReq.throttledShards.size()) {
+		if (setReq.throttledShards.empty()) {
 			continue;
 		}
 		setReq.expirationTime = now() + SERVER_KNOBS->HOT_SHARD_THROTTLING_EXPIRE_AFTER;
@@ -390,13 +390,13 @@ Future<Void> Ratekeeper::handleGetRateInfoReqs(RatekeeperInterface rkInterf,
 			if (SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES) {
 				auto proxyThrottledTags = tagThrottler->getProxyRates(grvProxyInfo.size());
 				if (!SERVER_KNOBS->GLOBAL_TAG_THROTTLING_REPORT_ONLY) {
-					returningTagsToProxy = proxyThrottledTags.size() > 0;
+					returningTagsToProxy = !proxyThrottledTags.empty();
 					reply.proxyThrottledTags = std::move(proxyThrottledTags);
 				}
 			} else {
 				auto clientThrottledTags = tagThrottler->getClientRates();
 				if (!SERVER_KNOBS->GLOBAL_TAG_THROTTLING_REPORT_ONLY) {
-					returningTagsToProxy = clientThrottledTags.size() > 0;
+					returningTagsToProxy = !clientThrottledTags.empty();
 					reply.clientThrottledTags = std::move(clientThrottledTags);
 				}
 			}
@@ -594,8 +594,7 @@ Ratekeeper::Ratekeeper(UID id, Database db)
                                                                     SERVER_KNOBS->TARGET_BYTES_PER_TLOG,
                                                                     SERVER_KNOBS->SPRING_BYTES_TLOG,
                                                                     SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE,
-                                                                    SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS,
-                                                                    SERVER_KNOBS->TARGET_BW_LAG),
+                                                                    SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS),
     batchLimits(TransactionPriority::BATCH,
                 "Batch",
                 SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER_BATCH,
@@ -603,9 +602,8 @@ Ratekeeper::Ratekeeper(UID id, Database db)
                 SERVER_KNOBS->TARGET_BYTES_PER_TLOG_BATCH,
                 SERVER_KNOBS->SPRING_BYTES_TLOG_BATCH,
                 SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH,
-                SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH,
-                SERVER_KNOBS->TARGET_BW_LAG_BATCH),
-    maxVersion(0), blobWorkerTime(now()), unblockedAssignmentTime(now()), anyBlobRanges(false) {
+                SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH),
+    maxVersion(0), unblockedAssignmentTime(now()) {
 	if (SERVER_KNOBS->GLOBAL_TAG_THROTTLING) {
 		tagThrottler = std::make_unique<GlobalTagThrottler>(
 		    db, id, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND, SERVER_KNOBS->GLOBAL_TAG_THROTTLING_LIMITING_THRESHOLD);
@@ -638,7 +636,7 @@ static std::string getIgnoredZonesReasons(
 		}
 		ignoredZoneReasons += "] ";
 	}
-	return ignoredZoneReasons.length() ? ignoredZoneReasons : "None";
+	return !ignoredZoneReasons.empty() ? ignoredZoneReasons : "None";
 }
 
 void Ratekeeper::updateRate(RatekeeperLimits* limits) {

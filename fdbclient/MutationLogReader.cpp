@@ -170,7 +170,7 @@ Future<Standalone<RangeResultRef>> MutationLogReader::getNext_impl(MutationLogRe
 		} else {
 			self->priorityQueue.push(top);
 		}
-		if (ret.size() != 0) {
+		if (!ret.empty()) {
 			co_return ret;
 		}
 	}

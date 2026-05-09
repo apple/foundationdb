@@ -35,7 +35,7 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 	Optional<int32_t> originalNumOfResolvers;
 	Optional<int32_t> currentNumOfResolvers;
 
-	TriggerRecoveryLoopWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit TriggerRecoveryLoopWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		startTime = getOption(options, "startTime"_sr, 0.0);
 		numRecoveries = getOption(options, "numRecoveries"_sr, deterministicRandom()->randomInt(1, 10));
 		delayBetweenRecoveries = getOption(options, "delayBetweenRecoveries"_sr, 0.0);
@@ -119,7 +119,7 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 					                   .removePrefix("\xff\xff/worker_interfaces/"_sr);
 					address_interface[ip_port] = it.value;
 				}
-				for (auto it : address_interface) {
+				for (const auto& it : address_interface) {
 					if (cx->apiVersionAtLeast(700))
 						BinaryReader::fromStringRef<ClientWorkerInterface>(it.second, IncludeVersion())
 						    .reboot.send(RebootRequest());

@@ -51,7 +51,7 @@ Future<Void> printHealthyZone(Reference<IDatabase> db) {
 			if (res.size() == 1 && res[0].key == fdb_cli::ignoreSSFailureSpecialKey) {
 				printf("Data distribution has been disabled for all storage server failures in this cluster and thus "
 				       "maintenance mode is not active.\n");
-			} else if (!res.size() || boost::lexical_cast<double>(res[0].value.toString()) <= 0) {
+			} else if (res.empty() || boost::lexical_cast<double>(res[0].value.toString()) <= 0) {
 				printf("No ongoing maintenance.\n");
 			} else {
 				std::string zoneId = res[0].key.removePrefix(fdb_cli::maintenanceSpecialKeyRange.begin).toString();

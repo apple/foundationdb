@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/tester/KnobProtectiveGroups.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.h"
@@ -64,8 +65,8 @@ public:
 		waitForQuiescenceEnd = true;
 		simCheckRelocationDuration = false;
 		simConnectionFailuresDisableDuration = 0;
-		simBackupAgents = ISimulator::BackupAgentType::NoBackupAgents;
-		simDrAgents = ISimulator::BackupAgentType::NoBackupAgents;
+		simBackupAgents = FDBBackupAgentType::NoBackupAgents;
+		simDrAgents = FDBBackupAgentType::NoBackupAgents;
 		restorePerpetualWiggleSetting = true;
 	}
 	TestSpec(StringRef title,
@@ -78,8 +79,8 @@ public:
 	    databasePingDelay(databasePingDelay), runConsistencyCheck(g_network->isSimulated()),
 	    runConsistencyCheckOnCache(false), runConsistencyCheckOnTSS(false), waitForQuiescenceBegin(true),
 	    waitForQuiescenceEnd(true), restorePerpetualWiggleSetting(true), simCheckRelocationDuration(false),
-	    simConnectionFailuresDisableDuration(0), simBackupAgents(ISimulator::BackupAgentType::NoBackupAgents),
-	    simDrAgents(ISimulator::BackupAgentType::NoBackupAgents) {
+	    simConnectionFailuresDisableDuration(0), simBackupAgents(FDBBackupAgentType::NoBackupAgents),
+	    simDrAgents(FDBBackupAgentType::NoBackupAgents) {
 		phases = TestWorkload::SETUP | TestWorkload::EXECUTION | TestWorkload::CHECK | TestWorkload::METRICS;
 		if (databasePingDelay < 0)
 			databasePingDelay = g_network->isSimulated() ? 0.0 : 15.0;
@@ -104,8 +105,8 @@ public:
 	bool restorePerpetualWiggleSetting;
 	bool simCheckRelocationDuration;
 	double simConnectionFailuresDisableDuration;
-	ISimulator::BackupAgentType simBackupAgents;
-	ISimulator::BackupAgentType simDrAgents;
+	FDBBackupAgentType simBackupAgents;
+	FDBBackupAgentType simDrAgents;
 
 	KnobKeyValuePairs overrideKnobs;
 	std::vector<std::string> disabledFailureInjectionWorkloads;

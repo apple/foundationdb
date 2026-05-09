@@ -18,14 +18,9 @@
  * limitations under the License.
  */
 
-#include "fdbclient/FDBTypes.h"
-#include "fdbclient/ManagementAPI.h"
-#include "fdbclient/ReadYourWrites.h"
-#include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupContainerFileSystem.h"
-#include "fdbserver/core/Knobs.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbserver/tester/TestEncryptionUtils.h"
 
@@ -43,7 +38,7 @@ struct SubmitBackupWorkload : TestWorkload {
 	IncrementalBackupOnly incremental{ false };
 	Optional<std::string> encryptionKeyFileName;
 
-	SubmitBackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit SubmitBackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		backupDir = getOption(options, "backupDir"_sr, "file://simfdb/backups/"_sr);
 		tag = getOption(options, "tag"_sr, "default"_sr);
 		delayFor = getOption(options, "delayFor"_sr, 10.0);
@@ -75,9 +70,11 @@ struct SubmitBackupWorkload : TestWorkload {
 			                                  tag.toString(),
 			                                  backupRanges,
 			                                  stopWhenDone,
-			                                  UsePartitionedLog::False,
+			                                  MutationLogType::DEFAULT,
 			                                  incremental,
-			                                  encryptionKeyFileName);
+			                                  encryptionKeyFileName,
+			                                  encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0,
+			                                  0);
 		} catch (Error& e) {
 			TraceEvent("BackupSubmitError").error(e);
 			if (e.code() != error_code_backup_duplicate) {

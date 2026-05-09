@@ -56,7 +56,6 @@
 #include "flow/SimpleCounter.h"
 #include "flow/StreamCipher.h"
 #include "flow/Trace.h"
-#include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/Util.h"
 
@@ -117,7 +116,6 @@ static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<u
 /* Needed for memory allocation */
 #include <linux/mman.h>
 /* Needed for processor affinity */
-#include <sched.h>
 /* Needed for getProcessorTime* and setpriority */
 #include <sys/syscall.h>
 /* Needed for setpriority */
@@ -163,6 +161,7 @@ static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<u
 
 #ifdef __APPLE__
 /* Needed for cross-platform 'environ' */
+#include <sys/random.h>
 #include <crt_externs.h>
 #include <mach-o/dyld.h>
 #include <mach/mach.h>
@@ -172,6 +171,8 @@ static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<u
 #include <netinet/in.h>
 #include <sys/mount.h>
 #include <sys/param.h>
+/* Needed for getentropy() */
+#include <sys/random.h>
 #include <sys/sysctl.h>
 #include <sys/syslimits.h>
 #include <sys/uio.h>
@@ -1572,7 +1573,7 @@ SystemStatistics getSystemStatistics(std::string const& dataFolder,
 	returnStats.machineCommittedRAM = memInfo.committed;
 	returnStats.machineAvailableRAM = memInfo.available;
 
-	if (dataFolder != "") {
+	if (!dataFolder.empty()) {
 		int64_t diskTotal, diskFree;
 		getDiskBytes(dataFolder, diskFree, diskTotal);
 		returnStats.processDiskTotalBytes = diskTotal;
@@ -1733,7 +1734,7 @@ SystemStatistics getSystemStatistics(std::string const& dataFolder,
 
 	(*statState)->machineLastRetransSegs = machineRetransSegs;
 
-	if (dataFolder != "") {
+	if (!dataFolder.empty()) {
 		DiskStatistics currentDiskStats = getDiskStatistics(dataFolder);
 
 		returnStats.processDiskQueueDepth = currentDiskStats.currentIOs;
@@ -2203,39 +2204,62 @@ void setAffinity(int proc) {
 
 namespace platform {
 
-int getRandomSeed() {
+uint64_t getRandomSeed() {
 	INJECT_FAULT(platform_error, "getRandomSeed"); // getting a random seed failed
-	int randomSeed;
-
+	uint64_t randomSeed;
 #ifdef _WIN32
-	if (rand_s((unsigned int*)&randomSeed) != 0) {
+	uint32_t high, low;
+	if (rand_s(&low) != 0 || rand_s(&high) != 0 {
 		TraceEvent(SevError, "WindowsRandomSeedError").log();
 		throw platform_error();
 	}
+	randomSeed = (uint64_t(high) << 32) | uint64_t(low);
 #else
-	int devRandom = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
-	if (devRandom == -1) {
-		TraceEvent(SevError, "OpenURandom").GetLastError();
-		throw platform_error();
-	}
-	int nbytes = read(devRandom, &randomSeed, sizeof(randomSeed));
-	close(devRandom);
-	if (nbytes != sizeof(randomSeed)) {
-		TraceEvent(SevError, "ReadURandom").GetLastError();
+	if (getentropy(&randomSeed, sizeof(randomSeed)) != 0) {
+		TraceEvent(SevError, "GetEntropyError").GetLastError();
 		throw platform_error();
 	}
 #endif
-
 	return randomSeed;
 }
+
+void getRandomBytes(void* buf, size_t len) {
+	INJECT_FAULT(platform_error, "getRandomBytes"); // getting random bytes failed
+	ASSERT(len == 0 || buf != nullptr);
+#ifdef _WIN32
+	size_t pos = 0;
+	while (pos < len) {
+		unsigned int val;
+		if (rand_s(&val) != 0) {
+			TraceEvent(SevError, "WindowsRandomBytesError").log();
+			throw platform_error();
+		}
+		size_t chunk = std::min(sizeof(val), len - pos);
+		memcpy(static_cast<uint8_t*>(buf) + pos, &val, chunk);
+		pos += chunk;
+	}
+#else
+	uint8_t* p = static_cast<uint8_t*>(buf);
+	while (len > 0) {
+		size_t chunk = std::min(len, size_t(256));
+		if (getentropy(p, chunk) != 0) {
+			TraceEvent(SevError, "GetEntropyError").detail("Errno", errno);
+			throw platform_error();
+		}
+		p += chunk;
+		len -= chunk;
+	}
+#endif
+}
+
 } // namespace platform
 
 std::string joinPath(std::string const& directory, std::string const& filename) {
 	auto d = directory;
 	auto f = filename;
-	while (f.size() && (f[0] == '/' || f[0] == CANONICAL_PATH_SEPARATOR))
+	while (!f.empty() && (f[0] == '/' || f[0] == CANONICAL_PATH_SEPARATOR))
 		f = f.substr(1);
-	while (d.size() && (d.back() == '/' || d.back() == CANONICAL_PATH_SEPARATOR))
+	while (!d.empty() && (d.back() == '/' || d.back() == CANONICAL_PATH_SEPARATOR))
 		d.resize(d.size() - 1);
 	return d + CANONICAL_PATH_SEPARATOR + f;
 }
@@ -2477,9 +2501,9 @@ std::string cleanPath(std::string const& path) {
 
 	StringRef p(path);
 
-	while (p.size() != 0) {
+	while (!p.empty()) {
 		StringRef part = p.eat(separator);
-		if (part.size() == 0 || (part.size() == 1 && part[0] == '.'))
+		if (part.empty() || (part.size() == 1 && part[0] == '.'))
 			continue;
 		if (part == dotdot) {
 			if (!finalParts.empty() && finalParts.back() != dotdot) {

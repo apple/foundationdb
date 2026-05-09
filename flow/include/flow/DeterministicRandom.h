@@ -43,19 +43,15 @@ class SWIFT_CXX_REF_DETERMINISTICRANDOM DeterministicRandom final : public IRand
 private:
 	// Use boost::random::mt19937 to get consistent output across
 	// different compilers and therefore across different C++ standard
-	// library implementations. In other words, don't rely on the
-	// standard library for this.
-	//
-	// This is not expected to affect performance.  See e.g.
-	// https://chatgpt.com/share/68800ee9-3270-800b-aa84-4567167f02ab
-	boost::random::mt19937 rng;
+	// library implementations.
+	boost::random::mt19937_64 rng;
 	uint64_t next;
 	bool useRandLog;
 
 	uint64_t gen64();
 
 public:
-	DeterministicRandom(uint32_t seed, bool useRandLog = false);
+	DeterministicRandom(uint64_t seed, bool useRandLog = false);
 	double random01() override;
 	int randomInt(int min, int maxPlusOne) override;
 	int64_t randomInt64(int64_t min, int64_t maxPlusOne) override;
@@ -68,7 +64,7 @@ public:
 	void randomBytes(uint8_t* buf, int length) override;
 	bool truePercent(const int percent) override;
 	uint64_t peek() const override;
-	void resetSeed(uint32_t seed) override; // Reset the random number generator with a new seed
+	void resetSeed(uint64_t seed) override; // Reset the random number generator with a new seed
 	void addref() override;
 	void delref() override;
 };

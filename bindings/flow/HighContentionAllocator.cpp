@@ -28,7 +28,7 @@ Future<Standalone<StringRef>> _allocate(Reference<Transaction> tr, Subspace coun
 	while (true) {
 		FDBStandalone<RangeResultRef> range = co_await tr->getRange(counters.range(), 1, true, true);
 
-		if (range.size() > 0) {
+		if (!range.empty()) {
 			start = counters.unpack(range[0].key).getInt(0);
 		}
 
@@ -77,7 +77,7 @@ Future<Standalone<StringRef>> _allocate(Reference<Transaction> tr, Subspace coun
 
 			co_await (success(latestCounter) && success(candidateValue));
 			int64_t currentWindowStart = 0;
-			if (latestCounter.get().size() > 0) {
+			if (!latestCounter.get().empty()) {
 				currentWindowStart = counters.unpack(latestCounter.get()[0].key).getInt(0);
 			}
 
