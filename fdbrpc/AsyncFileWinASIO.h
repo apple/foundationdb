@@ -69,7 +69,7 @@ public:
 			    .detail("Mode", mode);
 			return e;
 		}
-		return makeReference<AsyncFileWinASIO>(*ios, h, flags, filename);
+		return Reference<IAsyncFile>(makeReference<AsyncFileWinASIO>(*ios, h, flags, filename));
 	}
 	static Future<Void> deleteFile(std::string filename, bool mustBeDurable) {
 		::deleteFile(filename);
@@ -197,6 +197,9 @@ public:
 	~AsyncFileWinASIO() {}
 
 private:
+	template <class P, class... Args>
+	friend Reference<P> makeReference(Args&&... args);
+
 	boost::asio::windows::random_access_handle file;
 	int flags;
 	std::string filename;

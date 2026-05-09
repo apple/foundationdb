@@ -2554,7 +2554,7 @@ Future<Reference<IUDPSocket>> Sim2::createUDPSocket(NetworkAddress toAddr) {
 	while (process->boundUDPSockets.find(localAddress) != process->boundUDPSockets.end()) {
 		localAddress.port = deterministicRandom()->randomInt(40000, 60000);
 	}
-	return makeReference<UDPSimSocket>(localAddress, toAddr);
+	return Reference<IUDPSocket>(makeReference<UDPSimSocket>(localAddress, toAddr));
 }
 
 Future<Reference<IUDPSocket>> Sim2::createUDPSocket(bool isV6) {
