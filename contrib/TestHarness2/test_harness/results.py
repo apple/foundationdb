@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import collections
 import io
 import json
 import re
@@ -28,9 +29,14 @@ class EnsembleResults:
         self.fdb_path = ("joshua", "ensembles", "results", "application", ensemble_id)
         self.coverage_path = self.fdb_path + ("coverage",)
         self.statistics = test_harness.fdb.Statistics(cluster_file, self.fdb_path)
-        coverage_dict: OrderedDict[Coverage, int] = test_harness.fdb.read_coverage(
-            cluster_file, self.coverage_path
-        )
+        self.code_probe_tracking_enabled = not config.disable_code_probes
+        coverage_dict: OrderedDict[Coverage, int]
+        if self.code_probe_tracking_enabled:
+            coverage_dict = test_harness.fdb.read_coverage(
+                cluster_file, self.coverage_path
+            )
+        else:
+            coverage_dict = collections.OrderedDict()
         self.coverage: List[Tuple[Coverage, int]] = []
         self.min_coverage_hit: int | None = None
         self.ratio = self.global_statistics.total_test_runs / config.hit_per_runs_ratio
@@ -54,7 +60,9 @@ class EnsembleResults:
             self.global_statistics.total_cpu_time += v.runtime
             self.stats.append((k, v.runtime, v.run_count))
         self.stats.sort(key=lambda x: x[1], reverse=True)
-        if self.min_coverage_hit is not None:
+        if not self.code_probe_tracking_enabled:
+            self.coverage_ok = True
+        elif self.min_coverage_hit is not None:
             self.coverage_ok = self.min_coverage_hit > self.ratio
         else:
             self.coverage_ok = False
@@ -64,6 +72,9 @@ class EnsembleResults:
         out = SummaryTree("EnsembleResults")
         out.attributes["TotalRuntime"] = str(self.global_statistics.total_cpu_time)
         out.attributes["TotalTestRuns"] = str(self.global_statistics.total_test_runs)
+        out.attributes["CodeProbeTrackingEnabled"] = (
+            "1" if self.code_probe_tracking_enabled else "0"
+        )
         out.attributes["TotalProbesHit"] = str(self.global_statistics.total_probes_hit)
         out.attributes["MinProbeHit"] = str(self.min_coverage_hit)
         out.attributes["TotalProbes"] = str(len(self.coverage))
