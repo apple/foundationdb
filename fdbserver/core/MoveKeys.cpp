@@ -1593,7 +1593,7 @@ static Future<Void> finishMoveKeys(Database occ,
 						readyServersEv.detail("ReadyTSS", tssCount);
 					}
 
-				if (count == dest.size()) {
+					if (count == dest.size()) {
 						// update keyServers, serverKeys
 						// SOMEDAY: Doing these in parallel is safe because none of them overlap or touch (one per
 						// server)
