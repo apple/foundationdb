@@ -2441,7 +2441,7 @@ public:
 	    peerAddress(peerAddress), actors(false), _localAddress(localAddress) {
 		g_sim2.addressMap.emplace(_localAddress, process);
 		ASSERT(process->boundUDPSockets.find(localAddress) == process->boundUDPSockets.end());
-		process->boundUDPSockets.emplace(localAddress, this);
+		process->boundUDPSockets.emplace(localAddress, Reference<IUDPSocket>::addRef(this));
 	}
 	~UDPSimSocket() override {
 		if (!closed.getFuture().isReady()) {

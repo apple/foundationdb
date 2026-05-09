@@ -21,12 +21,9 @@
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
-#include "flow/Util.h"
 #include "flow/serialize.h"
 #include "fdbrpc/HTTP.h"
 #include "fdbserver/tester/workloads.h"
-#include <cstring>
-#include <limits>
 
 /*
  * Implements a basic put/get key-value store over HTTP to test the http client and simulated server code.

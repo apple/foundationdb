@@ -18,8 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ActorFuzz.h"
-#include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.h"
 
 Future<Void> sleepyActor(double interval, int* counter) {

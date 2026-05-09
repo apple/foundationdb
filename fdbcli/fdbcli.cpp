@@ -865,6 +865,8 @@ void LogCommand(std::string line, UID randomID, std::string errMsg) {
 }
 
 struct CLIOptions {
+	static constexpr int DEFERRED_EXIT_CODE = -2;
+
 	std::string program_name;
 	int exit_code = -1;
 
@@ -877,6 +879,7 @@ struct CLIOptions {
 	std::string logGroup;
 	int exit_timeout = 0;
 	Optional<std::string> exec;
+	Optional<std::string> statusJsonFile;
 	bool initialStatusCheck = true;
 	bool cliHints = true;
 	bool cliHistory = true;
@@ -907,12 +910,15 @@ struct CLIOptions {
 
 		while (args.Next()) {
 			int ec = processArg(args);
+			if (ec == DEFERRED_EXIT_CODE) {
+				return;
+			}
 			if (ec != -1) {
 				exit_code = ec;
 				return;
 			}
 		}
-		if (exit_timeout && !exec.present()) {
+		if (exit_timeout && !exec.present() && !statusJsonFile.present()) {
 			fprintf(stderr, "ERROR: --timeout may only be specified with --exec\n");
 			exit_code = FDB_EXIT_ERROR;
 			return;
@@ -1018,7 +1024,8 @@ struct CLIOptions {
 			printProgramUsage(program_name.c_str());
 			return 0;
 		case OPT_STATUS_FROM_JSON:
-			return printStatusFromJSON(args.OptionArg());
+			statusJsonFile = args.OptionArg();
+			return DEFERRED_EXIT_CODE;
 		case OPT_TRACE_FORMAT:
 			if (!validateTraceFormat(args.OptionArg())) {
 				fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
@@ -2134,6 +2141,21 @@ int main(int argc, char** argv) {
 	} catch (Error& e) {
 		fprintf(stderr, "ERROR: cannot disable logging client related information (%s)\n", e.what());
 		return 1;
+	}
+
+	if (opt.statusJsonFile.present()) {
+		try {
+			API->selectApiVersion(opt.apiVersion);
+			if (opt.useFutureProtocolVersion) {
+				API->useFutureProtocolVersion();
+			}
+			API->setupNetwork();
+			opt.setupKnobs();
+			return printStatusFromJSON(opt.statusJsonFile.get());
+		} catch (Error& e) {
+			fprintf(stderr, "ERROR: %s (%d)\n", e.what(), e.code());
+			return 1;
+		}
 	}
 
 	if (opt.debugTLS) {

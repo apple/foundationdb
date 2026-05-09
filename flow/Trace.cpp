@@ -28,12 +28,10 @@
 #include "flow/DeterministicRandom.h"
 #include "flow/ProcessEvents.h"
 #include <exception>
-#include <stdlib.h>
 #include <stdarg.h>
 #include <cctype>
 #include <time.h>
 #include <set>
-#include <unordered_set>
 #include <string_view>
 #include <iomanip>
 #include "flow/IThreadPool.h"
@@ -43,7 +41,6 @@
 #include "flow/TDMetric.h"
 #include "MetricSample.h"
 #include "flow/network.h"
-#include "flow/SimBugInjector.h"
 
 #ifdef _WIN32
 #include <windows.h>

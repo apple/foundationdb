@@ -22,7 +22,6 @@
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "fdbrpc/simulator.h"
-#include "fdbrpc/SimulatorProcessInfo.h"
 Future<Void> callbackHandler(Reference<IConnection> conn,
                              Future<Void> readRequestDone,
                              Reference<HTTP::IRequestHandler> requestHandler,
