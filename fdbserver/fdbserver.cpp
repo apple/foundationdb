@@ -367,7 +367,9 @@ UID getSharedMemoryMachineId() {
 #endif
 }
 
-Future<Void> failAfter(Future<Void> trigger, ISimulator::ProcessInfo* m = g_simulator->getCurrentProcess()) {
+Future<Void> failAfter(Uncancellable,
+                       Future<Void> trigger,
+                       ISimulator::ProcessInfo* m = g_simulator->getCurrentProcess()) {
 	co_await trigger;
 	if (enableFailures) {
 		printf("Killing machine: %s at %f\n", m->address.toString().c_str(), now());
@@ -377,11 +379,11 @@ Future<Void> failAfter(Future<Void> trigger, ISimulator::ProcessInfo* m = g_simu
 
 void failAfter(Future<Void> trigger, Endpoint e) {
 	if (g_network == g_simulator)
-		failAfter(trigger, g_simulator->getProcess(e));
+		failAfter(Uncancellable(), trigger, g_simulator->getProcess(e));
 }
 
 #ifdef WITH_SWIFT
-Future<Void> swiftTestRunner() {
+Future<Void> swiftTestRunner(Uncancellable) {
 	auto p = PromiseVoid();
 	fdbserver_swift::swiftyTestRunner(p);
 	co_await p.getFuture();
@@ -2069,7 +2071,7 @@ int main(int argc, char* argv[]) {
 #if WITH_SWIFT
 			// Set FDBSWIFTTEST env variable to execute some simple Swift/Flow interop tests.
 			if (SERVER_KNOBS->FLOW_WITH_SWIFT && getenv("FDBSWIFTTEST")) {
-				swiftTestRunner(); // spawns actor that will call Swift functions
+				swiftTestRunner(Uncancellable()); // spawns coroutine that will call Swift functions
 			}
 #endif
 
