@@ -158,7 +158,7 @@ TEST_CASE("/flow/simplecounter/int64") {
 	// NOTE: the following is written as >= 103 and not == 103 because
 	// "unit tests" actually run in fdbserver, so any background
 	// logic, like for example simpleCounterReport() being called
-	// above from fdbserver.actor.cpp, will affect the execution
+	// above from fdbserver.cpp, will affect the execution
 	// environment.
 	ASSERT(intCounters.size() >= 103);
 
