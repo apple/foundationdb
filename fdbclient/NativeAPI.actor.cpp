@@ -2990,7 +2990,7 @@ template <class Request, bool P>
 Optional<TSSDuplicateStreamData<REPLYSTREAM_TYPE(Request)>>
 maybeDuplicateTSSStreamFragment(Request& req, QueueModel* model, RequestStream<Request, P> const* ssStream) {
 	if (model) {
-		Optional<TSSEndpointData> tssData = model->getTssData(ssStream->getEndpoint().token.first());
+		Optional<TSSEndpointData> tssData = getTssData(model, ssStream->getEndpoint().token.first());
 
 		if (tssData.present()) {
 			CODE_PROBE(true, "duplicating stream to TSS");

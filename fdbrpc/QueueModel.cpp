@@ -60,18 +60,18 @@ double QueueModel::addRequest(uint64_t id) {
 	return d.penalty;
 }
 
-void QueueModel::updateTssEndpoint(uint64_t endpointId, const TSSEndpointData& tssData) {
+void QueueModel::updateEndpointData(uint64_t endpointId, Reference<QueueModelEndpointData> endpointData) {
 	auto& d = data[endpointId];
-	d.tssData = tssData;
+	d.endpointData = endpointData;
 }
 
-void QueueModel::removeTssEndpoint(uint64_t endpointId) {
+void QueueModel::removeEndpointData(uint64_t endpointId) {
 	auto& d = data[endpointId];
-	d.tssData = Optional<TSSEndpointData>();
+	d.endpointData.clear();
 }
 
-Optional<TSSEndpointData> QueueModel::getTssData(uint64_t id) {
-	return data[id].tssData;
+Reference<QueueModelEndpointData> QueueModel::getEndpointData(uint64_t id) {
+	return data[id].endpointData;
 }
 
 Optional<LoadBalancedReply> getLoadBalancedReply(const LoadBalancedReply* reply) {

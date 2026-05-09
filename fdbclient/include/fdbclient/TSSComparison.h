@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-// Shared declarations for the storage-server comparison helpers implemented in StorageServerInterface.cpp.
-#ifndef FDBRPC_TSS_COMPARISON_H
-#define FDBRPC_TSS_COMPARISON_H
+#ifndef FDBCLIENT_TSS_COMPARISON_H
+#define FDBCLIENT_TSS_COMPARISON_H
 
+#include "fdbrpc/QueueModel.h"
 #include "fdbrpc/Stats.h"
 #include <unordered_map>
 
@@ -107,6 +107,27 @@ struct TSSMetrics : ReferenceCounted<TSSMetrics>, NonCopyable {
 	    SSgetMappedKeyValuesLatency(), TSSgetValueLatency(), TSSgetKeyLatency(), TSSgetKeyValuesLatency(),
 	    TSSgetMappedKeyValuesLatency() {}
 };
+
+struct TSSEndpointData {
+	UID tssId;
+	Endpoint endpoint;
+	Reference<TSSMetrics> metrics;
+
+	TSSEndpointData(UID tssId, Endpoint endpoint, Reference<TSSMetrics> metrics)
+	  : tssId(tssId), endpoint(endpoint), metrics(metrics) {}
+};
+
+struct TSSQueueModelEndpointData : QueueModelEndpointData {
+	TSSEndpointData data;
+
+	explicit TSSQueueModelEndpointData(TSSEndpointData data) : data(data) {}
+};
+
+inline Optional<TSSEndpointData> getTssData(QueueModel* model, uint64_t endpointId) {
+	Reference<QueueModelEndpointData> endpointData = model->getEndpointData(endpointId);
+	return endpointData ? Optional<TSSEndpointData>(endpointData.castTo<TSSQueueModelEndpointData>()->data)
+	                    : Optional<TSSEndpointData>();
+}
 
 template <class Rep>
 bool TSS_doCompare(const Rep& src, const Rep& tss);

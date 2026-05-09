@@ -371,7 +371,7 @@ struct LoadBalanceRequestHooks<Request, StorageServerInterface, ReferencedInterf
 	                           RequestStream<Request, P> StorageServerInterface::* channel) {
 		if (model) {
 			// Send parallel request to TSS pair, if it exists
-			Optional<TSSEndpointData> tssData = model->getTssData(stream->getEndpoint().token.first());
+			Optional<TSSEndpointData> tssData = getTssData(model, stream->getEndpoint().token.first());
 
 			if (tssData.present()) {
 				CODE_PROBE(true, "duplicating request to TSS");
