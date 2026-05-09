@@ -294,16 +294,17 @@ struct RequestData : NonCopyable {
 // interfaces. If too many interfaces in the same DC are bad, try remote interfaces.
 // If compareReplicas is set, does a consistency check by fetching and comparing results from storage
 // replicas (as many as specified by "requiredReplicas") and throws an exception if an inconsistency is found.
-ACTOR template <class Interface, class Request, class Multi, bool P, class Model = QueueModel>
-Future<REPLY_TYPE(Request)> loadBalance(Reference<MultiInterface<Multi>> alternatives,
-                                        RequestStream<Request, P> Interface::* channel,
-                                        Request request = Request(),
-                                        TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
-                                        // If true, throws request_maybe_delivered() instead of retrying automatically.
-                                        AtMostOnce atMostOnce = AtMostOnce::False,
-                                        Model* model = nullptr,
-                                        bool compareReplicas = false,
-                                        int requiredReplicas = 0) {
+ACTOR template <class Interface, class Request, class Multi, bool P, class Model>
+Future<REPLY_TYPE(Request)> loadBalanceImpl(
+    Reference<MultiInterface<Multi>> alternatives,
+    RequestStream<Request, P> Interface::* channel,
+    Request request = Request(),
+    TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
+    // If true, throws request_maybe_delivered() instead of retrying automatically.
+    AtMostOnce atMostOnce = AtMostOnce::False,
+    Model* model = nullptr,
+    bool compareReplicas = false,
+    int requiredReplicas = 0) {
 
 	state RequestData<Request, Interface, Multi, Model, P> firstRequestData(compareReplicas);
 	state RequestData<Request, Interface, Multi, Model, P> secondRequestData(compareReplicas);
@@ -731,6 +732,21 @@ Future<REPLY_TYPE(Request)> basicLoadBalance(Reference<ModelInterface<Multi>> al
 		nextAlt = (nextAlt + 1) % alternatives->size();
 		resetReply(request, taskID);
 	}
+}
+
+// Keep the legacy public API separate from the actor implementation: actor-generated headers do not preserve default
+// template arguments, so callers without an explicit model need a concrete QueueModel overload here.
+template <class Interface, class Request, class Multi, bool P>
+Future<REPLY_TYPE(Request)> loadBalance(Reference<MultiInterface<Multi>> alternatives,
+                                        RequestStream<Request, P> Interface::* channel,
+                                        Request request = Request(),
+                                        TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
+                                        AtMostOnce atMostOnce = AtMostOnce::False,
+                                        QueueModel* model = nullptr,
+                                        bool compareReplicas = false,
+                                        int requiredReplicas = 0) {
+	return loadBalanceImpl<Interface, Request, Multi, P, QueueModel>(
+	    alternatives, channel, request, taskID, atMostOnce, model, compareReplicas, requiredReplicas);
 }
 
 #include "flow/unactorcompiler.h"

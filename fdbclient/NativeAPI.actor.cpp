@@ -1587,7 +1587,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
     bool compareReplicas = false,
     int requiredReplicas = 0) {
 	if (alternatives->hasCaches) {
-		return loadBalance(
+		return loadBalanceImpl(
 		    alternatives->locations(), channel, request, taskID, atMostOnce, model, compareReplicas, requiredReplicas);
 	}
 	return fmap(
@@ -1597,7 +1597,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 		    }
 		    return res;
 	    },
-	    loadBalance(
+	    loadBalanceImpl(
 	        alternatives->locations(), channel, request, taskID, atMostOnce, model, compareReplicas, requiredReplicas));
 }
 } // namespace
