@@ -36,7 +36,7 @@ struct LowLatencyWorkload : TestWorkload {
 	Key testKey;
 	bool ok;
 
-	LowLatencyWorkload(WorkloadContext const& wcx)
+	explicit LowLatencyWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), operations("Operations"), retries("Retries"), ok(true) {
 		testDuration = getOption(options, "testDuration"_sr, 600.0);
 		maxGRVLatency = getOption(options, "maxGRVLatency"_sr, 20.0);

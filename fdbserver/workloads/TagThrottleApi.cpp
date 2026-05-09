@@ -31,7 +31,7 @@ struct TagThrottleApiWorkload : TestWorkload {
 
 	constexpr static auto NAME = "TagThrottleApi";
 
-	TagThrottleApiWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit TagThrottleApiWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		autoThrottleEnabled = SERVER_KNOBS->AUTO_TAG_THROTTLING_ENABLED;
 	}

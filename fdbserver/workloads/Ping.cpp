@@ -51,7 +51,7 @@ struct PingWorkload : TestWorkload {
 	PerfDoubleCounter totalMessageLatency;
 	PerfDoubleCounter maxMessageLatency;
 
-	PingWorkload(WorkloadContext const& wcx)
+	explicit PingWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), messages("Messages"), totalMessageLatency("TotalLatency"),
 	    maxMessageLatency("Max Latency (ms)") {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);

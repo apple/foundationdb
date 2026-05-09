@@ -45,7 +45,7 @@ struct RestoreWorkload : TestWorkload {
 	bool shouldSkipRestoreRanges;
 	UID randomID;
 
-	RestoreWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit RestoreWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		locked.set(sharedRandomNumber % 2);
 		performRestore = getOption(options, "performRestore"_sr, true);
 		backupTag1 = getOption(options, "backupTag1"_sr, BackupAgentBase::getDefaultTag());

@@ -33,7 +33,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 	std::vector<Future<Void>> clients;
 	PerfIntCounter transactions, retries;
 
-	SelectorCorrectnessWorkload(WorkloadContext const& wcx)
+	explicit SelectorCorrectnessWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries") {
 
 		minOperationsPerTransaction = getOption(options, "minOperationsPerTransaction"_sr, 10);

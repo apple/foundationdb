@@ -30,7 +30,7 @@ namespace {
 
 class ClientReportGenerator {
 public:
-	ClientReportGenerator(DatabaseContext& cx) : cx(cx), healthy(true), numConnectionsFailed(0) {}
+	explicit ClientReportGenerator(DatabaseContext& cx) : cx(cx), healthy(true), numConnectionsFailed(0) {}
 
 	Standalone<StringRef> generateReport() {
 		if (cx.isError()) {

@@ -19,7 +19,6 @@
  */
 
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbclient/ManagementAPI.h"
 
@@ -30,7 +29,7 @@ struct LockDatabaseFrequentlyWorkload : TestWorkload {
 	double testDuration;
 	PerfIntCounter lockCount{ "LockCount" };
 
-	LockDatabaseFrequentlyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit LockDatabaseFrequentlyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		delayBetweenLocks = getOption(options, "delayBetweenLocks"_sr, 0.1);
 		testDuration = getOption(options, "testDuration"_sr, 60);
 	}

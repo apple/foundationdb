@@ -108,7 +108,7 @@ Reference<IRandom> seededDebugRandom;
 uint64_t debug_lastLoadBalanceResultEndpointToken = 0;
 bool noUnseed = false;
 
-void setThreadLocalDeterministicRandomSeed(uint32_t seed) {
+void setThreadLocalDeterministicRandomSeed(uint64_t seed) {
 	seededRandom = Reference<IRandom>(new DeterministicRandom(seed, true));
 	seededDebugRandom = Reference<IRandom>(new DeterministicRandom(seed));
 }
@@ -448,7 +448,7 @@ struct Int {
 	constexpr static FileIdentifier file_identifier = 12345;
 	uint32_t value;
 	Int() = default;
-	Int(uint32_t value) : value(value) {}
+	explicit Int(uint32_t value) : value(value) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, value);

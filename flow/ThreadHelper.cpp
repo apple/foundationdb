@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include <string>
 #include <thread>
 
 #include "flow/flow.h"

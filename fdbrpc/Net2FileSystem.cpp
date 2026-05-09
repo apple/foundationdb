@@ -21,7 +21,6 @@
 #include "fdbrpc/Net2FileSystem.h"
 
 // Define boost::asio::io_service
-#include <algorithm>
 #ifndef BOOST_SYSTEM_NO_LIB
 #define BOOST_SYSTEM_NO_LIB
 #endif

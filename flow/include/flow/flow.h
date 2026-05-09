@@ -126,10 +126,10 @@ public:
 	using ValueType = T;
 
 	ErrorOr() : ErrorOr(default_error_or()) {}
-	ErrorOr(Error const& error) : value(std::in_place_type<Error>, error) {}
+	explicit(false) ErrorOr(Error const& error) : value(std::in_place_type<Error>, error) {}
 
 	template <class U>
-	ErrorOr(U const& t) : value(std::in_place_type<T>, t) {}
+	explicit(false) ErrorOr(U const& t) : value(std::in_place_type<T>, t) {}
 
 	ErrorOr(Arena& a, ErrorOr<T> const& o) {
 		if (o.present()) {
@@ -433,7 +433,7 @@ namespace detail {
 
 template <class T, class Context>
 struct LoadSaveHelper<CachedSerialization<T>, Context> : Context {
-	LoadSaveHelper(const Context& context) : Context(context), helper(context) {}
+	explicit LoadSaveHelper(const Context& context) : Context(context), helper(context) {}
 
 	void load(CachedSerialization<T>& member, const uint8_t* current) { helper.load(member.mutate(), current); }
 
@@ -656,8 +656,9 @@ class LineageReference : public Reference<ActorLineage> {
 public:
 	LineageReference() : Reference<ActorLineage>(nullptr), actorName_(""), allocated_(false) {}
 	explicit LineageReference(ActorLineage* ptr) : Reference<ActorLineage>(ptr), actorName_(""), allocated_(false) {}
-	LineageReference(const LineageReference& r) : Reference<ActorLineage>(r), actorName_(""), allocated_(false) {}
-	LineageReference(LineageReference&& r)
+	explicit(false) LineageReference(const LineageReference& r)
+	  : Reference<ActorLineage>(r), actorName_(""), allocated_(false) {}
+	explicit(false) LineageReference(LineageReference&& r)
 	  : Reference<ActorLineage>(r.getPtr()), actorName_(r.actorName_), allocated_(r.allocated_) {
 		r.setPtrUnsafe(nullptr);
 		r.actorName_ = "";
@@ -700,7 +701,7 @@ struct StackLineage : LineageProperties<StackLineage> {
 #ifdef ENABLE_SAMPLING
 struct LineageScope {
 	LineageReference* oldLineage;
-	LineageScope(LineageReference* with) : oldLineage(currentLineage) { replaceLineage(with); }
+	explicit LineageScope(LineageReference* with) : oldLineage(currentLineage) { replaceLineage(with); }
 	~LineageScope() { replaceLineage(oldLineage); }
 };
 #endif

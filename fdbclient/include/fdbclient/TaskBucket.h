@@ -56,7 +56,7 @@ FDB_BOOLEAN_PARAM(UpdateParams);
 //       same Task
 class Task : public ReferenceCounted<Task> {
 public:
-	Task(Value type = StringRef(), uint32_t version = 0, Value done = StringRef(), unsigned int priority = 0);
+	explicit Task(Value type = StringRef(), uint32_t version = 0, Value done = StringRef(), unsigned int priority = 0);
 	~Task() {};
 
 	// Methods that safely read values from task's params
@@ -102,7 +102,7 @@ public:
 template <typename T>
 class TaskParam {
 public:
-	TaskParam(StringRef key) : key(key) {}
+	explicit(false) TaskParam(StringRef key) : key(key) {}
 	T get(Reference<Task> task) const { return TupleCodec<T>::unpack(task->params[key]); }
 	void set(Reference<Task> task, T const& val) const { task->params[key] = TupleCodec<T>::pack(val); }
 	bool exists(Reference<Task> task) const { return task->params.find(key) != task->params.end(); }
@@ -139,10 +139,10 @@ class FutureBucket;
 // instance may declare the Task a failure and move it back to the available subspace.
 class TaskBucket : public ReferenceCounted<TaskBucket> {
 public:
-	TaskBucket(const Subspace& subspace,
-	           AccessSystemKeys = AccessSystemKeys::False,
-	           PriorityBatch = PriorityBatch::False,
-	           LockAware = LockAware::False);
+	explicit TaskBucket(const Subspace& subspace,
+	                    AccessSystemKeys = AccessSystemKeys::False,
+	                    PriorityBatch = PriorityBatch::False,
+	                    LockAware = LockAware::False);
 	virtual ~TaskBucket();
 
 	void setOptions(Reference<ReadYourWritesTransaction> tr) {
@@ -311,7 +311,9 @@ class TaskFuture;
 
 class FutureBucket : public ReferenceCounted<FutureBucket> {
 public:
-	FutureBucket(const Subspace& subspace, AccessSystemKeys = AccessSystemKeys::False, LockAware = LockAware::False);
+	explicit FutureBucket(const Subspace& subspace,
+	                      AccessSystemKeys = AccessSystemKeys::False,
+	                      LockAware = LockAware::False);
 	virtual ~FutureBucket();
 
 	void setOptions(Reference<ReadYourWritesTransaction> tr) {
@@ -350,7 +352,7 @@ private:
 class TaskFuture : public ReferenceCounted<TaskFuture> {
 public:
 	TaskFuture();
-	TaskFuture(const Reference<FutureBucket> bucket, Standalone<StringRef> key = Standalone<StringRef>());
+	explicit TaskFuture(const Reference<FutureBucket> bucket, Standalone<StringRef> key = Standalone<StringRef>());
 	virtual ~TaskFuture();
 
 	Future<bool> isSet(Reference<ReadYourWritesTransaction> tr);
@@ -499,8 +501,8 @@ struct TaskCompletionKey {
 	TaskCompletionKey() {}
 
 private:
-	TaskCompletionKey(Reference<TaskFuture> f) : joinFuture(f) {}
-	TaskCompletionKey(Key k) : key(k) {}
+	explicit TaskCompletionKey(Reference<TaskFuture> f) : joinFuture(f) {}
+	explicit TaskCompletionKey(Key k) : key(k) {}
 };
 
 #endif

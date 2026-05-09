@@ -74,9 +74,9 @@ DatabaseBackupAgent::DatabaseBackupAgent(Database src)
 // Any new per-DR properties should go here.
 class DRConfig {
 public:
-	DRConfig(UID uid = UID())
+	explicit DRConfig(UID uid = UID())
 	  : uid(uid), configSpace(uidPrefixKey("uid->config/"_sr.withPrefix(databaseBackupPrefixRange.begin), uid)) {}
-	DRConfig(Reference<Task> task)
+	explicit DRConfig(Reference<Task> task)
 	  : DRConfig(BinaryReader::fromStringRef<UID>(task->params[BackupAgentBase::keyConfigLogUid], Unversioned())) {}
 
 	KeyBackedBinaryValue<int64_t> rangeBytesWritten() { return configSpace.pack(__FUNCTION__sr); }

@@ -86,7 +86,7 @@ class CounterCollection {
 	double logTime;
 
 public:
-	CounterCollection(std::string const& name, std::string const& id = std::string())
+	explicit CounterCollection(std::string const& name, std::string const& id = std::string())
 	  : name(name), id(id), logTime(0) {}
 	~CounterCollection() {
 		for (auto c : countersToRemove)
@@ -220,7 +220,7 @@ public:
 	    double loggingInterval,
 	    std::function<void(TraceEvent&)> const& decorator = [](auto&) {});
 
-	LatencyBands(LatencyBands&&) = default;
+	explicit(false) LatencyBands(LatencyBands&&) = default;
 	LatencyBands& operator=(LatencyBands&&) = default;
 
 	void addThreshold(double value);

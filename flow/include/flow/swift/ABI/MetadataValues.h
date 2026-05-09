@@ -120,7 +120,7 @@ public:
 	};
 
 	explicit JobFlags(uint32_t bits) : FlagSet(bits) {}
-	JobFlags(JobKind kind) { setKind(kind); }
+	explicit JobFlags(JobKind kind) { setKind(kind); }
 	JobFlags(JobKind kind, JobPriority priority) {
 		setKind(kind);
 		setPriority(priority);

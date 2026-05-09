@@ -112,8 +112,8 @@ Future<DistributedTestResults> runWorkload(Database const& cx,
 		printf("setting up test (%s)...\n", printable(specCopy.title).c_str());
 		TraceEvent("TestSetupStart").detail("WorkloadTitle", specCopy.title);
 		setups.reserve(workloads.size());
-		for (int i = 0; i < workloads.size(); i++)
-			setups.push_back(workloads[i].setup.template getReplyUnlessFailedFor<Void>(waitForFailureTime, 0));
+		for (const auto& workload : workloads)
+			setups.push_back(workload.setup.template getReplyUnlessFailedFor<Void>(waitForFailureTime, 0));
 		co_await waitForAll(setups);
 		throwIfError(setups, "SetupFailedForWorkload" + printable(specCopy.title));
 		TraceEvent("TestSetupComplete").detail("WorkloadTitle", specCopy.title);
@@ -125,8 +125,8 @@ Future<DistributedTestResults> runWorkload(Database const& cx,
 		printf("running test (%s)...\n", printable(specCopy.title).c_str());
 		std::vector<Future<ErrorOr<Void>>> starts;
 		starts.reserve(workloads.size());
-		for (int i = 0; i < workloads.size(); i++)
-			starts.push_back(workloads[i].start.template getReplyUnlessFailedFor<Void>(waitForFailureTime, 0));
+		for (const auto& workload : workloads)
+			starts.push_back(workload.start.template getReplyUnlessFailedFor<Void>(waitForFailureTime, 0));
 		co_await waitForAll(starts);
 		throwIfError(starts, "StartFailedForWorkload" + printable(specCopy.title));
 		printf("%s complete\n", printable(specCopy.title).c_str());
@@ -146,14 +146,14 @@ Future<DistributedTestResults> runWorkload(Database const& cx,
 		TraceEvent("TestProgress").log("runWorkload: calling check interface for test [%s]", name.c_str());
 
 		checks.reserve(workloads.size());
-		for (int i = 0; i < workloads.size(); i++)
-			checks.push_back(workloads[i].check.template getReplyUnlessFailedFor<CheckReply>(waitForFailureTime, 0));
+		for (const auto& workload : workloads)
+			checks.push_back(workload.check.template getReplyUnlessFailedFor<CheckReply>(waitForFailureTime, 0));
 		co_await waitForAll(checks);
 
 		throwIfError(checks, "CheckFailedForWorkload" + printable(specCopy.title));
 
-		for (int i = 0; i < checks.size(); i++) {
-			if (checks[i].get().get().value)
+		for (const auto& check : checks) {
+			if (check.get().get().value)
 				success++;
 			else
 				failure++;
@@ -169,20 +169,20 @@ Future<DistributedTestResults> runWorkload(Database const& cx,
 		TraceEvent("TestFetchingMetrics").detail("WorkloadTitle", specCopy.title);
 		TraceEvent("TestProgress").log("runWorkload: calling metrics interface for test [%s]", name.c_str());
 		metricTasks.reserve(workloads.size());
-		for (int i = 0; i < workloads.size(); i++)
+		for (const auto& workload : workloads)
 			metricTasks.push_back(
-			    workloads[i].metrics.template getReplyUnlessFailedFor<std::vector<PerfMetric>>(waitForFailureTime, 0));
+			    workload.metrics.template getReplyUnlessFailedFor<std::vector<PerfMetric>>(waitForFailureTime, 0));
 		co_await waitForAll(metricTasks);
 		throwIfError(metricTasks, "MetricFailedForWorkload" + printable(specCopy.title));
-		for (int i = 0; i < metricTasks.size(); i++) {
-			metricsResults.push_back(metricTasks[i].get().get());
+		for (const auto& metricTask : metricTasks) {
+			metricsResults.push_back(metricTask.get().get());
 		}
 	}
 
 	// Stopping the workloads is unreliable, but they have a timeout
 	// FIXME: stop if one of the above phases throws an exception
-	for (int i = 0; i < workloads.size(); i++)
-		workloads[i].stop.send(ReplyPromise<Void>());
+	for (const auto& workload : workloads)
+		workload.stop.send(ReplyPromise<Void>());
 
 	co_return DistributedTestResults(aggregateMetrics(metricsResults), success, failure);
 }
@@ -841,8 +841,8 @@ Future<Void> runTests8(Reference<AsyncVar<Optional<struct ClusterControllerFullI
 
 	std::vector<TesterInterface> ts;
 	ts.reserve(workers.size());
-	for (int i = 0; i < workers.size(); i++)
-		ts.push_back(workers[i].interf.testerInterface);
+	for (const auto& worker : workers)
+		ts.push_back(worker.interf.testerInterface);
 
 	co_await runTests7(cc, ci, ts, tests, startingConfiguration, locality, restartingTest);
 	co_return;
@@ -940,8 +940,8 @@ Future<Void> runTests(Reference<IClusterConnectionRecord> const& connRecordUnsaf
 		options.push_back_deep(options.arena(), KeyValueRef("testName"_sr, "UnitTests"_sr));
 		options.push_back_deep(options.arena(), KeyValueRef("testsMatching"_sr, fileName));
 		// Add unit test options as test spec options
-		for (auto& kv : testOptions.params) {
-			options.push_back_deep(options.arena(), KeyValueRef(kv.first, kv.second));
+		for (auto& [key, value] : testOptions.params) {
+			options.push_back_deep(options.arena(), KeyValueRef(key, value));
 		}
 		spec.options.push_back_deep(spec.options.arena(), options);
 		testSet.testSpecs.push_back(spec);
@@ -1064,8 +1064,8 @@ Future<Void> testExpectedErrorImpl(Future<Void> test,
 	ASSERT(!details.contains("ActualErrorCode"));
 	ASSERT(!details.contains("Reason"));
 
-	for (auto& p : details) {
-		evt.detail(p.first.c_str(), p.second);
+	for (auto& [key, value] : details) {
+		evt.detail(key.c_str(), value);
 	}
 	if (throwOnError.present()) {
 		throw throwOnError.get();

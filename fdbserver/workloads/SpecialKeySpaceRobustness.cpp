@@ -31,7 +31,7 @@
 struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 	static constexpr auto NAME = "SpecialKeySpaceRobustness";
 
-	SpecialKeySpaceRobustnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
+	explicit SpecialKeySpaceRobustnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
 
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 	Future<bool> check(Database const& cx) override { return true; }

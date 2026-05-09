@@ -30,7 +30,6 @@
 #include <cctype>
 #include <sstream>
 #include "flow/IConnection.h"
-#include <unordered_map>
 
 namespace HTTP {
 

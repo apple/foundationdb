@@ -43,7 +43,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 		out.insert({ "RandomRangeLock" });
 	}
 
-	BackupToDBUpgradeWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit BackupToDBUpgradeWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		backupAfter = getOption(options, "backupAfter"_sr, deterministicRandom()->random01() * 10.0);
 		backupPrefix = getOption(options, "backupPrefix"_sr, StringRef());
 		backupRangeLengthMax = getOption(options, "backupRangeLengthMax"_sr, 1);

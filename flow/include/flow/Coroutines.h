@@ -241,12 +241,12 @@ private:
 public:
 	explicit Generator(handle_type h) : handle(h) {}
 	Generator() {}
-	Generator(Generator const& other) : handle(other.handle) {
+	explicit(false) Generator(Generator const& other) : handle(other.handle) {
 		if (handle) {
 			handle.promise().addRef();
 		}
 	}
-	Generator(Generator&& other) : handle(std::move(other.handle)) { other.handle = handle_type{}; }
+	explicit(false) Generator(Generator&& other) : handle(std::move(other.handle)) { other.handle = handle_type{}; }
 	~Generator() {
 		if (handle) {
 			handle.promise().delRef();

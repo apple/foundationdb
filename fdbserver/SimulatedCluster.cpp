@@ -928,8 +928,7 @@ Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConnectionR
 				writeFile(joinPath(*dataFolder, "fdb.cluster"), connStr.toString());
 				connRecord = makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"));
 			} else {
-				connRecord =
-				    makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"), connStr.toString());
+				connRecord = makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"), connStr);
 			}
 		} else if (onShutdown.get() == ISimulator::KillType::RebootProcessAndSwitch) {
 			TraceEvent("SimulatedFDBDRebootAndSwitch")
@@ -947,7 +946,8 @@ Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConnectionR
 			if (otherConnStr.toString().size() > 1) {
 				std::string newConnStr =
 				    g_simulator->hasSwitchedCluster(process->address) ? otherConnStr.toString() : connStr.toString();
-				connRecord = makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"), newConnStr);
+				connRecord = makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"),
+				                                                  ClusterConnectionString(newConnStr));
 			}
 		} else {
 			TraceEvent("SimulatedFDBDJustRepeat")
@@ -1036,9 +1036,9 @@ Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				if (ipProcessMode != SimHTTPServer) {
 					// Fall back to use seed string if fdb.cluster not present
 					// It can happen when a process failed before it persisted the connection string to disk
-					clusterFile = Reference<IClusterConnectionRecord>(
-					    useSeedFile || !fileExists(path) ? new ClusterConnectionFile(path, connStr.toString())
-					                                     : new ClusterConnectionFile(path));
+					clusterFile = Reference<IClusterConnectionRecord>(useSeedFile || !fileExists(path)
+					                                                      ? new ClusterConnectionFile(path, connStr)
+					                                                      : new ClusterConnectionFile(path));
 				}
 				const int listenPort = i * listenPerProcess + 1;
 
@@ -2687,7 +2687,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 using namespace std::literals;
 
 // Actor that waits for a specified simulation time and then resets the random seed
-Future<Void> reseedRandomAtTime(double waitTime, uint32_t newSeed) {
+Future<Void> reseedRandomAtTime(double waitTime, uint64_t newSeed) {
 	co_await delay(waitTime);
 	TraceEvent("ResettingRandomSeed").detail("WaitTime", waitTime).detail("NewSeed", newSeed);
 	deterministicRandom()->resetSeed(newSeed);
@@ -2842,7 +2842,7 @@ static Future<Void> simulationSetupAndRunImpl(std::string dataFolder,
 		// If reseedTime is set, schedule a random seed reset at a random time between [0, reseedTime]
 		if (reseedTime >= 0.0) {
 			double actualReseedTime = nondeterministicRandom()->random01() * reseedTime;
-			uint32_t newSeed = platform::getRandomSeed();
+			uint64_t newSeed = platform::getRandomSeed();
 			TraceEvent("SchedulingRandomSeedReset")
 			    .detail("ReseedTimeMax", reseedTime)
 			    .detail("ActualReseedTime", actualReseedTime)

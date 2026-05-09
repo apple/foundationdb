@@ -48,7 +48,7 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 	std::map<UID, StorageServerInterface> serverInterfaces;
 	int hotServerCount = 0, currentHotRound = -1;
 
-	SkewedReadWriteWorkload(WorkloadContext const& wcx) : ReadWriteCommon(wcx) {
+	explicit SkewedReadWriteWorkload(WorkloadContext const& wcx) : ReadWriteCommon(wcx) {
 		descriptionString = getOption(options, "description"_sr, "SkewedReadWrite"_sr);
 		hotServerFraction = getOption(options, "hotServerFraction"_sr, 0.2);
 		hotServerShardFraction = getOption(options, "hotServerShardFraction"_sr, 1.0);
