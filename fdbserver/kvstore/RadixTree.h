@@ -151,7 +151,7 @@ private:
 	};
 
 	struct leafNode : FastAllocated<leafNode> {
-		leafNode(const StringRef& content) : base(), is_inline(0), inline_length(0), arena() {
+		explicit leafNode(const StringRef& content) : base(), is_inline(0), inline_length(0), arena() {
 			base.m_is_leaf = 1;
 			setValue(content);
 		}
@@ -235,8 +235,8 @@ public:
 		node* m_pointee;
 
 		iterator() : m_pointee(nullptr) {}
-		iterator(const iterator& r) : m_pointee(r.m_pointee) {}
-		iterator(node* p) : m_pointee(p) {}
+		explicit(false) iterator(const iterator& r) : m_pointee(r.m_pointee) {}
+		explicit(false) iterator(node* p) : m_pointee(p) {}
 		iterator& operator=(const iterator& r) {
 			m_pointee = r.m_pointee;
 			return *this;

@@ -31,7 +31,7 @@ struct ChangeConfigWorkload : TestWorkload {
 	std::string networkAddresses;
 	int coordinatorChanges;
 
-	ChangeConfigWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit ChangeConfigWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		minDelayBeforeChange = getOption(options, "minDelayBeforeChange"_sr, 0.0);
 		maxDelayBeforeChange = getOption(options, "maxDelayBeforeChange"_sr, 0.0);
 		ASSERT(maxDelayBeforeChange >= minDelayBeforeChange);

@@ -566,37 +566,61 @@ public:
 			json_spirit::mValue json;
 			if (json_spirit::read_string(content, json) && json.type() == json_spirit::obj_type) {
 				auto& obj = json.get_obj();
-				bool enabled = false;
-				int blockSize = 0;
 
-				if (obj.count("is_encryption_enabled") &&
-				    obj.at("is_encryption_enabled").type() == json_spirit::bool_type) {
-					enabled = obj.at("is_encryption_enabled").get_bool();
+				// Both fields must be present with correct types.
+				if (!obj.count("is_encryption_enabled") ||
+				    obj.at("is_encryption_enabled").type() != json_spirit::bool_type ||
+				    !obj.count("encryption_block_size") ||
+				    obj.at("encryption_block_size").type() != json_spirit::int_type) {
+					fprintf(stderr, "ERROR: Encryption metadata file is missing required fields or has wrong types.\n");
+					TraceEvent(SevError, "BackupContainerReadEncryptionMetadataMalformed")
+					    .detail("URL", bc->getURL())
+					    .detail("File", BackupContainerFileSystem::encryptionMetadataFileName());
+					throw file_corrupt();
 				}
-				if (obj.count("encryption_block_size") &&
-				    obj.at("encryption_block_size").type() == json_spirit::int_type) {
-					blockSize = obj.at("encryption_block_size").get_int();
+
+				bool enabled = obj.at("is_encryption_enabled").get_bool();
+				int blockSize = obj.at("encryption_block_size").get_int();
+
+				if ((enabled && blockSize <= 0) || (!enabled && blockSize != 0)) {
+					fprintf(stderr,
+					        "ERROR: Encryption metadata is inconsistent (enabled=%d, blockSize=%d).\n",
+					        enabled,
+					        blockSize);
+					TraceEvent(SevError, "BackupContainerReadEncryptionMetadataInconsistent")
+					    .detail("URL", bc->getURL())
+					    .detail("IsEncryptionEnabled", enabled)
+					    .detail("EncryptionBlockSize", blockSize);
+					throw file_corrupt();
 				}
+
 				TraceEvent("BackupContainerReadEncryptionMetadata")
 				    .detail("URL", bc->getURL())
 				    .detail("IsEncryptionEnabled", enabled)
 				    .detail("EncryptionBlockSize", blockSize);
 				co_return std::make_pair(enabled, blockSize);
 			} else {
-				throw backup_invalid_info();
+				// If the file is malformed, throw an error.
+				fprintf(stderr, "ERROR: Failed to read encryption_metadata file due to incorrect format\n");
+				TraceEvent(SevError, "BackupContainerReadEncryptionMetadataMalformed")
+				    .detail("URL", bc->getURL())
+				    .detail("File", BackupContainerFileSystem::encryptionMetadataFileName());
+				throw file_corrupt();
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_file_not_found) {
+				// File may not be present for older backups, return encryption disabled.
 				TraceEvent(SevWarn, "BackupContainerEncryptionMetadataNotFound")
 				    .detail("URL", bc->getURL())
 				    .detail("File", BackupContainerFileSystem::encryptionMetadataFileName());
 				co_return std::make_pair(false, 0);
 			}
+			fprintf(stderr, "ERROR: Failed to read encryption_metadata file due to an error.\n");
 			TraceEvent(SevError, "BackupContainerReadEncryptionMetadataError")
 			    .error(e)
 			    .detail("URL", bc->getURL())
 			    .detail("File", BackupContainerFileSystem::encryptionMetadataFileName());
-			throw;
+			throw file_not_readable();
 		}
 	}
 
@@ -1474,8 +1498,9 @@ public:
 		}
 
 		// Write JSON with encryption metadata
+		bool enabled = bc->encryptionKeyFileName.present();
 		JsonBuilderObject doc;
-		doc.setKey("is_encryption_enabled", bc->encryptionKeyFileName.present());
+		doc.setKey("is_encryption_enabled", enabled);
 		doc.setKey("encryption_block_size", encryptionBlockSize);
 
 		std::string jsonStr = doc.getJson();
@@ -1821,12 +1846,9 @@ BackupContainerFileSystem::VersionProperty BackupContainerFileSystem::unreliable
 BackupContainerFileSystem::VersionProperty BackupContainerFileSystem::logType() {
 	return { Reference<BackupContainerFileSystem>::addRef(this), "mutation_log_type" };
 }
-BackupContainerFileSystem::VersionProperty BackupContainerFileSystem::fileLevelEncryption() {
-	return { Reference<BackupContainerFileSystem>::addRef(this), "file_level_encryption" };
-}
 
 std::string BackupContainerFileSystem::encryptionMetadataFileName() {
-	return "properties/file_level_encryption";
+	return "properties/encryption_metadata";
 }
 
 bool BackupContainerFileSystem::usesEncryption() const {
@@ -1850,114 +1872,6 @@ void BackupContainerFileSystem::setEncryptionKey(Optional<std::string> const& en
 
 Future<Void> BackupContainerFileSystem::createTestEncryptionKeyFile(std::string const& filename) {
 	return BackupContainerFileSystemImpl::createTestEncryptionKeyFile(filename);
-}
-
-// Get a BackupContainerFileSystem based on a container URL string
-// TODO: refactor to not duplicate IBackupContainer::openContainer. It's the exact same
-// code but returning a different template type because you can't cast between them
-Reference<BackupContainerFileSystem> BackupContainerFileSystem::openContainerFS(
-    const std::string& url,
-    const Optional<std::string>& proxy,
-    const Optional<std::string>& encryptionKeyFileName,
-    int encryptionBlockSize,
-    bool isBackup) {
-	static std::map<std::string, Reference<BackupContainerFileSystem>> m_cache;
-
-	Reference<BackupContainerFileSystem>& r = m_cache[url];
-	if (r)
-		return r;
-
-	try {
-		StringRef u(url);
-		if (u.startsWith("file://"_sr)) {
-			r = makeReference<BackupContainerLocalDirectory>(url, encryptionKeyFileName, encryptionBlockSize);
-		} else if (u.startsWith("blobstore://"_sr)) {
-			std::string resource;
-			Optional<std::string> blobstoreProxy;
-
-			// If no proxy is passed down to the openContainer method, try to fallback to the
-			// fileBackupAgentProxy which is a global variable and will be set for the backup_agent.
-			if (proxy.present()) {
-				blobstoreProxy = proxy.get();
-			} else if (fileBackupAgentProxy.present()) {
-				blobstoreProxy = fileBackupAgentProxy.get();
-			}
-
-			// The URL parameters contain blobstore endpoint tunables as well as possible backup-specific options.
-			IBlobStoreEndpoint::ParametersT backupParams;
-			Reference<IBlobStoreEndpoint> bstore =
-			    IBlobStoreEndpoint::fromString(url, blobstoreProxy, &resource, &lastOpenError, &backupParams);
-
-			BackupContainerBlobStore::validateBackupUrl(resource);
-			r = makeReference<BackupContainerBlobStore>(
-			    bstore, resource, backupParams, encryptionKeyFileName, isBackup, encryptionBlockSize);
-		}
-#ifdef BUILD_AZURE_BACKUP
-		else if (u.startsWith("azure://"_sr)) {
-			u.eat("azure://"_sr);
-			auto address = u.eat("/"_sr);
-			if (address.endsWith(std::string(azure::storage_lite::constants::default_endpoint_suffix))) {
-				CODE_PROBE(true, "Azure backup url with standard azure storage account endpoint");
-				// <account>.<service>.core.windows.net/<resource_path>
-				auto endPoint = address.toString();
-				auto accountName = address.eat("."_sr).toString();
-				auto containerName = u.eat("/"_sr).toString();
-				r = makeReference<BackupContainerAzureBlobStore>(
-				    endPoint, accountName, containerName, encryptionKeyFileName);
-			} else {
-				// resolve the network address if necessary
-				std::string endpoint(address.toString());
-				Optional<NetworkAddress> parsedAddress = NetworkAddress::parseOptional(endpoint);
-				if (!parsedAddress.present()) {
-					try {
-						auto hostname = Hostname::parse(endpoint);
-						auto resolvedAddress = hostname.resolveBlocking();
-						if (resolvedAddress.present()) {
-							CODE_PROBE(true, "Azure backup url with hostname in the endpoint");
-							parsedAddress = resolvedAddress.get();
-						}
-					} catch (Error& e) {
-						TraceEvent(SevError, "InvalidAzureBackupUrl").error(e).detail("Endpoint", endpoint);
-						throw backup_invalid_url();
-					}
-				}
-				if (!parsedAddress.present()) {
-					TraceEvent(SevError, "InvalidAzureBackupUrl").detail("Endpoint", endpoint);
-					throw backup_invalid_url();
-				}
-				auto accountName = u.eat("/"_sr).toString();
-				// Avoid including ":tls" and "(fromHostname)"
-				// note: the endpoint needs to contain the account name
-				// so either "<account_name>.blob.core.windows.net" or "<ip>:<port>/<account_name>"
-				endpoint =
-				    fmt::format("{}/{}", formatIpPort(parsedAddress.get().ip, parsedAddress.get().port), accountName);
-				auto containerName = u.eat("/"_sr).toString();
-				r = makeReference<BackupContainerAzureBlobStore>(
-				    endpoint, accountName, containerName, encryptionKeyFileName);
-			}
-		}
-#endif
-		else {
-			lastOpenError = "invalid URL prefix";
-			throw backup_invalid_url();
-		}
-
-		r->encryptionKeyFileName = encryptionKeyFileName;
-		r->URL = url;
-		return r;
-	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled)
-			throw;
-
-		TraceEvent m(SevWarn, "BackupContainer");
-		m.error(e);
-		m.detail("Description", "Invalid container specification.  See help.");
-		m.detail("URL", url);
-		if (e.code() == error_code_backup_invalid_url)
-			m.detail("LastOpenError", lastOpenError);
-
-		throw;
-	}
 }
 
 namespace backup_test {

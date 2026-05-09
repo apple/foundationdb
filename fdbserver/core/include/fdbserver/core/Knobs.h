@@ -151,6 +151,7 @@ public:
 	double MERGE_RELOCATION_PARALLELISM_PER_TEAM;
 	int DD_QUEUE_MAX_KEY_SERVERS;
 	int DD_REBALANCE_PARALLELISM;
+	int DD_MAX_PIPELINE_MOVES; // Hard cap on total relocations DD tracks (queued + in-flight).
 	int DD_REBALANCE_RESET_AMOUNT;
 	double INFLIGHT_PENALTY_HEALTHY;
 	double INFLIGHT_PENALTY_REDUNDANT;
@@ -917,6 +918,8 @@ public:
 	double SERVER_READY_QUORUM_TIMEOUT;
 	double REMOVE_RETRY_DELAY;
 	int MOVE_KEYS_KRM_LIMIT;
+	int FINISH_MOVE_KEYS_MAX_RETRIES; // Max retries in finishMoveKeys before returning move to queue; set very high to
+	                                  // disable
 	int MOVE_KEYS_KRM_LIMIT_BYTES; // This must be sufficiently larger than CLIENT_KNOBS->KEY_SIZE_LIMIT
 	                               // (fdbclient/Knobs.h) to ensure that at least two entries will be returned from an
 	                               // attempt to read a key range map

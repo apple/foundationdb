@@ -33,8 +33,6 @@
 #include <memcheck.h>
 #endif
 
-#include <boost/unordered_map.hpp>
-
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/HealthMonitor.h"
@@ -51,7 +49,6 @@
 #include "flow/ObjectSerializer.h"
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
-#include "flow/UnitTest.h"
 #include "flow/WatchFile.h"
 #include "flow/IConnection.h"
 #define XXH_INLINE_ALL

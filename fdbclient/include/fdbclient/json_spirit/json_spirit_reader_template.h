@@ -205,7 +205,7 @@ public:
 	typedef typename Config_type::Array_type Array_type;
 	typedef typename String_type::value_type Char_type;
 
-	Semantic_actions(Value_type& value) : value_(value), current_p_(0) {}
+	explicit Semantic_actions(Value_type& value) : value_(value), current_p_(0) {}
 
 	void begin_obj(Char_type c) {
 		assert(c == '{');
@@ -335,7 +335,7 @@ class Json_grammar : public spirit_namespace::grammar<Json_grammar<Value_type, I
 public:
 	typedef Semantic_actions<Value_type, Iter_type> Semantic_actions_t;
 
-	Json_grammar(Semantic_actions_t& semantic_actions) : actions_(semantic_actions) {}
+	explicit Json_grammar(Semantic_actions_t& semantic_actions) : actions_(semantic_actions) {}
 
 	static void throw_not_value(Iter_type begin, Iter_type end) { throw_error(begin, "not a value"); }
 
@@ -352,7 +352,7 @@ public:
 	template <typename ScannerT>
 	class definition {
 	public:
-		definition(const Json_grammar& self) {
+		explicit definition(const Json_grammar& self) {
 			using namespace spirit_namespace;
 
 			typedef typename Value_type::String_type::value_type Char_type;
@@ -437,7 +437,7 @@ struct Multi_pass_iters {
 	typedef std::istream_iterator<Char_type, Char_type> istream_iter;
 	typedef spirit_namespace::multi_pass<istream_iter> Mp_iter;
 
-	Multi_pass_iters(Istream_type& is) {
+	explicit Multi_pass_iters(Istream_type& is) {
 		is.unsetf(std::ios::skipws);
 
 		begin_ = spirit_namespace::make_multi_pass(istream_iter(is));

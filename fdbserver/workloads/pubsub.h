@@ -75,7 +75,7 @@ public:
 
 class PubSub {
 public:
-	PubSub(Database cx);
+	explicit PubSub(Database cx);
 
 	Future<Feed> createFeed(Standalone<StringRef> metadata);
 

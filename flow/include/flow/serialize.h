@@ -153,13 +153,15 @@ inline void save(Archive& ar, const std::string& value) {
 }
 
 template <class Archive, class T>
-class Serializer<Archive, T, typename std::enable_if_t<is_binary_serializable<T>::value>> {
+    requires(is_binary_serializable<T>::value)
+class Serializer<Archive, T> {
 public:
 	static void serialize(Archive& ar, T& t) { ar.serializeBinaryItem(t); }
 };
 
 template <class Archive, class T>
-class Serializer<Archive, T, typename std::enable_if_t<std::is_enum_v<T>>> {
+    requires(std::is_enum_v<T>)
+class Serializer<Archive, T> {
 public:
 	static void serialize(Archive& ar, T& t) {
 		static_assert(is_binary_serializable<std::underlying_type_t<T>>::value);
@@ -450,7 +452,7 @@ public:
 	explicit BinaryWriter(VersionOptions vo) : data(nullptr), size(0), allocated(0) {
 		vo.write(*this);
 	}
-	BinaryWriter(BinaryWriter&& rhs)
+	explicit(false) BinaryWriter(BinaryWriter&& rhs)
 	  : arena(std::move(rhs.arena)), data(rhs.data), size(rhs.size), allocated(rhs.allocated),
 	    m_protocolVersion(rhs.m_protocolVersion) {
 		rhs.size = 0;
@@ -987,7 +989,7 @@ template <class T>
 struct SerializeSource : MakeSerializeSource<SerializeSource<T>, T> {
 	using value_type = T;
 	T const& value;
-	SerializeSource(T const& value) : value(value) {}
+	explicit SerializeSource(T const& value) : value(value) {}
 	void serializeObjectWriter(ObjectWriter& w) const override { w.serialize(value); }
 	T const& get() const override { return value; }
 };

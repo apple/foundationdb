@@ -18,8 +18,6 @@
  * limitations under the License.
  */
 
-#include <cstring>
-
 #include "fdbrpc/simulator.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
@@ -36,7 +34,7 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 	Key keyPrefix;
 	bool checkOnly;
 
-	GetEstimatedRangeSizeWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit GetEstimatedRangeSizeWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		nodeCount = getOption(options, "nodeCount"_sr, 10000);
 		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, ""_sr).toString());

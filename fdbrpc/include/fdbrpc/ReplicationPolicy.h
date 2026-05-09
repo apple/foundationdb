@@ -216,7 +216,8 @@ protected:
 
 struct PolicyAnd final : IReplicationPolicy {
 	friend struct serializable_traits<PolicyAnd*>;
-	PolicyAnd(std::vector<Reference<IReplicationPolicy>> policies) : _policies(policies), _sortedPolicies(policies) {
+	explicit PolicyAnd(std::vector<Reference<IReplicationPolicy>> policies)
+	  : _policies(policies), _sortedPolicies(policies) {
 		// Sort the policy array
 		std::sort(_sortedPolicies.begin(), _sortedPolicies.end(), PolicyAnd::comparePolicy);
 	}

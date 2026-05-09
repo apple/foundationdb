@@ -39,7 +39,7 @@ static Future<Void> benchPriorityMultiLock(benchmark::State* benchState) {
 	}
 
 	int concurrency = priorities.size() * 10;
-	Reference<PriorityMultiLock> pml = makeReference<PriorityMultiLock>(concurrency, priorities);
+	auto pml = makeReference<PriorityMultiLock>(concurrency, priorities);
 
 	// Clog the lock buy taking n=concurrency locks
 	std::deque<Future<PriorityMultiLock::Lock>> lockFutures;

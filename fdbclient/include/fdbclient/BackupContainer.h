@@ -45,7 +45,7 @@ bool isBlobstoreUrl(const std::string& url);
 // TODO: Move the log file and range file format encoding/decoding stuff to this file and behind interfaces.
 class IBackupFile {
 public:
-	IBackupFile(const std::string& fileName) : m_fileName(fileName) {}
+	explicit IBackupFile(const std::string& fileName) : m_fileName(fileName) {}
 	virtual ~IBackupFile() {}
 	// Backup files are append-only and cannot have more than 1 append outstanding at once.
 	virtual Future<Void> append(const void* data, int len) = 0;

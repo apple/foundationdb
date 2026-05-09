@@ -19,7 +19,6 @@
  */
 
 #include "fdbrpc/FailureMonitor.h"
-#include "flow/CoroUtils.h"
 
 Future<Void> waitForStateEqual(IFailureMonitor* monitor, Endpoint endpoint, FailureStatus status) {
 	while (true) {

@@ -20,9 +20,7 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "pubsub.h"
-#include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct PubSubMultiplesWorkload : TestWorkload {
 	static constexpr auto NAME = "PubSubMultiples";
@@ -33,7 +31,7 @@ struct PubSubMultiplesWorkload : TestWorkload {
 	std::vector<Future<Void>> inboxWatchers;
 	PerfIntCounter messages;
 
-	PubSubMultiplesWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), messages("Messages") {
+	explicit PubSubMultiplesWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), messages("Messages") {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		messagesPerSecond = getOption(options, "messagesPerSecond"_sr, 500.0) / clientCount;
 		actorCount = getOption(options, "actorsPerClient"_sr, 20);

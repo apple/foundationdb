@@ -25,6 +25,7 @@
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <random>
 #include <regex>
 #include <string>
 #include <unordered_set>
@@ -1138,18 +1139,18 @@ Future<Optional<std::vector<StorageServerInterface>>> transactionalGetServerInte
     std::vector<UID> ids) {
 	std::vector<Future<Optional<StorageServerInterface>>> serverListEntries;
 	serverListEntries.reserve(ids.size());
-	for (int s = 0; s < ids.size(); s++) {
-		serverListEntries.push_back(fetchServerInterface(trState, ids[s]));
+	for (const auto& id : ids) {
+		serverListEntries.push_back(fetchServerInterface(trState, id));
 	}
 
 	std::vector<Optional<StorageServerInterface>> serverListValues = co_await getAll(serverListEntries);
 	std::vector<StorageServerInterface> serverInterfaces;
-	for (int s = 0; s < serverListValues.size(); s++) {
-		if (!serverListValues[s].present()) {
+	for (const auto& serverListValue : serverListValues) {
+		if (!serverListValue.present()) {
 			// A storage server has been removed from ServerList since we read keyServers
 			co_return Optional<std::vector<StorageServerInterface>>();
 		}
-		serverInterfaces.push_back(serverListValues[s].get());
+		serverInterfaces.push_back(serverListValue.get());
 	}
 	co_return serverInterfaces;
 }
@@ -1164,11 +1165,11 @@ void updateTssMappings(Database cx, const GetKeyServerLocationsReply& reply) {
 		}
 	}
 
-	for (const auto& mapping : reply.resultsTssMapping) {
-		auto ssi = ssiById.find(mapping.first);
+	for (const auto& [storageServerId, tss] : reply.resultsTssMapping) {
+		auto ssi = ssiById.find(storageServerId);
 		ASSERT(ssi != ssiById.end());
-		cx->addTssMapping(*ssi->second, mapping.second);
-		ssiById.erase(mapping.first);
+		cx->addTssMapping(*ssi->second, tss);
+		ssiById.erase(storageServerId);
 	}
 
 	// if SS didn't have a mapping above, it's still in the ssiById map, so remove its tss mapping
@@ -1178,8 +1179,8 @@ void updateTssMappings(Database cx, const GetKeyServerLocationsReply& reply) {
 }
 
 void updateTagMappings(Database cx, const GetKeyServerLocationsReply& reply) {
-	for (const auto& mapping : reply.resultsTagMapping) {
-		cx->addSSIdTagMapping(mapping.first, mapping.second);
+	for (const auto& [storageServerId, tag] : reply.resultsTagMapping) {
+		cx->addSSIdTagMapping(storageServerId, tag);
 	}
 }
 
@@ -4109,11 +4110,11 @@ Future<Void> checkWrites(Uncancellable,
 	auto& mutations = req.transaction.mutations;
 	const int mCount = mutations.size(); // debugging info for traceEvent
 
-	for (int idx = 0; idx < mutations.size(); ++idx) {
-		if (mutations[idx].type == MutationRef::SetValue)
-			expectedValues.insert(singleKeyRange(mutations[idx].param1), MutationBlock(mutations[idx].param2));
-		else if (mutations[idx].type == MutationRef::ClearRange)
-			expectedValues.insert(KeyRangeRef(mutations[idx].param1, mutations[idx].param2), MutationBlock(true));
+	for (const auto& mutation : mutations) {
+		if (mutation.type == MutationRef::SetValue)
+			expectedValues.insert(singleKeyRange(mutation.param1), MutationBlock(mutation.param2));
+		else if (mutation.type == MutationRef::ClearRange)
+			expectedValues.insert(KeyRangeRef(mutation.param1, mutation.param2), MutationBlock(true));
 	}
 
 	try {
@@ -4510,7 +4511,8 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState, CommitT
 			}
 		}
 	} catch (Error& e) {
-		if (e.code() == error_code_request_maybe_delivered || e.code() == error_code_commit_unknown_result) {
+		if (e.code() == error_code_request_maybe_delivered || e.code() == error_code_commit_unknown_result ||
+		    e.code() == error_code_never_reply) {
 			// We don't know if the commit happened, and it might even still be in flight.
 
 			if (!trState->options.causalWriteRisky || req.idempotencyId.valid()) {
@@ -4613,11 +4615,10 @@ Future<Void> Transaction::commitMutations() {
 		}
 
 		bool isCheckingWrites = trState->options.checkWritesEnabled && deterministicRandom()->random01() < 0.01;
-		for (int i = 0; i < extraConflictRanges.size(); i++)
-			if (extraConflictRanges[i].isReady() &&
-			    extraConflictRanges[i].get().first < extraConflictRanges[i].get().second)
+		for (const auto& extraConflictRange : extraConflictRanges)
+			if (extraConflictRange.isReady() && extraConflictRange.get().first < extraConflictRange.get().second)
 				tr.transaction.read_conflict_ranges.emplace_back(
-				    tr.arena, extraConflictRanges[i].get().first, extraConflictRanges[i].get().second);
+				    tr.arena, extraConflictRange.get().first, extraConflictRange.get().second);
 
 		if (tr.idempotencyId.valid()) {
 			// We need to be able confirm that this transaction is no longer in
@@ -4724,6 +4725,18 @@ Future<Void> Transaction::commit() {
 	ASSERT(!committing.isValid());
 	committing = commitAndWatch(this);
 	return committing;
+}
+
+// Returns a thread-local mt19937_64 seeded once with 32 bytes of OS entropy.
+// Used for AUTOMATIC_IDEMPOTENCY ID generation in non-simulation runs.
+static std::mt19937_64& getIdempotencyRng() {
+	static thread_local std::mt19937_64 rng = []() {
+		uint32_t seed_data[8];
+		platform::getRandomBytes(seed_data, sizeof(seed_data));
+		std::seed_seq seq(seed_data, seed_data + 8);
+		return std::mt19937_64(seq);
+	}();
+	return rng;
 }
 
 void Transaction::setOption(FDBTransactionOptions::Option option, Optional<StringRef> value) {
@@ -4972,9 +4985,15 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 	case FDBTransactionOptions::AUTOMATIC_IDEMPOTENCY:
 		validateOptionValueNotPresent(value);
 		if (!tr.idempotencyId.valid()) {
-			tr.idempotencyId = IdempotencyIdRef(
-			    tr.arena,
-			    IdempotencyIdRef(BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned())));
+			StringRef id = makeString(16, tr.arena);
+			if (g_network->isSimulated()) {
+				deterministicRandom()->randomBytes(mutateString(id), 16);
+			} else {
+				auto& rng = getIdempotencyRng();
+				uint64_t buf[2] = { rng(), rng() };
+				memcpy(mutateString(id), buf, 16);
+			}
+			tr.idempotencyId = IdempotencyIdRef(id);
 		}
 		trState->automaticIdempotency = true;
 		break;
@@ -5864,6 +5883,8 @@ Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(Database cx,
                                                                     int expectedShardCount,
                                                                     Optional<Reference<TransactionState>> trState) {
 	Span span("NAPI:WaitStorageMetrics"_loc, generateSpanID(cx->transactionTracingSample));
+	double startTime = now();
+	int retryCount = 0;
 	while (true) {
 		if (trState.present()) {
 			co_await trState.get()->startTransaction();
@@ -5910,7 +5931,14 @@ Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(Database cx,
 		} catch (Error& e) {
 			err = e;
 		}
-		TraceEvent(SevDebug, "WaitStorageMetricsHandleError").error(err);
+		retryCount++;
+		// Upgrade from SevDebug to SevWarn after 60 seconds of retrying
+		Severity sev = (now() - startTime > 60.0) ? SevWarn : SevDebug;
+		TraceEvent(sev, "WaitStorageMetricsHandleError")
+		    .error(err)
+		    .detail("Keys", keys)
+		    .detail("Elapsed", now() - startTime)
+		    .detail("Retries", retryCount);
 		if (err.code() == error_code_wrong_shard_server || err.code() == error_code_all_alternatives_failed) {
 			cx->invalidateCache(keys);
 			co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution);
@@ -6585,14 +6613,14 @@ Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> excl
 	ClientCoordinators coordinatorList(cx->getConnectionRecord());
 	std::vector<Future<Optional<LeaderInfo>>> leaderServers;
 	leaderServers.reserve(coordinatorList.clientLeaderServers.size());
-	for (int i = 0; i < coordinatorList.clientLeaderServers.size(); ++i) {
-		if (coordinatorList.clientLeaderServers[i].hostname.present()) {
+	for (const auto& clientLeaderServer : coordinatorList.clientLeaderServers) {
+		if (clientLeaderServer.hostname.present()) {
 			leaderServers.push_back(retryGetReplyFromHostname(GetLeaderRequest(coordinatorList.clusterKey, UID()),
-			                                                  coordinatorList.clientLeaderServers[i].hostname.get(),
+			                                                  clientLeaderServer.hostname.get(),
 			                                                  WLTOKEN_CLIENTLEADERREG_GETLEADER,
 			                                                  TaskPriority::CoordinationReply));
 		} else {
-			leaderServers.push_back(retryBrokenPromise(coordinatorList.clientLeaderServers[i].getLeader,
+			leaderServers.push_back(retryBrokenPromise(clientLeaderServer.getLeader,
 			                                           GetLeaderRequest(coordinatorList.clusterKey, UID()),
 			                                           TaskPriority::CoordinationReply));
 		}
@@ -6797,12 +6825,12 @@ Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerLi
 	ASSERT(!serverList.get().more && serverList.get().size() < CLIENT_KNOBS->TOO_MANY);
 
 	std::map<Optional<Standalone<StringRef>>, ProcessData> id_data;
-	for (int i = 0; i < workers.get().size(); i++)
-		id_data[workers.get()[i].locality.processId()] = workers.get()[i];
+	for (const auto& worker : workers.get())
+		id_data[worker.locality.processId()] = worker;
 
 	std::vector<std::pair<StorageServerInterface, ProcessClass>> results;
-	for (int i = 0; i < serverList.get().size(); i++) {
-		auto ssi = decodeServerListValue(serverList.get()[i].value);
+	for (const auto& server : serverList.get()) {
+		auto ssi = decodeServerListValue(server.value);
 		results.emplace_back(ssi, id_data[ssi.locality.processId()].processClass);
 	}
 

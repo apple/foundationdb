@@ -18,8 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 
@@ -29,7 +27,7 @@ class ClogSingleConnectionWorkload : public TestWorkload {
 
 public:
 	static constexpr auto NAME = "ClogSingleConnection";
-	ClogSingleConnectionWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit ClogSingleConnectionWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		auto minDelay = getOption(options, "minDelay"_sr, 0.0);
 		auto maxDelay = getOption(options, "maxDelay"_sr, 10.0);
 		ASSERT_LE(minDelay, maxDelay);

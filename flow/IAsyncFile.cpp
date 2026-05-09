@@ -19,7 +19,6 @@
  */
 
 #include "flow/IAsyncFile.h"
-#include "flow/Error.h"
 #include "flow/Knobs.h"
 #include "flow/Platform.h"
 

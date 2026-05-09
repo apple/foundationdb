@@ -113,7 +113,22 @@ std::string describe(int const& val) {
 
 template <>
 std::string describe(const SimulationStorageEngine& val) {
-	return std::to_string(static_cast<uint32_t>(val));
+	switch (val) {
+	case SimulationStorageEngine::SSD:
+		return "ssd";
+	case SimulationStorageEngine::MEMORY:
+		return "memory";
+	case SimulationStorageEngine::RADIX_TREE:
+		return "memory-radixtree";
+	case SimulationStorageEngine::REDWOOD:
+		return "ssd-redwood-1";
+	case SimulationStorageEngine::ROCKSDB:
+		return "ssd-rocksdb-v1";
+	case SimulationStorageEngine::SHARDED_ROCKSDB:
+		return "ssd-sharded-rocksdb";
+	default:
+		return std::to_string(static_cast<uint32_t>(val));
+	}
 }
 
 namespace {
@@ -121,6 +136,28 @@ namespace {
 bool isValidSimulationStorageEngineValue(const std::underlying_type_t<SimulationStorageEngine>& value) {
 	return value < static_cast<std::underlying_type_t<SimulationStorageEngine>>(
 	                   SimulationStorageEngine::SIMULATION_STORAGE_ENGINE_INVALID_VALUE);
+}
+
+SimulationStorageEngine parseSimulationStorageEngine(const toml::value& value) {
+	if (value.type() == toml::value_t::integer) {
+		const auto intVal = static_cast<uint8_t>(value.as_integer());
+		ASSERT(isValidSimulationStorageEngineValue(intVal));
+		return static_cast<SimulationStorageEngine>(intVal);
+	}
+
+	ASSERT(value.type() == toml::value_t::string);
+	const auto& stringVal = value.as_string();
+	static const std::unordered_map<std::string, SimulationStorageEngine> STORAGE_ENGINE_NAME_MAPPER = {
+		{ "ssd", SimulationStorageEngine::SSD },
+		{ "memory", SimulationStorageEngine::MEMORY },
+		{ "memory-radixtree", SimulationStorageEngine::RADIX_TREE },
+		{ "ssd-redwood-1", SimulationStorageEngine::REDWOOD },
+		{ "ssd-rocksdb-v1", SimulationStorageEngine::ROCKSDB },
+		{ "ssd-sharded-rocksdb", SimulationStorageEngine::SHARDED_ROCKSDB },
+	};
+	const auto iter = STORAGE_ENGINE_NAME_MAPPER.find(stringVal);
+	ASSERT(iter != STORAGE_ENGINE_NAME_MAPPER.end());
+	return iter->second;
 }
 
 constexpr int MACHINE_REBOOT_TIME = 10;
@@ -183,9 +220,7 @@ class TestConfig : public BasicTestConfig {
 			void operator()(std::set<SimulationStorageEngine>* val) const {
 				auto arr = value.as_array();
 				for (const auto& i : arr) {
-					const auto intVal = static_cast<uint8_t>(i.as_integer());
-					ASSERT(isValidSimulationStorageEngineValue(intVal));
-					val->insert(static_cast<SimulationStorageEngine>(intVal));
+					val->insert(parseSimulationStorageEngine(i));
 				}
 			}
 			void operator()(Optional<std::set<SimulationStorageEngine>>* val) const {
@@ -400,14 +435,8 @@ public:
 	// 7.1 cannot be downgraded to 7.0 and below after enabling hostname, so disable hostname for 7.0 downgrade tests
 	bool disableHostname = false;
 	// Storage Engine Types: Verify match with SimulationConfig::generateNormalConfig
-	//	0 = "ssd"
-	//	1 = "memory"
-	//	2 = "memory-radixtree"
-	//	3 = "ssd-redwood-1"
-	//	4 = "ssd-rocksdb-v1"
-	//	5 = "ssd-sharded-rocksdb"
-	// Requires a comma-separated list of numbers WITHOUT whitespaces
-	// See SimulationStorageEngine for more details
+	// TOML tests may use either the canonical string names or legacy integer values. Restart tests
+	// parsed by older binaries must keep using legacy integers for compatibility.
 	std::set<SimulationStorageEngine> storageEngineExcludeTypes;
 	Optional<int> datacenters, stderrSeverity, processesPerMachine;
 	// Set the maximum TLog version that can be selected for a test
@@ -899,8 +928,7 @@ Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConnectionR
 				writeFile(joinPath(*dataFolder, "fdb.cluster"), connStr.toString());
 				connRecord = makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"));
 			} else {
-				connRecord =
-				    makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"), connStr.toString());
+				connRecord = makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"), connStr);
 			}
 		} else if (onShutdown.get() == ISimulator::KillType::RebootProcessAndSwitch) {
 			TraceEvent("SimulatedFDBDRebootAndSwitch")
@@ -918,7 +946,8 @@ Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConnectionR
 			if (otherConnStr.toString().size() > 1) {
 				std::string newConnStr =
 				    g_simulator->hasSwitchedCluster(process->address) ? otherConnStr.toString() : connStr.toString();
-				connRecord = makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"), newConnStr);
+				connRecord = makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"),
+				                                                  ClusterConnectionString(newConnStr));
 			}
 		} else {
 			TraceEvent("SimulatedFDBDJustRepeat")
@@ -1007,9 +1036,9 @@ Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				if (ipProcessMode != SimHTTPServer) {
 					// Fall back to use seed string if fdb.cluster not present
 					// It can happen when a process failed before it persisted the connection string to disk
-					clusterFile = Reference<IClusterConnectionRecord>(
-					    useSeedFile || !fileExists(path) ? new ClusterConnectionFile(path, connStr.toString())
-					                                     : new ClusterConnectionFile(path));
+					clusterFile = Reference<IClusterConnectionRecord>(useSeedFile || !fileExists(path)
+					                                                      ? new ClusterConnectionFile(path, connStr)
+					                                                      : new ClusterConnectionFile(path));
 				}
 				const int listenPort = i * listenPerProcess + 1;
 
@@ -1632,7 +1661,7 @@ const std::vector<SimulationStorageEngine> SIMULATION_STORAGE_ENGINE = {
 std::string getExcludedStorageEngineTypesInString(const std::set<SimulationStorageEngine>& excluded) {
 	std::string str;
 	for (const auto& e : excluded) {
-		str += std::to_string(static_cast<uint32_t>(e));
+		str += describe(e);
 		str += ',';
 	}
 	if (!excluded.empty())
@@ -2658,7 +2687,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 using namespace std::literals;
 
 // Actor that waits for a specified simulation time and then resets the random seed
-Future<Void> reseedRandomAtTime(double waitTime, uint32_t newSeed) {
+Future<Void> reseedRandomAtTime(double waitTime, uint64_t newSeed) {
 	co_await delay(waitTime);
 	TraceEvent("ResettingRandomSeed").detail("WaitTime", waitTime).detail("NewSeed", newSeed);
 	deterministicRandom()->resetSeed(newSeed);
@@ -2813,7 +2842,7 @@ static Future<Void> simulationSetupAndRunImpl(std::string dataFolder,
 		// If reseedTime is set, schedule a random seed reset at a random time between [0, reseedTime]
 		if (reseedTime >= 0.0) {
 			double actualReseedTime = nondeterministicRandom()->random01() * reseedTime;
-			uint32_t newSeed = platform::getRandomSeed();
+			uint64_t newSeed = platform::getRandomSeed();
 			TraceEvent("SchedulingRandomSeedReset")
 			    .detail("ReseedTimeMax", reseedTime)
 			    .detail("ActualReseedTime", actualReseedTime)

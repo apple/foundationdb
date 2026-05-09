@@ -108,7 +108,8 @@ public:
 		}
 		getCurrentLineage()->modify(member) = before;
 	}
-	ScopedLineage(ScopedLineage<T, V>&& o) : before(std::move(o.before)), member(o.member), valid(o.valid) {
+	explicit(false) ScopedLineage(ScopedLineage<T, V>&& o)
+	  : before(std::move(o.before)), member(o.member), valid(o.valid) {
 		o.release();
 	}
 	ScopedLineage& operator=(ScopedLineage<T, V>&& o) {

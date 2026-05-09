@@ -75,7 +75,7 @@ struct PrepareBlobRestoreReply {
 	int8_t res;
 
 	PrepareBlobRestoreReply() = default;
-	PrepareBlobRestoreReply(Type t) : res(int8_t(t)) {}
+	explicit PrepareBlobRestoreReply(Type t) : res(int8_t(t)) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

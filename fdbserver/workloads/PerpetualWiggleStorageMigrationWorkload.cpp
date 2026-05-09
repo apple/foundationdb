@@ -55,7 +55,7 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 
 	static constexpr auto NAME = "PerpetualWiggleStorageMigrationWorkload";
 
-	PerpetualWiggleStorageMigrationWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
+	explicit PerpetualWiggleStorageMigrationWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
 
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
 		// This test requires exclude/include runs smoothly, so we disable all the failure injection workloads.

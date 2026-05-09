@@ -30,7 +30,6 @@
 #include "flow/IRandom.h"
 #include "flow/flow.h"
 #include <cstdint>
-#include <limits>
 
 namespace {
 std::string printValue(const ErrorOr<Optional<Value>>& value) {
@@ -89,7 +88,7 @@ struct ValidateStorage : TestWorkload {
 		pass = false;
 	}
 
-	ValidateStorage(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(!clientId), pass(true) {}
+	explicit ValidateStorage(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(!clientId), pass(true) {}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 

@@ -284,10 +284,40 @@ Future<bool> anyPartitionedBackupRunning(Reference<ReadYourWritesTransaction> tr
 	co_return false;
 }
 
+// Lists all backups and find if any range-partitioned backup is running.
+Future<bool> anyRangePartitionedBackupRunning(Reference<ReadYourWritesTransaction> tr) {
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	std::vector<KeyBackedTag> tags = co_await getAllBackupTags(tr);
+
+	std::vector<Future<Optional<UidAndAbortedFlagT>>> futures;
+	for (const auto& tag : tags) {
+		futures.push_back(tag.get(tr));
+	}
+
+	co_await waitForAll(futures);
+	int i = 0;
+	for (i = 0; i < futures.size(); i++) {
+		if (futures[i].get().present()) {
+			Optional<MutationLogType> mutationLogType;
+			EBackupState eState;
+			BackupConfig config(futures[i].get().get().first);
+
+			co_await (store(eState, config.stateEnum().getD(tr, Snapshot::False, EBackupState::STATE_NEVERRAN)) &&
+			          store(mutationLogType, config.mutationLogType().get(tr)));
+			if (FileBackupAgent::isRunnable(eState) &&
+			    mutationLogType.orDefault(MutationLogType::DEFAULT) == MutationLogType::RANGE_PARTITIONED_LOG) {
+				co_return true;
+			}
+		}
+	}
+	co_return false;
+}
+
 class RestoreConfig : public KeyBackedTaskConfig {
 public:
-	RestoreConfig(UID uid = UID()) : KeyBackedTaskConfig(fileRestorePrefixRange.begin, uid) {}
-	RestoreConfig(Reference<Task> task) : KeyBackedTaskConfig(fileRestorePrefixRange.begin, task) {}
+	explicit RestoreConfig(UID uid = UID()) : KeyBackedTaskConfig(fileRestorePrefixRange.begin, uid) {}
+	explicit RestoreConfig(Reference<Task> task) : KeyBackedTaskConfig(fileRestorePrefixRange.begin, task) {}
 
 	KeyBackedProperty<ERestoreState> stateEnum() { return configSpace.pack(__FUNCTION__sr); }
 	Future<StringRef> stateText(Reference<ReadYourWritesTransaction> tr) {
@@ -829,7 +859,7 @@ public:
 		size_t size;
 		int index;
 		int capacity;
-		IteratorBuffer(int _capacity) {
+		explicit IteratorBuffer(int _capacity) {
 			capacity = _capacity;
 			data = std::shared_ptr<char[]>(new char[capacity]());
 			fetchingData.reset();
@@ -1525,7 +1555,7 @@ public:
 //   then the space after the final key to the next 1MB boundary would
 //   just be padding anyway.
 struct RangeFileWriter : public IRangeFileWriter {
-	RangeFileWriter(Reference<IBackupFile> file = Reference<IBackupFile>(), int blockSize = 0)
+	explicit RangeFileWriter(Reference<IBackupFile> file = Reference<IBackupFile>(), int blockSize = 0)
 	  : file(file), blockSize(blockSize), blockEnd(0), fileVersion(BACKUP_AGENT_SNAPSHOT_FILE_VERSION) {}
 
 	// Handles the first block and internal blocks.  Ends current block if needed.
@@ -1736,7 +1766,7 @@ Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsync
 // Very simple format compared to KeyRange files.
 // Header, [Key, Value]... Key len
 struct LogFileWriter {
-	LogFileWriter(Reference<IBackupFile> file = Reference<IBackupFile>(), int blockSize = 0)
+	explicit LogFileWriter(Reference<IBackupFile> file = Reference<IBackupFile>(), int blockSize = 0)
 	  : file(file), blockSize(blockSize), blockEnd(0) {}
 
 	// Start a new block if needed, then write the key and value
@@ -1867,7 +1897,7 @@ static Future<Void> abortFiveZeroBackup(FileBackupAgent* backupAgent,
 
 	Subspace statusSpace = backupAgent->subspace.get(BackupAgentBase::keyStates).get(uid.toString());
 	Subspace globalConfig = backupAgent->subspace.get(BackupAgentBase::keyConfig).get(uid.toString());
-	Subspace newConfigSpace = uidPrefixKey("uid->config/"_sr.withPrefix(fileBackupPrefixRange.begin), uid);
+	Subspace newConfigSpace(uidPrefixKey("uid->config/"_sr.withPrefix(fileBackupPrefixRange.begin), uid));
 
 	Optional<Value> statusStr = co_await tr->get(statusSpace.pack(FileBackupAgent::keyStateStatus));
 	EBackupState status =
@@ -7169,6 +7199,32 @@ public:
 			prevConfig.clear(tr);
 		}
 
+		// PARTITIONED_LOG and RANGE_PARTITIONED_LOG backups are mutually exclusive: backup worker
+		// recruitment is determined by the active non-default type, so both cannot run concurrently.
+		if (mutationLogType == MutationLogType::PARTITIONED_LOG) {
+			if (co_await anyRangePartitionedBackupRunning(tr)) {
+				TraceEvent(SevError, "FBA_SubmitBackupMutationLogTypeConflict")
+				    .detail("TagName", tagName)
+				    .detail("RequestedType", mutationLogTypeToString(MutationLogType::PARTITIONED_LOG))
+				    .detail("ConflictingType", mutationLogTypeToString(MutationLogType::RANGE_PARTITIONED_LOG));
+				fprintf(stderr,
+				        "ERROR: Cannot start a backup with mutation-log-type `partitioned-log' while a "
+				        "range-partitioned-log backup is running.\n");
+				throw backup_error();
+			}
+		} else if (mutationLogType == MutationLogType::RANGE_PARTITIONED_LOG) {
+			if (co_await anyPartitionedBackupRunning(tr)) {
+				TraceEvent(SevError, "FBA_SubmitBackupMutationLogTypeConflict")
+				    .detail("TagName", tagName)
+				    .detail("RequestedType", mutationLogTypeToString(MutationLogType::RANGE_PARTITIONED_LOG))
+				    .detail("ConflictingType", mutationLogTypeToString(MutationLogType::PARTITIONED_LOG));
+				fprintf(stderr,
+				        "ERROR: Cannot start a backup with mutation-log-type `range-partitioned-log' while a "
+				        "partitioned-log backup is running.\n");
+				throw backup_error();
+			}
+		}
+
 		BackupConfig config(deterministicRandom()->randomUniqueID());
 		UID uid = config.getUid();
 
@@ -7288,9 +7344,9 @@ public:
 	                                  Version beginVersion,
 	                                  UID uid,
 	                                  MutationLogType mutationLogType,
-	                                  bool useRangeFileRestore = true,
-	                                  int encryptionBlockSize = 0,
-	                                  Optional<std::string> encryptionKeyFileName = {}) {
+	                                  Optional<std::string> encryptionKeyFileName,
+	                                  int encryptionBlockSize,
+	                                  bool useRangeFileRestore = true) {
 		KeyRangeMap<int> restoreRangeSet;
 		for (auto& range : ranges) {
 			restoreRangeSet.insert(range, 1);
@@ -8218,9 +8274,9 @@ public:
 				                       beginVersion,
 				                       randomUid,
 				                       desc.mutationLogType,
-				                       useRangeFileRestore,
+				                       encryptionKeyFileName,
 				                       desc.encryptionBlockSize,
-				                       encryptionKeyFileName);
+				                       useRangeFileRestore);
 				co_await tr->commit();
 				break;
 			} catch (Error& e) {

@@ -200,7 +200,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 	bool chained;
 	int subtaskCount;
 
-	TaskBucketCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit TaskBucketCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		chained = getOption(options, "chained"_sr, false);
 		subtaskCount = getOption(options, "subtaskCount"_sr, 20);
 	}
