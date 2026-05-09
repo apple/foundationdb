@@ -2884,6 +2884,18 @@ private:
 			co_await queueMutationLock.take(TaskPriority::DataDistributionLaunch);
 			FlowLock::Releaser releaser(queueMutationLock);
 
+			// A source-fetch actor can finish after an overlapping relocation has already cancelled and
+			// replaced the item it was fetching for. The old serialized choose loop could not observe that
+			// completion after the replacement had been processed, but the coroutine split can.
+			if (!self->fetchingSourcesQueue.contains(results)) {
+				DebugRelocationTraceEvent("StaleSourceFetchResult", self->distributorId)
+				    .detail("KeyBegin", results.keys.begin)
+				    .detail("KeyEnd", results.keys.end)
+				    .detail("Priority", results.priority)
+				    .detail("RandomID", results.randomId);
+				continue;
+			}
+
 			// This stream is triggered by queueRelocation(), which is triggered by sending self->input.
 			self->completeSourceFetch(results);
 			self->validate();
