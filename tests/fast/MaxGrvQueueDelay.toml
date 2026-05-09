@@ -1,6 +1,6 @@
 [[knobs]]
-# Keep GRV ratekeeper capacity low enough that thresholded requests observe
-# proxy-side queue-delay rejection without throttling cluster setup.
+# Keep GRV ratekeeper capacity low enough that the warmup burst creates
+# queueing without throttling cluster setup.
 ratekeeper_default_limit = 100
 ratekeeper_max_rate = 100
 
@@ -9,11 +9,11 @@ testTitle = 'MaxGrvQueueDelay'
 
     [[test.workload]]
     testName = 'MaxGrvQueueDelay'
-    # Run before idle GRV admission credit accumulates, otherwise the burst can
-    # be admitted without queueing on some randomized simulator seeds.
     startAfter = 0.0
     testTimeout = 30.0
     requestCount = 250
     minRejected = 1
     maxQueueDelayMS = 0
     permissiveMaxQueueDelayMS = 60000
+    warmupRequestCount = 10000
+    warmupDelay = 0.1
