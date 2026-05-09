@@ -21,7 +21,6 @@
 #include "fdbclient/KnobValue.h"
 #include "fdbclient/Tuple.h"
 #include "flow/flow.h"
-#include "flow/Trace.h"
 
 namespace {
 

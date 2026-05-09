@@ -19,9 +19,7 @@
  */
 
 #include "fdbclient/AsyncFileBlobStore.h"
-#include "fdbrpc/AsyncFileReadAhead.h"
 #include "flow/UnitTest.h"
-#include "flow/IConnection.h"
 
 Future<int64_t> AsyncFileBlobStoreRead::size() const {
 	if (!m_size.isValid())

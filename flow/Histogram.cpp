@@ -27,7 +27,6 @@
 // scoped to the right "machine".
 // either we pull g_simulator into flow, or flow (and the I/O path) will be unable to log performance
 // metrics.
-#include <limits>
 
 #pragma region HistogramRegistry
 
