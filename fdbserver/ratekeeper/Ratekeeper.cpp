@@ -386,20 +386,9 @@ Future<Void> Ratekeeper::handleGetRateInfoReqs(RatekeeperInterface rkInterf,
 			p.lastThrottledTagChangeId = tagThrottler->getThrottledTagChangeId();
 			p.lastTagPushTime = now();
 
-			bool returningTagsToProxy{ false };
-			if (SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES) {
-				auto proxyThrottledTags = tagThrottler->getProxyRates(grvProxyInfo.size());
-				if (!SERVER_KNOBS->GLOBAL_TAG_THROTTLING_REPORT_ONLY) {
-					returningTagsToProxy = !proxyThrottledTags.empty();
-					reply.proxyThrottledTags = std::move(proxyThrottledTags);
-				}
-			} else {
-				auto clientThrottledTags = tagThrottler->getClientRates();
-				if (!SERVER_KNOBS->GLOBAL_TAG_THROTTLING_REPORT_ONLY) {
-					returningTagsToProxy = !clientThrottledTags.empty();
-					reply.clientThrottledTags = std::move(clientThrottledTags);
-				}
-			}
+			auto clientThrottledTags = tagThrottler->getClientRates();
+			bool returningTagsToProxy = !clientThrottledTags.empty();
+			reply.clientThrottledTags = std::move(clientThrottledTags);
 			CODE_PROBE(returningTagsToProxy, "Returning tag throttles to a proxy");
 		}
 
@@ -604,12 +593,7 @@ Ratekeeper::Ratekeeper(UID id, Database db)
                 SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH,
                 SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH),
     maxVersion(0), unblockedAssignmentTime(now()) {
-	if (SERVER_KNOBS->GLOBAL_TAG_THROTTLING) {
-		tagThrottler = std::make_unique<GlobalTagThrottler>(
-		    db, id, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND, SERVER_KNOBS->GLOBAL_TAG_THROTTLING_LIMITING_THRESHOLD);
-	} else {
-		tagThrottler = std::make_unique<TagThrottler>(db, id);
-	}
+	tagThrottler = std::make_unique<TagThrottler>(db, id);
 }
 
 void Ratekeeper::updateCommitCostEstimation(

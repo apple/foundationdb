@@ -20,7 +20,6 @@
 
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TagThrottle.h"
-#include "fdbclient/Tuple.h"
 
 double const ClientTagThrottleLimits::NO_EXPIRATION = std::numeric_limits<double>::max();
 
@@ -122,43 +121,6 @@ TagThrottleValue TagThrottleValue::fromValue(const ValueRef& value) {
 	BinaryReader reader(value, IncludeVersion(ProtocolVersion::withTagThrottleValueReason()));
 	reader >> throttleValue;
 	return throttleValue;
-}
-
-KeyRangeRef const tagQuotaKeys = KeyRangeRef("\xff/tagQuota/"_sr, "\xff/tagQuota0"_sr);
-KeyRef const tagQuotaPrefix = tagQuotaKeys.begin;
-
-Key ThrottleApi::getTagQuotaKey(TransactionTagRef tag) {
-	return tag.withPrefix(tagQuotaPrefix);
-}
-
-bool ThrottleApi::TagQuotaValue::isValid() const {
-	return reservedQuota <= totalQuota && reservedQuota >= 0;
-}
-
-Value ThrottleApi::TagQuotaValue::toValue() const {
-	return Tuple::makeTuple(reservedQuota, totalQuota).pack();
-}
-
-ThrottleApi::TagQuotaValue ThrottleApi::TagQuotaValue::fromValue(ValueRef value) {
-	auto tuple = Tuple::unpack(value);
-	if (tuple.size() != 2) {
-		throw invalid_throttle_quota_value();
-	}
-	TagQuotaValue result;
-	try {
-		result.reservedQuota = tuple.getInt(0);
-		result.totalQuota = tuple.getInt(1);
-	} catch (Error& e) {
-		TraceEvent(SevWarnAlways, "TagQuotaValueFailedToDeserialize").error(e);
-		throw invalid_throttle_quota_value();
-	}
-	if (!result.isValid()) {
-		TraceEvent(SevWarnAlways, "TagQuotaValueInvalidQuotas")
-		    .detail("ReservedQuota", result.reservedQuota)
-		    .detail("TotalQuota", result.totalQuota);
-		throw invalid_throttle_quota_value();
-	}
-	return result;
 }
 
 TEST_CASE("TagSet/toString") {
