@@ -165,9 +165,13 @@ Future<Reference<class IAsyncFile>> Net2FileSystem::open(const std::string& file
 		    mode,
 		    static_cast<boost::asio::io_service*>((void*)g_network->global(INetwork::enASIOService)));
 	if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
-		f = map(f, [=](Reference<IAsyncFile> r) { return makeReference<AsyncFileWriteChecker>(r); });
+		f = map(f, [=](Reference<IAsyncFile> r) -> Reference<IAsyncFile> {
+			return makeReference<AsyncFileWriteChecker>(r);
+		});
 	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES)
-		f = map(f, [=](Reference<IAsyncFile> r) { return makeReference<AsyncFileChaos>(r); });
+		f = map(f, [=](Reference<IAsyncFile> r) -> Reference<IAsyncFile> {
+			return makeReference<AsyncFileChaos>(r);
+		});
 	return f;
 }
 

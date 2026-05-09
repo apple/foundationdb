@@ -2787,8 +2787,9 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 
 			f = SimpleFile::open(filename, flags, mode, diskParameters, false);
 			if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0) {
-				f = map(f,
-				        [=](Reference<IAsyncFile> r) { return makeReference<AsyncFileWriteChecker>(r); });
+				f = map(f, [=](Reference<IAsyncFile> r) -> Reference<IAsyncFile> {
+					return makeReference<AsyncFileWriteChecker>(r);
+				});
 			}
 
 			f = AsyncFileNonDurable::open(
@@ -2801,7 +2802,9 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 
 		f = AsyncFileDetachable::open(f);
 		if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES)
-			f = map(f, [=](Reference<IAsyncFile> r) { return makeReference<AsyncFileChaos>(r); });
+			f = map(f, [=](Reference<IAsyncFile> r) -> Reference<IAsyncFile> {
+				return makeReference<AsyncFileChaos>(r);
+			});
 		return f;
 	} else
 		return AsyncFileCached::open(filename, flags, mode);
