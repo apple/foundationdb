@@ -53,14 +53,14 @@ var _ = Describe("[api] FDBVersion", func() {
 
 		It("should return an error when unmarshaling an invalid version string", func() {
 			var decoded Version
-			Err := json.Unmarshal([]byte(`"not-a-version"`), &decoded)
-			Expect(Err).To(HaveOccurred())
+			err := json.Unmarshal([]byte(`"not-a-version"`), &decoded)
+			Expect(err).To(HaveOccurred())
 		})
 
 		It("should return an error when unmarshaling a version with missing patch", func() {
 			var decoded Version
-			Err := json.Unmarshal([]byte(`"7.3"`), &decoded)
-			Expect(Err).To(HaveOccurred())
+			err := json.Unmarshal([]byte(`"7.3"`), &decoded)
+			Expect(err).To(HaveOccurred())
 		})
 	})
 
