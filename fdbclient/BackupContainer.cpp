@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-// FIXME: Trim this down
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/FDBTypes.h"

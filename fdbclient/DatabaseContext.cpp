@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-// TODO: prune down the list of includes. This was copied from NativeAPI.actor.cpp.
 #include "fdbclient/NativeAPI.actor.h"
 
 #include <functional>
