@@ -18,10 +18,7 @@
  * limitations under the License.
  */
 
-/*
- * This header is to declare the tss comparison function that LoadBalance.Actor.h needs to be aware of to call,
- * But StorageServerInterface.h needs to implement on the types defined in SSI.h.
- */
+// Shared declarations for the storage-server comparison helpers implemented in StorageServerInterface.cpp.
 #ifndef FDBRPC_TSS_COMPARISON_H
 #define FDBRPC_TSS_COMPARISON_H
 

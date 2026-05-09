@@ -1267,4 +1267,6 @@ inline int mvccStorageBytes(int mutationBytes) {
 	       (mutationBytes + MutationRef::OVERHEAD_BYTES) * 2;
 }
 
+#include "fdbclient/StorageServerLoadBalance.actor.h"
+
 #endif
