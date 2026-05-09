@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/GrvProxyInterface.h"
 #include "GrvTransactionRateInfo.h"
 #include "flow/flow.h"
