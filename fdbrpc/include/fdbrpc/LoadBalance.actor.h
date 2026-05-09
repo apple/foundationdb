@@ -81,17 +81,17 @@ Optional<LoadBalancedReply> getLoadBalancedReply(const void*);
 
 // Storage-server-specific layers can specialize these hooks to attach request duplication or post-response comparison
 // behavior without teaching the generic RPC load balancer about storage semantics.
-template <class Request, class Interface, class Multi, bool P>
+template <class Request, class Interface, class Multi, class Model, bool P>
 struct LoadBalanceRequestHooks {
 	static void maybeDuplicate(RequestStream<Request, P> const* stream,
 	                           Request& request,
-	                           QueueModel* model,
+	                           Model* model,
 	                           Future<ErrorOr<REPLY_TYPE(Request)>> response,
 	                           Reference<MultiInterface<Multi>> alternatives,
 	                           RequestStream<Request, P> Interface::* channel) {}
 
 	static Future<Void> maybeCompare(Request& request,
-	                                 QueueModel* model,
+	                                 Model* model,
 	                                 RequestStream<Request, P> const* requestStream,
 	                                 Future<ErrorOr<REPLY_TYPE(Request)>> response,
 	                                 Reference<MultiInterface<Multi>> alternatives,
@@ -106,7 +106,7 @@ FDB_BOOLEAN_PARAM(AtMostOnce);
 FDB_BOOLEAN_PARAM(TriedAllOptions);
 
 // Stores state for a request made by the load balancer
-template <class Request, class Interface, class Multi, bool P>
+template <class Request, class Interface, class Multi, class Model, bool P>
 struct RequestData : NonCopyable {
 	typedef ErrorOr<REPLY_TYPE(Request)> Reply;
 
@@ -128,12 +128,12 @@ struct RequestData : NonCopyable {
 	bool isValid() { return response.isValid(); }
 
 	Future<Void> maybeDoPostRequestComparison(Request& request,
-	                                          QueueModel* model,
+	                                          Model* model,
 	                                          Reference<MultiInterface<Multi>> alternatives,
 	                                          RequestStream<Request, P> Interface::* channel,
 	                                          int requiredReplicas) {
 		ASSERT(requestStream != nullptr);
-		return LoadBalanceRequestHooks<Request, Interface, Multi, P>::maybeCompare(
+		return LoadBalanceRequestHooks<Request, Interface, Multi, Model, P>::maybeCompare(
 		    request, model, requestStream, response, alternatives, channel, compareReplicas, requiredReplicas);
 	}
 
@@ -143,7 +143,7 @@ struct RequestData : NonCopyable {
 	    TriedAllOptions triedAllOptions,
 	    RequestStream<Request, P> const* stream,
 	    Request& request,
-	    QueueModel* model,
+	    Model* model,
 	    Reference<MultiInterface<Multi>> alternatives, // alternatives and channel passed through to request hooks
 	    RequestStream<Request, P> Interface::* channel) {
 		modelHolder = Reference<ModelHolder>();
@@ -155,7 +155,7 @@ struct RequestData : NonCopyable {
 				requestStarted = true;
 				modelHolder = makeReference<ModelHolder>(model, stream->getEndpoint().token.first());
 				Future<Reply> resp = stream->tryGetReply(request);
-				LoadBalanceRequestHooks<Request, Interface, Multi, P>::maybeDuplicate(
+				LoadBalanceRequestHooks<Request, Interface, Multi, Model, P>::maybeDuplicate(
 				    stream, request, model, resp, alternatives, channel);
 				return resp;
 			});
@@ -163,7 +163,7 @@ struct RequestData : NonCopyable {
 			requestStarted = true;
 			modelHolder = makeReference<ModelHolder>(model, stream->getEndpoint().token.first());
 			response = stream->tryGetReply(request);
-			LoadBalanceRequestHooks<Request, Interface, Multi, P>::maybeDuplicate(
+			LoadBalanceRequestHooks<Request, Interface, Multi, Model, P>::maybeDuplicate(
 			    stream, request, model, response, alternatives, channel);
 		}
 
@@ -294,19 +294,19 @@ struct RequestData : NonCopyable {
 // interfaces. If too many interfaces in the same DC are bad, try remote interfaces.
 // If compareReplicas is set, does a consistency check by fetching and comparing results from storage
 // replicas (as many as specified by "requiredReplicas") and throws an exception if an inconsistency is found.
-ACTOR template <class Interface, class Request, class Multi, bool P>
+ACTOR template <class Interface, class Request, class Multi, bool P, class Model = QueueModel>
 Future<REPLY_TYPE(Request)> loadBalance(Reference<MultiInterface<Multi>> alternatives,
                                         RequestStream<Request, P> Interface::* channel,
                                         Request request = Request(),
                                         TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
                                         // If true, throws request_maybe_delivered() instead of retrying automatically.
                                         AtMostOnce atMostOnce = AtMostOnce::False,
-                                        QueueModel* model = nullptr,
+                                        Model* model = nullptr,
                                         bool compareReplicas = false,
                                         int requiredReplicas = 0) {
 
-	state RequestData<Request, Interface, Multi, P> firstRequestData(compareReplicas);
-	state RequestData<Request, Interface, Multi, P> secondRequestData(compareReplicas);
+	state RequestData<Request, Interface, Multi, Model, P> firstRequestData(compareReplicas);
+	state RequestData<Request, Interface, Multi, Model, P> secondRequestData(compareReplicas);
 
 	state Optional<uint64_t> firstRequestEndpoint;
 	state Future<Void> secondDelay = Never();
@@ -545,7 +545,7 @@ Future<REPLY_TYPE(Request)> loadBalance(Reference<MultiInterface<Multi>> alterna
 
 			if (firstRequestSuccessful || secondRequestSuccessful) {
 				// Do consistency check, by comparing results from storage replicas, if requested.
-				state RequestData<Request, Interface, Multi, P>* requestData =
+				state RequestData<Request, Interface, Multi, Model, P>* requestData =
 				    firstRequestSuccessful ? &firstRequestData : &secondRequestData;
 				wait(
 				    requestData->maybeDoPostRequestComparison(request, model, alternatives, channel, requiredReplicas));

@@ -370,7 +370,7 @@ public:
 	bool proxyProvisional; // Provisional commit proxy and grv proxy are used at the same time.
 	UID proxiesLastChange;
 	LocalityData clientLocality;
-	QueueModel queueModel;
+	StorageServerQueueModel queueModel;
 	EnableLocalityLoadBalance enableLocalityLoadBalance{ EnableLocalityLoadBalance::False };
 
 	struct VersionRequest {

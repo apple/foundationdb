@@ -60,20 +60,6 @@ double QueueModel::addRequest(uint64_t id) {
 	return d.penalty;
 }
 
-void QueueModel::updateEndpointData(uint64_t endpointId, Reference<QueueModelEndpointData> endpointData) {
-	auto& d = data[endpointId];
-	d.endpointData = endpointData;
-}
-
-void QueueModel::removeEndpointData(uint64_t endpointId) {
-	auto& d = data[endpointId];
-	d.endpointData.clear();
-}
-
-Reference<QueueModelEndpointData> QueueModel::getEndpointData(uint64_t id) {
-	return data[id].endpointData;
-}
-
 Optional<LoadBalancedReply> getLoadBalancedReply(const LoadBalancedReply* reply) {
 	return *reply;
 }

@@ -151,35 +151,26 @@ void DatabaseContext::addTssMapping(StorageServerInterface const& ssi, StorageSe
 		}
 
 		// data requests duplicated for load and data comparison
-		queueModel.updateEndpointData(
-		    ssi.getValue.getEndpoint().token.first(),
-		    makeReference<TSSQueueModelEndpointData>(TSSEndpointData(tssi.id(), tssi.getValue.getEndpoint(), metrics)));
-		queueModel.updateEndpointData(
-		    ssi.getKey.getEndpoint().token.first(),
-		    makeReference<TSSQueueModelEndpointData>(TSSEndpointData(tssi.id(), tssi.getKey.getEndpoint(), metrics)));
-		queueModel.updateEndpointData(ssi.getKeyValues.getEndpoint().token.first(),
-		                              makeReference<TSSQueueModelEndpointData>(
-		                                  TSSEndpointData(tssi.id(), tssi.getKeyValues.getEndpoint(), metrics)));
-		queueModel.updateEndpointData(ssi.getMappedKeyValues.getEndpoint().token.first(),
-		                              makeReference<TSSQueueModelEndpointData>(
-		                                  TSSEndpointData(tssi.id(), tssi.getMappedKeyValues.getEndpoint(), metrics)));
-		queueModel.updateEndpointData(ssi.getKeyValuesStream.getEndpoint().token.first(),
-		                              makeReference<TSSQueueModelEndpointData>(
-		                                  TSSEndpointData(tssi.id(), tssi.getKeyValuesStream.getEndpoint(), metrics)));
+		queueModel.updateTssEndpoint(ssi.getValue.getEndpoint().token.first(),
+		                             TSSEndpointData(tssi.id(), tssi.getValue.getEndpoint(), metrics));
+		queueModel.updateTssEndpoint(ssi.getKey.getEndpoint().token.first(),
+		                             TSSEndpointData(tssi.id(), tssi.getKey.getEndpoint(), metrics));
+		queueModel.updateTssEndpoint(ssi.getKeyValues.getEndpoint().token.first(),
+		                             TSSEndpointData(tssi.id(), tssi.getKeyValues.getEndpoint(), metrics));
+		queueModel.updateTssEndpoint(ssi.getMappedKeyValues.getEndpoint().token.first(),
+		                             TSSEndpointData(tssi.id(), tssi.getMappedKeyValues.getEndpoint(), metrics));
+		queueModel.updateTssEndpoint(ssi.getKeyValuesStream.getEndpoint().token.first(),
+		                             TSSEndpointData(tssi.id(), tssi.getKeyValuesStream.getEndpoint(), metrics));
 
 		// non-data requests duplicated for load
-		queueModel.updateEndpointData(ssi.watchValue.getEndpoint().token.first(),
-		                              makeReference<TSSQueueModelEndpointData>(
-		                                  TSSEndpointData(tssi.id(), tssi.watchValue.getEndpoint(), metrics)));
-		queueModel.updateEndpointData(ssi.splitMetrics.getEndpoint().token.first(),
-		                              makeReference<TSSQueueModelEndpointData>(
-		                                  TSSEndpointData(tssi.id(), tssi.splitMetrics.getEndpoint(), metrics)));
-		queueModel.updateEndpointData(ssi.getReadHotRanges.getEndpoint().token.first(),
-		                              makeReference<TSSQueueModelEndpointData>(
-		                                  TSSEndpointData(tssi.id(), tssi.getReadHotRanges.getEndpoint(), metrics)));
-		queueModel.updateEndpointData(ssi.getRangeSplitPoints.getEndpoint().token.first(),
-		                              makeReference<TSSQueueModelEndpointData>(
-		                                  TSSEndpointData(tssi.id(), tssi.getRangeSplitPoints.getEndpoint(), metrics)));
+		queueModel.updateTssEndpoint(ssi.watchValue.getEndpoint().token.first(),
+		                             TSSEndpointData(tssi.id(), tssi.watchValue.getEndpoint(), metrics));
+		queueModel.updateTssEndpoint(ssi.splitMetrics.getEndpoint().token.first(),
+		                             TSSEndpointData(tssi.id(), tssi.splitMetrics.getEndpoint(), metrics));
+		queueModel.updateTssEndpoint(ssi.getReadHotRanges.getEndpoint().token.first(),
+		                             TSSEndpointData(tssi.id(), tssi.getReadHotRanges.getEndpoint(), metrics));
+		queueModel.updateTssEndpoint(ssi.getRangeSplitPoints.getEndpoint().token.first(),
+		                             TSSEndpointData(tssi.id(), tssi.getRangeSplitPoints.getEndpoint(), metrics));
 	}
 }
 
@@ -188,16 +179,16 @@ void DatabaseContext::removeTssMapping(StorageServerInterface const& ssi) {
 	if (result != tssMapping.end()) {
 		tssMetrics.erase(ssi.id());
 		tssMapping.erase(result);
-		queueModel.removeEndpointData(ssi.getValue.getEndpoint().token.first());
-		queueModel.removeEndpointData(ssi.getKey.getEndpoint().token.first());
-		queueModel.removeEndpointData(ssi.getKeyValues.getEndpoint().token.first());
-		queueModel.removeEndpointData(ssi.getMappedKeyValues.getEndpoint().token.first());
-		queueModel.removeEndpointData(ssi.getKeyValuesStream.getEndpoint().token.first());
+		queueModel.removeTssEndpoint(ssi.getValue.getEndpoint().token.first());
+		queueModel.removeTssEndpoint(ssi.getKey.getEndpoint().token.first());
+		queueModel.removeTssEndpoint(ssi.getKeyValues.getEndpoint().token.first());
+		queueModel.removeTssEndpoint(ssi.getMappedKeyValues.getEndpoint().token.first());
+		queueModel.removeTssEndpoint(ssi.getKeyValuesStream.getEndpoint().token.first());
 
-		queueModel.removeEndpointData(ssi.watchValue.getEndpoint().token.first());
-		queueModel.removeEndpointData(ssi.splitMetrics.getEndpoint().token.first());
-		queueModel.removeEndpointData(ssi.getReadHotRanges.getEndpoint().token.first());
-		queueModel.removeEndpointData(ssi.getRangeSplitPoints.getEndpoint().token.first());
+		queueModel.removeTssEndpoint(ssi.watchValue.getEndpoint().token.first());
+		queueModel.removeTssEndpoint(ssi.splitMetrics.getEndpoint().token.first());
+		queueModel.removeTssEndpoint(ssi.getReadHotRanges.getEndpoint().token.first());
+		queueModel.removeTssEndpoint(ssi.getRangeSplitPoints.getEndpoint().token.first());
 	}
 }
 

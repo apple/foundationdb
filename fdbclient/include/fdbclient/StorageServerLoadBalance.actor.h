@@ -362,16 +362,20 @@ Future<Void> replicaComparison(Req req,
 }
 
 template <class Request, bool P>
-struct LoadBalanceRequestHooks<Request, StorageServerInterface, ReferencedInterface<StorageServerInterface>, P> {
+struct LoadBalanceRequestHooks<Request,
+                               StorageServerInterface,
+                               ReferencedInterface<StorageServerInterface>,
+                               StorageServerQueueModel,
+                               P> {
 	static void maybeDuplicate(RequestStream<Request, P> const* stream,
 	                           Request& request,
-	                           QueueModel* model,
+	                           StorageServerQueueModel* model,
 	                           Future<ErrorOr<REPLY_TYPE(Request)>> ssResponse,
 	                           Reference<MultiInterface<ReferencedInterface<StorageServerInterface>>> alternatives,
 	                           RequestStream<Request, P> StorageServerInterface::* channel) {
 		if (model) {
 			// Send parallel request to TSS pair, if it exists
-			Optional<TSSEndpointData> tssData = getTssData(model, stream->getEndpoint().token.first());
+			Optional<TSSEndpointData> tssData = model->getTssData(stream->getEndpoint().token.first());
 
 			if (tssData.present()) {
 				CODE_PROBE(true, "duplicating request to TSS");
@@ -392,7 +396,7 @@ struct LoadBalanceRequestHooks<Request, StorageServerInterface, ReferencedInterf
 
 	static Future<Void> maybeCompare(
 	    Request& request,
-	    QueueModel* model,
+	    StorageServerQueueModel* model,
 	    RequestStream<Request, P> const* requestStream,
 	    Future<ErrorOr<REPLY_TYPE(Request)>> response,
 	    Reference<MultiInterface<ReferencedInterface<StorageServerInterface>>> alternatives,

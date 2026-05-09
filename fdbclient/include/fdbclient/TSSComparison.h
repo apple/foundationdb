@@ -117,17 +117,22 @@ struct TSSEndpointData {
 	  : tssId(tssId), endpoint(endpoint), metrics(metrics) {}
 };
 
-struct TSSQueueModelEndpointData : QueueModelEndpointData {
-	TSSEndpointData data;
+class StorageServerQueueModel : public QueueModel {
+public:
+	void updateTssEndpoint(uint64_t endpointId, TSSEndpointData endpointData) {
+		tssData.insert_or_assign(endpointId, std::move(endpointData));
+	}
 
-	explicit TSSQueueModelEndpointData(TSSEndpointData data) : data(data) {}
+	void removeTssEndpoint(uint64_t endpointId) { tssData.erase(endpointId); }
+
+	Optional<TSSEndpointData> getTssData(uint64_t endpointId) const {
+		auto it = tssData.find(endpointId);
+		return it == tssData.end() ? Optional<TSSEndpointData>() : Optional<TSSEndpointData>(it->second);
+	}
+
+private:
+	std::unordered_map<uint64_t, TSSEndpointData> tssData;
 };
-
-inline Optional<TSSEndpointData> getTssData(QueueModel* model, uint64_t endpointId) {
-	Reference<QueueModelEndpointData> endpointData = model->getEndpointData(endpointId);
-	return endpointData ? Optional<TSSEndpointData>(endpointData.castTo<TSSQueueModelEndpointData>()->data)
-	                    : Optional<TSSEndpointData>();
-}
 
 template <class Rep>
 bool TSS_doCompare(const Rep& src, const Rep& tss);

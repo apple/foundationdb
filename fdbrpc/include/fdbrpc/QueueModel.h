@@ -28,12 +28,6 @@
 #include "flow/ActorCollection.h"
 #include "fdbrpc/FlowTransport.h" // For Endpoint
 
-// Client layers can attach endpoint-local metadata to the generic queue model without forcing fdbrpc to know the
-// metadata schema.
-struct QueueModelEndpointData : ReferenceCounted<QueueModelEndpointData>, NonCopyable {
-	virtual ~QueueModelEndpointData() = default;
-};
-
 // The data structure used for the client-side load balancing algorithm to
 // decide which storage server to read data from. Conceptually, it tracks the
 // number of outstanding requests the current client sent to each storage
@@ -66,9 +60,6 @@ struct QueueData {
 	// hasn't returned a valid result, increase above `futureVersionBackoff`
 	// to increase the future backoff amount.
 	double increaseBackoffTime;
-
-	// A small escape hatch for client-layer endpoint metadata that needs to travel with queue measurements.
-	Reference<QueueModelEndpointData> endpointData;
 
 	QueueData()
 	  : smoothOutstanding(FLOW_KNOBS->QUEUE_MODEL_SMOOTHING_AMOUNT), latency(0.001), penalty(1.0), failedUntil(0),
@@ -103,15 +94,6 @@ public:
 	PromiseStream<Future<Void>> addActor;
 	Future<Void> laggingRequests; // requests for which a different recipient already answered
 	int laggingRequestCount;
-
-	// Updates the client-layer metadata associated with an endpoint.
-	void updateEndpointData(uint64_t endpointId, Reference<QueueModelEndpointData> endpointData);
-
-	// Removes the client-layer metadata associated with an endpoint.
-	void removeEndpointData(uint64_t endpointId);
-
-	// Retrieves the client-layer metadata associated with an endpoint, if present.
-	Reference<QueueModelEndpointData> getEndpointData(uint64_t endpointId);
 
 	QueueModel() : secondMultiplier(1.0), secondBudget(0), laggingRequestCount(0) {
 		laggingRequests = actorCollection(addActor.getFuture(), &laggingRequestCount);
