@@ -6342,7 +6342,8 @@ public:
 		int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
 		int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
 
-		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(teamSize, "zoneid", makeReference<PolicyOne>());
+		Reference<IReplicationPolicy> policy =
+		    makeReference<PolicyAcross>(teamSize, "zoneid", makeReference<PolicyOne>());
 		std::unique_ptr<DDTeamCollection> collection = testMachineTeamCollection(teamSize, policy, processSize);
 
 		collection->addTeamsBestOf(30, desiredTeams, maxTeams);
@@ -6358,7 +6359,8 @@ public:
 		int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
 		int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
 
-		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(teamSize, "zoneid", makeReference<PolicyOne>());
+		Reference<IReplicationPolicy> policy =
+		    makeReference<PolicyAcross>(teamSize, "zoneid", makeReference<PolicyOne>());
 		std::unique_ptr<DDTeamCollection> collection = testMachineTeamCollection(teamSize, policy, processSize);
 
 		if (collection == nullptr) {

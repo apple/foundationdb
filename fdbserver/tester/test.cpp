@@ -459,7 +459,8 @@ Future<Void> initializeSimConfig(Database db, bool restartingTest) {
 			if (foundSharedDcId) {
 				int totalRequired = std::max(dbConfig.tLogReplicationFactor, dbConfig.remoteTLogReplicationFactor) +
 				                    maxSatelliteReplication;
-				setFDBSimulationPolicyRemoteTLogPolicy(makeReference<PolicyAcross>(totalRequired, "zoneid", makeReference<PolicyOne>()));
+				setFDBSimulationPolicyRemoteTLogPolicy(
+				    makeReference<PolicyAcross>(totalRequired, "zoneid", makeReference<PolicyOne>()));
 				TraceEvent("ChangingSimTLogPolicyForSharedRemote")
 				    .detail("TotalRequired", totalRequired)
 				    .detail("MaxSatelliteReplication", maxSatelliteReplication)

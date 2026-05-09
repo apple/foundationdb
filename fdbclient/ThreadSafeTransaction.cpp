@@ -591,11 +591,13 @@ void ThreadSafeApi::stopNetwork() {
 }
 
 Reference<IDatabase> ThreadSafeApi::createDatabase(const char* clusterFilePath) {
-	return makeReference<ThreadSafeDatabase>(ThreadSafeDatabase::ConnectionRecordType::FILE, clusterFilePath, apiVersion.version());
+	return makeReference<ThreadSafeDatabase>(
+	    ThreadSafeDatabase::ConnectionRecordType::FILE, clusterFilePath, apiVersion.version());
 }
 
 Reference<IDatabase> ThreadSafeApi::createDatabaseFromConnectionString(const char* connectionString) {
-	return makeReference<ThreadSafeDatabase>(ThreadSafeDatabase::ConnectionRecordType::CONNECTION_STRING, connectionString, apiVersion.version());
+	return makeReference<ThreadSafeDatabase>(
+	    ThreadSafeDatabase::ConnectionRecordType::CONNECTION_STRING, connectionString, apiVersion.version());
 }
 
 void ThreadSafeApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) {

@@ -1049,8 +1049,8 @@ Peer::Peer(TransportData* transport, NetworkAddress const& destination)
     bytesReceived(0), bytesSent(0), lastDataPacketSentTime(now()), outstandingReplies(0),
     pingLatencies(destination.isPublic() ? FLOW_KNOBS->PING_SKETCH_ACCURACY : 0.1), lastLoggedTime(0.0),
     lastLoggedBytesReceived(0), lastLoggedBytesSent(0), timeoutCount(0),
-    protocolVersion(makeReference<AsyncVar<Optional<ProtocolVersion>>>()),
-    connectOutgoingCount(0), connectIncomingCount(0), connectFailedCount(0),
+    protocolVersion(makeReference<AsyncVar<Optional<ProtocolVersion>>>()), connectOutgoingCount(0),
+    connectIncomingCount(0), connectFailedCount(0),
     connectLatencies(destination.isPublic() ? FLOW_KNOBS->PING_SKETCH_ACCURACY : 0.1) {
 	IFailureMonitor::failureMonitor().setStatus(destination, FailureStatus(false));
 }

@@ -2802,9 +2802,8 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 
 		f = AsyncFileDetachable::open(f);
 		if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES)
-			f = map(f, [=](Reference<IAsyncFile> r) -> Reference<IAsyncFile> {
-				return makeReference<AsyncFileChaos>(r);
-			});
+			f = map(f,
+			        [=](Reference<IAsyncFile> r) -> Reference<IAsyncFile> { return makeReference<AsyncFileChaos>(r); });
 		return f;
 	} else
 		return AsyncFileCached::open(filename, flags, mode);

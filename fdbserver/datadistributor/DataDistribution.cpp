@@ -4921,8 +4921,7 @@ Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 	KeyRangeRef rangeToRead;
 	int64_t cumulatedValidatedServerKeysNum = 0;
 	int64_t cumulatedValidatedKeyServersNum = 0;
-	Reference<IRateControl> rateLimiter =
-	    makeReference<SpeedLimit>(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1);
+	Reference<IRateControl> rateLimiter = makeReference<SpeedLimit>(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1);
 	int64_t remoteReadBytes = 0;
 	double lastRateLimiterWaitTime = 0;
 	double rateLimiterBeforeWaitTime = 0;

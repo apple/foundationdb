@@ -335,19 +335,19 @@ struct ThroughputWorkload : TestWorkload {
 		double zeroPaddingRatio = getOption(options, "zeroPaddingRatio"_sr, 0.15);
 
 		auto AType = makeReference<RWTransactor>(getOption(options, "readsPerTransactionA"_sr, 10),
-		                                                     getOption(options, "writesPerTransactionA"_sr, 0),
-		                                                     keyCount,
-		                                                     keyBytes,
-		                                                     minValueBytes,
-		                                                     maxValueBytes,
-		                                                     zeroPaddingRatio);
+		                                         getOption(options, "writesPerTransactionA"_sr, 0),
+		                                         keyCount,
+		                                         keyBytes,
+		                                         minValueBytes,
+		                                         maxValueBytes,
+		                                         zeroPaddingRatio);
 		auto BType = makeReference<RWTransactor>(getOption(options, "readsPerTransactionB"_sr, 5),
-		                                                     getOption(options, "writesPerTransactionB"_sr, 5),
-		                                                     keyCount,
-		                                                     keyBytes,
-		                                                     minValueBytes,
-		                                                     maxValueBytes,
-		                                                     zeroPaddingRatio);
+		                                         getOption(options, "writesPerTransactionB"_sr, 5),
+		                                         keyCount,
+		                                         keyBytes,
+		                                         minValueBytes,
+		                                         maxValueBytes,
+		                                         zeroPaddingRatio);
 
 		if (sweepDuration > 0) {
 			op = makeReference<SweepTransactor>(sweepDuration, sweepDelay, AType, BType);
@@ -364,7 +364,8 @@ struct ThroughputWorkload : TestWorkload {
 		    getOption(options, "measurePeriodicMetrics"_sr, std::vector<std::string>());
 		if (measurePeriod) {
 			ASSERT(!periodicMetrics.empty());
-			multi->ms.push_back(makeReference<MeasurePeriodically>(measurePeriod, std::set<std::string>(periodicMetrics.begin(), periodicMetrics.end())));
+			multi->ms.push_back(makeReference<MeasurePeriodically>(
+			    measurePeriod, std::set<std::string>(periodicMetrics.begin(), periodicMetrics.end())));
 		}
 
 		Pgain = getOption(options, "ProportionalGain"_sr, 0.1);

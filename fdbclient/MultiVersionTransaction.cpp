@@ -1371,11 +1371,13 @@ MultiVersionDatabase::~MultiVersionDatabase() {
 // Create a MultiVersionDatabase that wraps an already created IDatabase object
 // For internal use in testing
 Reference<IDatabase> MultiVersionDatabase::debugCreateFromExistingDatabase(Reference<IDatabase> db) {
-	return makeReference<MultiVersionDatabase>(MultiVersionApi::api, 0, ClusterConnectionRecord::fromConnectionString(""), db, db, false);
+	return makeReference<MultiVersionDatabase>(
+	    MultiVersionApi::api, 0, ClusterConnectionRecord::fromConnectionString(""), db, db, false);
 }
 
 Reference<ITransaction> MultiVersionDatabase::createTransaction() {
-	return makeReference<MultiVersionTransaction>(Reference<MultiVersionDatabase>::addRef(this), dbState->transactionDefaultOptions);
+	return makeReference<MultiVersionTransaction>(Reference<MultiVersionDatabase>::addRef(this),
+	                                              dbState->transactionDefaultOptions);
 }
 
 void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {

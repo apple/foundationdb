@@ -638,18 +638,14 @@ std::vector<Reference<IReplicationPolicy>> const& getStaticPolicies() {
 			makeReference<PolicyAcross>(3, "sz", makeReference<PolicyOne>()),
 
 			// 4 'dc^1 x az^3 x 1'
-			makeReference<PolicyAcross>(1,
-			                     "dc",
-			                     makeReference<PolicyAcross>(3, "az", makeReference<PolicyOne>())),
+			makeReference<PolicyAcross>(1, "dc", makeReference<PolicyAcross>(3, "az", makeReference<PolicyOne>())),
 
 			// 5 '(sz^3 x rack^2 x 1) + (dc^2 x az^3 x 1)'
 			Reference<IReplicationPolicy>(
-			    new PolicyAnd({ makeReference<PolicyAcross>(3,
-			                                         "sz",
-			                                         makeReference<PolicyAcross>(2, "rack", makeReference<PolicyOne>())),
-			                    makeReference<PolicyAcross>(2,
-			                        "dc",
-			                        makeReference<PolicyAcross>(3, "az", makeReference<PolicyOne>())) })),
+			    new PolicyAnd({ makeReference<PolicyAcross>(
+			                        3, "sz", makeReference<PolicyAcross>(2, "rack", makeReference<PolicyOne>())),
+			                    makeReference<PolicyAcross>(
+			                        2, "dc", makeReference<PolicyAcross>(3, "az", makeReference<PolicyOne>())) })),
 
 			// 6 '(sz^1 x 1)'
 			makeReference<PolicyAcross>(1, "sz", makeReference<PolicyOne>()),
@@ -665,53 +661,42 @@ std::vector<Reference<IReplicationPolicy>> const& getStaticPolicies() {
 			                    makeReference<PolicyAcross>(2, "sz", makeReference<PolicyOne>()) })),
 
 			// 9 '(dc^1 x sz^2 x 1)'
-			makeReference<PolicyAcross>(1,
-			                     "dc",
-			                     makeReference<PolicyAcross>(2, "sz", makeReference<PolicyOne>())),
+			makeReference<PolicyAcross>(1, "dc", makeReference<PolicyAcross>(2, "sz", makeReference<PolicyOne>())),
 
 			// 10 '(dc^2 x sz^2 x 1)'
-			makeReference<PolicyAcross>(2,
-			                     "dc",
-			                     makeReference<PolicyAcross>(2, "sz", makeReference<PolicyOne>())),
+			makeReference<PolicyAcross>(2, "dc", makeReference<PolicyAcross>(2, "sz", makeReference<PolicyOne>())),
 
 			// 11 '(dc^1 x sz^2 x 1) + (dc^2 x sz^2 x 1)'
-			Reference<IReplicationPolicy>(new PolicyAnd(
-			    { makeReference<PolicyAcross>(1,
-			                           "dc",
-			                           makeReference<PolicyAcross>(2, "sz", makeReference<PolicyOne>())),
-			      makeReference<PolicyAcross>(2,
-			                           "dc",
-			                           makeReference<PolicyAcross>(2, "sz", makeReference<PolicyOne>())) })),
+			Reference<IReplicationPolicy>(
+			    new PolicyAnd({ makeReference<PolicyAcross>(
+			                        1, "dc", makeReference<PolicyAcross>(2, "sz", makeReference<PolicyOne>())),
+			                    makeReference<PolicyAcross>(
+			                        2, "dc", makeReference<PolicyAcross>(2, "sz", makeReference<PolicyOne>())) })),
 
 			// 12 '(dc^2 x sz^2 x 1) + (dc^1 x sz^2 x 1)'
 			Reference<IReplicationPolicy>(
-			    new PolicyAnd({ makeReference<PolicyAcross>(2,
-			                                         "dc",
-			                                         makeReference<PolicyAcross>(2, "sz", makeReference<PolicyOne>())),
-			                    makeReference<PolicyAcross>(1,
-			                        "dc",
-			                        makeReference<PolicyAcross>(2, "sz", makeReference<PolicyOne>())) })),
+			    new PolicyAnd({ makeReference<PolicyAcross>(
+			                        2, "dc", makeReference<PolicyAcross>(2, "sz", makeReference<PolicyOne>())),
+			                    makeReference<PolicyAcross>(
+			                        1, "dc", makeReference<PolicyAcross>(2, "sz", makeReference<PolicyOne>())) })),
 
 			// 13 '(sz^2 x 1) + (dc^1 x sz^2 x 1)'
 			Reference<IReplicationPolicy>(
 			    new PolicyAnd({ makeReference<PolicyAcross>(2, "sz", makeReference<PolicyOne>()),
-			                    makeReference<PolicyAcross>(1,
-			                        "dc",
-			                        makeReference<PolicyAcross>(2, "sz", makeReference<PolicyOne>())) })),
+			                    makeReference<PolicyAcross>(
+			                        1, "dc", makeReference<PolicyAcross>(2, "sz", makeReference<PolicyOne>())) })),
 
 			// 14 '(sz^2 x 1) + (dc^2 x sz^2 x 1)'
 			Reference<IReplicationPolicy>(
 			    new PolicyAnd({ makeReference<PolicyAcross>(2, "sz", makeReference<PolicyOne>()),
-			                    makeReference<PolicyAcross>(2,
-			                        "dc",
-			                        makeReference<PolicyAcross>(2, "sz", makeReference<PolicyOne>())) })),
+			                    makeReference<PolicyAcross>(
+			                        2, "dc", makeReference<PolicyAcross>(2, "sz", makeReference<PolicyOne>())) })),
 
 			// 15 '(sz^3 x 1) + (dc^2 x sz^2 x 1)'
 			Reference<IReplicationPolicy>(
 			    new PolicyAnd({ makeReference<PolicyAcross>(3, "sz", makeReference<PolicyOne>()),
-			                    makeReference<PolicyAcross>(2,
-			                        "dc",
-			                        makeReference<PolicyAcross>(2, "sz", makeReference<PolicyOne>())) })),
+			                    makeReference<PolicyAcross>(
+			                        2, "dc", makeReference<PolicyAcross>(2, "sz", makeReference<PolicyOne>())) })),
 
 			// 16 '(sz^1 x 1) + (sz^2 x 1)'
 			Reference<IReplicationPolicy>(
@@ -741,26 +726,19 @@ std::vector<Reference<IReplicationPolicy>> const& getStaticPolicies() {
 			//"zoneid", Reference<IReplicationPolicy>(new PolicyOne()))) } ) ),
 
 			// 20 '(dc^1 x sz^3 x 1)'
-			makeReference<PolicyAcross>(1,
-			                     "dc",
-			                     makeReference<PolicyAcross>(3, "sz", makeReference<PolicyOne>())),
+			makeReference<PolicyAcross>(1, "dc", makeReference<PolicyAcross>(3, "sz", makeReference<PolicyOne>())),
 
 			// 21 '(dc^2 x sz^3 x 1)'
-			makeReference<PolicyAcross>(2,
-			                     "dc",
-			                     makeReference<PolicyAcross>(3, "sz", makeReference<PolicyOne>())),
+			makeReference<PolicyAcross>(2, "dc", makeReference<PolicyAcross>(3, "sz", makeReference<PolicyOne>())),
 
 			// 22 '(dc^2 x az^3 x 1)'
-			makeReference<PolicyAcross>(2,
-			                     "dc",
-			                     makeReference<PolicyAcross>(3, "az", makeReference<PolicyOne>())),
+			makeReference<PolicyAcross>(2, "dc", makeReference<PolicyAcross>(3, "az", makeReference<PolicyOne>())),
 
 			// 23 '(sz^1 x 1) + (dc^2 x az^3 x 1)'
 			Reference<IReplicationPolicy>(
 			    new PolicyAnd({ makeReference<PolicyAcross>(1, "sz", makeReference<PolicyOne>()),
-			                    makeReference<PolicyAcross>(2,
-			                        "dc",
-			                        makeReference<PolicyAcross>(3, "az", makeReference<PolicyOne>())) })),
+			                    makeReference<PolicyAcross>(
+			                        2, "dc", makeReference<PolicyAcross>(3, "az", makeReference<PolicyOne>())) })),
 
 			// 'dc^1 x (az^2 x 1) + (sz^2 x 1)'
 			//	Reference<IReplicationPolicy>( new PolicyAcross(1, "dc", Reference<IReplicationPolicy>(new
@@ -769,14 +747,10 @@ std::vector<Reference<IReplicationPolicy>> const& getStaticPolicies() {
 			// PolicyOne())))}))) ),
 
 			// 24 Require backtracking
-			makeReference<PolicyAcross>(8,
-			    "zoneid",
-			    makeReference<PolicyAcross>(1, "az", makeReference<PolicyOne>())),
+			makeReference<PolicyAcross>(8, "zoneid", makeReference<PolicyAcross>(1, "az", makeReference<PolicyOne>())),
 
 			// 25
-			makeReference<PolicyAcross>(8,
-			    "zoneid",
-			    makeReference<PolicyAcross>(1, "sz", makeReference<PolicyOne>()))
+			makeReference<PolicyAcross>(8, "zoneid", makeReference<PolicyAcross>(1, "sz", makeReference<PolicyOne>()))
 		};
 	}
 	return staticPolicies;

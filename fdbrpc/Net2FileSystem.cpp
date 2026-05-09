@@ -169,9 +169,7 @@ Future<Reference<class IAsyncFile>> Net2FileSystem::open(const std::string& file
 			return makeReference<AsyncFileWriteChecker>(r);
 		});
 	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES)
-		f = map(f, [=](Reference<IAsyncFile> r) -> Reference<IAsyncFile> {
-			return makeReference<AsyncFileChaos>(r);
-		});
+		f = map(f, [=](Reference<IAsyncFile> r) -> Reference<IAsyncFile> { return makeReference<AsyncFileChaos>(r); });
 	return f;
 }
 
