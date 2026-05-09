@@ -147,7 +147,7 @@ func (d Database) RebootWorker(address string, checkFile bool, suspendDuration i
 // NOTE: ErrMultiVersionClientUnavailable will be returned if the Multi-Version client API was not enabled.
 func (d Database) GetClientStatus() ([]byte, error) {
 	if apiVersion == 0 {
-		return nil, errAPIVersionUnset
+		return nil, ErrAPIVersionUnset
 	}
 
 	st := &futureByteSlice{

@@ -23,8 +23,6 @@
 
 #include <boost/url/url.hpp>
 #include <boost/url/parse.hpp>
-#include <boost/url/error_types.hpp>
-#include <boost/url/string_view.hpp>
 
 bool getConductBulkLoadFromDataMoveId(const UID& dataMoveId) {
 	bool nowAssigned = false;

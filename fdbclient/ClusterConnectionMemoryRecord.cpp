@@ -19,7 +19,6 @@
  */
 
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
-#include "fdbclient/MonitorLeader.h"
 
 // Sets the connections string held by this object.
 Future<Void> ClusterConnectionMemoryRecord::setAndPersistConnectionString(ClusterConnectionString const& conn) {

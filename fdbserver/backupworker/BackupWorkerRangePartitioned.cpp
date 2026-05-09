@@ -647,9 +647,7 @@ Future<Void> saveMutationsToFile(BackupRangePartitionedData* self, Version lastV
 	for (auto entry = self->keyRangeToBackupAssignment.ranges().begin();
 	     entry != self->keyRangeToBackupAssignment.ranges().end();
 	     ++entry) {
-		for (const auto& bkPartition : entry->value()) {
-			UID backupUid = bkPartition.first;
-			int32_t partitionId = bkPartition.second;
+		for (const auto& [backupUid, partitionId] : entry->value()) {
 
 			auto it = self->backups.find(backupUid);
 			if (it == self->backups.end() || !it->second.container.get().present()) {

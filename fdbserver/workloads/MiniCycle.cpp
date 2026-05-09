@@ -27,7 +27,6 @@
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/serialize.h"
-#include <cstring>
 
 #include "flow/CoroUtils.h"
 

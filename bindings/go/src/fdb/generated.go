@@ -60,14 +60,14 @@ func (o NetworkOptions) SetTraceEnable(param string) error {
 	return o.setOpt(30, []byte(param))
 }
 
-// Sets the maximum size in bytes of a single trace output file. This value should be in the range ``[0, INT64_MAX]``. If the value is set to 0, there is no limit on individual file size. The default is a maximum size of 10,485,760 bytes.
+// Sets the maximum size in bytes of a single trace output file. This value should be in the range "[0, INT64_MAX]". If the value is set to 0, there is no limit on individual file size. The default is a maximum size of 10,485,760 bytes.
 //
 // Parameter: max size of a single trace output file
 func (o NetworkOptions) SetTraceRollSize(param int64) error {
 	return o.setOpt(31, int64ToBytes(param))
 }
 
-// Sets the maximum size of all the trace output files put together. This value should be in the range ``[0, INT64_MAX]``. If the value is set to 0, there is no limit on the total size of the files. The default is a maximum size of 104,857,600 bytes. If the default roll size is used, this means that a maximum of 10 trace files will be written at a time.
+// Sets the maximum size of all the trace output files put together. This value should be in the range "[0, INT64_MAX]". If the value is set to 0, there is no limit on the total size of the files. The default is a maximum size of 104,857,600 bytes. If the default roll size is used, this means that a maximum of 10 trace files will be written at a time.
 //
 // Parameter: max total size of trace files
 func (o NetworkOptions) SetTraceMaxLogsSize(param int64) error {
@@ -336,7 +336,7 @@ func (o NetworkOptions) SetDistributedClientTracer(param string) error {
 
 // Sets the directory for storing temporary files created by FDB client, such as temporary copies of client libraries. Defaults to /tmp
 //
-// Parameter: Client directory for temporary files. 
+// Parameter: Client directory for temporary files.
 func (o NetworkOptions) SetClientTmpDir(param string) error {
 	return o.setOpt(91, []byte(param))
 }
@@ -379,35 +379,35 @@ func (o DatabaseOptions) SetSnapshotRywDisable() error {
 	return o.setOpt(27, nil)
 }
 
-// Sets the maximum escaped length of key and value fields to be logged to the trace file via the LOG_TRANSACTION option. This sets the ``transaction_logging_max_field_length`` option of each transaction created by this database. See the transaction option description for more information.
+// Sets the maximum escaped length of key and value fields to be logged to the trace file via the LOG_TRANSACTION option. This sets the "transaction_logging_max_field_length" option of each transaction created by this database. See the transaction option description for more information.
 //
 // Parameter: Maximum length of escaped key and value fields.
 func (o DatabaseOptions) SetTransactionLoggingMaxFieldLength(param int64) error {
 	return o.setOpt(405, int64ToBytes(param))
 }
 
-// Set a timeout in milliseconds which, when elapsed, will cause each transaction automatically to be cancelled. This sets the ``timeout`` option of each transaction created by this database. See the transaction option description for more information. Using this option requires that the API version is 610 or higher.
+// Set a timeout in milliseconds which, when elapsed, will cause each transaction automatically to be cancelled. This sets the "timeout" option of each transaction created by this database. See the transaction option description for more information. Using this option requires that the API version is 610 or higher.
 //
 // Parameter: value in milliseconds of timeout
 func (o DatabaseOptions) SetTransactionTimeout(param int64) error {
 	return o.setOpt(500, int64ToBytes(param))
 }
 
-// Set a maximum number of retries after which additional calls to ``onError`` will throw the most recently seen error code. This sets the ``retry_limit`` option of each transaction created by this database. See the transaction option description for more information.
+// Set a maximum number of retries after which additional calls to "onError" will throw the most recently seen error code. This sets the "retry_limit" option of each transaction created by this database. See the transaction option description for more information.
 //
 // Parameter: number of times to retry
 func (o DatabaseOptions) SetTransactionRetryLimit(param int64) error {
 	return o.setOpt(501, int64ToBytes(param))
 }
 
-// Set the maximum amount of backoff delay incurred in the call to ``onError`` if the error is retryable. This sets the ``max_retry_delay`` option of each transaction created by this database. See the transaction option description for more information.
+// Set the maximum amount of backoff delay incurred in the call to "onError" if the error is retryable. This sets the "max_retry_delay" option of each transaction created by this database. See the transaction option description for more information.
 //
 // Parameter: value in milliseconds of maximum delay
 func (o DatabaseOptions) SetTransactionMaxRetryDelay(param int64) error {
 	return o.setOpt(502, int64ToBytes(param))
 }
 
-// Set the maximum transaction size in bytes. This sets the ``size_limit`` option on each transaction created by this database. See the transaction option description for more information.
+// Set the maximum transaction size in bytes. This sets the "size_limit" option on each transaction created by this database. See the transaction option description for more information.
 //
 // Parameter: value in bytes
 func (o DatabaseOptions) SetTransactionSizeLimit(param int64) error {
@@ -429,7 +429,7 @@ func (o DatabaseOptions) SetTransactionAutomaticIdempotency() error {
 	return o.setOpt(506, nil)
 }
 
-// Allows ``get`` operations to read from sections of keyspace that have become unreadable because of versionstamp operations. This sets the ``bypass_unreadable`` option of each transaction created by this database. See the transaction option description for more information.
+// Allows "get" operations to read from sections of keyspace that have become unreadable because of versionstamp operations. This sets the "bypass_unreadable" option of each transaction created by this database. See the transaction option description for more information.
 func (o DatabaseOptions) SetTransactionBypassUnreadable() error {
 	return o.setOpt(700, nil)
 }
@@ -597,21 +597,21 @@ func (o TransactionOptions) SetServerRequestTracing() error {
 	return o.setOpt(406, nil)
 }
 
-// Set a timeout in milliseconds which, when elapsed, will cause the transaction automatically to be cancelled. Valid parameter values are ``[0, INT_MAX]``. If set to 0, will disable all timeouts. All pending and any future uses of the transaction will throw an exception. The transaction can be used again after it is reset. Prior to API version 610, like all other transaction options, the timeout must be reset after a call to ``onError``. If the API version is 610 or greater, the timeout is not reset after an ``onError`` call. This allows the user to specify a longer timeout on specific transactions than the default timeout specified through the ``transaction_timeout`` database option without the shorter database timeout cancelling transactions that encounter a retryable error. Note that at all API versions, it is safe and legal to set the timeout each time the transaction begins, so most code written assuming the older behavior can be upgraded to the newer behavior without requiring any modification, and the caller is not required to implement special logic in retry loops to only conditionally set this option.
+// Set a timeout in milliseconds which, when elapsed, will cause the transaction automatically to be cancelled. Valid parameter values are "[0, INT_MAX]". If set to 0, will disable all timeouts. All pending and any future uses of the transaction will throw an exception. The transaction can be used again after it is reset. Prior to API version 610, like all other transaction options, the timeout must be reset after a call to "onError". If the API version is 610 or greater, the timeout is not reset after an "onError" call. This allows the user to specify a longer timeout on specific transactions than the default timeout specified through the "transaction_timeout" database option without the shorter database timeout cancelling transactions that encounter a retryable error. Note that at all API versions, it is safe and legal to set the timeout each time the transaction begins, so most code written assuming the older behavior can be upgraded to the newer behavior without requiring any modification, and the caller is not required to implement special logic in retry loops to only conditionally set this option.
 //
 // Parameter: value in milliseconds of timeout
 func (o TransactionOptions) SetTimeout(param int64) error {
 	return o.setOpt(500, int64ToBytes(param))
 }
 
-// Set a maximum number of retries after which additional calls to ``onError`` will throw the most recently seen error code. Valid parameter values are ``[-1, INT_MAX]``. If set to -1, will disable the retry limit. Prior to API version 610, like all other transaction options, the retry limit must be reset after a call to ``onError``. If the API version is 610 or greater, the retry limit is not reset after an ``onError`` call. Note that at all API versions, it is safe and legal to set the retry limit each time the transaction begins, so most code written assuming the older behavior can be upgraded to the newer behavior without requiring any modification, and the caller is not required to implement special logic in retry loops to only conditionally set this option.
+// Set a maximum number of retries after which additional calls to "onError" will throw the most recently seen error code. Valid parameter values are "[-1, INT_MAX]". If set to -1, will disable the retry limit. Prior to API version 610, like all other transaction options, the retry limit must be reset after a call to "onError". If the API version is 610 or greater, the retry limit is not reset after an "onError" call. Note that at all API versions, it is safe and legal to set the retry limit each time the transaction begins, so most code written assuming the older behavior can be upgraded to the newer behavior without requiring any modification, and the caller is not required to implement special logic in retry loops to only conditionally set this option.
 //
 // Parameter: number of times to retry
 func (o TransactionOptions) SetRetryLimit(param int64) error {
 	return o.setOpt(501, int64ToBytes(param))
 }
 
-// Set the maximum amount of backoff delay incurred in the call to ``onError`` if the error is retryable. Defaults to 1000 ms. Valid parameter values are ``[0, INT_MAX]``. If the maximum retry delay is less than the current retry delay of the transaction, then the current retry delay will be clamped to the maximum retry delay. Prior to API version 610, like all other transaction options, the maximum retry delay must be reset after a call to ``onError``. If the API version is 610 or greater, the retry limit is not reset after an ``onError`` call. Note that at all API versions, it is safe and legal to set the maximum retry delay each time the transaction begins, so most code written assuming the older behavior can be upgraded to the newer behavior without requiring any modification, and the caller is not required to implement special logic in retry loops to only conditionally set this option.
+// Set the maximum amount of backoff delay incurred in the call to "onError" if the error is retryable. Defaults to 1000 ms. Valid parameter values are "[0, INT_MAX]". If the maximum retry delay is less than the current retry delay of the transaction, then the current retry delay will be clamped to the maximum retry delay. Prior to API version 610, like all other transaction options, the maximum retry delay must be reset after a call to "onError". If the API version is 610 or greater, the retry limit is not reset after an "onError" call. Note that at all API versions, it is safe and legal to set the maximum retry delay each time the transaction begins, so most code written assuming the older behavior can be upgraded to the newer behavior without requiring any modification, and the caller is not required to implement special logic in retry loops to only conditionally set this option.
 //
 // Parameter: value in milliseconds of maximum delay
 func (o TransactionOptions) SetMaxRetryDelay(param int64) error {
@@ -625,7 +625,7 @@ func (o TransactionOptions) SetSizeLimit(param int64) error {
 	return o.setOpt(503, int64ToBytes(param))
 }
 
-// Automatically assign a random 16 byte idempotency id for this transaction. Prevents commits from failing with ``commit_unknown_result``. WARNING: If you are also using the multiversion client or transaction timeouts, if either cluster_version_changed or transaction_timed_out was thrown during a commit, then that commit may have already succeeded or may succeed in the future. This feature is in development and not ready for general use.
+// Automatically assign a random 16 byte idempotency id for this transaction. Prevents commits from failing with "commit_unknown_result". WARNING: If you are also using the multiversion client or transaction timeouts, if either cluster_version_changed or transaction_timed_out was thrown during a commit, then that commit may have already succeeded or may succeed in the future. This feature is in development and not ready for general use.
 func (o TransactionOptions) SetAutomaticIdempotency() error {
 	return o.setOpt(505, nil)
 }
@@ -689,7 +689,7 @@ func (o TransactionOptions) SetAutoThrottleTag(param string) error {
 	return o.setOpt(801, []byte(param))
 }
 
-// Adds a parent to the Span of this transaction. Used for transaction tracing. A span can be identified with a 33 bytes serialized binary format which consists of: 8 bytes protocol version, e.g. ``0x0FDB00B073000000LL`` in little-endian format, 16 bytes trace id, 8 bytes span id, 1 byte set to 1 if sampling is enabled
+// Adds a parent to the Span of this transaction. Used for transaction tracing. A span can be identified with a 33 bytes serialized binary format which consists of: 8 bytes protocol version, e.g. "0x0FDB00B073000000LL" in little-endian format, 16 bytes trace id, 8 bytes span id, 1 byte set to 1 if sampling is enabled
 //
 // Parameter: A serialized binary byte string of length 33 used to associate the span of this transaction with a parent
 func (o TransactionOptions) SetSpanParent(param []byte) error {
@@ -701,7 +701,7 @@ func (o TransactionOptions) SetExpensiveClearCostEstimationEnable() error {
 	return o.setOpt(1000, nil)
 }
 
-// Allows ``get`` operations to read from sections of keyspace that have become unreadable because of versionstamp operations. These reads will view versionstamp operations as if they were set operations that did not fill in the versionstamp.
+// Allows "get" operations to read from sections of keyspace that have become unreadable because of versionstamp operations. These reads will view versionstamp operations as if they were set operations that did not fill in the versionstamp.
 func (o TransactionOptions) SetBypassUnreadable() error {
 	return o.setOpt(1100, nil)
 }
@@ -711,7 +711,7 @@ func (o TransactionOptions) SetUseGrvCache() error {
 	return o.setOpt(1101, nil)
 }
 
-// Rejects a GRV request with ``transaction_grv_queue_rejected`` if the GRV proxy estimates that ratekeeper throttling will keep the request queued longer than this limit. Valid parameter values are ``[0, INT_MAX]``. The estimate is advisory and only accounts for time spent queued at the GRV proxy due to ratekeeper throttling.
+// Rejects a GRV request with "transaction_grv_queue_rejected" if the GRV proxy estimates that ratekeeper throttling will keep the request queued longer than this limit. Valid parameter values are "[0, INT_MAX]". The estimate is advisory and only accounts for time spent queued at the GRV proxy due to ratekeeper throttling.
 //
 // Parameter: value in milliseconds of maximum estimated GRV queue delay
 func (o TransactionOptions) SetMaxGrvQueueDelay(param int64) error {
@@ -751,13 +751,13 @@ const (
 	// order to minimize costs if the client doesn't read the entire range), and
 	// as the caller iterates over more items in the range larger batches will
 	// be transferred in order to minimize latency. After enough iterations,
-	// the iterator mode will eventually reach the same byte limit as “WANT_ALL“
+	// the iterator mode will eventually reach the same byte limit as "WANT_ALL"
 	StreamingModeIterator StreamingMode = 0
 
 	// Infrequently used. The client has passed a specific row limit and wants
 	// that many rows delivered in a single batch. Because of iterator operation
 	// in client drivers make request batches transparent to the user, consider
-	// “WANT_ALL“ StreamingMode instead. A row limit must be specified if this
+	// "WANT_ALL" StreamingMode instead. A row limit must be specified if this
 	// mode is used.
 	StreamingModeExact StreamingMode = 1
 
@@ -784,7 +784,7 @@ const (
 	StreamingModeSerial StreamingMode = 5
 )
 
-// Performs an addition of little-endian integers. If the existing value in the database is not present or shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``. The integers to be added must be stored in a little-endian representation.  They can be signed in two's complement representation or unsigned. You can add to an integer at a known offset in the value by prepending the appropriate number of zero bytes to ``param`` and padding with zero bytes to match the length of the value. However, this offset technique requires that you know the addition will not cause the integer field within the value to overflow.
+// Performs an addition of little-endian integers. If the existing value in the database is not present or shorter than "param", it is first extended to the length of "param" with zero bytes.  If "param" is shorter than the existing value in the database, the existing value is truncated to match the length of "param". The integers to be added must be stored in a little-endian representation.  They can be signed in two's complement representation or unsigned. You can add to an integer at a known offset in the value by prepending the appropriate number of zero bytes to "param" and padding with zero bytes to match the length of the value. However, this offset technique requires that you know the addition will not cause the integer field within the value to overflow.
 func (t Transaction) Add(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 2)
 }
@@ -794,7 +794,7 @@ func (t Transaction) And(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 6)
 }
 
-// Performs a bitwise ``and`` operation.  If the existing value in the database is not present, then ``param`` is stored in the database. If the existing value in the database is shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``.
+// Performs a bitwise "and" operation.  If the existing value in the database is not present, then "param" is stored in the database. If the existing value in the database is shorter than "param", it is first extended to the length of "param" with zero bytes.  If "param" is shorter than the existing value in the database, the existing value is truncated to match the length of "param".
 func (t Transaction) BitAnd(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 6)
 }
@@ -804,7 +804,7 @@ func (t Transaction) Or(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 7)
 }
 
-// Performs a bitwise ``or`` operation.  If the existing value in the database is not present or shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``.
+// Performs a bitwise "or" operation.  If the existing value in the database is not present or shorter than "param", it is first extended to the length of "param" with zero bytes.  If "param" is shorter than the existing value in the database, the existing value is truncated to match the length of "param".
 func (t Transaction) BitOr(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 7)
 }
@@ -814,47 +814,47 @@ func (t Transaction) Xor(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 8)
 }
 
-// Performs a bitwise ``xor`` operation.  If the existing value in the database is not present or shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``.
+// Performs a bitwise "xor" operation.  If the existing value in the database is not present or shorter than "param", it is first extended to the length of "param" with zero bytes.  If "param" is shorter than the existing value in the database, the existing value is truncated to match the length of "param".
 func (t Transaction) BitXor(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 8)
 }
 
-// Appends ``param`` to the end of the existing value already in the database at the given key (or creates the key and sets the value to ``param`` if the key is empty). This will only append the value if the final concatenated value size is less than or equal to the maximum value size (i.e., if it fits). WARNING: No error is surfaced back to the user if the final value is too large because the mutation will not be applied until after the transaction has been committed. Therefore, it is only safe to use this mutation type if one can guarantee that one will keep the total value size under the maximum size.
+// Appends "param" to the end of the existing value already in the database at the given key (or creates the key and sets the value to "param" if the key is empty). This will only append the value if the final concatenated value size is less than or equal to the maximum value size (i.e., if it fits). WARNING: No error is surfaced back to the user if the final value is too large because the mutation will not be applied until after the transaction has been committed. Therefore, it is only safe to use this mutation type if one can guarantee that one will keep the total value size under the maximum size.
 func (t Transaction) AppendIfFits(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 9)
 }
 
-// Performs a little-endian comparison of byte strings. If the existing value in the database is not present or shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``. The larger of the two values is then stored in the database.
+// Performs a little-endian comparison of byte strings. If the existing value in the database is not present or shorter than "param", it is first extended to the length of "param" with zero bytes.  If "param" is shorter than the existing value in the database, the existing value is truncated to match the length of "param". The larger of the two values is then stored in the database.
 func (t Transaction) Max(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 12)
 }
 
-// Performs a little-endian comparison of byte strings. If the existing value in the database is not present, then ``param`` is stored in the database. If the existing value in the database is shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``. The smaller of the two values is then stored in the database.
+// Performs a little-endian comparison of byte strings. If the existing value in the database is not present, then "param" is stored in the database. If the existing value in the database is shorter than "param", it is first extended to the length of "param" with zero bytes.  If "param" is shorter than the existing value in the database, the existing value is truncated to match the length of "param". The smaller of the two values is then stored in the database.
 func (t Transaction) Min(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 13)
 }
 
-// Transforms ``key`` using a versionstamp for the transaction. Sets the transformed key in the database to ``param``. The key is transformed by removing the final four bytes from the key and reading those as a little-Endian 32-bit integer to get a position ``pos``. The 10 bytes of the key from ``pos`` to ``pos + 10`` are replaced with the versionstamp of the transaction used. The first byte of the key is position 0. A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database (serialized in big-Endian order). The last 2 bytes are monotonic in the serialization order for transactions. WARNING: At this time, versionstamps are compatible with the Tuple layer only in the Java, Python, and Go bindings. Also, note that prior to API version 520, the offset was computed from only the final two bytes rather than the final four bytes.
+// Transforms "key" using a versionstamp for the transaction. Sets the transformed key in the database to "param". The key is transformed by removing the final four bytes from the key and reading those as a little-Endian 32-bit integer to get a position "pos". The 10 bytes of the key from "pos" to "pos + 10" are replaced with the versionstamp of the transaction used. The first byte of the key is position 0. A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database (serialized in big-Endian order). The last 2 bytes are monotonic in the serialization order for transactions. WARNING: At this time, versionstamps are compatible with the Tuple layer only in the Java, Python, and Go bindings. Also, note that prior to API version 520, the offset was computed from only the final two bytes rather than the final four bytes.
 func (t Transaction) SetVersionstampedKey(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 14)
 }
 
-// Transforms ``param`` using a versionstamp for the transaction. Sets the ``key`` given to the transformed ``param``. The parameter is transformed by removing the final four bytes from ``param`` and reading those as a little-Endian 32-bit integer to get a position ``pos``. The 10 bytes of the parameter from ``pos`` to ``pos + 10`` are replaced with the versionstamp of the transaction used. The first byte of the parameter is position 0. A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database (serialized in big-Endian order). The last 2 bytes are monotonic in the serialization order for transactions. WARNING: At this time, versionstamps are compatible with the Tuple layer only in the Java, Python, and Go bindings. Also, note that prior to API version 520, the versionstamp was always placed at the beginning of the parameter rather than computing an offset.
+// Transforms "param" using a versionstamp for the transaction. Sets the "key" given to the transformed "param". The parameter is transformed by removing the final four bytes from "param" and reading those as a little-Endian 32-bit integer to get a position "pos". The 10 bytes of the parameter from "pos" to "pos + 10" are replaced with the versionstamp of the transaction used. The first byte of the parameter is position 0. A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database (serialized in big-Endian order). The last 2 bytes are monotonic in the serialization order for transactions. WARNING: At this time, versionstamps are compatible with the Tuple layer only in the Java, Python, and Go bindings. Also, note that prior to API version 520, the versionstamp was always placed at the beginning of the parameter rather than computing an offset.
 func (t Transaction) SetVersionstampedValue(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 15)
 }
 
-// Performs lexicographic comparison of byte strings. If the existing value in the database is not present, then ``param`` is stored. Otherwise the smaller of the two values is then stored in the database.
+// Performs lexicographic comparison of byte strings. If the existing value in the database is not present, then "param" is stored. Otherwise the smaller of the two values is then stored in the database.
 func (t Transaction) ByteMin(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 16)
 }
 
-// Performs lexicographic comparison of byte strings. If the existing value in the database is not present, then ``param`` is stored. Otherwise the larger of the two values is then stored in the database.
+// Performs lexicographic comparison of byte strings. If the existing value in the database is not present, then "param" is stored. Otherwise the larger of the two values is then stored in the database.
 func (t Transaction) ByteMax(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 17)
 }
 
-// Performs an atomic ``compare and clear`` operation. If the existing value in the database is equal to the given value, then given key is cleared.
+// Performs an atomic "compare and clear" operation. If the existing value in the database is equal to the given value, then given key is cleared.
 func (t Transaction) CompareAndClear(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 20)
 }
@@ -874,15 +874,15 @@ type ErrorPredicate int
 
 const (
 
-	// Returns “true“ if the error indicates the operations in the transactions
+	// Returns "true" if the error indicates the operations in the transactions
 	// should be retried because of transient error.
 	ErrorPredicateRetryable ErrorPredicate = 50000
 
-	// Returns “true“ if the error indicates the transaction may have succeeded,
+	// Returns "true" if the error indicates the transaction may have succeeded,
 	// though not in a way the system can verify.
 	ErrorPredicateMaybeCommitted ErrorPredicate = 50001
 
-	// Returns “true“ if the error indicates the transaction has not committed,
+	// Returns "true" if the error indicates the transaction has not committed,
 	// though in a way that can be retried.
 	ErrorPredicateRetryableNotCommitted ErrorPredicate = 50002
 )

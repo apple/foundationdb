@@ -18,8 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/FailureMonitor.h"
-#include "fdbrpc/FlowTransport.h"
 #include "fdbrpc/HealthMonitor.h"
 
 void HealthMonitor::reportPeerClosed(const NetworkAddress& peerAddress) {

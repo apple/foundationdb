@@ -19,7 +19,6 @@
  */
 
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/core/TesterInterface.h"
 #include "flow/TDMetric.h"
 #include "fdbserver/tester/workloads.h"
 

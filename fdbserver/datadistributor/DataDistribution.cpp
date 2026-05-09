@@ -83,7 +83,8 @@ std::set<int> const& normalDDQueueErrors() {
 	static std::set<int> s{ error_code_movekeys_conflict,
 		                    error_code_broken_promise,
 		                    error_code_data_move_cancelled,
-		                    error_code_data_move_dest_team_not_found };
+		                    error_code_data_move_dest_team_not_found,
+		                    error_code_finish_move_keys_too_many_retries };
 	return s;
 }
 

@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/flow.h"
 #include "JsonTraceLogFormatter.h"
 
 #include <sstream>

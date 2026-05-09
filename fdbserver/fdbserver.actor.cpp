@@ -1068,7 +1068,7 @@ struct CLIOptions {
 	bool maxLogsSet = false;
 
 	ServerRole role = ServerRole::FDBD;
-	uint32_t randomSeed = platform::getRandomSeed();
+	uint64_t randomSeed = platform::getRandomSeed();
 	double reseedTime = -1.0; // Time in seconds when to reset random seed in simulation (-1 = disabled)
 
 	const char* testFile = "tests/default.txt";
@@ -1539,7 +1539,7 @@ private:
 				break;
 			case OPT_RANDOMSEED: {
 				char* end;
-				randomSeed = (uint32_t)strtoul(args.OptionArg(), &end, 0);
+				randomSeed = strtoull(args.OptionArg(), &end, 0);
 				if (*end) {
 					fprintf(stderr, "ERROR: Could not parse random seed `%s'\n", args.OptionArg());
 					printHelpTeaser(argv[0]);
@@ -1975,7 +1975,7 @@ int main(int argc, char* argv[]) {
 		const auto role = opts.role;
 
 		if (role == ServerRole::Simulation) {
-			printf("Random seed is %u...\n", opts.randomSeed);
+			printf("Random seed is %llu...\n", opts.randomSeed);
 			bindDeterministicRandomToOpenssl();
 		}
 
