@@ -84,12 +84,7 @@ struct GetRateInfoReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar,
-		           transactionRate,
-		           batchTransactionRate,
-		           leaseDuration,
-		           healthMetrics,
-		           clientThrottledTags);
+		serializer(ar, transactionRate, batchTransactionRate, leaseDuration, healthMetrics, clientThrottledTags);
 		if (!ar.protocolVersion().hasRemovedProxyTagThrottling()) {
 			Optional<TransactionTagMap<double>> legacyProxyThrottledTags;
 			serializer(ar, legacyProxyThrottledTags);
