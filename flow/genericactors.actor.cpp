@@ -20,7 +20,6 @@
 
 #include "flow/flow.h"
 #include "flow/UnitTest.h"
-#include "genericcoros.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR Future<bool> allTrue(std::vector<Future<bool>> all) {
@@ -308,97 +307,95 @@ TEST_CASE("/flow/genericactors/WaitForMost") {
 	return Void();
 }
 
-TEST_CASE("/flow/genericcoros/ThrowErrorOr") {
-	int value = wait(generic_coro::throwErrorOr<int>(Future<ErrorOr<int>>(ErrorOr<int>(7))));
+TEST_CASE("/flow/genericactors/ThrowErrorOr") {
+	int value = wait(throwErrorOr<int>(Future<ErrorOr<int>>(ErrorOr<int>(7))));
+	ASSERT_EQ(value, 7);
+
+	int errorCode = wait(getErrorCode(throwErrorOr<int>(Future<ErrorOr<int>>(ErrorOr<int>(operation_failed())))));
+	ASSERT_EQ(errorCode, error_code_operation_failed);
+
+	return Void();
+}
+
+TEST_CASE("/flow/genericactors/TraceAfter") {
+	int value = wait(traceAfter<int>(Future<int>(7), "GenericActorsTraceAfter"));
 	ASSERT_EQ(value, 7);
 
 	int errorCode =
-	    wait(getErrorCode(generic_coro::throwErrorOr<int>(Future<ErrorOr<int>>(ErrorOr<int>(operation_failed())))));
+	    wait(getErrorCode(traceAfter<int>(Future<int>(operation_failed()), "GenericActorsTraceAfterError")));
 	ASSERT_EQ(errorCode, error_code_operation_failed);
 
 	return Void();
 }
 
-TEST_CASE("/flow/genericcoros/TraceAfter") {
-	int value = wait(generic_coro::traceAfter<int>(Future<int>(7), "GenericCorosTraceAfter"));
+TEST_CASE("/flow/genericactors/TransformErrors") {
+	int value = wait(transformErrors<int>(Future<int>(7), operation_failed()));
 	ASSERT_EQ(value, 7);
 
-	int errorCode = wait(
-	    getErrorCode(generic_coro::traceAfter<int>(Future<int>(operation_failed()), "GenericCorosTraceAfterError")));
+	int errorCode = wait(getErrorCode(transformErrors<int>(Future<int>(transaction_too_old()), operation_failed())));
 	ASSERT_EQ(errorCode, error_code_operation_failed);
 
 	return Void();
 }
 
-TEST_CASE("/flow/genericcoros/TransformErrors") {
-	int value = wait(generic_coro::transformErrors<int>(Future<int>(7), operation_failed()));
+TEST_CASE("/flow/genericactors/TransformError") {
+	int value = wait(transformError<int>(Future<int>(7), transaction_too_old(), operation_failed()));
 	ASSERT_EQ(value, 7);
 
-	int errorCode =
-	    wait(getErrorCode(generic_coro::transformErrors<int>(Future<int>(transaction_too_old()), operation_failed())));
-	ASSERT_EQ(errorCode, error_code_operation_failed);
-
-	return Void();
-}
-
-TEST_CASE("/flow/genericcoros/TransformError") {
-	int value = wait(generic_coro::transformError<int>(Future<int>(7), transaction_too_old(), operation_failed()));
-	ASSERT_EQ(value, 7);
-
-	int transformedErrorCode = wait(getErrorCode(generic_coro::transformError<int>(
-	    Future<int>(transaction_too_old()), transaction_too_old(), operation_failed())));
+	int transformedErrorCode = wait(getErrorCode(
+	    transformError<int>(Future<int>(transaction_too_old()), transaction_too_old(), operation_failed())));
 	ASSERT_EQ(transformedErrorCode, error_code_operation_failed);
 
-	int preservedErrorCode = wait(getErrorCode(
-	    generic_coro::transformError<int>(Future<int>(process_behind()), transaction_too_old(), operation_failed())));
+	int preservedErrorCode = wait(
+	    getErrorCode(transformError<int>(Future<int>(process_behind()), transaction_too_old(), operation_failed())));
 	ASSERT_EQ(preservedErrorCode, error_code_process_behind);
 
 	return Void();
 }
 
-TEST_CASE("/flow/genericcoros/WaitForAllReady") {
+TEST_CASE("/flow/genericactors/WaitForAllReady") {
 	state std::vector<Future<int>> results;
 	results = { Future<int>(1), Future<int>(operation_failed()), Future<int>(3) };
 
-	wait(generic_coro::waitForAllReady<int>(results));
+	wait(waitForAllReady<int>(results));
 
 	return Void();
 }
 
-TEST_CASE("/flow/genericcoros/Timeout") {
-	int readyValue = wait(generic_coro::timeout<int>(Future<int>(7), 0.0, -1));
+TEST_CASE("/flow/genericactors/Timeout") {
+	int readyValue = wait(timeout<int>(Future<int>(7), 0.0, -1));
 	ASSERT_EQ(readyValue, 7);
 
-	int timedOutValue = wait(generic_coro::timeout<int>(Future<int>(Never()), 0.0, -1));
+	int timedOutValue = wait(timeout<int>(Future<int>(Never()), 0.0, -1));
 	ASSERT_EQ(timedOutValue, -1);
 
-	Optional<int> readyOptional = wait(generic_coro::timeout<int>(Future<int>(7), 0.0));
+	Optional<int> readyOptional = wait(timeout<int>(Future<int>(7), 0.0));
 	ASSERT(readyOptional.present());
 	ASSERT_EQ(readyOptional.get(), 7);
 
-	Optional<int> timedOutOptional = wait(generic_coro::timeout<int>(Future<int>(Never()), 0.0));
+	Optional<int> timedOutOptional = wait(timeout<int>(Future<int>(Never()), 0.0));
 	ASSERT(!timedOutOptional.present());
 
-	int errorCode = wait(getErrorCode(generic_coro::timeoutError<int>(Future<int>(Never()), 0.0)));
+	int errorCode = wait(getErrorCode(timeoutError<int>(Future<int>(Never()), 0.0)));
 	ASSERT_EQ(errorCode, error_code_timed_out);
 
 	return Void();
 }
 
-TEST_CASE("/flow/genericcoros/Delayed") {
-	int value = wait(generic_coro::delayed<int>(Future<int>(7)));
+TEST_CASE("/flow/genericactors/Delayed") {
+	int value = wait(delayed<int>(Future<int>(7)));
 	ASSERT_EQ(value, 7);
 
-	int errorCode = wait(getErrorCode(generic_coro::delayed<int>(Future<int>(operation_failed()))));
+	int errorCode = wait(getErrorCode(delayed<int>(Future<int>(operation_failed()))));
 	ASSERT_EQ(errorCode, error_code_operation_failed);
 
 	return Void();
 }
 
-TEST_CASE("/flow/genericcoros/Trigger") {
+TEST_CASE("/flow/genericactors/Trigger") {
 	state Reference<AsyncVar<bool>> called = makeReference<AsyncVar<bool>>(false);
 	state Promise<Void> signal;
-	state Future<Void> triggered = generic_coro::trigger(SetAsyncVarTrue{ called }, signal.getFuture());
+	state Future<Void> triggered = trigger(SetAsyncVarTrue{ called }, signal.getFuture());
 
 	ASSERT(!called->get());
 	ASSERT(!triggered.isReady());
@@ -408,8 +405,7 @@ TEST_CASE("/flow/genericcoros/Trigger") {
 	ASSERT(called->get());
 
 	called->set(false);
-	int errorCode =
-	    wait(getVoidErrorCode(generic_coro::trigger(SetAsyncVarTrue{ called }, Future<Void>(operation_failed()))));
+	int errorCode = wait(getVoidErrorCode(trigger(SetAsyncVarTrue{ called }, Future<Void>(operation_failed()))));
 	ASSERT_EQ(errorCode, error_code_operation_failed);
 	ASSERT(!called->get());
 

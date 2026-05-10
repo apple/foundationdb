@@ -43,6 +43,7 @@
 #include <utility>
 
 #include "flow/flow.h"
+#include "flow/Coroutines.h"
 #include "flow/CoroUtils.h"
 #include "flow/Knobs.h"
 #include "flow/Util.h"
@@ -53,28 +54,27 @@
 #pragma warning(disable : 4355) // 'this' : used in base member initializer list
 #endif
 
-ACTOR template <class T>
-Future<T> traceAfter(Future<T> what, std::string type, bool traceErrors = true) {
-	state std::string typeStr = type;
+template <class T>
+Future<T> traceAfter(Future<T> what, std::string eventType, bool traceErrors = true, ExplicitVoid = {}) {
 	try {
-		T val = wait(what);
-		TraceEvent(typeStr.c_str());
-		return val;
+		T val = co_await what;
+		TraceEvent(eventType.c_str());
+		co_return val;
 	} catch (Error& e) {
 		// Don't trace operation_cancelled as it's a normal control flow mechanism, not an error
 		if (traceErrors && e.code() != error_code_operation_cancelled) {
-			TraceEvent(typeStr.c_str()).errorUnsuppressed(e);
+			TraceEvent(eventType.c_str()).errorUnsuppressed(e);
 		}
 		throw;
 	}
 }
 
-ACTOR template <class T>
-Future<Optional<T>> stopAfter(Future<T> what) {
-	state Optional<T> ret = T();
+template <class T>
+Future<Optional<T>> stopAfter(Future<T> what, ExplicitVoid = {}) {
+	Optional<T> ret = T();
 	try {
-		T _ = wait(what);
-		ret = Optional<T>(_);
+		T res = co_await what;
+		ret = Optional<T>(res);
 	} catch (Error& e) {
 		bool ok = e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete ||
 		          e.code() == error_code_actor_cancelled || e.code() == error_code_local_config_changed;
@@ -85,7 +85,7 @@ Future<Optional<T>> stopAfter(Future<T> what) {
 		}
 	}
 	g_network->stop();
-	return ret;
+	co_return ret;
 }
 
 template <class T>
@@ -148,36 +148,39 @@ Future<ErrorOr<T>> errorOr(Future<T> f) {
 	}
 }
 
-ACTOR template <class T>
-Future<T> throwErrorOr(Future<ErrorOr<T>> f) {
-	ErrorOr<T> t = wait(f);
-	if (t.isError())
+template <class T>
+Future<T> throwErrorOr(Future<ErrorOr<T>> f, ExplicitVoid = {}) {
+	ErrorOr<T> t = co_await f;
+	if (t.isError()) {
 		throw t.getError();
-	return t.get();
-}
-
-ACTOR template <class T>
-Future<T> transformErrors(Future<T> f, Error err) {
-	try {
-		T t = wait(f);
-		return t;
-	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled)
-			throw e;
-		throw err;
 	}
+	co_return std::move(t).get();
 }
 
-ACTOR template <class T>
-Future<T> transformError(Future<T> f, Error inErr, Error outErr) {
-	try {
-		T t = wait(f);
-		return t;
-	} catch (Error& e) {
-		if (e.code() == inErr.code())
-			throw outErr;
+template <class T>
+Future<T> transformErrors(Future<T> f, Error err, ExplicitVoid = {}) {
+	ErrorOr<T> t = co_await coro::errorOr(f);
+	if (t.present()) {
+		co_return std::move(t).get();
+	}
+	Error e = t.getError();
+	if (e.code() == error_code_actor_cancelled) {
 		throw e;
 	}
+	throw err;
+}
+
+template <class T>
+Future<T> transformError(Future<T> f, Error inErr, Error outErr, ExplicitVoid = {}) {
+	ErrorOr<T> t = co_await coro::errorOr(f);
+	if (t.present()) {
+		co_return std::move(t).get();
+	}
+	Error e = t.getError();
+	if (e.code() == inErr.code()) {
+		throw outErr;
+	}
+	throw e;
 }
 
 // Note that the RequestStream<T> version of forwardPromise doesn't exist, because what to do with errors?
@@ -203,57 +206,70 @@ void forwardEvent(Event* ev, T* t, Error* err, FutureStream<T> input) {
 	}
 }
 
-ACTOR template <class T>
+template <class T>
 Future<Void> waitForAllReady(std::vector<Future<T>> results) {
-	state int i = 0;
-	loop {
-		if (i == results.size())
-			return Void();
-		try {
-			T t = wait(results[i]);
-			(void)t;
-		} catch (...) {
+	for (auto const& result : results) {
+		if (result.isReady()) {
+			continue;
 		}
-		i++;
+		// waitForAllReady only cares that each future completes; composing
+		// ignore() with errorOr() avoids both throwing on error and copying T.
+		co_await coro::errorOr(coro::ignore(result));
 	}
 }
 
-ACTOR template <class T>
-Future<T> timeout(Future<T> what, double time, T timedoutValue, TaskPriority taskID = TaskPriority::DefaultDelay) {
-	Future<Void> end = delay(time, taskID);
-	choose {
-		when(T t = wait(what)) {
-			return t;
-		}
-		when(wait(end)) {
-			return timedoutValue;
-		}
+template <class T>
+Future<T> timeout(Future<T> what,
+                  double time,
+                  T timedoutValue,
+                  TaskPriority taskID = TaskPriority::DefaultDelay,
+                  ExplicitVoid = {}) {
+	if (what.canGet()) {
+		co_return what.get();
+	} else if (what.isError()) {
+		throw what.getError();
+	}
+	auto res = co_await race(what, delay(time, taskID));
+	if (res.index() == 0) {
+		co_return std::get<0>(std::move(res));
+	} else {
+		co_return timedoutValue;
 	}
 }
 
-ACTOR template <class T>
-Future<Optional<T>> timeout(Future<T> what, double time, TaskPriority taskID = TaskPriority::DefaultDelay) {
-	Future<Void> end = delay(time, taskID);
-	choose {
-		when(T t = wait(what)) {
-			return t;
-		}
-		when(wait(end)) {
-			return Optional<T>();
-		}
+template <class T>
+Future<Optional<T>> timeout(Future<T> what,
+                            double time,
+                            TaskPriority taskID = TaskPriority::DefaultDelay,
+                            ExplicitVoid = {}) {
+	if (what.canGet()) {
+		co_return what.get();
+	} else if (what.isError()) {
+		throw what.getError();
+	}
+	auto res = co_await race(what, delay(time, taskID));
+	if (res.index() == 0) {
+		co_return std::get<0>(std::move(res));
+	} else {
+		co_return Optional<T>();
 	}
 }
 
-ACTOR template <class T>
-Future<T> timeoutError(Future<T> what, double time, TaskPriority taskID = TaskPriority::DefaultDelay) {
-	Future<Void> end = delay(time, taskID);
-	choose {
-		when(T t = wait(what)) {
-			return t;
-		}
-		when(wait(end)) {
-			throw timed_out();
-		}
+template <class T>
+Future<T> timeoutError(Future<T> what,
+                       double time,
+                       TaskPriority taskID = TaskPriority::DefaultDelay,
+                       ExplicitVoid = {}) {
+	if (what.canGet()) {
+		co_return what.get();
+	} else if (what.isError()) {
+		throw what.getError();
+	}
+	auto res = co_await race(what, delay(time, taskID));
+	if (res.index() == 0) {
+		co_return std::get<0>(std::move(res));
+	} else {
+		throw timed_out();
 	}
 }
 
@@ -275,48 +291,46 @@ AsyncResult<T> timeoutError(AsyncResult<T> what,
 	}
 }
 
-ACTOR template <class T>
-Future<T> delayed(Future<T> what, double time = 0.0, TaskPriority taskID = TaskPriority::DefaultDelay) {
-	try {
-		state T t = wait(what);
-		wait(delay(time, taskID));
-		return t;
-	} catch (Error& e) {
-		state Error err = e;
-		wait(delay(time, taskID));
-		throw err;
+template <class T>
+Future<T> delayed(Future<T> what,
+                  double time = 0.0,
+                  TaskPriority taskID = TaskPriority::DefaultDelay,
+                  ExplicitVoid = {}) {
+	ErrorOr<T> t = co_await coro::errorOr(what);
+	co_await delay(time, taskID);
+	if (t.present()) {
+		co_return std::move(t).get();
+	} else {
+		throw t.getError();
 	}
 }
 
-ACTOR template <class Func>
+template <class Func>
 Future<Void> trigger(Func what, Future<Void> signal) {
-	wait(signal);
+	co_await signal;
 	what();
-	return Void();
 }
 
 // Waits for a future to complete and cannot be cancelled
 // Most situations will use the overload below, which does not require a promise
-ACTOR template <class T>
-void uncancellable(Future<T> what, Promise<T> result) {
-	try {
-		T val = wait(what);
-		result.send(val);
-	} catch (Error& e) {
-		result.sendError(e);
+template <class T>
+Future<Void> uncancellable(Uncancellable, Future<T> what, Promise<T> result) {
+	ErrorOr<T> res = co_await coro::errorOr(what);
+	if (res.present()) {
+		result.send(std::move(res).get());
+	} else {
+		result.sendError(res.getError());
 	}
 }
 
 // Waits for a future to complete and cannot be cancelled
-ACTOR template <class T>
-[[flow_allow_discard]] Future<T> uncancellable(Future<T> what) {
+template <class T>
+Future<T> uncancellable(Future<T> what, ExplicitVoid = {}) {
 	Promise<T> resultPromise;
 	Future<T> result = resultPromise.getFuture();
 
-	uncancellable(what, resultPromise);
-	T val = wait(result);
-
-	return val;
+	uncancellable(Uncancellable(), what, resultPromise);
+	co_return co_await result;
 }
 
 // Holds onto an object until a future either completes or is cancelled
@@ -324,10 +338,9 @@ ACTOR template <class T>
 //
 // NOTE: the order of the arguments is important. The arguments will be destructed in
 // reverse order, and we need the object to be destructed last.
-ACTOR template <class T, class X>
+template <class T, class X>
 Future<T> holdWhile(X object, Future<T> what) {
-	T val = wait(what);
-	return val;
+	co_return co_await what;
 }
 
 // Assign the future value of what to out

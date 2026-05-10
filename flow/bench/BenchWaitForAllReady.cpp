@@ -22,13 +22,11 @@
 
 #include "flow/ThreadHelper.actor.h"
 #include "flow/genericactors.actor.h"
-#include "genericcoros.h"
 
 #include <vector>
 
 namespace {
 
-enum class WaitForAllReadyImpl { Actor, Coroutine };
 enum class WaitForAllReadyScenario { Ready, Error };
 
 template <WaitForAllReadyScenario Scenario>
@@ -45,7 +43,7 @@ std::vector<Future<int>> makeResults(int futureCount) {
 	return results;
 }
 
-template <WaitForAllReadyImpl Impl, WaitForAllReadyScenario Scenario>
+template <WaitForAllReadyScenario Scenario>
 Future<Void> benchWaitForAllReadyActor(benchmark::State* state) {
 	const int futureCount = state->range(0);
 	// Prebuild the futures so the benchmark isolates waitForAllReady itself
@@ -53,45 +51,27 @@ Future<Void> benchWaitForAllReadyActor(benchmark::State* state) {
 	const std::vector<Future<int>> results = makeResults<Scenario>(futureCount);
 
 	while (state->KeepRunning()) {
-		if constexpr (Impl == WaitForAllReadyImpl::Actor) {
-			Future<Void> done = ::waitForAllReady<int>(results);
-			co_await done;
-			benchmark::DoNotOptimize(done);
-		} else {
-			Future<Void> done = generic_coro::waitForAllReady<int>(results);
-			co_await done;
-			benchmark::DoNotOptimize(done);
-		}
+		Future<Void> done = waitForAllReady<int>(results);
+		co_await done;
+		benchmark::DoNotOptimize(done);
 		benchmark::ClobberMemory();
 	}
 
 	state->SetItemsProcessed(static_cast<int64_t>(state->iterations()) * futureCount);
 }
 
-template <WaitForAllReadyImpl Impl, WaitForAllReadyScenario Scenario>
+template <WaitForAllReadyScenario Scenario>
 void benchWaitForAllReady(benchmark::State& state) {
-	onMainThread([&state] { return benchWaitForAllReadyActor<Impl, Scenario>(&state); }).blockUntilReady();
+	onMainThread([&state] { return benchWaitForAllReadyActor<Scenario>(&state); }).blockUntilReady();
 }
 
-BENCHMARK_TEMPLATE(benchWaitForAllReady, WaitForAllReadyImpl::Actor, WaitForAllReadyScenario::Ready)
-    ->Name("WaitForAllReady/actor/ready")
-    ->RangeMultiplier(4)
-    ->Range(1, 1 << 12)
-    ->ReportAggregatesOnly(true);
-
-BENCHMARK_TEMPLATE(benchWaitForAllReady, WaitForAllReadyImpl::Coroutine, WaitForAllReadyScenario::Ready)
+BENCHMARK_TEMPLATE(benchWaitForAllReady, WaitForAllReadyScenario::Ready)
     ->Name("WaitForAllReady/coroutine/ready")
     ->RangeMultiplier(4)
     ->Range(1, 1 << 12)
     ->ReportAggregatesOnly(true);
 
-BENCHMARK_TEMPLATE(benchWaitForAllReady, WaitForAllReadyImpl::Actor, WaitForAllReadyScenario::Error)
-    ->Name("WaitForAllReady/actor/error")
-    ->RangeMultiplier(4)
-    ->Range(1, 1 << 12)
-    ->ReportAggregatesOnly(true);
-
-BENCHMARK_TEMPLATE(benchWaitForAllReady, WaitForAllReadyImpl::Coroutine, WaitForAllReadyScenario::Error)
+BENCHMARK_TEMPLATE(benchWaitForAllReady, WaitForAllReadyScenario::Error)
     ->Name("WaitForAllReady/coroutine/error")
     ->RangeMultiplier(4)
     ->Range(1, 1 << 12)
