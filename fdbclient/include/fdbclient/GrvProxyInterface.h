@@ -59,10 +59,6 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 		           rkBatchThrottled,
 		           ssVersionVectorDelta,
 		           proxyId);
-		if (!ar.protocolVersion().hasRemovedProxyTagThrottling()) {
-			double legacyProxyTagThrottledDuration{ 0.0 };
-			serializer(ar, legacyProxyTagThrottledDuration);
-		}
 	}
 };
 

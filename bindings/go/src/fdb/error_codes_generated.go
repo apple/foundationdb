@@ -228,8 +228,6 @@ var (
 	ErrAuditStorageFailed = Error{Code: 1221}
 	// Exceeded the max number of allowed concurrent audit storage requests
 	ErrAuditStorageExceededRequestLimit = Error{Code: 1222}
-	// Exceeded maximum proxy tag throttling duration
-	ErrProxyTagThrottled = Error{Code: 1223}
 	// Exceeded maximum time allowed to read or write.
 	ErrKeyValueStoreDeadlineExceeded = Error{Code: 1224}
 	// Found data corruption
