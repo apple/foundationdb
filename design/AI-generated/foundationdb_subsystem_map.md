@@ -268,10 +268,10 @@ Phase 4: REPLY                      CommitProxy
 
 **What it controls:**
 - Transaction rate limits (`tpsLimit`) computed separately for normal (SYSTEM+DEFAULT) and batch priorities, sent to GRV proxies via `GetRateInfoReply`. Each proxy receives `tpsLimit / numProxies`. See [Subsystem 5](subsystem_05_commit_pipeline.md) for how GRV proxies enforce these limits.
-- Per-tag throttling via `GlobalTagThrottler` — can slow down or reject transactions from specific tags
+- Per-tag throttling via `TagThrottler` — can slow down or reject transactions from specific tags
 - Batch priority vs. default priority differentiation (batch uses more aggressive queue depth thresholds)
 
-**Principal files:** [`Ratekeeper.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/ratekeeper/Ratekeeper.cpp), [`Ratekeeper.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/ratekeeper/Ratekeeper.h), [`GlobalTagThrottler.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/ratekeeper/GlobalTagThrottler.cpp), [`RkTagThrottleCollection.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/ratekeeper/RkTagThrottleCollection.cpp), [`ServerThroughputTracker.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/ratekeeper/ServerThroughputTracker.cpp)
+**Principal files:** [`Ratekeeper.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/ratekeeper/Ratekeeper.cpp), [`Ratekeeper.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/ratekeeper/Ratekeeper.h), [`TagThrottler.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/ratekeeper/TagThrottler.cpp), [`RkTagThrottleCollection.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/ratekeeper/RkTagThrottleCollection.cpp)
 
 ---
 

@@ -92,10 +92,8 @@ TEST_CASE("/fdbserver/grvproxy/maxGrvQueueDelay/queueTransactionCounts") {
 	ASSERT_EQ(counts.defaultPriority, 0);
 	ASSERT_EQ(counts.normalRateQueuedTransactions(), 2);
 
-	GrvProxyTagThrottler::ReleaseTransactionsResult releaseStats;
-	releaseStats.defaultPriorityTransactionsReleased = 7;
-	releaseStats.batchPriorityTransactionsReleased = 11;
-	counts.add(releaseStats);
+	counts.add(TransactionPriority::DEFAULT, 7);
+	counts.add(TransactionPriority::BATCH, 11);
 
 	ASSERT_EQ(counts.defaultPriority, 7);
 	ASSERT_EQ(counts.batchPriority, 16);

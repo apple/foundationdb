@@ -30,7 +30,6 @@ public:
 	virtual void addRequests(TransactionTag tag, int count) = 0;
 	virtual uint64_t getThrottledTagChangeId() const = 0;
 	virtual PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates() = 0;
-	virtual TransactionTagMap<double> getProxyRates(int numProxies) = 0;
 	virtual int64_t autoThrottleCount() const = 0;
 	virtual uint32_t busyReadTagCount() const = 0;
 	virtual uint32_t busyWriteTagCount() const = 0;
@@ -51,7 +50,6 @@ public:
 	void addRequests(TransactionTag tag, int count) override;
 	uint64_t getThrottledTagChangeId() const override;
 	PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates() override;
-	TransactionTagMap<double> getProxyRates(int numProxies) override { throw not_implemented(); }
 	int64_t autoThrottleCount() const override;
 	uint32_t busyReadTagCount() const override;
 	uint32_t busyWriteTagCount() const override;
@@ -59,33 +57,4 @@ public:
 	bool isAutoThrottlingEnabled() const override;
 	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&) override;
 	void updateThrottling(Map<UID, StorageQueueInfo> const&) override {}
-};
-
-class GlobalTagThrottler : public ITagThrottler {
-	PImpl<class GlobalTagThrottlerImpl> impl;
-
-public:
-	GlobalTagThrottler(Database db, UID id, int maxFallingBehind, double limitingThreshold);
-	~GlobalTagThrottler();
-
-	Future<Void> monitorThrottlingChanges() override;
-	void addRequests(TransactionTag tag, int count) override;
-	uint64_t getThrottledTagChangeId() const override;
-
-	int64_t autoThrottleCount() const override;
-	uint32_t busyReadTagCount() const override;
-	uint32_t busyWriteTagCount() const override;
-	int64_t manualThrottleCount() const override;
-	bool isAutoThrottlingEnabled() const override;
-
-	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&) override { return Void(); }
-	void updateThrottling(Map<UID, StorageQueueInfo> const&) override;
-	PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates() override;
-	TransactionTagMap<double> getProxyRates(int numProxies) override;
-
-public:
-	void setQuota(TransactionTagRef, ThrottleApi::TagQuotaValue const&);
-	void removeQuota(TransactionTagRef);
-	void removeExpiredTags();
-	uint32_t tagsTracked() const;
 };

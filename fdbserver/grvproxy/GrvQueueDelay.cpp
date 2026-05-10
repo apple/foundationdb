@@ -55,11 +55,6 @@ void GrvQueueTransactionCounts::remove(GetReadVersionRequest const& req) {
 	remove(req.priority, req.transactionCount);
 }
 
-void GrvQueueTransactionCounts::add(GrvProxyTagThrottler::ReleaseTransactionsResult const& releaseStats) {
-	defaultPriority += static_cast<int64_t>(releaseStats.defaultPriorityTransactionsReleased);
-	batchPriority += static_cast<int64_t>(releaseStats.batchPriorityTransactionsReleased);
-}
-
 int64_t GrvQueueTransactionCounts::normalRateQueuedTransactions() const {
 	return systemPriority + defaultPriority;
 }
