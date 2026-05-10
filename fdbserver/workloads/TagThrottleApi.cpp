@@ -42,7 +42,7 @@ struct TagThrottleApiWorkload : TestWorkload {
 	}
 
 	Future<Void> start(Database const& cx) override {
-		if (SERVER_KNOBS->GLOBAL_TAG_THROTTLING || this->clientId != 0)
+		if (this->clientId != 0)
 			return Void();
 		return timeout(runThrottleApi(this, cx), testDuration, Void());
 	}

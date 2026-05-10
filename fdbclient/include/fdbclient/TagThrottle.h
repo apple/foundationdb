@@ -593,29 +593,6 @@ Future<Void> enableAuto(Reference<DB> db, bool enabled) {
 	}
 }
 
-class TagQuotaValue {
-public:
-	int64_t reservedQuota{ 0 };
-	int64_t totalQuota{ 0 };
-	bool isValid() const;
-	Value toValue() const;
-	static TagQuotaValue fromValue(ValueRef);
-};
-
-Key getTagQuotaKey(TransactionTagRef);
-
-template <class Tr>
-void setTagQuota(Reference<Tr> tr, TransactionTagRef tag, int64_t reservedQuota, int64_t totalQuota) {
-	TagQuotaValue tagQuotaValue;
-	tagQuotaValue.reservedQuota = reservedQuota;
-	tagQuotaValue.totalQuota = totalQuota;
-	if (!tagQuotaValue.isValid()) {
-		throw invalid_throttle_quota_value();
-	}
-	tr->set(getTagQuotaKey(tag), tagQuotaValue.toValue());
-	signalThrottleChange(tr);
-}
-
 }; // namespace ThrottleApi
 
 template <class Value>

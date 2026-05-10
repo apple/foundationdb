@@ -1446,7 +1446,7 @@ Serializes all endpoints directly: `waitFailure`, `getRateInfo`, `haltRatekeeper
 | leaseDuration | `double` | Rate lease duration |
 | healthMetrics | `HealthMetrics` | Cluster health |
 | clientThrottledTags | `Optional<PrioritizedTransactionTagMap<ClientTagThrottleLimits>>` | Client throttles |
-| proxyThrottledTags | `Optional<TransactionTagMap<double>>` | Proxy throttles |
+| proxyThrottledTags | `Optional<TransactionTagMap<double>>` | Retained for protocol compatibility; no longer populated |
 
 `PrioritizedTransactionTagMap<T>` is `std::map<TransactionPriority, TransactionTagMap<T>>` where `TransactionPriority` is a `uint8_t` enum.
 

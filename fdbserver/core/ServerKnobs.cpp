@@ -1103,22 +1103,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL,                30.0 ); if(randomize && BUGGIFY) TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL = 1.0;
 	init( AUTO_TAG_THROTTLING_ENABLED,                          true ); if(randomize && BUGGIFY) AUTO_TAG_THROTTLING_ENABLED = false;
 	init( SS_THROTTLE_TAGS_TRACKED,                                5 ); if(randomize && BUGGIFY) SS_THROTTLE_TAGS_TRACKED = deterministicRandom()->randomInt(1, 10);
-	init( GLOBAL_TAG_THROTTLING,                                true ); if(isSimulated) GLOBAL_TAG_THROTTLING = deterministicRandom()->coinflip();
-	init( ENFORCE_TAG_THROTTLING_ON_PROXIES,   GLOBAL_TAG_THROTTLING );
-	init( GLOBAL_TAG_THROTTLING_MIN_RATE,                        1.0 );
-	init( GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED,                 10 );
-	init( GLOBAL_TAG_THROTTLING_TAG_EXPIRE_AFTER,              240.0 );
-	init( GLOBAL_TAG_THROTTLING_PROXY_LOGGING_INTERVAL,         60.0 );
-	init( GLOBAL_TAG_THROTTLING_TRACE_INTERVAL,                  5.0 );
-	init( GLOBAL_TAG_THROTTLING_REPORT_ONLY,                   false );
-	init( GLOBAL_TAG_THROTTLING_FORGET_SS_THRESHOLD,            4096 );
-	init( GLOBAL_TAG_THROTTLING_LIMITING_THRESHOLD,         409600.0 );
-
-	init( GLOBAL_TAG_THROTTLING_TARGET_RATE_FOLDING_TIME,        10.0 );
-	init( GLOBAL_TAG_THROTTLING_TRANSACTION_COUNT_FOLDING_TIME,   2.0 );
-	init( GLOBAL_TAG_THROTTLING_TRANSACTION_RATE_FOLDING_TIME,   10.0 );
-	init( GLOBAL_TAG_THROTTLING_COST_FOLDING_TIME,               10.0 );
-
 	init( HOT_SHARD_THROTTLING_ENABLED,                         false ); if(randomize && BUGGIFY) HOT_SHARD_THROTTLING_ENABLED = true;
 	init( HOT_SHARD_THROTTLING_EXPIRE_AFTER,                      3.0 );
 	init( HOT_SHARD_THROTTLING_TRACKED,                             1 );
