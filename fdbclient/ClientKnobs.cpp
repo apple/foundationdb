@@ -423,7 +423,6 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	// Preserve the old public knob spelling while moving new code to the non-global name.
 	double_knobs["global_tag_throttling_rw_fungibility_ratio"] =
 	    KnobValue<double>{ &TAG_THROTTLING_RW_FUNGIBILITY_RATIO };
-	init( PROXY_MAX_TAG_THROTTLE_DURATION,          5.0 ); if( randomize && BUGGIFY ) PROXY_MAX_TAG_THROTTLE_DURATION = 0.5;
 	init( TRANSACTION_LOCK_REJECTION_RETRIABLE,    true );
 
 	// busyness reporting

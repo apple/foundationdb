@@ -8,7 +8,7 @@
 # used and should not be changed from 0.
 #                                                          xyzdev
 #                                                          vvvv
-set(FDB_PV_DEFAULT_VERSION                      "0x0FDB00B080000000LL")
+set(FDB_PV_DEFAULT_VERSION                      "0x0FDB00B080010000LL")
 set(FDB_PV_FUTURE_VERSION                       "0x0FDB00B081000000LL")
 set(FDB_PV_MIN_COMPATIBLE_VERSION               "0x0FDB00B074000000LL")
 set(FDB_PV_MIN_INVALID_VERSION                  "0x0FDB00B082000000LL")
@@ -95,3 +95,4 @@ set(FDB_PV_BLOB_RANGE_CHANGE_LOG                "0x0FDB00B072000000LL")
 set(FDB_PV_GC_TXN_GENERATIONS                   "0x0FDB00B073000000LL")
 set(FDB_PV_MUTATION_CHECKSUM                    "0x0FDB00B074000000LL")
 set(FDB_PV_GRPC_ENDPOINT                        "0x0FDB00B080000000LL")
+set(FDB_PV_REMOVED_PROXY_TAG_THROTTLING         "0x0FDB00B080010000LL")

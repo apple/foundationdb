@@ -322,8 +322,6 @@ public:
 	int64_t TAG_THROTTLING_PAGE_SIZE; // Used to round up the cost of operations
 	// Cost multiplier for writes (because write operations are more expensive than reads):
 	double TAG_THROTTLING_RW_FUNGIBILITY_RATIO;
-	// Legacy compatibility knob for retrying proxy_tag_throttled errors from older GRV proxies.
-	double PROXY_MAX_TAG_THROTTLE_DURATION;
 
 	// Enable to automatically retry transactions in the presence of transaction_lock_rejection error
 	// Set to false only for the rangeLocking simulation test

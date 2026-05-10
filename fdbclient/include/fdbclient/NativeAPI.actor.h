@@ -270,8 +270,6 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	// after rounding up to the nearest page size and applying a write penalty
 	int64_t totalCost = 0;
 
-	double proxyTagThrottledDuration = 0.0;
-
 	int numErrors = 0;
 	double startTime = 0;
 	Promise<Standalone<StringRef>> versionstampPromise;
