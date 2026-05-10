@@ -287,7 +287,6 @@ public:
 			kbt_debug("RANGEMAP updateRange set end\n");
 			self.kvMap.set(tr, end, original);
 		}
-
 	}
 
 	template <class Transaction>
