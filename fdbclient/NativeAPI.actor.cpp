@@ -5618,6 +5618,7 @@ Future<Void> Transaction::onError(Error const& e) {
 		         e.code() == error_code_transaction_throttled_hot_shard) {
 			++trState->cx->transactionsThrottled;
 		} else if (e.code() == error_code_proxy_tag_throttled) {
+			// Older GRV proxies can still emit this during mixed-version upgrades.
 			++trState->cx->transactionsThrottled;
 			trState->proxyTagThrottledDuration += CLIENT_KNOBS->PROXY_MAX_TAG_THROTTLE_DURATION;
 		} else if (e.code() == error_code_transaction_rejected_range_locked) {

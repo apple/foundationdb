@@ -101,7 +101,7 @@ class TransactionCostWorkload : public TestWorkload {
 		}
 
 		int64_t expectedFinalCost() const override {
-			return CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
+			return CLIENT_KNOBS->TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
 		}
 	};
 
@@ -115,7 +115,7 @@ class TransactionCostWorkload : public TestWorkload {
 		}
 
 		int64_t expectedFinalCost() const override {
-			return 2 * CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO *
+			return 2 * CLIENT_KNOBS->TAG_THROTTLING_RW_FUNGIBILITY_RATIO *
 			       CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
 		}
 	};
@@ -132,7 +132,7 @@ class TransactionCostWorkload : public TestWorkload {
 		}
 
 		int64_t expectedFinalCost() const override {
-			return 10 * CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO *
+			return 10 * CLIENT_KNOBS->TAG_THROTTLING_RW_FUNGIBILITY_RATIO *
 			       CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
 		}
 	};

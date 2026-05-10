@@ -40,6 +40,7 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 	bool rkBatchThrottled = false;
 
 	TransactionTagMap<ClientTagThrottleLimits> tagThrottleInfo;
+	// Retained for mixed-version compatibility with older GRV proxies that can still report proxy-side tag throttling.
 	double proxyTagThrottledDuration{ 0.0 };
 
 	VersionVector ssVersionVectorDelta;
@@ -86,8 +87,8 @@ struct GetReadVersionRequest : TimedRequest {
 
 	TransactionTagMap<uint32_t> tags;
 	// Not serialized, because this field does not need to be sent to master.
-	// It is used for reporting to clients the amount of time spent delayed by
-	// the TagQueue
+	// Retained for mixed-version compatibility with older GRV proxies that can still
+	// delay tagged requests before they reach the main GRV queues.
 	double proxyTagThrottledDuration{ 0.0 };
 
 	Optional<UID> debugID;
