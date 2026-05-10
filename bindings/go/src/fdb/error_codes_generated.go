@@ -416,8 +416,6 @@ var (
 	ErrMapperNotTuple = Error{Code: 2043}
 	// Invalid checkpoint format
 	ErrInvalidCheckpointFormat = Error{Code: 2044}
-	// Invalid quota value. Note that reserved_throughput cannot exceed total_throughput
-	ErrInvalidThrottleQuotaValue = Error{Code: 2045}
 	// Failed to create a checkpoint
 	ErrFailedToCreateCheckpoint = Error{Code: 2046}
 	// Failed to restore a checkpoint
