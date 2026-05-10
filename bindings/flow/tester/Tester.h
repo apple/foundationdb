@@ -165,8 +165,7 @@ struct DirectoryTesterData {
 	}
 
 	DirectoryTesterData() : directoryListIndex(0), directoryErrorIndex(0) {
-		directoryList.push_back(
-		    DirectoryOrSubspace(Reference<FDB::IDirectory>(makeReference<FDB::DirectoryLayer>())));
+		directoryList.push_back(DirectoryOrSubspace(Reference<FDB::IDirectory>(makeReference<FDB::DirectoryLayer>())));
 	}
 
 	template <class T>
