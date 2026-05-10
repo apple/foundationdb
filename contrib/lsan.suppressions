@@ -3,3 +3,14 @@
 
 # Not all incoming connections are cleanly shut down in client API tests
 leak:ConnectionReaderActorState
+
+# Peer objects in TransportData::peers are intentionally not freed at shutdown.
+# FlowTransport is allocated into a global slot and never deleted because its
+# destructor triggers actor cancellation cascades that access freed state.
+# Peer::Peer covers allocations during Peer construction (DDSketch, AsyncTrigger).
+# connectionKeeper and connectionMonitor cover Promise allocations made during
+# the Peer's lifetime that are leaked along with the Peer.
+leak:TransportData::getOrOpenPeer
+leak:Peer::Peer
+leak:connectionKeeper
+leak:connectionMonitor
