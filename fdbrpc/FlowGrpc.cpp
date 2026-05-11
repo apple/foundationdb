@@ -200,7 +200,7 @@ void GrpcServer::registerRoleServices(const UID& owner_id, const ServiceList& se
 	on_services_changed_.trigger();
 }
 
-Future<Void> GrpcServer::deregisterRoleServices(const UID& owner_id) {
+Future<Void> GrpcServer::deregisterRoleServices(UID owner_id) {
 	ASSERT(g_network->isOnMainThread());
 	co_await stopServer();
 	registered_services_.erase(owner_id);

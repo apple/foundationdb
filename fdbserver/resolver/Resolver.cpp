@@ -600,7 +600,7 @@ Future<Void> pollMetrics(Reference<Resolver> self) {
 
 namespace {
 
-// TODO: refactor with the one in CommitProxyServer.actor.cpp
+// TODO: refactor with the one in CommitProxyServer.cpp
 struct TransactionStateResolveContext {
 	// Maximum sequence for txnStateRequest, this is defined when the request last flag is set.
 	Sequence maxSequence = std::numeric_limits<Sequence>::max();

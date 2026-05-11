@@ -209,7 +209,7 @@ Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, Future
 	return handleIOErrors(actor, storeError, id, onClosed);
 }
 
-Future<Void> deregisterGrpcService(const UID& id) {
+Future<Void> deregisterGrpcService(UID id) {
 #ifdef FLOW_GRPC_ENABLED
 	if (g_network->isSimulated()) {
 		return Void();
