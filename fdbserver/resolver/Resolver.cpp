@@ -31,6 +31,7 @@
 #include "fdbserver/kvstore/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/logsystem/LogSystem.h"
+#include "fdbserver/logsystem/LogSystemConsumer.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/MasterInterface.h"
@@ -144,6 +145,7 @@ struct Resolver : ReferenceCounted<Resolver> {
 	// Resolvers.
 	LogSystemDiskQueueAdapter* logAdapter = nullptr;
 	Reference<LogSystem> logSystem;
+	Reference<LogSystemConsumer> logSystemConsumer;
 	IKeyValueStore* txnStateStore = nullptr;
 	int localTLogCount = -1;
 
@@ -387,7 +389,7 @@ Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatchReque
 				auto lockedKey = self->txnStateStore->readValue(databaseLockedKey).get();
 				isLocked = lockedKey.present() && lockedKey.get().size();
 				resolverData.reset(new ResolverData(self->dbgid,
-				                                    self->logSystem->makeConsumer(),
+				                                    self->logSystemConsumer,
 				                                    self->txnStateStore,
 				                                    &self->keyInfo,
 				                                    toCommit.get(),
@@ -770,6 +772,7 @@ Future<Void> resolverCore(ResolverInterface resolver,
 
 	// Initialize txnStateStore
 	self->logSystem = makeLogSystemFromServerDBInfo(resolver.id(), db->get(), false, addActor);
+	self->logSystemConsumer = self->logSystem->makeConsumer();
 	self->localTLogCount = db->get().logSystemConfig.numLogs();
 	Future<Void> onError = transformError(actorCollection(addActor.getFuture()), broken_promise(), resolver_failed());
 	TransactionStateResolveContext transactionStateResolveContext;
