@@ -152,74 +152,67 @@ class MappedRangeQueryIntegrationTest {
 	}
 
 	RangeQueryWithIndex rangeQueryAndThenRangeQueries = (int begin, int end, Database db) -> db.run(tr -> {
-		try {
-			List<KeyValue> kvs = tr.getRange(KeySelector.firstGreaterOrEqual(indexEntryKey(begin)),
-			                                 KeySelector.firstGreaterOrEqual(indexEntryKey(end)),
-			                                 ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL)
-			                         .asList()
-			                         .get();
-			Assertions.assertEquals(end - begin, kvs.size());
+		// Let Database.run retry transient FDB errors instead of turning them into assertion failures.
+		List<KeyValue> kvs = tr.getRange(KeySelector.firstGreaterOrEqual(indexEntryKey(begin)),
+		                                 KeySelector.firstGreaterOrEqual(indexEntryKey(end)),
+		                                 ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL)
+		                         .asList()
+		                         .join();
+		Assertions.assertEquals(end - begin, kvs.size());
 
-			// Get the records of each index entry IN PARALLEL.
-			List<CompletableFuture<List<KeyValue>>> resultFutures = new ArrayList<>();
-			// In reality, we need to get the record key by parsing the index entry key. But considering this is a
-			// performance test, we just ignore the returned key and simply generate it from recordKey.
+		// Get the records of each index entry IN PARALLEL.
+		List<CompletableFuture<List<KeyValue>>> resultFutures = new ArrayList<>();
+		// In reality, we need to get the record key by parsing the index entry key. But considering this is a
+		// performance test, we just ignore the returned key and simply generate it from recordKey.
+		for (int id = begin; id < end; id++) {
+			resultFutures.add(tr.getRange(Range.startsWith(recordKeyPrefix(id)),
+			                              ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL).asList());
+		}
+		AsyncUtil.whenAll(resultFutures).join();
+
+		if (validate) {
+			final Iterator<KeyValue> indexes = kvs.iterator();
+			final Iterator<CompletableFuture<List<KeyValue>>> records = resultFutures.iterator();
 			for (int id = begin; id < end; id++) {
-				resultFutures.add(tr.getRange(Range.startsWith(recordKeyPrefix(id)),
-				                              ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL).asList());
-			}
-			AsyncUtil.whenAll(resultFutures).get();
+				Assertions.assertTrue(indexes.hasNext());
+				assertByteArrayEquals(indexEntryKey(id), indexes.next().getKey());
 
-			if (validate) {
-				final Iterator<KeyValue> indexes = kvs.iterator();
-				final Iterator<CompletableFuture<List<KeyValue>>> records = resultFutures.iterator();
-				for (int id = begin; id < end; id++) {
-					Assertions.assertTrue(indexes.hasNext());
-					assertByteArrayEquals(indexEntryKey(id), indexes.next().getKey());
-
-					Assertions.assertTrue(records.hasNext());
-					List<KeyValue> rangeResult = records.next().get();
-					validateRangeResult(id, rangeResult);
-				}
-				Assertions.assertFalse(indexes.hasNext());
-				Assertions.assertFalse(records.hasNext());
+				Assertions.assertTrue(records.hasNext());
+				List<KeyValue> rangeResult = records.next().join();
+				validateRangeResult(id, rangeResult);
 			}
-		} catch (Exception e) {
-			Assertions.fail("Unexpected exception", e);
+			Assertions.assertFalse(indexes.hasNext());
+			Assertions.assertFalse(records.hasNext());
 		}
 		return null;
 	});
 
 	RangeQueryWithIndex mappedRangeQuery = (int begin, int end, Database db) -> db.run(tr -> {
-		try {
-			List<MappedKeyValue> kvs =
-			    tr.getMappedRange(KeySelector.firstGreaterOrEqual(indexEntryKey(begin)),
-			                      KeySelector.firstGreaterOrEqual(indexEntryKey(end)), MAPPER,
-			                      ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL)
-			        .asList()
-			        .get();
-			Assertions.assertEquals(end - begin, kvs.size());
+		List<MappedKeyValue> kvs =
+		    tr.getMappedRange(KeySelector.firstGreaterOrEqual(indexEntryKey(begin)),
+		                      KeySelector.firstGreaterOrEqual(indexEntryKey(end)), MAPPER,
+		                      ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL)
+		        .asList()
+		        .join();
+		Assertions.assertEquals(end - begin, kvs.size());
 
-			if (validate) {
-				final Iterator<MappedKeyValue> results = kvs.iterator();
-				for (int id = begin; id < end; id++) {
-					Assertions.assertTrue(results.hasNext());
-					MappedKeyValue mappedKeyValue = results.next();
-					assertByteArrayEquals(indexEntryKey(id), mappedKeyValue.getKey());
-					assertByteArrayEquals(EMPTY, mappedKeyValue.getValue());
-					assertByteArrayEquals(indexEntryKey(id), mappedKeyValue.getKey());
-					byte[] prefix = recordKeyPrefix(id);
-					assertByteArrayEquals(prefix, mappedKeyValue.getRangeBegin());
-					prefix[prefix.length - 1] = (byte)0x01;
-					assertByteArrayEquals(prefix, mappedKeyValue.getRangeEnd());
+		if (validate) {
+			final Iterator<MappedKeyValue> results = kvs.iterator();
+			for (int id = begin; id < end; id++) {
+				Assertions.assertTrue(results.hasNext());
+				MappedKeyValue mappedKeyValue = results.next();
+				assertByteArrayEquals(indexEntryKey(id), mappedKeyValue.getKey());
+				assertByteArrayEquals(EMPTY, mappedKeyValue.getValue());
+				assertByteArrayEquals(indexEntryKey(id), mappedKeyValue.getKey());
+				byte[] prefix = recordKeyPrefix(id);
+				assertByteArrayEquals(prefix, mappedKeyValue.getRangeBegin());
+				prefix[prefix.length - 1] = (byte)0x01;
+				assertByteArrayEquals(prefix, mappedKeyValue.getRangeEnd());
 
-					List<KeyValue> rangeResult = mappedKeyValue.getRangeResult();
-					validateRangeResult(id, rangeResult);
-				}
-				Assertions.assertFalse(results.hasNext());
+				List<KeyValue> rangeResult = mappedKeyValue.getRangeResult();
+				validateRangeResult(id, rangeResult);
 			}
-		} catch (Exception e) {
-			Assertions.fail("Unexpected exception", e);
+			Assertions.assertFalse(results.hasNext());
 		}
 		return null;
 	});
