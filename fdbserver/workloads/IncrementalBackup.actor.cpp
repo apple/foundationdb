@@ -127,8 +127,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 					    .detail("Size", containers.size())
 					    .detail("First", containers.front());
 					if (containers.size()) {
-						backupContainer =
-						    IBackupContainer::openContainer(containers.front(), {}, restoreEncryptionKeyFileName);
+						backupContainer = IBackupContainer::openContainer(containers.front(), {}, {}, 0);
 					}
 				}
 				state bool e = wait(backupContainer->exists());
@@ -188,19 +187,21 @@ struct IncrementalBackupWorkload : TestWorkload {
 				if (!self->blobManifestUrl.empty()) {
 					blobManifestUrl = self->blobManifestUrl.toString();
 				}
-				wait(self->backupAgent.submitBackup(cx,
-				                                    self->backupDir,
-				                                    {},
-				                                    0,
-				                                    1e8,
-				                                    self->tag.toString(),
-				                                    backupRanges,
-				                                    true,
-				                                    StopWhenDone::False,
-				                                    MutationLogType::DEFAULT,
-				                                    IncrementalBackupOnly::True,
-				                                    self->encryptionKeyFileName,
-				                                    blobManifestUrl));
+				wait(self->backupAgent.submitBackup(
+				    cx,
+				    self->backupDir,
+				    {},
+				    0,
+				    1e8,
+				    self->tag.toString(),
+				    backupRanges,
+				    true,
+				    StopWhenDone::False,
+				    MutationLogType::DEFAULT,
+				    IncrementalBackupOnly::True,
+				    self->encryptionKeyFileName,
+				    self->encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0,
+				    blobManifestUrl));
 			} catch (Error& e) {
 				TraceEvent("IBackupSubmitError").error(e);
 				if (e.code() != error_code_backup_duplicate) {

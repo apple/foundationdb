@@ -1831,7 +1831,8 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 }
 
 static Reference<IBackupContainer> getBackupContainerWithProxy(Reference<IBackupContainer> _bc) {
-	Reference<IBackupContainer> bc = IBackupContainer::openContainer(_bc->getURL(), fileBackupAgentProxy, {});
+	Reference<IBackupContainer> bc = IBackupContainer::openContainer(
+	    _bc->getURL(), fileBackupAgentProxy, _bc->getEncryptionKeyFileName(), _bc->getEncryptionBlockSize());
 	return bc;
 }
 
@@ -4196,7 +4197,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 		}
 
 		Reference<IBackupContainer> bc = wait(config.backupContainer().getOrThrow(tr));
-		wait(bc->writeEncryptionMetadata());
+		wait(bc->writeEncryptionMetadata(bc->getEncryptionBlockSize()));
 
 		config.stateEnum().set(tr, EBackupState::STATE_RUNNING);
 
@@ -6725,7 +6726,7 @@ public:
 	                                                Key addPrefix,
 	                                                Key removePrefix) {
 		// Sanity check backup is valid
-		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(bcUrl.toString(), proxy, {});
+		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(bcUrl.toString(), proxy, {}, 0);
 		state BackupDescription desc = wait(bc->describeBackup());
 		wait(desc.resolveVersionTimes(cx));
 
@@ -6877,6 +6878,7 @@ public:
 	                                       MutationLogType mutationLogType,
 	                                       IncrementalBackupOnly incrementalBackupOnly,
 	                                       Optional<std::string> encryptionKeyFileName,
+	                                       int encryptionBlockSize,
 	                                       Optional<std::string> blobManifestUrl) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -6886,7 +6888,9 @@ public:
 		    .detail("TagName", tagName.c_str())
 		    .detail("StopWhenDone", stopWhenDone)
 		    .detail("MutationLogType", mutationLogType)
-		    .detail("OutContainer", outContainer.toString());
+		    .detail("OutContainer", outContainer.toString())
+		    .detail("EncryptionKeyFileName", encryptionKeyFileName.present() ? encryptionKeyFileName.get() : "None")
+		    .detail("EncryptionBlockSize", encryptionBlockSize);
 
 		state KeyBackedTag tag = makeBackupTag(tagName);
 		Optional<UidAndAbortedFlagT> uidAndAbortedFlag = wait(tag.get(tr));
@@ -6916,7 +6920,7 @@ public:
 		}
 
 		state Reference<IBackupContainer> bc =
-		    IBackupContainer::openContainer(backupContainer, proxy, encryptionKeyFileName);
+		    IBackupContainer::openContainer(backupContainer, proxy, encryptionKeyFileName, encryptionBlockSize);
 		try {
 			wait(timeoutError(bc->create(), 30));
 		} catch (Error& e) {
@@ -7038,7 +7042,9 @@ public:
 	                                        Version beginVersion,
 	                                        UID uid,
 	                                        Optional<std::string> blobManifestUrl,
-	                                        MutationLogType mutationLogType) {
+	                                        MutationLogType mutationLogType,
+	                                        Optional<std::string> encryptionKeyFileName,
+	                                        int encryptionBlockSize) {
 		KeyRangeMap<int> restoreRangeSet;
 		for (auto& range : ranges) {
 			restoreRangeSet.insert(range, 1);
@@ -7103,7 +7109,8 @@ public:
 		// Point the tag to the new uid
 		tag.set(tr, { uid, false });
 
-		Reference<IBackupContainer> bc = IBackupContainer::openContainer(backupURL.toString(), proxy, {});
+		Reference<IBackupContainer> bc =
+		    IBackupContainer::openContainer(backupURL.toString(), proxy, encryptionKeyFileName, encryptionBlockSize);
 
 		// Configure the new restore
 		restore.tag().set(tr, tagName.toString());
@@ -7755,8 +7762,8 @@ public:
 			throw restore_error();
 		}
 
-		state Reference<IBackupContainer> bc =
-		    IBackupContainer::openContainer(url.toString(), proxy, encryptionKeyFileName);
+		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(
+		    url.toString(), proxy, /*encryptionKeyFileName=*/{}, /*encryptionBlockSize=*/0);
 
 		state BackupDescription desc = wait(bc->describeBackup(true));
 
@@ -7766,6 +7773,14 @@ public:
 		} else if (!desc.fileLevelEncryption && encryptionKeyFileName.present()) {
 			fprintf(stderr, "ERROR: Backup is not encrypted, please remove the encryption key file path.\n");
 			throw restore_error();
+		}
+
+		if (desc.fileLevelEncryption) {
+			bc =
+			    IBackupContainer::openContainer(url.toString(), proxy, encryptionKeyFileName, desc.encryptionBlockSize);
+			// openContainer may return a cached container that has blockSize=0 (seeded earlier without blockSize).
+			// Set it explicitly to ensure the correct value is used.
+			bc->setEncryptionBlockSize(desc.encryptionBlockSize);
 		}
 
 		if (cxOrig.present()) {
@@ -7824,7 +7839,9 @@ public:
 				                   beginVersion,
 				                   randomUid,
 				                   blobManifestUrl,
-				                   desc.mutationLogType));
+				                   desc.mutationLogType,
+				                   encryptionKeyFileName,
+				                   desc.encryptionBlockSize));
 				wait(tr->commit());
 				break;
 			} catch (Error& e) {
@@ -8276,6 +8293,7 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
                                            MutationLogType mutationLogType,
                                            IncrementalBackupOnly incrementalBackupOnly,
                                            Optional<std::string> const& encryptionKeyFileName,
+                                           int encryptionBlockSize,
                                            Optional<std::string> const& blobManifestUrl) {
 	return FileBackupAgentImpl::submitBackup(this,
 	                                         tr,
@@ -8290,6 +8308,7 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
 	                                         mutationLogType,
 	                                         incrementalBackupOnly,
 	                                         encryptionKeyFileName,
+	                                         encryptionBlockSize,
 	                                         blobManifestUrl);
 }
 

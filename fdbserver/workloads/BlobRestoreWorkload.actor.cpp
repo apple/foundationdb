@@ -161,7 +161,7 @@ struct BlobRestoreWorkload : TestWorkload {
 			CODE_PROBE(true, "Skip blob restore test because of missing log backups");
 			return invalidVersion;
 		}
-		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(containers.front(), {}, {});
+		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(containers.front(), {}, {}, 0);
 		BackupDescription desc = wait(bc->describeBackup(true));
 		if (!desc.contiguousLogEnd.present()) {
 			fmt::print("missing mutation logs {}\n", baseUrl);

@@ -35,6 +35,7 @@ timeout = 360000
     backupRangesCount = -1
     #    use old backup
     mutationLogType = 0 # default logs
+    encrypted = false
 
     [[test.workload]]
     testName = 'RandomClogging'

@@ -55,6 +55,7 @@ timeout = 360000
     # backupRangesCount<0 means backup the entire normal keyspace
     backupRangesCount = -1
     mutationLogType = 1 # partitioned-log-experimental
+    encrypted = false
 
     [[test.workload]]
     testName = 'RandomClogging'

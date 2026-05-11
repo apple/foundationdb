@@ -5728,7 +5728,7 @@ ACTOR Future<Version> maybeFlushGranules(Reference<BlobManagerData> bmData) {
 	}
 
 	state std::string mlogsUrl = wait(config.mutationLogsUrl().getD(SystemDBWriteLockedNow(bmData->db.getReference())));
-	state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {});
+	state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {}, 0);
 	state BackupDescription desc = wait(bc->describeBackup());
 	if (!desc.contiguousLogEnd.present()) {
 		TraceEvent("SkipBlobGranulesFlush").detail("LogUrl", mlogsUrl);
@@ -5783,7 +5783,7 @@ ACTOR Future<Void> truncateMutations(Reference<BlobManagerData> bmData, Version 
 	if (truncVersion > 0 && truncVersion < flushVersion) {
 		state std::string mlogsUrl =
 		    wait(BlobGranuleBackupConfig().mutationLogsUrl().getD(SystemDBWriteLockedNow(bmData->db.getReference())));
-		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {});
+		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {}, 0);
 		wait(bc->expireData(truncVersion, true));
 		bmData->stats.lastMLogTruncationVersion = truncVersion;
 		TraceEvent("TruncateMutationLogs").detail("Version", truncVersion).detail("Timestamp", timestamp);

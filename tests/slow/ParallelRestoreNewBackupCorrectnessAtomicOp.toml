@@ -36,6 +36,7 @@ timeout = 360000
     backupRangesCount = -1
     # use new backup
     mutationLogType = 1 # partitioned-log-experimental
+    encrypted = false
 
     [[test.workload]]
     testName = 'RandomClogging'

@@ -391,7 +391,7 @@ private:
 			    BlobGranuleRestoreConfig().mutationLogsUrl().getD(SystemDBWriteLockedNow(self->db_.getReference())));
 
 			self->mlogsUrl_ = KeyRef(mlogsUrl);
-			state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {});
+			state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {}, 0);
 			state double beginTs = now();
 			BackupDescription desc = wait(bc->describeBackup(true));
 			TraceEvent("DescribeBackupLatency", self->interf_.id()).detail("Seconds", now() - beginTs);

@@ -454,7 +454,7 @@ private:
 
 ACTOR Future<Void> convert(ConvertParams params) {
 	state Reference<IBackupContainer> container =
-	    IBackupContainer::openContainer(params.container_url, params.proxy, {});
+	    IBackupContainer::openContainer(params.container_url, params.proxy, {}, 0);
 	state BackupFileList listing = wait(container->dumpFileList());
 	std::sort(listing.logs.begin(), listing.logs.end());
 	TraceEvent("Container").detail("URL", params.container_url).detail("Logs", listing.logs.size());

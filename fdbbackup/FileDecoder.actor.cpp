@@ -103,6 +103,8 @@ void printDecodeUsage() {
 	             "  --knob-KNOBNAME KNOBVALUE\n"
 	             "                 Changes a knob value. KNOBNAME should be lowercase.\n"
 	             "  -s, --save     Save a copy of downloaded files (default: not saving).\n"
+	             "  --encryption-key-file FILE\n"
+	             "                 AES-128-GCM encryption key file for encrypted backups.\n"
 	             "\n";
 	return;
 }
@@ -130,6 +132,7 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 	Version endVersionFilter = std::numeric_limits<Version>::max();
 
 	std::vector<std::pair<std::string, std::string>> knobs;
+	Optional<std::string> encryptionKeyFileName;
 
 	// Returns if [begin, end) overlap with the filter range
 	bool overlap(Version begin, Version end) const {
@@ -237,6 +240,9 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 			s.append(", KNOB-").append(knob).append(" = ").append(value);
 		}
 		s.append(", SaveFile: ").append(save_file_locally ? "true" : "false");
+		if (encryptionKeyFileName.present()) {
+			s.append(", EncryptionKeyFile: ").append(encryptionKeyFileName.get());
+		}
 		return s;
 	}
 
@@ -392,6 +398,10 @@ int parseDecodeCommandLine(Reference<DecodeParams> param, CSimpleOpt* args) {
 
 		case OPT_SAVE_FILE:
 			param->save_file_locally = true;
+			break;
+
+		case OPT_ENCRYPTION_KEY_FILE:
+			param->encryptionKeyFileName = args->OptionArg();
 			break;
 
 		case TLSConfig::OPT_TLS_PLUGIN:
@@ -808,7 +818,7 @@ ACTOR Future<std::vector<RangeFile>> getRangeFiles(Reference<IBackupContainer> b
 
 ACTOR Future<Void> decode_logs(Reference<DecodeParams> params) {
 	state Reference<IBackupContainer> container =
-	    IBackupContainer::openContainer(params->container_url, params->proxy, {});
+	    IBackupContainer::openContainer(params->container_url, params->proxy, params->encryptionKeyFileName, 0);
 	state UID uid = deterministicRandom()->randomUniqueID();
 	state BackupFileList listing = wait(container->dumpFileList());
 	// remove partitioned logs
@@ -824,6 +834,8 @@ ACTOR Future<Void> decode_logs(Reference<DecodeParams> params) {
 	TraceEvent("DecodeParam", uid).setMaxFieldLength(100000).detail("Value", params->toString());
 
 	BackupDescription desc = wait(container->describeBackup());
+	container->setEncryptionBlockSize(desc.encryptionBlockSize);
+
 	std::cout << "\n" << desc.toString() << "\n";
 
 	state std::vector<LogFile> logFiles;

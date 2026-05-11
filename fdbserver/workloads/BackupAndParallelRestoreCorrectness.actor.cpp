@@ -240,7 +240,9 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			                               StopWhenDone{ !stopDifferentialDelay },
 			                               self->mutationLogType,
 			                               IncrementalBackupOnly::False,
-			                               self->encryptionKeyFileName));
+			                               self->encryptionKeyFileName,
+			                               self->encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0,
+			                               /*blobManifestUrl=*/{}));
 		} catch (Error& e) {
 			TraceEvent("BARW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
@@ -498,18 +500,21 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				try {
 					// Note the mutationLogType is default, because we change
 					// the configuration to disable backup workers before restore.
-					extraBackup = backupAgent.submitBackup(cx,
-					                                       "file://simfdb/backups/"_sr,
-					                                       {},
-					                                       deterministicRandom()->randomInt(0, 60),
-					                                       deterministicRandom()->randomInt(0, 100),
-					                                       self->backupTag.toString(),
-					                                       self->backupRanges,
-					                                       true,
-					                                       StopWhenDone::True,
-					                                       MutationLogType::DEFAULT,
-					                                       IncrementalBackupOnly::False,
-					                                       self->encryptionKeyFileName);
+					extraBackup = backupAgent.submitBackup(
+					    cx,
+					    "file://simfdb/backups/"_sr,
+					    {},
+					    deterministicRandom()->randomInt(0, 60),
+					    deterministicRandom()->randomInt(0, 100),
+					    self->backupTag.toString(),
+					    self->backupRanges,
+					    true,
+					    StopWhenDone::True,
+					    MutationLogType::DEFAULT,
+					    IncrementalBackupOnly::False,
+					    self->encryptionKeyFileName,
+					    self->encryptionKeyFileName.present() ? DEFAULT_ENCRYPTION_BLOCK_SIZE : 0,
+					    /*blobManifestUrl=*/{});
 				} catch (Error& e) {
 					TraceEvent("BARW_SubmitBackup2Exception", randomID)
 					    .error(e)
@@ -551,7 +556,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 				auto container = IBackupContainer::openContainer(lastBackupContainer->getURL(),
 				                                                 lastBackupContainer->getProxy(),
-				                                                 lastBackupContainer->getEncryptionKeyFileName());
+				                                                 lastBackupContainer->getEncryptionKeyFileName(),
+				                                                 lastBackupContainer->getEncryptionBlockSize());
 				BackupDescription desc = wait(container->describeBackup());
 				ASSERT(self->mutationLogType == desc.mutationLogType);
 				ASSERT(desc.minRestorableVersion.present()); // We must have a valid backup now.
