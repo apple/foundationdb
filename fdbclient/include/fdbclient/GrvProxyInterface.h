@@ -147,6 +147,38 @@ struct GetReadVersionRequest : TimedRequest {
 	}
 };
 
+struct GlobalConfigRefreshReply {
+	constexpr static FileIdentifier file_identifier = 12680327;
+	Arena arena;
+	Version version;
+	RangeResultRef result;
+
+	GlobalConfigRefreshReply() {}
+	GlobalConfigRefreshReply(Arena const& arena, Version version, RangeResultRef result)
+	  : arena(arena), version(version), result(result) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, result, version, arena);
+	}
+};
+
+struct GlobalConfigRefreshRequest {
+	constexpr static FileIdentifier file_identifier = 2828131;
+	Version lastKnown;
+	ReplyPromise<GlobalConfigRefreshReply> reply;
+
+	GlobalConfigRefreshRequest() {}
+	explicit GlobalConfigRefreshRequest(Version lastKnown) : lastKnown(lastKnown) {}
+
+	bool verify() const noexcept { return true; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, lastKnown, reply);
+	}
+};
+
 // GrvProxy is proxy primarily specializing on serving GetReadVersion. It also
 // serves health metrics since it communicates with RateKeeper to gather health
 // information of the cluster, and handles proxied GlobalConfig requests.
