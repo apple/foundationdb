@@ -24,7 +24,7 @@
 #include "flow/ObjectSerializer.h"
 #include "flow/serialize.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/KeyBackedTypes.actor.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/RunTransaction.h"
 
 FDB_BOOLEAN_PARAM(PrimaryRegion);

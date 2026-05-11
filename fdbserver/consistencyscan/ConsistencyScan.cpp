@@ -696,7 +696,7 @@ Future<Void> consistencyScanCore(Database db, Reference<ConsistencyScanMemorySta
 				if (DEBUG_SCAN_PROGRESS) {
 					TraceEvent("ConsistencyScan_ChangeRate", memState->csId).detail("RateBytes", readRateLimit);
 				}
-				readRateControl = Reference<IRateControl>(new SpeedLimit(readRateLimit, 1));
+				readRateControl = makeReference<SpeedLimit>(readRateLimit, 1);
 				memState->stats.targetRate = configuredRate;
 			}
 
@@ -1548,7 +1548,7 @@ Future<Void> checkDataConsistency(Database cx,
 	    .detail("TargetInterval", targetInterval)
 	    .detail("MaxRate", maxRate);
 	ASSERT(rateLimitForThisRound >= 0 && rateLimitForThisRound <= maxRate);
-	Reference<IRateControl> rateLimiter = Reference<IRateControl>(new SpeedLimit(rateLimitForThisRound, 1));
+	Reference<IRateControl> rateLimiter = makeReference<SpeedLimit>(rateLimitForThisRound, 1);
 	double rateLimiterStartTime = now();
 	int64_t bytesReadInthisRound = 0;
 	double rateLimiterCumulatedWaitTime = 0;
@@ -1918,7 +1918,7 @@ Future<Void> checkDataConsistency(Database cx,
 						// Set ratelimit to max allowed if current round has been going on for a while
 						if (now() - rateLimiterStartTime > 1.1 * targetInterval && rateLimitForThisRound != maxRate) {
 							rateLimitForThisRound = maxRate;
-							rateLimiter = Reference<IRateControl>(new SpeedLimit(rateLimitForThisRound, 1));
+							rateLimiter = makeReference<SpeedLimit>(rateLimitForThisRound, 1);
 							rateLimiterStartTime = now();
 							TraceEvent(SevInfo, "ConsistencyCheck_RateLimitSetMaxForThisRound")
 							    .detail("RateLimit", rateLimitForThisRound);

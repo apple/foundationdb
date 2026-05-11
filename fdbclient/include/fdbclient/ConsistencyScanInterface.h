@@ -31,8 +31,8 @@
 #include "fdbclient/RunRYWTransaction.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
-#include "fdbclient/KeyBackedTypes.actor.h"
-#include "fdbclient/KeyBackedRangeMap.actor.h"
+#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedRangeMap.h"
 
 struct ConsistencyScanInterface {
 	constexpr static FileIdentifier file_identifier = 4983265;
