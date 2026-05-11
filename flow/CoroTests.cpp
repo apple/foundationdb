@@ -2740,6 +2740,25 @@ TEST_CASE("/flow/coro/raceThreadFutureStreamSuccess") {
 	co_return;
 }
 
+TEST_CASE("/flow/coro/raceThreadFutureStreamLoserCleanup") {
+	ThreadReturnPromiseStream<int> intStream;
+	ThreadFutureStream<int> stream = intStream.getFuture();
+	Promise<Void> firstWinner;
+
+	Future<std::variant<Void, int>> firstRace = race(firstWinner.getFuture(), stream);
+	firstWinner.send(Void());
+	auto firstResult = co_await firstRace;
+	ASSERT_EQ(firstResult.index(), 0);
+
+	Promise<Void> secondLoser;
+	Future<std::variant<Void, int>> secondRace = race(secondLoser.getFuture(), stream);
+	intStream.send(17);
+	auto secondResult = co_await secondRace;
+	ASSERT_EQ(secondResult.index(), 1);
+	ASSERT_EQ(std::get<1>(secondResult), 17);
+	co_return;
+}
+
 TEST_CASE("/flow/coro/raceAsyncResultReady") {
 	Future<std::variant<int, std::string>> raced = race(immediateAsyncResultInt(17), Future<std::string>("later"));
 	ASSERT(raced.isReady());
