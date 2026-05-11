@@ -656,6 +656,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	std::map<UID, PeekTrackerData> peekTracker;
 
 	Reference<AsyncVar<Reference<LogSystem>>> logSystem;
+	Reference<AsyncVar<Reference<LogSystemConsumer>>> logSystemConsumer;
 	Tag remoteTag;
 	bool isPrimary;
 	int logRouterTags;
@@ -693,8 +694,9 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	    nonEmptyPeeks("NonEmptyPeeks", cc), persistentDataUpdateBatches("PersistentDataUpdateBatches", cc),
 	    dirtyTagsProcessed("DirtyTagsProcessed", cc), logId(interf.id()), protocolVersion(protocolVersion),
 	    newPersistentDataVersion(invalidVersion), tLogData(tLogData), unrecoveredBefore(1), recoveredAt(1),
-	    recoveryTxnVersion(1), logSystem(new AsyncVar<Reference<LogSystem>>()), remoteTag(remoteTag),
-	    isPrimary(isPrimary), logRouterTags(logRouterTags), logRouterPoppedVersion(0), logRouterPopToVersion(0),
+	    recoveryTxnVersion(1), logSystem(new AsyncVar<Reference<LogSystem>>()),
+	    logSystemConsumer(new AsyncVar<Reference<LogSystemConsumer>>()), remoteTag(remoteTag), isPrimary(isPrimary),
+	    logRouterTags(logRouterTags), logRouterPoppedVersion(0), logRouterPopToVersion(0),
 	    locality(tagLocalityInvalid), recruitmentID(recruitmentID), logSpillType(logSpillType),
 	    allTags(tags.begin(), tags.end()), terminated(tLogData->terminated.getFuture()), execOpCommitInProgress(false),
 	    txsTags(txsTags) {
@@ -734,6 +736,11 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		specialCounter(cc, "Generation", [this]() { return this->recoveryCount; });
 		specialCounter(cc, "ActivePeekStreams", [tLogData]() { return tLogData->activePeekStreams; });
 		specialCounter(cc, "UnknownCommittedVersionCount", [this]() { return this->unknownCommittedVersions.size(); });
+	}
+
+	void setLogSystem(Reference<LogSystem> newLogSystem) {
+		logSystem->set(newLogSystem);
+		logSystemConsumer->set(newLogSystem ? newLogSystem->makeConsumer() : Reference<LogSystemConsumer>());
 	}
 
 	~LogData() {
@@ -2323,14 +2330,13 @@ Future<Void> doQueueCommit(TLogData* self,
 	}
 
 	//TraceEvent("TLogCommitDurable", self->dbgid).detail("Version", ver);
-	if (logData->logSystem->get() &&
+	if (logData->logSystemConsumer->get() &&
 	    (!logData->isPrimary || logData->logRouterPoppedVersion < logData->logRouterPopToVersion)) {
 		logData->logRouterPoppedVersion = ver;
 		DebugLogTraceEvent("LogPop", self->dbgid)
 		    .detail("Tag", logData->remoteTag.toString())
 		    .detail("Version", knownCommittedVersion);
-		logData->logSystem->get()->makeConsumer()->pop(
-		    ver, logData->remoteTag, knownCommittedVersion, logData->locality);
+		logData->logSystemConsumer->get()->pop(ver, logData->remoteTag, knownCommittedVersion, logData->locality);
 	}
 
 	logData->queueCommittedVersion.set(ver);
@@ -2823,12 +2829,12 @@ class ServeTLogInterface {
 				}
 			}
 			if (found && self->dbInfo->get().logSystemConfig.recruitmentID == logData->recruitmentID) {
-				logData->logSystem->set(makeLogSystemFromServerDBInfo(self->dbgid, self->dbInfo->get()));
+				logData->setLogSystem(makeLogSystemFromServerDBInfo(self->dbgid, self->dbInfo->get()));
 				if (!logData->isPrimary) {
-					logData->logSystem->get()->makeConsumer()->pop(logData->logRouterPoppedVersion,
-					                                               logData->remoteTag,
-					                                               logData->durableKnownCommittedVersion,
-					                                               logData->locality);
+					logData->logSystemConsumer->get()->pop(logData->logRouterPoppedVersion,
+					                                      logData->remoteTag,
+					                                      logData->durableKnownCommittedVersion,
+					                                      logData->locality);
 				}
 
 				if (!logData->isPrimary && logData->stopped()) {
@@ -2836,7 +2842,7 @@ class ServeTLogInterface {
 					logData->removed = logData->removed && logData->logSystem->get()->endEpoch();
 				}
 			} else {
-				logData->logSystem->set(Reference<LogSystem>());
+				logData->setLogSystem(Reference<LogSystem>());
 			}
 		}
 	}
@@ -3089,12 +3095,12 @@ Future<Void> pullAsyncData(TLogData* self,
 			if (res.index() == 0) {
 				break;
 			} else if (res.index() == 1) {
-				if (logData->logSystem->get()) {
-					r = logData->logSystem->get()->makeConsumer()->peek(logData->logId, tagAt, endVersion, tags, true);
+				if (logData->logSystemConsumer->get()) {
+					r = logData->logSystemConsumer->get()->peek(logData->logId, tagAt, endVersion, tags, true);
 				} else {
 					r = Reference<IPeekCursor>();
 				}
-				dbInfoChange = logData->logSystem->onChange();
+				dbInfoChange = logData->logSystemConsumer->onChange();
 			} else {
 				ASSERT(res.index() == 2);
 				TraceEvent(SevWarn, "TLogPullAsyncDataSlow", logData->logId)
@@ -3622,33 +3628,30 @@ bool tlogTerminated(TLogData* self, IKeyValueStore* persistentData, TLogQueue* p
 		return false;
 }
 
-Future<Void> updateLogSystem(TLogData* self,
-                             Reference<LogData> logData,
-                             LogSystemConfig recoverFrom,
-                             Reference<AsyncVar<Reference<LogSystem>>> logSystem) {
+Future<Void> updateLogSystem(TLogData* self, Reference<LogData> logData, LogSystemConfig recoverFrom) {
 	while (true) {
 		bool found = self->dbInfo->get().logSystemConfig.recruitmentID == logData->recruitmentID;
 		if (found) {
 			if (self->dbInfo->get().logSystemConfig.isNextGenerationOf(recoverFrom)) {
-				logSystem->set(makeOldLogSystemFromLogSystemConfig(
+				logData->setLogSystem(makeOldLogSystemFromLogSystemConfig(
 				    logData->logId, self->dbInfo->get().myLocality, self->dbInfo->get().logSystemConfig));
 			} else if (self->dbInfo->get().logSystemConfig.isEqualIds(recoverFrom)) {
-				logSystem->set(makeLogSystemFromLogSystemConfig(
+				logData->setLogSystem(makeLogSystemFromLogSystemConfig(
 				    logData->logId, self->dbInfo->get().myLocality, self->dbInfo->get().logSystemConfig, false, true));
 			} else if (self->dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
-				logSystem->set(makeLogSystemFromLogSystemConfig(
+				logData->setLogSystem(makeLogSystemFromLogSystemConfig(
 				    logData->logId, self->dbInfo->get().myLocality, self->dbInfo->get().logSystemConfig, true));
 			} else {
 				found = false;
 			}
 		}
 		if (!found) {
-			logSystem->set(Reference<LogSystem>());
+			logData->setLogSystem(Reference<LogSystem>());
 		} else {
-			logData->logSystem->get()->makeConsumer()->pop(logData->logRouterPoppedVersion,
-			                                               logData->remoteTag,
-			                                               logData->durableKnownCommittedVersion,
-			                                               logData->locality);
+			logData->logSystemConsumer->get()->pop(logData->logRouterPoppedVersion,
+			                                      logData->remoteTag,
+			                                      logData->durableKnownCommittedVersion,
+			                                      logData->locality);
 		}
 		TraceEvent("TLogUpdate", self->dbgid)
 		    .detail("LogId", logData->logId)
@@ -3657,7 +3660,7 @@ Future<Void> updateLogSystem(TLogData* self,
 		    .detail("RecoverFrom", recoverFrom.toString())
 		    .detail("DbInfo", self->dbInfo->get().logSystemConfig.toString())
 		    .detail("Found", found)
-		    .detail("LogSystem", (bool)logSystem->get())
+		    .detail("LogSystem", (bool)logData->logSystem->get())
 		    .detail("RecoveryState", (int)self->dbInfo->get().recoveryState);
 		for (const auto& it : self->dbInfo->get().logSystemConfig.oldTLogs) {
 			TraceEvent("TLogUpdateOld", self->dbgid).detail("LogId", logData->logId).detail("DbInfo", it.toString());
@@ -3780,7 +3783,7 @@ Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, LocalityData l
 				throw worker_removed();
 			}
 
-			updater = updateLogSystem(self, logData, req.recoverFrom, logData->logSystem);
+			updater = updateLogSystem(self, logData, req.recoverFrom);
 
 			logData->initialized = true;
 			self->newLogData.trigger();
