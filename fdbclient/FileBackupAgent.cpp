@@ -4236,16 +4236,13 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 			co_await tr->onError(err);
 		}
 
-		// Check if backup worker is enabled
-		DatabaseConfiguration dbConfig = co_await getDatabaseConfiguration(cx);
-		bool backupWorkerEnabled = dbConfig.backupWorkerEnabled;
-		if (!backupWorkerEnabled && mutationLogType.get().present() &&
-		    mutationLogType.get().get() == MutationLogType::PARTITIONED_LOG) {
-			// Change configuration only when we set to use partitioned logs and
-			// the flag was not set before.
-			co_await ManagementAPI::changeConfig(cx.getReference(), "backup_worker_enabled:=1", true);
-			backupWorkerEnabled = true;
-			// the user is responsible for manually disabling backup worker after the last backup is done
+		// Enable the appropriate backup worker type if not already enabled.
+		if (mutationLogType.get().present()) {
+			if (mutationLogType.get().get() == MutationLogType::PARTITIONED_LOG) {
+				co_await enableBackupWorker(cx);
+			} else if (mutationLogType.get().get() == MutationLogType::RANGE_PARTITIONED_LOG) {
+				co_await enableRangeBackupWorker(cx);
+			}
 		}
 
 		// Get start version after backup worker are enabled
@@ -7589,6 +7586,15 @@ public:
 		co_return;
 	}
 
+	static Future<Void> checkAndDisableRangeBackupWorkers(Database cx) {
+		bool running = co_await runRYWTransaction(
+		    cx, [=](Reference<ReadYourWritesTransaction> tr) { return anyRangePartitionedBackupRunning(tr); });
+		if (!running) {
+			co_await disableRangeBackupWorker(cx);
+		}
+		co_return;
+	}
+
 	static Future<Void> changePause(FileBackupAgent* backupAgent, Database db, bool pause) {
 		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(db));
 
@@ -8691,6 +8697,10 @@ Future<Void> FileBackupAgent::abortBackup(Reference<ReadYourWritesTransaction> t
 
 Future<Void> FileBackupAgent::checkAndDisableBackupWorkers(Database cx) {
 	return FileBackupAgentImpl::checkAndDisableBackupWorkers(cx);
+}
+
+Future<Void> FileBackupAgent::checkAndDisableRangeBackupWorkers(Database cx) {
+	return FileBackupAgentImpl::checkAndDisableRangeBackupWorkers(cx);
 }
 
 Future<std::string> FileBackupAgent::getStatus(Database cx, ShowErrors showErrors, std::string tagName) {
