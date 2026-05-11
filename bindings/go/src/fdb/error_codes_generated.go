@@ -228,8 +228,6 @@ var (
 	ErrAuditStorageFailed = Error{Code: 1221}
 	// Exceeded the max number of allowed concurrent audit storage requests
 	ErrAuditStorageExceededRequestLimit = Error{Code: 1222}
-	// Exceeded maximum proxy tag throttling duration
-	ErrProxyTagThrottled = Error{Code: 1223}
 	// Exceeded maximum time allowed to read or write.
 	ErrKeyValueStoreDeadlineExceeded = Error{Code: 1224}
 	// Found data corruption
@@ -416,8 +414,6 @@ var (
 	ErrMapperNotTuple = Error{Code: 2043}
 	// Invalid checkpoint format
 	ErrInvalidCheckpointFormat = Error{Code: 2044}
-	// Invalid quota value. Note that reserved_throughput cannot exceed total_throughput
-	ErrInvalidThrottleQuotaValue = Error{Code: 2045}
 	// Failed to create a checkpoint
 	ErrFailedToCreateCheckpoint = Error{Code: 2046}
 	// Failed to restore a checkpoint

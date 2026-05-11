@@ -321,9 +321,7 @@ public:
 	double TAG_THROTTLE_EXPIRATION_INTERVAL;
 	int64_t TAG_THROTTLING_PAGE_SIZE; // Used to round up the cost of operations
 	// Cost multiplier for writes (because write operations are more expensive than reads):
-	double GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO;
-	// Maximum duration that a transaction can be tag throttled by proxy before being rejected
-	double PROXY_MAX_TAG_THROTTLE_DURATION;
+	double TAG_THROTTLING_RW_FUNGIBILITY_RATIO;
 
 	// Enable to automatically retry transactions in the presence of transaction_lock_rejection error
 	// Set to false only for the rangeLocking simulation test

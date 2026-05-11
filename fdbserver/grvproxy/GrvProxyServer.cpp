@@ -488,7 +488,7 @@ void dropRequestFromQueue(Deque<GetReadVersionRequest>* queue,
 }
 
 void rejectForMaxGrvQueueDelay(GetReadVersionRequest const& req, GrvProxyStats* stats, double estimatedRemainingDelay) {
-	double elapsedQueueDelay = std::max(0.0, now() - req.requestTime() - req.proxyTagThrottledDuration);
+	double elapsedQueueDelay = std::max(0.0, now() - req.requestTime());
 	TraceEvent("ProxyGRVQueueDelayExceeded")
 	    .suppressFor(5.0)
 	    .detail("Priority", static_cast<int>(req.priority))
@@ -772,7 +772,7 @@ Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 
 	double end = g_network->timer();
 	for (GetReadVersionRequest const& request : requests) {
-		double duration = end - request.requestTime() - request.proxyTagThrottledDuration;
+		double duration = end - request.requestTime();
 		if (request.priority == TransactionPriority::BATCH) {
 			stats->grvBatchLatencySample.addMeasurement(duration);
 		}
@@ -798,7 +798,6 @@ Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 			grvProxyData->versionVectorSizeOnGRVReply->addMeasurement(reply.ssVersionVectorDelta.size());
 		}
 		reply.proxyId = grvProxyData->dbgid;
-		reply.proxyTagThrottledDuration = request.proxyTagThrottledDuration;
 
 		if (request.isTagged()) {
 			auto& priorityThrottledTags = clientThrottledTags[request.priority];

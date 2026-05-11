@@ -81,18 +81,10 @@ struct GetRateInfoReply {
 	HealthMetrics healthMetrics;
 
 	Optional<PrioritizedTransactionTagMap<ClientTagThrottleLimits>> clientThrottledTags;
-	// Retained for protocol compatibility with older binaries; no longer populated.
-	Optional<TransactionTagMap<double>> proxyThrottledTags;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar,
-		           transactionRate,
-		           batchTransactionRate,
-		           leaseDuration,
-		           healthMetrics,
-		           clientThrottledTags,
-		           proxyThrottledTags);
+		serializer(ar, transactionRate, batchTransactionRate, leaseDuration, healthMetrics, clientThrottledTags);
 	}
 };
 

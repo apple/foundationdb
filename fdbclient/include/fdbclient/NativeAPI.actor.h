@@ -270,8 +270,6 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	// after rounding up to the nearest page size and applying a write penalty
 	int64_t totalCost = 0;
 
-	double proxyTagThrottledDuration = 0.0;
-
 	int numErrors = 0;
 	double startTime = 0;
 	Promise<Standalone<StringRef>> versionstampPromise;
@@ -586,9 +584,9 @@ Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> excl
 // because writes are more expensive than reads.
 inline uint64_t getWriteOperationCost(uint64_t bytes) {
 	if (bytes == 0) {
-		return CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
+		return CLIENT_KNOBS->TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
 	} else {
-		return CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE *
+		return CLIENT_KNOBS->TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE *
 		       ((bytes - 1) / CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE + 1);
 	}
 }
