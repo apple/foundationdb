@@ -149,7 +149,6 @@ struct GetRateInfoReply {
     double leaseDuration;               // METRIC_UPDATE_RATE
     HealthMetrics healthMetrics;
     Optional<PrioritizedTransactionTagMap<ClientTagThrottleLimits>> clientThrottledTags;
-    Optional<TransactionTagMap<double>> proxyThrottledTags; // retained for protocol compatibility
 };
 ```
 

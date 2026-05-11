@@ -85,7 +85,7 @@ bool shouldRejectForMaxGrvQueueDelay(GetReadVersionRequest const& req, double re
 		return false;
 	}
 
-	double elapsedQueueDelay = now() - req.requestTime() - req.proxyTagThrottledDuration;
+	double elapsedQueueDelay = now() - req.requestTime();
 	double estimatedQueueDelay = std::max(0.0, elapsedQueueDelay) + remainingDelay;
 	return estimatedQueueDelay > req.maxGrvQueueDelayMS.get() / 1000.0;
 }
