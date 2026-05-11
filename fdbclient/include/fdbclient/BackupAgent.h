@@ -28,7 +28,7 @@
 #include "fdbclient/TaskBucket.h"
 #include "fdbclient/Notified.h"
 #include "flow/IAsyncFile.h"
-#include "fdbclient/KeyBackedTypes.actor.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/BackupContainer.h"
 
 FDB_BOOLEAN_PARAM(LockDB);

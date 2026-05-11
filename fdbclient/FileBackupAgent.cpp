@@ -35,7 +35,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/JSONDoc.h"
-#include "fdbclient/KeyBackedTypes.actor.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.h"

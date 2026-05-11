@@ -22,7 +22,7 @@
 #include <map>
 #include <vector>
 
-#include "fdbclient/KeyBackedTypes.actor.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/Knobs.h"

@@ -35,7 +35,7 @@
 #include "flow/TDMetric.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbclient/KeyBackedTypes.actor.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "MetricLogger.actor.h"
 #include "MetricClient.h"
 #include "flow/flow.h"

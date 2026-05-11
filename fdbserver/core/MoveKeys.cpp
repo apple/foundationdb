@@ -26,7 +26,7 @@
 #include "flow/Trace.h"
 #include "flow/Util.h"
 #include "fdbrpc/FailureMonitor.h"
-#include "fdbclient/KeyBackedTypes.actor.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/BulkLoadUtil.h"
