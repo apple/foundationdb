@@ -719,11 +719,14 @@ static Future<PartState> downloadPart(Reference<S3BlobStoreEndpoint> endpoint,
 			}
 
 			while (totalBytesRead < resultPart.size) {
-				int bytesRead = co_await endpoint->readObject(bucket,
-				                                              objectName,
-				                                              buffer->data() + totalBytesRead,
-				                                              resultPart.size - totalBytesRead,
-				                                              resultPart.offset + totalBytesRead);
+				// Keep the shared buffer alive until the async read has fully settled, even if this actor is cancelled.
+				int bytesRead =
+				    co_await uncancellable(holdWhile(buffer,
+				                                     endpoint->readObject(bucket,
+				                                                          objectName,
+				                                                          buffer->data() + totalBytesRead,
+				                                                          resultPart.size - totalBytesRead,
+				                                                          resultPart.offset + totalBytesRead)));
 				if (bytesRead == 0) {
 					// Avoid infinite loop if server closes connection prematurely
 					TraceEvent(SevError, "S3ClientDownloadPartUnexpectedEOF")
@@ -754,6 +757,7 @@ static Future<PartState> downloadPart(Reference<S3BlobStoreEndpoint> endpoint,
 				}
 			}
 
+			// Keep the shared buffer alive until the async write has fully settled, even if this actor is cancelled.
 			co_await uncancellable(holdWhile(buffer, file->write(buffer->data(), totalBytesRead, resultPart.offset)));
 
 			resultPart.completed = true;
