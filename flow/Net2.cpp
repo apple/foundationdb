@@ -2191,9 +2191,9 @@ Reference<IListener> Net2::listen(NetworkAddress localAddr) {
 	try {
 		if (localAddr.isTLS()) {
 			initTLS(ETLSInitState::LISTEN);
-			return Reference<IListener>(new SSLListener(reactor.ios, &this->sslContextVar, localAddr));
+			return makeReference<SSLListener>(reactor.ios, &this->sslContextVar, localAddr);
 		}
-		return Reference<IListener>(new Listener(reactor.ios, localAddr));
+		return makeReference<Listener>(reactor.ios, localAddr);
 	} catch (boost::system::system_error const& e) {
 		Error x;
 		if (e.code().value() == EADDRINUSE)
