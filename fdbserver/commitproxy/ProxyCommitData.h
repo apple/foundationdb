@@ -27,6 +27,7 @@
 #include "fdbserver/logsystem/ApplyMetadataMutation.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/logsystem/LogSystem.h"
+#include "fdbserver/logsystem/LogSystemConsumer.h"
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/ResolverInterface.h"
 #include "../logsystem/include/fdbserver/logsystem/LogSystem.h"
@@ -188,6 +189,7 @@ struct ProxyCommitData {
 	std::vector<ResolverInterface> resolvers;
 	LogSystemDiskQueueAdapter* logAdapter;
 	Reference<LogSystem> logSystem;
+	Reference<LogSystemConsumer> logSystemConsumer;
 	IKeyValueStore* txnStateStore;
 	NotifiedVersion committedVersion; // Provided that this recovery has succeeded or will succeed, this version is
 	                                  // fully committed (durable)
