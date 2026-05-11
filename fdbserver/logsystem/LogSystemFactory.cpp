@@ -1,5 +1,6 @@
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/logsystem/LogSystem.h"
+#include "fdbserver/logsystem/LogSystemConsumer.h"
 
 Future<Void> recoverAndEndLogSystemEpoch(Reference<AsyncVar<Reference<LogSystem>>> const& outLogSystem,
                                          UID const& dbgid,
@@ -41,4 +42,13 @@ Reference<LogSystem> makeLogSystemFromServerDBInfo(UID const& dbgid,
                                                    Optional<PromiseStream<Future<Void>>> addActor) {
 	return makeLogSystemFromLogSystemConfig(
 	    dbgid, dbInfo.myLocality, dbInfo.logSystemConfig, false, useRecoveredAt, addActor);
+}
+
+Reference<LogSystemConsumer> makeLogSystemConsumerFromServerDBInfo(
+    UID const& dbgid,
+    ServerDBInfo const& dbInfo,
+    bool useRecoveredAt,
+    Optional<PromiseStream<Future<Void>>> addActor) {
+	Reference<LogSystem> logSystem = makeLogSystemFromServerDBInfo(dbgid, dbInfo, useRecoveredAt, addActor);
+	return logSystem ? logSystem->makeConsumer() : Reference<LogSystemConsumer>();
 }

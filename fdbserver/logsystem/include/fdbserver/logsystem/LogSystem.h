@@ -52,6 +52,7 @@ struct DBCoreState;
 struct LogPushData;
 struct LocalityData;
 struct LogSystem;
+struct LogSystemConsumer;
 class LogSet;
 
 struct ConnectionResetInfo : public ReferenceCounted<ConnectionResetInfo> {
@@ -391,6 +392,8 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	                     SpanContext const& spanContext,
 	                     Optional<UID> debugID,
 	                     Optional<std::unordered_map<uint16_t, Version>> tpcvMap);
+
+	Reference<LogSystemConsumer> makeConsumer();
 
 	// Version vector/Unicast specific: reset best server if it is not known to have been locked/stopped.
 	void resetBestServerIfNotLocked(int bestSet,

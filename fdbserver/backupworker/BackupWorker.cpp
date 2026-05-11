@@ -28,6 +28,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/LogProtocolMessage.h"
 #include "fdbserver/logsystem/LogSystem.h"
+#include "fdbserver/logsystem/LogSystemConsumer.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/WaitFailure.h"
@@ -114,7 +115,7 @@ struct BackupData {
 	Version minKnownCommittedVersion;
 	Version savedVersion; // Largest version saved to blob storage
 	Reference<AsyncVar<ServerDBInfo> const> db;
-	AsyncVar<Reference<LogSystem>> logSystem;
+	AsyncVar<Reference<LogSystemConsumer>> logSystem;
 	Database cx;
 	std::vector<VersionedMessage> messages;
 	NotifiedVersion pulledVersion;
@@ -1085,7 +1086,7 @@ Future<Void> backupWorker(BackupInterface interf,
 				Reference<LogSystem> ls = makeLogSystemFromServerDBInfo(self.myId, db->get(), true);
 				bool hasPseudoLocality = ls.isValid() && ls->hasPseudoLocality(tagLocalityBackup);
 				if (hasPseudoLocality) {
-					self.logSystem.set(ls);
+					self.logSystem.set(ls->makeConsumer());
 					self.oldestBackupEpoch = std::max(self.oldestBackupEpoch, ls->getOldestBackupEpoch());
 				}
 				TraceEvent("BackupWorkerLogSystem", self.myId)

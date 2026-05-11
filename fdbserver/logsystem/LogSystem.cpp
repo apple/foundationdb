@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/logsystem/LogSystem.h"
+#include "fdbserver/logsystem/LogSystemConsumer.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/core/OTELSpanContextMessage.h"
 #include "fdbserver/core/SpanContextMessage.h"
@@ -321,6 +322,10 @@ LogSet::LogSet(const CoreTLogSet& coreSet)
 	// Do NOT recover coreSet.backupWorkers, because master will recruit new ones.
 	filterLocalityDataForPolicy(tLogPolicy, &tLogLocalities);
 	updateLocalitySet(tLogLocalities);
+}
+
+Reference<LogSystemConsumer> LogSystem::makeConsumer() {
+	return makeReference<LogSystemConsumer>(Reference<LogSystem>::addRef(this));
 }
 
 void LogSystem::stopRejoins() {
