@@ -870,7 +870,7 @@ Applications must provide error handling and an appropriate retry loop around th
 
 .. function:: FDBFuture* fdb_transaction_get_tag_throttled_duration(FDBTransaction* transaction)
 
-  |future-return0| the time (in seconds) that the transaction was throttled by the tag throttler in the returned future. |future-return1| call :func:`fdb_future_get_double()` to extract the duration, |future-return2|
+  |future-return0| ``0``. This compatibility API used to report proxy-side tag throttling time, but proxy-side tag throttling has been removed. |future-return1| call :func:`fdb_future_get_double()` to extract the duration, |future-return2|
 
 .. function:: FDBFuture* fdb_transaction_get_total_cost(FDBTransaction* transaction)
 

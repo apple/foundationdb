@@ -40,7 +40,6 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 	bool rkBatchThrottled = false;
 
 	TransactionTagMap<ClientTagThrottleLimits> tagThrottleInfo;
-	double proxyTagThrottledDuration{ 0.0 };
 
 	VersionVector ssVersionVectorDelta;
 	UID proxyId; // GRV proxy ID to detect old GRV proxies at client side
@@ -59,8 +58,7 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 		           rkDefaultThrottled,
 		           rkBatchThrottled,
 		           ssVersionVectorDelta,
-		           proxyId,
-		           proxyTagThrottledDuration);
+		           proxyId);
 	}
 };
 
@@ -85,10 +83,6 @@ struct GetReadVersionRequest : TimedRequest {
 	TransactionPriority priority;
 
 	TransactionTagMap<uint32_t> tags;
-	// Not serialized, because this field does not need to be sent to master.
-	// It is used for reporting to clients the amount of time spent delayed by
-	// the TagQueue
-	double proxyTagThrottledDuration{ 0.0 };
 
 	Optional<UID> debugID;
 	ReplyPromise<GetReadVersionReply> reply;
@@ -144,6 +138,38 @@ struct GetReadVersionRequest : TimedRequest {
 				priority = TransactionPriority::DEFAULT;
 			}
 		}
+	}
+};
+
+struct GlobalConfigRefreshReply {
+	constexpr static FileIdentifier file_identifier = 12680327;
+	Arena arena;
+	Version version;
+	RangeResultRef result;
+
+	GlobalConfigRefreshReply() {}
+	GlobalConfigRefreshReply(Arena const& arena, Version version, RangeResultRef result)
+	  : arena(arena), version(version), result(result) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, result, version, arena);
+	}
+};
+
+struct GlobalConfigRefreshRequest {
+	constexpr static FileIdentifier file_identifier = 2828131;
+	Version lastKnown;
+	ReplyPromise<GlobalConfigRefreshReply> reply;
+
+	GlobalConfigRefreshRequest() {}
+	explicit GlobalConfigRefreshRequest(Version lastKnown) : lastKnown(lastKnown) {}
+
+	bool verify() const noexcept { return true; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, lastKnown, reply);
 	}
 };
 

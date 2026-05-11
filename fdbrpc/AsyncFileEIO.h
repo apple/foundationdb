@@ -104,7 +104,7 @@ public:
 			throw lock_file_failure();
 		}
 
-		co_return Reference<IAsyncFile>(new AsyncFileEIO(r->result, flags, filename));
+		co_return Reference<IAsyncFile>(makeReference<AsyncFileEIO>(r->result, flags, filename));
 	}
 	static Future<Void> deleteFile(std::string filename, bool mustBeDurable) {
 		::deleteFile(filename);
@@ -234,6 +234,9 @@ public:
 	~AsyncFileEIO() override { close_impl(Uncancellable(), fd); }
 
 private:
+	template <class P, class... Args>
+	friend Reference<P> makeReference(Args&&... args);
+
 	struct ErrorInfo : ReferenceCounted<ErrorInfo>, FastAllocated<ErrorInfo> {
 		Error err;
 		void set(const Error& e) {

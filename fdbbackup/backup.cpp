@@ -45,7 +45,7 @@
 #include "fdbclient/Status.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/ClusterConnectionFile.h"
-#include "fdbclient/KeyBackedTypes.actor.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/RunRYWTransaction.h"
 #include "fdbclient/IBlobStore.h"

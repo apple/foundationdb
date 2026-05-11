@@ -259,7 +259,7 @@ struct TransactionFactory : public TransactionFactoryInterface {
 
 	// Creates a new transaction
 	Reference<TransactionWrapper> createTransaction() override {
-		return Reference<TransactionWrapper>(new T(dbHandle, extraDbHandle, useExtraDB));
+		return makeReference<T>(dbHandle, extraDbHandle, useExtraDB);
 	}
 };
 

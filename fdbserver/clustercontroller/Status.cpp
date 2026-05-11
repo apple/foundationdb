@@ -23,7 +23,7 @@
 #include "flow/genericactors.actor.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.h"
-#include "fdbclient/KeyBackedTypes.actor.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "Status.h"
 #include "flow/ITrace.h"
 #include "flow/ProtocolVersion.h"

@@ -209,6 +209,7 @@ struct DatabaseConfiguration {
 
 	// Backup Workers
 	bool backupWorkerEnabled;
+	bool rangeBackupWorkerEnabled;
 
 	// Data centers
 	int32_t usableRegions; // Number of regions which have a replica of the database.
