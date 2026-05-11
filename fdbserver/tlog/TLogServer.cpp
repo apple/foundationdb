@@ -44,6 +44,7 @@
 #include "fdbrpc/Stats.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/logsystem/LogSystem.h"
+#include "fdbserver/logsystem/LogSystemConsumer.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "flow/Histogram.h"
 #include "flow/DebugTrace.h"
@@ -2328,7 +2329,8 @@ Future<Void> doQueueCommit(TLogData* self,
 		DebugLogTraceEvent("LogPop", self->dbgid)
 		    .detail("Tag", logData->remoteTag.toString())
 		    .detail("Version", knownCommittedVersion);
-		logData->logSystem->get()->pop(ver, logData->remoteTag, knownCommittedVersion, logData->locality);
+		logData->logSystem->get()->makeConsumer()->pop(
+		    ver, logData->remoteTag, knownCommittedVersion, logData->locality);
 	}
 
 	logData->queueCommittedVersion.set(ver);
@@ -2823,10 +2825,10 @@ class ServeTLogInterface {
 			if (found && self->dbInfo->get().logSystemConfig.recruitmentID == logData->recruitmentID) {
 				logData->logSystem->set(makeLogSystemFromServerDBInfo(self->dbgid, self->dbInfo->get()));
 				if (!logData->isPrimary) {
-					logData->logSystem->get()->pop(logData->logRouterPoppedVersion,
-					                               logData->remoteTag,
-					                               logData->durableKnownCommittedVersion,
-					                               logData->locality);
+					logData->logSystem->get()->makeConsumer()->pop(logData->logRouterPoppedVersion,
+					                                               logData->remoteTag,
+					                                               logData->durableKnownCommittedVersion,
+					                                               logData->locality);
 				}
 
 				if (!logData->isPrimary && logData->stopped()) {
@@ -3088,7 +3090,7 @@ Future<Void> pullAsyncData(TLogData* self,
 				break;
 			} else if (res.index() == 1) {
 				if (logData->logSystem->get()) {
-					r = logData->logSystem->get()->peek(logData->logId, tagAt, endVersion, tags, true);
+					r = logData->logSystem->get()->makeConsumer()->peek(logData->logId, tagAt, endVersion, tags, true);
 				} else {
 					r = Reference<IPeekCursor>();
 				}
@@ -3643,10 +3645,10 @@ Future<Void> updateLogSystem(TLogData* self,
 		if (!found) {
 			logSystem->set(Reference<LogSystem>());
 		} else {
-			logData->logSystem->get()->pop(logData->logRouterPoppedVersion,
-			                               logData->remoteTag,
-			                               logData->durableKnownCommittedVersion,
-			                               logData->locality);
+			logData->logSystem->get()->makeConsumer()->pop(logData->logRouterPoppedVersion,
+			                                               logData->remoteTag,
+			                                               logData->durableKnownCommittedVersion,
+			                                               logData->locality);
 		}
 		TraceEvent("TLogUpdate", self->dbgid)
 		    .detail("LogId", logData->logId)

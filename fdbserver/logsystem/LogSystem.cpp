@@ -880,57 +880,6 @@ void LogSystem::resetBestServerIfNotLocked(
 	}
 }
 
-Reference<IPeekCursor> LogSystem::peekAll(UID dbgid, Version begin, Version end, Tag tag, bool parallelGetMore) {
-	LogSystemConsumer consumer(Reference<LogSystem>::addRef(this));
-	return consumer.peekAll(dbgid, begin, end, tag, parallelGetMore);
-}
-
-Reference<IPeekCursor> LogSystem::peekRemote(
-    UID dbgid, Version begin, Optional<Version> end, Tag tag, bool parallelGetMore) {
-	LogSystemConsumer consumer(Reference<LogSystem>::addRef(this));
-	return consumer.peekRemote(dbgid, begin, end, tag, parallelGetMore);
-}
-
-Reference<IPeekCursor> LogSystem::peek(UID dbgid, Version begin, Optional<Version> end, Tag tag, bool parallelGetMore) {
-	LogSystemConsumer consumer(Reference<LogSystem>::addRef(this));
-	return consumer.peek(dbgid, begin, end, tag, parallelGetMore);
-}
-
-Reference<IPeekCursor> LogSystem::peek(
-    UID dbgid, Version begin, Optional<Version> end, std::vector<Tag> tags, bool parallelGetMore) {
-	LogSystemConsumer consumer(Reference<LogSystem>::addRef(this));
-	return consumer.peek(dbgid, begin, end, std::move(tags), parallelGetMore);
-}
-
-Reference<IPeekCursor> LogSystem::peekLocal(
-    UID dbgid, Tag tag, Version begin, Version end, bool useMergePeekCursors, int8_t peekLocality) {
-	LogSystemConsumer consumer(Reference<LogSystem>::addRef(this));
-	return consumer.peekLocal(dbgid, tag, begin, end, useMergePeekCursors, peekLocality);
-}
-
-Reference<IPeekCursor> LogSystem::peekTxs(
-    UID dbgid, Version begin, int8_t peekLocality, Version localEnd, bool canDiscardPopped) {
-	LogSystemConsumer consumer(Reference<LogSystem>::addRef(this));
-	return consumer.peekTxs(dbgid, begin, peekLocality, localEnd, canDiscardPopped);
-}
-
-Reference<IPeekCursor> LogSystem::peekSingle(
-    UID dbgid, Version begin, Tag tag, std::vector<std::pair<Version, Tag>> history) {
-	LogSystemConsumer consumer(Reference<LogSystem>::addRef(this));
-	return consumer.peekSingle(dbgid, begin, tag, std::move(history));
-}
-
-Reference<IPeekCursor> LogSystem::peekLogRouter(
-    UID dbgid,
-    Version begin,
-    Tag tag,
-    bool useSatellite,
-    Optional<Version> end,
-    const Optional<std::map<uint8_t, std::vector<uint16_t>>>& knownStoppedTLogIds) {
-	LogSystemConsumer consumer(Reference<LogSystem>::addRef(this));
-	return consumer.peekLogRouter(dbgid, begin, tag, useSatellite, end, knownStoppedTLogIds);
-}
-
 Version LogSystem::getKnownCommittedVersion() {
 	Version result = invalidVersion;
 	for (auto& it : lockResults) {
@@ -951,21 +900,6 @@ Future<Void> LogSystem::onKnownCommittedVersionChange() {
 		return Never();
 	}
 	return waitForAny(result);
-}
-
-void LogSystem::popLogRouter(Version upTo, Tag tag, Version durableKnownCommittedVersion, int8_t popLocality) {
-	LogSystemConsumer consumer(Reference<LogSystem>::addRef(this));
-	consumer.popLogRouter(upTo, tag, durableKnownCommittedVersion, popLocality);
-}
-
-void LogSystem::popTxs(Version upTo, int8_t popLocality) {
-	LogSystemConsumer consumer(Reference<LogSystem>::addRef(this));
-	consumer.popTxs(upTo, popLocality);
-}
-
-void LogSystem::pop(Version upTo, Tag tag, Version durableKnownCommittedVersion, int8_t popLocality) {
-	LogSystemConsumer consumer(Reference<LogSystem>::addRef(this));
-	consumer.pop(upTo, tag, durableKnownCommittedVersion, popLocality);
 }
 
 Future<Void> LogSystem::popFromLog(LogSystem* self,
@@ -1071,11 +1005,6 @@ Future<Version> LogSystem::getPoppedTxs(LogSystem* self) {
 		}
 	}
 	co_return maxPopped;
-}
-
-Future<Version> LogSystem::getTxsPoppedVersion() {
-	LogSystemConsumer consumer(Reference<LogSystem>::addRef(this));
-	return consumer.getTxsPoppedVersion();
 }
 
 void LogSystem::updateLogRouter(int logSetIndex, int tagId, TLogInterface const& newLogRouter) {

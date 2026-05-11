@@ -67,7 +67,7 @@ public:
 	                           Arena& arena_,
 	                           const VectorRef<MutationRef>& mutations_,
 	                           const ApplyMetadataProxyContext& proxyMetadata_,
-	                           Reference<LogSystem> logSystem_,
+	                           Reference<LogSystemConsumer> logSystemConsumer_,
 	                           LogPushData* toCommit_,
 	                           bool& confChange_,
 	                           Version version,
@@ -76,7 +76,8 @@ public:
 	                           bool provisionalCommitProxy_)
 	  : spanContext(spanContext_), dbgid(proxyMetadata_.dbgid), arena(arena_), mutations(mutations_),
 	    txnStateStore(proxyMetadata_.txnStateStore), toCommit(toCommit_), confChange(confChange_),
-	    logSystem(logSystem_), version(version), popVersion(popVersion_), vecBackupKeys(proxyMetadata_.vecBackupKeys),
+	    logSystemConsumer(logSystemConsumer_), version(version), popVersion(popVersion_),
+	    vecBackupKeys(proxyMetadata_.vecBackupKeys),
 	    keyInfo(proxyMetadata_.keyInfo), uid_applyMutationsData(proxyMetadata_.uid_applyMutationsData),
 	    commit(proxyMetadata_.commit), cx(proxyMetadata_.cx), committedVersion(proxyMetadata_.committedVersion),
 	    storageCache(proxyMetadata_.storageCache), tag_popped(proxyMetadata_.tag_popped),
@@ -94,7 +95,8 @@ public:
 	                           const VectorRef<MutationRef>& mutations_)
 	  : spanContext(spanContext_), dbgid(resolverData_.dbgid), arena(resolverData_.arena), mutations(mutations_),
 	    txnStateStore(resolverData_.txnStateStore), toCommit(resolverData_.toCommit),
-	    confChange(resolverData_.confChanges), logSystem(resolverData_.logSystem), popVersion(resolverData_.popVersion),
+	    confChange(resolverData_.confChanges), logSystemConsumer(resolverData_.logSystemConsumer),
+	    popVersion(resolverData_.popVersion),
 	    keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache),
 	    initialCommit(resolverData_.initialCommit), forResolver(true),
 	    accumulativeChecksumIndex(resolverAccumulativeChecksumIndex), epoch(Optional<LogEpoch>()) {}
@@ -119,7 +121,7 @@ private:
 	// Flag indicates if the configure is changed
 	bool& confChange;
 
-	Reference<LogSystem> logSystem = Reference<LogSystem>();
+	Reference<LogSystemConsumer> logSystemConsumer = Reference<LogSystemConsumer>();
 	Version version = invalidVersion;
 	Version popVersion = 0;
 	KeyRangeMap<std::set<Key>>* vecBackupKeys = nullptr;
@@ -758,7 +760,7 @@ private:
 		// Storage server removal always happens in a separate version from any prior writes (or any subsequent
 		// reuse of the tag) so we can safely destroy the tag here without any concern about intra-batch
 		// ordering
-		if (logSystem && popVersion) {
+		if (logSystemConsumer && popVersion) {
 			auto serverKeysCleared =
 			    txnStateStore->readRange(range & serverTagKeys).get(); // read is expected to be immediately available
 			for (auto& kv : serverKeysCleared) {
@@ -768,7 +770,7 @@ private:
 				    .detail("Tag", tag.toString())
 				    .detail("Server", decodeServerTagKey(kv.key));
 				if (!forResolver) {
-					logSystem->pop(popVersion, tag);
+					logSystemConsumer->pop(popVersion, tag);
 					(*tag_popped)[tag] = popVersion;
 				}
 				ASSERT_WE_THINK(forResolver ^ (tag_popped != nullptr));
@@ -845,7 +847,7 @@ private:
 		}
 		// Once a tag has been removed from history we should pop it, since we no longer have a record of the
 		// tag once it has been removed from history
-		if (logSystem && popVersion) {
+		if (logSystemConsumer && popVersion) {
 			auto serverKeysCleared = txnStateStore->readRange(range & serverTagHistoryKeys)
 			                             .get(); // read is expected to be immediately available
 			for (auto& kv : serverKeysCleared) {
@@ -855,7 +857,7 @@ private:
 				    .detail("Tag", tag.toString())
 				    .detail("Version", decodeServerTagHistoryKey(kv.key));
 				if (!forResolver) {
-					logSystem->pop(popVersion, tag);
+					logSystemConsumer->pop(popVersion, tag);
 					(*tag_popped)[tag] = popVersion;
 				}
 				ASSERT_WE_THINK(forResolver ^ (tag_popped != nullptr));
@@ -1173,7 +1175,7 @@ public:
 void applyMetadataMutations(SpanContext const& spanContext,
                             const ApplyMetadataProxyContext& proxyMetadata,
                             Arena& arena,
-                            Reference<LogSystem> logSystem,
+                            Reference<LogSystemConsumer> logSystemConsumer,
                             const VectorRef<MutationRef>& mutations,
                             LogPushData* toCommit,
                             bool& confChange,
@@ -1185,7 +1187,7 @@ void applyMetadataMutations(SpanContext const& spanContext,
 	                           arena,
 	                           mutations,
 	                           proxyMetadata,
-	                           logSystem,
+	                           logSystemConsumer,
 	                           toCommit,
 	                           confChange,
 	                           version,

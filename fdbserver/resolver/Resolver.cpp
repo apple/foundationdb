@@ -387,7 +387,7 @@ Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatchReque
 				auto lockedKey = self->txnStateStore->readValue(databaseLockedKey).get();
 				isLocked = lockedKey.present() && lockedKey.get().size();
 				resolverData.reset(new ResolverData(self->dbgid,
-				                                    self->logSystem,
+				                                    self->logSystem->makeConsumer(),
 				                                    self->txnStateStore,
 				                                    &self->keyInfo,
 				                                    toCommit.get(),

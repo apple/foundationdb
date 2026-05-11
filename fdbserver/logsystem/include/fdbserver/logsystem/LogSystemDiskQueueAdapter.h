@@ -54,7 +54,7 @@ public:
 	// committed information to the LogSystem, commit() in this interface doesn't directly
 	// call LogSystem::push().  Instead it makes a commit message available through
 	// getCommitMessage(), and doesn't return until its acknowledge promise is set.
-	// The caller is responsible for calling LogSystem::push() and LogSystem::pop() with the results.
+	// The caller is responsible for calling LogSystem::push() and LogSystemConsumer::pop() with the results.
 
 	// It does, however, peek the specified tag directly at recovery time.
 
@@ -67,11 +67,12 @@ public:
 	    recoveryQueueDataSize(0), poppedUpTo(0), nextCommit(1), hasDiscardedData(false), totalRecoveredBytes(0) {
 		if (enableRecovery) {
 			localityChanged = peekLocality ? peekLocality->onChange() : Never();
-			cursor = logSystem->peekTxs(UID(),
-			                            txsPoppedVersion,
-			                            peekLocality ? peekLocality->get().primaryLocality : tagLocalityInvalid,
-			                            peekLocality ? peekLocality->get().knownCommittedVersion : invalidVersion,
-			                            true);
+			cursor = this->logSystem->peekTxs(
+			    UID(),
+			    txsPoppedVersion,
+			    peekLocality ? peekLocality->get().primaryLocality : tagLocalityInvalid,
+			    peekLocality ? peekLocality->get().knownCommittedVersion : invalidVersion,
+			    true);
 		}
 	}
 
