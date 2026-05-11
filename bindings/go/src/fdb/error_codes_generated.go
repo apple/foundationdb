@@ -282,6 +282,8 @@ var (
 	ErrTransactionGRVQueueRejected = Error{Code: 1251}
 	// finishMoveKeys exceeded retry limit
 	ErrFinishMoveKeysTooManyRetries = Error{Code: 1252}
+	// startMoveKeys exceeded retry limit
+	ErrStartMoveKeysTooManyRetries = Error{Code: 1253}
 	// Platform error
 	ErrPlatformError = Error{Code: 1500}
 	// Large block allocation failed

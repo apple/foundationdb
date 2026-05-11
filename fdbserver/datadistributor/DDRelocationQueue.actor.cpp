@@ -2343,7 +2343,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 					throw error;
 				}
 			} else {
-				CODE_PROBE(true, "move keys failed — removed server or exceeded retries", probe::decoration::rare);
+				CODE_PROBE(true, "move keys failed -- removed server or exceeded retries", probe::decoration::rare);
 				healthyDestinations.addDataInFlightToTeam(-metrics.bytes);
 				auto readLoad = metrics.readLoadKSecond();
 				auto& destinationRef = healthyDestinations;
