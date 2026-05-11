@@ -53,7 +53,6 @@ struct BulkDumping : TestWorkload {
 
 	// Timeout configuration
 	double jobCompletionTimeout = 1800.0; // Timeout for waiting on bulk dump/load job completion
-	double modeSetTimeout = 60.0; // Timeout for setBulkLoadMode/setBulkDumpMode operations
 	double jobSubmitTimeout = 60.0; // Timeout for submitBulkDumpJob/submitBulkLoadJob operations
 
 	// This workload is not compatible with following workload because they will race in changing the DD mode
@@ -89,7 +88,6 @@ struct BulkDumping : TestWorkload {
 
 		// Initialize timeout options
 		jobCompletionTimeout = getOption(options, "jobCompletionTimeout"_sr, 1800.0);
-		modeSetTimeout = getOption(options, "modeSetTimeout"_sr, 60.0);
 		jobSubmitTimeout = getOption(options, "jobSubmitTimeout"_sr, 60.0);
 	}
 
@@ -493,23 +491,11 @@ struct BulkDumping : TestWorkload {
 		// Submit a bulk dump job
 		int oldBulkDumpMode = 0;
 		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Setting BulkDump Mode");
-		double setDumpModeDeadline = now() + 300.0;
-		while (true) {
-			Error captured;
-			try {
-				oldBulkDumpMode = co_await timeoutError(setBulkDumpMode(cx, 1), modeSetTimeout); // Enable bulkDump
-				break;
-			} catch (Error& e) {
-				captured = e;
-			}
-			if (captured.code() != error_code_timed_out || now() >= setDumpModeDeadline) {
-				if (captured.code() == error_code_timed_out) {
-					TraceEvent(SevWarnAlways, "BulkDumpingWorkLoadSetDumpModeTimeout")
-					    .detail("TimeoutSeconds", modeSetTimeout);
-				}
-				throw captured;
-			}
-			co_await delay(1.0);
+		try {
+			oldBulkDumpMode = co_await setBulkDumpMode(cx, 1); // Enable bulkDump
+		} catch (Error& e) {
+			TraceEvent(SevWarnAlways, "BulkDumpingWorkLoadSetDumpModeFailed").error(e);
+			throw;
 		}
 		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "BulkDump Mode Set").detail("OldMode", oldBulkDumpMode);
 		std::string dumpFolder = jobRoot.empty() ? simulationBulkDumpFolder : jobRoot;
@@ -536,24 +522,13 @@ struct BulkDumping : TestWorkload {
 		TraceEvent("BulkDumpingWorkLoad")
 		    .detail("Phase", "Setting BulkLoad Mode")
 		    .detail("Job", bulkDumpJob.toString());
-		double setLoadModeDeadline = now() + 300.0;
-		while (true) {
-			Error captured;
-			try {
-				oldBulkLoadMode = co_await timeoutError(setBulkLoadMode(cx, 1), modeSetTimeout); // Enable bulkLoad
-				break;
-			} catch (Error& e) {
-				captured = e;
-			}
-			if (captured.code() != error_code_timed_out || now() >= setLoadModeDeadline) {
-				if (captured.code() == error_code_timed_out) {
-					TraceEvent(SevWarnAlways, "BulkDumpingWorkLoadSetModeTimeout")
-					    .detail("Job", bulkDumpJob.toString())
-					    .detail("TimeoutSeconds", modeSetTimeout);
-				}
-				throw captured;
-			}
-			co_await delay(1.0);
+		try {
+			oldBulkLoadMode = co_await setBulkLoadMode(cx, 1); // Enable bulkLoad
+		} catch (Error& e) {
+			TraceEvent(SevWarnAlways, "BulkDumpingWorkLoadSetLoadModeFailed")
+			    .error(e)
+			    .detail("Job", bulkDumpJob.toString());
+			throw;
 		}
 		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "BulkLoad Mode Set").detail("OldMode", oldBulkLoadMode);
 		while (true) {
