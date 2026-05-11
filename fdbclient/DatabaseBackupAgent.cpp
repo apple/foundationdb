@@ -33,7 +33,7 @@
 #include "flow/Hash3.h"
 #include <numeric>
 #include "fdbclient/ManagementAPI.h"
-#include "fdbclient/KeyBackedTypes.actor.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include <inttypes.h>
 #include <map>
 

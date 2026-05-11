@@ -1,5 +1,5 @@
 /*
- * KeyBackedRangeMap.actor.h
+ * KeyBackedRangeMap.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,7 +20,7 @@
 #pragma once
 
 #include "flow/FastRef.h"
-#include "fdbclient/KeyBackedTypes.actor.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "flow/CoroUtils.h"
 
 // A local in-memory representation of a KeyBackedRangeMap snapshot

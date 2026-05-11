@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/BackupAgent.h"
-#include "fdbclient/KeyBackedTypes.actor.h" // for key backed map codecs for tss mapping
+#include "fdbclient/KeyBackedTypes.h" // for key backed map codecs for tss mapping
 #include "fdbclient/MutationList.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
