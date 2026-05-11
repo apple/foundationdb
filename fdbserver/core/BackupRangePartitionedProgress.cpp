@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "BackupRangePartitionedProgress.h"
+#include "fdbserver/core/BackupRangePartitionedProgress.h"
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
@@ -48,12 +48,12 @@ Future<Void> getBackupRangePartitionedProgress(Database cx,
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			RangeResult results = co_await tr.getRange(backupRangePartitionedProgressKeys, CLIENT_KNOBS->TOO_MANY);
+			RangeResult results = co_await tr.getRange(backupProgressKeys, CLIENT_KNOBS->TOO_MANY);
 			ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
 
 			for (auto& it : results) {
-				const UID workerID = decodeBackupRangePartitionedProgressKey(it.key);
-				const WorkerBackupStatus status = decodeBackupRangePartitionedProgressValue(it.value);
+				const UID workerID = decodeBackupProgressKey(it.key);
+				const WorkerBackupStatus status = decodeBackupProgressValue(it.value);
 				bStatus->addBackupStatus(status);
 
 				TraceEvent(severity, "GotBackupRangePartitionedProgress", dbgid)

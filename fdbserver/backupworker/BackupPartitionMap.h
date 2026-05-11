@@ -22,7 +22,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/core/ShardMetrics.h"
-#include <unordered_map>
+#include <map>
 #include <vector>
 
 struct Partition {
@@ -39,6 +39,6 @@ struct Partition {
 };
 
 typedef std::vector<Partition> PartitionList;
-typedef std::unordered_map<Tag, PartitionList> PartitionMap;
+typedef std::map<Tag, PartitionList> PartitionMap;
 
 std::string serializePartitionListJSON(PartitionMap const& PartitionMap);
