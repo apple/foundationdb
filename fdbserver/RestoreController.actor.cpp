@@ -892,7 +892,7 @@ ACTOR static Future<Void> buildRangeVersions(KeyRangeMap<Version>* pRangeVersion
 		    .detail("Reason", "Parsing all range files is slow and memory intensive");
 		return Void();
 	}
-	Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString(), proxy, {});
+	Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString(), proxy, {}, 0);
 
 	// Key ranges not in range files are empty;
 	// Assign highest version to avoid applying any mutation in these ranges

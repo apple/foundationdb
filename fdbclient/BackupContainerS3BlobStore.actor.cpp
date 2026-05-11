@@ -156,9 +156,11 @@ BackupContainerS3BlobStore::BackupContainerS3BlobStore(Reference<S3BlobStoreEndp
                                                        const std::string& name,
                                                        const S3BlobStoreEndpoint::ParametersT& params,
                                                        const Optional<std::string>& encryptionKeyFileName,
+                                                       int encryptionBlockSize,
                                                        bool isBackup)
   : m_bstore(bstore), m_name(name), m_bucket("FDB_BACKUPS_V2"), isBackup(isBackup) {
 	setEncryptionKey(encryptionKeyFileName);
+	this->encryptionBlockSize = encryptionBlockSize;
 	// Currently only one parameter is supported, "bucket"
 	for (const auto& [name, value] : params) {
 		if (name == "bucket") {
@@ -186,7 +188,7 @@ Future<Reference<IAsyncFile>> BackupContainerS3BlobStore::readFile(const std::st
 	Reference<IAsyncFile> f = makeReference<AsyncFileS3BlobStoreRead>(m_bstore, m_bucket, dataPath(path));
 
 	if (usesEncryption() && !StringRef(path).startsWith("properties/"_sr)) {
-		f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::READ_ONLY);
+		f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::READ_ONLY, encryptionBlockSize);
 	}
 	if (m_bstore->knobs.enable_read_cache) {
 		f = makeReference<AsyncFileReadAheadCache>(f,
@@ -206,7 +208,7 @@ Future<std::vector<std::string>> BackupContainerS3BlobStore::listURLs(Reference<
 Future<Reference<IBackupFile>> BackupContainerS3BlobStore::writeFile(const std::string& path) {
 	Reference<IAsyncFile> f = makeReference<AsyncFileS3BlobStoreWrite>(m_bstore, m_bucket, dataPath(path));
 	if (usesEncryption() && !StringRef(path).startsWith("properties/"_sr)) {
-		f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::APPEND_ONLY);
+		f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::APPEND_ONLY, encryptionBlockSize);
 	}
 	return Future<Reference<IBackupFile>>(makeReference<BackupContainerS3BlobStoreImpl::BackupFile>(path, f));
 }

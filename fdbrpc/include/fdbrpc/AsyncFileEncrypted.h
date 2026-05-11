@@ -47,10 +47,11 @@ private:
 	uint32_t currentBlock{ 0 };
 	int offsetInBlock{ 0 };
 	std::vector<unsigned char> writeBuffer;
+	int encryptionBlockSize{ 0 };
 	Future<Void> initialize();
 
 public:
-	AsyncFileEncrypted(Reference<IAsyncFile>, Mode);
+	AsyncFileEncrypted(Reference<IAsyncFile>, Mode, int encryptedBlockSize);
 	void addref() override;
 	void delref() override;
 	Future<int> read(void* data, int length, int64_t offset) override;
