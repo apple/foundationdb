@@ -132,9 +132,8 @@ struct LogRouterData {
 
 	LogRouterData(UID dbgid, const InitializeLogRouterRequest& req)
 	  : dbgid(dbgid), logSystem(new AsyncVar<Reference<LogSystemConsumer>>()), version(req.startVersion - 1),
-	    minPopped(0),
-	    startVersion(req.startVersion), minKnownCommittedVersion(0), poppedVersion(0), routerTag(req.routerTag),
-	    allowPops(false), foundEpochEnd(false), generation(req.recoveryCount),
+	    minPopped(0), startVersion(req.startVersion), minKnownCommittedVersion(0), poppedVersion(0),
+	    routerTag(req.routerTag), allowPops(false), foundEpochEnd(false), generation(req.recoveryCount),
 	    peekLatencyDist(Histogram::getHistogram("LogRouter"_sr, "PeekTLogLatency"_sr, Histogram::Unit::milliseconds)),
 	    cc("LogRouter", dbgid.toString()), getMoreCount("GetMoreCount", cc),
 	    getMoreBlockedCount("GetMoreBlockedCount", cc) {

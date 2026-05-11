@@ -2,7 +2,11 @@
 
 #include <utility>
 
-Reference<IPeekCursor> LogSystemConsumer::peekAll(UID dbgid, Version begin, Version end, Tag tag, bool parallelGetMore) {
+Reference<IPeekCursor> LogSystemConsumer::peekAll(UID dbgid,
+                                                  Version begin,
+                                                  Version end,
+                                                  Tag tag,
+                                                  bool parallelGetMore) {
 	auto& ls = *logSystem;
 	int bestSet = 0;
 	std::vector<Reference<LogSet>> localSets;
@@ -143,10 +147,10 @@ Reference<IPeekCursor> LogSystemConsumer::peekAll(UID dbgid, Version begin, Vers
 }
 
 Reference<IPeekCursor> LogSystemConsumer::peekRemote(UID dbgid,
-                                             Version begin,
-                                             Optional<Version> end,
-                                             Tag tag,
-                                             bool parallelGetMore) {
+                                                     Version begin,
+                                                     Optional<Version> end,
+                                                     Tag tag,
+                                                     bool parallelGetMore) {
 	auto& ls = *logSystem;
 	int bestSet = -1;
 	Version lastBegin = ls.recoveredAt.present() ? ls.recoveredAt.get() + 1 : 0;
@@ -165,8 +169,12 @@ Reference<IPeekCursor> LogSystemConsumer::peekRemote(UID dbgid,
 		    .detail("Tag", tag.toString())
 		    .detail("Begin", begin)
 		    .detail("End", end.present() ? end.get() : ls.getPeekEnd());
-		return makeReference<ServerPeekCursor>(
-		    Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, ls.getPeekEnd(), false, parallelGetMore);
+		return makeReference<ServerPeekCursor>(Reference<AsyncVar<OptionalInterface<TLogInterface>>>(),
+		                                       tag,
+		                                       begin,
+		                                       ls.getPeekEnd(),
+		                                       false,
+		                                       parallelGetMore);
 	}
 	if (begin >= lastBegin) {
 		TraceEvent("TLogPeekRemoteBestOnly", dbgid)
@@ -176,8 +184,11 @@ Reference<IPeekCursor> LogSystemConsumer::peekRemote(UID dbgid,
 		    .detail("BestSet", bestSet)
 		    .detail("BestSetStart", lastBegin)
 		    .detail("LogRouterIds", ls.tLogs[bestSet]->logRouterString());
-		return makeReference<BufferedCursor>(
-		    ls.tLogs[bestSet]->logRouters, tag, begin, end.present() ? end.get() + 1 : ls.getPeekEnd(), parallelGetMore);
+		return makeReference<BufferedCursor>(ls.tLogs[bestSet]->logRouters,
+		                                     tag,
+		                                     begin,
+		                                     end.present() ? end.get() + 1 : ls.getPeekEnd(),
+		                                     parallelGetMore);
 	} else {
 		std::vector<Reference<IPeekCursor>> cursors;
 		std::vector<LogMessageVersion> epochEnds;
@@ -188,8 +199,11 @@ Reference<IPeekCursor> LogSystemConsumer::peekRemote(UID dbgid,
 		    .detail("BestSet", bestSet)
 		    .detail("BestSetStart", lastBegin)
 		    .detail("LogRouterIds", ls.tLogs[bestSet]->logRouterString());
-		cursors.push_back(makeReference<BufferedCursor>(
-		    ls.tLogs[bestSet]->logRouters, tag, lastBegin, end.present() ? end.get() + 1 : ls.getPeekEnd(), parallelGetMore));
+		cursors.push_back(makeReference<BufferedCursor>(ls.tLogs[bestSet]->logRouters,
+		                                                tag,
+		                                                lastBegin,
+		                                                end.present() ? end.get() + 1 : ls.getPeekEnd(),
+		                                                parallelGetMore));
 		int i = 0;
 		while (begin < lastBegin) {
 			if (i == ls.oldLogData.size()) {
@@ -254,7 +268,11 @@ Reference<IPeekCursor> LogSystemConsumer::peekRemote(UID dbgid,
 	}
 }
 
-Reference<IPeekCursor> LogSystemConsumer::peek(UID dbgid, Version begin, Optional<Version> end, Tag tag, bool parallelGetMore) {
+Reference<IPeekCursor> LogSystemConsumer::peek(UID dbgid,
+                                               Version begin,
+                                               Optional<Version> end,
+                                               Tag tag,
+                                               bool parallelGetMore) {
 	auto& ls = *logSystem;
 	if (ls.tLogs.empty()) {
 		TraceEvent("TLogPeekNoLogSets", dbgid).detail("Tag", tag.toString()).detail("Begin", begin);
@@ -270,10 +288,10 @@ Reference<IPeekCursor> LogSystemConsumer::peek(UID dbgid, Version begin, Optiona
 }
 
 Reference<IPeekCursor> LogSystemConsumer::peek(UID dbgid,
-                                       Version begin,
-                                       Optional<Version> end,
-                                       std::vector<Tag> tags,
-                                       bool parallelGetMore) {
+                                               Version begin,
+                                               Optional<Version> end,
+                                               std::vector<Tag> tags,
+                                               bool parallelGetMore) {
 	auto& ls = *logSystem;
 	if (tags.empty()) {
 		TraceEvent("TLogPeekNoTags", dbgid).detail("Begin", begin);
@@ -294,11 +312,11 @@ Reference<IPeekCursor> LogSystemConsumer::peek(UID dbgid,
 }
 
 Reference<IPeekCursor> LogSystemConsumer::peekLocal(UID dbgid,
-                                            Tag tag,
-                                            Version begin,
-                                            Version end,
-                                            bool useMergePeekCursors,
-                                            int8_t peekLocality) {
+                                                    Tag tag,
+                                                    Version begin,
+                                                    Version end,
+                                                    bool useMergePeekCursors,
+                                                    int8_t peekLocality) {
 	auto& ls = *logSystem;
 	if (tag.locality >= 0 || tag.locality == tagLocalitySpecial) {
 		peekLocality = tag.locality;
@@ -401,13 +419,13 @@ Reference<IPeekCursor> LogSystemConsumer::peekLocal(UID dbgid,
 				                                                  ls.tLogs[bestSet]->tLogReplicationFactor,
 				                                                  bestKnownLockedTLogIds));
 			} else {
-				cursors.push_back(
-				    makeReference<ServerPeekCursor>(ls.tLogs[bestSet]->logServers[ls.tLogs[bestSet]->bestLocationFor(tag)],
-				                                    tag,
-				                                    ls.tLogs[bestSet]->startVersion,
-				                                    end,
-				                                    false,
-				                                    false));
+				cursors.push_back(makeReference<ServerPeekCursor>(
+				    ls.tLogs[bestSet]->logServers[ls.tLogs[bestSet]->bestLocationFor(tag)],
+				    tag,
+				    ls.tLogs[bestSet]->startVersion,
+				    end,
+				    false,
+				    false));
 			}
 		}
 		Version lastBegin = ls.tLogs[bestSet]->startVersion;
@@ -510,10 +528,10 @@ Reference<IPeekCursor> LogSystemConsumer::peekLocal(UID dbgid,
 }
 
 Reference<IPeekCursor> LogSystemConsumer::peekTxs(UID dbgid,
-                                          Version begin,
-                                          int8_t peekLocality,
-                                          Version localEnd,
-                                          bool canDiscardPopped) {
+                                                  Version begin,
+                                                  int8_t peekLocality,
+                                                  Version localEnd,
+                                                  bool canDiscardPopped) {
 	auto& ls = *logSystem;
 	Version end = ls.getEnd();
 	if (ls.tLogs.empty()) {
@@ -586,9 +604,9 @@ Reference<IPeekCursor> LogSystemConsumer::peekTxs(UID dbgid,
 }
 
 Reference<IPeekCursor> LogSystemConsumer::peekSingle(UID dbgid,
-                                             Version begin,
-                                             Tag tag,
-                                             std::vector<std::pair<Version, Tag>> history) {
+                                                     Version begin,
+                                                     Tag tag,
+                                                     std::vector<std::pair<Version, Tag>> history) {
 	auto& ls = *logSystem;
 	while (!history.empty() && begin >= history.back().first) {
 		history.pop_back();
@@ -794,12 +812,13 @@ void LogSystemConsumer::popLogRouter(Version upTo, Tag tag, Version durableKnown
 						    std::make_pair(upTo, durableKnownCommittedVersion);
 					}
 					if (prev == 0) {
-						ls.popActors.add(LogSystem::popFromLog(&ls,
-						                         log,
-						                         tag,
-						                         /*delayBeforePop=*/0.0,
-						                         /*popLogRouter=*/true)); // Fast pop time because log routers can only
-						                                                  // hold 5 seconds of data.
+						ls.popActors.add(
+						    LogSystem::popFromLog(&ls,
+						                          log,
+						                          tag,
+						                          /*delayBeforePop=*/0.0,
+						                          /*popLogRouter=*/true)); // Fast pop time because log routers can only
+						                                                   // hold 5 seconds of data.
 					}
 				}
 			}
@@ -826,8 +845,8 @@ void LogSystemConsumer::popLogRouter(Version upTo, Tag tag, Version durableKnown
 								    std::make_pair(upTo, durableKnownCommittedVersion);
 							}
 							if (prev == 0) {
-								ls.popActors.add(
-								    LogSystem::popFromLog(&ls, log, tag, /*delayBeforePop=*/0.0, /*popLogRouter=*/true));
+								ls.popActors.add(LogSystem::popFromLog(
+								    &ls, log, tag, /*delayBeforePop=*/0.0, /*popLogRouter=*/true));
 							}
 						}
 					}
@@ -866,7 +885,8 @@ void LogSystemConsumer::pop(Version upTo, Tag tag, Version durableKnownCommitted
 				}
 				if (prev == 0) {
 					// pop tag from log upto version defined in ls.outstandingPops[].first
-					ls.popActors.add(LogSystem::popFromLog(&ls, log, tag, SERVER_KNOBS->POP_FROM_LOG_DELAY, /*popLogRouter=*/false));
+					ls.popActors.add(
+					    LogSystem::popFromLog(&ls, log, tag, SERVER_KNOBS->POP_FROM_LOG_DELAY, /*popLogRouter=*/false));
 				}
 			}
 		}

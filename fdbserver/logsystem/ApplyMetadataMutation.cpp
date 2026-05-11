@@ -77,9 +77,9 @@ public:
 	  : spanContext(spanContext_), dbgid(proxyMetadata_.dbgid), arena(arena_), mutations(mutations_),
 	    txnStateStore(proxyMetadata_.txnStateStore), toCommit(toCommit_), confChange(confChange_),
 	    logSystemConsumer(logSystemConsumer_), version(version), popVersion(popVersion_),
-	    vecBackupKeys(proxyMetadata_.vecBackupKeys),
-	    keyInfo(proxyMetadata_.keyInfo), uid_applyMutationsData(proxyMetadata_.uid_applyMutationsData),
-	    commit(proxyMetadata_.commit), cx(proxyMetadata_.cx), committedVersion(proxyMetadata_.committedVersion),
+	    vecBackupKeys(proxyMetadata_.vecBackupKeys), keyInfo(proxyMetadata_.keyInfo),
+	    uid_applyMutationsData(proxyMetadata_.uid_applyMutationsData), commit(proxyMetadata_.commit),
+	    cx(proxyMetadata_.cx), committedVersion(proxyMetadata_.committedVersion),
 	    storageCache(proxyMetadata_.storageCache), tag_popped(proxyMetadata_.tag_popped),
 	    tssMapping(proxyMetadata_.tssMapping), initialCommit(initialCommit_),
 	    provisionalCommitProxy(provisionalCommitProxy_),
@@ -96,8 +96,7 @@ public:
 	  : spanContext(spanContext_), dbgid(resolverData_.dbgid), arena(resolverData_.arena), mutations(mutations_),
 	    txnStateStore(resolverData_.txnStateStore), toCommit(resolverData_.toCommit),
 	    confChange(resolverData_.confChanges), logSystemConsumer(resolverData_.logSystemConsumer),
-	    popVersion(resolverData_.popVersion),
-	    keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache),
+	    popVersion(resolverData_.popVersion), keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache),
 	    initialCommit(resolverData_.initialCommit), forResolver(true),
 	    accumulativeChecksumIndex(resolverAccumulativeChecksumIndex), epoch(Optional<LogEpoch>()) {}
 

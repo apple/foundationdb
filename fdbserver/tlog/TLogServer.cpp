@@ -696,10 +696,9 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	    newPersistentDataVersion(invalidVersion), tLogData(tLogData), unrecoveredBefore(1), recoveredAt(1),
 	    recoveryTxnVersion(1), logSystem(new AsyncVar<Reference<LogSystem>>()),
 	    logSystemConsumer(new AsyncVar<Reference<LogSystemConsumer>>()), remoteTag(remoteTag), isPrimary(isPrimary),
-	    logRouterTags(logRouterTags), logRouterPoppedVersion(0), logRouterPopToVersion(0),
-	    locality(tagLocalityInvalid), recruitmentID(recruitmentID), logSpillType(logSpillType),
-	    allTags(tags.begin(), tags.end()), terminated(tLogData->terminated.getFuture()), execOpCommitInProgress(false),
-	    txsTags(txsTags) {
+	    logRouterTags(logRouterTags), logRouterPoppedVersion(0), logRouterPopToVersion(0), locality(tagLocalityInvalid),
+	    recruitmentID(recruitmentID), logSpillType(logSpillType), allTags(tags.begin(), tags.end()),
+	    terminated(tLogData->terminated.getFuture()), execOpCommitInProgress(false), txsTags(txsTags) {
 		startRole(Role::TRANSACTION_LOG,
 		          interf.id(),
 		          tLogData->workerID,
@@ -2832,9 +2831,9 @@ class ServeTLogInterface {
 				logData->setLogSystem(makeLogSystemFromServerDBInfo(self->dbgid, self->dbInfo->get()));
 				if (!logData->isPrimary) {
 					logData->logSystemConsumer->get()->pop(logData->logRouterPoppedVersion,
-					                                      logData->remoteTag,
-					                                      logData->durableKnownCommittedVersion,
-					                                      logData->locality);
+					                                       logData->remoteTag,
+					                                       logData->durableKnownCommittedVersion,
+					                                       logData->locality);
 				}
 
 				if (!logData->isPrimary && logData->stopped()) {
@@ -3649,9 +3648,9 @@ Future<Void> updateLogSystem(TLogData* self, Reference<LogData> logData, LogSyst
 			logData->setLogSystem(Reference<LogSystem>());
 		} else {
 			logData->logSystemConsumer->get()->pop(logData->logRouterPoppedVersion,
-			                                      logData->remoteTag,
-			                                      logData->durableKnownCommittedVersion,
-			                                      logData->locality);
+			                                       logData->remoteTag,
+			                                       logData->durableKnownCommittedVersion,
+			                                       logData->locality);
 		}
 		TraceEvent("TLogUpdate", self->dbgid)
 		    .detail("LogId", logData->logId)

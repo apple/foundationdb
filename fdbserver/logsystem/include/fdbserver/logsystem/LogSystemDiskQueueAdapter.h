@@ -67,12 +67,11 @@ public:
 	    recoveryQueueDataSize(0), poppedUpTo(0), nextCommit(1), hasDiscardedData(false), totalRecoveredBytes(0) {
 		if (enableRecovery) {
 			localityChanged = peekLocality ? peekLocality->onChange() : Never();
-			cursor = this->logSystem->peekTxs(
-			    UID(),
-			    txsPoppedVersion,
-			    peekLocality ? peekLocality->get().primaryLocality : tagLocalityInvalid,
-			    peekLocality ? peekLocality->get().knownCommittedVersion : invalidVersion,
-			    true);
+			cursor = this->logSystem->peekTxs(UID(),
+			                                  txsPoppedVersion,
+			                                  peekLocality ? peekLocality->get().primaryLocality : tagLocalityInvalid,
+			                                  peekLocality ? peekLocality->get().knownCommittedVersion : invalidVersion,
+			                                  true);
 		}
 	}
 
