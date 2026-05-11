@@ -325,7 +325,7 @@ public:
 		    issues));
 
 		if (g_network->isSimulated())
-			writer = Reference<IThreadPool>(new DummyThreadPool());
+			writer = makeReference<DummyThreadPool>();
 		else
 			writer = createGenericThreadPool();
 		writer->addThread(new WriterThread(barriers, logWriter, formatter), "fdb-trace-log");
@@ -682,17 +682,17 @@ bool traceFormatImpl(std::string& format) {
 	std::transform(format.begin(), format.end(), format.begin(), ::tolower);
 	if (format == "xml") {
 		if (!validate) {
-			g_traceLog.formatter = Reference<ITraceLogFormatter>(new XmlTraceLogFormatter());
+			g_traceLog.formatter = makeReference<XmlTraceLogFormatter>();
 		}
 		return true;
 	} else if (format == "json") {
 		if (!validate) {
-			g_traceLog.formatter = Reference<ITraceLogFormatter>(new JsonTraceLogFormatter());
+			g_traceLog.formatter = makeReference<JsonTraceLogFormatter>();
 		}
 		return true;
 	} else {
 		if (!validate) {
-			g_traceLog.formatter = Reference<ITraceLogFormatter>(new XmlTraceLogFormatter());
+			g_traceLog.formatter = makeReference<XmlTraceLogFormatter>();
 		}
 		return false;
 	}

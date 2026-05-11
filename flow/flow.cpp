@@ -109,8 +109,8 @@ uint64_t debug_lastLoadBalanceResultEndpointToken = 0;
 bool noUnseed = false;
 
 void setThreadLocalDeterministicRandomSeed(uint64_t seed) {
-	seededRandom = Reference<IRandom>(new DeterministicRandom(seed, true));
-	seededDebugRandom = Reference<IRandom>(new DeterministicRandom(seed));
+	seededRandom = makeReference<DeterministicRandom>(seed, true);
+	seededDebugRandom = makeReference<DeterministicRandom>(seed);
 }
 
 Reference<IRandom> debugRandom() {
@@ -119,7 +119,7 @@ Reference<IRandom> debugRandom() {
 
 Reference<IRandom> deterministicRandom() {
 	if (!seededRandom) {
-		seededRandom = Reference<IRandom>(new DeterministicRandom(platform::getRandomSeed(), true));
+		seededRandom = makeReference<DeterministicRandom>(platform::getRandomSeed(), true);
 	}
 	return seededRandom;
 }
@@ -127,7 +127,7 @@ Reference<IRandom> deterministicRandom() {
 Reference<IRandom> nondeterministicRandom() {
 	static thread_local Reference<IRandom> random;
 	if (!random) {
-		random = Reference<IRandom>(new DeterministicRandom(platform::getRandomSeed()));
+		random = makeReference<DeterministicRandom>(platform::getRandomSeed());
 	}
 	return random;
 }

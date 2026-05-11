@@ -72,7 +72,7 @@ void LogSet::populateSatelliteTagLocations(int logRouterTags, int oldLogRouterTa
 		used_servers.insert(std::make_pair(0, i));
 	}
 
-	Reference<LocalitySet> serverSet = Reference<LocalitySet>(new LocalityMap<std::pair<int, int>>());
+	Reference<LocalitySet> serverSet = makeReference<LocalityMap<std::pair<int, int>>>();
 	auto* serverMap = (LocalityMap<std::pair<int, int>>*)serverSet.getPtr();
 	std::vector<std::pair<int, int>> resultPairs;
 	for (int loc = 0; loc < satelliteTagLocations.size(); loc++) {
@@ -187,7 +187,7 @@ int LogSet::bestLocationFor(Tag tag) {
 void LogSet::updateLocalitySet(std::vector<LocalityData> const& localities) {
 	LocalityMap<int>* logServerMap;
 
-	logServerSet = Reference<LocalitySet>(new LocalityMap<int>());
+	logServerSet = makeReference<LocalityMap<int>>();
 	logServerMap = (LocalityMap<int>*)logServerSet.getPtr();
 
 	logEntryArray.clear();

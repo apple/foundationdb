@@ -20,12 +20,6 @@
 
 #pragma once
 
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_KEYBACKEDTYPES_ACTOR_G_H)
-#define FDBCLIENT_KEYBACKEDTYPES_ACTOR_G_H
-#include "fdbclient/KeyBackedTypes.actor.g.h"
-#elif !defined(FDBCLIENT_KEYBACKEDTYPES_ACTOR_H)
-#define FDBCLIENT_KEYBACKEDTYPES_ACTOR_H
-
 #include <utility>
 #include <vector>
 #include <ranges>
@@ -40,11 +34,10 @@
 #include "fdbclient/TupleVersionstamp.h"
 #include "flow/ObjectSerializer.h"
 #include "flow/Platform.h"
+#include "flow/CoroUtils.h"
 #include "flow/genericactors.actor.h"
 #include "flow/serialize.h"
 #include "flow/ThreadHelper.actor.h"
-
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 #define KEYBACKEDTYPES_DEBUG 0
 #if KEYBACKEDTYPES_DEBUG || !defined(NO_INTELLISENSE)
@@ -280,21 +273,11 @@ public:
 		return holdWhile(watchFuture, safeThreadFutureToFuture(watchFuture));
 	}
 
-// Forward declaration of this static template actor does not work correctly, so this actor is forward declared
-// in a way that works for both compiling and in IDEs.
-#if defined(NO_INTELLISENSE)
 	template <class DB>
-	static Future<Version> onChangeActor(WatchableTrigger const& self,
-	                                     Reference<DB> const& db,
-	                                     Optional<Version> const& initialVersion,
-	                                     Promise<Version> const& watching);
-#else
-	ACTOR template <class DB>
 	static Future<Version> onChangeActor(WatchableTrigger self,
 	                                     Reference<DB> db,
 	                                     Optional<Version> initialVersion,
 	                                     Promise<Version> watching);
-#endif
 
 	// Watch the trigger until it changes.  The result will be ready when it is observed that the trigger value's
 	// version is greater than initialVersion, and the observed trigger value version will be returned.
@@ -314,42 +297,45 @@ public:
 	}
 };
 
-ACTOR template <class DB>
+template <class DB>
 Future<Version> WatchableTrigger::onChangeActor(WatchableTrigger self,
                                                 Reference<DB> db,
                                                 Optional<Version> initialVersion,
                                                 Promise<Version> watching) {
-	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+	Reference<typename DB::TransactionT> tr = db->createTransaction();
 
-	loop {
+	while (true) {
 		if constexpr (can_set_transaction_options<DB>) {
 			db->setOptions(tr);
 		}
+		Error err;
 		try {
 			// If the initialVersion is not set yet, then initialize it with the read version
 			if (!initialVersion.present()) {
-				wait(store(initialVersion, safeThreadFutureToFuture(tr->getReadVersion())));
+				co_await store(initialVersion, safeThreadFutureToFuture(tr->getReadVersion()));
 			}
 			if (watching.canBeSet()) {
 				watching.send(*initialVersion);
 			}
 
 			// Get the trigger's latest value.
-			Optional<Versionstamp> currentVal = wait(self.get(tr));
+			Optional<Versionstamp> currentVal = co_await self.get(tr);
 
 			// If the trigger has a value and its version is > initialVersion then the trigger has fired so break
 			if (currentVal.present() && currentVal->version > *initialVersion) {
-				return currentVal->version;
+				co_return currentVal->version;
 			}
 
 			// Otherwise, watch the key and repeat the loop once the watch fires
-			state Future<Void> watch = self.watch(tr);
-			wait(safeThreadFutureToFuture(tr->commit()));
-			wait(watch);
+			Future<Void> watch = self.watch(tr);
+			co_await safeThreadFutureToFuture(tr->commit());
+			co_await watch;
 			tr->reset();
+			continue;
 		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
+			err = e;
 		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
@@ -618,7 +604,7 @@ public:
 		}
 	}
 
-	ACTOR template <class Transaction>
+	template <class Transaction>
 	static Future<RangeResultType> getRangeActor(KeyBackedMap self,
 	                                             Transaction tr,
 	                                             KeySelector begin,
@@ -630,18 +616,18 @@ public:
 		          begin.pack(self.subspace.begin).toString(),
 		          end.pack(self.subspace.begin).toString());
 
-		state ::KeySelector ksBegin = begin.pack(self.subspace.begin);
-		state ::KeySelector ksEnd = end.pack(self.subspace.begin);
-		state typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
+		::KeySelector ksBegin = begin.pack(self.subspace.begin);
+		::KeySelector ksEnd = end.pack(self.subspace.begin);
+		typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
 		    tr->getRange(ksBegin, ksEnd, limits, snapshot, reverse);
 
 		// Since the getRange result must be filtered to keys within the map subspace, it is possible that the given
 		// TypedKeySelectors and GetRangeLimits yields a result in which no KV pairs are within the map subspace.  If
 		// this happens, we can't return any map KV pairs for the caller to base the next request on, so we will loop
 		// and continue with the next request here.
-		state RangeResultType rangeResult;
-		loop {
-			RangeResult kvs = wait(safeThreadFutureToFuture(getRangeFuture));
+		RangeResultType rangeResult{};
+		while (true) {
+			RangeResult kvs = co_await safeThreadFutureToFuture(getRangeFuture);
 			kbt_debug("MAP GETRANGE KeySelectors {} - {} results={} more={}\n",
 			          begin.pack(self.subspace.begin).toString(),
 			          end.pack(self.subspace.begin).toString(),
@@ -687,7 +673,7 @@ public:
 			getRangeFuture = tr->getRange(ksBegin, ksEnd, limits, snapshot, reverse);
 		}
 
-		return rangeResult;
+		co_return rangeResult;
 	}
 
 	// GetRange with typed KeySelectors
@@ -705,7 +691,7 @@ public:
 	// These operation can be accomplished using KeySelectors however they run the risk of touching keys outside of
 	// map subspace, which can cause problems if this touches an offline range or a key which is unreadable by range
 	// read operations due to having been modified with a version stamp operation in the current transaction.
-	ACTOR template <class Transaction>
+	template <class Transaction>
 	static Future<Optional<KVType>> seek(KeyBackedMap self,
 	                                     Transaction tr,
 	                                     KeyType query,
@@ -734,15 +720,15 @@ public:
 			end = self.subspace.end;
 		}
 
-		state typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
+		typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
 		    tr->getRange(KeyRangeRef(begin, end), 1, snapshot, Reverse{ lessThan });
 
-		RangeResult kvs = wait(safeThreadFutureToFuture(getRangeFuture));
+		RangeResult kvs = co_await safeThreadFutureToFuture(getRangeFuture);
 		if (kvs.empty()) {
-			return Optional<KVType>();
+			co_return Optional<KVType>();
 		}
 
-		return self.unpackKV(kvs.front());
+		co_return self.unpackKV(kvs.front());
 	}
 
 	template <class Transaction>
@@ -935,7 +921,7 @@ public:
 		                     }));
 	}
 
-	ACTOR template <class Transaction>
+	template <class Transaction>
 	static Future<RangeResultType> getRangeActor(KeyBackedSet self,
 	                                             Transaction tr,
 	                                             KeySelector begin,
@@ -947,18 +933,18 @@ public:
 		          begin.pack(self.subspace.begin).toString(),
 		          end.pack(self.subspace.begin).toString());
 
-		state ::KeySelector ksBegin = begin.pack(self.subspace.begin);
-		state ::KeySelector ksEnd = end.pack(self.subspace.begin);
-		state typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
+		::KeySelector ksBegin = begin.pack(self.subspace.begin);
+		::KeySelector ksEnd = end.pack(self.subspace.begin);
+		typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
 		    tr->getRange(ksBegin, ksEnd, limits, snapshot, reverse);
 
 		// Since the getRange result must be filtered to keys within the map subspace, it is possible that the given
 		// TypedKeySelectors and GetRangeLimits yields a result in which no KV pairs are within the map subspace.  If
 		// this happens, we can't return any map KV pairs for the caller to base the next request on, so we will loop
 		// and continue with the next request here.
-		state RangeResultType rangeResult;
-		loop {
-			RangeResult kvs = wait(safeThreadFutureToFuture(getRangeFuture));
+		RangeResultType rangeResult{};
+		while (true) {
+			RangeResult kvs = co_await safeThreadFutureToFuture(getRangeFuture);
 			kbt_debug("MAP GETRANGE KeySelectors {} - {} results={} more={}\n",
 			          begin.pack(self.subspace.begin).toString(),
 			          end.pack(self.subspace.begin).toString(),
@@ -1002,7 +988,7 @@ public:
 			getRangeFuture = tr->getRange(ksBegin, ksEnd, limits, snapshot, reverse);
 		}
 
-		return rangeResult;
+		co_return rangeResult;
 	}
 
 	// GetRange with typed KeySelectors
@@ -1020,7 +1006,7 @@ public:
 	// These operation can be accomplished using KeySelectors however they run the risk of touching keys outside of
 	// map subspace, which can cause problems if this touches an offline range or a key which is unreadable by range
 	// read operations due to having been modified with a version stamp operation in the current transaction.
-	ACTOR template <class Transaction>
+	template <class Transaction>
 	static Future<Optional<ValueType>> seek(KeyBackedSet self,
 	                                        Transaction tr,
 	                                        ValueType query,
@@ -1049,15 +1035,15 @@ public:
 			end = self.subspace.end;
 		}
 
-		state typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
+		typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
 		    tr->getRange(KeyRangeRef(begin, end), 1, snapshot, Reverse{ lessThan });
 
-		RangeResult kvs = wait(safeThreadFutureToFuture(getRangeFuture));
+		RangeResult kvs = co_await safeThreadFutureToFuture(getRangeFuture);
 		if (kvs.empty()) {
-			return Optional<ValueType>();
+			co_return Optional<ValueType>();
 		}
 
-		return self.unpackKey(kvs.front().key);
+		co_return self.unpackKey(kvs.front().key);
 	}
 
 	template <class Transaction>
@@ -1156,7 +1142,3 @@ public:
 	Subspace subspace;
 	WatchableTrigger trigger;
 };
-
-#include "flow/unactorcompiler.h"
-
-#endif

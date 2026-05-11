@@ -270,59 +270,40 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 	if (mode == "single") {
 		redundancy = "1";
 		log_replicas = "1";
-		storagePolicy = tLogPolicy = Reference<IReplicationPolicy>(new PolicyOne());
+		storagePolicy = tLogPolicy = makeReference<PolicyOne>();
 
 	} else if (mode == "double" || mode == "fast_recovery_double") {
 		redundancy = "2";
 		log_replicas = "2";
-		storagePolicy = tLogPolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		storagePolicy = tLogPolicy = makeReference<PolicyAcross>(2, "zoneid", makeReference<PolicyOne>());
 	} else if (mode == "triple" || mode == "fast_recovery_triple") {
 		redundancy = "3";
 		log_replicas = "3";
-		storagePolicy = tLogPolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		storagePolicy = tLogPolicy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 	} else if (mode == "three_datacenter" || mode == "multi_dc") {
 		redundancy = "6";
 		log_replicas = "4";
-		storagePolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3,
-		                     "dcid",
-		                     Reference<IReplicationPolicy>(
-		                         new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())))));
-		tLogPolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(2,
-		                     "dcid",
-		                     Reference<IReplicationPolicy>(
-		                         new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())))));
+		storagePolicy = makeReference<PolicyAcross>(
+		    3, "dcid", makeReference<PolicyAcross>(2, "zoneid", makeReference<PolicyOne>()));
+		tLogPolicy = makeReference<PolicyAcross>(
+		    2, "dcid", makeReference<PolicyAcross>(2, "zoneid", makeReference<PolicyOne>()));
 	} else if (mode == "three_datacenter_fallback") {
 		redundancy = "4";
 		log_replicas = "4";
-		storagePolicy = tLogPolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(2,
-		                     "dcid",
-		                     Reference<IReplicationPolicy>(
-		                         new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())))));
+		storagePolicy = tLogPolicy = makeReference<PolicyAcross>(
+		    2, "dcid", makeReference<PolicyAcross>(2, "zoneid", makeReference<PolicyOne>()));
 	} else if (mode == "three_data_hall") {
 		redundancy = "3";
 		log_replicas = "4";
-		storagePolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "data_hall", Reference<IReplicationPolicy>(new PolicyOne())));
-		tLogPolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(2,
-		                     "data_hall",
-		                     Reference<IReplicationPolicy>(
-		                         new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())))));
+		storagePolicy = makeReference<PolicyAcross>(3, "data_hall", makeReference<PolicyOne>());
+		tLogPolicy = makeReference<PolicyAcross>(
+		    2, "data_hall", makeReference<PolicyAcross>(2, "zoneid", makeReference<PolicyOne>()));
 	} else if (mode == "three_data_hall_fallback") {
 		redundancy = "2";
 		log_replicas = "4";
-		storagePolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(2, "data_hall", Reference<IReplicationPolicy>(new PolicyOne())));
-		tLogPolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(2,
-		                     "data_hall",
-		                     Reference<IReplicationPolicy>(
-		                         new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())))));
+		storagePolicy = makeReference<PolicyAcross>(2, "data_hall", makeReference<PolicyOne>());
+		tLogPolicy = makeReference<PolicyAcross>(
+		    2, "data_hall", makeReference<PolicyAcross>(2, "zoneid", makeReference<PolicyOne>()));
 	} else
 		redundancySpecified = false;
 	if (redundancySpecified) {
@@ -350,25 +331,20 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 	} else if (mode == "remote_single") {
 		remote_redundancy = "1";
 		remote_log_replicas = "1";
-		remoteTLogPolicy = Reference<IReplicationPolicy>(new PolicyOne());
+		remoteTLogPolicy = makeReference<PolicyOne>();
 	} else if (mode == "remote_double") {
 		remote_redundancy = "2";
 		remote_log_replicas = "2";
-		remoteTLogPolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		remoteTLogPolicy = makeReference<PolicyAcross>(2, "zoneid", makeReference<PolicyOne>());
 	} else if (mode == "remote_triple") {
 		remote_redundancy = "3";
 		remote_log_replicas = "3";
-		remoteTLogPolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		remoteTLogPolicy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 	} else if (mode == "remote_three_data_hall") { // FIXME: not tested in simulation
 		remote_redundancy = "3";
 		remote_log_replicas = "4";
-		remoteTLogPolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(2,
-		                     "data_hall",
-		                     Reference<IReplicationPolicy>(
-		                         new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())))));
+		remoteTLogPolicy = makeReference<PolicyAcross>(
+		    2, "data_hall", makeReference<PolicyAcross>(2, "zoneid", makeReference<PolicyOne>()));
 	} else
 		remoteRedundancySpecified = false;
 	if (remoteRedundancySpecified) {
@@ -407,8 +383,8 @@ ConfigurationResult buildConfiguration(std::vector<StringRef> const& modeTokens,
 	auto p = configKeysPrefix.toString();
 	if (!outConf.contains(p + "storage_replication_policy") && outConf.contains(p + "storage_replicas")) {
 		int storageCount = stoi(outConf[p + "storage_replicas"]);
-		Reference<IReplicationPolicy> storagePolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(storageCount, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		Reference<IReplicationPolicy> storagePolicy =
+		    makeReference<PolicyAcross>(storageCount, "zoneid", makeReference<PolicyOne>());
 		BinaryWriter policyWriter(IncludeVersion(ProtocolVersion::withReplicationPolicy()));
 		serializeReplicationPolicy(policyWriter, storagePolicy);
 		outConf[p + "storage_replication_policy"] = policyWriter.toValue().toString();
@@ -416,8 +392,8 @@ ConfigurationResult buildConfiguration(std::vector<StringRef> const& modeTokens,
 
 	if (!outConf.contains(p + "log_replication_policy") && outConf.contains(p + "log_replicas")) {
 		int logCount = stoi(outConf[p + "log_replicas"]);
-		Reference<IReplicationPolicy> logPolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(logCount, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		Reference<IReplicationPolicy> logPolicy =
+		    makeReference<PolicyAcross>(logCount, "zoneid", makeReference<PolicyOne>());
 		BinaryWriter policyWriter(IncludeVersion(ProtocolVersion::withReplicationPolicy()));
 		serializeReplicationPolicy(policyWriter, logPolicy);
 		outConf[p + "log_replication_policy"] = policyWriter.toValue().toString();
@@ -1173,7 +1149,7 @@ struct NameQuorumChange final : IQuorumChange {
 	std::string getDesiredClusterKeyName() const override { return newName; }
 };
 Reference<IQuorumChange> nameQuorumChange(std::string const& name, Reference<IQuorumChange> const& other) {
-	return Reference<IQuorumChange>(new NameQuorumChange(name, other));
+	return makeReference<NameQuorumChange>(name, other);
 }
 
 struct AutoQuorumChange final : IQuorumChange {
@@ -1412,7 +1388,7 @@ struct AutoQuorumChange final : IQuorumChange {
 	}
 };
 Reference<IQuorumChange> autoQuorumChange(int desired) {
-	return Reference<IQuorumChange>(new AutoQuorumChange(desired));
+	return makeReference<AutoQuorumChange>(desired);
 }
 
 Future<Void> excludeServers(Transaction* tr, std::vector<AddressExclusion> servers, bool failed) {
