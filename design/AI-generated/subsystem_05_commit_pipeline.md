@@ -100,7 +100,6 @@ Assigns read versions to client transactions. The GRV proxy is the primary enfor
 ```
 struct GrvProxyData {
     MasterInterface master;                    // version source
-    GrvProxyTagThrottler tagThrottler;         // per-tag throttling
     VersionVector ssVersionVectorCache;        // storage server version tracking
     Version version;
 };
@@ -121,7 +120,6 @@ Flow control is the mechanism that prevents the cluster from being overwhelmed w
 - Each GRV proxy periodically sends a `GetRateInfoRequest` to ratekeeper (every `leaseDuration/2` seconds, jittered).
 - Ratekeeper replies with `transactionRate = normalLimits.tpsLimit / numProxies` and `batchTransactionRate = batchLimits.tpsLimit / numProxies` — the global limit divided evenly across all GRV proxies.
 - The reply also includes a `leaseDuration` (default `METRIC_UPDATE_RATE` = 0.1s). If the proxy doesn't hear back within the lease, it disables rate limiting (sets rate to 0 via `GrvTransactionRateInfo::disable()`), which smoothly ramps the allowed rate to zero and stops releasing transactions.
-- Optionally includes per-tag throttle information for `GrvProxyTagThrottler`.
 
 **3. GRV proxy enforces the rate via a token bucket** (`GrvTransactionRateInfo`, `GrvTransactionRateInfo.h`):
 - Each proxy maintains two `GrvTransactionRateInfo` objects: `normalRateInfo` (for SYSTEM + DEFAULT) and `batchRateInfo` (for BATCH).
@@ -162,7 +160,6 @@ When the total GRV queue depth exceeds `START_TRANSACTION_MAX_QUEUE_SIZE`, the p
 
 1. **Queuing** (`queueGetReadVersionRequests`, line 518):
    - Three priority queues: SYSTEM, DEFAULT, BATCH
-   - Tagged requests optionally routed to `GrvProxyTagThrottler` for per-tag rate limiting
    - Dynamic batching as described above
 
 2. **Version fetch** (`getLiveCommittedVersion`, line 670):
@@ -302,7 +299,6 @@ Tags connect mutations to storage servers:
 | `fdbserver/commitproxy/ProxyCommitData.h` | ProxyCommitData, tag lookup |
 | [`fdbserver/grvproxy/GrvProxyServer.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/grvproxy/GrvProxyServer.cpp) | Read version assignment, rate limiting enforcement |
 | `fdbserver/grvproxy/GrvTransactionRateInfo.h` | Token-bucket rate limiter driven by ratekeeper |
-| `fdbserver/grvproxy/GrvProxyTagThrottler.h` | Per-tag throttling on proxy side |
 | [`fdbserver/sequencer/masterserver.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/sequencer/masterserver.cpp) | Version assignment, wall-clock alignment |
 | `fdbserver/sequencer/MasterData.h` | MasterData, version tracking |
 | [`fdbserver/resolver/Resolver.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/resolver/Resolver.cpp) | Conflict detection, batch resolution |

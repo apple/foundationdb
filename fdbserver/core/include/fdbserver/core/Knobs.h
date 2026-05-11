@@ -1000,44 +1000,6 @@ public:
 	// Limit to the number of throttling tags each storage server
 	// will track and send to the ratekeeper
 	int64_t SS_THROTTLE_TAGS_TRACKED;
-	// Use global tag throttling strategy. i.e. throttle based on the cluster-wide
-	// throughput for tags and their associated quotas.
-	bool GLOBAL_TAG_THROTTLING;
-	// Enforce tag throttling on proxies rather than on clients
-	bool ENFORCE_TAG_THROTTLING_ON_PROXIES;
-	// Minimum number of transactions per second that the global tag throttler must allow for each tag.
-	// When the measured tps for a tag gets too low, the denominator in the
-	// average cost calculation gets small, resulting in an unstable calculation.
-	// To protect against this, we do not compute the average cost when the
-	// measured tps drops below this threshold
-	double GLOBAL_TAG_THROTTLING_MIN_RATE;
-	// Maximum number of tags tracked by global tag throttler. Additional tags will be ignored
-	// until some existing tags expire
-	int64_t GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED;
-	// Global tag throttler forgets about throughput from a tag once no new transactions from that
-	// tag have been received for this duration (in seconds):
-	int64_t GLOBAL_TAG_THROTTLING_TAG_EXPIRE_AFTER;
-	// Interval at which latency bands are logged for each tag on grv proxy
-	double GLOBAL_TAG_THROTTLING_PROXY_LOGGING_INTERVAL;
-	// Interval at which ratekeeper logs statistics for each tag:
-	double GLOBAL_TAG_THROTTLING_TRACE_INTERVAL;
-	// If this knob is set to true, the global tag throttler will still
-	// compute rates, but these rates won't be sent to GRV proxies for
-	// enforcement.
-	bool GLOBAL_TAG_THROTTLING_REPORT_ONLY;
-	// Below this throughput threshold (in bytes/second), ratekeeper will forget about the
-	// throughput of a particular tag on a particular storage server
-	int64_t GLOBAL_TAG_THROTTLING_FORGET_SS_THRESHOLD;
-	// If a tag's throughput on a particular storage server exceeds this threshold,
-	// this storage server's throttling ratio will contribute the calculation of the
-	// throttlingId's limiting transaction rate
-	double GLOBAL_TAG_THROTTLING_LIMITING_THRESHOLD;
-
-	double GLOBAL_TAG_THROTTLING_TARGET_RATE_FOLDING_TIME;
-	double GLOBAL_TAG_THROTTLING_TRANSACTION_COUNT_FOLDING_TIME;
-	double GLOBAL_TAG_THROTTLING_TRANSACTION_RATE_FOLDING_TIME;
-	double GLOBAL_TAG_THROTTLING_COST_FOLDING_TIME;
-
 	bool HOT_SHARD_THROTTLING_ENABLED;
 	double HOT_SHARD_THROTTLING_EXPIRE_AFTER;
 	int64_t HOT_SHARD_THROTTLING_TRACKED;
