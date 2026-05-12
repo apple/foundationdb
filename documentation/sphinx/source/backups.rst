@@ -36,7 +36,7 @@ Backup data is not encrypted at rest on disk or in a blob store account.
 Tools
 ===========
 
-There are 5 command line tools for working with Backup and DR operations:
+There are 6 command line tools for working with Backup and DR operations:
 
 ``fdbbackup``
     This command line tool is used to control (but not execute) backup jobs and manage backup data.  It can ``start``, ``modify`` or ``abort`` a backup, ``discontinue`` a continuous backup, get the ``status`` of an ongoing backup, or ``wait`` for a backup to complete.  It can also ``describe``, ``delete``, ``expire`` data in a backup, or ``list`` the backups at a destination folder URL.
@@ -48,10 +48,13 @@ There are 5 command line tools for working with Backup and DR operations:
     The backup agent is a daemon that actually executes the work of the backup and restore jobs.  Any number of backup agents pointed at the same database will cooperate to perform  backups and restores. The Backup URL specified for a backup or restore must be accessible by all ``backup_agent`` processes.
 
 ``fdbdr``
-    This command line tool is used to control (but not execute) DR jobs - backups from one database to another.  It can ``start``, ``abort`` a DR job, or ``switch`` the DR direction.  It can also get the ``status`` of a running DR job.  
+    This command line tool is used to control (but not execute) DR jobs - backups from one database to another.  It can ``start``, ``abort`` a DR job, or ``switch`` the DR direction.  It can also get the ``status`` of a running DR job.
 
 ``dr_agent``
     The database backup agent is a daemon that actually executes the work of the DR jobs, writing snapshot and log data to the destination database.  Any number of agents pointed at the same databases will cooperate to perform the backup.
+
+``fdbdecode``
+    This command line tool decodes and inspects the raw contents of a backup container.  It reads mutation log files and range snapshot files directly from a backup URL and prints their contents to stdout in hexadecimal format.  It is primarily useful for debugging backups and auditing the mutations recorded during a backup window.
 
 By default, the FoundationDB packages are configured to start a single ``backup_agent`` process on each FoundationDB server. If you want to perform a backup to a network drive or blob store instance that is accessible to every server, you can immediately use the ``fdbbackup start`` command from any machine with access to your cluster to start the backup
 
@@ -688,3 +691,165 @@ Unlike ``backup_agent``, ``dr_agent`` is not started automatically in a default 
 
 ``-s <CLUSTER_FILE>``
   Specify the path to the ``fdb.cluster`` file for the source cluster of the DR operation.
+
+.. _fdbdecode-intro:
+
+``fdbdecode`` command line tool
+================================
+
+.. program:: fdbdecode
+
+``fdbdecode`` reads backup files directly from a backup container and prints their decoded contents to stdout.  It is a diagnostic and inspection tool — it does not modify any data.  Its output is useful for auditing which mutations were captured in a backup, verifying backup contents after an incident, or troubleshooting backup and restore issues.
+
+There are two kinds of files in a FoundationDB backup:
+
+* **Mutation log files** record every individual mutation (set, clear, atomic operation) that occurred in the database during the backup window, grouped by version.
+* **Range snapshot files** record a point-in-time snapshot of the full key-value state for a key range at a specific version.
+
+``fdbdecode`` can decode either or both file types from the same container in a single invocation.
+
+Output format
+-------------
+
+For each mutation in a log file, one line is printed per mutation::
+
+    <version>.<subsequence> <mutation_type> param1: <hex_key> param2: <hex_value>
+
+For each key-value pair in a range snapshot file, one line is printed::
+
+    <version> key: <hex_key>  value: <hex_value>
+
+All keys and values are printed as hexadecimal strings.  The backup description (version range, restorable versions, etc.) is also printed before the file contents.
+
+.. note::
+
+   **Range snapshot files do not all share the same version.**
+
+   A FoundationDB backup snapshot is *inconsistent*: different key ranges (shards) are read at different FDB versions spread across the snapshot window (``snapshotBeginVersion`` to ``snapshotTargetEndVersion``).  Each range file covers exactly one shard and all key-value pairs within it are read in a single transaction at one specific version, but that version differs between files covering different shards.
+
+   As a result:
+
+   * The ``<version>`` prefix in range file output is the **shard read version** — the version at which that entire shard was fetched — not the version at which each individual key was last written.
+   * Two keys that appear in different range files may carry different version numbers even though they were both captured in the same logical snapshot.
+   * Range file output alone does **not** represent a consistent point-in-time view of the database.  To reconstruct the database state at any specific version you must combine the range files with the mutation log files: the log files record every mutation between ``snapshotBeginVersion`` and the restore target, allowing each shard to be "rolled forward" to a common consistent version.
+   * The ``--begin-version-filter`` and ``--end-version-filter`` options filter range files by their shard read version (one version per file), **not** by the write version of individual keys.  A key whose shard was read at version 1,500,000 will be excluded if you filter ``--end-version-filter 1,000,000``, even if the key itself was written long before that.
+
+   Mutation log files do not have this ambiguity: every mutation is stamped with the exact FDB commit version at which it was written.
+
+Basic usage
+-----------
+
+::
+
+    user@host$ fdbdecode -r <BACKUP_URL> [OPTIONS]
+
+Required options
+^^^^^^^^^^^^^^^^
+
+``-r <BACKUP_URL>`` or ``--container <BACKUP_URL>``
+  The :ref:`Backup URL <backup-urls>` of the backup container to decode.  Supports the same URL formats as ``fdbbackup`` (``file://``, ``blobstore://``, etc.).
+
+File selection options
+^^^^^^^^^^^^^^^^^^^^^^
+
+``-t [log|range|both]`` or ``--file-type [log|range|both]``
+  Selects which type of backup file to decode.  ``log`` decodes only mutation log files, ``range`` decodes only range snapshot files, and ``both`` (the default) decodes both.
+
+``-i <PATTERN>`` or ``--input <PATTERN>``
+  Restricts decoding to files whose names contain ``<PATTERN>``.  Useful for narrowing to a specific file or subset of files within a large backup.
+
+``--list-only``
+  Prints the list of matching files and then exits without decoding any file contents.
+
+Filtering options
+^^^^^^^^^^^^^^^^^
+
+``-k <KEY_PREFIX>``
+  Only output mutations and key-value pairs whose key starts with ``<KEY_PREFIX>``.  The prefix is interpreted as a raw byte string.  Can be specified multiple times to filter on multiple prefixes.
+
+``--hex-prefix <HEX_PREFIX>``
+  Same as ``-k`` but the prefix is given in hexadecimal escape notation, for example ``--hex-prefix "\\x05\\x01"``.
+
+``--filters <PREFIX_FILTER_FILE>``
+  Path to a file containing one or more key prefixes in hexadecimal format, separated by ``;`` (semicolons can be escaped as ``\;``).  For example, the file might contain ``\\x05\\x01;\\x15\\x2b``.  All prefixes in the file are applied as an OR filter — a mutation is printed if its key matches any of them.
+
+``--begin-version-filter <VERSION>``
+  Only output mutations at or after ``<VERSION>`` (inclusive).
+
+``--end-version-filter <VERSION>``
+  Only output mutations before ``<VERSION>`` (exclusive).
+
+Encryption and credentials
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``--encryption-key-file <FILE>``
+  Path to an AES-128-GCM encryption key file.  Required when decoding an encrypted backup.
+
+``--blob-credentials <FILE>``
+  Path to a :ref:`Blob Credential File <blob-credential-files>` for accessing a blobstore backup container.
+
+Local file caching
+^^^^^^^^^^^^^^^^^^
+
+``-s`` or ``--save``
+  Save a local copy of each downloaded backup file into the current directory (mirroring the container's directory structure).  By default downloaded files are not saved.
+
+Trace logging options
+^^^^^^^^^^^^^^^^^^^^^
+
+``--log``
+  Enable trace file logging for the session.
+
+``--logdir <PATH>``
+  Directory for trace files.  Defaults to the current directory.  Has no effect unless ``--log`` is specified.
+
+``--loggroup <LOG_GROUP>``
+  Sets the ``LogGroup`` field for all trace events.  Defaults to ``default``.
+
+``--trace-format [xml|json]``
+  Format for trace files.  Defaults to ``json``.  Has no effect unless ``--log`` is specified.
+
+Miscellaneous options
+^^^^^^^^^^^^^^^^^^^^^
+
+``--crash``
+  Crash the process on a serious error instead of returning an error code.
+
+``--build-flags``
+  Print build information (version, compile-time flags) and exit.
+
+``--validate-filters``
+  Cross-check the fast ``RangeMap``-based prefix filter against a slower linear scan and assert that both produce identical results.  Intended for development and testing.
+
+``--knob-<KNOBNAME> <VALUE>``
+  Override an internal knob at runtime.  ``<KNOBNAME>`` must be lowercase.
+
+TLS options
+^^^^^^^^^^^
+
+In-flight traffic to a blobstore or DR backup can be encrypted.  See :ref:`TLS Support <tls>` for details.  The relevant flags are ``--tls-certificate-file``, ``--tls-key-file``, ``--tls-password``, ``--tls-ca-file``, and ``--tls-verify-peers``.
+
+Examples
+--------
+
+List all files in a local backup without decoding::
+
+    user@host$ fdbdecode -r file:///path/to/backup --list-only
+
+Decode all mutation log files from a local backup::
+
+    user@host$ fdbdecode -r file:///path/to/backup -t log
+
+Decode all log and range files, filtering to a specific key prefix::
+
+    user@host$ fdbdecode -r file:///path/to/backup --hex-prefix "\\x05\\x01"
+
+Decode mutations in a specific version window::
+
+    user@host$ fdbdecode -r file:///path/to/backup -t log \
+        --begin-version-filter 1000000 --end-version-filter 2000000
+
+Decode a blobstore backup with saved local copies and trace logging::
+
+    user@host$ fdbdecode -r blobstore://key:secret@s3.example.com/mybackup?bucket=mybucket \
+        -s --log --logdir /tmp/traces
