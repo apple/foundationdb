@@ -14,7 +14,7 @@ import uuid
 
 # Try API versions from newest to oldest
 _api_version_set = False
-for _api_version in [730, 720, 710, 700]:
+for _api_version in [740, 730, 720, 710, 700]:
     try:
         fdb.api_version(_api_version)
         _api_version_set = True
