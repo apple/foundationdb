@@ -34,9 +34,18 @@ Options (must come before COMMAND):
   --fdb-python PATH   Directory containing the fdb Python package
   -h, --help          Show this help
 
+All commands accept:
+  -C, --cluster-file PATH   Path to fdb.cluster file
+
 Environment variables:
+  FDB_CLUSTER_FILE    Path to fdb.cluster file
   FDB_LIB_PATH        Same as --fdb-lib
   FDB_PYTHON_PATH     Same as --fdb-python
+
+Examples:
+  $(basename "$0") check -C /etc/foundationdb/fdb.cluster
+  $(basename "$0") --fdb-lib /opt/fdb/lib backup -C fdb.cluster -o /tmp/backup
+  $(basename "$0") restore --backup-dir backup_20260216 --dry-run -C fdb.cluster
 
 EOF
     exit "${1:-0}"
