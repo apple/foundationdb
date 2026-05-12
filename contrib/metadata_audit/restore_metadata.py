@@ -261,7 +261,7 @@ def verify_backup(args, manifest, db):
 def main():
     parser = argparse.ArgumentParser(description='Restore FDB metadata from backup')
     parser.add_argument('--backup-dir', '-b', required=True, help='Backup directory')
-    parser.add_argument('--cluster-file', '-c', help='Path to fdb.cluster file')
+    parser.add_argument('--cluster-file', '-C', help='Path to fdb.cluster file')
     parser.add_argument('--yes-i-am-sure', action='store_true', help='Confirm restore')
     parser.add_argument('--dry-run', action='store_true', help='Show what would be done')
     parser.add_argument('--restore-only', choices=['serverList', 'keyServers', 'serverKeys'],

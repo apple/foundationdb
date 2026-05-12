@@ -58,7 +58,7 @@ Usage:
     python3 check_krm_corruption.py [options]
 
 Options:
-    -c, --cluster-file PATH   Path to fdb.cluster file
+    -C, --cluster-file PATH   Path to fdb.cluster file
     -k, --key-prefix HEX      Only check keyServers with this prefix (hex)
     -l, --limit N             Max entries to scan (default: 10M)
     -v, --verbose             Verbose output
@@ -3198,7 +3198,7 @@ def repair_keyservers_phantom_shards(db, audit_data, dry_run=True):
         print(f"  DRY RUN: Would delete {deleted} keyServers entries")
         print()
         print("  To execute this repair, run with --execute-repair:")
-        print("    python3 check_krm_corruption.py -c cluster.file \\")
+        print("    python3 check_krm_corruption.py -C cluster.file \\")
         print("        --repair-from-audit audit.json --repair-keyservers --execute-repair")
     else:
         print(f"  DELETED {deleted} keyServers entries")
@@ -4610,7 +4610,7 @@ def repair_keyservers_from_audit(db, audit_data, dry_run=True):
 
 def main():
     parser = argparse.ArgumentParser(description='Check FDB KRM for corruption')
-    parser.add_argument('--cluster-file', '-c', help='Path to fdb.cluster file')
+    parser.add_argument('--cluster-file', '-C', help='Path to fdb.cluster file')
     parser.add_argument('--fdbcli', help='Path to fdbcli binary (default: fdbcli in PATH or FDBCLI_PATH env var)')
     parser.add_argument('--key-prefix', '-k', help='Only check keyServers with this prefix (hex)', default=None)
     parser.add_argument('--check-blog', action='store_true', help='Check \\xff\\x02/blog/ range specifically')
@@ -4672,9 +4672,9 @@ def main():
     if args.repair_from_audit:
         if not args.repair_serverkeys and not args.repair_keyservers:
             print("ERROR: --repair-from-audit requires --repair-serverkeys or --repair-keyservers")
-            print("Usage: python3 check_krm_corruption.py -c cluster.file \\")
+            print("Usage: python3 check_krm_corruption.py -C cluster.file \\")
             print("         --repair-from-audit audit_output.json --repair-serverkeys")
-            print("  OR:  python3 check_krm_corruption.py -c cluster.file \\")
+            print("  OR:  python3 check_krm_corruption.py -C cluster.file \\")
             print("         --repair-from-audit audit_output.json --repair-keyservers")
             sys.exit(1)
 

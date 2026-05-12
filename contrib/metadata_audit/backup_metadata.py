@@ -72,7 +72,7 @@ def backup_range(db, prefix, end, name, batch_size=10000):
 
 def main():
     parser = argparse.ArgumentParser(description='Backup FDB metadata')
-    parser.add_argument('--cluster-file', '-c', help='Path to fdb.cluster file')
+    parser.add_argument('--cluster-file', '-C', help='Path to fdb.cluster file')
     parser.add_argument('--output-dir', '-o', default='backup', help='Output directory (default: backup)')
     args = parser.parse_args()
 

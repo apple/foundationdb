@@ -7,14 +7,14 @@ Tools for diagnosing and recovering from FoundationDB metadata corruption
 
 ```bash
 # Check for corruption (read-only diagnostics)
-./metadata-audit.sh check -c /path/to/fdb.cluster
+./metadata-audit.sh check -C /path/to/fdb.cluster
 
 # Backup metadata before any repair
-./metadata-audit.sh backup -c /path/to/fdb.cluster --output-dir /tmp/meta_backup
+./metadata-audit.sh backup -C /path/to/fdb.cluster --output-dir /tmp/meta_backup
 
 # Restore from backup (after failed repair)
 ./metadata-audit.sh restore --backup-dir /tmp/meta_backup_20260216_120000 \
-    --dry-run -c /path/to/fdb.cluster
+    --dry-run -C /path/to/fdb.cluster
 ```
 
 ## Prerequisites
@@ -43,8 +43,8 @@ Reads all three metadata spaces and cross-references them to detect:
 - Ranges assigned to zero servers
 
 ```bash
-./metadata-audit.sh check -c fdb.cluster
-./metadata-audit.sh check -c fdb.cluster --output report.txt
+./metadata-audit.sh check -C fdb.cluster
+./metadata-audit.sh check -C fdb.cluster --output report.txt
 ```
 
 ### `backup` — Snapshot Metadata to JSON
@@ -52,7 +52,7 @@ Reads all three metadata spaces and cross-references them to detect:
 Creates a timestamped backup of all metadata with verification.
 
 ```bash
-./metadata-audit.sh backup -c fdb.cluster --output-dir /safe/location
+./metadata-audit.sh backup -C fdb.cluster --output-dir /safe/location
 ```
 
 Output: `<output-dir>_<timestamp>/` containing JSON files and a manifest.
@@ -64,14 +64,14 @@ after a failed repair attempt.
 
 ```bash
 # Preview what would be restored
-./metadata-audit.sh restore --backup-dir backup_20260216_120000 --dry-run -c fdb.cluster
+./metadata-audit.sh restore --backup-dir backup_20260216_120000 --dry-run -C fdb.cluster
 
 # Actually restore (requires confirmation flag)
-./metadata-audit.sh restore --backup-dir backup_20260216_120000 --yes-i-am-sure -c fdb.cluster
+./metadata-audit.sh restore --backup-dir backup_20260216_120000 --yes-i-am-sure -C fdb.cluster
 
 # Restore only one metadata type
 ./metadata-audit.sh restore --backup-dir backup_20260216_120000 \
-    --restore-only keyServers --yes-i-am-sure -c fdb.cluster
+    --restore-only keyServers --yes-i-am-sure -C fdb.cluster
 ```
 
 **Important limitations:** Restoring `serverKeys` only works if the same
@@ -85,7 +85,7 @@ If not using the wrapper script:
 ```bash
 export LD_LIBRARY_PATH=/path/to/lib/containing/libfdb_c:$LD_LIBRARY_PATH
 export PYTHONPATH=/path/to/fdb/python/bindings:$PYTHONPATH
-python3 check_krm_corruption.py -c fdb.cluster
+python3 check_krm_corruption.py -C fdb.cluster
 ```
 
 ## How It Works

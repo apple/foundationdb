@@ -6,14 +6,14 @@
 # to the appropriate Python script.
 #
 # Usage:
-#   ./metadata-audit.sh check -c fdb.cluster
-#   ./metadata-audit.sh backup -c fdb.cluster --output-dir /tmp/backup
-#   ./metadata-audit.sh restore --backup-dir /tmp/backup --dry-run -c fdb.cluster
+#   ./metadata-audit.sh check -C fdb.cluster
+#   ./metadata-audit.sh backup -C fdb.cluster --output-dir /tmp/backup
+#   ./metadata-audit.sh restore --backup-dir /tmp/backup --dry-run -C fdb.cluster
 #
 #   # With explicit paths:
 #   ./metadata-audit.sh --fdb-lib /opt/foundationdb/lib \
 #                       --fdb-python ~/build_output/bindings/python \
-#                       check -c fdb.cluster
+#                       check -C fdb.cluster
 #
 set -euo pipefail
 
@@ -131,7 +131,22 @@ find_fdb_lib() {
 }
 
 FDB_LIB_DIR=$(find_fdb_lib) || {
-    echo "Error: Cannot find libfdb_c. Use --fdb-lib PATH or set FDB_LIB_PATH." >&2
+    local lib_name
+    if [[ "$(uname)" == "Darwin" ]]; then lib_name="libfdb_c.dylib"; else lib_name="libfdb_c.so"; fi
+    echo "Error: Cannot find $lib_name" >&2
+    echo "" >&2
+    echo "Searched in:" >&2
+    [[ -n "${FDB_LIB_PATH:-}" ]] && echo "  FDB_LIB_PATH=$FDB_LIB_PATH" >&2
+    [[ -n "${LD_LIBRARY_PATH:-}" ]] && echo "  LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >&2
+    [[ -n "${DYLD_LIBRARY_PATH:-}" ]] && echo "  DYLD_LIBRARY_PATH=$DYLD_LIBRARY_PATH" >&2
+    echo "  $REPO_ROOT/build_output/lib/" >&2
+    echo "  $HOME/build_output/lib/" >&2
+    echo "  /usr/lib/" >&2
+    echo "  /usr/local/lib/" >&2
+    echo "" >&2
+    echo "Fix: specify the directory containing $lib_name:" >&2
+    echo "  ./metadata-audit.sh --fdb-lib /path/to/lib check ..." >&2
+    echo "  export FDB_LIB_PATH=/path/to/lib" >&2
     exit 1
 }
 
@@ -179,7 +194,19 @@ find_fdb_python() {
 }
 
 FDB_PYTHON_DIR=$(find_fdb_python) || {
-    echo "Error: Cannot find fdb Python module. Use --fdb-python PATH or set FDB_PYTHON_PATH." >&2
+    echo "Error: Cannot find fdb Python module (directory containing fdb/ package)" >&2
+    echo "" >&2
+    echo "Searched in:" >&2
+    [[ -n "${FDB_PYTHON_PATH:-}" ]] && echo "  FDB_PYTHON_PATH=$FDB_PYTHON_PATH" >&2
+    echo "  python3 -c 'import fdb' (not importable)" >&2
+    echo "  $REPO_ROOT/build_output/bindings/python/" >&2
+    echo "  $HOME/build_output/bindings/python/" >&2
+    echo "  $SCRIPT_DIR/" >&2
+    echo "" >&2
+    echo "Fix: specify the directory containing the fdb/ package:" >&2
+    echo "  ./metadata-audit.sh --fdb-python /path/to/bindings/python check ..." >&2
+    echo "  export FDB_PYTHON_PATH=/path/to/bindings/python" >&2
+    echo "  pip install foundationdb" >&2
     exit 1
 }
 
@@ -189,6 +216,43 @@ fi
 
 # Also add the script directory so fdb_metadata_utils is importable
 export PYTHONPATH="${SCRIPT_DIR}${PYTHONPATH:+:$PYTHONPATH}"
+
+# --- Check for cluster file ---
+
+# See if the user passed -C or --cluster-file in the remaining args
+has_cluster_arg=false
+for arg in "$@"; do
+    if [[ "$arg" == "-C" || "$arg" == "--cluster-file" ]]; then
+        has_cluster_arg=true
+        break
+    fi
+done
+
+if [[ "$has_cluster_arg" == "false" ]]; then
+    # Check default locations
+    cluster_file="${FDB_CLUSTER_FILE:-}"
+    if [[ -z "$cluster_file" ]]; then
+        if [[ -f "/etc/foundationdb/fdb.cluster" ]]; then
+            cluster_file="/etc/foundationdb/fdb.cluster"
+        elif [[ -f "$HOME/.fdb/fdb.cluster" ]]; then
+            cluster_file="$HOME/.fdb/fdb.cluster"
+        fi
+    fi
+
+    if [[ -z "$cluster_file" || ! -f "$cluster_file" ]]; then
+        echo "Error: No cluster file found" >&2
+        echo "" >&2
+        echo "Searched in:" >&2
+        [[ -n "${FDB_CLUSTER_FILE:-}" ]] && echo "  FDB_CLUSTER_FILE=$FDB_CLUSTER_FILE (not found)" >&2
+        echo "  /etc/foundationdb/fdb.cluster" >&2
+        echo "  $HOME/.fdb/fdb.cluster" >&2
+        echo "" >&2
+        echo "Fix: pass the cluster file explicitly:" >&2
+        echo "  ./metadata-audit.sh $COMMAND -C /path/to/fdb.cluster ..." >&2
+        echo "  export FDB_CLUSTER_FILE=/path/to/fdb.cluster" >&2
+        exit 1
+    fi
+fi
 
 # --- Execute ---
 
