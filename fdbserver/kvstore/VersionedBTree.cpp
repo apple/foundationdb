@@ -2103,7 +2103,7 @@ public:
 			if (!exists) {
 				flags |= IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE;
 			}
-			co_await store(self->pageFile, IAsyncFileSystem::filesystem()->open(self->filename, flags, 0644));
+			self->pageFile = co_await IAsyncFileSystem::filesystem()->open(self->filename, flags, 0644);
 		}
 
 		// Header page is always treated as having a page size of smallestPhysicalBlock
@@ -2111,7 +2111,7 @@ public:
 
 		int64_t fileSize = 0;
 		if (exists) {
-			co_await store(fileSize, self->pageFile->size());
+			fileSize = co_await self->pageFile->size();
 		}
 
 		self->fileExtension = Void();
@@ -2134,7 +2134,7 @@ public:
 
 			// Try to read primary header
 			try {
-				co_await store(self->headerPage, self->readHeaderPage(primaryHeaderPageID));
+				self->headerPage = co_await self->readHeaderPage(primaryHeaderPageID);
 			} catch (Error& e) {
 				debug_printf("DWALPager(%s) Primary header read failed with %s\n", self->filename.c_str(), e.what());
 
@@ -2163,7 +2163,7 @@ public:
 			if (!self->headerPage.isValid()) {
 				// Try to read backup header
 				try {
-					co_await store(self->headerPage, self->readHeaderPage(backupHeaderPageID));
+					self->headerPage = co_await self->readHeaderPage(backupHeaderPageID);
 					recoveredBackupHeader = true;
 				} catch (Error& e) {
 					debug_printf("DWALPager(%s) Backup header read failed with %s\n", self->filename.c_str(), e.what());
@@ -2352,7 +2352,7 @@ public:
 		}
 
 		if (!self->memoryOnly) {
-			co_await store(fileSize, self->pageFile->size());
+			fileSize = co_await self->pageFile->size();
 		}
 
 		TraceEvent e(SevInfo, "RedwoodRecoveredPager");
