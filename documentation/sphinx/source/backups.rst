@@ -827,7 +827,7 @@ Miscellaneous options
 TLS options
 ^^^^^^^^^^^
 
-In-flight traffic to a blobstore or DR backup can be encrypted.  See :ref:`TLS Support <tls>` for details.  The relevant flags are ``--tls-certificate-file``, ``--tls-key-file``, ``--tls-password``, ``--tls-ca-file``, and ``--tls-verify-peers``.
+In-flight traffic to a blobstore or DR backup can be encrypted.  See :ref:`TLS Support <enable-TLS>` for details.  The relevant flags are ``--tls-certificate-file``, ``--tls-key-file``, ``--tls-password``, ``--tls-ca-file``, and ``--tls-verify-peers``.
 
 Examples
 --------
