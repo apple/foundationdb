@@ -114,12 +114,17 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 			Value idempotencyId = makeString(length);
 			deterministicRandom()->randomBytes(mutateString(idempotencyId), length);
 			TraceEvent("IdempotencyIdWorkloadTransaction").detail("Id", idempotencyId);
+			bool automatic = deterministicRandom()->random01() < automaticPercentage;
+			Reference<ReadYourWritesTransaction> committedTr;
 			co_await runRYWTransaction(
-			    cx, [this, idempotencyId = idempotencyId](Reference<ReadYourWritesTransaction> tr) {
+			    cx,
+			    [this, idempotencyId = idempotencyId, automatic, &committedTr](
+			        Reference<ReadYourWritesTransaction> tr) {
+				    committedTr = tr;
 				    // If we don't set AUTOMATIC_IDEMPOTENCY the idempotency id won't automatically get cleaned up, so
 				    // it should create work for the cleaner.
 				    tr->setOption(FDBTransactionOptions::IDEMPOTENCY_ID, idempotencyId);
-				    if (deterministicRandom()->random01() < automaticPercentage) {
+				    if (automatic) {
 					    // We also want to exercise the automatic idempotency code path.
 					    tr->setOption(FDBTransactionOptions::AUTOMATIC_IDEMPOTENCY);
 				    }
@@ -132,6 +137,12 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 				                 MutationRef::SetVersionstampedKey);
 				    return Future<Void>(Void());
 			    });
+			if (committedTr->getCommittedVersion() == invalidVersion) {
+				TraceEvent(SevError, "IdempotencyCommitMissingVersion")
+				    .detail("Id", idempotencyId)
+				    .detail("AutomaticIdempotency", automatic);
+				ok = false;
+			}
 		}
 	}
 

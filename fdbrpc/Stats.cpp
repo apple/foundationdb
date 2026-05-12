@@ -106,12 +106,14 @@ void CounterCollection::logToTraceEvent(TraceEvent& te) {
 				metrics->sumMap[c->id].points.back().addAttribute("ip", ip_str);
 				metrics->sumMap[c->id].points.back().addAttribute("port", port_str);
 				metrics->sumMap[c->id].points.back().startTime = logTime;
+				break;
 			}
 			case MetricsDataModel::STATSD: {
 				std::vector<std::pair<std::string, std::string>> statsd_attributes{ { "ip", ip_str },
 					                                                                { "port", port_str } };
 				metrics->statsd_message.push_back(createStatsdMessage(
 				    c->getName(), StatsDMetric::COUNTER, std::to_string(val) /*, statsd_attributes*/));
+				break;
 			}
 			case MetricsDataModel::NONE:
 			default: {
@@ -288,6 +290,7 @@ void LatencySample::logSample() {
 			createOtelGauge(p95id, name + "p95", p95);
 			createOtelGauge(p99id, name + "p99", p99);
 			createOtelGauge(p999id, name + "p99_9", p99_9);
+			break;
 		}
 		case MetricsDataModel::STATSD: {
 			std::vector<std::pair<std::string, std::string>> statsd_attributes{ { "ip", ip_str },
@@ -302,6 +305,7 @@ void LatencySample::logSample() {
 			    createStatsdMessage(name + "p99", StatsDMetric::GAUGE, std::to_string(p99) /*, statsd_attributes*/);
 			auto p999_gauge =
 			    createStatsdMessage(name + "p99.9", StatsDMetric::GAUGE, std::to_string(p99_9) /*, statsd_attributes*/);
+			break;
 		}
 		case MetricsDataModel::NONE:
 		default: {
