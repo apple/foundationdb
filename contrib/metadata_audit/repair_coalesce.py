@@ -219,7 +219,9 @@ def coalesce_serverkeys(db, server_uid, dry_run=False):
     if to_delete and not dry_run:
         delete_keys_batched(db, to_delete)
 
-    return len(to_delete), len(to_delete) if not dry_run else 0
+    found = len(to_delete)
+    deleted = found if not dry_run else 0
+    return found, deleted
 
 
 def coalesce_keyservers(db, key_prefix=None, dry_run=False):
@@ -237,7 +239,9 @@ def coalesce_keyservers(db, key_prefix=None, dry_run=False):
         print(f"    Deleting {len(to_delete)} redundant entries...", flush=True)
         delete_keys_batched(db, to_delete)
 
-    return len(to_delete), len(to_delete) if not dry_run else 0
+    found = len(to_delete)
+    deleted = found if not dry_run else 0
+    return found, deleted
 
 
 def main():

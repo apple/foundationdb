@@ -19,6 +19,12 @@
 #
 
 # FoundationDB Python API
+#
+# Vendored from bindings/python/fdb/ (commit 2d2a2144f4, 2026).
+# Modified: api_version() queries libfdb_c's max API version at runtime
+# instead of using a hardcoded LATEST_API_VERSION constant.
+# fdboptions.py generated from fdbclient/vexillographer/fdb.options.
+#
 
 """Documentation for this API can be found at
 https://apple.github.io/foundationdb/api-python.html"""
