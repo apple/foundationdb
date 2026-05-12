@@ -36,21 +36,21 @@ ps auxw | grep fdbserver
 This shows something like:
 
 ```
-fdb  12345  ... /opt/ais/local/CIEDb/cie-foundationdb-client-.../bin/fdbserver \
-    -C /data/v8/fdb/daily_test/fdb.cluster ...
+fdb  12345  ... /usr/local/foundationdb/bin/fdbserver \
+    -C /etc/foundationdb/fdb.cluster ...
 ```
 
 From this you can extract:
 
-- **Cluster file**: the `-C` argument (e.g., `/data/v8/fdb/daily_test/fdb.cluster`)
+- **Cluster file**: the `-C` argument (e.g., `/etc/foundationdb/fdb.cluster`)
 - **libfdb_c location**: replace `bin/fdbserver` with `lib/` in the binary path
-  (e.g., `/opt/ais/local/CIEDb/cie-foundationdb-client-.../lib/`)
+  (e.g., `/usr/local/foundationdb/lib/`)
 
 Then run:
 
 ```bash
-FDB_LIB_PATH=/opt/ais/local/.../lib \
-    ./metadata-audit.sh check -C /data/v8/fdb/daily_test/fdb.cluster
+FDB_LIB_PATH=/usr/local/foundationdb/lib \
+    ./metadata-audit.sh check -C /etc/foundationdb/fdb.cluster
 ```
 
 If `libfdb_c` is already on `LD_LIBRARY_PATH` (common on hosts with the client
