@@ -20,16 +20,45 @@ Tools for diagnosing and recovering from FoundationDB metadata corruption
 ## Prerequisites
 
 1. **libfdb_c** — The FDB C client library (`libfdb_c.so` or `libfdb_c.dylib`).
-   Build from source or install the `foundationdb-clients` package.
 
-2. **fdb Python module** — The FoundationDB Python bindings.
-   Either `pip install foundationdb` or use the build output from
-   `bindings/python/` in your FDB build directory.
+2. **Python 3.6+**
 
-3. **Python 3.6+**
+The `fdb` Python bindings are bundled in this directory — no `pip install` needed.
 
-The wrapper script (`metadata-audit.sh`) automatically searches for these in
-common locations. Use `--fdb-lib` and `--fdb-python` flags to override.
+## Finding libfdb_c and the Cluster File
+
+On a machine running FDB, use `ps` to find the running `fdbserver` process:
+
+```bash
+ps auxw | grep fdbserver
+```
+
+This shows something like:
+
+```
+fdb  12345  ... /opt/ais/local/CIEDb/cie-foundationdb-client-.../bin/fdbserver \
+    -C /data/v8/fdb/daily_test/fdb.cluster ...
+```
+
+From this you can extract:
+
+- **Cluster file**: the `-C` argument (e.g., `/data/v8/fdb/daily_test/fdb.cluster`)
+- **libfdb_c location**: replace `bin/fdbserver` with `lib/` in the binary path
+  (e.g., `/opt/ais/local/CIEDb/cie-foundationdb-client-.../lib/`)
+
+Then run:
+
+```bash
+FDB_LIB_PATH=/opt/ais/local/.../lib \
+    ./metadata-audit.sh check -C /data/v8/fdb/daily_test/fdb.cluster
+```
+
+If `libfdb_c` is already on `LD_LIBRARY_PATH` (common on hosts with the client
+package installed), you only need the cluster file:
+
+```bash
+./metadata-audit.sh check -C /data/v8/fdb/daily_test/fdb.cluster
+```
 
 ## Commands
 
