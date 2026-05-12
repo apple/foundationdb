@@ -84,7 +84,8 @@ std::set<int> const& normalDDQueueErrors() {
 		                    error_code_broken_promise,
 		                    error_code_data_move_cancelled,
 		                    error_code_data_move_dest_team_not_found,
-		                    error_code_finish_move_keys_too_many_retries };
+		                    error_code_finish_move_keys_too_many_retries,
+		                    error_code_start_move_keys_too_many_retries };
 	return s;
 }
 
