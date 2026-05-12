@@ -83,14 +83,28 @@ from fdb_metadata_utils import (
 )
 
 
-def restore_entries(db, entries, name, dry_run=False, batch_size=100):
+def restore_entries(db, entries, name, prefix, end, dry_run=False, batch_size=100):
     """
     Restore entries to FDB.
-    Each entry is {key: hex, value: hex}.
+    Each entry is {'key': hex_string, 'value': hex_string}.
 
+    Validates all keys fall within [prefix, end) before writing.
     Uses MoveKeysLock for serverKeys/keyServers writes.
     """
     print(f"\nRestoring {name} ({len(entries)} entries)...", flush=True)
+
+    # Validate all keys are within the expected range
+    out_of_range = 0
+    for entry in entries:
+        key = bytes.fromhex(entry['key'])
+        if key < prefix or key >= end:
+            out_of_range += 1
+            if out_of_range <= 3:
+                print(f"  ERROR: key {entry['key'][:40]}... outside {name} range", flush=True)
+
+    if out_of_range > 0:
+        print(f"  ERROR: {out_of_range} keys outside expected range, aborting restore of {name}", flush=True)
+        return -1
 
     if dry_run:
         print(f"  DRY RUN - would write {len(entries)} entries", flush=True)
@@ -223,6 +237,10 @@ def verify_backup(args, manifest, db):
             return "match"
 
         # Check sample entries
+        if len(entries) == 0:
+            print(f"  Spot-check: skipped (no entries)")
+            continue
+
         sample_size = min(20, len(entries))
         indices = [0] + [len(entries) * i // sample_size for i in range(1, sample_size)]
         indices = sorted(set(indices))[:sample_size]
@@ -315,10 +333,11 @@ def main():
         restore_targets = ['serverList', 'keyServers', 'serverKeys']
 
     # Take MoveKeysLock before writing (required for serverKeys/keyServers)
+    prev_dd_mode = None
     if not args.dry_run:
         print("\nDisabling DD and taking MoveKeysLock...")
         try:
-            our_uid = take_movekeys_lock(db)
+            our_uid, prev_dd_mode = take_movekeys_lock(db)
             print(f"  Lock acquired (owner: {our_uid.hex()[:16]}...)")
         except Exception as e:
             print(f"  ERROR taking lock: {e}")
@@ -348,14 +367,17 @@ def main():
 
             # Clear existing, then restore
             clear_range(db, prefix, end, name, dry_run=args.dry_run)
-            restore_entries(db, entries, name, dry_run=args.dry_run)
+            result = restore_entries(db, entries, name, prefix, end, dry_run=args.dry_run)
+            if result < 0:
+                print(f"\n  Skipping {name} due to validation errors")
+                continue
 
     finally:
         # Release MoveKeysLock and re-enable DD
         if not args.dry_run:
             print("\nRe-enabling DD and releasing MoveKeysLock...")
             try:
-                release_movekeys_lock(db)
+                release_movekeys_lock(db, prev_dd_mode)
                 print("  Lock released, DD re-enabled")
             except Exception as e:
                 print(f"  WARNING: Error releasing lock: {e}")

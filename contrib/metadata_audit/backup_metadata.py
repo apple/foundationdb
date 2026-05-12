@@ -31,7 +31,7 @@ from fdb_metadata_utils import (
 def backup_range(db, prefix, end, name, batch_size=10000):
     """
     Backup all entries in a key range.
-    Returns list of {key_hex, value_hex} dicts.
+    Returns a list of {'key': hex_str, 'value': hex_str} dicts.
     """
     print(f"\nBacking up {name}...", flush=True)
 

@@ -9,6 +9,7 @@ Provides:
 """
 
 import fdb
+import struct
 import uuid
 
 # Try API versions from newest to oldest
@@ -39,6 +40,23 @@ SERVER_KEYS_TRUE = b'\x01'
 SERVER_KEYS_FALSE = b'\x00'
 
 
+def _encode_dd_mode(mode):
+    """Encode DD mode as little-endian int32 (matches BinaryWriter<int>(Unversioned()))."""
+    return struct.pack('<i', mode)
+
+
+def _decode_dd_mode(value):
+    """Decode DD mode from little-endian int32."""
+    if value is None or len(value) == 0:
+        return 1  # default mode
+    return struct.unpack('<i', value)[0]
+
+
+def _encode_uid():
+    """Generate a random UID encoded as two little-endian uint64s (matches FDB UID serialization)."""
+    return struct.pack('<QQ', *struct.unpack('>QQ', uuid.uuid4().bytes))
+
+
 def strinc(key):
     """Return the first key greater than the given key that doesn't have key as a prefix."""
     if not key:
@@ -62,9 +80,11 @@ def take_movekeys_lock(db):
     Required before writing to serverKeys/keyServers. This is exactly what
     FDB's internal code does (see MoveKeys.actor.cpp).
 
-    Returns our owner UID.
+    Returns (our_owner_uid_bytes, previous_dd_mode_value) so the caller can
+    restore the prior mode on release.
     """
-    our_owner_uid = uuid.uuid4().bytes
+    our_owner_uid = _encode_uid()
+    prev_mode = [None]
 
     @fdb.transactional
     def do_take_lock(tr):
@@ -72,23 +92,32 @@ def take_movekeys_lock(db):
         tr.options.set_lock_aware()
         tr.options.set_timeout(30000)
         tr.options.set_priority_system_immediate()
-        # Disable DD
-        tr[DD_MODE_KEY] = b'\x00'
+        # Read current DD mode so we can restore it later
+        prev_mode[0] = tr[DD_MODE_KEY].wait()
+        # Disable DD (mode=0)
+        tr[DD_MODE_KEY] = _encode_dd_mode(0)
         # Take ownership of MoveKeysLock
         tr[MOVEKEYS_LOCK_OWNER_KEY] = our_owner_uid
         # Set initial write key
-        tr[MOVEKEYS_LOCK_WRITE_KEY] = uuid.uuid4().bytes
+        tr[MOVEKEYS_LOCK_WRITE_KEY] = _encode_uid()
 
     do_take_lock(db)
-    return our_owner_uid
+    return our_owner_uid, prev_mode[0]
 
 
-def release_movekeys_lock(db):
+def release_movekeys_lock(db, prev_dd_mode_value=None):
     """
-    Re-enable DD and release MoveKeysLock.
+    Restore DD mode and release MoveKeysLock.
 
     Call this after finishing writes to serverKeys/keyServers.
+    If prev_dd_mode_value is provided, restores that exact value.
+    Otherwise defaults to mode=1 (enabled).
     """
+    if prev_dd_mode_value is None:
+        restore_value = _encode_dd_mode(1)
+    else:
+        restore_value = bytes(prev_dd_mode_value)
+
     @fdb.transactional
     def do_release_lock(tr):
         tr.options.set_access_system_keys()
@@ -96,10 +125,10 @@ def release_movekeys_lock(db):
         tr.options.set_timeout(30000)
         tr.options.set_priority_system_immediate()
         # Release lock by setting new random owner (DD will reclaim)
-        tr[MOVEKEYS_LOCK_OWNER_KEY] = uuid.uuid4().bytes
-        tr[MOVEKEYS_LOCK_WRITE_KEY] = uuid.uuid4().bytes
-        # Re-enable DD
-        tr[DD_MODE_KEY] = b'\x01'
+        tr[MOVEKEYS_LOCK_OWNER_KEY] = _encode_uid()
+        tr[MOVEKEYS_LOCK_WRITE_KEY] = _encode_uid()
+        # Restore DD mode
+        tr[DD_MODE_KEY] = restore_value
 
     do_release_lock(db)
 
@@ -111,7 +140,7 @@ def update_movekeys_lock_write(tr):
     Call this in each transaction that writes to serverKeys/keyServers
     to prevent conflicts with DD.
     """
-    tr[MOVEKEYS_LOCK_WRITE_KEY] = uuid.uuid4().bytes
+    tr[MOVEKEYS_LOCK_WRITE_KEY] = _encode_uid()
 
 
 def set_write_transaction_options(tr, timeout_ms=60000):
