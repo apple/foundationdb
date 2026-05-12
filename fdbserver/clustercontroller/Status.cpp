@@ -3187,7 +3187,7 @@ static AsyncResult<Void> clusterGetStatusImpl(Reference<ClusterGetStatusState> s
 				}
 			}
 
-			std::vector<JsonBuilderObject> workerStatuses = co_await getAll(std::move(statusSectionFetchers));
+			std::vector<JsonBuilderObject> workerStatuses = co_await getAllAsync(std::move(statusSectionFetchers));
 			co_await primaryDCFO;
 
 			if (primaryDCFO.get().present()) {
