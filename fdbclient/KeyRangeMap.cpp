@@ -213,9 +213,21 @@ Future<Void> krmSetRange(Reference<ReadYourWritesTransaction> tr, Key mapPrefix,
 	tr->set(withPrefix.end, oldValue);
 }
 
-// Sets a range of keys in a key range map, coalescing with adjacent regions if the values match
-// Ranges outside of maxRange will not be coalesced
-// CAUTION: use care when attempting to coalesce multiple ranges in the same prefix in a single transaction
+// Sets a range of keys in a key range map, coalescing with adjacent regions if the values match.
+// Ranges outside of maxRange will not be coalesced.
+//
+// REQUIREMENTS FOR CALLERS:
+// - Multiple calls on the SAME prefix within a single transaction MUST be executed sequentially
+//   (co_await each one before starting the next). They MUST NOT be launched concurrently via
+//   waitForAll or similar. Each call does snapshot reads to determine coalescing boundaries and
+//   then writes clears/sets that extend beyond the requested range. Concurrent calls on the same
+//   prefix see the same snapshot state, compute overlapping clear ranges, and corrupt each other's
+//   boundary writes — producing adjacent same-value entries (fragmentation) that violate KRM
+//   invariants and crash downstream code.
+// - Multiple calls on DIFFERENT prefixes within a single transaction are safe to run concurrently
+//   because their reads and writes do not overlap.
+// - The transaction MUST be a ReadYourWritesTransaction if sequential calls on the same prefix
+//   need each call to see the prior call's writes for correct coalescing.
 template <class Transaction>
 static Future<Void> krmSetRangeCoalescing_(Transaction* tr,
                                            Key mapPrefix,

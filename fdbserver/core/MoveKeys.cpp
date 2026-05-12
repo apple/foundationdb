@@ -784,28 +784,6 @@ Future<Void> cleanUpSingleShardDataMove(Database occ,
 	TraceEvent(SevInfo, "CleanUpSingleShardDataMoveEnd", dataMoveId).detail("Range", keys);
 }
 
-Future<Void> removeOldDestinations(Reference<ReadYourWritesTransaction> tr,
-                                   UID oldDest,
-                                   VectorRef<KeyRangeRef> shards,
-                                   KeyRangeRef currentKeys) {
-	KeyRef beginKey = currentKeys.begin;
-
-	std::vector<Future<Void>> actors;
-	for (int i = 0; i < shards.size(); i++) {
-		if (beginKey < shards[i].begin)
-			actors.push_back(krmSetRangeCoalescing(
-			    tr, serverKeysPrefixFor(oldDest), KeyRangeRef(beginKey, shards[i].begin), allKeys, serverKeysFalse));
-
-		beginKey = shards[i].end;
-	}
-
-	if (beginKey < currentKeys.end)
-		actors.push_back(krmSetRangeCoalescing(
-		    tr, serverKeysPrefixFor(oldDest), KeyRangeRef(beginKey, currentKeys.end), allKeys, serverKeysFalse));
-
-	return waitForAll(actors);
-}
-
 Future<std::vector<UID>> addReadWriteDestinations(KeyRangeRef shard,
                                                   std::vector<StorageServerInterface> srcInterfs,
                                                   std::vector<StorageServerInterface> destInterfs,
@@ -1124,15 +1102,13 @@ static Future<Void> startMoveKeys(Database occ,
 
 					std::set<UID>::iterator oldDest;
 
-					// Remove old dests from serverKeys.  In order for krmSetRangeCoalescing to work correctly in the
-					// same prefix for a single transaction, we must do most of the coalescing ourselves.  Only the
-					// shards on the boundary of currentRange are actually coalesced with the ranges outside of
-					// currentRange. For all shards internal to currentRange, we overwrite all consecutive keys whose
-					// value is or should be serverKeysFalse in a single write
+					// Remove old dests from serverKeys. Each removeOldDestinations call
+					// executes its krmSetRangeCoalescing calls sequentially so that each
+					// sees the prior call's writes through the RYW transaction.
 					std::vector<Future<Void>> actors;
 					for (oldDest = oldDests.begin(); oldDest != oldDests.end(); ++oldDest)
 						if (std::find(servers.begin(), servers.end(), *oldDest) == servers.end())
-							actors.push_back(removeOldDestinations(tr, *oldDest, shardMap[*oldDest], currentKeys));
+							actors.push_back(removeOldDestinations(tr, serverKeysPrefixFor(*oldDest), shardMap[*oldDest], currentKeys));
 
 					// Update serverKeys to include keys (or the currently processed subset of keys) for each SS in
 					// servers
@@ -3523,4 +3499,45 @@ TEST_CASE("/fdbserver/MoveKeys/finishMoveKeysBackoff") {
 	ASSERT(SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES > 0);
 
 	return Void();
+}
+
+Future<Void> removeOldDestinations(Reference<ReadYourWritesTransaction> tr,
+                                   Key prefix,
+                                   VectorRef<KeyRangeRef> shards,
+                                   KeyRangeRef currentKeys) {
+	KeyRef beginKey = currentKeys.begin;
+
+	for (int i = 0; i < shards.size(); i++) {
+		if (beginKey < shards[i].begin) {
+			co_await krmSetRangeCoalescing(
+			    tr, prefix, KeyRangeRef(beginKey, shards[i].begin), allKeys, serverKeysFalse);
+		}
+
+		beginKey = shards[i].end;
+	}
+
+	if (beginKey < currentKeys.end) {
+		co_await krmSetRangeCoalescing(
+		    tr, prefix, KeyRangeRef(beginKey, currentKeys.end), allKeys, serverKeysFalse);
+	}
+
+#if DO_NOT_ENABLE_THIS_EXCEPT_TO_REPRODUCE_BUG_IN_TESTING
+	// BAD OLD LOGIC: fdbserver/workloads/KRMCoalescingFragmentation.cpp will
+	// generate improperly coalesced KRM entries if you comment about the above
+	// and uncomment this version.
+	std::vector<Future<Void>> actors;
+	for (int i = 0; i < shards.size(); i++) {
+		if (beginKey < shards[i].begin)
+			actors.push_back(krmSetRangeCoalescing(
+			    tr, prefix, KeyRangeRef(beginKey, shards[i].begin), allKeys, serverKeysFalse));
+
+		beginKey = shards[i].end;
+	}
+
+	if (beginKey < currentKeys.end)
+		actors.push_back(krmSetRangeCoalescing(
+		    tr, prefix, KeyRangeRef(beginKey, currentKeys.end), allKeys, serverKeysFalse));
+
+	co_await waitForAll(actors);
+#endif
 }
