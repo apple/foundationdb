@@ -172,7 +172,7 @@ def main():
                 try:
                     bytes.fromhex(entry['key'])
                     bytes.fromhex(entry['value'])
-                except:
+                except Exception:
                     errors += 1
         if errors > 0:
             print(f"  ERROR: {name} has {errors} malformed entries")

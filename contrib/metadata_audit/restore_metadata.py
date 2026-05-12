@@ -215,7 +215,7 @@ def verify_backup(args, manifest, db):
                 else:
                     bytes.fromhex(entry['key'])
                     bytes.fromhex(entry['value'])
-            except:
+            except Exception:
                 bad_entries += 1
 
         if bad_entries > 0:

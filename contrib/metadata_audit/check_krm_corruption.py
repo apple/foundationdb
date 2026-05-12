@@ -101,6 +101,7 @@ from fdb_metadata_utils import (
     KEY_SERVERS_PREFIX, SERVER_KEYS_PREFIX, SERVER_LIST_PREFIX,
     KEY_SERVERS_END, SERVER_KEYS_END, SERVER_LIST_END,
     strinc, set_read_transaction_options,
+    update_movekeys_lock_write, take_movekeys_lock, release_movekeys_lock,
 )
 
 # End keys are imported from fdb_metadata_utils
@@ -112,6 +113,23 @@ def decode_uid(uid_bytes):
 def short_uid(uid_bytes):
     """Short display form of UID."""
     return uid_bytes[:4].hex() + "..." if len(uid_bytes) >= 4 else uid_bytes.hex()
+
+def decode_compressed_int(data):
+    """Decode FDB's compressed integer format."""
+    if not data:
+        return 0, 0
+
+    first_byte = data[0]
+    if first_byte < 254:
+        return first_byte, 1
+    elif first_byte == 254:
+        if len(data) < 3:
+            return 0, 1
+        return struct.unpack('<H', data[1:3])[0], 3
+    else:  # 255
+        if len(data) < 5:
+            return 0, 1
+        return struct.unpack('<I', data[1:5])[0], 5
 
 def decode_key_servers_value(value):
     """
@@ -580,23 +598,6 @@ def test_serverkeys_encoding_roundtrip(tr, limit=100):
     print(f"    '33' (0x33='3') = owns empty range (assigned but empty)", flush=True)
     print(f"    24 bytes = protocol version + shard ID", flush=True)
     return True
-
-def decode_compressed_int(data):
-    """Decode FDB's compressed integer format."""
-    if not data:
-        return 0, 0
-
-    first_byte = data[0]
-    if first_byte < 254:
-        return first_byte, 1
-    elif first_byte == 254:
-        if len(data) < 3:
-            return 0, 1
-        return struct.unpack('<H', data[1:3])[0], 3
-    else:  # 255
-        if len(data) < 5:
-            return 0, 1
-        return struct.unpack('<I', data[1:5])[0], 5
 
 def get_server_list(tr):
     """Get all server IDs from serverList."""
@@ -3175,6 +3176,11 @@ def repair_keyservers_phantom_shards(db, audit_data, dry_run=True):
             try:
                 @fdb.transactional
                 def delete_batch(tr):
+                    tr.options.set_access_system_keys()
+                    tr.options.set_lock_aware()
+                    tr.options.set_timeout(60000)
+                    tr.options.set_priority_system_immediate()
+                    update_movekeys_lock_write(tr)
                     count = 0
                     for shard in batch:
                         begin_hex = shard.get('begin', '')
@@ -4520,6 +4526,11 @@ def repair_serverkeys_from_audit(db, audit_data, dry_run=True):
                 try:
                     @fdb.transactional
                     def delete_serverkeys_range(tr):
+                        tr.options.set_access_system_keys()
+                        tr.options.set_lock_aware()
+                        tr.options.set_timeout(60000)
+                        tr.options.set_priority_system_immediate()
+                        update_movekeys_lock_write(tr)
                         # Clear the range in serverKeys
                         tr.clear_range(sk_begin, sk_end)
                         # Also clear the begin boundary key itself
@@ -4728,13 +4739,24 @@ def main():
                 sys.exit(0)
 
         # Run repair based on audit type
-        if args.repair_serverkeys:
-            repair_serverkeys_from_audit(db, audit_data, dry_run=dry_run)
-        elif args.repair_keyservers:
-            # First show analysis
-            process_keyservers_audit(db, audit_data, verbose=args.verbose)
-            # Then repair
-            repair_keyservers_phantom_shards(db, audit_data, dry_run=dry_run)
+        if not dry_run:
+            print("\nDisabling DD and taking MoveKeysLock...")
+            our_uid, prev_dd_mode = take_movekeys_lock(db)
+            print(f"  Lock acquired (owner: {our_uid.hex()[:16]}...)")
+
+        try:
+            if args.repair_serverkeys:
+                repair_serverkeys_from_audit(db, audit_data, dry_run=dry_run)
+            elif args.repair_keyservers:
+                # First show analysis
+                process_keyservers_audit(db, audit_data, verbose=args.verbose)
+                # Then repair
+                repair_keyservers_phantom_shards(db, audit_data, dry_run=dry_run)
+        finally:
+            if not dry_run:
+                print("\nRe-enabling DD and releasing MoveKeysLock...")
+                release_movekeys_lock(db, prev_dd_mode)
+                print("  Lock released, DD re-enabled")
 
         sys.exit(0)
 

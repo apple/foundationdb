@@ -58,7 +58,11 @@ def _encode_uid():
 
 
 def strinc(key):
-    """Return the first key greater than the given key that doesn't have key as a prefix."""
+    """Return the first key greater than the given key that doesn't have key as a prefix.
+
+    Note: duplicates fdb.impl.strinc() but is needed here because this runs
+    at module load time before fdb.api_version() has been called.
+    """
     if not key:
         return b'\x00'
     for i in range(len(key) - 1, -1, -1):
