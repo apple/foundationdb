@@ -25,9 +25,10 @@ usage() {
 Usage: $(basename "$0") [OPTIONS] COMMAND [ARGS...]
 
 Commands:
-  check       Run corruption diagnostics (check_krm_corruption.py)
-  backup      Backup metadata to JSON (backup_metadata.py)
-  restore     Restore metadata from JSON backup (restore_metadata.py)
+  check            Run corruption diagnostics (read-only)
+  backup           Backup metadata to JSON
+  restore          Restore metadata from JSON backup
+  repair-coalesce  Fix uncoalesced serverKeys/keyServers entries (idempotent)
 
 Options (must come before COMMAND):
   --fdb-lib PATH      Directory containing libfdb_c.so/dylib
@@ -46,6 +47,7 @@ Examples:
   $(basename "$0") check -C /etc/foundationdb/fdb.cluster
   $(basename "$0") --fdb-lib /opt/fdb/lib backup -C fdb.cluster -o /tmp/backup
   $(basename "$0") restore --backup-dir backup_20260216 --dry-run -C fdb.cluster
+  $(basename "$0") repair-coalesce --type serverKeys --dry-run -C fdb.cluster
 
 EOF
     exit "${1:-0}"
@@ -88,6 +90,8 @@ case "$COMMAND" in
         SCRIPT="$SCRIPT_DIR/backup_metadata.py" ;;
     restore)
         SCRIPT="$SCRIPT_DIR/restore_metadata.py" ;;
+    repair-coalesce)
+        SCRIPT="$SCRIPT_DIR/repair_coalesce.py" ;;
     *)
         echo "Unknown command: $COMMAND" >&2
         usage 1 ;;
