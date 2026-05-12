@@ -1,5 +1,5 @@
 /*
- * VersionedBTree.actor.cpp
+ * VersionedBTree.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -2785,7 +2785,7 @@ public:
 	static Future<Void> freeExtent_impl(Uncancellable, DWALPager* self, LogicalPageID pageID) {
 		self->extentFreeList.pushBack(pageID);
 		Optional<ExtentUsedListEntry> freeExtent = co_await self->extentUsedList.pop();
-		// Optional<LogicalPageID> freeExtentPageID = wait(self->extentUsedList.pop());
+		// Optional<LogicalPageID> freeExtentPageID = co_await self->extentUsedList.pop();
 		if (freeExtent.present()) {
 			debug_printf("DWALPager(%s) freeExtentPageID() popped %s from used list\n",
 			             self->filename.c_str(),
@@ -9754,82 +9754,82 @@ TEST_CASE("Lredwood/correctness/btree") {
 	g_redwoodMetricsActor = Void(); // Prevent trace event metrics from starting
 	g_redwoodMetrics.clear();
 
-	state std::string file = params.get("file").orDefault("unittest_pageFile.redwood-v1");
+	std::string file = params.get("file").orDefault("unittest_pageFile.redwood-v1");
 	IPager2* pager;
 
-	state bool serialTest = params.getInt("serialTest").orDefault(deterministicRandom()->random01() < 0.25);
-	state bool shortTest = params.getInt("shortTest").orDefault(deterministicRandom()->random01() < 0.25);
+	bool serialTest = params.getInt("serialTest").orDefault(deterministicRandom()->random01() < 0.25);
+	bool shortTest = params.getInt("shortTest").orDefault(deterministicRandom()->random01() < 0.25);
 
-	state int pageSize =
+	int pageSize =
 	    shortTest ? 250 : (deterministicRandom()->coinflip() ? 4096 : deterministicRandom()->randomInt(250, 400));
-	state int extentSize =
+	int extentSize =
 	    params.getInt("extentSize")
 	        .orDefault(deterministicRandom()->coinflip() ? SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE
 	                                                     : deterministicRandom()->randomInt(4096, 32768));
-	state bool pagerMemoryOnly =
+	bool pagerMemoryOnly =
 	    params.getInt("pagerMemoryOnly").orDefault(shortTest && (deterministicRandom()->random01() < .001));
 
-	state double setExistingKeyProbability =
+	double setExistingKeyProbability =
 	    params.getDouble("setExistingKeyProbability").orDefault(deterministicRandom()->random01() * .5);
-	state double clearProbability =
+	double clearProbability =
 	    params.getDouble("clearProbability").orDefault(deterministicRandom()->random01() * .1);
-	state double clearExistingBoundaryProbability =
+	double clearExistingBoundaryProbability =
 	    params.getDouble("clearExistingBoundaryProbability").orDefault(deterministicRandom()->random01() * .5);
-	state double clearSingleKeyProbability =
+	double clearSingleKeyProbability =
 	    params.getDouble("clearSingleKeyProbability").orDefault(deterministicRandom()->random01() * .1);
-	state double clearKnownNodeBoundaryProbability =
+	double clearKnownNodeBoundaryProbability =
 	    params.getDouble("clearKnownNodeBoundaryProbability").orDefault(deterministicRandom()->random01() * .1);
-	state double clearPostSetProbability =
+	double clearPostSetProbability =
 	    params.getDouble("clearPostSetProbability").orDefault(deterministicRandom()->random01() * .1);
-	state double coldStartProbability =
+	double coldStartProbability =
 	    params.getDouble("coldStartProbability").orDefault(pagerMemoryOnly ? 0 : (deterministicRandom()->random01()));
-	state double advanceOldVersionProbability =
+	double advanceOldVersionProbability =
 	    params.getDouble("advanceOldVersionProbability").orDefault(deterministicRandom()->random01());
-	state int64_t pageCacheBytes =
+	int64_t pageCacheBytes =
 	    params.getInt("pageCacheBytes")
 	        .orDefault(pagerMemoryOnly ? 2e9
 	                                   : (pageSize * deterministicRandom()->randomInt(1, (BUGGIFY ? 10 : 10000) + 1)));
-	state Version versionIncrement =
+	Version versionIncrement =
 	    params.getInt("versionIncrement").orDefault(deterministicRandom()->randomInt64(1, 1e8));
-	state int64_t remapCleanupWindowBytes =
+	int64_t remapCleanupWindowBytes =
 	    params.getInt("remapCleanupWindowBytes")
 	        .orDefault(BUGGIFY ? 0 : deterministicRandom()->randomInt64(1, 100) * 1024 * 1024);
-	state int concurrentExtentReads =
+	int concurrentExtentReads =
 	    params.getInt("concurrentExtentReads").orDefault(SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS);
 
 	// These settings are an attempt to keep the test execution real reasonably short
-	state int64_t maxPageOps = params.getInt("maxPageOps").orDefault((shortTest || serialTest) ? 50e3 : 1e6);
-	state int maxVerificationMapEntries = params.getInt("maxVerificationMapEntries").orDefault(300e3);
-	state int maxColdStarts = params.getInt("maxColdStarts").orDefault(300);
+	int64_t maxPageOps = params.getInt("maxPageOps").orDefault((shortTest || serialTest) ? 50e3 : 1e6);
+	int maxVerificationMapEntries = params.getInt("maxVerificationMapEntries").orDefault(300e3);
+	int maxColdStarts = params.getInt("maxColdStarts").orDefault(300);
 	// Max number of records in the BTree or the versioned written map to visit
-	state int64_t maxRecordsRead = params.getInt("maxRecordsRead").orDefault(300e6);
+	int64_t maxRecordsRead = params.getInt("maxRecordsRead").orDefault(300e6);
 	// Max test runtime (in seconds). After the test runs for this amount of time, the next iteration of the test
 	// loop will terminate.
-	state double maxRunTimeWallTime = getExternalTimeoutThreshold(params);
+	double maxRunTimeWallTime = getExternalTimeoutThreshold(params);
 
-	state Optional<std::string> keyGenerator = params.get("keyGenerator");
-	state RandomKeyGenerator keyGen;
+	Optional<std::string> keyGenerator = params.get("keyGenerator");
+	RandomKeyGenerator keyGen;
 	if (keyGenerator.present()) {
 		keyGen.addKeyGenerator(std::make_unique<RandomKeyTupleSetGenerator>(keyGenerator.get()));
 	} else {
 		keyGen = getDefaultKeyGenerator(2 * pageSize);
 	};
 
-	state Optional<std::string> valueGenerator = params.get("valueGenerator");
-	state RandomValueGenerator valGen;
+	Optional<std::string> valueGenerator = params.get("valueGenerator");
+	RandomValueGenerator valGen;
 	if (valueGenerator.present()) {
 		valGen = RandomValueGenerator(valueGenerator.get());
 	} else {
 		valGen = RandomValueGenerator(RandomIntGenerator(0, randomSize(pageSize * 25)), "a..z");
 	}
 
-	state int maxCommitSize =
+	int maxCommitSize =
 	    params.getInt("maxCommitSize")
 	        .orDefault(shortTest ? 1000
 	                             : randomSize((int)std::min<int64_t>(
 	                                   (keyGen.getMaxKeyLen() + valGen.getMaxValLen()) * int64_t(20000), 10e6)));
 
-	state EncodingType encodingType = EncodingType::XXHash64;
+	EncodingType encodingType = EncodingType::XXHash64;
 
 	printf("\n");
 	printf("file: %s\n", file.c_str());
@@ -9866,48 +9866,48 @@ TEST_CASE("Lredwood/correctness/btree") {
 	pager = new DWALPager(
 	    pageSize, extentSize, file, pageCacheBytes, remapCleanupWindowBytes, concurrentExtentReads, pagerMemoryOnly);
 
-	state VersionedBTree* btree = new VersionedBTree(pager, file, UID(), /*ServerDBInfo blah */ {});
-	wait(btree->init());
+	VersionedBTree* btree = new VersionedBTree(pager, file, UID(), /*ServerDBInfo blah */ {});
+	co_await btree->init();
 
-	state DecodeBoundaryVerifier* pBoundaries = DecodeBoundaryVerifier::getVerifier(file);
-	state std::map<std::pair<std::string, Version>, Optional<std::string>> written;
-	state int64_t totalRecordsRead = 0;
-	state std::set<Key> keys;
-	state int coldStarts = 0;
+	DecodeBoundaryVerifier* pBoundaries = DecodeBoundaryVerifier::getVerifier(file);
+	std::map<std::pair<std::string, Version>, Optional<std::string>> written;
+	int64_t totalRecordsRead = 0;
+	std::set<Key> keys;
+	int coldStarts = 0;
 
 	Version lastVer = btree->getLastCommittedVersion();
 	printf("Starting from version: %" PRId64 "\n", lastVer);
 
-	state Version version = lastVer + 1;
+	Version version = lastVer + 1;
 
-	state ReallySimpleCounter mutationBytes;
-	state ReallySimpleCounter keyBytesInserted;
-	state ReallySimpleCounter valueBytesInserted;
-	state ReallySimpleCounter sets;
-	state ReallySimpleCounter rangeClears;
-	state ReallySimpleCounter keyBytesCleared;
-	state int mutationBytesThisCommit = 0;
-	state int mutationBytesTargetThisCommit = randomSize(maxCommitSize);
+	ReallySimpleCounter mutationBytes;
+	ReallySimpleCounter keyBytesInserted;
+	ReallySimpleCounter valueBytesInserted;
+	ReallySimpleCounter sets;
+	ReallySimpleCounter rangeClears;
+	ReallySimpleCounter keyBytesCleared;
+	int mutationBytesThisCommit = 0;
+	int mutationBytesTargetThisCommit = randomSize(maxCommitSize);
 
-	state PromiseStream<Version> committedVersions;
-	state Future<Void> verifyTask =
+	PromiseStream<Version> committedVersions;
+	Future<Void> verifyTask =
 	    verify(btree, committedVersions.getFuture(), &written, &totalRecordsRead, serialTest);
-	state Future<Void> randomTask = serialTest ? Void() : (randomReader(btree, &totalRecordsRead) || btree->getError());
+	Future<Void> randomTask = serialTest ? Void() : (randomReader(btree, &totalRecordsRead) || btree->getError());
 	committedVersions.send(lastVer);
 
 	// Sometimes do zero-change commit at last version
 	if (deterministicRandom()->coinflip()) {
-		wait(btree->commit(lastVer));
+		co_await btree->commit(lastVer);
 	}
 
-	state Future<Void> commit = Void();
-	state int64_t totalPageOps = 0;
+	Future<Void> commit = Void();
+	int64_t totalPageOps = 0;
 
-	state double testStartWallTime = timer();
-	state int64_t commitOps = 0;
+	double testStartWallTime = timer();
+	int64_t commitOps = 0;
 
 	// Check test op limits and wall time and commitOps
-	state std::function<bool()> testFinished = [=]() {
+	std::function<bool()> testFinished = [=]() {
 		if (timer() - testStartWallTime >= maxRunTimeWallTime) {
 			noUnseed = true;
 		}
@@ -10039,7 +10039,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 		// Commit after any limits for this commit or the total test are reached
 		if (mutationBytesThisCommit >= mutationBytesTargetThisCommit || testFinished()) {
 			// Wait for previous commit to finish
-			wait(commit);
+			co_await commit;
 			printf("Commit complete.  Next commit %d bytes, %" PRId64 " bytes committed so far.",
 			       mutationBytesThisCommit,
 			       mutationBytes.get() - mutationBytesThisCommit);
@@ -10070,10 +10070,10 @@ TEST_CASE("Lredwood/correctness/btree") {
 
 			if (serialTest) {
 				// Wait for commit, wait for verification, then start new verification
-				wait(commit);
+				co_await commit;
 				committedVersions.sendError(end_of_stream());
 				debug_printf("Waiting for verification to complete.\n");
-				wait(verifyTask);
+				co_await verifyTask;
 				committedVersions = PromiseStream<Version>();
 				verifyTask = verify(btree, committedVersions.getFuture(), &written, &totalRecordsRead, serialTest);
 			}
@@ -10088,17 +10088,17 @@ TEST_CASE("Lredwood/correctness/btree") {
 
 				// Wait for outstanding commit
 				debug_printf("Waiting for outstanding commit\n");
-				wait(commit);
+				co_await commit;
 
 				// Stop and wait for the verifier task
 				committedVersions.sendError(end_of_stream());
 				debug_printf("Waiting for verification to complete.\n");
-				wait(verifyTask);
+				co_await verifyTask;
 
 				debug_printf("Closing btree\n");
 				Future<Void> closedFuture = btree->onClosed();
 				btree->close();
-				wait(closedFuture);
+				co_await closedFuture;
 
 				printf("Reopening btree from disk.\n");
 				IPager2* pager = new DWALPager(
@@ -10106,7 +10106,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 
 				btree = new VersionedBTree(pager, file, UID(), /* something blah = */ {});
 
-				wait(btree->init());
+				co_await btree->init();
 
 				Version v = btree->getLastCommittedVersion();
 				printf("Recovered from disk.  Latest recovered version %" PRId64 " highest written version %" PRId64
@@ -10117,7 +10117,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 
 				// Sometimes do zero-change commit at last version
 				if (deterministicRandom()->coinflip()) {
-					wait(btree->commit(version));
+					co_await btree->commit(version);
 				}
 
 				// Create new promise stream and start the verifier again
@@ -10134,17 +10134,17 @@ TEST_CASE("Lredwood/correctness/btree") {
 	}
 
 	debug_printf("Waiting for outstanding commit\n");
-	wait(commit);
+	co_await commit;
 	committedVersions.sendError(end_of_stream());
 	randomTask.cancel();
 	debug_printf("Waiting for verification to complete.\n");
-	wait(verifyTask);
+	co_await verifyTask;
 
 	// Sometimes close and reopen before destructive sanity check
 	if (!pagerMemoryOnly && deterministicRandom()->coinflip()) {
 		Future<Void> closedFuture = btree->onClosed();
 		btree->close();
-		wait(closedFuture);
+		co_await closedFuture;
 		btree = new VersionedBTree(new DWALPager(pageSize,
 		                                         extentSize,
 		                                         file,
@@ -10156,20 +10156,20 @@ TEST_CASE("Lredwood/correctness/btree") {
 		                           UID(),
 		                           /* blah = */ {});
 
-		wait(btree->init());
+		co_await btree->init();
 	}
 
-	wait(btree->clearAllAndCheckSanity());
+	co_await btree->clearAllAndCheckSanity();
 
 	Future<Void> closedFuture = btree->onClosed();
 	btree->close();
 	debug_printf("Closing.\n");
-	wait(closedFuture);
+	co_await closedFuture;
 
-	wait(delay(0));
+	co_await delay(0);
 	ASSERT(DWALPager::PageCacheT::Evictor::getEvictor()->empty());
 
-	return Void();
+	co_return;
 }
 
 Future<Void> randomSeeks(VersionedBTree* btree,
@@ -10261,13 +10261,13 @@ struct ExtentQueueEntry {
 
 using ExtentQueueT = FIFOQueue<ExtentQueueEntry<16>>;
 TEST_CASE(":/redwood/performance/extentQueue") {
-	state ExtentQueueT m_extentQueue;
-	state ExtentQueueT::QueueState extentQueueState;
+	ExtentQueueT m_extentQueue;
+	ExtentQueueT::QueueState extentQueueState;
 
-	state DWALPager* pager;
+	DWALPager* pager;
 	// If a test file is passed in by environment then don't write new data to it.
-	state bool reload = getenv("TESTFILE") == nullptr;
-	state std::string fileName = reload ? "unittest.redwood-v1" : getenv("TESTFILE");
+	bool reload = getenv("TESTFILE") == nullptr;
+	std::string fileName = reload ? "unittest.redwood-v1" : getenv("TESTFILE");
 
 	if (reload) {
 		printf("Deleting old test data\n");
@@ -10275,17 +10275,17 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	}
 
 	printf("Filename: %s\n", fileName.c_str());
-	state int pageSize = params.getInt("pageSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE);
-	state int extentSize = params.getInt("extentSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE);
-	state int64_t cacheSizeBytes = params.getInt("cacheSizeBytes").orDefault(FLOW_KNOBS->PAGE_CACHE_4K);
+	int pageSize = params.getInt("pageSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE);
+	int extentSize = params.getInt("extentSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE);
+	int64_t cacheSizeBytes = params.getInt("cacheSizeBytes").orDefault(FLOW_KNOBS->PAGE_CACHE_4K);
 	// Choose a large remapCleanupWindowBytes to avoid popping the queue
-	state int64_t remapCleanupWindowBytes = params.getInt("remapCleanupWindowBytes").orDefault(1e16);
-	state int numEntries = params.getInt("numEntries").orDefault(10e6);
-	state int concurrentExtentReads =
+	int64_t remapCleanupWindowBytes = params.getInt("remapCleanupWindowBytes").orDefault(1e16);
+	int numEntries = params.getInt("numEntries").orDefault(10e6);
+	int concurrentExtentReads =
 	    params.getInt("concurrentExtentReads").orDefault(SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS);
-	state int targetCommitSize = deterministicRandom()->randomInt(2e6, 30e6);
-	state int currentCommitSize = 0;
-	state int64_t cumulativeCommitSize = 0;
+	int targetCommitSize = deterministicRandom()->randomInt(2e6, 30e6);
+	int currentCommitSize = 0;
+	int64_t cumulativeCommitSize = 0;
 
 	printf("pageSize: %d\n", pageSize);
 	printf("extentSize: %d\n", extentSize);
@@ -10296,16 +10296,16 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	if (reload) {
 		pager = new DWALPager(
 		    pageSize, extentSize, fileName, cacheSizeBytes, remapCleanupWindowBytes, concurrentExtentReads, false);
-		wait(success(pager->init()));
+		co_await success(pager->init());
 
 		LogicalPageID extID = pager->newLastExtentID();
 		m_extentQueue.create(pager, extID, "ExtentQueue", pager->newLastQueueID(), true);
 		pager->pushExtentUsedList(m_extentQueue.queueID, extID);
 
-		state int v;
-		state ExtentQueueEntry<16> e;
+		int v;
+		ExtentQueueEntry<16> e;
 		deterministicRandom()->randomBytes(e.entry, 16);
-		state int sinceYield = 0;
+		int sinceYield = 0;
 		for (v = 1; v <= numEntries; ++v) {
 			// Sometimes do a commit
 			if (currentCommitSize >= targetCommitSize) {
@@ -10313,9 +10313,9 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 				           currentCommitSize,
 				           cumulativeCommitSize,
 				           pager->getPageCacheCount());
-				wait(m_extentQueue.flush());
-				wait(pager->commit(pager->getLastCommittedVersion() + 1,
-				                   ObjectWriter::toValue(m_extentQueue.getState(), Unversioned())));
+				co_await m_extentQueue.flush();
+				co_await pager->commit(pager->getLastCommittedVersion() + 1,
+				                       ObjectWriter::toValue(m_extentQueue.getState(), Unversioned()));
 				cumulativeCommitSize += currentCommitSize;
 				targetCommitSize = deterministicRandom()->randomInt(2e6, 30e6);
 				currentCommitSize = 0;
@@ -10328,26 +10328,26 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 			// yield periodically to avoid overflowing the stack
 			if (++sinceYield >= 100) {
 				sinceYield = 0;
-				wait(yield());
+				co_await yield();
 			}
 		}
 		cumulativeCommitSize += currentCommitSize;
 		fmt::print(
 		    "Final cumulativeCommitSize: {0}, pageCacheCount: {1}\n", cumulativeCommitSize, pager->getPageCacheCount());
-		wait(m_extentQueue.flush());
+		co_await m_extentQueue.flush();
 		printf("Commit ExtentQueue getState(): %s\n", m_extentQueue.getState().toString().c_str());
-		wait(pager->commit(pager->getLastCommittedVersion() + 1,
-		                   ObjectWriter::toValue(m_extentQueue.getState(), Unversioned())));
+		co_await pager->commit(pager->getLastCommittedVersion() + 1,
+		                       ObjectWriter::toValue(m_extentQueue.getState(), Unversioned()));
 
 		Future<Void> onClosed = pager->onClosed();
 		pager->close();
-		wait(onClosed);
+		co_await onClosed;
 	}
 
 	printf("Reopening pager file from disk.\n");
 	pager = new DWALPager(
 	    pageSize, extentSize, fileName, cacheSizeBytes, remapCleanupWindowBytes, concurrentExtentReads, false);
-	wait(success(pager->init()));
+	co_await success(pager->init());
 
 	printf("Starting ExtentQueue FastPath Recovery from Disk.\n");
 
@@ -10356,30 +10356,34 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	printf("Recovered ExtentQueue getState(): %s\n", extentQueueState.toString().c_str());
 	m_extentQueue.recover(pager, extentQueueState, "ExtentQueueRecovered");
 
-	state double intervalStart = timer();
-	state double start = intervalStart;
-	state Standalone<VectorRef<LogicalPageID>> extentIDs = wait(pager->getUsedExtents(m_extentQueue.queueID));
+	double intervalStart = timer();
+	double start = intervalStart;
+	Standalone<VectorRef<LogicalPageID>> extentIDs = co_await pager->getUsedExtents(m_extentQueue.queueID);
 
 	// fire read requests for all used extents
-	state int i;
+	int i;
 	for (i = 1; i < extentIDs.size() - 1; i++) {
 		LogicalPageID extID = extentIDs[i];
 		pager->readExtent(extID);
 	}
 
-	state PromiseStream<Standalone<VectorRef<ExtentQueueEntry<16>>>> resultStream;
-	state Future<Void> queueRecoverActor;
+	PromiseStream<Standalone<VectorRef<ExtentQueueEntry<16>>>> resultStream;
+	Future<Void> queueRecoverActor;
 	queueRecoverActor = m_extentQueue.peekAllExt(resultStream);
-	state int entriesRead = 0;
+	int entriesRead = 0;
 	try {
-		loop choose {
-			when(Standalone<VectorRef<ExtentQueueEntry<16>>> entries = waitNext(resultStream.getFuture())) {
+		while (true) {
+			auto res = co_await race(resultStream.getFuture(), queueRecoverActor);
+			if (res.index() == 0) {
+				Standalone<VectorRef<ExtentQueueEntry<16>>> entries = std::get<0>(std::move(res));
 				entriesRead += entries.size();
-				if (entriesRead == m_extentQueue.numEntries)
+				if (entriesRead == m_extentQueue.numEntries) {
 					break;
-			}
-			when(wait(queueRecoverActor)) {
+				}
+			} else if (res.index() == 1) {
 				queueRecoverActor = Never();
+			} else {
+				UNREACHABLE();
 			}
 		}
 	} catch (Error& e) {
@@ -10388,7 +10392,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 		}
 	}
 
-	state double elapsed = timer() - start;
+	double elapsed = timer() - start;
 	printf("Completed fastpath extent queue recovery: elapsed=%f entriesRead=%d recoveryRate=%f MB/s\n",
 	       elapsed,
 	       entriesRead,
@@ -10403,7 +10407,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	intervalStart = timer();
 	start = intervalStart;
 	// peekAll the queue using regular slow path
-	Standalone<VectorRef<ExtentQueueEntry<16>>> entries = wait(m_extentQueue.peekAll());
+	Standalone<VectorRef<ExtentQueueEntry<16>>> entries = co_await m_extentQueue.peekAll();
 
 	elapsed = timer() - start;
 	printf("Completed slowpath extent queue recovery: elapsed=%f entriesRead=%d recoveryRate=%f MB/s\n",
@@ -10411,42 +10415,42 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	       entries.size(),
 	       cumulativeCommitSize / elapsed / 1e6);
 
-	return Void();
+	co_return;
 }
 
 TEST_CASE(":/redwood/performance/set") {
-	state SignalableActorCollection actors;
+	SignalableActorCollection actors;
 
-	state std::string file = params.get("file").orDefault("unittest.redwood-v1");
-	state int pageSize = params.getInt("pageSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE);
-	state int extentSize = params.getInt("extentSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE);
-	state int64_t pageCacheBytes = params.getInt("pageCacheBytes").orDefault(FLOW_KNOBS->PAGE_CACHE_4K);
-	state int nodeCount = params.getInt("nodeCount").orDefault(1e9);
-	state int maxRecordsPerCommit = params.getInt("maxRecordsPerCommit").orDefault(20000);
-	state int maxKVBytesPerCommit = params.getInt("maxKVBytesPerCommit").orDefault(20e6);
-	state int64_t kvBytesTarget = params.getInt("kvBytesTarget").orDefault(4e9);
-	state int minKeyPrefixBytes = params.getInt("minKeyPrefixBytes").orDefault(25);
-	state int maxKeyPrefixBytes = params.getInt("maxKeyPrefixBytes").orDefault(25);
-	state int minValueSize = params.getInt("minValueSize").orDefault(100);
-	state int maxValueSize = params.getInt("maxValueSize").orDefault(500);
-	state int minConsecutiveRun = params.getInt("minConsecutiveRun").orDefault(1);
-	state int maxConsecutiveRun = params.getInt("maxConsecutiveRun").orDefault(100);
-	state char firstKeyChar = params.get("firstKeyChar").orDefault("a")[0];
-	state char lastKeyChar = params.get("lastKeyChar").orDefault("m")[0];
-	state int64_t remapCleanupWindowBytes = params.getInt("remapCleanupWindowBytes").orDefault(100LL * 1024 * 1024);
-	state int concurrentExtentReads =
+	std::string file = params.get("file").orDefault("unittest.redwood-v1");
+	int pageSize = params.getInt("pageSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE);
+	int extentSize = params.getInt("extentSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE);
+	int64_t pageCacheBytes = params.getInt("pageCacheBytes").orDefault(FLOW_KNOBS->PAGE_CACHE_4K);
+	int nodeCount = params.getInt("nodeCount").orDefault(1e9);
+	int maxRecordsPerCommit = params.getInt("maxRecordsPerCommit").orDefault(20000);
+	int maxKVBytesPerCommit = params.getInt("maxKVBytesPerCommit").orDefault(20e6);
+	int64_t kvBytesTarget = params.getInt("kvBytesTarget").orDefault(4e9);
+	int minKeyPrefixBytes = params.getInt("minKeyPrefixBytes").orDefault(25);
+	int maxKeyPrefixBytes = params.getInt("maxKeyPrefixBytes").orDefault(25);
+	int minValueSize = params.getInt("minValueSize").orDefault(100);
+	int maxValueSize = params.getInt("maxValueSize").orDefault(500);
+	int minConsecutiveRun = params.getInt("minConsecutiveRun").orDefault(1);
+	int maxConsecutiveRun = params.getInt("maxConsecutiveRun").orDefault(100);
+	char firstKeyChar = params.get("firstKeyChar").orDefault("a")[0];
+	char lastKeyChar = params.get("lastKeyChar").orDefault("m")[0];
+	int64_t remapCleanupWindowBytes = params.getInt("remapCleanupWindowBytes").orDefault(100LL * 1024 * 1024);
+	int concurrentExtentReads =
 	    params.getInt("concurrentExtentReads").orDefault(SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS);
-	state bool openExisting = params.getInt("openExisting").orDefault(0);
-	state bool insertRecords = !openExisting || params.getInt("insertRecords").orDefault(0);
-	state int concurrentSeeks = params.getInt("concurrentSeeks").orDefault(64);
-	state int concurrentScans = params.getInt("concurrentScans").orDefault(64);
-	state int seeks = params.getInt("seeks").orDefault(1000000);
-	state int scans = params.getInt("scans").orDefault(20000);
-	state int scanWidth = params.getInt("scanWidth").orDefault(50);
-	state int scanPrefetchBytes = params.getInt("scanPrefetchBytes").orDefault(0);
-	state bool pagerMemoryOnly = params.getInt("pagerMemoryOnly").orDefault(0);
-	state bool traceMetrics = params.getInt("traceMetrics").orDefault(0);
-	state bool destructiveSanityCheck = params.getInt("destructiveSanityCheck").orDefault(0);
+	bool openExisting = params.getInt("openExisting").orDefault(0);
+	bool insertRecords = !openExisting || params.getInt("insertRecords").orDefault(0);
+	int concurrentSeeks = params.getInt("concurrentSeeks").orDefault(64);
+	int concurrentScans = params.getInt("concurrentScans").orDefault(64);
+	int seeks = params.getInt("seeks").orDefault(1000000);
+	int scans = params.getInt("scans").orDefault(20000);
+	int scanWidth = params.getInt("scanWidth").orDefault(50);
+	int scanPrefetchBytes = params.getInt("scanPrefetchBytes").orDefault(0);
+	bool pagerMemoryOnly = params.getInt("pagerMemoryOnly").orDefault(0);
+	bool traceMetrics = params.getInt("traceMetrics").orDefault(0);
+	bool destructiveSanityCheck = params.getInt("destructiveSanityCheck").orDefault(0);
 
 	printf("file: %s\n", file.c_str());
 	printf("openExisting: %d\n", openExisting);
@@ -10488,25 +10492,25 @@ TEST_CASE(":/redwood/performance/set") {
 
 	DWALPager* pager = new DWALPager(
 	    pageSize, extentSize, file, pageCacheBytes, remapCleanupWindowBytes, concurrentExtentReads, pagerMemoryOnly);
-	state VersionedBTree* btree = new VersionedBTree(pager, file, UID(), {});
-	wait(btree->init());
+	VersionedBTree* btree = new VersionedBTree(pager, file, UID(), {});
+	co_await btree->init();
 	printf("Initialized.  StorageBytes=%s\n", btree->getStorageBytes().toString().c_str());
 
-	state int64_t kvBytesThisCommit = 0;
-	state int64_t kvBytesTotal = 0;
-	state int recordsThisCommit = 0;
-	state Future<Void> commit = Void();
-	state std::string value(maxValueSize, 'v');
+	int64_t kvBytesThisCommit = 0;
+	int64_t kvBytesTotal = 0;
+	int recordsThisCommit = 0;
+	Future<Void> commit = Void();
+	std::string value(maxValueSize, 'v');
 
 	printf("Starting.\n");
-	state double intervalStart = timer();
-	state double start = intervalStart;
-	state int sinceYield = 0;
-	state Version version = btree->getLastCommittedVersion();
+	double intervalStart = timer();
+	double start = intervalStart;
+	int sinceYield = 0;
+	Version version = btree->getLastCommittedVersion();
 
 	if (insertRecords) {
 		while (kvBytesTotal < kvBytesTarget) {
-			state int changesThisVersion =
+			int changesThisVersion =
 			    deterministicRandom()->randomInt(0, maxRecordsPerCommit - recordsThisCommit + 1);
 
 			while (changesThisVersion > 0 && kvBytesThisCommit < maxKVBytesPerCommit) {
@@ -10534,13 +10538,13 @@ TEST_CASE(":/redwood/performance/set") {
 
 				if (++sinceYield >= 100) {
 					sinceYield = 0;
-					wait(yield());
+					co_await yield();
 				}
 			}
 
 			if (kvBytesThisCommit >= maxKVBytesPerCommit || recordsThisCommit >= maxRecordsPerCommit) {
 				btree->setOldestReadableVersion(btree->getLastCommittedVersion());
-				wait(commit);
+				co_await commit;
 				TraceEvent e("RedwoodState");
 				btree->toTraceEvent(e);
 				e.log();
@@ -10561,14 +10565,14 @@ TEST_CASE(":/redwood/performance/set") {
 			}
 		}
 
-		wait(commit);
+		co_await commit;
 		printf("Cumulative %.2f MB keyValue bytes written at %.2f MB/s\n",
 		       kvBytesTotal / 1e6,
 		       kvBytesTotal / (timer() - start) / 1e6);
 		printf("StorageBytes=%s\n", btree->getStorageBytes().toString().c_str());
 	}
 
-	state Future<Void> stats = traceMetrics ? Void() : recurring(std::bind_front(&printRedwoodStats), 1.0);
+	Future<Void> stats = traceMetrics ? Void() : recurring(std::bind_front(&printRedwoodStats), 1.0);
 
 	if (scans > 0) {
 		printf("Parallel scans, concurrency=%d, scans=%d, scanWidth=%d, scanPreftchBytes=%d ...\n",
@@ -10580,7 +10584,7 @@ TEST_CASE(":/redwood/performance/set") {
 			actors.add(
 			    randomScans(btree, scans / concurrentScans, scanWidth, scanPrefetchBytes, firstKeyChar, lastKeyChar));
 		}
-		wait(actors.signalAndReset());
+		co_await actors.signalAndReset();
 	}
 
 	if (seeks > 0) {
@@ -10589,23 +10593,23 @@ TEST_CASE(":/redwood/performance/set") {
 			actors.add(
 			    randomSeeks(btree, Optional<Version>(), true, seeks / concurrentSeeks, firstKeyChar, lastKeyChar, 4));
 		}
-		wait(actors.signalAndReset());
+		co_await actors.signalAndReset();
 	}
 
 	stats.cancel();
 
 	if (destructiveSanityCheck) {
-		wait(btree->clearAllAndCheckSanity());
+		co_await btree->clearAllAndCheckSanity();
 	}
 
 	Future<Void> closedFuture = btree->onClosed();
 	btree->close();
-	wait(closedFuture);
+	co_await closedFuture;
 
-	wait(delay(0));
+	co_await delay(0);
 	ASSERT(DWALPager::PageCacheT::Evictor::getEvictor()->empty());
 
-	return Void();
+	co_return;
 }
 
 struct PrefixSegment {
@@ -10944,39 +10948,37 @@ Future<Void> doPrefixInsertComparison(int suffixSize,
 }
 
 TEST_CASE(":/redwood/performance/prefixSizeComparison") {
-	state int suffixSize = params.getInt("suffixSize").orDefault(12);
-	state int valueSize = params.getInt("valueSize").orDefault(100);
-	state int recordCountTarget = params.getInt("recordCountTarget").orDefault(100e6);
-	state bool usePrefixesInOrder = params.getInt("usePrefixesInOrder").orDefault(0);
+	int suffixSize = params.getInt("suffixSize").orDefault(12);
+	int valueSize = params.getInt("valueSize").orDefault(100);
+	int recordCountTarget = params.getInt("recordCountTarget").orDefault(100e6);
+	bool usePrefixesInOrder = params.getInt("usePrefixesInOrder").orDefault(0);
 
-	wait(doPrefixInsertComparison(
-	    suffixSize, valueSize, recordCountTarget, usePrefixesInOrder, KVSource({ { 10, 100000 } })));
-	wait(doPrefixInsertComparison(
-	    suffixSize, valueSize, recordCountTarget, usePrefixesInOrder, KVSource({ { 16, 100000 } })));
-	wait(doPrefixInsertComparison(
-	    suffixSize, valueSize, recordCountTarget, usePrefixesInOrder, KVSource({ { 32, 100000 } })));
-	wait(doPrefixInsertComparison(suffixSize,
-	                              valueSize,
-	                              recordCountTarget,
-	                              usePrefixesInOrder,
-	                              KVSource({ { 4, 5 }, { 12, 1000 }, { 8, 5 }, { 8, 4 } })));
-
-	return Void();
+	co_await doPrefixInsertComparison(
+	    suffixSize, valueSize, recordCountTarget, usePrefixesInOrder, KVSource({ { 10, 100000 } }));
+	co_await doPrefixInsertComparison(
+	    suffixSize, valueSize, recordCountTarget, usePrefixesInOrder, KVSource({ { 16, 100000 } }));
+	co_await doPrefixInsertComparison(
+	    suffixSize, valueSize, recordCountTarget, usePrefixesInOrder, KVSource({ { 32, 100000 } }));
+	co_await doPrefixInsertComparison(suffixSize,
+	                                  valueSize,
+	                                  recordCountTarget,
+	                                  usePrefixesInOrder,
+	                                  KVSource({ { 4, 5 }, { 12, 1000 }, { 8, 5 }, { 8, 4 } }));
 }
 
 TEST_CASE(":/redwood/performance/sequentialInsert") {
-	state int prefixLen = params.getInt("prefixLen").orDefault(30);
-	state int valueSize = params.getInt("valueSize").orDefault(100);
-	state int recordCountTarget = params.getInt("recordCountTarget").orDefault(100e6);
+	int prefixLen = params.getInt("prefixLen").orDefault(30);
+	int valueSize = params.getInt("valueSize").orDefault(100);
+	int recordCountTarget = params.getInt("recordCountTarget").orDefault(100e6);
 
 	deleteFile("test.redwood-v1");
-	wait(delay(5));
-	state IKeyValueStore* redwood = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1, "test.redwood-v1", UID(), 0);
-	wait(sequentialInsert(redwood, prefixLen, valueSize, recordCountTarget));
-	wait(closeKVS(redwood));
+	co_await delay(5);
+	IKeyValueStore* redwood = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1, "test.redwood-v1", UID(), 0);
+	co_await sequentialInsert(redwood, prefixLen, valueSize, recordCountTarget);
+	co_await closeKVS(redwood);
 	printf("\n");
 
-	return Void();
+	co_return;
 }
 
 // singlePrefix forces the range read to have the start and end key with the same prefix
@@ -11039,33 +11041,33 @@ Future<Void> randomRangeScans(IKeyValueStore* kvs,
 }
 
 TEST_CASE(":/redwood/performance/randomRangeScans") {
-	state int prefixLen = 30;
-	state int suffixSize = 12;
-	state int valueSize = 100;
-	state int maxByteLimit = std::numeric_limits<int>::max();
+	int prefixLen = 30;
+	int suffixSize = 12;
+	int valueSize = 100;
+	int maxByteLimit = std::numeric_limits<int>::max();
 
 	// TODO change to 100e8 after figuring out no-disk redwood mode
-	state int writeRecordCountTarget = 1e6;
-	state int queryRecordTarget = 1e7;
-	state int writePrefixesInOrder = false;
+	int writeRecordCountTarget = 1e6;
+	int queryRecordTarget = 1e7;
+	int writePrefixesInOrder = false;
 
-	state KVSource source({ { prefixLen, 1000 } });
+	KVSource source({ { prefixLen, 1000 } });
 
 	deleteFile("test.redwood-v1");
-	wait(delay(5));
-	state IKeyValueStore* redwood = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1, "test.redwood-v1", UID(), 0);
-	wait(prefixClusteredInsert(
-	    redwood, suffixSize, valueSize, source, writeRecordCountTarget, writePrefixesInOrder, false));
+	co_await delay(5);
+	IKeyValueStore* redwood = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1, "test.redwood-v1", UID(), 0);
+	co_await prefixClusteredInsert(
+	    redwood, suffixSize, valueSize, source, writeRecordCountTarget, writePrefixesInOrder, false);
 
 	// divide targets for tiny queries by 10 because they are much slower
-	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget / 10, true, 10, maxByteLimit));
-	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, true, 1000, maxByteLimit));
-	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget / 10, false, 100, maxByteLimit));
-	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, false, 10000, maxByteLimit));
-	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, false, 1000000, maxByteLimit));
-	wait(closeKVS(redwood));
+	co_await randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget / 10, true, 10, maxByteLimit);
+	co_await randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, true, 1000, maxByteLimit);
+	co_await randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget / 10, false, 100, maxByteLimit);
+	co_await randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, false, 10000, maxByteLimit);
+	co_await randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, false, 1000000, maxByteLimit);
+	co_await closeKVS(redwood);
 	printf("\n");
-	return Void();
+	co_return;
 }
 
 TEST_CASE(":/redwood/performance/histograms") {
