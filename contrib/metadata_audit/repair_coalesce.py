@@ -314,7 +314,7 @@ def main():
                     servers_with_issues += 1
                     total_found += found
                     total_deleted += deleted
-                    print(f"    Server {uid.hex()[:16]}...: {found} redundant entries")
+                    print(f"    Server {uid.hex()}: {found} redundant entries")
 
                 if (i + 1) % 20 == 0:
                     print(f"    ... processed {i + 1}/{len(live_uids)} servers", flush=True)
