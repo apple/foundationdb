@@ -46,10 +46,9 @@ ACTOR Future<Void> anyTrue(std::vector<Reference<AsyncVar<bool>>> input, Referen
 	}
 }
 
-Future<Void> cancelOnly(std::vector<Future<Void>> futures) {
+Future<Void> cancelOnly([[maybe_unused]] std::vector<Future<Void>> futures) {
 	// We don't do anything with futures except hold them, we never return, but if we are cancelled we (naturally) drop
 	// the futures
-	(void)futures;
 	co_await Future<Void>(Never());
 }
 
