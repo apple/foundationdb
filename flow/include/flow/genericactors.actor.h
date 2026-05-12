@@ -862,7 +862,7 @@ Future<Void> setWhenDoneOrError(Future<Void> condition, Reference<AsyncVar<T>> v
 	return Void();
 }
 
-ACTOR Future<Void> lowPriorityDelay(double waitTime);
+Future<Void> lowPriorityDelay(double waitTime);
 
 // Delay after condition is cleared (i.e. equal to false).
 // If during delay, condition changes to true, wait till condition become false again, and repeat.
@@ -873,9 +873,9 @@ ACTOR Future<Void> delayAfterCleared(Reference<AsyncVar<bool>> condition,
 // Same as delayAfterCleared, but use lowPriorityDelay.
 ACTOR Future<Void> lowPriorityDelayAfterCleared(Reference<AsyncVar<bool>> condition, double time);
 
-Future<bool> allTrue(const std::vector<Future<bool>>& all);
+Future<bool> allTrue(std::vector<Future<bool>> all);
 Future<Void> anyTrue(std::vector<Reference<AsyncVar<bool>>> const& input, Reference<AsyncVar<bool>> const& output);
-Future<Void> cancelOnly(std::vector<Future<Void>> const& futures);
+Future<Void> cancelOnly(std::vector<Future<Void>> futures);
 Future<Void> timeoutWarningCollector(FutureStream<Void> const& input,
                                      double const& logDelay,
                                      const char* const& context,
