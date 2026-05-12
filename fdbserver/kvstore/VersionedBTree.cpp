@@ -9762,17 +9762,15 @@ TEST_CASE("Lredwood/correctness/btree") {
 
 	int pageSize =
 	    shortTest ? 250 : (deterministicRandom()->coinflip() ? 4096 : deterministicRandom()->randomInt(250, 400));
-	int extentSize =
-	    params.getInt("extentSize")
-	        .orDefault(deterministicRandom()->coinflip() ? SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE
-	                                                     : deterministicRandom()->randomInt(4096, 32768));
+	int extentSize = params.getInt("extentSize")
+	                     .orDefault(deterministicRandom()->coinflip() ? SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE
+	                                                                  : deterministicRandom()->randomInt(4096, 32768));
 	bool pagerMemoryOnly =
 	    params.getInt("pagerMemoryOnly").orDefault(shortTest && (deterministicRandom()->random01() < .001));
 
 	double setExistingKeyProbability =
 	    params.getDouble("setExistingKeyProbability").orDefault(deterministicRandom()->random01() * .5);
-	double clearProbability =
-	    params.getDouble("clearProbability").orDefault(deterministicRandom()->random01() * .1);
+	double clearProbability = params.getDouble("clearProbability").orDefault(deterministicRandom()->random01() * .1);
 	double clearExistingBoundaryProbability =
 	    params.getDouble("clearExistingBoundaryProbability").orDefault(deterministicRandom()->random01() * .5);
 	double clearSingleKeyProbability =
@@ -9789,8 +9787,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	    params.getInt("pageCacheBytes")
 	        .orDefault(pagerMemoryOnly ? 2e9
 	                                   : (pageSize * deterministicRandom()->randomInt(1, (BUGGIFY ? 10 : 10000) + 1)));
-	Version versionIncrement =
-	    params.getInt("versionIncrement").orDefault(deterministicRandom()->randomInt64(1, 1e8));
+	Version versionIncrement = params.getInt("versionIncrement").orDefault(deterministicRandom()->randomInt64(1, 1e8));
 	int64_t remapCleanupWindowBytes =
 	    params.getInt("remapCleanupWindowBytes")
 	        .orDefault(BUGGIFY ? 0 : deterministicRandom()->randomInt64(1, 100) * 1024 * 1024);
@@ -9890,8 +9887,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	int mutationBytesTargetThisCommit = randomSize(maxCommitSize);
 
 	PromiseStream<Version> committedVersions;
-	Future<Void> verifyTask =
-	    verify(btree, committedVersions.getFuture(), &written, &totalRecordsRead, serialTest);
+	Future<Void> verifyTask = verify(btree, committedVersions.getFuture(), &written, &totalRecordsRead, serialTest);
 	Future<Void> randomTask = serialTest ? Void() : (randomReader(btree, &totalRecordsRead) || btree->getError());
 	committedVersions.send(lastVer);
 
@@ -10510,8 +10506,7 @@ TEST_CASE(":/redwood/performance/set") {
 
 	if (insertRecords) {
 		while (kvBytesTotal < kvBytesTarget) {
-			int changesThisVersion =
-			    deterministicRandom()->randomInt(0, maxRecordsPerCommit - recordsThisCommit + 1);
+			int changesThisVersion = deterministicRandom()->randomInt(0, maxRecordsPerCommit - recordsThisCommit + 1);
 
 			while (changesThisVersion > 0 && kvBytesThisCommit < maxKVBytesPerCommit) {
 				KeyValue kv;
