@@ -849,15 +849,13 @@ Future<Void> decode_logs(Reference<DecodeParams> params) {
 	if (params->beginTimestamp.present() || params->endTimestamp.present()) {
 		Database db = Database::createDatabase(params->clusterFile, ApiVersion::LATEST_VERSION);
 		if (params->beginTimestamp.present()) {
-			params->beginVersionFilter =
-			    co_await timeKeeperVersionFromDatetime(params->beginTimestamp.get(), db);
+			params->beginVersionFilter = co_await timeKeeperVersionFromDatetime(params->beginTimestamp.get(), db);
 			TraceEvent("TimestampResolved")
 			    .detail("Timestamp", params->beginTimestamp.get())
 			    .detail("Version", params->beginVersionFilter);
 		}
 		if (params->endTimestamp.present()) {
-			params->endVersionFilter =
-			    co_await timeKeeperVersionFromDatetime(params->endTimestamp.get(), db);
+			params->endVersionFilter = co_await timeKeeperVersionFromDatetime(params->endTimestamp.get(), db);
 			TraceEvent("TimestampResolved")
 			    .detail("Timestamp", params->endTimestamp.get())
 			    .detail("Version", params->endVersionFilter);
@@ -960,8 +958,7 @@ int main(int argc, char** argv) {
 			file_converter::printDecodeUsage();
 			return FDB_EXIT_ERROR;
 		}
-		if (param->endTimestamp.present() &&
-		    param->endVersionFilter != std::numeric_limits<Version>::max()) {
+		if (param->endTimestamp.present() && param->endVersionFilter != std::numeric_limits<Version>::max()) {
 			std::cerr << "ERROR: --end-timestamp-filter and --end-version-filter cannot be used together.\n";
 			file_converter::printDecodeUsage();
 			return FDB_EXIT_ERROR;
