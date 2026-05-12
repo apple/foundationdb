@@ -151,8 +151,7 @@ ACTOR Future<Void> returnIfTrue(Future<bool> f) {
 }
 
 Future<Void> lowPriorityDelay(double waitTime) {
-	int totalLoops =
-	    std::max<int>(waitTime / FLOW_KNOBS->LOW_PRIORITY_MAX_DELAY, FLOW_KNOBS->LOW_PRIORITY_DELAY_COUNT);
+	int totalLoops = std::max<int>(waitTime / FLOW_KNOBS->LOW_PRIORITY_MAX_DELAY, FLOW_KNOBS->LOW_PRIORITY_DELAY_COUNT);
 
 	for (int loopCount = 0; loopCount < totalLoops; ++loopCount) {
 		co_await delay(waitTime / totalLoops, TaskPriority::Low);
