@@ -76,6 +76,10 @@ Reads all three metadata spaces and cross-references them to detect:
 ./metadata-audit.sh check -C fdb.cluster --output report.txt
 ```
 
+**Note:** The check output is verbose and not heavily curated — it dumps
+everything it finds. Expect noise; focus on the summary sections and
+error counts at the end.
+
 ### `backup` — Snapshot Metadata to JSON
 
 Creates a timestamped backup of all metadata with verification.
