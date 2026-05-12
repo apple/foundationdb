@@ -188,15 +188,25 @@ find_fdb_python() {
         echo ""; return 0  # empty means no extra path needed
     fi
 
-    # 4. Common build output locations
+    # 4. Common locations: build outputs, relative to libfdb_c, site-packages
     for candidate in \
         "$REPO_ROOT/build_output/bindings/python" \
         "$HOME/build_output/bindings/python" \
+        "${FDB_LIB_DIR}/../bindings/python" \
+        "${FDB_LIB_DIR}/../lib/python3/dist-packages" \
+        "${FDB_LIB_DIR}/../lib/python/site-packages" \
         "$SCRIPT_DIR"; do
         if [[ -d "$candidate/fdb" ]]; then
             echo "$candidate"; return 0
         fi
     done
+
+    # 5. Search python3 site-packages
+    local site_dir
+    site_dir=$(python3 -c "import site; print(site.getsitepackages()[0])" 2>/dev/null)
+    if [[ -n "$site_dir" ]] && [[ -d "$site_dir/fdb" ]]; then
+        echo "$site_dir"; return 0
+    fi
 
     return 1
 }
@@ -209,12 +219,16 @@ FDB_PYTHON_DIR=$(find_fdb_python) || {
     echo "  python3 -c 'import fdb' (not importable)" >&2
     echo "  $REPO_ROOT/build_output/bindings/python/" >&2
     echo "  $HOME/build_output/bindings/python/" >&2
+    echo "  $FDB_LIB_DIR/../bindings/python/" >&2
     echo "  $SCRIPT_DIR/" >&2
     echo "" >&2
-    echo "Fix: specify the directory containing the fdb/ package:" >&2
+    echo "The fdb Python module is included in the FoundationDB build output" >&2
+    echo "or can be installed with:" >&2
+    echo "  pip install foundationdb" >&2
+    echo "" >&2
+    echo "Or point to it directly:" >&2
     echo "  ./metadata-audit.sh --fdb-python /path/to/bindings/python check ..." >&2
     echo "  export FDB_PYTHON_PATH=/path/to/bindings/python" >&2
-    echo "  pip install foundationdb" >&2
     exit 1
 }
 
