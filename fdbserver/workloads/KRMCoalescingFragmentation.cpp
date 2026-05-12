@@ -196,7 +196,6 @@ private:
 				co_await tr->onError(err);
 			}
 		}
-
 	}
 };
 

@@ -1108,7 +1108,8 @@ static Future<Void> startMoveKeys(Database occ,
 					std::vector<Future<Void>> actors;
 					for (oldDest = oldDests.begin(); oldDest != oldDests.end(); ++oldDest)
 						if (std::find(servers.begin(), servers.end(), *oldDest) == servers.end())
-							actors.push_back(removeOldDestinations(tr, serverKeysPrefixFor(*oldDest), shardMap[*oldDest], currentKeys));
+							actors.push_back(removeOldDestinations(
+							    tr, serverKeysPrefixFor(*oldDest), shardMap[*oldDest], currentKeys));
 
 					// Update serverKeys to include keys (or the currently processed subset of keys) for each SS in
 					// servers
@@ -3517,8 +3518,7 @@ Future<Void> removeOldDestinations(Reference<ReadYourWritesTransaction> tr,
 	}
 
 	if (beginKey < currentKeys.end) {
-		co_await krmSetRangeCoalescing(
-		    tr, prefix, KeyRangeRef(beginKey, currentKeys.end), allKeys, serverKeysFalse);
+		co_await krmSetRangeCoalescing(tr, prefix, KeyRangeRef(beginKey, currentKeys.end), allKeys, serverKeysFalse);
 	}
 
 #if DO_NOT_ENABLE_THIS_EXCEPT_TO_REPRODUCE_BUG_IN_TESTING
@@ -3528,15 +3528,15 @@ Future<Void> removeOldDestinations(Reference<ReadYourWritesTransaction> tr,
 	std::vector<Future<Void>> actors;
 	for (int i = 0; i < shards.size(); i++) {
 		if (beginKey < shards[i].begin)
-			actors.push_back(krmSetRangeCoalescing(
-			    tr, prefix, KeyRangeRef(beginKey, shards[i].begin), allKeys, serverKeysFalse));
+			actors.push_back(
+			    krmSetRangeCoalescing(tr, prefix, KeyRangeRef(beginKey, shards[i].begin), allKeys, serverKeysFalse));
 
 		beginKey = shards[i].end;
 	}
 
 	if (beginKey < currentKeys.end)
-		actors.push_back(krmSetRangeCoalescing(
-		    tr, prefix, KeyRangeRef(beginKey, currentKeys.end), allKeys, serverKeysFalse));
+		actors.push_back(
+		    krmSetRangeCoalescing(tr, prefix, KeyRangeRef(beginKey, currentKeys.end), allKeys, serverKeysFalse));
 
 	co_await waitForAll(actors);
 #endif
