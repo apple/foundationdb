@@ -131,9 +131,8 @@ find_fdb_lib() {
 }
 
 FDB_LIB_DIR=$(find_fdb_lib) || {
-    local lib_name
-    if [[ "$(uname)" == "Darwin" ]]; then lib_name="libfdb_c.dylib"; else lib_name="libfdb_c.so"; fi
-    echo "Error: Cannot find $lib_name" >&2
+    if [[ "$(uname)" == "Darwin" ]]; then _lib_name="libfdb_c.dylib"; else _lib_name="libfdb_c.so"; fi
+    echo "Error: Cannot find $_lib_name" >&2
     echo "" >&2
     echo "Searched in:" >&2
     [[ -n "${FDB_LIB_PATH:-}" ]] && echo "  FDB_LIB_PATH=$FDB_LIB_PATH" >&2
@@ -144,7 +143,7 @@ FDB_LIB_DIR=$(find_fdb_lib) || {
     echo "  /usr/lib/" >&2
     echo "  /usr/local/lib/" >&2
     echo "" >&2
-    echo "Fix: specify the directory containing $lib_name:" >&2
+    echo "Fix: specify the directory containing $_lib_name:" >&2
     echo "  ./metadata-audit.sh --fdb-lib /path/to/lib check ..." >&2
     echo "  export FDB_LIB_PATH=/path/to/lib" >&2
     exit 1
