@@ -96,12 +96,27 @@ private:
 		// Verify setup.
 		{
 			auto tr = makeReference<ReadYourWritesTransaction>(cx);
-			RangeResult result = co_await krmGetRanges(tr, testPrefix, allKeys);
-			ASSERT(result.size() == 4);
-			ASSERT(result[0].value == serverKeysTrue);
-			ASSERT(result[1].key == "d"_sr && result[1].value == serverKeysFalse);
-			ASSERT(result[2].key == "j"_sr && result[2].value == serverKeysTrue);
-			TraceEvent("KRMFragTestSetupDone").detail("Entries", result.size());
+			loop {
+				Error err;
+				try {
+					RangeResult result = co_await krmGetRanges(tr, testPrefix, allKeys);
+					TraceEvent evt("KRMFragTestSetupVerify");
+					evt.detail("NumEntries", result.size());
+					for (int i = 0; i < result.size(); i++) {
+						evt.detail(format("Key%d", i), result[i].key);
+						evt.detail(format("Val%d", i), result[i].value);
+					}
+					ASSERT(result.size() == 4);
+					ASSERT(result[0].value == serverKeysTrue);
+					ASSERT(result[1].key == "d"_sr && result[1].value == serverKeysFalse);
+					ASSERT(result[2].key == "j"_sr && result[2].value == serverKeysTrue);
+					TraceEvent("KRMFragTestSetupDone").detail("Entries", result.size());
+					break;
+				} catch (Error& e) {
+					err = e;
+				}
+				co_await tr->onError(err);
+			}
 		}
 
 		// Step 2: Call removeOldDestinations with the multi-gap pattern.
@@ -136,32 +151,41 @@ private:
 		// Step 3: Read back and check for fragmentation.
 		{
 			auto tr = makeReference<ReadYourWritesTransaction>(cx);
-			RangeResult result = co_await krmGetRanges(tr, testPrefix, allKeys);
+			loop {
+				Error err;
+				try {
+					RangeResult result = co_await krmGetRanges(tr, testPrefix, allKeys);
 
-			TraceEvent evt("KRMFragTestResult");
-			evt.detail("NumEntries", result.size());
-			for (int i = 0; i < result.size(); i++) {
-				evt.detail(format("Key%d", i), result[i].key);
-				evt.detail(format("Val%d", i), result[i].value);
-			}
+					TraceEvent evt("KRMFragTestResult");
+					evt.detail("NumEntries", result.size());
+					for (int i = 0; i < result.size(); i++) {
+						evt.detail(format("Key%d", i), result[i].key);
+						evt.detail(format("Val%d", i), result[i].value);
+					}
 
-			bool fragmented = false;
-			for (int i = 1; i < (int)result.size() - 1; i++) {
-				if (result[i].value == result[i - 1].value) {
-					fragmented = true;
-					TraceEvent(SevError, "KRMFragTestFragmentationDetected")
-					    .detail("Key1", result[i - 1].key)
-					    .detail("Key2", result[i].key)
-					    .detail("Value", result[i].value);
+					bool fragmented = false;
+					for (int i = 1; i < (int)result.size() - 1; i++) {
+						if (result[i].value == result[i - 1].value) {
+							fragmented = true;
+							TraceEvent(SevError, "KRMFragTestFragmentationDetected")
+							    .detail("Key1", result[i - 1].key)
+							    .detail("Key2", result[i].key)
+							    .detail("Value", result[i].value);
+						}
+					}
+
+					if (fragmented) {
+						TraceEvent(SevError, "KRMFragTestFailed")
+						    .detail("Message", "removeOldDestinations produced fragmented KRM entries");
+					} else {
+						success = true;
+						TraceEvent("KRMFragTestPassed").detail("Entries", result.size());
+					}
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
-			}
-
-			if (fragmented) {
-				TraceEvent(SevError, "KRMFragTestFailed")
-				    .detail("Message", "removeOldDestinations produced fragmented KRM entries");
-			} else {
-				success = true;
-				TraceEvent("KRMFragTestPassed").detail("Entries", result.size());
+				co_await tr->onError(err);
 			}
 		}
 
