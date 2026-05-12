@@ -1159,6 +1159,8 @@ static Future<Void> startMoveKeys(Database occ,
 					counters->aborted->increment(1);
 					err = e;
 				}
+				if (err.code() == error_code_actor_cancelled)
+					throw err;
 				if (err.code() == error_code_move_to_removed_server)
 					throw err;
 				if (retries > SERVER_KNOBS->START_MOVE_KEYS_MAX_RETRIES) {
