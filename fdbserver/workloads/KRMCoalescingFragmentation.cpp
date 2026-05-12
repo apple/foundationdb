@@ -100,6 +100,10 @@ private:
 				Error err;
 				try {
 					RangeResult result = co_await krmGetRanges(tr, testPrefix, allKeys);
+					if (result.back().key < allKeys.end) {
+						tr->reset();
+						continue;
+					}
 					TraceEvent evt("KRMFragTestSetupVerify");
 					evt.detail("NumEntries", result.size());
 					for (int i = 0; i < result.size(); i++) {
@@ -155,6 +159,10 @@ private:
 				Error err;
 				try {
 					RangeResult result = co_await krmGetRanges(tr, testPrefix, allKeys);
+					if (result.back().key < allKeys.end) {
+						tr->reset();
+						continue;
+					}
 
 					TraceEvent evt("KRMFragTestResult");
 					evt.detail("NumEntries", result.size());
