@@ -1079,6 +1079,7 @@ template <class T>
 class SWIFT_SENDABLE StrictFuture : public Future<T> {
 public:
 	inline StrictFuture(Future<T> const& f) : Future<T>(f) {}
+	inline StrictFuture(Future<T>&& f) : Future<T>(std::move(f)) {}
 	inline StrictFuture(Never n) : Future<T>(n) {}
 
 private:

@@ -92,6 +92,9 @@ struct QuorumAsyncResultCallback;
 template <class ValueType>
 struct GetAllAsyncResultCallback;
 
+template <class ValueType>
+struct GetAllAsyncResultStateCallback;
+
 template <class PromiseType, class ValueType>
 struct AwaitableFutureIgnore;
 
@@ -190,6 +193,8 @@ private:
 	friend struct coro::QuorumAsyncResultCallback;
 	template <class ValueType>
 	friend struct coro::GetAllAsyncResultCallback;
+	template <class ValueType>
+	friend struct coro::GetAllAsyncResultStateCallback;
 };
 
 #include "flow/CoroutinesImpl.h"
