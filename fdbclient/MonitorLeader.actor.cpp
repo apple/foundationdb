@@ -818,6 +818,17 @@ void shrinkProxyList(ClientDBInfo& ni,
 		}
 		ni.firstCommitProxy = ni.commitProxies[0];
 		ni.commitProxies = lastCommitProxies;
+	} else {
+		// Below the shrink threshold the cached list is unused, but if a prior
+		// iteration populated it (above-threshold then dropped below e.g. via a
+		// CP kill that took recruited count from 6 to 5 against MAX=5), the
+		// cache continues to pin the killed CP's RequestStreams (and the
+		// associated peer references) for the actor's lifetime. Clear it so
+		// peerReferences for the dead CP can drop. Observed in StalePeerTest
+		// killRole=commit_proxy as a stuck Delta=14/28 across SS- and
+		// MonitorLeader-hosted DatabaseContexts.
+		lastCommitProxyUIDs.clear();
+		lastCommitProxies.clear();
 	}
 	if (ni.grvProxies.size() > CLIENT_KNOBS->MAX_GRV_PROXY_CONNECTIONS) {
 		std::vector<UID> grvProxyUIDs;
@@ -834,6 +845,11 @@ void shrinkProxyList(ClientDBInfo& ni,
 			}
 		}
 		ni.grvProxies = lastGrvProxies;
+	} else {
+		// Same logic as commit-proxy branch above: clear the cache when no
+		// shrink is needed so it doesn't pin a killed GP's interface.
+		lastGrvProxyUIDs.clear();
+		lastGrvProxies.clear();
 	}
 }
 
