@@ -295,7 +295,8 @@ void TCServerInfo::markTeamUnhealthy(int teamIndex) {
 }
 
 TCServerInfo::~TCServerInfo() {
-	if (collection && ssVersionTooFarBehind.get() && !lastKnownInterface.isTss()) {
+	if (collection && ssVersionTooFarBehind.get() && !lastKnownInterface.isTss() &&
+	    lastKnownInterface.locality.zoneId().present()) {
 		collection->removeLaggingStorageServer(lastKnownInterface.locality.zoneId().get());
 	}
 }

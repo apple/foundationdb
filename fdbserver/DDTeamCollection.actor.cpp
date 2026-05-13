@@ -21,6 +21,7 @@
 #include <climits>
 
 #include "fdbclient/SystemData.h"
+#include "fdbrpc/FlowTransport.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/DDTeamCollection.h"
 #include "fdbserver/ExclusionTracker.actor.h"
@@ -3154,6 +3155,7 @@ public:
 				when(wait(checkSignal)) {
 					checkSignal = Never();
 					isFetchingResults = true;
+					FlowTransport::transport().interfaceTracker.currentCallerTag = "DD::monitorServerListChange";
 					serverListAndProcessClasses = self->db->getServerListAndProcessClasses();
 				}
 				when(ServerWorkerInfos infos = wait(serverListAndProcessClasses)) {
@@ -3194,6 +3196,7 @@ public:
 				}
 				when(waitNext(serverRemoved)) {
 					if (isFetchingResults) {
+						FlowTransport::transport().interfaceTracker.currentCallerTag = "DD::monitorServerListChange(serverRemoved)";
 						serverListAndProcessClasses = self->db->getServerListAndProcessClasses();
 					}
 				}
@@ -3722,6 +3725,18 @@ public:
 			// 		wait(yield());
 			// 	}
 			// }
+
+			// Release snapshot Reference<TCServerInfo>/<TCTeamInfo>/<TCMachineInfo>
+			// held in state vars between iterations. Otherwise these keep every
+			// server's TCServerInfo alive for DD's entire lifetime, so a removed
+			// SS's StorageServerInterface (and its 27 peer references) only dies
+			// when DD does — causing stale peer refs long after RemoveStorageServer.
+			server_info.clear();
+			server_status.clear();
+			teams.clear();
+			machine_info.clear();
+			machineTeams.clear();
+			serverIDs.clear();
 		}
 	}
 }; // class DDTeamCollectionImpl
@@ -4410,6 +4425,29 @@ DDTeamCollection::~DDTeamCollection() {
 	//  before the server_status map to which it has a pointer, is destroyed.
 	for (auto& [_, info] : server_and_tss_info) {
 		info->cancel();
+	}
+
+	// Break all reference cycles between TCServerInfo, TCTeamInfo, TCMachineInfo, TCMachineTeamInfo
+	for (auto& team : teams) {
+		team->clearServers();
+	}
+	for (auto& team : badTeams) {
+		team->clearServers();
+	}
+	for (auto& team : largeTeams) {
+		team->clearServers();
+	}
+	for (auto& [_, info] : server_and_tss_info) {
+		info->machine.clear();
+		info->clearTeams();
+	}
+	for (auto& [_, minfo] : machine_info) {
+		minfo->serversOnMachine.clear();
+		minfo->machineTeams.clear();
+	}
+	for (auto& mt : machineTeams) {
+		mt->clearMachines();
+		mt->clearServerTeams();
 	}
 
 	storageWiggler->teamCollection = nullptr;
@@ -5702,6 +5740,7 @@ void DDTeamCollection::addServer(StorageServerInterface newServer,
 	        std::find(includedDCs.begin(), includedDCs.end(), newServer.locality.dcId()) != includedDCs.end(),
 	    storageServerSet,
 	    addedVersion);
+	
 
 	if (newServer.isTss()) {
 		tss_info_by_pair[newServer.tssPairID.get()] = r;
@@ -5756,6 +5795,9 @@ bool DDTeamCollection::removeTeam(Reference<TCTeamInfo> team) {
 	// Remove the team from its machine team
 	bool foundInMachineTeam = team->machineTeam->removeServerTeam(team);
 
+	// Break cycle: TCTeamInfo::machineTeam <-> TCMachineTeamInfo::serverTeams
+	team->machineTeam.clear();
+
 	ASSERT_WE_THINK(foundInMachineTeam);
 	team->tracker.cancel();
 	team->setHealthy(false);
@@ -5778,9 +5820,11 @@ Reference<TCMachineInfo> DDTeamCollection::checkAndCreateMachine(Reference<TCSer
 		// For each machine, store the first server's localityEntry into machineInfo for later use.
 		LocalityEntry localityEntry = machineLocalityMap.add(locality, &server->getId());
 		machineInfo = makeReference<TCMachineInfo>(server, localityEntry);
+		
 		machine_info.insert(std::make_pair(machine_id, machineInfo));
 	} else {
 		machineInfo = machine_info.find(machine_id)->second;
+		
 		machineInfo->serversOnMachine.push_back(server);
 	}
 	server->machine = machineInfo;
@@ -5986,6 +6030,25 @@ void DDTeamCollection::removeServer(UID removedServer) {
 	}
 	server_info.erase(removedServer);
 	server_and_tss_info.erase(removedServer);
+
+	// Break reference cycle: TCServerInfo::machine <-> TCMachineInfo::serversOnMachine
+	removedServerInfo->machine.clear();
+	removedServerInfo->clearTeams();
+	// ~TCServerInfo conditionally calls removeLaggingStorageServer using
+	// lastKnownInterface.locality.zoneId(). Clear the lagging entry explicitly
+	// BEFORE clearing the interface so the destructor (which may run much later,
+	// after clearLastKnownInterface has zeroed the locality) doesn't silently
+	// miss it. This matters for PerpetualWiggleStorageMigration which relies on
+	// accurate lagging-server tracking.
+	if (removedServerInfo->ssVersionTooFarBehind.get() &&
+	    !removedServerInfo->getLastKnownInterface().isTss() &&
+	    removedServerInfo->getLastKnownInterface().locality.zoneId().present()) {
+		removeLaggingStorageServer(removedServerInfo->getLastKnownInterface().locality.zoneId().get());
+	}
+	// Release the 27 queue refs inside lastKnownInterface. Even if some
+	// holder keeps this TCServerInfo alive past removeServer (e.g., until
+	// ~DDTeamCollection), the FlowTransport peer refs drop now.
+	removedServerInfo->clearLastKnownInterface();
 
 	if (server_status.get(removedServer).initialized && server_status.get(removedServer).isUnhealthy()) {
 		unhealthyServers--;

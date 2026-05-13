@@ -115,7 +115,7 @@ typedef std::map<std::string, TraceEventFields> EventMap;
 
 struct StorageServerStatusInfo : public StorageServerMetaInfo {
 	EventMap eventMap;
-	StorageServerStatusInfo(const StorageServerMetaInfo& info) : StorageServerMetaInfo(info, info.metadata) {}
+	StorageServerStatusInfo(const StorageServerMetaInfo& info) : StorageServerMetaInfo(info) {}
 };
 
 ACTOR static Future<Optional<TraceEventFields>> latestEventOnWorker(WorkerInterface worker, std::string eventName) {

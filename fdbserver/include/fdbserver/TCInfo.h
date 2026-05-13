@@ -54,6 +54,9 @@ class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 
 	int64_t dataInFlightToServer = 0, readInFlightToServer = 0;
 	std::vector<Reference<TCTeamInfo>> teams{};
+
+public:
+private:
 	ErrorOr<GetStorageMetricsReply> metrics;
 	Optional<HealthMetrics::StorageStats> storageStats;
 	Optional<double> storageQueueTooLongStartTime; // When a storage queue becomes long
@@ -99,6 +102,11 @@ public:
 	void updateLastKnown(StorageServerInterface const&, ProcessClass);
 	StorageServerInterface const& getLastKnownInterface() const { return lastKnownInterface; }
 	ProcessClass const& getLastKnownClass() const { return lastKnownClass; }
+	// Drop the 27 queue/peerRef holders inside lastKnownInterface by
+	// replacing it with a default-constructed interface. Used by
+	// DDTeamCollection::removeServer so stale peer refs are released
+	// promptly even if some holder keeps the TCServerInfo alive.
+	void clearLastKnownInterface() { lastKnownInterface = StorageServerInterface(); }
 	Future<Void> updateStoreType();
 	KeyValueStoreType getStoreType() const { return storeType; }
 	int64_t getDataInFlightToServer() const { return dataInFlightToServer; }
@@ -110,6 +118,7 @@ public:
 	void cancel();
 	std::vector<Reference<TCTeamInfo>> const& getTeams() const { return teams; }
 	void addTeam(Reference<TCTeamInfo> team) { teams.push_back(team); }
+	void clearTeams() { teams.clear(); }
 	void removeTeamsContainingServer(UID removedServer);
 	void removeTeam(Reference<TCTeamInfo>);
 	bool metricsPresent() const { return metrics.present(); }
@@ -141,6 +150,45 @@ public:
 	std::vector<Reference<TCMachineTeamInfo>> machineTeams; // SOMEDAY: split good and bad machine teams.
 	LocalityEntry localityEntry;
 
+	// Debug ref tracking
+	bool debugTrackRefs = false;
+	struct RefTrackRecord {
+		int64_t id;
+		bool isAdd;
+		double time;
+		std::string backtrace;
+	};
+	int64_t nextRefTrackId = 0;
+	std::vector<RefTrackRecord> refTrackRecords;
+
+	void addref() const {
+		ReferenceCounted<TCMachineInfo>::addref();
+		if (debugTrackRefs) {
+			auto* self = const_cast<TCMachineInfo*>(this);
+			self->refTrackRecords.push_back(RefTrackRecord{
+			    self->nextRefTrackId++, true, g_network ? g_network->now() : 0.0, platform::get_backtrace() });
+		}
+	}
+	void delref() const {
+		if (debugTrackRefs) {
+			auto* self = const_cast<TCMachineInfo*>(this);
+			self->refTrackRecords.push_back(RefTrackRecord{
+			    self->nextRefTrackId++, false, g_network ? g_network->now() : 0.0, platform::get_backtrace() });
+		}
+		ReferenceCounted<TCMachineInfo>::delref();
+	}
+	void dumpAllRefs(const std::string& label) const {
+		for (const auto& rec : refTrackRecords) {
+			TraceEvent(rec.isAdd ? "TCMachineInfoRefAdd" : "TCMachineInfoRefDel")
+			    .detail("Label", label)
+			    .detail("MachineID", machineID)
+			    .detail("RefId", rec.id)
+			    .detail("RefTime", format("%.6f", rec.time))
+			    .detail("CurrentRefCount", this->debugGetReferenceCount())
+			    .detail("RefBacktrace", rec.backtrace);
+		}
+	}
+
 	Reference<TCMachineInfo> clone() const;
 
 	explicit TCMachineInfo(Reference<TCServerInfo> server, const LocalityEntry& entry);
@@ -165,6 +213,8 @@ public:
 
 	UID id() const { return _id; }
 	std::vector<Reference<TCMachineInfo>> const& getMachines() const { return machines; }
+	void clearMachines() { machines.clear(); }
+	void clearServerTeams() { serverTeams.clear(); }
 	std::vector<Standalone<StringRef>> const& getMachineIDs() const { return machineIDs; }
 	std::vector<Reference<TCTeamInfo>> const& getServerTeams() const { return serverTeams; }
 	void addServerTeam(Reference<TCTeamInfo> team) { serverTeams.push_back(team); }
@@ -215,6 +265,7 @@ public:
 	std::vector<UID> const& getServerIDs() const override { return serverIDs; }
 
 	const std::vector<Reference<TCServerInfo>>& getServers() const { return servers; }
+	void clearServers() { servers.clear(); }
 
 	std::string getServerIDsStr() const;
 

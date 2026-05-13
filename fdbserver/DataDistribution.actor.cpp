@@ -936,6 +936,17 @@ ACTOR Future<Void> monitorPhysicalShardStatus(Reference<PhysicalShardCollection>
 	}
 }
 
+
+// Drop the StorageServerInterface copies held in initData->allServers once
+// DDTeamCollection::init has consumed them. See call site in dataDistribution().
+ACTOR Future<Void> releaseInitDataAllServers(Reference<DataDistributor> self) {
+	wait(self->initialized.getFuture());
+	if (self->initData) {
+		self->initData->allServers.clear();
+	}
+	return Void();
+}
+
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
 ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
                                     PromiseStream<GetMetricsListRequest> getShardMetricsList) {
@@ -1162,6 +1173,19 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
 				actors.push_back(monitorPhysicalShardStatus(self->physicalShardCollection));
 			}
+
+
+			// Release the StorageServerInterface copies from initData->allServers
+			// once DDTeamCollection::init has consumed them (its run signals
+			// readyToStart via the DataDistributionTracker → self->initialized
+			// path). Each entry holds 27 RequestStream queues; leaving them in
+			// place for DD's lifetime keeps a stale SSI — and 27 peer refs per
+			// killed server — alive on every non-CP role running on the DD
+			// process, which is what StalePeerTest observes as Delta=27.
+			// The empty vector preserves the initData shell for any remaining
+			// consumer that only touches metadata fields (toCleanDataMoveTombstone,
+			// etc.); we only drop the SSI payload.
+			actors.push_back(releaseInitDataAllServers(self));
 
 			wait(waitForAll(actors));
 			return Void();
