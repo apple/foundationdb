@@ -894,8 +894,7 @@ void MergedPeekCursor::advanceTo(LogMessageVersion n) {
 Future<Void> mergedPeekGetMore(MergedPeekCursor* self, LogMessageVersion startVersion, TaskPriority taskID) {
 	while (true) {
 		//TraceEvent("MPC_GetMoreA", self->randomID).detail("Start", startVersion.toString());
-		if (self->bestServer >= 0 &&
-		    self->serverCursors[self->bestServer]->isActive()) {
+		if (self->bestServer >= 0 && self->serverCursors[self->bestServer]->isActive()) {
 			ASSERT(!self->serverCursors[self->bestServer]->hasMessage());
 			co_await (self->serverCursors[self->bestServer]->getMore(taskID) ||
 			          self->serverCursors[self->bestServer]->onFailed());
@@ -1130,8 +1129,7 @@ void SetPeekCursor::updateMessage(int logIdx, bool usePolicy) {
 			}
 		} else {
 			//(int)oldLogData[i].logServers.size() + 1 - oldLogData[i].tLogReplicationFactor
-			auto quorum =
-			    logSets[logIdx]->logServers.size() + 1 - logSets[logIdx]->tLogReplicationFactor;
+			auto quorum = logSets[logIdx]->logServers.size() + 1 - logSets[logIdx]->tLogReplicationFactor;
 			std::nth_element(versions.begin(), versions.end() - quorum, versions.end());
 			selectedVersion = versions[versions.size() - quorum].first;
 		}
@@ -1332,7 +1330,8 @@ Version SetPeekCursor::popped() const {
 	return poppedVersion;
 }
 
-ReplayMultiCursor::ReplayMultiCursor(std::vector<Reference<IReplayPeekCursor>> cursors, std::vector<LogMessageVersion> epochEnds)
+ReplayMultiCursor::ReplayMultiCursor(std::vector<Reference<IReplayPeekCursor>> cursors,
+                                     std::vector<LogMessageVersion> epochEnds)
   : cursors(cursors), epochEnds(epochEnds), poppedVersion(0) {
 	for (int i = 0; i < std::min<int>(cursors.size(), SERVER_KNOBS->MULTI_CURSOR_PRE_FETCH_LIMIT); i++) {
 		cursors[cursors.size() - i - 1]->getMore();
@@ -1425,8 +1424,7 @@ Version ReplayMultiCursor::popped() const {
 	return std::max(poppedVersion, cursors.back()->popped());
 }
 
-MultiCursor::MultiCursor(std::vector<Reference<IPeekCursor>> cursors,
-                                   std::vector<LogMessageVersion> epochEnds)
+MultiCursor::MultiCursor(std::vector<Reference<IPeekCursor>> cursors, std::vector<LogMessageVersion> epochEnds)
   : cursors(cursors), epochEnds(epochEnds), poppedVersion(0) {
 	for (int i = 0; i < std::min<int>(cursors.size(), SERVER_KNOBS->MULTI_CURSOR_PRE_FETCH_LIMIT); i++) {
 		cursors[cursors.size() - i - 1]->getMore();
@@ -1513,8 +1511,8 @@ BufferedCursor::BufferedCursor(std::vector<Reference<IReplayPeekCursor>> replayC
                                Version end,
                                bool withTags,
                                bool canDiscardPopped)
-  : discardableCursors(canDiscardPopped ? replayCursors : std::vector<Reference<IReplayPeekCursor>>()),
-    messageIndex(0), messageVersion(begin), end(end), hasNextMessage(false), withTags(withTags), knownUnique(false),
+  : discardableCursors(canDiscardPopped ? replayCursors : std::vector<Reference<IReplayPeekCursor>>()), messageIndex(0),
+    messageVersion(begin), end(end), hasNextMessage(false), withTags(withTags), knownUnique(false),
     minKnownCommittedVersion(0), poppedVersion(0), initialPoppedVersion(0), canDiscardPopped(canDiscardPopped),
     randomID(deterministicRandom()->randomUniqueID()) {
 	cursors.reserve(replayCursors.size());

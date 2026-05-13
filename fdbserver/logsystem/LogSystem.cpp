@@ -1163,11 +1163,11 @@ Reference<IPeekCursor> LogSystem::peek(UID dbgid,
 }
 
 Reference<IReplayPeekCursor> LogSystem::peekLocal(UID dbgid,
-                                            Tag tag,
-                                            Version begin,
-                                            Version end,
-                                            bool useMergePeekCursors,
-                                            int8_t peekLocality) {
+                                                  Tag tag,
+                                                  Version begin,
+                                                  Version end,
+                                                  bool useMergePeekCursors,
+                                                  int8_t peekLocality) {
 	if (tag.locality >= 0 || tag.locality == tagLocalitySpecial) {
 		peekLocality = tag.locality;
 	}
@@ -1453,9 +1453,9 @@ Reference<IPeekCursor> LogSystem::peekTxs(UID dbgid,
 }
 
 Reference<IReplayPeekCursor> LogSystem::peekSingle(UID dbgid,
-                                             Version begin,
-                                             Tag tag,
-                                             std::vector<std::pair<Version, Tag>> history) {
+                                                   Version begin,
+                                                   Tag tag,
+                                                   std::vector<std::pair<Version, Tag>> history) {
 	while (!history.empty() && begin >= history.back().first) {
 		history.pop_back();
 	}

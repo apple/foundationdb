@@ -364,7 +364,8 @@ Future<Void> LogRouterData::waitForVersionAndLog(Version ver) {
 	}
 }
 
-Future<Reference<IReplayPeekCursor>> LogRouterData::getPeekCursorData(Reference<IReplayPeekCursor> r, Version beginVersion) {
+Future<Reference<IReplayPeekCursor>> LogRouterData::getPeekCursorData(Reference<IReplayPeekCursor> r,
+                                                                      Version beginVersion) {
 	Reference<IReplayPeekCursor> result = r;
 	bool useSatellite = SERVER_KNOBS->LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED;
 	uint32_t noPrimaryPeekLocation = 0;

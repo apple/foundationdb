@@ -413,11 +413,11 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	                            bool parallelGetMore);
 
 	Reference<IReplayPeekCursor> peekLocal(UID dbgid,
-	                                        Tag tag,
-	                                        Version begin,
-	                                        Version end,
-	                                        bool useMergePeekCursors,
-	                                        int8_t peekLocality = tagLocalityInvalid);
+	                                       Tag tag,
+	                                       Version begin,
+	                                       Version end,
+	                                       bool useMergePeekCursors,
+	                                       int8_t peekLocality = tagLocalityInvalid);
 
 	Reference<IPeekCursor> peekTxs(UID dbgid,
 	                               Version begin,
