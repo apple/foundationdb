@@ -59,6 +59,7 @@ static const char* typeString[] = { "SetValue",
 	                                "Reserved_For_SpanContextMessage",
 	                                "Reserved_For_OTELSpanContextMessage",
 	                                "AccumulativeChecksum",
+	                                "Reserved_For_PartitionMapMessage",
 	                                "MAX_ATOMIC_OP" };
 
 struct MutationRef {
@@ -90,6 +91,7 @@ struct MutationRef {
 		CompareAndClear,
 		Reserved_For_SpanContextMessage /* See fdbserver/SpanContextMessage.h */,
 		Reserved_For_OTELSpanContextMessage,
+		Reserved_For_PartitionMapMessage /* See fdbserver/core/PartitionMapMessage.h */,
 		MAX_ATOMIC_OP
 	};
 
