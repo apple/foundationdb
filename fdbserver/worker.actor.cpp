@@ -2019,16 +2019,31 @@ ACTOR Future<Void> cleanupStaleStorageDisk(Reference<AsyncVar<ServerDBInfo>> dbI
 			}
 
 			TraceEvent("StorageServerLivenessCheck").detail("StoreID", storeID).detail("Retry", retries);
-			Reference<CommitProxyInfo> commitProxies(new CommitProxyInfo(dbInfo->get().client.commitProxies));
+			state Reference<CommitProxyInfo> commitProxies(
+			    new CommitProxyInfo(dbInfo->get().client.commitProxies));
 			if (commitProxies->size() == 0) {
 				TraceEvent("SkipDiskCleanup").log();
 				return Void();
 			}
 			GetStorageServerRejoinInfoRequest request(storeID, cleaner.locality.dcId());
-			GetStorageServerRejoinInfoReply _rep =
-			    wait(basicLoadBalance(commitProxies, &CommitProxyInterface::getStorageServerRejoinInfo, request));
-			// a successful response means the storage server is still alive
-			retries++;
+			// Wrap the basicLoadBalance call in a choose against dbInfo->onChange so a
+			// proxy-list rotation (e.g. a CP kill that removes the proxy from
+			// dbInfo.client.commitProxies) cancels the in-flight LB and frees the
+			// captured Reference<CommitProxyInfo>. Without this, basicLoadBalance
+			// keeps the OLD CommitProxyInfo (with the killed CP's 14 RequestStream
+			// copies) alive for the duration of its inner retry/backoff loop, which
+			// can outlast StalePeerTest's 240s waitAfterKill window — observed as
+			// a stuck Delta=14 CP leak across processes that hosted a cleanup actor.
+			choose {
+				when(wait(dbInfo->onChange())) {
+					commitProxies.clear();
+				}
+				when(GetStorageServerRejoinInfoReply _rep = wait(basicLoadBalance(
+				         commitProxies, &CommitProxyInterface::getStorageServerRejoinInfo, request))) {
+					// a successful response means the storage server is still alive
+					retries++;
+				}
+			}
 		} catch (Error& e) {
 			// error worker_removed indicates the storage server has been removed, so it's safe to delete its data
 			if (e.code() == error_code_worker_removed) {

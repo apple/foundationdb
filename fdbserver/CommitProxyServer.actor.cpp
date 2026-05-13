@@ -3714,17 +3714,28 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	addActor.send(reportTxnTagCommitCost(proxy.id(), db, &commitData.ssTrTagCommitCost));
 	addActor.send(logDetailedMetrics(&commitData));
 
-	auto openDb = openDBOnServer(db);
-
+	// Use commitData.cx instead of a separately-opened Database here. An
+	// extra openDBOnServer(db) creates another Reference<DatabaseContext>
+	// (and a fresh extractClientInfo / ClientDBInfo AsyncVar); if any of
+	// the sub-actors below captures that Database by value and outlives
+	// the parent commitProxyServerCore cancellation, its stored
+	// ClientDBInfo keeps the deserialized proxy RequestStreams alive.
+	// Observed in StalePeerTest as a stuck Delta=28 on the CP's host
+	// process: one snapshot from commitData.cx (released on shutdown)
+	// + one from the separate openDb (not released). commitData.cx
+	// already receives the same ServerDBInfo stream and is the natural
+	// Database handle for proxy-local housekeeping.
 	if (firstProxy) {
 		addActor.send(recurringAsync(
-		    [openDb = openDb]() { return cleanIdempotencyIds(openDb, SERVER_KNOBS->IDEMPOTENCY_IDS_MIN_AGE_SECONDS); },
+		    [cx = commitData.cx]() { return cleanIdempotencyIds(cx, SERVER_KNOBS->IDEMPOTENCY_IDS_MIN_AGE_SECONDS); },
 		    SERVER_KNOBS->IDEMPOTENCY_IDS_CLEANER_POLLING_INTERVAL,
 		    true,
 		    SERVER_KNOBS->IDEMPOTENCY_IDS_CLEANER_POLLING_INTERVAL));
 	}
-	addActor.send(idempotencyIdsExpireServer(
-	    openDb, proxy.expireIdempotencyId, commitData.expectedIdempotencyIdCountForKey, &commitData.idempotencyClears));
+	addActor.send(idempotencyIdsExpireServer(commitData.cx,
+	                                         proxy.expireIdempotencyId,
+	                                         commitData.expectedIdempotencyIdCountForKey,
+	                                         &commitData.idempotencyClears));
 
 	if (SERVER_KNOBS->STORAGE_QUOTA_ENABLED) {
 		addActor.send(monitorTenantsOverStorageQuota(proxy.id(), db, &commitData));
@@ -3809,6 +3820,22 @@ ACTOR Future<Void> updateLocalDbInfo(Reference<AsyncVar<ServerDBInfo> const> in,
 		bool isIncluded =
 		    std::count(in->get().client.commitProxies.begin(), in->get().client.commitProxies.end(), myInterface);
 		if (in->get().recoveryCount >= recoveryCount && !isIncluded) {
+			// Before throwing worker_removed, one last forward of the parent
+			// ServerDBInfo to localDb. Downstream actors (ProxyCommitData.cx
+			// extractClientInfo, openDBOnServer subscribers) read from
+			// localDb; if we skip this write, the localDb value stays frozen
+			// with the pre-rotation ClientDBInfo — which includes stale
+			// CommitProxyInterface / GrvProxyInterface entries pointing at
+			// the now-killed peer. Those stale interfaces then pin 14
+			// RequestStream queues per proxy until the parent commitProxy
+			// actor is torn down. On the MasterServer-hosting process
+			// (which co-locates CPs that get superseded without their
+			// parent dying quickly), StalePeerTest sees Delta=28+ residue.
+			// Forwarding once before the throw lets the downstream AsyncVars
+			// drop the killed proxy's refs through normal vector= reassign.
+			if (in->get().recoveryCount >= out->get().recoveryCount) {
+				out->set(in->get());
+			}
 			throw worker_removed();
 		}
 
@@ -3864,6 +3891,18 @@ ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
 			throw;
 		}
 		CODE_PROBE(e.code() == error_code_failed_to_progress, "Commit proxy failed to progress");
+		// Before state destructs, reset localDb to a default-constructed
+		// ServerDBInfo. This drops all interface copies (CC, CP, GP, TLog,
+		// etc.) that were stored inside localDb's value from prior set()
+		// calls. Downstream subscribers of localDb (ProxyCommitData.cx
+		// extractClientInfo, idempotency sub-actors) may outlive the
+		// parent commitProxyServerCore cancellation due to actorCollection
+		// teardown ordering; if they do, their held Reference<AsyncVar<
+		// ServerDBInfo>> keeps localDb alive and its stored value pins
+		// the killed peer's RequestStream queues. Explicit reset here
+		// forces those queues to be released regardless of who holds a
+		// Reference to the AsyncVar.
+		localDb->setUnconditional(ServerDBInfo());
 	}
 	return Void();
 }
