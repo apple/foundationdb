@@ -199,12 +199,13 @@ function build_and_push_images () {
             --build-arg FDB_VERSION="${fdb_version}" \
             --build-arg FDB_LIBRARY_VERSIONS="${fdb_library_versions[*]}" \
             --build-arg FDB_WEBSITE="${fdb_website}" \
+            --build-arg DATA_LOADER_BASE_IMAGE="${tag_base}fdb-data-loader:latest" \
             --build-arg HTTPS_PROXY="${HTTPS_PROXY}" \
             --build-arg HTTP_PROXY="${HTTP_PROXY}" \
             --tag "${image_tag}" \
             --file "${dockerfile_name}" \
             --target "${image}" .
-        if [ "${image}" == 'foundationdb' ] || [ "${image}" == 'foundationdb-kubernetes-sidecar' ] || [ "${image}" == 'ycsb' ] ; then
+        if [ "${image}" == 'foundationdb' ] || [ "${image}" == 'foundationdb-kubernetes-sidecar' ] || [ "${image}" == 'ycsb' ] || [ "${image}" == 'fdb-data-loader' ] ; then
             tags_to_push+=("${image_tag}")
         fi
     done
@@ -256,6 +257,7 @@ image_list=(
     'fdb-kubernetes-monitor'
     'foundationdb-kubernetes-sidecar'
     'ycsb'
+    'fdb-data-loader'
 )
 registry=""
 tag_base="foundationdb/"

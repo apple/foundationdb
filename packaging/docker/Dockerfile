@@ -16,6 +16,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+# DATA_LOADER_BASE_IMAGE is consumed by the `FROM` of the fdb-data-loader
+# stage at the bottom of this file. Buildkit requires any ARG referenced
+# from a `FROM` to be declared in the global scope (before the first
+# `FROM`); declaring it next to the consumer stage scopes it to the prior
+# stage and the FROM substitution sees an empty string. Default value is
+# the public docker.io image; build-images.sh overrides via --build-arg.
+ARG DATA_LOADER_BASE_IMAGE=foundationdb/fdb-data-loader:latest
+
 FROM docker.io/rockylinux/rockylinux:9.4-minimal AS base
 
 RUN microdnf install -y \
@@ -226,3 +234,20 @@ ENV FDB_NETWORK_OPTION_TRACE_ENABLE=/var/log/fdb-trace-logs
 ENV LD_LIBRARY_PATH=/var/dynamic-conf/lib/
 ENV BUCKET=""
 ENTRYPOINT ["run_ycsb.sh"]
+
+# fdb-data-loader: overlay stage. Starts from a previously-built data-loader
+# image (which carries the `data-loader` Go binary and the rockylinux base
+# from fdb-kubernetes-operator/sample-apps/data-loader/Dockerfile) and
+# replaces the rpm-installed libfdb_c.so at /usr/lib64/libfdb_c.so with the
+# one built from our local website tree. That way a kubernetes test that
+# spins up a data-loader Job picks up *this* build's client library and
+# client knob defaults, not whatever libfdb was baked into the base image.
+#
+# The DATA_LOADER_BASE_IMAGE ARG is declared at the top of this file
+# because buildkit only substitutes ARGs into FROM when they're declared
+# in the global scope. See build-images.sh for how the value is computed.
+FROM ${DATA_LOADER_BASE_IMAGE} AS fdb-data-loader
+USER root
+COPY --from=foundationdb-base /usr/lib/libfdb_c.so /usr/lib64/libfdb_c.so
+RUN chmod 0755 /usr/lib64/libfdb_c.so
+USER 4059
