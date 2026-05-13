@@ -1,5 +1,5 @@
 /*
- * FlowTest.cpp
+ * fdbrpc_test.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -21,5 +21,5 @@
 #include "flow/UnitTestRunner.h"
 
 int main(int argc, char** argv) {
-	return runUnitTests(argc, argv, { "flow", "flow_test_data", "flow_test" });
+	return runUnitTests(argc, argv, { "fdbrpc", "fdbrpc_test_data", "fdbrpc_test", "fdbrpc" });
 }

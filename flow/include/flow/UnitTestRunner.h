@@ -1,5 +1,5 @@
 /*
- * FlowTest.cpp
+ * UnitTestRunner.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,8 +18,19 @@
  * limitations under the License.
  */
 
-#include "flow/UnitTestRunner.h"
+#ifndef FLOW_UNIT_TEST_RUNNER_H
+#define FLOW_UNIT_TEST_RUNNER_H
+#pragma once
 
-int main(int argc, char** argv) {
-	return runUnitTests(argc, argv, { "flow", "flow_test_data", "flow_test" });
-}
+#include <string_view>
+
+struct UnitTestRunnerConfig {
+	std::string_view suiteName;
+	std::string_view dataDir;
+	std::string_view traceName;
+	const char* sourceSubdir = nullptr;
+};
+
+int runUnitTests(int argc, char** argv, const UnitTestRunnerConfig& config);
+
+#endif
