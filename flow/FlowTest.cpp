@@ -21,5 +21,5 @@
 #include "flow/UnitTestRunner.h"
 
 int main(int argc, char** argv) {
-	return runUnitTests(argc, argv, { .sourceSubDir = "flow" });
+	return runUnitTests(argc, argv, UnitTestRunnerConfig("flow"));
 }

@@ -230,7 +230,7 @@ bool testMatched(const UnitTestRunnerOptions& options, std::string_view testName
 std::vector<UnitTest*> collectTests(const UnitTestRunnerOptions& options, const UnitTestRunnerConfig& config) {
 	std::vector<UnitTest*> tests;
 	for (auto test = g_unittests.tests; test != nullptr; test = test->next) {
-		if (!pathComponentMatches(test->file, config.sourceSubDir)) {
+		if (!pathComponentMatches(test->file, config.suiteName())) {
 			continue;
 		}
 		if (testMatched(options, test->name)) {
@@ -330,6 +330,8 @@ Future<Void> stopNetworkAfter(Future<Void> what, std::string_view traceName, int
 }
 
 } // namespace
+
+UnitTestRunnerConfig::UnitTestRunnerConfig(std::string_view sourceSubDir) : sourceSubDir(sourceSubDir) {}
 
 std::string_view UnitTestRunnerConfig::suiteName() const {
 	return sourceSubDir;
