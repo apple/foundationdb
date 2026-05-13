@@ -152,7 +152,16 @@ private:
 			}
 		}
 
-		// Step 3: Read back and check for fragmentation.
+		// Step 3: Read back and verify the exact expected KRM state.
+		//
+		// Sequential coalescing should produce:
+		//   "" -> "1"   (server owns ["", "c"))
+		//   "c" -> ""   (gaps ["c","e") and ["g","k") coalesced with existing "" region ["d","j"))
+		//   "k" -> "1"  (server owns ["k", ...))
+		//   <terminator>
+		//
+		// Gap 1 ["c","e") coalesces right through "d"->"" to "j", then Gap 2 ["g","k")
+		// coalesces left through the now-extended "" region back to "c".
 		{
 			auto tr = makeReference<ReadYourWritesTransaction>(cx);
 			loop {
@@ -185,10 +194,18 @@ private:
 					if (fragmented) {
 						TraceEvent(SevError, "KRMFragTestFailed")
 						    .detail("Message", "removeOldDestinations produced fragmented KRM entries");
-					} else {
-						success = true;
-						TraceEvent("KRMFragTestPassed").detail("Entries", result.size());
+						break;
 					}
+
+					// Verify the exact expected transitions: the gaps were cleared and
+					// coalesced, and the kept-shard boundaries are correct.
+					ASSERT_EQ(result.size(), 4);
+					ASSERT(result[0].key == ""_sr && result[0].value == serverKeysTrue);
+					ASSERT(result[1].key == "c"_sr && result[1].value == serverKeysFalse);
+					ASSERT(result[2].key == "k"_sr && result[2].value == serverKeysTrue);
+
+					success = true;
+					TraceEvent("KRMFragTestPassed").detail("Entries", result.size());
 					break;
 				} catch (Error& e) {
 					err = e;

@@ -3523,7 +3523,7 @@ Future<Void> removeOldDestinations(Reference<ReadYourWritesTransaction> tr,
 
 #if DO_NOT_ENABLE_THIS_EXCEPT_TO_REPRODUCE_BUG_IN_TESTING
 	// BAD OLD LOGIC: fdbserver/workloads/KRMCoalescingFragmentation.cpp will
-	// generate improperly coalesced KRM entries if you comment about the above
+	// generate improperly coalesced KRM entries if you comment out the above
 	// and uncomment this version.
 	std::vector<Future<Void>> actors;
 	for (int i = 0; i < shards.size(); i++) {

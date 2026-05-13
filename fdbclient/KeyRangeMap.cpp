@@ -224,8 +224,8 @@ Future<Void> krmSetRange(Reference<ReadYourWritesTransaction> tr, Key mapPrefix,
 //   prefix see the same snapshot state, compute overlapping clear ranges, and corrupt each other's
 //   boundary writes — producing adjacent same-value entries (fragmentation) that violate KRM
 //   invariants and crash downstream code.
-// - Multiple calls on DIFFERENT prefixes within a single transaction are safe to run concurrently
-//   because their reads and writes do not overlap.
+// - Multiple calls on non-overlapping prefixes within a single transaction are safe to run
+//   concurrently because their reads and writes are disjoint.
 // - The transaction MUST be a ReadYourWritesTransaction if sequential calls on the same prefix
 //   need each call to see the prior call's writes for correct coalescing.
 template <class Transaction>
