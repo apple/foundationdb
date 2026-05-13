@@ -1409,7 +1409,11 @@ Version ReplayMultiCursor::getMinKnownCommittedVersion() const {
 }
 
 Version ReplayMultiCursor::getMaxKnownVersion() const {
-	return cursors.back()->getMaxKnownVersion();
+	Version maxKnownVersion = 0;
+	for (const auto& cursor : cursors) {
+		maxKnownVersion = std::max(maxKnownVersion, cursor->getMaxKnownVersion());
+	}
+	return maxKnownVersion;
 }
 
 Optional<UID> ReplayMultiCursor::getPrimaryPeekLocation() const {
