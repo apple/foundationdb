@@ -2824,7 +2824,7 @@ public:
 	                        FutureStream<Promise<int>> getUnhealthyRelocationCount) {
 		Reference<DDQueueImpl> queue = Reference<DDQueueImpl>(
 		    new DDQueueImpl(self, processingUnhealthy, processingWiggle, getUnhealthyRelocationCount));
-		co_await queue->run(queue);
+		co_await run(queue);
 	}
 
 private:
@@ -2837,7 +2837,11 @@ private:
 		serversToLaunchFrom.insert(servers.begin(), servers.end());
 	}
 
-	Future<Void> relocateShards([[maybe_unused]] Reference<DDQueueImpl> keepAlive, FutureStream<RelocateShard> input) {
+	static Future<Void> relocateShards(Reference<DDQueueImpl> impl, FutureStream<RelocateShard> input) {
+		auto& self = impl->self;
+		auto& serversToLaunchFrom = impl->serversToLaunchFrom;
+		auto& queueMutationLock = impl->queueMutationLock;
+
 		while (true) {
 			RelocateShard rs = co_await input;
 			self->pendingGateRelocations--;
@@ -2857,13 +2861,18 @@ private:
 				self->queueRelocation(rs, serversToLaunchFrom);
 				self->validate();
 				if (wasEmpty && !serversToLaunchFrom.empty()) {
-					triggerLaunchQueuedWork();
+					impl->triggerLaunchQueuedWork();
 				}
 			}
 		}
 	}
 
-	Future<Void> launchQueuedWork([[maybe_unused]] Reference<DDQueueImpl> keepAlive) {
+	static Future<Void> launchQueuedWork(Reference<DDQueueImpl> impl) {
+		auto& self = impl->self;
+		auto& launchQueuedWorkTrigger = impl->launchQueuedWorkTrigger;
+		auto& serversToLaunchFrom = impl->serversToLaunchFrom;
+		auto& queueMutationLock = impl->queueMutationLock;
+
 		while (true) {
 			co_await launchQueuedWorkTrigger.getFuture();
 			co_await delay(0, TaskPriority::DataDistributionLaunch);
@@ -2878,7 +2887,10 @@ private:
 		}
 	}
 
-	Future<Void> processSourceFetchResults([[maybe_unused]] Reference<DDQueueImpl> keepAlive) {
+	static Future<Void> processSourceFetchResults(Reference<DDQueueImpl> impl) {
+		auto& self = impl->self;
+		auto& queueMutationLock = impl->queueMutationLock;
+
 		while (true) {
 			RelocateData results = co_await self->fetchSourceServersComplete.getFuture();
 			co_await queueMutationLock.take(TaskPriority::DataDistributionLaunch);
@@ -2903,19 +2915,26 @@ private:
 		}
 	}
 
-	Future<Void> processDataTransferComplete([[maybe_unused]] Reference<DDQueueImpl> keepAlive) {
+	static Future<Void> processDataTransferComplete(Reference<DDQueueImpl> impl) {
+		auto& self = impl->self;
+		auto& queueMutationLock = impl->queueMutationLock;
+
 		while (true) {
 			RelocateData done = co_await self->dataTransferComplete.getFuture();
 			co_await queueMutationLock.take(TaskPriority::DataDistributionLaunch);
 			FlowLock::Releaser releaser(queueMutationLock);
 
 			complete(done, self->busymap, self->destBusymap);
-			addServersToLaunch(done.src);
+			impl->addServersToLaunch(done.src);
 			self->validate();
 		}
 	}
 
-	Future<Void> processRelocationComplete([[maybe_unused]] Reference<DDQueueImpl> keepAlive) {
+	static Future<Void> processRelocationComplete(Reference<DDQueueImpl> impl) {
+		auto& self = impl->self;
+		auto& rangesComplete = impl->rangesComplete;
+		auto& queueMutationLock = impl->queueMutationLock;
+
 		while (true) {
 			RelocateData done = co_await self->relocationComplete.getFuture();
 			co_await queueMutationLock.take(TaskPriority::DataDistributionLaunch);
@@ -2938,7 +2957,11 @@ private:
 		}
 	}
 
-	Future<Void> launchCompletedRanges([[maybe_unused]] Reference<DDQueueImpl> keepAlive) {
+	static Future<Void> launchCompletedRanges(Reference<DDQueueImpl> impl) {
+		auto& self = impl->self;
+		auto& rangesComplete = impl->rangesComplete;
+		auto& queueMutationLock = impl->queueMutationLock;
+
 		while (true) {
 			KeyRange done = co_await rangesComplete.getFuture();
 			co_await queueMutationLock.take(TaskPriority::DataDistributionLaunch);
@@ -2949,7 +2972,11 @@ private:
 		}
 	}
 
-	Future<Void> recordMetricsLoop([[maybe_unused]] Reference<DDQueueImpl> keepAlive) {
+	static Future<Void> recordMetricsLoop(Reference<DDQueueImpl> impl) {
+		auto& self = impl->self;
+		auto& recordMetrics = impl->recordMetrics;
+		auto& queueMutationLock = impl->queueMutationLock;
+
 		while (true) {
 			co_await recordMetrics;
 			co_await queueMutationLock.take(TaskPriority::FlushTrace);
@@ -3030,11 +3057,17 @@ private:
 		}
 	}
 
-	Future<Void> propagateDataDistributionRelocatorErrors([[maybe_unused]] Reference<DDQueueImpl> keepAlive) {
+	static Future<Void> propagateDataDistributionRelocatorErrors(Reference<DDQueueImpl> impl) {
+		auto& self = impl->self;
+
 		co_await self->error.getFuture();
 	}
 
-	Future<Void> getUnhealthyRelocationCountRequests([[maybe_unused]] Reference<DDQueueImpl> keepAlive) {
+	static Future<Void> getUnhealthyRelocationCountRequests(Reference<DDQueueImpl> impl) {
+		auto& self = impl->self;
+		auto& getUnhealthyRelocationCount = impl->getUnhealthyRelocationCount;
+		auto& queueMutationLock = impl->queueMutationLock;
+
 		while (true) {
 			Promise<int> r = co_await getUnhealthyRelocationCount;
 			co_await queueMutationLock.take(TaskPriority::DataDistributionLaunch);
@@ -3045,7 +3078,12 @@ private:
 		}
 	}
 
-	Future<Void> run(Reference<DDQueueImpl> impl) {
+	static Future<Void> run(Reference<DDQueueImpl> impl) {
+		auto& self = impl->self;
+		auto& processingUnhealthy = impl->processingUnhealthy;
+		auto& processingWiggle = impl->processingWiggle;
+		auto& ddQueueFutures = impl->ddQueueFutures;
+		auto& onCleanUpDataMoveActorError = impl->onCleanUpDataMoveActorError;
 
 		// Gate the input stream by the pipeline limit so that DD never tracks more
 		// than DD_MAX_PIPELINE_MOVES relocations at once (queued + in-flight).
