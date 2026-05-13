@@ -42,7 +42,13 @@ struct ResolutionBalancer {
 
 	Version* pVersion; // points to MasterData::version
 
-	std::vector<CommitProxyInterface> commitProxies;
+	// Only proxy UIDs are needed by resolutionBalancing_impl (to populate
+	// resolverNeedingChanges). Store UIDs instead of full CommitProxyInterface
+	// values so MasterData doesn't pin the killed CP's 14 RequestStreams via
+	// this long-lived member until the master actor exits. Observed in
+	// StalePeerTest killRole='proxy' as a stuck Delta=28 (2 snapshots' worth
+	// of CP streams) on the MasterServer-hosting process.
+	std::vector<UID> commitProxies;
 	std::vector<ResolverInterface> resolvers;
 	AsyncTrigger triggerResolution;
 
@@ -56,7 +62,13 @@ struct ResolutionBalancer {
 	// than one resolvers are present.
 	void setResolvers(const std::vector<ResolverInterface>& resolvers);
 
-	void setCommitProxies(const std::vector<CommitProxyInterface>& proxies) { commitProxies = proxies; }
+	void setCommitProxies(const std::vector<CommitProxyInterface>& proxies) {
+		commitProxies.clear();
+		commitProxies.reserve(proxies.size());
+		for (const auto& p : proxies) {
+			commitProxies.push_back(p.id());
+		}
+	}
 
 	void setChangesInReply(UID requestingProxy, GetCommitVersionReply& rep);
 };

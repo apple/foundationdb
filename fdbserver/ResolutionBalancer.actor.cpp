@@ -177,7 +177,7 @@ ACTOR Future<Void> ResolutionBalancer::resolutionBalancing_impl(ResolutionBalanc
 
 				self->resolverChangesVersion = *self->pVersion + 1;
 				for (auto& p : self->commitProxies)
-					self->resolverNeedingChanges.insert(p.id());
+					self->resolverNeedingChanges.insert(p);
 				self->resolverChanges.set(movedRanges);
 			} catch (Error& e) {
 				if (e.code() != error_code_operation_failed)
