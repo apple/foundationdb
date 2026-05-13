@@ -65,6 +65,14 @@ struct MasterInterface {
 			    waitFailure.getEndpoint().getAdjustedEndpoint(3));
 			updateRecoveryData =
 			    RequestStream<struct UpdateRecoveryDataRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(4));
+			if (g_network && g_network->global(INetwork::enFlowTransport)) {
+				std::vector<UID> tokens;
+				tokens.push_back(waitFailure.getEndpoint().token);
+				for (int i = 1; i <= 4; i++)
+					tokens.push_back(waitFailure.getEndpoint().getAdjustedEndpoint(i).token);
+				FlowTransport::transport().interfaceTracker.created(
+				    waitFailure.getEndpoint().getPrimaryAddress(), "MS", tokens);
+			}
 		}
 	}
 

@@ -28,6 +28,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbrpc/TimedRequest.h"
 #include <iterator>
+#include "flow/serialize.h"
 
 struct TLogInterface {
 	constexpr static FileIdentifier file_identifier = 16308510;
@@ -99,6 +100,14 @@ struct TLogInterface {
 		}
 		serializer(ar, uniqueID, sharedTLogID, filteredLocality, peekMessages);
 		if (Ar::isDeserializing) {
+			if (g_network && g_network->global(INetwork::enFlowTransport)) {
+				std::vector<UID> tokens;
+				tokens.push_back(peekMessages.getEndpoint().token);
+				for (int i = 1; i <= 12; i++)
+					tokens.push_back(peekMessages.getEndpoint().getAdjustedEndpoint(i).token);
+				FlowTransport::transport().interfaceTracker.created(
+				    peekMessages.getEndpoint().getPrimaryAddress(), "TLog", tokens);
+			}
 			popMessages = RequestStream<struct TLogPopRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(1));
 			commit = RequestStream<struct TLogCommitRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(2));
 			lock =
@@ -485,5 +494,19 @@ struct setClusterRecoveryVersionRequest {
 		serializer(ar, recoveryVersion, reply);
 	}
 };
+
+// Creates an independent copy of a TLogInterface by serializing and
+// deserializing. The new copy has its own NetNotifiedQueues and
+// FlowReceivers, decoupled from the source. Used to break queue-sharing
+// when extracting TLogInterfaces from reply futures, so that destroying
+// the reply chain also destroys its FlowReceivers.
+inline TLogInterface cloneTLogInterface(const TLogInterface& src) {
+	BinaryWriter wr(AssumeVersion(g_network->protocolVersion()));
+	wr << src;
+	BinaryReader rd(wr.toValue(), AssumeVersion(g_network->protocolVersion()));
+	TLogInterface result;
+	rd >> result;
+	return result;
+}
 
 #endif

@@ -230,6 +230,24 @@ struct ClusterControllerFullInterface {
 		           notifyBackupWorkerDone,
 		           changeCoordinators,
 		           getEncryptionAtRestMode);
+		if (Ar::isDeserializing && g_network && g_network->global(INetwork::enFlowTransport)) {
+			std::vector<UID> tokens;
+			tokens.push_back(recruitFromConfiguration.getEndpoint().token);
+			tokens.push_back(recruitRemoteFromConfiguration.getEndpoint().token);
+			tokens.push_back(recruitStorage.getEndpoint().token);
+			tokens.push_back(recruitBlobWorker.getEndpoint().token);
+			tokens.push_back(registerWorker.getEndpoint().token);
+			tokens.push_back(getWorkers.getEndpoint().token);
+			tokens.push_back(registerMaster.getEndpoint().token);
+			tokens.push_back(getServerDBInfo.getEndpoint().token);
+			tokens.push_back(updateWorkerHealth.getEndpoint().token);
+			tokens.push_back(tlogRejoin.getEndpoint().token);
+			tokens.push_back(notifyBackupWorkerDone.getEndpoint().token);
+			tokens.push_back(changeCoordinators.getEndpoint().token);
+			tokens.push_back(getEncryptionAtRestMode.getEndpoint().token);
+			FlowTransport::transport().interfaceTracker.created(
+			    recruitFromConfiguration.getEndpoint().getPrimaryAddress(), "CC", tokens);
+		}
 	}
 };
 

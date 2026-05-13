@@ -64,6 +64,16 @@ struct ResolverInterface {
 	void serialize(Ar& ar) {
 		// TODO: save space by using getAdjustedEndpoint() as in CommitProxyInterface
 		serializer(ar, uniqueID, locality, resolve, metrics, split, waitFailure, txnState);
+		if (Ar::isDeserializing && g_network && g_network->global(INetwork::enFlowTransport)) {
+			std::vector<UID> tokens;
+			tokens.push_back(resolve.getEndpoint().token);
+			tokens.push_back(metrics.getEndpoint().token);
+			tokens.push_back(split.getEndpoint().token);
+			tokens.push_back(waitFailure.getEndpoint().token);
+			tokens.push_back(txnState.getEndpoint().token);
+			FlowTransport::transport().interfaceTracker.created(
+			    resolve.getEndpoint().getPrimaryAddress(), "RV", tokens);
+		}
 	}
 };
 

@@ -62,6 +62,14 @@ struct GrvProxyInterface {
 			    getConsistentReadVersion.getEndpoint().getAdjustedEndpoint(2));
 			refreshGlobalConfig = PublicRequestStream<struct GlobalConfigRefreshRequest>(
 			    getConsistentReadVersion.getEndpoint().getAdjustedEndpoint(3));
+			if (g_network && g_network->global(INetwork::enFlowTransport)) {
+				std::vector<UID> tokens;
+				tokens.push_back(getConsistentReadVersion.getEndpoint().token);
+				for (int i = 1; i <= 3; i++)
+					tokens.push_back(getConsistentReadVersion.getEndpoint().getAdjustedEndpoint(i).token);
+				FlowTransport::transport().interfaceTracker.created(
+				    getConsistentReadVersion.getEndpoint().getPrimaryAddress(), "GP", tokens);
+			}
 		}
 	}
 

@@ -64,6 +64,20 @@ struct DataDistributorInterface {
 		           storageWigglerState,
 		           triggerAudit,
 		           tenantsOverStorageQuota);
+		if (Archive::isDeserializing && g_network && g_network->global(INetwork::enFlowTransport)) {
+			std::vector<UID> tokens;
+			tokens.push_back(waitFailure.getEndpoint().token);
+			tokens.push_back(haltDataDistributor.getEndpoint().token);
+			tokens.push_back(distributorSnapReq.getEndpoint().token);
+			tokens.push_back(distributorExclCheckReq.getEndpoint().token);
+			tokens.push_back(dataDistributorMetrics.getEndpoint().token);
+			tokens.push_back(distributorSplitRange.getEndpoint().token);
+			tokens.push_back(storageWigglerState.getEndpoint().token);
+			tokens.push_back(triggerAudit.getEndpoint().token);
+			tokens.push_back(tenantsOverStorageQuota.getEndpoint().token);
+			FlowTransport::transport().interfaceTracker.created(
+			    waitFailure.getEndpoint().getPrimaryAddress(), "DD", tokens);
+		}
 	}
 };
 

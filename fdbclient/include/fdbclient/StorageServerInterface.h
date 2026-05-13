@@ -158,6 +158,14 @@ public:
 				serializer(ar, uniqueID, locality, getValue);
 			}
 			if (Ar::isDeserializing) {
+				{
+					std::vector<UID> tokens;
+					tokens.push_back(getValue.getEndpoint().token);
+					for (int i = 1; i <= 25; i++)
+						tokens.push_back(getValue.getEndpoint().getAdjustedEndpoint(i).token);
+					FlowTransport::transport().interfaceTracker.created(
+					    getValue.getEndpoint().getPrimaryAddress(), "SS", tokens);
+				}
 				getKey = PublicRequestStream<struct GetKeyRequest>(getValue.getEndpoint().getAdjustedEndpoint(1));
 				getKeyValues =
 				    PublicRequestStream<struct GetKeyValuesRequest>(getValue.getEndpoint().getAdjustedEndpoint(2));
@@ -268,12 +276,28 @@ struct StorageInfo : NonCopyable, public ReferenceCounted<StorageInfo> {
 	StorageInfo() : tag(invalidTag) {}
 };
 
-struct StorageServerMetaInfo : public StorageServerInterface {
+// Lightweight slice of StorageServerInterface fields actually consumed by
+// the cluster controller's monitorStorageMetadata + Status.actor.cpp paths
+// (id, address, isTss, metadata, eventMap-on-StatusInfo). Critically it does
+// NOT extend StorageServerInterface — the parent struct holds 27 RequestStreams,
+// and ClusterControllerData::storageStatusInfos is held for the lifetime of
+// the CC actor, which would pin every SS interface (and its peer references)
+// long after that SS dies. Observed in StalePeerTest killRole='ss' as a stuck
+// Delta=27 (one SS snapshot of 27 RPC streams) on the CC-hosting process.
+struct StorageServerMetaInfo {
+	UID uniqueID;
+	NetworkAddress addr;
+	Optional<UID> tssPairID;
 	Optional<StorageMetadataType> metadata;
 
 	StorageServerMetaInfo(const StorageServerInterface& interface,
 	                      Optional<StorageMetadataType> metadata = Optional<StorageMetadataType>())
-	  : StorageServerInterface(interface), metadata(metadata) {}
+	  : uniqueID(interface.uniqueID), addr(interface.address()), tssPairID(interface.tssPairID),
+	    metadata(metadata) {}
+
+	UID id() const { return uniqueID; }
+	NetworkAddress address() const { return addr; }
+	bool isTss() const { return tssPairID.present(); }
 };
 
 struct ServerCacheInfo {

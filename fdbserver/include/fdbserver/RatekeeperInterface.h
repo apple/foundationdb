@@ -47,6 +47,15 @@ struct RatekeeperInterface {
 	template <class Archive>
 	void serialize(Archive& ar) {
 		serializer(ar, waitFailure, getRateInfo, haltRatekeeper, reportCommitCostEstimation, locality, myId);
+		if (Archive::isDeserializing && g_network && g_network->global(INetwork::enFlowTransport)) {
+			std::vector<UID> tokens;
+			tokens.push_back(waitFailure.getEndpoint().token);
+			tokens.push_back(getRateInfo.getEndpoint().token);
+			tokens.push_back(haltRatekeeper.getEndpoint().token);
+			tokens.push_back(reportCommitCostEstimation.getEndpoint().token);
+			FlowTransport::transport().interfaceTracker.created(
+			    waitFailure.getEndpoint().getPrimaryAddress(), "RK", tokens);
+		}
 	}
 };
 
