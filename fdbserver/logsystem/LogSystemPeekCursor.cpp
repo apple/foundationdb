@@ -954,7 +954,11 @@ Version MergedPeekCursor::getMinKnownCommittedVersion() const {
 }
 
 Version MergedPeekCursor::getMaxKnownVersion() const {
-	return serverCursors[currentCursor]->getMaxKnownVersion();
+	Version maxKnownVersion = 0;
+	for (const auto& cursor : serverCursors) {
+		maxKnownVersion = std::max(maxKnownVersion, cursor->getMaxKnownVersion());
+	}
+	return maxKnownVersion;
 }
 
 Optional<UID> MergedPeekCursor::getPrimaryPeekLocation() const {
@@ -1303,7 +1307,13 @@ Version SetPeekCursor::getMinKnownCommittedVersion() const {
 }
 
 Version SetPeekCursor::getMaxKnownVersion() const {
-	return serverCursors[currentSet][currentCursor]->getMaxKnownVersion();
+	Version maxKnownVersion = 0;
+	for (const auto& cursors : serverCursors) {
+		for (const auto& cursor : cursors) {
+			maxKnownVersion = std::max(maxKnownVersion, cursor->getMaxKnownVersion());
+		}
+	}
+	return maxKnownVersion;
 }
 
 Optional<UID> SetPeekCursor::getPrimaryPeekLocation() const {
