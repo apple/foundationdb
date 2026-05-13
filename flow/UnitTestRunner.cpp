@@ -101,8 +101,8 @@ void printUsage(const char* program, const UnitTestRunnerConfig& config) {
 	           "      --list                Print matching test names without running them\n"
 	           "  -h, --help                Show this help\n",
 	           program,
-	           config.suiteName,
-	           config.dataDir);
+	           config.suiteName(),
+	           config.dataDir());
 }
 
 bool parseInt(const char* text, int* value) {
@@ -230,7 +230,7 @@ bool testMatched(const UnitTestRunnerOptions& options, std::string_view testName
 std::vector<UnitTest*> collectTests(const UnitTestRunnerOptions& options, const UnitTestRunnerConfig& config) {
 	std::vector<UnitTest*> tests;
 	for (auto test = g_unittests.tests; test != nullptr; test = test->next) {
-		if (config.sourceSubdir != nullptr && !pathComponentMatches(test->file, config.sourceSubdir)) {
+		if (!pathComponentMatches(test->file, config.sourceSubDir)) {
 			continue;
 		}
 		if (testMatched(options, test->name)) {
@@ -250,7 +250,7 @@ Future<Void> runTests(const UnitTestRunnerOptions& options,
 	std::vector<UnitTest*> tests = collectTests(options, config);
 	result->testsAvailable = tests.size();
 
-	fmt::print(stdout, "Found {} {} tests\n", tests.size(), config.suiteName);
+	fmt::print(stdout, "Found {} {} tests\n", tests.size(), config.suiteName());
 
 	if (options.listTests) {
 		for (auto test : tests) {
@@ -331,6 +331,18 @@ Future<Void> stopNetworkAfter(Future<Void> what, std::string_view traceName, int
 
 } // namespace
 
+std::string_view UnitTestRunnerConfig::suiteName() const {
+	return sourceSubDir;
+}
+
+std::string UnitTestRunnerConfig::dataDir() const {
+	return std::string(sourceSubDir) + "_test_data";
+}
+
+std::string UnitTestRunnerConfig::traceName() const {
+	return std::string(sourceSubDir) + "_test";
+}
+
 int runUnitTests(int argc, char** argv, const UnitTestRunnerConfig& config) {
 	platformInit();
 	Error::init();
@@ -338,7 +350,7 @@ int runUnitTests(int argc, char** argv, const UnitTestRunnerConfig& config) {
 	setvbuf(stderr, nullptr, _IOLBF, BUFSIZ);
 
 	UnitTestRunnerOptions options;
-	options.dataDir = config.dataDir;
+	options.dataDir = config.dataDir();
 	if (!parseArgs(argc, argv, &options)) {
 		printUsage(argv[0], config);
 		return 1;
@@ -354,9 +366,9 @@ int runUnitTests(int argc, char** argv, const UnitTestRunnerConfig& config) {
 	setThreadLocalDeterministicRandomSeed(options.randomSeed);
 	fmt::print(stdout, "Random seed is {}\n", options.randomSeed);
 
+	const std::string traceName = config.traceName();
 	std::string originalWorkingDirectory = platform::getWorkingDirectory();
-	std::string runDirectory =
-	    joinPath("/tmp", fmt::format("{}.{}.{}", config.traceName, ::getpid(), options.randomSeed));
+	std::string runDirectory = joinPath("/tmp", fmt::format("{}.{}.{}", traceName, ::getpid(), options.randomSeed));
 	platform::createDirectory(runDirectory);
 	if (::chdir(runDirectory.c_str()) != 0) {
 		fmt::print(stderr, "ERROR: Could not chdir to {}\n", runDirectory);
@@ -364,11 +376,11 @@ int runUnitTests(int argc, char** argv, const UnitTestRunnerConfig& config) {
 	}
 
 	g_network = newNet2(TLSConfig());
-	openTraceFile({}, 10 << 20, 10 << 20, ".", std::string(config.traceName));
+	openTraceFile({}, 10 << 20, 10 << 20, ".", traceName);
 
 	int exitCode = 0;
 	UnitTestRunnerResult result;
-	Future<Void> done = stopNetworkAfter(runTests(options, config, &result), config.traceName, &exitCode);
+	Future<Void> done = stopNetworkAfter(runTests(options, config, &result), traceName, &exitCode);
 	g_network->run();
 	flushTraceFileVoid();
 

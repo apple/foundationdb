@@ -22,13 +22,15 @@
 #define FLOW_UNIT_TEST_RUNNER_H
 #pragma once
 
+#include <string>
 #include <string_view>
 
 struct UnitTestRunnerConfig {
-	std::string_view suiteName;
-	std::string_view dataDir;
-	std::string_view traceName;
-	const char* sourceSubdir = nullptr;
+	std::string_view sourceSubDir;
+
+	std::string_view suiteName() const;
+	std::string dataDir() const;
+	std::string traceName() const;
 };
 
 int runUnitTests(int argc, char** argv, const UnitTestRunnerConfig& config);

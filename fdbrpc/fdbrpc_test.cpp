@@ -21,5 +21,5 @@
 #include "flow/UnitTestRunner.h"
 
 int main(int argc, char** argv) {
-	return runUnitTests(argc, argv, { "fdbrpc", "fdbrpc_test_data", "fdbrpc_test", "fdbrpc" });
+	return runUnitTests(argc, argv, { .sourceSubDir = "fdbrpc" });
 }
