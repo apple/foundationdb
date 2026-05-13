@@ -23,6 +23,10 @@
 #pragma once
 
 #include <algorithm>
+#include <map>
+#include <unordered_map>
+#include <unordered_set>
+#include <string>
 
 #include "fdbrpc/DDSketch.h"
 #include "fdbrpc/HealthMonitor.h"
@@ -32,7 +36,287 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/Net2Packet.h"
 #include "flow/Arena.h"
+#include "flow/Platform.h"
 #include "flow/PKey.h"
+
+// Tracks creation and destruction of interface objects (StorageServerInterface,
+// TLogInterface, etc.) per process. Used for debugging stale peer references.
+//
+// created(addr, role, tokens): called at interface deserialization time. Registers
+//   all endpoint tokens for this interface so that removePeerReference can look up
+//   the role from the token.
+//
+// peerRefRemoved(addr, token): called from FlowTransport::removePeerReference.
+//   Looks up the role from the token and increments numDeleted for (addr, role).
+//
+// prettyPrint: emits InterfaceTrackerDump with NumCreated, NumDeleted, Delta per (addr, role).
+struct InterfaceTracker {
+	struct Key {
+		NetworkAddress dstAddress;
+		std::string dstRole;
+		bool operator==(const Key& other) const { return dstAddress == other.dstAddress && dstRole == other.dstRole; }
+	};
+	struct KeyHash {
+		size_t operator()(const Key& k) const {
+			return std::hash<NetworkAddress>()(k.dstAddress) ^ std::hash<std::string>()(k.dstRole);
+		}
+	};
+	struct Entry {
+		int64_t numCreated = 0;
+		int64_t numDeleted = 0;
+		struct CreateRecord {
+			int64_t id;
+			double time;
+			std::string backtrace;
+			int numStreams;
+			int numStreamsDeleted = 0;
+		};
+		std::vector<CreateRecord> createRecords;
+	};
+
+	std::unordered_map<Key, Entry, KeyHash> map;
+
+	// Maps (address, token) → (role, createId) so removePeerReference can
+	// attribute the deletion to the specific deserialization that created it
+	struct TokenKey {
+		NetworkAddress addr;
+		UID token;
+		bool operator==(const TokenKey& other) const { return addr == other.addr && token == other.token; }
+	};
+	struct TokenKeyHash {
+		size_t operator()(const TokenKey& k) const { return k.addr.hash() ^ k.token.hash(); }
+	};
+	struct TokenInfo {
+		std::string role;
+		int64_t createId;
+	};
+	std::unordered_map<TokenKey, TokenInfo, TokenKeyHash> tokenToInfo;
+	int64_t nextCreateId = 0;
+
+	void created(const NetworkAddress& dstAddr, const std::string& dstRole, const std::vector<UID>& tokens) {
+		if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY)
+			return;
+		auto& entry = map[Key{ dstAddr, dstRole }];
+		entry.numCreated += tokens.size();
+		int64_t id = nextCreateId++;
+		entry.createRecords.push_back(
+		    { id, g_network ? g_network->now() : 0.0, platform::get_backtrace(), (int)tokens.size() });
+		for (const auto& tok : tokens) {
+			tokenToInfo[TokenKey{ dstAddr, tok }] = TokenInfo{ dstRole, id };
+		}
+	}
+
+	// Raw addPeerReference/removePeerReference counters per address
+	struct PeerRefCount {
+		int64_t added = 0;
+		int64_t removed = 0;
+	};
+	std::unordered_map<NetworkAddress, PeerRefCount> peerRefCounts;
+
+	void peerRefAdded(const NetworkAddress& addr) {
+		if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY)
+			return;
+		peerRefCounts[addr].added++;
+	}
+	void peerRefRemovedRaw(const NetworkAddress& addr) {
+		if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY)
+			return;
+		peerRefCounts[addr].removed++;
+	}
+
+	void peerRefRemoved(const NetworkAddress& addr, const UID& token) {
+		if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY)
+			return;
+		auto it = tokenToInfo.find(TokenKey{ addr, token });
+		if (it != tokenToInfo.end()) {
+			ASSERT(map.contains(Key{ addr, it->second.role }));
+			auto& entry = map[Key{ addr, it->second.role }];
+			entry.numDeleted++;
+			for (auto& rec : entry.createRecords) {
+				if (rec.id == it->second.createId) {
+					rec.numStreamsDeleted++;
+					break;
+				}
+			}
+		}
+	}
+
+	// Returns the delta (created - deleted) for a specific (address, role) pair.
+	// Returns 0 if no entry exists.
+	int64_t getDelta(const NetworkAddress& addr, const std::string& role) const {
+		auto it = map.find(Key{ addr, role });
+		if (it == map.end())
+			return 0;
+		return it->second.numCreated - it->second.numDeleted;
+	}
+
+	// Per-FlowReceiver tracking: each remote-endpoint FlowReceiver gets a unique
+	// deterministic ID. We store creation info (address, token, time, backtrace).
+	// On destruction, the record is erased. At check time, any record still
+	// present is a leaked FlowReceiver.
+	struct FlowReceiverRecord {
+		int64_t id;
+		NetworkAddress addr;
+		UID token;
+		double createTime;
+		std::string backtrace;
+		std::string srcRoles;
+		std::string callerTag;
+	};
+	int64_t nextFlowReceiverId = 0;
+	std::unordered_map<int64_t, FlowReceiverRecord> flowReceiverRecords;
+	std::string currentCallerTag;
+
+	int64_t flowReceiverCreated(const NetworkAddress& addr, const UID& token) {
+		if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY)
+			return -1;
+		int64_t id = nextFlowReceiverId++;
+		std::string roles = getTraceRolesString();
+		flowReceiverRecords[id] = FlowReceiverRecord{
+			id, addr, token, g_network ? g_network->now() : 0.0, platform::get_backtrace(), roles, currentCallerTag
+		};
+		return id;
+	}
+	void flowReceiverDestroyed(const NetworkAddress& addr, int64_t id) {
+		if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY)
+			return;
+		// Erase immediately; marking destroyed=true would leave the record
+		// in the map forever (OOM in long simulations with many SS migrations).
+		flowReceiverRecords.erase(id);
+	}
+	void prettyPrintLeakedReceivers(const NetworkAddress& srcAddr,
+	                                const std::vector<NetworkAddress>& filterAddrs) const {
+		for (const auto& [id, rec] : flowReceiverRecords) {
+			// Only undestroyed records remain (destroyed ones are erased above).
+			for (const auto& filterAddr : filterAddrs) {
+				if (rec.addr == filterAddr) {
+					TraceEvent("FlowReceiverLeaked")
+					    .detail("SrcProcess", srcAddr)
+					    .detail("SrcRoles", rec.srcRoles)
+					    .detail("CallerTag", rec.callerTag)
+					    .detail("DstAddress", rec.addr)
+					    .detail("Token", rec.token)
+					    .detail("ReceiverId", rec.id)
+					    .detail("CreateTime", format("%.6f", rec.createTime))
+					    .detail("Backtrace", rec.backtrace);
+				}
+			}
+		}
+	}
+
+	// Ref tracking: each addPromiseRef/delPromiseRef and addFutureRef/delFutureRef
+	// on a remote endpoint gets a unique ID. At check time, IDs without matching
+	// deletes are the holders. Unconditional — tracks all remote endpoints.
+	struct RefRecord {
+		int64_t id;
+		NetworkAddress addr;
+		UID token;
+		double time;
+		std::string backtrace; // TEMPORARY re-added to debug stuck
+		                       // proxy-peer-ref leaks. Backtrace
+		                       // capture is expensive (platform::
+		                       // get_backtrace per copy); drop this
+		                       // field again once stuck holder is
+		                       // identified. See notes step 144+.
+		bool isFutureRef = false;
+	};
+	int64_t nextRefId = 0;
+	std::unordered_map<int64_t, RefRecord> refRecords;
+
+	int64_t promiseRefAdded(const NetworkAddress& addr, const UID& token) {
+		if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY)
+			return -1;
+		int64_t id = nextRefId++;
+		refRecords[id] = RefRecord{ id, addr, token, g_network ? g_network->now() : 0.0,
+		                            platform::get_backtrace(), false };
+		return id;
+	}
+
+	void promiseRefReleased(int64_t id) {
+		if (id < 0)
+			return;
+		// Erase immediately rather than marking released=true; the refRecords
+		// map would otherwise grow unboundedly in long simulations (one entry
+		// per promise ref add for the lifetime of the process → OOM).
+		refRecords.erase(id);
+	}
+
+	int64_t futureRefAdded(const NetworkAddress& addr, const UID& token) {
+		if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY)
+			return -1;
+		int64_t id = nextRefId++;
+		refRecords[id] = RefRecord{ id, addr, token, g_network ? g_network->now() : 0.0,
+		                            platform::get_backtrace(), true };
+		return id;
+	}
+
+	void futureRefReleased(int64_t id) {
+		if (id < 0)
+			return;
+		refRecords.erase(id);
+	}
+
+	void prettyPrintLeakedRefs(const NetworkAddress& srcAddr, const std::vector<NetworkAddress>& filterAddrs) const {
+		for (const auto& [id, rec] : refRecords) {
+			// Only unreleased records remain in the map (released ones are
+			// erased by promiseRefReleased), so every entry here is a leak.
+			for (const auto& filterAddr : filterAddrs) {
+				if (rec.addr == filterAddr) {
+					TraceEvent(rec.isFutureRef ? "FutureRefLeaked" : "PromiseRefLeaked")
+					    .detail("SrcProcess", srcAddr)
+					    .detail("DstAddress", rec.addr)
+					    .detail("Token", rec.token)
+					    .detail("RefId", rec.id)
+					    .detail("RefCreateTime", format("%.6f", rec.time))
+					    .detail("RefBacktrace", rec.backtrace);
+					break;
+				}
+			}
+		}
+	}
+
+	void prettyPrint(const NetworkAddress& srcAddr, const std::vector<NetworkAddress>& filterAddrs) const {
+		for (const auto& filterAddr : filterAddrs) {
+			for (const auto& [key, entry] : map) {
+				if (key.dstAddress == filterAddr) {
+					TraceEvent("InterfaceTrackerDump")
+					    .detail("SrcProcess", srcAddr)
+					    .detail("DstAddress", key.dstAddress)
+					    .detail("DstRole", key.dstRole)
+					    .detail("NumCreated", entry.numCreated)
+					    .detail("NumDeleted", entry.numDeleted)
+					    .detail("Delta", entry.numCreated - entry.numDeleted);
+					if (entry.numCreated > entry.numDeleted) {
+						for (const auto& rec : entry.createRecords) {
+							if (rec.numStreamsDeleted < rec.numStreams) {
+								TraceEvent("InterfaceTrackerLeaked")
+								    .detail("SrcProcess", srcAddr)
+								    .detail("DstAddress", key.dstAddress)
+								    .detail("DstRole", key.dstRole)
+								    .detail("CreateId", rec.id)
+								    .detail("CreateTime", format("%.6f", rec.time))
+								    .detail("NumStreams", rec.numStreams)
+								    .detail("NumStreamsDeleted", rec.numStreamsDeleted)
+								    .detail("Backtrace", rec.backtrace);
+							}
+						}
+					}
+				}
+			}
+		}
+		for (const auto& filterAddr : filterAddrs) {
+			auto it = peerRefCounts.find(filterAddr);
+			if (it != peerRefCounts.end()) {
+				TraceEvent("InterfaceTrackerPeerRefRaw")
+				    .detail("SrcProcess", srcAddr)
+				    .detail("DstAddress", filterAddr)
+				    .detail("TotalAdded", it->second.added)
+				    .detail("TotalRemoved", it->second.removed)
+				    .detail("RawDelta", it->second.added - it->second.removed);
+			}
+		}
+	}
+};
 
 class IConnection;
 
@@ -307,6 +591,8 @@ public:
 
 	// Periodically read JWKS (RFC 7517) public key file to refresh public key set.
 	void watchPublicKeyFile(const std::string& publicKeyFilePath);
+
+	InterfaceTracker interfaceTracker;
 
 private:
 	class TransportData* self;

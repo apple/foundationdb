@@ -1203,6 +1203,9 @@ protected:
 	bool shouldFireImmediately() { return SingleCallback<T>::next != this; }
 };
 
+// Global callback for futureRef tracking release — set by FlowTransport at init
+inline void (*g_futureRefReleasedCallback)(int64_t id) = nullptr;
+
 template <class T>
 class FutureStream {
 public:
@@ -1216,26 +1219,41 @@ public:
 	void addCallbackAndClear(SingleCallback<T>* cb) {
 		queue->addCallbackAndDelFutureRef(cb);
 		queue = nullptr;
+		if (m_futureRefTrackingId >= 0 && g_futureRefReleasedCallback)
+			g_futureRefReleasedCallback(m_futureRefTrackingId);
+		m_futureRefTrackingId = -1;
 	}
-	FutureStream() : queue(nullptr) {}
-	FutureStream(const FutureStream& rhs) : queue(rhs.queue) { queue->addFutureRef(); }
-	FutureStream(FutureStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
+	FutureStream() : queue(nullptr), m_futureRefTrackingId(-1) {}
+	FutureStream(const FutureStream& rhs) : queue(rhs.queue), m_futureRefTrackingId(-1) { queue->addFutureRef(); }
+	FutureStream(FutureStream&& rhs) noexcept : queue(rhs.queue), m_futureRefTrackingId(rhs.m_futureRefTrackingId) {
+		rhs.queue = 0;
+		rhs.m_futureRefTrackingId = -1;
+	}
 	~FutureStream() {
 		if (queue)
 			queue->delFutureRef();
+		if (m_futureRefTrackingId >= 0 && g_futureRefReleasedCallback)
+			g_futureRefReleasedCallback(m_futureRefTrackingId);
 	}
 	void operator=(const FutureStream& rhs) {
 		rhs.queue->addFutureRef();
 		if (queue)
 			queue->delFutureRef();
+		if (m_futureRefTrackingId >= 0 && g_futureRefReleasedCallback)
+			g_futureRefReleasedCallback(m_futureRefTrackingId);
 		queue = rhs.queue;
+		m_futureRefTrackingId = -1;
 	}
 	void operator=(FutureStream&& rhs) noexcept {
 		if (rhs.queue != queue) {
 			if (queue)
 				queue->delFutureRef();
+			if (m_futureRefTrackingId >= 0 && g_futureRefReleasedCallback)
+				g_futureRefReleasedCallback(m_futureRefTrackingId);
 			queue = rhs.queue;
+			m_futureRefTrackingId = rhs.m_futureRefTrackingId;
 			rhs.queue = nullptr;
+			rhs.m_futureRefTrackingId = -1;
 		}
 	}
 	bool operator==(const FutureStream& rhs) { return rhs.queue == queue; }
@@ -1247,10 +1265,14 @@ public:
 		return queue->error;
 	}
 
-	explicit FutureStream(NotifiedQueue<T>* queue) : queue(queue) {}
+	explicit FutureStream(NotifiedQueue<T>* queue) : queue(queue), m_futureRefTrackingId(-1) {}
+	FutureStream(NotifiedQueue<T>* queue, int64_t trackingId) : queue(queue), m_futureRefTrackingId(trackingId) {}
+
+	int64_t getFutureRefTrackingId() const { return m_futureRefTrackingId; }
 
 private:
 	NotifiedQueue<T>* queue;
+	int64_t m_futureRefTrackingId;
 };
 
 template <class Request>
