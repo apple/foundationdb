@@ -640,7 +640,8 @@ protected:
  */
 class TransactionExecutorBase : public ITransactionExecutor {
 public:
-	explicit TransactionExecutorBase(const TransactionExecutorOptions& options) : options(options), scheduler(nullptr) {}
+	explicit TransactionExecutorBase(const TransactionExecutorOptions& options)
+	  : options(options), scheduler(nullptr) {}
 
 	~TransactionExecutorBase() override {
 		if (tamperClusterFileThread.joinable()) {

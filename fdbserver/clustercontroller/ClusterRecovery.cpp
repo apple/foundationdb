@@ -1160,7 +1160,8 @@ Future<Void> updateLocalityForDcId(Optional<Key> dcId,
 Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> self,
                                         Reference<LogSystem> oldLogSystem,
                                         Version txsPoppedVersion) {
-	auto myLocality = makeReference<AsyncVar<PeekTxsInfo>>(PeekTxsInfo(tagLocalityInvalid, tagLocalityInvalid, invalidVersion));
+	auto myLocality =
+	    makeReference<AsyncVar<PeekTxsInfo>>(PeekTxsInfo(tagLocalityInvalid, tagLocalityInvalid, invalidVersion));
 	Future<Void> localityUpdater =
 	    updateLocalityForDcId(self->masterInterface.locality.dcId(), oldLogSystem, myLocality);
 	// Peek the txnStateTag in oldLogSystem and recover self->txnStateStore
