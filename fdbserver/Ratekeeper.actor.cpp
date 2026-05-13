@@ -289,11 +289,38 @@ public:
 		}
 	}
 
+	// Backstop for monitorServerListChange: when an SS dies, immediately drop
+	// our long-lived StorageServerInterface copies (one in
+	// storageServerInterfaces, one in trackStorageServerQueueInfo's `ssi`
+	// parameter) instead of waiting for DD to remove the SS from
+	// serverListKeys, which can lag the death by long enough that
+	// StalePeerTest's 240s waitAfterKill expires with the killed SS's 27 RPC
+	// streams still pinned (Delta=54 = 2 SSI snapshots = these two holders).
+	//
+	// Pass endpoint by value (it's a small POD: NetworkAddressList + UID token)
+	// so this watcher doesn't itself hold a third SSI copy with all 27
+	// RequestStream peer refs. We only need the endpoint to query the
+	// FailureMonitor.
+	ACTOR static Future<Void> watchStorageServerFailure(ActorWeakSelfRef<Ratekeeper> self,
+	                                                    UID id,
+	                                                    Endpoint ssEndpoint,
+	                                                    std::unordered_map<UID, Future<Void>>* trackers) {
+		wait(IFailureMonitor::failureMonitor().onStateEqual(ssEndpoint, FailureStatus(true)));
+		// Re-confirm after a yield to filter transient false positives.
+		wait(delay(0));
+		if (IFailureMonitor::failureMonitor().getState(ssEndpoint).failed) {
+			self->storageServerInterfaces.erase(id);
+			trackers->erase(id);
+		}
+		return Void();
+	}
+
 	ACTOR static Future<Void> trackEachStorageServer(
 	    ActorWeakSelfRef<Ratekeeper> self,
 	    FutureStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges) {
 
 		state std::unordered_map<UID, Future<Void>> storageServerTrackers;
+		state std::unordered_map<UID, Future<Void>> storageServerFailureWatchers;
 		state Promise<Void> err;
 
 		loop choose {
@@ -309,9 +336,28 @@ public:
 						a = splitError(trackStorageServerQueueInfo(self, change.second.get()), err);
 
 						self->storageServerInterfaces[id] = change.second.get();
+
+						// Optional proactive cleanup when the SS's primary endpoint
+						// is flagged failed by FailureMonitor. Gated on the same
+						// CLIENT_KNOBS->DBCONTEXT_FILTER_FAILED_PROXIES knob the
+						// client-side filter uses — under buggify FM briefly flags
+						// healthy endpoints, and erasing SS entries then would
+						// make DD repeatedly lose/regain its view of teams and
+						// destabilise its queue. Off by default; SPT turns it on
+						// in its toml.
+						if (CLIENT_KNOBS->DBCONTEXT_FILTER_FAILED_PROXIES) {
+							auto& w = storageServerFailureWatchers[id];
+							w = Future<Void>();
+							w = splitError(watchStorageServerFailure(self,
+							                                         id,
+							                                         change.second.get().getValue.getEndpoint(),
+							                                         &storageServerTrackers),
+							               err);
+						}
 					}
 				} else {
 					storageServerTrackers.erase(id);
+					storageServerFailureWatchers.erase(id);
 					self->storageServerInterfaces.erase(id);
 				}
 			}
