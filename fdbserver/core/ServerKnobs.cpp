@@ -1270,6 +1270,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PROBABILITY_FACTOR_SHARDED_ROCKSDB_ENGINE_SELECTED_SIM, 100 ); // default is 1
 	init( PROBABILITY_FACTOR_ROCKSDB_ENGINE_SELECTED_SIM,         100 ); // default is 1
 	init( PROBABILITY_FACTOR_SQLITE_ENGINE_SELECTED_SIM,          100 ); // default is 1
+	init( PROBABILITY_FACTOR_REDWOOD_ENGINE_SELECTED_SIM,         100 ); // default is 1
 	init( PROBABILITY_FACTOR_MEMORY_SELECTED_SIM,                  40 ); // default is 1
 
 	// Coordination
