@@ -54,7 +54,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( MAX_CLIENT_STATUS_AGE,                   1.0 );
 	init( MAX_COMMIT_PROXY_CONNECTIONS,              5 ); if( randomize && BUGGIFY ) MAX_COMMIT_PROXY_CONNECTIONS = 1;
 	init( MAX_GRV_PROXY_CONNECTIONS,                 3 ); if( randomize && BUGGIFY ) MAX_GRV_PROXY_CONNECTIONS = 1;
-	init( DBCONTEXT_FILTER_FAILED_PROXIES,       true  ); // v41a: default on for this binary (kube deployment). When true, DatabaseContext::updateProxies() drops CPs/GPs that FailureMonitor flags failed. Original 7.4 behavior was off because under buggify+connection-failure injection FailureMonitor briefly flags healthy proxies; this build is not run under buggify so the filter is safe.
+	init( DBCONTEXT_FILTER_FAILED_PROXIES,       false ); // Off by default. When true, DatabaseContext::updateProxies() drops CPs/GPs that FailureMonitor flags failed. Kept off in the general binary because under buggify+connection-failure injection FailureMonitor briefly flags healthy proxies, which destabilises correctness tests. StalePeerTest and kube deployments opt in via per-binary/per-test overrides.
 	init( STATUS_IDLE_TIMEOUT,                   120.0 );
 	init( SEND_ENTIRE_VERSION_VECTOR,            false );
 
@@ -98,8 +98,8 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( LOCATION_CACHE_EVICTION_SIZE_SIM,         10 ); if( randomize && BUGGIFY ) LOCATION_CACHE_EVICTION_SIZE_SIM = 3;
 	init( LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD,     60 );
 	init( LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL,    60 );
-	init( LOCATION_CACHE_PEER_FAILURE_EVICTION_DELAY,     10.0 ); // v41a: 10s for kube deployment (faster than the 90s general default, slower than the 5s SPT sim override)
-	init( LOCATION_CACHE_PEER_USE_FAILURE_MONITOR_SIGNAL,  true ); // v41a: default on for this binary. Original 7.4 default was off to avoid DD-drain thrash under load; this kube build is a narrow workload where FM-based peer-cache eviction is the desired behavior.
+	init( LOCATION_CACHE_PEER_FAILURE_EVICTION_DELAY,     90.0 ); // 90s tick interval for the location-cache peer watcher. StalePeerTest overrides to 5s, kube deployments typically override to 10s; 90s is the conservative default for general workloads.
+	init( LOCATION_CACHE_PEER_USE_FAILURE_MONITOR_SIGNAL, false ); // Off by default to avoid DD-drain thrash under load. StalePeerTest and narrow kube workloads opt in via toml/env overrides where FM-based peer-cache eviction is the desired behavior.
 
 	init( GET_RANGE_SHARD_LIMIT,                     2 );
 	init( WARM_RANGE_SHARD_LIMIT,                  100 );
