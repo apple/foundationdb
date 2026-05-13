@@ -4951,7 +4951,7 @@ def main():
             if len(ks_issues['uncoalesced']) > 10:
                 print(f"    ... and {len(ks_issues['uncoalesced']) - 10} more")
         else:
-            print("  No uncoalesced entries found (KeyRangeMap.actor.cpp:297 OK)")
+            print("  No uncoalesced keyServers entries found")
 
         if ks_issues['dead_servers']:
             dead_unique = set(i['dead_server'] for i in ks_issues['dead_servers'])
@@ -5010,14 +5010,22 @@ def main():
             live_servers_affected = set(u['server_id'] for u in live_uncoalesced)
             dead_servers_affected = set(u['server_id'] for u in dead_uncoalesced)
 
-            print(f"\n  CRITICAL: {len(sk_issues['uncoalesced'])} uncoalesced adjacent entries!")
-            print(f"            (This triggers ASSERT at MoveKeys.actor.cpp:158)")
+            severity = "CRITICAL" if live_uncoalesced else "WARNING"
+            print(f"\n  {severity}: {len(sk_issues['uncoalesced'])} uncoalesced adjacent entries!")
+            if live_uncoalesced:
+                print(f"            Live server entries may trigger ASSERT during shard moves")
+                print(f"            (MoveKeys.cpp:176 asserts no adjacent duplicates when writing)")
+            else:
+                print(f"            All on dead servers — will NOT crash DD (dead servers are never read)")
             print(f"\n    Breakdown:")
             print(f"      Live servers: {len(live_uncoalesced)} entries across {len(live_servers_affected)} servers")
             print(f"      Dead servers: {len(dead_uncoalesced)} entries across {len(dead_servers_affected)} servers")
-            print(f"\n    FULL KEYSPACE entries (b'' -> b'\\xff\\xff') - VERY WRONG:")
-            print(f"      Live servers: {len(full_ks_live)}")
-            print(f"      Dead servers: {len(full_ks_dead)}")
+            if full_keyspace:
+                print(f"\n    FULL KEYSPACE entries (b'' -> b'\\xff\\xff') — orphaned dead server state:")
+                print(f"      Live servers: {len(full_ks_live)}")
+                print(f"      Dead servers: {len(full_ks_dead)}")
+            print(f"\n    NOTE: DD only reads serverKeys for servers in serverList (live servers).")
+            print(f"          Dead server entries are inert garbage — safe to clean up but not urgent.")
 
             total_issues += len(sk_issues['uncoalesced'])
 
@@ -5041,7 +5049,7 @@ def main():
                 if len(dead_uncoalesced) > 5:
                     print(f"      ... and {len(dead_uncoalesced) - 5} more dead server entries")
         else:
-            print("  No uncoalesced entries found (MoveKeys.actor.cpp:158 OK)")
+            print("  No uncoalesced serverKeys entries found")
 
         if sk_issues['dead_servers']:
             dead_unique = set(i['server_id'] for i in sk_issues['dead_servers'])
@@ -5623,10 +5631,12 @@ def main():
             if has_uncoalesced:
                 print("\nUNCOALESCED ENTRIES DETECTED:")
                 print("  Adjacent KRM entries with the same value should be merged.")
-                print("  This triggers DD assertions at:")
-                print("    - KeyRangeMap.actor.cpp:297 (keyServers)")
-                print("    - MoveKeys.actor.cpp:158 (serverKeys)")
-                print("\n  Potential fix: Delete the redundant entries to coalesce ranges")
+                print("  Impact:")
+                print("    - keyServers: Wastes memory in DD shard map (no crash)")
+                print("    - serverKeys (live): May trigger ASSERT during active shard moves")
+                print("      (MoveKeys.cpp:176 asserts no adjacent duplicates when writing)")
+                print("    - serverKeys (dead): Inert garbage, never read by DD")
+                print("\n  Fix: Run repair_coalesce.py to delete redundant entries (idempotent)")
 
             if has_dead_refs:
                 print("\nDEAD SERVER REFERENCES DETECTED:")
