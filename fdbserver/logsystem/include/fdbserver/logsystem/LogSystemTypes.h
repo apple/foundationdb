@@ -194,6 +194,7 @@ public:
 	const LogMessageVersion& version() const override;
 	Version popped() const override;
 	Version getMinKnownCommittedVersion() const override;
+	Version getMaxKnownVersion() const override;
 	Optional<UID> getPrimaryPeekLocation() const override;
 	Optional<UID> getCurrentPeekLocation() const override;
 	void addref() override { ReferenceCounted<MergedPeekCursor>::addref(); }
@@ -250,6 +251,7 @@ public:
 	const LogMessageVersion& version() const override;
 	Version popped() const override;
 	Version getMinKnownCommittedVersion() const override;
+	Version getMaxKnownVersion() const override;
 	Optional<UID> getPrimaryPeekLocation() const override;
 	Optional<UID> getCurrentPeekLocation() const override;
 	void addref() override { ReferenceCounted<SetPeekCursor>::addref(); }
@@ -280,6 +282,7 @@ public:
 	const LogMessageVersion& version() const override;
 	Version popped() const override;
 	Version getMinKnownCommittedVersion() const override;
+	Version getMaxKnownVersion() const override;
 	Optional<UID> getPrimaryPeekLocation() const override;
 	Optional<UID> getCurrentPeekLocation() const override;
 	void addref() override { ReferenceCounted<ReplayMultiCursor>::addref(); }

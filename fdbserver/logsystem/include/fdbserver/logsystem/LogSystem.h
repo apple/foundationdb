@@ -87,7 +87,7 @@ struct IPeekCursor {
 struct IReplayPeekCursor : IPeekCursor {
 	virtual Optional<UID> getPrimaryPeekLocation() const = 0;
 	virtual Optional<UID> getCurrentPeekLocation() const = 0;
-	virtual Version getMaxKnownVersion() const { return 0; }
+	virtual Version getMaxKnownVersion() const = 0;
 	virtual Reference<IReplayPeekCursor> cloneNoMore() = 0;
 	virtual void advanceTo(LogMessageVersion n) = 0;
 };

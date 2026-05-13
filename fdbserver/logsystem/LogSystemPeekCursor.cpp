@@ -954,6 +954,10 @@ Version MergedPeekCursor::getMinKnownCommittedVersion() const {
 	return serverCursors[currentCursor]->getMinKnownCommittedVersion();
 }
 
+Version MergedPeekCursor::getMaxKnownVersion() const {
+	return serverCursors[currentCursor]->getMaxKnownVersion();
+}
+
 Optional<UID> MergedPeekCursor::getPrimaryPeekLocation() const {
 	if (bestServer >= 0) {
 		return serverCursors[bestServer]->getPrimaryPeekLocation();
@@ -1300,6 +1304,10 @@ Version SetPeekCursor::getMinKnownCommittedVersion() const {
 	return serverCursors[currentSet][currentCursor]->getMinKnownCommittedVersion();
 }
 
+Version SetPeekCursor::getMaxKnownVersion() const {
+	return serverCursors[currentSet][currentCursor]->getMaxKnownVersion();
+}
+
 Optional<UID> SetPeekCursor::getPrimaryPeekLocation() const {
 	if (bestServer >= 0 && bestSet >= 0) {
 		return serverCursors[bestSet][bestServer]->getPrimaryPeekLocation();
@@ -1399,6 +1407,10 @@ const LogMessageVersion& ReplayMultiCursor::version() const {
 
 Version ReplayMultiCursor::getMinKnownCommittedVersion() const {
 	return cursors.back()->getMinKnownCommittedVersion();
+}
+
+Version ReplayMultiCursor::getMaxKnownVersion() const {
+	return cursors.back()->getMaxKnownVersion();
 }
 
 Optional<UID> ReplayMultiCursor::getPrimaryPeekLocation() const {
