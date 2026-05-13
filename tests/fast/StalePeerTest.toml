@@ -1,0 +1,84 @@
+[configuration]
+buggify = false
+machineCount = 10
+desiredTLogCount = 6
+generateFearless = false
+config = 'triple'
+# Force 3 coordinators so killRole={coordinator, cluster_controller}
+# always has a non-protected target. With sim2's default coordinator
+# count and protectedAddresses (a majority is protected), small clusters
+# can end up with all coordinators in protectedAddresses, in which case
+# the test trivially skips and we get no signal.
+coordinators = 3
+
+tenantModes = ['disabled'] # pre-emptive
+encryptModes = ['disabled'] #pre-emptive
+disableTss = true # dbcontext dtor tss cancelation avoid
+
+[[knobs]]
+gray_failure_allow_primary_ss_to_complain = false
+gray_failure_allow_remote_ss_to_complain = false
+# The locationCachePeerWatcher is conservative in general workloads (only
+# evicts when UID is gone from serverListKeys) because acting on
+# FailureMonitor state there causes DD-drain thrash. For StalePeerTest we
+# need fast eviction within the 240s waitAfterKill window, so enable
+# FM-based eviction here.
+location_cache_peer_use_failure_monitor_signal = true
+# Also tighten the watcher cadence. The general default (90s) is chosen to
+# reduce simulator-event overhead in busy tests; StalePeerTest is small
+# (10 machines) and needs multiple evict passes within the 240s window
+# to drain stale refs after a kill, so a fast tick is safe here.
+location_cache_peer_failure_eviction_delay = 5.0
+# Enable DatabaseContext::updateProxies's FailureMonitor filter. Default
+# off because under buggify FailureMonitor briefly flags healthy proxies
+# during connection-failure injection windows; SPT runs with buggify=false,
+# so the filter is safe here and lets us drain killed-proxy peer refs
+# without waiting for the master to rotate clientInfo.commitProxies /
+# clientInfo.grvProxies after the kill.
+dbcontext_filter_failed_proxies = true
+# Turn on the InterfaceTracker bookkeeping that SPT's pass criterion
+# depends on (per-(addr, role) Delta lookups in the workload's check).
+# Default off in general tests (saves ~1 backtrace per RequestStream copy,
+# avoids TracedTooManyLines in long simulations, keeps the refRecords map
+# empty so there's no memory/log growth). Toggling this knob does not
+# change simulator ordering, so determinism is preserved: same seed with
+# observability=1 and observability=0 runs the same sequence of simulator
+# actions and the same final RandomUnseed.
+stale_peer_observability = true
+
+[[test]]
+testTitle = 'StalePeerTest'
+# StalePeerTest kills a process and waits. The post-test ConsistencyCheck
+# workload often discovers ExtraDataStore entries for the killed process
+# and related cleanup state, then loops retrying — the simulation hits
+# its wall-clock timeout (TestUnexpectedlyNotFinished) even though the
+# stale-peer check itself passed. The test's goal is peer-ref accounting,
+# not data consistency, so skip the post-test CC.
+runConsistencyCheck = false
+# Also skip the post-test quietDatabase wait. After kills (especially
+# coordinator kill which triggers autoQuorumChange) DD can stay
+# stressed for a long time and trip the !ddGotStuck assertion in
+# QuietDatabase.actor.cpp:868. The peer-ref check is the test's only
+# contract; quiescence is irrelevant.
+waitForQuiescenceBegin = false
+waitForQuiescenceEnd = false
+
+    [[test.workload]]
+    testName = 'StalePeerTest'
+    # killRole: which role's process to kill.
+    # Options: 'tlog', 'ss', 'commit_proxy', 'grv_proxy', 'master', 'resolver',
+    # 'dd', 'rk', 'coordinator', 'log_router', 'cluster_controller'.
+    # Pass criterion (uniform across all roles): peer->peerReferences == 0
+    # for the killed address from every other live process at check time.
+    killRole = 'cluster_controller'
+    # clientDstRoles=true overrides killRole and randomly picks one of the
+    # client-facing destination roles per simulation run: coordinator,
+    # cluster_controller, commit_proxy, grv_proxy, ss. Use this for bulk
+    # validation that all client-facing dst-role kills are stale-ref clean
+    # in a single ensemble run.
+    clientDstRoles = true
+    # Short wait after kill — measurement showed the stuck-peer-ref
+    # leaks are architectural (don't self-heal even at 1200s), so
+    # waiting longer just slows simulation without helping the test.
+    # Keep at the SS-kill baseline.
+    waitAfterKill = 240.0
