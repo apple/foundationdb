@@ -422,9 +422,10 @@ ACTOR Future<StatusObject> clientStatusFetcher(Reference<IClusterConnectionRecor
 // Cluster section of json output
 ACTOR Future<Optional<StatusObject>> clusterStatusFetcher(ClusterInterface cI,
                                                           StatusArray* messages,
-                                                          std::string statusField) {
+                                                          std::string statusField,
+                                                          double timeoutSeconds) {
 	state StatusRequest req(statusField);
-	state Future<Void> clusterTimeout = delay(CLIENT_KNOBS->STATUS_TIMEOUT);
+	state Future<Void> clusterTimeout = delay(timeoutSeconds);
 	state Optional<StatusObject> oStatusObj;
 
 	wait(delay(0.0)); // make sure the cluster controller is marked as not failed
@@ -460,6 +461,27 @@ ACTOR Future<Optional<StatusObject>> clusterStatusFetcher(ClusterInterface cI,
 	}
 
 	return oStatusObj;
+}
+
+TEST_CASE("/fdbclient/status/overallTimeoutBudget") {
+	state ClusterInterface clusterInterface;
+	state StatusArray messages;
+	state double overallTimeout = 0.2;
+	state double coordinatorProbeDuration = 0.1;
+	state double startTime = now();
+	state double statusDeadline = startTime + overallTimeout;
+
+	wait(delay(coordinatorProbeDuration));
+	state Optional<StatusObject> status = wait(
+	    clusterStatusFetcher(clusterInterface, &messages, "", std::max(0.0, statusDeadline - now())));
+
+	double elapsed = now() - startTime;
+	ASSERT(!status.present());
+	ASSERT_EQ(messages.size(), 1);
+	ASSERT_EQ(messages.front().get_obj().at("name").get_str(), "status_incomplete_timeout");
+	ASSERT_GE(elapsed, overallTimeout);
+	ASSERT_LT(elapsed, overallTimeout + 0.05);
+	return Void();
 }
 
 // Create and return a database_status section.
@@ -516,6 +538,9 @@ ACTOR Future<StatusObject> statusFetcherImpl(Reference<IClusterConnectionRecord>
 	if (!g_network)
 		throw network_not_setup();
 
+	// Keep the overall status request within STATUS_TIMEOUT, including the client-side coordinator probe that runs
+	// before we ask the cluster controller for its status payload.
+	state double statusDeadline = now() + CLIENT_KNOBS->STATUS_TIMEOUT;
 	state StatusObject statusObj;
 	state StatusObject statusObjClient;
 	state StatusArray clientMessages;
@@ -549,12 +574,15 @@ ACTOR Future<StatusObject> statusFetcherImpl(Reference<IClusterConnectionRecord>
 	if (quorum_reachable) {
 		try {
 
-			state Future<Void> interfaceTimeout = delay(2.0);
+			state Future<Void> interfaceTimeout = delay(std::min(2.0, std::max(0.0, statusDeadline - now())));
 
 			loop {
 				if (clusterInterface->get().present()) {
-					Optional<StatusObject> _statusObjCluster =
-					    wait(clusterStatusFetcher(clusterInterface->get().get(), &clientMessages, statusField));
+					Optional<StatusObject> _statusObjCluster = wait(clusterStatusFetcher(clusterInterface->get().get(),
+					                                                                        &clientMessages,
+					                                                                        statusField,
+					                                                                        std::max(0.0,
+					                                                                                 statusDeadline - now())));
 					if (_statusObjCluster.present()) {
 						statusObjCluster = _statusObjCluster.get();
 						// TODO: this is a temporary fix, getting the number of available coordinators should move to
