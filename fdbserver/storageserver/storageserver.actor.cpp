@@ -1178,7 +1178,7 @@ public:
 	ProtocolVersion logProtocol;
 
 	Reference<LogSystem> logSystem;
-	Reference<IPeekCursor> logCursor;
+	Reference<IReplayPeekCursor> logCursor;
 
 	// The version the cluster starts on. This value is not persisted and may
 	// not be valid after a recovery.
@@ -9626,7 +9626,7 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				co_await data->byteSampleClearsTooLarge.onChange();
 			}
 
-			Reference<IPeekCursor> cursor = data->logCursor;
+			Reference<IReplayPeekCursor> cursor = data->logCursor;
 
 			double beforeTLogCursorReads = now();
 			while (true) {
@@ -9665,7 +9665,7 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 			start = now();
 			FetchInjectionInfo fii;
-			Reference<IPeekCursor> cloneCursor2 = cursor->cloneNoMore();
+			Reference<IReplayPeekCursor> cloneCursor2 = cursor->cloneNoMore();
 
 			// Collect eager read keys.
 			while (true) {
@@ -9675,7 +9675,7 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				bool firstMutation = true;
 				bool dbgLastMessageWasProtocol = false;
 
-				Reference<IPeekCursor> cloneCursor1 = cloneCursor2->cloneNoMore();
+				Reference<IReplayPeekCursor> cloneCursor1 = cloneCursor2->cloneNoMore();
 
 				cloneCursor1->setProtocolVersion(data->logProtocol);
 

@@ -99,8 +99,12 @@ ServerPeekCursor::ServerPeekCursor(TLogPeekReply const& results,
 	advanceTo(messageVersion);
 }
 
-Reference<IPeekCursor> ServerPeekCursor::cloneNoMore() {
+Reference<ServerPeekCursor> ServerPeekCursor::cloneServerNoMore() {
 	return makeReference<ServerPeekCursor>(results, messageVersion, end, messageAndTags, hasMsg, poppedVersion, tag);
+}
+
+Reference<IReplayPeekCursor> ServerPeekCursor::cloneNoMore() {
+	return cloneServerNoMore();
 }
 
 void ServerPeekCursor::setProtocolVersion(ProtocolVersion version) {
@@ -658,7 +662,42 @@ static bool canReturnEmptyVersionRange(
 	return false;
 }
 
-MergedPeekCursor::MergedPeekCursor(std::vector<Reference<IPeekCursor>> const& serverCursors, Version begin)
+template <class SelectMessageVersion, class AdvanceAllCursors>
+static bool updateMergedPeekMessage(std::vector<Reference<ServerPeekCursor>>& candidateCursors,
+                                    Optional<LogMessageVersion> const& nextVersion,
+                                    std::vector<std::pair<LogMessageVersion, int>>& sortedVersions,
+                                    LogMessageVersion& messageVersion,
+                                    int& currentCursor,
+                                    SelectMessageVersion selectMessageVersion,
+                                    AdvanceAllCursors advanceAllCursors) {
+	while (true) {
+		sortedVersions.clear();
+		for (int i = 0; i < candidateCursors.size(); i++) {
+			auto& candidateCursor = candidateCursors[i];
+			if (nextVersion.present()) {
+				candidateCursor->advanceTo(nextVersion.get());
+			}
+			sortedVersions.emplace_back(candidateCursor->version(), i);
+		}
+
+		selectMessageVersion(sortedVersions, messageVersion);
+		if (!advanceAllCursors(messageVersion)) {
+			break;
+		}
+	}
+
+	for (int i = 0; i < candidateCursors.size(); i++) {
+		auto& candidateCursor = candidateCursors[i];
+		ASSERT_WE_THINK(!candidateCursor->hasMessage() || candidateCursor->version() >= messageVersion);
+		if (candidateCursor->version() == messageVersion && candidateCursor->hasMessage()) {
+			currentCursor = i;
+			return true;
+		}
+	}
+	return false;
+}
+
+MergedPeekCursor::MergedPeekCursor(std::vector<Reference<ServerPeekCursor>> const& serverCursors, Version begin)
   : serverCursors(serverCursors), tag(invalidTag), bestServer(-1), currentCursor(0), readQuorum(serverCursors.size()),
     messageVersion(begin), hasNextMessage(false), randomID(deterministicRandom()->randomUniqueID()),
     tLogReplicationFactor(0) {
@@ -704,7 +743,7 @@ MergedPeekCursor::MergedPeekCursor(std::vector<Reference<AsyncVar<OptionalInterf
 	sortedVersions.resize(serverCursors.size());
 }
 
-MergedPeekCursor::MergedPeekCursor(std::vector<Reference<IPeekCursor>> const& serverCursors,
+MergedPeekCursor::MergedPeekCursor(std::vector<Reference<ServerPeekCursor>> const& serverCursors,
                                    LogMessageVersion const& messageVersion,
                                    int bestServer,
                                    int readQuorum,
@@ -718,10 +757,10 @@ MergedPeekCursor::MergedPeekCursor(std::vector<Reference<IPeekCursor>> const& se
 	calcHasMessage();
 }
 
-Reference<IPeekCursor> MergedPeekCursor::cloneNoMore() {
-	std::vector<Reference<IPeekCursor>> cursors;
+Reference<IReplayPeekCursor> MergedPeekCursor::cloneNoMore() {
+	std::vector<Reference<ServerPeekCursor>> cursors;
 	for (auto it : serverCursors) {
-		cursors.push_back(it->cloneNoMore());
+		cursors.push_back(it->cloneServerNoMore());
 	}
 	return makeReference<MergedPeekCursor>(
 	    cursors, messageVersion, bestServer, readQuorum, nextVersion, logSet, tLogReplicationFactor);
@@ -775,59 +814,44 @@ void MergedPeekCursor::calcHasMessage() {
 }
 
 void MergedPeekCursor::updateMessage(bool usePolicy) {
-	while (true) {
-		bool advancedPast = false;
-		sortedVersions.clear();
-		for (int i = 0; i < serverCursors.size(); i++) {
-			auto& serverCursor = serverCursors[i];
-			if (nextVersion.present()) {
-				serverCursor->advanceTo(nextVersion.get());
-			}
-			sortedVersions.push_back(std::pair<LogMessageVersion, int>(serverCursor->version(), i));
-		}
-
+	auto selectMessageVersion = [&](auto& versions, LogMessageVersion& selectedVersion) {
 		if (usePolicy) {
 			ASSERT(logSet->tLogPolicy);
-			std::sort(sortedVersions.begin(), sortedVersions.end());
+			std::sort(versions.begin(), versions.end());
 
 			locations.clear();
-			for (auto sortedVersion : sortedVersions) {
+			for (auto sortedVersion : versions) {
 				locations.push_back(logSet->logEntryArray[sortedVersion.second]);
 				if (locations.size() >= tLogReplicationFactor && logSet->satisfiesPolicy(locations)) {
-					messageVersion = sortedVersion.first;
+					selectedVersion = sortedVersion.first;
 					break;
 				}
 			}
 		} else {
-			std::nth_element(sortedVersions.begin(), sortedVersions.end() - readQuorum, sortedVersions.end());
-			messageVersion = sortedVersions[sortedVersions.size() - readQuorum].first;
+			std::nth_element(versions.begin(), versions.end() - readQuorum, versions.end());
+			selectedVersion = versions[versions.size() - readQuorum].first;
 		}
-
-		for (int i = 0; i < serverCursors.size(); i++) {
-			auto& c = serverCursors[i];
-			auto start = c->version();
-			c->advanceTo(messageVersion);
-			if (start <= messageVersion && messageVersion < c->version()) {
+	};
+	auto advanceAllCursors = [&](LogMessageVersion const& selectedVersion) {
+		bool advancedPast = false;
+		for (auto& cursor : serverCursors) {
+			auto start = cursor->version();
+			cursor->advanceTo(selectedVersion);
+			if (start <= selectedVersion && selectedVersion < cursor->version()) {
 				advancedPast = true;
 				CODE_PROBE(true, "Merge peek cursor advanced past desired sequence", probe::decoration::rare);
 			}
 		}
+		return advancedPast;
+	};
 
-		if (!advancedPast) {
-			break;
-		}
-	}
-
-	for (int i = 0; i < serverCursors.size(); i++) {
-		auto& c = serverCursors[i];
-		ASSERT_WE_THINK(!c->hasMessage() ||
-		                c->version() >= messageVersion); // Seems like the loop above makes this unconditionally true
-		if (c->version() == messageVersion && c->hasMessage()) {
-			hasNextMessage = true;
-			currentCursor = i;
-			break;
-		}
-	}
+	hasNextMessage = updateMergedPeekMessage(serverCursors,
+	                                         nextVersion,
+	                                         sortedVersions,
+	                                         messageVersion,
+	                                         currentCursor,
+	                                         selectMessageVersion,
+	                                         advanceAllCursors);
 }
 
 bool MergedPeekCursor::hasMessage() const {
@@ -870,7 +894,8 @@ void MergedPeekCursor::advanceTo(LogMessageVersion n) {
 Future<Void> mergedPeekGetMore(MergedPeekCursor* self, LogMessageVersion startVersion, TaskPriority taskID) {
 	while (true) {
 		//TraceEvent("MPC_GetMoreA", self->randomID).detail("Start", startVersion.toString());
-		if (self->bestServer >= 0 && self->serverCursors[self->bestServer]->isActive()) {
+		if (self->bestServer >= 0 &&
+		    self->serverCursors[self->bestServer]->isActive()) {
 			ASSERT(!self->serverCursors[self->bestServer]->hasMessage());
 			co_await (self->serverCursors[self->bestServer]->getMore(taskID) ||
 			          self->serverCursors[self->bestServer]->onFailed());
@@ -915,16 +940,6 @@ Future<Void> MergedPeekCursor::getMore(TaskPriority taskID) {
 
 	more = mergedPeekGetMore(this, startVersion, taskID);
 	return more;
-}
-
-Future<Void> MergedPeekCursor::onFailed() const {
-	ASSERT(false);
-	return Never();
-}
-
-bool MergedPeekCursor::isActive() const {
-	ASSERT(false);
-	return false;
 }
 
 bool MergedPeekCursor::isExhausted() const {
@@ -994,7 +1009,7 @@ SetPeekCursor::SetPeekCursor(std::vector<Reference<LogSet>> const& logSets,
 }
 
 SetPeekCursor::SetPeekCursor(std::vector<Reference<LogSet>> const& logSets,
-                             std::vector<std::vector<Reference<IPeekCursor>>> const& serverCursors,
+                             std::vector<std::vector<Reference<ServerPeekCursor>>> const& serverCursors,
                              LogMessageVersion const& messageVersion,
                              int bestSet,
                              int bestServer,
@@ -1011,12 +1026,12 @@ SetPeekCursor::SetPeekCursor(std::vector<Reference<LogSet>> const& logSets,
 	calcHasMessage();
 }
 
-Reference<IPeekCursor> SetPeekCursor::cloneNoMore() {
-	std::vector<std::vector<Reference<IPeekCursor>>> cursors;
+Reference<IReplayPeekCursor> SetPeekCursor::cloneNoMore() {
+	std::vector<std::vector<Reference<ServerPeekCursor>>> cursors;
 	cursors.resize(logSets.size());
 	for (int i = 0; i < logSets.size(); i++) {
 		for (int j = 0; j < logSets[i]->logServers.size(); j++) {
-			cursors[i].push_back(serverCursors[i][j]->cloneNoMore());
+			cursors[i].push_back(serverCursors[i][j]->cloneServerNoMore());
 		}
 	}
 	return makeReference<SetPeekCursor>(logSets, cursors, messageVersion, bestSet, bestServer, nextVersion, useBestSet);
@@ -1097,65 +1112,50 @@ void SetPeekCursor::calcHasMessage() {
 }
 
 void SetPeekCursor::updateMessage(int logIdx, bool usePolicy) {
-	while (true) {
-		bool advancedPast = false;
-		sortedVersions.clear();
-		for (int i = 0; i < serverCursors[logIdx].size(); i++) {
-			auto& serverCursor = serverCursors[logIdx][i];
-			if (nextVersion.present())
-				serverCursor->advanceTo(nextVersion.get());
-			sortedVersions.push_back(std::pair<LogMessageVersion, int>(serverCursor->version(), i));
-			//TraceEvent("LPC_Update1").detail("Ver", messageVersion.toString()).detail("Tag", tag.toString()).detail("HasNextMessage", hasNextMessage).detail("ServerVer", serverCursor->version().toString()).detail("I", i);
-		}
-
+	auto selectMessageVersion = [&](auto& versions, LogMessageVersion& selectedVersion) {
 		if (usePolicy) {
-			std::sort(sortedVersions.begin(), sortedVersions.end());
+			std::sort(versions.begin(), versions.end());
 			locations.clear();
-			for (auto sortedVersion : sortedVersions) {
+			for (auto sortedVersion : versions) {
 				locations.push_back(logSets[logIdx]->logEntryArray[sortedVersion.second]);
 				if (locations.size() >= logSets[logIdx]->tLogReplicationFactor &&
 				    logSets[logIdx]->satisfiesPolicy(locations)) {
-					messageVersion = sortedVersion.first;
+					selectedVersion = sortedVersion.first;
 					break;
 				}
 			}
 		} else {
 			//(int)oldLogData[i].logServers.size() + 1 - oldLogData[i].tLogReplicationFactor
-			std::nth_element(sortedVersions.begin(),
-			                 sortedVersions.end() -
-			                     (logSets[logIdx]->logServers.size() + 1 - logSets[logIdx]->tLogReplicationFactor),
-			                 sortedVersions.end());
-			messageVersion = sortedVersions[sortedVersions.size() - (logSets[logIdx]->logServers.size() + 1 -
-			                                                         logSets[logIdx]->tLogReplicationFactor)]
-			                     .first;
+			auto quorum =
+			    logSets[logIdx]->logServers.size() + 1 - logSets[logIdx]->tLogReplicationFactor;
+			std::nth_element(versions.begin(), versions.end() - quorum, versions.end());
+			selectedVersion = versions[versions.size() - quorum].first;
 		}
-
+	};
+	auto advanceAllCursors = [&](LogMessageVersion const& selectedVersion) {
+		bool advancedPast = false;
 		for (auto& cursors : serverCursors) {
-			for (auto& c : cursors) {
-				auto start = c->version();
-				c->advanceTo(messageVersion);
-				if (start <= messageVersion && messageVersion < c->version()) {
+			for (auto& cursor : cursors) {
+				auto start = cursor->version();
+				cursor->advanceTo(selectedVersion);
+				if (start <= selectedVersion && selectedVersion < cursor->version()) {
 					advancedPast = true;
 					CODE_PROBE(true, "Set peek cursor with logIdx advanced past desired sequence");
 				}
 			}
 		}
+		return advancedPast;
+	};
 
-		if (!advancedPast) {
-			break;
-		}
-	}
-
-	for (int i = 0; i < serverCursors[logIdx].size(); i++) {
-		auto& c = serverCursors[logIdx][i];
-		ASSERT_WE_THINK(!c->hasMessage() ||
-		                c->version() >= messageVersion); // Seems like the loop above makes this unconditionally true
-		if (c->version() == messageVersion && c->hasMessage()) {
-			hasNextMessage = true;
-			currentSet = logIdx;
-			currentCursor = i;
-			break;
-		}
+	hasNextMessage = updateMergedPeekMessage(serverCursors[logIdx],
+	                                         nextVersion,
+	                                         sortedVersions,
+	                                         messageVersion,
+	                                         currentCursor,
+	                                         selectMessageVersion,
+	                                         advanceAllCursors);
+	if (hasNextMessage) {
+		currentSet = logIdx;
 	}
 }
 
@@ -1288,16 +1288,6 @@ Future<Void> SetPeekCursor::getMore(TaskPriority taskID) {
 	return more;
 }
 
-Future<Void> SetPeekCursor::onFailed() const {
-	ASSERT(false);
-	return Never();
-}
-
-bool SetPeekCursor::isActive() const {
-	ASSERT(false);
-	return false;
-}
-
 bool SetPeekCursor::isExhausted() const {
 	return serverCursors[currentSet][currentCursor]->isExhausted();
 }
@@ -1334,15 +1324,101 @@ Version SetPeekCursor::popped() const {
 	return poppedVersion;
 }
 
-MultiCursor::MultiCursor(std::vector<Reference<IPeekCursor>> cursors, std::vector<LogMessageVersion> epochEnds)
+ReplayMultiCursor::ReplayMultiCursor(std::vector<Reference<IReplayPeekCursor>> cursors, std::vector<LogMessageVersion> epochEnds)
   : cursors(cursors), epochEnds(epochEnds), poppedVersion(0) {
 	for (int i = 0; i < std::min<int>(cursors.size(), SERVER_KNOBS->MULTI_CURSOR_PRE_FETCH_LIMIT); i++) {
 		cursors[cursors.size() - i - 1]->getMore();
 	}
 }
 
-Reference<IPeekCursor> MultiCursor::cloneNoMore() {
+Reference<IReplayPeekCursor> ReplayMultiCursor::cloneNoMore() {
 	return cursors.back()->cloneNoMore();
+}
+
+void ReplayMultiCursor::setProtocolVersion(ProtocolVersion version) {
+	cursors.back()->setProtocolVersion(version);
+}
+
+Arena& ReplayMultiCursor::arena() {
+	return cursors.back()->arena();
+}
+
+ArenaReader* ReplayMultiCursor::reader() {
+	return cursors.back()->reader();
+}
+
+bool ReplayMultiCursor::hasMessage() const {
+	return cursors.back()->hasMessage();
+}
+
+void ReplayMultiCursor::nextMessage() {
+	cursors.back()->nextMessage();
+}
+
+StringRef ReplayMultiCursor::getMessage() {
+	return cursors.back()->getMessage();
+}
+
+StringRef ReplayMultiCursor::getMessageWithTags() {
+	return cursors.back()->getMessageWithTags();
+}
+
+VectorRef<Tag> ReplayMultiCursor::getTags() const {
+	return cursors.back()->getTags();
+}
+
+void ReplayMultiCursor::advanceTo(LogMessageVersion n) {
+	while (cursors.size() > 1 && n >= epochEnds.back()) {
+		poppedVersion = std::max(poppedVersion, cursors.back()->popped());
+		cursors.pop_back();
+		epochEnds.pop_back();
+	}
+	cursors.back()->advanceTo(n);
+}
+
+Future<Void> ReplayMultiCursor::getMore(TaskPriority taskID) {
+	LogMessageVersion startVersion = cursors.back()->version();
+	while (cursors.size() > 1 && cursors.back()->version() >= epochEnds.back()) {
+		poppedVersion = std::max(poppedVersion, cursors.back()->popped());
+		cursors.pop_back();
+		epochEnds.pop_back();
+	}
+	if (cursors.back()->version() > startVersion) {
+		return Void();
+	}
+	return cursors.back()->getMore(taskID);
+}
+
+bool ReplayMultiCursor::isExhausted() const {
+	return cursors.back()->isExhausted();
+}
+
+const LogMessageVersion& ReplayMultiCursor::version() const {
+	return cursors.back()->version();
+}
+
+Version ReplayMultiCursor::getMinKnownCommittedVersion() const {
+	return cursors.back()->getMinKnownCommittedVersion();
+}
+
+Optional<UID> ReplayMultiCursor::getPrimaryPeekLocation() const {
+	return cursors.back()->getPrimaryPeekLocation();
+}
+
+Optional<UID> ReplayMultiCursor::getCurrentPeekLocation() const {
+	return cursors.back()->getCurrentPeekLocation();
+}
+
+Version ReplayMultiCursor::popped() const {
+	return std::max(poppedVersion, cursors.back()->popped());
+}
+
+MultiCursor::MultiCursor(std::vector<Reference<IPeekCursor>> cursors,
+                                   std::vector<LogMessageVersion> epochEnds)
+  : cursors(cursors), epochEnds(epochEnds), poppedVersion(0) {
+	for (int i = 0; i < std::min<int>(cursors.size(), SERVER_KNOBS->MULTI_CURSOR_PRE_FETCH_LIMIT); i++) {
+		cursors[cursors.size() - i - 1]->getMore();
+	}
 }
 
 void MultiCursor::setProtocolVersion(ProtocolVersion version) {
@@ -1377,15 +1453,6 @@ VectorRef<Tag> MultiCursor::getTags() const {
 	return cursors.back()->getTags();
 }
 
-void MultiCursor::advanceTo(LogMessageVersion n) {
-	while (cursors.size() > 1 && n >= epochEnds.back()) {
-		poppedVersion = std::max(poppedVersion, cursors.back()->popped());
-		cursors.pop_back();
-		epochEnds.pop_back();
-	}
-	cursors.back()->advanceTo(n);
-}
-
 Future<Void> MultiCursor::getMore(TaskPriority taskID) {
 	LogMessageVersion startVersion = cursors.back()->version();
 	while (cursors.size() > 1 && cursors.back()->version() >= epochEnds.back()) {
@@ -1397,14 +1464,6 @@ Future<Void> MultiCursor::getMore(TaskPriority taskID) {
 		return Void();
 	}
 	return cursors.back()->getMore(taskID);
-}
-
-Future<Void> MultiCursor::onFailed() const {
-	return cursors.back()->onFailed();
-}
-
-bool MultiCursor::isActive() const {
-	return cursors.back()->isActive();
 }
 
 bool MultiCursor::isExhausted() const {
@@ -1419,14 +1478,6 @@ Version MultiCursor::getMinKnownCommittedVersion() const {
 	return cursors.back()->getMinKnownCommittedVersion();
 }
 
-Optional<UID> MultiCursor::getPrimaryPeekLocation() const {
-	return cursors.back()->getPrimaryPeekLocation();
-}
-
-Optional<UID> MultiCursor::getCurrentPeekLocation() const {
-	return cursors.back()->getCurrentPeekLocation();
-}
-
 Version MultiCursor::popped() const {
 	return std::max(poppedVersion, cursors.back()->popped());
 }
@@ -1439,6 +1490,25 @@ BufferedCursor::BufferedCursor(std::vector<Reference<IPeekCursor>> cursors,
   : cursors(cursors), messageIndex(0), messageVersion(begin), end(end), hasNextMessage(false), withTags(withTags),
     knownUnique(false), minKnownCommittedVersion(0), poppedVersion(0), initialPoppedVersion(0),
     canDiscardPopped(canDiscardPopped), randomID(deterministicRandom()->randomUniqueID()) {
+	ASSERT(!canDiscardPopped);
+	targetQueueSize = SERVER_KNOBS->DESIRED_OUTSTANDING_MESSAGES / cursors.size();
+	messages.reserve(SERVER_KNOBS->DESIRED_OUTSTANDING_MESSAGES);
+	cursorMessages.resize(cursors.size());
+}
+
+BufferedCursor::BufferedCursor(std::vector<Reference<IReplayPeekCursor>> replayCursors,
+                               Version begin,
+                               Version end,
+                               bool withTags,
+                               bool canDiscardPopped)
+  : discardableCursors(canDiscardPopped ? replayCursors : std::vector<Reference<IReplayPeekCursor>>()),
+    messageIndex(0), messageVersion(begin), end(end), hasNextMessage(false), withTags(withTags), knownUnique(false),
+    minKnownCommittedVersion(0), poppedVersion(0), initialPoppedVersion(0), canDiscardPopped(canDiscardPopped),
+    randomID(deterministicRandom()->randomUniqueID()) {
+	cursors.reserve(replayCursors.size());
+	for (const auto& cursor : replayCursors) {
+		cursors.push_back(cursor);
+	}
 	targetQueueSize = SERVER_KNOBS->DESIRED_OUTSTANDING_MESSAGES / cursors.size();
 	messages.reserve(SERVER_KNOBS->DESIRED_OUTSTANDING_MESSAGES);
 	cursorMessages.resize(cursors.size());
@@ -1459,11 +1529,6 @@ BufferedCursor::BufferedCursor(std::vector<Reference<AsyncVar<OptionalInterface<
 		auto cursor = makeReference<ServerPeekCursor>(logServers[i], tag, begin, end, false, parallelGetMore);
 		cursors.push_back(cursor);
 	}
-}
-
-Reference<IPeekCursor> BufferedCursor::cloneNoMore() {
-	ASSERT(false);
-	return Reference<IPeekCursor>();
 }
 
 void BufferedCursor::setProtocolVersion(ProtocolVersion version) {
@@ -1505,10 +1570,6 @@ StringRef BufferedCursor::getMessageWithTags() {
 VectorRef<Tag> BufferedCursor::getTags() const {
 	ASSERT(withTags);
 	return messages[messageIndex].tags;
-}
-
-void BufferedCursor::advanceTo(LogMessageVersion n) {
-	ASSERT(false);
 }
 
 Future<Void> bufferedGetMoreLoader(BufferedCursor* self, Reference<IPeekCursor> cursor, int idx, TaskPriority taskID) {
@@ -1601,7 +1662,7 @@ Future<Void> bufferedGetMore(BufferedCursor* self, TaskPriority taskID) {
 		    .detail("Version", self->version().version)
 		    .detail("Popped", self->poppedVersion);
 		self->messageVersion = std::max(self->messageVersion, LogMessageVersion(self->poppedVersion));
-		for (auto cursor : self->cursors) {
+		for (auto cursor : self->discardableCursors) {
 			cursor->advanceTo(self->messageVersion);
 		}
 		self->messageIndex = self->messages.size();
@@ -1633,16 +1694,6 @@ Future<Void> BufferedCursor::getMore(TaskPriority taskID) {
 	return more;
 }
 
-Future<Void> BufferedCursor::onFailed() const {
-	ASSERT(false);
-	return Never();
-}
-
-bool BufferedCursor::isActive() const {
-	ASSERT(false);
-	return false;
-}
-
 bool BufferedCursor::isExhausted() const {
 	ASSERT(false);
 	return false;
@@ -1657,14 +1708,6 @@ const LogMessageVersion& BufferedCursor::version() const {
 
 Version BufferedCursor::getMinKnownCommittedVersion() const {
 	return minKnownCommittedVersion;
-}
-
-Optional<UID> BufferedCursor::getPrimaryPeekLocation() const {
-	return Optional<UID>();
-}
-
-Optional<UID> BufferedCursor::getCurrentPeekLocation() const {
-	return Optional<UID>();
 }
 
 Version BufferedCursor::popped() const {

@@ -63,9 +63,8 @@ struct ConnectionResetInfo : public ReferenceCounted<ConnectionResetInfo> {
 	ConnectionResetInfo() : lastReset(now()), resetCheck(Void()), slowReplies(0), fastReplies(0) {}
 };
 
+// Base cursor contract for consuming a sequential log peek stream.
 struct IPeekCursor {
-	virtual Reference<IPeekCursor> cloneNoMore() = 0;
-
 	virtual void setProtocolVersion(ProtocolVersion version) = 0;
 
 	virtual bool hasMessage() const = 0;
@@ -75,19 +74,22 @@ struct IPeekCursor {
 	virtual StringRef getMessage() = 0;
 	virtual StringRef getMessageWithTags() = 0;
 	virtual void nextMessage() = 0;
-	virtual void advanceTo(LogMessageVersion n) = 0;
 	virtual Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply) = 0;
-	virtual Future<Void> onFailed() const = 0;
-	virtual bool isActive() const = 0;
 	virtual bool isExhausted() const = 0;
 	virtual const LogMessageVersion& version() const = 0;
 	virtual Version popped() const = 0;
-	virtual Version getMaxKnownVersion() const { return 0; }
 	virtual Version getMinKnownCommittedVersion() const = 0;
-	virtual Optional<UID> getPrimaryPeekLocation() const = 0;
-	virtual Optional<UID> getCurrentPeekLocation() const = 0;
 	virtual void addref() = 0;
 	virtual void delref() = 0;
+};
+
+// Peek cursor that reports log location and can be cloned and repositioned for replay.
+struct IReplayPeekCursor : IPeekCursor {
+	virtual Optional<UID> getPrimaryPeekLocation() const = 0;
+	virtual Optional<UID> getCurrentPeekLocation() const = 0;
+	virtual Version getMaxKnownVersion() const { return 0; }
+	virtual Reference<IReplayPeekCursor> cloneNoMore() = 0;
+	virtual void advanceTo(LogMessageVersion n) = 0;
 };
 
 struct LogPushVersionSet {
@@ -398,7 +400,7 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	                                Optional<Version> end,
 	                                const Optional<std::map<uint8_t, std::vector<uint16_t>>>& knownLockedTLogIds);
 
-	Reference<IPeekCursor> peekAll(UID dbgid, Version begin, Version end, Tag tag, bool parallelGetMore);
+	Reference<IReplayPeekCursor> peekAll(UID dbgid, Version begin, Version end, Tag tag, bool parallelGetMore);
 
 	Reference<IPeekCursor> peekRemote(UID dbgid, Version begin, Optional<Version> end, Tag tag, bool parallelGetMore);
 
@@ -410,12 +412,12 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	                            std::vector<Tag> tags,
 	                            bool parallelGetMore);
 
-	Reference<IPeekCursor> peekLocal(UID dbgid,
-	                                 Tag tag,
-	                                 Version begin,
-	                                 Version end,
-	                                 bool useMergePeekCursors,
-	                                 int8_t peekLocality = tagLocalityInvalid);
+	Reference<IReplayPeekCursor> peekLocal(UID dbgid,
+	                                        Tag tag,
+	                                        Version begin,
+	                                        Version end,
+	                                        bool useMergePeekCursors,
+	                                        int8_t peekLocality = tagLocalityInvalid);
 
 	Reference<IPeekCursor> peekTxs(UID dbgid,
 	                               Version begin,
@@ -423,7 +425,7 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	                               Version localEnd,
 	                               bool canDiscardPopped);
 
-	Reference<IPeekCursor> peekSingle(
+	Reference<IReplayPeekCursor> peekSingle(
 	    UID dbgid,
 	    Version begin,
 	    Tag tag,
@@ -434,13 +436,14 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	// The returned cursor can peek data at the "tag" from the given "begin" version to that epoch's end version or
 	// the recovery version for the latest old epoch. For the current epoch, the cursor has no end version.
 	// For the old epoch, the cursor is provided an end version.
-	Reference<IPeekCursor> peekLogRouter(UID dbgid,
-	                                     Version begin,
-	                                     Tag tag,
-	                                     bool useSatellite,
-	                                     Optional<Version> end = Optional<Version>(),
-	                                     const Optional<std::map<uint8_t, std::vector<uint16_t>>>& knownStoppedTLogIds =
-	                                         Optional<std::map<uint8_t, std::vector<uint16_t>>>());
+	Reference<IReplayPeekCursor> peekLogRouter(
+	    UID dbgid,
+	    Version begin,
+	    Tag tag,
+	    bool useSatellite,
+	    Optional<Version> end = Optional<Version>(),
+	    const Optional<std::map<uint8_t, std::vector<uint16_t>>>& knownStoppedTLogIds =
+	        Optional<std::map<uint8_t, std::vector<uint16_t>>>());
 
 	Version getKnownCommittedVersion();
 
