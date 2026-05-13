@@ -5014,7 +5014,7 @@ def main():
             print(f"\n  {severity}: {len(sk_issues['uncoalesced'])} uncoalesced adjacent entries!")
             if live_uncoalesced:
                 print(f"            Live server entries may trigger ASSERT during shard moves")
-                print(f"            (MoveKeys.cpp:176 asserts no adjacent duplicates when writing)")
+                print(f"            (MoveKeys.cpp unassignServerKeys asserts no adjacent duplicates when writing)")
             else:
                 print(f"            All on dead servers — will NOT crash DD (dead servers are never read)")
             print(f"\n    Breakdown:")
@@ -5054,7 +5054,7 @@ def main():
         if sk_issues['dead_servers']:
             dead_unique = set(i['server_id'] for i in sk_issues['dead_servers'])
             print(f"\n  WARNING: {len(sk_issues['dead_servers'])} entries for {len(dead_unique)} dead servers")
-            print(f"           (Dead server refs won't crash DD immediately but cause issues)")
+            print(f"           (Dead server refs are inert — DD never reads serverKeys for servers not in serverList)")
             total_issues += len(sk_issues['dead_servers'])
             for srv in list(dead_unique)[:5]:
                 print(f"    - {decode_uid(srv)}")
@@ -5634,9 +5634,9 @@ def main():
                 print("  Impact:")
                 print("    - keyServers: Wastes memory in DD shard map (no crash)")
                 print("    - serverKeys (live): May trigger ASSERT during active shard moves")
-                print("      (MoveKeys.cpp:176 asserts no adjacent duplicates when writing)")
+                print("      (MoveKeys.cpp unassignServerKeys asserts no adjacent duplicates when writing)")
                 print("    - serverKeys (dead): Inert garbage, never read by DD")
-                print("\n  Fix: Run repair_coalesce.py to delete redundant entries (idempotent)")
+                print("\n  Fix: Run ./metadata-audit.sh repair-coalesce to delete redundant entries (idempotent)")
 
             if has_dead_refs:
                 print("\nDEAD SERVER REFERENCES DETECTED:")

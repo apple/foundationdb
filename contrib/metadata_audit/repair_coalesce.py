@@ -8,7 +8,7 @@ Running it multiple times is safe.
 The algorithm:
 1. Scan entries in key order
 2. Find runs of adjacent entries with equivalent values
-3. Delete all but the LAST entry in each run (keeping the boundary)
+3. Delete all but the FIRST entry in each run (it defines where the range starts)
 
 For serverKeys:
   Adjacent entries with same value (TRUE or FALSE) are redundant.

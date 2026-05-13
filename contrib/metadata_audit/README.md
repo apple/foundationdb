@@ -75,8 +75,7 @@ Reads all three metadata spaces and cross-references them to detect:
 - Dead server references (servers not in serverList)
 - keyServers/serverKeys disagreements (wrong_shard_server)
 - Orphaned serverKeys entries (server not in serverList)
-- Empty source servers in keyServers
-- Ranges assigned to zero servers
+- Empty source servers / ranges assigned to zero servers
 - SS shard probing (actual reads to detect missing data)
 
 ```bash
@@ -124,10 +123,11 @@ storage servers are still running (same UIDs). See comments in
 coalesces KRM entries automatically. Uncoalesced entries can occur after bugs
 in shard movement, interrupted data moves, or metadata corruption.
 
-**When you need this:** DD fails to start (crash-loops with an assertion in
-`MoveKeys.cpp`) because it encounters adjacent serverKeys entries with the
-same value during a shard move. The `check` command will report uncoalesced
-entries. This tool deletes the redundant entries so DD can operate normally.
+**When you need this:** DD crash-loops on an assertion in `MoveKeys.cpp`
+(function `unassignServerKeys`) while attempting a shard move, because it
+encounters adjacent serverKeys entries with the same value. The `check` command
+will report uncoalesced entries. This tool deletes the redundant entries so DD
+can operate normally.
 
 Removes redundant adjacent KRM entries with the same value. This is safe and
 idempotent — running it on a healthy cluster finds nothing to delete, and
@@ -161,8 +161,8 @@ shard moves; on dead servers they are inert garbage.
 - `--server UID` — limit to a specific server (hex UID, serverKeys only)
 - `--key-prefix HEX` — limit to keys with this prefix (keyServers only)
 - `--dry-run` — show what would be deleted without making changes
-- `--yes-i-am-sure` — required to actually write (mutually exclusive with `--dry-run`)
-- `--keep-dd-disabled` — don't re-enable DD after repair (use when chaining multiple repairs)
+- `--yes-i-am-sure` — required to actually write; ignored if `--dry-run` is also set
+- `--keep-dd-disabled` — don't re-enable DD after repair (use when chaining multiple repairs; remember to re-enable DD manually when done)
 
 **What it does:**
 1. Disables Data Distribution and takes the MoveKeysLock
@@ -175,6 +175,8 @@ shard moves; on dead servers they are inert garbage.
 - DD is disabled during writes — no conflicts with shard moves
 - Only deletes redundant boundaries — KRM semantics are unchanged
 - Idempotent — running again after repair finds 0 entries to delete
+- If interrupted (ctrl-C, crash), DD remains disabled. Re-enable manually:
+  `fdbcli --exec "option on ACCESS_SYSTEM_KEYS; writemode on; set \xff/dataDistributionMode \x01\x00\x00\x00"`
 - Verify with `status details` after repair — DD should reinitialize and show "Healthy"
 
 **After running repair**, confirm DD is healthy:
