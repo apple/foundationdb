@@ -193,6 +193,10 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 
 	void coreStateWritten(DBCoreState const& newState) final;
 
+	int32_t debugGetReferenceCount() const final {
+		return ReferenceCounted<TagPartitionedLogSystem>::debugGetReferenceCount();
+	}
+
 	Future<Void> onError() const final;
 
 	ACTOR static Future<Void> onError_internal(TagPartitionedLogSystem const* self);

@@ -60,7 +60,20 @@ public:
 	                          Reference<AsyncVar<PeekTxsInfo>> peekLocality,
 	                          Version txsPoppedVersion,
 	                          bool recover)
-	  : peekLocality(peekLocality), peekTypeSwitches(0), enableRecovery(recover), logSystem(logSystem),
+	  : peekLocality(peekLocality), peekTypeSwitches(0), enableRecovery(recover),
+	    // Only retain the Reference<ILogSystem> when we'll actually need it for
+	    // the readNext recovery path. With recover=false (e.g. the CommitProxy
+	    // construction at CommitProxyServer.actor.cpp:4031) this->logSystem is
+	    // never read after construction; holding the Reference here pins every
+	    // TLogInterface copy inside that ILogSystem's LogSet AsyncVars for the
+	    // entire lifetime of the adapter, which itself lives as long as the
+	    // hosting CP. After a TLog dies (e.g. as a co-resident of a killed
+	    // commit_proxy in StalePeerTest), peer references to the dead TLog
+	    // address stay alive on this process until the CP eventually
+	    // terminates — well past the test's check window. Dropping the
+	    // Reference here lets the natural Reference<ILogSystem>-scoped
+	    // cleanup release TLog peer refs on the next dbInfo rotation.
+	    logSystem(recover ? logSystem : Reference<ILogSystem>()),
 	    startLoc(txsPoppedVersion), recoveryLoc(txsPoppedVersion), recoveryQueueLoc(txsPoppedVersion),
 	    recoveryQueueDataSize(0), poppedUpTo(0), nextCommit(1), hasDiscardedData(false), totalRecoveredBytes(0) {
 		if (enableRecovery) {

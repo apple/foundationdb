@@ -514,6 +514,8 @@ struct ILogSystem {
 	virtual void coreStateWritten(DBCoreState const& newState) = 0;
 	// Called when a core state has been written to the coordinators
 
+	virtual int32_t debugGetReferenceCount() const = 0;
+
 	virtual Future<Void> onError() const = 0;
 	// Never returns normally, but throws an error if the subsystem stops working
 
