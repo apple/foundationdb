@@ -1530,7 +1530,7 @@ AsyncResult<std::vector<T>> getAllAsync(std::vector<AsyncResult<T>> input) {
 	if (input.empty())
 		co_return std::vector<T>();
 
-	Reference<GetAllAsyncResultState<T>> aggregateState = makeReference<GetAllAsyncResultState<T>>(input.size());
+	auto aggregateState = makeReference<GetAllAsyncResultState<T>>(input.size());
 	aggregateState->attach(input);
 	co_await aggregateState->completion.getFuture();
 

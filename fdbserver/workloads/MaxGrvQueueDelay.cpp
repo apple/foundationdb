@@ -48,7 +48,7 @@ struct MaxGrvQueueDelayWorkload : TestWorkload {
 	PerfIntCounter rejected;
 	PerfIntCounter unexpectedErrors;
 
-	MaxGrvQueueDelayWorkload(WorkloadContext const& wcx)
+	explicit MaxGrvQueueDelayWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), requests("Requests"), successes("Successes"), rejected("Rejected"),
 	    unexpectedErrors("UnexpectedErrors") {
 		requestCount = getOption(options, "requestCount"_sr, 50);

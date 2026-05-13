@@ -640,7 +640,7 @@ protected:
  */
 class TransactionExecutorBase : public ITransactionExecutor {
 public:
-	TransactionExecutorBase(const TransactionExecutorOptions& options) : options(options), scheduler(nullptr) {}
+	explicit TransactionExecutorBase(const TransactionExecutorOptions& options) : options(options), scheduler(nullptr) {}
 
 	~TransactionExecutorBase() override {
 		if (tamperClusterFileThread.joinable()) {
@@ -752,7 +752,7 @@ protected:
  */
 class DBPoolTransactionExecutor : public TransactionExecutorBase {
 public:
-	DBPoolTransactionExecutor(const TransactionExecutorOptions& options) : TransactionExecutorBase(options) {}
+	explicit DBPoolTransactionExecutor(const TransactionExecutorOptions& options) : TransactionExecutorBase(options) {}
 
 	~DBPoolTransactionExecutor() override { release(); }
 
@@ -780,7 +780,7 @@ private:
  */
 class DBPerTransactionExecutor : public TransactionExecutorBase {
 public:
-	DBPerTransactionExecutor(const TransactionExecutorOptions& options) : TransactionExecutorBase(options) {}
+	explicit DBPerTransactionExecutor(const TransactionExecutorOptions& options) : TransactionExecutorBase(options) {}
 
 	fdb::Database selectDatabase() override { return fdb::Database(clusterFile.c_str()); }
 };

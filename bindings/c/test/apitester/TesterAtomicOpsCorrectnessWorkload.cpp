@@ -34,7 +34,7 @@ using fdb::ValueRef;
 
 class AtomicOpsCorrectnessWorkload : public ApiWorkload {
 public:
-	AtomicOpsCorrectnessWorkload(const WorkloadConfig& config) : ApiWorkload(config) {}
+	explicit AtomicOpsCorrectnessWorkload(const WorkloadConfig& config) : ApiWorkload(config) {}
 
 private:
 	using IntAtomicOpFunction = std::function<uint64_t(uint64_t, uint64_t)>;

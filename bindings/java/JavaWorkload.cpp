@@ -165,7 +165,7 @@ jlong getSharedRandomNumber(JNIEnv* env, jclass, jlong self) {
 
 struct JavaPromise {
 	GenericPromise<bool> impl;
-	JavaPromise(GenericPromise<bool>&& promise) : impl(std::move(promise)) {}
+	explicit JavaPromise(GenericPromise<bool>&& promise) : impl(std::move(promise)) {}
 
 	void send(bool val) {
 		impl.send(val);
@@ -235,7 +235,7 @@ struct JVM {
 		}
 	}
 
-	JVM(FDBLogger* log) : log(log) {
+	explicit JVM(FDBLogger* log) : log(log) {
 		try {
 			log->trace(FDBSeverity::Debug, "InitializeJVM", {});
 			JavaVMInitArgs args;
@@ -604,7 +604,7 @@ struct JavaWorkload final : FDBWorkload {
 struct JavaWorkloadFactory : FDBWorkloadFactory {
 	FDBLogger* log;
 	std::weak_ptr<JVM> jvm;
-	JavaWorkloadFactory(FDBLogger* log) : log(log) {}
+	explicit JavaWorkloadFactory(FDBLogger* log) : log(log) {}
 	JavaWorkloadFactory(const JavaWorkloadFactory&) = delete;
 	JavaWorkloadFactory& operator=(const JavaWorkloadFactory&) = delete;
 	std::shared_ptr<FDBWorkload> create(const std::string& name) override {
