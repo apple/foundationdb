@@ -516,7 +516,7 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 
 	Version getBackupStartVersion() const;
 
-	std::map<LogEpoch, EpochTagsVersionsInfo> getOldEpochTagsVersionsInfo() const;
+	std::map<LogEpoch, EpochTagsVersionsInfo> getOldEpochLRTagsVersionsInfo() const;
 
 	inline Reference<LogSet> getEpochLogSet(LogEpoch epoch) const;
 

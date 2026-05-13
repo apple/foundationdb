@@ -650,7 +650,7 @@ struct InitializeBackupRequest {
 	LogEpoch recruitedEpoch; // The epoch the worker is recruited.
 	LogEpoch backupEpoch; // The epoch the worker should work on. If different from the recruitedEpoch, then it refers
 	                      // to some previous epoch with unfinished work.
-	Tag routerTag;
+	Tag tag;
 	int totalTags;
 	Version startVersion;
 	Optional<Version> endVersion;
@@ -661,7 +661,7 @@ struct InitializeBackupRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reqId, recruitedEpoch, backupEpoch, routerTag, totalTags, startVersion, endVersion, reply);
+		serializer(ar, reqId, recruitedEpoch, backupEpoch, tag, totalTags, startVersion, endVersion, reply);
 	}
 };
 

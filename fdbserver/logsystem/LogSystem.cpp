@@ -2134,7 +2134,7 @@ Version LogSystem::getBackupStartVersion() const {
 	return backupStartVersion;
 }
 
-std::map<LogEpoch, EpochTagsVersionsInfo> LogSystem::getOldEpochTagsVersionsInfo() const {
+std::map<LogEpoch, EpochTagsVersionsInfo> LogSystem::getOldEpochLRTagsVersionsInfo() const {
 	std::map<LogEpoch, EpochTagsVersionsInfo> epochInfos;
 	for (const auto& old : oldLogData) {
 		epochInfos.insert({ old.epoch, EpochTagsVersionsInfo(old.logRouterTags, old.epochBegin, old.epochEnd) });
