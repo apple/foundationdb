@@ -16,8 +16,9 @@ encryptModes = ['disabled'] #pre-emptive
 disableTss = true # dbcontext dtor tss cancelation avoid
 
 [[knobs]]
-gray_failure_allow_primary_ss_to_complain = false
-gray_failure_allow_remote_ss_to_complain = false
+#gray_failure_allow_primary_ss_to_complain = false
+#gray_failure_allow_remote_ss_to_complain = false
+
 # The locationCachePeerWatcher is conservative in general workloads (only
 # evicts when UID is gone from serverListKeys) because acting on
 # FailureMonitor state there causes DD-drain thrash. For StalePeerTest we
