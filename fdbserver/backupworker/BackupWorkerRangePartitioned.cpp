@@ -25,10 +25,10 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tracing.h"
 #include "BackupPartitionMap.h"
-#include "fdbserver/core/BackupRangePartitionedProgress.h"
+#include "fdbserver/core/BackupProgress.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/core/WaitFailure.h"
+#include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "flow/CoroUtils.h"
 
@@ -393,6 +393,7 @@ Future<Version> pullPartitionMapFromTLog(BackupRangePartitionedData* self, Parti
 	}
 }
 
+// TODO akanksha: Test if concurrent uploads of identical content to the same path in blob storage is safe or not.
 Future<Void> uploadPartitionList(BackupRangePartitionedData* self, PartitionMap partitionMap) {
 	std::vector<Future<Void>> fileFutures;
 	auto it = self->backups.begin();
@@ -918,8 +919,8 @@ Future<Void> monitorBackupRangePartitionedProgress(BackupRangePartitionedData* s
 		}
 
 		// Check all workers have started by checking their progress is larger than the backup's start version.
-		Reference<BackupRangePartitionedProgress> progress(new BackupRangePartitionedProgress(self->myId));
-		co_await getBackupRangePartitionedProgress(self->cx, self->myId, progress, SevDebug);
+		Reference<BackupProgress> progress(new BackupProgress(self->myId, {}));
+		co_await getBackupProgress(self->cx, self->myId, progress, SevDebug);
 
 		std::map<Tag, Version> tagVersions = progress->getEpochStatus(self->recruitedEpoch);
 		if (tagVersions.size() != self->totalTags) {
