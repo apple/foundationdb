@@ -574,6 +574,11 @@ public:
 		this->logGroup = logGroup;
 	}
 
+	std::string getRolesString() {
+		MutexHolder holder(mutex);
+		return mutateRoleInfo().rolesString;
+	}
+
 	void addUniversalTraceField(const std::string& name, const std::string& value) {
 		MutexHolder holder(mutex);
 		ASSERT(universalFields.count(name) == 0);
@@ -840,6 +845,10 @@ void addTraceRole(std::string const& role) {
 
 void removeTraceRole(std::string const& role) {
 	g_traceLog.removeRole(role);
+}
+
+std::string getTraceRolesString() {
+	return g_traceLog.getRolesString();
 }
 
 void setTraceLogGroup(const std::string& logGroup) {

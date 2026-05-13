@@ -561,6 +561,7 @@ bool validateTraceClockSource(std::string source);
 
 void addTraceRole(std::string const& role);
 void removeTraceRole(std::string const& role);
+std::string getTraceRolesString();
 void retrieveTraceLogIssues(std::set<std::string>& out);
 void setTraceLogGroup(const std::string& role);
 void addUniversalTraceField(std::string const& name, std::string const& value);
