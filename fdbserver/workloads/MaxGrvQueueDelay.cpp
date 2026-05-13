@@ -36,6 +36,8 @@ struct MaxGrvQueueDelayWorkload : TestWorkload {
 	int minRejected;
 	int64_t maxQueueDelayMS;
 	int64_t permissiveMaxQueueDelayMS;
+	int warmupRequestCount;
+	double warmupDelay;
 	double startAfter;
 	double testTimeout;
 
@@ -53,6 +55,8 @@ struct MaxGrvQueueDelayWorkload : TestWorkload {
 		minRejected = getOption(options, "minRejected"_sr, 1);
 		maxQueueDelayMS = getOption(options, "maxQueueDelayMS"_sr, int64_t{ 0 });
 		permissiveMaxQueueDelayMS = getOption(options, "permissiveMaxQueueDelayMS"_sr, int64_t{ 60000 });
+		warmupRequestCount = getOption(options, "warmupRequestCount"_sr, 0);
+		warmupDelay = getOption(options, "warmupDelay"_sr, 0.0);
 		startAfter = getOption(options, "startAfter"_sr, 5.0);
 		testTimeout = getOption(options, "testTimeout"_sr, 30.0);
 	}
@@ -67,6 +71,8 @@ struct MaxGrvQueueDelayWorkload : TestWorkload {
 		    .detail("MinRejected", minRejected)
 		    .detail("MaxQueueDelayMS", maxQueueDelayMS)
 		    .detail("PermissiveMaxQueueDelayMS", permissiveMaxQueueDelayMS)
+		    .detail("WarmupRequestCount", warmupRequestCount)
+		    .detail("WarmupDelay", warmupDelay)
 		    .detail("StartAfter", startAfter)
 		    .detail("TestTimeout", testTimeout);
 		return Void();
@@ -145,6 +151,15 @@ struct MaxGrvQueueDelayWorkload : TestWorkload {
 		if (failed) {
 			done = true;
 			co_return;
+		}
+
+		std::vector<Future<ErrorOr<Version>>> warmupFutures;
+		warmupFutures.reserve(warmupRequestCount);
+		for (int i = 0; i < warmupRequestCount; ++i) {
+			warmupFutures.push_back(errorOr(getReadVersion(cx, Optional<int64_t>())));
+		}
+		if (warmupDelay > 0.0) {
+			co_await delay(warmupDelay);
 		}
 
 		std::vector<Future<ErrorOr<Version>>> futures;

@@ -318,6 +318,7 @@ extern const KeyRangeRef configKeys;
 extern const KeyRef configKeysPrefix;
 
 extern const KeyRef backupWorkerEnabledKey;
+extern const KeyRef rangeBackupWorkerEnabledKey;
 extern const KeyRef perpetualStorageWiggleKey;
 extern const KeyRef perpetualStorageWiggleLocalityKey;
 extern const KeyRef perpetualStorageWiggleIDPrefix;
@@ -550,8 +551,6 @@ extern const KeyRef tagThrottleSignalKey;
 extern const KeyRef tagThrottleAutoEnabledKey;
 extern const KeyRef tagThrottleLimitKey;
 extern const KeyRef tagThrottleCountKey;
-extern const KeyRangeRef tagQuotaKeys;
-extern const KeyRef tagQuotaPrefix;
 
 // Log Range constant variables
 // Used in the backup pipeline to track mutations

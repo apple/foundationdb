@@ -305,8 +305,6 @@ Future<bool> clearHealthyZone(Reference<IDatabase> db,
 Future<bool> maintenanceCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // profile command
 Future<bool> profileCommandActor(Database db, Reference<ITransaction> tr, std::vector<StringRef> tokens, bool intrans);
-// quota command
-Future<bool> quotaCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // setclass command
 Future<bool> setClassCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // snapshot command

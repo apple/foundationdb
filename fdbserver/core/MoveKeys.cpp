@@ -26,7 +26,7 @@
 #include "flow/Trace.h"
 #include "flow/Util.h"
 #include "fdbrpc/FailureMonitor.h"
-#include "fdbclient/KeyBackedTypes.actor.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/BulkLoadUtil.h"
@@ -1159,8 +1159,20 @@ static Future<Void> startMoveKeys(Database occ,
 					counters->aborted->increment(1);
 					err = e;
 				}
+				if (err.code() == error_code_actor_cancelled)
+					throw err;
 				if (err.code() == error_code_move_to_removed_server)
 					throw err;
+				if (retries > SERVER_KNOBS->START_MOVE_KEYS_MAX_RETRIES) {
+					CODE_PROBE(true, "startMoveKeys giving up after max retries");
+					TraceEvent(SevWarnAlways, "RelocateShard_StartMoveKeysGivingUp", relocationIntervalId)
+					    .error(err)
+					    .detail("KeyBegin", keys.begin)
+					    .detail("KeyEnd", keys.end)
+					    .detail("BeginKey", begin)
+					    .detail("Retries", retries);
+					throw start_move_keys_too_many_retries();
+				}
 				co_await tr->onError(err);
 
 				if (retries % 10 == 0) {
@@ -1619,6 +1631,20 @@ static Future<Void> finishMoveKeys(Database occ,
 					}
 					// This leads to a count of transactions starting that exceeds the sum of
 					// committed or aborted, but this is intentional here.
+					retries++;
+					if (retries > SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES) {
+						CODE_PROBE(true, "finishMoveKeys giving up due to timeout on dest servers");
+						TraceEvent(SevWarnAlways, "RelocateShard_FinishMoveKeysDestNotReady", relocationIntervalId)
+						    .detail("KeyBegin", keys.begin)
+						    .detail("KeyEnd", keys.end)
+						    .detail("Retries", retries)
+						    .detail("ReadyCount", count)
+						    .detail("DestCount", dest.size());
+						throw finish_move_keys_too_many_retries();
+					}
+					serverReady.clear();
+					tssReady.clear();
+					co_await delay(finishMoveKeysBackoff(retries));
 					tr.reset();
 					continue;
 				} catch (Error& error) {

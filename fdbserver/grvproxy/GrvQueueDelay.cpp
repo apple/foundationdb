@@ -55,11 +55,6 @@ void GrvQueueTransactionCounts::remove(GetReadVersionRequest const& req) {
 	remove(req.priority, req.transactionCount);
 }
 
-void GrvQueueTransactionCounts::add(GrvProxyTagThrottler::ReleaseTransactionsResult const& releaseStats) {
-	defaultPriority += static_cast<int64_t>(releaseStats.defaultPriorityTransactionsReleased);
-	batchPriority += static_cast<int64_t>(releaseStats.batchPriorityTransactionsReleased);
-}
-
 int64_t GrvQueueTransactionCounts::normalRateQueuedTransactions() const {
 	return systemPriority + defaultPriority;
 }
@@ -90,7 +85,7 @@ bool shouldRejectForMaxGrvQueueDelay(GetReadVersionRequest const& req, double re
 		return false;
 	}
 
-	double elapsedQueueDelay = now() - req.requestTime() - req.proxyTagThrottledDuration;
+	double elapsedQueueDelay = now() - req.requestTime();
 	double estimatedQueueDelay = std::max(0.0, elapsedQueueDelay) + remainingDelay;
 	return estimatedQueueDelay > req.maxGrvQueueDelayMS.get() / 1000.0;
 }

@@ -415,3 +415,5 @@ Future<Void> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd, UID snap
 
 Future<Void> disableBackupWorker(Database cx);
 Future<Void> enableBackupWorker(Database cx);
+Future<Void> disableRangeBackupWorker(Database cx);
+Future<Void> enableRangeBackupWorker(Database cx);

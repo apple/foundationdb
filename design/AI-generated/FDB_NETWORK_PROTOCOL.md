@@ -1051,7 +1051,6 @@ Serializes `processId` (`Optional<Key>`), `provisional` (`bool`), and
 | rkBatchThrottled | `bool` | Ratekeeper throttling batch |
 | ssVersionVectorDelta | `VersionVector` | SS version vector delta (custom serialization) |
 | proxyId | `UID` | Proxy ID |
-| proxyTagThrottledDuration | `double` | Duration tag-throttled |
 
 ### GlobalConfigRefreshRequest
 
@@ -1446,7 +1445,6 @@ Serializes all endpoints directly: `waitFailure`, `getRateInfo`, `haltRatekeeper
 | leaseDuration | `double` | Rate lease duration |
 | healthMetrics | `HealthMetrics` | Cluster health |
 | clientThrottledTags | `Optional<PrioritizedTransactionTagMap<ClientTagThrottleLimits>>` | Client throttles |
-| proxyThrottledTags | `Optional<TransactionTagMap<double>>` | Proxy throttles |
 
 `PrioritizedTransactionTagMap<T>` is `std::map<TransactionPriority, TransactionTagMap<T>>` where `TransactionPriority` is a `uint8_t` enum.
 
@@ -1883,7 +1881,6 @@ GrvProxy → Client:  GetReadVersionReply
     rkDefaultThrottled:        bool
     rkBatchThrottled:          bool
     tagThrottleInfo:           TransactionTagMap<ClientTagThrottleLimits>
-    proxyTagThrottledDuration: double
     ssVersionVectorDelta:      VersionVector
     proxyId:                   UID
 ```
@@ -2135,7 +2132,6 @@ GrvProxy → Client:  GlobalConfigRefreshReply
 | `commit_unknown_result` | Proxy crash mid-commit | Verify via idempotency or retry |
 | `commit_proxy_memory_limit_exceeded` | Proxy overloaded | Exponential backoff |
 | `batch_transaction_throttled` | Batch priority throttled | Retry after delay |
-| `proxy_tag_throttled` | Tag throttled by ratekeeper | Wait for throttle expiration |
 
 Backoff: starts at `CLIENT_KNOBS->BACKOFF_DELAY`, multiplied by
 `BACKOFF_GROWTH_RATE` on each failure, capped at

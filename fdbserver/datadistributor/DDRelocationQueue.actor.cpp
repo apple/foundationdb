@@ -2226,7 +2226,8 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 			//TraceEvent("RelocateShardFinished", distributorId).detail("RelocateId", relocateShardInterval.pairID);
 
 			if (error.code() != error_code_move_to_removed_server &&
-			    error.code() != error_code_finish_move_keys_too_many_retries) {
+			    error.code() != error_code_finish_move_keys_too_many_retries &&
+			    error.code() != error_code_start_move_keys_too_many_retries) {
 				if (!error.code()) {
 					try {
 						co_await healthyDestinations
@@ -2342,7 +2343,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 					throw error;
 				}
 			} else {
-				CODE_PROBE(true, "move to removed server", probe::decoration::rare);
+				CODE_PROBE(true, "move keys failed -- removed server or exceeded retries", probe::decoration::rare);
 				healthyDestinations.addDataInFlightToTeam(-metrics.bytes);
 				auto readLoad = metrics.readLoadKSecond();
 				auto& destinationRef = healthyDestinations;

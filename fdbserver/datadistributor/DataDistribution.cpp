@@ -84,7 +84,8 @@ std::set<int> const& normalDDQueueErrors() {
 		                    error_code_broken_promise,
 		                    error_code_data_move_cancelled,
 		                    error_code_data_move_dest_team_not_found,
-		                    error_code_finish_move_keys_too_many_retries };
+		                    error_code_finish_move_keys_too_many_retries,
+		                    error_code_start_move_keys_too_many_retries };
 	return s;
 }
 
@@ -352,6 +353,7 @@ Future<UID> launchAudit(Reference<DataDistributor> self,
                         AuditType auditType,
                         KeyValueStoreType auditStorageEngineType);
 Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req);
+Future<Void> periodicAuditLocationMetadata(Reference<DataDistributor> self);
 void loadAndDispatchAudit(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
 Future<Void> dispatchAuditStorageServerShard(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
 Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> self,
@@ -2741,7 +2743,7 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 	if (!isMocked) {
 		Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, LockAware::True);
 		cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
-		self->txnProcessor = Reference<IDDTxnProcessor>(new DDTxnProcessor(cx));
+		self->txnProcessor = makeReference<DDTxnProcessor>(cx);
 	} else {
 		ASSERT(self->txnProcessor.isValid() && self->txnProcessor->isMocked());
 	}
@@ -2968,6 +2970,8 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 			    .detail("UsableRegions", self->configuration.usableRegions)
 			    .detail("InitialMode", self->initData->bulkDumpMode);
 			actors.push_back(bulkDumpCore(self, self->initialized.getFuture()));
+
+			actors.push_back(periodicAuditLocationMetadata(self));
 
 			co_await waitForAll(actors);
 			ASSERT_WE_THINK(false);
@@ -3994,6 +3998,30 @@ Future<Void> cancelAuditStorage(Reference<DataDistributor> self, TriggerAuditReq
 	}
 }
 
+Future<Void> periodicAuditLocationMetadata(Reference<DataDistributor> self) {
+	if (SERVER_KNOBS->AUDIT_LOCATION_METADATA_INTERVAL <= 0) {
+		co_return;
+	}
+	co_await self->auditStorageInitialized.getFuture();
+	TraceEvent("PeriodicAuditLocationMetadataEnabled", self->ddId)
+	    .detail("IntervalSeconds", SERVER_KNOBS->AUDIT_LOCATION_METADATA_INTERVAL);
+	while (true) {
+		co_await delay(SERVER_KNOBS->AUDIT_LOCATION_METADATA_INTERVAL);
+		try {
+			co_await self->auditStorageLocationMetadataLaunchingLock.take(TaskPriority::DefaultYield);
+			FlowLock::Releaser holder(self->auditStorageLocationMetadataLaunchingLock);
+			UID auditID =
+			    co_await launchAudit(self, allKeys, AuditType::ValidateLocationMetadata, KeyValueStoreType::END);
+			TraceEvent("PeriodicAuditLocationMetadataLaunched", self->ddId).detail("AuditID", auditID);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			TraceEvent(SevWarn, "PeriodicAuditLocationMetadataError", self->ddId).error(e);
+		}
+	}
+}
+
 // Handling audit requests
 // For each request, launch audit storage and reply to CC with following three replies:
 // (1) auditID: reply auditID when the audit is successfully launch
@@ -4921,8 +4949,7 @@ Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 	KeyRangeRef rangeToRead;
 	int64_t cumulatedValidatedServerKeysNum = 0;
 	int64_t cumulatedValidatedKeyServersNum = 0;
-	Reference<IRateControl> rateLimiter =
-	    Reference<IRateControl>(new SpeedLimit(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1));
+	Reference<IRateControl> rateLimiter = makeReference<SpeedLimit>(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1);
 	int64_t remoteReadBytes = 0;
 	double lastRateLimiterWaitTime = 0;
 	double rateLimiterBeforeWaitTime = 0;

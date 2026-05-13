@@ -92,10 +92,8 @@ TEST_CASE("/fdbserver/grvproxy/maxGrvQueueDelay/queueTransactionCounts") {
 	ASSERT_EQ(counts.defaultPriority, 0);
 	ASSERT_EQ(counts.normalRateQueuedTransactions(), 2);
 
-	GrvProxyTagThrottler::ReleaseTransactionsResult releaseStats;
-	releaseStats.defaultPriorityTransactionsReleased = 7;
-	releaseStats.batchPriorityTransactionsReleased = 11;
-	counts.add(releaseStats);
+	counts.add(TransactionPriority::DEFAULT, 7);
+	counts.add(TransactionPriority::BATCH, 11);
 
 	ASSERT_EQ(counts.defaultPriority, 7);
 	ASSERT_EQ(counts.batchPriority, 16);
@@ -153,7 +151,7 @@ TEST_CASE("/fdbserver/grvproxy/maxGrvQueueDelay/rejectDecision/table") {
 	struct Case {
 		std::string_view name;
 		Optional<int64_t> maxDelayMS;
-		double proxyTagThrottledDuration;
+		double requestTimeOffset;
 		double remainingDelay;
 		bool expectedReject;
 	};
@@ -170,13 +168,12 @@ TEST_CASE("/fdbserver/grvproxy/maxGrvQueueDelay/rejectDecision/table") {
 
 	for (auto const& c : cases) {
 		GetReadVersionRequest req;
-		req.setRequestTime(now());
+		req.setRequestTime(now() + c.requestTimeOffset);
 		req.maxGrvQueueDelayMS = c.maxDelayMS;
-		req.proxyTagThrottledDuration = c.proxyTagThrottledDuration;
 
 		ASSERT_EQ(shouldRejectForMaxGrvQueueDelay(req, c.remainingDelay), c.expectedReject);
 
-		double elapsedLowerBound = c.proxyTagThrottledDuration < 0.0 ? -c.proxyTagThrottledDuration : 0.0;
+		double elapsedLowerBound = c.requestTimeOffset < 0.0 ? -c.requestTimeOffset : 0.0;
 		ASSERT_EQ(expectedShouldReject(c.maxDelayMS, elapsedLowerBound, c.remainingDelay), c.expectedReject);
 	}
 

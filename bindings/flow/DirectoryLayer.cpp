@@ -95,8 +95,7 @@ Reference<DirectorySubspace> DirectoryLayer::contentsOfNode(Subspace const& node
 	Standalone<StringRef> prefix = nodeSubspace.unpack(node.key()).getString(0);
 
 	if (layer == PARTITION_LAYER) {
-		return Reference<DirectorySubspace>(
-		    new DirectoryPartition(toAbsolutePath(path), prefix, Reference<DirectoryLayer>::addRef(this)));
+		return makeReference<DirectoryPartition>(toAbsolutePath(path), prefix, Reference<DirectoryLayer>::addRef(this));
 	} else {
 		return makeReference<DirectorySubspace>(
 		    toAbsolutePath(path), prefix, Reference<DirectoryLayer>::addRef(this), layer);

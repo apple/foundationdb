@@ -60,7 +60,7 @@
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbrpc/sim_validation.h"
-#include "fdbclient/KeyBackedTypes.actor.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbserver/logsystem/ApplyMetadataMutation.h"
 #include "fdbserver/core/BackupProgress.h"
 #include "fdbserver/core/DBCoreState.h"

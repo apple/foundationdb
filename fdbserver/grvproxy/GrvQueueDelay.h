@@ -20,8 +20,8 @@
 
 #pragma once
 
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/GrvProxyInterface.h"
-#include "GrvProxyTagThrottler.h"
 #include "GrvTransactionRateInfo.h"
 #include "flow/flow.h"
 
@@ -35,8 +35,6 @@ struct GrvQueueTransactionCounts {
 
 	void remove(TransactionPriority priority, int64_t transactionCount);
 	void remove(GetReadVersionRequest const& req);
-
-	void add(GrvProxyTagThrottler::ReleaseTransactionsResult const& releaseStats);
 
 	int64_t normalRateQueuedTransactions() const;
 	int64_t batchRateQueuedTransactions() const;

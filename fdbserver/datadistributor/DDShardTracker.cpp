@@ -1087,7 +1087,7 @@ Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, GetTopKMe
 				for (auto t : self->shards->intersectingRanges(range)) {
 					auto& stats = t.value().stats;
 					if (!stats->get().present()) {
-						onChange = stats->onChange();
+						onChange = brokenPromiseToReady(stats->onChange());
 						break;
 					}
 					metrics += t.value().stats->get().get().metrics;
@@ -1153,7 +1153,7 @@ Future<Void> fetchShardMetrics_impl(DataDistributionTracker* self, GetMetricsReq
 			for (auto t : self->shards->intersectingRanges(req.keys)) {
 				auto& stats = t.value().stats;
 				if (!stats->get().present()) {
-					onChange = stats->onChange();
+					onChange = brokenPromiseToReady(stats->onChange());
 					break;
 				}
 				returnMetrics += t.value().stats->get().get().metrics;
@@ -1197,7 +1197,7 @@ Future<Void> fetchShardMetricsList_impl(DataDistributionTracker* self, GetMetric
 			for (auto t = beginIter; t != endIter; ++t) {
 				auto& stats = t.value().stats;
 				if (!stats->get().present()) {
-					onChange = stats->onChange();
+					onChange = brokenPromiseToReady(stats->onChange());
 					break;
 				}
 				result.push_back_deep(result.arena(),

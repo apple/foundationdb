@@ -32,7 +32,7 @@
 #include "BackupContainerBlobStore.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbclient/KeyBackedTypes.actor.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/RunRYWTransaction.h"
 #include <algorithm>
 #include <cinttypes>

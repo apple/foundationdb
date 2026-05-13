@@ -27,8 +27,7 @@
 
 static void bench_select_replicas(int repCount, benchmark::State& state) {
 
-	Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-	    new PolicyAcross(repCount, "rack", Reference<IReplicationPolicy>(new PolicyOne())));
+	Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(repCount, "rack", makeReference<PolicyOne>());
 
 	// Pre-warm the depth cache to avoid measuring lazy initialization overhead
 	policy->depth();
@@ -47,7 +46,7 @@ static void bench_select_replicas(int repCount, benchmark::State& state) {
 	    createTestLocalityMap(indexes, dcTotal, szTotal, rackTotal, slotTotal, independentItems, independentTotal);
 	LocalityGroup* fromServersGroup = (LocalityGroup*)fromServersSet.getPtr();
 
-	const Reference<LocalitySet> alreadyServersSet = Reference<LocalitySet>(new LocalityGroup());
+	const Reference<LocalitySet> alreadyServersSet = makeReference<LocalityGroup>();
 
 	alreadyServersSet->deep_copy(*fromServersGroup);
 	std::vector<LocalityEntry> localityGroupEntries;

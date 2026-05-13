@@ -1,5 +1,5 @@
 /*
- * fdbserver.actor.cpp
+ * fdbserver.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -119,8 +119,6 @@ class MasterData;
 #if __has_include("SwiftModules/Flow")
 #include "SwiftModules/Flow"
 #endif
-
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 // FIXME(swift): remove those
 extern "C" void swiftCallMeFuture(void* _Nonnull opaqueResultPromisePtr) noexcept;
@@ -337,7 +335,7 @@ UID getSharedMemoryMachineId() {
 	// On windows, this means that we have to create an elaborate workaround for DACLs
 	WorldReadablePermissions p;
 	std::string sharedMemoryIdentifier = "fdbserver_shared_memory_id";
-	loop {
+	while (true) {
 		try {
 			// "0" is the default netPrefix "addr"
 			boost::interprocess::managed_shared_memory segment(
@@ -369,8 +367,10 @@ UID getSharedMemoryMachineId() {
 #endif
 }
 
-ACTOR void failAfter(Future<Void> trigger, ISimulator::ProcessInfo* m = g_simulator->getCurrentProcess()) {
-	wait(trigger);
+Future<Void> failAfter(Uncancellable,
+                       Future<Void> trigger,
+                       ISimulator::ProcessInfo* m = g_simulator->getCurrentProcess()) {
+	co_await trigger;
 	if (enableFailures) {
 		printf("Killing machine: %s at %f\n", m->address.toString().c_str(), now());
 		g_simulator->killProcess(m, ISimulator::KillType::KillInstantly);
@@ -379,30 +379,30 @@ ACTOR void failAfter(Future<Void> trigger, ISimulator::ProcessInfo* m = g_simula
 
 void failAfter(Future<Void> trigger, Endpoint e) {
 	if (g_network == g_simulator)
-		failAfter(trigger, g_simulator->getProcess(e));
+		failAfter(Uncancellable(), trigger, g_simulator->getProcess(e));
 }
 
 #ifdef WITH_SWIFT
-ACTOR void swiftTestRunner() {
+Future<Void> swiftTestRunner(Uncancellable) {
 	auto p = PromiseVoid();
 	fdbserver_swift::swiftyTestRunner(p);
-	wait(p.getFuture());
+	co_await p.getFuture();
 
 	flushAndExit(0);
 }
 #endif
 
-ACTOR Future<Void> histogramReport() {
-	loop {
-		wait(delay(SERVER_KNOBS->HISTOGRAM_REPORT_INTERVAL));
+Future<Void> histogramReport() {
+	while (true) {
+		co_await delay(SERVER_KNOBS->HISTOGRAM_REPORT_INTERVAL);
 
 		GetHistogramRegistry().logReport();
 	}
 }
 
-ACTOR Future<Void> metricsReport() {
-	loop {
-		wait(delay(SERVER_KNOBS->GENERIC_METRICS_REPORT_INTERVAL));
+Future<Void> metricsReport() {
+	while (true) {
+		co_await delay(SERVER_KNOBS->GENERIC_METRICS_REPORT_INTERVAL);
 
 		simpleCounterReport();
 	}
@@ -2071,7 +2071,7 @@ int main(int argc, char* argv[]) {
 #if WITH_SWIFT
 			// Set FDBSWIFTTEST env variable to execute some simple Swift/Flow interop tests.
 			if (SERVER_KNOBS->FLOW_WITH_SWIFT && getenv("FDBSWIFTTEST")) {
-				swiftTestRunner(); // spawns actor that will call Swift functions
+				swiftTestRunner(Uncancellable()); // spawns coroutine that will call Swift functions
 			}
 #endif
 

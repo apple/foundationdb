@@ -280,11 +280,11 @@ Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std:
 		}
 		ASSERT(blockSize > 0);
 
-		return map(f, [=](Reference<IAsyncFile> fr) {
+		return map(f, [=](Reference<IAsyncFile> fr) -> Reference<IAsyncFile> {
 			int readAhead = deterministicRandom()->randomInt(0, 3);
 			int reads = deterministicRandom()->randomInt(1, 3);
 			int cacheSize = deterministicRandom()->randomInt(0, 3);
-			return Reference<IAsyncFile>(new AsyncFileReadAheadCache(fr, blockSize, readAhead, reads, cacheSize));
+			return makeReference<AsyncFileReadAheadCache>(fr, blockSize, readAhead, reads, cacheSize);
 		});
 	}
 
@@ -307,8 +307,9 @@ Future<Reference<IBackupFile>> BackupContainerLocalDirectory::writeFile(const st
 			    makeReference<AsyncFileEncrypted>(r, AsyncFileEncrypted::Mode::APPEND_ONLY, encBlockSize));
 		});
 	}
-	return map(
-	    f, [=](Reference<IAsyncFile> file) { return Reference<IBackupFile>(new BackupFile(path, file, fullPath)); });
+	return map(f, [=](Reference<IAsyncFile> file) -> Reference<IBackupFile> {
+		return makeReference<BackupFile>(path, file, fullPath);
+	});
 }
 
 Future<Void> BackupContainerLocalDirectory::writeEntireFile(const std::string& path, const std::string& contents) {
