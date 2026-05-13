@@ -42,12 +42,21 @@ type Option struct {
 	Description string `xml:"description,attr"`
 	Hidden      bool   `xml:"hidden,attr"`
 }
+
 type Scope struct {
 	Name   string `xml:"name,attr"`
 	Option []Option
 }
+
 type Options struct {
 	Scope []Scope
+}
+
+// sanitize normalizes description text to be gofmt-compliant: replaces RST
+// double-backtick spans with Go-style double-quoted strings and removes
+// trailing whitespace.
+func sanitize(s string) string {
+	return strings.TrimRight(strings.ReplaceAll(s, "``", "\""), " \t")
 }
 
 func writeOptString(w io.Writer, receiver string, function string, opt Option) {
@@ -84,9 +93,9 @@ func writeOpt(w io.Writer, receiver string, opt Option) {
 	fmt.Fprintln(w)
 
 	if opt.Description != "" {
-		fmt.Fprintf(w, "// %s\n", opt.Description)
+		fmt.Fprintf(w, "// %s\n", sanitize(opt.Description))
 		if opt.ParamDesc != "" {
-			fmt.Fprintf(w, "//\n// Parameter: %s\n", opt.ParamDesc)
+			fmt.Fprintf(w, "//\n// Parameter: %s\n", sanitize(opt.ParamDesc))
 		}
 	} else {
 		fmt.Fprintf(w, "// Not yet implemented.\n")
@@ -117,14 +126,13 @@ func writeMutation(w io.Writer, opt Option) {
 func (t Transaction) %s(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, %d)
 }
-`, opt.Description, tname, opt.Code)
+`, sanitize(opt.Description), tname, opt.Code)
 }
 
 func writeEnum(w io.Writer, scope Scope, opt Option, delta int) {
 	fmt.Fprintln(w)
 	if opt.Description != "" {
-		doc.ToText(w, opt.Description, "\t// ", "", 73)
-		// fmt.Printf("	// %s\n", opt.Description)
+		doc.ToText(w, sanitize(opt.Description), "\t// ", "", 73)
 	}
 	fmt.Fprintf(w, "	%s %s = %d\n", scope.Name+translateName(opt.Name), scope.Name, opt.Code+delta)
 }

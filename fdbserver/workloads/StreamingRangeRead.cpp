@@ -28,7 +28,6 @@
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/serialize.h"
-#include <cstring>
 
 Future<Void> streamUsingGetRange(PromiseStream<RangeResult> results, Transaction* tr, KeyRange keys) {
 	KeySelectorRef begin = firstGreaterOrEqual(keys.begin);

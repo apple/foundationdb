@@ -20,7 +20,6 @@
 
 #include "flow/IThreadPool.h"
 
-#include <algorithm>
 // The ifndef's allow us to compile with pre-built boost.  Otherwise, we get
 // errors about double-defines.  As of this writing, the automatically downloaded
 // build of boost doesn't define these, but the pre-built version does.  (The old
@@ -139,7 +138,7 @@ public:
 };
 
 Reference<IThreadPool> createGenericThreadPool(int stackSize, int pri) {
-	return Reference<IThreadPool>(new ThreadPool(stackSize, pri));
+	return makeReference<ThreadPool>(stackSize, pri);
 }
 
 thread_local IThreadPoolReceiver* ThreadPool::Thread::threadUserObject;

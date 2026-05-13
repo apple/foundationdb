@@ -1,5 +1,4 @@
 #include "flow/FastAlloc.h"
-#include "flow/ScopeExit.h"
 #include "flow/UnitTest.h"
 #include "flow/WipedString.h"
 #include "flow/ObjectSerializer.h"

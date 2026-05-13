@@ -18,31 +18,24 @@
  * limitations under the License.
  */
 
-#include <algorithm>
-#include <cctype>
 #include <cstdlib>
-#include <fstream>
 #include <iostream>
 #include <limits>
 #include <memory>
 #include <string>
 #include <vector>
-#include <fcntl.h>
 #include <filesystem>
 
 #ifdef _WIN32
 #include <io.h>
 #endif
 
-#include <boost/algorithm/hex.hpp>
 #include "fdbclient/BuildFlags.h"
-#include "fdbclient/BackupContainerFileSystem.h"
 #import "fdbclient/BackupTLSConfig.h"
-#include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/S3Client.h"
-#include "fdbclient/BackupAgent.h"
 #include "flow/Platform.h"
 #include "flow/ArgParseUtil.h"
 #include "flow/FastRef.h"

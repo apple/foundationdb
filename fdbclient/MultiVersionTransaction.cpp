@@ -409,7 +409,7 @@ ThreadFuture<Void> DLDatabase::onReady() {
 Reference<ITransaction> DLDatabase::createTransaction() {
 	FdbCApi::FDBTransaction* tr;
 	throwIfError(api->databaseCreateTransaction(db, &tr));
-	return Reference<ITransaction>(new DLTransaction(api, tr));
+	return makeReference<DLTransaction>(api, tr);
 }
 
 void DLDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {
@@ -805,7 +805,7 @@ Reference<IDatabase> DLApi::createDatabase(const char* clusterFilePath) {
 	if (headerVersion >= 610) {
 		FdbCApi::FDBDatabase* db;
 		throwIfError(api->createDatabase(clusterFilePath, &db));
-		return Reference<IDatabase>(new DLDatabase(api, db));
+		return makeReference<DLDatabase>(api, db);
 	} else {
 		return DLApi::createDatabase609(clusterFilePath);
 	}
@@ -818,7 +818,7 @@ Reference<IDatabase> DLApi::createDatabaseFromConnectionString(const char* conne
 
 	FdbCApi::FDBDatabase* db;
 	throwIfError(api->createDatabaseFromConnectionString(connectionString, &db));
-	return Reference<IDatabase>(new DLDatabase(api, db));
+	return makeReference<DLDatabase>(api, db);
 }
 
 void DLApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) {
@@ -1371,13 +1371,13 @@ MultiVersionDatabase::~MultiVersionDatabase() {
 // Create a MultiVersionDatabase that wraps an already created IDatabase object
 // For internal use in testing
 Reference<IDatabase> MultiVersionDatabase::debugCreateFromExistingDatabase(Reference<IDatabase> db) {
-	return Reference<IDatabase>(new MultiVersionDatabase(
-	    MultiVersionApi::api, 0, ClusterConnectionRecord::fromConnectionString(""), db, db, false));
+	return makeReference<MultiVersionDatabase>(
+	    MultiVersionApi::api, 0, ClusterConnectionRecord::fromConnectionString(""), db, db, false);
 }
 
 Reference<ITransaction> MultiVersionDatabase::createTransaction() {
-	return Reference<ITransaction>(
-	    new MultiVersionTransaction(Reference<MultiVersionDatabase>::addRef(this), dbState->transactionDefaultOptions));
+	return makeReference<MultiVersionTransaction>(Reference<MultiVersionDatabase>::addRef(this),
+	                                              dbState->transactionDefaultOptions);
 }
 
 void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {
@@ -2432,8 +2432,7 @@ Reference<IDatabase> MultiVersionApi::createDatabase(ClusterConnectionRecord con
 		lock.leave();
 
 		Reference<IDatabase> localDb = connectionRecord.createDatabase(localClient->api);
-		return Reference<IDatabase>(
-		    new MultiVersionDatabase(this, threadIdx, connectionRecord, Reference<IDatabase>(), localDb));
+		return makeReference<MultiVersionDatabase>(this, threadIdx, connectionRecord, Reference<IDatabase>(), localDb);
 	}
 
 	lock.leave();
@@ -2444,8 +2443,7 @@ Reference<IDatabase> MultiVersionApi::createDatabase(ClusterConnectionRecord con
 	if (bypassMultiClientApi) {
 		return localDb;
 	} else {
-		return Reference<IDatabase>(
-		    new MultiVersionDatabase(this, 0, connectionRecord, Reference<IDatabase>(), localDb));
+		return makeReference<MultiVersionDatabase>(this, 0, connectionRecord, Reference<IDatabase>(), localDb);
 	}
 }
 

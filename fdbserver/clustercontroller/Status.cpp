@@ -23,7 +23,7 @@
 #include "flow/genericactors.actor.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.h"
-#include "fdbclient/KeyBackedTypes.actor.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "Status.h"
 #include "flow/ITrace.h"
 #include "flow/ProtocolVersion.h"
@@ -1797,7 +1797,7 @@ static AsyncResult<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 		futures.push_back(
 		    timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest("TotalDataInFlightRemote"_sr)), 1.0));
 
-		std::vector<TraceEventFields> dataInfo = co_await getAll(futures);
+		std::vector<TraceEventFields> dataInfo = co_await getAllAsync(futures);
 
 		TraceEventFields startingStats = dataInfo[0];
 		TraceEventFields dataStats = dataInfo[1];
@@ -1958,7 +1958,7 @@ static AsyncResult<std::vector<std::pair<iface, EventMap>>> getServerMetrics(
 		}
 	}
 
-	std::vector<Optional<TraceEventFields>> eventTraces = co_await getAll(std::move(futures));
+	std::vector<Optional<TraceEventFields>> eventTraces = co_await getAllAsync(std::move(futures));
 
 	std::vector<std::pair<iface, EventMap>> results;
 	auto eventTraceItr = eventTraces.begin();
@@ -2144,8 +2144,8 @@ static AsyncResult<JsonBuilderObject> workloadStatusFetcher(
 			else
 				throw all_alternatives_failed(); // We need data from all proxies for this result to be trustworthy
 		}
-		std::vector<TraceEventFields> commitProxyStats = co_await getAll(commitProxyStatFutures);
-		std::vector<TraceEventFields> grvProxyStats = co_await getAll(grvProxyStatFutures);
+		std::vector<TraceEventFields> commitProxyStats = co_await getAllAsync(commitProxyStatFutures);
+		std::vector<TraceEventFields> grvProxyStats = co_await getAllAsync(grvProxyStatFutures);
 
 		StatusCounter txnStartOut;
 		StatusCounter txnSystemPriorityStartOut;
@@ -2978,7 +2978,7 @@ static AsyncResult<Void> clusterGetStatusImpl(Reference<ClusterGetStatusState> s
 
 		// Wait for all response pairs.
 		std::vector<Optional<std::pair<WorkerEvents, std::set<std::string>>>> workerEventsVec =
-		    co_await getAll(std::move(workerEventFetchers));
+		    co_await getAllAsync(std::move(workerEventFetchers));
 
 		// Create a unique set of all workers who were unreachable for 1 or more of the event requests above.
 		// Since each event request is independent and to all workers, workers can have responded to some
@@ -3016,7 +3016,7 @@ static AsyncResult<Void> clusterGetStatusImpl(Reference<ClusterGetStatusState> s
 		clusterSubsectionFetchers.push_back(errorOr(versionEpochStatusFetcher(cx, &status_incomplete_reasons)));
 
 		std::vector<ErrorOr<JsonBuilderObject>> clusterSubsectionStatuses =
-		    co_await getAll(std::move(clusterSubsectionFetchers));
+		    co_await getAllAsync(std::move(clusterSubsectionFetchers));
 
 		if (clusterSubsectionStatuses[0].isError()) {
 			throw clusterSubsectionStatuses[0].getError();
@@ -3187,7 +3187,7 @@ static AsyncResult<Void> clusterGetStatusImpl(Reference<ClusterGetStatusState> s
 				}
 			}
 
-			std::vector<JsonBuilderObject> workerStatuses = co_await getAll(std::move(statusSectionFetchers));
+			std::vector<JsonBuilderObject> workerStatuses = co_await getAllAsync(std::move(statusSectionFetchers));
 			co_await primaryDCFO;
 
 			if (primaryDCFO.get().present()) {

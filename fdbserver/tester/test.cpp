@@ -280,7 +280,7 @@ Future<bool> runTest(Database cx,
 
 		// Run the consistency check workload
 		if (spec.runConsistencyCheck) {
-			bool quiescent = g_network->isSimulated() ? !BUGGIFY : spec.waitForQuiescenceEnd;
+			bool quiescent = g_network->isSimulated() ? !isGeneralBuggifyEnabled() : spec.waitForQuiescenceEnd;
 			try {
 				if (quiescent) {
 					printf("Running urgent consistency check...\n");
@@ -459,8 +459,8 @@ Future<Void> initializeSimConfig(Database db, bool restartingTest) {
 			if (foundSharedDcId) {
 				int totalRequired = std::max(dbConfig.tLogReplicationFactor, dbConfig.remoteTLogReplicationFactor) +
 				                    maxSatelliteReplication;
-				setFDBSimulationPolicyRemoteTLogPolicy(Reference<IReplicationPolicy>(
-				    new PolicyAcross(totalRequired, "zoneid", Reference<IReplicationPolicy>(new PolicyOne()))));
+				setFDBSimulationPolicyRemoteTLogPolicy(
+				    makeReference<PolicyAcross>(totalRequired, "zoneid", makeReference<PolicyOne>()));
 				TraceEvent("ChangingSimTLogPolicyForSharedRemote")
 				    .detail("TotalRequired", totalRequired)
 				    .detail("MaxSatelliteReplication", maxSatelliteReplication)

@@ -28,12 +28,10 @@
 #include "flow/DeterministicRandom.h"
 #include "flow/ProcessEvents.h"
 #include <exception>
-#include <stdlib.h>
 #include <stdarg.h>
 #include <cctype>
 #include <time.h>
 #include <set>
-#include <unordered_set>
 #include <string_view>
 #include <iomanip>
 #include "flow/IThreadPool.h"
@@ -43,7 +41,6 @@
 #include "flow/TDMetric.h"
 #include "MetricSample.h"
 #include "flow/network.h"
-#include "flow/SimBugInjector.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -328,7 +325,7 @@ public:
 		    issues));
 
 		if (g_network->isSimulated())
-			writer = Reference<IThreadPool>(new DummyThreadPool());
+			writer = makeReference<DummyThreadPool>();
 		else
 			writer = createGenericThreadPool();
 		writer->addThread(new WriterThread(barriers, logWriter, formatter), "fdb-trace-log");
@@ -685,17 +682,17 @@ bool traceFormatImpl(std::string& format) {
 	std::transform(format.begin(), format.end(), format.begin(), ::tolower);
 	if (format == "xml") {
 		if (!validate) {
-			g_traceLog.formatter = Reference<ITraceLogFormatter>(new XmlTraceLogFormatter());
+			g_traceLog.formatter = makeReference<XmlTraceLogFormatter>();
 		}
 		return true;
 	} else if (format == "json") {
 		if (!validate) {
-			g_traceLog.formatter = Reference<ITraceLogFormatter>(new JsonTraceLogFormatter());
+			g_traceLog.formatter = makeReference<JsonTraceLogFormatter>();
 		}
 		return true;
 	} else {
 		if (!validate) {
-			g_traceLog.formatter = Reference<ITraceLogFormatter>(new XmlTraceLogFormatter());
+			g_traceLog.formatter = makeReference<XmlTraceLogFormatter>();
 		}
 		return false;
 	}

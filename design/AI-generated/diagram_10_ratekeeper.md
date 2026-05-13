@@ -11,8 +11,7 @@ graph TB
 
     subgraph RK["Ratekeeper"]
         Calc["Rate Calculator"]
-        GTT["GlobalTagThrottler\n(per-tag limits)"]
-        ThroughputTracker["ServerThroughputTracker"]
+        TT["TagThrottler\n(per-tag limits)"]
     end
 
     subgraph Control["What Ratekeeper Controls"]
@@ -33,7 +32,7 @@ graph TB
     TagRates --> Calc
     Calc --> TxnRate
     Calc --> BatchRate
-    TagRates --> GTT --> TagThrottle
+    TagRates --> TT --> TagThrottle
 
     TxnRate --> GRVProxy
     BatchRate --> GRVProxy
@@ -84,8 +83,8 @@ graph TD
     CheckRate -->|yes| Proceed
     CheckRate -->|no| ThrottleResp["Reject or delay\n(tag_throttled error)"]
 
-    GTT["GlobalTagThrottler"] -->|"per-tag limits"| GRV
-    RK["Ratekeeper"] -->|"tag usage stats"| GTT
+    TT["TagThrottler"] -->|"per-tag limits"| GRV
+    RK["Ratekeeper"] -->|"tag usage stats"| TT
 
     style ThrottleResp fill:#fce4ec,stroke:#e91e63
     style Proceed fill:#e8f5e9,stroke:#4caf50

@@ -139,7 +139,7 @@ ERROR( please_reboot_kv_store, 1219, "Need to reboot the storage engine")
 ERROR( incompatible_software_version, 1220, "Current software does not support database format" )
 ERROR( audit_storage_failed, 1221, "Validate storage consistency operation failed" )
 ERROR( audit_storage_exceeded_request_limit, 1222, "Exceeded the max number of allowed concurrent audit storage requests" )
-ERROR( proxy_tag_throttled, 1223, "Exceeded maximum proxy tag throttling duration" )
+// 1223 removed
 ERROR( key_value_store_deadline_exceeded, 1224, "Exceeded maximum time allowed to read or write.")
 // 1225 has been removed
 ERROR( audit_storage_error, 1226, "Found data corruption" )
@@ -168,6 +168,7 @@ ERROR( bulkload_dataset_not_cover_required_range, 1249, "Bulkload dataset does n
 ERROR( bulkload_invalid_configuration, 1250, "BulkLoad requires cluster configuration with both shard_encode_location_metadata=1 and enable_read_lock_on_range=1" )
 ERROR( transaction_grv_queue_rejected, 1251, "GRV request rejected because estimated queue wait exceeds transaction limit" )
 ERROR( finish_move_keys_too_many_retries, 1252, "finishMoveKeys exceeded retry limit" )
+ERROR( start_move_keys_too_many_retries, 1253, "startMoveKeys exceeded retry limit" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
@@ -243,7 +244,7 @@ ERROR( key_not_tuple, 2041, "The key cannot be parsed as a tuple" );
 ERROR( value_not_tuple, 2042, "The value cannot be parsed as a tuple" );
 ERROR( mapper_not_tuple, 2043, "The mapper cannot be parsed as a tuple" );
 ERROR( invalid_checkpoint_format, 2044, "Invalid checkpoint format" )
-ERROR( invalid_throttle_quota_value, 2045, "Invalid quota value. Note that reserved_throughput cannot exceed total_throughput" )
+// 2045 removed
 ERROR( failed_to_create_checkpoint, 2046, "Failed to create a checkpoint" )
 ERROR( failed_to_restore_checkpoint, 2047, "Failed to restore a checkpoint" )
 ERROR( failed_to_create_checkpoint_shard_metadata, 2048, "Failed to dump shard metadata for a checkpoint to a sst file" )

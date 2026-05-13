@@ -862,7 +862,7 @@ Future<Void> setWhenDoneOrError(Future<Void> condition, Reference<AsyncVar<T>> v
 	return Void();
 }
 
-ACTOR Future<Void> lowPriorityDelay(double waitTime);
+Future<Void> lowPriorityDelay(double waitTime);
 
 // Delay after condition is cleared (i.e. equal to false).
 // If during delay, condition changes to true, wait till condition become false again, and repeat.
@@ -873,9 +873,9 @@ ACTOR Future<Void> delayAfterCleared(Reference<AsyncVar<bool>> condition,
 // Same as delayAfterCleared, but use lowPriorityDelay.
 ACTOR Future<Void> lowPriorityDelayAfterCleared(Reference<AsyncVar<bool>> condition, double time);
 
-Future<bool> allTrue(const std::vector<Future<bool>>& all);
+Future<bool> allTrue(std::vector<Future<bool>> all);
 Future<Void> anyTrue(std::vector<Reference<AsyncVar<bool>>> const& input, Reference<AsyncVar<bool>> const& output);
-Future<Void> cancelOnly(std::vector<Future<Void>> const& futures);
+Future<Void> cancelOnly(std::vector<Future<Void>> futures);
 Future<Void> timeoutWarningCollector(FutureStream<Void> const& input,
                                      double const& logDelay,
                                      const char* const& context,
@@ -1022,7 +1022,13 @@ struct QuorumAsyncResultCallback;
 
 template <class T>
 struct GetAllAsyncResultCallback;
+
+template <class T>
+struct GetAllAsyncResultStateCallback;
 } // namespace coro
+
+template <class T>
+struct GetAllAsyncResultState;
 
 template <class T>
 struct QuorumAsyncResult final : SAV<Void> {
@@ -1277,6 +1283,129 @@ struct GetAllAsyncResultCallback final : AsyncResultCallback<typename AsyncResul
 
 namespace coro {
 template <class T>
+struct GetAllAsyncResultStateCallback final : AsyncResultCallback<typename AsyncResult<T>::StoredT> {
+	using StoredT = typename AsyncResult<T>::StoredT;
+
+	AsyncResultState<StoredT>* resultState = nullptr;
+	GetAllAsyncResultState<T>* head = nullptr;
+	int idx = -1;
+
+	void attach(AsyncResult<T>& result, GetAllAsyncResultState<T>* head, int idx);
+
+	void fire(StoredT const& value) override;
+	void fire(StoredT&& value) override;
+	void error(Error error) override;
+	bool isRegistered() const { return resultState != nullptr; }
+	void detach();
+};
+} // namespace coro
+
+template <class T>
+struct GetAllAsyncResultState final : ReferenceCounted<GetAllAsyncResultState<T>> {
+	int remaining;
+	int count;
+	Promise<Void> completion;
+	std::vector<std::optional<T>> values;
+	std::vector<coro::GetAllAsyncResultStateCallback<T>> callbacks;
+
+	explicit GetAllAsyncResultState(int count) : remaining(count), count(count), values(count), callbacks(count) {}
+
+	~GetAllAsyncResultState() { detachPendingCallbacks(); }
+
+	void detachPendingCallbacks() {
+		for (auto& callback : callbacks) {
+			if (callback.isRegistered()) {
+				callback.detach();
+			}
+		}
+	}
+
+	template <class U>
+	void oneSuccess(int idx, U&& value) {
+		if (!completion.canBeSet()) {
+			return;
+		}
+
+		values[idx].emplace(std::forward<U>(value));
+		if (--remaining == 0) {
+			completion.send(Void());
+		}
+	}
+
+	void oneError(Error err) {
+		if (!completion.canBeSet()) {
+			return;
+		}
+
+		detachPendingCallbacks();
+		completion.sendError(err);
+	}
+
+	void attach(std::vector<AsyncResult<T>>& input) {
+		for (int i = 0; i < input.size(); ++i) {
+			auto& item = input[i];
+			if (!completion.canBeSet()) {
+				item = AsyncResult<T>();
+			} else if (item.isReady()) {
+				if (item.isError()) {
+					Error err = item.getError();
+					item = AsyncResult<T>();
+					oneError(err);
+				} else {
+					T value = std::move(item).get();
+					item = AsyncResult<T>();
+					oneSuccess(i, std::move(value));
+				}
+			} else {
+				callbacks[i].attach(item, this, i);
+			}
+		}
+	}
+};
+
+namespace coro {
+template <class T>
+void GetAllAsyncResultStateCallback<T>::attach(AsyncResult<T>& result, GetAllAsyncResultState<T>* head, int idx) {
+	resultState = result.resultState;
+	this->head = head;
+	this->idx = idx;
+	std::move(result).addCallbackAndClear(this);
+}
+
+template <class T>
+void GetAllAsyncResultStateCallback<T>::detach() {
+	detachAsyncResultStateCallback(resultState, this);
+}
+
+template <class T>
+void GetAllAsyncResultStateCallback<T>::fire(StoredT const& value) {
+	Reference<GetAllAsyncResultState<T>> keepAlive = Reference<GetAllAsyncResultState<T>>::addRef(head);
+	if constexpr (std::is_constructible_v<T, StoredT const&>) {
+		T copied(value);
+		detach();
+		head->oneSuccess(idx, std::move(copied));
+	} else {
+		UNREACHABLE();
+	}
+}
+
+template <class T>
+void GetAllAsyncResultStateCallback<T>::fire(StoredT&& value) {
+	Reference<GetAllAsyncResultState<T>> keepAlive = Reference<GetAllAsyncResultState<T>>::addRef(head);
+	detach();
+	head->oneSuccess(idx, std::move(value));
+}
+
+template <class T>
+void GetAllAsyncResultStateCallback<T>::error(Error error) {
+	Reference<GetAllAsyncResultState<T>> keepAlive = Reference<GetAllAsyncResultState<T>>::addRef(head);
+	detach();
+	head->oneError(error);
+}
+} // namespace coro
+
+namespace coro {
+template <class T>
 GetAllAsyncResultCallback<T>::GetAllAsyncResultCallback(AsyncResult<T>& result, GetAllAsyncResult<T>* head, int idx)
   : resultState(result.resultState), head(head), idx(idx) {
 	std::move(result).addCallbackAndClear(this);
@@ -1376,9 +1505,42 @@ Future<std::vector<T>> getAll(std::vector<Future<T>> input) {
 }
 
 template <class T>
+AsyncResult<std::vector<T>> getAllAsync(std::vector<Future<T>> input) {
+	if (input.empty())
+		co_return std::vector<T>();
+	co_await quorum(input, input.size());
+
+	std::vector<T> output;
+	output.reserve(input.size());
+	for (int i = 0; i < input.size(); ++i) {
+		output.push_back(input[i].get());
+	}
+	co_return output;
+}
+
+template <class T>
 // AsyncResult is single-consumer, so getAll requires an explicit ownership
 // transfer from vector callers.
 Future<std::vector<T>> getAll(std::vector<AsyncResult<T>>& input) = delete;
+
+template <class T>
+// Preserve getAll's fail-fast behavior while keeping the aggregate result on a
+// move-preserving AsyncResult path.
+AsyncResult<std::vector<T>> getAllAsync(std::vector<AsyncResult<T>> input) {
+	if (input.empty())
+		co_return std::vector<T>();
+
+	Reference<GetAllAsyncResultState<T>> aggregateState = makeReference<GetAllAsyncResultState<T>>(input.size());
+	aggregateState->attach(input);
+	co_await aggregateState->completion.getFuture();
+
+	std::vector<T> output;
+	output.reserve(aggregateState->count);
+	for (auto& item : aggregateState->values) {
+		output.push_back(std::move(*item));
+	}
+	co_return output;
+}
 
 template <class T>
 Future<std::vector<T>> getAll(std::vector<AsyncResult<T>>&& input) {

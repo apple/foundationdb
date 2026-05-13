@@ -1452,7 +1452,7 @@ public:
 		auto* m = new ProcessInfo(name, locality, startingClass, addresses, this, dataFolder, coordinationFolder);
 		for (int processPort = port; processPort < port + listenPerProcess; ++processPort) {
 			NetworkAddress address(ip, processPort, true, sslEnabled && processPort == port);
-			m->listenerMap[address] = Reference<IListener>(new Sim2Listener(m, address));
+			m->listenerMap[address] = makeReference<Sim2Listener>(m, address);
 			addressMap[address] = m;
 		}
 		m->machine = &machine;
@@ -2176,7 +2176,7 @@ public:
 			                                     handlerContext->port,
 			                                     true /* isPublic*/,
 			                                     false /*isTLS*/);
-			process->listenerMap[addr] = Reference<IListener>(new Sim2Listener(process, addr));
+			process->listenerMap[addr] = makeReference<Sim2Listener>(process, addr);
 			addressMap[addr] = process;
 			handlerContext->addAddress(addr);
 			serverContext->registerNewServer(addr, handlerContext->requestHandler->clone());
@@ -2441,7 +2441,7 @@ public:
 	    peerAddress(peerAddress), actors(false), _localAddress(localAddress) {
 		g_sim2.addressMap.emplace(_localAddress, process);
 		ASSERT(process->boundUDPSockets.find(localAddress) == process->boundUDPSockets.end());
-		process->boundUDPSockets.emplace(localAddress, this);
+		process->boundUDPSockets.emplace(localAddress, Reference<IUDPSocket>::addRef(this));
 	}
 	~UDPSimSocket() override {
 		if (!closed.getFuture().isReady()) {
@@ -2554,7 +2554,7 @@ Future<Reference<IUDPSocket>> Sim2::createUDPSocket(NetworkAddress toAddr) {
 	while (process->boundUDPSockets.find(localAddress) != process->boundUDPSockets.end()) {
 		localAddress.port = deterministicRandom()->randomInt(40000, 60000);
 	}
-	return Reference<IUDPSocket>(new UDPSimSocket(localAddress, toAddr));
+	return Reference<IUDPSocket>(makeReference<UDPSimSocket>(localAddress, toAddr));
 }
 
 Future<Reference<IUDPSocket>> Sim2::createUDPSocket(bool isV6) {
@@ -2787,8 +2787,9 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 
 			f = SimpleFile::open(filename, flags, mode, diskParameters, false);
 			if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0) {
-				f = map(f,
-				        [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileWriteChecker(r)); });
+				f = map(f, [=](Reference<IAsyncFile> r) -> Reference<IAsyncFile> {
+					return makeReference<AsyncFileWriteChecker>(r);
+				});
 			}
 
 			f = AsyncFileNonDurable::open(
@@ -2801,7 +2802,8 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 
 		f = AsyncFileDetachable::open(f);
 		if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES)
-			f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileChaos(r)); });
+			f = map(f,
+			        [=](Reference<IAsyncFile> r) -> Reference<IAsyncFile> { return makeReference<AsyncFileChaos>(r); });
 		return f;
 	} else
 		return AsyncFileCached::open(filename, flags, mode);

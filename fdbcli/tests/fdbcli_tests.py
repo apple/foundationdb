@@ -120,76 +120,6 @@ def maintenance(logger):
 
 
 @enable_logging()
-def quota(logger):
-    # Should be a noop
-    command = "quota clear green"
-    output = run_fdbcli_command(command)
-    logger.debug(command + " : " + output)
-    assert output == "Successfully cleared quota."
-
-    command = "quota get green total_throughput"
-    output = run_fdbcli_command(command)
-    logger.debug(command + " : " + output)
-    assert output == "<empty>"
-
-    # Ignored update
-    command = "quota set red total_throughput 49152"
-    output = run_fdbcli_command(command)
-    logger.debug(command + " : " + output)
-    assert output == "Successfully updated quota."
-
-    command = "quota set green total_throughput 32768"
-    output = run_fdbcli_command(command)
-    logger.debug(command + " : " + output)
-    assert output == "Successfully updated quota."
-
-    command = "quota set green reserved_throughput 16384"
-    output = run_fdbcli_command(command)
-    logger.debug(command + " : " + output)
-    assert output == "Successfully updated quota."
-
-    command = "quota set green storage 98765"
-    output = run_fdbcli_command(command)
-    logger.debug(command + " : " + output)
-    assert output == "Successfully updated quota."
-
-    command = "quota get green total_throughput"
-    output = run_fdbcli_command(command)
-    logger.debug(command + " : " + output)
-    assert output == "32768"
-
-    command = "quota get green reserved_throughput"
-    output = run_fdbcli_command(command)
-    logger.debug(command + " : " + output)
-    assert output == "16384"
-
-    command = "quota get green storage"
-    output = run_fdbcli_command(command)
-    logger.debug(command + " : " + output)
-    assert output == "98765"
-
-    command = "quota clear green"
-    output = run_fdbcli_command(command)
-    logger.debug(command + " : " + output)
-    assert output == "Successfully cleared quota."
-
-    command = "quota get green total_throughput"
-    output = run_fdbcli_command(command)
-    logger.debug(command + " : " + output)
-    assert output == "<empty>"
-
-    command = "quota get green storage"
-    output = run_fdbcli_command(command)
-    logger.debug(command + " : " + output)
-    assert output == "<empty>"
-
-    # Too few arguments, should log help message
-    command = "quota get green"
-    output = run_fdbcli_command(command)
-    logger.debug(command + " : " + output)
-
-
-@enable_logging()
 def setclass(logger):
     # get all processes' network addresses
     output1 = run_fdbcli_command("setclass")
@@ -469,6 +399,64 @@ def get_value_from_status_json(retry, *args):
         result = result[arg]
 
     return result
+
+
+def status_json_file_region_failover_message():
+    status_json = {
+        "client": {
+            "cluster_file": {"path": "fdb.cluster", "up_to_date": True},
+            "coordinators": {"coordinators": [], "quorum_reachable": True},
+            "database_status": {"available": True, "healthy": False},
+            "messages": [],
+            "timestamp": 1417807090,
+        },
+        "cluster": {
+            "configuration": {
+                "redundancy_mode": "three_data_hall",
+                "storage_engine": "ssd-2",
+                "coordinators_count": 3,
+                "excluded_servers": [],
+            },
+            "data": {"state": {"name": "healthy", "healthy": True}},
+            "fault_tolerance": {
+                "max_zone_failures_without_losing_availability": -1,
+                "max_zone_failures_without_losing_data": -1,
+            },
+            "logs": [
+                {
+                    "epoch": 1,
+                    "current": True,
+                    "begin_version": 1,
+                    "possibly_losing_data": False,
+                    "log_interfaces": [
+                        {
+                            "id": "aaaaaaaaaaaaaaaa",
+                            "healthy": False,
+                            "address": "1.1.1.1:4500",
+                        }
+                    ],
+                }
+            ],
+            "machines": {},
+            "processes": {},
+        },
+    }
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json") as status_file:
+        json.dump(status_json, status_file)
+        status_file.flush()
+        result = subprocess.run(
+            [command_template[0], "--status-from-json", status_file.name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=fdbcli_env,
+        )
+
+    stdout = result.stdout.decode("utf-8")
+    stderr = result.stderr.decode("utf-8")
+    assert result.returncode == 0, stderr
+    assert "Warning: the database may have availability loss." in stdout
+    assert "may have data loss" not in stdout
 
 
 @enable_logging()
@@ -939,17 +927,16 @@ if __name__ == "__main__":
         lockAndUnlock()
         maintenance()
         profile()
-        # TODO: re-enable it until it's stable
+        # TODO: re-enable once stable
         # suspend()
         transaction()
-        # this is replaced by the "quota" command
+        # TODO: re-enable once stable
         # throttle()
         triggerddteaminfolog()
         versionepoch()
         integer_options()
         tls_address_suffix()
-        # TODO: fix the issue when running through the external client
-        # quota()
+        status_json_file_region_failover_message()
         idempotency_ids()
     else:
         assert args.process_number > 1, "Process number should be positive"
