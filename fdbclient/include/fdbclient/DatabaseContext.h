@@ -30,6 +30,7 @@
 #include "flow/genericactors.actor.h"
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
@@ -55,10 +56,22 @@ public:
 
 	~StorageServerInfo() override;
 
+	// Per-instance debug id for lifecycle tracing (monotonic from nextSSInfoInstanceId).
+	int64_t debugInstanceId;
+
+	// invalidateCacheByAddress needs to update server_by_address registration
+	// when it clears an interf whose address differs from the SSInfo's bucket
+	// key. Grant friendship so the implementation can touch registeredAddress.
+	friend class DatabaseContext;
+
 private:
 	DatabaseContext* cx;
-	StorageServerInfo(DatabaseContext* cx, StorageServerInterface const& interf, LocalityData const& locality)
-	  : ReferencedInterface<StorageServerInterface>(interf, locality), cx(cx) {}
+	// The address this SSInfo was registered under in cx->server_by_address.
+	// Held independently of interf.address() because we may clear interf
+	// (e.g. during notifyContextDestroyed or invalidateCacheByAddress) but
+	// still need to de-register from the multimap under the original key.
+	NetworkAddress registeredAddress;
+	StorageServerInfo(DatabaseContext* cx, StorageServerInterface const& interf, LocalityData const& locality);
 };
 
 struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>>, FastAllocated<LocationInfo> {
@@ -308,6 +321,7 @@ public:
 	Reference<LocationInfo> setCachedLocation(const KeyRangeRef&, const std::vector<struct StorageServerInterface>&);
 	void invalidateCache(const Optional<KeyRef>& tenantPrefix, const KeyRef& key, Reverse isBackward = Reverse::False);
 	void invalidateCache(const Optional<KeyRef>& tenantPrefix, const KeyRangeRef& keys);
+	void invalidateCacheByAddress(const NetworkAddress& address, bool resetPeerConnection = true);
 
 	// Records that `endpoint` is failed on a healthy server.
 	void setFailedEndpointOnHealthyServer(const Endpoint& endpoint);
@@ -546,7 +560,19 @@ public:
 	std::unordered_map<Endpoint, EndpointFailureInfo> failedEndpointsOnHealthyServersInfo;
 
 	std::map<UID, StorageServerInfo*> server_interf;
+	// All alive StorageServerInfo objects keyed by their address. server_interf
+	// only holds the *current* (latest) SSInfo per UID; once a new SSInfo
+	// replaces an existing one (locality change), the old one drops out of
+	// server_interf but may still be alive via Reference<> chains in
+	// in-flight actors. Tracking every alive one here lets
+	// invalidateCacheByAddress clear the interf on ALL of them, so the 27
+	// RequestStream queue refs for a dead address drop promptly regardless
+	// of who else is holding a Reference.
+	std::unordered_multimap<NetworkAddress, StorageServerInfo*> server_by_address;
 	std::map<UID, BlobWorkerInterface> blobWorker_interf; // blob workers don't change endpoints for the same ID
+
+	// Periodically scans serverListKeys and evicts stale locationCache entries
+	Future<Void> locationCachePeerWatcher;
 
 	// map from ssid -> tss interface
 	std::unordered_map<UID, StorageServerInterface> tssMapping;

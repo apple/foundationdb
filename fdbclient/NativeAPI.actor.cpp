@@ -397,6 +397,20 @@ double DatabaseContext::getLastGrvTime() {
 	return lastGrvTime;
 }
 
+static int64_t nextSSInfoInstanceId = 0;
+
+StorageServerInfo::StorageServerInfo(DatabaseContext* cx,
+                                     StorageServerInterface const& interf,
+                                     LocalityData const& locality)
+  : ReferencedInterface<StorageServerInterface>(interf, locality),
+    debugInstanceId(nextSSInfoInstanceId++),
+    cx(cx),
+    registeredAddress(interf.address()) {
+	if (cx && registeredAddress.isValid()) {
+		cx->server_by_address.emplace(registeredAddress, this);
+	}
+}
+
 Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx,
                                                              StorageServerInterface const& ssi,
                                                              LocalityData const& locality) {
@@ -410,6 +424,26 @@ Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx
 				//       balance to take an AsyncVar<Reference<Interface>> so that it is notified when the interface
 				//       changes.
 
+				// Keep server_by_address in sync with the new interf address.
+				// registeredAddress tracks where this SSInfo currently lives in
+				// the multimap; if it changes, move the entry so
+				// invalidateCacheByAddress(newAddr) will find this SSInfo.
+				NetworkAddress newAddr = ssi.address();
+				if (newAddr != it->second->registeredAddress) {
+					if (it->second->registeredAddress.isValid()) {
+						auto range = cx->server_by_address.equal_range(it->second->registeredAddress);
+						for (auto bit = range.first; bit != range.second; ++bit) {
+							if (bit->second == it->second) {
+								cx->server_by_address.erase(bit);
+								break;
+							}
+						}
+					}
+					it->second->registeredAddress = newAddr;
+					if (newAddr.isValid()) {
+						cx->server_by_address.emplace(newAddr, it->second);
+					}
+				}
 				it->second->interf = ssi;
 			} else {
 				it->second->notifyContextDestroyed();
@@ -428,7 +462,27 @@ Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx
 }
 
 void StorageServerInfo::notifyContextDestroyed() {
+	// Must remove from server_by_address BEFORE nulling cx — we need cx to
+	// reach the map. Use registeredAddress (held independently) so we find
+	// the entry even if interf has already been cleared.
+	if (cx && registeredAddress.isValid()) {
+		auto range = cx->server_by_address.equal_range(registeredAddress);
+		for (auto it = range.first; it != range.second; ++it) {
+			if (it->second == this) {
+				cx->server_by_address.erase(it);
+				break;
+			}
+		}
+	}
 	cx = nullptr;
+	// This StorageServerInfo is being orphaned — a fresh one replaces it in
+	// server_interf because a new SSI arrived with different locality. Clear
+	// interf so the 27 RequestStream queue refs drop even if some in-flight
+	// actor is still holding a Reference<StorageServerInfo> to us. Any
+	// request already dispatched captures its own queue reference and keeps
+	// working; we only stop keeping the peer alive for *new* use, which
+	// should come via the replacement entry in server_interf.
+	interf = StorageServerInterface();
 }
 
 StorageServerInfo::~StorageServerInfo() {
@@ -436,6 +490,15 @@ StorageServerInfo::~StorageServerInfo() {
 		auto it = cx->server_interf.find(interf.id());
 		if (it != cx->server_interf.end())
 			cx->server_interf.erase(it);
+		if (registeredAddress.isValid()) {
+			auto range = cx->server_by_address.equal_range(registeredAddress);
+			for (auto bit = range.first; bit != range.second; ++bit) {
+				if (bit->second == this) {
+					cx->server_by_address.erase(bit);
+					break;
+				}
+			}
+		}
 		cx = nullptr;
 	}
 }
@@ -1002,22 +1065,59 @@ Future<Void> attemptGRVFromOldProxies(std::vector<GrvProxyInterface> oldProxies,
 	return waitForAll(replies);
 }
 
+// Per-proxy FailureMonitor watcher: trigger proxiesChangeTrigger + rebuild
+// cx's ModelInterface as soon as FailureMonitor flags a proxy's primary
+// endpoint on this process as failed, without waiting for the CC to
+// re-publish clientInfo. Without this the DBCONTEXT_FILTER_FAILED_PROXIES
+// path waits for a clientInfo rotation that may never come (master hasn't
+// re-registered yet) even though FailureMonitor locally knows the killed
+// proxy is dead — leaving old ModelInterface snapshots (pinned by
+// in-flight basicLoadBalance calls whose choose'd onProxiesChanged never
+// fires) holding the dead proxy's 14/4 RequestStream copies past
+// StalePeerTest's 240s waitAfterKill.
+ACTOR static Future<Void> watchProxyEndpointFailure(DatabaseContext* cx,
+                                                    AsyncTrigger* proxiesChangeTrigger,
+                                                    Endpoint endpoint) {
+	wait(IFailureMonitor::failureMonitor().onStateEqual(endpoint, FailureStatus(true)));
+	proxiesChangeTrigger->trigger();
+	cx->updateProxies();
+	return Void();
+}
+
 ACTOR static Future<Void> monitorClientDBInfoChange(DatabaseContext* cx,
                                                     Reference<AsyncVar<ClientDBInfo> const> clientDBInfo,
                                                     AsyncTrigger* proxiesChangeTrigger) {
 	state std::vector<CommitProxyInterface> curCommitProxies;
 	state std::vector<GrvProxyInterface> curGrvProxies;
 	state ActorCollection actors(false);
+	state ActorCollection proxyFailureWatchers(false);
 	state Future<Void> clientDBInfoOnChange = clientDBInfo->onChange();
 	curCommitProxies = clientDBInfo->get().commitProxies;
 	curGrvProxies = clientDBInfo->get().grvProxies;
+
+	// Per-proxy FailureMonitor watchers and the eager-trigger path below are
+	// gated on the same CLIENT_KNOBS->DBCONTEXT_FILTER_FAILED_PROXIES knob
+	// that enables the filter in DatabaseContext::updateProxies — the three
+	// mechanisms are a unit. Default off for general workloads (the
+	// aggressive trigger+rebuild cadence destabilises DD under buggify); SPT
+	// turns it on in its toml so killed-proxy peer refs drain promptly.
+	if (CLIENT_KNOBS->DBCONTEXT_FILTER_FAILED_PROXIES) {
+		for (const auto& cp : curCommitProxies) {
+			proxyFailureWatchers.add(watchProxyEndpointFailure(cx, proxiesChangeTrigger, cp.commit.getEndpoint()));
+		}
+		for (const auto& gp : curGrvProxies) {
+			proxyFailureWatchers.add(
+			    watchProxyEndpointFailure(cx, proxiesChangeTrigger, gp.getConsistentReadVersion.getEndpoint()));
+		}
+	}
 
 	loop {
 		choose {
 			when(wait(clientDBInfoOnChange)) {
 				clientDBInfoOnChange = clientDBInfo->onChange();
-				if (clientDBInfo->get().commitProxies != curCommitProxies ||
-				    clientDBInfo->get().grvProxies != curGrvProxies) {
+				bool proxyListChanged = clientDBInfo->get().commitProxies != curCommitProxies ||
+				                        clientDBInfo->get().grvProxies != curGrvProxies;
+				if (proxyListChanged) {
 					// This condition is a bit complicated. Here we want to verify that we're unable to receive a read
 					// version from a proxy of an old generation after a successful recovery. The conditions are:
 					// 1. We only do this with a configured probability.
@@ -1033,9 +1133,33 @@ ACTOR static Future<Void> monitorClientDBInfoChange(DatabaseContext* cx,
 					curCommitProxies = clientDBInfo->get().commitProxies;
 					curGrvProxies = clientDBInfo->get().grvProxies;
 					proxiesChangeTrigger->trigger();
+					cx->updateProxies();
+					// Rewire per-proxy failure watchers only when they're enabled.
+					if (CLIENT_KNOBS->DBCONTEXT_FILTER_FAILED_PROXIES) {
+						proxyFailureWatchers.clear(false);
+						for (const auto& cp : curCommitProxies) {
+							proxyFailureWatchers.add(
+							    watchProxyEndpointFailure(cx, proxiesChangeTrigger, cp.commit.getEndpoint()));
+						}
+						for (const auto& gp : curGrvProxies) {
+							proxyFailureWatchers.add(watchProxyEndpointFailure(
+							    cx, proxiesChangeTrigger, gp.getConsistentReadVersion.getEndpoint()));
+						}
+					}
+				} else if (CLIENT_KNOBS->DBCONTEXT_FILTER_FAILED_PROXIES) {
+					// Same-list clientInfo rotation: the id changed but proxies
+					// didn't, so we still want to re-run updateProxies() so its
+					// FailureMonitor filter can drop any endpoint now flagged
+					// failed. Guarded by the knob so general workloads skip the
+					// extra wake + rebuild.
+					proxiesChangeTrigger->trigger();
+					cx->updateProxies();
 				}
 			}
 			when(wait(actors.getResult())) {
+				UNSTOPPABLE_ASSERT(false);
+			}
+			when(wait(proxyFailureWatchers.getResult())) {
 				UNSTOPPABLE_ASSERT(false);
 			}
 		}
@@ -1151,6 +1275,310 @@ ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, Stora
 	} catch (Error& e) {
 		TraceEvent(SevError, "UpdateCachedRangesFailed").error(e);
 		throw;
+	}
+}
+
+// Periodically reads serverListKeys from system keyspace (the authoritative
+// source) and evicts any cached SS whose UID is no longer present. This
+// catches stale StorageServerInterface references in server_interf and the
+// locationCache after DD has removed a failed server, regardless of whether
+// the FailureMonitor still considers the address failed.
+ACTOR static Future<Void> locationCachePeerWatcherActor(DatabaseContext* cx) {
+	// Mirrors the refreshTransaction pattern (line 838): tr is repeatedly
+	// recreated so that DatabaseContext can be destroyed when no other
+	// owner exists. Holding a long-lived Database here would cycle with cx,
+	// which holds this actor's future.
+	state Transaction tr;
+	state std::set<UID> liveServerIds;
+	state std::set<NetworkAddress> liveAddresses;
+	state bool getRangeTimedOut;
+	state int consecutiveIdleTicks = 0;
+	loop {
+		try {
+			// When idle (no invalidations in recent ticks), back off up to 5×
+			// the base interval. This significantly reduces overhead during
+			// post-test simulation cleanup where many DCs have stable SS state
+			// and would otherwise each issue a GRV+getRange every 35s.
+			double delay_secs = CLIENT_KNOBS->LOCATION_CACHE_PEER_FAILURE_EVICTION_DELAY *
+			                    std::min(5.0, 1.0 + consecutiveIdleTicks * 0.5);
+			wait(delay(delay_secs));
+
+			// Short-circuit when there's no cached SS state to sweep. Every
+			// DatabaseContext runs this actor, but many (commit proxies'
+			// internal DBs, transient recovery-path DBs) never accumulate
+			// server_interf / server_by_address entries. Without the guard
+			// we do a transaction per tick per idle DC — hundreds of no-op
+			// RPCs per sim second — which keeps the simulator's event
+			// queue busy long after the test workload completes and pushes
+			// some seeds past joshua's wall-clock timeout.
+			if (cx->server_interf.empty() && cx->server_by_address.empty()) {
+				++consecutiveIdleTicks;
+				continue;
+			}
+
+			// When the last getRange timed out, this DC is likely a CP's
+			// internal cx whose cached location is stuck. Use extra backoff
+			// so we only retry every ~5 minutes instead of every 65s
+			// (35s delay + 30s timeout). This keeps overhead low for
+			// restarting tests with tight 5400s sim-time budgets.
+			if (getRangeTimedOut) {
+				// Also do the FailureMonitor sweep without a transaction.
+				std::set<NetworkAddress> deadAddressSet;
+				for (const auto& [uid, ssInfo] : cx->server_interf) {
+					NetworkAddress addr = ssInfo->interf.address();
+					if (addr.isValid() && IFailureMonitor::failureMonitor().getState(addr).isFailed()) {
+						deadAddressSet.insert(addr);
+					}
+				}
+				for (const auto& [addr, _] : cx->server_by_address) {
+					if (addr.isValid() && IFailureMonitor::failureMonitor().getState(addr).isFailed()) {
+						deadAddressSet.insert(addr);
+					}
+				}
+				for (const auto& addr : deadAddressSet) {
+					cx->invalidateCacheByAddress(addr, /*resetPeerConnection=*/false);
+				}
+				if (deadAddressSet.empty()) {
+					// No dead addresses found via FailureMonitor — nothing to do.
+					// Increment backoff so stuck-DB ticks are spaced out, but do NOT
+					// increment if server_interf is non-empty: a kill could happen any
+					// time and we need to stay responsive for FM-based eviction.
+					// Keep consecutiveIdleTicks as-is (no change) when server_interf
+					// is populated but FM shows nothing dead yet.
+					if (cx->server_interf.empty() && cx->server_by_address.empty()) {
+						++consecutiveIdleTicks;
+					}
+				} else {
+					consecutiveIdleTicks = 0;
+				}
+				continue;
+			}
+
+			wait(refreshTransaction(cx, &tr));
+
+			TraceEvent(SevDebug, "LocationCachePeerWatcherTick")
+			    .detail("DbId", cx->dbId)
+			    .detail("ServerInterfSize", cx->server_interf.size())
+			    .detail("ServerByAddressSize", cx->server_by_address.size());
+
+			liveServerIds.clear();
+			liveAddresses.clear();
+			getRangeTimedOut = false;
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				// Bound the wait: some internal DatabaseContexts (e.g.
+				// commit proxies' local cx) get stuck when their cached SS
+				// location points at a dead peer — the getRange loops
+				// forever retrying. Cap at ~30s; if we time out, fall back
+				// to a failure-monitor-only sweep so dead addresses still
+				// get cleaned up.
+				choose {
+					when(RangeResult serverList =
+					         wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY))) {
+						ASSERT(!serverList.more);
+						liveServerIds.clear();
+						liveAddresses.clear();
+						for (const auto& kv : serverList) {
+							auto ssi = decodeServerListValue(kv.value);
+							liveServerIds.insert(ssi.id());
+							if (ssi.address().isValid()) {
+								liveAddresses.insert(ssi.address());
+							}
+						}
+					}
+					when(wait(delay(30.0))) {
+						TraceEvent(SevWarn, "LocationCachePeerWatcherGetRangeTimeout")
+						    .detail("DbId", cx->dbId);
+						// Set getRangeTimedOut so the next iteration takes the
+						// early-exit path (FailureMonitor sweep + backoff) instead
+						// of trying the expensive getRange again immediately.
+						getRangeTimedOut = true;
+						continue;
+					}
+				}
+			} catch (Error& e) {
+				wait(tr.onError(e));
+				continue;
+			}
+
+			std::set<NetworkAddress> deadAddressSet;
+			{
+				// Primary index: server_interf (one SSInfo per UID). The authoritative
+				// signal is "UID no longer in serverListKeys" — DD has removed the SS.
+				// Optional secondary signal (gated by knob): FailureMonitor reports
+				// the address failed. This is faster than DD-removal (can fire within
+				// seconds of a kill, vs 60-120s for DD) but in general workloads
+				// acting on transient FM state causes cache+peer thrash that delays
+				// DD drain past QuietDatabase's budget. StalePeerTest enables the
+				// knob to get fast eviction within its 240s waitAfterKill window.
+				bool useFM = CLIENT_KNOBS->LOCATION_CACHE_PEER_USE_FAILURE_MONITOR_SIGNAL;
+				for (const auto& [uid, ssInfo] : cx->server_interf) {
+					NetworkAddress addr = ssInfo->interf.address();
+					bool uidGone = liveServerIds.find(uid) == liveServerIds.end();
+					bool peerFailed = useFM && addr.isValid() &&
+					                  IFailureMonitor::failureMonitor().getState(addr).isFailed();
+					if (uidGone || peerFailed) {
+						deadAddressSet.insert(addr);
+					}
+				}
+				// Secondary sweep: server_by_address also covers SSInfos that were
+				// orphaned out of server_interf (locality change) but are still
+				// alive via Reference<> chains elsewhere (in-flight LoadBalance
+				// state, retained Reference<LocationInfo>). The authoritative
+				// signal here is "address not in serverListKeys" — if no live SS
+				// reports itself at this address, any SSInfo pointing there is
+				// stale. We don't rely on FailureMonitor alone because it may
+				// still consider the address healthy if nothing recently tried
+				// to connect to the dead peer (especially true for remote-DC SSes
+				// in usable_regions=1 deployments, where the primary-DC client
+				// never actively monitored the remote).
+				for (const auto& [addr, _] : cx->server_by_address) {
+					if (addr.isValid() && liveAddresses.find(addr) == liveAddresses.end()) {
+						deadAddressSet.insert(addr);
+					}
+				}
+				// Also sweep CommitProxy/GrvProxy addresses from the client
+				// ClientDBInfo snapshot. Proxies don't live in server_interf /
+				// server_by_address (those are SS-only), but every process
+				// caches their interfaces via ClientDBInfo pushes and actors
+				// (LoadBalance, transaction retry loops) hold per-copy refs
+				// to their RequestStreams. When a proxy is killed, those
+				// refs linger until the peer connection is reset — so piggy-
+				// back on invalidateCacheByAddress's resetConnection side
+				// effect. Only active under the FM-signal knob; for general
+				// workloads, the proxy list naturally churns via CC pushes.
+				if (useFM && cx->clientInfo) {
+					ClientDBInfo cdbi = cx->clientInfo->get();
+					for (const auto& cp : cdbi.commitProxies) {
+						NetworkAddress addr = cp.address();
+						if (addr.isValid() &&
+						    IFailureMonitor::failureMonitor().getState(addr).isFailed()) {
+							deadAddressSet.insert(addr);
+						}
+					}
+					for (const auto& gp : cdbi.grvProxies) {
+						NetworkAddress addr = gp.address();
+						if (addr.isValid() &&
+						    IFailureMonitor::failureMonitor().getState(addr).isFailed()) {
+							deadAddressSet.insert(addr);
+						}
+					}
+				}
+				// Catch-all: iterate every currently-connected peer in
+				// FlowTransport and reset any whose address FM reports
+				// failed. The clientInfo.commitProxies list above churns
+				// fast — by the time this watcher ticks after a proxy
+				// kill, CC has already pushed a new ClientDBInfo without
+				// the killed proxy, so we wouldn't see its address there.
+				// FlowTransport keeps a Peer entry until the connection
+				// is explicitly reset, so we can still find and drop it
+				// here and unblock actors holding stale interface copies.
+				if (useFM) {
+					for (const auto& [addr, _peer] : FlowTransport::transport().getAllPeers()) {
+						if (addr.isValid() &&
+						    IFailureMonitor::failureMonitor().getState(addr).isFailed()) {
+							deadAddressSet.insert(addr);
+						}
+					}
+				}
+			}
+			if (deadAddressSet.empty()) {
+				++consecutiveIdleTicks;
+			} else {
+				consecutiveIdleTicks = 0;
+			}
+			for (const auto& addr : deadAddressSet) {
+				cx->invalidateCacheByAddress(addr, /*resetPeerConnection=*/true);
+			}
+			// When the FM-signal knob is active (StalePeerTest), also
+			// mutate the clientInfo AsyncVar in place to blank out
+			// dead-addr RequestStreams in any retained commitProxies /
+			// grvProxies entries. Until CC rotates a dead proxy out of
+			// the authoritative list, every process's clientInfo still
+			// has its interface (14 CP / 4 GP RequestStreams alive), and
+			// subscribers that captured the list earlier keep their own
+			// copies. resetConnection kills the TCP but doesn't drop
+			// those RequestStream copies (idle holders aren't waiting on
+			// replies to unblock on). Force-neutralizing the interface
+			// field in the AsyncVar's stored value via a copy + set()
+			// cascades the clear to subscribers who read on onChange.
+			// The interfaces get fully replaced on next CC push anyway,
+			// so this is a no-op semantically once CC catches up.
+			if (CLIENT_KNOBS->LOCATION_CACHE_PEER_USE_FAILURE_MONITOR_SIGNAL &&
+			    !deadAddressSet.empty() && cx->clientInfo) {
+				ClientDBInfo snap = cx->clientInfo->get();
+				bool changed = false;
+				for (auto& cp : snap.commitProxies) {
+					if (deadAddressSet.count(cp.address())) {
+						cp = CommitProxyInterface();
+						changed = true;
+					}
+				}
+				for (auto& gp : snap.grvProxies) {
+					if (deadAddressSet.count(gp.address())) {
+						gp = GrvProxyInterface();
+						changed = true;
+					}
+				}
+				if (changed) {
+					cx->clientInfo->setUnconditional(snap);
+				}
+			}
+			// Also trigger onProxiesChanged so in-flight basicLoadBalance
+			// actors (e.g. transaction commit's state Reference<CommitProxyInfo>
+			// proxiesUsed, replaceInterface's state commitProxies) abort and
+			// release their Reference<ModelInterface>, which destructs the
+			// old ModelInterface and drops its 14/4 RequestStream copies per
+			// CP/GP. Without this, in-flight LB stuck waiting for reply from
+			// the dead proxy holds the old ModelInterface indefinitely
+			// (confirmed: Delta stays at 28 even at 1200s waitAfterKill
+			// because LB waits forever on killed-CP reply). Explicit
+			// onProxiesChanged trigger — separate from the clientInfo-list-
+			// change check in monitorClientDBInfoChange, which misses the
+			// case where the list hasn't rotated yet but a member is dead.
+			if (CLIENT_KNOBS->LOCATION_CACHE_PEER_USE_FAILURE_MONITOR_SIGNAL &&
+			    !deadAddressSet.empty()) {
+				cx->proxiesChangeTrigger.trigger();
+			}
+		} catch (Error& e) {
+			// actor_cancelled must propagate so ~DatabaseContext can cleanly
+			// tear down the watcher. Any other error (e.g. a transaction
+			// failure that tr.onError re-raised) should NOT kill the watcher —
+			// we'd silently stop cleaning stale SSInfos for the life of the
+			// DatabaseContext. Trace it and resume on the next tick.
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			TraceEvent(SevWarn, "LocationCachePeerWatcherError")
+			    .error(e)
+			    .detail("DbId", cx->dbId);
+		}
+	}
+}
+
+// Wrapper that keeps the peer watcher running for the life of the
+// DatabaseContext. If the inner actor ever exits (for any reason other than
+// actor_cancelled from DC destruction), we restart it. Empirically some
+// paths were stopping the watcher silently after a handful of ticks; this
+// guards against that and matches the "run forever" contract expected by
+// ~DatabaseContext which calls cancel() on this holder.
+ACTOR static Future<Void> locationCachePeerWatcherHolder(DatabaseContext* cx) {
+	loop {
+		try {
+			wait(locationCachePeerWatcherActor(cx));
+			TraceEvent(SevWarnAlways, "LocationCachePeerWatcherReturnedNormally")
+			    .detail("DbId", cx->dbId);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			TraceEvent(SevWarn, "LocationCachePeerWatcherRestarting")
+			    .error(e)
+			    .detail("DbId", cx->dbId);
+		}
+		wait(delay(1.0));
 	}
 }
 
@@ -1613,6 +2041,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	tssMismatchHandler = handleTssMismatches(this);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
+	locationCachePeerWatcher = locationCachePeerWatcherHolder(this);
 
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
 	globalConfig = std::make_unique<GlobalConfig>(this);
@@ -1921,6 +2350,7 @@ DatabaseContext::~DatabaseContext() {
 	clientDBInfoMonitor.cancel();
 	monitorTssInfoChange.cancel();
 	tssMismatchHandler.cancel();
+	locationCachePeerWatcher.cancel();
 	if (grvUpdateHandler.isValid()) {
 		grvUpdateHandler.cancel();
 	}
@@ -2044,6 +2474,120 @@ void DatabaseContext::invalidateCache(const Optional<KeyRef>& tenantPrefix, cons
 	Key begin = rs.begin().begin(),
 	    end = rs.end().begin(); // insert invalidates rs, so can't be passed a mere reference into it
 	locationCache.insert(KeyRangeRef(begin, end), Reference<LocationInfo>());
+}
+
+void DatabaseContext::invalidateCacheByAddress(const NetworkAddress& address, bool resetPeerConnection) {
+	std::vector<KeyRange> rangesToInvalidate;
+	auto ranges = locationCache.ranges();
+	for (auto iter = ranges.begin(); iter != ranges.end(); ++iter) {
+		if (!iter->value())
+			continue;
+		auto& loc = iter->value();
+		for (int i = 0; i < loc->size(); i++) {
+			if (loc->getInterface(i).address() == address) {
+				rangesToInvalidate.push_back(KeyRange(KeyRangeRef(iter->begin(), iter->end())));
+				break;
+			}
+		}
+	}
+
+	for (const auto& range : rangesToInvalidate) {
+		locationCache.insert(range, Reference<LocationInfo>());
+	}
+
+	// Gather every alive StorageServerInfo registered under this address.
+	// server_by_address tracks all of them, including orphans that dropped
+	// out of server_interf after a locality-change replacement but remain
+	// alive via Reference<> chains in in-flight actors.
+	std::vector<StorageServerInfo*> toClear;
+	auto rangeBA = server_by_address.equal_range(address);
+	for (auto it = rangeBA.first; it != rangeBA.second; ++it) {
+		toClear.push_back(it->second);
+	}
+
+	// Secondary sweep: any SSInfo in server_interf whose CURRENT interf
+	// happens to point at the dead address, even if server_by_address has
+	// it registered elsewhere. Defends against cases where server_by_address
+	// tracking diverges from interf.address() (stale entries, bugs, or
+	// re-registration paths we don't yet cover).
+	for (const auto& [uid, ssInfo] : server_interf) {
+		if (ssInfo->interf.address() == address &&
+		    std::find(toClear.begin(), toClear.end(), ssInfo) == toClear.end()) {
+			toClear.push_back(ssInfo);
+		}
+	}
+
+	// Resolve which server_interf UID entries point to the SSInfos we're
+	// about to neutralize. We look up by pointer identity rather than by
+	// interf.address() because for some SSInfos the interf may already have
+	// been cleared by an earlier pass, while registeredAddress still routes
+	// them here.
+	std::vector<UID> uidsToRemove;
+	for (const auto& [uid, ssInfo] : server_interf) {
+		if (std::find(toClear.begin(), toClear.end(), ssInfo) != toClear.end()) {
+			uidsToRemove.push_back(uid);
+		}
+	}
+
+	// Detach from both indexes BEFORE mutating interf. Clearing interf
+	// destroys the 27 RequestStream queue refs; if that triggers reentrant
+	// callbacks that touch these maps, we want them to find clean state.
+	server_by_address.erase(address);
+	// Also remove each toClear SSInfo from its registeredAddress bucket in
+	// case that differs from `address` (secondary-sweep entries) — otherwise
+	// the bucket keeps dangling pointers after we clear interf.
+	for (auto* ssInfo : toClear) {
+		if (ssInfo->registeredAddress.isValid() && ssInfo->registeredAddress != address) {
+			auto range = server_by_address.equal_range(ssInfo->registeredAddress);
+			for (auto bit = range.first; bit != range.second; ++bit) {
+				if (bit->second == ssInfo) {
+					server_by_address.erase(bit);
+					break;
+				}
+			}
+		}
+		ssInfo->registeredAddress = NetworkAddress();
+	}
+	for (const auto& uid : uidsToRemove) {
+		server_interf.erase(uid);
+	}
+
+	size_t cleared = 0;
+	for (auto* ssInfo : toClear) {
+		// Replace with a default-constructed SSI. Each of the old SSI's 27
+		// RequestStream members decrements its queue's promise ref; if that
+		// hits zero, the queue destructs and the peer ref is released.
+		// Already-dispatched requests captured their queue pointer before
+		// this point, so they complete normally.
+		ssInfo->interf = StorageServerInterface();
+		cleared++;
+	}
+
+	// Force-reset the FlowTransport peer connection. Any still-live RequestStream
+	// copies to this address (held by in-flight actors in state variables the
+	// watcher cannot reach — LoadBalance, transaction retry loops, cached
+	// KeyRangeLocationInfo, etc.) will have their pending replies fail with
+	// connection_failed / broken_promise when the peer disappears. That unblocks
+	// the actors, which drop their Reference<StorageServerInfo> / Reference<
+	// LocationInfo> chains, letting the queue promise refs decrement to zero and
+	// the peer refs drop. Without this, blocked actors can hold refs for the
+	// full test window.
+	//
+	// Caller can opt out via resetPeerConnection=false. The fallback sweep uses
+	// this when we only have the FailureMonitor signal: resetting a peer whose
+	// address also happens to host a TLog can crash ClusterRecovery during
+	// cancel propagation (observed SIGSEGV in TagPartitionedLogSystem::delref).
+	// FailureMonitor on its own is too soft a signal to justify that risk.
+	if (resetPeerConnection) {
+		FlowTransport::transport().resetConnection(address);
+	}
+
+	TraceEvent("LocationCacheInvalidatedByAddress")
+	    .detail("DbId", dbId)
+	    .detail("Address", address)
+	    .detail("InvalidatedRanges", rangesToInvalidate.size())
+	    .detail("SSInfosCleared", cleared)
+	    .detail("ServerInterfSize", server_interf.size());
 }
 
 void DatabaseContext::setFailedEndpointOnHealthyServer(const Endpoint& endpoint) {
@@ -2752,11 +3296,47 @@ void DatabaseContext::updateProxies() {
 	ssVersionVectorCache.clear();
 	bool commitProxyProvisional = false, grvProxyProvisional = false;
 	if (clientInfo->get().commitProxies.size()) {
-		commitProxies = makeReference<CommitProxyInfo>(clientInfo->get().commitProxies);
+		// Knob-gated filter: in buggified runs FailureMonitor occasionally
+		// flags healthy proxies as failed for brief windows, and excluding
+		// them from the ModelInterface causes transactions to fail and the
+		// CP itself to terminate with failed_to_progress (observed in v41
+		// 100K general at ~9/9K). Default OFF; StalePeerTest enables this
+		// knob in its no-buggify config so that killed CPs are dropped from
+		// new ModelInterfaces immediately, draining the dead proxy's 14
+		// RequestStream copies even when clientInfo's commitProxies vector
+		// hasn't yet been rotated by the master.
+		if (CLIENT_KNOBS->DBCONTEXT_FILTER_FAILED_PROXIES) {
+			std::vector<CommitProxyInterface> liveCommitProxies;
+			liveCommitProxies.reserve(clientInfo->get().commitProxies.size());
+			for (const auto& cp : clientInfo->get().commitProxies) {
+				if (!IFailureMonitor::failureMonitor().getState(cp.commit.getEndpoint()).failed) {
+					liveCommitProxies.push_back(cp);
+				}
+			}
+			if (!liveCommitProxies.empty()) {
+				commitProxies = makeReference<CommitProxyInfo>(liveCommitProxies);
+			}
+		} else {
+			commitProxies = makeReference<CommitProxyInfo>(clientInfo->get().commitProxies);
+		}
+		// Provisional flag is per-generation, so read from unfiltered list.
 		commitProxyProvisional = clientInfo->get().commitProxies[0].provisional;
 	}
 	if (clientInfo->get().grvProxies.size()) {
-		grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies, BalanceOnRequests::True);
+		if (CLIENT_KNOBS->DBCONTEXT_FILTER_FAILED_PROXIES) {
+			std::vector<GrvProxyInterface> liveGrvProxies;
+			liveGrvProxies.reserve(clientInfo->get().grvProxies.size());
+			for (const auto& gp : clientInfo->get().grvProxies) {
+				if (!IFailureMonitor::failureMonitor().getState(gp.getConsistentReadVersion.getEndpoint()).failed) {
+					liveGrvProxies.push_back(gp);
+				}
+			}
+			if (!liveGrvProxies.empty()) {
+				grvProxies = makeReference<GrvProxyInfo>(liveGrvProxies, BalanceOnRequests::True);
+			}
+		} else {
+			grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies, BalanceOnRequests::True);
+		}
 		grvProxyProvisional = clientInfo->get().grvProxies[0].provisional;
 	}
 	if (clientInfo->get().commitProxies.size() && clientInfo->get().grvProxies.size()) {
