@@ -277,7 +277,7 @@ bool API::evaluatePredicate(FDBErrorPredicate pred, Error const& e) {
 Reference<Database> API::createDatabase(std::string const& connFilename) {
 	FDBDatabase* db;
 	throw_on_error(fdb_create_database(connFilename.c_str(), &db));
-	return makeReference<DatabaseImpl>(db);
+	return Reference<Database>(new DatabaseImpl(db));
 }
 
 int API::getAPIVersion() const {
@@ -285,7 +285,7 @@ int API::getAPIVersion() const {
 }
 
 Reference<Transaction> DatabaseImpl::createTransaction() {
-	return makeReference<TransactionImpl>(db);
+	return Reference<Transaction>(new TransactionImpl(db));
 }
 
 void DatabaseImpl::setDatabaseOption(FDBDatabaseOption option, Optional<StringRef> value) {
