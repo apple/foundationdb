@@ -88,7 +88,8 @@ bool TLogSet::isEqualIds(TLogSet const& r) const {
 bool OldTLogConf::operator==(const OldTLogConf& rhs) const {
 	return tLogs == rhs.tLogs && epochBegin == rhs.epochBegin && epochEnd == rhs.epochEnd &&
 	       recoverAt == rhs.recoverAt && logRouterTags == rhs.logRouterTags && txsTags == rhs.txsTags &&
-	       pseudoLocalities == rhs.pseudoLocalities && epoch == rhs.epoch;
+	       pseudoLocalities == rhs.pseudoLocalities && epoch == rhs.epoch &&
+	       rangeBackupWorkerTags == rhs.rangeBackupWorkerTags;
 }
 
 bool OldTLogConf::isEqualIds(OldTLogConf const& r) const {
@@ -256,7 +257,8 @@ bool LogSystemConfig::isEqual(LogSystemConfig const& r) const {
 	return logSystemType == r.logSystemType && tLogs == r.tLogs && oldTLogs == r.oldTLogs &&
 	       expectedLogSets == r.expectedLogSets && logRouterTags == r.logRouterTags && txsTags == r.txsTags &&
 	       recruitmentID == r.recruitmentID && stopped == r.stopped && recoveredAt == r.recoveredAt &&
-	       pseudoLocalities == r.pseudoLocalities && epoch == r.epoch && oldestBackupEpoch == r.oldestBackupEpoch;
+	       pseudoLocalities == r.pseudoLocalities && epoch == r.epoch && oldestBackupEpoch == r.oldestBackupEpoch &&
+	       rangeBackupWorkerTags == r.rangeBackupWorkerTags;
 }
 
 bool LogSystemConfig::isEqualIds(LogSystemConfig const& r) const {

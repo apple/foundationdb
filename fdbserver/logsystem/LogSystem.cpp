@@ -231,6 +231,7 @@ OldTLogConf toOldTLogConf(const OldLogData& oldLogData) {
 	result.recoverAt = oldLogData.recoverAt;
 	result.logRouterTags = oldLogData.logRouterTags;
 	result.txsTags = oldLogData.txsTags;
+	result.rangeBackupWorkerTags = oldLogData.rangeBackupWorkerTags;
 	result.pseudoLocalities = oldLogData.pseudoLocalities;
 	result.epoch = oldLogData.epoch;
 	for (const Reference<LogSet>& logSet : oldLogData.tLogs) {
@@ -243,6 +244,7 @@ OldTLogCoreData toOldTLogCoreData(const OldLogData& oldData) {
 	OldTLogCoreData result;
 	result.logRouterTags = oldData.logRouterTags;
 	result.txsTags = oldData.txsTags;
+	result.rangeBackupWorkerTags = oldData.rangeBackupWorkerTags;
 	result.epochBegin = oldData.epochBegin;
 	result.epochEnd = oldData.epochEnd;
 	result.recoverAt = oldData.recoverAt;
@@ -425,6 +427,7 @@ Reference<LogSystem> LogSystem::fromLogSystemConfig(UID const& dbgid,
 	logSystem->expectedLogSets = lsConf.expectedLogSets;
 	logSystem->logRouterTags = lsConf.logRouterTags;
 	logSystem->txsTags = lsConf.txsTags;
+	logSystem->rangeBackupWorkerTags = lsConf.rangeBackupWorkerTags;
 	logSystem->recruitmentID = lsConf.recruitmentID;
 	logSystem->stopped = lsConf.stopped;
 	if (useRecoveredAt) {
@@ -539,6 +542,7 @@ void LogSystem::toCoreState(DBCoreState& newState) const {
 	newState.tLogs.clear();
 	newState.logRouterTags = logRouterTags;
 	newState.txsTags = txsTags;
+	newState.rangeBackupWorkerTags = rangeBackupWorkerTags;
 	newState.pseudoLocalities = pseudoLocalities;
 	for (const auto& t : tLogs) {
 		if (!t->logServers.empty()) {
@@ -1979,6 +1983,7 @@ LogSystemConfig LogSystem::getLogSystemConfig() const {
 	logSystemConfig.expectedLogSets = expectedLogSets;
 	logSystemConfig.logRouterTags = logRouterTags;
 	logSystemConfig.txsTags = txsTags;
+	logSystemConfig.rangeBackupWorkerTags = rangeBackupWorkerTags;
 	logSystemConfig.recruitmentID = recruitmentID;
 	logSystemConfig.stopped = stopped;
 	logSystemConfig.recoveredAt = recoveredAt;
@@ -2134,13 +2139,27 @@ Version LogSystem::getBackupStartVersion() const {
 	return backupStartVersion;
 }
 
-std::map<LogEpoch, EpochTagsVersionsInfo> LogSystem::getOldEpochLRTagsVersionsInfo() const {
+std::map<LogEpoch, EpochTagsVersionsInfo> LogSystem::getOldEpochLogRouterTagsInfo() const {
 	std::map<LogEpoch, EpochTagsVersionsInfo> epochInfos;
 	for (const auto& old : oldLogData) {
 		epochInfos.insert({ old.epoch, EpochTagsVersionsInfo(old.logRouterTags, old.epochBegin, old.epochEnd) });
-		TraceEvent("OldEpochTagsVersions", dbgid)
+		TraceEvent("OldEpochLogRouterTagsInfo", dbgid)
 		    .detail("Epoch", old.epoch)
 		    .detail("Tags", old.logRouterTags)
+		    .detail("BeginVersion", old.epochBegin)
+		    .detail("EndVersion", old.epochEnd);
+	}
+	return epochInfos;
+}
+
+std::map<LogEpoch, EpochTagsVersionsInfo> LogSystem::getOldEpochRangeBackupTagsInfo() const {
+	std::map<LogEpoch, EpochTagsVersionsInfo> epochInfos;
+	for (const auto& old : oldLogData) {
+		epochInfos.insert(
+		    { old.epoch, EpochTagsVersionsInfo(old.rangeBackupWorkerTags, old.epochBegin, old.epochEnd) });
+		TraceEvent("OldEpochRangeBackupTagsInfo", dbgid)
+		    .detail("Epoch", old.epoch)
+		    .detail("Tags", old.rangeBackupWorkerTags)
 		    .detail("BeginVersion", old.epochBegin)
 		    .detail("EndVersion", old.epochEnd);
 	}
@@ -2897,6 +2916,7 @@ Future<Void> LogSystem::epochEnd(Reference<AsyncVar<Reference<LogSystem>>> outLo
 			logSystem->tLogs = logServers;
 			logSystem->logRouterTags = prevState.logRouterTags;
 			logSystem->txsTags = prevState.txsTags;
+			logSystem->rangeBackupWorkerTags = prevState.rangeBackupWorkerTags;
 			logSystem->oldLogData = oldLogData;
 			logSystem->logSystemType = prevState.logSystemType;
 			logSystem->rejoins = rejoins;
@@ -3368,6 +3388,12 @@ Future<Reference<LogSystem>> LogSystem::newEpoch(Reference<LogSystem> oldLogSyst
 		TraceEvent("AddPseudoLocality", logSystem->getDebugID()).detail("Locality", "Backup");
 	}
 
+	if (configuration.rangeBackupWorkerEnabled) {
+		logSystem->rangeBackupWorkerTags = configuration.desiredRangeBackupWorkerCount > 0
+		                                       ? configuration.desiredRangeBackupWorkerCount
+		                                       : (int)recr.tLogs.size();
+	}
+
 	logSystem->tLogs.push_back(makeReference<LogSet>());
 	logSystem->tLogs[0]->tLogVersion = configuration.tLogVersion;
 	logSystem->tLogs[0]->tLogWriteAntiQuorum = configuration.tLogWriteAntiQuorum;
@@ -3421,6 +3447,7 @@ Future<Reference<LogSystem>> LogSystem::newEpoch(Reference<LogSystem> oldLogSyst
 		logSystem->oldLogData[0].epochEnd = oldLogSystem->knownCommittedVersion + 1;
 		logSystem->oldLogData[0].recoverAt = oldLogSystem->recoverAt.get();
 		logSystem->oldLogData[0].logRouterTags = oldLogSystem->logRouterTags;
+		logSystem->oldLogData[0].rangeBackupWorkerTags = oldLogSystem->rangeBackupWorkerTags;
 		logSystem->oldLogData[0].txsTags = oldLogSystem->txsTags;
 		logSystem->oldLogData[0].pseudoLocalities = oldLogSystem->pseudoLocalities;
 		logSystem->oldLogData[0].epoch = oldLogSystem->epoch;

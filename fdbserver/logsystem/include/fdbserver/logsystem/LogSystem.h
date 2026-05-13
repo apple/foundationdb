@@ -221,8 +221,10 @@ struct OldLogData {
 	Version recoverAt;
 	std::set<int8_t> pseudoLocalities;
 	LogEpoch epoch;
+	int32_t rangeBackupWorkerTags;
 
-	OldLogData() : logRouterTags(0), txsTags(0), epochBegin(0), epochEnd(0), recoverAt(0), epoch(0) {}
+	OldLogData()
+	  : logRouterTags(0), txsTags(0), epochBegin(0), epochEnd(0), recoverAt(0), epoch(0), rangeBackupWorkerTags(0) {}
 
 	// Constructor for T of OldTLogConf and OldTLogCoreData
 	template <class T>
@@ -272,6 +274,7 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	std::set<int8_t> pseudoLocalities; // Represent special localities that will be mapped to tagLocalityLogRouter
 	const LogEpoch epoch;
 	LogEpoch oldestBackupEpoch;
+	int rangeBackupWorkerTags;
 
 	// new members
 	std::map<Tag, Version> pseudoLocalityPopVersion;
@@ -319,7 +322,7 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	          LogEpoch e,
 	          Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>())
 	  : dbgid(dbgid), logSystemType(LogSystemType::empty), expectedLogSets(0), logRouterTags(0), txsTags(0),
-	    repopulateRegionAntiQuorum(0), stopped(false), epoch(e), oldestBackupEpoch(0),
+	    repopulateRegionAntiQuorum(0), stopped(false), epoch(e), oldestBackupEpoch(0), rangeBackupWorkerTags(0),
 	    recoveredVersion(makeReference<AsyncVar<Version>>(invalidVersion)),
 	    remoteRecoveredVersion(makeReference<AsyncVar<Version>>(invalidVersion)),
 	    recoveryCompleteWrittenToCoreState(false), remoteLogsWrittenToCoreState(false), hasRemoteServers(false),
@@ -519,7 +522,8 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 
 	Version getBackupStartVersion() const;
 
-	std::map<LogEpoch, EpochTagsVersionsInfo> getOldEpochLRTagsVersionsInfo() const;
+	std::map<LogEpoch, EpochTagsVersionsInfo> getOldEpochLogRouterTagsInfo() const;
+	std::map<LogEpoch, EpochTagsVersionsInfo> getOldEpochRangeBackupTagsInfo() const;
 
 	inline Reference<LogSet> getEpochLogSet(LogEpoch epoch) const;
 
@@ -624,7 +628,8 @@ std::vector<T> LogSystem::getReadyNonError(std::vector<Future<T>> const& futures
 template <class T>
 OldLogData::OldLogData(const T& conf)
   : logRouterTags(conf.logRouterTags), txsTags(conf.txsTags), epochBegin(conf.epochBegin), epochEnd(conf.epochEnd),
-    recoverAt(conf.recoverAt), pseudoLocalities(conf.pseudoLocalities), epoch(conf.epoch) {
+    recoverAt(conf.recoverAt), pseudoLocalities(conf.pseudoLocalities), epoch(conf.epoch),
+    rangeBackupWorkerTags(conf.rangeBackupWorkerTags) {
 	tLogs.resize(conf.tLogs.size());
 	for (int j = 0; j < conf.tLogs.size(); j++) {
 		auto logSet = makeReference<LogSet>(conf.tLogs[j]);
