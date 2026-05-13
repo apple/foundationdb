@@ -901,6 +901,41 @@ private:
 				tssServerListToRemove.push_back(rangeToClear);
 			} else {
 				txnStateStore->clear(rangeToClear);
+				// If the regular SS had a TSS pair, release the cached TSS
+				// StorageServerInterface from tssMapping. Normally
+				// checkClearTssMappingKeys handles this when tssMappingKeys
+				// is cleared, but defensively clear here too so a stale
+				// TSS interface (with its 27 RequestStreams) cannot outlive
+				// the regular SS removal.
+				if (tssMapping) {
+					tssMapping->erase(id);
+				}
+				// Drop the StorageInfo reference CommitProxy holds for this
+				// SS in its storageCache. Every ServerCacheInfo for a shard
+				// held this SS references storageCache[id], and each holds
+				// a Reference<StorageInfo>; dropping the cache entry here
+				// means the StorageInfo dies when the last ServerCacheInfo
+				// using it goes away (via keyInfo updates below), releasing
+				// its copy of StorageServerInterface and its 27 queue refs.
+				// checkClearServerTagKeys erases the cache on single-key tag
+				// clears; this path covers the serverListKeys side in case
+				// the server's tag key is cleared as part of a range that
+				// doesn't hit the singleKeyRange branch.
+				//
+				// Also neutralize the interf on the StorageInfo itself — any
+				// existing ServerCacheInfo entries for shards still mapped to
+				// this SS keep a Reference<StorageInfo> alive. Until those
+				// entries are rewritten by a subsequent keyServers mutation,
+				// the StorageInfo won't destruct. Setting interf to a
+				// default-constructed SSI releases the 27 RequestStream
+				// queue refs immediately without waiting for those rewrites.
+				if (storageCache) {
+					auto it = storageCache->find(id);
+					if (it != storageCache->end()) {
+						it->second->interf = StorageServerInterface();
+						storageCache->erase(it);
+					}
+				}
 			}
 		} else {
 			txnStateStore->clear(rangeToClear);
