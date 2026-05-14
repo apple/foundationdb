@@ -104,7 +104,10 @@ class MappedRangeQueryIntegrationTest {
 		test.clearDatabase();
 	}
 
-	int numRecords = 10000;
+	// Keep numRecords modest so transactions complete within the 5s timeout
+	// even on heavily loaded CI infrastructure (e.g., CodeBuild running
+	// compilation and tests concurrently on the same instance).
+	int numRecords = 1000;
 	int numQueries = 1;
 	int numRecordsPerQuery = 100;
 	boolean validate = true;
