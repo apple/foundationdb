@@ -1142,8 +1142,8 @@ static Future<Void> startMoveKeys(Database occ,
 						// to have the same shard boundaries If that invariant was important, we would have to move this
 						// inside the loop above and also set it for the src servers
 						Value skValue = (dataMoveId.isValid() && dataMoveId != anonymousShardId)
-					                    ? serverKeysValue(dataMoveId)
-					                    : serverKeysTrue;
+						                    ? serverKeysValue(dataMoveId)
+						                    : serverKeysTrue;
 						actors.push_back(
 						    krmSetRangeCoalescing(tr, serverKeysPrefixFor(servers[i]), currentKeys, allKeys, skValue));
 					}
