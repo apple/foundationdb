@@ -302,8 +302,13 @@ public:
 	void trackAtPriority(TaskPriority priority, double now);
 	void stopImmediately() {
 #ifdef ADDRESS_SANITIZER
-		// Do leak check before intentionally leaking a bunch of memory
-		__lsan_do_leak_check();
+		// Only run leak check from the main network thread to avoid deadlocking
+		// when multiple network threads (from multiversion client) all call
+		// __lsan_do_leak_check() concurrently — one blocks on the symbolizer
+		// while others wait on __lsan::global_mutex, causing a timeout.
+		if (thread_network == this) {
+			__lsan_do_leak_check();
+		}
 #endif
 		stopped = true;
 		taskQueue.clear();
