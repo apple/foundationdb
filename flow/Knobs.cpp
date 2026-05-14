@@ -49,7 +49,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( HOSTNAME_RECONNECT_INIT_INTERVAL,                    .05 );
 	init( HOSTNAME_RECONNECT_MAX_INTERVAL,                     1.0 );
 	init( ENABLE_COORDINATOR_DNS_CACHE,                      false ); if( randomize && BUGGIFY ) ENABLE_COORDINATOR_DNS_CACHE = true;
-	init( STALE_PEER_OBSERVABILITY,                          false ); // Off by default. When true, InterfaceTracker records per-(addr, role) created/deleted counters and RequestStream copy backtraces so tests/tooling can dump peer-ref accounting. Off → methods no-op. Knob does not change simulator ordering (determinism preserved). StalePeerTest turns it on via the workload's toml override.
+	init( STALE_PEER_OBSERVABILITY,                          true  ); // v41a: on by default for this binary. When true, InterfaceTracker records per-(addr, role) created/deleted counters and RequestStream copy backtraces so tests/tooling can dump peer-ref accounting. Off → methods no-op. Knob does not change simulator ordering (determinism preserved).
 	init( CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED, 1.0 );
 
 	init( DELAY_JITTER_OFFSET,                                 0.9 );
