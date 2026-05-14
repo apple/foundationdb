@@ -260,7 +260,9 @@ Future<Void> runTests(const UnitTestRunnerOptions& options,
 	}
 
 	if (tests.empty()) {
-		TraceEvent(SevError, "NoMatchingFlowTests").detail("TestPattern", options.testPattern);
+		TraceEvent(SevError, "NoMatchingUnitTests")
+		    .detail("Suite", config.suiteName())
+		    .detail("TestPattern", options.testPattern);
 		++result->testsFailed;
 		co_return;
 	}
@@ -275,7 +277,8 @@ Future<Void> runTests(const UnitTestRunnerOptions& options,
 	for (auto test : tests) {
 		fmt::print(stdout, "Testing {}\n", test->name);
 
-		TraceEvent(SevInfo, "RunningFlowTest")
+		TraceEvent(SevInfo, "RunningUnitTest")
+		    .detail("Suite", config.suiteName())
 		    .detail("Name", test->name)
 		    .detail("File", test->file)
 		    .detail("Line", test->line)
@@ -299,8 +302,9 @@ Future<Void> runTests(const UnitTestRunnerOptions& options,
 
 		double wallTime = timer() - startTimer;
 		double flowTime = now() - startNow;
-		TraceEvent(resultCode.code() != error_code_success ? SevError : SevInfo, "FlowTest")
+		TraceEvent(resultCode.code() != error_code_success ? SevError : SevInfo, "UnitTest")
 		    .errorUnsuppressed(resultCode)
+		    .detail("Suite", config.suiteName())
 		    .detail("Name", test->name)
 		    .detail("File", test->file)
 		    .detail("Line", test->line)
