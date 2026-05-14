@@ -69,7 +69,17 @@ void BackupProgress::updateTagVersions(std::map<Tag, Version>* tagVersions,
 	}
 }
 
-std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgress::getUnfinishedBackup() {
+std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgress::getUnfinishedPartitionedBackup() {
+	return getUnfinishedBackup(tagLocalityLogRouter);
+}
+
+std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>>
+BackupProgress::getUnfinishedRangePartitionedBackup() {
+	return getUnfinishedBackup(tagLocalityRangeBackup);
+}
+
+std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgress::getUnfinishedBackup(
+    int8_t locality) {
 	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> toRecruit;
 
 	if (!backupStartedValue.present())
@@ -77,7 +87,7 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 
 	Version lastEnd = invalidVersion;
 	for (const auto& [epoch, info] : epochInfos) {
-		std::set<Tag> tags = enumerateLogRouterTags(info.logRouterTags);
+		std::set<Tag> tags = enumerateTags(locality, info.tags);
 		std::map<Tag, Version> tagVersions;
 
 		// Sometimes, an epoch's begin version is lower than the previous epoch's
@@ -117,8 +127,8 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 					}
 				}
 				if (savedMore > 0) {
-					// The logRouterTags are the same
-					// ASSERT(info.logRouterTags == epochTags[rit->first]);
+					// The tags are the same
+					// ASSERT(info.tags == epochTags[rit->first]);
 					updateTagVersions(&tagVersions, &tags, rit->second, info.epochEnd, adjustedBeginVersion, epoch);
 					if (tags.empty())
 						break;
@@ -137,7 +147,7 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 			    .detail("EndVersion", info.epochEnd);
 		}
 		if (!tagVersions.empty()) {
-			toRecruit[{ epoch, info.epochEnd, info.logRouterTags }] = tagVersions;
+			toRecruit[{ epoch, info.epochEnd, info.tags }] = tagVersions;
 		}
 	}
 	return toRecruit;
@@ -188,7 +198,8 @@ TEST_CASE("/BackupProgress/Unfinished") {
 	BackupProgress progress(UID(0, 0), epochInfos);
 	progress.setBackupStartedValue(Optional<Value>("1"_sr));
 
-	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> unfinished = progress.getUnfinishedBackup();
+	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> unfinished =
+	    progress.getUnfinishedPartitionedBackup();
 	ASSERT(unfinished.size() == 1);
 	for (const auto& [epochVersionCount, tagVersion] : unfinished) {
 		ASSERT(std::get<0>(epochVersionCount) == epoch1 && std::get<1>(epochVersionCount) == end1 &&
@@ -199,7 +210,7 @@ TEST_CASE("/BackupProgress/Unfinished") {
 	const int saved1 = 50, totalTags = 1;
 	WorkerBackupStatus status1(epoch1, saved1, tag1, totalTags);
 	progress.addBackupStatus(status1);
-	unfinished = progress.getUnfinishedBackup();
+	unfinished = progress.getUnfinishedPartitionedBackup();
 	ASSERT(unfinished.size() == 1);
 	for (const auto& [epochVersionCount, tagVersion] : unfinished) {
 		ASSERT(std::get<0>(epochVersionCount) == epoch1 && std::get<1>(epochVersionCount) == end1 &&
