@@ -45,10 +45,18 @@ struct GrvQueueDelayEstimate {
 	Optional<double> batchRateDelay;
 };
 
+enum class GrvRateLeaseState {
+	Unknown,
+	Active,
+	Expired,
+};
+
 GrvQueueDelayEstimate estimateRemainingGrvQueueDelay(TransactionPriority priority,
                                                      int64_t transactionCount,
                                                      GrvQueueTransactionCounts const& queueTransactionCounts,
                                                      GrvTransactionRateInfo const* normalRateInfo,
                                                      GrvTransactionRateInfo const* batchRateInfo);
 
-bool shouldRejectForMaxGrvQueueDelay(GetReadVersionRequest const& req, double remainingDelay);
+bool shouldRejectForMaxGrvQueueDelay(GetReadVersionRequest const& req,
+                                     double remainingDelay,
+                                     GrvRateLeaseState rateLeaseState = GrvRateLeaseState::Unknown);

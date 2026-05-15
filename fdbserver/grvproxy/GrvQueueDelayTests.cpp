@@ -54,9 +54,15 @@ double expectedEstimateDelay(int64_t queuedTransactions, int64_t transactionCoun
 	return deficit / EXPECTED_RATE;
 }
 
-bool expectedShouldReject(Optional<int64_t> maxDelayMS, double elapsedQueueDelay, double remainingDelay) {
+bool expectedShouldReject(Optional<int64_t> maxDelayMS,
+                          double elapsedQueueDelay,
+                          double remainingDelay,
+                          GrvRateLeaseState rateLeaseState) {
 	if (!maxDelayMS.present()) {
 		return false;
+	}
+	if (rateLeaseState == GrvRateLeaseState::Expired) {
+		return true;
 	}
 	double estimatedQueueDelay = std::max(0.0, elapsedQueueDelay) + remainingDelay;
 	return estimatedQueueDelay > maxDelayMS.get() / 1000.0;
@@ -158,7 +164,7 @@ TEST_CASE("/fdbserver/grvproxy/maxGrvQueueDelay/remainingDelayEstimate/disabledR
 	auto estimate =
 	    estimateRemainingGrvQueueDelay(TransactionPriority::DEFAULT, 1, counts, &normalRateInfo, &batchRateInfo);
 
-	ASSERT(std::isinf(estimate.normalRateDelay));
+	ASSERT_EQ(estimate.normalRateDelay, 0.0);
 	ASSERT(!estimate.batchRateDelay.present());
 
 	return Void();
@@ -170,17 +176,34 @@ TEST_CASE("/fdbserver/grvproxy/maxGrvQueueDelay/rejectDecision/table") {
 		Optional<int64_t> maxDelayMS;
 		double requestTimeOffset;
 		double remainingDelay;
+		GrvRateLeaseState rateLeaseState;
 		bool expectedReject;
 	};
 
-	std::array<Case, 7> cases{ {
-		{ "option absent", Optional<int64_t>(), 3600.0, std::numeric_limits<double>::infinity(), false },
-		{ "under threshold", Optional<int64_t>(100), 3600.0, 0.099, false },
-		{ "exactly at threshold", Optional<int64_t>(100), 3600.0, 0.100, false },
-		{ "over threshold", Optional<int64_t>(100), 3600.0, 0.101, true },
-		{ "negative elapsed is clamped", Optional<int64_t>(100), 3600.0, 0.050, false },
-		{ "elapsed queue time contributes", Optional<int64_t>(49), -0.010, 0.040, true },
-		{ "elapsed queue time under threshold", Optional<int64_t>(100), -0.010, 0.040, false },
+	std::array<Case, 8> cases{ {
+		{ "option absent",
+		  Optional<int64_t>(),
+		  3600.0,
+		  std::numeric_limits<double>::infinity(),
+		  GrvRateLeaseState::Expired,
+		  false },
+		{ "under threshold", Optional<int64_t>(100), 3600.0, 0.099, GrvRateLeaseState::Unknown, false },
+		{ "exactly at threshold", Optional<int64_t>(100), 3600.0, 0.100, GrvRateLeaseState::Active, false },
+		{ "over threshold", Optional<int64_t>(100), 3600.0, 0.101, GrvRateLeaseState::Active, true },
+		{ "negative elapsed is clamped", Optional<int64_t>(100), 3600.0, 0.050, GrvRateLeaseState::Unknown, false },
+		{ "elapsed queue time contributes", Optional<int64_t>(49), -0.010, 0.040, GrvRateLeaseState::Active, true },
+		{ "elapsed queue time under threshold",
+		  Optional<int64_t>(100),
+		  -0.010,
+		  0.040,
+		  GrvRateLeaseState::Unknown,
+		  false },
+		{ "expired lease rejects bounded request",
+		  Optional<int64_t>(100),
+		  3600.0,
+		  0.0,
+		  GrvRateLeaseState::Expired,
+		  true },
 	} };
 
 	for (auto const& c : cases) {
@@ -188,10 +211,11 @@ TEST_CASE("/fdbserver/grvproxy/maxGrvQueueDelay/rejectDecision/table") {
 		req.setRequestTime(now() + c.requestTimeOffset);
 		req.maxGrvQueueDelayMS = c.maxDelayMS;
 
-		ASSERT_EQ(shouldRejectForMaxGrvQueueDelay(req, c.remainingDelay), c.expectedReject);
+		ASSERT_EQ(shouldRejectForMaxGrvQueueDelay(req, c.remainingDelay, c.rateLeaseState), c.expectedReject);
 
 		double elapsedLowerBound = c.requestTimeOffset < 0.0 ? -c.requestTimeOffset : 0.0;
-		ASSERT_EQ(expectedShouldReject(c.maxDelayMS, elapsedLowerBound, c.remainingDelay), c.expectedReject);
+		ASSERT_EQ(expectedShouldReject(c.maxDelayMS, elapsedLowerBound, c.remainingDelay, c.rateLeaseState),
+		          c.expectedReject);
 	}
 
 	return Void();
