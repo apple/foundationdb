@@ -155,8 +155,8 @@ TEST_CASE("/fdbserver/grvproxy/maxGrvQueueDelay/remainingDelayEstimate/disabledR
 	GrvQueueTransactionCounts counts;
 	counts.defaultPriority = 10;
 
-	auto estimate = estimateRemainingGrvQueueDelay(
-	    TransactionPriority::DEFAULT, 1, counts, &normalRateInfo, &batchRateInfo);
+	auto estimate =
+	    estimateRemainingGrvQueueDelay(TransactionPriority::DEFAULT, 1, counts, &normalRateInfo, &batchRateInfo);
 
 	ASSERT(std::isinf(estimate.normalRateDelay));
 	ASSERT(!estimate.batchRateDelay.present());
