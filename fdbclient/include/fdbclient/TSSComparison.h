@@ -18,13 +18,10 @@
  * limitations under the License.
  */
 
-/*
- * This header is to declare the tss comparison function that LoadBalance.Actor.h needs to be aware of to call,
- * But StorageServerInterface.h needs to implement on the types defined in SSI.h.
- */
-#ifndef FDBRPC_TSS_COMPARISON_H
-#define FDBRPC_TSS_COMPARISON_H
+#ifndef FDBCLIENT_TSS_COMPARISON_H
+#define FDBCLIENT_TSS_COMPARISON_H
 
+#include "fdbrpc/QueueModel.h"
 #include "fdbrpc/Stats.h"
 #include <unordered_map>
 
@@ -109,6 +106,32 @@ struct TSSMetrics : ReferenceCounted<TSSMetrics>, NonCopyable {
 	    mismatches("Mismatches", cc), SSgetValueLatency(), SSgetKeyLatency(), SSgetKeyValuesLatency(),
 	    SSgetMappedKeyValuesLatency(), TSSgetValueLatency(), TSSgetKeyLatency(), TSSgetKeyValuesLatency(),
 	    TSSgetMappedKeyValuesLatency() {}
+};
+
+struct TSSEndpointData {
+	UID tssId;
+	Endpoint endpoint;
+	Reference<TSSMetrics> metrics;
+
+	TSSEndpointData(UID tssId, Endpoint endpoint, Reference<TSSMetrics> metrics)
+	  : tssId(tssId), endpoint(endpoint), metrics(metrics) {}
+};
+
+class StorageServerQueueModel : public QueueModel {
+public:
+	void updateTssEndpoint(uint64_t endpointId, TSSEndpointData endpointData) {
+		tssData.insert_or_assign(endpointId, std::move(endpointData));
+	}
+
+	void removeTssEndpoint(uint64_t endpointId) { tssData.erase(endpointId); }
+
+	Optional<TSSEndpointData> getTssData(uint64_t endpointId) const {
+		auto it = tssData.find(endpointId);
+		return it == tssData.end() ? Optional<TSSEndpointData>() : Optional<TSSEndpointData>(it->second);
+	}
+
+private:
+	std::unordered_map<uint64_t, TSSEndpointData> tssData;
 };
 
 template <class Rep>

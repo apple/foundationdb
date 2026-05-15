@@ -1583,11 +1583,11 @@ Future<REPLY_TYPE(Request)> loadBalance(
     TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
     AtMostOnce atMostOnce =
         AtMostOnce::False, // if true, throws request_maybe_delivered() instead of retrying automatically
-    QueueModel* model = nullptr,
+    StorageServerQueueModel* model = nullptr,
     bool compareReplicas = false,
     int requiredReplicas = 0) {
 	if (alternatives->hasCaches) {
-		return loadBalance(
+		return loadBalanceImpl(
 		    alternatives->locations(), channel, request, taskID, atMostOnce, model, compareReplicas, requiredReplicas);
 	}
 	return fmap(
@@ -1597,7 +1597,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 		    }
 		    return res;
 	    },
-	    loadBalance(
+	    loadBalanceImpl(
 	        alternatives->locations(), channel, request, taskID, atMostOnce, model, compareReplicas, requiredReplicas));
 }
 } // namespace
@@ -2987,8 +2987,10 @@ static Future<Void> tssStreamComparison(Request request,
 // Currently only used for GetKeyValuesStream but could easily be plugged for other stream types
 // User of the stream has to forward the SS's responses to the returned promise stream, if it is set
 template <class Request, bool P>
-Optional<TSSDuplicateStreamData<REPLYSTREAM_TYPE(Request)>>
-maybeDuplicateTSSStreamFragment(Request& req, QueueModel* model, RequestStream<Request, P> const* ssStream) {
+Optional<TSSDuplicateStreamData<REPLYSTREAM_TYPE(Request)>> maybeDuplicateTSSStreamFragment(
+    Request& req,
+    StorageServerQueueModel* model,
+    RequestStream<Request, P> const* ssStream) {
 	if (model) {
 		Optional<TSSEndpointData> tssData = model->getTssData(ssStream->getEndpoint().token.first());
 
