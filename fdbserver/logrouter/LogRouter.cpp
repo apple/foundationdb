@@ -240,7 +240,7 @@ struct LogRouterData {
 	// recovery version.
 	Future<Void> pullAsyncData();
 
-	Future<Reference<IPeekCursor>> getPeekCursorData(Reference<IPeekCursor> r, Version beginVersion);
+	Future<Reference<IReplayPeekCursor>> getPeekCursorData(Reference<IReplayPeekCursor> r, Version beginVersion);
 
 	// Future<Void> logRouterPop(const TLogPopRequest& req);
 	Future<Void> cleanupPeekTrackers();
@@ -364,8 +364,9 @@ Future<Void> LogRouterData::waitForVersionAndLog(Version ver) {
 	}
 }
 
-Future<Reference<IPeekCursor>> LogRouterData::getPeekCursorData(Reference<IPeekCursor> r, Version beginVersion) {
-	Reference<IPeekCursor> result = r;
+Future<Reference<IReplayPeekCursor>> LogRouterData::getPeekCursorData(Reference<IReplayPeekCursor> r,
+                                                                      Version beginVersion) {
+	Reference<IReplayPeekCursor> result = r;
 	bool useSatellite = SERVER_KNOBS->LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED;
 	uint32_t noPrimaryPeekLocation = 0;
 
@@ -402,7 +403,7 @@ Future<Reference<IPeekCursor>> LogRouterData::getPeekCursorData(Reference<IPeekC
 				              .detail("LogID", result->getPrimaryPeekLocation())
 				              .trackLatest(eventCacheHolder->trackingKey);
 			          } else {
-				          result = Reference<IPeekCursor>();
+				          result = Reference<IReplayPeekCursor>();
 			          }
 			          logSystemChanged = logSystem->onChange();
 		          })
@@ -436,7 +437,7 @@ Future<Reference<IPeekCursor>> LogRouterData::getPeekCursorData(Reference<IPeekC
 }
 
 Future<Void> LogRouterData::pullAsyncData() {
-	Reference<IPeekCursor> r;
+	Reference<IReplayPeekCursor> r;
 	Version tagAt = version.get() + 1;
 	Version lastVer = 0;
 	std::vector<int> tags; // an optimization to avoid reallocating vector memory in every loop
