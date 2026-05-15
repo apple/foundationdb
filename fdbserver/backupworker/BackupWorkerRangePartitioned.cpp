@@ -369,13 +369,7 @@ Future<Version> pullPartitionMapFromTLog(BackupRangePartitionedData* self, Parti
 				continue;
 			}
 			bool isPartitionMap = PartitionMapMessage::isNextIn(reader);
-			if (!isPartitionMap) {
-				TraceEvent(SevError, "BWRangeParitionedPartitionMapNotReceived", self->myId)
-				    .detail("Version", msgVersion)
-				    .detail("Tag", self->tag.toString())
-				    .detail("MessageSize", message.size());
-				throw worker_removed();
-			}
+			ASSERT(isPartitionMap);
 
 			PartitionMapMessage pmMsg;
 			reader >> pmMsg;
@@ -416,6 +410,7 @@ Future<Void> uploadPartitionList(BackupRangePartitionedData* self, PartitionMap 
 // 2. For older epochs with different containers is PartitionMap specific to container or same for all.
 // Right now assumption is that PartitionMap will be passed by TLOG with the first message after start version for both
 // older epochs and newer epochs.
+// 3. Provide implemention for recovery where paritionmap can come any time and won't be the first message.
 Future<Void> waitAndProcessPartitionMap(BackupRangePartitionedData* self) {
 	TraceEvent("BWRangeParitionedWaitingForPartitionMap", self->myId)
 	    .detail("Tag", self->tag.toString())
