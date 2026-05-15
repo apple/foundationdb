@@ -231,7 +231,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 			return;
 		}
 		bcUrl = url;
-		bc = IBackupContainer::openContainer(url.toString(), proxy, {});
+		bc = IBackupContainer::openContainer(url.toString(), proxy, {}, 0);
 	}
 };
 
