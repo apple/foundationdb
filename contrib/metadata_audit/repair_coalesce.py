@@ -337,7 +337,7 @@ def main():
             if args.keep_dd_disabled:
                 print("\n[4] Keeping DD disabled (--keep-dd-disabled flag)")
                 print("    DD remains disabled for subsequent repairs")
-                print("    Re-enable manually with: fdbcli --exec \"writemode on; set \\xff/dataDistributionMode \\x01\"")
+                print("    Re-enable manually with: fdbcli --exec \"option on ACCESS_SYSTEM_KEYS; writemode on; set \\xff/dataDistributionMode \\x01\\x00\\x00\\x00\"")
             else:
                 print("\n[4] Re-enabling DD and releasing MoveKeysLock...")
                 try:
