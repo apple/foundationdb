@@ -35,8 +35,11 @@ bool GrvTransactionRateInfo::canStart(int64_t numAlreadyStarted, int64_t count) 
 }
 
 double GrvTransactionRateInfo::estimateDelay(int64_t numAlreadyStarted, int64_t count) const {
-	if (canStart(numAlreadyStarted, count) || disabled) {
+	if (canStart(numAlreadyStarted, count)) {
 		return 0.0;
+	}
+	if (disabled) {
+		return std::numeric_limits<double>::infinity();
 	}
 	if (rate <= 0.0) {
 		return std::numeric_limits<double>::infinity();

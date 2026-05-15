@@ -147,6 +147,23 @@ TEST_CASE("/fdbserver/grvproxy/maxGrvQueueDelay/remainingDelayEstimate/table") {
 	return Void();
 }
 
+TEST_CASE("/fdbserver/grvproxy/maxGrvQueueDelay/remainingDelayEstimate/disabledRateInfo") {
+	GrvTransactionRateInfo normalRateInfo = makeRateInfo();
+	GrvTransactionRateInfo batchRateInfo = makeRateInfo();
+	normalRateInfo.disable();
+
+	GrvQueueTransactionCounts counts;
+	counts.defaultPriority = 10;
+
+	auto estimate = estimateRemainingGrvQueueDelay(
+	    TransactionPriority::DEFAULT, 1, counts, &normalRateInfo, &batchRateInfo);
+
+	ASSERT(std::isinf(estimate.normalRateDelay));
+	ASSERT(!estimate.batchRateDelay.present());
+
+	return Void();
+}
+
 TEST_CASE("/fdbserver/grvproxy/maxGrvQueueDelay/rejectDecision/table") {
 	struct Case {
 		std::string_view name;
