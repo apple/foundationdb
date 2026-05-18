@@ -835,6 +835,11 @@ static AsyncResult<JsonBuilderObject> processStatusFetcher(
 				roles.addRole("router", it.interf());
 			}
 		}
+		for (auto& backupWorker : tLogSet.backupWorkers) {
+			if (backupWorker.present()) {
+				roles.addRole("backup", backupWorker.interf());
+			}
+		}
 	}
 
 	std::vector<OldTLogConf>::const_iterator oldTLogIter;
@@ -849,6 +854,11 @@ static AsyncResult<JsonBuilderObject> processStatusFetcher(
 			for (auto& it : tLogSet.logRouters) {
 				if (it.present()) {
 					roles.addRole("router", it.interf());
+				}
+			}
+			for (auto& backupWorker : tLogSet.backupWorkers) {
+				if (backupWorker.present()) {
+					roles.addRole("backup", backupWorker.interf());
 				}
 			}
 		}
