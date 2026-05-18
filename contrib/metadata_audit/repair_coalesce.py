@@ -8,7 +8,7 @@ Running it multiple times is safe.
 The algorithm:
 1. Scan entries in key order
 2. Find runs of adjacent entries with equivalent values
-3. Delete all but the LAST entry in each run (keeping the boundary)
+3. Delete all but the FIRST entry in each run (it defines where the range starts)
 
 For serverKeys:
   Adjacent entries with same value (TRUE or FALSE) are redundant.
@@ -337,7 +337,7 @@ def main():
             if args.keep_dd_disabled:
                 print("\n[4] Keeping DD disabled (--keep-dd-disabled flag)")
                 print("    DD remains disabled for subsequent repairs")
-                print("    Re-enable manually with: fdbcli --exec \"writemode on; set \\xff/dataDistributionMode \\x01\"")
+                print("    Re-enable manually with: fdbcli --exec \"option on ACCESS_SYSTEM_KEYS; writemode on; set \\xff/dataDistributionMode \\x01\\x00\\x00\\x00\"")
             else:
                 print("\n[4] Re-enabling DD and releasing MoveKeysLock...")
                 try:
