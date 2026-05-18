@@ -4015,7 +4015,7 @@ Future<Void> periodicAuditLocationMetadata(Reference<DataDistributor> self) {
 			    co_await launchAudit(self, allKeys, AuditType::ValidateLocationMetadata, KeyValueStoreType::END);
 			TraceEvent("DDAuditPeriodicAuditLocationMetadata", self->ddId)
 			    .detail("AuditID", auditID)
-			    .state("State", "Finished");
+			    .detail("State", "Finished");
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
