@@ -62,6 +62,8 @@ struct GrvProxyStats {
 	int systemGRVQueueSize;
 	int defaultGRVQueueSize;
 	int batchGRVQueueSize;
+	int versionVectorSize;
+	int versionVectorEncodedBytes;
 	double transactionRateAllowed;
 	double batchTransactionRateAllowed;
 	double transactionLimit;
@@ -125,10 +127,10 @@ struct GrvProxyStats {
 	    txnDefaultPriorityStartIn("TxnDefaultPriorityStartIn", cc),
 	    txnDefaultPriorityStartOut("TxnDefaultPriorityStartOut", cc), txnThrottled("TxnThrottled", cc),
 	    updatesFromRatekeeper("UpdatesFromRatekeeper", cc), leaseTimeouts("LeaseTimeouts", cc), systemGRVQueueSize(0),
-	    defaultGRVQueueSize(0), batchGRVQueueSize(0), transactionRateAllowed(0), batchTransactionRateAllowed(0),
-	    transactionLimit(0), batchTransactionLimit(0), percentageOfDefaultGRVQueueProcessed(0),
-	    percentageOfBatchGRVQueueProcessed(0), lastBatchQueueThrottled(false), lastDefaultQueueThrottled(false),
-	    batchThrottleStartTime(0.0), defaultThrottleStartTime(0.0),
+	    defaultGRVQueueSize(0), batchGRVQueueSize(0), versionVectorSize(0), versionVectorEncodedBytes(0),
+	    transactionRateAllowed(0), batchTransactionRateAllowed(0), transactionLimit(0), batchTransactionLimit(0),
+	    percentageOfDefaultGRVQueueProcessed(0), percentageOfBatchGRVQueueProcessed(0), lastBatchQueueThrottled(false),
+	    lastDefaultQueueThrottled(false), batchThrottleStartTime(0.0), defaultThrottleStartTime(0.0),
 	    defaultTxnGRVTimeInQueue("DefaultTxnGRVTimeInQueue",
 	                             id,
 	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -156,6 +158,10 @@ struct GrvProxyStats {
 		specialCounter(cc, "SystemGRVQueueSize", [this]() { return this->systemGRVQueueSize; });
 		specialCounter(cc, "DefaultGRVQueueSize", [this]() { return this->defaultGRVQueueSize; });
 		specialCounter(cc, "BatchGRVQueueSize", [this]() { return this->batchGRVQueueSize; });
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+			specialCounter(cc, "VersionVectorSize", [this]() { return this->versionVectorSize; });
+			specialCounter(cc, "VersionVectorEncodedBytes", [this]() { return this->versionVectorEncodedBytes; });
+		}
 		specialCounter(
 		    cc, "SystemAndDefaultTxnRateAllowed", [this]() { return int64_t(this->transactionRateAllowed); });
 		specialCounter(
@@ -733,8 +739,9 @@ Future<GetReadVersionReply> getLiveCommittedVersion(std::vector<SpanContext> spa
 	grvProxyData->minKnownCommittedVersion =
 	    std::max(grvProxyData->minKnownCommittedVersion, repFromMaster.minKnownCommittedVersion);
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
-		// TODO add to "status json"
 		grvProxyData->ssVersionVectorCache.applyDelta(repFromMaster.ssVersionVectorDelta);
+		grvProxyData->stats.versionVectorSize = grvProxyData->ssVersionVectorCache.size();
+		grvProxyData->stats.versionVectorEncodedBytes = grvProxyData->ssVersionVectorCache.getEncodedSize();
 	}
 	grvProxyData->stats.grvGetCommittedVersionRpcDist->sampleSeconds(now() - grvConfirmEpochLive);
 	GetReadVersionReply rep;

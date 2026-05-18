@@ -875,7 +875,7 @@ void LogSystem::resetBestServerIfNotLocked(
 	}
 }
 
-Reference<IPeekCursor> LogSystem::peekAll(UID dbgid, Version begin, Version end, Tag tag, bool parallelGetMore) {
+Reference<IReplayPeekCursor> LogSystem::peekAll(UID dbgid, Version begin, Version end, Tag tag, bool parallelGetMore) {
 	int bestSet = 0;
 	std::vector<Reference<LogSet>> localSets;
 	Version lastBegin = 0;
@@ -919,7 +919,7 @@ Reference<IPeekCursor> LogSystem::peekAll(UID dbgid, Version begin, Version end,
 		return makeReference<SetPeekCursor>(
 		    localSets, bestSet, bestServer, tag, begin, end, parallelGetMore, bestKnownLockedTLogIds);
 	} else {
-		std::vector<Reference<IPeekCursor>> cursors;
+		std::vector<Reference<IReplayPeekCursor>> cursors;
 		std::vector<LogMessageVersion> epochEnds;
 
 		if (lastBegin < end && !localSets.empty()) {
@@ -1010,7 +1010,7 @@ Reference<IPeekCursor> LogSystem::peekAll(UID dbgid, Version begin, Version end,
 			}
 		}
 
-		return makeReference<MultiCursor>(cursors, epochEnds);
+		return makeReference<ReplayMultiCursor>(cursors, epochEnds);
 	}
 }
 
@@ -1162,12 +1162,12 @@ Reference<IPeekCursor> LogSystem::peek(UID dbgid,
 	return makeReference<BufferedCursor>(cursors, begin, end.present() ? end.get() + 1 : getPeekEnd(), true, false);
 }
 
-Reference<IPeekCursor> LogSystem::peekLocal(UID dbgid,
-                                            Tag tag,
-                                            Version begin,
-                                            Version end,
-                                            bool useMergePeekCursors,
-                                            int8_t peekLocality) {
+Reference<IReplayPeekCursor> LogSystem::peekLocal(UID dbgid,
+                                                  Tag tag,
+                                                  Version begin,
+                                                  Version end,
+                                                  bool useMergePeekCursors,
+                                                  int8_t peekLocality) {
 	if (tag.locality >= 0 || tag.locality == tagLocalitySpecial) {
 		peekLocality = tag.locality;
 	}
@@ -1237,7 +1237,7 @@ Reference<IPeekCursor> LogSystem::peekLocal(UID dbgid,
 			    tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor(tag)], tag, begin, end, false, false);
 		}
 	} else {
-		std::vector<Reference<IPeekCursor>> cursors;
+		std::vector<Reference<IReplayPeekCursor>> cursors;
 		std::vector<LogMessageVersion> epochEnds;
 
 		if (tLogs[bestSet]->startVersion < end) {
@@ -1373,7 +1373,7 @@ Reference<IPeekCursor> LogSystem::peekLocal(UID dbgid,
 			}
 		}
 
-		return makeReference<MultiCursor>(cursors, epochEnds);
+		return makeReference<ReplayMultiCursor>(cursors, epochEnds);
 	}
 }
 
@@ -1401,7 +1401,7 @@ Reference<IPeekCursor> LogSystem::peekTxs(UID dbgid,
 	}
 
 	if (peekLocality < 0 || localEnd == invalidVersion || localEnd <= begin) {
-		std::vector<Reference<IPeekCursor>> cursors;
+		std::vector<Reference<IReplayPeekCursor>> cursors;
 		cursors.reserve(maxTxsTags);
 		for (int i = 0; i < maxTxsTags; i++) {
 			cursors.push_back(peekAll(dbgid, begin, end, Tag(tagLocalityTxs, i), true));
@@ -1412,7 +1412,7 @@ Reference<IPeekCursor> LogSystem::peekTxs(UID dbgid,
 
 	try {
 		if (localEnd >= end) {
-			std::vector<Reference<IPeekCursor>> cursors;
+			std::vector<Reference<IReplayPeekCursor>> cursors;
 			cursors.reserve(maxTxsTags);
 			for (int i = 0; i < maxTxsTags; i++) {
 				cursors.push_back(peekLocal(dbgid, Tag(tagLocalityTxs, i), begin, end, true, peekLocality));
@@ -1426,8 +1426,8 @@ Reference<IPeekCursor> LogSystem::peekTxs(UID dbgid,
 
 		cursors.resize(2);
 
-		std::vector<Reference<IPeekCursor>> localCursors;
-		std::vector<Reference<IPeekCursor>> allCursors;
+		std::vector<Reference<IReplayPeekCursor>> localCursors;
+		std::vector<Reference<IReplayPeekCursor>> allCursors;
 		for (int i = 0; i < maxTxsTags; i++) {
 			localCursors.push_back(peekLocal(dbgid, Tag(tagLocalityTxs, i), begin, localEnd, true, peekLocality));
 			allCursors.push_back(peekAll(dbgid, localEnd, end, Tag(tagLocalityTxs, i), true));
@@ -1440,7 +1440,7 @@ Reference<IPeekCursor> LogSystem::peekTxs(UID dbgid,
 		return makeReference<MultiCursor>(cursors, epochEnds);
 	} catch (Error& e) {
 		if (e.code() == error_code_worker_removed) {
-			std::vector<Reference<IPeekCursor>> cursors;
+			std::vector<Reference<IReplayPeekCursor>> cursors;
 			cursors.reserve(maxTxsTags);
 			for (int i = 0; i < maxTxsTags; i++) {
 				cursors.push_back(peekAll(dbgid, begin, end, Tag(tagLocalityTxs, i), true));
@@ -1452,10 +1452,10 @@ Reference<IPeekCursor> LogSystem::peekTxs(UID dbgid,
 	}
 }
 
-Reference<IPeekCursor> LogSystem::peekSingle(UID dbgid,
-                                             Version begin,
-                                             Tag tag,
-                                             std::vector<std::pair<Version, Tag>> history) {
+Reference<IReplayPeekCursor> LogSystem::peekSingle(UID dbgid,
+                                                   Version begin,
+                                                   Tag tag,
+                                                   std::vector<std::pair<Version, Tag>> history) {
 	while (!history.empty() && begin >= history.back().first) {
 		history.pop_back();
 	}
@@ -1464,7 +1464,7 @@ Reference<IPeekCursor> LogSystem::peekSingle(UID dbgid,
 		TraceEvent("TLogPeekSingleNoHistory", dbgid).detail("Tag", tag.toString()).detail("Begin", begin);
 		return peekLocal(dbgid, tag, begin, getPeekEnd(), false);
 	} else {
-		std::vector<Reference<IPeekCursor>> cursors;
+		std::vector<Reference<IReplayPeekCursor>> cursors;
 		std::vector<LogMessageVersion> epochEnds;
 
 		TraceEvent("TLogPeekSingleAddingLocal", dbgid).detail("Tag", tag.toString()).detail("Begin", history[0].first);
@@ -1484,11 +1484,11 @@ Reference<IPeekCursor> LogSystem::peekSingle(UID dbgid,
 			epochEnds.emplace_back(history[i].first);
 		}
 
-		return makeReference<MultiCursor>(cursors, epochEnds);
+		return makeReference<ReplayMultiCursor>(cursors, epochEnds);
 	}
 }
 
-Reference<IPeekCursor> LogSystem::peekLogRouter(
+Reference<IReplayPeekCursor> LogSystem::peekLogRouter(
     UID dbgid,
     Version begin,
     Tag tag,
