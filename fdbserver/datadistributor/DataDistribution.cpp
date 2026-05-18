@@ -4003,16 +4003,19 @@ Future<Void> periodicAuditLocationMetadata(Reference<DataDistributor> self) {
 		co_return;
 	}
 	co_await self->auditStorageInitialized.getFuture();
-	TraceEvent("PeriodicAuditLocationMetadataEnabled", self->ddId)
+	TraceEvent("DDAuditPeriodicAuditLocationMetadataEnabled", self->ddId)
 	    .detail("IntervalSeconds", SERVER_KNOBS->AUDIT_LOCATION_METADATA_INTERVAL);
 	while (true) {
 		co_await delay(SERVER_KNOBS->AUDIT_LOCATION_METADATA_INTERVAL);
 		try {
+			TraceEvent("DDAuditPeriodicAuditLocationMetadata", self->ddId).detail("State", "Starting");
 			co_await self->auditStorageLocationMetadataLaunchingLock.take(TaskPriority::DefaultYield);
 			FlowLock::Releaser holder(self->auditStorageLocationMetadataLaunchingLock);
 			UID auditID =
 			    co_await launchAudit(self, allKeys, AuditType::ValidateLocationMetadata, KeyValueStoreType::END);
-			TraceEvent("PeriodicAuditLocationMetadataLaunched", self->ddId).detail("AuditID", auditID);
+			TraceEvent("DDAuditPeriodicAuditLocationMetadata", self->ddId)
+			    .detail("AuditID", auditID)
+			    .state("State", "Finished");
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
