@@ -4020,7 +4020,7 @@ Future<Void> periodicAuditLocationMetadata(Reference<DataDistributor> self) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
 			}
-			TraceEvent(SevWarn, "PeriodicAuditLocationMetadataError", self->ddId).error(e);
+			TraceEvent(SevWarn, "DDAuditPeriodicAuditLocationMetadataError", self->ddId).error(e);
 		}
 	}
 }
