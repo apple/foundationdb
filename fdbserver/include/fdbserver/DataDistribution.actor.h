@@ -168,7 +168,6 @@ struct RelocateShard {
 
 	bool isRestore() const { return this->dataMove != nullptr; }
 
-private:
 	RelocateShard()
 	  : priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::OTHER),
 	    moveReason(DataMovementReason::INVALID) {}
