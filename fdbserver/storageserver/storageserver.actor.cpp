@@ -1179,7 +1179,7 @@ public:
 	ProtocolVersion logProtocol;
 
 	Reference<LogSystemConsumer> logSystem;
-	Reference<IPeekCursor> logCursor;
+	Reference<IReplayPeekCursor> logCursor;
 
 	// The version the cluster starts on. This value is not persisted and may
 	// not be valid after a recovery.
@@ -9627,7 +9627,7 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				co_await data->byteSampleClearsTooLarge.onChange();
 			}
 
-			Reference<IPeekCursor> cursor = data->logCursor;
+			Reference<IReplayPeekCursor> cursor = data->logCursor;
 
 			double beforeTLogCursorReads = now();
 			while (true) {
@@ -9666,7 +9666,7 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 			start = now();
 			FetchInjectionInfo fii;
-			Reference<IPeekCursor> cloneCursor2 = cursor->cloneNoMore();
+			Reference<IReplayPeekCursor> cloneCursor2 = cursor->cloneNoMore();
 
 			// Collect eager read keys.
 			while (true) {
@@ -9676,7 +9676,7 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				bool firstMutation = true;
 				bool dbgLastMessageWasProtocol = false;
 
-				Reference<IPeekCursor> cloneCursor1 = cloneCursor2->cloneNoMore();
+				Reference<IReplayPeekCursor> cloneCursor1 = cloneCursor2->cloneNoMore();
 
 				cloneCursor1->setProtocolVersion(data->logProtocol);
 
@@ -11911,7 +11911,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	state Future<Void> doUpdate = Void();
 	state bool updateReceived = false; // true iff the current update() actor assigned to doUpdate has already
 	                                   // received an update from the tlog
-	state double lastLoopTopTime = now();
+	state double lastLoopResumeTime = now();
 	state Future<Void> dbInfoChange = Void();
 	state Future<Void> checkLastUpdate = Void();
 	state Future<Void> updateProcessStatsTimer = delay(SERVER_KNOBS->STORAGE_UPDATE_PROCESS_STATS_INTERVAL);
@@ -11946,15 +11946,15 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 		++self->counters.loops;
 
 		double loopTopTime = now();
-		double elapsedTime = loopTopTime - lastLoopTopTime;
+		double elapsedTime = loopTopTime - lastLoopResumeTime;
 		if (elapsedTime > 0.050) {
 			if (deterministicRandom()->random01() < 0.01)
 				TraceEvent(SevWarn, "SlowSSLoopx100", self->thisServerID).detail("Elapsed", elapsedTime);
 		}
-		lastLoopTopTime = loopTopTime;
 
 		choose {
 			when(wait(checkLastUpdate)) {
+				lastLoopResumeTime = now();
 				if (now() - self->lastUpdate >= CLIENT_KNOBS->NO_RECENT_UPDATES_DURATION) {
 					self->noRecentUpdates.set(true);
 					checkLastUpdate = delay(CLIENT_KNOBS->NO_RECENT_UPDATES_DURATION);
@@ -11964,6 +11964,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				}
 			}
 			when(wait(dbInfoChange)) {
+				lastLoopResumeTime = now();
 				CODE_PROBE(self->logSystem, "shardServer dbInfo changed");
 				dbInfoChange = self->db->onChange();
 				if (self->db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
@@ -11999,6 +12000,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				}
 			}
 			when(GetShardStateRequest req = waitNext(ssi.getShardState.getFuture())) {
+				lastLoopResumeTime = now();
 				if (req.mode == GetShardStateRequest::NO_WAIT) {
 					if (self->isReadable(req.keys))
 						req.reply.send(GetShardStateReply{ self->version.get(), self->durableVersion.get() });
@@ -12009,12 +12011,15 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				}
 			}
 			when(StorageQueuingMetricsRequest req = waitNext(ssi.getQueuingMetrics.getFuture())) {
+				lastLoopResumeTime = now();
 				getQueuingMetrics(self, req);
 			}
 			when(ReplyPromise<KeyValueStoreType> reply = waitNext(ssi.getKeyValueStoreType.getFuture())) {
+				lastLoopResumeTime = now();
 				reply.send(self->storage.getKeyValueStoreType());
 			}
 			when(wait(doUpdate)) {
+				lastLoopResumeTime = now();
 				updateReceived = false;
 				if (!self->logSystem)
 					doUpdate = Never();
@@ -12022,12 +12027,15 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 					doUpdate = update(self, &updateReceived);
 			}
 			when(GetCheckpointRequest req = waitNext(ssi.checkpoint.getFuture())) {
+				lastLoopResumeTime = now();
 				self->actors.add(getCheckpointQ(self, req));
 			}
 			when(FetchCheckpointRequest req = waitNext(ssi.fetchCheckpoint.getFuture())) {
+				lastLoopResumeTime = now();
 				self->actors.add(fetchCheckpointQ(self, req));
 			}
 			when(UpdateCommitCostRequest req = waitNext(ssi.updateCommitCostRequest.getFuture())) {
+				lastLoopResumeTime = now();
 				// Ratekeeper might change with a new ID. In this case, always accept the data.
 				if (req.ratekeeperID != self->busiestWriteTagContext.ratekeeperID) {
 					TraceEvent("RatekeeperIDChange")
@@ -12057,9 +12065,11 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				req.reply.send(Void());
 			}
 			when(FetchCheckpointKeyValuesRequest req = waitNext(ssi.fetchCheckpointKeyValues.getFuture())) {
+				lastLoopResumeTime = now();
 				self->actors.add(fetchCheckpointKeyValuesQ(self, req));
 			}
 			when(AuditStorageRequest req = waitNext(ssi.auditStorage.getFuture())) {
+				lastLoopResumeTime = now();
 				// Check req
 				if (!req.id.isValid() || !req.ddId.isValid() || req.range.empty() ||
 				    req.getType() == AuditType::ValidateLocationMetadata) {
@@ -12088,15 +12098,18 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				}
 			}
 			when(BulkDumpRequest req = waitNext(ssi.bulkdump.getFuture())) {
+				lastLoopResumeTime = now();
 				TraceEvent(bulkLoadVerboseEventSev(), "SSBulkDumpRequestReceived", self->thisServerID)
 				    .detail("BulkDumpRequest", req.toString());
 				self->actors.add(bulkDumpQ(self, req));
 			}
 			when(wait(updateProcessStatsTimer)) {
+				lastLoopResumeTime = now();
 				updateProcessStats(self);
 				updateProcessStatsTimer = delay(SERVER_KNOBS->STORAGE_UPDATE_PROCESS_STATS_INTERVAL);
 			}
 			when(GetHotShardsRequest req = waitNext(ssi.getHotShards.getFuture())) {
+				lastLoopResumeTime = now();
 				struct ComparePair {
 					bool operator()(const std::pair<KeyRange, int64_t>& lhs, const std::pair<KeyRange, int64_t>& rhs) {
 						return lhs.second > rhs.second;
@@ -12132,10 +12145,13 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				req.reply.send(reply);
 			}
 			when(GetStorageCheckSumRequest req = waitNext(ssi.getCheckSum.getFuture())) {
+				lastLoopResumeTime = now();
 				TraceEvent(SevError, "GetStorageCheckSumHasNotImplemented", ssi.id());
 				req.reply.sendError(not_implemented());
 			}
-			when(wait(self->actors.getResult())) {}
+			when(wait(self->actors.getResult())) {
+				ASSERT(false);
+			}
 		}
 	}
 }

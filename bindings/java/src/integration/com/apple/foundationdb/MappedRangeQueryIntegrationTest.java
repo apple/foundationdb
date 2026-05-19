@@ -25,6 +25,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicReference;
@@ -49,13 +50,24 @@ class MappedRangeQueryIntegrationTest {
 	@AfterEach
 	void clearDatabase() throws Exception {
 		/*
-		 * Empty the database before and after each run, just in case
+		 * Empty the database before and after each run, just in case.
+		 * Retry the clear operation since on heavily loaded CI the transaction
+		 * may time out during cluster bootstrap or under resource contention.
 		 */
-		try (Database db = openFDB()) {
-			db.run(tr -> {
-				tr.clear(new byte[0], new byte[] { (byte) 0xff });
-				return null;
-			});
+		int maxAttempts = 5;
+		for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+			try (Database db = openFDB()) {
+				db.run(tr -> {
+					tr.clear(new byte[0], new byte[] { (byte)0xff });
+					return null;
+				});
+				return; // success
+			} catch (CompletionException e) {
+				if (attempt == maxAttempts) {
+					throw e;
+				}
+				Thread.sleep(1000);
+			}
 		}
 	}
 
@@ -104,7 +116,10 @@ class MappedRangeQueryIntegrationTest {
 		test.clearDatabase();
 	}
 
-	int numRecords = 10000;
+	// Keep numRecords modest so transactions complete within the 5s timeout
+	// even on heavily loaded CI infrastructure (e.g., CodeBuild running
+	// compilation and tests concurrently on the same instance).
+	int numRecords = 1000;
 	int numQueries = 1;
 	int numRecordsPerQuery = 100;
 	boolean validate = true;

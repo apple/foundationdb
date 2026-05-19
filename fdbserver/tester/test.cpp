@@ -280,7 +280,7 @@ Future<bool> runTest(Database cx,
 
 		// Run the consistency check workload
 		if (spec.runConsistencyCheck) {
-			bool quiescent = g_network->isSimulated() ? !BUGGIFY : spec.waitForQuiescenceEnd;
+			bool quiescent = g_network->isSimulated() ? !isGeneralBuggifyEnabled() : spec.waitForQuiescenceEnd;
 			try {
 				if (quiescent) {
 					printf("Running urgent consistency check...\n");

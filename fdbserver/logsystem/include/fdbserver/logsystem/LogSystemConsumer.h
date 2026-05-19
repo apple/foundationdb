@@ -30,7 +30,7 @@
 struct LogSystemConsumer : ReferenceCounted<LogSystemConsumer> {
 	explicit LogSystemConsumer(Reference<LogSystem> logSystem) : logSystem(logSystem) {}
 
-	Reference<IPeekCursor> peekAll(UID dbgid, Version begin, Version end, Tag tag, bool parallelGetMore);
+	Reference<IReplayPeekCursor> peekAll(UID dbgid, Version begin, Version end, Tag tag, bool parallelGetMore);
 	Reference<IPeekCursor> peekRemote(UID dbgid, Version begin, Optional<Version> end, Tag tag, bool parallelGetMore);
 	Reference<IPeekCursor> peek(UID dbgid, Version begin, Optional<Version> end, Tag tag, bool parallelGetMore);
 	Reference<IPeekCursor> peek(UID dbgid,
@@ -38,29 +38,30 @@ struct LogSystemConsumer : ReferenceCounted<LogSystemConsumer> {
 	                            Optional<Version> end,
 	                            std::vector<Tag> tags,
 	                            bool parallelGetMore);
-	Reference<IPeekCursor> peekLocal(UID dbgid,
-	                                 Tag tag,
-	                                 Version begin,
-	                                 Version end,
-	                                 bool useMergePeekCursors,
-	                                 int8_t peekLocality = tagLocalityInvalid);
+	Reference<IReplayPeekCursor> peekLocal(UID dbgid,
+	                                       Tag tag,
+	                                       Version begin,
+	                                       Version end,
+	                                       bool useMergePeekCursors,
+	                                       int8_t peekLocality = tagLocalityInvalid);
 	Reference<IPeekCursor> peekTxs(UID dbgid,
 	                               Version begin,
 	                               int8_t peekLocality,
 	                               Version localEnd,
 	                               bool canDiscardPopped);
-	Reference<IPeekCursor> peekSingle(
+	Reference<IReplayPeekCursor> peekSingle(
 	    UID dbgid,
 	    Version begin,
 	    Tag tag,
 	    std::vector<std::pair<Version, Tag>> history = std::vector<std::pair<Version, Tag>>());
-	Reference<IPeekCursor> peekLogRouter(UID dbgid,
-	                                     Version begin,
-	                                     Tag tag,
-	                                     bool useSatellite,
-	                                     Optional<Version> end = Optional<Version>(),
-	                                     const Optional<std::map<uint8_t, std::vector<uint16_t>>>& knownStoppedTLogIds =
-	                                         Optional<std::map<uint8_t, std::vector<uint16_t>>>());
+	Reference<IReplayPeekCursor> peekLogRouter(
+	    UID dbgid,
+	    Version begin,
+	    Tag tag,
+	    bool useSatellite,
+	    Optional<Version> end = Optional<Version>(),
+	    const Optional<std::map<uint8_t, std::vector<uint16_t>>>& knownStoppedTLogIds =
+	        Optional<std::map<uint8_t, std::vector<uint16_t>>>());
 
 	void popLogRouter(Version upTo, Tag tag, Version durableKnownCommittedVersion, int8_t popLocality);
 	void popTxs(Version upTo, int8_t popLocality = tagLocalityInvalid);

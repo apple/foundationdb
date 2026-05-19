@@ -421,9 +421,10 @@ AsyncResult<StatusObject> clientStatusFetcher(Reference<IClusterConnectionRecord
 // Cluster section of json output
 AsyncResult<Optional<StatusObject>> clusterStatusFetcher(ClusterInterface cI,
                                                          StatusArray* messages,
-                                                         std::string statusField) {
+                                                         std::string statusField,
+                                                         double timeoutSeconds) {
 	StatusRequest req(statusField);
-	Future<Void> clusterTimeout = delay(CLIENT_KNOBS->STATUS_TIMEOUT);
+	Future<Void> clusterTimeout = delay(timeoutSeconds);
 	Optional<StatusObject> oStatusObj;
 
 	co_await delay(0.0); // make sure the cluster controller is marked as not failed
@@ -511,6 +512,9 @@ AsyncResult<StatusObject> statusFetcherImpl(Reference<IClusterConnectionRecord> 
 	if (!g_network)
 		throw network_not_setup();
 
+	// Keep the overall status request within STATUS_TIMEOUT, including the client-side coordinator probe that runs
+	// before we ask the cluster controller for its status payload.
+	double statusDeadline = now() + CLIENT_KNOBS->STATUS_TIMEOUT;
 	StatusObject statusObj;
 	StatusObject statusObjClient;
 	StatusArray clientMessages;
@@ -542,11 +546,14 @@ AsyncResult<StatusObject> statusFetcherImpl(Reference<IClusterConnectionRecord> 
 
 	if (quorum_reachable) {
 		try {
-			Future<Void> interfaceTimeout = delay(2.0);
+			Future<Void> interfaceTimeout = delay(std::min(2.0, std::max(0.0, statusDeadline - now())));
 			while (true) {
 				if (clusterInterface->get().present()) {
 					Optional<StatusObject> _statusObjCluster =
-					    co_await clusterStatusFetcher(clusterInterface->get().get(), &clientMessages, statusField);
+					    co_await clusterStatusFetcher(clusterInterface->get().get(),
+					                                  &clientMessages,
+					                                  statusField,
+					                                  std::max(0.0, statusDeadline - now()));
 					if (_statusObjCluster.present()) {
 						statusObjCluster = std::move(_statusObjCluster).get();
 						// TODO: this is a temporary fix, getting the number of available coordinators should move to

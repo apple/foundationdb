@@ -920,6 +920,7 @@ public:
 	int MOVE_KEYS_KRM_LIMIT;
 	int FINISH_MOVE_KEYS_MAX_RETRIES; // Max retries in finishMoveKeys before returning move to queue; set very high to
 	                                  // disable
+	int START_MOVE_KEYS_MAX_RETRIES;
 	int MOVE_KEYS_KRM_LIMIT_BYTES; // This must be sufficiently larger than CLIENT_KNOBS->KEY_SIZE_LIMIT
 	                               // (fdbclient/Knobs.h) to ensure that at least two entries will be returned from an
 	                               // attempt to read a key range map
@@ -1062,6 +1063,9 @@ public:
 	// Rolling window duration over which the average bytes moved by DD is calculated for the 'MovingData' trace event.
 	double DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL;
 	int64_t MOVING_WINDOW_SAMPLE_SIZE;
+	// Probability of running the consistency check between teams and teamsByServerIDs
+	// in getTeamByServers (simulation only).
+	double DD_TEAMS_BY_SERVER_IDS_CONSISTENCY_CHECK_PROB_SIM;
 
 	// Storage Server
 	double STORAGE_LOGGING_DELAY;
@@ -1210,6 +1214,7 @@ public:
 	int PROBABILITY_FACTOR_SHARDED_ROCKSDB_ENGINE_SELECTED_SIM;
 	int PROBABILITY_FACTOR_ROCKSDB_ENGINE_SELECTED_SIM;
 	int PROBABILITY_FACTOR_SQLITE_ENGINE_SELECTED_SIM;
+	int PROBABILITY_FACTOR_REDWOOD_ENGINE_SELECTED_SIM;
 	int PROBABILITY_FACTOR_MEMORY_SELECTED_SIM;
 
 	// Coordination

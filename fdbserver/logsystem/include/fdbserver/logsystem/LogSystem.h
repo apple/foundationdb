@@ -64,9 +64,8 @@ struct ConnectionResetInfo : public ReferenceCounted<ConnectionResetInfo> {
 	ConnectionResetInfo() : lastReset(now()), resetCheck(Void()), slowReplies(0), fastReplies(0) {}
 };
 
+// Base cursor contract for consuming a sequential log peek stream.
 struct IPeekCursor {
-	virtual Reference<IPeekCursor> cloneNoMore() = 0;
-
 	virtual void setProtocolVersion(ProtocolVersion version) = 0;
 
 	virtual bool hasMessage() const = 0;
@@ -76,19 +75,22 @@ struct IPeekCursor {
 	virtual StringRef getMessage() = 0;
 	virtual StringRef getMessageWithTags() = 0;
 	virtual void nextMessage() = 0;
-	virtual void advanceTo(LogMessageVersion n) = 0;
 	virtual Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply) = 0;
-	virtual Future<Void> onFailed() const = 0;
-	virtual bool isActive() const = 0;
 	virtual bool isExhausted() const = 0;
 	virtual const LogMessageVersion& version() const = 0;
 	virtual Version popped() const = 0;
-	virtual Version getMaxKnownVersion() const { return 0; }
 	virtual Version getMinKnownCommittedVersion() const = 0;
-	virtual Optional<UID> getPrimaryPeekLocation() const = 0;
-	virtual Optional<UID> getCurrentPeekLocation() const = 0;
 	virtual void addref() = 0;
 	virtual void delref() = 0;
+};
+
+// Peek cursor that reports log location and can be cloned and repositioned for replay.
+struct IReplayPeekCursor : IPeekCursor {
+	virtual Optional<UID> getPrimaryPeekLocation() const = 0;
+	virtual Optional<UID> getCurrentPeekLocation() const = 0;
+	virtual Version getMaxKnownVersion() const = 0;
+	virtual Reference<IReplayPeekCursor> cloneNoMore() = 0;
+	virtual void advanceTo(LogMessageVersion n) = 0;
 };
 
 struct LogPushVersionSet {
@@ -466,7 +468,7 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 
 	Version getBackupStartVersion() const;
 
-	std::map<LogEpoch, EpochTagsVersionsInfo> getOldEpochTagsVersionsInfo() const;
+	std::map<LogEpoch, EpochTagsVersionsInfo> getOldEpochLRTagsVersionsInfo() const;
 
 	inline Reference<LogSet> getEpochLogSet(LogEpoch epoch) const;
 

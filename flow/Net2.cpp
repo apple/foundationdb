@@ -302,8 +302,14 @@ public:
 	void trackAtPriority(TaskPriority priority, double now);
 	void stopImmediately() {
 #ifdef ADDRESS_SANITIZER
-		// Do leak check before intentionally leaking a bunch of memory
-		__lsan_do_leak_check();
+		// Intentionally NOT calling __lsan_do_leak_check() here.
+		// LSAN will still run at process exit. Calling it explicitly causes
+		// timeouts in CI because the symbolizer (llvm-addr2line) can take
+		// 45+ seconds to resolve stacks from dynamically loaded external
+		// client libraries (libfdb_c_external.so), exceeding the ctest timeout.
+		// The original deadlock (multiple threads calling __lsan_do_leak_check()
+		// concurrently) was fixed in #13224 but the single-thread symbolizer
+		// slowness remains.
 #endif
 		stopped = true;
 		taskQueue.clear();
