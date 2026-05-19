@@ -307,7 +307,7 @@ public:
 		// timeouts in CI because the symbolizer (llvm-addr2line) can take
 		// 45+ seconds to resolve stacks from dynamically loaded external
 		// client libraries (libfdb_c_external.so), exceeding the ctest timeout.
-		// The original deadlock (multiple threads calling __lsan_do_leak_check
+		// The original deadlock (multiple threads calling __lsan_do_leak_check()
 		// concurrently) was fixed in #13224 but the single-thread symbolizer
 		// slowness remains.
 #endif
