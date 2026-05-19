@@ -501,7 +501,7 @@ def _pack_maybe_with_versionstamp(t, prefix=None):
 
 
 # packs the specified tuple into a key
-def pack(t: Tuple[Any, ...], prefix: Optional[bytes] = None) -> bytes:
+def pack(t: Tuple[TupleElement, ...], prefix: Optional[bytes] = None) -> bytes:
     res, version_pos = _pack_maybe_with_versionstamp(t, prefix)
     if version_pos >= 0:
         raise ValueError("Incomplete versionstamp included in vanilla tuple pack")
@@ -509,7 +509,7 @@ def pack(t: Tuple[Any, ...], prefix: Optional[bytes] = None) -> bytes:
 
 
 # packs the specified tuple into a key for versionstamp operations
-def pack_with_versionstamp(t: Tuple[Any, ...], prefix: Optional[bytes] = None) -> bytes:
+def pack_with_versionstamp(t: Tuple[TupleElement, ...], prefix: Optional[bytes] = None) -> bytes:
     res, version_pos = _pack_maybe_with_versionstamp(t, prefix)
     if version_pos < 0:
         raise ValueError(
@@ -519,7 +519,7 @@ def pack_with_versionstamp(t: Tuple[Any, ...], prefix: Optional[bytes] = None) -
 
 
 # unpacks the specified key into a tuple
-def unpack(key: bytes, prefix_len: int = 0) -> Tuple[Any, ...]:
+def unpack(key: bytes, prefix_len: int = 0) -> Tuple[TupleElement, ...]:
     pos = prefix_len
     res = []
     while pos < len(key):
@@ -529,8 +529,8 @@ def unpack(key: bytes, prefix_len: int = 0) -> Tuple[Any, ...]:
 
 
 # determines if there is at least one incomplete versionstamp in a tuple
-def has_incomplete_versionstamp(t: Union[Tuple[Any, ...], List[Any]]) -> bool:
-    def _elem_has_incomplete(item: Any) -> bool:
+def has_incomplete_versionstamp(t: Union[Tuple[TupleElement, ...], List[TupleElement]]) -> bool:
+    def _elem_has_incomplete(item: TupleElement) -> bool:
         if item is None:
             return False
         elif isinstance(item, Versionstamp):
@@ -546,7 +546,7 @@ def has_incomplete_versionstamp(t: Union[Tuple[Any, ...], List[Any]]) -> bool:
 _range = range
 
 
-def range(t: Tuple[Any, ...]) -> slice:
+def range(t: Tuple[TupleElement, ...]) -> slice:
     """Returns a slice of keys that includes all tuples of greater
     length than the specified tuple that that start with the
     specified elements.
@@ -640,7 +640,7 @@ def _compare_values(value1, value2):
 
 
 # compare element by element and return -1 if t1 < t2 or 1 if t1 > t2 or 0 if t1 == t2
-def compare(t1: Union[Tuple[Any, ...], List[Any]], t2: Union[Tuple[Any, ...], List[Any]]) -> int:
+def compare(t1: Union[Tuple[TupleElement, ...], List[TupleElement]], t2: Union[Tuple[TupleElement, ...], List[TupleElement]]) -> int:
     i = 0
     while i < len(t1) and i < len(t2):
         c = _compare_values(t1[i], t2[i])
