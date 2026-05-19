@@ -457,7 +457,7 @@ class FDBRange(object):
 
 
 class TransactionRead(_FDBBase):
-    def __init__(self, tpointer: int, db: Database, snapshot: bool) -> None:
+    def __init__(self, tpointer: Any, db: Database, snapshot: bool) -> None:
         self.tpointer = tpointer
         self.db = db
         self._snapshot = snapshot
@@ -591,7 +591,7 @@ class TransactionRead(_FDBBase):
 class Transaction(TransactionRead):
     """A modifiable snapshot of a Database."""
 
-    def __init__(self, tpointer: int, db: Database) -> None:
+    def __init__(self, tpointer: Any, db: Database) -> None:
         super(Transaction, self).__init__(tpointer, db, False)
         self.options = _TransactionOptions(self)
         self.__snapshot = self.snapshot = TransactionRead(tpointer, db, True)
@@ -727,7 +727,7 @@ class Future(_FDBBase):
     Event = threading.Event
     _state = None  # < Hack for trollius
 
-    def __init__(self, fpointer: int) -> None:
+    def __init__(self, fpointer: Any) -> None:
         # print("Creating future 0x%x" % fpointer)
         self.fpointer = fpointer
 
@@ -1327,7 +1327,7 @@ class _TransactionCreator(_FDBBase):
 
 
 class Database(_TransactionCreator):
-    def __init__(self, dpointer: int) -> None:
+    def __init__(self, dpointer: Any) -> None:
         self.dpointer = dpointer
         self.options = _DatabaseOptions(self)
 
