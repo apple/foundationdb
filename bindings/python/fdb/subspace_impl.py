@@ -22,39 +22,40 @@
 
 from __future__ import annotations
 
-from typing import Any, Tuple
+from typing import Tuple
 
 import fdb.tuple
+from fdb.tuple import TupleElement
 
 
 class Subspace(object):
     rawPrefix: bytes
 
-    def __init__(self, prefixTuple: Tuple[Any, ...] = tuple(), rawPrefix: bytes = b"") -> None:
+    def __init__(self, prefixTuple: Tuple[TupleElement, ...] = tuple(), rawPrefix: bytes = b"") -> None:
         self.rawPrefix = fdb.tuple.pack(prefixTuple, prefix=rawPrefix)
 
     def __repr__(self) -> str:
         return "Subspace(rawPrefix=" + repr(self.rawPrefix) + ")"
 
-    def __getitem__(self, name: Any) -> Subspace:
+    def __getitem__(self, name: TupleElement) -> Subspace:
         return Subspace((name,), self.rawPrefix)
 
     def key(self) -> bytes:
         return self.rawPrefix
 
-    def pack(self, t: Tuple[Any, ...] = tuple()) -> bytes:
+    def pack(self, t: Tuple[TupleElement, ...] = tuple()) -> bytes:
         return fdb.tuple.pack(t, prefix=self.rawPrefix)
 
-    def pack_with_versionstamp(self, t: Tuple[Any, ...] = tuple()) -> bytes:
+    def pack_with_versionstamp(self, t: Tuple[TupleElement, ...] = tuple()) -> bytes:
         return fdb.tuple.pack_with_versionstamp(t, prefix=self.rawPrefix)
 
-    def unpack(self, key: bytes) -> Tuple[Any, ...]:
+    def unpack(self, key: bytes) -> Tuple[TupleElement, ...]:
         if not self.contains(key):
             raise ValueError("Cannot unpack key that is not in subspace.")
 
         return fdb.tuple.unpack(key, prefix_len=len(self.rawPrefix))
 
-    def range(self, t: Tuple[Any, ...] = tuple()) -> slice:
+    def range(self, t: Tuple[TupleElement, ...] = tuple()) -> slice:
         p = fdb.tuple.range(t)
         return slice(self.rawPrefix + p.start, self.rawPrefix + p.stop)
 
@@ -64,5 +65,5 @@ class Subspace(object):
     def as_foundationdb_key(self) -> bytes:
         return self.rawPrefix
 
-    def subspace(self, tuple: Tuple[Any, ...]) -> Subspace:
+    def subspace(self, tuple: Tuple[TupleElement, ...]) -> Subspace:
         return Subspace(tuple, self.rawPrefix)
