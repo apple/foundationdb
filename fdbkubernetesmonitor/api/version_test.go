@@ -28,6 +28,27 @@ import (
 )
 
 var _ = Describe("[api] FDBVersion", func() {
+	When("marshaling and unmarshaling a Version as JSON", func() {
+		It("should round-trip a stable version", func() {
+			original := Version{Major: 7, Minor: 3, Patch: 27}
+			data, err := json.Marshal(&original)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(data)).To(Equal(`"7.3.27"`))
+
+			var decoded Version
+			Expect(json.Unmarshal(data, &decoded)).To(Succeed())
+			Expect(decoded).To(Equal(original))
+		})
+
+		It("should return an error when unmarshaling invalid version strings", func() {
+			for _, invalidVersion := range []string{`"not-a-version"`, `"7.3"`} {
+				var decoded Version
+				err := json.Unmarshal([]byte(invalidVersion), &decoded)
+				Expect(err).To(HaveOccurred())
+			}
+		})
+	})
+
 	When("checking if the protocol and the version are compatible", func() {
 		It("should return the correct compatibility", func() {
 			version := Version{Major: 6, Minor: 2, Patch: 20}
