@@ -388,7 +388,7 @@ class FDBRange(object):
         end: KeySelector,
         limit: int,
         reverse: bool,
-        streaming_mode: Any,
+        streaming_mode: int,
     ) -> None:
         self._tr = tr
 
@@ -414,7 +414,7 @@ class FDBRange(object):
 
         return list(self.__iter__(mode=mode))
 
-    def __iter__(self, mode: Any = None) -> Iterator[KeyValue]:
+    def __iter__(self, mode: Optional[int] = None) -> Iterator[KeyValue]:
         if mode is None:
             mode = self._mode
         bsel = self._bsel
@@ -457,7 +457,7 @@ class FDBRange(object):
 
 
 class TransactionRead(_FDBBase):
-    def __init__(self, tpointer: Any, db: Database, snapshot: bool) -> None:
+    def __init__(self, tpointer: int, db: Database, snapshot: bool) -> None:
         self.tpointer = tpointer
         self.db = db
         self._snapshot = snapshot
@@ -495,7 +495,7 @@ class TransactionRead(_FDBBase):
         begin: KeySelector,
         end: KeySelector,
         limit: int,
-        streaming_mode: Any,
+        streaming_mode: int,
         iteration: int,
         reverse: bool,
     ) -> FutureKeyValueArray:
@@ -533,7 +533,7 @@ class TransactionRead(_FDBBase):
         end: Optional[Union[bytes, KeySelector]],
         limit: int = 0,
         reverse: bool = False,
-        streaming_mode: Any = StreamingMode.iterator,
+        streaming_mode: int = StreamingMode.iterator,
     ) -> FDBRange:
         if begin is None:
             begin = b""
@@ -591,7 +591,7 @@ class TransactionRead(_FDBBase):
 class Transaction(TransactionRead):
     """A modifiable snapshot of a Database."""
 
-    def __init__(self, tpointer: Any, db: Database) -> None:
+    def __init__(self, tpointer: int, db: Database) -> None:
         super(Transaction, self).__init__(tpointer, db, False)
         self.options = _TransactionOptions(self)
         self.__snapshot = self.snapshot = TransactionRead(tpointer, db, True)
@@ -727,7 +727,7 @@ class Future(_FDBBase):
     Event = threading.Event
     _state = None  # < Hack for trollius
 
-    def __init__(self, fpointer: Any) -> None:
+    def __init__(self, fpointer: int) -> None:
         # print("Creating future 0x%x" % fpointer)
         self.fpointer = fpointer
 
@@ -775,7 +775,7 @@ class Future(_FDBBase):
                 raise
 
     def on_ready(self, callback: Callable[[Future], None]) -> None:
-        def cb_and_delref(ignore: Any) -> None:
+        def cb_and_delref(ignore: object) -> None:
             _unpin_callback(cbfunc[0])
             del cbfunc[:]
             try:
@@ -804,7 +804,7 @@ class Future(_FDBBase):
         ev = futures[0].Event()
         for i, f in enumerate(futures):
 
-            def cb(ignore: Any, i: int = i) -> None:
+            def cb(ignore: object, i: int = i) -> None:
                 if d.setdefault("i", i) == i:
                     ev.set()
 
@@ -1327,7 +1327,7 @@ class _TransactionCreator(_FDBBase):
 
 
 class Database(_TransactionCreator):
-    def __init__(self, dpointer: Any) -> None:
+    def __init__(self, dpointer: int) -> None:
         self.dpointer = dpointer
         self.options = _DatabaseOptions(self)
 
