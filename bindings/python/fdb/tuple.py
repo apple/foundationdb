@@ -181,7 +181,9 @@ class Versionstamp(object):
                 + " which is out of range"
             )
 
-    def __init__(self, tr_version: Optional[bytes] = None, user_version: int = 0) -> None:
+    def __init__(
+        self, tr_version: Optional[bytes] = None, user_version: int = 0
+    ) -> None:
         Versionstamp.validate_tr_version(tr_version)
         Versionstamp.validate_user_version(user_version)
         self.tr_version = tr_version
@@ -291,10 +293,10 @@ def _decode(v, pos):
         return None, pos + 1
     elif code == BYTES_CODE:
         end = _find_terminator(v, pos + 1)
-        return v[pos + 1 : end].replace(b"\x00\xFF", b"\x00"), end + 1
+        return v[pos + 1 : end].replace(b"\x00\xff", b"\x00"), end + 1
     elif code == STRING_CODE:
         end = _find_terminator(v, pos + 1)
-        return v[pos + 1 : end].replace(b"\x00\xFF", b"\x00").decode("utf-8"), end + 1
+        return v[pos + 1 : end].replace(b"\x00\xff", b"\x00").decode("utf-8"), end + 1
     elif code >= INT_ZERO_CODE and code < POS_INT_END:
         n = code - 20
         end = pos + 1 + n
@@ -396,13 +398,13 @@ def _encode(value, nested=False):
             return b"".join([int2byte(NULL_CODE)]), -1
     elif isinstance(value, bytes):  # also gets non-None fdb.impl.Value
         return (
-            int2byte(BYTES_CODE) + value.replace(b"\x00", b"\x00\xFF") + b"\x00",
+            int2byte(BYTES_CODE) + value.replace(b"\x00", b"\x00\xff") + b"\x00",
             -1,
         )
     elif isinstance(value, str):
         return (
             int2byte(STRING_CODE)
-            + value.encode("utf-8").replace(b"\x00", b"\x00\xFF")
+            + value.encode("utf-8").replace(b"\x00", b"\x00\xff")
             + b"\x00",
             -1,
         )
@@ -509,7 +511,9 @@ def pack(t: Tuple[TupleElement, ...], prefix: Optional[bytes] = None) -> bytes:
 
 
 # packs the specified tuple into a key for versionstamp operations
-def pack_with_versionstamp(t: Tuple[TupleElement, ...], prefix: Optional[bytes] = None) -> bytes:
+def pack_with_versionstamp(
+    t: Tuple[TupleElement, ...], prefix: Optional[bytes] = None
+) -> bytes:
     res, version_pos = _pack_maybe_with_versionstamp(t, prefix)
     if version_pos < 0:
         raise ValueError(
@@ -529,7 +533,9 @@ def unpack(key: bytes, prefix_len: int = 0) -> Tuple[TupleElement, ...]:
 
 
 # determines if there is at least one incomplete versionstamp in a tuple
-def has_incomplete_versionstamp(t: Union[Tuple[TupleElement, ...], List[TupleElement]]) -> bool:
+def has_incomplete_versionstamp(
+    t: Union[Tuple[TupleElement, ...], List[TupleElement]],
+) -> bool:
     def _elem_has_incomplete(item: TupleElement) -> bool:
         if item is None:
             return False
@@ -640,7 +646,10 @@ def _compare_values(value1, value2):
 
 
 # compare element by element and return -1 if t1 < t2 or 1 if t1 > t2 or 0 if t1 == t2
-def compare(t1: Union[Tuple[TupleElement, ...], List[TupleElement]], t2: Union[Tuple[TupleElement, ...], List[TupleElement]]) -> int:
+def compare(
+    t1: Union[Tuple[TupleElement, ...], List[TupleElement]],
+    t2: Union[Tuple[TupleElement, ...], List[TupleElement]],
+) -> int:
     i = 0
     while i < len(t1) and i < len(t2):
         c = _compare_values(t1[i], t2[i])
