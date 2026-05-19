@@ -470,7 +470,7 @@ class TransactionRead(_FDBBase):
         """Get the read version of the transaction."""
         return FutureInt64(self.capi.fdb_transaction_get_read_version(self.tpointer))
 
-    def get(self, key: Union[bytes, FutureString]) -> Value:
+    def get(self, key: Any) -> Value:
         key = keyToBytes(key)
         return Value(
             self.capi.fdb_transaction_get(self.tpointer, key, len(key), self._snapshot)
@@ -544,7 +544,7 @@ class TransactionRead(_FDBBase):
         return FDBRange(self, begin, end, limit, reverse, streaming_mode)
 
     def get_range_startswith(
-        self, prefix: Union[bytes, FutureString], *args: Any, **kwargs: Any
+        self, prefix: Any, *args: Any, **kwargs: Any
     ) -> FDBRange:
         prefix = keyToBytes(prefix)
         return self.get_range(prefix, strinc(prefix), *args, **kwargs)
@@ -572,7 +572,7 @@ class TransactionRead(_FDBBase):
         )
 
     def get_range_split_points(
-        self, begin_key: bytes, end_key: bytes, chunk_size: int
+        self, begin_key: Optional[bytes], end_key: Optional[bytes], chunk_size: int
     ) -> FutureKeyArray:
         if begin_key is None or end_key is None or chunk_size <= 0:
             raise Exception("Invalid begin key, end key or chunk size")
@@ -606,7 +606,7 @@ class Transaction(TransactionRead):
     def _set_option(self, option: int, param: Optional[bytes], length: int) -> None:
         self.capi.fdb_transaction_set_option(self.tpointer, option, param, length)
 
-    def _atomic_operation(self, opcode: int, key: Union[bytes, FutureString], param: Union[bytes, FutureString]) -> None:
+    def _atomic_operation(self, opcode: int, key: Any, param: Any) -> None:
         paramBytes = valueToBytes(param)
         paramLength = len(paramBytes)
         keyBytes = keyToBytes(key)
@@ -615,12 +615,12 @@ class Transaction(TransactionRead):
             self.tpointer, keyBytes, keyLength, paramBytes, paramLength, opcode
         )
 
-    def set(self, key: Union[bytes, FutureString], value: Union[bytes, FutureString]) -> None:
+    def set(self, key: Any, value: Any) -> None:
         key = keyToBytes(key)
         value = valueToBytes(value)
         self.capi.fdb_transaction_set(self.tpointer, key, len(key), value, len(value))
 
-    def clear(self, key: Union[bytes, KeySelector, FutureString]) -> None:
+    def clear(self, key: Any) -> None:
         if isinstance(key, KeySelector):
             key = self.get_key(key)
 
@@ -649,33 +649,33 @@ class Transaction(TransactionRead):
             self.tpointer, begin, len(begin), end, len(end)
         )
 
-    def clear_range_startswith(self, prefix: Union[bytes, FutureString]) -> None:
+    def clear_range_startswith(self, prefix: Any) -> None:
         prefix = keyToBytes(prefix)
         return self.clear_range(prefix, strinc(prefix))
 
-    def watch(self, key: Union[bytes, FutureString]) -> FutureVoid:
+    def watch(self, key: Any) -> FutureVoid:
         key = keyToBytes(key)
         return FutureVoid(self.capi.fdb_transaction_watch(self.tpointer, key, len(key)))
 
-    def add_read_conflict_range(self, begin: bytes, end: bytes) -> None:
+    def add_read_conflict_range(self, begin: Any, end: Any) -> None:
         begin = keyToBytes(begin)
         end = keyToBytes(end)
         self.capi.fdb_transaction_add_conflict_range(
             self.tpointer, begin, len(begin), end, len(end), ConflictRangeType.read
         )
 
-    def add_read_conflict_key(self, key: bytes) -> None:
+    def add_read_conflict_key(self, key: Any) -> None:
         key = keyToBytes(key)
         self.add_read_conflict_range(key, key + b"\x00")
 
-    def add_write_conflict_range(self, begin: bytes, end: bytes) -> None:
+    def add_write_conflict_range(self, begin: Any, end: Any) -> None:
         begin = keyToBytes(begin)
         end = keyToBytes(end)
         self.capi.fdb_transaction_add_conflict_range(
             self.tpointer, begin, len(begin), end, len(end), ConflictRangeType.write
         )
 
-    def add_write_conflict_key(self, key: bytes) -> None:
+    def add_write_conflict_key(self, key: Any) -> None:
         key = keyToBytes(key)
         self.add_write_conflict_range(key, key + b"\x00")
 
@@ -713,7 +713,7 @@ class Transaction(TransactionRead):
     def cancel(self) -> None:
         self.capi.fdb_transaction_cancel(self.tpointer)
 
-    def __setitem__(self, key: Union[bytes, FutureString], value: Union[bytes, FutureString]) -> None:
+    def __setitem__(self, key: Any, value: Any) -> None:
         self.set(key, value)
 
     def __delitem__(self, key: Union[bytes, slice]) -> None:

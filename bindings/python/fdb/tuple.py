@@ -28,7 +28,7 @@ import struct
 import math
 import functools
 from bisect import bisect_left
-from typing import Any, Iterator, List, Optional, Sequence, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import fdb
 
