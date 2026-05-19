@@ -42,7 +42,6 @@ from fdb.tuple import pack, int2byte
 
 from fdb import fdboptions as _opts
 
-
 _network_thread = None
 _network_thread_reentrant_lock = threading.RLock()
 
@@ -165,6 +164,7 @@ def add_operation(fname, v):
     )
     setattr(globals()["Database"], fname, f)
     setattr(globals()["Transaction"], fname, f)
+
 
 def fill_operations():
     _dict = getattr(_opts, "MutationType")
@@ -428,7 +428,7 @@ class FDBRange(object):
 
         while not done:
             if future:
-                (kvs, count, more) = future.wait()
+                kvs, count, more = future.wait()
                 index = 0
                 future = None
 
@@ -543,9 +543,7 @@ class TransactionRead(_FDBBase):
         end = self._to_selector(end)
         return FDBRange(self, begin, end, limit, reverse, streaming_mode)
 
-    def get_range_startswith(
-        self, prefix: Any, *args: Any, **kwargs: Any
-    ) -> FDBRange:
+    def get_range_startswith(self, prefix: Any, *args: Any, **kwargs: Any) -> FDBRange:
         prefix = keyToBytes(prefix)
         return self.get_range(prefix, strinc(prefix), *args, **kwargs)
 
