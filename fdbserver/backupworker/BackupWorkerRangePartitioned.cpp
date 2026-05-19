@@ -341,15 +341,13 @@ Future<Version> pullPartitionMapFromTLog(BackupRangePartitionedData* self, Parti
 			auto res = co_await race(cursor ? cursor->getMore() : Never(), logSystemChange);
 			if (res.index() == 0) {
 				break;
-			} else if (res.index() == 1) {
+			} else {
 				if (self->logSystem.get()) {
 					cursor = self->logSystem.get()->peekSingle(self->myId, self->startVersion, self->tag);
 				} else {
 					cursor = Reference<IPeekCursor>();
 				}
 				logSystemChange = self->logSystem.onChange();
-			} else {
-				UNREACHABLE();
 			}
 		}
 		co_await cursor->getMore();
@@ -471,7 +469,7 @@ Future<Void> pullAsyncData(BackupRangePartitionedData* self) {
 				    .detail("Tag", self->tag)
 				    .detail("CursorVersion", cursor->version().version);
 				break;
-			} else if (res.index() == 1) {
+			} else {
 				if (self->logSystem.get()) {
 					// TODO akanksha: Use peekSingle as of now instead of peekLogRouter and later confirm if it works as
 					// expected.
@@ -480,8 +478,6 @@ Future<Void> pullAsyncData(BackupRangePartitionedData* self) {
 					cursor = Reference<IPeekCursor>();
 				}
 				logSystemChange = self->logSystem.onChange();
-			} else {
-				UNREACHABLE();
 			}
 		}
 
@@ -1046,13 +1042,31 @@ Future<Void> uploadData(BackupRangePartitionedData* self) {
 	}
 }
 
+// Keeps `self->logSystem` and `self->oldestBackupEpoch` in sync with the latest ServerDBInfo.
+static Future<Void> monitorLogSystemFromDbInfo(Reference<AsyncVar<ServerDBInfo> const> db,
+                                               BackupRangePartitionedData* self) {
+	while (true) {
+		Reference<LogSystem> ls = makeLogSystemFromServerDBInfo(self->myId, db->get(), true);
+		if (ls.isValid()) {
+			self->logSystem.set(ls->makeConsumer());
+			self->oldestBackupEpoch = std::max(self->oldestBackupEpoch, ls->getOldestBackupEpoch());
+			TraceEvent("BWRangePartitionedLogSystemUpdate", self->myId)
+			    .detail("Tag", self->tag.toString())
+			    .detail("TagLocality", self->tag.locality)
+			    .detail("OldestEpoch", self->oldestBackupEpoch);
+		} else {
+			TraceEvent("BWRangePartitionedNoLogSystem", self->myId);
+		}
+		co_await db->onChange();
+	}
+}
+
 Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
                                           InitializeBackupRequest req,
                                           Reference<AsyncVar<ServerDBInfo> const> db) {
 	BackupRangePartitionedData self(interf.id(), db, req);
 	PromiseStream<Future<Void>> addActor;
 	Future<Void> error = actorCollection(addActor.getFuture());
-	Future<Void> dbInfoChange = Void();
 	Future<Void> pull;
 	Future<Void> done;
 	Error err;
@@ -1074,6 +1088,8 @@ Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
 		}
 
 		addActor.send(monitorWorkerPause(&self));
+		// Must be sent before waitAndProcessPartitionMap so logSystem is populated before the partition-map peek.
+		addActor.send(monitorLogSystemFromDbInfo(db, &self));
 
 		// First need to call waitAndProcessPartitionMap before starting to pull data, because we need to know the
 		// partition assignment.
@@ -1091,30 +1107,14 @@ Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
 		done = exitEarly ? Void() : uploadData(&self);
 
 		while (true) {
-			auto res = co_await race(dbInfoChange, done, error);
+			auto res = co_await race(done, error);
 			if (res.index() == 0) {
-				dbInfoChange = db->onChange();
-				Reference<LogSystem> ls = makeLogSystemFromServerDBInfo(self.myId, db->get(), true);
-
-				if (ls.isValid()) {
-					self.logSystem.set(ls->makeConsumer());
-					self.oldestBackupEpoch = std::max(self.oldestBackupEpoch, ls->getOldestBackupEpoch());
-					TraceEvent("BWRangePartitionedLogSystemUpdate", self.myId)
-					    .detail("Tag", self.tag.toString())
-					    .detail("TagLocality", self.tag.locality)
-					    .detail("OldestEpoch", self.oldestBackupEpoch);
-				} else {
-					TraceEvent("BWRangePartitionedNoLogSystem", self.myId);
-				}
-			} else if (res.index() == 1) {
 				TraceEvent("BWRangePartitionedDone", self.myId).detail("BackupEpoch", self.backupEpoch);
 				// Notify master so that this worker can be removed from log system, then this
 				// worker (for an old epoch's unfinished work) can safely exit.
 				co_await brokenPromiseToNever(db->get().clusterInterface.notifyBackupWorkerDone.getReply(
 				    BackupWorkerDoneRequest(self.myId, self.backupEpoch)));
 				break;
-			} else if (res.index() != 2) {
-				UNREACHABLE();
 			}
 		}
 		co_return;
