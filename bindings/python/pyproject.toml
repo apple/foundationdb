@@ -28,7 +28,10 @@ classifiers = [
 version = {attr = "fdb.__version__"}
 
 [tool.setuptools.packages.find]
-# It is necessary to restrict the py-modules since in the CMake build directory 
+# It is necessary to restrict the py-modules since in the CMake build directory
 # there is a CMakeFiles subdirectory which will be misidentified by pip as a
 # module.
 include = ["fdb"]
+
+[tool.setuptools.package-data]
+fdb = ["py.typed"]
