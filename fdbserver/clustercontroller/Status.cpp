@@ -837,7 +837,7 @@ static AsyncResult<JsonBuilderObject> processStatusFetcher(
 		}
 		for (auto& backupWorker : tLogSet.backupWorkers) {
 			if (backupWorker.present()) {
-				roles.addRole("backup", backupWorker.interf());
+				roles.addRole("backupworker", backupWorker.interf());
 			}
 		}
 	}
@@ -858,7 +858,7 @@ static AsyncResult<JsonBuilderObject> processStatusFetcher(
 			}
 			for (auto& backupWorker : tLogSet.backupWorkers) {
 				if (backupWorker.present()) {
-					roles.addRole("backup", backupWorker.interf());
+					roles.addRole("backupworker", backupWorker.interf());
 				}
 			}
 		}
