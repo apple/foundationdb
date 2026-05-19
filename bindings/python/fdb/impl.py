@@ -38,6 +38,7 @@ import fdb
 from fdb.tuple import pack, int2byte
 
 from fdb import fdboptions as _opts
+from typing import Union
 
 
 _network_thread = None
