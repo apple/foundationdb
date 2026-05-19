@@ -20,6 +20,8 @@
 
 # FoundationDB Python API
 
+from __future__ import annotations
+
 import atexit
 import ctypes
 import ctypes.util
@@ -33,12 +35,12 @@ import sys
 import threading
 import traceback
 import weakref
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 
 import fdb
 from fdb.tuple import pack, int2byte
 
 from fdb import fdboptions as _opts
-from typing import Union
 
 
 _network_thread = None
@@ -348,20 +350,22 @@ class FDBError(Exception):
 
     """
 
-    def __init__(self, code):
+    code: int
+
+    def __init__(self, code: int) -> None:
         self.code = code
-        self._description = None
+        self._description: Optional[str] = None
 
     @property
-    def description(self):
+    def description(self) -> str:
         if not self._description:
             self._description = _capi.fdb_get_error(self.code)
         return self._description
 
-    def __str__(self):
+    def __str__(self) -> str:
         return "%s (%d)" % (self.description, self.code)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "FDBError(%d)" % self.code
 
 
@@ -377,7 +381,15 @@ class FDBRange(object):
 
     """
 
-    def __init__(self, tr, begin, end, limit, reverse, streaming_mode):
+    def __init__(
+        self,
+        tr: TransactionRead,
+        begin: KeySelector,
+        end: KeySelector,
+        limit: int,
+        reverse: bool,
+        streaming_mode: Any,
+    ) -> None:
         self._tr = tr
 
         self._bsel = begin
@@ -391,7 +403,7 @@ class FDBRange(object):
             begin, end, limit, streaming_mode, 1, reverse
         )
 
-    def to_list(self):
+    def to_list(self) -> List[KeyValue]:
         if self._mode == StreamingMode.iterator:
             if self._limit > 0:
                 mode = StreamingMode.exact
@@ -402,7 +414,7 @@ class FDBRange(object):
 
         return list(self.__iter__(mode=mode))
 
-    def __iter__(self, mode=None):
+    def __iter__(self, mode: Any = None) -> Iterator[KeyValue]:
         if mode is None:
             mode = self._mode
         bsel = self._bsel
@@ -445,26 +457,26 @@ class FDBRange(object):
 
 
 class TransactionRead(_FDBBase):
-    def __init__(self, tpointer, db, snapshot):
+    def __init__(self, tpointer: Any, db: Database, snapshot: bool) -> None:
         self.tpointer = tpointer
         self.db = db
         self._snapshot = snapshot
 
-    def __del__(self):
+    def __del__(self) -> None:
         # print("Destroying transactionread 0x%x" % self.tpointer)
         self.capi.fdb_transaction_destroy(self.tpointer)
 
-    def get_read_version(self):
+    def get_read_version(self) -> FutureInt64:
         """Get the read version of the transaction."""
         return FutureInt64(self.capi.fdb_transaction_get_read_version(self.tpointer))
 
-    def get(self, key):
+    def get(self, key: Union[bytes, FutureString]) -> Value:
         key = keyToBytes(key)
         return Value(
             self.capi.fdb_transaction_get(self.tpointer, key, len(key), self._snapshot)
         )
 
-    def get_key(self, key_selector):
+    def get_key(self, key_selector: KeySelector) -> Key:
         key = keyToBytes(key_selector.key)
 
         return Key(
@@ -478,7 +490,15 @@ class TransactionRead(_FDBBase):
             )
         )
 
-    def _get_range(self, begin, end, limit, streaming_mode, iteration, reverse):
+    def _get_range(
+        self,
+        begin: KeySelector,
+        end: KeySelector,
+        limit: int,
+        streaming_mode: Any,
+        iteration: int,
+        reverse: bool,
+    ) -> FutureKeyValueArray:
         beginKey = keyToBytes(begin.key)
         endKey = keyToBytes(end.key)
 
@@ -502,14 +522,19 @@ class TransactionRead(_FDBBase):
             )
         )
 
-    def _to_selector(self, key_or_selector):
+    def _to_selector(self, key_or_selector: Union[bytes, KeySelector]) -> KeySelector:
         if not isinstance(key_or_selector, KeySelector):
             key_or_selector = KeySelector.first_greater_or_equal(key_or_selector)
         return key_or_selector
 
     def get_range(
-        self, begin, end, limit=0, reverse=False, streaming_mode=StreamingMode.iterator
-    ):
+        self,
+        begin: Optional[Union[bytes, KeySelector]],
+        end: Optional[Union[bytes, KeySelector]],
+        limit: int = 0,
+        reverse: bool = False,
+        streaming_mode: Any = StreamingMode.iterator,
+    ) -> FDBRange:
         if begin is None:
             begin = b""
         if end is None:
@@ -518,16 +543,20 @@ class TransactionRead(_FDBBase):
         end = self._to_selector(end)
         return FDBRange(self, begin, end, limit, reverse, streaming_mode)
 
-    def get_range_startswith(self, prefix, *args, **kwargs):
+    def get_range_startswith(
+        self, prefix: Union[bytes, FutureString], *args: Any, **kwargs: Any
+    ) -> FDBRange:
         prefix = keyToBytes(prefix)
         return self.get_range(prefix, strinc(prefix), *args, **kwargs)
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: Union[bytes, slice]) -> Union[Value, FDBRange]:
         if isinstance(key, slice):
             return self.get_range(key.start, key.stop, reverse=(key.step == -1))
         return self.get(key)
 
-    def get_estimated_range_size_bytes(self, begin_key, end_key):
+    def get_estimated_range_size_bytes(
+        self, begin_key: Optional[bytes], end_key: Optional[bytes]
+    ) -> FutureInt64:
         if begin_key is None or end_key is None:
             if fdb.get_api_version() >= 700:
                 raise Exception("Invalid begin key or end key")
@@ -542,7 +571,9 @@ class TransactionRead(_FDBBase):
             )
         )
 
-    def get_range_split_points(self, begin_key, end_key, chunk_size):
+    def get_range_split_points(
+        self, begin_key: bytes, end_key: bytes, chunk_size: int
+    ) -> FutureKeyArray:
         if begin_key is None or end_key is None or chunk_size <= 0:
             raise Exception("Invalid begin key, end key or chunk size")
         return FutureKeyArray(
@@ -560,22 +591,22 @@ class TransactionRead(_FDBBase):
 class Transaction(TransactionRead):
     """A modifiable snapshot of a Database."""
 
-    def __init__(self, tpointer, db):
+    def __init__(self, tpointer: Any, db: Database) -> None:
         super(Transaction, self).__init__(tpointer, db, False)
         self.options = _TransactionOptions(self)
         self.__snapshot = self.snapshot = TransactionRead(tpointer, db, True)
 
-    def __del__(self):
+    def __del__(self) -> None:
         pass
 
-    def set_read_version(self, version):
+    def set_read_version(self, version: int) -> None:
         """Set the read version of the transaction."""
         self.capi.fdb_transaction_set_read_version(self.tpointer, version)
 
-    def _set_option(self, option, param, length):
+    def _set_option(self, option: int, param: Optional[bytes], length: int) -> None:
         self.capi.fdb_transaction_set_option(self.tpointer, option, param, length)
 
-    def _atomic_operation(self, opcode, key, param):
+    def _atomic_operation(self, opcode: int, key: Union[bytes, FutureString], param: Union[bytes, FutureString]) -> None:
         paramBytes = valueToBytes(param)
         paramLength = len(paramBytes)
         keyBytes = keyToBytes(key)
@@ -584,12 +615,12 @@ class Transaction(TransactionRead):
             self.tpointer, keyBytes, keyLength, paramBytes, paramLength, opcode
         )
 
-    def set(self, key, value):
+    def set(self, key: Union[bytes, FutureString], value: Union[bytes, FutureString]) -> None:
         key = keyToBytes(key)
         value = valueToBytes(value)
         self.capi.fdb_transaction_set(self.tpointer, key, len(key), value, len(value))
 
-    def clear(self, key):
+    def clear(self, key: Union[bytes, KeySelector, FutureString]) -> None:
         if isinstance(key, KeySelector):
             key = self.get_key(key)
 
@@ -597,7 +628,11 @@ class Transaction(TransactionRead):
 
         self.capi.fdb_transaction_clear(self.tpointer, key, len(key))
 
-    def clear_range(self, begin, end):
+    def clear_range(
+        self,
+        begin: Optional[Union[bytes, KeySelector]],
+        end: Optional[Union[bytes, KeySelector]],
+    ) -> None:
         if begin is None:
             begin = b""
         if end is None:
@@ -614,56 +649,56 @@ class Transaction(TransactionRead):
             self.tpointer, begin, len(begin), end, len(end)
         )
 
-    def clear_range_startswith(self, prefix):
+    def clear_range_startswith(self, prefix: Union[bytes, FutureString]) -> None:
         prefix = keyToBytes(prefix)
         return self.clear_range(prefix, strinc(prefix))
 
-    def watch(self, key):
+    def watch(self, key: Union[bytes, FutureString]) -> FutureVoid:
         key = keyToBytes(key)
         return FutureVoid(self.capi.fdb_transaction_watch(self.tpointer, key, len(key)))
 
-    def add_read_conflict_range(self, begin, end):
+    def add_read_conflict_range(self, begin: bytes, end: bytes) -> None:
         begin = keyToBytes(begin)
         end = keyToBytes(end)
         self.capi.fdb_transaction_add_conflict_range(
             self.tpointer, begin, len(begin), end, len(end), ConflictRangeType.read
         )
 
-    def add_read_conflict_key(self, key):
+    def add_read_conflict_key(self, key: bytes) -> None:
         key = keyToBytes(key)
         self.add_read_conflict_range(key, key + b"\x00")
 
-    def add_write_conflict_range(self, begin, end):
+    def add_write_conflict_range(self, begin: bytes, end: bytes) -> None:
         begin = keyToBytes(begin)
         end = keyToBytes(end)
         self.capi.fdb_transaction_add_conflict_range(
             self.tpointer, begin, len(begin), end, len(end), ConflictRangeType.write
         )
 
-    def add_write_conflict_key(self, key):
+    def add_write_conflict_key(self, key: bytes) -> None:
         key = keyToBytes(key)
         self.add_write_conflict_range(key, key + b"\x00")
 
-    def commit(self):
+    def commit(self) -> FutureVoid:
         return FutureVoid(self.capi.fdb_transaction_commit(self.tpointer))
 
-    def get_committed_version(self):
+    def get_committed_version(self) -> int:
         version = ctypes.c_int64()
         self.capi.fdb_transaction_get_committed_version(
             self.tpointer, ctypes.byref(version)
         )
         return version.value
 
-    def get_approximate_size(self):
+    def get_approximate_size(self) -> FutureInt64:
         """Get the approximate commit size of the transaction."""
         return FutureInt64(
             self.capi.fdb_transaction_get_approximate_size(self.tpointer)
         )
 
-    def get_versionstamp(self):
+    def get_versionstamp(self) -> Key:
         return Key(self.capi.fdb_transaction_get_versionstamp(self.tpointer))
 
-    def on_error(self, error):
+    def on_error(self, error: Union[FDBError, int]) -> FutureVoid:
         if isinstance(error, FDBError):
             code = error.code
         elif isinstance(error, int):
@@ -672,16 +707,16 @@ class Transaction(TransactionRead):
             raise error
         return FutureVoid(self.capi.fdb_transaction_on_error(self.tpointer, code))
 
-    def reset(self):
+    def reset(self) -> None:
         self.capi.fdb_transaction_reset(self.tpointer)
 
-    def cancel(self):
+    def cancel(self) -> None:
         self.capi.fdb_transaction_cancel(self.tpointer)
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key: Union[bytes, FutureString], value: Union[bytes, FutureString]) -> None:
         self.set(key, value)
 
-    def __delitem__(self, key):
+    def __delitem__(self, key: Union[bytes, slice]) -> None:
         if isinstance(key, slice):
             self.clear_range(key.start, key.stop)
         else:
@@ -692,29 +727,29 @@ class Future(_FDBBase):
     Event = threading.Event
     _state = None  # < Hack for trollius
 
-    def __init__(self, fpointer):
+    def __init__(self, fpointer: Any) -> None:
         # print("Creating future 0x%x" % fpointer)
         self.fpointer = fpointer
 
-    def __del__(self):
+    def __del__(self) -> None:
         if self.fpointer:
             # print("Destroying future 0x%x" % self.fpointer)
             self.capi.fdb_future_destroy(self.fpointer)
             self.fpointer = None
 
-    def cancel(self):
+    def cancel(self) -> None:
         self.capi.fdb_future_cancel(self.fpointer)
 
-    def _release_memory(self):
+    def _release_memory(self) -> None:
         self.capi.fdb_future_release_memory(self.fpointer)
 
-    def wait(self):
+    def wait(self) -> Any:
         raise NotImplementedError
 
-    def is_ready(self):
+    def is_ready(self) -> bool:
         return bool(self.capi.fdb_future_is_ready(self.fpointer))
 
-    def block_until_ready(self):
+    def block_until_ready(self) -> None:
         # Checking readiness is faster than using the callback, so it saves us time if we are already
         # ready. It also doesn't add much to the cost of this function
         if not self.is_ready():
@@ -739,8 +774,8 @@ class Future(_FDBBase):
                 )
                 raise
 
-    def on_ready(self, callback):
-        def cb_and_delref(ignore):
+    def on_ready(self, callback: Callable[[Future], None]) -> None:
+        def cb_and_delref(ignore: Any) -> None:
             _unpin_callback(cbfunc[0])
             del cbfunc[:]
             try:
@@ -760,16 +795,16 @@ class Future(_FDBBase):
         self.capi.fdb_future_set_callback(self.fpointer, cbfunc[0], None)
 
     @staticmethod
-    def wait_for_any(*futures):
+    def wait_for_any(*futures: Future) -> int:
         """Does not return until at least one of the given futures is ready.
         Returns the index in the parameter list of a ready future."""
         if not futures:
             raise ValueError("wait_for_any requires at least one future")
-        d = {}
+        d: Dict[str, int] = {}
         ev = futures[0].Event()
         for i, f in enumerate(futures):
 
-            def cb(ignore, i=i):
+            def cb(ignore: Any, i: int = i) -> None:
                 if d.setdefault("i", i) == i:
                     ev.set()
 
@@ -778,7 +813,7 @@ class Future(_FDBBase):
         return d["i"]
 
     # asyncio future protocol
-    def cancelled(self):
+    def cancelled(self) -> bool:
         if not self.done():
             return False
         e = self.exception()
@@ -786,12 +821,12 @@ class Future(_FDBBase):
 
     done = is_ready
 
-    def result(self):
+    def result(self) -> Any:
         if not self.done():
             raise Exception("Future result not available")
         return self.wait()
 
-    def exception(self):
+    def exception(self) -> Optional[BaseException]:
         if not self.done():
             raise Exception("Future result not available")
         try:
@@ -800,22 +835,22 @@ class Future(_FDBBase):
         except BaseException as e:
             return e
 
-    def add_done_callback(self, fn):
+    def add_done_callback(self, fn: Callable[[Future], None]) -> None:
         self.on_ready(lambda f: self.call_soon_threadsafe(fn, f))
 
-    def remove_done_callback(self, fn):
+    def remove_done_callback(self, fn: Callable[[Future], None]) -> None:
         raise NotImplementedError()
 
 
 class FutureVoid(Future):
-    def wait(self):
+    def wait(self) -> None:
         self.block_until_ready()
         self.capi.fdb_future_get_error(self.fpointer)
         return None
 
 
 class FutureInt64(Future):
-    def wait(self):
+    def wait(self) -> int:
         self.block_until_ready()
         value = ctypes.c_int64()
         self.capi.fdb_future_get_int64(self.fpointer, ctypes.byref(value))
@@ -823,7 +858,7 @@ class FutureInt64(Future):
 
 
 class FutureUInt64(Future):
-    def wait(self):
+    def wait(self) -> int:
         self.block_until_ready()
         value = ctypes.c_uint64()
         self.capi.fdb_future_get_uint64(self.fpointer, ctypes.byref(value))
@@ -831,7 +866,7 @@ class FutureUInt64(Future):
 
 
 class FutureKeyValueArray(Future):
-    def wait(self):
+    def wait(self) -> Tuple[List[KeyValue], int, int]:
         self.block_until_ready()
         kvs = ctypes.pointer(KeyValueStruct())
         count = ctypes.c_int()
@@ -858,7 +893,7 @@ class FutureKeyValueArray(Future):
 
 
 class FutureKeyArray(Future):
-    def wait(self):
+    def wait(self) -> List[bytes]:
         self.block_until_ready()
         ks = ctypes.pointer(KeyStruct())
         count = ctypes.c_int()
@@ -869,7 +904,7 @@ class FutureKeyArray(Future):
 
 
 class FutureStringArray(Future):
-    def wait(self):
+    def wait(self) -> List[bytes]:
         self.block_until_ready()
         strings = ctypes.pointer(ctypes.c_char_p())
         count = ctypes.c_int()
@@ -1292,15 +1327,15 @@ class _TransactionCreator(_FDBBase):
 
 
 class Database(_TransactionCreator):
-    def __init__(self, dpointer):
+    def __init__(self, dpointer: Any) -> None:
         self.dpointer = dpointer
         self.options = _DatabaseOptions(self)
 
-    def __del__(self):
+    def __del__(self) -> None:
         # print("Destroying database 0x%x" % self.dpointer)
         self.capi.fdb_database_destroy(self.dpointer)
 
-    def _set_option(self, option, param, length):
+    def _set_option(self, option: int, param: Optional[bytes], length: int) -> None:
         self.capi.fdb_database_set_option(self.dpointer, option, param, length)
 
     # XXX Adding this back temporarily to test C bindings changes to ensure
@@ -1322,12 +1357,12 @@ class Database(_TransactionCreator):
         )
         return None
 
-    def create_transaction(self):
+    def create_transaction(self) -> Transaction:
         pointer = ctypes.c_void_p()
         self.capi.fdb_database_create_transaction(self.dpointer, ctypes.byref(pointer))
         return Transaction(pointer.value, self)
 
-    def get_client_status(self):
+    def get_client_status(self) -> Key:
         return Key(self.capi.fdb_database_get_client_status(self.dpointer))
 
 
@@ -1346,7 +1381,7 @@ class Cluster(_FDBBase):
         return create_database(self.cluster_file)
 
 
-def create_database(cluster_file=None):
+def create_database(cluster_file: Optional[Union[str, bytes]] = None) -> Database:
     pointer = ctypes.c_void_p()
     _FDBBase.capi.fdb_create_database(
         optionalParamToBytes(cluster_file)[0], ctypes.byref(pointer)
@@ -1354,39 +1389,43 @@ def create_database(cluster_file=None):
     return Database(pointer)
 
 
-def create_cluster(cluster_file=None):
+def create_cluster(cluster_file: Optional[Union[str, bytes]] = None) -> Cluster:
     return Cluster(cluster_file)
 
 
 class KeySelector(object):
-    def __init__(self, key, or_equal, offset):
+    key: bytes
+    or_equal: bool
+    offset: int
+
+    def __init__(self, key: bytes, or_equal: bool, offset: int) -> None:
         self.key = key
         self.or_equal = or_equal
         self.offset = offset
 
-    def __add__(self, offset):
+    def __add__(self, offset: int) -> KeySelector:
         return KeySelector(self.key, self.or_equal, self.offset + offset)
 
-    def __sub__(self, offset):
+    def __sub__(self, offset: int) -> KeySelector:
         return KeySelector(self.key, self.or_equal, self.offset - offset)
 
     @classmethod
-    def last_less_than(cls, key):
+    def last_less_than(cls, key: bytes) -> KeySelector:
         return cls(key, False, 0)
 
     @classmethod
-    def last_less_or_equal(cls, key):
+    def last_less_or_equal(cls, key: bytes) -> KeySelector:
         return cls(key, True, 0)
 
     @classmethod
-    def first_greater_than(cls, key):
+    def first_greater_than(cls, key: bytes) -> KeySelector:
         return cls(key, True, 1)
 
     @classmethod
-    def first_greater_or_equal(cls, key):
+    def first_greater_or_equal(cls, key: bytes) -> KeySelector:
         return cls(key, False, 1)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "KeySelector(%r, %r, %r)" % (self.key, self.or_equal, self.offset)
 
 
@@ -1427,14 +1466,17 @@ class KeyStruct(ctypes.Structure):
 
 
 class KeyValue(object):
-    def __init__(self, key, value):
+    key: bytes
+    value: bytes
+
+    def __init__(self, key: bytes, value: bytes) -> None:
         self.key = key
         self.value = value
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "%s: %s" % (repr(self.key), repr(self.value))
 
-    def __iter__(self):
+    def __iter__(self) -> KVIter:
         return KVIter(self)
 
 
@@ -1511,7 +1553,7 @@ else:
             raise Exception("Unable to locate the FoundationDB API shared library!")
 
 
-def keyToBytes(k):
+def keyToBytes(k: Any) -> bytes:
     if hasattr(k, "as_foundationdb_key"):
         k = k.as_foundationdb_key()
     if not isinstance(k, bytes):
@@ -1519,7 +1561,7 @@ def keyToBytes(k):
     return k
 
 
-def valueToBytes(v):
+def valueToBytes(v: Any) -> bytes:
     if hasattr(v, "as_foundationdb_value"):
         v = v.as_foundationdb_value()
     if not isinstance(v, bytes):
@@ -1527,7 +1569,7 @@ def valueToBytes(v):
     return v
 
 
-def paramToBytes(v):
+def paramToBytes(v: Union[bytes, str, FutureString]) -> bytes:
     if isinstance(v, FutureString):
         v = v.value
     if not isinstance(v, bytes) and hasattr(v, "encode"):
@@ -1537,7 +1579,7 @@ def paramToBytes(v):
     return v
 
 
-def optionalParamToBytes(v):
+def optionalParamToBytes(v: Optional[Union[str, bytes]]) -> Tuple[Optional[bytes], int]:
     if v is None:
         return (None, 0)
     else:
@@ -1900,7 +1942,7 @@ else:
     _unpin_callback = _active_callbacks.remove
 
 
-def init(event_model=None):
+def init(event_model: Optional[str] = None) -> None:
     """Initialize the FDB interface.
 
     Consider using open() as a higher-level interface.
@@ -2103,7 +2145,10 @@ open_databases = {}
 cacheLock = threading.Lock()
 
 
-def open(cluster_file=None, event_model=None):
+def open(
+    cluster_file: Optional[Union[str, bytes]] = None,
+    event_model: Optional[str] = None,
+) -> Database:
     """Opens the given database (or the default database of the cluster indicated
     by the fdb.cluster file in a platform-specific location, if no cluster_file
     or database_name is provided).  Initializes the FDB interface as required."""
@@ -2137,7 +2182,7 @@ def _stop_on_exit():
         _network_thread.join()
 
 
-def strinc(key):
+def strinc(key: bytes) -> bytes:
     key = key.rstrip(b"\xff")
     if len(key) == 0:
         raise ValueError("Key must contain at least one byte not equal to 0xFF.")
