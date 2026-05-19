@@ -1864,7 +1864,7 @@ bool isNormalClusterRecoveryError(const Error& error) {
 	return normalClusterRecoveryErrors().contains(error.code());
 }
 
-std::string& getRecoveryEventName(ClusterRecoveryEventType type) {
+const std::string& getRecoveryEventName(ClusterRecoveryEventType type) {
 	ASSERT(type >= ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME &&
 	       type < ClusterRecoveryEventType::CLUSTER_RECOVERY_LAST);
 

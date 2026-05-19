@@ -62,7 +62,7 @@ Future<Void> recoveryTerminateOnConflict(UID dbgid,
                                          Promise<Void> fullyRecovered,
                                          Future<Void> onConflict,
                                          Future<Void> switchedState);
-std::string& getRecoveryEventName(ClusterRecoveryEventType type);
+const std::string& getRecoveryEventName(ClusterRecoveryEventType type);
 
 class ReusableCoordinatedState : NonCopyable {
 public:
