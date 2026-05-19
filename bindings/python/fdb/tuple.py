@@ -20,14 +20,32 @@
 
 # FoundationDB Python API
 
+from __future__ import annotations
+
 import ctypes
 import uuid
 import struct
 import math
 import functools
 from bisect import bisect_left
+from typing import Any, Iterator, List, Optional, Sequence, Tuple, Union
 
 import fdb
+
+# Type alias for values that can be packed into a tuple
+TupleElement = Union[
+    None,
+    bytes,
+    str,
+    int,
+    float,
+    bool,
+    uuid.UUID,
+    "SingleFloat",
+    "Versionstamp",
+    Tuple[Any, ...],
+    List[Any],
+]
 
 _size_limits = tuple((1 << (i * 8)) - 1 for i in range(9))
 
@@ -75,7 +93,9 @@ def _float_adjust(v, encode):
 
 @functools.total_ordering
 class SingleFloat(object):
-    def __init__(self, value):
+    value: float
+
+    def __init__(self, value: Union[float, ctypes.c_float, int]) -> None:
         if isinstance(value, float):
             # Restrict to the first 4 bytes (essentially)
             self.value = ctypes.c_float(value).value
@@ -89,22 +109,22 @@ class SingleFloat(object):
             )
 
     # Comparisons
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, SingleFloat):
             return _compare_floats(self.value, other.value) == 0
         else:
             return False
 
-    def __lt__(self, other):
+    def __lt__(self, other: SingleFloat) -> bool:
         return _compare_floats(self.value, other.value) < 0
 
-    def __str__(self):
+    def __str__(self) -> str:
         return str(self.value)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "SingleFloat(" + str(self.value) + ")"
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         # Left-circulate the child hash to make hash(self) != hash(self.value)
         v_hash = hash(self.value)
         if v_hash >= 0:
@@ -112,7 +132,7 @@ class SingleFloat(object):
         else:
             return ((v_hash >> 16) + 1) - ((abs(v_hash) & 0xFFFF) << 16)
 
-    def __nonzero__(self):
+    def __nonzero__(self) -> bool:
         return bool(self.value)
 
 
@@ -124,8 +144,11 @@ class Versionstamp(object):
     _UNSET_TR_VERSION = 10 * int2byte(0xFF)
     _STRUCT_FORMAT_STRING = ">" + str(_TR_VERSION_LEN) + "sH"
 
+    tr_version: Optional[bytes]
+    user_version: int
+
     @classmethod
-    def validate_tr_version(cls, tr_version):
+    def validate_tr_version(cls, tr_version: Optional[bytes]) -> None:
         if tr_version is None:
             return
         if not isinstance(tr_version, bytes):
@@ -144,7 +167,7 @@ class Versionstamp(object):
             )
 
     @classmethod
-    def validate_user_version(cls, user_version):
+    def validate_user_version(cls, user_version: int) -> None:
         if not isinstance(user_version, int):
             raise TypeError(
                 "Local version has illegal type "
@@ -158,18 +181,18 @@ class Versionstamp(object):
                 + " which is out of range"
             )
 
-    def __init__(self, tr_version=None, user_version=0):
+    def __init__(self, tr_version: Optional[bytes] = None, user_version: int = 0) -> None:
         Versionstamp.validate_tr_version(tr_version)
         Versionstamp.validate_user_version(user_version)
         self.tr_version = tr_version
         self.user_version = user_version
 
     @staticmethod
-    def incomplete(user_version=0):
+    def incomplete(user_version: int = 0) -> Versionstamp:
         return Versionstamp(user_version=user_version)
 
     @classmethod
-    def from_bytes(cls, v, start=0):
+    def from_bytes(cls, v: bytes, start: int = 0) -> Versionstamp:
         if not isinstance(v, bytes):
             raise TypeError("Cannot parse versionstamp from non-byte string")
         elif len(v) - start < cls.LENGTH:
@@ -188,10 +211,10 @@ class Versionstamp(object):
             )
             return Versionstamp(tr_version, user_version)
 
-    def is_complete(self):
+    def is_complete(self) -> bool:
         return self.tr_version is not None
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             "fdb.tuple.Versionstamp("
             + repr(self.tr_version)
@@ -200,7 +223,7 @@ class Versionstamp(object):
             + ")"
         )
 
-    def __str__(self):
+    def __str__(self) -> str:
         return (
             "Versionstamp("
             + repr(self.tr_version)
@@ -209,7 +232,7 @@ class Versionstamp(object):
             + ")"
         )
 
-    def to_bytes(self):
+    def to_bytes(self) -> bytes:
         tr_version = self.tr_version
         if isinstance(tr_version, fdb.impl.Value):
             tr_version = tr_version.value
@@ -219,14 +242,14 @@ class Versionstamp(object):
             self.user_version,
         )
 
-    def completed(self, new_tr_version):
+    def completed(self, new_tr_version: bytes) -> Versionstamp:
         if self.is_complete():
             raise RuntimeError("Versionstamp already completed")
         else:
             return Versionstamp(new_tr_version, self.user_version)
 
     # Comparisons
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, Versionstamp):
             return (
                 self.tr_version == other.tr_version
@@ -235,7 +258,7 @@ class Versionstamp(object):
         else:
             return False
 
-    def __lt__(self, other):
+    def __lt__(self, other: Versionstamp) -> bool:
         if self.is_complete():
             if other.is_complete():
                 if self.tr_version == other.tr_version:
@@ -252,13 +275,13 @@ class Versionstamp(object):
             else:
                 return self.user_version < other.user_version
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         if self.tr_version is None:
             return hash(self.user_version)
         else:
             return hash(self.tr_version) * 37 ^ hash(self.user_version)
 
-    def __nonzero__(self):
+    def __nonzero__(self) -> bool:
         return self.is_complete()
 
 
@@ -478,7 +501,7 @@ def _pack_maybe_with_versionstamp(t, prefix=None):
 
 
 # packs the specified tuple into a key
-def pack(t, prefix=None):
+def pack(t: Tuple[Any, ...], prefix: Optional[bytes] = None) -> bytes:
     res, version_pos = _pack_maybe_with_versionstamp(t, prefix)
     if version_pos >= 0:
         raise ValueError("Incomplete versionstamp included in vanilla tuple pack")
@@ -486,7 +509,7 @@ def pack(t, prefix=None):
 
 
 # packs the specified tuple into a key for versionstamp operations
-def pack_with_versionstamp(t, prefix=None):
+def pack_with_versionstamp(t: Tuple[Any, ...], prefix: Optional[bytes] = None) -> bytes:
     res, version_pos = _pack_maybe_with_versionstamp(t, prefix)
     if version_pos < 0:
         raise ValueError(
@@ -496,7 +519,7 @@ def pack_with_versionstamp(t, prefix=None):
 
 
 # unpacks the specified key into a tuple
-def unpack(key, prefix_len=0):
+def unpack(key: bytes, prefix_len: int = 0) -> Tuple[Any, ...]:
     pos = prefix_len
     res = []
     while pos < len(key):
@@ -506,8 +529,8 @@ def unpack(key, prefix_len=0):
 
 
 # determines if there is at least one incomplete versionstamp in a tuple
-def has_incomplete_versionstamp(t):
-    def _elem_has_incomplete(item):
+def has_incomplete_versionstamp(t: Union[Tuple[Any, ...], List[Any]]) -> bool:
+    def _elem_has_incomplete(item: Any) -> bool:
         if item is None:
             return False
         elif isinstance(item, Versionstamp):
@@ -523,7 +546,7 @@ def has_incomplete_versionstamp(t):
 _range = range
 
 
-def range(t):
+def range(t: Tuple[Any, ...]) -> slice:
     """Returns a slice of keys that includes all tuples of greater
     length than the specified tuple that that start with the
     specified elements.
@@ -617,7 +640,7 @@ def _compare_values(value1, value2):
 
 
 # compare element by element and return -1 if t1 < t2 or 1 if t1 > t2 or 0 if t1 == t2
-def compare(t1, t2):
+def compare(t1: Union[Tuple[Any, ...], List[Any]], t2: Union[Tuple[Any, ...], List[Any]]) -> int:
     i = 0
     while i < len(t1) and i < len(t2):
         c = _compare_values(t1[i], t2[i])
