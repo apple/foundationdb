@@ -20,43 +20,49 @@
 
 # FoundationDB Python API
 
+from __future__ import annotations
+
+from typing import Any, Tuple
+
 import fdb.tuple
 
 
 class Subspace(object):
-    def __init__(self, prefixTuple=tuple(), rawPrefix=b""):
+    rawPrefix: bytes
+
+    def __init__(self, prefixTuple: Tuple[Any, ...] = tuple(), rawPrefix: bytes = b"") -> None:
         self.rawPrefix = fdb.tuple.pack(prefixTuple, prefix=rawPrefix)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "Subspace(rawPrefix=" + repr(self.rawPrefix) + ")"
 
-    def __getitem__(self, name):
+    def __getitem__(self, name: Any) -> Subspace:
         return Subspace((name,), self.rawPrefix)
 
-    def key(self):
+    def key(self) -> bytes:
         return self.rawPrefix
 
-    def pack(self, t=tuple()):
+    def pack(self, t: Tuple[Any, ...] = tuple()) -> bytes:
         return fdb.tuple.pack(t, prefix=self.rawPrefix)
 
-    def pack_with_versionstamp(self, t=tuple()):
+    def pack_with_versionstamp(self, t: Tuple[Any, ...] = tuple()) -> bytes:
         return fdb.tuple.pack_with_versionstamp(t, prefix=self.rawPrefix)
 
-    def unpack(self, key):
+    def unpack(self, key: bytes) -> Tuple[Any, ...]:
         if not self.contains(key):
             raise ValueError("Cannot unpack key that is not in subspace.")
 
         return fdb.tuple.unpack(key, prefix_len=len(self.rawPrefix))
 
-    def range(self, t=tuple()):
+    def range(self, t: Tuple[Any, ...] = tuple()) -> slice:
         p = fdb.tuple.range(t)
         return slice(self.rawPrefix + p.start, self.rawPrefix + p.stop)
 
-    def contains(self, key):
+    def contains(self, key: bytes) -> bool:
         return key.startswith(self.rawPrefix)
 
-    def as_foundationdb_key(self):
+    def as_foundationdb_key(self) -> bytes:
         return self.rawPrefix
 
-    def subspace(self, tuple):
+    def subspace(self, tuple: Tuple[Any, ...]) -> Subspace:
         return Subspace(tuple, self.rawPrefix)
