@@ -476,7 +476,18 @@ Future<Void> serverPeekGetMoreImpl(ServerPeekCursor* self, TaskPriority taskID) 
 				                                                                       self->returnEmptyIfStopped),
 				                                                       taskID));
 			}
-			auto res = co_await race(peekReply, self->interf->onChange());
+			// Race between: (1) peek reply, (2) interface change, and optionally
+			// (3) sender-side timeout if PEEK_REPLY_TIMEOUT > 0 and a request is in-flight.
+			// The timeout detects dead TLogs that silently drop requests after rebooting
+			// with new endpoint tokens. Without this, the sender waits forever because
+			// FlowTransport silently discards packets to unknown endpoints.
+			// Set PEEK_REPLY_TIMEOUT to 0 to disable and restore the old wait-forever behavior.
+			// Only enable timeout when interface is present (i.e., a peek was actually sent).
+			Future<Void> timeoutFuture =
+			    (self->interf->get().present() && SERVER_KNOBS->PEEK_REPLY_TIMEOUT > 0)
+			    ? delay(SERVER_KNOBS->PEEK_REPLY_TIMEOUT)
+			    : Never();
+			auto res = co_await race(peekReply, self->interf->onChange(), timeoutFuture);
 			if (res.index() == 0) {
 				TLogPeekReply reply = std::get<0>(std::move(res));
 
@@ -489,6 +500,21 @@ Future<Void> serverPeekGetMoreImpl(ServerPeekCursor* self, TaskPriority taskID) 
 				co_return;
 			} else if (res.index() == 1) {
 				self->onlySpilled = false;
+			} else if (res.index() == 2) {
+				// Sender-side timeout fired — no reply received within PEEK_REPLY_TIMEOUT.
+				// Don't throw — just retry the peek. This handles both cases:
+				// - Dead TLog: the retry will also timeout, but eventually the interface
+				//   will change (cluster controller detects the failure) and we'll break
+				//   out via interf->onChange().
+				// - Clogged TLog: the retry may succeed if the clog clears, or timeout
+				//   again harmlessly.
+				// The key benefit: this resets the brokenPromiseToNever future, allowing
+				// the peek to be re-sent. Without this, a peek to a dead endpoint would
+				// wait forever because the original future is permanently stuck.
+				DebugLogTraceEvent("PeekReplyTimeout", self->randomID)
+				    .detail("Tag", self->tag.toString())
+				    .detail("Version", self->messageVersion.version);
+				continue;
 			} else {
 				UNREACHABLE();
 			}

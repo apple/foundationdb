@@ -126,6 +126,7 @@ public:
 	int TLOG_POP_BATCH_SIZE;
 	bool ENABLE_TLOG_TEMP_TAG_MESSAGES_RESERVE;
 	double BLOCKING_PEEK_TIMEOUT;
+	double PEEK_REPLY_TIMEOUT; // Sender-side timeout for non-parallel peek requests; 0 disables (old wait-forever behavior)
 	bool PEEK_BATCHING_EMPTY_MSG;
 	double PEEK_BATCHING_EMPTY_MSG_INTERVAL;
 	double POP_FROM_LOG_DELAY;
