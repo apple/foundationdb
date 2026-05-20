@@ -110,7 +110,7 @@ Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req)
 
 		} else {
 			double t1 = now();
-			if (BUGGIFY) {
+			if (buggify()) {
 				t1 = self->lastVersionTime;
 			}
 
@@ -324,7 +324,7 @@ Future<Void> updateRecoveryData(Reference<MasterData> self) {
 		}
 		if (req.versionEpoch.present()) {
 			self->referenceVersion = req.versionEpoch.get();
-		} else if (BUGGIFY) {
+		} else if (buggify()) {
 			// Cannot use a positive version epoch in simulation because of the
 			// clock starting at 0. A positive version epoch would mean the initial
 			// cluster version was negative.
@@ -408,7 +408,7 @@ Future<Void> masterServer(MasterInterface mi,
 				    .detail("MyToken", lifetime.toString())
 				    .detail("CurrentToken", db->get().masterLifetime.toString());
 				CODE_PROBE(true, "Master replaced, dying");
-				if (BUGGIFY) {
+				if (buggify()) {
 					co_await delay(5);
 				}
 				throw worker_removed();

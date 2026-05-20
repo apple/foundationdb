@@ -488,7 +488,7 @@ void S3BlobStoreEndpoint::simulateRequestFailure(std::string const& verb,
                                                  std::string const& resource,
                                                  Reference<HTTP::IncomingResponse>& r) {
 	simulatedTokenError = false;
-	if (!g_network->isSimulated() || !BUGGIFY || deterministicRandom()->random01() >= 0.1) {
+	if (!g_network->isSimulated() || !buggify() || deterministicRandom()->random01() >= 0.1) {
 		return;
 	}
 	// Don't simulate token errors for multipart complete operations (POST with uploadId but no partNumber)

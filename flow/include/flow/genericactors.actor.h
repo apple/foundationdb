@@ -2124,7 +2124,7 @@ private:
 			throw;
 		}
 		try {
-			double duration = BUGGIFY_WITH_PROB(.001)
+			double duration = buggify(.001)
 			                      ? deterministicRandom()->random01() * FLOW_KNOBS->BUGGIFY_FLOW_LOCK_RELEASE_DELAY
 			                      : 0.0;
 			choose {

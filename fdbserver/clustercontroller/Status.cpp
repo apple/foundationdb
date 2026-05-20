@@ -1449,7 +1449,7 @@ static AsyncResult<JsonBuilderObject> versionEpochStatusFetcher(Database cx,
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				Optional<Value> versionEpochVal =
-				    co_await timeoutError(BUGGIFY ? Never() : tr.get(versionEpochKey), 5.0);
+				    co_await timeoutError(buggify() ? Never() : tr.get(versionEpochKey), 5.0);
 				message["enabled"] = versionEpochVal.present();
 				if (!versionEpochVal.present()) {
 					break;
@@ -1483,7 +1483,7 @@ static Future<Void> consistencyCheckStatusFetcher(Database cx,
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				Optional<Value> ccSuspendVal =
-				    co_await timeoutError(BUGGIFY ? Never() : tr.get(fdbShouldConsistencyCheckBeSuspended), 5.0);
+				    co_await timeoutError(buggify() ? Never() : tr.get(fdbShouldConsistencyCheckBeSuspended), 5.0);
 				bool ccSuspend = ccSuspendVal.present()
 				                     ? BinaryReader::fromStringRef<bool>(ccSuspendVal.get(), Unversioned())
 				                     : false;
@@ -2854,7 +2854,7 @@ AsyncResult<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistribut
 	}
 
 	try {
-		if (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01)) {
+		if (g_network->isSimulated() && buggify(0.01)) {
 			throw timed_out();
 		}
 
@@ -3162,7 +3162,7 @@ static AsyncResult<Void> clusterGetStatusImpl(Reference<ClusterGetStatusState> s
 				Future<std::vector<std::pair<UID, StorageWiggleValue>>> primaryWiggleValues;
 				Future<std::vector<std::pair<UID, StorageWiggleValue>>> remoteWiggleValues;
 				AsyncResult<JsonBuilderObject> storageWigglerFetcher;
-				double timeout = g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01) ? 0.0 : 2.0;
+				double timeout = g_network->isSimulated() && buggify(0.01) ? 0.0 : 2.0;
 				primaryWiggleValues = timeoutError(readStorageWiggleValues(cx, true, true), timeout);
 				remoteWiggleValues = timeoutError(readStorageWiggleValues(cx, false, true), timeout);
 				storageWigglerFetcher =

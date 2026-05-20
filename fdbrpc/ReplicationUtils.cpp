@@ -198,7 +198,7 @@ bool findBestPolicySetExpensive(std::vector<LocalityEntry>& bestResults,
 			bestLocalitySet = testLocalitySet;
 		}
 		// Allow the occasional bad comparison, if buggified
-		else if (!BUGGIFY ? (testRate < bestRate) : (testRate > bestRate)) {
+		else if (!buggify() ? (testRate < bestRate) : (testRate > bestRate)) {
 			bestResults = results;
 			bestRate = testRate;
 			bestLocalitySet = testLocalitySet;
@@ -341,7 +341,7 @@ bool findBestUniquePolicySet(std::vector<LocalityEntry>& bestResults,
 			bestLocalitySet = testLocalitySet;
 		}
 		// Allow the occasional bad comparison, if buggified
-		else if (!BUGGIFY ? (testRate < bestRate) : (testRate > bestRate)) {
+		else if (!buggify() ? (testRate < bestRate) : (testRate > bestRate)) {
 			bestResults = results;
 			bestRate = testRate;
 			bestLocalitySet = testLocalitySet;

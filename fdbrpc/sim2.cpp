@@ -386,7 +386,7 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 		ASSERT(limit > 0);
 
 		int toSend = 0;
-		if (BUGGIFY && !stableConnection) {
+		if (buggify() && !stableConnection) {
 			toSend = std::min(limit, buffer->bytes_written - buffer->bytes_sent);
 		} else {
 			for (auto p = buffer; p; p = p->next) {
@@ -399,7 +399,7 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 			}
 		}
 		ASSERT(toSend);
-		if (BUGGIFY && !stableConnection)
+		if (buggify() && !stableConnection)
 			toSend = std::min(toSend, deterministicRandom()->randomInt(0, 1000));
 
 		if (!peer)
@@ -1096,7 +1096,7 @@ public:
 			             // can't deterministically check stack size as the real network does
 			return yielded = true;
 		}
-		return yielded = BUGGIFY_WITH_PROB(0.01);
+		return yielded = buggify(0.01);
 	}
 	TaskPriority getCurrentTask() const override { return currentTaskID; }
 	void setCurrentTask(TaskPriority taskID) override { currentTaskID = taskID; }
@@ -1300,7 +1300,7 @@ public:
 			    .detail("NumFiles", numFiles);
 		} else {
 			int64_t maxDelta = std::min(5.0, (now() - diskSpace.lastUpdate)) *
-			                   (BUGGIFY ? 10e6 : 1e6); // External processes modifying the disk
+			                   (buggify() ? 10e6 : 1e6); // External processes modifying the disk
 			int64_t delta = -maxDelta + deterministicRandom()->random01() * maxDelta * 2;
 			diskSpace.baseFreeSpace = std::min<int64_t>(
 			    diskSpace.totalSpace, std::max<int64_t>(diskSpace.baseFreeSpace + delta, totalFileSize));
@@ -2679,7 +2679,7 @@ Future<Void> waitUntilDiskReady(Reference<DiskParameters> diskParameters, int64_
 
 	double randomLatency;
 	if (sync) {
-		randomLatency = .005 + deterministicRandom()->random01() * (BUGGIFY ? 1.0 : .010);
+		randomLatency = .005 + deterministicRandom()->random01() * (buggify() ? 1.0 : .010);
 	} else
 		randomLatency = 10 * deterministicRandom()->random01() / diskParameters->iops;
 
@@ -2845,7 +2845,7 @@ Future<Void> Sim2FileSystem::renameFile(std::string const& from, std::string con
 Future<std::time_t> Sim2FileSystem::lastWriteTime(const std::string& filename) {
 	// TODO: update this map upon file writes.
 	static std::map<std::string, double> fileWrites;
-	if (BUGGIFY && deterministicRandom()->random01() < 0.01) {
+	if (buggify() && deterministicRandom()->random01() < 0.01) {
 		fileWrites[filename] = now();
 	}
 	return fileWrites[filename];

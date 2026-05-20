@@ -159,7 +159,7 @@ struct WatchesWorkload : TestWorkload {
 						//TraceEvent("WatcherWatch").detail("Watch", printable(watchKey));
 						Future<Void> watchFuture = tr->watch(makeReference<Watch>(watchKey, watchValue));
 						co_await tr->commit();
-						if (BUGGIFY) {
+						if (buggify()) {
 							// Make watch future outlive transaction
 							tr.reset();
 						}

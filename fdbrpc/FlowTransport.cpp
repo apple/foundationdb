@@ -1322,7 +1322,7 @@ static void scanPackets(TransportData* transport,
 			if (g_network->isSimulated() && !isStableConnection &&
 			    g_network->now() - g_simulator->lastConnectionFailure >
 			        g_simulator->connectionFailuresDisableDuration &&
-			    BUGGIFY_WITH_PROB(0.0001)) {
+			    buggify(0.0001)) {
 				g_simulator->lastConnectionFailure = g_network->now();
 				isBuggifyEnabled = true;
 				TraceEvent(SevInfo, "BitsFlip").log();

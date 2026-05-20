@@ -213,7 +213,7 @@ Future<Void> writeResponse(Reference<IConnection> conn, Reference<OutgoingRespon
 	response->data.content->prependWriteBuffer(pFirst, pLast);
 	while (true) {
 		int trySend = FLOW_KNOBS->HTTP_SEND_SIZE;
-		if ((!g_network->isSimulated() || !g_simulator->speedUpSimulation) && BUGGIFY_WITH_PROB(0.01)) {
+		if ((!g_network->isSimulated() || !g_simulator->speedUpSimulation) && buggify(0.01)) {
 			trySend = deterministicRandom()->randomInt(1, 10);
 		}
 		int len = conn->write(response->data.content->getUnsent(), trySend);
@@ -660,7 +660,7 @@ Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnection> 
 			}
 
 			int trySend = FLOW_KNOBS->HTTP_SEND_SIZE;
-			if ((!g_network->isSimulated() || !g_simulator->speedUpSimulation) && BUGGIFY_WITH_PROB(0.01)) {
+			if ((!g_network->isSimulated() || !g_simulator->speedUpSimulation) && buggify(0.01)) {
 				trySend = deterministicRandom()->randomInt(1, 10);
 			}
 			co_await sendRate->getAllowance(trySend);

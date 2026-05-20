@@ -171,9 +171,9 @@ public:
 	    readyToPush(Void()), lastCommit(Void()), isFirstCommit(true), readingBuffer(dbgid), readingFile(-1),
 	    readingPage(-1), writingPos(-1), fileExtensionBytes(SERVER_KNOBS->DISK_QUEUE_FILE_EXTENSION_BYTES),
 	    fileShrinkBytes(SERVER_KNOBS->DISK_QUEUE_FILE_SHRINK_BYTES) {
-		if (BUGGIFY)
+		if (buggify())
 			fileExtensionBytes = _PAGE_SIZE * deterministicRandom()->randomSkewedUInt32(1, 10 << 10);
-		if (BUGGIFY)
+		if (buggify())
 			fileShrinkBytes = _PAGE_SIZE * deterministicRandom()->randomSkewedUInt32(1, 10 << 10);
 		files[0].dbgFilename = filename(0);
 		files[1].dbgFilename = filename(1);
@@ -372,7 +372,7 @@ public:
 				                                             self->fileExtensionBytes + self->fileShrinkBytes);
 				const int64_t desiredMaxFileSize =
 				    pageCeiling(std::max(activeDataVolume, SERVER_KNOBS->TLOG_HARD_LIMIT_BYTES * 2));
-				const bool frivolouslyTruncate = BUGGIFY_WITH_PROB(0.1);
+				const bool frivolouslyTruncate = buggify(0.1);
 				if (self->files[1].size > desiredMaxFileSize || frivolouslyTruncate) {
 					// Either shrink self->files[1] to the size of self->files[0], or chop off fileShrinkBytes
 					int64_t maxShrink =
@@ -773,7 +773,7 @@ public:
 
 		// Read up to 1MB into readingBuffer
 		int len = std::min<int64_t>((files[readingFile].size / sizeof(Page) - readingPage) * sizeof(Page),
-		                            BUGGIFY_WITH_PROB(1.0) ? sizeof(Page) * deterministicRandom()->randomInt(1, 4)
+		                            buggify(1.0) ? sizeof(Page) * deterministicRandom()->randomInt(1, 4)
 		                                                   : (1 << 20));
 		readingBuffer.clear();
 		readingBuffer.alignReserve(sizeof(Page), len);
@@ -794,7 +794,7 @@ public:
 
 			if (!self->readingBuffer.size()) {
 				Future<Void> f = Void();
-				// if (BUGGIFY) f = delay( deterministicRandom()->random01() * 0.1 );
+				// if (buggify()) f = delay( deterministicRandom()->random01() * 0.1 );
 
 				int read = co_await self->fillReadingBuffer();
 				ASSERT(read == self->readingBuffer.size());

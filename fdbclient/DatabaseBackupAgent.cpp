@@ -331,7 +331,7 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 					Key rangeCountKey = task->params[BackupAgentBase::keyConfigLogUid].withPrefix(
 					    applyMutationsKeyVersionCountRange.begin);
 					Future<RangeResult> backupVersions =
-					    krmGetRanges(tr, prefix, KeyRangeRef(rangeBegin, rangeEnd), BUGGIFY ? 2 : 2000, 1e5);
+					    krmGetRanges(tr, prefix, KeyRangeRef(rangeBegin, rangeEnd), buggify() ? 2 : 2000, 1e5);
 					Future<Optional<Value>> logVersionValue =
 					    tr->get(task->params[BackupAgentBase::keyConfigLogUid].withPrefix(applyMutationsEndRange.begin),
 					            Snapshot::True);

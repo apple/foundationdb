@@ -1212,7 +1212,7 @@ Future<Void> simulatedMachine(ClusterConnectionString connStr,
 
 			CODE_PROBE(true, "Simulated machine has been rebooted");
 
-			bool swap = killType == ISimulator::KillType::Reboot && BUGGIFY_WITH_PROB(0.75) &&
+			bool swap = killType == ISimulator::KillType::Reboot && buggify(0.75) &&
 			            g_simulator->canSwapToMachine(localities.zoneId());
 			if (swap)
 				availableFolders[localities.dcId()].push_back(myFolders);
@@ -1442,7 +1442,7 @@ Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		g_simulator->processesPerMachine = processesPerMachine;
 
 		uniquify(dcIds);
-		if (!BUGGIFY && dcIds.size() == 2 && !dcIds[0].empty() && !dcIds[1].empty()) {
+		if (!buggify() && dcIds.size() == 2 && !dcIds[0].empty() && !dcIds[1].empty()) {
 			StatusObject primaryObj;
 			StatusObject primaryDcObj;
 			primaryDcObj["id"] = dcIds[0];
@@ -2077,7 +2077,7 @@ void SimulationConfig::setMachineCount(const TestConfig& testConfig) {
 		// generateMachineTeamTestConfig set up the number of servers per machine and the number of machines such that
 		// if we do not remove the surplus server and machine teams, the simulation test will report error.
 		// This is needed to make sure the number of server (and machine) teams is no larger than the desired number.
-		bool generateMachineTeamTestConfig = BUGGIFY_WITH_PROB(0.1) ? true : false;
+		bool generateMachineTeamTestConfig = buggify(0.1) ? true : false;
 		if (generateMachineTeamTestConfig) {
 			// When DESIRED_TEAMS_PER_SERVER is set to 1, the desired machine team number is 5
 			// while the max possible machine team number is 10.
@@ -2099,7 +2099,7 @@ void SimulationConfig::setCoordinators(const TestConfig& testConfig) {
 	} else {
 		// because we protect a majority of coordinators from being killed, it is better to run with low numbers of
 		// coordinators to prevent too many processes from being protected
-		coordinators = (testConfig.minimumRegions <= 1 && BUGGIFY)
+		coordinators = (testConfig.minimumRegions <= 1 && buggify())
 		                   ? deterministicRandom()->randomInt(1, std::max(machine_count, 2))
 		                   : 1;
 	}
@@ -2274,7 +2274,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	    useHostname ? NetworkAddressFromHostname::True : NetworkAddressFromHostname::False;
 
 	int extraDatabaseCount = 0;
-	bool useLocalDatabase = (testConfig.extraDatabaseMode == FDBExtraDatabaseMode::LocalOrSingle && BUGGIFY) ||
+	bool useLocalDatabase = (testConfig.extraDatabaseMode == FDBExtraDatabaseMode::LocalOrSingle && buggify()) ||
 	                        testConfig.extraDatabaseMode == FDBExtraDatabaseMode::Local;
 	if (!useLocalDatabase && testConfig.extraDatabaseMode != FDBExtraDatabaseMode::Disabled) {
 		extraDatabaseCount =

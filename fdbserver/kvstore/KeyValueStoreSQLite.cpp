@@ -1520,7 +1520,7 @@ void SQLiteDB::open(bool writable) {
 	int chunkSize;
 	if (!g_network->isSimulated()) {
 		chunkSize = 4096 * SERVER_KNOBS->SQLITE_CHUNK_SIZE_PAGES;
-	} else if (BUGGIFY) {
+	} else if (buggify()) {
 		chunkSize = 4096 * deterministicRandom()->randomInt(0, 100);
 	} else {
 		chunkSize = 4096 * SERVER_KNOBS->SQLITE_CHUNK_SIZE_PAGES_SIM;

@@ -34,7 +34,7 @@ public:
 	BackupFile(const std::string& fileName, Reference<IAsyncFile> file, const std::string& finalFullPath)
 	  : IBackupFile(fileName), m_file(file), m_writeOffset(0), m_finalFullPath(finalFullPath),
 	    m_blockSize(CLIENT_KNOBS->BACKUP_LOCAL_FILE_WRITE_BLOCK) {
-		if (BUGGIFY) {
+		if (buggify()) {
 			m_blockSize = deterministicRandom()->randomInt(100, 20000);
 		}
 		m_buffer.reserve(m_buffer.arena(), m_blockSize);

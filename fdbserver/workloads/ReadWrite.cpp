@@ -414,7 +414,7 @@ struct ReadWriteWorkload : ReadWriteCommon {
 
 		if (cacheResult) {
 			// Enabled is the default, but sometimes set it explicitly
-			if (BUGGIFY) {
+			if (buggify()) {
 				tr.setOption(FDBTransactionOptions::READ_SERVER_SIDE_CACHE_ENABLE);
 			}
 		} else {

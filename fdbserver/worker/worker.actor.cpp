@@ -261,7 +261,7 @@ template <class T>
 Future<Void> zombie(T workerInterface, Future<Void> worker) {
 	try {
 		co_await worker;
-		if (BUGGIFY)
+		if (buggify())
 			co_await delay(1.0);
 		co_return;
 	} catch (Error& e) {
@@ -1935,7 +1935,7 @@ void cleanupStorageDisks(Reference<AsyncVar<ServerDBInfo>> dbInfo,
 }
 
 bool skipInitRspInSim(const UID workerInterfID, const bool allowDropInSim) {
-	const bool skip = allowDropInSim && g_network->isSimulated() && BUGGIFY_WITH_PROB(/* 1% */ 0.01);
+	const bool skip = allowDropInSim && g_network->isSimulated() && buggify(/* 1% */ 0.01);
 	if (skip) {
 		TraceEvent("SkipInitRspInSimTrue").detail("WorkerInterfID", workerInterfID);
 	}
