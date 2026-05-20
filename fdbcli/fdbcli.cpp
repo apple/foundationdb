@@ -538,6 +538,12 @@ void initHelp() {
 	    "clear a range of keys from the database",
 	    "All keys between BEGINKEY (inclusive) and ENDKEY (exclusive) are cleared from the database. This command will "
 	    "succeed even if the specified range is empty, but may fail because of conflicts." ESCAPINGK);
+	helpMap["clearprefix"] = CommandHelp(
+	    "clearprefix <PREFIX>",
+	    "clear all keys with the given prefix from the database",
+	    "All keys that start with PREFIX are cleared from the database. This is equivalent to `clearrange <PREFIX> "
+	    "<STRINC(PREFIX)>' but avoids the need to manually compute the end key. This command will succeed even if no "
+	    "keys with the given prefix exist, but may fail because of conflicts." ESCAPINGK);
 	helpMap["exit"] = CommandHelp("exit", "exit the CLI", "");
 	helpMap["quit"] = CommandHelp();
 	helpMap["waitconnected"] = CommandHelp();
@@ -1809,6 +1815,27 @@ Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterConnecti
 					} else {
 						getTransaction(db, tr, options, intrans);
 						tr->clear(KeyRangeRef(tokens[1], tokens[2]));
+
+						if (!intrans) {
+							co_await commitTransaction(tr);
+						}
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "clearprefix")) {
+					if (!writeMode) {
+						fprintf(stderr, "ERROR: writemode must be enabled to set or clear keys in the database.\n");
+						is_error = true;
+						continue;
+					}
+
+					if (tokens.size() != 2) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						getTransaction(db, tr, options, intrans);
+						tr->clear(prefixRange(tokens[1]));
 
 						if (!intrans) {
 							co_await commitTransaction(tr);
