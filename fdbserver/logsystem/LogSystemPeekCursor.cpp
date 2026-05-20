@@ -483,10 +483,9 @@ Future<Void> serverPeekGetMoreImpl(ServerPeekCursor* self, TaskPriority taskID) 
 			// FlowTransport silently discards packets to unknown endpoints.
 			// Set PEEK_REPLY_TIMEOUT to 0 to disable and restore the old wait-forever behavior.
 			// Only enable timeout when interface is present (i.e., a peek was actually sent).
-			Future<Void> timeoutFuture =
-			    (self->interf->get().present() && SERVER_KNOBS->PEEK_REPLY_TIMEOUT > 0)
-			    ? delay(SERVER_KNOBS->PEEK_REPLY_TIMEOUT)
-			    : Never();
+			Future<Void> timeoutFuture = (self->interf->get().present() && SERVER_KNOBS->PEEK_REPLY_TIMEOUT > 0)
+			                                 ? delay(SERVER_KNOBS->PEEK_REPLY_TIMEOUT)
+			                                 : Never();
 			auto res = co_await race(peekReply, self->interf->onChange(), timeoutFuture);
 			if (res.index() == 0) {
 				TLogPeekReply reply = std::get<0>(std::move(res));
