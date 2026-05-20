@@ -136,7 +136,7 @@ function start_fdb_cluster {
       --storage_count "${ss_count}" --storage_type ssd-rocksdb-v1 \
       --dump_pids on \
       > >(tee "${output}") \
-      2> >(tee "${output}" >&2)
+      2> >(tee "${output}.stderr" >&2)
     status="$?"
     # Restore exit on error.
     set -o errexit  # a.k.a. set -e
@@ -171,13 +171,14 @@ function start_fdb_cluster {
       fi
       break;
     fi
-    # Otherwise, look for 'Local address in use' and if found retry with different ports.
-    # Use grep -a to treat binary files as text
-    if grep -a 'Local address in use' "${output}"; then
-      log "Ports in use; retry cluster start but with different ports"
+    # Check stderr (separate file to avoid tee process substitution race) for
+    # port-in-use error. Only retry on port collision; fail on anything else.
+    if grep -a 'Local address in use' "${output}.stderr"; then
+      log "Port ${port_prefix} in use, retrying with next port"
       continue
     fi
-    err "Failed to start fdb cluster"
+    err "Failed to start fdb cluster (stderr follows):"
+    cat "${output}.stderr" >&2
     return 1
   done
 }
