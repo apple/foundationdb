@@ -4,6 +4,9 @@ add_flow_target(STATIC_LIBRARY NAME fdbserver_datadistributor SRCS ${FDBSERVER_D
 add_fdbserver_link_test(fdbserver_datadistributorlinktest
   fdbserver_datadistributor
   fdbserver_core)
+add_fdbserver_unit_test(fdbserver_datadistributor_test datadistributor
+  fdbserver_datadistributor
+  fdbserver_core)
 
 configure_fdbserver_common_includes(fdbserver_datadistributor)
 target_include_directories(fdbserver_datadistributor
