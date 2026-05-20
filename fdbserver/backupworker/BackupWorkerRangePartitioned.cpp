@@ -24,9 +24,10 @@
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tracing.h"
-#include "BackupPartitionMap.h"
+#include "fdbserver/core/BackupPartitionMap.h"
 #include "fdbserver/core/BackupProgress.h"
 #include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/PartitionMapMessage.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/logsystem/LogSystemConsumer.h"
@@ -368,25 +369,12 @@ Future<Version> pullPartitionMapFromTLog(BackupRangePartitionedData* self, Parti
 				cursor->nextMessage();
 				continue;
 			}
-			// TODO akanksha: Uncomment once PartitionMapMessage is implemented.
-			// bool isPartitionMap = PartitionMapMessage::isNextIn(reader);
-			bool isPartitionMap = true;
-			if (!isPartitionMap) {
-				TraceEvent(SevError, "BWRangeParitionedPartitionMapNotReceived", self->myId)
-				    .detail("Version", msgVersion)
-				    .detail("Tag", self->tag.toString())
-				    .detail("MessageSize", message.size());
-				throw worker_removed();
-			}
+			bool isPartitionMap = PartitionMapMessage::isNextIn(reader);
+			ASSERT(isPartitionMap);
 
-			// TODO akanksha: 1. std::unordered_map is not supported by ArenaReader right now, need to implement custom
-			// deserialization logic for it. Or we can switch to std::map which is supported by ArenaReader.
-			// 2. Uncomment and update the code once the deserialization logic is implemented.
-			/*
 			PartitionMapMessage pmMsg;
 			reader >> pmMsg;
-			*outPartitionMap  = pmMsg.partitionMap;
-			*/
+			*outPartitionMap = std::move(pmMsg.partitionMap);
 			partitionMapVersion = msgVersion;
 			co_return partitionMapVersion;
 		}
@@ -423,6 +411,7 @@ Future<Void> uploadPartitionList(BackupRangePartitionedData* self, PartitionMap 
 // 2. For older epochs with different containers is PartitionMap specific to container or same for all.
 // Right now assumption is that PartitionMap will be passed by TLOG with the first message after start version for both
 // older epochs and newer epochs.
+// 3. Provide implemention for recovery where paritionmap can come any time and won't be the first message.
 Future<Void> waitAndProcessPartitionMap(BackupRangePartitionedData* self) {
 	TraceEvent("BWRangeParitionedWaitingForPartitionMap", self->myId)
 	    .detail("Tag", self->tag.toString())
@@ -1146,3 +1135,87 @@ Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
 		throw err;
 	}
 }
+
+namespace {
+PartitionMap makeSamplePartitionMap() {
+	PartitionMap pm;
+	pm[Tag(tagLocalityRangeBackup, 0)] = {
+		Partition(0, KeyRangeRef("a"_sr, "c"_sr)),
+		Partition(1, KeyRangeRef("c"_sr, "f"_sr)),
+	};
+	pm[Tag(tagLocalityRangeBackup, 1)] = {
+		Partition(2, KeyRangeRef("f"_sr, "m"_sr)),
+		Partition(3, KeyRangeRef("m"_sr, "z"_sr)),
+	};
+	return pm;
+}
+
+void assertPartitionMapsEqual(PartitionMap const& a, PartitionMap const& b) {
+	ASSERT_EQ(a.size(), b.size());
+	for (auto const& [tag, list] : a) {
+		auto it = b.find(tag);
+		ASSERT(it != b.end());
+		ASSERT_EQ(list.size(), it->second.size());
+		for (size_t i = 0; i < list.size(); ++i) {
+			ASSERT_EQ(list[i].partitionId, it->second[i].partitionId);
+			ASSERT(list[i].ranges == it->second[i].ranges);
+		}
+	}
+}
+} // namespace
+
+TEST_CASE("/BackupWorkerRangePartitioned/PartitionMapMessage/RoundTrip") {
+	PartitionMap original = makeSamplePartitionMap();
+	PartitionMapMessage outgoing(original);
+
+	BinaryWriter wr(AssumeVersion(g_network->protocolVersion()));
+	wr << outgoing;
+	Standalone<StringRef> bytes = wr.toValue();
+
+	ArenaReader reader(bytes.arena(), bytes, AssumeVersion(g_network->protocolVersion()));
+	ASSERT(PartitionMapMessage::isNextIn(reader));
+
+	PartitionMapMessage incoming;
+	reader >> incoming;
+	assertPartitionMapsEqual(original, incoming.partitionMap);
+	return Void();
+}
+
+TEST_CASE("/BackupWorkerRangePartitioned/PartitionMapMessage/RoundTripEmpty") {
+	PartitionMapMessage outgoing(PartitionMap{});
+
+	BinaryWriter wr(AssumeVersion(g_network->protocolVersion()));
+	wr << outgoing;
+	Standalone<StringRef> bytes = wr.toValue();
+
+	ArenaReader reader(bytes.arena(), bytes, AssumeVersion(g_network->protocolVersion()));
+	ASSERT(PartitionMapMessage::isNextIn(reader));
+
+	PartitionMapMessage incoming;
+	reader >> incoming;
+	ASSERT(incoming.partitionMap.empty());
+	return Void();
+}
+
+TEST_CASE("/BackupWorkerRangePartitioned/PartitionMapMessage/IsNextInLeadingByte") {
+	BinaryWriter wr(AssumeVersion(g_network->protocolVersion()));
+	PartitionMapMessage outgoing(makeSamplePartitionMap());
+	wr << outgoing;
+	Standalone<StringRef> bytes = wr.toValue();
+	ASSERT(bytes.size() >= 1);
+	ASSERT(PartitionMapMessage::startsPartitionMapMessage(bytes[0]));
+
+	ArenaReader pmmReader(bytes.arena(), bytes, AssumeVersion(g_network->protocolVersion()));
+	ASSERT(PartitionMapMessage::isNextIn(pmmReader));
+
+	uint8_t notPmm = MutationRef::SetValue;
+	StringRef otherBytes(&notPmm, 1);
+	Arena arena;
+	ArenaReader otherReader(arena, otherBytes, AssumeVersion(g_network->protocolVersion()));
+	ASSERT(!PartitionMapMessage::isNextIn(otherReader));
+	return Void();
+}
+
+// TODO akanksha: Remove once a production caller of backupWorkerRangePartitioned() is wired up;
+// this only exists to keep TEST_CASEs in this file from being dead-stripped from the static lib.
+void forceLinkBackupWorkerRangePartitionedTests() {}
