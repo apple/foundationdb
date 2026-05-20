@@ -3021,11 +3021,13 @@ Future<Void> printTimeout() {
 Future<Void> printOnFirstConnected(Reference<AsyncVar<Optional<ClusterInterface>> const> ci) {
 	[[maybe_unused]] Future<Void> timeoutFuture = printTimeout();
 	while (true) {
-		auto res =
-		    co_await race(ci->get().present() ? IFailureMonitor::failureMonitor().onStateEqual(
-		                                            ci->get().get().openDatabase.getEndpoint(), FailureStatus(false))
-		                                      : Never(),
-		                  ci->onChange());
+		Future<Void> connected = Never();
+		if (ci->get().present()) {
+			connected = IFailureMonitor::failureMonitor().onStateEqual(ci->get().get().openDatabase.getEndpoint(),
+			                                                           FailureStatus(false));
+		}
+		Future<Void> changed = ci->onChange();
+		auto res = co_await race(connected, changed);
 		if (res.index() == 0) {
 			printf("FDBD joined cluster.\n");
 			TraceEvent("FDBDConnected").log();
