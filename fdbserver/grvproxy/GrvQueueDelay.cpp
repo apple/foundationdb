@@ -80,9 +80,14 @@ GrvQueueDelayEstimate estimateRemainingGrvQueueDelay(TransactionPriority priorit
 	return estimate;
 }
 
-bool shouldRejectForMaxGrvQueueDelay(GetReadVersionRequest const& req, double remainingDelay) {
+bool shouldRejectForMaxGrvQueueDelay(GetReadVersionRequest const& req,
+                                     double remainingDelay,
+                                     GrvRateLeaseState rateLeaseState) {
 	if (!req.maxGrvQueueDelayMS.present()) {
 		return false;
+	}
+	if (rateLeaseState == GrvRateLeaseState::Expired) {
+		return true;
 	}
 
 	double elapsedQueueDelay = now() - req.requestTime();
