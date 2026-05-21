@@ -62,6 +62,8 @@ struct GrvProxyStats {
 	int systemGRVQueueSize;
 	int defaultGRVQueueSize;
 	int batchGRVQueueSize;
+	int versionVectorSize;
+	int versionVectorEncodedBytes;
 	double transactionRateAllowed;
 	double batchTransactionRateAllowed;
 	double transactionLimit;
@@ -125,10 +127,10 @@ struct GrvProxyStats {
 	    txnDefaultPriorityStartIn("TxnDefaultPriorityStartIn", cc),
 	    txnDefaultPriorityStartOut("TxnDefaultPriorityStartOut", cc), txnThrottled("TxnThrottled", cc),
 	    updatesFromRatekeeper("UpdatesFromRatekeeper", cc), leaseTimeouts("LeaseTimeouts", cc), systemGRVQueueSize(0),
-	    defaultGRVQueueSize(0), batchGRVQueueSize(0), transactionRateAllowed(0), batchTransactionRateAllowed(0),
-	    transactionLimit(0), batchTransactionLimit(0), percentageOfDefaultGRVQueueProcessed(0),
-	    percentageOfBatchGRVQueueProcessed(0), lastBatchQueueThrottled(false), lastDefaultQueueThrottled(false),
-	    batchThrottleStartTime(0.0), defaultThrottleStartTime(0.0),
+	    defaultGRVQueueSize(0), batchGRVQueueSize(0), versionVectorSize(0), versionVectorEncodedBytes(0),
+	    transactionRateAllowed(0), batchTransactionRateAllowed(0), transactionLimit(0), batchTransactionLimit(0),
+	    percentageOfDefaultGRVQueueProcessed(0), percentageOfBatchGRVQueueProcessed(0), lastBatchQueueThrottled(false),
+	    lastDefaultQueueThrottled(false), batchThrottleStartTime(0.0), defaultThrottleStartTime(0.0),
 	    defaultTxnGRVTimeInQueue("DefaultTxnGRVTimeInQueue",
 	                             id,
 	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -156,6 +158,10 @@ struct GrvProxyStats {
 		specialCounter(cc, "SystemGRVQueueSize", [this]() { return this->systemGRVQueueSize; });
 		specialCounter(cc, "DefaultGRVQueueSize", [this]() { return this->defaultGRVQueueSize; });
 		specialCounter(cc, "BatchGRVQueueSize", [this]() { return this->batchGRVQueueSize; });
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+			specialCounter(cc, "VersionVectorSize", [this]() { return this->versionVectorSize; });
+			specialCounter(cc, "VersionVectorEncodedBytes", [this]() { return this->versionVectorEncodedBytes; });
+		}
 		specialCounter(
 		    cc, "SystemAndDefaultTxnRateAllowed", [this]() { return int64_t(this->transactionRateAllowed); });
 		specialCounter(
@@ -380,6 +386,7 @@ Future<Void> getRate(UID myID,
                      int64_t* inBatchTransactionCount,
                      GrvTransactionRateInfo* transactionRateInfo,
                      GrvTransactionRateInfo* batchTransactionRateInfo,
+                     GrvRateLeaseState* rateLeaseState,
                      GetHealthMetricsReply* healthMetricsReply,
                      GetHealthMetricsReply* detailedHealthMetricsReply,
                      TransactionTagMap<uint64_t>* transactionTagCounter,
@@ -429,6 +436,7 @@ Future<Void> getRate(UID myID,
 
 			transactionRateInfo->setRate(rep.transactionRate);
 			batchTransactionRateInfo->setRate(rep.batchTransactionRate);
+			*rateLeaseState = GrvRateLeaseState::Active;
 			stats->transactionRateAllowed = rep.transactionRate;
 			stats->batchTransactionRateAllowed = rep.batchTransactionRate;
 			++stats->updatesFromRatekeeper;
@@ -451,6 +459,7 @@ Future<Void> getRate(UID myID,
 
 			transactionRateInfo->disable();
 			batchTransactionRateInfo->disable();
+			*rateLeaseState = GrvRateLeaseState::Expired;
 			++stats->leaseTimeouts;
 			TraceEvent(SevWarn, "GrvProxyRateLeaseExpired", myID).suppressFor(5.0);
 			//TraceEvent("GrvProxyRate", myID).detail("Rate", 0.0).detail("BatchRate", 0.0).detail("Lease", 0);
@@ -505,7 +514,8 @@ bool rejectIncomingForMaxGrvQueueDelay(GetReadVersionRequest const& req,
                                        GrvQueueTransactionCounts const& queueTransactionCounts,
                                        GrvProxyStats* stats,
                                        GrvTransactionRateInfo const* normalRateInfo,
-                                       GrvTransactionRateInfo const* batchRateInfo) {
+                                       GrvTransactionRateInfo const* batchRateInfo,
+                                       GrvRateLeaseState rateLeaseState) {
 	// Requests with this option should be rejected before normal queue accounting
 	// or insertion. The estimate uses normal-rate work for every request and adds
 	// batch-rate work for batch-priority requests.
@@ -519,13 +529,13 @@ bool rejectIncomingForMaxGrvQueueDelay(GetReadVersionRequest const& req,
 	auto estimate = estimateRemainingGrvQueueDelay(
 	    req.priority, req.transactionCount, queueTransactionCounts, normalRateInfo, batchRateInfo);
 	if (estimate.batchRateDelay.present()) {
-		if (shouldRejectForMaxGrvQueueDelay(req, estimate.batchRateDelay.get())) {
+		if (shouldRejectForMaxGrvQueueDelay(req, estimate.batchRateDelay.get(), rateLeaseState)) {
 			rejectForMaxGrvQueueDelay(req, stats, estimate.batchRateDelay.get());
 			return true;
 		}
 	}
 
-	if (shouldRejectForMaxGrvQueueDelay(req, estimate.normalRateDelay)) {
+	if (shouldRejectForMaxGrvQueueDelay(req, estimate.normalRateDelay, rateLeaseState)) {
 		rejectForMaxGrvQueueDelay(req, stats, estimate.normalRateDelay);
 		return true;
 	}
@@ -546,7 +556,8 @@ Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> const>
                                          GrvProxyStats* stats,
                                          GrvTransactionRateInfo* normalRateInfo,
                                          GrvTransactionRateInfo* batchRateInfo,
-                                         GrvQueueTransactionCounts* queueTransactionCounts) {
+                                         GrvQueueTransactionCounts* queueTransactionCounts,
+                                         GrvRateLeaseState const* rateLeaseState) {
 	getCurrentLineage()->modify(&TransactionLineage::operation) =
 	    TransactionLineage::Operation::GetConsistentReadVersion;
 	while (true) {
@@ -588,7 +599,7 @@ Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> const>
 				proxyGRVThresholdExceeded(&req, stats);
 			} else {
 				if (rejectIncomingForMaxGrvQueueDelay(
-				        req, *queueTransactionCounts, stats, normalRateInfo, batchRateInfo)) {
+				        req, *queueTransactionCounts, stats, normalRateInfo, batchRateInfo, *rateLeaseState)) {
 					continue;
 				}
 
@@ -728,8 +739,9 @@ Future<GetReadVersionReply> getLiveCommittedVersion(std::vector<SpanContext> spa
 	grvProxyData->minKnownCommittedVersion =
 	    std::max(grvProxyData->minKnownCommittedVersion, repFromMaster.minKnownCommittedVersion);
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
-		// TODO add to "status json"
 		grvProxyData->ssVersionVectorCache.applyDelta(repFromMaster.ssVersionVectorDelta);
+		grvProxyData->stats.versionVectorSize = grvProxyData->ssVersionVectorCache.size();
+		grvProxyData->stats.versionVectorEncodedBytes = grvProxyData->ssVersionVectorCache.getEncodedSize();
 	}
 	grvProxyData->stats.grvGetCommittedVersionRpcDist->sampleSeconds(now() - grvConfirmEpochLive);
 	GetReadVersionReply rep;
@@ -907,6 +919,7 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	GrvTransactionRateInfo batchRateInfo(SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW,
 	                                     SERVER_KNOBS->START_TRANSACTION_MAX_EMPTY_QUEUE_BUDGET,
 	                                     /*rate=*/0);
+	GrvRateLeaseState rateLeaseState = GrvRateLeaseState::Unknown;
 
 	Deque<GetReadVersionRequest> systemQueue;
 	Deque<GetReadVersionRequest> defaultQueue;
@@ -929,6 +942,7 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	                      &batchTransactionCount,
 	                      &normalRateInfo,
 	                      &batchRateInfo,
+	                      &rateLeaseState,
 	                      healthMetricsReply,
 	                      detailedHealthMetricsReply,
 	                      &transactionTagCounter,
@@ -947,7 +961,8 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	                                          &grvProxyData->stats,
 	                                          &normalRateInfo,
 	                                          &batchRateInfo,
-	                                          &queueTransactionCounts));
+	                                          &queueTransactionCounts,
+	                                          &rateLeaseState));
 
 	while (std::find(db->get().client.grvProxies.begin(), db->get().client.grvProxies.end(), proxy) ==
 	       db->get().client.grvProxies.end()) {

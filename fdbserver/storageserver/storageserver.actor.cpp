@@ -59,6 +59,7 @@
 #include "fdbserver/storageserver/StorageCorruptionBug.h"
 #include "fdbserver/core/StorageMetrics.h"
 #include "fdbserver/core/TLogInterface.h"
+#include "fdbserver/logsystem/LogSystemConsumer.h"
 #include "TransactionTagCounter.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "flow/ActorCollection.h"
@@ -1177,8 +1178,8 @@ public:
 
 	ProtocolVersion logProtocol;
 
-	Reference<LogSystem> logSystem;
-	Reference<IPeekCursor> logCursor;
+	Reference<LogSystemConsumer> logSystem;
+	Reference<IReplayPeekCursor> logCursor;
 
 	// The version the cluster starts on. This value is not persisted and may
 	// not be valid after a recovery.
@@ -9626,7 +9627,7 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				co_await data->byteSampleClearsTooLarge.onChange();
 			}
 
-			Reference<IPeekCursor> cursor = data->logCursor;
+			Reference<IReplayPeekCursor> cursor = data->logCursor;
 
 			double beforeTLogCursorReads = now();
 			while (true) {
@@ -9665,7 +9666,7 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 			start = now();
 			FetchInjectionInfo fii;
-			Reference<IPeekCursor> cloneCursor2 = cursor->cloneNoMore();
+			Reference<IReplayPeekCursor> cloneCursor2 = cursor->cloneNoMore();
 
 			// Collect eager read keys.
 			while (true) {
@@ -9675,7 +9676,7 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				bool firstMutation = true;
 				bool dbgLastMessageWasProtocol = false;
 
-				Reference<IPeekCursor> cloneCursor1 = cloneCursor2->cloneNoMore();
+				Reference<IReplayPeekCursor> cloneCursor1 = cloneCursor2->cloneNoMore();
 
 				cloneCursor1->setProtocolVersion(data->logProtocol);
 
@@ -11963,7 +11964,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				CODE_PROBE(self->logSystem, "shardServer dbInfo changed");
 				dbInfoChange = self->db->onChange();
 				if (self->db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
-					self->logSystem = makeLogSystemFromServerDBInfo(self->thisServerID, self->db->get());
+					self->logSystem = makeLogSystemConsumerFromServerDBInfo(self->thisServerID, self->db->get());
 					if (self->logSystem) {
 						if (self->db->get().logSystemConfig.recoveredAt.present()) {
 							self->poppedAllAfter = self->db->get().logSystemConfig.recoveredAt.get();
