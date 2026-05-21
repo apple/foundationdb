@@ -24,8 +24,8 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicReference;
@@ -34,9 +34,7 @@ import com.apple.foundationdb.async.AsyncIterable;
 import com.apple.foundationdb.async.AsyncUtil;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 import com.apple.foundationdb.tuple.Tuple;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
@@ -46,33 +44,9 @@ class MappedRangeQueryIntegrationTest {
 	public String databaseArg = null;
 	private Database openFDB() { return fdb.open(databaseArg); }
 
-	@BeforeEach
-	@AfterEach
-	void clearDatabase() throws Exception {
-		/*
-		 * Empty the database before and after each run, just in case.
-		 * Retry the clear operation since on heavily loaded CI the transaction
-		 * may time out during cluster bootstrap or under resource contention.
-		 */
-		int maxAttempts = 5;
-		for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-			try (Database db = openFDB()) {
-				db.run(tr -> {
-					tr.clear(new byte[0], new byte[] { (byte)0xff });
-					return null;
-				});
-				return; // success
-			} catch (CompletionException e) {
-				if (attempt == maxAttempts) {
-					throw e;
-				}
-				Thread.sleep(1000);
-			}
-		}
-	}
-
 	static private final byte[] EMPTY = Tuple.from().pack();
-	static private final String PREFIX = "prefix";
+	// Integration tests share a database, so do not require a database-wide clear.
+	static private final String PREFIX = "mapped-range-query-" + UUID.randomUUID();
 	static private final String RECORD = "RECORD";
 	static private final String INDEX = "INDEX";
 	static private String primaryKey(int i) { return String.format("primary-key-of-record-%08d", i); }
@@ -111,9 +85,7 @@ class MappedRangeQueryIntegrationTest {
 	public static void main(String[] args) throws Exception {
 		final MappedRangeQueryIntegrationTest test = new MappedRangeQueryIntegrationTest();
 		test.databaseArg = getArgFromEnv();
-		test.clearDatabase();
 		test.comparePerformance();
-		test.clearDatabase();
 	}
 
 	// Keep numRecords modest so transactions complete within the 5s timeout
