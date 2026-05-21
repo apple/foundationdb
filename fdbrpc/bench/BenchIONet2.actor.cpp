@@ -48,11 +48,12 @@ static Future<Void> benchIONet2Actor(benchmark::State* benchState) {
 	uint32_t sum{ 0 };
 	uint64_t seed = platform::getRandomSeed();
 	std::unique_ptr<char[]> data(new char[4096]);
+	// The actor version declared this as state inside the loop, so keep these futures across iterations.
+	std::vector<Future<Void>> futures;
+	futures.reserve(actorCount);
 	memset(data.get(), 0, 4096);
 	while (benchState->KeepRunning()) {
 		sum = 0;
-		std::vector<Future<Void>> futures;
-		futures.reserve(actorCount);
 		DeterministicRandom rand(seed);
 		for (int i = 0; i < actorCount; ++i) {
 			futures.push_back(increment(getRandomTaskPriority(rand), &sum));
