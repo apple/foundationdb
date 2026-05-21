@@ -4297,14 +4297,18 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 
 				tr->set(backupStartedKey, encodeBackupStartedValue(ids));
 
+				// Range-partitioned workers do not set BackupConfig.allWorkerStarted, so do not watch
+				// it for that mutation log type.
+				const bool isRangePartitioned = mutationLogType.get().get() == MutationLogType::RANGE_PARTITIONED_LOG;
+
 				// The task may be restarted. Set the watch if started key has NOT been set.
-				if (!taskStarted.get().present()) {
+				if (!isRangePartitioned && !taskStarted.get().present()) {
 					watchFuture = tr->watch(config.allWorkerStarted().key);
 				}
 
 				co_await keepRunning;
 				co_await tr->commit();
-				if (!taskStarted.get().present()) {
+				if (!isRangePartitioned && !taskStarted.get().present()) {
 					co_await watchFuture;
 				}
 				co_return;

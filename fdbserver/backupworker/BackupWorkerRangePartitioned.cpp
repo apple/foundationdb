@@ -283,7 +283,7 @@ static Future<Void> onBackupChanges(BackupRangePartitionedData* self,
 	bool hasNewBackup = false;
 	Version newBackupsMinVersion = std::numeric_limits<Version>::max();
 
-	// Add any new backups
+	// Add any new backups.
 	for (const auto& [uid, version] : uidVersions) {
 		if (self->backups.find(uid) == self->backups.end()) {
 			self->backups.emplace(uid, BackupRangePartitionedData::PerBackupInfo(self, uid, version));
@@ -823,20 +823,14 @@ Future<Void> setBackupKeys(BackupRangePartitionedData* self, std::map<UID, Versi
 
 			std::vector<Future<Optional<Version>>> prevBackupWorkerSavedVersions;
 			std::vector<BackupConfig> versionConfigs;
-			std::vector<Future<Optional<bool>>> allWorkersReady;
 			for (const auto& [uid, version] : savedLogVersions) {
 				BackupConfig config(uid);
 				versionConfigs.emplace_back(config);
 				prevBackupWorkerSavedVersions.push_back(config.latestBackupWorkerSavedVersion().get(tr));
-				allWorkersReady.push_back(config.allWorkerStarted().get(tr));
 			}
-			co_await (waitForAll(prevBackupWorkerSavedVersions) && waitForAll(allWorkersReady));
+			co_await waitForAll(prevBackupWorkerSavedVersions);
 
 			for (int i = 0; i < prevBackupWorkerSavedVersions.size(); i++) {
-				if (!allWorkersReady[i].get().present() || !allWorkersReady[i].get().get()) {
-					continue;
-				}
-
 				const Version current = savedLogVersions[versionConfigs[i].getUid()];
 				if (prevBackupWorkerSavedVersions[i].get().present()) {
 					const Version prev = prevBackupWorkerSavedVersions[i].get().get();
