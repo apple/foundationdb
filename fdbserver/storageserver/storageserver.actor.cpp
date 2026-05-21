@@ -59,6 +59,7 @@
 #include "fdbserver/storageserver/StorageCorruptionBug.h"
 #include "fdbserver/core/StorageMetrics.h"
 #include "fdbserver/core/TLogInterface.h"
+#include "fdbserver/logsystem/LogSystemConsumer.h"
 #include "TransactionTagCounter.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "flow/ActorCollection.h"
@@ -1177,7 +1178,7 @@ public:
 
 	ProtocolVersion logProtocol;
 
-	Reference<LogSystem> logSystem;
+	Reference<LogSystemConsumer> logSystem;
 	Reference<IReplayPeekCursor> logCursor;
 
 	// The version the cluster starts on. This value is not persisted and may
@@ -11967,7 +11968,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				CODE_PROBE(self->logSystem, "shardServer dbInfo changed");
 				dbInfoChange = self->db->onChange();
 				if (self->db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
-					self->logSystem = makeLogSystemFromServerDBInfo(self->thisServerID, self->db->get());
+					self->logSystem = makeLogSystemConsumerFromServerDBInfo(self->thisServerID, self->db->get());
 					if (self->logSystem) {
 						if (self->db->get().logSystemConfig.recoveredAt.present()) {
 							self->poppedAllAfter = self->db->get().logSystemConfig.recoveredAt.get();

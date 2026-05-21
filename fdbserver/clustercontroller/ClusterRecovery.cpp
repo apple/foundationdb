@@ -1609,7 +1609,7 @@ Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 			logChanges = triggerUpdates(self, oldLogSystem);
 			if (!minRecoveryDuration.isValid()) {
 				minRecoveryDuration = delay(SERVER_KNOBS->ENFORCED_MIN_RECOVERY_DURATION);
-				poppedTxsVersion = oldLogSystem->getTxsPoppedVersion();
+				poppedTxsVersion = oldLogSystem->makeConsumer()->getTxsPoppedVersion();
 			}
 		}
 
