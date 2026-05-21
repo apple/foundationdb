@@ -386,6 +386,7 @@ Future<Void> getRate(UID myID,
                      int64_t* inBatchTransactionCount,
                      GrvTransactionRateInfo* transactionRateInfo,
                      GrvTransactionRateInfo* batchTransactionRateInfo,
+                     GrvRateLeaseState* rateLeaseState,
                      GetHealthMetricsReply* healthMetricsReply,
                      GetHealthMetricsReply* detailedHealthMetricsReply,
                      TransactionTagMap<uint64_t>* transactionTagCounter,
@@ -435,6 +436,7 @@ Future<Void> getRate(UID myID,
 
 			transactionRateInfo->setRate(rep.transactionRate);
 			batchTransactionRateInfo->setRate(rep.batchTransactionRate);
+			*rateLeaseState = GrvRateLeaseState::Active;
 			stats->transactionRateAllowed = rep.transactionRate;
 			stats->batchTransactionRateAllowed = rep.batchTransactionRate;
 			++stats->updatesFromRatekeeper;
@@ -457,6 +459,7 @@ Future<Void> getRate(UID myID,
 
 			transactionRateInfo->disable();
 			batchTransactionRateInfo->disable();
+			*rateLeaseState = GrvRateLeaseState::Expired;
 			++stats->leaseTimeouts;
 			TraceEvent(SevWarn, "GrvProxyRateLeaseExpired", myID).suppressFor(5.0);
 			//TraceEvent("GrvProxyRate", myID).detail("Rate", 0.0).detail("BatchRate", 0.0).detail("Lease", 0);
@@ -511,7 +514,8 @@ bool rejectIncomingForMaxGrvQueueDelay(GetReadVersionRequest const& req,
                                        GrvQueueTransactionCounts const& queueTransactionCounts,
                                        GrvProxyStats* stats,
                                        GrvTransactionRateInfo const* normalRateInfo,
-                                       GrvTransactionRateInfo const* batchRateInfo) {
+                                       GrvTransactionRateInfo const* batchRateInfo,
+                                       GrvRateLeaseState rateLeaseState) {
 	// Requests with this option should be rejected before normal queue accounting
 	// or insertion. The estimate uses normal-rate work for every request and adds
 	// batch-rate work for batch-priority requests.
@@ -525,13 +529,13 @@ bool rejectIncomingForMaxGrvQueueDelay(GetReadVersionRequest const& req,
 	auto estimate = estimateRemainingGrvQueueDelay(
 	    req.priority, req.transactionCount, queueTransactionCounts, normalRateInfo, batchRateInfo);
 	if (estimate.batchRateDelay.present()) {
-		if (shouldRejectForMaxGrvQueueDelay(req, estimate.batchRateDelay.get())) {
+		if (shouldRejectForMaxGrvQueueDelay(req, estimate.batchRateDelay.get(), rateLeaseState)) {
 			rejectForMaxGrvQueueDelay(req, stats, estimate.batchRateDelay.get());
 			return true;
 		}
 	}
 
-	if (shouldRejectForMaxGrvQueueDelay(req, estimate.normalRateDelay)) {
+	if (shouldRejectForMaxGrvQueueDelay(req, estimate.normalRateDelay, rateLeaseState)) {
 		rejectForMaxGrvQueueDelay(req, stats, estimate.normalRateDelay);
 		return true;
 	}
@@ -552,7 +556,8 @@ Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> const>
                                          GrvProxyStats* stats,
                                          GrvTransactionRateInfo* normalRateInfo,
                                          GrvTransactionRateInfo* batchRateInfo,
-                                         GrvQueueTransactionCounts* queueTransactionCounts) {
+                                         GrvQueueTransactionCounts* queueTransactionCounts,
+                                         GrvRateLeaseState const* rateLeaseState) {
 	getCurrentLineage()->modify(&TransactionLineage::operation) =
 	    TransactionLineage::Operation::GetConsistentReadVersion;
 	while (true) {
@@ -594,7 +599,7 @@ Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> const>
 				proxyGRVThresholdExceeded(&req, stats);
 			} else {
 				if (rejectIncomingForMaxGrvQueueDelay(
-				        req, *queueTransactionCounts, stats, normalRateInfo, batchRateInfo)) {
+				        req, *queueTransactionCounts, stats, normalRateInfo, batchRateInfo, *rateLeaseState)) {
 					continue;
 				}
 
@@ -914,6 +919,7 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	GrvTransactionRateInfo batchRateInfo(SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW,
 	                                     SERVER_KNOBS->START_TRANSACTION_MAX_EMPTY_QUEUE_BUDGET,
 	                                     /*rate=*/0);
+	GrvRateLeaseState rateLeaseState = GrvRateLeaseState::Unknown;
 
 	Deque<GetReadVersionRequest> systemQueue;
 	Deque<GetReadVersionRequest> defaultQueue;
@@ -936,6 +942,7 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	                      &batchTransactionCount,
 	                      &normalRateInfo,
 	                      &batchRateInfo,
+	                      &rateLeaseState,
 	                      healthMetricsReply,
 	                      detailedHealthMetricsReply,
 	                      &transactionTagCounter,
@@ -954,7 +961,8 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	                                          &grvProxyData->stats,
 	                                          &normalRateInfo,
 	                                          &batchRateInfo,
-	                                          &queueTransactionCounts));
+	                                          &queueTransactionCounts,
+	                                          &rateLeaseState));
 
 	while (std::find(db->get().client.grvProxies.begin(), db->get().client.grvProxies.end(), proxy) ==
 	       db->get().client.grvProxies.end()) {
