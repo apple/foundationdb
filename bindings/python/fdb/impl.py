@@ -593,10 +593,7 @@ class Transaction(TransactionRead):
         super(Transaction, self).__init__(tpointer, db, False)
         self.options = _TransactionOptions(self)
         self.__snapshot = self.snapshot = TransactionRead(tpointer, db, True)
-
-    def __del__(self) -> None:
-        pass
-
+        
     def set_read_version(self, version: int) -> None:
         """Set the read version of the transaction."""
         self.capi.fdb_transaction_set_read_version(self.tpointer, version)
