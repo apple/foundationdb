@@ -561,7 +561,7 @@ Future<KeyRange> getBulkLoadJobFileManifestEntryFromJobManifestFile(
 			int64_t bytesToRead = std::min(chunkSize, fileSize - offset);
 			buffer.resize(bytesToRead);
 
-			int bytesRead = co_await file->read(&buffer[0], bytesToRead, offset);
+			int bytesRead = co_await uncancellable(file->read(&buffer[0], bytesToRead, offset));
 			if (bytesRead != bytesToRead) {
 				TraceEvent(SevError, "ReadFileError", logId)
 				    .detail("BytesRead", bytesRead)
