@@ -30,7 +30,6 @@ leak:GlobalConfig::updater
 leak:GlobalConfig::refresh
 leak:monitorProxiesOneGeneration
 leak:DatabaseContext::updateProxies
-leak:makeReference<TransactionState
 leak:ModelInterface<CommitProxyInterface>::ModelInterface
 leak:ModelInterface<GrvProxyInterface>::ModelInterface
 leak:timeWarning
@@ -43,11 +42,10 @@ leak:clientStatusFetcher
 leak:cli(CLIOptions
 
 # Recurring actor started during DatabaseContext construction (currently
-# throttleExpirer, which binds DatabaseContext::expireThrottles). Leaked
-# because DatabaseContext is never cleanly destroyed at shutdown.
-# Suppress the stable FDB symbol rather than the toolchain-specific
-# bind_front/recurring instantiation for portability.
-leak:DatabaseContext::expireThrottles
+# throttleExpirer via bind_front(DatabaseContext::expireThrottles)).
+# The function name is mangled away by bind_front so we suppress via
+# Database::createDatabase which is the stable FDB frame in the stack.
+leak:Database::createDatabase
 
 # Thread-safe transaction destructor dispatches cleanup to the network
 # thread via onMainThreadVoid. If the network is shutting down, the
