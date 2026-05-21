@@ -42,10 +42,12 @@ leak:statusFetcherImpl
 leak:clientStatusFetcher
 leak:cli(CLIOptions
 
-# Recurring actors started during DatabaseContext construction (periodic
-# metrics like updateLatencyBandConfig). Leaked because DatabaseContext
-# is never cleanly destroyed at shutdown.
-leak:recurring<std::__1::__bind_front_t<void (DatabaseContext::
+# Recurring actor started during DatabaseContext construction (currently
+# throttleExpirer, which binds DatabaseContext::expireThrottles). Leaked
+# because DatabaseContext is never cleanly destroyed at shutdown.
+# Suppress the stable FDB symbol rather than the toolchain-specific
+# bind_front/recurring instantiation for portability.
+leak:DatabaseContext::expireThrottles
 
 # Thread-safe transaction destructor dispatches cleanup to the network
 # thread via onMainThreadVoid. If the network is shutting down, the
