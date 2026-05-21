@@ -21,9 +21,7 @@
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/JsonBuilder.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/Tracing.h"
 #include "fdbserver/core/BackupPartitionMap.h"
 #include "fdbserver/core/BackupProgress.h"
 #include "fdbserver/core/Knobs.h"
@@ -118,8 +116,9 @@ struct BackupRangePartitionedData {
 		bool isReady() const { return stopped || (container.isReady() && ranges.isReady()); }
 
 		Future<Void> waitReady() {
-			if (stopped)
+			if (stopped) {
 				return Void();
+			}
 			return _waitReady(this);
 		}
 
@@ -285,7 +284,7 @@ static Future<Void> onBackupChanges(BackupRangePartitionedData* self,
 
 	// Add any new backups.
 	for (const auto& [uid, version] : uidVersions) {
-		if (self->backups.find(uid) == self->backups.end()) {
+		if (!self->backups.contains(uid)) {
 			self->backups.emplace(uid, BackupRangePartitionedData::PerBackupInfo(self, uid, version));
 			modified = true;
 			newBackupsMinVersion = std::min(newBackupsMinVersion, version);
@@ -295,7 +294,7 @@ static Future<Void> onBackupChanges(BackupRangePartitionedData* self,
 
 	// Remove backups that are no longer active.
 	for (auto it = self->backups.begin(); it != self->backups.end(); it++) {
-		if (activeUids.find(it->first) == activeUids.end()) {
+		if (!activeUids.contains(it->first)) {
 			it->second.stopped = true;
 			it = self->backups.erase(it);
 			modified = true;
@@ -419,7 +418,7 @@ Future<Void> waitAndProcessPartitionMap(BackupRangePartitionedData* self) {
 	Version partitionMapVersion = co_await pullPartitionMapFromTLog(self, &partitionMap);
 	self->logFolderBaseVersion = partitionMapVersion + 1;
 
-	ASSERT(partitionMap.find(self->tag) != partitionMap.end());
+	ASSERT(partitionMap.contains(self->tag));
 	TraceEvent("BWRangeParitionedPulledPartitionMap", self->myId)
 	    .detail("Version", partitionMapVersion)
 	    .detail("NumTags", partitionMap.size())
@@ -702,7 +701,7 @@ Future<Void> saveMutationsToFile(BackupRangePartitionedData* self, Version lastV
 
 					int fileIdx = it->second;
 					// For ClearRange, we only need to write the full mutation once for each file.
-					if (writtenFiles.find(fileIdx) != writtenFiles.end()) {
+					if (writtenFiles.contains(fileIdx)) {
 						continue;
 					}
 					auto& lf = activeFiles[fileIdx];
