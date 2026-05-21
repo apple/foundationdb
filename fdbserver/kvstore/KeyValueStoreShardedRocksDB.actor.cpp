@@ -93,18 +93,17 @@ using rocksdb::BackgroundErrorReason;
 using rocksdb::CompactionReason;
 using rocksdb::FlushReason;
 
-// Returns string representation of RocksDB background error reason.
-// Error reason code:
-// https://github.com/facebook/rocksdb/blob/12d798ac06bcce36be703b057d5f5f4dab3b270c/include/rocksdb/listener.h#L125
-// This function needs to be updated when error code changes.
+using RocksDBCommon::getBackgroundError;
 using RocksDBCommon::getErrorReason;
+using RocksDBCommon::RocksDBBackgroundError;
 
-ACTOR Future<Void> forwardError(Future<int> input) {
-	int errorCode = wait(input);
-	if (errorCode == error_code_success) {
-		return Never();
-	}
-	throw Error::fromCode(errorCode);
+ACTOR Future<Void> forwardError(Future<RocksDBBackgroundError> input) {
+	RocksDBBackgroundError error = wait(input);
+	TraceEvent(SevError, "ShardedRocksDBBGError")
+	    .detail("Reason", getErrorReason(error.reason))
+	    .detail("ShardedRocksDBSeverity", error.severity)
+	    .detail("Status", error.status);
+	throw Error::fromCode(error.errorCode);
 }
 
 int getWriteStallState(const rocksdb::WriteStallCondition& condition) {
@@ -274,36 +273,22 @@ private:
 
 // Background error handling is tested with Chaos test.
 // TODO: Test background error in simulation. RocksDB doesn't use flow IO in simulation, which limits our ability to
-// inject IO errors. We could implement rocksdb::FileSystem using flow IO to unblock simulation. Also, trace event is
-// not available on background threads because trace event requires setting up special thread locals. Using trace event
-// could potentially cause segmentation fault.
+// inject IO errors. We could implement rocksdb::FileSystem using flow IO to unblock simulation.
+// OnBackgroundError can run on RocksDB background threads, so report errors through the thread-safe promise instead of
+// emitting TraceEvents from the callback.
 class RocksDBErrorListener : public rocksdb::EventListener {
 public:
 	RocksDBErrorListener() = default;
 	void OnBackgroundError(rocksdb::BackgroundErrorReason reason, rocksdb::Status* bg_error) override {
 		if (!bg_error)
 			return;
-		TraceEvent(SevError, "ShardedRocksDBBGError")
-		    .detail("Reason", getErrorReason(reason))
-		    .detail("ShardedRocksDBSeverity", bg_error->severity())
-		    .detail("Status", bg_error->ToString());
 
 		std::unique_lock<std::mutex> lock(mutex);
 		if (!errorPromise.isValid())
 			return;
-		// RocksDB generates two types of background errors, IO Error and Corruption
-		// Error type and severity map could be found at
-		// https://github.com/facebook/rocksdb/blob/2e09a54c4fb82e88bcaa3e7cfa8ccbbbbf3635d5/db/error_handler.cc#L138.
-		// All background errors will be treated as storage engine failure. Send the error to storage server.
-		if (bg_error->IsIOError()) {
-			errorPromise.send(error_code_io_error);
-		} else if (bg_error->IsCorruption()) {
-			errorPromise.send(error_code_file_corrupt);
-		} else {
-			errorPromise.send(error_code_unknown_error);
-		}
+		errorPromise.send(getBackgroundError(reason, *bg_error));
 	}
-	Future<int> getFuture() {
+	Future<RocksDBBackgroundError> getFuture() {
 		std::unique_lock<std::mutex> lock(mutex);
 		return errorPromise.getFuture();
 	}
@@ -311,11 +296,11 @@ public:
 		std::unique_lock<std::mutex> lock(mutex);
 		if (!errorPromise.isValid())
 			return;
-		errorPromise.send(error_code_success);
+		errorPromise.send(Never());
 	}
 
 private:
-	ThreadReturnPromise<int> errorPromise;
+	ThreadReturnPromise<RocksDBBackgroundError> errorPromise;
 	std::mutex mutex;
 };
 
