@@ -35,7 +35,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/kvstore/IKeyValueStore.h"
 #include "fdbserver/core/LogProtocolMessage.h"
-#include "fdbserver/logsystem/LogSystem.h"
+#include "fdbserver/logsystem/LogSystemConsumer.h"
 #include "flow/FastRef.h"
 
 class AccumulativeChecksumBuilder;
@@ -83,7 +83,7 @@ struct ResolverData {
 	// Whether configuration changes. If so, a recovery is forced.
 	bool& confChanges;
 	bool initialCommit = false;
-	Reference<LogSystem> logSystem = Reference<LogSystem>();
+	Reference<LogSystemConsumer> logSystemConsumer = Reference<LogSystemConsumer>();
 	LogPushData* toCommit = nullptr;
 	Version popVersion = 0; // exclusive, usually set to commitVersion + 1
 	std::map<UID, Reference<StorageInfo>>* storageCache = nullptr;
@@ -95,7 +95,7 @@ struct ResolverData {
 
 	// For transaction batches that contain metadata mutations
 	ResolverData(UID debugId,
-	             Reference<LogSystem> logSystem,
+	             Reference<LogSystemConsumer> logSystemConsumer,
 	             IKeyValueStore* store,
 	             KeyRangeMap<ServerCacheInfo>* info,
 	             LogPushData* toCommit,
@@ -103,8 +103,9 @@ struct ResolverData {
 	             Version popVersion,
 	             std::map<UID, Reference<StorageInfo>>* storageCache,
 	             std::unordered_map<UID, StorageServerInterface>* tssMapping)
-	  : dbgid(debugId), txnStateStore(store), keyInfo(info), confChanges(forceRecovery), logSystem(logSystem),
-	    toCommit(toCommit), popVersion(popVersion), storageCache(storageCache), tssMapping(tssMapping) {}
+	  : dbgid(debugId), txnStateStore(store), keyInfo(info), confChanges(forceRecovery),
+	    logSystemConsumer(logSystemConsumer), toCommit(toCommit), popVersion(popVersion), storageCache(storageCache),
+	    tssMapping(tssMapping) {}
 };
 
 inline bool isMetadataMutation(MutationRef const& m) {
@@ -128,7 +129,7 @@ Reference<StorageInfo> getStorageInfo(UID id,
 void applyMetadataMutations(SpanContext const& spanContext,
                             const ApplyMetadataProxyContext& proxyMetadata,
                             Arena& arena,
-                            Reference<LogSystem> logSystem,
+                            Reference<LogSystemConsumer> logSystemConsumer,
                             const VectorRef<MutationRef>& mutations,
                             LogPushData* pToCommit,
                             bool& confChange,

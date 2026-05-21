@@ -25,6 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/core/IDiskQueue.h"
 #include "fdbserver/logsystem/LogSystem.h"
+#include "fdbserver/logsystem/LogSystemConsumer.h"
 
 struct PeekTxsInfo {
 	int8_t primaryLocality;
@@ -53,7 +54,7 @@ public:
 	// committed information to the LogSystem, commit() in this interface doesn't directly
 	// call LogSystem::push().  Instead it makes a commit message available through
 	// getCommitMessage(), and doesn't return until its acknowledge promise is set.
-	// The caller is responsible for calling LogSystem::push() and LogSystem::pop() with the results.
+	// The caller is responsible for calling LogSystem::push() and LogSystemConsumer::pop() with the results.
 
 	// It does, however, peek the specified tag directly at recovery time.
 
@@ -61,16 +62,16 @@ public:
 	                          Reference<AsyncVar<PeekTxsInfo>> peekLocality,
 	                          Version txsPoppedVersion,
 	                          bool recover)
-	  : peekLocality(peekLocality), peekTypeSwitches(0), enableRecovery(recover), logSystem(logSystem),
+	  : peekLocality(peekLocality), peekTypeSwitches(0), enableRecovery(recover), logSystem(logSystem->makeConsumer()),
 	    startLoc(txsPoppedVersion), recoveryLoc(txsPoppedVersion), recoveryQueueLoc(txsPoppedVersion),
 	    recoveryQueueDataSize(0), poppedUpTo(0), nextCommit(1), hasDiscardedData(false), totalRecoveredBytes(0) {
 		if (enableRecovery) {
 			localityChanged = peekLocality ? peekLocality->onChange() : Never();
-			cursor = logSystem->peekTxs(UID(),
-			                            txsPoppedVersion,
-			                            peekLocality ? peekLocality->get().primaryLocality : tagLocalityInvalid,
-			                            peekLocality ? peekLocality->get().knownCommittedVersion : invalidVersion,
-			                            true);
+			cursor = this->logSystem->peekTxs(UID(),
+			                                  txsPoppedVersion,
+			                                  peekLocality ? peekLocality->get().primaryLocality : tagLocalityInvalid,
+			                                  peekLocality ? peekLocality->get().knownCommittedVersion : invalidVersion,
+			                                  true);
 		}
 	}
 
@@ -123,7 +124,7 @@ private:
 
 	// Recovery state (used while readNext() is being called repeatedly)
 	bool enableRecovery;
-	Reference<LogSystem> logSystem;
+	Reference<LogSystemConsumer> logSystem;
 	Version startLoc, recoveryLoc, recoveryQueueLoc;
 	std::vector<Standalone<StringRef>> recoveryQueue;
 	int recoveryQueueDataSize;

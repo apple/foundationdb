@@ -1062,7 +1062,7 @@ void applyMetadataEffect(CommitBatchContext* self) {
 				applyMetadataMutations(SpanContext(),
 				                       self->pProxyCommitData->getApplyMetadataProxyContext(),
 				                       self->arena,
-				                       self->pProxyCommitData->logSystem,
+				                       self->pProxyCommitData->logSystemConsumer,
 				                       self->resolution[0].stateMutations[versionIndex][transactionIndex].mutations,
 				                       /* pToCommit= */ nullptr,
 				                       self->forceRecovery,
@@ -1160,7 +1160,7 @@ Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self) {
 			applyMetadataMutations(trs[t].spanContext,
 			                       pProxyCommitData->getApplyMetadataProxyContext(),
 			                       self->arena,
-			                       pProxyCommitData->logSystem,
+			                       pProxyCommitData->logSystemConsumer,
 			                       trs[t].transaction.mutations,
 			                       SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? nullptr : &self->toCommit,
 			                       self->forceRecovery,
@@ -1834,7 +1834,7 @@ Future<Void> transactionLogging(CommitBatchContext* self) {
 
 		pProxyCommitData->txsPopVersions.emplace_back(self->commitVersion, self->msg.popTo);
 	}
-	pProxyCommitData->logSystem->popTxs(self->msg.popTo);
+	pProxyCommitData->logSystemConsumer->popTxs(self->msg.popTo);
 	pProxyCommitData->stats.tlogLoggingDist->sampleSeconds(g_network->timer_monotonic() - tLoggingStart);
 }
 
@@ -2341,7 +2341,7 @@ Future<Void> monitorRemoteCommitted(ProxyCommitData* self) {
 
 			while (self->txsPopVersions.size() && self->txsPopVersions.front().first <= minVersion) {
 				self->lastTxsPop = self->txsPopVersions.front().second;
-				self->logSystem->popTxs(self->txsPopVersions.front().second, tagLocalityRemoteLog);
+				self->logSystemConsumer->popTxs(self->txsPopVersions.front().second, tagLocalityRemoteLog);
 				self->txsPopVersions.pop_front();
 			}
 
@@ -2738,7 +2738,7 @@ Future<Void> processCompleteTransactionStateRequest(TransactionStateResolveConte
 		applyMetadataMutations(SpanContext(),
 		                       pContext->pCommitData->getApplyMetadataProxyContext(),
 		                       arena,
-		                       Reference<LogSystem>(),
+		                       Reference<LogSystemConsumer>(),
 		                       mutations,
 		                       /* pToCommit= */ nullptr,
 		                       confChanges,
@@ -2878,10 +2878,11 @@ class CommitProxyServerCore {
 			if (masterLifetime.isEqual(commitData.db->get().masterLifetime) &&
 			    commitData.db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION) {
 				commitData.logSystem = makeLogSystemFromServerDBInfo(proxy.id(), commitData.db->get(), false, addActor);
+				commitData.logSystemConsumer = commitData.logSystem->makeConsumer();
 				for (auto it : commitData.tag_popped) {
-					commitData.logSystem->pop(it.second, it.first);
+					commitData.logSystemConsumer->pop(it.second, it.first);
 				}
-				commitData.logSystem->popTxs(commitData.lastTxsPop, tagLocalityRemoteLog);
+				commitData.logSystemConsumer->popTxs(commitData.lastTxsPop, tagLocalityRemoteLog);
 			}
 
 			commitData.updateLatencyBandConfig(commitData.db->get().latencyBandConfig);
@@ -3025,6 +3026,7 @@ public:
 		commitData.systemKeyVersions.push_back(0);
 
 		commitData.logSystem = makeLogSystemFromServerDBInfo(proxy.id(), commitData.db->get(), false, addActor);
+		commitData.logSystemConsumer = commitData.logSystem->makeConsumer();
 		commitData.logAdapter =
 		    new LogSystemDiskQueueAdapter(commitData.logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
 		commitData.txnStateStore = keyValueStoreLogSystem(commitData.logAdapter,

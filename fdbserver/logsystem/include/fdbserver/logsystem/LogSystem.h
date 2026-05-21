@@ -52,6 +52,7 @@ struct DBCoreState;
 struct LogPushData;
 struct LocalityData;
 struct LogSystem;
+struct LogSystemConsumer;
 class LogSet;
 
 struct ConnectionResetInfo : public ReferenceCounted<ConnectionResetInfo> {
@@ -394,67 +395,17 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	                     Optional<UID> debugID,
 	                     Optional<std::unordered_map<uint16_t, Version>> tpcvMap);
 
+	Reference<LogSystemConsumer> makeConsumer();
+
 	// Version vector/Unicast specific: reset best server if it is not known to have been locked/stopped.
 	void resetBestServerIfNotLocked(int bestSet,
 	                                int& bestServer,
 	                                Optional<Version> end,
 	                                const Optional<std::map<uint8_t, std::vector<uint16_t>>>& knownLockedTLogIds);
 
-	Reference<IReplayPeekCursor> peekAll(UID dbgid, Version begin, Version end, Tag tag, bool parallelGetMore);
-
-	Reference<IPeekCursor> peekRemote(UID dbgid, Version begin, Optional<Version> end, Tag tag, bool parallelGetMore);
-
-	Reference<IPeekCursor> peek(UID dbgid, Version begin, Optional<Version> end, Tag tag, bool parallelGetMore);
-
-	Reference<IPeekCursor> peek(UID dbgid,
-	                            Version begin,
-	                            Optional<Version> end,
-	                            std::vector<Tag> tags,
-	                            bool parallelGetMore);
-
-	Reference<IReplayPeekCursor> peekLocal(UID dbgid,
-	                                       Tag tag,
-	                                       Version begin,
-	                                       Version end,
-	                                       bool useMergePeekCursors,
-	                                       int8_t peekLocality = tagLocalityInvalid);
-
-	Reference<IPeekCursor> peekTxs(UID dbgid,
-	                               Version begin,
-	                               int8_t peekLocality,
-	                               Version localEnd,
-	                               bool canDiscardPopped);
-
-	Reference<IReplayPeekCursor> peekSingle(
-	    UID dbgid,
-	    Version begin,
-	    Tag tag,
-	    std::vector<std::pair<Version, Tag>> history = std::vector<std::pair<Version, Tag>>());
-
-	// LogRouter or BackupWorker use this function to obtain a cursor for peeking tlogs of a generation (i.e., epoch).
-	// Specifically, the epoch is determined by looking up "dbgid" in tlog sets of generations.
-	// The returned cursor can peek data at the "tag" from the given "begin" version to that epoch's end version or
-	// the recovery version for the latest old epoch. For the current epoch, the cursor has no end version.
-	// For the old epoch, the cursor is provided an end version.
-	Reference<IReplayPeekCursor> peekLogRouter(
-	    UID dbgid,
-	    Version begin,
-	    Tag tag,
-	    bool useSatellite,
-	    Optional<Version> end = Optional<Version>(),
-	    const Optional<std::map<uint8_t, std::vector<uint16_t>>>& knownStoppedTLogIds =
-	        Optional<std::map<uint8_t, std::vector<uint16_t>>>());
-
 	Version getKnownCommittedVersion();
 
 	Future<Void> onKnownCommittedVersionChange();
-
-	void popLogRouter(Version upTo, Tag tag, Version durableKnownCommittedVersion, int8_t popLocality);
-
-	void popTxs(Version upTo, int8_t popLocality = tagLocalityInvalid);
-
-	// pop 'tag.locality' type data up to the 'upTo' version
-	void pop(Version upTo, Tag tag, Version durableKnownCommittedVersion = 0, int8_t popLocality = tagLocalityInvalid);
 
 	// pop tag from log up to the version defined in self->outstandingPops[].first
 	static Future<Void> popFromLog(LogSystem* self,
@@ -466,8 +417,6 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	static Future<Version> getPoppedFromTLog(Reference<AsyncVar<OptionalInterface<TLogInterface>>> log, Tag tag);
 
 	static Future<Version> getPoppedTxs(LogSystem* self);
-
-	Future<Version> getTxsPoppedVersion();
 
 	static Future<Void> confirmEpochLive_internal(Reference<LogSet> logSet, Optional<UID> debugID);
 
