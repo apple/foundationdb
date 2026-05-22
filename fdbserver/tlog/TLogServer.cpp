@@ -347,7 +347,7 @@ struct TLogData : NonCopyable {
 	PromiseStream<Future<Void>> sharedActors;
 	Promise<Void> terminated;
 	FlowLock concurrentLogRouterReads;
-	FlowLock persistentDataCommitLock;
+	Reference<FlowLock> persistentDataCommitLock;
 
 	// Beginning of fields used by snapshot based backup and restore
 	double ignorePopDeadline; // time until which the ignorePopRequest will be
@@ -398,7 +398,8 @@ struct TLogData : NonCopyable {
 	    instanceID(deterministicRandom()->randomUniqueID().first()), bytesInput(0), bytesDurable(0),
 	    targetVolatileBytes(SERVER_KNOBS->TLOG_SPILL_THRESHOLD), overheadBytesInput(0), overheadBytesDurable(0),
 	    peekMemoryLimiter(SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES),
-	    concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS), ignorePopDeadline(0), dataFolder(folder),
+	    concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS), persistentDataCommitLock(new FlowLock()),
+	    ignorePopDeadline(0), dataFolder(folder),
 	    degraded(degraded), lowDiskTLogExclusion(lowDiskTLogExclusion),
 	    commitLatencyDist(Histogram::getHistogram("tLog"_sr, "commit"_sr, Histogram::Unit::milliseconds)),
 	    queueWaitLatencyDist(Histogram::getHistogram("tLog"_sr, "QueueWait"_sr, Histogram::Unit::milliseconds)),
@@ -1426,6 +1427,7 @@ Future<Void> updateStorage(TLogData* self) {
 	Version nextVersion = 0;
 	int totalSize = 0;
 
+	Reference<FlowLock> persistentDataCommitLock = self->persistentDataCommitLock;
 	FlowLock::Releaser commitLockReleaser;
 
 	if (logData->stopped()) {
@@ -1449,8 +1451,8 @@ Future<Void> updateStorage(TLogData* self) {
 
 				//TraceEvent("TLogUpdatePersist", self->dbgid).detail("LogId", logData->logId).detail("NextVersion", nextVersion).detail("Version", logData->version.get()).detail("PersistentDataDurableVer", logData->persistentDataDurableVersion).detail("QueueCommitVer", logData->queueCommittedVersion.get()).detail("PersistDataVer", logData->persistentDataVersion);
 				if (nextVersion > logData->persistentDataVersion) {
-					co_await self->persistentDataCommitLock.take();
-					commitLockReleaser = FlowLock::Releaser(self->persistentDataCommitLock);
+					co_await persistentDataCommitLock->take();
+					commitLockReleaser = FlowLock::Releaser(*persistentDataCommitLock);
 					co_await updatePersistentData(self, logData, nextVersion);
 					// Concurrently with this loop, the last stopped TLog could have been removed.
 					if (self->popOrder.size()) {
@@ -1501,8 +1503,8 @@ Future<Void> updateStorage(TLogData* self) {
 		co_await delay(0, TaskPriority::UpdateStorage);
 
 		if (nextVersion > logData->persistentDataVersion) {
-			co_await self->persistentDataCommitLock.take();
-			commitLockReleaser = FlowLock::Releaser(self->persistentDataCommitLock);
+			co_await persistentDataCommitLock->take();
+			commitLockReleaser = FlowLock::Releaser(*persistentDataCommitLock);
 			co_await updatePersistentData(self, logData, nextVersion);
 			if (self->popOrder.size()) {
 				co_await popDiskQueue(self, self->id_data[self->popOrder.front()]);
@@ -2529,8 +2531,9 @@ Future<Void> tLogCommit(TLogData* self,
 }
 
 Future<Void> initPersistentState(TLogData* self, Reference<LogData> logData) {
-	co_await self->persistentDataCommitLock.take();
-	FlowLock::Releaser commitLockReleaser(self->persistentDataCommitLock);
+	Reference<FlowLock> persistentDataCommitLock = self->persistentDataCommitLock;
+	co_await persistentDataCommitLock->take();
+	FlowLock::Releaser commitLockReleaser(*persistentDataCommitLock);
 
 	IKeyValueStore* storage = self->persistentData;
 	storage->set(
@@ -3312,8 +3315,9 @@ Future<Void> checkEmptyQueue(TLogData* self) {
 Future<Void> initPersistentStorage(TLogData* self) {
 	TraceEvent("TLogInitPersistentStorageStart", self->dbgid);
 
-	co_await self->persistentDataCommitLock.take();
-	FlowLock::Releaser commitLockReleaser(self->persistentDataCommitLock);
+	Reference<FlowLock> persistentDataCommitLock = self->persistentDataCommitLock;
+	co_await persistentDataCommitLock->take();
+	FlowLock::Releaser commitLockReleaser(*persistentDataCommitLock);
 
 	// PERSIST: Initial setup of persistentData for a brand new tLog for a new database
 	IKeyValueStore* storage = self->persistentData;
