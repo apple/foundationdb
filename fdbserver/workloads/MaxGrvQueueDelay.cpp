@@ -120,29 +120,43 @@ struct MaxGrvQueueDelayWorkload : TestWorkload {
 	}
 
 	Future<Void> verifyBaseline(Database cx) {
-		ErrorOr<Version> withoutOption = co_await errorOr(getReadVersion(cx, Optional<int64_t>()));
-		if (withoutOption.isError()) {
-			failed = true;
-			++unexpectedErrors;
-			TraceEvent(SevError, "MaxGrvQueueDelayBaselineFailed")
-			    .error(withoutOption.getError())
-			    .detail("HasOption", false);
-			co_return;
-		}
-		++successes;
+		// Retry baseline a few times — the system may still be settling after
+		// recovery, with GRV queues temporarily backed up from rate limiting.
+		for (int attempt = 0; attempt < 5; ++attempt) {
+			if (attempt > 0) {
+				co_await delay(5.0);
+			}
+			ErrorOr<Version> withoutOption = co_await errorOr(getReadVersion(cx, Optional<int64_t>()));
+			if (withoutOption.isError()) {
+				if (attempt < 4) {
+					continue;
+				}
+				failed = true;
+				++unexpectedErrors;
+				TraceEvent(SevError, "MaxGrvQueueDelayBaselineFailed")
+				    .error(withoutOption.getError())
+				    .detail("HasOption", false);
+				co_return;
+			}
+			++successes;
 
-		ErrorOr<Version> permissive =
-		    co_await errorOr(getReadVersion(cx, Optional<int64_t>(permissiveMaxQueueDelayMS)));
-		if (permissive.isError()) {
-			failed = true;
-			++unexpectedErrors;
-			TraceEvent(SevError, "MaxGrvQueueDelayBaselineFailed")
-			    .error(permissive.getError())
-			    .detail("HasOption", true)
-			    .detail("MaxQueueDelayMS", permissiveMaxQueueDelayMS);
-			co_return;
+			ErrorOr<Version> permissive =
+			    co_await errorOr(getReadVersion(cx, Optional<int64_t>(permissiveMaxQueueDelayMS)));
+			if (permissive.isError()) {
+				if (attempt < 4) {
+					continue;
+				}
+				failed = true;
+				++unexpectedErrors;
+				TraceEvent(SevError, "MaxGrvQueueDelayBaselineFailed")
+				    .error(permissive.getError())
+				    .detail("HasOption", true)
+				    .detail("MaxQueueDelayMS", permissiveMaxQueueDelayMS);
+				co_return;
+			}
+			++successes;
+			co_return; // baseline passed
 		}
-		++successes;
 	}
 
 	Future<Void> run(Database cx) {
