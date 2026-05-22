@@ -590,6 +590,60 @@ def transaction(logger):
     assert output7 == "`key': not found"
 
 
+@enable_logging()
+def clearprefix(logger):
+    """This test covers the clearprefix fdbcli command."""
+    # Test 1: clearprefix without writemode should fail
+    err1 = run_fdbcli_command_and_get_error("clearprefix", "prefix")
+    assert (
+        err1 == "ERROR: writemode must be enabled to set or clear keys in the database."
+    )
+    # Test 2: set keys with a shared prefix and one without, then clearprefix
+    process = subprocess.Popen(
+        command_template[:-1],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        env=fdbcli_env,
+    )
+    transaction_flow = [
+        "writemode on",
+        "set prefix_aaa val1",
+        "set prefix_bbb val2",
+        "set prefix_ccc val3",
+        "set other_key val4",
+        "clearprefix prefix_",
+        # verify prefix keys are gone
+        "get prefix_aaa",
+        "get prefix_bbb",
+        "get prefix_ccc",
+        # verify non-prefix key is still present
+        "get other_key",
+    ]
+    output1, _ = process.communicate(input="\n".join(transaction_flow).encode())
+    lines = list(filter(len, output1.decode().split("\n")))
+    logger.debug("Output lines: {}".format(lines))
+    # Find the get results (last 4 meaningful lines before the prompt)
+    get_results = [l for l in lines if "not found" in l or "is `" in l]
+    logger.debug("Get results: {}".format(get_results))
+    assert len(get_results) == 4
+    assert get_results[0] == "`prefix_aaa': not found"
+    assert get_results[1] == "`prefix_bbb': not found"
+    assert get_results[2] == "`prefix_ccc': not found"
+    assert get_results[3] == "`other_key' is `val4'"
+    # Cleanup: remove the remaining key
+    process = subprocess.Popen(
+        command_template[:-1],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        env=fdbcli_env,
+    )
+    cleanup_flow = [
+        "writemode on",
+        "clear other_key",
+    ]
+    process.communicate(input="\n".join(cleanup_flow).encode())
+
+
 def get_fdb_process_addresses(logger):
     # get all processes' network addresses
     output = run_fdbcli_command("kill")
@@ -930,6 +984,7 @@ if __name__ == "__main__":
         # TODO: re-enable once stable
         # suspend()
         transaction()
+        clearprefix()
         # TODO: re-enable once stable
         # throttle()
         triggerddteaminfolog()
