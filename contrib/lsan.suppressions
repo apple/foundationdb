@@ -14,3 +14,40 @@ leak:TransportData::getOrOpenPeer
 leak:Peer::Peer
 leak:connectionKeeper
 leak:connectionMonitor
+
+# Client-side background actors that are still running when fdbcli/client
+# processes exit. These are not cleaned up because the network thread is
+# stopped without cancelling all outstanding actors. Each suppression targets
+# a specific actor or infrastructure function to avoid masking real leaks.
+leak:tssLogger
+leak:databaseLogger
+leak:monitorNetworkBusyness
+leak:multiVersionCleanupWorker
+leak:pingLatencyLogger
+leak:logTimeOffset
+leak:startMemoryUsageMonitor
+leak:GlobalConfig::updater
+leak:GlobalConfig::refresh
+leak:monitorProxiesOneGeneration
+leak:DatabaseContext::updateProxies
+leak:ModelInterface<CommitProxyInterface>::ModelInterface
+leak:ModelInterface<GrvProxyInterface>::ModelInterface
+leak:timeWarning
+leak:ManagementAPI::changeConfig
+leak:clientCoordinatorsStatusFetcher
+leak:clusterStatusFetcher
+leak:timeoutMonitorLeader
+leak:statusFetcherImpl
+leak:clientStatusFetcher
+leak:cli(CLIOptions
+
+# Recurring actor started during DatabaseContext construction (currently
+# throttleExpirer via bind_front(DatabaseContext::expireThrottles)).
+# The function name is mangled away by bind_front so we suppress via
+# Database::createDatabase which is the stable FDB frame in the stack.
+leak:Database::createDatabase
+
+# Thread-safe transaction destructor dispatches cleanup to the network
+# thread via onMainThreadVoid. If the network is shutting down, the
+# callback's Promise allocation is leaked.
+leak:ThreadSafeTransaction::~ThreadSafeTransaction
