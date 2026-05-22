@@ -120,15 +120,20 @@ struct MaxGrvQueueDelayWorkload : TestWorkload {
 	}
 
 	Future<Void> verifyBaseline(Database cx) {
-		// Retry baseline a few times — the system may still be settling after
-		// recovery, with GRV queues temporarily backed up from rate limiting.
-		for (int attempt = 0; attempt < 5; ++attempt) {
+		// Retry baseline for transient GRV queue backlog after recovery.
+		// Keep backoff short (1s) to avoid consuming the 30s testTimeout budget.
+		static constexpr int maxBaselineAttempts = 5;
+		static constexpr double baselineRetryDelay = 1.0;
+
+		for (int attempt = 0; attempt < maxBaselineAttempts; ++attempt) {
 			if (attempt > 0) {
-				co_await delay(5.0);
+				co_await delay(baselineRetryDelay);
 			}
+			bool lastAttempt = (attempt == maxBaselineAttempts - 1);
+
 			ErrorOr<Version> withoutOption = co_await errorOr(getReadVersion(cx, Optional<int64_t>()));
 			if (withoutOption.isError()) {
-				if (attempt < 4) {
+				if (!lastAttempt && withoutOption.getError().code() == error_code_transaction_grv_queue_rejected) {
 					continue;
 				}
 				failed = true;
@@ -143,7 +148,7 @@ struct MaxGrvQueueDelayWorkload : TestWorkload {
 			ErrorOr<Version> permissive =
 			    co_await errorOr(getReadVersion(cx, Optional<int64_t>(permissiveMaxQueueDelayMS)));
 			if (permissive.isError()) {
-				if (attempt < 4) {
+				if (!lastAttempt && permissive.getError().code() == error_code_transaction_grv_queue_rejected) {
 					continue;
 				}
 				failed = true;
