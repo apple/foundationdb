@@ -84,6 +84,9 @@ struct BackupRangePartitionedData {
 	Reference<FlowLock> lock;
 	AsyncTrigger doneTrigger;
 	AsyncTrigger changedTrigger;
+	// Set to true when the worker is shutting down (e.g., worker_removed). Used by uploadData to exit
+	// gracefully via allMessageSaved(), letting in-flight file writes and progress commits finish first.
+	bool stopped = false;
 	Database cx;
 	std::vector<RangePartitionedVersionedMessage> messages;
 	// Key range to partition ID map, used to determine which partition a mutation belongs to based on its key.
@@ -133,7 +136,13 @@ struct BackupRangePartitionedData {
 
 	Version maxPopVersion() const { return endVersion.present() ? endVersion.get() : minKnownCommittedVersion; }
 
-	bool allMessageSaved() const { return (endVersion.present() && savedVersion >= endVersion.get()); }
+	bool allMessageSaved() const { return (endVersion.present() && savedVersion >= endVersion.get()) || stopped; }
+
+	// Tells uploadData to exit: sets stopped (read by allMessageSaved) and wakes it up via doneTrigger.
+	void stop() {
+		stopped = true;
+		doneTrigger.trigger();
+	}
 
 	// Erases messages and updates lock with memory released.
 	void eraseMessages(int num) {
@@ -210,6 +219,21 @@ struct BackupRangePartitionedData {
 		if (!logSystem.get()) {
 			return;
 		}
+		// Defer the pop in two cases, both to avoid losing mutations a future worker might still need:
+		//   1. An older epoch still has work to finish (backupEpoch > oldestBackupEpoch). Wait for that
+		//      older epoch to catch up before popping from this epoch.
+		//   2. We're shutting down (stopped) — our saved progress may not be visible to the next master
+		//      in time, so let the next worker pop after it re-reads progress safely.
+		if (backupEpoch > oldestBackupEpoch || stopped) {
+			TraceEvent("BWRangePartitionedPopDeferred", myId)
+			    .suppressFor(1.0)
+			    .detail("BackupEpoch", backupEpoch)
+			    .detail("OldestEpoch", oldestBackupEpoch)
+			    .detail("Stopped", stopped)
+			    .detail("Version", savedVersion);
+			return;
+		}
+		ASSERT_WE_THINK(backupEpoch == oldestBackupEpoch);
 		logSystem.get()->pop(savedVersion, tag);
 	}
 
@@ -336,7 +360,6 @@ Future<Version> pullPartitionMapFromTLog(BackupRangePartitionedData* self, Parti
 				logSystemChange = self->logSystem.onChange();
 			}
 		}
-		co_await cursor->getMore();
 		if (!cursor->hasMessage()) {
 			continue;
 		}
@@ -346,11 +369,9 @@ Future<Version> pullPartitionMapFromTLog(BackupRangePartitionedData* self, Parti
 			Arena arena = cursor->arena();
 			ArenaReader reader(arena, message, AssumeVersion(g_network->protocolVersion()));
 			if (reader.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(reader)) {
-				cursor->nextMessage();
 				continue;
 			}
 			if (reader.protocolVersion().hasOTELSpanContext() && OTELSpanContextMessage::isNextIn(reader)) {
-				cursor->nextMessage();
 				continue;
 			}
 			bool isPartitionMap = PartitionMapMessage::isNextIn(reader);
@@ -783,7 +804,7 @@ static Future<Void> monitorBackupStartedKeyChanges(BackupRangePartitionedData* s
 					}
 				}
 
-				onBackupChanges(self, uidVersions);
+				co_await onBackupChanges(self, uidVersions);
 				Future<Void> watchFuture = tr.watch(backupStartedKey);
 				co_await tr.commit();
 				co_await watchFuture;
@@ -1104,6 +1125,7 @@ Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
 
 	if (err.code() == error_code_worker_removed) {
 		pull = Void(); // cancels pulling
+		self.stop(); // lets uploadData finish its current upload and exit
 		try {
 			co_await done;
 		} catch (Error& shutdownErr) {
