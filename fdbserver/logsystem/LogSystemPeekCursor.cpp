@@ -26,6 +26,16 @@
 #include "flow/DebugTrace.h"
 #include "flow/CoroUtils.h"
 
+// Returns a timeout future for peek reply detection. Used by both the non-parallel
+// (serverPeekGetMoreImpl) and parallel (serverPeekParallelGetMoreImpl) peek paths
+// to detect dead/stale TLog endpoints that silently drop requests. When the timeout
+// fires, the caller re-sends the peek. Set PEEK_REPLY_TIMEOUT to 0 to disable.
+static Future<Void> peekReplyTimeout(ServerPeekCursor const* self) {
+	return (self->interf->get().present() && SERVER_KNOBS->PEEK_REPLY_TIMEOUT > 0)
+	           ? delay(SERVER_KNOBS->PEEK_REPLY_TIMEOUT)
+	           : Never();
+}
+
 Future<Void> tryEstablishPeekStreamImpl(ServerPeekCursor* self) {
 	co_await IFailureMonitor::failureMonitor().onStateEqual(
 	    self->interf->get().interf().peekStreamMessages.getEndpoint(), FailureStatus(false));
@@ -306,7 +316,8 @@ Future<Void> serverPeekParallelGetMoreImpl(ServerPeekCursor* self, TaskPriority 
 				co_return;
 
 			Future<TLogPeekReply> peekReply = self->interf->get().present() ? self->futureResults.front() : Never();
-			auto res = co_await race(peekReply, self->interfaceChanged);
+			// See peekReplyTimeout() and serverPeekGetMoreImpl for the non-parallel equivalent.
+			auto res = co_await race(peekReply, self->interfaceChanged, peekReplyTimeout(self));
 			if (res.index() == 0) {
 				TLogPeekReply reply = std::get<0>(std::move(res));
 
@@ -327,6 +338,15 @@ Future<Void> serverPeekParallelGetMoreImpl(ServerPeekCursor* self, TaskPriority 
 				self->randomID = deterministicRandom()->randomUniqueID();
 				self->sequence = 0;
 				self->onlySpilled = false;
+				self->futureResults.clear();
+			} else if (res.index() == 2) {
+				// Timeout fired — no reply within PEEK_REPLY_TIMEOUT. Re-send the peek.
+				// This handles dead/stale TLog endpoints that silently drop requests.
+				DebugLogTraceEvent("PeekParallelReplyTimeout", self->randomID)
+				    .detail("Tag", self->tag.toString())
+				    .detail("Version", self->messageVersion.version);
+				self->randomID = deterministicRandom()->randomUniqueID();
+				self->sequence = 0;
 				self->futureResults.clear();
 			} else {
 				UNREACHABLE();
@@ -477,16 +497,9 @@ Future<Void> serverPeekGetMoreImpl(ServerPeekCursor* self, TaskPriority taskID) 
 				                                                       taskID));
 			}
 			// Race between: (1) peek reply, (2) interface change, and optionally
-			// (3) sender-side timeout if PEEK_REPLY_TIMEOUT > 0 and a request is in-flight.
-			// The timeout detects dead TLogs that silently drop requests after rebooting
-			// with new endpoint tokens. Without this, the sender waits forever because
-			// FlowTransport silently discards packets to unknown endpoints.
-			// Set PEEK_REPLY_TIMEOUT to 0 to disable and restore the old wait-forever behavior.
-			// Only enable timeout when interface is present (i.e., a peek was actually sent).
-			Future<Void> timeoutFuture = (self->interf->get().present() && SERVER_KNOBS->PEEK_REPLY_TIMEOUT > 0)
-			                                 ? delay(SERVER_KNOBS->PEEK_REPLY_TIMEOUT)
-			                                 : Never();
-			auto res = co_await race(peekReply, self->interf->onChange(), timeoutFuture);
+			// (3) sender-side timeout — see peekReplyTimeout() and
+			// serverPeekParallelGetMoreImpl for the parallel equivalent.
+			auto res = co_await race(peekReply, self->interf->onChange(), peekReplyTimeout(self));
 			if (res.index() == 0) {
 				TLogPeekReply reply = std::get<0>(std::move(res));
 
