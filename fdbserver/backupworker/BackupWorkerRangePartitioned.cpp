@@ -92,7 +92,6 @@ struct BackupRangePartitionedData {
 	std::unordered_map<int, KeyRange> partitionToKeyRange;
 	// KeyRange to backup UID and partition id map needed to create log files for the right backup and partition.
 	KeyRangeMap<std::vector<std::pair<UID, int32_t>>> keyRangeToBackupAssignment;
-	// TODO akanksha: Once end to end implementation complete, check if stopped need to be added or not.
 
 	struct PerBackupInfo {
 		PerBackupInfo() = default;
@@ -111,20 +110,10 @@ struct BackupRangePartitionedData {
 		Version startVersion = invalidVersion;
 		// The next log's begin version.
 		Version nextFileBeginVersion = invalidVersion;
-		bool stopped = false;
 
-		bool isReady() const { return stopped || (container.isReady() && ranges.isReady()); }
+		bool isBackupReady() const { return container.isReady() && ranges.isReady(); }
 
-		Future<Void> waitReady() {
-			if (stopped) {
-				return Void();
-			}
-			return _waitReady(this);
-		}
-
-		static Future<Void> _waitReady(PerBackupInfo* info) {
-			co_await (success(info->container) && success(info->ranges));
-		}
+		Future<Void> waitBackupReady() { co_await (success(container) && success(ranges)); }
 	};
 
 	// TODO akanksha: Add backups in this map when backup worker receives backup request.
@@ -224,20 +213,17 @@ struct BackupRangePartitionedData {
 		logSystem.get()->pop(savedVersion, tag);
 	}
 
-	static Future<Void> _waitAllInfoReady(BackupRangePartitionedData* self) {
+	Future<Void> waitAllBackupsReady() {
 		std::vector<Future<Void>> all;
-		for (auto it = self->backups.begin(); it != self->backups.end();) {
-			all.push_back(it->second.waitReady());
-			it++;
+		for (auto& [uid, info] : backups) {
+			all.push_back(info.waitBackupReady());
 		}
 		co_await waitForAll(all);
 	}
 
-	Future<Void> waitAllInfoReady() { return _waitAllInfoReady(this); }
-
-	bool isAllInfoReady() const {
+	bool isAllBackupsReady() const {
 		for (const auto& [uid, info] : backups) {
-			if (!info.isReady())
+			if (!info.isBackupReady())
 				return false;
 		}
 		return true;
@@ -247,8 +233,8 @@ struct BackupRangePartitionedData {
 static Future<Void> computeKeyRangeToBackupAssignment(BackupRangePartitionedData* self) {
 	self->keyRangeToBackupAssignment = KeyRangeMap<std::vector<std::pair<UID, int32_t>>>();
 
-	while (!self->isAllInfoReady()) {
-		co_await self->waitAllInfoReady();
+	while (!self->isAllBackupsReady()) {
+		co_await self->waitAllBackupsReady();
 	}
 
 	for (auto& [uid, info] : self->backups) {
@@ -293,11 +279,12 @@ static Future<Void> onBackupChanges(BackupRangePartitionedData* self,
 	}
 
 	// Remove backups that are no longer active.
-	for (auto it = self->backups.begin(); it != self->backups.end(); it++) {
+	for (auto it = self->backups.begin(); it != self->backups.end();) {
 		if (!activeUids.contains(it->first)) {
-			it->second.stopped = true;
 			it = self->backups.erase(it);
 			modified = true;
+		} else {
+			++it;
 		}
 	}
 
@@ -601,8 +588,8 @@ static Future<Void> updateLogBytesWritten(BackupRangePartitionedData* self, std:
 
 Future<Void> saveMutationsToFile(BackupRangePartitionedData* self, Version lastVersionInFile, int numMsg) {
 	// Make sure all backups are ready, otherwise mutations will be lost.
-	while (!self->isAllInfoReady()) {
-		co_await self->waitAllInfoReady();
+	while (!self->isAllBackupsReady()) {
+		co_await self->waitAllBackupsReady();
 	}
 
 	std::vector<RangePartitionedLogFileInfo> activeFiles;
