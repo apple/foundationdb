@@ -806,6 +806,13 @@ Key cdcStreamKeyFor(CDCStreamId streamId) {
 	return wr.toValue();
 }
 
+CDCStreamId decodeCDCStreamKey(KeyRef const& key) {
+	CDCStreamId streamId;
+	BinaryReader reader(key.removePrefix(cdcStreamKeys.begin), Unversioned());
+	reader >> streamId;
+	return streamId;
+}
+
 Value cdcStreamKeysValue(KeyRangeRef const& keys) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withNativeCdc()));
 	wr << keys;
@@ -1776,6 +1783,7 @@ TEST_CASE("noSim/SystemData/NativeCDC") {
 
 	ASSERT(decodeCDCStreamNameKey(cdcStreamNameKeyFor(name)) == name);
 	ASSERT(decodeCDCStreamNameValue(cdcStreamNameValue(streamId)) == streamId);
+	ASSERT(decodeCDCStreamKey(cdcStreamKeyFor(streamId)) == streamId);
 	ASSERT(decodeCDCStreamKeysValue(cdcStreamKeysValue(keys)) == keys);
 	ASSERT(decodeCDCMinVersionValue(cdcMinVersionValue(minVersion)) == minVersion);
 
