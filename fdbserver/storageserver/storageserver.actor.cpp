@@ -11539,15 +11539,11 @@ Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) {
 	co_await serveStorageMetricsRequests(self, ssi);
 }
 
-ACTOR Future<Void> logLongByteSampleRecovery(Future<Void> recovery) {
-	choose {
-		when(wait(recovery)) {}
-		when(wait(delay(SERVER_KNOBS->LONG_BYTE_SAMPLE_RECOVERY_DELAY))) {
-			TraceEvent(g_network->isSimulated() ? SevWarn : SevWarnAlways, "LongByteSampleRecovery");
-		}
+Future<Void> logLongByteSampleRecovery(Future<Void> recovery) {
+	auto res = co_await timeout(recovery, SERVER_KNOBS->LONG_BYTE_SAMPLE_RECOVERY_DELAY);
+	if (!res.present()) {
+		TraceEvent(g_network->isSimulated() ? SevWarn : SevWarnAlways, "LongByteSampleRecovery");
 	}
-
-	return Void();
 }
 
 Future<Void> checkBehind(StorageServer* self) {
