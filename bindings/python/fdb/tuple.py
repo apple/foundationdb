@@ -77,7 +77,6 @@ def _float_adjust(v, encode):
 class SingleFloat(object):
     def __init__(self, value):
         if isinstance(value, float):
-            # Restrict to the first 4 bytes (essentially)
             self.value = ctypes.c_float(value).value
         elif isinstance(value, ctypes.c_float):
             self.value = value.value
@@ -88,7 +87,6 @@ class SingleFloat(object):
                 "Incompatible type for single-precision float: " + repr(value)
             )
 
-    # Comparisons
     def __eq__(self, other):
         if isinstance(other, SingleFloat):
             return _compare_floats(self.value, other.value) == 0
@@ -105,7 +103,6 @@ class SingleFloat(object):
         return "SingleFloat(" + str(self.value) + ")"
 
     def __hash__(self):
-        # Left-circulate the child hash to make hash(self) != hash(self.value)
         v_hash = hash(self.value)
         if v_hash >= 0:
             return (v_hash >> 16) + ((v_hash & 0xFFFF) << 16)
@@ -225,7 +222,6 @@ class Versionstamp(object):
         else:
             return Versionstamp(new_tr_version, self.user_version)
 
-    # Comparisons
     def __eq__(self, other):
         if isinstance(other, Versionstamp):
             return (
@@ -243,11 +239,9 @@ class Versionstamp(object):
                 else:
                     return self.tr_version < other.tr_version
             else:
-                # All complete are less than all incomplete.
                 return True
         else:
             if other.is_complete():
-                # All incomplete are greater than all complete
                 return False
             else:
                 return self.user_version < other.user_version
@@ -284,14 +278,14 @@ def _decode(v, pos):
             - _size_limits[n],
             end,
         )
-    elif code == POS_INT_END:  # 0x1d; Positive 9-255 byte integer
+    elif code == POS_INT_END:
         length = v[pos + 1]
         val = 0
         for i in _range(length):
             val = val << 8
             val += v[pos + 2 + i]
         return val, pos + 2 + length
-    elif code == NEG_INT_START:  # 0x0b; Negative 9-255 byte integer
+    elif code == NEG_INT_START:
         length = v[pos + 1] ^ 0xFF
         val = 0
         for i in _range(length):
@@ -363,24 +357,19 @@ def _bit_length(x):
 
 
 def _encode(value, nested=False):
-    # returns [code][data] (code != 0xFF)
-    # encoded values are self-terminating
-    # sorting need to work too!
-
-    # Check for fdb.impl.Value wrapping None first (uses __eq__ intentionally),
-    # then use identity check `is None` for plain None to avoid silent NULL
-    # encoding of user-defined objects that override __eq__ to equal None.
-    if isinstance(value, fdb.impl.Value) and value == None:
+    # Use identity check (is None) for actual None — avoids silent data corruption
+    # from custom objects whose __eq__ returns True when compared to None.
+    if value is None:
         if nested:
             return b"".join([int2byte(NULL_CODE), int2byte(0xFF)]), -1
         else:
             return b"".join([int2byte(NULL_CODE)]), -1
-    elif value is None:
+    elif isinstance(value, fdb.impl.Value) and value == None:  # noqa: E711 — intentional for fdb.impl.Value
         if nested:
             return b"".join([int2byte(NULL_CODE), int2byte(0xFF)]), -1
         else:
             return b"".join([int2byte(NULL_CODE)]), -1
-    elif isinstance(value, bytes):  # also gets non-None fdb.impl.Value
+    elif isinstance(value, bytes):
         return (
             int2byte(BYTES_CODE) + value.replace(b"\x00", b"\x00\xFF") + b"\x00",
             -1,
@@ -404,7 +393,6 @@ def _encode(value, nested=False):
                 for i in _range(length - 1, -1, -1):
                     data.append(int2byte((value >> (8 * i)) & 0xFF))
                 return b"".join(data), -1
-
             n = bisect_left(_size_limits, value)
             return int2byte(INT_ZERO_CODE + n) + struct.pack(">Q", value)[-n:], -1
         else:
@@ -415,7 +403,6 @@ def _encode(value, nested=False):
                 for i in _range(length - 1, -1, -1):
                     data.append(int2byte((value >> (8 * i)) & 0xFF))
                 return b"".join(data), -1
-
             n = bisect_left(_size_limits, -value)
             maxv = _size_limits[n]
             return (
@@ -460,18 +447,11 @@ def _encode(value, nested=False):
         raise ValueError("Unsupported data type: " + str(type(value)))
 
 
-# packs the tuple possibly for versionstamp operations and returns the position of the
-# incomplete versionstamp
-#  * if there are no incomplete versionstamp members, this returns the packed tuple and -1
-#  * if there is exactly one incomplete versionstamp member, it returns the tuple with the
-#    two extra version bytes and the position of the version start
-#  * if there is more than one incomplete versionstamp member, it throws an error
 def _pack_maybe_with_versionstamp(t, prefix=None):
     if not isinstance(t, tuple):
         raise Exception("fdbtuple pack() expects a tuple, got a " + str(type(t)))
 
     bytes_list = [prefix] if prefix is not None else []
-
     child_bytes, version_pos = _reduce_children(map(_encode, t))
     if version_pos >= 0:
         version_pos += len(prefix) if prefix is not None else 0
@@ -486,7 +466,6 @@ def _pack_maybe_with_versionstamp(t, prefix=None):
     return b"".join(bytes_list), version_pos
 
 
-# packs the specified tuple into a key
 def pack(t, prefix=None):
     res, version_pos = _pack_maybe_with_versionstamp(t, prefix)
     if version_pos >= 0:
@@ -494,7 +473,6 @@ def pack(t, prefix=None):
     return res
 
 
-# packs the specified tuple into a key for versionstamp operations
 def pack_with_versionstamp(t, prefix=None):
     res, version_pos = _pack_maybe_with_versionstamp(t, prefix)
     if version_pos < 0:
@@ -504,7 +482,6 @@ def pack_with_versionstamp(t, prefix=None):
     return res
 
 
-# unpacks the specified key into a tuple
 def unpack(key, prefix_len=0):
     pos = prefix_len
     res = []
@@ -514,7 +491,6 @@ def unpack(key, prefix_len=0):
     return tuple(res)
 
 
-# determines if there is at least one incomplete versionstamp in a tuple
 def has_incomplete_versionstamp(t):
     def _elem_has_incomplete(item):
         if item is None:
@@ -577,18 +553,14 @@ def _compare_floats(f1, f2):
     sign1 = int(math.copysign(1, f1))
     sign2 = int(math.copysign(1, f2))
 
-    # This business with signs is to deal with negative zero, NaN, and infinity.
     if sign1 < sign2:
-        # f1 is negative and f2 is positive.
         return -1
     elif sign1 > sign2:
-        # f1 is positive and f2 is negative.
         return 1
 
     if not math.isnan(f1) and not math.isnan(f2):
         return -1 if f1 < f2 else 0 if f1 == f2 else 1
 
-    # There are enough edge cases that bit comparison is safer.
     bytes1 = struct.pack(">d", f1)
     bytes2 = struct.pack(">d", f2)
     return sign1 * (-1 if bytes1 < bytes2 else 0 if bytes1 == bytes2 else 1)
@@ -603,7 +575,6 @@ def _compare_values(value1, value2):
     elif code1 > code2:
         return 1
 
-    # Compatible types.
     if code1 == NULL_CODE:
         return 0
     elif code1 == STRING_CODE:
@@ -621,11 +592,9 @@ def _compare_values(value1, value2):
     elif code1 == NESTED_CODE:
         return compare(value1, value2)
     else:
-        # Booleans, UUIDs, integers, and Versionstamps can just use standard comparison.
         return -1 if value1 < value2 else 0 if value1 == value2 else 1
 
 
-# compare element by element and return -1 if t1 < t2 or 1 if t1 > t2 or 0 if t1 == t2
 def compare(t1, t2):
     i = 0
     while i < len(t1) and i < len(t2):
