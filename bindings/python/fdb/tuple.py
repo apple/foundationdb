@@ -28,15 +28,18 @@ import struct
 import math
 import functools
 from bisect import bisect_left
-from typing import TYPE_CHECKING, Any, List, Optional, Tuple, Union
+import sys
+from typing import Any, ClassVar, List, Optional, Tuple, Union
 
-if TYPE_CHECKING:
+if sys.version_info >= (3, 10):
     from typing import TypeAlias
+else:
+    from typing_extensions import TypeAlias
 
 import fdb
 
 # Type alias for values that can be packed into a tuple
-TupleElement: "TypeAlias" = Union[
+TupleElement: TypeAlias = Union[
     None,
     bytes,
     str,
@@ -96,6 +99,8 @@ def _float_adjust(v, encode):
 
 @functools.total_ordering
 class SingleFloat(object):
+    value: float
+
     def __init__(self, value: Union[float, ctypes.c_float, int]) -> None:
         if isinstance(value, float):
             # Restrict to the first 4 bytes (essentially)
@@ -139,11 +144,15 @@ class SingleFloat(object):
 
 @functools.total_ordering
 class Versionstamp(object):
-    LENGTH = 12
-    _TR_VERSION_LEN = 10
-    _MAX_USER_VERSION = (1 << 16) - 1
-    _UNSET_TR_VERSION = 10 * int2byte(0xFF)
-    _STRUCT_FORMAT_STRING = ">" + str(_TR_VERSION_LEN) + "sH"
+    LENGTH: ClassVar[int] = 12
+    _TR_VERSION_LEN: ClassVar[int] = 10
+    _MAX_USER_VERSION: ClassVar[int] = (1 << 16) - 1
+    _UNSET_TR_VERSION: ClassVar[bytes] = 10 * int2byte(0xFF)
+    _STRUCT_FORMAT_STRING: ClassVar[str] = ">" + str(_TR_VERSION_LEN) + "sH"
+
+    # Instance variables set in __init__
+    tr_version: Optional[bytes]
+    user_version: int
 
     @classmethod
     def validate_tr_version(cls, tr_version: Optional[bytes]) -> None:
