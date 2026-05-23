@@ -366,7 +366,16 @@ def _encode(value, nested=False):
     # returns [code][data] (code != 0xFF)
     # encoded values are self-terminating
     # sorting need to work too!
-    if value == None:  # ==, not is, because some fdb.impl.Value are equal to None
+
+    # Check for fdb.impl.Value wrapping None first (uses __eq__ intentionally),
+    # then use identity check `is None` for plain None to avoid silent NULL
+    # encoding of user-defined objects that override __eq__ to equal None.
+    if isinstance(value, fdb.impl.Value) and value == None:
+        if nested:
+            return b"".join([int2byte(NULL_CODE), int2byte(0xFF)]), -1
+        else:
+            return b"".join([int2byte(NULL_CODE)]), -1
+    elif value is None:
         if nested:
             return b"".join([int2byte(NULL_CODE), int2byte(0xFF)]), -1
         else:
@@ -538,7 +547,7 @@ def range(t):
 
 
 def _code_for(value):
-    if value == None:
+    if value is None:
         return NULL_CODE
     elif isinstance(value, bytes):
         return BYTES_CODE
