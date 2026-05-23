@@ -315,12 +315,12 @@ Future<std::vector<KeyRange>> getConsistencyCheckShards(Database cx, std::vector
 				Value valueToCheck = Standalone(readResult[i].value);
 				bool toAdd = false;
 				for (const auto& range : ranges) {
-					if (rangeToCheck.intersects(range) == true) {
+					if (rangeToCheck.intersects(range)) {
 						toAdd = true;
 						break;
 					}
 				}
-				if (toAdd == true) {
+				if (toAdd) {
 					res.push_back(rangeToCheck);
 				}
 				beginKeyToReadKeyServer = readResult[i + 1].key;
@@ -516,7 +516,7 @@ Optional<std::vector<KeyRange>> loadRangesToCheckFromKnob() {
 
 	std::vector<KeyRange> res;
 	for (auto rangeToCheck : rangeToCheckMap.ranges()) {
-		if (rangeToCheck.value() == true) {
+		if (rangeToCheck.value()) {
 			res.push_back(rangeToCheck.range());
 		}
 	}

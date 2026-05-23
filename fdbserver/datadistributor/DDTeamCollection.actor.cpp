@@ -5374,7 +5374,7 @@ bool DDTeamCollection::isOnSameMachineTeam(TCTeamInfo const& team) const {
 
 bool DDTeamCollection::sanityCheckTeams() const {
 	for (auto& team : teams) {
-		if (isOnSameMachineTeam(*team) == false) {
+		if (!isOnSameMachineTeam(*team)) {
 			return false;
 		}
 	}

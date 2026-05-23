@@ -412,7 +412,7 @@ private:
 	// When DD restarts, it checks whether keyRange has anonymousShard
 	// If yes, setTransitionCheck() is call to trigger the process of removing anonymousShard
 	inline void setTransitionCheck() {
-		if (requireTransition == true) {
+		if (requireTransition) {
 			return;
 		}
 		requireTransition = true;
