@@ -29,8 +29,6 @@ from fdb.tuple import TupleElement
 
 
 class Subspace(object):
-    rawPrefix: bytes
-
     def __init__(
         self, prefixTuple: Tuple[TupleElement, ...] = tuple(), rawPrefix: bytes = b""
     ) -> None:
