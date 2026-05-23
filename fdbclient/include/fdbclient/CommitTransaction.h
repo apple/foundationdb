@@ -106,10 +106,38 @@ struct MutationRef {
 
 	MutationRef() : type(MAX_ATOMIC_OP), corrupted(false) {}
 	MutationRef(Type t, StringRef a, StringRef b) : type(t), param1(a), param2(b), corrupted(false) {}
-	MutationRef(Arena& to, Type t, StringRef a, StringRef b)
-	  : type(t), param1(to, a), param2(to, b), corrupted(false) {}
-	MutationRef(Arena& to, const MutationRef& from)
-	  : type(from.type), param1(to, from.param1), param2(to, from.param2), corrupted(false) {}
+    MutationRef(Arena& to, Type t, StringRef a, StringRef b) : type(t), corrupted(false) {
+	    const int totalSize = a.size() + b.size();
+	    uint8_t* packed = totalSize ? new (to) uint8_t[totalSize] : nullptr;
+
+	    if (a.size()) {
+		    memcpy(packed, a.begin(), a.size());
+	    }
+
+	    if (b.size()) {
+		    memcpy(packed + a.size(), b.begin(), b.size());
+	    }
+
+	    param1 = StringRef(packed, a.size());
+	    param2 = StringRef(packed + a.size(), b.size());
+    }
+
+    MutationRef(Arena& to, const MutationRef& from) : type(from.type), corrupted(false) {
+        const int totalSize = from.param1.size() + from.param2.size();
+	    uint8_t* packed = totalSize ? new (to) uint8_t[totalSize] : nullptr;
+
+	    if (from.param1.size()) {
+		    memcpy(packed, from.param1.begin(), from.param1.size());
+	    }
+
+	    if (from.param2.size()) {
+		    memcpy(packed + from.param1.size(), from.param2.begin(), from.param2.size());
+	    }
+
+	    param1 = StringRef(packed, from.param1.size());
+	    param2 = StringRef(packed + from.param1.size(), from.param2.size());
+    }
+
 	int totalSize() const {
 		return OVERHEAD_BYTES + param1.size() + param2.size() + (checksum.present() ? sizeof(uint32_t) + 1 : 1) +
 		       (accumulativeChecksumIndex.present() ? sizeof(uint16_t) + 1 : 1);
