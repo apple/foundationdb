@@ -591,14 +591,14 @@ def transaction(logger):
 
 
 @enable_logging()
-def clearprefix(logger):
-    """This test covers the clearprefix fdbcli command."""
-    # Test 1: clearprefix without writemode should fail
-    err1 = run_fdbcli_command_and_get_error("clearprefix", "prefix")
+def clearrange_prefix(logger):
+    """This test covers the clearrange fdbcli command with optional ENDKEY (prefix mode)."""
+    # Test 1: clearrange without writemode should fail
+    err1 = run_fdbcli_command_and_get_error("clearrange", "prefix")
     assert (
         err1 == "ERROR: writemode must be enabled to set or clear keys in the database."
     )
-    # Test 2: set keys with a shared prefix and one without, then clearprefix
+    # Test 2: set keys with a shared prefix and one without, then clearrange with prefix only
     process = subprocess.Popen(
         command_template[:-1],
         stdin=subprocess.PIPE,
@@ -611,7 +611,7 @@ def clearprefix(logger):
         "set prefix_bbb val2",
         "set prefix_ccc val3",
         "set other_key val4",
-        "clearprefix prefix_",
+        "clearrange prefix_",
         # verify prefix keys are gone
         "get prefix_aaa",
         "get prefix_bbb",
@@ -984,7 +984,7 @@ if __name__ == "__main__":
         # TODO: re-enable once stable
         # suspend()
         transaction()
-        clearprefix()
+        clearrange_prefix()
         # TODO: re-enable once stable
         # throttle()
         triggerddteaminfolog()
