@@ -36,7 +36,7 @@ import sys
 import threading
 import traceback
 import weakref
-from typing import Any, Callable, Dict, Iterator, List, Optional, Protocol, Tuple, Union
+from typing import Any, Callable, Dict, Iterator, List, Optional, Protocol, Tuple, Union, runtime_checkable
 
 import fdb
 from fdb.tuple import pack, int2byte
@@ -49,6 +49,26 @@ _network_thread_reentrant_lock = threading.RLock()
 _open_file = open
 
 _thread_local_storage = threading.local()
+
+
+@runtime_checkable
+class IFoundationDBKey(Protocol):
+    """Protocol for objects that can be used as FDB keys."""
+
+    def as_foundationdb_key(self) -> bytes: ...
+
+
+@runtime_checkable
+class IFoundationDBValue(Protocol):
+    """Protocol for objects that can be used as FDB values."""
+
+    def as_foundationdb_value(self) -> bytes: ...
+
+
+# A key accepted by the FDB API: either raw bytes or any object implementing IFoundationDBKey
+KeyType = Union[bytes, IFoundationDBKey]
+# A value accepted by the FDB API: either raw bytes or any object implementing IFoundationDBValue
+ValueType = Union[bytes, IFoundationDBValue]
 
 
 class _NetworkOptions(object):
@@ -468,7 +488,7 @@ class TransactionRead(_FDBBase):
         """Get the read version of the transaction."""
         return FutureInt64(self.capi.fdb_transaction_get_read_version(self.tpointer))
 
-    def get(self, key: Any) -> Value:
+    def get(self, key: KeyType) -> Value:
         key = keyToBytes(key)
         return Value(
             self.capi.fdb_transaction_get(self.tpointer, key, len(key), self._snapshot)
@@ -541,7 +561,7 @@ class TransactionRead(_FDBBase):
         end = self._to_selector(end)
         return FDBRange(self, begin, end, limit, reverse, streaming_mode)
 
-    def get_range_startswith(self, prefix: Any, *args: Any, **kwargs: Any) -> FDBRange:
+    def get_range_startswith(self, prefix: KeyType, *args: Any, **kwargs: Any) -> FDBRange:
         prefix = keyToBytes(prefix)
         return self.get_range(prefix, strinc(prefix), *args, **kwargs)
 
@@ -599,7 +619,7 @@ class Transaction(TransactionRead):
     def _set_option(self, option: int, param: Optional[bytes], length: int) -> None:
         self.capi.fdb_transaction_set_option(self.tpointer, option, param, length)
 
-    def _atomic_operation(self, opcode: int, key: Any, param: Any) -> None:
+    def _atomic_operation(self, opcode: int, key: KeyType, param: ValueType) -> None:
         paramBytes = valueToBytes(param)
         paramLength = len(paramBytes)
         keyBytes = keyToBytes(key)
@@ -608,12 +628,12 @@ class Transaction(TransactionRead):
             self.tpointer, keyBytes, keyLength, paramBytes, paramLength, opcode
         )
 
-    def set(self, key: Any, value: Any) -> None:
+    def set(self, key: KeyType, value: ValueType) -> None:
         key = keyToBytes(key)
         value = valueToBytes(value)
         self.capi.fdb_transaction_set(self.tpointer, key, len(key), value, len(value))
 
-    def clear(self, key: Any) -> None:
+    def clear(self, key: Union[KeyType, KeySelector]) -> None:
         if isinstance(key, KeySelector):
             key = self.get_key(key)
 
@@ -642,33 +662,33 @@ class Transaction(TransactionRead):
             self.tpointer, begin, len(begin), end, len(end)
         )
 
-    def clear_range_startswith(self, prefix: Any) -> None:
+    def clear_range_startswith(self, prefix: KeyType) -> None:
         prefix = keyToBytes(prefix)
         return self.clear_range(prefix, strinc(prefix))
 
-    def watch(self, key: Any) -> FutureVoid:
+    def watch(self, key: KeyType) -> FutureVoid:
         key = keyToBytes(key)
         return FutureVoid(self.capi.fdb_transaction_watch(self.tpointer, key, len(key)))
 
-    def add_read_conflict_range(self, begin: Any, end: Any) -> None:
+    def add_read_conflict_range(self, begin: KeyType, end: KeyType) -> None:
         begin = keyToBytes(begin)
         end = keyToBytes(end)
         self.capi.fdb_transaction_add_conflict_range(
             self.tpointer, begin, len(begin), end, len(end), ConflictRangeType.read
         )
 
-    def add_read_conflict_key(self, key: Any) -> None:
+    def add_read_conflict_key(self, key: KeyType) -> None:
         key = keyToBytes(key)
         self.add_read_conflict_range(key, key + b"\x00")
 
-    def add_write_conflict_range(self, begin: Any, end: Any) -> None:
+    def add_write_conflict_range(self, begin: KeyType, end: KeyType) -> None:
         begin = keyToBytes(begin)
         end = keyToBytes(end)
         self.capi.fdb_transaction_add_conflict_range(
             self.tpointer, begin, len(begin), end, len(end), ConflictRangeType.write
         )
 
-    def add_write_conflict_key(self, key: Any) -> None:
+    def add_write_conflict_key(self, key: KeyType) -> None:
         key = keyToBytes(key)
         self.add_write_conflict_range(key, key + b"\x00")
 
@@ -706,7 +726,7 @@ class Transaction(TransactionRead):
     def cancel(self) -> None:
         self.capi.fdb_transaction_cancel(self.tpointer)
 
-    def __setitem__(self, key: Any, value: Any) -> None:
+    def __setitem__(self, key: KeyType, value: ValueType) -> None:
         self.set(key, value)
 
     def __delitem__(self, key: Union[bytes, slice]) -> None:
@@ -767,7 +787,7 @@ class Future(_FDBBase, metaclass=abc.ABCMeta):
                 raise
 
     def on_ready(self, callback: Callable[[Future], None]) -> None:
-        def cb_and_delref(_ignore: Any) -> None:
+        def cb_and_delref(_ignore: object) -> None:
             _unpin_callback(cbfunc[0])
             del cbfunc[:]
             try:
@@ -796,7 +816,7 @@ class Future(_FDBBase, metaclass=abc.ABCMeta):
         ev = futures[0].Event()
         for idx, f in enumerate(futures):
 
-            def cb(_ignore: Any, idx: int = idx) -> None:
+            def cb(_ignore: object, idx: int = idx) -> None:
                 if d.setdefault("i", idx) == idx:
                     ev.set()
 
@@ -830,6 +850,7 @@ class Future(_FDBBase, metaclass=abc.ABCMeta):
     def add_done_callback(self, fn: Callable[[Future], None]) -> None:
         self.on_ready(lambda f: self.call_soon_threadsafe(fn, f))
 
+    @abc.abstractmethod
     def remove_done_callback(self, fn: Callable[[Future], None]) -> None:
         raise NotImplementedError()
 
