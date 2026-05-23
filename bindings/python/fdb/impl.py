@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import abc
 import atexit
 import ctypes
 import ctypes.util
@@ -35,7 +36,7 @@ import sys
 import threading
 import traceback
 import weakref
-from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterator, List, Optional, Protocol, Tuple, Union
 
 import fdb
 from fdb.tuple import pack, int2byte
@@ -350,8 +351,6 @@ class FDBError(Exception):
 
     """
 
-    code: int
-
     def __init__(self, code: int) -> None:
         self.code = code
         self._description: Optional[str] = None
@@ -463,7 +462,6 @@ class TransactionRead(_FDBBase):
         self._snapshot = snapshot
 
     def __del__(self) -> None:
-        # print("Destroying transactionread 0x%x" % self.tpointer)
         self.capi.fdb_transaction_destroy(self.tpointer)
 
     def get_read_version(self) -> FutureInt64:
@@ -593,7 +591,7 @@ class Transaction(TransactionRead):
         super(Transaction, self).__init__(tpointer, db, False)
         self.options = _TransactionOptions(self)
         self.__snapshot = self.snapshot = TransactionRead(tpointer, db, True)
-        
+
     def set_read_version(self, version: int) -> None:
         """Set the read version of the transaction."""
         self.capi.fdb_transaction_set_read_version(self.tpointer, version)
@@ -718,17 +716,15 @@ class Transaction(TransactionRead):
             self.clear(key)
 
 
-class Future(_FDBBase):
+class Future(_FDBBase, metaclass=abc.ABCMeta):
     Event = threading.Event
     _state = None  # < Hack for trollius
 
     def __init__(self, fpointer: Any) -> None:
-        # print("Creating future 0x%x" % fpointer)
         self.fpointer = fpointer
 
     def __del__(self) -> None:
         if self.fpointer:
-            # print("Destroying future 0x%x" % self.fpointer)
             self.capi.fdb_future_destroy(self.fpointer)
             self.fpointer = None
 
@@ -738,6 +734,7 @@ class Future(_FDBBase):
     def _release_memory(self) -> None:
         self.capi.fdb_future_release_memory(self.fpointer)
 
+    @abc.abstractmethod
     def wait(self) -> Any:
         raise NotImplementedError
 
@@ -770,7 +767,7 @@ class Future(_FDBBase):
                 raise
 
     def on_ready(self, callback: Callable[[Future], None]) -> None:
-        def cb_and_delref(ignore: object) -> None:
+        def cb_and_delref(_ignore: Any) -> None:
             _unpin_callback(cbfunc[0])
             del cbfunc[:]
             try:
@@ -797,10 +794,10 @@ class Future(_FDBBase):
             raise ValueError("wait_for_any requires at least one future")
         d: Dict[str, int] = {}
         ev = futures[0].Event()
-        for i, f in enumerate(futures):
+        for idx, f in enumerate(futures):
 
-            def cb(ignore: object, i: int = i) -> None:
-                if d.setdefault("i", i) == i:
+            def cb(_ignore: Any, idx: int = idx) -> None:
+                if d.setdefault("i", idx) == idx:
                     ev.set()
 
             f.on_ready(cb)
@@ -1327,7 +1324,6 @@ class Database(_TransactionCreator):
         self.options = _DatabaseOptions(self)
 
     def __del__(self) -> None:
-        # print("Destroying database 0x%x" % self.dpointer)
         self.capi.fdb_database_destroy(self.dpointer)
 
     def _set_option(self, option: int, param: Optional[bytes], length: int) -> None:
@@ -1389,10 +1385,6 @@ def create_cluster(cluster_file: Optional[Union[str, bytes]] = None) -> Cluster:
 
 
 class KeySelector(object):
-    key: bytes
-    or_equal: bool
-    offset: int
-
     def __init__(self, key: bytes, or_equal: bool, offset: int) -> None:
         self.key = key
         self.or_equal = or_equal
@@ -1461,9 +1453,6 @@ class KeyStruct(ctypes.Structure):
 
 
 class KeyValue(object):
-    key: bytes
-    value: bytes
-
     def __init__(self, key: bytes, value: bytes) -> None:
         self.key = key
         self.value = value
@@ -1548,7 +1537,17 @@ else:
             raise Exception("Unable to locate the FoundationDB API shared library!")
 
 
-def keyToBytes(k: Any) -> bytes:
+class IFoundationDBKey(Protocol):
+    def as_foundationdb_key(self) -> bytes:
+        pass
+
+
+class IFoundationDBValue(Protocol):
+    def as_foundationdb_value(self) -> bytes:
+        pass
+
+
+def keyToBytes(k: Union[bytes, IFoundationDBKey]) -> bytes:
     if hasattr(k, "as_foundationdb_key"):
         k = k.as_foundationdb_key()
     if not isinstance(k, bytes):
@@ -1556,7 +1555,7 @@ def keyToBytes(k: Any) -> bytes:
     return k
 
 
-def valueToBytes(v: Any) -> bytes:
+def valueToBytes(v: Union[bytes, IFoundationDBValue]) -> bytes:
     if hasattr(v, "as_foundationdb_value"):
         v = v.as_foundationdb_value()
     if not isinstance(v, bytes):
@@ -1964,7 +1963,6 @@ def init(event_model: Optional[str] = None) -> None:
                         sys.stderr.write(
                             "Unhandled error in FoundationDB network thread: %s\n" % e
                         )
-                    # print("Network stopped")
 
             _network_thread = NetworkThread()
             _network_thread.daemon = True
