@@ -22,6 +22,8 @@
 #define FDBCLIENT_SYSTEMDATA_H
 #pragma once
 
+#include <tuple>
+
 // Functions and constants documenting the organization of the reserved keyspace in the database beginning with "\xFF"
 
 #include "fdbclient/AccumulativeChecksum.h"
@@ -263,6 +265,37 @@ Key tagLocalityListKeyFor(Optional<Value> dcID);
 Value tagLocalityListValue(int8_t const&);
 Optional<Value> decodeTagLocalityListKey(KeyRef const&);
 int8_t decodeTagLocalityListValue(ValueRef const&);
+
+// Native CDC metadata persisted in the transaction state store.
+// "\xff/cdc/name/[[streamName]]" := "[[CDCStreamId]]"
+extern const KeyRangeRef cdcStreamNameKeys;
+Key cdcStreamNameKeyFor(KeyRef const& streamName);
+Key decodeCDCStreamNameKey(KeyRef const& key);
+Value cdcStreamNameValue(CDCStreamId streamId);
+CDCStreamId decodeCDCStreamNameValue(ValueRef const& value);
+
+// "\xff/cdc/keys/[[CDCStreamId]]" := "[[KeyRange]]"
+extern const KeyRangeRef cdcStreamKeys;
+Key cdcStreamKeyFor(CDCStreamId streamId);
+Value cdcStreamKeysValue(KeyRangeRef const& keys);
+KeyRange decodeCDCStreamKeysValue(ValueRef const& value);
+
+// "\xff/cdc/tagHistory/[[CDCStreamId]][[Version]][[Tag]]" := ""
+extern const KeyRangeRef cdcTagHistoryKeys;
+Key cdcTagHistoryKeyFor(CDCStreamId streamId, Version version, Tag tag);
+KeyRange cdcTagHistoryRangeFor(CDCStreamId streamId);
+std::tuple<CDCStreamId, Version, Tag> decodeCDCTagHistoryKey(KeyRef const& key);
+
+// "\xff/cdc/minVersion/[[CDCStreamId]]" := "[[Version]]"
+extern const KeyRangeRef cdcMinVersionKeys;
+Key cdcMinVersionKeyFor(CDCStreamId streamId);
+Value cdcMinVersionValue(Version version);
+Version decodeCDCMinVersionValue(ValueRef const& value);
+
+// "\xff/cdc/proxies/[[CDCStreamId]][[proxyUID]]" := ""
+extern const KeyRangeRef cdcProxyKeys;
+Key cdcProxyKeyFor(CDCStreamId streamId, UID proxyId);
+std::pair<CDCStreamId, UID> decodeCDCProxyKey(KeyRef const& key);
 
 //    "\xff\x02/datacenterReplicas/[[datacenterID]]" := "[[replicas]]"
 //	Provides the number of replicas for the given datacenterID.

@@ -771,6 +771,123 @@ int8_t decodeTagLocalityListValue(ValueRef const& value) {
 	return s;
 }
 
+const KeyRangeRef cdcStreamNameKeys("\xff/cdc/name/"_sr, "\xff/cdc/name0"_sr);
+const KeyRangeRef cdcStreamKeys("\xff/cdc/keys/"_sr, "\xff/cdc/keys0"_sr);
+const KeyRangeRef cdcTagHistoryKeys("\xff/cdc/tagHistory/"_sr, "\xff/cdc/tagHistory0"_sr);
+const KeyRangeRef cdcMinVersionKeys("\xff/cdc/minVersion/"_sr, "\xff/cdc/minVersion0"_sr);
+const KeyRangeRef cdcProxyKeys("\xff/cdc/proxies/"_sr, "\xff/cdc/proxies0"_sr);
+
+Key cdcStreamNameKeyFor(KeyRef const& streamName) {
+	return streamName.withPrefix(cdcStreamNameKeys.begin);
+}
+
+Key decodeCDCStreamNameKey(KeyRef const& key) {
+	return key.removePrefix(cdcStreamNameKeys.begin);
+}
+
+Value cdcStreamNameValue(CDCStreamId streamId) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withNativeCdc()));
+	wr << streamId;
+	return wr.toValue();
+}
+
+CDCStreamId decodeCDCStreamNameValue(ValueRef const& value) {
+	CDCStreamId streamId;
+	BinaryReader reader(value, IncludeVersion());
+	ASSERT_WE_THINK(reader.protocolVersion().hasNativeCdc());
+	reader >> streamId;
+	return streamId;
+}
+
+Key cdcStreamKeyFor(CDCStreamId streamId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(cdcStreamKeys.begin);
+	wr << streamId;
+	return wr.toValue();
+}
+
+Value cdcStreamKeysValue(KeyRangeRef const& keys) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withNativeCdc()));
+	wr << keys;
+	return wr.toValue();
+}
+
+KeyRange decodeCDCStreamKeysValue(ValueRef const& value) {
+	KeyRange keys;
+	BinaryReader reader(value, IncludeVersion());
+	ASSERT_WE_THINK(reader.protocolVersion().hasNativeCdc());
+	reader >> keys;
+	return keys;
+}
+
+static Key cdcTagHistoryPrefixFor(CDCStreamId streamId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(cdcTagHistoryKeys.begin);
+	wr << streamId;
+	return wr.toValue();
+}
+
+Key cdcTagHistoryKeyFor(CDCStreamId streamId, Version version, Tag tag) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(cdcTagHistoryPrefixFor(streamId));
+
+	Version encodedVersion = bigEndian64(version);
+	Key versionBytes = makeString(sizeof(encodedVersion));
+	memcpy(mutateString(versionBytes), &encodedVersion, sizeof(encodedVersion));
+	wr.serializeBytes(versionBytes);
+	wr << tag;
+	return wr.toValue();
+}
+
+KeyRange cdcTagHistoryRangeFor(CDCStreamId streamId) {
+	return prefixRange(cdcTagHistoryPrefixFor(streamId));
+}
+
+std::tuple<CDCStreamId, Version, Tag> decodeCDCTagHistoryKey(KeyRef const& key) {
+	CDCStreamId streamId;
+	Version encodedVersion;
+	Tag tag;
+	BinaryReader reader(key.removePrefix(cdcTagHistoryKeys.begin), Unversioned());
+	reader >> streamId >> encodedVersion >> tag;
+	return { streamId, bigEndian64(encodedVersion), tag };
+}
+
+Key cdcMinVersionKeyFor(CDCStreamId streamId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(cdcMinVersionKeys.begin);
+	wr << streamId;
+	return wr.toValue();
+}
+
+Value cdcMinVersionValue(Version version) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withNativeCdc()));
+	wr << version;
+	return wr.toValue();
+}
+
+Version decodeCDCMinVersionValue(ValueRef const& value) {
+	Version version;
+	BinaryReader reader(value, IncludeVersion());
+	ASSERT_WE_THINK(reader.protocolVersion().hasNativeCdc());
+	reader >> version;
+	return version;
+}
+
+Key cdcProxyKeyFor(CDCStreamId streamId, UID proxyId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(cdcProxyKeys.begin);
+	wr << streamId << proxyId;
+	return wr.toValue();
+}
+
+std::pair<CDCStreamId, UID> decodeCDCProxyKey(KeyRef const& key) {
+	CDCStreamId streamId;
+	UID proxyId;
+	BinaryReader reader(key.removePrefix(cdcProxyKeys.begin), Unversioned());
+	reader >> streamId >> proxyId;
+	return { streamId, proxyId };
+}
+
 const KeyRangeRef datacenterReplicasKeys("\xff\x02/datacenterReplicas/"_sr, "\xff\x02/datacenterReplicas0"_sr);
 const KeyRef datacenterReplicasPrefix = datacenterReplicasKeys.begin;
 
@@ -1645,6 +1762,33 @@ TEST_CASE("noSim/SystemData/DataMoveId") {
 	ASSERT(type == decodeType && reason == decodeReason);
 
 	printf("testing data move ID encoding/decoding complete\n");
+
+	return Void();
+}
+
+TEST_CASE("noSim/SystemData/NativeCDC") {
+	const Key name = "orders"_sr;
+	const CDCStreamId streamId = 42;
+	const KeyRange keys(KeyRangeRef("a"_sr, "z"_sr));
+	const Version minVersion = 123456789;
+	const Tag tag(tagLocalityCDC, 9);
+	const UID proxyId(1, 2);
+
+	ASSERT(decodeCDCStreamNameKey(cdcStreamNameKeyFor(name)) == name);
+	ASSERT(decodeCDCStreamNameValue(cdcStreamNameValue(streamId)) == streamId);
+	ASSERT(decodeCDCStreamKeysValue(cdcStreamKeysValue(keys)) == keys);
+	ASSERT(decodeCDCMinVersionValue(cdcMinVersionValue(minVersion)) == minVersion);
+
+	const Key tagHistoryKey = cdcTagHistoryKeyFor(streamId, minVersion, tag);
+	const auto [decodedStreamId, decodedVersion, decodedTag] = decodeCDCTagHistoryKey(tagHistoryKey);
+	ASSERT(decodedStreamId == streamId);
+	ASSERT(decodedVersion == minVersion);
+	ASSERT(decodedTag == tag);
+	ASSERT(cdcTagHistoryRangeFor(streamId).contains(tagHistoryKey));
+
+	const auto [proxyStreamId, decodedProxyId] = decodeCDCProxyKey(cdcProxyKeyFor(streamId, proxyId));
+	ASSERT(proxyStreamId == streamId);
+	ASSERT(decodedProxyId == proxyId);
 
 	return Void();
 }
