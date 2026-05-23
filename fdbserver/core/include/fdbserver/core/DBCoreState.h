@@ -182,7 +182,7 @@ struct DBCoreState {
 	bool isEqual(const DBCoreState& r) const {
 		return logSystemType == r.logSystemType && recoveryCount == r.recoveryCount && tLogs == r.tLogs &&
 		       oldTLogData == r.oldTLogData && logRouterTags == r.logRouterTags && txsTags == r.txsTags &&
-		       pseudoLocalities == r.pseudoLocalities;
+		       pseudoLocalities == r.pseudoLocalities && rangeBackupWorkerTags == r.rangeBackupWorkerTags;
 	}
 	bool operator==(const DBCoreState& rhs) const { return isEqual(rhs); }
 	bool operator!=(const DBCoreState& rhs) const { return !isEqual(rhs); }

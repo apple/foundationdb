@@ -468,6 +468,7 @@ Reference<LogSystem> LogSystem::fromOldLogSystemConfig(UID const& dbgid,
 		}
 		logSystem->logRouterTags = lsConf.oldTLogs[0].logRouterTags;
 		logSystem->txsTags = lsConf.oldTLogs[0].txsTags;
+		logSystem->rangeBackupWorkerTags = lsConf.oldTLogs[0].rangeBackupWorkerTags;
 		// logSystem->epochEnd = lsConf.oldTLogs[0].epochEnd;
 
 		for (int i = 1; i < lsConf.oldTLogs.size(); i++) {
@@ -563,6 +564,7 @@ void LogSystem::toCoreState(DBCoreState& newState) const {
 			TraceEvent("BWToCore")
 			    .detail("Epoch", newState.oldTLogData.back().epoch)
 			    .detail("TotalTags", newState.oldTLogData.back().logRouterTags)
+			    .detail("RangeBackupWorkerTags", newState.oldTLogData.back().rangeBackupWorkerTags)
 			    .detail("BeginVersion", newState.oldTLogData.back().epochBegin)
 			    .detail("EndVersion", newState.oldTLogData.back().epochEnd);
 		}
@@ -2134,6 +2136,10 @@ int LogSystem::getLogRouterTags() const {
 	return logRouterTags;
 }
 
+int LogSystem::getRangeBackupWorkerTags() const {
+	return rangeBackupWorkerTags;
+}
+
 Version LogSystem::getBackupStartVersion() const {
 	ASSERT(!tLogs.empty());
 	return backupStartVersion;
@@ -2651,6 +2657,7 @@ Future<Void> LogSystem::epochEnd(Reference<AsyncVar<Reference<LogSystem>>> outLo
 					modifiedState.tLogs.push_back(coreSet);
 					modifiedState.tLogs[0].isLocal = true;
 					modifiedState.logRouterTags = 0;
+					// TODO neethu: Decide if we want to recruit backup workers in case of force recovery
 					modifiedLogSets++;
 					break;
 				}

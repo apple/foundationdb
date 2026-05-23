@@ -146,7 +146,11 @@ struct OldTLogConf {
 	OldTLogConf()
 	  : epochBegin(0), epochEnd(0), recoverAt(0), logRouterTags(0), txsTags(0), epoch(0), rangeBackupWorkerTags(0) {}
 	std::string toString() const {
-		return format("end: %d tags: %d %s", epochEnd, logRouterTags, describe(tLogs).c_str());
+		return format("end: %d tags: %d rangeBackupWorkerTags: %d %s",
+		              epochEnd,
+		              logRouterTags,
+		              rangeBackupWorkerTags,
+		              describe(tLogs).c_str());
 	}
 
 	bool operator==(const OldTLogConf& rhs) const;
@@ -155,6 +159,9 @@ struct OldTLogConf {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
+		// FlatBuffer serializers always include all fields regardless of protocol version, so rangeBackupWorkerTags
+		// is unconditionally serialized. Non-FlatBuffer (versioned binary) serializers must gate the field on
+		// hasRangeBackupWorker() to maintain wire compatibility with older peers that don't know about this field.
 		if constexpr (is_fb_function<Ar>) {
 			serializer(ar,
 			           tLogs,
@@ -240,6 +247,9 @@ struct LogSystemConfig {
 
 template <class Ar>
 void LogSystemConfig::serialize(Ar& ar) {
+	// FlatBuffer serializers always include all fields regardless of protocol version, so rangeBackupWorkerTags
+	// is unconditionally serialized. Non-FlatBuffer (versioned binary) serializers must gate the field on
+	// hasRangeBackupWorker() to maintain wire compatibility with older peers that don't know about this field.
 	if constexpr (is_fb_function<Ar>) {
 		serializer(ar,
 		           logSystemType,

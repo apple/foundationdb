@@ -1607,6 +1607,7 @@ Conditionally serializes a full interface or just its UID.
 | txsTags | `int32_t` | Number of txs tags |
 | pseudoLocalities | `std::set<int8_t>` | Pseudo-localities |
 | epoch | `LogEpoch` → `uint64_t` | Epoch number |
+| rangeBackupWorkerTags | `int32_t` | Number of range backup worker tags |
 
 ### LogSystemConfig
 
@@ -1625,6 +1626,7 @@ Conditionally serializes a full interface or just its UID.
 | epoch | `LogEpoch` → `uint64_t` | Current epoch |
 | oldestBackupEpoch | `LogEpoch` → `uint64_t` | Oldest backup epoch |
 | knownLockedTLogIds | `std::map<uint8_t, std::vector<uint16_t>>` | Known locked TLog IDs |
+| rangeBackupWorkerTags | `int32_t` | Range backup worker tag count |
 
 ### CoreTLogSet
 Persisted on coordinators (UIDs only, no full interfaces).
@@ -1654,6 +1656,7 @@ Persisted on coordinators (UIDs only, no full interfaces).
 | recoverAt | `Version` → `int64_t` | Recovery version (conditional on protocol version) |
 | pseudoLocalities | `std::set<int8_t>` | Pseudo-localities |
 | epoch | `LogEpoch` → `uint64_t` | Epoch |
+| rangeBackupWorkerTags | `int32_t` | Rrange backup worker tags |
 
 ### DBCoreState
 Persisted on coordinators — the ground truth for recovery.
@@ -1670,6 +1673,7 @@ Persisted on coordinators — the ground truth for recovery.
 | newestProtocolVersion | `ProtocolVersion` → `uint64_t` | Newest protocol (conditional) |
 | lowestCompatibleProtocolVersion | `ProtocolVersion` → `uint64_t` | Lowest compatible (conditional) |
 | encryptionAtRestModeDeprecated | `EncryptionAtRestModeDeprecated` → `uint32_t` | Encryption mode (conditional) |
+| rangeBackupWorkerTags | `int32_t` | Range backup worker tags |
 
 ### ServerDBInfo
 Distributed to all server processes.

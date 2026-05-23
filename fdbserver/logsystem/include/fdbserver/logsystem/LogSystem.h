@@ -519,6 +519,7 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	TLogVersion getTLogVersion() const;
 
 	int getLogRouterTags() const;
+	int getRangeBackupWorkerTags() const;
 
 	Version getBackupStartVersion() const;
 

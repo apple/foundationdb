@@ -105,10 +105,11 @@ bool OldTLogConf::isEqualIds(OldTLogConf const& r) const {
 }
 
 std::string LogSystemConfig::toString() const {
-	return format("type: %d oldGenerations: %d tags: %d %s",
+	return format("type: %d oldGenerations: %d tags: %d rangeBackupWorkerTags: %d %s",
 	              logSystemType,
 	              oldTLogs.size(),
 	              logRouterTags,
+	              rangeBackupWorkerTags,
 	              describe(tLogs).c_str());
 }
 
