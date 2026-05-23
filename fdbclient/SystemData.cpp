@@ -880,11 +880,22 @@ Version decodeCDCMinVersionValue(ValueRef const& value) {
 	return version;
 }
 
-Key cdcProxyKeyFor(CDCStreamId streamId, UID proxyId) {
+static Key cdcProxyPrefixFor(CDCStreamId streamId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(cdcProxyKeys.begin);
-	wr << streamId << proxyId;
+	wr << streamId;
 	return wr.toValue();
+}
+
+Key cdcProxyKeyFor(CDCStreamId streamId, UID proxyId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(cdcProxyPrefixFor(streamId));
+	wr << proxyId;
+	return wr.toValue();
+}
+
+KeyRange cdcProxyRangeFor(CDCStreamId streamId) {
+	return prefixRange(cdcProxyPrefixFor(streamId));
 }
 
 std::pair<CDCStreamId, UID> decodeCDCProxyKey(KeyRef const& key) {
@@ -1797,6 +1808,7 @@ TEST_CASE("noSim/SystemData/NativeCDC") {
 	const auto [proxyStreamId, decodedProxyId] = decodeCDCProxyKey(cdcProxyKeyFor(streamId, proxyId));
 	ASSERT(proxyStreamId == streamId);
 	ASSERT(decodedProxyId == proxyId);
+	ASSERT(cdcProxyRangeFor(streamId).contains(cdcProxyKeyFor(streamId, proxyId)));
 
 	return Void();
 }

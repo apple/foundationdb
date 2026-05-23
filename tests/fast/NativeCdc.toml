@@ -1,0 +1,6 @@
+[[test]]
+testTitle = 'NativeCdc'
+useDB = true
+
+    [[test.workload]]
+    testName = 'NativeCdc'

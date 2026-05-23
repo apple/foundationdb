@@ -296,6 +296,7 @@ Version decodeCDCMinVersionValue(ValueRef const& value);
 // "\xff/cdc/proxies/[[CDCStreamId]][[proxyUID]]" := ""
 extern const KeyRangeRef cdcProxyKeys;
 Key cdcProxyKeyFor(CDCStreamId streamId, UID proxyId);
+KeyRange cdcProxyRangeFor(CDCStreamId streamId);
 std::pair<CDCStreamId, UID> decodeCDCProxyKey(KeyRef const& key);
 
 //    "\xff\x02/datacenterReplicas/[[datacenterID]]" := "[[replicas]]"
