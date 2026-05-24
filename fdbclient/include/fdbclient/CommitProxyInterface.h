@@ -50,9 +50,6 @@ struct CommitProxyInterface {
 	RequestStream<ReplyPromise<Void>> waitFailure;
 
 	RequestStream<struct TxnStateRequest> txnState;
-	// Reserved to preserve the historical adjusted-endpoint numbering for the
-	// commit proxy interface. Health metric requests are served by GrvProxyInterface.
-	RequestStream<struct GetHealthMetricsRequest> legacyGetHealthMetrics;
 	RequestStream<struct ProxySnapRequest> proxySnapReq;
 	RequestStream<struct ExclusionSafetyCheckRequest> exclusionSafetyCheckReq;
 	RequestStream<struct GetDDMetricsRequest> getDDMetrics;
@@ -78,16 +75,14 @@ struct CommitProxyInterface {
 			    RequestStream<struct GetStorageServerRejoinInfoRequest>(commit.getEndpoint().getAdjustedEndpoint(3));
 			waitFailure = RequestStream<ReplyPromise<Void>>(commit.getEndpoint().getAdjustedEndpoint(4));
 			txnState = RequestStream<struct TxnStateRequest>(commit.getEndpoint().getAdjustedEndpoint(5));
-			legacyGetHealthMetrics =
-			    RequestStream<struct GetHealthMetricsRequest>(commit.getEndpoint().getAdjustedEndpoint(6));
-			proxySnapReq = RequestStream<struct ProxySnapRequest>(commit.getEndpoint().getAdjustedEndpoint(7));
+			proxySnapReq = RequestStream<struct ProxySnapRequest>(commit.getEndpoint().getAdjustedEndpoint(6));
 			exclusionSafetyCheckReq =
-			    RequestStream<struct ExclusionSafetyCheckRequest>(commit.getEndpoint().getAdjustedEndpoint(8));
-			getDDMetrics = RequestStream<struct GetDDMetricsRequest>(commit.getEndpoint().getAdjustedEndpoint(9));
+			    RequestStream<struct ExclusionSafetyCheckRequest>(commit.getEndpoint().getAdjustedEndpoint(7));
+			getDDMetrics = RequestStream<struct GetDDMetricsRequest>(commit.getEndpoint().getAdjustedEndpoint(8));
 			expireIdempotencyId =
-			    PublicRequestStream<struct ExpireIdempotencyIdRequest>(commit.getEndpoint().getAdjustedEndpoint(10));
+			    PublicRequestStream<struct ExpireIdempotencyIdRequest>(commit.getEndpoint().getAdjustedEndpoint(9));
 			setThrottledShard =
-			    RequestStream<struct SetThrottledShardRequest>(commit.getEndpoint().getAdjustedEndpoint(13));
+			    RequestStream<struct SetThrottledShardRequest>(commit.getEndpoint().getAdjustedEndpoint(12));
 		}
 	}
 
@@ -100,7 +95,6 @@ struct CommitProxyInterface {
 		streams.push_back(getStorageServerRejoinInfo.getReceiver(TaskPriority::ProxyStorageRejoin));
 		streams.push_back(waitFailure.getReceiver());
 		streams.push_back(txnState.getReceiver());
-		streams.push_back(legacyGetHealthMetrics.getReceiver());
 		streams.push_back(proxySnapReq.getReceiver());
 		streams.push_back(exclusionSafetyCheckReq.getReceiver());
 		streams.push_back(getDDMetrics.getReceiver());
