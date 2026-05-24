@@ -145,7 +145,7 @@ std::vector<TLogInterface> LogSystemConfig::allLocalLogs(bool includeSatellite) 
 int LogSystemConfig::numLogs() const {
 	int numLogs = 0;
 	for (auto& tLogSet : tLogs) {
-		if (tLogSet.isLocal == true) {
+		if (tLogSet.isLocal) {
 			numLogs += tLogSet.tLogs.size();
 		}
 	}

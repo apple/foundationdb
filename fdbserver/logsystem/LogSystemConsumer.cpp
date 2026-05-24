@@ -747,8 +747,11 @@ Reference<IReplayPeekCursor> LogSystemConsumer::peekLogRouter(
 		}
 		if (found) {
 			Version oldEnd = firstOld && ls.recoveredAt.present() ? ls.recoveredAt.get() + 1 : old.epochEnd;
-			if (begin > oldEnd) {
-				TraceEvent("TLogPeekLogRouterSkipEmptyOldRange", dbgid)
+			if (begin >= oldEnd) {
+				// The LogRouter has already advanced past this old epoch's range.
+				// Skip it without creating a SetPeekCursor with begin >= end (which
+				// would be born exhausted and hang).
+				TraceEvent("TLogPeekLogRouterOldRangeEmpty", dbgid)
 				    .detail("Tag", tag.toString())
 				    .detail("Begin", begin)
 				    .detail("OldEnd", oldEnd)

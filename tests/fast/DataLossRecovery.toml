@@ -1,4 +1,11 @@
 [configuration]
+# Disable buggify for this test. The workload disables DD and manually moves
+# shards via startMoveKeys. With buggify enabled, injected delays cause
+# transaction_too_old on every retry (transaction body exceeds the 5-second
+# read version window), while BUGGIFY also reduces START_MOVE_KEYS_MAX_RETRIES
+# from 50 to 10. The combination is self-defeating: the test exhausts retries
+# before DD recognizes it has been disabled and releases the move keys lock.
+buggify = false
 generateFearless = false
 config = 'triple'
 processesPerMachine = 2

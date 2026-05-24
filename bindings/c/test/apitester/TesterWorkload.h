@@ -278,6 +278,9 @@ private:
 
 	// Timer for printing statistics in regular intervals
 	std::unique_ptr<ITimer> statsTimer;
+
+	// Flag to stop the stats timer from re-scheduling
+	std::atomic<bool> statsStopped{ false };
 };
 
 // A workload factory

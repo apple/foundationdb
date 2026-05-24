@@ -7,6 +7,7 @@ sharded_rocksdb_histograms_sample_rate=1.0
 
 [[test]]
  testTitle = 'UnitTests'
+ timeout = 3600
  useDB = false
  startDelay = 0
 
