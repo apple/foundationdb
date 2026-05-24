@@ -1228,7 +1228,7 @@ public:
 				    .detail("NumSstFiles", numSstFiles);
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_actor_cancelled) {
+			if (e.code() != error_code_actor_cancelled && e.code() != error_code_broken_promise) {
 				TraceEvent(SevError, "ShardedRocksShardMetricsLoggerError").errorUnsuppressed(e);
 			}
 		}
@@ -2232,7 +2232,7 @@ Future<Void> rocksDBAggregatedMetricsLogger(std::shared_ptr<ShardedRocksDBState>
 			}
 		}
 	} catch (Error& e) {
-		if (e.code() != error_code_actor_cancelled) {
+		if (e.code() != error_code_actor_cancelled && e.code() != error_code_broken_promise) {
 			TraceEvent(SevError, "ShardedRocksDBMetricsError").errorUnsuppressed(e);
 		}
 	}
@@ -2263,7 +2263,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				histogram->sample(timer_monotonic() - startTime);
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_actor_cancelled) {
+			if (e.code() != error_code_actor_cancelled && e.code() != error_code_broken_promise) {
 				TraceEvent(SevError, "RefreshReadIteratorPoolError").errorUnsuppressed(e);
 			}
 		}
@@ -2282,7 +2282,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				eventListener->resetCounters();
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_actor_cancelled) {
+			if (e.code() != error_code_actor_cancelled && e.code() != error_code_broken_promise) {
 				TraceEvent(SevError, "RefreshRocksDBBackgroundEventCounter").errorUnsuppressed(e);
 			}
 		}
@@ -3754,7 +3754,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				}
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_actor_cancelled) {
+			if (e.code() != error_code_actor_cancelled && e.code() != error_code_broken_promise) {
 				TraceEvent(SevError, "ShardedRocksDBCompactionActorError").errorUnsuppressed(e);
 			}
 		}
@@ -3782,7 +3782,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				}
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_actor_cancelled) {
+			if (e.code() != error_code_actor_cancelled && e.code() != error_code_broken_promise) {
 				TraceEvent(SevError, "DeleteEmptyShardsError").errorUnsuppressed(e);
 			}
 		}

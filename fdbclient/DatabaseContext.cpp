@@ -1516,6 +1516,10 @@ DatabaseContext::~DatabaseContext() {
 	clientDBInfoMonitor.cancel();
 	monitorTssInfoChange.cancel();
 	tssMismatchHandler.cancel();
+	logger.cancel();
+	clientStatusUpdater.actor.cancel();
+	throttleExpirer.cancel();
+	statusLeaderMon.cancel();
 
 	if (grvUpdateHandler.isValid()) {
 		grvUpdateHandler.cancel();
