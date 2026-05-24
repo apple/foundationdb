@@ -1797,7 +1797,7 @@ std::pair<Optional<ShardsAffectedByTeamFailure::Team>, bool> PhysicalShardCollec
 		return { Optional<ShardsAffectedByTeamFailure::Team>(), false };
 	}
 	for (const auto& team : physicalShardInstances[inputPhysicalShardID].teams) {
-		if (team.primary == false) {
+		if (!team.primary) {
 			/*TraceEvent("TryGetRemoteTeamWith")
 			    .detail("PhysicalShardID", inputPhysicalShardID)
 			    .detail("Team", team.toString())

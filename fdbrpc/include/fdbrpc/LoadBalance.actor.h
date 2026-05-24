@@ -42,7 +42,7 @@
 #include "fdbrpc/TSSComparison.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR Future<Void> allAlternativesFailedDelay(Future<Void> okFuture);
+Future<Void> allAlternativesFailedDelay(Future<Void> okFuture);
 
 enum ComparisonType { TSS_COMPARISON, REPLICA_COMPARISON };
 
@@ -398,6 +398,7 @@ Future<Void> replicaComparison(Req req,
 			            restOfTeamFutures.size() >= requiredReplicas)) {
 				const char* type = numError ? "ReplicaComparisonReadError" : "ReplicaComparisonTimeoutError";
 				TraceEvent(SevWarnAlways, type)
+				    .suppressFor(1.0)
 				    .detail("TeamSize", restOfTeamFutures.size() + 1)
 				    .detail("RequiredReplies", requiredReplicas)
 				    .detail("SuccessfulReplies", successfulReplies)

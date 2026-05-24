@@ -231,6 +231,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ENABLE_TLOG_TEMP_TAG_MESSAGES_RESERVE,               false );
 	init( TLOG_POPPED_VER_LAG_THRESHOLD_FOR_TLOGPOP_TRACE,     250e6 );
 	init( BLOCKING_PEEK_TIMEOUT,                                 0.4 );
+	init( PEEK_REPLY_TIMEOUT,                                   30.0 ); // Sender-side timeout for non-parallel peek; re-sends peek to detect dead TLogs that silently drop requests. Set to 0 to disable (restores old wait-forever behavior).
 	init( ENABLE_DETAILED_TLOG_POP_TRACE,                      false ); if ( randomize && BUGGIFY ) ENABLE_DETAILED_TLOG_POP_TRACE = true;
 	init( PEEK_BATCHING_EMPTY_MSG,                              true ); if ( randomize && BUGGIFY ) PEEK_BATCHING_EMPTY_MSG = false;
 	init( PEEK_BATCHING_EMPTY_MSG_INTERVAL,                    0.005 ); if ( randomize && BUGGIFY ) PEEK_BATCHING_EMPTY_MSG_INTERVAL = 0.01;
@@ -1125,6 +1126,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_PREFER_LOW_READ_UTIL_TEAM,                          true );
 	init( DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL,                   120);
 	init( MOVING_WINDOW_SAMPLE_SIZE,                         10000000); // 10MB
+	init( DD_TEAMS_BY_SERVER_IDS_CONSISTENCY_CHECK_PROB_SIM,       0.0 ); if( isSimulated ) DD_TEAMS_BY_SERVER_IDS_CONSISTENCY_CHECK_PROB_SIM = (deterministicRandom()->random01() * 0.4) + 0.1;
 
 	//Storage Server
 	init( STORAGE_LOGGING_DELAY,                                 5.0 );

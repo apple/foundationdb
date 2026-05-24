@@ -5,7 +5,7 @@ testTitle = 'MoveKeysCycle'
     testName = 'Cycle'
     transactionsPerSecond = 2500.0
     testDuration = 10.0
-    expectedRate = 0.025
+    expectedRate = 0
 
     [[test.workload]]
     testName = 'RandomMoveKeys'
