@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "fdbclient/CommitTransaction.h"
+#include "fdbclient/CDCProxyInterface.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GlobalConfig.h"
 #include "fdbclient/GrvProxyInterface.h"
@@ -111,6 +112,7 @@ struct ClientDBInfo {
 	UID id; // Changes each time anything else changes
 	std::vector<GrvProxyInterface> grvProxies;
 	std::vector<CommitProxyInterface> commitProxies;
+	std::vector<CDCProxyInterface> cdcProxies;
 	Optional<CommitProxyInterface>
 	    firstCommitProxy; // not serialized, used for commitOnFirstProxy when the commit proxies vector has been shrunk
 	Optional<Value> forward;
@@ -128,8 +130,13 @@ struct ClientDBInfo {
 	void serialize(Archive& ar) {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
+			serializer(ar, grvProxies, commitProxies, id, forward, history, clusterId, clusterType);
+			if (ar.protocolVersion().hasNativeCdc()) {
+				serializer(ar, cdcProxies);
+			}
+		} else {
+			serializer(ar, grvProxies, commitProxies, id, forward, history, clusterId, clusterType, cdcProxies);
 		}
-		serializer(ar, grvProxies, commitProxies, id, forward, history, clusterId, clusterType);
 	}
 };
 

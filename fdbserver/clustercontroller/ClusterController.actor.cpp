@@ -236,6 +236,12 @@ bool ClusterControllerData::transactionSystemContainsDegradedServers() {
 				}
 			}
 
+			for (const auto& proxy : dbi.client.cdcProxies) {
+				if (proxy.addresses().contains(server)) {
+					return true;
+				}
+			}
+
 			for (const auto& resolver : dbi.resolvers) {
 				if (resolver.addresses().contains(server)) {
 					return true;
@@ -1177,6 +1183,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	    .detail("RegistrationCount", req.registrationCount)
 	    .detail("CommitProxies", req.commitProxies.size())
 	    .detail("GrvProxies", req.grvProxies.size())
+	    .detail("CDCProxies", req.cdcProxies.size())
 	    .detail("RecoveryCount", req.recoveryCount)
 	    .detail("Stalled", req.recoveryStalled)
 	    .detail("OldestBackupEpoch", req.logSystemConfig.oldestBackupEpoch);
@@ -1236,7 +1243,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 
 	// Construct the client information
 	if (db->clientInfo->get().commitProxies != req.commitProxies ||
-	    db->clientInfo->get().grvProxies != req.grvProxies ||
+	    db->clientInfo->get().grvProxies != req.grvProxies || db->clientInfo->get().cdcProxies != req.cdcProxies ||
 	    db->clientInfo->get().clusterId != db->serverInfo->get().client.clusterId ||
 	    db->clientInfo->get().clusterType != db->clusterType) {
 		TraceEvent("PublishNewClientInfo", self->id)
@@ -1246,6 +1253,8 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		    .detail("CommitProxies", db->clientInfo->get().commitProxies)
 		    .detail("GlobalConfigHistorySize", db->clientInfo->get().history.size())
 		    .detail("ReqCPs", req.commitProxies)
+		    .detail("CDCProxies", db->clientInfo->get().cdcProxies)
+		    .detail("ReqCDCProxies", req.cdcProxies)
 		    .detail("ClusterId", db->serverInfo->get().client.clusterId)
 		    .detail("ClientClusterId", db->clientInfo->get().clusterId)
 		    .detail("ClusterType", db->clientInfo->get().clusterType)
@@ -1256,6 +1265,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		clientInfo.id = deterministicRandom()->randomUniqueID();
 		clientInfo.commitProxies = req.commitProxies;
 		clientInfo.grvProxies = req.grvProxies;
+		clientInfo.cdcProxies = req.cdcProxies;
 		clientInfo.history = db->clientInfo->get().history;
 		clientInfo.clusterId = db->serverInfo->get().client.clusterId;
 		clientInfo.clusterType = db->clusterType;

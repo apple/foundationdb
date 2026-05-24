@@ -150,8 +150,8 @@ Future<Void> consume(CDCProxyData* self, CDCConsumeRequest request) {
 
 		Reference<IReplayPeekCursor> cursor =
 		    self->logSystem->peekSingle(self->id, begin, state.currentTag, state.tagHistory);
-		cursor->setProtocolVersion(g_network->protocolVersion());
 		co_await cursor->getMore(TaskPriority::TLogPeekReply);
+		cursor->setProtocolVersion(g_network->protocolVersion());
 		if (cursor->popped() > begin) {
 			throw transaction_too_old();
 		}
@@ -250,47 +250,62 @@ Future<Void> listStreams(CDCProxyData* self, CDCListStreamsRequest request) {
 
 } // namespace
 
-Future<Void> cdcProxyServer(CDCProxyInterface proxy, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
-	CDCProxyData self(proxy, dbInfo);
-	ActorCollection actors(false);
+Future<Void> cdcProxyServer(CDCProxyInterface proxy,
+                            uint64_t recoveryCount,
+                            Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	try {
+		CDCProxyData self(proxy, dbInfo);
+		ActorCollection actors(false);
 
-	actors.add(waitFailureServer(proxy.waitFailure.getFuture()));
-	self.logSystem = makeLogSystemConsumerFromServerDBInfo(self.id, dbInfo->get());
-	Future<Void> dbInfoChange = dbInfo->onChange();
+		actors.add(waitFailureServer(proxy.waitFailure.getFuture()));
+		actors.add(traceRole(Role::CDC_PROXY, proxy.id()));
+		self.logSystem = makeLogSystemConsumerFromServerDBInfo(self.id, dbInfo->get());
+		Future<Void> dbInfoChange = dbInfo->onChange();
 
-	while (true) {
-		auto result = co_await race(proxy.consume.getFuture(),
-		                            proxy.ack.getFuture(),
-		                            proxy.registerStream.getFuture(),
-		                            proxy.removeStream.getFuture(),
-		                            proxy.listStreams.getFuture(),
-		                            dbInfoChange,
-		                            actors.getResult());
-		switch (result.index()) {
-		case 0:
-			actors.add(consume(&self, std::get<0>(std::move(result))));
-			break;
-		case 1:
-			actors.add(acknowledge(&self, std::get<1>(std::move(result))));
-			break;
-		case 2:
-			actors.add(registerStream(&self, std::get<2>(std::move(result))));
-			break;
-		case 3:
-			actors.add(removeStream(&self, std::get<3>(std::move(result))));
-			break;
-		case 4:
-			actors.add(listStreams(&self, std::get<4>(std::move(result))));
-			break;
-		case 5:
-			self.logSystem = makeLogSystemConsumerFromServerDBInfo(self.id, dbInfo->get());
-			dbInfoChange = dbInfo->onChange();
-			break;
-		case 6:
-			co_await actors.getResult();
-			break;
-		default:
-			ASSERT(false);
+		while (true) {
+			auto result = co_await race(proxy.consume.getFuture(),
+			                            proxy.ack.getFuture(),
+			                            proxy.registerStream.getFuture(),
+			                            proxy.removeStream.getFuture(),
+			                            proxy.listStreams.getFuture(),
+			                            dbInfoChange,
+			                            actors.getResult());
+			switch (result.index()) {
+			case 0:
+				actors.add(consume(&self, std::get<0>(std::move(result))));
+				break;
+			case 1:
+				actors.add(acknowledge(&self, std::get<1>(std::move(result))));
+				break;
+			case 2:
+				actors.add(registerStream(&self, std::get<2>(std::move(result))));
+				break;
+			case 3:
+				actors.add(removeStream(&self, std::get<3>(std::move(result))));
+				break;
+			case 4:
+				actors.add(listStreams(&self, std::get<4>(std::move(result))));
+				break;
+			case 5:
+				if (dbInfo->get().recoveryCount >= recoveryCount &&
+				    std::find(dbInfo->get().client.cdcProxies.begin(), dbInfo->get().client.cdcProxies.end(), proxy) ==
+				        dbInfo->get().client.cdcProxies.end()) {
+					throw worker_removed();
+				}
+				self.logSystem = makeLogSystemConsumerFromServerDBInfo(self.id, dbInfo->get());
+				dbInfoChange = dbInfo->onChange();
+				break;
+			case 6:
+				co_await actors.getResult();
+				break;
+			default:
+				ASSERT(false);
+			}
+		}
+	} catch (Error& e) {
+		TraceEvent("CDCProxyTerminated", proxy.id()).errorUnsuppressed(e);
+		if (e.code() != error_code_worker_removed) {
+			throw;
 		}
 	}
 }

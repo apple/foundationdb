@@ -20,7 +20,7 @@ Reference<IReplayPeekCursor> LogSystemConsumer::peekAll(UID dbgid,
 		}
 		if (log->isLocal && !log->logServers.empty() &&
 		    (log->locality == tagLocalitySpecial || log->locality == tag.locality || tag.locality == tagLocalityTxs ||
-		     tag.locality == tagLocalityLogRouter)) {
+		     tag.locality == tagLocalityLogRouter || tag.locality == tagLocalityCDC)) {
 			lastBegin = std::max(lastBegin, log->startVersion);
 			localSets.push_back(log);
 			if (log->locality != tagLocalitySatellite) {
@@ -95,7 +95,8 @@ Reference<IReplayPeekCursor> LogSystemConsumer::peekAll(UID dbgid,
 				}
 				if (log->isLocal && !log->logServers.empty() &&
 				    (log->locality == tagLocalitySpecial || log->locality == tag.locality ||
-				     tag.locality == tagLocalityTxs || tag.locality == tagLocalityLogRouter)) {
+				     tag.locality == tagLocalityTxs || tag.locality == tagLocalityLogRouter ||
+				     tag.locality == tagLocalityCDC)) {
 					thisBegin = std::max(thisBegin, log->startVersion);
 					localOldSets.push_back(log);
 					if (log->locality != tagLocalitySatellite) {
@@ -608,19 +609,25 @@ Reference<IReplayPeekCursor> LogSystemConsumer::peekSingle(UID dbgid,
                                                            Tag tag,
                                                            std::vector<std::pair<Version, Tag>> history) {
 	auto& ls = *logSystem;
+	auto peekTag = [&](Tag readTag, Version readBegin, Version readEnd) -> Reference<IReplayPeekCursor> {
+		if (readTag.locality == tagLocalityCDC) {
+			return peekAll(dbgid, readBegin, readEnd, readTag, false);
+		}
+		return peekLocal(dbgid, readTag, readBegin, readEnd, false);
+	};
 	while (!history.empty() && begin >= history.back().first) {
 		history.pop_back();
 	}
 
 	if (history.empty()) {
 		TraceEvent("TLogPeekSingleNoHistory", dbgid).detail("Tag", tag.toString()).detail("Begin", begin);
-		return peekLocal(dbgid, tag, begin, ls.getPeekEnd(), false);
+		return peekTag(tag, begin, ls.getPeekEnd());
 	} else {
 		std::vector<Reference<IReplayPeekCursor>> cursors;
 		std::vector<LogMessageVersion> epochEnds;
 
 		TraceEvent("TLogPeekSingleAddingLocal", dbgid).detail("Tag", tag.toString()).detail("Begin", history[0].first);
-		cursors.push_back(peekLocal(dbgid, tag, history[0].first, ls.getPeekEnd(), false));
+		cursors.push_back(peekTag(tag, history[0].first, ls.getPeekEnd()));
 
 		for (int i = 0; i < history.size(); i++) {
 			TraceEvent("TLogPeekSingleAddingOld", dbgid)
@@ -628,11 +635,9 @@ Reference<IReplayPeekCursor> LogSystemConsumer::peekSingle(UID dbgid,
 			    .detail("HistoryTag", history[i].second.toString())
 			    .detail("Begin", i + 1 == history.size() ? begin : std::max(history[i + 1].first, begin))
 			    .detail("End", history[i].first);
-			cursors.push_back(peekLocal(dbgid,
-			                            history[i].second,
-			                            i + 1 == history.size() ? begin : std::max(history[i + 1].first, begin),
-			                            history[i].first,
-			                            false));
+			cursors.push_back(peekTag(history[i].second,
+			                          i + 1 == history.size() ? begin : std::max(history[i + 1].first, begin),
+			                          history[i].first));
 			epochEnds.emplace_back(history[i].first);
 		}
 

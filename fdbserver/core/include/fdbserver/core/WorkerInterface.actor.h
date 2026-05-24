@@ -28,6 +28,7 @@
 #include "fdbserver/core/BackupInterface.h"
 #include "fdbserver/core/DataDistributorInterface.h"
 #include "fdbserver/core/MasterInterface.h"
+#include "fdbclient/CDCProxyInterface.h"
 #include "fdbserver/core/TLogInterface.h"
 #include "fdbserver/core/RatekeeperInterface.h"
 #include "fdbclient/ConsistencyScanInterface.h"
@@ -50,6 +51,7 @@ struct WorkerInterface {
 	RequestStream<struct RecruitMasterRequest> master;
 	RequestStream<struct InitializeCommitProxyRequest> commitProxy;
 	RequestStream<struct InitializeGrvProxyRequest> grvProxy;
+	RequestStream<struct InitializeCDCProxyRequest> cdcProxy;
 	RequestStream<struct InitializeDataDistributorRequest> dataDistributor;
 	RequestStream<struct InitializeRatekeeperRequest> ratekeeper;
 	RequestStream<struct InitializeConsistencyScanRequest> consistencyScan;
@@ -87,6 +89,7 @@ struct WorkerInterface {
 		master.getEndpoint(TaskPriority::Worker);
 		commitProxy.getEndpoint(TaskPriority::Worker);
 		grvProxy.getEndpoint(TaskPriority::Worker);
+		cdcProxy.getEndpoint(TaskPriority::Worker);
 		resolver.getEndpoint(TaskPriority::Worker);
 		logRouter.getEndpoint(TaskPriority::Worker);
 		debugPing.getEndpoint(TaskPriority::Worker);
@@ -97,31 +100,63 @@ struct WorkerInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar,
-		           clientInterface,
-		           locality,
-		           tLog,
-		           master,
-		           commitProxy,
-		           grvProxy,
-		           dataDistributor,
-		           ratekeeper,
-		           consistencyScan,
-		           resolver,
-		           storage,
-		           logRouter,
-		           debugPing,
-		           coordinationPing,
-		           waitFailure,
-		           setMetricsRate,
-		           eventLogRequest,
-		           traceBatchDumpRequest,
-		           testerInterface,
-		           diskStoreRequest,
-		           execReq,
-		           workerSnapReq,
-		           backup,
-		           updateServerDBInfo);
+		if constexpr (is_fb_function<Ar>) {
+			serializer(ar,
+			           clientInterface,
+			           locality,
+			           tLog,
+			           master,
+			           commitProxy,
+			           grvProxy,
+			           dataDistributor,
+			           ratekeeper,
+			           consistencyScan,
+			           resolver,
+			           storage,
+			           logRouter,
+			           debugPing,
+			           coordinationPing,
+			           waitFailure,
+			           setMetricsRate,
+			           eventLogRequest,
+			           traceBatchDumpRequest,
+			           testerInterface,
+			           diskStoreRequest,
+			           execReq,
+			           workerSnapReq,
+			           backup,
+			           updateServerDBInfo,
+			           cdcProxy);
+		} else {
+			serializer(ar,
+			           clientInterface,
+			           locality,
+			           tLog,
+			           master,
+			           commitProxy,
+			           grvProxy,
+			           dataDistributor,
+			           ratekeeper,
+			           consistencyScan,
+			           resolver,
+			           storage,
+			           logRouter,
+			           debugPing,
+			           coordinationPing,
+			           waitFailure,
+			           setMetricsRate,
+			           eventLogRequest,
+			           traceBatchDumpRequest,
+			           testerInterface,
+			           diskStoreRequest,
+			           execReq,
+			           workerSnapReq,
+			           backup,
+			           updateServerDBInfo);
+			if (ar.protocolVersion().hasNativeCdc()) {
+				serializer(ar, cdcProxy);
+			}
+		}
 	}
 };
 
@@ -239,6 +274,7 @@ struct RegisterMasterRequest {
 	LogSystemConfig logSystemConfig;
 	std::vector<CommitProxyInterface> commitProxies;
 	std::vector<GrvProxyInterface> grvProxies;
+	std::vector<CDCProxyInterface> cdcProxies;
 	std::vector<ResolverInterface> resolvers;
 	DBRecoveryCount recoveryCount;
 	int64_t registrationCount;
@@ -253,20 +289,38 @@ struct RegisterMasterRequest {
 	void serialize(Ar& ar) {
 		if constexpr (!is_fb_function<Ar>) {
 			ASSERT(ar.protocolVersion().isValid());
+			serializer(ar,
+			           id,
+			           mi,
+			           logSystemConfig,
+			           commitProxies,
+			           grvProxies,
+			           resolvers,
+			           recoveryCount,
+			           registrationCount,
+			           configuration,
+			           priorCommittedLogServers,
+			           recoveryState,
+			           recoveryStalled);
+			if (ar.protocolVersion().hasNativeCdc()) {
+				serializer(ar, cdcProxies);
+			}
+		} else {
+			serializer(ar,
+			           id,
+			           mi,
+			           logSystemConfig,
+			           commitProxies,
+			           grvProxies,
+			           resolvers,
+			           recoveryCount,
+			           registrationCount,
+			           configuration,
+			           priorCommittedLogServers,
+			           recoveryState,
+			           recoveryStalled,
+			           cdcProxies);
 		}
-		serializer(ar,
-		           id,
-		           mi,
-		           logSystemConfig,
-		           commitProxies,
-		           grvProxies,
-		           resolvers,
-		           recoveryCount,
-		           registrationCount,
-		           configuration,
-		           priorCommittedLogServers,
-		           recoveryState,
-		           recoveryStalled);
 	}
 };
 
@@ -731,6 +785,21 @@ struct InitializeGrvProxyRequest {
 extern template class RequestStream<InitializeGrvProxyRequest, false>;
 extern template struct NetNotifiedQueue<InitializeGrvProxyRequest, false>;
 
+struct InitializeCDCProxyRequest {
+	constexpr static FileIdentifier file_identifier = 16776013;
+	uint64_t recoveryCount;
+	ReplyPromise<CDCProxyInterface> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, recoveryCount, reply);
+	}
+};
+
+// Instantiated in WorkerSupport.cpp
+extern template class RequestStream<InitializeCDCProxyRequest, false>;
+extern template struct NetNotifiedQueue<InitializeCDCProxyRequest, false>;
+
 struct InitializeDataDistributorRequest {
 	constexpr static FileIdentifier file_identifier = 8858952;
 	UID reqId;
@@ -970,6 +1039,7 @@ struct Role {
 	static const Role SHARED_TRANSACTION_LOG;
 	static const Role COMMIT_PROXY;
 	static const Role GRV_PROXY;
+	static const Role CDC_PROXY;
 	static const Role MASTER;
 	static const Role RESOLVER;
 	static const Role CLUSTER_CONTROLLER;

@@ -50,6 +50,7 @@
 #include "MetricLogger.actor.h"
 #include "fdbserver/backupworker/BackupWorker.h"
 #include "fdbserver/clustercontroller/ClusterController.h"
+#include "fdbserver/cdcproxy/CDCProxy.h"
 #include "fdbserver/commitproxy/CommitProxyServer.h"
 #include "fdbserver/consistencyscan/ConsistencyScan.h"
 #include "fdbserver/datadistributor/DataDistributor.h"
@@ -2785,6 +2786,26 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				errorForwarders.add(zombie(
 				    recruited,
 				    forwardError(errors, Role::GRV_PROXY, recruited.id(), grvProxyServer(recruited, req, dbInfo))));
+				req.reply.send(recruited);
+			}
+			when(InitializeCDCProxyRequest req = waitNext(interf.cdcProxy.getFuture())) {
+				LocalLineage _;
+				CDCProxyInterface recruited;
+				recruited.processId = locality.processId();
+				recruited.initEndpoints();
+
+				std::map<std::string, std::string> details;
+				startRole(Role::CDC_PROXY, recruited.id(), interf.id(), details);
+
+				DUMPTOKEN(recruited.consume);
+				DUMPTOKEN(recruited.ack);
+				DUMPTOKEN(recruited.waitFailure);
+
+				errorForwarders.add(zombie(recruited,
+				                           forwardError(errors,
+				                                        Role::CDC_PROXY,
+				                                        recruited.id(),
+				                                        cdcProxyServer(recruited, req.recoveryCount, dbInfo))));
 				req.reply.send(recruited);
 			}
 			when(InitializeResolverRequest req = waitNext(interf.resolver.getFuture())) {

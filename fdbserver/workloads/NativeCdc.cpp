@@ -21,8 +21,10 @@
 #include <utility>
 #include <vector>
 
+#include "fdbclient/CDCProxyInterface.h"
 #include "fdbclient/NativeCdc.h"
 #include "fdbclient/SystemData.h"
+#include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/tester/workloads.h"
 
 struct NativeCdcWorkload : TestWorkload {
@@ -82,6 +84,13 @@ struct NativeCdcWorkload : TestWorkload {
 		}
 	}
 
+	Future<CDCProxyInterface> getCDCProxy() {
+		while (dbInfo->get().client.cdcProxies.empty()) {
+			co_await dbInfo->onChange();
+		}
+		co_return dbInfo->get().client.cdcProxies.front();
+	}
+
 	Future<Void> run(Database cx) {
 		const Key firstName = "native-cdc-first"_sr;
 		const Key secondName = "native-cdc-second"_sr;
@@ -135,6 +144,46 @@ struct NativeCdcWorkload : TestWorkload {
 		ASSERT(secondRoute.first != firstRoute.first);
 
 		co_await removeNativeCdcStream(cx, secondName);
+
+		CDCProxyInterface proxy = co_await getCDCProxy();
+		const Key liveName = "native-cdc-live"_sr;
+		const KeyRange liveRange(KeyRangeRef("live/"_sr, "live0"_sr));
+		CDCRegisterStreamReply liveRegistration =
+		    co_await proxy.registerStream.getReply(CDCRegisterStreamRequest(liveName, liveRange));
+
+		CDCListStreamsReply listed = co_await proxy.listStreams.getReply(CDCListStreamsRequest());
+		ASSERT(listed.streams.size() == 1);
+		ASSERT(listed.streams[0].name == liveName);
+		ASSERT(listed.streams[0].streamId == liveRegistration.streamId);
+		ASSERT(listed.streams[0].keys == liveRange);
+
+		Transaction write(cx);
+		write.set("live/in"_sr, "captured"_sr);
+		write.set("other/out"_sr, "ignored"_sr);
+		co_await write.commit();
+		const Version writeVersion = write.getCommittedVersion();
+
+		CDCConsumeReply consumed = co_await timeoutError(
+		    proxy.consume.getReply(CDCConsumeRequest(CDCCursor(liveRegistration.streamId, invalidVersion))), 30.0);
+		ASSERT(consumed.lastConsumedVersion >= writeVersion);
+		bool foundInRangeWrite = false;
+		bool foundOutOfRangeWrite = false;
+		for (const auto& versioned : consumed.mutations) {
+			for (const auto& mutation : versioned.mutations) {
+				if (mutation.param1 == "live/in"_sr) {
+					foundInRangeWrite = true;
+				}
+				if (mutation.param1 == "other/out"_sr) {
+					foundOutOfRangeWrite = true;
+				}
+			}
+		}
+		ASSERT(foundInRangeWrite);
+		ASSERT(!foundOutOfRangeWrite);
+
+		co_await proxy.ack.getReply(CDCAckRequest(liveRegistration.streamId, writeVersion));
+		ASSERT(co_await getPersistedMinVersion(cx, liveRegistration.streamId) == writeVersion + 1);
+		co_await proxy.removeStream.getReply(CDCRemoveStreamRequest(liveName));
 	}
 };
 

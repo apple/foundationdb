@@ -45,6 +45,7 @@ static std::set<int> const& normalClusterRecoveryErrors() {
 		s.insert(error_code_tlog_failed);
 		s.insert(error_code_commit_proxy_failed);
 		s.insert(error_code_grv_proxy_failed);
+		s.insert(error_code_cdc_proxy_failed);
 		s.insert(error_code_resolver_failed);
 		s.insert(error_code_backup_worker_failed);
 		s.insert(error_code_recruitment_failed);
@@ -231,6 +232,23 @@ Future<Void> newGrvProxies(Reference<ClusterRecoveryData> self, RecruitFromConfi
 	self->grvProxies = std::move(newRecruits);
 }
 
+Future<Void> newCDCProxies(Reference<ClusterRecoveryData> self, RecruitFromConfigurationReply recr) {
+	std::vector<Future<CDCProxyInterface>> initializationReplies;
+	for (int i = 0; i < recr.grvProxies.size(); i++) {
+		InitializeCDCProxyRequest req;
+		req.recoveryCount = self->cstate.myDBState.recoveryCount + 1;
+		TraceEvent("CDCProxyReplies", self->dbgid).detail("WorkerID", recr.grvProxies[i].id());
+		initializationReplies.push_back(
+		    transformErrors(throwErrorOr(recr.grvProxies[i].cdcProxy.getReplyUnlessFailedFor(
+		                        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
+		                    cdc_proxy_failed()));
+	}
+
+	std::vector<CDCProxyInterface> newRecruits = co_await getAll(initializationReplies);
+	TraceEvent("CDCProxyInitializationComplete", self->dbgid).log();
+	self->cdcProxies = std::move(newRecruits);
+}
+
 Future<Void> newResolvers(Reference<ClusterRecoveryData> self, RecruitFromConfigurationReply recr) {
 	std::vector<Future<ResolverInterface>> initializationReplies;
 	for (int i = 0; i < recr.resolvers.size(); i++) {
@@ -409,6 +427,19 @@ Future<Void> waitGrvProxyFailure(std::vector<GrvProxyInterface> const& grvProxie
 		                                   /*trace=*/true));
 	ASSERT(!failed.empty());
 	return tagError<Void>(quorum(failed, 1), grv_proxy_failed());
+}
+
+Future<Void> waitCDCProxyFailure(std::vector<CDCProxyInterface> const& cdcProxies) {
+	std::vector<Future<Void>> failed;
+	failed.reserve(cdcProxies.size());
+	for (auto cdcProxy : cdcProxies) {
+		failed.push_back(waitFailureClient(cdcProxy.waitFailure,
+		                                   SERVER_KNOBS->TLOG_TIMEOUT,
+		                                   -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+		                                   /*trace=*/true));
+	}
+	ASSERT(failed.size() >= 1);
+	return tagError<Void>(quorum(failed, 1), cdc_proxy_failed());
 }
 
 Future<Void> waitResolverFailure(std::vector<ResolverInterface> const& resolvers) {
@@ -779,6 +810,7 @@ void sendMasterRegistration(ClusterRecoveryData* self,
                             LogSystemConfig const& logSystemConfig,
                             std::vector<CommitProxyInterface> commitProxies,
                             std::vector<GrvProxyInterface> grvProxies,
+                            std::vector<CDCProxyInterface> cdcProxies,
                             std::vector<ResolverInterface> resolvers,
                             DBRecoveryCount recoveryCount,
                             std::vector<UID> priorCommittedLogServers) {
@@ -788,6 +820,7 @@ void sendMasterRegistration(ClusterRecoveryData* self,
 	masterReq.logSystemConfig = logSystemConfig;
 	masterReq.commitProxies = commitProxies;
 	masterReq.grvProxies = grvProxies;
+	masterReq.cdcProxies = cdcProxies;
 	masterReq.resolvers = resolvers;
 	masterReq.recoveryCount = recoveryCount;
 	if (self->hasConfiguration)
@@ -826,6 +859,7 @@ Future<Void> updateRegistration(Reference<ClusterRecoveryData> self, Reference<L
 			                       logSystemConfig,
 			                       self->provisionalCommitProxies,
 			                       self->provisionalGrvProxies,
+			                       std::vector<CDCProxyInterface>(),
 			                       self->resolvers,
 			                       self->cstate.myDBState.recoveryCount,
 			                       self->cstate.prevDBState.getPriorCommittedLogServers());
@@ -835,6 +869,7 @@ Future<Void> updateRegistration(Reference<ClusterRecoveryData> self, Reference<L
 			                       logSystemConfig,
 			                       self->commitProxies,
 			                       self->grvProxies,
+			                       self->cdcProxies,
 			                       self->resolvers,
 			                       self->cstate.myDBState.recoveryCount,
 			                       std::vector<UID>());
@@ -1102,6 +1137,7 @@ Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	    .detail("Status", RecoveryStatus::names[RecoveryStatus::initializing_transaction_servers])
 	    .detail("CommitProxies", recruits.commitProxies.size())
 	    .detail("GrvProxies", recruits.grvProxies.size())
+	    .detail("CDCProxies", recruits.grvProxies.size())
 	    .detail("TLogs", recruits.tLogs.size())
 	    .detail("Resolvers", recruits.resolvers.size())
 	    .detail("SatelliteTLogs", recruits.satelliteTLogs.size())
@@ -1122,6 +1158,7 @@ Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	Future<Void> txnSystemInitialized =
 	    traceAfter(newCommitProxies(self, recruits), "CommitProxiesInitialized") &&
 	    traceAfter(newGrvProxies(self, recruits), "GRVProxiesInitialized") &&
+	    traceAfter(newCDCProxies(self, recruits), "CDCProxiesInitialized") &&
 	    traceAfter(newResolvers(self, recruits), "ResolversInitialized") &&
 	    traceAfter(newTLogServers(self, recruits, oldLogSystem, &confChanges), "TLogServersInitialized");
 	co_await (txnSystemInitialized || monitorInitializingTxnSystem(self->controllerData->db.unfinishedRecoveries));
@@ -1761,6 +1798,7 @@ Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	self->addActor.send(waitResolverFailure(self->resolvers));
 	self->addActor.send(waitCommitProxyFailure(self->commitProxies));
 	self->addActor.send(waitGrvProxyFailure(self->grvProxies));
+	self->addActor.send(waitCDCProxyFailure(self->cdcProxies));
 	self->addActor.send(reportErrors(updateRegistration(self, self->logSystem), "UpdateRegistration", self->dbgid));
 	self->registrationTrigger.trigger();
 

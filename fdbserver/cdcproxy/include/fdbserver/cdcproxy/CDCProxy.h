@@ -25,6 +25,6 @@
 
 struct ServerDBInfo;
 
-// Implements CDCProxyInterface once a worker/cluster-controller recruitment
-// path publishes a CDCProxyInterface to clients.
-Future<Void> cdcProxyServer(CDCProxyInterface proxy, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
+Future<Void> cdcProxyServer(CDCProxyInterface proxy,
+                            uint64_t recoveryCount,
+                            Reference<AsyncVar<ServerDBInfo> const> dbInfo);
