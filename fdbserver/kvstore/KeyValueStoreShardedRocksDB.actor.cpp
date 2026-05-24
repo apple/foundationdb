@@ -1111,9 +1111,11 @@ int readRangeInDb(PhysicalShard* shard,
 		auto* cursor = readIter->iter.get();
 		cursor->Seek(toSlice(range.begin));
 		while (cursor->Valid() && toStringRef(cursor->key()) < range.end) {
-			KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
-			accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
-			result->push_back_deep(result->arena(), kv);
+			KeyRef key = toStringRef(cursor->key());
+			ValueRef value = toStringRef(cursor->value());
+
+			accumulatedBytes += sizeof(KeyValueRef) + key.expectedSize() + value.expectedSize();
+			result->emplace_back_deep(result->arena(), key, value);
 			// Calling `cursor->Next()` is potentially expensive, so short-circut here just in case.
 			if (result->size() >= rowLimit || accumulatedBytes >= byteLimit) {
 				break;
@@ -1128,9 +1130,11 @@ int readRangeInDb(PhysicalShard* shard,
 			cursor->Prev();
 		}
 		while (cursor->Valid() && toStringRef(cursor->key()) >= range.begin) {
-			KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
-			accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
-			result->push_back_deep(result->arena(), kv);
+			KeyRef key = toStringRef(cursor->key());
+			ValueRef value = toStringRef(cursor->value());
+
+			accumulatedBytes += sizeof(KeyValueRef) + key.expectedSize() + value.expectedSize();
+			result->emplace_back_deep(result->arena(), key, value);
 			// Calling `cursor->Prev()` is potentially expensive, so short-circuit here just in case.
 			if (result->size() >= -rowLimit || accumulatedBytes >= byteLimit) {
 				break;
