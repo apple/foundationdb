@@ -49,6 +49,10 @@ Reference<StorageInfo> getStorageInfo(UID id,
 	return storageInfo;
 }
 
+CDCRoutingTable::CDCRoutingTable() {
+	tagsByRange.insert(allKeys, std::set<Tag>());
+}
+
 void CDCRoutingTable::rebuildRanges() {
 	tagsByRange.insert(allKeys, std::set<Tag>());
 	for (const auto& [streamId, state] : streams) {
@@ -78,10 +82,12 @@ void CDCRoutingTable::setTag(CDCStreamId streamId, Version version, Tag tag) {
 
 void CDCRoutingTable::reload(IKeyValueStore* txnStateStore) {
 	streams.clear();
-	for (const auto& kv : txnStateStore->readRange(cdcStreamKeys).get()) {
+	const RangeResult streamRows = txnStateStore->readRange(cdcStreamKeys).get();
+	for (const auto& kv : streamRows) {
 		setRange(decodeCDCStreamKey(kv.key), decodeCDCStreamKeysValue(kv.value));
 	}
-	for (const auto& kv : txnStateStore->readRange(cdcTagHistoryKeys).get()) {
+	const RangeResult tagHistoryRows = txnStateStore->readRange(cdcTagHistoryKeys).get();
+	for (const auto& kv : tagHistoryRows) {
 		const auto [streamId, version, tag] = decodeCDCTagHistoryKey(kv.key);
 		setTag(streamId, version, tag);
 	}
@@ -1353,6 +1359,9 @@ TEST_CASE("noSim/NativeCDC/RoutingTable") {
 	const Tag ordersTag(tagLocalityCDC, 1);
 	const Tag overlappingTag(tagLocalityCDC, 2);
 	const Tag rotatedOrdersTag(tagLocalityCDC, 3);
+
+	ASSERT(table.tagsForKey("b"_sr).empty());
+	ASSERT(table.tagsForRange(KeyRangeRef("b"_sr, "x"_sr)).empty());
 
 	table.setRange(1, KeyRangeRef("a"_sr, "m"_sr));
 	table.setTag(1, 100, ordersTag);

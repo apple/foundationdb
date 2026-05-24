@@ -69,6 +69,7 @@ class CDCRoutingTable : NonCopyable {
 	void rebuildRanges();
 
 public:
+	CDCRoutingTable();
 	void setRange(CDCStreamId streamId, KeyRangeRef const& keys);
 	void setTag(CDCStreamId streamId, Version version, Tag tag);
 	void reload(IKeyValueStore* txnStateStore);
