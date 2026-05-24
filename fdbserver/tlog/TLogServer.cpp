@@ -2626,7 +2626,7 @@ Future<Void> rejoinClusterController(TLogData* self,
 				    co_await race(brokenPromiseToNever(self->dbInfo->get().clusterInterface.tlogRejoin.getReply(req)),
 				                  self->dbInfo->onChange());
 				if (res.index() == 0) {
-					TLogRejoinReply rep = std::get<0>(std::move(res));
+					TLogRejoinReply rep = std::get<0>(res);
 					if (rep.masterIsRecovered)
 						lastMasterLifetime = self->dbInfo->get().masterLifetime;
 				} else {

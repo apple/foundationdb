@@ -156,7 +156,7 @@ void WriteMap::mutate(KeyRef key, MutationRef::Type operation, ValueRef param, b
 			    writes,
 			    ver,
 			    e.key); // FIXME: Make PTreeImpl::insert do this automatically (see also VersionedMap.h FIXME)
-			PTreeImpl::insert(writes, ver, std::move(e));
+			PTreeImpl::insert(writes, ver, e);
 		}
 	}
 }
@@ -331,7 +331,7 @@ void WriteMap::addConflictRange(KeyRangeRef keys) {
 	}
 
 	for (int i = 0; i < insertions.size(); i++) {
-		PTreeImpl::insert(writes, ver, std::move(insertions[i]));
+		PTreeImpl::insert(writes, ver, insertions[i]);
 	}
 }
 

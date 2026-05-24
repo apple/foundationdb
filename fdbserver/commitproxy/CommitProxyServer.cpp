@@ -1807,7 +1807,7 @@ Future<Void> transactionLogging(CommitBatchContext* self) {
 		auto res = co_await race(self->loggingComplete,
 		                         pProxyCommitData->committedVersion.whenAtLeast(self->commitVersion + 1));
 		if (res.index() == 0) {
-			Version ver = std::get<0>(std::move(res));
+			Version ver = std::get<0>(res);
 			if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 				pProxyCommitData->minKnownCommittedVersion = std::max(pProxyCommitData->minKnownCommittedVersion, ver);
 			}

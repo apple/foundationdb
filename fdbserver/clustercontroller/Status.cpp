@@ -605,7 +605,7 @@ struct RolesInfo {
 				rocksdbMetricsObj.setKeyRawNumber("throttled_commits", rocksdbMetrics.getValue("CommitDelayed"));
 				rocksdbMetricsObj.setKeyRawNumber("write_stall_microseconds", rocksdbMetrics.getValue("StallMicros"));
 
-				obj["rocksdb_metrics"] = std::move(rocksdbMetricsObj);
+				obj["rocksdb_metrics"] = rocksdbMetricsObj;
 			}
 
 		} catch (AttributeNotFoundError& e) {
@@ -3444,7 +3444,7 @@ AsyncResult<StatusReply> clusterGetStatus(
 	    delay(deadlineTimeout));
 
 	if (result.index() == 0) {
-		ErrorOr<Void> statusResult = std::get<0>(std::move(result));
+		ErrorOr<Void> statusResult = std::get<0>(result);
 		if (statusResult.isError()) {
 			status_incomplete_reasons.insert(
 			    fmt::format("Status collection threw: {}", statusResult.getError().what()));

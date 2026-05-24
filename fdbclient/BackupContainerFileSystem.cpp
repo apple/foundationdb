@@ -196,7 +196,7 @@ public:
 		json_spirit::mValue json;
 		JSONDoc doc(json);
 
-		doc.create("files") = std::move(fileArray);
+		doc.create("files") = fileArray;
 		doc.create("totalBytes") = totalBytes;
 		doc.create("beginVersion") = minVer;
 		doc.create("endVersion") = maxVer;
@@ -1026,7 +1026,7 @@ public:
 		std::vector<std::string> toDelete;
 
 		// Move filenames out of vector then destroy it to save memory
-		for (auto const& f : logs) {
+		for (auto& f : logs) {
 			// We may have cleared the last log file earlier so skip any empty filenames
 			if (!f.fileName.empty()) {
 				toDelete.push_back(std::move(f.fileName));
@@ -1035,7 +1035,7 @@ public:
 		logs.clear();
 
 		// Move filenames out of vector then destroy it to save memory
-		for (auto const& f : ranges) {
+		for (auto& f : ranges) {
 			// The file version must be checked here again because it is likely that expireEndVersion is in the middle
 			// of a log file, in which case after the log and range file listings are done (using the original
 			// expireEndVersion) the expireEndVersion will be moved back slightly to the begin version of the last log
@@ -1046,7 +1046,7 @@ public:
 		}
 		ranges.clear();
 
-		for (auto const& f : desc.snapshots) {
+		for (auto& f : desc.snapshots) {
 			if (f.endVersion < expireEndVersion)
 				toDelete.push_back(std::move(f.fileName));
 		}
@@ -1677,8 +1677,8 @@ Future<std::vector<RangeFile>> BackupContainerFileSystem::listRangeFiles(Version
 	});
 
 	return map(success(oldFiles) && success(newFiles), [=](Void _) {
-		std::vector<RangeFile> results = std::move(newFiles.get());
-		std::vector<RangeFile> oldResults = std::move(oldFiles.get());
+		std::vector<RangeFile> results = newFiles.get();
+		std::vector<RangeFile> oldResults = oldFiles.get();
 		results.insert(
 		    results.end(), std::make_move_iterator(oldResults.begin()), std::make_move_iterator(oldResults.end()));
 		return results;
