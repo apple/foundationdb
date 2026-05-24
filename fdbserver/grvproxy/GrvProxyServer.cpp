@@ -27,6 +27,7 @@
 #include "fdbclient/GrvProxyInterface.h"
 #include "fdbclient/VersionVector.h"
 #include "fdbserver/grvproxy/GrvProxyServer.h"
+#include "HealthMetricsRequestServer.h"
 #include "GrvQueueDelay.h"
 #include "GrvTransactionRateInfo.h"
 #include "fdbserver/logsystem/LogSystem.h"
@@ -241,19 +242,6 @@ struct GrvProxyData {
 	}
 };
 
-Future<Void> healthMetricsRequestServer(GrvProxyInterface grvProxy,
-                                        GetHealthMetricsReply* healthMetricsReply,
-                                        GetHealthMetricsReply* detailedHealthMetricsReply) {
-	while (true) {
-		GetHealthMetricsRequest req = co_await grvProxy.getHealthMetrics.getFuture();
-		if (req.detailed) {
-			req.reply.send(*detailedHealthMetricsReply);
-		} else {
-			req.reply.send(*healthMetricsReply);
-		}
-	}
-}
-
 // Older FDB versions used different keys for client profiling data. This
 // function performs a one-time migration of data in these keys to the new
 // global configuration key space.
@@ -387,8 +375,7 @@ Future<Void> getRate(UID myID,
                      GrvTransactionRateInfo* transactionRateInfo,
                      GrvTransactionRateInfo* batchTransactionRateInfo,
                      GrvRateLeaseState* rateLeaseState,
-                     GetHealthMetricsReply* healthMetricsReply,
-                     GetHealthMetricsReply* detailedHealthMetricsReply,
+                     HealthMetricsRequestServer* healthMetricsServer,
                      TransactionTagMap<uint64_t>* transactionTagCounter,
                      PrioritizedTransactionTagMap<ClientTagThrottleLimits>* clientThrottledTags,
                      GrvProxyStats* stats,
@@ -444,9 +431,8 @@ Future<Void> getRate(UID myID,
 			// lastTC = *inTransactionCount;
 			leaseTimeout = delay(rep.leaseDuration);
 			nextRequestTimer = delayJittered(rep.leaseDuration / 2);
-			healthMetricsReply->update(rep.healthMetrics, expectingDetailedReply, true);
+			healthMetricsServer->update(rep.healthMetrics, expectingDetailedReply);
 			if (expectingDetailedReply) {
-				detailedHealthMetricsReply->update(rep.healthMetrics, true, true);
 				lastDetailedReply = now();
 			}
 
@@ -905,8 +891,7 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
                                        Reference<AsyncVar<ServerDBInfo> const> db,
                                        PromiseStream<Future<Void>> addActor,
                                        GrvProxyData* grvProxyData,
-                                       GetHealthMetricsReply* healthMetricsReply,
-                                       GetHealthMetricsReply* detailedHealthMetricsReply) {
+                                       HealthMetricsRequestServer* healthMetricsServer) {
 	double lastGRVTime = 0;
 	PromiseStream<Void> GRVTimer;
 	double GRVBatchTime = SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_MIN;
@@ -943,8 +928,7 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	                      &normalRateInfo,
 	                      &batchRateInfo,
 	                      &rateLeaseState,
-	                      healthMetricsReply,
-	                      detailedHealthMetricsReply,
+	                      healthMetricsServer,
 	                      &transactionTagCounter,
 	                      &clientThrottledTags,
 	                      &grvProxyData->stats,
@@ -1164,8 +1148,7 @@ Future<Void> grvProxyServerCore(GrvProxyInterface proxy,
 	PromiseStream<Future<Void>> addActor;
 	Future<Void> onError = actorCollection(addActor.getFuture());
 
-	GetHealthMetricsReply healthMetricsReply;
-	GetHealthMetricsReply detailedHealthMetricsReply;
+	HealthMetricsRequestServer healthMetricsServer(proxy);
 
 	addActor.send(waitFailureServer(proxy.waitFailure.getFuture()));
 	addActor.send(traceRole(Role::GRV_PROXY, proxy.id()));
@@ -1186,9 +1169,8 @@ Future<Void> grvProxyServerCore(GrvProxyInterface proxy,
 
 	grvProxyData.updateLatencyBandConfig(grvProxyData.db->get().latencyBandConfig);
 
-	addActor.send(transactionStarter(
-	    proxy, grvProxyData.db, addActor, &grvProxyData, &healthMetricsReply, &detailedHealthMetricsReply));
-	addActor.send(healthMetricsRequestServer(proxy, &healthMetricsReply, &detailedHealthMetricsReply));
+	addActor.send(transactionStarter(proxy, grvProxyData.db, addActor, &grvProxyData, &healthMetricsServer));
+	addActor.send(healthMetricsServer.run());
 	addActor.send(globalConfigRequestServer(&grvProxyData, proxy));
 
 	if (SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION > 0) {
