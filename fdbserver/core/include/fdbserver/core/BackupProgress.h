@@ -38,7 +38,7 @@ public:
 	// savedVersion is used.
 	void addBackupStatus(const WorkerBackupStatus& status);
 
-	// Returns a map of tuple<Epoch, endVersion, logRouterTags> : std::map<tag, savedVersion>, so that
+	// Returns a map of tuple<Epoch, endVersion, tags> : std::map<tag, savedVersion>, so that
 	// the backup range should be [savedVersion + 1, endVersion) for the "tag" of the "Epoch".
 	//
 	// Specifically, the backup ranges for each old epoch are:
@@ -46,7 +46,8 @@ public:
 	//        backup [epochBegin, endVersion)
 	//    else if savedVersion < endVersion - 1 = knownCommittedVersion
 	//        backup [savedVersion + 1, endVersion)
-	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> getUnfinishedBackup();
+	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> getUnfinishedPartitionedBackup();
+	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> getUnfinishedRangePartitionedBackup();
 
 	// Set the value for "backupStartedKey"
 	void setBackupStartedValue(Optional<Value> value) { backupStartedValue = value; }
@@ -64,10 +65,12 @@ public:
 	void delref() { ReferenceCounted<BackupProgress>::delref(); }
 
 private:
-	std::set<Tag> enumerateLogRouterTags(int logRouterTags) const {
+	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> getUnfinishedBackup(int8_t locality);
+
+	std::set<Tag> enumerateTags(int8_t locality, int count) const {
 		std::set<Tag> tags;
-		for (int i = 0; i < logRouterTags; i++) {
-			tags.insert(Tag(tagLocalityLogRouter, i));
+		for (int i = 0; i < count; i++) {
+			tags.insert(Tag(locality, i));
 		}
 		return tags;
 	}

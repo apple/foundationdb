@@ -651,7 +651,7 @@ static Future<Void> recruitBackupWorkers(Reference<ClusterRecoveryData> self, Da
 
 	LogEpoch epoch = self->cstate.myDBState.recoveryCount;
 	Reference<BackupProgress> backupProgress(
-	    new BackupProgress(self->dbgid, self->logSystem->getOldEpochTagsVersionsInfo()));
+	    new BackupProgress(self->dbgid, self->logSystem->getOldEpochLRTagsVersionsInfo()));
 	Future<Void> gotProgress = getBackupProgress(cx, self->dbgid, backupProgress, SevInfo);
 	std::vector<Future<InitializeBackupReply>> initializationReplies;
 
@@ -669,12 +669,12 @@ static Future<Void> recruitBackupWorkers(Reference<ClusterRecoveryData> self, Da
 		InitializeBackupRequest req(idsTags[i].first);
 		req.recruitedEpoch = epoch;
 		req.backupEpoch = epoch;
-		req.routerTag = idsTags[i].second;
+		req.tag = idsTags[i].second;
 		req.totalTags = logRouterTags;
 		req.startVersion = startVersion;
 		TraceEvent("BackupRecruitment", self->dbgid)
 		    .detail("RequestID", req.reqId)
-		    .detail("Tag", req.routerTag.toString())
+		    .detail("Tag", req.tag.toString())
 		    .detail("Epoch", epoch)
 		    .detail("BackupEpoch", epoch)
 		    .detail("StartVersion", req.startVersion);
@@ -690,7 +690,7 @@ static Future<Void> recruitBackupWorkers(Reference<ClusterRecoveryData> self, Da
 	TraceEvent("MinBackupVersion", self->dbgid).detail("Version", minVersion.present() ? minVersion.get() : -1);
 
 	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> toRecruit =
-	    backupProgress->getUnfinishedBackup();
+	    backupProgress->getUnfinishedPartitionedBackup();
 	for (const auto& [epochVersionTags, tagVersions] : toRecruit) {
 		const Version oldEpochEnd = std::get<1>(epochVersionTags);
 		if (!minVersion.present() || minVersion.get() + 1 >= oldEpochEnd) {
@@ -707,13 +707,13 @@ static Future<Void> recruitBackupWorkers(Reference<ClusterRecoveryData> self, Da
 			InitializeBackupRequest req(deterministicRandom()->randomUniqueID());
 			req.recruitedEpoch = epoch;
 			req.backupEpoch = std::get<0>(epochVersionTags);
-			req.routerTag = tag;
+			req.tag = tag;
 			req.totalTags = std::get<2>(epochVersionTags);
 			req.startVersion = version; // savedVersion + 1
 			req.endVersion = std::get<1>(epochVersionTags) - 1;
 			TraceEvent("BackupRecruitment", self->dbgid)
 			    .detail("RequestID", req.reqId)
-			    .detail("Tag", req.routerTag.toString())
+			    .detail("Tag", req.tag.toString())
 			    .detail("Epoch", epoch)
 			    .detail("BackupEpoch", req.backupEpoch)
 			    .detail("StartVersion", req.startVersion)
@@ -1609,7 +1609,7 @@ Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 			logChanges = triggerUpdates(self, oldLogSystem);
 			if (!minRecoveryDuration.isValid()) {
 				minRecoveryDuration = delay(SERVER_KNOBS->ENFORCED_MIN_RECOVERY_DURATION);
-				poppedTxsVersion = oldLogSystem->getTxsPoppedVersion();
+				poppedTxsVersion = oldLogSystem->makeConsumer()->getTxsPoppedVersion();
 			}
 		}
 

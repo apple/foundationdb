@@ -14,6 +14,7 @@ Checks: >
   readability-container-size-empty,
   readability-delete-null-pointer,
   readability-duplicate-include,
+  readability-simplify-boolean-expr,
   readability-inconsistent-ifelse-braces
 CheckOptions:
   - key: modernize-use-auto.MinTypeNameLength

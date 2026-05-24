@@ -24,11 +24,13 @@
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tracing.h"
-#include "BackupPartitionMap.h"
+#include "fdbserver/core/BackupPartitionMap.h"
 #include "fdbserver/core/BackupProgress.h"
 #include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/PartitionMapMessage.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/logsystem/LogSystem.h"
+#include "fdbserver/logsystem/LogSystemConsumer.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "flow/CoroUtils.h"
 
@@ -79,7 +81,7 @@ struct BackupRangePartitionedData {
 	Version savedVersion; // Largest version saved to blob storage
 	NotifiedVersion pulledVersion;
 	Version logFolderBaseVersion;
-	AsyncVar<Reference<LogSystem>> logSystem;
+	AsyncVar<Reference<LogSystemConsumer>> logSystem;
 	AsyncVar<bool> paused; // Track if "backupPausedKey" is set.
 	Reference<FlowLock> lock;
 	AsyncTrigger doneTrigger;
@@ -132,10 +134,9 @@ struct BackupRangePartitionedData {
 	explicit BackupRangePartitionedData(UID id,
 	                                    Reference<AsyncVar<ServerDBInfo> const> db,
 	                                    const InitializeBackupRequest& req)
-	  : myId(id), tag(req.routerTag), totalTags(req.totalTags), startVersion(req.startVersion),
-	    endVersion(req.endVersion), recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch),
-	    minKnownCommittedVersion(invalidVersion), savedVersion(req.startVersion - 1), pulledVersion(0),
-	    logFolderBaseVersion(invalidVersion), paused(false),
+	  : myId(id), tag(req.tag), totalTags(req.totalTags), startVersion(req.startVersion), endVersion(req.endVersion),
+	    recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch), minKnownCommittedVersion(invalidVersion),
+	    savedVersion(req.startVersion - 1), pulledVersion(0), logFolderBaseVersion(invalidVersion), paused(false),
 	    lock(new FlowLock(SERVER_KNOBS->BACKUP_WORKER_LOCK_BYTES)) {
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
@@ -368,25 +369,12 @@ Future<Version> pullPartitionMapFromTLog(BackupRangePartitionedData* self, Parti
 				cursor->nextMessage();
 				continue;
 			}
-			// TODO akanksha: Uncomment once PartitionMapMessage is implemented.
-			// bool isPartitionMap = PartitionMapMessage::isNextIn(reader);
-			bool isPartitionMap = true;
-			if (!isPartitionMap) {
-				TraceEvent(SevError, "BWRangeParitionedPartitionMapNotReceived", self->myId)
-				    .detail("Version", msgVersion)
-				    .detail("Tag", self->tag.toString())
-				    .detail("MessageSize", message.size());
-				throw worker_removed();
-			}
+			bool isPartitionMap = PartitionMapMessage::isNextIn(reader);
+			ASSERT(isPartitionMap);
 
-			// TODO akanksha: 1. std::unordered_map is not supported by ArenaReader right now, need to implement custom
-			// deserialization logic for it. Or we can switch to std::map which is supported by ArenaReader.
-			// 2. Uncomment and update the code once the deserialization logic is implemented.
-			/*
 			PartitionMapMessage pmMsg;
 			reader >> pmMsg;
-			*outPartitionMap  = pmMsg.partitionMap;
-			*/
+			*outPartitionMap = std::move(pmMsg.partitionMap);
 			partitionMapVersion = msgVersion;
 			co_return partitionMapVersion;
 		}
@@ -423,6 +411,7 @@ Future<Void> uploadPartitionList(BackupRangePartitionedData* self, PartitionMap 
 // 2. For older epochs with different containers is PartitionMap specific to container or same for all.
 // Right now assumption is that PartitionMap will be passed by TLOG with the first message after start version for both
 // older epochs and newer epochs.
+// 3. Provide implemention for recovery where paritionmap can come any time and won't be the first message.
 Future<Void> waitAndProcessPartitionMap(BackupRangePartitionedData* self) {
 	TraceEvent("BWRangeParitionedWaitingForPartitionMap", self->myId)
 	    .detail("Tag", self->tag.toString())
@@ -1069,7 +1058,7 @@ Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
 	Error err;
 
 	TraceEvent("BWRangePartitionedStart", self.myId)
-	    .detail("Tag", req.routerTag.toString())
+	    .detail("Tag", req.tag.toString())
 	    .detail("TotalTags", req.totalTags)
 	    .detail("StartVersion", req.startVersion)
 	    .detail("EndVersion", req.endVersion.present() ? req.endVersion.get() : -1)
@@ -1080,7 +1069,7 @@ Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
 		addActor.send(checkRemoved(db, req.recruitedEpoch, &self));
 		addActor.send(waitFailureServer(interf.waitFailure.getFuture()));
 
-		if (req.recruitedEpoch == req.backupEpoch && req.routerTag.id == 0) {
+		if (req.recruitedEpoch == req.backupEpoch && req.tag.id == 0) {
 			addActor.send(monitorBackupRangePartitionedProgress(&self));
 		}
 
@@ -1108,7 +1097,7 @@ Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
 				Reference<LogSystem> ls = makeLogSystemFromServerDBInfo(self.myId, db->get(), true);
 
 				if (ls.isValid()) {
-					self.logSystem.set(ls);
+					self.logSystem.set(ls->makeConsumer());
 					self.oldestBackupEpoch = std::max(self.oldestBackupEpoch, ls->getOldestBackupEpoch());
 					TraceEvent("BWRangePartitionedLogSystemUpdate", self.myId)
 					    .detail("Tag", self.tag.toString())
@@ -1146,3 +1135,87 @@ Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
 		throw err;
 	}
 }
+
+namespace {
+PartitionMap makeSamplePartitionMap() {
+	PartitionMap pm;
+	pm[Tag(tagLocalityRangeBackup, 0)] = {
+		Partition(0, KeyRangeRef("a"_sr, "c"_sr)),
+		Partition(1, KeyRangeRef("c"_sr, "f"_sr)),
+	};
+	pm[Tag(tagLocalityRangeBackup, 1)] = {
+		Partition(2, KeyRangeRef("f"_sr, "m"_sr)),
+		Partition(3, KeyRangeRef("m"_sr, "z"_sr)),
+	};
+	return pm;
+}
+
+void assertPartitionMapsEqual(PartitionMap const& a, PartitionMap const& b) {
+	ASSERT_EQ(a.size(), b.size());
+	for (auto const& [tag, list] : a) {
+		auto it = b.find(tag);
+		ASSERT(it != b.end());
+		ASSERT_EQ(list.size(), it->second.size());
+		for (size_t i = 0; i < list.size(); ++i) {
+			ASSERT_EQ(list[i].partitionId, it->second[i].partitionId);
+			ASSERT(list[i].ranges == it->second[i].ranges);
+		}
+	}
+}
+} // namespace
+
+TEST_CASE("/BackupWorkerRangePartitioned/PartitionMapMessage/RoundTrip") {
+	PartitionMap original = makeSamplePartitionMap();
+	PartitionMapMessage outgoing(original);
+
+	BinaryWriter wr(AssumeVersion(g_network->protocolVersion()));
+	wr << outgoing;
+	Standalone<StringRef> bytes = wr.toValue();
+
+	ArenaReader reader(bytes.arena(), bytes, AssumeVersion(g_network->protocolVersion()));
+	ASSERT(PartitionMapMessage::isNextIn(reader));
+
+	PartitionMapMessage incoming;
+	reader >> incoming;
+	assertPartitionMapsEqual(original, incoming.partitionMap);
+	return Void();
+}
+
+TEST_CASE("/BackupWorkerRangePartitioned/PartitionMapMessage/RoundTripEmpty") {
+	PartitionMapMessage outgoing(PartitionMap{});
+
+	BinaryWriter wr(AssumeVersion(g_network->protocolVersion()));
+	wr << outgoing;
+	Standalone<StringRef> bytes = wr.toValue();
+
+	ArenaReader reader(bytes.arena(), bytes, AssumeVersion(g_network->protocolVersion()));
+	ASSERT(PartitionMapMessage::isNextIn(reader));
+
+	PartitionMapMessage incoming;
+	reader >> incoming;
+	ASSERT(incoming.partitionMap.empty());
+	return Void();
+}
+
+TEST_CASE("/BackupWorkerRangePartitioned/PartitionMapMessage/IsNextInLeadingByte") {
+	BinaryWriter wr(AssumeVersion(g_network->protocolVersion()));
+	PartitionMapMessage outgoing(makeSamplePartitionMap());
+	wr << outgoing;
+	Standalone<StringRef> bytes = wr.toValue();
+	ASSERT(bytes.size() >= 1);
+	ASSERT(PartitionMapMessage::startsPartitionMapMessage(bytes[0]));
+
+	ArenaReader pmmReader(bytes.arena(), bytes, AssumeVersion(g_network->protocolVersion()));
+	ASSERT(PartitionMapMessage::isNextIn(pmmReader));
+
+	uint8_t notPmm = MutationRef::SetValue;
+	StringRef otherBytes(&notPmm, 1);
+	Arena arena;
+	ArenaReader otherReader(arena, otherBytes, AssumeVersion(g_network->protocolVersion()));
+	ASSERT(!PartitionMapMessage::isNextIn(otherReader));
+	return Void();
+}
+
+// TODO akanksha: Remove once a production caller of backupWorkerRangePartitioned() is wired up;
+// this only exists to keep TEST_CASEs in this file from being dead-stripped from the static lib.
+void forceLinkBackupWorkerRangePartitionedTests() {}

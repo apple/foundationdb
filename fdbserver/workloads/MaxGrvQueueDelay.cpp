@@ -120,29 +120,48 @@ struct MaxGrvQueueDelayWorkload : TestWorkload {
 	}
 
 	Future<Void> verifyBaseline(Database cx) {
-		ErrorOr<Version> withoutOption = co_await errorOr(getReadVersion(cx, Optional<int64_t>()));
-		if (withoutOption.isError()) {
-			failed = true;
-			++unexpectedErrors;
-			TraceEvent(SevError, "MaxGrvQueueDelayBaselineFailed")
-			    .error(withoutOption.getError())
-			    .detail("HasOption", false);
-			co_return;
-		}
-		++successes;
+		// Retry baseline for transient GRV queue backlog after recovery.
+		// Keep backoff short (1s) to avoid consuming the 30s testTimeout budget.
+		static constexpr int maxBaselineAttempts = 5;
+		static constexpr double baselineRetryDelay = 1.0;
 
-		ErrorOr<Version> permissive =
-		    co_await errorOr(getReadVersion(cx, Optional<int64_t>(permissiveMaxQueueDelayMS)));
-		if (permissive.isError()) {
-			failed = true;
-			++unexpectedErrors;
-			TraceEvent(SevError, "MaxGrvQueueDelayBaselineFailed")
-			    .error(permissive.getError())
-			    .detail("HasOption", true)
-			    .detail("MaxQueueDelayMS", permissiveMaxQueueDelayMS);
-			co_return;
+		for (int attempt = 0; attempt < maxBaselineAttempts; ++attempt) {
+			if (attempt > 0) {
+				co_await delay(baselineRetryDelay);
+			}
+			bool lastAttempt = (attempt == maxBaselineAttempts - 1);
+
+			ErrorOr<Version> withoutOption = co_await errorOr(getReadVersion(cx, Optional<int64_t>()));
+			if (withoutOption.isError()) {
+				if (!lastAttempt && withoutOption.getError().code() == error_code_transaction_grv_queue_rejected) {
+					continue;
+				}
+				failed = true;
+				++unexpectedErrors;
+				TraceEvent(SevError, "MaxGrvQueueDelayBaselineFailed")
+				    .error(withoutOption.getError())
+				    .detail("HasOption", false);
+				co_return;
+			}
+			++successes;
+
+			ErrorOr<Version> permissive =
+			    co_await errorOr(getReadVersion(cx, Optional<int64_t>(permissiveMaxQueueDelayMS)));
+			if (permissive.isError()) {
+				if (!lastAttempt && permissive.getError().code() == error_code_transaction_grv_queue_rejected) {
+					continue;
+				}
+				failed = true;
+				++unexpectedErrors;
+				TraceEvent(SevError, "MaxGrvQueueDelayBaselineFailed")
+				    .error(permissive.getError())
+				    .detail("HasOption", true)
+				    .detail("MaxQueueDelayMS", permissiveMaxQueueDelayMS);
+				co_return;
+			}
+			++successes;
+			co_return; // baseline passed
 		}
-		++successes;
 	}
 
 	Future<Void> run(Database cx) {

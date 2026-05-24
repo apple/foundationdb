@@ -126,6 +126,7 @@ public:
 	int TLOG_POP_BATCH_SIZE;
 	bool ENABLE_TLOG_TEMP_TAG_MESSAGES_RESERVE;
 	double BLOCKING_PEEK_TIMEOUT;
+	double PEEK_REPLY_TIMEOUT; // Sender-side timeout for non-parallel peek; 0 disables (old wait-forever behavior)
 	bool PEEK_BATCHING_EMPTY_MSG;
 	double PEEK_BATCHING_EMPTY_MSG_INTERVAL;
 	double POP_FROM_LOG_DELAY;
@@ -1063,6 +1064,9 @@ public:
 	// Rolling window duration over which the average bytes moved by DD is calculated for the 'MovingData' trace event.
 	double DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL;
 	int64_t MOVING_WINDOW_SAMPLE_SIZE;
+	// Probability of running the consistency check between teams and teamsByServerIDs
+	// in getTeamByServers (simulation only).
+	double DD_TEAMS_BY_SERVER_IDS_CONSISTENCY_CHECK_PROB_SIM;
 
 	// Storage Server
 	double STORAGE_LOGGING_DELAY;

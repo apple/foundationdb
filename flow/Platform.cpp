@@ -4270,7 +4270,7 @@ int testPathFunction2(const char* name,
                       bool mustExist,
                       ErrorOr<std::string> b) {
 	// Skip tests with resolveLinks set to false as the implementation is not complete
-	if (resolveLinks == false) {
+	if (!resolveLinks) {
 		printf("SKIPPED: %s('%s', %d, %d)\n", name, a.c_str(), resolveLinks, mustExist);
 		return 0;
 	}

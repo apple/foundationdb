@@ -8,6 +8,9 @@ on:
       - 'boost-*'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   test-windows-boost:
     name: Test Boost CONFIG Mode on Windows

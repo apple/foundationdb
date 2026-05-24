@@ -117,9 +117,7 @@ function start_fdb_cluster {
   local port_prefix=1500
   while : ; do
     port_prefix="$(( port_prefix + 100 ))"
-    # Disable exit on error temporarily so can capture result from run cluster.
-    # Then redirect the output of the run_customer_cluster.sh via tee via
-    # 'process substitution'; piping to tee hangs on success.
+    # Disable exit on error temporarily so we can capture the exit status.
     set +o errexit  # a.k.a. set +e
     set +o noclobber
     # In the below $knobs will pick up single quotes -- its what bash does when it
@@ -135,8 +133,7 @@ function start_fdb_cluster {
       --stateless_count 1 --replication_count 1 --logs_count 1 \
       --storage_count "${ss_count}" --storage_type ssd-rocksdb-v1 \
       --dump_pids on \
-      > >(tee "${output}") \
-      2> >(tee "${output}" >&2)
+      > "${output}" 2> "${output}.stderr"
     status="$?"
     # Restore exit on error.
     set -o errexit  # a.k.a. set -e
@@ -171,13 +168,14 @@ function start_fdb_cluster {
       fi
       break;
     fi
-    # Otherwise, look for 'Local address in use' and if found retry with different ports.
-    # Use grep -a to treat binary files as text
-    if grep -a 'Local address in use' "${output}"; then
-      log "Ports in use; retry cluster start but with different ports"
+    # Check stderr for port-in-use error. Only retry on port collision;
+    # fail on anything else.
+    if grep -a 'Local address in use' "${output}.stderr"; then
+      log "Port ${port_prefix} in use, retrying with next port"
       continue
     fi
-    err "Failed to start fdb cluster"
+    err "Failed to start fdb cluster (stderr follows):"
+    cat "${output}.stderr" >&2
     return 1
   done
 }

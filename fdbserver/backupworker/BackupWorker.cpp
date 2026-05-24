@@ -28,6 +28,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/LogProtocolMessage.h"
 #include "fdbserver/logsystem/LogSystem.h"
+#include "fdbserver/logsystem/LogSystemConsumer.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/WaitFailure.h"
@@ -114,7 +115,7 @@ struct BackupData {
 	Version minKnownCommittedVersion;
 	Version savedVersion; // Largest version saved to blob storage
 	Reference<AsyncVar<ServerDBInfo> const> db;
-	AsyncVar<Reference<LogSystem>> logSystem;
+	AsyncVar<Reference<LogSystemConsumer>> logSystem;
 	Database cx;
 	std::vector<VersionedMessage> messages;
 	NotifiedVersion pulledVersion;
@@ -265,10 +266,10 @@ struct BackupData {
 	Future<Void> logger;
 
 	explicit BackupData(UID id, Reference<AsyncVar<ServerDBInfo> const> db, const InitializeBackupRequest& req)
-	  : myId(id), tag(req.routerTag), totalTags(req.totalTags), startVersion(req.startVersion),
-	    endVersion(req.endVersion), recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch),
-	    minKnownCommittedVersion(invalidVersion), savedVersion(req.startVersion - 1), db(db), pulledVersion(0),
-	    paused(false), lock(new FlowLock(SERVER_KNOBS->BACKUP_WORKER_LOCK_BYTES)), cc("BackupWorker", myId.toString()) {
+	  : myId(id), tag(req.tag), totalTags(req.totalTags), startVersion(req.startVersion), endVersion(req.endVersion),
+	    recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch), minKnownCommittedVersion(invalidVersion),
+	    savedVersion(req.startVersion - 1), db(db), pulledVersion(0), paused(false),
+	    lock(new FlowLock(SERVER_KNOBS->BACKUP_WORKER_LOCK_BYTES)), cc("BackupWorker", myId.toString()) {
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True);
 
 		specialCounter(cc, "SavedVersion", [this]() { return this->savedVersion; });
@@ -1053,7 +1054,7 @@ Future<Void> backupWorker(BackupInterface interf,
 	Error err;
 
 	TraceEvent("BackupWorkerStart", self.myId)
-	    .detail("Tag", req.routerTag.toString())
+	    .detail("Tag", req.tag.toString())
 	    .detail("TotalTags", req.totalTags)
 	    .detail("StartVersion", req.startVersion)
 	    .detail("EndVersion", req.endVersion.present() ? req.endVersion.get() : -1)
@@ -1062,7 +1063,7 @@ Future<Void> backupWorker(BackupInterface interf,
 	try {
 		addActor.send(checkRemoved(db, req.recruitedEpoch, &self));
 		addActor.send(waitFailureServer(interf.waitFailure.getFuture()));
-		if (req.recruitedEpoch == req.backupEpoch && req.routerTag.id == 0) {
+		if (req.recruitedEpoch == req.backupEpoch && req.tag.id == 0) {
 			addActor.send(monitorBackupProgress(&self));
 		}
 		addActor.send(monitorWorkerPause(&self));
@@ -1085,7 +1086,7 @@ Future<Void> backupWorker(BackupInterface interf,
 				Reference<LogSystem> ls = makeLogSystemFromServerDBInfo(self.myId, db->get(), true);
 				bool hasPseudoLocality = ls.isValid() && ls->hasPseudoLocality(tagLocalityBackup);
 				if (hasPseudoLocality) {
-					self.logSystem.set(ls);
+					self.logSystem.set(ls->makeConsumer());
 					self.oldestBackupEpoch = std::max(self.oldestBackupEpoch, ls->getOldestBackupEpoch());
 				}
 				TraceEvent("BackupWorkerLogSystem", self.myId)

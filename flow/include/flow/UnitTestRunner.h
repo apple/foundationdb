@@ -1,5 +1,5 @@
 /*
- * BackupProgressTypes.h
+ * UnitTestRunner.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,13 +18,25 @@
  * limitations under the License.
  */
 
+#ifndef FLOW_UNIT_TEST_RUNNER_H
+#define FLOW_UNIT_TEST_RUNNER_H
 #pragma once
 
-#include "fdbclient/FDBTypes.h"
+#include <string>
+#include <string_view>
 
-struct EpochTagsVersionsInfo {
-	int32_t tags;
-	Version epochBegin, epochEnd;
+class UnitTestRunnerConfig {
+public:
+	explicit UnitTestRunnerConfig(std::string_view sourceSubDir);
 
-	explicit EpochTagsVersionsInfo(int32_t n, Version begin, Version end) : tags(n), epochBegin(begin), epochEnd(end) {}
+	std::string_view suiteName() const;
+	std::string dataDir() const;
+	std::string traceName() const;
+
+private:
+	std::string_view sourceSubDir;
 };
+
+int runUnitTests(int argc, char** argv, const UnitTestRunnerConfig& config);
+
+#endif

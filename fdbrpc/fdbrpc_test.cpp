@@ -1,5 +1,5 @@
 /*
- * BackupProgressTypes.h
+ * fdbrpc_test.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,13 +18,8 @@
  * limitations under the License.
  */
 
-#pragma once
+#include "flow/UnitTestRunner.h"
 
-#include "fdbclient/FDBTypes.h"
-
-struct EpochTagsVersionsInfo {
-	int32_t tags;
-	Version epochBegin, epochEnd;
-
-	explicit EpochTagsVersionsInfo(int32_t n, Version begin, Version end) : tags(n), epochBegin(begin), epochEnd(end) {}
-};
+int main(int argc, char** argv) {
+	return runUnitTests(argc, argv, UnitTestRunnerConfig("fdbrpc"));
+}
