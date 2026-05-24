@@ -1,0 +1,23 @@
+"component/server":
+  - "fdbserver/**/*"
+
+"component/client":
+  - "fdbclient/**/*"
+
+"component/flow":
+  - "flow/**/*"
+
+"component/rpc":
+  - "fdbrpc/**/*"
+
+"component/test":
+  - "tests/**/*"
+  - "fdbserver/workloads/**/*"
+  - "bindings/c/test/**/*"
+
+"component/bindings":
+  - "bindings/**/*"
+
+"component/documentation":
+  - "documentation/**/*"
+  - "**/*.md"

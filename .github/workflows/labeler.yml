@@ -1,0 +1,112 @@
+name: PR Label Analysis
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze PR for labeling
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Save PR metadata
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          mkdir -p ./pr-metadata
+          echo "${PR_NUMBER}" > ./pr-metadata/pr-number.txt
+      
+      - name: Upload PR metadata as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-metadata-${{ github.event.pull_request.number }}
+          path: pr-metadata/
+          retention-days: 1
+
+---
+
+name: PR Label Apply
+
+on:
+  workflow_run:
+    workflows: ["PR Label Analysis"]
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+jobs:
+  apply-labels:
+    name: Apply labels to PR
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    permissions:
+      contents: read
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download PR metadata artifact
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+          pattern: pr-metadata-*
+          merge-multiple: true
+      
+      - name: Read PR number
+        id: pr-number
+        run: |
+          PR_NUMBER=$(cat "pr-number.txt")
+          echo "number=${PR_NUMBER}" >> $GITHUB_OUTPUT
+          echo "PR Number: ${PR_NUMBER}"
+      
+      - name: Apply Path-Based Labels
+        uses: actions/labeler@v5
+        with:
+          pr-number: ${{ steps.pr-number.outputs.number }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          configuration-path: .github/labeler.yml
+          sync-labels: true
+
+      - name: Calculate and Apply Size Label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.pr-number.outputs.number }}
+        run: |
+          PR_DATA=$(curl -s -H "Authorization: token $GH_TOKEN" \
+            https://api.github.com/repos/${{ github.repository }}/pulls/$PR_NUMBER)
+          
+          ADDITIONS=$(echo "$PR_DATA" | jq '.additions')
+          DELETIONS=$(echo "$PR_DATA" | jq '.deletions')
+          TOTAL=$((ADDITIONS + DELETIONS))
+          
+          if [ $TOTAL -lt 10 ]; then
+            SIZE_LABEL="size/XS"
+          elif [ $TOTAL -lt 50 ]; then
+            SIZE_LABEL="size/S"
+          elif [ $TOTAL -lt 200 ]; then
+            SIZE_LABEL="size/M"
+          elif [ $TOTAL -lt 500 ]; then
+            SIZE_LABEL="size/L"
+          else
+            SIZE_LABEL="size/XL"
+          fi
+          
+          CURRENT_LABELS=$(echo "$PR_DATA" | jq -r '.labels[].name')
+          
+          for label in $CURRENT_LABELS; do
+            if [[ "$label" =~ ^size/ ]] && [ "$label" != "$SIZE_LABEL" ]; then
+              gh pr edit $PR_NUMBER --remove-label "$label" || true
+            fi
+          done
+          
+          if ! echo "$CURRENT_LABELS" | grep -q "^$SIZE_LABEL$"; then
+            gh pr edit $PR_NUMBER --add-label "$SIZE_LABEL"
+          fi

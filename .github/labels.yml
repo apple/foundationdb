@@ -1,0 +1,47 @@
+- name: "size/XS"
+  color: "3cbf46"
+  description: "XS Pull Request (<10 lines change)"
+
+- name: "size/S"
+  color: "5cd667"
+  description: "S Pull Request (10-49 lines change)"
+
+- name: "size/M"
+  color: "ffc107"
+  description: "M Pull Request (50-199 lines change)"
+
+- name: "size/L"
+  color: "fd7e14"
+  description: "L Pull Request (200-499 lines change)"
+
+- name: "size/XL"
+  color: "dc3545"
+  description: "XL Pull Request (>=500 lines change)"
+
+- name: "component/server"
+  color: "007bff"
+  description: "Server-side modifications (fdbserver)"
+
+- name: "component/client"
+  color: "17a2b8"
+  description: "Client-side modifications (fdbclient)"
+
+- name: "component/flow"
+  color: "6f42c1"
+  description: "Flow asynchronous framework changes"
+
+- name: "component/rpc"
+  color: "e83e8c"
+  description: "RPC / network protocol changes"
+
+- name: "component/test"
+  color: "20c997"
+  description: "Tests and simulation workload changes"
+
+- name: "component/bindings"
+  color: "6610f2"
+  description: "Language binding changes"
+
+- name: "component/documentation"
+  color: "6c757d"
+  description: "Documentation changes"
