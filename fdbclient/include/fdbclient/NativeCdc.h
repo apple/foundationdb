@@ -38,5 +38,8 @@ struct NativeCdcStreamInfo {
 Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys);
 Future<Void> removeNativeCdcStream(Database cx, Key name);
 Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams(Database cx);
+// Persists the exclusive unpopped watermark after consuming through a version.
+// Removed streams remain acknowledgeable while retained CDC log data is drained.
+Future<Version> acknowledgeNativeCdcStream(Database cx, CDCStreamId streamId, Version consumedThrough);
 
 #endif // FDBCLIENT_NATIVECDC_H

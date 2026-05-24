@@ -66,6 +66,22 @@ struct NativeCdcWorkload : TestWorkload {
 		}
 	}
 
+	Future<Version> getPersistedMinVersion(Database cx, CDCStreamId streamId) {
+		Transaction tr(cx);
+		while (true) {
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				Optional<Value> minVersion = co_await tr.get(cdcMinVersionKeyFor(streamId));
+				ASSERT(minVersion.present());
+				co_return decodeCDCMinVersionValue(minVersion.get());
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
+	}
+
 	Future<Void> run(Database cx) {
 		const Key firstName = "native-cdc-first"_sr;
 		const Key secondName = "native-cdc-second"_sr;
@@ -98,8 +114,20 @@ struct NativeCdcWorkload : TestWorkload {
 		ASSERT(streams[0].keys == firstRange);
 		ASSERT(streams[0].minVersion == firstRoute.second);
 
+		const Version firstConsumedThrough = firstRoute.second + 5;
+		const Version firstAckMinVersion = firstConsumedThrough + 1;
+		ASSERT(co_await acknowledgeNativeCdcStream(cx, firstId, firstConsumedThrough) == firstAckMinVersion);
+		ASSERT(co_await acknowledgeNativeCdcStream(cx, firstId, firstRoute.second) == firstAckMinVersion);
+		streams = co_await listNativeCdcStreams(cx);
+		ASSERT(streams.size() == 1);
+		ASSERT(streams[0].minVersion == firstAckMinVersion);
+
 		co_await removeNativeCdcStream(cx, firstName);
 		ASSERT((co_await listNativeCdcStreams(cx)).empty());
+		const Version retiredConsumedThrough = firstConsumedThrough + 5;
+		const Version retiredAckMinVersion = retiredConsumedThrough + 1;
+		ASSERT(co_await acknowledgeNativeCdcStream(cx, firstId, retiredConsumedThrough) == retiredAckMinVersion);
+		ASSERT(co_await getPersistedMinVersion(cx, firstId) == retiredAckMinVersion);
 
 		const CDCStreamId secondId = co_await registerNativeCdcStream(cx, secondName, secondRange);
 		const auto secondRoute = co_await getPersistedRoute(cx, secondId);

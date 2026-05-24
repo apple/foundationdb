@@ -208,6 +208,39 @@ Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams(Database cx) {
 	co_return result;
 }
 
+Future<Version> acknowledgeNativeCdcStream(Database cx, CDCStreamId streamId, Version consumedThrough) {
+	if (streamId == 0 || consumedThrough < 0 || consumedThrough == std::numeric_limits<Version>::max()) {
+		throw client_invalid_operation();
+	}
+	const Version minUnpoppedVersion = consumedThrough + 1;
+
+	Transaction tr(cx);
+	while (true) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+			Optional<Value> minVersionValue = co_await tr.get(cdcMinVersionKeyFor(streamId));
+			if (!minVersionValue.present()) {
+				throw client_invalid_operation();
+			}
+
+			const Version minVersion = decodeCDCMinVersionValue(minVersionValue.get());
+			if (minUnpoppedVersion <= minVersion) {
+				co_return minVersion;
+			}
+
+			tr.set(cdcMinVersionKeyFor(streamId), cdcMinVersionValue(minUnpoppedVersion));
+			co_await tr.commit();
+			co_return minUnpoppedVersion;
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr.onError(err);
+	}
+}
+
 TEST_CASE("noSim/NativeCDC/LifecycleAllocation") {
 	NativeCdcIdentifierAllocator allocator;
 	auto [initialId, initialTag] = allocator.allocate();
