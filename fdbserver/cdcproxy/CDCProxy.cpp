@@ -161,10 +161,12 @@ Future<Void> consume(CDCProxyData* self, CDCConsumeRequest request) {
 
 		Reference<IReplayPeekCursor> cursor =
 		    self->logSystem->peekSingle(self->id, begin, state.currentTag, state.tagHistory);
-		co_await cursor->getMore(TaskPriority::TLogPeekReply);
-		cursor->setProtocolVersion(g_network->protocolVersion());
-		if (cursor->popped() > begin) {
-			throw transaction_too_old();
+		while (!cursor->hasMessage()) {
+			co_await cursor->getMore(TaskPriority::TLogPeekReply);
+			cursor->setProtocolVersion(g_network->protocolVersion());
+			if (cursor->popped() > begin) {
+				throw transaction_too_old();
+			}
 		}
 
 		CDCConsumeReply reply;
@@ -316,7 +318,9 @@ Future<Void> cdcProxyServer(CDCProxyInterface proxy,
 					throw worker_removed();
 				}
 				hasBeenPublished = hasBeenPublished || isPublished;
-				self.logSystem = makeLogSystemConsumerFromServerDBInfo(self.id, dbInfo->get());
+				if (!dbInfo->get().logSystemConfig.tLogs.empty()) {
+					self.logSystem = makeLogSystemConsumerFromServerDBInfo(self.id, dbInfo->get());
+				}
 				dbInfoChange = dbInfo->onChange();
 				break;
 			}

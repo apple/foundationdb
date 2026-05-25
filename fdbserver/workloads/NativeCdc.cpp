@@ -22,8 +22,10 @@
 #include <vector>
 
 #include "fdbclient/CDCProxyInterface.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeCdc.h"
 #include "fdbclient/SystemData.h"
+#include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/tester/workloads.h"
 
@@ -128,6 +130,26 @@ struct NativeCdcWorkload : TestWorkload {
 		co_return;
 	}
 
+	Future<Void> changeResolverCount(Database cx, int32_t count) {
+		Standalone<StringRef> config(format("resolvers=%d", count));
+		while (true) {
+			Optional<ConfigureAutoResult> conf;
+			ConfigurationResult result =
+			    co_await ManagementAPI::changeConfig(cx.getReference(), { config }, conf, true);
+			if (result == ConfigurationResult::SUCCESS) {
+				co_return;
+			}
+			co_await delay(1.0);
+		}
+	}
+
+	Future<Void> waitForRecoveryAfter(uint64_t previousRecoveryCount, RecoveryState requiredState) {
+		while (dbInfo->get().recoveryCount <= previousRecoveryCount || dbInfo->get().recoveryState < requiredState) {
+			co_await dbInfo->onChange();
+		}
+		co_return;
+	}
+
 	Future<Void> run(Database cx) {
 		const Key firstName = "native-cdc-first"_sr;
 		const Key secondName = "native-cdc-second"_sr;
@@ -197,6 +219,7 @@ struct NativeCdcWorkload : TestWorkload {
 		ASSERT(listed.streams[0].keys == liveRange);
 
 		Transaction write(cx);
+		write.setOption(FDBTransactionOptions::LOCK_AWARE);
 		write.set("live/in"_sr, "captured"_sr);
 		write.set("other/out"_sr, "ignored"_sr);
 		co_await write.commit();
@@ -250,6 +273,7 @@ struct NativeCdcWorkload : TestWorkload {
 		ASSERT(dbInfo->get().recoveryCount == recoveryCount);
 
 		Transaction afterFailureWrite(cx);
+		afterFailureWrite.setOption(FDBTransactionOptions::LOCK_AWARE);
 		afterFailureWrite.set("live/after-failure"_sr, "captured-after-failure"_sr);
 		co_await afterFailureWrite.commit();
 		const Version afterFailureVersion = afterFailureWrite.getCommittedVersion();
@@ -268,9 +292,54 @@ struct NativeCdcWorkload : TestWorkload {
 		}
 		ASSERT(foundAfterFailureWrite);
 
-		co_await replacement.ack.getReply(CDCAckRequest(liveRegistration.streamId, afterFailureVersion));
-		ASSERT(co_await getPersistedMinVersion(cx, liveRegistration.streamId) == afterFailureVersion + 1);
-		co_await replacement.removeStream.getReply(CDCRemoveStreamRequest(liveName));
+		const Version cursorBeforeRecovery = afterFailure.lastConsumedVersion;
+		co_await replacement.ack.getReply(CDCAckRequest(liveRegistration.streamId, cursorBeforeRecovery));
+		ASSERT(co_await getPersistedMinVersion(cx, liveRegistration.streamId) == cursorBeforeRecovery + 1);
+
+		const int32_t recoveredResolverCount = (co_await getDatabaseConfiguration(cx)).getDesiredResolvers() + 1;
+		const UID ownerBeforeRecovery = replacement.id();
+		const uint64_t recoveryBeforeChange = dbInfo->get().recoveryCount;
+		co_await changeResolverCount(cx, recoveredResolverCount);
+		co_await timeoutError(waitForRecoveryAfter(recoveryBeforeChange, RecoveryState::ACCEPTING_COMMITS), 60.0);
+		CDCProxyInterface recoveredOwner = co_await getCDCProxy(liveRegistration.streamId);
+		ASSERT(recoveredOwner.id() == ownerBeforeRecovery);
+
+		Transaction afterRecoveryWrite(cx);
+		afterRecoveryWrite.setOption(FDBTransactionOptions::LOCK_AWARE);
+		afterRecoveryWrite.set("live/after-recovery"_sr, "captured-after-recovery"_sr);
+		co_await afterRecoveryWrite.commit();
+		const Version afterRecoveryVersion = afterRecoveryWrite.getCommittedVersion();
+		Version afterRecoveryCursor = cursorBeforeRecovery;
+		bool foundAfterRecoveryWrite = false;
+		const double afterRecoveryConsumeDeadline = now() + 30.0;
+		while (afterRecoveryCursor < afterRecoveryVersion) {
+			CDCConsumeReply afterRecovery =
+			    co_await timeoutError(recoveredOwner.consume.getReply(
+			                              CDCConsumeRequest(CDCCursor(liveRegistration.streamId, afterRecoveryCursor))),
+			                          30.0);
+			if (afterRecovery.lastConsumedVersion == afterRecoveryCursor) {
+				ASSERT(now() < afterRecoveryConsumeDeadline);
+				co_await delay(0.1);
+				continue;
+			}
+			ASSERT(afterRecovery.lastConsumedVersion > afterRecoveryCursor);
+			afterRecoveryCursor = afterRecovery.lastConsumedVersion;
+			for (const auto& versioned : afterRecovery.mutations) {
+				for (const auto& mutation : versioned.mutations) {
+					if (mutation.param1 == "live/after-recovery"_sr) {
+						foundAfterRecoveryWrite = true;
+					}
+				}
+			}
+		}
+		ASSERT(foundAfterRecoveryWrite);
+
+		co_await recoveredOwner.ack.getReply(CDCAckRequest(liveRegistration.streamId, afterRecoveryCursor));
+		ASSERT(co_await getPersistedMinVersion(cx, liveRegistration.streamId) == afterRecoveryCursor + 1);
+		co_await timeoutError(waitForRecoveryAfter(recoveryBeforeChange, RecoveryState::FULLY_RECOVERED), 60.0);
+		recoveredOwner = co_await getCDCProxy(liveRegistration.streamId);
+		ASSERT(recoveredOwner.id() == ownerBeforeRecovery);
+		co_await recoveredOwner.removeStream.getReply(CDCRemoveStreamRequest(liveName));
 		co_await waitForCDCProxyAssignmentRemoval(liveRegistration.streamId);
 	}
 };

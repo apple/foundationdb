@@ -591,15 +591,22 @@ Future<Void> recruitFailedCDCProxies(ClusterControllerData* self,
 	for (int failedIndex : failedIndexes) {
 		ASSERT_WE_THINK(failedIndex >= 0 && failedIndex < monitoredProxies.size());
 		const CDCProxyInterface& failedProxy = monitoredProxies[failedIndex];
-		auto current =
-		    std::find(self->db.recoveryData->cdcProxies.begin(), self->db.recoveryData->cdcProxies.end(), failedProxy);
-		if (current == self->db.recoveryData->cdcProxies.end()) {
+		auto current = std::find(self->db.cdcProxies.begin(), self->db.cdcProxies.end(), failedProxy);
+		if (current == self->db.cdcProxies.end()) {
 			continue;
 		}
 
 		auto worker = self->id_worker.find(failedProxy.processId);
 		if (worker == self->id_worker.end()) {
-			throw recruitment_failed();
+			for (const auto& grvProxy : self->db.recoveryData->grvProxies) {
+				worker = self->id_worker.find(grvProxy.processId);
+				if (worker != self->id_worker.end()) {
+					break;
+				}
+			}
+			if (worker == self->id_worker.end()) {
+				throw recruitment_failed();
+			}
 		}
 
 		InitializeCDCProxyRequest request;
@@ -612,9 +619,8 @@ Future<Void> recruitFailedCDCProxies(ClusterControllerData* self,
 		    self->db.recoveryData->cstate.myDBState.recoveryCount != recoveryCount) {
 			co_return;
 		}
-		current =
-		    std::find(self->db.recoveryData->cdcProxies.begin(), self->db.recoveryData->cdcProxies.end(), failedProxy);
-		if (current == self->db.recoveryData->cdcProxies.end()) {
+		current = std::find(self->db.cdcProxies.begin(), self->db.cdcProxies.end(), failedProxy);
+		if (current == self->db.cdcProxies.end()) {
 			continue;
 		}
 		*current = replacement;
@@ -655,13 +661,13 @@ Future<Void> recruitFailedCDCProxies(ClusterControllerData* self,
 
 Future<Void> monitorAndRecruitCDCProxies(ClusterControllerData* self) {
 	while (true) {
-		while (self->db.serverInfo->get().recoveryState < RecoveryState::FULLY_RECOVERED ||
-		       !self->db.recoveryData.isValid() || self->db.recoveryData->cdcProxies.empty()) {
+		while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ||
+		       !self->db.recoveryData.isValid() || self->db.cdcProxies.empty()) {
 			co_await self->db.serverInfo->onChange();
 		}
 
 		const uint64_t recoveryCount = self->db.recoveryData->cstate.myDBState.recoveryCount;
-		const std::vector<CDCProxyInterface> monitoredProxies = self->db.recoveryData->cdcProxies;
+		const std::vector<CDCProxyInterface> monitoredProxies = self->db.cdcProxies;
 		Future<std::vector<int>> failures = monitorCDCProxies(monitoredProxies);
 		while (true) {
 			bool retryAfterFailure = false;
@@ -677,7 +683,7 @@ Future<Void> monitorAndRecruitCDCProxies(ClusterControllerData* self) {
 				}
 				if (!self->db.recoveryData.isValid() ||
 				    self->db.recoveryData->cstate.myDBState.recoveryCount != recoveryCount ||
-				    self->db.recoveryData->cdcProxies != monitoredProxies) {
+				    self->db.cdcProxies != monitoredProxies) {
 					break;
 				}
 			} catch (Error& e) {
@@ -738,6 +744,8 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			dbInfo.client = ClientDBInfo();
 			dbInfo.client.clusterId = db->serverInfo->get().client.clusterId;
 			dbInfo.client.clusterType = db->clusterType;
+			dbInfo.client.cdcProxies = db->cdcProxies;
+			dbInfo.client.streamToCDCProxyId = db->clientInfo->get().streamToCDCProxyId;
 
 			TraceEvent("CCWDB", cluster->id)
 			    .detail("NewMaster", dbInfo.master.id().toString())

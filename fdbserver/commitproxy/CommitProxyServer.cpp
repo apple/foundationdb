@@ -2758,6 +2758,7 @@ Future<Void> processCompleteTransactionStateRequest(TransactionStateResolveConte
 	auto lockedKey = pContext->pTxnStateStore->readValue(databaseLockedKey).get();
 	pContext->pCommitData->locked = lockedKey.present() && !lockedKey.get().empty();
 	pContext->pCommitData->metadataVersion = pContext->pTxnStateStore->readValue(metadataVersionKey).get();
+	pContext->pCommitData->cdcRouting.reload(pContext->pTxnStateStore);
 
 	pContext->pTxnStateStore->enableSnapshot();
 }

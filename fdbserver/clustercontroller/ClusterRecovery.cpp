@@ -232,7 +232,12 @@ Future<Void> newGrvProxies(Reference<ClusterRecoveryData> self, RecruitFromConfi
 	self->grvProxies = std::move(newRecruits);
 }
 
-Future<Void> newCDCProxies(Reference<ClusterRecoveryData> self, RecruitFromConfigurationReply recr) {
+Future<Void> ensureCDCProxies(Reference<ClusterRecoveryData> self, RecruitFromConfigurationReply recr) {
+	if (!self->controllerData->db.cdcProxies.empty()) {
+		TraceEvent("CDCProxiesReused", self->dbgid).detail("Count", self->controllerData->db.cdcProxies.size());
+		co_return;
+	}
+
 	std::vector<Future<CDCProxyInterface>> initializationReplies;
 	for (int i = 0; i < recr.grvProxies.size(); i++) {
 		InitializeCDCProxyRequest req;
@@ -246,7 +251,7 @@ Future<Void> newCDCProxies(Reference<ClusterRecoveryData> self, RecruitFromConfi
 
 	std::vector<CDCProxyInterface> newRecruits = co_await getAll(initializationReplies);
 	TraceEvent("CDCProxyInitializationComplete", self->dbgid).log();
-	self->cdcProxies = std::move(newRecruits);
+	self->controllerData->db.cdcProxies = std::move(newRecruits);
 }
 
 Future<Void> newResolvers(Reference<ClusterRecoveryData> self, RecruitFromConfigurationReply recr) {
@@ -846,7 +851,7 @@ Future<Void> updateRegistration(Reference<ClusterRecoveryData> self, Reference<L
 			                       logSystemConfig,
 			                       self->provisionalCommitProxies,
 			                       self->provisionalGrvProxies,
-			                       std::vector<CDCProxyInterface>(),
+			                       self->controllerData->db.cdcProxies,
 			                       self->resolvers,
 			                       self->cstate.myDBState.recoveryCount,
 			                       self->cstate.prevDBState.getPriorCommittedLogServers());
@@ -856,7 +861,7 @@ Future<Void> updateRegistration(Reference<ClusterRecoveryData> self, Reference<L
 			                       logSystemConfig,
 			                       self->commitProxies,
 			                       self->grvProxies,
-			                       self->cdcProxies,
+			                       self->controllerData->db.cdcProxies,
 			                       self->resolvers,
 			                       self->cstate.myDBState.recoveryCount,
 			                       std::vector<UID>());
@@ -1145,7 +1150,7 @@ Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	Future<Void> txnSystemInitialized =
 	    traceAfter(newCommitProxies(self, recruits), "CommitProxiesInitialized") &&
 	    traceAfter(newGrvProxies(self, recruits), "GRVProxiesInitialized") &&
-	    traceAfter(newCDCProxies(self, recruits), "CDCProxiesInitialized") &&
+	    traceAfter(ensureCDCProxies(self, recruits), "CDCProxiesAvailable") &&
 	    traceAfter(newResolvers(self, recruits), "ResolversInitialized") &&
 	    traceAfter(newTLogServers(self, recruits, oldLogSystem, &confChanges), "TLogServersInitialized");
 	co_await (txnSystemInitialized || monitorInitializingTxnSystem(self->controllerData->db.unfinishedRecoveries));
@@ -1301,6 +1306,20 @@ Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> self,
 	RangeResult rawHistoryTags = co_await self->txnStateStore->readRange(serverTagHistoryKeys);
 	for (auto& kv : rawHistoryTags) {
 		self->allTags.push_back(decodeServerTagValue(kv.value));
+	}
+
+	std::set<CDCStreamId> activeCdcStreams;
+	RangeResult rawCdcStreams = co_await self->txnStateStore->readRange(cdcStreamKeys);
+	for (auto& kv : rawCdcStreams) {
+		activeCdcStreams.insert(decodeCDCStreamKey(kv.key));
+	}
+
+	RangeResult rawCdcHistoryTags = co_await self->txnStateStore->readRange(cdcTagHistoryKeys);
+	for (auto& kv : rawCdcHistoryTags) {
+		const auto tagHistory = decodeCDCTagHistoryKey(kv.key);
+		if (activeCdcStreams.contains(std::get<0>(tagHistory))) {
+			self->allTags.push_back(std::get<2>(tagHistory));
+		}
 	}
 
 	uniquify(self->allTags);
