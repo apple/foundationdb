@@ -386,7 +386,7 @@ def versionepoch(logger):
     version11 = run_fdbcli_command("versionepoch commit")
     assert version11.startswith("Current read version is ")
     # the test can trigger recovery, thus we wait until the recovery is finished to move to the next test
-    wait_for_database_available(logger)
+    wait_for_database_fully_recovered(logger)
 
 
 def get_value_from_status_json(retry, *args):
@@ -471,7 +471,6 @@ def consistencycheck(logger):
     run_fdbcli_command("consistencycheck", "on")
     output3 = run_fdbcli_command("consistencycheck")
     assert output3 == consistency_check_on_output
-
 
 
 @enable_logging()
@@ -636,7 +635,7 @@ def coordinators(logger):
         len(get_value_from_status_json(True, "client", "coordinators", "coordinators"))
         == 1
     )
-    wait_for_database_available(logger)
+    wait_for_database_fully_recovered(logger)
 
 
 @enable_logging(logging.DEBUG)
@@ -699,7 +698,7 @@ def exclude(logger):
     # check the include is successful
     output4 = run_fdbcli_command("exclude")
     assert no_excluded_process_output in output4
-    wait_for_database_available(logger)
+    wait_for_database_fully_recovered(logger)
 
 
 # read the system key 'k', need to enable the option first
@@ -734,13 +733,20 @@ def throttle(logger):
     # TODO : test manual throttling, not easy to do now
 
 
-def wait_for_database_available(logger):
-    # sometimes the change takes some time to have effect and the database can be unavailable at that time
-    # this is to wait until the database is available again
-    while not get_value_from_status_json(
-        True, "client", "database_status", "available"
-    ):
-        logger.debug("Database unavailable for now, wait for one second")
+def wait_for_database_fully_recovered(logger):
+    # Database availability precedes full recovery and is not sufficient before tests that
+    # make assertions about recovery generations.
+    while True:
+        status = json.loads(run_fdbcli_command("status", "json"))
+        available = status["client"]["database_status"]["available"]
+        recovery_state = status.get("cluster", {}).get("recovery_state", {}).get("name")
+        if available and recovery_state == "fully_recovered":
+            return
+        logger.debug(
+            "Database available: {}, recovery state: {}; wait for one second".format(
+                available, recovery_state
+            )
+        )
         time.sleep(1)
 
 
