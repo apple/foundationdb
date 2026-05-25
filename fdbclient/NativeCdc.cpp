@@ -228,12 +228,12 @@ Future<Void> removeNativeCdcStream(Database cx, Key name, Optional<UID> proxyId)
 			}
 			tr.clear(nameKey);
 			tr.clear(cdcStreamKeyFor(streamId));
+			tr.clear(cdcTagHistoryRangeFor(streamId));
+			tr.clear(cdcMinVersionKeyFor(streamId));
 			tr.clear(cdcProxyRangeFor(streamId));
 			if (assignedProxy.present()) {
 				signalNativeCdcProxyAssignmentChange(&tr);
 			}
-			// Retain tag history and minVersion until the pop/cleanup phase can
-			// safely release all durable mutations for this retired stream.
 			co_await tr.commit();
 			co_return;
 		} catch (Error& e) {

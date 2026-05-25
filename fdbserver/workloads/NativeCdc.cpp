@@ -88,6 +88,22 @@ struct NativeCdcWorkload : TestWorkload {
 		}
 	}
 
+	Future<bool> hasPersistedRetention(Database cx, CDCStreamId streamId) {
+		Transaction tr(cx);
+		while (true) {
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				Optional<Value> minVersion = co_await tr.get(cdcMinVersionKeyFor(streamId));
+				RangeResult history = co_await tr.getRange(cdcTagHistoryRangeFor(streamId), 1);
+				co_return minVersion.present() || !history.empty();
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
+	}
+
 	Future<Void> appendPersistedTag(Database cx, CDCStreamId streamId, Tag tag) {
 		Transaction tr(cx);
 		while (true) {
@@ -281,15 +297,20 @@ struct NativeCdcWorkload : TestWorkload {
 
 		co_await removeNativeCdcStream(cx, firstName);
 		ASSERT((co_await listNativeCdcStreams(cx)).empty());
-		const Version retiredConsumedThrough = firstConsumedThrough + 5;
-		const Version retiredAckMinVersion = retiredConsumedThrough + 1;
-		ASSERT(co_await acknowledgeNativeCdcStream(cx, firstId, retiredConsumedThrough) == retiredAckMinVersion);
-		ASSERT(co_await getPersistedMinVersion(cx, firstId) == retiredAckMinVersion);
+		ASSERT(!(co_await hasPersistedRetention(cx, firstId)));
+
+		bool retiredAcknowledgeRejected = false;
+		try {
+			co_await acknowledgeNativeCdcStream(cx, firstId, firstConsumedThrough + 5);
+		} catch (Error& e) {
+			retiredAcknowledgeRejected = e.code() == error_code_client_invalid_operation;
+		}
+		ASSERT(retiredAcknowledgeRejected);
 
 		const CDCStreamId secondId = co_await registerNativeCdcStream(cx, secondName, secondRange);
 		const auto secondRoute = co_await getPersistedRoute(cx, secondId);
 		ASSERT(secondId > firstId);
-		ASSERT(secondRoute.first != firstRoute.first);
+		ASSERT(secondRoute.first == firstRoute.first);
 
 		co_await removeNativeCdcStream(cx, secondName);
 
