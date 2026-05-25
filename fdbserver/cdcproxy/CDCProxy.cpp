@@ -435,8 +435,7 @@ Future<Void> acknowledge(CDCProxyData* self, CDCAckRequest request) {
 			found->second->minVersion = std::max(found->second->minVersion, minVersion);
 			while (!found->second->mutations.empty() && found->second->mutations.front().version < minVersion) {
 				found->second->bufferedBytes -= sizeof(VersionedMutationsRef) +
-				                                found->second->mutations.front().mutations.expectedSize() +
-				                                found->second->mutations.front().mutations.size() * sizeof(MutationRef);
+				                                found->second->mutations.front().mutations.expectedSize();
 				found->second->mutations.pop_front();
 			}
 			ASSERT(found->second->bufferedBytes >= 0);
