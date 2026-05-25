@@ -68,6 +68,23 @@ void validateNativeCdcStream(KeyRef const& name, KeyRangeRef const& keys) {
 	}
 }
 
+Future<Optional<UID>> getNativeCdcProxyAssignment(Transaction* tr, CDCStreamId streamId) {
+	RangeResult assignments = co_await tr->getRange(cdcProxyRangeFor(streamId), 2);
+	ASSERT(assignments.size() <= 1);
+	if (assignments.empty()) {
+		co_return Optional<UID>();
+	}
+	const auto [assignedStreamId, proxyId] = decodeCDCProxyKey(assignments[0].key);
+	ASSERT_WE_THINK(assignedStreamId == streamId);
+	co_return proxyId;
+}
+
+void signalNativeCdcProxyAssignmentChange(Transaction* tr) {
+	tr->set(cdcProxyAssignmentChangeKey,
+	        BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),
+	                              IncludeVersion(ProtocolVersion::withNativeCdc())));
+}
+
 Future<Void> observeNativeCdcMetadata(Transaction* tr, NativeCdcIdentifierAllocator* allocator) {
 	Key begin = cdcStreamKeys.begin;
 	while (begin < cdcStreamKeys.end) {
@@ -99,7 +116,7 @@ Future<Void> observeNativeCdcMetadata(Transaction* tr, NativeCdcIdentifierAlloca
 
 } // namespace
 
-Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys) {
+Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys, Optional<UID> proxyId) {
 	validateNativeCdcStream(name, keys);
 
 	Transaction tr(cx);
@@ -117,6 +134,11 @@ Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys
 				if (!currentKeys.present() || decodeCDCStreamKeysValue(currentKeys.get()) != keys) {
 					throw client_invalid_operation();
 				}
+				if (proxyId.present() && !(co_await getNativeCdcProxyAssignment(&tr, streamId)).present()) {
+					tr.set(cdcProxyKeyFor(streamId, proxyId.get()), Value());
+					signalNativeCdcProxyAssignmentChange(&tr);
+					co_await tr.commit();
+				}
 				co_return streamId;
 			}
 
@@ -129,6 +151,10 @@ Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys
 			tr.set(cdcStreamKeyFor(streamId), cdcStreamKeysValue(keys));
 			tr.set(cdcTagHistoryKeyFor(streamId, registrationVersion, tag), Value());
 			tr.set(cdcMinVersionKeyFor(streamId), cdcMinVersionValue(registrationVersion));
+			if (proxyId.present()) {
+				tr.set(cdcProxyKeyFor(streamId, proxyId.get()), Value());
+				signalNativeCdcProxyAssignmentChange(&tr);
+			}
 			co_await tr.commit();
 			co_return streamId;
 		} catch (Error& e) {
@@ -138,7 +164,7 @@ Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys
 	}
 }
 
-Future<Void> removeNativeCdcStream(Database cx, Key name) {
+Future<Void> removeNativeCdcStream(Database cx, Key name, Optional<UID> proxyId) {
 	if (name.empty()) {
 		throw client_invalid_operation();
 	}
@@ -157,14 +183,24 @@ Future<Void> removeNativeCdcStream(Database cx, Key name) {
 			}
 
 			const CDCStreamId streamId = decodeCDCStreamNameValue(currentId.get());
+			Optional<UID> assignedProxy = co_await getNativeCdcProxyAssignment(&tr, streamId);
+			if (proxyId.present() && (!assignedProxy.present() || assignedProxy.get() != proxyId.get())) {
+				throw wrong_shard_server();
+			}
 			tr.clear(nameKey);
 			tr.clear(cdcStreamKeyFor(streamId));
 			tr.clear(cdcProxyRangeFor(streamId));
+			if (assignedProxy.present()) {
+				signalNativeCdcProxyAssignmentChange(&tr);
+			}
 			// Retain tag history and minVersion until the pop/cleanup phase can
 			// safely release all durable mutations for this retired stream.
 			co_await tr.commit();
 			co_return;
 		} catch (Error& e) {
+			if (e.code() == error_code_wrong_shard_server) {
+				throw;
+			}
 			err = e;
 		}
 		co_await tr.onError(err);

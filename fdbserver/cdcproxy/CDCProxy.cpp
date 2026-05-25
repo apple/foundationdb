@@ -75,7 +75,10 @@ Optional<MutationRef> clipCDCMutation(MutationRef const& mutation, KeyRangeRef c
 	return Optional<MutationRef>();
 }
 
-Future<CDCStreamReadState> readCDCStreamState(Database cx, CDCStreamId streamId, bool requireKeys) {
+Future<CDCStreamReadState> readCDCStreamState(Database cx,
+                                              CDCStreamId streamId,
+                                              UID expectedProxyId,
+                                              bool requireKeys) {
 	if (streamId == 0) {
 		throw client_invalid_operation();
 	}
@@ -100,6 +103,11 @@ Future<CDCStreamReadState> readCDCStreamState(Database cx, CDCStreamId streamId,
 				throw client_invalid_operation();
 			}
 			result.minVersion = decodeCDCMinVersionValue(minVersionValue.get());
+
+			RangeResult assignedProxies = co_await tr.getRange(cdcProxyRangeFor(streamId), 2);
+			if (assignedProxies.size() != 1 || decodeCDCProxyKey(assignedProxies[0].key).second != expectedProxyId) {
+				throw wrong_shard_server();
+			}
 
 			std::vector<std::pair<Version, Tag>> tagAssignments;
 			KeyRange tagHistoryRange = cdcTagHistoryRangeFor(streamId);
@@ -128,6 +136,9 @@ Future<CDCStreamReadState> readCDCStreamState(Database cx, CDCStreamId streamId,
 			}
 			co_return result;
 		} catch (Error& e) {
+			if (e.code() == error_code_wrong_shard_server) {
+				throw;
+			}
 			err = e;
 		}
 		co_await tr.onError(err);
@@ -141,7 +152,7 @@ Future<Void> consume(CDCProxyData* self, CDCConsumeRequest request) {
 			throw client_invalid_operation();
 		}
 
-		CDCStreamReadState state = co_await readCDCStreamState(self->cx, request.cursor.streamId, true);
+		CDCStreamReadState state = co_await readCDCStreamState(self->cx, request.cursor.streamId, self->id, true);
 		Version begin = request.cursor.lastConsumedVersion == invalidVersion ? state.minVersion
 		                                                                     : request.cursor.lastConsumedVersion + 1;
 		if (begin < state.minVersion) {
@@ -194,7 +205,7 @@ Future<Void> consume(CDCProxyData* self, CDCConsumeRequest request) {
 
 Future<Void> acknowledge(CDCProxyData* self, CDCAckRequest request) {
 	try {
-		CDCStreamReadState state = co_await readCDCStreamState(self->cx, request.streamId, false);
+		CDCStreamReadState state = co_await readCDCStreamState(self->cx, request.streamId, self->id, false);
 		const Version minVersion = co_await acknowledgeNativeCdcStream(self->cx, request.streamId, request.version);
 		std::set<Tag> tags{ state.currentTag };
 		for (const auto& history : state.tagHistory) {
@@ -212,7 +223,7 @@ Future<Void> acknowledge(CDCProxyData* self, CDCAckRequest request) {
 
 Future<Void> registerStream(CDCProxyData* self, CDCRegisterStreamRequest request) {
 	try {
-		const CDCStreamId streamId = co_await registerNativeCdcStream(self->cx, request.name, request.keys);
+		const CDCStreamId streamId = co_await registerNativeCdcStream(self->cx, request.name, request.keys, self->id);
 		request.reply.send(CDCRegisterStreamReply(streamId));
 	} catch (Error& e) {
 		request.reply.sendError(e);
@@ -222,7 +233,7 @@ Future<Void> registerStream(CDCProxyData* self, CDCRegisterStreamRequest request
 
 Future<Void> removeStream(CDCProxyData* self, CDCRemoveStreamRequest request) {
 	try {
-		co_await removeNativeCdcStream(self->cx, request.name);
+		co_await removeNativeCdcStream(self->cx, request.name, self->id);
 		request.reply.send(Void());
 	} catch (Error& e) {
 		request.reply.sendError(e);

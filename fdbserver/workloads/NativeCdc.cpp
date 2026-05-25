@@ -91,6 +91,28 @@ struct NativeCdcWorkload : TestWorkload {
 		co_return dbInfo->get().client.cdcProxies.front();
 	}
 
+	Future<CDCProxyInterface> getCDCProxy(CDCStreamId streamId) {
+		while (true) {
+			const ClientDBInfo& client = dbInfo->get().client;
+			auto assigned = client.streamToCDCProxyId.find(streamId);
+			if (assigned != client.streamToCDCProxyId.end()) {
+				for (const auto& proxy : client.cdcProxies) {
+					if (proxy.id() == assigned->second) {
+						co_return proxy;
+					}
+				}
+			}
+			co_await dbInfo->onChange();
+		}
+	}
+
+	Future<Void> waitForCDCProxyAssignmentRemoval(CDCStreamId streamId) {
+		while (dbInfo->get().client.streamToCDCProxyId.contains(streamId)) {
+			co_await dbInfo->onChange();
+		}
+		co_return;
+	}
+
 	Future<Void> run(Database cx) {
 		const Key firstName = "native-cdc-first"_sr;
 		const Key secondName = "native-cdc-second"_sr;
@@ -150,6 +172,8 @@ struct NativeCdcWorkload : TestWorkload {
 		const KeyRange liveRange(KeyRangeRef("live/"_sr, "live0"_sr));
 		CDCRegisterStreamReply liveRegistration =
 		    co_await proxy.registerStream.getReply(CDCRegisterStreamRequest(liveName, liveRange));
+		CDCProxyInterface owner = co_await getCDCProxy(liveRegistration.streamId);
+		ASSERT(owner.id() == proxy.id());
 
 		CDCListStreamsReply listed = co_await proxy.listStreams.getReply(CDCListStreamsRequest());
 		ASSERT(listed.streams.size() == 1);
@@ -163,8 +187,30 @@ struct NativeCdcWorkload : TestWorkload {
 		co_await write.commit();
 		const Version writeVersion = write.getCommittedVersion();
 
+		for (const auto& nonOwner : dbInfo->get().client.cdcProxies) {
+			if (nonOwner.id() == owner.id()) {
+				continue;
+			}
+			bool wrongOwnerRejected = false;
+			try {
+				co_await nonOwner.consume.getReply(
+				    CDCConsumeRequest(CDCCursor(liveRegistration.streamId, invalidVersion)));
+			} catch (Error& e) {
+				wrongOwnerRejected = e.code() == error_code_wrong_shard_server;
+			}
+			ASSERT(wrongOwnerRejected);
+			bool wrongOwnerRemoveRejected = false;
+			try {
+				co_await nonOwner.removeStream.getReply(CDCRemoveStreamRequest(liveName));
+			} catch (Error& e) {
+				wrongOwnerRemoveRejected = e.code() == error_code_wrong_shard_server;
+			}
+			ASSERT(wrongOwnerRemoveRejected);
+			break;
+		}
+
 		CDCConsumeReply consumed = co_await timeoutError(
-		    proxy.consume.getReply(CDCConsumeRequest(CDCCursor(liveRegistration.streamId, invalidVersion))), 30.0);
+		    owner.consume.getReply(CDCConsumeRequest(CDCCursor(liveRegistration.streamId, invalidVersion))), 30.0);
 		ASSERT(consumed.lastConsumedVersion >= writeVersion);
 		bool foundInRangeWrite = false;
 		bool foundOutOfRangeWrite = false;
@@ -181,9 +227,10 @@ struct NativeCdcWorkload : TestWorkload {
 		ASSERT(foundInRangeWrite);
 		ASSERT(!foundOutOfRangeWrite);
 
-		co_await proxy.ack.getReply(CDCAckRequest(liveRegistration.streamId, writeVersion));
+		co_await owner.ack.getReply(CDCAckRequest(liveRegistration.streamId, writeVersion));
 		ASSERT(co_await getPersistedMinVersion(cx, liveRegistration.streamId) == writeVersion + 1);
-		co_await proxy.removeStream.getReply(CDCRemoveStreamRequest(liveName));
+		co_await owner.removeStream.getReply(CDCRemoveStreamRequest(liveName));
+		co_await waitForCDCProxyAssignmentRemoval(liveRegistration.streamId);
 	}
 };
 

@@ -776,6 +776,7 @@ const KeyRangeRef cdcStreamKeys("\xff/cdc/keys/"_sr, "\xff/cdc/keys0"_sr);
 const KeyRangeRef cdcTagHistoryKeys("\xff/cdc/tagHistory/"_sr, "\xff/cdc/tagHistory0"_sr);
 const KeyRangeRef cdcMinVersionKeys("\xff/cdc/minVersion/"_sr, "\xff/cdc/minVersion0"_sr);
 const KeyRangeRef cdcProxyKeys("\xff/cdc/proxies/"_sr, "\xff/cdc/proxies0"_sr);
+const KeyRef cdcProxyAssignmentChangeKey = "\xff/cdc/proxyAssignmentChange"_sr;
 
 Key cdcStreamNameKeyFor(KeyRef const& streamName) {
 	return streamName.withPrefix(cdcStreamNameKeys.begin);

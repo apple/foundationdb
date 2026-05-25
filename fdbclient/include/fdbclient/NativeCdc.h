@@ -35,8 +35,11 @@ struct NativeCdcStreamInfo {
 
 // These durable metadata operations are intended to back CDCProxyInterface
 // lifecycle requests once CDC proxies are recruited.
-Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys);
-Future<Void> removeNativeCdcStream(Database cx, Key name);
+Future<CDCStreamId> registerNativeCdcStream(Database cx,
+                                            Key name,
+                                            KeyRange keys,
+                                            Optional<UID> proxyId = Optional<UID>());
+Future<Void> removeNativeCdcStream(Database cx, Key name, Optional<UID> proxyId = Optional<UID>());
 Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams(Database cx);
 // Persists the exclusive unpopped watermark after consuming through a version.
 // Removed streams remain acknowledgeable while retained CDC log data is drained.

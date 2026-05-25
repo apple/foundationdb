@@ -615,7 +615,7 @@ private:
 	void checkSetCDCMetadata(MutationRef m) {
 		if (!cdcStreamNameKeys.contains(m.param1) && !cdcStreamKeys.contains(m.param1) &&
 		    !cdcTagHistoryKeys.contains(m.param1) && !cdcMinVersionKeys.contains(m.param1) &&
-		    !cdcProxyKeys.contains(m.param1)) {
+		    !cdcProxyKeys.contains(m.param1) && m.param1 != cdcProxyAssignmentChangeKey) {
 			return;
 		}
 		if (!initialCommit) {
@@ -1330,7 +1330,8 @@ bool containsMetadataMutation(const VectorRef<MutationRef>& mutations) {
 			    (m.param1.startsWith(logRangesRange.begin)) || (m.param1.startsWith(serverKeysPrefix)) ||
 			    (m.param1.startsWith(keyServersPrefix)) || cdcStreamNameKeys.contains(m.param1) ||
 			    cdcStreamKeys.contains(m.param1) || cdcTagHistoryKeys.contains(m.param1) ||
-			    cdcMinVersionKeys.contains(m.param1) || cdcProxyKeys.contains(m.param1)) {
+			    cdcMinVersionKeys.contains(m.param1) || cdcProxyKeys.contains(m.param1) ||
+			    m.param1 == cdcProxyAssignmentChangeKey) {
 				return true;
 			}
 		} else if (m.type == MutationRef::ClearRange && isSystemKey(m.param2)) {

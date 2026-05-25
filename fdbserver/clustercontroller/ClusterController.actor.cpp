@@ -1266,6 +1266,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		clientInfo.commitProxies = req.commitProxies;
 		clientInfo.grvProxies = req.grvProxies;
 		clientInfo.cdcProxies = req.cdcProxies;
+		clientInfo.streamToCDCProxyId = db->clientInfo->get().streamToCDCProxyId;
 		clientInfo.history = db->clientInfo->get().history;
 		clientInfo.clusterId = db->serverInfo->get().client.clusterId;
 		clientInfo.clusterType = db->clusterType;
@@ -1977,6 +1978,55 @@ Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 				Future<Void> globalConfigFuture = tr.watch(globalConfigVersionKey);
 				co_await tr.commit();
 				co_await globalConfigFuture;
+				break;
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
+	}
+}
+
+Future<Void> monitorCDCProxyAssignments(ClusterControllerData::DBInfo* db) {
+	while (true) {
+		ReadYourWritesTransaction tr(db->db);
+		while (true) {
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+				std::map<CDCStreamId, UID> streamToCDCProxyId;
+				Key begin = cdcProxyKeys.begin;
+				while (begin < cdcProxyKeys.end) {
+					RangeResult assignments =
+					    co_await tr.getRange(KeyRangeRef(begin, cdcProxyKeys.end), CLIENT_KNOBS->TOO_MANY);
+					for (const auto& assignment : assignments) {
+						const auto [streamId, proxyId] = decodeCDCProxyKey(assignment.key);
+						ASSERT_WE_THINK(streamToCDCProxyId.emplace(streamId, proxyId).second);
+					}
+					if (!assignments.more) {
+						break;
+					}
+					begin = keyAfter(assignments.back().key);
+				}
+
+				ClientDBInfo clientInfo = db->clientInfo->get();
+				if (clientInfo.streamToCDCProxyId != streamToCDCProxyId) {
+					clientInfo.id = deterministicRandom()->randomUniqueID();
+					clientInfo.streamToCDCProxyId = std::move(streamToCDCProxyId);
+
+					ServerDBInfo serverInfo = db->serverInfo->get();
+					serverInfo.id = deterministicRandom()->randomUniqueID();
+					serverInfo.infoGeneration = ++db->dbInfoCount;
+					serverInfo.client = clientInfo;
+					db->serverInfo->set(serverInfo);
+					db->clientInfo->set(clientInfo);
+				}
+
+				Future<Void> assignmentChangeFuture = tr.watch(cdcProxyAssignmentChangeKey);
+				co_await tr.commit();
+				co_await assignmentChangeFuture;
 				break;
 			} catch (Error& e) {
 				err = e;
@@ -2928,6 +2978,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(monitorServerInfoConfig(&self.db));
 	self.addActor.send(monitorStorageMetadata(&self));
 	self.addActor.send(monitorGlobalConfig(&self.db));
+	self.addActor.send(monitorCDCProxyAssignments(&self.db));
 	self.addActor.send(updatedChangingDatacenters(&self));
 	self.addActor.send(updatedChangedDatacenters(&self));
 	self.addActor.send(updateDatacenterVersionDifference(&self));

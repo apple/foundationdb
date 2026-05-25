@@ -22,6 +22,7 @@
 #define FDBCLIENT_COMMITPROXYINTERFACE_H
 #pragma once
 
+#include <map>
 #include <utility>
 #include <vector>
 
@@ -113,6 +114,7 @@ struct ClientDBInfo {
 	std::vector<GrvProxyInterface> grvProxies;
 	std::vector<CommitProxyInterface> commitProxies;
 	std::vector<CDCProxyInterface> cdcProxies;
+	std::map<CDCStreamId, UID> streamToCDCProxyId;
 	Optional<CommitProxyInterface>
 	    firstCommitProxy; // not serialized, used for commitOnFirstProxy when the commit proxies vector has been shrunk
 	Optional<Value> forward;
@@ -132,10 +134,19 @@ struct ClientDBInfo {
 			ASSERT(ar.protocolVersion().isValid());
 			serializer(ar, grvProxies, commitProxies, id, forward, history, clusterId, clusterType);
 			if (ar.protocolVersion().hasNativeCdc()) {
-				serializer(ar, cdcProxies);
+				serializer(ar, cdcProxies, streamToCDCProxyId);
 			}
 		} else {
-			serializer(ar, grvProxies, commitProxies, id, forward, history, clusterId, clusterType, cdcProxies);
+			serializer(ar,
+			           grvProxies,
+			           commitProxies,
+			           id,
+			           forward,
+			           history,
+			           clusterId,
+			           clusterType,
+			           cdcProxies,
+			           streamToCDCProxyId);
 		}
 	}
 };

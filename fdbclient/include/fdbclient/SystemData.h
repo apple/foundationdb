@@ -295,6 +295,8 @@ Version decodeCDCMinVersionValue(ValueRef const& value);
 
 // "\xff/cdc/proxies/[[CDCStreamId]][[proxyUID]]" := ""
 extern const KeyRangeRef cdcProxyKeys;
+// Changed whenever durable CDC stream-to-proxy assignments change.
+extern const KeyRef cdcProxyAssignmentChangeKey;
 Key cdcProxyKeyFor(CDCStreamId streamId, UID proxyId);
 KeyRange cdcProxyRangeFor(CDCStreamId streamId);
 std::pair<CDCStreamId, UID> decodeCDCProxyKey(KeyRef const& key);
