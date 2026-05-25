@@ -153,6 +153,40 @@ Future<CDCProxyInterface> getNativeCdcStreamProxy(Database cx, CDCStreamId strea
 	}
 }
 
+Future<bool> nativeCdcStreamStillExists(Database cx, Key name, CDCStreamId streamId) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			Optional<Value> currentId = co_await tr.get(cdcStreamNameKeyFor(name));
+			co_return currentId.present() && decodeCDCStreamNameValue(currentId.get()) == streamId;
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr.onError(err);
+	}
+}
+
+Future<Optional<CDCProxyInterface>> getNativeCdcStreamProxyForRemoval(Database cx, Key name, CDCStreamId streamId) {
+	while (true) {
+		const ClientDBInfo& clientInfo = cx->clientInfo->get();
+		auto assigned = clientInfo.streamToCDCProxyId.find(streamId);
+		if (assigned != clientInfo.streamToCDCProxyId.end()) {
+			for (const auto& proxy : clientInfo.cdcProxies) {
+				if (proxy.id() == assigned->second) {
+					co_return proxy;
+				}
+			}
+		}
+		if (!(co_await nativeCdcStreamStillExists(cx, name, streamId))) {
+			co_return Optional<CDCProxyInterface>();
+		}
+		co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, cx->taskID);
+	}
+}
+
 } // namespace
 
 Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys, Optional<UID> proxyId) {
@@ -416,9 +450,12 @@ Future<Void> removeNativeCdcStreamClient(Database cx, Key name) {
 			co_return;
 		}
 
-		CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(cx, stream->streamId);
+		Optional<CDCProxyInterface> proxy = co_await getNativeCdcStreamProxyForRemoval(cx, name, stream->streamId);
+		if (!proxy.present()) {
+			co_return;
+		}
 		try {
-			co_await proxy.removeStream.getReply(CDCRemoveStreamRequest(name));
+			co_await proxy.get().removeStream.getReply(CDCRemoveStreamRequest(name));
 			co_return;
 		} catch (Error& error) {
 			if (!retryNativeCdcProxyRequest(error)) {
