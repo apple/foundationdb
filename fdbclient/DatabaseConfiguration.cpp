@@ -36,7 +36,7 @@ void DatabaseConfiguration::resetInternal() {
 	// does NOT reset rawConfiguration
 	initialized = false;
 	commitProxyCount = grvProxyCount = resolverCount = desiredTLogCount = tLogWriteAntiQuorum = tLogReplicationFactor =
-	    storageTeamSize = desiredLogRouterCount = -1;
+	    storageTeamSize = desiredLogRouterCount = desiredRangeBackupWorkerCount = -1;
 	tLogVersion = TLogVersion::DEFAULT;
 	tLogDataStoreType = storageServerStoreType = testingStorageServerStoreType = KeyValueStoreType::END;
 	perpetualStoreType = KeyValueStoreType::NONE;
@@ -422,6 +422,9 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 
 	result["backup_worker_enabled"] = (int32_t)backupWorkerEnabled;
 	result["range_backup_worker_enabled"] = (int32_t)rangeBackupWorkerEnabled;
+	if (desiredRangeBackupWorkerCount != -1 || isOverridden("range_backup_worker_count")) {
+		result["range_backup_worker_count"] = desiredRangeBackupWorkerCount;
+	}
 	result["perpetual_storage_wiggle"] = perpetualStorageWiggleSpeed;
 	result["perpetual_storage_wiggle_locality"] = perpetualStorageWiggleLocality;
 	if (perpetualStoreType.storeType() != KeyValueStoreType::END) {
@@ -695,6 +698,8 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	} else if (ck == "range_backup_worker_enabled"_sr) {
 		parse((&type), value);
 		rangeBackupWorkerEnabled = (type != 0);
+	} else if (ck == "range_backup_worker_count"_sr) {
+		parse(&desiredRangeBackupWorkerCount, value);
 	} else if (ck == "usable_regions"_sr) {
 		parse(&usableRegions, value);
 	} else if (ck == "repopulate_anti_quorum"_sr) {
