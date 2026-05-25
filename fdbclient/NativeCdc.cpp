@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <map>
 #include <set>
 #include <utility>
 #include <vector>
@@ -36,7 +37,7 @@ namespace {
 struct NativeCdcIdentifierAllocator {
 	bool sawStream = false;
 	CDCStreamId maxStreamId = 0;
-	std::set<uint16_t> usedTagIds;
+	std::map<uint16_t, uint32_t> tagStreamCounts;
 
 	void observeStreamId(CDCStreamId streamId) {
 		sawStream = true;
@@ -45,7 +46,7 @@ struct NativeCdcIdentifierAllocator {
 
 	void observeTag(Tag tag) {
 		ASSERT_WE_THINK(tag.locality == tagLocalityCDC);
-		usedTagIds.insert(tag.id);
+		++tagStreamCounts[tag.id];
 	}
 
 	std::pair<CDCStreamId, Tag> allocate() const {
@@ -54,12 +55,19 @@ struct NativeCdcIdentifierAllocator {
 		}
 
 		const CDCStreamId streamId = sawStream ? maxStreamId + 1 : 1;
-		for (uint32_t tagId = 0; tagId <= std::numeric_limits<uint16_t>::max(); ++tagId) {
-			if (!usedTagIds.contains(static_cast<uint16_t>(tagId))) {
-				return { streamId, Tag(tagLocalityCDC, static_cast<uint16_t>(tagId)) };
+		ASSERT_WE_THINK(CLIENT_KNOBS->NATIVE_CDC_TAG_COUNT > 0);
+		ASSERT_WE_THINK(CLIENT_KNOBS->NATIVE_CDC_TAG_COUNT <= std::numeric_limits<uint16_t>::max() + 1u);
+		uint32_t leastStreams = std::numeric_limits<uint32_t>::max();
+		uint16_t selectedTagId = 0;
+		for (uint32_t tagId = 0; tagId < static_cast<uint32_t>(CLIENT_KNOBS->NATIVE_CDC_TAG_COUNT); ++tagId) {
+			auto count = tagStreamCounts.find(static_cast<uint16_t>(tagId));
+			const uint32_t streamCount = count == tagStreamCounts.end() ? 0 : count->second;
+			if (streamCount < leastStreams) {
+				leastStreams = streamCount;
+				selectedTagId = static_cast<uint16_t>(tagId);
 			}
 		}
-		throw operation_failed();
+		return { streamId, Tag(tagLocalityCDC, selectedTagId) };
 	}
 };
 
@@ -87,11 +95,19 @@ void signalNativeCdcProxyAssignmentChange(Transaction* tr) {
 }
 
 Future<Void> observeNativeCdcMetadata(Transaction* tr, NativeCdcIdentifierAllocator* allocator) {
+	Optional<Value> maxStreamId = co_await tr->get(cdcMaxStreamIdKey);
+	if (maxStreamId.present()) {
+		allocator->observeStreamId(decodeCDCMaxStreamIdValue(maxStreamId.get()));
+	}
+
+	std::set<CDCStreamId> activeStreamIds;
 	Key begin = cdcStreamKeys.begin;
 	while (begin < cdcStreamKeys.end) {
 		RangeResult streams = co_await tr->getRange(KeyRangeRef(begin, cdcStreamKeys.end), CLIENT_KNOBS->TOO_MANY);
 		for (const auto& kv : streams) {
-			allocator->observeStreamId(decodeCDCStreamKey(kv.key));
+			const CDCStreamId streamId = decodeCDCStreamKey(kv.key);
+			activeStreamIds.insert(streamId);
+			allocator->observeStreamId(streamId);
 		}
 		if (!streams.more) {
 			break;
@@ -99,6 +115,7 @@ Future<Void> observeNativeCdcMetadata(Transaction* tr, NativeCdcIdentifierAlloca
 		begin = keyAfter(streams.back().key);
 	}
 
+	std::map<CDCStreamId, Tag> currentTags;
 	begin = cdcTagHistoryKeys.begin;
 	while (begin < cdcTagHistoryKeys.end) {
 		RangeResult histories =
@@ -106,12 +123,17 @@ Future<Void> observeNativeCdcMetadata(Transaction* tr, NativeCdcIdentifierAlloca
 		for (const auto& kv : histories) {
 			const auto history = decodeCDCTagHistoryKey(kv.key);
 			allocator->observeStreamId(std::get<0>(history));
-			allocator->observeTag(std::get<2>(history));
+			if (activeStreamIds.contains(std::get<0>(history))) {
+				currentTags[std::get<0>(history)] = std::get<2>(history);
+			}
 		}
 		if (!histories.more) {
 			break;
 		}
 		begin = keyAfter(histories.back().key);
+	}
+	for (const auto& tagAssignment : currentTags) {
+		allocator->observeTag(tagAssignment.second);
 	}
 }
 
@@ -221,6 +243,7 @@ Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys
 			const Version registrationVersion = co_await tr.getReadVersion();
 
 			tr.set(nameKey, cdcStreamNameValue(streamId));
+			tr.set(cdcMaxStreamIdKey, cdcMaxStreamIdValue(streamId));
 			tr.set(cdcStreamKeyFor(streamId), cdcStreamKeysValue(keys));
 			tr.set(cdcTagHistoryKeyFor(streamId, registrationVersion, tag), Value());
 			tr.set(cdcMinVersionKeyFor(streamId), cdcMinVersionValue(registrationVersion));
@@ -511,6 +534,14 @@ TEST_CASE("noSim/NativeCDC/LifecycleAllocation") {
 	auto [nextId, nextTag] = allocator.allocate();
 	ASSERT(nextId == 10);
 	ASSERT(nextTag == Tag(tagLocalityCDC, 1));
+
+	NativeCdcIdentifierAllocator fullPoolAllocator;
+	for (uint32_t tagId = 0; tagId < static_cast<uint32_t>(CLIENT_KNOBS->NATIVE_CDC_TAG_COUNT); ++tagId) {
+		fullPoolAllocator.observeTag(Tag(tagLocalityCDC, static_cast<uint16_t>(tagId)));
+	}
+	auto [sharedId, sharedTag] = fullPoolAllocator.allocate();
+	ASSERT(sharedId == 1);
+	ASSERT(sharedTag == Tag(tagLocalityCDC, 0));
 
 	return Void();
 }

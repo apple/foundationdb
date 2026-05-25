@@ -772,6 +772,7 @@ int8_t decodeTagLocalityListValue(ValueRef const& value) {
 }
 
 const KeyRangeRef cdcStreamNameKeys("\xff/cdc/name/"_sr, "\xff/cdc/name0"_sr);
+const KeyRef cdcMaxStreamIdKey = "\xff/cdc/maxStreamId"_sr;
 const KeyRangeRef cdcStreamKeys("\xff/cdc/keys/"_sr, "\xff/cdc/keys0"_sr);
 const KeyRangeRef cdcTagHistoryKeys("\xff/cdc/tagHistory/"_sr, "\xff/cdc/tagHistory0"_sr);
 const KeyRangeRef cdcMinVersionKeys("\xff/cdc/minVersion/"_sr, "\xff/cdc/minVersion0"_sr);
@@ -798,6 +799,14 @@ CDCStreamId decodeCDCStreamNameValue(ValueRef const& value) {
 	ASSERT_WE_THINK(reader.protocolVersion().hasNativeCdc());
 	reader >> streamId;
 	return streamId;
+}
+
+Value cdcMaxStreamIdValue(CDCStreamId streamId) {
+	return cdcStreamNameValue(streamId);
+}
+
+CDCStreamId decodeCDCMaxStreamIdValue(ValueRef const& value) {
+	return decodeCDCStreamNameValue(value);
 }
 
 Key cdcStreamKeyFor(CDCStreamId streamId) {
@@ -1802,6 +1811,7 @@ TEST_CASE("noSim/SystemData/NativeCDC") {
 
 	ASSERT(decodeCDCStreamNameKey(cdcStreamNameKeyFor(name)) == name);
 	ASSERT(decodeCDCStreamNameValue(cdcStreamNameValue(streamId)) == streamId);
+	ASSERT(decodeCDCMaxStreamIdValue(cdcMaxStreamIdValue(streamId)) == streamId);
 	ASSERT(decodeCDCStreamKey(cdcStreamKeyFor(streamId)) == streamId);
 	ASSERT(decodeCDCStreamKeysValue(cdcStreamKeysValue(keys)) == keys);
 	ASSERT(decodeCDCMinVersionKey(cdcMinVersionKeyFor(streamId)) == streamId);

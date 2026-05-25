@@ -274,6 +274,11 @@ Key decodeCDCStreamNameKey(KeyRef const& key);
 Value cdcStreamNameValue(CDCStreamId streamId);
 CDCStreamId decodeCDCStreamNameValue(ValueRef const& value);
 
+// "\xff/cdc/maxStreamId" := "[[CDCStreamId]]"
+extern const KeyRef cdcMaxStreamIdKey;
+Value cdcMaxStreamIdValue(CDCStreamId streamId);
+CDCStreamId decodeCDCMaxStreamIdValue(ValueRef const& value);
+
 // "\xff/cdc/keys/[[CDCStreamId]]" := "[[KeyRange]]"
 extern const KeyRangeRef cdcStreamKeys;
 Key cdcStreamKeyFor(CDCStreamId streamId);
