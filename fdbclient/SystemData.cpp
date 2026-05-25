@@ -889,7 +889,19 @@ Value cdcMinVersionValue(Version version) {
 	return wr.toValue();
 }
 
+Value cdcVersionstampedMinVersionValue() {
+	// Ten placeholder bytes followed by the versionstamp offset at byte zero.
+	return "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"_sr;
+}
+
 Version decodeCDCMinVersionValue(ValueRef const& value) {
+	if (value.size() == sizeof(Version) + sizeof(uint16_t)) {
+		Versionstamp versionstamp;
+		BinaryReader reader(value, Unversioned());
+		reader >> versionstamp;
+		return versionstamp.version;
+	}
+
 	Version version;
 	BinaryReader reader(value, IncludeVersion());
 	ASSERT_WE_THINK(reader.protocolVersion().hasNativeCdc());
@@ -1816,6 +1828,8 @@ TEST_CASE("noSim/SystemData/NativeCDC") {
 	ASSERT(decodeCDCStreamKeysValue(cdcStreamKeysValue(keys)) == keys);
 	ASSERT(decodeCDCMinVersionKey(cdcMinVersionKeyFor(streamId)) == streamId);
 	ASSERT(decodeCDCMinVersionValue(cdcMinVersionValue(minVersion)) == minVersion);
+	ASSERT(cdcVersionstampedMinVersionValue().size() ==
+	       sizeof(Version) + sizeof(uint16_t) + sizeof(int32_t));
 
 	const Key tagHistoryKey = cdcTagHistoryKeyFor(streamId, minVersion, tag);
 	const auto [decodedStreamId, decodedVersion, decodedTag] = decodeCDCTagHistoryKey(tagHistoryKey);

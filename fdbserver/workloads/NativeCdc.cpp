@@ -63,8 +63,9 @@ struct NativeCdcWorkload : TestWorkload {
 				ASSERT(history.size() == 1);
 				const auto [historyStreamId, historyVersion, tag] = decodeCDCTagHistoryKey(history[0].key);
 				ASSERT(historyStreamId == streamId);
-				ASSERT(historyVersion == decodeCDCMinVersionValue(minVersion.get()));
-				co_return std::make_pair(tag, historyVersion);
+				const Version initialMinVersion = decodeCDCMinVersionValue(minVersion.get());
+				ASSERT(historyVersion <= initialMinVersion);
+				co_return std::make_pair(tag, initialMinVersion);
 			} catch (Error& e) {
 				err = e;
 			}

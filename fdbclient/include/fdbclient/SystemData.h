@@ -293,10 +293,12 @@ KeyRange cdcTagHistoryRangeFor(CDCStreamId streamId);
 std::tuple<CDCStreamId, Version, Tag> decodeCDCTagHistoryKey(KeyRef const& key);
 
 // "\xff/cdc/minVersion/[[CDCStreamId]]" := "[[Version]]"
+// The initial value is versionstamped at stream registration commit.
 extern const KeyRangeRef cdcMinVersionKeys;
 Key cdcMinVersionKeyFor(CDCStreamId streamId);
 CDCStreamId decodeCDCMinVersionKey(KeyRef const& key);
 Value cdcMinVersionValue(Version version);
+Value cdcVersionstampedMinVersionValue();
 Version decodeCDCMinVersionValue(ValueRef const& value);
 
 // "\xff/cdc/proxies/[[CDCStreamId]][[proxyUID]]" := ""
