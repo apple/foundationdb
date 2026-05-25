@@ -30,6 +30,7 @@
 #include "fdbclient/NativeCdc.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/cdcproxy/CDCProxy.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/LogProtocolMessage.h"
 #include "fdbserver/core/OTELSpanContextMessage.h"
 #include "fdbserver/core/ServerDBInfo.h"
@@ -57,9 +58,11 @@ struct CDCBufferedStream : ReferenceCounted<CDCBufferedStream> {
 	bool initialized = false;
 	Version minVersion = invalidVersion;
 	Version bufferedThrough = invalidVersion;
+	int64_t bufferedBytes = 0;
 	std::deque<Standalone<VersionedMutationsRef>> mutations;
 	AsyncTrigger changed;
 	AsyncTrigger refresh;
+	AsyncTrigger spaceAvailable;
 	AsyncTrigger stopped;
 
 	explicit CDCBufferedStream(CDCStreamId streamId) : streamId(streamId) {}
@@ -187,8 +190,10 @@ void bufferMessages(Reference<CDCBufferedStream> stream,
 				if (stream->mutations.empty() || stream->mutations.back().version != messageVersion) {
 					stream->mutations.emplace_back();
 					stream->mutations.back().version = messageVersion;
+					stream->bufferedBytes += sizeof(VersionedMutationsRef);
 				}
 				stream->mutations.back().mutations.push_back_deep(stream->mutations.back().arena(), clipped.get());
+				stream->bufferedBytes += clipped.get().expectedSize() + sizeof(MutationRef);
 			}
 		}
 		stream->bufferedThrough = std::max(stream->bufferedThrough, messageVersion);
@@ -215,6 +220,19 @@ Future<Void> bufferStream(CDCProxyData* self, Reference<CDCBufferedStream> strea
 			Reference<IReplayPeekCursor> cursor =
 			    self->logSystem->get()->peekSingle(self->id, begin, metadata.currentTag, metadata.tagHistory);
 			while (stream->active) {
+				if (stream->bufferedBytes >= SERVER_KNOBS->CDC_PROXY_BUFFER_BYTES) {
+					auto waitForSpace = co_await race(stream->spaceAvailable.onTrigger(),
+					                                  self->logSystem->onChange(),
+					                                  stream->stopped.onTrigger(),
+					                                  stream->refresh.onTrigger());
+					if (waitForSpace.index() == 0) {
+						continue;
+					}
+					if (waitForSpace.index() == 2) {
+						co_return;
+					}
+					break;
+				}
 				auto result = co_await race(cursor->getMore(TaskPriority::TLogPeekReply),
 				                            self->logSystem->onChange(),
 				                            stream->stopped.onTrigger(),
@@ -416,8 +434,13 @@ Future<Void> acknowledge(CDCProxyData* self, CDCAckRequest request) {
 		if (found != self->streams.end()) {
 			found->second->minVersion = std::max(found->second->minVersion, minVersion);
 			while (!found->second->mutations.empty() && found->second->mutations.front().version < minVersion) {
+				found->second->bufferedBytes -= sizeof(VersionedMutationsRef) +
+				                                found->second->mutations.front().mutations.expectedSize() +
+				                                found->second->mutations.front().mutations.size() * sizeof(MutationRef);
 				found->second->mutations.pop_front();
 			}
+			ASSERT(found->second->bufferedBytes >= 0);
+			found->second->spaceAvailable.trigger();
 		}
 		co_await popAcknowledgedData(self);
 		request.reply.send(Void());
