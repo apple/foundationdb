@@ -19,7 +19,9 @@
  */
 
 #include <algorithm>
+#include <deque>
 #include <limits>
+#include <map>
 #include <set>
 #include <utility>
 #include <vector>
@@ -49,14 +51,30 @@ struct CDCStreamReadState {
 	std::vector<std::pair<Version, Tag>> tagHistory;
 };
 
+struct CDCBufferedStream : ReferenceCounted<CDCBufferedStream> {
+	CDCStreamId streamId;
+	bool active = true;
+	bool initialized = false;
+	Version minVersion = invalidVersion;
+	Version bufferedThrough = invalidVersion;
+	std::deque<Standalone<VersionedMutationsRef>> mutations;
+	AsyncTrigger changed;
+	AsyncTrigger refresh;
+	AsyncTrigger stopped;
+
+	explicit CDCBufferedStream(CDCStreamId streamId) : streamId(streamId) {}
+};
+
 struct CDCProxyData {
 	UID id;
 	Database cx;
 	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
-	Reference<LogSystemConsumer> logSystem;
+	Reference<AsyncVar<Reference<LogSystemConsumer>>> logSystem;
+	std::map<CDCStreamId, Reference<CDCBufferedStream>> streams;
 
 	CDCProxyData(CDCProxyInterface const& proxy, Reference<AsyncVar<ServerDBInfo> const> dbInfo)
-	  : id(proxy.id()), cx(openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True)), dbInfo(dbInfo) {}
+	  : id(proxy.id()), cx(openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True)), dbInfo(dbInfo),
+	    logSystem(makeReference<AsyncVar<Reference<LogSystemConsumer>>>()) {}
 };
 
 Optional<MutationRef> clipCDCMutation(MutationRef const& mutation, KeyRangeRef const& keys) {
@@ -145,6 +163,197 @@ Future<CDCStreamReadState> readCDCStreamState(Database cx,
 	}
 }
 
+void bufferMessages(Reference<CDCBufferedStream> stream,
+                    CDCStreamReadState const& metadata,
+                    Reference<IReplayPeekCursor> cursor) {
+	while (cursor->hasMessage()) {
+		const Version messageVersion = cursor->version().version;
+		ArenaReader& reader = *cursor->reader();
+		if (LogProtocolMessage::isNextIn(reader)) {
+			LogProtocolMessage protocolMessage;
+			reader >> protocolMessage;
+			cursor->setProtocolVersion(reader.protocolVersion());
+		} else if (reader.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(reader)) {
+			SpanContextMessage contextMessage;
+			reader >> contextMessage;
+		} else if (reader.protocolVersion().hasOTELSpanContext() && OTELSpanContextMessage::isNextIn(reader)) {
+			OTELSpanContextMessage contextMessage;
+			reader >> contextMessage;
+		} else {
+			MutationRef mutation;
+			reader >> mutation;
+			Optional<MutationRef> clipped = clipCDCMutation(mutation, metadata.keys.get());
+			if (clipped.present()) {
+				if (stream->mutations.empty() || stream->mutations.back().version != messageVersion) {
+					stream->mutations.emplace_back();
+					stream->mutations.back().version = messageVersion;
+				}
+				stream->mutations.back().mutations.push_back_deep(stream->mutations.back().arena(), clipped.get());
+			}
+		}
+		stream->bufferedThrough = std::max(stream->bufferedThrough, messageVersion);
+		cursor->nextMessage();
+	}
+}
+
+Future<Void> bufferStream(CDCProxyData* self, Reference<CDCBufferedStream> stream) {
+	try {
+		CDCStreamReadState metadata = co_await readCDCStreamState(self->cx, stream->streamId, self->id, true);
+		stream->minVersion = metadata.minVersion;
+		stream->bufferedThrough = metadata.minVersion - 1;
+		stream->initialized = true;
+		stream->changed.trigger();
+
+		while (stream->active) {
+			if (!self->logSystem->get()) {
+				co_await self->logSystem->onChange();
+				continue;
+			}
+
+			metadata = co_await readCDCStreamState(self->cx, stream->streamId, self->id, true);
+			const Version begin = stream->bufferedThrough + 1;
+			Reference<IReplayPeekCursor> cursor =
+			    self->logSystem->get()->peekSingle(self->id, begin, metadata.currentTag, metadata.tagHistory);
+			while (stream->active) {
+				auto result = co_await race(cursor->getMore(TaskPriority::TLogPeekReply),
+				                            self->logSystem->onChange(),
+				                            stream->stopped.onTrigger(),
+				                            stream->refresh.onTrigger());
+				if (result.index() == 1) {
+					break;
+				}
+				if (result.index() == 2) {
+					co_return;
+				}
+				if (result.index() == 3) {
+					break;
+				}
+
+				cursor->setProtocolVersion(g_network->protocolVersion());
+				if (cursor->popped() > begin) {
+					throw transaction_too_old();
+				}
+
+				const Version previousBufferedThrough = stream->bufferedThrough;
+				bufferMessages(stream, metadata, cursor);
+				if (stream->bufferedThrough > previousBufferedThrough) {
+					stream->changed.trigger();
+				}
+				if (cursor->isExhausted()) {
+					Optional<Version> nextTagBoundary;
+					for (const auto& historyEntry : metadata.tagHistory) {
+						const Version boundary = historyEntry.first;
+						if (boundary > begin && (!nextTagBoundary.present() || boundary < nextTagBoundary.get())) {
+							nextTagBoundary = boundary;
+						}
+					}
+					if (nextTagBoundary.present()) {
+						const Version previousBufferedThrough = stream->bufferedThrough;
+						stream->bufferedThrough = std::max(stream->bufferedThrough, nextTagBoundary.get() - 1);
+						if (stream->bufferedThrough > previousBufferedThrough) {
+							stream->changed.trigger();
+						}
+					} else {
+						co_await delay(0.1);
+					}
+					break;
+				}
+			}
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_client_invalid_operation || e.code() == error_code_wrong_shard_server) {
+			stream->active = false;
+			stream->changed.trigger();
+			co_return;
+		}
+		throw;
+	}
+}
+
+Future<std::map<Tag, Version>> readSafePopVersions(Database cx) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+
+			std::map<CDCStreamId, Version> minVersions;
+			Key begin = cdcMinVersionKeys.begin;
+			while (begin < cdcMinVersionKeys.end) {
+				RangeResult minima =
+				    co_await tr.getRange(KeyRangeRef(begin, cdcMinVersionKeys.end), CLIENT_KNOBS->TOO_MANY);
+				for (const auto& kv : minima) {
+					minVersions[decodeCDCMinVersionKey(kv.key)] = decodeCDCMinVersionValue(kv.value);
+				}
+				if (!minima.more) {
+					break;
+				}
+				begin = keyAfter(minima.back().key);
+			}
+
+			std::map<Tag, Version> safePopVersions;
+			begin = cdcTagHistoryKeys.begin;
+			while (begin < cdcTagHistoryKeys.end) {
+				RangeResult histories =
+				    co_await tr.getRange(KeyRangeRef(begin, cdcTagHistoryKeys.end), CLIENT_KNOBS->TOO_MANY);
+				for (const auto& kv : histories) {
+					const auto [streamId, version, tag] = decodeCDCTagHistoryKey(kv.key);
+					auto minimum = minVersions.find(streamId);
+					if (minimum == minVersions.end()) {
+						continue;
+					}
+					auto safePop = safePopVersions.find(tag);
+					if (safePop == safePopVersions.end()) {
+						safePopVersions[tag] = minimum->second;
+					} else {
+						safePop->second = std::min(safePop->second, minimum->second);
+					}
+				}
+				if (!histories.more) {
+					break;
+				}
+				begin = keyAfter(histories.back().key);
+			}
+			co_return safePopVersions;
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr.onError(err);
+	}
+}
+
+Future<Void> popAcknowledgedData(CDCProxyData* self) {
+	const std::map<Tag, Version> safePopVersions = co_await readSafePopVersions(self->cx);
+	for (const auto& [tag, version] : safePopVersions) {
+		self->logSystem->get()->pop(version, tag);
+	}
+}
+
+void reconcileStreams(CDCProxyData* self, ActorCollection* actors) {
+	std::set<CDCStreamId> assignedStreams;
+	for (const auto& [streamId, proxyId] : self->dbInfo->get().client.streamToCDCProxyId) {
+		if (proxyId == self->id) {
+			assignedStreams.insert(streamId);
+			if (!self->streams.contains(streamId)) {
+				Reference<CDCBufferedStream> stream = makeReference<CDCBufferedStream>(streamId);
+				self->streams.emplace(streamId, stream);
+				actors->add(bufferStream(self, stream));
+			}
+		}
+	}
+
+	for (auto it = self->streams.begin(); it != self->streams.end();) {
+		if (!assignedStreams.contains(it->first)) {
+			it->second->active = false;
+			it->second->stopped.trigger();
+			it = self->streams.erase(it);
+		} else {
+			++it;
+		}
+	}
+}
+
 Future<Void> consume(CDCProxyData* self, CDCConsumeRequest request) {
 	try {
 		if (request.cursor.lastConsumedVersion < invalidVersion ||
@@ -152,54 +361,48 @@ Future<Void> consume(CDCProxyData* self, CDCConsumeRequest request) {
 			throw client_invalid_operation();
 		}
 
-		CDCStreamReadState state = co_await readCDCStreamState(self->cx, request.cursor.streamId, self->id, true);
-		Version begin = request.cursor.lastConsumedVersion == invalidVersion ? state.minVersion
+		co_await readCDCStreamState(self->cx, request.cursor.streamId, self->id, true);
+		auto found = self->streams.find(request.cursor.streamId);
+		if (found == self->streams.end()) {
+			throw wrong_shard_server();
+		}
+		Reference<CDCBufferedStream> stream = found->second;
+		while (!stream->initialized) {
+			co_await stream->changed.onTrigger();
+		}
+
+		Version begin = request.cursor.lastConsumedVersion == invalidVersion ? stream->minVersion
 		                                                                     : request.cursor.lastConsumedVersion + 1;
-		if (begin < state.minVersion) {
+		if (begin < stream->minVersion) {
 			throw transaction_too_old();
 		}
 
-		Reference<IReplayPeekCursor> cursor =
-		    self->logSystem->peekSingle(self->id, begin, state.currentTag, state.tagHistory);
-		while (!cursor->hasMessage()) {
-			co_await cursor->getMore(TaskPriority::TLogPeekReply);
-			cursor->setProtocolVersion(g_network->protocolVersion());
-			if (cursor->popped() > begin) {
-				throw transaction_too_old();
-			}
+		if (stream->bufferedThrough < begin) {
+			stream->refresh.trigger();
+		}
+		while (stream->active && stream->bufferedThrough < begin) {
+			co_await stream->changed.onTrigger();
+		}
+		if (!stream->active) {
+			throw wrong_shard_server();
 		}
 
 		CDCConsumeReply reply;
 		reply.lastConsumedVersion = request.cursor.lastConsumedVersion;
-		while (cursor->hasMessage()) {
-			const Version messageVersion = cursor->version().version;
-			ArenaReader& reader = *cursor->reader();
-			if (LogProtocolMessage::isNextIn(reader)) {
-				LogProtocolMessage protocolMessage;
-				reader >> protocolMessage;
-				cursor->setProtocolVersion(reader.protocolVersion());
-			} else if (reader.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(reader)) {
-				SpanContextMessage contextMessage;
-				reader >> contextMessage;
-			} else if (reader.protocolVersion().hasOTELSpanContext() && OTELSpanContextMessage::isNextIn(reader)) {
-				OTELSpanContextMessage contextMessage;
-				reader >> contextMessage;
-			} else {
-				MutationRef mutation;
-				reader >> mutation;
-				Optional<MutationRef> clipped = clipCDCMutation(mutation, state.keys.get());
-				if (clipped.present()) {
-					if (reply.mutations.empty() || reply.mutations.back().version != messageVersion) {
-						reply.mutations.push_back(reply.arena, VersionedMutationsRef(messageVersion, {}));
-					}
-					reply.mutations.back().mutations.push_back_deep(reply.arena, clipped.get());
+		for (const auto& versioned : stream->mutations) {
+			if (versioned.version >= begin) {
+				reply.mutations.push_back(reply.arena, VersionedMutationsRef(versioned.version, {}));
+				for (const auto& mutation : versioned.mutations) {
+					reply.mutations.back().mutations.push_back_deep(reply.arena, mutation);
 				}
 			}
-			reply.lastConsumedVersion = std::max(reply.lastConsumedVersion, messageVersion);
-			cursor->nextMessage();
 		}
+		reply.lastConsumedVersion = stream->bufferedThrough;
 		request.reply.send(reply);
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		request.reply.sendError(e);
 	}
 	co_return;
@@ -207,17 +410,21 @@ Future<Void> consume(CDCProxyData* self, CDCConsumeRequest request) {
 
 Future<Void> acknowledge(CDCProxyData* self, CDCAckRequest request) {
 	try {
-		CDCStreamReadState state = co_await readCDCStreamState(self->cx, request.streamId, self->id, false);
+		co_await readCDCStreamState(self->cx, request.streamId, self->id, false);
 		const Version minVersion = co_await acknowledgeNativeCdcStream(self->cx, request.streamId, request.version);
-		std::set<Tag> tags{ state.currentTag };
-		for (const auto& history : state.tagHistory) {
-			tags.insert(history.second);
+		auto found = self->streams.find(request.streamId);
+		if (found != self->streams.end()) {
+			found->second->minVersion = std::max(found->second->minVersion, minVersion);
+			while (!found->second->mutations.empty() && found->second->mutations.front().version < minVersion) {
+				found->second->mutations.pop_front();
+			}
 		}
-		for (Tag tag : tags) {
-			self->logSystem->pop(minVersion, tag);
-		}
+		co_await popAcknowledgedData(self);
 		request.reply.send(Void());
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		request.reply.sendError(e);
 	}
 	co_return;
@@ -228,6 +435,9 @@ Future<Void> registerStream(CDCProxyData* self, CDCRegisterStreamRequest request
 		const CDCStreamId streamId = co_await registerNativeCdcStream(self->cx, request.name, request.keys, self->id);
 		request.reply.send(CDCRegisterStreamReply(streamId));
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		request.reply.sendError(e);
 	}
 	co_return;
@@ -238,6 +448,9 @@ Future<Void> removeStream(CDCProxyData* self, CDCRemoveStreamRequest request) {
 		co_await removeNativeCdcStream(self->cx, request.name, self->id);
 		request.reply.send(Void());
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		request.reply.sendError(e);
 	}
 	co_return;
@@ -256,6 +469,9 @@ Future<Void> listStreams(CDCProxyData* self, CDCListStreamsRequest request) {
 		}
 		request.reply.send(reply);
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		request.reply.sendError(e);
 	}
 	co_return;
@@ -272,7 +488,8 @@ Future<Void> cdcProxyServer(CDCProxyInterface proxy,
 
 		actors.add(waitFailureServer(proxy.waitFailure.getFuture()));
 		actors.add(traceRole(Role::CDC_PROXY, proxy.id()));
-		self.logSystem = makeLogSystemConsumerFromServerDBInfo(self.id, dbInfo->get());
+		self.logSystem->set(makeLogSystemConsumerFromServerDBInfo(self.id, dbInfo->get()));
+		reconcileStreams(&self, &actors);
 		Future<Void> dbInfoChange = dbInfo->onChange();
 		bool hasBeenPublished =
 		    std::find(dbInfo->get().client.cdcProxies.begin(), dbInfo->get().client.cdcProxies.end(), proxy) !=
@@ -319,8 +536,9 @@ Future<Void> cdcProxyServer(CDCProxyInterface proxy,
 				}
 				hasBeenPublished = hasBeenPublished || isPublished;
 				if (!dbInfo->get().logSystemConfig.tLogs.empty()) {
-					self.logSystem = makeLogSystemConsumerFromServerDBInfo(self.id, dbInfo->get());
+					self.logSystem->set(makeLogSystemConsumerFromServerDBInfo(self.id, dbInfo->get()));
 				}
+				reconcileStreams(&self, &actors);
 				dbInfoChange = dbInfo->onChange();
 				break;
 			}

@@ -1,0 +1,7 @@
+[[test]]
+testTitle = 'NativeCdcSharedTag'
+useDB = true
+
+    [[test.workload]]
+    testName = 'NativeCdc'
+    sharedTagSafety = true

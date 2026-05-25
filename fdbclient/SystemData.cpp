@@ -867,6 +867,13 @@ Key cdcMinVersionKeyFor(CDCStreamId streamId) {
 	return wr.toValue();
 }
 
+CDCStreamId decodeCDCMinVersionKey(KeyRef const& key) {
+	CDCStreamId streamId;
+	BinaryReader reader(key.removePrefix(cdcMinVersionKeys.begin), Unversioned());
+	reader >> streamId;
+	return streamId;
+}
+
 Value cdcMinVersionValue(Version version) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withNativeCdc()));
 	wr << version;
@@ -1797,6 +1804,7 @@ TEST_CASE("noSim/SystemData/NativeCDC") {
 	ASSERT(decodeCDCStreamNameValue(cdcStreamNameValue(streamId)) == streamId);
 	ASSERT(decodeCDCStreamKey(cdcStreamKeyFor(streamId)) == streamId);
 	ASSERT(decodeCDCStreamKeysValue(cdcStreamKeysValue(keys)) == keys);
+	ASSERT(decodeCDCMinVersionKey(cdcMinVersionKeyFor(streamId)) == streamId);
 	ASSERT(decodeCDCMinVersionValue(cdcMinVersionValue(minVersion)) == minVersion);
 
 	const Key tagHistoryKey = cdcTagHistoryKeyFor(streamId, minVersion, tag);

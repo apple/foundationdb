@@ -31,8 +31,10 @@
 
 struct NativeCdcWorkload : TestWorkload {
 	static constexpr auto NAME = "NativeCdc";
+	bool sharedTagSafety;
 
-	explicit NativeCdcWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
+	explicit NativeCdcWorkload(WorkloadContext const& wcx)
+	  : TestWorkload(wcx), sharedTagSafety(getOption(options, "sharedTagSafety"_sr, false)) {}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -40,7 +42,7 @@ struct NativeCdcWorkload : TestWorkload {
 		if (clientId != 0) {
 			return Void();
 		}
-		return run(cx);
+		return sharedTagSafety ? runSharedTagSafety(cx) : run(cx);
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }
@@ -79,6 +81,42 @@ struct NativeCdcWorkload : TestWorkload {
 				Optional<Value> minVersion = co_await tr.get(cdcMinVersionKeyFor(streamId));
 				ASSERT(minVersion.present());
 				co_return decodeCDCMinVersionValue(minVersion.get());
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
+	}
+
+	Future<Void> appendPersistedTag(Database cx, CDCStreamId streamId, Tag tag) {
+		Transaction tr(cx);
+		while (true) {
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				const Version assignmentVersion = co_await tr.getReadVersion();
+				tr.set(cdcTagHistoryKeyFor(streamId, assignmentVersion, tag), Value());
+				co_await tr.commit();
+				co_return;
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
+	}
+
+	Future<Tag> getLatestPersistedTag(Database cx, CDCStreamId streamId) {
+		Transaction tr(cx);
+		while (true) {
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				RangeResult history = co_await tr.getRange(cdcTagHistoryRangeFor(streamId), CLIENT_KNOBS->TOO_MANY);
+				ASSERT(!history.empty());
+				const auto historyEntry = decodeCDCTagHistoryKey(history.back().key);
+				ASSERT(std::get<0>(historyEntry) == streamId);
+				co_return std::get<2>(historyEntry);
 			} catch (Error& e) {
 				err = e;
 			}
@@ -147,6 +185,57 @@ struct NativeCdcWorkload : TestWorkload {
 		while (dbInfo->get().recoveryCount <= previousRecoveryCount || dbInfo->get().recoveryState < requiredState) {
 			co_await dbInfo->onChange();
 		}
+		co_return;
+	}
+
+	Future<Void> runSharedTagSafety(Database cx) {
+		CDCProxyInterface proxy = co_await getCDCProxy();
+		const Key firstName = "native-cdc-shared-first"_sr;
+		const Key secondName = "native-cdc-shared-second"_sr;
+		const KeyRange keys(KeyRangeRef("shared/"_sr, "shared0"_sr));
+		const CDCStreamId firstId = co_await registerNativeCdcStream(cx, firstName, keys);
+		const CDCStreamId secondId = co_await registerNativeCdcStream(cx, secondName, keys);
+		const auto firstRoute = co_await getPersistedRoute(cx, firstId);
+		co_await appendPersistedTag(cx, secondId, firstRoute.first);
+		ASSERT((co_await getLatestPersistedTag(cx, secondId)) == firstRoute.first);
+
+		ASSERT((co_await proxy.registerStream.getReply(CDCRegisterStreamRequest(firstName, keys))).streamId == firstId);
+		CDCProxyInterface firstOwner = co_await getCDCProxy(firstId);
+		Transaction write(cx);
+		write.setOption(FDBTransactionOptions::LOCK_AWARE);
+		write.set("shared/unread"_sr, "protected-by-minimum"_sr);
+		co_await write.commit();
+		const Version writeVersion = write.getCommittedVersion();
+		CDCConsumeReply consumed = co_await timeoutError(
+		    firstOwner.consume.getReply(CDCConsumeRequest(CDCCursor(firstId, invalidVersion))), 30.0);
+		ASSERT(consumed.lastConsumedVersion >= writeVersion);
+		co_await firstOwner.ack.getReply(CDCAckRequest(firstId, consumed.lastConsumedVersion));
+
+		ASSERT((co_await firstOwner.registerStream.getReply(CDCRegisterStreamRequest(secondName, keys))).streamId ==
+		       secondId);
+		CDCProxyInterface secondOwner = co_await getCDCProxy(secondId);
+		CDCCursor unreadCursor(secondId, invalidVersion);
+		bool foundUnread = false;
+		while (unreadCursor.lastConsumedVersion < writeVersion) {
+			CDCConsumeReply unread =
+			    co_await timeoutError(secondOwner.consume.getReply(CDCConsumeRequest(unreadCursor)), 30.0);
+			ASSERT(unread.lastConsumedVersion > unreadCursor.lastConsumedVersion);
+			for (const auto& versioned : unread.mutations) {
+				for (const auto& mutation : versioned.mutations) {
+					if (mutation.param1 == "shared/unread"_sr) {
+						foundUnread = true;
+					}
+				}
+			}
+			unreadCursor.lastConsumedVersion = unread.lastConsumedVersion;
+		}
+		ASSERT(foundUnread);
+		co_await secondOwner.ack.getReply(CDCAckRequest(secondId, unreadCursor.lastConsumedVersion));
+
+		co_await firstOwner.removeStream.getReply(CDCRemoveStreamRequest(firstName));
+		co_await secondOwner.removeStream.getReply(CDCRemoveStreamRequest(secondName));
+		co_await waitForCDCProxyAssignmentRemoval(firstId);
+		co_await waitForCDCProxyAssignmentRemoval(secondId);
 		co_return;
 	}
 

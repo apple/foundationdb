@@ -290,6 +290,7 @@ std::tuple<CDCStreamId, Version, Tag> decodeCDCTagHistoryKey(KeyRef const& key);
 // "\xff/cdc/minVersion/[[CDCStreamId]]" := "[[Version]]"
 extern const KeyRangeRef cdcMinVersionKeys;
 Key cdcMinVersionKeyFor(CDCStreamId streamId);
+CDCStreamId decodeCDCMinVersionKey(KeyRef const& key);
 Value cdcMinVersionValue(Version version);
 Version decodeCDCMinVersionValue(ValueRef const& value);
 
