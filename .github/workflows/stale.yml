@@ -19,6 +19,5 @@ jobs:
           days-before-pr-stale: 150
           days-before-close: 14
           days-before-issue-stale: 5475 # 15 years, basically disabled for issues
-          # throttled to 20 per day
-          operations-per-run: 20
+          operations-per-run: 80 # operating on one PR can use multiple "operations"
           ascending: true
