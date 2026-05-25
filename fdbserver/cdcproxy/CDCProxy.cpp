@@ -249,6 +249,9 @@ Future<Void> bufferStream(CDCProxyData* self, Reference<CDCBufferedStream> strea
 
 				cursor->setProtocolVersion(g_network->protocolVersion());
 				if (cursor->popped() > begin) {
+					if (cursor->popped() <= stream->minVersion) {
+						break;
+					}
 					throw transaction_too_old();
 				}
 
@@ -439,6 +442,7 @@ Future<Void> acknowledge(CDCProxyData* self, CDCAckRequest request) {
 				found->second->mutations.pop_front();
 			}
 			ASSERT(found->second->bufferedBytes >= 0);
+			found->second->refresh.trigger();
 			found->second->spaceAvailable.trigger();
 		}
 		co_await popAcknowledgedData(self);
