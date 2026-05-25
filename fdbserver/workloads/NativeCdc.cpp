@@ -106,6 +106,21 @@ struct NativeCdcWorkload : TestWorkload {
 		}
 	}
 
+	Future<CDCProxyInterface> getReplacementCDCProxy(CDCStreamId streamId, UID failedProxyId) {
+		while (true) {
+			const ClientDBInfo& client = dbInfo->get().client;
+			auto assigned = client.streamToCDCProxyId.find(streamId);
+			if (assigned != client.streamToCDCProxyId.end() && assigned->second != failedProxyId) {
+				for (const auto& proxy : client.cdcProxies) {
+					if (proxy.id() == assigned->second) {
+						co_return proxy;
+					}
+				}
+			}
+			co_await dbInfo->onChange();
+		}
+	}
+
 	Future<Void> waitForCDCProxyAssignmentRemoval(CDCStreamId streamId) {
 		while (dbInfo->get().client.streamToCDCProxyId.contains(streamId)) {
 			co_await dbInfo->onChange();
@@ -227,9 +242,35 @@ struct NativeCdcWorkload : TestWorkload {
 		ASSERT(foundInRangeWrite);
 		ASSERT(!foundOutOfRangeWrite);
 
-		co_await owner.ack.getReply(CDCAckRequest(liveRegistration.streamId, writeVersion));
-		ASSERT(co_await getPersistedMinVersion(cx, liveRegistration.streamId) == writeVersion + 1);
-		co_await owner.removeStream.getReply(CDCRemoveStreamRequest(liveName));
+		const uint64_t recoveryCount = dbInfo->get().recoveryCount;
+		co_await owner.haltForTesting.getReply(HaltCDCProxyRequest());
+		CDCProxyInterface replacement =
+		    co_await timeoutError(getReplacementCDCProxy(liveRegistration.streamId, owner.id()), 30.0);
+		ASSERT(replacement.id() != owner.id());
+		ASSERT(dbInfo->get().recoveryCount == recoveryCount);
+
+		Transaction afterFailureWrite(cx);
+		afterFailureWrite.set("live/after-failure"_sr, "captured-after-failure"_sr);
+		co_await afterFailureWrite.commit();
+		const Version afterFailureVersion = afterFailureWrite.getCommittedVersion();
+		CDCConsumeReply afterFailure =
+		    co_await timeoutError(replacement.consume.getReply(CDCConsumeRequest(
+		                              CDCCursor(liveRegistration.streamId, consumed.lastConsumedVersion))),
+		                          30.0);
+		ASSERT(afterFailure.lastConsumedVersion >= afterFailureVersion);
+		bool foundAfterFailureWrite = false;
+		for (const auto& versioned : afterFailure.mutations) {
+			for (const auto& mutation : versioned.mutations) {
+				if (mutation.param1 == "live/after-failure"_sr) {
+					foundAfterFailureWrite = true;
+				}
+			}
+		}
+		ASSERT(foundAfterFailureWrite);
+
+		co_await replacement.ack.getReply(CDCAckRequest(liveRegistration.streamId, afterFailureVersion));
+		ASSERT(co_await getPersistedMinVersion(cx, liveRegistration.streamId) == afterFailureVersion + 1);
+		co_await replacement.removeStream.getReply(CDCRemoveStreamRequest(liveName));
 		co_await waitForCDCProxyAssignmentRemoval(liveRegistration.streamId);
 	}
 };

@@ -272,6 +272,9 @@ Future<Void> cdcProxyServer(CDCProxyInterface proxy,
 		actors.add(traceRole(Role::CDC_PROXY, proxy.id()));
 		self.logSystem = makeLogSystemConsumerFromServerDBInfo(self.id, dbInfo->get());
 		Future<Void> dbInfoChange = dbInfo->onChange();
+		bool hasBeenPublished =
+		    std::find(dbInfo->get().client.cdcProxies.begin(), dbInfo->get().client.cdcProxies.end(), proxy) !=
+		    dbInfo->get().client.cdcProxies.end();
 
 		while (true) {
 			auto result = co_await race(proxy.consume.getFuture(),
@@ -279,6 +282,7 @@ Future<Void> cdcProxyServer(CDCProxyInterface proxy,
 			                            proxy.registerStream.getFuture(),
 			                            proxy.removeStream.getFuture(),
 			                            proxy.listStreams.getFuture(),
+			                            proxy.haltForTesting.getFuture(),
 			                            dbInfoChange,
 			                            actors.getResult());
 			switch (result.index()) {
@@ -298,15 +302,25 @@ Future<Void> cdcProxyServer(CDCProxyInterface proxy,
 				actors.add(listStreams(&self, std::get<4>(std::move(result))));
 				break;
 			case 5:
-				if (dbInfo->get().recoveryCount >= recoveryCount &&
-				    std::find(dbInfo->get().client.cdcProxies.begin(), dbInfo->get().client.cdcProxies.end(), proxy) ==
-				        dbInfo->get().client.cdcProxies.end()) {
+				if (!g_network->isSimulated()) {
+					std::get<5>(std::move(result)).reply.sendError(client_invalid_operation());
+					break;
+				}
+				std::get<5>(std::move(result)).reply.send(Void());
+				throw worker_removed();
+			case 6: {
+				const bool isPublished =
+				    std::find(dbInfo->get().client.cdcProxies.begin(), dbInfo->get().client.cdcProxies.end(), proxy) !=
+				    dbInfo->get().client.cdcProxies.end();
+				if (hasBeenPublished && dbInfo->get().recoveryCount >= recoveryCount && !isPublished) {
 					throw worker_removed();
 				}
+				hasBeenPublished = hasBeenPublished || isPublished;
 				self.logSystem = makeLogSystemConsumerFromServerDBInfo(self.id, dbInfo->get());
 				dbInfoChange = dbInfo->onChange();
 				break;
-			case 6:
+			}
+			case 7:
 				co_await actors.getResult();
 				break;
 			default:

@@ -2800,6 +2800,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				DUMPTOKEN(recruited.consume);
 				DUMPTOKEN(recruited.ack);
 				DUMPTOKEN(recruited.waitFailure);
+				DUMPTOKEN(recruited.haltForTesting);
 
 				errorForwarders.add(zombie(recruited,
 				                           forwardError(errors,

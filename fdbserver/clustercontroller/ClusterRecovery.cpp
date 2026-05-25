@@ -429,19 +429,6 @@ Future<Void> waitGrvProxyFailure(std::vector<GrvProxyInterface> const& grvProxie
 	return tagError<Void>(quorum(failed, 1), grv_proxy_failed());
 }
 
-Future<Void> waitCDCProxyFailure(std::vector<CDCProxyInterface> const& cdcProxies) {
-	std::vector<Future<Void>> failed;
-	failed.reserve(cdcProxies.size());
-	for (auto cdcProxy : cdcProxies) {
-		failed.push_back(waitFailureClient(cdcProxy.waitFailure,
-		                                   SERVER_KNOBS->TLOG_TIMEOUT,
-		                                   -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
-		                                   /*trace=*/true));
-	}
-	ASSERT(failed.size() >= 1);
-	return tagError<Void>(quorum(failed, 1), cdc_proxy_failed());
-}
-
 Future<Void> waitResolverFailure(std::vector<ResolverInterface> const& resolvers) {
 	std::vector<Future<Void>> failed;
 	failed.reserve(resolvers.size());
@@ -1798,7 +1785,6 @@ Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	self->addActor.send(waitResolverFailure(self->resolvers));
 	self->addActor.send(waitCommitProxyFailure(self->commitProxies));
 	self->addActor.send(waitGrvProxyFailure(self->grvProxies));
-	self->addActor.send(waitCDCProxyFailure(self->cdcProxies));
 	self->addActor.send(reportErrors(updateRegistration(self, self->logSystem), "UpdateRegistration", self->dbgid));
 	self->registrationTrigger.trigger();
 

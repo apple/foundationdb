@@ -244,6 +244,50 @@ Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams(Database cx) {
 	co_return result;
 }
 
+Future<Void> reassignNativeCdcStreams(Database cx, UID oldProxyId, UID newProxyId) {
+	if (oldProxyId == newProxyId) {
+		co_return;
+	}
+
+	Transaction tr(cx);
+	while (true) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			bool changed = false;
+			Key begin = cdcProxyKeys.begin;
+			while (begin < cdcProxyKeys.end) {
+				RangeResult assignments =
+				    co_await tr.getRange(KeyRangeRef(begin, cdcProxyKeys.end), CLIENT_KNOBS->TOO_MANY);
+				for (const auto& assignment : assignments) {
+					const auto [streamId, proxyId] = decodeCDCProxyKey(assignment.key);
+					if (proxyId == oldProxyId) {
+						tr.clear(assignment.key);
+						tr.set(cdcProxyKeyFor(streamId, newProxyId), Value());
+						changed = true;
+					}
+				}
+				if (!assignments.more) {
+					break;
+				}
+				begin = keyAfter(assignments.back().key);
+			}
+
+			if (changed) {
+				signalNativeCdcProxyAssignmentChange(&tr);
+				co_await tr.commit();
+			}
+			co_return;
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr.onError(err);
+	}
+}
+
 Future<Version> acknowledgeNativeCdcStream(Database cx, CDCStreamId streamId, Version consumedThrough) {
 	if (streamId == 0 || consumedThrough < 0 || consumedThrough == std::numeric_limits<Version>::max()) {
 		throw client_invalid_operation();

@@ -41,6 +41,8 @@ Future<CDCStreamId> registerNativeCdcStream(Database cx,
                                             Optional<UID> proxyId = Optional<UID>());
 Future<Void> removeNativeCdcStream(Database cx, Key name, Optional<UID> proxyId = Optional<UID>());
 Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams(Database cx);
+// Atomically moves any streams assigned to a failed proxy to its replacement.
+Future<Void> reassignNativeCdcStreams(Database cx, UID oldProxyId, UID newProxyId);
 // Persists the exclusive unpopped watermark after consuming through a version.
 // Removed streams remain acknowledgeable while retained CDC log data is drained.
 Future<Version> acknowledgeNativeCdcStream(Database cx, CDCStreamId streamId, Version consumedThrough);

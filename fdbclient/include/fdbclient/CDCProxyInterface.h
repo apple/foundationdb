@@ -186,6 +186,18 @@ struct CDCAckRequest {
 	}
 };
 
+struct HaltCDCProxyRequest {
+	constexpr static FileIdentifier file_identifier = 16776014;
+	ReplyPromise<Void> reply;
+
+	bool verify() const { return true; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
 struct CDCProxyInterface {
 	constexpr static FileIdentifier file_identifier = 16776011;
 	enum { LocationAwareLoadBalance = 1 };
@@ -198,6 +210,7 @@ struct CDCProxyInterface {
 	PublicRequestStream<CDCListStreamsRequest> listStreams;
 	PublicRequestStream<CDCAckRequest> ack;
 	RequestStream<ReplyPromise<Void>> waitFailure;
+	RequestStream<HaltCDCProxyRequest> haltForTesting;
 
 	UID id() const { return consume.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
@@ -216,6 +229,7 @@ struct CDCProxyInterface {
 			listStreams = PublicRequestStream<CDCListStreamsRequest>(consume.getEndpoint().getAdjustedEndpoint(3));
 			ack = PublicRequestStream<CDCAckRequest>(consume.getEndpoint().getAdjustedEndpoint(4));
 			waitFailure = RequestStream<ReplyPromise<Void>>(consume.getEndpoint().getAdjustedEndpoint(5));
+			haltForTesting = RequestStream<HaltCDCProxyRequest>(consume.getEndpoint().getAdjustedEndpoint(6));
 		}
 	}
 
@@ -227,6 +241,7 @@ struct CDCProxyInterface {
 		streams.push_back(listStreams.getReceiver(TaskPriority::ReadSocket));
 		streams.push_back(ack.getReceiver(TaskPriority::ReadSocket));
 		streams.push_back(waitFailure.getReceiver());
+		streams.push_back(haltForTesting.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
