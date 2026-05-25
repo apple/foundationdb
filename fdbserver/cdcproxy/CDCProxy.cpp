@@ -216,7 +216,7 @@ Future<Void> bufferStream(CDCProxyData* self, Reference<CDCBufferedStream> strea
 			}
 
 			metadata = co_await readCDCStreamState(self->cx, stream->streamId, self->id, true);
-			const Version begin = stream->bufferedThrough + 1;
+			const Version begin = std::max(stream->bufferedThrough + 1, metadata.minVersion);
 			Reference<IReplayPeekCursor> cursor =
 			    self->logSystem->get()->peekSingle(self->id, begin, metadata.currentTag, metadata.tagHistory);
 			while (stream->active) {
