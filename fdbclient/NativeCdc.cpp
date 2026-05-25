@@ -24,6 +24,7 @@
 #include <utility>
 #include <vector>
 
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/NativeCdc.h"
 #include "fdbclient/SystemData.h"
@@ -111,6 +112,44 @@ Future<Void> observeNativeCdcMetadata(Transaction* tr, NativeCdcIdentifierAlloca
 			break;
 		}
 		begin = keyAfter(histories.back().key);
+	}
+}
+
+bool retryNativeCdcProxyRequest(Error const& error) {
+	return error.code() == error_code_wrong_shard_server || error.code() == error_code_broken_promise ||
+	       error.code() == error_code_connection_failed || error.code() == error_code_request_maybe_delivered;
+}
+
+Future<CDCProxyInterface> getAvailableNativeCdcProxy(Database cx, Optional<UID> previousProxy = Optional<UID>()) {
+	while (true) {
+		for (const auto& proxy : cx->clientInfo->get().cdcProxies) {
+			if (!previousProxy.present() || proxy.id() != previousProxy.get()) {
+				co_return proxy;
+			}
+		}
+		if (!cx->clientInfo->get().cdcProxies.empty()) {
+			co_return cx->clientInfo->get().cdcProxies.front();
+		}
+		co_await cx->clientInfo->onChange();
+	}
+}
+
+Future<CDCProxyInterface> getNativeCdcStreamProxy(Database cx, CDCStreamId streamId) {
+	if (streamId == 0) {
+		throw client_invalid_operation();
+	}
+
+	while (true) {
+		const ClientDBInfo& clientInfo = cx->clientInfo->get();
+		auto assigned = clientInfo.streamToCDCProxyId.find(streamId);
+		if (assigned != clientInfo.streamToCDCProxyId.end()) {
+			for (const auto& proxy : clientInfo.cdcProxies) {
+				if (proxy.id() == assigned->second) {
+					co_return proxy;
+				}
+			}
+		}
+		co_await cx->clientInfo->onChange();
 	}
 }
 
@@ -318,6 +357,108 @@ Future<Version> acknowledgeNativeCdcStream(Database cx, CDCStreamId streamId, Ve
 			err = e;
 		}
 		co_await tr.onError(err);
+	}
+}
+
+Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, KeyRange keys) {
+	validateNativeCdcStream(name, keys);
+	Optional<UID> previousProxy;
+
+	while (true) {
+		CDCProxyInterface proxy = co_await getAvailableNativeCdcProxy(cx, previousProxy);
+		try {
+			CDCRegisterStreamReply reply = co_await proxy.registerStream.getReply(CDCRegisterStreamRequest(name, keys));
+			co_return reply.streamId;
+		} catch (Error& error) {
+			if (!retryNativeCdcProxyRequest(error)) {
+				throw;
+			}
+			previousProxy = proxy.id();
+		}
+		co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, cx->taskID);
+	}
+}
+
+Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreamsClient(Database cx) {
+	Optional<UID> previousProxy;
+
+	while (true) {
+		CDCProxyInterface proxy = co_await getAvailableNativeCdcProxy(cx, previousProxy);
+		try {
+			CDCListStreamsReply reply = co_await proxy.listStreams.getReply(CDCListStreamsRequest());
+			std::vector<NativeCdcStreamInfo> streams;
+			streams.reserve(reply.streams.size());
+			for (const auto& stream : reply.streams) {
+				streams.push_back(
+				    NativeCdcStreamInfo{ Key(stream.name), stream.streamId, KeyRange(stream.keys), stream.minVersion });
+			}
+			co_return streams;
+		} catch (Error& error) {
+			if (!retryNativeCdcProxyRequest(error)) {
+				throw;
+			}
+			previousProxy = proxy.id();
+		}
+		co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, cx->taskID);
+	}
+}
+
+Future<Void> removeNativeCdcStreamClient(Database cx, Key name) {
+	if (name.empty()) {
+		throw client_invalid_operation();
+	}
+
+	while (true) {
+		std::vector<NativeCdcStreamInfo> streams = co_await listNativeCdcStreamsClient(cx);
+		auto stream = std::find_if(
+		    streams.begin(), streams.end(), [&](NativeCdcStreamInfo const& info) { return info.name == name; });
+		if (stream == streams.end()) {
+			co_return;
+		}
+
+		CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(cx, stream->streamId);
+		try {
+			co_await proxy.removeStream.getReply(CDCRemoveStreamRequest(name));
+			co_return;
+		} catch (Error& error) {
+			if (!retryNativeCdcProxyRequest(error)) {
+				throw;
+			}
+		}
+		co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, cx->taskID);
+	}
+}
+
+Future<CDCConsumeReply> consumeNativeCdcStream(Database cx, CDCCursor cursor) {
+	while (true) {
+		CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(cx, cursor.streamId);
+		try {
+			co_return co_await proxy.consume.getReply(CDCConsumeRequest(cursor));
+		} catch (Error& error) {
+			if (!retryNativeCdcProxyRequest(error)) {
+				throw;
+			}
+		}
+		co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, cx->taskID);
+	}
+}
+
+Future<Void> acknowledgeNativeCdcStreamClient(Database cx, CDCStreamId streamId, Version consumedThrough) {
+	if (streamId == 0 || consumedThrough < 0 || consumedThrough == std::numeric_limits<Version>::max()) {
+		throw client_invalid_operation();
+	}
+
+	while (true) {
+		CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(cx, streamId);
+		try {
+			co_await proxy.ack.getReply(CDCAckRequest(streamId, consumedThrough));
+			co_return;
+		} catch (Error& error) {
+			if (!retryNativeCdcProxyRequest(error)) {
+				throw;
+			}
+		}
+		co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, cx->taskID);
 	}
 }
 

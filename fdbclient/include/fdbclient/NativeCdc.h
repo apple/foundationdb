@@ -24,6 +24,7 @@
 
 #include <vector>
 
+#include "fdbclient/CDCProxyInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 
 struct NativeCdcStreamInfo {
@@ -46,5 +47,13 @@ Future<Void> reassignNativeCdcStreams(Database cx, UID oldProxyId, UID newProxyI
 // Persists the exclusive unpopped watermark after consuming through a version.
 // Removed streams remain acknowledgeable while retained CDC log data is drained.
 Future<Version> acknowledgeNativeCdcStream(Database cx, CDCStreamId streamId, Version consumedThrough);
+
+// Client-facing CDC operations. These select the appropriate CDC proxy from
+// ClientDBInfo and retry requests when stream ownership changes.
+Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, KeyRange keys);
+Future<Void> removeNativeCdcStreamClient(Database cx, Key name);
+Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreamsClient(Database cx);
+Future<CDCConsumeReply> consumeNativeCdcStream(Database cx, CDCCursor cursor);
+Future<Void> acknowledgeNativeCdcStreamClient(Database cx, CDCStreamId streamId, Version consumedThrough);
 
 #endif // FDBCLIENT_NATIVECDC_H

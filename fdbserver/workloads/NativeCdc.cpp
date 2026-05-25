@@ -293,19 +293,16 @@ struct NativeCdcWorkload : TestWorkload {
 
 		co_await removeNativeCdcStream(cx, secondName);
 
-		CDCProxyInterface proxy = co_await getCDCProxy();
 		const Key liveName = "native-cdc-live"_sr;
 		const KeyRange liveRange(KeyRangeRef("live/"_sr, "live0"_sr));
-		CDCRegisterStreamReply liveRegistration =
-		    co_await proxy.registerStream.getReply(CDCRegisterStreamRequest(liveName, liveRange));
-		CDCProxyInterface owner = co_await getCDCProxy(liveRegistration.streamId);
-		ASSERT(owner.id() == proxy.id());
+		const CDCStreamId liveStreamId = co_await registerNativeCdcStreamClient(cx, liveName, liveRange);
+		CDCProxyInterface owner = co_await getCDCProxy(liveStreamId);
 
-		CDCListStreamsReply listed = co_await proxy.listStreams.getReply(CDCListStreamsRequest());
-		ASSERT(listed.streams.size() == 1);
-		ASSERT(listed.streams[0].name == liveName);
-		ASSERT(listed.streams[0].streamId == liveRegistration.streamId);
-		ASSERT(listed.streams[0].keys == liveRange);
+		std::vector<NativeCdcStreamInfo> listed = co_await listNativeCdcStreamsClient(cx);
+		ASSERT(listed.size() == 1);
+		ASSERT(listed[0].name == liveName);
+		ASSERT(listed[0].streamId == liveStreamId);
+		ASSERT(listed[0].keys == liveRange);
 
 		Transaction write(cx);
 		write.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -320,8 +317,7 @@ struct NativeCdcWorkload : TestWorkload {
 			}
 			bool wrongOwnerRejected = false;
 			try {
-				co_await nonOwner.consume.getReply(
-				    CDCConsumeRequest(CDCCursor(liveRegistration.streamId, invalidVersion)));
+				co_await nonOwner.consume.getReply(CDCConsumeRequest(CDCCursor(liveStreamId, invalidVersion)));
 			} catch (Error& e) {
 				wrongOwnerRejected = e.code() == error_code_wrong_shard_server;
 			}
@@ -336,8 +332,8 @@ struct NativeCdcWorkload : TestWorkload {
 			break;
 		}
 
-		CDCConsumeReply consumed = co_await timeoutError(
-		    owner.consume.getReply(CDCConsumeRequest(CDCCursor(liveRegistration.streamId, invalidVersion))), 30.0);
+		CDCConsumeReply consumed =
+		    co_await timeoutError(consumeNativeCdcStream(cx, CDCCursor(liveStreamId, invalidVersion)), 30.0);
 		ASSERT(consumed.lastConsumedVersion >= writeVersion);
 		bool foundInRangeWrite = false;
 		bool foundOutOfRangeWrite = false;
@@ -356,8 +352,7 @@ struct NativeCdcWorkload : TestWorkload {
 
 		const uint64_t recoveryCount = dbInfo->get().recoveryCount;
 		co_await owner.haltForTesting.getReply(HaltCDCProxyRequest());
-		CDCProxyInterface replacement =
-		    co_await timeoutError(getReplacementCDCProxy(liveRegistration.streamId, owner.id()), 30.0);
+		CDCProxyInterface replacement = co_await timeoutError(getReplacementCDCProxy(liveStreamId, owner.id()), 30.0);
 		ASSERT(replacement.id() != owner.id());
 		ASSERT(dbInfo->get().recoveryCount == recoveryCount);
 
@@ -366,10 +361,8 @@ struct NativeCdcWorkload : TestWorkload {
 		afterFailureWrite.set("live/after-failure"_sr, "captured-after-failure"_sr);
 		co_await afterFailureWrite.commit();
 		const Version afterFailureVersion = afterFailureWrite.getCommittedVersion();
-		CDCConsumeReply afterFailure =
-		    co_await timeoutError(replacement.consume.getReply(CDCConsumeRequest(
-		                              CDCCursor(liveRegistration.streamId, consumed.lastConsumedVersion))),
-		                          30.0);
+		CDCConsumeReply afterFailure = co_await timeoutError(
+		    consumeNativeCdcStream(cx, CDCCursor(liveStreamId, consumed.lastConsumedVersion)), 30.0);
 		ASSERT(afterFailure.lastConsumedVersion >= afterFailureVersion);
 		bool foundAfterFailureWrite = false;
 		for (const auto& versioned : afterFailure.mutations) {
@@ -382,15 +375,15 @@ struct NativeCdcWorkload : TestWorkload {
 		ASSERT(foundAfterFailureWrite);
 
 		const Version cursorBeforeRecovery = afterFailure.lastConsumedVersion;
-		co_await replacement.ack.getReply(CDCAckRequest(liveRegistration.streamId, cursorBeforeRecovery));
-		ASSERT(co_await getPersistedMinVersion(cx, liveRegistration.streamId) == cursorBeforeRecovery + 1);
+		co_await acknowledgeNativeCdcStreamClient(cx, liveStreamId, cursorBeforeRecovery);
+		ASSERT(co_await getPersistedMinVersion(cx, liveStreamId) == cursorBeforeRecovery + 1);
 
 		const int32_t recoveredResolverCount = (co_await getDatabaseConfiguration(cx)).getDesiredResolvers() + 1;
 		const UID ownerBeforeRecovery = replacement.id();
 		const uint64_t recoveryBeforeChange = dbInfo->get().recoveryCount;
 		co_await changeResolverCount(cx, recoveredResolverCount);
 		co_await timeoutError(waitForRecoveryAfter(recoveryBeforeChange, RecoveryState::ACCEPTING_COMMITS), 60.0);
-		CDCProxyInterface recoveredOwner = co_await getCDCProxy(liveRegistration.streamId);
+		CDCProxyInterface recoveredOwner = co_await getCDCProxy(liveStreamId);
 		ASSERT(recoveredOwner.id() == ownerBeforeRecovery);
 
 		Transaction afterRecoveryWrite(cx);
@@ -403,9 +396,7 @@ struct NativeCdcWorkload : TestWorkload {
 		const double afterRecoveryConsumeDeadline = now() + 30.0;
 		while (afterRecoveryCursor < afterRecoveryVersion) {
 			CDCConsumeReply afterRecovery =
-			    co_await timeoutError(recoveredOwner.consume.getReply(
-			                              CDCConsumeRequest(CDCCursor(liveRegistration.streamId, afterRecoveryCursor))),
-			                          30.0);
+			    co_await timeoutError(consumeNativeCdcStream(cx, CDCCursor(liveStreamId, afterRecoveryCursor)), 30.0);
 			if (afterRecovery.lastConsumedVersion == afterRecoveryCursor) {
 				ASSERT(now() < afterRecoveryConsumeDeadline);
 				co_await delay(0.1);
@@ -423,13 +414,13 @@ struct NativeCdcWorkload : TestWorkload {
 		}
 		ASSERT(foundAfterRecoveryWrite);
 
-		co_await recoveredOwner.ack.getReply(CDCAckRequest(liveRegistration.streamId, afterRecoveryCursor));
-		ASSERT(co_await getPersistedMinVersion(cx, liveRegistration.streamId) == afterRecoveryCursor + 1);
+		co_await acknowledgeNativeCdcStreamClient(cx, liveStreamId, afterRecoveryCursor);
+		ASSERT(co_await getPersistedMinVersion(cx, liveStreamId) == afterRecoveryCursor + 1);
 		co_await timeoutError(waitForRecoveryAfter(recoveryBeforeChange, RecoveryState::FULLY_RECOVERED), 60.0);
-		recoveredOwner = co_await getCDCProxy(liveRegistration.streamId);
+		recoveredOwner = co_await getCDCProxy(liveStreamId);
 		ASSERT(recoveredOwner.id() == ownerBeforeRecovery);
-		co_await recoveredOwner.removeStream.getReply(CDCRemoveStreamRequest(liveName));
-		co_await waitForCDCProxyAssignmentRemoval(liveRegistration.streamId);
+		co_await removeNativeCdcStreamClient(cx, liveName);
+		co_await waitForCDCProxyAssignmentRemoval(liveStreamId);
 	}
 };
 
