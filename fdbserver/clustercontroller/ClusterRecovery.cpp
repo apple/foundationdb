@@ -651,7 +651,7 @@ static Future<Void> recruitBackupWorkers(Reference<ClusterRecoveryData> self, Da
 
 	LogEpoch epoch = self->cstate.myDBState.recoveryCount;
 	Reference<BackupProgress> backupProgress(
-	    new BackupProgress(self->dbgid, self->logSystem->getOldEpochLRTagsVersionsInfo()));
+	    new BackupProgress(self->dbgid, self->logSystem->getOldEpochLogRouterTagsInfo()));
 	Future<Void> gotProgress = getBackupProgress(cx, self->dbgid, backupProgress, SevInfo);
 	std::vector<Future<InitializeBackupReply>> initializationReplies;
 
