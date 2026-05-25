@@ -568,9 +568,9 @@ public:
 				auto& obj = json.get_obj();
 
 				// Both fields must be present with correct types.
-				if (!obj.count("is_encryption_enabled") ||
+				if (!obj.contains("is_encryption_enabled") ||
 				    obj.at("is_encryption_enabled").type() != json_spirit::bool_type ||
-				    !obj.count("encryption_block_size") ||
+				    !obj.contains("encryption_block_size") ||
 				    obj.at("encryption_block_size").type() != json_spirit::int_type) {
 					fprintf(stderr, "ERROR: Encryption metadata file is missing required fields or has wrong types.\n");
 					TraceEvent(SevError, "BackupContainerReadEncryptionMetadataMalformed")

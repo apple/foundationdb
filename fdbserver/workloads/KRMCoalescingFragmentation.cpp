@@ -200,7 +200,7 @@ private:
 					// Verify the exact expected transitions: the gaps were cleared and
 					// coalesced, and the kept-shard boundaries are correct.
 					ASSERT_EQ(result.size(), 4);
-					ASSERT(result[0].key == ""_sr && result[0].value == serverKeysTrue);
+					ASSERT(result[0].key.empty() && result[0].value == serverKeysTrue);
 					ASSERT(result[1].key == "c"_sr && result[1].value == serverKeysFalse);
 					ASSERT(result[2].key == "k"_sr && result[2].value == serverKeysTrue);
 

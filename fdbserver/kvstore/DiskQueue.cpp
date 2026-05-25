@@ -95,7 +95,7 @@ struct StringBuffer {
 			                        ~(alignment - 1)); // first multiple of alignment greater than or equal to b
 			ASSERT(p >= b && p + reserved <= e && int64_t(p) % alignment == 0);
 
-			if (str.size() > 0) {
+			if (!str.empty()) {
 				memcpy(p, str.begin(), str.size());
 			}
 			str.contents() = StringRef(p, str.size());
@@ -467,7 +467,7 @@ public:
 
 			Future<Void> pushed = co_await self->push(pageData, &syncFiles);
 			pushing.send(Void());
-			ASSERT(syncFiles.size() >= 1 && syncFiles.size() <= 2);
+			ASSERT(!syncFiles.empty() && syncFiles.size() <= 2);
 			CODE_PROBE(2 == syncFiles.size(), "push spans both files");
 			co_await pushed;
 
@@ -890,7 +890,7 @@ public:
 		ASSERT(recovered);
 		uint8_t const* begin = contents.begin();
 		uint8_t const* end = contents.end();
-		CODE_PROBE(contents.size() && pushedPageCount(), "More than one push between commits");
+		CODE_PROBE(!contents.empty() && pushedPageCount(), "More than one push between commits");
 
 		bool pushAtEndOfPage = contents.size() >= 4 && pushedPageCount() && backPage().remainingCapacity() < 4;
 		CODE_PROBE(pushAtEndOfPage, "Push right at the end of a page, possibly splitting size");
@@ -1337,7 +1337,7 @@ private:
 			}
 
 			Standalone<StringRef> page = co_await self->rawQueue->readNextPage();
-			if (!page.size()) {
+			if (page.empty()) {
 				TraceEvent("DQRecEOF", self->dbgid)
 				    .detail("NextReadLocation", self->nextReadLocation)
 				    .detail("File0Name", self->rawQueue->files[0].dbgFilename);
@@ -1404,7 +1404,7 @@ private:
 		Standalone<StringRef> lastPageData = co_await self->rawQueue->readFirstAndLastPages(&comparePages);
 		self->initialized = true;
 
-		if (!lastPageData.size()) {
+		if (lastPageData.empty()) {
 			// There are no valid pages, so apparently this is a completely empty queue
 			self->nextReadLocation = 0;
 			self->lastCommittedSeq = 0;

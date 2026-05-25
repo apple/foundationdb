@@ -1202,7 +1202,7 @@ TEST_CASE("/BackupWorkerRangePartitioned/PartitionMapMessage/IsNextInLeadingByte
 	PartitionMapMessage outgoing(makeSamplePartitionMap());
 	wr << outgoing;
 	Standalone<StringRef> bytes = wr.toValue();
-	ASSERT(bytes.size() >= 1);
+	ASSERT(!bytes.empty());
 	ASSERT(PartitionMapMessage::startsPartitionMapMessage(bytes[0]));
 
 	ArenaReader pmmReader(bytes.arena(), bytes, AssumeVersion(g_network->protocolVersion()));

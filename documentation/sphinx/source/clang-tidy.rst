@@ -10,13 +10,13 @@ This guide explains how to run ``clang-tidy`` locally so you can fix issues befo
 What clang-tidy checks
 ======================
 
-FoundationDB enables 21 checks configured in the ``.clang-tidy`` file at the repository root. The
+FoundationDB enables 20 checks configured in the ``.clang-tidy`` file at the repository root. The
 intent is to enable more as we go forward. Here are some example rules:
 
 * **9 Bugprone rules** -- catch potential runtime errors (e.g., ``bugprone-use-after-move``, ``bugprone-suspicious-memory-comparison``)
 * **4 Modernize rules** -- encourage modern C++ practices (e.g., ``modernize-use-auto``, ``modernize-use-override``)
 * **2 Performance rules** -- avoid unnecessary copies and pointless moves (e.g., ``performance-for-range-copy``, ``performance-move-const-arg``)
-* **6 Readability rules** -- improve code clarity (e.g., ``readability-container-contains``, ``readability-container-size-empty``)
+* **5 Readability rules** -- improve code clarity (e.g., ``readability-container-contains``, ``readability-container-size-empty``)
 
 Basic examples of ``clang-tidy`` style and performance improvement changes:
 
@@ -171,6 +171,9 @@ Known limitations
 **``.actor.cpp`` files cannot be analyzed.** These files use FoundationDB's custom actor compiler syntax (``ACTOR``, ``wait()``, ``state``) that ``clang-tidy`` cannot parse. CMake skips clang-tidy for generated ``.actor.g.cpp`` outputs. Exclude actor inputs from your diff when running locally.
 
 Build-integrated clang-tidy also skips bundled external-library targets, including ``crc32``, ``libb64``, ``md5``, ``libeio``, and ``libcoroutine``.
+
+``readability-simplify-boolean-expr`` is not enabled because it diagnoses ordinary
+uses of FoundationDB's ``ASSERT`` macro after macro expansion.
 
 Quick reference
 ===============

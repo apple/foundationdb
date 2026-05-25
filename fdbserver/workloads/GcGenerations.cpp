@@ -70,7 +70,7 @@ struct GcGenerationsWorkload : TestWorkload {
 	// Ensure simulator state is cleaned up even if the workload is cancelled by timeout.
 	// Without this, a timeout leaves the cluster permanently degraded: remote DC clogged,
 	// connection failures active, disableTLogRecoveryFinish=true — causing Cycle check to fail.
-	~GcGenerationsWorkload() {
+	~GcGenerationsWorkload() override {
 		if (g_network && g_network->isSimulated()) {
 			unclogAll();
 			disableConnectionFailures("GcGenerations");

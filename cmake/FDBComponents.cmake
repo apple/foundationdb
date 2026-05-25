@@ -262,15 +262,19 @@ set(WITH_LIBURING OFF CACHE BOOL "Build with liburing enabled") # Set this to ON
 # TOML11
 ################################################################################
 
-find_package(toml11 3.8.1 EXACT CONFIG)
+find_package(toml11 3.8.1 EXACT QUIET CONFIG)
 if(NOT toml11_FOUND)
   include(FetchContent)
   FetchContent_Declare(
     toml11
     URL "https://github.com/ToruNiina/toml11/archive/v3.8.1.tar.gz"
     URL_HASH SHA256=6a3d20080ecca5ea42102c078d3415bef80920f6c4ea2258e87572876af77849
+    SOURCE_SUBDIR fdb_header_only_dependency
   )
   FetchContent_MakeAvailable(toml11)
+  add_library(toml11 INTERFACE)
+  target_include_directories(toml11 INTERFACE "${toml11_SOURCE_DIR}")
+  add_library(toml11::toml11 ALIAS toml11)
 endif()
 
 ################################################################################
