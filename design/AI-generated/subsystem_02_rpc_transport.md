@@ -155,6 +155,72 @@ Stream of replies with flow control:
 
 ---
 
+## Interface Endpoint Layout
+
+Service interfaces (e.g., `CommitProxyInterface`, `GrvProxyInterface`, `StorageServerInterface`) bundle many `RequestStream<T>` channels but ship a single endpoint over the wire. The rest are reconstructed locally by adding a fixed offset to that anchor.
+
+### Convention
+
+Each interface picks an "anchor" stream (typically the most-used one: `commit` for the commit proxy, `getConsistentReadVersion` for the GRV proxy, `getValue` for storage servers). It is the only `RequestStream` actually serialized. All other streams are reconstructed in the `if (Archive::isDeserializing)` branch via `anchor.getEndpoint().getAdjustedEndpoint(N)`, where N is the stream's position in `initEndpoints`'s `push_back` order.
+
+```cpp
+// CommitProxyInterface.h (excerpt)
+template <class Archive>
+void serialize(Archive& ar) {
+    serializer(ar, processId, provisional, commit);  // anchor — only this is on the wire
+    if (Archive::isDeserializing) {
+        legacyGetConsistentReadVersion = ...(commit.getEndpoint().getAdjustedEndpoint(1));
+        getKeyServersLocations         = ...(commit.getEndpoint().getAdjustedEndpoint(2));
+        // ...
+    }
+}
+
+void initEndpoints() {
+    std::vector<...> streams;
+    streams.push_back(commit.getReceiver(...));                         // index 0 — anchor
+    streams.push_back(legacyGetConsistentReadVersion.getReceiver(...)); // 1
+    streams.push_back(getKeyServersLocations.getReceiver(...));         // 2
+    // ...
+    FlowTransport::transport().addEndpoints(streams);
+}
+```
+
+`EndpointMap::insert` allocates the registered receivers as a contiguous block keyed off a fresh random `base` UID. Stream `i` ends up at token offset `i` from the anchor, and `getAdjustedEndpoint(N)` produces the matching token. Client and server agree iff the client's deserialization index matches the server's registration order.
+
+### Why changing an interface is safe within a protocol version
+
+Endpoint indices look like a wire-format contract but aren't:
+
+1. **Tokens are not persistent.** Every process calls `initEndpoints` on startup and `EndpointMap::insert` generates a fresh `base` UID per call. Clients don't hold stale tokens across a server restart — they refetch `ClientDBInfo` and reconstruct the interface from scratch.
+2. **Recovery reissues every interface.** When proxies, TLogs, etc. are re-recruited, the new generation's interfaces are distributed via fresh `ServerDBInfo` / `ClientDBInfo` (see [`subsystem_09_cluster_recovery.md`](subsystem_09_cluster_recovery.md)).
+3. **Cross-protocol-version traffic uses the matching client `.so`.** The multi-version client ([`MultiVersionTransaction.cpp`](https://github.com/apple/foundationdb/blob/main/fdbclient/MultiVersionTransaction.cpp), see [`subsystem_03_client_library.md`](subsystem_03_client_library.md)) loads the cluster's matching `fdb_c.so`, so client and server endpoint orders always come from the same source tree.
+
+The implication: re-packing or shifting endpoint indices is *not* a wire-compat break, provided both `fdb_c` and `fdbserver` are built together for the protocol version they target. The one invariant that *does* matter within a single build is local: the `getAdjustedEndpoint(N)` argument used in `serialize()` must equal the `push_back` position of the same stream in `initEndpoints()`. Otherwise the deserialized client-side endpoint points at a slot that the server never registered, and `EndpointMap::get` returns `nullptr`.
+
+### Legacy slots and an apparent index/registration discrepancy
+
+[`CommitProxyInterface.h`](https://github.com/apple/foundationdb/blob/main/fdbclient/include/fdbclient/CommitProxyInterface.h) contains residue from past endpoint removals/moves, and part of that residue looks like a live bug rather than mere cosmetic cruft.
+
+**`legacyGetConsistentReadVersion` at index 1.** A placeholder left behind when `getConsistentReadVersion` was moved to `GrvProxyInterface` (commit `b20ac72d5f`). Carries an inline comment: "Reserved to preserve the historical adjusted-endpoint numbering for the commit proxy interface." The comment asserts numbering must be preserved without explaining why. No surviving commit message or design note justifies the preservation. Per the subsection above, there is no wire-compat reason it must stay.
+
+**Apparent index/registration mismatch for `setThrottledShard`.** The blob-granule (`b1d6dcf0e7`) and multitenant (`bab7637d87`) deletions dropped the `push_back` and deserialization lines for `getBlobGranuleLocations` (originally index 12) and `getTenantId` (originally index 11) without renumbering successors. As of the current tree:
+
+- `serialize()` reconstructs `setThrottledShard` via `commit.getEndpoint().getAdjustedEndpoint(13)`.
+- `initEndpoints()` pushes 12 receivers total, placing `setThrottledShard` at vector index **11**.
+- `EndpointMap::insert` ([`FlowTransport.cpp:150`](https://github.com/apple/foundationdb/blob/main/fdbrpc/FlowTransport.cpp)) allocates exactly `streams.size()` contiguous slots with no holes. The receiver at slot 11 is keyed with `base.first() + (11<<32)` and token-index `adjacentStart + 11`. The client-side token produced by `getAdjustedEndpoint(13)` is keyed with `base.first() + (13<<32)` and token-index `adjacentStart + 13`. Both halves of the token mismatch, so `EndpointMap::get` returns `nullptr`.
+
+The only sender of this request is Ratekeeper ([`Ratekeeper.cpp:325`](https://github.com/apple/foundationdb/blob/main/fdbserver/ratekeeper/Ratekeeper.cpp), `cpi.setThrottledShard.send(setReq)`); the only receiver is [`CommitProxyServer.cpp:2952`](https://github.com/apple/foundationdb/blob/main/fdbserver/commitproxy/CommitProxyServer.cpp) (`proxy.setThrottledShard.getFuture()`). Before the deletions, slots 11 and 12 were occupied and the offsets lined up; after them, the routing path appears broken.
+
+**This should be investigated.** If the analysis above is correct, hot-shard-throttle messages from Ratekeeper to commit proxies have been silently dropped since at least the Dec 2025 multitenant deletion (and partially since the Oct 2025 blob-granule deletion). That this has not surfaced as an obvious regression suggests one of:
+
+- the throttled-shard signaling path is not exercised by current simulation, integration, or production workloads;
+- something in the send/receive plumbing tolerates a `nullptr` receiver lookup more gracefully than the reasoning above implies; or
+- a separate registration mechanism exists that I have not identified.
+
+A minimal fix, if the bug is real, is to change `getAdjustedEndpoint(13)` → `getAdjustedEndpoint(11)`. A more durable fix would be a unit test that, for each interface, round-trips through `serialize`/`initEndpoints` and asserts every reconstructed stream resolves to a registered receiver — which would also catch any future blob-granule-style deletion that forgets to renumber successors. Cleaning up `legacyGetConsistentReadVersion` and compacting the indices would prevent the entire class of bug.
+
+---
+
 ## Wire Protocol
 
 ### Packet Format
