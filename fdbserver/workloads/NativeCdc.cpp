@@ -226,10 +226,20 @@ struct NativeCdcWorkload : TestWorkload {
 		write.set("shared/unread"_sr, "protected-by-minimum"_sr);
 		co_await write.commit();
 		const Version writeVersion = write.getCommittedVersion();
-		CDCConsumeReply consumed = co_await timeoutError(
-		    firstOwner.consume.getReply(CDCConsumeRequest(CDCCursor(firstId, invalidVersion))), 30.0);
-		ASSERT(consumed.lastConsumedVersion >= writeVersion);
-		co_await firstOwner.ack.getReply(CDCAckRequest(firstId, consumed.lastConsumedVersion));
+		CDCCursor firstCursor(firstId, invalidVersion);
+		const double firstConsumeDeadline = now() + 30.0;
+		while (firstCursor.lastConsumedVersion < writeVersion) {
+			CDCConsumeReply consumed =
+			    co_await timeoutError(firstOwner.consume.getReply(CDCConsumeRequest(firstCursor)), 30.0);
+			if (consumed.lastConsumedVersion == firstCursor.lastConsumedVersion) {
+				ASSERT(now() < firstConsumeDeadline);
+				co_await delay(0.1);
+				continue;
+			}
+			ASSERT(consumed.lastConsumedVersion > firstCursor.lastConsumedVersion);
+			firstCursor.lastConsumedVersion = consumed.lastConsumedVersion;
+		}
+		co_await firstOwner.ack.getReply(CDCAckRequest(firstId, firstCursor.lastConsumedVersion));
 
 		ASSERT((co_await firstOwner.registerStream.getReply(CDCRegisterStreamRequest(secondName, keys))).streamId ==
 		       secondId);
@@ -357,18 +367,28 @@ struct NativeCdcWorkload : TestWorkload {
 			break;
 		}
 
-		CDCConsumeReply consumed =
-		    co_await timeoutError(consumeNativeCdcStream(cx, CDCCursor(liveStreamId, invalidVersion)), 30.0);
-		ASSERT(consumed.lastConsumedVersion >= writeVersion);
+		Version consumedThrough = invalidVersion;
 		bool foundInRangeWrite = false;
 		bool foundOutOfRangeWrite = false;
-		for (const auto& versioned : consumed.mutations) {
-			for (const auto& mutation : versioned.mutations) {
-				if (mutation.param1 == "live/in"_sr) {
-					foundInRangeWrite = true;
-				}
-				if (mutation.param1 == "other/out"_sr) {
-					foundOutOfRangeWrite = true;
+		const double initialConsumeDeadline = now() + 30.0;
+		while (consumedThrough < writeVersion) {
+			CDCConsumeReply consumed =
+			    co_await timeoutError(consumeNativeCdcStream(cx, CDCCursor(liveStreamId, consumedThrough)), 30.0);
+			if (consumed.lastConsumedVersion == consumedThrough) {
+				ASSERT(now() < initialConsumeDeadline);
+				co_await delay(0.1);
+				continue;
+			}
+			ASSERT(consumed.lastConsumedVersion > consumedThrough);
+			consumedThrough = consumed.lastConsumedVersion;
+			for (const auto& versioned : consumed.mutations) {
+				for (const auto& mutation : versioned.mutations) {
+					if (mutation.param1 == "live/in"_sr) {
+						foundInRangeWrite = true;
+					}
+					if (mutation.param1 == "other/out"_sr) {
+						foundOutOfRangeWrite = true;
+					}
 				}
 			}
 		}
@@ -386,20 +406,30 @@ struct NativeCdcWorkload : TestWorkload {
 		afterFailureWrite.set("live/after-failure"_sr, "captured-after-failure"_sr);
 		co_await afterFailureWrite.commit();
 		const Version afterFailureVersion = afterFailureWrite.getCommittedVersion();
-		CDCConsumeReply afterFailure = co_await timeoutError(
-		    consumeNativeCdcStream(cx, CDCCursor(liveStreamId, consumed.lastConsumedVersion)), 30.0);
-		ASSERT(afterFailure.lastConsumedVersion >= afterFailureVersion);
+		Version afterFailureCursor = consumedThrough;
 		bool foundAfterFailureWrite = false;
-		for (const auto& versioned : afterFailure.mutations) {
-			for (const auto& mutation : versioned.mutations) {
-				if (mutation.param1 == "live/after-failure"_sr) {
-					foundAfterFailureWrite = true;
+		const double afterFailureConsumeDeadline = now() + 30.0;
+		while (afterFailureCursor < afterFailureVersion) {
+			CDCConsumeReply afterFailure =
+			    co_await timeoutError(consumeNativeCdcStream(cx, CDCCursor(liveStreamId, afterFailureCursor)), 30.0);
+			if (afterFailure.lastConsumedVersion == afterFailureCursor) {
+				ASSERT(now() < afterFailureConsumeDeadline);
+				co_await delay(0.1);
+				continue;
+			}
+			ASSERT(afterFailure.lastConsumedVersion > afterFailureCursor);
+			afterFailureCursor = afterFailure.lastConsumedVersion;
+			for (const auto& versioned : afterFailure.mutations) {
+				for (const auto& mutation : versioned.mutations) {
+					if (mutation.param1 == "live/after-failure"_sr) {
+						foundAfterFailureWrite = true;
+					}
 				}
 			}
 		}
 		ASSERT(foundAfterFailureWrite);
 
-		const Version cursorBeforeRecovery = afterFailure.lastConsumedVersion;
+		const Version cursorBeforeRecovery = afterFailureCursor;
 		co_await acknowledgeNativeCdcStreamClient(cx, liveStreamId, cursorBeforeRecovery);
 		ASSERT(co_await getPersistedMinVersion(cx, liveStreamId) == cursorBeforeRecovery + 1);
 
