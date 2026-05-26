@@ -44,4 +44,8 @@ using PartitionList = std::vector<Partition>;
 // storage when multiple backup workers upload the partition map at the same time.
 using PartitionMap = std::map<Tag, PartitionList>;
 
+// History of partition maps for an epoch: pairs of (effective version, partition map),
+// sorted by version ascending. Multiple entries occur when a re-partition happens mid-epoch.
+using PartitionMapHistory = std::vector<std::pair<Version, PartitionMap>>;
+
 std::string serializePartitionListJSON(PartitionMap const& partitionMap);

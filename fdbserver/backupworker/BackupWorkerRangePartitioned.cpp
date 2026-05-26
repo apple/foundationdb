@@ -385,7 +385,85 @@ Future<Version> pullPartitionMapFromTLog(BackupRangePartitionedData* self, Parti
 	}
 }
 
-// TODO akanksha: Test if concurrent uploads of identical content to the same path in blob storage is safe or not.
+// Persist the (epoch, version) -> PartitionMap row to SS so older epoch backup workers can read it during
+// recovery. Multiple workers may call this concurrently for the same (epoch, version) but only one succeed in writing
+// to SS.
+Future<Void> persistPartitionMapToSS(BackupRangePartitionedData* self,
+                                     Version partitionMapVersion,
+                                     PartitionMap const& partitionMap) {
+	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+	Key key = backupPartitionMapHistoryKeyFor(self->backupEpoch, partitionMapVersion);
+
+	BinaryWriter valueWriter(IncludeVersion());
+	valueWriter << partitionMap;
+	Standalone<StringRef> serialized = valueWriter.toValue();
+
+	while (true) {
+		Error err;
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			Optional<Value> existing = co_await tr->get(key);
+			if (existing.present()) {
+				co_return;
+			}
+			tr->set(key, serialized);
+			co_await tr->commit();
+			TraceEvent("BWRangePartitionedPMHistoryWritten", self->myId)
+			    .detail("Epoch", self->backupEpoch)
+			    .detail("Version", partitionMapVersion)
+			    .detail("Size", serialized.size());
+			co_return;
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr->onError(err);
+	}
+}
+
+// Reads all partition map entries persisted for `epoch` from system keys, returning them in
+// version order. Each entry is the partition map that became effective at its associated version.
+Future<PartitionMapHistory> loadPartitionMapHistoryFromSS(BackupRangePartitionedData* self, LogEpoch epoch) {
+	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+	KeyRange range = backupPartitionMapHistoryRangeFor(epoch);
+
+	while (true) {
+		Error err;
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			RangeResult rows = co_await tr->getRange(range, CLIENT_KNOBS->TOO_MANY);
+			ASSERT(!rows.more);
+
+			PartitionMapHistory history;
+			history.reserve(rows.size());
+			for (auto const& kv : rows) {
+				auto [decodedEpoch, version] = decodeBackupPartitionMapHistoryKey(kv.key);
+				ASSERT_EQ(decodedEpoch, epoch);
+
+				PartitionMap pm;
+				BinaryReader reader(kv.value, IncludeVersion());
+				reader >> pm;
+				history.emplace_back(version, std::move(pm));
+			}
+			TraceEvent("BWRangePartitionedMapHistoryRead", self->myId)
+			    .detail("Epoch", epoch)
+			    .detail("NumEntries", history.size());
+			co_return history;
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr->onError(err);
+	}
+}
+
+// TODO akanksha:
+// 1. Test if concurrent uploads of identical content to the same path in blob storage is safe or not.
+// 2. When folder is advanced to next version, do we upload the partition map again to that version.
 Future<Void> uploadPartitionList(BackupRangePartitionedData* self, PartitionMap partitionMap) {
 	std::vector<Future<Void>> fileFutures;
 	auto it = self->backups.begin();
@@ -411,20 +489,59 @@ Future<Void> uploadPartitionList(BackupRangePartitionedData* self, PartitionMap 
 }
 
 // TODO akanksha -> Need to figure out if
-// 1. For new requests -> PartitionMap in TLOG will be same for all containers
-// 2. For older epochs with different containers is PartitionMap specific to container or same for all.
-// Right now assumption is that PartitionMap will be passed by TLOG with the first message after start version for both
-// older epochs and newer epochs.
-// 3. Provide implemention for recovery where partitionmap can come any time and won't be the first message.
-Future<Void> waitAndProcessPartitionMap(BackupRangePartitionedData* self) {
+// 1. For new requests -> PartitionMap in TLOG will be same for all containers.
+// 2. Provide implemention for recovery where partitionmap can come any time and won't be the first message.
+// 3. Handle Recovery case where backupworker needs to process multiple partition maps for same epoch at different
+// versions.
+Future<Void> processPartitionMap(BackupRangePartitionedData* self) {
 	TraceEvent("BWRangePartitionedWaitingForPartitionMap", self->myId)
 	    .detail("Tag", self->tag.toString())
-	    .detail("StartVersion", self->startVersion);
+	    .detail("StartVersion", self->startVersion)
+	    .detail("BackupEpoch", self->backupEpoch)
+	    .detail("RecruitedEpoch", self->recruitedEpoch);
+
 	PartitionMap partitionMap;
+	Version partitionMapVersion;
 
-	Version partitionMapVersion = co_await pullPartitionMapFromTLog(self, &partitionMap);
+	if (self->backupEpoch == self->recruitedEpoch) {
+		// Current-epoch worker: receive the partition map via TLog as the first message.
+		partitionMapVersion = co_await pullPartitionMapFromTLog(self, &partitionMap);
+		TraceEvent("BWRangeParitionedPulledPartitionMap", self->myId)
+		    .detail("Version", partitionMapVersion)
+		    .detail("NumTags", partitionMap.size())
+		    .detail("Tag", self->tag.toString())
+		    .detail("NumPartitions", partitionMap[self->tag].size());
+
+		// Persist the partition map to system keys so catch-up backup workers can read it during recovery.
+		co_await persistPartitionMapToSS(self, partitionMapVersion, partitionMap);
+
+		// Every BW uploads the partition list. Content is deterministic across workers
+		// through serializePartitionListJSON, so concurrent PUTs of identical bytes are safe.
+		co_await uploadPartitionList(self, partitionMap);
+		TraceEvent("BWRangePartitionedPartitionMapUploaded", self->myId)
+		    .detail("Version", partitionMapVersion)
+		    .detail("NumBackups", self->backups.size());
+
+		self->pulledVersion.set(partitionMapVersion);
+		self->savedVersion = partitionMapVersion;
+		self->pop();
+	} else {
+		// Catch-up worker: the partition map for our backupEpoch was persisted by the previous epoch's
+		// workers. Read it from system keys instead of pulling from TLog.
+		// TODO akanksha: Handle Case 3 mentioned in the TODO above.
+		PartitionMapHistory history = co_await loadPartitionMapHistoryFromSS(self, self->backupEpoch);
+		ASSERT_GT(history.size(), 1);
+		partitionMapVersion = history[0].first;
+		partitionMap = std::move(history[0].second);
+		TraceEvent("BWRangePartitionedLoadedPartitionMap", self->myId)
+		    .detail("Epoch", self->backupEpoch)
+		    .detail("Version", partitionMapVersion)
+		    .detail("NumTags", partitionMap.size())
+		    .detail("Tag", self->tag.toString())
+		    .detail("NumPartitions", partitionMap[self->tag].size());
+	}
+
 	self->logFolderBaseVersion = partitionMapVersion + 1;
-
 	ASSERT(partitionMap.contains(self->tag));
 	TraceEvent("BWRangePartitionedPulledPartitionMap", self->myId)
 	    .detail("Version", partitionMapVersion)
@@ -437,16 +554,6 @@ Future<Void> waitAndProcessPartitionMap(BackupRangePartitionedData* self) {
 	for (auto& partition : partitionMap[self->tag]) {
 		self->keyRangeToPartitionId.insert(partition.ranges, partition.partitionId);
 	}
-
-	// Every BW uploads the partition list. Content is deterministic across workers
-	// through serializePartitionListJSON, so concurrent PUTs of identical bytes are safe.
-	co_await uploadPartitionList(self, partitionMap);
-	TraceEvent("BWRangePartitionedPartitionMapUploaded", self->myId)
-	    .detail("Version", partitionMapVersion)
-	    .detail("NumBackups", self->backups.size());
-	self->pulledVersion.set(partitionMapVersion);
-	self->savedVersion = partitionMapVersion;
-	self->pop();
 	co_await computeKeyRangeToBackupAssignment(self);
 }
 
@@ -1091,12 +1198,12 @@ Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
 		}
 
 		addActor.send(monitorWorkerPause(&self));
-		// Must be sent before waitAndProcessPartitionMap so logSystem is populated before the partition-map peek.
+		// Must be sent before processPartitionMap so logSystem is populated before the partition-map peek.
 		addActor.send(monitorLogSystemFromDbInfo(db, &self));
 
-		// First need to call waitAndProcessPartitionMap before starting to pull data, because we need to know the
+		// First need to call processPartitionMap before starting to pull data, because we need to know the
 		// partition assignment.
-		co_await waitAndProcessPartitionMap(&self);
+		co_await processPartitionMap(&self);
 
 		// If the worker is on an old epoch and all backups starts a version >= the endVersion
 		bool exitEarly = co_await shouldBackupWorkerExitEarly(&self);

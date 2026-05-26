@@ -1060,6 +1060,32 @@ WorkerBackupStatus decodeBackupProgressValue(const ValueRef& value) {
 	return status;
 }
 
+const KeyRangeRef backupPartitionMapHistoryKeys("\xff\x02/backupPartitionmap/"_sr, "\xff\x02/backupPartitionmap0"_sr);
+
+Key backupPartitionMapHistoryKeyFor(LogEpoch epoch, Version version) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(backupPartitionMapHistoryKeys.begin);
+	wr << bigEndian64(epoch) << bigEndian64(version);
+	return wr.toValue();
+}
+
+KeyRange backupPartitionMapHistoryRangeFor(LogEpoch epoch) {
+	BinaryWriter beginW(Unversioned());
+	beginW.serializeBytes(backupPartitionMapHistoryKeys.begin);
+	beginW << bigEndian64(epoch);
+	BinaryWriter endW(Unversioned());
+	endW.serializeBytes(backupPartitionMapHistoryKeys.begin);
+	endW << bigEndian64(epoch + 1);
+	return KeyRangeRef(beginW.toValue(), endW.toValue());
+}
+
+std::pair<LogEpoch, Version> decodeBackupPartitionMapHistoryKey(const KeyRef& key) {
+	BinaryReader rd(key.removePrefix(backupPartitionMapHistoryKeys.begin), Unversioned());
+	int64_t epoch, version;
+	rd >> epoch >> version;
+	return { fromBigEndian64(epoch), fromBigEndian64(version) };
+}
+
 Value encodeBackupStartedValue(const std::vector<std::pair<UID, Version>>& ids) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBackupStartValue()));
 	wr << ids;
