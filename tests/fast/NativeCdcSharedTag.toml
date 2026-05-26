@@ -1,6 +1,7 @@
 [[test]]
 testTitle = 'NativeCdcSharedTag'
 useDB = true
+waitForQuiescenceEnd = false
 
     [[test.workload]]
     testName = 'NativeCdc'

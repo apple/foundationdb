@@ -257,6 +257,7 @@ Future<Void> bufferStream(CDCProxyData* self, Reference<CDCBufferedStream> strea
 
 				const Version previousBufferedThrough = stream->bufferedThrough;
 				bufferMessages(stream, metadata, cursor);
+				stream->bufferedThrough = std::max(stream->bufferedThrough, cursor->version().version - 1);
 				if (stream->bufferedThrough > previousBufferedThrough) {
 					stream->changed.trigger();
 				}
@@ -275,7 +276,9 @@ Future<Void> bufferStream(CDCProxyData* self, Reference<CDCBufferedStream> strea
 							stream->changed.trigger();
 						}
 					} else {
-						co_await delay(0.1);
+						// ReplayMultiCursor advances past an empty old log generation on
+						// its next getMore(); rebuilding it here repeats that generation.
+						continue;
 					}
 					break;
 				}
