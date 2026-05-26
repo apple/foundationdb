@@ -24,9 +24,10 @@
 #include "flow/IRandom.h"
 #include "flow/Net2Packet.h"
 #include "flow/Trace.h"
+#include "flow/Knobs.h"
+#include "flow/CodeProbe.h"
 #include "md5/md5.h"
 #include "libb64/encode.h"
-#include "flow/Knobs.h"
 #include <cctype>
 #include <sstream>
 #include "flow/IConnection.h"
@@ -227,7 +228,7 @@ Future<Void> writeResponse(Reference<IConnection> conn, Reference<OutgoingRespon
 	}
 }
 
-// Read at least 1 bytes from conn and up to maxlen in a single read, append read data into *buf
+// Read at least 1 byte from conn and up to maxlen in a single read, append read data into *buf
 // Returns the number of bytes read.
 Future<int> read_into_string(Reference<IConnection> conn, std::string* buf, int maxlen) {
 	while (true) {
@@ -235,7 +236,12 @@ Future<int> read_into_string(Reference<IConnection> conn, std::string* buf, int 
 		int originalSize = buf->size();
 		// TODO:  resize is zero-initializing the space we're about to overwrite, so do something else, which probably
 		// means not using a string for this buffer
-		// FIXME: buggify read size as well
+
+		// Buggify read size to exercise partial-read code paths in simulation
+		if ((!g_network->isSimulated() || !g_simulator->speedUpSimulation) && BUGGIFY_WITH_PROB(0.01)) {
+			maxlen = deterministicRandom()->randomInt(1, 10);
+			CODE_PROBE(true, "HTTP buggified read size");
+		}
 		buf->resize(originalSize + maxlen);
 		uint8_t* wptr = (uint8_t*)buf->data() + originalSize;
 		int len = conn->read(wptr, wptr + maxlen);
