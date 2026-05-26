@@ -30,9 +30,9 @@
 namespace FDB {
 class DirectoryLayer : public IDirectory {
 public:
-	DirectoryLayer(Subspace nodeSubspace = DEFAULT_NODE_SUBSPACE,
-	               Subspace contentSubspace = DEFAULT_CONTENT_SUBSPACE,
-	               bool allowManualPrefixes = false);
+	explicit DirectoryLayer(Subspace nodeSubspace = DEFAULT_NODE_SUBSPACE,
+	                        Subspace contentSubspace = DEFAULT_CONTENT_SUBSPACE,
+	                        bool allowManualPrefixes = false);
 
 	Future<Reference<DirectorySubspace>> create(
 	    Reference<Transaction> const& tr,

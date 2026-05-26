@@ -27,7 +27,7 @@ namespace FdbApiTester {
 
 class ApiCorrectnessWorkload : public ApiWorkload {
 public:
-	ApiCorrectnessWorkload(const WorkloadConfig& config) : ApiWorkload(config) {}
+	explicit ApiCorrectnessWorkload(const WorkloadConfig& config) : ApiWorkload(config) {}
 
 private:
 	enum OpType {

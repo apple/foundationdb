@@ -1161,7 +1161,7 @@ Future<Void> updateLocalityForDcId(Optional<Key> dcId,
 Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> self,
                                         Reference<LogSystem> oldLogSystem,
                                         Version txsPoppedVersion) {
-	Reference<AsyncVar<PeekTxsInfo>> myLocality =
+	auto myLocality =
 	    makeReference<AsyncVar<PeekTxsInfo>>(PeekTxsInfo(tagLocalityInvalid, tagLocalityInvalid, invalidVersion));
 	Future<Void> localityUpdater =
 	    updateLocalityForDcId(self->masterInterface.locality.dcId(), oldLogSystem, myLocality);

@@ -324,7 +324,7 @@ public:
 		Future<RangeResultType> boundariesFuture =
 		    self.kvMap.getRange(tr, rangeBegin, rangeEnd, GetRangeLimits(readSize));
 
-		Reference<LocalSnapshot> result = makeReference<LocalSnapshot>();
+		auto result = makeReference<LocalSnapshot>();
 		while (true) {
 			kbt_debug("RANGEMAP snapshot loop\n");
 			RangeResultType boundaries = co_await boundariesFuture;

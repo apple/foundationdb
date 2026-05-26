@@ -3081,7 +3081,7 @@ public:
 		addActor.send(idempotencyIdsExpireServer.run());
 
 		// wait for txnStateStore recovery
-		co_await success(commitData.txnStateStore->readValue(StringRef()));
+		co_await commitData.txnStateStore->readValue(StringRef());
 
 		int commitBatchByteLimit =
 		    (int)std::min<double>(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_BYTES_MAX,
