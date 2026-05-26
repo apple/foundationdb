@@ -98,7 +98,6 @@ struct PrivateEndpoints : TestWorkload {
 		// addTestFor(&CommitProxyInterface::getStorageServerRejoinInfo);
 		addTestFor(&CommitProxyInterface::waitFailure);
 		// addTestFor(&CommitProxyInterface::txnState);
-		// addTestFor(&CommitProxyInterface::getHealthMetrics);
 		// addTestFor(&CommitProxyInterface::proxySnapReq);
 		addTestFor(&CommitProxyInterface::exclusionSafetyCheckReq);
 		// addTestFor(&CommitProxyInterface::getDDMetrics);
