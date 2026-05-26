@@ -56,6 +56,7 @@ struct CDCBufferedStream : ReferenceCounted<CDCBufferedStream> {
 	CDCStreamId streamId;
 	bool active = true;
 	bool initialized = false;
+	bool tooOld = false;
 	Version minVersion = invalidVersion;
 	Version bufferedThrough = invalidVersion;
 	int64_t bufferedBytes = 0;
@@ -252,6 +253,14 @@ Future<Void> bufferStream(CDCProxyData* self, Reference<CDCBufferedStream> strea
 					if (cursor->popped() <= stream->minVersion) {
 						break;
 					}
+					TraceEvent("CDCBufferStreamTooOld", self->id)
+					    .detail("StreamId", stream->streamId)
+					    .detail("MinVersion", stream->minVersion)
+					    .detail("BufferedThrough", stream->bufferedThrough)
+					    .detail("Begin", begin)
+					    .detail("Popped", cursor->popped())
+					    .detail("CurrentTag", metadata.currentTag)
+					    .detail("TagHistorySize", metadata.tagHistory.size());
 					throw transaction_too_old();
 				}
 
@@ -286,6 +295,12 @@ Future<Void> bufferStream(CDCProxyData* self, Reference<CDCBufferedStream> strea
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_client_invalid_operation || e.code() == error_code_wrong_shard_server) {
+			stream->active = false;
+			stream->changed.trigger();
+			co_return;
+		}
+		if (e.code() == error_code_transaction_too_old) {
+			stream->tooOld = true;
 			stream->active = false;
 			stream->changed.trigger();
 			co_return;
@@ -394,6 +409,9 @@ Future<Void> consume(CDCProxyData* self, CDCConsumeRequest request) {
 		while (!stream->initialized) {
 			co_await stream->changed.onTrigger();
 		}
+		if (stream->tooOld) {
+			throw transaction_too_old();
+		}
 
 		Version begin = request.cursor.lastConsumedVersion == invalidVersion ? stream->minVersion
 		                                                                     : request.cursor.lastConsumedVersion + 1;
@@ -406,6 +424,9 @@ Future<Void> consume(CDCProxyData* self, CDCConsumeRequest request) {
 		}
 		while (stream->active && stream->bufferedThrough < begin) {
 			co_await stream->changed.onTrigger();
+		}
+		if (stream->tooOld) {
+			throw transaction_too_old();
 		}
 		if (!stream->active) {
 			throw wrong_shard_server();
