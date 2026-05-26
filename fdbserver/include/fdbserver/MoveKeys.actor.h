@@ -213,5 +213,10 @@ Future<Void> checkMoveKeysLock(Transaction* tr,
                                const DDEnabledState* ddEnabledState,
                                bool isWrite = true);
 
+ACTOR Future<Void> removeOldDestinations(Reference<ReadYourWritesTransaction> tr,
+                                         Key prefix,
+                                         VectorRef<KeyRangeRef> shards,
+                                         KeyRangeRef currentKeys);
+
 #include "flow/unactorcompiler.h"
 #endif
