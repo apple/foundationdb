@@ -1348,6 +1348,34 @@ void LogSystem::setBackupWorkers(const std::vector<InitializeBackupReply>& repli
 	backupWorkerChanged.trigger();
 }
 
+void LogSystem::setRangeBackupWorkers(const std::vector<InitializeRangeBackupReply>& replies) {
+	ASSERT(!tLogs.empty());
+
+	Reference<LogSet> logset = tLogs[0];
+	LogEpoch logsetEpoch = this->epoch;
+	oldestBackupEpoch = this->epoch;
+	for (const auto& reply : replies) {
+		if (removedBackupWorkers.contains(reply.interf.id())) {
+			removedBackupWorkers.erase(reply.interf.id());
+			continue;
+		}
+		auto worker = makeReference<AsyncVar<OptionalInterface<BackupInterface>>>(
+		    OptionalInterface<BackupInterface>(reply.interf));
+		if (reply.backupEpoch != logsetEpoch) {
+			logsetEpoch = reply.backupEpoch;
+			oldestBackupEpoch = std::min(oldestBackupEpoch, logsetEpoch);
+			logset = getEpochLogSet(logsetEpoch);
+			ASSERT(logset.isValid());
+		}
+		logset->backupWorkers.push_back(worker);
+		TraceEvent("AddRangeBackupWorker", dbgid)
+		    .detail("Epoch", logsetEpoch)
+		    .detail("BackupWorkerID", reply.interf.id());
+	}
+	TraceEvent("SetOldestBackupEpoch", dbgid).detail("Epoch", oldestBackupEpoch);
+	backupWorkerChanged.trigger();
+}
+
 bool LogSystem::removeBackupWorker(const BackupWorkerDoneRequest& req) {
 	bool removed = false;
 	Reference<LogSet> logset = getEpochLogSet(req.backupEpoch);

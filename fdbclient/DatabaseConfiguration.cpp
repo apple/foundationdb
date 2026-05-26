@@ -422,8 +422,8 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 
 	result["backup_worker_enabled"] = (int32_t)backupWorkerEnabled;
 	result["range_backup_worker_enabled"] = (int32_t)rangeBackupWorkerEnabled;
-	if (desiredRangeBackupWorkerCount != -1 || isOverridden("range_backup_worker_count")) {
-		result["range_backup_worker_count"] = desiredRangeBackupWorkerCount;
+	if (desiredRangeBackupWorkerCount != -1 || isOverridden("range_backup_workers")) {
+		result["range_backup_workers"] = desiredRangeBackupWorkerCount;
 	}
 	result["perpetual_storage_wiggle"] = perpetualStorageWiggleSpeed;
 	result["perpetual_storage_wiggle_locality"] = perpetualStorageWiggleLocality;
@@ -698,7 +698,7 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	} else if (ck == "range_backup_worker_enabled"_sr) {
 		parse((&type), value);
 		rangeBackupWorkerEnabled = (type != 0);
-	} else if (ck == "range_backup_worker_count"_sr) {
+	} else if (ck == "range_backup_workers"_sr) {
 		parse(&desiredRangeBackupWorkerCount, value);
 	} else if (ck == "usable_regions"_sr) {
 		parse(&usableRegions, value);
