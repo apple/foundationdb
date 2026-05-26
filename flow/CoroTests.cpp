@@ -1396,7 +1396,7 @@ TEST_CASE("/flow/coro/StrictFuture/move") {
 	ASSERT_EQ(future.getFutureReferenceCount(), 1);
 
 	StrictFuture<int> strictFuture(std::move(future));
-	ASSERT(!future.isValid());
+	ASSERT(!future.isValid()); // NOLINT(bugprone-use-after-move): verifies moved-from Future state.
 	ASSERT_EQ(strictFuture.getFutureReferenceCount(), 1);
 
 	promise.send(42);

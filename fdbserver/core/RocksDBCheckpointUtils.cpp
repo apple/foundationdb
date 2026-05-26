@@ -719,9 +719,7 @@ Future<Void> RocksDBColumnFamilyReader::doClose(RocksDBColumnFamilyReader* self)
 	co_await f;
 
 	co_await self->threads->stop();
-	if (self->db != nullptr) {
-		delete self->db;
-	}
+	delete self->db;
 	delete self;
 }
 
@@ -891,7 +889,7 @@ RangeResult RocksDBSstFileReader::getRange(const KeyRange& range) {
 class RocksDBCheckpointByteSampleReader : public ICheckpointByteSampleReader {
 public:
 	explicit(false) RocksDBCheckpointByteSampleReader(const CheckpointMetaData& checkpoint);
-	~RocksDBCheckpointByteSampleReader() = default;
+	~RocksDBCheckpointByteSampleReader() override = default;
 
 	KeyValue next() override;
 

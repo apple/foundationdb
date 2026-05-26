@@ -944,7 +944,7 @@ TEST_CASE("/flow/StringRef/ConstCharConstructor") {
 
 	StringRef empty("");
 	ASSERT(empty.empty());
-	ASSERT(empty.size() == 0);
+	ASSERT(empty.empty());
 
 	return Void();
 }

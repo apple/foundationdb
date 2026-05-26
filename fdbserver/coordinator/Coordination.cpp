@@ -210,7 +210,7 @@ Future<Void> openDatabase(ClientData* db,
 	++(*clientCount);
 	hasConnectedClients->set(true);
 
-	if (req.supportedVersions.size() > 0 && !req.internal) {
+	if (!req.supportedVersions.empty() && !req.internal) {
 		db->clientStatusInfoMap[req.reply.getEndpoint().getPrimaryAddress()] =
 		    ClientStatusInfo(req.traceLogGroup, req.supportedVersions, req.issues);
 	}
@@ -238,7 +238,7 @@ Future<Void> openDatabase(ClientData* db,
 		}
 	}
 
-	if (req.supportedVersions.size() > 0 && !req.internal) {
+	if (!req.supportedVersions.empty() && !req.internal) {
 		db->clientStatusInfoMap.erase(req.reply.getEndpoint().getPrimaryAddress());
 	}
 
@@ -451,7 +451,7 @@ class LeaderRegister : public ReferenceCounted<LeaderRegister>, NonCopyable {
 				UNREACHABLE();
 			}
 
-			if (!availableLeaders.size() && !availableCandidates.size() && !notify.size() &&
+			if (availableLeaders.empty() && availableCandidates.empty() && notify.empty() &&
 			    !currentNominee.present()) {
 				// Our state is back to the initial state, so we can safely stop this actor
 				TraceEvent("EndingLeaderNomination")
@@ -464,11 +464,11 @@ class LeaderRegister : public ReferenceCounted<LeaderRegister>, NonCopyable {
 				}
 			} else {
 				Optional<LeaderInfo> nextNominee;
-				if (availableCandidates.size() &&
-				    (!availableLeaders.size() ||
+				if (!availableCandidates.empty() &&
+				    (availableLeaders.empty() ||
 				     availableLeaders.begin()->leaderChangeRequired(*availableCandidates.begin()))) {
 					nextNominee = *availableCandidates.begin();
-				} else if (availableLeaders.size()) {
+				} else if (!availableLeaders.empty()) {
 					nextNominee = *availableLeaders.begin();
 				}
 
@@ -491,7 +491,7 @@ class LeaderRegister : public ReferenceCounted<LeaderRegister>, NonCopyable {
 
 				currentNominee = nextNominee;
 
-				if (availableLeaders.size()) {
+				if (!availableLeaders.empty()) {
 					setNextInterval(delay(SERVER_KNOBS->POLLING_FREQUENCY));
 					if (leaderIntervalCount++ > 5) {
 						candidateDelay = SERVER_KNOBS->CANDIDATE_MIN_DELAY;
