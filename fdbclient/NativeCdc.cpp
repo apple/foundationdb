@@ -481,6 +481,11 @@ Future<Version> acknowledgeNativeCdcStream(Database cx, CDCStreamId streamId, Ve
 				throw client_invalid_operation();
 			}
 
+			const Version readVersion = co_await tr.getReadVersion();
+			if (consumedThrough > readVersion) {
+				throw client_invalid_operation();
+			}
+
 			const Version minVersion = decodeCDCMinVersionValue(minVersionValue.get());
 			if (minUnpoppedVersion <= minVersion) {
 				co_return minVersion;

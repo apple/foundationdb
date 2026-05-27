@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <limits>
 #include <set>
 #include <utility>
 #include <vector>
@@ -354,7 +355,8 @@ struct NativeCdcWorkload : TestWorkload {
 		ASSERT(streams[0].keys == firstRange);
 		ASSERT(streams[0].minVersion == firstRoute.second);
 
-		const Version firstConsumedThrough = firstRoute.second + 5;
+		const Version firstConsumedThrough =
+		    co_await writeValues(cx, { { "first/acknowledged"_sr, "acknowledged"_sr } });
 		const Version firstAckMinVersion = firstConsumedThrough + 1;
 		ASSERT(co_await acknowledgeNativeCdcStream(cx, firstId, firstConsumedThrough) == firstAckMinVersion);
 		ASSERT(co_await acknowledgeNativeCdcStream(cx, firstId, firstRoute.second) == firstAckMinVersion);
@@ -392,6 +394,15 @@ struct NativeCdcWorkload : TestWorkload {
 		CDCCursor liveCursor = co_await createNativeCdcCursor(cx, liveName);
 		ASSERT(liveCursor.streamId == liveStreamId);
 		CDCProxyInterface owner = co_await getCDCProxy(liveStreamId);
+
+		bool futureAcknowledgeRejected = false;
+		try {
+			co_await acknowledgeNativeCdcStreamClient(cx,
+			                                          CDCCursor(liveStreamId, std::numeric_limits<Version>::max() - 1));
+		} catch (Error& e) {
+			futureAcknowledgeRejected = e.code() == error_code_client_invalid_operation;
+		}
+		ASSERT(futureAcknowledgeRejected);
 
 		std::vector<NativeCdcStreamInfo> listed = co_await listNativeCdcStreamsClient(cx);
 		ASSERT(listed.size() == 1);
