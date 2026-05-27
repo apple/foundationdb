@@ -27,7 +27,7 @@
 #include "fdbrpc/fdbrpc.h"
 
 struct CDCCursor {
-	constexpr static FileIdentifier file_identifier = 16776001;
+	constexpr static FileIdentifier file_identifier = 10949553;
 	CDCStreamId streamId = 0;
 	Version lastConsumedVersion = invalidVersion;
 
@@ -42,7 +42,7 @@ struct CDCCursor {
 };
 
 struct VersionedMutationsRef {
-	constexpr static FileIdentifier file_identifier = 16776002;
+	constexpr static FileIdentifier file_identifier = 3297577;
 	Version version = invalidVersion;
 	VectorRef<MutationRef> mutations;
 
@@ -56,7 +56,7 @@ struct VersionedMutationsRef {
 };
 
 struct CDCStreamInfoRef {
-	constexpr static FileIdentifier file_identifier = 16776003;
+	constexpr static FileIdentifier file_identifier = 10228408;
 	StringRef name;
 	CDCStreamId streamId = 0;
 	KeyRangeRef keys;
@@ -73,7 +73,7 @@ struct CDCStreamInfoRef {
 };
 
 struct CDCRegisterStreamReply {
-	constexpr static FileIdentifier file_identifier = 16776012;
+	constexpr static FileIdentifier file_identifier = 3217071;
 	CDCStreamId streamId = 0;
 
 	CDCRegisterStreamReply() = default;
@@ -86,7 +86,7 @@ struct CDCRegisterStreamReply {
 };
 
 struct CDCRegisterStreamRequest {
-	constexpr static FileIdentifier file_identifier = 16776004;
+	constexpr static FileIdentifier file_identifier = 1269096;
 	Key name;
 	KeyRange keys;
 	ReplyPromise<CDCRegisterStreamReply> reply;
@@ -103,7 +103,7 @@ struct CDCRegisterStreamRequest {
 };
 
 struct CDCRemoveStreamRequest {
-	constexpr static FileIdentifier file_identifier = 16776005;
+	constexpr static FileIdentifier file_identifier = 3683857;
 	Key name;
 	ReplyPromise<Void> reply;
 
@@ -119,7 +119,7 @@ struct CDCRemoveStreamRequest {
 };
 
 struct CDCListStreamsReply {
-	constexpr static FileIdentifier file_identifier = 16776006;
+	constexpr static FileIdentifier file_identifier = 7600884;
 	Arena arena;
 	VectorRef<CDCStreamInfoRef> streams;
 
@@ -130,7 +130,7 @@ struct CDCListStreamsReply {
 };
 
 struct CDCListStreamsRequest {
-	constexpr static FileIdentifier file_identifier = 16776007;
+	constexpr static FileIdentifier file_identifier = 8134529;
 	ReplyPromise<CDCListStreamsReply> reply;
 
 	bool verify() const { return true; }
@@ -142,7 +142,7 @@ struct CDCListStreamsRequest {
 };
 
 struct CDCConsumeReply {
-	constexpr static FileIdentifier file_identifier = 16776008;
+	constexpr static FileIdentifier file_identifier = 12940542;
 	Arena arena;
 	VectorRef<VersionedMutationsRef> mutations;
 	Version lastConsumedVersion = invalidVersion;
@@ -154,7 +154,7 @@ struct CDCConsumeReply {
 };
 
 struct CDCConsumeRequest {
-	constexpr static FileIdentifier file_identifier = 16776009;
+	constexpr static FileIdentifier file_identifier = 8178243;
 	CDCCursor cursor;
 	ReplyPromise<CDCConsumeReply> reply;
 
@@ -170,7 +170,7 @@ struct CDCConsumeRequest {
 };
 
 struct CDCAckRequest {
-	constexpr static FileIdentifier file_identifier = 16776010;
+	constexpr static FileIdentifier file_identifier = 15923892;
 	CDCStreamId streamId = 0;
 	Version version = invalidVersion;
 	ReplyPromise<Void> reply;
@@ -187,7 +187,7 @@ struct CDCAckRequest {
 };
 
 struct HaltCDCProxyRequest {
-	constexpr static FileIdentifier file_identifier = 16776014;
+	constexpr static FileIdentifier file_identifier = 6992638;
 	ReplyPromise<Void> reply;
 
 	bool verify() const { return true; }
@@ -199,7 +199,7 @@ struct HaltCDCProxyRequest {
 };
 
 struct CDCProxyInterface {
-	constexpr static FileIdentifier file_identifier = 16776011;
+	constexpr static FileIdentifier file_identifier = 6689609;
 	enum { LocationAwareLoadBalance = 1 };
 	enum { AlwaysFresh = 1 };
 

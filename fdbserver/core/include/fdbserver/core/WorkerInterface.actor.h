@@ -738,7 +738,7 @@ extern template class RequestStream<InitializeGrvProxyRequest, false>;
 extern template struct NetNotifiedQueue<InitializeGrvProxyRequest, false>;
 
 struct InitializeCDCProxyRequest {
-	constexpr static FileIdentifier file_identifier = 16776013;
+	constexpr static FileIdentifier file_identifier = 416762;
 	uint64_t recoveryCount;
 	ReplyPromise<CDCProxyInterface> reply;
 
