@@ -42,6 +42,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"
 #include "flow/UnitTest.h"
+#include "flow/genericactors.actor.h"
 
 namespace {
 
@@ -63,10 +64,18 @@ struct CDCBufferedStream : ReferenceCounted<CDCBufferedStream> {
 	std::deque<Standalone<VersionedMutationsRef>> mutations;
 	AsyncTrigger changed;
 	AsyncTrigger refresh;
-	AsyncTrigger spaceAvailable;
 	AsyncTrigger stopped;
 
 	explicit CDCBufferedStream(CDCStreamId streamId) : streamId(streamId) {}
+};
+
+struct CDCBufferedBatch {
+	Version bufferedThrough;
+	int64_t bufferedBytes = 0;
+	bool mergeFirstMutationVersion = false;
+	std::deque<Standalone<VersionedMutationsRef>> mutations;
+
+	explicit CDCBufferedBatch(Version bufferedThrough) : bufferedThrough(bufferedThrough) {}
 };
 
 struct CDCProxyData {
@@ -75,10 +84,13 @@ struct CDCProxyData {
 	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
 	Reference<AsyncVar<Reference<LogSystemConsumer>>> logSystem;
 	std::map<CDCStreamId, Reference<CDCBufferedStream>> streams;
+	FlowLock bufferLock;
+	int64_t bufferedBytes = 0;
 
 	CDCProxyData(CDCProxyInterface const& proxy, Reference<AsyncVar<ServerDBInfo> const> dbInfo)
 	  : id(proxy.id()), cx(openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True)), dbInfo(dbInfo),
-	    logSystem(makeReference<AsyncVar<Reference<LogSystemConsumer>>>()) {}
+	    logSystem(makeReference<AsyncVar<Reference<LogSystemConsumer>>>()),
+	    bufferLock(SERVER_KNOBS->CDC_PROXY_BUFFER_BYTES) {}
 };
 
 Optional<MutationRef> clipCDCMutation(MutationRef const& mutation, KeyRangeRef const& keys) {
@@ -167,9 +179,10 @@ Future<CDCStreamReadState> readCDCStreamState(Database cx,
 	}
 }
 
-void bufferMessages(Reference<CDCBufferedStream> stream,
-                    CDCStreamReadState const& metadata,
-                    Reference<IReplayPeekCursor> cursor) {
+CDCBufferedBatch bufferMessages(Reference<CDCBufferedStream> stream,
+                                CDCStreamReadState const& metadata,
+                                Reference<IReplayPeekCursor> cursor) {
+	CDCBufferedBatch batch(stream->bufferedThrough);
 	while (cursor->hasMessage()) {
 		const Version messageVersion = cursor->version().version;
 		ArenaReader& reader = *cursor->reader();
@@ -188,18 +201,52 @@ void bufferMessages(Reference<CDCBufferedStream> stream,
 			reader >> mutation;
 			Optional<MutationRef> clipped = clipCDCMutation(mutation, metadata.keys.get());
 			if (clipped.present()) {
-				if (stream->mutations.empty() || stream->mutations.back().version != messageVersion) {
-					stream->mutations.emplace_back();
-					stream->mutations.back().version = messageVersion;
-					stream->bufferedBytes += sizeof(VersionedMutationsRef);
+				if (batch.mutations.empty() || batch.mutations.back().version != messageVersion) {
+					batch.mutations.emplace_back();
+					batch.mutations.back().version = messageVersion;
+					if (stream->mutations.empty() || stream->mutations.back().version != messageVersion) {
+						batch.bufferedBytes += sizeof(VersionedMutationsRef);
+					} else {
+						batch.mergeFirstMutationVersion = true;
+					}
 				}
-				stream->mutations.back().mutations.push_back_deep(stream->mutations.back().arena(), clipped.get());
-				stream->bufferedBytes += clipped.get().expectedSize() + sizeof(MutationRef);
+				batch.mutations.back().mutations.push_back_deep(batch.mutations.back().arena(), clipped.get());
+				batch.bufferedBytes += clipped.get().expectedSize() + sizeof(MutationRef);
 			}
 		}
-		stream->bufferedThrough = std::max(stream->bufferedThrough, messageVersion);
+		batch.bufferedThrough = std::max(batch.bufferedThrough, messageVersion);
 		cursor->nextMessage();
 	}
+	return batch;
+}
+
+void addBufferedBatch(CDCProxyData* self, Reference<CDCBufferedStream> stream, CDCBufferedBatch batch) {
+	if (batch.mergeFirstMutationVersion) {
+		ASSERT(!stream->mutations.empty());
+		ASSERT(!batch.mutations.empty());
+		ASSERT(stream->mutations.back().version == batch.mutations.front().version);
+		for (const auto& mutation : batch.mutations.front().mutations) {
+			stream->mutations.back().mutations.push_back_deep(stream->mutations.back().arena(), mutation);
+		}
+		batch.mutations.pop_front();
+	}
+	while (!batch.mutations.empty()) {
+		stream->mutations.emplace_back(std::move(batch.mutations.front()));
+		batch.mutations.pop_front();
+	}
+	stream->bufferedThrough = std::max(stream->bufferedThrough, batch.bufferedThrough);
+	stream->bufferedBytes += batch.bufferedBytes;
+	self->bufferedBytes += batch.bufferedBytes;
+}
+
+void clearBufferedMutations(CDCProxyData* self, Reference<CDCBufferedStream> stream) {
+	if (stream->bufferedBytes > 0) {
+		ASSERT(self->bufferedBytes >= stream->bufferedBytes);
+		self->bufferedBytes -= stream->bufferedBytes;
+		self->bufferLock.release(stream->bufferedBytes);
+		stream->bufferedBytes = 0;
+	}
+	stream->mutations.clear();
 }
 
 Future<Void> bufferStream(CDCProxyData* self, Reference<CDCBufferedStream> stream) {
@@ -221,19 +268,23 @@ Future<Void> bufferStream(CDCProxyData* self, Reference<CDCBufferedStream> strea
 			Reference<IReplayPeekCursor> cursor =
 			    self->logSystem->get()->peekSingle(self->id, begin, metadata.currentTag, metadata.tagHistory);
 			while (stream->active) {
-				if (stream->bufferedBytes >= SERVER_KNOBS->CDC_PROXY_BUFFER_BYTES) {
-					auto waitForSpace = co_await race(stream->spaceAvailable.onTrigger(),
-					                                  self->logSystem->onChange(),
-					                                  stream->stopped.onTrigger(),
-					                                  stream->refresh.onTrigger());
-					if (waitForSpace.index() == 0) {
-						continue;
-					}
-					if (waitForSpace.index() == 2) {
-						co_return;
-					}
+				const int64_t peekReservation =
+				    std::min<int64_t>(SERVER_KNOBS->CDC_PROXY_BUFFER_BYTES, SERVER_KNOBS->MAXIMUM_PEEK_BYTES);
+				ASSERT(peekReservation > 0);
+				auto capacity = co_await race(self->bufferLock.take(TaskPriority::TLogPeekReply, peekReservation),
+				                              self->logSystem->onChange(),
+				                              stream->stopped.onTrigger(),
+				                              stream->refresh.onTrigger());
+				if (capacity.index() == 1) {
 					break;
 				}
+				if (capacity.index() == 2) {
+					co_return;
+				}
+				if (capacity.index() == 3) {
+					break;
+				}
+				FlowLock::Releaser reservation(self->bufferLock, peekReservation);
 				auto result = co_await race(cursor->getMore(TaskPriority::TLogPeekReply),
 				                            self->logSystem->onChange(),
 				                            stream->stopped.onTrigger(),
@@ -264,8 +315,39 @@ Future<Void> bufferStream(CDCProxyData* self, Reference<CDCBufferedStream> strea
 					throw transaction_too_old();
 				}
 
+				CDCBufferedBatch batch = bufferMessages(stream, metadata, cursor);
+				if (batch.bufferedBytes > peekReservation) {
+					TraceEvent(SevWarn, "CDCProxyOversizedPeekBatch", self->id)
+					    .detail("StreamId", stream->streamId)
+					    .detail("BufferedBytes", batch.bufferedBytes)
+					    .detail("ReservedBytes", peekReservation);
+					reservation.release();
+					auto oversizedCapacity =
+					    co_await race(self->bufferLock.take(TaskPriority::TLogPeekReply, batch.bufferedBytes),
+					                  self->logSystem->onChange(),
+					                  stream->stopped.onTrigger(),
+					                  stream->refresh.onTrigger());
+					if (oversizedCapacity.index() == 1) {
+						break;
+					}
+					if (oversizedCapacity.index() == 2) {
+						co_return;
+					}
+					if (oversizedCapacity.index() == 3) {
+						break;
+					}
+					reservation = FlowLock::Releaser(self->bufferLock, batch.bufferedBytes);
+				} else {
+					reservation.release(peekReservation - batch.bufferedBytes);
+				}
+				if (!stream->active) {
+					co_return;
+				}
+
 				const Version previousBufferedThrough = stream->bufferedThrough;
-				bufferMessages(stream, metadata, cursor);
+				addBufferedBatch(self, stream, std::move(batch));
+				// Buffered mutations own these permits until acknowledgement or stream removal.
+				reservation.remaining = 0;
 				stream->bufferedThrough = std::max(stream->bufferedThrough, cursor->version().version - 1);
 				if (stream->bufferedThrough > previousBufferedThrough) {
 					stream->changed.trigger();
@@ -295,11 +377,13 @@ Future<Void> bufferStream(CDCProxyData* self, Reference<CDCBufferedStream> strea
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_client_invalid_operation || e.code() == error_code_wrong_shard_server) {
+			clearBufferedMutations(self, stream);
 			stream->active = false;
 			stream->changed.trigger();
 			co_return;
 		}
 		if (e.code() == error_code_transaction_too_old) {
+			clearBufferedMutations(self, stream);
 			stream->tooOld = true;
 			stream->active = false;
 			stream->changed.trigger();
@@ -461,6 +545,7 @@ void reconcileStreams(CDCProxyData* self, ActorCollection* actors) {
 			it->second->active = false;
 			it->second->stopped.trigger();
 			it->second->changed.trigger();
+			clearBufferedMutations(self, it->second);
 			it = self->streams.erase(it);
 		} else {
 			++it;
@@ -539,13 +624,16 @@ Future<Void> acknowledge(CDCProxyData* self, CDCAckRequest request) {
 		if (found != self->streams.end()) {
 			found->second->minVersion = std::max(found->second->minVersion, minVersion);
 			while (!found->second->mutations.empty() && found->second->mutations.front().version < minVersion) {
-				found->second->bufferedBytes -=
+				const int64_t releasedBytes =
 				    sizeof(VersionedMutationsRef) + found->second->mutations.front().mutations.expectedSize();
+				found->second->bufferedBytes -= releasedBytes;
+				ASSERT(self->bufferedBytes >= releasedBytes);
+				self->bufferedBytes -= releasedBytes;
+				self->bufferLock.release(releasedBytes);
 				found->second->mutations.pop_front();
 			}
 			ASSERT(found->second->bufferedBytes >= 0);
 			found->second->refresh.trigger();
-			found->second->spaceAvailable.trigger();
 		}
 		co_await popAcknowledgedData(self);
 		request.reply.send(Void());

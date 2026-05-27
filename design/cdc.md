@@ -330,8 +330,14 @@ the tag appropriate for the version interval it is reading. It filters
 mutations to the registered range and stores versioned mutation batches in a
 per-stream in-memory buffer.
 
-Buffers are bounded by `CDC_PROXY_BUFFER_BYTES`. A slow consumer does not
-require the proxy to buffer its entire retained history in memory: durable
+All stream buffers owned by one CDC proxy share a `CDC_PROXY_BUFFER_BYTES`
+budget. Before requesting more TLog data, a stream reserves a bounded peek
+window from that budget, then converts the reservation to the actual filtered
+mutation bytes retained in its buffer. Acknowledgement or stream removal
+releases the retained reservation. This applies backpressure before ordinary
+peek batches arrive, rather than allowing each stream or each received batch
+to independently overshoot the proxy limit. A slow consumer does not require
+the proxy to buffer its entire retained history in memory: durable
 acknowledgement state and tagged TLog retention are the source of resumability,
 while the proxy buffer is a delivery optimization.
 
