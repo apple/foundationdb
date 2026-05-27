@@ -182,6 +182,29 @@ Future<bool> nativeCdcStreamStillExists(Database cx, CDCStreamId streamId) {
 	}
 }
 
+Future<CDCStreamId> getNativeCdcStreamId(Database cx, Key name) {
+	if (name.empty()) {
+		throw client_invalid_operation();
+	}
+
+	Transaction tr(cx);
+	while (true) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			Optional<Value> streamId = co_await tr.get(cdcStreamNameKeyFor(name));
+			if (!streamId.present()) {
+				throw client_invalid_operation();
+			}
+			co_return decodeCDCStreamNameValue(streamId.get());
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr.onError(err);
+	}
+}
+
 Future<CDCProxyInterface> getNativeCdcStreamProxy(Database cx, CDCStreamId streamId) {
 	if (streamId == 0) {
 		throw client_invalid_operation();
@@ -548,10 +571,12 @@ Future<Void> removeNativeCdcStreamClient(Database cx, Key name) {
 	}
 }
 
-Future<CDCConsumeReply> consumeNativeCdcStream(Database cx, CDCCursor cursor) {
+Future<CDCConsumeReply> consumeNativeCdcStream(Database cx, Key name, Version lastConsumedVersion) {
 	validateNativeCdcEnabled();
+	const CDCStreamId streamId = co_await getNativeCdcStreamId(cx, name);
+	const CDCCursor cursor(streamId, lastConsumedVersion);
 	while (true) {
-		CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(cx, cursor.streamId);
+		CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(cx, streamId);
 		try {
 			co_return co_await proxy.consume.getReply(CDCConsumeRequest(cursor));
 		} catch (Error& error) {
@@ -563,11 +588,12 @@ Future<CDCConsumeReply> consumeNativeCdcStream(Database cx, CDCCursor cursor) {
 	}
 }
 
-Future<Void> acknowledgeNativeCdcStreamClient(Database cx, CDCStreamId streamId, Version consumedThrough) {
+Future<Void> acknowledgeNativeCdcStreamClient(Database cx, Key name, Version consumedThrough) {
 	validateNativeCdcEnabled();
-	if (streamId == 0 || consumedThrough < 0 || consumedThrough == std::numeric_limits<Version>::max()) {
+	if (consumedThrough < 0 || consumedThrough == std::numeric_limits<Version>::max()) {
 		throw client_invalid_operation();
 	}
+	const CDCStreamId streamId = co_await getNativeCdcStreamId(cx, name);
 
 	while (true) {
 		CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(cx, streamId);
