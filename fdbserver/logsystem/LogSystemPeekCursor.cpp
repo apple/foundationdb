@@ -308,7 +308,7 @@ Future<Void> serverPeekParallelGetMoreImpl(ServerPeekCursor* self, TaskPriority 
 				if (self->sequence == std::numeric_limits<decltype(self->sequence)>::max()) {
 					throw operation_obsolete();
 				}
-			} else if (self->futureResults.size() == 0) {
+			} else if (self->futureResults.empty()) {
 				co_return;
 			}
 
@@ -562,7 +562,7 @@ Future<Void> ServerPeekCursor::getMore(TaskPriority taskID) {
 		if (usePeekStream &&
 		    (tag.locality >= 0 || tag.locality == tagLocalityLogRouter || tag.locality == tagLocalityRemoteLog)) {
 			more = serverPeekStreamGetMore(this, taskID);
-		} else if (parallelGetMore || onlySpilled || futureResults.size()) {
+		} else if (parallelGetMore || onlySpilled || !futureResults.empty()) {
 			more = serverPeekParallelGetMore(this, taskID);
 		} else {
 			more = serverPeekGetMore(this, taskID);
@@ -797,7 +797,7 @@ MergedPeekCursor::MergedPeekCursor(std::vector<Reference<ServerPeekCursor>> cons
 
 Reference<IReplayPeekCursor> MergedPeekCursor::cloneNoMore() {
 	std::vector<Reference<ServerPeekCursor>> cursors;
-	for (auto it : serverCursors) {
+	for (const auto& it : serverCursors) {
 		cursors.push_back(it->cloneServerNoMore());
 	}
 	return makeReference<MergedPeekCursor>(
@@ -805,7 +805,7 @@ Reference<IReplayPeekCursor> MergedPeekCursor::cloneNoMore() {
 }
 
 void MergedPeekCursor::setProtocolVersion(ProtocolVersion version) {
-	for (auto it : serverCursors) {
+	for (const auto& it : serverCursors) {
 		if (it->hasMessage()) {
 			it->setProtocolVersion(version);
 		}
@@ -958,7 +958,7 @@ Future<Void> MergedPeekCursor::getMore(TaskPriority taskID) {
 		return more;
 	}
 
-	if (!serverCursors.size()) {
+	if (serverCursors.empty()) {
 		return Never();
 	}
 
@@ -1716,7 +1716,7 @@ Future<Void> bufferedGetMore(BufferedCursor* self, TaskPriority taskID) {
 
 	self->messageVersion = LogMessageVersion(minVersion);
 	self->messageIndex = 0;
-	self->hasNextMessage = self->messages.size() > 0;
+	self->hasNextMessage = !self->messages.empty();
 
 	co_await yield();
 	if (self->canDiscardPopped && self->poppedVersion > self->version().version) {
@@ -1724,11 +1724,11 @@ Future<Void> bufferedGetMore(BufferedCursor* self, TaskPriority taskID) {
 		    .detail("Version", self->version().version)
 		    .detail("Popped", self->poppedVersion);
 		self->messageVersion = std::max(self->messageVersion, LogMessageVersion(self->poppedVersion));
-		for (auto cursor : self->discardableCursors) {
+		for (const auto& cursor : self->discardableCursors) {
 			cursor->advanceTo(self->messageVersion);
 		}
 		self->messageIndex = self->messages.size();
-		if (self->messages.size() > 0 &&
+		if (!self->messages.empty() &&
 		    self->messages[self->messages.size() - 1].version.version < self->poppedVersion) {
 			self->hasNextMessage = false;
 		} else {

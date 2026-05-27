@@ -394,10 +394,10 @@ public:
 	// constructor — which is the actual use-after-free case this guards against.
 	// Precondition: str is not null.
 	explicit StringRef(const char* str) : StringRef(str, strlen(str)) {}
-	StringRef(std::nullptr_t) = delete;
+	explicit StringRef(std::nullptr_t) = delete;
 	// Reject integer literals (e.g. StringRef(0)), which would otherwise pick the const char*
 	// overload via null-pointer conversion and crash in strlen.
-	StringRef(int) = delete;
+	explicit StringRef(int) = delete;
 	explicit(false) StringRef(const std::string& s) : data((const uint8_t*)s.c_str()), length((int)s.size()) {
 		if (s.size() > std::numeric_limits<int>::max())
 			abort();

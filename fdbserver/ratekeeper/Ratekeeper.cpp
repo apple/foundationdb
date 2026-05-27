@@ -1224,7 +1224,7 @@ UpdateCommitCostRequest StorageQueueInfo::refreshCommitCost(double elapsed) {
 	}
 
 	while (!topKWriters.empty()) {
-		busiestWriteTags.push_back(std::move(topKWriters.top()));
+		busiestWriteTags.push_back(topKWriters.top());
 		topKWriters.pop();
 	}
 
@@ -1269,7 +1269,7 @@ TLogQueueInfo::TLogQueueInfo(UID id)
 
 void TLogQueueInfo::update(TLogQueuingMetricsReply const& reply, Smoother& smoothTotalDurableBytes) {
 	valid = true;
-	auto prevReply = std::move(lastReply);
+	auto prevReply = lastReply;
 	lastReply = reply;
 	if (prevReply.instanceID != reply.instanceID) {
 		smoothDurableBytes.reset(reply.bytesDurable);

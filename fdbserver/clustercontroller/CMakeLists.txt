@@ -5,6 +5,10 @@ add_fdbserver_link_test(fdbserver_clustercontrollerlinktest
   fdbserver_clustercontroller
   fdbserver_logsystem
   fdbserver_core)
+add_fdbserver_unit_test(fdbserver_clustercontroller_test clustercontroller
+  fdbserver_clustercontroller
+  fdbserver_logsystem
+  fdbserver_core)
 
 configure_fdbserver_common_includes(fdbserver_clustercontroller)
 target_include_directories(fdbserver_clustercontroller

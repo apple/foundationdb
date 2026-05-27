@@ -106,7 +106,7 @@ struct WorkloadConfig {
 // Tracks if workload is active, notifies the workload manager when the workload completes
 class WorkloadBase : public IWorkload {
 public:
-	WorkloadBase(const WorkloadConfig& config);
+	explicit WorkloadBase(const WorkloadConfig& config);
 
 	// Initialize the workload
 	void init(WorkloadManager* manager) override;
@@ -304,7 +304,7 @@ struct IWorkloadFactory {
  */
 template <class WorkloadType>
 struct WorkloadFactory : IWorkloadFactory {
-	WorkloadFactory(const char* name) { factories()[name] = this; }
+	explicit WorkloadFactory(const char* name) { factories()[name] = this; }
 	std::shared_ptr<IWorkload> create(const WorkloadConfig& config) override {
 		return std::make_shared<WorkloadType>(config);
 	}

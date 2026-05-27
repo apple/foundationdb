@@ -1,5 +1,6 @@
 fdb_find_sources(FDBSERVER_SRCS)
 list(FILTER FDBSERVER_SRCS EXCLUDE REGEX "^workloads/")
+list(REMOVE_ITEM FDBSERVER_SRCS FDBServerUnitTestMain.cpp)
 include(AddFdbServerLinkTest)
 
 function(configure_fdbserver_common_includes target_name)

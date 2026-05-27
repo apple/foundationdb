@@ -1,6 +1,7 @@
 fdb_find_sources(FDBCLIENT_SRCS)
 list(REMOVE_ITEM FDBCLIENT_SRCS LinkTest.cpp)
 list(REMOVE_ITEM FDBCLIENT_SRCS S3Client_cli.cpp)
+list(REMOVE_ITEM FDBCLIENT_SRCS fdbclient_test.cpp)
 list(APPEND FDBCLIENT_SRCS sha1/SHA1.cpp)
 
 message(STATUS "FDB version is ${FDB_VERSION}")
@@ -198,6 +199,10 @@ endif()
 
 add_flow_target(LINK_TEST NAME fdbclientlinktest SRCS LinkTest.cpp)
 target_link_libraries(fdbclientlinktest PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,fdbclient>" rapidxml) # re-link rapidxml due to private link interface
+
+add_flow_target(EXECUTABLE NAME fdbclient_test SRCS fdbclient_test.cpp)
+set_target_properties(fdbclient_test PROPERTIES EXCLUDE_FROM_ALL TRUE)
+target_link_libraries(fdbclient_test PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,fdbclient>" rapidxml)
 
 if(NOT FOUNDATIONDB_CROSS_COMPILING) # FIXME(swift): make this work when
                                      # x-compiling.
