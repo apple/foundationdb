@@ -22,6 +22,7 @@
 #include <limits>
 #include <map>
 #include <set>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -37,7 +38,7 @@ namespace {
 struct NativeCdcIdentifierAllocator {
 	bool sawStream = false;
 	CDCStreamId maxStreamId = 0;
-	std::map<uint16_t, uint32_t> tagStreamCounts;
+	std::unordered_map<uint16_t, uint32_t> tagStreamCounts;
 
 	void observeStreamId(CDCStreamId streamId) {
 		sawStream = true;
