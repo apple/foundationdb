@@ -108,6 +108,24 @@ struct NativeCdcWorkload : TestWorkload {
 		}
 	}
 
+	Future<Version> getRetiredTagPopVersion(Database cx, Tag tag) {
+		Transaction tr(cx);
+		while (true) {
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				Optional<Value> marker = co_await tr.get(cdcRetiredTagPopKeyFor(tag));
+				Optional<Value> version = co_await tr.get(cdcRetiredTagPopVersionKeyFor(tag));
+				ASSERT(marker.present());
+				ASSERT(version.present());
+				co_return decodeCDCMinVersionValue(version.get());
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
+	}
+
 	Future<Void> appendPersistedTag(Database cx, CDCStreamId streamId, Tag tag) {
 		Transaction tr(cx);
 		while (true) {
@@ -317,7 +335,9 @@ struct NativeCdcWorkload : TestWorkload {
 		ASSERT(streams.size() == 1);
 		ASSERT(streams[0].minVersion == firstAckMinVersion);
 
-		co_await removeNativeCdcStream(cx, firstName);
+		Optional<NativeCdcRemovedStreamInfo> removedFirst = co_await removeNativeCdcStream(cx, firstName);
+		ASSERT(removedFirst.present());
+		ASSERT((co_await getRetiredTagPopVersion(cx, firstRoute.first)) == removedFirst.get().removalVersion);
 		ASSERT((co_await listNativeCdcStreams(cx)).empty());
 		ASSERT(!(co_await hasPersistedRetention(cx, firstId)));
 
@@ -334,7 +354,9 @@ struct NativeCdcWorkload : TestWorkload {
 		ASSERT(secondId > firstId);
 		ASSERT(secondRoute.first == firstRoute.first);
 
-		co_await removeNativeCdcStream(cx, secondName);
+		Optional<NativeCdcRemovedStreamInfo> removedSecond = co_await removeNativeCdcStream(cx, secondName);
+		ASSERT(removedSecond.present());
+		ASSERT((co_await getRetiredTagPopVersion(cx, secondRoute.first)) == removedSecond.get().removalVersion);
 
 		const Key liveName = "native-cdc-live"_sr;
 		const KeyRange liveRange(KeyRangeRef("live/"_sr, "live0"_sr));

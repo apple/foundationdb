@@ -776,6 +776,9 @@ const KeyRef cdcMaxStreamIdKey = "\xff/cdc/maxStreamId"_sr;
 const KeyRangeRef cdcStreamKeys("\xff/cdc/keys/"_sr, "\xff/cdc/keys0"_sr);
 const KeyRangeRef cdcTagHistoryKeys("\xff/cdc/tagHistory/"_sr, "\xff/cdc/tagHistory0"_sr);
 const KeyRangeRef cdcMinVersionKeys("\xff\x02/cdc/minVersion/"_sr, "\xff\x02/cdc/minVersion0"_sr);
+const KeyRangeRef cdcRetiredTagPopKeys("\xff/cdc/retiredTagPop/"_sr, "\xff/cdc/retiredTagPop0"_sr);
+const KeyRangeRef cdcRetiredTagPopVersionKeys("\xff\x02/cdc/retiredTagPopVersion/"_sr,
+                                              "\xff\x02/cdc/retiredTagPopVersion0"_sr);
 const KeyRangeRef cdcProxyKeys("\xff/cdc/proxies/"_sr, "\xff/cdc/proxies0"_sr);
 const KeyRef cdcProxyAssignmentChangeKey = "\xff/cdc/proxyAssignmentChange"_sr;
 
@@ -907,6 +910,34 @@ Version decodeCDCMinVersionValue(ValueRef const& value) {
 	ASSERT_WE_THINK(reader.protocolVersion().hasNativeCdc());
 	reader >> version;
 	return version;
+}
+
+Key cdcRetiredTagPopKeyFor(Tag tag) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(cdcRetiredTagPopKeys.begin);
+	wr << tag;
+	return wr.toValue();
+}
+
+Tag decodeCDCRetiredTagPopKey(KeyRef const& key) {
+	Tag tag;
+	BinaryReader reader(key.removePrefix(cdcRetiredTagPopKeys.begin), Unversioned());
+	reader >> tag;
+	return tag;
+}
+
+Key cdcRetiredTagPopVersionKeyFor(Tag tag) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(cdcRetiredTagPopVersionKeys.begin);
+	wr << tag;
+	return wr.toValue();
+}
+
+Tag decodeCDCRetiredTagPopVersionKey(KeyRef const& key) {
+	Tag tag;
+	BinaryReader reader(key.removePrefix(cdcRetiredTagPopVersionKeys.begin), Unversioned());
+	reader >> tag;
+	return tag;
 }
 
 static Key cdcProxyPrefixFor(CDCStreamId streamId) {
@@ -1830,6 +1861,11 @@ TEST_CASE("/SystemData/NativeCDC") {
 	ASSERT(decodeCDCMinVersionValue(cdcMinVersionValue(minVersion)) == minVersion);
 	ASSERT(nonMetadataSystemKeys.contains(cdcMinVersionKeyFor(streamId)));
 	ASSERT(cdcVersionstampedMinVersionValue().size() == sizeof(Version) + sizeof(uint16_t) + sizeof(int32_t));
+	ASSERT(decodeCDCRetiredTagPopKey(cdcRetiredTagPopKeyFor(tag)) == tag);
+	ASSERT(cdcRetiredTagPopKeys.contains(cdcRetiredTagPopKeyFor(tag)));
+	ASSERT(decodeCDCRetiredTagPopVersionKey(cdcRetiredTagPopVersionKeyFor(tag)) == tag);
+	ASSERT(cdcRetiredTagPopVersionKeys.contains(cdcRetiredTagPopVersionKeyFor(tag)));
+	ASSERT(nonMetadataSystemKeys.contains(cdcRetiredTagPopVersionKeyFor(tag)));
 
 	const Key tagHistoryKey = cdcTagHistoryKeyFor(streamId, minVersion, tag);
 	const auto [decodedStreamId, decodedVersion, decodedTag] = decodeCDCTagHistoryKey(tagHistoryKey);

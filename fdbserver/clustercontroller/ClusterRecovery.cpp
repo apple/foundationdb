@@ -233,7 +233,9 @@ Future<Void> newGrvProxies(Reference<ClusterRecoveryData> self, RecruitFromConfi
 }
 
 Future<Void> ensureCDCProxies(Reference<ClusterRecoveryData> self, RecruitFromConfigurationReply recr) {
-	if (!CLIENT_KNOBS->ENABLE_NATIVE_CDC) {
+	const bool hasDurableCdcState = !(co_await self->txnStateStore->readRange(cdcStreamKeys)).empty() ||
+	                                !(co_await self->txnStateStore->readRange(cdcRetiredTagPopKeys)).empty();
+	if (!CLIENT_KNOBS->ENABLE_NATIVE_CDC && !hasDurableCdcState) {
 		co_return;
 	}
 	if (!self->controllerData->db.cdcProxies.empty()) {

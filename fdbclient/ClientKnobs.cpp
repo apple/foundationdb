@@ -193,7 +193,7 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( CHANGE_FEED_CACHE_FLUSH_BYTES,          10e6 ); if( randomize && BUGGIFY ) CHANGE_FEED_CACHE_FLUSH_BYTES = deterministicRandom()->randomInt64(1, 1e6);
 	init( CHANGE_FEED_CACHE_EXPIRE_TIME,          60.0 ); if( randomize && BUGGIFY ) CHANGE_FEED_CACHE_EXPIRE_TIME = 1.0;
 	init( CHANGE_FEED_CACHE_LIMIT_BYTES,        500000 ); if( randomize && BUGGIFY ) CHANGE_FEED_CACHE_LIMIT_BYTES = 50000;
-	init( ENABLE_NATIVE_CDC,                     false ); if( randomize && BUGGIFY ) ENABLE_NATIVE_CDC = true;
+	init( ENABLE_NATIVE_CDC,                     false ); if( randomize && isSimulated && BUGGIFY ) ENABLE_NATIVE_CDC = true;
 	init( NATIVE_CDC_TAG_COUNT,                    256 ); if( randomize && BUGGIFY ) NATIVE_CDC_TAG_COUNT = 2;
 
 	init( MAX_BATCH_SIZE,                         1000 ); if( randomize && BUGGIFY ) MAX_BATCH_SIZE = 1;

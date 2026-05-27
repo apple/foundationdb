@@ -39,14 +39,14 @@ struct NativeCdcRemovedStreamInfo {
 	std::vector<Tag> tags;
 };
 
-// These durable metadata operations are intended to back CDCProxyInterface
-// lifecycle requests once CDC proxies are recruited.
+// These durable metadata operations back CDCProxyInterface lifecycle requests.
+// Registration is knob-protected; draining and cleanup remain available for
+// streams persisted while native CDC was enabled.
 Future<CDCStreamId> registerNativeCdcStream(Database cx,
                                             Key name,
                                             KeyRange keys,
                                             Optional<UID> proxyId = Optional<UID>());
-// Returns the retired tags so the owning proxy can pop them after applying
-// the acknowledgement minima of any remaining streams that share them.
+// Persists per-tag final-pop watermarks before removing stream metadata.
 Future<Optional<NativeCdcRemovedStreamInfo>> removeNativeCdcStream(Database cx,
                                                                    Key name,
                                                                    Optional<UID> proxyId = Optional<UID>());

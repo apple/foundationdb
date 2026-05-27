@@ -2150,18 +2150,52 @@ Future<Void> monitorCDCProxyAssignments(ClusterControllerData::DBInfo* db) {
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 				std::map<CDCStreamId, UID> streamToCDCProxyId;
+				const std::vector<CDCProxyInterface> availableProxies = db->cdcProxies;
+				size_t replacementIndex = 0;
+				bool repairedAssignment = false;
 				Key begin = cdcProxyKeys.begin;
 				while (begin < cdcProxyKeys.end) {
 					RangeResult assignments =
 					    co_await tr.getRange(KeyRangeRef(begin, cdcProxyKeys.end), CLIENT_KNOBS->TOO_MANY);
 					for (const auto& assignment : assignments) {
 						const auto [streamId, proxyId] = decodeCDCProxyKey(assignment.key);
-						ASSERT_WE_THINK(streamToCDCProxyId.emplace(streamId, proxyId).second);
+						UID resolvedProxyId = proxyId;
+						const bool hasOwner =
+						    std::any_of(availableProxies.begin(), availableProxies.end(), [proxyId](const auto& proxy) {
+							    return proxy.id() == proxyId;
+						    });
+						if (!availableProxies.empty() && !hasOwner) {
+							resolvedProxyId = availableProxies[replacementIndex++ % availableProxies.size()].id();
+							tr.clear(assignment.key);
+							tr.set(cdcProxyKeyFor(streamId, resolvedProxyId), Value());
+							repairedAssignment = true;
+							TraceEvent("CDCProxyAssignmentRepaired")
+							    .detail("StreamId", streamId)
+							    .detail("OldCDCProxyID", proxyId)
+							    .detail("NewCDCProxyID", resolvedProxyId);
+						}
+						ASSERT_WE_THINK(streamToCDCProxyId.emplace(streamId, resolvedProxyId).second);
 					}
 					if (!assignments.more) {
 						break;
 					}
 					begin = keyAfter(assignments.back().key);
+				}
+
+				if (!streamToCDCProxyId.empty() && availableProxies.empty()) {
+					Future<Void> assignmentChangeFuture = tr.watch(cdcProxyAssignmentChangeKey);
+					Future<Void> endpointChangeFuture = db->clientInfo->onChange();
+					co_await tr.commit();
+					co_await (assignmentChangeFuture || endpointChangeFuture);
+					break;
+				}
+
+				if (repairedAssignment) {
+					tr.set(cdcProxyAssignmentChangeKey,
+					       BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),
+					                             IncludeVersion(ProtocolVersion::withNativeCdc())));
+					co_await tr.commit();
+					break;
 				}
 
 				ClientDBInfo clientInfo = db->clientInfo->get();
@@ -3131,10 +3165,9 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(monitorServerInfoConfig(&self.db));
 	self.addActor.send(monitorStorageMetadata(&self));
 	self.addActor.send(monitorGlobalConfig(&self.db));
-	if (CLIENT_KNOBS->ENABLE_NATIVE_CDC) {
-		self.addActor.send(monitorCDCProxyAssignments(&self.db));
-		self.addActor.send(monitorAndRecruitCDCProxies(&self));
-	}
+	// These actors also drain durable CDC state when new stream registration is disabled.
+	self.addActor.send(monitorCDCProxyAssignments(&self.db));
+	self.addActor.send(monitorAndRecruitCDCProxies(&self));
 	self.addActor.send(updatedChangingDatacenters(&self));
 	self.addActor.send(updatedChangedDatacenters(&self));
 	self.addActor.send(updateDatacenterVersionDifference(&self));

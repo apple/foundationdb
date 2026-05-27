@@ -292,7 +292,6 @@ Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys
 }
 
 Future<Optional<NativeCdcRemovedStreamInfo>> removeNativeCdcStream(Database cx, Key name, Optional<UID> proxyId) {
-	validateNativeCdcEnabled();
 	if (name.empty()) {
 		throw client_invalid_operation();
 	}
@@ -333,6 +332,12 @@ Future<Optional<NativeCdcRemovedStreamInfo>> removeNativeCdcStream(Database cx, 
 
 			tr.clear(nameKey);
 			tr.clear(cdcStreamKeyFor(streamId));
+			for (const Tag& tag : removedTags) {
+				tr.set(cdcRetiredTagPopKeyFor(tag), Value());
+				tr.atomicOp(cdcRetiredTagPopVersionKeyFor(tag),
+				            cdcVersionstampedMinVersionValue(),
+				            MutationRef::SetVersionstampedValue);
+			}
 			tr.clear(cdcTagHistoryRangeFor(streamId));
 			tr.clear(cdcMinVersionKeyFor(streamId));
 			tr.clear(cdcProxyRangeFor(streamId));
@@ -355,7 +360,6 @@ Future<Optional<NativeCdcRemovedStreamInfo>> removeNativeCdcStream(Database cx, 
 }
 
 Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams(Database cx) {
-	validateNativeCdcEnabled();
 	std::vector<NativeCdcStreamInfo> result;
 	Key begin = cdcStreamNameKeys.begin;
 	Transaction tr(cx);
@@ -393,7 +397,6 @@ Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams(Database cx) {
 }
 
 Future<Void> reassignNativeCdcStreams(Database cx, UID oldProxyId, UID newProxyId) {
-	validateNativeCdcEnabled();
 	if (oldProxyId == newProxyId) {
 		co_return;
 	}
@@ -438,7 +441,6 @@ Future<Void> reassignNativeCdcStreams(Database cx, UID oldProxyId, UID newProxyI
 }
 
 Future<Version> acknowledgeNativeCdcStream(Database cx, CDCStreamId streamId, Version consumedThrough) {
-	validateNativeCdcEnabled();
 	if (streamId == 0 || consumedThrough < 0 || consumedThrough == std::numeric_limits<Version>::max()) {
 		throw client_invalid_operation();
 	}

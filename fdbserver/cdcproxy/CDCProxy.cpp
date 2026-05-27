@@ -362,18 +362,46 @@ Future<std::map<Tag, Version>> readSafePopVersions(Database cx) {
 	}
 }
 
+Future<std::map<Tag, Version>> readRetiredTagPopVersions(Database cx) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+
+			std::map<Tag, Version> retiredTagPopVersions;
+			Key begin = cdcRetiredTagPopVersionKeys.begin;
+			while (begin < cdcRetiredTagPopVersionKeys.end) {
+				RangeResult retired =
+				    co_await tr.getRange(KeyRangeRef(begin, cdcRetiredTagPopVersionKeys.end), CLIENT_KNOBS->TOO_MANY);
+				for (const auto& kv : retired) {
+					retiredTagPopVersions[decodeCDCRetiredTagPopVersionKey(kv.key)] =
+					    decodeCDCMinVersionValue(kv.value);
+				}
+				if (!retired.more) {
+					break;
+				}
+				begin = keyAfter(retired.back().key);
+			}
+			co_return retiredTagPopVersions;
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr.onError(err);
+	}
+}
+
 Future<Void> popAcknowledgedData(CDCProxyData* self) {
 	const std::map<Tag, Version> safePopVersions = co_await readSafePopVersions(self->cx);
 	for (const auto& [tag, version] : safePopVersions) {
 		self->logSystem->get()->pop(version, tag);
 	}
-}
-
-Future<Void> popRemovedStreamData(CDCProxyData* self, NativeCdcRemovedStreamInfo removed) {
-	const std::map<Tag, Version> safePopVersions = co_await readSafePopVersions(self->cx);
-	for (const Tag& tag : removed.tags) {
+	const std::map<Tag, Version> retiredTagPopVersions = co_await readRetiredTagPopVersions(self->cx);
+	for (const auto& [tag, retiredVersion] : retiredTagPopVersions) {
 		const auto safePop = safePopVersions.find(tag);
-		const Version version = safePop == safePopVersions.end() ? removed.removalVersion : safePop->second;
+		const Version version =
+		    safePop == safePopVersions.end() ? retiredVersion : std::min(retiredVersion, safePop->second);
 		self->logSystem->get()->pop(version, tag);
 	}
 }
@@ -419,11 +447,11 @@ Future<Void> consume(CDCProxyData* self, CDCConsumeRequest request) {
 		while (stream->active && !stream->initialized) {
 			co_await stream->changed.onTrigger();
 		}
-		if (!stream->active) {
-			throw wrong_shard_server();
-		}
 		if (stream->tooOld) {
 			throw transaction_too_old();
+		}
+		if (!stream->active) {
+			throw wrong_shard_server();
 		}
 
 		Version begin = request.cursor.lastConsumedVersion == invalidVersion ? stream->minVersion
@@ -510,7 +538,7 @@ Future<Void> removeStream(CDCProxyData* self, CDCRemoveStreamRequest request) {
 	try {
 		Optional<NativeCdcRemovedStreamInfo> removed = co_await removeNativeCdcStream(self->cx, request.name, self->id);
 		if (removed.present()) {
-			co_await popRemovedStreamData(self, removed.get());
+			co_await popAcknowledgedData(self);
 		}
 		request.reply.send(Void());
 	} catch (Error& e) {

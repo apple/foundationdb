@@ -614,8 +614,9 @@ private:
 
 	void checkSetCDCMetadata(MutationRef m) {
 		if (!cdcStreamNameKeys.contains(m.param1) && !cdcStreamKeys.contains(m.param1) &&
-		    !cdcTagHistoryKeys.contains(m.param1) && !cdcProxyKeys.contains(m.param1) &&
-		    m.param1 != cdcMaxStreamIdKey && m.param1 != cdcProxyAssignmentChangeKey) {
+		    !cdcTagHistoryKeys.contains(m.param1) && !cdcRetiredTagPopKeys.contains(m.param1) &&
+		    !cdcProxyKeys.contains(m.param1) && m.param1 != cdcMaxStreamIdKey &&
+		    m.param1 != cdcProxyAssignmentChangeKey) {
 			return;
 		}
 		if (!initialCommit) {
@@ -1080,14 +1081,15 @@ private:
 
 	void checkClearCDCMetadata(KeyRangeRef range) {
 		if (!cdcStreamNameKeys.intersects(range) && !cdcStreamKeys.intersects(range) &&
-		    !cdcTagHistoryKeys.intersects(range) && !cdcProxyKeys.intersects(range) &&
-		    !range.contains(cdcMaxStreamIdKey)) {
+		    !cdcTagHistoryKeys.intersects(range) && !cdcRetiredTagPopKeys.intersects(range) &&
+		    !cdcProxyKeys.intersects(range) && !range.contains(cdcMaxStreamIdKey)) {
 			return;
 		}
 		// CDC tags may be shared and acknowledgement minima are stored outside transaction state.
-		// The owning CDC proxy safely pops retired tags after stream removal commits.
+		// A durable retired-tag watermark lets any CDC proxy finish pops after stream removal.
 		if (!initialCommit) {
-			for (const KeyRangeRef cdcRange : { cdcStreamNameKeys, cdcStreamKeys, cdcTagHistoryKeys, cdcProxyKeys }) {
+			for (const KeyRangeRef cdcRange :
+			     { cdcStreamNameKeys, cdcStreamKeys, cdcTagHistoryKeys, cdcRetiredTagPopKeys, cdcProxyKeys }) {
 				if (cdcRange.intersects(range)) {
 					txnStateStore->clear(cdcRange & range);
 				}
@@ -1334,8 +1336,8 @@ bool containsMetadataMutation(const VectorRef<MutationRef>& mutations) {
 			    (m.param1.startsWith(logRangesRange.begin)) || (m.param1.startsWith(serverKeysPrefix)) ||
 			    (m.param1.startsWith(keyServersPrefix)) || cdcStreamNameKeys.contains(m.param1) ||
 			    cdcStreamKeys.contains(m.param1) || cdcTagHistoryKeys.contains(m.param1) ||
-			    cdcProxyKeys.contains(m.param1) || m.param1 == cdcMaxStreamIdKey ||
-			    m.param1 == cdcProxyAssignmentChangeKey) {
+			    cdcRetiredTagPopKeys.contains(m.param1) || cdcProxyKeys.contains(m.param1) ||
+			    m.param1 == cdcMaxStreamIdKey || m.param1 == cdcProxyAssignmentChangeKey) {
 				return true;
 			}
 		} else if (m.type == MutationRef::ClearRange && isSystemKey(m.param2)) {
@@ -1350,8 +1352,8 @@ bool containsMetadataMutation(const VectorRef<MutationRef>& mutations) {
 			    (range.contains(metadataVersionKey)) || (range.contains(mustContainSystemMutationsKey)) ||
 			    (range.contains(writeRecoveryKey)) || (range.intersects(testOnlyTxnStateStorePrefixRange)) ||
 			    cdcStreamNameKeys.intersects(range) || cdcStreamKeys.intersects(range) ||
-			    cdcTagHistoryKeys.intersects(range) || cdcProxyKeys.intersects(range) ||
-			    range.contains(cdcMaxStreamIdKey)) {
+			    cdcTagHistoryKeys.intersects(range) || cdcRetiredTagPopKeys.intersects(range) ||
+			    cdcProxyKeys.intersects(range) || range.contains(cdcMaxStreamIdKey)) {
 				return true;
 			}
 		}

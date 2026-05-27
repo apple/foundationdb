@@ -302,6 +302,18 @@ Value cdcMinVersionValue(Version version);
 Value cdcVersionstampedMinVersionValue();
 Version decodeCDCMinVersionValue(ValueRef const& value);
 
+// "\xff/cdc/retiredTagPop/[[Tag]]" := ""
+// Marks tags with durable final-pop work, so recovery keeps a CDC proxy available.
+extern const KeyRangeRef cdcRetiredTagPopKeys;
+Key cdcRetiredTagPopKeyFor(Tag tag);
+Tag decodeCDCRetiredTagPopKey(KeyRef const& key);
+
+// "\xff\x02/cdc/retiredTagPopVersion/[[Tag]]" := "[[Version]]"
+// Stores bounded storage-backed final-pop watermarks for removed streams.
+extern const KeyRangeRef cdcRetiredTagPopVersionKeys;
+Key cdcRetiredTagPopVersionKeyFor(Tag tag);
+Tag decodeCDCRetiredTagPopVersionKey(KeyRef const& key);
+
 // "\xff/cdc/proxies/[[CDCStreamId]][[proxyUID]]" := ""
 extern const KeyRangeRef cdcProxyKeys;
 // Changed whenever durable CDC stream-to-proxy assignments change.
