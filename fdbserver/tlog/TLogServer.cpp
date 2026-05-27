@@ -1950,8 +1950,8 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		auto tagData = logData->getTagData(reqTag);
 		bool tagRecovered = tagData && !tagData->unpoppedRecovered;
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && poppedVer <= reqBegin &&
-		    reqBegin > logData->persistentDataDurableVersion && !reqOnlySpilled && reqTag.locality >= 0 &&
-		    !reqReturnIfBlocked && tagRecovered) {
+		    reqBegin > logData->persistentDataDurableVersion && !reqOnlySpilled &&
+		    (reqTag.locality >= 0 || reqTag.locality == tagLocalityCDC) && !reqReturnIfBlocked && tagRecovered) {
 			double startTime = now();
 			co_await waitForMessagesForTag(logData, reqTag, reqBegin, SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT);
 			double latency = now() - startTime;

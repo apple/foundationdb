@@ -1,7 +1,14 @@
+[configuration]
+config = 'single'
+singleRegion = true
+buggify = false
+faultInjection = false
+
 [[test]]
 testTitle = 'NativeCdc'
 useDB = true
 waitForQuiescenceEnd = false
+connectionFailuresDisableDuration = 1000000
 
     [[test.workload]]
     testName = 'NativeCdc'

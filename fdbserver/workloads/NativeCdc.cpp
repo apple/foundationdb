@@ -126,6 +126,24 @@ struct NativeCdcWorkload : TestWorkload {
 		}
 	}
 
+	Future<Version> writeValues(Database cx, std::vector<std::pair<KeyRef, ValueRef>> values) {
+		Transaction tr(cx);
+		while (true) {
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				for (const auto& [key, value] : values) {
+					tr.set(key, value);
+				}
+				co_await tr.commit();
+				co_return tr.getCommittedVersion();
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
+	}
+
 	Future<Tag> getLatestPersistedTag(Database cx, CDCStreamId streamId) {
 		Transaction tr(cx);
 		while (true) {
@@ -209,7 +227,6 @@ struct NativeCdcWorkload : TestWorkload {
 	}
 
 	Future<Void> runSharedTagSafety(Database cx) {
-		CDCProxyInterface proxy = co_await getCDCProxy();
 		const Key firstName = "native-cdc-shared-first"_sr;
 		const Key secondName = "native-cdc-shared-second"_sr;
 		const KeyRange keys(KeyRangeRef("shared/"_sr, "shared0"_sr));
@@ -219,18 +236,12 @@ struct NativeCdcWorkload : TestWorkload {
 		co_await appendPersistedTag(cx, secondId, firstRoute.first);
 		ASSERT((co_await getLatestPersistedTag(cx, secondId)) == firstRoute.first);
 
-		ASSERT((co_await proxy.registerStream.getReply(CDCRegisterStreamRequest(firstName, keys))).streamId == firstId);
-		CDCProxyInterface firstOwner = co_await getCDCProxy(firstId);
-		Transaction write(cx);
-		write.setOption(FDBTransactionOptions::LOCK_AWARE);
-		write.set("shared/unread"_sr, "protected-by-minimum"_sr);
-		co_await write.commit();
-		const Version writeVersion = write.getCommittedVersion();
+		ASSERT(co_await registerNativeCdcStreamClient(cx, firstName, keys) == firstId);
+		const Version writeVersion = co_await writeValues(cx, { { "shared/unread"_sr, "protected-by-minimum"_sr } });
 		CDCCursor firstCursor(firstId, invalidVersion);
 		const double firstConsumeDeadline = now() + 30.0;
 		while (firstCursor.lastConsumedVersion < writeVersion) {
-			CDCConsumeReply consumed =
-			    co_await timeoutError(firstOwner.consume.getReply(CDCConsumeRequest(firstCursor)), 30.0);
+			CDCConsumeReply consumed = co_await timeoutError(consumeNativeCdcStream(cx, firstCursor), 30.0);
 			if (consumed.lastConsumedVersion == firstCursor.lastConsumedVersion) {
 				ASSERT(now() < firstConsumeDeadline);
 				co_await delay(0.1);
@@ -239,16 +250,13 @@ struct NativeCdcWorkload : TestWorkload {
 			ASSERT(consumed.lastConsumedVersion > firstCursor.lastConsumedVersion);
 			firstCursor.lastConsumedVersion = consumed.lastConsumedVersion;
 		}
-		co_await firstOwner.ack.getReply(CDCAckRequest(firstId, firstCursor.lastConsumedVersion));
+		co_await acknowledgeNativeCdcStreamClient(cx, firstId, firstCursor.lastConsumedVersion);
 
-		ASSERT((co_await firstOwner.registerStream.getReply(CDCRegisterStreamRequest(secondName, keys))).streamId ==
-		       secondId);
-		CDCProxyInterface secondOwner = co_await getCDCProxy(secondId);
+		ASSERT(co_await registerNativeCdcStreamClient(cx, secondName, keys) == secondId);
 		CDCCursor unreadCursor(secondId, invalidVersion);
 		bool foundUnread = false;
 		while (unreadCursor.lastConsumedVersion < writeVersion) {
-			CDCConsumeReply unread =
-			    co_await timeoutError(secondOwner.consume.getReply(CDCConsumeRequest(unreadCursor)), 30.0);
+			CDCConsumeReply unread = co_await timeoutError(consumeNativeCdcStream(cx, unreadCursor), 30.0);
 			ASSERT(unread.lastConsumedVersion > unreadCursor.lastConsumedVersion);
 			for (const auto& versioned : unread.mutations) {
 				for (const auto& mutation : versioned.mutations) {
@@ -260,10 +268,10 @@ struct NativeCdcWorkload : TestWorkload {
 			unreadCursor.lastConsumedVersion = unread.lastConsumedVersion;
 		}
 		ASSERT(foundUnread);
-		co_await secondOwner.ack.getReply(CDCAckRequest(secondId, unreadCursor.lastConsumedVersion));
+		co_await acknowledgeNativeCdcStreamClient(cx, secondId, unreadCursor.lastConsumedVersion);
 
-		co_await firstOwner.removeStream.getReply(CDCRemoveStreamRequest(firstName));
-		co_await secondOwner.removeStream.getReply(CDCRemoveStreamRequest(secondName));
+		co_await removeNativeCdcStreamClient(cx, firstName);
+		co_await removeNativeCdcStreamClient(cx, secondName);
 		co_await waitForCDCProxyAssignmentRemoval(firstId);
 		co_await waitForCDCProxyAssignmentRemoval(secondId);
 		co_return;
@@ -339,12 +347,8 @@ struct NativeCdcWorkload : TestWorkload {
 		ASSERT(listed[0].streamId == liveStreamId);
 		ASSERT(listed[0].keys == liveRange);
 
-		Transaction write(cx);
-		write.setOption(FDBTransactionOptions::LOCK_AWARE);
-		write.set("live/in"_sr, "captured"_sr);
-		write.set("other/out"_sr, "ignored"_sr);
-		co_await write.commit();
-		const Version writeVersion = write.getCommittedVersion();
+		const Version writeVersion =
+		    co_await writeValues(cx, { { "live/in"_sr, "captured"_sr }, { "other/out"_sr, "ignored"_sr } });
 
 		for (const auto& nonOwner : dbInfo->get().client.cdcProxies) {
 			if (nonOwner.id() == owner.id()) {
@@ -401,11 +405,8 @@ struct NativeCdcWorkload : TestWorkload {
 		ASSERT(replacement.id() != owner.id());
 		ASSERT(dbInfo->get().recoveryCount == recoveryCount);
 
-		Transaction afterFailureWrite(cx);
-		afterFailureWrite.setOption(FDBTransactionOptions::LOCK_AWARE);
-		afterFailureWrite.set("live/after-failure"_sr, "captured-after-failure"_sr);
-		co_await afterFailureWrite.commit();
-		const Version afterFailureVersion = afterFailureWrite.getCommittedVersion();
+		const Version afterFailureVersion =
+		    co_await writeValues(cx, { { "live/after-failure"_sr, "captured-after-failure"_sr } });
 		Version afterFailureCursor = consumedThrough;
 		bool foundAfterFailureWrite = false;
 		const double afterFailureConsumeDeadline = now() + 30.0;
@@ -441,11 +442,8 @@ struct NativeCdcWorkload : TestWorkload {
 		CDCProxyInterface recoveredOwner = co_await getCDCProxy(liveStreamId);
 		ASSERT(recoveredOwner.id() == ownerBeforeRecovery);
 
-		Transaction afterRecoveryWrite(cx);
-		afterRecoveryWrite.setOption(FDBTransactionOptions::LOCK_AWARE);
-		afterRecoveryWrite.set("live/after-recovery"_sr, "captured-after-recovery"_sr);
-		co_await afterRecoveryWrite.commit();
-		const Version afterRecoveryVersion = afterRecoveryWrite.getCommittedVersion();
+		const Version afterRecoveryVersion =
+		    co_await writeValues(cx, { { "live/after-recovery"_sr, "captured-after-recovery"_sr } });
 		Version afterRecoveryCursor = cursorBeforeRecovery;
 		bool foundAfterRecoveryWrite = false;
 		const double afterRecoveryConsumeDeadline = now() + 30.0;

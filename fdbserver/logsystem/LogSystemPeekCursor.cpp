@@ -1044,8 +1044,13 @@ SetPeekCursor::SetPeekCursor(std::vector<Reference<LogSet>> const& logSets,
 			         ? canReturnEmptyVersionRange(
 			               bestServer, j /*currentServer*/, end, knownLockedTLogIds, bestSet, i /* currentSet */)
 			         : false);
-			auto cursor = makeReference<ServerPeekCursor>(
-			    logSets[i]->logServers[j], tag, begin, end, true, parallelGetMore, returnEmptyIfStopped);
+			auto cursor = makeReference<ServerPeekCursor>(logSets[i]->logServers[j],
+			                                              tag,
+			                                              begin,
+			                                              end,
+			                                              tag.locality != tagLocalityCDC,
+			                                              parallelGetMore,
+			                                              returnEmptyIfStopped);
 			serverCursors[i].push_back(cursor);
 		}
 		maxServers = std::max<int>(maxServers, serverCursors[i].size());
