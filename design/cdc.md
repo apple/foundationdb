@@ -182,23 +182,17 @@ that request.
 
 The data path is:
 
-```text
-                            durable stream and acknowledgement state
-                                      +-------------------------+
-                                      | transaction state store |
-                                      | and system key storage  |
-                                      +------------+------------+
-                                                   |
-                                                   v
-Client <---- consume / acknowledge ----> CDC Proxy <---- peek / pop ---- TLogs
-                                             ^                            ^
-                                             |                            |
-                                             | assigned streams           | ordinary and
-                                             |                            | CDC tags
-                                      Cluster Controller            Commit Proxies
-                                                                        ^
-                                                                        |
-                                                                  user commits
+```mermaid
+flowchart LR
+    client["Client"] <-->|"consume / acknowledge"| proxy["CDC Proxy"]
+    proxy <-->|"peek / pop"| tlogs["TLogs"]
+
+    commits["User commits"] --> commitProxy["Commit Proxies"]
+    commitProxy -->|"ordinary and CDC tags"| tlogs
+
+    controller["Cluster Controller"] -->|"assigned streams"| proxy
+    metadata["Transaction state store<br/>and system key storage"] -->|"durable stream and acknowledgement state"| proxy
+    metadata -->|"durable CDC routing metadata"| commitProxy
 ```
 
 Commit proxies keep a routing table derived from durable CDC metadata. For
