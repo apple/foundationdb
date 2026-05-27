@@ -132,22 +132,17 @@ struct ClientDBInfo {
 	void serialize(Archive& ar) {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
-			serializer(ar, grvProxies, commitProxies, id, forward, history, clusterId, clusterType);
-			if (ar.protocolVersion().hasNativeCdc()) {
-				serializer(ar, cdcProxies, streamToCDCProxyId);
-			}
-		} else {
-			serializer(ar,
-			           grvProxies,
-			           commitProxies,
-			           id,
-			           forward,
-			           history,
-			           clusterId,
-			           clusterType,
-			           cdcProxies,
-			           streamToCDCProxyId);
 		}
+		serializer(ar,
+		           grvProxies,
+		           commitProxies,
+		           id,
+		           forward,
+		           history,
+		           clusterId,
+		           clusterType,
+		           cdcProxies,
+		           streamToCDCProxyId);
 	}
 };
 

@@ -100,63 +100,32 @@ struct WorkerInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		if constexpr (is_fb_function<Ar>) {
-			serializer(ar,
-			           clientInterface,
-			           locality,
-			           tLog,
-			           master,
-			           commitProxy,
-			           grvProxy,
-			           dataDistributor,
-			           ratekeeper,
-			           consistencyScan,
-			           resolver,
-			           storage,
-			           logRouter,
-			           debugPing,
-			           coordinationPing,
-			           waitFailure,
-			           setMetricsRate,
-			           eventLogRequest,
-			           traceBatchDumpRequest,
-			           testerInterface,
-			           diskStoreRequest,
-			           execReq,
-			           workerSnapReq,
-			           backup,
-			           updateServerDBInfo,
-			           cdcProxy);
-		} else {
-			serializer(ar,
-			           clientInterface,
-			           locality,
-			           tLog,
-			           master,
-			           commitProxy,
-			           grvProxy,
-			           dataDistributor,
-			           ratekeeper,
-			           consistencyScan,
-			           resolver,
-			           storage,
-			           logRouter,
-			           debugPing,
-			           coordinationPing,
-			           waitFailure,
-			           setMetricsRate,
-			           eventLogRequest,
-			           traceBatchDumpRequest,
-			           testerInterface,
-			           diskStoreRequest,
-			           execReq,
-			           workerSnapReq,
-			           backup,
-			           updateServerDBInfo);
-			if (ar.protocolVersion().hasNativeCdc()) {
-				serializer(ar, cdcProxy);
-			}
-		}
+		serializer(ar,
+		           clientInterface,
+		           locality,
+		           tLog,
+		           master,
+		           commitProxy,
+		           grvProxy,
+		           dataDistributor,
+		           ratekeeper,
+		           consistencyScan,
+		           resolver,
+		           storage,
+		           logRouter,
+		           debugPing,
+		           coordinationPing,
+		           waitFailure,
+		           setMetricsRate,
+		           eventLogRequest,
+		           traceBatchDumpRequest,
+		           testerInterface,
+		           diskStoreRequest,
+		           execReq,
+		           workerSnapReq,
+		           backup,
+		           updateServerDBInfo,
+		           cdcProxy);
 	}
 };
 
@@ -289,38 +258,21 @@ struct RegisterMasterRequest {
 	void serialize(Ar& ar) {
 		if constexpr (!is_fb_function<Ar>) {
 			ASSERT(ar.protocolVersion().isValid());
-			serializer(ar,
-			           id,
-			           mi,
-			           logSystemConfig,
-			           commitProxies,
-			           grvProxies,
-			           resolvers,
-			           recoveryCount,
-			           registrationCount,
-			           configuration,
-			           priorCommittedLogServers,
-			           recoveryState,
-			           recoveryStalled);
-			if (ar.protocolVersion().hasNativeCdc()) {
-				serializer(ar, cdcProxies);
-			}
-		} else {
-			serializer(ar,
-			           id,
-			           mi,
-			           logSystemConfig,
-			           commitProxies,
-			           grvProxies,
-			           resolvers,
-			           recoveryCount,
-			           registrationCount,
-			           configuration,
-			           priorCommittedLogServers,
-			           recoveryState,
-			           recoveryStalled,
-			           cdcProxies);
 		}
+		serializer(ar,
+		           id,
+		           mi,
+		           logSystemConfig,
+		           commitProxies,
+		           grvProxies,
+		           resolvers,
+		           recoveryCount,
+		           registrationCount,
+		           configuration,
+		           priorCommittedLogServers,
+		           recoveryState,
+		           recoveryStalled,
+		           cdcProxies);
 	}
 };
 
