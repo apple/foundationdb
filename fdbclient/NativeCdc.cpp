@@ -156,6 +156,21 @@ Future<CDCProxyInterface> getAvailableNativeCdcProxy(Database cx, Optional<UID> 
 	}
 }
 
+Future<bool> nativeCdcStreamStillExists(Database cx, CDCStreamId streamId) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			co_return (co_await tr.get(cdcStreamKeyFor(streamId))).present();
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr.onError(err);
+	}
+}
+
 Future<CDCProxyInterface> getNativeCdcStreamProxy(Database cx, CDCStreamId streamId) {
 	if (streamId == 0) {
 		throw client_invalid_operation();
@@ -171,11 +186,14 @@ Future<CDCProxyInterface> getNativeCdcStreamProxy(Database cx, CDCStreamId strea
 				}
 			}
 		}
-		co_await cx->clientInfo->onChange();
+		if (!(co_await nativeCdcStreamStillExists(cx, streamId))) {
+			throw client_invalid_operation();
+		}
+		co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, cx->taskID);
 	}
 }
 
-Future<bool> nativeCdcStreamStillExists(Database cx, Key name, CDCStreamId streamId) {
+Future<bool> namedNativeCdcStreamStillExists(Database cx, Key name, CDCStreamId streamId) {
 	Transaction tr(cx);
 	while (true) {
 		Error err;
@@ -202,7 +220,7 @@ Future<Optional<CDCProxyInterface>> getNativeCdcStreamProxyForRemoval(Database c
 				}
 			}
 		}
-		if (!(co_await nativeCdcStreamStillExists(cx, name, streamId))) {
+		if (!(co_await namedNativeCdcStreamStillExists(cx, name, streamId))) {
 			co_return Optional<CDCProxyInterface>();
 		}
 		co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, cx->taskID);

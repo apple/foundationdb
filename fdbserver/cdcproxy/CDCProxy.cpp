@@ -395,6 +395,7 @@ void reconcileStreams(CDCProxyData* self, ActorCollection* actors) {
 		if (!assignedStreams.contains(it->first)) {
 			it->second->active = false;
 			it->second->stopped.trigger();
+			it->second->changed.trigger();
 			it = self->streams.erase(it);
 		} else {
 			++it;
@@ -415,8 +416,11 @@ Future<Void> consume(CDCProxyData* self, CDCConsumeRequest request) {
 			throw wrong_shard_server();
 		}
 		Reference<CDCBufferedStream> stream = found->second;
-		while (!stream->initialized) {
+		while (stream->active && !stream->initialized) {
 			co_await stream->changed.onTrigger();
+		}
+		if (!stream->active) {
+			throw wrong_shard_server();
 		}
 		if (stream->tooOld) {
 			throw transaction_too_old();

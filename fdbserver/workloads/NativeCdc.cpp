@@ -469,8 +469,37 @@ struct NativeCdcWorkload : TestWorkload {
 
 		co_await acknowledgeNativeCdcStreamClient(cx, liveStreamId, afterRecoveryCursor);
 		ASSERT(co_await getPersistedMinVersion(cx, liveStreamId) == afterRecoveryCursor + 1);
+
+		Future<CDCConsumeReply> pendingConsume =
+		    recoveredOwner.consume.getReply(CDCConsumeRequest(CDCCursor(liveStreamId, afterRecoveryCursor + 1000000)));
+		co_await delay(0.1);
 		co_await removeNativeCdcStreamClient(cx, liveName);
 		co_await waitForCDCProxyAssignmentRemoval(liveStreamId);
+
+		bool pendingConsumeRejected = false;
+		try {
+			co_await timeoutError(pendingConsume, 30.0);
+		} catch (Error& e) {
+			pendingConsumeRejected =
+			    e.code() == error_code_wrong_shard_server || e.code() == error_code_client_invalid_operation;
+		}
+		ASSERT(pendingConsumeRejected);
+
+		bool retiredConsumeRejected = false;
+		try {
+			co_await timeoutError(consumeNativeCdcStream(cx, CDCCursor(liveStreamId, afterRecoveryCursor)), 30.0);
+		} catch (Error& e) {
+			retiredConsumeRejected = e.code() == error_code_client_invalid_operation;
+		}
+		ASSERT(retiredConsumeRejected);
+
+		bool retiredClientAcknowledgeRejected = false;
+		try {
+			co_await timeoutError(acknowledgeNativeCdcStreamClient(cx, liveStreamId, afterRecoveryCursor), 30.0);
+		} catch (Error& e) {
+			retiredClientAcknowledgeRejected = e.code() == error_code_client_invalid_operation;
+		}
+		ASSERT(retiredClientAcknowledgeRejected);
 	}
 };
 
