@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "fdbclient/CDCProxyInterface.h"
+#include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeCdc.h"
 #include "fdbclient/SystemData.h"
@@ -126,6 +127,23 @@ struct NativeCdcWorkload : TestWorkload {
 		}
 	}
 
+	Future<bool> hasRetiredTagPopState(Database cx, Tag tag) {
+		Transaction tr(cx);
+		while (true) {
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				Optional<Value> marker = co_await tr.get(cdcRetiredTagPopKeyFor(tag));
+				Optional<Value> version = co_await tr.get(cdcRetiredTagPopVersionKeyFor(tag));
+				ASSERT(marker.present() == version.present());
+				co_return marker.present();
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
+	}
+
 	Future<Void> appendPersistedTag(Database cx, CDCStreamId streamId, Tag tag) {
 		Transaction tr(cx);
 		while (true) {
@@ -219,6 +237,13 @@ struct NativeCdcWorkload : TestWorkload {
 
 	Future<Void> waitForCDCProxyAssignmentRemoval(CDCStreamId streamId) {
 		while (dbInfo->get().client.streamToCDCProxyId.contains(streamId)) {
+			co_await dbInfo->onChange();
+		}
+		co_return;
+	}
+
+	Future<Void> waitForNoCDCProxies() {
+		while (!dbInfo->get().client.cdcProxies.empty()) {
 			co_await dbInfo->onChange();
 		}
 		co_return;
@@ -363,6 +388,7 @@ struct NativeCdcWorkload : TestWorkload {
 		const Key liveName = "native-cdc-live"_sr;
 		const KeyRange liveRange(KeyRangeRef("live/"_sr, "live0"_sr));
 		const CDCStreamId liveStreamId = co_await registerNativeCdcStreamClient(cx, liveName, liveRange);
+		const Tag liveTag = co_await getLatestPersistedTag(cx, liveStreamId);
 		CDCCursor liveCursor = co_await createNativeCdcCursor(cx, liveName);
 		ASSERT(liveCursor.streamId == liveStreamId);
 		CDCProxyInterface owner = co_await getCDCProxy(liveStreamId);
@@ -520,6 +546,16 @@ struct NativeCdcWorkload : TestWorkload {
 			retiredClientAcknowledgeRejected = e.code() == error_code_client_invalid_operation;
 		}
 		ASSERT(retiredClientAcknowledgeRejected);
+		ASSERT(!(co_await hasRetiredTagPopState(cx, liveTag)));
+
+		if (g_network->isSimulated()) {
+			CLIENT_KNOBS->ENABLE_NATIVE_CDC = false;
+			const int32_t disabledResolverCount = (co_await getDatabaseConfiguration(cx)).getDesiredResolvers() + 1;
+			const uint64_t recoveryBeforeDisable = dbInfo->get().recoveryCount;
+			co_await changeResolverCount(cx, disabledResolverCount);
+			co_await timeoutError(waitForRecoveryAfter(recoveryBeforeDisable, RecoveryState::ACCEPTING_COMMITS), 60.0);
+			co_await timeoutError(waitForNoCDCProxies(), 30.0);
+		}
 	}
 };
 

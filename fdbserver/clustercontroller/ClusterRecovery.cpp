@@ -236,6 +236,7 @@ Future<Void> ensureCDCProxies(Reference<ClusterRecoveryData> self, RecruitFromCo
 	const bool hasDurableCdcState = !(co_await self->txnStateStore->readRange(cdcStreamKeys)).empty() ||
 	                                !(co_await self->txnStateStore->readRange(cdcRetiredTagPopKeys)).empty();
 	if (!CLIENT_KNOBS->ENABLE_NATIVE_CDC && !hasDurableCdcState) {
+		self->controllerData->db.cdcProxies.clear();
 		co_return;
 	}
 	if (!self->controllerData->db.cdcProxies.empty()) {

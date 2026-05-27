@@ -1,6 +1,9 @@
 #include "fdbserver/logsystem/LogSystemConsumer.h"
 
+#include <algorithm>
 #include <utility>
+
+#include "flow/genericactors.actor.h"
 
 Reference<IReplayPeekCursor> LogSystemConsumer::peekAll(UID dbgid,
                                                         Version begin,
@@ -898,6 +901,31 @@ void LogSystemConsumer::pop(Version upTo, Tag tag, Version durableKnownCommitted
 				}
 			}
 		}
+	}
+}
+
+Future<Void> LogSystemConsumer::waitForPopped(Version upTo, Tag tag, int8_t popLocality) {
+	while (true) {
+		std::vector<Future<Version>> poppedFutures;
+		for (auto& t : logSystem->tLogs) {
+			if (t->locality == tagLocalitySpecial || t->locality == tag.locality ||
+			    (tag.locality < 0 && ((popLocality == tagLocalityInvalid) == t->isLocal))) {
+				for (auto& log : t->logServers) {
+					poppedFutures.push_back(LogSystem::getPoppedFromTLog(log, tag));
+				}
+			}
+		}
+		if (poppedFutures.empty()) {
+			co_return;
+		}
+
+		std::vector<Version> poppedVersions = co_await getAll(poppedFutures);
+		if (std::all_of(poppedVersions.begin(), poppedVersions.end(), [upTo](Version poppedVersion) {
+			    return poppedVersion >= upTo;
+		    })) {
+			co_return;
+		}
+		co_await delay(0.01, TaskPriority::TLogPop);
 	}
 }
 

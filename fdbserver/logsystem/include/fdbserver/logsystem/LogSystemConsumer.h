@@ -66,6 +66,8 @@ struct LogSystemConsumer : ReferenceCounted<LogSystemConsumer> {
 	void popLogRouter(Version upTo, Tag tag, Version durableKnownCommittedVersion, int8_t popLocality);
 	void popTxs(Version upTo, int8_t popLocality = tagLocalityInvalid);
 	void pop(Version upTo, Tag tag, Version durableKnownCommittedVersion = 0, int8_t popLocality = tagLocalityInvalid);
+	// Waits until every currently targeted TLog reports that `tag` has been popped through `upTo`.
+	Future<Void> waitForPopped(Version upTo, Tag tag, int8_t popLocality = tagLocalityInvalid);
 	Future<Version> getTxsPoppedVersion();
 	Version getEnd() const;
 	Tag getPseudoPopTag(Tag tag, ProcessClass::ClassType type) const;

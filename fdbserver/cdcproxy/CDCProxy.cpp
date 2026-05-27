@@ -392,18 +392,55 @@ Future<std::map<Tag, Version>> readRetiredTagPopVersions(Database cx) {
 	}
 }
 
+Future<Void> clearCompletedRetiredTagPops(Database cx, std::map<Tag, Version> completedPopVersions) {
+	if (completedPopVersions.empty()) {
+		co_return;
+	}
+
+	Transaction tr(cx);
+	while (true) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+			for (const auto& [tag, completedVersion] : completedPopVersions) {
+				Optional<Value> retiredVersionValue = co_await tr.get(cdcRetiredTagPopVersionKeyFor(tag));
+				if (!retiredVersionValue.present() ||
+				    decodeCDCMinVersionValue(retiredVersionValue.get()) > completedVersion) {
+					continue;
+				}
+				tr.clear(cdcRetiredTagPopKeyFor(tag));
+				tr.clear(cdcRetiredTagPopVersionKeyFor(tag));
+			}
+
+			co_await tr.commit();
+			co_return;
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr.onError(err);
+	}
+}
+
 Future<Void> popAcknowledgedData(CDCProxyData* self) {
 	const std::map<Tag, Version> safePopVersions = co_await readSafePopVersions(self->cx);
 	for (const auto& [tag, version] : safePopVersions) {
 		self->logSystem->get()->pop(version, tag);
 	}
 	const std::map<Tag, Version> retiredTagPopVersions = co_await readRetiredTagPopVersions(self->cx);
+	std::map<Tag, Version> completedPopVersions;
 	for (const auto& [tag, retiredVersion] : retiredTagPopVersions) {
 		const auto safePop = safePopVersions.find(tag);
 		const Version version =
 		    safePop == safePopVersions.end() ? retiredVersion : std::min(retiredVersion, safePop->second);
 		self->logSystem->get()->pop(version, tag);
+		if (version >= retiredVersion) {
+			co_await self->logSystem->get()->waitForPopped(retiredVersion, tag);
+			completedPopVersions[tag] = retiredVersion;
+		}
 	}
+	co_await clearCompletedRetiredTagPops(self->cx, std::move(completedPopVersions));
 }
 
 void reconcileStreams(CDCProxyData* self, ActorCollection* actors) {
