@@ -1151,8 +1151,8 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 					std::vector<Future<Void>> actors;
 					for (oldDest = oldDests.begin(); oldDest != oldDests.end(); ++oldDest)
 						if (std::find(servers.begin(), servers.end(), *oldDest) == servers.end())
-							actors.push_back(
-							    removeOldDestinations(tr, serverKeysPrefixFor(*oldDest), shardMap[*oldDest], currentKeys));
+							actors.push_back(removeOldDestinations(
+							    tr, serverKeysPrefixFor(*oldDest), shardMap[*oldDest], currentKeys));
 
 					// Update serverKeys to include keys (or the currently processed subset of keys) for each SS in
 					// servers
@@ -3768,8 +3768,7 @@ ACTOR Future<Void> removeOldDestinations(Reference<ReadYourWritesTransaction> tr
 
 	for (; i < shards.size(); i++) {
 		if (beginKey < shards[i].begin) {
-			wait(krmSetRangeCoalescing(
-			    tr, prefix, KeyRangeRef(beginKey, shards[i].begin), allKeys, serverKeysFalse));
+			wait(krmSetRangeCoalescing(tr, prefix, KeyRangeRef(beginKey, shards[i].begin), allKeys, serverKeysFalse));
 		}
 
 		beginKey = shards[i].end;
