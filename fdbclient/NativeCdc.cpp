@@ -246,9 +246,8 @@ Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys
 			tr.set(cdcMaxStreamIdKey, cdcMaxStreamIdValue(streamId));
 			tr.set(cdcStreamKeyFor(streamId), cdcStreamKeysValue(keys));
 			tr.set(cdcTagHistoryKeyFor(streamId, registrationVersion, tag), Value());
-			tr.atomicOp(cdcMinVersionKeyFor(streamId),
-			            cdcVersionstampedMinVersionValue(),
-			            MutationRef::SetVersionstampedValue);
+			tr.atomicOp(
+			    cdcMinVersionKeyFor(streamId), cdcVersionstampedMinVersionValue(), MutationRef::SetVersionstampedValue);
 			if (proxyId.present()) {
 				tr.set(cdcProxyKeyFor(streamId, proxyId.get()), Value());
 				signalNativeCdcProxyAssignmentChange(&tr);
