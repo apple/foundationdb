@@ -47,7 +47,7 @@ Native CDC is intended to provide:
 * Finite cleanup when streams are removed, so an old stream does not require
   CDC infrastructure forever.
 
-The first implementation does not attempt to provide:
+The current implementation does not attempt to provide:
 
 * Exactly-once side effects in the consumer. A consumer must make its output
   and its acknowledgement consistent if it needs exactly-once processing.
