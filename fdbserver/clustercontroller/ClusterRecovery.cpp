@@ -653,7 +653,7 @@ static Future<Void> recruitRangeBackupWorkers(Reference<ClusterRecoveryData> sel
 	LogEpoch epoch = self->cstate.myDBState.recoveryCount;
 	Reference<BackupProgress> backupProgress(
 	    new BackupProgress(self->dbgid, self->logSystem->getOldEpochRangeBackupTagsInfo()));
-	Future<Void> gotProgress = getBackupProgress(cx, self->dbgid, backupProgress, SevInfo);
+	Future<Void> fBackupProgress = getBackupProgress(cx, self->dbgid, backupProgress, SevInfo);
 	std::vector<Future<InitializeRangeBackupReply>> initializationReplies;
 
 	int rangeBackupTags = self->logSystem->rangeBackupWorkerTags;
@@ -686,7 +686,7 @@ static Future<Void> recruitRangeBackupWorkers(Reference<ClusterRecoveryData> sel
 	}
 
 	Future<Optional<Version>> fMinVersion = getMinBackupVersion(self, cx);
-	co_await (gotProgress && success(fMinVersion));
+	co_await (fBackupProgress && success(fMinVersion));
 	Optional<Version> minVersion = fMinVersion.get();
 	TraceEvent("RangeBackupMinVersion", self->dbgid).detail("Version", minVersion.present() ? minVersion.get() : -1);
 
@@ -741,7 +741,7 @@ static Future<Void> recruitBackupWorkers(Reference<ClusterRecoveryData> self, Da
 	LogEpoch epoch = self->cstate.myDBState.recoveryCount;
 	Reference<BackupProgress> backupProgress(
 	    new BackupProgress(self->dbgid, self->logSystem->getOldEpochLogRouterTagsInfo()));
-	Future<Void> gotProgress = getBackupProgress(cx, self->dbgid, backupProgress, SevInfo);
+	Future<Void> fBackupProgress = getBackupProgress(cx, self->dbgid, backupProgress, SevInfo);
 	std::vector<Future<InitializeBackupReply>> initializationReplies;
 
 	std::vector<std::pair<UID, Tag>> idsTags; // worker IDs and tags for current epoch
@@ -774,7 +774,7 @@ static Future<Void> recruitBackupWorkers(Reference<ClusterRecoveryData> self, Da
 	}
 
 	Future<Optional<Version>> fMinVersion = getMinBackupVersion(self, cx);
-	co_await (gotProgress && success(fMinVersion));
+	co_await (fBackupProgress && success(fMinVersion));
 	Optional<Version> minVersion = fMinVersion.get();
 	TraceEvent("MinBackupVersion", self->dbgid).detail("Version", minVersion.present() ? minVersion.get() : -1);
 

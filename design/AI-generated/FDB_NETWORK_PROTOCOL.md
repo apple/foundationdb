@@ -1499,8 +1499,8 @@ All follow the pattern: fields describing the role configuration + `ReplyPromise
 - **InitializeRatekeeperRequest**: `UID reqId`, `reply` → `RatekeeperInterface`
 - **InitializeConsistencyScanRequest**: `UID reqId`, `reply` → `ConsistencyScanInterface`
 - **InitializeLogRouterRequest**: `uint64_t recoveryCount`, `Tag routerTag`, `Version startVersion`, `std::vector<LocalityData> tLogLocalities`, `Reference<IReplicationPolicy> tLogPolicy`, `int8_t locality`, `Optional<Version> recoverAt`, `Optional<std::map<uint8_t, std::vector<uint16_t>>> knownLockedTLogIds`, `bool allowDropInSim/isReplacement`, `UID reqId`, `reply` → `TLogInterface`
-- **InitializeBackupRequest**: `UID reqId`, `LogEpoch recruitedEpoch/backupEpoch`, `Tag routerTag`, `int totalTags`, `Version startVersion`, `Optional<Version> endVersion`, `reply` → **InitializeBackupReply** {`BackupInterface interf`, `LogEpoch backupEpoch`}
-- **InitializeRangeBackupRequest**: `UID reqId`, `LogEpoch recruitedEpoch/backupEpoch`, `Tag routerTag`, `int totalTags`, `Version startVersion`, `Optional<Version> endVersion`, `reply` → **InitializeRangeBackupReply** {`BackupInterface interf`, `LogEpoch backupEpoch`}
+- **InitializeBackupRequest**: `UID reqId`, `LogEpoch recruitedEpoch/backupEpoch`, `Tag tag`, `int totalTags`, `Version startVersion`, `Optional<Version> endVersion`, `reply` → **InitializeBackupReply** {`BackupInterface interf`, `LogEpoch backupEpoch`}
+- **InitializeRangeBackupRequest**: `UID reqId`, `LogEpoch recruitedEpoch/backupEpoch`, `Tag tag`, `int totalTags`, `Version startVersion`, `Optional<Version> endVersion`, `reply` → **InitializeRangeBackupReply** {`BackupInterface interf`, `LogEpoch backupEpoch`}
 
 ### Recruitment Requests
 - **RecruitFromConfigurationRequest**: `DatabaseConfiguration configuration`, `bool recruitSeedServers`, `int maxOldLogRouters`, `reply` → **RecruitFromConfigurationReply** {`std::vector<WorkerInterface>` for: tLogs, satelliteTLogs, commitProxies, grvProxies, resolvers, storageServers, oldLogRouters, backupWorkers; `Optional<Key> dcId`, `bool satelliteFallback`}

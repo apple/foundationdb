@@ -1372,7 +1372,7 @@ void LogSystem::setRangeBackupWorkers(const std::vector<InitializeRangeBackupRep
 		    .detail("Epoch", logsetEpoch)
 		    .detail("BackupWorkerID", reply.interf.id());
 	}
-	TraceEvent("SetOldestBackupEpoch", dbgid).detail("Epoch", oldestBackupEpoch);
+	TraceEvent("SetOldestRangeBackupEpoch", dbgid).detail("Epoch", oldestBackupEpoch);
 	backupWorkerChanged.trigger();
 }
 
