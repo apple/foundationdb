@@ -256,30 +256,30 @@ struct NativeCdcWorkload : TestWorkload {
 
 		ASSERT(co_await registerNativeCdcStreamClient(cx, firstName, keys) == firstId);
 		const Version writeVersion = co_await writeValues(cx, { { "shared/unread"_sr, "protected-by-minimum"_sr } });
-		Version firstConsumedThrough = invalidVersion;
+		CDCCursor firstCursor = co_await createNativeCdcCursor(cx, firstName);
+		ASSERT(firstCursor.streamId == firstId);
 		const double firstConsumeDeadline = now() + 30.0;
-		while (firstConsumedThrough < writeVersion) {
-			CDCConsumeReply consumed =
-			    co_await timeoutError(consumeNativeCdcStream(cx, firstName, firstConsumedThrough), 30.0);
-			if (consumed.lastConsumedVersion == firstConsumedThrough) {
+		while (firstCursor.lastConsumedVersion < writeVersion) {
+			CDCConsumeReply consumed = co_await timeoutError(consumeNativeCdcStream(cx, firstCursor), 30.0);
+			if (consumed.lastConsumedVersion == firstCursor.lastConsumedVersion) {
 				ASSERT(now() < firstConsumeDeadline);
 				co_await delay(0.1);
 				continue;
 			}
-			ASSERT(consumed.lastConsumedVersion > firstConsumedThrough);
-			firstConsumedThrough = consumed.lastConsumedVersion;
+			ASSERT(consumed.lastConsumedVersion > firstCursor.lastConsumedVersion);
+			firstCursor.lastConsumedVersion = consumed.lastConsumedVersion;
 		}
-		co_await acknowledgeNativeCdcStreamClient(cx, firstName, firstConsumedThrough);
+		co_await acknowledgeNativeCdcStreamClient(cx, firstCursor);
 		co_await removeNativeCdcStreamClient(cx, firstName);
 		co_await waitForCDCProxyAssignmentRemoval(firstId);
 
 		ASSERT(co_await registerNativeCdcStreamClient(cx, secondName, keys) == secondId);
-		Version unreadConsumedThrough = invalidVersion;
+		CDCCursor unreadCursor = co_await createNativeCdcCursor(cx, secondName);
+		ASSERT(unreadCursor.streamId == secondId);
 		bool foundUnread = false;
-		while (unreadConsumedThrough < writeVersion) {
-			CDCConsumeReply unread =
-			    co_await timeoutError(consumeNativeCdcStream(cx, secondName, unreadConsumedThrough), 30.0);
-			ASSERT(unread.lastConsumedVersion > unreadConsumedThrough);
+		while (unreadCursor.lastConsumedVersion < writeVersion) {
+			CDCConsumeReply unread = co_await timeoutError(consumeNativeCdcStream(cx, unreadCursor), 30.0);
+			ASSERT(unread.lastConsumedVersion > unreadCursor.lastConsumedVersion);
 			for (const auto& versioned : unread.mutations) {
 				for (const auto& mutation : versioned.mutations) {
 					if (mutation.param1 == "shared/unread"_sr) {
@@ -287,10 +287,10 @@ struct NativeCdcWorkload : TestWorkload {
 					}
 				}
 			}
-			unreadConsumedThrough = unread.lastConsumedVersion;
+			unreadCursor.lastConsumedVersion = unread.lastConsumedVersion;
 		}
 		ASSERT(foundUnread);
-		co_await acknowledgeNativeCdcStreamClient(cx, secondName, unreadConsumedThrough);
+		co_await acknowledgeNativeCdcStreamClient(cx, unreadCursor);
 
 		co_await removeNativeCdcStreamClient(cx, secondName);
 		co_await waitForCDCProxyAssignmentRemoval(secondId);
@@ -363,6 +363,8 @@ struct NativeCdcWorkload : TestWorkload {
 		const Key liveName = "native-cdc-live"_sr;
 		const KeyRange liveRange(KeyRangeRef("live/"_sr, "live0"_sr));
 		const CDCStreamId liveStreamId = co_await registerNativeCdcStreamClient(cx, liveName, liveRange);
+		CDCCursor liveCursor = co_await createNativeCdcCursor(cx, liveName);
+		ASSERT(liveCursor.streamId == liveStreamId);
 		CDCProxyInterface owner = co_await getCDCProxy(liveStreamId);
 
 		std::vector<NativeCdcStreamInfo> listed = co_await listNativeCdcStreamsClient(cx);
@@ -395,20 +397,18 @@ struct NativeCdcWorkload : TestWorkload {
 			break;
 		}
 
-		Version consumedThrough = invalidVersion;
 		bool foundInRangeWrite = false;
 		bool foundOutOfRangeWrite = false;
 		const double initialConsumeDeadline = now() + 30.0;
-		while (consumedThrough < writeVersion) {
-			CDCConsumeReply consumed =
-			    co_await timeoutError(consumeNativeCdcStream(cx, liveName, consumedThrough), 30.0);
-			if (consumed.lastConsumedVersion == consumedThrough) {
+		while (liveCursor.lastConsumedVersion < writeVersion) {
+			CDCConsumeReply consumed = co_await timeoutError(consumeNativeCdcStream(cx, liveCursor), 30.0);
+			if (consumed.lastConsumedVersion == liveCursor.lastConsumedVersion) {
 				ASSERT(now() < initialConsumeDeadline);
 				co_await delay(0.1);
 				continue;
 			}
-			ASSERT(consumed.lastConsumedVersion > consumedThrough);
-			consumedThrough = consumed.lastConsumedVersion;
+			ASSERT(consumed.lastConsumedVersion > liveCursor.lastConsumedVersion);
+			liveCursor.lastConsumedVersion = consumed.lastConsumedVersion;
 			for (const auto& versioned : consumed.mutations) {
 				for (const auto& mutation : versioned.mutations) {
 					if (mutation.param1 == "live/in"_sr) {
@@ -431,19 +431,17 @@ struct NativeCdcWorkload : TestWorkload {
 
 		const Version afterFailureVersion =
 		    co_await writeValues(cx, { { "live/after-failure"_sr, "captured-after-failure"_sr } });
-		Version afterFailureCursor = consumedThrough;
 		bool foundAfterFailureWrite = false;
 		const double afterFailureConsumeDeadline = now() + 30.0;
-		while (afterFailureCursor < afterFailureVersion) {
-			CDCConsumeReply afterFailure =
-			    co_await timeoutError(consumeNativeCdcStream(cx, liveName, afterFailureCursor), 30.0);
-			if (afterFailure.lastConsumedVersion == afterFailureCursor) {
+		while (liveCursor.lastConsumedVersion < afterFailureVersion) {
+			CDCConsumeReply afterFailure = co_await timeoutError(consumeNativeCdcStream(cx, liveCursor), 30.0);
+			if (afterFailure.lastConsumedVersion == liveCursor.lastConsumedVersion) {
 				ASSERT(now() < afterFailureConsumeDeadline);
 				co_await delay(0.1);
 				continue;
 			}
-			ASSERT(afterFailure.lastConsumedVersion > afterFailureCursor);
-			afterFailureCursor = afterFailure.lastConsumedVersion;
+			ASSERT(afterFailure.lastConsumedVersion > liveCursor.lastConsumedVersion);
+			liveCursor.lastConsumedVersion = afterFailure.lastConsumedVersion;
 			for (const auto& versioned : afterFailure.mutations) {
 				for (const auto& mutation : versioned.mutations) {
 					if (mutation.param1 == "live/after-failure"_sr) {
@@ -454,8 +452,8 @@ struct NativeCdcWorkload : TestWorkload {
 		}
 		ASSERT(foundAfterFailureWrite);
 
-		const Version cursorBeforeRecovery = afterFailureCursor;
-		co_await acknowledgeNativeCdcStreamClient(cx, liveName, cursorBeforeRecovery);
+		const Version cursorBeforeRecovery = liveCursor.lastConsumedVersion;
+		co_await acknowledgeNativeCdcStreamClient(cx, liveCursor);
 		ASSERT(co_await getPersistedMinVersion(cx, liveStreamId) == cursorBeforeRecovery + 1);
 
 		const int32_t recoveredResolverCount = (co_await getDatabaseConfiguration(cx)).getDesiredResolvers() + 1;
@@ -468,19 +466,17 @@ struct NativeCdcWorkload : TestWorkload {
 
 		const Version afterRecoveryVersion =
 		    co_await writeValues(cx, { { "live/after-recovery"_sr, "captured-after-recovery"_sr } });
-		Version afterRecoveryCursor = cursorBeforeRecovery;
 		bool foundAfterRecoveryWrite = false;
 		const double afterRecoveryConsumeDeadline = now() + 30.0;
-		while (afterRecoveryCursor < afterRecoveryVersion) {
-			CDCConsumeReply afterRecovery =
-			    co_await timeoutError(consumeNativeCdcStream(cx, liveName, afterRecoveryCursor), 30.0);
-			if (afterRecovery.lastConsumedVersion == afterRecoveryCursor) {
+		while (liveCursor.lastConsumedVersion < afterRecoveryVersion) {
+			CDCConsumeReply afterRecovery = co_await timeoutError(consumeNativeCdcStream(cx, liveCursor), 30.0);
+			if (afterRecovery.lastConsumedVersion == liveCursor.lastConsumedVersion) {
 				ASSERT(now() < afterRecoveryConsumeDeadline);
 				co_await delay(0.1);
 				continue;
 			}
-			ASSERT(afterRecovery.lastConsumedVersion > afterRecoveryCursor);
-			afterRecoveryCursor = afterRecovery.lastConsumedVersion;
+			ASSERT(afterRecovery.lastConsumedVersion > liveCursor.lastConsumedVersion);
+			liveCursor.lastConsumedVersion = afterRecovery.lastConsumedVersion;
 			for (const auto& versioned : afterRecovery.mutations) {
 				for (const auto& mutation : versioned.mutations) {
 					if (mutation.param1 == "live/after-recovery"_sr) {
@@ -491,11 +487,11 @@ struct NativeCdcWorkload : TestWorkload {
 		}
 		ASSERT(foundAfterRecoveryWrite);
 
-		co_await acknowledgeNativeCdcStreamClient(cx, liveName, afterRecoveryCursor);
-		ASSERT(co_await getPersistedMinVersion(cx, liveStreamId) == afterRecoveryCursor + 1);
+		co_await acknowledgeNativeCdcStreamClient(cx, liveCursor);
+		ASSERT(co_await getPersistedMinVersion(cx, liveStreamId) == liveCursor.lastConsumedVersion + 1);
 
-		Future<CDCConsumeReply> pendingConsume =
-		    recoveredOwner.consume.getReply(CDCConsumeRequest(CDCCursor(liveStreamId, afterRecoveryCursor + 1000000)));
+		Future<CDCConsumeReply> pendingConsume = recoveredOwner.consume.getReply(
+		    CDCConsumeRequest(CDCCursor(liveStreamId, liveCursor.lastConsumedVersion + 1000000)));
 		co_await delay(0.1);
 		co_await removeNativeCdcStreamClient(cx, liveName);
 		co_await waitForCDCProxyAssignmentRemoval(liveStreamId);
@@ -511,7 +507,7 @@ struct NativeCdcWorkload : TestWorkload {
 
 		bool retiredConsumeRejected = false;
 		try {
-			co_await timeoutError(consumeNativeCdcStream(cx, liveName, afterRecoveryCursor), 30.0);
+			co_await timeoutError(consumeNativeCdcStream(cx, liveCursor), 30.0);
 		} catch (Error& e) {
 			retiredConsumeRejected = e.code() == error_code_client_invalid_operation;
 		}
@@ -519,7 +515,7 @@ struct NativeCdcWorkload : TestWorkload {
 
 		bool retiredClientAcknowledgeRejected = false;
 		try {
-			co_await timeoutError(acknowledgeNativeCdcStreamClient(cx, liveName, afterRecoveryCursor), 30.0);
+			co_await timeoutError(acknowledgeNativeCdcStreamClient(cx, liveCursor), 30.0);
 		} catch (Error& e) {
 			retiredClientAcknowledgeRejected = e.code() == error_code_client_invalid_operation;
 		}

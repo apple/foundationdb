@@ -571,12 +571,16 @@ Future<Void> removeNativeCdcStreamClient(Database cx, Key name) {
 	}
 }
 
-Future<CDCConsumeReply> consumeNativeCdcStream(Database cx, Key name, Version lastConsumedVersion) {
+Future<CDCCursor> createNativeCdcCursor(Database cx, Key name) {
 	validateNativeCdcEnabled();
 	const CDCStreamId streamId = co_await getNativeCdcStreamId(cx, name);
-	const CDCCursor cursor(streamId, lastConsumedVersion);
+	co_return CDCCursor(streamId, invalidVersion);
+}
+
+Future<CDCConsumeReply> consumeNativeCdcStream(Database cx, CDCCursor cursor) {
+	validateNativeCdcEnabled();
 	while (true) {
-		CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(cx, streamId);
+		CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(cx, cursor.streamId);
 		try {
 			co_return co_await proxy.consume.getReply(CDCConsumeRequest(cursor));
 		} catch (Error& error) {
@@ -588,17 +592,17 @@ Future<CDCConsumeReply> consumeNativeCdcStream(Database cx, Key name, Version la
 	}
 }
 
-Future<Void> acknowledgeNativeCdcStreamClient(Database cx, Key name, Version consumedThrough) {
+Future<Void> acknowledgeNativeCdcStreamClient(Database cx, CDCCursor cursor) {
 	validateNativeCdcEnabled();
-	if (consumedThrough < 0 || consumedThrough == std::numeric_limits<Version>::max()) {
+	if (cursor.streamId == 0 || cursor.lastConsumedVersion < 0 ||
+	    cursor.lastConsumedVersion == std::numeric_limits<Version>::max()) {
 		throw client_invalid_operation();
 	}
-	const CDCStreamId streamId = co_await getNativeCdcStreamId(cx, name);
 
 	while (true) {
-		CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(cx, streamId);
+		CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(cx, cursor.streamId);
 		try {
-			co_await proxy.ack.getReply(CDCAckRequest(streamId, consumedThrough));
+			co_await proxy.ack.getReply(CDCAckRequest(cursor.streamId, cursor.lastConsumedVersion));
 			co_return;
 		} catch (Error& error) {
 			if (!retryNativeCdcProxyRequest(error)) {

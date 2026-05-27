@@ -62,7 +62,8 @@ Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, KeyRang
 Future<Void> removeNativeCdcStreamClient(Database cx, Key name);
 Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreamsClient(Database cx);
 // Uses the range registered for this name; consumers do not respecify it.
-Future<CDCConsumeReply> consumeNativeCdcStream(Database cx, Key name, Version lastConsumedVersion);
-Future<Void> acknowledgeNativeCdcStreamClient(Database cx, Key name, Version consumedThrough);
+Future<CDCCursor> createNativeCdcCursor(Database cx, Key name);
+Future<CDCConsumeReply> consumeNativeCdcStream(Database cx, CDCCursor cursor);
+Future<Void> acknowledgeNativeCdcStreamClient(Database cx, CDCCursor cursor);
 
 #endif // FDBCLIENT_NATIVECDC_H
