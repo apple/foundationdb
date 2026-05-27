@@ -266,7 +266,7 @@ Value tagLocalityListValue(int8_t const&);
 Optional<Value> decodeTagLocalityListKey(KeyRef const&);
 int8_t decodeTagLocalityListValue(ValueRef const&);
 
-// Native CDC metadata persisted in the transaction state store.
+// Native CDC stream routing and lifecycle metadata persisted in the transaction state store.
 // "\xff/cdc/name/[[streamName]]" := "[[CDCStreamId]]"
 extern const KeyRangeRef cdcStreamNameKeys;
 Key cdcStreamNameKeyFor(KeyRef const& streamName);
@@ -292,7 +292,8 @@ Key cdcTagHistoryKeyFor(CDCStreamId streamId, Version version, Tag tag);
 KeyRange cdcTagHistoryRangeFor(CDCStreamId streamId);
 std::tuple<CDCStreamId, Version, Tag> decodeCDCTagHistoryKey(KeyRef const& key);
 
-// "\xff/cdc/minVersion/[[CDCStreamId]]" := "[[Version]]"
+// Native CDC acknowledgement progress is regular storage-server-backed system data.
+// "\xff\x02/cdc/minVersion/[[CDCStreamId]]" := "[[Version]]"
 // The initial value is versionstamped at stream registration commit.
 extern const KeyRangeRef cdcMinVersionKeys;
 Key cdcMinVersionKeyFor(CDCStreamId streamId);

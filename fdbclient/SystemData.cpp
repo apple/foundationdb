@@ -775,7 +775,7 @@ const KeyRangeRef cdcStreamNameKeys("\xff/cdc/name/"_sr, "\xff/cdc/name0"_sr);
 const KeyRef cdcMaxStreamIdKey = "\xff/cdc/maxStreamId"_sr;
 const KeyRangeRef cdcStreamKeys("\xff/cdc/keys/"_sr, "\xff/cdc/keys0"_sr);
 const KeyRangeRef cdcTagHistoryKeys("\xff/cdc/tagHistory/"_sr, "\xff/cdc/tagHistory0"_sr);
-const KeyRangeRef cdcMinVersionKeys("\xff/cdc/minVersion/"_sr, "\xff/cdc/minVersion0"_sr);
+const KeyRangeRef cdcMinVersionKeys("\xff\x02/cdc/minVersion/"_sr, "\xff\x02/cdc/minVersion0"_sr);
 const KeyRangeRef cdcProxyKeys("\xff/cdc/proxies/"_sr, "\xff/cdc/proxies0"_sr);
 const KeyRef cdcProxyAssignmentChangeKey = "\xff/cdc/proxyAssignmentChange"_sr;
 
@@ -1828,8 +1828,8 @@ TEST_CASE("noSim/SystemData/NativeCDC") {
 	ASSERT(decodeCDCStreamKeysValue(cdcStreamKeysValue(keys)) == keys);
 	ASSERT(decodeCDCMinVersionKey(cdcMinVersionKeyFor(streamId)) == streamId);
 	ASSERT(decodeCDCMinVersionValue(cdcMinVersionValue(minVersion)) == minVersion);
-	ASSERT(cdcVersionstampedMinVersionValue().size() ==
-	       sizeof(Version) + sizeof(uint16_t) + sizeof(int32_t));
+	ASSERT(nonMetadataSystemKeys.contains(cdcMinVersionKeyFor(streamId)));
+	ASSERT(cdcVersionstampedMinVersionValue().size() == sizeof(Version) + sizeof(uint16_t) + sizeof(int32_t));
 
 	const Key tagHistoryKey = cdcTagHistoryKeyFor(streamId, minVersion, tag);
 	const auto [decodedStreamId, decodedVersion, decodedTag] = decodeCDCTagHistoryKey(tagHistoryKey);

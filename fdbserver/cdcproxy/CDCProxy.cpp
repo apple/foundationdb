@@ -461,8 +461,8 @@ Future<Void> acknowledge(CDCProxyData* self, CDCAckRequest request) {
 		if (found != self->streams.end()) {
 			found->second->minVersion = std::max(found->second->minVersion, minVersion);
 			while (!found->second->mutations.empty() && found->second->mutations.front().version < minVersion) {
-				found->second->bufferedBytes -= sizeof(VersionedMutationsRef) +
-				                                found->second->mutations.front().mutations.expectedSize();
+				found->second->bufferedBytes -=
+				    sizeof(VersionedMutationsRef) + found->second->mutations.front().mutations.expectedSize();
 				found->second->mutations.pop_front();
 			}
 			ASSERT(found->second->bufferedBytes >= 0);
@@ -540,6 +540,7 @@ Future<Void> cdcProxyServer(CDCProxyInterface proxy,
 		actors.add(traceRole(Role::CDC_PROXY, proxy.id()));
 		self.logSystem->set(makeLogSystemConsumerFromServerDBInfo(self.id, dbInfo->get()));
 		reconcileStreams(&self, &actors);
+		actors.add(popAcknowledgedData(&self));
 		Future<Void> dbInfoChange = dbInfo->onChange();
 		bool hasBeenPublished =
 		    std::find(dbInfo->get().client.cdcProxies.begin(), dbInfo->get().client.cdcProxies.end(), proxy) !=
@@ -589,6 +590,7 @@ Future<Void> cdcProxyServer(CDCProxyInterface proxy,
 					self.logSystem->set(makeLogSystemConsumerFromServerDBInfo(self.id, dbInfo->get()));
 				}
 				reconcileStreams(&self, &actors);
+				actors.add(popAcknowledgedData(&self));
 				dbInfoChange = dbInfo->onChange();
 				break;
 			}
