@@ -560,7 +560,7 @@ Future<Void> acknowledgeNativeCdcStreamClient(Database cx, CDCStreamId streamId,
 	}
 }
 
-TEST_CASE("noSim/NativeCDC/LifecycleAllocation") {
+TEST_CASE("/NativeCDC/LifecycleAllocation") {
 	NativeCdcIdentifierAllocator allocator;
 	auto [initialId, initialTag] = allocator.allocate();
 	ASSERT(initialId == 1);

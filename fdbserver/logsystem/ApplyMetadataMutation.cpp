@@ -1359,7 +1359,7 @@ bool containsMetadataMutation(const VectorRef<MutationRef>& mutations) {
 	return false;
 }
 
-TEST_CASE("noSim/NativeCDC/RoutingTable") {
+TEST_CASE("/NativeCDC/RoutingTable") {
 	CDCRoutingTable table;
 	const Tag ordersTag(tagLocalityCDC, 1);
 	const Tag overlappingTag(tagLocalityCDC, 2);

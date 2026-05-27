@@ -625,7 +625,7 @@ Future<Void> cdcProxyServer(CDCProxyInterface proxy,
 	}
 }
 
-TEST_CASE("noSim/NativeCDC/ProxyMutationFiltering") {
+TEST_CASE("/NativeCDC/ProxyMutationFiltering") {
 	const KeyRangeRef keys("c"_sr, "m"_sr);
 
 	Optional<MutationRef> inRange = clipCDCMutation(MutationRef(MutationRef::SetValue, "d"_sr, "value"_sr), keys);

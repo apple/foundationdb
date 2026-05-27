@@ -1813,7 +1813,7 @@ TEST_CASE("noSim/SystemData/DataMoveId") {
 	return Void();
 }
 
-TEST_CASE("noSim/SystemData/NativeCDC") {
+TEST_CASE("/SystemData/NativeCDC") {
 	const Key name = "orders"_sr;
 	const CDCStreamId streamId = 42;
 	const KeyRange keys(KeyRangeRef("a"_sr, "z"_sr));
