@@ -60,6 +60,8 @@ struct NativeCdcIdentifierAllocator {
 		ASSERT_WE_THINK(CLIENT_KNOBS->NATIVE_CDC_TAG_COUNT <= std::numeric_limits<uint16_t>::max() + 1u);
 		uint32_t leastStreams = std::numeric_limits<uint32_t>::max();
 		uint16_t selectedTagId = 0;
+		// TODO: Use data-distributor-observed per-tag write throughput to rebalance CDC tags, including
+		// migrating active streams with versioned tag-history assignments.
 		for (uint32_t tagId = 0; tagId < static_cast<uint32_t>(CLIENT_KNOBS->NATIVE_CDC_TAG_COUNT); ++tagId) {
 			auto count = tagStreamCounts.find(static_cast<uint16_t>(tagId));
 			const uint32_t streamCount = count == tagStreamCounts.end() ? 0 : count->second;
@@ -143,6 +145,8 @@ bool retryNativeCdcProxyRequest(Error const& error) {
 	       error.code() == error_code_connection_failed || error.code() == error_code_request_maybe_delivered;
 }
 
+// TODO: Have the cluster controller rebalance stream ownership using aggregate CDC proxy throughput and
+// update cdcProxyKeys and ClientDBInfo assignments; registration currently chooses any available proxy.
 Future<CDCProxyInterface> getAvailableNativeCdcProxy(Database cx, Optional<UID> previousProxy = Optional<UID>()) {
 	while (true) {
 		for (const auto& proxy : cx->clientInfo->get().cdcProxies) {
