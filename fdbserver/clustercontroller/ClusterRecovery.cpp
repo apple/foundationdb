@@ -233,6 +233,9 @@ Future<Void> newGrvProxies(Reference<ClusterRecoveryData> self, RecruitFromConfi
 }
 
 Future<Void> ensureCDCProxies(Reference<ClusterRecoveryData> self, RecruitFromConfigurationReply recr) {
+	if (!CLIENT_KNOBS->ENABLE_NATIVE_CDC) {
+		co_return;
+	}
 	if (!self->controllerData->db.cdcProxies.empty()) {
 		TraceEvent("CDCProxiesReused", self->dbgid).detail("Count", self->controllerData->db.cdcProxies.size());
 		co_return;

@@ -73,6 +73,7 @@ public:
 	void setRange(CDCStreamId streamId, KeyRangeRef const& keys);
 	void setTag(CDCStreamId streamId, Version version, Tag tag);
 	void reload(IKeyValueStore* txnStateStore);
+	bool empty() const { return streams.empty(); }
 
 	const std::set<Tag>& tagsForKey(KeyRef const& key) const;
 	std::set<Tag> tagsForRange(KeyRangeRef const& keys) const;

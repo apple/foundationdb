@@ -4,6 +4,9 @@ singleRegion = true
 buggify = false
 faultInjection = false
 
+[[knobs]]
+enable_native_cdc = true
+
 [[test]]
 testTitle = 'NativeCdc'
 useDB = true

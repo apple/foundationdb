@@ -35,6 +35,12 @@
 
 namespace {
 
+void validateNativeCdcEnabled() {
+	if (!CLIENT_KNOBS->ENABLE_NATIVE_CDC) {
+		throw client_invalid_operation();
+	}
+}
+
 struct NativeCdcIdentifierAllocator {
 	bool sawStream = false;
 	CDCStreamId maxStreamId = 0;
@@ -235,6 +241,7 @@ Future<Optional<CDCProxyInterface>> getNativeCdcStreamProxyForRemoval(Database c
 } // namespace
 
 Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys, Optional<UID> proxyId) {
+	validateNativeCdcEnabled();
 	validateNativeCdcStream(name, keys);
 
 	Transaction tr(cx);
@@ -285,6 +292,7 @@ Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys
 }
 
 Future<Optional<NativeCdcRemovedStreamInfo>> removeNativeCdcStream(Database cx, Key name, Optional<UID> proxyId) {
+	validateNativeCdcEnabled();
 	if (name.empty()) {
 		throw client_invalid_operation();
 	}
@@ -347,6 +355,7 @@ Future<Optional<NativeCdcRemovedStreamInfo>> removeNativeCdcStream(Database cx, 
 }
 
 Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams(Database cx) {
+	validateNativeCdcEnabled();
 	std::vector<NativeCdcStreamInfo> result;
 	Key begin = cdcStreamNameKeys.begin;
 	Transaction tr(cx);
@@ -384,6 +393,7 @@ Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams(Database cx) {
 }
 
 Future<Void> reassignNativeCdcStreams(Database cx, UID oldProxyId, UID newProxyId) {
+	validateNativeCdcEnabled();
 	if (oldProxyId == newProxyId) {
 		co_return;
 	}
@@ -428,6 +438,7 @@ Future<Void> reassignNativeCdcStreams(Database cx, UID oldProxyId, UID newProxyI
 }
 
 Future<Version> acknowledgeNativeCdcStream(Database cx, CDCStreamId streamId, Version consumedThrough) {
+	validateNativeCdcEnabled();
 	if (streamId == 0 || consumedThrough < 0 || consumedThrough == std::numeric_limits<Version>::max()) {
 		throw client_invalid_operation();
 	}
@@ -461,6 +472,7 @@ Future<Version> acknowledgeNativeCdcStream(Database cx, CDCStreamId streamId, Ve
 }
 
 Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, KeyRange keys) {
+	validateNativeCdcEnabled();
 	validateNativeCdcStream(name, keys);
 	Optional<UID> previousProxy;
 
@@ -480,6 +492,7 @@ Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, KeyRang
 }
 
 Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreamsClient(Database cx) {
+	validateNativeCdcEnabled();
 	Optional<UID> previousProxy;
 
 	while (true) {
@@ -504,6 +517,7 @@ Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreamsClient(Database cx)
 }
 
 Future<Void> removeNativeCdcStreamClient(Database cx, Key name) {
+	validateNativeCdcEnabled();
 	if (name.empty()) {
 		throw client_invalid_operation();
 	}
@@ -533,6 +547,7 @@ Future<Void> removeNativeCdcStreamClient(Database cx, Key name) {
 }
 
 Future<CDCConsumeReply> consumeNativeCdcStream(Database cx, CDCCursor cursor) {
+	validateNativeCdcEnabled();
 	while (true) {
 		CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(cx, cursor.streamId);
 		try {
@@ -547,6 +562,7 @@ Future<CDCConsumeReply> consumeNativeCdcStream(Database cx, CDCCursor cursor) {
 }
 
 Future<Void> acknowledgeNativeCdcStreamClient(Database cx, CDCStreamId streamId, Version consumedThrough) {
+	validateNativeCdcEnabled();
 	if (streamId == 0 || consumedThrough < 0 || consumedThrough == std::numeric_limits<Version>::max()) {
 		throw client_invalid_operation();
 	}

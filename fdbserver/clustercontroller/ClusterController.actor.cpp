@@ -3131,8 +3131,10 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(monitorServerInfoConfig(&self.db));
 	self.addActor.send(monitorStorageMetadata(&self));
 	self.addActor.send(monitorGlobalConfig(&self.db));
-	self.addActor.send(monitorCDCProxyAssignments(&self.db));
-	self.addActor.send(monitorAndRecruitCDCProxies(&self));
+	if (CLIENT_KNOBS->ENABLE_NATIVE_CDC) {
+		self.addActor.send(monitorCDCProxyAssignments(&self.db));
+		self.addActor.send(monitorAndRecruitCDCProxies(&self));
+	}
 	self.addActor.send(updatedChangingDatacenters(&self));
 	self.addActor.send(updatedChangedDatacenters(&self));
 	self.addActor.send(updateDatacenterVersionDifference(&self));
