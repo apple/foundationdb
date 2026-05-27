@@ -1084,25 +1084,8 @@ private:
 		    !range.contains(cdcMaxStreamIdKey)) {
 			return;
 		}
-		if (logSystemConsumer && popVersion && cdcStreamKeys.intersects(range)) {
-			auto streamsCleared = txnStateStore->readRange(range & cdcStreamKeys).get();
-			for (const auto& stream : streamsCleared) {
-				const CDCStreamId streamId = decodeCDCStreamKey(stream.key);
-				auto tagHistory = txnStateStore->readRange(cdcTagHistoryRangeFor(streamId)).get();
-				for (const auto& entry : tagHistory) {
-					const Tag tag = std::get<2>(decodeCDCTagHistoryKey(entry.key));
-					TraceEvent("CDCStreamTagRemove")
-					    .detail("PopVersion", popVersion)
-					    .detail("Tag", tag.toString())
-					    .detail("StreamId", streamId);
-					if (!forResolver) {
-						logSystemConsumer->pop(popVersion, tag);
-						(*tag_popped)[tag] = popVersion;
-					}
-					ASSERT_WE_THINK(forResolver ^ (tag_popped != nullptr));
-				}
-			}
-		}
+		// CDC tags may be shared and acknowledgement minima are stored outside transaction state.
+		// The owning CDC proxy safely pops retired tags after stream removal commits.
 		if (!initialCommit) {
 			for (const KeyRangeRef cdcRange : { cdcStreamNameKeys, cdcStreamKeys, cdcTagHistoryKeys, cdcProxyKeys }) {
 				if (cdcRange.intersects(range)) {

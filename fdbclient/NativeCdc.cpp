@@ -261,7 +261,7 @@ Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys
 	}
 }
 
-Future<Void> removeNativeCdcStream(Database cx, Key name, Optional<UID> proxyId) {
+Future<Optional<NativeCdcRemovedStreamInfo>> removeNativeCdcStream(Database cx, Key name, Optional<UID> proxyId) {
 	if (name.empty()) {
 		throw client_invalid_operation();
 	}
@@ -276,7 +276,7 @@ Future<Void> removeNativeCdcStream(Database cx, Key name, Optional<UID> proxyId)
 			const Key nameKey = cdcStreamNameKeyFor(name);
 			Optional<Value> currentId = co_await tr.get(nameKey);
 			if (!currentId.present()) {
-				co_return;
+				co_return Optional<NativeCdcRemovedStreamInfo>();
 			}
 
 			const CDCStreamId streamId = decodeCDCStreamNameValue(currentId.get());
@@ -284,6 +284,22 @@ Future<Void> removeNativeCdcStream(Database cx, Key name, Optional<UID> proxyId)
 			if (proxyId.present() && (!assignedProxy.present() || assignedProxy.get() != proxyId.get())) {
 				throw wrong_shard_server();
 			}
+
+			std::set<Tag> removedTags;
+			const KeyRange historyRange = cdcTagHistoryRangeFor(streamId);
+			Key begin = historyRange.begin;
+			while (begin < historyRange.end) {
+				RangeResult history =
+				    co_await tr.getRange(KeyRangeRef(begin, historyRange.end), CLIENT_KNOBS->TOO_MANY);
+				for (const auto& entry : history) {
+					removedTags.insert(std::get<2>(decodeCDCTagHistoryKey(entry.key)));
+				}
+				if (!history.more) {
+					break;
+				}
+				begin = keyAfter(history.back().key);
+			}
+
 			tr.clear(nameKey);
 			tr.clear(cdcStreamKeyFor(streamId));
 			tr.clear(cdcTagHistoryRangeFor(streamId));
@@ -293,7 +309,10 @@ Future<Void> removeNativeCdcStream(Database cx, Key name, Optional<UID> proxyId)
 				signalNativeCdcProxyAssignmentChange(&tr);
 			}
 			co_await tr.commit();
-			co_return;
+			NativeCdcRemovedStreamInfo removed;
+			removed.removalVersion = tr.getCommittedVersion();
+			removed.tags.assign(removedTags.begin(), removedTags.end());
+			co_return Optional<NativeCdcRemovedStreamInfo>(removed);
 		} catch (Error& e) {
 			if (e.code() == error_code_wrong_shard_server) {
 				throw;

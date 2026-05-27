@@ -369,6 +369,15 @@ Future<Void> popAcknowledgedData(CDCProxyData* self) {
 	}
 }
 
+Future<Void> popRemovedStreamData(CDCProxyData* self, NativeCdcRemovedStreamInfo removed) {
+	const std::map<Tag, Version> safePopVersions = co_await readSafePopVersions(self->cx);
+	for (const Tag& tag : removed.tags) {
+		const auto safePop = safePopVersions.find(tag);
+		const Version version = safePop == safePopVersions.end() ? removed.removalVersion : safePop->second;
+		self->logSystem->get()->pop(version, tag);
+	}
+}
+
 void reconcileStreams(CDCProxyData* self, ActorCollection* actors) {
 	std::set<CDCStreamId> assignedStreams;
 	for (const auto& [streamId, proxyId] : self->dbInfo->get().client.streamToCDCProxyId) {
@@ -495,7 +504,10 @@ Future<Void> registerStream(CDCProxyData* self, CDCRegisterStreamRequest request
 
 Future<Void> removeStream(CDCProxyData* self, CDCRemoveStreamRequest request) {
 	try {
-		co_await removeNativeCdcStream(self->cx, request.name, self->id);
+		Optional<NativeCdcRemovedStreamInfo> removed = co_await removeNativeCdcStream(self->cx, request.name, self->id);
+		if (removed.present()) {
+			co_await popRemovedStreamData(self, removed.get());
+		}
 		request.reply.send(Void());
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {

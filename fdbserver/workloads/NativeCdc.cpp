@@ -251,6 +251,8 @@ struct NativeCdcWorkload : TestWorkload {
 			firstCursor.lastConsumedVersion = consumed.lastConsumedVersion;
 		}
 		co_await acknowledgeNativeCdcStreamClient(cx, firstId, firstCursor.lastConsumedVersion);
+		co_await removeNativeCdcStreamClient(cx, firstName);
+		co_await waitForCDCProxyAssignmentRemoval(firstId);
 
 		ASSERT(co_await registerNativeCdcStreamClient(cx, secondName, keys) == secondId);
 		CDCCursor unreadCursor(secondId, invalidVersion);
@@ -270,9 +272,7 @@ struct NativeCdcWorkload : TestWorkload {
 		ASSERT(foundUnread);
 		co_await acknowledgeNativeCdcStreamClient(cx, secondId, unreadCursor.lastConsumedVersion);
 
-		co_await removeNativeCdcStreamClient(cx, firstName);
 		co_await removeNativeCdcStreamClient(cx, secondName);
-		co_await waitForCDCProxyAssignmentRemoval(firstId);
 		co_await waitForCDCProxyAssignmentRemoval(secondId);
 		co_return;
 	}
