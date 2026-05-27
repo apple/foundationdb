@@ -613,7 +613,6 @@ Future<Void> consume(CDCProxyData* self, CDCConsumeRequest request) {
 		}
 		request.reply.sendError(e);
 	}
-	co_return;
 }
 
 Future<Void> acknowledge(CDCProxyData* self, CDCAckRequest request) {
@@ -643,7 +642,6 @@ Future<Void> acknowledge(CDCProxyData* self, CDCAckRequest request) {
 		}
 		request.reply.sendError(e);
 	}
-	co_return;
 }
 
 Future<Void> registerStream(CDCProxyData* self, CDCRegisterStreamRequest request) {
@@ -656,7 +654,6 @@ Future<Void> registerStream(CDCProxyData* self, CDCRegisterStreamRequest request
 		}
 		request.reply.sendError(e);
 	}
-	co_return;
 }
 
 Future<Void> removeStream(CDCProxyData* self, CDCRemoveStreamRequest request) {
@@ -672,7 +669,6 @@ Future<Void> removeStream(CDCProxyData* self, CDCRemoveStreamRequest request) {
 		}
 		request.reply.sendError(e);
 	}
-	co_return;
 }
 
 Future<Void> listStreams(CDCProxyData* self, CDCListStreamsRequest request) {
@@ -693,7 +689,6 @@ Future<Void> listStreams(CDCProxyData* self, CDCListStreamsRequest request) {
 		}
 		request.reply.sendError(e);
 	}
-	co_return;
 }
 
 } // namespace

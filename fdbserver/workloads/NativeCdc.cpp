@@ -240,14 +240,12 @@ struct NativeCdcWorkload : TestWorkload {
 		while (dbInfo->get().client.streamToCDCProxyId.contains(streamId)) {
 			co_await dbInfo->onChange();
 		}
-		co_return;
 	}
 
 	Future<Void> waitForNoCDCProxies() {
 		while (!dbInfo->get().client.cdcProxies.empty()) {
 			co_await dbInfo->onChange();
 		}
-		co_return;
 	}
 
 	Future<Void> changeResolverCount(Database cx, int32_t count) {
@@ -267,7 +265,6 @@ struct NativeCdcWorkload : TestWorkload {
 		while (dbInfo->get().recoveryCount <= previousRecoveryCount || dbInfo->get().recoveryState < requiredState) {
 			co_await dbInfo->onChange();
 		}
-		co_return;
 	}
 
 	Future<Void> runSharedTagSafety(Database cx) {
@@ -320,7 +317,6 @@ struct NativeCdcWorkload : TestWorkload {
 
 		co_await removeNativeCdcStreamClient(cx, secondName);
 		co_await waitForCDCProxyAssignmentRemoval(secondId);
-		co_return;
 	}
 
 	Future<Void> run(Database cx) {
