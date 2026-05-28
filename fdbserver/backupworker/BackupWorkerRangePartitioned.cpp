@@ -436,19 +436,23 @@ Future<PartitionMapHistory> loadPartitionMapHistoryFromSS(BackupRangePartitioned
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			RangeResult rows = co_await tr->getRange(range, CLIENT_KNOBS->TOO_MANY);
-			ASSERT(!rows.more);
-
 			PartitionMapHistory history;
-			history.reserve(rows.size());
-			for (auto const& kv : rows) {
-				auto [decodedEpoch, version] = decodeBackupPartitionMapHistoryKey(kv.key);
-				ASSERT_EQ(decodedEpoch, epoch);
+			Key beginKey = range.begin;
+			while (true) {
+				RangeResult rows = co_await tr->getRange(KeyRangeRef(beginKey, range.end), CLIENT_KNOBS->TOO_MANY);
+				for (auto const& kv : rows) {
+					auto [decodedEpoch, version] = decodeBackupPartitionMapHistoryKey(kv.key);
+					ASSERT_EQ(decodedEpoch, epoch);
 
-				PartitionMap pm;
-				BinaryReader reader(kv.value, IncludeVersion());
-				reader >> pm;
-				history.emplace_back(version, std::move(pm));
+					PartitionMap pm;
+					BinaryReader reader(kv.value, IncludeVersion());
+					reader >> pm;
+					history.emplace_back(version, std::move(pm));
+				}
+				if (!rows.more) {
+					break;
+				}
+				beginKey = keyAfter(rows.back().key);
 			}
 			TraceEvent("BWRangePartitionedMapHistoryRead", self->myId)
 			    .detail("Epoch", epoch)
@@ -506,11 +510,13 @@ Future<Void> processPartitionMap(BackupRangePartitionedData* self) {
 	if (self->backupEpoch == self->recruitedEpoch) {
 		// Current-epoch worker: receive the partition map via TLog as the first message.
 		partitionMapVersion = co_await pullPartitionMapFromTLog(self, &partitionMap);
+		auto it = partitionMap.find(self->tag);
+		ASSERT(it != partitionMap.end() && !it->second.empty());
 		TraceEvent("BWRangeParitionedPulledPartitionMap", self->myId)
 		    .detail("Version", partitionMapVersion)
 		    .detail("NumTags", partitionMap.size())
 		    .detail("Tag", self->tag.toString())
-		    .detail("NumPartitions", partitionMap[self->tag].size());
+		    .detail("NumPartitions", it->second.size());
 
 		// Persist the partition map to system keys so catch-up backup workers can read it during recovery.
 		co_await persistPartitionMapToSS(self, partitionMapVersion, partitionMap);
@@ -530,27 +536,21 @@ Future<Void> processPartitionMap(BackupRangePartitionedData* self) {
 		// workers. Read it from system keys instead of pulling from TLog.
 		// TODO akanksha: Handle Case 3 mentioned in the TODO above.
 		PartitionMapHistory history = co_await loadPartitionMapHistoryFromSS(self, self->backupEpoch);
-		ASSERT_GT(history.size(), 1);
+		ASSERT(!history.empty());
 		partitionMapVersion = history[0].first;
 		partitionMap = std::move(history[0].second);
+		auto it = partitionMap.find(self->tag);
+		ASSERT(it != partitionMap.end() && !it->second.empty());
 		TraceEvent("BWRangePartitionedLoadedPartitionMap", self->myId)
 		    .detail("Epoch", self->backupEpoch)
 		    .detail("Version", partitionMapVersion)
 		    .detail("NumTags", partitionMap.size())
 		    .detail("Tag", self->tag.toString())
-		    .detail("NumPartitions", partitionMap[self->tag].size());
+		    .detail("NumPartitions", it->second.size());
 	}
 
 	self->logFolderBaseVersion = partitionMapVersion + 1;
-	ASSERT(partitionMap.contains(self->tag));
-	TraceEvent("BWRangePartitionedPulledPartitionMap", self->myId)
-	    .detail("Version", partitionMapVersion)
-	    .detail("NumTags", partitionMap.size())
-	    .detail("Tag", self->tag.toString())
-	    .detail("NumPartitions", partitionMap[self->tag].size());
-
 	self->keyRangeToPartitionId.clear();
-	ASSERT_GT(partitionMap[self->tag].size(), 0);
 	for (auto& partition : partitionMap[self->tag]) {
 		self->keyRangeToPartitionId.insert(partition.ranges, partition.partitionId);
 	}
