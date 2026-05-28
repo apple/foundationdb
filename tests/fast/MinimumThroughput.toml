@@ -1,5 +1,9 @@
+[configuration]
+buggify = false
+
 [[test]]
 testTitle = 'MinimumThroughput'
+connectionFailuresDisableDuration = 100000
 
     [[test.workload]]
     testName = 'MinimumThroughput'
