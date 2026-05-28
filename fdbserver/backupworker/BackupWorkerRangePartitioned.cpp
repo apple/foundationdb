@@ -72,7 +72,6 @@ struct BackupRangePartitionedData {
 	const Optional<Version> endVersion; // old epoch's end version (inclusive), or empty for current epoch
 	const LogEpoch recruitedEpoch; // current epoch whose tLogs are receiving mutations
 	const LogEpoch backupEpoch; // the epoch workers should pull mutations
-	// TODO akanksha: Update oldestBackupEpoch wherever needed.
 	LogEpoch oldestBackupEpoch = 0; // oldest epoch that still has data on tLogs for backup to pull
 	// Minimumum known committed version in StorageServers.
 	Version minKnownCommittedVersion;
@@ -416,9 +415,9 @@ Future<Void> uploadPartitionList(BackupRangePartitionedData* self, PartitionMap 
 // 2. For older epochs with different containers is PartitionMap specific to container or same for all.
 // Right now assumption is that PartitionMap will be passed by TLOG with the first message after start version for both
 // older epochs and newer epochs.
-// 3. Provide implemention for recovery where paritionmap can come any time and won't be the first message.
+// 3. Provide implemention for recovery where partitionmap can come any time and won't be the first message.
 Future<Void> waitAndProcessPartitionMap(BackupRangePartitionedData* self) {
-	TraceEvent("BWRangeParitionedWaitingForPartitionMap", self->myId)
+	TraceEvent("BWRangePartitionedWaitingForPartitionMap", self->myId)
 	    .detail("Tag", self->tag.toString())
 	    .detail("StartVersion", self->startVersion);
 	PartitionMap partitionMap;
@@ -427,7 +426,7 @@ Future<Void> waitAndProcessPartitionMap(BackupRangePartitionedData* self) {
 	self->logFolderBaseVersion = partitionMapVersion + 1;
 
 	ASSERT(partitionMap.contains(self->tag));
-	TraceEvent("BWRangeParitionedPulledPartitionMap", self->myId)
+	TraceEvent("BWRangePartitionedPulledPartitionMap", self->myId)
 	    .detail("Version", partitionMapVersion)
 	    .detail("NumTags", partitionMap.size())
 	    .detail("Tag", self->tag.toString())
@@ -682,7 +681,7 @@ Future<Void> saveMutationsToFile(BackupRangePartitionedData* self, Version lastV
 			continue;
 		}
 
-		DEBUG_MUTATION("BWRangeParitionedAddMutation", message.version.version, m, self->myId)
+		DEBUG_MUTATION("BWRangePartitionedAddMutation", message.version.version, m, self->myId)
 		    .detail("KCV", self->minKnownCommittedVersion)
 		    .detail("SavedVersion", self->savedVersion);
 
@@ -735,7 +734,10 @@ Future<Void> saveMutationsToFile(BackupRangePartitionedData* self, Version lastV
 
 	std::map<UID, int64_t> bytesPerBackup;
 	for (auto& lf : activeFiles) {
-		self->backups[lf.backupUid].nextFileBeginVersion = lastVersionInFile + 1;
+		auto it = self->backups.find(lf.backupUid);
+		if (it != self->backups.end()) {
+			it->second.nextFileBeginVersion = lastVersionInFile + 1;
+		}
 		bytesPerBackup[lf.backupUid] += lf.file->size();
 	}
 

@@ -44,4 +44,4 @@ using PartitionList = std::vector<Partition>;
 // storage when multiple backup workers upload the partition map at the same time.
 using PartitionMap = std::map<Tag, PartitionList>;
 
-std::string serializePartitionListJSON(PartitionMap const& PartitionMap);
+std::string serializePartitionListJSON(PartitionMap const& partitionMap);
