@@ -1,5 +1,5 @@
 /*
- * HighContentionAllocator.h
+ * HealthMetricsRequestServer.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,25 +18,24 @@
  * limitations under the License.
  */
 
-#ifndef FDB_FLOW_HIGH_CONTENTION_ALLOCATOR_H
-#define FDB_FLOW_HIGH_CONTENTION_ALLOCATOR_H
+#include "HealthMetricsRequestServer.h"
 
-#pragma once
+HealthMetricsRequestServer::HealthMetricsRequestServer(GrvProxyInterface grvProxy) : grvProxy(grvProxy) {}
 
-#include "Subspace.h"
+void HealthMetricsRequestServer::update(HealthMetrics const& healthMetrics, bool detailed) {
+	healthMetricsReply.update(healthMetrics, detailed, true);
+	if (detailed) {
+		detailedHealthMetricsReply.update(healthMetrics, true, true);
+	}
+}
 
-namespace FDB {
-class HighContentionAllocator {
-public:
-	explicit HighContentionAllocator(Subspace subspace) : counters(subspace.get(0)), recent(subspace.get(1)) {}
-	Future<Standalone<StringRef>> allocate(Reference<Transaction> const& tr) const;
-
-	static int64_t windowSize(int64_t start);
-
-private:
-	Subspace counters;
-	Subspace recent;
-};
-} // namespace FDB
-
-#endif
+Future<Void> HealthMetricsRequestServer::run() {
+	while (true) {
+		GetHealthMetricsRequest req = co_await grvProxy.getHealthMetrics.getFuture();
+		if (req.detailed) {
+			req.reply.send(detailedHealthMetricsReply);
+		} else {
+			req.reply.send(healthMetricsReply);
+		}
+	}
+}

@@ -534,10 +534,11 @@ void initHelp() {
 	    "clear a key from the database",
 	    "Clear succeeds even if the specified key is not present, but may fail because of conflicts." ESCAPINGK);
 	helpMap["clearrange"] = CommandHelp(
-	    "clearrange <BEGINKEY> <ENDKEY>",
+	    "clearrange <BEGINKEY> [ENDKEY]",
 	    "clear a range of keys from the database",
-	    "All keys between BEGINKEY (inclusive) and ENDKEY (exclusive) are cleared from the database. This command will "
-	    "succeed even if the specified range is empty, but may fail because of conflicts." ESCAPINGK);
+	    "All keys between BEGINKEY (inclusive) and ENDKEY (exclusive) are cleared from the database. If ENDKEY is "
+	    "omitted, then all keys starting with BEGINKEY are cleared. This command will succeed even if the specified "
+	    "range is empty, but may fail because of conflicts." ESCAPINGK);
 	helpMap["exit"] = CommandHelp("exit", "exit the CLI", "");
 	helpMap["quit"] = CommandHelp();
 	helpMap["waitconnected"] = CommandHelp();
@@ -1803,16 +1804,25 @@ Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterConnecti
 						continue;
 					}
 
-					if (tokens.size() != 3) {
-						printUsage(tokens[0]);
-						is_error = true;
-					} else {
+					if (tokens.size() == 2) {
+						// Prefix mode: clear all keys starting with BEGINKEY
+						getTransaction(db, tr, options, intrans);
+						tr->clear(prefixRange(tokens[1]));
+
+						if (!intrans) {
+							co_await commitTransaction(tr);
+						}
+					} else if (tokens.size() == 3) {
+						// Range mode: clear keys in [BEGINKEY, ENDKEY)
 						getTransaction(db, tr, options, intrans);
 						tr->clear(KeyRangeRef(tokens[1], tokens[2]));
 
 						if (!intrans) {
 							co_await commitTransaction(tr);
 						}
+					} else {
+						printUsage(tokens[0]);
+						is_error = true;
 					}
 					continue;
 				}

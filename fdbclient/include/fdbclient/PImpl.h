@@ -27,7 +27,7 @@ class PImpl {
 	std::unique_ptr<T> impl;
 	struct ConstructorTag {};
 	template <class... Args>
-	PImpl(ConstructorTag, Args&&... args) : impl(std::make_unique<T>(std::forward<Args>(args)...)) {}
+	explicit PImpl(ConstructorTag, Args&&... args) : impl(std::make_unique<T>(std::forward<Args>(args)...)) {}
 
 public:
 	PImpl() = default;

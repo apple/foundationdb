@@ -180,7 +180,7 @@ IPAddress parseAddr(std::string const& str) {
 
 struct SubNetTest {
 	AuthAllowedSubnet subnet;
-	explicit SubNetTest(AuthAllowedSubnet&& subnet) : subnet(std::move(subnet)) {}
+	explicit SubNetTest(AuthAllowedSubnet&& subnet) : subnet(subnet) {}
 	explicit SubNetTest(AuthAllowedSubnet const& subnet) : subnet(subnet) {}
 	template <bool V4>
 	static SubNetTest randomSubNetImpl() {

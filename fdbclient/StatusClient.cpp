@@ -200,7 +200,7 @@ void JSONDoc::mergeValueInto(json_spirit::mValue& dst, const json_spirit::mValue
 	}
 
 	// Do nothing if d is already an error
-	if (dst.type() == json_spirit::obj_type && dst.get_obj().count("ERROR"))
+	if (dst.type() == json_spirit::obj_type && dst.get_obj().contains("ERROR"))
 		return;
 
 	if (dst.type() != src.type()) {
@@ -478,7 +478,7 @@ StatusObject getClientDatabaseStatus(StatusObjectReader client, StatusObjectRead
 			// OK to throw if processes doesn't exist, can't have an available database without processes
 			for (auto p : cluster.at("processes").get_obj()) {
 				StatusObjectReader proc(p.second);
-				if (proc.has("messages") && proc.last().get_array().size()) {
+				if (proc.has("messages") && !proc.last().get_array().empty()) {
 					procMessagesPresent = true;
 					break;
 				}

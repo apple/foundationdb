@@ -5,6 +5,10 @@ add_fdbserver_link_test(fdbserver_tloglinktest
   fdbserver_tlog
   fdbserver_logsystem
   fdbserver_core)
+add_fdbserver_unit_test(fdbserver_tlog_test tlog
+  fdbserver_tlog
+  fdbserver_logsystem
+  fdbserver_core)
 
 configure_fdbserver_common_includes(fdbserver_tlog)
 target_include_directories(fdbserver_tlog

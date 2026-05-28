@@ -1,5 +1,5 @@
 /*
- * HighContentionAllocator.h
+ * HealthMetricsRequestServer.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,25 +18,19 @@
  * limitations under the License.
  */
 
-#ifndef FDB_FLOW_HIGH_CONTENTION_ALLOCATOR_H
-#define FDB_FLOW_HIGH_CONTENTION_ALLOCATOR_H
-
 #pragma once
 
-#include "Subspace.h"
+#include "fdbclient/GrvProxyInterface.h"
+#include "flow/flow.h"
 
-namespace FDB {
-class HighContentionAllocator {
+class HealthMetricsRequestServer {
+	GrvProxyInterface grvProxy;
+	GetHealthMetricsReply healthMetricsReply;
+	GetHealthMetricsReply detailedHealthMetricsReply;
+
 public:
-	explicit HighContentionAllocator(Subspace subspace) : counters(subspace.get(0)), recent(subspace.get(1)) {}
-	Future<Standalone<StringRef>> allocate(Reference<Transaction> const& tr) const;
+	explicit HealthMetricsRequestServer(GrvProxyInterface grvProxy);
 
-	static int64_t windowSize(int64_t start);
-
-private:
-	Subspace counters;
-	Subspace recent;
+	void update(HealthMetrics const& healthMetrics, bool detailed);
+	Future<Void> run();
 };
-} // namespace FDB
-
-#endif

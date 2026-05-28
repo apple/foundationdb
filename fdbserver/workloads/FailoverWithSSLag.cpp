@@ -194,7 +194,7 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 				// Fetch SS lag every 5s.
 				ssLag = fetchStorageServerLag(cx);
 			} else if (choice.index() == 1) {
-				Optional<Version> versionLag = std::get<1>(std::move(choice));
+				Optional<Version> versionLag = std::get<1>(choice);
 
 				if (versionLag.present() && versionLag.get() >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE) {
 					TraceEvent("SSLag").detail("Versions", versionLag.get());

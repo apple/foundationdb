@@ -112,10 +112,50 @@ public:
 	}
 
 	void clear() {
+#ifdef ADDRESS_SANITIZER
+		// Under ASAN, properly free pending tasks so LeakSanitizer doesn't report
+		// them. Destroying a PromiseTask fires broken_promise on waiting futures,
+		// which cancels associated actors and frees their coroutine frames.
+		// Only done in ASAN builds because broken_promise during shutdown can
+		// trigger SevError logging in server-side actors that don't expect it.
+
+		// Swap out queues first so any callbacks triggered during cleanup
+		// add new tasks to the live (empty) queues, not the ones we're draining.
+		// This prevents infinite loops from actors that catch broken_promise and retry.
+		ReadyQueue<OrderedTask> oldReady(0);
+		ready.swap(oldReady);
+		decltype(timers) oldTimers;
+		timers.swap(oldTimers);
+
+		while (!oldTimers.empty()) {
+			delete oldTimers.top().task;
+			oldTimers.pop();
+		}
+		while (!oldReady.empty()) {
+			delete oldReady.top().task;
+			oldReady.pop();
+		}
+		// Drain cross-thread queue. ThreadSafeQueue::pop() can transiently return
+		// empty if a producer is between head.exchange() and prev->next.store() in
+		// push(). We drain in a loop: if we got at least one item, retry in case
+		// more are in-flight. Exit only after a full pass finds nothing.
+		bool found;
+		do {
+			found = false;
+			while (true) {
+				Optional<std::pair<TaskPriority, Task*>> t = threadReady.pop();
+				if (!t.present())
+					break;
+				delete t.get().second;
+				found = true;
+			}
+		} while (found);
+#else
 		decltype(ready) _1;
 		ready.swap(_1);
 		decltype(timers) _2;
 		timers.swap(_2);
+#endif
 	}
 
 private:

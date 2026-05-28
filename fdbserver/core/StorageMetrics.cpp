@@ -725,7 +725,7 @@ Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest req, Fut
 			try {
 				auto res = co_await race(change.getFuture(), timeout);
 				if (res.index() == 0) {
-					metrics += std::get<0>(std::move(res));
+					metrics += std::get<0>(res);
 				} else {
 					timedout = true;
 				}

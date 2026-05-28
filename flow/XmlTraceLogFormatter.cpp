@@ -75,7 +75,7 @@ void XmlTraceLogFormatter::escape(std::ostringstream& oss, std::string source) c
 		source = source.substr(index + 1);
 	}
 
-	oss << std::move(source);
+	oss << source;
 }
 
 std::string XmlTraceLogFormatter::formatEvent(const TraceEventFields& fields) const {

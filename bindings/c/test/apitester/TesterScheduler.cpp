@@ -43,7 +43,7 @@ public:
 
 class AsioScheduler : public IScheduler {
 public:
-	AsioScheduler(int numThreads) : numThreads(numThreads) {}
+	explicit AsioScheduler(int numThreads) : numThreads(numThreads) {}
 
 	void start() override {
 		work = require(io_ctx.get_executor(), execution::outstanding_work.tracked);
