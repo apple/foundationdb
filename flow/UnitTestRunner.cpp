@@ -103,7 +103,7 @@ void printUsage(const char* program, const UnitTestRunnerConfig& config) {
 	           "      --max-test-cases N    Stop after N matching tests\n"
 	           "      --no-cleanup          Keep the data directory after each test\n"
 	           "      --list                Print matching test names without running them\n"
-	           "      --simulation          Run using Sim2 (when supported by the target)\n"
+	           "      --simulation          Run using Sim2; skip noSim/ tests unless filtered\n"
 	           "  -h, --help                Show this help\n",
 	           program,
 	           config.suiteName(),
@@ -223,6 +223,10 @@ bool pathComponentMatches(std::string_view path, std::string_view component) {
 
 bool testMatched(const UnitTestRunnerOptions& options, std::string_view testName) {
 	if (!startsWith(testName, options.testPattern)) {
+		return false;
+	}
+
+	if (options.simulation && options.testPattern.empty() && startsWith(testName, "noSim/")) {
 		return false;
 	}
 
@@ -399,6 +403,9 @@ int runUnitTests(int argc, char** argv, const UnitTestRunnerConfig& config) {
 		options.randomSeed = platform::getRandomSeed();
 	}
 	setThreadLocalDeterministicRandomSeed(options.randomSeed);
+	if (options.simulation) {
+		bindDeterministicRandomToOpenssl();
+	}
 	fmt::print(stdout, "Random seed is {}\n", options.randomSeed);
 
 	const std::string traceName = config.traceName();

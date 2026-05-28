@@ -397,5 +397,6 @@ public:
 // Flow knobs are needed before the knob collections are available, so a global FlowKnobs object is used to bootstrap
 extern FlowKnobs bootstrapGlobalFlowKnobs;
 extern FlowKnobs const* FLOW_KNOBS;
+void resetFlowKnobs(class Randomize randomize, class IsSimulated isSimulated);
 
 #endif

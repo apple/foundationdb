@@ -38,6 +38,11 @@ FlowKnobs::FlowKnobs(Randomize randomize, IsSimulated isSimulated) {
 FlowKnobs bootstrapGlobalFlowKnobs(Randomize::False, IsSimulated::False);
 FlowKnobs const* FLOW_KNOBS = &bootstrapGlobalFlowKnobs;
 
+void resetFlowKnobs(Randomize randomize, IsSimulated isSimulated) {
+	bootstrapGlobalFlowKnobs.reset(randomize, isSimulated);
+	FLOW_KNOBS = &bootstrapGlobalFlowKnobs;
+}
+
 #define init(knob, value) INIT_KNOB(knob, value)
 
 // clang-format off

@@ -18,9 +18,17 @@
  * limitations under the License.
  */
 
-#include "flow/UnitTestRunner.h"
+#include "fdbclient/Knobs.h"
 #include "fdbrpc/simulator.h"
+#include "flow/UnitTestRunner.h"
+
+namespace {
+Future<Void> initializeSimulation() {
+	resetClientKnobs(Randomize::True, IsSimulated::True);
+	return startUnitTestSimulator();
+}
+} // namespace
 
 int main(int argc, char** argv) {
-	return runUnitTests(argc, argv, UnitTestRunnerConfig("fdbclient", startUnitTestSimulator));
+	return runUnitTests(argc, argv, UnitTestRunnerConfig("fdbclient", initializeSimulation));
 }
