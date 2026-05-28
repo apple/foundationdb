@@ -13,7 +13,6 @@ testTitle = 'Clogged'
 testName = 'Cycle'
 transactionsPerSecond = 2500.0
 testDuration = 10.0
-expectedRate = 0
 unseedCheck = false
 
 [[test.workload]]
@@ -46,5 +45,4 @@ testTitle = 'Unclogged'
 testName = 'Cycle'
 transactionsPerSecond = 250.0
 testDuration = 10.0
-expectedRate = 0.80
 unseedCheck = false
