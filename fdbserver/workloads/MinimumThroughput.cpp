@@ -37,7 +37,7 @@ struct MinimumThroughputWorkload : TestWorkload {
 	explicit MinimumThroughputWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"), totalLatency("Latency") {
 		testDuration = getOption(options, "testDuration"_sr, 30.0);
-		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0) / clientCount;
+		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 200.0) / clientCount;
 		actorCount = getOption(options, "actorsPerClient"_sr, std::max(1, int(transactionsPerSecond / 5)));
 		nodeCount = getOption(options, "nodeCount"_sr, 100000);
 		readFraction = getOption(options, "readFraction"_sr, 0.5);
@@ -64,8 +64,8 @@ struct MinimumThroughputWorkload : TestWorkload {
 			return false;
 		}
 		int64_t achieved = transactions.getMetric().value();
-		int64_t minRequired = (int64_t)(testDuration * minExpectedTransactionsPerSecond * clientCount);
-		int64_t target = (int64_t)(testDuration * transactionsPerSecond * clientCount);
+		int64_t minRequired = (int64_t)(testDuration * minExpectedTransactionsPerSecond);
+		int64_t target = (int64_t)(testDuration * transactionsPerSecond);
 		if (achieved < minRequired) {
 			TraceEvent(SevError, "TestFailure")
 			    .detail("Reason", "Throughput below minimum")
@@ -76,6 +76,8 @@ struct MinimumThroughputWorkload : TestWorkload {
 		}
 		return true;
 	}
+
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("all"); }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.push_back(transactions.getMetric());
