@@ -2219,8 +2219,9 @@ Future<Void> monitorCDCProxyAssignments(ClusterControllerData::DBInfo* db) {
 				}
 
 				Future<Void> assignmentChangeFuture = tr.watch(cdcProxyAssignmentChangeKey);
+				Future<Void> endpointChangeFuture = db->clientInfo->onChange();
 				co_await tr.commit();
-				co_await assignmentChangeFuture;
+				co_await (assignmentChangeFuture || endpointChangeFuture);
 				break;
 			} catch (Error& e) {
 				err = e;

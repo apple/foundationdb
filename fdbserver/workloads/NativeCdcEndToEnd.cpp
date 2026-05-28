@@ -71,6 +71,9 @@ struct NativeCdcEndToEndWorkload : TestWorkload {
 		ASSERT(writesPerRound >= 1 && writesPerRound <= keyCount);
 	}
 
+	// RandomRangeLock can outlive this bounded CDC workload and mask its progress check.
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("RandomRangeLock"); }
+
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
 	Future<Void> start(Database const& cx) override {

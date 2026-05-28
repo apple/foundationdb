@@ -100,6 +100,7 @@ struct CDCProxyData {
 	Reference<AsyncVar<Reference<LogSystemConsumer>>> logSystem;
 	std::map<CDCStreamId, Reference<CDCBufferedStream>> streams;
 	std::map<Tag, Reference<CDCBufferedTag>> tags;
+	AsyncTrigger popAcknowledgedDataTrigger;
 	FlowLock bufferLock;
 	int64_t bufferedBytes = 0;
 
@@ -692,6 +693,19 @@ Future<Void> popAcknowledgedData(CDCProxyData* self) {
 	co_await clearCompletedRetiredTagPops(self->cx, std::move(completedPopVersions));
 }
 
+Future<Void> monitorAcknowledgedDataPops(CDCProxyData* self) {
+	co_await self->popAcknowledgedDataTrigger.onTrigger();
+	while (true) {
+		// Pop completion may wait on an unavailable log generation. A new acknowledgement or log-system
+		// configuration supersedes that attempt and retries the durable work against current state.
+		Future<Void> retriggered = self->popAcknowledgedDataTrigger.onTrigger();
+		auto result = co_await race(popAcknowledgedData(self), retriggered);
+		if (result.index() == 0) {
+			co_await self->popAcknowledgedDataTrigger.onTrigger();
+		}
+	}
+}
+
 void reconcileStreams(CDCProxyData* self, ActorCollection* actors) {
 	std::set<CDCStreamId> assignedStreams;
 	for (const auto& [streamId, proxyId] : self->dbInfo->get().client.streamToCDCProxyId) {
@@ -795,7 +809,7 @@ Future<Void> acknowledge(CDCProxyData* self, CDCAckRequest request) {
 			}
 			ASSERT(found->second->bufferedBytes >= 0);
 		}
-		co_await popAcknowledgedData(self);
+		self->popAcknowledgedDataTrigger.trigger();
 		request.reply.send(Void());
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
@@ -821,7 +835,7 @@ Future<Void> removeStream(CDCProxyData* self, CDCRemoveStreamRequest request) {
 	try {
 		Optional<NativeCdcRemovedStreamInfo> removed = co_await removeNativeCdcStream(self->cx, request.name, self->id);
 		if (removed.present()) {
-			co_await popAcknowledgedData(self);
+			self->popAcknowledgedDataTrigger.trigger();
 		}
 		request.reply.send(Void());
 	} catch (Error& e) {
@@ -865,7 +879,8 @@ Future<Void> cdcProxyServer(CDCProxyInterface proxy,
 		actors.add(traceRole(Role::CDC_PROXY, proxy.id()));
 		self.logSystem->set(makeLogSystemConsumerFromServerDBInfo(self.id, dbInfo->get()));
 		reconcileStreams(&self, &actors);
-		actors.add(popAcknowledgedData(&self));
+		actors.add(monitorAcknowledgedDataPops(&self));
+		self.popAcknowledgedDataTrigger.trigger();
 		Future<Void> dbInfoChange = dbInfo->onChange();
 		bool hasBeenPublished =
 		    std::find(dbInfo->get().client.cdcProxies.begin(), dbInfo->get().client.cdcProxies.end(), proxy) !=
@@ -915,7 +930,7 @@ Future<Void> cdcProxyServer(CDCProxyInterface proxy,
 					self.logSystem->set(makeLogSystemConsumerFromServerDBInfo(self.id, dbInfo->get()));
 				}
 				reconcileStreams(&self, &actors);
-				actors.add(popAcknowledgedData(&self));
+				self.popAcknowledgedDataTrigger.trigger();
 				dbInfoChange = dbInfo->onChange();
 				break;
 			}

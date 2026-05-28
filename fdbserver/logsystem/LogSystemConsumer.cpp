@@ -5,6 +5,16 @@
 
 #include "flow/genericactors.actor.h"
 
+namespace {
+bool shouldPopFromLogSet(Reference<LogSet> const& logSet, Tag tag, int8_t popLocality) {
+	// CDC tags are replicated to each TLog set. Once a version is acknowledged, every copy can be discarded;
+	// leaving remote copies unpopped can retain old log generations across failover.
+	return logSet->locality == tagLocalitySpecial || logSet->locality == tag.locality ||
+	       tag.locality == tagLocalityCDC ||
+	       (tag.locality < 0 && ((popLocality == tagLocalityInvalid) == logSet->isLocal));
+}
+} // namespace
+
 Reference<IReplayPeekCursor> LogSystemConsumer::peekAll(UID dbgid,
                                                         Version begin,
                                                         Version end,
@@ -885,8 +895,7 @@ void LogSystemConsumer::pop(Version upTo, Tag tag, Version durableKnownCommitted
 		return;
 	}
 	for (auto& t : ls.tLogs) {
-		if (t->locality == tagLocalitySpecial || t->locality == tag.locality ||
-		    (tag.locality < 0 && ((popLocality == tagLocalityInvalid) == t->isLocal))) {
+		if (shouldPopFromLogSet(t, tag, popLocality)) {
 			for (auto& log : t->logServers) {
 				Version prev = ls.outstandingPops[std::make_pair(log->get().id(), tag)].first;
 				if (prev < upTo) {
@@ -908,8 +917,7 @@ Future<Void> LogSystemConsumer::waitForPopped(Version upTo, Tag tag, int8_t popL
 	while (true) {
 		std::vector<Future<Version>> poppedFutures;
 		for (auto& t : logSystem->tLogs) {
-			if (t->locality == tagLocalitySpecial || t->locality == tag.locality ||
-			    (tag.locality < 0 && ((popLocality == tagLocalityInvalid) == t->isLocal))) {
+			if (shouldPopFromLogSet(t, tag, popLocality)) {
 				for (auto& log : t->logServers) {
 					poppedFutures.push_back(LogSystem::getPoppedFromTLog(log, tag));
 				}

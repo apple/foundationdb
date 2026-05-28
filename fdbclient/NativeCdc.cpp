@@ -551,7 +551,7 @@ Future<Version> acknowledgeNativeCdcStream(Database cx, CDCStreamId streamId, Ve
 
 			const Version readVersion = co_await tr.getReadVersion();
 			if (consumedThrough > readVersion) {
-				throw client_invalid_operation();
+				throw future_version();
 			}
 
 			const Version minVersion = decodeCDCMinVersionValue(minVersionValue.get());
@@ -577,7 +577,8 @@ Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, KeyRang
 	while (true) {
 		CDCProxyInterface proxy = co_await getAvailableNativeCdcProxy(cx, previousProxy);
 		try {
-			CDCRegisterStreamReply reply = co_await proxy.registerStream.getReply(CDCRegisterStreamRequest(name, keys));
+			CDCRegisterStreamReply reply =
+			    co_await throwErrorOr(proxy.registerStream.tryGetReply(CDCRegisterStreamRequest(name, keys)));
 			co_return reply.streamId;
 		} catch (Error& error) {
 			if (!retryNativeCdcProxyRequest(error)) {
@@ -596,7 +597,7 @@ Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreamsClient(Database cx)
 	while (true) {
 		CDCProxyInterface proxy = co_await getAvailableNativeCdcProxy(cx, previousProxy);
 		try {
-			CDCListStreamsReply reply = co_await proxy.listStreams.getReply(CDCListStreamsRequest());
+			CDCListStreamsReply reply = co_await throwErrorOr(proxy.listStreams.tryGetReply(CDCListStreamsRequest()));
 			std::vector<NativeCdcStreamInfo> streams;
 			streams.reserve(reply.streams.size());
 			for (const auto& stream : reply.streams) {
@@ -633,7 +634,7 @@ Future<Void> removeNativeCdcStreamClient(Database cx, Key name) {
 			co_return;
 		}
 		try {
-			co_await proxy.get().removeStream.getReply(CDCRemoveStreamRequest(name));
+			co_await throwErrorOr(proxy.get().removeStream.tryGetReply(CDCRemoveStreamRequest(name)));
 			co_return;
 		} catch (Error& error) {
 			if (!retryNativeCdcProxyRequest(error)) {
@@ -655,7 +656,7 @@ Future<CDCConsumeReply> consumeNativeCdcStream(Database cx, CDCCursor cursor) {
 	while (true) {
 		CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(cx, cursor.streamId);
 		try {
-			co_return co_await proxy.consume.getReply(CDCConsumeRequest(cursor));
+			co_return co_await throwErrorOr(proxy.consume.tryGetReply(CDCConsumeRequest(cursor)));
 		} catch (Error& error) {
 			if (!retryNativeCdcProxyRequest(error)) {
 				throw;
@@ -675,7 +676,7 @@ Future<Void> acknowledgeNativeCdcStreamClient(Database cx, CDCCursor cursor) {
 	while (true) {
 		CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(cx, cursor.streamId);
 		try {
-			co_await proxy.ack.getReply(CDCAckRequest(cursor.streamId, cursor.lastConsumedVersion));
+			co_await throwErrorOr(proxy.ack.tryGetReply(CDCAckRequest(cursor.streamId, cursor.lastConsumedVersion)));
 			co_return;
 		} catch (Error& error) {
 			if (!retryNativeCdcProxyRequest(error)) {
