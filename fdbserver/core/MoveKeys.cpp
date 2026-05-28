@@ -1867,14 +1867,18 @@ static Future<Void> startMoveShards(Database occ,
 								    occ, rangeIntersectKeys, lock, startMoveKeysLock, dataMoveId, ddEnabledState);
 								throw retry();
 							} else {
-								if (cancelConflictingDataMoves) {
+								if (cancelConflictingDataMoves || !SERVER_KNOBS->RESUME_DATA_MOVES_ON_RESTART) {
 									TraceEvent(
 									    SevWarn, "StartMoveShardsCancelConflictingDataMove", relocationIntervalId)
 									    .detail("Range", rangeIntersectKeys)
 									    .detail("DataMoveID", dataMoveId.toString())
 									    .detail("ExistingDataMoveID", destId.toString());
-									co_await cleanUpDataMove(
-									    occ, destId, lock, startMoveKeysLock, keys, ddEnabledState);
+									co_await cleanUpDataMove(occ,
+									                         destId,
+									                         lock,
+									                         cancelConflictingDataMoves ? startMoveKeysLock : nullptr,
+									                         keys,
+									                         ddEnabledState);
 									throw retry();
 								} else {
 									Optional<Value> val = co_await tr.get(dataMoveKeyFor(destId));
@@ -3077,8 +3081,11 @@ Future<Void> cleanUpDataMoveBackground(Database occ,
 	TraceEvent(SevDebug, "CleanUpDataMoveBackgroundBegin", dataMoveId)
 	    .detail("DataMoveID", dataMoveId)
 	    .detail("Range", keys);
-	co_await cleanUpDataMoveParallelismLock->take(TaskPriority::DataDistributionLaunch);
-	FlowLock::Releaser releaser = FlowLock::Releaser(*cleanUpDataMoveParallelismLock);
+	Optional<FlowLock::Releaser> releaser;
+	if (cleanUpDataMoveParallelismLock) {
+		co_await cleanUpDataMoveParallelismLock->take(TaskPriority::DataDistributionLaunch);
+		releaser = FlowLock::Releaser(*cleanUpDataMoveParallelismLock);
+	}
 	DataMoveMetaData dataMove;
 	Transaction tr(occ);
 	while (true) {
@@ -3127,8 +3134,11 @@ Future<Void> cleanUpDataMoveCore(Database occ,
 	Error lastError;
 	bool runPreCheck = true;
 
-	co_await cleanUpDataMoveParallelismLock->take(TaskPriority::DataDistributionLaunch);
-	FlowLock::Releaser releaser = FlowLock::Releaser(*cleanUpDataMoveParallelismLock);
+	Optional<FlowLock::Releaser> releaser;
+	if (cleanUpDataMoveParallelismLock) {
+		co_await cleanUpDataMoveParallelismLock->take(TaskPriority::DataDistributionLaunch);
+		releaser = FlowLock::Releaser(*cleanUpDataMoveParallelismLock);
+	}
 
 	try {
 		while (true) {

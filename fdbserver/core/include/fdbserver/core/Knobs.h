@@ -246,6 +246,11 @@ public:
 	int MAX_LARGE_SHARD_BYTES;
 
 	bool SHARD_ENCODE_LOCATION_METADATA; // If true, location metadata will contain shard ID.
+	bool RESUME_DATA_MOVES_ON_RESTART; // If false, DD skips reading DataMoveMetaData on restart (does not resume
+	                                   // stale moves). DataMoveMetaData is still written within a DD lifetime
+	                                   // (needed by finishMoveShards). Only relevant when
+	                                   // SHARD_ENCODE_LOCATION_METADATA=true; the old path never touches
+	                                   // DataMoveMetaData regardless of this flag.
 	bool ENABLE_DD_PHYSICAL_SHARD; // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true.
 	double DD_PHYSICAL_SHARD_MOVE_PROBABILITY; // Percentage of physical shard move, in the range of [0, 1].
 	bool ENABLE_PHYSICAL_SHARD_MOVE_EXPERIMENT;

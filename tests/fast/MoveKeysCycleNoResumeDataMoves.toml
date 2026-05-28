@@ -1,0 +1,30 @@
+[[knobs]]
+resume_data_moves_on_restart = false
+shard_encode_location_metadata = true
+
+[[test]]
+testTitle = 'MoveKeysCycleNoResumeDataMoves'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 2500.0
+    testDuration = 10.0
+    expectedRate = 0.025
+
+    [[test.workload]]
+    testName = 'RandomMoveKeys'
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 1
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 1
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 10.0

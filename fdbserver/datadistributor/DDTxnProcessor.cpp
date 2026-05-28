@@ -393,55 +393,61 @@ class DDTxnProcessorImpl {
 				}
 
 				double dataMoveReadStart = now();
-				RangeResult dms = co_await tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY);
-				if (now() - dataMoveReadStart > 5.0) {
-					TraceEvent(SevWarn, "DDInitSlowDataMoveRead", distributorId)
-					    .detail("ElapsedSeconds", now() - dataMoveReadStart);
-				}
-				ASSERT(!dms.more && dms.size() < CLIENT_KNOBS->TOO_MANY);
-				// For each data move, find out the src or dst servers are in primary or remote DC.
-				for (int i = 0; i < dms.size(); ++i) {
-					auto dataMove = std::make_shared<DataMove>(decodeDataMoveValue(dms[i].value), true);
-					const DataMoveMetaData& meta = dataMove->meta;
-					if (meta.ranges.empty()) {
-						// Any persisted datamove with an empty range must be an tombstone persisted by
-						// a background cleanup (with retry_clean_up_datamove_tombstone_added),
-						// and this datamove must be in DataMoveMetaData::Deleting state
-						// A datamove without processed by a background cleanup must have a non-empty range
-						// For this case, we simply clear the range when dd init
-						ASSERT(meta.getPhase() == DataMoveMetaData::Deleting);
-						result->toCleanDataMoveTombstone.push_back(meta.id);
-						continue;
+				if (SERVER_KNOBS->RESUME_DATA_MOVES_ON_RESTART) {
+					RangeResult dms = co_await tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY);
+					if (now() - dataMoveReadStart > 5.0) {
+						TraceEvent(SevWarn, "DDInitSlowDataMoveRead", distributorId)
+						    .detail("ElapsedSeconds", now() - dataMoveReadStart);
 					}
-					ASSERT(!meta.ranges.empty());
-					for (const UID& id : meta.src) {
-						auto& dc = server_dc[id];
-						if (std::find(remoteDcIds.begin(), remoteDcIds.end(), dc) != remoteDcIds.end()) {
-							dataMove->remoteSrc.push_back(id);
-						} else {
-							dataMove->primarySrc.push_back(id);
+					ASSERT(!dms.more && dms.size() < CLIENT_KNOBS->TOO_MANY);
+					// For each data move, find out the src or dst servers are in primary or remote DC.
+					for (int i = 0; i < dms.size(); ++i) {
+						auto dataMove = std::make_shared<DataMove>(decodeDataMoveValue(dms[i].value), true);
+						const DataMoveMetaData& meta = dataMove->meta;
+						if (meta.ranges.empty()) {
+							// Any persisted datamove with an empty range must be an tombstone persisted by
+							// a background cleanup (with retry_clean_up_datamove_tombstone_added),
+							// and this datamove must be in DataMoveMetaData::Deleting state
+							// A datamove without processed by a background cleanup must have a non-empty range
+							// For this case, we simply clear the range when dd init
+							ASSERT(meta.getPhase() == DataMoveMetaData::Deleting);
+							result->toCleanDataMoveTombstone.push_back(meta.id);
+							continue;
 						}
-					}
-					for (const UID& id : meta.dest) {
-						auto& dc = server_dc[id];
-						if (std::find(remoteDcIds.begin(), remoteDcIds.end(), dc) != remoteDcIds.end()) {
-							dataMove->remoteDest.push_back(id);
-						} else {
-							dataMove->primaryDest.push_back(id);
+						ASSERT(!meta.ranges.empty());
+						for (const UID& id : meta.src) {
+							auto& dc = server_dc[id];
+							if (std::find(remoteDcIds.begin(), remoteDcIds.end(), dc) != remoteDcIds.end()) {
+								dataMove->remoteSrc.push_back(id);
+							} else {
+								dataMove->primarySrc.push_back(id);
+							}
 						}
-					}
-					std::sort(dataMove->primarySrc.begin(), dataMove->primarySrc.end());
-					std::sort(dataMove->remoteSrc.begin(), dataMove->remoteSrc.end());
-					std::sort(dataMove->primaryDest.begin(), dataMove->primaryDest.end());
-					std::sort(dataMove->remoteDest.begin(), dataMove->remoteDest.end());
+						for (const UID& id : meta.dest) {
+							auto& dc = server_dc[id];
+							if (std::find(remoteDcIds.begin(), remoteDcIds.end(), dc) != remoteDcIds.end()) {
+								dataMove->remoteDest.push_back(id);
+							} else {
+								dataMove->primaryDest.push_back(id);
+							}
+						}
+						std::sort(dataMove->primarySrc.begin(), dataMove->primarySrc.end());
+						std::sort(dataMove->remoteSrc.begin(), dataMove->remoteSrc.end());
+						std::sort(dataMove->primaryDest.begin(), dataMove->primaryDest.end());
+						std::sort(dataMove->remoteDest.begin(), dataMove->remoteDest.end());
 
-					auto ranges = result->dataMoveMap.intersectingRanges(meta.ranges.front());
-					for (auto& r : ranges) {
-						ASSERT(!r.value()->valid);
+						auto ranges = result->dataMoveMap.intersectingRanges(meta.ranges.front());
+						for (auto& r : ranges) {
+							ASSERT(!r.value()->valid);
+						}
+						result->dataMoveMap.insert(meta.ranges.front(), std::move(dataMove));
+						++numDataMoves;
 					}
-					result->dataMoveMap.insert(meta.ranges.front(), dataMove);
-					++numDataMoves;
-				}
+				} // if RESUME_DATA_MOVES_ON_RESTART
+				// When false: stale DataMoveMetaData rows (including Deleting tombstones and
+				// bulk-load entries) remain in \xff/dataMoves/ until cleanUpDataMove removes
+				// them reactively when startMoveShards encounters a conflicting destId. This
+				// is harmless — the rows are small and don't affect correctness.
 
 				succeeded = true;
 
