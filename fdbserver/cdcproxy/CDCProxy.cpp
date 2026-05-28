@@ -40,6 +40,7 @@
 #include "fdbserver/logsystem/LogSystemConsumer.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "flow/ActorCollection.h"
+#include "flow/CodeProbe.h"
 #include "flow/Error.h"
 #include "flow/UnitTest.h"
 #include "flow/genericactors.actor.h"
@@ -159,6 +160,7 @@ Future<CDCStreamReadState> readCDCStreamState(Database cx,
 
 			RangeResult assignedProxies = co_await tr.getRange(cdcProxyRangeFor(streamId), 2);
 			if (assignedProxies.size() != 1 || decodeCDCProxyKey(assignedProxies[0].key).second != expectedProxyId) {
+				CODE_PROBE(true, "CDC proxy rejects request for stream owned elsewhere");
 				throw wrong_shard_server();
 			}
 
@@ -361,6 +363,7 @@ void markPoppedTagStreamsTooOld(CDCProxyData* self, Reference<CDCBufferedTag> ta
 		}
 	}
 	for (const auto& stream : tooOldStreams) {
+		CODE_PROBE(true, "CDC proxy detects unread mutations already popped from TLogs", probe::decoration::rare);
 		TraceEvent("CDCBufferStreamTooOld", self->id)
 		    .detail("StreamId", stream->streamId)
 		    .detail("MinVersion", stream->minVersion)
@@ -454,6 +457,7 @@ Future<Void> bufferTag(CDCProxyData* self, Reference<CDCBufferedTag> tag) {
 			    std::min<int64_t>(SERVER_KNOBS->CDC_PROXY_BUFFER_BYTES, SERVER_KNOBS->MAXIMUM_PEEK_BYTES);
 			ASSERT(peekReservation > 0);
 			if (self->bufferLock.available() < peekReservation) {
+				CODE_PROBE(true, "CDC proxy applies shared buffer backpressure", probe::decoration::rare);
 				self->peekCapacityContended.trigger();
 			}
 			auto capacity = co_await race(self->bufferLock.take(TaskPriority::TLogPeekReply, peekReservation),
@@ -493,6 +497,7 @@ Future<Void> bufferTag(CDCProxyData* self, Reference<CDCBufferedTag> tag) {
 				bufferedBytes += batch.bufferedBytes;
 			}
 			if (bufferedBytes > peekReservation) {
+				CODE_PROBE(true, "CDC proxy reserves capacity for oversized peek batch", probe::decoration::rare);
 				TraceEvent(SevWarn, "CDCProxyOversizedPeekBatch", self->id)
 				    .detail("Tag", tag->tag)
 				    .detail("BufferedBytes", bufferedBytes)
@@ -563,6 +568,7 @@ Future<Void> initializeStream(CDCProxyData* self, Reference<CDCBufferedStream> s
 				tag->second->streamIds.insert(stream->streamId);
 				actors->add(bufferTag(self, newTag));
 			} else {
+				CODE_PROBE(true, "CDC proxy shares a tag reader across streams");
 				tag->second->streamIds.insert(stream->streamId);
 				tag->second->refresh.trigger();
 			}
@@ -679,6 +685,7 @@ Future<Void> clearCompletedRetiredTagPops(Database cx, std::map<Tag, Version> co
 				    decodeCDCMinVersionValue(retiredVersionValue.get()) > completedVersion) {
 					continue;
 				}
+				CODE_PROBE(true, "CDC proxy clears completed retired tag pop metadata");
 				tr.clear(cdcRetiredTagPopKeyFor(tag));
 				tr.clear(cdcRetiredTagPopVersionKeyFor(tag));
 			}
@@ -704,6 +711,8 @@ Future<Void> popAcknowledgedData(CDCProxyData* self) {
 		const auto safePop = safePopVersions.find(tag);
 		const Version version =
 		    safePop == safePopVersions.end() ? retiredVersion : std::min(retiredVersion, safePop->second);
+		CODE_PROBE(safePop != safePopVersions.end() && version < retiredVersion,
+		           "CDC proxy defers retired tag pop behind a live shared stream");
 		logSystem->pop(version, tag);
 		if (version >= retiredVersion) {
 			co_await logSystem->waitForPopped(retiredVersion, tag);
@@ -741,6 +750,8 @@ void reconcileStreams(CDCProxyData* self, ActorCollection* actors) {
 
 	for (auto it = self->streams.begin(); it != self->streams.end();) {
 		if (!assignedStreams.contains(it->first)) {
+			CODE_PROBE(it->second->readDemand > 0, "CDC proxy wakes pending consume when stream is unassigned");
+			CODE_PROBE(true, "CDC proxy drops removed or reassigned stream state");
 			it->second->active = false;
 			it->second->changed.trigger();
 			detachStreamFromTags(self, it->second);
@@ -846,6 +857,7 @@ Future<Void> acknowledge(CDCProxyData* self, CDCAckRequest request) {
 		// The durable acknowledgement can commit before a replacement owner observes the RPC.
 		// Reconcile the new owner's in-memory frontier to that already verified watermark.
 		const Version minVersion = metadata.minVersion;
+		CODE_PROBE(stream->minVersion < minVersion, "CDC proxy reconciles a durable stream acknowledgement");
 		advanceStreamMinVersion(stream, minVersion);
 		while (!stream->mutations.empty() && stream->mutations.front().version < minVersion) {
 			const int64_t releasedBytes =
@@ -975,6 +987,8 @@ Future<Void> cdcProxyServer(CDCProxyInterface proxy,
 				}
 				hasBeenPublished = hasBeenPublished || isPublished;
 				if (!dbInfo->get().logSystemConfig.tLogs.empty()) {
+					CODE_PROBE(dbInfo->get().recoveryCount > recoveryCount,
+					           "CDC proxy refreshes its log consumer after recovery");
 					self.logSystem->set(makeLogSystemConsumerFromServerDBInfo(self.id, dbInfo->get()));
 				}
 				reconcileStreams(&self, &actors);

@@ -625,6 +625,7 @@ Future<Void> recruitFailedCDCProxies(ClusterControllerData* self,
 		}
 		*current = replacement;
 		replacements.emplace_back(failedProxy.id(), replacement.id());
+		CODE_PROBE(true, "CDC proxy is recruited after failure");
 		TraceEvent("CDCProxyRecruited", self->id)
 		    .detail("OldCDCProxyID", failedProxy.id())
 		    .detail("NewCDCProxyID", replacement.id())
@@ -2176,6 +2177,8 @@ Future<Void> monitorCDCProxyAssignments(ClusterControllerData::DBInfo* db) {
 							tr.clear(assignment.key);
 							tr.set(cdcProxyKeyFor(streamId, resolvedProxyId), Value());
 							repairedAssignment = true;
+							CODE_PROBE(
+							    true, "CDC stream assignment is repaired after owner loss", probe::decoration::rare);
 							TraceEvent("CDCProxyAssignmentRepaired")
 							    .detail("StreamId", streamId)
 							    .detail("OldCDCProxyID", proxyId)
@@ -2190,6 +2193,8 @@ Future<Void> monitorCDCProxyAssignments(ClusterControllerData::DBInfo* db) {
 				}
 
 				if (!streamToCDCProxyId.empty() && availableProxies.empty()) {
+					CODE_PROBE(
+					    true, "CDC assignments wait while no proxy endpoints are published", probe::decoration::rare);
 					Future<Void> assignmentChangeFuture = tr.watch(cdcProxyAssignmentChangeKey);
 					Future<Void> endpointChangeFuture = db->clientInfo->onChange();
 					co_await tr.commit();

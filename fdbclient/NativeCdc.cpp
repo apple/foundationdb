@@ -30,6 +30,7 @@
 #include "fdbclient/Knobs.h"
 #include "fdbclient/NativeCdc.h"
 #include "fdbclient/SystemData.h"
+#include "flow/CodeProbe.h"
 #include "flow/Error.h"
 #include "flow/UnitTest.h"
 
@@ -37,6 +38,7 @@ namespace {
 
 void validateNativeCdcEnabled() {
 	if (!CLIENT_KNOBS->ENABLE_NATIVE_CDC) {
+		CODE_PROBE(true, "Native CDC API rejected while feature disabled", probe::decoration::rare);
 		throw client_invalid_operation();
 	}
 }
@@ -284,6 +286,7 @@ Future<CDCProxyInterface> getNativeCdcStreamProxy(Database cx, CDCStreamId strea
 			}
 		}
 		if (!(co_await nativeCdcStreamStillExists(cx, streamId))) {
+			CODE_PROBE(true, "Native CDC client rejected operation after stream removal");
 			throw client_invalid_operation();
 		}
 		co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, cx->taskID);
@@ -346,8 +349,10 @@ Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys
 					throw client_invalid_operation();
 				}
 				if (proxyId.present() && !(co_await getNativeCdcProxyAssignment(&tr, streamId)).present()) {
+					CODE_PROBE(true, "Native CDC registration restores missing stream owner");
 					const Tag tag = co_await getNativeCdcCurrentTag(&tr, streamId);
 					Optional<UID> sharedTagProxy = co_await getNativeCdcProxyAssignmentForTag(&tr, tag);
+					CODE_PROBE(sharedTagProxy.present(), "Native CDC shared-tag streams use one owner");
 					const UID selectedProxy = sharedTagProxy.present() ? sharedTagProxy.get() : proxyId.get();
 					tr.set(cdcProxyKeyFor(streamId, selectedProxy), Value());
 					signalNativeCdcProxyAssignmentChange(&tr);
@@ -403,6 +408,7 @@ Future<Optional<NativeCdcRemovedStreamInfo>> removeNativeCdcStream(Database cx, 
 			const CDCStreamId streamId = decodeCDCStreamNameValue(currentId.get());
 			Optional<UID> assignedProxy = co_await getNativeCdcProxyAssignment(&tr, streamId);
 			if (proxyId.present() && (!assignedProxy.present() || assignedProxy.get() != proxyId.get())) {
+				CODE_PROBE(true, "Native CDC rejects removal through a stale owner");
 				throw wrong_shard_server();
 			}
 
@@ -439,6 +445,7 @@ Future<Optional<NativeCdcRemovedStreamInfo>> removeNativeCdcStream(Database cx, 
 			NativeCdcRemovedStreamInfo removed;
 			removed.removalVersion = tr.getCommittedVersion();
 			removed.tags.assign(removedTags.begin(), removedTags.end());
+			CODE_PROBE(!removed.tags.empty(), "Native CDC removal records final tagged pop work");
 			co_return Optional<NativeCdcRemovedStreamInfo>(removed);
 		} catch (Error& e) {
 			if (e.code() == error_code_wrong_shard_server) {
@@ -520,6 +527,7 @@ Future<Void> reassignNativeCdcStreams(Database cx, UID oldProxyId, UID newProxyI
 			}
 
 			if (changed) {
+				CODE_PROBE(true, "Native CDC reassigns streams after proxy replacement");
 				signalNativeCdcProxyAssignmentChange(&tr);
 				co_await tr.commit();
 			}
@@ -555,11 +563,13 @@ Future<Version> acknowledgeNativeCdcStream(Database cx,
 
 			const Version minVersion = decodeCDCMinVersionValue(minVersionValue.get());
 			if (minUnpoppedVersion <= minVersion) {
+				CODE_PROBE(true, "Native CDC preserves a durable duplicate acknowledgement");
 				co_return minVersion;
 			}
 
 			const Version readVersion = co_await tr.getReadVersion();
 			if (consumedThrough > readVersion && consumedThrough > knownAvailableThrough) {
+				CODE_PROBE(true, "Native CDC rejects unproven acknowledgement progress");
 				throw client_invalid_operation();
 			}
 
@@ -669,10 +679,12 @@ Future<CDCConsumeReply> NativeCdcConsumer::consumeImpl(Reference<NativeCdcConsum
 				self->currentPosition.lastConsumedVersion = reply.lastConsumedVersion;
 				co_return reply;
 			}
+			CODE_PROBE(true, "Native CDC consume retries after proxy metadata change", probe::decoration::rare);
 		} catch (Error& error) {
 			if (!retryNativeCdcProxyRequest(error)) {
 				throw;
 			}
+			CODE_PROBE(true, "Native CDC consume retries after proxy request failure", probe::decoration::rare);
 		}
 		co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, self->cx->taskID);
 	}

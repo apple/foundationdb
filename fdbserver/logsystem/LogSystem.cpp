@@ -24,6 +24,7 @@
 #include "fdbclient/Knobs.h"
 #include "fdbserver/core/OTELSpanContextMessage.h"
 #include "fdbserver/core/SpanContextMessage.h"
+#include "flow/CodeProbe.h"
 #include "flow/serialize.h"
 
 bool logSystemHasRemoteLogs(LogSystem const& logSystem) {
@@ -2765,6 +2766,7 @@ Future<Reference<LogSystem>> LogSystem::newEpoch(Reference<LogSystem> oldLogSyst
 
 		for (Tag tag : allTags) {
 			if (tag.locality == tagLocalityCDC) {
+				CODE_PROBE(true, "CDC tags are recovered onto satellite TLogs");
 				locations.clear();
 				logSystem->tLogs[1]->getPushLocations(VectorRef<Tag>(&tag, 1), locations, 0);
 				for (int loc : locations) {

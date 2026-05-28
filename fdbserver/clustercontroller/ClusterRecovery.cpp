@@ -236,10 +236,15 @@ Future<Void> ensureCDCProxies(Reference<ClusterRecoveryData> self, RecruitFromCo
 	const bool hasDurableCdcState = !(co_await self->txnStateStore->readRange(cdcStreamKeys)).empty() ||
 	                                !(co_await self->txnStateStore->readRange(cdcRetiredTagPopKeys)).empty();
 	if (!CLIENT_KNOBS->ENABLE_NATIVE_CDC && !hasDurableCdcState) {
+		CODE_PROBE(true, "Recovery skips CDC proxies when disabled with no durable state");
 		self->controllerData->db.cdcProxies.clear();
 		co_return;
 	}
+	CODE_PROBE(!CLIENT_KNOBS->ENABLE_NATIVE_CDC && hasDurableCdcState,
+	           "Recovery recruits CDC proxies to drain disabled durable state",
+	           probe::decoration::rare);
 	if (!self->controllerData->db.cdcProxies.empty()) {
+		CODE_PROBE(true, "Recovery reuses CDC proxies while CDC state remains durable");
 		TraceEvent("CDCProxiesReused", self->dbgid).detail("Count", self->controllerData->db.cdcProxies.size());
 		co_return;
 	}

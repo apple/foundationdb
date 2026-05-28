@@ -21,6 +21,7 @@
 #include "fdbserver/logsystem/LogSystem.h"
 
 #include "fdbclient/FDBTypes.h"
+#include "flow/CodeProbe.h"
 
 std::string LogSet::logRouterString() {
 	std::string result;
@@ -222,6 +223,7 @@ void LogSet::getPushLocations(VectorRef<Tag> tags,
 	if (locality == tagLocalitySatellite) {
 		for (auto& t : tags) {
 			if (t.locality == tagLocalityTxs || t.locality == tagLocalityLogRouter || t.locality == tagLocalityCDC) {
+				CODE_PROBE(t.locality == tagLocalityCDC, "CDC mutations are routed to satellite TLogs");
 				for (int loc : satelliteTagLocations[t.id + 1]) {
 					locations.push_back(locationOffset + loc);
 				}
