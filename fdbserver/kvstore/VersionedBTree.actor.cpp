@@ -3911,9 +3911,9 @@ private:
 	};
 
 	struct SnapshotEntryLessThanVersion {
-		bool operator()(Version v, const SnapshotEntry& snapshot) { return v < snapshot.version; }
+		bool operator()(Version v, const SnapshotEntry& snapshot) const { return v < snapshot.version; }
 
-		bool operator()(const SnapshotEntry& snapshot, Version v) { return snapshot.version < v; }
+		bool operator()(const SnapshotEntry& snapshot, Version v) const { return snapshot.version < v; }
 	};
 
 	// TODO: Better data structure
@@ -5303,9 +5303,9 @@ public:
 			iterator() = default;
 			explicit(false) iterator(const MutationsT::iterator& i) : Base(i) {}
 
-			const KeyRef& key() { return (*this)->first; }
+			const KeyRef& key() const { return (*this)->first; }
 
-			RangeMutation& mutation() { return (*this)->second; }
+			RangeMutation& mutation() const { return (*this)->second; }
 		};
 
 		struct const_iterator : public MutationsT::const_iterator {
@@ -5314,9 +5314,9 @@ public:
 			explicit(false) const_iterator(const MutationsT::const_iterator& i) : Base(i) {}
 			explicit(false) const_iterator(const MutationsT::iterator& i) : Base(i) {}
 
-			const KeyRef& key() { return (*this)->first; }
+			const KeyRef& key() const { return (*this)->first; }
 
-			const RangeMutation& mutation() { return (*this)->second; }
+			const RangeMutation& mutation() const { return (*this)->second; }
 		};
 
 		// Return a T constructed in arena

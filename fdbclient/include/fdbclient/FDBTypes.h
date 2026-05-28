@@ -663,9 +663,11 @@ public:
 	bool isLastLessOrEqual() const { return orEqual && offset == 0; }
 
 	// True iff, regardless of the contents of the database, lhs must resolve to a key > rhs
-	bool isDefinitelyGreater(KeyRef const& k) { return offset >= 1 && (isFirstGreaterOrEqual() ? key > k : key >= k); }
+	bool isDefinitelyGreater(KeyRef const& k) const {
+		return offset >= 1 && (isFirstGreaterOrEqual() ? key > k : key >= k);
+	}
 	// True iff, regardless of the contents of the database, lhs must resolve to a key < rhs
-	bool isDefinitelyLess(KeyRef const& k) { return offset <= 0 && (isLastLessOrEqual() ? key < k : key <= k); }
+	bool isDefinitelyLess(KeyRef const& k) const { return offset <= 0 && (isLastLessOrEqual() ? key < k : key <= k); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {

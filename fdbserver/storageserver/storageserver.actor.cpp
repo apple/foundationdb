@@ -842,7 +842,7 @@ public:
 	SSBulkLoadMetrics() : ongoingTasks(0) {}
 	void addTask() { ongoingTasks++; }
 	void removeTask() { ongoingTasks--; }
-	int getOngoingTasks() { return ongoingTasks; }
+	int getOngoingTasks() const { return ongoingTasks; }
 
 private:
 	int ongoingTasks = 0;
