@@ -198,6 +198,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/RandomUnitTests.toml)
   add_fdb_test(TEST_FILES fast/RangeLocking.toml)
   add_fdb_test(TEST_FILES fast/NativeCdc.toml)
+  add_fdb_test(TEST_FILES fast/NativeCdcEndToEnd.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcSharedTag.toml)
   add_fdb_test(TEST_FILES fast/RangeLockCycle.toml)
   add_fdb_test(TEST_FILES fast/ReadHotDetectionCorrectness.toml IGNORE) # TODO re-enable once read hot detection is enabled.
