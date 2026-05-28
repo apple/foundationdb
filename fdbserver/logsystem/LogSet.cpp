@@ -62,9 +62,13 @@ std::string LogSet::logServerString() {
 	return result;
 }
 
-void LogSet::populateSatelliteTagLocations(int logRouterTags, int oldLogRouterTags, int txsTags, int oldTxsTags) {
+void LogSet::populateSatelliteTagLocations(int logRouterTags,
+                                           int oldLogRouterTags,
+                                           int txsTags,
+                                           int oldTxsTags,
+                                           int cdcTags) {
 	satelliteTagLocations.clear();
-	satelliteTagLocations.resize(std::max({ logRouterTags, oldLogRouterTags, txsTags, oldTxsTags }) + 1);
+	satelliteTagLocations.resize(std::max({ logRouterTags, oldLogRouterTags, txsTags, oldTxsTags, cdcTags }) + 1);
 
 	std::map<int, int> server_usedBest;
 	std::set<std::pair<int, int>> used_servers;
@@ -217,7 +221,7 @@ void LogSet::getPushLocations(VectorRef<Tag> tags,
                               const Optional<Reference<LocalitySet>>& restrictedLogSet) {
 	if (locality == tagLocalitySatellite) {
 		for (auto& t : tags) {
-			if (t.locality == tagLocalityTxs || t.locality == tagLocalityLogRouter) {
+			if (t.locality == tagLocalityTxs || t.locality == tagLocalityLogRouter || t.locality == tagLocalityCDC) {
 				for (int loc : satelliteTagLocations[t.id + 1]) {
 					locations.push_back(locationOffset + loc);
 				}

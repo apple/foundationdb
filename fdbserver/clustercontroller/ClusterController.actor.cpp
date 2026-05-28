@@ -637,25 +637,25 @@ Future<Void> recruitFailedCDCProxies(ClusterControllerData* self,
 	// Endpoint publication precedes assignment publication so clients never route
 	// a stream to a replacement that is not yet discoverable.
 	self->db.recoveryData->registrationTrigger.trigger();
-	while (self->db.recoveryData.isValid() && self->db.recoveryData->cstate.myDBState.recoveryCount == recoveryCount) {
-		bool allPublished = true;
-		for (const auto& [oldProxyId, newProxyId] : replacements) {
-			allPublished = allPublished && std::any_of(self->db.clientInfo->get().cdcProxies.begin(),
-			                                           self->db.clientInfo->get().cdcProxies.end(),
-			                                           [newProxyId](CDCProxyInterface const& proxy) {
-				                                           return proxy.id() == newProxyId;
-			                                           });
-		}
-		if (allPublished) {
-			break;
-		}
-		co_await self->db.clientInfo->onChange();
-	}
-	if (!self->db.recoveryData.isValid() || self->db.recoveryData->cstate.myDBState.recoveryCount != recoveryCount) {
-		co_return;
-	}
 	for (const auto& [oldProxyId, newProxyId] : replacements) {
-		co_await reassignNativeCdcStreams(self->db.db, oldProxyId, newProxyId);
+		auto isCurrentProxy = [self, newProxyId]() {
+			return std::any_of(self->db.cdcProxies.begin(),
+			                   self->db.cdcProxies.end(),
+			                   [newProxyId](CDCProxyInterface const& proxy) { return proxy.id() == newProxyId; });
+		};
+		auto isPublishedProxy = [self, newProxyId]() {
+			return std::any_of(self->db.clientInfo->get().cdcProxies.begin(),
+			                   self->db.clientInfo->get().cdcProxies.end(),
+			                   [newProxyId](CDCProxyInterface const& proxy) { return proxy.id() == newProxyId; });
+		};
+		while (isCurrentProxy() && !isPublishedProxy()) {
+			co_await self->db.clientInfo->onChange();
+		}
+		if (isCurrentProxy() && isPublishedProxy()) {
+			// Reassignment remains necessary if recovery changes while the
+			// replacement endpoint is being published.
+			co_await reassignNativeCdcStreams(self->db.db, oldProxyId, newProxyId);
+		}
 	}
 }
 

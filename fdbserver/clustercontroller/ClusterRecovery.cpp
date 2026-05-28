@@ -258,6 +258,7 @@ Future<Void> ensureCDCProxies(Reference<ClusterRecoveryData> self, RecruitFromCo
 	std::vector<CDCProxyInterface> newRecruits = co_await getAll(initializationReplies);
 	TraceEvent("CDCProxyInitializationComplete", self->dbgid).log();
 	self->controllerData->db.cdcProxies = std::move(newRecruits);
+	self->registrationTrigger.trigger();
 }
 
 Future<Void> newResolvers(Reference<ClusterRecoveryData> self, RecruitFromConfigurationReply recr) {

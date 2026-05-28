@@ -56,7 +56,11 @@ public:
 	bool hasLogRouter(UID id) const;
 	bool hasBackupWorker(UID id) const;
 	std::string logServerString();
-	void populateSatelliteTagLocations(int logRouterTags, int oldLogRouterTags, int txsTags, int oldTxsTags);
+	void populateSatelliteTagLocations(int logRouterTags,
+	                                   int oldLogRouterTags,
+	                                   int txsTags,
+	                                   int oldTxsTags,
+	                                   int cdcTags);
 	void checkSatelliteTagLocations();
 	int bestLocationFor(Tag tag);
 	void updateLocalitySet(std::vector<LocalityData> const& localities);

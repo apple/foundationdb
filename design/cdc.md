@@ -4,7 +4,7 @@
 
 Native Change Data Capture (CDC) provides a FoundationDB-native mechanism for
 reading committed mutations for a registered key range. A client registers a
-named stream, creates a cursor for that name, consumes batches of mutations,
+named stream, creates a consumer for that name, consumes batches of mutations,
 and acknowledges processed versions. The implementation persists enough state
 to retain unread TLog data and to resume stream service after CDC proxy failure
 or transaction-system recovery.
@@ -35,7 +35,7 @@ and release its own log history without changing user data storage.
 Native CDC is intended to provide:
 
 * Durable, named registrations for key ranges in normal user key space.
-* A cursor-based API in which a consumer only needs a stream name after
+* A consumer API in which a client only needs a stream name after
   registration, rather than repeating its registered range on every read.
 * Ordered mutation batches identified by FoundationDB commit versions.
 * Durable acknowledgements that determine how much CDC-tagged TLog history may
@@ -67,9 +67,8 @@ Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, KeyRang
 Future<Void> removeNativeCdcStreamClient(Database cx, Key name);
 Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreamsClient(Database cx);
 
-Future<CDCCursor> createNativeCdcCursor(Database cx, Key name);
-Future<CDCConsumeReply> consumeNativeCdcStream(Database cx, CDCCursor cursor);
-Future<Void> acknowledgeNativeCdcStreamClient(Database cx, CDCCursor cursor);
+Future<Reference<NativeCdcConsumer>> createNativeCdcConsumer(Database cx, Key name);
+Reference<NativeCdcConsumer> resumeNativeCdcConsumer(Database cx, CDCCursor position);
 ```
 
 A stream registration contains:
@@ -84,9 +83,26 @@ struct NativeCdcStreamInfo {
 ```
 
 The durable identity of a stream is its `CDCStreamId`, not its name. Names are
-used to create and manage streams. A cursor resolves the current stream ID
-once, so removing a name and later registering the same name does not silently
-redirect an existing consumer to a different stream.
+used to create and manage streams. Creating a consumer resolves the current
+stream ID once, so removing a name and later registering the same name does
+not silently redirect an existing consumer to a different stream.
+
+`NativeCdcConsumer` is a client-side, reference-counted reader object. It
+holds the client's `Database` handle and current delivered position and
+exposes consumption and acknowledgement operations:
+
+```cpp
+class NativeCdcConsumer : public ReferenceCounted<NativeCdcConsumer> {
+public:
+	Future<CDCConsumeReply> consume();
+	Future<Void> acknowledge();
+	const CDCCursor& position() const;
+};
+```
+
+`CDCCursor` remains a small serializable position token used by CDC proxy
+requests and by callers that need to checkpoint or resume a consumer. It does
+not contain a `Database` handle or other process-local state:
 
 ```cpp
 struct CDCCursor {
@@ -114,27 +130,35 @@ A typical consumer loop is:
 
 ```cpp
 co_await registerNativeCdcStreamClient(db, "orders"_sr, KeyRangeRef("order/"_sr, "order0"_sr));
-state CDCCursor cursor = co_await createNativeCdcCursor(db, "orders"_sr);
+state Reference<NativeCdcConsumer> consumer = co_await createNativeCdcConsumer(db, "orders"_sr);
 
 loop {
-	CDCConsumeReply reply = co_await consumeNativeCdcStream(db, cursor);
+	CDCConsumeReply reply = co_await consumer->consume();
 	for (auto const& versionedMutations : reply.mutations) {
 		// Apply all mutations for versionedMutations.version.
 	}
 
-	cursor.lastConsumedVersion = reply.lastConsumedVersion;
-	co_await acknowledgeNativeCdcStreamClient(db, cursor);
+	co_await consumer->acknowledge();
 }
 ```
 
-The acknowledgement means that the consumer no longer requires CDC mutations
-through `cursor.lastConsumedVersion`. Internally, acknowledgement advances the
-stream's persisted minimum required version to `lastConsumedVersion + 1`.
-Therefore the consumer must not acknowledge a returned cursor position before
-it has durably processed all mutations represented through that position.
-The server rejects an acknowledgement beyond its current read version, so a
-consumer cannot pre-pop future mutations on a tag that may later be assigned
-to another stream.
+`consume()` advances `consumer->position()` to the returned delivered
+position, but does not change durable retention. The acknowledgement means
+that the consumer no longer requires CDC mutations through
+`consumer->position().lastConsumedVersion`. Internally, acknowledgement
+advances the stream's persisted minimum required version to
+`lastConsumedVersion + 1`. Therefore the consumer must not call
+`acknowledge()` before it has durably processed all mutations represented
+through the delivered position, and must not issue another `consume()` if it
+still needs to retry processing the previous reply from that same in-memory
+consumer. A consumer restarted from its last durably checkpointed position
+can use `resumeNativeCdcConsumer()`.
+The server accepts an acknowledgement beyond its current transaction read
+version only when the owning CDC proxy has read through that position from its
+tagged log stream. A resumed consumer may reissue an acknowledgement already
+represented by the durable watermark, and a replacement proxy reconciles its
+in-memory frontier to that watermark. A fabricated future position cannot
+pre-pop mutations that have not reached a proxy or the database read version.
 
 ### Registration and removal semantics
 
@@ -152,7 +176,7 @@ also supplies the first retention watermark for its TLog history.
 release of tagged log history that was protected by the removed stream.
 Removal explicitly relinquishes any unread history for that stream while still
 respecting the retention needs of other streams sharing its tags. Stream
-removal is terminal for existing cursors. Stale consume or acknowledgement
+removal is terminal for existing consumers. Stale consume or acknowledgement
 operations return an error instead of waiting indefinitely for an owner that
 will never be assigned again.
 
@@ -167,7 +191,7 @@ minimum version: TLogs must not pop tagged data that the stream may still
 consume. A slow consumer therefore retains its unread history rather than
 expiring solely because of age.
 
-Consumption returns `transaction_too_old` when the caller supplies a cursor
+Consumption returns `transaction_too_old` when a consumer supplies a cursor
 older than the stream's already acknowledged durable watermark. The proxy also
 treats discovery that an active stream's required tagged data has nevertheless
 already been popped as `transaction_too_old`; that condition indicates a
@@ -249,7 +273,7 @@ than transaction state:
 | `\xff\x02/cdc/retiredTagPopVersion/<tag>` | `Version` | Final pop watermark required after a stream using a tag is removed. |
 
 The initial `minVersion` is written with a versionstamp at stream
-registration. When a cursor acknowledges processing through version `V`, the
+registration. When a consumer acknowledges processing through version `V`, the
 stored value advances monotonically to `V + 1`. A CDC proxy may pop tagged
 mutations before this watermark only when doing so is safe for every live
 stream sharing that tag.
@@ -459,8 +483,9 @@ reduce it so shared-tag behavior is exercised frequently.
 
 The implementation is structured around the following properties:
 
-* **Registration identity:** a cursor binds to a stream ID, so reuse of a
-  removed stream name cannot cause an existing consumer to read a new stream.
+* **Registration identity:** a consumer's cursor binds to a stream ID, so
+  reuse of a removed stream name cannot cause an existing consumer to read a
+  new stream.
 * **Range correctness:** CDC proxies return only mutations within a stream's
   registered range, even when its tag is shared with other streams.
 * **Acknowledgement monotonicity:** durable minimum required versions advance
@@ -511,7 +536,7 @@ simulation workloads for the end-to-end behavior.
 The basic native CDC workload covers:
 
 * Registering, listing, consuming, acknowledging, and removing streams.
-* Name-based cursor creation and correct filtering of returned mutations.
+* Name-based consumer creation and correct filtering of returned mutations.
 * Rejection of incompatible same-name registrations.
 * CDC proxy replacement and recovery of stream service.
 * Errors for stale consume and acknowledgement requests after removal.

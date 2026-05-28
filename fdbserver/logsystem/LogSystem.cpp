@@ -21,6 +21,7 @@
 #include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/logsystem/LogSystemConsumer.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/Knobs.h"
 #include "fdbserver/core/OTELSpanContextMessage.h"
 #include "fdbserver/core/SpanContextMessage.h"
 #include "flow/serialize.h"
@@ -2556,6 +2557,12 @@ Future<Reference<LogSystem>> LogSystem::newEpoch(Reference<LogSystem> oldLogSyst
 	for (auto& it : oldLogSystem->oldLogData) {
 		maxTxsTags = std::max<int>(maxTxsTags, it.txsTags);
 	}
+	int maxCdcTags = CLIENT_KNOBS->NATIVE_CDC_TAG_COUNT;
+	for (Tag tag : allTags) {
+		if (tag.locality == tagLocalityCDC) {
+			maxCdcTags = std::max<int>(maxCdcTags, tag.id + 1);
+		}
+	}
 
 	if (region.satelliteTLogReplicationFactor > 0 && configuration.usableRegions > 1) {
 		logSystem->tLogs.push_back(makeReference<LogSet>());
@@ -2584,7 +2591,7 @@ Future<Reference<LogSystem>> LogSystem::newEpoch(Reference<LogSystem> oldLogSyst
 		        .size()); // Dummy interfaces, so that logSystem->getPushLocations() below uses the correct size
 		logSystem->tLogs[1]->updateLocalitySet(logSystem->tLogs[1]->tLogLocalities);
 		logSystem->tLogs[1]->populateSatelliteTagLocations(
-		    logSystem->logRouterTags, oldLogSystem->logRouterTags, logSystem->txsTags, maxTxsTags);
+		    logSystem->logRouterTags, oldLogSystem->logRouterTags, logSystem->txsTags, maxTxsTags, maxCdcTags);
 		logSystem->expectedLogSets++;
 	}
 
@@ -2755,6 +2762,17 @@ Future<Reference<LogSystem>> LogSystem::newEpoch(Reference<LogSystem> oldLogSyst
 		std::vector<Future<TLogInterface>> satelliteInitializationReplies;
 		std::vector<InitializeTLogRequest> sreqs(recr.satelliteTLogs.size());
 		std::vector<Tag> satelliteTags;
+
+		for (Tag tag : allTags) {
+			if (tag.locality == tagLocalityCDC) {
+				locations.clear();
+				logSystem->tLogs[1]->getPushLocations(VectorRef<Tag>(&tag, 1), locations, 0);
+				for (int loc : locations) {
+					sreqs[loc].recoverTags.push_back(tag);
+				}
+				satelliteTags.push_back(tag);
+			}
+		}
 
 		if (logSystem->logRouterTags) {
 			for (int i = 0; i < oldLogSystem->logRouterTags; i++) {

@@ -38,7 +38,7 @@ struct NativeCdcEndToEndWorkload : TestWorkload {
 	struct StreamState {
 		Key name;
 		KeyRange keys;
-		CDCCursor cursor;
+		Reference<NativeCdcConsumer> consumer;
 		std::map<std::pair<Key, Value>, ExpectedWrite> expected;
 	};
 
@@ -118,7 +118,7 @@ struct NativeCdcEndToEndWorkload : TestWorkload {
 		stream.name = Key(StringRef(format("native-cdc-e2e/stream/%04d", nextStreamNumber++)));
 		stream.keys = randomOverlappingRange();
 		co_await timeoutError(registerNativeCdcStreamClient(cx, stream.name, stream.keys), operationTimeout);
-		stream.cursor = co_await timeoutError(createNativeCdcCursor(cx, stream.name), operationTimeout);
+		stream.consumer = co_await timeoutError(createNativeCdcConsumer(cx, stream.name), operationTimeout);
 		streams.push_back(std::move(stream));
 	}
 
@@ -134,11 +134,11 @@ struct NativeCdcEndToEndWorkload : TestWorkload {
 		}
 	}
 
-	Future<Void> drainThrough(Database cx, StreamState* stream, Version throughVersion) {
+	Future<Void> drainThrough(StreamState* stream, Version throughVersion) {
 		const double deadline = now() + operationTimeout;
-		while (stream->cursor.lastConsumedVersion < throughVersion) {
-			const Version previous = stream->cursor.lastConsumedVersion;
-			CDCConsumeReply reply = co_await timeoutError(consumeNativeCdcStream(cx, stream->cursor), operationTimeout);
+		while (stream->consumer->position().lastConsumedVersion < throughVersion) {
+			const Version previous = stream->consumer->position().lastConsumedVersion;
+			CDCConsumeReply reply = co_await timeoutError(stream->consumer->consume(), operationTimeout);
 			if (reply.lastConsumedVersion == previous) {
 				ASSERT(now() < deadline);
 				co_await delay(0.1);
@@ -157,19 +157,18 @@ struct NativeCdcEndToEndWorkload : TestWorkload {
 					found->second.observed = true;
 				}
 			}
-			stream->cursor.lastConsumedVersion = reply.lastConsumedVersion;
+			co_await timeoutError(stream->consumer->acknowledge(), operationTimeout);
 		}
 		for (const auto& expected : stream->expected) {
 			if (expected.second.deadline <= throughVersion) {
 				ASSERT(expected.second.observed);
 			}
 		}
-		co_await timeoutError(acknowledgeNativeCdcStreamClient(cx, stream->cursor), operationTimeout);
 	}
 
 	Future<Void> removeStream(Database cx, int index, Version throughVersion) {
 		ASSERT(index > 0);
-		co_await drainThrough(cx, &streams[index], throughVersion);
+		co_await drainThrough(&streams[index], throughVersion);
 		co_await timeoutError(removeNativeCdcStreamClient(cx, streams[index].name), operationTimeout);
 		streams.erase(streams.begin() + index);
 	}
@@ -205,14 +204,14 @@ struct NativeCdcEndToEndWorkload : TestWorkload {
 			// streams[0] intentionally stays behind while other streams are removed.
 			for (int i = 1; i < static_cast<int>(streams.size()); ++i) {
 				if (deterministicRandom()->random01() < drainProbability) {
-					co_await drainThrough(cx, &streams[i], mostRecentWrite);
+					co_await drainThrough(&streams[i], mostRecentWrite);
 				}
 			}
 			co_await delay(delayBetweenRounds);
 		}
 
 		for (auto& stream : streams) {
-			co_await drainThrough(cx, &stream, mostRecentWrite);
+			co_await drainThrough(&stream, mostRecentWrite);
 		}
 		while (!streams.empty()) {
 			co_await timeoutError(removeNativeCdcStreamClient(cx, streams.back().name), operationTimeout);

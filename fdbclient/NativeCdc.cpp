@@ -531,8 +531,11 @@ Future<Void> reassignNativeCdcStreams(Database cx, UID oldProxyId, UID newProxyI
 	}
 }
 
-Future<Version> acknowledgeNativeCdcStream(Database cx, CDCStreamId streamId, Version consumedThrough) {
-	if (streamId == 0 || consumedThrough < 0 || consumedThrough == std::numeric_limits<Version>::max()) {
+Future<Version> acknowledgeNativeCdcStream(Database cx,
+                                           CDCStreamId streamId,
+                                           Version consumedThrough,
+                                           Version knownAvailableThrough) {
+	if (streamId == 0 || consumedThrough < 0 || consumedThrough >= std::numeric_limits<Version>::max() - 1) {
 		throw client_invalid_operation();
 	}
 	const Version minUnpoppedVersion = consumedThrough + 1;
@@ -543,20 +546,21 @@ Future<Version> acknowledgeNativeCdcStream(Database cx, CDCStreamId streamId, Ve
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			Optional<Value> minVersionValue = co_await tr.get(cdcMinVersionKeyFor(streamId));
 			if (!minVersionValue.present()) {
 				throw client_invalid_operation();
 			}
 
-			const Version readVersion = co_await tr.getReadVersion();
-			if (consumedThrough > readVersion) {
-				throw future_version();
-			}
-
 			const Version minVersion = decodeCDCMinVersionValue(minVersionValue.get());
 			if (minUnpoppedVersion <= minVersion) {
 				co_return minVersion;
+			}
+
+			const Version readVersion = co_await tr.getReadVersion();
+			if (consumedThrough > readVersion && consumedThrough > knownAvailableThrough) {
+				throw client_invalid_operation();
 			}
 
 			tr.set(cdcMinVersionKeyFor(streamId), cdcMinVersionValue(minUnpoppedVersion));
@@ -572,22 +576,8 @@ Future<Version> acknowledgeNativeCdcStream(Database cx, CDCStreamId streamId, Ve
 Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, KeyRange keys) {
 	validateNativeCdcEnabled();
 	validateNativeCdcStream(name, keys);
-	Optional<UID> previousProxy;
-
-	while (true) {
-		CDCProxyInterface proxy = co_await getAvailableNativeCdcProxy(cx, previousProxy);
-		try {
-			CDCRegisterStreamReply reply =
-			    co_await throwErrorOr(proxy.registerStream.tryGetReply(CDCRegisterStreamRequest(name, keys)));
-			co_return reply.streamId;
-		} catch (Error& error) {
-			if (!retryNativeCdcProxyRequest(error)) {
-				throw;
-			}
-			previousProxy = proxy.id();
-		}
-		co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, cx->taskID);
-	}
+	const CDCProxyInterface proxy = co_await getAvailableNativeCdcProxy(cx);
+	co_return co_await registerNativeCdcStream(cx, name, keys, proxy.id());
 }
 
 Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreamsClient(Database cx) {
@@ -597,20 +587,25 @@ Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreamsClient(Database cx)
 	while (true) {
 		CDCProxyInterface proxy = co_await getAvailableNativeCdcProxy(cx, previousProxy);
 		try {
-			CDCListStreamsReply reply = co_await throwErrorOr(proxy.listStreams.tryGetReply(CDCListStreamsRequest()));
-			std::vector<NativeCdcStreamInfo> streams;
-			streams.reserve(reply.streams.size());
-			for (const auto& stream : reply.streams) {
-				streams.push_back(
-				    NativeCdcStreamInfo{ Key(stream.name), stream.streamId, KeyRange(stream.keys), stream.minVersion });
+			Future<Void> proxyChanged = cx->clientInfo->onChange();
+			auto result =
+			    co_await race(throwErrorOr(proxy.listStreams.tryGetReply(CDCListStreamsRequest())), proxyChanged);
+			if (result.index() == 0) {
+				CDCListStreamsReply reply = std::get<0>(std::move(result));
+				std::vector<NativeCdcStreamInfo> streams;
+				streams.reserve(reply.streams.size());
+				for (const auto& stream : reply.streams) {
+					streams.push_back(NativeCdcStreamInfo{
+					    Key(stream.name), stream.streamId, KeyRange(stream.keys), stream.minVersion });
+				}
+				co_return streams;
 			}
-			co_return streams;
 		} catch (Error& error) {
 			if (!retryNativeCdcProxyRequest(error)) {
 				throw;
 			}
-			previousProxy = proxy.id();
 		}
+		previousProxy = proxy.id();
 		co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, cx->taskID);
 	}
 }
@@ -634,8 +629,12 @@ Future<Void> removeNativeCdcStreamClient(Database cx, Key name) {
 			co_return;
 		}
 		try {
-			co_await throwErrorOr(proxy.get().removeStream.tryGetReply(CDCRemoveStreamRequest(name)));
-			co_return;
+			Future<Void> proxyChanged = cx->clientInfo->onChange();
+			auto result = co_await race(
+			    throwErrorOr(proxy.get().removeStream.tryGetReply(CDCRemoveStreamRequest(name))), proxyChanged);
+			if (result.index() == 0) {
+				co_return;
+			}
 		} catch (Error& error) {
 			if (!retryNativeCdcProxyRequest(error)) {
 				throw;
@@ -645,46 +644,75 @@ Future<Void> removeNativeCdcStreamClient(Database cx, Key name) {
 	}
 }
 
-Future<CDCCursor> createNativeCdcCursor(Database cx, Key name) {
+Future<Reference<NativeCdcConsumer>> createNativeCdcConsumer(Database cx, Key name) {
 	validateNativeCdcEnabled();
 	const CDCStreamId streamId = co_await getNativeCdcStreamId(cx, name);
-	co_return CDCCursor(streamId, invalidVersion);
+	co_return makeReference<NativeCdcConsumer>(cx, CDCCursor(streamId, invalidVersion));
 }
 
-Future<CDCConsumeReply> consumeNativeCdcStream(Database cx, CDCCursor cursor) {
+Reference<NativeCdcConsumer> resumeNativeCdcConsumer(Database cx, CDCCursor position) {
+	validateNativeCdcEnabled();
+	return makeReference<NativeCdcConsumer>(cx, position);
+}
+
+Future<CDCConsumeReply> NativeCdcConsumer::consumeImpl(Reference<NativeCdcConsumer> self) {
 	validateNativeCdcEnabled();
 	while (true) {
-		CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(cx, cursor.streamId);
+		CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(self->cx, self->currentPosition.streamId);
 		try {
-			co_return co_await throwErrorOr(proxy.consume.tryGetReply(CDCConsumeRequest(cursor)));
+			Future<Void> proxyChanged = self->cx->clientInfo->onChange();
+			auto result = co_await race(
+			    throwErrorOr(proxy.consume.tryGetReply(CDCConsumeRequest(self->currentPosition))), proxyChanged);
+			if (result.index() == 0) {
+				CDCConsumeReply reply = std::get<0>(std::move(result));
+				self->knownAvailableThrough = reply.lastConsumedVersion;
+				self->currentPosition.lastConsumedVersion = reply.lastConsumedVersion;
+				co_return reply;
+			}
 		} catch (Error& error) {
 			if (!retryNativeCdcProxyRequest(error)) {
 				throw;
 			}
 		}
-		co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, cx->taskID);
+		co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, self->cx->taskID);
 	}
 }
 
-Future<Void> acknowledgeNativeCdcStreamClient(Database cx, CDCCursor cursor) {
+Future<CDCConsumeReply> NativeCdcConsumer::consume() {
+	return consumeImpl(Reference<NativeCdcConsumer>::addRef(this));
+}
+
+Future<Void> NativeCdcConsumer::acknowledgeImpl(Reference<NativeCdcConsumer> self) {
 	validateNativeCdcEnabled();
-	if (cursor.streamId == 0 || cursor.lastConsumedVersion < 0 ||
-	    cursor.lastConsumedVersion == std::numeric_limits<Version>::max()) {
+	if (self->currentPosition.streamId == 0 || self->currentPosition.lastConsumedVersion < 0 ||
+	    self->currentPosition.lastConsumedVersion == std::numeric_limits<Version>::max()) {
 		throw client_invalid_operation();
 	}
+	const Version acknowledgedVersion = self->currentPosition.lastConsumedVersion;
+	co_await acknowledgeNativeCdcStream(
+	    self->cx, self->currentPosition.streamId, acknowledgedVersion, self->knownAvailableThrough);
 
 	while (true) {
-		CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(cx, cursor.streamId);
+		CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(self->cx, self->currentPosition.streamId);
 		try {
-			co_await throwErrorOr(proxy.ack.tryGetReply(CDCAckRequest(cursor.streamId, cursor.lastConsumedVersion)));
-			co_return;
+			Future<Void> proxyChanged = self->cx->clientInfo->onChange();
+			auto result = co_await race(
+			    throwErrorOr(proxy.ack.tryGetReply(CDCAckRequest(self->currentPosition.streamId, acknowledgedVersion))),
+			    proxyChanged);
+			if (result.index() == 0) {
+				co_return;
+			}
 		} catch (Error& error) {
 			if (!retryNativeCdcProxyRequest(error)) {
 				throw;
 			}
 		}
-		co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, cx->taskID);
+		co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, self->cx->taskID);
 	}
+}
+
+Future<Void> NativeCdcConsumer::acknowledge() {
+	return acknowledgeImpl(Reference<NativeCdcConsumer>::addRef(this));
 }
 
 TEST_CASE("/NativeCDC/LifecycleAllocation") {

@@ -39,6 +39,23 @@ struct NativeCdcRemovedStreamInfo {
 	std::vector<Tag> tags;
 };
 
+class NativeCdcConsumer : public ReferenceCounted<NativeCdcConsumer> {
+public:
+	NativeCdcConsumer(Database cx, CDCCursor position) : cx(cx), currentPosition(position) {}
+
+	Future<CDCConsumeReply> consume();
+	Future<Void> acknowledge();
+	const CDCCursor& position() const { return currentPosition; }
+
+private:
+	static Future<CDCConsumeReply> consumeImpl(Reference<NativeCdcConsumer> self);
+	static Future<Void> acknowledgeImpl(Reference<NativeCdcConsumer> self);
+
+	Database cx;
+	CDCCursor currentPosition;
+	Version knownAvailableThrough = invalidVersion;
+};
+
 // These durable metadata operations back CDCProxyInterface lifecycle requests.
 // Registration is knob-protected; draining and cleanup remain available for
 // streams persisted while native CDC was enabled.
@@ -54,16 +71,21 @@ Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams(Database cx);
 // Atomically moves any streams assigned to a failed proxy to its replacement.
 Future<Void> reassignNativeCdcStreams(Database cx, UID oldProxyId, UID newProxyId);
 // Persists the exclusive unpopped watermark after consuming through a version.
-Future<Version> acknowledgeNativeCdcStream(Database cx, CDCStreamId streamId, Version consumedThrough);
+// knownAvailableThrough permits a consumer to acknowledge log data it has
+// already received before that version is visible at a transaction read version.
+Future<Version> acknowledgeNativeCdcStream(Database cx,
+                                           CDCStreamId streamId,
+                                           Version consumedThrough,
+                                           Version knownAvailableThrough = invalidVersion);
 
 // Client-facing CDC operations. These select the appropriate CDC proxy from
 // ClientDBInfo and retry requests when stream ownership changes.
 Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, KeyRange keys);
 Future<Void> removeNativeCdcStreamClient(Database cx, Key name);
 Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreamsClient(Database cx);
-// Uses the range registered for this name; consumers do not respecify it.
-Future<CDCCursor> createNativeCdcCursor(Database cx, Key name);
-Future<CDCConsumeReply> consumeNativeCdcStream(Database cx, CDCCursor cursor);
-Future<Void> acknowledgeNativeCdcStreamClient(Database cx, CDCCursor cursor);
+// Uses the range registered for this name; consumers do not respecify it. A
+// CDCCursor remains a serializable position token and does not hold Database.
+Future<Reference<NativeCdcConsumer>> createNativeCdcConsumer(Database cx, Key name);
+Reference<NativeCdcConsumer> resumeNativeCdcConsumer(Database cx, CDCCursor position);
 
 #endif // FDBCLIENT_NATIVECDC_H
