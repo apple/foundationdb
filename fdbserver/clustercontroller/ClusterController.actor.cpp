@@ -2150,8 +2150,11 @@ Future<Void> monitorCDCProxyAssignments(ClusterControllerData::DBInfo* db) {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
+				// Install the wakeup before reading published endpoints so an endpoint
+				// publication during the metadata scan cannot leave stale assignments asleep.
+				Future<Void> endpointChangeFuture = db->clientInfo->onChange();
 				std::map<CDCStreamId, UID> streamToCDCProxyId;
-				const std::vector<CDCProxyInterface> availableProxies = db->cdcProxies;
+				const std::vector<CDCProxyInterface> availableProxies = db->clientInfo->get().cdcProxies;
 				std::map<UID, UID> replacementByFailedProxy;
 				size_t replacementIndex = 0;
 				bool repairedAssignment = false;
@@ -2196,7 +2199,6 @@ Future<Void> monitorCDCProxyAssignments(ClusterControllerData::DBInfo* db) {
 					CODE_PROBE(
 					    true, "CDC assignments wait while no proxy endpoints are published", probe::decoration::rare);
 					Future<Void> assignmentChangeFuture = tr.watch(cdcProxyAssignmentChangeKey);
-					Future<Void> endpointChangeFuture = db->clientInfo->onChange();
 					co_await tr.commit();
 					co_await (assignmentChangeFuture || endpointChangeFuture);
 					break;
@@ -2224,7 +2226,6 @@ Future<Void> monitorCDCProxyAssignments(ClusterControllerData::DBInfo* db) {
 				}
 
 				Future<Void> assignmentChangeFuture = tr.watch(cdcProxyAssignmentChangeKey);
-				Future<Void> endpointChangeFuture = db->clientInfo->onChange();
 				co_await tr.commit();
 				co_await (assignmentChangeFuture || endpointChangeFuture);
 				break;
