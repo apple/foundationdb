@@ -19,11 +19,21 @@
  */
 
 #include "flow/UnitTestRunner.h"
+#include "fdbrpc/simulator.h"
 
 #ifndef FDBSERVER_UNIT_TEST_SUITE
 #error "FDBSERVER_UNIT_TEST_SUITE must be defined"
 #endif
 
+namespace {
+
+void initializeSimulation() {
+	startNewSimulator(false);
+	Sim2FileSystem::newFileSystem();
+}
+
+} // namespace
+
 int main(int argc, char** argv) {
-	return runUnitTests(argc, argv, UnitTestRunnerConfig(FDBSERVER_UNIT_TEST_SUITE));
+	return runUnitTests(argc, argv, UnitTestRunnerConfig(FDBSERVER_UNIT_TEST_SUITE, initializeSimulation));
 }

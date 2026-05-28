@@ -53,6 +53,7 @@ struct UnitTestRunnerOptions {
 	int maxTestCases = -1;
 	bool cleanupAfterTests = true;
 	bool listTests = false;
+	bool simulation = false;
 	bool showHelp = false;
 };
 
@@ -71,6 +72,7 @@ enum UnitTestRunnerOption {
 	OPT_MAX_TEST_CASES,
 	OPT_NO_CLEANUP,
 	OPT_LIST,
+	OPT_SIMULATION,
 };
 
 CSimpleOpt::SOption unitTestRunnerOptions[] = { { OPT_HELP, "-h", SO_NONE },
@@ -83,6 +85,7 @@ CSimpleOpt::SOption unitTestRunnerOptions[] = { { OPT_HELP, "-h", SO_NONE },
 	                                            { OPT_MAX_TEST_CASES, "--max-test-cases", SO_REQ_SEP },
 	                                            { OPT_NO_CLEANUP, "--no-cleanup", SO_NONE },
 	                                            { OPT_LIST, "--list", SO_NONE },
+	                                            { OPT_SIMULATION, "--simulation", SO_NONE },
 	                                            SO_END_OF_OPTIONS };
 
 void printUsage(const char* program, const UnitTestRunnerConfig& config) {
@@ -99,6 +102,7 @@ void printUsage(const char* program, const UnitTestRunnerConfig& config) {
 	           "      --max-test-cases N    Stop after N matching tests\n"
 	           "      --no-cleanup          Keep the data directory after each test\n"
 	           "      --list                Print matching test names without running them\n"
+	           "      --simulation          Run using Sim2 (when supported by the target)\n"
 	           "  -h, --help                Show this help\n",
 	           program,
 	           config.suiteName(),
@@ -180,6 +184,9 @@ bool parseArgs(int argc, char** argv, UnitTestRunnerOptions* options) {
 			break;
 		case OPT_LIST:
 			options->listTests = true;
+			break;
+		case OPT_SIMULATION:
+			options->simulation = true;
 			break;
 		default:
 			fmt::print(stderr, "ERROR: Unknown option id {}\n", args.OptionId());
@@ -335,7 +342,8 @@ Future<Void> stopNetworkAfter(Future<Void> what, std::string_view traceName, int
 
 } // namespace
 
-UnitTestRunnerConfig::UnitTestRunnerConfig(std::string_view sourceSubDir) : sourceSubDir(sourceSubDir) {}
+UnitTestRunnerConfig::UnitTestRunnerConfig(std::string_view sourceSubDir, SimulationInitializer simulationInitializer)
+  : sourceSubDir(sourceSubDir), simulationInitializer(simulationInitializer) {}
 
 std::string_view UnitTestRunnerConfig::suiteName() const {
 	return sourceSubDir;
@@ -347,6 +355,14 @@ std::string UnitTestRunnerConfig::dataDir() const {
 
 std::string UnitTestRunnerConfig::traceName() const {
 	return std::string(sourceSubDir) + "_test";
+}
+
+bool UnitTestRunnerConfig::supportsSimulation() const {
+	return simulationInitializer != nullptr;
+}
+
+void UnitTestRunnerConfig::initializeSimulation() const {
+	simulationInitializer();
 }
 
 int runUnitTests(int argc, char** argv, const UnitTestRunnerConfig& config) {
@@ -365,6 +381,10 @@ int runUnitTests(int argc, char** argv, const UnitTestRunnerConfig& config) {
 		printUsage(argv[0], config);
 		return 0;
 	}
+	if (options.simulation && !config.supportsSimulation()) {
+		fmt::print(stderr, "ERROR: Simulation mode is not supported by the {} test target\n", config.suiteName());
+		return 1;
+	}
 
 	if (options.randomSeed == 0) {
 		options.randomSeed = platform::getRandomSeed();
@@ -381,7 +401,11 @@ int runUnitTests(int argc, char** argv, const UnitTestRunnerConfig& config) {
 		return 1;
 	}
 
-	g_network = newNet2(TLSConfig());
+	if (options.simulation) {
+		config.initializeSimulation();
+	} else {
+		g_network = newNet2(TLSConfig());
+	}
 	openTraceFile({}, 10 << 20, 10 << 20, ".", traceName);
 
 	int exitCode = 0;

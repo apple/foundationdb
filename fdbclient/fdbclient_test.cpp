@@ -19,7 +19,17 @@
  */
 
 #include "flow/UnitTestRunner.h"
+#include "fdbrpc/simulator.h"
+
+namespace {
+
+void initializeSimulation() {
+	startNewSimulator(false);
+	Sim2FileSystem::newFileSystem();
+}
+
+} // namespace
 
 int main(int argc, char** argv) {
-	return runUnitTests(argc, argv, UnitTestRunnerConfig("fdbclient"));
+	return runUnitTests(argc, argv, UnitTestRunnerConfig("fdbclient", initializeSimulation));
 }

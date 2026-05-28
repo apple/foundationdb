@@ -27,14 +27,19 @@
 
 class UnitTestRunnerConfig {
 public:
-	explicit UnitTestRunnerConfig(std::string_view sourceSubDir);
+	using SimulationInitializer = void (*)();
+
+	explicit UnitTestRunnerConfig(std::string_view sourceSubDir, SimulationInitializer simulationInitializer = nullptr);
 
 	std::string_view suiteName() const;
 	std::string dataDir() const;
 	std::string traceName() const;
+	bool supportsSimulation() const;
+	void initializeSimulation() const;
 
 private:
 	std::string_view sourceSubDir;
+	SimulationInitializer simulationInitializer;
 };
 
 int runUnitTests(int argc, char** argv, const UnitTestRunnerConfig& config);
