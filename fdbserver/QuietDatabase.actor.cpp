@@ -40,6 +40,17 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+static bool g_ddPipelineControlEnabled = true;
+
+bool isDDPipelineControlEnabled() {
+	return g_ddPipelineControlEnabled;
+}
+
+void disableDDPipelineControl() {
+	TraceEvent("DDPipelineControlDisabled");
+	g_ddPipelineControlEnabled = false;
+}
+
 ACTOR Future<std::vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo, int flags = 0) {
 	loop {
 		choose {
@@ -1057,6 +1068,10 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 	printf("Set perpetual_storage_wiggle=0 ...\n");
 	state Version version = wait(setPerpetualStorageWiggle(cx, false, LockAware::True));
 	printf("Set perpetual_storage_wiggle=0 Done.\n");
+
+	if (g_network->isSimulated()) {
+		disableDDPipelineControl();
+	}
 
 	printf("Disabling backup worker ...\n");
 	wait(disableBackupWorker(cx));

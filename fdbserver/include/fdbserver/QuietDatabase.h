@@ -68,4 +68,10 @@ Future<std::vector<WorkerInterface>> getCoordWorkers(Database const& cx,
 Future<Void> enableConsistencyScanInSim(Database const& db);
 Future<Void> disableConsistencyScanInSim(Database const& db, bool const& waitForCompletion);
 
+// Permanently disables DD pipeline control so that all blocked relocations pass through.
+// For use by the test harness to allow DD to quiesce after tests complete.
+// Uses a plain boolean (not AsyncVar) to avoid cross-process callback issues in simulation.
+void disableDDPipelineControl();
+bool isDDPipelineControlEnabled();
+
 #endif
