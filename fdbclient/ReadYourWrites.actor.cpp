@@ -1340,7 +1340,7 @@ public:
 		// would already have a read version. We need to get a read version too, otherwise committing a conflicting
 		// transaction may not ensure this transaction is no longer in-flight, since this transaction could get a read
 		// version _after_.
-		co_await success(ryw->getReadVersion());
+		co_await ryw->getReadVersion();
 		if (!ryw->resetPromise.isSet())
 			ryw->resetPromise.sendError(transaction_timed_out());
 		co_await delay(deterministicRandom()->random01() * 5);

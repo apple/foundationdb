@@ -231,6 +231,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ENABLE_TLOG_TEMP_TAG_MESSAGES_RESERVE,               false );
 	init( TLOG_POPPED_VER_LAG_THRESHOLD_FOR_TLOGPOP_TRACE,     250e6 );
 	init( BLOCKING_PEEK_TIMEOUT,                                 0.4 );
+	init( PEEK_REPLY_TIMEOUT,                                   30.0 ); // Sender-side timeout for non-parallel peek; re-sends peek to detect dead TLogs that silently drop requests. Set to 0 to disable (restores old wait-forever behavior).
 	init( ENABLE_DETAILED_TLOG_POP_TRACE,                      false ); if ( randomize && buggify() ) ENABLE_DETAILED_TLOG_POP_TRACE = true;
 	init( PEEK_BATCHING_EMPTY_MSG,                              true ); if ( randomize && buggify() ) PEEK_BATCHING_EMPTY_MSG = false;
 	init( PEEK_BATCHING_EMPTY_MSG_INTERVAL,                    0.005 ); if ( randomize && buggify() ) PEEK_BATCHING_EMPTY_MSG_INTERVAL = 0.01;

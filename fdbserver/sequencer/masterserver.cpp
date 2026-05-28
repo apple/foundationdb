@@ -73,7 +73,7 @@ Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVersionRe
 
 Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
 	Span span("M:getVersion"_loc, req.spanContext);
-	std::map<UID, CommitProxyVersionReplies>::iterator proxyItr =
+	auto proxyItr =
 	    self->lastCommitProxyVersionReplies.find(req.requestingProxy); // lastCommitProxyVersionReplies never changes
 
 	++self->getCommitVersionRequests;
@@ -210,7 +210,7 @@ MasterData::MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
 	}
 }
 
-MasterData::~MasterData() {}
+MasterData::~MasterData() = default;
 
 Future<Void> provideVersions(Reference<MasterData> self) {
 	ActorCollection versionActors(false);
@@ -315,7 +315,7 @@ Future<Void> updateRecoveryData(Reference<MasterData> self) {
 		self->recoveryTransactionVersion = req.recoveryTransactionVersion;
 		self->lastEpochEnd = req.lastEpochEnd;
 
-		if (req.commitProxies.size() > 0) {
+		if (!req.commitProxies.empty()) {
 			self->lastCommitProxyVersionReplies.clear();
 
 			for (auto& p : req.commitProxies) {

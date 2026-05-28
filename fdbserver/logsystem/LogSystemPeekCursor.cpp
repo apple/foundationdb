@@ -26,6 +26,16 @@
 #include "flow/DebugTrace.h"
 #include "flow/CoroUtils.h"
 
+// Returns a timeout future for peek reply detection. Used by both the non-parallel
+// (serverPeekGetMoreImpl) and parallel (serverPeekParallelGetMoreImpl) peek paths
+// to detect dead/stale TLog endpoints that silently drop requests. When the timeout
+// fires, the caller re-sends the peek. Set PEEK_REPLY_TIMEOUT to 0 to disable.
+static Future<Void> peekReplyTimeout(ServerPeekCursor const* self) {
+	return (self->interf->get().present() && SERVER_KNOBS->PEEK_REPLY_TIMEOUT > 0)
+	           ? delay(SERVER_KNOBS->PEEK_REPLY_TIMEOUT)
+	           : Never();
+}
+
 Future<Void> tryEstablishPeekStreamImpl(ServerPeekCursor* self) {
 	co_await IFailureMonitor::failureMonitor().onStateEqual(
 	    self->interf->get().interf().peekStreamMessages.getEndpoint(), FailureStatus(false));
@@ -298,7 +308,7 @@ Future<Void> serverPeekParallelGetMoreImpl(ServerPeekCursor* self, TaskPriority 
 				if (self->sequence == std::numeric_limits<decltype(self->sequence)>::max()) {
 					throw operation_obsolete();
 				}
-			} else if (self->futureResults.size() == 0) {
+			} else if (self->futureResults.empty()) {
 				co_return;
 			}
 
@@ -306,7 +316,8 @@ Future<Void> serverPeekParallelGetMoreImpl(ServerPeekCursor* self, TaskPriority 
 				co_return;
 
 			Future<TLogPeekReply> peekReply = self->interf->get().present() ? self->futureResults.front() : Never();
-			auto res = co_await race(peekReply, self->interfaceChanged);
+			// See peekReplyTimeout() and serverPeekGetMoreImpl for the non-parallel equivalent.
+			auto res = co_await race(peekReply, self->interfaceChanged, peekReplyTimeout(self));
 			if (res.index() == 0) {
 				TLogPeekReply reply = std::get<0>(std::move(res));
 
@@ -327,6 +338,15 @@ Future<Void> serverPeekParallelGetMoreImpl(ServerPeekCursor* self, TaskPriority 
 				self->randomID = deterministicRandom()->randomUniqueID();
 				self->sequence = 0;
 				self->onlySpilled = false;
+				self->futureResults.clear();
+			} else if (res.index() == 2) {
+				// Timeout fired — no reply within PEEK_REPLY_TIMEOUT. Re-send the peek.
+				// This handles dead/stale TLog endpoints that silently drop requests.
+				DebugLogTraceEvent("PeekParallelReplyTimeout", self->randomID)
+				    .detail("Tag", self->tag.toString())
+				    .detail("Version", self->messageVersion.version);
+				self->randomID = deterministicRandom()->randomUniqueID();
+				self->sequence = 0;
 				self->futureResults.clear();
 			} else {
 				UNREACHABLE();
@@ -476,7 +496,10 @@ Future<Void> serverPeekGetMoreImpl(ServerPeekCursor* self, TaskPriority taskID) 
 				                                                                       self->returnEmptyIfStopped),
 				                                                       taskID));
 			}
-			auto res = co_await race(peekReply, self->interf->onChange());
+			// Race between: (1) peek reply, (2) interface change, and optionally
+			// (3) sender-side timeout — see peekReplyTimeout() and
+			// serverPeekParallelGetMoreImpl for the parallel equivalent.
+			auto res = co_await race(peekReply, self->interf->onChange(), peekReplyTimeout(self));
 			if (res.index() == 0) {
 				TLogPeekReply reply = std::get<0>(std::move(res));
 
@@ -489,6 +512,21 @@ Future<Void> serverPeekGetMoreImpl(ServerPeekCursor* self, TaskPriority taskID) 
 				co_return;
 			} else if (res.index() == 1) {
 				self->onlySpilled = false;
+			} else if (res.index() == 2) {
+				// Sender-side timeout fired — no reply received within PEEK_REPLY_TIMEOUT.
+				// Don't throw — just retry the peek. This handles both cases:
+				// - Dead TLog: the retry will also timeout, but eventually the interface
+				//   will change (cluster controller detects the failure) and we'll break
+				//   out via interf->onChange().
+				// - Clogged TLog: the retry may succeed if the clog clears, or timeout
+				//   again harmlessly.
+				// The key benefit: this resets the brokenPromiseToNever future, allowing
+				// the peek to be re-sent. Without this, a peek to a dead endpoint would
+				// wait forever because the original future is permanently stuck.
+				DebugLogTraceEvent("PeekReplyTimeout", self->randomID)
+				    .detail("Tag", self->tag.toString())
+				    .detail("Version", self->messageVersion.version);
+				continue;
 			} else {
 				UNREACHABLE();
 			}
@@ -524,7 +562,7 @@ Future<Void> ServerPeekCursor::getMore(TaskPriority taskID) {
 		if (usePeekStream &&
 		    (tag.locality >= 0 || tag.locality == tagLocalityLogRouter || tag.locality == tagLocalityRemoteLog)) {
 			more = serverPeekStreamGetMore(this, taskID);
-		} else if (parallelGetMore || onlySpilled || futureResults.size()) {
+		} else if (parallelGetMore || onlySpilled || !futureResults.empty()) {
 			more = serverPeekParallelGetMore(this, taskID);
 		} else {
 			more = serverPeekGetMore(this, taskID);
@@ -759,7 +797,7 @@ MergedPeekCursor::MergedPeekCursor(std::vector<Reference<ServerPeekCursor>> cons
 
 Reference<IReplayPeekCursor> MergedPeekCursor::cloneNoMore() {
 	std::vector<Reference<ServerPeekCursor>> cursors;
-	for (auto it : serverCursors) {
+	for (const auto& it : serverCursors) {
 		cursors.push_back(it->cloneServerNoMore());
 	}
 	return makeReference<MergedPeekCursor>(
@@ -767,7 +805,7 @@ Reference<IReplayPeekCursor> MergedPeekCursor::cloneNoMore() {
 }
 
 void MergedPeekCursor::setProtocolVersion(ProtocolVersion version) {
-	for (auto it : serverCursors) {
+	for (const auto& it : serverCursors) {
 		if (it->hasMessage()) {
 			it->setProtocolVersion(version);
 		}
@@ -920,7 +958,7 @@ Future<Void> MergedPeekCursor::getMore(TaskPriority taskID) {
 		return more;
 	}
 
-	if (!serverCursors.size()) {
+	if (serverCursors.empty()) {
 		return Never();
 	}
 
@@ -1678,7 +1716,7 @@ Future<Void> bufferedGetMore(BufferedCursor* self, TaskPriority taskID) {
 
 	self->messageVersion = LogMessageVersion(minVersion);
 	self->messageIndex = 0;
-	self->hasNextMessage = self->messages.size() > 0;
+	self->hasNextMessage = !self->messages.empty();
 
 	co_await yield();
 	if (self->canDiscardPopped && self->poppedVersion > self->version().version) {
@@ -1686,11 +1724,11 @@ Future<Void> bufferedGetMore(BufferedCursor* self, TaskPriority taskID) {
 		    .detail("Version", self->version().version)
 		    .detail("Popped", self->poppedVersion);
 		self->messageVersion = std::max(self->messageVersion, LogMessageVersion(self->poppedVersion));
-		for (auto cursor : self->discardableCursors) {
+		for (const auto& cursor : self->discardableCursors) {
 			cursor->advanceTo(self->messageVersion);
 		}
 		self->messageIndex = self->messages.size();
-		if (self->messages.size() > 0 &&
+		if (!self->messages.empty() &&
 		    self->messages[self->messages.size() - 1].version.version < self->poppedVersion) {
 			self->hasNextMessage = false;
 		} else {

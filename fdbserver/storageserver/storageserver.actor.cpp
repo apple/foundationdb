@@ -59,6 +59,7 @@
 #include "fdbserver/storageserver/StorageCorruptionBug.h"
 #include "fdbserver/core/StorageMetrics.h"
 #include "fdbserver/core/TLogInterface.h"
+#include "fdbserver/logsystem/LogSystemConsumer.h"
 #include "TransactionTagCounter.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "flow/ActorCollection.h"
@@ -841,7 +842,7 @@ public:
 	SSBulkLoadMetrics() : ongoingTasks(0) {}
 	void addTask() { ongoingTasks++; }
 	void removeTask() { ongoingTasks--; }
-	int getOngoingTasks() { return ongoingTasks; }
+	int getOngoingTasks() const { return ongoingTasks; }
 
 private:
 	int ongoingTasks = 0;
@@ -1177,7 +1178,7 @@ public:
 
 	ProtocolVersion logProtocol;
 
-	Reference<LogSystem> logSystem;
+	Reference<LogSystemConsumer> logSystem;
 	Reference<IReplayPeekCursor> logCursor;
 
 	// The version the cluster starts on. This value is not persisted and may
@@ -11538,15 +11539,11 @@ Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) {
 	co_await serveStorageMetricsRequests(self, ssi);
 }
 
-ACTOR Future<Void> logLongByteSampleRecovery(Future<Void> recovery) {
-	choose {
-		when(wait(recovery)) {}
-		when(wait(delay(SERVER_KNOBS->LONG_BYTE_SAMPLE_RECOVERY_DELAY))) {
-			TraceEvent(g_network->isSimulated() ? SevWarn : SevWarnAlways, "LongByteSampleRecovery");
-		}
+Future<Void> logLongByteSampleRecovery(Future<Void> recovery) {
+	auto res = co_await timeout(recovery, SERVER_KNOBS->LONG_BYTE_SAMPLE_RECOVERY_DELAY);
+	if (!res.present()) {
+		TraceEvent(g_network->isSimulated() ? SevWarn : SevWarnAlways, "LongByteSampleRecovery");
 	}
-
-	return Void();
 }
 
 Future<Void> checkBehind(StorageServer* self) {
@@ -11967,7 +11964,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				CODE_PROBE(self->logSystem, "shardServer dbInfo changed");
 				dbInfoChange = self->db->onChange();
 				if (self->db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
-					self->logSystem = makeLogSystemFromServerDBInfo(self->thisServerID, self->db->get());
+					self->logSystem = makeLogSystemConsumerFromServerDBInfo(self->thisServerID, self->db->get());
 					if (self->logSystem) {
 						if (self->db->get().logSystemConfig.recoveredAt.present()) {
 							self->poppedAllAfter = self->db->get().logSystemConfig.recoveredAt.get();

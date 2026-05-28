@@ -51,7 +51,7 @@ class TransactionTagCounterImpl {
 		}
 		std::vector<BusyTagInfo> result;
 		while (!topKTags.empty()) {
-			result.push_back(std::move(topKTags.top()));
+			result.push_back(topKTags.top());
 			topKTags.pop();
 		}
 		return result;

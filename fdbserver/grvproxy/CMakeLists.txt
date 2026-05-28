@@ -5,6 +5,10 @@ add_fdbserver_link_test(fdbserver_grvproxylinktest
   fdbserver_grvproxy
   fdbserver_logsystem
   fdbserver_core)
+add_fdbserver_unit_test(fdbserver_grvproxy_test grvproxy
+  fdbserver_grvproxy
+  fdbserver_logsystem
+  fdbserver_core)
 
 configure_fdbserver_common_includes(fdbserver_grvproxy)
 target_include_directories(fdbserver_grvproxy

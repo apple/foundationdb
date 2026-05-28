@@ -386,7 +386,7 @@ def versionepoch(logger):
     version11 = run_fdbcli_command("versionepoch commit")
     assert version11.startswith("Current read version is ")
     # the test can trigger recovery, thus we wait until the recovery is finished to move to the next test
-    wait_for_database_available(logger)
+    wait_for_database_fully_recovered(logger)
 
 
 def get_value_from_status_json(retry, *args):
@@ -471,7 +471,6 @@ def consistencycheck(logger):
     run_fdbcli_command("consistencycheck", "on")
     output3 = run_fdbcli_command("consistencycheck")
     assert output3 == consistency_check_on_output
-
 
 
 @enable_logging()
@@ -590,6 +589,60 @@ def transaction(logger):
     assert output7 == "`key': not found"
 
 
+@enable_logging()
+def clearrange_prefix(logger):
+    """This test covers the clearrange fdbcli command with optional ENDKEY (prefix mode)."""
+    # Test 1: clearrange without writemode should fail
+    err1 = run_fdbcli_command_and_get_error("clearrange", "prefix")
+    assert (
+        err1 == "ERROR: writemode must be enabled to set or clear keys in the database."
+    )
+    # Test 2: set keys with a shared prefix and one without, then clearrange with prefix only
+    process = subprocess.Popen(
+        command_template[:-1],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        env=fdbcli_env,
+    )
+    transaction_flow = [
+        "writemode on",
+        "set prefix_aaa val1",
+        "set prefix_bbb val2",
+        "set prefix_ccc val3",
+        "set other_key val4",
+        "clearrange prefix_",
+        # verify prefix keys are gone
+        "get prefix_aaa",
+        "get prefix_bbb",
+        "get prefix_ccc",
+        # verify non-prefix key is still present
+        "get other_key",
+    ]
+    output1, _ = process.communicate(input="\n".join(transaction_flow).encode())
+    lines = list(filter(len, output1.decode().split("\n")))
+    logger.debug("Output lines: {}".format(lines))
+    # Find the get results (last 4 meaningful lines before the prompt)
+    get_results = [l for l in lines if "not found" in l or "is `" in l]
+    logger.debug("Get results: {}".format(get_results))
+    assert len(get_results) == 4
+    assert get_results[0] == "`prefix_aaa': not found"
+    assert get_results[1] == "`prefix_bbb': not found"
+    assert get_results[2] == "`prefix_ccc': not found"
+    assert get_results[3] == "`other_key' is `val4'"
+    # Cleanup: remove the remaining key
+    process = subprocess.Popen(
+        command_template[:-1],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        env=fdbcli_env,
+    )
+    cleanup_flow = [
+        "writemode on",
+        "clear other_key",
+    ]
+    process.communicate(input="\n".join(cleanup_flow).encode())
+
+
 def get_fdb_process_addresses(logger):
     # get all processes' network addresses
     output = run_fdbcli_command("kill")
@@ -636,7 +689,7 @@ def coordinators(logger):
         len(get_value_from_status_json(True, "client", "coordinators", "coordinators"))
         == 1
     )
-    wait_for_database_available(logger)
+    wait_for_database_fully_recovered(logger)
 
 
 @enable_logging(logging.DEBUG)
@@ -699,7 +752,7 @@ def exclude(logger):
     # check the include is successful
     output4 = run_fdbcli_command("exclude")
     assert no_excluded_process_output in output4
-    wait_for_database_available(logger)
+    wait_for_database_fully_recovered(logger)
 
 
 # read the system key 'k', need to enable the option first
@@ -734,13 +787,20 @@ def throttle(logger):
     # TODO : test manual throttling, not easy to do now
 
 
-def wait_for_database_available(logger):
-    # sometimes the change takes some time to have effect and the database can be unavailable at that time
-    # this is to wait until the database is available again
-    while not get_value_from_status_json(
-        True, "client", "database_status", "available"
-    ):
-        logger.debug("Database unavailable for now, wait for one second")
+def wait_for_database_fully_recovered(logger):
+    # Database availability precedes full recovery and is not sufficient before tests that
+    # make assertions about recovery generations.
+    while True:
+        status = json.loads(run_fdbcli_command("status", "json"))
+        available = status["client"]["database_status"]["available"]
+        recovery_state = status.get("cluster", {}).get("recovery_state", {}).get("name")
+        if available and recovery_state == "fully_recovered":
+            return
+        logger.debug(
+            "Database available: {}, recovery state: {}; wait for one second".format(
+                available, recovery_state
+            )
+        )
         time.sleep(1)
 
 
@@ -930,6 +990,7 @@ if __name__ == "__main__":
         # TODO: re-enable once stable
         # suspend()
         transaction()
+        clearrange_prefix()
         # TODO: re-enable once stable
         # throttle()
         triggerddteaminfolog()

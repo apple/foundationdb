@@ -206,7 +206,7 @@ public:
 		if (thread_network == this)
 			stopCallbacks.emplace_back(std::move(fn));
 		else
-			onMainThreadVoid([this, fn] { this->stopCallbacks.emplace_back(std::move(fn)); });
+			onMainThreadVoid([this, fn = std::move(fn)]() mutable { this->stopCallbacks.emplace_back(std::move(fn)); });
 	}
 
 	bool isSimulated() const override { return false; }

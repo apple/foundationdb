@@ -5,6 +5,10 @@ add_fdbserver_link_test(fdbserver_logsystemlinktest
   fdbserver_logsystem
   fdbserver_kvstore
   fdbserver_core)
+add_fdbserver_unit_test(fdbserver_logsystem_test logsystem
+  fdbserver_logsystem
+  fdbserver_kvstore
+  fdbserver_core)
 
 configure_fdbserver_common_includes(fdbserver_logsystem)
 target_include_directories(fdbserver_logsystem

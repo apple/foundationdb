@@ -114,7 +114,7 @@ int32_t DatabaseContext::decreaseWatchRefCount(KeyRef key, const Version& versio
 
 	const auto count = versionSet.size();
 	// The metadata might be deleted somewhere else, before calling this decreaseWatchRefCount
-	if (auto metadata = getWatchMetadata(key); metadata.isValid() && versionSet.size() == 0) {
+	if (auto metadata = getWatchMetadata(key); metadata.isValid() && versionSet.empty()) {
 		// It is a *must* to cancel the watchFutureSS manually. watchFutureSS waits for watchStorageServerResp, which
 		// holds a reference to the metadata. If the ACTOR is not cancelled, it indirectly holds a Future waiting for
 		// itself.
@@ -516,17 +516,17 @@ Future<Void> tssLogger(DatabaseContext* cx) {
 
 		// Log each TSS pair separately
 		for (const auto& it : cx->tssMetrics) {
-			if (it.second->detailedMismatches.size()) {
+			if (!it.second->detailedMismatches.empty()) {
 				cx->tssMismatchStream.send(
 				    std::pair<UID, std::vector<DetailedTSSMismatch>>(it.first, it.second->detailedMismatches));
 			}
 
 			// Do error histograms as separate event
-			if (it.second->ssErrorsByCode.size()) {
+			if (!it.second->ssErrorsByCode.empty()) {
 				traceTSSErrors("TSS_SSErrors", it.first, it.second->ssErrorsByCode);
 			}
 
-			if (it.second->tssErrorsByCode.size()) {
+			if (!it.second->tssErrorsByCode.empty()) {
 				traceTSSErrors("TSS_TSSErrors", it.first, it.second->tssErrorsByCode);
 			}
 
@@ -736,7 +736,7 @@ static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 				                               : CLIENT_KNOBS->VALUE_SIZE_LIMIT;
 				int num_chunks = (bw.getLength() + value_size_limit - 1) / value_size_limit;
 				std::string random_id = deterministicRandom()->randomAlphaNumeric(16);
-				std::string user_provided_id = entry.first.size() ? entry.first + "/" : "";
+				std::string user_provided_id = !entry.first.empty() ? entry.first + "/" : "";
 				for (int i = 0; i < num_chunks; i++) {
 					TrInfoChunk chunk;
 					BinaryWriter chunkBW(Unversioned());
@@ -760,10 +760,10 @@ static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 			int64_t dataSizeLimit =
 			    buggify() ? deterministicRandom()->randomInt(200e3, 1.5 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT)
 			            : 0.8 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
-			std::vector<TrInfoChunk>::iterator tracking_iter = trChunksQ.begin();
+			auto tracking_iter = trChunksQ.begin();
 			ASSERT(commitQ.empty() && (txBytes == 0));
 			while (true) {
-				std::vector<TrInfoChunk>::iterator iter = tracking_iter;
+				auto iter = tracking_iter;
 				txBytes = 0;
 				commitQ.clear();
 				try {
@@ -926,7 +926,7 @@ void updateLocationCacheWithCaches(DatabaseContext* self,
 			interfaces.reserve(val->size() - removed.size() + added.size());
 			for (int i = 0; i < val->size(); ++i) {
 				const auto& interf = (*val)[i];
-				if (removed.count(interf->interf.id()) == 0) {
+				if (!removed.contains(interf->interf.id())) {
 					interfaces.emplace_back(interf);
 				}
 			}
@@ -1203,7 +1203,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 
 	DisabledTraceEvent("DatabaseContextCreated", dbId).backtrace();
 
-	connected = (clientInfo->get().commitProxies.size() && clientInfo->get().grvProxies.size())
+	connected = (!clientInfo->get().commitProxies.empty() && !clientInfo->get().grvProxies.empty())
 	                ? Void()
 	                : clientInfo->onChange();
 
@@ -1516,6 +1516,10 @@ DatabaseContext::~DatabaseContext() {
 	clientDBInfoMonitor.cancel();
 	monitorTssInfoChange.cancel();
 	tssMismatchHandler.cancel();
+	logger.cancel();
+	clientStatusUpdater.actor.cancel();
+	throttleExpirer.cancel();
+	statusLeaderMon.cancel();
 
 	if (grvUpdateHandler.isValid()) {
 		grvUpdateHandler.cancel();

@@ -439,7 +439,7 @@ class DDTxnProcessorImpl {
 					for (auto& r : ranges) {
 						ASSERT(!r.value()->valid);
 					}
-					result->dataMoveMap.insert(meta.ranges.front(), std::move(dataMove));
+					result->dataMoveMap.insert(meta.ranges.front(), dataMove);
 					++numDataMoves;
 				}
 

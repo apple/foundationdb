@@ -21,6 +21,7 @@
 #include "fdbrpc/Stats.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/logsystem/LogSystem.h"
+#include "fdbserver/logsystem/LogSystemConsumer.h"
 #include "fdbserver/logrouter/LogRouter.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
@@ -71,7 +72,7 @@ struct LogRouterData {
 	};
 
 	const UID dbgid;
-	Reference<AsyncVar<Reference<LogSystem>>> logSystem;
+	Reference<AsyncVar<Reference<LogSystemConsumer>>> logSystem;
 	Future<Void> logSystemChanged = Void();
 	Optional<UID> primaryPeekLocation;
 	NotifiedVersion version; // The largest version at which the log router has peeked mutations
@@ -130,9 +131,9 @@ struct LogRouterData {
 	}
 
 	LogRouterData(UID dbgid, const InitializeLogRouterRequest& req)
-	  : dbgid(dbgid), logSystem(new AsyncVar<Reference<LogSystem>>()), version(req.startVersion - 1), minPopped(0),
-	    startVersion(req.startVersion), minKnownCommittedVersion(0), poppedVersion(0), routerTag(req.routerTag),
-	    allowPops(false), foundEpochEnd(false), generation(req.recoveryCount),
+	  : dbgid(dbgid), logSystem(new AsyncVar<Reference<LogSystemConsumer>>()), version(req.startVersion - 1),
+	    minPopped(req.startVersion), startVersion(req.startVersion), minKnownCommittedVersion(0), poppedVersion(0),
+	    routerTag(req.routerTag), allowPops(false), foundEpochEnd(false), generation(req.recoveryCount),
 	    peekLatencyDist(Histogram::getHistogram("LogRouter"_sr, "PeekTLogLatency"_sr, Histogram::Unit::milliseconds)),
 	    cc("LogRouter", dbgid.toString()), getMoreCount("GetMoreCount", cc),
 	    getMoreBlockedCount("GetMoreBlockedCount", cc) {
@@ -149,7 +150,9 @@ struct LogRouterData {
 			Tag tag(tagLocalityRemoteLog, i);
 			auto tagData = getTagData(tag);
 			if (!tagData) {
-				tagData = createTagData(tag, 0, 0);
+				// The router cannot serve data before its handoff boundary; do not wait for a consumer
+				// that never reads this tag to pop versions outside the router's range.
+				tagData = createTagData(tag, req.startVersion, 0);
 			}
 		}
 
@@ -852,7 +855,8 @@ Future<Void> logRouterCore(TLogInterface interf,
 			          dbInfoChange = db->onChange();
 			          logRouterData.allowPops = db->get().recoveryState == RecoveryState::FULLY_RECOVERED &&
 			                                    db->get().recoveryCount >= req.recoveryCount;
-			          logRouterData.logSystem->set(makeLogSystemFromServerDBInfo(logRouterData.dbgid, db->get(), true));
+			          logRouterData.logSystem->set(
+			              makeLogSystemConsumerFromServerDBInfo(logRouterData.dbgid, db->get(), true));
 		          })
 		    .When(interf.peekMessages.getFuture(),
 		          [&](const TLogPeekRequest& req) {

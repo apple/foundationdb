@@ -31,6 +31,7 @@
 #include "fdbserver/kvstore/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/logsystem/LogSystem.h"
+#include "fdbserver/logsystem/LogSystemConsumer.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/MasterInterface.h"
@@ -69,7 +70,7 @@ public:
 		                              recentStateTransactions.upper_bound(oldestVersion));
 
 		int64_t stateBytes = 0;
-		while (recentStateTransactionSizes.size() && recentStateTransactionSizes.front().first <= oldestVersion) {
+		while (!recentStateTransactionSizes.empty() && recentStateTransactionSizes.front().first <= oldestVersion) {
 			stateBytes += recentStateTransactionSizes.front().second;
 			recentStateTransactionSizes.pop_front();
 		}
@@ -144,6 +145,7 @@ struct Resolver : ReferenceCounted<Resolver> {
 	// Resolvers.
 	LogSystemDiskQueueAdapter* logAdapter = nullptr;
 	Reference<LogSystem> logSystem;
+	Reference<LogSystemConsumer> logSystemConsumer;
 	IKeyValueStore* txnStateStore = nullptr;
 	int localTLogCount = -1;
 
@@ -223,7 +225,7 @@ struct Resolver : ReferenceCounted<Resolver> {
 
 Future<Void> versionReady(Resolver* self, ProxyRequestsInfo* proxyInfo, Version prevVersion) {
 	while (true) {
-		if (self->recentStateTransactionsInfo.size() &&
+		if (!self->recentStateTransactionsInfo.empty() &&
 		    proxyInfo->lastVersion <= self->recentStateTransactionsInfo.firstVersion()) {
 			self->neededVersion.set(std::max(self->neededVersion.get(), prevVersion));
 		}
@@ -281,7 +283,7 @@ Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatchReque
 	   self->recentStateTransactionsInfo.firstVersion()) .detail("ResolverVersion", self->version.get()); */
 
 	while (self->totalStateBytes.get() > SERVER_KNOBS->RESOLVER_STATE_MEMORY_LIMIT &&
-	       self->recentStateTransactionsInfo.size() &&
+	       !self->recentStateTransactionsInfo.empty() &&
 	       proxyInfo.lastVersion > self->recentStateTransactionsInfo.firstVersion() &&
 	       req.version > self->neededVersion.get()) {
 		/* TraceEvent("ResolveBatchDelay").detail("From", proxyAddress).detail("StateBytes",
@@ -369,7 +371,7 @@ Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatchReque
 		self->transactionsConflicted += req.transactions.size() - commitList.size() - tooOldList.size();
 
 		ASSERT(req.prevVersion >= 0 ||
-		       req.txnStateTransactions.size() == 0); // The master's request should not have any state transactions
+		       req.txnStateTransactions.empty()); // The master's request should not have any state transactions
 
 		auto& stateTransactionsPair = self->recentStateTransactionsInfo.getStateTransactionsRef(req.version);
 		auto& stateTransactions = stateTransactionsPair.second;
@@ -385,9 +387,9 @@ Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatchReque
 			toCommit.reset(new LogPushData(self->logSystem, self->localTLogCount));
 			if (shouldApplyResolverPrivateMutations) {
 				auto lockedKey = self->txnStateStore->readValue(databaseLockedKey).get();
-				isLocked = lockedKey.present() && lockedKey.get().size();
+				isLocked = lockedKey.present() && !lockedKey.get().empty();
 				resolverData.reset(new ResolverData(self->dbgid,
-				                                    self->logSystem,
+				                                    self->logSystemConsumer,
 				                                    self->txnStateStore,
 				                                    &self->keyInfo,
 				                                    toCommit.get(),
@@ -494,7 +496,7 @@ Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatchReque
 				// NOTE: Ignore log router tags (in "req.writtenTags") while doing this check, because log router
 				// tags get added to all commit messages in HA mode.
 				bool isEmpty = !hasNonLogRouterTags(req.writtenTags);
-				if (req.lastShardMove < self->lastShardMove || shardChanged || req.txnStateTransactions.size() ||
+				if (req.lastShardMove < self->lastShardMove || shardChanged || !req.txnStateTransactions.empty() ||
 				    isEmpty) {
 					for (int i = 0; i < self->numLogs; i++) {
 						writtenTLogs.insert(i);
@@ -643,7 +645,7 @@ Future<Void> processCompleteTransactionStateRequest(TransactionStateResolveConte
 		    pContext->pTxnStateStore
 		        ->readRange(txnKeys, SERVER_KNOBS->BUGGIFIED_ROW_LIMIT, SERVER_KNOBS->APPLY_MUTATION_BYTES)
 		        .get();
-		if (!data.size())
+		if (data.empty())
 			break;
 
 		((KeyRangeRef&)txnKeys) = KeyRangeRef(keyAfter(data.back().key, txnKeys.arena()), txnKeys.end);
@@ -770,6 +772,7 @@ Future<Void> resolverCore(ResolverInterface resolver,
 
 	// Initialize txnStateStore
 	self->logSystem = makeLogSystemFromServerDBInfo(resolver.id(), db->get(), false, addActor);
+	self->logSystemConsumer = self->logSystem->makeConsumer();
 	self->localTLogCount = db->get().logSystemConfig.numLogs();
 	Future<Void> onError = transformError(actorCollection(addActor.getFuture()), broken_promise(), resolver_failed());
 	TransactionStateResolveContext transactionStateResolveContext;

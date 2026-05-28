@@ -511,7 +511,7 @@ private:
 					{
 						Standalone<StringRef> data = co_await self->log->readNext(sizeof(OpHeader));
 						if (data.size() != sizeof(OpHeader)) {
-							if (data.size()) {
+							if (!data.empty()) {
 								CODE_PROBE(
 								    true, "zero fill partial header in KeyValueStoreMemory", probe::decoration::rare);
 								memset(&h, 0, sizeof(OpHeader));
@@ -741,7 +741,7 @@ private:
 				    .detail("CommittedWrites", self->notifiedCommittedWriteBytes.get())
 				    .detail("SnapshotWrites", snapshotTotalWrittenBytes)
 				    .detail("Diff", diff)
-				    .detail("LastOperationWasASnapshot", nextKey == Key() && !nextKeyAfter);
+				    .detail("LastOperationWasASnapshot", nextKey.empty() && !nextKeyAfter);
 			lastDiff = diff;
 
 			// Since notifiedCommittedWriteBytes is only set() once per commit, before logging the commit operation,

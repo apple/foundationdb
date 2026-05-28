@@ -4,6 +4,9 @@ add_flow_target(STATIC_LIBRARY NAME fdbserver_kvstore SRCS ${FDBSERVER_KVSTORE_S
 add_fdbserver_link_test(fdbserver_kvstorelinktest
   fdbserver_kvstore
   fdbserver_core)
+add_fdbserver_unit_test(fdbserver_kvstore_test kvstore
+  fdbserver_kvstore
+  fdbserver_core)
 
 configure_fdbserver_common_includes(fdbserver_kvstore)
 target_include_directories(fdbserver_kvstore

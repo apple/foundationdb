@@ -612,7 +612,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				{
 					auto choice = co_await race(checkSafeExclusions(cx, toKillMarkFailedArray), delay(5.0));
 					if (choice.index() == 0) {
-						bool _safe = std::get<0>(std::move(choice));
+						bool _safe = std::get<0>(choice);
 
 						safe = _safe && protectServers(std::set<AddressExclusion>(toKillMarkFailedArray.begin(),
 						                                                          toKillMarkFailedArray.end()))

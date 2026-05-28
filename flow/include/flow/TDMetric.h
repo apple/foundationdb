@@ -409,7 +409,7 @@ template <size_t N>
 struct FixedString {
 	std::array<char, N> value{};
 
-	constexpr FixedString(const char (&str)[N]) {
+	explicit(false) constexpr FixedString(const char (&str)[N]) {
 		for (size_t i = 0; i < N; ++i) {
 			value[i] = str[i];
 		}

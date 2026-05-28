@@ -165,7 +165,7 @@ public:
 private:
 	static API* instance;
 
-	API(int version);
+	explicit API(int version);
 	int version;
 };
 } // namespace FDB

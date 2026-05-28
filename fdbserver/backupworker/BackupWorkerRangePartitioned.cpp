@@ -30,6 +30,7 @@
 #include "fdbserver/core/PartitionMapMessage.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/logsystem/LogSystem.h"
+#include "fdbserver/logsystem/LogSystemConsumer.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "flow/CoroUtils.h"
 
@@ -80,7 +81,7 @@ struct BackupRangePartitionedData {
 	Version savedVersion; // Largest version saved to blob storage
 	NotifiedVersion pulledVersion;
 	Version logFolderBaseVersion;
-	AsyncVar<Reference<LogSystem>> logSystem;
+	AsyncVar<Reference<LogSystemConsumer>> logSystem;
 	AsyncVar<bool> paused; // Track if "backupPausedKey" is set.
 	Reference<FlowLock> lock;
 	AsyncTrigger doneTrigger;
@@ -1096,7 +1097,7 @@ Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
 				Reference<LogSystem> ls = makeLogSystemFromServerDBInfo(self.myId, db->get(), true);
 
 				if (ls.isValid()) {
-					self.logSystem.set(ls);
+					self.logSystem.set(ls->makeConsumer());
 					self.oldestBackupEpoch = std::max(self.oldestBackupEpoch, ls->getOldestBackupEpoch());
 					TraceEvent("BWRangePartitionedLogSystemUpdate", self.myId)
 					    .detail("Tag", self.tag.toString())
@@ -1201,7 +1202,7 @@ TEST_CASE("/BackupWorkerRangePartitioned/PartitionMapMessage/IsNextInLeadingByte
 	PartitionMapMessage outgoing(makeSamplePartitionMap());
 	wr << outgoing;
 	Standalone<StringRef> bytes = wr.toValue();
-	ASSERT(bytes.size() >= 1);
+	ASSERT(!bytes.empty());
 	ASSERT(PartitionMapMessage::startsPartitionMapMessage(bytes[0]));
 
 	ArenaReader pmmReader(bytes.arena(), bytes, AssumeVersion(g_network->protocolVersion()));

@@ -4,6 +4,9 @@ add_flow_target(STATIC_LIBRARY NAME fdbserver_sequencer SRCS ${FDBSERVER_SEQUENC
 add_fdbserver_link_test(fdbserver_sequencerlinktest
   fdbserver_sequencer
   fdbserver_core)
+add_fdbserver_unit_test(fdbserver_sequencer_test sequencer
+  fdbserver_sequencer
+  fdbserver_core)
 
 configure_fdbserver_common_includes(fdbserver_sequencer)
 target_include_directories(fdbserver_sequencer

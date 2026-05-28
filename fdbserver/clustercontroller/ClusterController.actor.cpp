@@ -65,6 +65,7 @@
 #include "fdbserver/core/BackupProgress.h"
 #include "fdbserver/core/DBCoreState.h"
 #include "fdbserver/core/MoveKeys.h"
+#include "flow/CoroUtils.h"
 #include "flow/Error.h"
 #include "flow/Trace.h"
 #include "flow/Util.h"
@@ -702,38 +703,33 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 	}
 }
 
-ACTOR Future<Void> clusterGetServerInfo(ClusterControllerData::DBInfo* db,
-                                        UID knownServerInfoID,
-                                        ReplyPromise<ServerDBInfo> reply) {
+Future<Void> clusterGetServerInfo(ClusterControllerData::DBInfo* db,
+                                  UID knownServerInfoID,
+                                  ReplyPromise<ServerDBInfo> reply) {
 	while (db->serverInfo->get().id == knownServerInfoID) {
-		choose {
-			when(wait(yieldedFuture(db->serverInfo->onChange()))) {}
-			when(wait(delayJittered(300))) {
-				break;
-			} // The server might be long gone!
+		auto res = co_await race(yieldedFuture(db->serverInfo->onChange()), delayJittered(300));
+		if (res.index() == 1) {
+			break; // The server might be long gone!
 		}
 	}
 	reply.send(db->serverInfo->get());
-	return Void();
 }
 
-ACTOR Future<Void> clusterOpenDatabase(ClusterControllerData::DBInfo* db, OpenDatabaseRequest req) {
+Future<Void> clusterOpenDatabase(ClusterControllerData::DBInfo* db, OpenDatabaseRequest req) {
 	db->clientStatus[req.reply.getEndpoint().getPrimaryAddress()] = std::make_pair(now(), req);
 	if (db->clientStatus.size() > 10000) {
 		TraceEvent(SevWarnAlways, "TooManyClientStatusEntries").suppressFor(1.0);
 	}
 
 	while (db->clientInfo->get().id == req.knownClientInfoID) {
-		choose {
-			when(wait(db->clientInfo->onChange())) {}
-			when(wait(delayJittered(SERVER_KNOBS->COORDINATOR_REGISTER_INTERVAL))) {
-				break;
-			} // The client might be long gone!
+		auto res =
+		    co_await race(db->clientInfo->onChange(), delayJittered(SERVER_KNOBS->COORDINATOR_REGISTER_INTERVAL));
+		if (res.index() == 1) {
+			break; // The client might be long gone!
 		}
 	}
 
 	req.reply.send(db->clientInfo->get());
-	return Void();
 }
 
 void checkOutstandingRecruitmentRequests(ClusterControllerData* self) {

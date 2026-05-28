@@ -42,7 +42,7 @@
 #include "fdbrpc/TSSComparison.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR Future<Void> allAlternativesFailedDelay(Future<Void> okFuture);
+Future<Void> allAlternativesFailedDelay(Future<Void> okFuture);
 
 enum ComparisonType { TSS_COMPARISON, REPLICA_COMPARISON };
 

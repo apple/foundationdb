@@ -1973,6 +1973,9 @@ void SimulationConfig::setRegions(const TestConfig& testConfig) {
 		if (deterministicRandom()->random01() < 0.25)
 			db.desiredLogRouterCount = deterministicRandom()->randomInt(1, 7);
 
+		if (db.rangeBackupWorkerEnabled && deterministicRandom()->random01() < 0.5)
+			db.desiredRangeBackupWorkerCount = deterministicRandom()->randomInt(1, 7);
+
 		if (testConfig.remoteDesiredTLogCount.present()) {
 			db.remoteDesiredTLogCount = testConfig.remoteDesiredTLogCount.get();
 		} else if (deterministicRandom()->random01() < 0.25) {

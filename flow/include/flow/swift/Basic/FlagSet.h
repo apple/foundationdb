@@ -45,7 +45,7 @@ protected:
 		return lowMaskFor<BitWidth>() << FirstBit;
 	}
 
-	constexpr FlagSet(IntType bits = 0) : Bits(bits) {}
+	explicit constexpr FlagSet(IntType bits = 0) : Bits(bits) {}
 
 	/// Read a single-bit flag.
 	template <unsigned Bit>
