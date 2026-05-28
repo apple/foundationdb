@@ -26,9 +26,11 @@
 #include <string>
 #include <string_view>
 
+#include "flow/flow.h"
+
 class UnitTestRunnerConfig {
 public:
-	using SimulationInitializer = std::function<void()>;
+	using SimulationInitializer = std::function<Future<Void>()>;
 
 	explicit UnitTestRunnerConfig(std::string_view sourceSubDir, SimulationInitializer simulationInitializer = {});
 
@@ -36,7 +38,7 @@ public:
 	std::string dataDir() const;
 	std::string traceName() const;
 	bool supportsSimulation() const;
-	void initializeSimulation() const;
+	Future<Void> initializeSimulation() const;
 
 private:
 	std::string_view sourceSubDir;

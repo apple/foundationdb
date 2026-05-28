@@ -25,15 +25,6 @@
 #error "FDBSERVER_UNIT_TEST_SUITE must be defined"
 #endif
 
-namespace {
-
-void initializeSimulation() {
-	startNewSimulator(false);
-	Sim2FileSystem::newFileSystem();
-}
-
-} // namespace
-
 int main(int argc, char** argv) {
-	return runUnitTests(argc, argv, UnitTestRunnerConfig(FDBSERVER_UNIT_TEST_SUITE, initializeSimulation));
+	return runUnitTests(argc, argv, UnitTestRunnerConfig(FDBSERVER_UNIT_TEST_SUITE, startUnitTestSimulator));
 }

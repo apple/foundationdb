@@ -325,6 +325,14 @@ Future<Void> runTests(const UnitTestRunnerOptions& options,
 	}
 }
 
+Future<Void> runTestsAfterInitialization(Future<Void> initialization,
+                                         const UnitTestRunnerOptions& options,
+                                         const UnitTestRunnerConfig& config,
+                                         UnitTestRunnerResult* result) {
+	co_await initialization;
+	co_await runTests(options, config, result);
+}
+
 Future<Void> stopNetworkAfter(Future<Void> what, std::string_view traceName, int* exitCode) {
 	try {
 		co_await what;
@@ -362,8 +370,8 @@ bool UnitTestRunnerConfig::supportsSimulation() const {
 	return static_cast<bool>(simulationInitializer);
 }
 
-void UnitTestRunnerConfig::initializeSimulation() const {
-	simulationInitializer();
+Future<Void> UnitTestRunnerConfig::initializeSimulation() const {
+	return simulationInitializer();
 }
 
 int runUnitTests(int argc, char** argv, const UnitTestRunnerConfig& config) {
@@ -402,8 +410,9 @@ int runUnitTests(int argc, char** argv, const UnitTestRunnerConfig& config) {
 		return 1;
 	}
 
+	Future<Void> initialization = Void();
 	if (options.simulation) {
-		config.initializeSimulation();
+		initialization = config.initializeSimulation();
 	} else {
 		g_network = newNet2(TLSConfig());
 	}
@@ -411,7 +420,9 @@ int runUnitTests(int argc, char** argv, const UnitTestRunnerConfig& config) {
 
 	int exitCode = 0;
 	UnitTestRunnerResult result;
-	Future<Void> done = stopNetworkAfter(runTests(options, config, &result), traceName, &exitCode);
+	Future<Void> tests = options.simulation ? runTestsAfterInitialization(initialization, options, config, &result)
+	                                        : runTests(options, config, &result);
+	Future<Void> done = stopNetworkAfter(tests, traceName, &exitCode);
 	g_network->run();
 	flushTraceFileVoid();
 

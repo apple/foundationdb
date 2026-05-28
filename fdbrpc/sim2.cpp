@@ -53,6 +53,7 @@
 #include "flow/network.h"
 #include "flow/TLSConfig.h"
 #include "fdbrpc/Net2FileSystem.h"
+#include "fdbrpc/FlowTransport.h"
 #include "AsyncFileWriteChecker.h"
 #include "fdbrpc/genericactors.h"
 #include "fdbrpc/WellKnownEndpoints.h"
@@ -2585,6 +2586,50 @@ void startNewSimulator(bool printSimTime) {
 	g_network = g_simulator = new Sim2(printSimTime);
 	g_simulator->connectionFailuresDisableDuration =
 	    deterministicRandom()->coinflip() ? 0 : DISABLE_CONNECTION_FAILURE_FOREVER;
+}
+
+Future<Void> startUnitTestSimulator() {
+	startNewSimulator(false);
+	Standalone<StringRef> processId(deterministicRandom()->randomUniqueID().toString());
+	auto* process = g_simulator->newProcess(
+	    "UnitTest",
+	    IPAddress(0x01010101),
+	    1,
+	    false,
+	    1,
+	    LocalityData(Optional<Standalone<StringRef>>(), processId, processId, Optional<Standalone<StringRef>>()),
+	    ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource),
+	    "",
+	    "",
+	    currentProtocolVersion(),
+	    false);
+	process->excludeFromRestarts = true;
+
+	Standalone<StringRef> httpProcessId(deterministicRandom()->randomUniqueID().toString());
+	auto* httpProcess = g_simulator->newProcess(
+	    "UnitTestHTTPServer",
+	    IPAddress(0x02020202),
+	    1,
+	    false,
+	    1,
+	    LocalityData(
+	        Optional<Standalone<StringRef>>(), httpProcessId, httpProcessId, Optional<Standalone<StringRef>>()),
+	    ProcessClass(ProcessClass::SimHTTPServerClass, ProcessClass::CommandLineSource),
+	    "",
+	    "",
+	    currentProtocolVersion(),
+	    false);
+	httpProcess->excludeFromRestarts = true;
+	co_await g_simulator->onProcess(httpProcess, TaskPriority::DefaultYield);
+	Sim2FileSystem::newFileSystem();
+	FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT);
+	(void)FlowTransport::transport().bind(httpProcess->address, httpProcess->address);
+	g_simulator->addSimHTTPProcess(makeReference<HTTP::SimServerContext>());
+
+	co_await g_simulator->onProcess(process, TaskPriority::DefaultYield);
+	Sim2FileSystem::newFileSystem();
+	FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT);
+	(void)FlowTransport::transport().bind(process->address, process->address);
 }
 
 Future<Void> doReboot(Uncancellable, ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
