@@ -579,6 +579,11 @@ Future<std::vector<int>> monitorCDCProxies(std::vector<CDCProxyInterface> const&
 	co_return failedProxies;
 }
 
+bool containsCDCProxy(std::vector<CDCProxyInterface> const& proxies, UID proxyId) {
+	return std::any_of(
+	    proxies.begin(), proxies.end(), [proxyId](CDCProxyInterface const& proxy) { return proxy.id() == proxyId; });
+}
+
 Future<Void> recruitFailedCDCProxies(ClusterControllerData* self,
                                      uint64_t recoveryCount,
                                      std::vector<CDCProxyInterface> const& monitoredProxies,
@@ -639,20 +644,12 @@ Future<Void> recruitFailedCDCProxies(ClusterControllerData* self,
 	// a stream to a replacement that is not yet discoverable.
 	self->db.recoveryData->registrationTrigger.trigger();
 	for (const auto& [oldProxyId, newProxyId] : replacements) {
-		auto isCurrentProxy = [self, newProxyId]() {
-			return std::any_of(self->db.cdcProxies.begin(),
-			                   self->db.cdcProxies.end(),
-			                   [newProxyId](CDCProxyInterface const& proxy) { return proxy.id() == newProxyId; });
-		};
-		auto isPublishedProxy = [self, newProxyId]() {
-			return std::any_of(self->db.clientInfo->get().cdcProxies.begin(),
-			                   self->db.clientInfo->get().cdcProxies.end(),
-			                   [newProxyId](CDCProxyInterface const& proxy) { return proxy.id() == newProxyId; });
-		};
-		while (isCurrentProxy() && !isPublishedProxy()) {
+		while (containsCDCProxy(self->db.cdcProxies, newProxyId) &&
+		       !containsCDCProxy(self->db.clientInfo->get().cdcProxies, newProxyId)) {
 			co_await self->db.clientInfo->onChange();
 		}
-		if (isCurrentProxy() && isPublishedProxy()) {
+		if (containsCDCProxy(self->db.cdcProxies, newProxyId) &&
+		    containsCDCProxy(self->db.clientInfo->get().cdcProxies, newProxyId)) {
 			// Reassignment remains necessary if recovery changes while the
 			// replacement endpoint is being published.
 			co_await reassignNativeCdcStreams(self->db.db, oldProxyId, newProxyId);

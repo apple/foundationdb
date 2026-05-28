@@ -169,7 +169,7 @@ target_link_libraries(fdbserver PRIVATE
   "$<LINK_LIBRARY:WHOLE_ARCHIVE,fdbserver_workloads>"
   fdbserver_worker
   fdbserver_backupworker
-  "$<LINK_LIBRARY:WHOLE_ARCHIVE,fdbserver_cdcproxy>"
+  fdbserver_cdcproxy
   fdbserver_clustercontroller
   fdbserver_commitproxy
   fdbserver_consistencyscan

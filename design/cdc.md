@@ -469,11 +469,12 @@ cluster role.
 `ENABLE_NATIVE_CDC` defaults to false. In simulation it may be randomly enabled
 under buggification; workloads that depend on CDC set it explicitly.
 
-The feature knob gates client admission to native CDC operations. Internal
-cleanup and recovery paths remain capable of handling durable CDC state that
-was created while the feature was enabled. This is necessary because disabling
-new use of a feature cannot safely abandon log-retention obligations for
-already registered or recently removed streams.
+The feature knob gates new stream registration. Listing, consumer creation and
+resume, consumption, acknowledgement, and removal remain available for
+streams persisted while native CDC was enabled. Internal cleanup and recovery
+paths likewise continue handling durable CDC state. This is necessary because
+disabling new use of a feature cannot safely abandon log-retention obligations
+for already registered or recently removed streams.
 
 `NATIVE_CDC_TAG_COUNT` controls the bounded tag pool used for new stream
 allocation. Normal operation defaults to a larger tag pool; simulation may
@@ -541,6 +542,9 @@ The basic native CDC workload covers:
 * CDC proxy replacement and recovery of stream service.
 * Errors for stale consume and acknowledgement requests after removal.
 * Creation and eventual collection of retired final-pop state.
+* Disabling native CDC while a live stream remains, rejecting new
+  registration while allowing recovery, consumption, acknowledgement, and
+  removal to drain the persisted stream.
 * Recovery with native CDC disabled after the last stream and final-pop work
   have drained, verifying that no CDC proxy remains required.
 

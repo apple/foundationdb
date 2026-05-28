@@ -38,7 +38,7 @@ namespace {
 
 void validateNativeCdcEnabled() {
 	if (!CLIENT_KNOBS->ENABLE_NATIVE_CDC) {
-		CODE_PROBE(true, "Native CDC API rejected while feature disabled", probe::decoration::rare);
+		CODE_PROBE(true, "Native CDC registration rejected while feature disabled", probe::decoration::rare);
 		throw client_invalid_operation();
 	}
 }
@@ -591,7 +591,6 @@ Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, KeyRang
 }
 
 Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreamsClient(Database cx) {
-	validateNativeCdcEnabled();
 	Optional<UID> previousProxy;
 
 	while (true) {
@@ -621,7 +620,6 @@ Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreamsClient(Database cx)
 }
 
 Future<Void> removeNativeCdcStreamClient(Database cx, Key name) {
-	validateNativeCdcEnabled();
 	if (name.empty()) {
 		throw client_invalid_operation();
 	}
@@ -655,18 +653,15 @@ Future<Void> removeNativeCdcStreamClient(Database cx, Key name) {
 }
 
 Future<Reference<NativeCdcConsumer>> createNativeCdcConsumer(Database cx, Key name) {
-	validateNativeCdcEnabled();
 	const CDCStreamId streamId = co_await getNativeCdcStreamId(cx, name);
 	co_return makeReference<NativeCdcConsumer>(cx, CDCCursor(streamId, invalidVersion));
 }
 
 Reference<NativeCdcConsumer> resumeNativeCdcConsumer(Database cx, CDCCursor position) {
-	validateNativeCdcEnabled();
 	return makeReference<NativeCdcConsumer>(cx, position);
 }
 
 Future<CDCConsumeReply> NativeCdcConsumer::consumeImpl(Reference<NativeCdcConsumer> self) {
-	validateNativeCdcEnabled();
 	while (true) {
 		CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(self->cx, self->currentPosition.streamId);
 		try {
@@ -695,7 +690,6 @@ Future<CDCConsumeReply> NativeCdcConsumer::consume() {
 }
 
 Future<Void> NativeCdcConsumer::acknowledgeImpl(Reference<NativeCdcConsumer> self) {
-	validateNativeCdcEnabled();
 	if (self->currentPosition.streamId == 0 || self->currentPosition.lastConsumedVersion < 0 ||
 	    self->currentPosition.lastConsumedVersion == std::numeric_limits<Version>::max()) {
 		throw client_invalid_operation();

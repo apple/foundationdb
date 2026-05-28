@@ -530,6 +530,57 @@ struct NativeCdcWorkload : TestWorkload {
 		co_await liveConsumer->acknowledge();
 		ASSERT(co_await getPersistedMinVersion(cx, liveStreamId) == liveConsumer->position().lastConsumedVersion + 1);
 
+		if (g_network->isSimulated()) {
+			(const_cast<ClientKnobs*>(CLIENT_KNOBS))->ENABLE_NATIVE_CDC = false;
+
+			bool disabledRegistrationRejected = false;
+			try {
+				co_await registerNativeCdcStreamClient(cx, "native-cdc-disabled-registration"_sr, liveRange);
+			} catch (Error& e) {
+				disabledRegistrationRejected = e.code() == error_code_client_invalid_operation;
+			}
+			ASSERT(disabledRegistrationRejected);
+
+			listed = co_await listNativeCdcStreamsClient(cx);
+			ASSERT(listed.size() == 1);
+			ASSERT(listed[0].streamId == liveStreamId);
+			ASSERT((co_await createNativeCdcConsumer(cx, liveName))->position().streamId == liveStreamId);
+			liveConsumer = resumeNativeCdcConsumer(cx, liveConsumer->position());
+
+			const int32_t disabledResolverCount = (co_await getDatabaseConfiguration(cx)).getDesiredResolvers() + 1;
+			const uint64_t recoveryBeforeDisabledDrain = dbInfo->get().recoveryCount;
+			co_await changeResolverCount(cx, disabledResolverCount);
+			co_await timeoutError(waitForRecoveryAfter(recoveryBeforeDisabledDrain, RecoveryState::ACCEPTING_COMMITS),
+			                      60.0);
+			recoveredOwner = co_await timeoutError(getCDCProxy(liveStreamId), 30.0);
+
+			const Version afterDisableVersion =
+			    co_await writeValues(cx, { { "live/after-disable"_sr, "captured-after-disable"_sr } });
+			bool foundAfterDisableWrite = false;
+			const double afterDisableConsumeDeadline = now() + 30.0;
+			while (liveConsumer->position().lastConsumedVersion < afterDisableVersion) {
+				const Version previous = liveConsumer->position().lastConsumedVersion;
+				CDCConsumeReply afterDisable = co_await timeoutError(liveConsumer->consume(), 30.0);
+				if (afterDisable.lastConsumedVersion == previous) {
+					ASSERT(now() < afterDisableConsumeDeadline);
+					co_await delay(0.1);
+					continue;
+				}
+				ASSERT(afterDisable.lastConsumedVersion > previous);
+				for (const auto& versioned : afterDisable.mutations) {
+					for (const auto& mutation : versioned.mutations) {
+						if (mutation.param1 == "live/after-disable"_sr) {
+							foundAfterDisableWrite = true;
+						}
+					}
+				}
+			}
+			ASSERT(foundAfterDisableWrite);
+			co_await liveConsumer->acknowledge();
+			ASSERT(co_await getPersistedMinVersion(cx, liveStreamId) ==
+			       liveConsumer->position().lastConsumedVersion + 1);
+		}
+
 		Future<CDCConsumeReply> pendingConsume = recoveredOwner.consume.getReply(
 		    CDCConsumeRequest(CDCCursor(liveStreamId, std::numeric_limits<Version>::max() - 2)));
 		co_await delay(0.1);
@@ -563,7 +614,6 @@ struct NativeCdcWorkload : TestWorkload {
 		co_await timeoutError(waitForNoRetiredTagPopState(cx, liveTag), 30.0);
 
 		if (g_network->isSimulated()) {
-			(const_cast<ClientKnobs*>(CLIENT_KNOBS))->ENABLE_NATIVE_CDC = false;
 			const int32_t disabledResolverCount = (co_await getDatabaseConfiguration(cx)).getDesiredResolvers() + 1;
 			const uint64_t recoveryBeforeDisable = dbInfo->get().recoveryCount;
 			co_await changeResolverCount(cx, disabledResolverCount);
