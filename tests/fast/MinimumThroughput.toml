@@ -1,0 +1,10 @@
+[[test]]
+testTitle = 'MinimumThroughput'
+
+    [[test.workload]]
+    testName = 'MinimumThroughput'
+    testDuration = 30.0
+    transactionsPerSecond = 200.0
+    nodeCount = 100000
+    readFraction = 0.5
+    expectedRate = 0.8
