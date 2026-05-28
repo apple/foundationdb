@@ -5,6 +5,10 @@ add_fdbserver_link_test(fdbserver_cdcproxylinktest
   fdbserver_cdcproxy
   fdbserver_logsystem
   fdbserver_core)
+add_fdbserver_unit_test(fdbserver_cdcproxy_test cdcproxy
+  fdbserver_cdcproxy
+  fdbserver_logsystem
+  fdbserver_core)
 
 configure_fdbserver_common_includes(fdbserver_cdcproxy)
 target_include_directories(fdbserver_cdcproxy
