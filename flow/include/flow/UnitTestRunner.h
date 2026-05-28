@@ -22,14 +22,15 @@
 #define FLOW_UNIT_TEST_RUNNER_H
 #pragma once
 
+#include <functional>
 #include <string>
 #include <string_view>
 
 class UnitTestRunnerConfig {
 public:
-	using SimulationInitializer = void (*)();
+	using SimulationInitializer = std::function<void()>;
 
-	explicit UnitTestRunnerConfig(std::string_view sourceSubDir, SimulationInitializer simulationInitializer = nullptr);
+	explicit UnitTestRunnerConfig(std::string_view sourceSubDir, SimulationInitializer simulationInitializer = {});
 
 	std::string_view suiteName() const;
 	std::string dataDir() const;

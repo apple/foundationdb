@@ -37,6 +37,7 @@
 #include <exception>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #ifndef _WIN32
@@ -343,7 +344,7 @@ Future<Void> stopNetworkAfter(Future<Void> what, std::string_view traceName, int
 } // namespace
 
 UnitTestRunnerConfig::UnitTestRunnerConfig(std::string_view sourceSubDir, SimulationInitializer simulationInitializer)
-  : sourceSubDir(sourceSubDir), simulationInitializer(simulationInitializer) {}
+  : sourceSubDir(sourceSubDir), simulationInitializer(std::move(simulationInitializer)) {}
 
 std::string_view UnitTestRunnerConfig::suiteName() const {
 	return sourceSubDir;
@@ -358,7 +359,7 @@ std::string UnitTestRunnerConfig::traceName() const {
 }
 
 bool UnitTestRunnerConfig::supportsSimulation() const {
-	return simulationInitializer != nullptr;
+	return static_cast<bool>(simulationInitializer);
 }
 
 void UnitTestRunnerConfig::initializeSimulation() const {
