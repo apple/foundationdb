@@ -278,6 +278,8 @@ struct NativeCdcWorkload : TestWorkload {
 		ASSERT((co_await getLatestPersistedTag(cx, secondId)) == firstRoute.first);
 
 		ASSERT(co_await registerNativeCdcStreamClient(cx, firstName, keys) == firstId);
+		ASSERT(co_await registerNativeCdcStreamClient(cx, secondName, keys) == secondId);
+		ASSERT((co_await getCDCProxy(firstId)).id() == (co_await getCDCProxy(secondId)).id());
 		const Version writeVersion = co_await writeValues(cx, { { "shared/unread"_sr, "protected-by-minimum"_sr } });
 		CDCCursor firstCursor = co_await createNativeCdcCursor(cx, firstName);
 		ASSERT(firstCursor.streamId == firstId);
@@ -296,7 +298,6 @@ struct NativeCdcWorkload : TestWorkload {
 		co_await removeNativeCdcStreamClient(cx, firstName);
 		co_await waitForCDCProxyAssignmentRemoval(firstId);
 
-		ASSERT(co_await registerNativeCdcStreamClient(cx, secondName, keys) == secondId);
 		CDCCursor unreadCursor = co_await createNativeCdcCursor(cx, secondName);
 		ASSERT(unreadCursor.streamId == secondId);
 		bool foundUnread = false;
@@ -556,7 +557,7 @@ struct NativeCdcWorkload : TestWorkload {
 		ASSERT(!(co_await hasRetiredTagPopState(cx, liveTag)));
 
 		if (g_network->isSimulated()) {
-			CLIENT_KNOBS->ENABLE_NATIVE_CDC = false;
+			(const_cast<ClientKnobs*>(CLIENT_KNOBS))->ENABLE_NATIVE_CDC = false;
 			const int32_t disabledResolverCount = (co_await getDatabaseConfiguration(cx)).getDesiredResolvers() + 1;
 			const uint64_t recoveryBeforeDisable = dbInfo->get().recoveryCount;
 			co_await changeResolverCount(cx, disabledResolverCount);

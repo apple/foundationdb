@@ -2151,6 +2151,7 @@ Future<Void> monitorCDCProxyAssignments(ClusterControllerData::DBInfo* db) {
 
 				std::map<CDCStreamId, UID> streamToCDCProxyId;
 				const std::vector<CDCProxyInterface> availableProxies = db->cdcProxies;
+				std::map<UID, UID> replacementByFailedProxy;
 				size_t replacementIndex = 0;
 				bool repairedAssignment = false;
 				Key begin = cdcProxyKeys.begin;
@@ -2165,7 +2166,13 @@ Future<Void> monitorCDCProxyAssignments(ClusterControllerData::DBInfo* db) {
 							    return proxy.id() == proxyId;
 						    });
 						if (!availableProxies.empty() && !hasOwner) {
-							resolvedProxyId = availableProxies[replacementIndex++ % availableProxies.size()].id();
+							auto replacement = replacementByFailedProxy.find(proxyId);
+							if (replacement == replacementByFailedProxy.end()) {
+								resolvedProxyId = availableProxies[replacementIndex++ % availableProxies.size()].id();
+								replacementByFailedProxy.emplace(proxyId, resolvedProxyId);
+							} else {
+								resolvedProxyId = replacement->second;
+							}
 							tr.clear(assignment.key);
 							tr.set(cdcProxyKeyFor(streamId, resolvedProxyId), Value());
 							repairedAssignment = true;

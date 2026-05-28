@@ -97,6 +97,69 @@ Future<Optional<UID>> getNativeCdcProxyAssignment(Transaction* tr, CDCStreamId s
 	co_return proxyId;
 }
 
+Future<Tag> getNativeCdcCurrentTag(Transaction* tr, CDCStreamId streamId) {
+	Optional<Tag> currentTag;
+	const KeyRange historyRange = cdcTagHistoryRangeFor(streamId);
+	Key begin = historyRange.begin;
+	while (begin < historyRange.end) {
+		RangeResult history = co_await tr->getRange(KeyRangeRef(begin, historyRange.end), CLIENT_KNOBS->TOO_MANY);
+		for (const auto& assignment : history) {
+			currentTag = std::get<2>(decodeCDCTagHistoryKey(assignment.key));
+		}
+		if (!history.more) {
+			break;
+		}
+		begin = keyAfter(history.back().key);
+	}
+	if (!currentTag.present()) {
+		throw client_invalid_operation();
+	}
+	co_return currentTag.get();
+}
+
+Future<Optional<UID>> getNativeCdcProxyAssignmentForTag(Transaction* tr, Tag targetTag) {
+	std::set<CDCStreamId> activeStreamIds;
+	Key begin = cdcStreamKeys.begin;
+	while (begin < cdcStreamKeys.end) {
+		RangeResult streams = co_await tr->getRange(KeyRangeRef(begin, cdcStreamKeys.end), CLIENT_KNOBS->TOO_MANY);
+		for (const auto& stream : streams) {
+			activeStreamIds.insert(decodeCDCStreamKey(stream.key));
+		}
+		if (!streams.more) {
+			break;
+		}
+		begin = keyAfter(streams.back().key);
+	}
+
+	std::map<CDCStreamId, Tag> currentTags;
+	begin = cdcTagHistoryKeys.begin;
+	while (begin < cdcTagHistoryKeys.end) {
+		RangeResult histories =
+		    co_await tr->getRange(KeyRangeRef(begin, cdcTagHistoryKeys.end), CLIENT_KNOBS->TOO_MANY);
+		for (const auto& history : histories) {
+			const auto decoded = decodeCDCTagHistoryKey(history.key);
+			const CDCStreamId streamId = std::get<0>(decoded);
+			if (activeStreamIds.contains(streamId)) {
+				currentTags[streamId] = std::get<2>(decoded);
+			}
+		}
+		if (!histories.more) {
+			break;
+		}
+		begin = keyAfter(histories.back().key);
+	}
+
+	for (const auto& [streamId, tag] : currentTags) {
+		if (tag == targetTag) {
+			Optional<UID> proxyId = co_await getNativeCdcProxyAssignment(tr, streamId);
+			if (proxyId.present()) {
+				co_return proxyId;
+			}
+		}
+	}
+	co_return Optional<UID>();
+}
+
 void signalNativeCdcProxyAssignmentChange(Transaction* tr) {
 	tr->set(cdcProxyAssignmentChangeKey,
 	        BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),
@@ -283,7 +346,10 @@ Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys
 					throw client_invalid_operation();
 				}
 				if (proxyId.present() && !(co_await getNativeCdcProxyAssignment(&tr, streamId)).present()) {
-					tr.set(cdcProxyKeyFor(streamId, proxyId.get()), Value());
+					const Tag tag = co_await getNativeCdcCurrentTag(&tr, streamId);
+					Optional<UID> sharedTagProxy = co_await getNativeCdcProxyAssignmentForTag(&tr, tag);
+					const UID selectedProxy = sharedTagProxy.present() ? sharedTagProxy.get() : proxyId.get();
+					tr.set(cdcProxyKeyFor(streamId, selectedProxy), Value());
 					signalNativeCdcProxyAssignmentChange(&tr);
 					co_await tr.commit();
 				}
@@ -302,7 +368,9 @@ Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys
 			tr.atomicOp(
 			    cdcMinVersionKeyFor(streamId), cdcVersionstampedMinVersionValue(), MutationRef::SetVersionstampedValue);
 			if (proxyId.present()) {
-				tr.set(cdcProxyKeyFor(streamId, proxyId.get()), Value());
+				Optional<UID> sharedTagProxy = co_await getNativeCdcProxyAssignmentForTag(&tr, tag);
+				const UID selectedProxy = sharedTagProxy.present() ? sharedTagProxy.get() : proxyId.get();
+				tr.set(cdcProxyKeyFor(streamId, selectedProxy), Value());
 				signalNativeCdcProxyAssignmentChange(&tr);
 			}
 			co_await tr.commit();
