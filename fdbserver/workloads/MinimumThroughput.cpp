@@ -1,8 +1,6 @@
 /*
  * MinimumThroughput.cpp
  *
- * Do not mix this with Attrition or similar error injection workloads.
- *
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
@@ -24,6 +22,9 @@
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.h"
 
+// NOTE: Do not mix this with Attrition or similar error injection workloads.
+// Its purpose is to ensure a basic level of transaction throughput in error-free
+// circumstances.
 struct MinimumThroughputWorkload : TestWorkload {
 	static constexpr auto NAME = "MinimumThroughput";
 
