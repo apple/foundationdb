@@ -1577,13 +1577,16 @@ void commitMessages(TLogData* self,
 		block.append(block.arena(), msg.message.begin(), msg.message.size());
 		for (auto tag : msg.tags) {
 			if (logData->locality == tagLocalitySatellite) {
-				if (!(tag.locality == tagLocalityTxs || tag.locality == tagLocalityLogRouter || tag == txsTag)) {
+				if (!(tag.locality == tagLocalityTxs || tag.locality == tagLocalityLogRouter ||
+				      tag.locality == tagLocalityCDC || tag == txsTag)) {
 					continue;
 				}
 			} else if (!(logData->locality == tagLocalitySpecial || logData->locality == tag.locality ||
 			             tag.locality < 0)) {
 				continue;
 			}
+			CODE_PROBE(logData->locality == tagLocalitySatellite && tag.locality == tagLocalityCDC,
+			           "Satellite TLog indexes CDC mutation");
 
 			if (tag.locality == tagLocalityLogRouter) {
 				if (!logData->logRouterTags) {

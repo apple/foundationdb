@@ -30,14 +30,17 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/ServerDBInfo.h"
+#include "fdbserver/core/TLogInterface.h"
 #include "fdbserver/tester/workloads.h"
 
 struct NativeCdcWorkload : TestWorkload {
 	static constexpr auto NAME = "NativeCdc";
 	bool sharedTagSafety;
+	bool verifySatelliteIndexing;
 
 	explicit NativeCdcWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), sharedTagSafety(getOption(options, "sharedTagSafety"_sr, false)) {}
+	  : TestWorkload(wcx), sharedTagSafety(getOption(options, "sharedTagSafety"_sr, false)),
+	    verifySatelliteIndexing(getOption(options, "verifySatelliteIndexing"_sr, false)) {}
 
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("all"); }
 
@@ -273,6 +276,27 @@ struct NativeCdcWorkload : TestWorkload {
 		}
 	}
 
+	Future<Void> verifySatelliteCDCWrite(Tag tag, Version version) {
+		bool foundSatelliteTLog = false;
+		for (const auto& tlogset : dbInfo->get().logSystemConfig.tLogs) {
+			if (!tlogset.isLocal || tlogset.locality != tagLocalitySatellite) {
+				continue;
+			}
+			foundSatelliteTLog = true;
+			for (const auto& tlog : tlogset.tLogs) {
+				TLogPeekReply reply = co_await timeoutError(
+				    tlog.interf().peekMessages.getReply(TLogPeekRequest(version, tag, true, false)), 30.0);
+				if (!reply.messages.empty()) {
+					CODE_PROBE(true, "Native CDC workload reads tagged mutation from a satellite TLog");
+					co_return;
+				}
+			}
+		}
+		ASSERT(foundSatelliteTLog);
+		ASSERT(false);
+		co_return;
+	}
+
 	Future<Void> runSharedTagSafety(Database cx) {
 		const Key firstName = "native-cdc-shared-first"_sr;
 		const Key secondName = "native-cdc-shared-second"_sr;
@@ -415,6 +439,9 @@ struct NativeCdcWorkload : TestWorkload {
 
 		const Version writeVersion =
 		    co_await writeValues(cx, { { "live/in"_sr, "captured"_sr }, { "other/out"_sr, "ignored"_sr } });
+		if (verifySatelliteIndexing) {
+			co_await verifySatelliteCDCWrite(liveTag, writeVersion);
+		}
 
 		for (const auto& nonOwner : dbInfo->get().client.cdcProxies) {
 			if (nonOwner.id() == owner.id()) {
@@ -506,6 +533,9 @@ struct NativeCdcWorkload : TestWorkload {
 
 		const Version afterRecoveryVersion =
 		    co_await writeValues(cx, { { "live/after-recovery"_sr, "captured-after-recovery"_sr } });
+		if (verifySatelliteIndexing) {
+			co_await verifySatelliteCDCWrite(liveTag, afterRecoveryVersion);
+		}
 		bool foundAfterRecoveryWrite = false;
 		const double afterRecoveryConsumeDeadline = now() + 30.0;
 		while (liveConsumer->position().lastConsumedVersion < afterRecoveryVersion) {

@@ -230,6 +230,7 @@ if(WITH_PYTHON)
 
   if (MULTIREGION_TEST)
     # ValidateStorage depends on WITH_ROCKSDB
+    add_fdb_test(TEST_FILES fast/NativeCdcSatellite.toml)
     add_fdb_test(TEST_FILES slow/DiskFailureCycle.toml)
     add_fdb_test(TEST_FILES rare/FailoverWithSSLag.toml)
     add_fdb_test(TEST_FILES rare/DcLag.toml)
