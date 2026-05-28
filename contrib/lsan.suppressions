@@ -19,6 +19,7 @@ leak:ConnectionReaderActorState
 # cannot execute after the network stops. This covers the transaction objects
 # and all their owned state (TransactionState, WriteMap, ReadVersion actors).
 leak:ThreadSafeDatabase::createTransaction
+leak:ThreadSafeTransaction::ThreadSafeTransaction
 
 # External client libraries (loaded via MultiVersionApi) create DatabaseContext
 # objects whose cleanup is deferred via onMainThreadVoid in ~ThreadSafeDatabase.
