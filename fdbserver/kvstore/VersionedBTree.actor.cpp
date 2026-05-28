@@ -3404,7 +3404,7 @@ public:
 
 		// Maximum number of remaining remap entries to keep before obeying stop command.
 		double toleranceRatio = buggify() ? deterministicRandom()->randomInt(0, 10) / 100.0
-		                                : SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_TOLERANCE_RATIO;
+		                                  : SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_TOLERANCE_RATIO;
 		// For simplicity, we assume each entry in the remap queue corresponds to one remapped page.
 		uint64_t remapCleanupWindowEntries =
 		    static_cast<uint64_t>(self->remapCleanupWindowBytes / self->header.pageSize);
@@ -7601,16 +7601,16 @@ public:
 			pageCacheBytes =
 			    g_network->isSimulated()
 			        ? (buggify() ? deterministicRandom()->randomInt(pageSize, FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_4K)
-			                   : FLOW_KNOBS->SIM_PAGE_CACHE_4K)
+			                     : FLOW_KNOBS->SIM_PAGE_CACHE_4K)
 			        : FLOW_KNOBS->PAGE_CACHE_4K;
 		}
 		// Rough size of pages to keep in remap cleanup queue before being cleanup.
 		int64_t remapCleanupWindowBytes =
 		    g_network->isSimulated()
 		        ? (buggify() ? (deterministicRandom()->coinflip()
-		                          ? deterministicRandom()->randomInt64(0, 100 * 1024) // small window
-		                          : deterministicRandom()->randomInt64(0, 100 * 1024 * 1024)) // large window
-		                   : 100 * 1024 * 1024) // 100M
+		                            ? deterministicRandom()->randomInt64(0, 100 * 1024) // small window
+		                            : deterministicRandom()->randomInt64(0, 100 * 1024 * 1024)) // large window
+		                     : 100 * 1024 * 1024) // 100M
 		        : SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_WINDOW_BYTES;
 
 		IPager2* pager = new DWALPager(pageSize,
@@ -9786,8 +9786,8 @@ TEST_CASE("Lredwood/correctness/btree") {
 	    params.getDouble("advanceOldVersionProbability").orDefault(deterministicRandom()->random01());
 	state int64_t pageCacheBytes =
 	    params.getInt("pageCacheBytes")
-	        .orDefault(pagerMemoryOnly ? 2e9
-	                                   : (pageSize * deterministicRandom()->randomInt(1, (buggify() ? 10 : 10000) + 1)));
+	        .orDefault(
+	            pagerMemoryOnly ? 2e9 : (pageSize * deterministicRandom()->randomInt(1, (buggify() ? 10 : 10000) + 1)));
 	state Version versionIncrement =
 	    params.getInt("versionIncrement").orDefault(deterministicRandom()->randomInt64(1, 1e8));
 	state int64_t remapCleanupWindowBytes =

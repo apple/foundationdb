@@ -773,8 +773,7 @@ public:
 
 		// Read up to 1MB into readingBuffer
 		int len = std::min<int64_t>((files[readingFile].size / sizeof(Page) - readingPage) * sizeof(Page),
-		                            buggify(1.0) ? sizeof(Page) * deterministicRandom()->randomInt(1, 4)
-		                                                   : (1 << 20));
+		                            buggify(1.0) ? sizeof(Page) * deterministicRandom()->randomInt(1, 4) : (1 << 20));
 		readingBuffer.clear();
 		readingBuffer.alignReserve(sizeof(Page), len);
 		void* p = readingBuffer.append(len);

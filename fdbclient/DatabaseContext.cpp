@@ -759,7 +759,7 @@ static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 			// Commit the chunks splitting into different transactions if needed
 			int64_t dataSizeLimit =
 			    buggify() ? deterministicRandom()->randomInt(200e3, 1.5 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT)
-			            : 0.8 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
+			              : 0.8 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 			auto tracking_iter = trChunksQ.begin();
 			ASSERT(commitQ.empty() && (txBytes == 0));
 			while (true) {

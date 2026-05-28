@@ -2402,8 +2402,8 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				outVersion = values.second;
 				// block size must be at least large enough for 3 max size keys and 2 max size values + overhead so
 				// 250k conservatively.
-				int blockSize =
-				    buggify() ? deterministicRandom()->randomInt(250e3, 4e6) : CLIENT_KNOBS->BACKUP_RANGEFILE_BLOCK_SIZE;
+				int blockSize = buggify() ? deterministicRandom()->randomInt(250e3, 4e6)
+				                          : CLIENT_KNOBS->BACKUP_RANGEFILE_BLOCK_SIZE;
 				Version snapshotBeginVersion{ 0 };
 				int64_t snapshotRangeFileCount{ 0 };
 
@@ -2897,7 +2897,7 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 
 			// Limit number of tasks added per transaction
 			int taskBatchSize = buggify() ? deterministicRandom()->randomInt(1, countShardsToDispatch + 1)
-			                            : CLIENT_KNOBS->BACKUP_DISPATCH_ADDTASK_SIZE;
+			                              : CLIENT_KNOBS->BACKUP_DISPATCH_ADDTASK_SIZE;
 			int added = 0;
 
 			while (countShardsToDispatch > 0 && added < taskBatchSize && shardMap.size() > 0) {

@@ -1403,7 +1403,7 @@ Future<Void> tLogPop(TLogData* self, TLogPopRequest req, Reference<LogData> logD
 
 double getTLogStorageUpdateDelayDuration() {
 	return buggify() ? SERVER_KNOBS->BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL
-	               : SERVER_KNOBS->TLOG_STORAGE_MIN_UPDATE_INTERVAL;
+	                 : SERVER_KNOBS->TLOG_STORAGE_MIN_UPDATE_INTERVAL;
 }
 
 // This function (and updatePersistentData, which is called by this function) run at a low priority and can soak up all

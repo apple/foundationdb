@@ -1315,10 +1315,11 @@ Future<Void> sendInitialCommitToResolvers(Reference<ClusterRecoveryData> self) {
 		if (data.empty())
 			break;
 		((KeyRangeRef&)txnKeys) = KeyRangeRef(keyAfter(data.back().key, txnKeys.arena()), txnKeys.end);
-		RangeResult nextData =
-		    self->txnStateStore
-		        ->readRange(txnKeys, buggify() ? 3 : SERVER_KNOBS->DESIRED_TOTAL_BYTES, SERVER_KNOBS->DESIRED_TOTAL_BYTES)
-		        .get();
+		RangeResult nextData = self->txnStateStore
+		                           ->readRange(txnKeys,
+		                                       buggify() ? 3 : SERVER_KNOBS->DESIRED_TOTAL_BYTES,
+		                                       SERVER_KNOBS->DESIRED_TOTAL_BYTES)
+		                           .get();
 
 		TxnStateRequest req;
 		req.arena = data.arena();

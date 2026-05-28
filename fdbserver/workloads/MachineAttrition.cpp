@@ -111,10 +111,10 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 		killProcess = getOption(options, "killProcess"_sr, killProcess);
 		killZone = getOption(options, "killZone"_sr, killZone);
 		killSelf = getOption(options, "killSelf"_sr, killSelf);
-		killAll = getOption(options,
-		                    "killAll"_sr,
-		                    g_network->isSimulated() && !fdbSimulationPolicyState().extraDatabases.empty() &&
-		                        buggify(0.01));
+		killAll =
+		    getOption(options,
+		              "killAll"_sr,
+		              g_network->isSimulated() && !fdbSimulationPolicyState().extraDatabases.empty() && buggify(0.01));
 		targetIds = getOption(options, "targetIds"_sr, std::vector<std::string>());
 		replacement = getOption(options, "replacement"_sr, reboot && deterministicRandom()->random01() < 0.5);
 		waitForVersion = getOption(options, "waitForVersion"_sr, waitForVersion);

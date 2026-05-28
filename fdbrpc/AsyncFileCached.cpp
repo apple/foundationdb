@@ -57,7 +57,8 @@ Future<Reference<IAsyncFile>> AsyncFileCached::open_impl(std::string filename, i
 	if (g_network->isSimulated()) {
 		auto cacheItr = simulatorPageCaches.find(g_network->getLocalAddress());
 		if (cacheItr == simulatorPageCaches.end()) {
-			int64_t pageCacheSize4k = (buggify()) ? FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_4K : FLOW_KNOBS->SIM_PAGE_CACHE_4K;
+			int64_t pageCacheSize4k =
+			    (buggify()) ? FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_4K : FLOW_KNOBS->SIM_PAGE_CACHE_4K;
 			int64_t pageCacheSize64k =
 			    (buggify()) ? FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_64K : FLOW_KNOBS->SIM_PAGE_CACHE_64K;
 			auto caches = std::make_pair(makeReference<EvictablePageCache>(4096, pageCacheSize4k),

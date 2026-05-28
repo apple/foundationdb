@@ -39,9 +39,7 @@ struct BuggifySection {
 	const char* file;
 	int line;
 
-	bool operator==(const BuggifySection& rhs) const noexcept {
-		return line == rhs.line && file == rhs.file;
-	}
+	bool operator==(const BuggifySection& rhs) const noexcept { return line == rhs.line && file == rhs.file; }
 };
 
 struct BuggifySectionHash {
@@ -70,7 +68,7 @@ struct BuggifySectionHash {
 	inline bool get##Type##SBVar(const char* file, const int line) {                                                   \
 		const BuggifySection section{ file, line };                                                                    \
 		const auto sectionItr = Type##_SBVars.find(section);                                                           \
-		if (sectionItr != Type##_SBVars.end()) [[likely]] {                                                           \
+		if (sectionItr != Type##_SBVars.end()) [[likely]] {                                                            \
 			return sectionItr->second;                                                                                 \
 		}                                                                                                              \
                                                                                                                        \
@@ -100,8 +98,7 @@ inline bool buggify(double probability = P_GENERAL_BUGGIFIED_SECTION_FIRES,
 #define EXPENSIVE_VALIDATION (isGeneralBuggifyEnabled() && deterministicRandom()->random01() < P_EXPENSIVE_VALIDATION)
 
 #define CLIENT_BUGGIFY_WITH_PROB(x)                                                                                    \
-	(isClientBuggifyEnabled() && getClientSBVar(__FILE__, __LINE__) &&                                                 \
-	 deterministicRandom()->random01() < (x))
+	(isClientBuggifyEnabled() && getClientSBVar(__FILE__, __LINE__) && deterministicRandom()->random01() < (x))
 #define CLIENT_BUGGIFY CLIENT_BUGGIFY_WITH_PROB(P_CLIENT_BUGGIFIED_SECTION_FIRES)
 
 namespace SwiftBridging {
