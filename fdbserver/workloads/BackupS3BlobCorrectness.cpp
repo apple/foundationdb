@@ -446,9 +446,9 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		co_await delay(startDelay);
 
 		// S3-specific: Conditional cleanup matching original BackupCorrectness behavior
-		// Only abort existing backups on first call (startDelay > 0) or randomly (BUGGIFY)
+		// Only abort existing backups on first call (startDelay > 0) or randomly (buggify())
 		// This prevents excessive cleanup on test restarts that caused timeouts
-		if (startDelay || BUGGIFY) {
+		if (startDelay || buggify()) {
 			TraceEvent("BS3BCW_DoBackupAbortBackup1", randomID)
 			    .detail("Tag", printable(tag))
 			    .detail("StartDelay", startDelay);

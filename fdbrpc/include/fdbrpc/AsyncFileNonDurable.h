@@ -364,7 +364,7 @@ private:
 			    self->getModificationsAndInsert(offset, length, true, writeEnded);
 			self->minSizeAfterPendingModifications = std::max(self->minSizeAfterPendingModifications, offset + length);
 
-			if (BUGGIFY_WITH_PROB(0.001) && !g_simulator->speedUpSimulation)
+			if (buggify(0.001) && !g_simulator->speedUpSimulation)
 				priorModifications.push_back(
 				    delay(deterministicRandom()->random01() * FLOW_KNOBS->MAX_PRIOR_MODIFICATION_DELAY) ||
 				    self->killed.getFuture());
@@ -542,7 +542,7 @@ private:
 			std::vector<Future<Void>> priorModifications =
 			    self->getModificationsAndInsert(beginModifiedRange, /*through end of file*/ -1, true, truncateEnded);
 
-			if (BUGGIFY_WITH_PROB(0.001))
+			if (buggify(0.001))
 				priorModifications.push_back(
 				    delay(deterministicRandom()->random01() * FLOW_KNOBS->MAX_PRIOR_MODIFICATION_DELAY) ||
 				    self->killed.getFuture());

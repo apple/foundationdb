@@ -993,7 +993,7 @@ public:
 					UIDofLongest = kv.first;
 				}
 			}
-			if (BUGGIFY) {
+			if (buggify()) {
 				UIDofLongest = deterministicRandom()->randomUniqueID();
 			}
 			auto it = keyRangeMap.find(UIDofLongest);
@@ -2320,7 +2320,7 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext p
 				ASSERT(reply.error.get().code() != error_code_future_version);
 				throw reply.error.get();
 			}
-			if (BUGGIFY) {
+			if (buggify()) {
 				throw transaction_too_old();
 			}
 
@@ -2369,7 +2369,7 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext p
 					// if we need to wait for a higher version because of a race, wait for that version
 					watchFuture = watchFuture || data->version.whenAtLeast(waitVersion);
 				}
-				if (BUGGIFY) {
+				if (buggify()) {
 					// Simulate a trigger on the watch that results in the loop going around without the value changing
 					watchFuture = watchFuture || delay(deterministicRandom()->random01());
 				}
@@ -2420,7 +2420,7 @@ ACTOR Future<Void> watchValueSendReply(StorageServer* data,
 		double timeoutDelay = -1;
 		if (data->noRecentUpdates.get()) {
 			timeoutDelay = std::max(CLIENT_KNOBS->FAST_WATCH_TIMEOUT - (now() - startTime), 0.0);
-		} else if (!BUGGIFY) {
+		} else if (!buggify()) {
 			timeoutDelay = std::max(CLIENT_KNOBS->WATCH_TIMEOUT - (now() - startTime), 0.0);
 		}
 
@@ -3139,7 +3139,7 @@ Future<Key> findKey(StorageServer* data,
 	else
 		maxBytes =
 		    (g_network->isSimulated() &&
-		     simulationPolicyHasCapability(ISimulationPolicy::Capability::LimitStorageServerReadBytes) && BUGGIFY)
+		     simulationPolicyHasCapability(ISimulationPolicy::Capability::LimitStorageServerReadBytes) && buggify())
 		        ? SERVER_KNOBS->BUGGIFY_LIMIT_BYTES
 		        : SERVER_KNOBS->STORAGE_LIMIT_BYTES;
 
@@ -5908,7 +5908,7 @@ Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest 
 				// Even if TSS mode is Disabled, this may be the second test in a restarting test where the first run
 				// had it enabled.
 				int byteLimit =
-				    (BUGGIFY && g_network->isSimulated() &&
+				    (buggify() && g_network->isSimulated() &&
 				     simulationPolicyHasCapability(ISimulationPolicy::Capability::LimitStorageServerReadBytes) &&
 				     !data->isTss() && !data->isSSWithTSSPair())
 				        ? 1
@@ -6509,7 +6509,7 @@ void splitMutation(StorageServer* data, KeyRangeMap<T>& map, MutationRef const& 
 Future<Void> logFetchKeysWarning(AddingShard* shard) {
 	double startTime = now();
 	while (true) {
-		double waitSeconds = BUGGIFY ? 5.0 : 600.0;
+		double waitSeconds = buggify() ? 5.0 : 600.0;
 		co_await delay(waitSeconds);
 
 		const auto traceEventLevel =
@@ -7054,7 +7054,7 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			// Then dest SS waits its version catch up with this GRV version and write the data to disk.
 			// Note that dest SS waits outside the fetchKeysParallelismLock.
 			fetchVersion = std::max(shard->fetchVersion, data->version.get());
-			if (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01)) {
+			if (g_network->isSimulated() && buggify(0.01)) {
 				// Test using GRV version for fetchKey.
 				lastError = transaction_too_old();
 			}
@@ -7062,7 +7062,7 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			if (lastError.code() == error_code_transaction_too_old) {
 				try {
 					Version grvVersion = co_await tr.getRawReadVersion();
-					if (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01)) {
+					if (g_network->isSimulated() && buggify(0.01)) {
 						// Test failed GRV request.
 						throw grv_proxy_memory_limit_exceeded();
 					}
@@ -10698,7 +10698,7 @@ void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
 		    mLV, MutationRef(MutationRef::SetValue, availableKeys.end, endAvailable ? "1"_sr : "0"_sr));
 	}
 
-	if (BUGGIFY) {
+	if (buggify()) {
 		self->maybeInjectTargetedRestart(logV);
 	}
 }
@@ -10752,7 +10752,7 @@ void setAssignedStatus(StorageServer* self, KeyRangeRef keys, bool nowAssigned) 
 		    mLV, MutationRef(MutationRef::SetValue, assignedKeys.end, endAssigned ? "1"_sr : "0"_sr));
 	}
 
-	if (BUGGIFY) {
+	if (buggify()) {
 		self->maybeInjectTargetedRestart(logV);
 	}
 }
@@ -10772,7 +10772,7 @@ void setRangeBasedBulkLoadStatus(StorageServer* self, KeyRangeRef keys, const SS
 		    mLV, MutationRef(MutationRef::SetValue, dataMoveKeys.end, ssBulkLoadMetadataValue(endBulkLoadMetadata)));
 	}
 	self->ssBulkLoadMetadataMap.insert(keys, ssBulkLoadMetadata);
-	if (BUGGIFY) {
+	if (buggify()) {
 		self->maybeInjectTargetedRestart(logV);
 	}
 }
@@ -11015,7 +11015,7 @@ Future<Void> restoreByteSample(StorageServer* data,
 	co_await waitForAll(sampleRanges);
 	TraceEvent("RecoveredByteSampleChunkedRead", data->thisServerID).detail("Ranges", sampleRanges.size());
 
-	if (BUGGIFY)
+	if (buggify())
 		co_await delay(deterministicRandom()->random01() * 10.0);
 }
 
@@ -12294,7 +12294,7 @@ ACTOR Future<Void> replaceInterface(StorageServer* self, StorageServerInterface 
 								    .detail("Tag", it.second.toString());
 							}
 
-							if (self->history.size() && BUGGIFY) {
+							if (self->history.size() && buggify()) {
 								TraceEvent("SSHistoryReboot", self->thisServerID).log();
 								throw please_reboot();
 							}

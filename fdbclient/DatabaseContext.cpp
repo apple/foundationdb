@@ -558,7 +558,7 @@ Future<Void> databaseLogger(DatabaseContext* cx) {
 	while (true) {
 		co_await delay(CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, TaskPriority::FlushTrace);
 
-		bool logMetrics = !g_network->isSimulated() || BUGGIFY_WITH_PROB(0.01);
+		bool logMetrics = !g_network->isSimulated() || buggify(0.01);
 		if (logMetrics) {
 			TraceEvent ev("TransactionMetrics", cx->dbId);
 
@@ -731,7 +731,7 @@ static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 			std::vector<TrInfoChunk> trChunksQ;
 			for (auto& entry : cx->clientStatusUpdater.outStatusQ) {
 				auto& bw = entry.second;
-				int64_t value_size_limit = BUGGIFY
+				int64_t value_size_limit = buggify()
 				                               ? deterministicRandom()->randomInt(1e3, CLIENT_KNOBS->VALUE_SIZE_LIMIT)
 				                               : CLIENT_KNOBS->VALUE_SIZE_LIMIT;
 				int num_chunks = (bw.getLength() + value_size_limit - 1) / value_size_limit;
@@ -758,8 +758,8 @@ static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 
 			// Commit the chunks splitting into different transactions if needed
 			int64_t dataSizeLimit =
-			    BUGGIFY ? deterministicRandom()->randomInt(200e3, 1.5 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT)
-			            : 0.8 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
+			    buggify() ? deterministicRandom()->randomInt(200e3, 1.5 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT)
+			              : 0.8 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 			auto tracking_iter = trChunksQ.begin();
 			ASSERT(commitQ.empty() && (txBytes == 0));
 			while (true) {
@@ -1443,7 +1443,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	throttleExpirer = recurring(std::bind_front(&DatabaseContext::expireThrottles, this),
 	                            CLIENT_KNOBS->TAG_THROTTLE_EXPIRATION_INTERVAL);
 
-	if (BUGGIFY) {
+	if (buggify()) {
 		DatabaseContext::debugUseTags = true;
 	}
 
