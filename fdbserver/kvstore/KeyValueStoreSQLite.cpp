@@ -41,7 +41,6 @@ u32 sqlite3VdbeSerialGet(const unsigned char*, u32, Mem*);
 #include "template_fdb.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 #if SQLITE_THREADSAFE == 0
 #define sqlite3_mutex_enter(x)

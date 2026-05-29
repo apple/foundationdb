@@ -3932,8 +3932,6 @@ IKeyValueStore* keyValueStoreShardedRocksDB(std::string const& path,
 }
 
 #ifdef WITH_ROCKSDB
-#include "flow/UnitTest.h"
-
 namespace {
 TEST_CASE("noSim/ShardedRocksDB/Initialization") {
 	state const std::string rocksDBTestDir = "sharded-rocksdb-test-db";

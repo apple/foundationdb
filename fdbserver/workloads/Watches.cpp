@@ -25,7 +25,6 @@
 #include "flow/Coroutines.h"
 #include "flow/DeterministicRandom.h"
 #include "fdbserver/tester/workloads.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct WatchesWorkload : TestWorkload {
 	static constexpr auto NAME = "Watches";

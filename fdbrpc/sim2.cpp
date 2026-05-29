@@ -61,8 +61,6 @@
 #include "flow/IUDPSocket.h"
 #include "flow/IConnection.h"
 
-#include "flow/actorcompiler.h" // This must be the last #include.
-
 ISimulator* g_simulator = nullptr;
 thread_local ISimulator::ProcessInfo* ISimulator::currentProcess = nullptr;
 thread_local bool ISimulator::isMainThread = false;
@@ -457,7 +455,7 @@ private:
 	}
 
 	static Future<Void> sender(Sim2Conn* self) {
-		loop {
+		while (true) {
 			co_await self->writtenBytes.onChange(); // takes place on peer!
 			ASSERT(g_simulator->getCurrentProcess() == self->peerProcess);
 			co_await delay(.002 * deterministicRandom()->random01());
@@ -465,7 +463,7 @@ private:
 		}
 	}
 	static Future<Void> receiver(Sim2Conn* self) {
-		loop {
+		while (true) {
 			if (self->sentBytes.get() != self->receivedBytes.get())
 				co_await g_simulator->onProcess(self->peerProcess);
 			while (self->sentBytes.get() == self->receivedBytes.get())
@@ -502,7 +500,7 @@ private:
 	}
 	static Future<Void> whenReadable(Sim2Conn* self) {
 		try {
-			loop {
+			while (true) {
 				if (self->readBytes.get() != self->receivedBytes.get()) {
 					ASSERT(g_simulator->getCurrentProcess() == self->process);
 					co_return;
@@ -517,7 +515,7 @@ private:
 	}
 	static Future<Void> whenWritable(Sim2Conn* self) {
 		try {
-			loop {
+			while (true) {
 				if (!self->peer)
 					co_return;
 				if (self->peer->availableSendBufferForPeer() > 0) {
@@ -1221,7 +1219,7 @@ public:
 	}
 	static Future<Reference<IConnection>> waitForProcessAndConnect(NetworkAddress toAddr, INetworkConnections* self) {
 		// We have to be able to connect to processes that don't yet exist, so we do some silly polling
-		loop {
+		while (true) {
 			co_await ::delay(0.1 * deterministicRandom()->random01());
 			if (g_sim2.addressMap.contains(toAddr)) {
 				Reference<IConnection> c = co_await self->connect(toAddr);
