@@ -19,7 +19,9 @@
  */
 
 #include "fdbrpc/HTTP.h"
+#include "flow/CodeProbe.h"
 #include "flow/IRandom.h"
+#include "flow/Knobs.h"
 #include "flow/Trace.h"
 #include "fdbrpc/simulator.h"
 Future<Void> callbackHandler(Reference<IConnection> conn,
@@ -157,6 +159,21 @@ void HTTP::SimRegisteredHandlerContext::removeIp(IPAddress ip) {
 		}
 	}
 	updateDNS();
+}
+
+Future<Void> HTTP::SimRegisteredHandlerContext::delayedRemoveIp(IPAddress ip, double delaySeconds) {
+	CODE_PROBE(true,
+	           "Simulated delayed DNS removal for dead process",
+	           probe::context::sim2,
+	           probe::assert::simOnly);
+	TraceEvent("SimDNSDelayedRemoval")
+	    .detail("Hostname", hostname)
+	    .detail("Service", service)
+	    .detail("IP", ip.toString())
+	    .detail("DelaySecs", delaySeconds);
+	co_await ::delay(delaySeconds);
+	removeIp(ip);
+	co_return;
 }
 
 struct AlwaysFailRequestHandler final : HTTP::IRequestHandler, ReferenceCounted<AlwaysFailRequestHandler> {

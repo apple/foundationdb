@@ -177,6 +177,7 @@ public:
 
 	void addAddress(NetworkAddress addr);
 	void removeIp(IPAddress addr);
+	Future<Void> delayedRemoveIp(IPAddress addr, double delay);
 
 private:
 	std::vector<NetworkAddress> addresses;

@@ -2225,9 +2225,18 @@ public:
 		}
 		ASSERT(found);
 
-		// FIXME: potentially instead delay removing from DNS for a bit so we still briefly try to talk to dead server
-		for (auto& it : httpHandlers) {
-			it.second->removeIp(p->address.ip);
+		double dnsRemovalDelay = FLOW_KNOBS->SIM_DNS_REMOVAL_MAX_DELAY;
+		if (dnsRemovalDelay > 0) {
+			// Simulate real-world DNS caching: keep stale DNS entries briefly so
+			// clients may still attempt to talk to the dead server's address.
+			double actualDelay = deterministicRandom()->random01() * dnsRemovalDelay;
+			for (auto& it : httpHandlers) {
+				uncancellable(it.second->delayedRemoveIp(p->address.ip, actualDelay));
+			}
+		} else {
+			for (auto& it : httpHandlers) {
+				it.second->removeIp(p->address.ip);
+			}
 		}
 	}
 
