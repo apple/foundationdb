@@ -53,6 +53,20 @@ CDCRoutingTable::CDCRoutingTable() {
 	tagsByRange.insert(allKeys, std::set<Tag>());
 }
 
+void CDCRoutingTable::updateRange(CDCStreamId streamId, KeyRangeRef const& keys) {
+	streams[streamId].keys = KeyRange(keys);
+}
+
+bool CDCRoutingTable::updateTag(CDCStreamId streamId, Version version, Tag tag) {
+	ASSERT(tag.locality == tagLocalityCDC);
+	auto& existing = streams[streamId].tag;
+	if (!existing.present() || version >= existing.get().first) {
+		existing = std::make_pair(version, tag);
+		return true;
+	}
+	return false;
+}
+
 void CDCRoutingTable::rebuildRanges() {
 	tagsByRange.insert(allKeys, std::set<Tag>());
 	for (const auto& [streamId, state] : streams) {
@@ -67,15 +81,12 @@ void CDCRoutingTable::rebuildRanges() {
 }
 
 void CDCRoutingTable::setRange(CDCStreamId streamId, KeyRangeRef const& keys) {
-	streams[streamId].keys = KeyRange(keys);
+	updateRange(streamId, keys);
 	rebuildRanges();
 }
 
 void CDCRoutingTable::setTag(CDCStreamId streamId, Version version, Tag tag) {
-	ASSERT(tag.locality == tagLocalityCDC);
-	auto& existing = streams[streamId].tag;
-	if (!existing.present() || version >= existing.get().first) {
-		existing = std::make_pair(version, tag);
+	if (updateTag(streamId, version, tag)) {
 		rebuildRanges();
 	}
 }
@@ -84,12 +95,12 @@ void CDCRoutingTable::reload(IKeyValueStore* txnStateStore) {
 	streams.clear();
 	const RangeResult streamRows = txnStateStore->readRange(cdcStreamKeys).get();
 	for (const auto& kv : streamRows) {
-		setRange(decodeCDCStreamKey(kv.key), decodeCDCStreamKeysValue(kv.value));
+		updateRange(decodeCDCStreamKey(kv.key), decodeCDCStreamKeysValue(kv.value));
 	}
 	const RangeResult tagHistoryRows = txnStateStore->readRange(cdcTagHistoryKeys).get();
 	for (const auto& kv : tagHistoryRows) {
 		const auto [streamId, version, tag] = decodeCDCTagHistoryKey(kv.key);
-		setTag(streamId, version, tag);
+		updateTag(streamId, version, tag);
 	}
 	rebuildRanges();
 }

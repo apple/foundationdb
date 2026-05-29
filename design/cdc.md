@@ -59,8 +59,10 @@ The current implementation does not attempt to provide:
 
 ## Client interface
 
-The client-facing declarations are in `fdbclient/NativeCdc.h`; cursor and wire
-request types are in `fdbclient/CDCProxyInterface.h`.
+The client-facing declarations are in `fdbclient/NativeCdc.h`; durable
+metadata operations used by server roles are in
+`fdbclient/NativeCdcInternal.h`; cursor and wire request types are in
+`fdbclient/CDCProxyInterface.h`.
 
 ```cpp
 Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, KeyRange keys);
@@ -153,6 +155,9 @@ through the delivered position, and must not issue another `consume()` if it
 still needs to retry processing the previous reply from that same in-memory
 consumer. A consumer restarted from its last durably checkpointed position
 can use `resumeNativeCdcConsumer()`.
+Only one `consume()` or `acknowledge()` operation may be outstanding on a
+`NativeCdcConsumer`; concurrent operations are rejected because they would
+race updates to its delivered position and acknowledgement proof.
 The server accepts an acknowledgement beyond its current transaction read
 version only when the owning CDC proxy has read through that position from its
 tagged log stream. A resumed consumer may reissue an acknowledgement already

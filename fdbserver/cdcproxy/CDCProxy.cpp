@@ -27,7 +27,7 @@
 #include <vector>
 
 #include "fdbclient/Knobs.h"
-#include "fdbclient/NativeCdc.h"
+#include "fdbclient/NativeCdcInternal.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/cdcproxy/CDCProxy.h"
 #include "fdbserver/core/Knobs.h"
@@ -584,6 +584,8 @@ Future<Void> initializeStream(CDCProxyData* self, Reference<CDCBufferedStream> s
 	}
 }
 
+// TODO: Persist per-tag safe-pop state or coordinate pops centrally instead of rebuilding minima from all stream
+// history on every acknowledgement.
 Future<std::map<Tag, Version>> readSafePopVersions(Database cx) {
 	Transaction tr(cx);
 	while (true) {

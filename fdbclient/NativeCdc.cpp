@@ -29,6 +29,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/NativeCdc.h"
+#include "fdbclient/NativeCdcInternal.h"
 #include "fdbclient/SystemData.h"
 #include "flow/CodeProbe.h"
 #include "flow/Error.h"
@@ -119,6 +120,7 @@ Future<Tag> getNativeCdcCurrentTag(Transaction* tr, CDCStreamId streamId) {
 	co_return currentTag.get();
 }
 
+// TODO: Persist current per-tag ownership so registration does not reconstruct it by scanning all active streams.
 Future<Optional<UID>> getNativeCdcProxyAssignmentForTag(Transaction* tr, Tag targetTag) {
 	std::set<CDCStreamId> activeStreamIds;
 	Key begin = cdcStreamKeys.begin;
@@ -247,7 +249,7 @@ Future<bool> nativeCdcStreamStillExists(Database cx, CDCStreamId streamId) {
 	}
 }
 
-Future<CDCStreamId> getNativeCdcStreamId(Database cx, Key name) {
+Future<Optional<CDCStreamId>> findNativeCdcStreamId(Database cx, Key name) {
 	if (name.empty()) {
 		throw client_invalid_operation();
 	}
@@ -260,7 +262,7 @@ Future<CDCStreamId> getNativeCdcStreamId(Database cx, Key name) {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			Optional<Value> streamId = co_await tr.get(cdcStreamNameKeyFor(name));
 			if (!streamId.present()) {
-				throw client_invalid_operation();
+				co_return Optional<CDCStreamId>();
 			}
 			co_return decodeCDCStreamNameValue(streamId.get());
 		} catch (Error& e) {
@@ -268,6 +270,14 @@ Future<CDCStreamId> getNativeCdcStreamId(Database cx, Key name) {
 		}
 		co_await tr.onError(err);
 	}
+}
+
+Future<CDCStreamId> getNativeCdcStreamId(Database cx, Key name) {
+	Optional<CDCStreamId> streamId = co_await findNativeCdcStreamId(cx, name);
+	if (!streamId.present()) {
+		throw client_invalid_operation();
+	}
+	co_return streamId.get();
 }
 
 Future<CDCProxyInterface> getNativeCdcStreamProxy(Database cx, CDCStreamId streamId) {
@@ -625,14 +635,12 @@ Future<Void> removeNativeCdcStreamClient(Database cx, Key name) {
 	}
 
 	while (true) {
-		std::vector<NativeCdcStreamInfo> streams = co_await listNativeCdcStreamsClient(cx);
-		auto stream = std::find_if(
-		    streams.begin(), streams.end(), [&](NativeCdcStreamInfo const& info) { return info.name == name; });
-		if (stream == streams.end()) {
+		Optional<CDCStreamId> streamId = co_await findNativeCdcStreamId(cx, name);
+		if (!streamId.present()) {
 			co_return;
 		}
 
-		Optional<CDCProxyInterface> proxy = co_await getNativeCdcStreamProxyForRemoval(cx, name, stream->streamId);
+		Optional<CDCProxyInterface> proxy = co_await getNativeCdcStreamProxyForRemoval(cx, name, streamId.get());
 		if (!proxy.present()) {
 			co_return;
 		}
@@ -662,62 +670,84 @@ Reference<NativeCdcConsumer> resumeNativeCdcConsumer(Database cx, CDCCursor posi
 }
 
 Future<CDCConsumeReply> NativeCdcConsumer::consumeImpl(Reference<NativeCdcConsumer> self) {
-	while (true) {
-		CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(self->cx, self->currentPosition.streamId);
-		try {
+	try {
+		while (true) {
+			CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(self->cx, self->currentPosition.streamId);
 			Future<Void> proxyChanged = self->cx->clientInfo->onChange();
-			auto result = co_await race(
-			    throwErrorOr(proxy.consume.tryGetReply(CDCConsumeRequest(self->currentPosition))), proxyChanged);
-			if (result.index() == 0) {
-				CDCConsumeReply reply = std::get<0>(std::move(result));
-				self->knownAvailableThrough = reply.lastConsumedVersion;
-				self->currentPosition.lastConsumedVersion = reply.lastConsumedVersion;
-				co_return reply;
+			try {
+				auto result = co_await race(
+				    throwErrorOr(proxy.consume.tryGetReply(CDCConsumeRequest(self->currentPosition))), proxyChanged);
+				if (result.index() == 0) {
+					CDCConsumeReply reply = std::get<0>(std::move(result));
+					self->knownAvailableThrough = reply.lastConsumedVersion;
+					self->currentPosition.lastConsumedVersion = reply.lastConsumedVersion;
+					self->operationOutstanding = false;
+					co_return reply;
+				}
+				CODE_PROBE(true, "Native CDC consume retries after proxy metadata change", probe::decoration::rare);
+			} catch (Error& error) {
+				if (!retryNativeCdcProxyRequest(error)) {
+					throw;
+				}
+				CODE_PROBE(true, "Native CDC consume retries after proxy request failure", probe::decoration::rare);
 			}
-			CODE_PROBE(true, "Native CDC consume retries after proxy metadata change", probe::decoration::rare);
-		} catch (Error& error) {
-			if (!retryNativeCdcProxyRequest(error)) {
-				throw;
-			}
-			CODE_PROBE(true, "Native CDC consume retries after proxy request failure", probe::decoration::rare);
+			co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, self->cx->taskID);
 		}
-		co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, self->cx->taskID);
+	} catch (Error&) {
+		self->operationOutstanding = false;
+		throw;
 	}
 }
 
 Future<CDCConsumeReply> NativeCdcConsumer::consume() {
+	if (operationOutstanding) {
+		CODE_PROBE(true, "Native CDC consumer rejects overlapping operations", probe::decoration::rare);
+		return Future<CDCConsumeReply>(client_invalid_operation());
+	}
+	operationOutstanding = true;
 	return consumeImpl(Reference<NativeCdcConsumer>::addRef(this));
 }
 
 Future<Void> NativeCdcConsumer::acknowledgeImpl(Reference<NativeCdcConsumer> self) {
-	if (self->currentPosition.streamId == 0 || self->currentPosition.lastConsumedVersion < 0 ||
-	    self->currentPosition.lastConsumedVersion == std::numeric_limits<Version>::max()) {
-		throw client_invalid_operation();
-	}
-	const Version acknowledgedVersion = self->currentPosition.lastConsumedVersion;
-	co_await acknowledgeNativeCdcStream(
-	    self->cx, self->currentPosition.streamId, acknowledgedVersion, self->knownAvailableThrough);
-
-	while (true) {
-		CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(self->cx, self->currentPosition.streamId);
-		try {
-			Future<Void> proxyChanged = self->cx->clientInfo->onChange();
-			auto result = co_await race(
-			    throwErrorOr(proxy.ack.tryGetReply(CDCAckRequest(self->currentPosition.streamId, acknowledgedVersion))),
-			    proxyChanged);
-			if (result.index() == 0) {
-				co_return;
-			}
-		} catch (Error& error) {
-			if (!retryNativeCdcProxyRequest(error)) {
-				throw;
-			}
+	try {
+		if (self->currentPosition.streamId == 0 || self->currentPosition.lastConsumedVersion < 0 ||
+		    self->currentPosition.lastConsumedVersion == std::numeric_limits<Version>::max()) {
+			throw client_invalid_operation();
 		}
-		co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, self->cx->taskID);
+		const Version acknowledgedVersion = self->currentPosition.lastConsumedVersion;
+		co_await acknowledgeNativeCdcStream(
+		    self->cx, self->currentPosition.streamId, acknowledgedVersion, self->knownAvailableThrough);
+
+		while (true) {
+			CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(self->cx, self->currentPosition.streamId);
+			try {
+				Future<Void> proxyChanged = self->cx->clientInfo->onChange();
+				auto result = co_await race(throwErrorOr(proxy.ack.tryGetReply(
+				                                CDCAckRequest(self->currentPosition.streamId, acknowledgedVersion))),
+				                            proxyChanged);
+				if (result.index() == 0) {
+					self->operationOutstanding = false;
+					co_return;
+				}
+			} catch (Error& error) {
+				if (!retryNativeCdcProxyRequest(error)) {
+					throw;
+				}
+			}
+			co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, self->cx->taskID);
+		}
+	} catch (Error&) {
+		self->operationOutstanding = false;
+		throw;
 	}
 }
 
 Future<Void> NativeCdcConsumer::acknowledge() {
+	if (operationOutstanding) {
+		CODE_PROBE(true, "Native CDC consumer rejects overlapping operations", probe::decoration::rare);
+		return Future<Void>(client_invalid_operation());
+	}
+	operationOutstanding = true;
 	return acknowledgeImpl(Reference<NativeCdcConsumer>::addRef(this));
 }
 

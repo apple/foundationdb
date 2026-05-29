@@ -34,15 +34,11 @@ struct NativeCdcStreamInfo {
 	Version minVersion = invalidVersion;
 };
 
-struct NativeCdcRemovedStreamInfo {
-	Version removalVersion = invalidVersion;
-	std::vector<Tag> tags;
-};
-
 class NativeCdcConsumer : public ReferenceCounted<NativeCdcConsumer> {
 public:
 	NativeCdcConsumer(Database cx, CDCCursor position) : cx(cx), currentPosition(position) {}
 
+	// Operations advance shared delivery state; only one may be outstanding.
 	Future<CDCConsumeReply> consume();
 	Future<Void> acknowledge();
 	const CDCCursor& position() const { return currentPosition; }
@@ -54,29 +50,8 @@ private:
 	Database cx;
 	CDCCursor currentPosition;
 	Version knownAvailableThrough = invalidVersion;
+	bool operationOutstanding = false;
 };
-
-// These durable metadata operations back CDCProxyInterface lifecycle requests.
-// Registration is knob-protected; draining and cleanup remain available for
-// streams persisted while native CDC was enabled.
-Future<CDCStreamId> registerNativeCdcStream(Database cx,
-                                            Key name,
-                                            KeyRange keys,
-                                            Optional<UID> proxyId = Optional<UID>());
-// Persists per-tag final-pop watermarks before removing stream metadata.
-Future<Optional<NativeCdcRemovedStreamInfo>> removeNativeCdcStream(Database cx,
-                                                                   Key name,
-                                                                   Optional<UID> proxyId = Optional<UID>());
-Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams(Database cx);
-// Atomically moves any streams assigned to a failed proxy to its replacement.
-Future<Void> reassignNativeCdcStreams(Database cx, UID oldProxyId, UID newProxyId);
-// Persists the exclusive unpopped watermark after consuming through a version.
-// knownAvailableThrough permits a consumer to acknowledge log data it has
-// already received before that version is visible at a transaction read version.
-Future<Version> acknowledgeNativeCdcStream(Database cx,
-                                           CDCStreamId streamId,
-                                           Version consumedThrough,
-                                           Version knownAvailableThrough = invalidVersion);
 
 // Client-facing CDC operations. Registration is feature gated; the remaining
 // operations stay available so existing durable streams can be drained after

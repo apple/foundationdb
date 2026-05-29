@@ -27,6 +27,7 @@
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeCdc.h"
+#include "fdbclient/NativeCdcInternal.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/ServerDBInfo.h"
