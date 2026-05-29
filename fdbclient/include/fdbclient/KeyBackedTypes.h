@@ -312,7 +312,7 @@ Future<Version> WatchableTrigger::onChangeActor(WatchableTrigger self,
 		try {
 			// If the initialVersion is not set yet, then initialize it with the read version
 			if (!initialVersion.present()) {
-				co_await store(initialVersion, safeThreadFutureToFuture(tr->getReadVersion()));
+				initialVersion = co_await safeThreadFutureToFuture(tr->getReadVersion());
 			}
 			if (watching.canBeSet()) {
 				watching.send(*initialVersion);

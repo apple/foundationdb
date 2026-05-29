@@ -29,6 +29,7 @@
 #include <sstream>
 #include <vector>
 
+#include <inttypes.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <time.h>
@@ -819,7 +820,7 @@ Optional<bool> checkBuggifyOverride(const char* testFile) {
 	while (ifs.good()) {
 		getline(ifs, cline);
 		std::string line = removeWhitespace(std::string(cline));
-		if (!line.size() || line.find(';') == 0)
+		if (line.empty() || line.find(';') == 0)
 			continue;
 
 		size_t found = line.find('=');
@@ -860,7 +861,7 @@ Optional<bool> checkFaultInjectionOverride(const char* testFile) {
 	while (ifs.good()) {
 		getline(ifs, cline);
 		std::string line = removeWhitespace(std::string(cline));
-		if (!line.size() || line.find(';') == 0)
+		if (line.empty() || line.find(';') == 0)
 			continue;
 
 		size_t found = line.find('=');
@@ -896,7 +897,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
     IClusterConnectionRecord& connectionRecord,
     const std::vector<std::string>& publicAddressStrs,
     std::vector<std::string>& listenAddressStrs) {
-	if (listenAddressStrs.size() > 0 && publicAddressStrs.size() != listenAddressStrs.size()) {
+	if (!listenAddressStrs.empty() && publicAddressStrs.size() != listenAddressStrs.size()) {
 		fprintf(stderr,
 		        "ERROR: Listen addresses (if provided) should be equal to the number of public addresses in order.\n");
 		flushAndExit(FDB_EXIT_ERROR);
@@ -1765,9 +1766,9 @@ private:
 			StringRef t((uint8_t*)blobCredsFromENV, strlen(blobCredsFromENV));
 			do {
 				StringRef file = t.eat(":");
-				if (file.size() != 0)
+				if (!file.empty())
 					blobCredentials.push_back(file.toString());
-			} while (t.size() != 0);
+			} while (!t.empty());
 		}
 
 		// Sets up proxy from ENV if it is not set by arg.
@@ -1791,15 +1792,15 @@ private:
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
-		if (seedConnString.length() && seedConnFile.length()) {
+		if (!seedConnString.empty() && !seedConnFile.empty()) {
 			fprintf(
 			    stderr, "%s\n", "--seed-cluster-file and --seed-connection-string may not both be specified at once.");
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
-		bool seedSpecified = seedConnFile.length() || seedConnString.length();
+		bool seedSpecified = !seedConnFile.empty() || !seedConnString.empty();
 
-		if (seedSpecified && !connFile.length()) {
+		if (seedSpecified && connFile.empty()) {
 			fprintf(stderr,
 			        "%s\n",
 			        "If -seed-cluster-file or --seed-connection-string is specified, -C must be specified as well.");
@@ -1809,7 +1810,7 @@ private:
 		if (metricsConnFile == connFile)
 			metricsConnFile = "";
 
-		if (metricsConnFile != "" && metricsPrefix == "") {
+		if (!metricsConnFile.empty() && metricsPrefix.empty()) {
 			fprintf(stderr, "If a metrics cluster file is specified, a metrics prefix is required.\n");
 			flushAndExit(FDB_EXIT_ERROR);
 		}
@@ -1824,9 +1825,9 @@ private:
 		    autoPublicAddress) {
 
 			if (seedSpecified && !fileExists(connFile)) {
-				std::string connectionString = seedConnString.length() ? seedConnString : "";
+				std::string connectionString = !seedConnString.empty() ? seedConnString : "";
 				ClusterConnectionString ccs;
-				if (seedConnFile.length()) {
+				if (!seedConnFile.empty()) {
 					try {
 						connectionString = readFileBytes(seedConnFile, MAX_CLUSTER_FILE_BYTES);
 					} catch (Error& e) {
@@ -1874,7 +1875,7 @@ private:
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
-		if (role == ServerRole::NetworkTestClient && !testServersStr.size()) {
+		if (role == ServerRole::NetworkTestClient && testServersStr.empty()) {
 			fprintf(stderr, "ERROR: please specify --testservers\n");
 			printHelpTeaser(argv[0]);
 			flushAndExit(FDB_EXIT_ERROR);
@@ -1882,7 +1883,7 @@ private:
 
 		if (role == ServerRole::ChangeClusterKey) {
 			bool error = false;
-			if (!newClusterKey.size()) {
+			if (newClusterKey.empty()) {
 				fprintf(stderr, "ERROR: please specify --new-cluster-key\n");
 				error = true;
 			} else if (connectionFile->getConnectionString().clusterKey() == newClusterKey) {
@@ -1975,7 +1976,7 @@ int main(int argc, char* argv[]) {
 		const auto role = opts.role;
 
 		if (role == ServerRole::Simulation) {
-			printf("Random seed is %llu...\n", opts.randomSeed);
+			printf("Random seed is %" PRIu64 "...\n", opts.randomSeed);
 			bindDeterministicRandomToOpenssl();
 		}
 
@@ -2160,7 +2161,7 @@ int main(int argc, char* argv[]) {
 		for (const std::string& knobOption : getEnvironmentKnobOptions()) {
 			environmentKnobOptions += knobOption + " ";
 		}
-		if (environmentKnobOptions.length()) {
+		if (!environmentKnobOptions.empty()) {
 			environmentKnobOptions.pop_back();
 		}
 
@@ -2178,7 +2179,7 @@ int main(int argc, char* argv[]) {
 		            opts.connectionFile ? opts.connectionFile->getConnectionString().toString() : "")
 		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
 		    .setMaxFieldLength(10000)
-		    .detail("EnvironmentKnobOptions", environmentKnobOptions.length() ? environmentKnobOptions : "none")
+		    .detail("EnvironmentKnobOptions", !environmentKnobOptions.empty() ? environmentKnobOptions : "none")
 		    .detail("CommandLine", opts.commandLine)
 		    .setMaxFieldLength(0)
 		    .detail("BuggifyEnabled", opts.buggifyEnabled)
@@ -2216,7 +2217,7 @@ int main(int argc, char* argv[]) {
 			FLOW_KNOBS->trace();
 			SERVER_KNOBS->trace();
 
-			auto dataFolder = opts.dataFolder.size() ? opts.dataFolder : "simfdb";
+			auto dataFolder = !opts.dataFolder.empty() ? opts.dataFolder : "simfdb";
 			std::vector<std::string> directories = platform::listDirectories(dataFolder);
 			const std::set<std::string> allowedDirectories = { ".",       "..",       "backups",  "unittests",
 				                                               "fdbblob", "bulkdump", "bulkload", "mocks3" };
@@ -2303,7 +2304,7 @@ int main(int argc, char* argv[]) {
 						}
 						// remove empty/partial snap directories
 						std::vector<std::string> childrenList = platform::listFiles(dirSrc);
-						if (childrenList.size() == 0) {
+						if (childrenList.empty()) {
 							TraceEvent("RemovingEmptySnapDirectory").detail("DirBeingDeleted", dirSrc);
 							platform::eraseDirectoryRecursive(dirSrc);
 							continue;
@@ -2368,7 +2369,7 @@ int main(int argc, char* argv[]) {
 			setupRunLoopProfiler();
 
 			auto dataFolder = opts.dataFolder;
-			if (!dataFolder.size())
+			if (dataFolder.empty())
 				dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
 
 			std::vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
@@ -2388,7 +2389,7 @@ int main(int argc, char* argv[]) {
 			actors.push_back(metricsReport());
 
 #ifdef FLOW_GRPC_ENABLED
-			if (opts.grpcAddressStrs.size() > 0) {
+			if (!opts.grpcAddressStrs.empty()) {
 				FlowGrpc::init(&opts.tlsConfig, NetworkAddress::parse(opts.grpcAddressStrs[0]));
 				actors.push_back(GrpcServer::instance()->run());
 			}

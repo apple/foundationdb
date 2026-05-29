@@ -1,53 +1,33 @@
 # LeakSanitizer suppressions file for FDB
 # https://github.com/google/sanitizers/wiki/AddressSanitizerLeakSanitizer
 
-# Not all incoming connections are cleanly shut down in client API tests
-leak:ConnectionReaderActorState
-
 # Peer objects in TransportData::peers are intentionally not freed at shutdown.
 # FlowTransport is allocated into a global slot and never deleted because its
 # destructor triggers actor cancellation cascades that access freed state.
 # Peer::Peer covers allocations during Peer construction (DDSketch, AsyncTrigger).
-# connectionKeeper and connectionMonitor cover Promise allocations made during
-# the Peer's lifetime that are leaked along with the Peer.
+# connectionKeeper and connectionMonitor cover the coroutine frames held alive
+# by the Peer's Future<Void> connect member (catches broken_promise and retries).
+# ConnectionReaderActorState covers incoming connections not cleanly shut down.
 leak:TransportData::getOrOpenPeer
 leak:Peer::Peer
 leak:connectionKeeper
 leak:connectionMonitor
+leak:ConnectionReaderActorState
 
-# Client-side background actors that are still running when fdbcli/client
-# processes exit. These are not cleaned up because the network thread is
-# stopped without cancelling all outstanding actors. Each suppression targets
-# a specific actor or infrastructure function to avoid masking real leaks.
-leak:tssLogger
-leak:databaseLogger
-leak:monitorNetworkBusyness
-leak:multiVersionCleanupWorker
-leak:pingLatencyLogger
-leak:logTimeOffset
-leak:startMemoryUsageMonitor
-leak:GlobalConfig::updater
-leak:GlobalConfig::refresh
-leak:monitorProxiesOneGeneration
-leak:DatabaseContext::updateProxies
-leak:ModelInterface<CommitProxyInterface>::ModelInterface
-leak:ModelInterface<GrvProxyInterface>::ModelInterface
-leak:timeWarning
-leak:ManagementAPI::changeConfig
-leak:clientCoordinatorsStatusFetcher
-leak:clusterStatusFetcher
-leak:timeoutMonitorLeader
-leak:statusFetcherImpl
-leak:clientStatusFetcher
-leak:cli(CLIOptions
+# fdbcli does not release its ThreadSafeTransaction references before calling
+# stopNetwork(). The destructor defers cleanup via onMainThreadVoid() which
+# cannot execute after the network stops. This covers the transaction objects
+# and all their owned state (TransactionState, WriteMap, ReadVersion actors).
+leak:ThreadSafeDatabase::createTransaction
+leak:ThreadSafeTransaction::ThreadSafeTransaction
 
-# Recurring actor started during DatabaseContext construction (currently
-# throttleExpirer via bind_front(DatabaseContext::expireThrottles)).
-# The function name is mangled away by bind_front so we suppress via
-# Database::createDatabase which is the stable FDB frame in the stack.
+# External client libraries (loaded via MultiVersionApi) create DatabaseContext
+# objects whose cleanup is deferred via onMainThreadVoid in ~ThreadSafeDatabase.
+# When the external library's network thread stops, the deferred cleanup cannot
+# execute, leaking the DatabaseContext and its members (DDSketch, etc.).
 leak:Database::createDatabase
 
-# Thread-safe transaction destructor dispatches cleanup to the network
-# thread via onMainThreadVoid. If the network is shutting down, the
-# callback's Promise allocation is leaked.
-leak:ThreadSafeTransaction::~ThreadSafeTransaction
+# MultiVersionDatabase::DatabaseState::monitorProtocolVersion() calls
+# onMainThread into the external client's network thread. If that thread
+# has already stopped, the dispatched work leaks.
+leak:monitorProtocolVersion

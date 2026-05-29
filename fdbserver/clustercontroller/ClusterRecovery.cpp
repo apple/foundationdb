@@ -257,7 +257,7 @@ Future<Void> newTLogServers(Reference<ClusterRecoveryData> self,
                             std::vector<Standalone<CommitTransactionRef>>* initialConfChanges) {
 	TraceEvent("NewTLogServersStarted", self->dbgid).detail("UsableRegions", self->configuration.usableRegions);
 	if (self->configuration.usableRegions > 1) {
-		Optional<Key> remoteDcId = self->remoteDcIds.size() ? self->remoteDcIds[0] : Optional<Key>();
+		Optional<Key> remoteDcId = !self->remoteDcIds.empty() ? self->remoteDcIds[0] : Optional<Key>();
 		if (!self->dcId_locality.contains(recr.dcId)) {
 			int8_t loc = self->getNextLocality();
 			Standalone<CommitTransactionRef> tr;
@@ -389,13 +389,13 @@ Future<Void> newSeedServers(Reference<ClusterRecoveryData> self,
 Future<Void> waitCommitProxyFailure(std::vector<CommitProxyInterface> const& commitProxies) {
 	std::vector<Future<Void>> failed;
 	failed.reserve(commitProxies.size());
-	for (auto commitProxy : commitProxies) {
+	for (const auto& commitProxy : commitProxies) {
 		failed.push_back(waitFailureClient(commitProxy.waitFailure,
 		                                   SERVER_KNOBS->TLOG_TIMEOUT,
 		                                   -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
 		                                   /*trace=*/true));
 	}
-	ASSERT(failed.size() >= 1);
+	ASSERT(!failed.empty());
 	return tagError<Void>(quorum(failed, 1), commit_proxy_failed());
 }
 
@@ -407,20 +407,20 @@ Future<Void> waitGrvProxyFailure(std::vector<GrvProxyInterface> const& grvProxie
 		                                   SERVER_KNOBS->TLOG_TIMEOUT,
 		                                   -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
 		                                   /*trace=*/true));
-	ASSERT(failed.size() >= 1);
+	ASSERT(!failed.empty());
 	return tagError<Void>(quorum(failed, 1), grv_proxy_failed());
 }
 
 Future<Void> waitResolverFailure(std::vector<ResolverInterface> const& resolvers) {
 	std::vector<Future<Void>> failed;
 	failed.reserve(resolvers.size());
-	for (auto resolver : resolvers) {
+	for (const auto& resolver : resolvers) {
 		failed.push_back(waitFailureClient(resolver.waitFailure,
 		                                   SERVER_KNOBS->TLOG_TIMEOUT,
 		                                   -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
 		                                   /*trace=*/true));
 	}
-	ASSERT(failed.size() >= 1);
+	ASSERT(!failed.empty());
 	return tagError<Void>(quorum(failed, 1), resolver_failed());
 }
 
@@ -455,15 +455,16 @@ Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 		ASSERT(newState.tLogs[0].tLogWriteAntiQuorum == configuration.tLogWriteAntiQuorum &&
 		       newState.tLogs[0].tLogReplicationFactor == configuration.tLogReplicationFactor);
 
-		bool allLogs = newState.tLogs.size() ==
-		               configuration.expectedLogSets(self->primaryDcId.size() ? self->primaryDcId[0] : Optional<Key>());
-		bool finalUpdate = !newState.oldTLogData.size() && allLogs;
+		bool allLogs =
+		    newState.tLogs.size() ==
+		    configuration.expectedLogSets(!self->primaryDcId.empty() ? self->primaryDcId[0] : Optional<Key>());
+		bool finalUpdate = newState.oldTLogData.empty() && allLogs;
 		TraceEvent("TrackTLogRecovery")
 		    .detail("FinalUpdate", finalUpdate)
 		    .detail("NewState.tlogs", newState.tLogs.size())
 		    .detail("NewState.OldTLogs", newState.oldTLogData.size())
 		    .detail("Expected.tlogs",
-		            configuration.expectedLogSets(self->primaryDcId.size() ? self->primaryDcId[0] : Optional<Key>()))
+		            configuration.expectedLogSets(!self->primaryDcId.empty() ? self->primaryDcId[0] : Optional<Key>()))
 		    .detail("RecoveryCount", newState.recoveryCount);
 		co_await self->cstate.write(newState, finalUpdate);
 		// Purge in memory state after durability to avoid race conditions.
@@ -491,7 +492,7 @@ Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 			           self->dbgid)
 			    .detail("ActiveGenerations", 1)
 			    .trackLatest(self->clusterRecoveryGenerationsEventHolder->trackingKey);
-		} else if (!newState.oldTLogData.size() && self->recoveryState < RecoveryState::STORAGE_RECOVERED) {
+		} else if (newState.oldTLogData.empty() && self->recoveryState < RecoveryState::STORAGE_RECOVERED) {
 			self->recoveryState = RecoveryState::STORAGE_RECOVERED;
 			TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(),
 			           self->dbgid)
@@ -644,7 +645,7 @@ static Future<Optional<Version>> getMinBackupVersion(Reference<ClusterRecoveryDa
 }
 
 static Future<Void> recruitBackupWorkers(Reference<ClusterRecoveryData> self, Database cx) {
-	ASSERT(self->backupWorkers.size() > 0);
+	ASSERT(!self->backupWorkers.empty());
 
 	// Avoid race between a backup worker's save progress and the reads below.
 	co_await delay(SERVER_KNOBS->SECONDS_BEFORE_RECRUIT_BACKUP_WORKER);
@@ -860,7 +861,7 @@ class ProvisionalMaster {
 		parent->registrationTrigger.trigger();
 
 		auto lockedKey = parent->txnStateStore->readValue(databaseLockedKey).get();
-		locked = lockedKey.present() && lockedKey.get().size();
+		locked = lockedKey.present() && !lockedKey.get().empty();
 
 		metadataVersion = parent->txnStateStore->readValue(metadataVersionKey).get();
 	}
@@ -1032,7 +1033,7 @@ Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 			    .setMaxFieldLength(10000)
 			    .detail("Conf", self->configuration.toString());
 			status = RecoveryStatus::configuration_invalid;
-		} else if (!self->cstate.prevDBState.tLogs.size()) {
+		} else if (self->cstate.prevDBState.tLogs.empty()) {
 			status = RecoveryStatus::configuration_never_created;
 			self->neverCreated = true;
 		} else {
@@ -1160,7 +1161,7 @@ Future<Void> updateLocalityForDcId(Optional<Key> dcId,
 Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> self,
                                         Reference<LogSystem> oldLogSystem,
                                         Version txsPoppedVersion) {
-	Reference<AsyncVar<PeekTxsInfo>> myLocality =
+	auto myLocality =
 	    makeReference<AsyncVar<PeekTxsInfo>>(PeekTxsInfo(tagLocalityInvalid, tagLocalityInvalid, invalidVersion));
 	Future<Void> localityUpdater =
 	    updateLocalityForDcId(self->masterInterface.locality.dcId(), oldLogSystem, myLocality);
@@ -1311,7 +1312,7 @@ Future<Void> sendInitialCommitToResolvers(Reference<ClusterRecoveryData> self) {
 		}
 	}
 	while (true) {
-		if (!data.size())
+		if (data.empty())
 			break;
 		((KeyRangeRef&)txnKeys) = KeyRangeRef(keyAfter(data.back().key, txnKeys.arena()), txnKeys.end);
 		RangeResult nextData =
@@ -1323,7 +1324,7 @@ Future<Void> sendInitialCommitToResolvers(Reference<ClusterRecoveryData> self) {
 		req.arena = data.arena();
 		req.data = data;
 		req.sequence = txnSequence;
-		req.last = !nextData.size();
+		req.last = nextData.empty();
 		req.broadcastInfo = endpoints;
 		txnReplies.push_back(broadcastTxnRequest(req, SERVER_KNOBS->TXN_STATE_SEND_AMOUNT, false));
 		dataOutstanding += SERVER_KNOBS->TXN_STATE_SEND_AMOUNT * data.arena().getSize();
@@ -1864,7 +1865,7 @@ bool isNormalClusterRecoveryError(const Error& error) {
 	return normalClusterRecoveryErrors().contains(error.code());
 }
 
-std::string& getRecoveryEventName(ClusterRecoveryEventType type) {
+const std::string& getRecoveryEventName(ClusterRecoveryEventType type) {
 	ASSERT(type >= ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME &&
 	       type < ClusterRecoveryEventType::CLUSTER_RECOVERY_LAST);
 

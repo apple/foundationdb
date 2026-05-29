@@ -173,7 +173,7 @@ struct DcLagWorkload : TestWorkload {
 				// Fetch DC lag every 5s
 				status = fetchDatacenterLag(cx);
 			} else if (choice.index() == 1) {
-				Optional<double> lag = std::get<1>(std::move(choice));
+				Optional<double> lag = std::get<1>(choice);
 
 				if (lag.present() && lag.get() >= SERVER_KNOBS->LOG_ROUTER_PEEK_SWITCH_DC_TIME - 10.0) {
 					// Detect DC Lag happened before Log router switch DC reactions

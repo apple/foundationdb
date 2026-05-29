@@ -1,5 +1,5 @@
 /*
- * HighContentionAllocator.h
+ * FDBServerUnitTestMain.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,25 +18,12 @@
  * limitations under the License.
  */
 
-#ifndef FDB_FLOW_HIGH_CONTENTION_ALLOCATOR_H
-#define FDB_FLOW_HIGH_CONTENTION_ALLOCATOR_H
+#include "flow/UnitTestRunner.h"
 
-#pragma once
-
-#include "Subspace.h"
-
-namespace FDB {
-class HighContentionAllocator {
-public:
-	explicit HighContentionAllocator(Subspace subspace) : counters(subspace.get(0)), recent(subspace.get(1)) {}
-	Future<Standalone<StringRef>> allocate(Reference<Transaction> const& tr) const;
-
-	static int64_t windowSize(int64_t start);
-
-private:
-	Subspace counters;
-	Subspace recent;
-};
-} // namespace FDB
-
+#ifndef FDBSERVER_UNIT_TEST_SUITE
+#error "FDBSERVER_UNIT_TEST_SUITE must be defined"
 #endif
+
+int main(int argc, char** argv) {
+	return runUnitTests(argc, argv, UnitTestRunnerConfig(FDBSERVER_UNIT_TEST_SUITE));
+}

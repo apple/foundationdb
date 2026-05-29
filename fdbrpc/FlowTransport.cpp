@@ -458,21 +458,21 @@ Future<Void> connectionHistoryLogger(TransportData* self) {
 	while (true) {
 		co_await next;
 		next = delay(FLOW_KNOBS->LOG_CONNECTION_INTERVAL_SECS);
-		if (self->connectionHistory.size() == 0) {
+		if (self->connectionHistory.empty()) {
 			continue;
 		}
 		std::string localAddr = FlowTransport::getGlobalLocalAddress().toString();
 		auto action = new ConnectionLogWriter::AppendAction(localAddr, std::move(self->connectionHistory));
 		ASSERT(action != nullptr);
 		self->connectionLogWriterThread->post(action);
-		ASSERT(self->connectionHistory.size() == 0);
+		ASSERT(self->connectionHistory.empty());
 	}
 }
 
 Future<Void> pingLatencyLogger(TransportData* self) {
 	NetworkAddress lastAddress = NetworkAddress();
 	while (true) {
-		if (self->orderedAddresses.size()) {
+		if (!self->orderedAddresses.empty()) {
 			auto it = self->orderedAddresses.upper_bound(lastAddress);
 			if (it == self->orderedAddresses.end()) {
 				it = self->orderedAddresses.begin();
@@ -1511,7 +1511,7 @@ static Future<Void> connectionReader(TransportData* transport,
 							if (connectionId != 1)
 								addr.port = 0;
 
-							if (!transport->multiVersionConnections.count(connectionId)) {
+							if (!transport->multiVersionConnections.contains(connectionId)) {
 								if (now() - transport->lastIncompatibleMessage >
 								    FLOW_KNOBS->CONNECTION_REJECTED_MESSAGE_DELAY) {
 									TraceEvent(SevWarn, "ConnectionRejected", conn->getDebugID())
@@ -1529,7 +1529,7 @@ static Future<Void> connectionReader(TransportData* transport,
 									    .detail("ConnectionId", connectionId);
 									transport->lastIncompatibleMessage = now();
 								}
-								if (!transport->incompatiblePeers.count(addr)) {
+								if (!transport->incompatiblePeers.contains(addr)) {
 									transport->incompatiblePeers[addr] = std::make_pair(connectionId, now());
 								}
 							} else if (connectionId > 1) {
@@ -1770,7 +1770,7 @@ void TransportData::applyPublicKeySet(StringRef jwkSetString) {
 	const auto& keySet = jwks.get().keys;
 	publicKeys.clear();
 	int numPrivateKeys = 0;
-	for (auto [keyName, key] : keySet) {
+	for (const auto& [keyName, key] : keySet) {
 		// ignore private keys
 		if (key.isPublic()) {
 			publicKeys[keyName] = key.getPublic();
@@ -1789,7 +1789,7 @@ static Future<Void> multiVersionCleanupWorker(TransportData* self) {
 		co_await delay(FLOW_KNOBS->CONNECTION_CLEANUP_DELAY);
 		bool foundIncompatible = false;
 		for (auto it = self->incompatiblePeers.begin(); it != self->incompatiblePeers.end();) {
-			if (self->multiVersionConnections.count(it->second.first)) {
+			if (self->multiVersionConnections.contains(it->second.first)) {
 				it = self->incompatiblePeers.erase(it);
 			} else {
 				if (now() - it->second.second > FLOW_KNOBS->INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING) {
@@ -1849,7 +1849,7 @@ const std::unordered_map<NetworkAddress, Reference<Peer>>& FlowTransport::getAll
 
 std::map<NetworkAddress, std::pair<uint64_t, double>>* FlowTransport::getIncompatiblePeers() {
 	for (auto it = self->incompatiblePeers.begin(); it != self->incompatiblePeers.end();) {
-		if (self->multiVersionConnections.count(it->second.first)) {
+		if (self->multiVersionConnections.contains(it->second.first)) {
 			it = self->incompatiblePeers.erase(it);
 		} else {
 			it++;
@@ -1957,7 +1957,7 @@ static void sendLocal(TransportData* self, ISerializeSource const& what, const E
 	VALGRIND_CHECK_MEM_IS_DEFINED(copy.begin(), copy.size());
 #endif
 
-	ASSERT(copy.size() > 0);
+	ASSERT(!copy.empty());
 	TaskPriority priority = self->endpoints.getPriority(destination.token);
 	if (priority != TaskPriority::UnknownEndpoint || (destination.token.first() & TOKEN_STREAM_FLAG) != 0) {
 		deliver(Uncancellable(),
