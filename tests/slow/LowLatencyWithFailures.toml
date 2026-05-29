@@ -18,7 +18,6 @@ connectionFailuresDisableDuration = 60
     testName = 'Cycle'
     transactionsPerSecond = 1000.0
     testDuration = 300.0
-    expectedRate = 0
 
     [[test.workload]]
     testName = 'LowLatency'

@@ -19,7 +19,6 @@ simBackupAgents = 'BackupToFile'
     nodeCount = 3000
     transactionsPerSecond = 3000.0
     testDuration = 10.0
-    expectedRate = 0
 
     [[test.workload]]
     testName = 'IncrementalBackup'
@@ -47,4 +46,3 @@ checkOnly = true
     nodeCount = 3000
     transactionsPerSecond = 3000.0
     testDuration = 10.0
-    expectedRate = 0
