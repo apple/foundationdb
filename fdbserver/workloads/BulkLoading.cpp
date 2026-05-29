@@ -26,7 +26,6 @@
 #include "fdbserver/core/RocksDBCheckpointUtils.h"
 #include "fdbserver/core/StorageMetrics.h"
 #include "fdbserver/tester/workloads.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 const std::string simulationBulkLoadFolder = joinPath("simfdb", "bulkload");
 

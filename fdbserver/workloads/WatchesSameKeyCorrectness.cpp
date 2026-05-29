@@ -23,7 +23,6 @@
 #include "fdbserver/core/TesterInterface.h"
 #include "flow/DeterministicRandom.h"
 #include "fdbserver/tester/workloads.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct WatchesSameKeyWorkload : TestWorkload {
 	static constexpr auto NAME = "WatchesSameKeyCorrectness";

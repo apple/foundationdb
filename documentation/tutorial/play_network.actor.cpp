@@ -23,10 +23,11 @@
 #include "flow/flow.h"
 #include "flow/Platform.h"
 #include "flow/TLSConfig.h"
-#include "flow/actorcompiler.h"
 
 #include <iostream>
 #include <vector>
+
+#include "flow/actorcompiler.h"
 
 /// This file has code similar to play.actor.cpp, but for client/server actors talking over a network
 /// It's also similar to tutorial.actor.cpp but only has the minimal code needed for testing client/server actor

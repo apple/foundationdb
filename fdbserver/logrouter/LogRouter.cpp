@@ -35,7 +35,6 @@
 #include "flow/Trace.h"
 #include "flow/network.h"
 #include "flow/DebugTrace.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct LogRouterData {
 	struct TagData : NonCopyable, public ReferenceCounted<TagData> {
