@@ -980,7 +980,7 @@ Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	std::sort(old.coords.begin(), old.coords.end());
 	if (conn->hostnames == old.hostnames && conn->coords == old.coords && old.clusterKeyName() == newName) {
 		connectionStrings.clear();
-		if (BUGGIFY_WITH_PROB(0.1)) {
+		if (buggify(0.1)) {
 			// Introduce a random delay in simulation to allow processes to be
 			// killed before previousCoordinatorKeys has been reset. This helps
 			// exercise coordinator change edge cases around key cleanup.

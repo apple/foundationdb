@@ -1402,8 +1402,8 @@ Future<Void> tLogPop(TLogData* self, TLogPopRequest req, Reference<LogData> logD
 }
 
 double getTLogStorageUpdateDelayDuration() {
-	return BUGGIFY ? SERVER_KNOBS->BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL
-	               : SERVER_KNOBS->TLOG_STORAGE_MIN_UPDATE_INTERVAL;
+	return buggify() ? SERVER_KNOBS->BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL
+	                 : SERVER_KNOBS->TLOG_STORAGE_MIN_UPDATE_INTERVAL;
 }
 
 // This function (and updatePersistentData, which is called by this function) run at a low priority and can soak up all
@@ -2307,7 +2307,7 @@ Future<Void> doQueueCommit(TLogData* self,
 
 	co_await ioDegradedOrTimeoutError(
 	    c, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, self->degraded, SERVER_KNOBS->TLOG_DEGRADED_DURATION, "TLogCommit");
-	if (g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.0001)) {
+	if (g_network->isSimulated() && !g_simulator->speedUpSimulation && buggify(0.0001)) {
 		co_await delay(6.0);
 	}
 	co_await self->queueCommitEnd.whenAtLeast(commitNumber - 1);
@@ -2386,7 +2386,7 @@ Future<Void> commitQueue(TLogData* self) {
 		while (true) {
 			// Insert enough of a delay to allow this tlog to be stopped and a new one registered
 			// before the commit is issued. These are the conditions which trigger a missingFinalCommit.
-			if (BUGGIFY_WITH_PROB(0.0001) && !g_simulator->speedUpSimulation) {
+			if (buggify(0.0001) && !g_simulator->speedUpSimulation) {
 				co_await delay(1.0);
 			}
 
@@ -2599,7 +2599,7 @@ Future<Void> rejoinClusterController(TLogData* self,
 			    .detail("LogSysConf", describe(inf.logSystemConfig.tLogs))
 			    .detail("PriorLogs", describe(inf.priorCommittedLogServers))
 			    .detail("OldLogGens", inf.logSystemConfig.oldTLogs.size());
-			if (BUGGIFY)
+			if (buggify())
 				co_await delay(SERVER_KNOBS->BUGGIFY_WORKER_REMOVED_MAX_LAG * deterministicRandom()->random01());
 			throw worker_removed();
 		} else if (inf.recoveryCount > recoveryCount && stoppedPromise.canBeSet()) {
@@ -3494,7 +3494,7 @@ Future<Void> restorePersistentState(TLogData* self,
 		while (true) {
 			if (logData->removed.isReady())
 				break;
-			RangeResult data = co_await self->persistentData->readRange(tagKeys, BUGGIFY ? 3 : 1 << 30, 1 << 20);
+			RangeResult data = co_await self->persistentData->readRange(tagKeys, buggify() ? 3 : 1 << 30, 1 << 20);
 			if (data.empty())
 				break;
 			((KeyRangeRef&)tagKeys) = KeyRangeRef(keyAfter(data.back().key, tagKeys.arena()), tagKeys.end);
@@ -3522,7 +3522,7 @@ Future<Void> restorePersistentState(TLogData* self,
 	Future<Void> allRemoved = waitForAll(removed);
 	UID lastId = UID(1, 1); // initialized so it will not compare equal to a default UID
 	double recoverMemoryLimit = SERVER_KNOBS->TLOG_RECOVER_MEMORY_LIMIT;
-	if (BUGGIFY)
+	if (buggify())
 		recoverMemoryLimit =
 		    std::max<double>(SERVER_KNOBS->BUGGIFY_RECOVER_MEMORY_LIMIT, (double)SERVER_KNOBS->TLOG_SPILL_THRESHOLD);
 

@@ -797,19 +797,19 @@ struct WriteDuringReadWorkload : TestWorkload {
 		int waitLocation = 0;
 		double startTime = now();
 
-		bool disableGetKey = BUGGIFY;
-		bool disableGetRange = BUGGIFY;
-		bool disableGet = BUGGIFY;
-		bool disableCommit = BUGGIFY;
-		bool disableClearRange = BUGGIFY;
-		bool disableClear = BUGGIFY;
-		bool disableWatch = BUGGIFY;
-		bool disableWriteConflictRange = BUGGIFY;
-		bool disableDelay = BUGGIFY;
-		bool disableReset = BUGGIFY;
-		bool disableReadConflictRange = BUGGIFY;
-		bool disableSet = BUGGIFY;
-		bool disableAtomicOp = BUGGIFY;
+		bool disableGetKey = buggify();
+		bool disableGetRange = buggify();
+		bool disableGet = buggify();
+		bool disableCommit = buggify();
+		bool disableClearRange = buggify();
+		bool disableClear = buggify();
+		bool disableWatch = buggify();
+		bool disableWriteConflictRange = buggify();
+		bool disableDelay = buggify();
+		bool disableReset = buggify();
+		bool disableReadConflictRange = buggify();
+		bool disableSet = buggify();
+		bool disableAtomicOp = buggify();
 
 		Key timebombStr = makeString(8);
 		uint8_t* data = mutateString(timebombStr);

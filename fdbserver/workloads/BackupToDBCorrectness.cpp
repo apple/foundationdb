@@ -161,7 +161,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 	}
 
 	Future<Void> _setup(Database cx, BackupToDBCorrectnessWorkload* self) {
-		if (BUGGIFY) {
+		if (buggify()) {
 			for (auto r : getSystemBackupRanges()) {
 				self->backupRanges.push_back_deep(self->backupRanges.arena(), r);
 			}
@@ -302,7 +302,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 		Future<Void> stopDifferentialFuture = delay(stopDifferentialDelay);
 		co_await delay(startDelay);
 
-		if (startDelay || BUGGIFY) {
+		if (startDelay || buggify()) {
 			TraceEvent("BARW_DoBackupAbortBackup1", randomID)
 			    .detail("Tag", printable(tag))
 			    .detail("StartDelay", startDelay);
@@ -368,7 +368,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 			bool aborted = false;
 			try {
-				if (BUGGIFY) {
+				if (buggify()) {
 					TraceEvent("BARW_DoBackupWaitForRestorable", randomID).detail("Tag", printable(tag));
 					// Wait until the backup is in a restorable state
 					EBackupState resultWait = co_await backupAgent->waitBackup(cx, tag, StopWhenDone::False);
@@ -620,7 +620,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 			UID logUid = co_await backupAgent.getLogUid(extraDB, backupTag);
 
 			// Occasionally start yet another backup that might still be running when we restore
-			if (!locked && extraPrefix != backupPrefix && BUGGIFY) {
+			if (!locked && extraPrefix != backupPrefix && buggify()) {
 				TraceEvent("BARW_SubmitBackup2", randomID).detail("Tag", printable(backupTag));
 				try {
 					extraBackup = backupAgent.submitBackup(extraDB,

@@ -24,7 +24,6 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/Schemas.h"
 #include "fdbserver/tester/workloads.h"
-#include "flow/actorcompiler.h" // This must be the last include
 
 struct DataDistributionMetricsWorkload : KVWorkload {
 	static constexpr auto NAME = "DataDistributionMetrics";

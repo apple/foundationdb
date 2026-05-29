@@ -840,8 +840,7 @@ public:
 			Future<Void> disc =
 			    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint());
 			auto& p = getReplyPromiseStream(value);
-			if (disc.isReady() ||
-			    (g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.01))) {
+			if (disc.isReady() || (g_network->isSimulated() && !g_simulator->speedUpSimulation && buggify(0.01))) {
 				if (disc.isReady() && IFailureMonitor::failureMonitor().knownUnauthorized(getEndpoint())) {
 					p.sendError(unauthorized_attempt());
 				} else {

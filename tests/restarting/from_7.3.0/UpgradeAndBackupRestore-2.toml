@@ -12,7 +12,6 @@ runConsistencyCheck=false
     nodeCount = 30000
     transactionsPerSecond = 2500.0
     testDuration = 30.0
-    expectedRate = 0
     keyPrefix = 'AfterRestart'
     
     [[test.workload]]
@@ -55,10 +54,8 @@ checkOnly=true
     testName = 'Cycle'
     nodeCount=30000
     keyPrefix = 'AfterRestart'
-    expectedRate=0
      
     [[test.workload]]
     testName = 'Cycle'
     nodeCount = 30000
     keyPrefix= 'BeforeRestart'
-    expectedRate = 0

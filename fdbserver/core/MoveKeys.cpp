@@ -1218,7 +1218,7 @@ Future<Void> checkFetchingState(Database cx,
 	while (true) {
 		Error err;
 		try {
-			if (BUGGIFY)
+			if (buggify())
 				co_await delay(5);
 
 			tr.trState->taskID = TaskPriority::MoveKeys;
@@ -1595,7 +1595,7 @@ static Future<Void> finishMoveKeys(Database occ,
 
 						// Inject transaction_too_old before commit to exercise the
 						// retry limit and finish_move_keys_too_many_retries path.
-						if (BUGGIFY_WITH_PROB(0.01)) {
+						if (buggify(0.01)) {
 							CODE_PROBE(true, "finishMoveKeys injecting transaction_too_old before commit");
 							throw transaction_too_old();
 						}

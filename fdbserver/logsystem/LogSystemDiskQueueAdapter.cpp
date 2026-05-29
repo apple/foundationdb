@@ -100,7 +100,7 @@ public:
 				    .detail("HasMessage", self->cursor->hasMessage())
 				    .detail("Version", self->cursor->version().version);
 
-				bool buggify = !self->hasDiscardedData && BUGGIFY_WITH_PROB(0.01);
+				bool buggify = !self->hasDiscardedData && ::buggify(0.01);
 				if (self->cursor->popped() != 0 || buggify) {
 					TraceEvent(SevWarnAlways, "DiskQueueAdapterReset")
 					    .detail("Version", self->cursor->popped())

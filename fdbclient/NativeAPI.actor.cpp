@@ -1957,7 +1957,7 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 			// max versions in flight in an attempt to reliably recognize when
 			// a recovery has occurred, but avoid triggering if it just takes a
 			// little while to get the committed version.
-			bool buggifyRetry = g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.1);
+			bool buggifyRetry = g_network->isSimulated() && !g_simulator->speedUpSimulation && buggify(0.1);
 			CODE_PROBE(buggifyRetry, "Watch buggifying version gap retry");
 			if (v - resp.version < 50'000'000 && !buggifyRetry) {
 				return resp.version;
@@ -2720,7 +2720,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					output.readToBegin = readToBegin;
 					output.readThroughEnd = readThroughEnd;
 
-					if (BUGGIFY && limits.hasByteLimit() && output.size() > std::max(1, originalLimits.minRows) &&
+					if (buggify() && limits.hasByteLimit() && output.size() > std::max(1, originalLimits.minRows) &&
 					    (!std::is_same<GetKeyValuesFamilyRequest, GetMappedKeyValuesRequest>::value)) {
 						// Copy instead of resizing because TSS maybe be using output's arena for comparison. This only
 						// happens in simulation so it's fine
@@ -3978,7 +3978,7 @@ double Transaction::getBackoff(int errCode) {
 
 TransactionOptions::TransactionOptions(Database const& cx) {
 	reset(cx);
-	if (BUGGIFY) {
+	if (buggify()) {
 		commitOnFirstProxy = true;
 	}
 }
@@ -6327,7 +6327,7 @@ Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(cons
 		double sampleRate =
 		    cx->globalConfig->get<double>(fdbClientInfoTxnSampleRate, std::numeric_limits<double>::infinity());
 		double clientSamplingProbability = std::isinf(sampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : sampleRate;
-		if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY) &&
+		if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || buggify()) &&
 		    deterministicRandom()->random01() < clientSamplingProbability &&
 		    (!g_network->isSimulated() || !g_simulator->speedUpSimulation)) {
 			return makeReference<TransactionLogInfo>(TransactionLogInfo::DATABASE);

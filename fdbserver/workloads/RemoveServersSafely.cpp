@@ -381,7 +381,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		// Include the servers, if unable to exclude
 		// Reinclude when buggify is on to increase the surface area of the next set of excludes
 		bool failed = true;
-		if (!bClearedFirst || BUGGIFY) {
+		if (!bClearedFirst || buggify()) {
 			// Get the updated list of processes which may have changed due to reboots, deletes, etc
 			TraceEvent("RemoveAndKill")
 			    .detail("Step", "include all first")
@@ -441,7 +441,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 	std::vector<ISimulator::ProcessInfo*> killAddresses(std::set<AddressExclusion> const& killAddrs) {
 		UID functionId = nondeterministicRandom()->randomUniqueID();
-		bool removeViaClear = !BUGGIFY;
+		bool removeViaClear = !buggify();
 		std::vector<ISimulator::ProcessInfo*> killProcArray;
 		std::vector<AddressExclusion> toKillArray;
 
@@ -578,7 +578,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		std::vector<AddressExclusion> toKillMarkFailedArray;
 		AddressExclusion coordExcl;
 		// Exclude a coordinator under buggify, but only if fault tolerance is > 0 and kill set is non-empty already
-		if (BUGGIFY && !toKill.empty()) {
+		if (buggify() && !toKill.empty()) {
 			Optional<ClusterConnectionString> csOptional = co_await getConnectionString(cx);
 			std::vector<NetworkAddress> coordinators;
 			if (csOptional.present()) {

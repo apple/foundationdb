@@ -40,7 +40,6 @@
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/StatusClient.h"
 #include "flow/CoroUtils.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
 const std::string kTracingTransactionIdKey = "transaction_id";

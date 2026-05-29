@@ -1229,7 +1229,7 @@ Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> self,
 		// online, so test this behavior in simulation.
 		// Only inflate on first generation (no old TLog data) to avoid compound
 		// version growth across rapid recovery loops that can reach 20+ billion.
-		if (BUGGIFY && self->cstate.myDBState.oldTLogData.empty()) {
+		if (buggify() && self->cstate.myDBState.oldTLogData.empty()) {
 			self->recoveryTransactionVersion += deterministicRandom()->randomInt64(0, 10000000);
 		}
 	}
@@ -1296,7 +1296,7 @@ Future<Void> sendInitialCommitToResolvers(Reference<ClusterRecoveryData> self) {
 
 	RangeResult data =
 	    self->txnStateStore
-	        ->readRange(txnKeys, BUGGIFY ? 3 : SERVER_KNOBS->DESIRED_TOTAL_BYTES, SERVER_KNOBS->DESIRED_TOTAL_BYTES)
+	        ->readRange(txnKeys, buggify() ? 3 : SERVER_KNOBS->DESIRED_TOTAL_BYTES, SERVER_KNOBS->DESIRED_TOTAL_BYTES)
 	        .get();
 	std::vector<Future<Void>> txnReplies;
 	int64_t dataOutstanding = 0;
@@ -1315,10 +1315,11 @@ Future<Void> sendInitialCommitToResolvers(Reference<ClusterRecoveryData> self) {
 		if (data.empty())
 			break;
 		((KeyRangeRef&)txnKeys) = KeyRangeRef(keyAfter(data.back().key, txnKeys.arena()), txnKeys.end);
-		RangeResult nextData =
-		    self->txnStateStore
-		        ->readRange(txnKeys, BUGGIFY ? 3 : SERVER_KNOBS->DESIRED_TOTAL_BYTES, SERVER_KNOBS->DESIRED_TOTAL_BYTES)
-		        .get();
+		RangeResult nextData = self->txnStateStore
+		                           ->readRange(txnKeys,
+		                                       buggify() ? 3 : SERVER_KNOBS->DESIRED_TOTAL_BYTES,
+		                                       SERVER_KNOBS->DESIRED_TOTAL_BYTES)
+		                           .get();
 
 		TxnStateRequest req;
 		req.arena = data.arena();
@@ -1437,7 +1438,7 @@ Future<Void> recoverFrom(Reference<ClusterRecoveryData> self,
 	    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
 	self->hasConfiguration = false;
 
-	if (BUGGIFY)
+	if (buggify())
 		co_await delay(10.0);
 
 	Version txsPoppedVersion = co_await poppedTxsVersion;
