@@ -27,7 +27,7 @@ class Endpoint {
 };
 ```
 
-- **Token** = `UID` (pair of `uint64_t`). Lower 32 bits encode an index into the EndpointMap; upper 32 bits encode task priority.
+- **Token** = `UID` (pair of `uint64_t`). The low 32 bits of the second word are the endpoint's index into the `EndpointMap` — that is what `get()` looks up — and the map entry reuses that same field to hold the receiver's `TaskPriority`. The first word is a random base shared across an interface's contiguous block of endpoints.
 - **Well-known tokens**: `wellKnownToken(int id)` returns `UID(-1, id)`. Reserved IDs: `WLTOKEN_ENDPOINT_NOT_FOUND(0)`, `WLTOKEN_PING_PACKET`, `WLTOKEN_UNAUTHORIZED_ENDPOINT`, plus system services (leader election, config transactions, etc.)
 - **Address selection**: `choosePrimaryAddress()` swaps primary/secondary based on local TLS preference.
 
@@ -58,7 +58,7 @@ struct Peer : ReferenceCounted<Peer> {
 3. Sends `ConnectPacket` (protocol version, local address, connection ID)
 4. Spawns `connectionWriter()` (async write loop) and `connectionReader()` (async read loop)
 5. `connectionMonitor()` sends periodic pings, detects timeouts
-6. On failure: exponential backoff (INITIAL_RECONNECTION_TIME to MAX_RECONNECTION_TIME, growth factor 1.5x)
+6. On failure: exponential backoff (INITIAL_RECONNECTION_TIME to MAX_RECONNECTION_TIME, growth factor 1.2x)
 7. `discardUnreliablePackets()` on disconnect; reliable packets resent after reconnect
 
 ### EndpointMap -- [`FlowTransport.cpp`](https://github.com/apple/foundationdb/blob/main/fdbrpc/FlowTransport.cpp)`:90-230`
@@ -75,7 +75,7 @@ struct Entry {
 - Pre-allocates slots for well-known endpoints (indices 0 to wellKnownEndpointCount-1)
 - Dynamic endpoints allocated from free list; doubles table size when full
 - `get(token)` -- O(1) lookup by token's lower 32 bits
-- `insert()` -- allocates from free list, encodes priority in upper 32 bits
+- `insert()` -- allocates from free list (single endpoint) or a contiguous block (the `streams` overload, keyed off a fresh random base UID); stores the receiver's priority in the entry token's low 32 bits
 - `remove()` -- returns slot to free list
 
 ### FlowTransport -- [`FlowTransport.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/FlowTransport.h)`:199-315`
@@ -167,7 +167,7 @@ Each interface picks an "anchor" stream (typically the most-used one: `commit` f
 // CommitProxyInterface.h (excerpt)
 template <class Archive>
 void serialize(Archive& ar) {
-    serializer(ar, processId, provisional, commit);  // anchor — only this is on the wire
+    serializer(ar, processId, provisional, commit);  // commit is the anchor — the only RequestStream on the wire
     if (Archive::isDeserializing) {
         legacyGetConsistentReadVersion = ...(commit.getEndpoint().getAdjustedEndpoint(1));
         getKeyServersLocations         = ...(commit.getEndpoint().getAdjustedEndpoint(2));
@@ -187,37 +187,35 @@ void initEndpoints() {
 
 `EndpointMap::insert` allocates the registered receivers as a contiguous block keyed off a fresh random `base` UID. Stream `i` ends up at token offset `i` from the anchor, and `getAdjustedEndpoint(N)` produces the matching token. Client and server agree iff the client's deserialization index matches the server's registration order.
 
-### Why changing an interface is safe within a protocol version
+### The endpoint layout is a wire-compatibility contract
 
-Endpoint indices look like a wire-format contract but aren't:
+The offsets look like a private, per-build implementation detail. They are not. The offset of every stream within an interface is part of the wire protocol, and it must stay identical across **every binary that runs a compatible protocol version** — not merely across binaries built from the same source tree.
 
-1. **Tokens are not persistent.** Every process calls `initEndpoints` on startup and `EndpointMap::insert` generates a fresh `base` UID per call. Clients don't hold stale tokens across a server restart — they refetch `ClientDBInfo` and reconstruct the interface from scratch.
-2. **Recovery reissues every interface.** When proxies, TLogs, etc. are re-recruited, the new generation's interfaces are distributed via fresh `ServerDBInfo` / `ClientDBInfo` (see [`subsystem_09_cluster_recovery.md`](subsystem_09_cluster_recovery.md)).
-3. **Cross-protocol-version traffic uses the matching client `.so`.** The multi-version client ([`MultiVersionTransaction.cpp`](https://github.com/apple/foundationdb/blob/main/fdbclient/MultiVersionTransaction.cpp), see [`subsystem_03_client_library.md`](subsystem_03_client_library.md)) loads the cluster's matching `fdb_c.so`, so client and server endpoint orders always come from the same source tree.
+The binaries that actually differ are `fdbserver` and `fdbclient`. A cluster's server processes are upgraded together: an upgrade is a coordinated restart that triggers a recovery, so the cluster's `fdbserver` processes always run a single build, and server-to-server interface reconstruction — for example, Ratekeeper rebuilding a `CommitProxyInterface` from the broadcast `ServerDBInfo` — is effectively same-build. Client libraries are not: they are versioned and deployed independently of the cluster and are *not* upgraded in lockstep with it. An application links `fdb_c` libraries that may have been built long before, or after, the `fdbserver` it happens to connect to.
 
-The implication: re-packing or shifting endpoint indices is *not* a wire-compat break, provided both `fdb_c` and `fdbserver` are built together for the protocol version they target. The one invariant that *does* matter within a single build is local: the `getAdjustedEndpoint(N)` argument used in `serialize()` must equal the `push_back` position of the same stream in `initEndpoints()`. Otherwise the deserialized client-side endpoint points at a slot that the server never registered, and `EndpointMap::get` returns `nullptr`.
+What lets a client talk to that server is *protocol compatibility*, not an identical build:
 
-### Legacy slots and an apparent index/registration discrepancy
+1. **FlowTransport connects compatible peers, not identical ones.** Two protocol versions are compatible when their high 48 bits match — `isCompatible` compares `version() & compatibleProtocolVersionMask`, where `compatibleProtocolVersionMask = 0xFFFFFFFFFFFF0000` (see [`ProtocolVersion.h`](https://github.com/apple/foundationdb/blob/main/flow/ProtocolVersion.h.cmake)). The low 16 bits never affect compatibility, and patch releases of an `x.y` line are *required* to keep the same protocol version (see `cmake/ProtocolVersions.cmake`: "This version impacts both communications and the deserialization of certain database and IKeyValueStore keys"). A single compatible protocol version therefore spans many distinct builds.
+2. **The multi-version client selects a library by *normalized* (compatible) version.** `MultiVersionDatabase` indexes loaded client libraries by `protocolVersion.normalizedVersion()` and keeps the same connection when the cluster's protocol version changes but stays compatible (see [`subsystem_03_client_library.md`](subsystem_03_client_library.md)). The library it picks need only be *compatible* with the cluster, so it is routinely a different build than the `fdbserver` it connects to — and its compiled-in endpoint offsets must still match what that server registered.
 
-[`CommitProxyInterface.h`](https://github.com/apple/foundationdb/blob/main/fdbclient/include/fdbclient/CommitProxyInterface.h) contains residue from past endpoint removals/moves, and part of that residue looks like a live bug rather than mere cosmetic cruft.
+A client reconstructs the *entire* interface (every stream in `commitProxies`/`grvProxies`) but only sends to the streams it actually uses. So a client-facing stream carries the cross-build `fdbserver`↔`fdbclient` contract, whereas a server-only stream (one no client sends to, such as `setThrottledShard`) is exercised only on the same-build server-to-server path — its realistic failure mode is the *local* `serialize`/`initEndpoints` misalignment described below, not a cross-build mismatch.
 
-**`legacyGetConsistentReadVersion` at index 1.** A placeholder left behind when `getConsistentReadVersion` was moved to `GrvProxyInterface` (commit `b20ac72d5f`). Carries an inline comment: "Reserved to preserve the historical adjusted-endpoint numbering for the commit proxy interface." The comment asserts numbering must be preserved without explaining why. No surviving commit message or design note justifies the preservation. Per the subsection above, there is no wire-compat reason it must stay.
+Two facts about tokens are true but do *not* license repacking: tokens are not persistent (every process gets a fresh random `base` UID, so no stale token survives a restart), and recovery reissues every interface via fresh `ServerDBInfo`/`ClientDBInfo` (see [`subsystem_09_cluster_recovery.md`](subsystem_09_cluster_recovery.md)). Both keep the *anchor* token fresh — but the offsets relative to that anchor are still reconstructed on the far side from the reader's compiled-in indices, so they remain a cross-binary contract whenever a client and server are different builds.
 
-**Apparent index/registration mismatch for `setThrottledShard`.** The blob-granule (`b1d6dcf0e7`) and multitenant (`bab7637d87`) deletions dropped the `push_back` and deserialization lines for `getBlobGranuleLocations` (originally index 12) and `getTenantId` (originally index 11) without renumbering successors. As of the current tree:
+### Evolving an interface safely
 
-- `serialize()` reconstructs `setThrottledShard` via `commit.getEndpoint().getAdjustedEndpoint(13)`.
-- `initEndpoints()` pushes 12 receivers total, placing `setThrottledShard` at vector index **11**.
-- `EndpointMap::insert` ([`FlowTransport.cpp:150`](https://github.com/apple/foundationdb/blob/main/fdbrpc/FlowTransport.cpp)) allocates exactly `streams.size()` contiguous slots with no holes. The receiver at slot 11 is keyed with `base.first() + (11<<32)` and token-index `adjacentStart + 11`. The client-side token produced by `getAdjustedEndpoint(13)` is keyed with `base.first() + (13<<32)` and token-index `adjacentStart + 13`. Both halves of the token mismatch, so `EndpointMap::get` returns `nullptr`.
+There are two invariants, one local and one global:
 
-The only sender of this request is Ratekeeper ([`Ratekeeper.cpp:325`](https://github.com/apple/foundationdb/blob/main/fdbserver/ratekeeper/Ratekeeper.cpp), `cpi.setThrottledShard.send(setReq)`); the only receiver is [`CommitProxyServer.cpp:2952`](https://github.com/apple/foundationdb/blob/main/fdbserver/commitproxy/CommitProxyServer.cpp) (`proxy.setThrottledShard.getFuture()`). Before the deletions, slots 11 and 12 were occupied and the offsets lined up; after them, the routing path appears broken.
+- **Local (necessary).** Within a single build, the `getAdjustedEndpoint(N)` argument in `serialize()` must equal the `push_back` position of the same stream in `initEndpoints()`. If they differ, even two *identical* binaries mis-route: the reconstructed endpoint points at a slot the server never registered, and `EndpointMap::get` returns `nullptr`.
+- **Global (the real contract).** The offset of each stream must be stable across all compatible binaries, per the section above.
 
-**This should be investigated.** If the analysis above is correct, hot-shard-throttle messages from Ratekeeper to commit proxies have been silently dropped since at least the Dec 2025 multitenant deletion (and partially since the Oct 2025 blob-granule deletion). That this has not surfaced as an obvious regression suggests one of:
+From these, the only safe ways to change an interface are:
 
-- the throttled-shard signaling path is not exercised by current simulation, integration, or production workloads;
-- something in the send/receive plumbing tolerates a `nullptr` receiver lookup more gracefully than the reasoning above implies; or
-- a separate registration mechanism exists that I have not identified.
+1. **Append new streams at the end.** Existing offsets are untouched, so an older client built against the previous layout keeps resolving every stream it knows about.
+2. **When removing a stream, leave a placeholder in its slot** so every successor keeps its offset. The retained `legacyGetConsistentReadVersion` field and the `reservedFor*` placeholders in [`CommitProxyInterface.h`](https://github.com/apple/foundationdb/blob/main/fdbclient/include/fdbclient/CommitProxyInterface.h) are examples — a typed-but-unused `RequestStream` is enough to hold the slot. Removing a stream and letting successors shift down is a *silent* wire break for any compatible client still reconstructing the old layout.
+3. **If you genuinely need to repack or compact offsets, bump the protocol version incompatibly** so that incompatible client and server builds refuse to talk rather than mis-route.
 
-A minimal fix, if the bug is real, is to change `getAdjustedEndpoint(13)` → `getAdjustedEndpoint(11)`. A more durable fix would be a unit test that, for each interface, round-trips through `serialize`/`initEndpoints` and asserts every reconstructed stream resolves to a registered receiver — which would also catch any future blob-granule-style deletion that forgets to renumber successors. Cleaning up `legacyGetConsistentReadVersion` and compacting the indices would prevent the entire class of bug.
+A violation of this contract fails quietly. A send to a token the receiver never registered elicits a `WLTOKEN_ENDPOINT_NOT_FOUND` reply (surfacing as an `EndpointNotFound` trace event), but fire-and-forget sends (`RequestStream::send`) observe no application-level error, so the request is simply dropped. Guarding the layout is therefore best done proactively: a unit test that, for each interface, round-trips through `serialize`/`initEndpoints` and asserts every reconstructed stream resolves to a registered receiver catches the local invariant immediately, and pinning each stream's offset across protocol versions catches a removal that forgets to reserve a placeholder.
 
 ---
 
@@ -272,10 +270,10 @@ class SimpleFailureMonitor : public IFailureMonitor {
 
 **Detection mechanism** (`connectionMonitor()` actor):
 1. Sends periodic ping to `WLTOKEN_PING_PACKET`
-2. Waits for reply with `CONNECTION_MONITOR_TIMEOUT` (1s default)
+2. Waits for reply with `CONNECTION_MONITOR_TIMEOUT` (2s default; 1.5s in simulation)
 3. On timeout: increment count, eventually throw `connection_failed()`
 4. Records ping latency in `DDSketch` histogram
-5. After `FAILURE_DETECTION_DELAY` (5s): mark address as failed
+5. After `FAILURE_DETECTION_DELAY` (4s): mark address as failed
 
 ---
 
@@ -379,14 +377,14 @@ Client-side request distribution:
 
 | Knob | Default | Purpose |
 |------|---------|---------|
-| `INITIAL_RECONNECTION_TIME` | 0.2s | First reconnect delay |
-| `MAX_RECONNECTION_TIME` | 30s | Max backoff |
-| `RECONNECTION_TIME_GROWTH_RATE` | 1.5x | Backoff multiplier |
-| `CONNECTION_MONITOR_TIMEOUT` | 1s | Ping timeout |
-| `FAILURE_DETECTION_DELAY` | 5s | Before marking failed |
-| `PACKET_LIMIT` | 512MB | Max packet size |
-| `MIN_COALESCE_DELAY` | 0.5ms | Min buffer wait |
-| `MAX_COALESCE_DELAY` | 2ms | Max buffer wait |
+| `INITIAL_RECONNECTION_TIME` | 0.05s | First reconnect delay |
+| `MAX_RECONNECTION_TIME` | 0.5s | Max backoff |
+| `RECONNECTION_TIME_GROWTH_RATE` | 1.2x | Backoff multiplier |
+| `CONNECTION_MONITOR_TIMEOUT` | 2s (1.5s in sim) | Ping timeout |
+| `FAILURE_DETECTION_DELAY` | 4s | Before marking failed |
+| `PACKET_LIMIT` | 100MB | Max packet size |
+| `MIN_COALESCE_DELAY` | 10µs | Min buffer wait |
+| `MAX_COALESCE_DELAY` | 20µs | Max buffer wait |
 
 ---
 

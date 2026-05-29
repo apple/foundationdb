@@ -55,6 +55,9 @@ struct CommitProxyInterface {
 	RequestStream<struct ExclusionSafetyCheckRequest> exclusionSafetyCheckReq;
 	RequestStream<struct GetDDMetricsRequest> getDDMetrics;
 	PublicRequestStream<struct ExpireIdempotencyIdRequest> expireIdempotencyId;
+	// Reserved to preserve the historical adjusted-endpoint numbering for the commit proxy interface.
+	RequestStream<ReplyPromise<Void>> reservedForRemovedGetTenantId;
+	RequestStream<ReplyPromise<Void>> reservedForRemovedGetBlobGranuleLocations;
 	RequestStream<struct SetThrottledShardRequest> setThrottledShard;
 
 	UID id() const { return commit.getEndpoint().token; }
@@ -84,6 +87,10 @@ struct CommitProxyInterface {
 			getDDMetrics = RequestStream<struct GetDDMetricsRequest>(commit.getEndpoint().getAdjustedEndpoint(9));
 			expireIdempotencyId =
 			    PublicRequestStream<struct ExpireIdempotencyIdRequest>(commit.getEndpoint().getAdjustedEndpoint(10));
+			reservedForRemovedGetTenantId =
+			    RequestStream<ReplyPromise<Void>>(commit.getEndpoint().getAdjustedEndpoint(11));
+			reservedForRemovedGetBlobGranuleLocations =
+			    RequestStream<ReplyPromise<Void>>(commit.getEndpoint().getAdjustedEndpoint(12));
 			setThrottledShard =
 			    RequestStream<struct SetThrottledShardRequest>(commit.getEndpoint().getAdjustedEndpoint(13));
 		}
@@ -103,6 +110,8 @@ struct CommitProxyInterface {
 		streams.push_back(exclusionSafetyCheckReq.getReceiver());
 		streams.push_back(getDDMetrics.getReceiver());
 		streams.push_back(expireIdempotencyId.getReceiver());
+		streams.push_back(reservedForRemovedGetTenantId.getReceiver());
+		streams.push_back(reservedForRemovedGetBlobGranuleLocations.getReceiver());
 		streams.push_back(setThrottledShard.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
