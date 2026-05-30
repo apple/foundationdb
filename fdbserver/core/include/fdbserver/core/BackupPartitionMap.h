@@ -38,10 +38,10 @@ struct Partition {
 	}
 };
 
-typedef std::vector<Partition> PartitionList;
+using PartitionList = std::vector<Partition>;
 // NOTE: PartitionMap is ordered by Tag so that multiple backup workers can upload the same content and overwrite to
 // blob storage at the same time without conflicts. If the map is not ordered, then there can be conflicts in blob
 // storage when multiple backup workers upload the partition map at the same time.
-typedef std::map<Tag, PartitionList> PartitionMap;
+using PartitionMap = std::map<Tag, PartitionList>;
 
-std::string serializePartitionListJSON(PartitionMap const& PartitionMap);
+std::string serializePartitionListJSON(PartitionMap const& partitionMap);

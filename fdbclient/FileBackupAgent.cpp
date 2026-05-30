@@ -4279,7 +4279,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 				co_await (success(started) && success(taskStarted) && success(mutationLogType));
 
 				if (!mutationLogType.get().present() || mutationLogType.get().get() == MutationLogType::DEFAULT) {
-					co_return; // Skip if not using partitioned logs
+					co_return; // Skip if not using partitioned or range partitioned logs
 				}
 
 				std::vector<std::pair<UID, Version>> ids;
@@ -4297,14 +4297,18 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 
 				tr->set(backupStartedKey, encodeBackupStartedValue(ids));
 
+				// Only PartitionedLog workers set BackupConfig.allWorkerStarted, so watch it for that mutation log
+				// type.
+				const bool isPartitionedLog = mutationLogType.get().get() == MutationLogType::PARTITIONED_LOG;
+
 				// The task may be restarted. Set the watch if started key has NOT been set.
-				if (!taskStarted.get().present()) {
+				if (isPartitionedLog && !taskStarted.get().present()) {
 					watchFuture = tr->watch(config.allWorkerStarted().key);
 				}
 
 				co_await keepRunning;
 				co_await tr->commit();
-				if (!taskStarted.get().present()) {
+				if (isPartitionedLog && !taskStarted.get().present()) {
 					co_await watchFuture;
 				}
 				co_return;
