@@ -2105,6 +2105,11 @@ static Future<Void> clearBackupStartID(Reference<ReadYourWritesTransaction> tr, 
 	if (ids.empty()) {
 		TraceEvent("ClearBackup").detail("BackupID", backupUid);
 		tr->clear(backupStartedKey);
+		// Last backup just finished. If outgoing backup was range-partitioned, ask DD to clear the partition list.
+		Optional<MutationLogType> logType = co_await BackupConfig(backupUid).mutationLogType().get(tr);
+		if (logType.present() && logType.get() == MutationLogType::RANGE_PARTITIONED_LOG) {
+			tr->set(backupPartitionRequiredKey, backupPartitionRequiredValue(2));
+		}
 	} else {
 		tr->set(backupStartedKey, encodeBackupStartedValue(ids));
 	}
@@ -4286,6 +4291,12 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 				if (started.get().present()) {
 					ids = decodeBackupStartedValue(started.get().get());
 				}
+
+				// First range-partitioned backup on this cluster: ask DD to compute the partition list.
+				if (ids.empty() && mutationLogType.get().get() == MutationLogType::RANGE_PARTITIONED_LOG) {
+					tr->set(backupPartitionRequiredKey, backupPartitionRequiredValue(1));
+				}
+
 				const UID uid = config.getUid();
 				auto it = std::find_if(
 				    ids.begin(), ids.end(), [uid](const std::pair<UID, Version>& p) { return p.first == uid; });

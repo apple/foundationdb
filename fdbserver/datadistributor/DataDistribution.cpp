@@ -30,6 +30,7 @@
 #include "fdbclient/RunRYWTransaction.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
+#include "fdbserver/core/BackupPartitionMap.h"
 #include "fdbserver/core/BulkDumpUtil.h"
 #include "fdbserver/core/BulkLoadUtil.h"
 #include "fdbserver/datadistributor/DataDistributor.h"
@@ -304,6 +305,48 @@ Future<Void> remoteRecovered(Reference<AsyncVar<ServerDBInfo> const> db) {
 	while (db->get().recoveryState < RecoveryState::ALL_LOGS_RECRUITED) {
 		TraceEvent("DDTrackerStarting").detail("RecoveryState", (int)db->get().recoveryState);
 		co_await db->onChange();
+	}
+}
+
+// Watches backupPartitionRequiredKey.
+// On value=1, computes the user keyspace partitions and writes them to backupPartitionListKey.
+// On value=2, clears backupPartitionListKey.
+// In both cases the request key is cleared in the same commit.
+Future<Void> monitorBackupPartitionRequired(Database cx, KeyRangeMap<ShardTrackedData>* shards, UID ddId) {
+	while (true) {
+		ReadYourWritesTransaction tr(cx);
+		while (true) {
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				Optional<Value> value = co_await tr.get(backupPartitionRequiredKey);
+				int8_t requestType = value.present() ? decodeBackupPartitionRequiredValue(value.get()) : 0;
+
+				if (requestType == 1) {
+					std::vector<KeyRange> partitions = co_await calculateBackupPartitionKeyRanges(shards);
+					tr.set(backupPartitionListKey, encodeBackupPartitionListValue(partitions));
+					tr.clear(backupPartitionRequiredKey);
+					co_await tr.commit();
+					TraceEvent("DDBackupPartitionsComputed", ddId).detail("NumPartitions", partitions.size());
+					break;
+				} else if (requestType == 2) {
+					tr.clear(backupPartitionListKey);
+					tr.clear(backupPartitionRequiredKey);
+					co_await tr.commit();
+					TraceEvent("DDBackupPartitionsCleared", ddId);
+					break;
+				}
+
+				Future<Void> watchFuture = tr.watch(backupPartitionRequiredKey);
+				co_await tr.commit();
+				co_await watchFuture;
+				break;
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
 	}
 }
 
@@ -2814,6 +2857,7 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 			}
 
 			actors.push_back(self->pollMoveKeysLock());
+			actors.push_back(monitorBackupPartitionRequired(self->txnProcessor->context(), &shards, self->ddId));
 
 			self->context->tracker = makeReference<DataDistributionTracker>(
 			    DataDistributionTrackerInitParams{ .db = self->txnProcessor,
