@@ -432,6 +432,14 @@ std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& va
 // 1 = Send a signal to pause/already paused.
 extern const KeyRef backupPausedKey;
 
+//	"\xff\x02/backupPartitionmap/[8-byte epoch][8-byte version]" := "[[PartitionMap]]"
+//	One row per (epoch, version) where a partition map became effective.
+//	Read by catch-up backup workers during recovery.
+extern const KeyRangeRef backupPartitionMapHistoryKeys;
+Key backupPartitionMapHistoryKeyFor(LogEpoch epoch, Version version);
+KeyRange backupPartitionMapHistoryRangeFor(LogEpoch epoch);
+std::pair<LogEpoch, Version> decodeBackupPartitionMapHistoryKey(const KeyRef& key);
+
 //	"\xff/previousCoordinators" = "[[ClusterConnectionString]]"
 //	Set to the encoded structure of the cluster's previous set of coordinators.
 //	Changed when performing quorumChange.
