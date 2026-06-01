@@ -75,7 +75,7 @@ if(WIN32)
   add_definitions(-D_USE_MATH_DEFINES) # Math constants
 endif()
 
-if(APPLE)
+if(APPLE OR USE_LIBCXX)
 # Remove this after boost 1.81 or above is used
 add_definitions(-D_LIBCPP_ENABLE_CXX17_REMOVED_UNARY_BINARY_FUNCTION)
 endif()
