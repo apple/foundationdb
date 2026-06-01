@@ -1045,6 +1045,11 @@ ACTOR static Future<Void> monitorClientDBInfoChange(DatabaseContext* cx,
 					curCommitProxies = clientDBInfo->get().commitProxies;
 					curGrvProxies = clientDBInfo->get().grvProxies;
 					proxiesChangeTrigger->trigger();
+					// Eagerly rebuild the published proxy ModelInterface the instant the
+					// proxy list changes, so a killed proxy's RequestStream is dropped from
+					// cx->commitProxies/grvProxies on clientInfo rotation rather than waiting
+					// for the next transaction's lazy getCommitProxies()/getGrvProxies().
+					cx->updateProxies();
 				}
 			}
 			when(wait(actors.getResult())) {

@@ -54,6 +54,7 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( MAX_CLIENT_STATUS_AGE,                   1.0 );
 	init( MAX_COMMIT_PROXY_CONNECTIONS,              5 ); if( randomize && BUGGIFY ) MAX_COMMIT_PROXY_CONNECTIONS = 1;
 	init( MAX_GRV_PROXY_CONNECTIONS,                 3 ); if( randomize && BUGGIFY ) MAX_GRV_PROXY_CONNECTIONS = 1;
+	init( SHRINK_PROXY_LIST_CLEAR_CACHE_BELOW_THRESHOLD, true ); // When true, MonitorLeader::shrinkProxyList clears its cached sampled-subset (lastCommitProxies / lastGrvProxies) on iterations where recruited count is below MAX_*_PROXY_CONNECTIONS. Prevents the cache from pinning RequestStream refs (and thus peer references) of a killed proxy after recruited count drops back under the cap. Default on; disable to restore pre-fix behavior.
 	init( STATUS_IDLE_TIMEOUT,                   120.0 );
 	init( STATUS_TIMEOUT,                         30.0 );
 	init( SEND_ENTIRE_VERSION_VECTOR,            false );

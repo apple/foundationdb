@@ -818,6 +818,38 @@ void shrinkProxyList(ClientDBInfo& ni,
 		}
 		ni.firstCommitProxy = ni.commitProxies[0];
 		ni.commitProxies = lastCommitProxies;
+	} else if (CLIENT_KNOBS->SHRINK_PROXY_LIST_CLEAR_CACHE_BELOW_THRESHOLD) {
+		// Why clear here: say MAX=5 and we recruited 6 CPs, so we sampled+cached 5 of
+		// them above. Now a CP is killed and the recruited count drops to 5 (6 -> 5),
+		// which falls at/below MAX so we land in this branch and never re-enter the
+		// shrink path. The cached list still holds the old sample -- including the
+		// killed CP's interface -- so it keeps that CP's RequestStreams (and their
+		// peer references), which causes stale peer issue (See StalePeerTest.toml with killRole=commit_proxy)
+		//
+		// The cache exists to prevent proxy churn: while above MAX we keep talking to
+		// the same sampled subset across ClientDBInfo updates instead of reshuffling.
+		//
+		// You may ask: now that we clear it, is there a performance cost? No:
+		//   - The cache is only (re)populated above MAX, and only when the recruited
+		//     set actually changed. Clearing never runs above MAX, so the
+		//     stay-above-MAX stability is untouched.
+		//   - Below MAX the cache is not used at all (we talk to every recruited
+		//     proxy), so clearing it has zero effect on churn or perf here.
+		//   - The one case where the cache could have helped is 6 -> 5 -> 6 returning
+		//     to the *same* set: baseline would reuse, we re-sample. But crossing MAX
+		//     again means a recovery, which recruits CPs with new UIDs, so the set is
+		//     not the same and baseline would re-sample too.
+		//     Either way it is a one-time reshuffle, not steady-state, and
+		//     the knob means we can experiment and have it be off in case of performance concerns.
+		if (!lastCommitProxyUIDs.empty()) {
+			TraceEvent("ShrinkProxyListCacheCleared")
+			    .detail("Role", "commit_proxy")
+			    .detail("PrevCachedCount", (int)lastCommitProxyUIDs.size())
+			    .detail("RecruitedCount", (int)ni.commitProxies.size())
+			    .detail("MaxConnections", CLIENT_KNOBS->MAX_COMMIT_PROXY_CONNECTIONS);
+			lastCommitProxyUIDs.clear();
+			lastCommitProxies.clear();
+		}
 	}
 	if (ni.grvProxies.size() > CLIENT_KNOBS->MAX_GRV_PROXY_CONNECTIONS) {
 		std::vector<UID> grvProxyUIDs;
@@ -834,6 +866,19 @@ void shrinkProxyList(ClientDBInfo& ni,
 			}
 		}
 		ni.grvProxies = lastGrvProxies;
+	} else if (CLIENT_KNOBS->SHRINK_PROXY_LIST_CLEAR_CACHE_BELOW_THRESHOLD) {
+		// Same as the commit-proxy branch above (see that comment for the why and the
+		// no-perf-cost reasoning): clear the cache when no shrink is needed so it
+		// doesn't pin a killed GP's interface.
+		if (!lastGrvProxyUIDs.empty()) {
+			TraceEvent("ShrinkProxyListCacheCleared")
+			    .detail("Role", "grv_proxy")
+			    .detail("PrevCachedCount", (int)lastGrvProxyUIDs.size())
+			    .detail("RecruitedCount", (int)ni.grvProxies.size())
+			    .detail("MaxConnections", CLIENT_KNOBS->MAX_GRV_PROXY_CONNECTIONS);
+			lastGrvProxyUIDs.clear();
+			lastGrvProxies.clear();
+		}
 	}
 }
 
