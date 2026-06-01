@@ -327,6 +327,19 @@ public:
 	NetworkAddressCachedString localAddresses;
 	std::vector<Future<Void>> listeners;
 	std::unordered_map<NetworkAddress, Reference<struct Peer>> peers;
+	// Per-address connect-failure counter that survives Peer destruction.
+	// Peer can be erased when peerReferences hits zero (see Peer dtor /
+	// connectionKeeper exit conditions), which resets per-Peer counters and
+	// blinds the locationCachePeerWatcher to flapping addresses whose Peer
+	// churns between watcher ticks. Incremented in the connect() catch handler,
+	// which also prunes entries once an address has had no connect failure for
+	// PERSISTENT_CONNECT_FAILED_COUNT_TTL -- bounding this map (and the
+	// per-DatabaseContext watcher snapshot/streak maps it feeds), which would
+	// otherwise grow one entry per ever-failed address for the process's life.
+	std::unordered_map<NetworkAddress, ConnectFailedInfo> persistentConnectFailedCount;
+	// now() of the last prune sweep over persistentConnectFailedCount; throttles
+	// the sweep to at most once per PERSISTENT_CONNECT_FAILED_COUNT_TTL.
+	double persistentConnectFailedLastPrune = 0;
 	std::unordered_map<NetworkAddress, std::pair<double, double>> closedPeers;
 	HealthMonitor healthMonitor;
 	std::set<NetworkAddress> orderedAddresses;
@@ -858,6 +871,30 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 					}
 				} catch (Error& e) {
 					++self->connectFailedCount;
+					// Track per-address cumulative connect failures + last-failure time. The map
+					// survives Peer destruction so locationCachePeerWatcher has a stable flap
+					// signal; bound it by dropping (throttled to once per TTL) any address
+					// quiescent for >= TTL. Pruned addresses have watcher delta 0 (no eviction in
+					// flight) and the watcher sheds its snapshot/streak entry next tick; now()
+					// consumes no RNG, so simulator determinism is preserved.
+					{
+						double tNow = now();
+						double ttl = FLOW_KNOBS->PERSISTENT_CONNECT_FAILED_COUNT_TTL;
+						auto& m = self->transport->persistentConnectFailedCount;
+						auto& info = m[self->destination];
+						info.count++;
+						info.lastFailed = tNow;
+						if (ttl > 0 && tNow - self->transport->persistentConnectFailedLastPrune >= ttl) {
+							self->transport->persistentConnectFailedLastPrune = tNow;
+							for (auto it = m.begin(); it != m.end();) {
+								if (tNow - it->second.lastFailed >= ttl) {
+									it = m.erase(it);
+								} else {
+									++it;
+								}
+							}
+						}
+					}
 					if (e.code() != error_code_connection_failed) {
 						throw;
 					}
@@ -2035,6 +2072,10 @@ void FlowTransport::setLocalAddress(NetworkAddress const& address) {
 
 const std::unordered_map<NetworkAddress, Reference<Peer>>& FlowTransport::getAllPeers() const {
 	return self->peers;
+}
+
+const std::unordered_map<NetworkAddress, ConnectFailedInfo>& FlowTransport::getPersistentConnectFailedCounts() const {
+	return self->persistentConnectFailedCount;
 }
 
 std::map<NetworkAddress, std::pair<uint64_t, double>>* FlowTransport::getIncompatiblePeers() {

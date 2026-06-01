@@ -131,6 +131,10 @@ public:
 	// a given seed produces the same execution regardless of the value.
 	bool STALE_PEER_OBSERVABILITY;
 
+	// Seconds of no connect failure after which an address is pruned from
+	// TransportData::persistentConnectFailedCount (bounds that map and the
+	// locationCachePeerWatcher snapshot/streak maps). 0 disables pruning.
+	double PERSISTENT_CONNECT_FAILED_COUNT_TTL;
 	double DELAY_JITTER_OFFSET;
 	double DELAY_JITTER_RANGE;
 	double BUSY_WAIT_THRESHOLD;
