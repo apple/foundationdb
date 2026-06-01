@@ -91,14 +91,13 @@ __GENERATE_BUGGIFY_VARIABLES(CLIENT, Client, client)
 /* Disabled due to <source_location> not available on clang-14 on macOS 13. Use macro for a bit longer.
 inline bool buggify(double probability = P_GENERAL_BUGGIFIED_SECTION_FIRES,
                     const std::source_location location = std::source_location::current()) {
-	return isGeneralBuggifyEnabled() && getGeneralSBVar(location.file_name(), static_cast<int>(location.line())) &&
-	       deterministicRandom()->random01() < probability;
+    return isGeneralBuggifyEnabled() && getGeneralSBVar(location.file_name(), static_cast<int>(location.line())) &&
+           deterministicRandom()->random01() < probability;
 }
 */
 
-inline bool _buggify(const char *file, const int line, double probability = P_GENERAL_BUGGIFIED_SECTION_FIRES) {
-	return isGeneralBuggifyEnabled() && getGeneralSBVar(file, line) &&
-	       deterministicRandom()->random01() < probability;
+inline bool _buggify(const char* file, const int line, double probability = P_GENERAL_BUGGIFIED_SECTION_FIRES) {
+	return isGeneralBuggifyEnabled() && getGeneralSBVar(file, line) && deterministicRandom()->random01() < probability;
 }
 // buggify() macro defined at the end to avoid affecting swift namespace
 
@@ -139,6 +138,6 @@ inline bool buggify(const char* _Nonnull filename, int line) {
 } // namespace SwiftBridging
 
 // TODO: go back to buggify() function using <source_location>, above
-#define buggify(...) _buggify(__FILE__, __LINE__ __VA_OPT__(,) __VA_ARGS__)
+#define buggify(...) _buggify(__FILE__, __LINE__ __VA_OPT__(, ) __VA_ARGS__)
 
 #endif // FLOW_BUGGIFY_H
