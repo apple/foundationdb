@@ -1060,7 +1060,7 @@ WorkerBackupStatus decodeBackupProgressValue(const ValueRef& value) {
 	return status;
 }
 
-const KeyRangeRef backupPartitionMapHistoryKeys("\xff\x02/backupPartitionmap/"_sr, "\xff\x02/backupPartitionmap0"_sr);
+const KeyRangeRef backupPartitionMapHistoryKeys("\xff\x02/backupPartitionMap/"_sr, "\xff\x02/backupPartitionMap0"_sr);
 
 Key backupPartitionMapHistoryKeyFor(LogEpoch epoch, Version version) {
 	BinaryWriter wr(Unversioned());

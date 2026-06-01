@@ -506,9 +506,32 @@ Future<Void> processPartitionMap(BackupRangePartitionedData* self) {
 
 	PartitionMap partitionMap;
 	Version partitionMapVersion;
+	PartitionMapHistory history;
 
-	if (self->backupEpoch == self->recruitedEpoch) {
-		// Current-epoch worker: receive the partition map via TLog as the first message.
+	if (self->backupEpoch != self->recruitedEpoch) {
+		// Old epoch worker: the partition map for our backupEpoch was persisted by the previous epoch's
+		// workers. Read it from system keys instead of pulling from TLog.
+		// TODO akanksha: Scenario 2 — handle multiple history entries for mid-stream re-partition.
+		// TODO akanksha: Handle Case 3 mentioned in the TODO above.
+		history = co_await loadPartitionMapHistoryFromSS(self, self->backupEpoch);
+		if (!history.empty()) {
+			partitionMapVersion = history[0].first;
+			partitionMap = std::move(history[0].second);
+			auto it = partitionMap.find(self->tag);
+			ASSERT(it != partitionMap.end() && !it->second.empty());
+			TraceEvent("BWRangePartitionedLoadedPartitionMap", self->myId)
+			    .detail("Epoch", self->backupEpoch)
+			    .detail("Version", partitionMapVersion)
+			    .detail("NumTags", partitionMap.size())
+			    .detail("Tag", self->tag.toString())
+			    .detail("NumPartitions", it->second.size());
+		}
+	}
+
+	if (self->backupEpoch == self->recruitedEpoch || history.empty()) {
+		// Current-epoch worker, or old epoch worker with no SS history (recovery happened before the
+		// previous epoch's persistPartitionMapToSS). Receive the partition map via TLog as the first
+		// message, then persist it so the next old epoch worker doesn't hit this case.
 		partitionMapVersion = co_await pullPartitionMapFromTLog(self, &partitionMap);
 		auto it = partitionMap.find(self->tag);
 		ASSERT(it != partitionMap.end() && !it->second.empty());
@@ -518,7 +541,7 @@ Future<Void> processPartitionMap(BackupRangePartitionedData* self) {
 		    .detail("Tag", self->tag.toString())
 		    .detail("NumPartitions", it->second.size());
 
-		// Persist the partition map to system keys so catch-up backup workers can read it during recovery.
+		// Persist the partition map to system keys so old epoch backup workers can read it during recovery.
 		co_await persistPartitionMapToSS(self, partitionMapVersion, partitionMap);
 
 		// Every BW uploads the partition list. Content is deterministic across workers
@@ -531,22 +554,6 @@ Future<Void> processPartitionMap(BackupRangePartitionedData* self) {
 		self->pulledVersion.set(partitionMapVersion);
 		self->savedVersion = partitionMapVersion;
 		self->pop();
-	} else {
-		// Catch-up worker: the partition map for our backupEpoch was persisted by the previous epoch's
-		// workers. Read it from system keys instead of pulling from TLog.
-		// TODO akanksha: Handle Case 3 mentioned in the TODO above.
-		PartitionMapHistory history = co_await loadPartitionMapHistoryFromSS(self, self->backupEpoch);
-		ASSERT(!history.empty());
-		partitionMapVersion = history[0].first;
-		partitionMap = std::move(history[0].second);
-		auto it = partitionMap.find(self->tag);
-		ASSERT(it != partitionMap.end() && !it->second.empty());
-		TraceEvent("BWRangePartitionedLoadedPartitionMap", self->myId)
-		    .detail("Epoch", self->backupEpoch)
-		    .detail("Version", partitionMapVersion)
-		    .detail("NumTags", partitionMap.size())
-		    .detail("Tag", self->tag.toString())
-		    .detail("NumPartitions", it->second.size());
 	}
 
 	self->logFolderBaseVersion = partitionMapVersion + 1;
