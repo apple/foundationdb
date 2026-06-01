@@ -1035,6 +1035,11 @@ SetPeekCursor::SetPeekCursor(std::vector<Reference<LogSet>> const& logSets,
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && bestSet >= 0) {
 		resetBestServerIfNotAvailable(logSets[bestSet]->logServers, bestServer, end);
 	}
+	// Live CDC consumers wait for future mutations; finite recovery and tag-history reads must reach their end.
+	const bool tailingCDC = tag.locality == tagLocalityCDC && end == std::numeric_limits<Version>::max();
+	CODE_PROBE(tag.locality == tagLocalityCDC && !tailingCDC,
+	           "CDC finite-range peek returns without blocking",
+	           probe::decoration::rare);
 	serverCursors.resize(logSets.size());
 	int maxServers = 0;
 	for (int i = 0; i < logSets.size(); i++) {
@@ -1044,13 +1049,8 @@ SetPeekCursor::SetPeekCursor(std::vector<Reference<LogSet>> const& logSets,
 			         ? canReturnEmptyVersionRange(
 			               bestServer, j /*currentServer*/, end, knownLockedTLogIds, bestSet, i /* currentSet */)
 			         : false);
-			auto cursor = makeReference<ServerPeekCursor>(logSets[i]->logServers[j],
-			                                              tag,
-			                                              begin,
-			                                              end,
-			                                              tag.locality != tagLocalityCDC,
-			                                              parallelGetMore,
-			                                              returnEmptyIfStopped);
+			auto cursor = makeReference<ServerPeekCursor>(
+			    logSets[i]->logServers[j], tag, begin, end, !tailingCDC, parallelGetMore, returnEmptyIfStopped);
 			serverCursors[i].push_back(cursor);
 		}
 		maxServers = std::max<int>(maxServers, serverCursors[i].size());

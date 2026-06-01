@@ -2162,10 +2162,7 @@ Future<Void> monitorCDCProxyAssignments(ClusterControllerData::DBInfo* db) {
 					for (const auto& assignment : assignments) {
 						const auto [streamId, proxyId] = decodeCDCProxyKey(assignment.key);
 						UID resolvedProxyId = proxyId;
-						const bool hasOwner =
-						    std::any_of(availableProxies.begin(), availableProxies.end(), [proxyId](const auto& proxy) {
-							    return proxy.id() == proxyId;
-						    });
+						const bool hasOwner = containsCDCProxy(availableProxies, proxyId);
 						if (!availableProxies.empty() && !hasOwner) {
 							auto replacement = replacementByFailedProxy.find(proxyId);
 							if (replacement == replacementByFailedProxy.end()) {

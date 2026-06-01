@@ -1,10 +1,16 @@
 [configuration]
 config = '''double remote_double usable_regions=2 regions=[{"datacenters":[{"id":"0","priority":2},{"id":"2","priority":1,"satellite":1}],"satellite_redundancy_mode":"one_satellite_single"},{"datacenters":[{"id":"1","priority":1},{"id":"3","priority":1,"satellite":1}],"satellite_redundancy_mode":"one_satellite_single"}]'''
+# The test targets CDC replay through satellites, not randomized stateless role saturation.
+desiredTLogCount = 2
+remoteDesiredTLogCount = 2
+commitProxyCount = 1
+grvProxyCount = 1
+resolverCount = 1
 minimumRegions = 2
 singleRegion = true
 generateFearless = false
 datacenters = 4
-machineCount = 16
+machineCount = 32
 processesPerMachine = 1
 buggify = false
 faultInjection = false

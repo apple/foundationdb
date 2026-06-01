@@ -1,3 +1,10 @@
+[configuration]
+# Preserve room for role placement in generated multi-region and satellite topologies while running attrition.
+extraMachineCountDC = 3
+# Exercise the explicit bounded Attrition workload without unrelated BUGGIFY disruption.
+buggify = false
+faultInjection = true
+
 [[knobs]]
 enable_native_cdc = true
 
@@ -5,6 +12,8 @@ enable_native_cdc = true
 testTitle = 'NativeCdcEndToEnd'
 useDB = true
 waitForQuiescenceEnd = false
+# The workload validates CDC delivery directly; post-test consistency can block on disrupted generated topologies.
+runConsistencyCheck = false
 timeout = 600
 connectionFailuresDisableDuration = 1000000
 runFailureWorkloads = false
