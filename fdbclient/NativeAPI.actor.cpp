@@ -397,6 +397,7 @@ double DatabaseContext::getLastGrvTime() {
 	return lastGrvTime;
 }
 
+
 Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx,
                                                              StorageServerInterface const& ssi,
                                                              LocalityData const& locality) {
@@ -409,7 +410,6 @@ Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx
 				//       pointing to. This is technically correct, but is very unnatural. We may want to refactor load
 				//       balance to take an AsyncVar<Reference<Interface>> so that it is notified when the interface
 				//       changes.
-
 				it->second->interf = ssi;
 			} else {
 				it->second->notifyContextDestroyed();
@@ -429,6 +429,18 @@ Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx
 
 void StorageServerInfo::notifyContextDestroyed() {
 	cx = nullptr;
+	// NOTE: we deliberately do NOT clear interf here. notifyContextDestroyed()
+	// is called from getInterface() when a still-ALIVE storage server re-registers
+	// with a new locality (orphaning this StorageServerInfo for a fresh one) -- this
+	// happens routinely during recovery/restart. A cached LocationInfo (or an
+	// in-flight load-balance choice) may still hold a Reference to this object; if we
+	// null interf out from under it, its reads route to a default-constructed (invalid)
+	// endpoint and HANG forever (no reply, no wrong_shard_server, no connection_failed),
+	// which stalls clients (observed as Ratekeeper's getServerListAndProcessClasses
+	// hanging -> RkSSListFetchTimeout -> tpsLimit=0 -> the cluster never quiesces).
+	// Dropping a genuinely-dead peer's RequestStream refs is handled by
+	// invalidateCacheByAddress(), which detaches from server_interf first and only
+	// then clears interf -- safe because nothing routes there anymore.
 }
 
 StorageServerInfo::~StorageServerInfo() {
@@ -1154,6 +1166,74 @@ ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, Stora
 	}
 }
 
+// Periodically samples FlowTransport's persistent per-address connect-failed
+// counter and evicts any address whose count advanced since the previous tick
+// (a "flap"). This is a direct CTO signal: every connect failure increments
+// the counter, and any positive delta within a watcher interval indicates an
+// address that is still being targeted by RPCs but cannot establish a
+// connection, which is exactly the behavior that produces client-visible CTOs.
+ACTOR static Future<Void> locationCachePeerWatcherActor(DatabaseContext* cx) {
+	// Per-address snapshot of FlowTransport's persistent connect-failed counter
+	// taken on the previous tick. The delta to the current count is the flap
+	// signal: a positive delta means the address is still being targeted by RPCs
+	// but cannot connect. We snapshot here (rather than the persistent counter
+	// itself) because that counter survives Peer destruction in TransportData and
+	// is the only stable reference for short-lived flapping Peers.
+	state std::unordered_map<NetworkAddress, int64_t> lastConnectFailedSnapshot;
+	loop {
+		try {
+			wait(delay(CLIENT_KNOBS->LOCATION_CACHE_PEER_FAILURE_EVICTION_DELAY));
+
+			std::set<NetworkAddress> deadAddressSet;
+			int connectFailedThreshold = CLIENT_KNOBS->LOCATION_CACHE_PEER_CONNECT_FAILED_THRESHOLD;
+			const auto& persistent = FlowTransport::transport().getPersistentConnectFailedCounts();
+			for (const auto& [addr, cur] : persistent) {
+				if (!addr.isValid()) {
+					continue;
+				}
+				int64_t prev = 0;
+				auto snapIt = lastConnectFailedSnapshot.find(addr);
+				if (snapIt != lastConnectFailedSnapshot.end()) {
+					prev = snapIt->second;
+				}
+				int64_t delta = cur.count - prev;
+				lastConnectFailedSnapshot[addr] = cur.count;
+				if (delta > connectFailedThreshold) {
+					deadAddressSet.insert(addr);
+					if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
+						TraceEvent("StalePeerEvictFlapSweep")
+						    .detail("DbId", cx->dbId)
+						    .detail("Addr", addr)
+						    .detail("ConnectFailedDelta", delta)
+						    .detail("ConnectFailedTotal", cur.count);
+					}
+				}
+			}
+			// Drop snapshot entries for addrs FlowTransport no longer reports a counter
+			// for, so this map stays bounded alongside the persistent one.
+			for (auto it = lastConnectFailedSnapshot.begin(); it != lastConnectFailedSnapshot.end();) {
+				if (persistent.find(it->first) == persistent.end()) {
+					it = lastConnectFailedSnapshot.erase(it);
+				} else {
+					++it;
+				}
+			}
+			for (const auto& addr : deadAddressSet) {
+				cx->invalidateCacheByAddress(addr);
+			}
+		} catch (Error& e) {
+			// actor_cancelled must propagate so ~DatabaseContext can tear down the
+			// watcher; any other error should not kill the loop (that would silently
+			// stop the flap sweep for the life of the DC).
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			TraceEvent(SevWarn, "LocationCachePeerWatcherError").error(e).detail("DbId", cx->dbId);
+		}
+	}
+}
+
+
 // The reason for getting a pointer to DatabaseContext instead of a reference counted object is because reference
 // counting will increment reference count for DatabaseContext which holds the future of this actor. This creates a
 // cyclic reference and hence this actor and Database object will not be destroyed at all.
@@ -1613,6 +1693,9 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	tssMismatchHandler = handleTssMismatches(this);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
+	if (CLIENT_KNOBS->LOCATION_CACHE_PEER_WATCHER_ENABLED) {
+		locationCachePeerWatcher = locationCachePeerWatcherActor(this);
+	}
 
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
 	globalConfig = std::make_unique<GlobalConfig>(this);
@@ -1921,6 +2004,7 @@ DatabaseContext::~DatabaseContext() {
 	clientDBInfoMonitor.cancel();
 	monitorTssInfoChange.cancel();
 	tssMismatchHandler.cancel();
+	locationCachePeerWatcher.cancel();
 	if (grvUpdateHandler.isValid()) {
 		grvUpdateHandler.cancel();
 	}
@@ -2044,6 +2128,39 @@ void DatabaseContext::invalidateCache(const Optional<KeyRef>& tenantPrefix, cons
 	Key begin = rs.begin().begin(),
 	    end = rs.end().begin(); // insert invalidates rs, so can't be passed a mere reference into it
 	locationCache.insert(KeyRangeRef(begin, end), Reference<LocationInfo>());
+}
+
+void DatabaseContext::invalidateCacheByAddress(const NetworkAddress& address) {
+	// Evict every cached location whose LocationInfo references this address,
+	// forcing a re-resolve off the stale/unreachable storage server. We do NOT
+	// touch the StorageServerInfo interf or the FlowTransport peer here: dropping
+	// the cache's Reference is enough -- once no cached LocationInfo (and no
+	// in-flight load-balance choice) holds the SSInfo, it is destroyed and its
+	// RequestStream / peer refs release. Clearing interf directly would risk
+	// nulling it out from under an in-flight read, which then hangs on a default
+	// endpoint; we let the reference-count cascade release it instead.
+	std::vector<KeyRange> rangesToInvalidate;
+	auto ranges = locationCache.ranges();
+	for (auto iter = ranges.begin(); iter != ranges.end(); ++iter) {
+		if (!iter->value())
+			continue;
+		auto& loc = iter->value();
+		for (int i = 0; i < loc->size(); i++) {
+			if (loc->getInterface(i).address() == address) {
+				rangesToInvalidate.push_back(KeyRange(KeyRangeRef(iter->begin(), iter->end())));
+				break;
+			}
+		}
+	}
+
+	for (const auto& range : rangesToInvalidate) {
+		locationCache.insert(range, Reference<LocationInfo>());
+	}
+
+	TraceEvent("LocationCacheInvalidatedByAddress")
+	    .detail("DbId", dbId)
+	    .detail("Address", address)
+	    .detail("InvalidatedRanges", rangesToInvalidate.size());
 }
 
 void DatabaseContext::setFailedEndpointOnHealthyServer(const Endpoint& endpoint) {

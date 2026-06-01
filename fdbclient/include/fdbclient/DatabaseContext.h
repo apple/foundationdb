@@ -308,6 +308,7 @@ public:
 	Reference<LocationInfo> setCachedLocation(const KeyRangeRef&, const std::vector<struct StorageServerInterface>&);
 	void invalidateCache(const Optional<KeyRef>& tenantPrefix, const KeyRef& key, Reverse isBackward = Reverse::False);
 	void invalidateCache(const Optional<KeyRef>& tenantPrefix, const KeyRangeRef& keys);
+	void invalidateCacheByAddress(const NetworkAddress& address);
 
 	// Records that `endpoint` is failed on a healthy server.
 	void setFailedEndpointOnHealthyServer(const Endpoint& endpoint);
@@ -547,6 +548,9 @@ public:
 
 	std::map<UID, StorageServerInfo*> server_interf;
 	std::map<UID, BlobWorkerInterface> blobWorker_interf; // blob workers don't change endpoints for the same ID
+
+	// Periodically scans serverListKeys and evicts stale locationCache entries
+	Future<Void> locationCachePeerWatcher;
 
 	// map from ssid -> tss interface
 	std::unordered_map<UID, StorageServerInterface> tssMapping;

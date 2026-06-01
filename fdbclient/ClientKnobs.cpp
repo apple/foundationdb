@@ -28,11 +28,11 @@
 
 #define init(...) KNOB_FN(__VA_ARGS__, INIT_ATOMIC_KNOB, INIT_KNOB)(__VA_ARGS__)
 
-ClientKnobs::ClientKnobs(Randomize randomize) {
-	initialize(randomize);
+ClientKnobs::ClientKnobs(Randomize randomize, IsSimulated isSimulated) {
+	initialize(randomize, isSimulated);
 }
 
-void ClientKnobs::initialize(Randomize randomize) {
+void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	// clang-format off
 
 	init( TOO_MANY,                            1000000 );
@@ -98,6 +98,9 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( LOCATION_CACHE_EVICTION_SIZE_SIM,         10 ); if( randomize && BUGGIFY ) LOCATION_CACHE_EVICTION_SIZE_SIM = 3;
 	init( LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD,     60 );
 	init( LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL,    60 );
+	init( LOCATION_CACHE_PEER_FAILURE_EVICTION_DELAY, isSimulated ? 180.0 : 10.0 ); // Base interval of the locationCachePeerWatcher sweep. Production (kube) = 10s. Simulation = 180s: the watcher actor's periodic wakeups consume RNG and perturb the deterministic actor-interleaving, so sim wakes it less often to keep the schedule footprint negligible. StalePeerTest overrides to 5.0 for prompt eviction.
+	init( LOCATION_CACHE_PEER_WATCHER_ENABLED,            true ); // master switch for the stale-peer location-cache eviction subsystem. v41j: kept ON in simulation -- general jsd must exercise this functional mitigation outside StalePeerTest. The earlier swizzle/DD-stuck instability tracked to STALE_PEER_OBSERVABILITY (now off in sim), not this watcher; if a residual remains, tune LOCATION_CACHE_PEER_CONNECT_FAILED_THRESHOLD / LOCATION_CACHE_PEER_FAILURE_EVICTION_DELAY for simulation rather than disabling.
+	init( LOCATION_CACHE_PEER_CONNECT_FAILED_THRESHOLD,      0 ); // In the locationCachePeerWatcher sweep, evict an address whose TransportData::persistentConnectFailedCount advanced by more than this since the previous sweep. 0 = any new connect failure counts; a negative value disables the trigger. If simulation is too twitchy, raise LOCATION_CACHE_PEER_FAILURE_EVICTION_DELAY rather than this threshold.
 
 	init( GET_RANGE_SHARD_LIMIT,                     2 );
 	init( WARM_RANGE_SHARD_LIMIT,                  100 );
@@ -343,13 +346,13 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 TEST_CASE("/fdbclient/knobs/initialize") {
 	// This test depends on TASKBUCKET_TIMEOUT_VERSIONS being defined as a constant multiple of CORE_VERSIONSPERSECOND
-	ClientKnobs clientKnobs(Randomize::False);
+	ClientKnobs clientKnobs(Randomize::False, IsSimulated::False);
 	int64_t initialCoreVersionsPerSecond = clientKnobs.CORE_VERSIONSPERSECOND;
 	int initialTaskBucketTimeoutVersions = clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS;
 	clientKnobs.setKnob("core_versionspersecond", initialCoreVersionsPerSecond * 2);
 	ASSERT_EQ(clientKnobs.CORE_VERSIONSPERSECOND, initialCoreVersionsPerSecond * 2);
 	ASSERT_EQ(clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS, initialTaskBucketTimeoutVersions);
-	clientKnobs.initialize(Randomize::False);
+	clientKnobs.initialize(Randomize::False, IsSimulated::False);
 	ASSERT_EQ(clientKnobs.CORE_VERSIONSPERSECOND, initialCoreVersionsPerSecond * 2);
 	ASSERT_EQ(clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS, initialTaskBucketTimeoutVersions * 2);
 	return Void();

@@ -95,6 +95,9 @@ public:
 	int LOCATION_CACHE_EVICTION_SIZE_SIM;
 	double LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD;
 	double LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL;
+	double LOCATION_CACHE_PEER_FAILURE_EVICTION_DELAY;
+	bool LOCATION_CACHE_PEER_WATCHER_ENABLED;
+	int LOCATION_CACHE_PEER_CONNECT_FAILED_THRESHOLD;
 
 	int GET_RANGE_SHARD_LIMIT;
 	int WARM_RANGE_SHARD_LIMIT;
@@ -338,8 +341,8 @@ public:
 	bool ENABLE_MUTATION_CHECKSUM;
 	bool ENABLE_ACCUMULATIVE_CHECKSUM;
 
-	ClientKnobs(Randomize randomize);
-	void initialize(Randomize randomize);
+	ClientKnobs(Randomize randomize, IsSimulated isSimulated);
+	void initialize(Randomize randomize, IsSimulated isSimulated);
 };
 
 #endif
