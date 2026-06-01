@@ -45,9 +45,7 @@ function(compile_boost)
     # Remove this after boost 1.81 or above is used
     # avoid unary_function errors with macOS 26 toolchain using c++17:
     #  > no template named 'unary_function' in namespace 'std'; did you mean '__unary_function'?
-    if (APPLE)
-      list(APPEND BOOST_COMPILER_FLAGS -D_LIBCPP_ENABLE_CXX17_REMOVED_UNARY_BINARY_FUNCTION)
-    endif()
+    list(APPEND BOOST_COMPILER_FLAGS -D_LIBCPP_ENABLE_CXX17_REMOVED_UNARY_BINARY_FUNCTION)
   endif()
 
   # Update the user-config.jam
