@@ -36,13 +36,19 @@ class FlowReceiver : public NetworkMessageReceiver, public NonCopyable {
 	Endpoint endpoint;
 	bool m_isLocalEndpoint;
 	bool m_stream;
+	int64_t m_flowReceiverId;
 
 protected:
-	FlowReceiver() : m_isLocalEndpoint(false), m_stream(false) {}
+	FlowReceiver() : m_isLocalEndpoint(false), m_stream(false), m_flowReceiverId(-1) {}
 
 	FlowReceiver(Endpoint const& remoteEndpoint, bool stream)
-	  : endpoint(remoteEndpoint), m_isLocalEndpoint(false), m_stream(stream) {
+	  : endpoint(remoteEndpoint), m_isLocalEndpoint(false), m_stream(stream), m_flowReceiverId(-1) {
 		FlowTransport::transport().addPeerReference(endpoint, m_stream);
+		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_stream && endpoint.getPrimaryAddress().isValid() &&
+		    endpoint.getPrimaryAddress().isPublic()) {
+			m_flowReceiverId = FlowTransport::transport().interfaceTracker.flowReceiverCreated(
+			    endpoint.getPrimaryAddress(), endpoint.token);
+		}
 	}
 
 	~FlowReceiver() {
@@ -50,6 +56,10 @@ protected:
 			FlowTransport::transport().removeEndpoint(endpoint, this);
 		} else {
 			FlowTransport::transport().removePeerReference(endpoint, m_stream);
+			if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_flowReceiverId >= 0) {
+				FlowTransport::transport().interfaceTracker.flowReceiverDestroyed(
+				    endpoint.getPrimaryAddress(), m_flowReceiverId);
+			}
 		}
 	}
 
@@ -63,6 +73,11 @@ public:
 		endpoint = remoteEndpoint;
 		m_stream = stream;
 		FlowTransport::transport().addPeerReference(endpoint, m_stream);
+		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_stream && endpoint.getPrimaryAddress().isValid() &&
+		    endpoint.getPrimaryAddress().isPublic()) {
+			m_flowReceiverId = FlowTransport::transport().interfaceTracker.flowReceiverCreated(
+			    endpoint.getPrimaryAddress(), endpoint.token);
+		}
 	}
 
 	// If already a remote endpoint, returns that.  Otherwise makes this
@@ -884,36 +899,84 @@ public:
 		return getReplyUnlessFailedFor(ReplyPromise<X>(), sustainedFailureDuration, sustainedFailureSlope);
 	}
 
-	explicit RequestStream(const Endpoint& endpoint) : queue(new NetNotifiedQueue<T, IsPublic>(0, 1, endpoint)) {}
+	explicit RequestStream(const Endpoint& endpoint) : queue(new NetNotifiedQueue<T, IsPublic>(0, 1, endpoint)), m_promiseRefTrackingId(-1) {
+		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && queue->isRemoteEndpoint() && g_network &&
+		    g_network->global(INetwork::enFlowTransport)) {
+			m_promiseRefTrackingId = FlowTransport::transport().interfaceTracker.promiseRefAdded(
+			    endpoint.getPrimaryAddress(), endpoint.token);
+		}
+	}
 
 	FutureStream<T> getFuture() const {
 		queue->addFutureRef();
-		return FutureStream<T>(queue);
+		int64_t trackingId = -1;
+		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && queue->isRemoteEndpoint() && g_network &&
+		    g_network->global(INetwork::enFlowTransport)) {
+			auto const& ep = queue->getEndpoint(TaskPriority::DefaultEndpoint);
+			trackingId = FlowTransport::transport().interfaceTracker.futureRefAdded(
+			    ep.getPrimaryAddress(), ep.token);
+		}
+		return FutureStream<T>(queue, trackingId);
 	}
-	RequestStream() : queue(new NetNotifiedQueue<T, IsPublic>(0, 1)) {}
+	RequestStream() : queue(new NetNotifiedQueue<T, IsPublic>(0, 1)), m_promiseRefTrackingId(-1) {}
 	explicit RequestStream(PeerCompatibilityPolicy policy) : RequestStream() {
 		queue->setPeerCompatibilityPolicy(policy);
 	}
-	RequestStream(const RequestStream& rhs) : queue(rhs.queue) { queue->addPromiseRef(); }
-	RequestStream(RequestStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
+	RequestStream(const RequestStream& rhs) : queue(rhs.queue), m_promiseRefTrackingId(-1) {
+		queue->addPromiseRef();
+		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && queue->isRemoteEndpoint() && g_network &&
+		    g_network->global(INetwork::enFlowTransport)) {
+			auto const& ep = queue->getEndpoint(TaskPriority::DefaultEndpoint);
+			m_promiseRefTrackingId = FlowTransport::transport().interfaceTracker.promiseRefAdded(
+			    ep.getPrimaryAddress(), ep.token);
+		}
+	}
+	RequestStream(RequestStream&& rhs) noexcept : queue(rhs.queue), m_promiseRefTrackingId(rhs.m_promiseRefTrackingId) {
+		rhs.queue = 0;
+		rhs.m_promiseRefTrackingId = -1;
+	}
 	void operator=(const RequestStream& rhs) {
 		rhs.queue->addPromiseRef();
-		if (queue)
+		int64_t newTrackingId = -1;
+		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && rhs.queue->isRemoteEndpoint() && g_network &&
+		    g_network->global(INetwork::enFlowTransport)) {
+			auto const& ep = rhs.queue->getEndpoint(TaskPriority::DefaultEndpoint);
+			newTrackingId = FlowTransport::transport().interfaceTracker.promiseRefAdded(
+			    ep.getPrimaryAddress(), ep.token);
+		}
+		if (queue) {
 			queue->delPromiseRef();
+			if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_promiseRefTrackingId >= 0 && g_network &&
+			    g_network->global(INetwork::enFlowTransport)) {
+				FlowTransport::transport().interfaceTracker.promiseRefReleased(m_promiseRefTrackingId);
+			}
+		}
 		queue = rhs.queue;
+		m_promiseRefTrackingId = newTrackingId;
 	}
 	void operator=(RequestStream&& rhs) noexcept {
 		if (queue != rhs.queue) {
-			if (queue)
+			if (queue) {
 				queue->delPromiseRef();
+				if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_promiseRefTrackingId >= 0 && g_network &&
+				    g_network->global(INetwork::enFlowTransport)) {
+					FlowTransport::transport().interfaceTracker.promiseRefReleased(m_promiseRefTrackingId);
+				}
+			}
 			queue = rhs.queue;
+			m_promiseRefTrackingId = rhs.m_promiseRefTrackingId;
 			rhs.queue = 0;
+			rhs.m_promiseRefTrackingId = -1;
 		}
 	}
 	~RequestStream() {
-		if (queue)
+		if (queue) {
 			queue->delPromiseRef();
-		// queue = (NetNotifiedQueue<T>*)0xdeadbeef;
+			if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_promiseRefTrackingId >= 0 && g_network &&
+			    g_network->global(INetwork::enFlowTransport)) {
+				FlowTransport::transport().interfaceTracker.promiseRefReleased(m_promiseRefTrackingId);
+			}
+		}
 	}
 
 	const Endpoint& getEndpoint(TaskPriority taskID = TaskPriority::DefaultEndpoint) const {
@@ -935,6 +998,7 @@ public:
 
 private:
 	NetNotifiedQueue<T, IsPublic>* queue;
+	int64_t m_promiseRefTrackingId;
 };
 
 template <class T>

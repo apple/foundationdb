@@ -97,6 +97,15 @@ struct CommitProxyInterface {
 			getTenantId = PublicRequestStream<struct GetTenantIdRequest>(commit.getEndpoint().getAdjustedEndpoint(11));
 			getBlobGranuleLocations = PublicRequestStream<struct GetBlobGranuleLocationsRequest>(
 			    commit.getEndpoint().getAdjustedEndpoint(12));
+			if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && g_network &&
+			    g_network->global(INetwork::enFlowTransport)) {
+				std::vector<UID> tokens;
+				tokens.push_back(commit.getEndpoint().token);
+				for (int i = 1; i <= 12; i++)
+					tokens.push_back(commit.getEndpoint().getAdjustedEndpoint(i).token);
+				FlowTransport::transport().interfaceTracker.created(
+				    commit.getEndpoint().getPrimaryAddress(), "CP", tokens);
+			}
 		}
 	}
 

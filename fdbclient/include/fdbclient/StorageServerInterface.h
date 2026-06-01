@@ -158,6 +158,15 @@ public:
 				serializer(ar, uniqueID, locality, getValue);
 			}
 			if (Ar::isDeserializing) {
+				if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && g_network &&
+				    g_network->global(INetwork::enFlowTransport)) {
+					std::vector<UID> tokens;
+					tokens.push_back(getValue.getEndpoint().token);
+					for (int i = 1; i <= 25; i++)
+						tokens.push_back(getValue.getEndpoint().getAdjustedEndpoint(i).token);
+					FlowTransport::transport().interfaceTracker.created(
+					    getValue.getEndpoint().getPrimaryAddress(), "SS", tokens);
+				}
 				getKey = PublicRequestStream<struct GetKeyRequest>(getValue.getEndpoint().getAdjustedEndpoint(1));
 				getKeyValues =
 				    PublicRequestStream<struct GetKeyValuesRequest>(getValue.getEndpoint().getAdjustedEndpoint(2));
