@@ -300,6 +300,67 @@ class DDTxnProcessorImpl {
 		co_return Optional<Key>();
 	}
 
+	// When SHARD_ENCODE_LOCATION_METADATA is false, rewrite any shard-encoded metadata
+	// to old format. Clears DataMoveMetaData and converts keyServers entries from
+	// UID-based to tag-based encoding. Returns true if a rewrite was committed
+	// (caller should re-read). serverKeys entries are left in place — they drain
+	// naturally as DD moves shards using the old path.
+	static Future<bool> rewriteShardEncodedMetadata(Transaction& tr, UID distributorId) {
+		TraceEvent(SevInfo, "DDInitShardEncodeOff", distributorId)
+		    .detail("KnobValue", SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+
+		// Phase 1: Clear all DataMoveMetaData
+		RangeResult dmsCheck = co_await tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY);
+		ASSERT(!dmsCheck.more && dmsCheck.size() < CLIENT_KNOBS->TOO_MANY);
+		if (!dmsCheck.empty()) {
+			TraceEvent(SevWarnAlways, "DDInitCancellingShardEncodedMoves", distributorId)
+			    .detail("Count", dmsCheck.size());
+			tr.clear(dataMoveKeys);
+			co_await tr.commit();
+			tr.reset();
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			co_return true;
+		}
+
+		// Phase 2: Rewrite shard-encoded keyServers entries to old format
+		RangeResult UIDtoTagMap = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
+		ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+
+		bool rewroteAny = false;
+		RangeResult ksEntries = co_await tr.getRange(
+		    KeyRangeRef(keyServersPrefix, keyServersEnd), 1000);
+		for (const auto& kv : ksEntries) {
+			if (kv.value.empty())
+				continue;
+			BinaryReader rd(kv.value, IncludeVersion());
+			if (rd.protocolVersion().hasShardEncodeLocationMetaData()) {
+				std::vector<UID> src, dest;
+				UID srcId, destId;
+				decodeKeyServersValue(UIDtoTagMap, kv.value, src, dest, srcId, destId);
+				Value oldValue = keyServersValue(UIDtoTagMap, src, dest);
+				tr.set(kv.key, oldValue);
+				rewroteAny = true;
+			}
+		}
+
+		if (rewroteAny) {
+			TraceEvent(SevInfo, "DDInitRewritingShardEncodedMetadata", distributorId)
+			    .detail("KeyServersEntries", ksEntries.size());
+			co_await tr.commit();
+			tr.reset();
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			co_return true;
+		}
+
+		co_return false;
+	}
+
 	// Read keyservers, return unique set of teams
 	static Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Database cx,
 	                                                                             UID distributorId,
@@ -389,6 +450,13 @@ class DDTxnProcessorImpl {
 						server_dc[ssi.id()] = ssi.locality.dcId();
 					} else {
 						tss_servers.emplace_back(ssi, id_data[ssi.locality.processId()].processClass);
+					}
+				}
+
+				// If SHARD_ENCODE is off, rewrite any shard-encoded metadata to old format.
+				if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+					if (co_await rewriteShardEncodedMetadata(tr, distributorId)) {
+						continue; // Committed a rewrite — re-read from the top
 					}
 				}
 

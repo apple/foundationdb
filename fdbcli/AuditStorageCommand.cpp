@@ -63,6 +63,7 @@
 #include "fdbclient/IClientApi.h"
 
 #include "fdbclient/ManagementAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Audit.h"
 
 #include "flow/Arena.h"
@@ -114,12 +115,21 @@ Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> cluster
 			type = AuditType::ValidateStorageServerShard;
 		} else if (tokencmp(tokens[1], "validate_restore")) {
 			type = AuditType::ValidateRestore;
+		} else if (tokencmp(tokens[1], "metadata_encoding")) {
+			type = AuditType::ValidateMetadataEncoding;
 		} else {
 			printUsage(tokens[0]);
 			co_return UID();
 		}
 
 		Key begin = allKeys.begin, end = allKeys.end;
+		if (type == AuditType::ValidateMetadataEncoding) {
+			// This audit runs client-side (simple scan, not distributed)
+			auto db = Database::createDatabase(clusterFile, ApiVersion::LATEST_VERSION);
+			UID auditId = deterministicRandom()->randomUniqueID();
+			co_await checkMetadataEncodingCommandActor(db, tokens);
+			co_return auditId;
+		}
 		if (tokens.size() == 3) {
 			begin = tokens[2];
 		} else if (tokens.size() == 4 || tokens.size() == 5) {
@@ -161,7 +171,7 @@ CommandFactory auditStorageFactory(
     CommandHelp("audit_storage <Type> [BeginKey EndKey] <EngineType>",
                 "Start an audit storage",
                 "Specify audit `Type' (only `ha' and `replica' and `locationmetadata' and "
-                "`ssshard' and `validate_restore' `Type' are supported currently), and\n"
+                "`ssshard' and `validate_restore' and `metadata_encoding' `Type' are supported currently), and\n"
                 "optionally a sub-range with `BeginKey' and `EndKey'.\n"
                 "Specify audit `EngineType' when auditType is `ha' or `replica'\n"
                 "(only `ssd-rocksdb-v1' and `ssd-sharded-rocksdb' and `ssd-2' are supported).\n"

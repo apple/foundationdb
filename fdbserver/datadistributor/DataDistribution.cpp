@@ -84,6 +84,7 @@ std::set<int> const& normalDDQueueErrors() {
 		                    error_code_broken_promise,
 		                    error_code_data_move_cancelled,
 		                    error_code_data_move_dest_team_not_found,
+		                    error_code_dd_config_changed,
 		                    error_code_finish_move_keys_too_many_retries,
 		                    error_code_start_move_keys_too_many_retries };
 	return s;
@@ -354,6 +355,7 @@ Future<UID> launchAudit(Reference<DataDistributor> self,
                         KeyValueStoreType auditStorageEngineType);
 Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req);
 Future<Void> periodicAuditLocationMetadata(Reference<DataDistributor> self);
+Future<Void> monitorShardEncodeKnob(UID ddId);
 void loadAndDispatchAudit(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
 Future<Void> dispatchAuditStorageServerShard(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
 Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> self,
@@ -2973,6 +2975,8 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			actors.push_back(periodicAuditLocationMetadata(self));
 
+			actors.push_back(monitorShardEncodeKnob(self->ddId));
+
 			co_await waitForAll(actors);
 			ASSERT_WE_THINK(false);
 			co_return;
@@ -3047,6 +3051,22 @@ static std::set<int> const& normalDataDistributorErrors() {
 		s.insert(error_code_audit_storage_failed);
 	}
 	return s;
+}
+
+// Monitor SHARD_ENCODE_LOCATION_METADATA knob for changes. If flipped mid-run,
+// throw dd_config_changed to restart DD cleanly (preventing in-flight move actors
+// from hitting asserts due to knob/path mismatch).
+Future<Void> monitorShardEncodeKnob(UID ddId) {
+	bool initial = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA;
+	loop {
+		co_await delay(5.0);
+		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA != initial) {
+			TraceEvent(SevInfo, "DDShardEncodeKnobChanged", ddId)
+			    .detail("OldValue", initial)
+			    .detail("NewValue", SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+			throw dd_config_changed();
+		}
+	}
 }
 
 template <class Req>

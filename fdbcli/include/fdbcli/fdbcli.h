@@ -274,6 +274,8 @@ Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> cluster
 Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef> tokens);
 // Retrieve shard information command
 Future<bool> locationMetadataCommandActor(Database cx, std::vector<StringRef> tokens);
+// Check metadata encoding format (old vs shard-encoded)
+Future<bool> checkMetadataEncodingCommandActor(Database cx, std::vector<StringRef> tokens);
 // Bulk loading command
 Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens);
 // Bulk dumping command
