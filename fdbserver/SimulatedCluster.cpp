@@ -792,6 +792,7 @@ Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConnectionR
 					                       localities,
 					                       processClass,
 					                       *dataFolder,
+					                       *dataFolder,
 					                       *coordFolder,
 					                       500e6,
 					                       "",
