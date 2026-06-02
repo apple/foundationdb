@@ -86,7 +86,7 @@ struct BackupRangePartitionedData {
 	// Signals pullAsyncData that uploadData has flushed self->messages, so it can apply a new
 	// partition map. pullAsyncData resets it to false before opening the barrier; uploadData sets
 	// it to true once the flush completes.
-	AsyncVar<bool> messagesFlushedForPM{ false };
+	AsyncVar<bool> messagesFlushedForPMM{ false };
 	// Set by pullAsyncData while waiting for previous Partition Map's mutations to flush. Tells uploadData to bypass
 	// the version-boundary trim (no more messages will arrive to unstick the last buffered version) and flush
 	// everything currently in self->messages so that new partition map can be applied and new messages can be correctly
@@ -681,11 +681,11 @@ Future<Void> pullAsyncData(BackupRangePartitionedData* self) {
 				}
 
 				// Wait for uploadData to flush all messages before new PartitionMap.
-				self->messagesFlushedForPM.set(false);
+				self->messagesFlushedForPMM.set(false);
 				self->flushBeforePMApply = true;
 				self->doneTrigger.trigger();
-				while (!self->messagesFlushedForPM.get()) {
-					co_await self->messagesFlushedForPM.onChange();
+				while (!self->messagesFlushedForPMM.get()) {
+					co_await self->messagesFlushedForPMM.onChange();
 				}
 
 				co_await persistAndUploadPartitionMap(self, pmVersion, pmMsg.partitionMap);
@@ -1233,7 +1233,7 @@ Future<Void> uploadData(BackupRangePartitionedData* self) {
 
 		// Unblock pullAsyncData once the buffer is flushed for a pending PartitionMap apply.
 		if (self->flushBeforePMApply) {
-			self->messagesFlushedForPM.set(true);
+			self->messagesFlushedForPMM.set(true);
 		}
 
 		if (popVersion > self->savedVersion) {
