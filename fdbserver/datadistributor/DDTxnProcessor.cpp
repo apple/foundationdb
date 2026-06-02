@@ -334,8 +334,7 @@ class DDTxnProcessorImpl {
 		ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
 		bool rewroteAny = false;
-		RangeResult ksEntries = co_await tr.getRange(
-		    KeyRangeRef(keyServersPrefix, keyServersEnd), 1000);
+		RangeResult ksEntries = co_await tr.getRange(KeyRangeRef(keyServersPrefix, keyServersEnd), 1000);
 		for (const auto& kv : ksEntries) {
 			if (kv.value.empty())
 				continue;
