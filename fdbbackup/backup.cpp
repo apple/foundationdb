@@ -665,6 +665,8 @@ CSimpleOpt::SOption g_rgBackupQueryOptions[] = {
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_RESTORE_TIMESTAMP, "--query-restore-timestamp", SO_REQ_SEP },
+	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
+	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
 	{ OPT_DESTCONTAINER, "-d", SO_REQ_SEP },
 	{ OPT_DESTCONTAINER, "--destcontainer", SO_REQ_SEP },
 	{ OPT_PROXY, "--proxy", SO_REQ_SEP },
@@ -1078,7 +1080,9 @@ static void printBackupUsage(bool devhelp) {
 	    "                 For query operations, instead of a numeric version, use this to specify a timestamp in %s\n",
 	    BackupAgentBase::timeFormat().c_str());
 	printf(
-	    "                 and it will be converted to a version from that time using metadata in the cluster file.\n");
+	    "                 and it will be converted to a version from that time using metadata in the cluster file\n");
+	printf("                 specified with -C/--cluster-file. A cluster file is required when\n");
+	printf("                 --query-restore-timestamp is specified.\n");
 	printf("  --restorable-after-timestamp DATETIME\n"
 	       "                 For expire operations, set minimum acceptable restorability to the version equivalent of "
 	       "DATETIME and later.\n");
@@ -2721,7 +2725,7 @@ Future<Void> queryBackup(const char* name,
 			reportBackupQueryError(
 			    operationId,
 			    result,
-			    format("an original cluster file must be given in order to resolve restore target timestamp '%s'",
+			    format("a cluster file must be given in order to resolve restore target timestamp '%s'",
 			           restoreTimestamp.c_str()));
 			co_return;
 		}
@@ -4446,7 +4450,7 @@ int main(int argc, char* argv[]) {
 				                          backupKeysFilter,
 				                          restoreVersion,
 				                          snapshotVersion,
-				                          restoreClusterFileOrig,
+				                          clusterFile,
 				                          restoreTimestamp,
 				                          Verbose{ !quietDisplay },
 				                          db));
@@ -4675,7 +4679,9 @@ int main() {
 	                            const std::vector<std::string>& expectedOptions = {},
 	                            bool shouldSucceed = true,
 	                            const char* testName = "",
-	                            bool expectCSimpleOptions = false) -> bool {
+	                            bool expectCSimpleOptions = false,
+	                            const CSimpleOpt::SOption* simpleOptions = g_rgOptions,
+	                            int simpleOptionsArgOffset = 0) -> bool {
 		printf("\n--- Test: %s ---\n", testName);
 		static std::vector<std::string> persistentArgs;
 		persistentArgs.clear();
@@ -4739,8 +4745,11 @@ int main() {
 		// Test with actual CSimpleOpt if expected
 		if (expectCSimpleOptions && !expectedOptions.empty()) {
 			try {
-				std::unique_ptr<CSimpleOpt> simpleOpt = std::make_unique<CSimpleOpt>(
-				    argcNew, const_cast<char**>(argvNew), g_rgOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+				std::unique_ptr<CSimpleOpt> simpleOpt =
+				    std::make_unique<CSimpleOpt>(argcNew - simpleOptionsArgOffset,
+				                                 &argvNew[simpleOptionsArgOffset],
+				                                 simpleOptions,
+				                                 SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 
 				ESOError lastError = SO_SUCCESS;
 				bool foundExpectedOptions = true;
@@ -4829,6 +4838,48 @@ int main() {
 	printf("\n6) Global flag options and CSimpleOpt Tests:\n");
 	allPassed &=
 	    testOptionParsing({ "fdbbackup", "--version", "-h" }, { "--version", "-h" }, true, "6.1 Version flag", true);
+
+	printf("\n6b) Query Option Table Tests:\n");
+	allPassed &= testOptionParsing({ "fdbbackup",
+	                                 "query",
+	                                 "-d",
+	                                 "file:///tmp/backup",
+	                                 "-C",
+	                                 "/tmp/fdb.cluster",
+	                                 "--query-restore-timestamp",
+	                                 "2026/06/02.11:06:50+0800" },
+	                               { "query",
+	                                 "-d",
+	                                 "file:///tmp/backup",
+	                                 "-C",
+	                                 "/tmp/fdb.cluster",
+	                                 "--query-restore-timestamp",
+	                                 "2026/06/02.11:06:50+0800" },
+	                               true,
+	                               "6b.1 Query accepts short cluster file option",
+	                               true,
+	                               g_rgBackupQueryOptions,
+	                               1);
+	allPassed &= testOptionParsing({ "fdbbackup",
+	                                 "query",
+	                                 "-d",
+	                                 "file:///tmp/backup",
+	                                 "--cluster-file",
+	                                 "/tmp/fdb.cluster",
+	                                 "--query-restore-timestamp",
+	                                 "2026/06/02.11:06:50+0800" },
+	                               { "query",
+	                                 "-d",
+	                                 "file:///tmp/backup",
+	                                 "--cluster-file",
+	                                 "/tmp/fdb.cluster",
+	                                 "--query-restore-timestamp",
+	                                 "2026/06/02.11:06:50+0800" },
+	                               true,
+	                               "6b.2 Query accepts long cluster file option",
+	                               true,
+	                               g_rgBackupQueryOptions,
+	                               1);
 
 	printf("\n7) Error Tests:\n");
 	allPassed &= testOptionParsing({ "fdbbackup", "start", "--unknown-option" }, {}, false, "7.1 Unknown option");
