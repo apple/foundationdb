@@ -1097,6 +1097,10 @@ static void printBackupUsage(bool devhelp) {
 	       "                 For start or modify operations, specifies the backup's default target snapshot interval "
 	       "as DURATION seconds.  Defaults to %d for start operations.\n",
 	       CLIENT_KNOBS->BACKUP_DEFAULT_SNAPSHOT_INTERVAL_SEC);
+	printf(
+	    "  --initial-snapshot-interval DURATION\n"
+	    "                 For start operations, specifies the duration of the first inconsistent snapshot as DURATION "
+	    "seconds. Defaults to 0, meaning as fast as possible.\n");
 	printf("  --mode MODE    Snapshot mechanism to use: bulkdump, rangefile (default, legacy), or both.\n"
 	       "                 bulkdump: Uses BulkDump SST files for faster restore performance\n"
 	       "                 rangefile: Traditional range files for backward compatibility\n"
