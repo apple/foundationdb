@@ -241,6 +241,14 @@ std::string IBlobStoreEndpoint::getResourceURL(std::string resource, std::string
 		params.append(knobParams);
 	}
 
+	if (!region.empty()) {
+		if (!params.empty()) {
+			params.append("&");
+		}
+		params.append("region=");
+		params.append(region);
+	}
+
 	for (const auto& [k, v] : extraHeaders) {
 		if (!params.empty()) {
 			params.append("&");
