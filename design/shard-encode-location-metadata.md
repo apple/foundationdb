@@ -32,6 +32,31 @@ Both paths use the same KRM primitives (`krmSetPreviouslyEmptyRange` for
 keyServers, `krmSetRangeCoalescing` for serverKeys). The difference is in the
 value encoding and the existence of DataMoveMetaData.
 
+**Coalescing behavior differs between paths.** In the old path, `serverKeys`
+values are boolean constants (`serverKeysTrue` / `serverKeysFalse`). Adjacent
+shards on the same SS with the same `true` value coalesce into a single KRM
+entry. In the new path, `serverKeys` values encode unique `dataMoveId` UIDs,
+and adjacent shards almost always have different UIDs (from different moves).
+This prevents KRM coalescing, keeping each shard as a separate KRM entry — see
+`unassignServerKeys()` at `MoveKeys.cpp:74` which explicitly works around
+`krmSetRangeCoalescing`'s inability to handle per-shard unique values.
+
+**This boundary enforcement is critical for bulkload.** Bulkload maps physical
+files to specific shard ranges (`DataMoveType::LOGICAL_BULKLOAD`). Without
+enforced boundaries, a coalesced KRM entry could span multiple file sets,
+making it impossible to determine which files belong to which shard. The fetch
+key data movement path does not require this — it fetches data per logical
+range regardless of KRM entry boundaries — but bulkload needs exact per-shard
+boundaries because it loads data from physical file sets rather than from
+source servers.
+
+**Downstream effect of no coalescing:** In the old path any code reading
+`serverKeys` saw a compact KRM (few entries per SS), so small reads with
+`krmGetRanges` were sufficient. In the new path the KRM has one entry per
+shard per SS, so reads iterate more entries and move operations write more
+boundaries per transaction — reflected in the 10× higher KRM row limit
+(`MOVE_SHARD_KRM_ROW_LIMIT=20000` vs `MOVE_KEYS_KRM_LIMIT=2000`).
+
 ### keyServers encoding change
 
 The old format stores **Tags** — small TLog stream identifiers (locality + id).
