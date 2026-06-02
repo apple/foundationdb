@@ -83,15 +83,12 @@ struct BackupRangePartitionedData {
 	Reference<FlowLock> lock;
 	AsyncTrigger doneTrigger;
 	AsyncTrigger changedTrigger;
-	// Signals pullAsyncData that uploadData has flushed self->messages, so it can apply a new
-	// partition map. pullAsyncData resets it to false before opening the barrier; uploadData sets
-	// it to true once the flush completes.
-	AsyncVar<bool> messagesFlushedForPMM{ false };
-	// Set by pullAsyncData while waiting for previous Partition Map's mutations to flush. Tells uploadData to bypass
-	// the version-boundary trim (no more messages will arrive to unstick the last buffered version) and flush
-	// everything currently in self->messages so that new partition map can be applied and new messages can be correctly
-	// buffered under the new partition map.
-	bool flushBeforePMApply = false;
+	// Pending partition maps to apply, in version order. Two sources fill this:
+	//   - At startup, an old-epoch worker preloads its remaining history from SS.
+	//   - During pulling, the current-epoch worker pushes any new partition map it sees in the TLog stream.
+	// uploadData picks them up: when its current batch of mutations reaches a queued version, it
+	// finishes saving the mutations under the old map, switches to the new map, and continues.
+	std::deque<std::pair<Version, PartitionMap>> pmUpdateQueue;
 	// Set to true when the worker is shutting down (e.g., worker_removed). Used by uploadData to exit gracefully via
 	// allMessageSaved(), letting in-flight file writes and progress commits finish first.
 	bool stopped = false;
@@ -514,7 +511,7 @@ Future<Void> persistAndUploadPartitionMap(BackupRangePartitionedData* self,
 Future<Void> setActivePartitionMap(BackupRangePartitionedData* self,
                                    Version pmVersion,
                                    PartitionMap const& partitionMap) {
-	self->logFolderBaseVersion = pmVersion + 1;
+	self->logFolderBaseVersion = pmVersion;
 	ASSERT(partitionMap.contains(self->tag));
 	const auto& tagPartitions = partitionMap.at(self->tag);
 	ASSERT_GT(tagPartitions.size(), 0);
@@ -525,11 +522,6 @@ Future<Void> setActivePartitionMap(BackupRangePartitionedData* self,
 	co_await computeKeyRangeToBackupAssignment(self);
 }
 
-// TODO akanksha -> Need to figure out if
-// 1. For new requests -> PartitionMap in TLOG will be same for all containers.
-// 2. Provide implemention for recovery where partitionmap can come any time and won't be the first message.
-// 3. Handle Recovery case where backupworker needs to process multiple partition maps for same epoch at different
-// versions.
 Future<Void> processPartitionMap(BackupRangePartitionedData* self) {
 	TraceEvent("BWRangePartitionedWaitingForPartitionMap", self->myId)
 	    .detail("Tag", self->tag.toString())
@@ -544,8 +536,6 @@ Future<Void> processPartitionMap(BackupRangePartitionedData* self) {
 	if (self->backupEpoch != self->recruitedEpoch) {
 		// Old epoch worker: the partition map for our backupEpoch was persisted by the previous epoch's
 		// workers. Read it from system keys instead of pulling from TLog.
-		// TODO akanksha: Scenario 2 — handle multiple history entries for mid-stream re-partition.
-		// TODO akanksha: Handle Case 3 mentioned in the TODO above.
 		history = co_await loadPartitionMapHistoryFromSS(self, self->backupEpoch);
 		if (!history.empty()) {
 			partitionMapVersion = history[0].first;
@@ -558,6 +548,12 @@ Future<Void> processPartitionMap(BackupRangePartitionedData* self) {
 			    .detail("NumTags", partitionMap.size())
 			    .detail("Tag", self->tag.toString())
 			    .detail("NumPartitions", it->second.size());
+
+			// history[0] is applied as the initial active partition map (above). Remaining entries
+			// are queued for uploadData to swap to as it crosses each version.
+			self->pmUpdateQueue.insert(self->pmUpdateQueue.end(),
+			                           std::make_move_iterator(history.begin() + 1),
+			                           std::make_move_iterator(history.end()));
 		}
 	}
 
@@ -596,7 +592,6 @@ Future<Void> pullAsyncData(BackupRangePartitionedData* self) {
 	Reference<IPeekCursor> cursor;
 
 	Version tagAt = std::max({ self->pulledVersion.get(), self->startVersion, self->savedVersion });
-
 	TraceEvent("BWRangePartitionedPull", self->myId)
 	    .detail("Tag", self->tag)
 	    .detail("Version", tagAt)
@@ -617,8 +612,6 @@ Future<Void> pullAsyncData(BackupRangePartitionedData* self) {
 				break;
 			} else {
 				if (self->logSystem.get()) {
-					// TODO akanksha: Use peekSingle as of now instead of peekLogRouter and later confirm if it works as
-					// expected.
 					cursor = self->logSystem.get()->peekSingle(self->myId, tagAt, self->tag);
 				} else {
 					cursor = Reference<IPeekCursor>();
@@ -659,48 +652,19 @@ Future<Void> pullAsyncData(BackupRangePartitionedData* self) {
 				continue;
 			}
 
-			// Mid-stream PartitionMap update (re-partition). Flush existing Partition Map's mutations, persist
-			// the new map, then swap local routing state before pulling further messages.
+			// Mid-stream PartitionMap update (re-partition). Persist + upload the new map immediately so
+			// future old-epoch workers can find it, then queue it for uploadData to apply at the right
+			// version boundary.
 			if (PartitionMapMessage::isNextIn(reader)) {
 				Version pmVersion = cursor->version().version;
 				PartitionMapMessage pmMsg;
 				reader >> pmMsg;
 				cursor->nextMessage();
 
-				// Push everything buffered into self->messages to flush them.
-				if (peekedBytes > 0) {
-					TraceEvent(SevDebugMemory, "BWRangePartitionedMemory", self->myId)
-					    .detail("Take", peekedBytes)
-					    .detail("Current", self->lock->activePermits());
-					co_await self->lock->take(TaskPriority::DefaultYield, peekedBytes);
-					self->messages.insert(self->messages.end(),
-					                      std::make_move_iterator(tmpMessages.begin()),
-					                      std::make_move_iterator(tmpMessages.end()));
-					tmpMessages.clear();
-					peekedBytes = 0;
-				}
-
-				// Wait for uploadData to flush all messages before new PartitionMap.
-				self->messagesFlushedForPMM.set(false);
-				self->flushBeforePMApply = true;
-				self->doneTrigger.trigger();
-				while (!self->messagesFlushedForPMM.get()) {
-					co_await self->messagesFlushedForPMM.onChange();
-				}
-
 				co_await persistAndUploadPartitionMap(self, pmVersion, pmMsg.partitionMap);
-				co_await setActivePartitionMap(self, pmVersion, pmMsg.partitionMap);
+				self->pmUpdateQueue.emplace_back(pmVersion, std::move(pmMsg.partitionMap));
 
-				self->flushBeforePMApply = false;
-
-				// Advance savedVersion past the PM message so TLog can pop it.
-				if (pmVersion > self->savedVersion) {
-					self->savedVersion = pmVersion;
-					self->pop();
-				}
-				self->pulledVersion.set(std::max(self->pulledVersion.get(), pmVersion));
-
-				TraceEvent("BWRangePartitionedAppliedMidStreamPM", self->myId)
+				TraceEvent("BWRangePartitionedQueuedMidStreamPM", self->myId)
 				    .detail("Version", pmVersion)
 				    .detail("NumPartitions", pmMsg.partitionMap[self->tag].size());
 				continue;
@@ -1202,12 +1166,6 @@ Future<Void> uploadData(BackupRangePartitionedData* self) {
 		}
 		if (self->pullFinished()) {
 			popVersion = self->endVersion.get();
-		} else if (self->flushBeforePMApply) {
-			// pullAsyncData has paused for a PartitionMap apply. No further messages will
-			// arrive at the last buffered version, so flush every queued message instead of
-			// holding the last version back for boundary alignment.
-			popVersion = self->messages.empty() ? popVersion : self->messages.back().getVersion();
-			numMsg = self->messages.size();
 		} else {
 			// make sure file is saved on version boundary
 			popVersion = lastVersion;
@@ -1226,14 +1184,39 @@ Future<Void> uploadData(BackupRangePartitionedData* self) {
 			    .detail("SavedVersion", self->savedVersion)
 			    .detail("NumMsg", numMsg)
 			    .detail("MsgQ", self->messages.size());
+
+			// Apply any queued partition maps whose version is reached by this batch. For each one,
+			// flush the messages with versions older than that map's version under the current map,
+			// then switch to the new map before continuing.
+			while (!self->pmUpdateQueue.empty() && self->pmUpdateQueue.front().first <= popVersion) {
+				Version pmV = self->pmUpdateQueue.front().first;
+				PartitionMap newPM = std::move(self->pmUpdateQueue.front().second);
+				self->pmUpdateQueue.pop_front();
+
+				int numMsgsBeforePM = 0;
+				for (int i = 0; i < numMsg; i++) {
+					if (self->messages[i].getVersion() >= pmV) {
+						break;
+					}
+					numMsgsBeforePM++;
+				}
+
+				if (numMsgsBeforePM > 0) {
+					co_await saveMutationsToFile(self, pmV - 1, numMsgsBeforePM);
+					self->eraseMessages(numMsgsBeforePM);
+					numMsg -= numMsgsBeforePM;
+				}
+
+				co_await setActivePartitionMap(self, pmV, newPM);
+
+				TraceEvent("BWRangePartitionedAppliedQueuedPM", self->myId)
+				    .detail("Version", pmV)
+				    .detail("NumPartitions", newPM[self->tag].size());
+			}
+
 			// save an empty file for old epochs so that log file versions are continuous
 			co_await saveMutationsToFile(self, popVersion, numMsg);
 			self->eraseMessages(numMsg);
-		}
-
-		// Unblock pullAsyncData once the buffer is flushed for a pending PartitionMap apply.
-		if (self->flushBeforePMApply) {
-			self->messagesFlushedForPMM.set(true);
 		}
 
 		if (popVersion > self->savedVersion) {
