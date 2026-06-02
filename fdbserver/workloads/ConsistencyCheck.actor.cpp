@@ -691,41 +691,54 @@ struct ConsistencyCheckWorkload : TestWorkload {
 									// Last value mismatch
 									KeyRef valueMismatchKey;
 
-									// Loop indeces
+									// Loop through both replies using a merge strategy, always advancing
+									// the minimum cursor. Keep going until we've exhausted at least one
+									// cursor
 									int currentI = 0;
 									int referenceI = 0;
-									while (currentI < current.data.size() || referenceI < reference.data.size()) {
-										if (currentI >= current.data.size()) {
-											referenceUniqueKey = reference.data[referenceI].key;
-											referenceUniques++;
+									while (currentI < current.data.size() && referenceI < reference.data.size()) {
+										KeyValueRef currentKV = current.data[currentI];
+										KeyValueRef referenceKV = reference.data[referenceI];
+										if (currentKV.key == referenceKV.key) {
+											if (currentKV.value == referenceKV.value)
+												matchingKVPairs++;
+											else {
+												valueMismatchKey = currentKV.key;
+												valueMismatches++;
+											}
+											currentI++;
 											referenceI++;
-										} else if (referenceI >= reference.data.size()) {
-											currentUniqueKey = current.data[currentI].key;
+										} else if (currentKV.key < referenceKV.key) {
+											currentUniqueKey = currentKV.key;
 											currentUniques++;
 											currentI++;
 										} else {
-											KeyValueRef currentKV = current.data[currentI];
-											KeyValueRef referenceKV = reference.data[referenceI];
+											referenceUniqueKey = referenceKV.key;
+											referenceUniques++;
+											referenceI++;
+										}
+									}
 
-											if (currentKV.key == referenceKV.key) {
-												if (currentKV.value == referenceKV.value)
-													matchingKVPairs++;
-												else {
-													valueMismatchKey = currentKV.key;
-													valueMismatches++;
-												}
-
-												currentI++;
-												referenceI++;
-											} else if (currentKV.key < referenceKV.key) {
-												currentUniqueKey = currentKV.key;
-												currentUniques++;
-												currentI++;
-											} else {
-												referenceUniqueKey = referenceKV.key;
-												referenceUniques++;
-												referenceI++;
-											}
+									// We have exhausted at least one of the comparands. If we've exhausted
+									// exactly one of them, there are now two possibilities for the other:
+									//  1. There is no more data in the exhausted range (i.e., "more" is false). In this
+									//     case, we know each key remaining in is unique, so mark it as such
+									//  2. There is more data in the exhausted range (i.e., "more" is true). In this
+									//     case, we need to do additional reads to validate the rest of the data in
+									//     the non-exhausted range. For now, ignore these keys. We will check them
+									//     during the next iteration.
+									if (currentI >= current.data.size() && !current.more) {
+										while (referenceI < reference.data.size()) {
+											referenceUniqueKey = reference.data[referenceI].key;
+											referenceUniques++;
+											referenceI++;
+										}
+									}
+									if (referenceI >= reference.data.size() && !reference.more) {
+										while (currentI < current.data.size()) {
+											currentUniqueKey = current.data[currentI].key;
+											currentUniques++;
+											currentI++;
 										}
 									}
 
@@ -768,10 +781,28 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					bytesReadInRange += totalReadAmount;
 
 					// Advance to the next set of entries
-					if (firstValidServer >= 0 && keyValueFutures[firstValidServer].get().get().more) {
-						VectorRef<KeyValueRef> result = keyValueFutures[firstValidServer].get().get().data;
-						ASSERT(result.size() > 0);
-						begin = firstGreaterThan(result[result.size() - 1].key);
+					Optional<KeyRef> nextBegin;
+
+					// Begin from the minimum ending key from all non-exhausted ranges.
+					// Using the minimum allows us to re-check any ranges where we couldn't
+					// validate if a key was unique because one get key value reply was exhausted
+					// before one of the other ones
+					for (const auto& rangeReply : keyValueFutures) {
+						if (rangeReply.get().get().more) {
+							VectorRef<KeyValueRef> data = rangeReply.get().get().data;
+							ASSERT(!data.empty());
+							KeyRef dataEnd = data[data.size() - 1].key;
+							if (nextBegin.present()) {
+								if (dataEnd < nextBegin.get()) {
+									nextBegin = dataEnd;
+								}
+							} else {
+								nextBegin = dataEnd;
+							}
+						}
+					}
+					if (nextBegin.present()) {
+						begin = firstGreaterThan(nextBegin.get());
 						ASSERT(begin.getKey() != allKeys.end);
 						lastStartSampleKey = lastSampleKey;
 						TraceEvent(SevDebug, "CacheConsistencyCheckNextBeginKey").detail("Key", begin);

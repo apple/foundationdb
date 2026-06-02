@@ -425,8 +425,8 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 								// exactly one of them, there are now two possibilities for the other:
 								//  1. There is no more data in the exhausted range (i.e., "more" is false). In this
 								//     case, we know each key remaining in is unique, so mark it as such
-								//  2. There is more data in the exhausted range (i.e., "more" is true). In this,
-								//     case we need to do additional reads to validate the rest of the data in
+								//  2. There is more data in the exhausted range (i.e., "more" is true). In this
+								//     case, we need to do additional reads to validate the rest of the data in
 								//     the non-exhausted range. For now, ignore these keys. We will check them
 								//     during the next iteration.
 								if (currentI >= current.data.size() && !current.more) {
@@ -482,8 +482,8 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 
 					// Begin from the minimum ending key from all non-exhausted ranges.
 					// Using the minimum allows us to re-check any ranges where we couldn't
-					// validate if a key was unique because one get key value reply was already
-					// completed
+					// validate if a key was unique because one get key value reply was exhausted
+					// before one of the other ones
 					for (const auto& rangeReply : keyValueFutures) {
 						if (rangeReply.get().get().more) {
 							VectorRef<KeyValueRef> data = rangeReply.get().get().data;
