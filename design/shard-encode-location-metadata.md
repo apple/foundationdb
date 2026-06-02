@@ -381,15 +381,13 @@ progressing?). Use `audit_storage metadata_encoding` for the final gate decision
 
 Extends the existing `audit_storage` fdbcli command with a new AuditType that
 reports encoding format state across keyServers and serverKeys. Used to confirm
-both forward migration completion and rollback readiness.
+both forward migration completion and rollback readiness. Runs client-side
+(immediate scan, not a distributed audit).
 
 ### Usage
 
 ```
-fdbcli> audit_storage validate_metadata_encoding
-Audit started with ID <uid>
-
-fdbcli> get_audit_status validate_metadata_encoding <uid>
+fdbcli> audit_storage metadata_encoding
 keyServers: 45021 entries
   Old format (tag-based): 0
   New format (UID-based): 45021
@@ -404,7 +402,7 @@ Migration status: FORWARD COMPLETE
 After rollback (knob flipped false, drain in progress):
 
 ```
-fdbcli> get_audit_status validate_metadata_encoding <uid>
+fdbcli> audit_storage metadata_encoding
 keyServers: 45021 entries
   Old format (tag-based): 44800
   New format (UID-based): 221

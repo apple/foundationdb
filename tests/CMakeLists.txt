@@ -392,10 +392,6 @@ if(WITH_PYTHON)
     add_fdb_test(
       TEST_FILES restarting/to_8.0.0/CycleTestRestart-1.toml
       restarting/to_8.0.0/CycleTestRestart-2.toml)
-    add_fdb_test(
-      TEST_FILES restarting/to_8.0.0/ShardEncodeRollback-1.toml
-      restarting/to_8.0.0/ShardEncodeRollback-2.toml
-      IGNORE)
   endif()
 
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)

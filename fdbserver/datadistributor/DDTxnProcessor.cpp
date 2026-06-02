@@ -326,7 +326,10 @@ class DDTxnProcessorImpl {
 			co_return true;
 		}
 
-		// Phase 2: Rewrite shard-encoded keyServers entries to old format
+		// Phase 2: Rewrite shard-encoded keyServers entries to old format.
+		// Reads 1000 entries per iteration. Caller loops (co_return true triggers
+		// re-entry) until no shard-encoded entries remain. Previously-rewritten
+		// entries won't match hasShardEncodeLocationMetaData() on re-read.
 		RangeResult UIDtoTagMap = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
 		ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
