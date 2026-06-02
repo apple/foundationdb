@@ -2105,11 +2105,6 @@ static Future<Void> clearBackupStartID(Reference<ReadYourWritesTransaction> tr, 
 	if (ids.empty()) {
 		TraceEvent("ClearBackup").detail("BackupID", backupUid);
 		tr->clear(backupStartedKey);
-		// Last backup just finished. If outgoing backup was range-partitioned, ask DD to clear the partition list.
-		Optional<MutationLogType> logType = co_await BackupConfig(backupUid).mutationLogType().get(tr);
-		if (logType.present() && logType.get() == MutationLogType::RANGE_PARTITIONED_LOG) {
-			tr->set(backupPartitionRequiredKey, backupPartitionRequiredValue(2));
-		}
 	} else {
 		tr->set(backupStartedKey, encodeBackupStartedValue(ids));
 	}
@@ -7602,8 +7597,14 @@ public:
 	}
 
 	static Future<Void> checkAndDisableRangeBackupWorkers(Database cx) {
-		bool running = co_await runRYWTransaction(
-		    cx, [=](Reference<ReadYourWritesTransaction> tr) { return anyRangePartitionedBackupRunning(tr); });
+		bool running = co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<bool> {
+			bool r = co_await anyRangePartitionedBackupRunning(tr);
+			if (!r) {
+				// Last range-partitioned backup just finished. Ask DD to clear the partition list.
+				tr->set(backupPartitionRequiredKey, backupPartitionRequiredValue(2));
+			}
+			co_return r;
+		});
 		if (!running) {
 			co_await disableRangeBackupWorker(cx);
 		}
