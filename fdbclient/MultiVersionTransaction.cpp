@@ -2396,6 +2396,14 @@ void MultiVersionApi::stopNetwork() {
 	localClient->api->stopNetwork();
 
 	if (!bypassMultiClientApi) {
+#ifdef ADDRESS_SANITIZER
+		// Give external client network threads time to process pending
+		// onMainThreadVoid cleanup callbacks (database/transaction destroy)
+		// before stopping their networks. A deterministic flush isn't possible
+		// because we cannot dispatch work to external client network threads
+		// and wait for completion through the DL API.
+		threadSleep(3);
+#endif
 		runOnExternalClientsAllThreads([](Reference<ClientInfo> client) { client->api->stopNetwork(); }, true);
 	}
 }
