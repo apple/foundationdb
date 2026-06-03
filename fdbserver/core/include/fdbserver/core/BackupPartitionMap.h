@@ -21,6 +21,7 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/KeyRangeMap.h"
 #include "fdbserver/core/ShardMetrics.h"
 #include <map>
 #include <vector>
@@ -49,3 +50,6 @@ using PartitionMap = std::map<Tag, PartitionList>;
 using PartitionMapHistory = std::vector<std::pair<Version, PartitionMap>>;
 
 std::string serializePartitionListJSON(PartitionMap const& partitionMap);
+
+// Partitions the user keyspace into balanced contiguous KeyRanges using shard byte sizes.
+Future<std::vector<KeyRange>> calculateBackupPartitionKeyRanges(KeyRangeMap<ShardTrackedData>* shards);

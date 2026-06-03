@@ -1100,6 +1100,39 @@ std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& va
 	return ids;
 }
 
+const KeyRef backupPartitionRequiredKey = "\xff\x02/backupPartitionRequired"_sr;
+const KeyRef backupPartitionListKey = "\xff\x02/backupPartitionList"_sr;
+
+Value backupPartitionRequiredValue(int8_t requestType) {
+	BinaryWriter wr(Unversioned());
+	wr << requestType;
+	return wr.toValue();
+}
+
+int8_t decodeBackupPartitionRequiredValue(const ValueRef& value) {
+	int8_t requestType = 0;
+	if (!value.empty()) {
+		BinaryReader reader(value, Unversioned());
+		reader >> requestType;
+	}
+	return requestType;
+}
+
+Value encodeBackupPartitionListValue(const std::vector<KeyRange>& partitions) {
+	BinaryWriter wr(IncludeVersion());
+	wr << partitions;
+	return wr.toValue();
+}
+
+std::vector<KeyRange> decodeBackupPartitionListValue(const ValueRef& value) {
+	std::vector<KeyRange> partitions;
+	if (!value.empty()) {
+		BinaryReader reader(value, IncludeVersion());
+		reader >> partitions;
+	}
+	return partitions;
+}
+
 bool mutationForKey(const MutationRef& m, const KeyRef& key) {
 	return isSingleKeyMutation((MutationRef::Type)m.type) && m.param1 == key;
 }

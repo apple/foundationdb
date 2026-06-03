@@ -30,6 +30,7 @@
 #include "fdbclient/RunRYWTransaction.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
+#include "fdbserver/core/BackupPartitionMap.h"
 #include "fdbserver/core/BulkDumpUtil.h"
 #include "fdbserver/core/BulkLoadUtil.h"
 #include "fdbserver/datadistributor/DataDistributor.h"
@@ -304,6 +305,79 @@ Future<Void> remoteRecovered(Reference<AsyncVar<ServerDBInfo> const> db) {
 	while (db->get().recoveryState < RecoveryState::ALL_LOGS_RECRUITED) {
 		TraceEvent("DDTrackerStarting").detail("RecoveryState", (int)db->get().recoveryState);
 		co_await db->onChange();
+	}
+}
+
+// Watches backupPartitionRequiredKey.
+// On value=1, computes the user keyspace partitions and writes them to backupPartitionListKey.
+// On value=2, clears backupPartitionListKey.
+// In both cases the request key is cleared in the same commit.
+Future<Void> monitorBackupPartitionRequired(Database cx, KeyRangeMap<ShardTrackedData>* shards, UID ddId) {
+	// The partition computation can wait arbitrarily long on shard-metrics tracking, so it runs OUTSIDE any
+	// transaction to avoid transaction_too_old. A short re-read in the write transaction protects against
+	// the race where a value=2 (cleanup) arrives while we are computing for a value=1.
+	while (true) {
+		// Phase 1: peek the request key in a loop. If nothing pending, park on watch and wait, then re-read.
+		int8_t requestType = 0;
+		while (requestType == 0) {
+			ReadYourWritesTransaction tr(cx);
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				Optional<Value> value = co_await tr.get(backupPartitionRequiredKey);
+				requestType = value.present() ? decodeBackupPartitionRequiredValue(value.get()) : 0;
+				if (requestType == 0) {
+					Future<Void> watchFuture = tr.watch(backupPartitionRequiredKey);
+					co_await tr.commit();
+					co_await watchFuture;
+				}
+				continue;
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
+
+		// Phase 2: compute outside any transaction (may wait long on shard metrics).
+		std::vector<KeyRange> partitions;
+		if (requestType == 1) {
+			partitions = co_await calculateBackupPartitionKeyRanges(shards);
+		}
+
+		// Phase 3: short txn to re-check the request value and write the result.
+		{
+			ReadYourWritesTransaction tr(cx);
+			while (true) {
+				Error err;
+				try {
+					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+					Optional<Value> value = co_await tr.get(backupPartitionRequiredKey);
+					int8_t currentType = value.present() ? decodeBackupPartitionRequiredValue(value.get()) : 0;
+					if (currentType != requestType) {
+						// Someone wrote a new request while we were computing partitions; restart the outer loop
+						// so the next iteration acts on the new value.
+						break;
+					}
+					if (requestType == 1) {
+						tr.set(backupPartitionListKey, encodeBackupPartitionListValue(partitions));
+						tr.clear(backupPartitionRequiredKey);
+						co_await tr.commit();
+						TraceEvent("DDBackupPartitionsComputed", ddId).detail("NumPartitions", partitions.size());
+					} else {
+						tr.clear(backupPartitionListKey);
+						tr.clear(backupPartitionRequiredKey);
+						co_await tr.commit();
+						TraceEvent("DDBackupPartitionsCleared", ddId);
+					}
+					break;
+				} catch (Error& e) {
+					err = e;
+				}
+				co_await tr.onError(err);
+			}
+		}
 	}
 }
 
@@ -2814,6 +2888,7 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 			}
 
 			actors.push_back(self->pollMoveKeysLock());
+			actors.push_back(monitorBackupPartitionRequired(self->txnProcessor->context(), &shards, self->ddId));
 
 			self->context->tracker = makeReference<DataDistributionTracker>(
 			    DataDistributionTrackerInitParams{ .db = self->txnProcessor,

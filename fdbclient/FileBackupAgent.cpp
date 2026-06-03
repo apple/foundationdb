@@ -4286,6 +4286,12 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 				if (started.get().present()) {
 					ids = decodeBackupStartedValue(started.get().get());
 				}
+
+				// First range-partitioned backup on this cluster: ask DD to compute the partition list.
+				if (ids.empty() && mutationLogType.get().get() == MutationLogType::RANGE_PARTITIONED_LOG) {
+					tr->set(backupPartitionRequiredKey, backupPartitionRequiredValue(1));
+				}
+
 				const UID uid = config.getUid();
 				auto it = std::find_if(
 				    ids.begin(), ids.end(), [uid](const std::pair<UID, Version>& p) { return p.first == uid; });
@@ -7591,8 +7597,14 @@ public:
 	}
 
 	static Future<Void> checkAndDisableRangeBackupWorkers(Database cx) {
-		bool running = co_await runRYWTransaction(
-		    cx, [=](Reference<ReadYourWritesTransaction> tr) { return anyRangePartitionedBackupRunning(tr); });
+		bool running = co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<bool> {
+			bool r = co_await anyRangePartitionedBackupRunning(tr);
+			if (!r) {
+				// Last range-partitioned backup just finished. Ask DD to clear the partition list.
+				tr->set(backupPartitionRequiredKey, backupPartitionRequiredValue(2));
+			}
+			co_return r;
+		});
 		if (!running) {
 			co_await disableRangeBackupWorker(cx);
 		}

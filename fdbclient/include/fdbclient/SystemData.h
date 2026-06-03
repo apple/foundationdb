@@ -432,13 +432,31 @@ std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& va
 // 1 = Send a signal to pause/already paused.
 extern const KeyRef backupPausedKey;
 
-//	"\xff\x02/backupPartitionmap/[8-byte epoch][8-byte version]" := "[[PartitionMap]]"
+//	"\xff\x02/backupPartitionMap/[8-byte epoch][8-byte version]" := "[[PartitionMap]]"
 //	One row per (epoch, version) where a partition map became effective.
 //	Read by catch-up backup workers during recovery.
 extern const KeyRangeRef backupPartitionMapHistoryKeys;
 Key backupPartitionMapHistoryKeyFor(LogEpoch epoch, Version version);
 KeyRange backupPartitionMapHistoryRangeFor(LogEpoch epoch);
 std::pair<LogEpoch, Version> decodeBackupPartitionMapHistoryKey(const KeyRef& key);
+
+// The key BackupAgent writes to request DataDistributor to (re)compute partitions for
+// range-partitioned backup, or to clear the partition state on backup stop. DD watches
+// this key, performs the requested action, and clears it (sets value back to 0).
+//    "\xff\x02/backupPartitionRequired" := "[[0|1|2]]"
+// 0 = cleared / no pending request.
+// 1 = initial partition or manual/adaptive re-partition.
+// 2 = cleanup partitionMap (issued on backup abort/stop when the last backup leaves).
+extern const KeyRef backupPartitionRequiredKey;
+Value backupPartitionRequiredValue(int8_t requestType);
+int8_t decodeBackupPartitionRequiredValue(const ValueRef& value);
+
+// The key DataDistributor writes the computed partition list to. CommitProxy will read this
+// in a later change to construct the PartitionMap.
+//    "\xff\x02/backupPartitionList" := "[[vector<KeyRange>]]"
+extern const KeyRef backupPartitionListKey;
+Value encodeBackupPartitionListValue(const std::vector<KeyRange>& partitions);
+std::vector<KeyRange> decodeBackupPartitionListValue(const ValueRef& value);
 
 //	"\xff/previousCoordinators" = "[[ClusterConnectionString]]"
 //	Set to the encoded structure of the cluster's previous set of coordinators.
