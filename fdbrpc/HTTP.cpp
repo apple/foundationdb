@@ -214,7 +214,7 @@ Future<Void> writeResponse(Reference<IConnection> conn, Reference<OutgoingRespon
 	response->data.content->prependWriteBuffer(pFirst, pLast);
 	while (true) {
 		int trySend = FLOW_KNOBS->HTTP_SEND_SIZE;
-		if (g_network->isSimulated() && !g_simulator->speedUpSimulation && buggify(0.1)) {
+		if ((!g_network->isSimulated() || !g_simulator->speedUpSimulation) && buggify(0.1)) {
 			trySend = deterministicRandom()->randomInt(1, 10);
 		}
 		int len = conn->write(response->data.content->getUnsent(), trySend);
@@ -238,7 +238,7 @@ Future<int> read_into_string(Reference<IConnection> conn, std::string* buf, int 
 		// means not using a string for this buffer
 
 		// Buggify read size to exercise partial-read code paths in simulation
-		if (g_network->isSimulated() && !g_simulator->speedUpSimulation && maxlen > 1 && buggify(0.1)) {
+		if ((!g_network->isSimulated() || !g_simulator->speedUpSimulation) && maxlen > 1 && buggify(0.1)) {
 			maxlen = deterministicRandom()->randomInt(1, maxlen);
 			CODE_PROBE(true, "HTTP buggified read size");
 		}
@@ -666,7 +666,7 @@ Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnection> 
 			}
 
 			int trySend = FLOW_KNOBS->HTTP_SEND_SIZE;
-			if (g_network->isSimulated() && !g_simulator->speedUpSimulation && buggify(0.1)) {
+			if ((!g_network->isSimulated() || !g_simulator->speedUpSimulation) && buggify(0.1)) {
 				trySend = deterministicRandom()->randomInt(1, 10);
 			}
 			co_await sendRate->getAllowance(trySend);
