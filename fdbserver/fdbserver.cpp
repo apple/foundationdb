@@ -2253,7 +2253,11 @@ int main(int argc, char* argv[]) {
 			// mocks3 folder is used by MockS3 persistence for post-test analysis
 
 			for (const auto& dir : directories) {
-				if (dir.size() != 32 && !allowedDirectories.contains(dir) && dir.find("snap") == std::string::npos) {
+				StringRef tLogSpillFolderSuffix = "-tlog-spill"_sr;
+				bool isTLogSpillFolder =
+				    dir.size() == 32 + tLogSpillFolderSuffix.size() && StringRef(dir).endsWith(tLogSpillFolderSuffix);
+				if (dir.size() != 32 && !isTLogSpillFolder && !allowedDirectories.contains(dir) &&
+				    dir.find("snap") == std::string::npos) {
 
 					TraceEvent(SevError, "IncompatibleDirectoryFound")
 					    .detail("DataFolder", dataFolder)
