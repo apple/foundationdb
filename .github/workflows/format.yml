@@ -25,7 +25,7 @@ jobs:
           clang-format --version
 
       - name: clang-format
-        run:
+        run: |
           find . -type f '(' -name \*.c -or -name \*.cpp -or -name \*.h -or -name \*.hpp ')' \
                  -not -name sqlite3.amalgamation.c \
                  -exec clang-format -i '{}' ';'
