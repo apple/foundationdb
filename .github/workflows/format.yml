@@ -22,12 +22,13 @@ jobs:
 
       - name: tool versions
         run: |
-          clang-format --version
+          sudo apt-get update
+          sudo apt-get install clang-format-19
 
       - name: clang-format
         run: |
           find . -type f '(' -name \*.c -or -name \*.cpp -or -name \*.h -or -name \*.hpp ')' \
                  -not -name sqlite3.amalgamation.c \
-                 -exec clang-format -i '{}' ';'
+                 -exec clang-format-19 -i '{}' ';'
 
           git diff --exit-code
