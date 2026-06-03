@@ -26,9 +26,11 @@ jobs:
           sudo apt-get install clang-format-19
 
       - name: clang-format
+        # skip contrib dir, find all files named *.c/h/cpp/hpp,
+        # run clang-format 19.x on each file, in-place modifications
         run: |
-          find . -type f '(' -name \*.c -or -name \*.cpp -or -name \*.h -or -name \*.hpp ')' \
-                 -not -name sqlite3.amalgamation.c \
-                 -exec clang-format-19 -i '{}' ';'
+          find . -name contrib -prune -or -type f \
+                 '(' -name \*.c -or -name \*.cpp -or -name \*.h -or -name \*.hpp ')' \
+                 -exec clang-format-19 -i '{}' \;
 
           git diff --exit-code
