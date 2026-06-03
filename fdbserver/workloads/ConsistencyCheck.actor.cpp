@@ -783,13 +783,14 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					// Advance to the next set of entries
 					Optional<KeyRef> nextBegin;
 
-					// Begin from the minimum ending key from all non-exhausted ranges.
+					// Begin from the minimum ending key from all non-exhausted, non-error range responses.
 					// Using the minimum allows us to re-check any ranges where we couldn't
 					// validate if a key was unique because one get key value reply was exhausted
 					// before one of the other ones
 					for (const auto& rangeReply : keyValueFutures) {
-						if (rangeReply.get().get().more) {
-							VectorRef<KeyValueRef> data = rangeReply.get().get().data;
+						const ErrorOr<GetKeyValuesReply>& rangeResult = rangeReply.get();
+						if (rangeResult.present() && rangeResult.get().more) {
+							VectorRef<KeyValueRef> data = rangeResult.get().data;
 							ASSERT(!data.empty());
 							KeyRef dataEnd = data[data.size() - 1].key;
 							if (nextBegin.present()) {
