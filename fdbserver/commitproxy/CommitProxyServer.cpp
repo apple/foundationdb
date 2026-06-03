@@ -1300,6 +1300,13 @@ void rejectMutationsForReadLockOnRange(CommitBatchContext* self) {
 	ASSERT(self->rangeLockEnabled());
 	ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
 	ASSERT(pProxyCommitData->rangeLock != nullptr);
+	// Fast path: no exclusive locks held -> nothing to check, skip the
+	// per-mutation loop entirely. Steady state when no bulkload is running.
+	if (!pProxyCommitData->rangeLock->anyExclusiveLockHeld()) {
+		++pProxyCommitData->stats.rangeLockFastPath;
+		return;
+	}
+	++pProxyCommitData->stats.rangeLockSlowPath;
 	std::vector<CommitTransactionRequest>& trs = self->trs;
 	for (int i = self->transactionNum; i < trs.size(); i++) {
 		if (self->committed[i] != ConflictBatchStatus::TransactionCommitted) {
