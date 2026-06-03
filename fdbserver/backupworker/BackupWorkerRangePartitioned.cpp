@@ -83,12 +83,6 @@ struct BackupRangePartitionedData {
 	Reference<FlowLock> lock;
 	AsyncTrigger doneTrigger;
 	AsyncTrigger changedTrigger;
-	// Pending partition maps to apply, in version order. Two sources fill this:
-	//   - At startup, an old-epoch worker preloads its remaining history from SS.
-	//   - During pulling, the current-epoch worker pushes any new partition map it sees in the TLog stream.
-	// uploadData picks them up: when its current batch of mutations reaches a queued version, it
-	// finishes saving the mutations under the old map, switches to the new map, and continues.
-	std::deque<std::pair<Version, PartitionMap>> pmUpdateQueue;
 	// Set to true when the worker is shutting down (e.g., worker_removed). Used by uploadData to exit gracefully via
 	// allMessageSaved(), letting in-flight file writes and progress commits finish first.
 	bool stopped = false;
@@ -429,12 +423,12 @@ Future<Void> persistPartitionMapToSS(BackupRangePartitionedData* self,
 	}
 }
 
-// Reads partition map entries persisted for `epoch` from system keys, starting from the entry active at
-// `startVersion` (the largest version <= startVersion). Earlier entries don't apply to mutations the worker
-// will process, so we skip them at the SS read.
-Future<PartitionMapHistory> loadPartitionMapHistoryFromSS(BackupRangePartitionedData* self,
-                                                          LogEpoch epoch,
-                                                          Version startVersion) {
+// Reads the partition map active at `startVersion` for `epoch` from system keys. Any later re-partitions
+// in this epoch arrive via the TLog cursor like a current-epoch worker, so we only need this one entry.
+// Returns empty if no entry exists for this epoch (e.g., recovery happened before persistPartitionMapToSS).
+Future<Optional<std::pair<Version, PartitionMap>>> loadActivePartitionMapFromSS(BackupRangePartitionedData* self,
+                                                                                LogEpoch epoch,
+                                                                                Version startVersion) {
 	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
 	KeyRange range = backupPartitionMapHistoryRangeFor(epoch);
 
@@ -445,35 +439,54 @@ Future<PartitionMapHistory> loadPartitionMapHistoryFromSS(BackupRangePartitioned
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			// Find the entry active at startVersion for this worker. If none exists at or before that
-			// version, fall back to the first entry of this epoch.
-			// e.g., startVersion for this worker=80 with entries at versions [1, 50, 90, 95]: starts from 50.
-			Key probedBegin =
-			    co_await tr->getKey(lastLessOrEqual(backupPartitionMapHistoryKeyFor(epoch, startVersion)));
-			Key beginKey = probedBegin >= range.begin ? probedBegin : Key(range.begin);
-
-			PartitionMapHistory history;
-			while (true) {
-				RangeResult rows = co_await tr->getRange(KeyRangeRef(beginKey, range.end), CLIENT_KNOBS->TOO_MANY);
-				for (auto const& kv : rows) {
-					auto [decodedEpoch, version] = decodeBackupPartitionMapHistoryKey(kv.key);
-					ASSERT_EQ(decodedEpoch, epoch);
-
-					PartitionMap pm;
-					BinaryReader reader(kv.value, IncludeVersion());
-					reader >> pm;
-					history.emplace_back(version, std::move(pm));
-				}
-				if (!rows.more) {
-					break;
-				}
-				beginKey = keyAfter(rows.back().key);
+			// Goal: find the partition map that was active at this worker's startVersion within `epoch`.
+			//
+			// Example: epoch=5, startVersion=80. SS has entries at:
+			//   [epoch=5, v=1], [epoch=5, v=50], [epoch=5, v=90], [epoch=5, v=95]
+			// We want the entry at v=50 (largest version <= 80 in epoch 5).
+			//
+			// getRange is used here so we get both the key and the value back in a single round trip
+			//   - begin = lastLessOrEqual([epoch=5, v=80])
+			//             "find the largest actual key in the DB <= this target".
+			//             For our example, FDB resolves it to [epoch=5, v=50].
+			//   - end   = firstGreaterOrEqual(range.end)
+			//             range.end = [epoch=6, v=0] (one past this epoch's keys), so the search
+			//             never reads beyond this epoch.
+			//   - limit = 1
+			//             We only need that one entry.
+			RangeResult rows =
+			    co_await tr->getRange(lastLessOrEqual(backupPartitionMapHistoryKeyFor(epoch, startVersion)),
+			                          firstGreaterOrEqual(range.end),
+			                          /*limit=*/1);
+			if (rows.empty()) {
+				TraceEvent("BWRangePartitionedActivePMNotFound", self->myId)
+				    .detail("Epoch", epoch)
+				    .detail("StartVersion", startVersion);
+				co_return Optional<std::pair<Version, PartitionMap>>();
 			}
-			TraceEvent("BWRangePartitionedMapHistoryRead", self->myId)
+
+			// If no entry exists in our epoch at or before startVersion, lastLessOrEqual lands on a key from a previous
+			// epoch. We detect that by checking the decoded epoch on the result and treat it as "no entry". The caller
+			// falls back to pulling the partition map from TLog.
+			auto [decodedEpoch, version] = decodeBackupPartitionMapHistoryKey(rows[0].key);
+			if (decodedEpoch != epoch) {
+				TraceEvent("BWRangePartitionedActivePMNotFound", self->myId)
+				    .detail("Epoch", epoch)
+				    .detail("DecodedEpoch", decodedEpoch)
+				    .detail("DecodedVersion", version)
+				    .detail("StartVersion", startVersion);
+				co_return Optional<std::pair<Version, PartitionMap>>();
+			}
+
+			PartitionMap pm;
+			BinaryReader reader(rows[0].value, IncludeVersion());
+			reader >> pm;
+
+			TraceEvent("BWRangePartitionedActivePMRead", self->myId)
 			    .detail("Epoch", epoch)
 			    .detail("StartVersion", startVersion)
-			    .detail("NumEntries", history.size());
-			co_return history;
+			    .detail("PMVersion", version);
+			co_return std::make_pair(version, std::move(pm));
 		} catch (Error& e) {
 			err = e;
 		}
@@ -541,15 +554,16 @@ Future<Void> processPartitionMap(BackupRangePartitionedData* self) {
 
 	PartitionMap partitionMap;
 	Version partitionMapVersion;
-	PartitionMapHistory history;
+	Optional<std::pair<Version, PartitionMap>> startPMFromHistory;
 
 	if (self->backupEpoch != self->recruitedEpoch) {
-		// Old epoch worker: the partition map for our backupEpoch was persisted by the previous epoch's
-		// workers. Read it from system keys instead of pulling from TLog.
-		history = co_await loadPartitionMapHistoryFromSS(self, self->backupEpoch, self->startVersion);
-		if (!history.empty()) {
-			partitionMapVersion = history[0].first;
-			partitionMap = std::move(history[0].second);
+		// Old epoch worker: the partition map active at our startVersion was persisted by the previous
+		// epoch's workers. Read just that one from system keys; any later re-partitions in this epoch
+		// will arrive via the TLog cursor like a current-epoch worker.
+		startPMFromHistory = co_await loadActivePartitionMapFromSS(self, self->backupEpoch, self->startVersion);
+		if (startPMFromHistory.present()) {
+			partitionMapVersion = startPMFromHistory.get().first;
+			partitionMap = std::move(startPMFromHistory.get().second);
 			auto it = partitionMap.find(self->tag);
 			ASSERT(it != partitionMap.end() && !it->second.empty());
 			TraceEvent("BWRangePartitionedLoadedPartitionMap", self->myId)
@@ -558,16 +572,10 @@ Future<Void> processPartitionMap(BackupRangePartitionedData* self) {
 			    .detail("NumTags", partitionMap.size())
 			    .detail("Tag", self->tag.toString())
 			    .detail("NumPartitions", it->second.size());
-
-			// history[0] is applied as the initial active partition map (above). Remaining entries
-			// are queued for uploadData to swap to as it crosses each version.
-			self->pmUpdateQueue.insert(self->pmUpdateQueue.end(),
-			                           std::make_move_iterator(history.begin() + 1),
-			                           std::make_move_iterator(history.end()));
 		}
 	}
 
-	if (self->backupEpoch == self->recruitedEpoch || history.empty()) {
+	if (self->backupEpoch == self->recruitedEpoch || !startPMFromHistory.present()) {
 		// Current-epoch worker, or old epoch worker with no SS history (recovery happened before the
 		// previous epoch's persistPartitionMapToSS). Receive the partition map via TLog as the first
 		// message, then persist it so the next old epoch worker doesn't hit this case.
@@ -663,21 +671,20 @@ Future<Void> pullAsyncData(BackupRangePartitionedData* self) {
 			}
 
 			// Mid-stream PartitionMap update (re-partition). Persist + upload the new map immediately so
-			// future old-epoch workers can find it, then queue it for uploadData to apply at the right
-			// version boundary.
+			// future old-epoch workers can find it. The raw message bytes fall through to be buffered
+			// into self->messages like any other cursor message; uploadData detects it during its batch
+			// and calls setActivePartitionMap at the right version boundary.
+			// Do not `cursor->nextMessage()` or `continue` — fall through to buffer this message.
 			if (PartitionMapMessage::isNextIn(reader)) {
 				Version pmVersion = cursor->version().version;
 				PartitionMapMessage pmMsg;
 				reader >> pmMsg;
-				cursor->nextMessage();
 
 				co_await persistAndUploadPartitionMap(self, pmVersion, pmMsg.partitionMap);
-				self->pmUpdateQueue.emplace_back(pmVersion, std::move(pmMsg.partitionMap));
 
-				TraceEvent("BWRangePartitionedQueuedMidStreamPM", self->myId)
+				TraceEvent("BWRangePartitionedReceivedMidStreamPM", self->myId)
 				    .detail("Version", pmVersion)
 				    .detail("NumPartitions", pmMsg.partitionMap[self->tag].size());
-				continue;
 			}
 
 			auto msg = RangePartitionedVersionedMessage(cursor->version(), rawMessage, cursor->getTags(), msgArena);
@@ -1195,36 +1202,45 @@ Future<Void> uploadData(BackupRangePartitionedData* self) {
 			    .detail("NumMsg", numMsg)
 			    .detail("MsgQ", self->messages.size());
 
-			// Apply any queued partition maps whose version is reached by this batch. For each one,
-			// flush the messages with versions older than that map's version under the current map,
-			// then switch to the new map before continuing.
-			while (!self->pmUpdateQueue.empty() && self->pmUpdateQueue.front().first <= popVersion) {
-				Version pmV = self->pmUpdateQueue.front().first;
-				PartitionMap newPM = std::move(self->pmUpdateQueue.front().second);
-				self->pmUpdateQueue.pop_front();
-
-				int numMsgsBeforePM = 0;
-				for (int i = 0; i < numMsg; i++) {
-					if (self->messages[i].getVersion() >= pmV) {
-						break;
-					}
-					numMsgsBeforePM++;
+			// Walk the batch and look for any PartitionMapMessage. Whenever we hit one, flush all the
+			// mutations before it under the current map, switch to the new map, and drop the message.
+			int idx = 0;
+			while (idx < numMsg) {
+				ArenaReader reader(self->messages[idx].arena,
+				                   self->messages[idx].message,
+				                   AssumeVersion(g_network->protocolVersion()));
+				if (!PartitionMapMessage::isNextIn(reader)) {
+					idx++;
+					continue;
 				}
 
-				if (numMsgsBeforePM > 0) {
-					co_await saveMutationsToFile(self, pmV - 1, numMsgsBeforePM);
-					self->eraseMessages(numMsgsBeforePM);
-					numMsg -= numMsgsBeforePM;
+				Version pmV = self->messages[idx].getVersion();
+				if (idx > 0) {
+					co_await saveMutationsToFile(self, pmV - 1, idx);
+					self->eraseMessages(idx);
+					numMsg -= idx;
 				}
 
-				co_await setActivePartitionMap(self, pmV, newPM);
+				// PartitionMapMessage is now at index 0. Decode, apply, drop.
+				ArenaReader pmReader(
+				    self->messages[0].arena, self->messages[0].message, AssumeVersion(g_network->protocolVersion()));
+				PartitionMapMessage pmMsg;
+				pmReader >> pmMsg;
+				co_await setActivePartitionMap(self, pmV, pmMsg.partitionMap);
+				self->eraseMessages(1);
+				numMsg -= 1;
 
-				TraceEvent("BWRangePartitionedAppliedQueuedPM", self->myId)
+				TraceEvent("BWRangePartitionedAppliedMidStreamPM", self->myId)
 				    .detail("Version", pmV)
-				    .detail("NumPartitions", newPM[self->tag].size());
+				    .detail("NumPartitions", pmMsg.partitionMap[self->tag].size());
+
+				idx = 0;
 			}
 
-			// save an empty file for old epochs so that log file versions are continuous
+			// Even if numMsg is 0 (pullFinished with nothing left to save), write a final file at endVersion. Restore
+			// checks each tag's log files form a continuous range; without this marker, restore would stop at the last
+			// real file and miss the tail of this epoch. In-between empty ranges (gaps within [startVersion,
+			// endVersion)) are fine — restore only needs the worker's continuous range to extend through endVersion.
 			co_await saveMutationsToFile(self, popVersion, numMsg);
 			self->eraseMessages(numMsg);
 		}
