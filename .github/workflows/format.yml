@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  clang-format-tidy:
+  clang-format:
     runs-on: ubuntu-24.04
 
     steps:
@@ -26,7 +26,8 @@ jobs:
 
       - name: clang-format
         run:
-          find -E . -type f -regex '.*\.(c|h|cpp|hpp)' -not -name sqlite3.amalgamation.c \
-               -exec clang-format -i '{}' ';'
+          find . -type f '(' -name \*.c -or -name \*.cpp -or -name \*.h -or -name \*.hpp ')' \
+                 -not -name sqlite3.amalgamation.c \
+                 -exec clang-format -i '{}' ';'
 
           git diff --exit-code
