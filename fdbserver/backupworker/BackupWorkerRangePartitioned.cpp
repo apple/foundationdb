@@ -429,9 +429,12 @@ Future<Void> persistPartitionMapToSS(BackupRangePartitionedData* self,
 	}
 }
 
-// Reads all partition map entries persisted for `epoch` from system keys, returning them in
-// version order. Each entry is the partition map that became effective at its associated version.
-Future<PartitionMapHistory> loadPartitionMapHistoryFromSS(BackupRangePartitionedData* self, LogEpoch epoch) {
+// Reads partition map entries persisted for `epoch` from system keys, starting from the entry active at
+// `startVersion` (the largest version <= startVersion). Earlier entries don't apply to mutations the worker
+// will process, so we skip them at the SS read.
+Future<PartitionMapHistory> loadPartitionMapHistoryFromSS(BackupRangePartitionedData* self,
+                                                          LogEpoch epoch,
+                                                          Version startVersion) {
 	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
 	KeyRange range = backupPartitionMapHistoryRangeFor(epoch);
 
@@ -442,8 +445,14 @@ Future<PartitionMapHistory> loadPartitionMapHistoryFromSS(BackupRangePartitioned
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
+			// Find the entry active at startVersion for this worker. If none exists at or before that
+			// version, fall back to the first entry of this epoch.
+			// e.g., startVersion for this worker=80 with entries at versions [1, 50, 90, 95]: starts from 50.
+			Key probedBegin =
+			    co_await tr->getKey(lastLessOrEqual(backupPartitionMapHistoryKeyFor(epoch, startVersion)));
+			Key beginKey = probedBegin >= range.begin ? probedBegin : Key(range.begin);
+
 			PartitionMapHistory history;
-			Key beginKey = range.begin;
 			while (true) {
 				RangeResult rows = co_await tr->getRange(KeyRangeRef(beginKey, range.end), CLIENT_KNOBS->TOO_MANY);
 				for (auto const& kv : rows) {
@@ -462,6 +471,7 @@ Future<PartitionMapHistory> loadPartitionMapHistoryFromSS(BackupRangePartitioned
 			}
 			TraceEvent("BWRangePartitionedMapHistoryRead", self->myId)
 			    .detail("Epoch", epoch)
+			    .detail("StartVersion", startVersion)
 			    .detail("NumEntries", history.size());
 			co_return history;
 		} catch (Error& e) {
@@ -536,7 +546,7 @@ Future<Void> processPartitionMap(BackupRangePartitionedData* self) {
 	if (self->backupEpoch != self->recruitedEpoch) {
 		// Old epoch worker: the partition map for our backupEpoch was persisted by the previous epoch's
 		// workers. Read it from system keys instead of pulling from TLog.
-		history = co_await loadPartitionMapHistoryFromSS(self, self->backupEpoch);
+		history = co_await loadPartitionMapHistoryFromSS(self, self->backupEpoch, self->startVersion);
 		if (!history.empty()) {
 			partitionMapVersion = history[0].first;
 			partitionMap = std::move(history[0].second);
