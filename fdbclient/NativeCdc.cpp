@@ -107,7 +107,7 @@ Future<Tag> getNativeCdcCurrentTag(Transaction* tr, CDCStreamId streamId) {
 	while (begin < historyRange.end) {
 		RangeResult history = co_await tr->getRange(KeyRangeRef(begin, historyRange.end), CLIENT_KNOBS->TOO_MANY);
 		for (const auto& assignment : history) {
-			currentTag = std::get<2>(decodeCDCTagHistoryKey(assignment.key));
+			currentTag = decodeCDCTagHistoryKey(assignment.key).tag;
 		}
 		if (!history.more) {
 			break;
@@ -141,10 +141,9 @@ Future<Optional<UID>> getNativeCdcProxyAssignmentForTag(Transaction* tr, Tag tar
 		RangeResult histories =
 		    co_await tr->getRange(KeyRangeRef(begin, cdcTagHistoryKeys.end), CLIENT_KNOBS->TOO_MANY);
 		for (const auto& history : histories) {
-			const auto decoded = decodeCDCTagHistoryKey(history.key);
-			const CDCStreamId streamId = std::get<0>(decoded);
-			if (activeStreamIds.contains(streamId)) {
-				currentTags[streamId] = std::get<2>(decoded);
+			const CDCTagHistoryEntry decoded = decodeCDCTagHistoryKey(history.key);
+			if (activeStreamIds.contains(decoded.streamId)) {
+				currentTags[decoded.streamId] = decoded.tag;
 			}
 		}
 		if (!histories.more) {
@@ -197,10 +196,10 @@ Future<Void> observeNativeCdcMetadata(Transaction* tr, NativeCdcIdentifierAlloca
 		RangeResult histories =
 		    co_await tr->getRange(KeyRangeRef(begin, cdcTagHistoryKeys.end), CLIENT_KNOBS->TOO_MANY);
 		for (const auto& kv : histories) {
-			const auto history = decodeCDCTagHistoryKey(kv.key);
-			allocator->observeStreamId(std::get<0>(history));
-			if (activeStreamIds.contains(std::get<0>(history))) {
-				currentTags[std::get<0>(history)] = std::get<2>(history);
+			const CDCTagHistoryEntry history = decodeCDCTagHistoryKey(kv.key);
+			allocator->observeStreamId(history.streamId);
+			if (activeStreamIds.contains(history.streamId)) {
+				currentTags[history.streamId] = history.tag;
 			}
 		}
 		if (!histories.more) {
@@ -429,7 +428,7 @@ Future<Optional<NativeCdcRemovedStreamInfo>> removeNativeCdcStream(Database cx, 
 				RangeResult history =
 				    co_await tr.getRange(KeyRangeRef(begin, historyRange.end), CLIENT_KNOBS->TOO_MANY);
 				for (const auto& entry : history) {
-					removedTags.insert(std::get<2>(decodeCDCTagHistoryKey(entry.key)));
+					removedTags.insert(decodeCDCTagHistoryKey(entry.key).tag);
 				}
 				if (!history.more) {
 					break;

@@ -171,10 +171,10 @@ Future<CDCStreamReadState> readCDCStreamState(Database cx,
 				RangeResult history =
 				    co_await tr.getRange(KeyRangeRef(begin, tagHistoryRange.end), CLIENT_KNOBS->TOO_MANY);
 				for (KeyValueRef const& kv : history) {
-					const auto [historyStreamId, version, tag] = decodeCDCTagHistoryKey(kv.key);
-					ASSERT_WE_THINK(historyStreamId == streamId);
-					ASSERT_WE_THINK(tag.locality == tagLocalityCDC);
-					tagAssignments.emplace_back(version, tag);
+					const CDCTagHistoryEntry historyEntry = decodeCDCTagHistoryKey(kv.key);
+					ASSERT_WE_THINK(historyEntry.streamId == streamId);
+					ASSERT_WE_THINK(historyEntry.tag.locality == tagLocalityCDC);
+					tagAssignments.emplace_back(historyEntry.version, historyEntry.tag);
 				}
 				if (!history.more) {
 					break;
@@ -614,14 +614,14 @@ Future<std::map<Tag, Version>> readSafePopVersions(Database cx) {
 				RangeResult histories =
 				    co_await tr.getRange(KeyRangeRef(begin, cdcTagHistoryKeys.end), CLIENT_KNOBS->TOO_MANY);
 				for (const auto& kv : histories) {
-					const auto [streamId, version, tag] = decodeCDCTagHistoryKey(kv.key);
-					auto minimum = minVersions.find(streamId);
+					const CDCTagHistoryEntry history = decodeCDCTagHistoryKey(kv.key);
+					auto minimum = minVersions.find(history.streamId);
 					if (minimum == minVersions.end()) {
 						continue;
 					}
-					auto safePop = safePopVersions.find(tag);
+					auto safePop = safePopVersions.find(history.tag);
 					if (safePop == safePopVersions.end()) {
-						safePopVersions[tag] = minimum->second;
+						safePopVersions[history.tag] = minimum->second;
 					} else {
 						safePop->second = std::min(safePop->second, minimum->second);
 					}

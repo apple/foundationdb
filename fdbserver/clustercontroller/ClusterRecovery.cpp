@@ -1328,9 +1328,9 @@ Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> self,
 
 	RangeResult rawCdcHistoryTags = co_await self->txnStateStore->readRange(cdcTagHistoryKeys);
 	for (auto& kv : rawCdcHistoryTags) {
-		const auto tagHistory = decodeCDCTagHistoryKey(kv.key);
-		if (activeCdcStreams.contains(std::get<0>(tagHistory))) {
-			self->allTags.push_back(std::get<2>(tagHistory));
+		const CDCTagHistoryEntry tagHistory = decodeCDCTagHistoryKey(kv.key);
+		if (activeCdcStreams.contains(tagHistory.streamId)) {
+			self->allTags.push_back(tagHistory.tag);
 		}
 	}
 

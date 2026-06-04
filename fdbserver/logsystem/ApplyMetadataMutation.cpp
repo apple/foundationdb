@@ -99,8 +99,8 @@ void CDCRoutingTable::reload(IKeyValueStore* txnStateStore) {
 	}
 	const RangeResult tagHistoryRows = txnStateStore->readRange(cdcTagHistoryKeys).get();
 	for (const auto& kv : tagHistoryRows) {
-		const auto [streamId, version, tag] = decodeCDCTagHistoryKey(kv.key);
-		updateTag(streamId, version, tag);
+		const CDCTagHistoryEntry history = decodeCDCTagHistoryKey(kv.key);
+		updateTag(history.streamId, history.version, history.tag);
 	}
 	rebuildRanges();
 }
@@ -643,8 +643,8 @@ private:
 		if (cdcStreamKeys.contains(m.param1)) {
 			cdcRouting->setRange(decodeCDCStreamKey(m.param1), decodeCDCStreamKeysValue(m.param2));
 		} else if (cdcTagHistoryKeys.contains(m.param1)) {
-			const auto [streamId, tagVersion, tag] = decodeCDCTagHistoryKey(m.param1);
-			cdcRouting->setTag(streamId, tagVersion, tag);
+			const CDCTagHistoryEntry history = decodeCDCTagHistoryKey(m.param1);
+			cdcRouting->setTag(history.streamId, history.version, history.tag);
 		}
 	}
 

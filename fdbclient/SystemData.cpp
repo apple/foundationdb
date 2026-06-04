@@ -863,13 +863,13 @@ KeyRange cdcTagHistoryRangeFor(CDCStreamId streamId) {
 	return prefixRange(cdcTagHistoryPrefixFor(streamId));
 }
 
-std::tuple<CDCStreamId, Version, Tag> decodeCDCTagHistoryKey(KeyRef const& key) {
+CDCTagHistoryEntry decodeCDCTagHistoryKey(KeyRef const& key) {
 	CDCStreamId streamId;
 	Version encodedVersion;
 	Tag tag;
 	BinaryReader reader(key.removePrefix(cdcTagHistoryKeys.begin), Unversioned());
 	reader >> streamId >> encodedVersion >> tag;
-	return { streamId, bigEndian64(encodedVersion), tag };
+	return CDCTagHistoryEntry(streamId, bigEndian64(encodedVersion), tag);
 }
 
 Key cdcMinVersionKeyFor(CDCStreamId streamId) {
@@ -1927,11 +1927,18 @@ TEST_CASE("/SystemData/NativeCDC") {
 	ASSERT(nonMetadataSystemKeys.contains(cdcRetiredTagPopVersionKeyFor(tag)));
 
 	const Key tagHistoryKey = cdcTagHistoryKeyFor(streamId, minVersion, tag);
-	const auto [decodedStreamId, decodedVersion, decodedTag] = decodeCDCTagHistoryKey(tagHistoryKey);
-	ASSERT(decodedStreamId == streamId);
-	ASSERT(decodedVersion == minVersion);
-	ASSERT(decodedTag == tag);
+	const CDCTagHistoryEntry decodedTagHistory = decodeCDCTagHistoryKey(tagHistoryKey);
+	ASSERT(decodedTagHistory.streamId == streamId);
+	ASSERT(decodedTagHistory.version == minVersion);
+	ASSERT(decodedTagHistory.tag == tag);
 	ASSERT(cdcTagHistoryRangeFor(streamId).contains(tagHistoryKey));
+
+	const Value serializedTagHistory = ObjectWriter::toValue(decodedTagHistory, Unversioned());
+	const CDCTagHistoryEntry deserializedTagHistory =
+	    ObjectReader::fromStringRef<CDCTagHistoryEntry>(serializedTagHistory, Unversioned());
+	ASSERT(deserializedTagHistory.streamId == streamId);
+	ASSERT(deserializedTagHistory.version == minVersion);
+	ASSERT(deserializedTagHistory.tag == tag);
 
 	const auto [proxyStreamId, decodedProxyId] = decodeCDCProxyKey(cdcProxyKeyFor(streamId, proxyId));
 	ASSERT(proxyStreamId == streamId);

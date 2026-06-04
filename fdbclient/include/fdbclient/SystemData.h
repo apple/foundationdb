@@ -32,6 +32,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/RangeLock.h"
 #include "fdbclient/StorageServerInterface.h"
+#include "flow/FileIdentifier.h"
 
 // Don't warn on constants being defined in this file.
 #pragma clang diagnostic push
@@ -287,10 +288,27 @@ Value cdcStreamKeysValue(KeyRangeRef const& keys);
 KeyRange decodeCDCStreamKeysValue(ValueRef const& value);
 
 // "\xff/cdc/tagHistory/[[CDCStreamId]][[Version]][[Tag]]" := ""
+struct CDCTagHistoryEntry {
+	constexpr static FileIdentifier file_identifier = 13091844;
+
+	CDCStreamId streamId = 0;
+	Version version = invalidVersion;
+	Tag tag;
+
+	CDCTagHistoryEntry() = default;
+	CDCTagHistoryEntry(CDCStreamId streamId, Version version, Tag tag)
+	  : streamId(streamId), version(version), tag(tag) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, streamId, version, tag);
+	}
+};
+
 extern const KeyRangeRef cdcTagHistoryKeys;
 Key cdcTagHistoryKeyFor(CDCStreamId streamId, Version version, Tag tag);
 KeyRange cdcTagHistoryRangeFor(CDCStreamId streamId);
-std::tuple<CDCStreamId, Version, Tag> decodeCDCTagHistoryKey(KeyRef const& key);
+CDCTagHistoryEntry decodeCDCTagHistoryKey(KeyRef const& key);
 
 // Native CDC acknowledgement progress is regular storage-server-backed system data.
 // "\xff\x02/cdc/minVersion/[[CDCStreamId]]" := "[[Version]]"

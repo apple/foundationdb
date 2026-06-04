@@ -70,11 +70,11 @@ struct NativeCdcWorkload : TestWorkload {
 				ASSERT(keys.present());
 				ASSERT(minVersion.present());
 				ASSERT(history.size() == 1);
-				const auto [historyStreamId, historyVersion, tag] = decodeCDCTagHistoryKey(history[0].key);
-				ASSERT(historyStreamId == streamId);
+				const CDCTagHistoryEntry historyEntry = decodeCDCTagHistoryKey(history[0].key);
+				ASSERT(historyEntry.streamId == streamId);
 				const Version initialMinVersion = decodeCDCMinVersionValue(minVersion.get());
-				ASSERT(historyVersion <= initialMinVersion);
-				co_return std::make_pair(tag, initialMinVersion);
+				ASSERT(historyEntry.version <= initialMinVersion);
+				co_return std::make_pair(historyEntry.tag, initialMinVersion);
 			} catch (Error& e) {
 				err = e;
 			}
@@ -199,9 +199,9 @@ struct NativeCdcWorkload : TestWorkload {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				RangeResult history = co_await tr.getRange(cdcTagHistoryRangeFor(streamId), CLIENT_KNOBS->TOO_MANY);
 				ASSERT(!history.empty());
-				const auto historyEntry = decodeCDCTagHistoryKey(history.back().key);
-				ASSERT(std::get<0>(historyEntry) == streamId);
-				co_return std::get<2>(historyEntry);
+				const CDCTagHistoryEntry historyEntry = decodeCDCTagHistoryKey(history.back().key);
+				ASSERT(historyEntry.streamId == streamId);
+				co_return historyEntry.tag;
 			} catch (Error& e) {
 				err = e;
 			}
