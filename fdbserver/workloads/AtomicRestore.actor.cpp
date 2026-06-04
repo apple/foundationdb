@@ -50,8 +50,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 			// Fast restore doesn't support multiple ranges yet
 			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 		}
-		usePartitionedLogs.set(
-		    getOption(options, "usePartitionedLogs"_sr, false));
+		usePartitionedLogs.set(getOption(options, "usePartitionedLogs"_sr, false));
 
 		addPrefix = getOption(options, "addPrefix"_sr, ""_sr);
 		removePrefix = getOption(options, "removePrefix"_sr, ""_sr);

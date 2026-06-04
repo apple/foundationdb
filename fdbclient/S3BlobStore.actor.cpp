@@ -2009,9 +2009,7 @@ TEST_CASE("/backup/s3/parseErrorCodeFromS3") {
 	}
 
 	// Empty response — should return ""
-	{
-		ASSERT(parseErrorCodeFromS3("") == "");
-	}
+	{ ASSERT(parseErrorCodeFromS3("") == ""); }
 
 	// HTML error page from load balancer (502/503) — should return "", not throw
 	{
@@ -2020,19 +2018,13 @@ TEST_CASE("/backup/s3/parseErrorCodeFromS3") {
 	}
 
 	// Completely invalid / garbage — should return "", not throw
-	{
-		ASSERT(parseErrorCodeFromS3("not xml at all {{{") == "");
-	}
+	{ ASSERT(parseErrorCodeFromS3("not xml at all {{{") == ""); }
 
 	// Partial XML — should return "", not throw
-	{
-		ASSERT(parseErrorCodeFromS3("<Error><Code>Incomple") == "");
-	}
+	{ ASSERT(parseErrorCodeFromS3("<Error><Code>Incomple") == ""); }
 
 	// Plain text error — should return "", not throw
-	{
-		ASSERT(parseErrorCodeFromS3("Internal Server Error") == "");
-	}
+	{ ASSERT(parseErrorCodeFromS3("Internal Server Error") == ""); }
 
 	return Void();
 }
