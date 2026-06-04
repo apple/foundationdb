@@ -1789,6 +1789,8 @@ TEST_CASE("noSim/traceEventXMLHandling") {
 	// Verify that TraceEvent handles large XML strings (like S3 API responses) without breaking.
 	// Tests the full pipeline: detail() -> field truncation -> XML/JSON formatting.
 
+	// clang-format off
+
 	// Minimal S3-style XML
 	std::string smallXml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
 	                        "<Error><Code>NoSuchKey</Code>"
@@ -1831,6 +1833,8 @@ TEST_CASE("noSim/traceEventXMLHandling") {
 	                        "\"10.0.0.0/8\"}</Detail>\n"
 	                        "</Error>";
 	TraceEvent("TestNastyXml").detail("ResponseDetails", nastyXml);
+
+	// clang-format on
 
 	// Verify XML formatter handles the content without crashing
 	{
