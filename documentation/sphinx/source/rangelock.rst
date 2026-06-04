@@ -135,6 +135,17 @@ The locking mutation takes effect on all mutations after the locking mutation in
 To achieve this, the locking transaction adds a write_conflict_range on the lock range.
 As a result, any following transactions in the batch that writes to the locked range will be marked as ``Conflict``.
 
+Steady-state cost when no locks are held
+----------------------------------------
+The per-mutation lookup described above runs only when at least one exclusive read lock is held cluster-wide. Each commit proxy tracks an ``anyExclusiveLockHeld_`` flag on its ``RangeLock`` struct, refreshed when the lock set changes (during ``consumePendingRequest`` and recovery's ``initKeyPoint``). When the flag is false — the steady state for any cluster running with ``knob_enable_read_lock_on_range=true`` but no active bulkload — ``rejectMutationsForReadLockOnRange`` short-circuits at the top of the function and the per-mutation work is skipped entirely.
+
+Two ``ProxyMetrics`` counters expose which path the proxy took:
+
+* ``RangeLockFastPath`` increments once per commit batch when the early return fired (no locks held).
+* ``RangeLockSlowPath`` increments once per commit batch when the per-mutation check loop ran (at least one lock held).
+
+Operators can use these counters to confirm in production that the optimization is firing, and to detect the silent-degradation case where the flag fails to clear after a release. In normal operation only one counter advances at a time per proxy.
+
 Support multiple range lock users
 ---------------------------------
 To support rangeLock for multiple applications, we add ownership concept to rangeLock. 
