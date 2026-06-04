@@ -25,6 +25,7 @@
 #include "flow/ProcessEvents.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/ConsistencyScanInterface.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/IRateControl.h"
@@ -118,19 +119,6 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 			}
 		}
 		return res;
-	}
-
-	ACTOR Future<Version> getVersion(Database cx) {
-		loop {
-			state Transaction tr(cx);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			try {
-				Version version = wait(tr.getReadVersion());
-				return version;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
 	}
 
 	ACTOR Future<Void> checkDataConsistencyUrgent(Database cx,
@@ -291,215 +279,38 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 			}
 
 			// Step 3: Read a limited number of entries at a time, repeating until all keys in the shard have been read
-			state int64_t totalReadAmount = 0;
 			state int64_t shardReadAmount = 0;
 			state int64_t shardKeyCompared = 0;
 			state bool valueAvailableToCheck = true;
-			state KeySelector begin = firstGreaterOrEqual(range.begin);
+			state KeySelectorRef begin = firstGreaterOrEqual(range.begin);
 			loop {
 				try {
-					// Get the min version of the storage servers
-					Version version = wait(self->getVersion(cx));
+					state bool success = true;
+					state RangeConsistencyResult rangeConsistencyResult = wait(checkRangeConsistency(cx, storageServerInterfaces, range, begin, false, false, false, &success));
 
-					state GetKeyValuesRequest req;
-					req.begin = begin;
-					req.end = firstGreaterOrEqual(range.end);
-					req.limit = 1e4;
-					if (g_network->isSimulated() && SERVER_KNOBS->CONSISTENCY_CHECK_BACKWARD_READ) {
-						req.limit = -1e4;
-					}
-					req.limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
-					req.version = version;
-					req.tags = TagSet();
-
-					// Try getting the entries in the specified range
-					state std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
-					state int j = 0;
-					for (j = 0; j < storageServerInterfaces.size(); j++) {
-						resetReply(req);
-						keyValueFutures.push_back(
-						    storageServerInterfaces[j].getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
-					}
-					wait(waitForAll(keyValueFutures));
-
-					for (j = 0; j < keyValueFutures.size(); j++) {
-						ErrorOr<GetKeyValuesReply> rangeResult = keyValueFutures[j].get();
-						if (!rangeResult.present() || rangeResult.get().error.present()) {
-							valueAvailableToCheck = false;
-							TraceEvent e(SevInfo, "ConsistencyCheckUrgent_TesterGetRangeError");
-							e.detail("ResultPresent", rangeResult.present());
-							e.detail("StorageServer", storageServerInterfaces[j].uniqueID);
-							if (rangeResult.present()) {
-								e.detail("ErrorPresent", rangeResult.get().error.present());
-								if (rangeResult.get().error.present()) {
-									e.detail("Error", rangeResult.get().error.get().what());
-								}
-							} else {
-								e.detail("ResultNotPresentWithError", rangeResult.getError().what());
-								if (g_network->isSimulated() &&
-								    g_simulator->getProcessByAddress(storageServerInterfaces[j].address())->failed) {
-									e.detail("MachineFailed", "True");
-									// skipCheck = true;
-								}
-							}
-							break;
-						}
-					}
-					if (!valueAvailableToCheck) {
+					if (rangeConsistencyResult.anyReadFailed) {
+						valueAvailableToCheck = false;
 						failedRanges.insert(range, true);
 						TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterShardAddedToRetry")
-						    .setMaxEventLength(-1)
-						    .setMaxFieldLength(-1)
-						    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
-						    .detail("ClientId", self->clientId)
-						    .detail("ClientCount", self->clientCount)
-						    .detail("ShardBegin", range.begin)
-						    .detail("ShardEnd", range.end)
-						    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
+							.setMaxEventLength(-1)
+							.setMaxFieldLength(-1)
+							.detail("ConsistencyCheckerId", self->consistencyCheckerId)
+							.detail("ClientId", self->clientId)
+							.detail("ClientCount", self->clientCount)
+							.detail("ShardBegin", range.begin)
+							.detail("ShardEnd", range.end)
+							.detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
 						break;
 					}
-
-					state int firstValidServer = -1;
-					totalReadAmount = 0;
-					for (j = 0; j < keyValueFutures.size(); j++) {
-						ErrorOr<GetKeyValuesReply> rangeResult = keyValueFutures[j].get();
-						ASSERT(rangeResult.present() && !rangeResult.get().error.present());
-
-						state GetKeyValuesReply current = rangeResult.get();
-						totalReadAmount += current.data.expectedSize();
-						// If we haven't encountered a valid storage server yet, then mark this as the baseline
-						// to compare against
-						if (firstValidServer == -1) {
-							firstValidServer = j;
-							GetKeyValuesReply reference = keyValueFutures[firstValidServer].get().get();
-							shardKeyCompared += current.data.size();
-						} else {
-							// Compare this shard against the first
-							GetKeyValuesReply reference = keyValueFutures[firstValidServer].get().get();
-							if (current.data != reference.data || current.more != reference.more) {
-								// Data for trace event
-								// The number of keys unique to the current shard
-								int currentUniques = 0;
-								// The number of keys unique to the reference shard
-								int referenceUniques = 0;
-								// The number of keys in both shards with conflicting values
-								int valueMismatches = 0;
-								// The number of keys in both shards with matching values
-								int matchingKVPairs = 0;
-								// Last unique key on the current shard
-								KeyRef currentUniqueKey;
-								// Last unique key on the reference shard
-								KeyRef referenceUniqueKey;
-								// Last value mismatch
-								KeyRef valueMismatchKey;
-
-								// Loop through both replies using a merge strategy, always advancing
-								// the minimum cursor. Keep going until we've exhausted at least one
-								// cursor
-								int currentI = 0;
-								int referenceI = 0;
-								while (currentI < current.data.size() && referenceI < reference.data.size()) {
-									KeyValueRef currentKV = current.data[currentI];
-									KeyValueRef referenceKV = reference.data[referenceI];
-									if (currentKV.key == referenceKV.key) {
-										if (currentKV.value == referenceKV.value)
-											matchingKVPairs++;
-										else {
-											valueMismatchKey = currentKV.key;
-											valueMismatches++;
-										}
-										currentI++;
-										referenceI++;
-									} else if (currentKV.key < referenceKV.key) {
-										currentUniqueKey = currentKV.key;
-										currentUniques++;
-										currentI++;
-									} else {
-										referenceUniqueKey = referenceKV.key;
-										referenceUniques++;
-										referenceI++;
-									}
-								}
-
-								// We have exhausted at least one of the comparands. If we've exhausted
-								// exactly one of them, there are now two possibilities for the other:
-								//  1. There is no more data in the exhausted range (i.e., "more" is false). In this
-								//     case, we know each key remaining in is unique, so mark it as such
-								//  2. There is more data in the exhausted range (i.e., "more" is true). In this
-								//     case, we need to do additional reads to validate the rest of the data in
-								//     the non-exhausted range. For now, ignore these keys. We will check them
-								//     during the next iteration.
-								if (currentI >= current.data.size() && !current.more) {
-									while (referenceI < reference.data.size()) {
-										referenceUniqueKey = reference.data[referenceI].key;
-										referenceUniques++;
-										referenceI++;
-									}
-								}
-								if (referenceI >= reference.data.size() && !reference.more) {
-									while (currentI < current.data.size()) {
-										currentUniqueKey = current.data[currentI].key;
-										currentUniques++;
-										currentI++;
-									}
-								}
-
-								TraceEvent(SevError, "ConsistencyCheck_DataInconsistent")
-								    .setMaxEventLength(-1)
-								    .setMaxFieldLength(-1)
-								    .detail(format("StorageServer%d", j).c_str(), storageServers[j].toString())
-								    .detail(format("StorageServer%d", firstValidServer).c_str(),
-								            storageServers[firstValidServer].toString())
-								    .detail("RangeBegin", req.begin.getKey())
-								    .detail("RangeEnd", req.end.getKey())
-								    .detail("VersionNumber", req.version)
-								    .detail(format("Server%dUniques", j).c_str(), currentUniques)
-								    .detail(format("Server%dUniqueKey", j).c_str(), currentUniqueKey)
-								    .detail(format("Server%dUniques", firstValidServer).c_str(), referenceUniques)
-								    .detail(format("Server%dUniqueKey", firstValidServer).c_str(), referenceUniqueKey)
-								    .detail("ValueMismatches", valueMismatches)
-								    .detail("ValueMismatchKey", valueMismatchKey)
-								    .detail("MatchingKVPairs", matchingKVPairs)
-								    .detail("IsTSS",
-								            storageServerInterfaces[j].isTss() ||
-								                    storageServerInterfaces[firstValidServer].isTss()
-								                ? "True"
-								                : "False")
-								    .detail("ShardBegin", range.begin)
-								    .detail("ShardEnd", range.end);
-							}
-						}
-					}
+					shardReadAmount += rangeConsistencyResult.totalReadAmount;
 
 					// RateKeeping
-					wait(rateLimiter->getAllowance(totalReadAmount));
-
-					shardReadAmount += totalReadAmount;
+					wait(rateLimiter->getAllowance(rangeConsistencyResult.totalReadAmount));
 
 					// Advance to the next set of entries
-					ASSERT(firstValidServer != -1);
-					Optional<KeyRef> nextBegin;
-
-					// Begin from the minimum ending key from all non-exhausted ranges.
-					// Using the minimum allows us to re-check any ranges where we couldn't
-					// validate if a key was unique because one get key value reply was exhausted
-					// before one of the other ones
-					for (const auto& rangeReply : keyValueFutures) {
-						if (rangeReply.get().get().more) {
-							VectorRef<KeyValueRef> data = rangeReply.get().get().data;
-							ASSERT(!data.empty());
-							KeyRef dataEnd = data[data.size() - 1].key;
-							if (nextBegin.present()) {
-								if (dataEnd < nextBegin.get()) {
-									nextBegin = dataEnd;
-								}
-							} else {
-								nextBegin = dataEnd;
-							}
-						}
-					}
-					if (nextBegin.present()) {
-						begin = firstGreaterThan(nextBegin.get());
+					ASSERT(rangeConsistencyResult.firstValidServer != -1);
+					if (rangeConsistencyResult.nextKey.present()) {
+						begin = firstGreaterThan(rangeConsistencyResult.nextKey.get());
 						ASSERT(begin.getKey() != allKeys.end);
 					} else {
 						break;

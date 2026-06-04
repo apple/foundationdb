@@ -173,6 +173,30 @@ ACTOR Future<bool> getKeyLocations(Database cx,
                                    Promise<Standalone<VectorRef<KeyValueRef>>> keyLocationPromise,
                                    bool performQuiescentChecks,
                                    bool* success);
+
+struct RangeConsistencyResult {
+	int firstValidServer;
+	std::vector<int64_t> uniqueRefKeys;
+	std::vector<int64_t> uniqueCmpKeys;
+	std::vector<int64_t> mismatchedValues;
+	Optional<KeyRef> nextKey;
+	Optional<KeyRef> lastReadKey;
+	int totalReadAmount;
+	Optional<GetKeyValuesReply> referenceRangeReply;
+	bool anyReadFailed;
+
+	explicit RangeConsistencyResult(const size_t serverCount) : firstValidServer(-1), uniqueRefKeys(serverCount), uniqueCmpKeys(serverCount), mismatchedValues(serverCount), totalReadAmount(0) {}
+
+	explicit RangeConsistencyResult() : RangeConsistencyResult(0) {}
+};
+ACTOR Future<RangeConsistencyResult> checkRangeConsistency(Database cx,
+                                                           std::vector<StorageServerInterface> storageServerInterfaces,
+                                                           KeyRangeRef range,
+                                                           KeySelectorRef begin,
+                                                           bool isRelocating,
+                                                           bool performQuiescentChecks,
+                                                           bool failureIsError,
+                                                           bool *success);
 ACTOR Future<Void> checkDataConsistency(Database cx,
                                         VectorRef<KeyValueRef> keyLocations,
                                         DatabaseConfiguration configuration,

@@ -361,6 +361,313 @@ ACTOR Future<int64_t> getDatabaseSize(Database cx) {
 	}
 }
 
+ACTOR Future<RangeConsistencyResult> checkRangeConsistency(Database cx,
+                                                           std::vector<StorageServerInterface> storageServerInterfaces,
+                                                           KeyRangeRef range,
+                                                           KeySelectorRef begin,
+                                                           bool isRelocating,
+                                                           bool performQuiescentChecks,
+                                                           bool failureIsError,
+                                                           bool *success) {
+	// Get the min version of the storage servers
+	Version version = wait(getVersion(cx));
+
+	state GetKeyValuesRequest req;
+	req.begin = begin;
+	req.end = firstGreaterOrEqual(range.end);
+	req.limit = 1e4;
+	req.limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+	req.version = version;
+	req.tags = TagSet();
+
+	// Try getting the entries in the specified range
+	state std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
+	TraceEvent("ConsistencyCheck_StoringGetFutures").detail("SSISize", storageServerInterfaces.size());
+	for (int j = 0; j < storageServerInterfaces.size(); j++) {
+		resetReply(req);
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+			cx->getLatestCommitVersion(
+				storageServerInterfaces[j], req.version, req.ssLatestCommitVersions);
+		}
+		keyValueFutures.push_back(
+			storageServerInterfaces[j].getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
+	}
+
+	wait(waitForAll(keyValueFutures));
+
+	RangeConsistencyResult result(storageServerInterfaces.size());
+
+	// Determine the first valid server and the correct stopping point, which is the minimum key of all
+	// ranges with more data. We will compare all the other ranges to the reference one, and we will read
+	// each range until we hit this minimum stopping point. The next range read will begin from that point,
+	// so that comparison ensures that every call reads a unique subsection of the key range
+	bool allNoMore = true;
+	Optional<KeyRef> maxReadKey;
+	for (int j = 0; j < storageServerInterfaces.size(); j++) {
+		ErrorOr<GetKeyValuesReply> rangeResult = keyValueFutures[j].get();
+		if (rangeResult.present() && !rangeResult.get().error.present()) {
+			GetKeyValuesReply rangeReply = rangeResult.get();
+			TraceEvent("ConsistencyCheck_GetKeyValuesStream")
+				.detail("DataSize", rangeReply.data.size())
+				.detail(format("StorageServer%d", j).c_str(), storageServerInterfaces[j].toString());
+			result.totalReadAmount += rangeReply.data.expectedSize();
+
+			allNoMore &= !rangeReply.more;
+			Optional<KeyRef> lastKeyInRange;
+			if (!rangeReply.data.empty()) {
+				lastKeyInRange = rangeReply.data[rangeReply.data.size() - 1].key;
+			}
+			if (!maxReadKey.present() || (lastKeyInRange.present() && lastKeyInRange.get() > maxReadKey.get())) {
+				maxReadKey = lastKeyInRange;
+			}
+
+			if (!result.referenceRangeReply.present()) {
+				// First result with a valid response. All other responses will be judged against this one
+				TraceEvent("ConsistencyCheck_FirstValidServer").detail("Iter", j);
+				result.firstValidServer = j;
+				result.referenceRangeReply = rangeReply;
+				if (rangeReply.more) {
+					ASSERT(lastKeyInRange.present());
+					result.nextKey = lastKeyInRange;
+				}
+			} else if (rangeReply.more) {
+				ASSERT(lastKeyInRange.present());
+				if (!result.nextKey.present() || lastKeyInRange.get() < result.nextKey.get()) {
+					result.nextKey = lastKeyInRange;
+				}
+			}
+		} else {
+			result.anyReadFailed = true;
+			// If the data is not available and we aren't relocating this shard, we report on the error
+			if (!isRelocating) {
+				Error e = rangeResult.isError() ? rangeResult.getError() : rangeResult.get().error.get();
+
+				TraceEvent("ConsistencyCheck_StorageServerUnavailable")
+					.errorUnsuppressed(e)
+					.suppressFor(1.0)
+					.detail("StorageServer", storageServerInterfaces[j].toString())
+					.detail("ShardBegin", printable(range.begin))
+					.detail("ShardEnd", printable(range.end))
+					.detail("Address", storageServerInterfaces[j].address())
+					.detail("UID", storageServerInterfaces[j].id())
+					.detail("Quiesced", performQuiescentChecks)
+					.detail("GetKeyValuesToken",
+							storageServerInterfaces[j].getKeyValues.getEndpoint().token)
+					.detail("IsTSS", storageServerInterfaces[j].isTss() ? "True" : "False");
+
+				if (e.code() == error_code_request_maybe_delivered) {
+					// SS in the team may be removed and we get this error.
+					*success = false;
+					throw e;
+				}
+				// All shards should be available in quiescence
+				if (performQuiescentChecks && !storageServerInterfaces[j].isTss()) {
+					testFailure(
+						"Storage server unavailable", performQuiescentChecks, success, failureIsError);
+					throw e;
+				}
+			}
+		}
+	}
+
+	// None of the servers returned valid data. We have to move on
+	if (!result.referenceRangeReply.present()) {
+		return result;
+	}
+	result.lastReadKey = allNoMore ? maxReadKey : result.nextKey;
+
+	// Read the resulting entries and compare against the reference
+	for (int j = 0; j < storageServerInterfaces.size(); j++) {
+		if (j == result.firstValidServer) {
+			// We are comparing servers to the reference server, so we skip comparing it to itself
+			continue;
+		}
+		ErrorOr<GetKeyValuesReply> rangeResult = keyValueFutures[j].get();
+
+		if (rangeResult.present() && !rangeResult.get().error.present()) {
+			GetKeyValuesReply current = rangeResult.get();
+			GetKeyValuesReply reference = result.referenceRangeReply.get();
+
+			if (current.data != reference.data || current.more != reference.more) {
+				// Be especially verbose if in simulation
+				if (g_network->isSimulated()) {
+					int invalidIndex = -1;
+					printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
+						   "",
+						   j,
+						   storageServerInterfaces[j].address().toString().c_str(),
+						   printable(req.begin.getKey()).c_str(),
+						   printable(req.end.getKey()).c_str());
+					for (int k = 0; k < current.data.size(); k++) {
+						printf("%d. %s => %s\n",
+							   k,
+							   printable(current.data[k].key).c_str(),
+							   printable(current.data[k].value).c_str());
+						if (invalidIndex < 0 && (k >= reference.data.size() ||
+												 current.data[k].key != reference.data[k].key ||
+												 current.data[k].value != reference.data[k].value))
+							invalidIndex = k;
+					}
+
+					printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
+						   "",
+						   result.firstValidServer,
+						   storageServerInterfaces[result.firstValidServer].address().toString().c_str(),
+						   printable(req.begin.getKey()).c_str(),
+						   printable(req.end.getKey()).c_str());
+					for (int k = 0; k < reference.data.size(); k++) {
+						printf("%d. %s => %s\n",
+							   k,
+							   printable(reference.data[k].key).c_str(),
+							   printable(reference.data[k].value).c_str());
+						if (invalidIndex < 0 && (k >= current.data.size() ||
+												 reference.data[k].key != current.data[k].key ||
+												 reference.data[k].value != current.data[k].value))
+							invalidIndex = k;
+					}
+
+					printf("\nMISMATCH AT %d\n\n", invalidIndex);
+				}
+
+				// Data for trace event
+				// The number of keys unique to the current shard
+				int currentUniques = 0;
+				// The number of keys unique to the reference shard
+				int referenceUniques = 0;
+				// The number of keys in both shards with conflicting values
+				int valueMismatches = 0;
+				// The number of keys in both shards with matching values
+				int matchingKVPairs = 0;
+				// Last unique key on the current shard
+				KeyRef currentUniqueKey;
+				// Last unique key on the reference shard
+				KeyRef referenceUniqueKey;
+				// Last value mismatch
+				KeyRef valueMismatchKey;
+
+				// Loop through both replies using a merge strategy, always advancing
+				// the minimum cursor. Keep going until we've exhausted one reply or
+				// hit the minimum across all non-exhausted replies
+				int currentI = 0;
+				int referenceI = 0;
+				while (currentI < current.data.size() && referenceI < reference.data.size()) {
+					KeyValueRef currentKV = current.data[currentI];
+					KeyValueRef referenceKV = reference.data[referenceI];
+					if (result.nextKey.present() && (currentKV.key > result.nextKey.get() || referenceKV.key > result.nextKey.get())) {
+						// We have exceeded the minimum key reached across all servers. Stop checking
+						break;
+					}
+					if (currentKV.key == referenceKV.key) {
+						if (currentKV.value == referenceKV.value)
+							matchingKVPairs++;
+						else {
+							valueMismatchKey = currentKV.key;
+							valueMismatches++;
+						}
+						currentI++;
+						referenceI++;
+					} else if (currentKV.key < referenceKV.key) {
+						currentUniqueKey = currentKV.key;
+						currentUniques++;
+						currentI++;
+					} else {
+						referenceUniqueKey = referenceKV.key;
+						referenceUniques++;
+						referenceI++;
+					}
+				}
+
+				// At this point, we've consumed all of either the current or reference implementation
+				// through result.nextKey (if set) or the end (if result.nextKey is not set). Any remaining
+				// data (through result.nextKey) in either array is unique to that server
+
+				while (referenceI < reference.data.size()
+						&& (!result.nextKey.present() || reference.data[referenceI].key <= result.nextKey.get())) {
+					referenceUniqueKey = reference.data[referenceI].key;
+					referenceUniques++;
+					referenceI++;
+				}
+				while (currentI < current.data.size()
+						&& (!result.nextKey.present() || current.data[currentI].key <= result.nextKey.get())) {
+					currentUniqueKey = current.data[currentI].key;
+					currentUniques++;
+					currentI++;
+				}
+
+				// Record the mismatches in the result
+				result.uniqueRefKeys[j] = referenceUniques;
+				result.uniqueCmpKeys[j] = currentUniques;
+				result.mismatchedValues[j] = valueMismatches;
+
+				bool isTss = (storageServerInterfaces)[j].isTss() ||
+							 (storageServerInterfaces)[result.firstValidServer].isTss();
+				bool isExpectedTSSMismatch =
+					g_network->isSimulated() &&
+					g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations && isTss;
+
+				// It's possible that the storage servers are inconsistent in KillRegion
+				// workload where a forced recovery is performed. The killed storage server
+				// in the killed region returned first with a higher version, and a later
+				// response from a different region returned with a lower version (because
+				// of the rollback of the forced recovery). In this case, we should not fail
+				// the test. So we double check both process are live.
+				bool isFailed =
+					g_network->isSimulated() &&
+					(g_simulator->getProcessByAddress((storageServerInterfaces)[j].address())
+						 ->failed ||
+					 g_simulator
+						 ->getProcessByAddress(storageServerInterfaces[result.firstValidServer].address())
+						 ->failed) &&
+					(g_simulator->getProcessByAddress((storageServerInterfaces)[j].address())
+						 ->locality.dcId() !=
+					 g_simulator
+						 ->getProcessByAddress(
+							 (storageServerInterfaces)[result.firstValidServer].address())
+						 ->locality.dcId());
+				TraceEvent(isExpectedTSSMismatch || isFailed ? SevWarn : SevError,
+						   "ConsistencyCheck_DataInconsistent")
+					.detail(format("StorageServer%d", j).c_str(), storageServerInterfaces[j].toString())
+					.detail(format("StorageServer%d", result.firstValidServer).c_str(),
+							storageServerInterfaces[result.firstValidServer].toString())
+					.detail("ShardBegin", req.begin.getKey())
+					.detail("ShardEnd", req.end.getKey())
+					.detail("VersionNumber", req.version)
+					.detail(format("Server%dUniques", j).c_str(), currentUniques)
+					.detail(format("Server%dUniqueKey", j).c_str(), currentUniqueKey)
+					.detail(format("Server%dUniques", result.firstValidServer).c_str(), referenceUniques)
+					.detail(format("Server%dUniqueKey", result.firstValidServer).c_str(),
+							referenceUniqueKey)
+					.detail("ValueMismatches", valueMismatches)
+					.detail("ValueMismatchKey", valueMismatchKey)
+					.detail("MatchingKVPairs", matchingKVPairs)
+					.detail("IsTSS",
+							storageServerInterfaces[j].isTss() ||
+									storageServerInterfaces[result.firstValidServer].isTss()
+								? "True"
+								: "False");
+
+				if (!isExpectedTSSMismatch && !isFailed) {
+					if (g_network->isSimulated()) {
+						// Only log the test failure in simuation
+						testFailure("Data inconsistent", performQuiescentChecks, success, true);
+					}
+				} else if (isFailed) {
+					// If the storage servers are not live, we should retry.
+					TraceEvent("ConsistencyCheck_StorageServerUnavailable")
+						.detail("StorageServer0", storageServerInterfaces[result.firstValidServer].id())
+						.detail("StorageServer1", storageServerInterfaces[j].id())
+						.detail("ShardBegin", printable(range.begin))
+						.detail("ShardEnd", printable(range.end));
+					*success = false;
+					return result;
+				}
+			}
+		}
+	}
+
+	return result;
+}
+
 // Checks that the data in each shard is the same on each storage server that it resides on.  Also performs some
 // sanity checks on the sizes of shards and storage servers. Returns false if there is a failure
 // TODO: Future optimization: Use streaming reads
@@ -645,9 +952,8 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 			state bool canSplit = false;
 			state Key lastSampleKey;
 			state Key lastStartSampleKey;
-			state int64_t totalReadAmount = 0;
 
-			state KeySelector begin = firstGreaterOrEqual(range.begin);
+			state KeySelectorRef begin = firstGreaterOrEqual(range.begin);
 			state Transaction onErrorTr(cx); // This transaction exists only to access onError and its backoff behavior
 
 			// Read a limited number of entries at a time, repeating until all keys in the shard have been read
@@ -656,290 +962,44 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 					state double dataConsistencyCheckBeginTime = now();
 					lastSampleKey = lastStartSampleKey;
 
-					// Get the min version of the storage servers
-					Version version = wait(getVersion(cx));
-
-					state GetKeyValuesRequest req;
-					req.begin = begin;
-					req.end = firstGreaterOrEqual(range.end);
-					req.limit = 1e4;
-					req.limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
-					req.version = version;
-					req.tags = TagSet();
-
-					// Try getting the entries in the specified range
-					state std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
-					state int j = 0;
-					TraceEvent("ConsistencyCheck_StoringGetFutures").detail("SSISize", storageServerInterfaces.size());
-					for (j = 0; j < storageServerInterfaces.size(); j++) {
-						resetReply(req);
-						if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
-							cx->getLatestCommitVersion(
-							    storageServerInterfaces[j], req.version, req.ssLatestCommitVersions);
-						}
-						keyValueFutures.push_back(
-						    storageServerInterfaces[j].getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
-					}
-
-					wait(waitForAll(keyValueFutures));
-
-					// Read the resulting entries
-					state int firstValidServer = -1;
-					totalReadAmount = 0;
-					for (j = 0; j < storageServerInterfaces.size(); j++) {
-						ErrorOr<GetKeyValuesReply> rangeResult = keyValueFutures[j].get();
-
-						// Compare the results with other storage servers
-						if (rangeResult.present() && !rangeResult.get().error.present()) {
-							state GetKeyValuesReply current = rangeResult.get();
-							TraceEvent("ConsistencyCheck_GetKeyValuesStream")
-							    .detail("DataSize", current.data.size())
-							    .detail(format("StorageServer%d", j).c_str(), storageServers[j].toString());
-							totalReadAmount += current.data.expectedSize();
-							// If we haven't encountered a valid storage server yet, then mark this as the baseline
-							// to compare against
-							if (firstValidServer == -1) {
-								TraceEvent("ConsistencyCheck_FirstValidServer").detail("Iter", j);
-								firstValidServer = j;
-								// Compare this shard against the first
-							} else {
-								GetKeyValuesReply reference = keyValueFutures[firstValidServer].get().get();
-
-								if (current.data != reference.data || current.more != reference.more) {
-									// Be especially verbose if in simulation
-									if (g_network->isSimulated()) {
-										int invalidIndex = -1;
-										printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
-										       "",
-										       j,
-										       storageServerInterfaces[j].address().toString().c_str(),
-										       printable(req.begin.getKey()).c_str(),
-										       printable(req.end.getKey()).c_str());
-										for (int k = 0; k < current.data.size(); k++) {
-											printf("%d. %s => %s\n",
-											       k,
-											       printable(current.data[k].key).c_str(),
-											       printable(current.data[k].value).c_str());
-											if (invalidIndex < 0 && (k >= reference.data.size() ||
-											                         current.data[k].key != reference.data[k].key ||
-											                         current.data[k].value != reference.data[k].value))
-												invalidIndex = k;
-										}
-
-										printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
-										       "",
-										       firstValidServer,
-										       storageServerInterfaces[firstValidServer].address().toString().c_str(),
-										       printable(req.begin.getKey()).c_str(),
-										       printable(req.end.getKey()).c_str());
-										for (int k = 0; k < reference.data.size(); k++) {
-											printf("%d. %s => %s\n",
-											       k,
-											       printable(reference.data[k].key).c_str(),
-											       printable(reference.data[k].value).c_str());
-											if (invalidIndex < 0 && (k >= current.data.size() ||
-											                         reference.data[k].key != current.data[k].key ||
-											                         reference.data[k].value != current.data[k].value))
-												invalidIndex = k;
-										}
-
-										printf("\nMISMATCH AT %d\n\n", invalidIndex);
-									}
-
-									// Data for trace event
-									// The number of keys unique to the current shard
-									int currentUniques = 0;
-									// The number of keys unique to the reference shard
-									int referenceUniques = 0;
-									// The number of keys in both shards with conflicting values
-									int valueMismatches = 0;
-									// The number of keys in both shards with matching values
-									int matchingKVPairs = 0;
-									// Last unique key on the current shard
-									KeyRef currentUniqueKey;
-									// Last unique key on the reference shard
-									KeyRef referenceUniqueKey;
-									// Last value mismatch
-									KeyRef valueMismatchKey;
-
-									// Loop through both replies using a merge strategy, always advancing
-									// the minimum cursor. Keep going until we've exhausted at least one
-									// cursor
-									int currentI = 0;
-									int referenceI = 0;
-									while (currentI < current.data.size() && referenceI < reference.data.size()) {
-										KeyValueRef currentKV = current.data[currentI];
-										KeyValueRef referenceKV = reference.data[referenceI];
-										if (currentKV.key == referenceKV.key) {
-											if (currentKV.value == referenceKV.value)
-												matchingKVPairs++;
-											else {
-												valueMismatchKey = currentKV.key;
-												valueMismatches++;
-											}
-											currentI++;
-											referenceI++;
-										} else if (currentKV.key < referenceKV.key) {
-											currentUniqueKey = currentKV.key;
-											currentUniques++;
-											currentI++;
-										} else {
-											referenceUniqueKey = referenceKV.key;
-											referenceUniques++;
-											referenceI++;
-										}
-									}
-
-									// We have exhausted at least one of the comparands. If we've exhausted
-									// exactly one of them, there are now two possibilities for the other:
-									//  1. There is no more data in the exhausted range (i.e., "more" is false). In this
-									//     case, we know each key remaining in is unique, so mark it as such
-									//  2. There is more data in the exhausted range (i.e., "more" is true). In this
-									//     case, we need to do additional reads to validate the rest of the data in
-									//     the non-exhausted range. For now, ignore these keys. We will check them
-									//     during the next iteration.
-									if (currentI >= current.data.size() && !current.more) {
-										while (referenceI < reference.data.size()) {
-											referenceUniqueKey = reference.data[referenceI].key;
-											referenceUniques++;
-											referenceI++;
-										}
-									}
-									if (referenceI >= reference.data.size() && !reference.more) {
-										while (currentI < current.data.size()) {
-											currentUniqueKey = current.data[currentI].key;
-											currentUniques++;
-											currentI++;
-										}
-									}
-
-									bool isTss = (storageServerInterfaces)[j].isTss() ||
-									             (storageServerInterfaces)[firstValidServer].isTss();
-									bool isExpectedTSSMismatch =
-									    g_network->isSimulated() &&
-									    g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations && isTss;
-
-									// It's possible that the storage servers are inconsistent in KillRegion
-									// workload where a forced recovery is performed. The killed storage server
-									// in the killed region returned first with a higher version, and a later
-									// response from a different region returned with a lower version (because
-									// of the rollback of the forced recovery). In this case, we should not fail
-									// the test. So we double check both process are live.
-									bool isFailed =
-									    g_network->isSimulated() &&
-									    (g_simulator->getProcessByAddress((storageServerInterfaces)[j].address())
-									         ->failed ||
-									     g_simulator
-									         ->getProcessByAddress(storageServerInterfaces[firstValidServer].address())
-									         ->failed) &&
-									    (g_simulator->getProcessByAddress((storageServerInterfaces)[j].address())
-									         ->locality.dcId() !=
-									     g_simulator
-									         ->getProcessByAddress(
-									             (storageServerInterfaces)[firstValidServer].address())
-									         ->locality.dcId());
-									TraceEvent(isExpectedTSSMismatch || isFailed ? SevWarn : SevError,
-									           "ConsistencyCheck_DataInconsistent")
-									    .detail(format("StorageServer%d", j).c_str(), storageServers[j].toString())
-									    .detail(format("StorageServer%d", firstValidServer).c_str(),
-									            storageServers[firstValidServer].toString())
-									    .detail("ShardBegin", req.begin.getKey())
-									    .detail("ShardEnd", req.end.getKey())
-									    .detail("VersionNumber", req.version)
-									    .detail(format("Server%dUniques", j).c_str(), currentUniques)
-									    .detail(format("Server%dUniqueKey", j).c_str(), currentUniqueKey)
-									    .detail(format("Server%dUniques", firstValidServer).c_str(), referenceUniques)
-									    .detail(format("Server%dUniqueKey", firstValidServer).c_str(),
-									            referenceUniqueKey)
-									    .detail("ValueMismatches", valueMismatches)
-									    .detail("ValueMismatchKey", valueMismatchKey)
-									    .detail("MatchingKVPairs", matchingKVPairs)
-									    .detail("IsTSS",
-									            storageServerInterfaces[j].isTss() ||
-									                    storageServerInterfaces[firstValidServer].isTss()
-									                ? "True"
-									                : "False");
-
-									if (!isExpectedTSSMismatch && !isFailed) {
-										testFailure("Data inconsistent", performQuiescentChecks, success, true);
-									} else if (isFailed) {
-										// If the storage servers are not live, we should retry.
-										TraceEvent("ConsistencyCheck_StorageServerUnavailable")
-										    .detail("StorageServer0", storageServerInterfaces[firstValidServer].id())
-										    .detail("StorageServer1", storageServerInterfaces[j].id())
-										    .detail("ShardBegin", printable(range.begin))
-										    .detail("ShardEnd", printable(range.end));
-										*success = false;
-										return Void();
-									}
-								}
-							}
-						}
-
-						// If the data is not available and we aren't relocating this shard
-						else if (!isRelocating) {
-							Error e = rangeResult.isError() ? rangeResult.getError() : rangeResult.get().error.get();
-
-							TraceEvent("ConsistencyCheck_StorageServerUnavailable")
-							    .errorUnsuppressed(e)
-							    .suppressFor(1.0)
-							    .detail("StorageServer", storageServers[j])
-							    .detail("ShardBegin", printable(range.begin))
-							    .detail("ShardEnd", printable(range.end))
-							    .detail("Address", storageServerInterfaces[j].address())
-							    .detail("UID", storageServerInterfaces[j].id())
-							    .detail("Quiesced", performQuiescentChecks)
-							    .detail("GetKeyValuesToken",
-							            storageServerInterfaces[j].getKeyValues.getEndpoint().token)
-							    .detail("IsTSS", storageServerInterfaces[j].isTss() ? "True" : "False");
-
-							if (e.code() == error_code_request_maybe_delivered) {
-								// SS in the team may be removed and we get this error.
-								*success = false;
-								return Void();
-							}
-							// All shards should be available in quiscence
-							if (performQuiescentChecks && !storageServerInterfaces[j].isTss()) {
-								testFailure(
-								    "Storage server unavailable", performQuiescentChecks, success, failureIsError);
-								return Void();
-							}
-						}
+					state RangeConsistencyResult rangeConsistencyResult = wait(checkRangeConsistency(cx, storageServerInterfaces, range, begin, isRelocating, performQuiescentChecks, failureIsError, success));
+					if (!*success) {
+						return Void();
 					}
 
 					dataConsistencyCheckTimeForThisShard += (now() - dataConsistencyCheckBeginTime);
 
-					if (firstValidServer >= 0) {
-						state VectorRef<KeyValueRef> data = keyValueFutures[firstValidServer].get().get().data;
-
+					if (rangeConsistencyResult.lastReadKey.present()) {
 						// Persist the last key of the range we just verified as the progressKey
-						if (data.size()) {
-							state Reference<ReadYourWritesTransaction> csInfoTr =
-							    makeReference<ReadYourWritesTransaction>(cx);
-							progressKey = data[data.size() - 1].key;
-							loop {
-								try {
+						state Reference<ReadYourWritesTransaction> csInfoTr =
+							makeReference<ReadYourWritesTransaction>(cx);
+						progressKey = rangeConsistencyResult.lastReadKey.get();
+						loop {
+							try {
+								csInfoTr->reset();
+								csInfoTr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+								state Optional<Value> val = wait(ConsistencyScanInfo::getInfo(csInfoTr));
+								wait(csInfoTr->commit());
+								if (val.present()) {
+									ConsistencyScanInfo consistencyScanInfo =
+										ObjectReader::fromStringRef<ConsistencyScanInfo>(val.get(),
+																						 IncludeVersion());
+									consistencyScanInfo.progress_key = progressKey;
 									csInfoTr->reset();
 									csInfoTr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
-									state Optional<Value> val = wait(ConsistencyScanInfo::getInfo(csInfoTr));
+									wait(ConsistencyScanInfo::setInfo(csInfoTr, consistencyScanInfo));
 									wait(csInfoTr->commit());
-									if (val.present()) {
-										ConsistencyScanInfo consistencyScanInfo =
-										    ObjectReader::fromStringRef<ConsistencyScanInfo>(val.get(),
-										                                                     IncludeVersion());
-										consistencyScanInfo.progress_key = progressKey;
-										csInfoTr->reset();
-										csInfoTr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-										wait(ConsistencyScanInfo::setInfo(csInfoTr, consistencyScanInfo));
-										wait(csInfoTr->commit());
-									}
-									break;
-								} catch (Error& e) {
-									wait(csInfoTr->onError(e));
 								}
+								break;
+							} catch (Error& e) {
+								wait(csInfoTr->onError(e));
 							}
 						}
+					}
+
+					if (rangeConsistencyResult.referenceRangeReply.present()) {
+						VectorRef<KeyValueRef, VecSerStrategy::String> data = rangeConsistencyResult.referenceRangeReply.get().data;
 
 						// Calculate the size of the shard, the variance of the shard size estimate, and the correct
 						// shard size estimate
@@ -997,13 +1057,13 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 					if (rateLimitForThisRound > 0) {
 						TraceEvent("ConsistencyCheck_RateLimit")
 						    .detail("RateLimitForThisRound", rateLimitForThisRound)
-						    .detail("TotalAmountRead", totalReadAmount);
+						    .detail("TotalAmountRead", rangeConsistencyResult.totalReadAmount);
 						state double rateLimiterBeforeWaitTime = now();
-						wait(rateLimiter->getAllowance(totalReadAmount));
+						wait(rateLimiter->getAllowance(rangeConsistencyResult.totalReadAmount));
 						double rateLimiterCurrentWaitTime = now() - rateLimiterBeforeWaitTime;
 						rateLimiterWaitTimeForThisShard += rateLimiterCurrentWaitTime;
 						rateLimiterCumulatedWaitTime += rateLimiterCurrentWaitTime;
-						TraceEvent("ConsistencyCheck_AmountRead").detail("TotalAmountRead", totalReadAmount);
+						TraceEvent("ConsistencyCheck_AmountRead").detail("TotalAmountRead", rangeConsistencyResult.totalReadAmount);
 						// Set ratelimit to max allowed if current round has been going on for a while
 						if (now() - rateLimiterStartTime > 1.1 * targetInterval && rateLimitForThisRound != maxRate) {
 							rateLimitForThisRound = maxRate;
@@ -1014,36 +1074,14 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 							decideToRunAtMaxRate = true;
 						}
 					}
-					bytesReadInRange += totalReadAmount;
-					bytesReadInthisRound += totalReadAmount;
+					bytesReadInRange += rangeConsistencyResult.totalReadAmount;
+					bytesReadInthisRound += rangeConsistencyResult.totalReadAmount;
 					TraceEvent("ConsistencyCheck_BytesRead")
 					    .detail("BytesReadInRange", bytesReadInRange)
 					    .detail("BytesReadInthisRound", bytesReadInthisRound);
 
-					// Advance to the next set of entries
-					Optional<KeyRef> nextBegin;
-
-					// Begin from the minimum ending key from all non-exhausted, non-error range responses.
-					// Using the minimum allows us to re-check any ranges where we couldn't
-					// validate if a key was unique because one get key value reply was exhausted
-					// before one of the other ones
-					for (const auto& rangeReply : keyValueFutures) {
-						const ErrorOr<GetKeyValuesReply>& rangeResult = rangeReply.get();
-						if (rangeResult.present() && rangeResult.get().more) {
-							VectorRef<KeyValueRef> data = rangeResult.get().data;
-							ASSERT(!data.empty());
-							KeyRef dataEnd = data[data.size() - 1].key;
-							if (nextBegin.present()) {
-								if (dataEnd < nextBegin.get()) {
-									nextBegin = dataEnd;
-								}
-							} else {
-								nextBegin = dataEnd;
-							}
-						}
-					}
-					if (nextBegin.present()) {
-						begin = firstGreaterThan(nextBegin.get());
+					if (rangeConsistencyResult.nextKey.present()) {
+						begin = firstGreaterThan(rangeConsistencyResult.nextKey.get());
 						ASSERT(begin.getKey() != allKeys.end);
 						lastStartSampleKey = lastSampleKey;
 					} else
