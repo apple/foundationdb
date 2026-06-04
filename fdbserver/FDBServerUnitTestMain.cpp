@@ -18,12 +18,21 @@
  * limitations under the License.
  */
 
+#include "fdbrpc/simulator.h"
+#include "fdbserver/core/Knobs.h"
 #include "flow/UnitTestRunner.h"
 
 #ifndef FDBSERVER_UNIT_TEST_SUITE
 #error "FDBSERVER_UNIT_TEST_SUITE must be defined"
 #endif
 
+namespace {
+Future<Void> initializeSimulation() {
+	resetServerKnobs(Randomize::True, IsSimulated::True);
+	return startUnitTestSimulator();
+}
+} // namespace
+
 int main(int argc, char** argv) {
-	return runUnitTests(argc, argv, UnitTestRunnerConfig(FDBSERVER_UNIT_TEST_SUITE));
+	return runUnitTests(argc, argv, UnitTestRunnerConfig(FDBSERVER_UNIT_TEST_SUITE, initializeSimulation));
 }
