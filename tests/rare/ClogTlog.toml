@@ -23,7 +23,6 @@ testTitle = 'ClogTlog'
     nodeCount = 30000
     transactionsPerSecond = 2500.0
     testDuration = 60.0
-    expectedRate = 0
 
     [[test.workload]]
     testName = 'ClogTlog'

@@ -169,7 +169,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		numTenants = 0;
 
 		// See https://github.com/apple/foundationdb/issues/2424
-		if (BUGGIFY) {
+		if (buggify()) {
 			enableClientBuggify();
 		}
 

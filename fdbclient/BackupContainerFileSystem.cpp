@@ -1561,7 +1561,7 @@ Future<Reference<IBackupFile>> BackupContainerFileSystem::writeRangeFile(Version
 	}
 
 	return writeFile(BackupContainerFileSystemImpl::snapshotFolderString(snapshotBeginVersion) +
-	                 format("/%d/", snapshotFileCount / (BUGGIFY ? 1 : 5000)) + fileName);
+	                 format("/%d/", snapshotFileCount / (buggify() ? 1 : 5000)) + fileName);
 }
 
 Future<Void> BackupContainerFileSystem::writePartitionListFile(Version v, std::string contents) {
@@ -2017,7 +2017,7 @@ Future<Void> testBackupContainer(std::string url,
 				writes.push_back(c->writeKeyspaceSnapshotFile(snapshots.rbegin()->second,
 				                                              snapshotBeginEndKeys.rbegin()->second,
 				                                              snapshotSizes.rbegin()->second,
-				                                              IncludeKeyRangeMap(BUGGIFY)));
+				                                              IncludeKeyRangeMap(buggify())));
 				snapshots[v] = {};
 				snapshotBeginEndKeys[v] = {};
 				snapshotSizes[v] = 0;
@@ -2440,7 +2440,7 @@ Future<Void> testBackupContainerWithMissingLogRanges(std::string url, Optional<s
 		writes.push_back(c->writeKeyspaceSnapshotFile(rangeFileNames,
 		                                              snapshotBeginEndKeys,
 		                                              deterministicRandom()->randomInt(0, 2e6),
-		                                              IncludeKeyRangeMap(BUGGIFY)));
+		                                              IncludeKeyRangeMap(buggify())));
 
 		// if the last missing log file overlaps with the current snapshot,
 		// mark snapshotsMissingLogs for current snapshot as true.
@@ -2575,7 +2575,7 @@ Future<Void> testBackupContinuousLogEndVer(std::string url, Optional<std::string
 
 	// writing snapshot file
 	writes.push_back(c->writeKeyspaceSnapshotFile(
-	    rangeFileNames, snapshotBeginEndKeys, deterministicRandom()->randomInt(0, 2e6), IncludeKeyRangeMap(BUGGIFY)));
+	    rangeFileNames, snapshotBeginEndKeys, deterministicRandom()->randomInt(0, 2e6), IncludeKeyRangeMap(buggify())));
 	co_await waitForAll(writes);
 
 	BackupFileList fileList = co_await c->dumpFileList();

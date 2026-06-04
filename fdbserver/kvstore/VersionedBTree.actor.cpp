@@ -3403,8 +3403,8 @@ public:
 		state RemappedPage cutoff(oldestRetainedVersion);
 
 		// Maximum number of remaining remap entries to keep before obeying stop command.
-		double toleranceRatio = BUGGIFY ? deterministicRandom()->randomInt(0, 10) / 100.0
-		                                : SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_TOLERANCE_RATIO;
+		double toleranceRatio = buggify() ? deterministicRandom()->randomInt(0, 10) / 100.0
+		                                  : SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_TOLERANCE_RATIO;
 		// For simplicity, we assume each entry in the remap queue corresponds to one remapped page.
 		uint64_t remapCleanupWindowEntries =
 		    static_cast<uint64_t>(self->remapCleanupWindowBytes / self->header.pageSize);
@@ -3911,9 +3911,9 @@ private:
 	};
 
 	struct SnapshotEntryLessThanVersion {
-		bool operator()(Version v, const SnapshotEntry& snapshot) { return v < snapshot.version; }
+		bool operator()(Version v, const SnapshotEntry& snapshot) const { return v < snapshot.version; }
 
-		bool operator()(const SnapshotEntry& snapshot, Version v) { return snapshot.version < v; }
+		bool operator()(const SnapshotEntry& snapshot, Version v) const { return snapshot.version < v; }
 	};
 
 	// TODO: Better data structure
@@ -5303,9 +5303,9 @@ public:
 			iterator() = default;
 			explicit(false) iterator(const MutationsT::iterator& i) : Base(i) {}
 
-			const KeyRef& key() { return (*this)->first; }
+			const KeyRef& key() const { return (*this)->first; }
 
-			RangeMutation& mutation() { return (*this)->second; }
+			RangeMutation& mutation() const { return (*this)->second; }
 		};
 
 		struct const_iterator : public MutationsT::const_iterator {
@@ -5314,9 +5314,9 @@ public:
 			explicit(false) const_iterator(const MutationsT::const_iterator& i) : Base(i) {}
 			explicit(false) const_iterator(const MutationsT::iterator& i) : Base(i) {}
 
-			const KeyRef& key() { return (*this)->first; }
+			const KeyRef& key() const { return (*this)->first; }
 
-			const RangeMutation& mutation() { return (*this)->second; }
+			const RangeMutation& mutation() const { return (*this)->second; }
 		};
 
 		// Return a T constructed in arena
@@ -5883,7 +5883,7 @@ private:
 		// Root pointer size is limited because the pager commit header is limited to smallestPhysicalBlock in
 		// size.
 		while (records.size() > 1 ||
-		       records.front().getChildPage().size() > (BUGGIFY ? 1 : BTreeCommitHeader::maxRootPointerSize) ||
+		       records.front().getChildPage().size() > (buggify() ? 1 : BTreeCommitHeader::maxRootPointerSize) ||
 		       records[0].key != dbBegin.key) {
 			CODE_PROBE(records.size() == 1, "Writing a new root because the current root pointer would be too large");
 			ASSERT(height < 0xf0);
@@ -7595,22 +7595,22 @@ public:
 	                     int64_t pageCacheBytes = 0)
 	  : m_filename(filename), prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
 		int pageSize =
-		    BUGGIFY ? deterministicRandom()->randomInt(1000, 4096 * 4) : SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE;
+		    buggify() ? deterministicRandom()->randomInt(1000, 4096 * 4) : SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE;
 		int extentSize = SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE;
 		if (pageCacheBytes <= 0) {
 			pageCacheBytes =
 			    g_network->isSimulated()
-			        ? (BUGGIFY ? deterministicRandom()->randomInt(pageSize, FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_4K)
-			                   : FLOW_KNOBS->SIM_PAGE_CACHE_4K)
+			        ? (buggify() ? deterministicRandom()->randomInt(pageSize, FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_4K)
+			                     : FLOW_KNOBS->SIM_PAGE_CACHE_4K)
 			        : FLOW_KNOBS->PAGE_CACHE_4K;
 		}
 		// Rough size of pages to keep in remap cleanup queue before being cleanup.
 		int64_t remapCleanupWindowBytes =
 		    g_network->isSimulated()
-		        ? (BUGGIFY ? (deterministicRandom()->coinflip()
-		                          ? deterministicRandom()->randomInt64(0, 100 * 1024) // small window
-		                          : deterministicRandom()->randomInt64(0, 100 * 1024 * 1024)) // large window
-		                   : 100 * 1024 * 1024) // 100M
+		        ? (buggify() ? (deterministicRandom()->coinflip()
+		                            ? deterministicRandom()->randomInt64(0, 100 * 1024) // small window
+		                            : deterministicRandom()->randomInt64(0, 100 * 1024 * 1024)) // large window
+		                     : 100 * 1024 * 1024) // 100M
 		        : SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_WINDOW_BYTES;
 
 		IPager2* pager = new DWALPager(pageSize,
@@ -7641,7 +7641,7 @@ public:
 		g_redwoodMetrics.ioLock = nullptr;
 
 		// In simulation, if the instance is being disposed of then sometimes run destructive sanity check.
-		if (g_network->isSimulated() && dispose && BUGGIFY) {
+		if (g_network->isSimulated() && dispose && buggify()) {
 			// Only proceed if the last commit is a success, but don't throw if it's not because shutdown
 			// should not throw.
 			co_await ready(self->m_lastCommit);
@@ -9786,13 +9786,13 @@ TEST_CASE("Lredwood/correctness/btree") {
 	    params.getDouble("advanceOldVersionProbability").orDefault(deterministicRandom()->random01());
 	state int64_t pageCacheBytes =
 	    params.getInt("pageCacheBytes")
-	        .orDefault(pagerMemoryOnly ? 2e9
-	                                   : (pageSize * deterministicRandom()->randomInt(1, (BUGGIFY ? 10 : 10000) + 1)));
+	        .orDefault(
+	            pagerMemoryOnly ? 2e9 : (pageSize * deterministicRandom()->randomInt(1, (buggify() ? 10 : 10000) + 1)));
 	state Version versionIncrement =
 	    params.getInt("versionIncrement").orDefault(deterministicRandom()->randomInt64(1, 1e8));
 	state int64_t remapCleanupWindowBytes =
 	    params.getInt("remapCleanupWindowBytes")
-	        .orDefault(BUGGIFY ? 0 : deterministicRandom()->randomInt64(1, 100) * 1024 * 1024);
+	        .orDefault(buggify() ? 0 : deterministicRandom()->randomInt64(1, 100) * 1024 * 1024);
 	state int concurrentExtentReads =
 	    params.getInt("concurrentExtentReads").orDefault(SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS);
 
@@ -10148,7 +10148,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 		                                         extentSize,
 		                                         file,
 		                                         pageCacheBytes,
-		                                         (BUGGIFY ? 0 : remapCleanupWindowBytes),
+		                                         (buggify() ? 0 : remapCleanupWindowBytes),
 		                                         concurrentExtentReads,
 		                                         pagerMemoryOnly),
 		                           file,

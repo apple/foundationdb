@@ -843,7 +843,7 @@ Future<Void> enableConsistencyScanInSim(Database db) {
 			if (!config.enabled &&
 			    fdbSimulationPolicyState().consistencyScanState < FDBSimConsistencyScanState::Enabled) {
 				if (!fdbSimulationPolicyState().doInjectConsistencyScanCorruption.present()) {
-					fdbSimulationPolicyState().doInjectConsistencyScanCorruption = BUGGIFY_WITH_PROB(0.1);
+					fdbSimulationPolicyState().doInjectConsistencyScanCorruption = buggify(0.1);
 					TraceEvent("ConsistencyScan_DoInjectCorruption")
 					    .detail("Val", fdbSimulationPolicyState().doInjectConsistencyScanCorruption.get());
 				}
@@ -858,7 +858,7 @@ Future<Void> enableConsistencyScanInSim(Database db) {
 					fdbSimulationPolicyState().updateConsistencyScanState(FDBSimConsistencyScanState::DisabledStart,
 					                                                      FDBSimConsistencyScanState::Enabling);
 				}
-				if (BUGGIFY_WITH_PROB(0.5)) {
+				if (buggify(0.5)) {
 					config.minStartVersion = tr->getReadVersion().get();
 				}
 			}

@@ -135,7 +135,7 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 	outSerializedLeader->set(Value());
 
 	state Future<Void> buggifyDelay =
-	    (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY) ? buggifyDelayedAsyncVar(outSerializedLeader) : Void();
+	    (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || buggify()) ? buggifyDelayedAsyncVar(outSerializedLeader) : Void();
 
 	while (!iAmLeader) {
 		state Future<Void> badCandidateTimeout;
@@ -297,7 +297,7 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 		wait(rate);
 	}
 
-	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY)
+	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || buggify())
 		wait(delay(SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * deterministicRandom()->random01()));
 
 	return Void(); // We are no longer leader

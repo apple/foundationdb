@@ -53,5 +53,4 @@ testTitle = "TxnTimeout"
     nodeCount = 30
     transactionsPerSecond = 250.0
     testDuration = 360.0
-    expectedRate = 0  # No specific rate expectation, just background activity
 

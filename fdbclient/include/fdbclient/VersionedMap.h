@@ -751,8 +751,8 @@ public:
 	std::deque<std::pair<Version, Tree>> roots;
 
 	struct rootsComparator {
-		bool operator()(const std::pair<Version, Tree>& value, const Version& key) { return (value.first < key); }
-		bool operator()(const Version& key, const std::pair<Version, Tree>& value) { return (key < value.first); }
+		bool operator()(const std::pair<Version, Tree>& value, const Version& key) const { return (value.first < key); }
+		bool operator()(const Version& key, const std::pair<Version, Tree>& value) const { return (key < value.first); }
 	};
 
 	Tree const& getRoot(Version v) const {

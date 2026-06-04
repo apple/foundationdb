@@ -217,7 +217,7 @@ Future<int> consistencyCheckReadData(UID myId,
 	req.tags = TagSet();
 
 	// buggify read limits in simulation
-	if (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01)) {
+	if (g_network->isSimulated() && buggify(0.01)) {
 		if (deterministicRandom()->coinflip()) {
 			req.limit = deterministicRandom()->randomInt(2, 10);
 		}
@@ -1115,7 +1115,7 @@ Future<Void> sometimesRandomlyClearStatsInSim(Database db, Reference<Consistency
 	auto tr = makeReference<ReadYourWritesTransaction>(db);
 	ConsistencyScanState cs;
 
-	if (BUGGIFY_WITH_PROB(0.1) && !g_simulator->speedUpSimulation) {
+	if (buggify(0.1) && !g_simulator->speedUpSimulation) {
 		TraceEvent("ConsistencyScan_RandomStatClearWaiting", memState->csId).log();
 		co_await delay(deterministicRandom()->randomInt(1, 60));
 
@@ -1245,7 +1245,7 @@ Future<bool> getKeyServers(
 	std::vector<Future<ErrorOr<GetKeyServerLocationsReply>>> keyServerLocationFutures;
 	Key begin = kr.begin;
 	Key end = kr.end;
-	int limitKeyServers = BUGGIFY ? 1 : 100;
+	int limitKeyServers = buggify() ? 1 : 100;
 	Span span(SpanContext(deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUInt64()),
 	          "WL:ConsistencyCheck"_loc);
 

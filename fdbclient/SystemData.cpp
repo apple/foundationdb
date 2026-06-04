@@ -1255,6 +1255,32 @@ WorkerBackupStatus decodeBackupProgressValue(const ValueRef& value) {
 	return status;
 }
 
+const KeyRangeRef backupPartitionMapHistoryKeys("\xff\x02/backupPartitionMap/"_sr, "\xff\x02/backupPartitionMap0"_sr);
+
+Key backupPartitionMapHistoryKeyFor(LogEpoch epoch, Version version) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(backupPartitionMapHistoryKeys.begin);
+	wr << bigEndian64(epoch) << bigEndian64(version);
+	return wr.toValue();
+}
+
+KeyRange backupPartitionMapHistoryRangeFor(LogEpoch epoch) {
+	BinaryWriter beginW(Unversioned());
+	beginW.serializeBytes(backupPartitionMapHistoryKeys.begin);
+	beginW << bigEndian64(epoch);
+	BinaryWriter endW(Unversioned());
+	endW.serializeBytes(backupPartitionMapHistoryKeys.begin);
+	endW << bigEndian64(epoch + 1);
+	return KeyRangeRef(beginW.toValue(), endW.toValue());
+}
+
+std::pair<LogEpoch, Version> decodeBackupPartitionMapHistoryKey(const KeyRef& key) {
+	BinaryReader rd(key.removePrefix(backupPartitionMapHistoryKeys.begin), Unversioned());
+	int64_t epoch, version;
+	rd >> epoch >> version;
+	return { fromBigEndian64(epoch), fromBigEndian64(version) };
+}
+
 Value encodeBackupStartedValue(const std::vector<std::pair<UID, Version>>& ids) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBackupStartValue()));
 	wr << ids;
@@ -1267,6 +1293,39 @@ std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& va
 	if (!value.empty())
 		reader >> ids;
 	return ids;
+}
+
+const KeyRef backupPartitionRequiredKey = "\xff\x02/backupPartitionRequired"_sr;
+const KeyRef backupPartitionListKey = "\xff\x02/backupPartitionList"_sr;
+
+Value backupPartitionRequiredValue(int8_t requestType) {
+	BinaryWriter wr(Unversioned());
+	wr << requestType;
+	return wr.toValue();
+}
+
+int8_t decodeBackupPartitionRequiredValue(const ValueRef& value) {
+	int8_t requestType = 0;
+	if (!value.empty()) {
+		BinaryReader reader(value, Unversioned());
+		reader >> requestType;
+	}
+	return requestType;
+}
+
+Value encodeBackupPartitionListValue(const std::vector<KeyRange>& partitions) {
+	BinaryWriter wr(IncludeVersion());
+	wr << partitions;
+	return wr.toValue();
+}
+
+std::vector<KeyRange> decodeBackupPartitionListValue(const ValueRef& value) {
+	std::vector<KeyRange> partitions;
+	if (!value.empty()) {
+		BinaryReader reader(value, IncludeVersion());
+		reader >> partitions;
+	}
+	return partitions;
 }
 
 bool mutationForKey(const MutationRef& m, const KeyRef& key) {

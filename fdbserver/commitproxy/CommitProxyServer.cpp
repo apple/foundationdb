@@ -66,7 +66,6 @@
 #include "flow/Knobs.h"
 #include "flow/Trace.h"
 #include "flow/network.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 using WriteMutationRefVar = std::variant<MutationRef, VectorRef<MutationRef>>;
 
@@ -825,7 +824,7 @@ Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	pProxyCommitData->stats.computeLatency.addMeasurement(queuingDelay);
 	pProxyCommitData->stats.commitBatchQueuingDist->sampleSeconds(queuingDelay);
 	if ((queuingDelay > (double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS / SERVER_KNOBS->VERSIONS_PER_SECOND ||
-	     (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01))) &&
+	     (g_network->isSimulated() && buggify(0.01))) &&
 	    SERVER_KNOBS->PROXY_REJECT_BATCH_QUEUED_TOO_LONG && canReject(trs)) {
 		// Disabled for the recovery transaction. otherwise, recovery can't finish and keeps doing more recoveries.
 		CODE_PROBE(true, "Reject transactions in the batch");
@@ -2211,7 +2210,7 @@ static Future<Void> readRequestServer(CommitProxyInterface proxy,
 		if (req.limit != CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT && // Always do data distribution requests
 		    (commitData->stats.keyServerLocationIn.getValue() - commitData->stats.keyServerLocationOut.getValue() >
 		         SERVER_KNOBS->KEY_LOCATION_MAX_QUEUE_SIZE ||
-		     (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.001)))) {
+		     (g_network->isSimulated() && buggify(0.001)))) {
 			++commitData->stats.keyServerLocationErrors;
 			req.reply.sendError(commit_proxy_memory_limit_exceeded());
 			TraceEvent(SevWarnAlways, "ProxyLocationRequestThresholdExceeded").suppressFor(60);

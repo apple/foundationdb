@@ -34,11 +34,24 @@ extern TraceBatch g_traceBatch;
 
 inline double P_EXPENSIVE_VALIDATION{ 0.05 };
 
+struct BuggifySection {
+	const char* file;
+	int line;
+
+	bool operator==(const BuggifySection& rhs) const noexcept { return line == rhs.line && file == rhs.file; }
+};
+
+struct BuggifySectionHash {
+	size_t operator()(const BuggifySection& section) const noexcept {
+		return std::hash<const char*>{}(section.file) ^ std::hash<int>{}(section.line);
+	}
+};
+
 #define __GENERATE_BUGGIFY_VARIABLES(TYPE, Type, type)                                                                 \
 	inline double P_##TYPE##_BUGGIFIED_SECTION_ACTIVATED{ 0.25 };                                                      \
 	inline double P_##TYPE##_BUGGIFIED_SECTION_FIRES{ 0.25 };                                                          \
 	inline double P_##TYPE##_ENABLED{ false };                                                                         \
-	inline std::unordered_map<const char*, bool> Type##_SBVars;                                                        \
+	inline std::unordered_map<BuggifySection, bool, BuggifySectionHash> Type##_SBVars;                                 \
 	inline bool is##Type##BuggifyEnabled() noexcept {                                                                  \
 		return P_##TYPE##_ENABLED;                                                                                     \
 	}                                                                                                                  \
@@ -51,14 +64,16 @@ inline double P_EXPENSIVE_VALIDATION{ 0.05 };
 	inline void clear##Type##BuggifySections() {                                                                       \
 		Type##_SBVars.clear();                                                                                         \
 	}                                                                                                                  \
-	inline bool get##Type##SBVar(const char* file, const int line, const char* combined) {                             \
-		if (Type##_SBVars.count(combined)) [[likely]] {                                                                \
-			return Type##_SBVars[combined];                                                                            \
+	inline bool get##Type##SBVar(const char* file, const int line) {                                                   \
+		const BuggifySection section{ file, line };                                                                    \
+		const auto sectionItr = Type##_SBVars.find(section);                                                           \
+		if (sectionItr != Type##_SBVars.end()) [[likely]] {                                                            \
+			return sectionItr->second;                                                                                 \
 		}                                                                                                              \
                                                                                                                        \
 		const double rand = deterministicRandom()->random01();                                                         \
 		const bool activated = rand < P_##TYPE##_BUGGIFIED_SECTION_ACTIVATED;                                          \
-		Type##_SBVars[combined] = activated;                                                                           \
+		Type##_SBVars.emplace(section, activated);                                                                     \
 		g_traceBatch.addBuggify(activated, line, file);                                                                \
 		if (g_network) [[likely]] {                                                                                    \
 			g_traceBatch.dump();                                                                                       \
@@ -73,18 +88,24 @@ __GENERATE_BUGGIFY_VARIABLES(CLIENT, Client, client)
 
 #undef __GENERATE_BUGGIFY_VARIABLES
 
-#define __BUGGIFY_TO_STRING_HELPER(param) #param
-#define __BUGGIFY_TO_STRING(param) __BUGGIFY_TO_STRING_HELPER(param)
+/* Disabled due to <source_location> not available on clang-14 on macOS 13. Use macro for a bit longer.
+inline bool buggify(double probability = P_GENERAL_BUGGIFIED_SECTION_FIRES,
+                    const std::source_location location = std::source_location::current()) {
+    return isGeneralBuggifyEnabled() && getGeneralSBVar(location.file_name(), static_cast<int>(location.line())) &&
+           deterministicRandom()->random01() < probability;
+}
+*/
 
-#define BUGGIFY_WITH_PROB(x)                                                                                           \
-	(isGeneralBuggifyEnabled() && getGeneralSBVar(__FILE__, __LINE__, __FILE__ __BUGGIFY_TO_STRING(__LINE__)) &&       \
-	 deterministicRandom()->random01() < (x))
-#define BUGGIFY BUGGIFY_WITH_PROB(P_GENERAL_BUGGIFIED_SECTION_FIRES)
+inline bool _buggify(const char* file, const int line, double probability = P_GENERAL_BUGGIFIED_SECTION_FIRES) {
+	return isGeneralBuggifyEnabled() && getGeneralSBVar(file, line) && deterministicRandom()->random01() < probability;
+}
+// buggify() macro defined at the end to avoid affecting swift namespace
+
 #define EXPENSIVE_VALIDATION (isGeneralBuggifyEnabled() && deterministicRandom()->random01() < P_EXPENSIVE_VALIDATION)
 
 #define CLIENT_BUGGIFY_WITH_PROB(x)                                                                                    \
-	(isClientBuggifyEnabled() && getClientSBVar(__FILE__, __LINE__, __FILE__ __BUGGIFY_TO_STRING(__LINE__)) &&         \
-	 deterministicRandom()->random01() < (x))
+	(isClientBuggifyEnabled() && getClientSBVar(__FILE__, __LINE__) && deterministicRandom()->random01() < (x))
+
 #define CLIENT_BUGGIFY CLIENT_BUGGIFY_WITH_PROB(P_CLIENT_BUGGIFIED_SECTION_FIRES)
 
 namespace SwiftBridging {
@@ -109,11 +130,14 @@ inline bool getGeneralSBVar(const char* file, const int line) {
 }
 
 inline bool buggify(const char* _Nonnull filename, int line) {
-	// SEE: BUGGIFY_WITH_PROB and BUGGIFY macros above.
+	// SEE: the global buggify function above.
 	return isGeneralBuggifyEnabled() && getGeneralSBVar(filename, line) &&
 	       deterministicRandom()->random01() < P_GENERAL_BUGGIFIED_SECTION_FIRES;
 }
 
 } // namespace SwiftBridging
+
+// TODO: go back to buggify() function using <source_location>, above
+#define buggify(...) _buggify(__FILE__, __LINE__ __VA_OPT__(, ) __VA_ARGS__)
 
 #endif // FLOW_BUGGIFY_H

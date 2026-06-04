@@ -20,7 +20,7 @@
 
 import Flow
 
-/// Swift equivalent for the BUGGIFY macro from flow.
+/// Swift equivalent for the buggify function from flow.
 public func BUGGIFY(file: @autoclosure () -> StaticString = #file,
                     line: @autoclosure () -> Int = #line) -> Bool {
     let file_ = file()

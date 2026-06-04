@@ -22,7 +22,6 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunRYWTransaction.h"
 #include "fdbserver/tester/workloads.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct AtomicOpsApiCorrectnessWorkload : TestWorkload {
 	static constexpr auto NAME = "AtomicOpsApiCorrectness";

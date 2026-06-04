@@ -185,7 +185,7 @@ public:
 
 	KeyRangeMap<std::pair<bool, Optional<Value>>>& getSpecialKeySpaceWriteMap() { return specialKeySpaceWriteMap; }
 	bool readYourWritesDisabled() const { return options.readYourWritesDisabled; }
-	const Optional<std::string>& getSpecialKeySpaceErrorMsg() { return specialKeySpaceErrorMsg; }
+	const Optional<std::string>& getSpecialKeySpaceErrorMsg() const { return specialKeySpaceErrorMsg; }
 	void setSpecialKeySpaceErrorMsg(const std::string& msg) {
 		if (g_network && g_network->isSimulated()) {
 			try {

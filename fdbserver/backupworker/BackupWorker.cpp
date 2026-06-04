@@ -47,12 +47,10 @@ struct VersionedMessage {
 	StringRef message;
 	VectorRef<Tag> tags;
 	Arena arena; // Keep a reference to the memory containing the message
-	Arena decryptArena; // Arena used for decrypt buffer.
 
 	VersionedMessage(LogMessageVersion v, StringRef m, const VectorRef<Tag>& t, const Arena& a)
 	  : version(v), message(m), tags(t), arena(a) {}
 	Version getVersion() const { return version.version; }
-	uint32_t getSubVersion() const { return version.sub; }
 	// Returns the estimated size of the message in bytes, assuming 6 tags.
 	size_t getEstimatedSize() const { return message.size() + TagsAndMessage::getHeaderSize(6); }
 
@@ -114,7 +112,6 @@ struct BackupData {
 	LogEpoch oldestBackupEpoch = 0; // oldest epoch that still has data on tLogs for backup to pull
 	Version minKnownCommittedVersion;
 	Version savedVersion; // Largest version saved to blob storage
-	Reference<AsyncVar<ServerDBInfo> const> db;
 	AsyncVar<Reference<LogSystemConsumer>> logSystem;
 	Database cx;
 	std::vector<VersionedMessage> messages;
@@ -268,7 +265,7 @@ struct BackupData {
 	explicit BackupData(UID id, Reference<AsyncVar<ServerDBInfo> const> db, const InitializeBackupRequest& req)
 	  : myId(id), tag(req.tag), totalTags(req.totalTags), startVersion(req.startVersion), endVersion(req.endVersion),
 	    recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch), minKnownCommittedVersion(invalidVersion),
-	    savedVersion(req.startVersion - 1), db(db), pulledVersion(0), paused(false),
+	    savedVersion(req.startVersion - 1), pulledVersion(0), paused(false),
 	    lock(new FlowLock(SERVER_KNOBS->BACKUP_WORKER_LOCK_BYTES)), cc("BackupWorker", myId.toString()) {
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True);
 

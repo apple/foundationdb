@@ -457,10 +457,23 @@ struct KeyValueRef {
 	KeyRef key;
 	ValueRef value;
 	KeyValueRef() {}
+
 	KeyValueRef(const KeyRef& key, const ValueRef& value) : key(key), value(value) {}
-	KeyValueRef(Arena& a, const KeyValueRef& copyFrom) : key(a, copyFrom.key), value(a, copyFrom.value) {}
+
+	KeyValueRef(Arena& a, const KeyRef& key, const ValueRef& value) {
+		StringRef storage = makeString(key.size() + value.size(), a);
+		uint8_t* dst = mutateString(storage);
+
+		key.copyTo(dst);
+		value.copyTo(dst + key.size());
+
+		this->key = KeyRef(storage.begin(), key.size());
+		this->value = ValueRef(storage.begin() + key.size(), value.size());
+	}
+
+	KeyValueRef(Arena& a, const KeyValueRef& copyFrom) : KeyValueRef(a, copyFrom.key, copyFrom.value) {}
+
 	bool operator==(const KeyValueRef& r) const { return key == r.key && value == r.value; }
-	bool operator!=(const KeyValueRef& r) const { return key != r.key || value != r.value; }
 
 	int expectedSize() const { return key.expectedSize() + value.expectedSize(); }
 
@@ -665,9 +678,11 @@ public:
 	bool isLastLessOrEqual() const { return orEqual && offset == 0; }
 
 	// True iff, regardless of the contents of the database, lhs must resolve to a key > rhs
-	bool isDefinitelyGreater(KeyRef const& k) { return offset >= 1 && (isFirstGreaterOrEqual() ? key > k : key >= k); }
+	bool isDefinitelyGreater(KeyRef const& k) const {
+		return offset >= 1 && (isFirstGreaterOrEqual() ? key > k : key >= k);
+	}
 	// True iff, regardless of the contents of the database, lhs must resolve to a key < rhs
-	bool isDefinitelyLess(KeyRef const& k) { return offset <= 0 && (isLastLessOrEqual() ? key < k : key <= k); }
+	bool isDefinitelyLess(KeyRef const& k) const { return offset <= 0 && (isLastLessOrEqual() ? key < k : key <= k); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {

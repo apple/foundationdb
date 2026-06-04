@@ -19,12 +19,18 @@ leak:ConnectionReaderActorState
 # cannot execute after the network stops. This covers the transaction objects
 # and all their owned state (TransactionState, WriteMap, ReadVersion actors).
 leak:ThreadSafeDatabase::createTransaction
+leak:ThreadSafeTransaction::ThreadSafeTransaction
 
 # External client libraries (loaded via MultiVersionApi) create DatabaseContext
 # objects whose cleanup is deferred via onMainThreadVoid in ~ThreadSafeDatabase.
 # When the external library's network thread stops, the deferred cleanup cannot
 # execute, leaking the DatabaseContext and its members (DDSketch, etc.).
+# These are the same Peer/connection leaks suppressed above for the main client,
+# but LSAN cannot symbolize stacks inside the external .so copies so those
+# suppressions don't match. runNetworkThread is the thread entry point for
+# external client network threads — it does not affect main client leak detection.
 leak:Database::createDatabase
+leak:runNetworkThread
 
 # MultiVersionDatabase::DatabaseState::monitorProtocolVersion() calls
 # onMainThread into the external client's network thread. If that thread

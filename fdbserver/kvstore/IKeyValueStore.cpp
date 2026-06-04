@@ -21,7 +21,6 @@
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/kvstore/IKeyValueStore.h"
 #include "flow/flow.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 IKeyValueStore* openKVStore(KeyValueStoreType storeType,
                             std::string const& filename,

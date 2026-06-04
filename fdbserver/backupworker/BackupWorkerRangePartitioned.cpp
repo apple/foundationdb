@@ -21,9 +21,7 @@
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/JsonBuilder.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/Tracing.h"
 #include "fdbserver/core/BackupPartitionMap.h"
 #include "fdbserver/core/BackupProgress.h"
 #include "fdbserver/core/Knobs.h"
@@ -74,7 +72,6 @@ struct BackupRangePartitionedData {
 	const Optional<Version> endVersion; // old epoch's end version (inclusive), or empty for current epoch
 	const LogEpoch recruitedEpoch; // current epoch whose tLogs are receiving mutations
 	const LogEpoch backupEpoch; // the epoch workers should pull mutations
-	// TODO akanksha: Update oldestBackupEpoch wherever needed.
 	LogEpoch oldestBackupEpoch = 0; // oldest epoch that still has data on tLogs for backup to pull
 	// Minimumum known committed version in StorageServers.
 	Version minKnownCommittedVersion;
@@ -86,6 +83,18 @@ struct BackupRangePartitionedData {
 	Reference<FlowLock> lock;
 	AsyncTrigger doneTrigger;
 	AsyncTrigger changedTrigger;
+	// Signals pullAsyncData that uploadData has flushed self->messages, so it can apply a new
+	// partition map. pullAsyncData resets it to false before opening the barrier; uploadData sets
+	// it to true once the flush completes.
+	AsyncVar<bool> messagesFlushedForPMM{ false };
+	// Set by pullAsyncData while waiting for previous Partition Map's mutations to flush. Tells uploadData to bypass
+	// the version-boundary trim (no more messages will arrive to unstick the last buffered version) and flush
+	// everything currently in self->messages so that new partition map can be applied and new messages can be correctly
+	// buffered under the new partition map.
+	bool flushBeforePMApply = false;
+	// Set to true when the worker is shutting down (e.g., worker_removed). Used by uploadData to exit gracefully via
+	// allMessageSaved(), letting in-flight file writes and progress commits finish first.
+	bool stopped = false;
 	Database cx;
 	std::vector<RangePartitionedVersionedMessage> messages;
 	// Key range to partition ID map, used to determine which partition a mutation belongs to based on its key.
@@ -94,7 +103,6 @@ struct BackupRangePartitionedData {
 	std::unordered_map<int, KeyRange> partitionToKeyRange;
 	// KeyRange to backup UID and partition id map needed to create log files for the right backup and partition.
 	KeyRangeMap<std::vector<std::pair<UID, int32_t>>> keyRangeToBackupAssignment;
-	// TODO akanksha: Once end to end implementation complete, check if stopped need to be added or not.
 
 	struct PerBackupInfo {
 		PerBackupInfo() = default;
@@ -113,19 +121,10 @@ struct BackupRangePartitionedData {
 		Version startVersion = invalidVersion;
 		// The next log's begin version.
 		Version nextFileBeginVersion = invalidVersion;
-		bool stopped = false;
 
-		bool isReady() const { return stopped || (container.isReady() && ranges.isReady()); }
+		bool isBackupReady() const { return container.isReady() && ranges.isReady(); }
 
-		Future<Void> waitReady() {
-			if (stopped)
-				return Void();
-			return _waitReady(this);
-		}
-
-		static Future<Void> _waitReady(PerBackupInfo* info) {
-			co_await (success(info->container) && success(info->ranges));
-		}
+		Future<Void> waitBackupReady() { co_await (success(container) && success(ranges)); }
 	};
 
 	// TODO akanksha: Add backups in this map when backup worker receives backup request.
@@ -145,7 +144,13 @@ struct BackupRangePartitionedData {
 
 	Version maxPopVersion() const { return endVersion.present() ? endVersion.get() : minKnownCommittedVersion; }
 
-	bool allMessageSaved() const { return (endVersion.present() && savedVersion >= endVersion.get()); }
+	bool allMessageSaved() const { return (endVersion.present() && savedVersion >= endVersion.get()) || stopped; }
+
+	// Tells uploadData to exit: sets stopped (read by allMessageSaved) and wakes it up via doneTrigger.
+	void stop() {
+		stopped = true;
+		doneTrigger.trigger();
+	}
 
 	// Erases messages and updates lock with memory released.
 	void eraseMessages(int num) {
@@ -222,23 +227,35 @@ struct BackupRangePartitionedData {
 		if (!logSystem.get()) {
 			return;
 		}
+		// Defer the pop in two cases, both to avoid losing mutations a future worker might still need:
+		//   1. An older epoch still has work to finish (backupEpoch > oldestBackupEpoch). Wait for that
+		//      older epoch to catch up before popping from this epoch.
+		//   2. We're shutting down (stopped) — our saved progress may not be visible to the next master
+		//      in time, so let the next worker pop after it re-reads progress safely.
+		if (backupEpoch > oldestBackupEpoch || stopped) {
+			TraceEvent("BWRangePartitionedPopDeferred", myId)
+			    .suppressFor(1.0)
+			    .detail("BackupEpoch", backupEpoch)
+			    .detail("OldestEpoch", oldestBackupEpoch)
+			    .detail("Stopped", stopped)
+			    .detail("Version", savedVersion);
+			return;
+		}
+		ASSERT_WE_THINK(backupEpoch == oldestBackupEpoch);
 		logSystem.get()->pop(savedVersion, tag);
 	}
 
-	static Future<Void> _waitAllInfoReady(BackupRangePartitionedData* self) {
+	Future<Void> waitAllBackupsReady() {
 		std::vector<Future<Void>> all;
-		for (auto it = self->backups.begin(); it != self->backups.end();) {
-			all.push_back(it->second.waitReady());
-			it++;
+		for (auto& [uid, info] : backups) {
+			all.push_back(info.waitBackupReady());
 		}
 		co_await waitForAll(all);
 	}
 
-	Future<Void> waitAllInfoReady() { return _waitAllInfoReady(this); }
-
-	bool isAllInfoReady() const {
+	bool isAllBackupsReady() const {
 		for (const auto& [uid, info] : backups) {
-			if (!info.isReady())
+			if (!info.isBackupReady())
 				return false;
 		}
 		return true;
@@ -248,8 +265,8 @@ struct BackupRangePartitionedData {
 static Future<Void> computeKeyRangeToBackupAssignment(BackupRangePartitionedData* self) {
 	self->keyRangeToBackupAssignment = KeyRangeMap<std::vector<std::pair<UID, int32_t>>>();
 
-	while (!self->isAllInfoReady()) {
-		co_await self->waitAllInfoReady();
+	while (!self->isAllBackupsReady()) {
+		co_await self->waitAllBackupsReady();
 	}
 
 	for (auto& [uid, info] : self->backups) {
@@ -283,9 +300,9 @@ static Future<Void> onBackupChanges(BackupRangePartitionedData* self,
 	bool hasNewBackup = false;
 	Version newBackupsMinVersion = std::numeric_limits<Version>::max();
 
-	// Add any new backups
+	// Add any new backups.
 	for (const auto& [uid, version] : uidVersions) {
-		if (self->backups.find(uid) == self->backups.end()) {
+		if (!self->backups.contains(uid)) {
 			self->backups.emplace(uid, BackupRangePartitionedData::PerBackupInfo(self, uid, version));
 			modified = true;
 			newBackupsMinVersion = std::min(newBackupsMinVersion, version);
@@ -294,11 +311,12 @@ static Future<Void> onBackupChanges(BackupRangePartitionedData* self,
 	}
 
 	// Remove backups that are no longer active.
-	for (auto it = self->backups.begin(); it != self->backups.end(); it++) {
-		if (activeUids.find(it->first) == activeUids.end()) {
-			it->second.stopped = true;
+	for (auto it = self->backups.begin(); it != self->backups.end();) {
+		if (!activeUids.contains(it->first)) {
 			it = self->backups.erase(it);
 			modified = true;
+		} else {
+			++it;
 		}
 	}
 
@@ -341,18 +359,15 @@ Future<Version> pullPartitionMapFromTLog(BackupRangePartitionedData* self, Parti
 			auto res = co_await race(cursor ? cursor->getMore() : Never(), logSystemChange);
 			if (res.index() == 0) {
 				break;
-			} else if (res.index() == 1) {
+			} else {
 				if (self->logSystem.get()) {
 					cursor = self->logSystem.get()->peekSingle(self->myId, self->startVersion, self->tag);
 				} else {
 					cursor = Reference<IPeekCursor>();
 				}
 				logSystemChange = self->logSystem.onChange();
-			} else {
-				UNREACHABLE();
 			}
 		}
-		co_await cursor->getMore();
 		if (!cursor->hasMessage()) {
 			continue;
 		}
@@ -362,11 +377,9 @@ Future<Version> pullPartitionMapFromTLog(BackupRangePartitionedData* self, Parti
 			Arena arena = cursor->arena();
 			ArenaReader reader(arena, message, AssumeVersion(g_network->protocolVersion()));
 			if (reader.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(reader)) {
-				cursor->nextMessage();
 				continue;
 			}
 			if (reader.protocolVersion().hasOTELSpanContext() && OTELSpanContextMessage::isNextIn(reader)) {
-				cursor->nextMessage();
 				continue;
 			}
 			bool isPartitionMap = PartitionMapMessage::isNextIn(reader);
@@ -381,7 +394,89 @@ Future<Version> pullPartitionMapFromTLog(BackupRangePartitionedData* self, Parti
 	}
 }
 
-// TODO akanksha: Test if concurrent uploads of identical content to the same path in blob storage is safe or not.
+// Persist the (epoch, version) -> PartitionMap row to SS so older epoch backup workers can read it during
+// recovery. Multiple workers may call this concurrently for the same (epoch, version) but only one succeed in writing
+// to SS.
+Future<Void> persistPartitionMapToSS(BackupRangePartitionedData* self,
+                                     Version partitionMapVersion,
+                                     PartitionMap const& partitionMap) {
+	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+	Key key = backupPartitionMapHistoryKeyFor(self->backupEpoch, partitionMapVersion);
+
+	BinaryWriter valueWriter(IncludeVersion());
+	valueWriter << partitionMap;
+	Standalone<StringRef> serialized = valueWriter.toValue();
+
+	while (true) {
+		Error err;
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			Optional<Value> existing = co_await tr->get(key);
+			if (existing.present()) {
+				co_return;
+			}
+			tr->set(key, serialized);
+			co_await tr->commit();
+			TraceEvent("BWRangePartitionedPMHistoryWritten", self->myId)
+			    .detail("Epoch", self->backupEpoch)
+			    .detail("Version", partitionMapVersion)
+			    .detail("Size", serialized.size());
+			co_return;
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr->onError(err);
+	}
+}
+
+// Reads all partition map entries persisted for `epoch` from system keys, returning them in
+// version order. Each entry is the partition map that became effective at its associated version.
+Future<PartitionMapHistory> loadPartitionMapHistoryFromSS(BackupRangePartitionedData* self, LogEpoch epoch) {
+	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+	KeyRange range = backupPartitionMapHistoryRangeFor(epoch);
+
+	while (true) {
+		Error err;
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			PartitionMapHistory history;
+			Key beginKey = range.begin;
+			while (true) {
+				RangeResult rows = co_await tr->getRange(KeyRangeRef(beginKey, range.end), CLIENT_KNOBS->TOO_MANY);
+				for (auto const& kv : rows) {
+					auto [decodedEpoch, version] = decodeBackupPartitionMapHistoryKey(kv.key);
+					ASSERT_EQ(decodedEpoch, epoch);
+
+					PartitionMap pm;
+					BinaryReader reader(kv.value, IncludeVersion());
+					reader >> pm;
+					history.emplace_back(version, std::move(pm));
+				}
+				if (!rows.more) {
+					break;
+				}
+				beginKey = keyAfter(rows.back().key);
+			}
+			TraceEvent("BWRangePartitionedMapHistoryRead", self->myId)
+			    .detail("Epoch", epoch)
+			    .detail("NumEntries", history.size());
+			co_return history;
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr->onError(err);
+	}
+}
+
+// TODO akanksha:
+// 1. Test if concurrent uploads of identical content to the same path in blob storage is safe or not.
+// 2. When folder is advanced to next version, do we upload the partition map again to that version.
 Future<Void> uploadPartitionList(BackupRangePartitionedData* self, PartitionMap partitionMap) {
 	std::vector<Future<Void>> fileFutures;
 	auto it = self->backups.begin();
@@ -406,44 +501,93 @@ Future<Void> uploadPartitionList(BackupRangePartitionedData* self, PartitionMap 
 	co_await waitForAll(fileFutures);
 }
 
-// TODO akanksha -> Need to figure out if
-// 1. For new requests -> PartitionMap in TLOG will be same for all containers
-// 2. For older epochs with different containers is PartitionMap specific to container or same for all.
-// Right now assumption is that PartitionMap will be passed by TLOG with the first message after start version for both
-// older epochs and newer epochs.
-// 3. Provide implemention for recovery where paritionmap can come any time and won't be the first message.
-Future<Void> waitAndProcessPartitionMap(BackupRangePartitionedData* self) {
-	TraceEvent("BWRangeParitionedWaitingForPartitionMap", self->myId)
-	    .detail("Tag", self->tag.toString())
-	    .detail("StartVersion", self->startVersion);
-	PartitionMap partitionMap;
+// Persists partitionMap to SS history (so that catch-up backup workers can find it during recovery) and writes the
+// partitionId_keyRange_Map file for every active backup container.
+Future<Void> persistAndUploadPartitionMap(BackupRangePartitionedData* self,
+                                          Version pmVersion,
+                                          PartitionMap const& partitionMap) {
+	co_await persistPartitionMapToSS(self, pmVersion, partitionMap);
+	co_await uploadPartitionList(self, partitionMap);
+}
 
-	Version partitionMapVersion = co_await pullPartitionMapFromTLog(self, &partitionMap);
-	self->logFolderBaseVersion = partitionMapVersion + 1;
-
-	ASSERT(partitionMap.find(self->tag) != partitionMap.end());
-	TraceEvent("BWRangeParitionedPulledPartitionMap", self->myId)
-	    .detail("Version", partitionMapVersion)
-	    .detail("NumTags", partitionMap.size())
-	    .detail("Tag", self->tag.toString())
-	    .detail("NumPartitions", partitionMap[self->tag].size());
-
+// Updates local routing state to use the new partition map.
+Future<Void> setActivePartitionMap(BackupRangePartitionedData* self,
+                                   Version pmVersion,
+                                   PartitionMap const& partitionMap) {
+	self->logFolderBaseVersion = pmVersion + 1;
+	ASSERT(partitionMap.contains(self->tag));
+	const auto& tagPartitions = partitionMap.at(self->tag);
+	ASSERT_GT(tagPartitions.size(), 0);
 	self->keyRangeToPartitionId.clear();
-	ASSERT_GT(partitionMap[self->tag].size(), 0);
-	for (auto& partition : partitionMap[self->tag]) {
+	for (const auto& partition : tagPartitions) {
 		self->keyRangeToPartitionId.insert(partition.ranges, partition.partitionId);
 	}
-
-	// Every BW uploads the partition list. Content is deterministic across workers
-	// through serializePartitionListJSON, so concurrent PUTs of identical bytes are safe.
-	co_await uploadPartitionList(self, partitionMap);
-	TraceEvent("BWRangePartitionedPartitionMapUploaded", self->myId)
-	    .detail("Version", partitionMapVersion)
-	    .detail("NumBackups", self->backups.size());
-	self->pulledVersion.set(partitionMapVersion);
-	self->savedVersion = partitionMapVersion;
-	self->pop();
 	co_await computeKeyRangeToBackupAssignment(self);
+}
+
+// TODO akanksha -> Need to figure out if
+// 1. For new requests -> PartitionMap in TLOG will be same for all containers.
+// 2. Provide implemention for recovery where partitionmap can come any time and won't be the first message.
+// 3. Handle Recovery case where backupworker needs to process multiple partition maps for same epoch at different
+// versions.
+Future<Void> processPartitionMap(BackupRangePartitionedData* self) {
+	TraceEvent("BWRangePartitionedWaitingForPartitionMap", self->myId)
+	    .detail("Tag", self->tag.toString())
+	    .detail("StartVersion", self->startVersion)
+	    .detail("BackupEpoch", self->backupEpoch)
+	    .detail("RecruitedEpoch", self->recruitedEpoch);
+
+	PartitionMap partitionMap;
+	Version partitionMapVersion;
+	PartitionMapHistory history;
+
+	if (self->backupEpoch != self->recruitedEpoch) {
+		// Old epoch worker: the partition map for our backupEpoch was persisted by the previous epoch's
+		// workers. Read it from system keys instead of pulling from TLog.
+		// TODO akanksha: Scenario 2 — handle multiple history entries for mid-stream re-partition.
+		// TODO akanksha: Handle Case 3 mentioned in the TODO above.
+		history = co_await loadPartitionMapHistoryFromSS(self, self->backupEpoch);
+		if (!history.empty()) {
+			partitionMapVersion = history[0].first;
+			partitionMap = std::move(history[0].second);
+			auto it = partitionMap.find(self->tag);
+			ASSERT(it != partitionMap.end() && !it->second.empty());
+			TraceEvent("BWRangePartitionedLoadedPartitionMap", self->myId)
+			    .detail("Epoch", self->backupEpoch)
+			    .detail("Version", partitionMapVersion)
+			    .detail("NumTags", partitionMap.size())
+			    .detail("Tag", self->tag.toString())
+			    .detail("NumPartitions", it->second.size());
+		}
+	}
+
+	if (self->backupEpoch == self->recruitedEpoch || history.empty()) {
+		// Current-epoch worker, or old epoch worker with no SS history (recovery happened before the
+		// previous epoch's persistPartitionMapToSS). Receive the partition map via TLog as the first
+		// message, then persist it so the next old epoch worker doesn't hit this case.
+		partitionMapVersion = co_await pullPartitionMapFromTLog(self, &partitionMap);
+		auto it = partitionMap.find(self->tag);
+		ASSERT(it != partitionMap.end() && !it->second.empty());
+		TraceEvent("BWRangePartitionedPulledPartitionMap", self->myId)
+		    .detail("Version", partitionMapVersion)
+		    .detail("NumTags", partitionMap.size())
+		    .detail("Tag", self->tag.toString())
+		    .detail("NumPartitions", it->second.size());
+
+		// Persist the partition map to system key so that catch-up backup workers can read it during recovery.
+		// Every BW also writes the partitionId_keyRange_Map file. Content is deterministic across workers
+		// through serializePartitionListJSON, so concurrent PUTs of identical bytes are safe.
+		co_await persistAndUploadPartitionMap(self, partitionMapVersion, partitionMap);
+		TraceEvent("BWRangePartitionedPartitionMapUploaded", self->myId)
+		    .detail("Version", partitionMapVersion)
+		    .detail("NumBackups", self->backups.size());
+
+		self->pulledVersion.set(partitionMapVersion);
+		self->savedVersion = partitionMapVersion;
+		self->pop();
+	}
+
+	co_await setActivePartitionMap(self, partitionMapVersion, partitionMap);
 }
 
 // Pulls mutations from TLog servers.
@@ -471,7 +615,7 @@ Future<Void> pullAsyncData(BackupRangePartitionedData* self) {
 				    .detail("Tag", self->tag)
 				    .detail("CursorVersion", cursor->version().version);
 				break;
-			} else if (res.index() == 1) {
+			} else {
 				if (self->logSystem.get()) {
 					// TODO akanksha: Use peekSingle as of now instead of peekLogRouter and later confirm if it works as
 					// expected.
@@ -480,8 +624,6 @@ Future<Void> pullAsyncData(BackupRangePartitionedData* self) {
 					cursor = Reference<IPeekCursor>();
 				}
 				logSystemChange = self->logSystem.onChange();
-			} else {
-				UNREACHABLE();
 			}
 		}
 
@@ -503,8 +645,68 @@ Future<Void> pullAsyncData(BackupRangePartitionedData* self) {
 
 		// Messages may be prefetched in peek here, but uncommitted messages should not be uploaded in uploadData().
 		while (cursor->hasMessage()) {
-			auto msg = RangePartitionedVersionedMessage(
-			    cursor->version(), cursor->getMessage(), cursor->getTags(), cursor->arena());
+			StringRef rawMessage = cursor->getMessage();
+			Arena msgArena = cursor->arena();
+			ArenaReader reader(msgArena, rawMessage, AssumeVersion(g_network->protocolVersion()));
+
+			// Skip metadata-only messages so they don't reach uploadData.
+			if (reader.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(reader)) {
+				cursor->nextMessage();
+				continue;
+			}
+			if (reader.protocolVersion().hasOTELSpanContext() && OTELSpanContextMessage::isNextIn(reader)) {
+				cursor->nextMessage();
+				continue;
+			}
+
+			// Mid-stream PartitionMap update (re-partition). Flush existing Partition Map's mutations, persist
+			// the new map, then swap local routing state before pulling further messages.
+			if (PartitionMapMessage::isNextIn(reader)) {
+				Version pmVersion = cursor->version().version;
+				PartitionMapMessage pmMsg;
+				reader >> pmMsg;
+				cursor->nextMessage();
+
+				// Push everything buffered into self->messages to flush them.
+				if (peekedBytes > 0) {
+					TraceEvent(SevDebugMemory, "BWRangePartitionedMemory", self->myId)
+					    .detail("Take", peekedBytes)
+					    .detail("Current", self->lock->activePermits());
+					co_await self->lock->take(TaskPriority::DefaultYield, peekedBytes);
+					self->messages.insert(self->messages.end(),
+					                      std::make_move_iterator(tmpMessages.begin()),
+					                      std::make_move_iterator(tmpMessages.end()));
+					tmpMessages.clear();
+					peekedBytes = 0;
+				}
+
+				// Wait for uploadData to flush all messages before new PartitionMap.
+				self->messagesFlushedForPMM.set(false);
+				self->flushBeforePMApply = true;
+				self->doneTrigger.trigger();
+				while (!self->messagesFlushedForPMM.get()) {
+					co_await self->messagesFlushedForPMM.onChange();
+				}
+
+				co_await persistAndUploadPartitionMap(self, pmVersion, pmMsg.partitionMap);
+				co_await setActivePartitionMap(self, pmVersion, pmMsg.partitionMap);
+
+				self->flushBeforePMApply = false;
+
+				// Advance savedVersion past the PM message so TLog can pop it.
+				if (pmVersion > self->savedVersion) {
+					self->savedVersion = pmVersion;
+					self->pop();
+				}
+				self->pulledVersion.set(std::max(self->pulledVersion.get(), pmVersion));
+
+				TraceEvent("BWRangePartitionedAppliedMidStreamPM", self->myId)
+				    .detail("Version", pmVersion)
+				    .detail("NumPartitions", pmMsg.partitionMap[self->tag].size());
+				continue;
+			}
+
+			auto msg = RangePartitionedVersionedMessage(cursor->version(), rawMessage, cursor->getTags(), msgArena);
 			tmpMessages.emplace_back(std::move(msg));
 			peekedBytes += tmpMessages.back().getEstimatedSize();
 			cursor->nextMessage();
@@ -606,8 +808,8 @@ static Future<Void> updateLogBytesWritten(BackupRangePartitionedData* self, std:
 
 Future<Void> saveMutationsToFile(BackupRangePartitionedData* self, Version lastVersionInFile, int numMsg) {
 	// Make sure all backups are ready, otherwise mutations will be lost.
-	while (!self->isAllInfoReady()) {
-		co_await self->waitAllInfoReady();
+	while (!self->isAllBackupsReady()) {
+		co_await self->waitAllBackupsReady();
 	}
 
 	std::vector<RangePartitionedLogFileInfo> activeFiles;
@@ -679,7 +881,7 @@ Future<Void> saveMutationsToFile(BackupRangePartitionedData* self, Version lastV
 			continue;
 		}
 
-		DEBUG_MUTATION("BWRangeParitionedAddMutation", message.version.version, m, self->myId)
+		DEBUG_MUTATION("BWRangePartitionedAddMutation", message.version.version, m, self->myId)
 		    .detail("KCV", self->minKnownCommittedVersion)
 		    .detail("SavedVersion", self->savedVersion);
 
@@ -706,7 +908,7 @@ Future<Void> saveMutationsToFile(BackupRangePartitionedData* self, Version lastV
 
 					int fileIdx = it->second;
 					// For ClearRange, we only need to write the full mutation once for each file.
-					if (writtenFiles.find(fileIdx) != writtenFiles.end()) {
+					if (writtenFiles.contains(fileIdx)) {
 						continue;
 					}
 					auto& lf = activeFiles[fileIdx];
@@ -732,7 +934,10 @@ Future<Void> saveMutationsToFile(BackupRangePartitionedData* self, Version lastV
 
 	std::map<UID, int64_t> bytesPerBackup;
 	for (auto& lf : activeFiles) {
-		self->backups[lf.backupUid].nextFileBeginVersion = lastVersionInFile + 1;
+		auto it = self->backups.find(lf.backupUid);
+		if (it != self->backups.end()) {
+			it->second.nextFileBeginVersion = lastVersionInFile + 1;
+		}
 		bytesPerBackup[lf.backupUid] += lf.file->size();
 	}
 
@@ -801,7 +1006,7 @@ static Future<Void> monitorBackupStartedKeyChanges(BackupRangePartitionedData* s
 					}
 				}
 
-				onBackupChanges(self, uidVersions);
+				co_await onBackupChanges(self, uidVersions);
 				Future<Void> watchFuture = tr.watch(backupStartedKey);
 				co_await tr.commit();
 				co_await watchFuture;
@@ -827,20 +1032,14 @@ Future<Void> setBackupKeys(BackupRangePartitionedData* self, std::map<UID, Versi
 
 			std::vector<Future<Optional<Version>>> prevBackupWorkerSavedVersions;
 			std::vector<BackupConfig> versionConfigs;
-			std::vector<Future<Optional<bool>>> allWorkersReady;
 			for (const auto& [uid, version] : savedLogVersions) {
 				BackupConfig config(uid);
 				versionConfigs.emplace_back(config);
 				prevBackupWorkerSavedVersions.push_back(config.latestBackupWorkerSavedVersion().get(tr));
-				allWorkersReady.push_back(config.allWorkerStarted().get(tr));
 			}
-			co_await (waitForAll(prevBackupWorkerSavedVersions) && waitForAll(allWorkersReady));
+			co_await waitForAll(prevBackupWorkerSavedVersions);
 
 			for (int i = 0; i < prevBackupWorkerSavedVersions.size(); i++) {
-				if (!allWorkersReady[i].get().present() || !allWorkersReady[i].get().get()) {
-					continue;
-				}
-
 				const Version current = savedLogVersions[versionConfigs[i].getUid()];
 				if (prevBackupWorkerSavedVersions[i].get().present()) {
 					const Version prev = prevBackupWorkerSavedVersions[i].get().get();
@@ -1003,6 +1202,12 @@ Future<Void> uploadData(BackupRangePartitionedData* self) {
 		}
 		if (self->pullFinished()) {
 			popVersion = self->endVersion.get();
+		} else if (self->flushBeforePMApply) {
+			// pullAsyncData has paused for a PartitionMap apply. No further messages will
+			// arrive at the last buffered version, so flush every queued message instead of
+			// holding the last version back for boundary alignment.
+			popVersion = self->messages.empty() ? popVersion : self->messages.back().getVersion();
+			numMsg = self->messages.size();
 		} else {
 			// make sure file is saved on version boundary
 			popVersion = lastVersion;
@@ -1026,6 +1231,11 @@ Future<Void> uploadData(BackupRangePartitionedData* self) {
 			self->eraseMessages(numMsg);
 		}
 
+		// Unblock pullAsyncData once the buffer is flushed for a pending PartitionMap apply.
+		if (self->flushBeforePMApply) {
+			self->messagesFlushedForPMM.set(true);
+		}
+
 		if (popVersion > self->savedVersion) {
 			co_await saveProgress(self, popVersion);
 			TraceEvent("BWRangePartitionedSavedProgress", self->myId)
@@ -1046,13 +1256,31 @@ Future<Void> uploadData(BackupRangePartitionedData* self) {
 	}
 }
 
+// Keeps `self->logSystem` and `self->oldestBackupEpoch` in sync with the latest ServerDBInfo.
+static Future<Void> monitorLogSystemFromDbInfo(Reference<AsyncVar<ServerDBInfo> const> db,
+                                               BackupRangePartitionedData* self) {
+	while (true) {
+		Reference<LogSystem> ls = makeLogSystemFromServerDBInfo(self->myId, db->get(), true);
+		if (ls.isValid()) {
+			self->logSystem.set(ls->makeConsumer());
+			self->oldestBackupEpoch = std::max(self->oldestBackupEpoch, ls->getOldestBackupEpoch());
+			TraceEvent("BWRangePartitionedLogSystemUpdate", self->myId)
+			    .detail("Tag", self->tag.toString())
+			    .detail("TagLocality", self->tag.locality)
+			    .detail("OldestEpoch", self->oldestBackupEpoch);
+		} else {
+			TraceEvent("BWRangePartitionedNoLogSystem", self->myId);
+		}
+		co_await db->onChange();
+	}
+}
+
 Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
                                           InitializeBackupRequest req,
                                           Reference<AsyncVar<ServerDBInfo> const> db) {
 	BackupRangePartitionedData self(interf.id(), db, req);
 	PromiseStream<Future<Void>> addActor;
 	Future<Void> error = actorCollection(addActor.getFuture());
-	Future<Void> dbInfoChange = Void();
 	Future<Void> pull;
 	Future<Void> done;
 	Error err;
@@ -1074,10 +1302,12 @@ Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
 		}
 
 		addActor.send(monitorWorkerPause(&self));
+		// Must be sent before processPartitionMap so logSystem is populated before the partition-map peek.
+		addActor.send(monitorLogSystemFromDbInfo(db, &self));
 
-		// First need to call waitAndProcessPartitionMap before starting to pull data, because we need to know the
+		// First need to call processPartitionMap before starting to pull data, because we need to know the
 		// partition assignment.
-		co_await waitAndProcessPartitionMap(&self);
+		co_await processPartitionMap(&self);
 
 		// If the worker is on an old epoch and all backups starts a version >= the endVersion
 		bool exitEarly = co_await shouldBackupWorkerExitEarly(&self);
@@ -1091,30 +1321,14 @@ Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
 		done = exitEarly ? Void() : uploadData(&self);
 
 		while (true) {
-			auto res = co_await race(dbInfoChange, done, error);
+			auto res = co_await race(done, error);
 			if (res.index() == 0) {
-				dbInfoChange = db->onChange();
-				Reference<LogSystem> ls = makeLogSystemFromServerDBInfo(self.myId, db->get(), true);
-
-				if (ls.isValid()) {
-					self.logSystem.set(ls->makeConsumer());
-					self.oldestBackupEpoch = std::max(self.oldestBackupEpoch, ls->getOldestBackupEpoch());
-					TraceEvent("BWRangePartitionedLogSystemUpdate", self.myId)
-					    .detail("Tag", self.tag.toString())
-					    .detail("TagLocality", self.tag.locality)
-					    .detail("OldestEpoch", self.oldestBackupEpoch);
-				} else {
-					TraceEvent("BWRangePartitionedNoLogSystem", self.myId);
-				}
-			} else if (res.index() == 1) {
 				TraceEvent("BWRangePartitionedDone", self.myId).detail("BackupEpoch", self.backupEpoch);
 				// Notify master so that this worker can be removed from log system, then this
 				// worker (for an old epoch's unfinished work) can safely exit.
 				co_await brokenPromiseToNever(db->get().clusterInterface.notifyBackupWorkerDone.getReply(
 				    BackupWorkerDoneRequest(self.myId, self.backupEpoch)));
 				break;
-			} else if (res.index() != 2) {
-				UNREACHABLE();
 			}
 		}
 		co_return;
@@ -1124,6 +1338,7 @@ Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
 
 	if (err.code() == error_code_worker_removed) {
 		pull = Void(); // cancels pulling
+		self.stop(); // lets uploadData finish its current upload and exit
 		try {
 			co_await done;
 		} catch (Error& shutdownErr) {

@@ -41,7 +41,6 @@ u32 sqlite3VdbeSerialGet(const unsigned char*, u32, Mem*);
 #include "template_fdb.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 #if SQLITE_THREADSAFE == 0
 #define sqlite3_mutex_enter(x)
@@ -1520,7 +1519,7 @@ void SQLiteDB::open(bool writable) {
 	int chunkSize;
 	if (!g_network->isSimulated()) {
 		chunkSize = 4096 * SERVER_KNOBS->SQLITE_CHUNK_SIZE_PAGES;
-	} else if (BUGGIFY) {
+	} else if (buggify()) {
 		chunkSize = 4096 * deterministicRandom()->randomInt(0, 100);
 	} else {
 		chunkSize = 4096 * SERVER_KNOBS->SQLITE_CHUNK_SIZE_PAGES_SIM;

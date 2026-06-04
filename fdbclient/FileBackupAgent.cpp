@@ -374,7 +374,7 @@ public:
 	static Future<std::vector<KeyRange>> getRestoreRangesOrDefault_impl(RestoreConfig* self,
 	                                                                    Reference<ReadYourWritesTransaction> tr) {
 		std::vector<KeyRange> ranges;
-		int batchSize = BUGGIFY ? 1 : CLIENT_KNOBS->RESTORE_RANGES_READ_BATCH;
+		int batchSize = buggify() ? 1 : CLIENT_KNOBS->RESTORE_RANGES_READ_BATCH;
 		Optional<KeyRange> begin;
 		Arena arena;
 		while (true) {
@@ -2372,7 +2372,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 					Key nextKey = done ? endKey : keyAfter(lastKey);
 					co_await rangeFile->writeKey(nextKey);
 
-					if (BUGGIFY) {
+					if (buggify()) {
 						co_await rangeFile->padEnd(true);
 					}
 
@@ -2402,8 +2402,8 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				outVersion = values.second;
 				// block size must be at least large enough for 3 max size keys and 2 max size values + overhead so
 				// 250k conservatively.
-				int blockSize =
-				    BUGGIFY ? deterministicRandom()->randomInt(250e3, 4e6) : CLIENT_KNOBS->BACKUP_RANGEFILE_BLOCK_SIZE;
+				int blockSize = buggify() ? deterministicRandom()->randomInt(250e3, 4e6)
+				                          : CLIENT_KNOBS->BACKUP_RANGEFILE_BLOCK_SIZE;
 				Version snapshotBeginVersion{ 0 };
 				int64_t snapshotRangeFileCount{ 0 };
 
@@ -2896,8 +2896,8 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 			std::vector<KeyRange> rangesToAdd;
 
 			// Limit number of tasks added per transaction
-			int taskBatchSize = BUGGIFY ? deterministicRandom()->randomInt(1, countShardsToDispatch + 1)
-			                            : CLIENT_KNOBS->BACKUP_DISPATCH_ADDTASK_SIZE;
+			int taskBatchSize = buggify() ? deterministicRandom()->randomInt(1, countShardsToDispatch + 1)
+			                              : CLIENT_KNOBS->BACKUP_DISPATCH_ADDTASK_SIZE;
 			int added = 0;
 
 			while (countShardsToDispatch > 0 && added < taskBatchSize && shardMap.size() > 0) {
@@ -3210,7 +3210,7 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 		// Block size must be at least large enough for 1 max size key, 1 max size value, and overhead, so
 		// conservatively 125k.
 		int blockSize =
-		    BUGGIFY ? deterministicRandom()->randomInt(125e3, 4e6) : CLIENT_KNOBS->BACKUP_LOGFILE_BLOCK_SIZE;
+		    buggify() ? deterministicRandom()->randomInt(125e3, 4e6) : CLIENT_KNOBS->BACKUP_LOGFILE_BLOCK_SIZE;
 		Reference<IBackupFile> outFile = co_await bc->writeLogFile(beginVersion, endVersion, blockSize);
 		LogFileWriter logFile(outFile, blockSize);
 
@@ -3715,7 +3715,7 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 		// of non overlapping key range files
 		std::map<Key, BackupConfig::RangeSlice> localmap;
 		Key startKey;
-		int batchSize = BUGGIFY ? 1 : 1000000;
+		int batchSize = buggify() ? 1 : 1000000;
 
 		while (true) {
 			Error err;
@@ -4279,13 +4279,19 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 				co_await (success(started) && success(taskStarted) && success(mutationLogType));
 
 				if (!mutationLogType.get().present() || mutationLogType.get().get() == MutationLogType::DEFAULT) {
-					co_return; // Skip if not using partitioned logs
+					co_return; // Skip if not using partitioned or range partitioned logs
 				}
 
 				std::vector<std::pair<UID, Version>> ids;
 				if (started.get().present()) {
 					ids = decodeBackupStartedValue(started.get().get());
 				}
+
+				// First range-partitioned backup on this cluster: ask DD to compute the partition list.
+				if (ids.empty() && mutationLogType.get().get() == MutationLogType::RANGE_PARTITIONED_LOG) {
+					tr->set(backupPartitionRequiredKey, backupPartitionRequiredValue(1));
+				}
+
 				const UID uid = config.getUid();
 				auto it = std::find_if(
 				    ids.begin(), ids.end(), [uid](const std::pair<UID, Version>& p) { return p.first == uid; });
@@ -4297,14 +4303,18 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 
 				tr->set(backupStartedKey, encodeBackupStartedValue(ids));
 
+				// Only PartitionedLog workers set BackupConfig.allWorkerStarted, so watch it for that mutation log
+				// type.
+				const bool isPartitionedLog = mutationLogType.get().get() == MutationLogType::PARTITIONED_LOG;
+
 				// The task may be restarted. Set the watch if started key has NOT been set.
-				if (!taskStarted.get().present()) {
+				if (isPartitionedLog && !taskStarted.get().present()) {
 					watchFuture = tr->watch(config.allWorkerStarted().key);
 				}
 
 				co_await keepRunning;
 				co_await tr->commit();
-				if (!taskStarted.get().present()) {
+				if (isPartitionedLog && !taskStarted.get().present()) {
 					co_await watchFuture;
 				}
 				co_return;
@@ -4968,7 +4978,7 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 			int start = 0;
 			int end = data.size();
 			int dataSizeLimit =
-			    BUGGIFY ? deterministicRandom()->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
+			    buggify() ? deterministicRandom()->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
 
 			tr->reset();
 			while (true) {
@@ -5049,7 +5059,7 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 			}
 		}
 		if (!originalFileRanges.empty()) {
-			if (BUGGIFY && restoreRanges.get().size() == 1) {
+			if (buggify() && restoreRanges.get().size() == 1) {
 				Params.originalFileRange().set(task, originalFileRanges[0]);
 			} else {
 				Params.originalFileRanges().set(task, originalFileRanges);
@@ -5350,7 +5360,7 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 		int start = 0;
 		int end = dataFiltered.size();
 		int dataSizeLimit =
-		    BUGGIFY ? deterministicRandom()->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
+		    buggify() ? deterministicRandom()->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
 
 		tr->reset();
 		while (true) {
@@ -5961,7 +5971,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// this is to guarantee commit proxy is catching up doing apply alog -> normal key
 		// with this  backupFile -> alog process
 		// If starting a new batch and the apply lag is too large then re-queue and wait
-		if (applyLag > (BUGGIFY ? 1 : CLIENT_KNOBS->CORE_VERSIONSPERSECOND * 300)) {
+		if (applyLag > (buggify() ? 1 : CLIENT_KNOBS->CORE_VERSIONSPERSECOND * 300)) {
 			// Wait a small amount of time and then re-add this same task.
 			co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
 			co_await RestoreDispatchPartitionedTaskFunc::addTask(
@@ -6203,7 +6213,7 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 		int64_t batchSize = Params.batchSize().get(task);
 
 		// If starting a new batch and the apply lag is too large then re-queue and wait
-		if (!addingToExistingBatch && applyLag > (BUGGIFY ? 1 : CLIENT_KNOBS->CORE_VERSIONSPERSECOND * 300)) {
+		if (!addingToExistingBatch && applyLag > (buggify() ? 1 : CLIENT_KNOBS->CORE_VERSIONSPERSECOND * 300)) {
 			// Wait a small amount of time and then re-add this same task.
 			co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
 			co_await RestoreDispatchTaskFunc::addTask(
@@ -6224,7 +6234,7 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 		std::string beginFile = Params.beginFile().getOrDefault(task);
 		// Get a batch of files.  We're targeting batchSize blocks being dispatched so query for batchSize files
 		// (each of which is 0 or more blocks).
-		int taskBatchSize = BUGGIFY ? 1 : CLIENT_KNOBS->RESTORE_DISPATCH_ADDTASK_SIZE;
+		int taskBatchSize = buggify() ? 1 : CLIENT_KNOBS->RESTORE_DISPATCH_ADDTASK_SIZE;
 		RestoreConfig::FileSetT::RangeResultType files = co_await restore.fileSet().getRange(
 		    tr, Optional<RestoreConfig::RestoreFile>({ beginVersion, beginFile }), {}, taskBatchSize);
 
@@ -7422,7 +7432,7 @@ public:
 		restore.unlockDBAfterRestore().set(tr, unlockDB);
 		restore.mutationLogType().set(tr, mutationLogType);
 		restore.useRangeFileRestore().set(tr, useRangeFileRestore);
-		if (BUGGIFY && restoreRanges.size() == 1) {
+		if (buggify() && restoreRanges.size() == 1) {
 			restore.restoreRange().set(tr, restoreRanges[0]);
 		} else {
 			for (auto& range : restoreRanges) {
@@ -7587,8 +7597,14 @@ public:
 	}
 
 	static Future<Void> checkAndDisableRangeBackupWorkers(Database cx) {
-		bool running = co_await runRYWTransaction(
-		    cx, [=](Reference<ReadYourWritesTransaction> tr) { return anyRangePartitionedBackupRunning(tr); });
+		bool running = co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<bool> {
+			bool r = co_await anyRangePartitionedBackupRunning(tr);
+			if (!r) {
+				// Last range-partitioned backup just finished. Ask DD to clear the partition list.
+				tr->set(backupPartitionRequiredKey, backupPartitionRequiredValue(2));
+			}
+			co_return r;
+		});
 		if (!running) {
 			co_await disableRangeBackupWorker(cx);
 		}
@@ -8809,7 +8825,7 @@ static Future<Void> writeKVs(Database cx, Standalone<VectorRef<KeyValueRef>> kvs
 }
 
 void simulateBlobFailure() {
-	if (BUGGIFY && deterministicRandom()->random01() < 0.01) { // Simulate blob failures
+	if (buggify() && deterministicRandom()->random01() < 0.01) { // Simulate blob failures
 		double i = deterministicRandom()->random01();
 		if (i < 0.5) {
 			throw http_request_failed();
