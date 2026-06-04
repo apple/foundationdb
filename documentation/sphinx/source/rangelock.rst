@@ -80,6 +80,25 @@ Get a range lock owner by uniqueId
 ``ACTOR Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID);``
 
 
+Using ``fdbcli``
+----------------
+For ad-hoc operational use — inspecting active locks, releasing a lock left behind by a failed bulkload job, taking a lock for a maintenance window, or driving a perf test — ``fdbcli`` exposes a thin wrapper around the management API:
+
+::
+
+    rangelock register <OWNER_ID> <DESCRIPTION>
+    rangelock unregister <OWNER_ID>
+    rangelock owners
+    rangelock take <BEGIN_KEY> <END_KEY> <OWNER_ID>
+    rangelock release <BEGIN_KEY> <END_KEY> <OWNER_ID>
+    rangelock release-all <OWNER_ID>
+    rangelock list [<BEGIN_KEY> <END_KEY>]
+
+Range locks only take effect when commit proxies are started with ``knob_enable_read_lock_on_range=true``. ``rangelock take`` prints an advisory notice as a reminder, but cannot probe the server-side knob — the take itself succeeds either way; the lock simply has no effect when the knob is off.
+
+The bulkload-specific commands (``bulkload addlockowner`` / ``clearlock`` / ``printlockowner``) remain available; they are a constrained subset of the above scoped to the bulkload workflow.
+
+
 Example usage
 -------------
 When submitting a bulk load task on a range, we block user write traffic to the range.
