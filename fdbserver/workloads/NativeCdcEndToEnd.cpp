@@ -72,11 +72,12 @@ struct NativeCdcEndToEndWorkload : TestWorkload {
 		drainProbability = getOption(options, "drainProbability"_sr, 0.25);
 		delayBetweenRounds = getOption(options, "delayBetweenRounds"_sr, 0.5);
 		operationTimeout = getOption(options, "operationTimeout"_sr, 120.0);
-		ASSERT(minStreamCount >= 1);
-		ASSERT(initialStreamCount >= minStreamCount);
-		ASSERT(maxStreamCount >= initialStreamCount);
-		ASSERT(keyCount >= 2);
-		ASSERT(writesPerRound >= 1 && writesPerRound <= keyCount);
+		ASSERT_GE(minStreamCount, 1);
+		ASSERT_GE(initialStreamCount, minStreamCount);
+		ASSERT_GE(maxStreamCount, initialStreamCount);
+		ASSERT_GE(keyCount, 2);
+		ASSERT_GE(writesPerRound, 1);
+		ASSERT_LE(writesPerRound, keyCount);
 	}
 
 	// RandomRangeLock can outlive this bounded CDC workload and mask its progress check.
@@ -159,16 +160,16 @@ struct NativeCdcEndToEndWorkload : TestWorkload {
 			const Version previous = stream->consumer->position().lastConsumedVersion;
 			CDCConsumeReply reply = co_await timeoutError(stream->consumer->consume(), operationTimeout);
 			if (reply.lastConsumedVersion == previous) {
-				ASSERT(now() < deadline);
+				ASSERT_LT(now(), deadline);
 				co_await delay(0.1);
 				continue;
 			}
-			ASSERT(reply.lastConsumedVersion > previous);
+			ASSERT_GT(reply.lastConsumedVersion, previous);
 			for (const auto& versioned : reply.mutations) {
-				ASSERT(versioned.version > previous);
-				ASSERT(versioned.version <= reply.lastConsumedVersion);
+				ASSERT_GT(versioned.version, previous);
+				ASSERT_LE(versioned.version, reply.lastConsumedVersion);
 				for (const auto& mutation : versioned.mutations) {
-					ASSERT(mutation.type == MutationRef::SetValue);
+					ASSERT_EQ(mutation.type, MutationRef::SetValue);
 					ASSERT(stream->keys.contains(mutation.param1));
 					const auto found =
 					    stream->expected.find(std::make_pair(Key(mutation.param1), Value(mutation.param2)));
@@ -186,7 +187,7 @@ struct NativeCdcEndToEndWorkload : TestWorkload {
 	}
 
 	Future<Void> removeStream(Database cx, int index, Version throughVersion) {
-		ASSERT(index > 0);
+		ASSERT_GT(index, 0);
 		co_await drainThrough(&streams[index], throughVersion);
 		co_await timeoutError(removeNativeCdcStreamClient(cx, streams[index].name), operationTimeout);
 		streams.erase(streams.begin() + index);

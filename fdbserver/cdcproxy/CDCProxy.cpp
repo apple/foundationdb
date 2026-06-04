@@ -199,7 +199,7 @@ Future<CDCStreamReadState> readCDCStreamState(Database cx,
 
 void clearBufferedMutations(CDCProxyData* self, Reference<CDCBufferedStream> stream) {
 	if (stream->bufferedBytes > 0) {
-		ASSERT(self->bufferedBytes >= stream->bufferedBytes);
+		ASSERT_GE(self->bufferedBytes, stream->bufferedBytes);
 		self->bufferedBytes -= stream->bufferedBytes;
 		self->bufferLock.release(stream->bufferedBytes);
 		stream->bufferedBytes = 0;
@@ -455,7 +455,7 @@ Future<Void> bufferTag(CDCProxyData* self, Reference<CDCBufferedTag> tag) {
 		while (tag->active) {
 			const int64_t peekReservation =
 			    std::min<int64_t>(SERVER_KNOBS->CDC_PROXY_BUFFER_BYTES, SERVER_KNOBS->MAXIMUM_PEEK_BYTES);
-			ASSERT(peekReservation > 0);
+			ASSERT_GT(peekReservation, 0);
 			if (self->bufferLock.available() < peekReservation) {
 				CODE_PROBE(true, "CDC proxy applies shared buffer backpressure", probe::decoration::rare);
 				self->peekCapacityContended.trigger();
@@ -804,7 +804,7 @@ Future<Void> consume(CDCProxyData* self, CDCConsumeRequest request) {
 			co_await stream->changed.onTrigger();
 		}
 		if (issuedReadDemand) {
-			ASSERT(stream->readDemand > 0);
+			ASSERT_GT(stream->readDemand, 0);
 			--stream->readDemand;
 			refreshStreamTags(self, stream);
 		}
@@ -865,12 +865,12 @@ Future<Void> acknowledge(CDCProxyData* self, CDCAckRequest request) {
 			const int64_t releasedBytes =
 			    sizeof(VersionedMutationsRef) + stream->mutations.front().mutations.expectedSize();
 			stream->bufferedBytes -= releasedBytes;
-			ASSERT(self->bufferedBytes >= releasedBytes);
+			ASSERT_GE(self->bufferedBytes, releasedBytes);
 			self->bufferedBytes -= releasedBytes;
 			self->bufferLock.release(releasedBytes);
 			stream->mutations.pop_front();
 		}
-		ASSERT(stream->bufferedBytes >= 0);
+		ASSERT_GE(stream->bufferedBytes, 0);
 		self->popAcknowledgedDataTrigger.trigger();
 		request.reply.send(Void());
 	} catch (Error& e) {
@@ -1018,15 +1018,15 @@ TEST_CASE("/NativeCDC/ProxyMutationFiltering") {
 
 	Optional<MutationRef> inRange = clipCDCMutation(MutationRef(MutationRef::SetValue, "d"_sr, "value"_sr), keys);
 	ASSERT(inRange.present());
-	ASSERT(inRange.get().param1 == "d"_sr);
+	ASSERT_EQ(inRange.get().param1, "d"_sr);
 
 	Optional<MutationRef> outOfRange = clipCDCMutation(MutationRef(MutationRef::SetValue, "z"_sr, "value"_sr), keys);
 	ASSERT(!outOfRange.present());
 
 	Optional<MutationRef> clippedClear = clipCDCMutation(MutationRef(MutationRef::ClearRange, "a"_sr, "f"_sr), keys);
 	ASSERT(clippedClear.present());
-	ASSERT(clippedClear.get().param1 == "c"_sr);
-	ASSERT(clippedClear.get().param2 == "f"_sr);
+	ASSERT_EQ(clippedClear.get().param1, "c"_sr);
+	ASSERT_EQ(clippedClear.get().param2, "f"_sr);
 
 	Optional<MutationRef> excludedClear = clipCDCMutation(MutationRef(MutationRef::ClearRange, "n"_sr, "z"_sr), keys);
 	ASSERT(!excludedClear.present());

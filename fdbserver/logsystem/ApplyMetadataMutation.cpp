@@ -58,7 +58,7 @@ void CDCRoutingTable::updateRange(CDCStreamId streamId, KeyRangeRef const& keys)
 }
 
 bool CDCRoutingTable::updateTag(CDCStreamId streamId, Version version, Tag tag) {
-	ASSERT(tag.locality == tagLocalityCDC);
+	ASSERT_EQ(tag.locality, tagLocalityCDC);
 	auto& existing = streams[streamId].tag;
 	if (!existing.present() || version >= existing.get().first) {
 		existing = std::make_pair(version, tag);
@@ -1386,14 +1386,14 @@ TEST_CASE("/NativeCDC/RoutingTable") {
 	table.setRange(2, KeyRangeRef("g"_sr, "z"_sr));
 	table.setTag(2, 100, overlappingTag);
 
-	ASSERT(table.tagsForKey("b"_sr) == std::set<Tag>{ ordersTag });
-	ASSERT(table.tagsForKey("h"_sr) == (std::set<Tag>{ ordersTag, overlappingTag }));
-	ASSERT(table.tagsForKey("x"_sr) == std::set<Tag>{ overlappingTag });
-	ASSERT(table.tagsForRange(KeyRangeRef("b"_sr, "x"_sr)) == (std::set<Tag>{ ordersTag, overlappingTag }));
+	ASSERT_EQ(table.tagsForKey("b"_sr), std::set<Tag>{ ordersTag });
+	ASSERT_EQ(table.tagsForKey("h"_sr), (std::set<Tag>{ ordersTag, overlappingTag }));
+	ASSERT_EQ(table.tagsForKey("x"_sr), std::set<Tag>{ overlappingTag });
+	ASSERT_EQ(table.tagsForRange(KeyRangeRef("b"_sr, "x"_sr)), (std::set<Tag>{ ordersTag, overlappingTag }));
 
 	table.setTag(1, 200, rotatedOrdersTag);
-	ASSERT(table.tagsForKey("b"_sr) == std::set<Tag>{ rotatedOrdersTag });
-	ASSERT(table.tagsForKey("h"_sr) == (std::set<Tag>{ rotatedOrdersTag, overlappingTag }));
+	ASSERT_EQ(table.tagsForKey("b"_sr), std::set<Tag>{ rotatedOrdersTag });
+	ASSERT_EQ(table.tagsForKey("h"_sr), (std::set<Tag>{ rotatedOrdersTag, overlappingTag }));
 
 	return Void();
 }

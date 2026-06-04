@@ -69,11 +69,11 @@ struct NativeCdcWorkload : TestWorkload {
 				RangeResult history = co_await tr.getRange(cdcTagHistoryRangeFor(streamId), 2);
 				ASSERT(keys.present());
 				ASSERT(minVersion.present());
-				ASSERT(history.size() == 1);
+				ASSERT_EQ(history.size(), 1);
 				const CDCTagHistoryEntry historyEntry = decodeCDCTagHistoryKey(history[0].key);
-				ASSERT(historyEntry.streamId == streamId);
+				ASSERT_EQ(historyEntry.streamId, streamId);
 				const Version initialMinVersion = decodeCDCMinVersionValue(minVersion.get());
-				ASSERT(historyEntry.version <= initialMinVersion);
+				ASSERT_LE(historyEntry.version, initialMinVersion);
 				co_return std::make_pair(historyEntry.tag, initialMinVersion);
 			} catch (Error& e) {
 				err = e;
@@ -140,7 +140,7 @@ struct NativeCdcWorkload : TestWorkload {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				Optional<Value> marker = co_await tr.get(cdcRetiredTagPopKeyFor(tag));
 				Optional<Value> version = co_await tr.get(cdcRetiredTagPopVersionKeyFor(tag));
-				ASSERT(marker.present() == version.present());
+				ASSERT_EQ(marker.present(), version.present());
 				co_return marker.present();
 			} catch (Error& e) {
 				err = e;
@@ -200,7 +200,7 @@ struct NativeCdcWorkload : TestWorkload {
 				RangeResult history = co_await tr.getRange(cdcTagHistoryRangeFor(streamId), CLIENT_KNOBS->TOO_MANY);
 				ASSERT(!history.empty());
 				const CDCTagHistoryEntry historyEntry = decodeCDCTagHistoryKey(history.back().key);
-				ASSERT(historyEntry.streamId == streamId);
+				ASSERT_EQ(historyEntry.streamId, streamId);
 				co_return historyEntry.tag;
 			} catch (Error& e) {
 				err = e;
@@ -306,36 +306,36 @@ struct NativeCdcWorkload : TestWorkload {
 		const CDCStreamId secondId = co_await registerNativeCdcStream(cx, secondName, keys);
 		const auto firstRoute = co_await getPersistedRoute(cx, firstId);
 		co_await appendPersistedTag(cx, secondId, firstRoute.first);
-		ASSERT((co_await getLatestPersistedTag(cx, secondId)) == firstRoute.first);
+		ASSERT_EQ(co_await getLatestPersistedTag(cx, secondId), firstRoute.first);
 
-		ASSERT(co_await registerNativeCdcStreamClient(cx, firstName, keys) == firstId);
-		ASSERT(co_await registerNativeCdcStreamClient(cx, secondName, keys) == secondId);
-		ASSERT((co_await getCDCProxy(firstId)).id() == (co_await getCDCProxy(secondId)).id());
+		ASSERT_EQ(co_await registerNativeCdcStreamClient(cx, firstName, keys), firstId);
+		ASSERT_EQ(co_await registerNativeCdcStreamClient(cx, secondName, keys), secondId);
+		ASSERT_EQ((co_await getCDCProxy(firstId)).id(), (co_await getCDCProxy(secondId)).id());
 		const Version writeVersion = co_await writeValues(cx, { { "shared/unread"_sr, "protected-by-minimum"_sr } });
 		Reference<NativeCdcConsumer> firstConsumer = co_await createNativeCdcConsumer(cx, firstName);
-		ASSERT(firstConsumer->position().streamId == firstId);
+		ASSERT_EQ(firstConsumer->position().streamId, firstId);
 		const double firstConsumeDeadline = now() + 30.0;
 		while (firstConsumer->position().lastConsumedVersion < writeVersion) {
 			const Version previous = firstConsumer->position().lastConsumedVersion;
 			CDCConsumeReply consumed = co_await timeoutError(firstConsumer->consume(), 30.0);
 			if (consumed.lastConsumedVersion == previous) {
-				ASSERT(now() < firstConsumeDeadline);
+				ASSERT_LT(now(), firstConsumeDeadline);
 				co_await delay(0.1);
 				continue;
 			}
-			ASSERT(consumed.lastConsumedVersion > previous);
+			ASSERT_GT(consumed.lastConsumedVersion, previous);
 		}
 		co_await firstConsumer->acknowledge();
 		co_await removeNativeCdcStreamClient(cx, firstName);
 		co_await waitForCDCProxyAssignmentRemoval(firstId);
 
 		Reference<NativeCdcConsumer> unreadConsumer = co_await createNativeCdcConsumer(cx, secondName);
-		ASSERT(unreadConsumer->position().streamId == secondId);
+		ASSERT_EQ(unreadConsumer->position().streamId, secondId);
 		bool foundUnread = false;
 		while (unreadConsumer->position().lastConsumedVersion < writeVersion) {
 			const Version previous = unreadConsumer->position().lastConsumedVersion;
 			CDCConsumeReply unread = co_await timeoutError(unreadConsumer->consume(), 30.0);
-			ASSERT(unread.lastConsumedVersion > previous);
+			ASSERT_GT(unread.lastConsumedVersion, previous);
 			for (const auto& versioned : unread.mutations) {
 				for (const auto& mutation : versioned.mutations) {
 					if (mutation.param1 == "shared/unread"_sr) {
@@ -359,7 +359,7 @@ struct NativeCdcWorkload : TestWorkload {
 		const KeyRange secondRange(KeyRangeRef("g"_sr, "z"_sr));
 
 		const CDCStreamId firstId = co_await registerNativeCdcStream(cx, firstName, firstRange);
-		ASSERT(co_await registerNativeCdcStream(cx, firstName, firstRange) == firstId);
+		ASSERT_EQ(co_await registerNativeCdcStream(cx, firstName, firstRange), firstId);
 
 		bool conflictingDuplicateRejected = false;
 		try {
@@ -374,27 +374,27 @@ struct NativeCdcWorkload : TestWorkload {
 		ASSERT(conflictingDuplicateRejected);
 
 		const auto firstRoute = co_await getPersistedRoute(cx, firstId);
-		ASSERT(firstRoute.first.locality == tagLocalityCDC);
+		ASSERT_EQ(firstRoute.first.locality, tagLocalityCDC);
 
 		std::vector<NativeCdcStreamInfo> streams = co_await listNativeCdcStreams(cx);
-		ASSERT(streams.size() == 1);
-		ASSERT(streams[0].name == firstName);
-		ASSERT(streams[0].streamId == firstId);
-		ASSERT(streams[0].keys == firstRange);
-		ASSERT(streams[0].minVersion == firstRoute.second);
+		ASSERT_EQ(streams.size(), 1);
+		ASSERT_EQ(streams[0].name, firstName);
+		ASSERT_EQ(streams[0].streamId, firstId);
+		ASSERT_EQ(streams[0].keys, firstRange);
+		ASSERT_EQ(streams[0].minVersion, firstRoute.second);
 
 		const Version firstConsumedThrough =
 		    co_await writeValues(cx, { { "first/acknowledged"_sr, "acknowledged"_sr } });
 		const Version firstAckMinVersion = firstConsumedThrough + 1;
-		ASSERT(co_await acknowledgeNativeCdcStream(cx, firstId, firstConsumedThrough) == firstAckMinVersion);
-		ASSERT(co_await acknowledgeNativeCdcStream(cx, firstId, firstRoute.second) == firstAckMinVersion);
+		ASSERT_EQ(co_await acknowledgeNativeCdcStream(cx, firstId, firstConsumedThrough), firstAckMinVersion);
+		ASSERT_EQ(co_await acknowledgeNativeCdcStream(cx, firstId, firstRoute.second), firstAckMinVersion);
 		streams = co_await listNativeCdcStreams(cx);
-		ASSERT(streams.size() == 1);
-		ASSERT(streams[0].minVersion == firstAckMinVersion);
+		ASSERT_EQ(streams.size(), 1);
+		ASSERT_EQ(streams[0].minVersion, firstAckMinVersion);
 
 		Optional<NativeCdcRemovedStreamInfo> removedFirst = co_await removeNativeCdcStream(cx, firstName);
 		ASSERT(removedFirst.present());
-		ASSERT((co_await getRetiredTagPopVersion(cx, firstRoute.first)) == removedFirst.get().removalVersion);
+		ASSERT_EQ(co_await getRetiredTagPopVersion(cx, firstRoute.first), removedFirst.get().removalVersion);
 		ASSERT((co_await listNativeCdcStreams(cx)).empty());
 		ASSERT(!(co_await hasPersistedRetention(cx, firstId)));
 
@@ -408,19 +408,19 @@ struct NativeCdcWorkload : TestWorkload {
 
 		const CDCStreamId secondId = co_await registerNativeCdcStream(cx, secondName, secondRange);
 		const auto secondRoute = co_await getPersistedRoute(cx, secondId);
-		ASSERT(secondId > firstId);
-		ASSERT(secondRoute.first == firstRoute.first);
+		ASSERT_GT(secondId, firstId);
+		ASSERT_EQ(secondRoute.first, firstRoute.first);
 
 		Optional<NativeCdcRemovedStreamInfo> removedSecond = co_await removeNativeCdcStream(cx, secondName);
 		ASSERT(removedSecond.present());
-		ASSERT((co_await getRetiredTagPopVersion(cx, secondRoute.first)) == removedSecond.get().removalVersion);
+		ASSERT_EQ(co_await getRetiredTagPopVersion(cx, secondRoute.first), removedSecond.get().removalVersion);
 
 		const Key liveName = "native-cdc-live"_sr;
 		const KeyRange liveRange(KeyRangeRef("live/"_sr, "live0"_sr));
 		const CDCStreamId liveStreamId = co_await registerNativeCdcStreamClient(cx, liveName, liveRange);
 		const Tag liveTag = co_await getLatestPersistedTag(cx, liveStreamId);
 		Reference<NativeCdcConsumer> liveConsumer = co_await createNativeCdcConsumer(cx, liveName);
-		ASSERT(liveConsumer->position().streamId == liveStreamId);
+		ASSERT_EQ(liveConsumer->position().streamId, liveStreamId);
 		CDCProxyInterface owner = co_await getCDCProxy(liveStreamId);
 
 		bool futureAcknowledgeRejected = false;
@@ -433,10 +433,10 @@ struct NativeCdcWorkload : TestWorkload {
 		ASSERT(futureAcknowledgeRejected);
 
 		std::vector<NativeCdcStreamInfo> listed = co_await listNativeCdcStreamsClient(cx);
-		ASSERT(listed.size() == 1);
-		ASSERT(listed[0].name == liveName);
-		ASSERT(listed[0].streamId == liveStreamId);
-		ASSERT(listed[0].keys == liveRange);
+		ASSERT_EQ(listed.size(), 1);
+		ASSERT_EQ(listed[0].name, liveName);
+		ASSERT_EQ(listed[0].streamId, liveStreamId);
+		ASSERT_EQ(listed[0].keys, liveRange);
 
 		const Version writeVersion =
 		    co_await writeValues(cx, { { "live/in"_sr, "captured"_sr }, { "other/out"_sr, "ignored"_sr } });
@@ -472,11 +472,11 @@ struct NativeCdcWorkload : TestWorkload {
 			const Version previous = liveConsumer->position().lastConsumedVersion;
 			CDCConsumeReply consumed = co_await timeoutError(liveConsumer->consume(), 30.0);
 			if (consumed.lastConsumedVersion == previous) {
-				ASSERT(now() < initialConsumeDeadline);
+				ASSERT_LT(now(), initialConsumeDeadline);
 				co_await delay(0.1);
 				continue;
 			}
-			ASSERT(consumed.lastConsumedVersion > previous);
+			ASSERT_GT(consumed.lastConsumedVersion, previous);
 			for (const auto& versioned : consumed.mutations) {
 				for (const auto& mutation : versioned.mutations) {
 					if (mutation.param1 == "live/in"_sr) {
@@ -494,8 +494,8 @@ struct NativeCdcWorkload : TestWorkload {
 		const uint64_t recoveryCount = dbInfo->get().recoveryCount;
 		co_await owner.haltForTesting.getReply(HaltCDCProxyRequest());
 		CDCProxyInterface replacement = co_await timeoutError(getReplacementCDCProxy(liveStreamId, owner.id()), 30.0);
-		ASSERT(replacement.id() != owner.id());
-		ASSERT(dbInfo->get().recoveryCount == recoveryCount);
+		ASSERT_NE(replacement.id(), owner.id());
+		ASSERT_EQ(dbInfo->get().recoveryCount, recoveryCount);
 
 		const Version afterFailureVersion =
 		    co_await writeValues(cx, { { "live/after-failure"_sr, "captured-after-failure"_sr } });
@@ -505,11 +505,11 @@ struct NativeCdcWorkload : TestWorkload {
 			const Version previous = liveConsumer->position().lastConsumedVersion;
 			CDCConsumeReply afterFailure = co_await timeoutError(liveConsumer->consume(), 30.0);
 			if (afterFailure.lastConsumedVersion == previous) {
-				ASSERT(now() < afterFailureConsumeDeadline);
+				ASSERT_LT(now(), afterFailureConsumeDeadline);
 				co_await delay(0.1);
 				continue;
 			}
-			ASSERT(afterFailure.lastConsumedVersion > previous);
+			ASSERT_GT(afterFailure.lastConsumedVersion, previous);
 			for (const auto& versioned : afterFailure.mutations) {
 				for (const auto& mutation : versioned.mutations) {
 					if (mutation.param1 == "live/after-failure"_sr) {
@@ -522,7 +522,7 @@ struct NativeCdcWorkload : TestWorkload {
 
 		const Version cursorBeforeRecovery = liveConsumer->position().lastConsumedVersion;
 		co_await liveConsumer->acknowledge();
-		ASSERT(co_await getPersistedMinVersion(cx, liveStreamId) == cursorBeforeRecovery + 1);
+		ASSERT_EQ(co_await getPersistedMinVersion(cx, liveStreamId), cursorBeforeRecovery + 1);
 
 		const int32_t recoveredResolverCount = (co_await getDatabaseConfiguration(cx)).getDesiredResolvers() + 1;
 		const UID ownerBeforeRecovery = replacement.id();
@@ -530,7 +530,7 @@ struct NativeCdcWorkload : TestWorkload {
 		co_await changeResolverCount(cx, recoveredResolverCount);
 		co_await timeoutError(waitForRecoveryAfter(recoveryBeforeChange, RecoveryState::ACCEPTING_COMMITS), 60.0);
 		CDCProxyInterface recoveredOwner = co_await getCDCProxy(liveStreamId);
-		ASSERT(recoveredOwner.id() == ownerBeforeRecovery);
+		ASSERT_EQ(recoveredOwner.id(), ownerBeforeRecovery);
 
 		const Version afterRecoveryVersion =
 		    co_await writeValues(cx, { { "live/after-recovery"_sr, "captured-after-recovery"_sr } });
@@ -543,11 +543,11 @@ struct NativeCdcWorkload : TestWorkload {
 			const Version previous = liveConsumer->position().lastConsumedVersion;
 			CDCConsumeReply afterRecovery = co_await timeoutError(liveConsumer->consume(), 30.0);
 			if (afterRecovery.lastConsumedVersion == previous) {
-				ASSERT(now() < afterRecoveryConsumeDeadline);
+				ASSERT_LT(now(), afterRecoveryConsumeDeadline);
 				co_await delay(0.1);
 				continue;
 			}
-			ASSERT(afterRecovery.lastConsumedVersion > previous);
+			ASSERT_GT(afterRecovery.lastConsumedVersion, previous);
 			for (const auto& versioned : afterRecovery.mutations) {
 				for (const auto& mutation : versioned.mutations) {
 					if (mutation.param1 == "live/after-recovery"_sr) {
@@ -559,7 +559,7 @@ struct NativeCdcWorkload : TestWorkload {
 		ASSERT(foundAfterRecoveryWrite);
 
 		co_await liveConsumer->acknowledge();
-		ASSERT(co_await getPersistedMinVersion(cx, liveStreamId) == liveConsumer->position().lastConsumedVersion + 1);
+		ASSERT_EQ(co_await getPersistedMinVersion(cx, liveStreamId), liveConsumer->position().lastConsumedVersion + 1);
 
 		if (g_network->isSimulated()) {
 			(const_cast<ClientKnobs*>(CLIENT_KNOBS))->ENABLE_NATIVE_CDC = false;
@@ -573,9 +573,9 @@ struct NativeCdcWorkload : TestWorkload {
 			ASSERT(disabledRegistrationRejected);
 
 			listed = co_await listNativeCdcStreamsClient(cx);
-			ASSERT(listed.size() == 1);
-			ASSERT(listed[0].streamId == liveStreamId);
-			ASSERT((co_await createNativeCdcConsumer(cx, liveName))->position().streamId == liveStreamId);
+			ASSERT_EQ(listed.size(), 1);
+			ASSERT_EQ(listed[0].streamId, liveStreamId);
+			ASSERT_EQ((co_await createNativeCdcConsumer(cx, liveName))->position().streamId, liveStreamId);
 			liveConsumer = resumeNativeCdcConsumer(cx, liveConsumer->position());
 
 			const int32_t disabledResolverCount = (co_await getDatabaseConfiguration(cx)).getDesiredResolvers() + 1;
@@ -593,11 +593,11 @@ struct NativeCdcWorkload : TestWorkload {
 				const Version previous = liveConsumer->position().lastConsumedVersion;
 				CDCConsumeReply afterDisable = co_await timeoutError(liveConsumer->consume(), 30.0);
 				if (afterDisable.lastConsumedVersion == previous) {
-					ASSERT(now() < afterDisableConsumeDeadline);
+					ASSERT_LT(now(), afterDisableConsumeDeadline);
 					co_await delay(0.1);
 					continue;
 				}
-				ASSERT(afterDisable.lastConsumedVersion > previous);
+				ASSERT_GT(afterDisable.lastConsumedVersion, previous);
 				for (const auto& versioned : afterDisable.mutations) {
 					for (const auto& mutation : versioned.mutations) {
 						if (mutation.param1 == "live/after-disable"_sr) {
@@ -608,8 +608,8 @@ struct NativeCdcWorkload : TestWorkload {
 			}
 			ASSERT(foundAfterDisableWrite);
 			co_await liveConsumer->acknowledge();
-			ASSERT(co_await getPersistedMinVersion(cx, liveStreamId) ==
-			       liveConsumer->position().lastConsumedVersion + 1);
+			ASSERT_EQ(co_await getPersistedMinVersion(cx, liveStreamId),
+			          liveConsumer->position().lastConsumedVersion + 1);
 		}
 
 		Future<CDCConsumeReply> pendingConsume = recoveredOwner.consume.getReply(

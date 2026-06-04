@@ -90,7 +90,7 @@ void validateNativeCdcStream(KeyRef const& name, KeyRangeRef const& keys) {
 
 Future<Optional<UID>> getNativeCdcProxyAssignment(Transaction* tr, CDCStreamId streamId) {
 	RangeResult assignments = co_await tr->getRange(cdcProxyRangeFor(streamId), 2);
-	ASSERT(assignments.size() <= 1);
+	ASSERT_LE(assignments.size(), 1);
 	if (assignments.empty()) {
 		co_return Optional<UID>();
 	}
@@ -752,23 +752,23 @@ Future<Void> NativeCdcConsumer::acknowledge() {
 TEST_CASE("/NativeCDC/LifecycleAllocation") {
 	NativeCdcIdentifierAllocator allocator;
 	auto [initialId, initialTag] = allocator.allocate();
-	ASSERT(initialId == 1);
-	ASSERT(initialTag == Tag(tagLocalityCDC, 0));
+	ASSERT_EQ(initialId, 1);
+	ASSERT_EQ(initialTag, Tag(tagLocalityCDC, 0));
 
 	allocator.observeStreamId(9);
 	allocator.observeTag(initialTag);
 	allocator.observeTag(Tag(tagLocalityCDC, 2));
 	auto [nextId, nextTag] = allocator.allocate();
-	ASSERT(nextId == 10);
-	ASSERT(nextTag == Tag(tagLocalityCDC, 1));
+	ASSERT_EQ(nextId, 10);
+	ASSERT_EQ(nextTag, Tag(tagLocalityCDC, 1));
 
 	NativeCdcIdentifierAllocator fullPoolAllocator;
 	for (uint32_t tagId = 0; tagId < static_cast<uint32_t>(CLIENT_KNOBS->NATIVE_CDC_TAG_COUNT); ++tagId) {
 		fullPoolAllocator.observeTag(Tag(tagLocalityCDC, static_cast<uint16_t>(tagId)));
 	}
 	auto [sharedId, sharedTag] = fullPoolAllocator.allocate();
-	ASSERT(sharedId == 1);
-	ASSERT(sharedTag == Tag(tagLocalityCDC, 0));
+	ASSERT_EQ(sharedId, 1);
+	ASSERT_EQ(sharedTag, Tag(tagLocalityCDC, 0));
 
 	return Void();
 }

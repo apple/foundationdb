@@ -1911,38 +1911,38 @@ TEST_CASE("/SystemData/NativeCDC") {
 	const Tag tag(tagLocalityCDC, 9);
 	const UID proxyId(1, 2);
 
-	ASSERT(decodeCDCStreamNameKey(cdcStreamNameKeyFor(name)) == name);
-	ASSERT(decodeCDCStreamNameValue(cdcStreamNameValue(streamId)) == streamId);
-	ASSERT(decodeCDCMaxStreamIdValue(cdcMaxStreamIdValue(streamId)) == streamId);
-	ASSERT(decodeCDCStreamKey(cdcStreamKeyFor(streamId)) == streamId);
-	ASSERT(decodeCDCStreamKeysValue(cdcStreamKeysValue(keys)) == keys);
-	ASSERT(decodeCDCMinVersionKey(cdcMinVersionKeyFor(streamId)) == streamId);
-	ASSERT(decodeCDCMinVersionValue(cdcMinVersionValue(minVersion)) == minVersion);
+	ASSERT_EQ(decodeCDCStreamNameKey(cdcStreamNameKeyFor(name)), name);
+	ASSERT_EQ(decodeCDCStreamNameValue(cdcStreamNameValue(streamId)), streamId);
+	ASSERT_EQ(decodeCDCMaxStreamIdValue(cdcMaxStreamIdValue(streamId)), streamId);
+	ASSERT_EQ(decodeCDCStreamKey(cdcStreamKeyFor(streamId)), streamId);
+	ASSERT_EQ(decodeCDCStreamKeysValue(cdcStreamKeysValue(keys)), keys);
+	ASSERT_EQ(decodeCDCMinVersionKey(cdcMinVersionKeyFor(streamId)), streamId);
+	ASSERT_EQ(decodeCDCMinVersionValue(cdcMinVersionValue(minVersion)), minVersion);
 	ASSERT(nonMetadataSystemKeys.contains(cdcMinVersionKeyFor(streamId)));
-	ASSERT(cdcVersionstampedMinVersionValue().size() == sizeof(Version) + sizeof(uint16_t) + sizeof(int32_t));
-	ASSERT(decodeCDCRetiredTagPopKey(cdcRetiredTagPopKeyFor(tag)) == tag);
+	ASSERT_EQ(cdcVersionstampedMinVersionValue().size(), sizeof(Version) + sizeof(uint16_t) + sizeof(int32_t));
+	ASSERT_EQ(decodeCDCRetiredTagPopKey(cdcRetiredTagPopKeyFor(tag)), tag);
 	ASSERT(cdcRetiredTagPopKeys.contains(cdcRetiredTagPopKeyFor(tag)));
-	ASSERT(decodeCDCRetiredTagPopVersionKey(cdcRetiredTagPopVersionKeyFor(tag)) == tag);
+	ASSERT_EQ(decodeCDCRetiredTagPopVersionKey(cdcRetiredTagPopVersionKeyFor(tag)), tag);
 	ASSERT(cdcRetiredTagPopVersionKeys.contains(cdcRetiredTagPopVersionKeyFor(tag)));
 	ASSERT(nonMetadataSystemKeys.contains(cdcRetiredTagPopVersionKeyFor(tag)));
 
 	const Key tagHistoryKey = cdcTagHistoryKeyFor(streamId, minVersion, tag);
 	const CDCTagHistoryEntry decodedTagHistory = decodeCDCTagHistoryKey(tagHistoryKey);
-	ASSERT(decodedTagHistory.streamId == streamId);
-	ASSERT(decodedTagHistory.version == minVersion);
-	ASSERT(decodedTagHistory.tag == tag);
+	ASSERT_EQ(decodedTagHistory.streamId, streamId);
+	ASSERT_EQ(decodedTagHistory.version, minVersion);
+	ASSERT_EQ(decodedTagHistory.tag, tag);
 	ASSERT(cdcTagHistoryRangeFor(streamId).contains(tagHistoryKey));
 
 	const Value serializedTagHistory = ObjectWriter::toValue(decodedTagHistory, Unversioned());
 	const CDCTagHistoryEntry deserializedTagHistory =
 	    ObjectReader::fromStringRef<CDCTagHistoryEntry>(serializedTagHistory, Unversioned());
-	ASSERT(deserializedTagHistory.streamId == streamId);
-	ASSERT(deserializedTagHistory.version == minVersion);
-	ASSERT(deserializedTagHistory.tag == tag);
+	ASSERT_EQ(deserializedTagHistory.streamId, streamId);
+	ASSERT_EQ(deserializedTagHistory.version, minVersion);
+	ASSERT_EQ(deserializedTagHistory.tag, tag);
 
 	const auto [proxyStreamId, decodedProxyId] = decodeCDCProxyKey(cdcProxyKeyFor(streamId, proxyId));
-	ASSERT(proxyStreamId == streamId);
-	ASSERT(decodedProxyId == proxyId);
+	ASSERT_EQ(proxyStreamId, streamId);
+	ASSERT_EQ(decodedProxyId, proxyId);
 	ASSERT(cdcProxyRangeFor(streamId).contains(cdcProxyKeyFor(streamId, proxyId)));
 
 	return Void();
