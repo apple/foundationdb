@@ -7397,7 +7397,9 @@ public:
 			oldRestore.clear(tr);
 		}
 
-		if (!onlyApplyMutationLogs) {
+		// Bulkload restore (useRangeFileRestore=false) overwrites each shard via the range-lock
+		// mechanism in DD, so a non-empty destination is expected and required — skip the precheck.
+		if (!onlyApplyMutationLogs && useRangeFileRestore) {
 			int index{ 0 };
 			for (index = 0; index < restoreRanges.size(); index++) {
 				KeyRange restoreIntoRange = KeyRangeRef(restoreRanges[index].begin, restoreRanges[index].end)
