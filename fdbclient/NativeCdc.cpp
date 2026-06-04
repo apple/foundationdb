@@ -20,7 +20,6 @@
 
 #include <algorithm>
 #include <limits>
-#include <map>
 #include <set>
 #include <unordered_map>
 #include <utility>
@@ -135,7 +134,7 @@ Future<Optional<UID>> getNativeCdcProxyAssignmentForTag(Transaction* tr, Tag tar
 		begin = keyAfter(streams.back().key);
 	}
 
-	std::map<CDCStreamId, Tag> currentTags;
+	std::unordered_map<CDCStreamId, Tag> currentTags;
 	begin = cdcTagHistoryKeys.begin;
 	while (begin < cdcTagHistoryKeys.end) {
 		RangeResult histories =
@@ -190,7 +189,7 @@ Future<Void> observeNativeCdcMetadata(Transaction* tr, NativeCdcIdentifierAlloca
 		begin = keyAfter(streams.back().key);
 	}
 
-	std::map<CDCStreamId, Tag> currentTags;
+	std::unordered_map<CDCStreamId, Tag> currentTags;
 	begin = cdcTagHistoryKeys.begin;
 	while (begin < cdcTagHistoryKeys.end) {
 		RangeResult histories =

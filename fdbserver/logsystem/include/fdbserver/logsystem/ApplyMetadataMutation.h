@@ -63,7 +63,7 @@ class CDCRoutingTable : NonCopyable {
 		Optional<std::pair<Version, Tag>> tag;
 	};
 
-	std::map<CDCStreamId, StreamState> streams;
+	std::unordered_map<CDCStreamId, StreamState> streams;
 	KeyRangeMap<std::set<Tag>> tagsByRange;
 
 	void updateRange(CDCStreamId streamId, KeyRangeRef const& keys);

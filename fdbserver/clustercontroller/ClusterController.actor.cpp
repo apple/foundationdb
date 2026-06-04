@@ -24,6 +24,7 @@
 #include <memory>
 #include <set>
 #include <tuple>
+#include <unordered_map>
 #include <vector>
 
 #include "fdbclient/ClientBooleanParams.h"
@@ -2152,7 +2153,7 @@ Future<Void> monitorCDCProxyAssignments(ClusterControllerData::DBInfo* db) {
 				Future<Void> endpointChangeFuture = db->clientInfo->onChange();
 				std::map<CDCStreamId, UID> streamToCDCProxyId;
 				const std::vector<CDCProxyInterface> availableProxies = db->clientInfo->get().cdcProxies;
-				std::map<UID, UID> replacementByFailedProxy;
+				std::unordered_map<UID, UID> replacementByFailedProxy;
 				size_t replacementIndex = 0;
 				bool repairedAssignment = false;
 				Key begin = cdcProxyKeys.begin;

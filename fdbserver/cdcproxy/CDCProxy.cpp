@@ -21,8 +21,8 @@
 #include <algorithm>
 #include <deque>
 #include <limits>
-#include <map>
 #include <set>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -100,8 +100,8 @@ struct CDCProxyData {
 	Database cx;
 	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
 	Reference<AsyncVar<Reference<LogSystemConsumer>>> logSystem;
-	std::map<CDCStreamId, Reference<CDCBufferedStream>> streams;
-	std::map<Tag, Reference<CDCBufferedTag>> tags;
+	std::unordered_map<CDCStreamId, Reference<CDCBufferedStream>> streams;
+	std::unordered_map<Tag, Reference<CDCBufferedTag>> tags;
 	AsyncTrigger popAcknowledgedDataTrigger;
 	AsyncTrigger peekCapacityContended;
 	FlowLock bufferLock;
@@ -378,10 +378,10 @@ void markPoppedTagStreamsTooOld(CDCProxyData* self, Reference<CDCBufferedTag> ta
 	}
 }
 
-std::map<CDCStreamId, CDCBufferedBatch> bufferMessages(CDCProxyData* self,
-                                                       Reference<CDCBufferedTag> tag,
-                                                       Reference<IReplayPeekCursor> cursor) {
-	std::map<CDCStreamId, CDCBufferedBatch> batches;
+std::unordered_map<CDCStreamId, CDCBufferedBatch> bufferMessages(CDCProxyData* self,
+                                                                 Reference<CDCBufferedTag> tag,
+                                                                 Reference<IReplayPeekCursor> cursor) {
+	std::unordered_map<CDCStreamId, CDCBufferedBatch> batches;
 	while (cursor->hasMessage()) {
 		const Version messageVersion = cursor->version().version;
 		ArenaReader& reader = *cursor->reader();
@@ -491,7 +491,7 @@ Future<Void> bufferTag(CDCProxyData* self, Reference<CDCBufferedTag> tag) {
 				break;
 			}
 
-			std::map<CDCStreamId, CDCBufferedBatch> batches = bufferMessages(self, tag, cursor);
+			std::unordered_map<CDCStreamId, CDCBufferedBatch> batches = bufferMessages(self, tag, cursor);
 			int64_t bufferedBytes = 0;
 			for (const auto& [streamId, batch] : batches) {
 				bufferedBytes += batch.bufferedBytes;
@@ -586,7 +586,7 @@ Future<Void> initializeStream(CDCProxyData* self, Reference<CDCBufferedStream> s
 
 // TODO: Persist per-tag safe-pop state or coordinate pops centrally instead of rebuilding minima from all stream
 // history on every acknowledgement.
-Future<std::map<Tag, Version>> readSafePopVersions(Database cx) {
+Future<std::unordered_map<Tag, Version>> readSafePopVersions(Database cx) {
 	Transaction tr(cx);
 	while (true) {
 		Error err;
@@ -594,7 +594,7 @@ Future<std::map<Tag, Version>> readSafePopVersions(Database cx) {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
-			std::map<CDCStreamId, Version> minVersions;
+			std::unordered_map<CDCStreamId, Version> minVersions;
 			Key begin = cdcMinVersionKeys.begin;
 			while (begin < cdcMinVersionKeys.end) {
 				RangeResult minima =
@@ -608,7 +608,7 @@ Future<std::map<Tag, Version>> readSafePopVersions(Database cx) {
 				begin = keyAfter(minima.back().key);
 			}
 
-			std::map<Tag, Version> safePopVersions;
+			std::unordered_map<Tag, Version> safePopVersions;
 			begin = cdcTagHistoryKeys.begin;
 			while (begin < cdcTagHistoryKeys.end) {
 				RangeResult histories =
@@ -639,7 +639,7 @@ Future<std::map<Tag, Version>> readSafePopVersions(Database cx) {
 	}
 }
 
-Future<std::map<Tag, Version>> readRetiredTagPopVersions(Database cx) {
+Future<std::unordered_map<Tag, Version>> readRetiredTagPopVersions(Database cx) {
 	Transaction tr(cx);
 	while (true) {
 		Error err;
@@ -647,7 +647,7 @@ Future<std::map<Tag, Version>> readRetiredTagPopVersions(Database cx) {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
-			std::map<Tag, Version> retiredTagPopVersions;
+			std::unordered_map<Tag, Version> retiredTagPopVersions;
 			Key begin = cdcRetiredTagPopVersionKeys.begin;
 			while (begin < cdcRetiredTagPopVersionKeys.end) {
 				RangeResult retired =
@@ -669,7 +669,7 @@ Future<std::map<Tag, Version>> readRetiredTagPopVersions(Database cx) {
 	}
 }
 
-Future<Void> clearCompletedRetiredTagPops(Database cx, std::map<Tag, Version> completedPopVersions) {
+Future<Void> clearCompletedRetiredTagPops(Database cx, std::unordered_map<Tag, Version> completedPopVersions) {
 	if (completedPopVersions.empty()) {
 		co_return;
 	}
@@ -702,13 +702,13 @@ Future<Void> clearCompletedRetiredTagPops(Database cx, std::map<Tag, Version> co
 }
 
 Future<Void> popAcknowledgedData(CDCProxyData* self) {
-	const std::map<Tag, Version> safePopVersions = co_await readSafePopVersions(self->cx);
+	const std::unordered_map<Tag, Version> safePopVersions = co_await readSafePopVersions(self->cx);
 	Reference<LogSystemConsumer> logSystem = self->logSystem->get();
 	for (const auto& [tag, version] : safePopVersions) {
 		logSystem->pop(version, tag);
 	}
-	const std::map<Tag, Version> retiredTagPopVersions = co_await readRetiredTagPopVersions(self->cx);
-	std::map<Tag, Version> completedPopVersions;
+	const std::unordered_map<Tag, Version> retiredTagPopVersions = co_await readRetiredTagPopVersions(self->cx);
+	std::unordered_map<Tag, Version> completedPopVersions;
 	for (const auto& [tag, retiredVersion] : retiredTagPopVersions) {
 		const auto safePop = safePopVersions.find(tag);
 		const Version version =

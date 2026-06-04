@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include <map>
 #include <set>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -35,11 +35,19 @@ struct NativeCdcEndToEndWorkload : TestWorkload {
 		bool observed = false;
 	};
 
+	struct KeyValueHash {
+		size_t operator()(const std::pair<Key, Value>& item) const {
+			size_t hash = std::hash<Key>{}(item.first);
+			hash ^= std::hash<Value>{}(item.second) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+			return hash;
+		}
+	};
+
 	struct StreamState {
 		Key name;
 		KeyRange keys;
 		Reference<NativeCdcConsumer> consumer;
-		std::map<std::pair<Key, Value>, ExpectedWrite> expected;
+		std::unordered_map<std::pair<Key, Value>, ExpectedWrite, KeyValueHash> expected;
 	};
 
 	int initialStreamCount;
