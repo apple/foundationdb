@@ -746,8 +746,9 @@ Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConnectionR
 		    process,
 		    TaskPriority::DefaultYield); // Now switch execution to the process on which we will run
 		Future<ISimulator::KillType> onShutdown = process->onShutdown();
-		// Persist the simulated configuration choice across restart phases by deriving it from the random data folder.
-		bool useSeparateTLogSpillFolder = dataFolder->back() % 2 == 0;
+		// Older binaries used in restart tests do not recognize separate tlog spill folders.
+		bool useSeparateTLogSpillFolder = !fdbSimulationPolicyState().willRestart &&
+		                                  !fdbSimulationPolicyState().restarted && dataFolder->back() % 2 == 0;
 		std::string tLogSpillFolder = useSeparateTLogSpillFolder ? *dataFolder + "-tlog-spill" : *dataFolder;
 
 		try {
