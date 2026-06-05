@@ -282,7 +282,7 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 			state int64_t shardReadAmount = 0;
 			state int64_t shardKeyCompared = 0;
 			state bool valueAvailableToCheck = true;
-			state KeySelectorRef begin = firstGreaterOrEqual(range.begin);
+			state KeySelector begin = firstGreaterOrEqual(range.begin);
 			loop {
 				try {
 					state bool success = true;

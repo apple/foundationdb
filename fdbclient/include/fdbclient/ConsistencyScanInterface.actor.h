@@ -185,14 +185,14 @@ struct RangeConsistencyResult {
 	Optional<GetKeyValuesReply> referenceRangeReply;
 	bool anyReadFailed;
 
-	explicit RangeConsistencyResult(const size_t serverCount) : firstValidServer(-1), uniqueRefKeys(serverCount), uniqueCmpKeys(serverCount), mismatchedValues(serverCount), totalReadAmount(0) {}
+	explicit RangeConsistencyResult(const size_t serverCount) : firstValidServer(-1), uniqueRefKeys(serverCount), uniqueCmpKeys(serverCount), mismatchedValues(serverCount), totalReadAmount(0), anyReadFailed(false) {}
 
 	explicit RangeConsistencyResult() : RangeConsistencyResult(0) {}
 };
 ACTOR Future<RangeConsistencyResult> checkRangeConsistency(Database cx,
                                                            std::vector<StorageServerInterface> storageServerInterfaces,
                                                            KeyRangeRef range,
-                                                           KeySelectorRef begin,
+                                                           KeySelector begin,
                                                            bool isRelocating,
                                                            bool performQuiescentChecks,
                                                            bool failureIsError,

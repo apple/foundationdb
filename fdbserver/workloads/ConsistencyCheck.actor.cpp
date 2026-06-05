@@ -573,7 +573,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			state Key lastSampleKey;
 			state Key lastStartSampleKey;
 
-			state KeySelectorRef begin = firstGreaterOrEqual(iter->begin());
+			state KeySelector begin = firstGreaterOrEqual(iter->begin());
 			state Transaction onErrorTr(cx); // This transaction exists only to access onError and its backoff behavior
 
 			// Read a limited number of entries at a time, repeating until all keys in the shard have been read

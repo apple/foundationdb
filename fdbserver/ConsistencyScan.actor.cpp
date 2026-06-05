@@ -361,14 +361,10 @@ ACTOR Future<int64_t> getDatabaseSize(Database cx) {
 	}
 }
 
-ACTOR Future<RangeConsistencyResult> checkRangeConsistency(Database cx,
-                                                           std::vector<StorageServerInterface> storageServerInterfaces,
-                                                           KeyRangeRef range,
-                                                           KeySelectorRef begin,
-                                                           bool isRelocating,
-                                                           bool performQuiescentChecks,
-                                                           bool failureIsError,
-                                                           bool *success) {
+ACTOR Future<std::vector<ErrorOr<GetKeyValuesReply>>> readFromAllStorageServers(Database cx,
+                                                                                std::vector<StorageServerInterface> storageServerInterfaces,
+                                                                                KeyRangeRef range,
+                                                                                KeySelectorRef begin) {
 	// Get the min version of the storage servers
 	Version version = wait(getVersion(cx));
 
@@ -395,7 +391,22 @@ ACTOR Future<RangeConsistencyResult> checkRangeConsistency(Database cx,
 
 	wait(waitForAll(keyValueFutures));
 
-	RangeConsistencyResult result(storageServerInterfaces.size());
+	std::vector<ErrorOr<GetKeyValuesReply>> readReplies;
+	for (int j = 0; j < storageServerInterfaces.size(); j++) {
+		readReplies.push_back(keyValueFutures[j].get());
+	}
+	return readReplies;
+}
+
+RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterface>& storageServerInterfaces,
+	                                     const std::vector<ErrorOr<GetKeyValuesReply>>& readReplies,
+	                                     KeyRangeRef range,
+	                                     KeySelector begin,
+	                                     bool isRelocating,
+	                                     bool performQuiescentChecks,
+	                                     bool failureIsError,
+	                                     bool *success) {
+	RangeConsistencyResult result(readReplies.size());
 
 	// Determine the first valid server and the correct stopping point, which is the minimum key of all
 	// ranges with more data. We will compare all the other ranges to the reference one, and we will read
@@ -403,8 +414,9 @@ ACTOR Future<RangeConsistencyResult> checkRangeConsistency(Database cx,
 	// so that comparison ensures that every call reads a unique subsection of the key range
 	bool allNoMore = true;
 	Optional<KeyRef> maxReadKey;
-	for (int j = 0; j < storageServerInterfaces.size(); j++) {
-		ErrorOr<GetKeyValuesReply> rangeResult = keyValueFutures[j].get();
+	Version version;
+	for (int j = 0; j < readReplies.size(); j++) {
+		ErrorOr<GetKeyValuesReply> rangeResult = readReplies[j];
 		if (rangeResult.present() && !rangeResult.get().error.present()) {
 			GetKeyValuesReply rangeReply = rangeResult.get();
 			TraceEvent("ConsistencyCheck_GetKeyValuesStream")
@@ -426,6 +438,7 @@ ACTOR Future<RangeConsistencyResult> checkRangeConsistency(Database cx,
 				TraceEvent("ConsistencyCheck_FirstValidServer").detail("Iter", j);
 				result.firstValidServer = j;
 				result.referenceRangeReply = rangeReply;
+				version = rangeReply.version;
 				if (rangeReply.more) {
 					ASSERT(lastKeyInRange.present());
 					result.nextKey = lastKeyInRange;
@@ -482,7 +495,7 @@ ACTOR Future<RangeConsistencyResult> checkRangeConsistency(Database cx,
 			// We are comparing servers to the reference server, so we skip comparing it to itself
 			continue;
 		}
-		ErrorOr<GetKeyValuesReply> rangeResult = keyValueFutures[j].get();
+		ErrorOr<GetKeyValuesReply> rangeResult = readReplies[j];
 
 		if (rangeResult.present() && !rangeResult.get().error.present()) {
 			GetKeyValuesReply current = rangeResult.get();
@@ -496,8 +509,8 @@ ACTOR Future<RangeConsistencyResult> checkRangeConsistency(Database cx,
 						   "",
 						   j,
 						   storageServerInterfaces[j].address().toString().c_str(),
-						   printable(req.begin.getKey()).c_str(),
-						   printable(req.end.getKey()).c_str());
+						   printable(begin.getKey()).c_str(),
+						   printable(range.end).c_str());
 					for (int k = 0; k < current.data.size(); k++) {
 						printf("%d. %s => %s\n",
 							   k,
@@ -513,8 +526,8 @@ ACTOR Future<RangeConsistencyResult> checkRangeConsistency(Database cx,
 						   "",
 						   result.firstValidServer,
 						   storageServerInterfaces[result.firstValidServer].address().toString().c_str(),
-						   printable(req.begin.getKey()).c_str(),
-						   printable(req.end.getKey()).c_str());
+						   printable(begin.getKey()).c_str(),
+						   printable(range.end).c_str());
 					for (int k = 0; k < reference.data.size(); k++) {
 						printf("%d. %s => %s\n",
 							   k,
@@ -629,9 +642,9 @@ ACTOR Future<RangeConsistencyResult> checkRangeConsistency(Database cx,
 					.detail(format("StorageServer%d", j).c_str(), storageServerInterfaces[j].toString())
 					.detail(format("StorageServer%d", result.firstValidServer).c_str(),
 							storageServerInterfaces[result.firstValidServer].toString())
-					.detail("ShardBegin", req.begin.getKey())
-					.detail("ShardEnd", req.end.getKey())
-					.detail("VersionNumber", req.version)
+					.detail("ShardBegin", begin.getKey())
+					.detail("ShardEnd", range.end)
+					.detail("VersionNumber", version)
 					.detail(format("Server%dUniques", j).c_str(), currentUniques)
 					.detail(format("Server%dUniqueKey", j).c_str(), currentUniqueKey)
 					.detail(format("Server%dUniques", result.firstValidServer).c_str(), referenceUniques)
@@ -666,6 +679,18 @@ ACTOR Future<RangeConsistencyResult> checkRangeConsistency(Database cx,
 	}
 
 	return result;
+}
+
+ACTOR Future<RangeConsistencyResult> checkRangeConsistency(Database cx,
+                                                           std::vector<StorageServerInterface> storageServerInterfaces,
+                                                           KeyRangeRef range,
+                                                           KeySelector begin,
+                                                           bool isRelocating,
+                                                           bool performQuiescentChecks,
+                                                           bool failureIsError,
+                                                           bool *success) {
+	std::vector<ErrorOr<GetKeyValuesReply>> readReplies = wait(readFromAllStorageServers(cx, storageServerInterfaces, range, begin));
+	return checkRangeReplies(storageServerInterfaces, readReplies, range, begin, isRelocating, performQuiescentChecks, failureIsError, success);
 }
 
 // Checks that the data in each shard is the same on each storage server that it resides on.  Also performs some
@@ -953,7 +978,7 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 			state Key lastSampleKey;
 			state Key lastStartSampleKey;
 
-			state KeySelectorRef begin = firstGreaterOrEqual(range.begin);
+			state KeySelector begin = firstGreaterOrEqual(range.begin);
 			state Transaction onErrorTr(cx); // This transaction exists only to access onError and its backoff behavior
 
 			// Read a limited number of entries at a time, repeating until all keys in the shard have been read
@@ -962,8 +987,10 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 					state double dataConsistencyCheckBeginTime = now();
 					lastSampleKey = lastStartSampleKey;
 
-					state RangeConsistencyResult rangeConsistencyResult = wait(checkRangeConsistency(cx, storageServerInterfaces, range, begin, isRelocating, performQuiescentChecks, failureIsError, success));
-					if (!*success) {
+					state bool innerSuccess = true;
+					state RangeConsistencyResult rangeConsistencyResult = wait(checkRangeConsistency(cx, storageServerInterfaces, range, begin, isRelocating, performQuiescentChecks, failureIsError, &innerSuccess));
+					if (!innerSuccess) {
+						*success = false;
 						return Void();
 					}
 
@@ -999,7 +1026,7 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 					}
 
 					if (rangeConsistencyResult.referenceRangeReply.present()) {
-						VectorRef<KeyValueRef, VecSerStrategy::String> data = rangeConsistencyResult.referenceRangeReply.get().data;
+						VectorRef<KeyValueRef> data = rangeConsistencyResult.referenceRangeReply.get().data;
 
 						// Calculate the size of the shard, the variance of the shard size estimate, and the correct
 						// shard size estimate
