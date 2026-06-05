@@ -2270,7 +2270,7 @@ uint64_t getRandomSeed() {
 	uint64_t randomSeed;
 #ifdef _WIN32
 	uint32_t high, low;
-	if (rand_s(&low) != 0 || rand_s(&high) != 0 {
+	if (rand_s(&low) != 0 || rand_s(&high) != 0) {
 		TraceEvent(SevError, "WindowsRandomSeedError").log();
 		throw platform_error();
 	}
