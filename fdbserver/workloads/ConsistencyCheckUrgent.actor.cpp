@@ -285,11 +285,32 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 			state KeySelector begin = firstGreaterOrEqual(range.begin);
 			loop {
 				try {
-					state bool success = true;
-					state RangeConsistencyResult rangeConsistencyResult = wait(checkRangeConsistency(cx, storageServerInterfaces, range, begin, false, false, false, &success));
+					state std::vector<ErrorOr<GetKeyValuesReply>> readReplies = wait(readFromAllStorageServers(cx, storageServerInterfaces, range, begin));
+					for (int j = 0; j < readReplies.size(); j++) {
+						ErrorOr<GetKeyValuesReply> rangeResult = readReplies[j];
+						if (!isSuccessReply(rangeResult)) {
+							valueAvailableToCheck = false;
+							TraceEvent e(SevInfo, "ConsistencyCheckUrgent_TesterGetRangeError");
+							e.detail("ResultPresent", rangeResult.present());
+							e.detail("StorageServer", storageServerInterfaces[j].uniqueID);
+							if (rangeResult.present()) {
+								e.detail("ErrorPresent", rangeResult.get().error.present());
+								if (rangeResult.get().error.present()) {
+									e.detail("Error", rangeResult.get().error.get().what());
+								}
+							} else {
+								e.detail("ResultNotPresentWithError", rangeResult.getError().what());
+								if (g_network->isSimulated() &&
+								    g_simulator->getProcessByAddress(storageServerInterfaces[j].address())->failed) {
+								        e.detail("MachineFailed", "True");
+									// skipCheck = true
+								}
+							}
+							break;
+						}
+					}
 
-					if (rangeConsistencyResult.anyReadFailed) {
-						valueAvailableToCheck = false;
+					if (!valueAvailableToCheck) {
 						failedRanges.insert(range, true);
 						TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterShardAddedToRetry")
 							.setMaxEventLength(-1)
@@ -302,6 +323,8 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 							.detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
 						break;
 					}
+
+					state RangeConsistencyResult rangeConsistencyResult = checkRangeReplies(storageServerInterfaces, readReplies, range, begin, false);
 					shardReadAmount += rangeConsistencyResult.totalReadAmount;
 
 					// RateKeeping

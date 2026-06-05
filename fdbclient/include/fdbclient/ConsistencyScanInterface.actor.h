@@ -182,21 +182,24 @@ struct RangeConsistencyResult {
 	Optional<KeyRef> nextKey;
 	Optional<KeyRef> lastReadKey;
 	int totalReadAmount;
-	Optional<GetKeyValuesReply> referenceRangeReply;
-	bool anyReadFailed;
+	bool success;
 
-	explicit RangeConsistencyResult(const size_t serverCount) : firstValidServer(-1), uniqueRefKeys(serverCount), uniqueCmpKeys(serverCount), mismatchedValues(serverCount), totalReadAmount(0), anyReadFailed(false) {}
+	explicit RangeConsistencyResult(const size_t serverCount) : firstValidServer(-1), uniqueRefKeys(serverCount), uniqueCmpKeys(serverCount), mismatchedValues(serverCount), totalReadAmount(0), success(true) {}
 
 	explicit RangeConsistencyResult() : RangeConsistencyResult(0) {}
 };
-ACTOR Future<RangeConsistencyResult> checkRangeConsistency(Database cx,
-                                                           std::vector<StorageServerInterface> storageServerInterfaces,
-                                                           KeyRangeRef range,
-                                                           KeySelector begin,
-                                                           bool isRelocating,
-                                                           bool performQuiescentChecks,
-                                                           bool failureIsError,
-                                                           bool *success);
+inline bool isSuccessReply(const ErrorOr<GetKeyValuesReply>& reply) {
+	return reply.present() && !reply.get().error.present();
+}
+ACTOR Future<std::vector<ErrorOr<GetKeyValuesReply>>> readFromAllStorageServers(Database cx,
+																				std::vector<StorageServerInterface> storageServerInterfaces,
+																				KeyRangeRef range,
+																				KeySelector begin);
+RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterface>& storageServerInterfaces,
+										 const std::vector<ErrorOr<GetKeyValuesReply>>& readReplies,
+										 KeyRangeRef range,
+										 KeySelector begin,
+										 bool performQuiescentChecks);
 ACTOR Future<Void> checkDataConsistency(Database cx,
                                         VectorRef<KeyValueRef> keyLocations,
                                         DatabaseConfiguration configuration,

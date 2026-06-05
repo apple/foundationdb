@@ -581,7 +581,12 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				try {
 					lastSampleKey = lastStartSampleKey;
 
-					state RangeConsistencyResult rangeConsistencyResult = wait(checkRangeConsistency(cx, iter_ss, iter.range(), begin, true, false, true, &self->success));
+					state std::vector<ErrorOr<GetKeyValuesReply>> readReplies = wait(readFromAllStorageServers(cx, iter_ss, iter.range(), begin));
+					TraceEvent(SevDebug, "CheckCacheConsistencyComparison")
+						.detail("Begin", begin)
+						.detail("End", iter.range().end)
+						.detail("SSInterfaces", describe(iter_ss));
+					state RangeConsistencyResult rangeConsistencyResult = checkRangeReplies(iter_ss, readReplies, iter.range(), begin, false);
 
 					// after requesting each shard, enforce rate limit based on how much data will likely be read
 					if (rateLimitForThisRound > 0) {

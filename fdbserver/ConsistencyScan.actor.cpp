@@ -364,7 +364,7 @@ ACTOR Future<int64_t> getDatabaseSize(Database cx) {
 ACTOR Future<std::vector<ErrorOr<GetKeyValuesReply>>> readFromAllStorageServers(Database cx,
                                                                                 std::vector<StorageServerInterface> storageServerInterfaces,
                                                                                 KeyRangeRef range,
-                                                                                KeySelectorRef begin) {
+                                                                                KeySelector begin) {
 	// Get the min version of the storage servers
 	Version version = wait(getVersion(cx));
 
@@ -402,10 +402,7 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 	                                     const std::vector<ErrorOr<GetKeyValuesReply>>& readReplies,
 	                                     KeyRangeRef range,
 	                                     KeySelector begin,
-	                                     bool isRelocating,
-	                                     bool performQuiescentChecks,
-	                                     bool failureIsError,
-	                                     bool *success) {
+	                                     bool performQuiescentChecks) {
 	RangeConsistencyResult result(readReplies.size());
 
 	// Determine the first valid server and the correct stopping point, which is the minimum key of all
@@ -417,7 +414,7 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 	Version version;
 	for (int j = 0; j < readReplies.size(); j++) {
 		ErrorOr<GetKeyValuesReply> rangeResult = readReplies[j];
-		if (rangeResult.present() && !rangeResult.get().error.present()) {
+		if (isSuccessReply(rangeResult)) {
 			GetKeyValuesReply rangeReply = rangeResult.get();
 			TraceEvent("ConsistencyCheck_GetKeyValuesStream")
 				.detail("DataSize", rangeReply.data.size())
@@ -433,11 +430,10 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 				maxReadKey = lastKeyInRange;
 			}
 
-			if (!result.referenceRangeReply.present()) {
+			if (result.firstValidServer < 0) {
 				// First result with a valid response. All other responses will be judged against this one
 				TraceEvent("ConsistencyCheck_FirstValidServer").detail("Iter", j);
 				result.firstValidServer = j;
-				result.referenceRangeReply = rangeReply;
 				version = rangeReply.version;
 				if (rangeReply.more) {
 					ASSERT(lastKeyInRange.present());
@@ -449,45 +445,15 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 					result.nextKey = lastKeyInRange;
 				}
 			}
-		} else {
-			result.anyReadFailed = true;
-			// If the data is not available and we aren't relocating this shard, we report on the error
-			if (!isRelocating) {
-				Error e = rangeResult.isError() ? rangeResult.getError() : rangeResult.get().error.get();
-
-				TraceEvent("ConsistencyCheck_StorageServerUnavailable")
-					.errorUnsuppressed(e)
-					.suppressFor(1.0)
-					.detail("StorageServer", storageServerInterfaces[j].toString())
-					.detail("ShardBegin", printable(range.begin))
-					.detail("ShardEnd", printable(range.end))
-					.detail("Address", storageServerInterfaces[j].address())
-					.detail("UID", storageServerInterfaces[j].id())
-					.detail("Quiesced", performQuiescentChecks)
-					.detail("GetKeyValuesToken",
-							storageServerInterfaces[j].getKeyValues.getEndpoint().token)
-					.detail("IsTSS", storageServerInterfaces[j].isTss() ? "True" : "False");
-
-				if (e.code() == error_code_request_maybe_delivered) {
-					// SS in the team may be removed and we get this error.
-					*success = false;
-					throw e;
-				}
-				// All shards should be available in quiescence
-				if (performQuiescentChecks && !storageServerInterfaces[j].isTss()) {
-					testFailure(
-						"Storage server unavailable", performQuiescentChecks, success, failureIsError);
-					throw e;
-				}
-			}
 		}
 	}
 
 	// None of the servers returned valid data. We have to move on
-	if (!result.referenceRangeReply.present()) {
+	if (result.firstValidServer < 0) {
 		return result;
 	}
 	result.lastReadKey = allNoMore ? maxReadKey : result.nextKey;
+	GetKeyValuesReply reference = readReplies[result.firstValidServer].get();
 
 	// Read the resulting entries and compare against the reference
 	for (int j = 0; j < storageServerInterfaces.size(); j++) {
@@ -497,9 +463,8 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 		}
 		ErrorOr<GetKeyValuesReply> rangeResult = readReplies[j];
 
-		if (rangeResult.present() && !rangeResult.get().error.present()) {
+		if (isSuccessReply(rangeResult)) {
 			GetKeyValuesReply current = rangeResult.get();
-			GetKeyValuesReply reference = result.referenceRangeReply.get();
 
 			if (current.data != reference.data || current.more != reference.more) {
 				// Be especially verbose if in simulation
@@ -661,8 +626,8 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 
 				if (!isExpectedTSSMismatch && !isFailed) {
 					if (g_network->isSimulated()) {
-						// Only log the test failure in simuation
-						testFailure("Data inconsistent", performQuiescentChecks, success, true);
+						// Only log the test failure in simulation
+						testFailure("Data inconsistent", performQuiescentChecks, &result.success, true);
 					}
 				} else if (isFailed) {
 					// If the storage servers are not live, we should retry.
@@ -671,7 +636,7 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 						.detail("StorageServer1", storageServerInterfaces[j].id())
 						.detail("ShardBegin", printable(range.begin))
 						.detail("ShardEnd", printable(range.end));
-					*success = false;
+					result.success = false;
 					return result;
 				}
 			}
@@ -679,18 +644,6 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 	}
 
 	return result;
-}
-
-ACTOR Future<RangeConsistencyResult> checkRangeConsistency(Database cx,
-                                                           std::vector<StorageServerInterface> storageServerInterfaces,
-                                                           KeyRangeRef range,
-                                                           KeySelector begin,
-                                                           bool isRelocating,
-                                                           bool performQuiescentChecks,
-                                                           bool failureIsError,
-                                                           bool *success) {
-	std::vector<ErrorOr<GetKeyValuesReply>> readReplies = wait(readFromAllStorageServers(cx, storageServerInterfaces, range, begin));
-	return checkRangeReplies(storageServerInterfaces, readReplies, range, begin, isRelocating, performQuiescentChecks, failureIsError, success);
 }
 
 // Checks that the data in each shard is the same on each storage server that it resides on.  Also performs some
@@ -987,9 +940,42 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 					state double dataConsistencyCheckBeginTime = now();
 					lastSampleKey = lastStartSampleKey;
 
-					state bool innerSuccess = true;
-					state RangeConsistencyResult rangeConsistencyResult = wait(checkRangeConsistency(cx, storageServerInterfaces, range, begin, isRelocating, performQuiescentChecks, failureIsError, &innerSuccess));
-					if (!innerSuccess) {
+					state std::vector<ErrorOr<GetKeyValuesReply>> readReplies = wait(readFromAllStorageServers(cx, storageServerInterfaces, range, begin));
+
+					for (int j = 0; j < readReplies.size(); j++) {
+						ErrorOr<GetKeyValuesReply> rangeResult = readReplies[j];
+						if (!isSuccessReply(rangeResult) && !isRelocating) {
+							Error e = rangeResult.isError() ? rangeResult.getError() : rangeResult.get().error.get();
+
+							TraceEvent("ConsistencyCheck_StorageServerUnavailable")
+								.errorUnsuppressed(e)
+								.suppressFor(1.0)
+								.detail("StorageServer", storageServerInterfaces[j].toString())
+								.detail("ShardBegin", printable(range.begin))
+								.detail("ShardEnd", printable(range.end))
+								.detail("Address", storageServerInterfaces[j].address())
+								.detail("UID", storageServerInterfaces[j].id())
+								.detail("Quiesced", performQuiescentChecks)
+								.detail("GetKeyValuesToken",
+										storageServerInterfaces[j].getKeyValues.getEndpoint().token)
+								.detail("IsTSS", storageServerInterfaces[j].isTss() ? "True" : "False");
+
+							if (e.code() == error_code_request_maybe_delivered) {
+								// SS in the team may be removed and we get this error.
+								*success = false;
+								throw e;
+							}
+							// All shards should be available in quiescence
+							if (performQuiescentChecks && !storageServerInterfaces[j].isTss()) {
+								testFailure(
+									"Storage server unavailable", performQuiescentChecks, success, failureIsError);
+								throw e;
+							}
+						}
+					}
+
+					state RangeConsistencyResult rangeConsistencyResult = checkRangeReplies(storageServerInterfaces, readReplies, range, begin, performQuiescentChecks);
+					if (!rangeConsistencyResult.success) {
 						*success = false;
 						return Void();
 					}
@@ -1025,8 +1011,8 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 						}
 					}
 
-					if (rangeConsistencyResult.referenceRangeReply.present()) {
-						VectorRef<KeyValueRef> data = rangeConsistencyResult.referenceRangeReply.get().data;
+					if (rangeConsistencyResult.firstValidServer >= 0) {
+						VectorRef<KeyValueRef> data = readReplies[rangeConsistencyResult.firstValidServer].get().data;
 
 						// Calculate the size of the shard, the variance of the shard size estimate, and the correct
 						// shard size estimate
