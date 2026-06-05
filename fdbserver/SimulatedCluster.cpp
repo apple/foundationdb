@@ -746,6 +746,10 @@ Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConnectionR
 		    process,
 		    TaskPriority::DefaultYield); // Now switch execution to the process on which we will run
 		Future<ISimulator::KillType> onShutdown = process->onShutdown();
+		// Older binaries used in restart tests do not recognize separate tlog spill folders.
+		bool useSeparateTLogSpillFolder = !fdbSimulationPolicyState().willRestart &&
+		                                  !fdbSimulationPolicyState().restarted && dataFolder->back() % 2 == 0;
+		std::string tLogSpillFolder = useSeparateTLogSpillFolder ? *dataFolder + "-tlog-spill" : *dataFolder;
 
 		try {
 			TraceEvent("SimulatedRebooterStarting")
@@ -764,6 +768,7 @@ Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConnectionR
 			    .detail("Version", FDB_VT_VERSION)
 			    .detail("PackageName", FDB_VT_PACKAGE_NAME)
 			    .detail("DataFolder", *dataFolder)
+			    .detail("TLogSpillFolder", tLogSpillFolder)
 			    .detail("ConnectionString", connRecord ? connRecord->getConnectionString().toString() : "")
 			    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
 			    .detail("CommandLine", "fdbserver -r simulation")
@@ -792,6 +797,7 @@ Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConnectionR
 					                       localities,
 					                       processClass,
 					                       *dataFolder,
+					                       tLogSpillFolder,
 					                       *coordFolder,
 					                       500e6,
 					                       "",
