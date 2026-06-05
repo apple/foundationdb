@@ -96,7 +96,7 @@ For ad-hoc operational use — inspecting active locks, releasing a lock left be
 
 Range locks only take effect when commit proxies are started with ``knob_enable_read_lock_on_range=true``. ``rangelock take`` prints an advisory notice as a reminder, but cannot probe the server-side knob — the take itself succeeds either way; the lock simply has no effect when the knob is off.
 
-The bulkload-specific commands (``bulkload addlockowner`` / ``clearlock`` / ``printlockowner``) remain available; they are a constrained subset of the above scoped to the bulkload workflow.
+The bulkload-specific commands (``bulkload addlockowner`` / ``bulkload clearlock`` / ``bulkload printlockowner``) remain available; they are a constrained subset of the above scoped to the bulkload workflow.
 
 
 Example usage
