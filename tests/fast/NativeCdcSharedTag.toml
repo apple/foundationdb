@@ -6,6 +6,7 @@ faultInjection = false
 
 [[knobs]]
 enable_native_cdc = true
+native_cdc_tag_count = 1
 
 [[test]]
 testTitle = 'NativeCdcSharedTag'
@@ -14,5 +15,13 @@ waitForQuiescenceEnd = false
 connectionFailuresDisableDuration = 1000000
 
     [[test.workload]]
-    testName = 'NativeCdc'
-    sharedTagSafety = true
+    testName = 'NativeCdcEndToEnd'
+    initialStreamCount = 3
+    minStreamCount = 2
+    maxStreamCount = 3
+    keyCount = 6
+    writesPerRound = 3
+    rounds = 6
+    drainProbability = 1.0
+    delayBetweenRounds = 0.1
+    operationTimeout = 120.0

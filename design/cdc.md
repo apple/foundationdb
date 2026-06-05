@@ -61,7 +61,7 @@ The current implementation does not attempt to provide:
 
 The client-facing declarations are in `fdbclient/NativeCdc.h`; durable
 metadata operations used by server roles are in
-`fdbclient/NativeCdcInternal.h`; cursor and wire request types are in
+the private `fdbclient/NativeCdcInternal.h`; cursor and wire request types are in
 `fdbclient/CDCProxyInterface.h`.
 
 ```cpp

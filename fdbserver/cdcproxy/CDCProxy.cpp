@@ -27,8 +27,8 @@
 #include <vector>
 
 #include "fdbclient/Knobs.h"
-#include "fdbclient/NativeCdcInternal.h"
 #include "fdbclient/SystemData.h"
+#include "NativeCdcInternal.h"
 #include "fdbserver/cdcproxy/CDCProxy.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/LogProtocolMessage.h"

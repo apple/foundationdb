@@ -13,5 +13,7 @@ add_fdbserver_unit_test(fdbserver_cdcproxy_test cdcproxy
 configure_fdbserver_common_includes(fdbserver_cdcproxy)
 target_include_directories(fdbserver_cdcproxy
   PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+  PRIVATE
+    ${CMAKE_SOURCE_DIR}/fdbclient)
 target_link_libraries(fdbserver_cdcproxy PUBLIC fdbserver_logsystem fdbserver_core)

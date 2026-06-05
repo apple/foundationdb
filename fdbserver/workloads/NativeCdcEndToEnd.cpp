@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <algorithm>
+#include <limits>
 #include <set>
 #include <unordered_map>
 #include <utility>
@@ -142,6 +144,51 @@ struct NativeCdcEndToEndWorkload : TestWorkload {
 		}
 	}
 
+	Future<Void> validatePublicLifecycle(Database cx) {
+		const Key name = "native-cdc-e2e/lifecycle"_sr;
+		const KeyRange keys(KeyRangeRef("native-cdc-e2e/lifecycle/"_sr, "native-cdc-e2e/lifecycle0"_sr));
+		const KeyRange conflictingKeys(KeyRangeRef("native-cdc-e2e/lifecycle/"_sr, "native-cdc-e2e/lifecycle1"_sr));
+
+		const CDCStreamId streamId =
+		    co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout);
+		ASSERT_EQ(co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout), streamId);
+
+		bool conflictingRegistrationRejected = false;
+		try {
+			co_await timeoutError(registerNativeCdcStreamClient(cx, name, conflictingKeys), operationTimeout);
+		} catch (Error& e) {
+			if (e.code() != error_code_client_invalid_operation) {
+				throw;
+			}
+			conflictingRegistrationRejected = true;
+		}
+		ASSERT_EQ(conflictingRegistrationRejected, true);
+
+		const std::vector<NativeCdcStreamInfo> listed =
+		    co_await timeoutError(listNativeCdcStreamsClient(cx), operationTimeout);
+		auto found = std::find_if(
+		    listed.begin(), listed.end(), [&](NativeCdcStreamInfo const& stream) { return stream.name == name; });
+		ASSERT_EQ(found != listed.end(), true);
+		ASSERT_EQ(found->streamId, streamId);
+		ASSERT_EQ(found->keys, keys);
+
+		bool futureAcknowledgeRejected = false;
+		try {
+			co_await timeoutError(
+			    resumeNativeCdcConsumer(cx, CDCCursor(streamId, std::numeric_limits<Version>::max() - 2))
+			        ->acknowledge(),
+			    operationTimeout);
+		} catch (Error& e) {
+			if (e.code() != error_code_client_invalid_operation) {
+				throw;
+			}
+			futureAcknowledgeRejected = true;
+		}
+		ASSERT_EQ(futureAcknowledgeRejected, true);
+
+		co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
+	}
+
 	void recordExpectedWrites(std::vector<std::pair<Key, Value>> const& values, Version committedVersion) {
 		for (auto& stream : streams) {
 			for (const auto& [key, value] : values) {
@@ -189,11 +236,26 @@ struct NativeCdcEndToEndWorkload : TestWorkload {
 	Future<Void> removeStream(Database cx, int index, Version throughVersion) {
 		ASSERT_GT(index, 0);
 		co_await drainThrough(&streams[index], throughVersion);
+		Reference<NativeCdcConsumer> pendingConsumer = resumeNativeCdcConsumer(
+		    cx, CDCCursor(streams[index].consumer->position().streamId, std::numeric_limits<Version>::max() - 2));
+		Future<CDCConsumeReply> pendingConsume = pendingConsumer->consume();
+		co_await delay(0.1);
 		co_await timeoutError(removeNativeCdcStreamClient(cx, streams[index].name), operationTimeout);
+		bool pendingConsumeRejected = false;
+		try {
+			co_await timeoutError(pendingConsume, operationTimeout);
+		} catch (Error& e) {
+			if (e.code() != error_code_client_invalid_operation) {
+				throw;
+			}
+			pendingConsumeRejected = true;
+		}
+		ASSERT_EQ(pendingConsumeRejected, true);
 		streams.erase(streams.begin() + index);
 	}
 
 	Future<Void> run(Database cx) {
+		co_await validatePublicLifecycle(cx);
 		Version mostRecentWrite = invalidVersion;
 		for (int round = 0; round < rounds; ++round) {
 			if (round > 0 && static_cast<int>(streams.size()) > minStreamCount &&

@@ -13,7 +13,7 @@ datacenters = 4
 machineCount = 32
 processesPerMachine = 1
 buggify = false
-faultInjection = false
+faultInjection = true
 
 [[knobs]]
 enable_native_cdc = true
@@ -22,8 +22,29 @@ enable_native_cdc = true
 testTitle = 'NativeCdcSatellite'
 useDB = true
 waitForQuiescenceEnd = false
+runConsistencyCheck = false
+timeout = 600
 connectionFailuresDisableDuration = 1000000
+runFailureWorkloads = false
 
     [[test.workload]]
-    testName = 'NativeCdc'
-    verifySatelliteIndexing = true
+    testName = 'NativeCdcEndToEnd'
+    initialStreamCount = 4
+    minStreamCount = 2
+    maxStreamCount = 6
+    keyCount = 8
+    writesPerRound = 3
+    rounds = 12
+    drainProbability = 0.5
+    delayBetweenRounds = 0.5
+    operationTimeout = 500.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 1
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 8.0
+    waitForVersion = true
+    allowFaultInjection = false
+    killDc = true

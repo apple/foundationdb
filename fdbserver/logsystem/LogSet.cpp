@@ -22,6 +22,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "flow/CodeProbe.h"
+#include "flow/UnitTest.h"
 
 std::string LogSet::logRouterString() {
 	std::string result;
@@ -273,4 +274,26 @@ void LogSet::getPushLocations(VectorRef<Tag> tags,
 	for (auto entry : resultEntries) {
 		locations.push_back(locationOffset + *logServerMap->getObject(entry));
 	}
+}
+
+TEST_CASE("/NativeCDC/SatelliteRouting") {
+	LogSet logSet;
+	logSet.locality = tagLocalitySatellite;
+	logSet.tLogPolicy = makeReference<PolicyOne>();
+	for (int i = 0; i < 3; ++i) {
+		Standalone<StringRef> id(StringRef(format("satellite-%d", i)));
+		logSet.tLogLocalities.emplace_back(id, id, id, "satellite"_sr);
+	}
+	logSet.populateSatelliteTagLocations(1, 1, 1, 1, 4);
+
+	for (int tagId = 0; tagId < 4; ++tagId) {
+		Tag tag(tagLocalityCDC, tagId);
+		std::vector<int> locations;
+		logSet.getPushLocations(VectorRef<Tag>(&tag, 1), locations, 10);
+		ASSERT_EQ(locations.size(), 1);
+		ASSERT_GE(locations.front(), 10);
+		ASSERT_LT(locations.front(), 13);
+	}
+
+	return Void();
 }

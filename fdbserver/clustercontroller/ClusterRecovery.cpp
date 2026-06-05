@@ -34,6 +34,7 @@
 #include "flow/Error.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/Trace.h"
+#include "flow/UnitTest.h"
 
 #include "flow/CoroUtils.h"
 
@@ -232,10 +233,14 @@ Future<Void> newGrvProxies(Reference<ClusterRecoveryData> self, RecruitFromConfi
 	self->grvProxies = std::move(newRecruits);
 }
 
+bool shouldRecruitCDCProxies(bool nativeCdcEnabled, bool hasDurableCdcState) {
+	return nativeCdcEnabled || hasDurableCdcState;
+}
+
 Future<Void> ensureCDCProxies(Reference<ClusterRecoveryData> self, RecruitFromConfigurationReply recr) {
 	const bool hasDurableCdcState = !(co_await self->txnStateStore->readRange(cdcStreamKeys)).empty() ||
 	                                !(co_await self->txnStateStore->readRange(cdcRetiredTagPopKeys)).empty();
-	if (!CLIENT_KNOBS->ENABLE_NATIVE_CDC && !hasDurableCdcState) {
+	if (!shouldRecruitCDCProxies(CLIENT_KNOBS->ENABLE_NATIVE_CDC, hasDurableCdcState)) {
 		CODE_PROBE(true, "Recovery skips CDC proxies when disabled with no durable state");
 		self->controllerData->db.cdcProxies.clear();
 		co_return;
@@ -264,6 +269,14 @@ Future<Void> ensureCDCProxies(Reference<ClusterRecoveryData> self, RecruitFromCo
 	TraceEvent("CDCProxyInitializationComplete", self->dbgid).log();
 	self->controllerData->db.cdcProxies = std::move(newRecruits);
 	self->registrationTrigger.trigger();
+}
+
+TEST_CASE("/NativeCDC/RecoveryRecruitment") {
+	ASSERT_EQ(shouldRecruitCDCProxies(true, false), true);
+	ASSERT_EQ(shouldRecruitCDCProxies(true, true), true);
+	ASSERT_EQ(shouldRecruitCDCProxies(false, false), false);
+	ASSERT_EQ(shouldRecruitCDCProxies(false, true), true);
+	return Void();
 }
 
 Future<Void> newResolvers(Reference<ClusterRecoveryData> self, RecruitFromConfigurationReply recr) {

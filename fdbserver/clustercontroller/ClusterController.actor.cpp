@@ -29,7 +29,7 @@
 
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/NativeCdcInternal.h"
+#include "NativeCdcInternal.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbrpc/FailureMonitor.h"

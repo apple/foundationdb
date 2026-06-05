@@ -31,9 +31,9 @@ struct NativeCdcRemovedStreamInfo {
 	std::vector<Tag> tags;
 };
 
-// Durable metadata operations used by CDC server roles and simulation
-// coverage. Registration is feature gated; drain and cleanup operations remain
-// available for streams persisted before native CDC is disabled.
+// Durable metadata operations used by CDC server roles. Registration is
+// feature gated; drain and cleanup operations remain available for streams
+// persisted before native CDC is disabled.
 Future<CDCStreamId> registerNativeCdcStream(Database cx,
                                             Key name,
                                             KeyRange keys,
