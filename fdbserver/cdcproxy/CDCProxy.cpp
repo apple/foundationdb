@@ -928,6 +928,90 @@ Future<Void> listStreams(CDCProxyData* self, CDCListStreamsRequest request) {
 	}
 }
 
+Future<Void> serveConsumeRequests(CDCProxyData* self,
+                                  FutureStream<CDCConsumeRequest> requests,
+                                  ActorCollection* actors) {
+	while (true) {
+		CDCConsumeRequest request = co_await requests;
+		actors->add(consume(self, std::move(request)));
+	}
+}
+
+Future<Void> serveAcknowledgeRequests(CDCProxyData* self,
+                                      FutureStream<CDCAckRequest> requests,
+                                      ActorCollection* actors) {
+	while (true) {
+		CDCAckRequest request = co_await requests;
+		actors->add(acknowledge(self, std::move(request)));
+	}
+}
+
+Future<Void> serveRegisterStreamRequests(CDCProxyData* self,
+                                         FutureStream<CDCRegisterStreamRequest> requests,
+                                         ActorCollection* actors) {
+	while (true) {
+		CDCRegisterStreamRequest request = co_await requests;
+		actors->add(registerStream(self, std::move(request)));
+	}
+}
+
+Future<Void> serveRemoveStreamRequests(CDCProxyData* self,
+                                       FutureStream<CDCRemoveStreamRequest> requests,
+                                       ActorCollection* actors) {
+	while (true) {
+		CDCRemoveStreamRequest request = co_await requests;
+		actors->add(removeStream(self, std::move(request)));
+	}
+}
+
+Future<Void> serveListStreamsRequests(CDCProxyData* self,
+                                      FutureStream<CDCListStreamsRequest> requests,
+                                      ActorCollection* actors) {
+	while (true) {
+		CDCListStreamsRequest request = co_await requests;
+		actors->add(listStreams(self, std::move(request)));
+	}
+}
+
+Future<Void> serveHaltForTestingRequests(FutureStream<HaltCDCProxyRequest> requests) {
+	while (true) {
+		HaltCDCProxyRequest request = co_await requests;
+		if (!g_network->isSimulated()) {
+			request.reply.sendError(client_invalid_operation());
+			continue;
+		}
+		request.reply.send(Void());
+		throw worker_removed();
+	}
+}
+
+Future<Void> monitorDBInfo(CDCProxyData* self,
+                           CDCProxyInterface proxy,
+                           uint64_t recoveryCount,
+                           Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                           ActorCollection* actors) {
+	bool hasBeenPublished =
+	    std::find(dbInfo->get().client.cdcProxies.begin(), dbInfo->get().client.cdcProxies.end(), proxy) !=
+	    dbInfo->get().client.cdcProxies.end();
+	while (true) {
+		co_await dbInfo->onChange();
+		const bool isPublished =
+		    std::find(dbInfo->get().client.cdcProxies.begin(), dbInfo->get().client.cdcProxies.end(), proxy) !=
+		    dbInfo->get().client.cdcProxies.end();
+		if (hasBeenPublished && dbInfo->get().recoveryCount >= recoveryCount && !isPublished) {
+			throw worker_removed();
+		}
+		hasBeenPublished = hasBeenPublished || isPublished;
+		if (!dbInfo->get().logSystemConfig.tLogs.empty()) {
+			CODE_PROBE(dbInfo->get().recoveryCount > recoveryCount,
+			           "CDC proxy refreshes its log consumer after recovery");
+			self->logSystem->set(makeLogSystemConsumerFromServerDBInfo(self->id, dbInfo->get()));
+		}
+		reconcileStreams(self, actors);
+		self->popAcknowledgedDataTrigger.trigger();
+	}
+}
+
 } // namespace
 
 Future<Void> cdcProxyServer(CDCProxyInterface proxy,
@@ -943,68 +1027,14 @@ Future<Void> cdcProxyServer(CDCProxyInterface proxy,
 		reconcileStreams(&self, &actors);
 		actors.add(monitorAcknowledgedDataPops(&self));
 		self.popAcknowledgedDataTrigger.trigger();
-		Future<Void> dbInfoChange = dbInfo->onChange();
-		bool hasBeenPublished =
-		    std::find(dbInfo->get().client.cdcProxies.begin(), dbInfo->get().client.cdcProxies.end(), proxy) !=
-		    dbInfo->get().client.cdcProxies.end();
-
-		while (true) {
-			auto result = co_await race(proxy.consume.getFuture(),
-			                            proxy.ack.getFuture(),
-			                            proxy.registerStream.getFuture(),
-			                            proxy.removeStream.getFuture(),
-			                            proxy.listStreams.getFuture(),
-			                            proxy.haltForTesting.getFuture(),
-			                            dbInfoChange,
-			                            actors.getResult());
-			switch (result.index()) {
-			case 0:
-				actors.add(consume(&self, std::get<0>(std::move(result))));
-				break;
-			case 1:
-				actors.add(acknowledge(&self, std::get<1>(std::move(result))));
-				break;
-			case 2:
-				actors.add(registerStream(&self, std::get<2>(std::move(result))));
-				break;
-			case 3:
-				actors.add(removeStream(&self, std::get<3>(std::move(result))));
-				break;
-			case 4:
-				actors.add(listStreams(&self, std::get<4>(std::move(result))));
-				break;
-			case 5:
-				if (!g_network->isSimulated()) {
-					std::get<5>(std::move(result)).reply.sendError(client_invalid_operation());
-					break;
-				}
-				std::get<5>(std::move(result)).reply.send(Void());
-				throw worker_removed();
-			case 6: {
-				const bool isPublished =
-				    std::find(dbInfo->get().client.cdcProxies.begin(), dbInfo->get().client.cdcProxies.end(), proxy) !=
-				    dbInfo->get().client.cdcProxies.end();
-				if (hasBeenPublished && dbInfo->get().recoveryCount >= recoveryCount && !isPublished) {
-					throw worker_removed();
-				}
-				hasBeenPublished = hasBeenPublished || isPublished;
-				if (!dbInfo->get().logSystemConfig.tLogs.empty()) {
-					CODE_PROBE(dbInfo->get().recoveryCount > recoveryCount,
-					           "CDC proxy refreshes its log consumer after recovery");
-					self.logSystem->set(makeLogSystemConsumerFromServerDBInfo(self.id, dbInfo->get()));
-				}
-				reconcileStreams(&self, &actors);
-				self.popAcknowledgedDataTrigger.trigger();
-				dbInfoChange = dbInfo->onChange();
-				break;
-			}
-			case 7:
-				co_await actors.getResult();
-				break;
-			default:
-				ASSERT(false);
-			}
-		}
+		actors.add(serveConsumeRequests(&self, proxy.consume.getFuture(), &actors));
+		actors.add(serveAcknowledgeRequests(&self, proxy.ack.getFuture(), &actors));
+		actors.add(serveRegisterStreamRequests(&self, proxy.registerStream.getFuture(), &actors));
+		actors.add(serveRemoveStreamRequests(&self, proxy.removeStream.getFuture(), &actors));
+		actors.add(serveListStreamsRequests(&self, proxy.listStreams.getFuture(), &actors));
+		actors.add(serveHaltForTestingRequests(proxy.haltForTesting.getFuture()));
+		actors.add(monitorDBInfo(&self, proxy, recoveryCount, dbInfo, &actors));
+		co_await actors.getResult();
 	} catch (Error& e) {
 		TraceEvent("CDCProxyTerminated", proxy.id()).errorUnsuppressed(e);
 		if (e.code() != error_code_worker_removed) {
