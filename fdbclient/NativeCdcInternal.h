@@ -41,6 +41,7 @@ Future<CDCStreamId> registerNativeCdcStream(Database cx,
 // Persists per-tag final-pop watermarks before removing stream metadata.
 Future<Optional<NativeCdcRemovedStreamInfo>> removeNativeCdcStream(Database cx,
                                                                    Key name,
+                                                                   CDCStreamId streamId,
                                                                    Optional<UID> proxyId = Optional<UID>());
 Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams(Database cx);
 // Atomically moves any streams assigned to a failed proxy to its replacement.

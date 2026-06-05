@@ -105,16 +105,17 @@ struct CDCRegisterStreamRequest {
 struct CDCRemoveStreamRequest {
 	constexpr static FileIdentifier file_identifier = 3683857;
 	Key name;
+	CDCStreamId streamId = 0;
 	ReplyPromise<Void> reply;
 
 	CDCRemoveStreamRequest() = default;
-	explicit CDCRemoveStreamRequest(Key name) : name(name) {}
+	CDCRemoveStreamRequest(Key name, CDCStreamId streamId) : name(name), streamId(streamId) {}
 
 	bool verify() const { return true; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, name, reply);
+		serializer(ar, name, streamId, reply);
 	}
 };
 

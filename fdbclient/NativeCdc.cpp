@@ -301,6 +301,10 @@ Future<CDCProxyInterface> getNativeCdcStreamProxy(Database cx, CDCStreamId strea
 	}
 }
 
+bool nativeCdcNameMatchesStream(Optional<Value> const& currentId, CDCStreamId streamId) {
+	return currentId.present() && decodeCDCStreamNameValue(currentId.get()) == streamId;
+}
+
 Future<bool> namedNativeCdcStreamStillExists(Database cx, Key name, CDCStreamId streamId) {
 	Transaction tr(cx);
 	while (true) {
@@ -309,7 +313,7 @@ Future<bool> namedNativeCdcStreamStillExists(Database cx, Key name, CDCStreamId 
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			Optional<Value> currentId = co_await tr.get(cdcStreamNameKeyFor(name));
-			co_return currentId.present() && decodeCDCStreamNameValue(currentId.get()) == streamId;
+			co_return nativeCdcNameMatchesStream(currentId, streamId);
 		} catch (Error& e) {
 			err = e;
 		}
@@ -395,8 +399,11 @@ Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys
 	}
 }
 
-Future<Optional<NativeCdcRemovedStreamInfo>> removeNativeCdcStream(Database cx, Key name, Optional<UID> proxyId) {
-	if (name.empty()) {
+Future<Optional<NativeCdcRemovedStreamInfo>> removeNativeCdcStream(Database cx,
+                                                                   Key name,
+                                                                   CDCStreamId streamId,
+                                                                   Optional<UID> proxyId) {
+	if (name.empty() || streamId == 0) {
 		throw client_invalid_operation();
 	}
 
@@ -409,11 +416,11 @@ Future<Optional<NativeCdcRemovedStreamInfo>> removeNativeCdcStream(Database cx, 
 
 			const Key nameKey = cdcStreamNameKeyFor(name);
 			Optional<Value> currentId = co_await tr.get(nameKey);
-			if (!currentId.present()) {
+			if (!nativeCdcNameMatchesStream(currentId, streamId)) {
+				CODE_PROBE(currentId.present(), "Native CDC preserves a replacement stream during removal retry");
 				co_return Optional<NativeCdcRemovedStreamInfo>();
 			}
 
-			const CDCStreamId streamId = decodeCDCStreamNameValue(currentId.get());
 			Optional<UID> assignedProxy = co_await getNativeCdcProxyAssignment(&tr, streamId);
 			if (proxyId.present() && (!assignedProxy.present() || assignedProxy.get() != proxyId.get())) {
 				CODE_PROBE(true, "Native CDC rejects removal through a stale owner");
@@ -632,12 +639,12 @@ Future<Void> removeNativeCdcStreamClient(Database cx, Key name) {
 		throw client_invalid_operation();
 	}
 
-	while (true) {
-		Optional<CDCStreamId> streamId = co_await findNativeCdcStreamId(cx, name);
-		if (!streamId.present()) {
-			co_return;
-		}
+	Optional<CDCStreamId> streamId = co_await findNativeCdcStreamId(cx, name);
+	if (!streamId.present()) {
+		co_return;
+	}
 
+	while (true) {
 		Optional<CDCProxyInterface> proxy = co_await getNativeCdcStreamProxyForRemoval(cx, name, streamId.get());
 		if (!proxy.present()) {
 			co_return;
@@ -645,7 +652,8 @@ Future<Void> removeNativeCdcStreamClient(Database cx, Key name) {
 		try {
 			Future<Void> proxyChanged = cx->clientInfo->onChange();
 			auto result = co_await race(
-			    throwErrorOr(proxy.get().removeStream.tryGetReply(CDCRemoveStreamRequest(name))), proxyChanged);
+			    throwErrorOr(proxy.get().removeStream.tryGetReply(CDCRemoveStreamRequest(name, streamId.get()))),
+			    proxyChanged);
 			if (result.index() == 0) {
 				co_return;
 			}
@@ -769,6 +777,15 @@ TEST_CASE("/NativeCDC/LifecycleAllocation") {
 	auto [sharedId, sharedTag] = fullPoolAllocator.allocate();
 	ASSERT_EQ(sharedId, 1);
 	ASSERT_EQ(sharedTag, Tag(tagLocalityCDC, 0));
+
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/RemovalMatchesOriginalStream") {
+	const CDCStreamId originalStreamId = 1;
+	ASSERT(nativeCdcNameMatchesStream(Optional<Value>(cdcStreamNameValue(originalStreamId)), originalStreamId));
+	ASSERT(!nativeCdcNameMatchesStream(Optional<Value>(cdcStreamNameValue(originalStreamId + 1)), originalStreamId));
+	ASSERT(!nativeCdcNameMatchesStream(Optional<Value>(), originalStreamId));
 
 	return Void();
 }

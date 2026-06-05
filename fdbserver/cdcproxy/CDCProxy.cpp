@@ -124,6 +124,9 @@ private:
 	Optional<Version> nextTagReadVersion(Reference<CDCBufferedTag> tag);
 	void advanceTagBufferedThrough(Reference<CDCBufferedTag> tag, Version bufferedThrough);
 	void markPoppedTagStreamsTooOld(Reference<CDCBufferedTag> tag, Version popped);
+	template <class Visitor>
+	void visitBufferedMutations(Reference<CDCBufferedTag> tag, Reference<IReplayPeekCursor> cursor, Visitor&& visitor);
+	int64_t estimateBufferedBytes(Reference<CDCBufferedTag> tag, Reference<IReplayPeekCursor> cursor);
 	std::unordered_map<CDCStreamId, CDCBufferedBatch> bufferMessages(Reference<CDCBufferedTag> tag,
 	                                                                 Reference<IReplayPeekCursor> cursor);
 	Future<Void> rotateContendedPeek();
@@ -411,9 +414,10 @@ void CDCProxy::markPoppedTagStreamsTooOld(Reference<CDCBufferedTag> tag, Version
 	}
 }
 
-std::unordered_map<CDCStreamId, CDCBufferedBatch> CDCProxy::bufferMessages(Reference<CDCBufferedTag> tag,
-                                                                           Reference<IReplayPeekCursor> cursor) {
-	std::unordered_map<CDCStreamId, CDCBufferedBatch> batches;
+template <class Visitor>
+void CDCProxy::visitBufferedMutations(Reference<CDCBufferedTag> tag,
+                                      Reference<IReplayPeekCursor> cursor,
+                                      Visitor&& visitor) {
 	while (cursor->hasMessage()) {
 		const Version messageVersion = cursor->version().version;
 		ArenaReader& reader = *cursor->reader();
@@ -448,12 +452,45 @@ std::unordered_map<CDCStreamId, CDCBufferedBatch> CDCProxy::bufferMessages(Refer
 				}
 				Optional<MutationRef> clipped = clipCDCMutation(mutation, stream->second->keys.get());
 				if (clipped.present()) {
-					addMutationToBatch(stream->second, &batches[streamId], messageVersion, clipped.get());
+					visitor(stream->second, messageVersion, clipped.get());
 				}
 			}
 		}
 		cursor->nextMessage();
 	}
+}
+
+int64_t CDCProxy::estimateBufferedBytes(Reference<CDCBufferedTag> tag, Reference<IReplayPeekCursor> cursor) {
+	std::unordered_map<CDCStreamId, Version> lastMutationVersion;
+	int64_t estimatedBytes = 0;
+	visitBufferedMutations(
+	    tag,
+	    cursor,
+	    [&lastMutationVersion,
+	     &estimatedBytes](Reference<CDCBufferedStream> stream, Version version, MutationRef const& mutation) {
+		    auto [lastVersion, inserted] = lastMutationVersion.emplace(stream->streamId, version);
+		    if (inserted || lastVersion->second != version) {
+			    lastVersion->second = version;
+			    const bool alreadyBuffered =
+			        std::any_of(stream->mutations.begin(), stream->mutations.end(), [version](const auto& buffered) {
+				        return buffered.version == version;
+			        });
+			    if (!alreadyBuffered) {
+				    estimatedBytes += sizeof(VersionedMutationsRef);
+			    }
+		    }
+		    estimatedBytes += mutation.expectedSize() + sizeof(MutationRef);
+	    });
+	return estimatedBytes;
+}
+
+std::unordered_map<CDCStreamId, CDCBufferedBatch> CDCProxy::bufferMessages(Reference<CDCBufferedTag> tag,
+                                                                           Reference<IReplayPeekCursor> cursor) {
+	std::unordered_map<CDCStreamId, CDCBufferedBatch> batches;
+	visitBufferedMutations(
+	    tag, cursor, [&batches](Reference<CDCBufferedStream> stream, Version version, MutationRef const& mutation) {
+		    addMutationToBatch(stream, &batches[stream->streamId], version, mutation);
+	    });
 	return batches;
 }
 
@@ -523,35 +560,50 @@ Future<Void> CDCProxy::bufferTag(Reference<CDCBufferedTag> tag) {
 				break;
 			}
 
-			std::unordered_map<CDCStreamId, CDCBufferedBatch> batches = bufferMessages(tag, cursor);
-			int64_t bufferedBytes = 0;
-			for (const auto& [streamId, batch] : batches) {
-				bufferedBytes += batch.bufferedBytes;
-			}
-			if (bufferedBytes > peekReservation) {
-				CODE_PROBE(true, "CDC proxy reserves capacity for oversized peek batch", probe::decoration::rare);
+			bool restartCursor = false;
+			while (true) {
+				Reference<IReplayPeekCursor> estimateCursor = cursor->cloneNoMore();
+				estimateCursor->setProtocolVersion(g_network->protocolVersion());
+				const int64_t estimatedBytes = estimateBufferedBytes(tag, estimateCursor);
+				if (estimatedBytes <= reservation.remaining) {
+					reservation.release(reservation.remaining - estimatedBytes);
+					break;
+				}
+
+				CODE_PROBE(true,
+				           "CDC proxy reserves capacity before materializing an oversized peek batch",
+				           probe::decoration::rare);
 				TraceEvent(SevWarn, "CDCProxyOversizedPeekBatch", id)
 				    .detail("Tag", tag->tag)
-				    .detail("BufferedBytes", bufferedBytes)
-				    .detail("ReservedBytes", peekReservation);
+				    .detail("BufferedBytes", estimatedBytes)
+				    .detail("ReservedBytes", reservation.remaining);
 				reservation.release();
-				auto oversizedCapacity = co_await race(bufferLock.take(TaskPriority::TLogPeekReply, bufferedBytes),
+				auto oversizedCapacity = co_await race(bufferLock.take(TaskPriority::TLogPeekReply, estimatedBytes),
 				                                       logSystem->onChange(),
 				                                       tag->stopped.onTrigger(),
 				                                       tag->refresh.onTrigger());
 				if (oversizedCapacity.index() == 1 || oversizedCapacity.index() == 3) {
+					restartCursor = true;
 					break;
 				}
 				if (oversizedCapacity.index() == 2) {
 					co_return;
 				}
-				reservation = FlowLock::Releaser(bufferLock, bufferedBytes);
-			} else {
-				reservation.release(peekReservation - bufferedBytes);
+				reservation = FlowLock::Releaser(bufferLock, estimatedBytes);
+			}
+			if (restartCursor) {
+				break;
 			}
 			if (!tag->active) {
 				co_return;
 			}
+
+			std::unordered_map<CDCStreamId, CDCBufferedBatch> batches = bufferMessages(tag, cursor);
+			int64_t materializedBytes = 0;
+			for (const auto& [streamId, batch] : batches) {
+				materializedBytes += batch.bufferedBytes;
+			}
+			ASSERT_EQ(materializedBytes, reservation.remaining);
 
 			int64_t acceptedBytes = 0;
 			for (auto& [streamId, batch] : batches) {
@@ -561,7 +613,7 @@ Future<Void> CDCProxy::bufferTag(Reference<CDCBufferedTag> tag) {
 					addBufferedBatch(stream->second, std::move(batch));
 				}
 			}
-			reservation.release(bufferedBytes - acceptedBytes);
+			reservation.release(materializedBytes - acceptedBytes);
 			// Buffered mutations own these permits until acknowledgement or stream removal.
 			reservation.remaining = 0;
 			advanceTagBufferedThrough(tag, cursor->version().version - 1);
@@ -926,7 +978,8 @@ Future<Void> CDCProxy::registerStream(CDCRegisterStreamRequest request) {
 
 Future<Void> CDCProxy::removeStream(CDCRemoveStreamRequest request) {
 	try {
-		Optional<NativeCdcRemovedStreamInfo> removed = co_await removeNativeCdcStream(cx, request.name, id);
+		Optional<NativeCdcRemovedStreamInfo> removed =
+		    co_await removeNativeCdcStream(cx, request.name, request.streamId, id);
 		if (removed.present()) {
 			popAcknowledgedDataTrigger.trigger();
 		}
