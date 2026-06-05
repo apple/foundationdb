@@ -1576,7 +1576,7 @@ namespace {
 
 template <class Interface, class Request, bool P>
 Future<REPLY_TYPE(Request)> loadBalance(
-    DatabaseContext* ctx,
+    DatabaseContext* /* ctx */,
     const Reference<LocationInfo> alternatives,
     RequestStream<Request, P> Interface::* channel,
     const Request& request = Request(),
@@ -1586,19 +1586,8 @@ Future<REPLY_TYPE(Request)> loadBalance(
     QueueModel* model = nullptr,
     bool compareReplicas = false,
     int requiredReplicas = 0) {
-	if (alternatives->hasCaches) {
-		return loadBalance(
-		    alternatives->locations(), channel, request, taskID, atMostOnce, model, compareReplicas, requiredReplicas);
-	}
-	return fmap(
-	    [ctx](auto const& res) {
-		    if (res.cached) {
-			    ctx->updateCache.trigger();
-		    }
-		    return res;
-	    },
-	    loadBalance(
-	        alternatives->locations(), channel, request, taskID, atMostOnce, model, compareReplicas, requiredReplicas));
+	return loadBalance(
+	    alternatives->locations(), channel, request, taskID, atMostOnce, model, compareReplicas, requiredReplicas);
 }
 } // namespace
 
