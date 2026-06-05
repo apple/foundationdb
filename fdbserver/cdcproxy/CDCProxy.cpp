@@ -95,7 +95,16 @@ struct CDCBufferedTag : ReferenceCounted<CDCBufferedTag> {
 	explicit CDCBufferedTag(Tag tag) : tag(tag) {}
 };
 
-struct CDCProxyData {
+class CDCProxy {
+public:
+	CDCProxy(CDCProxyInterface const& proxy, Reference<AsyncVar<ServerDBInfo> const> dbInfo)
+	  : id(proxy.id()), cx(openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True)), dbInfo(dbInfo),
+	    logSystem(makeReference<AsyncVar<Reference<LogSystemConsumer>>>()),
+	    bufferLock(SERVER_KNOBS->CDC_PROXY_BUFFER_BYTES), actors(false) {}
+
+	Future<Void> run(CDCProxyInterface proxy, uint64_t recoveryCount);
+
+private:
 	UID id;
 	Database cx;
 	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
@@ -106,11 +115,35 @@ struct CDCProxyData {
 	AsyncTrigger peekCapacityContended;
 	FlowLock bufferLock;
 	int64_t bufferedBytes = 0;
+	ActorCollection actors;
 
-	CDCProxyData(CDCProxyInterface const& proxy, Reference<AsyncVar<ServerDBInfo> const> dbInfo)
-	  : id(proxy.id()), cx(openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True)), dbInfo(dbInfo),
-	    logSystem(makeReference<AsyncVar<Reference<LogSystemConsumer>>>()),
-	    bufferLock(SERVER_KNOBS->CDC_PROXY_BUFFER_BYTES) {}
+	void clearBufferedMutations(Reference<CDCBufferedStream> stream);
+	void addBufferedBatch(Reference<CDCBufferedStream> stream, CDCBufferedBatch batch);
+	void detachStreamFromTags(Reference<CDCBufferedStream> stream);
+	void refreshStreamTags(Reference<CDCBufferedStream> stream);
+	Optional<Version> nextTagReadVersion(Reference<CDCBufferedTag> tag);
+	void advanceTagBufferedThrough(Reference<CDCBufferedTag> tag, Version bufferedThrough);
+	void markPoppedTagStreamsTooOld(Reference<CDCBufferedTag> tag, Version popped);
+	std::unordered_map<CDCStreamId, CDCBufferedBatch> bufferMessages(Reference<CDCBufferedTag> tag,
+	                                                                 Reference<IReplayPeekCursor> cursor);
+	Future<Void> rotateContendedPeek();
+	Future<Void> bufferTag(Reference<CDCBufferedTag> tag);
+	Future<Void> initializeStream(Reference<CDCBufferedStream> stream);
+	Future<Void> popAcknowledgedData();
+	Future<Void> monitorAcknowledgedDataPops();
+	void reconcileStreams();
+	Future<Void> consume(CDCConsumeRequest request);
+	Future<Void> acknowledge(CDCAckRequest request);
+	Future<Void> registerStream(CDCRegisterStreamRequest request);
+	Future<Void> removeStream(CDCRemoveStreamRequest request);
+	Future<Void> listStreams(CDCListStreamsRequest request);
+	Future<Void> serveConsumeRequests(FutureStream<CDCConsumeRequest> requests);
+	Future<Void> serveAcknowledgeRequests(FutureStream<CDCAckRequest> requests);
+	Future<Void> serveRegisterStreamRequests(FutureStream<CDCRegisterStreamRequest> requests);
+	Future<Void> serveRemoveStreamRequests(FutureStream<CDCRemoveStreamRequest> requests);
+	Future<Void> serveListStreamsRequests(FutureStream<CDCListStreamsRequest> requests);
+	Future<Void> serveHaltForTestingRequests(FutureStream<HaltCDCProxyRequest> requests);
+	Future<Void> monitorDBInfo(CDCProxyInterface proxy, uint64_t recoveryCount);
 };
 
 Optional<MutationRef> clipCDCMutation(MutationRef const& mutation, KeyRangeRef const& keys) {
@@ -197,11 +230,11 @@ Future<CDCStreamReadState> readCDCStreamState(Database cx,
 	}
 }
 
-void clearBufferedMutations(CDCProxyData* self, Reference<CDCBufferedStream> stream) {
+void CDCProxy::clearBufferedMutations(Reference<CDCBufferedStream> stream) {
 	if (stream->bufferedBytes > 0) {
-		ASSERT_GE(self->bufferedBytes, stream->bufferedBytes);
-		self->bufferedBytes -= stream->bufferedBytes;
-		self->bufferLock.release(stream->bufferedBytes);
+		ASSERT_GE(bufferedBytes, stream->bufferedBytes);
+		bufferedBytes -= stream->bufferedBytes;
+		bufferLock.release(stream->bufferedBytes);
 		stream->bufferedBytes = 0;
 	}
 	stream->mutations.clear();
@@ -230,7 +263,7 @@ void addMutationToBatch(Reference<CDCBufferedStream> stream,
 	batch->bufferedBytes += mutation.expectedSize() + sizeof(MutationRef);
 }
 
-void addBufferedBatch(CDCProxyData* self, Reference<CDCBufferedStream> stream, CDCBufferedBatch batch) {
+void CDCProxy::addBufferedBatch(Reference<CDCBufferedStream> stream, CDCBufferedBatch batch) {
 	while (!batch.mutations.empty()) {
 		Standalone<VersionedMutationsRef> versioned = std::move(batch.mutations.front());
 		batch.mutations.pop_front();
@@ -248,7 +281,7 @@ void addBufferedBatch(CDCProxyData* self, Reference<CDCBufferedStream> stream, C
 		}
 	}
 	stream->bufferedBytes += batch.bufferedBytes;
-	self->bufferedBytes += batch.bufferedBytes;
+	bufferedBytes += batch.bufferedBytes;
 }
 
 void updateStreamBufferedThrough(Reference<CDCBufferedStream> stream) {
@@ -282,17 +315,17 @@ void advanceStreamMinVersion(Reference<CDCBufferedStream> stream, Version minVer
 	updateStreamBufferedThrough(stream);
 }
 
-void detachStreamFromTags(CDCProxyData* self, Reference<CDCBufferedStream> stream) {
+void CDCProxy::detachStreamFromTags(Reference<CDCBufferedStream> stream) {
 	for (const auto& interval : stream->tagIntervals) {
-		auto tag = self->tags.find(interval.tag);
-		if (tag == self->tags.end()) {
+		auto tag = tags.find(interval.tag);
+		if (tag == tags.end()) {
 			continue;
 		}
 		Reference<CDCBufferedTag> bufferedTag = tag->second;
 		bufferedTag->streamIds.erase(stream->streamId);
 		if (bufferedTag->streamIds.empty()) {
 			bufferedTag->active = false;
-			self->tags.erase(tag);
+			tags.erase(tag);
 			bufferedTag->stopped.trigger();
 		} else {
 			bufferedTag->refresh.trigger();
@@ -300,20 +333,20 @@ void detachStreamFromTags(CDCProxyData* self, Reference<CDCBufferedStream> strea
 	}
 }
 
-void refreshStreamTags(CDCProxyData* self, Reference<CDCBufferedStream> stream) {
+void CDCProxy::refreshStreamTags(Reference<CDCBufferedStream> stream) {
 	for (const auto& interval : stream->tagIntervals) {
-		auto tag = self->tags.find(interval.tag);
-		if (tag != self->tags.end()) {
+		auto tag = tags.find(interval.tag);
+		if (tag != tags.end()) {
 			tag->second->refresh.trigger();
 		}
 	}
 }
 
-Optional<Version> nextTagReadVersion(CDCProxyData* self, Reference<CDCBufferedTag> tag) {
+Optional<Version> CDCProxy::nextTagReadVersion(Reference<CDCBufferedTag> tag) {
 	Optional<Version> begin;
 	for (const CDCStreamId streamId : tag->streamIds) {
-		auto stream = self->streams.find(streamId);
-		if (stream == self->streams.end() || !stream->second->active || !stream->second->initialized ||
+		auto stream = streams.find(streamId);
+		if (stream == streams.end() || !stream->second->active || !stream->second->initialized ||
 		    stream->second->readDemand == 0) {
 			continue;
 		}
@@ -330,11 +363,11 @@ Optional<Version> nextTagReadVersion(CDCProxyData* self, Reference<CDCBufferedTa
 	return begin;
 }
 
-void advanceTagBufferedThrough(CDCProxyData* self, Reference<CDCBufferedTag> tag, Version bufferedThrough) {
+void CDCProxy::advanceTagBufferedThrough(Reference<CDCBufferedTag> tag, Version bufferedThrough) {
 	const std::vector<CDCStreamId> streamIds(tag->streamIds.begin(), tag->streamIds.end());
 	for (const CDCStreamId streamId : streamIds) {
-		auto stream = self->streams.find(streamId);
-		if (stream == self->streams.end() || !stream->second->active || stream->second->readDemand == 0) {
+		auto stream = streams.find(streamId);
+		if (stream == streams.end() || !stream->second->active || stream->second->readDemand == 0) {
 			continue;
 		}
 		for (auto& interval : stream->second->tagIntervals) {
@@ -347,11 +380,11 @@ void advanceTagBufferedThrough(CDCProxyData* self, Reference<CDCBufferedTag> tag
 	}
 }
 
-void markPoppedTagStreamsTooOld(CDCProxyData* self, Reference<CDCBufferedTag> tag, Version popped) {
+void CDCProxy::markPoppedTagStreamsTooOld(Reference<CDCBufferedTag> tag, Version popped) {
 	std::vector<Reference<CDCBufferedStream>> tooOldStreams;
 	for (const CDCStreamId streamId : tag->streamIds) {
-		auto stream = self->streams.find(streamId);
-		if (stream == self->streams.end() || !stream->second->active) {
+		auto stream = streams.find(streamId);
+		if (stream == streams.end() || !stream->second->active) {
 			continue;
 		}
 		for (const auto& interval : stream->second->tagIntervals) {
@@ -364,23 +397,22 @@ void markPoppedTagStreamsTooOld(CDCProxyData* self, Reference<CDCBufferedTag> ta
 	}
 	for (const auto& stream : tooOldStreams) {
 		CODE_PROBE(true, "CDC proxy detects unread mutations already popped from TLogs", probe::decoration::rare);
-		TraceEvent("CDCBufferStreamTooOld", self->id)
+		TraceEvent("CDCBufferStreamTooOld", id)
 		    .detail("StreamId", stream->streamId)
 		    .detail("MinVersion", stream->minVersion)
 		    .detail("BufferedThrough", stream->bufferedThrough)
 		    .detail("Popped", popped)
 		    .detail("Tag", tag->tag);
-		clearBufferedMutations(self, stream);
+		clearBufferedMutations(stream);
 		stream->tooOld = true;
 		stream->active = false;
 		stream->changed.trigger();
-		detachStreamFromTags(self, stream);
+		detachStreamFromTags(stream);
 	}
 }
 
-std::unordered_map<CDCStreamId, CDCBufferedBatch> bufferMessages(CDCProxyData* self,
-                                                                 Reference<CDCBufferedTag> tag,
-                                                                 Reference<IReplayPeekCursor> cursor) {
+std::unordered_map<CDCStreamId, CDCBufferedBatch> CDCProxy::bufferMessages(Reference<CDCBufferedTag> tag,
+                                                                           Reference<IReplayPeekCursor> cursor) {
 	std::unordered_map<CDCStreamId, CDCBufferedBatch> batches;
 	while (cursor->hasMessage()) {
 		const Version messageVersion = cursor->version().version;
@@ -399,8 +431,8 @@ std::unordered_map<CDCStreamId, CDCBufferedBatch> bufferMessages(CDCProxyData* s
 			MutationRef mutation;
 			reader >> mutation;
 			for (const CDCStreamId streamId : tag->streamIds) {
-				auto stream = self->streams.find(streamId);
-				if (stream == self->streams.end() || !stream->second->active || stream->second->readDemand == 0 ||
+				auto stream = streams.find(streamId);
+				if (stream == streams.end() || !stream->second->active || stream->second->readDemand == 0 ||
 				    !stream->second->keys.present()) {
 					continue;
 				}
@@ -425,16 +457,16 @@ std::unordered_map<CDCStreamId, CDCBufferedBatch> bufferMessages(CDCProxyData* s
 	return batches;
 }
 
-Future<Void> rotateContendedPeek(CDCProxyData* self) {
-	if (self->bufferLock.waiters() == 0) {
-		co_await self->peekCapacityContended.onTrigger();
+Future<Void> CDCProxy::rotateContendedPeek() {
+	if (bufferLock.waiters() == 0) {
+		co_await peekCapacityContended.onTrigger();
 	}
 	co_await delay(SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT);
 }
 
-Future<Void> bufferTag(CDCProxyData* self, Reference<CDCBufferedTag> tag) {
+Future<Void> CDCProxy::bufferTag(Reference<CDCBufferedTag> tag) {
 	while (tag->active) {
-		Optional<Version> begin = nextTagReadVersion(self, tag);
+		Optional<Version> begin = nextTagReadVersion(tag);
 		if (!begin.present()) {
 			auto waitForDemand = co_await race(tag->stopped.onTrigger(), tag->refresh.onTrigger());
 			if (waitForDemand.index() == 0) {
@@ -442,26 +474,26 @@ Future<Void> bufferTag(CDCProxyData* self, Reference<CDCBufferedTag> tag) {
 			}
 			continue;
 		}
-		if (!self->logSystem->get()) {
+		if (!logSystem->get()) {
 			auto waitForLogSystem =
-			    co_await race(self->logSystem->onChange(), tag->stopped.onTrigger(), tag->refresh.onTrigger());
+			    co_await race(logSystem->onChange(), tag->stopped.onTrigger(), tag->refresh.onTrigger());
 			if (waitForLogSystem.index() == 1) {
 				co_return;
 			}
 			continue;
 		}
 
-		Reference<IReplayPeekCursor> cursor = self->logSystem->get()->peekSingle(self->id, begin.get(), tag->tag, {});
+		Reference<IReplayPeekCursor> cursor = logSystem->get()->peekSingle(id, begin.get(), tag->tag, {});
 		while (tag->active) {
 			const int64_t peekReservation =
 			    std::min<int64_t>(SERVER_KNOBS->CDC_PROXY_BUFFER_BYTES, SERVER_KNOBS->MAXIMUM_PEEK_BYTES);
 			ASSERT_GT(peekReservation, 0);
-			if (self->bufferLock.available() < peekReservation) {
+			if (bufferLock.available() < peekReservation) {
 				CODE_PROBE(true, "CDC proxy applies shared buffer backpressure", probe::decoration::rare);
-				self->peekCapacityContended.trigger();
+				peekCapacityContended.trigger();
 			}
-			auto capacity = co_await race(self->bufferLock.take(TaskPriority::TLogPeekReply, peekReservation),
-			                              self->logSystem->onChange(),
+			auto capacity = co_await race(bufferLock.take(TaskPriority::TLogPeekReply, peekReservation),
+			                              logSystem->onChange(),
 			                              tag->stopped.onTrigger(),
 			                              tag->refresh.onTrigger());
 			if (capacity.index() == 1 || capacity.index() == 3) {
@@ -470,14 +502,14 @@ Future<Void> bufferTag(CDCProxyData* self, Reference<CDCBufferedTag> tag) {
 			if (capacity.index() == 2) {
 				co_return;
 			}
-			FlowLock::Releaser reservation(self->bufferLock, peekReservation);
+			FlowLock::Releaser reservation(bufferLock, peekReservation);
 			// Blocking peeks hold a response reservation. Once another tag queues for capacity, rotate this
 			// reader after one blocking-peek interval so an idle tag cannot monopolize the shared budget.
 			auto result = co_await race(cursor->getMore(TaskPriority::TLogPeekReply),
-			                            self->logSystem->onChange(),
+			                            logSystem->onChange(),
 			                            tag->stopped.onTrigger(),
 			                            tag->refresh.onTrigger(),
-			                            rotateContendedPeek(self));
+			                            rotateContendedPeek());
 			if (result.index() == 1 || result.index() == 3 || result.index() == 4) {
 				break;
 			}
@@ -487,34 +519,33 @@ Future<Void> bufferTag(CDCProxyData* self, Reference<CDCBufferedTag> tag) {
 
 			cursor->setProtocolVersion(g_network->protocolVersion());
 			if (cursor->popped() > begin.get()) {
-				markPoppedTagStreamsTooOld(self, tag, cursor->popped());
+				markPoppedTagStreamsTooOld(tag, cursor->popped());
 				break;
 			}
 
-			std::unordered_map<CDCStreamId, CDCBufferedBatch> batches = bufferMessages(self, tag, cursor);
+			std::unordered_map<CDCStreamId, CDCBufferedBatch> batches = bufferMessages(tag, cursor);
 			int64_t bufferedBytes = 0;
 			for (const auto& [streamId, batch] : batches) {
 				bufferedBytes += batch.bufferedBytes;
 			}
 			if (bufferedBytes > peekReservation) {
 				CODE_PROBE(true, "CDC proxy reserves capacity for oversized peek batch", probe::decoration::rare);
-				TraceEvent(SevWarn, "CDCProxyOversizedPeekBatch", self->id)
+				TraceEvent(SevWarn, "CDCProxyOversizedPeekBatch", id)
 				    .detail("Tag", tag->tag)
 				    .detail("BufferedBytes", bufferedBytes)
 				    .detail("ReservedBytes", peekReservation);
 				reservation.release();
-				auto oversizedCapacity =
-				    co_await race(self->bufferLock.take(TaskPriority::TLogPeekReply, bufferedBytes),
-				                  self->logSystem->onChange(),
-				                  tag->stopped.onTrigger(),
-				                  tag->refresh.onTrigger());
+				auto oversizedCapacity = co_await race(bufferLock.take(TaskPriority::TLogPeekReply, bufferedBytes),
+				                                       logSystem->onChange(),
+				                                       tag->stopped.onTrigger(),
+				                                       tag->refresh.onTrigger());
 				if (oversizedCapacity.index() == 1 || oversizedCapacity.index() == 3) {
 					break;
 				}
 				if (oversizedCapacity.index() == 2) {
 					co_return;
 				}
-				reservation = FlowLock::Releaser(self->bufferLock, bufferedBytes);
+				reservation = FlowLock::Releaser(bufferLock, bufferedBytes);
 			} else {
 				reservation.release(peekReservation - bufferedBytes);
 			}
@@ -524,17 +555,17 @@ Future<Void> bufferTag(CDCProxyData* self, Reference<CDCBufferedTag> tag) {
 
 			int64_t acceptedBytes = 0;
 			for (auto& [streamId, batch] : batches) {
-				auto stream = self->streams.find(streamId);
-				if (stream != self->streams.end() && stream->second->active && tag->streamIds.contains(streamId)) {
+				auto stream = streams.find(streamId);
+				if (stream != streams.end() && stream->second->active && tag->streamIds.contains(streamId)) {
 					acceptedBytes += batch.bufferedBytes;
-					addBufferedBatch(self, stream->second, std::move(batch));
+					addBufferedBatch(stream->second, std::move(batch));
 				}
 			}
 			reservation.release(bufferedBytes - acceptedBytes);
 			// Buffered mutations own these permits until acknowledgement or stream removal.
 			reservation.remaining = 0;
-			advanceTagBufferedThrough(self, tag, cursor->version().version - 1);
-			if (!nextTagReadVersion(self, tag).present()) {
+			advanceTagBufferedThrough(tag, cursor->version().version - 1);
+			if (!nextTagReadVersion(tag).present()) {
 				break;
 			}
 			if (cursor->isExhausted()) {
@@ -544,9 +575,9 @@ Future<Void> bufferTag(CDCProxyData* self, Reference<CDCBufferedTag> tag) {
 	}
 }
 
-Future<Void> initializeStream(CDCProxyData* self, Reference<CDCBufferedStream> stream, ActorCollection* actors) {
+Future<Void> CDCProxy::initializeStream(Reference<CDCBufferedStream> stream) {
 	try {
-		const CDCStreamReadState metadata = co_await readCDCStreamState(self->cx, stream->streamId, self->id, true);
+		const CDCStreamReadState metadata = co_await readCDCStreamState(cx, stream->streamId, id, true);
 		stream->keys = metadata.keys;
 		stream->minVersion = metadata.minVersion;
 		stream->bufferedThrough = metadata.minVersion - 1;
@@ -561,12 +592,12 @@ Future<Void> initializeStream(CDCProxyData* self, Reference<CDCBufferedStream> s
 		stream->initialized = true;
 		stream->changed.trigger();
 		for (const auto& interval : stream->tagIntervals) {
-			auto tag = self->tags.find(interval.tag);
-			if (tag == self->tags.end()) {
+			auto tag = tags.find(interval.tag);
+			if (tag == tags.end()) {
 				Reference<CDCBufferedTag> newTag = makeReference<CDCBufferedTag>(interval.tag);
-				tag = self->tags.emplace(interval.tag, newTag).first;
+				tag = tags.emplace(interval.tag, newTag).first;
 				tag->second->streamIds.insert(stream->streamId);
-				actors->add(bufferTag(self, newTag));
+				actors.add(bufferTag(newTag));
 			} else {
 				CODE_PROBE(true, "CDC proxy shares a tag reader across streams");
 				tag->second->streamIds.insert(stream->streamId);
@@ -575,7 +606,7 @@ Future<Void> initializeStream(CDCProxyData* self, Reference<CDCBufferedStream> s
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_client_invalid_operation || e.code() == error_code_wrong_shard_server) {
-			clearBufferedMutations(self, stream);
+			clearBufferedMutations(stream);
 			stream->active = false;
 			stream->changed.trigger();
 			co_return;
@@ -701,13 +732,13 @@ Future<Void> clearCompletedRetiredTagPops(Database cx, std::unordered_map<Tag, V
 	}
 }
 
-Future<Void> popAcknowledgedData(CDCProxyData* self) {
-	const std::unordered_map<Tag, Version> safePopVersions = co_await readSafePopVersions(self->cx);
-	Reference<LogSystemConsumer> logSystem = self->logSystem->get();
+Future<Void> CDCProxy::popAcknowledgedData() {
+	const std::unordered_map<Tag, Version> safePopVersions = co_await readSafePopVersions(cx);
+	Reference<LogSystemConsumer> currentLogSystem = logSystem->get();
 	for (const auto& [tag, version] : safePopVersions) {
-		logSystem->pop(version, tag);
+		currentLogSystem->pop(version, tag);
 	}
-	const std::unordered_map<Tag, Version> retiredTagPopVersions = co_await readRetiredTagPopVersions(self->cx);
+	const std::unordered_map<Tag, Version> retiredTagPopVersions = co_await readRetiredTagPopVersions(cx);
 	std::unordered_map<Tag, Version> completedPopVersions;
 	for (const auto& [tag, retiredVersion] : retiredTagPopVersions) {
 		const auto safePop = safePopVersions.find(tag);
@@ -715,66 +746,66 @@ Future<Void> popAcknowledgedData(CDCProxyData* self) {
 		    safePop == safePopVersions.end() ? retiredVersion : std::min(retiredVersion, safePop->second);
 		CODE_PROBE(safePop != safePopVersions.end() && version < retiredVersion,
 		           "CDC proxy defers retired tag pop behind a live shared stream");
-		logSystem->pop(version, tag);
+		currentLogSystem->pop(version, tag);
 		if (version >= retiredVersion) {
-			co_await logSystem->waitForPopped(retiredVersion, tag);
+			co_await currentLogSystem->waitForPopped(retiredVersion, tag);
 			completedPopVersions[tag] = retiredVersion;
 		}
 	}
-	co_await clearCompletedRetiredTagPops(self->cx, std::move(completedPopVersions));
+	co_await clearCompletedRetiredTagPops(cx, std::move(completedPopVersions));
 }
 
-Future<Void> monitorAcknowledgedDataPops(CDCProxyData* self) {
-	co_await self->popAcknowledgedDataTrigger.onTrigger();
+Future<Void> CDCProxy::monitorAcknowledgedDataPops() {
+	co_await popAcknowledgedDataTrigger.onTrigger();
 	while (true) {
 		// Pop completion may wait on an unavailable log generation. A new acknowledgement or log-system
 		// configuration supersedes that attempt and retries the durable work against current state.
-		Future<Void> retriggered = self->popAcknowledgedDataTrigger.onTrigger();
-		auto result = co_await race(popAcknowledgedData(self), retriggered);
+		Future<Void> retriggered = popAcknowledgedDataTrigger.onTrigger();
+		auto result = co_await race(popAcknowledgedData(), retriggered);
 		if (result.index() == 0) {
-			co_await self->popAcknowledgedDataTrigger.onTrigger();
+			co_await popAcknowledgedDataTrigger.onTrigger();
 		}
 	}
 }
 
-void reconcileStreams(CDCProxyData* self, ActorCollection* actors) {
+void CDCProxy::reconcileStreams() {
 	std::set<CDCStreamId> assignedStreams;
-	for (const auto& [streamId, proxyId] : self->dbInfo->get().client.streamToCDCProxyId) {
-		if (proxyId == self->id) {
+	for (const auto& [streamId, proxyId] : dbInfo->get().client.streamToCDCProxyId) {
+		if (proxyId == id) {
 			assignedStreams.insert(streamId);
-			if (!self->streams.contains(streamId)) {
+			if (!streams.contains(streamId)) {
 				Reference<CDCBufferedStream> stream = makeReference<CDCBufferedStream>(streamId);
-				self->streams.emplace(streamId, stream);
-				actors->add(initializeStream(self, stream, actors));
+				streams.emplace(streamId, stream);
+				actors.add(initializeStream(stream));
 			}
 		}
 	}
 
-	for (auto it = self->streams.begin(); it != self->streams.end();) {
+	for (auto it = streams.begin(); it != streams.end();) {
 		if (!assignedStreams.contains(it->first)) {
 			CODE_PROBE(it->second->readDemand > 0, "CDC proxy wakes pending consume when stream is unassigned");
 			CODE_PROBE(true, "CDC proxy drops removed or reassigned stream state");
 			it->second->active = false;
 			it->second->changed.trigger();
-			detachStreamFromTags(self, it->second);
-			clearBufferedMutations(self, it->second);
-			it = self->streams.erase(it);
+			detachStreamFromTags(it->second);
+			clearBufferedMutations(it->second);
+			it = streams.erase(it);
 		} else {
 			++it;
 		}
 	}
 }
 
-Future<Void> consume(CDCProxyData* self, CDCConsumeRequest request) {
+Future<Void> CDCProxy::consume(CDCConsumeRequest request) {
 	try {
 		if (request.cursor.lastConsumedVersion < invalidVersion ||
 		    request.cursor.lastConsumedVersion == std::numeric_limits<Version>::max()) {
 			throw client_invalid_operation();
 		}
 
-		co_await readCDCStreamState(self->cx, request.cursor.streamId, self->id, true);
-		auto found = self->streams.find(request.cursor.streamId);
-		if (found == self->streams.end()) {
+		co_await readCDCStreamState(cx, request.cursor.streamId, id, true);
+		auto found = streams.find(request.cursor.streamId);
+		if (found == streams.end()) {
 			throw wrong_shard_server();
 		}
 		Reference<CDCBufferedStream> stream = found->second;
@@ -797,7 +828,7 @@ Future<Void> consume(CDCProxyData* self, CDCConsumeRequest request) {
 		bool issuedReadDemand = false;
 		if (stream->bufferedThrough < begin) {
 			++stream->readDemand;
-			refreshStreamTags(self, stream);
+			refreshStreamTags(stream);
 			issuedReadDemand = true;
 		}
 		while (stream->active && stream->bufferedThrough < begin) {
@@ -806,7 +837,7 @@ Future<Void> consume(CDCProxyData* self, CDCConsumeRequest request) {
 		if (issuedReadDemand) {
 			ASSERT_GT(stream->readDemand, 0);
 			--stream->readDemand;
-			refreshStreamTags(self, stream);
+			refreshStreamTags(stream);
 		}
 		if (stream->tooOld) {
 			throw transaction_too_old();
@@ -835,17 +866,17 @@ Future<Void> consume(CDCProxyData* self, CDCConsumeRequest request) {
 	}
 }
 
-Future<Void> acknowledge(CDCProxyData* self, CDCAckRequest request) {
+Future<Void> CDCProxy::acknowledge(CDCAckRequest request) {
 	try {
 		if (request.version < 0 || request.version >= std::numeric_limits<Version>::max() - 1) {
 			throw client_invalid_operation();
 		}
-		const CDCStreamReadState metadata = co_await readCDCStreamState(self->cx, request.streamId, self->id, false);
+		const CDCStreamReadState metadata = co_await readCDCStreamState(cx, request.streamId, id, false);
 		if (metadata.minVersion <= request.version) {
 			throw client_invalid_operation();
 		}
-		auto found = self->streams.find(request.streamId);
-		if (found == self->streams.end()) {
+		auto found = streams.find(request.streamId);
+		if (found == streams.end()) {
 			throw wrong_shard_server();
 		}
 		Reference<CDCBufferedStream> stream = found->second;
@@ -865,13 +896,13 @@ Future<Void> acknowledge(CDCProxyData* self, CDCAckRequest request) {
 			const int64_t releasedBytes =
 			    sizeof(VersionedMutationsRef) + stream->mutations.front().mutations.expectedSize();
 			stream->bufferedBytes -= releasedBytes;
-			ASSERT_GE(self->bufferedBytes, releasedBytes);
-			self->bufferedBytes -= releasedBytes;
-			self->bufferLock.release(releasedBytes);
+			ASSERT_GE(bufferedBytes, releasedBytes);
+			bufferedBytes -= releasedBytes;
+			bufferLock.release(releasedBytes);
 			stream->mutations.pop_front();
 		}
 		ASSERT_GE(stream->bufferedBytes, 0);
-		self->popAcknowledgedDataTrigger.trigger();
+		popAcknowledgedDataTrigger.trigger();
 		request.reply.send(Void());
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
@@ -881,9 +912,9 @@ Future<Void> acknowledge(CDCProxyData* self, CDCAckRequest request) {
 	}
 }
 
-Future<Void> registerStream(CDCProxyData* self, CDCRegisterStreamRequest request) {
+Future<Void> CDCProxy::registerStream(CDCRegisterStreamRequest request) {
 	try {
-		const CDCStreamId streamId = co_await registerNativeCdcStream(self->cx, request.name, request.keys, self->id);
+		const CDCStreamId streamId = co_await registerNativeCdcStream(cx, request.name, request.keys, id);
 		request.reply.send(CDCRegisterStreamReply(streamId));
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
@@ -893,11 +924,11 @@ Future<Void> registerStream(CDCProxyData* self, CDCRegisterStreamRequest request
 	}
 }
 
-Future<Void> removeStream(CDCProxyData* self, CDCRemoveStreamRequest request) {
+Future<Void> CDCProxy::removeStream(CDCRemoveStreamRequest request) {
 	try {
-		Optional<NativeCdcRemovedStreamInfo> removed = co_await removeNativeCdcStream(self->cx, request.name, self->id);
+		Optional<NativeCdcRemovedStreamInfo> removed = co_await removeNativeCdcStream(cx, request.name, id);
 		if (removed.present()) {
-			self->popAcknowledgedDataTrigger.trigger();
+			popAcknowledgedDataTrigger.trigger();
 		}
 		request.reply.send(Void());
 	} catch (Error& e) {
@@ -908,11 +939,11 @@ Future<Void> removeStream(CDCProxyData* self, CDCRemoveStreamRequest request) {
 	}
 }
 
-Future<Void> listStreams(CDCProxyData* self, CDCListStreamsRequest request) {
+Future<Void> CDCProxy::listStreams(CDCListStreamsRequest request) {
 	try {
-		std::vector<NativeCdcStreamInfo> streams = co_await listNativeCdcStreams(self->cx);
+		std::vector<NativeCdcStreamInfo> listedStreams = co_await listNativeCdcStreams(cx);
 		CDCListStreamsReply reply;
-		for (NativeCdcStreamInfo const& stream : streams) {
+		for (NativeCdcStreamInfo const& stream : listedStreams) {
 			reply.streams.push_back(reply.arena,
 			                        CDCStreamInfoRef(StringRef(reply.arena, stream.name),
 			                                         stream.streamId,
@@ -928,52 +959,42 @@ Future<Void> listStreams(CDCProxyData* self, CDCListStreamsRequest request) {
 	}
 }
 
-Future<Void> serveConsumeRequests(CDCProxyData* self,
-                                  FutureStream<CDCConsumeRequest> requests,
-                                  ActorCollection* actors) {
+Future<Void> CDCProxy::serveConsumeRequests(FutureStream<CDCConsumeRequest> requests) {
 	while (true) {
 		CDCConsumeRequest request = co_await requests;
-		actors->add(consume(self, std::move(request)));
+		actors.add(consume(std::move(request)));
 	}
 }
 
-Future<Void> serveAcknowledgeRequests(CDCProxyData* self,
-                                      FutureStream<CDCAckRequest> requests,
-                                      ActorCollection* actors) {
+Future<Void> CDCProxy::serveAcknowledgeRequests(FutureStream<CDCAckRequest> requests) {
 	while (true) {
 		CDCAckRequest request = co_await requests;
-		actors->add(acknowledge(self, std::move(request)));
+		actors.add(acknowledge(std::move(request)));
 	}
 }
 
-Future<Void> serveRegisterStreamRequests(CDCProxyData* self,
-                                         FutureStream<CDCRegisterStreamRequest> requests,
-                                         ActorCollection* actors) {
+Future<Void> CDCProxy::serveRegisterStreamRequests(FutureStream<CDCRegisterStreamRequest> requests) {
 	while (true) {
 		CDCRegisterStreamRequest request = co_await requests;
-		actors->add(registerStream(self, std::move(request)));
+		actors.add(registerStream(std::move(request)));
 	}
 }
 
-Future<Void> serveRemoveStreamRequests(CDCProxyData* self,
-                                       FutureStream<CDCRemoveStreamRequest> requests,
-                                       ActorCollection* actors) {
+Future<Void> CDCProxy::serveRemoveStreamRequests(FutureStream<CDCRemoveStreamRequest> requests) {
 	while (true) {
 		CDCRemoveStreamRequest request = co_await requests;
-		actors->add(removeStream(self, std::move(request)));
+		actors.add(removeStream(std::move(request)));
 	}
 }
 
-Future<Void> serveListStreamsRequests(CDCProxyData* self,
-                                      FutureStream<CDCListStreamsRequest> requests,
-                                      ActorCollection* actors) {
+Future<Void> CDCProxy::serveListStreamsRequests(FutureStream<CDCListStreamsRequest> requests) {
 	while (true) {
 		CDCListStreamsRequest request = co_await requests;
-		actors->add(listStreams(self, std::move(request)));
+		actors.add(listStreams(std::move(request)));
 	}
 }
 
-Future<Void> serveHaltForTestingRequests(FutureStream<HaltCDCProxyRequest> requests) {
+Future<Void> CDCProxy::serveHaltForTestingRequests(FutureStream<HaltCDCProxyRequest> requests) {
 	while (true) {
 		HaltCDCProxyRequest request = co_await requests;
 		if (!g_network->isSimulated()) {
@@ -985,11 +1006,7 @@ Future<Void> serveHaltForTestingRequests(FutureStream<HaltCDCProxyRequest> reque
 	}
 }
 
-Future<Void> monitorDBInfo(CDCProxyData* self,
-                           CDCProxyInterface proxy,
-                           uint64_t recoveryCount,
-                           Reference<AsyncVar<ServerDBInfo> const> dbInfo,
-                           ActorCollection* actors) {
+Future<Void> CDCProxy::monitorDBInfo(CDCProxyInterface proxy, uint64_t recoveryCount) {
 	bool hasBeenPublished =
 	    std::find(dbInfo->get().client.cdcProxies.begin(), dbInfo->get().client.cdcProxies.end(), proxy) !=
 	    dbInfo->get().client.cdcProxies.end();
@@ -1005,11 +1022,28 @@ Future<Void> monitorDBInfo(CDCProxyData* self,
 		if (!dbInfo->get().logSystemConfig.tLogs.empty()) {
 			CODE_PROBE(dbInfo->get().recoveryCount > recoveryCount,
 			           "CDC proxy refreshes its log consumer after recovery");
-			self->logSystem->set(makeLogSystemConsumerFromServerDBInfo(self->id, dbInfo->get()));
+			logSystem->set(makeLogSystemConsumerFromServerDBInfo(id, dbInfo->get()));
 		}
-		reconcileStreams(self, actors);
-		self->popAcknowledgedDataTrigger.trigger();
+		reconcileStreams();
+		popAcknowledgedDataTrigger.trigger();
 	}
+}
+
+Future<Void> CDCProxy::run(CDCProxyInterface proxy, uint64_t recoveryCount) {
+	actors.add(waitFailureServer(proxy.waitFailure.getFuture()));
+	actors.add(traceRole(Role::CDC_PROXY, proxy.id()));
+	logSystem->set(makeLogSystemConsumerFromServerDBInfo(id, dbInfo->get()));
+	reconcileStreams();
+	actors.add(monitorAcknowledgedDataPops());
+	popAcknowledgedDataTrigger.trigger();
+	actors.add(serveConsumeRequests(proxy.consume.getFuture()));
+	actors.add(serveAcknowledgeRequests(proxy.ack.getFuture()));
+	actors.add(serveRegisterStreamRequests(proxy.registerStream.getFuture()));
+	actors.add(serveRemoveStreamRequests(proxy.removeStream.getFuture()));
+	actors.add(serveListStreamsRequests(proxy.listStreams.getFuture()));
+	actors.add(serveHaltForTestingRequests(proxy.haltForTesting.getFuture()));
+	actors.add(monitorDBInfo(proxy, recoveryCount));
+	co_await actors.getResult();
 }
 
 } // namespace
@@ -1018,23 +1052,8 @@ Future<Void> cdcProxyServer(CDCProxyInterface proxy,
                             uint64_t recoveryCount,
                             Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	try {
-		CDCProxyData self(proxy, dbInfo);
-		ActorCollection actors(false);
-
-		actors.add(waitFailureServer(proxy.waitFailure.getFuture()));
-		actors.add(traceRole(Role::CDC_PROXY, proxy.id()));
-		self.logSystem->set(makeLogSystemConsumerFromServerDBInfo(self.id, dbInfo->get()));
-		reconcileStreams(&self, &actors);
-		actors.add(monitorAcknowledgedDataPops(&self));
-		self.popAcknowledgedDataTrigger.trigger();
-		actors.add(serveConsumeRequests(&self, proxy.consume.getFuture(), &actors));
-		actors.add(serveAcknowledgeRequests(&self, proxy.ack.getFuture(), &actors));
-		actors.add(serveRegisterStreamRequests(&self, proxy.registerStream.getFuture(), &actors));
-		actors.add(serveRemoveStreamRequests(&self, proxy.removeStream.getFuture(), &actors));
-		actors.add(serveListStreamsRequests(&self, proxy.listStreams.getFuture(), &actors));
-		actors.add(serveHaltForTestingRequests(proxy.haltForTesting.getFuture()));
-		actors.add(monitorDBInfo(&self, proxy, recoveryCount, dbInfo, &actors));
-		co_await actors.getResult();
+		CDCProxy cdcProxy(proxy, dbInfo);
+		co_await cdcProxy.run(proxy, recoveryCount);
 	} catch (Error& e) {
 		TraceEvent("CDCProxyTerminated", proxy.id()).errorUnsuppressed(e);
 		if (e.code() != error_code_worker_removed) {
