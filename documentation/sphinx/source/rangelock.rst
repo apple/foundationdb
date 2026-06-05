@@ -146,6 +146,18 @@ Two ``ProxyMetrics`` counters expose which path the proxy took:
 
 Operators can use these counters to confirm in production that the optimization is firing, and to detect the silent-degradation case where the flag fails to clear after a release. In normal operation only one counter advances at a time per proxy.
 
+Correctness across proxies
+--------------------------
+The ``anyExclusiveLockHeld_`` flag is per-proxy and never directly synchronized between proxies. Convergence comes from the ``txnStateStore`` mutation broadcast already used by the in-memory ``coreMap``: every proxy applies the same ``\xff/rangeLock/`` mutation stream in commit-version order, so each proxy's flag value at version V is a deterministic function of the same prefix of the log.
+
+* **Within a single batch.** ``applyMetadataMutations`` (Phase 3a) runs before ``rejectMutationsForReadLockOnRange`` (Phase 3b). If the batch took a lock, ``consumePendingRequest`` has already set the flag by the time the reject loop reads it. Mutations ordered after the lock in the same batch are caught by the existing ``write_conflict_range`` mechanism, not by the flag.
+
+* **Across batches.** A proxy never starts processing batch ``V+1`` until version ``V`` 's metadata mutations are applied locally. So when batch ``V+1`` reaches Phase 3b, every lock taken at version ``<= V`` is reflected in the flag.
+
+* **During recovery.** ``initKeyPoint`` is monotonic-up — it only sets the flag to true. Combined with ``consumePendingRequest`` 's post-coalesce full recompute at runtime, the flag can be temporarily stuck at true (harmless: the slow path runs, finds no locks, rejects nothing — extra CPU, no behavior change) but cannot be stuck at false while locks are actually held. Stuck-true is observable through the ``RangeLockFastPath`` counter; stuck-false would manifest as missing ``transaction_rejected_range_locked`` rejections, which existing simulation workloads (``tests/fast/RangeLocking.toml``, ``tests/fast/RangeLockCycle.toml``) already assert against.
+
+The flag is therefore a layer on top of an already-coordinated invariant — the consistency of ``coreMap`` itself across proxies — rather than introducing a new coordination requirement of its own.
+
 Support multiple range lock users
 ---------------------------------
 To support rangeLock for multiple applications, we add ownership concept to rangeLock. 
