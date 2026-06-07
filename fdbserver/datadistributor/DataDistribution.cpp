@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <algorithm>
+
 #include "fdbclient/Audit.h"
 #include "fdbclient/AuditUtils.h"
 #include "fdbclient/BulkDumping.h"
@@ -88,6 +90,38 @@ std::set<int> const& normalDDQueueErrors() {
 		                    error_code_finish_move_keys_too_many_retries,
 		                    error_code_start_move_keys_too_many_retries };
 	return s;
+}
+
+struct DataDistributorDcIds {
+	std::vector<Optional<Key>> primary;
+	std::vector<Optional<Key>> remote;
+};
+
+// Selects the active primary DC and the first other configured DC, falling back to configuration order.
+DataDistributorDcIds getDataDistributorDcIds(const std::vector<RegionInfo>& regions, Optional<Key> activePrimaryDcId) {
+	DataDistributorDcIds dcIds;
+	if (regions.empty()) {
+		return dcIds;
+	}
+
+	auto primaryRegion = regions.begin();
+	if (activePrimaryDcId.present()) {
+		auto activeRegion = std::find_if(regions.begin(), regions.end(), [&](const RegionInfo& region) {
+			return region.dcId == activePrimaryDcId.get();
+		});
+		if (activeRegion != regions.end()) {
+			primaryRegion = activeRegion;
+		}
+	}
+
+	dcIds.primary.push_back(primaryRegion->dcId);
+	for (auto region = regions.begin(); region != regions.end(); ++region) {
+		if (region != primaryRegion) {
+			dcIds.remote.push_back(region->dcId);
+			break;
+		}
+	}
+	return dcIds;
 }
 
 } // anonymous namespace
@@ -586,15 +620,11 @@ public:
 	}
 
 	void initDcInfo() {
-		primaryDcId.clear();
-		remoteDcIds.clear();
-		const std::vector<RegionInfo>& regions = configuration.regions;
-		if (!configuration.regions.empty()) {
-			primaryDcId.push_back(regions[0].dcId);
-		}
-		if (configuration.regions.size() > 1) {
-			remoteDcIds.push_back(regions[1].dcId);
-		}
+		Optional<Key> activePrimaryDcId =
+		    txnProcessor->isMocked() ? Optional<Key>() : dbInfo->get().master.locality.dcId();
+		auto dcIds = getDataDistributorDcIds(configuration.regions, activePrimaryDcId);
+		primaryDcId = std::move(dcIds.primary);
+		remoteDcIds = std::move(dcIds.remote);
 	}
 
 	Future<Void> waitDataDistributorEnabled() const {
@@ -5380,6 +5410,28 @@ TEST_CASE("/DataDistribution/StorageWiggler/Order") {
 		ASSERT(id == correctOrder[i]);
 	}
 	ASSERT(!wiggler.getNextServerId().present());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Initialization/DcIds") {
+	RegionInfo configuredPrimary;
+	configuredPrimary.dcId = "primary"_sr;
+	RegionInfo configuredRemote;
+	configuredRemote.dcId = "remote"_sr;
+	std::vector<RegionInfo> regions{ configuredPrimary, configuredRemote };
+
+	auto dcIds = getDataDistributorDcIds(regions, Optional<Key>("primary"_sr));
+	ASSERT(dcIds.primary == std::vector<Optional<Key>>{ Optional<Key>("primary"_sr) });
+	ASSERT(dcIds.remote == std::vector<Optional<Key>>{ Optional<Key>("remote"_sr) });
+
+	dcIds = getDataDistributorDcIds(regions, Optional<Key>("remote"_sr));
+	ASSERT(dcIds.primary == std::vector<Optional<Key>>{ Optional<Key>("remote"_sr) });
+	ASSERT(dcIds.remote == std::vector<Optional<Key>>{ Optional<Key>("primary"_sr) });
+
+	dcIds = getDataDistributorDcIds(regions, Optional<Key>("unknown"_sr));
+	ASSERT(dcIds.primary == std::vector<Optional<Key>>{ Optional<Key>("primary"_sr) });
+	ASSERT(dcIds.remote == std::vector<Optional<Key>>{ Optional<Key>("remote"_sr) });
+
 	return Void();
 }
 
