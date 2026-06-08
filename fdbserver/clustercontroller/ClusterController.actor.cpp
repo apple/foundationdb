@@ -302,12 +302,19 @@ Future<Void> recruitFailedLogRouters(ClusterControllerData* cluster,
 	std::vector<WorkerDetails> workers =
 	    cluster->getWorkersForRoleInDatacenter(targetDcId, ProcessClass::LogRouter, tagIds.size(), db->config, id_used);
 
-	if (workers.size() < tagIds.size()) {
+	if (workers.empty()) {
 		TraceEvent(SevWarn, "NotEnoughWorkersForLogRouters", cluster->id)
 		    .detail("Required", tagIds.size())
 		    .detail("Available", workers.size())
 		    .detail("TargetDcId", targetDcId);
 		throw recruitment_failed();
+	}
+	if (workers.size() < tagIds.size()) {
+		TraceEvent(SevWarn, "PartialWorkersForLogRouters", cluster->id)
+		    .detail("Required", tagIds.size())
+		    .detail("Available", workers.size())
+		    .detail("TargetDcId", targetDcId);
+		tagIds.resize(workers.size());
 	}
 
 	// Replacement log routers will determine their own start version by querying
