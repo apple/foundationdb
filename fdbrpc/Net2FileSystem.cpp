@@ -137,9 +137,11 @@ Future<Reference<class IAsyncFile>> Net2FileSystem::open(const std::string& file
 		dev_t fileDeviceId = getDeviceId(filename);
 		if (std::find(this->fileSystemDeviceIds.begin(), this->fileSystemDeviceIds.end(), fileDeviceId) ==
 		    this->fileSystemDeviceIds.end()) {
-			TraceEvent(SevError, "DeviceIdMismatched")
-			    .detail("AllowedFileSystemDeviceCount", this->fileSystemDeviceIds.size())
-			    .detail("FileDeviceId", fileDeviceId);
+			TraceEvent te(SevError, "DeviceIdMismatched");
+			te.detail("FileDeviceId", fileDeviceId);
+			for (size_t i = 0; i < this->fileSystemDeviceIds.size(); ++i) {
+				te.detail(format("AllowedFileSystemDeviceId%zu", i).c_str(), this->fileSystemDeviceIds[i]);
+			}
 			throw io_error();
 		}
 	}
@@ -234,6 +236,10 @@ Net2FileSystem::Net2FileSystem(double ioTimeout, const std::vector<std::string>&
 				              format("Could not get device id from `%s'", fileSystemPath.c_str()).c_str());
 			}
 		}
+
+		std::sort(this->fileSystemDeviceIds.begin(), this->fileSystemDeviceIds.end());
+		this->fileSystemDeviceIds.erase(std::unique(this->fileSystemDeviceIds.begin(), this->fileSystemDeviceIds.end()),
+		                                this->fileSystemDeviceIds.end());
 	}
 #endif
 }

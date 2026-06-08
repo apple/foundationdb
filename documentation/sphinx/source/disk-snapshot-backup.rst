@@ -63,7 +63,7 @@ Before using the ``snapshot`` command the following setup needs to be done
     whitelist_binpath = "/bin/snap_create.sh"
 
 * ``snapshot create binary`` should capture any additional data needed to restore the cluster. Additional data can be stored as tags in cloud environments or it can be stored in an additional file/directory in the ``datadir`` and then snapshotted. The section :ref:`disk-snapshot-backup-specification` describes the recommended specification of the list of things that can be gathered by the binary.
-* When ``--tlog-spill-path`` is supplied, the ``snapshot create binary`` must take a coordinated crash-consistent snapshot of both the ``--path`` and ``--tlog-spill-path`` disks before returning success.
+* When ``--tlog-spill-path`` is supplied, the ``snapshot create binary`` must take a coordinated crash-consistent snapshot of both the ``--path`` and ``--tlog-spill-path`` disks before returning success. Use a storage consistency group, a shared volume group, or quiesce/freeze both filesystems before creating per-volume snapshots so the two paths restore to the same crash point.
 * Program should return a non-zero status for any failures and zero for success
 * If the ``snapshot create binary`` process takes longer than 5 minutes to return a status then it will be killed and ``snapshot`` command will fail. Timeout of 5 minutes is configurable and can be set with ``SNAP_CREATE_MAX_TIMEOUT`` config parameter in :ref:`foundationdb-conf-fdbserver`. Since the default value is large enough, there should not be a need to modify this configuration.
 
