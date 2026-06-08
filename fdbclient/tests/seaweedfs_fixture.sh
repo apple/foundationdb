@@ -64,22 +64,21 @@ function download_weed {
   fi
   if [[ "$OSTYPE" =~ ^linux ]]; then
     os="linux"
-    arch="$(uname -m)"
-    # The seaweedfs site is looking for amd64 as arch.
-    if [[ "${arch}" ==  "x86_64" ]]; then
-      arch="amd64"
-    elif [[ "${arch}" == "aarch64" ]]; then
-      arch="arm64"
-    else
-      echo "ERROR: Unsupported architecture ${arch}" >&2
-      # Return out of this function (does not exit program).
-      return 1
-    fi
   elif [[ "$OSTYPE" =~ ^darwin ]]; then
     os="darwin"
-    arch="$(uname -m)"
   else
     echo "ERROR: Unsupported operating system" >&2
+    # Return out of this function (does not exit program).
+    return 1
+  fi
+  arch="$(uname -m)"
+  if   [[ $arch ==  x86_64 ]]; then
+    arch="amd64"
+  elif [[ $arch == aarch64 ]]; then
+    arch="arm64"
+  fi
+  if [[ $arch != amd64 ]] && [[ $arch != arm64 ]]; then
+    echo "ERROR: Unsupported architecture ${arch}" >&2
     # Return out of this function (does not exit program).
     return 1
   fi
@@ -88,7 +87,7 @@ function download_weed {
   local fullpath_tgz="${dir}/${tgz}"
   if [[ ! -f "${fullpath_tgz}" ]]; then
     # Change directory because awkward telling curl where to put download.
-    local url="https://github.com/seaweedfs/seaweedfs/releases/download/3.79/${tgz}"
+    local url="https://github.com/seaweedfs/seaweedfs/releases/download/3.80/${tgz}"
     # Presuming! that an error in subshell will be propagated because of bash -e?
     # else, wrap in an if ! /then exit?
     (
