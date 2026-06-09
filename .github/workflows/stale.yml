@@ -4,6 +4,7 @@ on:
     - cron: '15 20 * * *' # 20:15 UTC
 
 permissions:
+  actions: write
   issues: write
   pull-requests: write
 
