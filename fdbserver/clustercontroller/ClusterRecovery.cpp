@@ -467,6 +467,8 @@ Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 		            configuration.expectedLogSets(!self->primaryDcId.empty() ? self->primaryDcId[0] : Optional<Key>()))
 		    .detail("RecoveryCount", newState.recoveryCount);
 		co_await self->cstate.write(newState, finalUpdate);
+		// Keep oldLogData in memory even after the coordinated state drops old generations. ServerDBInfo uses
+		// it to keep old-generation TLogs serving in case this master has to run recovery again.
 		if (self->cstateUpdated.canBeSet()) {
 			self->cstateUpdated.send(Void());
 		}
