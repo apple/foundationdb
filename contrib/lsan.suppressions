@@ -36,3 +36,17 @@ leak:runNetworkThread
 # onMainThread into the external client's network thread. If that thread
 # has already stopped, the dispatched work leaks.
 leak:monitorProtocolVersion
+
+# CApiCancelTransactionCB drops fdb::Future objects from get() without
+# awaiting them, then calls done() which cancels the transaction. The
+# cancellation propagates asynchronously across the test process's local
+# fdb_c network thread and each external client's network thread. When
+# stopNetwork() runs, whichever Net2 reaches stopImmediately() first does
+# the leak check while the other Net2s' taskQueues are still intact;
+# afterwards taskQueue.clear() drops PromiseTasks (raw pointers, leaked
+# by design — see flow/Net2.cpp). The doOnMainThread actor frames waiting
+# on those Promises never wake, so process-exit LSan reports them. Suppress
+# on the test path so we mask only the test-induced shutdown race, not real
+# leaks on these code paths.
+leak:CancelTransactionWorkload::randomCancelGetTx
+leak:CancelTransactionWorkload::randomCancelAfterFirstResTx
