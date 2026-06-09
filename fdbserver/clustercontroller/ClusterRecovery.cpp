@@ -467,8 +467,6 @@ Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 		            configuration.expectedLogSets(!self->primaryDcId.empty() ? self->primaryDcId[0] : Optional<Key>()))
 		    .detail("RecoveryCount", newState.recoveryCount);
 		co_await self->cstate.write(newState, finalUpdate);
-		// Purge in memory state after durability to avoid race conditions.
-		self->logSystem->purgeOldRecoveredGenerationsInMemory(newState);
 		if (self->cstateUpdated.canBeSet()) {
 			self->cstateUpdated.send(Void());
 		}

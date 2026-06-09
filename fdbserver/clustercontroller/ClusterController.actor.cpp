@@ -1194,7 +1194,6 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 
 	if (req.recoveryState == RecoveryState::FULLY_RECOVERED) {
 		self->db.unfinishedRecoveries = 0;
-		ASSERT(!req.logSystemConfig.oldTLogs.size());
 	}
 
 	db->masterRegistrationCount = req.registrationCount;
