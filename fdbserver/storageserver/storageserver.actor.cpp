@@ -2876,6 +2876,8 @@ Future<GetKeyValuesReply> readRange(StorageServer* data,
 	// for remembering the position in the resultCache
 	int pos = 0;
 
+	result.cached = false;
+
 	// if (limit >= 0) we are reading forward, else backward
 	if (limit >= 0) {
 		// We might care about a clear beginning before start that
