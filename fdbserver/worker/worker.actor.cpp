@@ -2157,6 +2157,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 	try {
 		state std::vector<DiskStore> stores = getDiskStores(folder, tLogSpillFolder);
+		// Recovery validation remains process-wide: the datadir sentinel covers both disk queues
+		// and tlog spill KV stores, even when the spill files live on a separate volume.
 		state bool validateDataFiles = deleteFile(joinPath(folder, validationFilename));
 		state int index = 0;
 		for (; index < stores.size(); ++index) {

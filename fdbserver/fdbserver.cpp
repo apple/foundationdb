@@ -2253,6 +2253,7 @@ int main(int argc, char* argv[]) {
 			// mocks3 folder is used by MockS3 persistence for post-test analysis
 
 			for (const auto& dir : directories) {
+				// Simulation may create one tlog spill sibling for each process data directory.
 				StringRef tLogSpillFolderSuffix = "-tlog-spill"_sr;
 				bool isTLogSpillFolder =
 				    dir.size() == 32 + tLogSpillFolderSuffix.size() && StringRef(dir).endsWith(tLogSpillFolderSuffix);
