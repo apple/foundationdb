@@ -85,10 +85,13 @@ set(wheel_package_file ${CMAKE_BINARY_DIR}/packages/foundationdb-${FDB_VERSION}$
 
 # Build both source distribution and wheel
 # Note: foundationdb is a pure Python package (uses ctypes), so wheel is py3-none-any
+set(PYPKG_VENV_DIR "${CMAKE_BINARY_DIR}/pypkg-venv")
+set(PYPKG_PY3      "${PYPKG_VENV_DIR}/bin/python3")
 add_custom_command(OUTPUT ${package_file} ${wheel_package_file}
-  COMMAND $<TARGET_FILE:Python3::Interpreter> -m ensurepip
-  COMMAND $<TARGET_FILE:Python3::Interpreter> -m pip install --upgrade build
-  COMMAND $<TARGET_FILE:Python3::Interpreter> -m build
+  COMMAND $<TARGET_FILE:Python3::Interpreter> -m venv "${PYPKG_VENV_DIR}"
+  COMMAND ${PYPKG_PY3} -m ensurepip
+  COMMAND ${PYPKG_PY3} -m pip install --upgrade build
+  COMMAND ${PYPKG_PY3} -m build
   COMMAND ${CMAKE_COMMAND} -E copy_if_different dist/${setup_file_name} ${package_file}
   COMMAND ${CMAKE_COMMAND} -E copy_if_different dist/${wheel_file_name} ${wheel_package_file}
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
