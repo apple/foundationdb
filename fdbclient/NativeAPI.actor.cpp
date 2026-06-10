@@ -5895,9 +5895,16 @@ Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(Database cx,
 			err = e;
 		}
 		retryCount++;
-		// Upgrade from SevDebug to SevWarn after 60 seconds of retrying
-		Severity sev = (now() - startTime > 60.0) ? SevWarn : SevDebug;
-		TraceEvent(sev, "WaitStorageMetricsHandleError")
+		// Stays at SevDebug. The previous SevDebug→SevWarn upgrade after 60s
+		// elapsed didn't actually filter for stuck shards: the SS-side
+		// waitMetrics is a long-poll with a STORAGE_METRIC_TIMEOUT of 600s,
+		// and on timeout the SS deliberately returns wrong_shard_server with
+		// WAIT_METRICS_WRONG_SHARD_CHANCE = 0.1 to force clients to refresh
+		// their location cache. So most calls that ever hit this catch are
+		// already past 60s elapsed by design, and the SevWarn was firing on
+		// normal cluster operation. DD-init stall visibility lives on the
+		// DDInit* events instead (PR #12913).
+		TraceEvent(SevDebug, "WaitStorageMetricsHandleError")
 		    .error(err)
 		    .detail("Keys", keys)
 		    .detail("Elapsed", now() - startTime)
