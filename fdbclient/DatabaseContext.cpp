@@ -914,41 +914,6 @@ static Future<Void> monitorClientDBInfoChange(DatabaseContext* cx,
 	}
 }
 
-void updateLocationCacheWithCaches(DatabaseContext* self,
-                                   const std::map<UID, StorageServerInterface>& removed,
-                                   const std::map<UID, StorageServerInterface>& added) {
-	// TODO: this needs to be more clever in the future
-	auto ranges = self->locationCache.ranges();
-	for (auto iter = ranges.begin(); iter != ranges.end(); ++iter) {
-		if (iter->value() && iter->value()->hasCaches) {
-			auto& val = iter->value();
-			std::vector<Reference<ReferencedInterface<StorageServerInterface>>> interfaces;
-			interfaces.reserve(val->size() - removed.size() + added.size());
-			for (int i = 0; i < val->size(); ++i) {
-				const auto& interf = (*val)[i];
-				if (!removed.contains(interf->interf.id())) {
-					interfaces.emplace_back(interf);
-				}
-			}
-			for (const auto& p : added) {
-				interfaces.push_back(makeReference<ReferencedInterface<StorageServerInterface>>(p.second));
-			}
-			iter->value() = makeReference<LocationInfo>(interfaces, true);
-		}
-	}
-}
-
-Reference<LocationInfo> addCaches(const Reference<LocationInfo>& loc,
-                                  const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& other) {
-	std::vector<Reference<ReferencedInterface<StorageServerInterface>>> interfaces;
-	interfaces.reserve(loc->size() + other.size());
-	for (int i = 0; i < loc->size(); ++i) {
-		interfaces.emplace_back((*loc)[i]);
-	}
-	interfaces.insert(interfaces.end(), other.begin(), other.end());
-	return makeReference<LocationInfo>(interfaces, true);
-}
-
 static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 	Reference<ReadYourWritesTransaction> tr;
 	KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);

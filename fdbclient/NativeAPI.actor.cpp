@@ -1572,36 +1572,6 @@ Future<Void> Transaction::warmRange(KeyRange keys) {
 	return warmRange_impl(trState, keys);
 }
 
-namespace {
-
-template <class Interface, class Request, bool P>
-Future<REPLY_TYPE(Request)> loadBalance(
-    DatabaseContext* ctx,
-    const Reference<LocationInfo> alternatives,
-    RequestStream<Request, P> Interface::* channel,
-    const Request& request = Request(),
-    TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
-    AtMostOnce atMostOnce =
-        AtMostOnce::False, // if true, throws request_maybe_delivered() instead of retrying automatically
-    QueueModel* model = nullptr,
-    bool compareReplicas = false,
-    int requiredReplicas = 0) {
-	if (alternatives->hasCaches) {
-		return loadBalance(
-		    alternatives->locations(), channel, request, taskID, atMostOnce, model, compareReplicas, requiredReplicas);
-	}
-	return fmap(
-	    [ctx](auto const& res) {
-		    if (res.cached) {
-			    ctx->updateCache.trigger();
-		    }
-		    return res;
-	    },
-	    loadBalance(
-	        alternatives->locations(), channel, request, taskID, atMostOnce, model, compareReplicas, requiredReplicas));
-}
-} // namespace
-
 ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
                                        Key key,
                                        TransactionRecordLogInfo recordLogInfo) {
@@ -1654,8 +1624,7 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 						throw transaction_too_old();
 					}
 					when(GetValueReply _reply = wait(
-					         loadBalance(trState->cx.getPtr(),
-					                     locationInfo.locations,
+					         loadBalance(locationInfo.locations->locations(),
 					                     &StorageServerInterface::getValue,
 					                     GetValueRequest(span.context,
 					                                     key,
@@ -1783,8 +1752,7 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState, KeySelector k) {
 						throw transaction_too_old();
 					}
 					when(GetKeyReply _reply = wait(
-					         loadBalance(trState->cx.getPtr(),
-					                     locationInfo.locations,
+					         loadBalance(locationInfo.locations->locations(),
 					                     &StorageServerInterface::getKey,
 					                     req,
 					                     TaskPriority::DefaultPromiseEndpoint,
@@ -1926,8 +1894,7 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 			state WatchValueReply resp;
 			choose {
 				when(WatchValueReply r = wait(
-				         loadBalance(cx.getPtr(),
-				                     locationInfo.locations,
+				         loadBalance(locationInfo.locations->locations(),
 				                     &StorageServerInterface::watchValue,
 				                     WatchValueRequest(span.context,
 				                                       parameters->key,
@@ -2279,8 +2246,7 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 							throw transaction_too_old();
 						}
 						when(GetKeyValuesFamilyReply _rep = wait(loadBalance(
-						         trState->cx.getPtr(),
-						         locations[shard].locations,
+						         locations[shard].locations->locations(),
 						         getRangeRequestStream<GetKeyValuesFamilyRequest>(),
 						         req,
 						         TaskPriority::DefaultPromiseEndpoint,
@@ -2665,8 +2631,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					}
 					// state AnnotateActor annotation(currentLineage);
 					GetKeyValuesFamilyReply _rep =
-					    wait(loadBalance(trState->cx.getPtr(),
-					                     beginServer.locations,
+					    wait(loadBalance(beginServer.locations->locations(),
 					                     getRangeRequestStream<GetKeyValuesFamilyRequest>(),
 					                     req,
 					                     TaskPriority::DefaultPromiseEndpoint,
