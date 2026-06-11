@@ -268,7 +268,6 @@ Future<Void> commitBatcher(ProxyCommitData* commitData,
 
 				// WARNING: this code is run at a high priority, so it needs to do as little work as possible
 				int bytes = getBytes(req);
-				commitData->stats.transactionSizeDist->sample(bytes);
 
 				// Drop requests if memory is under severe pressure
 				if (commitData->commitBatchesMemBytesCount + bytes > memBytesLimit) {
@@ -280,6 +279,7 @@ Future<Void> commitBatcher(ProxyCommitData* commitData,
 					    .detail("MemLimit", memBytesLimit);
 					continue;
 				}
+				commitData->stats.transactionSizeDist->sample(bytes);
 
 				if (bytes > FLOW_KNOBS->PACKET_WARNING) {
 					TraceEvent(SevWarn, "LargeTransaction")
