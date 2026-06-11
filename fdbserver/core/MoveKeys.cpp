@@ -1237,9 +1237,9 @@ Future<Void> checkFetchingState(Database cx,
 				// that might cause it to trigger. Adding this assertion to find any such cases via testing.
 				ASSERT_WE_THINK(serverListValues[s].present());
 				if (!serverListValues[s].present()) {
-					// FIXME: Is this the right behavior?  dataMovementComplete will never be sent!
-					// CODE_PROBE(true, "check fetching state moved to removed server", probe::decoration::rare);
-					throw move_to_removed_server();
+					CODE_PROBE(true, "check fetching state moved to removed server", probe::decoration::rare);
+					dataMovementComplete.sendError(move_to_removed_server());
+					co_return;
 				}
 				auto si = decodeServerListValue(serverListValues[s].get());
 				ASSERT(si.id() == dest[s]);
