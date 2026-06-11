@@ -58,6 +58,7 @@ struct NativeCdcEndToEndWorkload : TestWorkload {
 	int keyCount;
 	int writesPerRound;
 	int rounds;
+	int assignmentPublicationChecks;
 	double drainProbability;
 	double delayBetweenRounds;
 	double operationTimeout;
@@ -71,6 +72,7 @@ struct NativeCdcEndToEndWorkload : TestWorkload {
 		keyCount = getOption(options, "keyCount"_sr, 16);
 		writesPerRound = getOption(options, "writesPerRound"_sr, 5);
 		rounds = getOption(options, "rounds"_sr, 30);
+		assignmentPublicationChecks = getOption(options, "assignmentPublicationChecks"_sr, 0);
 		drainProbability = getOption(options, "drainProbability"_sr, 0.25);
 		delayBetweenRounds = getOption(options, "delayBetweenRounds"_sr, 0.5);
 		operationTimeout = getOption(options, "operationTimeout"_sr, 120.0);
@@ -80,6 +82,7 @@ struct NativeCdcEndToEndWorkload : TestWorkload {
 		ASSERT_GE(keyCount, 2);
 		ASSERT_GE(writesPerRound, 1);
 		ASSERT_LE(writesPerRound, keyCount);
+		ASSERT_GE(assignmentPublicationChecks, 0);
 	}
 
 	// RandomRangeLock can outlive this bounded CDC workload and mask its progress check.
@@ -189,6 +192,49 @@ struct NativeCdcEndToEndWorkload : TestWorkload {
 		co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
 	}
 
+	Future<Void> validateAssignmentPublication(Database cx) {
+		const KeyRange keys(KeyRangeRef("native-cdc-e2e/assignment/data/"_sr, "native-cdc-e2e/assignment/data0"_sr));
+		for (int check = 0; check < assignmentPublicationChecks; ++check) {
+			const Key name = Key(StringRef(format("native-cdc-e2e/assignment/%04d", check)));
+			const Key key = Key(StringRef(format("native-cdc-e2e/assignment/data/%04d", check)));
+			const Value value = Value(StringRef(format("assignment-value/%04d", check)));
+
+			co_await delay(0.1);
+			const CDCStreamId streamId =
+			    co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout);
+			Reference<NativeCdcConsumer> consumer =
+			    co_await timeoutError(createNativeCdcConsumer(cx, name), operationTimeout);
+			ASSERT_EQ(consumer->position().streamId, streamId);
+
+			const Version committed = co_await writeValues(cx, { { key, value } });
+			bool observed = false;
+			const double deadline = now() + operationTimeout;
+			while (!observed && consumer->position().lastConsumedVersion < committed) {
+				const Version previous = consumer->position().lastConsumedVersion;
+				CDCConsumeReply reply = co_await timeoutError(consumer->consume(), operationTimeout);
+				if (reply.lastConsumedVersion == previous) {
+					ASSERT_LT(now(), deadline);
+					co_await delay(0.1);
+					continue;
+				}
+				ASSERT_GT(reply.lastConsumedVersion, previous);
+				for (const auto& versioned : reply.mutations) {
+					ASSERT_GT(versioned.version, previous);
+					ASSERT_LE(versioned.version, reply.lastConsumedVersion);
+					for (const auto& mutation : versioned.mutations) {
+						if (versioned.version == committed && mutation.type == MutationRef::SetValue &&
+						    mutation.param1 == key && mutation.param2 == value) {
+							observed = true;
+						}
+					}
+				}
+				co_await timeoutError(consumer->acknowledge(), operationTimeout);
+			}
+			ASSERT(observed);
+			co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
+		}
+	}
+
 	void recordExpectedWrites(std::vector<std::pair<Key, Value>> const& values, Version committedVersion) {
 		for (auto& stream : streams) {
 			for (const auto& [key, value] : values) {
@@ -256,6 +302,7 @@ struct NativeCdcEndToEndWorkload : TestWorkload {
 
 	Future<Void> run(Database cx) {
 		co_await validatePublicLifecycle(cx);
+		co_await validateAssignmentPublication(cx);
 		Version mostRecentWrite = invalidVersion;
 		for (int round = 0; round < rounds; ++round) {
 			if (round > 0 && static_cast<int>(streams.size()) > minStreamCount &&
