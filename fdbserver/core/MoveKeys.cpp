@@ -719,7 +719,12 @@ Future<Void> cleanUpSingleShardDataMove(Database occ,
 			                                                  keys,
 			                                                  SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
 			                                                  SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT);
-			ASSERT(!currentShards.more);
+			if (currentShards.more) {
+				// The data-move range has been subdivided into more shards than fit in
+				// one krmGetRanges page since this cleanup was scheduled. The caller's
+				// view is stale; let DD re-discover the current shard layout.
+				throw operation_cancelled();
+			}
 			if (currentShards.empty()) {
 				if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 					throw dd_config_changed();
@@ -3384,7 +3389,9 @@ Future<Void> rawStartMovement(Database occ,
 		                       params.cancelConflictingDataMoves,
 		                       params.bulkLoadTaskState);
 	}
-	ASSERT(params.keys.present());
+	if (!params.keys.present()) {
+		throw dd_config_changed();
+	}
 	return startMoveKeys(std::move(occ),
 	                     params.keys.get(),
 	                     params.destinationTeam,
@@ -3412,7 +3419,9 @@ Future<Void> rawCheckFetchingState(const Database& cx,
 		                          params.relocationIntervalId,
 		                          tssMapping);
 	}
-	ASSERT(params.keys.present());
+	if (!params.keys.present()) {
+		throw dd_config_changed();
+	}
 	return checkFetchingState(cx,
 	                          params.healthyDestinations,
 	                          params.keys.get(),
@@ -3425,7 +3434,9 @@ Future<Void> rawFinishMovement(Database occ,
                                const MoveKeysParams& params,
                                const std::map<UID, StorageServerInterface>& tssMapping) {
 	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-		ASSERT(params.ranges.present());
+		if (!params.ranges.present()) {
+			throw dd_config_changed();
+		}
 		return finishMoveShards(std::move(occ),
 		                        params.dataMoveId,
 		                        params.ranges.get(),
@@ -3438,7 +3449,9 @@ Future<Void> rawFinishMovement(Database occ,
 		                        params.ddEnabledState,
 		                        params.bulkLoadTaskState);
 	}
-	ASSERT(params.keys.present());
+	if (!params.keys.present()) {
+		throw dd_config_changed();
+	}
 	return finishMoveKeys(std::move(occ),
 	                      params.keys.get(),
 	                      params.destinationTeam,

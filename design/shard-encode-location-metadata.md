@@ -134,7 +134,6 @@ Serialized with `ObjectWriter` + `IncludeVersion()` (versioned, evolvable).
 | DataMoveMetaData                  |
 +-----------------------------------+
 | id:             UID               |
-| version:        Version           |
 | ranges:         vector<KeyRange>  |
 | phase:          Running|Deleting  |
 | priority:       int               |
@@ -247,9 +246,17 @@ The dataMoveId lets the SS distinguish:
 - **Same ID as current fetch** → retry/continuation, keep going
 - **Different ID** → new task, restart fetch from scratch
 
-This distinction is critical for bulk load: if DD restarts and re-issues the same
-bulk load, SS must continue (not restart). If DD issues a DIFFERENT bulk load for
-the same range, SS must restart with the new S3 path.
+This distinction is critical for bulk load. The S3 path lives in the
+`BulkLoadTaskState` persisted at `\xff/bulkLoadTask/<range>` and is
+fixed for the lifetime of a given dataMoveId — DD writes it once when
+the move is created, SS reads it. So:
+
+- DD restart that re-issues the **same** dataMoveId → SS sees the same
+  task, continues from the same path (no restart).
+- DD issuing a **different** dataMoveId for the same range (a new bulk
+  load) → new `BulkLoadTaskState`, possibly with a different S3 path.
+  The change in dataMoveId is the signal to the SS to restart the
+  fetch from the new path.
 
 ## Bulk Load Integration
 
@@ -377,8 +384,24 @@ lightweight, no scanning required.
 
 **`fdbcli> audit_storage metadata_encoding`** — definitive check. Scans all
 keyServers and serverKeys entries, classifies each by protocol version header,
-counts dataMoves entries. Reports explicit migration status:
-FORWARD COMPLETE / ROLLBACK IN PROGRESS / ROLLBACK COMPLETE.
+counts dataMoves entries. Reports one of four states:
+
+- **`FORWARD COMPLETE`** — every keyServers and serverKeys entry is in the
+  new (UID-encoded) format. Forward migration has finished; the cluster is
+  fully on shard-encoded location metadata.
+- **`MIGRATION IN PROGRESS`** — both formats coexist (mixed). The
+  cluster is mid-migration but the snapshot can't tell direction from
+  the keyspace data alone — the operator who flipped the knob already
+  knows whether it's forward (toward shard-encoded) or back (toward
+  old format). Status line shows new-format counts so progress is
+  visible in either direction.
+- **`ROLLBACK COMPLETE`** — every entry is in the old format and
+  `\xff/dataMoves/` is empty. Safe to downgrade the binary. Also the
+  state for a cluster that has never enabled the knob.
+- **`NOT STARTED`** — every entry is old format but `\xff/dataMoves/`
+  is non-empty. Transient state seen briefly right after the knob is
+  flipped on (moves in flight before any keyServers entries have been
+  rewritten).
 
 Use `location_metadata physicalshards` for routine monitoring (is migration
 progressing?). Use `audit_storage metadata_encoding` for the final gate decision
@@ -436,7 +459,7 @@ serverKeys: 123004 entries
   New format (UID-encoded): 504
 dataMoves: 0 entries
 
-Migration status: ROLLBACK IN PROGRESS (221 keyServers + 504 serverKeys remaining)
+Migration status: MIGRATION IN PROGRESS (mixed format: 221 new keyServers, 504 new serverKeys)
 ```
 
 When all zeros:

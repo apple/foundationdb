@@ -300,11 +300,32 @@ class DDTxnProcessorImpl {
 		co_return Optional<Key>();
 	}
 
-	// When SHARD_ENCODE_LOCATION_METADATA is false, rewrite any shard-encoded metadata
-	// to old format. Clears DataMoveMetaData and converts keyServers entries from
-	// UID-based to tag-based encoding. Returns true if a rewrite was committed
-	// (caller should re-read). serverKeys entries are left in place — they drain
-	// naturally as DD moves shards using the old path.
+	// When SHARD_ENCODE_LOCATION_METADATA is false on DD init, do a bounded
+	// rewrite to start the rollback. Two phases, both bounded:
+	//
+	// Phase 1: Clear all DataMoveMetaData (single transaction; the dataMoves
+	// keyspace is small, this is always one commit).
+	//
+	// Phase 2: Rewrite up to 1000 keyServers entries at the head of the
+	// prefix from new (UID-based) to old (tag-based) format. Returns true
+	// if either phase committed; the caller restarts the outer init loop
+	// and calls back in. The Phase-2 cap means clusters with more than
+	// 1000 shard-encoded keyServers entries are NOT fully rewritten by
+	// this function — by design. Bulk rewrite happens through normal
+	// shard movement / storage wiggle once the knob is false (see the
+	// "Migration for downgrade" section of
+	// design/shard-encode-location-metadata.md); this function just
+	// clears dataMoves and rewrites the small remnant at the head so DD
+	// init has a tidy starting point.
+	//
+	// Calling this when nothing needs rewriting (knob has been false the
+	// whole time, or rollback already complete) is safe and
+	// write-cost-free: the reads find no shard-encoded entries, no
+	// commits happen, returns false. Cost is three system-key reads on
+	// every DD init when knob is false.
+	//
+	// serverKeys entries are left in place — they drain naturally as DD
+	// moves shards using the old path.
 	static Future<bool> rewriteShardEncodedMetadata(Transaction& tr, UID distributorId) {
 		TraceEvent(SevInfo, "DDInitShardEncodeOff", distributorId)
 		    .detail("KnobValue", SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);

@@ -136,8 +136,9 @@ Future<bool> checkMetadataEncodingCommandActor(Database cx, std::vector<StringRe
 	} else if (keyServersOld == 0 && serverKeysOld == 0) {
 		fmt::println("Migration status: FORWARD COMPLETE");
 	} else if (keyServersNew > 0 || serverKeysNew > 0) {
-		int64_t remaining = keyServersNew + serverKeysNew;
-		fmt::println("Migration status: ROLLBACK IN PROGRESS ({} entries remaining)", remaining);
+		fmt::println("Migration status: MIGRATION IN PROGRESS (mixed format: {} new keyServers, {} new serverKeys)",
+		             keyServersNew,
+		             serverKeysNew);
 	} else {
 		fmt::println("Migration status: NOT STARTED (all old format)");
 	}
