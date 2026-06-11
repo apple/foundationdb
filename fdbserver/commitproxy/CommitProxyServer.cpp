@@ -268,6 +268,7 @@ Future<Void> commitBatcher(ProxyCommitData* commitData,
 
 				// WARNING: this code is run at a high priority, so it needs to do as little work as possible
 				int bytes = getBytes(req);
+				commitData->stats.transactionSizeDist->sample(bytes);
 
 				// Drop requests if memory is under severe pressure
 				if (commitData->commitBatchesMemBytesCount + bytes > memBytesLimit) {
