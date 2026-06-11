@@ -123,16 +123,18 @@ Three pieces:
    decrement + one branch. On sample, walk the frame-pointer chain for
    4–6 return addresses.
 
-// TODO: think about the right key here.  void* below suggests one pointer.  Should
-// the key be the hash of the whole backtrace instead?  Do we always have the
-// memory block itself to key on?
-
-2. **Storage.** Two tables, both backed by a non-tracked slab pool:
-   - A pointer-keyed *live-block table* (`void* → {fingerprint, size}`)
-     so `onFree` can find what `onAlloc` recorded.
+2. **Storage.** Two tables, both backed by `std::malloc` (which bypasses
+   our `operator new` hooks):
    - A fingerprint-keyed *aggregation table*
      (`uint64_t → {count, bytes, peakBytes, exemplarFrames[6]}`) where
-     the fingerprint is `fnv64(frames)`.
+     the fingerprint is `fnv64(frames)`. Always present.
+   - A pointer-keyed *live-block table* (`void* → {fingerprint, size}`)
+     so `onFree` can find what `onAlloc` recorded. The pointer is the
+     only key available at free time — there is no backtrace to hash —
+     so the table is necessarily pointer-keyed if we want to track live
+     bytes at all. Optional, gated by the `MEMORY_TRACKING_LIVE_TRACKING`
+     knob (default on). When disabled, only cumulative per-site stats
+     are tracked and the side table disappears entirely.
 
 3. **Reporting.** A `memTrackerDump(int topN)` walks the aggregation
    table sorted by live bytes, emits a TraceEvent per site with raw
@@ -156,10 +158,11 @@ Hooks:
 
 extern thread_local bool gInMemTracker;
 extern thread_local int  gMemTrackerCounter;
+extern thread_local size_t gForceSampleBytes;  // refreshed periodically from FlowKnobs
 
 inline void memTrackerOnAlloc(void* p, size_t n) {
     if (gInMemTracker || !p) return;
-    if (--gMemTrackerCounter > 0) return;   // un-sampled fast path
+    if (--gMemTrackerCounter > 0 && n < gForceSampleBytes) return;  // un-sampled fast path
     gInMemTracker = true;
     memTrackerSampleAlloc(p, n);            // out-of-line; reseeds counter
     gInMemTracker = false;
@@ -182,6 +185,29 @@ indefinitely with no further work.
 `gMemTrackerCounter` starts at 1 so the first allocation per thread is
 always sampled — guarantees test workloads with very few allocations still
 exercise the path.
+
+**Force-sample-large.** The `n < gForceSampleBytes` check guarantees
+that any allocation at or above the configured threshold (default 100
+KB; `INT64_MAX` disables) is *always* sampled regardless of the
+counter. Large allocations are rare per second so unconditional
+sampling costs almost nothing in CPU, and they are often the most
+interesting individual allocations regardless of frequency (caches,
+buffers, big arrays). This collapses the byte-rate-vs-count-rate
+distinction for the case it actually matters: rare-but-huge
+allocations are no longer at risk of being missed.
+
+`gForceSampleBytes` is a thread-local cache of
+`FLOW_KNOBS->MEMORY_TRACKING_FORCE_SAMPLE_BYTES`, refreshed inside
+`memTrackerSampleAlloc` (which already runs under sampled-path cost),
+so the hot path reads a TLS slot rather than touching the knobs
+struct.
+
+The aggregation table per-site adds a `forceSampledCount` counter
+incremented on this path; a site's `ForceSampledFraction` in the dump
+output lets consumers tell whether a site's stats are predominantly
+"every alloc above 100 KB" vs "1% of allocs"  — without that, two
+sites with the same `cumulativeAllocs` value can mean very different
+population rates.
 
 ### Stack capture
 
@@ -216,11 +242,8 @@ Caveats and mitigations:
 - Code compiled with `-fomit-frame-pointer` (third-party static libs not
   rebuilt with project flags) terminate the walk early. Acceptable: we
   still get the FDB-side prefix, which is the main thing we care about.
-- Signal handlers and SJLJ exceptions can leave a transiently bad FP
-
-// TODO: expand `SJLJ` exceptions.  As-is it's excess jargon.
-
-  chain. The `next <= fp` sanity check bails out of those.
+- Signal handlers can leave a transiently bad FP chain mid-walk; the
+  `next <= fp` sanity check bails out of those.
 - ASAN/MSAN builds may instrument the FP chain. The tracker is a
   no-op-equivalent in those builds (sampling defaults can be flipped to
   0 in CMake when sanitizers are on).
@@ -232,12 +255,15 @@ Caveats and mitigations:
 Open-addressing hash, key `void*`, value `{uint64_t fingerprint, uint32_t
 size}` (16 bytes/entry). Sized for ~1.5× expected live sampled
 allocations to keep load factor under 0.7. Resize doubles capacity. All
-backing memory comes from a private mmap slab pool, never from
-`operator new` or FastAlloc, so resize cannot recurse into the tracker.
+backing memory comes from `std::malloc` directly: this bypasses our
+`operator new` hooks (we override `operator new`, not libc `malloc`), so
+the tracker's own allocations cannot recurse back into the tracking
+path. The thread-local `gInMemTracker` flag is the single line of
+defense and is sufficient on its own; we don't need a private slab pool.
 
-// TODO: if we use thread local storage to say "in tracker", why wouldn't it
-// work to use operator new?  This private mmap slab pool sounds like
-// over-engineering.
+Created lazily on first sample if the `MEMORY_TRACKING_LIVE_TRACKING`
+knob is set; if the knob is off, the table is never allocated and only
+the aggregation table exists.
 
 Single global `ThreadSpinLock` for v1. At 1% sampling and 100K
 alloc/sec the lock fires ~1K times/sec; uncontended spinlock acquire is
@@ -271,16 +297,6 @@ frames per fingerprint.
 
 `peakBytes = max(peakBytes, liveBytes)` updated on each alloc.
 
-#### Slab pool
-
-A `static char slabs[N][SLAB_SIZE]` plus a free-list head, served under
-the same `ThreadSpinLock`. Initial size sized for expected live entries
-(~10K live × 16 B = 160 KB) plus aggregation (~100 sites × 80 B = 8 KB).
-Backed by `mmap(MAP_ANON|MAP_PRIVATE)` so the tracker never touches
-libc heap.
-
-// TODO: as above this seems like over-engineering.
-
 ### Hook sites
 
 #### Global `operator new` / `delete`
@@ -304,13 +320,26 @@ contains:
 #endif
 ```
 
-// TODO: just should we leave ALLOC_INSTRUMENTATION alone for now?  And
-// just insert our new hook here.
+This block is left untouched — it already compiles to nothing in default
+builds, costs us nothing to leave, and stays available for whoever might
+still wire up the old offline analysis path. Immediately after it we
+add an unconditional new line:
 
-This is replaced by an unconditional `memTrackerOnAlloc(p, Size)`.
-Likewise at `FastAlloc.cpp:509` in `release()`, replaced by
-`memTrackerOnFree(ptr)`. Size is known at compile time from the template
-parameter, so no header lookup is needed.
+```cpp
+    memTrackerOnAlloc(p, Size);
+```
+
+Likewise at `FastAlloc.cpp:509` in `release()`, an unconditional
+`memTrackerOnFree(ptr)` is added next to (not replacing) the existing
+conditional `recordDeallocation(ptr)`. Size is known at compile time
+from the template parameter, so no header lookup is needed.
+
+The conditional global `operator new` / `delete` overrides in
+`fdbserver/fdbserver.cpp:771-818` also stay in place. Our unconditional
+overrides in `flow/MemoryTracker.cpp` are wrapped in
+`#if !defined(ALLOC_INSTRUMENTATION) && !defined(ALLOC_INSTRUMENTATION_STDOUT)`
+so the two paths don't produce duplicate symbols when somebody builds
+with the old flag on.
 
 #### Arena
 
@@ -379,25 +408,36 @@ making each TraceEvent self-contained for offline symbolization.
 
 Also emit one summary event per dump:
 
-// TODO: make sure the summary event includes a total count of blocks currently allocated (and not freed)
-// and bytes currently in-use (i.e. allocated and not freed).
-
 ```
 TraceEvent("MemoryTrackerSummary")
     .detail("SitesTracked", aggregationTable.size())
-    .detail("LiveBlocks", liveBlockTable.size())
+    .detail("LiveBlocks", liveBlocksTotal)            // sampled live blocks across all sites
+    .detail("LiveBytes", liveBytesTotal)              // sampled live bytes across all sites
+    .detail("CumulativeAllocs", cumulativeAllocsTotal)
+    .detail("CumulativeBytes", cumulativeBytesTotal)
     .detail("SamplesEmitted", samplesEmittedSinceStart)
     .detail("SamplesDroppedReentry", reentrantBailouts)
     .detail("SamplesDroppedTableFull", tableFullDrops)
     .detail("DumpDurationMs", dumpDurationMs)
-    .detail("SampleInverse", FLOW_KNOBS->MEMORY_TRACKING_SAMPLE_INVERSE);
+    .detail("SampleInverse", FLOW_KNOBS->MEMORY_TRACKING_SAMPLE_INVERSE)
+    .detail("ForceSampleBytes", FLOW_KNOBS->MEMORY_TRACKING_FORCE_SAMPLE_BYTES);
 ```
+
+The four totals (`LiveBlocks`, `LiveBytes`, `CumulativeAllocs`,
+`CumulativeBytes`) are maintained as `int64_t` globals updated under
+the same spinlock on every sample. They are *sampled* totals, not
+population totals; to estimate population, multiply by the sample
+inverse. (Force-sampled large allocations should be deducted before
+multiplying — easiest to track them in their own counter pair if this
+estimate matters.)
 
 ### Knobs (FlowKnobs, since clients use Arena/new too)
 
 | Knob | Default (prod) | Default (sim) | Meaning |
 |---|---|---|---|
 | `MEMORY_TRACKING_SAMPLE_INVERSE` | 100 | 2 | 0=off, N=1-in-N |
+| `MEMORY_TRACKING_FORCE_SAMPLE_BYTES` | 100000 | 100000 | Always sample allocations ≥ this many bytes; `INT64_MAX` disables force-sample |
+| `MEMORY_TRACKING_LIVE_TRACKING` | true | true | When false, skip the pointer-keyed live-block table and report cumulative-only stats |
 | `MEMORY_TRACKING_REPORT_INTERVAL` | 60.0 | 30.0 | Seconds between dumps; 0 disables |
 | `MEMORY_TRACKING_TOP_N` | 50 | 50 | Number of sites per dump |
 | `MEMORY_TRACKING_FRAMES` | 6 | 6 | Captured stack depth (1–10) |
@@ -408,32 +448,39 @@ simulation runs.
 ### Files
 
 New:
-- `flow/MemoryTracker.cpp` — hot-path entry points (out-of-line bodies),
-  slab pool, both tables, `memTrackerDump`, all global `operator
-  new`/`delete` overloads.
-- `flow/include/flow/MemoryTracker.h` — `memTrackerOnAlloc`/`OnFree`
-  inline declarations, `memTrackerDump` declaration.
+- `flow/MemoryTracker.cpp` — out-of-line sample paths
+  (`memTrackerSampleAlloc`, `memTrackerSampleFree`), live-block table,
+  aggregation table, `memTrackerDump`, `memTrackerForEachSite`, and
+  global `operator new`/`delete` overloads (wrapped in
+  `#if !defined(ALLOC_INSTRUMENTATION) && !defined(ALLOC_INSTRUMENTATION_STDOUT)`
+  to avoid duplicate symbols against the legacy framework).
+- `flow/include/flow/MemoryTracker.h` — header-inlined hot-path
+  entry points (`memTrackerOnAlloc`/`OnFree`), declarations of the
+  out-of-line entry points, `memTrackerDump`, `memTrackerForEachSite`.
 
 Modified:
-- `flow/FastAlloc.cpp` (lines 432, 509) — replace the conditional
-  `recordAllocation`/`recordDeallocation` calls with unconditional
-  `memTrackerOnAlloc`/`OnFree`.
+- `flow/FastAlloc.cpp` (lines 432, 509) — add unconditional
+  `memTrackerOnAlloc`/`OnFree` calls *next to* (not replacing) the
+  existing conditional `recordAllocation`/`recordDeallocation` calls.
 - `flow/Arena.cpp` — add hooks in `ArenaBlock::create` and
   `ArenaBlock::destroyLeaf`.
-- `fdbserver/fdbserver.cpp` (lines 771-818) — delete the conditional
-  `operator new`/`delete` overrides.
 - `flow/SystemMonitor.cpp` — periodic dump call.
-- `flow/Knobs.h`, `flow/Knobs.cpp` — four new FlowKnobs.
+- `flow/Knobs.h`, `flow/Knobs.cpp` — six new FlowKnobs (see Knobs
+  table above).
 - `flow/CMakeLists.txt` — register `MemoryTracker.cpp`.
 
 Reused as-is:
 - `platform::format_backtrace` (`flow/Platform.cpp:3517`).
 - `platform::ImageInfo` (`flow/include/flow/Platform.h:457-468`).
 
-Not touched (but candidate for follow-up cleanup):
+Not touched:
 - The `ALLOC_INSTRUMENTATION` block in `flow/include/flow/FastAlloc.h:60-112`
-  remains gated behind its compile flag. It is dead code in default
-  builds.
+  and its callers in `flow/FastAlloc.cpp` (the conditional
+  `recordAllocation`/`recordDeallocation` lines) and
+  `fdbserver/fdbserver.cpp:771-818` (the conditional `operator new`
+  overrides). All of these compile to nothing in default builds and
+  stay available for whoever might still wire up the old offline
+  analysis path.
 
 ### Determinism in simulation
 
@@ -508,28 +555,14 @@ Trivial to add later if production data shows we need it.
 
 ### A4. Byte-rate sampling vs count-rate sampling
 
-// TODO: can we unilaterally sample all allocations above a non-trivial byte size?
-// Let us add a knob for this and set it initially to (say) 100K.
-// Another goal of this work is to increase understandability of large memory
-// allocators around the code base.
-// TODO: rewrite or trim the text below in light of this information.
-
-Count-rate (1 in N allocations, our choice) gives unbiased per-call-site
-*counts*. Byte-rate (sample with probability proportional to size, à la
-jemalloc/tcmalloc heap profilers) gives unbiased per-call-site *bytes*,
-which is usually what we want for leak hunting. Byte-rate also surfaces
-infrequent-but-huge allocations that count-rate misses.
-
-Chose count-rate for v1 because:
-- Simpler implementation (single decrementing counter, no per-allocation
-  Bernoulli draw).
-- The user's stated framing was "1% of allocations", not "1% of bytes".
-- Aggregated cumulative bytes per site still reveals heavy allocators
-  even with count sampling; the bias only matters for outlier-heavy
-  workloads.
-
-Worth revisiting if leak-hunting cases emerge where count-rate misses
-the obvious culprit.
+True byte-rate sampling (per-allocation Bernoulli draw with probability
+proportional to size, à la jemalloc/tcmalloc heap profilers) gives
+unbiased per-site byte estimates but adds per-allocation work and
+complicates determinism. The hybrid we ship — count-rate for small
+allocations plus unconditional sampling above
+`MEMORY_TRACKING_FORCE_SAMPLE_BYTES` — captures the case byte-rate
+would have caught (rare-but-huge allocations) without the extra
+hot-path cost.
 
 ### A5. Per-thread aggregation tables vs single global lock
 
@@ -668,13 +701,40 @@ Build the release binary, strip it, paste an `AddrCmd` field from a
 trace into a shell pointing at the matching `.debug` sidecar, confirm
 symbol resolution works.
 
-### Coverage spot-check on a real-ish workload
+### Coverage spot-check via sentinel functions
 
-Run a multi-process simulation cluster with sampling at 100% briefly,
-extract the top-50 sites, confirm they map to plausible call paths
-covering all three allocation paths (operator new, FastAlloc, Arena).
+The "did the tracker actually capture each allocation path?" check is
+fully automated using sentinel functions and direct introspection of
+the aggregation table — no log parsing, no `addr2line`, no eyeballing.
 
-// TODO: is it obvious how to do this in an automated way?  Do not make me do manual work to test things.
+Add an introspection API:
+
+```cpp
+void memTrackerForEachSite(std::function<void(const CallSite&)>);
+```
+
+The unit test:
+
+1. Sets `MEMORY_TRACKING_SAMPLE_INVERSE = 1` (sample everything) and
+   resets the aggregation table.
+2. Calls a sentinel function `triggerOperatorNewSentinel()` that does
+   N `new int[k]` / `delete[]` pairs.
+3. Calls `triggerFastAllocSentinel<32>()` that does N
+   `FastAllocator<32>::allocate/release` pairs.
+4. Calls `triggerArenaSentinel()` that does N arena growths large
+   enough to force `ArenaBlock::create` calls.
+5. Captures the address of each sentinel via its function pointer:
+   `void* expected = (void*)&triggerOperatorNewSentinel;`
+6. Iterates the aggregation table via `memTrackerForEachSite`, asserts
+   that for each sentinel address there exists at least one site
+   whose `exemplarFrames` contains an address in the
+   `[&triggerXSentinel, &triggerXSentinel + reasonableSize)` range,
+   and that the matching site's `cumulativeAllocs == N`.
+
+This tests the full pipeline (sampling → capture → fingerprint →
+aggregation) end-to-end. The sentinel-address technique compares raw
+return addresses to function-pointer values at runtime, so it is
+deterministic, fast, and works on stripped builds.
 
 ## Observability/Supportability Considerations
 
@@ -729,13 +789,14 @@ If always-compiled tracker code in the client library ends up not
 working, should gate it behind a `-DENABLE_MEMORY_TRACKING_CLIENT=OFF`
 CMake flag for client builds specifically.
 
-### Removal of `ALLOC_INSTRUMENTATION` code
+### `ALLOC_INSTRUMENTATION` coexistence
 
 The existing framework in `flow/include/flow/FastAlloc.h:60-112` and
-the corresponding `recordAllocation`/`recordDeallocation`
-implementations stay in place during initial rollout. Once the new
-tracker is proven and any external tooling that depended on the old
-instrumentation has migrated, a cleanup PR removes them.
+its associated conditional code paths (in `flow/FastAlloc.cpp` and
+`fdbserver/fdbserver.cpp:771-818`) remain in place. The new tracker
+sits next to it, gated only by the inverse complement of the same
+`#ifdef`s where they would otherwise produce duplicate symbols (the
+`operator new` overrides). No removal is planned.
 
 ### Rollback
 
