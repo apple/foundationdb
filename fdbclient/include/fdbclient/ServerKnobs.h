@@ -609,6 +609,7 @@ public:
 	int ROCKSDB_WRITEBATCH_PROTECTION_BYTES_PER_KEY;
 	int ROCKSDB_MEMTABLE_PROTECTION_BYTES_PER_KEY;
 	int ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY;
+	bool ROCKSDB_ENABLE_CACHE_USAGE_OVERRIDES;
 	bool ROCKSDB_ENABLE_NONDETERMINISM; // Whether rocksdb nondeterministic behavior should be enabled in simulation.
 	                                    // Note that turning this on in simulation could lead to non-deterministic runs
 	                                    // since we rely on rocksdb metadata. This knob also applies to sharded rocks
