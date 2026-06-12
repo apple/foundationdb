@@ -706,7 +706,11 @@ public:
 	double COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL;
 	double COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR;
 	double COMMIT_TRIGGER_DELAY;
-	bool ENABLE_READ_LOCK_ON_RANGE;
+	bool ENABLE_READ_LOCK_ON_RANGE; // Despite the name, this is a write-exclusion lock — commit proxies
+	                                // reject writes to a locked range, but reads are unaffected. The
+	                                // name reflects bulkload's perspective: "I'm ingesting data into
+	                                // this range, lock it so nobody else writes." Bulkload is currently
+	                                // the only consumer.
 
 	double RESOLVER_COALESCE_TIME;
 	int BUGGIFIED_ROW_LIMIT;
