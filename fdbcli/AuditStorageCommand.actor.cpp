@@ -63,6 +63,7 @@
 #include "fdbclient/IClientApi.h"
 
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Audit.h"
 
 #include "flow/Arena.h"
@@ -80,12 +81,13 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
 	}
 
 	state UID resAuditId;
+	state AuditType type = AuditType::Invalid;
 	if (tokencmp(tokens[1], "cancel")) {
 		if (tokens.size() != 4) {
 			printUsage(tokens[0]);
 			return UID();
 		}
-		AuditType type = AuditType::Invalid;
+		type = AuditType::Invalid;
 		if (tokencmp(tokens[2], "ha")) {
 			type = AuditType::ValidateHA;
 		} else if (tokencmp(tokens[2], "replica")) {
@@ -105,7 +107,7 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
 		resAuditId = cancelledAuditId;
 
 	} else {
-		AuditType type = AuditType::Invalid;
+		type = AuditType::Invalid;
 		if (tokencmp(tokens[1], "ha")) {
 			type = AuditType::ValidateHA;
 		} else if (tokencmp(tokens[1], "replica")) {
@@ -116,9 +118,18 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
 			type = AuditType::ValidateStorageServerShard;
 		} else if (tokencmp(tokens[1], "validate_restore")) {
 			type = AuditType::ValidateRestore;
+		} else if (tokencmp(tokens[1], "metadata_encoding")) {
+			type = AuditType::ValidateMetadataEncoding;
 		} else {
 			printUsage(tokens[0]);
 			return UID();
+		}
+
+		if (type == AuditType::ValidateMetadataEncoding) {
+			// This audit runs client-side (simple scan, not distributed)
+			state Database db = Database::createDatabase(clusterFile, ApiVersion::LATEST_VERSION);
+			wait(success(checkMetadataEncodingCommandActor(db, tokens)));
+			return deterministicRandom()->randomUniqueID();
 		}
 
 		Key begin = allKeys.begin, end = allKeys.end;
@@ -163,7 +174,7 @@ CommandFactory auditStorageFactory(
     CommandHelp("audit_storage <Type> [BeginKey EndKey] <EngineType>",
                 "Start an audit storage",
                 "Specify audit `Type' (only `ha' and `replica' and `locationmetadata' and "
-                "`ssshard' and `validate_restore' `Type' are supported currently), and\n"
+                "`ssshard' and `validate_restore' and `metadata_encoding' `Type' are supported currently), and\n"
                 "optionally a sub-range with `BeginKey' and `EndKey'.\n"
                 "Specify audit `EngineType' when auditType is `ha' or `replica'\n"
                 "(only `ssd-rocksdb-v1' and `ssd-sharded-rocksdb' and `ssd-2' are supported).\n"
