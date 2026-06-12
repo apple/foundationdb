@@ -870,7 +870,7 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
          "proxies":6,
          "backup_worker_enabled":1,
          "range_backup_worker_enabled":1,
-         "range_backup_worker_count":0,
+         "range_backup_workers":0,
          "perpetual_storage_wiggle":0,
          "perpetual_storage_wiggle_locality":"0",
          "perpetual_storage_wiggle_engine":{
@@ -1164,7 +1164,7 @@ const KeyRef JSONSchemas::clusterConfigurationSchema = R"configSchema(
     "grv_proxies":1,
     "backup_worker_enabled":1,
     "range_backup_worker_enabled":1,
-    "range_backup_worker_count":0
+    "range_backup_workers":0
 })configSchema"_sr;
 
 const KeyRef JSONSchemas::latencyBandConfigurationSchema = R"configSchema(

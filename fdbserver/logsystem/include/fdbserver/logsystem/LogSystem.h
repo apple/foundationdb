@@ -478,6 +478,7 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	inline Reference<LogSet> getEpochLogSet(LogEpoch epoch) const;
 
 	void setBackupWorkers(const std::vector<InitializeBackupReply>& replies);
+	void setRangeBackupWorkers(const std::vector<InitializeRangeBackupReply>& replies);
 
 	bool removeBackupWorker(const BackupWorkerDoneRequest& req);
 
