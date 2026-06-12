@@ -19,6 +19,7 @@
  */
 
 #include "flow/Arena.h"
+#include "flow/MemoryTracker.h"
 #include "flow/ScopeExit.h"
 #include "flow/SimpleCounter.h"
 #include "flow/UnitTest.h"
@@ -485,6 +486,9 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 			b->tinySize = b->tinyUsed = NOT_TINY;
 			b->bigUsed = sizeof(ArenaBlock);
 			b->secure = 0;
+			// Block-level attribution for >256 sizes (sizes <=256 use FastAllocator,
+			// which fires its own memTrackerOnAlloc hook).
+			if (b->bigSize > 256) memTrackerOnAlloc(b, b->bigSize);
 		} else {
 #ifdef ALLOC_INSTRUMENTATION
 			allocInstr["ArenaHugeKB"].alloc((reqSize + 1023) >> 10);
@@ -505,6 +509,9 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 			}
 #endif
 			g_hugeArenaMemory.fetch_add(reqSize);
+			// Block-level attribution for huge arena blocks. allocateAndMaybeKeepalive
+			// bypasses FastAllocator, so this is the only hook for these blocks.
+			memTrackerOnAlloc(b, reqSize);
 
 			// If the new block has less free space than the old block, make the old block depend on it
 			if (next && !next->isTiny() && next->unused() >= reqSize - dataSize) {
@@ -585,18 +592,23 @@ void ArenaBlock::destroyLeaf() {
 			FastAllocator<256>::release(this);
 			INSTRUMENT_RELEASE("Arena256");
 		} else if (bigSize <= 512) {
+			memTrackerOnFree(this);
 			freeOrMaybeKeepalive(this);
 			INSTRUMENT_RELEASE("Arena512");
 		} else if (bigSize <= 1024) {
+			memTrackerOnFree(this);
 			freeOrMaybeKeepalive(this);
 			INSTRUMENT_RELEASE("Arena1024");
 		} else if (bigSize <= 2048) {
+			memTrackerOnFree(this);
 			freeOrMaybeKeepalive(this);
 			INSTRUMENT_RELEASE("Arena2048");
 		} else if (bigSize <= 4096) {
+			memTrackerOnFree(this);
 			freeOrMaybeKeepalive(this);
 			INSTRUMENT_RELEASE("Arena4096");
 		} else if (bigSize <= 8192) {
+			memTrackerOnFree(this);
 			freeOrMaybeKeepalive(this);
 			INSTRUMENT_RELEASE("Arena8192");
 		} else {
@@ -604,6 +616,7 @@ void ArenaBlock::destroyLeaf() {
 			allocInstr["ArenaHugeKB"].dealloc((bigSize + 1023) >> 10);
 #endif
 			g_hugeArenaMemory.fetch_sub(bigSize);
+			memTrackerOnFree(this);
 			freeOrMaybeKeepalive(this);
 		}
 	}
