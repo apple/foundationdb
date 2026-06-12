@@ -274,7 +274,15 @@ public:
 		}
 
 		Reference<IBackupFile> f = co_await bc->writeFile(fileName);
-		co_await f->append(docString.data(), docString.size());
+
+		// Write in chunks: append() takes int but docString.size() is size_t. A manifest larger than
+		// INT_MAX bytes silently wraps to a negative int, causing memcpy to be called with close to SIZE_MAX bytes.
+		for (size_t offset = 0; offset < docString.size();) {
+			int chunkSize = (int)std::min(docString.size() - offset, (size_t)std::numeric_limits<int>::max());
+			co_await f->append(docString.data() + offset, chunkSize);
+			offset += chunkSize;
+		}
+
 		co_await f->finish();
 	}
 
