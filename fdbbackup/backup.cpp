@@ -702,6 +702,8 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
+	{ OPT_RESTORE_CLUSTERFILE_DEST, "-C", SO_REQ_SEP },
+	{ OPT_RESTORE_CLUSTERFILE_DEST, "--cluster-file", SO_REQ_SEP },
 	{ OPT_RESTORE_CLUSTERFILE_DEST, "--dest-cluster-file", SO_REQ_SEP },
 	{ OPT_RESTORE_CLUSTERFILE_ORIG, "--orig-cluster-file", SO_REQ_SEP },
 	{ OPT_RESTORE_TIMESTAMP, "--timestamp", SO_REQ_SEP },
@@ -1191,7 +1193,7 @@ static void printRestoreUsage(bool devhelp) {
 	printf(" ACTION OPTIONS:\n");
 	// printf("  FOLDERS        Paths to folders containing the backup files.\n");
 	printf("  Options for all commands:\n\n");
-	printf("  --dest-cluster-file CONNFILE\n");
+	printf("  -C, --cluster-file, --dest-cluster-file CONNFILE\n");
 	printf("                 The cluster file to restore data into.\n");
 	printf("  -t, --tagname TAGNAME\n");
 	printf("                 The restore tag to act on.  Default is 'default'\n");
