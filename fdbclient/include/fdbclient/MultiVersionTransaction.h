@@ -802,6 +802,7 @@ public:
 	bool hasNonFailedExternalClients();
 
 	void updateSupportedVersions();
+	void ignoreEnvironmentVariableNetworkOption(FDBNetworkOptions::Option option);
 
 	bool callbackOnMainThread;
 	bool localClientDisabled;
@@ -860,6 +861,7 @@ private:
 	Mutex lock;
 	std::vector<std::pair<FDBNetworkOptions::Option, Optional<Standalone<StringRef>>>> options;
 	std::map<FDBNetworkOptions::Option, std::set<Standalone<StringRef>>> setEnvOptions;
+	std::set<FDBNetworkOptions::Option> ignoredEnvOptions;
 	volatile bool envOptionsLoaded;
 
 	friend struct MultiVersionDatabase::DatabaseState;

@@ -2091,6 +2091,9 @@ int main(int argc, char** argv) {
 	if (opt.exit_code != -1)
 		return opt.exit_code;
 
+	// fdbcli connects to one cluster, so multiple client threads per version have no effect.
+	MultiVersionApi::api->ignoreEnvironmentVariableNetworkOption(FDBNetworkOptions::CLIENT_THREADS_PER_VERSION);
+
 	if (opt.trace) {
 		if (opt.traceDir.empty())
 			setNetworkOption(FDBNetworkOptions::TRACE_ENABLE);
