@@ -94,6 +94,7 @@ struct ProxyStats {
 	Reference<Histogram> processingMutationDist;
 	Reference<Histogram> tlogLoggingDist;
 	Reference<Histogram> replyCommitDist;
+	Reference<Histogram> transactionSizeDist;
 
 	// These metrics are only logged as part of `ProxyDetailedMetrics`. Since
 	// the detailed proxy metrics combine data from different sources, we can't
@@ -162,7 +163,8 @@ struct ProxyStats {
 	    processingMutationDist(
 	        Histogram::getHistogram("CommitProxy"_sr, "ProcessingMutation"_sr, Histogram::Unit::milliseconds)),
 	    tlogLoggingDist(Histogram::getHistogram("CommitProxy"_sr, "TlogLogging"_sr, Histogram::Unit::milliseconds)),
-	    replyCommitDist(Histogram::getHistogram("CommitProxy"_sr, "ReplyCommit"_sr, Histogram::Unit::milliseconds)) {
+	    replyCommitDist(Histogram::getHistogram("CommitProxy"_sr, "ReplyCommit"_sr, Histogram::Unit::milliseconds)),
+	    transactionSizeDist(Histogram::getHistogram("CommitProxy"_sr, "TransactionSize"_sr, Histogram::Unit::bytes)) {
 		specialCounter(cc, "LastAssignedCommitVersion", [this]() { return this->lastCommitVersionAssigned; });
 		specialCounter(cc, "Version", [pVersion]() { return pVersion->get(); });
 		specialCounter(cc, "CommittedVersion", [pCommittedVersion]() { return pCommittedVersion->get(); });

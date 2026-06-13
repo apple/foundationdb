@@ -279,6 +279,7 @@ Future<Void> commitBatcher(ProxyCommitData* commitData,
 					    .detail("MemLimit", memBytesLimit);
 					continue;
 				}
+				commitData->stats.transactionSizeDist->sample(bytes);
 
 				if (bytes > FLOW_KNOBS->PACKET_WARNING) {
 					TraceEvent(SevWarn, "LargeTransaction")
