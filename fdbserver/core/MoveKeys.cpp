@@ -22,6 +22,7 @@
 #include <limits.h>
 
 #include "fdbclient/FDBOptions.g.h"
+#include "flow/CodeProbe.h"
 #include "flow/Error.h"
 #include "flow/Trace.h"
 #include "flow/Util.h"
@@ -3549,6 +3550,18 @@ Future<Void> removeOldDestinations(Reference<ReadYourWritesTransaction> tr,
                                    VectorRef<KeyRangeRef> shards,
                                    KeyRangeRef currentKeys) {
 	KeyRef beginKey = currentKeys.begin;
+	KeyRef gapBeginKey = currentKeys.begin;
+	int gapsToClear = 0;
+	for (int i = 0; i < shards.size(); i++) {
+		if (gapBeginKey < shards[i].begin) {
+			++gapsToClear;
+		}
+		gapBeginKey = shards[i].end;
+	}
+	if (gapBeginKey < currentKeys.end) {
+		++gapsToClear;
+	}
+	CODE_PROBE(gapsToClear > 1, "removeOldDestinations clears multiple gaps for one server");
 
 	for (int i = 0; i < shards.size(); i++) {
 		if (beginKey < shards[i].begin) {
