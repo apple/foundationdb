@@ -1840,6 +1840,7 @@ public:
 		}
 
 		if (req.configuration.backupWorkerEnabled) {
+			ASSERT(!req.configuration.rangeBackupWorkerEnabled);
 			const int nBackup = std::max<int>(
 			    (req.configuration.desiredLogRouterCount > 0 ? req.configuration.desiredLogRouterCount : tlogs.size()),
 			    req.maxOldLogRouters);
@@ -1847,6 +1848,19 @@ public:
 			    getWorkersForRoleInDatacenter(dcId, ProcessClass::Backup, nBackup, req.configuration, id_used);
 			std::transform(backupWorkers.begin(),
 			               backupWorkers.end(),
+			               std::back_inserter(result.backupWorkers),
+			               [](const WorkerDetails& w) { return w.interf; });
+		}
+
+		if (req.configuration.rangeBackupWorkerEnabled) {
+			ASSERT(!req.configuration.backupWorkerEnabled);
+			const int nRangeBackup = req.configuration.desiredRangeBackupWorkerCount > 0
+			                             ? req.configuration.desiredRangeBackupWorkerCount
+			                             : tlogs.size();
+			auto rangeBackupWorkers =
+			    getWorkersForRoleInDatacenter(dcId, ProcessClass::Backup, nRangeBackup, req.configuration, id_used);
+			std::transform(rangeBackupWorkers.begin(),
+			               rangeBackupWorkers.end(),
 			               std::back_inserter(result.backupWorkers),
 			               [](const WorkerDetails& w) { return w.interf; });
 		}
@@ -2084,11 +2098,25 @@ public:
 						}
 
 						if (req.configuration.backupWorkerEnabled) {
+							ASSERT(!req.configuration.rangeBackupWorkerEnabled);
 							const int nBackup = std::max<int>(tlogs.size(), req.maxOldLogRouters);
 							auto backupWorkers = getWorkersForRoleInDatacenter(
 							    dcId, ProcessClass::Backup, nBackup, req.configuration, used);
 							std::transform(backupWorkers.begin(),
 							               backupWorkers.end(),
+							               std::back_inserter(result.backupWorkers),
+							               [](const WorkerDetails& w) { return w.interf; });
+						}
+
+						if (req.configuration.rangeBackupWorkerEnabled) {
+							ASSERT(!req.configuration.backupWorkerEnabled);
+							const int nRangeBackup = req.configuration.desiredRangeBackupWorkerCount > 0
+							                             ? req.configuration.desiredRangeBackupWorkerCount
+							                             : tlogs.size();
+							auto rangeBackupWorkers = getWorkersForRoleInDatacenter(
+							    dcId, ProcessClass::Backup, nRangeBackup, req.configuration, used);
+							std::transform(rangeBackupWorkers.begin(),
+							               rangeBackupWorkers.end(),
 							               std::back_inserter(result.backupWorkers),
 							               [](const WorkerDetails& w) { return w.interf; });
 						}

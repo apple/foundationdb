@@ -123,7 +123,7 @@ struct BackupRangePartitionedData {
 
 	explicit BackupRangePartitionedData(UID id,
 	                                    Reference<AsyncVar<ServerDBInfo> const> db,
-	                                    const InitializeBackupRequest& req)
+	                                    const InitializeRangeBackupRequest& req)
 	  : myId(id), tag(req.tag), totalTags(req.totalTags), startVersion(req.startVersion), endVersion(req.endVersion),
 	    recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch), minKnownCommittedVersion(invalidVersion),
 	    savedVersion(req.startVersion - 1), pulledVersion(0), logFolderBaseVersion(invalidVersion), paused(false),
@@ -1285,7 +1285,7 @@ static Future<Void> monitorLogSystemFromDbInfo(Reference<AsyncVar<ServerDBInfo> 
 }
 
 Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
-                                          InitializeBackupRequest req,
+                                          InitializeRangeBackupRequest req,
                                           Reference<AsyncVar<ServerDBInfo> const> db) {
 	BackupRangePartitionedData self(interf.id(), db, req);
 	PromiseStream<Future<Void>> addActor;

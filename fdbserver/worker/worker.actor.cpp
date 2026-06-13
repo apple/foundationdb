@@ -49,6 +49,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "MetricLogger.actor.h"
 #include "fdbserver/backupworker/BackupWorker.h"
+#include "fdbserver/backupworker/BackupWorkerRangePartitioned.h"
 #include "fdbserver/clustercontroller/ClusterController.h"
 #include "fdbserver/commitproxy/CommitProxyServer.h"
 #include "fdbserver/consistencyscan/ConsistencyScan.h"
@@ -2048,6 +2049,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state std::map<SharedLogsKey, std::vector<SharedLogsValue>> sharedLogs;
 	state Reference<AsyncVar<UID>> activeSharedTLog(new AsyncVar<UID>());
 	state WorkerCache<InitializeBackupReply> backupWorkerCache;
+	state WorkerCache<InitializeRangeBackupReply> rangeBackupWorkerCache;
 	state WorkerCache<TLogInterface> logRouterCache;
 
 	state WorkerSnapRequest lastSnapReq;
@@ -2586,6 +2588,28 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					backupReady.send(reply);
 				} else {
 					forwardPromise(Uncancellable{}, req.reply, backupWorkerCache.get(req.reqId));
+				}
+			}
+			when(InitializeRangeBackupRequest req = waitNext(interf.rangeBackup.getFuture())) {
+				if (!rangeBackupWorkerCache.exists(req.reqId)) {
+					LocalLineage _;
+					getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Backup;
+					BackupInterface recruited(locality);
+					recruited.initEndpoints();
+
+					startRole(Role::BACKUP, recruited.id(), interf.id());
+					DUMPTOKEN(recruited.waitFailure);
+
+					ReplyPromise<InitializeRangeBackupReply> backupReady = req.reply;
+					rangeBackupWorkerCache.set(req.reqId, backupReady.getFuture());
+					Future<Void> backupProcess = backupWorkerRangePartitioned(recruited, req, dbInfo);
+					backupProcess = rangeBackupWorkerCache.removeOnReady(req.reqId, backupProcess);
+					errorForwarders.add(forwardError(errors, Role::BACKUP, recruited.id(), backupProcess));
+					TraceEvent("RangeBackupInitRequest", req.reqId).detail("BackupId", recruited.id());
+					InitializeRangeBackupReply reply(recruited, req.backupEpoch);
+					backupReady.send(reply);
+				} else {
+					forwardPromise(Uncancellable{}, req.reply, rangeBackupWorkerCache.get(req.reqId));
 				}
 			}
 			when(InitializeTLogRequest req = waitNext(interf.tLog.getFuture())) {

@@ -718,6 +718,9 @@ servers (who are receiving the data during a move). When no move is in progress,
 empty. The encoding supports both UID-based and Tag-based formats, plus optional shard IDs
 when `SHARD_ENCODE_LOCATION_METADATA` is enabled.
 
+See [shard-encode-location-metadata.md](shard-encode-location-metadata.md) for full
+feature description including encoding details, rollout/rollback, and SS behavior.
+
 Key encoding/decoding functions in [`SystemData.cpp`](https://github.com/apple/foundationdb/blob/release-7.3/fdbclient/SystemData.cpp):
 - `keyServersKey(k)` -- constructs the key
 - `keyServersValue(UIDtoTagMap, src, dest)` -- encodes src/dest with tags
