@@ -461,26 +461,34 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 				b = (ArenaBlock*)FastAllocator<256>::allocate();
 				b->bigSize = 256;
 				INSTRUMENT_ALLOCATE("Arena256");
-			} else if (reqSize <= 512) {
-				b = (ArenaBlock*)allocateAndMaybeKeepalive(512);
-				b->bigSize = 512;
-				INSTRUMENT_ALLOCATE("Arena512");
-			} else if (reqSize <= 1024) {
-				b = (ArenaBlock*)allocateAndMaybeKeepalive(1024);
-				b->bigSize = 1024;
-				INSTRUMENT_ALLOCATE("Arena1024");
-			} else if (reqSize <= 2048) {
-				b = (ArenaBlock*)allocateAndMaybeKeepalive(2048);
-				b->bigSize = 2048;
-				INSTRUMENT_ALLOCATE("Arena2048");
-			} else if (reqSize <= 4096) {
-				b = (ArenaBlock*)allocateAndMaybeKeepalive(4096);
-				b->bigSize = 4096;
-				INSTRUMENT_ALLOCATE("Arena4096");
 			} else {
-				b = (ArenaBlock*)allocateAndMaybeKeepalive(8192);
-				b->bigSize = 8192;
-				INSTRUMENT_ALLOCATE("Arena8192");
+				// Suppress the operator-new[] memory-tracker hook around the
+				// underlying `new uint8_t[]`; the explicit memTrackerOnAlloc
+				// below is the sole hook for these blocks. Without this
+				// guard the same pointer would be tracked twice under two
+				// different fingerprints.
+				MemTrackerSuppress _suppress;
+				if (reqSize <= 512) {
+					b = (ArenaBlock*)allocateAndMaybeKeepalive(512);
+					b->bigSize = 512;
+					INSTRUMENT_ALLOCATE("Arena512");
+				} else if (reqSize <= 1024) {
+					b = (ArenaBlock*)allocateAndMaybeKeepalive(1024);
+					b->bigSize = 1024;
+					INSTRUMENT_ALLOCATE("Arena1024");
+				} else if (reqSize <= 2048) {
+					b = (ArenaBlock*)allocateAndMaybeKeepalive(2048);
+					b->bigSize = 2048;
+					INSTRUMENT_ALLOCATE("Arena2048");
+				} else if (reqSize <= 4096) {
+					b = (ArenaBlock*)allocateAndMaybeKeepalive(4096);
+					b->bigSize = 4096;
+					INSTRUMENT_ALLOCATE("Arena4096");
+				} else {
+					b = (ArenaBlock*)allocateAndMaybeKeepalive(8192);
+					b->bigSize = 8192;
+					INSTRUMENT_ALLOCATE("Arena8192");
+				}
 			}
 			b->totalSizeEstimate = b->bigSize;
 			b->tinySize = b->tinyUsed = NOT_TINY;
@@ -494,7 +502,13 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 #ifdef ALLOC_INSTRUMENTATION
 			allocInstr["ArenaHugeKB"].alloc((reqSize + 1023) >> 10);
 #endif
-			b = (ArenaBlock*)allocateAndMaybeKeepalive(reqSize);
+			{
+				// Suppress the operator-new[] hook so the explicit
+				// memTrackerOnAlloc below is the sole tracker for huge
+				// arena blocks (see comment in the small-block branch).
+				MemTrackerSuppress _suppress;
+				b = (ArenaBlock*)allocateAndMaybeKeepalive(reqSize);
+			}
 			b->tinySize = b->tinyUsed = NOT_TINY;
 			b->bigSize = reqSize;
 			b->totalSizeEstimate = b->bigSize;
@@ -594,23 +608,38 @@ void ArenaBlock::destroyLeaf() {
 			INSTRUMENT_RELEASE("Arena256");
 		} else if (bigSize <= 512) {
 			memTrackerOnFree(this);
-			freeOrMaybeKeepalive(this);
+			{
+				MemTrackerSuppress _suppress;
+				freeOrMaybeKeepalive(this);
+			}
 			INSTRUMENT_RELEASE("Arena512");
 		} else if (bigSize <= 1024) {
 			memTrackerOnFree(this);
-			freeOrMaybeKeepalive(this);
+			{
+				MemTrackerSuppress _suppress;
+				freeOrMaybeKeepalive(this);
+			}
 			INSTRUMENT_RELEASE("Arena1024");
 		} else if (bigSize <= 2048) {
 			memTrackerOnFree(this);
-			freeOrMaybeKeepalive(this);
+			{
+				MemTrackerSuppress _suppress;
+				freeOrMaybeKeepalive(this);
+			}
 			INSTRUMENT_RELEASE("Arena2048");
 		} else if (bigSize <= 4096) {
 			memTrackerOnFree(this);
-			freeOrMaybeKeepalive(this);
+			{
+				MemTrackerSuppress _suppress;
+				freeOrMaybeKeepalive(this);
+			}
 			INSTRUMENT_RELEASE("Arena4096");
 		} else if (bigSize <= 8192) {
 			memTrackerOnFree(this);
-			freeOrMaybeKeepalive(this);
+			{
+				MemTrackerSuppress _suppress;
+				freeOrMaybeKeepalive(this);
+			}
 			INSTRUMENT_RELEASE("Arena8192");
 		} else {
 #ifdef ALLOC_INSTRUMENTATION
@@ -618,7 +647,10 @@ void ArenaBlock::destroyLeaf() {
 #endif
 			g_hugeArenaMemory.fetch_sub(bigSize);
 			memTrackerOnFree(this);
-			freeOrMaybeKeepalive(this);
+			{
+				MemTrackerSuppress _suppress;
+				freeOrMaybeKeepalive(this);
+			}
 		}
 	}
 }
