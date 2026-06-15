@@ -110,21 +110,33 @@ TEST_CASE("/flow/MemoryTracker/coverage") {
 	memTrackerForEachSite([&](const MemoryTrackerCallSite& s) {
 		siteCount++;
 		for (int i = 0; i < s.exemplarFrameCount; i++) {
-			if (frameInside(s.exemplarFrames[i], opNew)) foundOpNew = true;
-			if (frameInside(s.exemplarFrames[i], fastAlloc)) foundFastAlloc = true;
-			if (frameInside(s.exemplarFrames[i], arena)) foundArena = true;
+			if (frameInside(s.exemplarFrames[i], opNew))
+				foundOpNew = true;
+			if (frameInside(s.exemplarFrames[i], fastAlloc))
+				foundFastAlloc = true;
+			if (frameInside(s.exemplarFrames[i], arena))
+				foundArena = true;
 		}
 	});
 
 	if (!foundOpNew || !foundFastAlloc || !foundArena) {
 		fprintf(stderr,
 		        "MemoryTracker/coverage: sites=%d opNewSentinel=%p fastAllocSentinel=%p arenaSentinel=%p\n",
-		        siteCount, opNew, fastAlloc, arena);
-		fprintf(stderr, "MemoryTracker/coverage: foundOpNew=%d foundFastAlloc=%d foundArena=%d\n",
-		        foundOpNew, foundFastAlloc, foundArena);
+		        siteCount,
+		        opNew,
+		        fastAlloc,
+		        arena);
+		fprintf(stderr,
+		        "MemoryTracker/coverage: foundOpNew=%d foundFastAlloc=%d foundArena=%d\n",
+		        foundOpNew,
+		        foundFastAlloc,
+		        foundArena);
 		memTrackerForEachSite([&](const MemoryTrackerCallSite& s) {
-			fprintf(stderr, "  site fp=%016llx liveBytes=%lld cumAllocs=%lld frames=",
-			        (unsigned long long)s.fingerprint, (long long)s.liveBytes, (long long)s.cumulativeAllocs);
+			fprintf(stderr,
+			        "  site fp=%016llx liveBytes=%lld cumAllocs=%lld frames=",
+			        (unsigned long long)s.fingerprint,
+			        (long long)s.liveBytes,
+			        (long long)s.cumulativeAllocs);
 			for (int i = 0; i < s.exemplarFrameCount; i++) {
 				fprintf(stderr, "%p ", s.exemplarFrames[i]);
 			}
@@ -197,7 +209,8 @@ TEST_CASE("/flow/MemoryTracker/cumulativeIsMonotonic") {
 	memTrackerForEachSite([&](const MemoryTrackerCallSite& s) {
 		for (int i = 0; i < s.exemplarFrameCount; i++) {
 			if (frameInside(s.exemplarFrames[i], sentinel)) {
-				if (s.cumulativeAllocs > maxCumulative) maxCumulative = s.cumulativeAllocs;
+				if (s.cumulativeAllocs > maxCumulative)
+					maxCumulative = s.cumulativeAllocs;
 				finalLive += s.liveCount;
 			}
 		}

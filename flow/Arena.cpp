@@ -488,7 +488,8 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 			b->secure = 0;
 			// Block-level attribution for >256 sizes (sizes <=256 use FastAllocator,
 			// which fires its own memTrackerOnAlloc hook).
-			if (b->bigSize > 256) memTrackerOnAlloc(b, b->bigSize);
+			if (b->bigSize > 256)
+				memTrackerOnAlloc(b, b->bigSize);
 		} else {
 #ifdef ALLOC_INSTRUMENTATION
 			allocInstr["ArenaHugeKB"].alloc((reqSize + 1023) >> 10);
