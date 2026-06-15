@@ -3,7 +3,7 @@
 ## Objective
 
 Make it easier to debug memory leaks and generally to understand the
-principle consumers of memory in FDB.  Specifically: add a sampled,
+principal consumers of memory in FDB.  Specifically: add a sampled,
 always-compiled, runtime-knob-controlled memory attribution mechanism
 that captures a small return-address backtrace at a configurable
 fraction of allocations, aggregates byte and call counts per call
@@ -166,9 +166,9 @@ Hooks:
 
 | Path | Allocate | Free |
 |---|---|---|
-| Global `new`/`delete` | new `MemoryTracker.cpp` | same |
+| Global `new`/`delete` | `MemoryTracker.cpp` (new file) | `MemoryTracker.cpp` (same file) |
 | `FastAllocator<Size>` | `FastAlloc.cpp` (`::allocate`) | `FastAlloc.cpp` (`::release`) |
-| `Arena` | `Arena.cpp` `ArenaBlock::create` | `Arena.cpp` `ArenaBlock::destroyLeaf` |
+| `Arena` | `Arena.cpp` (`ArenaBlock::create`) | `Arena.cpp` (`ArenaBlock::destroyLeaf`) |
 
 ## Detailed Design
 
@@ -197,15 +197,16 @@ inline void memTrackerOnFree(void* p) {
 }
 ```
 
-The counter is reseeded inside `memTrackerSampleAlloc` to
-`1 + (xorshift32(&seed) % (2 * INV))`, giving mean `INV` with no aliasing
-to fixed allocation patterns. When `INV == 0` (off-switch), the reseed
-sets the counter to `INT_MAX` so the un-sampled branch is taken
-indefinitely with no further work.
+The counter is reseeded on every sample to a small uniform random
+integer with mean `INV`, so the sampling rate averages 1-in-`INV`
+without aliasing to fixed allocation patterns. When `INV == 0`
+(off-switch), the reseed parks the counter at a value large enough
+that the un-sampled fast-path branch is taken indefinitely with no
+further work.
 
-`gMemTrackerCounter` starts at 1 so the first allocation per thread is
-always sampled — guarantees test workloads with very few allocations still
-exercise the path.
+The counter's initial value (per-thread) is chosen so the first
+allocation a thread sees is always sampled, which guarantees that
+test workloads with very few allocations still exercise the path.
 
 **Force-sample-large.** The `n < gForceSampleBytes` check guarantees
 that any allocation at or above the configured threshold (default 100
@@ -361,14 +362,13 @@ about.
 
 #### Live-block table
 
-Open-addressing hash, key `void*`, value `{uint64_t fingerprint, uint32_t
-size}` (16 bytes/entry). Sized for ~1.5× expected live sampled
-allocations to keep load factor under 0.7. Resize doubles capacity. All
-backing memory comes from `std::malloc` directly: this bypasses our
-`operator new` hooks (we override `operator new`, not libc `malloc`), so
-the tracker's own allocations cannot recurse back into the tracking
-path. The thread-local `gInMemTracker` flag is the single line of
-defense and is sufficient on its own; we don't need a private slab pool.
+Hash table, key `void*`, value `{uint64_t fingerprint, uint32_t size}`
+(16 bytes/entry). All backing memory comes from `std::malloc`
+directly: this bypasses our `operator new` hooks (we override
+`operator new`, not libc `malloc`), so the tracker's own allocations
+cannot recurse back into the tracking path. The thread-local
+`gInMemTracker` flag is the single line of defense and is sufficient
+on its own; we don't need a private slab pool.
 
 Created lazily on first sample if the `MEMORY_TRACKING_LIVE_TRACKING`
 knob is set; if the knob is off, the table is never allocated and only
@@ -546,59 +546,40 @@ TraceEvent("MemoryTrackerSite")
     // ... up to FrameN
 ```
 
-Then emit **one** combined `addr2line` command for the entire dump as
-its own TraceEvent. `platform::format_backtrace` already produces a
-single `addr2line -e <bin> -p -C -f -i 0xADDR ...` invocation with the
-PIE load offset subtracted; we feed it the concatenation of every
-qualifying site's exemplar frames (in the same order as the
-`MemoryTrackerSite` events above), so the resulting command resolves
-every reported site's frames in one shot:
-
-```
-std::vector<void*> allFrames;
-for (const auto& s : qualifying) {
-    for (int i = 0; i < s.exemplarFrameCount; ++i)
-        allFrames.push_back(s.exemplarFrames[i]);
-}
-TraceEvent("MemoryTrackerAddrCmd")
-    .detail("Sites", qualifying.size())
-    .detail("FramesPerSite", FLOW_KNOBS->MEMORY_TRACKING_FRAMES)
-    .detail("AddrCmd", platform::format_backtrace(allFrames.data(), allFrames.size()));
-```
-
-A human (or an AI consumer) cuts and pastes the `AddrCmd` field once and
-gets every reported site's stacks resolved together. Mapping resolved
-lines back to
-sites is positional: the first `FramesPerSite` lines belong to the first
-`MemoryTrackerSite` event in the dump, the next `FramesPerSite` to the
-second, etc. (Sites with fewer captured frames are still padded to
-`FramesPerSite` per dump entry, or the per-site frame count is included
-above for variable-length walks.)
+Then emit **one** combined `addr2line`-style command for the entire
+dump as its own TraceEvent (`MemoryTrackerAddrCmd`), listing every
+qualifying site's exemplar frames in dump order with PIE-relative
+addresses. A human or AI consumer cuts and pastes this single
+command and gets every reported site's stacks resolved in one shot.
 
 Also emit one summary event per dump:
 
 ```
 TraceEvent("MemoryTrackerSummary")
-    .detail("SitesTracked", aggregationTable.size())
-    .detail("LiveBlocks", liveBlocksTotal)            // sampled live blocks across all sites
-    .detail("LiveBytes", liveBytesTotal)              // sampled live bytes across all sites
+    .detail("SitesTracked", aggregationTable.size())   // unique call-site fingerprints tracked
+    .detail("SitesReported", qualifying.size())        // sites that crossed the byte threshold this dump
+    .detail("LiveBlocks", liveMap.size())              // currently live sampled blocks
+    .detail("LiveBytesTotal", liveBytesTotal)          // sum of bytes across currently live sampled blocks
+    .detail("LiveBlocksTotal", liveBlocksTotal)        // running counter; equivalent to LiveBlocks above
     .detail("CumulativeAllocs", cumulativeAllocsTotal)
     .detail("CumulativeBytes", cumulativeBytesTotal)
     .detail("SamplesEmitted", samplesEmittedSinceStart)
     .detail("SamplesDroppedReentry", reentrantBailouts)
-    .detail("SamplesDroppedAllocFailure", allocFailureDrops)
-    .detail("DumpDurationMs", dumpDurationMs)
     .detail("SampleInverse", FLOW_KNOBS->MEMORY_TRACKING_SAMPLE_INVERSE)
-    .detail("ForceSampleBytes", FLOW_KNOBS->MEMORY_TRACKING_FORCE_SAMPLE_BYTES);
+    .detail("ForceSampleBytes", FLOW_KNOBS->MEMORY_TRACKING_FORCE_SAMPLE_BYTES)
+    .detail("ReportBytesThreshold", bytesThreshold);
 ```
 
-The four totals (`LiveBlocks`, `LiveBytes`, `CumulativeAllocs`,
-`CumulativeBytes`) are maintained as `int64_t` globals updated under
-the same spinlock on every sample. They are *sampled* totals, not
-population totals; to estimate population, multiply by the sample
-inverse. (Force-sampled large allocations should be deducted before
-multiplying — easiest to track them in their own counter pair if this
-estimate matters.)
+The running totals (`LiveBytesTotal`, `LiveBlocksTotal`,
+`CumulativeAllocs`, `CumulativeBytes`) are maintained as `int64_t`
+globals updated under the same spinlock on every sample. They are
+*sampled* totals, not population totals; to estimate population,
+multiply by the sample inverse. (Force-sampled large allocations
+should be deducted before multiplying — easiest to track them in
+their own counter pair if this estimate matters.) `LiveBlocks` is a
+snapshot of the live-block table size at dump time and is equivalent
+to `LiveBlocksTotal`; both are emitted for now and one may drop in a
+cleanup.
 
 ### Knobs (FlowKnobs, since clients use Arena/new too)
 
@@ -790,10 +771,10 @@ tail. Out of scope for v1.
 
 ### A8. `__FILE__`/`__LINE__` macro instrumentation
 
-User mentioned this as an alternative: replace every `new` /
-`arena.allocate` / `malloc` call with a macro that captures
-`__FILE__`/`__LINE__`, store those instead of return-address frames.
-Avoids the need for `addr2line`.
+An alternative considered: replace every `new` / `arena.allocate` /
+`malloc` call with a macro that captures `__FILE__` / `__LINE__`,
+storing those instead of return-address frames. Avoids the need for
+`addr2line`.
 
 Rejected because:
 - File/line at the *allocator* layer is uninformative
@@ -806,10 +787,6 @@ Rejected because:
 - Return-address frames give correct multi-frame attribution
   with no source changes. Symbolization via `addr2line` is offline
   but already supported in this repo.
-
-### A9. Storing the small backtrace inside the allocated block
-
-User originally proposed this; covered under A1. Side table chosen.
 
 ## Testing Considerations
 
@@ -849,21 +826,19 @@ A new `flow/MemoryTrackerTest.cpp` exercises:
 
 ### Microbenchmarks
 
+The targets below are 5% rather than R2's 0.1% end-to-end CPU ceiling
+because a tight alloc/free loop is the pessimal case: there is no real
+work between hook calls to amortize the overhead against, so the
+per-allocation cost shows up undiluted. R2's 0.1% applies to realistic
+workloads.
+
 - **Un-sampled hot path.** A new `bin/fdbserver -r unittests
   -f /flow/MemoryTracker/perfUnsampled` allocates and frees in a tight
   loop with sample inverse 0; compare against a baseline build with the
   hooks compiled out (`#ifdef MEMTRACKER_DISABLED`). Target: < 5%
   delta.
-
-// NOTE: I changed 1% to 5% above. This is because 1% total overhead
-// (stated elsewhere as a requirement) 
-// accounts for the system doing more than just allocating and freeing
-// in a tight loop.  In a tight loop, the overhead can be more.
-
 - **Sampled path.** Same loop with sample inverse 100; target: < 5%
   delta vs. the un-sampled baseline at 100K alloc/sec.
-
-// NOTE: again 5% here.
 
 ### Strip-aware symbolization spot-check
 
@@ -911,15 +886,14 @@ deterministic, fast, and works on stripped builds.
 ### Self-metrics emitted by the tracker
 
 Every `MemoryTrackerSummary` event reports:
-- `SitesTracked` — current size of aggregation table.
-- `LiveBlocks` — current size of live-block table.
+- `SitesTracked` — unique call-site fingerprints in the aggregation table.
+- `SitesReported` — sites that crossed the byte threshold this dump.
+- `LiveBlocks` / `LiveBlocksTotal` — currently live sampled blocks
+  (two equivalent paths; see Reporting).
 - `SamplesEmitted` — cumulative samples that produced an aggregate
   update.
 - `SamplesDroppedReentry` — sampled allocations skipped because the
   reentrancy guard was already set.
-- `SamplesDroppedAllocFailure` — sampled allocations skipped because
-  `std::malloc` returned null while growing a tracker table.
-- `DumpDurationMs` — how long the dump itself took.
 
 These are the operator-visible knobs for "is the tracker working" and
 "is the tracker hurting us".
