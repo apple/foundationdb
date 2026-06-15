@@ -399,6 +399,11 @@ if(NOT WIN32)
         --redundancy double
         )
 
+      # These tests replace every process in a local cluster. Running them with
+      # other CTests can starve recovery long enough to trip the progress check.
+      set_tests_properties(fdb_c_wiggle_only fdb_c_wiggle_and_upgrade
+        PROPERTIES RUN_SERIAL TRUE)
+
     endif()
   endif()
 
