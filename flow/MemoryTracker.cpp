@@ -377,26 +377,12 @@ void memTrackerDump(int64_t bytesThreshold) {
 		qualifying.push_back(s);
 	}
 
-	for (const auto& s : qualifying) {
-		TraceEvent ev("MemoryTrackerSite");
-		ev.detail("Fingerprint", format("%016llx", static_cast<unsigned long long>(s.fingerprint)));
-		ev.detail("LiveBytes", s.liveBytes);
-		ev.detail("LiveCount", s.liveCount);
-		ev.detail("PeakBytes", s.peakBytes);
-		ev.detail("CumulativeBytes", s.cumulativeBytes);
-		ev.detail("CumulativeAllocs", s.cumulativeAllocs);
-		ev.detail("ForceSampledCount", s.forceSampledCount);
-		for (int f = 0; f < s.exemplarFrameCount; f++) {
-			ev.detail(format("Frame%d", f).c_str(), format("%p", s.exemplarFrames[f]));
-		}
-	}
-
-	// Single combined addr2line invocation covering every qualifying site's
-	// frames in dump order, leaf-to-root within each site. Cut-and-paste
-	// resolves all stacks at once; resolved lines map back to sites positionally
-	// (FramesPerSite per site). Built directly so we keep frame 0 (the actual
-	// allocation site) — platform::format_backtrace drops index 0 by design,
-	// which is wrong for this use case.
+	// Build addr2line prefix once per dump. Built directly here rather
+	// than via platform::format_backtrace, which deliberately drops index
+	// 0 of its input (its single-site use case treats that as the helper's
+	// caller); we want every captured frame including the leaf.
+	std::string addrCmdPrefix;
+	uintptr_t pieOffset = 0;
 	if (!qualifying.empty()) {
 		platform::ImageInfo img = platform::getImageInfo();
 #ifdef __clang__
@@ -404,21 +390,25 @@ void memTrackerDump(int64_t bytesThreshold) {
 #else
 		const char* addr2lineTool = "/usr/bin/addr2line";
 #endif
-		std::string cmd = format("%s -e %s -p -C -f -i", addr2lineTool, img.symbolFileName.c_str());
-		int totalFrames = 0;
-		for (const auto& s : qualifying) {
-			for (int i = 0; i < s.exemplarFrameCount; i++) {
-				uintptr_t pieRelative =
-				    reinterpret_cast<uintptr_t>(s.exemplarFrames[i]) - reinterpret_cast<uintptr_t>(img.offset);
-				cmd += format(" 0x%lx", pieRelative);
-				totalFrames++;
-			}
+		addrCmdPrefix = format("%s -e %s -p -C -f -i", addr2lineTool, img.symbolFileName.c_str());
+		pieOffset = reinterpret_cast<uintptr_t>(img.offset);
+	}
+
+	for (const auto& s : qualifying) {
+		std::string addrCmd = addrCmdPrefix;
+		for (int i = 0; i < s.exemplarFrameCount; i++) {
+			uintptr_t pieRelative = reinterpret_cast<uintptr_t>(s.exemplarFrames[i]) - pieOffset;
+			addrCmd += format(" 0x%lx", pieRelative);
 		}
-		TraceEvent("MemoryTrackerAddrCmd")
-		    .detail("Sites", qualifying.size())
-		    .detail("FramesPerSite", FLOW_KNOBS ? FLOW_KNOBS->MEMORY_TRACKING_FRAMES : 6)
-		    .detail("TotalFrames", totalFrames)
-		    .detail("AddrCmd", cmd);
+		TraceEvent("MemoryTrackerSite")
+		    .detail("Fingerprint", format("%016llx", static_cast<unsigned long long>(s.fingerprint)))
+		    .detail("LiveBytes", s.liveBytes)
+		    .detail("LiveCount", s.liveCount)
+		    .detail("PeakBytes", s.peakBytes)
+		    .detail("CumulativeBytes", s.cumulativeBytes)
+		    .detail("CumulativeAllocs", s.cumulativeAllocs)
+		    .detail("ForceSampledCount", s.forceSampledCount)
+		    .detail("AddrCmd", addrCmd);
 	}
 
 	TraceEvent("MemoryTrackerSummary")
