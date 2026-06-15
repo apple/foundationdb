@@ -29,6 +29,11 @@
 thread_local bool gInMemTracker = false;
 thread_local int gMemTrackerCounter = 1;
 thread_local std::size_t gForceSampleBytes = static_cast<std::size_t>(-1);
+// Same initial seed for every thread; cheap and adequate. Threads in
+// production start at different times and call into the slow path at
+// uncorrelated rates, so any phase correlation washes out within the
+// first handful of samples. If profiling ever shows correlated bursts
+// at startup, mix in a thread-id-derived value here.
 thread_local uint32_t gMemTrackerSeed = 0x9E3779B9u;
 
 namespace {
@@ -150,7 +155,6 @@ std::int64_t g_liveBlocksTotal = 0;
 std::int64_t g_cumulativeBytesTotal = 0;
 std::int64_t g_cumulativeAllocsTotal = 0;
 std::int64_t g_samplesEmitted = 0;
-std::int64_t g_reentrantBailouts = 0; // currently unobserved; reentry returns silently from the inline
 
 void ensureMaps() {
 	if (!g_aggMap)
@@ -200,6 +204,13 @@ void memTrackerSampleAlloc(void* p, std::size_t n) {
 
 	// Capture frames; skip the topmost two (this function and captureFramesFP
 	// itself) so the recorded stack starts at the caller of memTrackerOnAlloc.
+	// The strip count of 2 assumes memTrackerOnAlloc is inlined into its
+	// caller (it's declared `inline` and the body is trivial). Production
+	// builds run at -O3 and the inliner cooperates; at -O0 the inline hint
+	// can be ignored and the recorded stack starts one frame too deep
+	// (frame 0 = memTrackerOnAlloc body rather than the user's
+	// allocation site). Acceptable: -O0 builds are not load-bearing for
+	// memory attribution; the off-by-one is harmless for that workflow.
 	void* tmp[MEMORY_TRACKER_MAX_FRAMES + 4];
 	int captured = captureFramesFP(tmp, frames + 2);
 	int kept = 0;
@@ -269,8 +280,11 @@ void memTrackerSampleFree(void* p) {
 }
 
 void memTrackerForEachSite(std::function<void(const MemoryTrackerCallSite&)> cb) {
+	// Suppress for the entire call so callbacks that allocate (e.g.
+	// fprintf or std::vector growth in test failure paths) don't
+	// re-enter the tracker and pollute the agg map mid-iteration.
+	MemTrackerSuppress _suppress;
 	std::vector<MemoryTrackerCallSite> snapshot;
-	gInMemTracker = true;
 	{
 		ThreadSpinLockHolder lk(g_mtLock);
 		if (g_aggMap) {
@@ -279,7 +293,6 @@ void memTrackerForEachSite(std::function<void(const MemoryTrackerCallSite&)> cb)
 				snapshot.push_back(kv.second);
 		}
 	}
-	gInMemTracker = false;
 	for (auto& s : snapshot)
 		cb(s);
 }
@@ -297,7 +310,6 @@ void memTrackerResetForTest() {
 		g_cumulativeBytesTotal = 0;
 		g_cumulativeAllocsTotal = 0;
 		g_samplesEmitted = 0;
-		g_reentrantBailouts = 0;
 	}
 	// Force the next allocation on this thread to take the slow path so it
 	// re-reads the (possibly just-changed) sample-inverse knob. Without this,
@@ -319,7 +331,6 @@ void memTrackerDump(int64_t bytesThreshold) {
 	std::int64_t cumBytesSnap = 0;
 	std::int64_t cumAllocsSnap = 0;
 	std::int64_t samplesEmittedSnap = 0;
-	std::int64_t reentrantSnap = 0;
 	{
 		ThreadSpinLockHolder lk(g_mtLock);
 		if (g_aggMap) {
@@ -334,10 +345,14 @@ void memTrackerDump(int64_t bytesThreshold) {
 		cumBytesSnap = g_cumulativeBytesTotal;
 		cumAllocsSnap = g_cumulativeAllocsTotal;
 		samplesEmittedSnap = g_samplesEmitted;
-		reentrantSnap = g_reentrantBailouts;
 	}
 
 	bool liveTracking = FLOW_KNOBS ? FLOW_KNOBS->MEMORY_TRACKING_LIVE_TRACKING : true;
+	// std::sort is unstable and unordered_map iteration is bucket-order, so
+	// MemoryTrackerSite events for sites with tied byte values may appear in
+	// different orders across same-seed sim2 runs. The R6 determinism
+	// requirement is on aggregate counts, not event ordering — those are
+	// unaffected — so we don't pay for stable_sort here.
 	auto byLive = [](const MemoryTrackerCallSite& a, const MemoryTrackerCallSite& b) {
 		return a.liveBytes > b.liveBytes;
 	};
@@ -415,7 +430,6 @@ void memTrackerDump(int64_t bytesThreshold) {
 	    .detail("CumulativeAllocs", cumAllocsSnap)
 	    .detail("CumulativeBytes", cumBytesSnap)
 	    .detail("SamplesEmitted", samplesEmittedSnap)
-	    .detail("SamplesDroppedReentry", reentrantSnap)
 	    .detail("SampleInverse", FLOW_KNOBS ? FLOW_KNOBS->MEMORY_TRACKING_SAMPLE_INVERSE : 0)
 	    .detail("ForceSampleBytes",
 	            FLOW_KNOBS ? FLOW_KNOBS->MEMORY_TRACKING_FORCE_SAMPLE_BYTES : static_cast<std::int64_t>(-1))

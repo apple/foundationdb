@@ -564,7 +564,6 @@ TraceEvent("MemoryTrackerSummary")
     .detail("CumulativeAllocs", cumulativeAllocsTotal)
     .detail("CumulativeBytes", cumulativeBytesTotal)
     .detail("SamplesEmitted", samplesEmittedSinceStart)
-    .detail("SamplesDroppedReentry", reentrantBailouts)
     .detail("SampleInverse", FLOW_KNOBS->MEMORY_TRACKING_SAMPLE_INVERSE)
     .detail("ForceSampleBytes", FLOW_KNOBS->MEMORY_TRACKING_FORCE_SAMPLE_BYTES)
     .detail("ReportBytesThreshold", bytesThreshold);
@@ -892,8 +891,6 @@ Every `MemoryTrackerSummary` event reports:
   (two equivalent paths; see Reporting).
 - `SamplesEmitted` — cumulative samples that produced an aggregate
   update.
-- `SamplesDroppedReentry` — sampled allocations skipped because the
-  reentrancy guard was already set.
 
 These are the operator-visible knobs for "is the tracker working" and
 "is the tracker hurting us".
