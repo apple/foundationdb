@@ -1,23 +1,41 @@
 /*
- * MemoryTracker.h — sampled per-call-site memory attribution.
+ * MemoryTracker.h
  *
- * See design/memory-tracker.md for the full design.
+ * This source file is part of the FoundationDB open source project
  *
- * Hot path: memTrackerOnAlloc / memTrackerOnFree are header-inlined, one TLS
- * load + one decrement + one branch on the un-sampled fast path.
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
- * Sampled path delegates to memTrackerSampleAlloc / memTrackerSampleFree,
- * which take a private spinlock, capture a frame-pointer-walk backtrace, and
- * update two tables (aggregation by fingerprint, and an optional pointer-
- * keyed live-block table).
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * Reentrancy: the gInMemTracker thread-local guard is set to true while the
- * tracker is doing its own work. Any allocator hook called recursively
- * during that window observes the guard and bails out, leaving the
- * underlying allocation un-tracked. Higher-level hooks (e.g. ArenaBlock::create)
- * may also set this guard to suppress an inner allocator hook so the same
- * block is attributed at exactly one level.
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
+
+// Sampled per-call-site memory attribution.
+//
+// See design/memory-tracker.md for the full design.
+//
+// Hot path: memTrackerOnAlloc / memTrackerOnFree are header-inlined, one TLS
+// load + one decrement + one branch on the un-sampled fast path.
+//
+// Sampled path delegates to memTrackerSampleAlloc / memTrackerSampleFree,
+// which take a private spinlock, capture a frame-pointer-walk backtrace, and
+// update two tables (aggregation by fingerprint, and an optional pointer-
+// keyed live-block table).
+//
+// Reentrancy: the gInMemTracker thread-local guard is set to true while the
+// tracker is doing its own work. Any allocator hook called recursively
+// during that window observes the guard and bails out, leaving the
+// underlying allocation un-tracked. Higher-level hooks (e.g. ArenaBlock::create)
+// may also set this guard to suppress an inner allocator hook so the same
+// block is attributed at exactly one level.
 
 #ifndef FLOW_MEMORY_TRACKER_H
 #define FLOW_MEMORY_TRACKER_H
