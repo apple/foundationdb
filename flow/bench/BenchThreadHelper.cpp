@@ -71,6 +71,40 @@ Future<Void> benchUnsafeThreadFutureToFutureReadyIntActor(benchmark::State* stat
 	state->SetItemsProcessed(static_cast<int64_t>(state->iterations()));
 }
 
+Future<Void> benchSafeThreadFutureToFuturePendingIntActor(benchmark::State* state) {
+	int64_t sink = 0;
+
+	while (state->KeepRunning()) {
+		auto* sav = new ThreadSingleAssignmentVar<int>;
+		ThreadFuture<int> threadFuture(sav);
+		Future<int> f = safeThreadFutureToFuture(threadFuture);
+		sav->send(7);
+		sink += co_await f;
+		benchmark::DoNotOptimize(f);
+		benchmark::ClobberMemory();
+	}
+
+	benchmark::DoNotOptimize(sink);
+	state->SetItemsProcessed(static_cast<int64_t>(state->iterations()));
+}
+
+Future<Void> benchUnsafeThreadFutureToFuturePendingIntActor(benchmark::State* state) {
+	int64_t sink = 0;
+
+	while (state->KeepRunning()) {
+		auto* sav = new ThreadSingleAssignmentVar<int>;
+		ThreadFuture<int> threadFuture(sav);
+		Future<int> f = unsafeThreadFutureToFuture(threadFuture);
+		sav->send(7);
+		sink += co_await f;
+		benchmark::DoNotOptimize(f);
+		benchmark::ClobberMemory();
+	}
+
+	benchmark::DoNotOptimize(sink);
+	state->SetItemsProcessed(static_cast<int64_t>(state->iterations()));
+}
+
 void benchOnMainThreadReadyInt(benchmark::State& state) {
 	int64_t sink = 0;
 
@@ -90,7 +124,7 @@ void benchOnMainThreadReadyVoid(benchmark::State& state) {
 	for (auto _ : state) {
 		benchmark::DoNotOptimize(_);
 		ThreadFuture<Void> result = onMainThread([] { return readyVoidFuture(); });
-		result.blockUntilReady();
+		result.getBlocking();
 		benchmark::ClobberMemory();
 	}
 
@@ -120,11 +154,11 @@ void benchOnMainThreadVoidEnqueue(benchmark::State& state) {
 
 void benchOnMainThreadVoidEnqueueWithErrorMember(benchmark::State& state) {
 	const int batchSize = state.range(0);
+	ErrorSlot slot;
 
 	for (auto _ : state) {
 		benchmark::DoNotOptimize(_);
 		std::atomic<int> completed{ 0 };
-		ErrorSlot slot;
 
 		for (int i = 0; i < batchSize; ++i) {
 			onMainThreadVoid(
@@ -135,24 +169,37 @@ void benchOnMainThreadVoidEnqueueWithErrorMember(benchmark::State& state) {
 		while (completed.load(std::memory_order_acquire) != batchSize) {
 			std::this_thread::yield();
 		}
-		state.ResumeTiming();
-
 		ASSERT(slot.error.code() == invalid_error_code);
+		state.ResumeTiming();
 	}
 
 	state.SetItemsProcessed(static_cast<int64_t>(state.iterations()) * batchSize);
 }
 
 void benchSafeThreadFutureToFutureReadyInt(benchmark::State& state) {
-	onMainThread([&state] { return benchSafeThreadFutureToFutureReadyIntActor(&state); }).blockUntilReady();
+	onMainThread([&state] { return benchSafeThreadFutureToFutureReadyIntActor(&state); }).getBlocking();
 }
 
 void benchUnsafeThreadFutureToFutureReadyInt(benchmark::State& state) {
-	onMainThread([&state] { return benchUnsafeThreadFutureToFutureReadyIntActor(&state); }).blockUntilReady();
+	onMainThread([&state] { return benchUnsafeThreadFutureToFutureReadyIntActor(&state); }).getBlocking();
 }
 
-BENCHMARK(benchOnMainThreadReadyInt)->Name("ThreadHelper/onMainThread/ready_int")->ReportAggregatesOnly(true);
-BENCHMARK(benchOnMainThreadReadyVoid)->Name("ThreadHelper/onMainThread/ready_void")->ReportAggregatesOnly(true);
+void benchSafeThreadFutureToFuturePendingInt(benchmark::State& state) {
+	onMainThread([&state] { return benchSafeThreadFutureToFuturePendingIntActor(&state); }).getBlocking();
+}
+
+void benchUnsafeThreadFutureToFuturePendingInt(benchmark::State& state) {
+	onMainThread([&state] { return benchUnsafeThreadFutureToFuturePendingIntActor(&state); }).getBlocking();
+}
+
+BENCHMARK(benchOnMainThreadReadyInt)
+    ->Name("ThreadHelper/onMainThread/ready_int")
+    ->UseRealTime()
+    ->ReportAggregatesOnly(true);
+BENCHMARK(benchOnMainThreadReadyVoid)
+    ->Name("ThreadHelper/onMainThread/ready_void")
+    ->UseRealTime()
+    ->ReportAggregatesOnly(true);
 
 BENCHMARK(benchOnMainThreadVoidEnqueue)
     ->Name("ThreadHelper/onMainThreadVoid/enqueue")
@@ -172,6 +219,14 @@ BENCHMARK(benchSafeThreadFutureToFutureReadyInt)
 
 BENCHMARK(benchUnsafeThreadFutureToFutureReadyInt)
     ->Name("ThreadHelper/unsafeThreadFutureToFuture/ready_int")
+    ->ReportAggregatesOnly(true);
+
+BENCHMARK(benchSafeThreadFutureToFuturePendingInt)
+    ->Name("ThreadHelper/safeThreadFutureToFuture/pending_int")
+    ->ReportAggregatesOnly(true);
+
+BENCHMARK(benchUnsafeThreadFutureToFuturePendingInt)
+    ->Name("ThreadHelper/unsafeThreadFutureToFuture/pending_int")
     ->ReportAggregatesOnly(true);
 
 } // namespace
