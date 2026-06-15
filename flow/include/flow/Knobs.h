@@ -130,7 +130,11 @@ public:
 	// Per-call-site sampled memory tracker. See design/memory-tracker.md and flow/MemoryTracker.h.
 	int MEMORY_TRACKING_SAMPLE_INVERSE; // 0=off, N=1-in-N
 	int64_t MEMORY_TRACKING_FORCE_SAMPLE_BYTES; // always sample allocations >= this many bytes; INT64_MAX disables
-	bool MEMORY_TRACKING_LIVE_TRACKING; // when false, skip the pointer-keyed live-block table
+	bool MEMORY_TRACKING_LIVE_TRACKING; // when false, skip the pointer-keyed live-block table.
+	                                    // Treat as startup-only: toggling true→false leaves orphan
+	                                    // entries in the live-block table that won't get debited;
+	                                    // toggling false→true then matches new frees against stale
+	                                    // entries. Operators should set this once and leave it.
 	double MEMORY_TRACKING_REPORT_INTERVAL; // seconds between dumps; 0 disables reporting
 	int64_t MEMORY_TRACKING_REPORT_BYTES_THRESHOLD; // sites with live bytes >= this are reported each dump (~1% of an 8
 	                                                // GB target RSS)
