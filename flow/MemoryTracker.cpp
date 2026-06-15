@@ -62,6 +62,8 @@ inline std::uint32_t xorshift32(std::uint32_t& s) {
 thread_local uintptr_t gStackLow = 0;
 thread_local uintptr_t gStackHigh = 0;
 
+#ifdef __linux__
+
 void initStackBoundsForThread() {
 	pthread_attr_t attr;
 	if (pthread_getattr_np(pthread_self(), &attr) == 0) {
@@ -111,6 +113,20 @@ __attribute__((no_instrument_function, noinline)) int captureFramesFP(void** out
 	}
 	return n;
 }
+
+#else // !__linux__
+
+// macOS / non-Linux: stack walking is unreliable here (system runtime
+// has -fomit-frame-pointer in places we can't avoid, and pthread_getattr_np
+// is Linux-specific). FDB is required to compile on macOS but is not run
+// in production there, so we just no-op the walker. The rest of the
+// tracker still compiles and runs; per-call-site reports will simply
+// lack stack attribution.
+__attribute__((no_instrument_function, noinline)) int captureFramesFP(void**, int) {
+	return 0;
+}
+
+#endif // __linux__
 
 ThreadSpinLock g_mtLock;
 
