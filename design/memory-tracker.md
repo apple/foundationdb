@@ -527,10 +527,10 @@ if (FLOW_KNOBS->MEMORY_TRACKING_REPORT_INTERVAL > 0 &&
 Implementation: take the spinlock; copy the aggregation table values
 into a local `std::vector<CallSite>` (backed by `std::malloc`; the
 `gInMemTracker` reentrancy flag prevents recursion into the tracker);
-release the lock; sort by `liveBytes` descending;
-filter to entries with `liveBytes >= bytesThreshold`; emit one
-TraceEvent per qualifying site with stats and raw addresses (no
-per-site `addr2line` command):
+release the lock; sort by `liveBytes` descending; filter to entries
+with `liveBytes >= bytesThreshold`; emit one TraceEvent per qualifying
+site with its stats and a ready-to-paste `addr2line` command for
+that site's stack:
 
 ```
 TraceEvent("MemoryTrackerSite")
@@ -541,16 +541,13 @@ TraceEvent("MemoryTrackerSite")
     .detail("CumulativeBytes", s.cumulativeBytes)
     .detail("CumulativeAllocs", s.cumulativeAllocs)
     .detail("ForceSampledCount", s.forceSampledCount)
-    .detail("Frame0", format("%p", s.exemplarFrames[0]))
-    .detail("Frame1", format("%p", s.exemplarFrames[1]));
-    // ... up to FrameN
+    .detail("AddrCmd", "<full addr2line invocation for this site>");
 ```
 
-Then emit **one** combined `addr2line`-style command for the entire
-dump as its own TraceEvent (`MemoryTrackerAddrCmd`), listing every
-qualifying site's exemplar frames in dump order with PIE-relative
-addresses. A human or AI consumer cuts and pastes this single
-command and gets every reported site's stacks resolved in one shot.
+The `AddrCmd` value is short — one prefix plus a handful of
+PIE-relative addresses, well under the TraceEvent string-detail
+length cap. A human or AI consumer pastes one site's `AddrCmd` and
+gets exactly that site's stack resolved.
 
 Also emit one summary event per dump:
 
