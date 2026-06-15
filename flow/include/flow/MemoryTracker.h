@@ -34,19 +34,19 @@ constexpr int MEMORY_TRACKER_MAX_FRAMES = 10;
 // Per-site aggregate. Public so unit tests can introspect via memTrackerForEachSite.
 struct MemoryTrackerCallSite {
 	uint64_t fingerprint;
-	int64_t  liveBytes;
-	int64_t  liveCount;
-	int64_t  peakBytes;
-	int64_t  cumulativeAllocs;
-	int64_t  cumulativeBytes;
-	int64_t  forceSampledCount;
-	void*    exemplarFrames[MEMORY_TRACKER_MAX_FRAMES];
-	uint8_t  exemplarFrameCount;
+	int64_t liveBytes;
+	int64_t liveCount;
+	int64_t peakBytes;
+	int64_t cumulativeAllocs;
+	int64_t cumulativeBytes;
+	int64_t forceSampledCount;
+	void* exemplarFrames[MEMORY_TRACKER_MAX_FRAMES];
+	uint8_t exemplarFrameCount;
 };
 
 // Thread-local state — see header comment.
-extern thread_local bool        gInMemTracker;
-extern thread_local int         gMemTrackerCounter;
+extern thread_local bool gInMemTracker;
+extern thread_local int gMemTrackerCounter;
 extern thread_local std::size_t gForceSampleBytes;
 
 // Out-of-line slow paths.
@@ -56,24 +56,29 @@ void memTrackerSampleFree(void* p);
 // Header-inlined hot path. Cost on the un-sampled path: one TLS load +
 // one decrement + one branch.
 inline void memTrackerOnAlloc(void* p, std::size_t n) {
-	if (gInMemTracker || !p) return;
-	if (--gMemTrackerCounter > 0 && n < gForceSampleBytes) return;
+	if (gInMemTracker || !p)
+		return;
+	if (--gMemTrackerCounter > 0 && n < gForceSampleBytes)
+		return;
 	gInMemTracker = true;
 	memTrackerSampleAlloc(p, n);
 	gInMemTracker = false;
 }
 
 inline void memTrackerOnFree(void* p) {
-	if (gInMemTracker || !p) return;
+	if (gInMemTracker || !p)
+		return;
 	gInMemTracker = true;
 	memTrackerSampleFree(p);
 	gInMemTracker = false;
 }
 
-// Periodic dump — emits one TraceEvent("MemoryTrackerSite") per top-N site
-// (sorted by liveBytes if live tracking on, else cumulativeBytes) plus one
-// TraceEvent("MemoryTrackerSummary"). Called from SystemMonitor.
-void memTrackerDump(int topN);
+// Periodic dump — emits one TraceEvent("MemoryTrackerSite") per site whose
+// liveBytes (or cumulativeBytes when MEMORY_TRACKING_LIVE_TRACKING is off)
+// exceeds bytesThreshold, plus one TraceEvent("MemoryTrackerAddrCmd") with
+// a single combined addr2line invocation covering all qualifying sites,
+// plus one TraceEvent("MemoryTrackerSummary"). Called from SystemMonitor.
+void memTrackerDump(int64_t bytesThreshold);
 
 // Snapshot iteration for tests. The callback runs while a copy of the
 // aggregation table is held; the spinlock is not held during the callback.

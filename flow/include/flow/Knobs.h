@@ -128,12 +128,13 @@ public:
 	double MEMORY_USAGE_CHECK_INTERVAL;
 
 	// Per-call-site sampled memory tracker. See design/memory-tracker.md and flow/MemoryTracker.h.
-	int     MEMORY_TRACKING_SAMPLE_INVERSE;     // 0=off, N=1-in-N
+	int MEMORY_TRACKING_SAMPLE_INVERSE; // 0=off, N=1-in-N
 	int64_t MEMORY_TRACKING_FORCE_SAMPLE_BYTES; // always sample allocations >= this many bytes; INT64_MAX disables
-	bool    MEMORY_TRACKING_LIVE_TRACKING;      // when false, skip the pointer-keyed live-block table
-	double  MEMORY_TRACKING_REPORT_INTERVAL;    // seconds between dumps; 0 disables reporting
-	int     MEMORY_TRACKING_TOP_N;              // number of sites per dump
-	int     MEMORY_TRACKING_FRAMES;             // captured stack depth (1..MEMORY_TRACKER_MAX_FRAMES)
+	bool MEMORY_TRACKING_LIVE_TRACKING; // when false, skip the pointer-keyed live-block table
+	double MEMORY_TRACKING_REPORT_INTERVAL; // seconds between dumps; 0 disables reporting
+	int64_t MEMORY_TRACKING_REPORT_BYTES_THRESHOLD; // sites with live bytes >= this are reported each dump (~1% of an 8
+	                                                // GB target RSS)
+	int MEMORY_TRACKING_FRAMES; // captured stack depth (1..MEMORY_TRACKER_MAX_FRAMES)
 
 	// Chaos testing
 	bool ENABLE_CHAOS_FEATURES;

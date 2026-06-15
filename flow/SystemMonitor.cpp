@@ -497,7 +497,7 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 	if (FLOW_KNOBS && FLOW_KNOBS->MEMORY_TRACKING_REPORT_INTERVAL > 0) {
 		static double lastMemTrackerDump = 0;
 		if (now() - lastMemTrackerDump >= FLOW_KNOBS->MEMORY_TRACKING_REPORT_INTERVAL) {
-			memTrackerDump(FLOW_KNOBS->MEMORY_TRACKING_TOP_N);
+			memTrackerDump(FLOW_KNOBS->MEMORY_TRACKING_REPORT_BYTES_THRESHOLD);
 			lastMemTrackerDump = now();
 		}
 	}
