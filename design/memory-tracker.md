@@ -28,11 +28,11 @@ attribution. When memory pressure or a leak shows up in production, the
 trace tells us *what size class* or *how much arena memory* but not *which
 caller*, making root-causing difficult.
 
-A partial framework already exists in `flow/include/flow/FastAlloc.h:60-112`
+A partial framework already exists in `flow/include/flow/FastAlloc.h`
 under the `ALLOC_INSTRUMENTATION` compile flag. It defines the right
 shapes — `memSample` (pointer → backtrace hash + size), `backTraceLookup`
 (hash → aggregate), a `memSample_entered` reentrancy flag — and global
-`operator new`/`delete` overrides in `fdbserver/fdbserver.cpp:771-818`. But
+`operator new`/`delete` overrides in `fdbserver/fdbserver.cpp`. But
 it relies on glibc `backtrace(3)` (microseconds per call), is gated behind
 a non-default compile flag, and was designed for offline analysis, not
 production. In practice it is dead code: builds that turn it on are too
@@ -42,9 +42,9 @@ The infrastructure needed to make a lightweight version cheap is already
 in place:
 
 - Frame pointers are globally enabled
-  (`cmake/ConfigureCompiler.cmake:212`: `-fno-omit-frame-pointer`), so a
+  (`cmake/ConfigureCompiler.cmake`: `-fno-omit-frame-pointer`), so a
   manual frame-pointer walk replaces `backtrace(3)` and runs in ~100 ns.
-- `platform::format_backtrace` (`flow/Platform.cpp:3517`) already emits a
+- `platform::format_backtrace` (`flow/Platform.cpp`) already emits a
   ready-to-paste `addr2line -e <bin> -p -C -f -i 0xADDR ...` command with
   the PIE load offset subtracted via `dl_iterate_phdr`. Symbolization is
   fully offline.
@@ -65,10 +65,13 @@ R2. **Sampled CPU budget.** End-to-end overhead from sampling at 1% on
     capture must take less than 200 ns for 6 frames on x86_64 and
     aarch64.
 
-R3. **Default-on in production and simulation.** Production binaries ship
-    with sampling enabled at 1% (one in 100 allocations). Simulation runs
-    at 50% (one in two) so the tracker is exercised under fault
-    injection.
+R3. **Default-on in production and simulation (post-rollout
+    steady state).** Steady-state production default is 1% sampling
+    (one in 100 allocations); simulation runs at 50% (one in two) so
+    the tracker is exercised under fault injection. The Rollout
+    section describes a phased landing where the production default
+    starts at 0 and is flipped to the steady-state value after
+    baseline performance testing.
 
 R4. **Allocation-path coverage.** All three FDB-owned allocation paths
     are attributed:
@@ -90,11 +93,14 @@ R6. **Determinism in simulation.** Sampling state lives entirely in
     `g_network->now()`. Identical workload + seed must produce identical
     aggregate counts.
 
-R7. **Periodic reporting.** A configurable cadence (default 60 s in
-    production, 30 s in simulation) emits one TraceEvent per top-N
-    sites (default 50), each containing raw return-address frames and a
-    ready-to-paste `addr2line` command. The dump itself runs in under 5
-    ms for 50 sites.
+R7. **Periodic reporting.** A configurable cadence (default 10 minutes
+    in production, 30 s in simulation) emits one TraceEvent per
+    qualifying site, where a site qualifies when its current live
+    bytes exceed `MEMORY_TRACKING_REPORT_BYTES_THRESHOLD` (default
+    80 MB — see Reporting for rationale). Each site event contains raw
+    return-address frames; a single combined `addr2line` command for
+    all qualifying sites is emitted as its own event. The dump itself
+    runs in under 5 ms when ~50 sites qualify.
 
 R8. **Zero-cost runtime symbolization.** All address-to-symbol mapping
     happens offline. The runtime never calls `backtrace_symbols`,
@@ -112,6 +118,16 @@ R11. **Reentrancy safety.** No allocation made by the tracker itself
      (table grows, dump scratch space) re-enters the tracking path. A
      thread-local guard prevents re-entry.
 
+R12. **Side-thread coverage.** Allocations from any thread are
+     attributed, not only the network thread. This includes threads
+     spawned by third-party libraries we do not own (RocksDB
+     compaction/flush/iteration, OpenSSL background workers, etc.).
+     The frame-pointer walker must terminate cleanly when it
+     traverses FP-elided code such as glibc's pthread shutdown
+     machinery — see "Side-thread safety" for the empirical repro
+     (joshua-found `IThreadPool` segfaults) that exposed the
+     original walker's crash mode.
+
 ## Design Overview
 
 Three pieces:
@@ -121,13 +137,18 @@ Three pieces:
    Both check a thread-local reentrancy flag and a thread-local
    decrementing counter; the un-sampled path is one TLS load + one
    decrement + one branch. On sample, walk the frame-pointer chain for
-   4–6 return addresses.
+   4–6 return addresses (initial estimate, subject to refinement during
+   development of this feature).
 
 2. **Storage.** Two tables, both backed by `std::malloc` (which bypasses
    our `operator new` hooks):
-   - A fingerprint-keyed *aggregation table*
-     (`uint64_t → {count, bytes, peakBytes, exemplarFrames[6]}`) where
-     the fingerprint is `fnv64(frames)`. Always present.
+   - A fingerprint-keyed *aggregation table*: `uint64_t → CallSite`,
+     where `CallSite` carries `liveCount` / `liveBytes` (count and
+     bytes of objects currently allocated at this site), `peakBytes`,
+     `cumulativeAllocs` / `cumulativeBytes` (never-decremented
+     lifetime totals), `forceSampledCount`, and the exemplar frames.
+     Fingerprint is `fnv64(frames)`. Always present. See "Aggregation
+     table" below for the full struct.
    - A pointer-keyed *live-block table* (`void* → {fingerprint, size}`)
      so `onFree` can find what `onAlloc` recorded. The pointer is the
      only key available at free time — there is no backtrace to hash —
@@ -136,17 +157,17 @@ Three pieces:
      knob (default on). When disabled, only cumulative per-site stats
      are tracked and the side table disappears entirely.
 
-3. **Reporting.** A `memTrackerDump(int topN)` walks the aggregation
-   table sorted by live bytes, emits a TraceEvent per site with raw
-   addresses and the offline `addr2line` command, called periodically
-   from `SystemMonitor.cpp`.
+3. **Reporting.** A `memTrackerDump(int64_t bytesThreshold)` walks the
+   aggregation table, emits a TraceEvent per site whose live bytes
+   exceed the threshold, plus one combined `addr2line` command covering
+   all qualifying sites. Called periodically from `SystemMonitor.cpp`.
 
 Hooks:
 
 | Path | Allocate | Free |
 |---|---|---|
 | Global `new`/`delete` | new `MemoryTracker.cpp` | same |
-| `FastAllocator<Size>` | `FastAlloc.cpp:432` | `FastAlloc.cpp:509` |
+| `FastAllocator<Size>` | `FastAlloc.cpp` (`::allocate`) | `FastAlloc.cpp` (`::release`) |
 | `Arena` | `Arena.cpp` `ArenaBlock::create` | `Arena.cpp` `ArenaBlock::destroyLeaf` |
 
 ## Detailed Design
@@ -203,25 +224,38 @@ so the hot path reads a TLS slot rather than touching the knobs
 struct.
 
 The aggregation table per-site adds a `forceSampledCount` counter
-incremented on this path; a site's `ForceSampledFraction` in the dump
-output lets consumers tell whether a site's stats are predominantly
-"every alloc above 100 KB" vs "1% of allocs"  — without that, two
-sites with the same `cumulativeAllocs` value can mean very different
+incremented on this path; the dump emits it as `ForceSampledCount`.
+Consumers compute `ForceSampledCount / CumulativeAllocs` to tell
+whether a site's stats are predominantly "every alloc above the
+force-sample threshold" vs "1% of allocs" — without that, two sites
+with the same `CumulativeAllocs` value can mean very different
 population rates.
 
 ### Stack capture
 
 ```cpp
-__attribute__((no_instrument_function, always_inline))
-inline int captureStackFP(void** frames, int max) {
+// Cached once per thread; see "Side-thread safety" for why.
+extern thread_local uintptr_t gStackLow, gStackHigh;
+void initStackBoundsForThread();   // pthread_getattr_np + pthread_attr_getstack
+
+__attribute__((no_instrument_function, noinline))
+int captureStackFP(void** frames, int max) {
+    if (!gStackLow) initStackBoundsForThread();
     void** fp = (void**)__builtin_frame_address(0);
+    // Fallback for threads where pthread_getattr_np fails: ±8 MB
+    // around the initial frame.
+    uintptr_t lo = gStackLow  ? gStackLow  : (uintptr_t)fp;
+    uintptr_t hi = gStackHigh ? gStackHigh : (uintptr_t)fp + (8u << 20);
     int n = 0;
     while (fp && n < max) {
+        uintptr_t a = (uintptr_t)fp;
+        if (a < lo || a + 16 > hi) break;            // unmapped / FP-elided upstream
+        if (a & (sizeof(void*) - 1)) break;          // misaligned
         void* ra = fp[1];
         if (!ra) break;
         frames[n++] = ra;
         void** next = (void**)fp[0];
-        if (next <= fp) break;   // sanity: stack grows down
+        if (next <= fp) break;                       // stack grows down
         fp = next;
     }
     return n;
@@ -233,20 +267,95 @@ responsible for stripping the topmost 1–2 frames so the captured stack
 starts at the real allocation site (not inside the tracker itself).
 
 Relies on `-fno-omit-frame-pointer` already set globally
-(`cmake/ConfigureCompiler.cmake:212`). On x86_64 and aarch64 each frame
+(`cmake/ConfigureCompiler.cmake`). On x86_64 and aarch64 each frame
 is two adjacent words (saved FP, saved RA), so the walk is one indirect
 load per frame: ~100 ns for 6 frames.
 
 Caveats and mitigations:
 
-- Code compiled with `-fomit-frame-pointer` (third-party static libs not
-  rebuilt with project flags) terminate the walk early. Acceptable: we
-  still get the FDB-side prefix, which is the main thing we care about.
-- Signal handlers can leave a transiently bad FP chain mid-walk; the
-  `next <= fp` sanity check bails out of those.
+- Code compiled with `-fomit-frame-pointer` (notably glibc's pthread
+  shutdown / TLS-destructor machinery, and third-party static libs
+  not rebuilt with project flags) does NOT terminate the walk
+  cleanly. The saved-FP slot at the FP-elided boundary contains
+  whatever that function happened to leave on the stack —
+  uninitialized garbage, not `NULL`. The `next <= fp` sanity check
+  is insufficient: garbage often satisfies it but points into
+  unmapped memory, and the next `fp[1]` dereference segfaults.
+  **Observed empirically:** without a bounds check, simulation
+  segfaulted inside `captureStackFP` on every joshua-found seed
+  that exercised `tests/fast/RandomUnitTests.toml`'s
+  `IThreadPool/{NamedThread, ExplicitStop, ImplicitStop}` cases
+  (the crash signature was identical: thread-pool worker exiting,
+  its `FastAllocator<N>::ThreadData` destructor allocating a
+  vector grow, the FP walk crossing into glibc's TLS-destructor
+  cleanup and dereferencing garbage). Mitigation: cache the
+  current thread's stack range once via `pthread_getattr_np` +
+  `pthread_attr_getstack`, and require `fp ∈ [stackLow, stackHigh
+  - 16)` aligned before dereferencing on each iteration. With the
+  bounds check the walk terminates cleanly at the FDB-side
+  boundary; we still get the FDB-side prefix, which is what we
+  care about. See "Side-thread safety" below for the full chain
+  analysis.
+- Signal handlers can leave a transiently bad FP chain mid-walk.
+  The same stack-bounds + `next <= fp` checks bail out of those
+  cases.
 - ASAN/MSAN builds may instrument the FP chain. The tracker is a
   no-op-equivalent in those builds (sampling defaults can be flipped to
   0 in CMake when sanitizers are on).
+
+### Side-thread safety
+
+The tracker must work on every thread that allocates, not just the
+network thread. RocksDB — FDB's largest dependency — runs
+significant work on its own background threads (compaction, flush,
+iteration), and those code paths certainly allocate. Missing
+side-thread coverage would leave a large blind spot precisely
+where we expect a lot of byte volume. Side-thread coverage is a
+hard requirement (see R12), not a nice-to-have.
+
+This pulled in two non-obvious constraints that the initial draft
+missed:
+
+1. **No assumption of a single thread.** All tracker state that
+   touches the slow path is either thread-local (sampling counter,
+   reentrancy flag, stack-bounds cache, xorshift seed) or guarded
+   by the global spinlock (aggregation table, live-block table).
+   The hot path on every thread is one TLS load + one decrement +
+   one branch — it does not need to know whether it is on the
+   network thread, an I/O thread, a RocksDB compaction thread, or
+   a thread the tracker has never seen before.
+
+2. **Robust frame-pointer walking on threads we did not spawn.**
+   FDB-spawned threads start in FDB code (FP-enabled all the way
+   up). RocksDB-spawned threads start inside RocksDB and end up
+   in libc's `start_thread` machinery, which is FP-elided. At
+   thread *exit*, every thread (FDB- or library-spawned)
+   traverses glibc's TLS-destructor invocation, also FP-elided. A
+   FP-elided frame leaves the saved-FP slot uninitialized; our
+   walker, if it just trusts that slot, follows garbage into
+   unmapped memory and segfaults. **This is not hypothetical — we
+   hit it directly.** Joshua reproduced it with three RandomUnitTests
+   seeds (3288611985, 3731245491, 2219741568): every run segfaulted
+   inside `captureStackFP` when an `IThreadPool` worker exited and
+   its `FastAllocator<N>::ThreadData` destructor allocated a vector
+   grow during slab return. Symbolizing the crash showed the walker
+   had stepped from `~ThreadData` into glibc's TLS-destructor
+   invocation, where the saved-FP slot was garbage. The
+   stack-bounds check described under "Stack capture" above is what
+   makes this safe: any walk that crosses into FP-elided code
+   terminates at the stack boundary instead of dereferencing
+   garbage.
+
+The same considerations apply to threads that use `setjmp` /
+`longjmp` or coroutine resumption to switch stacks — at the switch
+point, the FP chain may temporarily lead into a different stack
+region. The stack-bounds check correctly terminates those walks
+too (the cached bounds are for the thread's *primary* stack;
+walks that wander into a coroutine stack or sigaltstack simply
+end early). For our use case "early termination on a non-primary
+stack" is the right behavior: the captured prefix is the part on
+the primary stack, which is what a human reading the dump cares
+about.
 
 ### Storage
 
@@ -276,14 +385,18 @@ Alternatives).
 Open-addressing hash, key `uint64_t fingerprint`, value:
 
 ```cpp
+constexpr int MEMORY_TRACKER_MAX_FRAMES = 10;  // upper bound for the
+                                               // MEMORY_TRACKING_FRAMES knob
+
 struct CallSite {
     uint64_t fingerprint;
     int64_t  liveBytes;
     int64_t  liveCount;
     int64_t  peakBytes;
-    int64_t  cumulativeAllocs;   // never decremented
-    int64_t  cumulativeBytes;    // never decremented
-    void*    exemplarFrames[6];
+    int64_t  cumulativeAllocs;    // never decremented
+    int64_t  cumulativeBytes;     // never decremented
+    int64_t  forceSampledCount;   // see "Force-sample-large" in Sampling
+    void*    exemplarFrames[MEMORY_TRACKER_MAX_FRAMES];
     uint8_t  exemplarFrameCount;
 };
 ```
@@ -292,8 +405,9 @@ struct CallSite {
 exemplar frames are stored from the first allocation that produced the
 fingerprint and are never updated — different call paths that happen to
 collide on a fingerprint hash are very rare with 64-bit fnv and 4–6
-frames; if it matters we can switch to xxhash or store all observed
-frames per fingerprint.
+frames (the frame count is an initial estimate, subject to refinement
+during development); if it matters we can switch to xxhash or store all
+observed frames per fingerprint.
 
 `peakBytes = max(peakBytes, liveBytes)` updated on each alloc.
 
@@ -305,13 +419,17 @@ frames per fingerprint.
 `new[]`, `delete`, `delete[]`, sized variants, `nothrow_t` variants, and
 the C++17 `std::align_val_t` overloads. Each calls `std::malloc` /
 `std::free` (or `aligned_alloc` for the aligned variants) and then
-`memTrackerOnAlloc`/`OnFree`. The conditional overrides in
-`fdbserver/fdbserver.cpp:771-818` are deleted; the new module's
-unconditional overrides cover every binary that links flow.
+`memTrackerOnAlloc`/`OnFree`. The new module's unconditional overrides
+cover every binary that links flow. The legacy conditional overrides
+in `fdbserver/fdbserver.cpp` are left in place; our new overrides are
+wrapped in
+`#if !defined(ALLOC_INSTRUMENTATION) && !defined(ALLOC_INSTRUMENTATION_STDOUT)`
+so the two paths don't produce duplicate symbols when the legacy flag
+is on.
 
 #### FastAllocator
 
-`flow/FastAlloc.cpp:432` (in `FastAllocator<Size>::allocate`) currently
+In `flow/FastAlloc.cpp`, `FastAllocator<Size>::allocate` currently
 contains:
 
 ```cpp
@@ -329,13 +447,13 @@ add an unconditional new line:
     memTrackerOnAlloc(p, Size);
 ```
 
-Likewise at `FastAlloc.cpp:509` in `release()`, an unconditional
+Likewise in `FastAllocator<Size>::release()`, an unconditional
 `memTrackerOnFree(ptr)` is added next to (not replacing) the existing
 conditional `recordDeallocation(ptr)`. Size is known at compile time
 from the template parameter, so no header lookup is needed.
 
 The conditional global `operator new` / `delete` overrides in
-`fdbserver/fdbserver.cpp:771-818` also stay in place. Our unconditional
+`fdbserver/fdbserver.cpp` also stay in place. Our unconditional
 overrides in `flow/MemoryTracker.cpp` are wrapped in
 `#if !defined(ALLOC_INSTRUMENTATION) && !defined(ALLOC_INSTRUMENTATION_STDOUT)`
 so the two paths don't produce duplicate symbols when somebody builds
@@ -344,8 +462,8 @@ with the old flag on.
 #### Arena
 
 `Arena` has no per-allocation free path — only block-level lifetime via
-`ArenaBlock::create` (`flow/Arena.cpp:420-525`) and `ArenaBlock::destroyLeaf`
-(`flow/Arena.cpp:567-610`). Hooks are placed there:
+`ArenaBlock::create` (`flow/Arena.cpp`) and `ArenaBlock::destroyLeaf`
+(`flow/Arena.cpp`). Hooks are placed there:
 
 - `ArenaBlock::create`: after the block is allocated and before return,
   call `memTrackerOnAlloc(blockPtr, blockSizeBytes)`. The captured stack
@@ -371,21 +489,48 @@ doesn't recurse into any FDB-visible state (no `g_network`, no
 
 ### Reporting
 
-`memTrackerDump(int topN)` is called from `flow/SystemMonitor.cpp` next
-to the existing `MemoryMetrics` event, gated by a knob:
+`memTrackerDump(int64_t bytesThreshold)` is called from
+`flow/SystemMonitor.cpp` next to the existing `MemoryMetrics` event,
+gated by a knob. The default cadence is **once every 10 minutes** in
+production (knob-controlled via `MEMORY_TRACKING_REPORT_INTERVAL`);
+simulation defaults to 30 s for test exercise.
+
+Rather than logging a fixed top-N, the dump emits a `MemoryTrackerSite`
+event for every site whose live bytes exceed
+`MEMORY_TRACKING_REPORT_BYTES_THRESHOLD`. The default threshold is
+**80 MB**, chosen as roughly 1% of the target RSS for a production
+fdbserver (~8 GB). Sites smaller than that are not load-bearing for
+RSS-level investigations and would only add log volume; sites above it
+are the ones worth attributing. A pure top-N has the wrong shape for
+this — top-50 against a process that genuinely has only three
+heavyweight sites still emits 47 noise events, while a process with
+hundreds of meaningful sites silently truncates at 50. A byte
+threshold scales naturally to the actual distribution.
+
+**Degraded mode.** When `MEMORY_TRACKING_LIVE_TRACKING` is `false`,
+the live-block side table is not maintained, so `onFree` is a no-op
+and `liveBytes` / `liveCount` / `peakBytes` are never decremented —
+they end up tracking the cumulatives. The threshold filter still
+works, but it now reports "any site that has ever allocated ≥
+threshold bytes" rather than "any site currently holding ≥
+threshold". Operators using this mode should read the dump
+accordingly.
 
 ```cpp
 if (FLOW_KNOBS->MEMORY_TRACKING_REPORT_INTERVAL > 0 &&
     now() - lastDump >= FLOW_KNOBS->MEMORY_TRACKING_REPORT_INTERVAL) {
-    memTrackerDump(FLOW_KNOBS->MEMORY_TRACKING_TOP_N);
+    memTrackerDump(FLOW_KNOBS->MEMORY_TRACKING_REPORT_BYTES_THRESHOLD);
     lastDump = now();
 }
 ```
 
 Implementation: take the spinlock; copy the aggregation table values
-into a local `std::vector<CallSite>` (allocated via the slab pool, not
-`operator new`); release the lock; sort by `liveBytes` descending; emit
-one TraceEvent per top-N site:
+into a local `std::vector<CallSite>` (backed by `std::malloc`; the
+`gInMemTracker` reentrancy flag prevents recursion into the tracker);
+release the lock; sort by `liveBytes` descending;
+filter to entries with `liveBytes >= bytesThreshold`; emit one
+TraceEvent per qualifying site with stats and raw addresses (no
+per-site `addr2line` command):
 
 ```
 TraceEvent("MemoryTrackerSite")
@@ -395,16 +540,40 @@ TraceEvent("MemoryTrackerSite")
     .detail("PeakBytes", s.peakBytes)
     .detail("CumulativeBytes", s.cumulativeBytes)
     .detail("CumulativeAllocs", s.cumulativeAllocs)
+    .detail("ForceSampledCount", s.forceSampledCount)
     .detail("Frame0", format("%p", s.exemplarFrames[0]))
-    .detail("Frame1", format("%p", s.exemplarFrames[1]))
+    .detail("Frame1", format("%p", s.exemplarFrames[1]));
     // ... up to FrameN
-    .detail("AddrCmd", platform::format_backtrace(s.exemplarFrames, s.exemplarFrameCount));
 ```
 
-`format_backtrace` (`flow/Platform.cpp:3517`) is reused as-is. It
-subtracts the PIE load offset and emits the absolute-path
-`/usr/local/bin/llvm-addr2line -e <bin> -p -C -f -i 0xADDR ...` command,
-making each TraceEvent self-contained for offline symbolization.
+Then emit **one** combined `addr2line` command for the entire dump as
+its own TraceEvent. `platform::format_backtrace` already produces a
+single `addr2line -e <bin> -p -C -f -i 0xADDR ...` invocation with the
+PIE load offset subtracted; we feed it the concatenation of every
+qualifying site's exemplar frames (in the same order as the
+`MemoryTrackerSite` events above), so the resulting command resolves
+every reported site's frames in one shot:
+
+```
+std::vector<void*> allFrames;
+for (const auto& s : qualifying) {
+    for (int i = 0; i < s.exemplarFrameCount; ++i)
+        allFrames.push_back(s.exemplarFrames[i]);
+}
+TraceEvent("MemoryTrackerAddrCmd")
+    .detail("Sites", qualifying.size())
+    .detail("FramesPerSite", FLOW_KNOBS->MEMORY_TRACKING_FRAMES)
+    .detail("AddrCmd", platform::format_backtrace(allFrames.data(), allFrames.size()));
+```
+
+A human (or an AI consumer) cuts and pastes the `AddrCmd` field once and
+gets every reported site's stacks resolved together. Mapping resolved
+lines back to
+sites is positional: the first `FramesPerSite` lines belong to the first
+`MemoryTrackerSite` event in the dump, the next `FramesPerSite` to the
+second, etc. (Sites with fewer captured frames are still padded to
+`FramesPerSite` per dump entry, or the per-site frame count is included
+above for variable-length walks.)
 
 Also emit one summary event per dump:
 
@@ -417,7 +586,7 @@ TraceEvent("MemoryTrackerSummary")
     .detail("CumulativeBytes", cumulativeBytesTotal)
     .detail("SamplesEmitted", samplesEmittedSinceStart)
     .detail("SamplesDroppedReentry", reentrantBailouts)
-    .detail("SamplesDroppedTableFull", tableFullDrops)
+    .detail("SamplesDroppedAllocFailure", allocFailureDrops)
     .detail("DumpDurationMs", dumpDurationMs)
     .detail("SampleInverse", FLOW_KNOBS->MEMORY_TRACKING_SAMPLE_INVERSE)
     .detail("ForceSampleBytes", FLOW_KNOBS->MEMORY_TRACKING_FORCE_SAMPLE_BYTES);
@@ -438,8 +607,8 @@ estimate matters.)
 | `MEMORY_TRACKING_SAMPLE_INVERSE` | 100 | 2 | 0=off, N=1-in-N |
 | `MEMORY_TRACKING_FORCE_SAMPLE_BYTES` | 100000 | 100000 | Always sample allocations ≥ this many bytes; `INT64_MAX` disables force-sample |
 | `MEMORY_TRACKING_LIVE_TRACKING` | true | true | When false, skip the pointer-keyed live-block table and report cumulative-only stats |
-| `MEMORY_TRACKING_REPORT_INTERVAL` | 60.0 | 30.0 | Seconds between dumps; 0 disables |
-| `MEMORY_TRACKING_TOP_N` | 50 | 50 | Number of sites per dump |
+| `MEMORY_TRACKING_REPORT_INTERVAL` | 600.0 | 30.0 | Seconds between dumps; 0 disables |
+| `MEMORY_TRACKING_REPORT_BYTES_THRESHOLD` | 80000000 | 80000000 | Sites with live bytes ≥ this are reported each dump (~1% of an 8 GB target RSS) |
 | `MEMORY_TRACKING_FRAMES` | 6 | 6 | Captured stack depth (1–10) |
 
 Buggify the inverse to 1 (sample everything) in a small fraction of
@@ -459,7 +628,7 @@ New:
   out-of-line entry points, `memTrackerDump`, `memTrackerForEachSite`.
 
 Modified:
-- `flow/FastAlloc.cpp` (lines 432, 509) — add unconditional
+- `flow/FastAlloc.cpp` — add unconditional
   `memTrackerOnAlloc`/`OnFree` calls *next to* (not replacing) the
   existing conditional `recordAllocation`/`recordDeallocation` calls.
 - `flow/Arena.cpp` — add hooks in `ArenaBlock::create` and
@@ -470,14 +639,14 @@ Modified:
 - `flow/CMakeLists.txt` — register `MemoryTracker.cpp`.
 
 Reused as-is:
-- `platform::format_backtrace` (`flow/Platform.cpp:3517`).
-- `platform::ImageInfo` (`flow/include/flow/Platform.h:457-468`).
+- `platform::format_backtrace` (`flow/Platform.cpp`).
+- `platform::ImageInfo` (`flow/include/flow/Platform.h`).
 
 Not touched:
-- The `ALLOC_INSTRUMENTATION` block in `flow/include/flow/FastAlloc.h:60-112`
+- The `ALLOC_INSTRUMENTATION` block in `flow/include/flow/FastAlloc.h`
   and its callers in `flow/FastAlloc.cpp` (the conditional
   `recordAllocation`/`recordDeallocation` lines) and
-  `fdbserver/fdbserver.cpp:771-818` (the conditional `operator new`
+  `fdbserver/fdbserver.cpp` (the conditional `operator new`
   overrides). All of these compile to nothing in default builds and
   stay available for whoever might still wire up the old offline
   analysis path.
@@ -527,7 +696,7 @@ microseconds per call. libunwind is faster (sub-microsecond) but still
 slower than frame-pointer walking by an order of magnitude.
 
 Rejected because frame pointers are already enabled globally
-(`-fno-omit-frame-pointer` in `cmake/ConfigureCompiler.cmake:212`), and
+(`-fno-omit-frame-pointer` in `cmake/ConfigureCompiler.cmake`), and
 a hand-rolled FP walk is ~100 ns for 6 frames — fast enough to leave on
 in production. Falling back to libunwind is feasible if we ever need to
 support a build configuration that omits frame pointers.
@@ -654,8 +823,9 @@ A new `flow/MemoryTrackerTest.cpp` exercises:
   confirm `liveCount` returns to 0 and `cumulativeAllocs` stays at 100K.
 - **Off-switch.** With sample inverse 0, allocate 100K objects; confirm
   the aggregation table is empty.
-- **Reentrancy guard.** Force a path where the tracker's own slab pool
-  has to grow during sampling; confirm no infinite recursion.
+- **Reentrancy guard.** Force a path where the tracker itself
+  allocates during sampling (e.g., aggregation table resize); confirm
+  the `gInMemTracker` flag prevents re-entry into the tracking path.
 - **Frame-pointer walk depth.** Allocate from increasingly deeper call
   stacks; confirm the captured frame count tracks `MEMORY_TRACKING_FRAMES`.
 - **Free of un-tracked pointer.** `memTrackerOnFree` for a pointer that
@@ -747,8 +917,8 @@ Every `MemoryTrackerSummary` event reports:
   update.
 - `SamplesDroppedReentry` — sampled allocations skipped because the
   reentrancy guard was already set.
-- `SamplesDroppedTableFull` — sampled allocations skipped because the
-  slab pool ran out.
+- `SamplesDroppedAllocFailure` — sampled allocations skipped because
+  `std::malloc` returned null while growing a tracker table.
 - `DumpDurationMs` — how long the dump itself took.
 
 These are the operator-visible knobs for "is the tracker working" and
@@ -759,10 +929,11 @@ These are the operator-visible knobs for "is the tracker working" and
 ### Phased rollout
 
 1. Land code with `MEMORY_TRACKING_SAMPLE_INVERSE` defaulting to 0
-   (off) but compiled in. Verify no regression in cluster level
-   performance testing.
-2. Flip the production default to 100 (1% sampling) in a follow-up
-   commit.
+   (off) but compiled in — overriding the steady-state default in the
+   knobs table for this initial commit only. Verify no regression in
+   cluster-level performance testing.
+2. Flip the production default to 100 (1% sampling — the steady-state
+   value shown in the knobs table) in a follow-up commit.
 3. Confirm `MemoryTrackerSite` events flow through the trace pipeline
    end-to-end.
 4. On a case by case basis, test in developer-specific performance
@@ -791,9 +962,9 @@ CMake flag for client builds specifically.
 
 ### `ALLOC_INSTRUMENTATION` coexistence
 
-The existing framework in `flow/include/flow/FastAlloc.h:60-112` and
+The existing framework in `flow/include/flow/FastAlloc.h` and
 its associated conditional code paths (in `flow/FastAlloc.cpp` and
-`fdbserver/fdbserver.cpp:771-818`) remain in place. The new tracker
+`fdbserver/fdbserver.cpp`) remain in place. The new tracker
 sits next to it, gated only by the inverse complement of the same
 `#ifdef`s where they would otherwise produce duplicate symbols (the
 `operator new` overrides). No removal is planned.
