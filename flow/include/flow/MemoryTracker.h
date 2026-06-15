@@ -49,6 +49,22 @@ extern thread_local bool gInMemTracker;
 extern thread_local int gMemTrackerCounter;
 extern thread_local std::size_t gForceSampleBytes;
 
+// RAII suppressor: while alive, allocator hooks short-circuit. Used by code
+// paths that call into a lower-level allocator (e.g. ArenaBlock wrapping
+// `new uint8_t[]`) and want their explicit memTrackerOnAlloc/OnFree call to
+// be the sole tracker for the block — without this guard the inner
+// allocator's hook fires too and the same pointer is double-tracked under
+// two different fingerprints. Nest-safe: saves and restores prev.
+class MemTrackerSuppress {
+	bool prev;
+
+public:
+	MemTrackerSuppress() : prev(gInMemTracker) { gInMemTracker = true; }
+	~MemTrackerSuppress() { gInMemTracker = prev; }
+	MemTrackerSuppress(const MemTrackerSuppress&) = delete;
+	MemTrackerSuppress& operator=(const MemTrackerSuppress&) = delete;
+};
+
 // Out-of-line slow paths.
 void memTrackerSampleAlloc(void* p, std::size_t n);
 void memTrackerSampleFree(void* p);
