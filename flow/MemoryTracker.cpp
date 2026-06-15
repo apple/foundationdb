@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <new>
+#include <pthread.h>
 #include <unordered_map>
 #include <vector>
 
@@ -25,10 +26,10 @@
 // sampled (and the slow path then reseeds from the knob).
 // gForceSampleBytes initialized to ~0 so force-sample never fires before we've
 // loaded the knob value at least once.
-thread_local bool        gInMemTracker      = false;
-thread_local int         gMemTrackerCounter = 1;
-thread_local std::size_t gForceSampleBytes  = static_cast<std::size_t>(-1);
-thread_local uint32_t    gMemTrackerSeed    = 0x9E3779B9u;
+thread_local bool gInMemTracker = false;
+thread_local int gMemTrackerCounter = 1;
+thread_local std::size_t gForceSampleBytes = static_cast<std::size_t>(-1);
+thread_local uint32_t gMemTrackerSeed = 0x9E3779B9u;
 
 namespace {
 
@@ -52,20 +53,60 @@ inline std::uint32_t xorshift32(std::uint32_t& s) {
 	return x;
 }
 
+// Per-thread stack bounds, populated lazily on first use of captureFramesFP.
+// Used by captureFramesFP to terminate the FP walk when it crosses into
+// FP-elided code (notably glibc's pthread shutdown / TLS-destructor
+// machinery). Without this guard, the FP-elided frame leaves an
+// uninitialized saved-FP slot and the walk dereferences garbage. See
+// design/memory-tracker.md, "Side-thread safety".
+thread_local uintptr_t gStackLow = 0;
+thread_local uintptr_t gStackHigh = 0;
+
+void initStackBoundsForThread() {
+	pthread_attr_t attr;
+	if (pthread_getattr_np(pthread_self(), &attr) == 0) {
+		void* base = nullptr;
+		size_t size = 0;
+		if (pthread_attr_getstack(&attr, &base, &size) == 0) {
+			gStackLow = reinterpret_cast<uintptr_t>(base);
+			gStackHigh = gStackLow + size;
+		}
+		pthread_attr_destroy(&attr);
+	}
+}
+
 // Manual frame-pointer walk. Captures the return-address chain starting at
 // the caller of this function (and up). Relies on -fno-omit-frame-pointer.
 // Annotated noinline + no_instrument_function so the compiler can't fold the
 // frame chain in unexpected ways.
+//
+// Bounds the walk by the current thread's stack range so that crossing into
+// FP-elided code (which leaves the saved-FP slot uninitialized rather than
+// NULL) terminates cleanly instead of dereferencing garbage.
 __attribute__((no_instrument_function, noinline)) int captureFramesFP(void** out, int max) {
+	if (!gStackLow)
+		initStackBoundsForThread();
 	void** fp = static_cast<void**>(__builtin_frame_address(0));
+	// Fallback for threads where pthread_getattr_np failed: ±8 MB around
+	// the initial frame.
+	uintptr_t lo = gStackLow ? gStackLow : reinterpret_cast<uintptr_t>(fp);
+	uintptr_t hi = gStackHigh ? gStackHigh : reinterpret_cast<uintptr_t>(fp) + (8u << 20);
 	int n = 0;
 	while (fp && n < max) {
+		uintptr_t a = reinterpret_cast<uintptr_t>(fp);
+		// Reject out-of-stack or misaligned fp before dereferencing.
+		if (a < lo || a + 16 > hi)
+			break;
+		if (a & (sizeof(void*) - 1))
+			break;
 		void* ra = fp[1];
-		if (!ra) break;
+		if (!ra)
+			break;
 		out[n++] = ra;
 		void** next = static_cast<void**>(fp[0]);
 		// Sanity: stack grows down, so each next frame address must be larger.
-		if (next <= fp) break;
+		if (next <= fp)
+			break;
 		fp = next;
 	}
 	return n;
@@ -76,7 +117,7 @@ ThreadSpinLock g_mtLock;
 struct LiveEntry {
 	std::uint64_t fingerprint;
 	std::uint32_t size;
-	bool          forceSampled;
+	bool forceSampled;
 };
 
 // Lazily-constructed maps. Allocated under the spinlock the first time we
@@ -85,7 +126,7 @@ struct LiveEntry {
 // is true on the sampled path) and falls through to std::malloc — so map
 // growth never recurses into tracking.
 std::unordered_map<std::uint64_t, MemoryTrackerCallSite>* g_aggMap = nullptr;
-std::unordered_map<std::uintptr_t, LiveEntry>*            g_liveMap = nullptr;
+std::unordered_map<std::uintptr_t, LiveEntry>* g_liveMap = nullptr;
 
 // Sampled-totals (i.e. across what we actually saw, not population estimates).
 std::int64_t g_liveBytesTotal = 0;
@@ -96,16 +137,18 @@ std::int64_t g_samplesEmitted = 0;
 std::int64_t g_reentrantBailouts = 0; // currently unobserved; reentry returns silently from the inline
 
 void ensureMaps() {
-	if (!g_aggMap) g_aggMap = new std::unordered_map<std::uint64_t, MemoryTrackerCallSite>();
-	if (!g_liveMap) g_liveMap = new std::unordered_map<std::uintptr_t, LiveEntry>();
+	if (!g_aggMap)
+		g_aggMap = new std::unordered_map<std::uint64_t, MemoryTrackerCallSite>();
+	if (!g_liveMap)
+		g_liveMap = new std::unordered_map<std::uintptr_t, LiveEntry>();
 }
 
 } // namespace
 
 void memTrackerSampleAlloc(void* p, std::size_t n) {
 	// Refresh thread-local cache from knobs every time we hit the slow path.
-	int  inverse = 0;
-	int  frames = 6;
+	int inverse = 0;
+	int frames = 6;
 	bool liveTracking = true;
 	if (FLOW_KNOBS) {
 		inverse = FLOW_KNOBS->MEMORY_TRACKING_SAMPLE_INVERSE;
@@ -113,8 +156,10 @@ void memTrackerSampleAlloc(void* p, std::size_t n) {
 		liveTracking = FLOW_KNOBS->MEMORY_TRACKING_LIVE_TRACKING;
 		gForceSampleBytes = static_cast<std::size_t>(FLOW_KNOBS->MEMORY_TRACKING_FORCE_SAMPLE_BYTES);
 	}
-	if (frames < 1) frames = 1;
-	if (frames > MEMORY_TRACKER_MAX_FRAMES) frames = MEMORY_TRACKER_MAX_FRAMES;
+	if (frames < 1)
+		frames = 1;
+	if (frames > MEMORY_TRACKER_MAX_FRAMES)
+		frames = MEMORY_TRACKER_MAX_FRAMES;
 
 	// Reseed the counter for the un-sampled fast path.
 	if (inverse <= 0) {
@@ -158,16 +203,19 @@ void memTrackerSampleAlloc(void* p, std::size_t n) {
 		// the offline addr2line command in the dump.
 		site.fingerprint = fp;
 		site.exemplarFrameCount = static_cast<std::uint8_t>(kept);
-		for (int i = 0; i < kept; i++) site.exemplarFrames[i] = keep[i];
+		for (int i = 0; i < kept; i++)
+			site.exemplarFrames[i] = keep[i];
 	}
 	site.cumulativeAllocs += 1;
 	site.cumulativeBytes += static_cast<std::int64_t>(n);
-	if (isForceSampled) site.forceSampledCount += 1;
+	if (isForceSampled)
+		site.forceSampledCount += 1;
 
 	if (liveTracking) {
 		site.liveBytes += static_cast<std::int64_t>(n);
 		site.liveCount += 1;
-		if (site.liveBytes > site.peakBytes) site.peakBytes = site.liveBytes;
+		if (site.liveBytes > site.peakBytes)
+			site.peakBytes = site.liveBytes;
 		(*g_liveMap)[reinterpret_cast<std::uintptr_t>(p)] =
 		    LiveEntry{ fp, static_cast<std::uint32_t>(n), isForceSampled };
 		g_liveBytesTotal += static_cast<std::int64_t>(n);
@@ -180,12 +228,15 @@ void memTrackerSampleAlloc(void* p, std::size_t n) {
 
 void memTrackerSampleFree(void* p) {
 	bool liveTracking = FLOW_KNOBS ? FLOW_KNOBS->MEMORY_TRACKING_LIVE_TRACKING : true;
-	if (!liveTracking) return; // we never recorded the alloc, nothing to undo
+	if (!liveTracking)
+		return; // we never recorded the alloc, nothing to undo
 
 	ThreadSpinLockHolder lk(g_mtLock);
-	if (!g_liveMap) return;
+	if (!g_liveMap)
+		return;
 	auto it = g_liveMap->find(reinterpret_cast<std::uintptr_t>(p));
-	if (it == g_liveMap->end()) return; // un-tracked pointer, no-op
+	if (it == g_liveMap->end())
+		return; // un-tracked pointer, no-op
 
 	LiveEntry e = it->second;
 	g_liveMap->erase(it);
@@ -208,19 +259,23 @@ void memTrackerForEachSite(std::function<void(const MemoryTrackerCallSite&)> cb)
 		ThreadSpinLockHolder lk(g_mtLock);
 		if (g_aggMap) {
 			snapshot.reserve(g_aggMap->size());
-			for (auto& kv : *g_aggMap) snapshot.push_back(kv.second);
+			for (auto& kv : *g_aggMap)
+				snapshot.push_back(kv.second);
 		}
 	}
 	gInMemTracker = false;
-	for (auto& s : snapshot) cb(s);
+	for (auto& s : snapshot)
+		cb(s);
 }
 
 void memTrackerResetForTest() {
 	gInMemTracker = true;
 	{
 		ThreadSpinLockHolder lk(g_mtLock);
-		if (g_aggMap) g_aggMap->clear();
-		if (g_liveMap) g_liveMap->clear();
+		if (g_aggMap)
+			g_aggMap->clear();
+		if (g_liveMap)
+			g_liveMap->clear();
 		g_liveBytesTotal = 0;
 		g_liveBlocksTotal = 0;
 		g_cumulativeBytesTotal = 0;
@@ -237,12 +292,12 @@ void memTrackerResetForTest() {
 	gInMemTracker = false;
 }
 
-void memTrackerDump(int topN) {
+void memTrackerDump(int64_t bytesThreshold) {
 	gInMemTracker = true;
 
 	std::vector<MemoryTrackerCallSite> sites;
-	int          aggSize = 0;
-	int          liveSize = 0;
+	int aggSize = 0;
+	int liveSize = 0;
 	std::int64_t liveBytesTotalSnap = 0;
 	std::int64_t liveBlocksTotalSnap = 0;
 	std::int64_t cumBytesSnap = 0;
@@ -253,7 +308,8 @@ void memTrackerDump(int topN) {
 		ThreadSpinLockHolder lk(g_mtLock);
 		if (g_aggMap) {
 			sites.reserve(g_aggMap->size());
-			for (auto& kv : *g_aggMap) sites.push_back(kv.second);
+			for (auto& kv : *g_aggMap)
+				sites.push_back(kv.second);
 			aggSize = static_cast<int>(g_aggMap->size());
 		}
 		liveSize = g_liveMap ? static_cast<int>(g_liveMap->size()) : 0;
@@ -278,9 +334,19 @@ void memTrackerDump(int topN) {
 		std::sort(sites.begin(), sites.end(), byCum);
 	}
 
-	int n = std::min(static_cast<int>(sites.size()), topN);
-	for (int i = 0; i < n; i++) {
-		const auto& s = sites[i];
+	// Filter: a site qualifies when its currently-live bytes (or cumulative
+	// bytes in degraded mode) exceed the threshold. Sites are already sorted
+	// descending, so we can stop at the first non-qualifier.
+	std::vector<MemoryTrackerCallSite> qualifying;
+	qualifying.reserve(sites.size());
+	for (const auto& s : sites) {
+		int64_t v = liveTracking ? s.liveBytes : s.cumulativeBytes;
+		if (v < bytesThreshold)
+			break;
+		qualifying.push_back(s);
+	}
+
+	for (const auto& s : qualifying) {
 		TraceEvent ev("MemoryTrackerSite");
 		ev.detail("Fingerprint", format("%016llx", static_cast<unsigned long long>(s.fingerprint)));
 		ev.detail("LiveBytes", s.liveBytes);
@@ -292,12 +358,41 @@ void memTrackerDump(int topN) {
 		for (int f = 0; f < s.exemplarFrameCount; f++) {
 			ev.detail(format("Frame%d", f).c_str(), format("%p", s.exemplarFrames[f]));
 		}
-		ev.detail("AddrCmd",
-		          platform::format_backtrace(const_cast<void**>(s.exemplarFrames), s.exemplarFrameCount));
+	}
+
+	// Single combined addr2line invocation covering every qualifying site's
+	// frames in dump order, leaf-to-root within each site. Cut-and-paste
+	// resolves all stacks at once; resolved lines map back to sites positionally
+	// (FramesPerSite per site). Built directly so we keep frame 0 (the actual
+	// allocation site) — platform::format_backtrace drops index 0 by design,
+	// which is wrong for this use case.
+	if (!qualifying.empty()) {
+		platform::ImageInfo img = platform::getImageInfo();
+#ifdef __clang__
+		const char* addr2lineTool = "/usr/local/bin/llvm-addr2line";
+#else
+		const char* addr2lineTool = "/usr/bin/addr2line";
+#endif
+		std::string cmd = format("%s -e %s -p -C -f -i", addr2lineTool, img.symbolFileName.c_str());
+		int totalFrames = 0;
+		for (const auto& s : qualifying) {
+			for (int i = 0; i < s.exemplarFrameCount; i++) {
+				uintptr_t pieRelative =
+				    reinterpret_cast<uintptr_t>(s.exemplarFrames[i]) - reinterpret_cast<uintptr_t>(img.offset);
+				cmd += format(" 0x%lx", pieRelative);
+				totalFrames++;
+			}
+		}
+		TraceEvent("MemoryTrackerAddrCmd")
+		    .detail("Sites", qualifying.size())
+		    .detail("FramesPerSite", FLOW_KNOBS ? FLOW_KNOBS->MEMORY_TRACKING_FRAMES : 6)
+		    .detail("TotalFrames", totalFrames)
+		    .detail("AddrCmd", cmd);
 	}
 
 	TraceEvent("MemoryTrackerSummary")
 	    .detail("SitesTracked", aggSize)
+	    .detail("SitesReported", static_cast<int>(qualifying.size()))
 	    .detail("LiveBlocks", liveSize)
 	    .detail("LiveBytesTotal", liveBytesTotalSnap)
 	    .detail("LiveBlocksTotal", liveBlocksTotalSnap)
@@ -307,7 +402,8 @@ void memTrackerDump(int topN) {
 	    .detail("SamplesDroppedReentry", reentrantSnap)
 	    .detail("SampleInverse", FLOW_KNOBS ? FLOW_KNOBS->MEMORY_TRACKING_SAMPLE_INVERSE : 0)
 	    .detail("ForceSampleBytes",
-	            FLOW_KNOBS ? FLOW_KNOBS->MEMORY_TRACKING_FORCE_SAMPLE_BYTES : static_cast<std::int64_t>(-1));
+	            FLOW_KNOBS ? FLOW_KNOBS->MEMORY_TRACKING_FORCE_SAMPLE_BYTES : static_cast<std::int64_t>(-1))
+	    .detail("ReportBytesThreshold", bytesThreshold);
 
 	gInMemTracker = false;
 }
@@ -315,12 +411,13 @@ void memTrackerDump(int topN) {
 // Global operator new/delete overrides. We override the standard set so every
 // allocation flowing through global new is observable. Wrapped in
 // !ALLOC_INSTRUMENTATION to avoid duplicate symbols against the legacy framework
-// in fdbserver/fdbserver.cpp:771-818, which is gated on the same flag.
+// in fdbserver/fdbserver.cpp, which is gated on the same flag.
 #if !defined(ALLOC_INSTRUMENTATION) && !defined(ALLOC_INSTRUMENTATION_STDOUT)
 
 void* operator new(std::size_t n) {
 	void* p = std::malloc(n);
-	if (!p) throw std::bad_alloc();
+	if (!p)
+		throw std::bad_alloc();
 	memTrackerOnAlloc(p, n);
 	return p;
 }
@@ -335,7 +432,8 @@ void operator delete(void* p, std::size_t) noexcept {
 
 void* operator new[](std::size_t n) {
 	void* p = std::malloc(n);
-	if (!p) throw std::bad_alloc();
+	if (!p)
+		throw std::bad_alloc();
 	memTrackerOnAlloc(p, n);
 	return p;
 }
@@ -371,7 +469,8 @@ void operator delete[](void* p, const std::nothrow_t&) noexcept {
 // C++17 over-aligned new/delete.
 void* operator new(std::size_t n, std::align_val_t a) {
 	void* p = nullptr;
-	if (posix_memalign(&p, static_cast<std::size_t>(a), n) != 0) throw std::bad_alloc();
+	if (posix_memalign(&p, static_cast<std::size_t>(a), n) != 0)
+		throw std::bad_alloc();
 	memTrackerOnAlloc(p, n);
 	return p;
 }
@@ -386,7 +485,8 @@ void operator delete(void* p, std::size_t, std::align_val_t) noexcept {
 
 void* operator new[](std::size_t n, std::align_val_t a) {
 	void* p = nullptr;
-	if (posix_memalign(&p, static_cast<std::size_t>(a), n) != 0) throw std::bad_alloc();
+	if (posix_memalign(&p, static_cast<std::size_t>(a), n) != 0)
+		throw std::bad_alloc();
 	memTrackerOnAlloc(p, n);
 	return p;
 }
