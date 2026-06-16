@@ -118,7 +118,6 @@ private:
 
 	bool closing;
 	std::shared_ptr<rocksdb::Cache> blockCache;
-	std::shared_ptr<rocksdb::WriteBufferManager> writeBufferManager;
 	rocksdb::DBOptions dbOptions;
 	rocksdb::ColumnFamilyOptions cfOptions;
 	rocksdb::ReadOptions readOptions;
@@ -126,9 +125,10 @@ private:
 	std::atomic<double> lastFlushTime_;
 };
 
+// BlockCache should be initialized before DBOptions and CFOptions, because they both need reference to the cache.
 SharedRocksDBState::SharedRocksDBState(UID id)
-  : id(id), closing(false), dbOptions(initialDbOptions()), cfOptions(initialCfOptions()),
-    readOptions(initialReadOptions()), flushOptions(initialFlushOptions()) {}
+  : id(id), closing(false), blockCache(initialBlockCache()), dbOptions(initialDbOptions()),
+    cfOptions(initialCfOptions()), readOptions(initialReadOptions()), flushOptions(initialFlushOptions()) {}
 
 std::shared_ptr<rocksdb::Cache> SharedRocksDBState::initialBlockCache() {
 	if (SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE <= 0) {
@@ -277,8 +277,6 @@ rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
 }
 
 rocksdb::DBOptions SharedRocksDBState::initialDbOptions() {
-	blockCache = initialBlockCache();
-
 	rocksdb::DBOptions options;
 	options.use_direct_reads = SERVER_KNOBS->ROCKSDB_USE_DIRECT_READS;
 	options.use_direct_io_for_flush_and_compaction = SERVER_KNOBS->ROCKSDB_USE_DIRECT_IO_FLUSH_COMPACTION;
@@ -332,9 +330,8 @@ rocksdb::DBOptions SharedRocksDBState::initialDbOptions() {
 	}
 
 	if (SERVER_KNOBS->ROCKSDB_ENABLE_CACHE_USAGE_OVERRIDES && blockCache) {
-		writeBufferManager = std::make_shared<rocksdb::WriteBufferManager>(
+		options.write_buffer_manager = std::make_shared<rocksdb::WriteBufferManager>(
 		    /*buffer_size=*/0, /*cache=*/blockCache, /*allow_stall=*/false);
-		options.write_buffer_manager = writeBufferManager;
 	}
 	return options;
 }
