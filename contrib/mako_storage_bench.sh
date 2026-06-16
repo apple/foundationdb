@@ -89,6 +89,8 @@ function usage {
 Usage: ${0##*/} <build-root> [engine ...]
 
   build-root   FDB build directory containing bin/{fdbserver,fdbcli,mako}.
+               mako is NOT built by default -- configure the build with
+               -D BUILD_MAKO=ON (else bin/mako will be missing here).
   engine       One or more of: redwood rocksdb sharded-rocksdb all
                'all' = redwood + rocksdb (sharded-rocksdb is not included).
                Default: redwood

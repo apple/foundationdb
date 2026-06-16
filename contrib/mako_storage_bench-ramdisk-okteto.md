@@ -24,6 +24,12 @@ directory, which on okteto takes a little care.
 contrib/mako_storage_bench.sh build_output4
 ```
 
+> `build_output4` here is just an example build directory (the author's
+> `~/src/fdb4` build tree, i.e. `/root/build_output4` on the dev pod) —
+> substitute your own build root. Note that **mako is not built by default**:
+> configure the build with `-D BUILD_MAKO=ON`, or `build_output4/bin/mako` will
+> be missing.
+
 ## What the script does automatically (and how to override)
 
 - **`WORKDIR`** — the cluster data dir and mako output live under `WORKDIR`. The
