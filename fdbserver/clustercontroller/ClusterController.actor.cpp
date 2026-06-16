@@ -2238,7 +2238,8 @@ Future<Void> monitorCDCProxyAssignments(ClusterControllerData::DBInfo* db) {
 						TraceEvent("CDCProxyAssignmentMissingRepaired")
 						    .detail("StreamId", streamId)
 						    .detail("CDCProxyID", resolvedProxyId)
-						    .detail("HadPublishedAssignment", previousAssignment != previouslyPublishedAssignments.end())
+						    .detail("HadPublishedAssignment",
+						            previousAssignment != previouslyPublishedAssignments.end())
 						    .detail("DurableRepair", needsDurableRepair);
 						const auto [_, inserted] = streamToCDCProxyId.emplace(streamId, resolvedProxyId);
 						ASSERT_WE_THINK(inserted);
