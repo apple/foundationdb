@@ -8165,7 +8165,6 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
     Optional<Reference<TransactionState>> trState) {
 	state Span span("NAPI:WaitStorageMetrics"_loc, generateSpanID(cx->transactionTracingSample));
 	state double startTime = now();
-	state double lastLogTime = 0;
 	state int retryCount = 0;
 	loop {
 		if (trState.present()) {
@@ -8215,16 +8214,7 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
 			}
 		} catch (Error& e) {
 			retryCount++;
-			// Upgrade from SevDebug to SevWarn after 60 seconds of retrying,
-			// but rate-limit warns to avoid flooding the trace log on fast retries.
-			Severity sev = SevDebug;
-			if (now() - startTime > 60.0) {
-				if (now() - lastLogTime >= 10.0) {
-					sev = SevWarn;
-					lastLogTime = now();
-				}
-			}
-			TraceEvent(sev, "WaitStorageMetricsHandleError")
+			TraceEvent(SevDebug, "WaitStorageMetricsHandleError")
 			    .error(e)
 			    .detail("Keys", keys)
 			    .detail("Elapsed", now() - startTime)
