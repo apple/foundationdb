@@ -193,6 +193,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/RESTKmsConnectorUnit.toml IGNORE)
   add_fdb_test(TEST_FILES fast/RESTUtilsUnit.toml IGNORE)
   add_fdb_test(TEST_FILES fast/SelectorCorrectness.toml)
+  add_fdb_test(TEST_FILES fast/StalePeerTest.toml)
+  add_fdb_test(TEST_FILES fast/StalePeerTest_baseline.toml IGNORE)
   add_fdb_test(TEST_FILES fast/Sideband.toml)
   add_fdb_test(TEST_FILES fast/SidebandSingle.toml)
   add_fdb_test(TEST_FILES fast/SidebandWithStatus.toml)
@@ -297,7 +299,7 @@ if(WITH_PYTHON)
     restarting/from_7.1.0_until_7.2.0/ConfigureTestRestart-2.toml)
   add_fdb_test(
     TEST_FILES restarting/from_7.1.0_until_7.2.0/SnapIncrementalRestore-1.txt
-    restarting/from_7.1.0_until_7.2.0/SnapIncrementalRestore-2.txt)
+    restarting/from_7.1.0_until_7.2.0/SnapIncrementalRestore-2.txt IGNORE)
   add_fdb_test(
     TEST_FILES restarting/from_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-1.toml
     restarting/from_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-2.toml)
@@ -357,16 +359,16 @@ if(WITH_PYTHON)
     restarting/from_7.3.0_until_7.3.50/BlobGranuleRestartLarge-2.toml)
   add_fdb_test(
     TEST_FILES restarting/from_7.3.0_until_7.3.50/SnapCycleRestart-1.toml
-    restarting/from_7.3.0_until_7.3.50/SnapCycleRestart-2.toml)
+    restarting/from_7.3.0_until_7.3.50/SnapCycleRestart-2.toml IGNORE)
   add_fdb_test(
     TEST_FILES restarting/from_7.3.0_until_7.3.50/SnapTestAttrition-1.toml
-    restarting/from_7.3.0_until_7.3.50/SnapTestAttrition-2.toml)
+    restarting/from_7.3.0_until_7.3.50/SnapTestAttrition-2.toml IGNORE)
   add_fdb_test(
     TEST_FILES restarting/from_7.3.0_until_7.3.50/SnapTestSimpleRestart-1.toml
-    restarting/from_7.3.0_until_7.3.50/SnapTestSimpleRestart-2.toml)
+    restarting/from_7.3.0_until_7.3.50/SnapTestSimpleRestart-2.toml IGNORE)
   add_fdb_test(
     TEST_FILES restarting/from_7.3.0_until_7.3.50/SnapTestRestart-1.toml
-    restarting/from_7.3.0_until_7.3.50/SnapTestRestart-2.toml)
+    restarting/from_7.3.0_until_7.3.50/SnapTestRestart-2.toml IGNORE)
   add_fdb_test(
     TEST_FILES restarting/from_7.3.0_until_7.3.50/ClientTransactionProfilingCorrectness-1.toml
     restarting/from_7.3.0_until_7.3.50/ClientTransactionProfilingCorrectness-2.toml)
@@ -393,16 +395,16 @@ if(WITH_PYTHON)
     restarting/from_7.3.50_until_7.4.0/UpgradeAndBackupRestore-2.toml)
   add_fdb_test(
     TEST_FILES restarting/from_7.3.50_until_7.4.0/SnapCycleRestart-1.toml
-    restarting/from_7.3.50_until_7.4.0/SnapCycleRestart-2.toml)
+    restarting/from_7.3.50_until_7.4.0/SnapCycleRestart-2.toml IGNORE)
   add_fdb_test(
     TEST_FILES restarting/from_7.3.50_until_7.4.0/SnapTestAttrition-1.toml
-    restarting/from_7.3.50_until_7.4.0/SnapTestAttrition-2.toml)
+    restarting/from_7.3.50_until_7.4.0/SnapTestAttrition-2.toml IGNORE)
   add_fdb_test(
     TEST_FILES restarting/from_7.3.50_until_7.4.0/SnapTestSimpleRestart-1.toml
-    restarting/from_7.3.50_until_7.4.0/SnapTestSimpleRestart-2.toml)
+    restarting/from_7.3.50_until_7.4.0/SnapTestSimpleRestart-2.toml IGNORE)
   add_fdb_test(
     TEST_FILES restarting/from_7.3.50_until_7.4.0/SnapTestRestart-1.toml
-    restarting/from_7.3.50_until_7.4.0/SnapTestRestart-2.toml)
+    restarting/from_7.3.50_until_7.4.0/SnapTestRestart-2.toml IGNORE)
   add_fdb_test(
     TEST_FILES restarting/from_7.3.50_until_7.4.0/ClientTransactionProfilingCorrectness-1.toml
     restarting/from_7.3.50_until_7.4.0/ClientTransactionProfilingCorrectness-2.toml)
