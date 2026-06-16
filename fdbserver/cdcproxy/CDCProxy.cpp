@@ -96,15 +96,6 @@ struct CDCBufferedTag : ReferenceCounted<CDCBufferedTag> {
 };
 
 class CDCProxy {
-public:
-	CDCProxy(CDCProxyInterface const& proxy, Reference<AsyncVar<ServerDBInfo> const> dbInfo)
-	  : id(proxy.id()), cx(openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True)), dbInfo(dbInfo),
-	    logSystem(makeReference<AsyncVar<Reference<LogSystemConsumer>>>()),
-	    bufferLock(SERVER_KNOBS->CDC_PROXY_BUFFER_BYTES), actors(false) {}
-
-	Future<Void> run(CDCProxyInterface proxy, uint64_t recoveryCount);
-
-private:
 	UID id;
 	Database cx;
 	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
@@ -120,6 +111,7 @@ private:
 	void clearBufferedMutations(Reference<CDCBufferedStream> stream);
 	void addBufferedBatch(Reference<CDCBufferedStream> stream, CDCBufferedBatch batch);
 	void detachStreamFromTags(Reference<CDCBufferedStream> stream);
+	void deactivateStream(Reference<CDCBufferedStream> stream);
 	void refreshStreamTags(Reference<CDCBufferedStream> stream);
 	Optional<Version> nextTagReadVersion(Reference<CDCBufferedTag> tag);
 	void advanceTagBufferedThrough(Reference<CDCBufferedTag> tag, Version bufferedThrough);
@@ -139,14 +131,20 @@ private:
 	Future<Void> acknowledge(CDCAckRequest request);
 	Future<Void> registerStream(CDCRegisterStreamRequest request);
 	Future<Void> removeStream(CDCRemoveStreamRequest request);
-	Future<Void> listStreams(CDCListStreamsRequest request);
 	Future<Void> serveConsumeRequests(FutureStream<CDCConsumeRequest> requests);
 	Future<Void> serveAcknowledgeRequests(FutureStream<CDCAckRequest> requests);
 	Future<Void> serveRegisterStreamRequests(FutureStream<CDCRegisterStreamRequest> requests);
 	Future<Void> serveRemoveStreamRequests(FutureStream<CDCRemoveStreamRequest> requests);
-	Future<Void> serveListStreamsRequests(FutureStream<CDCListStreamsRequest> requests);
 	Future<Void> serveHaltForTestingRequests(FutureStream<HaltCDCProxyRequest> requests);
 	Future<Void> monitorDBInfo(CDCProxyInterface proxy, uint64_t recoveryCount);
+
+public:
+	CDCProxy(CDCProxyInterface const& proxy, Reference<AsyncVar<ServerDBInfo> const> dbInfo)
+	  : id(proxy.id()), cx(openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True)), dbInfo(dbInfo),
+	    logSystem(makeReference<AsyncVar<Reference<LogSystemConsumer>>>()),
+	    bufferLock(SERVER_KNOBS->CDC_PROXY_BUFFER_BYTES), actors(false) {}
+
+	Future<Void> run(CDCProxyInterface proxy, uint64_t recoveryCount);
 };
 
 Optional<MutationRef> clipCDCMutation(MutationRef const& mutation, KeyRangeRef const& keys) {
@@ -334,6 +332,15 @@ void CDCProxy::detachStreamFromTags(Reference<CDCBufferedStream> stream) {
 			bufferedTag->refresh.trigger();
 		}
 	}
+}
+
+void CDCProxy::deactivateStream(Reference<CDCBufferedStream> stream) {
+	CODE_PROBE(stream->readDemand > 0, "CDC proxy wakes pending consume when stream is unassigned");
+	CODE_PROBE(true, "CDC proxy drops removed or reassigned stream state");
+	stream->active = false;
+	stream->changed.trigger();
+	detachStreamFromTags(stream);
+	clearBufferedMutations(stream);
 }
 
 void CDCProxy::refreshStreamTags(Reference<CDCBufferedStream> stream) {
@@ -835,12 +842,7 @@ void CDCProxy::reconcileStreams() {
 
 	for (auto it = streams.begin(); it != streams.end();) {
 		if (!assignedStreams.contains(it->first)) {
-			CODE_PROBE(it->second->readDemand > 0, "CDC proxy wakes pending consume when stream is unassigned");
-			CODE_PROBE(true, "CDC proxy drops removed or reassigned stream state");
-			it->second->active = false;
-			it->second->changed.trigger();
-			detachStreamFromTags(it->second);
-			clearBufferedMutations(it->second);
+			deactivateStream(it->second);
 			it = streams.erase(it);
 		} else {
 			++it;
@@ -978,9 +980,13 @@ Future<Void> CDCProxy::registerStream(CDCRegisterStreamRequest request) {
 
 Future<Void> CDCProxy::removeStream(CDCRemoveStreamRequest request) {
 	try {
-		Optional<NativeCdcRemovedStreamInfo> removed =
-		    co_await removeNativeCdcStream(cx, request.name, request.streamId, id);
-		if (removed.present()) {
+		const bool removed = co_await removeNativeCdcStream(cx, request.name, request.streamId, id);
+		if (removed) {
+			auto stream = streams.find(request.streamId);
+			if (stream != streams.end()) {
+				deactivateStream(stream->second);
+				streams.erase(stream);
+			}
 			popAcknowledgedDataTrigger.trigger();
 		}
 		request.reply.send(Void());
@@ -991,27 +997,6 @@ Future<Void> CDCProxy::removeStream(CDCRemoveStreamRequest request) {
 		request.reply.sendError(e);
 	}
 }
-
-Future<Void> CDCProxy::listStreams(CDCListStreamsRequest request) {
-	try {
-		std::vector<NativeCdcStreamInfo> listedStreams = co_await listNativeCdcStreams(cx);
-		CDCListStreamsReply reply;
-		for (NativeCdcStreamInfo const& stream : listedStreams) {
-			reply.streams.push_back(reply.arena,
-			                        CDCStreamInfoRef(StringRef(reply.arena, stream.name),
-			                                         stream.streamId,
-			                                         KeyRangeRef(reply.arena, stream.keys),
-			                                         stream.minVersion));
-		}
-		request.reply.send(reply);
-	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled) {
-			throw;
-		}
-		request.reply.sendError(e);
-	}
-}
-
 Future<Void> CDCProxy::serveConsumeRequests(FutureStream<CDCConsumeRequest> requests) {
 	while (true) {
 		CDCConsumeRequest request = co_await requests;
@@ -1039,14 +1024,6 @@ Future<Void> CDCProxy::serveRemoveStreamRequests(FutureStream<CDCRemoveStreamReq
 		actors.add(removeStream(std::move(request)));
 	}
 }
-
-Future<Void> CDCProxy::serveListStreamsRequests(FutureStream<CDCListStreamsRequest> requests) {
-	while (true) {
-		CDCListStreamsRequest request = co_await requests;
-		actors.add(listStreams(std::move(request)));
-	}
-}
-
 Future<Void> CDCProxy::serveHaltForTestingRequests(FutureStream<HaltCDCProxyRequest> requests) {
 	while (true) {
 		HaltCDCProxyRequest request = co_await requests;
@@ -1093,7 +1070,6 @@ Future<Void> CDCProxy::run(CDCProxyInterface proxy, uint64_t recoveryCount) {
 	actors.add(serveAcknowledgeRequests(proxy.ack.getFuture()));
 	actors.add(serveRegisterStreamRequests(proxy.registerStream.getFuture()));
 	actors.add(serveRemoveStreamRequests(proxy.removeStream.getFuture()));
-	actors.add(serveListStreamsRequests(proxy.listStreams.getFuture()));
 	actors.add(serveHaltForTestingRequests(proxy.haltForTesting.getFuture()));
 	actors.add(monitorDBInfo(proxy, recoveryCount));
 	co_await actors.getResult();

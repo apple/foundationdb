@@ -43,11 +43,12 @@ void validateNativeCdcEnabled() {
 	}
 }
 
-struct NativeCdcIdentifierAllocator {
+class NativeCdcIdentifierAllocator {
 	bool sawStream = false;
 	CDCStreamId maxStreamId = 0;
 	std::unordered_map<uint16_t, uint32_t> tagStreamCounts;
 
+public:
 	void observeStreamId(CDCStreamId streamId) {
 		sawStream = true;
 		maxStreamId = std::max(maxStreamId, streamId);
@@ -218,15 +219,21 @@ bool retryNativeCdcProxyRequest(Error const& error) {
 
 // TODO: Have the cluster controller rebalance stream ownership using aggregate CDC proxy throughput and
 // update cdcProxyKeys and ClientDBInfo assignments; registration currently chooses any available proxy.
-Future<CDCProxyInterface> getAvailableNativeCdcProxy(Database cx, Optional<UID> previousProxy = Optional<UID>()) {
+Future<CDCProxyInterface> getAvailableNativeCdcProxy(Database cx,
+                                                     Optional<UID> previousProxy = Optional<UID>(),
+                                                     bool requireRegistrationEnabled = false) {
 	while (true) {
-		for (const auto& proxy : cx->clientInfo->get().cdcProxies) {
+		const ClientDBInfo& clientInfo = cx->clientInfo->get();
+		if (requireRegistrationEnabled && !clientInfo.nativeCdcEnabled) {
+			throw client_invalid_operation();
+		}
+		for (const auto& proxy : clientInfo.cdcProxies) {
 			if (!previousProxy.present() || proxy.id() != previousProxy.get()) {
 				co_return proxy;
 			}
 		}
-		if (!cx->clientInfo->get().cdcProxies.empty()) {
-			co_return cx->clientInfo->get().cdcProxies.front();
+		if (!clientInfo.cdcProxies.empty()) {
+			co_return clientInfo.cdcProxies.front();
 		}
 		co_await cx->clientInfo->onChange();
 	}
@@ -341,7 +348,7 @@ Future<Optional<CDCProxyInterface>> getNativeCdcStreamProxyForRemoval(Database c
 
 } // namespace
 
-Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys, Optional<UID> proxyId) {
+Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys, UID proxyId) {
 	validateNativeCdcEnabled();
 	validateNativeCdcStream(name, keys);
 
@@ -360,12 +367,12 @@ Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys
 				if (!currentKeys.present() || decodeCDCStreamKeysValue(currentKeys.get()) != keys) {
 					throw client_invalid_operation();
 				}
-				if (proxyId.present() && !(co_await getNativeCdcProxyAssignment(&tr, streamId)).present()) {
+				if (!(co_await getNativeCdcProxyAssignment(&tr, streamId)).present()) {
 					CODE_PROBE(true, "Native CDC registration restores missing stream owner");
 					const Tag tag = co_await getNativeCdcCurrentTag(&tr, streamId);
 					Optional<UID> sharedTagProxy = co_await getNativeCdcProxyAssignmentForTag(&tr, tag);
 					CODE_PROBE(sharedTagProxy.present(), "Native CDC shared-tag streams use one owner");
-					const UID selectedProxy = sharedTagProxy.present() ? sharedTagProxy.get() : proxyId.get();
+					const UID selectedProxy = sharedTagProxy.present() ? sharedTagProxy.get() : proxyId;
 					tr.set(cdcProxyKeyFor(streamId, selectedProxy), Value());
 					signalNativeCdcProxyAssignmentChange(&tr);
 					co_await tr.commit();
@@ -384,12 +391,10 @@ Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys
 			tr.set(cdcTagHistoryKeyFor(streamId, registrationVersion, tag), Value());
 			tr.atomicOp(
 			    cdcMinVersionKeyFor(streamId), cdcVersionstampedMinVersionValue(), MutationRef::SetVersionstampedValue);
-			if (proxyId.present()) {
-				Optional<UID> sharedTagProxy = co_await getNativeCdcProxyAssignmentForTag(&tr, tag);
-				const UID selectedProxy = sharedTagProxy.present() ? sharedTagProxy.get() : proxyId.get();
-				tr.set(cdcProxyKeyFor(streamId, selectedProxy), Value());
-				signalNativeCdcProxyAssignmentChange(&tr);
-			}
+			Optional<UID> sharedTagProxy = co_await getNativeCdcProxyAssignmentForTag(&tr, tag);
+			const UID selectedProxy = sharedTagProxy.present() ? sharedTagProxy.get() : proxyId;
+			tr.set(cdcProxyKeyFor(streamId, selectedProxy), Value());
+			signalNativeCdcProxyAssignmentChange(&tr);
 			co_await tr.commit();
 			co_return streamId;
 		} catch (Error& e) {
@@ -399,10 +404,7 @@ Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys
 	}
 }
 
-Future<Optional<NativeCdcRemovedStreamInfo>> removeNativeCdcStream(Database cx,
-                                                                   Key name,
-                                                                   CDCStreamId streamId,
-                                                                   Optional<UID> proxyId) {
+Future<bool> removeNativeCdcStream(Database cx, Key name, CDCStreamId streamId, UID proxyId) {
 	if (name.empty() || streamId == 0) {
 		throw client_invalid_operation();
 	}
@@ -418,11 +420,11 @@ Future<Optional<NativeCdcRemovedStreamInfo>> removeNativeCdcStream(Database cx,
 			Optional<Value> currentId = co_await tr.get(nameKey);
 			if (!nativeCdcNameMatchesStream(currentId, streamId)) {
 				CODE_PROBE(currentId.present(), "Native CDC preserves a replacement stream during removal retry");
-				co_return Optional<NativeCdcRemovedStreamInfo>();
+				co_return false;
 			}
 
 			Optional<UID> assignedProxy = co_await getNativeCdcProxyAssignment(&tr, streamId);
-			if (proxyId.present() && (!assignedProxy.present() || assignedProxy.get() != proxyId.get())) {
+			if (!assignedProxy.present() || assignedProxy.get() != proxyId) {
 				CODE_PROBE(true, "Native CDC rejects removal through a stale owner");
 				throw wrong_shard_server();
 			}
@@ -457,11 +459,8 @@ Future<Optional<NativeCdcRemovedStreamInfo>> removeNativeCdcStream(Database cx,
 				signalNativeCdcProxyAssignmentChange(&tr);
 			}
 			co_await tr.commit();
-			NativeCdcRemovedStreamInfo removed;
-			removed.removalVersion = tr.getCommittedVersion();
-			removed.tags.assign(removedTags.begin(), removedTags.end());
-			CODE_PROBE(!removed.tags.empty(), "Native CDC removal records final tagged pop work");
-			co_return Optional<NativeCdcRemovedStreamInfo>(removed);
+			CODE_PROBE(!removedTags.empty(), "Native CDC removal records final tagged pop work");
+			co_return true;
 		} catch (Error& e) {
 			if (e.code() == error_code_wrong_shard_server) {
 				throw;
@@ -599,30 +598,16 @@ Future<Version> acknowledgeNativeCdcStream(Database cx,
 }
 
 Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, KeyRange keys) {
-	validateNativeCdcEnabled();
 	validateNativeCdcStream(name, keys);
-	const CDCProxyInterface proxy = co_await getAvailableNativeCdcProxy(cx);
-	co_return co_await registerNativeCdcStream(cx, name, keys, proxy.id());
-}
-
-Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreamsClient(Database cx) {
 	Optional<UID> previousProxy;
-
 	while (true) {
-		CDCProxyInterface proxy = co_await getAvailableNativeCdcProxy(cx, previousProxy);
+		CDCProxyInterface proxy = co_await getAvailableNativeCdcProxy(cx, previousProxy, true);
 		try {
 			Future<Void> proxyChanged = cx->clientInfo->onChange();
-			auto result =
-			    co_await race(throwErrorOr(proxy.listStreams.tryGetReply(CDCListStreamsRequest())), proxyChanged);
+			auto result = co_await race(
+			    throwErrorOr(proxy.registerStream.tryGetReply(CDCRegisterStreamRequest(name, keys))), proxyChanged);
 			if (result.index() == 0) {
-				CDCListStreamsReply reply = std::get<0>(std::move(result));
-				std::vector<NativeCdcStreamInfo> streams;
-				streams.reserve(reply.streams.size());
-				for (const auto& stream : reply.streams) {
-					streams.push_back(NativeCdcStreamInfo{
-					    Key(stream.name), stream.streamId, KeyRange(stream.keys), stream.minVersion });
-				}
-				co_return streams;
+				co_return std::get<0>(std::move(result)).streamId;
 			}
 		} catch (Error& error) {
 			if (!retryNativeCdcProxyRequest(error)) {
@@ -632,6 +617,10 @@ Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreamsClient(Database cx)
 		previousProxy = proxy.id();
 		co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, cx->taskID);
 	}
+}
+
+Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreamsClient(Database cx) {
+	co_return co_await listNativeCdcStreams(cx);
 }
 
 Future<Void> removeNativeCdcStreamClient(Database cx, Key name) {

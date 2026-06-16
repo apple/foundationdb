@@ -743,6 +743,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			dbInfo.client = ClientDBInfo();
 			dbInfo.client.clusterId = db->serverInfo->get().client.clusterId;
 			dbInfo.client.clusterType = db->clusterType;
+			dbInfo.client.nativeCdcEnabled = CLIENT_KNOBS->ENABLE_NATIVE_CDC;
 			dbInfo.client.cdcProxies = db->cdcProxies;
 			dbInfo.client.streamToCDCProxyId = db->clientInfo->get().streamToCDCProxyId;
 
@@ -1396,6 +1397,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	// Construct the client information
 	if (db->clientInfo->get().commitProxies != req.commitProxies ||
 	    db->clientInfo->get().grvProxies != req.grvProxies || db->clientInfo->get().cdcProxies != req.cdcProxies ||
+	    db->clientInfo->get().nativeCdcEnabled != CLIENT_KNOBS->ENABLE_NATIVE_CDC ||
 	    db->clientInfo->get().clusterId != db->serverInfo->get().client.clusterId ||
 	    db->clientInfo->get().clusterType != db->clusterType) {
 		TraceEvent("PublishNewClientInfo", self->id)
@@ -1417,6 +1419,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		clientInfo.id = deterministicRandom()->randomUniqueID();
 		clientInfo.commitProxies = req.commitProxies;
 		clientInfo.grvProxies = req.grvProxies;
+		clientInfo.nativeCdcEnabled = CLIENT_KNOBS->ENABLE_NATIVE_CDC;
 		clientInfo.cdcProxies = req.cdcProxies;
 		clientInfo.streamToCDCProxyId = db->clientInfo->get().streamToCDCProxyId;
 		clientInfo.history = db->clientInfo->get().history;
@@ -2152,10 +2155,10 @@ Future<Void> monitorCDCProxyAssignments(ClusterControllerData::DBInfo* db) {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-				// Install the local endpoint wakeup and conflict on assignment changes before
-				// scanning metadata, so publications during the scan force a retry or wakeup.
+				// Install both wakeups before scanning metadata, so changes during the scan
+				// force a retry or wake the committed watch.
 				Future<Void> endpointChangeFuture = db->clientInfo->onChange();
-				Optional<Value> assignmentChangeValue = co_await tr.get(cdcProxyAssignmentChangeKey);
+				Future<Void> assignmentChangeFuture = tr.watch(cdcProxyAssignmentChangeKey);
 				std::map<CDCStreamId, UID> streamToCDCProxyId;
 				const std::vector<CDCProxyInterface> availableProxies = db->clientInfo->get().cdcProxies;
 				std::unordered_map<UID, UID> replacementByFailedProxy;
@@ -2223,24 +2226,21 @@ Future<Void> monitorCDCProxyAssignments(ClusterControllerData::DBInfo* db) {
 					if (durableAssignment == durableAssignments.end() && !availableProxies.empty()) {
 						auto previousAssignment = previouslyPublishedAssignments.find(streamId);
 						UID resolvedProxyId;
-						bool needsDurableRepair = false;
 						if (previousAssignment != previouslyPublishedAssignments.end() &&
 						    containsCDCProxy(availableProxies, previousAssignment->second)) {
 							resolvedProxyId = previousAssignment->second;
 						} else {
 							resolvedProxyId = availableProxies[replacementIndex++ % availableProxies.size()].id();
-							tr.clear(cdcProxyRangeFor(streamId));
-							tr.set(cdcProxyKeyFor(streamId, resolvedProxyId), Value());
-							repairedAssignment = true;
-							needsDurableRepair = true;
 						}
+						tr.clear(cdcProxyRangeFor(streamId));
+						tr.set(cdcProxyKeyFor(streamId, resolvedProxyId), Value());
+						repairedAssignment = true;
 						CODE_PROBE(true, "CDC stream assignment is repaired after missing owner");
 						TraceEvent("CDCProxyAssignmentMissingRepaired")
 						    .detail("StreamId", streamId)
 						    .detail("CDCProxyID", resolvedProxyId)
 						    .detail("HadPublishedAssignment",
-						            previousAssignment != previouslyPublishedAssignments.end())
-						    .detail("DurableRepair", needsDurableRepair);
+						            previousAssignment != previouslyPublishedAssignments.end());
 						const auto [_, inserted] = streamToCDCProxyId.emplace(streamId, resolvedProxyId);
 						ASSERT_WE_THINK(inserted);
 					}
@@ -2252,15 +2252,13 @@ Future<Void> monitorCDCProxyAssignments(ClusterControllerData::DBInfo* db) {
 				    .detail("DurableAssignmentCount", durableAssignments.size())
 				    .detail("AssignmentScanLimit", CDC_PROXY_ASSIGNMENT_SCAN_LIMIT)
 				    .detail("TransactionKind", "ReadYourWrites")
-				    .detail("ClientAssignmentCount", db->clientInfo->get().streamToCDCProxyId.size())
-				    .detail("AssignmentChangePresent", assignmentChangeValue.present());
+				    .detail("ClientAssignmentCount", db->clientInfo->get().streamToCDCProxyId.size());
 
 				if (!streamToCDCProxyId.empty() && availableProxies.empty()) {
 					CODE_PROBE(
 					    true, "CDC assignments wait while no proxy endpoints are published", probe::decoration::rare);
-					Future<Void> assignmentPollFuture = delay(SERVER_KNOBS->COORDINATOR_REGISTER_INTERVAL);
 					co_await tr.commit();
-					co_await (endpointChangeFuture || assignmentPollFuture);
+					co_await (endpointChangeFuture || assignmentChangeFuture);
 					break;
 				}
 
@@ -2289,9 +2287,8 @@ Future<Void> monitorCDCProxyAssignments(ClusterControllerData::DBInfo* db) {
 					    .detail("ClientInfoID", db->clientInfo->get().id);
 				}
 
-				Future<Void> assignmentPollFuture = delay(SERVER_KNOBS->COORDINATOR_REGISTER_INTERVAL);
 				co_await tr.commit();
-				co_await (endpointChangeFuture || assignmentPollFuture);
+				co_await (endpointChangeFuture || assignmentChangeFuture);
 				break;
 			} catch (Error& e) {
 				TraceEvent(SevWarn, "CDCProxyAssignmentsMonitorError").error(e);

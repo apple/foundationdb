@@ -29,9 +29,7 @@
 #include "fdbserver/tester/workloads.h"
 #include "flow/DeterministicRandom.h"
 
-struct NativeCdcEndToEndWorkload : TestWorkload {
-	static constexpr auto NAME = "NativeCdcEndToEnd";
-
+class NativeCdcEndToEndWorkload : public TestWorkload {
 	struct ExpectedWrite {
 		Version deadline;
 		bool observed = false;
@@ -65,47 +63,6 @@ struct NativeCdcEndToEndWorkload : TestWorkload {
 	int nextStreamNumber = 0;
 	std::vector<StreamState> streams;
 
-	explicit NativeCdcEndToEndWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		initialStreamCount = getOption(options, "initialStreamCount"_sr, 12);
-		minStreamCount = getOption(options, "minStreamCount"_sr, 6);
-		maxStreamCount = getOption(options, "maxStreamCount"_sr, 20);
-		keyCount = getOption(options, "keyCount"_sr, 16);
-		writesPerRound = getOption(options, "writesPerRound"_sr, 5);
-		rounds = getOption(options, "rounds"_sr, 30);
-		assignmentPublicationChecks = getOption(options, "assignmentPublicationChecks"_sr, 0);
-		drainProbability = getOption(options, "drainProbability"_sr, 0.25);
-		delayBetweenRounds = getOption(options, "delayBetweenRounds"_sr, 0.5);
-		operationTimeout = getOption(options, "operationTimeout"_sr, 120.0);
-		ASSERT_GE(minStreamCount, 1);
-		ASSERT_GE(initialStreamCount, minStreamCount);
-		ASSERT_GE(maxStreamCount, initialStreamCount);
-		ASSERT_GE(keyCount, 2);
-		ASSERT_GE(writesPerRound, 1);
-		ASSERT_LE(writesPerRound, keyCount);
-		ASSERT_GE(assignmentPublicationChecks, 0);
-	}
-
-	// RandomRangeLock can outlive this bounded CDC workload and mask its progress check.
-	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("RandomRangeLock"); }
-
-	Future<Void> setup(Database const& cx) override {
-		if (clientId != 0) {
-			return Void();
-		}
-		return initializeStreams(cx);
-	}
-
-	Future<Void> start(Database const& cx) override {
-		if (clientId != 0) {
-			return Void();
-		}
-		return run(cx);
-	}
-
-	Future<bool> check(Database const& cx) override { return true; }
-
-	void getMetrics(std::vector<PerfMetric>& m) override {}
-
 	Key keyForIndex(int index) const { return Key(StringRef(format("native-cdc-e2e/data/%04d", index))); }
 
 	KeyRange randomOverlappingRange() const {
@@ -130,6 +87,12 @@ struct NativeCdcEndToEndWorkload : TestWorkload {
 			}
 			co_await tr.onError(err);
 		}
+	}
+
+	Future<Version> writeValue(Database cx, Key key, Value value) {
+		std::vector<std::pair<Key, Value>> values;
+		values.emplace_back(std::move(key), std::move(value));
+		co_return co_await writeValues(cx, std::move(values));
 	}
 
 	Future<Void> addStream(Database cx) {
@@ -192,46 +155,50 @@ struct NativeCdcEndToEndWorkload : TestWorkload {
 		co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
 	}
 
-	Future<Void> validateAssignmentPublication(Database cx) {
+	Future<Void> validateAssignmentPublicationOnce(Database cx, int check) {
 		const KeyRange keys(KeyRangeRef("native-cdc-e2e/assignment/data/"_sr, "native-cdc-e2e/assignment/data0"_sr));
-		for (int check = 0; check < assignmentPublicationChecks; ++check) {
-			const Key name = Key(StringRef(format("native-cdc-e2e/assignment/%04d", check)));
-			const Key key = Key(StringRef(format("native-cdc-e2e/assignment/data/%04d", check)));
-			const Value value = Value(StringRef(format("assignment-value/%04d", check)));
+		const Key name = Key(StringRef(format("native-cdc-e2e/assignment/%04d", check)));
+		const Key key = Key(StringRef(format("native-cdc-e2e/assignment/data/%04d", check)));
+		const Value value = Value(StringRef(format("assignment-value/%04d", check)));
 
-			co_await delay(0.1);
-			const CDCStreamId streamId =
-			    co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout);
-			Reference<NativeCdcConsumer> consumer =
-			    co_await timeoutError(createNativeCdcConsumer(cx, name), operationTimeout);
-			ASSERT_EQ(consumer->position().streamId, streamId);
+		co_await delay(0.1);
+		const CDCStreamId streamId =
+		    co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout);
+		Reference<NativeCdcConsumer> consumer =
+		    co_await timeoutError(createNativeCdcConsumer(cx, name), operationTimeout);
+		ASSERT_EQ(consumer->position().streamId, streamId);
 
-			const Version committed = co_await writeValues(cx, { { key, value } });
-			bool observed = false;
-			const double deadline = now() + operationTimeout;
-			while (!observed && consumer->position().lastConsumedVersion < committed) {
-				const Version previous = consumer->position().lastConsumedVersion;
-				CDCConsumeReply reply = co_await timeoutError(consumer->consume(), operationTimeout);
-				if (reply.lastConsumedVersion == previous) {
-					ASSERT_LT(now(), deadline);
-					co_await delay(0.1);
-					continue;
-				}
-				ASSERT_GT(reply.lastConsumedVersion, previous);
-				for (const auto& versioned : reply.mutations) {
-					ASSERT_GT(versioned.version, previous);
-					ASSERT_LE(versioned.version, reply.lastConsumedVersion);
-					for (const auto& mutation : versioned.mutations) {
-						if (versioned.version == committed && mutation.type == MutationRef::SetValue &&
-						    mutation.param1 == key && mutation.param2 == value) {
-							observed = true;
-						}
+		const Version committed = co_await writeValue(cx, key, value);
+		bool observed = false;
+		const double deadline = now() + operationTimeout;
+		while (!observed && consumer->position().lastConsumedVersion < committed) {
+			const Version previous = consumer->position().lastConsumedVersion;
+			CDCConsumeReply reply = co_await timeoutError(consumer->consume(), operationTimeout);
+			if (reply.lastConsumedVersion == previous) {
+				ASSERT_LT(now(), deadline);
+				co_await delay(0.1);
+				continue;
+			}
+			ASSERT_GT(reply.lastConsumedVersion, previous);
+			for (const auto& versioned : reply.mutations) {
+				ASSERT_GT(versioned.version, previous);
+				ASSERT_LE(versioned.version, reply.lastConsumedVersion);
+				for (const auto& mutation : versioned.mutations) {
+					if (versioned.version == committed && mutation.type == MutationRef::SetValue &&
+					    mutation.param1 == key && mutation.param2 == value) {
+						observed = true;
 					}
 				}
-				co_await timeoutError(consumer->acknowledge(), operationTimeout);
 			}
-			ASSERT(observed);
-			co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
+			co_await timeoutError(consumer->acknowledge(), operationTimeout);
+		}
+		ASSERT(observed);
+		co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
+	}
+
+	Future<Void> validateAssignmentPublication(Database cx) {
+		for (int check = 0; check < assignmentPublicationChecks; ++check) {
+			co_await validateAssignmentPublicationOnce(cx, check);
 		}
 	}
 
@@ -343,6 +310,50 @@ struct NativeCdcEndToEndWorkload : TestWorkload {
 			streams.pop_back();
 		}
 	}
+
+public:
+	static constexpr auto NAME = "NativeCdcEndToEnd";
+
+	explicit NativeCdcEndToEndWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+		initialStreamCount = getOption(options, "initialStreamCount"_sr, 12);
+		minStreamCount = getOption(options, "minStreamCount"_sr, 6);
+		maxStreamCount = getOption(options, "maxStreamCount"_sr, 20);
+		keyCount = getOption(options, "keyCount"_sr, 16);
+		writesPerRound = getOption(options, "writesPerRound"_sr, 5);
+		rounds = getOption(options, "rounds"_sr, 30);
+		assignmentPublicationChecks = getOption(options, "assignmentPublicationChecks"_sr, 0);
+		drainProbability = getOption(options, "drainProbability"_sr, 0.25);
+		delayBetweenRounds = getOption(options, "delayBetweenRounds"_sr, 0.5);
+		operationTimeout = getOption(options, "operationTimeout"_sr, 120.0);
+		ASSERT_GE(minStreamCount, 1);
+		ASSERT_GE(initialStreamCount, minStreamCount);
+		ASSERT_GE(maxStreamCount, initialStreamCount);
+		ASSERT_GE(keyCount, 2);
+		ASSERT_GE(writesPerRound, 1);
+		ASSERT_LE(writesPerRound, keyCount);
+		ASSERT_GE(assignmentPublicationChecks, 0);
+	}
+
+	// RandomRangeLock can outlive this bounded CDC workload and mask its progress check.
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("RandomRangeLock"); }
+
+	Future<Void> setup(Database const& cx) override {
+		if (clientId != 0) {
+			return Void();
+		}
+		return initializeStreams(cx);
+	}
+
+	Future<Void> start(Database const& cx) override {
+		if (clientId != 0) {
+			return Void();
+		}
+		return run(cx);
+	}
+
+	Future<bool> check(Database const& cx) override { return true; }
+
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<NativeCdcEndToEndWorkload> NativeCdcEndToEndWorkloadFactory;

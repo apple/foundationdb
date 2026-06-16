@@ -55,23 +55,6 @@ struct VersionedMutationsRef {
 	}
 };
 
-struct CDCStreamInfoRef {
-	constexpr static FileIdentifier file_identifier = 10228408;
-	StringRef name;
-	CDCStreamId streamId = 0;
-	KeyRangeRef keys;
-	Version minVersion = invalidVersion;
-
-	CDCStreamInfoRef() = default;
-	CDCStreamInfoRef(StringRef name, CDCStreamId streamId, KeyRangeRef keys, Version minVersion)
-	  : name(name), streamId(streamId), keys(keys), minVersion(minVersion) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, name, streamId, keys, minVersion);
-	}
-};
-
 struct CDCRegisterStreamReply {
 	constexpr static FileIdentifier file_identifier = 3217071;
 	CDCStreamId streamId = 0;
@@ -116,29 +99,6 @@ struct CDCRemoveStreamRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, name, streamId, reply);
-	}
-};
-
-struct CDCListStreamsReply {
-	constexpr static FileIdentifier file_identifier = 7600884;
-	Arena arena;
-	VectorRef<CDCStreamInfoRef> streams;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, streams, arena);
-	}
-};
-
-struct CDCListStreamsRequest {
-	constexpr static FileIdentifier file_identifier = 8134529;
-	ReplyPromise<CDCListStreamsReply> reply;
-
-	bool verify() const { return true; }
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, reply);
 	}
 };
 
@@ -208,7 +168,6 @@ struct CDCProxyInterface {
 	PublicRequestStream<CDCConsumeRequest> consume;
 	PublicRequestStream<CDCRegisterStreamRequest> registerStream;
 	PublicRequestStream<CDCRemoveStreamRequest> removeStream;
-	PublicRequestStream<CDCListStreamsRequest> listStreams;
 	PublicRequestStream<CDCAckRequest> ack;
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<HaltCDCProxyRequest> haltForTesting;
@@ -227,10 +186,9 @@ struct CDCProxyInterface {
 			registerStream =
 			    PublicRequestStream<CDCRegisterStreamRequest>(consume.getEndpoint().getAdjustedEndpoint(1));
 			removeStream = PublicRequestStream<CDCRemoveStreamRequest>(consume.getEndpoint().getAdjustedEndpoint(2));
-			listStreams = PublicRequestStream<CDCListStreamsRequest>(consume.getEndpoint().getAdjustedEndpoint(3));
-			ack = PublicRequestStream<CDCAckRequest>(consume.getEndpoint().getAdjustedEndpoint(4));
-			waitFailure = RequestStream<ReplyPromise<Void>>(consume.getEndpoint().getAdjustedEndpoint(5));
-			haltForTesting = RequestStream<HaltCDCProxyRequest>(consume.getEndpoint().getAdjustedEndpoint(6));
+			ack = PublicRequestStream<CDCAckRequest>(consume.getEndpoint().getAdjustedEndpoint(3));
+			waitFailure = RequestStream<ReplyPromise<Void>>(consume.getEndpoint().getAdjustedEndpoint(4));
+			haltForTesting = RequestStream<HaltCDCProxyRequest>(consume.getEndpoint().getAdjustedEndpoint(5));
 		}
 	}
 
@@ -239,7 +197,6 @@ struct CDCProxyInterface {
 		streams.push_back(consume.getReceiver(TaskPriority::ReadSocket));
 		streams.push_back(registerStream.getReceiver(TaskPriority::ReadSocket));
 		streams.push_back(removeStream.getReceiver(TaskPriority::ReadSocket));
-		streams.push_back(listStreams.getReceiver(TaskPriority::ReadSocket));
 		streams.push_back(ack.getReceiver(TaskPriority::ReadSocket));
 		streams.push_back(waitFailure.getReceiver());
 		streams.push_back(haltForTesting.getReceiver());

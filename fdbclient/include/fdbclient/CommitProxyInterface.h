@@ -113,6 +113,7 @@ struct ClientDBInfo {
 	UID id; // Changes each time anything else changes
 	std::vector<GrvProxyInterface> grvProxies;
 	std::vector<CommitProxyInterface> commitProxies;
+	bool nativeCdcEnabled = false;
 	std::vector<CDCProxyInterface> cdcProxies;
 	std::map<CDCStreamId, UID> streamToCDCProxyId;
 	Optional<CommitProxyInterface>
@@ -141,6 +142,7 @@ struct ClientDBInfo {
 		           history,
 		           clusterId,
 		           clusterType,
+		           nativeCdcEnabled,
 		           cdcProxies,
 		           streamToCDCProxyId);
 	}

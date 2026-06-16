@@ -35,15 +35,6 @@ struct NativeCdcStreamInfo {
 };
 
 class NativeCdcConsumer : public ReferenceCounted<NativeCdcConsumer> {
-public:
-	NativeCdcConsumer(Database cx, CDCCursor position) : cx(cx), currentPosition(position) {}
-
-	// Operations advance shared delivery state; only one may be outstanding.
-	Future<CDCConsumeReply> consume();
-	Future<Void> acknowledge();
-	const CDCCursor& position() const { return currentPosition; }
-
-private:
 	static Future<CDCConsumeReply> consumeImpl(Reference<NativeCdcConsumer> self);
 	static Future<Void> acknowledgeImpl(Reference<NativeCdcConsumer> self);
 
@@ -51,6 +42,14 @@ private:
 	CDCCursor currentPosition;
 	Version knownAvailableThrough = invalidVersion;
 	bool operationOutstanding = false;
+
+public:
+	NativeCdcConsumer(Database cx, CDCCursor position) : cx(cx), currentPosition(position) {}
+
+	// Operations advance shared delivery state; only one may be outstanding.
+	Future<CDCConsumeReply> consume();
+	Future<Void> acknowledge();
+	const CDCCursor& position() const { return currentPosition; }
 };
 
 // Client-facing CDC operations. Registration is feature gated; the remaining

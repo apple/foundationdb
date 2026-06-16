@@ -22,27 +22,14 @@
 #define FDBCLIENT_NATIVECDCINTERNAL_H
 #pragma once
 
-#include <vector>
-
 #include "fdbclient/NativeCdc.h"
-
-struct NativeCdcRemovedStreamInfo {
-	Version removalVersion = invalidVersion;
-	std::vector<Tag> tags;
-};
 
 // Durable metadata operations used by CDC server roles. Registration is
 // feature gated; drain and cleanup operations remain available for streams
 // persisted before native CDC is disabled.
-Future<CDCStreamId> registerNativeCdcStream(Database cx,
-                                            Key name,
-                                            KeyRange keys,
-                                            Optional<UID> proxyId = Optional<UID>());
+Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys, UID proxyId);
 // Persists per-tag final-pop watermarks before removing stream metadata.
-Future<Optional<NativeCdcRemovedStreamInfo>> removeNativeCdcStream(Database cx,
-                                                                   Key name,
-                                                                   CDCStreamId streamId,
-                                                                   Optional<UID> proxyId = Optional<UID>());
+Future<bool> removeNativeCdcStream(Database cx, Key name, CDCStreamId streamId, UID proxyId);
 Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams(Database cx);
 // Atomically moves any streams assigned to a failed proxy to its replacement.
 Future<Void> reassignNativeCdcStreams(Database cx, UID oldProxyId, UID newProxyId);
