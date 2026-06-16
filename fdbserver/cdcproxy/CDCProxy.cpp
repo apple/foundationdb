@@ -42,6 +42,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/CodeProbe.h"
 #include "flow/Error.h"
+#include "flow/ScopeExit.h"
 #include "flow/UnitTest.h"
 #include "flow/genericactors.actor.h"
 
@@ -124,6 +125,7 @@ class CDCProxy {
 	Future<Void> rotateContendedPeek();
 	Future<Void> bufferTag(Reference<CDCBufferedTag> tag);
 	Future<Void> initializeStream(Reference<CDCBufferedStream> stream);
+	Future<Void> waitForBufferedVersion(Reference<CDCBufferedStream> stream, Version version);
 	Future<Void> popAcknowledgedData();
 	Future<Void> monitorAcknowledgedDataPops();
 	void reconcileStreams();
@@ -792,6 +794,10 @@ Future<Void> clearCompletedRetiredTagPops(Database cx, std::unordered_map<Tag, V
 }
 
 Future<Void> CDCProxy::popAcknowledgedData() {
+	while (!logSystem->get()) {
+		CODE_PROBE(true, "CDC proxy defers pops until a log system is available", probe::decoration::rare);
+		co_await logSystem->onChange();
+	}
 	const std::unordered_map<Tag, Version> safePopVersions = co_await readSafePopVersions(cx);
 	Reference<LogSystemConsumer> currentLogSystem = logSystem->get();
 	for (const auto& [tag, version] : safePopVersions) {
@@ -850,6 +856,23 @@ void CDCProxy::reconcileStreams() {
 	}
 }
 
+Future<Void> CDCProxy::waitForBufferedVersion(Reference<CDCBufferedStream> stream, Version version) {
+	if (stream->bufferedThrough >= version) {
+		co_return;
+	}
+
+	++stream->readDemand;
+	refreshStreamTags(stream);
+	ScopeExit releaseReadDemand([this, stream]() {
+		ASSERT_GT(stream->readDemand, 0);
+		--stream->readDemand;
+		refreshStreamTags(stream);
+	});
+	while (stream->active && stream->bufferedThrough < version) {
+		co_await stream->changed.onTrigger();
+	}
+}
+
 Future<Void> CDCProxy::consume(CDCConsumeRequest request) {
 	try {
 		if (request.cursor.lastConsumedVersion < invalidVersion ||
@@ -879,20 +902,7 @@ Future<Void> CDCProxy::consume(CDCConsumeRequest request) {
 			throw transaction_too_old();
 		}
 
-		bool issuedReadDemand = false;
-		if (stream->bufferedThrough < begin) {
-			++stream->readDemand;
-			refreshStreamTags(stream);
-			issuedReadDemand = true;
-		}
-		while (stream->active && stream->bufferedThrough < begin) {
-			co_await stream->changed.onTrigger();
-		}
-		if (issuedReadDemand) {
-			ASSERT_GT(stream->readDemand, 0);
-			--stream->readDemand;
-			refreshStreamTags(stream);
-		}
+		co_await waitForBufferedVersion(stream, begin);
 		if (stream->tooOld) {
 			throw transaction_too_old();
 		}
@@ -901,7 +911,6 @@ Future<Void> CDCProxy::consume(CDCConsumeRequest request) {
 		}
 
 		CDCConsumeReply reply;
-		reply.lastConsumedVersion = request.cursor.lastConsumedVersion;
 		for (const auto& versioned : stream->mutations) {
 			if (versioned.version >= begin && versioned.version <= stream->bufferedThrough) {
 				reply.mutations.push_back(reply.arena, VersionedMutationsRef(versioned.version, {}));

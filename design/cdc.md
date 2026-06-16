@@ -196,8 +196,11 @@ The server accepts an acknowledgement beyond its current transaction read
 version only when the owning CDC proxy has read through that position from its
 tagged log stream. A resumed consumer may reissue an acknowledgement already
 represented by the durable watermark, and a replacement proxy reconciles its
-in-memory frontier to that watermark. A fabricated future position cannot
-pre-pop mutations that have not reached a proxy or the database read version.
+in-memory frontier to that watermark. The client commits the durable
+acknowledgement before sending the proxy RPC, so the proxy's subsequent
+transactional metadata read observes that commit. A fabricated future position
+cannot pre-pop mutations that have not reached a proxy or the database read
+version.
 
 ### Registration and removal semantics
 
@@ -210,6 +213,10 @@ Registration establishes an initial minimum version using the registration
 transaction's commit version. Mutations committed after the registration has
 become visible are routed to the stream's CDC tag. The initial minimum version
 also supplies the first retention watermark for its TLog history.
+When CDC admission is disabled, this gate applies only to creation of a new
+name. Repeating an existing same-name/same-range registration remains
+idempotent, including repair of a missing durable owner, so an administrator can
+still drain state created while the feature was enabled.
 
 `removeNativeCdcStreamClient()` removes the named stream and schedules final
 release of tagged log history that was protected by the removed stream.
@@ -314,7 +321,11 @@ in transaction state:
 Tag history is versioned so the data model can support a stream moving between
 tags without forgetting which old log streams may still contain unread
 mutations. The initial implementation writes the initial assignment and reads
-the history; dynamic throughput-driven reassignment is future work.
+the history; dynamic throughput-driven reassignment is future work. The initial
+history entry uses the registration transaction's read version as a
+conservative inclusive lower bound. The versionstamped `minVersion` uses the
+commit version, and the proxy starts at the maximum of those two values, so the
+earlier history boundary cannot expose pre-registration mutations.
 
 ### Storage-backed system data
 
@@ -341,17 +352,17 @@ actual final pop to perform.
 
 Registration runs as a durable metadata transaction:
 
-1. It validates the feature knob, the stream name, and the registered normal
-   key range.
+1. It validates the stream name and registered normal key range.
 2. It checks whether the name is already registered and applies the idempotent
-   same-name/same-range rule.
-3. It allocates a new monotonically increasing `CDCStreamId`.
-4. It selects a CDC tag using current active stream counts. The allocator uses
+   same-name/same-range rule, even when admission is disabled.
+3. For a new name, it validates the feature knob.
+4. It allocates a new monotonically increasing `CDCStreamId`.
+5. It selects a CDC tag using current active stream counts. The allocator uses
    the least populated tag among `NATIVE_CDC_TAG_COUNT` tags, choosing the
    lowest tag ID on a tie.
-5. It records the stream name, range, initial tag history entry, and
+6. It records the stream name, range, initial tag history entry, and
    versionstamped initial minimum version.
-6. It records an available CDC proxy owner and signals assignment monitoring.
+7. It records an available CDC proxy owner and signals assignment monitoring.
 
 The tag allocator bounds the number of distinct CDC log streams while allowing
 many user streams. Several streams may therefore share one tag intentionally.
@@ -364,13 +375,14 @@ does not yet balance by stream traffic, memory use, or consumer lag.
 ### Metadata lifecycle example
 
 Assume a client registers stream name `orders` for range
-`["order/", "order0")`, the registration commits at version `1000`, allocates
-stream ID `7`, selects CDC tag `tagLocalityCDC:3`, and assigns proxy `P1`.
+`["order/", "order0")`, the registration reads at version `995`, commits at
+version `1000`, allocates stream ID `7`, selects CDC tag `tagLocalityCDC:3`, and
+assigns proxy `P1`.
 Registration writes:
 
 * Transaction state `\xff/cdc/name/orders -> 7`.
 * Transaction state `\xff/cdc/keys/7 -> ["order/", "order0")`.
-* Transaction state `\xff/cdc/tagHistory/7/1000/tagLocalityCDC:3 -> empty`.
+* Transaction state `\xff/cdc/tagHistory/7/995/tagLocalityCDC:3 -> empty`.
 * Transaction state `\xff/cdc/proxies/7/P1 -> empty` and the assignment-change
   signal.
 * Storage-backed system key `\xff\x02/cdc/minVersion/7 -> 1000`.
@@ -457,6 +469,12 @@ peeked data after the cursor position and a position through which the
 consumer may acknowledge after processing. If a stream is removed while a
 consume is blocked, reconciliation wakes the request and it fails rather than
 waiting on a data-change trigger for an inactive stream.
+When no later version is available, `consume()` is intentionally a long poll:
+it remains pending until the tagged-log frontier advances, ownership changes,
+or the stream is removed. The server does not impose a fixed deadline because
+normal recovery can outlast an arbitrary request timeout. Callers that need a
+deadline may cancel or externally bound the returned future; cancellation
+releases the proxy's read demand immediately.
 
 ## Acknowledgement and tag popping
 
@@ -538,6 +556,10 @@ The cluster controller monitors durable proxy assignment rows and repairs
 stale owner identifiers when endpoints are replaced or the controller itself
 is reconstructed. Clients obtain the currently published owner for their
 stream ID and retry transient proxy/routing failures.
+If a live stream temporarily has no published owner during repair, its client
+operation waits for a new assignment. Removal is terminal and wakes that wait;
+callers may cancel or externally bound the operation when they need a local
+deadline.
 
 ### Transaction-system recovery
 
@@ -567,7 +589,9 @@ resume, consumption, acknowledgement, and removal remain available for
 streams persisted while native CDC was enabled. Internal cleanup and recovery
 paths likewise continue handling durable CDC state. This is necessary because
 disabling new use of a feature cannot safely abandon log-retention obligations
-for already registered or recently removed streams.
+for already registered or recently removed streams. An idempotent registration
+of an existing name is also allowed while disabled; only allocation of a new
+stream is rejected.
 
 `NATIVE_CDC_TAG_COUNT` controls the bounded tag pool used for new stream
 allocation. Normal operation defaults to a larger tag pool; simulation may
@@ -611,6 +635,9 @@ policy simple.
   different in cost.
 * Registration selects an available CDC proxy without balancing aggregate
   proxy throughput, buffer memory, lag, or number of active readers.
+* Assignment mutations use one coalescing change key that wakes a full durable
+  ownership rescan. This is appropriate for low-rate control-plane changes but
+  should be sharded if registration and removal throughput becomes material.
 * There is no background process that changes a live stream's CDC tag in
   response to load. A future implementation can use versioned tag history to
   make such changes without losing the ability to read earlier tagged data.
@@ -630,16 +657,18 @@ simulation workloads for the end-to-end behavior.
 The basic native CDC workload covers:
 
 * Registering, listing, consuming, acknowledging, and removing streams.
-* Name-based consumer creation and correct filtering of returned mutations.
+* Name-based consumer creation, including end-to-end clear-range clipping.
 * Rejection of incompatible same-name registrations.
-* CDC proxy replacement and recovery of stream service.
+* Targeted CDC proxy termination, durable reassignment, and recovery of stream
+  service.
 * Errors for stale consume and acknowledgement requests after removal.
 * Creation and eventual collection of retired final-pop state.
-* Disabling native CDC while a live stream remains, rejecting new
-  registration while allowing recovery, consumption, acknowledgement, and
-  removal to drain the persisted stream.
-* Recovery with native CDC disabled after the last stream and final-pop work
-  have drained, verifying that no CDC proxy remains required.
+
+Unit coverage checks the CDC recovery-recruitment truth table with the feature
+enabled and disabled, both with and without durable CDC state. Because the knob
+is process-static, an end-to-end transition from enabled to disabled requires a
+separate restart-phase simulation rather than mutation within the basic
+workload.
 
 The shared-tag workload forces streams to share routing tags and verifies both
 range filtering and acknowledgement coordination. In particular, removing one

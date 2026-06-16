@@ -52,9 +52,10 @@ public:
 	const CDCCursor& position() const { return currentPosition; }
 };
 
-// Client-facing CDC operations. Registration is feature gated; the remaining
-// operations stay available so existing durable streams can be drained after
-// the feature is disabled. Requests retry when stream ownership changes.
+// Client-facing CDC operations. New registration is feature gated; idempotent
+// registration and the remaining operations stay available so existing durable
+// streams can be drained after the feature is disabled. Requests retry when
+// stream ownership changes.
 Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, KeyRange keys);
 Future<Void> removeNativeCdcStreamClient(Database cx, Key name);
 Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreamsClient(Database cx);

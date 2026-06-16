@@ -23,6 +23,7 @@ timeout = 180
     writesPerRound = 1
     rounds = 1
     assignmentPublicationChecks = 8
+    testProxyReplacement = true
     drainProbability = 1.0
     delayBetweenRounds = 0.0
     operationTimeout = 60.0

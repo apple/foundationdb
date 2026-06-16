@@ -25,7 +25,9 @@
 #include <utility>
 #include <vector>
 
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/NativeCdc.h"
+#include "fdbclient/SystemData.h"
 #include "fdbserver/tester/workloads.h"
 #include "flow/DeterministicRandom.h"
 
@@ -57,6 +59,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	int writesPerRound;
 	int rounds;
 	int assignmentPublicationChecks;
+	bool testProxyReplacement;
 	double drainProbability;
 	double delayBetweenRounds;
 	double operationTimeout;
@@ -93,6 +96,60 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		std::vector<std::pair<Key, Value>> values;
 		values.emplace_back(std::move(key), std::move(value));
 		co_return co_await writeValues(cx, std::move(values));
+	}
+
+	Future<Void> consumeThroughValue(Reference<NativeCdcConsumer> consumer, Version committed, Key key, Value value) {
+		bool observed = false;
+		const double deadline = now() + operationTimeout;
+		while (consumer->position().lastConsumedVersion < committed) {
+			const Version previous = consumer->position().lastConsumedVersion;
+			CDCConsumeReply reply = co_await timeoutError(consumer->consume(), operationTimeout);
+			if (reply.lastConsumedVersion == previous) {
+				ASSERT_LT(now(), deadline);
+				co_await delay(0.1);
+				continue;
+			}
+			ASSERT_GT(reply.lastConsumedVersion, previous);
+			for (const auto& versioned : reply.mutations) {
+				ASSERT_GT(versioned.version, previous);
+				ASSERT_LE(versioned.version, reply.lastConsumedVersion);
+				for (const auto& mutation : versioned.mutations) {
+					if (versioned.version == committed && mutation.type == MutationRef::SetValue &&
+					    mutation.param1 == key && mutation.param2 == value) {
+						observed = true;
+					}
+				}
+			}
+			co_await timeoutError(consumer->acknowledge(), operationTimeout);
+		}
+		ASSERT(observed);
+	}
+
+	Future<CDCProxyInterface> waitForAssignedProxy(Database cx,
+	                                               CDCStreamId streamId,
+	                                               Optional<UID> previousProxy = Optional<UID>()) {
+		while (true) {
+			Future<Void> changed = cx->clientInfo->onChange();
+			Optional<CDCProxyInterface> assignedProxy;
+			{
+				const ClientDBInfo& clientInfo = cx->clientInfo->get();
+				auto assignment = clientInfo.streamToCDCProxyId.find(streamId);
+				if (assignment != clientInfo.streamToCDCProxyId.end() &&
+				    (!previousProxy.present() || assignment->second != previousProxy.get())) {
+					auto proxy = std::find_if(
+					    clientInfo.cdcProxies.begin(),
+					    clientInfo.cdcProxies.end(),
+					    [&](CDCProxyInterface const& candidate) { return candidate.id() == assignment->second; });
+					if (proxy != clientInfo.cdcProxies.end()) {
+						assignedProxy = *proxy;
+					}
+				}
+			}
+			if (assignedProxy.present()) {
+				co_return assignedProxy.get();
+			}
+			co_await changed;
+		}
 	}
 
 	Future<Void> addStream(Database cx) {
@@ -153,6 +210,72 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		ASSERT_EQ(futureAcknowledgeRejected, true);
 
 		co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
+
+		bool staleAcknowledgeRejected = false;
+		try {
+			co_await timeoutError(resumeNativeCdcConsumer(cx, CDCCursor(streamId, 0))->acknowledge(), operationTimeout);
+		} catch (Error& e) {
+			if (e.code() != error_code_client_invalid_operation) {
+				throw;
+			}
+			staleAcknowledgeRejected = true;
+		}
+		ASSERT_EQ(staleAcknowledgeRejected, true);
+	}
+
+	Future<Void> validateClearClipping(Database cx) {
+		const Key name = "native-cdc-e2e/clear-stream"_sr;
+		const KeyRange keys(KeyRangeRef("native-cdc-e2e/clear/c"_sr, "native-cdc-e2e/clear/m"_sr));
+		const KeyRange lowerClear(KeyRangeRef("native-cdc-e2e/clear/a"_sr, "native-cdc-e2e/clear/f"_sr));
+		const KeyRange upperClear(KeyRangeRef("native-cdc-e2e/clear/j"_sr, "native-cdc-e2e/clear/z"_sr));
+		const KeyRange expectedLower(KeyRangeRef(keys.begin, lowerClear.end));
+		const KeyRange expectedUpper(KeyRangeRef(upperClear.begin, keys.end));
+
+		co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout);
+		Reference<NativeCdcConsumer> consumer =
+		    co_await timeoutError(createNativeCdcConsumer(cx, name), operationTimeout);
+
+		Version committed;
+		Transaction tr(cx);
+		while (true) {
+			Error err;
+			try {
+				tr.clear(lowerClear);
+				tr.clear(upperClear);
+				co_await tr.commit();
+				committed = tr.getCommittedVersion();
+				break;
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
+
+		bool sawLower = false;
+		bool sawUpper = false;
+		while (consumer->position().lastConsumedVersion < committed) {
+			CDCConsumeReply reply = co_await timeoutError(consumer->consume(), operationTimeout);
+			for (const auto& versioned : reply.mutations) {
+				if (versioned.version != committed) {
+					continue;
+				}
+				for (const auto& mutation : versioned.mutations) {
+					ASSERT_EQ(mutation.type, MutationRef::ClearRange);
+					const KeyRangeRef cleared(mutation.param1, mutation.param2);
+					if (cleared.begin == expectedLower.begin && cleared.end == expectedLower.end) {
+						sawLower = true;
+					} else if (cleared.begin == expectedUpper.begin && cleared.end == expectedUpper.end) {
+						sawUpper = true;
+					} else {
+						ASSERT(false);
+					}
+				}
+			}
+			co_await timeoutError(consumer->acknowledge(), operationTimeout);
+		}
+		ASSERT(sawLower);
+		ASSERT(sawUpper);
+		co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
 	}
 
 	Future<Void> validateAssignmentPublicationOnce(Database cx, int check) {
@@ -169,36 +292,57 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		ASSERT_EQ(consumer->position().streamId, streamId);
 
 		const Version committed = co_await writeValue(cx, key, value);
-		bool observed = false;
-		const double deadline = now() + operationTimeout;
-		while (!observed && consumer->position().lastConsumedVersion < committed) {
-			const Version previous = consumer->position().lastConsumedVersion;
-			CDCConsumeReply reply = co_await timeoutError(consumer->consume(), operationTimeout);
-			if (reply.lastConsumedVersion == previous) {
-				ASSERT_LT(now(), deadline);
-				co_await delay(0.1);
-				continue;
-			}
-			ASSERT_GT(reply.lastConsumedVersion, previous);
-			for (const auto& versioned : reply.mutations) {
-				ASSERT_GT(versioned.version, previous);
-				ASSERT_LE(versioned.version, reply.lastConsumedVersion);
-				for (const auto& mutation : versioned.mutations) {
-					if (versioned.version == committed && mutation.type == MutationRef::SetValue &&
-					    mutation.param1 == key && mutation.param2 == value) {
-						observed = true;
-					}
-				}
-			}
-			co_await timeoutError(consumer->acknowledge(), operationTimeout);
-		}
-		ASSERT(observed);
+		co_await consumeThroughValue(consumer, committed, key, value);
 		co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
 	}
 
 	Future<Void> validateAssignmentPublication(Database cx) {
 		for (int check = 0; check < assignmentPublicationChecks; ++check) {
 			co_await validateAssignmentPublicationOnce(cx, check);
+		}
+	}
+
+	Future<Void> validateProxyReplacement(Database cx) {
+		const Key name = "native-cdc-e2e/proxy-replacement"_sr;
+		const KeyRange keys(
+		    KeyRangeRef("native-cdc-e2e/proxy-replacement/"_sr, "native-cdc-e2e/proxy-replacement0"_sr));
+		const Key key = "native-cdc-e2e/proxy-replacement/value"_sr;
+		const Value value = "replacement-value"_sr;
+
+		const CDCStreamId streamId =
+		    co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout);
+		Reference<NativeCdcConsumer> consumer =
+		    co_await timeoutError(createNativeCdcConsumer(cx, name), operationTimeout);
+		CDCProxyInterface original = co_await timeoutError(waitForAssignedProxy(cx, streamId), operationTimeout);
+		co_await timeoutError(original.haltForTesting.getReply(HaltCDCProxyRequest()), operationTimeout);
+		CDCProxyInterface replacement =
+		    co_await timeoutError(waitForAssignedProxy(cx, streamId, original.id()), operationTimeout);
+		ASSERT_NE(original.id(), replacement.id());
+
+		const Version committed = co_await writeValue(cx, key, value);
+		co_await consumeThroughValue(consumer, committed, key, value);
+		co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
+	}
+
+	Future<Void> waitForRetiredTagCleanup(Database cx) {
+		Transaction tr(cx);
+		while (true) {
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				RangeResult markers = co_await tr.getRange(cdcRetiredTagPopKeys, 1);
+				RangeResult versions = co_await tr.getRange(cdcRetiredTagPopVersionKeys, 1);
+				if (markers.empty() && versions.empty()) {
+					co_return;
+				}
+				tr.reset();
+				co_await delay(0.1);
+				continue;
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr.onError(err);
 		}
 	}
 
@@ -269,7 +413,11 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 
 	Future<Void> run(Database cx) {
 		co_await validatePublicLifecycle(cx);
+		co_await validateClearClipping(cx);
 		co_await validateAssignmentPublication(cx);
+		if (testProxyReplacement) {
+			co_await validateProxyReplacement(cx);
+		}
 		Version mostRecentWrite = invalidVersion;
 		for (int round = 0; round < rounds; ++round) {
 			if (round > 0 && static_cast<int>(streams.size()) > minStreamCount &&
@@ -309,6 +457,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			co_await timeoutError(removeNativeCdcStreamClient(cx, streams.back().name), operationTimeout);
 			streams.pop_back();
 		}
+		co_await timeoutError(waitForRetiredTagCleanup(cx), operationTimeout);
 	}
 
 public:
@@ -322,6 +471,7 @@ public:
 		writesPerRound = getOption(options, "writesPerRound"_sr, 5);
 		rounds = getOption(options, "rounds"_sr, 30);
 		assignmentPublicationChecks = getOption(options, "assignmentPublicationChecks"_sr, 0);
+		testProxyReplacement = getOption(options, "testProxyReplacement"_sr, false);
 		drainProbability = getOption(options, "drainProbability"_sr, 0.25);
 		delayBetweenRounds = getOption(options, "delayBetweenRounds"_sr, 0.5);
 		operationTimeout = getOption(options, "operationTimeout"_sr, 120.0);

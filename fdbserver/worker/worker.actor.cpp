@@ -2145,6 +2145,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		DUMPTOKEN(recruited.master);
 		DUMPTOKEN(recruited.commitProxy);
 		DUMPTOKEN(recruited.grvProxy);
+		DUMPTOKEN(recruited.cdcProxy);
 		DUMPTOKEN(recruited.resolver);
 		DUMPTOKEN(recruited.storage);
 		DUMPTOKEN(recruited.debugPing);
@@ -2866,6 +2867,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				startRole(Role::CDC_PROXY, recruited.id(), interf.id(), details);
 
 				DUMPTOKEN(recruited.consume);
+				DUMPTOKEN(recruited.registerStream);
+				DUMPTOKEN(recruited.removeStream);
 				DUMPTOKEN(recruited.ack);
 				DUMPTOKEN(recruited.waitFailure);
 				DUMPTOKEN(recruited.haltForTesting);

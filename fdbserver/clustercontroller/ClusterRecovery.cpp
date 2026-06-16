@@ -266,7 +266,7 @@ Future<Void> ensureCDCProxies(Reference<ClusterRecoveryData> self, RecruitFromCo
 	}
 
 	std::vector<CDCProxyInterface> newRecruits = co_await getAll(initializationReplies);
-	TraceEvent("CDCProxyInitializationComplete", self->dbgid).log();
+	TraceEvent("CDCProxyInitializationComplete", self->dbgid).detail("Count", newRecruits.size());
 	self->controllerData->db.cdcProxies = std::move(newRecruits);
 	self->registrationTrigger.trigger();
 }
@@ -1242,7 +1242,6 @@ Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	    .detail("Status", RecoveryStatus::names[RecoveryStatus::initializing_transaction_servers])
 	    .detail("CommitProxies", recruits.commitProxies.size())
 	    .detail("GrvProxies", recruits.grvProxies.size())
-	    .detail("CDCProxies", recruits.grvProxies.size())
 	    .detail("TLogs", recruits.tLogs.size())
 	    .detail("Resolvers", recruits.resolvers.size())
 	    .detail("SatelliteTLogs", recruits.satelliteTLogs.size())
@@ -1433,6 +1432,13 @@ Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> self,
 		if (activeCdcStreams.contains(tagHistory.streamId)) {
 			self->allTags.push_back(tagHistory.tag);
 		}
+	}
+
+	// Final pops are durable recovery work. Preserve their tags even after the
+	// corresponding active stream history has been removed.
+	RangeResult rawRetiredCdcTags = co_await self->txnStateStore->readRange(cdcRetiredTagPopKeys);
+	for (auto& kv : rawRetiredCdcTags) {
+		self->allTags.push_back(decodeCDCRetiredTagPopKey(kv.key));
 	}
 
 	uniquify(self->allTags);
