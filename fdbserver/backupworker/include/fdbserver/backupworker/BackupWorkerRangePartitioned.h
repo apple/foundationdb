@@ -1,5 +1,5 @@
 /*
- * FDBServerUnitTestMain.cpp
+ * BackupWorkerRangePartitioned.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,21 +18,14 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/simulator.h"
-#include "fdbserver/core/Knobs.h"
-#include "flow/UnitTestRunner.h"
+#pragma once
 
-#ifndef FDBSERVER_UNIT_TEST_SUITE
-#error "FDBSERVER_UNIT_TEST_SUITE must be defined"
-#endif
+#include "fdbserver/core/BackupInterface.h"
+#include "flow/flow.h"
 
-namespace {
-Future<Void> initializeSimulation() {
-	resetServerKnobs(Randomize::True, IsSimulated::True);
-	return startUnitTestSimulator();
-}
-} // namespace
+struct InitializeRangeBackupRequest;
+struct ServerDBInfo;
 
-int main(int argc, char** argv) {
-	return runUnitTests(argc, argv, UnitTestRunnerConfig(FDBSERVER_UNIT_TEST_SUITE, initializeSimulation));
-}
+Future<Void> backupWorkerRangePartitioned(BackupInterface bi,
+                                          InitializeRangeBackupRequest req,
+                                          Reference<AsyncVar<ServerDBInfo> const> db);

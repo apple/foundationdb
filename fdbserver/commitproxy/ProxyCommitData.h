@@ -65,6 +65,10 @@ struct ProxyStats {
 	Counter conflictRanges;
 	Counter keyServerLocationIn, keyServerLocationOut, keyServerLocationErrors;
 	Counter txnExpensiveClearCostEstCount;
+	// rejectMutationsForReadLockOnRange takes the fast path (no locks held -> early return)
+	// vs the slow path (per-mutation lock check). Observable in production via ProxyMetrics
+	// to confirm the no-locks-active optimization fires when expected.
+	Counter rangeLockFastPath, rangeLockSlowPath;
 	Version lastCommitVersionAssigned;
 
 	LatencySample commitLatencySample;
@@ -90,6 +94,7 @@ struct ProxyStats {
 	Reference<Histogram> processingMutationDist;
 	Reference<Histogram> tlogLoggingDist;
 	Reference<Histogram> replyCommitDist;
+	Reference<Histogram> transactionSizeDist;
 
 	// These metrics are only logged as part of `ProxyDetailedMetrics`. Since
 	// the detailed proxy metrics combine data from different sources, we can't
@@ -128,7 +133,8 @@ struct ProxyStats {
 	    mutations("Mutations", cc), conflictRanges("ConflictRanges", cc),
 	    keyServerLocationIn("KeyServerLocationIn", cc), keyServerLocationOut("KeyServerLocationOut", cc),
 	    keyServerLocationErrors("KeyServerLocationErrors", cc),
-	    txnExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), lastCommitVersionAssigned(0),
+	    txnExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), rangeLockFastPath("RangeLockFastPath", cc),
+	    rangeLockSlowPath("RangeLockSlowPath", cc), lastCommitVersionAssigned(0),
 	    commitLatencySample("CommitLatencyMetrics",
 	                        id,
 	                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -157,7 +163,8 @@ struct ProxyStats {
 	    processingMutationDist(
 	        Histogram::getHistogram("CommitProxy"_sr, "ProcessingMutation"_sr, Histogram::Unit::milliseconds)),
 	    tlogLoggingDist(Histogram::getHistogram("CommitProxy"_sr, "TlogLogging"_sr, Histogram::Unit::milliseconds)),
-	    replyCommitDist(Histogram::getHistogram("CommitProxy"_sr, "ReplyCommit"_sr, Histogram::Unit::milliseconds)) {
+	    replyCommitDist(Histogram::getHistogram("CommitProxy"_sr, "ReplyCommit"_sr, Histogram::Unit::milliseconds)),
+	    transactionSizeDist(Histogram::getHistogram("CommitProxy"_sr, "TransactionSize"_sr, Histogram::Unit::bytes)) {
 		specialCounter(cc, "LastAssignedCommitVersion", [this]() { return this->lastCommitVersionAssigned; });
 		specialCounter(cc, "Version", [pVersion]() { return pVersion->get(); });
 		specialCounter(cc, "CommittedVersion", [pCommittedVersion]() { return pCommittedVersion->get(); });
@@ -343,21 +350,30 @@ struct RangeLock : ApplyMetadataRangeLock {
 public:
 	explicit RangeLock(ProxyCommitData* const pProxyCommitData) : pProxyCommitData(pProxyCommitData) {
 		coreMap.insert(allKeys, RangeLockStateSet());
+		// anyExclusiveLockHeld_ stays false: the initial all-keys entry is empty.
 	}
 
 	~RangeLock() override = default;
 
 	bool pendingRequest() const override { return currentRangeLockStartKey.present(); }
 
+	// Cheap query for the commit hot path. True when at least one
+	// ExclusiveReadLock is currently held over a sub-range. When this is
+	// false, rejectMutationsForReadLockOnRange skips its per-mutation loop.
+	bool anyExclusiveLockHeld() const { return anyExclusiveLockHeld_; }
+
 	void initKeyPoint(const Key& key, const Value& value) {
 		ASSERT(pProxyCommitData != nullptr && pProxyCommitData->rangeLockEnabled());
-		// TraceEvent(SevDebug, "RangeLockRangeOps").detail("Ops", "Init").detail("Key", key);
 		if (!value.empty()) {
-			coreMap.rawInsert(key, decodeRangeLockStateSet(value));
+			RangeLockStateSet decoded = decodeRangeLockStateSet(value);
+			coreMap.rawInsert(key, decoded);
+			if (decoded.isLockedFor(RangeLockType::ExclusiveReadLock)) {
+				// Recovery init is monotonic-up: it only adds state.
+				anyExclusiveLockHeld_ = true;
+			}
 		} else {
 			coreMap.rawInsert(key, RangeLockStateSet());
 		}
-		return;
 	}
 
 	void setPendingRequest(const Key& startKey, const RangeLockStateSet& lockSetState) override {
@@ -374,13 +390,13 @@ public:
 		ASSERT(currentRangeLockStartKey.get().first < endKey);
 		KeyRange lockRange = Standalone(KeyRangeRef(currentRangeLockStartKey.get().first, endKey));
 		RangeLockStateSet lockSetState = currentRangeLockStartKey.get().second;
-		/* TraceEvent(SevDebug, "RangeLockRangeOps")
-		    .detail("Ops", "Update")
-		    .detail("Range", lockRange)
-		    .detail("Status", lockSetState.toString()); */
 		coreMap.insert(lockRange, lockSetState);
 		coreMap.coalesce(allKeys);
 		currentRangeLockStartKey.reset();
+		// This path can transition locked -> unlocked when an empty
+		// RangeLockStateSet is inserted over a previously locked range, so we
+		// must rescan after coalesce to keep anyExclusiveLockHeld_ accurate.
+		recomputeAnyExclusiveLockHeld();
 		return;
 	}
 
@@ -391,24 +407,31 @@ public:
 		}
 		for (auto lockRange : coreMap.intersectingRanges(range)) {
 			if (lockRange.value().isValid() && lockRange.value().isLockedFor(RangeLockType::ExclusiveReadLock)) {
-				/*TraceEvent(SevDebug, "RangeLockRangeOps")
-				    .detail("Ops", "Check")
-				    .detail("Range", range)
-				    .detail("Status", "Reject");*/
 				return true;
 			}
 		}
-		/*TraceEvent(SevDebug, "RangeLockRangeOps")
-		    .detail("Ops", "Check")
-		    .detail("Range", range)
-		    .detail("Status", "Accept");*/
 		return false;
 	}
 
 private:
+	// Full rescan; only called on lock add/remove (rare, per-bulkload-job),
+	// not per-commit. Cost = O(coreMap entries), bounded by active lock count.
+	void recomputeAnyExclusiveLockHeld() {
+		for (auto it : coreMap.ranges()) {
+			if (it.value().isValid() && it.value().isLockedFor(RangeLockType::ExclusiveReadLock)) {
+				anyExclusiveLockHeld_ = true;
+				return;
+			}
+		}
+		anyExclusiveLockHeld_ = false;
+	}
+
 	Optional<std::pair<Key, RangeLockStateSet>> currentRangeLockStartKey;
 	KeyRangeMap<RangeLockStateSet> coreMap;
 	ProxyCommitData* const pProxyCommitData;
+	// Per-proxy cached summary of coreMap. Each proxy derives this from the
+	// same txnStateStore content, so all proxies converge to the same value.
+	bool anyExclusiveLockHeld_ = false;
 };
 
 inline ApplyMetadataProxyContext ProxyCommitData::getApplyMetadataProxyContext() {

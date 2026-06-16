@@ -90,6 +90,13 @@ else()
   set(WITH_C_BINDING OFF)
 endif()
 
+# mako is a benchmark client built on top of the C binding. Off by default
+# because nothing in the default build depends on it; opt in by configuring
+# CMake with -DBUILD_MAKO=ON. build-images.sh auto-detects packages/bin/mako
+# and includes it in the docker image when present. Also needed by the PGO
+# generate_profile target.
+option(BUILD_MAKO "build the mako benchmark client" OFF)
+
 ################################################################################
 # Java Bindings
 ################################################################################

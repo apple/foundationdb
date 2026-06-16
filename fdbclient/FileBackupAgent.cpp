@@ -4599,8 +4599,16 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 				    .detail("RestoreUID", restore.getUid())
 				    .detail("Owner", "BulkLoad");
 
-				// Note: BulkLoad configuration validation (shard_encode_location_metadata, enable_read_lock_on_range)
-				// is performed by the BulkLoad system on the server side when the job is submitted.
+				// TODO(BulkLoad): no precondition validation happens here today.
+				// submitBulkLoadJob() does not check that the cluster has
+				// shard_encode_location_metadata=1 and enable_read_lock_on_range=1, nor
+				// that the storage engine supports SST ingestion. If those preconditions
+				// are not met, setBulkLoadMode + submitBulkLoadJob both succeed but the
+				// Data Distributor never dispatches any tasks, leaving the restore in
+				// "State: running, Tasks: 0/0" indefinitely. Validation needs to live
+				// somewhere with real cluster-side knob visibility (DD or a commit proxy);
+				// it cannot be done from fdbclient because SERVER_KNOBS here are this
+				// process's local defaults, not the running cluster's actual config.
 
 				// Read the original BulkLoad mode from config (saved by StartFullRestoreTaskFunc before task creation).
 				// This is persisted in the database so we can restore the correct mode even after a crash.
@@ -7397,7 +7405,9 @@ public:
 			oldRestore.clear(tr);
 		}
 
-		if (!onlyApplyMutationLogs) {
+		// Bulkload restore (useRangeFileRestore=false) overwrites each shard via the range-lock
+		// mechanism in DD, so a non-empty destination is expected and required — skip the precheck.
+		if (!onlyApplyMutationLogs && useRangeFileRestore) {
 			int index{ 0 };
 			for (index = 0; index < restoreRanges.size(); index++) {
 				KeyRange restoreIntoRange = KeyRangeRef(restoreRanges[index].begin, restoreRanges[index].end)
@@ -7982,10 +7992,14 @@ public:
 					}
 					statusText += format("Snapshot Mode: %s\n", snapshotModeText.c_str());
 
-					// Check if backup is BulkLoad compatible (has bulkdump_data/)
-					Optional<std::string> bulkDumpJobIdOpt = co_await config.bulkDumpJobId().get(tr);
-					bool bulkLoadCompatible = bulkDumpJobIdOpt.present() && !bulkDumpJobIdOpt.get().empty();
-					statusText += format("BulkLoad Compatible: %s\n", bulkLoadCompatible ? "yes" : "no");
+					// Check if backup is BulkLoad compatible (has bulkdump_data/).
+					// In rangefile mode no bulkdump task ever runs, so the answer is
+					// always "no" and the line carries no information — skip it.
+					if (snapshotModeValue != 0) {
+						Optional<std::string> bulkDumpJobIdOpt = co_await config.bulkDumpJobId().get(tr);
+						bool bulkLoadCompatible = bulkDumpJobIdOpt.present() && !bulkDumpJobIdOpt.get().empty();
+						statusText += format("BulkLoad Compatible: %s\n", bulkLoadCompatible ? "yes" : "no");
+					}
 
 					bool showBulkDump = (snapshotModeValue == 1 || snapshotModeValue == 2);
 					bool showRangeFile = (snapshotModeValue == 0 || snapshotModeValue == 2);

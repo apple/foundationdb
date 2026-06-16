@@ -278,7 +278,11 @@ Future<int> spawnProcess(std::string path,
 }
 #endif
 
-static Future<int> execHelperImpl(ExecCmdValueString* execArg, UID snapUID, std::string folder, std::string role) {
+static Future<int> execHelperImpl(ExecCmdValueString* execArg,
+                                  UID snapUID,
+                                  std::string folder,
+                                  std::string role,
+                                  Optional<std::string> tLogSpillFolder) {
 	Standalone<StringRef> uidStr(snapUID.toString());
 	int err = 0;
 	Future<int> cmdErr;
@@ -296,6 +300,10 @@ static Future<int> execHelperImpl(ExecCmdValueString* execArg, UID snapUID, std:
 		// get additional arguments
 		paramList.push_back("--path");
 		paramList.push_back(folder);
+		if (tLogSpillFolder.present()) {
+			paramList.push_back("--tlog-spill-path");
+			paramList.push_back(tLogSpillFolder.get());
+		}
 		const char* version = FDB_VT_VERSION;
 		paramList.push_back("--version");
 		paramList.push_back(version);
@@ -332,8 +340,12 @@ static Future<int> execHelperImpl(ExecCmdValueString* execArg, UID snapUID, std:
 	co_return err;
 }
 
-Future<int> execHelper(ExecCmdValueString* execArg, UID snapUID, std::string folder, std::string role) {
-	return execHelperImpl(execArg, snapUID, folder, role);
+Future<int> execHelper(ExecCmdValueString* execArg,
+                       UID snapUID,
+                       std::string folder,
+                       std::string role,
+                       Optional<std::string> tLogSpillFolder) {
+	return execHelperImpl(execArg, snapUID, folder, role, tLogSpillFolder);
 }
 
 struct StorageVersionInfo {

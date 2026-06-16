@@ -65,13 +65,10 @@ struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>
 	using Locations = MultiInterface<ReferencedInterface<StorageServerInterface>>;
 	explicit LocationInfo(const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& v)
 	  : Locations(v) {}
-	LocationInfo(const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& v, bool hasCaches)
-	  : Locations(v), hasCaches(hasCaches) {}
 	LocationInfo(const LocationInfo&) = delete;
 	LocationInfo(LocationInfo&&) = delete;
 	LocationInfo& operator=(const LocationInfo&) = delete;
 	LocationInfo& operator=(LocationInfo&&) = delete;
-	bool hasCaches = false;
 	Reference<Locations> locations() { return Reference<Locations>::addRef(this); }
 };
 
@@ -547,8 +544,6 @@ public:
 
 	UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaults;
 
-	Future<Void> cacheListMonitor;
-	AsyncTrigger updateCache;
 	std::vector<std::unique_ptr<SpecialKeyRangeReadImpl>> specialKeySpaceModules;
 	std::unique_ptr<SpecialKeySpace> specialKeySpace;
 	void registerSpecialKeysImpl(SpecialKeySpace::MODULE module,

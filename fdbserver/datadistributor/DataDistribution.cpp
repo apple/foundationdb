@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <algorithm>
+
 #include "fdbclient/Audit.h"
 #include "fdbclient/AuditUtils.h"
 #include "fdbclient/BulkDumping.h"
@@ -85,9 +87,42 @@ std::set<int> const& normalDDQueueErrors() {
 		                    error_code_broken_promise,
 		                    error_code_data_move_cancelled,
 		                    error_code_data_move_dest_team_not_found,
+		                    error_code_dd_config_changed,
 		                    error_code_finish_move_keys_too_many_retries,
 		                    error_code_start_move_keys_too_many_retries };
 	return s;
+}
+
+struct DataDistributorDcIds {
+	std::vector<Optional<Key>> primary;
+	std::vector<Optional<Key>> remote;
+};
+
+// Selects the active primary DC and the first other configured DC, falling back to configuration order.
+DataDistributorDcIds getDataDistributorDcIds(const std::vector<RegionInfo>& regions, Optional<Key> activePrimaryDcId) {
+	DataDistributorDcIds dcIds;
+	if (regions.empty()) {
+		return dcIds;
+	}
+
+	auto primaryRegion = regions.begin();
+	if (activePrimaryDcId.present()) {
+		auto activeRegion = std::find_if(regions.begin(), regions.end(), [&](const RegionInfo& region) {
+			return region.dcId == activePrimaryDcId.get();
+		});
+		if (activeRegion != regions.end()) {
+			primaryRegion = activeRegion;
+		}
+	}
+
+	dcIds.primary.push_back(primaryRegion->dcId);
+	for (auto region = regions.begin(); region != regions.end(); ++region) {
+		if (region != primaryRegion) {
+			dcIds.remote.push_back(region->dcId);
+			break;
+		}
+	}
+	return dcIds;
 }
 
 } // anonymous namespace
@@ -428,6 +463,7 @@ Future<UID> launchAudit(Reference<DataDistributor> self,
                         KeyValueStoreType auditStorageEngineType);
 Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req);
 Future<Void> periodicAuditLocationMetadata(Reference<DataDistributor> self);
+Future<Void> monitorShardEncodeKnob(UID ddId);
 void loadAndDispatchAudit(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
 Future<Void> dispatchAuditStorageServerShard(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
 Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> self,
@@ -586,15 +622,11 @@ public:
 	}
 
 	void initDcInfo() {
-		primaryDcId.clear();
-		remoteDcIds.clear();
-		const std::vector<RegionInfo>& regions = configuration.regions;
-		if (!configuration.regions.empty()) {
-			primaryDcId.push_back(regions[0].dcId);
-		}
-		if (configuration.regions.size() > 1) {
-			remoteDcIds.push_back(regions[1].dcId);
-		}
+		Optional<Key> activePrimaryDcId =
+		    txnProcessor->isMocked() ? Optional<Key>() : dbInfo->get().master.locality.dcId();
+		auto dcIds = getDataDistributorDcIds(configuration.regions, activePrimaryDcId);
+		primaryDcId = std::move(dcIds.primary);
+		remoteDcIds = std::move(dcIds.remote);
 	}
 
 	Future<Void> waitDataDistributorEnabled() const {
@@ -3048,6 +3080,8 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			actors.push_back(periodicAuditLocationMetadata(self));
 
+			actors.push_back(monitorShardEncodeKnob(self->ddId));
+
 			co_await waitForAll(actors);
 			ASSERT_WE_THINK(false);
 			co_return;
@@ -3122,6 +3156,22 @@ static std::set<int> const& normalDataDistributorErrors() {
 		s.insert(error_code_audit_storage_failed);
 	}
 	return s;
+}
+
+// Monitor SHARD_ENCODE_LOCATION_METADATA knob for changes. If flipped mid-run,
+// throw dd_config_changed to restart DD cleanly (preventing in-flight move actors
+// from hitting asserts due to knob/path mismatch).
+Future<Void> monitorShardEncodeKnob(UID ddId) {
+	bool initial = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA;
+	loop {
+		co_await delay(5.0);
+		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA != initial) {
+			TraceEvent(SevInfo, "DDShardEncodeKnobChanged", ddId)
+			    .detail("OldValue", initial)
+			    .detail("NewValue", SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+			throw dd_config_changed();
+		}
+	}
 }
 
 template <class Req>
@@ -5380,6 +5430,28 @@ TEST_CASE("/DataDistribution/StorageWiggler/Order") {
 		ASSERT(id == correctOrder[i]);
 	}
 	ASSERT(!wiggler.getNextServerId().present());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Initialization/DcIds") {
+	RegionInfo configuredPrimary;
+	configuredPrimary.dcId = "primary"_sr;
+	RegionInfo configuredRemote;
+	configuredRemote.dcId = "remote"_sr;
+	std::vector<RegionInfo> regions{ configuredPrimary, configuredRemote };
+
+	auto dcIds = getDataDistributorDcIds(regions, Optional<Key>("primary"_sr));
+	ASSERT(dcIds.primary == std::vector<Optional<Key>>{ Optional<Key>("primary"_sr) });
+	ASSERT(dcIds.remote == std::vector<Optional<Key>>{ Optional<Key>("remote"_sr) });
+
+	dcIds = getDataDistributorDcIds(regions, Optional<Key>("remote"_sr));
+	ASSERT(dcIds.primary == std::vector<Optional<Key>>{ Optional<Key>("remote"_sr) });
+	ASSERT(dcIds.remote == std::vector<Optional<Key>>{ Optional<Key>("primary"_sr) });
+
+	dcIds = getDataDistributorDcIds(regions, Optional<Key>("unknown"_sr));
+	ASSERT(dcIds.primary == std::vector<Optional<Key>>{ Optional<Key>("primary"_sr) });
+	ASSERT(dcIds.remote == std::vector<Optional<Key>>{ Optional<Key>("remote"_sr) });
+
 	return Void();
 }
 

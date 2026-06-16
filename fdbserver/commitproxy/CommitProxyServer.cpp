@@ -279,6 +279,7 @@ Future<Void> commitBatcher(ProxyCommitData* commitData,
 					    .detail("MemLimit", memBytesLimit);
 					continue;
 				}
+				commitData->stats.transactionSizeDist->sample(bytes);
 
 				if (bytes > FLOW_KNOBS->PACKET_WARNING) {
 					TraceEvent(SevWarn, "LargeTransaction")
@@ -1308,6 +1309,13 @@ void rejectMutationsForReadLockOnRange(CommitBatchContext* self) {
 	ASSERT(self->rangeLockEnabled());
 	ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
 	ASSERT(pProxyCommitData->rangeLock != nullptr);
+	// Fast path: no exclusive locks held -> nothing to check, skip the
+	// per-mutation loop entirely. Steady state when no bulkload is running.
+	if (!pProxyCommitData->rangeLock->anyExclusiveLockHeld()) {
+		++pProxyCommitData->stats.rangeLockFastPath;
+		return;
+	}
+	++pProxyCommitData->stats.rangeLockSlowPath;
 	std::vector<CommitTransactionRequest>& trs = self->trs;
 	for (int i = self->transactionNum; i < trs.size(); i++) {
 		if (self->committed[i] != ConflictBatchStatus::TransactionCommitted) {

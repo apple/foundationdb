@@ -110,6 +110,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_DATABASE, "-d", SO_REQ_SEP },
 	                                  { OPT_TRACE, "--log", SO_NONE },
 	                                  { OPT_TRACE_DIR, "--log-dir", SO_REQ_SEP },
+	                                  { OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
 	                                  { OPT_LOGGROUP, "--log-group", SO_REQ_SEP },
 	                                  { OPT_TIMEOUT, "--timeout", SO_REQ_SEP },
 	                                  { OPT_EXEC, "--exec", SO_REQ_SEP },
@@ -480,7 +481,8 @@ static void printProgramUsage(const char* name) {
 	       "                 then `%s'.\n",
 	       platform::getDefaultClusterFilePath().c_str());
 	printf("  --log          Enables trace file logging for the CLI session.\n"
-	       "  --log-dir PATH Specifies the output directory for trace files. If\n"
+	       "  --log-dir PATH, --logdir PATH\n"
+	       "                 Specifies the output directory for trace files. If\n"
 	       "                 unspecified, defaults to the current directory. Has\n"
 	       "                 no effect unless --log is specified.\n"
 	       "  --log-group LOG_GROUP\n"
@@ -1620,6 +1622,14 @@ Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterConnecti
 					UID jobId = co_await makeInterruptable(bulkDumpCommandActor(localDb, tokens));
 					if (jobId.isValid()) {
 						printf("Received Job ID: %s\n", jobId.toString().c_str());
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "rangelock")) {
+					bool _result = co_await makeInterruptable(rangeLockCommandActor(localDb, tokens));
+					if (!_result) {
+						is_error = true;
 					}
 					continue;
 				}

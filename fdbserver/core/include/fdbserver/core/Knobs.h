@@ -617,6 +617,7 @@ public:
 	int ROCKSDB_WRITEBATCH_PROTECTION_BYTES_PER_KEY;
 	int ROCKSDB_MEMTABLE_PROTECTION_BYTES_PER_KEY;
 	int ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY;
+	bool ROCKSDB_ENABLE_CACHE_USAGE_OVERRIDES;
 	bool ROCKSDB_ENABLE_NONDETERMINISM; // Whether rocksdb nondeterministic behavior should be enabled in simulation.
 	                                    // Note that turning this on in simulation could lead to non-deterministic runs
 	                                    // since we rely on rocksdb metadata. This knob also applies to sharded rocks
@@ -706,7 +707,11 @@ public:
 	double COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL;
 	double COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR;
 	double COMMIT_TRIGGER_DELAY;
-	bool ENABLE_READ_LOCK_ON_RANGE;
+	bool ENABLE_READ_LOCK_ON_RANGE; // Despite the name, this is a write-exclusion lock — commit proxies
+	                                // reject writes to a locked range, but reads are unaffected. The
+	                                // name reflects bulkload's perspective: "I'm ingesting data into
+	                                // this range, lock it so nobody else writes." Bulkload is currently
+	                                // the only consumer.
 
 	double RESOLVER_COALESCE_TIME;
 	int BUGGIFIED_ROW_LIMIT;

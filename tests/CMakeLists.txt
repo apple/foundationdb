@@ -10,7 +10,6 @@ set(TEST_AGGREGATE_TRACES "NONE" CACHE STRING "Create aggregated trace files (NO
 set(TEST_LOG_FORMAT "xml" CACHE STRING "Format for test trace files (xml, json)")
 set(TEST_INCLUDE ".*" CACHE STRING "Include only tests that match the given regex")
 set(TEST_EXCLUDE ".^" CACHE STRING "Exclude all tests matching the given regex")
-set(SANITIZER_OPTIONS "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1;TSAN_OPTIONS=suppressions=${CMAKE_SOURCE_DIR}/contrib/tsan.suppressions;LSAN_OPTIONS=suppressions=${CMAKE_SOURCE_DIR}/contrib/lsan.suppressions" CACHE STRING "Environment variables setting sanitizer options")
 
 # For the restart test, prefer an installed fdbserver from an older stable release
 # to exercise upgrade paths from existing on-disk state. If it is unavailable,
@@ -187,6 +186,9 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/LowLatencySingleClog.toml IGNORE)
   add_fdb_test(TEST_FILES fast/MemoryLifetime.toml)
   add_fdb_test(TEST_FILES fast/MoveKeysCycle.toml)
+  add_fdb_test(TEST_FILES fast/CheckMetadataEncodingForward.toml)
+  add_fdb_test(TEST_FILES fast/CheckMetadataEncodingOldPath.toml)
+  add_fdb_test(TEST_FILES fast/ShardEncodeRollback.toml)
   add_fdb_test(TEST_FILES fast/MutationLogReaderCorrectness.toml)
 
   add_fdb_test(TEST_FILES fast/GetEstimatedRangeSize.toml)

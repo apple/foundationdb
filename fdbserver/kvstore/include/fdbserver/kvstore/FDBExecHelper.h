@@ -49,7 +49,11 @@ private:
 	StringRef binaryPath;
 };
 
-Future<int> execHelper(ExecCmdValueString* execArg, UID snapUID, std::string folder, std::string role);
+Future<int> execHelper(ExecCmdValueString* execArg,
+                       UID snapUID,
+                       std::string folder,
+                       std::string role,
+                       Optional<std::string> tLogSpillFolder = Optional<std::string>());
 void setDataVersion(UID uid, Version version);
 void setDataDurableVersion(UID uid, Version version);
 void printStorageVersionInfo();

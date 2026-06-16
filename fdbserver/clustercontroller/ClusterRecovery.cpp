@@ -692,6 +692,94 @@ static Future<Optional<Version>> getMinBackupVersion(Reference<ClusterRecoveryDa
 	}
 }
 
+static Future<Void> recruitRangeBackupWorkers(Reference<ClusterRecoveryData> self, Database cx) {
+	ASSERT(self->backupWorkers.size() > 0);
+
+	// Avoid race between a backup worker's save progress and the reads below.
+	co_await delay(SERVER_KNOBS->SECONDS_BEFORE_RECRUIT_BACKUP_WORKER);
+
+	LogEpoch epoch = self->cstate.myDBState.recoveryCount;
+	Reference<BackupProgress> backupProgress(
+	    new BackupProgress(self->dbgid, self->logSystem->getOldEpochRangeBackupTagsInfo()));
+	Future<Void> fBackupProgress = getBackupProgress(cx, self->dbgid, backupProgress, SevInfo);
+	std::vector<Future<InitializeRangeBackupReply>> initializationReplies;
+
+	int rangeBackupTags = self->logSystem->rangeBackupWorkerTags;
+	std::vector<std::pair<UID, Tag>> idsTags;
+	idsTags.reserve(rangeBackupTags);
+	for (int i = 0; i < rangeBackupTags; i++) {
+		idsTags.emplace_back(deterministicRandom()->randomUniqueID(), Tag(tagLocalityRangeBackup, i));
+	}
+
+	const Version startVersion = self->logSystem->getBackupStartVersion();
+	int i = 0;
+	for (; i < rangeBackupTags; i++) {
+		const auto& worker = self->backupWorkers[i % self->backupWorkers.size()];
+		InitializeRangeBackupRequest req(idsTags[i].first);
+		req.recruitedEpoch = epoch;
+		req.backupEpoch = epoch;
+		req.tag = idsTags[i].second;
+		req.totalTags = rangeBackupTags;
+		req.startVersion = startVersion;
+		TraceEvent("RangeBackupRecruitment", self->dbgid)
+		    .detail("RequestID", req.reqId)
+		    .detail("Tag", req.tag.toString())
+		    .detail("Epoch", epoch)
+		    .detail("BackupEpoch", epoch)
+		    .detail("StartVersion", req.startVersion);
+		initializationReplies.push_back(
+		    transformErrors(throwErrorOr(worker.rangeBackup.getReplyUnlessFailedFor(
+		                        req, SERVER_KNOBS->BACKUP_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
+		                    backup_worker_failed()));
+	}
+
+	Future<Optional<Version>> fMinVersion = getMinBackupVersion(self, cx);
+	co_await (fBackupProgress && success(fMinVersion));
+	Optional<Version> minVersion = fMinVersion.get();
+	TraceEvent("RangeBackupMinVersion", self->dbgid).detail("Version", minVersion.present() ? minVersion.get() : -1);
+
+	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> toRecruit =
+	    backupProgress->getUnfinishedRangePartitionedBackup();
+	for (const auto& [epochVersionTags, tagVersions] : toRecruit) {
+		const Version oldEpochEnd = std::get<1>(epochVersionTags);
+		if (!minVersion.present() || minVersion.get() + 1 >= oldEpochEnd) {
+			TraceEvent("SkipRangeBackupRecruitment", self->dbgid)
+			    .detail("MinVersion", minVersion.present() ? minVersion.get() : -1)
+			    .detail("Epoch", epoch)
+			    .detail("OldEpoch", std::get<0>(epochVersionTags))
+			    .detail("OldEpochEnd", oldEpochEnd);
+			continue;
+		}
+		for (const auto& [tag, version] : tagVersions) {
+			const auto& worker = self->backupWorkers[i % self->backupWorkers.size()];
+			i++;
+			InitializeRangeBackupRequest req(deterministicRandom()->randomUniqueID());
+			req.recruitedEpoch = epoch;
+			req.backupEpoch = std::get<0>(epochVersionTags);
+			req.tag = tag;
+			req.totalTags = std::get<2>(epochVersionTags);
+			req.startVersion = version; // savedVersion + 1
+			req.endVersion = std::get<1>(epochVersionTags) - 1;
+			TraceEvent("RangeBackupRecruitment", self->dbgid)
+			    .detail("RequestID", req.reqId)
+			    .detail("Tag", req.tag.toString())
+			    .detail("Epoch", epoch)
+			    .detail("BackupEpoch", req.backupEpoch)
+			    .detail("StartVersion", req.startVersion)
+			    .detail("EndVersion", req.endVersion.get());
+			initializationReplies.push_back(transformErrors(
+			    throwErrorOr(worker.rangeBackup.getReplyUnlessFailedFor(
+			        req, SERVER_KNOBS->BACKUP_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
+			    backup_worker_failed()));
+		}
+	}
+
+	std::vector<InitializeRangeBackupReply> newRecruits = co_await getAll(initializationReplies);
+	self->logSystem->setRangeBackupWorkers(newRecruits);
+	TraceEvent("RangeBackupRecruitmentDone", self->dbgid).detail("NumWorkers", newRecruits.size());
+	self->registrationTrigger.trigger();
+}
+
 static Future<Void> recruitBackupWorkers(Reference<ClusterRecoveryData> self, Database cx) {
 	ASSERT(!self->backupWorkers.empty());
 
@@ -701,7 +789,7 @@ static Future<Void> recruitBackupWorkers(Reference<ClusterRecoveryData> self, Da
 	LogEpoch epoch = self->cstate.myDBState.recoveryCount;
 	Reference<BackupProgress> backupProgress(
 	    new BackupProgress(self->dbgid, self->logSystem->getOldEpochLogRouterTagsInfo()));
-	Future<Void> gotProgress = getBackupProgress(cx, self->dbgid, backupProgress, SevInfo);
+	Future<Void> fBackupProgress = getBackupProgress(cx, self->dbgid, backupProgress, SevInfo);
 	std::vector<Future<InitializeBackupReply>> initializationReplies;
 
 	std::vector<std::pair<UID, Tag>> idsTags; // worker IDs and tags for current epoch
@@ -734,7 +822,7 @@ static Future<Void> recruitBackupWorkers(Reference<ClusterRecoveryData> self, Da
 	}
 
 	Future<Optional<Version>> fMinVersion = getMinBackupVersion(self, cx);
-	co_await (gotProgress && success(fMinVersion));
+	co_await (fBackupProgress && success(fMinVersion));
 	Optional<Version> minVersion = fMinVersion.get();
 	TraceEvent("MinBackupVersion", self->dbgid).detail("Version", minVersion.present() ? minVersion.get() : -1);
 
@@ -1912,6 +2000,8 @@ Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	self->addActor.send(configurationMonitor(self, cx));
 	if (self->configuration.backupWorkerEnabled) {
 		self->addActor.send(recruitBackupWorkers(self, cx));
+	} else if (self->configuration.rangeBackupWorkerEnabled) {
+		self->addActor.send(recruitRangeBackupWorkers(self, cx));
 	} else {
 		self->logSystem->setOldestBackupEpoch(self->cstate.myDBState.recoveryCount);
 	}

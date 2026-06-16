@@ -222,6 +222,20 @@ rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
 		bbOpts.whole_key_filtering = SERVER_KNOBS->ROCKSDB_BLOOM_WHOLE_KEY_FILTERING;
 	}
 
+	if (SERVER_KNOBS->ROCKSDB_ENABLE_CACHE_USAGE_OVERRIDES) {
+		bbOpts.cache_usage_options.options_overrides[rocksdb::CacheEntryRole::kCompressionDictionaryBuildingBuffer]
+		    .charged = rocksdb::CacheEntryRoleOptions::Decision::kEnabled;
+
+		bbOpts.cache_usage_options.options_overrides[rocksdb::CacheEntryRole::kFilterConstruction].charged =
+		    rocksdb::CacheEntryRoleOptions::Decision::kEnabled;
+
+		bbOpts.cache_usage_options.options_overrides[rocksdb::CacheEntryRole::kBlockBasedTableReader].charged =
+		    rocksdb::CacheEntryRoleOptions::Decision::kEnabled;
+
+		bbOpts.cache_usage_options.options_overrides[rocksdb::CacheEntryRole::kFileMetadata].charged =
+		    rocksdb::CacheEntryRoleOptions::Decision::kEnabled;
+	}
+
 	if (SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE > 0) {
 		bbOpts.block_cache =
 		    rocksdb::NewLRUCache(SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE,
