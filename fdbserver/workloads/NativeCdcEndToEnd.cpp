@@ -457,8 +457,9 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 
 	Future<Void> validateConsumeLeaseAndExclusivity(Database cx, CDCProxyInterface proxy) {
 		ASSERT(!streams.empty());
-		const CDCCursor cursor = streams.front().consumer->position();
-		Reference<NativeCdcConsumer> idleConsumer = resumeNativeCdcConsumer(cx, cursor);
+		// Acknowledgements advance one durable frontier for the whole stream. Exercise cancellation and exclusivity on
+		// the tracked consumer so later workload phases do not retain a cursor behind acknowledgements made here.
+		Reference<NativeCdcConsumer> idleConsumer = streams.front().consumer;
 		Future<CDCConsumeReply> idleConsume;
 		co_await startBlockedConsume(idleConsumer, proxy, &idleConsume);
 
@@ -616,20 +617,25 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	Future<Void> waitForRetiredTagCleanup(Database cx) { return waitForRetiredTagState(cx, false); }
 
 	Future<Void> setAllProxyPopsPaused(Database cx, bool paused) {
-		std::vector<CDCProxyInterface> proxies;
-		while (proxies.empty()) {
+		while (true) {
 			Future<Void> changed = cx->clientInfo->onChange();
-			proxies = cx->clientInfo->get().cdcProxies;
+			const std::vector<CDCProxyInterface> proxies = cx->clientInfo->get().cdcProxies;
 			if (proxies.empty()) {
 				co_await changed;
+				continue;
 			}
+
+			std::vector<Future<Void>> requests;
+			requests.reserve(proxies.size());
+			for (const auto& proxy : proxies) {
+				requests.push_back(proxy.setPopsPausedForTesting.getReply(SetCDCProxyPopsPausedRequest(paused)));
+			}
+			auto result = co_await race(waitForAll(requests), changed);
+			if (result.index() == 0 && proxies == cx->clientInfo->get().cdcProxies) {
+				co_return;
+			}
+			CODE_PROBE(true, "Native CDC workload retries pop control after proxy replacement");
 		}
-		std::vector<Future<Void>> requests;
-		requests.reserve(proxies.size());
-		for (const auto& proxy : proxies) {
-			requests.push_back(proxy.setPopsPausedForTesting.getReply(SetCDCProxyPopsPausedRequest(paused)));
-		}
-		co_await timeoutError(waitForAll(requests), operationTimeout);
 	}
 
 	Future<Void> waitForTransactionSystemRecoveryAfter(uint64_t recoveryCount) {
