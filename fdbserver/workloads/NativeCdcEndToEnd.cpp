@@ -412,6 +412,55 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		                                operationTimeout);
 	}
 
+	Future<std::pair<CDCProxyInterface, CDCProxyBufferStatus>> getAssignedProxyStatus(Database cx,
+	                                                                                  CDCStreamId streamId) {
+		while (true) {
+			Future<Void> changed = cx->clientInfo->onChange();
+			Optional<CDCProxyInterface> proxy;
+			{
+				const ClientDBInfo& clientInfo = cx->clientInfo->get();
+				auto assignment = clientInfo.streamToCDCProxyId.find(streamId);
+				if (assignment != clientInfo.streamToCDCProxyId.end()) {
+					auto found = std::find_if(
+					    clientInfo.cdcProxies.begin(),
+					    clientInfo.cdcProxies.end(),
+					    [&](CDCProxyInterface const& candidate) { return candidate.id() == assignment->second; });
+					if (found != clientInfo.cdcProxies.end()) {
+						proxy = *found;
+					}
+				}
+			}
+			if (!proxy.present()) {
+				co_await changed;
+				continue;
+			}
+
+			try {
+				auto result = co_await race(getProxyStatus(proxy.get()), changed);
+				if (result.index() == 0) {
+					const ClientDBInfo& clientInfo = cx->clientInfo->get();
+					auto assignment = clientInfo.streamToCDCProxyId.find(streamId);
+					if (assignment != clientInfo.streamToCDCProxyId.end() && assignment->second == proxy.get().id()) {
+						co_return std::make_pair(proxy.get(), std::get<0>(std::move(result)));
+					}
+				}
+			} catch (Error& e) {
+				if (e.code() != error_code_broken_promise && e.code() != error_code_connection_failed &&
+				    e.code() != error_code_request_maybe_delivered) {
+					throw;
+				}
+			}
+			co_await delay(0);
+		}
+	}
+
+	void updateObservedProxy(CDCProxyInterface& proxy, CDCProxyInterface current) {
+		if (proxy.id() != current.id()) {
+			CODE_PROBE(true, "Native CDC memory validation follows proxy replacement");
+			proxy = current;
+		}
+	}
+
 	Future<Void> startBlockedConsume(Reference<NativeCdcConsumer> consumer,
 	                                 CDCProxyInterface proxy,
 	                                 Future<CDCConsumeReply>* outstanding) {
@@ -523,8 +572,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		const Version committed = co_await writeValue(cx, key, value);
 
 		const CDCStreamId firstStreamId = streams.front().consumer->position().streamId;
-		const CDCProxyInterface proxy =
-		    co_await timeoutError(waitForAssignedProxy(cx, firstStreamId), operationTimeout);
+		CDCProxyInterface proxy = co_await timeoutError(waitForAssignedProxy(cx, firstStreamId), operationTimeout);
 		for (const auto& stream : streams) {
 			const CDCProxyInterface assigned =
 			    co_await timeoutError(waitForAssignedProxy(cx, stream.consumer->position().streamId), operationTimeout);
@@ -543,7 +591,9 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		CDCProxyBufferStatus status;
 		const double deadline = now() + operationTimeout;
 		while (true) {
-			status = co_await getProxyStatus(proxy);
+			auto proxyStatus = co_await timeoutError(getAssignedProxyStatus(cx, firstStreamId), operationTimeout);
+			updateObservedProxy(proxy, proxyStatus.first);
+			status = proxyStatus.second;
 			if (completed->get() > 0 && (completed->get() == static_cast<int>(streams.size()) || status.waiters > 0)) {
 				break;
 			}
@@ -558,7 +608,9 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 
 		releaseAcknowledgements.send(Void());
 		co_await timeoutError(waitForAll(consumers), operationTimeout);
-		status = co_await getProxyStatus(proxy);
+		auto proxyStatus = co_await timeoutError(getAssignedProxyStatus(cx, firstStreamId), operationTimeout);
+		updateObservedProxy(proxy, proxyStatus.first);
+		status = proxyStatus.second;
 		ASSERT_EQ(status.bufferedBytes, 0);
 		ASSERT_LE(status.activePermits, status.bufferLimit);
 		ASSERT_LE(status.peakActivePermits, status.bufferLimit);
