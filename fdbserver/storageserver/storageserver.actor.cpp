@@ -1139,8 +1139,6 @@ public:
 	KeyRangeMap<SSBulkLoadMetadata> ssBulkLoadMetadataMap; // store the latest bulkload task on ranges
 	uint64_t shardChangeCounter; // max( shards->changecounter )
 
-	KeyRangeMap<bool> cachedRangeMap; // indicates if a key-range is being cached
-
 	// newestAvailableVersion[k]
 	//   == invalidVersion -> k is unavailable at all versions
 	//   <= storageVersion -> k is unavailable at all versions (but might be read anyway from storage if we are in the
@@ -2247,12 +2245,7 @@ Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 			                      req.options.get().debugID.get().first(),
 			                      "getValueQ.AfterRead"); //.detail("TaskID", g_network->getCurrentTask());
 
-		// Check if the desired key might be cached
-		auto cached = data->cachedRangeMap[req.key];
-		// if (cached)
-		//	TraceEvent(SevDebug, "SSGetValueCached").detail("Key", req.key);
-
-		GetValueReply reply(v, cached);
+		GetValueReply reply(v, /*cached=*/false);
 		reply.penalty = data->getPenalty();
 		req.reply.send(reply);
 	} catch (Error& e) {
@@ -2883,14 +2876,7 @@ Future<GetKeyValuesReply> readRange(StorageServer* data,
 	// for remembering the position in the resultCache
 	int pos = 0;
 
-	// Check if the desired key-range is cached
-	auto containingRange = data->cachedRangeMap.rangeContaining(range.begin);
-	if (containingRange.value() && containingRange->range().end >= range.end) {
-		//TraceEvent(SevDebug, "SSReadRangeCached").detail("Size",data->cachedRangeMap.size()).detail("ContainingRangeBegin",containingRange->range().begin).detail("ContainingRangeEnd",containingRange->range().end).
-		//	detail("Begin", range.begin).detail("End",range.end);
-		result.cached = true;
-	} else
-		result.cached = false;
+	result.cached = false;
 
 	// if (limit >= 0) we are reading forward, else backward
 	if (limit >= 0) {
@@ -6046,13 +6032,7 @@ Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 		data->counters.bytesQueried += resultSize;
 		++data->counters.rowsQueried;
 
-		// Check if the desired key might be cached
-		auto cached = data->cachedRangeMap[absoluteKey];
-		// if (cached)
-		//	TraceEvent(SevDebug, "SSGetKeyCached").detail("Key", k).detail("Begin",
-		// shard.begin).detail("End", shard.end);
-
-		GetKeyReply reply(updated, cached);
+		GetKeyReply reply(updated, /*cached=*/false);
 		reply.penalty = data->getPenalty();
 
 		req.reply.send(reply);
