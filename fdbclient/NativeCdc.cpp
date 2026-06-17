@@ -233,6 +233,12 @@ Optional<CDCProxyInterface> selectAvailableNativeCdcProxy(ClientDBInfo const& cl
 	return Optional<CDCProxyInterface>();
 }
 
+bool containsNativeCdcProxy(ClientDBInfo const& clientInfo, UID proxyId) {
+	return std::any_of(clientInfo.cdcProxies.begin(),
+	                   clientInfo.cdcProxies.end(),
+	                   [proxyId](CDCProxyInterface const& proxy) { return proxy.id() == proxyId; });
+}
+
 Future<bool> nativeCdcStreamStillExists(Database cx, CDCStreamId streamId) {
 	Transaction tr(cx);
 	while (true) {
@@ -647,10 +653,21 @@ Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, KeyRang
 		}
 		CDCProxyInterface proxy = selectedProxy.get();
 		try {
-			auto result = co_await race(
-			    throwErrorOr(proxy.registerStream.tryGetReply(CDCRegisterStreamRequest(name, keys))), proxyChanged);
-			if (result.index() == 0) {
-				co_return std::get<0>(std::move(result)).streamId;
+			Future<ErrorOr<CDCRegisterStreamReply>> request =
+			    proxy.registerStream.tryGetReply(CDCRegisterStreamRequest(name, keys));
+			// Assignment publications for other streams also change ClientDBInfo. Keep this request alive while its
+			// proxy remains published; abandoning it can let a server-side retry recreate the stream after removal.
+			while (true) {
+				auto result = co_await race(throwErrorOr(request), proxyChanged);
+				if (result.index() == 0) {
+					co_return std::get<0>(std::move(result)).streamId;
+				}
+
+				proxyChanged = cx->clientInfo->onChange();
+				if (!containsNativeCdcProxy(cx->clientInfo->get(), proxy.id())) {
+					break;
+				}
+				CODE_PROBE(true, "Native CDC registration preserves request across unrelated client info change");
 			}
 		} catch (Error& error) {
 			if (!retryNativeCdcProxyRequest(error)) {
