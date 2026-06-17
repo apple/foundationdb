@@ -710,6 +710,12 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	Future<Void> prepareRestartDrainState(Database cx) {
 		ASSERT_EQ(streams.size(), 1);
 		co_await writeValue(cx, keyForIndex(keyCount / 2), "native-cdc-restart-drain"_sr);
+		CODE_PROBE(true, "Native CDC restart marker is durable before save and kill");
+	}
+
+	Future<Void> prepareRestartDrainSetup(Database cx) {
+		co_await initializeStreams(cx);
+		co_await prepareRestartDrainState(cx);
 	}
 
 	Future<Void> drainRestartState(Database cx) {
@@ -926,6 +932,9 @@ public:
 		if (drainAfterRestart) {
 			return Void();
 		}
+		if (prepareRestartDrain) {
+			return prepareRestartDrainSetup(cx);
+		}
 		return initializeStreams(cx);
 	}
 
@@ -934,7 +943,7 @@ public:
 			return Void();
 		}
 		if (prepareRestartDrain) {
-			return prepareRestartDrainState(cx);
+			return Void();
 		}
 		if (drainAfterRestart) {
 			return drainRestartState(cx);
