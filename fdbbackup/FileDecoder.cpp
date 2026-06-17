@@ -848,17 +848,79 @@ Future<Void> decode_logs(Reference<DecodeParams> params) {
 	// timeKeeperVersionFromDatetime() reads \xff\x02/timeKeeper/map/ from the live cluster.
 	if (params->beginTimestamp.present() || params->endTimestamp.present()) {
 		Database db = Database::createDatabase(params->clusterFile, ApiVersion::LATEST_VERSION);
+		// Fetch the current version to provide a warning message to a user if the provided date time resolves
+		// to a version in the future.
+		Transaction tr(db);
+		Version currentVersion = co_await tr.getReadVersion();
+
 		if (params->beginTimestamp.present()) {
 			params->beginVersionFilter = co_await timeKeeperVersionFromDatetime(params->beginTimestamp.get(), db);
-			TraceEvent("TimestampResolved")
+			TraceEvent("BeginTimeStampResolved")
 			    .detail("Timestamp", params->beginTimestamp.get())
 			    .detail("Version", params->beginVersionFilter);
+			// If the date time is too far in the past timeKeeperVersionFromDatetime will return a 0.
+			// This will be the same as the default for params->beginVersionFilter, so we just print a warning.
+			// Per default TimeKeeper has the timestamp to version mapping for ~6 months.
+			if (params->beginVersionFilter <= 0) {
+				fprintf(stderr,
+				        "WARNING: --begin-timestamp-filter = %s resolved to version %ld, which basically disables "
+				        "the --begin-timestamp-filter.\n",
+				        params->beginTimestamp.get().c_str(),
+				        params->beginVersionFilter);
+			}
+			// If the date time is too far in the future the returned version filter will be an extrapolated version.
+			// If this resolves beginVersionFilter: all mutations are filtered out since nothing has such a high
+			// version. In this case we throw an error, assuming that the user provided the wrong date time.
+			if (params->beginVersionFilter > currentVersion) {
+				fprintf(stderr,
+				        "ERROR: --begin-timestamp-filter = %s resolved to version %ld which is ahead of the "
+				        "current cluster version %ld. The timestamp may be in the future.\n",
+				        params->beginTimestamp.get().c_str(),
+				        params->beginVersionFilter,
+				        currentVersion);
+				throw backup_error();
+			}
 		}
 		if (params->endTimestamp.present()) {
 			params->endVersionFilter = co_await timeKeeperVersionFromDatetime(params->endTimestamp.get(), db);
-			TraceEvent("TimestampResolved")
+			TraceEvent("EndTimeStampResolved")
 			    .detail("Timestamp", params->endTimestamp.get())
 			    .detail("Version", params->endVersionFilter);
+			// If the date time is too far in the past we should throw an error and warn the user.
+			// Per default TimeKeeper has the timestamp to version mapping for ~6 months.
+			// This would fail the later step in params->validVersionFilters() anyways.
+			if (params->endVersionFilter <= 0) {
+				fprintf(stderr,
+				        "ERROR: --end-timestamp-filter = %s resolved to version %ld which would "
+				        "be below the --begin-timestamp-filter. The timestamp may be too much in the past.\n",
+				        params->endTimestamp.get().c_str(),
+				        params->endVersionFilter);
+				throw backup_error();
+			}
+			// If the date time is too far in the future the returned version filter will be an extrapolated version.
+			// If this resolves endVersionFilter: effectively no filtering (same as the default INT64_MAX behavior)
+			if (params->endVersionFilter > currentVersion) {
+				fprintf(stderr,
+				        "WARNING: --end-timestamp-filter = %s resolved to version %ld which is ahead of the "
+				        "current cluster version %ld. The timestamp may be in the future.\n",
+				        params->endTimestamp.get().c_str(),
+				        params->endVersionFilter,
+				        currentVersion);
+			}
+		}
+
+		// Check if the beginVersionFilter is greater than the endVersionFilter, otherwise the filtering will be
+		// invalid.
+		if (!params->validVersionFilters()) {
+			std::cerr << (params->beginTimestamp.present()
+			                  ? "--begin-timestamp-filter " + params->beginTimestamp.get()
+			                  : "--begin-version-filter " + std::to_string(params->beginVersionFilter))
+			          << " cannot be equal or greater than "
+			          << (params->endTimestamp.present()
+			                  ? "--end-timestamp-filter " + params->endTimestamp.get()
+			                  : "--end-version-filter " + std::to_string(params->endVersionFilter))
+			          << "\n";
+			throw backup_error();
 		}
 	}
 
