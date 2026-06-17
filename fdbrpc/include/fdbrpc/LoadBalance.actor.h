@@ -566,10 +566,10 @@ struct RequestData : NonCopyable {
 		bool receivedResponse =
 		    loadBalancedReply.present() ? !loadBalancedReply.get().error.present() : result.present();
 		receivedResponse = receivedResponse || (!maybeDelivered && errCode != error_code_process_behind);
-		bool futureVersion = errCode == error_code_future_version || errCode == error_code_process_behind;
+		FutureVersion futureVersion{ errCode == error_code_future_version || errCode == error_code_process_behind };
 
 		modelHolder->release(CleanRequest{ receivedResponse },
-		                     FutureVersion{ futureVersion },
+		                     futureVersion,
 		                     loadBalancedReply.present() ? loadBalancedReply.get().penalty : -1.0);
 
 		if (errCode == error_code_server_overloaded) {
