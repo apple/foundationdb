@@ -245,6 +245,7 @@ function(print_components)
   message(STATUS "Configure CTest (depends on Python):  ${WITH_PYTHON}")
   message(STATUS "Build with RocksDB:                   ${WITH_ROCKSDB_EXPERIMENTAL}")
   message(STATUS "Build with AWS SDK:                   ${WITH_AWS_BACKUP}")
+  message(STATUS "Build flow with zstd support:         ${FLOW_USE_ZSTD}")
   message(STATUS "=========================================")
 endfunction()
 
