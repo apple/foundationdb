@@ -483,34 +483,9 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		co_await waitForNoActiveConsumes(proxy);
 
 		CDCCursor currentCursor = idleConsumer->position();
-		Future<ErrorOr<CDCConsumeReply>> first;
-		const double deadline = now() + operationTimeout;
-		bool blocked = false;
-		while (!blocked) {
-			first = proxy.consume.tryGetReply(CDCConsumeRequest(currentCursor));
-			double activeSince = -1;
-			while (!first.isReady()) {
-				const CDCProxyBufferStatus status = co_await getProxyStatus(proxy);
-				if (status.activeConsumeRequests > 0 && status.readDemand > 0) {
-					if (activeSince < 0) {
-						activeSince = now();
-					}
-					if (now() - activeSince >= 1.0) {
-						blocked = true;
-						break;
-					}
-				} else {
-					activeSince = -1;
-				}
-				ASSERT_LT(now(), deadline);
-				co_await delay(0.01);
-			}
-			if (!blocked) {
-				ErrorOr<CDCConsumeReply> completed = co_await first;
-				ASSERT(!completed.isError());
-				currentCursor.lastConsumedVersion = completed.get().lastConsumedVersion;
-			}
-		}
+		// Send both requests without yielding. The first request marks the stream active before its metadata read, so
+		// the second request deterministically exercises server-side exclusivity even while versions advance.
+		Future<ErrorOr<CDCConsumeReply>> first = proxy.consume.tryGetReply(CDCConsumeRequest(currentCursor));
 		co_await expectConcurrentConsumeRejected(proxy, currentCursor);
 		first.cancel();
 		co_await waitForNoActiveConsumes(proxy);
