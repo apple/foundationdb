@@ -439,6 +439,12 @@ Routing at commit time has two important implications:
 * Registering CDC does not change normal durability for the user mutation; it
   adds tagged log data whose retention is controlled separately by consumers.
 
+For remote-region replication, a log router uses `tagLocalityRemoteLog` only to
+index its local forwarding queue. The forwarded payload remains the complete
+serialized source message, so the remote TLog reparses and indexes the original
+CDC tag. CDC acknowledgement pops therefore apply to the remote TLog copy as
+well as the primary and satellite copies.
+
 ## CDC proxy read path
 
 A CDC proxy owns a set of active stream IDs. For each owned stream it loads:
@@ -464,11 +470,30 @@ the proxy to buffer its entire retained history in memory: durable
 acknowledgement state and tagged TLog retention are the source of resumability,
 while the proxy buffer is a delivery optimization.
 
+One tagged TLog message can match many overlapping streams. The proxy estimates
+that expansion per stream and commit version, materializes only a subset that
+fits the current bounded pass, and reopens the tag cursor for the remaining
+streams. It never requests more retained-buffer permits than
+`CDC_PROXY_BUFFER_BYTES`. If the filtered mutations for one stream at one
+commit version exceed the complete configured budget, that consume fails with
+`server_overloaded` instead of exceeding the process memory limit; operators
+must configure the budget to hold the largest supported transaction for one
+stream.
+
 A consume operation supplies a cursor. The proxy returns buffered or newly
 peeked data after the cursor position and a position through which the
 consumer may acknowledge after processing. If a stream is removed while a
 consume is blocked, reconciliation wakes the request and it fails rather than
 waiting on a data-change trigger for an inactive stream.
+The owning proxy accepts a cursor only when the position has already been
+delivered by that owner or is covered by the stream's durable acknowledgement
+watermark. A fabricated or otherwise unproven cursor is rejected instead of
+making the proxy buffer every intervening mutation while trying to reach it;
+positions beyond the metadata transaction's read version are explicitly
+classified as invalid. A proven delivered cursor remains valid if that read
+version briefly lags the tagged-log frontier. After an owner restart, callers
+must resume from their last acknowledged checkpoint; an unacknowledged later
+position can be replayed from that durable checkpoint.
 When no later version is available, `consume()` is intentionally a long poll:
 it remains pending until the tagged-log frontier advances, ownership changes,
 or the stream is removed. The server does not impose a fixed deadline because

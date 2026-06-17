@@ -1587,6 +1587,9 @@ void commitMessages(TLogData* self,
 			}
 			CODE_PROBE(logData->locality == tagLocalitySatellite && tag.locality == tagLocalityCDC,
 			           "Satellite TLog indexes CDC mutation");
+			CODE_PROBE(!logData->isPrimary && logData->locality != tagLocalitySatellite &&
+			               tag.locality == tagLocalityCDC,
+			           "Remote TLog indexes CDC mutation");
 
 			if (tag.locality == tagLocalityLogRouter) {
 				if (!logData->logRouterTags) {

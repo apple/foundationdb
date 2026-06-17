@@ -60,10 +60,15 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	int rounds;
 	int assignmentPublicationChecks;
 	bool testProxyReplacement;
+	bool testMemoryBound;
+	bool testDelayedRetention;
+	int memoryTestValueBytes;
+	double retentionValidationDelay;
 	double drainProbability;
 	double delayBetweenRounds;
 	double operationTimeout;
 	int nextStreamNumber = 0;
+	Version retentionMarkerVersion = invalidVersion;
 	std::vector<StreamState> streams;
 
 	Key keyForIndex(int index) const { return Key(StringRef(format("native-cdc-e2e/data/%04d", index))); }
@@ -96,6 +101,19 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		std::vector<std::pair<Key, Value>> values;
 		values.emplace_back(std::move(key), std::move(value));
 		co_return co_await writeValues(cx, std::move(values));
+	}
+
+	Future<Version> getReadVersion(Database cx) {
+		Transaction tr(cx);
+		while (true) {
+			Error err;
+			try {
+				co_return co_await tr.getReadVersion();
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
 	}
 
 	Future<Void> consumeThroughValue(Reference<NativeCdcConsumer> consumer, Version committed, Key key, Value value) {
@@ -165,6 +183,12 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		for (int i = 0; i < initialStreamCount; ++i) {
 			co_await addStream(cx);
 		}
+		if (testDelayedRetention) {
+			std::vector<std::pair<Key, Value>> marker;
+			marker.emplace_back(keyForIndex(keyCount / 2), "retained-across-region-failure"_sr);
+			retentionMarkerVersion = co_await writeValues(cx, marker);
+			recordExpectedWrites(marker, retentionMarkerVersion);
+		}
 	}
 
 	Future<Void> validatePublicLifecycle(Database cx) {
@@ -194,6 +218,32 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		ASSERT_EQ(found != listed.end(), true);
 		ASSERT_EQ(found->streamId, streamId);
 		ASSERT_EQ(found->keys, keys);
+
+		bool futureConsumeRejected = false;
+		try {
+			co_await timeoutError(
+			    resumeNativeCdcConsumer(cx, CDCCursor(streamId, std::numeric_limits<Version>::max() - 2))->consume(),
+			    operationTimeout);
+		} catch (Error& e) {
+			if (e.code() != error_code_client_invalid_operation) {
+				throw;
+			}
+			futureConsumeRejected = true;
+		}
+		ASSERT_EQ(futureConsumeRejected, true);
+
+		bool unprovenConsumeRejected = false;
+		try {
+			const Version unprovenVersion = co_await getReadVersion(cx);
+			co_await timeoutError(resumeNativeCdcConsumer(cx, CDCCursor(streamId, unprovenVersion))->consume(),
+			                      operationTimeout);
+		} catch (Error& e) {
+			if (e.code() != error_code_client_invalid_operation) {
+				throw;
+			}
+			unprovenConsumeRejected = true;
+		}
+		ASSERT_EQ(unprovenConsumeRejected, true);
 
 		bool futureAcknowledgeRejected = false;
 		try {
@@ -324,6 +374,81 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
 	}
 
+	Future<Void> consumeMemoryMarker(Reference<NativeCdcConsumer> consumer,
+	                                 Version committed,
+	                                 Key key,
+	                                 Value value,
+	                                 Reference<AsyncVar<int>> completed,
+	                                 Future<Void> releaseAcknowledgements) {
+		bool observed = false;
+		while (consumer->position().lastConsumedVersion < committed) {
+			CDCConsumeReply reply = co_await timeoutError(consumer->consume(), operationTimeout);
+			for (const auto& versioned : reply.mutations) {
+				for (const auto& mutation : versioned.mutations) {
+					if (versioned.version == committed && mutation.type == MutationRef::SetValue &&
+					    mutation.param1 == key && mutation.param2 == value) {
+						observed = true;
+					}
+				}
+			}
+			if (consumer->position().lastConsumedVersion < committed) {
+				co_await timeoutError(consumer->acknowledge(), operationTimeout);
+			}
+		}
+		ASSERT(observed);
+		completed->set(completed->get() + 1);
+		co_await releaseAcknowledgements;
+		co_await timeoutError(consumer->acknowledge(), operationTimeout);
+	}
+
+	Future<Void> validateProxyMemoryBound(Database cx) {
+		ASSERT(!streams.empty());
+		const Key key = keyForIndex(keyCount / 2);
+		const Value value(std::string(memoryTestValueBytes, 'x'));
+		const Version committed = co_await writeValue(cx, key, value);
+
+		const CDCStreamId firstStreamId = streams.front().consumer->position().streamId;
+		const CDCProxyInterface proxy =
+		    co_await timeoutError(waitForAssignedProxy(cx, firstStreamId), operationTimeout);
+		for (const auto& stream : streams) {
+			const CDCProxyInterface assigned =
+			    co_await timeoutError(waitForAssignedProxy(cx, stream.consumer->position().streamId), operationTimeout);
+			ASSERT_EQ(assigned.id(), proxy.id());
+		}
+
+		Promise<Void> releaseAcknowledgements;
+		Reference<AsyncVar<int>> completed = makeReference<AsyncVar<int>>(0);
+		std::vector<Future<Void>> consumers;
+		consumers.reserve(streams.size());
+		for (const auto& stream : streams) {
+			consumers.push_back(consumeMemoryMarker(
+			    stream.consumer, committed, key, value, completed, releaseAcknowledgements.getFuture()));
+		}
+
+		CDCProxyBufferStatus status;
+		const double deadline = now() + operationTimeout;
+		while (true) {
+			status = co_await timeoutError(proxy.getBufferStatusForTesting.getReply(GetCDCProxyBufferStatusRequest()),
+			                               operationTimeout);
+			if (completed->get() > 0 && (completed->get() == static_cast<int>(streams.size()) || status.waiters > 0)) {
+				break;
+			}
+			ASSERT_LT(now(), deadline);
+			co_await delay(0.01);
+		}
+		ASSERT_GT(status.bufferedBytes, 0);
+		ASSERT_LE(status.bufferedBytes, status.bufferLimit);
+		ASSERT_LE(status.activePermits, status.bufferLimit);
+		ASSERT_GE(status.activePermits, status.bufferedBytes);
+
+		releaseAcknowledgements.send(Void());
+		co_await timeoutError(waitForAll(consumers), operationTimeout);
+		status = co_await timeoutError(proxy.getBufferStatusForTesting.getReply(GetCDCProxyBufferStatusRequest()),
+		                               operationTimeout);
+		ASSERT_EQ(status.bufferedBytes, 0);
+		ASSERT_LE(status.activePermits, status.bufferLimit);
+	}
+
 	Future<Void> waitForRetiredTagCleanup(Database cx) {
 		Transaction tr(cx);
 		while (true) {
@@ -390,33 +515,47 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		}
 	}
 
+	Future<Void> consumeUntilRemoved(Reference<NativeCdcConsumer> consumer) {
+		while (true) {
+			try {
+				co_await timeoutError(consumer->consume(), operationTimeout);
+				co_await timeoutError(consumer->acknowledge(), operationTimeout);
+			} catch (Error& e) {
+				if (e.code() != error_code_client_invalid_operation) {
+					throw;
+				}
+				co_return;
+			}
+		}
+	}
+
 	Future<Void> removeStream(Database cx, int index, Version throughVersion) {
 		ASSERT_GT(index, 0);
 		co_await drainThrough(&streams[index], throughVersion);
-		Reference<NativeCdcConsumer> pendingConsumer = resumeNativeCdcConsumer(
-		    cx, CDCCursor(streams[index].consumer->position().streamId, std::numeric_limits<Version>::max() - 2));
-		Future<CDCConsumeReply> pendingConsume = pendingConsumer->consume();
+		Reference<NativeCdcConsumer> pendingConsumer = resumeNativeCdcConsumer(cx, streams[index].consumer->position());
+		Future<Void> pendingConsume = consumeUntilRemoved(pendingConsumer);
 		co_await delay(0.1);
 		co_await timeoutError(removeNativeCdcStreamClient(cx, streams[index].name), operationTimeout);
-		bool pendingConsumeRejected = false;
-		try {
-			co_await timeoutError(pendingConsume, operationTimeout);
-		} catch (Error& e) {
-			if (e.code() != error_code_client_invalid_operation) {
-				throw;
-			}
-			pendingConsumeRejected = true;
-		}
-		ASSERT_EQ(pendingConsumeRejected, true);
+		co_await timeoutError(pendingConsume, operationTimeout);
 		streams.erase(streams.begin() + index);
 	}
 
 	Future<Void> run(Database cx) {
+		if (testDelayedRetention) {
+			ASSERT_NE(retentionMarkerVersion, invalidVersion);
+			co_await delay(retentionValidationDelay);
+			for (auto& stream : streams) {
+				co_await drainThrough(&stream, retentionMarkerVersion);
+			}
+		}
 		co_await validatePublicLifecycle(cx);
 		co_await validateClearClipping(cx);
 		co_await validateAssignmentPublication(cx);
 		if (testProxyReplacement) {
 			co_await validateProxyReplacement(cx);
+		}
+		if (testMemoryBound) {
+			co_await validateProxyMemoryBound(cx);
 		}
 		Version mostRecentWrite = invalidVersion;
 		for (int round = 0; round < rounds; ++round) {
@@ -472,6 +611,10 @@ public:
 		rounds = getOption(options, "rounds"_sr, 30);
 		assignmentPublicationChecks = getOption(options, "assignmentPublicationChecks"_sr, 0);
 		testProxyReplacement = getOption(options, "testProxyReplacement"_sr, false);
+		testMemoryBound = getOption(options, "testMemoryBound"_sr, false);
+		testDelayedRetention = getOption(options, "testDelayedRetention"_sr, false);
+		memoryTestValueBytes = getOption(options, "memoryTestValueBytes"_sr, 1024);
+		retentionValidationDelay = getOption(options, "retentionValidationDelay"_sr, 0.0);
 		drainProbability = getOption(options, "drainProbability"_sr, 0.25);
 		delayBetweenRounds = getOption(options, "delayBetweenRounds"_sr, 0.5);
 		operationTimeout = getOption(options, "operationTimeout"_sr, 120.0);
@@ -482,6 +625,8 @@ public:
 		ASSERT_GE(writesPerRound, 1);
 		ASSERT_LE(writesPerRound, keyCount);
 		ASSERT_GE(assignmentPublicationChecks, 0);
+		ASSERT_GT(memoryTestValueBytes, 0);
+		ASSERT_GE(retentionValidationDelay, 0.0);
 	}
 
 	// RandomRangeLock can outlive this bounded CDC workload and mask its progress check.

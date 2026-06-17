@@ -506,6 +506,8 @@ Future<Void> LogRouterData::pullAsyncData() {
 			}
 
 			TagsAndMessage tagAndMsg;
+			// Keep the complete serialized source message here. The tags below only index this message inside the
+			// log router; a remote TLog reparses getMessageWithTags() and indexes the original tags, including CDC.
 			tagAndMsg.message = r->getMessageWithTags();
 			tags.clear();
 			logSet.getPushLocations(r->getTags(), tags, 0);
