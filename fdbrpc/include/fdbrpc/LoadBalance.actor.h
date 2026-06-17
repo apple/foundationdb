@@ -48,6 +48,10 @@ enum ComparisonType { TSS_COMPARISON, REPLICA_COMPARISON };
 
 enum RequiredReplicas { BEST_EFFORT = -2, ALL_REPLICAS = -1 };
 
+FDB_BOOLEAN_PARAM(CleanRequest);
+FDB_BOOLEAN_PARAM(FutureVersion);
+FDB_BOOLEAN_PARAM(MeasureLatency);
+
 struct ModelHolder : NonCopyable, public ReferenceCounted<ModelHolder> {
 	QueueModel* model;
 	bool released;
@@ -61,7 +65,10 @@ struct ModelHolder : NonCopyable, public ReferenceCounted<ModelHolder> {
 		}
 	}
 
-	void release(bool clean, bool futureVersion, double penalty, bool measureLatency = true) {
+	void release(CleanRequest clean,
+	             FutureVersion futureVersion,
+	             double penalty,
+	             MeasureLatency measureLatency = MeasureLatency::True) {
 		if (model && !released) {
 			released = true;
 			double latency = (clean || measureLatency) ? now() - startTime : 0.0;
@@ -69,7 +76,7 @@ struct ModelHolder : NonCopyable, public ReferenceCounted<ModelHolder> {
 		}
 	}
 
-	~ModelHolder() { release(false, false, -1.0, false); }
+	~ModelHolder() { release(CleanRequest::False, FutureVersion::False, -1.0, MeasureLatency::False); }
 };
 
 // Subclasses must initialize all members in their default constructors
@@ -561,8 +568,9 @@ struct RequestData : NonCopyable {
 		receivedResponse = receivedResponse || (!maybeDelivered && errCode != error_code_process_behind);
 		bool futureVersion = errCode == error_code_future_version || errCode == error_code_process_behind;
 
-		modelHolder->release(
-		    receivedResponse, futureVersion, loadBalancedReply.present() ? loadBalancedReply.get().penalty : -1.0);
+		modelHolder->release(CleanRequest{ receivedResponse },
+		                     FutureVersion{ futureVersion },
+		                     loadBalancedReply.present() ? loadBalancedReply.get().penalty : -1.0);
 
 		if (errCode == error_code_server_overloaded) {
 			return false;
