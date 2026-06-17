@@ -136,8 +136,10 @@ private:
 	rocksdb::DBOptions initialDbOptions();
 	rocksdb::ReadOptions initialReadOptions();
 	rocksdb::FlushOptions initialFlushOptions();
+	std::shared_ptr<rocksdb::Cache> initialBlockCache();
 
 	bool closing;
+	std::shared_ptr<rocksdb::Cache> blockCache;
 	rocksdb::DBOptions dbOptions;
 	rocksdb::ColumnFamilyOptions cfOptions;
 	rocksdb::ReadOptions readOptions;
@@ -145,9 +147,20 @@ private:
 	std::atomic<double> lastFlushTime_;
 };
 
+// BlockCache should be initialized before DBOptions and CFOptions, because they both need reference to the cache.
 SharedRocksDBState::SharedRocksDBState(UID id)
-  : id(id), closing(false), dbOptions(initialDbOptions()), cfOptions(initialCfOptions()),
-    readOptions(initialReadOptions()), flushOptions(initialFlushOptions()) {}
+  : id(id), closing(false), blockCache(initialBlockCache()), dbOptions(initialDbOptions()),
+    cfOptions(initialCfOptions()), readOptions(initialReadOptions()), flushOptions(initialFlushOptions()) {}
+
+std::shared_ptr<rocksdb::Cache> SharedRocksDBState::initialBlockCache() {
+	if (SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE <= 0) {
+		return nullptr;
+	}
+	return rocksdb::NewLRUCache(SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE,
+	                            -1, /* num_shard_bits, default value:-1*/
+	                            false, /* strict_capacity_limit, default value:false */
+	                            SERVER_KNOBS->ROCKSDB_CACHE_HIGH_PRI_POOL_RATIO /* high_pri_pool_ratio */);
+}
 
 rocksdb::FlushOptions SharedRocksDBState::initialFlushOptions() {
 	rocksdb::FlushOptions fOptions;
@@ -257,12 +270,8 @@ rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
 		    rocksdb::CacheEntryRoleOptions::Decision::kEnabled;
 	}
 
-	if (SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE > 0) {
-		bbOpts.block_cache =
-		    rocksdb::NewLRUCache(SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE,
-		                         -1, /* num_shard_bits, default value:-1*/
-		                         false, /* strict_capacity_limit, default value:false */
-		                         SERVER_KNOBS->ROCKSDB_CACHE_HIGH_PRI_POOL_RATIO /* high_pri_pool_ratio */);
+	if (blockCache) {
+		bbOpts.block_cache = blockCache;
 		bbOpts.cache_index_and_filter_blocks = SERVER_KNOBS->ROCKSDB_CACHE_INDEX_AND_FILTER_BLOCKS;
 		bbOpts.pin_l0_filter_and_index_blocks_in_cache = SERVER_KNOBS->ROCKSDB_CACHE_INDEX_AND_FILTER_BLOCKS;
 		bbOpts.cache_index_and_filter_blocks_with_high_priority = SERVER_KNOBS->ROCKSDB_CACHE_INDEX_AND_FILTER_BLOCKS;
@@ -336,6 +345,11 @@ rocksdb::DBOptions SharedRocksDBState::initialDbOptions() {
 		// We want this sst level checksum for many scenarios, such as compaction, backup, and physicalshardmove
 		// https://github.com/facebook/rocksdb/wiki/Full-File-Checksum-and-Checksum-Handoff
 		options.file_checksum_gen_factory = rocksdb::GetFileChecksumGenCrc32cFactory();
+	}
+
+	if (SERVER_KNOBS->ROCKSDB_ENABLE_CACHE_USAGE_OVERRIDES && blockCache) {
+		options.write_buffer_manager = std::make_shared<rocksdb::WriteBufferManager>(
+		    /*buffer_size=*/0, /*cache=*/blockCache, /*allow_stall=*/false);
 	}
 	return options;
 }
