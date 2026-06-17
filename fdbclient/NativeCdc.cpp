@@ -711,18 +711,19 @@ Future<CDCConsumeReply> NativeCdcConsumer::consumeImpl(Reference<NativeCdcConsum
 	try {
 		while (true) {
 			CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(self->cx, self->currentPosition.streamId);
-			Future<Void> proxyChanged = self->cx->clientInfo->onChange();
 			try {
-				auto result = co_await race(
-				    throwErrorOr(proxy.consume.tryGetReply(CDCConsumeRequest(self->currentPosition))), proxyChanged);
-				if (result.index() == 0) {
-					CDCConsumeReply reply = std::get<0>(std::move(result));
-					self->knownAvailableThrough = reply.lastConsumedVersion;
-					self->currentPosition.lastConsumedVersion = reply.lastConsumedVersion;
-					self->operationOutstanding = false;
-					co_return reply;
+				CDCConsumeReply reply =
+				    co_await throwErrorOr(proxy.consume.tryGetReply(CDCConsumeRequest(self->currentPosition)));
+				if (reply.lastConsumedVersion == self->currentPosition.lastConsumedVersion && reply.mutations.empty()) {
+					// The server lease bounds abandoned long polls. Renew it transparently so the public consume
+					// operation remains a long poll without accumulating server actors after client cancellation.
+					CODE_PROBE(true, "Native CDC consume renews an idle server lease", probe::decoration::rare);
+					continue;
 				}
-				CODE_PROBE(true, "Native CDC consume retries after proxy metadata change", probe::decoration::rare);
+				self->knownAvailableThrough = reply.lastConsumedVersion;
+				self->currentPosition.lastConsumedVersion = reply.lastConsumedVersion;
+				self->operationOutstanding = false;
+				co_return reply;
 			} catch (Error& error) {
 				if (!retryNativeCdcProxyRequest(error)) {
 					throw;

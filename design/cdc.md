@@ -252,6 +252,13 @@ higher-level expiration policy exists, an unmanaged abandoned stream can retain
 TLog data indefinitely and eventually exhaust the TLog capacity allocated to
 its CDC tags.
 
+Each CDC proxy emits a periodic `CDCProxyMetrics` event containing its oldest
+required stream and version, acknowledgement lag, minimum safe-pop version and
+distance from the log end, retained and cumulative filtered bytes, buffer
+permits and waiters, active consume demand, and acknowledgement-pop progress.
+The oldest stream ID identifies the first consumer to investigate when the
+aggregate lag grows.
+
 Consumption returns `transaction_too_old` when a consumer supplies a cursor
 older than the stream's already acknowledged durable watermark. The proxy also
 treats discovery that an active stream's required tagged data has nevertheless
@@ -459,26 +466,30 @@ the tag appropriate for the version interval it is reading. It filters
 mutations to the registered range and stores versioned mutation batches in a
 per-stream in-memory buffer.
 
-All stream buffers owned by one CDC proxy share a `CDC_PROXY_BUFFER_BYTES`
-budget. Before requesting more TLog data, a stream reserves a bounded peek
-window from that budget, then converts the reservation to the actual filtered
-mutation bytes retained in its buffer. Acknowledgement or stream removal
-releases the retained reservation. This applies backpressure before ordinary
-peek batches arrive, rather than allowing each stream or each received batch
-to independently overshoot the proxy limit. A slow consumer does not require
-the proxy to buffer its entire retained history in memory: durable
-acknowledgement state and tagged TLog retention are the source of resumability,
-while the proxy buffer is a delivery optimization.
+All raw peek windows and stream buffers owned by one CDC proxy share a
+`CDC_PROXY_BUFFER_BYTES` budget. Before constructing a TLog cursor, a pass
+reserves `MAXIMUM_PEEK_BYTES` for its raw response plus a bounded
+materialization window. It retains the raw reservation while filtering and
+copying, then releases it and transfers only accepted filtered bytes to the
+stream buffers. Acknowledgement or stream removal releases those retained
+permits. The configured CDC budget must therefore be larger than
+`MAXIMUM_PEEK_BYTES`; its usable retained-batch capacity is the difference.
+This applies backpressure before ordinary peek batches arrive, rather than
+allowing each stream, received batch, or filtered expansion to independently
+overshoot the proxy limit. A slow consumer does not require the proxy to buffer
+its entire retained history in memory: durable acknowledgement state and tagged
+TLog retention are the source of resumability, while the proxy buffer is a
+delivery optimization.
 
 One tagged TLog message can match many overlapping streams. The proxy estimates
 that expansion per stream and commit version, materializes only a subset that
 fits the current bounded pass, and reopens the tag cursor for the remaining
-streams. It never requests more retained-buffer permits than
+streams. It never requests raw-plus-retained permits beyond
 `CDC_PROXY_BUFFER_BYTES`. If the filtered mutations for one stream at one
-commit version exceed the complete configured budget, that consume fails with
-`server_overloaded` instead of exceeding the process memory limit; operators
-must configure the budget to hold the largest supported transaction for one
-stream.
+commit version exceed the capacity remaining after the raw peek reservation,
+that consume fails with `server_overloaded`; operators must configure the
+budget to hold both the largest raw peek and the largest supported filtered
+transaction for one stream.
 
 A consume operation supplies a cursor. The proxy returns buffered or newly
 peeked data after the cursor position and a position through which the
@@ -493,13 +504,18 @@ positions beyond the metadata transaction's read version are explicitly
 classified as invalid. A proven delivered cursor remains valid if that read
 version briefly lags the tagged-log frontier. After an owner restart, callers
 must resume from their last acknowledged checkpoint; an unacknowledged later
-position can be replayed from that durable checkpoint.
-When no later version is available, `consume()` is intentionally a long poll:
-it remains pending until the tagged-log frontier advances, ownership changes,
-or the stream is removed. The server does not impose a fixed deadline because
-normal recovery can outlast an arbitrary request timeout. Callers that need a
-deadline may cancel or externally bound the returned future; cancellation
-releases the proxy's read demand immediately.
+position can be replayed from that durable checkpoint. Only one consume RPC may
+be active for a stream because all consumers would share the same durable
+acknowledgement frontier; overlapping logical consumers are rejected.
+
+When no later version is available, `consume()` is intentionally a client-side
+long poll. Each server request has a bounded
+`CDC_PROXY_CONSUME_POLL_TIMEOUT` lease; an idle lease returns an unchanged empty
+position and the native client transparently renews it. Ownership changes and
+stream removal still wake the current request immediately. Canceling the public
+future therefore leaves at most one server request, whose read demand is
+released when its bounded lease expires. Database-info changes unrelated to the
+stream do not abandon or duplicate that request.
 
 ## Acknowledgement and tag popping
 
@@ -521,6 +537,13 @@ The proxy recomputes these minima from durable active stream metadata and
 acknowledgement rows. It does not rely solely on its in-memory owned-stream
 set, because shared tags and replacement proxies must preserve the same global
 retention decision.
+
+Acknowledgement notifications are level-triggered and coalesced for at least
+`CDC_PROXY_POP_MIN_INTERVAL`. A notification received during a durable-state
+scan schedules one later pass but does not cancel the safe scan already in
+flight. Only replacement of the log-system generation cancels an outstanding
+pop attempt. This both guarantees progress under continuous acknowledgement
+traffic and bounds the frequency of the global metadata scan.
 
 ### Removing a stream
 
@@ -622,6 +645,12 @@ stream is rejected.
 allocation. Normal operation defaults to a larger tag pool; simulation may
 reduce it so shared-tag behavior is exercised frequently.
 
+Native CDC must be enabled only after every process in the cluster supports the
+`withNativeCdc` protocol version. Once streams or retired-pop records exist, a
+rollback must keep CDC-capable binaries available until those records have been
+consumed or removed and retired cleanup has completed. Disabling the knob stops
+new allocation but is not a rollback mechanism for already durable CDC state.
+
 ## Correctness properties
 
 The implementation is structured around the following properties:
@@ -687,13 +716,17 @@ The basic native CDC workload covers:
 * Targeted CDC proxy termination, durable reassignment, and recovery of stream
   service.
 * Errors for stale consume and acknowledgement requests after removal.
-* Creation and eventual collection of retired final-pop state.
+* Deterministic creation of retired final-pop state, transaction-system
+  recovery while that state is durable, and eventual collection afterward.
+* Bounded raw-plus-filtered proxy memory, consume-lease cleanup after client
+  cancellation and unrelated assignment changes, and rejection of concurrent
+  consumers for one stream.
 
 Unit coverage checks the CDC recovery-recruitment truth table with the feature
-enabled and disabled, both with and without durable CDC state. Because the knob
-is process-static, an end-to-end transition from enabled to disabled requires a
-separate restart-phase simulation rather than mutation within the basic
-workload.
+enabled and disabled, both with and without durable CDC state. The process-static
+knob transition is covered by a paired restart simulation that creates durable
+CDC work while enabled, restarts with registration disabled, and drains the
+existing stream and its retired state.
 
 The shared-tag workload forces streams to share routing tags and verifies both
 range filtering and acknowledgement coordination. In particular, removing one

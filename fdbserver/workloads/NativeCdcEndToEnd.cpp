@@ -28,7 +28,10 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/NativeCdc.h"
 #include "fdbclient/SystemData.h"
+#include "fdbserver/core/RecoveryState.h"
+#include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/tester/workloads.h"
+#include "fdbrpc/simulator.h"
 #include "flow/DeterministicRandom.h"
 
 class NativeCdcEndToEndWorkload : public TestWorkload {
@@ -62,6 +65,9 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	bool testProxyReplacement;
 	bool testMemoryBound;
 	bool testDelayedRetention;
+	bool testRetiredRecovery;
+	bool prepareRestartDrain;
+	bool drainAfterRestart;
 	int memoryTestValueBytes;
 	double retentionValidationDelay;
 	double drainProbability;
@@ -401,6 +407,139 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		co_await timeoutError(consumer->acknowledge(), operationTimeout);
 	}
 
+	Future<CDCProxyBufferStatus> getProxyStatus(CDCProxyInterface proxy) {
+		co_return co_await timeoutError(proxy.getBufferStatusForTesting.getReply(GetCDCProxyBufferStatusRequest()),
+		                                operationTimeout);
+	}
+
+	Future<Void> startBlockedConsume(Reference<NativeCdcConsumer> consumer,
+	                                 CDCProxyInterface proxy,
+	                                 Future<CDCConsumeReply>* outstanding) {
+		*outstanding = consumer->consume();
+		const double deadline = now() + operationTimeout;
+		while (true) {
+			CDCProxyBufferStatus status = co_await getProxyStatus(proxy);
+			if (status.activeConsumeRequests > 0 && status.readDemand > 0) {
+				co_return;
+			}
+			if (outstanding->isReady()) {
+				co_await *outstanding;
+				co_await timeoutError(consumer->acknowledge(), operationTimeout);
+				*outstanding = consumer->consume();
+			}
+			ASSERT_LT(now(), deadline);
+			co_await delay(0.01);
+		}
+	}
+
+	Future<Void> waitForNoActiveConsumes(CDCProxyInterface proxy) {
+		const double deadline = now() + operationTimeout;
+		while (true) {
+			CDCProxyBufferStatus status = co_await getProxyStatus(proxy);
+			if (status.activeConsumeRequests == 0 && status.readDemand == 0) {
+				co_return;
+			}
+			ASSERT_LT(now(), deadline);
+			co_await delay(0.01);
+		}
+	}
+
+	Future<Void> expectConcurrentConsumeRejected(CDCProxyInterface proxy, CDCCursor cursor) {
+		Optional<Error> error;
+		try {
+			co_await throwErrorOr(proxy.consume.tryGetReply(CDCConsumeRequest(cursor)));
+		} catch (Error& e) {
+			error = e;
+		}
+		ASSERT(error.present());
+		ASSERT_EQ(error.get().code(), error_code_client_invalid_operation);
+	}
+
+	Future<Void> validateConsumeLeaseAndExclusivity(Database cx, CDCProxyInterface proxy) {
+		ASSERT(!streams.empty());
+		const CDCCursor cursor = streams.front().consumer->position();
+		Reference<NativeCdcConsumer> idleConsumer = resumeNativeCdcConsumer(cx, cursor);
+		Future<CDCConsumeReply> idleConsume;
+		co_await startBlockedConsume(idleConsumer, proxy, &idleConsume);
+
+		// Assignment publications for unrelated streams used to abandon the client reply without canceling the
+		// corresponding server actor. The active request and read demand must remain bounded at one.
+		for (int i = 0; i < 4; ++i) {
+			Key name = Key(StringRef(format("native-cdc-e2e/lease/%04d", i)));
+			Key key = keyForIndex(keyCount / 2);
+			co_await timeoutError(registerNativeCdcStreamClient(cx, name, KeyRangeRef(key, keyAfter(key))),
+			                      operationTimeout);
+			CDCProxyBufferStatus status = co_await getProxyStatus(proxy);
+			ASSERT_LE(status.activeConsumeRequests, 1);
+			ASSERT_LE(status.readDemand, 1);
+			co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
+			status = co_await getProxyStatus(proxy);
+			ASSERT_LE(status.activeConsumeRequests, 1);
+			ASSERT_LE(status.readDemand, 1);
+		}
+
+		idleConsume.cancel();
+		co_await waitForNoActiveConsumes(proxy);
+
+		CDCCursor currentCursor = idleConsumer->position();
+		Future<ErrorOr<CDCConsumeReply>> first;
+		const double deadline = now() + operationTimeout;
+		bool blocked = false;
+		while (!blocked) {
+			first = proxy.consume.tryGetReply(CDCConsumeRequest(currentCursor));
+			double activeSince = -1;
+			while (!first.isReady()) {
+				const CDCProxyBufferStatus status = co_await getProxyStatus(proxy);
+				if (status.activeConsumeRequests > 0 && status.readDemand > 0) {
+					if (activeSince < 0) {
+						activeSince = now();
+					}
+					if (now() - activeSince >= 1.0) {
+						blocked = true;
+						break;
+					}
+				} else {
+					activeSince = -1;
+				}
+				ASSERT_LT(now(), deadline);
+				co_await delay(0.01);
+			}
+			if (!blocked) {
+				ErrorOr<CDCConsumeReply> completed = co_await first;
+				ASSERT(!completed.isError());
+				currentCursor.lastConsumedVersion = completed.get().lastConsumedVersion;
+			}
+		}
+		co_await expectConcurrentConsumeRejected(proxy, currentCursor);
+		first.cancel();
+		co_await waitForNoActiveConsumes(proxy);
+	}
+
+	Future<Void> requestPopsUntilStopped(CDCProxyInterface proxy, Reference<AsyncVar<bool>> stopped) {
+		while (!stopped->get()) {
+			co_await proxy.setPopsPausedForTesting.getReply(SetCDCProxyPopsPausedRequest(false));
+			co_await delay(0);
+		}
+	}
+
+	Future<Void> validatePopProgressUnderContinuousRequests(CDCProxyInterface proxy) {
+		const CDCProxyBufferStatus initial = co_await getProxyStatus(proxy);
+		Reference<AsyncVar<bool>> stopped = makeReference<AsyncVar<bool>>(false);
+		Future<Void> requester = requestPopsUntilStopped(proxy, stopped);
+		const double deadline = now() + operationTimeout;
+		while (true) {
+			const CDCProxyBufferStatus status = co_await getProxyStatus(proxy);
+			if (status.popCompletions > initial.popCompletions) {
+				ASSERT_GT(status.popRequests, initial.popRequests);
+				break;
+			}
+			ASSERT_LT(now(), deadline);
+			co_await delay(0.01);
+		}
+		stopped->set(true);
+		co_await timeoutError(requester, operationTimeout);
+	}
+
 	Future<Void> validateProxyMemoryBound(Database cx) {
 		ASSERT(!streams.empty());
 		const Key key = keyForIndex(keyCount / 2);
@@ -428,8 +567,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		CDCProxyBufferStatus status;
 		const double deadline = now() + operationTimeout;
 		while (true) {
-			status = co_await timeoutError(proxy.getBufferStatusForTesting.getReply(GetCDCProxyBufferStatusRequest()),
-			                               operationTimeout);
+			status = co_await getProxyStatus(proxy);
 			if (completed->get() > 0 && (completed->get() == static_cast<int>(streams.size()) || status.waiters > 0)) {
 				break;
 			}
@@ -439,17 +577,20 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		ASSERT_GT(status.bufferedBytes, 0);
 		ASSERT_LE(status.bufferedBytes, status.bufferLimit);
 		ASSERT_LE(status.activePermits, status.bufferLimit);
+		ASSERT_LE(status.peakActivePermits, status.bufferLimit);
 		ASSERT_GE(status.activePermits, status.bufferedBytes);
 
 		releaseAcknowledgements.send(Void());
 		co_await timeoutError(waitForAll(consumers), operationTimeout);
-		status = co_await timeoutError(proxy.getBufferStatusForTesting.getReply(GetCDCProxyBufferStatusRequest()),
-		                               operationTimeout);
+		status = co_await getProxyStatus(proxy);
 		ASSERT_EQ(status.bufferedBytes, 0);
 		ASSERT_LE(status.activePermits, status.bufferLimit);
+		ASSERT_LE(status.peakActivePermits, status.bufferLimit);
+		co_await validateConsumeLeaseAndExclusivity(cx, proxy);
+		co_await validatePopProgressUnderContinuousRequests(proxy);
 	}
 
-	Future<Void> waitForRetiredTagCleanup(Database cx) {
+	Future<Void> waitForRetiredTagState(Database cx, bool present) {
 		Transaction tr(cx);
 		while (true) {
 			Error err;
@@ -458,7 +599,8 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				RangeResult markers = co_await tr.getRange(cdcRetiredTagPopKeys, 1);
 				RangeResult versions = co_await tr.getRange(cdcRetiredTagPopVersionKeys, 1);
-				if (markers.empty() && versions.empty()) {
+				if ((present && !markers.empty() && !versions.empty()) ||
+				    (!present && markers.empty() && versions.empty())) {
 					co_return;
 				}
 				tr.reset();
@@ -469,6 +611,110 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			}
 			co_await tr.onError(err);
 		}
+	}
+
+	Future<Void> waitForRetiredTagCleanup(Database cx) { return waitForRetiredTagState(cx, false); }
+
+	Future<Void> setAllProxyPopsPaused(Database cx, bool paused) {
+		std::vector<CDCProxyInterface> proxies;
+		while (proxies.empty()) {
+			Future<Void> changed = cx->clientInfo->onChange();
+			proxies = cx->clientInfo->get().cdcProxies;
+			if (proxies.empty()) {
+				co_await changed;
+			}
+		}
+		std::vector<Future<Void>> requests;
+		requests.reserve(proxies.size());
+		for (const auto& proxy : proxies) {
+			requests.push_back(proxy.setPopsPausedForTesting.getReply(SetCDCProxyPopsPausedRequest(paused)));
+		}
+		co_await timeoutError(waitForAll(requests), operationTimeout);
+	}
+
+	Future<Void> waitForTransactionSystemRecoveryAfter(uint64_t recoveryCount) {
+		while (dbInfo->get().recoveryCount <= recoveryCount ||
+		       dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+			co_await dbInfo->onChange();
+		}
+	}
+
+	Future<Void> waitForTransactionSystemAvailable() {
+		while (dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+			co_await dbInfo->onChange();
+		}
+	}
+
+	Future<Void> forceTransactionSystemRecovery() {
+		ASSERT(g_network->isSimulated());
+		const uint64_t recoveryCount = dbInfo->get().recoveryCount;
+		while (true) {
+			const auto masterZone = dbInfo->get().master.locality.zoneId();
+			if (g_simulator->killZone(masterZone, ISimulator::KillType::Reboot, true)) {
+				break;
+			}
+			co_await dbInfo->onChange();
+		}
+		co_await timeoutError(waitForTransactionSystemRecoveryAfter(recoveryCount), operationTimeout);
+	}
+
+	Future<Void> validateRetiredCleanupAcrossRecovery(Database cx) {
+		ASSERT_EQ(streams.size(), 1);
+		co_await timeoutError(waitForTransactionSystemAvailable(), operationTimeout);
+		co_await setAllProxyPopsPaused(cx, true);
+		co_await timeoutError(removeNativeCdcStreamClient(cx, streams.back().name), operationTimeout);
+		streams.clear();
+		co_await timeoutError(waitForRetiredTagState(cx, true), operationTimeout);
+		TraceEvent("NativeCdcRetiredMarkerCreated").log();
+
+		co_await forceTransactionSystemRecovery();
+		TraceEvent("NativeCdcRetiredRecoveryComplete").log();
+		co_await setAllProxyPopsPaused(cx, false);
+		co_await timeoutError(waitForRetiredTagCleanup(cx), operationTimeout);
+		TraceEvent("NativeCdcRetiredCleanupComplete").log();
+	}
+
+	Future<Void> prepareRestartDrainState(Database cx) {
+		ASSERT_EQ(streams.size(), 1);
+		co_await writeValue(cx, keyForIndex(keyCount / 2), "native-cdc-restart-drain"_sr);
+	}
+
+	Future<Void> drainRestartState(Database cx) {
+		while (cx->clientInfo->get().nativeCdcEnabled) {
+			co_await cx->clientInfo->onChange();
+		}
+		const Key name = "native-cdc-e2e/stream/0000"_sr;
+		Reference<NativeCdcConsumer> consumer =
+		    co_await timeoutError(createNativeCdcConsumer(cx, name), operationTimeout);
+		bool observed = false;
+		while (!observed) {
+			CDCConsumeReply reply = co_await timeoutError(consumer->consume(), operationTimeout);
+			for (const auto& versioned : reply.mutations) {
+				for (const auto& mutation : versioned.mutations) {
+					if (mutation.type == MutationRef::SetValue && mutation.param1 == keyForIndex(keyCount / 2) &&
+					    mutation.param2 == "native-cdc-restart-drain"_sr) {
+						observed = true;
+					}
+				}
+			}
+			co_await timeoutError(consumer->acknowledge(), operationTimeout);
+		}
+		co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
+		co_await timeoutError(waitForRetiredTagCleanup(cx), operationTimeout);
+		const std::vector<NativeCdcStreamInfo> remainingStreams =
+		    co_await timeoutError(listNativeCdcStreamsClient(cx), operationTimeout);
+		ASSERT(remainingStreams.empty());
+
+		Optional<Error> registrationError;
+		try {
+			co_await timeoutError(
+			    registerNativeCdcStreamClient(cx, "native-cdc-e2e/disabled-registration"_sr, normalKeys),
+			    operationTimeout);
+		} catch (Error& e) {
+			registrationError = e;
+		}
+		ASSERT(registrationError.present());
+		ASSERT_EQ(registrationError.get().code(), error_code_client_invalid_operation);
 	}
 
 	void recordExpectedWrites(std::vector<std::pair<Key, Value>> const& values, Version committedVersion) {
@@ -592,11 +838,15 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		for (auto& stream : streams) {
 			co_await drainThrough(&stream, mostRecentWrite);
 		}
-		while (!streams.empty()) {
+		while (streams.size() > (testRetiredRecovery ? 1 : 0)) {
 			co_await timeoutError(removeNativeCdcStreamClient(cx, streams.back().name), operationTimeout);
 			streams.pop_back();
 		}
-		co_await timeoutError(waitForRetiredTagCleanup(cx), operationTimeout);
+		if (testRetiredRecovery) {
+			co_await validateRetiredCleanupAcrossRecovery(cx);
+		} else {
+			co_await timeoutError(waitForRetiredTagCleanup(cx), operationTimeout);
+		}
 	}
 
 public:
@@ -613,6 +863,9 @@ public:
 		testProxyReplacement = getOption(options, "testProxyReplacement"_sr, false);
 		testMemoryBound = getOption(options, "testMemoryBound"_sr, false);
 		testDelayedRetention = getOption(options, "testDelayedRetention"_sr, false);
+		testRetiredRecovery = getOption(options, "testRetiredRecovery"_sr, false);
+		prepareRestartDrain = getOption(options, "prepareRestartDrain"_sr, false);
+		drainAfterRestart = getOption(options, "drainAfterRestart"_sr, false);
 		memoryTestValueBytes = getOption(options, "memoryTestValueBytes"_sr, 1024);
 		retentionValidationDelay = getOption(options, "retentionValidationDelay"_sr, 0.0);
 		drainProbability = getOption(options, "drainProbability"_sr, 0.25);
@@ -627,6 +880,7 @@ public:
 		ASSERT_GE(assignmentPublicationChecks, 0);
 		ASSERT_GT(memoryTestValueBytes, 0);
 		ASSERT_GE(retentionValidationDelay, 0.0);
+		ASSERT(!(prepareRestartDrain && drainAfterRestart));
 	}
 
 	// RandomRangeLock can outlive this bounded CDC workload and mask its progress check.
@@ -636,12 +890,21 @@ public:
 		if (clientId != 0) {
 			return Void();
 		}
+		if (drainAfterRestart) {
+			return Void();
+		}
 		return initializeStreams(cx);
 	}
 
 	Future<Void> start(Database const& cx) override {
 		if (clientId != 0) {
 			return Void();
+		}
+		if (prepareRestartDrain) {
+			return prepareRestartDrainState(cx);
+		}
+		if (drainAfterRestart) {
+			return drainRestartState(cx);
 		}
 		return run(cx);
 	}

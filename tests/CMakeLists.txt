@@ -204,6 +204,11 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/NativeCdcAssignmentPublication.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcSharedTag.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcMemoryBound.toml)
+  add_fdb_test(TEST_FILES fast/NativeCdcRetiredRecovery.toml)
+  add_fdb_test(TEST_FILES fast/NativeCdcSatellite.toml)
+  add_fdb_test(
+    TEST_FILES fast/NativeCdcDisableRestart-1.toml
+    fast/NativeCdcDisableRestart-2.toml)
   add_fdb_test(TEST_FILES fast/RangeLockCycle.toml)
   add_fdb_test(TEST_FILES fast/ReadHotDetectionCorrectness.toml IGNORE) # TODO re-enable once read hot detection is enabled.
   add_fdb_test(TEST_FILES fast/ReportConflictingKeys.toml)
@@ -234,7 +239,6 @@ if(WITH_PYTHON)
 
   if (MULTIREGION_TEST)
     # ValidateStorage depends on WITH_ROCKSDB
-    add_fdb_test(TEST_FILES fast/NativeCdcSatellite.toml)
     add_fdb_test(TEST_FILES slow/DiskFailureCycle.toml)
     add_fdb_test(TEST_FILES rare/FailoverWithSSLag.toml)
     add_fdb_test(TEST_FILES rare/DcLag.toml)

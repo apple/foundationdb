@@ -163,12 +163,32 @@ struct CDCProxyBufferStatus {
 	constexpr static FileIdentifier file_identifier = 9770616;
 	int64_t bufferedBytes = 0;
 	int64_t activePermits = 0;
+	int64_t peakActivePermits = 0;
 	int64_t bufferLimit = 0;
 	int waiters = 0;
+	int activeConsumeRequests = 0;
+	int readDemand = 0;
+	int64_t popRequests = 0;
+	int64_t popAttempts = 0;
+	int64_t popCompletions = 0;
+	int64_t popCancellations = 0;
+	bool popsPaused = false;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, bufferedBytes, activePermits, bufferLimit, waiters);
+		serializer(ar,
+		           bufferedBytes,
+		           activePermits,
+		           peakActivePermits,
+		           bufferLimit,
+		           waiters,
+		           activeConsumeRequests,
+		           readDemand,
+		           popRequests,
+		           popAttempts,
+		           popCompletions,
+		           popCancellations,
+		           popsPaused);
 	}
 };
 
@@ -181,6 +201,22 @@ struct GetCDCProxyBufferStatusRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, reply);
+	}
+};
+
+struct SetCDCProxyPopsPausedRequest {
+	constexpr static FileIdentifier file_identifier = 1463231;
+	bool paused = false;
+	ReplyPromise<Void> reply;
+
+	SetCDCProxyPopsPausedRequest() = default;
+	explicit SetCDCProxyPopsPausedRequest(bool paused) : paused(paused) {}
+
+	bool verify() const { return true; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, paused, reply);
 	}
 };
 
@@ -197,6 +233,7 @@ struct CDCProxyInterface {
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<HaltCDCProxyRequest> haltForTesting;
 	RequestStream<GetCDCProxyBufferStatusRequest> getBufferStatusForTesting;
+	RequestStream<SetCDCProxyPopsPausedRequest> setPopsPausedForTesting;
 
 	UID id() const { return consume.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
@@ -217,6 +254,8 @@ struct CDCProxyInterface {
 			haltForTesting = RequestStream<HaltCDCProxyRequest>(consume.getEndpoint().getAdjustedEndpoint(5));
 			getBufferStatusForTesting =
 			    RequestStream<GetCDCProxyBufferStatusRequest>(consume.getEndpoint().getAdjustedEndpoint(6));
+			setPopsPausedForTesting =
+			    RequestStream<SetCDCProxyPopsPausedRequest>(consume.getEndpoint().getAdjustedEndpoint(7));
 		}
 	}
 
@@ -229,6 +268,7 @@ struct CDCProxyInterface {
 		streams.push_back(waitFailure.getReceiver());
 		streams.push_back(haltForTesting.getReceiver());
 		streams.push_back(getBufferStatusForTesting.getReceiver());
+		streams.push_back(setPopsPausedForTesting.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };

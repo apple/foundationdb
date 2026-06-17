@@ -70,6 +70,7 @@ struct LogSystemConsumer : ReferenceCounted<LogSystemConsumer> {
 	Future<Void> waitForPopped(Version upTo, Tag tag, int8_t popLocality = tagLocalityInvalid);
 	Future<Version> getTxsPoppedVersion();
 	Version getEnd() const;
+	Version getPeekEnd() const;
 	Tag getPseudoPopTag(Tag tag, ProcessClass::ClassType type) const;
 
 private:

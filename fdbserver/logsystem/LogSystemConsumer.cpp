@@ -946,6 +946,10 @@ Version LogSystemConsumer::getEnd() const {
 	return logSystem->getEnd();
 }
 
+Version LogSystemConsumer::getPeekEnd() const {
+	return logSystem->getPeekEnd();
+}
+
 Tag LogSystemConsumer::getPseudoPopTag(Tag tag, ProcessClass::ClassType type) const {
 	return logSystem->getPseudoPopTag(tag, type);
 }
