@@ -461,30 +461,41 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		}
 	}
 
-	Future<Void> startBlockedConsume(Reference<NativeCdcConsumer> consumer,
+	Future<CDCProxyBufferStatus> getCurrentProxyStatus(Database cx,
+	                                                   CDCStreamId streamId,
+	                                                   CDCProxyInterface* observedProxy) {
+		auto proxyStatus = co_await timeoutError(getAssignedProxyStatus(cx, streamId), operationTimeout);
+		updateObservedProxy(*observedProxy, proxyStatus.first);
+		co_return proxyStatus.second;
+	}
+
+	Future<Void> startBlockedConsume(Database cx,
+	                                 CDCStreamId streamId,
+	                                 Reference<NativeCdcConsumer> consumer,
 	                                 CDCProxyInterface proxy,
 	                                 Future<CDCConsumeReply>* outstanding) {
 		*outstanding = consumer->consume();
 		const double deadline = now() + operationTimeout;
 		while (true) {
-			CDCProxyBufferStatus status = co_await getProxyStatus(proxy);
-			if (status.activeConsumeRequests > 0 && status.readDemand > 0) {
-				co_return;
-			}
+			CDCProxyBufferStatus status = co_await getCurrentProxyStatus(cx, streamId, &proxy);
 			if (outstanding->isReady()) {
 				co_await *outstanding;
 				co_await timeoutError(consumer->acknowledge(), operationTimeout);
 				*outstanding = consumer->consume();
+				continue;
+			}
+			if (status.activeConsumeRequests > 0 && status.readDemand > 0) {
+				co_return;
 			}
 			ASSERT_LT(now(), deadline);
 			co_await delay(0.01);
 		}
 	}
 
-	Future<Void> waitForNoActiveConsumes(CDCProxyInterface proxy) {
+	Future<Void> waitForNoActiveConsumes(Database cx, CDCStreamId streamId, CDCProxyInterface* proxy) {
 		const double deadline = now() + operationTimeout;
 		while (true) {
-			CDCProxyBufferStatus status = co_await getProxyStatus(proxy);
+			CDCProxyBufferStatus status = co_await getCurrentProxyStatus(cx, streamId, proxy);
 			if (status.activeConsumeRequests == 0 && status.readDemand == 0) {
 				co_return;
 			}
@@ -504,13 +515,14 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		ASSERT_EQ(error.get().code(), error_code_client_invalid_operation);
 	}
 
-	Future<Void> validateConsumeLeaseAndExclusivity(Database cx, CDCProxyInterface proxy) {
+	Future<Void> validateConsumeLeaseAndExclusivity(Database cx, CDCStreamId streamId, CDCProxyInterface* proxy) {
 		ASSERT(!streams.empty());
 		// Acknowledgements advance one durable frontier for the whole stream. Exercise cancellation and exclusivity on
 		// the tracked consumer so later workload phases do not retain a cursor behind acknowledgements made here.
 		Reference<NativeCdcConsumer> idleConsumer = streams.front().consumer;
+		const Version idleStartVersion = idleConsumer->position().lastConsumedVersion;
 		Future<CDCConsumeReply> idleConsume;
-		co_await startBlockedConsume(idleConsumer, proxy, &idleConsume);
+		co_await startBlockedConsume(cx, streamId, idleConsumer, *proxy, &idleConsume);
 
 		// Assignment publications for unrelated streams used to abandon the client reply without canceling the
 		// corresponding server actor. The active request and read demand must remain bounded at one.
@@ -519,25 +531,35 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			Key key = keyForIndex(keyCount / 2);
 			co_await timeoutError(registerNativeCdcStreamClient(cx, name, KeyRangeRef(key, keyAfter(key))),
 			                      operationTimeout);
-			CDCProxyBufferStatus status = co_await getProxyStatus(proxy);
+			CDCProxyBufferStatus status = co_await getCurrentProxyStatus(cx, streamId, proxy);
 			ASSERT_LE(status.activeConsumeRequests, 1);
 			ASSERT_LE(status.readDemand, 1);
 			co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
-			status = co_await getProxyStatus(proxy);
+			status = co_await getCurrentProxyStatus(cx, streamId, proxy);
 			ASSERT_LE(status.activeConsumeRequests, 1);
 			ASSERT_LE(status.readDemand, 1);
 		}
 
-		idleConsume.cancel();
-		co_await waitForNoActiveConsumes(proxy);
+		// The long poll can complete while unrelated assignment publications are in flight. Preserve any resulting
+		// cursor progress before direct proxy requests so a replacement owner can validate it.
+		if (idleConsume.isReady()) {
+			co_await idleConsume;
+			if (idleConsumer->position().lastConsumedVersion > idleStartVersion) {
+				co_await timeoutError(idleConsumer->acknowledge(), operationTimeout);
+			}
+		} else {
+			idleConsume.cancel();
+		}
+		co_await waitForNoActiveConsumes(cx, streamId, proxy);
 
 		CDCCursor currentCursor = idleConsumer->position();
 		// Send both requests without yielding. The first request marks the stream active before its metadata read, so
 		// the second request deterministically exercises server-side exclusivity even while versions advance.
-		Future<ErrorOr<CDCConsumeReply>> first = proxy.consume.tryGetReply(CDCConsumeRequest(currentCursor));
-		co_await expectConcurrentConsumeRejected(proxy, currentCursor);
+		co_await getCurrentProxyStatus(cx, streamId, proxy);
+		Future<ErrorOr<CDCConsumeReply>> first = proxy->consume.tryGetReply(CDCConsumeRequest(currentCursor));
+		co_await expectConcurrentConsumeRejected(*proxy, currentCursor);
 		first.cancel();
-		co_await waitForNoActiveConsumes(proxy);
+		co_await waitForNoActiveConsumes(cx, streamId, proxy);
 	}
 
 	Future<Void> requestPopsUntilStopped(CDCProxyInterface proxy, Reference<AsyncVar<bool>> stopped) {
@@ -614,7 +636,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		ASSERT_EQ(status.bufferedBytes, 0);
 		ASSERT_LE(status.activePermits, status.bufferLimit);
 		ASSERT_LE(status.peakActivePermits, status.bufferLimit);
-		co_await validateConsumeLeaseAndExclusivity(cx, proxy);
+		co_await validateConsumeLeaseAndExclusivity(cx, firstStreamId, &proxy);
 		co_await validatePopProgressUnderContinuousRequests(proxy);
 	}
 
