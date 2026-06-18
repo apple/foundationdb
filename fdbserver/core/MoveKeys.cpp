@@ -1591,7 +1591,7 @@ static Future<Void> finishMoveKeys(Database occ,
 					}
 
 					// Wait for all storage server moves, and explicitly swallow errors for tss ones with
-					// waitForAllReady. The 15s timeout is safe here — no transaction clock is ticking.
+					// waitForAllReady. A long timeout is safe here — no transaction clock is ticking.
 					co_await timeout(waitForAll(serverReady) && waitForAllReady(tssReady),
 					                 SERVER_KNOBS->SERVER_READY_QUORUM_TIMEOUT,
 					                 Void(),
