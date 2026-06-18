@@ -663,7 +663,10 @@ paths likewise continue handling durable CDC state. This is necessary because
 disabling new use of a feature cannot safely abandon log-retention obligations
 for already registered or recently removed streams. An idempotent registration
 of an existing name is also allowed while disabled; only allocation of a new
-stream is rejected.
+stream is rejected. Admission follows the cluster-controller-published feature
+state rather than a serving proxy's process-local knob, so a proxy retained to
+drain durable state cannot admit a new stream because its local configuration
+differs.
 
 `NATIVE_CDC_TAG_COUNT` controls the bounded tag pool used for new stream
 allocation and must be between 1 and 65,536 inclusive. Invalid values reject

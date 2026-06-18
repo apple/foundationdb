@@ -41,8 +41,8 @@ bool validNativeCdcTagCount(int tagCount) {
 	       static_cast<uint64_t>(tagCount) <= static_cast<uint64_t>(std::numeric_limits<uint16_t>::max()) + 1;
 }
 
-void validateNativeCdcEnabled() {
-	if (!CLIENT_KNOBS->ENABLE_NATIVE_CDC) {
+void validateNativeCdcEnabled(bool enabled) {
+	if (!enabled) {
 		CODE_PROBE(true, "Native CDC registration rejected while feature disabled", probe::decoration::rare);
 		throw client_invalid_operation();
 	}
@@ -387,7 +387,7 @@ Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys
 
 			// Disabling CDC stops new admission, but existing registrations and
 			// owner repair must remain available so durable streams can drain.
-			validateNativeCdcEnabled();
+			validateNativeCdcEnabled(cx->clientInfo->get().nativeCdcEnabled);
 			NativeCdcIdentifierAllocator allocator;
 			co_await observeNativeCdcMetadata(&tr, &allocator);
 			const auto [streamId, tag] = allocator.allocate();
@@ -652,19 +652,19 @@ Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, KeyRang
 			registrationEnabled = clientInfo.nativeCdcEnabled;
 			clientInfoId = clientInfo.id;
 		}
-		if (!selectedProxy.present()) {
-			if (!registrationEnabled) {
-				Optional<CDCStreamId> existingStream = co_await findNativeCdcStreamId(cx, name);
-				if (cx->clientInfo->get().id != clientInfoId) {
-					CODE_PROBE(true,
-					           "Native CDC registration retries after client info changes during existence check",
-					           probe::decoration::rare);
-					continue;
-				}
-				if (!existingStream.present()) {
-					throw client_invalid_operation();
-				}
+		if (!registrationEnabled) {
+			Optional<CDCStreamId> existingStream = co_await findNativeCdcStreamId(cx, name);
+			if (cx->clientInfo->get().id != clientInfoId) {
+				CODE_PROBE(true,
+				           "Native CDC registration retries after client info changes during existence check",
+				           probe::decoration::rare);
+				continue;
 			}
+			if (!existingStream.present()) {
+				validateNativeCdcEnabled(registrationEnabled);
+			}
+		}
+		if (!selectedProxy.present()) {
 			co_await proxyChanged;
 			continue;
 		}
