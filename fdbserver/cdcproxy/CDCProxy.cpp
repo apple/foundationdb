@@ -953,8 +953,13 @@ Future<CDCBufferTagPassResult> CDCProxy::bufferTagPass(Reference<CDCBufferedTag>
 	for (const auto& [streamId, batch] : batches) {
 		materializedBytes += batch.bufferedBytes;
 	}
-	ASSERT_EQ(materializedBytes, selection.selectedBytes);
-	ASSERT_EQ(rawPeekReservation + materializedBytes, reservation.remaining);
+	// An acknowledgement or removal can advance a selected stream while this pass waits for exact capacity. The
+	// materialization pass rechecks current stream frontiers, so it may legitimately produce less than its estimate.
+	ASSERT_LE(materializedBytes, selection.selectedBytes);
+	CODE_PROBE(materializedBytes < selection.selectedBytes,
+	           "CDC proxy drops acknowledged mutations while waiting for buffer capacity",
+	           probe::decoration::rare);
+	ASSERT_GE(reservation.remaining, rawPeekReservation + materializedBytes);
 
 	int64_t acceptedBytes = 0;
 	for (auto& [streamId, batch] : batches) {
@@ -964,7 +969,9 @@ Future<CDCBufferTagPassResult> CDCProxy::bufferTagPass(Reference<CDCBufferedTag>
 			addBufferedBatch(stream->second, std::move(batch));
 		}
 	}
-	reservation.release(rawPeekReservation + materializedBytes - acceptedBytes);
+	ASSERT_LE(acceptedBytes, materializedBytes);
+	ASSERT_LE(acceptedBytes, reservation.remaining);
+	reservation.release(reservation.remaining - acceptedBytes);
 	// Buffered mutations own these permits until acknowledgement or stream removal.
 	reservation.remaining = 0;
 	ASSERT_LE(bufferedBytes, bufferLimit);
