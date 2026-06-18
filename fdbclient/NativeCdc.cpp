@@ -846,6 +846,13 @@ TEST_CASE("/NativeCDC/LifecycleAllocation") {
 	ASSERT_EQ(nextId, 10);
 	ASSERT_EQ(nextTag, Tag(tagLocalityCDC, 1));
 
+	NativeCdcIdentifierAllocator publishedPoolAllocator;
+	publishedPoolAllocator.observeTag(Tag(tagLocalityCDC, 0));
+	// The cluster-controller-published pool is authoritative even when it differs from this process's knob.
+	auto [publishedPoolId, publishedPoolTag] = publishedPoolAllocator.allocate(1);
+	ASSERT_EQ(publishedPoolId, 1);
+	ASSERT_EQ(publishedPoolTag, Tag(tagLocalityCDC, 0));
+
 	NativeCdcIdentifierAllocator fullPoolAllocator;
 	for (uint32_t tagId = 0; tagId < static_cast<uint32_t>(CLIENT_KNOBS->NATIVE_CDC_TAG_COUNT); ++tagId) {
 		fullPoolAllocator.observeTag(Tag(tagLocalityCDC, static_cast<uint16_t>(tagId)));
