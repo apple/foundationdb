@@ -204,14 +204,16 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		}
 	}
 
-	Future<Void> addStream(Database cx) {
+	Future<Void> addStream(Database cx, KeyRange keys) {
 		StreamState stream;
 		stream.name = Key(StringRef(format("native-cdc-e2e/stream/%04d", nextStreamNumber++)));
-		stream.keys = randomOverlappingRange();
+		stream.keys = std::move(keys);
 		co_await timeoutError(registerNativeCdcStreamClient(cx, stream.name, stream.keys), operationTimeout);
 		stream.consumer = co_await timeoutError(createNativeCdcConsumer(cx, stream.name), operationTimeout);
 		streams.push_back(std::move(stream));
 	}
+
+	Future<Void> addStream(Database cx) { return addStream(cx, randomOverlappingRange()); }
 
 	Future<Void> initializeStreams(Database cx) {
 		for (int i = 0; i < initialStreamCount; ++i) {
@@ -223,6 +225,12 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			retentionMarkerVersion = co_await writeValues(cx, marker);
 			recordExpectedWrites(marker, retentionMarkerVersion);
 		}
+	}
+
+	Future<Void> initializeOversizedPeekStreams(Database cx) {
+		ASSERT_GE(keyCount, 4);
+		co_await addStream(cx, KeyRange(KeyRangeRef(keyForIndex(0), keyForIndex(2))));
+		co_await addStream(cx, KeyRange(KeyRangeRef(keyForIndex(2), keyForIndex(4))));
 	}
 
 	Future<Void> validatePublicLifecycle(Database cx) {
@@ -677,28 +685,39 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	}
 
 	Future<Void> validateOversizedPeek(Database cx) {
-		ASSERT_EQ(streams.size(), 1);
-		const Key key = keyForIndex(keyCount / 2);
-		const Value value(std::string(memoryTestValueBytes, 'x'));
-		const Version committed = co_await writeValue(cx, key, value);
-		bool rejected = false;
-		const double deadline = now() + operationTimeout;
-		while (streams.front().consumer->position().lastConsumedVersion < committed) {
-			try {
-				co_await timeoutError(streams.front().consumer->consume(), operationTimeout);
-				co_await timeoutError(streams.front().consumer->acknowledge(), operationTimeout);
-			} catch (Error& e) {
-				if (e.code() != error_code_server_overloaded) {
-					throw;
+		ASSERT_EQ(streams.size(), 2);
+		// Both mutations share one CDC tag and commit version, so the raw TLog reply exceeds its cap. Each mutation
+		// matches only one stream and fits that stream's filtered-batch limit, keeping the rejection path unambiguous.
+		std::vector<std::pair<Key, Value>> values;
+		values.emplace_back(keyForIndex(1), Value(std::string(memoryTestValueBytes, 'x')));
+		values.emplace_back(keyForIndex(3), Value(std::string(memoryTestValueBytes, 'y')));
+		ASSERT(streams[0].keys.contains(values[0].first));
+		ASSERT(!streams[0].keys.contains(values[1].first));
+		ASSERT(!streams[1].keys.contains(values[0].first));
+		ASSERT(streams[1].keys.contains(values[1].first));
+		const Version committed = co_await writeValues(cx, values);
+		int rejected = 0;
+		for (auto& stream : streams) {
+			const double deadline = now() + operationTimeout;
+			while (stream.consumer->position().lastConsumedVersion < committed) {
+				try {
+					co_await timeoutError(stream.consumer->consume(), operationTimeout);
+					co_await timeoutError(stream.consumer->acknowledge(), operationTimeout);
+				} catch (Error& e) {
+					if (e.code() != error_code_server_overloaded) {
+						throw;
+					}
+					++rejected;
+					break;
 				}
-				rejected = true;
-				break;
+				ASSERT_LT(now(), deadline);
 			}
-			ASSERT_LT(now(), deadline);
 		}
-		ASSERT(rejected);
+		ASSERT_EQ(rejected, streams.size());
 		CODE_PROBE(true, "Native CDC rejects a TLog response larger than its raw peek reservation");
-		co_await timeoutError(removeNativeCdcStreamClient(cx, streams.front().name), operationTimeout);
+		for (const auto& stream : streams) {
+			co_await timeoutError(removeNativeCdcStreamClient(cx, stream.name), operationTimeout);
+		}
 		streams.clear();
 		co_await timeoutError(waitForRetiredTagCleanup(cx), operationTimeout);
 	}
@@ -1075,6 +1094,9 @@ public:
 		}
 		if (prepareRestartDrain) {
 			return prepareRestartDrainSetup(cx);
+		}
+		if (testOversizedPeek) {
+			return initializeOversizedPeekStreams(cx);
 		}
 		return initializeStreams(cx);
 	}

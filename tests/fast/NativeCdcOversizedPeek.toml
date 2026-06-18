@@ -19,12 +19,13 @@ connectionFailuresDisableDuration = 1000000
 
     [[test.workload]]
     testName = 'NativeCdcEndToEnd'
-    initialStreamCount = 1
-    minStreamCount = 1
-    maxStreamCount = 1
+    initialStreamCount = 2
+    minStreamCount = 2
+    maxStreamCount = 2
     keyCount = 4
     writesPerRound = 1
     rounds = 0
     testOversizedPeek = true
-    memoryTestValueBytes = 16384
+    # Two disjoint streams each receive one mutation that fits the filtered budget; their shared tagged reply does not.
+    memoryTestValueBytes = 3072
     operationTimeout = 120.0
