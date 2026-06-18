@@ -673,7 +673,9 @@ allocation and must be between 1 and 65,536 inclusive. Invalid values reject
 new registration and are not used to size recovery routing tables; tags already
 present in durable metadata remain recoverable. Normal operation defaults to a
 larger tag pool; simulation may reduce it so shared-tag behavior is exercised
-frequently.
+frequently. The cluster controller publishes the effective count in
+`ClientDBInfo`, and CDC proxies allocate from that published value rather than
+their process-local copy of the knob.
 
 Native CDC must be enabled only after every process in the cluster supports the
 `withNativeCdc` protocol version. Once streams or retired-pop records exist, a

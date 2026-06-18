@@ -16,12 +16,14 @@ template struct NetSAV<GetKeyServerLocationsReply>;
 TEST_CASE("/NativeCDC/ClientDBInfoProtocolGating") {
 	ClientDBInfo source;
 	source.nativeCdcEnabled = true;
+	source.nativeCdcTagCount = 256;
 	source.streamToCDCProxyId.emplace(1, UID(2, 3));
 
 	Standalone<StringRef> legacy =
 	    BinaryWriter::toValue(source, IncludeVersion(ProtocolVersion::withMutationChecksum()));
 	ClientDBInfo legacyDecoded = BinaryReader::fromStringRef<ClientDBInfo>(legacy, IncludeVersion());
 	ASSERT(!legacyDecoded.nativeCdcEnabled);
+	ASSERT_EQ(legacyDecoded.nativeCdcTagCount, 0);
 	ASSERT(legacyDecoded.cdcProxies.empty());
 	ASSERT(legacyDecoded.streamToCDCProxyId.empty());
 
@@ -29,6 +31,7 @@ TEST_CASE("/NativeCDC/ClientDBInfoProtocolGating") {
 	    BinaryWriter::toValue(source, IncludeVersion(ProtocolVersion::withNativeCdc()));
 	ClientDBInfo nativeCdcDecoded = BinaryReader::fromStringRef<ClientDBInfo>(nativeCdc, IncludeVersion());
 	ASSERT(nativeCdcDecoded.nativeCdcEnabled);
+	ASSERT_EQ(nativeCdcDecoded.nativeCdcTagCount, source.nativeCdcTagCount);
 	ASSERT_EQ(nativeCdcDecoded.streamToCDCProxyId, source.streamToCDCProxyId);
 	return Void();
 }

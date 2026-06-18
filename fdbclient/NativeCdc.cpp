@@ -64,20 +64,20 @@ public:
 		++tagStreamCounts[tag.id];
 	}
 
-	std::pair<CDCStreamId, Tag> allocate() const {
+	std::pair<CDCStreamId, Tag> allocate(int tagCount) const {
 		if (sawStream && maxStreamId == std::numeric_limits<CDCStreamId>::max()) {
 			throw operation_failed();
 		}
 
 		const CDCStreamId streamId = sawStream ? maxStreamId + 1 : 1;
-		if (!validNativeCdcTagCount(CLIENT_KNOBS->NATIVE_CDC_TAG_COUNT)) {
+		if (!validNativeCdcTagCount(tagCount)) {
 			throw invalid_option_value();
 		}
 		uint32_t leastStreams = std::numeric_limits<uint32_t>::max();
 		uint16_t selectedTagId = 0;
 		// TODO: Use data-distributor-observed per-tag write throughput to rebalance CDC tags, including
 		// migrating active streams with versioned tag-history assignments.
-		for (uint32_t tagId = 0; tagId < static_cast<uint32_t>(CLIENT_KNOBS->NATIVE_CDC_TAG_COUNT); ++tagId) {
+		for (uint32_t tagId = 0; tagId < static_cast<uint32_t>(tagCount); ++tagId) {
 			auto count = tagStreamCounts.find(static_cast<uint16_t>(tagId));
 			const uint32_t streamCount = count == tagStreamCounts.end() ? 0 : count->second;
 			if (streamCount < leastStreams) {
@@ -390,7 +390,7 @@ Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys
 			validateNativeCdcEnabled(cx->clientInfo->get().nativeCdcEnabled);
 			NativeCdcIdentifierAllocator allocator;
 			co_await observeNativeCdcMetadata(&tr, &allocator);
-			const auto [streamId, tag] = allocator.allocate();
+			const auto [streamId, tag] = allocator.allocate(cx->clientInfo->get().nativeCdcTagCount);
 			// The read version is a conservative lower bound for tag routing.
 			// The versionstamped minimum below is the commit version, and stream
 			// initialization takes their maximum before exposing mutations.
@@ -835,14 +835,14 @@ TEST_CASE("/NativeCDC/LifecycleAllocation") {
 	ASSERT(!validNativeCdcTagCount(std::numeric_limits<uint16_t>::max() + 2u));
 
 	NativeCdcIdentifierAllocator allocator;
-	auto [initialId, initialTag] = allocator.allocate();
+	auto [initialId, initialTag] = allocator.allocate(CLIENT_KNOBS->NATIVE_CDC_TAG_COUNT);
 	ASSERT_EQ(initialId, 1);
 	ASSERT_EQ(initialTag, Tag(tagLocalityCDC, 0));
 
 	allocator.observeStreamId(9);
 	allocator.observeTag(initialTag);
 	allocator.observeTag(Tag(tagLocalityCDC, 2));
-	auto [nextId, nextTag] = allocator.allocate();
+	auto [nextId, nextTag] = allocator.allocate(CLIENT_KNOBS->NATIVE_CDC_TAG_COUNT);
 	ASSERT_EQ(nextId, 10);
 	ASSERT_EQ(nextTag, Tag(tagLocalityCDC, 1));
 
@@ -850,7 +850,7 @@ TEST_CASE("/NativeCDC/LifecycleAllocation") {
 	for (uint32_t tagId = 0; tagId < static_cast<uint32_t>(CLIENT_KNOBS->NATIVE_CDC_TAG_COUNT); ++tagId) {
 		fullPoolAllocator.observeTag(Tag(tagLocalityCDC, static_cast<uint16_t>(tagId)));
 	}
-	auto [sharedId, sharedTag] = fullPoolAllocator.allocate();
+	auto [sharedId, sharedTag] = fullPoolAllocator.allocate(CLIENT_KNOBS->NATIVE_CDC_TAG_COUNT);
 	ASSERT_EQ(sharedId, 1);
 	ASSERT_EQ(sharedTag, Tag(tagLocalityCDC, 0));
 

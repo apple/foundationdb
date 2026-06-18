@@ -114,6 +114,7 @@ struct ClientDBInfo {
 	std::vector<GrvProxyInterface> grvProxies;
 	std::vector<CommitProxyInterface> commitProxies;
 	bool nativeCdcEnabled = false;
+	int nativeCdcTagCount = 0;
 	std::vector<CDCProxyInterface> cdcProxies;
 	std::map<CDCStreamId, UID> streamToCDCProxyId;
 	Optional<CommitProxyInterface>
@@ -143,13 +144,14 @@ struct ClientDBInfo {
 			           clusterId,
 			           clusterType,
 			           nativeCdcEnabled,
+			           nativeCdcTagCount,
 			           cdcProxies,
 			           streamToCDCProxyId);
 		} else {
 			ASSERT(ar.protocolVersion().isValid());
 			serializer(ar, grvProxies, commitProxies, id, forward, history, clusterId, clusterType);
 			if (ar.protocolVersion().hasNativeCdc()) {
-				serializer(ar, nativeCdcEnabled, cdcProxies, streamToCDCProxyId);
+				serializer(ar, nativeCdcEnabled, nativeCdcTagCount, cdcProxies, streamToCDCProxyId);
 			}
 		}
 	}

@@ -745,6 +745,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			dbInfo.client.clusterId = db->serverInfo->get().client.clusterId;
 			dbInfo.client.clusterType = db->clusterType;
 			dbInfo.client.nativeCdcEnabled = CLIENT_KNOBS->ENABLE_NATIVE_CDC;
+			dbInfo.client.nativeCdcTagCount = CLIENT_KNOBS->NATIVE_CDC_TAG_COUNT;
 			dbInfo.client.cdcProxies = db->cdcProxies;
 			dbInfo.client.streamToCDCProxyId = db->clientInfo->get().streamToCDCProxyId;
 
@@ -1399,6 +1400,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	if (db->clientInfo->get().commitProxies != req.commitProxies ||
 	    db->clientInfo->get().grvProxies != req.grvProxies || db->clientInfo->get().cdcProxies != req.cdcProxies ||
 	    db->clientInfo->get().nativeCdcEnabled != CLIENT_KNOBS->ENABLE_NATIVE_CDC ||
+	    db->clientInfo->get().nativeCdcTagCount != CLIENT_KNOBS->NATIVE_CDC_TAG_COUNT ||
 	    db->clientInfo->get().clusterId != db->serverInfo->get().client.clusterId ||
 	    db->clientInfo->get().clusterType != db->clusterType) {
 		TraceEvent("PublishNewClientInfo", self->id)
@@ -1421,6 +1423,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		clientInfo.commitProxies = req.commitProxies;
 		clientInfo.grvProxies = req.grvProxies;
 		clientInfo.nativeCdcEnabled = CLIENT_KNOBS->ENABLE_NATIVE_CDC;
+		clientInfo.nativeCdcTagCount = CLIENT_KNOBS->NATIVE_CDC_TAG_COUNT;
 		clientInfo.cdcProxies = req.cdcProxies;
 		clientInfo.streamToCDCProxyId = db->clientInfo->get().streamToCDCProxyId;
 		clientInfo.history = db->clientInfo->get().history;
