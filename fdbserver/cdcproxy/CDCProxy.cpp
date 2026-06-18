@@ -168,6 +168,15 @@ CDCBufferSelection selectBufferCandidates(std::vector<CDCBufferCandidate> candid
 	return selection;
 }
 
+// New TLogs retain every recovered tag until it is popped past the recovery boundary. An unshared retired tag has no
+// active consumer to advance it, so stopping at its pre-recovery removal version can keep the old generation forever.
+Version retiredTagPopTarget(Version retiredVersion, Optional<Version> safePopVersion, Optional<Version> recoveryEnd) {
+	if (safePopVersion.present()) {
+		return std::min(retiredVersion, safePopVersion.get());
+	}
+	return recoveryEnd.present() ? std::max(retiredVersion, recoveryEnd.get()) : retiredVersion;
+}
+
 class CDCProxy {
 	UID id;
 	Database cx;
@@ -1034,18 +1043,24 @@ Future<Void> CDCProxy::popAcknowledgedData() {
 	}
 	const std::unordered_map<Tag, Version> retiredTagPopVersions = co_await readRetiredTagPopVersions(cx);
 	std::unordered_map<Tag, Version> completedPopVersions;
+	const Optional<Version> recoveredAt = dbInfo->get().logSystemConfig.recoveredAt;
+	const Optional<Version> recoveryEnd =
+	    recoveredAt.present() ? Optional<Version>(recoveredAt.get() + 1) : Optional<Version>();
 	for (const auto& [tag, retiredVersion] : retiredTagPopVersions) {
 		if (popsPausedForTesting) {
 			co_return;
 		}
 		const auto safePop = safePopVersions.find(tag);
-		const Version version =
-		    safePop == safePopVersions.end() ? retiredVersion : std::min(retiredVersion, safePop->second);
+		const Optional<Version> safePopVersion =
+		    safePop == safePopVersions.end() ? Optional<Version>() : Optional<Version>(safePop->second);
+		const Version version = retiredTagPopTarget(retiredVersion, safePopVersion, recoveryEnd);
+		CODE_PROBE(!safePopVersion.present() && recoveryEnd.present() && version > retiredVersion,
+		           "CDC proxy advances retired tag pop past recovery boundary");
 		CODE_PROBE(safePop != safePopVersions.end() && version < retiredVersion,
 		           "CDC proxy defers retired tag pop behind a live shared stream");
 		currentLogSystem->pop(version, tag);
 		if (version >= retiredVersion) {
-			co_await currentLogSystem->waitForPopped(retiredVersion, tag);
+			co_await currentLogSystem->waitForPopped(version, tag);
 			completedPopVersions[tag] = retiredVersion;
 		}
 	}
@@ -1545,6 +1560,18 @@ TEST_CASE("/NativeCDC/ProxyBufferCandidateSelection") {
 	ASSERT_EQ(rejectsOverLimit.oversizedStreamIds.size(), 1);
 	ASSERT_EQ(rejectsOverLimit.oversizedStreamIds.front(), 1);
 	ASSERT(rejectsOverLimit.selectedStreamIds.contains(2));
+
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/RetiredTagPopTarget") {
+	const Version retiredVersion = 100;
+
+	ASSERT_EQ(retiredTagPopTarget(retiredVersion, Optional<Version>(), Optional<Version>()), retiredVersion);
+	ASSERT_EQ(retiredTagPopTarget(retiredVersion, Optional<Version>(), Optional<Version>(50)), retiredVersion);
+	ASSERT_EQ(retiredTagPopTarget(retiredVersion, Optional<Version>(), Optional<Version>(150)), 150);
+	ASSERT_EQ(retiredTagPopTarget(retiredVersion, Optional<Version>(75), Optional<Version>(150)), 75);
+	ASSERT_EQ(retiredTagPopTarget(retiredVersion, Optional<Version>(125), Optional<Version>(150)), retiredVersion);
 
 	return Void();
 }

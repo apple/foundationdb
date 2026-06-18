@@ -678,6 +678,12 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		}
 	}
 
+	Future<Void> waitForFullyRecovered() {
+		while (dbInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED) {
+			co_await dbInfo->onChange();
+		}
+	}
+
 	Future<Void> forceTransactionSystemRecovery() {
 		ASSERT(g_network->isSimulated());
 		const uint64_t recoveryCount = dbInfo->get().recoveryCount;
@@ -705,6 +711,8 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		co_await setAllProxyPopsPaused(cx, false);
 		co_await timeoutError(waitForRetiredTagCleanup(cx), operationTimeout);
 		TraceEvent("NativeCdcRetiredCleanupComplete").log();
+		co_await timeoutError(waitForFullyRecovered(), operationTimeout);
+		CODE_PROBE(true, "Native CDC retired tag cleanup allows recovery to complete");
 	}
 
 	Future<Void> prepareRestartDrainState(Database cx) {
