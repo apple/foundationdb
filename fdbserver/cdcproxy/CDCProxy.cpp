@@ -112,6 +112,11 @@ struct CDCBufferSelection {
 	int64_t selectedBytes = 0;
 };
 
+struct CDCPopState {
+	std::unordered_map<CDCStreamId, Version> minVersions;
+	std::unordered_map<Tag, Version> safePopVersions;
+};
+
 enum class CDCBufferTagPassResult { RETRY, WAIT_FOR_COMMIT, STOP };
 
 // AsyncTrigger intentionally drops notifications when nobody is waiting. Pop work needs level-triggered semantics:
@@ -212,6 +217,7 @@ class CDCProxy {
 	void refreshLogSystem();
 	void clearBufferedMutations(Reference<CDCBufferedStream> stream);
 	void addBufferedBatch(Reference<CDCBufferedStream> stream, CDCBufferedBatch batch);
+	void reconcileStreamMinVersion(Reference<CDCBufferedStream> stream, Version minVersion);
 	void markTagStreamsBufferLimitExceeded(Reference<CDCBufferedTag> tag, Version begin);
 	void detachStreamFromTags(Reference<CDCBufferedStream> stream);
 	void deactivateStream(Reference<CDCBufferedStream> stream);
@@ -483,6 +489,20 @@ void advanceStreamMinVersion(Reference<CDCBufferedStream> stream, Version minVer
 		}
 	}
 	updateStreamBufferedThrough(stream);
+}
+
+void CDCProxy::reconcileStreamMinVersion(Reference<CDCBufferedStream> stream, Version minVersion) {
+	advanceStreamMinVersion(stream, minVersion);
+	while (!stream->mutations.empty() && stream->mutations.front().version < minVersion) {
+		const int64_t releasedBytes =
+		    sizeof(VersionedMutationsRef) + stream->mutations.front().mutations.expectedSize();
+		stream->bufferedBytes -= releasedBytes;
+		ASSERT_GE(bufferedBytes, releasedBytes);
+		bufferedBytes -= releasedBytes;
+		bufferLock.release(releasedBytes);
+		stream->mutations.pop_front();
+	}
+	ASSERT_GE(stream->bufferedBytes, 0);
 }
 
 void CDCProxy::detachStreamFromTags(Reference<CDCBufferedStream> stream) {
@@ -951,8 +971,8 @@ Future<Void> CDCProxy::initializeStream(Reference<CDCBufferedStream> stream) {
 }
 
 // TODO: Persist per-tag safe-pop state or coordinate pops centrally instead of rebuilding minima from all stream
-// history on every acknowledgement.
-Future<std::unordered_map<Tag, Version>> readSafePopVersions(Database cx) {
+// history on every acknowledgement scan.
+Future<CDCPopState> readSafePopState(Database cx) {
 	Transaction tr(cx);
 	while (true) {
 		Error err;
@@ -960,13 +980,13 @@ Future<std::unordered_map<Tag, Version>> readSafePopVersions(Database cx) {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
-			std::unordered_map<CDCStreamId, Version> minVersions;
+			CDCPopState result;
 			Key begin = cdcMinVersionKeys.begin;
 			while (begin < cdcMinVersionKeys.end) {
 				RangeResult minima =
 				    co_await tr.getRange(KeyRangeRef(begin, cdcMinVersionKeys.end), CLIENT_KNOBS->TOO_MANY);
 				for (const auto& kv : minima) {
-					minVersions[decodeCDCMinVersionKey(kv.key)] = decodeCDCMinVersionValue(kv.value);
+					result.minVersions[decodeCDCMinVersionKey(kv.key)] = decodeCDCMinVersionValue(kv.value);
 				}
 				if (!minima.more) {
 					break;
@@ -974,20 +994,19 @@ Future<std::unordered_map<Tag, Version>> readSafePopVersions(Database cx) {
 				begin = keyAfter(minima.back().key);
 			}
 
-			std::unordered_map<Tag, Version> safePopVersions;
 			begin = cdcTagHistoryKeys.begin;
 			while (begin < cdcTagHistoryKeys.end) {
 				RangeResult histories =
 				    co_await tr.getRange(KeyRangeRef(begin, cdcTagHistoryKeys.end), CLIENT_KNOBS->TOO_MANY);
 				for (const auto& kv : histories) {
 					const CDCTagHistoryEntry history = decodeCDCTagHistoryKey(kv.key);
-					auto minimum = minVersions.find(history.streamId);
-					if (minimum == minVersions.end()) {
+					auto minimum = result.minVersions.find(history.streamId);
+					if (minimum == result.minVersions.end()) {
 						continue;
 					}
-					auto safePop = safePopVersions.find(history.tag);
-					if (safePop == safePopVersions.end()) {
-						safePopVersions[history.tag] = minimum->second;
+					auto safePop = result.safePopVersions.find(history.tag);
+					if (safePop == result.safePopVersions.end()) {
+						result.safePopVersions[history.tag] = minimum->second;
 					} else {
 						safePop->second = std::min(safePop->second, minimum->second);
 					}
@@ -997,7 +1016,7 @@ Future<std::unordered_map<Tag, Version>> readSafePopVersions(Database cx) {
 				}
 				begin = keyAfter(histories.back().key);
 			}
-			co_return safePopVersions;
+			co_return result;
 		} catch (Error& e) {
 			err = e;
 		}
@@ -1075,10 +1094,20 @@ Future<Void> CDCProxy::popAcknowledgedData() {
 		CODE_PROBE(true, "CDC proxy defers pops until a log system is available", probe::decoration::rare);
 		co_await logSystem->onChange();
 	}
-	const std::unordered_map<Tag, Version> safePopVersions = co_await readSafePopVersions(cx);
+	const CDCPopState popState = co_await readSafePopState(cx);
 	if (popsPausedForTesting) {
 		co_return;
 	}
+	for (const auto& [streamId, minVersion] : popState.minVersions) {
+		auto stream = streams.find(streamId);
+		if (stream == streams.end() || !stream->second->active || !stream->second->initialized ||
+		    stream->second->minVersion >= minVersion) {
+			continue;
+		}
+		CODE_PROBE(true, "CDC proxy scan reconciles a durable stream acknowledgement", probe::decoration::rare);
+		reconcileStreamMinVersion(stream->second, minVersion);
+	}
+	const std::unordered_map<Tag, Version>& safePopVersions = popState.safePopVersions;
 	lastSafePopVersions = safePopVersions;
 	Reference<LogSystemConsumer> currentLogSystem = logSystem->get();
 	for (const auto& [tag, version] : safePopVersions) {
@@ -1115,9 +1144,14 @@ Future<Void> CDCProxy::popAcknowledgedData() {
 
 Future<Void> CDCProxy::monitorAcknowledgedDataPops() {
 	while (true) {
-		co_await popAcknowledgedDataRequests.onTrigger();
-		co_await delay(SERVER_KNOBS->CDC_PROXY_POP_MIN_INTERVAL);
-		ASSERT(popAcknowledgedDataRequests.consume());
+		auto wake =
+		    co_await race(popAcknowledgedDataRequests.onTrigger(), delay(SERVER_KNOBS->CDC_PROXY_POP_SCAN_INTERVAL));
+		const bool periodicScan = wake.index() == 1;
+		if (!periodicScan) {
+			co_await delay(SERVER_KNOBS->CDC_PROXY_POP_MIN_INTERVAL);
+		}
+		popAcknowledgedDataRequests.consume();
+		CODE_PROBE(periodicScan, "CDC proxy periodically scans durable acknowledgement state", probe::decoration::rare);
 		++popAttempts;
 		// Acknowledgements only make a completed snapshot more conservative, so they are coalesced for a later
 		// pass instead of canceling this one. Only a new log generation invalidates waitForPopped work in flight.
@@ -1292,17 +1326,7 @@ Future<Void> CDCProxy::acknowledge(CDCAckRequest request) {
 		// Reconcile the new owner's in-memory frontier to that already verified watermark.
 		const Version minVersion = metadata.minVersion;
 		CODE_PROBE(stream->minVersion < minVersion, "CDC proxy reconciles a durable stream acknowledgement");
-		advanceStreamMinVersion(stream, minVersion);
-		while (!stream->mutations.empty() && stream->mutations.front().version < minVersion) {
-			const int64_t releasedBytes =
-			    sizeof(VersionedMutationsRef) + stream->mutations.front().mutations.expectedSize();
-			stream->bufferedBytes -= releasedBytes;
-			ASSERT_GE(bufferedBytes, releasedBytes);
-			bufferedBytes -= releasedBytes;
-			bufferLock.release(releasedBytes);
-			stream->mutations.pop_front();
-		}
-		ASSERT_GE(stream->bufferedBytes, 0);
+		reconcileStreamMinVersion(stream, minVersion);
 		requestAcknowledgedDataPop();
 		request.reply.send(Void());
 	} catch (Error& e) {
@@ -1504,12 +1528,14 @@ Future<Void> CDCProxy::monitorDBInfo(CDCProxyInterface proxy, uint64_t recoveryC
 Future<Void> CDCProxy::run(CDCProxyInterface proxy, uint64_t recoveryCount) {
 	if (SERVER_KNOBS->MAXIMUM_PEEK_BYTES <= 0 ||
 	    SERVER_KNOBS->CDC_PROXY_BUFFER_BYTES <= SERVER_KNOBS->MAXIMUM_PEEK_BYTES ||
-	    SERVER_KNOBS->CDC_PROXY_CONSUME_POLL_TIMEOUT <= 0 || SERVER_KNOBS->CDC_PROXY_POP_MIN_INTERVAL < 0) {
+	    SERVER_KNOBS->CDC_PROXY_CONSUME_POLL_TIMEOUT <= 0 || SERVER_KNOBS->CDC_PROXY_POP_MIN_INTERVAL < 0 ||
+	    SERVER_KNOBS->CDC_PROXY_POP_SCAN_INTERVAL <= 0) {
 		TraceEvent(SevError, "InvalidCDCProxyMemoryConfiguration", id)
 		    .detail("BufferBytes", SERVER_KNOBS->CDC_PROXY_BUFFER_BYTES)
 		    .detail("MaximumPeekBytes", SERVER_KNOBS->MAXIMUM_PEEK_BYTES)
 		    .detail("ConsumePollTimeout", SERVER_KNOBS->CDC_PROXY_CONSUME_POLL_TIMEOUT)
-		    .detail("PopMinInterval", SERVER_KNOBS->CDC_PROXY_POP_MIN_INTERVAL);
+		    .detail("PopMinInterval", SERVER_KNOBS->CDC_PROXY_POP_MIN_INTERVAL)
+		    .detail("PopScanInterval", SERVER_KNOBS->CDC_PROXY_POP_SCAN_INTERVAL);
 		throw invalid_option_value();
 	}
 	actors.add(waitFailureServer(proxy.waitFailure.getFuture()));

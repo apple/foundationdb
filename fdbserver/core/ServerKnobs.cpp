@@ -178,6 +178,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CDC_PROXY_BUFFER_BYTES,                                1e9 ); if( randomize && buggify() ) { MAXIMUM_PEEK_BYTES = 5000; CDC_PROXY_BUFFER_BYTES = 10000; }
 	init( CDC_PROXY_CONSUME_POLL_TIMEOUT,                         5.0 ); if( randomize && buggify() ) CDC_PROXY_CONSUME_POLL_TIMEOUT = 0.1;
 	init( CDC_PROXY_POP_MIN_INTERVAL,                             0.1 ); if( randomize && buggify() ) CDC_PROXY_POP_MIN_INTERVAL = 0.01;
+	init( CDC_PROXY_POP_SCAN_INTERVAL,                            5.0 ); if( randomize && buggify() ) CDC_PROXY_POP_SCAN_INTERVAL = 0.1;
 	init( APPLY_MUTATION_BYTES,                                  1e6 );
 	init( BUGGIFY_RECOVER_MEMORY_LIMIT,                          1e6 );
 	init( BUGGIFY_WORKER_REMOVED_MAX_LAG,                         30 );

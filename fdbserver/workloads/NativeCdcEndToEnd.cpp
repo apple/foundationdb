@@ -65,6 +65,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	bool testProxyReplacement;
 	bool testMemoryBound;
 	bool testOversizedPeek;
+	bool testDurableAckScan;
 	bool testDelayedRetention;
 	bool testRetiredRecovery;
 	bool prepareRestartDrain;
@@ -116,6 +117,32 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			Error err;
 			try {
 				co_return co_await tr.getReadVersion();
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
+	}
+
+	Future<Void> acknowledgeDurablyWithoutProxy(Database cx, CDCStreamId streamId, Version consumedThrough) {
+		Transaction tr(cx);
+		while (true) {
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				Optional<Value> current = co_await tr.get(cdcMinVersionKeyFor(streamId));
+				if (!current.present()) {
+					throw client_invalid_operation();
+				}
+				const Version minVersion = consumedThrough + 1;
+				if (minVersion <= decodeCDCMinVersionValue(current.get())) {
+					co_return;
+				}
+				tr.set(cdcMinVersionKeyFor(streamId), cdcMinVersionValue(minVersion));
+				co_await tr.commit();
+				co_return;
 			} catch (Error& e) {
 				err = e;
 			}
@@ -676,6 +703,42 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		co_await timeoutError(waitForRetiredTagCleanup(cx), operationTimeout);
 	}
 
+	Future<Void> validateDurableAcknowledgementScan(Database cx) {
+		ASSERT_EQ(streams.size(), 1);
+		const Key key = keyForIndex(keyCount / 2);
+		const Value value = "durable-ack-scan"_sr;
+		const Version committed = co_await writeValue(cx, key, value);
+		while (streams.front().consumer->position().lastConsumedVersion < committed) {
+			co_await timeoutError(streams.front().consumer->consume(), operationTimeout);
+			if (streams.front().consumer->position().lastConsumedVersion < committed) {
+				co_await timeoutError(streams.front().consumer->acknowledge(), operationTimeout);
+			}
+		}
+
+		const CDCStreamId streamId = streams.front().consumer->position().streamId;
+		co_await delay(1.0);
+		auto initialProxyStatus = co_await timeoutError(getAssignedProxyStatus(cx, streamId), operationTimeout);
+		const CDCProxyBufferStatus initial = initialProxyStatus.second;
+		ASSERT_GT(initial.bufferedBytes, 0);
+		co_await timeoutError(acknowledgeDurablyWithoutProxy(cx, streamId, committed), operationTimeout);
+
+		const double deadline = now() + operationTimeout;
+		while (true) {
+			auto currentProxyStatus = co_await timeoutError(getAssignedProxyStatus(cx, streamId), operationTimeout);
+			const CDCProxyBufferStatus& status = currentProxyStatus.second;
+			if (status.bufferedBytes < initial.bufferedBytes && status.popCompletions > initial.popCompletions) {
+				ASSERT_EQ(status.popRequests, initial.popRequests);
+				break;
+			}
+			ASSERT_LT(now(), deadline);
+			co_await delay(0.01);
+		}
+		CODE_PROBE(true, "Native CDC durable acknowledgement progresses without a proxy notification");
+		co_await timeoutError(removeNativeCdcStreamClient(cx, streams.front().name), operationTimeout);
+		streams.clear();
+		co_await timeoutError(waitForRetiredTagCleanup(cx), operationTimeout);
+	}
+
 	Future<Void> waitForRetiredTagState(Database cx, bool present) {
 		Transaction tr(cx);
 		while (true) {
@@ -897,6 +960,10 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			co_await validateOversizedPeek(cx);
 			co_return;
 		}
+		if (testDurableAckScan) {
+			co_await validateDurableAcknowledgementScan(cx);
+			co_return;
+		}
 		if (testDelayedRetention) {
 			ASSERT_NE(retentionMarkerVersion, invalidVersion);
 			co_await delay(retentionValidationDelay);
@@ -973,6 +1040,7 @@ public:
 		testProxyReplacement = getOption(options, "testProxyReplacement"_sr, false);
 		testMemoryBound = getOption(options, "testMemoryBound"_sr, false);
 		testOversizedPeek = getOption(options, "testOversizedPeek"_sr, false);
+		testDurableAckScan = getOption(options, "testDurableAckScan"_sr, false);
 		testDelayedRetention = getOption(options, "testDelayedRetention"_sr, false);
 		testRetiredRecovery = getOption(options, "testRetiredRecovery"_sr, false);
 		prepareRestartDrain = getOption(options, "prepareRestartDrain"_sr, false);
@@ -992,6 +1060,7 @@ public:
 		ASSERT_GT(memoryTestValueBytes, 0);
 		ASSERT_GE(retentionValidationDelay, 0.0);
 		ASSERT(!(prepareRestartDrain && drainAfterRestart));
+		ASSERT(!(testOversizedPeek && testDurableAckScan));
 	}
 
 	// RandomRangeLock can outlive this bounded CDC workload and mask its progress check.
