@@ -1,6 +1,6 @@
 # Native Change Data Capture (CDC)
 
-## Status and scope
+## Objective
 
 Native Change Data Capture (CDC) provides a FoundationDB-native mechanism for
 reading committed mutations for a registered key range. A client registers a
@@ -8,6 +8,8 @@ named stream, creates a consumer for that name, consumes batches of mutations,
 and acknowledges processed versions. The implementation persists enough state
 to retain unread TLog data and to resume stream service after CDC proxy failure
 or transaction-system recovery.
+
+## Background
 
 This design describes the native C++ interface and its server implementation.
 The feature is disabled by default behind `ENABLE_NATIVE_CDC`; the native CDC
@@ -270,7 +272,7 @@ a CDC proxy replacement. Invalid stream operations, already-acknowledged
 cursor positions, and retention invariant violations are terminal errors for
 that request.
 
-## Architecture
+## Design overview
 
 The data path is:
 
@@ -651,7 +653,9 @@ retired work, no CDC proxies are published. This makes stream removal and
 retired-pop completion observable as a finite drain rather than a permanent
 cluster role.
 
-## Feature gating
+## Rollout and migration considerations
+
+### Feature gating
 
 `ENABLE_NATIVE_CDC` defaults to false. In simulation it may be randomly enabled
 under buggification; workloads that depend on CDC set it explicitly.
@@ -741,7 +745,34 @@ invariants above. In particular, moving a stream between tags cannot forget an
 old tag until all data protected by that assignment has either been
 acknowledged and popped or retained as finite final-pop work.
 
-## Validation
+## Alternatives considered
+
+### Storage-server-backed change feeds
+
+CDC could duplicate every covered mutation into storage-server-backed data,
+similar to backup V1, and serve consumers from that copy. That approach avoids
+introducing CDC-specific TLog tags, but it adds a second write and storage path
+for every covered mutation and couples CDC retention to storage-server data.
+Native CDC instead retains the existing logged mutation through a dedicated
+tag and releases that history after durable acknowledgement.
+
+### One TLog tag per stream
+
+Assigning every stream a unique TLog tag would eliminate shared-tag filtering
+and reduce safe-pop calculation to one stream. It would also make TLog tag and
+cursor cardinality grow without bound as streams are registered. The bounded
+tag pool caps that log-system state; shared-tag filtering and the minimum
+acknowledgement watermark are the deliberate cost of that bound.
+
+### Age-based expiration
+
+Automatically popping history after a fixed age would bound the effect of an
+abandoned consumer, but it would silently violate the stated retention
+contract for a slow active stream. The initial design therefore requires an
+acknowledgement or explicit removal before releasing required history and
+treats administrative expiration policy as future work.
+
+## Testing considerations
 
 The implementation includes codec and metadata tests for CDC system keys and
 simulation workloads for the end-to-end behavior.
@@ -777,3 +808,14 @@ The simulation configurations enable CDC explicitly when testing these
 behaviors, while the default-disabled knob and randomized simulation admission
 exercise the requirement that clusters without active or pending CDC work do
 not carry CDC service overhead.
+
+## Observability and supportability considerations
+
+The `CDCProxyMetrics` event described under consumption and expiration is the
+primary operational signal. Production support should alert on growing
+acknowledgement lag, safe-pop distance, CDC-attributed TLog retention, and proxy
+buffer pressure. The oldest required stream ID identifies the first consumer
+to investigate. Because the initial implementation has no automatic stream
+expiration, operators must repair the consumer, explicitly discard its
+processed history, or remove the stream before retained CDC history exhausts
+the capacity allocated to its tags.
