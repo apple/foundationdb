@@ -1784,6 +1784,14 @@ Future<std::vector<StringRef>> parseMessagesForTag(StringRef commitBlob, Tag tag
 	co_return relevantMessages;
 }
 
+namespace {
+
+int tLogPeekReplyByteLimit(Tag tag) {
+	return tag.locality == tagLocalityCDC ? SERVER_KNOBS->MAXIMUM_PEEK_BYTES : 0;
+}
+
+} // namespace
+
 // Common logics to peek TLog and create TLogPeekReply that serves both streaming peek or normal peek request
 template <typename PromiseType>
 Future<Void> tLogPeekMessages(PromiseType replyPromise,
@@ -1795,8 +1803,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
                               bool reqOnlySpilled = false,
                               Optional<std::pair<UID, int>> reqSequence = Optional<std::pair<UID, int>>(),
                               Optional<Version> reqEnd = Optional<Version>(),
-                              Optional<bool> reqReturnEmptyIfStopped = Optional<bool>(),
-                              int reqReplyByteLimit = 0) {
+                              Optional<bool> reqReturnEmptyIfStopped = Optional<bool>()) {
 	BinaryWriter messages(Unversioned());
 	BinaryWriter messages2(Unversioned());
 	int sequence = -1;
@@ -2178,13 +2185,14 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		}
 	}
 
-	if (reqReplyByteLimit > 0 && messages.getLength() > reqReplyByteLimit) {
+	const int replyByteLimit = tLogPeekReplyByteLimit(reqTag);
+	if (replyByteLimit > 0 && messages.getLength() > replyByteLimit) {
 		CODE_PROBE(true, "TLog rejects an oversized Native CDC peek reply", probe::decoration::rare);
 		TraceEvent(SevWarn, "TLogPeekReplyExceedsByteLimit", logData->logId)
 		    .detail("Tag", reqTag)
 		    .detail("ReqBegin", reqBegin)
 		    .detail("ReplyBytes", messages.getLength())
-		    .detail("ReplyByteLimit", reqReplyByteLimit);
+		    .detail("ReplyByteLimit", replyByteLimit);
 		replyPromise.sendError(server_overloaded());
 		co_return;
 	}
@@ -2887,8 +2895,7 @@ class ServeTLogInterface {
 			                                        req.onlySpilled,
 			                                        req.sequence,
 			                                        req.end,
-			                                        req.returnEmptyIfStopped,
-			                                        req.replyByteLimit));
+			                                        req.returnEmptyIfStopped));
 		}
 	}
 
@@ -4025,6 +4032,13 @@ Future<Void> tLog(IKeyValueStore* persistentData,
 }
 
 // UNIT TESTS
+TEST_CASE("/NativeCDC/TLogPeekReplyLimit") {
+	ASSERT(tLogPeekReplyByteLimit(Tag(tagLocalityCDC, 0)) == SERVER_KNOBS->MAXIMUM_PEEK_BYTES);
+	ASSERT(tLogPeekReplyByteLimit(Tag(tagLocalityLogRouter, 0)) == 0);
+	ASSERT(tLogPeekReplyByteLimit(Tag(tagLocalityTxs, 0)) == 0);
+	return Void();
+}
+
 struct DequeAllocatorStats {
 	static int64_t allocatedBytes;
 };

@@ -37,10 +37,6 @@ static Future<Void> peekReplyTimeout(ServerPeekCursor const* self) {
 	           : Never();
 }
 
-static int peekReplyByteLimit(Tag tag) {
-	return tag.locality == tagLocalityCDC ? SERVER_KNOBS->MAXIMUM_PEEK_BYTES : 0;
-}
-
 Future<Void> tryEstablishPeekStreamImpl(ServerPeekCursor* self) {
 	co_await IFailureMonitor::failureMonitor().onStateEqual(
 	    self->interf->get().interf().peekStreamMessages.getEndpoint(), FailureStatus(false));
@@ -307,8 +303,7 @@ Future<Void> serverPeekParallelGetMoreImpl(ServerPeekCursor* self, TaskPriority 
 					                        self->onlySpilled,
 					                        std::make_pair(self->randomID, self->sequence++),
 					                        self->end.version,
-					                        self->returnEmptyIfStopped,
-					                        peekReplyByteLimit(self->tag)),
+					                        self->returnEmptyIfStopped),
 					        taskID)));
 				}
 				if (self->sequence == std::numeric_limits<decltype(self->sequence)>::max()) {
@@ -499,8 +494,7 @@ Future<Void> serverPeekGetMoreImpl(ServerPeekCursor* self, TaskPriority taskID) 
 				                                                                       self->onlySpilled,
 				                                                                       Optional<std::pair<UID, int>>(),
 				                                                                       self->end.version,
-				                                                                       self->returnEmptyIfStopped,
-				                                                                       peekReplyByteLimit(self->tag)),
+				                                                                       self->returnEmptyIfStopped),
 				                                                       taskID));
 			}
 			// Race between: (1) peek reply, (2) interface change, and optionally
