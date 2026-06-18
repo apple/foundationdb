@@ -77,7 +77,7 @@ ServerPeekCursor::ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInte
     poppedVersion(0), hasMsg(false), randomID(deterministicRandom()->randomUniqueID()),
     returnIfBlocked(returnIfBlocked), onlySpilled(false), parallelGetMore(parallelGetMore),
     usePeekStream(SERVER_KNOBS->PEEK_USING_STREAMING), sequence(0), lastReset(0), resetCheck(Void()), slowReplies(0),
-    fastReplies(0), unknownReplies(0), returnEmptyIfStopped(returnEmptyIfStopped) {
+    fastReplies(0), unknownReplies(0), returnEmptyIfStopped(returnEmptyIfStopped), replyByteLimit(0) {
 	this->results.maxKnownVersion = 0;
 	this->results.minKnownCommittedVersion = 0;
 	DebugLogTraceEvent(SevDebug, "SPC_Starting", randomID)
@@ -100,7 +100,7 @@ ServerPeekCursor::ServerPeekCursor(TLogPeekReply const& results,
     end(end), poppedVersion(poppedVersion), messageAndTags(message), hasMsg(hasMsg),
     randomID(deterministicRandom()->randomUniqueID()), returnIfBlocked(false), onlySpilled(false),
     parallelGetMore(false), usePeekStream(false), sequence(0), lastReset(0), resetCheck(Void()), slowReplies(0),
-    fastReplies(0), unknownReplies(0), returnEmptyIfStopped(false) {
+    fastReplies(0), unknownReplies(0), returnEmptyIfStopped(false), replyByteLimit(0) {
 	//TraceEvent("SPC_Clone", randomID);
 	this->results.maxKnownVersion = 0;
 	this->results.minKnownCommittedVersion = 0;
@@ -303,7 +303,8 @@ Future<Void> serverPeekParallelGetMoreImpl(ServerPeekCursor* self, TaskPriority 
 					                        self->onlySpilled,
 					                        std::make_pair(self->randomID, self->sequence++),
 					                        self->end.version,
-					                        self->returnEmptyIfStopped),
+					                        self->returnEmptyIfStopped,
+					                        self->replyByteLimit),
 					        taskID)));
 				}
 				if (self->sequence == std::numeric_limits<decltype(self->sequence)>::max()) {
@@ -494,7 +495,8 @@ Future<Void> serverPeekGetMoreImpl(ServerPeekCursor* self, TaskPriority taskID) 
 				                                                                       self->onlySpilled,
 				                                                                       Optional<std::pair<UID, int>>(),
 				                                                                       self->end.version,
-				                                                                       self->returnEmptyIfStopped),
+				                                                                       self->returnEmptyIfStopped,
+				                                                                       self->replyByteLimit),
 				                                                       taskID));
 			}
 			// Race between: (1) peek reply, (2) interface change, and optionally
@@ -639,6 +641,15 @@ int64_t ServerPeekCursor::getMaxRetainedReplyCount() const {
 	return parallelGetMore || onlySpilled || !futureResults.empty()
 	           ? std::max<int64_t>(1, SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS + 1)
 	           : 1;
+}
+
+void ServerPeekCursor::setReplyByteLimit(int limitBytes) {
+	ASSERT_GE(limitBytes, 0);
+	// A request that has already been issued cannot be retroactively capped.
+	ASSERT(!more.isValid());
+	ASSERT(futureResults.empty());
+	ASSERT(!peekReplyStream.present());
+	replyByteLimit = limitBytes;
 }
 
 Optional<UID> ServerPeekCursor::getPrimaryPeekLocation() const {
@@ -1022,6 +1033,12 @@ int64_t MergedPeekCursor::getMaxRetainedReplyCount() const {
 	return std::max<int64_t>(1, count);
 }
 
+void MergedPeekCursor::setReplyByteLimit(int limitBytes) {
+	for (const auto& cursor : serverCursors) {
+		cursor->setReplyByteLimit(limitBytes);
+	}
+}
+
 Optional<UID> MergedPeekCursor::getPrimaryPeekLocation() const {
 	if (bestServer >= 0) {
 		return serverCursors[bestServer]->getPrimaryPeekLocation();
@@ -1392,6 +1409,14 @@ int64_t SetPeekCursor::getMaxRetainedReplyCount() const {
 	return std::max<int64_t>(1, count);
 }
 
+void SetPeekCursor::setReplyByteLimit(int limitBytes) {
+	for (const auto& cursors : serverCursors) {
+		for (const auto& cursor : cursors) {
+			cursor->setReplyByteLimit(limitBytes);
+		}
+	}
+}
+
 Optional<UID> SetPeekCursor::getPrimaryPeekLocation() const {
 	if (bestServer >= 0 && bestSet >= 0) {
 		return serverCursors[bestSet][bestServer]->getPrimaryPeekLocation();
@@ -1517,6 +1542,12 @@ int64_t ReplayMultiCursor::getMaxRetainedReplyCount() const {
 	return count;
 }
 
+void ReplayMultiCursor::setReplyByteLimit(int limitBytes) {
+	for (const auto& cursor : cursors) {
+		cursor->setReplyByteLimit(limitBytes);
+	}
+}
+
 Optional<UID> ReplayMultiCursor::getPrimaryPeekLocation() const {
 	return cursors.back()->getPrimaryPeekLocation();
 }
@@ -1613,6 +1644,13 @@ TEST_CASE("/NativeCDC/ReplayPeekReplyAccounting") {
 	std::vector<Reference<IReplayPeekCursor>> epochs{ twoReplies, threeReplies };
 	auto noPrefetch = makeReference<ReplayMultiCursor>(epochs, std::vector<LogMessageVersion>{ 50 }, false);
 	ASSERT_EQ(noPrefetch->getMaxRetainedReplyCount(), 3);
+	noPrefetch->setReplyByteLimit(4096);
+	for (const auto& cursor : twoServers) {
+		ASSERT_EQ(cursor->replyByteLimit, 4096);
+	}
+	for (const auto& cursor : threeServers) {
+		ASSERT_EQ(cursor->replyByteLimit, 4096);
+	}
 	return Void();
 }
 

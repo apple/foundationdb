@@ -471,13 +471,16 @@ All raw peek windows and stream buffers owned by one CDC proxy share a
 capped reply arena from every candidate TLog it consults. CDC history cursors
 therefore disable cross-generation constructor prefetch, report the maximum
 number of reply arenas one active generation can retain, and reserve that count
-times `MAXIMUM_PEEK_BYTES` before issuing a peek. The pass also reserves a
-bounded materialization window. It retains the aggregate raw reservation while
-filtering and copying, then releases it and transfers only accepted filtered
-bytes to the stream buffers. Acknowledgement or stream removal releases those
-retained permits. The usable retained-batch capacity is the configured CDC
-budget minus this topology-dependent raw reservation; a configuration too small
-to hold both fails the affected consume with `server_overloaded`. This applies
+times `MAXIMUM_PEEK_BYTES` before issuing a peek. The proxy marks these delivery
+cursors with the same per-reply limit; recovery cursors remain uncapped so that
+transaction-system replay is not constrained by a delivery memory knob. The
+pass also reserves a bounded materialization window. It retains the aggregate
+raw reservation while filtering and copying, then releases it and transfers
+only accepted filtered bytes to the stream buffers. Acknowledgement or stream
+removal releases those retained permits. The usable retained-batch capacity is
+the configured CDC budget minus this topology-dependent raw reservation; a
+configuration too small to hold both fails the affected consume with
+`server_overloaded`. This applies
 backpressure before ordinary peek batches arrive, rather than allowing each
 stream, replica reply, received batch, or filtered expansion to independently
 overshoot the proxy limit. A slow consumer does not require the proxy to buffer

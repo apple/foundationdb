@@ -88,6 +88,8 @@ struct IPeekCursor {
 struct IReplayPeekCursor : IPeekCursor {
 	// Upper bound on TLogPeekReply arenas retained before or while satisfying the next getMore().
 	virtual int64_t getMaxRetainedReplyCount() const = 0;
+	// Applies a per-reply cap before the cursor issues its first TLog peek. Zero leaves replies uncapped.
+	virtual void setReplyByteLimit(int limitBytes) = 0;
 	virtual Optional<UID> getPrimaryPeekLocation() const = 0;
 	virtual Optional<UID> getCurrentPeekLocation() const = 0;
 	virtual Version getMaxKnownVersion() const = 0;

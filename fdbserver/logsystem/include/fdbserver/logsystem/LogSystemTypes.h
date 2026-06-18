@@ -104,6 +104,7 @@ public:
 	int fastReplies;
 	int unknownReplies;
 	bool returnEmptyIfStopped;
+	int replyByteLimit;
 
 	ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInterface>>> const& interf,
 	                 Tag tag,
@@ -139,6 +140,7 @@ public:
 	Version popped() const override;
 	Version getMinKnownCommittedVersion() const override;
 	int64_t getMaxRetainedReplyCount() const override;
+	void setReplyByteLimit(int limitBytes) override;
 	Optional<UID> getPrimaryPeekLocation() const override;
 	Optional<UID> getCurrentPeekLocation() const override;
 	void addref() override { ReferenceCounted<ServerPeekCursor>::addref(); }
@@ -201,6 +203,7 @@ public:
 	Version getMinKnownCommittedVersion() const override;
 	Version getMaxKnownVersion() const override;
 	int64_t getMaxRetainedReplyCount() const override;
+	void setReplyByteLimit(int limitBytes) override;
 	Optional<UID> getPrimaryPeekLocation() const override;
 	Optional<UID> getCurrentPeekLocation() const override;
 	void addref() override { ReferenceCounted<MergedPeekCursor>::addref(); }
@@ -259,6 +262,7 @@ public:
 	Version getMinKnownCommittedVersion() const override;
 	Version getMaxKnownVersion() const override;
 	int64_t getMaxRetainedReplyCount() const override;
+	void setReplyByteLimit(int limitBytes) override;
 	Optional<UID> getPrimaryPeekLocation() const override;
 	Optional<UID> getCurrentPeekLocation() const override;
 	void addref() override { ReferenceCounted<SetPeekCursor>::addref(); }
@@ -294,6 +298,7 @@ public:
 	Version getMinKnownCommittedVersion() const override;
 	Version getMaxKnownVersion() const override;
 	int64_t getMaxRetainedReplyCount() const override;
+	void setReplyByteLimit(int limitBytes) override;
 	Optional<UID> getPrimaryPeekLocation() const override;
 	Optional<UID> getCurrentPeekLocation() const override;
 	void addref() override { ReferenceCounted<ReplayMultiCursor>::addref(); }
