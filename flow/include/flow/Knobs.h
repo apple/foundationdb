@@ -125,9 +125,14 @@ public:
 	// When true, emits trace events useful to debug stale peer issue (StalePeerTest.toml)
 	bool STALE_PEER_OBSERVABILITY;
 
-	// Seconds of no connect failure after which an address is pruned from
-	// TransportData::persistentConnectFailedCount (bounds that map and the
-	// locationCachePeerWatcher snapshot/streak maps). 0 disables pruning.
+	// Used for two purposes off the same value: (1) eviction age -- an address is
+	// pruned from TransportData::persistentConnectFailedCount once it has had no
+	// connect failure for this many seconds; and (2) sweep cadence -- the prune
+	// scan runs at most once per this interval (and only when triggered by a
+	// connect failure). Bounds that map and the locationCachePeerEvictor
+	// snapshot/streak maps it feeds. 0 disables pruning. Coupling both onto one
+	// knob is a deliberate simplification: sweep about as often as the eviction
+	// horizon.
 	double PERSISTENT_CONNECT_FAILED_COUNT_TTL;
 	double DELAY_JITTER_OFFSET;
 	double DELAY_JITTER_RANGE;

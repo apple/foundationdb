@@ -1045,15 +1045,13 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 				te.errorUnsuppressed(e)
 				    .suppressFor(1.0)
 				    .detail("PeerAddr", self->destination)
-				    .detail("PeerAddress", self->destination);
-				if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
-					te.detail("PeerReferences", self->peerReferences)
-					    .detail("ReliableEmpty", self->reliable.empty())
-					    .detail("UnsentEmpty", self->unsent.empty())
-					    .detail("OutstandingReplies", self->outstandingReplies)
-					    .detail("ConnectFailedCount", self->connectFailedCount)
-					    .detail("Connected", self->connected);
-				}
+				    .detail("PeerAddress", self->destination)
+				    .detail("PeerReferences", self->peerReferences)
+				    .detail("ReliableEmpty", self->reliable.empty())
+				    .detail("UnsentEmpty", self->unsent.empty())
+				    .detail("OutstandingReplies", self->outstandingReplies)
+				    .detail("ConnectFailedCount", self->connectFailedCount)
+				    .detail("Connected", self->connected);
 				self->connect.cancel();
 				self->transport->peers.erase(self->destination);
 				self->transport->orderedAddresses.erase(self->destination);
@@ -1833,8 +1831,9 @@ ACTOR static Future<Void> multiVersionCleanupWorker(TransportData* self) {
 void InterfaceTracker::created(const NetworkAddress& dstAddr,
                                const std::string& dstRole,
                                const std::vector<UID>& tokens) {
-	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY)
+	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
 		return;
+	}
 	auto& entry = map[Key{ dstAddr, dstRole }];
 	entry.numCreated += tokens.size();
 	int64_t id = nextCreateId++;
@@ -1846,20 +1845,23 @@ void InterfaceTracker::created(const NetworkAddress& dstAddr,
 }
 
 void InterfaceTracker::peerRefAdded(const NetworkAddress& addr) {
-	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY)
+	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
 		return;
+	}
 	peerRefCounts[addr].added++;
 }
 
 void InterfaceTracker::peerRefRemovedRaw(const NetworkAddress& addr) {
-	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY)
+	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
 		return;
+	}
 	peerRefCounts[addr].removed++;
 }
 
 void InterfaceTracker::peerRefRemoved(const NetworkAddress& addr, const UID& token) {
-	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY)
+	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
 		return;
+	}
 	auto it = tokenToInfo.find(TokenKey{ addr, token });
 	if (it != tokenToInfo.end()) {
 		ASSERT(map.contains(Key{ addr, it->second.role }));
@@ -1875,8 +1877,9 @@ void InterfaceTracker::peerRefRemoved(const NetworkAddress& addr, const UID& tok
 }
 
 int64_t InterfaceTracker::getDelta(const NetworkAddress& addr, const std::string& role) const {
-	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY)
+	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
 		return 0;
+	}
 	auto it = map.find(Key{ addr, role });
 	if (it == map.end())
 		return 0;
@@ -1884,8 +1887,9 @@ int64_t InterfaceTracker::getDelta(const NetworkAddress& addr, const std::string
 }
 
 int64_t InterfaceTracker::flowReceiverCreated(const NetworkAddress& addr, const UID& token) {
-	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY)
+	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
 		return -1;
+	}
 	int64_t id = nextFlowReceiverId++;
 	flowReceiverRecords[id] = FlowReceiverRecord{
 		id, addr, token, g_network ? g_network->now() : 0.0, platform::get_backtrace(), currentCallerTag
@@ -1894,38 +1898,43 @@ int64_t InterfaceTracker::flowReceiverCreated(const NetworkAddress& addr, const 
 }
 
 void InterfaceTracker::flowReceiverDestroyed(const NetworkAddress& addr, int64_t id) {
-	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY)
+	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
 		return;
+	}
 	flowReceiverRecords.erase(id);
 }
 
 int64_t InterfaceTracker::promiseRefAdded(const NetworkAddress& addr, const UID& token) {
-	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY)
+	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
 		return -1;
+	}
 	int64_t id = nextRefId++;
 	refRecords[id] = RefRecord{ id, addr, token, g_network ? g_network->now() : 0.0, platform::get_backtrace(), false };
 	return id;
 }
 
 void InterfaceTracker::promiseRefReleased(int64_t id) {
-	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY)
+	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
 		return;
+	}
 	if (id < 0)
 		return;
 	refRecords.erase(id);
 }
 
 int64_t InterfaceTracker::futureRefAdded(const NetworkAddress& addr, const UID& token) {
-	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY)
+	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
 		return -1;
+	}
 	int64_t id = nextRefId++;
 	refRecords[id] = RefRecord{ id, addr, token, g_network ? g_network->now() : 0.0, platform::get_backtrace(), true };
 	return id;
 }
 
 void InterfaceTracker::futureRefReleased(int64_t id) {
-	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY)
+	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
 		return;
+	}
 	if (id < 0)
 		return;
 	refRecords.erase(id);
@@ -2019,8 +2028,9 @@ FlowTransport::FlowTransport(uint64_t transportId, int maxWellKnownEndpoints, IP
 		}
 	}
 	g_futureRefReleasedCallback = [](int64_t id) {
-		if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY)
+		if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
 			return;
+		}
 		if (g_network && g_network->global(INetwork::enFlowTransport)) {
 			FlowTransport::transport().interfaceTracker.futureRefReleased(id);
 		}
@@ -2120,13 +2130,12 @@ void FlowTransport::removePeerReference(const Endpoint& endpoint, bool isStream)
 	Reference<Peer> peer = self->getPeer(endpoint.getPrimaryAddress());
 	if (peer) {
 		peer->peerReferences--;
-		interfaceTracker.peerRefRemovedRaw(endpoint.getPrimaryAddress());
-		interfaceTracker.peerRefRemoved(endpoint.getPrimaryAddress(), endpoint.token);
-		// Per-token backtrace of which code path is releasing this peer ref.
-		// Knob-gated because platform::get_backtrace() is expensive and this
-		// fires on every removePeerReference. suppressFor caps the per-event
-		// rate when many tokens churn at once.
 		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
+			interfaceTracker.peerRefRemovedRaw(endpoint.getPrimaryAddress());
+			interfaceTracker.peerRefRemoved(endpoint.getPrimaryAddress(), endpoint.token);
+			// Per-token backtrace of which code path is releasing this peer ref.
+			// platform::get_backtrace() is expensive and this fires on every
+			// removePeerReference; suppressFor caps the per-event rate.
 			TraceEvent("PeerRefRemovedBacktrace")
 			    .suppressFor(2.0)
 			    .detail("PeerAddr", endpoint.getPrimaryAddress())

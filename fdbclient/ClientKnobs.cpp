@@ -54,7 +54,7 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( MAX_CLIENT_STATUS_AGE,                   1.0 );
 	init( MAX_COMMIT_PROXY_CONNECTIONS,              5 ); if( randomize && BUGGIFY ) MAX_COMMIT_PROXY_CONNECTIONS = 1;
 	init( MAX_GRV_PROXY_CONNECTIONS,                 3 ); if( randomize && BUGGIFY ) MAX_GRV_PROXY_CONNECTIONS = 1;
-	init( SHRINK_PROXY_LIST_CLEAR_CACHE_BELOW_THRESHOLD, true );
+	init( SHRINK_PROXY_LIST_CLEAR_CACHE_BELOW_THRESHOLD, false ); if( randomize && isSimulated ) SHRINK_PROXY_LIST_CLEAR_CACHE_BELOW_THRESHOLD = deterministicRandom()->coinflip();
 	init( DBCONTEXT_EAGER_PROXY_UPDATE,          false ); if( randomize && isSimulated ) DBCONTEXT_EAGER_PROXY_UPDATE = deterministicRandom()->coinflip();
 	init( STATUS_IDLE_TIMEOUT,                   120.0 );
 	init( STATUS_TIMEOUT,                         30.0 );
@@ -101,7 +101,7 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD,     60 );
 	init( LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL,    60 );
 	init( LOCATION_CACHE_PEER_FAILURE_EVICTION_DELAY, isSimulated ? 180.0 : 10.0 );
-	init( LOCATION_CACHE_PEER_WATCHER_ENABLED,            true );
+	init( LOCATION_CACHE_PEER_EVICTOR_ENABLED,          false ); if( randomize && isSimulated ) LOCATION_CACHE_PEER_EVICTOR_ENABLED = deterministicRandom()->coinflip();
 	init( LOCATION_CACHE_PEER_CONNECT_FAILED_THRESHOLD,      0 );
 
 	init( GET_RANGE_SHARD_LIMIT,                     2 );

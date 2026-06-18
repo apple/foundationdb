@@ -50,7 +50,17 @@ public:
 	double MAX_CLIENT_STATUS_AGE;
 	int MAX_COMMIT_PROXY_CONNECTIONS;
 	int MAX_GRV_PROXY_CONNECTIONS;
+	// MonitorLeader::shrinkProxyList clears its cached sampled-subset (lastCommitProxies /
+	// lastGrvProxies) on iterations where the recruited count is below MAX_*_PROXY_CONNECTIONS,
+	// so the cache stops pinning a killed proxy's RequestStream (peer) refs after the recruited
+	// count drops back under the cap. Off by default (opt-in mitigation); randomized in
+	// simulation; StalePeerTest forces it on.
 	bool SHRINK_PROXY_LIST_CLEAR_CACHE_BELOW_THRESHOLD;
+	// When true, monitorClientDBInfoChange calls DatabaseContext::updateProxies() the instant
+	// clientInfo's proxy list changes, rebuilding cx->commitProxies/grvProxies immediately so a
+	// killed proxy's RequestStream is dropped on rotation rather than on the next transaction's
+	// lazy getCommitProxies()/getGrvProxies(). Off by default; randomized in simulation;
+	// StalePeerTest forces it on.
 	bool DBCONTEXT_EAGER_PROXY_UPDATE;
 	double STATUS_IDLE_TIMEOUT;
 	double STATUS_TIMEOUT;
@@ -97,8 +107,17 @@ public:
 	int LOCATION_CACHE_EVICTION_SIZE_SIM;
 	double LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD;
 	double LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL;
+
+	// Base interval of the locationCachePeerEvictor sweep.
 	double LOCATION_CACHE_PEER_FAILURE_EVICTION_DELAY;
-	bool LOCATION_CACHE_PEER_WATCHER_ENABLED;
+	// Main switch for the stale-peer location-cache evictor: proactively evicts a storage
+	// server address from the location cache when its persistent connect-failed count advances,
+	// releasing the dead SS's stream refs. Off by default (opt-in mitigation); randomized in
+	// simulation; StalePeerTest forces it on.
+	bool LOCATION_CACHE_PEER_EVICTOR_ENABLED;
+	// In the locationCachePeerEvictor sweep, evict an address whose persistent connect-failed
+	// count advanced by more than this since the previous sweep. 0 = any new connect failure
+	// counts; a negative value disables the trigger.
 	int LOCATION_CACHE_PEER_CONNECT_FAILED_THRESHOLD;
 
 	int GET_RANGE_SHARD_LIMIT;

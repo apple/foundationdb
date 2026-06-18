@@ -19,6 +19,7 @@ coordinators = 3
 [[knobs]]
 
 # Tune knobs to aggressively evict potentially dead storage servers from NativeAPI's LocationCache
+location_cache_peer_evictor_enabled = true
 location_cache_peer_connect_failed_threshold = 0
 location_cache_peer_failure_eviction_delay = 5.0
 
@@ -35,7 +36,10 @@ stale_peer_observability = true
 [[test]]
 testTitle = 'StalePeerTest'
 
-# TODO: add rationale
+# The purpose of this test is purely measuring stale peer references
+# and ensuring there are none for a given (srcCheckRole, dstKillRole).
+# These checks in general are run outside this test with stale fix features
+# turned on e.g. location_cache_peer_evictor_enabled.
 runConsistencyCheck = false
 waitForQuiescenceBegin = false
 waitForQuiescenceEnd = false

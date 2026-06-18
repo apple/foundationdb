@@ -550,7 +550,7 @@ public:
 	std::map<UID, BlobWorkerInterface> blobWorker_interf; // blob workers don't change endpoints for the same ID
 
 	// Periodically scans serverListKeys and evicts stale locationCache entries
-	Future<Void> locationCachePeerWatcher;
+	Future<Void> locationCachePeerEvictor;
 
 	// map from ssid -> tss interface
 	std::unordered_map<UID, StorageServerInterface> tssMapping;

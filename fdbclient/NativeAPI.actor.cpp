@@ -428,7 +428,7 @@ Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx
 }
 
 void StorageServerInfo::notifyContextDestroyed() {
-	cx = nullptr;	
+	cx = nullptr;
 }
 
 StorageServerInfo::~StorageServerInfo() {
@@ -1164,10 +1164,10 @@ ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, Stora
 // Periodically samples FlowTransport's persistent per-address connect-failed
 // counter and evicts any address whose count advanced since the previous tick
 // (a "flap"). This is a direct ConnectionTimeout (CTO) signal: every connect failure increments
-// the counter, and any positive delta within a watcher interval indicates an
+// the counter, and any positive delta within an evictor interval indicates an
 // address that is still being targeted by RPCs but cannot establish a
 // connection, which is exactly the behavior that produces client-visible CTOs.
-ACTOR static Future<Void> locationCachePeerWatcherActor(DatabaseContext* cx) {
+ACTOR static Future<Void> locationCachePeerEvictorActor(DatabaseContext* cx) {
 	// Per-address snapshot of FlowTransport's persistent connect-failed counter
 	// taken on the previous tick. The delta to the current count is the flap
 	// signal: a positive delta means the address is still being targeted by RPCs
@@ -1218,12 +1218,12 @@ ACTOR static Future<Void> locationCachePeerWatcherActor(DatabaseContext* cx) {
 			}
 		} catch (Error& e) {
 			// actor_cancelled must propagate so ~DatabaseContext can tear down the
-			// watcher; any other error should not kill the loop (that would silently
+			// evictor; any other error should not kill the loop (that would silently
 			// stop the flap sweep for the life of the DC).
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
 			}
-			TraceEvent(SevWarn, "LocationCachePeerWatcherError").error(e).detail("DbId", cx->dbId);
+			TraceEvent(SevWarn, "LocationCachePeerEvictorError").error(e).detail("DbId", cx->dbId);
 		}
 	}
 }
@@ -1688,8 +1688,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	tssMismatchHandler = handleTssMismatches(this);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
-	if (CLIENT_KNOBS->LOCATION_CACHE_PEER_WATCHER_ENABLED) {
-		locationCachePeerWatcher = locationCachePeerWatcherActor(this);
+	if (CLIENT_KNOBS->LOCATION_CACHE_PEER_EVICTOR_ENABLED) {
+		locationCachePeerEvictor = locationCachePeerEvictorActor(this);
 	}
 
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
@@ -1999,7 +1999,7 @@ DatabaseContext::~DatabaseContext() {
 	clientDBInfoMonitor.cancel();
 	monitorTssInfoChange.cancel();
 	tssMismatchHandler.cancel();
-	locationCachePeerWatcher.cancel();
+	locationCachePeerEvictor.cancel();
 	if (grvUpdateHandler.isValid()) {
 		grvUpdateHandler.cancel();
 	}
