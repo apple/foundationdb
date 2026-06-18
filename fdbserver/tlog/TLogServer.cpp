@@ -2193,7 +2193,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		    .detail("ReqBegin", reqBegin)
 		    .detail("ReplyBytes", messages.getLength())
 		    .detail("ReplyByteLimit", replyByteLimit);
-		replyPromise.sendError(server_overloaded());
+		replyPromise.sendError(cdc_tlog_peek_reply_too_large());
 		co_return;
 	}
 

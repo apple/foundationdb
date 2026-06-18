@@ -873,7 +873,7 @@ Future<CDCBufferTagPassResult> CDCProxy::bufferTagPass(Reference<CDCBufferedTag>
 				co_return CDCBufferTagPassResult::STOP;
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_server_overloaded) {
+			if (e.code() != error_code_cdc_tlog_peek_reply_too_large) {
 				throw;
 			}
 			markTagStreamsBufferLimitExceeded(tag, begin);

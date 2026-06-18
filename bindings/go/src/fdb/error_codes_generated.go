@@ -286,6 +286,8 @@ var (
 	ErrStartMoveKeysTooManyRetries = Error{Code: 1253}
 	// Cluster recovery terminating because a CDCProxy failed
 	ErrCdcProxyFailed = Error{Code: 1254}
+	// TLog CDC peek reply exceeds configured byte limit
+	ErrCdcTlogPeekReplyTooLarge = Error{Code: 1255}
 	// Platform error
 	ErrPlatformError = Error{Code: 1500}
 	// Large block allocation failed
