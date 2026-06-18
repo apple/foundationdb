@@ -1575,18 +1575,16 @@ static Future<Void> finishMoveKeys(Database occ,
 					tssReady.reserve(storageServerInterfaces.size());
 					tssReadyInterfs.reserve(storageServerInterfaces.size());
 					for (int s = 0; s < storageServerInterfaces.size(); s++) {
-						serverReady.push_back(waitForShardReady(storageServerInterfaces[s],
-						                                        keys,
-						                                        readVersion,
-						                                        GetShardStateRequest::READABLE));
+						serverReady.push_back(waitForShardReady(
+						    storageServerInterfaces[s], keys, readVersion, GetShardStateRequest::READABLE));
 
 						auto tssPair = tssMapping.find(storageServerInterfaces[s].id());
 
 						if (tssPair != tssMapping.end() && waitForTSSCounter > 0 &&
 						    !tssToIgnore.contains(tssPair->second.id())) {
 							tssReadyInterfs.push_back(tssPair->second);
-							tssReady.push_back(waitForShardReady(
-							    tssPair->second, keys, readVersion, GetShardStateRequest::READABLE));
+							tssReady.push_back(
+							    waitForShardReady(tssPair->second, keys, readVersion, GetShardStateRequest::READABLE));
 						}
 					}
 
@@ -1649,9 +1647,14 @@ static Future<Void> finishMoveKeys(Database occ,
 						// re-verify dest hasn't changed during the wait, then commit.
 						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 						tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-						PostWaitReread reread = co_await rereadShardStateAfterWait(
-						    &tr, lock, ddEnabledState, currentKeys, /*dataMoveId=*/ {},
-						    SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT, SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES);
+						PostWaitReread reread =
+						    co_await rereadShardStateAfterWait(&tr,
+						                                       lock,
+						                                       ddEnabledState,
+						                                       currentKeys,
+						                                       /*dataMoveId=*/{},
+						                                       SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
+						                                       SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES);
 
 						// Verify dest is unchanged — if another DD reassigned the shard
 						// while we were waiting, we must not commit stale metadata.
@@ -2505,9 +2508,13 @@ static Future<Void> finishMoveShards(Database occ,
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-					PostWaitReread reread = co_await rereadShardStateAfterWait(
-					    &tr, lock, ddEnabledState, range, dataMoveId,
-					    SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT, SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT);
+					PostWaitReread reread = co_await rereadShardStateAfterWait(&tr,
+					                                                           lock,
+					                                                           ddEnabledState,
+					                                                           range,
+					                                                           dataMoveId,
+					                                                           SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
+					                                                           SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT);
 
 					if (!reread.dataMove.present()) {
 						TraceEvent(SevWarn, "FinishMoveShardsDataMoveDeletedAfterWait", relocationIntervalId)
@@ -2530,10 +2537,21 @@ static Future<Void> finishMoveShards(Database occ,
 					for (int i = 0; i + 1 < reread.keyServers.size(); ++i) {
 						std::vector<UID> checkSrc, checkDest;
 						UID checkSrcId, checkDestId;
-						decodeKeyServersValue(reread.uidToTagMap, reread.keyServers[i].value, checkSrc, checkDest, checkSrcId, checkDestId);
-						if (checkDestId != dataMoveId) { destChanged = true; break; }
+						decodeKeyServersValue(reread.uidToTagMap,
+						                      reread.keyServers[i].value,
+						                      checkSrc,
+						                      checkDest,
+						                      checkSrcId,
+						                      checkDestId);
+						if (checkDestId != dataMoveId) {
+							destChanged = true;
+							break;
+						}
 						std::sort(checkDest.begin(), checkDest.end());
-						if (checkDest != destServers) { destChanged = true; break; }
+						if (checkDest != destServers) {
+							destChanged = true;
+							break;
+						}
 					}
 					if (destChanged) {
 						CODE_PROBE(true, "finishMoveShards dest changed during waitForShardReady");
