@@ -204,6 +204,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/NativeCdcAssignmentPublication.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcSharedTag.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcMemoryBound.toml)
+  add_fdb_test(TEST_FILES fast/NativeCdcOversizedPeek.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcRetiredRecovery.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcSatellite.toml)
   add_fdb_test(

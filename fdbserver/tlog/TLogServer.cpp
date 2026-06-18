@@ -1795,7 +1795,8 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
                               bool reqOnlySpilled = false,
                               Optional<std::pair<UID, int>> reqSequence = Optional<std::pair<UID, int>>(),
                               Optional<Version> reqEnd = Optional<Version>(),
-                              Optional<bool> reqReturnEmptyIfStopped = Optional<bool>()) {
+                              Optional<bool> reqReturnEmptyIfStopped = Optional<bool>(),
+                              int reqReplyByteLimit = 0) {
 	BinaryWriter messages(Unversioned());
 	BinaryWriter messages2(Unversioned());
 	int sequence = -1;
@@ -2175,6 +2176,17 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 			break; // We know that from `reqBegin` to logData->version are all empty messages. Skip re-executing the
 			       // peek logic.
 		}
+	}
+
+	if (reqReplyByteLimit > 0 && messages.getLength() > reqReplyByteLimit) {
+		CODE_PROBE(true, "TLog rejects an oversized Native CDC peek reply", probe::decoration::rare);
+		TraceEvent(SevWarn, "TLogPeekReplyExceedsByteLimit", logData->logId)
+		    .detail("Tag", reqTag)
+		    .detail("ReqBegin", reqBegin)
+		    .detail("ReplyBytes", messages.getLength())
+		    .detail("ReplyByteLimit", reqReplyByteLimit);
+		replyPromise.sendError(server_overloaded());
+		co_return;
 	}
 
 	TLogPeekReply reply;
@@ -2875,7 +2887,8 @@ class ServeTLogInterface {
 			                                        req.onlySpilled,
 			                                        req.sequence,
 			                                        req.end,
-			                                        req.returnEmptyIfStopped));
+			                                        req.returnEmptyIfStopped,
+			                                        req.replyByteLimit));
 		}
 	}
 

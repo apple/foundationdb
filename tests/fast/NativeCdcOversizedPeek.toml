@@ -1,0 +1,30 @@
+[configuration]
+config = 'single'
+singleRegion = true
+buggify = false
+faultInjection = false
+
+[[knobs]]
+enable_native_cdc = true
+native_cdc_tag_count = 1
+cdc_proxy_buffer_bytes = 8192
+maximum_peek_bytes = 4096
+cdc_proxy_consume_poll_timeout = 30.0
+
+[[test]]
+testTitle = 'NativeCdcOversizedPeek'
+useDB = true
+waitForQuiescenceEnd = false
+connectionFailuresDisableDuration = 1000000
+
+    [[test.workload]]
+    testName = 'NativeCdcEndToEnd'
+    initialStreamCount = 1
+    minStreamCount = 1
+    maxStreamCount = 1
+    keyCount = 4
+    writesPerRound = 1
+    rounds = 0
+    testOversizedPeek = true
+    memoryTestValueBytes = 16384
+    operationTimeout = 120.0

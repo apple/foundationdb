@@ -221,6 +221,7 @@ struct TLogPeekRequest {
 	Optional<Version> end; // when set is exclusive to the desired range
 	// @todo investigate whether we really need this variable (and if not needed, remove it).
 	Optional<bool> returnEmptyIfStopped;
+	int replyByteLimit = 0;
 
 	TLogPeekRequest(Version begin,
 	                Tag tag,
@@ -228,14 +229,18 @@ struct TLogPeekRequest {
 	                bool onlySpilled,
 	                Optional<std::pair<UID, int>> sequence = Optional<std::pair<UID, int>>(),
 	                Optional<Version> end = Optional<Version>(),
-	                Optional<bool> returnEmptyIfStopped = Optional<bool>())
+	                Optional<bool> returnEmptyIfStopped = Optional<bool>(),
+	                int replyByteLimit = 0)
 	  : begin(begin), tag(tag), returnIfBlocked(returnIfBlocked), onlySpilled(onlySpilled), sequence(sequence),
-	    end(end), returnEmptyIfStopped(returnEmptyIfStopped) {}
+	    end(end), returnEmptyIfStopped(returnEmptyIfStopped), replyByteLimit(replyByteLimit) {}
 	TLogPeekRequest() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, begin, tag, returnIfBlocked, onlySpilled, sequence, reply, end, returnEmptyIfStopped);
+		if (ar.protocolVersion().hasNativeCdc()) {
+			serializer(ar, replyByteLimit);
+		}
 	}
 };
 

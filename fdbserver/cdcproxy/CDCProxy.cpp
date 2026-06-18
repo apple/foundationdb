@@ -212,6 +212,7 @@ class CDCProxy {
 	void refreshLogSystem();
 	void clearBufferedMutations(Reference<CDCBufferedStream> stream);
 	void addBufferedBatch(Reference<CDCBufferedStream> stream, CDCBufferedBatch batch);
+	void markTagStreamsBufferLimitExceeded(Reference<CDCBufferedTag> tag, Version begin);
 	void detachStreamFromTags(Reference<CDCBufferedStream> stream);
 	void deactivateStream(Reference<CDCBufferedStream> stream);
 	void refreshStreamTags(Reference<CDCBufferedStream> stream);
@@ -434,6 +435,23 @@ void CDCProxy::addBufferedBatch(Reference<CDCBufferedStream> stream, CDCBuffered
 	stream->bufferedBytes += batch.bufferedBytes;
 	bufferedBytes += batch.bufferedBytes;
 	totalBufferedMutationBytes += batch.bufferedBytes;
+}
+
+void CDCProxy::markTagStreamsBufferLimitExceeded(Reference<CDCBufferedTag> tag, Version begin) {
+	for (const CDCStreamId streamId : tag->streamIds) {
+		auto stream = streams.find(streamId);
+		if (stream == streams.end() || !stream->second->active) {
+			continue;
+		}
+		CODE_PROBE(true, "CDC proxy rejects a raw peek larger than its reservation", probe::decoration::rare);
+		TraceEvent(SevWarn, "CDCProxyRawPeekExceedsBufferLimit", id)
+		    .detail("Tag", tag->tag)
+		    .detail("StreamId", streamId)
+		    .detail("BeginVersion", begin)
+		    .detail("RawPeekLimit", SERVER_KNOBS->MAXIMUM_PEEK_BYTES);
+		stream->second->bufferLimitExceeded = true;
+		stream->second->changed.trigger();
+	}
 }
 
 void updateStreamBufferedThrough(Reference<CDCBufferedStream> stream) {
@@ -741,16 +759,24 @@ Future<CDCBufferTagPassResult> CDCProxy::bufferTagPass(Reference<CDCBufferedTag>
 	if (!cursor->hasMessage()) {
 		// Blocking peeks hold a response reservation. Once another tag queues for capacity, rotate this
 		// reader after one blocking-peek interval so an idle tag cannot monopolize the shared budget.
-		auto result = co_await race(cursor->getMore(TaskPriority::TLogPeekReply),
-		                            logSystem->onChange(),
-		                            tag->stopped.onTrigger(),
-		                            tag->refresh.onTrigger(),
-		                            rotateContendedPeek());
-		if (result.index() == 1 || result.index() == 3 || result.index() == 4) {
+		try {
+			auto result = co_await race(cursor->getMore(TaskPriority::TLogPeekReply),
+			                            logSystem->onChange(),
+			                            tag->stopped.onTrigger(),
+			                            tag->refresh.onTrigger(),
+			                            rotateContendedPeek());
+			if (result.index() == 1 || result.index() == 3 || result.index() == 4) {
+				co_return CDCBufferTagPassResult::RETRY;
+			}
+			if (result.index() == 2) {
+				co_return CDCBufferTagPassResult::STOP;
+			}
+		} catch (Error& e) {
+			if (e.code() != error_code_server_overloaded) {
+				throw;
+			}
+			markTagStreamsBufferLimitExceeded(tag, begin);
 			co_return CDCBufferTagPassResult::RETRY;
-		}
-		if (result.index() == 2) {
-			co_return CDCBufferTagPassResult::STOP;
 		}
 	}
 	// A newly constructed replay cursor can already contain messages, especially after log-generation
@@ -761,8 +787,7 @@ Future<CDCBufferTagPassResult> CDCProxy::bufferTagPass(Reference<CDCBufferedTag>
 		co_return CDCBufferTagPassResult::RETRY;
 	}
 
-	const Version peekThroughVersion =
-	    cursor->hasMessage() ? cursor->version().version : cursor->version().version - 1;
+	const Version peekThroughVersion = cursor->hasMessage() ? cursor->version().version : cursor->version().version - 1;
 	const Version throughVersion = committedPeekThrough(peekThroughVersion, cursor->getMinKnownCommittedVersion());
 	CODE_PROBE(throughVersion < peekThroughVersion,
 	           "CDC proxy waits for peeked mutations to become committed",

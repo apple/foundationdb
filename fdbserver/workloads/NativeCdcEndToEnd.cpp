@@ -64,6 +64,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	int assignmentPublicationChecks;
 	bool testProxyReplacement;
 	bool testMemoryBound;
+	bool testOversizedPeek;
 	bool testDelayedRetention;
 	bool testRetiredRecovery;
 	bool prepareRestartDrain;
@@ -648,6 +649,33 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		co_await validatePopProgressUnderContinuousRequests(cx, firstStreamId, &proxy);
 	}
 
+	Future<Void> validateOversizedPeek(Database cx) {
+		ASSERT_EQ(streams.size(), 1);
+		const Key key = keyForIndex(keyCount / 2);
+		const Value value(std::string(memoryTestValueBytes, 'x'));
+		const Version committed = co_await writeValue(cx, key, value);
+		bool rejected = false;
+		const double deadline = now() + operationTimeout;
+		while (streams.front().consumer->position().lastConsumedVersion < committed) {
+			try {
+				co_await timeoutError(streams.front().consumer->consume(), operationTimeout);
+				co_await timeoutError(streams.front().consumer->acknowledge(), operationTimeout);
+			} catch (Error& e) {
+				if (e.code() != error_code_server_overloaded) {
+					throw;
+				}
+				rejected = true;
+				break;
+			}
+			ASSERT_LT(now(), deadline);
+		}
+		ASSERT(rejected);
+		CODE_PROBE(true, "Native CDC rejects a TLog response larger than its raw peek reservation");
+		co_await timeoutError(removeNativeCdcStreamClient(cx, streams.front().name), operationTimeout);
+		streams.clear();
+		co_await timeoutError(waitForRetiredTagCleanup(cx), operationTimeout);
+	}
+
 	Future<Void> waitForRetiredTagState(Database cx, bool present) {
 		Transaction tr(cx);
 		while (true) {
@@ -865,6 +893,10 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	}
 
 	Future<Void> run(Database cx) {
+		if (testOversizedPeek) {
+			co_await validateOversizedPeek(cx);
+			co_return;
+		}
 		if (testDelayedRetention) {
 			ASSERT_NE(retentionMarkerVersion, invalidVersion);
 			co_await delay(retentionValidationDelay);
@@ -940,6 +972,7 @@ public:
 		assignmentPublicationChecks = getOption(options, "assignmentPublicationChecks"_sr, 0);
 		testProxyReplacement = getOption(options, "testProxyReplacement"_sr, false);
 		testMemoryBound = getOption(options, "testMemoryBound"_sr, false);
+		testOversizedPeek = getOption(options, "testOversizedPeek"_sr, false);
 		testDelayedRetention = getOption(options, "testDelayedRetention"_sr, false);
 		testRetiredRecovery = getOption(options, "testRetiredRecovery"_sr, false);
 		prepareRestartDrain = getOption(options, "prepareRestartDrain"_sr, false);
