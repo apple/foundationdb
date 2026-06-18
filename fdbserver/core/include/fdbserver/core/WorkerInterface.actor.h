@@ -126,8 +126,12 @@ struct WorkerInterface {
 		           workerSnapReq,
 		           backup,
 		           updateServerDBInfo,
-		           rangeBackup,
-		           cdcProxy);
+		           rangeBackup);
+		if constexpr (is_fb_function<Ar>) {
+			serializer(ar, cdcProxy);
+		} else if (ar.protocolVersion().hasNativeCdc()) {
+			serializer(ar, cdcProxy);
+		}
 	}
 };
 
@@ -258,9 +262,6 @@ struct RegisterMasterRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		if constexpr (!is_fb_function<Ar>) {
-			ASSERT(ar.protocolVersion().isValid());
-		}
 		serializer(ar,
 		           id,
 		           mi,
@@ -273,8 +274,15 @@ struct RegisterMasterRequest {
 		           configuration,
 		           priorCommittedLogServers,
 		           recoveryState,
-		           recoveryStalled,
-		           cdcProxies);
+		           recoveryStalled);
+		if constexpr (is_fb_function<Ar>) {
+			serializer(ar, cdcProxies);
+		} else {
+			ASSERT(ar.protocolVersion().isValid());
+			if (ar.protocolVersion().hasNativeCdc()) {
+				serializer(ar, cdcProxies);
+			}
+		}
 	}
 };
 
