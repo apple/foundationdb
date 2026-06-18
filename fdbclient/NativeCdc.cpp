@@ -639,14 +639,25 @@ Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, KeyRang
 		Future<Void> proxyChanged = cx->clientInfo->onChange();
 		Optional<CDCProxyInterface> selectedProxy;
 		bool registrationEnabled;
+		UID clientInfoId;
 		{
 			const ClientDBInfo& clientInfo = cx->clientInfo->get();
 			selectedProxy = selectAvailableNativeCdcProxy(clientInfo, previousProxy);
 			registrationEnabled = clientInfo.nativeCdcEnabled;
+			clientInfoId = clientInfo.id;
 		}
 		if (!selectedProxy.present()) {
-			if (!registrationEnabled && !(co_await findNativeCdcStreamId(cx, name)).present()) {
-				throw client_invalid_operation();
+			if (!registrationEnabled) {
+				Optional<CDCStreamId> existingStream = co_await findNativeCdcStreamId(cx, name);
+				if (cx->clientInfo->get().id != clientInfoId) {
+					CODE_PROBE(true,
+					           "Native CDC registration retries after client info changes during existence check",
+					           probe::decoration::rare);
+					continue;
+				}
+				if (!existingStream.present()) {
+					throw client_invalid_operation();
+				}
 			}
 			co_await proxyChanged;
 			continue;
