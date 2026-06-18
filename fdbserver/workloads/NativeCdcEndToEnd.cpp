@@ -36,7 +36,7 @@
 
 class NativeCdcEndToEndWorkload : public TestWorkload {
 	struct ExpectedWrite {
-		Version deadline;
+		Version committedVersion;
 		bool observed = false;
 	};
 
@@ -826,13 +826,14 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 					const auto found =
 					    stream->expected.find(std::make_pair(Key(mutation.param1), Value(mutation.param2)));
 					ASSERT(found != stream->expected.end());
+					ASSERT_EQ(versioned.version, found->second.committedVersion);
 					found->second.observed = true;
 				}
 			}
 			co_await timeoutError(stream->consumer->acknowledge(), operationTimeout);
 		}
 		for (const auto& expected : stream->expected) {
-			if (expected.second.deadline <= throughVersion) {
+			if (expected.second.committedVersion <= throughVersion) {
 				ASSERT(expected.second.observed);
 			}
 		}

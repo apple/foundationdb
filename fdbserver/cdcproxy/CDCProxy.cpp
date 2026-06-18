@@ -112,7 +112,7 @@ struct CDCBufferSelection {
 	int64_t selectedBytes = 0;
 };
 
-enum class CDCBufferTagPassResult { RETRY, STOP };
+enum class CDCBufferTagPassResult { RETRY, WAIT_FOR_COMMIT, STOP };
 
 // AsyncTrigger intentionally drops notifications when nobody is waiting. Pop work needs level-triggered semantics:
 // an acknowledgement that arrives during a scan must cause one later pass without canceling the pass in flight.
@@ -166,6 +166,10 @@ CDCBufferSelection selectBufferCandidates(std::vector<CDCBufferCandidate> candid
 		}
 	}
 	return selection;
+}
+
+Version committedPeekThrough(Version peekThrough, Version minKnownCommittedVersion) {
+	return std::min(peekThrough, minKnownCommittedVersion);
 }
 
 // New TLogs retain every recovered tag until it is popped past the recovery boundary. An unshared retired tag has no
@@ -757,9 +761,14 @@ Future<CDCBufferTagPassResult> CDCProxy::bufferTagPass(Reference<CDCBufferedTag>
 		co_return CDCBufferTagPassResult::RETRY;
 	}
 
-	const Version throughVersion = cursor->hasMessage() ? cursor->version().version : cursor->version().version - 1;
+	const Version peekThroughVersion =
+	    cursor->hasMessage() ? cursor->version().version : cursor->version().version - 1;
+	const Version throughVersion = committedPeekThrough(peekThroughVersion, cursor->getMinKnownCommittedVersion());
+	CODE_PROBE(throughVersion < peekThroughVersion,
+	           "CDC proxy waits for peeked mutations to become committed",
+	           probe::decoration::rare);
 	if (throughVersion < begin) {
-		co_return CDCBufferTagPassResult::RETRY;
+		co_return CDCBufferTagPassResult::WAIT_FOR_COMMIT;
 	}
 	Reference<IReplayPeekCursor> estimateCursor = cursor->cloneNoMore();
 	estimateCursor->setProtocolVersion(g_network->protocolVersion());
@@ -858,8 +867,20 @@ Future<Void> CDCProxy::bufferTag(Reference<CDCBufferedTag> tag) {
 			continue;
 		}
 
-		if (co_await bufferTagPass(tag, begin.get()) == CDCBufferTagPassResult::STOP) {
+		const CDCBufferTagPassResult result = co_await bufferTagPass(tag, begin.get());
+		if (result == CDCBufferTagPassResult::STOP) {
 			co_return;
+		}
+		if (result == CDCBufferTagPassResult::WAIT_FOR_COMMIT) {
+			// The cursor may already hold a speculative message, so getMore() would complete immediately without
+			// refreshing its committed frontier. Drop that arena and reopen after one blocking-peek interval.
+			auto waitForCommit = co_await race(delay(SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT),
+			                                   logSystem->onChange(),
+			                                   tag->stopped.onTrigger(),
+			                                   tag->refresh.onTrigger());
+			if (waitForCommit.index() == 2) {
+				co_return;
+			}
 		}
 	}
 }
@@ -1561,6 +1582,13 @@ TEST_CASE("/NativeCDC/ProxyBufferCandidateSelection") {
 	ASSERT_EQ(rejectsOverLimit.oversizedStreamIds.front(), 1);
 	ASSERT(rejectsOverLimit.selectedStreamIds.contains(2));
 
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/CommittedDeliveryFrontier") {
+	ASSERT_EQ(committedPeekThrough(200, 150), 150);
+	ASSERT_EQ(committedPeekThrough(150, 200), 150);
+	ASSERT_EQ(committedPeekThrough(150, 150), 150);
 	return Void();
 }
 
