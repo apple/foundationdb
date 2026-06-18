@@ -156,7 +156,7 @@ Reference<IReplayPeekCursor> LogSystemConsumer::peekAll(UID dbgid,
 			}
 		}
 
-		return makeReference<ReplayMultiCursor>(cursors, epochEnds);
+		return makeReference<ReplayMultiCursor>(cursors, epochEnds, tag.locality != tagLocalityCDC);
 	}
 }
 
@@ -537,7 +537,7 @@ Reference<IReplayPeekCursor> LogSystemConsumer::peekLocal(UID dbgid,
 			}
 		}
 
-		return makeReference<ReplayMultiCursor>(cursors, epochEnds);
+		return makeReference<ReplayMultiCursor>(cursors, epochEnds, tag.locality != tagLocalityCDC);
 	}
 }
 
@@ -654,7 +654,7 @@ Reference<IReplayPeekCursor> LogSystemConsumer::peekSingle(UID dbgid,
 			epochEnds.emplace_back(history[i].first);
 		}
 
-		return makeReference<ReplayMultiCursor>(cursors, epochEnds);
+		return makeReference<ReplayMultiCursor>(cursors, epochEnds, tag.locality != tagLocalityCDC);
 	}
 }
 

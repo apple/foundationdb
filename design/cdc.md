@@ -467,15 +467,19 @@ mutations to the registered range and stores versioned mutation batches in a
 per-stream in-memory buffer.
 
 All raw peek windows and stream buffers owned by one CDC proxy share a
-`CDC_PROXY_BUFFER_BYTES` budget. Before constructing a TLog cursor, a pass
-reserves `MAXIMUM_PEEK_BYTES` for its raw response plus a bounded
-materialization window. It retains the raw reservation while filtering and
-copying, then releases it and transfers only accepted filtered bytes to the
-stream buffers. Acknowledgement or stream removal releases those retained
-permits. The configured CDC budget must therefore be larger than
-`MAXIMUM_PEEK_BYTES`; its usable retained-batch capacity is the difference.
-This applies backpressure before ordinary peek batches arrive, rather than
-allowing each stream, received batch, or filtered expansion to independently
+`CDC_PROXY_BUFFER_BYTES` budget. A replicated log read may retain one separately
+capped reply arena from every candidate TLog it consults. CDC history cursors
+therefore disable cross-generation constructor prefetch, report the maximum
+number of reply arenas one active generation can retain, and reserve that count
+times `MAXIMUM_PEEK_BYTES` before issuing a peek. The pass also reserves a
+bounded materialization window. It retains the aggregate raw reservation while
+filtering and copying, then releases it and transfers only accepted filtered
+bytes to the stream buffers. Acknowledgement or stream removal releases those
+retained permits. The usable retained-batch capacity is the configured CDC
+budget minus this topology-dependent raw reservation; a configuration too small
+to hold both fails the affected consume with `server_overloaded`. This applies
+backpressure before ordinary peek batches arrive, rather than allowing each
+stream, replica reply, received batch, or filtered expansion to independently
 overshoot the proxy limit. A slow consumer does not require the proxy to buffer
 its entire retained history in memory: durable acknowledgement state and tagged
 TLog retention are the source of resumability, while the proxy buffer is a

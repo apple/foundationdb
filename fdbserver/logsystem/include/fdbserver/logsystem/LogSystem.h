@@ -86,6 +86,8 @@ struct IPeekCursor {
 
 // Peek cursor that reports log location and can be cloned and repositioned for replay.
 struct IReplayPeekCursor : IPeekCursor {
+	// Upper bound on TLogPeekReply arenas retained before or while satisfying the next getMore().
+	virtual int64_t getMaxRetainedReplyCount() const = 0;
 	virtual Optional<UID> getPrimaryPeekLocation() const = 0;
 	virtual Optional<UID> getCurrentPeekLocation() const = 0;
 	virtual Version getMaxKnownVersion() const = 0;

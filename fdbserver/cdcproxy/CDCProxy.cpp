@@ -112,6 +112,13 @@ struct CDCBufferSelection {
 	int64_t selectedBytes = 0;
 };
 
+struct CDCBufferPassLimits {
+	int64_t rawReplyBytes;
+	int64_t preferredBufferedBytes;
+	int64_t hardBufferedBytes;
+	int64_t reservationBytes;
+};
+
 struct CDCPopState {
 	std::unordered_map<CDCStreamId, Version> minVersions;
 	std::unordered_map<Tag, Version> safePopVersions;
@@ -119,6 +126,22 @@ struct CDCPopState {
 };
 
 enum class CDCBufferTagPassResult { RETRY, WAIT_FOR_COMMIT, STOP };
+
+Optional<CDCBufferPassLimits> calculateBufferPassLimits(int64_t bufferBytes,
+                                                        int64_t maximumPeekBytes,
+                                                        int64_t retainedReplyCount) {
+	if (bufferBytes <= 0 || maximumPeekBytes <= 0 || retainedReplyCount <= 0 ||
+	    retainedReplyCount > (bufferBytes - 1) / maximumPeekBytes) {
+		return Optional<CDCBufferPassLimits>();
+	}
+
+	const int64_t rawReplyBytes = retainedReplyCount * maximumPeekBytes;
+	const int64_t hardBufferedBytes = bufferBytes - rawReplyBytes;
+	const int64_t preferredBufferedBytes = std::min(maximumPeekBytes, hardBufferedBytes);
+	return CDCBufferPassLimits{
+		rawReplyBytes, preferredBufferedBytes, hardBufferedBytes, rawReplyBytes + preferredBufferedBytes
+	};
+}
 
 // AsyncTrigger intentionally drops notifications when nobody is waiting. Pop work needs level-triggered semantics:
 // an acknowledgement that arrives during a scan must cause one later pass without canceling the pass in flight.
@@ -234,6 +257,7 @@ class CDCProxy {
 	void addBufferedBatch(Reference<CDCBufferedStream> stream, CDCBufferedBatch batch);
 	void reconcileStreamMinVersion(Reference<CDCBufferedStream> stream, Version minVersion);
 	void markTagStreamsBufferLimitExceeded(Reference<CDCBufferedTag> tag, Version begin);
+	void markTagStreamsRawReplyBudgetExceeded(Reference<CDCBufferedTag> tag, Version begin, int64_t retainedReplyCount);
 	void detachStreamFromTags(Reference<CDCBufferedStream> stream);
 	void deactivateStream(Reference<CDCBufferedStream> stream);
 	void refreshStreamTags(Reference<CDCBufferedStream> stream);
@@ -470,6 +494,27 @@ void CDCProxy::markTagStreamsBufferLimitExceeded(Reference<CDCBufferedTag> tag, 
 		    .detail("StreamId", streamId)
 		    .detail("BeginVersion", begin)
 		    .detail("RawPeekLimit", SERVER_KNOBS->MAXIMUM_PEEK_BYTES);
+		stream->second->bufferLimitExceeded = true;
+		stream->second->changed.trigger();
+	}
+}
+
+void CDCProxy::markTagStreamsRawReplyBudgetExceeded(Reference<CDCBufferedTag> tag,
+                                                    Version begin,
+                                                    int64_t retainedReplyCount) {
+	CODE_PROBE(true, "CDC proxy rejects raw reply fanout larger than its buffer", probe::decoration::rare);
+	for (const CDCStreamId streamId : tag->streamIds) {
+		auto stream = streams.find(streamId);
+		if (stream == streams.end() || !stream->second->active) {
+			continue;
+		}
+		TraceEvent(SevWarn, "CDCProxyRawReplyBudgetExceedsBufferLimit", id)
+		    .detail("Tag", tag->tag)
+		    .detail("StreamId", streamId)
+		    .detail("BeginVersion", begin)
+		    .detail("RetainedReplyCount", retainedReplyCount)
+		    .detail("RawPeekLimitPerReply", SERVER_KNOBS->MAXIMUM_PEEK_BYTES)
+		    .detail("BufferLimit", SERVER_KNOBS->CDC_PROXY_BUFFER_BYTES);
 		stream->second->bufferLimitExceeded = true;
 		stream->second->changed.trigger();
 	}
@@ -768,18 +813,28 @@ Future<Void> CDCProxy::rotateContendedPeek() {
 
 Future<CDCBufferTagPassResult> CDCProxy::bufferTagPass(Reference<CDCBufferedTag> tag, Version begin) {
 	const int64_t bufferLimit = SERVER_KNOBS->CDC_PROXY_BUFFER_BYTES;
-	const int64_t rawPeekReservation = SERVER_KNOBS->MAXIMUM_PEEK_BYTES;
-	const int64_t hardBufferedBatchLimit = bufferLimit - rawPeekReservation;
-	const int64_t preferredBufferedBatch = std::min(rawPeekReservation, hardBufferedBatchLimit);
-	const int64_t passReservation = rawPeekReservation + preferredBufferedBatch;
-	ASSERT_GT(rawPeekReservation, 0);
-	ASSERT_GT(preferredBufferedBatch, 0);
+	Reference<LogSystemConsumer> consumer = logSystem->get();
+	Future<Void> logSystemChanged = logSystem->onChange();
+	// CDC ReplayMultiCursor instances disable constructor prefetch, so constructing this cursor cannot issue a peek
+	// before the proxy has reserved memory for every reply arena that its replicated read may retain.
+	Reference<IReplayPeekCursor> cursor = consumer->peekSingle(id, begin, tag->tag, {});
+	const int64_t retainedReplyCount = cursor->getMaxRetainedReplyCount();
+	Optional<CDCBufferPassLimits> limits =
+	    calculateBufferPassLimits(bufferLimit, SERVER_KNOBS->MAXIMUM_PEEK_BYTES, retainedReplyCount);
+	if (!limits.present()) {
+		markTagStreamsRawReplyBudgetExceeded(tag, begin, retainedReplyCount);
+		co_return CDCBufferTagPassResult::RETRY;
+	}
+	const int64_t rawPeekReservation = limits.get().rawReplyBytes;
+	const int64_t hardBufferedBatchLimit = limits.get().hardBufferedBytes;
+	const int64_t preferredBufferedBatch = limits.get().preferredBufferedBytes;
+	const int64_t passReservation = limits.get().reservationBytes;
 	if (bufferLock.available() < passReservation) {
 		CODE_PROBE(true, "CDC proxy applies shared buffer backpressure", probe::decoration::rare);
 		peekCapacityContended.trigger();
 	}
 	auto capacity = co_await race(bufferLock.take(TaskPriority::TLogPeekReply, passReservation),
-	                              logSystem->onChange(),
+	                              logSystemChanged,
 	                              tag->stopped.onTrigger(),
 	                              tag->refresh.onTrigger());
 	if (capacity.index() == 1 || capacity.index() == 3) {
@@ -790,13 +845,16 @@ Future<CDCBufferTagPassResult> CDCProxy::bufferTagPass(Reference<CDCBufferedTag>
 	}
 	FlowLock::Releaser reservation(bufferLock, passReservation);
 	recordBufferUsage();
-	Reference<IReplayPeekCursor> cursor = logSystem->get()->peekSingle(id, begin, tag->tag, {});
+	// If capacity and a generation change became ready together, discard the cursor built from the old topology.
+	if (logSystemChanged.isReady()) {
+		co_return CDCBufferTagPassResult::RETRY;
+	}
 	if (!cursor->hasMessage()) {
 		// Blocking peeks hold a response reservation. Once another tag queues for capacity, rotate this
 		// reader after one blocking-peek interval so an idle tag cannot monopolize the shared budget.
 		try {
 			auto result = co_await race(cursor->getMore(TaskPriority::TLogPeekReply),
-			                            logSystem->onChange(),
+			                            logSystemChanged,
 			                            tag->stopped.onTrigger(),
 			                            tag->refresh.onTrigger(),
 			                            rotateContendedPeek());
@@ -904,8 +962,8 @@ Future<CDCBufferTagPassResult> CDCProxy::bufferTagPass(Reference<CDCBufferedTag>
 	ASSERT_LE(bufferedBytes, bufferLimit);
 	ASSERT_LE(bufferLock.activePermits(), bufferLimit);
 	advanceTagBufferedThrough(tag, throughVersion, selection.selectedStreamIds);
-	// The raw cursor arena is covered by rawPeekReservation only for this pass. Reopen from the shared minimum after
-	// releasing it so no cursor response remains live outside the proxy memory budget.
+	// Every raw cursor arena is covered by rawPeekReservation only for this pass. Reopen from the shared minimum
+	// after releasing it so no cursor response remains live outside the proxy memory budget.
 	co_return CDCBufferTagPassResult::RETRY;
 }
 
@@ -1646,6 +1704,20 @@ TEST_CASE("/NativeCDC/ProxyBufferCandidateSelection") {
 	ASSERT_EQ(rejectsOverLimit.oversizedStreamIds.front(), 1);
 	ASSERT(rejectsOverLimit.selectedStreamIds.contains(2));
 
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/ProxyBufferPassLimits") {
+	Optional<CDCBufferPassLimits> replicated = calculateBufferPassLimits(1000, 100, 3);
+	ASSERT(replicated.present());
+	ASSERT_EQ(replicated.get().rawReplyBytes, 300);
+	ASSERT_EQ(replicated.get().preferredBufferedBytes, 100);
+	ASSERT_EQ(replicated.get().hardBufferedBytes, 700);
+	ASSERT_EQ(replicated.get().reservationBytes, 400);
+
+	ASSERT(!calculateBufferPassLimits(300, 100, 3).present());
+	ASSERT(!calculateBufferPassLimits(std::numeric_limits<int64_t>::max(), std::numeric_limits<int64_t>::max(), 2)
+	            .present());
 	return Void();
 }
 

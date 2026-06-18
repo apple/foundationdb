@@ -25,6 +25,7 @@
 #include "fdbrpc/ReplicationUtils.h"
 #include "flow/DebugTrace.h"
 #include "flow/CoroUtils.h"
+#include "flow/UnitTest.h"
 
 // Returns a timeout future for peek reply detection. Used by both the non-parallel
 // (serverPeekGetMoreImpl) and parallel (serverPeekParallelGetMoreImpl) peek paths
@@ -565,6 +566,14 @@ Future<Void> ServerPeekCursor::getMore(TaskPriority taskID) {
 		return Void();
 	}
 	if (!more.isValid() || more.isReady()) {
+		if (!hasMessage()) {
+			// A consumed reply is no longer useful. Release its arena before the next capped reply arrives so one
+			// ServerPeekCursor retains at most one reply window at a time.
+			results = TLogPeekReply();
+			results.maxKnownVersion = 0;
+			results.minKnownCommittedVersion = 0;
+			rd = ArenaReader(results.arena, results.messages, Unversioned());
+		}
 		if (usePeekStream &&
 		    (tag.locality >= 0 || tag.locality == tagLocalityLogRouter || tag.locality == tagLocalityRemoteLog)) {
 			more = serverPeekStreamGetMore(this, taskID);
@@ -630,6 +639,12 @@ const LogMessageVersion& ServerPeekCursor::version() const {
 
 Version ServerPeekCursor::getMinKnownCommittedVersion() const {
 	return results.minKnownCommittedVersion;
+}
+
+int64_t ServerPeekCursor::getMaxRetainedReplyCount() const {
+	return parallelGetMore || onlySpilled || !futureResults.empty()
+	           ? std::max<int64_t>(1, SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS + 1)
+	           : 1;
 }
 
 Optional<UID> ServerPeekCursor::getPrimaryPeekLocation() const {
@@ -1005,6 +1020,14 @@ Version MergedPeekCursor::getMaxKnownVersion() const {
 	return maxKnownVersion;
 }
 
+int64_t MergedPeekCursor::getMaxRetainedReplyCount() const {
+	int64_t count = 0;
+	for (const auto& cursor : serverCursors) {
+		count += cursor->getMaxRetainedReplyCount();
+	}
+	return std::max<int64_t>(1, count);
+}
+
 Optional<UID> MergedPeekCursor::getPrimaryPeekLocation() const {
 	if (bestServer >= 0) {
 		return serverCursors[bestServer]->getPrimaryPeekLocation();
@@ -1365,6 +1388,16 @@ Version SetPeekCursor::getMaxKnownVersion() const {
 	return maxKnownVersion;
 }
 
+int64_t SetPeekCursor::getMaxRetainedReplyCount() const {
+	int64_t count = 0;
+	for (const auto& cursors : serverCursors) {
+		for (const auto& cursor : cursors) {
+			count += cursor->getMaxRetainedReplyCount();
+		}
+	}
+	return std::max<int64_t>(1, count);
+}
+
 Optional<UID> SetPeekCursor::getPrimaryPeekLocation() const {
 	if (bestServer >= 0 && bestSet >= 0) {
 		return serverCursors[bestSet][bestServer]->getPrimaryPeekLocation();
@@ -1390,10 +1423,13 @@ Version SetPeekCursor::popped() const {
 }
 
 ReplayMultiCursor::ReplayMultiCursor(std::vector<Reference<IReplayPeekCursor>> cursors,
-                                     std::vector<LogMessageVersion> epochEnds)
-  : cursors(cursors), epochEnds(epochEnds), poppedVersion(0) {
-	for (int i = 0; i < std::min<int>(cursors.size(), SERVER_KNOBS->MULTI_CURSOR_PRE_FETCH_LIMIT); i++) {
-		cursors[cursors.size() - i - 1]->getMore();
+                                     std::vector<LogMessageVersion> epochEnds,
+                                     bool prefetch)
+  : cursors(cursors), epochEnds(epochEnds), poppedVersion(0), prefetch(prefetch) {
+	if (prefetch) {
+		for (int i = 0; i < std::min<int>(cursors.size(), SERVER_KNOBS->MULTI_CURSOR_PRE_FETCH_LIMIT); i++) {
+			cursors[cursors.size() - i - 1]->getMore();
+		}
 	}
 }
 
@@ -1475,6 +1511,18 @@ Version ReplayMultiCursor::getMaxKnownVersion() const {
 	return maxKnownVersion;
 }
 
+int64_t ReplayMultiCursor::getMaxRetainedReplyCount() const {
+	int64_t count = prefetch ? 0 : 1;
+	for (const auto& cursor : cursors) {
+		if (prefetch) {
+			count += cursor->getMaxRetainedReplyCount();
+		} else {
+			count = std::max(count, cursor->getMaxRetainedReplyCount());
+		}
+	}
+	return count;
+}
+
 Optional<UID> ReplayMultiCursor::getPrimaryPeekLocation() const {
 	return cursors.back()->getPrimaryPeekLocation();
 }
@@ -1553,6 +1601,25 @@ Version MultiCursor::getMinKnownCommittedVersion() const {
 
 Version MultiCursor::popped() const {
 	return std::max(poppedVersion, cursors.back()->popped());
+}
+
+TEST_CASE("/NativeCDC/ReplayPeekReplyAccounting") {
+	auto makeServerCursor = []() {
+		return makeReference<ServerPeekCursor>(
+		    Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), Tag(tagLocalityCDC, 0), 0, 100, false, false);
+	};
+
+	std::vector<Reference<ServerPeekCursor>> twoServers{ makeServerCursor(), makeServerCursor() };
+	std::vector<Reference<ServerPeekCursor>> threeServers{ makeServerCursor(), makeServerCursor(), makeServerCursor() };
+	auto twoReplies = makeReference<MergedPeekCursor>(twoServers, 0);
+	auto threeReplies = makeReference<MergedPeekCursor>(threeServers, 0);
+	ASSERT_EQ(twoReplies->getMaxRetainedReplyCount(), 2);
+	ASSERT_EQ(threeReplies->getMaxRetainedReplyCount(), 3);
+
+	std::vector<Reference<IReplayPeekCursor>> epochs{ twoReplies, threeReplies };
+	auto noPrefetch = makeReference<ReplayMultiCursor>(epochs, std::vector<LogMessageVersion>{ 50 }, false);
+	ASSERT_EQ(noPrefetch->getMaxRetainedReplyCount(), 3);
+	return Void();
 }
 
 BufferedCursor::BufferedCursor(std::vector<Reference<IPeekCursor>> cursors,
