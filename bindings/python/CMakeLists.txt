@@ -109,4 +109,24 @@ if(NOT OPEN_FOR_IDE AND NOT USE_SANITIZER)
             --cluster-file @CLUSTER_FILE@ --verbose
     DISABLE_LOG_DUMP
   )
+
+  # FIXME Windows support
+  set(PYPKG_TEST_DIR "${CMAKE_BINARY_DIR}/pypkg-test-venv")
+  set(PYPKG_TEST_PY3 "${PYPKG_TEST_DIR}/bin/python3")
+  add_test(
+    NAME python_package_test
+    COMMAND sh -c "
+      set -e
+      if ! [ -f '${package_file}' ]; then
+        exit 66
+      fi
+      $<TARGET_FILE:Python3::Interpreter> -m venv ${PYPKG_TEST_DIR}
+      ${PYPKG_TEST_PY3} -m ensurepip   # probably not needed, but for consistency
+      ${PYPKG_TEST_PY3} -m pip install '${package_file}'
+      ${PYPKG_TEST_PY3} -c 'import fdb'
+      ${PYPKG_TEST_PY3} -m pip install '${wheel_package_file}'
+      ${PYPKG_TEST_PY3} -c 'import fdb'
+    "
+  )
+  set_tests_properties(python_package_test PROPERTIES SKIP_RETURN_CODE 66)
 endif() # NOT OPEN_FOR_IDE AND NOT USE_SANITIZER
