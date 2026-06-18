@@ -274,7 +274,9 @@ public:
 		}
 
 		Reference<IBackupFile> f = co_await bc->writeFile(fileName);
+
 		co_await f->append(docString.data(), docString.size());
+
 		co_await f->finish();
 	}
 
@@ -2624,6 +2626,46 @@ Future<Void> testBackupContinuousLogEndVer(std::string url, Optional<std::string
 TEST_CASE("/backup/containers/localdir/continuousLogEndVersion") {
 	co_await testBackupContinuousLogEndVer(
 	    format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()), Optional<std::string>());
+}
+
+// Verify that writeKeyspaceSnapshotFile correctly writes and reads back a snapshot manifest even when the
+// JSON document is larger than BACKUP_MANIFEST_WRITE_CHUNK_SIZE, exercising the chunked-append path.
+TEST_CASE("/backup/containers/localdir/writeKeyspaceSnapshotFile/chunked") {
+	// Force a tiny chunk size so a normal-sized manifest triggers multiple append() calls.
+	int savedChunkSize = CLIENT_KNOBS->BACKUP_MANIFEST_WRITE_CHUNK_SIZE;
+	const_cast<ClientKnobs*>(CLIENT_KNOBS)->BACKUP_MANIFEST_WRITE_CHUNK_SIZE = 64;
+	ASSERT_EQ(CLIENT_KNOBS->BACKUP_MANIFEST_WRITE_CHUNK_SIZE, 64);
+
+	std::string url = format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int());
+	Reference<IBackupContainer> c = IBackupContainer::openContainer(url, {}, {}, 0);
+	co_await c->create();
+
+	// Use a fixed version and block size for deterministic assertions.
+	Version v = 1000;
+	int blockSize = 3 * sizeof(uint32_t) + 8;
+
+	// Write several range files so the resulting JSON manifest exceeds 64 bytes.
+	std::vector<std::string> rangeFileNames;
+	std::vector<std::pair<Key, Key>> beginEndKeys;
+	for (int i = 0; i < 5; ++i) {
+		Reference<IBackupFile> range = co_await c->writeRangeFile(v, 0, v, blockSize);
+		co_await testWriteSnapshotFile(range, ""_sr, ""_sr, blockSize);
+		rangeFileNames.push_back(range->getFileName());
+		beginEndKeys.push_back({ ""_sr, ""_sr });
+		++v;
+	}
+
+	int64_t totalSize = 99999;
+	co_await c->writeKeyspaceSnapshotFile(rangeFileNames, beginEndKeys, totalSize, IncludeKeyRangeMap(false));
+
+	BackupFileList listing = co_await c->dumpFileList();
+	ASSERT_EQ(listing.snapshots.size(), 1);
+	ASSERT_EQ(listing.snapshots[0].totalSize, totalSize);
+	ASSERT_EQ(listing.snapshots[0].beginVersion, 1000);
+	ASSERT_EQ(listing.snapshots[0].endVersion, 1004);
+
+	const_cast<ClientKnobs*>(CLIENT_KNOBS)->BACKUP_MANIFEST_WRITE_CHUNK_SIZE = savedChunkSize;
+	co_await c->deleteContainer();
 }
 
 } // namespace backup_test
