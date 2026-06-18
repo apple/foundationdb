@@ -397,7 +397,6 @@ double DatabaseContext::getLastGrvTime() {
 	return lastGrvTime;
 }
 
-
 Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx,
                                                              StorageServerInterface const& ssi,
                                                              LocalityData const& locality) {
@@ -410,6 +409,7 @@ Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx
 				//       pointing to. This is technically correct, but is very unnatural. We may want to refactor load
 				//       balance to take an AsyncVar<Reference<Interface>> so that it is notified when the interface
 				//       changes.
+
 				it->second->interf = ssi;
 			} else {
 				it->second->notifyContextDestroyed();
@@ -428,19 +428,7 @@ Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx
 }
 
 void StorageServerInfo::notifyContextDestroyed() {
-	cx = nullptr;
-	// NOTE: we deliberately do NOT clear interf here. notifyContextDestroyed()
-	// is called from getInterface() when a still-ALIVE storage server re-registers
-	// with a new locality (orphaning this StorageServerInfo for a fresh one) -- this
-	// happens routinely during recovery/restart. A cached LocationInfo (or an
-	// in-flight load-balance choice) may still hold a Reference to this object; if we
-	// null interf out from under it, its reads route to a default-constructed (invalid)
-	// endpoint and HANG forever (no reply, no wrong_shard_server, no connection_failed),
-	// which stalls clients (observed as Ratekeeper's getServerListAndProcessClasses
-	// hanging -> RkSSListFetchTimeout -> tpsLimit=0 -> the cluster never quiesces).
-	// Dropping a genuinely-dead peer's RequestStream refs is handled by
-	// invalidateCacheByAddress(), which detaches from server_interf first and only
-	// then clears interf -- safe because nothing routes there anymore.
+	cx = nullptr;	
 }
 
 StorageServerInfo::~StorageServerInfo() {
@@ -1049,7 +1037,9 @@ ACTOR static Future<Void> monitorClientDBInfoChange(DatabaseContext* cx,
 					// proxy list changes, so a killed proxy's RequestStream is dropped from
 					// cx->commitProxies/grvProxies on clientInfo rotation rather than waiting
 					// for the next transaction's lazy getCommitProxies()/getGrvProxies().
-					cx->updateProxies();
+					if (CLIENT_KNOBS->DBCONTEXT_EAGER_PROXY_UPDATE) {
+						cx->updateProxies();
+					}
 				}
 			}
 			when(wait(actors.getResult())) {
@@ -1173,7 +1163,7 @@ ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, Stora
 
 // Periodically samples FlowTransport's persistent per-address connect-failed
 // counter and evicts any address whose count advanced since the previous tick
-// (a "flap"). This is a direct CTO signal: every connect failure increments
+// (a "flap"). This is a direct ConnectionTimeout (CTO) signal: every connect failure increments
 // the counter, and any positive delta within a watcher interval indicates an
 // address that is still being targeted by RPCs but cannot establish a
 // connection, which is exactly the behavior that produces client-visible CTOs.
@@ -2136,14 +2126,6 @@ void DatabaseContext::invalidateCache(const Optional<KeyRef>& tenantPrefix, cons
 }
 
 void DatabaseContext::invalidateCacheByAddress(const NetworkAddress& address) {
-	// Evict every cached location whose LocationInfo references this address,
-	// forcing a re-resolve off the stale/unreachable storage server. We do NOT
-	// touch the StorageServerInfo interf or the FlowTransport peer here: dropping
-	// the cache's Reference is enough -- once no cached LocationInfo (and no
-	// in-flight load-balance choice) holds the SSInfo, it is destroyed and its
-	// RequestStream / peer refs release. Clearing interf directly would risk
-	// nulling it out from under an in-flight read, which then hangs on a default
-	// endpoint; we let the reference-count cascade release it instead.
 	std::vector<KeyRange> rangesToInvalidate;
 	auto ranges = locationCache.ranges();
 	for (auto iter = ranges.begin(); iter != ranges.end(); ++iter) {

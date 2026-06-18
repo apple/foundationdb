@@ -54,7 +54,8 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( MAX_CLIENT_STATUS_AGE,                   1.0 );
 	init( MAX_COMMIT_PROXY_CONNECTIONS,              5 ); if( randomize && BUGGIFY ) MAX_COMMIT_PROXY_CONNECTIONS = 1;
 	init( MAX_GRV_PROXY_CONNECTIONS,                 3 ); if( randomize && BUGGIFY ) MAX_GRV_PROXY_CONNECTIONS = 1;
-	init( SHRINK_PROXY_LIST_CLEAR_CACHE_BELOW_THRESHOLD, true ); // When true, MonitorLeader::shrinkProxyList clears its cached sampled-subset (lastCommitProxies / lastGrvProxies) on iterations where recruited count is below MAX_*_PROXY_CONNECTIONS. Prevents the cache from pinning RequestStream refs (and thus peer references) of a killed proxy after recruited count drops back under the cap. Default on; disable to restore pre-fix behavior.
+	init( SHRINK_PROXY_LIST_CLEAR_CACHE_BELOW_THRESHOLD, true );
+	init( DBCONTEXT_EAGER_PROXY_UPDATE,          false ); if( randomize && isSimulated ) DBCONTEXT_EAGER_PROXY_UPDATE = deterministicRandom()->coinflip();
 	init( STATUS_IDLE_TIMEOUT,                   120.0 );
 	init( STATUS_TIMEOUT,                         30.0 );
 	init( SEND_ENTIRE_VERSION_VECTOR,            false );
@@ -99,9 +100,9 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( LOCATION_CACHE_EVICTION_SIZE_SIM,         10 ); if( randomize && BUGGIFY ) LOCATION_CACHE_EVICTION_SIZE_SIM = 3;
 	init( LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD,     60 );
 	init( LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL,    60 );
-	init( LOCATION_CACHE_PEER_FAILURE_EVICTION_DELAY, isSimulated ? 180.0 : 10.0 ); // Base interval of the locationCachePeerWatcher sweep. Production (kube) = 10s. Simulation = 180s: the watcher actor's periodic wakeups consume RNG and perturb the deterministic actor-interleaving, so sim wakes it less often to keep the schedule footprint negligible. StalePeerTest overrides to 5.0 for prompt eviction.
-	init( LOCATION_CACHE_PEER_WATCHER_ENABLED,            true ); // master switch for the stale-peer location-cache eviction subsystem. v41j: kept ON in simulation -- general jsd must exercise this functional mitigation outside StalePeerTest. The earlier swizzle/DD-stuck instability tracked to STALE_PEER_OBSERVABILITY (now off in sim), not this watcher; if a residual remains, tune LOCATION_CACHE_PEER_CONNECT_FAILED_THRESHOLD / LOCATION_CACHE_PEER_FAILURE_EVICTION_DELAY for simulation rather than disabling.
-	init( LOCATION_CACHE_PEER_CONNECT_FAILED_THRESHOLD,      0 ); // In the locationCachePeerWatcher sweep, evict an address whose TransportData::persistentConnectFailedCount advanced by more than this since the previous sweep. 0 = any new connect failure counts; a negative value disables the trigger. If simulation is too twitchy, raise LOCATION_CACHE_PEER_FAILURE_EVICTION_DELAY rather than this threshold.
+	init( LOCATION_CACHE_PEER_FAILURE_EVICTION_DELAY, isSimulated ? 180.0 : 10.0 );
+	init( LOCATION_CACHE_PEER_WATCHER_ENABLED,            true );
+	init( LOCATION_CACHE_PEER_CONNECT_FAILED_THRESHOLD,      0 );
 
 	init( GET_RANGE_SHARD_LIMIT,                     2 );
 	init( WARM_RANGE_SHARD_LIMIT,                  100 );

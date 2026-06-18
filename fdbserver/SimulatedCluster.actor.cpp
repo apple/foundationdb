@@ -432,8 +432,7 @@ public:
 	int extraMachineCountDC = 0;
 	// Number of storage cache machines to allocate in dc0. If unset, falls
 	// back to the historical default of 1 (in dc0 only). Set to 0 in tests
-	// that don't exercise storage caching to remove a source of variance
-	// (extra worker process whose endpoint refs would otherwise be present).
+	// that don't exercise storage caching to remove a source of variance.
 	Optional<int> storageCacheMachines;
 
 	Optional<bool> generateFearless, buggify;

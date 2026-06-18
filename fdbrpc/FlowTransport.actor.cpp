@@ -327,19 +327,10 @@ public:
 	NetworkAddressCachedString localAddresses;
 	std::vector<Future<Void>> listeners;
 	std::unordered_map<NetworkAddress, Reference<struct Peer>> peers;
-	// Per-address connect-failure counter that survives Peer destruction.
-	// Peer can be erased when peerReferences hits zero (see Peer dtor /
-	// connectionKeeper exit conditions), which resets per-Peer counters and
-	// blinds the locationCachePeerWatcher to flapping addresses whose Peer
-	// churns between watcher ticks. Incremented in the connect() catch handler,
-	// which also prunes entries once an address has had no connect failure for
-	// PERSISTENT_CONNECT_FAILED_COUNT_TTL -- bounding this map (and the
-	// per-DatabaseContext watcher snapshot/streak maps it feeds), which would
-	// otherwise grow one entry per ever-failed address for the process's life.
+
 	std::unordered_map<NetworkAddress, ConnectFailedInfo> persistentConnectFailedCount;
-	// now() of the last prune sweep over persistentConnectFailedCount; throttles
-	// the sweep to at most once per PERSISTENT_CONNECT_FAILED_COUNT_TTL.
 	double persistentConnectFailedLastPrune = 0;
+
 	std::unordered_map<NetworkAddress, std::pair<double, double>> closedPeers;
 	HealthMonitor healthMonitor;
 	std::set<NetworkAddress> orderedAddresses;
@@ -872,11 +863,8 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 				} catch (Error& e) {
 					++self->connectFailedCount;
 					// Track per-address cumulative connect failures + last-failure time. The map
-					// survives Peer destruction so locationCachePeerWatcher has a stable flap
-					// signal; bound it by dropping (throttled to once per TTL) any address
-					// quiescent for >= TTL. Pruned addresses have watcher delta 0 (no eviction in
-					// flight) and the watcher sheds its snapshot/streak entry next tick; now()
-					// consumes no RNG, so simulator determinism is preserved.
+					// potentially has unbounded list of peers as they're having connection issues.
+					// To make the map bounded, evict based on TTL.
 					{
 						double tNow = now();
 						double ttl = FLOW_KNOBS->PERSISTENT_CONNECT_FAILED_COUNT_TTL;
@@ -898,20 +886,17 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 					if (e.code() != error_code_connection_failed) {
 						throw;
 					}
-					{
-						TraceEvent te("ConnectionTimedOut", conn ? conn->getDebugID() : UID());
-						te.suppressFor(1.0)
-						    .detail("PeerAddr", self->destination)
-						    .detail("PeerAddress", self->destination);
-						if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
-							te.detail("PeerReferences", self->peerReferences)
-							    .detail("ReliableEmpty", self->reliable.empty())
-							    .detail("UnsentEmpty", self->unsent.empty())
-							    .detail("OutstandingReplies", self->outstandingReplies)
-							    .detail("ConnectFailedCount", self->connectFailedCount)
-							    .detail("Connected", self->connected);
-						}
-					}
+
+					TraceEvent("ConnectionTimedOut", conn ? conn->getDebugID() : UID())
+					    .suppressFor(1.0)
+					    .detail("PeerAddr", self->destination)
+					    .detail("PeerAddress", self->destination)
+					    .detail("PeerReferences", self->peerReferences)
+					    .detail("ReliableEmpty", self->reliable.empty())
+					    .detail("UnsentEmpty", self->unsent.empty())
+					    .detail("OutstandingReplies", self->outstandingReplies)
+					    .detail("ConnectFailedCount", self->connectFailedCount)
+					    .detail("Connected", self->connected);
 
 					throw;
 				}
@@ -1918,8 +1903,7 @@ int64_t InterfaceTracker::promiseRefAdded(const NetworkAddress& addr, const UID&
 	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY)
 		return -1;
 	int64_t id = nextRefId++;
-	refRecords[id] = RefRecord{ id, addr, token, g_network ? g_network->now() : 0.0,
-	                            platform::get_backtrace(), false };
+	refRecords[id] = RefRecord{ id, addr, token, g_network ? g_network->now() : 0.0, platform::get_backtrace(), false };
 	return id;
 }
 
@@ -1935,8 +1919,7 @@ int64_t InterfaceTracker::futureRefAdded(const NetworkAddress& addr, const UID& 
 	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY)
 		return -1;
 	int64_t id = nextRefId++;
-	refRecords[id] = RefRecord{ id, addr, token, g_network ? g_network->now() : 0.0,
-	                            platform::get_backtrace(), true };
+	refRecords[id] = RefRecord{ id, addr, token, g_network ? g_network->now() : 0.0, platform::get_backtrace(), true };
 	return id;
 }
 

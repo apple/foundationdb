@@ -51,18 +51,8 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( ENABLE_COORDINATOR_DNS_CACHE,                      false ); if( randomize && BUGGIFY ) ENABLE_COORDINATOR_DNS_CACHE = true;
 	init( COORDINATOR_DNS_CACHE_REFRESH_INTERVAL,             3.0 );
 	init( COORDINATOR_DNS_CACHE_TTL,                         30.0 );
-	init( STALE_PEER_OBSERVABILITY,                  !isSimulated ); // v41a: on by default for this binary. When true, InterfaceTracker records per-(addr, role) created/deleted counters and RequestStream copy backtraces so tests/tooling can dump peer-ref accounting. Off → methods no-op. v41j: gate OFF in simulation -- purely diagnostic, and the per-RequestStream-copy backtraces add trace volume (TracedTooManyLines risk) and memory growth in long general tests for no functional value. Production (non-sim) keeps it on; StalePeerTest sets it true explicitly in its toml (its pass criterion depends on the tracker). Determinism is preserved either way.
+	init( STALE_PEER_OBSERVABILITY,                          false );
 	init( CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED, 1.0 );
-	// Bound TransportData::persistentConnectFailedCount (and the per-DatabaseContext
-	// locationCachePeerWatcher snapshot/streak maps it feeds): drop any address with
-	// no connect failure within this many seconds. The map is otherwise append-only
-	// -- one entry per distinct ever-failed address for the life of the process --
-	// and grows unbounded under kube pod-IP churn. Pruning only removes addresses
-	// already quiescent for the full window (watcher delta 0, so no eviction), so it
-	// is behavior-neutral and preserves simulator determinism. Production (kube)
-	// uses 600s (10 min); simulation uses 60s (1 min) -- tests are short, so the
-	// smaller window still bounds the map without changing eviction decisions.
-	// 0 disables pruning.
 	init( PERSISTENT_CONNECT_FAILED_COUNT_TTL, isSimulated ? 60.0 : 600.0 );
 
 	init( DELAY_JITTER_OFFSET,                                 0.9 );

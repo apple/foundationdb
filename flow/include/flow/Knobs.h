@@ -122,13 +122,7 @@ public:
 	double COORDINATOR_DNS_CACHE_TTL;
 	double CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED;
 
-	// Enable InterfaceTracker bookkeeping (per-(addr,role) create/delete counts,
-	// per-stream ref records, backtraces) used by StalePeerTest. When false
-	// (default), all tracker methods are no-ops — no backtraces, no maps
-	// populated, no TraceEvents, no TracedTooManyLines pressure. When true,
-	// the tracker records enough detail for SPT's Delta checks and leak-holder
-	// diagnostics. Toggling the knob does not change simulator decisions, so
-	// a given seed produces the same execution regardless of the value.
+	// When true, emits trace events useful to debug stale peer issue (StalePeerTest.toml)
 	bool STALE_PEER_OBSERVABILITY;
 
 	// Seconds of no connect failure after which an address is pruned from

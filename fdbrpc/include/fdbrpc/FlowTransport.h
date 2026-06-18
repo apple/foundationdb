@@ -290,14 +290,10 @@ struct Peer : public ReferenceCounted<Peer> {
 
 class IPAllowList;
 
-// Per-address connect-failure tracking on TransportData. `count` is the
-// cumulative number of connect()/handshake failures to the address (the flap
-// signal sampled by locationCachePeerWatcher); `lastFailed` is now() of the
-// most recent failure, used to prune addresses quiescent for
-// FLOW_KNOBS->PERSISTENT_CONNECT_FAILED_COUNT_TTL so the map stays bounded.
+// Per-address connect-failure tracking on TransportData.
 struct ConnectFailedInfo {
-	int64_t count = 0;
-	double lastFailed = 0;
+	int64_t count = 0; // cumulative number of failed connect attempts
+	double lastFailed = 0; // now() of the most recent failure
 };
 
 class FlowTransport : NonCopyable {
@@ -337,11 +333,11 @@ public:
 	// Returns all peers that the FlowTransport is monitoring.
 	const std::unordered_map<NetworkAddress, Reference<Peer>>& getAllPeers() const;
 
-	// Returns a per-address cumulative count of connect()/handshake failures
+	// Returns a per-address cumulative count of connect failures
 	// (every Error caught in connectionKeeper's connect catch block).
 	// The map lives on TransportData and persists across Peer destruction,
-	// so it remains a reliable flap signal for short-lived peers whose Peer
-	// object churns faster than the watcher tick interval.
+	// so it remains a reliable signal for catching short-lived peers that
+	// all point to the same address
 	const std::unordered_map<NetworkAddress, ConnectFailedInfo>& getPersistentConnectFailedCounts() const;
 
 	// Returns the same of all peers that have attempted to connect, but have incompatible protocol versions

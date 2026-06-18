@@ -1203,7 +1203,7 @@ protected:
 	bool shouldFireImmediately() { return SingleCallback<T>::next != this; }
 };
 
-// Global callback for futureRef tracking release — set by FlowTransport at init
+// Global callback for futureRef tracking release, set by FlowTransport at init
 inline void (*g_futureRefReleasedCallback)(int64_t id) = nullptr;
 
 template <class T>

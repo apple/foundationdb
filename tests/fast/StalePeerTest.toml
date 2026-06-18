@@ -4,65 +4,41 @@ machineCount = 10
 desiredTLogCount = 6
 generateFearless = false
 config = 'triple'
-# Force 3 coordinators so killRole={coordinator, cluster_controller}
-# always has a non-protected target. With sim2's default coordinator
-# count and protectedAddresses (a majority is protected), small clusters
-# can end up with all coordinators in protectedAddresses, in which case
+
+storageCacheMachines = 0
+tenantModes = ['disabled'] 
+encryptModes = ['disabled']
+disableTss = true
+
+# Force 3 coordinators so dstKillRole=coordinator always has a non-protected target.
+# With sim2's default coordinator count and protectedAddresses (a majority is protected), small
+# clusters can end up with all coordinators in protectedAddresses, in which case
 # the test trivially skips and we get no signal.
 coordinators = 3
 
-tenantModes = ['disabled'] # pre-emptive
-encryptModes = ['disabled'] #pre-emptive
-disableTss = true # dbcontext dtor tss cancelation avoid
-# StalePeerTest does not exercise storage cache; the default
-# "1 cache machine in dc0" allocation just adds an extra worker
-# process whose endpoint refs create noise in InterfaceTracker dumps.
-storageCacheMachines = 0
-
 [[knobs]]
-#gray_failure_allow_primary_ss_to_complain = false
-#gray_failure_allow_remote_ss_to_complain = false
 
-# The locationCachePeerWatcher evicts an address whose persistent connect-failed
-# count advanced by more than LOCATION_CACHE_PEER_CONNECT_FAILED_THRESHOLD since
-# the previous sweep. 0 (the default) = any new connect failure counts, which is
-# what SPT wants: a killed process's dead peer is evicted on the first sweep.
+# Tune knobs to aggressively evict potentially dead storage servers from NativeAPI's LocationCache
 location_cache_peer_connect_failed_threshold = 0
-# Also tighten the watcher cadence. The general default (90s) is chosen to
-# reduce simulator-event overhead in busy tests; StalePeerTest is small
-# (10 machines) and needs multiple evict passes within the 240s window
-# to drain stale refs after a kill, so a fast tick is safe here.
 location_cache_peer_failure_eviction_delay = 5.0
-# The pass criterion is the per-role InterfaceTracker Delta (leaked copies of
+
+# Ensure stale commit/grv proxies are also cleaned up
+shrink_proxy_list_clear_cache_below_threshold = true
+dbcontext_eager_proxy_update = true
+
+# The pass criterion is the per-role InterfaceTracker delta (leaked copies of
 # the killed role's interface RequestStreams), which requires this bookkeeping,
 # so it must be ON. Raw peerReferences is NOT the criterion (a client keeps
-# expected connection-level / co-resident refs to the killed address). Toggling
-# this knob does not change simulator ordering, so determinism is preserved.
-# SPT is short (small cluster, buggify off), so the per-RequestStream-copy
-# backtraces do not approach the TracedTooManyLines limit.
+# expected connection-level refs to the killed address).
 stale_peer_observability = true
 
 [[test]]
 testTitle = 'StalePeerTest'
-# StalePeerTest kills a process and waits. The post-test ConsistencyCheck
-# workload often discovers ExtraDataStore entries for the killed process
-# and related cleanup state, then loops retrying — the simulation hits
-# its wall-clock timeout (TestUnexpectedlyNotFinished) even though the
-# stale-peer check itself passed. The test's goal is peer-ref accounting,
-# not data consistency, so skip the post-test CC.
+
+# TODO: add rationale
 runConsistencyCheck = false
-# Also skip the post-test quietDatabase wait. After kills (especially
-# coordinator kill which triggers autoQuorumChange) DD can stay
-# stressed for a long time and trip the !ddGotStuck assertion in
-# QuietDatabase.actor.cpp:868. The peer-ref check is the test's only
-# contract; quiescence is irrelevant.
 waitForQuiescenceBegin = false
 waitForQuiescenceEnd = false
-# Skip the post-test database clear. The added Cycle workload writes data, and
-# clearing it after the kill (when the cluster is still recovering / slow) times
-# out as ErrorClearingDatabaseAfterTest -- a post-test-op timeout, not a
-# peer-ref leak. The test's only contract is peer-ref accounting and the sim is
-# torn down afterward, so the clear is unnecessary.
 clearAfterTest = false
 
     [[test.workload]]
