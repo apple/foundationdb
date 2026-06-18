@@ -222,10 +222,11 @@ struct OldLogData {
 	Version recoverAt;
 	std::set<int8_t> pseudoLocalities;
 	LogEpoch epoch;
-	int32_t rangeBackupWorkerTags;
+	int32_t rangePartitionedBackupWorkerTags;
 
 	OldLogData()
-	  : logRouterTags(0), txsTags(0), epochBegin(0), epochEnd(0), recoverAt(0), epoch(0), rangeBackupWorkerTags(0) {}
+	  : logRouterTags(0), txsTags(0), epochBegin(0), epochEnd(0), recoverAt(0), epoch(0),
+	    rangePartitionedBackupWorkerTags(0) {}
 
 	// Constructor for T of OldTLogConf and OldTLogCoreData
 	template <class T>
@@ -275,7 +276,7 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	std::set<int8_t> pseudoLocalities; // Represent special localities that will be mapped to tagLocalityLogRouter
 	const LogEpoch epoch;
 	LogEpoch oldestBackupEpoch;
-	int rangeBackupWorkerTags;
+	int rangePartitionedBackupWorkerTags;
 
 	// new members
 	std::map<Tag, Version> pseudoLocalityPopVersion;
@@ -323,8 +324,8 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	          LogEpoch e,
 	          Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>())
 	  : dbgid(dbgid), logSystemType(LogSystemType::empty), expectedLogSets(0), logRouterTags(0), txsTags(0),
-	    repopulateRegionAntiQuorum(0), stopped(false), epoch(e), oldestBackupEpoch(0), rangeBackupWorkerTags(0),
-	    recoveredVersion(makeReference<AsyncVar<Version>>(invalidVersion)),
+	    repopulateRegionAntiQuorum(0), stopped(false), epoch(e), oldestBackupEpoch(0),
+	    rangePartitionedBackupWorkerTags(0), recoveredVersion(makeReference<AsyncVar<Version>>(invalidVersion)),
 	    remoteRecoveredVersion(makeReference<AsyncVar<Version>>(invalidVersion)),
 	    recoveryCompleteWrittenToCoreState(false), remoteLogsWrittenToCoreState(false), hasRemoteServers(false),
 	    locality(locality), addActor(addActor), popActors(false) {}
@@ -468,17 +469,17 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	TLogVersion getTLogVersion() const;
 
 	int getLogRouterTags() const;
-	int getRangeBackupWorkerTags() const;
+	int getRangePartitionedBackupWorkerTags() const;
 
 	Version getBackupStartVersion() const;
 
 	std::map<LogEpoch, EpochTagsVersionsInfo> getOldEpochLogRouterTagsInfo() const;
-	std::map<LogEpoch, EpochTagsVersionsInfo> getOldEpochRangeBackupTagsInfo() const;
+	std::map<LogEpoch, EpochTagsVersionsInfo> getOldEpochRangePartitionedBackupTagsInfo() const;
 
 	inline Reference<LogSet> getEpochLogSet(LogEpoch epoch) const;
 
 	void setBackupWorkers(const std::vector<InitializeBackupReply>& replies);
-	void setRangeBackupWorkers(const std::vector<InitializeRangeBackupReply>& replies);
+	void setRangePartitionedBackupWorkers(const std::vector<InitializeRangePartitionedBackupReply>& replies);
 
 	bool removeBackupWorker(const BackupWorkerDoneRequest& req);
 
@@ -580,7 +581,7 @@ template <class T>
 OldLogData::OldLogData(const T& conf)
   : logRouterTags(conf.logRouterTags), txsTags(conf.txsTags), epochBegin(conf.epochBegin), epochEnd(conf.epochEnd),
     recoverAt(conf.recoverAt), pseudoLocalities(conf.pseudoLocalities), epoch(conf.epoch),
-    rangeBackupWorkerTags(conf.rangeBackupWorkerTags) {
+    rangePartitionedBackupWorkerTags(conf.rangePartitionedBackupWorkerTags) {
 	tLogs.resize(conf.tLogs.size());
 	for (int j = 0; j < conf.tLogs.size(); j++) {
 		auto logSet = makeReference<LogSet>(conf.tLogs[j]);
