@@ -773,11 +773,11 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	Future<Void> validateDurableAcknowledgementScan(Database cx) {
 		ASSERT_EQ(streams.size(), 1);
 		const Key key = keyForIndex(keyCount / 2);
-		const Value value = "durable-ack-scan"_sr;
-		const Version committed = co_await writeValue(cx, key, value);
-		while (streams.front().consumer->position().lastConsumedVersion < committed) {
+		const Value reconcileValue = "durable-ack-consume-reconcile"_sr;
+		const Version reconcileCommitted = co_await writeValue(cx, key, reconcileValue);
+		while (streams.front().consumer->position().lastConsumedVersion < reconcileCommitted) {
 			co_await timeoutError(streams.front().consumer->consume(), operationTimeout);
-			if (streams.front().consumer->position().lastConsumedVersion < committed) {
+			if (streams.front().consumer->position().lastConsumedVersion < reconcileCommitted) {
 				co_await timeoutError(streams.front().consumer->acknowledge(), operationTimeout);
 			}
 		}
@@ -787,14 +787,44 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		auto initialProxyStatus = co_await timeoutError(getAssignedProxyStatus(cx, streamId), operationTimeout);
 		const CDCProxyBufferStatus initial = initialProxyStatus.second;
 		ASSERT_GT(initial.bufferedBytes, 0);
-		co_await timeoutError(acknowledgeDurablyWithoutProxy(cx, streamId, committed), operationTimeout);
+
+		// A consume can observe the durable frontier before the explicit acknowledgement RPC arrives. Hold TLog pops so
+		// this path must release acknowledged batches and permits itself instead of relying on the periodic pop scan.
+		co_await setAllProxyPopsPaused(cx, true);
+		co_await timeoutError(acknowledgeDurablyWithoutProxy(cx, streamId, reconcileCommitted), operationTimeout);
+		CDCProxyInterface observedProxy = initialProxyStatus.first;
+		Future<ErrorOr<CDCConsumeReply>> reconcileRequest =
+		    observedProxy.consume.tryGetReply(CDCConsumeRequest(streams.front().consumer->position()));
+		const double reconcileDeadline = now() + operationTimeout;
+		while (true) {
+			const CDCProxyBufferStatus status = co_await getCurrentProxyStatus(cx, streamId, &observedProxy);
+			if (status.bufferedBytes < initial.bufferedBytes) {
+				break;
+			}
+			ASSERT_LT(now(), reconcileDeadline);
+			co_await delay(0.01);
+		}
+
+		const Value scanValue = "durable-ack-periodic-scan"_sr;
+		const Version scanCommitted = co_await writeValue(cx, key, scanValue);
+		co_await timeoutError(throwErrorOr(reconcileRequest), operationTimeout);
+		co_await setAllProxyPopsPaused(cx, false);
+		while (streams.front().consumer->position().lastConsumedVersion < scanCommitted) {
+			co_await timeoutError(streams.front().consumer->consume(), operationTimeout);
+		}
+		co_await delay(1.0);
+		initialProxyStatus = co_await timeoutError(getAssignedProxyStatus(cx, streamId), operationTimeout);
+		const CDCProxyBufferStatus scanInitial = initialProxyStatus.second;
+		ASSERT_GT(scanInitial.bufferedBytes, 0);
+		co_await timeoutError(acknowledgeDurablyWithoutProxy(cx, streamId, scanCommitted), operationTimeout);
 
 		const double deadline = now() + operationTimeout;
 		while (true) {
 			auto currentProxyStatus = co_await timeoutError(getAssignedProxyStatus(cx, streamId), operationTimeout);
 			const CDCProxyBufferStatus& status = currentProxyStatus.second;
-			if (status.bufferedBytes < initial.bufferedBytes && status.popCompletions > initial.popCompletions) {
-				ASSERT_EQ(status.popRequests, initial.popRequests);
+			if (status.bufferedBytes < scanInitial.bufferedBytes &&
+			    status.popCompletions > scanInitial.popCompletions) {
+				ASSERT_EQ(status.popRequests, scanInitial.popRequests);
 				break;
 			}
 			ASSERT_LT(now(), deadline);

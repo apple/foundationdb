@@ -1341,7 +1341,10 @@ Future<Void> CDCProxy::consume(CDCConsumeRequest request) {
 			--stream->activeConsumes;
 		});
 		const CDCStreamReadState metadata = co_await readCDCStreamState(cx, request.cursor.streamId, id, true);
-		advanceStreamMinVersion(stream, metadata.minVersion);
+		CODE_PROBE(stream->minVersion < metadata.minVersion,
+		           "Native CDC consume reconciles a durable acknowledgement",
+		           probe::decoration::rare);
+		reconcileStreamMinVersion(stream, metadata.minVersion);
 		if (request.cursor.lastConsumedVersion > stream->bufferedThrough) {
 			// A cursor is trusted only when this owner has delivered through it or when it is covered by the durable
 			// acknowledgement watermark used to initialize bufferedThrough. This prevents a fabricated cursor from
