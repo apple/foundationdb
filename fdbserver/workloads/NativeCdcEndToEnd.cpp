@@ -696,8 +696,18 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		ASSERT(!streams[1].keys.contains(values[0].first));
 		ASSERT(streams[1].keys.contains(values[1].first));
 		const Version committed = co_await writeValues(cx, values);
+
+		// Register a third stream after the oversized version. It shares the tag but starts at a later frontier and
+		// must not inherit the failure of consumers that still require the oversized reply.
+		co_await addStream(cx, KeyRange(KeyRangeRef(keyForIndex(4), keyForIndex(6))));
+		const Key laterKey = keyForIndex(5);
+		const Value laterValue = "after-oversized-reply"_sr;
+		const Version laterCommitted = co_await writeValue(cx, laterKey, laterValue);
+		ASSERT_EQ(streams.size(), 3);
+
 		int rejected = 0;
-		for (auto& stream : streams) {
+		for (int i = 0; i < 2; ++i) {
+			auto& stream = streams[i];
 			const double deadline = now() + operationTimeout;
 			while (stream.consumer->position().lastConsumedVersion < committed) {
 				try {
@@ -713,7 +723,9 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 				ASSERT_LT(now(), deadline);
 			}
 		}
-		ASSERT_EQ(rejected, streams.size());
+		ASSERT_EQ(rejected, 2);
+		co_await consumeThroughValue(streams.back().consumer, laterCommitted, laterKey, laterValue);
+		CODE_PROBE(true, "Native CDC raw peek failure is scoped to the blocked stream frontier");
 		CODE_PROBE(true, "Native CDC rejects a TLog response larger than its raw peek reservation");
 		for (const auto& stream : streams) {
 			co_await timeoutError(removeNativeCdcStreamClient(cx, stream.name), operationTimeout);

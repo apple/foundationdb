@@ -208,6 +208,10 @@ Version cdcLagVersions(Version committedVersion, Version retainedVersion) {
 	return std::max<Version>(0, committedVersion - retainedVersion);
 }
 
+bool rawPeekFailureBlocksStream(Optional<Version> nextReadVersion, Version failedBegin) {
+	return nextReadVersion.present() && nextReadVersion.get() == failedBegin;
+}
+
 bool isCurrentStreamInitialization(std::unordered_map<CDCStreamId, Reference<CDCBufferedStream>> const& streams,
                                    Reference<CDCBufferedStream> stream) {
 	auto current = streams.find(stream->streamId);
@@ -486,6 +490,10 @@ void CDCProxy::markTagStreamsBufferLimitExceeded(Reference<CDCBufferedTag> tag, 
 	for (const CDCStreamId streamId : tag->streamIds) {
 		auto stream = streams.find(streamId);
 		if (stream == streams.end() || !stream->second->active) {
+			continue;
+		}
+		const Optional<Version> nextReadVersion = nextTagReadVersionForStream(tag, stream->second);
+		if (!rawPeekFailureBlocksStream(nextReadVersion, begin)) {
 			continue;
 		}
 		CODE_PROBE(true, "CDC proxy rejects a raw peek larger than its reservation", probe::decoration::rare);
@@ -1725,6 +1733,13 @@ TEST_CASE("/NativeCDC/CommittedDeliveryFrontier") {
 	ASSERT_EQ(committedPeekThrough(200, 150), 150);
 	ASSERT_EQ(committedPeekThrough(150, 200), 150);
 	ASSERT_EQ(committedPeekThrough(150, 150), 150);
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/RawPeekFailureFrontier") {
+	ASSERT(rawPeekFailureBlocksStream(Optional<Version>(100), 100));
+	ASSERT(!rawPeekFailureBlocksStream(Optional<Version>(101), 100));
+	ASSERT(!rawPeekFailureBlocksStream(Optional<Version>(), 100));
 	return Void();
 }
 

@@ -21,11 +21,12 @@ connectionFailuresDisableDuration = 1000000
     testName = 'NativeCdcEndToEnd'
     initialStreamCount = 2
     minStreamCount = 2
-    maxStreamCount = 2
-    keyCount = 4
+    maxStreamCount = 3
+    keyCount = 6
     writesPerRound = 1
     rounds = 0
     testOversizedPeek = true
     # Two disjoint streams each receive one mutation that fits the filtered budget; their shared tagged reply does not.
+    # A third stream is registered after that version and verifies the failure is not applied to a later frontier.
     memoryTestValueBytes = 3072
     operationTimeout = 120.0
