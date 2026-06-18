@@ -1528,31 +1528,6 @@ public:
 		std::shared_ptr<PhysicalShard> physicalShard = nullptr;
 		if (it != physicalShards.end()) {
 			physicalShard = it->second;
-			// TODO: consider coalescing continous key ranges.
-			if (!SERVER_KNOBS->SHARDED_ROCKSDB_ALLOW_MULTIPLE_RANGES) {
-				bool continous = physicalShard->dataShards.empty();
-				std::string rangeStr = "";
-				for (auto& [_, shard] : physicalShard->dataShards) {
-					rangeStr += shard->range.toString() + ", ";
-					if (shard->range.begin < range.begin && shard->range.end == range.begin) {
-						continous = true;
-						break;
-					}
-					if (shard->range.begin > range.begin && range.end == shard->range.begin) {
-						continous = true;
-						break;
-					}
-				}
-				if (!continous) {
-					// When multiple shards are merged into a single shard, the storage server might already own a piece
-					// of the resulting shard. Because intra storage server move is disabled, the merge data move could
-					// create multiple segments in a single physcial shard.
-					TraceEvent("AddMultipleRanges")
-					    .detail("NewRange", range)
-					    .detail("OtherRanges", rangeStr)
-					    .setMaxFieldLength(1000);
-				}
-			}
 		} else {
 			auto currentCfOptions = active ? rState->getCFOptions() : rState->getCFOptionsForInactiveShard();
 			auto [it, inserted] = physicalShards.emplace(id, std::make_shared<PhysicalShard>(db, id, currentCfOptions));
@@ -1563,6 +1538,9 @@ public:
 		auto dataShard = std::make_unique<DataShard>(range, physicalShard.get());
 		dataShardMap.insert(range, dataShard.get());
 		physicalShard->dataShards[range.begin.toString()] = std::move(dataShard);
+
+		// Coalesce adjacent DataShards on the same physical shard into single ranges.
+		coalesceDataShards(physicalShard.get());
 
 		validate();
 
@@ -2021,6 +1999,74 @@ public:
 			expectedDataShards += physicalShard->dataShards.size();
 		}
 		ASSERT_EQ(expectedDataShards, totalDataShards);
+	}
+
+	// Coalesce continuous (adjacent) DataShards within a single PhysicalShard into merged ranges.
+	// For example, if a PhysicalShard has DataShards [A, B) and [B, C), they are merged into [A, C).
+	// This reduces bookkeeping overhead and simplifies the dataShardMap.
+	void coalesceDataShards(PhysicalShard* physicalShard) {
+		if (physicalShard->dataShards.size() <= 1) {
+			return;
+		}
+
+		// PhysicalShard::dataShards is an unordered_map keyed by range.begin.toString().
+		// We need sorted order to detect adjacency.
+		std::map<std::string, DataShard*> sorted;
+		for (auto& [key, ds] : physicalShard->dataShards) {
+			sorted[key] = ds.get();
+		}
+
+		// Walk through sorted entries and find groups of adjacent ranges.
+		std::vector<std::pair<KeyRange, std::vector<std::string>>> groups;
+		KeyRange currentRange;
+		std::vector<std::string> currentKeys;
+
+		for (auto& [key, ds] : sorted) {
+			if (currentKeys.empty()) {
+				currentRange = ds->range;
+				currentKeys.push_back(key);
+			} else if (currentRange.end == ds->range.begin) {
+				// Adjacent — extend the current group.
+				currentRange = KeyRangeRef(currentRange.begin, ds->range.end);
+				currentKeys.push_back(key);
+			} else {
+				// Gap — finalize previous group, start new one.
+				if (currentKeys.size() > 1) {
+					groups.emplace_back(currentRange, std::move(currentKeys));
+				}
+				currentRange = ds->range;
+				currentKeys = { key };
+			}
+		}
+		// Finalize last group.
+		if (currentKeys.size() > 1) {
+			groups.emplace_back(currentRange, std::move(currentKeys));
+		}
+
+		if (groups.empty()) {
+			return;
+		}
+
+		// For each group of adjacent shards, replace them with a single coalesced DataShard.
+		for (auto& [mergedRange, keys] : groups) {
+			// Remove old DataShard entries from the physical shard.
+			for (auto& k : keys) {
+				physicalShard->dataShards.erase(k);
+			}
+
+			// Clear old entries from the dataShardMap for the merged range.
+			dataShardMap.insert(mergedRange, nullptr);
+
+			// Create the new coalesced DataShard.
+			auto coalesced = std::make_unique<DataShard>(mergedRange, physicalShard);
+			dataShardMap.insert(mergedRange, coalesced.get());
+			physicalShard->dataShards[mergedRange.begin.toString()] = std::move(coalesced);
+
+			TraceEvent(SevInfo, "ShardedRocksDBCoalescedRange", logId)
+			    .detail("MergedRange", mergedRange)
+			    .detail("ShardId", physicalShard->id)
+			    .detail("NumCoalesced", keys.size());
+		}
 	}
 
 private:
