@@ -20,6 +20,8 @@
 
 #include "fdbserver/logsystem/LogSystem.h"
 
+#include <limits>
+
 #include "fdbclient/FDBTypes.h"
 #include "flow/CodeProbe.h"
 #include "flow/UnitTest.h"
@@ -182,9 +184,27 @@ void LogSet::checkSatelliteTagLocations() {
 	    .detail("NumOfDCs", dcs.size());
 }
 
+int LogSet::satelliteTagLocationIndex(Tag tag) const {
+	ASSERT(!satelliteTagLocations.empty());
+	if (satelliteTagLocations.size() == 1) {
+		return 0;
+	}
+
+	const int locationCount = static_cast<int>(satelliteTagLocations.size());
+	const int directIndex = static_cast<int>(tag.id) + 1;
+	if (tag.locality == tagLocalityCDC) {
+		CODE_PROBE(directIndex >= locationCount,
+		           "CDC tag exceeds the satellite routing table",
+		           probe::decoration::rare);
+		return static_cast<int>(tag.id % (locationCount - 1)) + 1;
+	}
+	ASSERT_LT(directIndex, locationCount);
+	return directIndex;
+}
+
 int LogSet::bestLocationFor(Tag tag) {
 	if (locality == tagLocalitySatellite) {
-		return satelliteTagLocations[tag.id + 1][0];
+		return satelliteTagLocations[satelliteTagLocationIndex(tag)][0];
 	}
 
 	return tag.id % logServers.size();
@@ -225,7 +245,7 @@ void LogSet::getPushLocations(VectorRef<Tag> tags,
 		for (auto& t : tags) {
 			if (t.locality == tagLocalityTxs || t.locality == tagLocalityLogRouter || t.locality == tagLocalityCDC) {
 				CODE_PROBE(t.locality == tagLocalityCDC, "CDC mutations are routed to satellite TLogs");
-				for (int loc : satelliteTagLocations[t.id + 1]) {
+				for (int loc : satelliteTagLocations[satelliteTagLocationIndex(t)]) {
 					locations.push_back(locationOffset + loc);
 				}
 			}
@@ -294,6 +314,14 @@ TEST_CASE("/NativeCDC/SatelliteRouting") {
 		ASSERT_GE(locations.front(), 10);
 		ASSERT_LT(locations.front(), 13);
 	}
+
+	// NATIVE_CDC_TAG_COUNT is process-local. A proxy using a larger pool than the process that built this epoch must
+	// still route a valid durable tag without indexing beyond the precomputed satellite table.
+	Tag wrappedTag(tagLocalityCDC, std::numeric_limits<uint16_t>::max());
+	std::vector<int> wrappedLocations;
+	logSet.getPushLocations(VectorRef<Tag>(&wrappedTag, 1), wrappedLocations, 10);
+	ASSERT_EQ(wrappedLocations.size(), 1);
+	ASSERT_EQ(wrappedLocations.front(), 10 + logSet.bestLocationFor(wrappedTag));
 
 	return Void();
 }

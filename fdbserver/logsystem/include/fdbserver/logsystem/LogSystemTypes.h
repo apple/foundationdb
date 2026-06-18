@@ -73,6 +73,7 @@ public:
 	    const Optional<Reference<LocalitySet>>& restrictedLogSet = Optional<Reference<LocalitySet>>());
 
 private:
+	int satelliteTagLocationIndex(Tag tag) const;
 	std::vector<LocalityEntry> alsoServers, resultEntries;
 	std::vector<int> newLocations;
 };

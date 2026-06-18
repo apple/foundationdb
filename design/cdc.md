@@ -452,6 +452,13 @@ serialized source message, so the remote TLog reparses and indexes the original
 CDC tag. CDC acknowledgement pops therefore apply to the remote TLog copy as
 well as the primary and satellite copies.
 
+Satellite epochs precompute a finite table of replication-policy teams. A CDC
+tag ID within the epoch's configured pool uses its corresponding table entry;
+a larger valid durable tag ID is folded into the available CDC entries. This
+keeps routing safe if process-local tag-count knobs differ or a later process
+encounters a tag allocated under a larger pool, while preserving the direct
+mapping for the normally configured IDs.
+
 ## CDC proxy read path
 
 A CDC proxy owns a set of active stream IDs. For each owned stream it loads:
