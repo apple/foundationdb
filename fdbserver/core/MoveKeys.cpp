@@ -2455,7 +2455,7 @@ static Future<Void> finishMoveShards(Database occ,
 				// finishMoveKeys above.
 				tr.reset();
 
-				// Wait OUTSIDE any transaction. The 15 s timeout is safe — no
+				// Wait OUTSIDE any transaction. A long timeout is safe — no
 				// transaction clock is ticking.
 				co_await timeout(waitForAll(serverReady) && waitForAllReady(tssReady),
 				                 SERVER_KNOBS->SERVER_READY_QUORUM_TIMEOUT,
