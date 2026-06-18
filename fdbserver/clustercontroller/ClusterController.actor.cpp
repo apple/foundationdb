@@ -571,6 +571,10 @@ Future<std::vector<int>> monitorCDCProxies(std::vector<CDCProxyInterface> const&
 	}
 
 	co_await quorum(failures, 1);
+	// Tests can hold the first result briefly so multiple simultaneous failures exercise one replacement batch.
+	if (SERVER_KNOBS->CDC_PROXY_FAILURE_COALESCE_DELAY > 0) {
+		co_await delay(SERVER_KNOBS->CDC_PROXY_FAILURE_COALESCE_DELAY);
+	}
 	std::vector<int> failedProxies;
 	for (int i = 0; i < failures.size(); ++i) {
 		if (failures[i].isReady() || failures[i].isError()) {
@@ -593,8 +597,8 @@ Future<Void> recruitFailedCDCProxies(ClusterControllerData* self,
 		co_return;
 	}
 
-	std::vector<std::pair<UID, UID>> replacements;
-	for (int failedIndex : failedIndexes) {
+	for (size_t replacementIndex = 0; replacementIndex < failedIndexes.size(); ++replacementIndex) {
+		const int failedIndex = failedIndexes[replacementIndex];
 		ASSERT_WE_THINK(failedIndex >= 0 && failedIndex < monitoredProxies.size());
 		const CDCProxyInterface& failedProxy = monitoredProxies[failedIndex];
 		auto current = std::find(self->db.cdcProxies.begin(), self->db.cdcProxies.end(), failedProxy);
@@ -630,30 +634,27 @@ Future<Void> recruitFailedCDCProxies(ClusterControllerData* self,
 			continue;
 		}
 		*current = replacement;
-		replacements.emplace_back(failedProxy.id(), replacement.id());
 		CODE_PROBE(true, "CDC proxy is recruited after failure");
 		TraceEvent("CDCProxyRecruited", self->id)
 		    .detail("OldCDCProxyID", failedProxy.id())
 		    .detail("NewCDCProxyID", replacement.id())
 		    .detail("RecoveryCount", recoveryCount);
-	}
-	if (replacements.empty()) {
-		co_return;
-	}
 
-	// Endpoint publication precedes assignment publication so clients never route
-	// a stream to a replacement that is not yet discoverable.
-	self->db.recoveryData->registrationTrigger.trigger();
-	for (const auto& [oldProxyId, newProxyId] : replacements) {
-		while (containsCDCProxy(self->db.cdcProxies, newProxyId) &&
-		       !containsCDCProxy(self->db.clientInfo->get().cdcProxies, newProxyId)) {
+		// Publish and reassign each successful replacement before recruiting the next one. A later recruitment may
+		// fail, and must not withhold a replacement that is already available.
+		self->db.recoveryData->registrationTrigger.trigger();
+		while (containsCDCProxy(self->db.cdcProxies, replacement.id()) &&
+		       !containsCDCProxy(self->db.clientInfo->get().cdcProxies, replacement.id())) {
 			co_await self->db.clientInfo->onChange();
 		}
-		if (containsCDCProxy(self->db.cdcProxies, newProxyId) &&
-		    containsCDCProxy(self->db.clientInfo->get().cdcProxies, newProxyId)) {
+		if (containsCDCProxy(self->db.cdcProxies, replacement.id()) &&
+		    containsCDCProxy(self->db.clientInfo->get().cdcProxies, replacement.id())) {
 			// Reassignment remains necessary if recovery changes while the
 			// replacement endpoint is being published.
-			co_await reassignNativeCdcStreams(self->db.db, oldProxyId, newProxyId);
+			co_await reassignNativeCdcStreams(self->db.db, failedProxy.id(), replacement.id());
+			CODE_PROBE(replacementIndex + 1 < failedIndexes.size(),
+			           "CDC proxy replacement is published before recruiting another failed proxy",
+			           probe::decoration::rare);
 		}
 	}
 }

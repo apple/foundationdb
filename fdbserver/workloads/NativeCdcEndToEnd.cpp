@@ -394,6 +394,29 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		}
 	}
 
+	Future<Void> waitForIndependentProxyPublications(Database cx, std::vector<CDCProxyInterface> originalProxies) {
+		bool sawPartialPublication = false;
+		while (true) {
+			Future<Void> changed = cx->clientInfo->onChange();
+			const ClientDBInfo& clientInfo = cx->clientInfo->get();
+			int originalEndpoints = 0;
+			for (const auto& proxy : originalProxies) {
+				if (std::find(clientInfo.cdcProxies.begin(), clientInfo.cdcProxies.end(), proxy) !=
+				    clientInfo.cdcProxies.end()) {
+					++originalEndpoints;
+				}
+			}
+			if (originalEndpoints == 1) {
+				sawPartialPublication = true;
+			}
+			if (originalEndpoints == 0) {
+				ASSERT(sawPartialPublication);
+				co_return;
+			}
+			co_await changed;
+		}
+	}
+
 	Future<Void> validateProxyReplacement(Database cx) {
 		const Key name = "native-cdc-e2e/proxy-replacement"_sr;
 		const KeyRange keys(
@@ -406,7 +429,20 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		Reference<NativeCdcConsumer> consumer =
 		    co_await timeoutError(createNativeCdcConsumer(cx, name), operationTimeout);
 		CDCProxyInterface original = co_await timeoutError(waitForAssignedProxy(cx, streamId), operationTimeout);
-		co_await timeoutError(original.haltForTesting.getReply(HaltCDCProxyRequest()), operationTimeout);
+		const std::vector<CDCProxyInterface> originalProxies = cx->clientInfo->get().cdcProxies;
+		ASSERT_EQ(originalProxies.size(), 2);
+		ASSERT(std::find(originalProxies.begin(), originalProxies.end(), original) != originalProxies.end());
+		Future<Void> publications = waitForIndependentProxyPublications(cx, originalProxies);
+
+		std::vector<Future<Void>> halts;
+		halts.reserve(originalProxies.size());
+		for (const auto& proxy : originalProxies) {
+			halts.push_back(proxy.haltForTesting.getReply(HaltCDCProxyRequest()));
+		}
+		co_await timeoutError(waitForAll(halts), operationTimeout);
+		co_await timeoutError(publications, operationTimeout);
+		CODE_PROBE(true, "Native CDC publishes successful proxy replacements independently");
+
 		CDCProxyInterface replacement =
 		    co_await timeoutError(waitForAssignedProxy(cx, streamId, original.id()), operationTimeout);
 		ASSERT_NE(original.id(), replacement.id());

@@ -1,11 +1,12 @@
 [configuration]
-config = 'single'
+config = 'single commit_proxies=1 grv_proxies=2'
 singleRegion = true
 buggify = false
 faultInjection = false
 
 [[knobs]]
 enable_native_cdc = true
+cdc_proxy_failure_coalesce_delay = 0.1
 
 [[test]]
 testTitle = 'NativeCdcAssignmentPublication'
