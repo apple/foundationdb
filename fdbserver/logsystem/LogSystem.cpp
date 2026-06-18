@@ -2586,7 +2586,16 @@ Future<Reference<LogSystem>> LogSystem::newEpoch(Reference<LogSystem> oldLogSyst
 	for (auto& it : oldLogSystem->oldLogData) {
 		maxTxsTags = std::max<int>(maxTxsTags, it.txsTags);
 	}
-	int maxCdcTags = CLIENT_KNOBS->NATIVE_CDC_TAG_COUNT;
+	const int configuredCdcTags = CLIENT_KNOBS->NATIVE_CDC_TAG_COUNT;
+	const bool validConfiguredCdcTags =
+	    configuredCdcTags > 0 &&
+	    static_cast<uint64_t>(configuredCdcTags) <= static_cast<uint64_t>(std::numeric_limits<uint16_t>::max()) + 1;
+	int maxCdcTags = validConfiguredCdcTags ? configuredCdcTags : 0;
+	if (!validConfiguredCdcTags) {
+		CODE_PROBE(true, "Recovery ignores an invalid Native CDC tag count", probe::decoration::rare);
+		TraceEvent(SevWarnAlways, "InvalidNativeCdcTagCount", oldLogSystem->getDebugID())
+		    .detail("ConfiguredTagCount", configuredCdcTags);
+	}
 	for (Tag tag : allTags) {
 		if (tag.locality == tagLocalityCDC) {
 			maxCdcTags = std::max<int>(maxCdcTags, tag.id + 1);

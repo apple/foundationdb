@@ -659,8 +659,11 @@ of an existing name is also allowed while disabled; only allocation of a new
 stream is rejected.
 
 `NATIVE_CDC_TAG_COUNT` controls the bounded tag pool used for new stream
-allocation. Normal operation defaults to a larger tag pool; simulation may
-reduce it so shared-tag behavior is exercised frequently.
+allocation and must be between 1 and 65,536 inclusive. Invalid values reject
+new registration and are not used to size recovery routing tables; tags already
+present in durable metadata remain recoverable. Normal operation defaults to a
+larger tag pool; simulation may reduce it so shared-tag behavior is exercised
+frequently.
 
 Native CDC must be enabled only after every process in the cluster supports the
 `withNativeCdc` protocol version. Once streams or retired-pop records exist, a

@@ -36,6 +36,11 @@
 
 namespace {
 
+bool validNativeCdcTagCount(int tagCount) {
+	return tagCount > 0 &&
+	       static_cast<uint64_t>(tagCount) <= static_cast<uint64_t>(std::numeric_limits<uint16_t>::max()) + 1;
+}
+
 void validateNativeCdcEnabled() {
 	if (!CLIENT_KNOBS->ENABLE_NATIVE_CDC) {
 		CODE_PROBE(true, "Native CDC registration rejected while feature disabled", probe::decoration::rare);
@@ -65,8 +70,9 @@ public:
 		}
 
 		const CDCStreamId streamId = sawStream ? maxStreamId + 1 : 1;
-		ASSERT_WE_THINK(CLIENT_KNOBS->NATIVE_CDC_TAG_COUNT > 0);
-		ASSERT_WE_THINK(CLIENT_KNOBS->NATIVE_CDC_TAG_COUNT <= std::numeric_limits<uint16_t>::max() + 1u);
+		if (!validNativeCdcTagCount(CLIENT_KNOBS->NATIVE_CDC_TAG_COUNT)) {
+			throw invalid_option_value();
+		}
 		uint32_t leastStreams = std::numeric_limits<uint32_t>::max();
 		uint16_t selectedTagId = 0;
 		// TODO: Use data-distributor-observed per-tag write throughput to rebalance CDC tags, including
@@ -822,6 +828,12 @@ Future<Void> NativeCdcConsumer::acknowledge() {
 }
 
 TEST_CASE("/NativeCDC/LifecycleAllocation") {
+	ASSERT(!validNativeCdcTagCount(-1));
+	ASSERT(!validNativeCdcTagCount(0));
+	ASSERT(validNativeCdcTagCount(1));
+	ASSERT(validNativeCdcTagCount(std::numeric_limits<uint16_t>::max() + 1u));
+	ASSERT(!validNativeCdcTagCount(std::numeric_limits<uint16_t>::max() + 2u));
+
 	NativeCdcIdentifierAllocator allocator;
 	auto [initialId, initialTag] = allocator.allocate();
 	ASSERT_EQ(initialId, 1);
