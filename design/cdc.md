@@ -620,6 +620,16 @@ markers are present in transaction state. Active history tags are added to the
 set of log tags that recovery must preserve; otherwise TLog generations could
 discard CDC data that an active consumer has not yet acknowledged.
 
+That retention can intentionally keep recovery at `ALL_LOGS_RECRUITED`. New
+TLogs consider a recovered tag complete only after its pop advances beyond the
+recovery boundary, while an active stream must not pop beyond its durable
+acknowledgement. If an active consumer still needs history below that boundary,
+the old TLog generation and the less-than-`FULLY_RECOVERED` state remain until
+the consumer acknowledges past it or the stream is removed. The cluster can
+accept commits in this state, but recovery-state health remains self-healing,
+snapshot requests that require full recovery are rejected, and log-router
+monitoring that waits for full recovery does not start.
+
 CDC proxy recruitment is required during recovery when either:
 
 * Native CDC is enabled and streams may be served, or
@@ -696,6 +706,12 @@ policy simple.
 * Assignment mutations use one coalescing change key that wakes a full durable
   ownership rescan. This is appropriate for low-rate control-plane changes but
   should be sharded if registration and removal throughput becomes material.
+* Registration metadata discovery, acknowledgement safe-pop calculation,
+  ownership publication, and failed-proxy reassignment each scan global CDC
+  metadata in one transaction. The scans page their reads but do not split the
+  transaction, so stream-count growth is bounded by FoundationDB transaction
+  size and lifetime limits until these paths are sharded or incrementally
+  maintained.
 * There is no background process that changes a live stream's CDC tag in
   response to load. A future implementation can use versioned tag history to
   make such changes without losing the ability to read earlier tagged data.
@@ -718,13 +734,15 @@ The basic native CDC workload covers:
 * Name-based consumer creation, including end-to-end clear-range clipping.
 * Rejection of incompatible same-name registrations.
 * Targeted CDC proxy termination, durable reassignment, and recovery of stream
-  service.
+  service, including independent publication when two proxies fail together.
 * Errors for stale consume and acknowledgement requests after removal.
 * Deterministic creation of retired final-pop state, transaction-system
   recovery while that state is durable, and eventual collection afterward.
 * Bounded raw-plus-filtered proxy memory, consume-lease cleanup after client
   cancellation and unrelated assignment changes, and rejection of concurrent
   consumers for one stream.
+* Oversized raw-peek rejection scoped to consumers blocked at that version, so
+  a same-tag stream registered at a later frontier continues to make progress.
 
 Unit coverage checks the CDC recovery-recruitment truth table with the feature
 enabled and disabled, both with and without durable CDC state. The process-static
