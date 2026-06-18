@@ -562,20 +562,27 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		co_await waitForNoActiveConsumes(cx, streamId, proxy);
 	}
 
-	Future<Void> requestPopsUntilStopped(CDCProxyInterface proxy, Reference<AsyncVar<bool>> stopped) {
+	Future<Void> requestPopsUntilStopped(Database cx, Reference<AsyncVar<bool>> stopped) {
 		while (!stopped->get()) {
-			co_await proxy.setPopsPausedForTesting.getReply(SetCDCProxyPopsPausedRequest(false));
+			co_await setAllProxyPopsPaused(cx, false);
 			co_await delay(0);
 		}
 	}
 
-	Future<Void> validatePopProgressUnderContinuousRequests(CDCProxyInterface proxy) {
-		const CDCProxyBufferStatus initial = co_await getProxyStatus(proxy);
+	Future<Void> validatePopProgressUnderContinuousRequests(Database cx,
+	                                                        CDCStreamId streamId,
+	                                                        CDCProxyInterface* proxy) {
+		auto initialProxyStatus = co_await timeoutError(getAssignedProxyStatus(cx, streamId), operationTimeout);
+		bool followedProxyReplacement = proxy->id() != initialProxyStatus.first.id();
+		updateObservedProxy(*proxy, initialProxyStatus.first);
+		const CDCProxyBufferStatus initial = initialProxyStatus.second;
 		Reference<AsyncVar<bool>> stopped = makeReference<AsyncVar<bool>>(false);
-		Future<Void> requester = requestPopsUntilStopped(proxy, stopped);
+		Future<Void> requester = requestPopsUntilStopped(cx, stopped);
 		const double deadline = now() + operationTimeout;
 		while (true) {
-			const CDCProxyBufferStatus status = co_await getProxyStatus(proxy);
+			const UID previousProxy = proxy->id();
+			const CDCProxyBufferStatus status = co_await getCurrentProxyStatus(cx, streamId, proxy);
+			followedProxyReplacement |= previousProxy != proxy->id();
 			if (status.popCompletions > initial.popCompletions) {
 				ASSERT_GT(status.popRequests, initial.popRequests);
 				break;
@@ -583,6 +590,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			ASSERT_LT(now(), deadline);
 			co_await delay(0.01);
 		}
+		CODE_PROBE(followedProxyReplacement, "Native CDC pop progress validation follows proxy replacement");
 		stopped->set(true);
 		co_await timeoutError(requester, operationTimeout);
 	}
@@ -637,7 +645,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		ASSERT_LE(status.activePermits, status.bufferLimit);
 		ASSERT_LE(status.peakActivePermits, status.bufferLimit);
 		co_await validateConsumeLeaseAndExclusivity(cx, firstStreamId, &proxy);
-		co_await validatePopProgressUnderContinuousRequests(proxy);
+		co_await validatePopProgressUnderContinuousRequests(cx, firstStreamId, &proxy);
 	}
 
 	Future<Void> waitForRetiredTagState(Database cx, bool present) {
