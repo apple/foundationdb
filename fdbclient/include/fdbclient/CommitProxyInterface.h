@@ -131,20 +131,27 @@ struct ClientDBInfo {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		if constexpr (!is_fb_function<Archive>) {
+		// FlatBuffer serializers include every schema field. Versioned binary serializers must omit Native CDC fields
+		// for peers predating withNativeCdc so a new client can still decode their ClientDBInfo payloads.
+		if constexpr (is_fb_function<Archive>) {
+			serializer(ar,
+			           grvProxies,
+			           commitProxies,
+			           id,
+			           forward,
+			           history,
+			           clusterId,
+			           clusterType,
+			           nativeCdcEnabled,
+			           cdcProxies,
+			           streamToCDCProxyId);
+		} else {
 			ASSERT(ar.protocolVersion().isValid());
+			serializer(ar, grvProxies, commitProxies, id, forward, history, clusterId, clusterType);
+			if (ar.protocolVersion().hasNativeCdc()) {
+				serializer(ar, nativeCdcEnabled, cdcProxies, streamToCDCProxyId);
+			}
 		}
-		serializer(ar,
-		           grvProxies,
-		           commitProxies,
-		           id,
-		           forward,
-		           history,
-		           clusterId,
-		           clusterType,
-		           nativeCdcEnabled,
-		           cdcProxies,
-		           streamToCDCProxyId);
 	}
 };
 

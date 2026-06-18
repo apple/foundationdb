@@ -1,5 +1,6 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/CoordinationInterface.h"
+#include "flow/UnitTest.h"
 
 // Instantiate ClientDBInfo related templates
 template class ReplyPromise<struct ClientDBInfo>;
@@ -11,6 +12,26 @@ template struct NetNotifiedQueue<OpenDatabaseCoordRequest, true>;
 // Instantiate GetKeyServerLocationsReply related templates
 template class ReplyPromise<GetKeyServerLocationsReply>;
 template struct NetSAV<GetKeyServerLocationsReply>;
+
+TEST_CASE("/NativeCDC/ClientDBInfoProtocolGating") {
+	ClientDBInfo source;
+	source.nativeCdcEnabled = true;
+	source.streamToCDCProxyId.emplace(1, UID(2, 3));
+
+	Standalone<StringRef> legacy =
+	    BinaryWriter::toValue(source, IncludeVersion(ProtocolVersion::withMutationChecksum()));
+	ClientDBInfo legacyDecoded = BinaryReader::fromStringRef<ClientDBInfo>(legacy, IncludeVersion());
+	ASSERT(!legacyDecoded.nativeCdcEnabled);
+	ASSERT(legacyDecoded.cdcProxies.empty());
+	ASSERT(legacyDecoded.streamToCDCProxyId.empty());
+
+	Standalone<StringRef> nativeCdc =
+	    BinaryWriter::toValue(source, IncludeVersion(ProtocolVersion::withNativeCdc()));
+	ClientDBInfo nativeCdcDecoded = BinaryReader::fromStringRef<ClientDBInfo>(nativeCdc, IncludeVersion());
+	ASSERT(nativeCdcDecoded.nativeCdcEnabled);
+	ASSERT_EQ(nativeCdcDecoded.streamToCDCProxyId, source.streamToCDCProxyId);
+	return Void();
+}
 
 Standalone<StringRef> getBackupKey(BinaryWriter& wr, uint32_t** partBuffer, int part) {
 	// Write the last part of the mutation to the serialization, if the buffer is not defined
