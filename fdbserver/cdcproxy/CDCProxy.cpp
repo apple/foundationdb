@@ -177,6 +177,12 @@ Version committedPeekThrough(Version peekThrough, Version minKnownCommittedVersi
 	return std::min(peekThrough, minKnownCommittedVersion);
 }
 
+bool isCurrentStreamInitialization(std::unordered_map<CDCStreamId, Reference<CDCBufferedStream>> const& streams,
+                                   Reference<CDCBufferedStream> stream) {
+	auto current = streams.find(stream->streamId);
+	return stream->active && current != streams.end() && current->second.getPtr() == stream.getPtr();
+}
+
 // New TLogs retain every recovered tag until it is popped past the recovery boundary. An unshared retired tag has no
 // active consumer to advance it, so stopping at its pre-recovery removal version can keep the old generation forever.
 Version retiredTagPopTarget(Version retiredVersion, Optional<Version> safePopVersion, Optional<Version> recoveryEnd) {
@@ -933,6 +939,10 @@ Future<Void> CDCProxy::bufferTag(Reference<CDCBufferedTag> tag) {
 Future<Void> CDCProxy::initializeStream(Reference<CDCBufferedStream> stream) {
 	try {
 		const CDCStreamReadState metadata = co_await readCDCStreamState(cx, stream->streamId, id, true);
+		if (!isCurrentStreamInitialization(streams, stream)) {
+			CODE_PROBE(true, "CDC proxy discards stale stream initialization", probe::decoration::rare);
+			co_return;
+		}
 		stream->keys = metadata.keys;
 		stream->minVersion = metadata.minVersion;
 		stream->bufferedThrough = metadata.minVersion - 1;
@@ -1640,6 +1650,23 @@ TEST_CASE("/NativeCDC/CommittedDeliveryFrontier") {
 	ASSERT_EQ(committedPeekThrough(200, 150), 150);
 	ASSERT_EQ(committedPeekThrough(150, 200), 150);
 	ASSERT_EQ(committedPeekThrough(150, 150), 150);
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/StreamInitializationLifecycle") {
+	std::unordered_map<CDCStreamId, Reference<CDCBufferedStream>> streams;
+	Reference<CDCBufferedStream> stream = makeReference<CDCBufferedStream>(1);
+	Reference<CDCBufferedStream> replacement = makeReference<CDCBufferedStream>(1);
+
+	ASSERT(!isCurrentStreamInitialization(streams, stream));
+	streams.emplace(stream->streamId, stream);
+	ASSERT(isCurrentStreamInitialization(streams, stream));
+	stream->active = false;
+	ASSERT(!isCurrentStreamInitialization(streams, stream));
+	stream->active = true;
+	streams.at(stream->streamId) = replacement;
+	ASSERT(!isCurrentStreamInitialization(streams, stream));
+	ASSERT(isCurrentStreamInitialization(streams, replacement));
 	return Void();
 }
 
