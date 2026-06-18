@@ -115,6 +115,7 @@ struct CDCBufferSelection {
 struct CDCPopState {
 	std::unordered_map<CDCStreamId, Version> minVersions;
 	std::unordered_map<Tag, Version> safePopVersions;
+	Version readVersion = invalidVersion;
 };
 
 enum class CDCBufferTagPassResult { RETRY, WAIT_FOR_COMMIT, STOP };
@@ -177,6 +178,13 @@ Version committedPeekThrough(Version peekThrough, Version minKnownCommittedVersi
 	return std::min(peekThrough, minKnownCommittedVersion);
 }
 
+Version cdcLagVersions(Version committedVersion, Version retainedVersion) {
+	if (committedVersion < 0 || retainedVersion < 0 || retainedVersion == std::numeric_limits<Version>::max()) {
+		return invalidVersion;
+	}
+	return std::max<Version>(0, committedVersion - retainedVersion);
+}
+
 bool isCurrentStreamInitialization(std::unordered_map<CDCStreamId, Reference<CDCBufferedStream>> const& streams,
                                    Reference<CDCBufferedStream> stream) {
 	auto current = streams.find(stream->streamId);
@@ -215,6 +223,7 @@ class CDCProxy {
 	bool logSystemInitialized = false;
 	uint64_t logSystemRecoveryCount = 0;
 	UID logSystemRecruitmentId;
+	Version latestCommittedVersion = invalidVersion;
 	std::unordered_map<Tag, Version> lastSafePopVersions;
 	ActorCollection actors;
 
@@ -808,6 +817,7 @@ Future<CDCBufferTagPassResult> CDCProxy::bufferTagPass(Reference<CDCBufferedTag>
 	// A newly constructed replay cursor can already contain messages, especially after log-generation
 	// changes. Initialize its reader even when getMore() was unnecessary.
 	cursor->setProtocolVersion(g_network->protocolVersion());
+	latestCommittedVersion = std::max(latestCommittedVersion, cursor->getMinKnownCommittedVersion());
 	if (cursor->popped() > begin) {
 		markPoppedTagStreamsTooOld(tag, cursor->popped());
 		co_return CDCBufferTagPassResult::RETRY;
@@ -991,6 +1001,7 @@ Future<CDCPopState> readSafePopState(Database cx) {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
 			CDCPopState result;
+			result.readVersion = co_await tr.getReadVersion();
 			Key begin = cdcMinVersionKeys.begin;
 			while (begin < cdcMinVersionKeys.end) {
 				RangeResult minima =
@@ -1108,6 +1119,7 @@ Future<Void> CDCProxy::popAcknowledgedData() {
 	if (popsPausedForTesting) {
 		co_return;
 	}
+	latestCommittedVersion = std::max(latestCommittedVersion, popState.readVersion);
 	for (const auto& [streamId, minVersion] : popState.minVersions) {
 		auto stream = streams.find(streamId);
 		if (stream == streams.end() || !stream->second->active || !stream->second->initialized ||
@@ -1475,10 +1487,6 @@ Future<Void> CDCProxy::traceMetrics() {
 		for (const auto& [tag, version] : lastSafePopVersions) {
 			minimumSafePopVersion = std::min(minimumSafePopVersion, version);
 		}
-		Version logEnd = logSystem->get() ? logSystem->get()->getPeekEnd() : invalidVersion;
-		if (logEnd == std::numeric_limits<Version>::max()) {
-			logEnd = invalidVersion;
-		}
 		TraceEvent("CDCProxyMetrics", id)
 		    .detail("Streams", streams.size())
 		    .detail("Tags", tags.size())
@@ -1494,17 +1502,12 @@ Future<Void> CDCProxy::traceMetrics() {
 		    .detail("OldestRequiredVersion",
 		            oldestRequiredVersion == std::numeric_limits<Version>::max() ? invalidVersion
 		                                                                         : oldestRequiredVersion)
-		    .detail("AcknowledgementLagVersions",
-		            logEnd >= 0 && oldestRequiredVersion != std::numeric_limits<Version>::max()
-		                ? std::max<Version>(0, logEnd - oldestRequiredVersion)
-		                : 0)
+		    .detail("CommittedVersion", latestCommittedVersion)
+		    .detail("AcknowledgementLagVersions", cdcLagVersions(latestCommittedVersion, oldestRequiredVersion))
 		    .detail("MinimumSafePopVersion",
 		            minimumSafePopVersion == std::numeric_limits<Version>::max() ? invalidVersion
 		                                                                         : minimumSafePopVersion)
-		    .detail("SafePopDistanceVersions",
-		            logEnd >= 0 && minimumSafePopVersion != std::numeric_limits<Version>::max()
-		                ? std::max<Version>(0, logEnd - minimumSafePopVersion)
-		                : 0)
+		    .detail("SafePopDistanceVersions", cdcLagVersions(latestCommittedVersion, minimumSafePopVersion))
 		    .detail("PopRequests", popRequests)
 		    .detail("PopAttempts", popAttempts)
 		    .detail("PopCompletions", popCompletions)
@@ -1650,6 +1653,15 @@ TEST_CASE("/NativeCDC/CommittedDeliveryFrontier") {
 	ASSERT_EQ(committedPeekThrough(200, 150), 150);
 	ASSERT_EQ(committedPeekThrough(150, 200), 150);
 	ASSERT_EQ(committedPeekThrough(150, 150), 150);
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/LagMetrics") {
+	ASSERT_EQ(cdcLagVersions(200, 150), 50);
+	ASSERT_EQ(cdcLagVersions(150, 200), 0);
+	ASSERT_EQ(cdcLagVersions(invalidVersion, 150), invalidVersion);
+	ASSERT_EQ(cdcLagVersions(200, invalidVersion), invalidVersion);
+	ASSERT_EQ(cdcLagVersions(200, std::numeric_limits<Version>::max()), invalidVersion);
 	return Void();
 }
 
