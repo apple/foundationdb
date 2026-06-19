@@ -238,11 +238,24 @@ struct TLogPeekRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, begin, tag, returnIfBlocked, onlySpilled, sequence, reply, end, returnEmptyIfStopped);
 		if constexpr (is_fb_function<Ar>) {
-			serializer(ar, replyByteLimit);
-		} else if (ar.protocolVersion().hasNativeCdc()) {
-			serializer(ar, replyByteLimit);
+			// FlatBuffer visitors must see every field in one call because each visit starts at field zero.
+			serializer(ar,
+			           begin,
+			           tag,
+			           returnIfBlocked,
+			           onlySpilled,
+			           sequence,
+			           reply,
+			           end,
+			           returnEmptyIfStopped,
+			           replyByteLimit);
+		} else {
+			ASSERT(ar.protocolVersion().isValid());
+			serializer(ar, begin, tag, returnIfBlocked, onlySpilled, sequence, reply, end, returnEmptyIfStopped);
+			if (ar.protocolVersion().hasNativeCdc()) {
+				serializer(ar, replyByteLimit);
+			}
 		}
 	}
 };

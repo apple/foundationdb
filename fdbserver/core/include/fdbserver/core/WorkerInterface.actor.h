@@ -101,36 +101,66 @@ struct WorkerInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar,
-		           clientInterface,
-		           locality,
-		           tLog,
-		           master,
-		           commitProxy,
-		           grvProxy,
-		           dataDistributor,
-		           ratekeeper,
-		           consistencyScan,
-		           resolver,
-		           storage,
-		           logRouter,
-		           debugPing,
-		           coordinationPing,
-		           waitFailure,
-		           setMetricsRate,
-		           eventLogRequest,
-		           traceBatchDumpRequest,
-		           testerInterface,
-		           diskStoreRequest,
-		           execReq,
-		           workerSnapReq,
-		           backup,
-		           updateServerDBInfo,
-		           rangeBackup);
 		if constexpr (is_fb_function<Ar>) {
-			serializer(ar, cdcProxy);
-		} else if (ar.protocolVersion().hasNativeCdc()) {
-			serializer(ar, cdcProxy);
+			// FlatBuffer visitors must see every field in one call because each visit starts at field zero.
+			serializer(ar,
+			           clientInterface,
+			           locality,
+			           tLog,
+			           master,
+			           commitProxy,
+			           grvProxy,
+			           dataDistributor,
+			           ratekeeper,
+			           consistencyScan,
+			           resolver,
+			           storage,
+			           logRouter,
+			           debugPing,
+			           coordinationPing,
+			           waitFailure,
+			           setMetricsRate,
+			           eventLogRequest,
+			           traceBatchDumpRequest,
+			           testerInterface,
+			           diskStoreRequest,
+			           execReq,
+			           workerSnapReq,
+			           backup,
+			           updateServerDBInfo,
+			           rangeBackup,
+			           cdcProxy);
+		} else {
+			ASSERT(ar.protocolVersion().isValid());
+			serializer(ar,
+			           clientInterface,
+			           locality,
+			           tLog,
+			           master,
+			           commitProxy,
+			           grvProxy,
+			           dataDistributor,
+			           ratekeeper,
+			           consistencyScan,
+			           resolver,
+			           storage,
+			           logRouter,
+			           debugPing,
+			           coordinationPing,
+			           waitFailure,
+			           setMetricsRate,
+			           eventLogRequest,
+			           traceBatchDumpRequest,
+			           testerInterface,
+			           diskStoreRequest,
+			           execReq,
+			           workerSnapReq,
+			           backup,
+			           updateServerDBInfo,
+			           rangeBackup);
+			if (ar.protocolVersion().hasNativeCdc()) {
+				serializer(ar, cdcProxy);
+			}
 		}
 	}
 };
@@ -262,23 +292,37 @@ struct RegisterMasterRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar,
-		           id,
-		           mi,
-		           logSystemConfig,
-		           commitProxies,
-		           grvProxies,
-		           resolvers,
-		           recoveryCount,
-		           registrationCount,
-		           configuration,
-		           priorCommittedLogServers,
-		           recoveryState,
-		           recoveryStalled);
 		if constexpr (is_fb_function<Ar>) {
-			serializer(ar, cdcProxies);
+			// FlatBuffer visitors must see every field in one call because each visit starts at field zero.
+			serializer(ar,
+			           id,
+			           mi,
+			           logSystemConfig,
+			           commitProxies,
+			           grvProxies,
+			           resolvers,
+			           recoveryCount,
+			           registrationCount,
+			           configuration,
+			           priorCommittedLogServers,
+			           recoveryState,
+			           recoveryStalled,
+			           cdcProxies);
 		} else {
 			ASSERT(ar.protocolVersion().isValid());
+			serializer(ar,
+			           id,
+			           mi,
+			           logSystemConfig,
+			           commitProxies,
+			           grvProxies,
+			           resolvers,
+			           recoveryCount,
+			           registrationCount,
+			           configuration,
+			           priorCommittedLogServers,
+			           recoveryState,
+			           recoveryStalled);
 			if (ar.protocolVersion().hasNativeCdc()) {
 				serializer(ar, cdcProxies);
 			}
