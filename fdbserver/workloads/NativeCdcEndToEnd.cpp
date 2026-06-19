@@ -150,6 +150,12 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		}
 	}
 
+	void resumeConsumerAfterDirectAcknowledgement(Database cx, CDCStreamId streamId, Version consumedThrough) {
+		ASSERT_EQ(streams.size(), 1);
+		streams.front().consumer = resumeNativeCdcConsumer(cx, CDCCursor(streamId, consumedThrough));
+		CODE_PROBE(true, "Native CDC durable acknowledgement test updates its resumed consumer cursor");
+	}
+
 	Future<Void> consumeThroughValue(Reference<NativeCdcConsumer> consumer, Version committed, Key key, Value value) {
 		bool observed = false;
 		const double deadline = now() + operationTimeout;
@@ -806,6 +812,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			// pop scan.
 			co_await setAllProxyPopsPaused(cx, true);
 			co_await timeoutError(acknowledgeDurablyWithoutProxy(cx, streamId, reconcileCommitted), operationTimeout);
+			resumeConsumerAfterDirectAcknowledgement(cx, streamId, reconcileCommitted);
 			CDCProxyInterface observedProxy = initialProxyStatus.first;
 			Future<ErrorOr<CDCConsumeReply>> reconcileRequest =
 			    observedProxy.consume.tryGetReply(CDCConsumeRequest(streams.front().consumer->position()));
@@ -861,6 +868,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			const CDCProxyBufferStatus scanInitial = initialProxyStatus.second;
 			ASSERT_GT(scanInitial.bufferedBytes, 0);
 			co_await timeoutError(acknowledgeDurablyWithoutProxy(cx, streamId, scanCommitted), operationTimeout);
+			resumeConsumerAfterDirectAcknowledgement(cx, streamId, scanCommitted);
 
 			const double deadline = now() + operationTimeout;
 			bool unrelatedPopRequest = false;
