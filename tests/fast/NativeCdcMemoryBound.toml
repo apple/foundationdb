@@ -7,7 +7,8 @@ faultInjection = false
 [[knobs]]
 enable_native_cdc = true
 native_cdc_tag_count = 1
-cdc_proxy_buffer_bytes = 8192
+# Allow up to six retained 4 KiB TLog replies while keeping 32 KiB of stream fanout memory-bound.
+cdc_proxy_buffer_bytes = 32768
 maximum_peek_bytes = 4096
 cdc_proxy_consume_poll_timeout = 30.0
 
