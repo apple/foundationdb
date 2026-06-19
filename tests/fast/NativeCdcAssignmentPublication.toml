@@ -1,6 +1,9 @@
 [configuration]
 config = 'single commit_proxies=1 grv_proxies=2'
 singleRegion = true
+# Independent replacement coverage needs enough workers in the primary data center for both proxies.
+datacenters = 1
+machineCount = 6
 buggify = false
 faultInjection = false
 
