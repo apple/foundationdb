@@ -191,6 +191,10 @@ through the delivered position, and must not issue another `consume()` if it
 still needs to retry processing the previous reply from that same in-memory
 consumer. A consumer restarted from its last durably checkpointed position
 can use `resumeNativeCdcConsumer()`.
+If the assigned CDC proxy is replaced while an in-memory consumer holds an
+unacknowledged delivered position, the native client rewinds its next consume
+to the last successful durable acknowledgement. The replacement may therefore
+redeliver mutations that the application processed but did not acknowledge.
 Only one `consume()` or `acknowledge()` operation may be outstanding on a
 `NativeCdcConsumer`; concurrent operations are rejected because they would
 race updates to its delivered position and acknowledgement proof.
@@ -518,11 +522,12 @@ watermark. A fabricated or otherwise unproven cursor is rejected instead of
 making the proxy buffer every intervening mutation while trying to reach it;
 positions beyond the metadata transaction's read version are explicitly
 classified as invalid. A proven delivered cursor remains valid if that read
-version briefly lags the tagged-log frontier. After an owner restart, callers
-must resume from their last acknowledged checkpoint; an unacknowledged later
-position can be replayed from that durable checkpoint. Only one consume RPC may
-be active for a stream because all consumers would share the same durable
-acknowledgement frontier; overlapping logical consumers are rejected.
+version briefly lags the tagged-log frontier. After an owner restart, a new
+consumer must resume from its last acknowledged checkpoint. An existing native
+consumer detects the replacement and automatically rewinds an unacknowledged
+later position to that durable checkpoint. Only one consume RPC may be active
+for a stream because all consumers would share the same durable acknowledgement
+frontier; overlapping logical consumers are rejected.
 
 When no later version is available, `consume()` is intentionally a client-side
 long poll. Each server request has a bounded

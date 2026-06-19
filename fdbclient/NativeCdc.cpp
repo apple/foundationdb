@@ -225,6 +225,19 @@ bool retryNativeCdcProxyRequest(Error const& error) {
 	       error.code() == error_code_connection_failed || error.code() == error_code_request_maybe_delivered;
 }
 
+bool rewindUnacknowledgedCursorAfterProxyReplacement(CDCCursor* currentPosition,
+                                                     Version lastAcknowledgedVersion,
+                                                     Optional<UID>* deliveryProxyId,
+                                                     UID currentProxyId) {
+	const bool proxyReplaced = deliveryProxyId->present() && deliveryProxyId->get() != currentProxyId;
+	*deliveryProxyId = currentProxyId;
+	if (!proxyReplaced || currentPosition->lastConsumedVersion <= lastAcknowledgedVersion) {
+		return false;
+	}
+	currentPosition->lastConsumedVersion = lastAcknowledgedVersion;
+	return true;
+}
+
 // TODO: Have the cluster controller rebalance stream ownership using aggregate CDC proxy throughput and
 // update cdcProxyKeys and ClientDBInfo assignments; registration currently chooses any available proxy.
 Optional<CDCProxyInterface> selectAvailableNativeCdcProxy(ClientDBInfo const& clientInfo, Optional<UID> previousProxy) {
@@ -734,7 +747,7 @@ Future<Void> removeNativeCdcStreamClient(Database cx, Key name) {
 
 Future<Reference<NativeCdcConsumer>> createNativeCdcConsumer(Database cx, Key name) {
 	const CDCStreamId streamId = co_await getNativeCdcStreamId(cx, name);
-	co_return makeReference<NativeCdcConsumer>(cx, CDCCursor(streamId, invalidVersion));
+	co_return makeReference<NativeCdcConsumer>(cx, CDCCursor(streamId, invalidVersion), invalidVersion);
 }
 
 Reference<NativeCdcConsumer> resumeNativeCdcConsumer(Database cx, CDCCursor position) {
@@ -745,6 +758,13 @@ Future<CDCConsumeReply> NativeCdcConsumer::consumeImpl(Reference<NativeCdcConsum
 	try {
 		while (true) {
 			CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(self->cx, self->currentPosition.streamId);
+			if (rewindUnacknowledgedCursorAfterProxyReplacement(
+			        &self->currentPosition, self->lastAcknowledgedVersion, &self->deliveryProxyId, proxy.id())) {
+				self->knownAvailableThrough = self->lastAcknowledgedVersion;
+				CODE_PROBE(true,
+				           "Native CDC consumer rewinds unacknowledged cursor after proxy replacement",
+				           probe::decoration::rare);
+			}
 			try {
 				CDCConsumeReply reply =
 				    co_await throwErrorOr(proxy.consume.tryGetReply(CDCConsumeRequest(self->currentPosition)));
@@ -788,8 +808,9 @@ Future<Void> NativeCdcConsumer::acknowledgeImpl(Reference<NativeCdcConsumer> sel
 			throw client_invalid_operation();
 		}
 		const Version acknowledgedVersion = self->currentPosition.lastConsumedVersion;
-		co_await acknowledgeNativeCdcStream(
+		const Version durableMinVersion = co_await acknowledgeNativeCdcStream(
 		    self->cx, self->currentPosition.streamId, acknowledgedVersion, self->knownAvailableThrough);
+		self->lastAcknowledgedVersion = std::max(self->lastAcknowledgedVersion, durableMinVersion - 1);
 		// The durable transaction completes before the proxy RPC. FoundationDB's
 		// transaction ordering guarantees the proxy's subsequent metadata read
 		// observes this acknowledgement.
@@ -860,6 +881,27 @@ TEST_CASE("/NativeCDC/LifecycleAllocation") {
 	auto [sharedId, sharedTag] = fullPoolAllocator.allocate(CLIENT_KNOBS->NATIVE_CDC_TAG_COUNT);
 	ASSERT_EQ(sharedId, 1);
 	ASSERT_EQ(sharedTag, Tag(tagLocalityCDC, 0));
+
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/ConsumerRewindsUnacknowledgedCursorOnProxyReplacement") {
+	CDCCursor cursor(1, invalidVersion);
+	Optional<UID> deliveryProxyId;
+	const UID firstProxy(1, 2);
+	const UID secondProxy(3, 4);
+
+	ASSERT(!rewindUnacknowledgedCursorAfterProxyReplacement(&cursor, invalidVersion, &deliveryProxyId, firstProxy));
+	cursor.lastConsumedVersion = 100;
+	ASSERT(!rewindUnacknowledgedCursorAfterProxyReplacement(&cursor, invalidVersion, &deliveryProxyId, firstProxy));
+	ASSERT(rewindUnacknowledgedCursorAfterProxyReplacement(&cursor, invalidVersion, &deliveryProxyId, secondProxy));
+	ASSERT_EQ(cursor.lastConsumedVersion, invalidVersion);
+
+	cursor.lastConsumedVersion = 100;
+	ASSERT(rewindUnacknowledgedCursorAfterProxyReplacement(&cursor, 80, &deliveryProxyId, firstProxy));
+	ASSERT_EQ(cursor.lastConsumedVersion, 80);
+	ASSERT(!rewindUnacknowledgedCursorAfterProxyReplacement(&cursor, 80, &deliveryProxyId, secondProxy));
+	ASSERT_EQ(cursor.lastConsumedVersion, 80);
 
 	return Void();
 }

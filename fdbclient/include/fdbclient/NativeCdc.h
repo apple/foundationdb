@@ -41,10 +41,15 @@ class NativeCdcConsumer : public ReferenceCounted<NativeCdcConsumer> {
 	Database cx;
 	CDCCursor currentPosition;
 	Version knownAvailableThrough = invalidVersion;
+	Version lastAcknowledgedVersion;
+	Optional<UID> deliveryProxyId;
 	bool operationOutstanding = false;
 
 public:
-	NativeCdcConsumer(Database cx, CDCCursor position) : cx(cx), currentPosition(position) {}
+	NativeCdcConsumer(Database cx, CDCCursor position)
+	  : cx(cx), currentPosition(position), lastAcknowledgedVersion(position.lastConsumedVersion) {}
+	NativeCdcConsumer(Database cx, CDCCursor position, Version lastAcknowledgedVersion)
+	  : cx(cx), currentPosition(position), lastAcknowledgedVersion(lastAcknowledgedVersion) {}
 
 	// Operations advance shared delivery state; only one may be outstanding.
 	Future<CDCConsumeReply> consume();

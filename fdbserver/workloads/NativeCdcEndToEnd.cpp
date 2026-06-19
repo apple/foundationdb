@@ -533,6 +533,12 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		}
 	}
 
+	void recordDurableAckProxyReplacement() {
+		CODE_PROBE(true,
+		           "Native CDC durable acknowledgement validation retries after proxy replacement",
+		           probe::decoration::rare);
+	}
+
 	Future<CDCProxyBufferStatus> getCurrentProxyStatus(Database cx,
 	                                                   CDCStreamId streamId,
 	                                                   CDCProxyInterface* observedProxy) {
@@ -773,75 +779,124 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	Future<Void> validateDurableAcknowledgementScan(Database cx) {
 		ASSERT_EQ(streams.size(), 1);
 		const Key key = keyForIndex(keyCount / 2);
-		const Value reconcileValue = "durable-ack-consume-reconcile"_sr;
-		const Version reconcileCommitted = co_await writeValue(cx, key, reconcileValue);
-		while (streams.front().consumer->position().lastConsumedVersion < reconcileCommitted) {
-			co_await timeoutError(streams.front().consumer->consume(), operationTimeout);
-			if (streams.front().consumer->position().lastConsumedVersion < reconcileCommitted) {
-				co_await timeoutError(streams.front().consumer->acknowledge(), operationTimeout);
-			}
-		}
-
 		const CDCStreamId streamId = streams.front().consumer->position().streamId;
-		co_await delay(1.0);
-		auto initialProxyStatus = co_await timeoutError(getAssignedProxyStatus(cx, streamId), operationTimeout);
-		const CDCProxyBufferStatus initial = initialProxyStatus.second;
-		ASSERT_GT(initial.bufferedBytes, 0);
-
-		// A consume can observe the durable frontier before the explicit acknowledgement RPC arrives. Hold TLog pops so
-		// this path must release acknowledged batches and permits itself instead of relying on the periodic pop scan.
-		co_await setAllProxyPopsPaused(cx, true);
-		co_await timeoutError(acknowledgeDurablyWithoutProxy(cx, streamId, reconcileCommitted), operationTimeout);
-		CDCProxyInterface observedProxy = initialProxyStatus.first;
-		Future<ErrorOr<CDCConsumeReply>> reconcileRequest =
-		    observedProxy.consume.tryGetReply(CDCConsumeRequest(streams.front().consumer->position()));
-		const double reconcileDeadline = now() + operationTimeout;
 		while (true) {
-			const CDCProxyBufferStatus status = co_await getCurrentProxyStatus(cx, streamId, &observedProxy);
-			if (status.bufferedBytes < initial.bufferedBytes) {
-				break;
-			}
-			ASSERT_LT(now(), reconcileDeadline);
-			co_await delay(0.01);
-		}
-
-		const Value scanValue = "durable-ack-periodic-scan"_sr;
-		const Version scanCommitted = co_await writeValue(cx, key, scanValue);
-		co_await timeoutError(throwErrorOr(reconcileRequest), operationTimeout);
-		co_await setAllProxyPopsPaused(cx, false);
-		while (streams.front().consumer->position().lastConsumedVersion < scanCommitted) {
-			co_await timeoutError(streams.front().consumer->consume(), operationTimeout);
-		}
-		co_await delay(1.0);
-		initialProxyStatus = co_await timeoutError(getAssignedProxyStatus(cx, streamId), operationTimeout);
-		const CDCProxyBufferStatus scanInitial = initialProxyStatus.second;
-		const UID scanInitialDbInfoId = dbInfo->get().id;
-		ASSERT_GT(scanInitial.bufferedBytes, 0);
-		co_await timeoutError(acknowledgeDurablyWithoutProxy(cx, streamId, scanCommitted), operationTimeout);
-
-		const double deadline = now() + operationTimeout;
-		while (true) {
-			auto currentProxyStatus = co_await timeoutError(getAssignedProxyStatus(cx, streamId), operationTimeout);
-			const CDCProxyBufferStatus& status = currentProxyStatus.second;
-			if (status.bufferedBytes < scanInitial.bufferedBytes &&
-			    status.popCompletions > scanInitial.popCompletions) {
-				// ServerDBInfo changes independently wake the same pop loop. The direct durable acknowledgement must not
-				// add a request while DB info is stable, but recovery may legitimately advance this aggregate counter.
-				if (status.popRequests != scanInitial.popRequests) {
-					ASSERT_NE(dbInfo->get().id, scanInitialDbInfoId);
-					CODE_PROBE(true,
-					           "Native CDC durable acknowledgement scan tolerates an unrelated DB info pop wake",
-					           probe::decoration::rare);
+			CDCProxyInterface reconcileSetupProxy =
+			    co_await timeoutError(waitForAssignedProxy(cx, streamId), operationTimeout);
+			const Value reconcileValue = "durable-ack-consume-reconcile"_sr;
+			const Version reconcileCommitted = co_await writeValue(cx, key, reconcileValue);
+			while (streams.front().consumer->position().lastConsumedVersion < reconcileCommitted) {
+				co_await timeoutError(streams.front().consumer->consume(), operationTimeout);
+				if (streams.front().consumer->position().lastConsumedVersion < reconcileCommitted) {
+					co_await timeoutError(streams.front().consumer->acknowledge(), operationTimeout);
 				}
-				break;
 			}
-			ASSERT_LT(now(), deadline);
-			co_await delay(0.01);
+
+			co_await delay(1.0);
+			auto initialProxyStatus = co_await timeoutError(getAssignedProxyStatus(cx, streamId), operationTimeout);
+			if (initialProxyStatus.first.id() != reconcileSetupProxy.id()) {
+				recordDurableAckProxyReplacement();
+				continue;
+			}
+			const CDCProxyBufferStatus initial = initialProxyStatus.second;
+			ASSERT_GT(initial.bufferedBytes, 0);
+
+			// A consume can observe the durable frontier before the explicit acknowledgement RPC arrives. Hold TLog
+			// pops so this path must release acknowledged batches and permits itself instead of relying on the periodic
+			// pop scan.
+			co_await setAllProxyPopsPaused(cx, true);
+			co_await timeoutError(acknowledgeDurablyWithoutProxy(cx, streamId, reconcileCommitted), operationTimeout);
+			CDCProxyInterface observedProxy = initialProxyStatus.first;
+			Future<ErrorOr<CDCConsumeReply>> reconcileRequest =
+			    observedProxy.consume.tryGetReply(CDCConsumeRequest(streams.front().consumer->position()));
+			const double reconcileDeadline = now() + operationTimeout;
+			bool proxyReplaced = false;
+			while (true) {
+				auto currentProxyStatus = co_await timeoutError(getAssignedProxyStatus(cx, streamId), operationTimeout);
+				if (currentProxyStatus.first.id() != observedProxy.id()) {
+					proxyReplaced = true;
+					break;
+				}
+				if (currentProxyStatus.second.bufferedBytes < initial.bufferedBytes) {
+					break;
+				}
+				ASSERT_LT(now(), reconcileDeadline);
+				co_await delay(0.01);
+			}
+			if (proxyReplaced) {
+				co_await setAllProxyPopsPaused(cx, false);
+				recordDurableAckProxyReplacement();
+				continue;
+			}
+
+			const Value scanValue = "durable-ack-periodic-scan"_sr;
+			const Version scanCommitted = co_await writeValue(cx, key, scanValue);
+			bool reconcileRequestFailed = false;
+			try {
+				co_await timeoutError(throwErrorOr(reconcileRequest), operationTimeout);
+			} catch (Error& e) {
+				if (e.code() != error_code_wrong_shard_server && e.code() != error_code_broken_promise &&
+				    e.code() != error_code_connection_failed && e.code() != error_code_request_maybe_delivered) {
+					throw;
+				}
+				reconcileRequestFailed = true;
+			}
+			co_await setAllProxyPopsPaused(cx, false);
+			if (reconcileRequestFailed) {
+				recordDurableAckProxyReplacement();
+				continue;
+			}
+
+			CDCProxyInterface scanConsumeProxy =
+			    co_await timeoutError(waitForAssignedProxy(cx, streamId), operationTimeout);
+			while (streams.front().consumer->position().lastConsumedVersion < scanCommitted) {
+				co_await timeoutError(streams.front().consumer->consume(), operationTimeout);
+			}
+			co_await delay(1.0);
+			initialProxyStatus = co_await timeoutError(getAssignedProxyStatus(cx, streamId), operationTimeout);
+			if (initialProxyStatus.first.id() != scanConsumeProxy.id()) {
+				recordDurableAckProxyReplacement();
+				continue;
+			}
+			const CDCProxyBufferStatus scanInitial = initialProxyStatus.second;
+			const UID scanInitialDbInfoId = dbInfo->get().id;
+			ASSERT_GT(scanInitial.bufferedBytes, 0);
+			co_await timeoutError(acknowledgeDurablyWithoutProxy(cx, streamId, scanCommitted), operationTimeout);
+
+			const double deadline = now() + operationTimeout;
+			while (true) {
+				auto currentProxyStatus = co_await timeoutError(getAssignedProxyStatus(cx, streamId), operationTimeout);
+				if (currentProxyStatus.first.id() != initialProxyStatus.first.id()) {
+					proxyReplaced = true;
+					break;
+				}
+				const CDCProxyBufferStatus& status = currentProxyStatus.second;
+				if (status.bufferedBytes < scanInitial.bufferedBytes &&
+				    status.popCompletions > scanInitial.popCompletions) {
+					// ServerDBInfo changes independently wake the same pop loop. The direct durable acknowledgement
+					// must not add a request while DB info is stable, but recovery may legitimately advance this
+					// aggregate counter.
+					if (status.popRequests != scanInitial.popRequests) {
+						ASSERT_NE(dbInfo->get().id, scanInitialDbInfoId);
+						CODE_PROBE(true,
+						           "Native CDC durable acknowledgement scan tolerates an unrelated DB info pop wake",
+						           probe::decoration::rare);
+					}
+					break;
+				}
+				ASSERT_LT(now(), deadline);
+				co_await delay(0.01);
+			}
+			if (proxyReplaced) {
+				recordDurableAckProxyReplacement();
+				continue;
+			}
+			CODE_PROBE(true, "Native CDC durable acknowledgement progresses without a proxy notification");
+			co_await timeoutError(removeNativeCdcStreamClient(cx, streams.front().name), operationTimeout);
+			streams.clear();
+			co_await timeoutError(waitForRetiredTagCleanup(cx), operationTimeout);
+			co_return;
 		}
-		CODE_PROBE(true, "Native CDC durable acknowledgement progresses without a proxy notification");
-		co_await timeoutError(removeNativeCdcStreamClient(cx, streams.front().name), operationTimeout);
-		streams.clear();
-		co_await timeoutError(waitForRetiredTagCleanup(cx), operationTimeout);
 	}
 
 	Future<Void> waitForRetiredTagState(Database cx, bool present) {
