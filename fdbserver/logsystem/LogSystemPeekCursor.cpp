@@ -1519,7 +1519,19 @@ const LogMessageVersion& ReplayMultiCursor::version() const {
 }
 
 Version ReplayMultiCursor::getMinKnownCommittedVersion() const {
-	return cursors.back()->getMinKnownCommittedVersion();
+	const Version cursorCommittedVersion = cursors.back()->getMinKnownCommittedVersion();
+	if (cursors.size() == 1) {
+		return cursorCommittedVersion;
+	}
+
+	// A following generation starts one version after the completed generation's known committed frontier.  A
+	// stopped TLog can report an older local frontier forever, so expose the generation boundary to readers that
+	// gate delivery on committed progress.
+	const Version completedGenerationCommittedVersion = epochEnds.back().version - 1;
+	CODE_PROBE(cursorCommittedVersion < completedGenerationCommittedVersion,
+	           "Replay cursor advances the committed frontier through a completed generation",
+	           probe::decoration::rare);
+	return std::max(cursorCommittedVersion, completedGenerationCommittedVersion);
 }
 
 Version ReplayMultiCursor::getMaxKnownVersion() const {
@@ -1651,6 +1663,28 @@ TEST_CASE("/NativeCDC/ReplayPeekReplyAccounting") {
 	for (const auto& cursor : threeServers) {
 		ASSERT_EQ(cursor->replyByteLimit, 4096);
 	}
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/ReplayPeekCommittedEpochBoundary") {
+	auto makeServerCursor = [](Version committedVersion) {
+		auto cursor = makeReference<ServerPeekCursor>(
+		    Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), Tag(tagLocalityCDC, 0), 0, 100, false, false);
+		cursor->results.minKnownCommittedVersion = committedVersion;
+		return cursor;
+	};
+
+	auto current = makeReference<MergedPeekCursor>(std::vector<Reference<ServerPeekCursor>>{ makeServerCursor(100) }, 0);
+	auto completed =
+	    makeReference<MergedPeekCursor>(std::vector<Reference<ServerPeekCursor>>{ makeServerCursor(10) }, 0);
+	auto replay = makeReference<ReplayMultiCursor>(
+	    std::vector<Reference<IReplayPeekCursor>>{ current, completed },
+	    std::vector<LogMessageVersion>{ LogMessageVersion(50) },
+	    false);
+
+	ASSERT_EQ(replay->getMinKnownCommittedVersion(), 49);
+	replay->advanceTo(LogMessageVersion(50));
+	ASSERT_EQ(replay->getMinKnownCommittedVersion(), 100);
 	return Void();
 }
 
