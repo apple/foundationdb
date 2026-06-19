@@ -37,7 +37,7 @@
 class NativeCdcEndToEndWorkload : public TestWorkload {
 	struct ExpectedWrite {
 		Version committedVersion;
-		bool observed = false;
+		std::set<Version> observedVersions;
 	};
 
 	struct KeyValueHash {
@@ -995,7 +995,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			for (const auto& [key, value] : values) {
 				if (stream.keys.contains(key)) {
 					const auto inserted =
-					    stream.expected.emplace(std::make_pair(key, value), ExpectedWrite{ committedVersion });
+					    stream.expected.emplace(std::make_pair(key, value), ExpectedWrite{ committedVersion, {} });
 					ASSERT(inserted.second);
 				}
 			}
@@ -1022,15 +1022,18 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 					const auto found =
 					    stream->expected.find(std::make_pair(Key(mutation.param1), Value(mutation.param2)));
 					ASSERT(found != stream->expected.end());
-					ASSERT_EQ(versioned.version, found->second.committedVersion);
-					found->second.observed = true;
+					ASSERT_LE(versioned.version, found->second.committedVersion);
+					CODE_PROBE(versioned.version < found->second.committedVersion,
+					           "Native CDC validation accepts a committed retry before the returned commit version",
+					           probe::decoration::rare);
+					ASSERT(found->second.observedVersions.insert(versioned.version).second);
 				}
 			}
 			co_await timeoutError(stream->consumer->acknowledge(), operationTimeout);
 		}
 		for (const auto& expected : stream->expected) {
 			if (expected.second.committedVersion <= throughVersion) {
-				ASSERT(expected.second.observed);
+				ASSERT(expected.second.observedVersions.contains(expected.second.committedVersion));
 			}
 		}
 	}
