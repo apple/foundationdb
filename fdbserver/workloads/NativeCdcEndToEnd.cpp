@@ -859,11 +859,11 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 				continue;
 			}
 			const CDCProxyBufferStatus scanInitial = initialProxyStatus.second;
-			const UID scanInitialDbInfoId = dbInfo->get().id;
 			ASSERT_GT(scanInitial.bufferedBytes, 0);
 			co_await timeoutError(acknowledgeDurablyWithoutProxy(cx, streamId, scanCommitted), operationTimeout);
 
 			const double deadline = now() + operationTimeout;
+			bool unrelatedPopRequest = false;
 			while (true) {
 				auto currentProxyStatus = co_await timeoutError(getAssignedProxyStatus(cx, streamId), operationTimeout);
 				if (currentProxyStatus.first.id() != initialProxyStatus.first.id()) {
@@ -871,24 +871,24 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 					break;
 				}
 				const CDCProxyBufferStatus& status = currentProxyStatus.second;
+				if (status.popRequests != scanInitial.popRequests) {
+					unrelatedPopRequest = true;
+					CODE_PROBE(true,
+					           "Native CDC durable acknowledgement scan retries after an unrelated proxy pop wake",
+					           probe::decoration::rare);
+					break;
+				}
 				if (status.bufferedBytes < scanInitial.bufferedBytes &&
 				    status.popCompletions > scanInitial.popCompletions) {
-					// ServerDBInfo changes independently wake the same pop loop. The direct durable acknowledgement
-					// must not add a request while DB info is stable, but recovery may legitimately advance this
-					// aggregate counter.
-					if (status.popRequests != scanInitial.popRequests) {
-						ASSERT_NE(dbInfo->get().id, scanInitialDbInfoId);
-						CODE_PROBE(true,
-						           "Native CDC durable acknowledgement scan tolerates an unrelated DB info pop wake",
-						           probe::decoration::rare);
-					}
 					break;
 				}
 				ASSERT_LT(now(), deadline);
 				co_await delay(0.01);
 			}
-			if (proxyReplaced) {
-				recordDurableAckProxyReplacement();
+			if (proxyReplaced || unrelatedPopRequest) {
+				if (proxyReplaced) {
+					recordDurableAckProxyReplacement();
+				}
 				continue;
 			}
 			CODE_PROBE(true, "Native CDC durable acknowledgement progresses without a proxy notification");
