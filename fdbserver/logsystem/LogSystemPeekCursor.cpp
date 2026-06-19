@@ -1674,13 +1674,13 @@ TEST_CASE("/NativeCDC/ReplayPeekCommittedEpochBoundary") {
 		return cursor;
 	};
 
-	auto current = makeReference<MergedPeekCursor>(std::vector<Reference<ServerPeekCursor>>{ makeServerCursor(100) }, 0);
+	auto current =
+	    makeReference<MergedPeekCursor>(std::vector<Reference<ServerPeekCursor>>{ makeServerCursor(100) }, 0);
 	auto completed =
 	    makeReference<MergedPeekCursor>(std::vector<Reference<ServerPeekCursor>>{ makeServerCursor(10) }, 0);
-	auto replay = makeReference<ReplayMultiCursor>(
-	    std::vector<Reference<IReplayPeekCursor>>{ current, completed },
-	    std::vector<LogMessageVersion>{ LogMessageVersion(50) },
-	    false);
+	auto replay = makeReference<ReplayMultiCursor>(std::vector<Reference<IReplayPeekCursor>>{ current, completed },
+	                                               std::vector<LogMessageVersion>{ LogMessageVersion(50) },
+	                                               false);
 
 	ASSERT_EQ(replay->getMinKnownCommittedVersion(), 49);
 	replay->advanceTo(LogMessageVersion(50));
