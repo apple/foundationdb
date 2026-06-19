@@ -815,6 +815,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		co_await delay(1.0);
 		initialProxyStatus = co_await timeoutError(getAssignedProxyStatus(cx, streamId), operationTimeout);
 		const CDCProxyBufferStatus scanInitial = initialProxyStatus.second;
+		const UID scanInitialDbInfoId = dbInfo->get().id;
 		ASSERT_GT(scanInitial.bufferedBytes, 0);
 		co_await timeoutError(acknowledgeDurablyWithoutProxy(cx, streamId, scanCommitted), operationTimeout);
 
@@ -824,7 +825,14 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			const CDCProxyBufferStatus& status = currentProxyStatus.second;
 			if (status.bufferedBytes < scanInitial.bufferedBytes &&
 			    status.popCompletions > scanInitial.popCompletions) {
-				ASSERT_EQ(status.popRequests, scanInitial.popRequests);
+				// ServerDBInfo changes independently wake the same pop loop. The direct durable acknowledgement must not
+				// add a request while DB info is stable, but recovery may legitimately advance this aggregate counter.
+				if (status.popRequests != scanInitial.popRequests) {
+					ASSERT_NE(dbInfo->get().id, scanInitialDbInfoId);
+					CODE_PROBE(true,
+					           "Native CDC durable acknowledgement scan tolerates an unrelated DB info pop wake",
+					           probe::decoration::rare);
+				}
 				break;
 			}
 			ASSERT_LT(now(), deadline);
