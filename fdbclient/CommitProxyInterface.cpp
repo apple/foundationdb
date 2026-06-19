@@ -27,12 +27,11 @@ TEST_CASE("/NativeCDC/ClientDBInfoProtocolGating") {
 	ASSERT(legacyDecoded.cdcProxies.empty());
 	ASSERT(legacyDecoded.streamToCDCProxyId.empty());
 
-	Standalone<StringRef> nativeCdc =
-	    BinaryWriter::toValue(source, IncludeVersion(ProtocolVersion::withNativeCdc()));
+	Standalone<StringRef> nativeCdc = BinaryWriter::toValue(source, IncludeVersion(ProtocolVersion::withNativeCdc()));
 	ClientDBInfo nativeCdcDecoded = BinaryReader::fromStringRef<ClientDBInfo>(nativeCdc, IncludeVersion());
 	ASSERT(nativeCdcDecoded.nativeCdcEnabled);
 	ASSERT_EQ(nativeCdcDecoded.nativeCdcTagCount, source.nativeCdcTagCount);
-	ASSERT_EQ(nativeCdcDecoded.streamToCDCProxyId, source.streamToCDCProxyId);
+	ASSERT(nativeCdcDecoded.streamToCDCProxyId == source.streamToCDCProxyId);
 	return Void();
 }
 

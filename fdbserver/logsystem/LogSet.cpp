@@ -193,9 +193,8 @@ int LogSet::satelliteTagLocationIndex(Tag tag) const {
 	const int locationCount = static_cast<int>(satelliteTagLocations.size());
 	const int directIndex = static_cast<int>(tag.id) + 1;
 	if (tag.locality == tagLocalityCDC) {
-		CODE_PROBE(directIndex >= locationCount,
-		           "CDC tag exceeds the satellite routing table",
-		           probe::decoration::rare);
+		CODE_PROBE(
+		    directIndex >= locationCount, "CDC tag exceeds the satellite routing table", probe::decoration::rare);
 		return static_cast<int>(tag.id % (locationCount - 1)) + 1;
 	}
 	ASSERT_LT(directIndex, locationCount);

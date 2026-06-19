@@ -4041,8 +4041,7 @@ TEST_CASE("/NativeCDC/TLogPeekReplyLimit") {
 	ASSERT(tLogPeekReplyByteLimit(Tag(tagLocalityCDC, 0), 0) == 0);
 	ASSERT(tLogPeekReplyByteLimit(Tag(tagLocalityCDC, 0), SERVER_KNOBS->MAXIMUM_PEEK_BYTES) ==
 	       SERVER_KNOBS->MAXIMUM_PEEK_BYTES);
-	ASSERT(tLogPeekReplyByteLimit(Tag(tagLocalityCDC, 0), 4096) ==
-	       std::min(4096, SERVER_KNOBS->MAXIMUM_PEEK_BYTES));
+	ASSERT(tLogPeekReplyByteLimit(Tag(tagLocalityCDC, 0), 4096) == std::min(4096, SERVER_KNOBS->MAXIMUM_PEEK_BYTES));
 	ASSERT(tLogPeekReplyByteLimit(Tag(tagLocalityLogRouter, 0), SERVER_KNOBS->MAXIMUM_PEEK_BYTES) == 0);
 	ASSERT(tLogPeekReplyByteLimit(Tag(tagLocalityTxs, 0), SERVER_KNOBS->MAXIMUM_PEEK_BYTES) == 0);
 	return Void();
