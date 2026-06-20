@@ -1598,6 +1598,10 @@ Future<Void> CDCProxy::monitorDBInfo(CDCProxyInterface proxy, uint64_t recoveryC
 	    dbInfo->get().client.cdcProxies.end();
 	while (true) {
 		co_await dbInfo->onChange();
+		if (dbInfo->get().recoveryCount < recoveryCount) {
+			CODE_PROBE(true, "CDC proxy ignores ServerDBInfo from an older recovery", probe::decoration::rare);
+			continue;
+		}
 		const bool isPublished =
 		    std::find(dbInfo->get().client.cdcProxies.begin(), dbInfo->get().client.cdcProxies.end(), proxy) !=
 		    dbInfo->get().client.cdcProxies.end();
