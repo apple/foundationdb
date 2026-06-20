@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <algorithm>
 #include <cmath>
 #include <utility>
 
@@ -248,26 +249,49 @@ Future<Void> ensureCDCProxies(Reference<ClusterRecoveryData> self, RecruitFromCo
 	CODE_PROBE(!CLIENT_KNOBS->ENABLE_NATIVE_CDC && hasDurableCdcState,
 	           "Recovery recruits CDC proxies to drain disabled durable state",
 	           probe::decoration::rare);
-	if (!self->controllerData->db.cdcProxies.empty()) {
+	auto& cdcProxies = self->controllerData->db.cdcProxies;
+	const size_t reusedCount = cdcProxies.size();
+	if (reusedCount > 0) {
 		CODE_PROBE(true, "Recovery reuses CDC proxies while CDC state remains durable");
-		TraceEvent("CDCProxiesReused", self->dbgid).detail("Count", self->controllerData->db.cdcProxies.size());
+		TraceEvent("CDCProxiesReused", self->dbgid).detail("Count", reusedCount);
+	}
+	const size_t targetCount = recr.grvProxies.size();
+	if (reusedCount >= targetCount) {
 		co_return;
 	}
 
 	std::vector<Future<CDCProxyInterface>> initializationReplies;
-	for (int i = 0; i < recr.grvProxies.size(); i++) {
+	for (const auto& grvProxy : recr.grvProxies) {
+		if (reusedCount + initializationReplies.size() >= targetCount) {
+			break;
+		}
+		const Optional<Key> grvProcessId = grvProxy.locality.processId();
+		ASSERT(grvProcessId.present());
+		const bool alreadyHostsCDCProxy =
+		    std::any_of(cdcProxies.begin(), cdcProxies.end(), [&](const CDCProxyInterface& cdcProxy) {
+			    return cdcProxy.processId.present() && cdcProxy.processId.get() == grvProcessId.get();
+		    });
+		if (alreadyHostsCDCProxy) {
+			continue;
+		}
 		InitializeCDCProxyRequest req;
 		req.recoveryCount = self->cstate.myDBState.recoveryCount + 1;
-		TraceEvent("CDCProxyReplies", self->dbgid).detail("WorkerID", recr.grvProxies[i].id());
+		TraceEvent("CDCProxyReplies", self->dbgid).detail("WorkerID", grvProxy.id());
 		initializationReplies.push_back(
-		    transformErrors(throwErrorOr(recr.grvProxies[i].cdcProxy.getReplyUnlessFailedFor(
+		    transformErrors(throwErrorOr(grvProxy.cdcProxy.getReplyUnlessFailedFor(
 		                        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
 		                    cdc_proxy_failed()));
 	}
 
 	std::vector<CDCProxyInterface> newRecruits = co_await getAll(initializationReplies);
-	TraceEvent("CDCProxyInitializationComplete", self->dbgid).detail("Count", newRecruits.size());
-	self->controllerData->db.cdcProxies = std::move(newRecruits);
+	ASSERT_EQ(reusedCount + newRecruits.size(), targetCount);
+	TraceEvent("CDCProxyInitializationComplete", self->dbgid)
+	    .detail("Count", newRecruits.size())
+	    .detail("ReusedCount", reusedCount)
+	    .detail("TotalCount", targetCount);
+	CODE_PROBE(
+	    reusedCount > 0, "Recovery expands retained CDC proxies to match GRV proxy count", probe::decoration::rare);
+	cdcProxies.insert(cdcProxies.end(), newRecruits.begin(), newRecruits.end());
 	self->registrationTrigger.trigger();
 }
 
