@@ -20,38 +20,30 @@
 
 #pragma once
 
-// When actually compiled (NO_INTELLISENSE), include the generated
-// version of this file.  In intellisense use the source version.
 #include "flow/Error.h"
 #include <cstddef>
-#if defined(NO_INTELLISENSE) && !defined(FLOW_THREADHELPER_ACTOR_G_H)
-#define FLOW_THREADHELPER_ACTOR_G_H
-#include "flow/ThreadHelper.actor.g.h"
-#elif !defined(FLOW_THREADHELPER_ACTOR_H)
-#define FLOW_THREADHELPER_ACTOR_H
 
 #include <utility>
 
 #include "flow/flow.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
-// Helper actor. Do not use directly!
+// Helper coroutine. Do not use directly!
 namespace internal_thread_helper {
 
-ACTOR template <class F>
-void doOnMainThreadVoid(Future<Void> signal, F f) {
-	wait(signal);
+template <class F>
+coro::DetachedCoroutine doOnMainThreadVoid(Future<Void> signal, F f) {
+	co_await signal;
 	try {
 		f();
-	} catch (Error& e) {
+	} catch (Error&) {
 	}
 }
 
-ACTOR template <class F, class T>
-void doOnMainThreadVoid(Future<Void> signal, F f, T* t, Error T::* member) {
-	wait(signal);
+template <class F, class T>
+coro::DetachedCoroutine doOnMainThreadVoid(Future<Void> signal, F f, T* t, Error T::* member) {
+	co_await signal;
 	if (t && (t->*member).code() != invalid_error_code)
-		return;
+		co_return;
 	try {
 		f();
 	} catch (Error& e) {
@@ -717,21 +709,21 @@ private:
 	void* userdata;
 };
 
-// The underlying actor that converts ThreadFuture to Future
+// The underlying coroutine that converts ThreadFuture to Future
 // Note: should be used from main thread
 // The cancellation here works both way
-// If the underlying "threadFuture" is cancelled, this actor will get actor_cancelled.
-// If instead, this actor is cancelled, we will also cancel the underlying "threadFuture"
+// If the underlying "threadFuture" is cancelled, this coroutine will get actor_cancelled.
+// If instead, this coroutine is cancelled, we will also cancel the underlying "threadFuture"
 // Note: we are required to have unique ownership of the "threadFuture"
-ACTOR template <class T>
-Future<T> safeThreadFutureToFutureImpl(ThreadFuture<T> threadFuture) {
+template <class T>
+Future<T> safeThreadFutureToFutureImpl(ThreadFuture<T> threadFuture, ExplicitVoid = {}) {
 	Promise<Void> ready;
 	Future<Void> onReady = ready.getFuture();
 	UtilCallback<T>* callback = new UtilCallback<T>(threadFuture, ready.extractRawPointer());
 	int unused = 0;
 	threadFuture.callOrSetAsCallback(callback, unused, 0);
 	try {
-		wait(onReady);
+		co_await onReady;
 	} catch (Error& e) {
 		// broken_promise can be thrown if the network is already shut down
 		ASSERT(e.code() == error_code_operation_cancelled || e.code() == error_code_broken_promise);
@@ -745,25 +737,25 @@ Future<T> safeThreadFutureToFutureImpl(ThreadFuture<T> threadFuture) {
 	ASSERT(threadFuture.isReady());
 	if (threadFuture.isError())
 		throw threadFuture.getError();
-	return threadFuture.get();
+	co_return threadFuture.get();
 }
 
 // The removeArenaFromStandalone() actors simulate the behavior of DLApi. In this case,
 // the memory is not owned by the Standalone. If the `future` goes out of scope, subsequent
 // access to the memory via the returned standalone will be invalid.
-ACTOR template <typename T>
+template <typename T>
 Future<Standalone<T>> removeArenaFromStandalone(Future<Standalone<T>> future) {
-	Standalone<T> _ = wait(future);
-	return Standalone<T>(future.get(), Arena());
+	Standalone<T> _ = co_await future;
+	co_return Standalone<T>(future.get(), Arena());
 }
 
-ACTOR template <typename T>
+template <typename T>
 Future<Optional<Standalone<T>>> removeArenaFromStandalone(Future<Optional<Standalone<T>>> future) {
-	Optional<Standalone<T>> val = wait(future);
+	Optional<Standalone<T>> val = co_await future;
 	if (val.present()) {
-		return Standalone<T>(future.get().get(), Arena());
+		co_return Standalone<T>(future.get().get(), Arena());
 	} else {
-		return Optional<Standalone<T>>();
+		co_return Optional<Standalone<T>>();
 	}
 }
 
@@ -815,14 +807,14 @@ Future<T> safeThreadFutureToFuture(Future<T>& future) {
 	return future;
 }
 
-// Helper actor. Do not use directly!
+// Helper coroutine. Do not use directly!
 namespace internal_thread_helper {
 
-ACTOR template <class R, class F>
-Future<Void> doOnMainThread(Future<Void> signal, F f, ThreadSingleAssignmentVar<R>* result) {
+template <class R, class F>
+Future<Void> doOnMainThread(Future<Void> signal, F f, ThreadSingleAssignmentVar<R>* result, ExplicitVoid = {}) {
 	try {
-		wait(signal);
-		R r = wait(f());
+		co_await signal;
+		R r = co_await f();
 		result->send(r);
 	} catch (Error& e) {
 		if (!result->canBeSet()) {
@@ -833,7 +825,7 @@ Future<Void> doOnMainThread(Future<Void> signal, F f, ThreadSingleAssignmentVar<
 
 	ThreadFuture<R> destroyResultAfterReturning(
 	    result); // Call result->delref(), but only after our return promise is no longer referenced on this thread
-	return Void();
+	co_return Void();
 }
 
 } // namespace internal_thread_helper
@@ -973,6 +965,3 @@ public:
 private:
 	ThreadSingleAssignmentVar<T>* sav;
 };
-
-#include "flow/unactorcompiler.h"
-#endif

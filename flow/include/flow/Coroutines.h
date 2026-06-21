@@ -62,6 +62,14 @@ template <class T>
 class AsyncResult;
 
 namespace coro {
+struct DetachedCoroutinePromise;
+
+// Fire-and-forget coroutine result. The coroutine owns its frame until it
+// completes and does not allocate a Future/SAV result object.
+struct DetachedCoroutine {
+	using promise_type = DetachedCoroutinePromise;
+};
+
 template <class T>
 struct FutureIgnore;
 
