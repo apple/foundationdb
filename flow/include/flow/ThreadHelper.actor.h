@@ -740,11 +740,12 @@ Future<T> safeThreadFutureToFutureImpl(ThreadFuture<T> threadFuture, ExplicitVoi
 	co_return threadFuture.get();
 }
 
-// The removeArenaFromStandalone() actors simulate the behavior of DLApi. In this case,
+// The removeArenaFromStandalone() coroutines simulate the behavior of DLApi. In this case,
 // the memory is not owned by the Standalone. If the `future` goes out of scope, subsequent
 // access to the memory via the returned standalone will be invalid.
 template <typename T>
 Future<Standalone<T>> removeArenaFromStandalone(Future<Standalone<T>> future) {
+	// Keep the source arena alive while constructing the non-owning result.
 	Standalone<T> _ = co_await future;
 	co_return Standalone<T>(future.get(), Arena());
 }

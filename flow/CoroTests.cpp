@@ -351,6 +351,7 @@ TEST_CASE("/flow/coro/cancel2") {
 
 namespace {
 
+// Tracks destruction of locals stored in a detached coroutine frame.
 struct DetachedCoroutineLifetime {
 	explicit DetachedCoroutineLifetime(int* destructions) : destructions(destructions) {}
 	~DetachedCoroutineLifetime() { ++*destructions; }

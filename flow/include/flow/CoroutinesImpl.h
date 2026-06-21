@@ -860,9 +860,11 @@ struct DetachedCoroutinePromise : Actor<void> {
 	[[nodiscard]] n_coroutine::suspend_never final_suspend() const noexcept { return {}; }
 
 	void return_void() const noexcept {}
+	// Detached coroutines have no result channel through which to propagate errors.
 	void unhandled_exception() const noexcept {}
 
 	void resume() {
+		// Reconstruct the handle instead of storing another pointer in the frame.
 		auto handle = n_coroutine::coroutine_handle<DetachedCoroutinePromise>::from_promise(*this);
 		handle.resume();
 	}
@@ -888,6 +890,7 @@ struct DetachedAwaitableFuture : Callback<ToFutureVal<ValueType>>,
 	DetachedAwaitableFuture(Future<FutureValue> const& future, DetachedCoroutinePromise* promise)
 	  : future(future), pt(promise) {}
 
+	// await_resume reads the completed value or error directly from future.
 	void fire(FutureValue const&) override { pt->resume(); }
 	void fire(FutureValue&&) override { pt->resume(); }
 	void error(Error) override { pt->resume(); }
