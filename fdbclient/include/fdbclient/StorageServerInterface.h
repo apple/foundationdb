@@ -160,10 +160,15 @@ public:
 			if (Ar::isDeserializing) {
 				if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && g_network &&
 				    g_network->global(INetwork::enFlowTransport)) {
+					// Record every RequestStream token of this interface for stale-peer tracking.
+					// 25 = the number of adjusted endpoints registered for StorageServerInterface
+					// below (getAdjustedEndpoint(1..25)); index 0 is the base getValue endpoint,
+					// pushed separately. Keep in sync when a RequestStream is added/removed.
 					std::vector<UID> tokens;
 					tokens.push_back(getValue.getEndpoint().token);
-					for (int i = 1; i <= 25; i++)
+					for (int i = 1; i <= 25; i++) {
 						tokens.push_back(getValue.getEndpoint().getAdjustedEndpoint(i).token);
+					}
 					FlowTransport::transport().interfaceTracker.created(
 					    getValue.getEndpoint().getPrimaryAddress(), "SS", tokens);
 				}

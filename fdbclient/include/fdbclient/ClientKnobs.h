@@ -108,7 +108,7 @@ public:
 	double LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD;
 	double LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL;
 
-	// Base interval of the locationCachePeerEvictor sweep.
+	// Base interval, in seconds, between locationCachePeerEvictor sweeps.
 	double LOCATION_CACHE_PEER_FAILURE_EVICTION_DELAY;
 	// Main switch for the stale-peer location-cache evictor: proactively evicts a storage
 	// server address from the location cache when its persistent connect-failed count advances,

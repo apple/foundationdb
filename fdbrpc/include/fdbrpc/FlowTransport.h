@@ -101,14 +101,21 @@ struct InterfaceTracker {
 		bool isFutureRef = false;
 	};
 
+	// Per (address, role): created/deleted interface counts + per-creation backtraces (the Delta source).
 	std::unordered_map<Key, Entry, KeyHash> map;
+	// Per (address, token): which (role, create-record) a stream token belongs to, for matching deletes to creates.
 	std::unordered_map<TokenKey, TokenInfo, TokenKeyHash> tokenToInfo;
+	// Per address: running count of peer references added vs removed (raw peer-ref accounting).
 	std::unordered_map<NetworkAddress, PeerRefCount> peerRefCounts;
+	// Live FlowReceiver records by id: who created each receiver + backtrace, erased on destroy.
 	std::unordered_map<int64_t, FlowReceiverRecord> flowReceiverRecords;
+	// Live promise/future ref records by id: creation backtrace per outstanding ref, erased on release.
 	std::unordered_map<int64_t, RefRecord> refRecords;
+	// Monotonic id generators for the records above (id 0 unused; -1 means "not tracked").
 	int64_t nextCreateId = 0;
 	int64_t nextFlowReceiverId = 0;
 	int64_t nextRefId = 0;
+	// Optional tag identifying the current call site, attached to new FlowReceiver records.
 	std::string currentCallerTag;
 
 	void created(const NetworkAddress& dstAddr, const std::string& dstRole, const std::vector<UID>& tokens);

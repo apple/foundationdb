@@ -868,15 +868,19 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 					{
 						double tNow = now();
 						double ttl = FLOW_KNOBS->PERSISTENT_CONNECT_FAILED_COUNT_TTL;
-						auto& m = self->transport->persistentConnectFailedCount;
-						auto& info = m[self->destination];
+						auto& failCounts = self->transport->persistentConnectFailedCount;
+						auto& info = failCounts[self->destination];
 						info.count++;
 						info.lastFailed = tNow;
+						TraceEvent("PersistentConnectFailed")
+						    .suppressFor(1.0)
+						    .detail("PeerAddr", self->destination)
+						    .detail("ConnectFailedTotal", info.count);
 						if (ttl > 0 && tNow - self->transport->persistentConnectFailedLastPrune >= ttl) {
 							self->transport->persistentConnectFailedLastPrune = tNow;
-							for (auto it = m.begin(); it != m.end();) {
+							for (auto it = failCounts.begin(); it != failCounts.end();) {
 								if (tNow - it->second.lastFailed >= ttl) {
-									it = m.erase(it);
+									it = failCounts.erase(it);
 								} else {
 									++it;
 								}
@@ -1041,8 +1045,8 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 
 			if (self->peerReferences <= 0 && self->reliable.empty() && self->unsent.empty() &&
 			    self->outstandingReplies == 0) {
-				TraceEvent te("PeerDestroy");
-				te.errorUnsuppressed(e)
+				TraceEvent("PeerDestroy")
+				    .errorUnsuppressed(e)
 				    .suppressFor(1.0)
 				    .detail("PeerAddr", self->destination)
 				    .detail("PeerAddress", self->destination)

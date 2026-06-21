@@ -549,7 +549,8 @@ public:
 	std::map<UID, StorageServerInfo*> server_interf;
 	std::map<UID, BlobWorkerInterface> blobWorker_interf; // blob workers don't change endpoints for the same ID
 
-	// Periodically scans serverListKeys and evicts stale locationCache entries
+	// Periodically samples FlowTransport per-address connect-failed counts and evicts
+	// location-cache entries for any address whose count advanced (a dead/flapping peer).
 	Future<Void> locationCachePeerEvictor;
 
 	// map from ssid -> tss interface

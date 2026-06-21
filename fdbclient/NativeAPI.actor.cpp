@@ -1195,13 +1195,15 @@ ACTOR static Future<Void> locationCachePeerEvictorActor(DatabaseContext* cx) {
 				lastConnectFailedSnapshot[addr] = cur.count;
 				if (delta > connectFailedThreshold) {
 					deadAddressSet.insert(addr);
-					if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
-						TraceEvent("StalePeerEvictFlapSweep")
-						    .detail("DbId", cx->dbId)
-						    .detail("Addr", addr)
-						    .detail("ConnectFailedDelta", delta)
-						    .detail("ConnectFailedTotal", cur.count);
-					}
+					// General observability for the fix (not deep STALE_PEER_OBSERVABILITY-only
+					// debugging): always emit, but suppressFor(1s) so a burst of stale SS does
+					// not flood the trace log (max ~1 RPS per process).
+					TraceEvent("StalePeerEvictFlapSweep")
+					    .suppressFor(1.0)
+					    .detail("DbId", cx->dbId)
+					    .detail("Addr", addr)
+					    .detail("ConnectFailedDelta", delta)
+					    .detail("ConnectFailedTotal", cur.count);
 				}
 			}
 			// Drop snapshot entries for addrs FlowTransport no longer reports a counter
@@ -1215,6 +1217,14 @@ ACTOR static Future<Void> locationCachePeerEvictorActor(DatabaseContext* cx) {
 			}
 			for (const auto& addr : deadAddressSet) {
 				cx->invalidateCacheByAddress(addr);
+			}
+			if (!deadAddressSet.empty()) {
+				// General observability for the fix; suppressFor(1s) caps the rate when
+				// many addresses are evicted at once.
+				TraceEvent("StalePeerEvictSweep")
+				    .suppressFor(1.0)
+				    .detail("DbId", cx->dbId)
+				    .detail("NumEvicted", (int64_t)deadAddressSet.size());
 			}
 		} catch (Error& e) {
 			// actor_cancelled must propagate so ~DatabaseContext can tear down the

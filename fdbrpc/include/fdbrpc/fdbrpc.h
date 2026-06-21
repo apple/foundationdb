@@ -210,7 +210,7 @@ private:
 
 template <class Ar, class T>
 void save(Ar& ar, const ReplyPromise<T>& value) {
-	auto const& ep = value.getEndpoint().token;
+	const auto& ep = value.getEndpoint().token;
 	ar << ep;
 }
 
@@ -646,7 +646,7 @@ private:
 
 template <class Ar, class T>
 void save(Ar& ar, const ReplyPromiseStream<T>& value) {
-	auto const& ep = value.getEndpoint().token;
+	const auto& ep = value.getEndpoint().token;
 	ar << ep;
 }
 
@@ -912,7 +912,7 @@ public:
 		int64_t trackingId = -1;
 		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && queue->isRemoteEndpoint() && g_network &&
 		    g_network->global(INetwork::enFlowTransport)) {
-			auto const& ep = queue->getEndpoint(TaskPriority::DefaultEndpoint);
+			const auto& ep = queue->getEndpoint(TaskPriority::DefaultEndpoint);
 			trackingId = FlowTransport::transport().interfaceTracker.futureRefAdded(
 			    ep.getPrimaryAddress(), ep.token);
 		}
@@ -926,13 +926,15 @@ public:
 		queue->addPromiseRef();
 		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && queue->isRemoteEndpoint() && g_network &&
 		    g_network->global(INetwork::enFlowTransport)) {
-			auto const& ep = queue->getEndpoint(TaskPriority::DefaultEndpoint);
+			const auto& ep = queue->getEndpoint(TaskPriority::DefaultEndpoint);
 			m_promiseRefTrackingId = FlowTransport::transport().interfaceTracker.promiseRefAdded(
 			    ep.getPrimaryAddress(), ep.token);
 		}
 	}
 	RequestStream(RequestStream&& rhs) noexcept : queue(rhs.queue), m_promiseRefTrackingId(rhs.m_promiseRefTrackingId) {
 		rhs.queue = 0;
+		// Transfer promise-ref tracking ownership to the moved-to object: clear rhs's id so its
+		// destructor does not release a tracking record now owned by *this (avoids double-release).
 		rhs.m_promiseRefTrackingId = -1;
 	}
 	void operator=(const RequestStream& rhs) {
@@ -940,7 +942,7 @@ public:
 		int64_t newTrackingId = -1;
 		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && rhs.queue->isRemoteEndpoint() && g_network &&
 		    g_network->global(INetwork::enFlowTransport)) {
-			auto const& ep = rhs.queue->getEndpoint(TaskPriority::DefaultEndpoint);
+			const auto& ep = rhs.queue->getEndpoint(TaskPriority::DefaultEndpoint);
 			newTrackingId = FlowTransport::transport().interfaceTracker.promiseRefAdded(
 			    ep.getPrimaryAddress(), ep.token);
 		}
@@ -977,6 +979,7 @@ public:
 				FlowTransport::transport().interfaceTracker.promiseRefReleased(m_promiseRefTrackingId);
 			}
 		}
+		// queue = (NetNotifiedQueue<T>*)0xdeadbeef;
 	}
 
 	const Endpoint& getEndpoint(TaskPriority taskID = TaskPriority::DefaultEndpoint) const {
@@ -998,6 +1001,10 @@ public:
 
 private:
 	NetNotifiedQueue<T, IsPublic>* queue;
+	// InterfaceTracker id for this stream's promise-ref, or -1 when not tracked. It stays -1
+	// whenever STALE_PEER_OBSERVABILITY is off (the gated *RefAdded blocks never run), so the
+	// plain transfers of this member in the copy/move/assignment paths are no-ops in that case
+	// and need no knob guard; only the tracker calls (promiseRefAdded/promiseRefReleased) are gated.
 	int64_t m_promiseRefTrackingId;
 };
 
@@ -1008,7 +1015,7 @@ using PublicRequestStream = RequestStream<T, true>;
 
 template <class Ar, class T, bool P>
 void save(Ar& ar, const RequestStream<T, P>& value) {
-	auto const& ep = value.getEndpoint();
+	const auto& ep = value.getEndpoint();
 	ar << ep;
 	UNSTOPPABLE_ASSERT(
 	    ep.getPrimaryAddress().isValid()); // No serializing PromiseStreams on a client with no public address
