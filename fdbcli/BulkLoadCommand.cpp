@@ -23,7 +23,7 @@
 #include "fdbclient/BulkLoading.h"
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 #include "flow/Util.h"
 
 namespace fdb_cli {

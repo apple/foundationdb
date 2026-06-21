@@ -34,7 +34,7 @@
 #include "fdbserver/core/FDBRocksDBVersion.h"
 #include "flow/flow.h"
 #include "flow/IThreadPool.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 #include "flow/Histogram.h"
 #include "flow/UnitTest.h"
 

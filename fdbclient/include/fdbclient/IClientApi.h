@@ -26,7 +26,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Tracing.h"
 #include "flow/ProtocolVersion.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 
 struct VersionVector;
 

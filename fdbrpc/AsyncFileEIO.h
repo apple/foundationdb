@@ -29,7 +29,7 @@
 
 #include "eio.h"
 #include "flow/flow.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 #include "flow/IAsyncFile.h"
 #include "flow/TDMetric.h"
 

@@ -51,7 +51,7 @@
 #include "flow/IAsyncFile.h"
 #include "flow/ActorCollection.h"
 #include "flow/TaskQueue.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 #include "flow/ChaosMetrics.h"
 #include "flow/TDMetric.h"
 #include "flow/AsioReactor.h"

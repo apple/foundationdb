@@ -27,7 +27,7 @@
 #include "fdbctl/ControlCommands.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/Knobs.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 #include "flow/genericactors.actor.h"
 
 #define DEFINE_GRPC_HANDLER(rpcName, handlerName)                                                                      \
