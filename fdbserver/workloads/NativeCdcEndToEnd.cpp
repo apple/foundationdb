@@ -68,6 +68,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	bool testDurableAckScan;
 	bool testDelayedRetention;
 	bool testRetiredRecovery;
+	bool testRetiredSharedTagSnapshot;
 	bool prepareRestartDrain;
 	bool drainAfterRestart;
 	int memoryTestValueBytes;
@@ -932,7 +933,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 
 	Future<Void> waitForRetiredTagCleanup(Database cx) { return waitForRetiredTagState(cx, false); }
 
-	Future<Void> setAllProxyPopsPaused(Database cx, bool paused) {
+	Future<Void> setAllProxyPopsPaused(Database cx, bool paused, bool afterSnapshot = false) {
 		while (true) {
 			Future<Void> changed = cx->clientInfo->onChange();
 			const std::vector<CDCProxyInterface> proxies = cx->clientInfo->get().cdcProxies;
@@ -944,7 +945,8 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			std::vector<Future<Void>> requests;
 			requests.reserve(proxies.size());
 			for (const auto& proxy : proxies) {
-				requests.push_back(proxy.setPopsPausedForTesting.getReply(SetCDCProxyPopsPausedRequest(paused)));
+				requests.push_back(
+				    proxy.setPopsPausedForTesting.getReply(SetCDCProxyPopsPausedRequest(paused, afterSnapshot)));
 			}
 			auto result = co_await race(waitForAll(requests), changed);
 			if (result.index() == 0 && proxies == cx->clientInfo->get().cdcProxies) {
@@ -952,6 +954,59 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			}
 			CODE_PROBE(true, "Native CDC workload retries pop control after proxy replacement");
 		}
+	}
+
+	Future<CDCProxyBufferStatus> getSingleProxyStatus(Database cx) {
+		while (true) {
+			const std::vector<CDCProxyInterface> proxies = cx->clientInfo->get().cdcProxies;
+			if (proxies.empty()) {
+				co_await cx->clientInfo->onChange();
+				continue;
+			}
+			ASSERT_EQ(proxies.size(), 1);
+			co_return co_await timeoutError(
+			    proxies.front().getBufferStatusForTesting.getReply(GetCDCProxyBufferStatusRequest()), operationTimeout);
+		}
+	}
+
+	Future<Void> waitForPopSnapshotPause(Database cx, int64_t previousPauses) {
+		const double deadline = now() + operationTimeout;
+		while (true) {
+			const CDCProxyBufferStatus status = co_await getSingleProxyStatus(cx);
+			ASSERT(status.popsPausedAfterSnapshot);
+			if (status.popSnapshotsPaused > previousPauses) {
+				co_return;
+			}
+			ASSERT_LT(now(), deadline);
+			co_await delay(0.01);
+		}
+	}
+
+	Future<Void> validateRetiredSharedTagSnapshot(Database cx) {
+		ASSERT(streams.empty());
+		ASSERT_EQ(cx->clientInfo->get().nativeCdcTagCount, 1);
+		const CDCProxyBufferStatus initialStatus = co_await getSingleProxyStatus(cx);
+		co_await setAllProxyPopsPaused(cx, true, true);
+		co_await waitForPopSnapshotPause(cx, initialStatus.popSnapshotsPaused);
+
+		const Key key = keyForIndex(keyCount / 2);
+		const KeyRange keys(KeyRangeRef(key, keyAfter(key)));
+		co_await addStream(cx, keys);
+		const Value value = "retired-shared-tag-snapshot"_sr;
+		const Version committed = co_await writeValue(cx, key, value);
+
+		// This second stream shares the only configured tag. Removing it advances the retired watermark after the
+		// paused snapshot, while the first stream still needs the mutation above.
+		co_await addStream(cx, keys);
+		co_await timeoutError(removeNativeCdcStreamClient(cx, streams.back().name), operationTimeout);
+		streams.pop_back();
+
+		co_await setAllProxyPopsPaused(cx, false);
+		co_await consumeThroughValue(streams.front().consumer, committed, key, value);
+		co_await timeoutError(removeNativeCdcStreamClient(cx, streams.front().name), operationTimeout);
+		streams.clear();
+		co_await timeoutError(waitForRetiredTagCleanup(cx), operationTimeout);
+		CODE_PROBE(true, "Native CDC retired pop snapshot preserves a newly shared live stream");
 	}
 
 	Future<Void> waitForTransactionSystemRecoveryAfter(uint64_t recoveryCount) {
@@ -1127,6 +1182,10 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	}
 
 	Future<Void> run(Database cx) {
+		if (testRetiredSharedTagSnapshot) {
+			co_await validateRetiredSharedTagSnapshot(cx);
+			co_return;
+		}
 		if (testOversizedPeek) {
 			co_await validateOversizedPeek(cx);
 			co_return;
@@ -1214,6 +1273,7 @@ public:
 		testDurableAckScan = getOption(options, "testDurableAckScan"_sr, false);
 		testDelayedRetention = getOption(options, "testDelayedRetention"_sr, false);
 		testRetiredRecovery = getOption(options, "testRetiredRecovery"_sr, false);
+		testRetiredSharedTagSnapshot = getOption(options, "testRetiredSharedTagSnapshot"_sr, false);
 		prepareRestartDrain = getOption(options, "prepareRestartDrain"_sr, false);
 		drainAfterRestart = getOption(options, "drainAfterRestart"_sr, false);
 		memoryTestValueBytes = getOption(options, "memoryTestValueBytes"_sr, 1024);
@@ -1232,6 +1292,7 @@ public:
 		ASSERT_GE(retentionValidationDelay, 0.0);
 		ASSERT(!(prepareRestartDrain && drainAfterRestart));
 		ASSERT(!(testOversizedPeek && testDurableAckScan));
+		ASSERT(!(testRetiredSharedTagSnapshot && testRetiredRecovery));
 	}
 
 	// RandomRangeLock can outlive this bounded CDC workload and mask its progress check.
@@ -1246,6 +1307,9 @@ public:
 		}
 		if (prepareRestartDrain) {
 			return prepareRestartDrainSetup(cx);
+		}
+		if (testRetiredSharedTagSnapshot) {
+			return Void();
 		}
 		if (testOversizedPeek) {
 			return initializeOversizedPeekStreams(cx);

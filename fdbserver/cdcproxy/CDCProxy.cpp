@@ -122,8 +122,13 @@ struct CDCBufferPassLimits {
 struct CDCPopState {
 	std::unordered_map<CDCStreamId, Version> minVersions;
 	std::unordered_map<Tag, Version> safePopVersions;
+	std::unordered_map<Tag, Version> retiredTagPopVersions;
 	Version readVersion = invalidVersion;
 };
+
+bool hasCompleteLogSystemConfig(LogSystemConfig const& config) {
+	return config.expectedLogSets > 0 && config.tLogs.size() == static_cast<size_t>(config.expectedLogSets);
+}
 
 enum class CDCBufferTagPassResult { RETRY, WAIT_FOR_COMMIT, STOP };
 
@@ -247,9 +252,13 @@ class CDCProxy {
 	int64_t popCompletions = 0;
 	int64_t popCancellations = 0;
 	bool popsPausedForTesting = false;
+	bool popsPausedAfterSnapshotForTesting = false;
+	int64_t popSnapshotsPausedForTesting = 0;
+	AsyncTrigger popPauseChangedForTesting;
 	bool logSystemInitialized = false;
-	uint64_t logSystemRecoveryCount = 0;
-	UID logSystemRecruitmentId;
+	bool lastLogSystemHasTLogs = false;
+	uint64_t lastLogSystemRecoveryCount = 0;
+	LogSystemConfig lastLogSystemConfig;
 	Version latestCommittedVersion = invalidVersion;
 	std::unordered_map<Tag, Version> lastSafePopVersions;
 	ActorCollection actors;
@@ -257,6 +266,9 @@ class CDCProxy {
 	void recordBufferUsage();
 	void requestAcknowledgedDataPop();
 	void refreshLogSystem();
+	bool isCurrentCompletePopLogSystem(Reference<LogSystemConsumer> const& currentLogSystem,
+	                                   LogSystemConfig const& config,
+	                                   uint64_t recoveryCount) const;
 	void clearBufferedMutations(Reference<CDCBufferedStream> stream);
 	void addBufferedBatch(Reference<CDCBufferedStream> stream, CDCBufferedBatch batch);
 	void reconcileStreamMinVersion(Reference<CDCBufferedStream> stream, Version minVersion);
@@ -417,18 +429,32 @@ void CDCProxy::requestAcknowledgedDataPop() {
 void CDCProxy::refreshLogSystem() {
 	const ServerDBInfo& info = dbInfo->get();
 	const bool hasLogSystem = !info.logSystemConfig.tLogs.empty();
-	const bool generationChanged = logSystemInitialized && hasLogSystem &&
-	                               (!logSystem->get() || info.recoveryCount != logSystemRecoveryCount ||
-	                                info.logSystemConfig.recruitmentID != logSystemRecruitmentId);
-	if (!logSystemInitialized || hasLogSystem) {
-		logSystem->set(makeLogSystemConsumerFromServerDBInfo(id, info));
+	const bool logSystemChanged =
+	    logSystemInitialized &&
+	    (hasLogSystem != lastLogSystemHasTLogs ||
+	     (hasLogSystem && (!logSystem->get() || info.recoveryCount != lastLogSystemRecoveryCount ||
+	                       !info.logSystemConfig.isEqual(lastLogSystemConfig))));
+	if (!logSystemInitialized || logSystemChanged) {
+		logSystem->set(hasLogSystem ? makeLogSystemConsumerFromServerDBInfo(id, info) : Reference<LogSystemConsumer>());
 	}
 	logSystemInitialized = true;
-	logSystemRecoveryCount = info.recoveryCount;
-	logSystemRecruitmentId = info.logSystemConfig.recruitmentID;
-	if (generationChanged) {
+	lastLogSystemHasTLogs = hasLogSystem;
+	lastLogSystemRecoveryCount = info.recoveryCount;
+	if (hasLogSystem) {
+		lastLogSystemConfig = info.logSystemConfig;
+	}
+	if (logSystemChanged) {
 		popLogSystemChanged.trigger();
 	}
+}
+
+bool CDCProxy::isCurrentCompletePopLogSystem(Reference<LogSystemConsumer> const& currentLogSystem,
+                                             LogSystemConfig const& config,
+                                             uint64_t recoveryCount) const {
+	return currentLogSystem.getPtr() != nullptr && currentLogSystem.getPtr() == logSystem->get().getPtr() &&
+	       hasCompleteLogSystemConfig(config) && lastLogSystemRecoveryCount == recoveryCount &&
+	       lastLogSystemConfig.isEqual(config) && dbInfo->get().recoveryCount == recoveryCount &&
+	       dbInfo->get().logSystemConfig.isEqual(config);
 }
 
 void CDCProxy::clearBufferedMutations(Reference<CDCBufferedStream> stream) {
@@ -1066,7 +1092,7 @@ Future<Void> CDCProxy::initializeStream(Reference<CDCBufferedStream> stream) {
 
 // TODO: Persist per-tag safe-pop state or coordinate pops centrally instead of rebuilding minima from all stream
 // history on every acknowledgement scan.
-Future<CDCPopState> readSafePopState(Database cx) {
+Future<CDCPopState> readPopState(Database cx) {
 	Transaction tr(cx);
 	while (true) {
 		Error err;
@@ -1111,29 +1137,15 @@ Future<CDCPopState> readSafePopState(Database cx) {
 				}
 				begin = keyAfter(histories.back().key);
 			}
-			co_return result;
-		} catch (Error& e) {
-			err = e;
-		}
-		co_await tr.onError(err);
-	}
-}
 
-Future<std::unordered_map<Tag, Version>> readRetiredTagPopVersions(Database cx) {
-	Transaction tr(cx);
-	while (true) {
-		Error err;
-		try {
-			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-
-			std::unordered_map<Tag, Version> retiredTagPopVersions;
-			Key begin = cdcRetiredTagPopVersionKeys.begin;
+			// A retired watermark is only safe when it is bounded by live shared streams from the same snapshot.
+			// Keep this scan in the transaction above instead of combining a newer watermark with stale safe-pop state.
+			begin = cdcRetiredTagPopVersionKeys.begin;
 			while (begin < cdcRetiredTagPopVersionKeys.end) {
 				RangeResult retired =
 				    co_await tr.getRange(KeyRangeRef(begin, cdcRetiredTagPopVersionKeys.end), CLIENT_KNOBS->TOO_MANY);
 				for (const auto& kv : retired) {
-					retiredTagPopVersions[decodeCDCRetiredTagPopVersionKey(kv.key)] =
+					result.retiredTagPopVersions[decodeCDCRetiredTagPopVersionKey(kv.key)] =
 					    decodeCDCMinVersionValue(kv.value);
 				}
 				if (!retired.more) {
@@ -1141,7 +1153,7 @@ Future<std::unordered_map<Tag, Version>> readRetiredTagPopVersions(Database cx) 
 				}
 				begin = keyAfter(retired.back().key);
 			}
-			co_return retiredTagPopVersions;
+			co_return result;
 		} catch (Error& e) {
 			err = e;
 		}
@@ -1189,8 +1201,32 @@ Future<Void> CDCProxy::popAcknowledgedData() {
 		CODE_PROBE(true, "CDC proxy defers pops until a log system is available", probe::decoration::rare);
 		co_await logSystem->onChange();
 	}
-	const CDCPopState popState = co_await readSafePopState(cx);
+	Reference<LogSystemConsumer> currentLogSystem = logSystem->get();
+	const LogSystemConfig popLogSystemConfig = lastLogSystemConfig;
+	const uint64_t popLogSystemRecoveryCount = lastLogSystemRecoveryCount;
+	if (!hasCompleteLogSystemConfig(popLogSystemConfig)) {
+		CODE_PROBE(true, "CDC proxy defers pops until every expected log set is published", probe::decoration::rare);
+		co_return;
+	}
+	if (!isCurrentCompletePopLogSystem(currentLogSystem, popLogSystemConfig, popLogSystemRecoveryCount)) {
+		requestAcknowledgedDataPop();
+		co_return;
+	}
+
+	const CDCPopState popState = co_await readPopState(cx);
+	if (popsPausedAfterSnapshotForTesting) {
+		++popSnapshotsPausedForTesting;
+		CODE_PROBE(true, "CDC proxy pauses after reading a consistent pop snapshot");
+		while (popsPausedAfterSnapshotForTesting) {
+			co_await popPauseChangedForTesting.onTrigger();
+		}
+	}
 	if (popsPausedForTesting) {
+		co_return;
+	}
+	if (!isCurrentCompletePopLogSystem(currentLogSystem, popLogSystemConfig, popLogSystemRecoveryCount)) {
+		CODE_PROBE(true, "CDC proxy retries pops after log system topology changes", probe::decoration::rare);
+		requestAcknowledgedDataPop();
 		co_return;
 	}
 	latestCommittedVersion = std::max(latestCommittedVersion, popState.readVersion);
@@ -1205,20 +1241,23 @@ Future<Void> CDCProxy::popAcknowledgedData() {
 	}
 	const std::unordered_map<Tag, Version>& safePopVersions = popState.safePopVersions;
 	lastSafePopVersions = safePopVersions;
-	Reference<LogSystemConsumer> currentLogSystem = logSystem->get();
 	for (const auto& [tag, version] : safePopVersions) {
 		if (popsPausedForTesting) {
 			co_return;
 		}
 		currentLogSystem->pop(version, tag);
 	}
-	const std::unordered_map<Tag, Version> retiredTagPopVersions = co_await readRetiredTagPopVersions(cx);
 	std::unordered_map<Tag, Version> completedPopVersions;
-	const Optional<Version> recoveredAt = dbInfo->get().logSystemConfig.recoveredAt;
+	const Optional<Version> recoveredAt = popLogSystemConfig.recoveredAt;
 	const Optional<Version> recoveryEnd =
 	    recoveredAt.present() ? Optional<Version>(recoveredAt.get() + 1) : Optional<Version>();
-	for (const auto& [tag, retiredVersion] : retiredTagPopVersions) {
+	for (const auto& [tag, retiredVersion] : popState.retiredTagPopVersions) {
 		if (popsPausedForTesting) {
+			co_return;
+		}
+		if (!isCurrentCompletePopLogSystem(currentLogSystem, popLogSystemConfig, popLogSystemRecoveryCount)) {
+			CODE_PROBE(true, "CDC proxy retries retired pops after log system topology changes");
+			requestAcknowledgedDataPop();
 			co_return;
 		}
 		const auto safePop = safePopVersions.find(tag);
@@ -1232,8 +1271,18 @@ Future<Void> CDCProxy::popAcknowledgedData() {
 		currentLogSystem->pop(version, tag);
 		if (version >= retiredVersion) {
 			co_await currentLogSystem->waitForPopped(version, tag);
+			if (!isCurrentCompletePopLogSystem(currentLogSystem, popLogSystemConfig, popLogSystemRecoveryCount)) {
+				CODE_PROBE(true, "CDC proxy retries retired pop completion after log system topology changes");
+				requestAcknowledgedDataPop();
+				co_return;
+			}
 			completedPopVersions[tag] = retiredVersion;
 		}
+	}
+	if (!isCurrentCompletePopLogSystem(currentLogSystem, popLogSystemConfig, popLogSystemRecoveryCount)) {
+		CODE_PROBE(true, "CDC proxy preserves retired pop metadata after log system topology changes");
+		requestAcknowledgedDataPop();
+		co_return;
 	}
 	co_await clearCompletedRetiredTagPops(cx, std::move(completedPopVersions));
 }
@@ -1249,8 +1298,9 @@ Future<Void> CDCProxy::monitorAcknowledgedDataPops() {
 		popAcknowledgedDataRequests.consume();
 		CODE_PROBE(periodicScan, "CDC proxy periodically scans durable acknowledgement state", probe::decoration::rare);
 		++popAttempts;
-		// Acknowledgements only make a completed snapshot more conservative, so they are coalesced for a later
-		// pass instead of canceling this one. Only a new log generation invalidates waitForPopped work in flight.
+		// Acknowledgements only make a completed snapshot more conservative, so they are coalesced for a later pass
+		// instead of canceling this one. A log-system config change can add targeted log sets, so it invalidates
+		// waitForPopped work in flight.
 		auto result = co_await race(popAcknowledgedData(), popLogSystemChanged.onTrigger());
 		if (result.index() == 0) {
 			if (!popsPausedForTesting) {
@@ -1528,6 +1578,8 @@ Future<Void> CDCProxy::serveBufferStatusForTestingRequests(FutureStream<GetCDCPr
 		status.popCompletions = popCompletions;
 		status.popCancellations = popCancellations;
 		status.popsPaused = popsPausedForTesting;
+		status.popSnapshotsPaused = popSnapshotsPausedForTesting;
+		status.popsPausedAfterSnapshot = popsPausedAfterSnapshotForTesting;
 		request.reply.send(status);
 	}
 }
@@ -1539,8 +1591,10 @@ Future<Void> CDCProxy::serveSetPopsPausedForTestingRequests(FutureStream<SetCDCP
 			request.reply.sendError(client_invalid_operation());
 			continue;
 		}
-		popsPausedForTesting = request.paused;
-		if (!popsPausedForTesting) {
+		popsPausedForTesting = request.paused && !request.afterSnapshot;
+		popsPausedAfterSnapshotForTesting = request.paused && request.afterSnapshot;
+		popPauseChangedForTesting.trigger();
+		if (!request.paused || request.afterSnapshot) {
 			requestAcknowledgedDataPop();
 		}
 		request.reply.send(Void());
@@ -1793,5 +1847,21 @@ TEST_CASE("/NativeCDC/RetiredTagPopTarget") {
 	ASSERT_EQ(retiredTagPopTarget(retiredVersion, Optional<Version>(75), Optional<Version>(150)), 75);
 	ASSERT_EQ(retiredTagPopTarget(retiredVersion, Optional<Version>(125), Optional<Version>(150)), retiredVersion);
 
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/CompleteLogSystemConfig") {
+	LogSystemConfig config;
+	config.expectedLogSets = 2;
+	ASSERT(!hasCompleteLogSystemConfig(config));
+
+	config.tLogs.emplace_back();
+	ASSERT(!hasCompleteLogSystemConfig(config));
+
+	config.tLogs.emplace_back();
+	ASSERT(hasCompleteLogSystemConfig(config));
+
+	config.expectedLogSets = 0;
+	ASSERT(!hasCompleteLogSystemConfig(config));
 	return Void();
 }
