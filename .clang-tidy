@@ -1,6 +1,7 @@
 ---
 Checks: >
   -*,
+  bugprone-dangling-handle,
   bugprone-shared-ptr-array-mismatch,
   bugprone-sizeof-expression,
   bugprone-string-constructor,
