@@ -1,5 +1,5 @@
 /*
- * LeaderElection.actor.cpp
+ * LeaderElection.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -24,7 +24,6 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbclient/MonitorLeader.h"
 #include "flow/CoroUtils.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 // Keep trying to become a leader by submitting itself to all coordinators.
 // Monitor the health of all coordinators at the same time.
@@ -108,25 +107,25 @@ Future<Void> changeLeaderCoordinators(ServerCoordinators const& coordinators, Va
 	return changeLeaderCoordinatorsImpl(coordinators, forwardingInfo);
 }
 
-ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
-                                           Value proposedSerializedInterface,
-                                           Reference<AsyncVar<Value>> outSerializedLeader,
-                                           bool hasConnected,
-                                           Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo) {
-	state AsyncTrigger nomineeChange;
-	state std::vector<Optional<LeaderInfo>> nominees;
-	state LeaderInfo myInfo;
-	state Future<Void> candidacies;
-	state bool iAmLeader = false;
-	state UID prevChangeID;
+Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
+                                     Value proposedSerializedInterface,
+                                     Reference<AsyncVar<Value>> outSerializedLeader,
+                                     bool hasConnected,
+                                     Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo) {
+	AsyncTrigger nomineeChange;
+	std::vector<Optional<LeaderInfo>> nominees;
+	LeaderInfo myInfo;
+	Future<Void> candidacies;
+	bool iAmLeader{ false };
+	UID prevChangeID;
 
 	if (asyncPriorityInfo->get().dcFitness == ClusterControllerPriorityInfo::FitnessBad ||
 	    asyncPriorityInfo->get().dcFitness == ClusterControllerPriorityInfo::FitnessRemote ||
 	    asyncPriorityInfo->get().dcFitness == ClusterControllerPriorityInfo::FitnessNotPreferred ||
 	    asyncPriorityInfo->get().isExcluded) {
-		wait(delay(SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY));
+		co_await delay(SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY);
 	} else if (asyncPriorityInfo->get().processClassFitness > ProcessClass::UnsetFit) {
-		wait(delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
+		co_await delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY);
 	}
 
 	nominees.resize(coordinators.leaderElectionServers.size());
@@ -134,11 +133,11 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 	myInfo.serializedInfo = proposedSerializedInterface;
 	outSerializedLeader->set(Value());
 
-	state Future<Void> buggifyDelay =
+	[[maybe_unused]] Future<Void> buggifyDelay =
 	    (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || buggify()) ? buggifyDelayedAsyncVar(outSerializedLeader) : Void();
 
 	while (!iAmLeader) {
-		state Future<Void> badCandidateTimeout;
+		Future<Void> badCandidateTimeout;
 
 		myInfo.changeID = deterministicRandom()->randomUniqueID();
 		prevChangeID = myInfo.changeID;
@@ -156,8 +155,8 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 		}
 		candidacies = waitForAll(cand);
 
-		loop {
-			state Optional<std::pair<LeaderInfo, bool>> leader = getLeader(nominees);
+		while (true) {
+			Optional<std::pair<LeaderInfo, bool>> leader = getLeader(nominees);
 			if (leader.present() && leader.get().first.forward) {
 				// These coordinators are forwarded to another set.  But before we change our own cluster file, we need
 				// to make sure that a majority of coordinators know that. SOMEDAY: Wait briefly to see if other
@@ -165,10 +164,7 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 				// NOTE: If a majority of coordinators (in the current connection string) have failed then we can
 				// end up waiting here indefinitely. Try to make progress in that scenario by proceeding with the
 				// connection string that we have received. Not a great solution, but can help in certain scenarios.
-				choose {
-					when(wait(changeLeaderCoordinators(coordinators, leader.get().first.serializedInfo))) {}
-					when(wait(delay(20))) {}
-				}
+				co_await race(changeLeaderCoordinators(coordinators, leader.get().first.serializedInfo), delay(20));
 
 				if (!hasConnected) {
 					TraceEvent(SevWarnAlways, "IncorrectClusterFileContentsAtConnection")
@@ -176,8 +172,8 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 					    .detail("StoredConnectionString", coordinators.ccr->getConnectionString().toString())
 					    .detail("CurrentConnectionString", leader.get().first.serializedInfo.toString());
 				}
-				wait(coordinators.ccr->setAndPersistConnectionString(
-				    ClusterConnectionString(leader.get().first.serializedInfo.toString())));
+				co_await coordinators.ccr->setAndPersistConnectionString(
+				    ClusterConnectionString(leader.get().first.serializedInfo.toString()));
 				TraceEvent("LeaderForwarding")
 				    .detail("ConnStr", coordinators.ccr->getConnectionString().toString())
 				    .trackLatest("LeaderForwarding");
@@ -214,18 +210,21 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 			} else
 				badCandidateTimeout = Future<Void>();
 
-			choose {
-				when(wait(nomineeChange.onTrigger())) {}
-				when(wait(badCandidateTimeout.isValid() ? badCandidateTimeout : Never())) {
+			{
+				auto res = co_await race(nomineeChange.onTrigger(),
+				                         badCandidateTimeout.isValid() ? badCandidateTimeout : Never(),
+				                         candidacies,
+				                         asyncPriorityInfo->onChange());
+				if (res.index() == 1) {
 					CODE_PROBE(true, "Bad candidate timeout");
 					TraceEvent("LeaderBadCandidateTimeout", myInfo.changeID).log();
 					break;
-				}
-				when(wait(candidacies)) {
+				} else if (res.index() == 2) {
 					ASSERT(false);
-				}
-				when(wait(asyncPriorityInfo->onChange())) {
+				} else if (res.index() == 3) {
 					break;
+				} else if (res.index() != 0) {
+					UNREACHABLE();
 				}
 			}
 		}
@@ -235,7 +234,7 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 
 	ASSERT(iAmLeader && outSerializedLeader->get() == proposedSerializedInterface);
 
-	loop {
+	while (true) {
 		prevChangeID = myInfo.changeID;
 		myInfo.updateChangeID(asyncPriorityInfo->get());
 		if (myInfo.changeID != prevChangeID) {
@@ -244,8 +243,8 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 			    .detail("NewChangeID", myInfo.changeID);
 		}
 
-		state std::vector<Future<Void>> true_heartbeats;
-		state std::vector<Future<Void>> false_heartbeats;
+		std::vector<Future<Void>> true_heartbeats;
+		std::vector<Future<Void>> false_heartbeats;
 		for (int i = 0; i < coordinators.leaderElectionServers.size(); i++) {
 			Future<LeaderHeartbeatReply> hb;
 			if (coordinators.leaderElectionServers[i].hostname.present()) {
@@ -262,18 +261,21 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 			false_heartbeats.push_back(onEqual(hb, LeaderHeartbeatReply{ false }));
 		}
 
-		state Future<Void> rate = delay(SERVER_KNOBS->HEARTBEAT_FREQUENCY, TaskPriority::CoordinationReply) ||
-		                          asyncPriorityInfo->onChange(); // SOMEDAY: Move to server side?
+		Future<Void> rate = delay(SERVER_KNOBS->HEARTBEAT_FREQUENCY, TaskPriority::CoordinationReply) ||
+		                    asyncPriorityInfo->onChange(); // SOMEDAY: Move to server side?
 
-		choose {
-			when(wait(quorum(true_heartbeats, true_heartbeats.size() / 2 + 1))) {
-				//TraceEvent("StillLeader", myInfo.changeID);
-			} // We are still leader
-			when(wait(quorum(false_heartbeats, false_heartbeats.size() / 2 + 1))) {
+		{
+			Future<Void> trueHeartbeatQuorum = quorum(true_heartbeats, true_heartbeats.size() / 2 + 1);
+			Future<Void> falseHeartbeatQuorum = quorum(false_heartbeats, false_heartbeats.size() / 2 + 1);
+			Future<Void> pollingTimeout = delay(SERVER_KNOBS->POLLING_FREQUENCY);
+			Future<Void> priorityInfoChanged = asyncPriorityInfo->onChange();
+			auto res = co_await race(trueHeartbeatQuorum, falseHeartbeatQuorum, pollingTimeout, priorityInfoChanged);
+			if (res.index() == 0) {
+				// TraceEvent("StillLeader", myInfo.changeID);
+			} else if (res.index() == 1) {
 				TraceEvent("ReplacedAsLeader", myInfo.changeID).log();
 				break;
-			} // We are definitely not leader
-			when(wait(delay(SERVER_KNOBS->POLLING_FREQUENCY))) {
+			} else if (res.index() == 2) {
 				for (int i = 0; i < coordinators.leaderElectionServers.size(); ++i) {
 					if (true_heartbeats[i].isReady())
 						TraceEvent("LeaderTrueHeartbeat", myInfo.changeID)
@@ -290,15 +292,14 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 				}
 				TraceEvent("ReleasingLeadership", myInfo.changeID).log();
 				break;
-			} // Give up on being leader, because we apparently have poor communications
-			when(wait(asyncPriorityInfo->onChange())) {}
+			} else if (res.index() != 3) {
+				UNREACHABLE();
+			}
 		}
 
-		wait(rate);
+		co_await rate;
 	}
 
 	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || buggify())
-		wait(delay(SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * deterministicRandom()->random01()));
-
-	return Void(); // We are no longer leader
+		co_await delay(SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * deterministicRandom()->random01());
 }
