@@ -132,6 +132,7 @@ struct InterfaceTracker {
 	int64_t promiseRefAdded(const NetworkAddress& addr, const UID& token);
 	void promiseRefReleased(int64_t id);
 	int64_t futureRefAdded(const NetworkAddress& addr, const UID& token);
+	int64_t futureRefCopied(int64_t srcId);
 	void futureRefReleased(int64_t id);
 
 	void prettyPrintLeakedReceivers(const NetworkAddress& srcAddr,

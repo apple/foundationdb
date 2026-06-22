@@ -1939,6 +1939,29 @@ int64_t InterfaceTracker::futureRefAdded(const NetworkAddress& addr, const UID& 
 	return id;
 }
 
+// Clone the (addr, token) of an existing tracked future ref into a brand-new
+// tracked ref. Used by FutureStream's copy ctor/assignment: a copy is a
+// distinct ref and must get its own id so it is released independently, rather
+// than going untracked (which would undercount live future refs). Copy the
+// fields out before inserting -- the insert may rehash and invalidate `it`.
+int64_t InterfaceTracker::futureRefCopied(int64_t srcId) {
+	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
+		return -1;
+	}
+	if (srcId < 0) {
+		return -1;
+	}
+	auto it = refRecords.find(srcId);
+	if (it == refRecords.end()) {
+		return -1;
+	}
+	NetworkAddress addr = it->second.addr;
+	UID token = it->second.token;
+	int64_t id = nextRefId++;
+	refRecords[id] = RefRecord{ id, addr, token, g_network ? g_network->now() : 0.0, platform::get_backtrace(), true };
+	return id;
+}
+
 void InterfaceTracker::futureRefReleased(int64_t id) {
 	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
 		return;
@@ -2042,6 +2065,15 @@ FlowTransport::FlowTransport(uint64_t transportId, int maxWellKnownEndpoints, IP
 		if (g_network && g_network->global(INetwork::enFlowTransport)) {
 			FlowTransport::transport().interfaceTracker.futureRefReleased(id);
 		}
+	};
+	g_futureRefCopiedCallback = [](int64_t srcId) -> int64_t {
+		if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
+			return -1;
+		}
+		if (g_network && g_network->global(INetwork::enFlowTransport)) {
+			return FlowTransport::transport().interfaceTracker.futureRefCopied(srcId);
+		}
+		return -1;
 	};
 }
 

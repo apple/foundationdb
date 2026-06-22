@@ -23,6 +23,7 @@
 
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/QuietDatabase.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/FlowTransport.h"
@@ -47,6 +48,14 @@ struct StalePeerTestWorkload : TestWorkload {
 	bool testPassed = false;
 	bool skippedNoTargets = false;
 	bool skippedClusterUnhealthy = false;
+	// Set when the chosen target was not referenced by any inspected source at
+	// kill time, so a post-kill Delta==0 would prove nothing (inconclusive). We
+	// skip rather than count such a run as a meaningful pass.
+	bool skippedVacuous = false;
+	// How many inspected source processes held a reference (tracked interface
+	// copy or live peer ref) to the killed address just before the kill. Logged
+	// for audit; the post-kill check is gated on this being > 0.
+	int preKillRefSources = 0;
 
 	std::vector<NetworkAddress> oldKillAddresses;
 	// Tracker role string for the killed interface, used purely for
@@ -118,6 +127,70 @@ struct StalePeerTestWorkload : TestWorkload {
 		}
 	}
 
+	// InterfaceTracker role string for the killed dst, used for the per-role
+	// Delta check and pre-kill reference snapshot. Deterministic from
+	// dstKillRole. Empty for coordinator: its endpoints use well-known tokens
+	// (ClientLeaderRegInterface) that are not registered with the tracker.
+	std::string computeTrackerRole() const {
+		if (dstKillRole == "tlog" || dstKillRole == "log_router")
+			return "TLog";
+		if (dstKillRole == "ss")
+			return "SS";
+		if (dstKillRole == "commit_proxy")
+			return "CP";
+		if (dstKillRole == "grv_proxy")
+			return "GP";
+		if (dstKillRole == "master")
+			return "MS";
+		if (dstKillRole == "resolver")
+			return "RV";
+		if (dstKillRole == "dd")
+			return "DD";
+		if (dstKillRole == "rk")
+			return "RK";
+		if (dstKillRole == "cluster_controller")
+			return "CC";
+		return ""; // coordinator
+	}
+
+	// Should this source process be inspected for stale refs? Mirrors the
+	// srcCheckRole filter used by both the pre-kill snapshot and the post-kill
+	// check so the two are always over the same population. "tester_client"
+	// keeps only customer-client (TesterClass) processes, excluding the
+	// simulator's internal TestSystem driver (IP 1.1.1.1), which is TesterClass
+	// but makes no workload transactions.
+	bool isInspectedSource(ISimulator::ProcessInfo* proc) const {
+		if (proc->failed || proc->rebooting)
+			return false;
+		if (srcCheckRole == "tester_client" &&
+		    (proc->startingClass != ProcessClass::TesterClass || proc->address.ip == IPAddress(0x01010101))) {
+			return false;
+		}
+		return proc->global(INetwork::enFlowTransport) != nullptr;
+	}
+
+	// Count inspected source processes that currently hold a reference to `addr`:
+	// either a live tracked interface copy (per-role Delta > 0) or a live peer
+	// reference. Used pre-kill to establish non-vacuity (the target is actually
+	// referenced) and to pick the most-referenced storage server to kill.
+	int countSourcesReferencing(const NetworkAddress& addr, const std::string& trackerRole) const {
+		int n = 0;
+		for (auto* proc : g_simulator->getAllProcesses()) {
+			if (!isInspectedSource(proc))
+				continue;
+			auto* transport = static_cast<FlowTransport*>((void*)proc->global(INetwork::enFlowTransport));
+			bool hasRef = !trackerRole.empty() && transport->interfaceTracker.getDelta(addr, trackerRole) > 0;
+			if (!hasRef) {
+				const auto& allPeers = transport->getAllPeers();
+				auto it = allPeers.find(addr);
+				hasRef = (it != allPeers.end() && it->second->peerReferences > 0);
+			}
+			if (hasRef)
+				++n;
+		}
+		return n;
+	}
+
 	// Find a process address for the given role.
 	std::vector<NetworkAddress> findAddressesForRole(Database const& cx) {
 		std::vector<NetworkAddress> result;
@@ -142,20 +215,12 @@ struct StalePeerTestWorkload : TestWorkload {
 				}
 			}
 		} else if (dstKillRole == "ss") {
-			// Candidates: any simulator process with StorageClass or UnsetClass
-			// (these are where SSes are recruited).
-			auto allProcesses = g_simulator->getAllProcesses();
-			for (auto* proc : allProcesses) {
-				if (proc->failed || proc->rebooting)
-					continue;
-				if (proc->startingClass != ProcessClass::StorageClass &&
-				    proc->startingClass != ProcessClass::UnsetClass)
-					continue;
-				auto* transport = static_cast<FlowTransport*>((void*)proc->global(INetwork::enFlowTransport));
-				if (transport) {
-					addIfKillable(result, proc->address);
-				}
-			}
+			// SS targets are resolved in _start from the authoritative recruited
+			// set via getStorageServers(cx) (see the ss path there), not here.
+			// Scanning simulator processes by StorageClass/UnsetClass could pick a
+			// process that hosts no recruited SS, in which case no SS interface is
+			// ever tracked at that address and the per-role Delta check passes
+			// vacuously. Leaving this empty; _start handles ss before calling.
 		} else if (dstKillRole == "commit_proxy") {
 			for (const auto& cp : info.client.commitProxies) {
 				addIfKillable(result, cp.address());
@@ -212,7 +277,25 @@ struct StalePeerTestWorkload : TestWorkload {
 			wait(self->dbInfo->onChange());
 		}
 
-		state std::vector<NetworkAddress> targetAddresses = self->findAddressesForRole(cx);
+		// Tracker role for the killed dst (deterministic from dstKillRole), used
+		// for both the pre-kill reference snapshot and the post-kill Delta check.
+		state std::string trackerRole = self->computeTrackerRole();
+
+		// Resolve kill targets.
+		state std::vector<NetworkAddress> targetAddresses;
+		if (self->dstKillRole == "ss") {
+			// #1 non-vacuity: target an ACTUAL recruited storage server from the
+			// cluster's authoritative serverList, not just any StorageClass
+			// process. Killing a process that hosts no recruited SS would leave no
+			// SS interface tracked at that address, so the per-role Delta check
+			// would pass without ever exercising the client-side eviction path.
+			std::vector<StorageServerInterface> ssis = wait(getStorageServers(cx));
+			for (const auto& ssi : ssis) {
+				self->addIfKillable(targetAddresses, ssi.address());
+			}
+		} else {
+			targetAddresses = self->findAddressesForRole(cx);
+		}
 
 		if (targetAddresses.empty()) {
 			// No killable addresses for this role (e.g. every coordinator /
@@ -230,8 +313,54 @@ struct StalePeerTestWorkload : TestWorkload {
 		    .detail("Role", self->dstKillRole)
 		    .detail("TargetsFound", targetAddresses.size());
 
-		// Pick the first target to kill
-		state NetworkAddress oldAddr = targetAddresses[0];
+		// Pick the target to kill. For SS, choose the recruited server that the
+		// most inspected sources currently reference (cached interface / live
+		// peer ref) so the kill actually exercises client-side eviction, polling
+		// briefly (bounded) to let caches warm under the ReadWrite workload. For
+		// other roles the candidates are interchangeable, so take the first. In
+		// all cases snapshot how many inspected sources reference the chosen
+		// target right before the kill -- that count is the non-vacuity signal.
+		state NetworkAddress oldAddr;
+		if (self->dstKillRole == "ss") {
+			state double warmDeadline = now() + 30.0;
+			loop {
+				NetworkAddress best;
+				int bestN = -1;
+				for (const auto& a : targetAddresses) {
+					int n = self->countSourcesReferencing(a, trackerRole);
+					if (n > bestN) {
+						bestN = n;
+						best = a;
+					}
+				}
+				if (bestN > 0 || now() >= warmDeadline) {
+					oldAddr = best;
+					self->preKillRefSources = bestN;
+					break;
+				}
+				wait(delay(2.0));
+			}
+		} else {
+			oldAddr = targetAddresses[0];
+			self->preKillRefSources = self->countSourcesReferencing(oldAddr, trackerRole);
+		}
+
+		// Non-vacuity gate: if no inspected source referenced the target at kill
+		// time, a post-kill Delta==0 would prove nothing. Mark the run
+		// inconclusive (skip) rather than recording it as a meaningful pass.
+		// Coordinator is exempt -- its endpoints use well-known tokens that are
+		// not tracked here, and its meaningful signal is connection-string
+		// removal (handled below), not a peer-ref drain.
+		if (self->dstKillRole != "coordinator" && self->preKillRefSources <= 0) {
+			TraceEvent(SevWarnAlways, "StalePeerTestVacuousNoPreKillRef")
+			    .detail("Role", self->dstKillRole)
+			    .detail("Address", oldAddr)
+			    .detail("TrackerRole", trackerRole)
+			    .detail("Note", "No inspected source referenced the target at kill time; skipping as inconclusive");
+			self->skippedVacuous = true;
+			return Void();
+		}
+
 		ISimulator::ProcessInfo* proc = g_simulator->getProcessByAddress(oldAddr);
 		if (!proc || proc->failed) {
 			TraceEvent(SevError, "StalePeerTestProcessNotFound").detail("Address", oldAddr);
@@ -244,6 +373,7 @@ struct StalePeerTestWorkload : TestWorkload {
 		TraceEvent("StalePeerTestKilling")
 		    .detail("Role", self->dstKillRole)
 		    .detail("Address", oldAddr)
+		    .detail("PreKillRefSources", self->preKillRefSources)
 		    .detail("ProcessClass", proc->startingClass.toString())
 		    .detail("Zone", proc->locality.zoneId());
 
@@ -370,60 +500,41 @@ struct StalePeerTestWorkload : TestWorkload {
 		// meaningful signal for a coordinator kill is whether the cluster removed
 		// the dead coord from the connection string; that is the autoQuorumChange
 		// result above, so no peer-ref check is done for coord.
+		//
+		// KNOWN COVERAGE GAP (intentional): a coordinator kill therefore asserts
+		// only that the dead coordinator was swapped out of the connection string
+		// (the autoQuorumChange succeeded) -- it does NOT assert that every source
+		// drained its peer ref to the dead address, because the LeaderMonitor refs
+		// are expected and not a leak our client-side fixes target. Since
+		// dstKillRole="clientFacing" resolves uniformly across {coordinator,
+		// cluster_controller, commit_proxy, grv_proxy, ss}, roughly one in five
+		// clientFacing runs lands on coordinator and exercises only this weaker
+		// connection-string check. The per-role stale-interface drain is covered
+		// by the other four roles. (Tightening the coordinator path to a strict
+		// peer-ref assertion -- tolerating the N expected LeaderMonitor refs -- is
+		// a possible follow-up.)
 		if (self->dstKillRole == "coordinator") {
 			TraceEvent("StalePeerTestChecking").detail("Mode", "coordinator/skip-peer-refs");
 			return Void();
 		}
 		TraceEvent("StalePeerTestChecking");
 
-		state std::string trackerRole;
-		if (self->dstKillRole == "tlog" || self->dstKillRole == "log_router") {
-			trackerRole = "TLog";
-		} else if (self->dstKillRole == "ss") {
-			trackerRole = "SS";
-		} else if (self->dstKillRole == "commit_proxy") {
-			trackerRole = "CP";
-		} else if (self->dstKillRole == "grv_proxy") {
-			trackerRole = "GP";
-		} else if (self->dstKillRole == "master") {
-			trackerRole = "MS";
-		} else if (self->dstKillRole == "resolver") {
-			trackerRole = "RV";
-		} else if (self->dstKillRole == "dd") {
-			trackerRole = "DD";
-		} else if (self->dstKillRole == "rk") {
-			trackerRole = "RK";
-		} else if (self->dstKillRole == "cluster_controller") {
-			trackerRole = "CC";
-		}
+		// trackerRole was computed once at the top of _start (computeTrackerRole)
+		// and used for the pre-kill snapshot; reuse it here. It is non-empty for
+		// every role that reaches this point (coordinator returned above).
 		ASSERT(!trackerRole.empty());
 
 		auto allProcesses = g_simulator->getAllProcesses();
 		state int clientSourcesChecked = 0;   // source processes inspected (post-filter)
 		state int clientSourcesWithLeak = 0;  // ...of which had a per-role Delta > 0 (a leak)
 		for (auto* proc : allProcesses) {
-			if (proc->failed || proc->rebooting)
+			// Same source population as the pre-kill snapshot (see
+			// isInspectedSource): drops failed/rebooting and, in "tester_client"
+			// mode, keeps only customer-client (TesterClass) processes while
+			// excluding the simulator's internal TestSystem driver (IP 1.1.1.1).
+			if (!self->isInspectedSource(proc))
 				continue;
-			// srcCheckRole filter. In "tester_client" mode only inspect
-			// client processes (ProcessClass::TesterClass). The testers running
-			// the workload are the database's "customers". Server roles
-			// drive the client library internally and our client-side fixes
-			// affect their peer refs too, but that is out of scope for the
-			// client contract this mode verifies. "any" inspects every process.
-			//
-			// Exclude the simulator's internal "TestSystem" process (IP 1.1.1.1,
-			// SimulatedCluster.actor.cpp). It is created with TesterClass but is
-			// the test-harness driver, not a workload customer. It makes no
-			// workload transactions, so it is not a "customer" and must not count
-			// toward the client contract.
-			if (self->srcCheckRole == "tester_client" &&
-			    (proc->startingClass != ProcessClass::TesterClass ||
-			     proc->address.ip == IPAddress(0x01010101))) {
-				continue;
-			}
 			auto* transport = static_cast<FlowTransport*>((void*)proc->global(INetwork::enFlowTransport));
-			if (!transport)
-				continue;
 			++clientSourcesChecked;
 			for (const auto& oldKillAddr : self->oldKillAddresses) {
 				auto& allPeers = transport->getAllPeers();
@@ -453,12 +564,28 @@ struct StalePeerTestWorkload : TestWorkload {
 		// Coverage visibility: how many source processes we examined, and how
 		// many showed a per-role interface leak (Delta > 0). This is logged for
 		// every run (pass or fail) so the aggregate leak signal is visible even
-		// when the run passes.
+		// when the run passes. PreKillRefSources records how many sources held a
+		// reference to the target before the drain -- it is > 0 here by
+		// construction (the non-vacuity gate above skips the run otherwise).
 		TraceEvent("StalePeerTestCheckCoverage")
 		    .detail("SrcCheckRole", self->srcCheckRole)
 		    .detail("KillRole", self->dstKillRole)
+		    .detail("PreKillRefSources", self->preKillRefSources)
 		    .detail("ClientSourcesChecked", clientSourcesChecked)
 		    .detail("ClientSourcesWithLeak", clientSourcesWithLeak);
+
+		// Non-vacuity assertion: a real check must have inspected at least one
+		// source. Reaching here means we killed a target that was referenced
+		// pre-kill (preKillRefSources > 0), so the inspected population cannot be
+		// empty. If it somehow is, the run validated nothing -- fail loudly
+		// rather than report a hollow pass.
+		if (clientSourcesChecked == 0) {
+			TraceEvent(SevError, "StalePeerTestNoSourcesInspected")
+			    .detail("KillRole", self->dstKillRole)
+			    .detail("SrcCheckRole", self->srcCheckRole)
+			    .detail("PreKillRefSources", self->preKillRefSources);
+			self->testPassed = false;
+		}
 
 		return Void();
 	}
@@ -467,7 +594,7 @@ struct StalePeerTestWorkload : TestWorkload {
 		if (clientId != 0) {
 			return true;
 		}
-		if (oldKillAddresses.empty() && !skippedNoTargets) {
+		if (oldKillAddresses.empty() && !skippedNoTargets && !skippedVacuous) {
 			TraceEvent(SevError, "StalePeerTestNoProcessKilled").detail("KillRole", dstKillRole);
 			testPassed = false;
 		}
@@ -477,6 +604,8 @@ struct StalePeerTestWorkload : TestWorkload {
 		    .detail("SrcCheckRole", srcCheckRole)
 		    .detail("SkippedNoTargets", skippedNoTargets)
 		    .detail("SkippedClusterUnhealthy", skippedClusterUnhealthy)
+		    .detail("SkippedVacuous", skippedVacuous)
+		    .detail("PreKillRefSources", preKillRefSources)
 		    .detail("ProcessesKilled", oldKillAddresses.size());
 		return testPassed;
 	}

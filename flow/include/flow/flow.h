@@ -1206,6 +1206,17 @@ protected:
 // Global callback for futureRef tracking release, set by FlowTransport at init
 inline void (*g_futureRefReleasedCallback)(int64_t id) = nullptr;
 
+// Global callback for futureRef tracking copy, set by FlowTransport at init.
+// Given the source FutureStream's tracking id, registers a brand-new tracked
+// ref (cloning the source's addr/token) and returns its id. A copied
+// FutureStream is a distinct ref (it bumps the queue's future ref count), so it
+// needs its own tracking id rather than sharing the source's -- otherwise
+// copies would go untracked (the move ctor propagates the id, but a copy can't
+// steal it). The flow layer has no endpoint context of its own, so this defers
+// to FlowTransport, which holds the source record's addr/token. Returns -1 when
+// the source isn't tracked or observability is off.
+inline int64_t (*g_futureRefCopiedCallback)(int64_t srcId) = nullptr;
+
 template <class T>
 class FutureStream {
 public:
@@ -1225,7 +1236,12 @@ public:
 		m_futureRefTrackingId = -1;
 	}
 	FutureStream() : queue(nullptr), m_futureRefTrackingId(-1) {}
-	FutureStream(const FutureStream& rhs) : queue(rhs.queue), m_futureRefTrackingId(-1) { queue->addFutureRef(); }
+	FutureStream(const FutureStream& rhs) : queue(rhs.queue), m_futureRefTrackingId(-1) {
+		queue->addFutureRef();
+		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && rhs.m_futureRefTrackingId >= 0 && g_futureRefCopiedCallback) {
+			m_futureRefTrackingId = g_futureRefCopiedCallback(rhs.m_futureRefTrackingId);
+		}
+	}
 	FutureStream(FutureStream&& rhs) noexcept : queue(rhs.queue), m_futureRefTrackingId(rhs.m_futureRefTrackingId) {
 		rhs.queue = 0;
 		rhs.m_futureRefTrackingId = -1;
@@ -1246,6 +1262,9 @@ public:
 		}
 		queue = rhs.queue;
 		m_futureRefTrackingId = -1;
+		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && rhs.m_futureRefTrackingId >= 0 && g_futureRefCopiedCallback) {
+			m_futureRefTrackingId = g_futureRefCopiedCallback(rhs.m_futureRefTrackingId);
+		}
 	}
 	void operator=(FutureStream&& rhs) noexcept {
 		if (rhs.queue != queue) {
