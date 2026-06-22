@@ -1195,10 +1195,7 @@ ACTOR static Future<Void> locationCachePeerEvictorActor(DatabaseContext* cx) {
 				lastConnectFailedSnapshot[addr] = cur.count;
 				if (delta > connectFailedThreshold) {
 					deadAddressSet.insert(addr);
-					// General observability for the fix (not deep STALE_PEER_OBSERVABILITY-only
-					// debugging): always emit, but suppressFor(1s) so a burst of stale SS does
-					// not flood the trace log (max ~1 RPS per process).
-					TraceEvent("StalePeerEvictFlapSweep")
+					TraceEvent("LocationCachePeerEvictor_FoundDeadAddr")
 					    .suppressFor(1.0)
 					    .detail("DbId", cx->dbId)
 					    .detail("Addr", addr)
@@ -1210,21 +1207,22 @@ ACTOR static Future<Void> locationCachePeerEvictorActor(DatabaseContext* cx) {
 			// for, so this map stays bounded alongside the persistent one.
 			for (auto it = lastConnectFailedSnapshot.begin(); it != lastConnectFailedSnapshot.end();) {
 				if (persistent.find(it->first) == persistent.end()) {
+					TraceEvent("LocationCachePeerEvictor_ClearAddrInSnapshot")
+					    .suppressFor(1.0)
+					    .detail("DbId", cx->dbId)
+					    .detail("Addr", it->first);
 					it = lastConnectFailedSnapshot.erase(it);
 				} else {
 					++it;
 				}
 			}
+			if (!deadAddressSet.empty()) {
+				TraceEvent("LocationCachePeerEvictor_DeadAddrSummary")
+				    .detail("DbId", cx->dbId)
+				    .detail("DeadAddrSetSize", deadAddressSet.size());
+			}
 			for (const auto& addr : deadAddressSet) {
 				cx->invalidateCacheByAddress(addr);
-			}
-			if (!deadAddressSet.empty()) {
-				// General observability for the fix; suppressFor(1s) caps the rate when
-				// many addresses are evicted at once.
-				TraceEvent("StalePeerEvictSweep")
-				    .suppressFor(1.0)
-				    .detail("DbId", cx->dbId)
-				    .detail("NumEvicted", (int64_t)deadAddressSet.size());
 			}
 		} catch (Error& e) {
 			// actor_cancelled must propagate so ~DatabaseContext can tear down the
@@ -1233,7 +1231,7 @@ ACTOR static Future<Void> locationCachePeerEvictorActor(DatabaseContext* cx) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
 			}
-			TraceEvent(SevWarn, "LocationCachePeerEvictorError").error(e).detail("DbId", cx->dbId);
+			TraceEvent(SevWarn, "LocationCachePeerEvictor_Error").error(e).detail("DbId", cx->dbId);
 		}
 	}
 }
