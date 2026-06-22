@@ -22,6 +22,7 @@
 
 #include "flow/Error.h"
 #include <cstddef>
+#include <optional>
 
 #include <utility>
 
@@ -811,11 +812,22 @@ Future<T> safeThreadFutureToFuture(Future<T>& future) {
 // Helper coroutine. Do not use directly!
 namespace internal_thread_helper {
 
-template <class R, class F>
-Future<Void> doOnMainThread(Future<Void> signal, F f, ThreadSingleAssignmentVar<R>* result, ExplicitVoid = {}) {
+// F can be a local lambda type with no linkage, so keep it out of the coroutine frame and pass only function
+// pointers whose types depend on R.
+template <class R>
+struct OnMainThreadFunction {
+	Future<R> (*invoke)(ThreadSingleAssignmentVar<R>*);
+	void (*destroy)(ThreadSingleAssignmentVar<R>*);
+};
+
+template <class R>
+Future<Void> doOnMainThread(Future<Void> signal,
+                            OnMainThreadFunction<R> function,
+                            ThreadSingleAssignmentVar<R>* result,
+                            ExplicitVoid = {}) {
 	try {
 		co_await signal;
-		R r = co_await f();
+		R r = co_await function.invoke(result);
 		result->send(r);
 	} catch (Error& e) {
 		if (!result->canBeSet()) {
@@ -824,6 +836,7 @@ Future<Void> doOnMainThread(Future<Void> signal, F f, ThreadSingleAssignmentVar<
 		result->sendError(e);
 	}
 
+	function.destroy(result);
 	ThreadFuture<R> destroyResultAfterReturning(
 	    result); // Call result->delref(), but only after our return promise is no longer referenced on this thread
 	co_return Void();
@@ -841,15 +854,26 @@ Future<Void> doOnMainThread(Future<Void> signal, F f, ThreadSingleAssignmentVar<
 // TODO: Add SFINAE overloads for functors returning void or a non-Future type.
 template <class F>
 ThreadFuture<decltype(std::declval<F>()().getValue())> onMainThread(F f) {
+	using R = decltype(std::declval<F>()().getValue());
+	// Store the functor in the existing result allocation instead of allocating a separate type-erased wrapper.
+	struct ReturnValue final : ThreadSingleAssignmentVar<R> {
+		explicit ReturnValue(F f) : f(std::move(f)) {}
+
+		std::optional<F> f;
+	};
+
 	Promise<Void> signal;
-	auto returnValue = new ThreadSingleAssignmentVar<decltype(std::declval<F>()().getValue())>();
+	auto returnValue = new ReturnValue(std::move(f));
 	returnValue->addref(); // For the ThreadFuture we return
 	// TODO: Is this cancellation logic actually needed?
-	Future<Void> cancelFuture = internal_thread_helper::doOnMainThread<decltype(std::declval<F>()().getValue()), F>(
-	    signal.getFuture(), f, returnValue);
+	Future<Void> cancelFuture = internal_thread_helper::doOnMainThread<R>(
+	    signal.getFuture(),
+	    { [](ThreadSingleAssignmentVar<R>* result) -> Future<R> { return (*static_cast<ReturnValue*>(result)->f)(); },
+	      [](ThreadSingleAssignmentVar<R>* result) { static_cast<ReturnValue*>(result)->f.reset(); } },
+	    returnValue);
 	returnValue->setCancel(std::move(cancelFuture));
 	g_network->onMainThread(std::move(signal), TaskPriority::DefaultOnMainThread);
-	return ThreadFuture<decltype(std::declval<F>()().getValue())>(returnValue);
+	return ThreadFuture<R>(returnValue);
 }
 
 template <class V>
