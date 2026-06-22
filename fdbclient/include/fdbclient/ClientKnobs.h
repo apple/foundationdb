@@ -108,17 +108,17 @@ public:
 	double LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD;
 	double LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL;
 
-	// Base interval, in seconds, between locationCachePeerEvictor sweeps.
-	double LOCATION_CACHE_PEER_FAILURE_EVICTION_DELAY;
 	// Main switch for the stale-peer location-cache evictor: proactively evicts a storage
 	// server address from the location cache when its persistent connect-failed count advances,
 	// releasing the dead SS's stream refs. Off by default (opt-in mitigation); randomized in
 	// simulation; StalePeerTest forces it on.
 	bool LOCATION_CACHE_PEER_EVICTOR_ENABLED;
+	// Base interval, in seconds, between locationCachePeerEvictor sweeps.
+	double LOCATION_CACHE_PEER_EVICTOR_DELAY;
 	// In the locationCachePeerEvictor sweep, evict an address whose persistent connect-failed
 	// count advanced by more than this since the previous sweep. 0 = any new connect failure
 	// counts; a negative value disables the trigger.
-	int LOCATION_CACHE_PEER_CONNECT_FAILED_THRESHOLD;
+	int LOCATION_CACHE_PEER_EVICTOR_FAILED_THRESHOLD;
 
 	int GET_RANGE_SHARD_LIMIT;
 	int WARM_RANGE_SHARD_LIMIT;

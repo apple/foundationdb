@@ -844,8 +844,8 @@ void shrinkProxyList(ClientDBInfo& ni,
 		if (!lastCommitProxyUIDs.empty()) {
 			TraceEvent("ShrinkProxyListCacheCleared")
 			    .detail("Role", "commit_proxy")
-			    .detail("PrevCachedCount", (int)lastCommitProxyUIDs.size())
-			    .detail("RecruitedCount", (int)ni.commitProxies.size())
+			    .detail("PrevCachedCount", lastCommitProxyUIDs.size())
+			    .detail("RecruitedCount", ni.commitProxies.size())
 			    .detail("MaxConnections", CLIENT_KNOBS->MAX_COMMIT_PROXY_CONNECTIONS);
 			lastCommitProxyUIDs.clear();
 			lastCommitProxies.clear();
@@ -873,8 +873,8 @@ void shrinkProxyList(ClientDBInfo& ni,
 		if (!lastGrvProxyUIDs.empty()) {
 			TraceEvent("ShrinkProxyListCacheCleared")
 			    .detail("Role", "grv_proxy")
-			    .detail("PrevCachedCount", (int)lastGrvProxyUIDs.size())
-			    .detail("RecruitedCount", (int)ni.grvProxies.size())
+			    .detail("PrevCachedCount", lastGrvProxyUIDs.size())
+			    .detail("RecruitedCount", ni.grvProxies.size())
 			    .detail("MaxConnections", CLIENT_KNOBS->MAX_GRV_PROXY_CONNECTIONS);
 			lastGrvProxyUIDs.clear();
 			lastGrvProxies.clear();

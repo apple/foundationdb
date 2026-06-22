@@ -210,7 +210,7 @@ private:
 
 template <class Ar, class T>
 void save(Ar& ar, const ReplyPromise<T>& value) {
-	const auto& ep = value.getEndpoint().token;
+	auto const& ep = value.getEndpoint().token;
 	ar << ep;
 }
 
@@ -646,7 +646,7 @@ private:
 
 template <class Ar, class T>
 void save(Ar& ar, const ReplyPromiseStream<T>& value) {
-	const auto& ep = value.getEndpoint().token;
+	auto const& ep = value.getEndpoint().token;
 	ar << ep;
 }
 
@@ -1015,7 +1015,7 @@ using PublicRequestStream = RequestStream<T, true>;
 
 template <class Ar, class T, bool P>
 void save(Ar& ar, const RequestStream<T, P>& value) {
-	const auto& ep = value.getEndpoint();
+	auto const& ep = value.getEndpoint();
 	ar << ep;
 	UNSTOPPABLE_ASSERT(
 	    ep.getPrimaryAddress().isValid()); // No serializing PromiseStreams on a client with no public address

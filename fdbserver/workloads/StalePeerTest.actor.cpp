@@ -44,7 +44,7 @@ struct StalePeerTestWorkload : TestWorkload {
 	// fixes too, but the contract we care about is that a pure customer client
 	// holds no stale ref to a killed client-facing role.
 	std::string srcCheckRole;
-	bool testPassed;
+	bool testPassed = false;
 	bool skippedNoTargets = false;
 	bool skippedClusterUnhealthy = false;
 
@@ -58,7 +58,7 @@ struct StalePeerTestWorkload : TestWorkload {
 	//   "MS" (master), "RV" (resolver),
 	//   "DD" (dd), "RK" (rk), "CC" (cluster_controller).
 	// Empty for coordinator (no service interface registered with the
-	// tracker — diagnostic Delta dump is skipped).
+	// tracker -- diagnostic Delta dump is skipped).
 	std::string trackedDstRole;
 
 	StalePeerTestWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), testPassed(true) {
@@ -66,7 +66,7 @@ struct StalePeerTestWorkload : TestWorkload {
 		dstKillRole = getOption(options, "dstKillRole"_sr, "clientFacing"_sr).toString();
 		srcCheckRole = getOption(options, "srcCheckRole"_sr, "any"_sr).toString();
 		// dstKillRole="clientFacing" resolves (per-run, deterministically) to one
-		// of the client-facing destination roles — the roles a client
+		// of the client-facing destination roles -- the roles a client
 		// (DatabaseContext / its peer connections) directly addresses: coordinator,
 		// cluster controller, commit proxy, grv proxy, storage server. Same
 		// seed/config picks the same role, so per-run determinism is preserved
@@ -184,7 +184,7 @@ struct StalePeerTestWorkload : TestWorkload {
 			// sim2 keeps a majority of coordinators in protectedAddresses. Any
 			// un-protected coordinator is a valid kill target. With
 			// coordinators=3 (set in StalePeerTest.toml), 2 are protected and
-			// the third is killable. Resolve hostnames too — simulation
+			// the third is killable. Resolve hostnames too -- simulation
 			// connection strings use hostnames (e.g. fakeCoordinatorDC0M0:1)
 			// rather than direct NetworkAddresses, so cs.coords is typically
 			// empty and the candidates live in cs.hostnames.
@@ -217,7 +217,7 @@ struct StalePeerTestWorkload : TestWorkload {
 		if (targetAddresses.empty()) {
 			// No killable addresses for this role (e.g. every coordinator /
 			// proxy is protected, or log_routers don't exist in a
-			// single-region cluster). Skip the test — there's nothing to
+			// single-region cluster). Skip the test -- there's nothing to
 			// leak refs for.
 			TraceEvent("StalePeerTestNoTargets")
 			    .detail("Role", self->dstKillRole)
@@ -269,7 +269,7 @@ struct StalePeerTestWorkload : TestWorkload {
 		// Wait for the kill's recovery + cleanup. Right after killProcess the
 		// broadcast dbInfo still carries the pre-kill FULLY_RECOVERED for a few
 		// seconds, so a bare wait-for-FULLY_RECOVERED races straight through
-		// without actually waiting for the kill's recovery — then the later
+		// without actually waiting for the kill's recovery -- then the later
 		// peer-ref check lands mid-recovery and skips as "cluster unhealthy".
 		// First wait (bounded) for the kill to drop recoveryState below
 		// FULLY_RECOVERED (recovery triggered); roles whose loss is handled
@@ -300,7 +300,7 @@ struct StalePeerTestWorkload : TestWorkload {
 		// Coordinator-only: the dead coordinator stays in the cluster's
 		// connection string indefinitely, so every live process keeps a
 		// long-term LeaderMonitor connection to its address (PeerRef = 1
-		// per process). That isn't a stale-ref leak — it's the design
+		// per process). That isn't a stale-ref leak -- it's the design
 		// pattern for cluster identity. Trigger an auto quorum change to
 		// swap the dead coordinator for a healthy candidate, mirroring
 		// what `coordinators auto` does in fdbcli. Once the dead address
@@ -336,7 +336,7 @@ struct StalePeerTestWorkload : TestWorkload {
 		// FULLY_RECOVERED within the wait window (e.g. perpetual_storage_wiggle
 		// + ssd-sharded-rocksdb configs that produce RkSSListFetchTimeout
 		// before the kill, or a degenerate recovery loop after the kill), the
-		// peer-ref check is meaningless — the leak signal will be dominated
+		// peer-ref check is meaningless -- the leak signal will be dominated
 		// by the cluster meltdown rather than the kill we're testing. Skip
 		// rather than fail: the contract this test verifies is "kill of role X
 		// drains its peer refs in a healthy cluster", not "every cluster
@@ -352,19 +352,19 @@ struct StalePeerTestWorkload : TestWorkload {
 
 		// Pass criterion: per-role InterfaceTracker Delta == 0 at the killed
 		// address. Delta counts leaked COPIES of the killed role's interface
-		// RequestStreams still pinned somewhere — i.e. the actual stale-interface
+		// RequestStreams still pinned somewhere -- i.e. the actual stale-interface
 		// leak our client-side fixes target. We deliberately do NOT use raw
 		// peer->peerReferences: a tester client legitimately retains
 		// connection-level / well-known-token refs to the killed address (the
 		// draining TCP connection, ping/leader-monitor endpoints, and refs to a
-		// co-resident role the process also hosted — sim co-locates many roles
+		// co-resident role the process also hosted -- sim co-locates many roles
 		// per process). Those are real, expected peers (peerReferences > 0 with
 		// Delta == 0), not the staleness bug. peerReferences is logged as a
 		// diagnostic. Delta requires the InterfaceTracker, so this mode needs
 		// stale_peer_observability = true (deterministic: toggling it does not
 		// change simulator ordering).
 		//
-		// Coordinator is special — its endpoints use well-known tokens
+		// Coordinator is special -- its endpoints use well-known tokens
 		// (ClientLeaderRegInterface) and aren't tracked, and every process keeps
 		// a long-term LeaderMonitor connection to each coordinator address. The
 		// meaningful signal for a coordinator kill is whether the cluster removed
@@ -404,21 +404,18 @@ struct StalePeerTestWorkload : TestWorkload {
 		for (auto* proc : allProcesses) {
 			if (proc->failed || proc->rebooting)
 				continue;
-			// srcCheckRole filter. In "tester_client" mode only inspect customer
-			// client processes (ProcessClass::TesterClass) — the testers running
-			// the workload, which are the database's "customers". Server roles
+			// srcCheckRole filter. In "tester_client" mode only inspect
+			// client processes (ProcessClass::TesterClass). The testers running
+			// the workload are the database's "customers". Server roles
 			// drive the client library internally and our client-side fixes
 			// affect their peer refs too, but that is out of scope for the
 			// client contract this mode verifies. "any" inspects every process.
 			//
 			// Exclude the simulator's internal "TestSystem" process (IP 1.1.1.1,
 			// SimulatedCluster.actor.cpp). It is created with TesterClass but is
-			// the test-harness driver, not a workload customer: it opens its own
-			// Database for setup/orchestration and can cache an SS location it
-			// never actually drives (no connect attempt, so neither the
-			// connect-failed watcher nor FailureMonitor ever flags it), leaving a
-			// benign cached SSInfo. It makes no workload transactions, so it is
-			// not a "customer" and must not count toward the client contract.
+			// the test-harness driver, not a workload customer. It makes no
+			// workload transactions, so it is not a "customer" and must not count
+			// toward the client contract.
 			if (self->srcCheckRole == "tester_client" &&
 			    (proc->startingClass != ProcessClass::TesterClass ||
 			     proc->address.ip == IPAddress(0x01010101))) {
@@ -427,15 +424,15 @@ struct StalePeerTestWorkload : TestWorkload {
 			auto* transport = static_cast<FlowTransport*>((void*)proc->global(INetwork::enFlowTransport));
 			if (!transport)
 				continue;
-			// Every matching source process is checked — not just clientId 0.
 			++clientSourcesChecked;
 			for (const auto& oldKillAddr : self->oldKillAddresses) {
 				auto& allPeers = transport->getAllPeers();
 				auto it = allPeers.find(oldKillAddr);
-				int peerRefs = (it != allPeers.end()) ? it->second->peerReferences : 0;
-				int64_t delta = transport->interfaceTracker.getDelta(oldKillAddr, trackerRole);
-				if (delta > 0)
+				const int peerRefs = (it != allPeers.end()) ? it->second->peerReferences : 0;
+				const int64_t delta = transport->interfaceTracker.getDelta(oldKillAddr, trackerRole);
+				if (delta > 0) {
 					++clientSourcesWithLeak;
+				}
 				if (delta > 0) {
 					transport->interfaceTracker.prettyPrint(proc->address, self->oldKillAddresses);
 					transport->interfaceTracker.prettyPrintLeakedReceivers(proc->address, self->oldKillAddresses);
@@ -467,8 +464,9 @@ struct StalePeerTestWorkload : TestWorkload {
 	}
 
 	Future<bool> check(Database const& cx) override {
-		if (clientId != 0)
+		if (clientId != 0) {
 			return true;
+		}
 		if (oldKillAddresses.empty() && !skippedNoTargets) {
 			TraceEvent(SevError, "StalePeerTestNoProcessKilled").detail("KillRole", dstKillRole);
 			testPassed = false;

@@ -1219,8 +1219,9 @@ public:
 	void addCallbackAndClear(SingleCallback<T>* cb) {
 		queue->addCallbackAndDelFutureRef(cb);
 		queue = nullptr;
-		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_futureRefTrackingId >= 0 && g_futureRefReleasedCallback)
+		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_futureRefTrackingId >= 0 && g_futureRefReleasedCallback) {
 			g_futureRefReleasedCallback(m_futureRefTrackingId);
+		}
 		m_futureRefTrackingId = -1;
 	}
 	FutureStream() : queue(nullptr), m_futureRefTrackingId(-1) {}
@@ -1232,15 +1233,17 @@ public:
 	~FutureStream() {
 		if (queue)
 			queue->delFutureRef();
-		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_futureRefTrackingId >= 0 && g_futureRefReleasedCallback)
+		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_futureRefTrackingId >= 0 && g_futureRefReleasedCallback) {
 			g_futureRefReleasedCallback(m_futureRefTrackingId);
+		}
 	}
 	void operator=(const FutureStream& rhs) {
 		rhs.queue->addFutureRef();
 		if (queue)
 			queue->delFutureRef();
-		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_futureRefTrackingId >= 0 && g_futureRefReleasedCallback)
+		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_futureRefTrackingId >= 0 && g_futureRefReleasedCallback) {
 			g_futureRefReleasedCallback(m_futureRefTrackingId);
+		}
 		queue = rhs.queue;
 		m_futureRefTrackingId = -1;
 	}
@@ -1248,8 +1251,9 @@ public:
 		if (rhs.queue != queue) {
 			if (queue)
 				queue->delFutureRef();
-			if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_futureRefTrackingId >= 0 && g_futureRefReleasedCallback)
+			if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_futureRefTrackingId >= 0 && g_futureRefReleasedCallback) {
 				g_futureRefReleasedCallback(m_futureRefTrackingId);
+			}
 			queue = rhs.queue;
 			m_futureRefTrackingId = rhs.m_futureRefTrackingId;
 			rhs.queue = nullptr;

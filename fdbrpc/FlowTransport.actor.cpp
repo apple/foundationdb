@@ -880,6 +880,10 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 							self->transport->persistentConnectFailedLastPrune = tNow;
 							for (auto it = failCounts.begin(); it != failCounts.end();) {
 								if (tNow - it->second.lastFailed >= ttl) {
+									TraceEvent("PersistentConnectFailedPrune")
+									    .suppressFor(1.0)
+									    .detail("PeerAddr", it->first)
+									    .detail("ConnectFailedTotal", it->second.count);
 									it = failCounts.erase(it);
 								} else {
 									++it;

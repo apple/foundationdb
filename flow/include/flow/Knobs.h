@@ -122,7 +122,7 @@ public:
 	double COORDINATOR_DNS_CACHE_TTL;
 	double CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED;
 
-	// When true, emits trace events useful to debug stale peer issue (StalePeerTest.toml)
+	// When true, emits trace events useful to debug stale peer issue (see StalePeerTest.toml)
 	bool STALE_PEER_OBSERVABILITY;
 
 	// Used for two purposes off the same value: (1) eviction age -- an address is

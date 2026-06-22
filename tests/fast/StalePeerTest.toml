@@ -5,7 +5,7 @@ desiredTLogCount = 6
 generateFearless = false
 config = 'triple'
 
-storageCacheMachines = 0
+storageCacheMachinesInDC0 = 0
 tenantModes = ['disabled'] 
 encryptModes = ['disabled']
 disableTss = true
@@ -20,8 +20,8 @@ coordinators = 3
 
 # Tune knobs to aggressively evict potentially dead storage servers from NativeAPI's LocationCache
 location_cache_peer_evictor_enabled = true
-location_cache_peer_connect_failed_threshold = 0
-location_cache_peer_failure_eviction_delay = 5.0
+location_cache_peer_evictor_failed_threshold = 0
+location_cache_peer_evictor_delay = 5.0
 
 # Ensure stale commit/grv proxies are also cleaned up
 shrink_proxy_list_clear_cache_below_threshold = true
@@ -65,8 +65,7 @@ clearAfterTest = false
     srcCheckRole = 'tester_client'
     # Wait after the kill before checking. For the client contract the drain is
     # fast (clientInfo rotation for proxies/CC; location-cache eviction for SS),
-    # so a short wait suffices. (The old 'leaks never self-heal' note applied to
-    # the server-role/any-source check; not this one.)
+    # so a short wait suffices.
     waitAfterKill = 60.0
 
     # Drive real client->dst connections so the tester_client check is not
@@ -74,11 +73,7 @@ clearAfterTest = false
     # connection to the killed dst (especially an SS). ReadWrite has each client
     # populate + read/write a keyspace, so clients hold genuine peer refs to
     # commit/grv proxies and storage servers and we observe them drop the dead
-    # dst while keeping the live ones. ReadWrite (unlike Cycle) has NO data
-    # correctness check -- its check() just dumps metrics and returns true -- so
-    # it cannot time out reading the keyspace on a still-slow post-kill cluster
-    # (the failure mode that dogged Cycle). It is read-heavy so clients connect
-    # to storage servers; testDuration spans the StalePeerTest kill+check window.
+    # dst while keeping the live ones.
     [[test.workload]]
     testName = 'ReadWrite'
     testDuration = 180.0

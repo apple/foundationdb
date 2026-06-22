@@ -1166,21 +1166,19 @@ ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, Stora
 // (a "flap"). This is a direct ConnectionTimeout (CTO) signal: every connect failure increments
 // the counter, and any positive delta within an evictor interval indicates an
 // address that is still being targeted by RPCs but cannot establish a
-// connection, which is exactly the behavior that produces client-visible CTOs.
+// connection.
 ACTOR static Future<Void> locationCachePeerEvictorActor(DatabaseContext* cx) {
 	// Per-address snapshot of FlowTransport's persistent connect-failed counter
 	// taken on the previous tick. The delta to the current count is the flap
 	// signal: a positive delta means the address is still being targeted by RPCs
-	// but cannot connect. We snapshot here (rather than the persistent counter
-	// itself) because that counter survives Peer destruction in TransportData and
-	// is the only stable reference for short-lived flapping Peers.
+	// but cannot connect.
 	state std::unordered_map<NetworkAddress, int64_t> lastConnectFailedSnapshot;
 	loop {
 		try {
-			wait(delay(CLIENT_KNOBS->LOCATION_CACHE_PEER_FAILURE_EVICTION_DELAY));
+			wait(delay(CLIENT_KNOBS->LOCATION_CACHE_PEER_EVICTOR_DELAY));
 
 			std::set<NetworkAddress> deadAddressSet;
-			int connectFailedThreshold = CLIENT_KNOBS->LOCATION_CACHE_PEER_CONNECT_FAILED_THRESHOLD;
+			const int connectFailedThreshold = CLIENT_KNOBS->LOCATION_CACHE_PEER_EVICTOR_FAILED_THRESHOLD;
 			const auto& persistent = FlowTransport::transport().getPersistentConnectFailedCounts();
 			for (const auto& [addr, cur] : persistent) {
 				if (!addr.isValid()) {
@@ -1194,13 +1192,13 @@ ACTOR static Future<Void> locationCachePeerEvictorActor(DatabaseContext* cx) {
 				int64_t delta = cur.count - prev;
 				lastConnectFailedSnapshot[addr] = cur.count;
 				if (delta > connectFailedThreshold) {
-					deadAddressSet.insert(addr);
 					TraceEvent("LocationCachePeerEvictor_FoundDeadAddr")
 					    .suppressFor(1.0)
 					    .detail("DbId", cx->dbId)
 					    .detail("Addr", addr)
 					    .detail("ConnectFailedDelta", delta)
 					    .detail("ConnectFailedTotal", cur.count);
+					deadAddressSet.insert(addr);
 				}
 			}
 			// Drop snapshot entries for addrs FlowTransport no longer reports a counter
@@ -1226,8 +1224,8 @@ ACTOR static Future<Void> locationCachePeerEvictorActor(DatabaseContext* cx) {
 			}
 		} catch (Error& e) {
 			// actor_cancelled must propagate so ~DatabaseContext can tear down the
-			// evictor; any other error should not kill the loop (that would silently
-			// stop the flap sweep for the life of the DC).
+			// evictor; any other error should not kill the loop (that would stop the
+			// eviction sweep).
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
 			}
