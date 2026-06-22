@@ -69,6 +69,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	bool testDelayedRetention;
 	bool testRetiredRecovery;
 	bool testRetiredSharedTagSnapshot;
+	bool testRetiredIncompleteLogSystem;
 	bool prepareRestartDrain;
 	bool drainAfterRestart;
 	int memoryTestValueBytes;
@@ -933,7 +934,10 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 
 	Future<Void> waitForRetiredTagCleanup(Database cx) { return waitForRetiredTagState(cx, false); }
 
-	Future<Void> setAllProxyPopsPaused(Database cx, bool paused, bool afterSnapshot = false) {
+	Future<Void> setAllProxyPopsPaused(Database cx,
+	                                   bool paused,
+	                                   bool afterSnapshot = false,
+	                                   bool afterIncompleteLogSystem = false) {
 		while (true) {
 			Future<Void> changed = cx->clientInfo->onChange();
 			const std::vector<CDCProxyInterface> proxies = cx->clientInfo->get().cdcProxies;
@@ -945,8 +949,8 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			std::vector<Future<Void>> requests;
 			requests.reserve(proxies.size());
 			for (const auto& proxy : proxies) {
-				requests.push_back(
-				    proxy.setPopsPausedForTesting.getReply(SetCDCProxyPopsPausedRequest(paused, afterSnapshot)));
+				requests.push_back(proxy.setPopsPausedForTesting.getReply(
+				    SetCDCProxyPopsPausedRequest(paused, afterSnapshot, afterIncompleteLogSystem)));
 			}
 			auto result = co_await race(waitForAll(requests), changed);
 			if (result.index() == 0 && proxies == cx->clientInfo->get().cdcProxies) {
@@ -975,6 +979,19 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			const CDCProxyBufferStatus status = co_await getSingleProxyStatus(cx);
 			ASSERT(status.popsPausedAfterSnapshot);
 			if (status.popSnapshotsPaused > previousPauses) {
+				co_return;
+			}
+			ASSERT_LT(now(), deadline);
+			co_await delay(0.01);
+		}
+	}
+
+	Future<Void> waitForIncompleteLogSystemPause(Database cx, int64_t previousPauses) {
+		const double deadline = now() + operationTimeout;
+		while (true) {
+			const CDCProxyBufferStatus status = co_await getSingleProxyStatus(cx);
+			ASSERT(status.popsPausedAfterIncompleteLogSystem);
+			if (status.popIncompleteLogSystemPauses > previousPauses) {
 				co_return;
 			}
 			ASSERT_LT(now(), deadline);
@@ -1044,7 +1061,13 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	Future<Void> validateRetiredCleanupAcrossRecovery(Database cx) {
 		ASSERT_EQ(streams.size(), 1);
 		co_await timeoutError(waitForTransactionSystemAvailable(), operationTimeout);
-		co_await setAllProxyPopsPaused(cx, true);
+		Optional<int64_t> initialIncompleteLogSystemPauses;
+		if (testRetiredIncompleteLogSystem) {
+			initialIncompleteLogSystemPauses = (co_await getSingleProxyStatus(cx)).popIncompleteLogSystemPauses;
+			co_await setAllProxyPopsPaused(cx, true, false, true);
+		} else {
+			co_await setAllProxyPopsPaused(cx, true);
+		}
 		co_await timeoutError(removeNativeCdcStreamClient(cx, streams.back().name), operationTimeout);
 		streams.clear();
 		co_await timeoutError(waitForRetiredTagState(cx, true), operationTimeout);
@@ -1052,6 +1075,12 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 
 		co_await forceTransactionSystemRecovery();
 		TraceEvent("NativeCdcRetiredRecoveryComplete").log();
+		if (testRetiredIncompleteLogSystem) {
+			ASSERT(initialIncompleteLogSystemPauses.present());
+			co_await waitForIncompleteLogSystemPause(cx, initialIncompleteLogSystemPauses.get());
+			co_await timeoutError(waitForRetiredTagState(cx, true), operationTimeout);
+			CODE_PROBE(true, "Native CDC preserves retired metadata while the log system is incomplete");
+		}
 		co_await setAllProxyPopsPaused(cx, false);
 		co_await timeoutError(waitForRetiredTagCleanup(cx), operationTimeout);
 		TraceEvent("NativeCdcRetiredCleanupComplete").log();
@@ -1274,6 +1303,7 @@ public:
 		testDelayedRetention = getOption(options, "testDelayedRetention"_sr, false);
 		testRetiredRecovery = getOption(options, "testRetiredRecovery"_sr, false);
 		testRetiredSharedTagSnapshot = getOption(options, "testRetiredSharedTagSnapshot"_sr, false);
+		testRetiredIncompleteLogSystem = getOption(options, "testRetiredIncompleteLogSystem"_sr, false);
 		prepareRestartDrain = getOption(options, "prepareRestartDrain"_sr, false);
 		drainAfterRestart = getOption(options, "drainAfterRestart"_sr, false);
 		memoryTestValueBytes = getOption(options, "memoryTestValueBytes"_sr, 1024);
@@ -1293,6 +1323,7 @@ public:
 		ASSERT(!(prepareRestartDrain && drainAfterRestart));
 		ASSERT(!(testOversizedPeek && testDurableAckScan));
 		ASSERT(!(testRetiredSharedTagSnapshot && testRetiredRecovery));
+		ASSERT(!testRetiredIncompleteLogSystem || testRetiredRecovery);
 	}
 
 	// RandomRangeLock can outlive this bounded CDC workload and mask its progress check.

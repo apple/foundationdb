@@ -254,6 +254,8 @@ class CDCProxy {
 	bool popsPausedForTesting = false;
 	bool popsPausedAfterSnapshotForTesting = false;
 	int64_t popSnapshotsPausedForTesting = 0;
+	bool popsPausedAfterIncompleteLogSystemForTesting = false;
+	int64_t popIncompleteLogSystemPausesForTesting = 0;
 	AsyncTrigger popPauseChangedForTesting;
 	bool logSystemInitialized = false;
 	bool lastLogSystemHasTLogs = false;
@@ -1204,7 +1206,17 @@ Future<Void> CDCProxy::popAcknowledgedData() {
 	Reference<LogSystemConsumer> currentLogSystem = logSystem->get();
 	const LogSystemConfig popLogSystemConfig = lastLogSystemConfig;
 	const uint64_t popLogSystemRecoveryCount = lastLogSystemRecoveryCount;
+	if (popsPausedAfterIncompleteLogSystemForTesting && hasCompleteLogSystemConfig(popLogSystemConfig)) {
+		co_return;
+	}
 	if (!hasCompleteLogSystemConfig(popLogSystemConfig)) {
+		if (popsPausedAfterIncompleteLogSystemForTesting) {
+			++popIncompleteLogSystemPausesForTesting;
+			CODE_PROBE(true, "CDC proxy pauses after observing an incomplete log system");
+			while (popsPausedAfterIncompleteLogSystemForTesting) {
+				co_await popPauseChangedForTesting.onTrigger();
+			}
+		}
 		CODE_PROBE(true, "CDC proxy defers pops until every expected log set is published", probe::decoration::rare);
 		co_return;
 	}
@@ -1580,6 +1592,8 @@ Future<Void> CDCProxy::serveBufferStatusForTestingRequests(FutureStream<GetCDCPr
 		status.popsPaused = popsPausedForTesting;
 		status.popSnapshotsPaused = popSnapshotsPausedForTesting;
 		status.popsPausedAfterSnapshot = popsPausedAfterSnapshotForTesting;
+		status.popIncompleteLogSystemPauses = popIncompleteLogSystemPausesForTesting;
+		status.popsPausedAfterIncompleteLogSystem = popsPausedAfterIncompleteLogSystemForTesting;
 		request.reply.send(status);
 	}
 }
@@ -1591,10 +1605,11 @@ Future<Void> CDCProxy::serveSetPopsPausedForTestingRequests(FutureStream<SetCDCP
 			request.reply.sendError(client_invalid_operation());
 			continue;
 		}
-		popsPausedForTesting = request.paused && !request.afterSnapshot;
+		popsPausedForTesting = request.paused && !request.afterSnapshot && !request.afterIncompleteLogSystem;
 		popsPausedAfterSnapshotForTesting = request.paused && request.afterSnapshot;
+		popsPausedAfterIncompleteLogSystemForTesting = request.paused && request.afterIncompleteLogSystem;
 		popPauseChangedForTesting.trigger();
-		if (!request.paused || request.afterSnapshot) {
+		if (!request.paused || request.afterSnapshot || request.afterIncompleteLogSystem) {
 			requestAcknowledgedDataPop();
 		}
 		request.reply.send(Void());
