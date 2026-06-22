@@ -216,8 +216,8 @@ AsyncResult<Optional<bool>> WorkerEventProvider::areAllCoordinatorsReachable() c
 		}
 		co_return true;
 	} catch (Error& e) {
-		ASSERT(e.code() ==
-		       error_code_actor_cancelled); // All errors should be filtering through the errorOr actor above
+		ASSERT_EQ(e.code(),
+		          error_code_actor_cancelled); // All errors should be filtering through the errorOr actor above
 		throw;
 	}
 }
