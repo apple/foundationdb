@@ -980,7 +980,7 @@ Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	std::sort(old.coords.begin(), old.coords.end());
 	if (conn->hostnames == old.hostnames && conn->coords == old.coords && old.clusterKeyName() == newName) {
 		connectionStrings.clear();
-		if (BUGGIFY_WITH_PROB(0.1)) {
+		if (buggify(0.1)) {
 			// Introduce a random delay in simulation to allow processes to be
 			// killed before previousCoordinatorKeys has been reset. This helps
 			// exercise coordinator change edge cases around key cleanup.
@@ -2885,6 +2885,14 @@ Future<Void> cancelBulkLoadJob(Database cx, UID jobId) {
 // TODO(Zhe): clear bulkload task metadata within the input range
 Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState, bool lockAware) {
 	ASSERT(jobState.getPhase() == BulkLoadJobPhase::Submitted);
+
+	// TODO(BulkLoad): validate cluster preconditions before accepting the job.
+	// BulkLoad requires shard_encode_location_metadata=1 and enable_read_lock_on_range=1,
+	// plus a storage engine that supports SST ingestion. Without these, this function and
+	// setBulkLoadMode both succeed, but the Data Distributor never dispatches the job and
+	// any restore that triggered it stalls in "State: running, Tasks: 0/0" forever.
+	// This check must read live cluster knob state — SERVER_KNOBS in fdbclient is the
+	// caller's local defaults and tells us nothing about the cluster.
 
 	Transaction tr(cx);
 	while (true) {

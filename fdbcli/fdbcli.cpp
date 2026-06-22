@@ -110,6 +110,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_DATABASE, "-d", SO_REQ_SEP },
 	                                  { OPT_TRACE, "--log", SO_NONE },
 	                                  { OPT_TRACE_DIR, "--log-dir", SO_REQ_SEP },
+	                                  { OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
 	                                  { OPT_LOGGROUP, "--log-group", SO_REQ_SEP },
 	                                  { OPT_TIMEOUT, "--timeout", SO_REQ_SEP },
 	                                  { OPT_EXEC, "--exec", SO_REQ_SEP },
@@ -480,7 +481,8 @@ static void printProgramUsage(const char* name) {
 	       "                 then `%s'.\n",
 	       platform::getDefaultClusterFilePath().c_str());
 	printf("  --log          Enables trace file logging for the CLI session.\n"
-	       "  --log-dir PATH Specifies the output directory for trace files. If\n"
+	       "  --log-dir PATH, --logdir PATH\n"
+	       "                 Specifies the output directory for trace files. If\n"
 	       "                 unspecified, defaults to the current directory. Has\n"
 	       "                 no effect unless --log is specified.\n"
 	       "  --log-group LOG_GROUP\n"
@@ -534,10 +536,11 @@ void initHelp() {
 	    "clear a key from the database",
 	    "Clear succeeds even if the specified key is not present, but may fail because of conflicts." ESCAPINGK);
 	helpMap["clearrange"] = CommandHelp(
-	    "clearrange <BEGINKEY> <ENDKEY>",
+	    "clearrange <BEGINKEY> [ENDKEY]",
 	    "clear a range of keys from the database",
-	    "All keys between BEGINKEY (inclusive) and ENDKEY (exclusive) are cleared from the database. This command will "
-	    "succeed even if the specified range is empty, but may fail because of conflicts." ESCAPINGK);
+	    "All keys between BEGINKEY (inclusive) and ENDKEY (exclusive) are cleared from the database. If ENDKEY is "
+	    "omitted, then all keys starting with BEGINKEY are cleared. This command will succeed even if the specified "
+	    "range is empty, but may fail because of conflicts." ESCAPINGK);
 	helpMap["exit"] = CommandHelp("exit", "exit the CLI", "");
 	helpMap["quit"] = CommandHelp();
 	helpMap["waitconnected"] = CommandHelp();
@@ -1623,6 +1626,14 @@ Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterConnecti
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "rangelock")) {
+					bool _result = co_await makeInterruptable(rangeLockCommandActor(localDb, tokens));
+					if (!_result) {
+						is_error = true;
+					}
+					continue;
+				}
+
 				if (tokencmp(tokens[0], "force_recovery_with_data_loss")) {
 					bool _result = co_await makeInterruptable(forceRecoveryWithDataLossCommandActor(db, tokens));
 					if (!_result)
@@ -1803,16 +1814,25 @@ Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterConnecti
 						continue;
 					}
 
-					if (tokens.size() != 3) {
-						printUsage(tokens[0]);
-						is_error = true;
-					} else {
+					if (tokens.size() == 2) {
+						// Prefix mode: clear all keys starting with BEGINKEY
+						getTransaction(db, tr, options, intrans);
+						tr->clear(prefixRange(tokens[1]));
+
+						if (!intrans) {
+							co_await commitTransaction(tr);
+						}
+					} else if (tokens.size() == 3) {
+						// Range mode: clear keys in [BEGINKEY, ENDKEY)
 						getTransaction(db, tr, options, intrans);
 						tr->clear(KeyRangeRef(tokens[1], tokens[2]));
 
 						if (!intrans) {
 							co_await commitTransaction(tr);
 						}
+					} else {
+						printUsage(tokens[0]);
+						is_error = true;
 					}
 					continue;
 				}

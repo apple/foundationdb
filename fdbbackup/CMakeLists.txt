@@ -69,4 +69,6 @@ if (NOT WIN32 AND NOT OPEN_FOR_IDE)
   add_test(NAME blob_backup_restore_tests COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/blob_backup_restore_test.sh ${CMAKE_SOURCE_DIR} ${CMAKE_BINARY_DIR})
   # Note: No --encrypt flag - BulkLoad doesn't support encryption yet
   add_test(NAME s3_backup_bulkdump_bulkload_tests COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/s3_backup_bulkdump_bulkload.sh ${CMAKE_SOURCE_DIR} ${CMAKE_BINARY_DIR})
+  set_tests_properties(dir_backup_tests blob_backup_restore_tests s3_backup_bulkdump_bulkload_tests
+    PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
 endif()

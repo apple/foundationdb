@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <algorithm>
+
 #include "fdbclient/Audit.h"
 #include "fdbclient/AuditUtils.h"
 #include "fdbclient/BulkDumping.h"
@@ -30,6 +32,7 @@
 #include "fdbclient/RunRYWTransaction.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
+#include "fdbserver/core/BackupPartitionMap.h"
 #include "fdbserver/core/BulkDumpUtil.h"
 #include "fdbserver/core/BulkLoadUtil.h"
 #include "fdbserver/datadistributor/DataDistributor.h"
@@ -84,9 +87,42 @@ std::set<int> const& normalDDQueueErrors() {
 		                    error_code_broken_promise,
 		                    error_code_data_move_cancelled,
 		                    error_code_data_move_dest_team_not_found,
+		                    error_code_dd_config_changed,
 		                    error_code_finish_move_keys_too_many_retries,
 		                    error_code_start_move_keys_too_many_retries };
 	return s;
+}
+
+struct DataDistributorDcIds {
+	std::vector<Optional<Key>> primary;
+	std::vector<Optional<Key>> remote;
+};
+
+// Selects the active primary DC and the first other configured DC, falling back to configuration order.
+DataDistributorDcIds getDataDistributorDcIds(const std::vector<RegionInfo>& regions, Optional<Key> activePrimaryDcId) {
+	DataDistributorDcIds dcIds;
+	if (regions.empty()) {
+		return dcIds;
+	}
+
+	auto primaryRegion = regions.begin();
+	if (activePrimaryDcId.present()) {
+		auto activeRegion = std::find_if(regions.begin(), regions.end(), [&](const RegionInfo& region) {
+			return region.dcId == activePrimaryDcId.get();
+		});
+		if (activeRegion != regions.end()) {
+			primaryRegion = activeRegion;
+		}
+	}
+
+	dcIds.primary.push_back(primaryRegion->dcId);
+	for (auto region = regions.begin(); region != regions.end(); ++region) {
+		if (region != primaryRegion) {
+			dcIds.remote.push_back(region->dcId);
+			break;
+		}
+	}
+	return dcIds;
 }
 
 } // anonymous namespace
@@ -307,6 +343,79 @@ Future<Void> remoteRecovered(Reference<AsyncVar<ServerDBInfo> const> db) {
 	}
 }
 
+// Watches backupPartitionRequiredKey.
+// On value=1, computes the user keyspace partitions and writes them to backupPartitionListKey.
+// On value=2, clears backupPartitionListKey.
+// In both cases the request key is cleared in the same commit.
+Future<Void> monitorBackupPartitionRequired(Database cx, KeyRangeMap<ShardTrackedData>* shards, UID ddId) {
+	// The partition computation can wait arbitrarily long on shard-metrics tracking, so it runs OUTSIDE any
+	// transaction to avoid transaction_too_old. A short re-read in the write transaction protects against
+	// the race where a value=2 (cleanup) arrives while we are computing for a value=1.
+	while (true) {
+		// Phase 1: peek the request key in a loop. If nothing pending, park on watch and wait, then re-read.
+		int8_t requestType = 0;
+		while (requestType == 0) {
+			ReadYourWritesTransaction tr(cx);
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				Optional<Value> value = co_await tr.get(backupPartitionRequiredKey);
+				requestType = value.present() ? decodeBackupPartitionRequiredValue(value.get()) : 0;
+				if (requestType == 0) {
+					Future<Void> watchFuture = tr.watch(backupPartitionRequiredKey);
+					co_await tr.commit();
+					co_await watchFuture;
+				}
+				continue;
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
+
+		// Phase 2: compute outside any transaction (may wait long on shard metrics).
+		std::vector<KeyRange> partitions;
+		if (requestType == 1) {
+			partitions = co_await calculateBackupPartitionKeyRanges(shards);
+		}
+
+		// Phase 3: short txn to re-check the request value and write the result.
+		{
+			ReadYourWritesTransaction tr(cx);
+			while (true) {
+				Error err;
+				try {
+					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+					Optional<Value> value = co_await tr.get(backupPartitionRequiredKey);
+					int8_t currentType = value.present() ? decodeBackupPartitionRequiredValue(value.get()) : 0;
+					if (currentType != requestType) {
+						// Someone wrote a new request while we were computing partitions; restart the outer loop
+						// so the next iteration acts on the new value.
+						break;
+					}
+					if (requestType == 1) {
+						tr.set(backupPartitionListKey, encodeBackupPartitionListValue(partitions));
+						tr.clear(backupPartitionRequiredKey);
+						co_await tr.commit();
+						TraceEvent("DDBackupPartitionsComputed", ddId).detail("NumPartitions", partitions.size());
+					} else {
+						tr.clear(backupPartitionListKey);
+						tr.clear(backupPartitionRequiredKey);
+						co_await tr.commit();
+						TraceEvent("DDBackupPartitionsCleared", ddId);
+					}
+					break;
+				} catch (Error& e) {
+					err = e;
+				}
+				co_await tr.onError(err);
+			}
+		}
+	}
+}
+
 // Ensures that the serverKeys key space is properly coalesced
 // This method is only used for testing and is not implemented in a manner that is safe for large databases
 Future<Void> debugCheckCoalescing(Database cx) {
@@ -354,6 +463,7 @@ Future<UID> launchAudit(Reference<DataDistributor> self,
                         KeyValueStoreType auditStorageEngineType);
 Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req);
 Future<Void> periodicAuditLocationMetadata(Reference<DataDistributor> self);
+Future<Void> monitorShardEncodeKnob(UID ddId);
 void loadAndDispatchAudit(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
 Future<Void> dispatchAuditStorageServerShard(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
 Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> self,
@@ -512,15 +622,11 @@ public:
 	}
 
 	void initDcInfo() {
-		primaryDcId.clear();
-		remoteDcIds.clear();
-		const std::vector<RegionInfo>& regions = configuration.regions;
-		if (!configuration.regions.empty()) {
-			primaryDcId.push_back(regions[0].dcId);
-		}
-		if (configuration.regions.size() > 1) {
-			remoteDcIds.push_back(regions[1].dcId);
-		}
+		Optional<Key> activePrimaryDcId =
+		    txnProcessor->isMocked() ? Optional<Key>() : dbInfo->get().master.locality.dcId();
+		auto dcIds = getDataDistributorDcIds(configuration.regions, activePrimaryDcId);
+		primaryDcId = std::move(dcIds.primary);
+		remoteDcIds = std::move(dcIds.remote);
 	}
 
 	Future<Void> waitDataDistributorEnabled() const {
@@ -2814,6 +2920,7 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 			}
 
 			actors.push_back(self->pollMoveKeysLock());
+			actors.push_back(monitorBackupPartitionRequired(self->txnProcessor->context(), &shards, self->ddId));
 
 			self->context->tracker = makeReference<DataDistributionTracker>(
 			    DataDistributionTrackerInitParams{ .db = self->txnProcessor,
@@ -2973,6 +3080,8 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			actors.push_back(periodicAuditLocationMetadata(self));
 
+			actors.push_back(monitorShardEncodeKnob(self->ddId));
+
 			co_await waitForAll(actors);
 			ASSERT_WE_THINK(false);
 			co_return;
@@ -3047,6 +3156,22 @@ static std::set<int> const& normalDataDistributorErrors() {
 		s.insert(error_code_audit_storage_failed);
 	}
 	return s;
+}
+
+// Monitor SHARD_ENCODE_LOCATION_METADATA knob for changes. If flipped mid-run,
+// throw dd_config_changed to restart DD cleanly (preventing in-flight move actors
+// from hitting asserts due to knob/path mismatch).
+Future<Void> monitorShardEncodeKnob(UID ddId) {
+	bool initial = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA;
+	loop {
+		co_await delay(5.0);
+		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA != initial) {
+			TraceEvent(SevInfo, "DDShardEncodeKnobChanged", ddId)
+			    .detail("OldValue", initial)
+			    .detail("NewValue", SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+			throw dd_config_changed();
+		}
+	}
 }
 
 template <class Req>
@@ -4003,21 +4128,24 @@ Future<Void> periodicAuditLocationMetadata(Reference<DataDistributor> self) {
 		co_return;
 	}
 	co_await self->auditStorageInitialized.getFuture();
-	TraceEvent("PeriodicAuditLocationMetadataEnabled", self->ddId)
+	TraceEvent("DDAuditPeriodicAuditLocationMetadataEnabled", self->ddId)
 	    .detail("IntervalSeconds", SERVER_KNOBS->AUDIT_LOCATION_METADATA_INTERVAL);
 	while (true) {
 		co_await delay(SERVER_KNOBS->AUDIT_LOCATION_METADATA_INTERVAL);
 		try {
+			TraceEvent("DDAuditPeriodicAuditLocationMetadata", self->ddId).detail("State", "Starting");
 			co_await self->auditStorageLocationMetadataLaunchingLock.take(TaskPriority::DefaultYield);
 			FlowLock::Releaser holder(self->auditStorageLocationMetadataLaunchingLock);
 			UID auditID =
 			    co_await launchAudit(self, allKeys, AuditType::ValidateLocationMetadata, KeyValueStoreType::END);
-			TraceEvent("PeriodicAuditLocationMetadataLaunched", self->ddId).detail("AuditID", auditID);
+			TraceEvent("DDAuditPeriodicAuditLocationMetadata", self->ddId)
+			    .detail("AuditID", auditID)
+			    .detail("State", "Finished");
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
 			}
-			TraceEvent(SevWarn, "PeriodicAuditLocationMetadataError", self->ddId).error(e);
+			TraceEvent(SevWarn, "DDAuditPeriodicAuditLocationMetadataError", self->ddId).error(e);
 		}
 	}
 }
@@ -5302,6 +5430,28 @@ TEST_CASE("/DataDistribution/StorageWiggler/Order") {
 		ASSERT(id == correctOrder[i]);
 	}
 	ASSERT(!wiggler.getNextServerId().present());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Initialization/DcIds") {
+	RegionInfo configuredPrimary;
+	configuredPrimary.dcId = "primary"_sr;
+	RegionInfo configuredRemote;
+	configuredRemote.dcId = "remote"_sr;
+	std::vector<RegionInfo> regions{ configuredPrimary, configuredRemote };
+
+	auto dcIds = getDataDistributorDcIds(regions, Optional<Key>("primary"_sr));
+	ASSERT(dcIds.primary == std::vector<Optional<Key>>{ Optional<Key>("primary"_sr) });
+	ASSERT(dcIds.remote == std::vector<Optional<Key>>{ Optional<Key>("remote"_sr) });
+
+	dcIds = getDataDistributorDcIds(regions, Optional<Key>("remote"_sr));
+	ASSERT(dcIds.primary == std::vector<Optional<Key>>{ Optional<Key>("remote"_sr) });
+	ASSERT(dcIds.remote == std::vector<Optional<Key>>{ Optional<Key>("primary"_sr) });
+
+	dcIds = getDataDistributorDcIds(regions, Optional<Key>("unknown"_sr));
+	ASSERT(dcIds.primary == std::vector<Optional<Key>>{ Optional<Key>("primary"_sr) });
+	ASSERT(dcIds.remote == std::vector<Optional<Key>>{ Optional<Key>("remote"_sr) });
+
 	return Void();
 }
 

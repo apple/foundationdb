@@ -483,7 +483,7 @@ Future<Void> readCommitted(Database cx,
 
 			// When this buggify line is enabled, if there are more than 1 result then use half of the results
 			// Copy the data instead of messing with the results directly to avoid TSS issues.
-			if (values.size() > 1 && BUGGIFY) {
+			if (values.size() > 1 && buggify()) {
 				RangeResult copy;
 				// only copy first half of values into copy
 				for (int i = 0; i < values.size() / 2; i++) {
@@ -566,7 +566,7 @@ Future<Void> readCommitted(Database cx,
 
 			// When this buggify line is enabled, if there are more than 1 result then use half of the results.
 			// Copy the data instead of messing with the results directly to avoid TSS issues.
-			if (rangevalue.size() > 1 && BUGGIFY) {
+			if (rangevalue.size() > 1 && buggify()) {
 				RangeResult copy;
 				// only copy first half of rangevalue into copy
 				for (int i = 0; i < rangevalue.size() / 2; i++) {
@@ -928,7 +928,7 @@ Future<Void> applyMutations(Database cx,
 			co_await coalesceKeyVersionCache(
 			    uid, newEndVersion, keyVersion, commit, committedVersion, addActor, &commitLock);
 			beginVersion = newEndVersion;
-			if (BUGGIFY) {
+			if (buggify()) {
 				co_await delay(2.0);
 			}
 		}
@@ -1012,7 +1012,7 @@ static Future<Void> _eraseLogData(Reference<ReadYourWritesTransaction> tr,
 		}
 	}
 
-	if (endVersion.present() || backupVersions.size() != 1 || BUGGIFY) {
+	if (endVersion.present() || backupVersions.size() != 1 || buggify()) {
 		if (!endVersion.present()) {
 			// Clear current backup version history
 			tr->clear(backupLatestVersionsKey);
@@ -1028,7 +1028,7 @@ static Future<Void> _eraseLogData(Reference<ReadYourWritesTransaction> tr,
 		if (clearLogRangesRequired) {
 			if ((nextSmallestVersion - currBeginVersion) / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE >=
 			        std::numeric_limits<uint8_t>::max() ||
-			    BUGGIFY) {
+			    buggify()) {
 				Key baLogRangePrefix = destUidValue.withPrefix(backupLogKeys.begin);
 
 				for (int h = 0; h <= std::numeric_limits<uint8_t>::max(); h++) {

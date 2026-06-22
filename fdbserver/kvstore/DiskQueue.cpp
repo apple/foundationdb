@@ -95,7 +95,7 @@ struct StringBuffer {
 			                        ~(alignment - 1)); // first multiple of alignment greater than or equal to b
 			ASSERT(p >= b && p + reserved <= e && int64_t(p) % alignment == 0);
 
-			if (str.size() > 0) {
+			if (!str.empty()) {
 				memcpy(p, str.begin(), str.size());
 			}
 			str.contents() = StringRef(p, str.size());
@@ -171,9 +171,9 @@ public:
 	    readyToPush(Void()), lastCommit(Void()), isFirstCommit(true), readingBuffer(dbgid), readingFile(-1),
 	    readingPage(-1), writingPos(-1), fileExtensionBytes(SERVER_KNOBS->DISK_QUEUE_FILE_EXTENSION_BYTES),
 	    fileShrinkBytes(SERVER_KNOBS->DISK_QUEUE_FILE_SHRINK_BYTES) {
-		if (BUGGIFY)
+		if (buggify())
 			fileExtensionBytes = _PAGE_SIZE * deterministicRandom()->randomSkewedUInt32(1, 10 << 10);
-		if (BUGGIFY)
+		if (buggify())
 			fileShrinkBytes = _PAGE_SIZE * deterministicRandom()->randomSkewedUInt32(1, 10 << 10);
 		files[0].dbgFilename = filename(0);
 		files[1].dbgFilename = filename(1);
@@ -372,7 +372,7 @@ public:
 				                                             self->fileExtensionBytes + self->fileShrinkBytes);
 				const int64_t desiredMaxFileSize =
 				    pageCeiling(std::max(activeDataVolume, SERVER_KNOBS->TLOG_HARD_LIMIT_BYTES * 2));
-				const bool frivolouslyTruncate = BUGGIFY_WITH_PROB(0.1);
+				const bool frivolouslyTruncate = buggify(0.1);
 				if (self->files[1].size > desiredMaxFileSize || frivolouslyTruncate) {
 					// Either shrink self->files[1] to the size of self->files[0], or chop off fileShrinkBytes
 					int64_t maxShrink =
@@ -467,7 +467,7 @@ public:
 
 			Future<Void> pushed = co_await self->push(pageData, &syncFiles);
 			pushing.send(Void());
-			ASSERT(syncFiles.size() >= 1 && syncFiles.size() <= 2);
+			ASSERT(!syncFiles.empty() && syncFiles.size() <= 2);
 			CODE_PROBE(2 == syncFiles.size(), "push spans both files");
 			co_await pushed;
 
@@ -773,8 +773,7 @@ public:
 
 		// Read up to 1MB into readingBuffer
 		int len = std::min<int64_t>((files[readingFile].size / sizeof(Page) - readingPage) * sizeof(Page),
-		                            BUGGIFY_WITH_PROB(1.0) ? sizeof(Page) * deterministicRandom()->randomInt(1, 4)
-		                                                   : (1 << 20));
+		                            buggify(1.0) ? sizeof(Page) * deterministicRandom()->randomInt(1, 4) : (1 << 20));
 		readingBuffer.clear();
 		readingBuffer.alignReserve(sizeof(Page), len);
 		void* p = readingBuffer.append(len);
@@ -794,7 +793,7 @@ public:
 
 			if (!self->readingBuffer.size()) {
 				Future<Void> f = Void();
-				// if (BUGGIFY) f = delay( deterministicRandom()->random01() * 0.1 );
+				// if (buggify()) f = delay( deterministicRandom()->random01() * 0.1 );
 
 				int read = co_await self->fillReadingBuffer();
 				ASSERT(read == self->readingBuffer.size());
@@ -890,7 +889,7 @@ public:
 		ASSERT(recovered);
 		uint8_t const* begin = contents.begin();
 		uint8_t const* end = contents.end();
-		CODE_PROBE(contents.size() && pushedPageCount(), "More than one push between commits");
+		CODE_PROBE(!contents.empty() && pushedPageCount(), "More than one push between commits");
 
 		bool pushAtEndOfPage = contents.size() >= 4 && pushedPageCount() && backPage().remainingCapacity() < 4;
 		CODE_PROBE(pushAtEndOfPage, "Push right at the end of a page, possibly splitting size");
@@ -1337,7 +1336,7 @@ private:
 			}
 
 			Standalone<StringRef> page = co_await self->rawQueue->readNextPage();
-			if (!page.size()) {
+			if (page.empty()) {
 				TraceEvent("DQRecEOF", self->dbgid)
 				    .detail("NextReadLocation", self->nextReadLocation)
 				    .detail("File0Name", self->rawQueue->files[0].dbgFilename);
@@ -1404,7 +1403,7 @@ private:
 		Standalone<StringRef> lastPageData = co_await self->rawQueue->readFirstAndLastPages(&comparePages);
 		self->initialized = true;
 
-		if (!lastPageData.size()) {
+		if (lastPageData.empty()) {
 			// There are no valid pages, so apparently this is a completely empty queue
 			self->nextReadLocation = 0;
 			self->lastCommittedSeq = 0;

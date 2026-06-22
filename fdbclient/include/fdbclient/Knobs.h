@@ -158,6 +158,7 @@ public:
 
 	// Backup
 	int BACKUP_LOCAL_FILE_WRITE_BLOCK;
+	int BACKUP_MANIFEST_WRITE_CHUNK_SIZE;
 	int BACKUP_CONCURRENT_DELETES;
 	int BACKUP_SIMULATED_LIMIT_BYTES;
 	int BACKUP_GET_RANGE_LIMIT_BYTES;
@@ -208,6 +209,8 @@ public:
 
 	// interval for version directory bucketing in range-partitioned backup.
 	int64_t BACKUP_RANGE_PARTITIONED_VDIR_INTERVAL;
+	// Number of contiguous user keyspace partitions for range-partitioned backup.
+	int BACKUP_NUM_OF_PARTITIONS;
 	bool BACKUP_CONTAINER_LOCAL_ALLOW_RELATIVE_PATH;
 	bool ENABLE_REPLICA_CONSISTENCY_CHECK_ON_BACKUP_READS;
 	int BACKUP_CONSISTENCY_CHECK_REQUIRED_REPLICAS;

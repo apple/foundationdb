@@ -18,9 +18,10 @@
  * limitations under the License.
  */
 
-#include "BackupPartitionMap.h"
+#include "fdbserver/core/BackupPartitionMap.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/Knobs.h"
 #include "fdbclient/SystemData.h"
 
 std::string serializePartitionListJSON(PartitionMap const& partitionMap) {
@@ -42,8 +43,7 @@ std::string serializePartitionListJSON(PartitionMap const& partitionMap) {
 
 // KeyRangeMap guarantees that key ranges are contiguous with no gaps in shards.
 Future<std::vector<KeyRange>> calculateBackupPartitionKeyRanges(KeyRangeMap<ShardTrackedData>* shards) {
-	// TODO akanksha: Hardcoded for now.
-	const int NUM_PARTITIONS = 100;
+	const int NUM_PARTITIONS = CLIENT_KNOBS->BACKUP_NUM_OF_PARTITIONS;
 	std::vector<std::pair<KeyRange, int64_t>> userShards; // Pair of shard key range and shard size in bytes.
 	int64_t totalBytes = 0;
 

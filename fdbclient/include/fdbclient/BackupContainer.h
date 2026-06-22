@@ -49,6 +49,9 @@ public:
 	virtual ~IBackupFile() {}
 	// Backup files are append-only and cannot have more than 1 append outstanding at once.
 	virtual Future<Void> append(const void* data, int len) = 0;
+	// Non-virtual size_t overload: safely chunks large writes so len never overflows the int parameter
+	// of the virtual append(). Uses CLIENT_KNOBS->BACKUP_MANIFEST_WRITE_CHUNK_SIZE as the chunk size.
+	Future<Void> append(const void* data, size_t len);
 	virtual Future<Void> finish() = 0;
 	inline std::string getFileName() const { return m_fileName; }
 	virtual int64_t size() const = 0;

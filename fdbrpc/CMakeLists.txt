@@ -1,5 +1,6 @@
 fdb_find_sources(FDBRPC_SRCS)
 list(REMOVE_ITEM FDBRPC_SRCS LinkTest.cpp)
+list(REMOVE_ITEM FDBRPC_SRCS fdbrpc_test.cpp)
 
 set(COMPILE_EIO OFF)
 
@@ -30,8 +31,13 @@ add_flow_target(LINK_TEST NAME fdbrpclinktest SRCS LinkTest.cpp)
 target_link_libraries(fdbrpclinktest PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,fdbrpc>" rapidjson)
 target_include_directories(fdbrpclinktest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
 
+add_flow_target(EXECUTABLE NAME fdbrpc_test SRCS fdbrpc_test.cpp)
+set_target_properties(fdbrpc_test PROPERTIES EXCLUDE_FROM_ALL TRUE)
+target_link_libraries(fdbrpc_test PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,fdbrpc>" rapidjson)
+
 if(COMPILE_EIO)
   add_library(eio STATIC libeio/eio.c)
+  set_target_properties(eio PROPERTIES C_CLANG_TIDY "")
   if(USE_VALGRIND)
     target_link_libraries(eio PUBLIC valgrind)
   endif()
@@ -48,6 +54,7 @@ if(${COROUTINE_IMPL} STREQUAL libcoro)
     list(APPEND CORO_SRCS libcoroutine/context.c)
   endif()
   add_library(coro STATIC ${CORO_SRCS})
+  set_target_properties(coro PROPERTIES C_CLANG_TIDY "")
   target_link_libraries(coro PRIVATE flow)
   target_include_directories(coro PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/libcoroutine)
   if(WIN32)

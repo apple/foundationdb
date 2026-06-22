@@ -1110,9 +1110,11 @@ int readRangeInDb(PhysicalShard* shard,
 		auto* cursor = readIter->iter.get();
 		cursor->Seek(toSlice(range.begin));
 		while (cursor->Valid() && toStringRef(cursor->key()) < range.end) {
-			KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
-			accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
-			result->push_back_deep(result->arena(), kv);
+			KeyRef key = toStringRef(cursor->key());
+			ValueRef value = toStringRef(cursor->value());
+
+			accumulatedBytes += sizeof(KeyValueRef) + key.expectedSize() + value.expectedSize();
+			result->emplace_back_deep(result->arena(), key, value);
 			// Calling `cursor->Next()` is potentially expensive, so short-circut here just in case.
 			if (result->size() >= rowLimit || accumulatedBytes >= byteLimit) {
 				break;
@@ -1127,9 +1129,11 @@ int readRangeInDb(PhysicalShard* shard,
 			cursor->Prev();
 		}
 		while (cursor->Valid() && toStringRef(cursor->key()) >= range.begin) {
-			KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
-			accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
-			result->push_back_deep(result->arena(), kv);
+			KeyRef key = toStringRef(cursor->key());
+			ValueRef value = toStringRef(cursor->value());
+
+			accumulatedBytes += sizeof(KeyValueRef) + key.expectedSize() + value.expectedSize();
+			result->emplace_back_deep(result->arena(), key, value);
 			// Calling `cursor->Prev()` is potentially expensive, so short-circuit here just in case.
 			if (result->size() >= -rowLimit || accumulatedBytes >= byteLimit) {
 				break;
@@ -1227,7 +1231,7 @@ public:
 				    .detail("NumSstFiles", numSstFiles);
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_actor_cancelled) {
+			if (e.code() != error_code_actor_cancelled && e.code() != error_code_broken_promise) {
 				TraceEvent(SevError, "ShardedRocksShardMetricsLoggerError").errorUnsuppressed(e);
 			}
 		}
@@ -2231,7 +2235,7 @@ Future<Void> rocksDBAggregatedMetricsLogger(std::shared_ptr<ShardedRocksDBState>
 			}
 		}
 	} catch (Error& e) {
-		if (e.code() != error_code_actor_cancelled) {
+		if (e.code() != error_code_actor_cancelled && e.code() != error_code_broken_promise) {
 			TraceEvent(SevError, "ShardedRocksDBMetricsError").errorUnsuppressed(e);
 		}
 	}
@@ -2262,7 +2266,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				histogram->sample(timer_monotonic() - startTime);
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_actor_cancelled) {
+			if (e.code() != error_code_actor_cancelled && e.code() != error_code_broken_promise) {
 				TraceEvent(SevError, "RefreshReadIteratorPoolError").errorUnsuppressed(e);
 			}
 		}
@@ -2281,7 +2285,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				eventListener->resetCounters();
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_actor_cancelled) {
+			if (e.code() != error_code_actor_cancelled && e.code() != error_code_broken_promise) {
 				TraceEvent(SevError, "RefreshRocksDBBackgroundEventCounter").errorUnsuppressed(e);
 			}
 		}
@@ -3751,7 +3755,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				}
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_actor_cancelled) {
+			if (e.code() != error_code_actor_cancelled && e.code() != error_code_broken_promise) {
 				TraceEvent(SevError, "ShardedRocksDBCompactionActorError").errorUnsuppressed(e);
 			}
 		}
@@ -3779,7 +3783,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				}
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_actor_cancelled) {
+			if (e.code() != error_code_actor_cancelled && e.code() != error_code_broken_promise) {
 				TraceEvent(SevError, "DeleteEmptyShardsError").errorUnsuppressed(e);
 			}
 		}
@@ -3928,8 +3932,6 @@ IKeyValueStore* keyValueStoreShardedRocksDB(std::string const& path,
 }
 
 #ifdef WITH_ROCKSDB
-#include "flow/UnitTest.h"
-
 namespace {
 TEST_CASE("noSim/ShardedRocksDB/Initialization") {
 	const std::string rocksDBTestDir = "sharded-rocksdb-test-db";

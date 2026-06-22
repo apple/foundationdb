@@ -73,7 +73,7 @@ Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVersionRe
 
 Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
 	Span span("M:getVersion"_loc, req.spanContext);
-	std::map<UID, CommitProxyVersionReplies>::iterator proxyItr =
+	auto proxyItr =
 	    self->lastCommitProxyVersionReplies.find(req.requestingProxy); // lastCommitProxyVersionReplies never changes
 
 	++self->getCommitVersionRequests;
@@ -110,7 +110,7 @@ Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req)
 
 		} else {
 			double t1 = now();
-			if (BUGGIFY) {
+			if (buggify()) {
 				t1 = self->lastVersionTime;
 			}
 
@@ -210,7 +210,7 @@ MasterData::MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
 	}
 }
 
-MasterData::~MasterData() {}
+MasterData::~MasterData() = default;
 
 Future<Void> provideVersions(Reference<MasterData> self) {
 	ActorCollection versionActors(false);
@@ -315,7 +315,7 @@ Future<Void> updateRecoveryData(Reference<MasterData> self) {
 		self->recoveryTransactionVersion = req.recoveryTransactionVersion;
 		self->lastEpochEnd = req.lastEpochEnd;
 
-		if (req.commitProxies.size() > 0) {
+		if (!req.commitProxies.empty()) {
 			self->lastCommitProxyVersionReplies.clear();
 
 			for (auto& p : req.commitProxies) {
@@ -324,7 +324,7 @@ Future<Void> updateRecoveryData(Reference<MasterData> self) {
 		}
 		if (req.versionEpoch.present()) {
 			self->referenceVersion = req.versionEpoch.get();
-		} else if (BUGGIFY) {
+		} else if (buggify()) {
 			// Cannot use a positive version epoch in simulation because of the
 			// clock starting at 0. A positive version epoch would mean the initial
 			// cluster version was negative.
@@ -408,7 +408,7 @@ Future<Void> masterServer(MasterInterface mi,
 				    .detail("MyToken", lifetime.toString())
 				    .detail("CurrentToken", db->get().masterLifetime.toString());
 				CODE_PROBE(true, "Master replaced, dying");
-				if (BUGGIFY) {
+				if (buggify()) {
 					co_await delay(5);
 				}
 				throw worker_removed();

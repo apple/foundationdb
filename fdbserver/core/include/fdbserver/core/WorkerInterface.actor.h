@@ -57,6 +57,7 @@ struct WorkerInterface {
 	RequestStream<struct InitializeStorageRequest> storage;
 	RequestStream<struct InitializeLogRouterRequest> logRouter;
 	RequestStream<struct InitializeBackupRequest> backup;
+	RequestStream<struct InitializeRangeBackupRequest> rangeBackup;
 
 	RequestStream<struct LoadedPingRequest> debugPing;
 	RequestStream<struct CoordinationPingMessage> coordinationPing;
@@ -121,7 +122,8 @@ struct WorkerInterface {
 		           execReq,
 		           workerSnapReq,
 		           backup,
-		           updateServerDBInfo);
+		           updateServerDBInfo,
+		           rangeBackup);
 	}
 };
 
@@ -644,13 +646,27 @@ struct InitializeBackupReply {
 	}
 };
 
+struct InitializeRangeBackupReply {
+	constexpr static FileIdentifier file_identifier = 1986264;
+	struct BackupInterface interf;
+	LogEpoch backupEpoch;
+
+	InitializeRangeBackupReply() = default;
+	InitializeRangeBackupReply(BackupInterface bi, LogEpoch e) : interf(bi), backupEpoch(e) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, interf, backupEpoch);
+	}
+};
+
 struct InitializeBackupRequest {
 	constexpr static FileIdentifier file_identifier = 1245415;
 	UID reqId;
 	LogEpoch recruitedEpoch; // The epoch the worker is recruited.
 	LogEpoch backupEpoch; // The epoch the worker should work on. If different from the recruitedEpoch, then it refers
 	                      // to some previous epoch with unfinished work.
-	Tag routerTag;
+	Tag tag;
 	int totalTags;
 	Version startVersion;
 	Optional<Version> endVersion;
@@ -661,7 +677,27 @@ struct InitializeBackupRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reqId, recruitedEpoch, backupEpoch, routerTag, totalTags, startVersion, endVersion, reply);
+		serializer(ar, reqId, recruitedEpoch, backupEpoch, tag, totalTags, startVersion, endVersion, reply);
+	}
+};
+
+struct InitializeRangeBackupRequest {
+	constexpr static FileIdentifier file_identifier = 1986263;
+	UID reqId;
+	LogEpoch recruitedEpoch;
+	LogEpoch backupEpoch;
+	Tag tag;
+	int totalTags;
+	Version startVersion;
+	Optional<Version> endVersion;
+	ReplyPromise<struct InitializeRangeBackupReply> reply;
+
+	InitializeRangeBackupRequest() = default;
+	explicit InitializeRangeBackupRequest(UID id) : reqId(id) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reqId, recruitedEpoch, backupEpoch, tag, totalTags, startVersion, endVersion, reply);
 	}
 };
 
@@ -1142,6 +1178,6 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
 	}
 }
 
-#include "fdbserver/core/ServerDBInfo.h"
 #include "flow/unactorcompiler.h"
+#include "fdbserver/core/ServerDBInfo.h"
 #endif

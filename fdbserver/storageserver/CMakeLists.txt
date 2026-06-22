@@ -5,6 +5,10 @@ add_fdbserver_link_test(fdbserver_storageserverlinktest
   fdbserver_storageserver
   fdbserver_logsystem
   fdbserver_core)
+add_fdbserver_unit_test(fdbserver_storageserver_test storageserver
+  fdbserver_storageserver
+  fdbserver_logsystem
+  fdbserver_core)
 
 configure_fdbserver_common_includes(fdbserver_storageserver)
 target_include_directories(fdbserver_storageserver

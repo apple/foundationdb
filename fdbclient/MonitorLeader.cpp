@@ -249,7 +249,7 @@ TEST_CASE("/fdbclient/MonitorLeader/ConnectionString/hostname") {
 
 		ClusterConnectionString cs(hostnames, "TestCluster:0"_sr);
 		ASSERT(cs.hostnames.size() == 2);
-		ASSERT(cs.coords.size() == 0);
+		ASSERT(cs.coords.empty());
 		ASSERT(cs.toString() == connectionString);
 	}
 
@@ -454,7 +454,7 @@ std::string ClusterConnectionString::toString() const {
 ClientCoordinators::ClientCoordinators(Reference<IClusterConnectionRecord> ccr) : ccr(ccr) {
 	ClusterConnectionString cs = ccr->getConnectionString();
 	clusterKey = cs.clusterKey();
-	for (auto h : cs.hostnames) {
+	for (const auto& h : cs.hostnames) {
 		clientLeaderServers.push_back(ClientLeaderRegInterface(h));
 	}
 	for (auto s : cs.coords) {
@@ -548,7 +548,7 @@ Optional<std::pair<LeaderInfo, bool>> getLeader(const std::vector<Optional<Leade
 		}
 	}
 
-	if (!maskedNominees.size())
+	if (maskedNominees.empty())
 		return Optional<std::pair<LeaderInfo, bool>>();
 
 	std::sort(maskedNominees.begin(),
@@ -686,7 +686,7 @@ OpenDatabaseRequest ClientData::getRequest() {
 			tryInsertIntoSamples(req.issues[issue], networkAddress, traceLogGroup);
 		}
 
-		if (!ci.second.versions.size()) {
+		if (ci.second.versions.empty()) {
 			tryInsertIntoSamples(req.supportedVersions[ClientVersionRef()], networkAddress, traceLogGroup);
 			continue;
 		}
@@ -726,8 +726,8 @@ Future<Void> getClientInfoFromLeader(Reference<AsyncVar<Optional<ClusterControll
 		if (res.index() == 0) {
 			ClientDBInfo ni = std::get<0>(std::move(res));
 			TraceEvent("GetClientInfoFromLeaderGotClientInfo", knownLeader->get().get().clientInterface.id())
-			    .detail("CommitProxy0", ni.commitProxies.size() ? ni.commitProxies[0].address().toString() : "")
-			    .detail("GrvProxy0", ni.grvProxies.size() ? ni.grvProxies[0].address().toString() : "")
+			    .detail("CommitProxy0", !ni.commitProxies.empty() ? ni.commitProxies[0].address().toString() : "")
+			    .detail("GrvProxy0", !ni.grvProxies.empty() ? ni.grvProxies[0].address().toString() : "")
 			    .detail("ClientID", ni.id);
 			clientData->clientInfo->set(CachedSerialization<ClientDBInfo>(ni));
 		}
@@ -747,7 +747,7 @@ Future<Void> monitorLeaderAndGetClientInfo(Key clusterKey,
 	    new AsyncVar<Optional<ClusterControllerClientInterface>>{});
 
 	clientLeaderServers.reserve(hostnames.size() + coordinators.size());
-	for (auto h : hostnames) {
+	for (const auto& h : hostnames) {
 		clientLeaderServers.push_back(ClientLeaderRegInterface(h));
 	}
 	for (auto s : coordinators) {
@@ -782,7 +782,7 @@ Future<Void> monitorLeaderAndGetClientInfo(Key clusterKey,
 				co_return;
 			}
 
-			if (leader.get().first.serializedInfo.size()) {
+			if (!leader.get().first.serializedInfo.empty()) {
 				ObjectReader reader(leader.get().first.serializedInfo.begin(), IncludeVersion());
 				ClusterControllerClientInterface res;
 				reader.deserialize(res);
@@ -861,7 +861,7 @@ Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 	for (const auto& c : cs.coords) {
 		clientLeaderServers.push_back(ClientLeaderRegInterface(c));
 	}
-	ASSERT(clientLeaderServers.size() > 0);
+	ASSERT(!clientLeaderServers.empty());
 
 	deterministicRandom()->randomShuffle(clientLeaderServers);
 

@@ -73,7 +73,7 @@ private: // construction
 
 struct BitFlipper {
 	static BitFlipper* flipper();
-	double getBitFlipPercentage() { return bitFlipPercentage; }
+	double getBitFlipPercentage() const { return bitFlipPercentage; }
 
 	void setBitFlipPercentage(double percentage) { bitFlipPercentage = percentage; }
 

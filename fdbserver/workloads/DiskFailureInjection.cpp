@@ -25,7 +25,6 @@
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/core/QuietDatabase.h"
 #include "fdbserver/core/WorkerEvents.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 	static constexpr auto NAME = "DiskFailureInjection";

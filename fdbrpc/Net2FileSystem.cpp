@@ -20,6 +20,8 @@
 
 #include "fdbrpc/Net2FileSystem.h"
 
+#include <algorithm>
+
 // Define boost::asio::io_service
 #ifndef BOOST_SYSTEM_NO_LIB
 #define BOOST_SYSTEM_NO_LIB
@@ -133,10 +135,13 @@ Future<Reference<class IAsyncFile>> Net2FileSystem::open(const std::string& file
 #ifdef __linux__
 	if (checkFileSystem) {
 		dev_t fileDeviceId = getDeviceId(filename);
-		if (fileDeviceId != this->fileSystemDeviceId) {
-			TraceEvent(SevError, "DeviceIdMismatched")
-			    .detail("FileSystemDeviceId", this->fileSystemDeviceId)
-			    .detail("FileDeviceId", fileDeviceId);
+		if (std::find(this->fileSystemDeviceIds.begin(), this->fileSystemDeviceIds.end(), fileDeviceId) ==
+		    this->fileSystemDeviceIds.end()) {
+			TraceEvent te(SevError, "DeviceIdMismatched");
+			te.detail("FileDeviceId", fileDeviceId);
+			for (size_t i = 0; i < this->fileSystemDeviceIds.size(); ++i) {
+				te.detail(format("AllowedFileSystemDeviceId%zu", i).c_str(), this->fileSystemDeviceIds[i]);
+			}
 			throw io_error();
 		}
 	}
@@ -189,36 +194,52 @@ ActorLineageSet& Net2FileSystem::getActorLineageSet() {
 }
 #endif
 
-void Net2FileSystem::newFileSystem(double ioTimeout, const std::string& fileSystemPath) {
-	g_network->setGlobal(INetwork::enFileSystem, (flowGlobalType) new Net2FileSystem(ioTimeout, fileSystemPath));
+void Net2FileSystem::newFileSystem(double ioTimeout, const std::vector<std::string>& fileSystemPaths) {
+	g_network->setGlobal(INetwork::enFileSystem, (flowGlobalType) new Net2FileSystem(ioTimeout, fileSystemPaths));
 }
 
-Net2FileSystem::Net2FileSystem(double ioTimeout, const std::string& fileSystemPath) {
+void Net2FileSystem::newFileSystem(double ioTimeout, const std::string& fileSystemPath) {
+	newFileSystem(ioTimeout,
+	              fileSystemPath.empty() ? std::vector<std::string>() : std::vector<std::string>{ fileSystemPath });
+}
+
+Net2FileSystem::Net2FileSystem(double ioTimeout, const std::string& fileSystemPath)
+  : Net2FileSystem(ioTimeout,
+                   fileSystemPath.empty() ? std::vector<std::string>() : std::vector<std::string>{ fileSystemPath }) {}
+
+Net2FileSystem::Net2FileSystem(double ioTimeout, const std::vector<std::string>& fileSystemPaths) {
 	Net2AsyncFile::init();
 #ifdef __linux__
 	if (!FLOW_KNOBS->DISABLE_POSIX_KERNEL_AIO)
 		AsyncFileKAIO::init(Reference<IEventFD>(N2::ASIOReactor::getEventFD()), ioTimeout);
 
-	if (fileSystemPath.empty()) {
+	if (fileSystemPaths.empty()) {
 		checkFileSystem = false;
 	} else {
 		checkFileSystem = true;
 
-		try {
-			this->fileSystemDeviceId = getDeviceId(fileSystemPath);
-			if (fileSystemPath != "/") {
-				dev_t fileSystemParentDeviceId = getDeviceId(parentDirectory(fileSystemPath));
-				if (this->fileSystemDeviceId == fileSystemParentDeviceId) {
-					criticalError(FDB_EXIT_ERROR,
-					              "FileSystemError",
-					              format("`%s' is not a mount point", fileSystemPath.c_str()).c_str());
+		for (const auto& fileSystemPath : fileSystemPaths) {
+			try {
+				dev_t fileSystemDeviceId = getDeviceId(fileSystemPath);
+				if (fileSystemPath != "/") {
+					dev_t fileSystemParentDeviceId = getDeviceId(parentDirectory(fileSystemPath));
+					if (fileSystemDeviceId == fileSystemParentDeviceId) {
+						criticalError(FDB_EXIT_ERROR,
+						              "FileSystemError",
+						              format("`%s' is not a mount point", fileSystemPath.c_str()).c_str());
+					}
 				}
+				this->fileSystemDeviceIds.push_back(fileSystemDeviceId);
+			} catch (Error&) {
+				criticalError(FDB_EXIT_ERROR,
+				              "FileSystemError",
+				              format("Could not get device id from `%s'", fileSystemPath.c_str()).c_str());
 			}
-		} catch (Error&) {
-			criticalError(FDB_EXIT_ERROR,
-			              "FileSystemError",
-			              format("Could not get device id from `%s'", fileSystemPath.c_str()).c_str());
 		}
+
+		std::sort(this->fileSystemDeviceIds.begin(), this->fileSystemDeviceIds.end());
+		this->fileSystemDeviceIds.erase(std::unique(this->fileSystemDeviceIds.begin(), this->fileSystemDeviceIds.end()),
+		                                this->fileSystemDeviceIds.end());
 	}
 #endif
 }

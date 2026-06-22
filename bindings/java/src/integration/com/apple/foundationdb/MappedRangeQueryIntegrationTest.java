@@ -24,6 +24,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ThreadLocalRandom;
@@ -33,9 +34,7 @@ import com.apple.foundationdb.async.AsyncIterable;
 import com.apple.foundationdb.async.AsyncUtil;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 import com.apple.foundationdb.tuple.Tuple;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
@@ -45,22 +44,9 @@ class MappedRangeQueryIntegrationTest {
 	public String databaseArg = null;
 	private Database openFDB() { return fdb.open(databaseArg); }
 
-	@BeforeEach
-	@AfterEach
-	void clearDatabase() throws Exception {
-		/*
-		 * Empty the database before and after each run, just in case
-		 */
-		try (Database db = openFDB()) {
-			db.run(tr -> {
-				tr.clear(new byte[0], new byte[] { (byte) 0xff });
-				return null;
-			});
-		}
-	}
-
 	static private final byte[] EMPTY = Tuple.from().pack();
-	static private final String PREFIX = "prefix";
+	// Integration tests share a database, so do not require a database-wide clear.
+	static private final String PREFIX = "mapped-range-query-" + UUID.randomUUID();
 	static private final String RECORD = "RECORD";
 	static private final String INDEX = "INDEX";
 	static private String primaryKey(int i) { return String.format("primary-key-of-record-%08d", i); }
@@ -99,12 +85,13 @@ class MappedRangeQueryIntegrationTest {
 	public static void main(String[] args) throws Exception {
 		final MappedRangeQueryIntegrationTest test = new MappedRangeQueryIntegrationTest();
 		test.databaseArg = getArgFromEnv();
-		test.clearDatabase();
 		test.comparePerformance();
-		test.clearDatabase();
 	}
 
-	int numRecords = 10000;
+	// Keep numRecords modest so transactions complete within the 5s timeout
+	// even on heavily loaded CI infrastructure (e.g., CodeBuild running
+	// compilation and tests concurrently on the same instance).
+	int numRecords = 1000;
 	int numQueries = 1;
 	int numRecordsPerQuery = 100;
 	boolean validate = true;

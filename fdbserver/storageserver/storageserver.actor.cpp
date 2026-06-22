@@ -59,6 +59,7 @@
 #include "fdbserver/storageserver/StorageCorruptionBug.h"
 #include "fdbserver/core/StorageMetrics.h"
 #include "fdbserver/core/TLogInterface.h"
+#include "fdbserver/logsystem/LogSystemConsumer.h"
 #include "TransactionTagCounter.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "flow/ActorCollection.h"
@@ -841,7 +842,7 @@ public:
 	SSBulkLoadMetrics() : ongoingTasks(0) {}
 	void addTask() { ongoingTasks++; }
 	void removeTask() { ongoingTasks--; }
-	int getOngoingTasks() { return ongoingTasks; }
+	int getOngoingTasks() const { return ongoingTasks; }
 
 private:
 	int ongoingTasks = 0;
@@ -992,7 +993,7 @@ public:
 					UIDofLongest = kv.first;
 				}
 			}
-			if (BUGGIFY) {
+			if (buggify()) {
 				UIDofLongest = deterministicRandom()->randomUniqueID();
 			}
 			auto it = keyRangeMap.find(UIDofLongest);
@@ -1138,8 +1139,6 @@ public:
 	KeyRangeMap<SSBulkLoadMetadata> ssBulkLoadMetadataMap; // store the latest bulkload task on ranges
 	uint64_t shardChangeCounter; // max( shards->changecounter )
 
-	KeyRangeMap<bool> cachedRangeMap; // indicates if a key-range is being cached
-
 	// newestAvailableVersion[k]
 	//   == invalidVersion -> k is unavailable at all versions
 	//   <= storageVersion -> k is unavailable at all versions (but might be read anyway from storage if we are in the
@@ -1177,8 +1176,8 @@ public:
 
 	ProtocolVersion logProtocol;
 
-	Reference<LogSystem> logSystem;
-	Reference<IPeekCursor> logCursor;
+	Reference<LogSystemConsumer> logSystem;
+	Reference<IReplayPeekCursor> logCursor;
 
 	// The version the cluster starts on. This value is not persisted and may
 	// not be valid after a recovery.
@@ -2246,12 +2245,7 @@ Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 			                      req.options.get().debugID.get().first(),
 			                      "getValueQ.AfterRead"); //.detail("TaskID", g_network->getCurrentTask());
 
-		// Check if the desired key might be cached
-		auto cached = data->cachedRangeMap[req.key];
-		// if (cached)
-		//	TraceEvent(SevDebug, "SSGetValueCached").detail("Key", req.key);
-
-		GetValueReply reply(v, cached);
+		GetValueReply reply(v, /*cached=*/false);
 		reply.penalty = data->getPenalty();
 		req.reply.send(reply);
 	} catch (Error& e) {
@@ -2319,7 +2313,7 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext p
 				ASSERT(reply.error.get().code() != error_code_future_version);
 				throw reply.error.get();
 			}
-			if (BUGGIFY) {
+			if (buggify()) {
 				throw transaction_too_old();
 			}
 
@@ -2368,7 +2362,7 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext p
 					// if we need to wait for a higher version because of a race, wait for that version
 					watchFuture = watchFuture || data->version.whenAtLeast(waitVersion);
 				}
-				if (BUGGIFY) {
+				if (buggify()) {
 					// Simulate a trigger on the watch that results in the loop going around without the value changing
 					watchFuture = watchFuture || delay(deterministicRandom()->random01());
 				}
@@ -2419,7 +2413,7 @@ ACTOR Future<Void> watchValueSendReply(StorageServer* data,
 		double timeoutDelay = -1;
 		if (data->noRecentUpdates.get()) {
 			timeoutDelay = std::max(CLIENT_KNOBS->FAST_WATCH_TIMEOUT - (now() - startTime), 0.0);
-		} else if (!BUGGIFY) {
+		} else if (!buggify()) {
 			timeoutDelay = std::max(CLIENT_KNOBS->WATCH_TIMEOUT - (now() - startTime), 0.0);
 		}
 
@@ -2882,14 +2876,7 @@ Future<GetKeyValuesReply> readRange(StorageServer* data,
 	// for remembering the position in the resultCache
 	int pos = 0;
 
-	// Check if the desired key-range is cached
-	auto containingRange = data->cachedRangeMap.rangeContaining(range.begin);
-	if (containingRange.value() && containingRange->range().end >= range.end) {
-		//TraceEvent(SevDebug, "SSReadRangeCached").detail("Size",data->cachedRangeMap.size()).detail("ContainingRangeBegin",containingRange->range().begin).detail("ContainingRangeEnd",containingRange->range().end).
-		//	detail("Begin", range.begin).detail("End",range.end);
-		result.cached = true;
-	} else
-		result.cached = false;
+	result.cached = false;
 
 	// if (limit >= 0) we are reading forward, else backward
 	if (limit >= 0) {
@@ -3138,7 +3125,7 @@ Future<Key> findKey(StorageServer* data,
 	else
 		maxBytes =
 		    (g_network->isSimulated() &&
-		     simulationPolicyHasCapability(ISimulationPolicy::Capability::LimitStorageServerReadBytes) && BUGGIFY)
+		     simulationPolicyHasCapability(ISimulationPolicy::Capability::LimitStorageServerReadBytes) && buggify())
 		        ? SERVER_KNOBS->BUGGIFY_LIMIT_BYTES
 		        : SERVER_KNOBS->STORAGE_LIMIT_BYTES;
 
@@ -5907,7 +5894,7 @@ Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest 
 				// Even if TSS mode is Disabled, this may be the second test in a restarting test where the first run
 				// had it enabled.
 				int byteLimit =
-				    (BUGGIFY && g_network->isSimulated() &&
+				    (buggify() && g_network->isSimulated() &&
 				     simulationPolicyHasCapability(ISimulationPolicy::Capability::LimitStorageServerReadBytes) &&
 				     !data->isTss() && !data->isSSWithTSSPair())
 				        ? 1
@@ -6045,13 +6032,7 @@ Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 		data->counters.bytesQueried += resultSize;
 		++data->counters.rowsQueried;
 
-		// Check if the desired key might be cached
-		auto cached = data->cachedRangeMap[absoluteKey];
-		// if (cached)
-		//	TraceEvent(SevDebug, "SSGetKeyCached").detail("Key", k).detail("Begin",
-		// shard.begin).detail("End", shard.end);
-
-		GetKeyReply reply(updated, cached);
+		GetKeyReply reply(updated, /*cached=*/false);
 		reply.penalty = data->getPenalty();
 
 		req.reply.send(reply);
@@ -6508,7 +6489,7 @@ void splitMutation(StorageServer* data, KeyRangeMap<T>& map, MutationRef const& 
 Future<Void> logFetchKeysWarning(AddingShard* shard) {
 	double startTime = now();
 	while (true) {
-		double waitSeconds = BUGGIFY ? 5.0 : 600.0;
+		double waitSeconds = buggify() ? 5.0 : 600.0;
 		co_await delay(waitSeconds);
 
 		const auto traceEventLevel =
@@ -7053,7 +7034,7 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			// Then dest SS waits its version catch up with this GRV version and write the data to disk.
 			// Note that dest SS waits outside the fetchKeysParallelismLock.
 			fetchVersion = std::max(shard->fetchVersion, data->version.get());
-			if (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01)) {
+			if (g_network->isSimulated() && buggify(0.01)) {
 				// Test using GRV version for fetchKey.
 				lastError = transaction_too_old();
 			}
@@ -7061,7 +7042,7 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			if (lastError.code() == error_code_transaction_too_old) {
 				try {
 					Version grvVersion = co_await tr.getRawReadVersion();
-					if (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01)) {
+					if (g_network->isSimulated() && buggify(0.01)) {
 						// Test failed GRV request.
 						throw grv_proxy_memory_limit_exceeded();
 					}
@@ -9626,7 +9607,7 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				co_await data->byteSampleClearsTooLarge.onChange();
 			}
 
-			Reference<IPeekCursor> cursor = data->logCursor;
+			Reference<IReplayPeekCursor> cursor = data->logCursor;
 
 			double beforeTLogCursorReads = now();
 			while (true) {
@@ -9665,7 +9646,7 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 			start = now();
 			FetchInjectionInfo fii;
-			Reference<IPeekCursor> cloneCursor2 = cursor->cloneNoMore();
+			Reference<IReplayPeekCursor> cloneCursor2 = cursor->cloneNoMore();
 
 			// Collect eager read keys.
 			while (true) {
@@ -9675,7 +9656,7 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				bool firstMutation = true;
 				bool dbgLastMessageWasProtocol = false;
 
-				Reference<IPeekCursor> cloneCursor1 = cloneCursor2->cloneNoMore();
+				Reference<IReplayPeekCursor> cloneCursor1 = cloneCursor2->cloneNoMore();
 
 				cloneCursor1->setProtocolVersion(data->logProtocol);
 
@@ -10697,7 +10678,7 @@ void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
 		    mLV, MutationRef(MutationRef::SetValue, availableKeys.end, endAvailable ? "1"_sr : "0"_sr));
 	}
 
-	if (BUGGIFY) {
+	if (buggify()) {
 		self->maybeInjectTargetedRestart(logV);
 	}
 }
@@ -10751,7 +10732,7 @@ void setAssignedStatus(StorageServer* self, KeyRangeRef keys, bool nowAssigned) 
 		    mLV, MutationRef(MutationRef::SetValue, assignedKeys.end, endAssigned ? "1"_sr : "0"_sr));
 	}
 
-	if (BUGGIFY) {
+	if (buggify()) {
 		self->maybeInjectTargetedRestart(logV);
 	}
 }
@@ -10771,7 +10752,7 @@ void setRangeBasedBulkLoadStatus(StorageServer* self, KeyRangeRef keys, const SS
 		    mLV, MutationRef(MutationRef::SetValue, dataMoveKeys.end, ssBulkLoadMetadataValue(endBulkLoadMetadata)));
 	}
 	self->ssBulkLoadMetadataMap.insert(keys, ssBulkLoadMetadata);
-	if (BUGGIFY) {
+	if (buggify()) {
 		self->maybeInjectTargetedRestart(logV);
 	}
 }
@@ -11014,7 +10995,7 @@ Future<Void> restoreByteSample(StorageServer* data,
 	co_await waitForAll(sampleRanges);
 	TraceEvent("RecoveredByteSampleChunkedRead", data->thisServerID).detail("Ranges", sampleRanges.size());
 
-	if (BUGGIFY)
+	if (buggify())
 		co_await delay(deterministicRandom()->random01() * 10.0);
 }
 
@@ -11538,15 +11519,11 @@ Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) {
 	co_await serveStorageMetricsRequests(self, ssi);
 }
 
-ACTOR Future<Void> logLongByteSampleRecovery(Future<Void> recovery) {
-	choose {
-		when(wait(recovery)) {}
-		when(wait(delay(SERVER_KNOBS->LONG_BYTE_SAMPLE_RECOVERY_DELAY))) {
-			TraceEvent(g_network->isSimulated() ? SevWarn : SevWarnAlways, "LongByteSampleRecovery");
-		}
+Future<Void> logLongByteSampleRecovery(Future<Void> recovery) {
+	auto res = co_await timeout(recovery, SERVER_KNOBS->LONG_BYTE_SAMPLE_RECOVERY_DELAY);
+	if (!res.present()) {
+		TraceEvent(g_network->isSimulated() ? SevWarn : SevWarnAlways, "LongByteSampleRecovery");
 	}
-
-	return Void();
 }
 
 Future<Void> checkBehind(StorageServer* self) {
@@ -11910,7 +11887,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	state Future<Void> doUpdate = Void();
 	state bool updateReceived = false; // true iff the current update() actor assigned to doUpdate has already
 	                                   // received an update from the tlog
-	state double lastLoopTopTime = now();
+	state double lastLoopResumeTime = now();
 	state Future<Void> dbInfoChange = Void();
 	state Future<Void> checkLastUpdate = Void();
 	state Future<Void> updateProcessStatsTimer = delay(SERVER_KNOBS->STORAGE_UPDATE_PROCESS_STATS_INTERVAL);
@@ -11945,15 +11922,15 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 		++self->counters.loops;
 
 		double loopTopTime = now();
-		double elapsedTime = loopTopTime - lastLoopTopTime;
+		double elapsedTime = loopTopTime - lastLoopResumeTime;
 		if (elapsedTime > 0.050) {
 			if (deterministicRandom()->random01() < 0.01)
 				TraceEvent(SevWarn, "SlowSSLoopx100", self->thisServerID).detail("Elapsed", elapsedTime);
 		}
-		lastLoopTopTime = loopTopTime;
 
 		choose {
 			when(wait(checkLastUpdate)) {
+				lastLoopResumeTime = now();
 				if (now() - self->lastUpdate >= CLIENT_KNOBS->NO_RECENT_UPDATES_DURATION) {
 					self->noRecentUpdates.set(true);
 					checkLastUpdate = delay(CLIENT_KNOBS->NO_RECENT_UPDATES_DURATION);
@@ -11963,10 +11940,11 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				}
 			}
 			when(wait(dbInfoChange)) {
+				lastLoopResumeTime = now();
 				CODE_PROBE(self->logSystem, "shardServer dbInfo changed");
 				dbInfoChange = self->db->onChange();
 				if (self->db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
-					self->logSystem = makeLogSystemFromServerDBInfo(self->thisServerID, self->db->get());
+					self->logSystem = makeLogSystemConsumerFromServerDBInfo(self->thisServerID, self->db->get());
 					if (self->logSystem) {
 						if (self->db->get().logSystemConfig.recoveredAt.present()) {
 							self->poppedAllAfter = self->db->get().logSystemConfig.recoveredAt.get();
@@ -11998,6 +11976,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				}
 			}
 			when(GetShardStateRequest req = waitNext(ssi.getShardState.getFuture())) {
+				lastLoopResumeTime = now();
 				if (req.mode == GetShardStateRequest::NO_WAIT) {
 					if (self->isReadable(req.keys))
 						req.reply.send(GetShardStateReply{ self->version.get(), self->durableVersion.get() });
@@ -12008,12 +11987,15 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				}
 			}
 			when(StorageQueuingMetricsRequest req = waitNext(ssi.getQueuingMetrics.getFuture())) {
+				lastLoopResumeTime = now();
 				getQueuingMetrics(self, req);
 			}
 			when(ReplyPromise<KeyValueStoreType> reply = waitNext(ssi.getKeyValueStoreType.getFuture())) {
+				lastLoopResumeTime = now();
 				reply.send(self->storage.getKeyValueStoreType());
 			}
 			when(wait(doUpdate)) {
+				lastLoopResumeTime = now();
 				updateReceived = false;
 				if (!self->logSystem)
 					doUpdate = Never();
@@ -12021,12 +12003,15 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 					doUpdate = update(self, &updateReceived);
 			}
 			when(GetCheckpointRequest req = waitNext(ssi.checkpoint.getFuture())) {
+				lastLoopResumeTime = now();
 				self->actors.add(getCheckpointQ(self, req));
 			}
 			when(FetchCheckpointRequest req = waitNext(ssi.fetchCheckpoint.getFuture())) {
+				lastLoopResumeTime = now();
 				self->actors.add(fetchCheckpointQ(self, req));
 			}
 			when(UpdateCommitCostRequest req = waitNext(ssi.updateCommitCostRequest.getFuture())) {
+				lastLoopResumeTime = now();
 				// Ratekeeper might change with a new ID. In this case, always accept the data.
 				if (req.ratekeeperID != self->busiestWriteTagContext.ratekeeperID) {
 					TraceEvent("RatekeeperIDChange")
@@ -12056,9 +12041,11 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				req.reply.send(Void());
 			}
 			when(FetchCheckpointKeyValuesRequest req = waitNext(ssi.fetchCheckpointKeyValues.getFuture())) {
+				lastLoopResumeTime = now();
 				self->actors.add(fetchCheckpointKeyValuesQ(self, req));
 			}
 			when(AuditStorageRequest req = waitNext(ssi.auditStorage.getFuture())) {
+				lastLoopResumeTime = now();
 				// Check req
 				if (!req.id.isValid() || !req.ddId.isValid() || req.range.empty() ||
 				    req.getType() == AuditType::ValidateLocationMetadata) {
@@ -12087,15 +12074,18 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				}
 			}
 			when(BulkDumpRequest req = waitNext(ssi.bulkdump.getFuture())) {
+				lastLoopResumeTime = now();
 				TraceEvent(bulkLoadVerboseEventSev(), "SSBulkDumpRequestReceived", self->thisServerID)
 				    .detail("BulkDumpRequest", req.toString());
 				self->actors.add(bulkDumpQ(self, req));
 			}
 			when(wait(updateProcessStatsTimer)) {
+				lastLoopResumeTime = now();
 				updateProcessStats(self);
 				updateProcessStatsTimer = delay(SERVER_KNOBS->STORAGE_UPDATE_PROCESS_STATS_INTERVAL);
 			}
 			when(GetHotShardsRequest req = waitNext(ssi.getHotShards.getFuture())) {
+				lastLoopResumeTime = now();
 				struct ComparePair {
 					bool operator()(const std::pair<KeyRange, int64_t>& lhs, const std::pair<KeyRange, int64_t>& rhs) {
 						return lhs.second > rhs.second;
@@ -12131,10 +12121,13 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				req.reply.send(reply);
 			}
 			when(GetStorageCheckSumRequest req = waitNext(ssi.getCheckSum.getFuture())) {
+				lastLoopResumeTime = now();
 				TraceEvent(SevError, "GetStorageCheckSumHasNotImplemented", ssi.id());
 				req.reply.sendError(not_implemented());
 			}
-			when(wait(self->actors.getResult())) {}
+			when(wait(self->actors.getResult())) {
+				ASSERT(false);
+			}
 		}
 	}
 }
@@ -12281,7 +12274,7 @@ ACTOR Future<Void> replaceInterface(StorageServer* self, StorageServerInterface 
 								    .detail("Tag", it.second.toString());
 							}
 
-							if (self->history.size() && BUGGIFY) {
+							if (self->history.size() && buggify()) {
 								TraceEvent("SSHistoryReboot", self->thisServerID).log();
 								throw please_reboot();
 							}

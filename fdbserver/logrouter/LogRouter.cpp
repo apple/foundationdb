@@ -21,6 +21,7 @@
 #include "fdbrpc/Stats.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/logsystem/LogSystem.h"
+#include "fdbserver/logsystem/LogSystemConsumer.h"
 #include "fdbserver/logrouter/LogRouter.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
@@ -34,7 +35,6 @@
 #include "flow/Trace.h"
 #include "flow/network.h"
 #include "flow/DebugTrace.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct LogRouterData {
 	struct TagData : NonCopyable, public ReferenceCounted<TagData> {
@@ -71,7 +71,7 @@ struct LogRouterData {
 	};
 
 	const UID dbgid;
-	Reference<AsyncVar<Reference<LogSystem>>> logSystem;
+	Reference<AsyncVar<Reference<LogSystemConsumer>>> logSystem;
 	Future<Void> logSystemChanged = Void();
 	Optional<UID> primaryPeekLocation;
 	NotifiedVersion version; // The largest version at which the log router has peeked mutations
@@ -130,9 +130,9 @@ struct LogRouterData {
 	}
 
 	LogRouterData(UID dbgid, const InitializeLogRouterRequest& req)
-	  : dbgid(dbgid), logSystem(new AsyncVar<Reference<LogSystem>>()), version(req.startVersion - 1), minPopped(0),
-	    startVersion(req.startVersion), minKnownCommittedVersion(0), poppedVersion(0), routerTag(req.routerTag),
-	    allowPops(false), foundEpochEnd(false), generation(req.recoveryCount),
+	  : dbgid(dbgid), logSystem(new AsyncVar<Reference<LogSystemConsumer>>()), version(req.startVersion - 1),
+	    minPopped(req.startVersion), startVersion(req.startVersion), minKnownCommittedVersion(0), poppedVersion(0),
+	    routerTag(req.routerTag), allowPops(false), foundEpochEnd(false), generation(req.recoveryCount),
 	    peekLatencyDist(Histogram::getHistogram("LogRouter"_sr, "PeekTLogLatency"_sr, Histogram::Unit::milliseconds)),
 	    cc("LogRouter", dbgid.toString()), getMoreCount("GetMoreCount", cc),
 	    getMoreBlockedCount("GetMoreBlockedCount", cc) {
@@ -149,7 +149,9 @@ struct LogRouterData {
 			Tag tag(tagLocalityRemoteLog, i);
 			auto tagData = getTagData(tag);
 			if (!tagData) {
-				tagData = createTagData(tag, 0, 0);
+				// The router cannot serve data before its handoff boundary; do not wait for a consumer
+				// that never reads this tag to pop versions outside the router's range.
+				tagData = createTagData(tag, req.startVersion, 0);
 			}
 		}
 
@@ -240,7 +242,7 @@ struct LogRouterData {
 	// recovery version.
 	Future<Void> pullAsyncData();
 
-	Future<Reference<IPeekCursor>> getPeekCursorData(Reference<IPeekCursor> r, Version beginVersion);
+	Future<Reference<IReplayPeekCursor>> getPeekCursorData(Reference<IReplayPeekCursor> r, Version beginVersion);
 
 	// Future<Void> logRouterPop(const TLogPopRequest& req);
 	Future<Void> cleanupPeekTrackers();
@@ -364,8 +366,9 @@ Future<Void> LogRouterData::waitForVersionAndLog(Version ver) {
 	}
 }
 
-Future<Reference<IPeekCursor>> LogRouterData::getPeekCursorData(Reference<IPeekCursor> r, Version beginVersion) {
-	Reference<IPeekCursor> result = r;
+Future<Reference<IReplayPeekCursor>> LogRouterData::getPeekCursorData(Reference<IReplayPeekCursor> r,
+                                                                      Version beginVersion) {
+	Reference<IReplayPeekCursor> result = r;
 	bool useSatellite = SERVER_KNOBS->LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED;
 	uint32_t noPrimaryPeekLocation = 0;
 
@@ -402,7 +405,7 @@ Future<Reference<IPeekCursor>> LogRouterData::getPeekCursorData(Reference<IPeekC
 				              .detail("LogID", result->getPrimaryPeekLocation())
 				              .trackLatest(eventCacheHolder->trackingKey);
 			          } else {
-				          result = Reference<IPeekCursor>();
+				          result = Reference<IReplayPeekCursor>();
 			          }
 			          logSystemChanged = logSystem->onChange();
 		          })
@@ -436,7 +439,7 @@ Future<Reference<IPeekCursor>> LogRouterData::getPeekCursorData(Reference<IPeekC
 }
 
 Future<Void> LogRouterData::pullAsyncData() {
-	Reference<IPeekCursor> r;
+	Reference<IReplayPeekCursor> r;
 	Version tagAt = version.get() + 1;
 	Version lastVer = 0;
 	std::vector<int> tags; // an optimization to avoid reallocating vector memory in every loop
@@ -851,7 +854,8 @@ Future<Void> logRouterCore(TLogInterface interf,
 			          dbInfoChange = db->onChange();
 			          logRouterData.allowPops = db->get().recoveryState == RecoveryState::FULLY_RECOVERED &&
 			                                    db->get().recoveryCount >= req.recoveryCount;
-			          logRouterData.logSystem->set(makeLogSystemFromServerDBInfo(logRouterData.dbgid, db->get(), true));
+			          logRouterData.logSystem->set(
+			              makeLogSystemConsumerFromServerDBInfo(logRouterData.dbgid, db->get(), true));
 		          })
 		    .When(interf.peekMessages.getFuture(),
 		          [&](const TLogPeekRequest& req) {

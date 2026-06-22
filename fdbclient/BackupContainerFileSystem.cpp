@@ -196,7 +196,7 @@ public:
 		json_spirit::mValue json;
 		JSONDoc doc(json);
 
-		doc.create("files") = std::move(fileArray);
+		doc.create("files") = fileArray;
 		doc.create("totalBytes") = totalBytes;
 		doc.create("beginVersion") = minVer;
 		doc.create("endVersion") = maxVer;
@@ -274,7 +274,9 @@ public:
 		}
 
 		Reference<IBackupFile> f = co_await bc->writeFile(fileName);
+
 		co_await f->append(docString.data(), docString.size());
+
 		co_await f->finish();
 	}
 
@@ -568,9 +570,9 @@ public:
 				auto& obj = json.get_obj();
 
 				// Both fields must be present with correct types.
-				if (!obj.count("is_encryption_enabled") ||
+				if (!obj.contains("is_encryption_enabled") ||
 				    obj.at("is_encryption_enabled").type() != json_spirit::bool_type ||
-				    !obj.count("encryption_block_size") ||
+				    !obj.contains("encryption_block_size") ||
 				    obj.at("encryption_block_size").type() != json_spirit::int_type) {
 					fprintf(stderr, "ERROR: Encryption metadata file is missing required fields or has wrong types.\n");
 					TraceEvent(SevError, "BackupContainerReadEncryptionMetadataMalformed")
@@ -1026,7 +1028,7 @@ public:
 		std::vector<std::string> toDelete;
 
 		// Move filenames out of vector then destroy it to save memory
-		for (auto const& f : logs) {
+		for (auto& f : logs) {
 			// We may have cleared the last log file earlier so skip any empty filenames
 			if (!f.fileName.empty()) {
 				toDelete.push_back(std::move(f.fileName));
@@ -1035,7 +1037,7 @@ public:
 		logs.clear();
 
 		// Move filenames out of vector then destroy it to save memory
-		for (auto const& f : ranges) {
+		for (auto& f : ranges) {
 			// The file version must be checked here again because it is likely that expireEndVersion is in the middle
 			// of a log file, in which case after the log and range file listings are done (using the original
 			// expireEndVersion) the expireEndVersion will be moved back slightly to the begin version of the last log
@@ -1046,7 +1048,7 @@ public:
 		}
 		ranges.clear();
 
-		for (auto const& f : desc.snapshots) {
+		for (auto& f : desc.snapshots) {
 			if (f.endVersion < expireEndVersion)
 				toDelete.push_back(std::move(f.fileName));
 		}
@@ -1561,7 +1563,7 @@ Future<Reference<IBackupFile>> BackupContainerFileSystem::writeRangeFile(Version
 	}
 
 	return writeFile(BackupContainerFileSystemImpl::snapshotFolderString(snapshotBeginVersion) +
-	                 format("/%d/", snapshotFileCount / (BUGGIFY ? 1 : 5000)) + fileName);
+	                 format("/%d/", snapshotFileCount / (buggify() ? 1 : 5000)) + fileName);
 }
 
 Future<Void> BackupContainerFileSystem::writePartitionListFile(Version v, std::string contents) {
@@ -1677,8 +1679,8 @@ Future<std::vector<RangeFile>> BackupContainerFileSystem::listRangeFiles(Version
 	});
 
 	return map(success(oldFiles) && success(newFiles), [=](Void _) {
-		std::vector<RangeFile> results = std::move(newFiles.get());
-		std::vector<RangeFile> oldResults = std::move(oldFiles.get());
+		std::vector<RangeFile> results = newFiles.get();
+		std::vector<RangeFile> oldResults = oldFiles.get();
 		results.insert(
 		    results.end(), std::make_move_iterator(oldResults.begin()), std::make_move_iterator(oldResults.end()));
 		return results;
@@ -2017,7 +2019,7 @@ Future<Void> testBackupContainer(std::string url,
 				writes.push_back(c->writeKeyspaceSnapshotFile(snapshots.rbegin()->second,
 				                                              snapshotBeginEndKeys.rbegin()->second,
 				                                              snapshotSizes.rbegin()->second,
-				                                              IncludeKeyRangeMap(BUGGIFY)));
+				                                              IncludeKeyRangeMap(buggify())));
 				snapshots[v] = {};
 				snapshotBeginEndKeys[v] = {};
 				snapshotSizes[v] = 0;
@@ -2440,7 +2442,7 @@ Future<Void> testBackupContainerWithMissingLogRanges(std::string url, Optional<s
 		writes.push_back(c->writeKeyspaceSnapshotFile(rangeFileNames,
 		                                              snapshotBeginEndKeys,
 		                                              deterministicRandom()->randomInt(0, 2e6),
-		                                              IncludeKeyRangeMap(BUGGIFY)));
+		                                              IncludeKeyRangeMap(buggify())));
 
 		// if the last missing log file overlaps with the current snapshot,
 		// mark snapshotsMissingLogs for current snapshot as true.
@@ -2575,7 +2577,7 @@ Future<Void> testBackupContinuousLogEndVer(std::string url, Optional<std::string
 
 	// writing snapshot file
 	writes.push_back(c->writeKeyspaceSnapshotFile(
-	    rangeFileNames, snapshotBeginEndKeys, deterministicRandom()->randomInt(0, 2e6), IncludeKeyRangeMap(BUGGIFY)));
+	    rangeFileNames, snapshotBeginEndKeys, deterministicRandom()->randomInt(0, 2e6), IncludeKeyRangeMap(buggify())));
 	co_await waitForAll(writes);
 
 	BackupFileList fileList = co_await c->dumpFileList();
@@ -2624,6 +2626,46 @@ Future<Void> testBackupContinuousLogEndVer(std::string url, Optional<std::string
 TEST_CASE("/backup/containers/localdir/continuousLogEndVersion") {
 	co_await testBackupContinuousLogEndVer(
 	    format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()), Optional<std::string>());
+}
+
+// Verify that writeKeyspaceSnapshotFile correctly writes and reads back a snapshot manifest even when the
+// JSON document is larger than BACKUP_MANIFEST_WRITE_CHUNK_SIZE, exercising the chunked-append path.
+TEST_CASE("/backup/containers/localdir/writeKeyspaceSnapshotFile/chunked") {
+	// Force a tiny chunk size so a normal-sized manifest triggers multiple append() calls.
+	int savedChunkSize = CLIENT_KNOBS->BACKUP_MANIFEST_WRITE_CHUNK_SIZE;
+	const_cast<ClientKnobs*>(CLIENT_KNOBS)->BACKUP_MANIFEST_WRITE_CHUNK_SIZE = 64;
+	ASSERT_EQ(CLIENT_KNOBS->BACKUP_MANIFEST_WRITE_CHUNK_SIZE, 64);
+
+	std::string url = format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int());
+	Reference<IBackupContainer> c = IBackupContainer::openContainer(url, {}, {}, 0);
+	co_await c->create();
+
+	// Use a fixed version and block size for deterministic assertions.
+	Version v = 1000;
+	int blockSize = 3 * sizeof(uint32_t) + 8;
+
+	// Write several range files so the resulting JSON manifest exceeds 64 bytes.
+	std::vector<std::string> rangeFileNames;
+	std::vector<std::pair<Key, Key>> beginEndKeys;
+	for (int i = 0; i < 5; ++i) {
+		Reference<IBackupFile> range = co_await c->writeRangeFile(v, 0, v, blockSize);
+		co_await testWriteSnapshotFile(range, ""_sr, ""_sr, blockSize);
+		rangeFileNames.push_back(range->getFileName());
+		beginEndKeys.push_back({ ""_sr, ""_sr });
+		++v;
+	}
+
+	int64_t totalSize = 99999;
+	co_await c->writeKeyspaceSnapshotFile(rangeFileNames, beginEndKeys, totalSize, IncludeKeyRangeMap(false));
+
+	BackupFileList listing = co_await c->dumpFileList();
+	ASSERT_EQ(listing.snapshots.size(), 1);
+	ASSERT_EQ(listing.snapshots[0].totalSize, totalSize);
+	ASSERT_EQ(listing.snapshots[0].beginVersion, 1000);
+	ASSERT_EQ(listing.snapshots[0].endVersion, 1004);
+
+	const_cast<ClientKnobs*>(CLIENT_KNOBS)->BACKUP_MANIFEST_WRITE_CHUNK_SIZE = savedChunkSize;
+	co_await c->deleteContainer();
 }
 
 } // namespace backup_test

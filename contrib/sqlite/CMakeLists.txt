@@ -11,6 +11,7 @@ set_target_properties(sqlite PROPERTIES C_CLANG_TIDY "")
 
 
 target_include_directories(sqlite PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(sqlite PRIVATE SQLITE_ENABLE_MEMORY_MANAGEMENT)
 # Suppress warnings in sqlite since it's third party
 if(NOT WIN32)
   target_compile_definitions(sqlite PRIVATE $<$<CONFIG:Debug>:NDEBUG>)

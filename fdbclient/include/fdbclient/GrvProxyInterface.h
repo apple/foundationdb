@@ -141,6 +141,46 @@ struct GetReadVersionRequest : TimedRequest {
 	}
 };
 
+struct GetHealthMetricsReply {
+	constexpr static FileIdentifier file_identifier = 11544290;
+	Standalone<StringRef> serialized;
+	HealthMetrics healthMetrics;
+
+	explicit GetHealthMetricsReply(const HealthMetrics& healthMetrics = HealthMetrics())
+	  : healthMetrics(healthMetrics) {
+		update(healthMetrics, true, true);
+	}
+
+	void update(const HealthMetrics& healthMetrics, bool detailedInput, bool detailedOutput) {
+		this->healthMetrics.update(healthMetrics, detailedInput, detailedOutput);
+		BinaryWriter bw(IncludeVersion());
+		bw << this->healthMetrics;
+		serialized = bw.toValue();
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, serialized);
+		if (ar.isDeserializing) {
+			BinaryReader br(serialized, IncludeVersion());
+			br >> healthMetrics;
+		}
+	}
+};
+
+struct GetHealthMetricsRequest {
+	constexpr static FileIdentifier file_identifier = 11403900;
+	ReplyPromise<struct GetHealthMetricsReply> reply;
+	bool detailed;
+
+	explicit GetHealthMetricsRequest(bool detailed = false) : detailed(detailed) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply, detailed);
+	}
+};
+
 struct GlobalConfigRefreshReply {
 	constexpr static FileIdentifier file_identifier = 12680327;
 	Arena arena;

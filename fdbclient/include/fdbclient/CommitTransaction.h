@@ -59,6 +59,7 @@ static const char* typeString[] = { "SetValue",
 	                                "Reserved_For_SpanContextMessage",
 	                                "Reserved_For_OTELSpanContextMessage",
 	                                "AccumulativeChecksum",
+	                                "Reserved_For_PartitionMapMessage",
 	                                "MAX_ATOMIC_OP" };
 
 struct MutationRef {
@@ -90,6 +91,7 @@ struct MutationRef {
 		CompareAndClear,
 		Reserved_For_SpanContextMessage /* See fdbserver/SpanContextMessage.h */,
 		Reserved_For_OTELSpanContextMessage,
+		Reserved_For_PartitionMapMessage /* See fdbserver/core/PartitionMapMessage.h */,
 		MAX_ATOMIC_OP
 	};
 
@@ -104,10 +106,33 @@ struct MutationRef {
 
 	MutationRef() : type(MAX_ATOMIC_OP), corrupted(false) {}
 	MutationRef(Type t, StringRef a, StringRef b) : type(t), param1(a), param2(b), corrupted(false) {}
-	MutationRef(Arena& to, Type t, StringRef a, StringRef b)
-	  : type(t), param1(to, a), param2(to, b), corrupted(false) {}
-	MutationRef(Arena& to, const MutationRef& from)
-	  : type(from.type), param1(to, from.param1), param2(to, from.param2), corrupted(false) {}
+
+	MutationRef(Arena& to, Type t, StringRef a, StringRef b) : type(t), corrupted(false) { copyParams(to, a, b); }
+
+	MutationRef(Arena& to, const MutationRef& from) : type(from.type), corrupted(false) {
+		copyParams(to, from.param1, from.param2);
+	}
+
+private:
+	inline void copyParams(Arena& to, StringRef a, StringRef b) {
+		const size_t aSize = a.size();
+		const size_t bSize = b.size();
+		const size_t totalSize = aSize + bSize;
+
+		uint8_t* packed = totalSize ? new (to) uint8_t[totalSize] : nullptr;
+
+		if (aSize) {
+			memcpy(packed, a.begin(), aSize);
+		}
+		if (bSize) {
+			memcpy(packed + aSize, b.begin(), bSize);
+		}
+
+		param1 = StringRef(aSize ? packed : nullptr, aSize);
+		param2 = StringRef(bSize ? packed + aSize : nullptr, bSize);
+	}
+
+public:
 	int totalSize() const {
 		return OVERHEAD_BYTES + param1.size() + param2.size() + (checksum.present() ? sizeof(uint32_t) + 1 : 1) +
 		       (accumulativeChecksumIndex.present() ? sizeof(uint16_t) + 1 : 1);

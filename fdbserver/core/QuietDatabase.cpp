@@ -843,7 +843,7 @@ Future<Void> enableConsistencyScanInSim(Database db) {
 			if (!config.enabled &&
 			    fdbSimulationPolicyState().consistencyScanState < FDBSimConsistencyScanState::Enabled) {
 				if (!fdbSimulationPolicyState().doInjectConsistencyScanCorruption.present()) {
-					fdbSimulationPolicyState().doInjectConsistencyScanCorruption = BUGGIFY_WITH_PROB(0.1);
+					fdbSimulationPolicyState().doInjectConsistencyScanCorruption = buggify(0.1);
 					TraceEvent("ConsistencyScan_DoInjectCorruption")
 					    .detail("Val", fdbSimulationPolicyState().doInjectConsistencyScanCorruption.get());
 				}
@@ -858,7 +858,7 @@ Future<Void> enableConsistencyScanInSim(Database db) {
 					fdbSimulationPolicyState().updateConsistencyScanState(FDBSimConsistencyScanState::DisabledStart,
 					                                                      FDBSimConsistencyScanState::Enabling);
 				}
-				if (BUGGIFY_WITH_PROB(0.5)) {
+				if (buggify(0.5)) {
 					config.minStartVersion = tr->getReadVersion().get();
 				}
 			}
@@ -999,7 +999,26 @@ Future<Void> waitForQuietDatabase(Database cx,
 
 	TraceEvent("QuietDatabaseWaitingOnFullRecovery").detail("Phase", phase).log();
 	while (dbInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED) {
-		co_await dbInfo->onChange();
+		// Bound the recovery wait by the same budget the quiet-database checks below use. If the
+		// cluster never returns to FULLY_RECOVERED (e.g. a wedged remote-region log router that can
+		// never find a primary peek location, so an old TLog generation never drains and recovery
+		// stalls at all_logs_recruited), fail fast here with a clear reason instead of blocking
+		// indefinitely until the simulator's trace-line cap aborts the run tens of thousands of
+		// seconds later. The (delay) ensures the deadline is re-checked even if dbInfo stops
+		// changing.
+		if (now() - checker.start > checker.maxDDRunTime) {
+			TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "QuietDatabaseNeverFullyRecovered")
+			    .detail("Phase", phase)
+			    .detail("RecoveryState", (int)dbInfo->get().recoveryState)
+			    .detail("WaitedFor", now() - checker.start)
+			    .detail("Timeout", checker.maxDDRunTime);
+			// Mirror the ddGotStuck assertion below: in simulation, a cluster that cannot fully
+			// recover within the budget is a failure we want surfaced quickly. On a real cluster,
+			// fall through and let the checks below keep retrying.
+			ASSERT(!g_network->isSimulated());
+			break;
+		}
+		co_await (dbInfo->onChange() || delay(5.0));
 	}
 
 	// The quiet database check (which runs at the end of every test) will always time out due to active data movement.

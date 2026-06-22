@@ -73,7 +73,8 @@ private:
 	std::vector<int> newLocations;
 };
 
-class ServerPeekCursor final : public IPeekCursor, public ReferenceCounted<ServerPeekCursor> {
+// Leaf replay cursor backed by a single TLog interface.
+class ServerPeekCursor final : public IReplayPeekCursor, public ReferenceCounted<ServerPeekCursor> {
 public:
 	Reference<AsyncVar<OptionalInterface<TLogInterface>>> interf;
 	const Tag tag;
@@ -115,7 +116,8 @@ public:
 	                 Version poppedVersion,
 	                 Tag tag);
 
-	Reference<IPeekCursor> cloneNoMore() override;
+	Reference<ServerPeekCursor> cloneServerNoMore();
+	Reference<IReplayPeekCursor> cloneNoMore() override;
 	void setProtocolVersion(ProtocolVersion version) override;
 	Arena& arena() override;
 	ArenaReader* reader() override;
@@ -126,8 +128,8 @@ public:
 	VectorRef<Tag> getTags() const override;
 	void advanceTo(LogMessageVersion n) override;
 	Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply) override;
-	Future<Void> onFailed() const override;
-	bool isActive() const override;
+	Future<Void> onFailed() const;
+	bool isActive() const;
 	bool isExhausted() const override;
 	const LogMessageVersion& version() const override;
 	Version popped() const override;
@@ -139,10 +141,11 @@ public:
 	Version getMaxKnownVersion() const override { return results.maxKnownVersion; }
 };
 
-class MergedPeekCursor final : public IPeekCursor, public ReferenceCounted<MergedPeekCursor> {
+// Replay cursor that reads one logical stream from replicated TLog servers in a log set.
+class MergedPeekCursor final : public IReplayPeekCursor, public ReferenceCounted<MergedPeekCursor> {
 public:
 	Reference<LogSet> logSet;
-	std::vector<Reference<IPeekCursor>> serverCursors;
+	std::vector<Reference<ServerPeekCursor>> serverCursors;
 	std::vector<LocalityEntry> locations;
 	std::vector<std::pair<LogMessageVersion, int>> sortedVersions;
 	Tag tag;
@@ -154,7 +157,7 @@ public:
 	int tLogReplicationFactor;
 	Future<Void> more;
 
-	MergedPeekCursor(std::vector<Reference<IPeekCursor>> const& serverCursors, Version begin);
+	MergedPeekCursor(std::vector<Reference<ServerPeekCursor>> const& serverCursors, Version begin);
 	MergedPeekCursor(std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers,
 	                 int bestServer,
 	                 int readQuorum,
@@ -166,7 +169,7 @@ public:
 	                 Reference<IReplicationPolicy> const tLogPolicy,
 	                 int tLogReplicationFactor,
 	                 const Optional<std::vector<uint16_t>>& knownLockedTLogIds = Optional<std::vector<uint16_t>>());
-	MergedPeekCursor(std::vector<Reference<IPeekCursor>> const& serverCursors,
+	MergedPeekCursor(std::vector<Reference<ServerPeekCursor>> const& serverCursors,
 	                 LogMessageVersion const& messageVersion,
 	                 int bestServer,
 	                 int readQuorum,
@@ -174,7 +177,7 @@ public:
 	                 Reference<LogSet> logSet,
 	                 int tLogReplicationFactor);
 
-	Reference<IPeekCursor> cloneNoMore() override;
+	Reference<IReplayPeekCursor> cloneNoMore() override;
 	void setProtocolVersion(ProtocolVersion version) override;
 	Arena& arena() override;
 	ArenaReader* reader() override;
@@ -187,22 +190,22 @@ public:
 	VectorRef<Tag> getTags() const override;
 	void advanceTo(LogMessageVersion n) override;
 	Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply) override;
-	Future<Void> onFailed() const override;
-	bool isActive() const override;
 	bool isExhausted() const override;
 	const LogMessageVersion& version() const override;
 	Version popped() const override;
 	Version getMinKnownCommittedVersion() const override;
+	Version getMaxKnownVersion() const override;
 	Optional<UID> getPrimaryPeekLocation() const override;
 	Optional<UID> getCurrentPeekLocation() const override;
 	void addref() override { ReferenceCounted<MergedPeekCursor>::addref(); }
 	void delref() override { ReferenceCounted<MergedPeekCursor>::delref(); }
 };
 
-class SetPeekCursor final : public IPeekCursor, public ReferenceCounted<SetPeekCursor> {
+// Replay cursor that reads one logical stream across candidate log sets.
+class SetPeekCursor final : public IReplayPeekCursor, public ReferenceCounted<SetPeekCursor> {
 public:
 	std::vector<Reference<LogSet>> logSets;
-	std::vector<std::vector<Reference<IPeekCursor>>> serverCursors;
+	std::vector<std::vector<Reference<ServerPeekCursor>>> serverCursors;
 	Tag tag;
 	int bestSet, bestServer, currentSet, currentCursor;
 	std::vector<LocalityEntry> locations;
@@ -224,14 +227,14 @@ public:
 	              bool parallelGetMore,
 	              const Optional<std::vector<uint16_t>>& knownLockedTLogIds = Optional<std::vector<uint16_t>>());
 	SetPeekCursor(std::vector<Reference<LogSet>> const& logSets,
-	              std::vector<std::vector<Reference<IPeekCursor>>> const& serverCursors,
+	              std::vector<std::vector<Reference<ServerPeekCursor>>> const& serverCursors,
 	              LogMessageVersion const& messageVersion,
 	              int bestSet,
 	              int bestServer,
 	              Optional<LogMessageVersion> nextVersion,
 	              bool useBestSet);
 
-	Reference<IPeekCursor> cloneNoMore() override;
+	Reference<IReplayPeekCursor> cloneNoMore() override;
 	void setProtocolVersion(ProtocolVersion version) override;
 	Arena& arena() override;
 	ArenaReader* reader() override;
@@ -244,27 +247,27 @@ public:
 	VectorRef<Tag> getTags() const override;
 	void advanceTo(LogMessageVersion n) override;
 	Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply) override;
-	Future<Void> onFailed() const override;
-	bool isActive() const override;
 	bool isExhausted() const override;
 	const LogMessageVersion& version() const override;
 	Version popped() const override;
 	Version getMinKnownCommittedVersion() const override;
+	Version getMaxKnownVersion() const override;
 	Optional<UID> getPrimaryPeekLocation() const override;
 	Optional<UID> getCurrentPeekLocation() const override;
 	void addref() override { ReferenceCounted<SetPeekCursor>::addref(); }
 	void delref() override { ReferenceCounted<SetPeekCursor>::delref(); }
 };
 
-class MultiCursor final : public IPeekCursor, public ReferenceCounted<MultiCursor> {
+// Replay cursor that stitches together replay-capable cursors from successive history ranges.
+class ReplayMultiCursor final : public IReplayPeekCursor, public ReferenceCounted<ReplayMultiCursor> {
 public:
-	std::vector<Reference<IPeekCursor>> cursors;
+	std::vector<Reference<IReplayPeekCursor>> cursors;
 	std::vector<LogMessageVersion> epochEnds;
 	Version poppedVersion;
 
-	MultiCursor(std::vector<Reference<IPeekCursor>> cursors, std::vector<LogMessageVersion> epochEnds);
+	ReplayMultiCursor(std::vector<Reference<IReplayPeekCursor>> cursors, std::vector<LogMessageVersion> epochEnds);
 
-	Reference<IPeekCursor> cloneNoMore() override;
+	Reference<IReplayPeekCursor> cloneNoMore() override;
 	void setProtocolVersion(ProtocolVersion version) override;
 	Arena& arena() override;
 	ArenaReader* reader() override;
@@ -275,18 +278,44 @@ public:
 	VectorRef<Tag> getTags() const override;
 	void advanceTo(LogMessageVersion n) override;
 	Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply) override;
-	Future<Void> onFailed() const override;
-	bool isActive() const override;
 	bool isExhausted() const override;
 	const LogMessageVersion& version() const override;
 	Version popped() const override;
 	Version getMinKnownCommittedVersion() const override;
+	Version getMaxKnownVersion() const override;
 	Optional<UID> getPrimaryPeekLocation() const override;
 	Optional<UID> getCurrentPeekLocation() const override;
+	void addref() override { ReferenceCounted<ReplayMultiCursor>::addref(); }
+	void delref() override { ReferenceCounted<ReplayMultiCursor>::delref(); }
+};
+
+// Plain cursor that stitches together sequential ranges without replay-only capabilities.
+class MultiCursor final : public IPeekCursor, public ReferenceCounted<MultiCursor> {
+public:
+	std::vector<Reference<IPeekCursor>> cursors;
+	std::vector<LogMessageVersion> epochEnds;
+	Version poppedVersion;
+
+	MultiCursor(std::vector<Reference<IPeekCursor>> cursors, std::vector<LogMessageVersion> epochEnds);
+
+	void setProtocolVersion(ProtocolVersion version) override;
+	Arena& arena() override;
+	ArenaReader* reader() override;
+	bool hasMessage() const override;
+	void nextMessage() override;
+	StringRef getMessage() override;
+	StringRef getMessageWithTags() override;
+	VectorRef<Tag> getTags() const override;
+	Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply) override;
+	bool isExhausted() const override;
+	const LogMessageVersion& version() const override;
+	Version popped() const override;
+	Version getMinKnownCommittedVersion() const override;
 	void addref() override { ReferenceCounted<MultiCursor>::addref(); }
 	void delref() override { ReferenceCounted<MultiCursor>::delref(); }
 };
 
+// Plain cursor that buffers and orders messages pulled from one or more input cursors.
 class BufferedCursor final : public IPeekCursor, public ReferenceCounted<BufferedCursor> {
 public:
 	struct BufferedMessage {
@@ -305,6 +334,7 @@ public:
 	};
 
 	std::vector<Reference<IPeekCursor>> cursors;
+	std::vector<Reference<IReplayPeekCursor>> discardableCursors;
 	std::vector<Deque<BufferedMessage>> cursorMessages;
 	std::vector<BufferedMessage> messages;
 	int messageIndex;
@@ -326,13 +356,17 @@ public:
 	               Version end,
 	               bool withTags,
 	               bool canDiscardPopped);
+	BufferedCursor(std::vector<Reference<IReplayPeekCursor>> cursors,
+	               Version begin,
+	               Version end,
+	               bool withTags,
+	               bool canDiscardPopped);
 	BufferedCursor(std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers,
 	               Tag tag,
 	               Version begin,
 	               Version end,
 	               bool parallelGetMore);
 
-	Reference<IPeekCursor> cloneNoMore() override;
 	void setProtocolVersion(ProtocolVersion version) override;
 	Arena& arena() override;
 	ArenaReader* reader() override;
@@ -341,16 +375,11 @@ public:
 	StringRef getMessage() override;
 	StringRef getMessageWithTags() override;
 	VectorRef<Tag> getTags() const override;
-	void advanceTo(LogMessageVersion n) override;
 	Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply) override;
-	Future<Void> onFailed() const override;
-	bool isActive() const override;
 	bool isExhausted() const override;
 	const LogMessageVersion& version() const override;
 	Version popped() const override;
 	Version getMinKnownCommittedVersion() const override;
-	Optional<UID> getPrimaryPeekLocation() const override;
-	Optional<UID> getCurrentPeekLocation() const override;
 	void addref() override { ReferenceCounted<BufferedCursor>::addref(); }
 	void delref() override { ReferenceCounted<BufferedCursor>::delref(); }
 };

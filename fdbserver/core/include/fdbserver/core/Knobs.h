@@ -126,6 +126,7 @@ public:
 	int TLOG_POP_BATCH_SIZE;
 	bool ENABLE_TLOG_TEMP_TAG_MESSAGES_RESERVE;
 	double BLOCKING_PEEK_TIMEOUT;
+	double PEEK_REPLY_TIMEOUT; // Sender-side timeout for non-parallel peek; 0 disables (old wait-forever behavior)
 	bool PEEK_BATCHING_EMPTY_MSG;
 	double PEEK_BATCHING_EMPTY_MSG_INTERVAL;
 	double POP_FROM_LOG_DELAY;
@@ -615,6 +616,7 @@ public:
 	int ROCKSDB_WRITEBATCH_PROTECTION_BYTES_PER_KEY;
 	int ROCKSDB_MEMTABLE_PROTECTION_BYTES_PER_KEY;
 	int ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY;
+	bool ROCKSDB_ENABLE_CACHE_USAGE_OVERRIDES;
 	bool ROCKSDB_ENABLE_NONDETERMINISM; // Whether rocksdb nondeterministic behavior should be enabled in simulation.
 	                                    // Note that turning this on in simulation could lead to non-deterministic runs
 	                                    // since we rely on rocksdb metadata. This knob also applies to sharded rocks
@@ -704,7 +706,11 @@ public:
 	double COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL;
 	double COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR;
 	double COMMIT_TRIGGER_DELAY;
-	bool ENABLE_READ_LOCK_ON_RANGE;
+	bool ENABLE_READ_LOCK_ON_RANGE; // Despite the name, this is a write-exclusion lock — commit proxies
+	                                // reject writes to a locked range, but reads are unaffected. The
+	                                // name reflects bulkload's perspective: "I'm ingesting data into
+	                                // this range, lock it so nobody else writes." Bulkload is currently
+	                                // the only consumer.
 
 	double RESOLVER_COALESCE_TIME;
 	int BUGGIFIED_ROW_LIMIT;
@@ -1063,6 +1069,9 @@ public:
 	// Rolling window duration over which the average bytes moved by DD is calculated for the 'MovingData' trace event.
 	double DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL;
 	int64_t MOVING_WINDOW_SAMPLE_SIZE;
+	// Probability of running the consistency check between teams and teamsByServerIDs
+	// in getTeamByServers (simulation only).
+	double DD_TEAMS_BY_SERVER_IDS_CONSISTENCY_CHECK_PROB_SIM;
 
 	// Storage Server
 	double STORAGE_LOGGING_DELAY;

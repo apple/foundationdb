@@ -27,7 +27,7 @@
 #include "flow/CoroUtils.h"
 
 Future<GenerationRegReadReply> waitAndSendRead(GenerationRegInterface stateServer, GenerationRegReadRequest req) {
-	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY)
+	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || buggify())
 		co_await delay(SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * deterministicRandom()->random01());
 	GenerationRegReadReply reply;
 	if (stateServer.hostname.present()) {
@@ -35,13 +35,13 @@ Future<GenerationRegReadReply> waitAndSendRead(GenerationRegInterface stateServe
 	} else {
 		reply = co_await retryBrokenPromise(stateServer.read, req);
 	}
-	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY)
+	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || buggify())
 		co_await delay(SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * deterministicRandom()->random01());
 	co_return reply;
 }
 
 Future<UniqueGeneration> waitAndSendWrite(GenerationRegInterface stateServer, GenerationRegWriteRequest req) {
-	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY)
+	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || buggify())
 		co_await delay(SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * deterministicRandom()->random01());
 	UniqueGeneration reply;
 	if (stateServer.hostname.present()) {
@@ -49,7 +49,7 @@ Future<UniqueGeneration> waitAndSendWrite(GenerationRegInterface stateServer, Ge
 	} else {
 		reply = co_await retryBrokenPromise(stateServer.write, req);
 	}
-	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY)
+	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || buggify())
 		co_await delay(SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * deterministicRandom()->random01());
 	co_return reply;
 }
@@ -318,7 +318,7 @@ struct MovableCoordinatedStateImpl {
 			ASSERT(res.index() == 1);
 		}
 
-		if (BUGGIFY)
+		if (buggify())
 			co_await delay(5);
 
 		Value oldQuorumState = co_await cs.read();
@@ -342,7 +342,7 @@ struct MovableCoordinatedStateImpl {
 		    BinaryWriter::toValue(MovableValue(value, MovableValue::MaybeTo, nc.toString()),
 		                          IncludeVersion(ProtocolVersion::withMovableCoordinatedStateV2())));
 
-		if (BUGGIFY)
+		if (buggify())
 			co_await delay(5);
 
 		// SOMEDAY: If we are worried about someone magically getting the new cluster ID and interfering, do a second

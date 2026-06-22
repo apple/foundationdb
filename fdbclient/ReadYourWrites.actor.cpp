@@ -701,7 +701,7 @@ public:
 				int singleClears = 0;
 				int clearLimit = requestCount ? 1 << std::min(requestCount, 20) : 0;
 				if (it.beginKey() < itEnd.beginKey())
-					singleClears = std::min(skipUncached(ucEnd, itEnd, BUGGIFY ? 0 : clearLimit + 100), clearLimit);
+					singleClears = std::min(skipUncached(ucEnd, itEnd, buggify() ? 0 : clearLimit + 100), clearLimit);
 
 				KeySelector read_end;
 				if (ucEnd != itEnd) {
@@ -1007,7 +1007,8 @@ public:
 				int singleClears = 0;
 				int clearLimit = requestCount ? 1 << std::min(requestCount, 20) : 0;
 				if (it.beginKey() > itEnd.beginKey())
-					singleClears = std::min(skipUncachedBack(ucEnd, itEnd, BUGGIFY ? 0 : clearLimit + 100), clearLimit);
+					singleClears =
+					    std::min(skipUncachedBack(ucEnd, itEnd, buggify() ? 0 : clearLimit + 100), clearLimit);
 
 				KeySelector read_begin;
 				if (ucEnd != itEnd) {
@@ -1340,7 +1341,7 @@ public:
 		// would already have a read version. We need to get a read version too, otherwise committing a conflicting
 		// transaction may not ensure this transaction is no longer in-flight, since this transaction could get a read
 		// version _after_.
-		co_await success(ryw->getReadVersion());
+		co_await ryw->getReadVersion();
 		if (!ryw->resetPromise.isSet())
 			ryw->resetPromise.sendError(transaction_timed_out());
 		co_await delay(deterministicRandom()->random01() * 5);

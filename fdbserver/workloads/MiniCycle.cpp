@@ -85,7 +85,7 @@ struct MiniCycleWorkload : TestWorkload {
 		while (true) {
 			auto choice = co_await race(self->_checkCycle(cx->clone(), self, ok), end);
 			if (choice.index() == 0) {
-				bool ret = std::get<0>(std::move(choice));
+				bool ret = std::get<0>(choice);
 
 				ok = ret && ok;
 				if (!ok)
