@@ -1292,10 +1292,7 @@ Future<Void> failBulkLoadTask(Reference<DataDistributor> self,
 // While the task is still ours -- including a multi-hour large-shard data
 // move -- this Future never returns, and the caller continues waiting on
 // completeAck.
-Future<Void> waitUntilTaskAbandoned(Reference<DataDistributor> self,
-                                     KeyRange range,
-                                     UID taskId,
-                                     int ourRestartCount) {
+Future<Void> waitUntilTaskAbandoned(Reference<DataDistributor> self, KeyRange range, UID taskId, int ourRestartCount) {
 	while (true) {
 		co_await delay(60.0);
 		Transaction tr(self->txnProcessor->context());
@@ -1304,10 +1301,7 @@ Future<Void> waitUntilTaskAbandoned(Reference<DataDistributor> self,
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			BulkLoadTaskState current = co_await getBulkLoadTask(
-			    &tr,
-			    range,
-			    taskId,
-			    { BulkLoadPhase::Triggered, BulkLoadPhase::Running, BulkLoadPhase::Complete });
+			    &tr, range, taskId, { BulkLoadPhase::Triggered, BulkLoadPhase::Running, BulkLoadPhase::Complete });
 			if (current.restartCount > ourRestartCount) {
 				// Someone re-triggered the task; a different doBulkLoadTask owns it.
 				co_return;
@@ -1381,11 +1375,9 @@ Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange range, UID
 		// that case neither completeAck nor abandoned will ever fire, but the
 		// backstop guarantees this actor exits within bounded time so
 		// scheduleBulkLoadTasks can re-scan and re-dispatch.
-		Future<Void> abandoned =
-		    waitUntilTaskAbandoned(self, range, taskId, triggeredBulkLoadTask.restartCount);
-		auto raceResult = co_await race(completeAck.getFuture(),
-		                                abandoned,
-		                                delay(SERVER_KNOBS->DD_BULKLOAD_JOB_MONITOR_PERIOD_SEC * 240));
+		Future<Void> abandoned = waitUntilTaskAbandoned(self, range, taskId, triggeredBulkLoadTask.restartCount);
+		auto raceResult = co_await race(
+		    completeAck.getFuture(), abandoned, delay(SERVER_KNOBS->DD_BULKLOAD_JOB_MONITOR_PERIOD_SEC * 240));
 		BulkLoadAck ack;
 		if (raceResult.index() == 0) {
 			ack = std::get<0>(std::move(raceResult));
