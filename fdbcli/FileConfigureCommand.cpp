@@ -26,6 +26,7 @@
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/Schemas.h"
+#include "fdbclient/StatusSchema.h"
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
