@@ -865,6 +865,13 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 					// Track per-address cumulative connect failures + last-failure time. The map
 					// potentially has unbounded list of peers as they're having connection issues.
 					// To make the map bounded, evict based on TTL.
+					//
+					// Note: this prune only runs here, inside the connect-failure path, so it is
+					// failure-driven rather than on a timer. If connect failures stop across all
+					// addresses, the scan does not run again and stale entries can linger past their
+					// TTL until the next failure on any address. The map is still bounded -- by the
+					// set of addresses ever contacted, and the next failure prunes the stale ones --
+					// so this is not unbounded growth, just not strictly time-based eviction.
 					{
 						double tNow = now();
 						double ttl = FLOW_KNOBS->PERSISTENT_CONNECT_FAILED_COUNT_TTL;
