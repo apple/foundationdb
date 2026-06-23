@@ -1296,32 +1296,43 @@ Future<Void> checkFetchingState(Database cx,
 	}
 }
 
-// Re-read state needed to verify nothing changed during waitForShardReady
-// when that wait runs outside the transaction. Returned by
-// rereadShardStateAfterWait.
-struct PostWaitReread {
+// System-key reads that finishMoveKeys / finishMoveShards depend on for
+// correctness. Used both before the waitForShardReady wait (in the planning
+// transaction that's then discarded) and after the wait (in the verify+write
+// transaction). Centralizing the reads ensures both sides see the same set,
+// so the post-wait verification can detect any change to state the planning
+// phase relied on.
+struct ShardStateReads {
 	RangeResult uidToTagMap;
 	RangeResult keyServers;
 	Optional<DataMoveMetaData> dataMove; // populated iff dataMoveId.present()
 };
 
-// After waitForShardReady has run outside of any transaction, the caller
-// opens a fresh transaction (and sets its own options). This helper does
-// the re-reads needed to verify nothing changed during the wait:
-//   - moveKeysLock is still ours
-//   - dataMove (when applicable) is still present and we still own it
-//   - keyServers is unchanged for the range we just waited on
-// The caller does the final equality checks on dest UIDs.
-static Future<PostWaitReread> rereadShardStateAfterWait(Transaction* tr,
-                                                        MoveKeysLock lock,
-                                                        const DDEnabledState* ddEnabledState,
-                                                        KeyRange range,
-                                                        Optional<UID> dataMoveId,
-                                                        int krmRowLimit,
-                                                        int krmByteLimit) {
+// Read the system-key state needed by finishMoveKeys / finishMoveShards.
+// Called twice per attempt:
+//   1. Before waitForShardReady, to plan the wait (which dest interfaces, etc).
+//   2. After the wait, to verify nothing changed; the caller compares the two
+//      results and retries if they differ.
+static Future<ShardStateReads> readShardState(Transaction* tr,
+                                              MoveKeysLock lock,
+                                              const DDEnabledState* ddEnabledState,
+                                              KeyRange range,
+                                              Optional<UID> dataMoveId,
+                                              int krmRowLimit,
+                                              int krmByteLimit) {
+	// Read set scope: moveKeysLock, dataMove (when applicable), serverTags
+	// (uidToTagMap), and keyServers. The original single-transaction code
+	// also read \xff/serverList/ — that's NOT covered here because writes
+	// key off stable UIDs not interfaces, so a serverList change between
+	// read and write can't invalidate the writes. Server removal is
+	// coordinated under moveKeysLock (re-checked here); dest reassignment
+	// is caught by the caller's dest-UID equality check; an SS that
+	// vanished mid-wait causes the caller's count check to fail before
+	// reaching commit. The serverList read therefore stays inline at the
+	// caller (it's needed once, before the wait, only to build interfaces).
 	co_await checkMoveKeysLock(tr, lock, ddEnabledState);
 
-	PostWaitReread r;
+	ShardStateReads r;
 	if (dataMoveId.present()) {
 		Optional<Value> val = co_await tr->get(dataMoveKeyFor(dataMoveId.get()));
 		if (val.present()) {
@@ -1389,16 +1400,16 @@ static Future<Void> finishMoveKeys(Database occ,
 					co_await finishMoveKeysParallelismLock->take(TaskPriority::DataDistributionLaunch);
 					releaser = FlowLock::Releaser(*finishMoveKeysParallelismLock);
 
-					co_await checkMoveKeysLock(&tr, lock, ddEnabledState);
-
 					KeyRange currentKeys = KeyRangeRef(begin, keys.end);
-					RangeResult UIDtoTagMap = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
-					ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
-					RangeResult keyServers = co_await krmGetRanges(&tr,
-					                                               keyServersPrefix,
-					                                               currentKeys,
-					                                               SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
-					                                               SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES);
+					ShardStateReads state = co_await readShardState(&tr,
+					                                                lock,
+					                                                ddEnabledState,
+					                                                currentKeys,
+					                                                /*dataMoveId=*/{},
+					                                                SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
+					                                                SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES);
+					RangeResult& UIDtoTagMap = state.uidToTagMap;
+					RangeResult& keyServers = state.keyServers;
 
 					// Determine the last processed key (which will be the beginning for the next iteration)
 					endKey = keyServers.end()[-1].key;
@@ -1647,8 +1658,8 @@ static Future<Void> finishMoveKeys(Database occ,
 						// re-verify dest hasn't changed during the wait, then commit.
 						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 						tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-						PostWaitReread reread =
-						    co_await rereadShardStateAfterWait(&tr,
+						ShardStateReads reread =
+						    co_await readShardState(&tr,
 						                                       lock,
 						                                       ddEnabledState,
 						                                       currentKeys,
@@ -2285,6 +2296,16 @@ static Future<Void> finishMoveShards(Database occ,
 
 				co_await checkMoveKeysLock(&tr, lock, ddEnabledState);
 
+				// dataMove is read inline (not via readShardState) because:
+				//   1. Its presence/phase drives a possible early-exit write
+				//      (cancelDataMove → set Deleting → commit → throw),
+				//      which can't sit inside the shared read helper.
+				//   2. dataMove.ranges.front() supplies `range`, which the
+				//      readShardState call below needs as input.
+				// The post-cancel safety-relevant reads (serverTags +
+				// keyServers, plus a redundant moveKeysLock check) go through
+				// readShardState so they stay in sync with the post-wait
+				// re-read in txn 2.
 				Optional<Value> val = co_await tr.get(dataMoveKeyFor(dataMoveId));
 				if (val.present()) {
 					dataMove = decodeDataMoveValue(val.get());
@@ -2320,14 +2341,15 @@ static Future<Void> finishMoveShards(Database occ,
 					co_return;
 				}
 
-				RangeResult UIDtoTagMap = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
-				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
-
-				RangeResult keyServers = co_await krmGetRanges(&tr,
-				                                               keyServersPrefix,
-				                                               range,
-				                                               SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
-				                                               SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT);
+				ShardStateReads state = co_await readShardState(&tr,
+				                                                lock,
+				                                                ddEnabledState,
+				                                                range,
+				                                                /*dataMoveId=*/{},
+				                                                SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
+				                                                SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT);
+				RangeResult& UIDtoTagMap = state.uidToTagMap;
+				RangeResult& keyServers = state.keyServers;
 				ASSERT(!keyServers.empty());
 				range = KeyRangeRef(range.begin, keyServers.back().key);
 				ASSERT(!range.empty());
@@ -2508,7 +2530,7 @@ static Future<Void> finishMoveShards(Database occ,
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-					PostWaitReread reread = co_await rereadShardStateAfterWait(&tr,
+					ShardStateReads reread = co_await readShardState(&tr,
 					                                                           lock,
 					                                                           ddEnabledState,
 					                                                           range,
