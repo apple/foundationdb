@@ -42,7 +42,7 @@ bool isBlobstoreUrl(const std::string& url);
 // Append-only file interface for writing backup data
 // Once finish() is called the file cannot be further written to.
 // Backup containers should not attempt to use files for which finish was not called or did not complete.
-// TODO: Move the log file and range file format encoding/decoding stuff to this file and behind interfaces.
+// Log and range file format encoding/decoding helpers live in BackupFileFormat.h and BackupFileFormat.cpp.
 class IBackupFile {
 public:
 	explicit IBackupFile(const std::string& fileName) : m_fileName(fileName) {}
