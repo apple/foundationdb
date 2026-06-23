@@ -1189,7 +1189,10 @@ ACTOR static Future<Void> locationCachePeerEvictorActor(DatabaseContext* cx) {
 				if (snapIt != lastConnectFailedSnapshot.end()) {
 					prev = snapIt->second;
 				}
-				int64_t delta = cur.count - prev;
+				// If the persistent counter went backwards, the entry was TTL-pruned and re-added
+				// since the last sweep (its count reset to a small value). Count from zero in that
+				// case so a genuine post-reset connect failure isn't missed for a sweep.
+				int64_t delta = (cur.count >= prev) ? (cur.count - prev) : cur.count;
 				lastConnectFailedSnapshot[addr] = cur.count;
 				// A negative threshold disables the trigger (no address is ever evicted on the
 				// connect-failed signal).
