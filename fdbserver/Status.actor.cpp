@@ -3164,7 +3164,6 @@ ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
 
 		statusObj["protocol_version"] = format("%" PRIx64, g_network->protocolVersion().version());
 		statusObj["connection_string"] = coordinators.ccr->getConnectionString().toString();
-		statusObj["bounce_impact"] = getBounceImpactInfo(statusCode);
 
 		state Future<ErrorOr<JsonBuilderObject>> idmpKeyStatusFuture = errorOr(timeoutError(getIdmpKeyStatus(cx), 5.0));
 
@@ -3172,6 +3171,8 @@ ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
 		    versionEpochStatusFetcher(cx, &status_incomplete_reasons);
 
 		wait(success(recoveryStateStatusFuture) && success(idmpKeyStatusFuture) && success(versionEpochStatusFuture));
+
+		statusObj["bounce_impact"] = getBounceImpactInfo(statusCode);
 
 		state JsonBuilderObject recoveryStateStatus = recoveryStateStatusFuture.get();
 		state JsonBuilderObject idmpKeyStatus;
