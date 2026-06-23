@@ -2281,7 +2281,7 @@ Future<Version> watchWaitForValueChange(coro::FrameSizeRecorder, StorageServer* 
 		                      "watchValueSendReply.Before"); //.detail("TaskID", g_network->getCurrentTask());
 
 	Version originalMetadataVersion = metadata->version;
-	co_await success(waitForVersionNoTooOld(data, metadata->version));
+	co_await waitForVersionNoTooOld(data, metadata->version);
 	if (metadata->debugID.present())
 		g_traceBatch.addEvent("WatchValueDebug",
 		                      metadata->debugID.get().first(),
