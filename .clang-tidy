@@ -1,9 +1,11 @@
 ---
 Checks: >
   -*,
+  bugprone-dangling-handle,
   bugprone-shared-ptr-array-mismatch,
   bugprone-sizeof-expression,
   bugprone-string-constructor,
+  bugprone-stringview-nullptr,
   bugprone-suspicious-memory-comparison,
   bugprone-suspicious-memset-usage,
   bugprone-suspicious-semicolon,

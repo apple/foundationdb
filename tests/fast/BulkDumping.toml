@@ -40,3 +40,9 @@ waitForQuiescence = false
     testName = 'BulkDumpingWorkload'
     # 1 is BulkLoadTransportMethod::CP
     bulkLoadTransportMethod = 1
+    # The default 60s is too short under this test's fault injection: a CommitProxy failure
+    # plus a rebooting process in a (possibly 2-region) cluster can leave the database
+    # unavailable for >60s while recovery hits no_more_servers, so the submitBulkDumpJob
+    # transaction can't commit in time and start() fails with timed_out. Raise the cap well
+    # above worst-case recovery; the submit still retries underneath.
+    jobSubmitTimeout = 600.0
