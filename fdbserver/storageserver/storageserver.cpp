@@ -2269,12 +2269,13 @@ Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	}
 }
 
-// Pessimistic estimate the number of overhead bytes used by each
-// watch. Watch key references are stored in an AsyncMap<Key,bool>, and actors
-// must be kept alive until the watch is finished.
+// Pessimistic estimate of the overhead bytes used by each watch. Watch key
+// references are stored in an AsyncMap<Key,bool>, and coroutine frames must be
+// kept alive until the watch is finished. Each watch coroutine records the
+// exact frame size passed to the Flow coroutine allocator before it starts.
 extern size_t WATCH_OVERHEAD_WATCHQ, WATCH_OVERHEAD_WATCHIMPL;
 
-Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext parent, KeyRef key) {
+Future<Version> watchWaitForValueChange(coro::FrameSizeRecorder, StorageServer* data, SpanContext parent, KeyRef key) {
 	Location spanLocation = "SS:watchWaitForValueChange"_loc;
 	Span span(spanLocation, parent);
 	Reference<ServerWatchMetadata> metadata = data->getWatchMetadata(key);
@@ -2389,6 +2390,13 @@ Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext parent,
 	}
 }
 
+Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext parent, KeyRef key) {
+	auto watch =
+	    watchWaitForValueChange(coro::FrameSizeRecorder{ &WATCH_OVERHEAD_WATCHIMPL }, data, std::move(parent), key);
+	ASSERT(WATCH_OVERHEAD_WATCHIMPL > 0);
+	return watch;
+}
+
 void checkCancelWatchImpl(StorageServer* data, WatchValueRequest req) {
 	Reference<ServerWatchMetadata> metadata = data->getWatchMetadata(req.key.contents());
 	// race() may retain one copy of resp while the winning branch runs. This reply
@@ -2400,7 +2408,8 @@ void checkCancelWatchImpl(StorageServer* data, WatchValueRequest req) {
 	}
 }
 
-Future<Void> watchValueSendReply(StorageServer* data,
+Future<Void> watchValueSendReply(coro::FrameSizeRecorder,
+                                 StorageServer* data,
                                  WatchValueRequest req,
                                  Future<Version> resp,
                                  SpanContext spanContext) {
@@ -2453,6 +2462,19 @@ Future<Void> watchValueSendReply(StorageServer* data,
 			co_return;
 		}
 	}
+}
+
+Future<Void> watchValueSendReply(StorageServer* data,
+                                 WatchValueRequest req,
+                                 Future<Version> resp,
+                                 SpanContext spanContext) {
+	auto watch = watchValueSendReply(coro::FrameSizeRecorder{ &WATCH_OVERHEAD_WATCHQ },
+	                                 data,
+	                                 std::move(req),
+	                                 std::move(resp),
+	                                 std::move(spanContext));
+	ASSERT(WATCH_OVERHEAD_WATCHQ > 0);
+	return watch;
 }
 
 // Finds a checkpoint.
@@ -2662,8 +2684,8 @@ Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpointKeyVa
 	}
 }
 
-size_t WATCH_OVERHEAD_WATCHQ = 0;
-size_t WATCH_OVERHEAD_WATCHIMPL = 0;
+size_t WATCH_OVERHEAD_WATCHQ;
+size_t WATCH_OVERHEAD_WATCHIMPL;
 
 Future<Void> getShardState_impl(StorageServer* data, GetShardStateRequest req) {
 	ASSERT(req.mode != GetShardStateRequest::NO_WAIT);
