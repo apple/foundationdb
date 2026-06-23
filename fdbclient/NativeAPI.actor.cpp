@@ -1191,7 +1191,9 @@ ACTOR static Future<Void> locationCachePeerEvictorActor(DatabaseContext* cx) {
 				}
 				int64_t delta = cur.count - prev;
 				lastConnectFailedSnapshot[addr] = cur.count;
-				if (delta > connectFailedThreshold) {
+				// A negative threshold disables the trigger (no address is ever evicted on the
+				// connect-failed signal).
+				if (connectFailedThreshold >= 0 && delta > connectFailedThreshold) {
 					TraceEvent("LocationCachePeerEvictor_FoundDeadAddr")
 					    .suppressFor(1.0)
 					    .detail("DbId", cx->dbId)
