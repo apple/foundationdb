@@ -1973,23 +1973,21 @@ void updateProcessStats(StorageServer* self) {
 
 Future<Version> waitForVersionActor(StorageServer* data, Version version, SpanContext spanContext) {
 	Span span("SS:WaitForVersion"_loc, spanContext);
-	auto res = co_await race(data->version.whenAtLeast(version), delay(SERVER_KNOBS->FUTURE_VERSION_DELAY));
-	if (res.index() == 0) {
+	auto res = co_await timeout(data->version.whenAtLeast(version), SERVER_KNOBS->FUTURE_VERSION_DELAY);
+	if (res.present()) {
 		// FIXME: A bunch of these can block with or without the following delay 0.
 		// wait( delay(0) );  // don't do a whole bunch of these at once
 		if (version < data->oldestVersion.get()) {
 			throw transaction_too_old(); // just in case
 		}
 		co_return version;
-	} else if (res.index() == 1) {
+	} else {
 		if (deterministicRandom()->random01() < 0.001)
 			TraceEvent(SevWarn, "ShardServerFutureVersion1000x", data->thisServerID)
 			    .detail("Version", version)
 			    .detail("MyVersion", data->version.get())
 			    .detail("ServerID", data->thisServerID);
 		throw future_version();
-	} else {
-		UNREACHABLE();
 	}
 }
 
@@ -2082,18 +2080,16 @@ Future<Version> waitForVersionNoTooOld(StorageServer* data, Version version) {
 		version = std::max(Version(1), data->version.get());
 	if (version <= data->version.get())
 		co_return version;
-	auto res = co_await race(data->version.whenAtLeast(version), delay(SERVER_KNOBS->FUTURE_VERSION_DELAY));
-	if (res.index() == 0) {
+	auto res = co_await timeout(data->version.whenAtLeast(version), SERVER_KNOBS->FUTURE_VERSION_DELAY);
+	if (res.present()) {
 		co_return version;
-	} else if (res.index() == 1) {
+	} else {
 		if (deterministicRandom()->random01() < 0.001)
 			TraceEvent(SevWarn, "ShardServerFutureVersion1000x", data->thisServerID)
 			    .detail("Version", version)
 			    .detail("MyVersion", data->version.get())
 			    .detail("ServerID", data->thisServerID);
 		throw future_version();
-	} else {
-		UNREACHABLE();
 	}
 }
 
@@ -2399,7 +2395,7 @@ Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext parent,
 
 void checkCancelWatchImpl(StorageServer* data, WatchValueRequest req) {
 	Reference<ServerWatchMetadata> metadata = data->getWatchMetadata(req.key.contents());
-	// race() may retain one copy of resp while the winning branch runs. This reply
+	// The response race/timeout path may retain one copy of resp while the winning branch runs. This reply
 	// owns the parameter plus at most that race copy; any other reply adds a third reference.
 	if (metadata.isValid() && metadata->versionPromise.getFutureReferenceCount() <= 2) {
 		// last watch timed out so cancel watch_impl and delete key from the map
@@ -2428,27 +2424,40 @@ Future<Void> watchValueSendReply(coro::FrameSizeRecorder,
 		}
 
 		try {
-			auto res =
-			    co_await race(resp, timeoutDelay < 0 ? Never() : delay(timeoutDelay), data->noRecentUpdates.onChange());
-			if (res.index() == 0) {
-				Version ver = std::get<0>(std::move(res));
+			if (timeoutDelay < 0) {
+				auto res = co_await race(resp, data->noRecentUpdates.onChange());
+				if (res.index() == 0) {
+					Version ver = std::get<0>(std::move(res));
 
-				// fire watch
-				req.reply.send(WatchValueReply{ ver });
+					// fire watch
+					req.reply.send(WatchValueReply{ ver });
+					checkCancelWatchImpl(data, req);
+					--data->numWatches;
+					data->watchBytes -= WATCH_OVERHEAD_WATCHQ;
+					co_return;
+				}
+				if (res.index() != 1) {
+					UNREACHABLE();
+				}
+				continue;
+			}
+
+			auto res = co_await race(timeout(resp, timeoutDelay), data->noRecentUpdates.onChange());
+			if (res.index() == 0) {
+				Optional<Version> response = std::get<0>(std::move(res));
+				if (response.present()) {
+					// fire watch
+					req.reply.send(WatchValueReply{ response.get() });
+				} else {
+					// watch timed out
+					data->sendErrorWithPenalty(req.reply, timed_out(), data->getPenalty());
+				}
 				checkCancelWatchImpl(data, req);
 				--data->numWatches;
 				data->watchBytes -= WATCH_OVERHEAD_WATCHQ;
 				co_return;
 			}
-			if (res.index() == 1) {
-				// watch timed out
-				data->sendErrorWithPenalty(req.reply, timed_out(), data->getPenalty());
-				checkCancelWatchImpl(data, req);
-				--data->numWatches;
-				data->watchBytes -= WATCH_OVERHEAD_WATCHQ;
-				co_return;
-			}
-			if (res.index() != 2) {
+			if (res.index() != 1) {
 				UNREACHABLE();
 			}
 		} catch (Error& e) {
@@ -2733,11 +2742,9 @@ Future<Void> getShardState_impl(StorageServer* data, GetShardStateRequest req) {
 }
 
 Future<Void> getShardStateQ(StorageServer* data, GetShardStateRequest req) {
-	auto res = co_await race(getShardState_impl(data, req), delay(g_network->isSimulated() ? 10 : 60));
-	if (res.index() == 1) {
+	auto res = co_await timeout(getShardState_impl(data, req), g_network->isSimulated() ? 10 : 60);
+	if (!res.present()) {
 		data->sendErrorWithPenalty(req.reply, timed_out(), data->getPenalty());
-	} else if (res.index() != 0) {
-		UNREACHABLE();
 	}
 }
 
@@ -10499,22 +10506,20 @@ Future<Void> updateStorage(StorageServer* data) {
 		recentCommitStats.back().whenCommit = now();
 		try {
 			while (true) {
-				auto res = co_await race(
-				    ioTimeoutError(durable, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, "StorageCommit"), delay(60.0));
-				if (res.index() == 0) {
+				if ((co_await timeout(ioTimeoutError(durable, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, "StorageCommit"),
+				                      60.0))
+				        .present()) {
 					break;
-				} else if (res.index() == 1) {
-					TraceEvent(SevWarn, "CommitTooLong", data->thisServerID)
-					    .detail("FetchBytes", data->fetchKeysTotalCommitBytes)
-					    .detail("CommitBytes", SERVER_KNOBS->STORAGE_COMMIT_BYTES - bytesLeft)
-					    .detail("ClearRangesLeft", clearRangesLeft);
+				}
 
-					if (data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
-					    SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_WHEN_IO_TIMEOUT) {
-						data->storage.logRecentRocksDBBackgroundWorkStats(data->thisServerID, "CommitTooLong");
-					}
-				} else {
-					UNREACHABLE();
+				TraceEvent(SevWarn, "CommitTooLong", data->thisServerID)
+				    .detail("FetchBytes", data->fetchKeysTotalCommitBytes)
+				    .detail("CommitBytes", SERVER_KNOBS->STORAGE_COMMIT_BYTES - bytesLeft)
+				    .detail("ClearRangesLeft", clearRangesLeft);
+
+				if (data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
+				    SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_WHEN_IO_TIMEOUT) {
+					data->storage.logRecentRocksDBBackgroundWorkStats(data->thisServerID, "CommitTooLong");
 				}
 			}
 		} catch (Error& e) {
