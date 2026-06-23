@@ -886,12 +886,13 @@ public:
 				if (desc.minRestorableVersion.present() && desc.maxRestorableVersion.present()) {
 					// check if we have contiguous logs from minRestorableVersion to current snapshot endVersion
 					bool contiguousLogs = false;
-					if (desc.mutationLogType == MutationLogType::PARTITIONED_LOG)
+					if (desc.mutationLogType == MutationLogType::PARTITIONED_LOG) {
 						contiguousLogs =
 						    isPartitionedLogsContinuous(logs, desc.minRestorableVersion.get(), s.endVersion);
-					else
+					} else {
 						contiguousLogs =
 						    hasContinuousLogsForSnapshot(logs, desc.minRestorableVersion.get(), s.endVersion);
+					}
 
 					if (contiguousLogs) {
 						// The previous restorable version can be extended to current snapshot version,
@@ -2379,12 +2380,13 @@ void printFileList(BackupFileList& backupFileList) {
 		printf("\n%s", l.toString().c_str());
 
 	printf("\nSnapshotFiles count:%lu", backupFileList.snapshots.size());
-	for (const auto& s : backupFileList.snapshots)
+	for (const auto& s : backupFileList.snapshots) {
 		printf("\n%" PRId64 ", %" PRId64 ", %s, %" PRId64 "\n",
 		       s.beginVersion,
 		       s.endVersion,
 		       s.fileName.c_str(),
 		       s.totalSize);
+	}
 }
 
 // Intentionally missing some log range files and checking if the snapshot can be restored.

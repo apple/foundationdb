@@ -591,10 +591,11 @@ Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> const>
 
 				stats->addRequest(req.transactionCount);
 
-				if (req.debugID.present())
+				if (req.debugID.present()) {
 					g_traceBatch.addEvent("TransactionDebug",
 					                      req.debugID.get().first(),
 					                      "GrvProxyServer.queueTransactionStartRequests.Before");
+				}
 
 				if (systemQueue->empty() && defaultQueue->empty() && batchQueue->empty()) {
 					forwardPromise(Uncancellable{},

@@ -136,18 +136,19 @@ Future<Void> uniform(double* last, double meanInterval) {
 }
 
 Value getOption(VectorRef<KeyValueRef> options, Key key, Value defaultValue) {
-	for (int i = 0; i < options.size(); i++)
+	for (int i = 0; i < options.size(); i++) {
 		if (options[i].key == key) {
 			Value value = options[i].value;
 			options[i].value = ""_sr;
 			return value;
 		}
+	}
 
 	return defaultValue;
 }
 
 int getOption(VectorRef<KeyValueRef> options, Key key, int defaultValue) {
-	for (int i = 0; i < options.size(); i++)
+	for (int i = 0; i < options.size(); i++) {
 		if (options[i].key == key) {
 			int r;
 			if (sscanf(options[i].value.toString().c_str(), "%d", &r)) {
@@ -158,12 +159,13 @@ int getOption(VectorRef<KeyValueRef> options, Key key, int defaultValue) {
 				throw test_specification_invalid();
 			}
 		}
+	}
 
 	return defaultValue;
 }
 
 uint64_t getOption(VectorRef<KeyValueRef> options, Key key, uint64_t defaultValue) {
-	for (int i = 0; i < options.size(); i++)
+	for (int i = 0; i < options.size(); i++) {
 		if (options[i].key == key) {
 			uint64_t r;
 			if (sscanf(options[i].value.toString().c_str(), "%" SCNd64, &r)) {
@@ -174,12 +176,13 @@ uint64_t getOption(VectorRef<KeyValueRef> options, Key key, uint64_t defaultValu
 				throw test_specification_invalid();
 			}
 		}
+	}
 
 	return defaultValue;
 }
 
 int64_t getOption(VectorRef<KeyValueRef> options, Key key, int64_t defaultValue) {
-	for (int i = 0; i < options.size(); i++)
+	for (int i = 0; i < options.size(); i++) {
 		if (options[i].key == key) {
 			int64_t r;
 			if (sscanf(options[i].value.toString().c_str(), "%" SCNd64, &r)) {
@@ -190,12 +193,13 @@ int64_t getOption(VectorRef<KeyValueRef> options, Key key, int64_t defaultValue)
 				throw test_specification_invalid();
 			}
 		}
+	}
 
 	return defaultValue;
 }
 
 double getOption(VectorRef<KeyValueRef> options, Key key, double defaultValue) {
-	for (int i = 0; i < options.size(); i++)
+	for (int i = 0; i < options.size(); i++) {
 		if (options[i].key == key) {
 			float r;
 			if (sscanf(options[i].value.toString().c_str(), "%f", &r)) {
@@ -203,6 +207,7 @@ double getOption(VectorRef<KeyValueRef> options, Key key, double defaultValue) {
 				return r;
 			}
 		}
+	}
 
 	return defaultValue;
 }
@@ -218,36 +223,40 @@ bool getOption(VectorRef<KeyValueRef> options, Key key, bool defaultValue) {
 }
 
 std::vector<std::string> getOption(VectorRef<KeyValueRef> options, Key key, std::vector<std::string> defaultValue) {
-	for (int i = 0; i < options.size(); i++)
+	for (int i = 0; i < options.size(); i++) {
 		if (options[i].key == key) {
 			std::vector<std::string> v;
 			int begin = 0;
-			for (int c = 0; c < options[i].value.size(); c++)
+			for (int c = 0; c < options[i].value.size(); c++) {
 				if (options[i].value[c] == ',') {
 					v.push_back(options[i].value.substr(begin, c - begin).toString());
 					begin = c + 1;
 				}
+			}
 			v.push_back(options[i].value.substr(begin).toString());
 			options[i].value = ""_sr;
 			return v;
 		}
+	}
 	return defaultValue;
 }
 
 std::vector<int> getOption(VectorRef<KeyValueRef> options, Key key, std::vector<int> defaultValue) {
-	for (int i = 0; i < options.size(); i++)
+	for (int i = 0; i < options.size(); i++) {
 		if (options[i].key == key) {
 			std::vector<int> v;
 			int begin = 0;
-			for (int c = 0; c < options[i].value.size(); c++)
+			for (int c = 0; c < options[i].value.size(); c++) {
 				if (options[i].value[c] == ',') {
 					v.push_back(atoi((char*)options[i].value.begin() + begin));
 					begin = c + 1;
 				}
+			}
 			v.push_back(atoi((char*)options[i].value.begin() + begin));
 			options[i].value = ""_sr;
 			return v;
 		}
+	}
 	return defaultValue;
 }
 

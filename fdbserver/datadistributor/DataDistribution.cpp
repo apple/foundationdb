@@ -432,12 +432,14 @@ Future<Void> debugCheckCoalescing(Database cx) {
 				RangeResult ranges = co_await krmGetRanges(&tr, serverKeysPrefixFor(id), allKeys);
 				ASSERT(ranges.end()[-1].key == allKeys.end);
 
-				for (int j = 0; j < ranges.size() - 2; j++)
-					if (ranges[j].value == ranges[j + 1].value)
+				for (int j = 0; j < ranges.size() - 2; j++) {
+					if (ranges[j].value == ranges[j + 1].value) {
 						TraceEvent(SevError, "UncoalescedValues", id)
 						    .detail("Key1", ranges[j].key)
 						    .detail("Key2", ranges[j + 1].key)
 						    .detail("Value", ranges[j].value);
+					}
+				}
 			}
 
 			TraceEvent("DoneCheckingCoalescing").log();
@@ -3207,8 +3209,9 @@ Future<ErrorOr<Void>> trySendSnapReq(RequestStream<WorkerSnapRequest> stream, Wo
 				co_await delay(snapRetryBackoff);
 				snapRetryBackoff = snapRetryBackoff * 2;
 			}
-		} else
+		} else {
 			break;
+		}
 	}
 	co_return ErrorOr<Void>(Void());
 }

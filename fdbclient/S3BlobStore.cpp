@@ -779,11 +779,12 @@ AsyncResult<std::vector<std::string>> listBuckets_impl(Reference<S3BlobStoreEndp
 			}
 
 		} catch (Error& e) {
-			if (e.code() != error_code_actor_cancelled)
+			if (e.code() != error_code_actor_cancelled) {
 				TraceEvent(SevWarn, "S3BlobStoreEndpointListBucketResultParseError")
 				    .errorUnsuppressed(e)
 				    .suppressFor(60)
 				    .detail("Resource", fullResource);
+			}
 			throw http_bad_response();
 		}
 	}

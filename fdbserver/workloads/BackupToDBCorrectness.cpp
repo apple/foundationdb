@@ -118,12 +118,13 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				backupRanges.push_back_deep(backupRanges.arena(),
 				                            KeyRangeRef(strinc("\x00\x00\x01"_sr), normalKeys.end));
 		} else if (backupRangesCount <= 0) {
-			if (beforePrefix)
+			if (beforePrefix) {
 				backupRanges.push_back_deep(backupRanges.arena(),
 				                            KeyRangeRef(normalKeys.begin, std::min(backupPrefix, extraPrefix)));
-			else
+			} else {
 				backupRanges.push_back_deep(backupRanges.arena(),
 				                            KeyRangeRef(strinc(std::max(backupPrefix, extraPrefix)), normalKeys.end));
+			}
 		} else {
 			// Add backup ranges
 			for (int rangeLoop = 0; rangeLoop < backupRangesCount; rangeLoop++) {

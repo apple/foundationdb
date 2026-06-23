@@ -177,19 +177,21 @@ Future<Void> excludeServersAndLocalities(Reference<IDatabase> db,
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		try {
-			if (force && !servers.empty())
+			if (force && !servers.empty()) {
 				tr->set(failed ? special_keys::failedForceOptionSpecialKey
 				               : special_keys::excludedForceOptionSpecialKey,
 				        ValueRef());
+			}
 			for (const auto& s : servers) {
 				Key addr = failed ? special_keys::failedServersSpecialKeyRange.begin.withSuffix(s.toString())
 				                  : special_keys::excludedServersSpecialKeyRange.begin.withSuffix(s.toString());
 				tr->set(addr, ValueRef());
 			}
-			if (force && !localities.empty())
+			if (force && !localities.empty()) {
 				tr->set(failed ? special_keys::failedLocalityForceOptionSpecialKey
 				               : special_keys::excludedLocalityForceOptionSpecialKey,
 				        ValueRef());
+			}
 			for (const auto& l : localities) {
 				Key addr = failed ? special_keys::failedLocalitySpecialKeyRange.begin.withSuffix(l)
 				                  : special_keys::excludedLocalitySpecialKeyRange.begin.withSuffix(l);

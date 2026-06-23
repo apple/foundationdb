@@ -16,6 +16,7 @@ Checks: >
   modernize-use-using,
   performance-for-range-copy,
   performance-move-const-arg,
+  readability-braces-around-statements,
   readability-container-contains,
   readability-const-return-type,
   readability-container-size-empty,
@@ -25,4 +26,6 @@ Checks: >
 CheckOptions:
   - key: modernize-use-auto.MinTypeNameLength
     value: '11'
+  - key: readability-braces-around-statements.ShortStatementLines
+    value: '3'
 ...

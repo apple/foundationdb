@@ -74,11 +74,12 @@ struct MiniCycleWorkload : TestWorkload {
 
 	Future<bool> _check(Database cx, MiniCycleWorkload* self) {
 		std::vector<Future<Void>> cycleClients;
-		for (int c = 0; c < self->clientCount; c++)
+		for (int c = 0; c < self->clientCount; c++) {
 			cycleClients.push_back(
 			    timeout(self->cycleClient(cx->clone(), self, self->actorCount / self->transactionsPerSecond),
 			            self->testDuration,
 			            Void()));
+		}
 
 		Future<Void> end = delay(self->testDuration);
 		bool ok = true;

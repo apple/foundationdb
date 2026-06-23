@@ -52,10 +52,11 @@ Future<bool> excludeServersAndLocalities(Reference<IDatabase> db,
 				                  : fdb_cli::excludedServersSpecialKeyRange.begin.withSuffix(s.toString());
 				tr->set(addr, ValueRef());
 			}
-			if (force && !localities.empty())
+			if (force && !localities.empty()) {
 				tr->set(failed ? fdb_cli::failedLocalityForceOptionSpecialKey
 				               : fdb_cli::excludedLocalityForceOptionSpecialKey,
 				        ValueRef());
+			}
 			for (const auto& l : localities) {
 				Key addr = failed ? fdb_cli::failedLocalitySpecialKeyRange.begin.withSuffix(l)
 				                  : fdb_cli::excludedLocalitySpecialKeyRange.begin.withSuffix(l);

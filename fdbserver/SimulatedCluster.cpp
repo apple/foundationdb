@@ -839,11 +839,12 @@ Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConnectionR
 				// If in simulation, if we make it here with an error other than io_timeout but enASIOTimedOut is set
 				// then somewhere an io_timeout was converted to a different error.
 				if (g_network->isSimulated() && e.code() != error_code_io_timeout &&
-				    (bool)g_network->global(INetwork::enASIOTimedOut))
+				    (bool)g_network->global(INetwork::enASIOTimedOut)) {
 					TraceEvent(SevError, "IOTimeoutErrorSuppressed")
 					    .detail("ErrorCode", e.code())
 					    .detail("RandomId", randomId)
 					    .backtrace();
+				}
 
 				if (e.code() == error_code_io_timeout && !onShutdown.isReady()) {
 					onShutdown = ISimulator::KillType::RebootProcess;
@@ -1009,11 +1010,12 @@ Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				if (i == 0) {
 					std::string coordinationFolder =
 					    ini.GetValue(printable(localities.machineId()).c_str(), "coordinationFolder", "");
-					if (coordinationFolder.empty())
+					if (coordinationFolder.empty()) {
 						coordinationFolder = ini.GetValue(
 						    printable(localities.machineId()).c_str(),
 						    format("c%d", i * listenPerProcess).c_str(),
 						    joinPath(baseFolder, deterministicRandom()->randomUniqueID().toString()).c_str());
+					}
 					coordFolders.push_back(coordinationFolder);
 				} else {
 					coordFolders.push_back(
@@ -1190,8 +1192,9 @@ Future<Void> simulatedMachine(ClusterConnectionString connStr,
 					TraceEvent("MachineFilesOpen", randomId)
 					    .detail("PAddr", toIPVectorString(ips))
 					    .detail("OpenFiles", openFiles);
-				} else
+				} else {
 					break;
+				}
 
 				if (shutdownDelayCount++ >= 50) { // Worker doesn't shut down instantly on reboot
 					TraceEvent(SevError, "SimulatedFDBDFilesCheck", randomId)
@@ -2517,16 +2520,17 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			// Choose a machine class
 			ProcessClass processClass = ProcessClass(ProcessClass::UnsetClass, ProcessClass::CommandLineSource);
 			if (assignClasses) {
-				if (assignedMachines < 4)
+				if (assignedMachines < 4) {
 					processClass = ProcessClass((ProcessClass::ClassType)deterministicRandom()->randomInt(0, 2),
 					                            ProcessClass::CommandLineSource); // Unset or Storage
-				else if (assignedMachines == 4 && simconfig.db.regions.empty())
+				} else if (assignedMachines == 4 && simconfig.db.regions.empty()) {
 					processClass = ProcessClass(
 					    processClassesSubSet[deterministicRandom()->randomInt(0, processClassesSubSet.size())],
 					    ProcessClass::CommandLineSource); // Unset or Stateless
-				else
+				} else {
 					processClass = ProcessClass((ProcessClass::ClassType)deterministicRandom()->randomInt(0, 3),
 					                            ProcessClass::CommandLineSource); // Unset, Storage, or Transaction
+				}
 
 				if (processClass == ProcessClass::UnsetClass || processClass == ProcessClass::StorageClass) {
 					possible_ss++;

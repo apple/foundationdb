@@ -284,13 +284,14 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		for (auto processInfo : getServers()) {
 			auto processNet = AddressExclusion(processInfo->address.ip, processInfo->address.port);
 			// Mark all of the unavailable as dead
-			if (!processInfo->isAvailable() || processInfo->isCleared())
+			if (!processInfo->isAvailable() || processInfo->isCleared()) {
 				processesDead.push_back(processInfo);
-			// Save all processes not specified within set
-			else if (killAddrs.find(processNet) == killAddrs.end())
+				// Save all processes not specified within set
+			} else if (killAddrs.find(processNet) == killAddrs.end()) {
 				processesLeft.push_back(processInfo);
-			else
+			} else {
 				killProcArray.push_back(processInfo);
+			}
 		}
 
 		// Identify the largest set of processes which can be killed
@@ -457,7 +458,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			    .detail("ClusterAvailable", g_simulator->isAvailable())
 			    .detail("RemoveViaClear", removeViaClear);
 			for (auto& killProcess : killProcArray) {
-				if (g_simulator->isProtectedAddress(killProcess->address))
+				if (g_simulator->isProtectedAddress(killProcess->address)) {
 					TraceEvent("RemoveAndKill", functionId)
 					    .detail("Step", "NoKill Process")
 					    .detail("Process", describe(*killProcess))
@@ -465,7 +466,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 					    .detail("Rebooting", killProcess->rebooting)
 					    .detail("ClusterAvailable", g_simulator->isAvailable())
 					    .detail("Protected", g_simulator->isProtectedAddress(killProcess->address));
-				else if (removeViaClear) {
+				} else if (removeViaClear) {
 					g_simulator->rebootProcess(killProcess, ISimulator::KillType::RebootProcessAndDelete);
 					TraceEvent("RemoveAndKill", functionId)
 					    .detail("Step", "Clear Process")
