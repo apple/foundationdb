@@ -11908,6 +11908,179 @@ Future<Void> reportStorageServerState(StorageServer* self) {
 	}
 }
 
+Future<Void> serveGetShardStateRequests(StorageServer* self, FutureStream<GetShardStateRequest> getShardState) {
+	while (true) {
+		GetShardStateRequest req = co_await getShardState;
+		if (req.mode == GetShardStateRequest::NO_WAIT) {
+			if (self->isReadable(req.keys))
+				req.reply.send(GetShardStateReply{ self->version.get(), self->durableVersion.get() });
+			else
+				req.reply.sendError(wrong_shard_server());
+		} else {
+			self->actors.add(getShardStateQ(self, req));
+		}
+	}
+}
+
+Future<Void> serveGetQueuingMetricsRequests(StorageServer* self,
+                                            FutureStream<StorageQueuingMetricsRequest> getQueuingMetricsRequests) {
+	while (true) {
+		StorageQueuingMetricsRequest req = co_await getQueuingMetricsRequests;
+		getQueuingMetrics(self, req);
+	}
+}
+
+Future<Void> serveGetKeyValueStoreTypeRequests(StorageServer* self,
+                                               FutureStream<ReplyPromise<KeyValueStoreType>> getKeyValueStoreType) {
+	while (true) {
+		ReplyPromise<KeyValueStoreType> reply = co_await getKeyValueStoreType;
+		reply.send(self->storage.getKeyValueStoreType());
+	}
+}
+
+Future<Void> serveGetCheckpointRequests(StorageServer* self, FutureStream<GetCheckpointRequest> getCheckpoint) {
+	while (true) {
+		GetCheckpointRequest req = co_await getCheckpoint;
+		self->actors.add(getCheckpointQ(self, req));
+	}
+}
+
+Future<Void> serveFetchCheckpointRequests(StorageServer* self, FutureStream<FetchCheckpointRequest> fetchCheckpoint) {
+	while (true) {
+		FetchCheckpointRequest req = co_await fetchCheckpoint;
+		self->actors.add(fetchCheckpointQ(self, req));
+	}
+}
+
+Future<Void> serveUpdateCommitCostRequests(StorageServer* self,
+                                           FutureStream<UpdateCommitCostRequest> updateCommitCostRequest) {
+	while (true) {
+		UpdateCommitCostRequest req = co_await updateCommitCostRequest;
+		// Ratekeeper might change with a new ID. In this case, always accept the data.
+		if (req.ratekeeperID != self->busiestWriteTagContext.ratekeeperID) {
+			TraceEvent("RatekeeperIDChange")
+			    .detail("OldID", self->busiestWriteTagContext.ratekeeperID)
+			    .detail("OldLastUpdateTime", self->busiestWriteTagContext.lastUpdateTime)
+			    .detail("NewID", req.ratekeeperID)
+			    .detail("LastUpdateTime", req.postTime);
+			self->busiestWriteTagContext.ratekeeperID = req.ratekeeperID;
+			self->busiestWriteTagContext.lastUpdateTime = -1;
+		}
+		// In case we received an old request/duplicate request, due to, e.g. network problem
+		ASSERT(req.postTime > 0);
+		if (req.postTime < self->busiestWriteTagContext.lastUpdateTime) {
+			continue;
+		}
+
+		self->busiestWriteTagContext.lastUpdateTime = req.postTime;
+		TraceEvent("BusiestWriteTag", self->thisServerID)
+		    .detail("Elapsed", req.elapsed)
+		    .detail("Tag", req.busiestTag)
+		    .detail("TagOps", req.opsSum)
+		    .detail("TagCost", req.costSum)
+		    .detail("TotalCost", req.totalWriteCosts)
+		    .detail("Reported", req.reported)
+		    .trackLatest(self->busiestWriteTagContext.busiestWriteTagTrackingKey);
+
+		req.reply.send(Void());
+	}
+}
+
+Future<Void> serveFetchCheckpointKeyValuesRequests(
+    StorageServer* self,
+    FutureStream<FetchCheckpointKeyValuesRequest> fetchCheckpointKeyValues) {
+	while (true) {
+		FetchCheckpointKeyValuesRequest req = co_await fetchCheckpointKeyValues;
+		self->actors.add(fetchCheckpointKeyValuesQ(self, req));
+	}
+}
+
+Future<Void> serveAuditStorageRequests(StorageServer* self, FutureStream<AuditStorageRequest> auditStorage) {
+	while (true) {
+		AuditStorageRequest req = co_await auditStorage;
+		// Check req
+		if (!req.id.isValid() || !req.ddId.isValid() || req.range.empty() ||
+		    req.getType() == AuditType::ValidateLocationMetadata) {
+			// ddId is used when persist progress
+			TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+			           "AuditRequestInvalid") // unexpected
+			    .detail("AuditRange", req.range)
+			    .detail("DDId", req.ddId)
+			    .detail("AuditId", req.id)
+			    .detail("AuditType", req.getType())
+			    .detail("AuditRange", req.range);
+			req.reply.sendError(audit_storage_cancelled());
+			continue;
+		}
+		// Start the new audit task
+		if (req.getType() == AuditType::ValidateHA) {
+			self->actors.add(auditStorageShardReplicaQ(self, req));
+		} else if (req.getType() == AuditType::ValidateReplica) {
+			self->actors.add(auditStorageShardReplicaQ(self, req));
+		} else if (req.getType() == AuditType::ValidateStorageServerShard) {
+			self->actors.add(auditStorageServerShardQ(self, req));
+		} else if (req.getType() == AuditType::ValidateRestore) {
+			self->actors.add(auditRestoreQ(self, req));
+		} else {
+			req.reply.sendError(not_implemented());
+		}
+	}
+}
+
+Future<Void> serveBulkDumpRequests(StorageServer* self, FutureStream<BulkDumpRequest> bulkDump) {
+	while (true) {
+		BulkDumpRequest req = co_await bulkDump;
+		TraceEvent(bulkLoadVerboseEventSev(), "SSBulkDumpRequestReceived", self->thisServerID)
+		    .detail("BulkDumpRequest", req.toString());
+		self->actors.add(bulkDumpQ(self, req));
+	}
+}
+
+Future<Void> serveGetHotShardsRequests(StorageServer* self, FutureStream<GetHotShardsRequest> getHotShards) {
+	while (true) {
+		GetHotShardsRequest req = co_await getHotShards;
+		struct ComparePair {
+			bool operator()(const std::pair<KeyRange, int64_t>& lhs, const std::pair<KeyRange, int64_t>& rhs) {
+				return lhs.second > rhs.second;
+			}
+		};
+		std::priority_queue<std::pair<KeyRange, int64_t>, std::vector<std::pair<KeyRange, int64_t>>, ComparePair>
+		    topRanges;
+
+		for (auto& s : self->shards.ranges()) {
+			KeyRange keyRange = KeyRange(s.range());
+			int64_t bytesWrittenPerKSecond = self->metrics.getHotShards(keyRange);
+			if (systemKeys.intersects(keyRange) || (bytesWrittenPerKSecond <= SERVER_KNOBS->SHARD_MAX_BYTES_PER_KSEC)) {
+				continue;
+			}
+			if (topRanges.size() < SERVER_KNOBS->HOT_SHARD_THROTTLING_TRACKED) {
+				topRanges.push(std::make_pair(keyRange, bytesWrittenPerKSecond));
+			} else if (bytesWrittenPerKSecond > topRanges.top().second) {
+				topRanges.pop();
+				topRanges.push(std::make_pair(keyRange, bytesWrittenPerKSecond));
+			}
+		}
+
+		// TraceEvent(SevDebug, "ReceivedGetHotShards").detail("TopRanges", topRanges.size());
+		GetHotShardsReply reply;
+
+		while (!topRanges.empty()) {
+			reply.hotShards.push_back(topRanges.top().first);
+			topRanges.pop();
+		}
+
+		req.reply.send(reply);
+	}
+}
+
+Future<Void> serveGetStorageCheckSumRequests(StorageServer* self, FutureStream<GetStorageCheckSumRequest> getCheckSum) {
+	while (true) {
+		GetStorageCheckSumRequest req = co_await getCheckSum;
+		TraceEvent(SevError, "GetStorageCheckSumHasNotImplemented", self->thisServerID);
+		req.reply.sendError(not_implemented());
+	}
+}
+
 Future<Void> storageServerCore(StorageServer* self, StorageServerInterface ssi) {
 	Future<Void> doUpdate = Void();
 	bool updateReceived = false; // true iff the current update() actor assigned to doUpdate has already
@@ -11933,6 +12106,17 @@ Future<Void> storageServerCore(StorageServer* self, StorageServerInterface ssi) 
 	self->actors.add(serveOverlappingChangeFeedsRequests(self, ssi.overlappingChangeFeeds.getFuture()));
 	self->actors.add(serveChangeFeedPopRequests(self, ssi.changeFeedPop.getFuture()));
 	self->actors.add(serveChangeFeedVersionUpdateRequests(self, ssi.changeFeedVersionUpdate.getFuture()));
+	self->actors.add(serveGetShardStateRequests(self, ssi.getShardState.getFuture()));
+	self->actors.add(serveGetQueuingMetricsRequests(self, ssi.getQueuingMetrics.getFuture()));
+	self->actors.add(serveGetKeyValueStoreTypeRequests(self, ssi.getKeyValueStoreType.getFuture()));
+	self->actors.add(serveGetCheckpointRequests(self, ssi.checkpoint.getFuture()));
+	self->actors.add(serveFetchCheckpointRequests(self, ssi.fetchCheckpoint.getFuture()));
+	self->actors.add(serveUpdateCommitCostRequests(self, ssi.updateCommitCostRequest.getFuture()));
+	self->actors.add(serveFetchCheckpointKeyValuesRequests(self, ssi.fetchCheckpointKeyValues.getFuture()));
+	self->actors.add(serveAuditStorageRequests(self, ssi.auditStorage.getFuture()));
+	self->actors.add(serveBulkDumpRequests(self, ssi.bulkdump.getFuture()));
+	self->actors.add(serveGetHotShardsRequests(self, ssi.getHotShards.getFuture()));
+	self->actors.add(serveGetStorageCheckSumRequests(self, ssi.getCheckSum.getFuture()));
 	self->actors.add(traceRole(Role::STORAGE_SERVER, ssi.id()));
 	self->actors.add(reportStorageServerState(self));
 	self->actors.add(storageEngineConsistencyCheck(self));
@@ -11953,236 +12137,72 @@ Future<Void> storageServerCore(StorageServer* self, StorageServerInterface ssi) 
 				TraceEvent(SevWarn, "SlowSSLoopx100", self->thisServerID).detail("Elapsed", elapsedTime);
 		}
 
-		{
-			auto res = co_await race(checkLastUpdate,
-			                         dbInfoChange,
-			                         ssi.getShardState.getFuture(),
-			                         ssi.getQueuingMetrics.getFuture(),
-			                         ssi.getKeyValueStoreType.getFuture(),
-			                         doUpdate,
-			                         ssi.checkpoint.getFuture(),
-			                         ssi.fetchCheckpoint.getFuture(),
-			                         ssi.updateCommitCostRequest.getFuture(),
-			                         ssi.fetchCheckpointKeyValues.getFuture(),
-			                         ssi.auditStorage.getFuture(),
-			                         ssi.bulkdump.getFuture(),
-			                         updateProcessStatsTimer,
-			                         ssi.getHotShards.getFuture(),
-			                         ssi.getCheckSum.getFuture(),
-			                         self->actors.getResult());
-			if (res.index() == 0) {
+		auto res =
+		    co_await race(checkLastUpdate, dbInfoChange, doUpdate, updateProcessStatsTimer, self->actors.getResult());
+		if (res.index() == 0) {
 
-				lastLoopResumeTime = now();
-				if (now() - self->lastUpdate >= CLIENT_KNOBS->NO_RECENT_UPDATES_DURATION) {
-					self->noRecentUpdates.set(true);
-					checkLastUpdate = delay(CLIENT_KNOBS->NO_RECENT_UPDATES_DURATION);
-				} else {
-					checkLastUpdate =
-					    delay(std::max(CLIENT_KNOBS->NO_RECENT_UPDATES_DURATION - (now() - self->lastUpdate), 0.1));
-				}
-			} else if (res.index() == 1) {
-
-				lastLoopResumeTime = now();
-				CODE_PROBE(self->logSystem, "shardServer dbInfo changed");
-				dbInfoChange = self->db->onChange();
-				if (self->db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
-					self->logSystem = makeLogSystemConsumerFromServerDBInfo(self->thisServerID, self->db->get());
-					if (self->logSystem) {
-						if (self->db->get().logSystemConfig.recoveredAt.present()) {
-							self->poppedAllAfter = self->db->get().logSystemConfig.recoveredAt.get();
-						}
-						self->logCursor = self->logSystem->peekSingle(
-						    self->thisServerID, self->version.get() + 1, self->tag, self->history);
-						self->popVersion(self->storageMinRecoverVersion + 1, true);
-					}
-					// If update() is waiting for results from the tlog, it might never get them, so needs to be
-					// cancelled.  But if it is waiting later, cancelling it could cause problems (e.g. fetchKeys
-					// that already committed to transitioning to waiting state)
-					if (!updateReceived) {
-						doUpdate = Void();
-					}
-				}
-
-				Optional<LatencyBandConfig> newLatencyBandConfig = self->db->get().latencyBandConfig;
-				if (newLatencyBandConfig.present() != self->latencyBandConfig.present() ||
-				    (newLatencyBandConfig.present() &&
-				     newLatencyBandConfig.get().readConfig != self->latencyBandConfig.get().readConfig)) {
-					self->latencyBandConfig = newLatencyBandConfig;
-					self->counters.readLatencyBands.clearBands();
-					TraceEvent("LatencyBandReadUpdatingConfig").detail("Present", newLatencyBandConfig.present());
-					if (self->latencyBandConfig.present()) {
-						for (auto band : self->latencyBandConfig.get().readConfig.bands) {
-							self->counters.readLatencyBands.addThreshold(band);
-						}
-					}
-				}
-			} else if (res.index() == 2) {
-				GetShardStateRequest req = std::get<2>(std::move(res));
-
-				lastLoopResumeTime = now();
-				if (req.mode == GetShardStateRequest::NO_WAIT) {
-					if (self->isReadable(req.keys))
-						req.reply.send(GetShardStateReply{ self->version.get(), self->durableVersion.get() });
-					else
-						req.reply.sendError(wrong_shard_server());
-				} else {
-					self->actors.add(getShardStateQ(self, req));
-				}
-			} else if (res.index() == 3) {
-				StorageQueuingMetricsRequest req = std::get<3>(std::move(res));
-
-				lastLoopResumeTime = now();
-				getQueuingMetrics(self, req);
-			} else if (res.index() == 4) {
-				ReplyPromise<KeyValueStoreType> reply = std::get<4>(std::move(res));
-
-				lastLoopResumeTime = now();
-				reply.send(self->storage.getKeyValueStoreType());
-			} else if (res.index() == 5) {
-
-				lastLoopResumeTime = now();
-				updateReceived = false;
-				if (!self->logSystem)
-					doUpdate = Never();
-				else
-					doUpdate = update(self, &updateReceived);
-			} else if (res.index() == 6) {
-				GetCheckpointRequest req = std::get<6>(std::move(res));
-
-				lastLoopResumeTime = now();
-				self->actors.add(getCheckpointQ(self, req));
-			} else if (res.index() == 7) {
-				FetchCheckpointRequest req = std::get<7>(std::move(res));
-
-				lastLoopResumeTime = now();
-				self->actors.add(fetchCheckpointQ(self, req));
-			} else if (res.index() == 8) {
-				UpdateCommitCostRequest req = std::get<8>(std::move(res));
-
-				lastLoopResumeTime = now();
-				// Ratekeeper might change with a new ID. In this case, always accept the data.
-				if (req.ratekeeperID != self->busiestWriteTagContext.ratekeeperID) {
-					TraceEvent("RatekeeperIDChange")
-					    .detail("OldID", self->busiestWriteTagContext.ratekeeperID)
-					    .detail("OldLastUpdateTime", self->busiestWriteTagContext.lastUpdateTime)
-					    .detail("NewID", req.ratekeeperID)
-					    .detail("LastUpdateTime", req.postTime);
-					self->busiestWriteTagContext.ratekeeperID = req.ratekeeperID;
-					self->busiestWriteTagContext.lastUpdateTime = -1;
-				}
-				// In case we received an old request/duplicate request, due to, e.g. network problem
-				ASSERT(req.postTime > 0);
-				if (req.postTime < self->busiestWriteTagContext.lastUpdateTime) {
-					continue;
-				}
-
-				self->busiestWriteTagContext.lastUpdateTime = req.postTime;
-				TraceEvent("BusiestWriteTag", self->thisServerID)
-				    .detail("Elapsed", req.elapsed)
-				    .detail("Tag", req.busiestTag)
-				    .detail("TagOps", req.opsSum)
-				    .detail("TagCost", req.costSum)
-				    .detail("TotalCost", req.totalWriteCosts)
-				    .detail("Reported", req.reported)
-				    .trackLatest(self->busiestWriteTagContext.busiestWriteTagTrackingKey);
-
-				req.reply.send(Void());
-			} else if (res.index() == 9) {
-				FetchCheckpointKeyValuesRequest req = std::get<9>(std::move(res));
-
-				lastLoopResumeTime = now();
-				self->actors.add(fetchCheckpointKeyValuesQ(self, req));
-			} else if (res.index() == 10) {
-				AuditStorageRequest req = std::get<10>(std::move(res));
-
-				lastLoopResumeTime = now();
-				// Check req
-				if (!req.id.isValid() || !req.ddId.isValid() || req.range.empty() ||
-				    req.getType() == AuditType::ValidateLocationMetadata) {
-					// ddId is used when persist progress
-					TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
-					           "AuditRequestInvalid") // unexpected
-					    .detail("AuditRange", req.range)
-					    .detail("DDId", req.ddId)
-					    .detail("AuditId", req.id)
-					    .detail("AuditType", req.getType())
-					    .detail("AuditRange", req.range);
-					req.reply.sendError(audit_storage_cancelled());
-					continue;
-				}
-				// Start the new audit task
-				if (req.getType() == AuditType::ValidateHA) {
-					self->actors.add(auditStorageShardReplicaQ(self, req));
-				} else if (req.getType() == AuditType::ValidateReplica) {
-					self->actors.add(auditStorageShardReplicaQ(self, req));
-				} else if (req.getType() == AuditType::ValidateStorageServerShard) {
-					self->actors.add(auditStorageServerShardQ(self, req));
-				} else if (req.getType() == AuditType::ValidateRestore) {
-					self->actors.add(auditRestoreQ(self, req));
-				} else {
-					req.reply.sendError(not_implemented());
-				}
-			} else if (res.index() == 11) {
-				BulkDumpRequest req = std::get<11>(std::move(res));
-
-				lastLoopResumeTime = now();
-				TraceEvent(bulkLoadVerboseEventSev(), "SSBulkDumpRequestReceived", self->thisServerID)
-				    .detail("BulkDumpRequest", req.toString());
-				self->actors.add(bulkDumpQ(self, req));
-			} else if (res.index() == 12) {
-
-				lastLoopResumeTime = now();
-				updateProcessStats(self);
-				updateProcessStatsTimer = delay(SERVER_KNOBS->STORAGE_UPDATE_PROCESS_STATS_INTERVAL);
-			} else if (res.index() == 13) {
-				GetHotShardsRequest req = std::get<13>(std::move(res));
-
-				lastLoopResumeTime = now();
-				struct ComparePair {
-					bool operator()(const std::pair<KeyRange, int64_t>& lhs, const std::pair<KeyRange, int64_t>& rhs) {
-						return lhs.second > rhs.second;
-					}
-				};
-				std::
-				    priority_queue<std::pair<KeyRange, int64_t>, std::vector<std::pair<KeyRange, int64_t>>, ComparePair>
-				        topRanges;
-
-				for (auto& s : self->shards.ranges()) {
-					KeyRange keyRange = KeyRange(s.range());
-					int64_t bytesWrittenPerKSecond = self->metrics.getHotShards(keyRange);
-					if (systemKeys.intersects(keyRange) ||
-					    (bytesWrittenPerKSecond <= SERVER_KNOBS->SHARD_MAX_BYTES_PER_KSEC)) {
-						continue;
-					}
-					if (topRanges.size() < SERVER_KNOBS->HOT_SHARD_THROTTLING_TRACKED) {
-						topRanges.push(std::make_pair(keyRange, bytesWrittenPerKSecond));
-					} else if (bytesWrittenPerKSecond > topRanges.top().second) {
-						topRanges.pop();
-						topRanges.push(std::make_pair(keyRange, bytesWrittenPerKSecond));
-					}
-				}
-
-				// TraceEvent(SevDebug, "ReceivedGetHotShards").detail("TopRanges", topRanges.size());
-				GetHotShardsReply reply;
-
-				while (!topRanges.empty()) {
-					reply.hotShards.push_back(topRanges.top().first);
-					topRanges.pop();
-				}
-
-				req.reply.send(reply);
-			} else if (res.index() == 14) {
-				GetStorageCheckSumRequest req = std::get<14>(std::move(res));
-
-				lastLoopResumeTime = now();
-				TraceEvent(SevError, "GetStorageCheckSumHasNotImplemented", ssi.id());
-				req.reply.sendError(not_implemented());
-			} else if (res.index() == 15) {
-
-				ASSERT(false);
+			lastLoopResumeTime = now();
+			if (now() - self->lastUpdate >= CLIENT_KNOBS->NO_RECENT_UPDATES_DURATION) {
+				self->noRecentUpdates.set(true);
+				checkLastUpdate = delay(CLIENT_KNOBS->NO_RECENT_UPDATES_DURATION);
 			} else {
-				UNREACHABLE();
+				checkLastUpdate =
+				    delay(std::max(CLIENT_KNOBS->NO_RECENT_UPDATES_DURATION - (now() - self->lastUpdate), 0.1));
 			}
+		} else if (res.index() == 1) {
+
+			lastLoopResumeTime = now();
+			CODE_PROBE(self->logSystem, "shardServer dbInfo changed");
+			dbInfoChange = self->db->onChange();
+			if (self->db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
+				self->logSystem = makeLogSystemConsumerFromServerDBInfo(self->thisServerID, self->db->get());
+				if (self->logSystem) {
+					if (self->db->get().logSystemConfig.recoveredAt.present()) {
+						self->poppedAllAfter = self->db->get().logSystemConfig.recoveredAt.get();
+					}
+					self->logCursor = self->logSystem->peekSingle(
+					    self->thisServerID, self->version.get() + 1, self->tag, self->history);
+					self->popVersion(self->storageMinRecoverVersion + 1, true);
+				}
+				// If update() is waiting for results from the tlog, it might never get them, so needs to be
+				// cancelled.  But if it is waiting later, cancelling it could cause problems (e.g. fetchKeys
+				// that already committed to transitioning to waiting state)
+				if (!updateReceived) {
+					doUpdate = Void();
+				}
+			}
+
+			Optional<LatencyBandConfig> newLatencyBandConfig = self->db->get().latencyBandConfig;
+			if (newLatencyBandConfig.present() != self->latencyBandConfig.present() ||
+			    (newLatencyBandConfig.present() &&
+			     newLatencyBandConfig.get().readConfig != self->latencyBandConfig.get().readConfig)) {
+				self->latencyBandConfig = newLatencyBandConfig;
+				self->counters.readLatencyBands.clearBands();
+				TraceEvent("LatencyBandReadUpdatingConfig").detail("Present", newLatencyBandConfig.present());
+				if (self->latencyBandConfig.present()) {
+					for (auto band : self->latencyBandConfig.get().readConfig.bands) {
+						self->counters.readLatencyBands.addThreshold(band);
+					}
+				}
+			}
+		} else if (res.index() == 2) {
+
+			lastLoopResumeTime = now();
+			updateReceived = false;
+			if (!self->logSystem)
+				doUpdate = Never();
+			else
+				doUpdate = update(self, &updateReceived);
+		} else if (res.index() == 3) {
+
+			lastLoopResumeTime = now();
+			updateProcessStats(self);
+			updateProcessStatsTimer = delay(SERVER_KNOBS->STORAGE_UPDATE_PROCESS_STATS_INTERVAL);
+		} else if (res.index() == 4) {
+
+			ASSERT(false);
+		} else {
+			UNREACHABLE();
 		}
 	}
 }
