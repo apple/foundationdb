@@ -1658,14 +1658,13 @@ static Future<Void> finishMoveKeys(Database occ,
 						// re-verify dest hasn't changed during the wait, then commit.
 						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 						tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-						ShardStateReads reread =
-						    co_await readShardState(&tr,
-						                                       lock,
-						                                       ddEnabledState,
-						                                       currentKeys,
-						                                       /*dataMoveId=*/{},
-						                                       SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
-						                                       SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES);
+						ShardStateReads reread = co_await readShardState(&tr,
+						                                                 lock,
+						                                                 ddEnabledState,
+						                                                 currentKeys,
+						                                                 /*dataMoveId=*/{},
+						                                                 SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
+						                                                 SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES);
 
 						// Verify dest is unchanged — if another DD reassigned the shard
 						// while we were waiting, we must not commit stale metadata.
@@ -2531,12 +2530,12 @@ static Future<Void> finishMoveShards(Database occ,
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 					ShardStateReads reread = co_await readShardState(&tr,
-					                                                           lock,
-					                                                           ddEnabledState,
-					                                                           range,
-					                                                           dataMoveId,
-					                                                           SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
-					                                                           SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT);
+					                                                 lock,
+					                                                 ddEnabledState,
+					                                                 range,
+					                                                 dataMoveId,
+					                                                 SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
+					                                                 SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT);
 
 					if (!reread.dataMove.present()) {
 						TraceEvent(SevWarn, "FinishMoveShardsDataMoveDeletedAfterWait", relocationIntervalId)
