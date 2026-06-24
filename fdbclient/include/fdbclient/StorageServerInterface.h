@@ -158,8 +158,7 @@ public:
 				serializer(ar, uniqueID, locality, getValue);
 			}
 			if (Ar::isDeserializing) {
-				if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && g_network &&
-				    g_network->global(INetwork::enFlowTransport)) {
+				if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && g_network && g_network->global(INetwork::enFlowTransport)) {
 					// Record every RequestStream token of this interface for stale-peer tracking.
 					// 25 = the number of adjusted endpoints registered for StorageServerInterface
 					// below (getAdjustedEndpoint(1..25)); index 0 is the base getValue endpoint,

@@ -1239,7 +1239,6 @@ ACTOR static Future<Void> locationCachePeerEvictorActor(DatabaseContext* cx) {
 	}
 }
 
-
 // The reason for getting a pointer to DatabaseContext instead of a reference counted object is because reference
 // counting will increment reference count for DatabaseContext which holds the future of this actor. This creates a
 // cyclic reference and hence this actor and Database object will not be destroyed at all.

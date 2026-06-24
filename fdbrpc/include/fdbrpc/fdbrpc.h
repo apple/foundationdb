@@ -57,8 +57,8 @@ protected:
 		} else {
 			FlowTransport::transport().removePeerReference(endpoint, m_stream);
 			if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_flowReceiverId >= 0) {
-				FlowTransport::transport().interfaceTracker.flowReceiverDestroyed(
-				    endpoint.getPrimaryAddress(), m_flowReceiverId);
+				FlowTransport::transport().interfaceTracker.flowReceiverDestroyed(endpoint.getPrimaryAddress(),
+				                                                                  m_flowReceiverId);
 			}
 		}
 	}
@@ -899,7 +899,8 @@ public:
 		return getReplyUnlessFailedFor(ReplyPromise<X>(), sustainedFailureDuration, sustainedFailureSlope);
 	}
 
-	explicit RequestStream(const Endpoint& endpoint) : queue(new NetNotifiedQueue<T, IsPublic>(0, 1, endpoint)), m_promiseRefTrackingId(-1) {
+	explicit RequestStream(const Endpoint& endpoint)
+	  : queue(new NetNotifiedQueue<T, IsPublic>(0, 1, endpoint)), m_promiseRefTrackingId(-1) {
 		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && queue->isRemoteEndpoint() && g_network &&
 		    g_network->global(INetwork::enFlowTransport)) {
 			m_promiseRefTrackingId = FlowTransport::transport().interfaceTracker.promiseRefAdded(
@@ -913,8 +914,7 @@ public:
 		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && queue->isRemoteEndpoint() && g_network &&
 		    g_network->global(INetwork::enFlowTransport)) {
 			const auto& ep = queue->getEndpoint(TaskPriority::DefaultEndpoint);
-			trackingId = FlowTransport::transport().interfaceTracker.futureRefAdded(
-			    ep.getPrimaryAddress(), ep.token);
+			trackingId = FlowTransport::transport().interfaceTracker.futureRefAdded(ep.getPrimaryAddress(), ep.token);
 		}
 		return FutureStream<T>(queue, trackingId);
 	}
@@ -927,8 +927,8 @@ public:
 		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && queue->isRemoteEndpoint() && g_network &&
 		    g_network->global(INetwork::enFlowTransport)) {
 			const auto& ep = queue->getEndpoint(TaskPriority::DefaultEndpoint);
-			m_promiseRefTrackingId = FlowTransport::transport().interfaceTracker.promiseRefAdded(
-			    ep.getPrimaryAddress(), ep.token);
+			m_promiseRefTrackingId =
+			    FlowTransport::transport().interfaceTracker.promiseRefAdded(ep.getPrimaryAddress(), ep.token);
 		}
 	}
 	RequestStream(RequestStream&& rhs) noexcept : queue(rhs.queue), m_promiseRefTrackingId(rhs.m_promiseRefTrackingId) {
@@ -943,8 +943,8 @@ public:
 		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && rhs.queue->isRemoteEndpoint() && g_network &&
 		    g_network->global(INetwork::enFlowTransport)) {
 			const auto& ep = rhs.queue->getEndpoint(TaskPriority::DefaultEndpoint);
-			newTrackingId = FlowTransport::transport().interfaceTracker.promiseRefAdded(
-			    ep.getPrimaryAddress(), ep.token);
+			newTrackingId =
+			    FlowTransport::transport().interfaceTracker.promiseRefAdded(ep.getPrimaryAddress(), ep.token);
 		}
 		if (queue) {
 			queue->delPromiseRef();

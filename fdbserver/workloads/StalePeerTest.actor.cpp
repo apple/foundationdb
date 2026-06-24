@@ -87,9 +87,10 @@ struct StalePeerTestWorkload : TestWorkload {
 			dstKillRole = clientDstChoices[deterministicRandom()->randomInt(0, clientDstChoices.size())];
 			TraceEvent("StalePeerTestPickedClientDstRole").detail("DstKillRole", dstKillRole);
 		}
-		static const std::set<std::string> validRoles = { "tlog",          "ss",         "commit_proxy", "grv_proxy",
-			                                              "master",        "resolver",   "dd",           "rk",
-			                                              "coordinator",   "log_router", "cluster_controller" };
+		static const std::set<std::string> validRoles = {
+			"tlog", "ss",          "commit_proxy", "grv_proxy",         "master", "resolver", "dd",
+			"rk",   "coordinator", "log_router",   "cluster_controller"
+		};
 		if (!validRoles.count(dstKillRole)) {
 			TraceEvent(SevError, "StalePeerTestInvalidDstKillRole")
 			    .detail("DstKillRole", dstKillRole)
@@ -409,23 +410,20 @@ struct StalePeerTestWorkload : TestWorkload {
 		// can never hang.
 		TraceEvent("StalePeerTestWaitingForRecovery");
 		state double recoveryTriggerDeadline = now() + 30.0;
-		while (self->dbInfo->get().recoveryState >= RecoveryState::FULLY_RECOVERED &&
-		       now() < recoveryTriggerDeadline) {
+		while (self->dbInfo->get().recoveryState >= RecoveryState::FULLY_RECOVERED && now() < recoveryTriggerDeadline) {
 			choose {
 				when(wait(self->dbInfo->onChange())) {}
 				when(wait(delay(1.0))) {}
 			}
 		}
 		state double recoveryCompleteDeadline = now() + 180.0;
-		while (self->dbInfo->get().recoveryState < RecoveryState::FULLY_RECOVERED &&
-		       now() < recoveryCompleteDeadline) {
+		while (self->dbInfo->get().recoveryState < RecoveryState::FULLY_RECOVERED && now() < recoveryCompleteDeadline) {
 			choose {
 				when(wait(self->dbInfo->onChange())) {}
 				when(wait(delay(5.0))) {}
 			}
 		}
-		TraceEvent("StalePeerTestRecovered")
-		    .detail("RecoveryState", (int)self->dbInfo->get().recoveryState);
+		TraceEvent("StalePeerTestRecovered").detail("RecoveryState", (int)self->dbInfo->get().recoveryState);
 
 		// Coordinator-only: the dead coordinator stays in the cluster's
 		// connection string indefinitely, so every live process keeps a
@@ -451,8 +449,7 @@ struct StalePeerTestWorkload : TestWorkload {
 					break;
 				}
 				if (autoChangeAttempts >= 20) {
-					TraceEvent(SevWarn, "StalePeerTestCoordinatorAutoChangeGivingUp")
-					    .detail("LastResult", (int)res);
+					TraceEvent(SevWarn, "StalePeerTestCoordinatorAutoChangeGivingUp").detail("LastResult", (int)res);
 					break;
 				}
 				wait(delay(1.0));
@@ -525,8 +522,8 @@ struct StalePeerTestWorkload : TestWorkload {
 		ASSERT(!trackerRole.empty());
 
 		auto allProcesses = g_simulator->getAllProcesses();
-		state int clientSourcesChecked = 0;   // source processes inspected (post-filter)
-		state int clientSourcesWithLeak = 0;  // ...of which had a per-role Delta > 0 (a leak)
+		state int clientSourcesChecked = 0; // source processes inspected (post-filter)
+		state int clientSourcesWithLeak = 0; // ...of which had a per-role Delta > 0 (a leak)
 		for (auto* proc : allProcesses) {
 			// Same source population as the pre-kill snapshot (see
 			// isInspectedSource): drops failed/rebooting and, in "tester_client"

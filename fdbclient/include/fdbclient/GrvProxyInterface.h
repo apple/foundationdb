@@ -62,8 +62,7 @@ struct GrvProxyInterface {
 			    getConsistentReadVersion.getEndpoint().getAdjustedEndpoint(2));
 			refreshGlobalConfig = PublicRequestStream<struct GlobalConfigRefreshRequest>(
 			    getConsistentReadVersion.getEndpoint().getAdjustedEndpoint(3));
-			if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && g_network &&
-			    g_network->global(INetwork::enFlowTransport)) {
+			if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && g_network && g_network->global(INetwork::enFlowTransport)) {
 				// Record every RequestStream token of this interface for stale-peer tracking.
 				// 3 = the number of adjusted endpoints registered for GrvProxyInterface in
 				// initEndpoints() (getAdjustedEndpoint(1..3)); index 0 is the base
