@@ -30,6 +30,7 @@
 #include "flow/genericactors.actor.h"
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
@@ -308,7 +309,7 @@ public:
 	Reference<LocationInfo> setCachedLocation(const KeyRangeRef&, const std::vector<struct StorageServerInterface>&);
 	void invalidateCache(const Optional<KeyRef>& tenantPrefix, const KeyRef& key, Reverse isBackward = Reverse::False);
 	void invalidateCache(const Optional<KeyRef>& tenantPrefix, const KeyRangeRef& keys);
-	void invalidateCacheByAddress(const NetworkAddress& address);
+	void invalidateCacheByAddresses(const std::unordered_set<NetworkAddress>& addresses);
 
 	// Records that `endpoint` is failed on a healthy server.
 	void setFailedEndpointOnHealthyServer(const Endpoint& endpoint);

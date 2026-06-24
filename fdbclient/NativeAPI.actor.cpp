@@ -1177,7 +1177,7 @@ ACTOR static Future<Void> locationCachePeerEvictorActor(DatabaseContext* cx) {
 		try {
 			wait(delay(CLIENT_KNOBS->LOCATION_CACHE_PEER_EVICTOR_DELAY));
 
-			std::set<NetworkAddress> deadAddressSet;
+			std::unordered_set<NetworkAddress> deadAddressSet;
 			const int connectFailedThreshold = CLIENT_KNOBS->LOCATION_CACHE_PEER_EVICTOR_FAILED_THRESHOLD;
 			const auto& persistent = FlowTransport::transport().getPersistentConnectFailedCounts();
 			for (const auto& [addr, cur] : persistent) {
@@ -1224,9 +1224,7 @@ ACTOR static Future<Void> locationCachePeerEvictorActor(DatabaseContext* cx) {
 				    .detail("DbId", cx->dbId)
 				    .detail("DeadAddrSetSize", deadAddressSet.size());
 			}
-			for (const auto& addr : deadAddressSet) {
-				cx->invalidateCacheByAddress(addr);
-			}
+			cx->invalidateCacheByAddresses(deadAddressSet);
 		} catch (Error& e) {
 			// actor_cancelled must propagate so ~DatabaseContext can tear down the
 			// evictor; any other error should not kill the loop (that would stop the
@@ -2135,7 +2133,10 @@ void DatabaseContext::invalidateCache(const Optional<KeyRef>& tenantPrefix, cons
 	locationCache.insert(KeyRangeRef(begin, end), Reference<LocationInfo>());
 }
 
-void DatabaseContext::invalidateCacheByAddress(const NetworkAddress& address) {
+void DatabaseContext::invalidateCacheByAddresses(const std::unordered_set<NetworkAddress>& addresses) {
+	if (addresses.empty()) {
+		return;
+	}
 	std::vector<KeyRange> rangesToInvalidate;
 	auto ranges = locationCache.ranges();
 	for (auto iter = ranges.begin(); iter != ranges.end(); ++iter) {
@@ -2143,7 +2144,7 @@ void DatabaseContext::invalidateCacheByAddress(const NetworkAddress& address) {
 			continue;
 		auto& loc = iter->value();
 		for (int i = 0; i < loc->size(); i++) {
-			if (loc->getInterface(i).address() == address) {
+			if (addresses.contains(loc->getInterface(i).address())) {
 				rangesToInvalidate.push_back(KeyRange(KeyRangeRef(iter->begin(), iter->end())));
 				break;
 			}
@@ -2154,9 +2155,9 @@ void DatabaseContext::invalidateCacheByAddress(const NetworkAddress& address) {
 		locationCache.insert(range, Reference<LocationInfo>());
 	}
 
-	TraceEvent("LocationCacheInvalidatedByAddress")
+	TraceEvent("LocationCacheInvalidatedByAddresses")
 	    .detail("DbId", dbId)
-	    .detail("Address", address)
+	    .detail("AddressCount", addresses.size())
 	    .detail("InvalidatedRanges", rangesToInvalidate.size());
 }
 
