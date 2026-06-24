@@ -4,12 +4,11 @@ This file provides guidance to AI coding agents working in this repository.
 
 ## Build
 
-The commands below assume the repository root as the current directory and use an out-of-source `build/` directory.
-
 ```bash
-cmake -S . -B build -G Ninja
-cmake --build build
-# or: cmake --build build --target fdbserver fdbcli fdbclient
+mkdir build && cd build
+cmake -G Ninja <SOURCE_DIR>
+ninja
+# or: ninja fdbserver fdbcli fdbclient  (specific targets)
 ```
 
 Key cmake options:
@@ -19,7 +18,7 @@ Key cmake options:
 
 macOS: add `-DBUILD_SWIFT_BINDING=OFF` if Swift issues arise.
 
-Linux with Clang: `CC=clang CXX=clang++ cmake -S . -B build -DUSE_LD=LLD -DUSE_LIBCXX=1 -G Ninja`
+Linux with Clang: `CC=clang CXX=clang++ cmake -DUSE_LD=LLD -DUSE_LIBCXX=1 -G Ninja ..`
 
 ## Testing
 
