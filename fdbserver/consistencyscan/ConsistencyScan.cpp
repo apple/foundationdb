@@ -1763,9 +1763,8 @@ Future<Void> checkDataConsistency(Database cx,
 			// If there was an error retrieving shard estimated size
 			if (performQuiescentChecks && estimatedBytes.empty()) {
 				testFailure("Error fetching storage metrics", performQuiescentChecks, success, failureIsError);
-
+			} else if (distributed) {
 				// If running a distributed test, storage server size is an accumulation of shard estimates
-			} else if (distributed && firstClient) {
 				for (int j = 0; j < storageServers.size(); j++)
 					storageServerSizes[storageServers[j]] += std::max(estimatedBytes[j], (int64_t)0);
 			}
