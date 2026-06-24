@@ -2,6 +2,7 @@
 Checks: >
   -*,
   bugprone-dangling-handle,
+  bugprone-redundant-branch-condition,
   bugprone-shared-ptr-array-mismatch,
   bugprone-sizeof-expression,
   bugprone-string-constructor,

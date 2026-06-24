@@ -1763,7 +1763,7 @@ Future<Void> checkDataConsistency(Database cx,
 				testFailure("Error fetching storage metrics", performQuiescentChecks, success, failureIsError);
 
 			// If running a distributed test, storage server size is an accumulation of shard estimates
-			else if (distributed && firstClient)
+			else if (distributed)
 				for (int j = 0; j < storageServers.size(); j++)
 					storageServerSizes[storageServers[j]] += std::max(estimatedBytes[j], (int64_t)0);
 		}
