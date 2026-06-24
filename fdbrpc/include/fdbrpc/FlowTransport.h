@@ -341,8 +341,7 @@ public:
 	// Returns all peers that the FlowTransport is monitoring.
 	const std::unordered_map<NetworkAddress, Reference<Peer>>& getAllPeers() const;
 
-	// Returns a per-address cumulative count of connect failures
-	// (every Error caught in connectionKeeper's connect catch block).
+	// Returns a per-address cumulative count of connect failures.
 	// The map lives on TransportData and persists across Peer destruction,
 	// so it remains a reliable signal for catching short-lived peers that
 	// all point to the same address

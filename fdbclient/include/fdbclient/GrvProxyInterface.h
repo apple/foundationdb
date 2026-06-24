@@ -30,6 +30,7 @@
 // information of the cluster, and handles proxied GlobalConfig requests.
 struct GrvProxyInterface {
 	constexpr static FileIdentifier file_identifier = 8743216;
+	constexpr static int kNumAdjustedEndpoints = 3;
 	enum { LocationAwareLoadBalance = 1 };
 	enum { AlwaysFresh = 1 };
 
@@ -52,6 +53,17 @@ struct GrvProxyInterface {
 	NetworkAddress address() const { return getConsistentReadVersion.getEndpoint().getPrimaryAddress(); }
 	NetworkAddressList addresses() const { return getConsistentReadVersion.getEndpoint().addresses; }
 
+	std::vector<UID> getEndpointTokens() const {
+		// Token at index 0 is the base `getConsistentReadVersion` endpoint; adjusted endpoints start at 1.
+		std::vector<UID> tokens;
+		tokens.reserve(kNumAdjustedEndpoints + 1);
+		tokens.push_back(getConsistentReadVersion.getEndpoint().token);
+		for (int i = 1; i <= kNumAdjustedEndpoints; ++i) {
+			tokens.push_back(getConsistentReadVersion.getEndpoint().getAdjustedEndpoint(i).token);
+		}
+		return tokens;
+	}
+
 	template <class Archive>
 	void serialize(Archive& ar) {
 		serializer(ar, processId, provisional, getConsistentReadVersion);
@@ -63,18 +75,8 @@ struct GrvProxyInterface {
 			refreshGlobalConfig = PublicRequestStream<struct GlobalConfigRefreshRequest>(
 			    getConsistentReadVersion.getEndpoint().getAdjustedEndpoint(3));
 			if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && g_network && g_network->global(INetwork::enFlowTransport)) {
-				// Record every RequestStream token of this interface for stale-peer tracking.
-				// 3 = the number of adjusted endpoints registered for GrvProxyInterface in
-				// initEndpoints() (getAdjustedEndpoint(1..3)); index 0 is the base
-				// getConsistentReadVersion endpoint, pushed separately. Keep in sync when a
-				// RequestStream is added to or removed from this interface.
-				std::vector<UID> tokens;
-				tokens.push_back(getConsistentReadVersion.getEndpoint().token);
-				for (int i = 1; i <= 3; i++) {
-					tokens.push_back(getConsistentReadVersion.getEndpoint().getAdjustedEndpoint(i).token);
-				}
 				FlowTransport::transport().interfaceTracker.created(
-				    getConsistentReadVersion.getEndpoint().getPrimaryAddress(), "GP", tokens);
+				    getConsistentReadVersion.getEndpoint().getPrimaryAddress(), "GP", getEndpointTokens());
 			}
 		}
 	}
@@ -86,6 +88,10 @@ struct GrvProxyInterface {
 		streams.push_back(getHealthMetrics.getReceiver());
 		streams.push_back(refreshGlobalConfig.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
+		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
+			// streams[0] is `getConsistentReadVersion` (base endpoint); streams[1..kNumAdjustedEndpoints] are adjusted endpoints.
+			ASSERT(streams.size() - 1 == kNumAdjustedEndpoints);
+		}
 	}
 };
 

@@ -501,14 +501,18 @@ struct StalePeerTestWorkload : TestWorkload {
 		// KNOWN COVERAGE GAP (intentional): a coordinator kill therefore asserts
 		// only that the dead coordinator was swapped out of the connection string
 		// (the autoQuorumChange succeeded) -- it does NOT assert that every source
-		// drained its peer ref to the dead address, because the LeaderMonitor refs
-		// are expected and not a leak our client-side fixes target. Since
-		// dstKillRole="clientFacing" resolves uniformly across {coordinator,
+		// drained its peer ref to the dead address. The old refs do get dropped, but
+		// asynchronously: they live in clientLeaderServers (a state vector in
+		// monitorProxiesOneGeneration) and only go away when that generation rolls over
+		// to the new connection string. We check right after autoQuorumChange, which
+		// doesn't guarantee that rollover has happened yet, so a lingering ref could be present
+		// becaus of timing.
+		// Since dstKillRole="clientFacing" resolves uniformly across {coordinator,
 		// cluster_controller, commit_proxy, grv_proxy, ss}, roughly one in five
 		// clientFacing runs lands on coordinator and exercises only this weaker
 		// connection-string check. The per-role stale-interface drain is covered
 		// by the other four roles. (Tightening the coordinator path to a strict
-		// peer-ref assertion -- tolerating the N expected LeaderMonitor refs -- is
+		// peer-ref assertion -- by waiting for the generation rollover -- is
 		// a possible follow-up.)
 		if (self->dstKillRole == "coordinator") {
 			TraceEvent("StalePeerTestChecking").detail("Mode", "coordinator/skip-peer-refs");

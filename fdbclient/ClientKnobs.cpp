@@ -101,7 +101,7 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD,     60 );
 	init( LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL,    60 );
 	init( LOCATION_CACHE_PEER_EVICTOR_ENABLED,          false ); if( randomize && isSimulated ) LOCATION_CACHE_PEER_EVICTOR_ENABLED = deterministicRandom()->coinflip();
-	init( LOCATION_CACHE_PEER_EVICTOR_DELAY, isSimulated ? 180.0 : 10.0 );
+	init( LOCATION_CACHE_PEER_EVICTOR_DELAY,                    60.0 );
 	init( LOCATION_CACHE_PEER_EVICTOR_FAILED_THRESHOLD,      0 );
 
 	init( GET_RANGE_SHARD_LIMIT,                     2 );

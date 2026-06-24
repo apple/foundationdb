@@ -873,14 +873,14 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 					// set of addresses ever contacted, and the next failure prunes the stale ones --
 					// so this is not unbounded growth, just not strictly time-based eviction.
 					{
-						double tNow = now();
 						double ttl = FLOW_KNOBS->PERSISTENT_CONNECT_FAILED_COUNT_TTL;
+						double tNow = now();
 						auto& failCounts = self->transport->persistentConnectFailedCount;
 						auto& info = failCounts[self->destination];
 						info.count++;
 						info.lastFailed = tNow;
 						TraceEvent("PersistentConnectFailed")
-						    .suppressFor(1.0)
+						    .suppressFor(5.0)
 						    .detail("PeerAddr", self->destination)
 						    .detail("ConnectFailedTotal", info.count);
 						if (ttl > 0 && tNow - self->transport->persistentConnectFailedLastPrune >= ttl) {
@@ -888,7 +888,7 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 							for (auto it = failCounts.begin(); it != failCounts.end();) {
 								if (tNow - it->second.lastFailed >= ttl) {
 									TraceEvent("PersistentConnectFailedPrune")
-									    .suppressFor(1.0)
+									    .suppressFor(5.0)
 									    .detail("PeerAddr", it->first)
 									    .detail("ConnectFailedTotal", it->second.count);
 									it = failCounts.erase(it);

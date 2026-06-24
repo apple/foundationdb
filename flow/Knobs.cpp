@@ -53,7 +53,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( COORDINATOR_DNS_CACHE_TTL,                         30.0 );
 	init( STALE_PEER_OBSERVABILITY,                          false );
 	init( CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED, 1.0 );
-	init( PERSISTENT_CONNECT_FAILED_COUNT_TTL, isSimulated ? 60.0 : 600.0 );
+	init( PERSISTENT_CONNECT_FAILED_COUNT_TTL, isSimulated ? 120.0 : 600.0 );
 
 	init( DELAY_JITTER_OFFSET,                                 0.9 );
 	init( DELAY_JITTER_RANGE,                                  0.2 );

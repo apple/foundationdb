@@ -1168,6 +1168,10 @@ ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, Stora
 // address that is still being targeted by RPCs but cannot establish a
 // connection.
 ACTOR static Future<Void> locationCachePeerEvictorActor(DatabaseContext* cx) {
+	state double evictorDelay = CLIENT_KNOBS->LOCATION_CACHE_PEER_EVICTOR_DELAY;
+	state int evictorFailedThreshold = CLIENT_KNOBS->LOCATION_CACHE_PEER_EVICTOR_FAILED_THRESHOLD;
+	ASSERT(evictorDelay > 0);
+	ASSERT(evictorFailedThreshold >= 0);
 	// Per-address snapshot of FlowTransport's persistent connect-failed counter
 	// taken on the previous tick. The delta to the current count is the flap
 	// signal: a positive delta means the address is still being targeted by RPCs
@@ -1175,10 +1179,9 @@ ACTOR static Future<Void> locationCachePeerEvictorActor(DatabaseContext* cx) {
 	state std::unordered_map<NetworkAddress, int64_t> lastConnectFailedSnapshot;
 	loop {
 		try {
-			wait(delay(CLIENT_KNOBS->LOCATION_CACHE_PEER_EVICTOR_DELAY));
+			wait(delay(evictorDelay));
 
 			std::unordered_set<NetworkAddress> deadAddressSet;
-			const int connectFailedThreshold = CLIENT_KNOBS->LOCATION_CACHE_PEER_EVICTOR_FAILED_THRESHOLD;
 			const auto& persistent = FlowTransport::transport().getPersistentConnectFailedCounts();
 			for (const auto& [addr, cur] : persistent) {
 				if (!addr.isValid()) {
@@ -1194,11 +1197,9 @@ ACTOR static Future<Void> locationCachePeerEvictorActor(DatabaseContext* cx) {
 				// case so a genuine post-reset connect failure isn't missed for a sweep.
 				int64_t delta = (cur.count >= prev) ? (cur.count - prev) : cur.count;
 				lastConnectFailedSnapshot[addr] = cur.count;
-				// A negative threshold disables the trigger (no address is ever evicted on the
-				// connect-failed signal).
-				if (connectFailedThreshold >= 0 && delta > connectFailedThreshold) {
+				if (delta > evictorFailedThreshold) {
 					TraceEvent("LocationCachePeerEvictor_FoundDeadAddr")
-					    .suppressFor(1.0)
+					    .suppressFor(5.0)
 					    .detail("DbId", cx->dbId)
 					    .detail("Addr", addr)
 					    .detail("ConnectFailedDelta", delta)
@@ -1211,7 +1212,7 @@ ACTOR static Future<Void> locationCachePeerEvictorActor(DatabaseContext* cx) {
 			for (auto it = lastConnectFailedSnapshot.begin(); it != lastConnectFailedSnapshot.end();) {
 				if (persistent.find(it->first) == persistent.end()) {
 					TraceEvent("LocationCachePeerEvictor_ClearAddrInSnapshot")
-					    .suppressFor(1.0)
+					    .suppressFor(5.0)
 					    .detail("DbId", cx->dbId)
 					    .detail("Addr", it->first);
 					it = lastConnectFailedSnapshot.erase(it);

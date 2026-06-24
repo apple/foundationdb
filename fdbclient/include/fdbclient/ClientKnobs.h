@@ -114,10 +114,17 @@ public:
 	// simulation; StalePeerTest forces it on.
 	bool LOCATION_CACHE_PEER_EVICTOR_ENABLED;
 	// Base interval, in seconds, between locationCachePeerEvictor sweeps.
+	// Value must be > 0, evictor will assert otherwise.
 	double LOCATION_CACHE_PEER_EVICTOR_DELAY;
 	// In the locationCachePeerEvictor sweep, evict an address whose persistent connect-failed
-	// count advanced by more than this since the previous sweep. 0 = any new connect failure
-	// counts; a negative value disables the trigger.
+	// count advanced by more than this since the previous sweep.
+	// 0 = any new connect failure counts.
+	// Value must be >= 0, evictor will assert otherwise.
+	//
+	// NOTE: this threshold must be less than the expected number of connect failures
+	// a dead endpoint generates in one evictor interval, otherwise eviction never triggers.
+	// Expected failures per interval ~ LOCATION_CACHE_PEER_EVICTOR_DELAY /
+	//                                   (SERVER_REQUEST_INTERVAL + CONNECTION_MONITOR_TIMEOUT)
 	int LOCATION_CACHE_PEER_EVICTOR_FAILED_THRESHOLD;
 
 	int GET_RANGE_SHARD_LIMIT;
