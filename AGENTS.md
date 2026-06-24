@@ -24,22 +24,22 @@ Linux with Clang: `CC=clang CXX=clang++ cmake -DUSE_LD=LLD -DUSE_LIBCXX=1 -G Nin
 
 **Unit tests** use `TEST_CASE("/path/to/test")` macros (defined in `flow/include/flow/UnitTest.h`):
 ```bash
-build/bin/fdbserver -r unittests                           # all unit tests
-build/bin/fdbserver -r unittests -f "/flow/DNSCache"       # single test by prefix
+bin/fdbserver -r unittests                           # all unit tests
+bin/fdbserver -r unittests -f "/flow/DNSCache"       # single test by prefix
 ```
 
 **Simulation tests** use TOML workload definitions in `tests/fast/`, `tests/slow/`, etc.:
 ```bash
-build/bin/fdbserver -r simulation -f tests/fast/CycleTest.toml
+bin/fdbserver -r simulation -f tests/fast/CycleTest.toml
 ```
-
-Configure with `-DENABLE_SIMULATION_TESTS=ON` to register simulation tests with ctest.
 
 **Via ctest:**
 ```bash
-ctest --test-dir build -L fast                    # all fast tests
-ctest --test-dir build -R "StatusDuringOutage"    # by name pattern
+ctest -L fast                    # all fast tests
+ctest -R "StatusDuringOutage"    # by name pattern
 ```
+
+Enable simulation tests in cmake: `-DENABLE_SIMULATION_TESTS=ON`
 
 **Adding new tests:**
 - For a new otherwise-unreferenced translation unit containing `TEST_CASE`, add a `forceLinkXxxTests()` stub and call it from `fdbserver/workloads/UnitTests.cpp`, or the linker can drop the tests.
