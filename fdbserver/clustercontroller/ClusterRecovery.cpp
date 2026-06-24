@@ -646,7 +646,7 @@ static Future<Optional<Version>> getMinBackupVersion(Reference<ClusterRecoveryDa
 }
 
 static Future<Void> recruitRangeBackupWorkers(Reference<ClusterRecoveryData> self, Database cx) {
-	ASSERT(self->backupWorkers.size() > 0);
+	ASSERT(!self->backupWorkers.empty());
 
 	// Avoid race between a backup worker's save progress and the reads below.
 	co_await delay(SERVER_KNOBS->SECONDS_BEFORE_RECRUIT_BACKUP_WORKER);
