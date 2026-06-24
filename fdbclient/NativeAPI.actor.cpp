@@ -4324,6 +4324,25 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Referen
 	return trCommitCosts;
 }
 
+// Client-side bookkeeping shared by the normal commit-success path and the idempotency recovery
+// path: caches the read version, records the committed version, resets the per-transaction error
+// count, and bumps the commit / mutation counters.
+// NOTE: the metadata-version cache update is intentionally NOT here. It needs the proxy reply's
+// metadataVersion (CommitID::metadataVersion); the recovery path only has a CommitResult {
+// commitVersion, batchIndex } from determineCommitStatus(), with no metadata version, so that
+// update stays inline in the normal path.
+static void recordSuccessfulCommit(Reference<TransactionState> trState,
+                                   Version commitVersion,
+                                   double grvTime,
+                                   const CommitTransactionRequest& req) {
+	trState->cx->updateCachedReadVersion(grvTime, commitVersion);
+	trState->committedVersion = commitVersion;
+	trState->numErrors = 0;
+	++trState->cx->transactionsCommitCompleted;
+	trState->cx->transactionCommittedMutations += req.transaction.mutations.size();
+	trState->cx->transactionCommittedMutationBytes += req.transaction.mutations.expectedSize();
+}
+
 ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState, CommitTransactionRequest req) {
 	state TraceInterval interval("TransactionCommit");
 	state double startTime = now();
@@ -4404,10 +4423,9 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState, CommitT
 					if (CLIENT_BUGGIFY) {
 						throw commit_unknown_result();
 					}
-					trState->cx->updateCachedReadVersion(grvTime, v);
 					if (debugID.present())
 						TraceEvent(interval.end()).detail("CommittedVersion", v);
-					trState->committedVersion = v;
+					recordSuccessfulCommit(trState, v, grvTime, req);
 					if (v > trState->cx->metadataVersionCache[trState->cx->mvCacheInsertLocation].first) {
 						trState->cx->mvCacheInsertLocation =
 						    (trState->cx->mvCacheInsertLocation + 1) % trState->cx->metadataVersionCache.size();
@@ -4418,11 +4436,6 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState, CommitT
 					Standalone<StringRef> ret = makeString(10);
 					placeVersionstamp(mutateString(ret), v, ci.txnBatchId);
 					trState->versionstampPromise.send(ret);
-
-					trState->numErrors = 0;
-					++trState->cx->transactionsCommitCompleted;
-					trState->cx->transactionCommittedMutations += req.transaction.mutations.size();
-					trState->cx->transactionCommittedMutationBytes += req.transaction.mutations.expectedSize();
 
 					if (commitID.present())
 						g_traceBatch.addEvent("CommitDebug", commitID.get().first(), "NativeAPI.commit.After");
@@ -4503,7 +4516,7 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState, CommitT
 					    req.transaction.read_snapshot + CLIENT_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS,
 					    req.idempotencyId));
 					if (commitResult.present()) {
-						trState->committedVersion = commitResult.get().commitVersion;
+						recordSuccessfulCommit(trState, commitResult.get().commitVersion, grvTime, req);
 						Standalone<StringRef> ret = makeString(10);
 						placeVersionstamp(
 						    mutateString(ret), commitResult.get().commitVersion, commitResult.get().batchIndex);
