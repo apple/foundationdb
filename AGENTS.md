@@ -111,7 +111,7 @@ Runtime-tunable parameters are declared in `fdbserver/core/include/fdbserver/cor
 
 ## Compatibility
 
-Before changing a serialized type that crosses process boundaries or persists on disk, inspect its `serializer()` and adjacent protocol-version or downgrade comments. Do not reorder, remove, or change encoded fields without the appropriate version gate or migration and compatibility coverage.
+Before changing a serialized type that persists on disk, inspect its `serializer()` and adjacent versioning or downgrade comments. Do not reorder, remove, or change encoded fields without the appropriate version gate or migration and compatibility coverage.
 
 ## Naming Conventions
 
