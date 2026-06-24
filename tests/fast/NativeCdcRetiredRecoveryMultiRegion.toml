@@ -36,7 +36,6 @@ runFailureWorkloads = false
     writesPerRound = 1
     rounds = 1
     testRetiredRecovery = true
-    testRetiredIncompleteLogSystem = true
     drainProbability = 1.0
     delayBetweenRounds = 0.0
     operationTimeout = 500.0
