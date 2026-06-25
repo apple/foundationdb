@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/FDBSimulatorProcessInfo.h"
+#include "fdbserver/core/FDBSimulatorProcessInfo.h"
 
 FDBSimulatorProcessMetadata::FDBSimulatorProcessMetadata(ProcessClass startingClass)
   : simulator::ProcessInfoMetadata(startingClass.toString(), startingClass == ProcessClass::TesterClass),

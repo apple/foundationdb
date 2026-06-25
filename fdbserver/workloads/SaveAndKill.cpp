@@ -26,7 +26,7 @@
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbrpc/simulator.h"
-#include "fdbclient/FDBSimulatorProcessInfo.h"
+#include "fdbserver/core/FDBSimulatorProcessInfo.h"
 #include "flow/Knobs.h"
 
 #include "boost/algorithm/string/predicate.hpp"

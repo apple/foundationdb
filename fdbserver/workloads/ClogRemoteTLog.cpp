@@ -7,7 +7,7 @@
 #include "fdbrpc/PerfMetric.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/simulator.h"
-#include "fdbclient/FDBSimulatorProcessInfo.h"
+#include "fdbserver/core/FDBSimulatorProcessInfo.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/ServerDBInfo.h"

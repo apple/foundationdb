@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef FDBCLIENT_FDBSIMULATORPROCESSINFO_H
-#define FDBCLIENT_FDBSIMULATORPROCESSINFO_H
+#ifndef FDBSERVER_CORE_FDBSIMULATORPROCESSINFO_H
+#define FDBSERVER_CORE_FDBSIMULATORPROCESSINFO_H
 #pragma once
 
 #include "fdbclient/ProcessClass.h"
@@ -42,4 +42,4 @@ bool isAvailableSimulatorProcessClass(simulator::ProcessInfo const& process);
 
 bool isAvailableSimulatorProcessClass(simulator::ProcessInfo const* process);
 
-#endif // FDBCLIENT_FDBSIMULATORPROCESSINFO_H
+#endif // FDBSERVER_CORE_FDBSIMULATORPROCESSINFO_H

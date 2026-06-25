@@ -29,7 +29,7 @@
 #include "fdbserver/tester/workloads.h"
 #include "flow/IRateControl.h"
 #include "fdbrpc/simulator.h"
-#include "fdbclient/FDBSimulatorProcessInfo.h"
+#include "fdbserver/core/FDBSimulatorProcessInfo.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/consistencyscan/ConsistencyScan.h"

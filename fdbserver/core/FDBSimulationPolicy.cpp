@@ -24,11 +24,11 @@
 #include <set>
 #include <vector>
 
-#include "fdbclient/FDBSimulatorProcessInfo.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/simulator.h"
+#include "fdbserver/core/FDBSimulatorProcessInfo.h"
 
 FDBExtraDatabaseMode stringToFDBExtraDatabaseMode(const std::string& databaseMode) {
 	if (databaseMode == "Disabled") {

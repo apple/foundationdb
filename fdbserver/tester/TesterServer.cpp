@@ -31,7 +31,7 @@
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/simulator.h"
-#include "fdbclient/FDBSimulatorProcessInfo.h"
+#include "fdbserver/core/FDBSimulatorProcessInfo.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/WorkerInterface.actor.h"

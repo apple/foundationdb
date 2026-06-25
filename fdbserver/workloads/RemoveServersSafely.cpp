@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/FDBSimulatorProcessInfo.h"
+#include "fdbserver/core/FDBSimulatorProcessInfo.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"

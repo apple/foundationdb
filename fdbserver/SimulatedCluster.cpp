@@ -29,7 +29,6 @@
 #include <toml.hpp>
 
 #include "fdbclient/DatabaseConfiguration.h"
-#include "fdbclient/FDBSimulatorProcessInfo.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/simulator.h"
@@ -39,6 +38,7 @@
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/tester/tester.h"
+#include "fdbserver/core/FDBSimulatorProcessInfo.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/worker/Worker.h"
 #include "fdbclient/ClusterInterface.h"
