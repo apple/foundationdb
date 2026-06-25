@@ -171,7 +171,7 @@ void ISimulator::displayWorkers() const {
 			printf("                  %9s %-10s%-13s%-8s %-6s %-9s %-8s %-48s %-40s\n",
 			       processInfo->address.toString().c_str(),
 			       processInfo->name.c_str(),
-			       processInfo->startingClass.toString().c_str(),
+			       processInfo->metadata->role.c_str(),
 			       (processInfo->isExcluded() ? "True" : "False"),
 			       (processInfo->failed ? "True" : "False"),
 			       (processInfo->rebooting ? "True" : "False"),
@@ -1406,7 +1406,7 @@ public:
 	                        bool sslEnabled,
 	                        uint16_t listenPerProcess,
 	                        LocalityData locality,
-	                        ProcessClass startingClass,
+	                        Reference<simulator::ProcessInfoMetadata> metadata,
 	                        const char* dataFolder,
 	                        const char* coordinationFolder,
 	                        ProtocolVersion protocol,
@@ -1436,8 +1436,7 @@ public:
 		// These files must live on after process kills for sim purposes.
 		if (machine.machineProcess == 0) {
 			NetworkAddress machineAddress(ip, 0, false, false);
-			machine.machineProcess =
-			    new ProcessInfo("Machine", locality, startingClass, { machineAddress }, this, "", "");
+			machine.machineProcess = new ProcessInfo("Machine", locality, metadata, { machineAddress }, this, "", "");
 			machine.machineProcess->machine = &machine;
 		}
 
@@ -1448,7 +1447,7 @@ public:
 		}
 
 		// FIXME: why would a ProcessInfo be called `m`?
-		auto* m = new ProcessInfo(name, locality, startingClass, addresses, this, dataFolder, coordinationFolder);
+		auto* m = new ProcessInfo(name, locality, metadata, addresses, this, dataFolder, coordinationFolder);
 		for (int processPort = port; processPort < port + listenPerProcess; ++processPort) {
 			NetworkAddress address(ip, processPort, true, sslEnabled && processPort == port);
 			m->listenerMap[address] = makeReference<Sim2Listener>(m, address);
@@ -1494,7 +1493,7 @@ public:
 		std::vector<ProcessInfo*> processesLeft, processesDead;
 		auto processes = getAllProcesses();
 		for (auto processInfo : processes) {
-			if (processInfo->isAvailableClass()) {
+			if (!getSimulationPolicy() || getSimulationPolicy()->shouldIncludeInAvailabilityCheck(*processInfo)) {
 				if (processInfo->isExcluded() || processInfo->isCleared() || !processInfo->isAvailable()) {
 					processesDead.push_back(processInfo);
 				} else {
@@ -1776,7 +1775,7 @@ public:
 			int protectedWorker = 0, unavailable = 0, excluded = 0, cleared = 0;
 
 			for (auto processInfo : getAllProcesses()) {
-				if (processInfo->isAvailableClass()) {
+				if (!getSimulationPolicy() || getSimulationPolicy()->shouldIncludeInAvailabilityCheck(*processInfo)) {
 					if (processInfo->isExcluded()) {
 						processesDead.push_back(processInfo);
 						excluded++;
@@ -1905,12 +1904,12 @@ public:
 				TraceEvent("KillMachineProcess")
 				    .detail("KillType", kt)
 				    .detail("Process", process->toString())
-				    .detail("StartingClass", process->startingClass.toString())
+				    .detail("StartingClass", process->metadata->role)
 				    .detail("Failed", process->failed)
 				    .detail("Excluded", process->excluded)
 				    .detail("Cleared", process->cleared)
 				    .detail("Rebooting", process->rebooting);
-				if (process->startingClass != ProcessClass::TesterClass)
+				if (!process->metadata->excludeFromMachineKill)
 					killProcess_internal(process, kt);
 			}
 		} else if (kt == KillType::Reboot || kt == KillType::RebootAndDelete ||
@@ -1919,12 +1918,12 @@ public:
 				TraceEvent("KillMachineProcess")
 				    .detail("KillType", kt)
 				    .detail("Process", process->toString())
-				    .detail("StartingClass", process->startingClass.toString())
+				    .detail("StartingClass", process->metadata->role)
 				    .detail("Failed", process->failed)
 				    .detail("Excluded", process->excluded)
 				    .detail("Cleared", process->cleared)
 				    .detail("Rebooting", process->rebooting);
-				if (process->startingClass != ProcessClass::TesterClass)
+				if (!process->metadata->excludeFromMachineKill)
 					doReboot(Uncancellable(), process, kt);
 			}
 		}
@@ -1983,7 +1982,7 @@ public:
 		     (kt == KillType::RebootAndDelete) || (kt == KillType::RebootProcessAndDelete))) {
 			std::vector<ProcessInfo*> processesLeft, processesDead;
 			for (auto processInfo : getAllProcesses()) {
-				if (processInfo->isAvailableClass()) {
+				if (!getSimulationPolicy() || getSimulationPolicy()->shouldIncludeInAvailabilityCheck(*processInfo)) {
 					if (processInfo->isExcluded() || processInfo->isCleared() || !processInfo->isAvailable()) {
 						processesDead.push_back(processInfo);
 					} else if (isProtectedAddress(processInfo->address) ||
@@ -2273,7 +2272,7 @@ public:
 		currentProcess =
 		    new ProcessInfo("NoMachine",
 		                    LocalityData(Optional<Standalone<StringRef>>(), StringRef(), StringRef(), StringRef()),
-		                    ProcessClass(),
+		                    makeReference<simulator::ProcessInfoMetadata>("unset"),
 		                    { NetworkAddress() },
 		                    this,
 		                    "",
@@ -2596,7 +2595,7 @@ Future<Void> startUnitTestSimulator() {
 	    false,
 	    1,
 	    LocalityData(Optional<Standalone<StringRef>>(), processId, processId, Optional<Standalone<StringRef>>()),
-	    ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource),
+	    makeReference<simulator::ProcessInfoMetadata>("test", true),
 	    "",
 	    "",
 	    currentProtocolVersion(),
@@ -2612,7 +2611,7 @@ Future<Void> startUnitTestSimulator() {
 	    1,
 	    LocalityData(
 	        Optional<Standalone<StringRef>>(), httpProcessId, httpProcessId, Optional<Standalone<StringRef>>()),
-	    ProcessClass(ProcessClass::SimHTTPServerClass, ProcessClass::CommandLineSource),
+	    makeReference<simulator::ProcessInfoMetadata>("sim_http_server"),
 	    "",
 	    "",
 	    currentProtocolVersion(),
@@ -2635,7 +2634,7 @@ Future<Void> doReboot(Uncancellable, ISimulator::ProcessInfo* p, ISimulator::Kil
 	    .detail("ZoneId", p->locality.zoneId())
 	    .detail("KillType", kt)
 	    .detail("Process", p->toString())
-	    .detail("StartingClass", p->startingClass.toString())
+	    .detail("StartingClass", p->metadata->role)
 	    .detail("Failed", p->failed)
 	    .detail("Excluded", p->excluded)
 	    .detail("Cleared", p->cleared)

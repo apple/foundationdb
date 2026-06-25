@@ -35,6 +35,8 @@
 #include "flow/FastRef.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/flow.h"
+#include "fdbclient/ProcessClass.h"
+#include "fdbclient/ProcessData.h"
 #include "fdbclient/Status.h"
 #include "fdbrpc/Locality.h"
 

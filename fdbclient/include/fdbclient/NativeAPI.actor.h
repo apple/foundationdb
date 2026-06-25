@@ -31,6 +31,7 @@
 #include "flow/TDMetric.h"
 #include "flow/IRandom.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/ProcessClass.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/FDBOptions.g.h"

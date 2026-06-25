@@ -29,6 +29,7 @@
 #include <toml.hpp>
 
 #include "fdbclient/DatabaseConfiguration.h"
+#include "fdbclient/FDBSimulatorProcessInfo.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/simulator.h"
@@ -737,7 +738,7 @@ Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConnectionR
 		                                                           sslEnabled,
 		                                                           listenPerProcess,
 		                                                           localities,
-		                                                           processClass,
+		                                                           makeFDBSimulatorProcessMetadata(processClass),
 		                                                           dataFolder->c_str(),
 		                                                           coordFolder->c_str(),
 		                                                           protocolVersion,
@@ -2776,21 +2777,21 @@ static Future<Void> simulationSetupAndRunImpl(std::string dataFolder,
 	}
 
 	// TODO (IPv6) Use IPv6?
-	auto testSystem =
-	    g_simulator->newProcess("TestSystem",
-	                            IPAddress(0x01010101),
-	                            1,
-	                            false,
-	                            1,
-	                            LocalityData(Optional<Standalone<StringRef>>(),
-	                                         Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
-	                                         Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
-	                                         Optional<Standalone<StringRef>>()),
-	                            ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource),
-	                            "",
-	                            "",
-	                            currentProtocolVersion(),
-	                            false);
+	auto testSystem = g_simulator->newProcess(
+	    "TestSystem",
+	    IPAddress(0x01010101),
+	    1,
+	    false,
+	    1,
+	    LocalityData(Optional<Standalone<StringRef>>(),
+	                 Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
+	                 Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
+	                 Optional<Standalone<StringRef>>()),
+	    makeFDBSimulatorProcessMetadata(ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource)),
+	    "",
+	    "",
+	    currentProtocolVersion(),
+	    false);
 	testSystem->excludeFromRestarts = true;
 	co_await g_simulator->onProcess(testSystem, TaskPriority::DefaultYield);
 	Sim2FileSystem::newFileSystem();

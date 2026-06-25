@@ -28,6 +28,7 @@
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/BulkDumping.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/ProcessClass.h"
 #include "fdbclient/RangeLock.h"
 #include "fdbclient/StorageServerInterface.h"
 

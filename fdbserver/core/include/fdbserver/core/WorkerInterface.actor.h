@@ -33,6 +33,7 @@
 #include "fdbclient/ConsistencyScanInterface.h"
 #include "fdbserver/core/ResolverInterface.h"
 #include "fdbclient/ClientBooleanParams.h"
+#include "fdbclient/ProcessClass.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbclient/FDBTypes.h"

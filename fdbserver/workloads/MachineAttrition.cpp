@@ -26,6 +26,7 @@
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbrpc/simulator.h"
+#include "fdbclient/FDBSimulatorProcessInfo.h"
 #include "fdbclient/ManagementAPI.h"
 #include "flow/FaultInjection.h"
 #include "flow/DeterministicRandom.h"
@@ -163,7 +164,7 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 		std::vector<ISimulator::ProcessInfo*> all = g_simulator->getAllProcesses();
 		for (int i = 0; i < all.size(); i++)
 			if (!all[i]->failed && all[i]->name == std::string("Server") &&
-			    all[i]->startingClass != ProcessClass::TesterClass)
+			    getSimulatorProcessClass(all[i]) != ProcessClass::TesterClass)
 				machines.push_back(all[i]);
 		return machines;
 	}

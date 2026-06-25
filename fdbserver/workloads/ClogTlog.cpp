@@ -23,6 +23,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
+#include "fdbclient/FDBSimulatorProcessInfo.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/TesterInterface.h"
@@ -75,7 +76,7 @@ struct ClogTlogWorkload : TestWorkload {
 		std::vector<IPAddress> ips; // all FDB process IPs
 		for (const auto& process : g_simulator->getAllProcesses()) {
 			const auto& ip = process->address.ip;
-			if (process->startingClass != ProcessClass::TesterClass) {
+			if (getSimulatorProcessClass(process) != ProcessClass::TesterClass) {
 				ips.push_back(ip);
 			}
 		}

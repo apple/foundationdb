@@ -20,6 +20,7 @@
 
 #pragma once
 #include "fdbclient/ActorLineageProfiler.h"
+#include "fdbclient/ProcessClass.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 
 #include <any>

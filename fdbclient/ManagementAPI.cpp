@@ -34,6 +34,7 @@
 #include "flow/Arena.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/FDBOptions.g.h"
+#include "fdbclient/FDBSimulatorProcessInfo.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/ManagementAPI.h"
@@ -4202,7 +4203,8 @@ TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 			                        false,
 			                        1,
 			                        data.locality,
-			                        ProcessClass(ProcessClass::CoordinatorClass, ProcessClass::CommandLineSource),
+			                        makeFDBSimulatorProcessMetadata(
+			                            ProcessClass(ProcessClass::CoordinatorClass, ProcessClass::CommandLineSource)),
 			                        "",
 			                        "",
 			                        currentProtocolVersion(),

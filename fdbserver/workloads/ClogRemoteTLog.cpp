@@ -7,6 +7,7 @@
 #include "fdbrpc/PerfMetric.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/simulator.h"
+#include "fdbclient/FDBSimulatorProcessInfo.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/ServerDBInfo.h"
@@ -362,7 +363,7 @@ struct ClogRemoteTLog : TestWorkload {
 		std::vector<IPAddress> processes;
 		for (const auto& process : g_simulator->getAllProcesses()) {
 			const auto& ip = process->address.ip;
-			if (process->startingClass != ProcessClass::TesterClass && ip != cc) {
+			if (getSimulatorProcessClass(process) != ProcessClass::TesterClass && ip != cc) {
 				processes.push_back(ip);
 			}
 		}

@@ -43,6 +43,7 @@
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/SimulatorKillType.h"
+#include "fdbrpc/SimulatorProcessMetadata.h"
 
 enum ClogMode { ClogDefault, ClogAll, ClogSend, ClogReceive };
 
@@ -70,6 +71,7 @@ public:
 	};
 
 	virtual bool shouldProtectNewProcess(ProcessInfo const&) const { return false; }
+	virtual bool shouldIncludeInAvailabilityCheck(ProcessInfo const&) const { return true; }
 	virtual bool isAvailable(std::vector<ProcessInfo*> const&,
 	                         std::vector<ProcessInfo*> const& availableProcesses,
 	                         std::vector<ProcessInfo*> const& deadProcesses) const {
@@ -120,7 +122,7 @@ public:
 	                                bool sslEnabled,
 	                                uint16_t listenPerProcess,
 	                                LocalityData locality,
-	                                ProcessClass startingClass,
+	                                Reference<simulator::ProcessInfoMetadata> metadata,
 	                                const char* dataFolder,
 	                                const char* coordinationFolder,
 	                                ProtocolVersion protocol,

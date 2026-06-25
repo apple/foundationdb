@@ -20,6 +20,7 @@
 
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/tester/workloads.h"
+#include "fdbclient/FDBSimulatorProcessInfo.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 
@@ -63,17 +64,18 @@ class WorkloadProcessState {
 		auto dataFolder = joinPath(popPath(parent->dataFolder), deterministicRandom()->randomUniqueID().toString());
 		platform::createDirectory(dataFolder);
 		TraceEvent("StartingClientWorkloadProcess", id).detail("Name", processName).detail("Address", childAddress);
-		childProcess = g_simulator->newProcess(processName.c_str(),
-		                                       childAddress,
-		                                       1,
-		                                       parent->address.isTLS(),
-		                                       1,
-		                                       locality,
-		                                       ProcessClass(ProcessClass::TesterClass, ProcessClass::AutoSource),
-		                                       dataFolder.c_str(),
-		                                       parent->coordinationFolder.c_str(),
-		                                       parent->protocolVersion,
-		                                       false);
+		childProcess = g_simulator->newProcess(
+		    processName.c_str(),
+		    childAddress,
+		    1,
+		    parent->address.isTLS(),
+		    1,
+		    locality,
+		    makeFDBSimulatorProcessMetadata(ProcessClass(ProcessClass::TesterClass, ProcessClass::AutoSource)),
+		    dataFolder.c_str(),
+		    parent->coordinationFolder.c_str(),
+		    parent->protocolVersion,
+		    false);
 		childProcess->excludeFromRestarts = true;
 		co_await g_simulator->onProcess(childProcess, TaskPriority::DefaultYield);
 		try {

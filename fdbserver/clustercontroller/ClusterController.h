@@ -23,6 +23,7 @@
 #include <utility>
 
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/ProcessClass.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"

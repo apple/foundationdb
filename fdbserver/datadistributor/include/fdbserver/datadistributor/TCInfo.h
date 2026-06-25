@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include "fdbclient/ProcessClass.h"
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/ReplicationTypes.h"
 #include "fdbserver/datadistributor/DDTxnProcessor.h"

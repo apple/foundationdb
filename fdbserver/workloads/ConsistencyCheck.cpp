@@ -29,6 +29,7 @@
 #include "fdbserver/tester/workloads.h"
 #include "flow/IRateControl.h"
 #include "fdbrpc/simulator.h"
+#include "fdbclient/FDBSimulatorProcessInfo.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/consistencyscan/ConsistencyScan.h"
@@ -741,8 +742,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		std::vector<ISimulator::ProcessInfo*> all = g_simulator->getAllProcesses();
 		for (int i = 0; i < all.size(); i++) {
 			if (all[i]->isReliable() && all[i]->name == std::string("Server") &&
-			    all[i]->startingClass != ProcessClass::TesterClass &&
-			    all[i]->startingClass != ProcessClass::SimHTTPServerClass &&
+			    getSimulatorProcessClass(all[i]) != ProcessClass::TesterClass &&
+			    getSimulatorProcessClass(all[i]) != ProcessClass::SimHTTPServerClass &&
 			    all[i]->protocolVersion == g_network->protocolVersion()) {
 				if (!workerAddresses.contains(all[i]->address)) {
 					TraceEvent("ConsistencyCheck_WorkerMissingFromList").detail("Addr", all[i]->address);
