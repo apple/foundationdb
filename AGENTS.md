@@ -49,6 +49,9 @@ Enable simulation tests in cmake: `-DENABLE_SIMULATION_TESTS=ON`
 
 **Trace logs**: simulation and test runs emit `trace.*.xml` (or `.json`) files in the run directory. `TraceEvent(...)` is the canonical logging mechanism — search trace files by event name when debugging a simulation failure.
 
+- A `SevError` (Severity 40) `TraceEvent` **fails** a simulation/Joshua run. Use `SevWarnAlways` for "shouldn't happen but non-fatal." Errors carrying an injected fault are auto-downgraded; genuine `SevError`s are not. Expected errors must be suppressed/allowlisted, never emitted at `SevError`.
+- Keep a `TraceEvent` small: any single `detail()` value over 495 bytes is truncated (`...`), and an event whose fields total over 4000 bytes is **dropped entirely** and re-logged as `TraceEventOverflow` — at `SevError` in simulation, so an oversized event *fails the test*. Chunk long payloads (joined lists, command lines, serialized blobs) across multiple events.
+
 ## Architecture
 
 FoundationDB is a distributed ordered key-value store with strict serializability. The codebase is organized into ~12 subsystems. For background on subsystems before diving into code, the `design/` directory holds human-authored design docs and `design/AI-generated/` holds subsystem maps and per-subsystem diagrams (start with `design/AI-generated/foundationdb_subsystem_map.md`).
@@ -67,6 +70,8 @@ Key types: `Future<T>`, `Promise<T>`, `PromiseStream<T>`, `Reference<T>` (ref-co
 - `wait()` / `waitNext()` cannot appear inside ternary expressions, function arguments, or other sub-expressions. Assign to a `state` variable first, or use a small gating actor.
 - C++ coroutines: `co_await` is not allowed inside a `catch` handler. Capture the error, exit the catch, then `co_await` outside.
 - `ACTOR` functions declared in headers must not be defined inside an anonymous namespace, or call sites get ambiguous-overload errors.
+- Errors are integer codes (`flow/include/flow/error_definitions.h`), not exceptions with messages. When you `catch (Error& e)`, re-throw `actor_cancelled` (and never silently swallow `broken_promise`) — eating cancellation causes hangs and leaks. Transaction retry goes through `tr.onError(e)`, not a bare loop.
+- `StringRef`/`KeyRef`/`ValueRef` are non-owning views into an `Arena`. Returning or storing one past its arena's lifetime is a dangling-reference bug; use `Standalone<>` (or `Key`/`Value`) when you need to own the bytes.
 
 ### Core Subsystems
 
