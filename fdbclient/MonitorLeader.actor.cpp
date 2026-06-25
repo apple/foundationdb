@@ -840,7 +840,8 @@ void shrinkProxyList(ClientDBInfo& ni,
 		//     Either way it is a one-time reshuffle, not steady-state, and
 		//     the knob means we can experiment and have it be off in case of performance concerns.
 		if (!lastCommitProxyUIDs.empty()) {
-			CODE_PROBE(true, "commit proxy recruited count dropped to at/below MAX_COMMIT_PROXY_CONNECTIONS, clearing cache");
+			CODE_PROBE(true,
+			           "commit proxy recruited count dropped to at/below MAX_COMMIT_PROXY_CONNECTIONS, clearing cache");
 			TraceEvent("ShrinkProxyListCacheCleared")
 			    .detail("PeerRole", "commit_proxy")
 			    .detail("PrevCachedCount", lastCommitProxyUIDs.size())

@@ -89,7 +89,8 @@ struct GrvProxyInterface {
 		streams.push_back(refreshGlobalConfig.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
-			// streams[0] is `getConsistentReadVersion` (base endpoint); streams[1..kNumAdjustedEndpoints] are adjusted endpoints.
+			// streams[0] is `getConsistentReadVersion` (base endpoint); streams[1..kNumAdjustedEndpoints] are adjusted
+			// endpoints.
 			ASSERT(streams.size() - 1 == kNumAdjustedEndpoints);
 		}
 	}
