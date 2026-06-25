@@ -28,57 +28,18 @@
 struct FDBSimulatorProcessMetadata final : simulator::ProcessInfoMetadata {
 	ProcessClass startingClass;
 
-	explicit FDBSimulatorProcessMetadata(ProcessClass startingClass)
-	  : simulator::ProcessInfoMetadata(startingClass.toString(), startingClass == ProcessClass::TesterClass),
-	    startingClass(startingClass) {}
+	explicit FDBSimulatorProcessMetadata(ProcessClass startingClass);
 };
 
-inline Reference<simulator::ProcessInfoMetadata> makeFDBSimulatorProcessMetadata(ProcessClass startingClass) {
-	return makeReference<FDBSimulatorProcessMetadata>(startingClass);
-}
+Reference<simulator::ProcessInfoMetadata> makeFDBSimulatorProcessMetadata(ProcessClass startingClass);
 
-inline ProcessClass const& getSimulatorProcessClass(simulator::ProcessInfo const& process) {
-	auto* metadata = dynamic_cast<FDBSimulatorProcessMetadata*>(process.metadata.getPtr());
-	ASSERT(metadata != nullptr);
-	return metadata->startingClass;
-}
+ProcessClass const& getSimulatorProcessClass(simulator::ProcessInfo const& process);
 
-inline ProcessClass const& getSimulatorProcessClass(simulator::ProcessInfo const* process) {
-	ASSERT(process != nullptr);
-	return getSimulatorProcessClass(*process);
-}
+ProcessClass const& getSimulatorProcessClass(simulator::ProcessInfo const* process);
 
 // Return true if the class type is suitable for stateful roles, such as tLog and StorageServer.
-inline bool isAvailableSimulatorProcessClass(simulator::ProcessInfo const& process) {
-	switch (getSimulatorProcessClass(process)._class) {
-	case ProcessClass::UnsetClass:
-	case ProcessClass::StorageClass:
-	case ProcessClass::TransactionClass:
-	case ProcessClass::LogClass:
-		return true;
+bool isAvailableSimulatorProcessClass(simulator::ProcessInfo const& process);
 
-	case ProcessClass::ResolutionClass:
-	case ProcessClass::CommitProxyClass:
-	case ProcessClass::GrvProxyClass:
-	case ProcessClass::MasterClass:
-	case ProcessClass::TesterClass:
-	case ProcessClass::StatelessClass:
-	case ProcessClass::LogRouterClass:
-	case ProcessClass::ClusterControllerClass:
-	case ProcessClass::DataDistributorClass:
-	case ProcessClass::RatekeeperClass:
-	case ProcessClass::ConsistencyScanClass:
-	case ProcessClass::BlobManagerClass:
-	case ProcessClass::BackupClass:
-	case ProcessClass::EncryptKeyProxyClass:
-	default:
-		return false;
-	}
-}
-
-inline bool isAvailableSimulatorProcessClass(simulator::ProcessInfo const* process) {
-	ASSERT(process != nullptr);
-	return isAvailableSimulatorProcessClass(*process);
-}
+bool isAvailableSimulatorProcessClass(simulator::ProcessInfo const* process);
 
 #endif // FDBCLIENT_FDBSIMULATORPROCESSINFO_H
