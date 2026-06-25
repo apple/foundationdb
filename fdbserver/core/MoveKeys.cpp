@@ -1125,10 +1125,11 @@ static Future<Void> startMoveKeys(Database occ,
 					// executes its krmSetRangeCoalescing calls sequentially so that each
 					// sees the prior call's writes through the RYW transaction.
 					std::vector<Future<Void>> actors;
-					for (oldDest = oldDests.begin(); oldDest != oldDests.end(); ++oldDest)
+					for (oldDest = oldDests.begin(); oldDest != oldDests.end(); ++oldDest) {
 						if (std::find(servers.begin(), servers.end(), *oldDest) == servers.end())
 							actors.push_back(removeOldDestinations(
 							    tr, serverKeysPrefixFor(*oldDest), shardMap[*oldDest], currentKeys));
+					}
 
 					// Update serverKeys to include keys (or the currently processed subset of keys) for each SS in
 					// servers

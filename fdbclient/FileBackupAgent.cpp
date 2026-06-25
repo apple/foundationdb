@@ -739,10 +739,11 @@ Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore, Refer
 	bool useRangeFile = !useRangeFileRestore.get().present() || useRangeFileRestore.get().get();
 
 	std::string errstr = "None";
-	if (lastError.get().second != 0)
+	if (lastError.get().second != 0) {
 		errstr = format("'%s' %" PRId64 "s ago.\n",
 		                lastError.get().first.c_str(),
 		                (tr->getReadVersion().get() - lastError.get().second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+	}
 
 	TraceEvent("FileRestoreProgress")
 	    .detail("RestoreUID", uid)
@@ -2782,8 +2783,9 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 		for (; iShard != iShardEnd; ++iShard) {
 			if (iShard->value() == DONE) {
 				++countShardsDone;
-			} else if (iShard->value() >= NOT_DONE_MIN)
+			} else if (iShard->value() >= NOT_DONE_MIN) {
 				++countShardsNotDone;
+			}
 
 			co_await yield();
 		}
@@ -2820,12 +2822,13 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 
 		// In simulation, use snapshot interval / 5 to ensure multiple dispatches run
 		// Otherwise, use the knob for the number of seconds between snapshot dispatch tasks.
-		if (g_network->isSimulated())
+		if (g_network->isSimulated()) {
 			nextDispatchVersion =
 			    recentReadVersion + CLIENT_KNOBS->CORE_VERSIONSPERSECOND * (snapshotIntervalSeconds / 5.0);
-		else
+		} else {
 			nextDispatchVersion = recentReadVersion + CLIENT_KNOBS->CORE_VERSIONSPERSECOND *
 			                                              CLIENT_KNOBS->BACKUP_SNAPSHOT_DISPATCH_INTERVAL_SEC;
+		}
 
 		// If nextDispatchVersion is greater than snapshotTargetEndVersion (which could be in the past) then just
 		// use the greater of recentReadVersion or snapshotTargetEndVersion.  Any range tasks created in this
@@ -2840,11 +2843,12 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 		// timeElapsed is between 0 and 1 and represents what portion of the shards we should have completed by now
 		double timeElapsed;
 		Version snapshotScheduledVersionInterval = snapshotTargetEndVersion - snapshotBeginVersion;
-		if (snapshotTargetEndVersion > snapshotBeginVersion)
+		if (snapshotTargetEndVersion > snapshotBeginVersion) {
 			timeElapsed = std::min(
 			    1.0, (double)(nextDispatchVersion - snapshotBeginVersion) / (snapshotScheduledVersionInterval));
-		else
+		} else {
 			timeElapsed = 1.0;
+		}
 
 		int countExpectedShardsDone = countAllShards * timeElapsed;
 		int countShardsToDispatch = std::max<int>(0, countExpectedShardsDone - countShardsDone);
@@ -6425,8 +6429,9 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 			if (i == 0) {
 				batchSize *= 2;
 				decision = "increased_batch_size";
-			} else
+			} else {
 				decision = "all_files_were_empty";
+			}
 
 			TraceEvent("FileRestoreDispatch")
 			    .detail("RestoreUID", restore.getUid())
@@ -6474,7 +6479,7 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 
 		// If more blocks need to be dispatched in this batch then add a follow-on task that is part of the
 		// allPartsDone group which will won't wait to run and will add more block tasks.
-		if (remainingInBatch > 0)
+		if (remainingInBatch > 0) {
 			addTaskFutures.push_back(RestoreDispatchTaskFunc::addTask(tr,
 			                                                          taskBucket,
 			                                                          task,
@@ -6484,7 +6489,7 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 			                                                          batchSize,
 			                                                          remainingInBatch,
 			                                                          TaskCompletionKey::joinWith(allPartsDone)));
-		else // Otherwise, add a follow-on task to continue after all previously dispatched blocks are done
+		} else { // Otherwise, add a follow-on task to continue after all previously dispatched blocks are done
 			addTaskFutures.push_back(RestoreDispatchTaskFunc::addTask(tr,
 			                                                          taskBucket,
 			                                                          task,
@@ -6495,6 +6500,7 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 			                                                          0,
 			                                                          TaskCompletionKey::noSignal(),
 			                                                          allPartsDone));
+		}
 
 		co_await waitForAll(addTaskFutures);
 
@@ -6577,8 +6583,9 @@ Future<std::string> restoreStatus(Reference<ReadYourWritesTransaction> tr, Key t
 	if (tagName.empty()) {
 		std::vector<KeyBackedTag> t = co_await getAllRestoreTags(tr);
 		tags = t;
-	} else
+	} else {
 		tags.push_back(makeRestoreTag(tagName.toString()));
+	}
 
 	// If no tags found, return helpful message
 	if (tags.empty()) {
@@ -7476,10 +7483,11 @@ public:
 				KeyBackedTag tag = makeRestoreTag(tagName.toString());
 				Optional<UidAndAbortedFlagT> current = co_await tag.get(tr);
 				if (!current.present()) {
-					if (verbose)
+					if (verbose) {
 						printf("waitRestore: Tag: %s  State: %s\n",
 						       tagName.toString().c_str(),
 						       FileBackupAgent::restoreStateText(ERestoreState::UNINITIALIZED).toString().c_str());
+					}
 					co_return ERestoreState::UNINITIALIZED;
 				}
 
@@ -8138,15 +8146,16 @@ public:
 						}
 
 						if (!recentErrors.empty()) {
-							if (latestRestorableVersion.present())
+							if (latestRestorableVersion.present()) {
 								statusText +=
 								    format("Recent Errors (since latest restorable point %s ago)\n",
 								           secondsToTimeFormat((recentReadVersion - latestRestorableVersion.get()) /
 								                               CLIENT_KNOBS->CORE_VERSIONSPERSECOND)
 								               .c_str()) +
 								    recentErrors;
-							else
+							} else {
 								statusText += "Recent Errors (since initialization)\n" + recentErrors;
+							}
 						}
 						if (!pastErrors.empty())
 							statusText += "Older Errors\n" + pastErrors;

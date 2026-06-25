@@ -360,10 +360,11 @@ UID getSharedMemoryMachineId() {
 			} catch (boost::interprocess::interprocess_exception& ex) {
 				// Retry in case the shared memory was deleted in between the call to open_or_create and open_read_only
 				// Don't keep trying forever in case this is caused by some other problem
-				if (++numTries == 10)
+				if (++numTries == 10) {
 					criticalError(FDB_EXIT_ERROR,
 					              "SharedMemoryError",
 					              format("Could not open shared memory - %s", ex.what()).c_str());
+				}
 			}
 		}
 	}

@@ -402,11 +402,12 @@ Future<Void> waitCommitProxyFailure(std::vector<CommitProxyInterface> const& com
 Future<Void> waitGrvProxyFailure(std::vector<GrvProxyInterface> const& grvProxies) {
 	std::vector<Future<Void>> failed;
 	failed.reserve(grvProxies.size());
-	for (int i = 0; i < grvProxies.size(); i++)
+	for (int i = 0; i < grvProxies.size(); i++) {
 		failed.push_back(waitFailureClient(grvProxies[i].waitFailure,
 		                                   SERVER_KNOBS->TLOG_TIMEOUT,
 		                                   -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
 		                                   /*trace=*/true));
+	}
 	ASSERT(!failed.empty());
 	return tagError<Void>(quorum(failed, 1), grv_proxy_failed());
 }
@@ -1565,11 +1566,12 @@ Future<Void> recoverFrom(Reference<ClusterRecoveryData> self,
 			Standalone<CommitTransactionRef> req = std::get<1>(std::move(res));
 			CODE_PROBE(true, "Emergency transaction processing during recovery");
 			TraceEvent("EmergencyTransaction", self->dbgid).log();
-			for (auto m = req.mutations.begin(); m != req.mutations.end(); ++m)
+			for (auto m = req.mutations.begin(); m != req.mutations.end(); ++m) {
 				TraceEvent("EmergencyTransactionMutation", self->dbgid)
 				    .detail("MType", m->type)
 				    .detail("P1", m->param1)
 				    .detail("P2", m->param2);
+			}
 
 			DatabaseConfiguration oldConf = self->configuration;
 			self->configuration = self->originalConfiguration;

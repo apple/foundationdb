@@ -229,11 +229,12 @@ struct ResolutionRequestBuilder {
 		}
 
 		std::vector<int> resolversUsed;
-		for (int r = 0; r < outTr.size(); r++)
+		for (int r = 0; r < outTr.size(); r++) {
 			if (outTr[r]) {
 				resolversUsed.push_back(r);
 				outTr[r]->report_conflicting_keys = trIn.report_conflicting_keys;
 			}
+		}
 		transactionResolverMap.emplace_back(std::move(resolversUsed));
 	}
 };
@@ -1962,11 +1963,12 @@ Future<Void> reply(CommitBatchContext* self) {
 					    self->resolution[resolverInd]
 					        .conflictingKeyRangeMap[self->nextTr[resolverInd]]; // nextTr[resolverInd] -> index of
 					                                                            // this trs[t] on the resolver
-					for (auto const& rCRIndex : cKRs)
+					for (auto const& rCRIndex : cKRs) {
 						// read_conflict_range can change when sent to resolvers, mapping the index from
 						// resolver-side to original index in commitTransactionRef
 						conflictingKRIndices.push_back(conflictingKRIndices.arena(),
 						                               self->txReadConflictRangeIndexMap[t][resolverInd][rCRIndex]);
+					}
 				}
 				// At least one keyRange index should be returned
 				ASSERT(!conflictingKRIndices.empty());

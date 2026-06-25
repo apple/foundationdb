@@ -259,11 +259,12 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 					for (const KeyRange& rCR : readConflictRanges) {
 						if (std::any_of(writeConflictRanges.begin(), writeConflictRanges.end(), [&rCR](KeyRange wCR) {
 							    bool result = wCR.intersects(rCR);
-							    if (result)
+							    if (result) {
 								    TraceEvent(SevError, "TestFailure")
 								        .detail("Reason", "No conflicts returned but it should")
 								        .detail("WriteConflictRangeInTr1", wCR.toString())
 								        .detail("ReadConflictRangeInTr2", rCR.toString());
+							    }
 							    return result;
 						    })) {
 							++self->invalidReports;

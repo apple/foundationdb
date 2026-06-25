@@ -42,13 +42,14 @@ namespace {
 Standalone<VectorRef<KeyValueRef>> checkAllOptionsConsumed(VectorRef<KeyValueRef> options) {
 	static StringRef nothing = ""_sr;
 	Standalone<VectorRef<KeyValueRef>> unconsumed;
-	for (int i = 0; i < options.size(); i++)
+	for (int i = 0; i < options.size(); i++) {
 		if (!(options[i].value == nothing)) {
 			TraceEvent(SevError, "OptionNotConsumed")
 			    .detail("Key", options[i].key.toString().c_str())
 			    .detail("Value", options[i].value.toString().c_str());
 			unconsumed.push_back_deep(unconsumed.arena(), options[i]);
 		}
+	}
 	return unconsumed;
 }
 
@@ -84,11 +85,12 @@ Future<Reference<TestWorkload>> getWorkloadIface(WorkloadRequest work,
 		} else {
 			evt.detail("Reason", "Not all options consumed");
 			fprintf(stderr, "ERROR: Workload had invalid options. The following were unrecognized:\n");
-			for (int i = 0; i < unconsumedOptions.size(); i++)
+			for (int i = 0; i < unconsumedOptions.size(); i++) {
 				fprintf(stderr,
 				        " '%s' = '%s'\n",
 				        unconsumedOptions[i].key.toString().c_str(),
 				        unconsumedOptions[i].value.toString().c_str());
+			}
 		}
 		throw test_specification_invalid();
 	}
@@ -241,10 +243,11 @@ Future<Void> testDatabaseLiveness(Database cx, double databasePingDelay, std::st
 			TraceEvent(("PingingDatabaseLivenessDone_" + context).c_str()).detail("TimeTaken", pingTime);
 			co_await delay(databasePingDelay - pingTime);
 		} catch (Error& e) {
-			if (e.code() != error_code_actor_cancelled)
+			if (e.code() != error_code_actor_cancelled) {
 				TraceEvent(SevError, ("PingingDatabaseLivenessError_" + context).c_str())
 				    .error(e)
 				    .detail("PingDelay", databasePingDelay);
+			}
 			throw;
 		}
 	}
