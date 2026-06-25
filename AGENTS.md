@@ -22,11 +22,17 @@ Linux with Clang: `CC=clang CXX=clang++ cmake -DUSE_LD=LLD -DUSE_LIBCXX=1 -G Nin
 
 ## Testing
 
-**Unit tests** use `TEST_CASE("/path/to/test")` macros (defined in `flow/include/flow/UnitTest.h`):
+**Unit tests** use `TEST_CASE("/path/to/test")` macros (defined in `flow/include/flow/UnitTest.h`). Prefer the narrowest dedicated unit-test target instead of `fdbserver -r unittests`; these targets compile and run faster. Use `fdbclient_test` for client tests or the relevant `fdbserver_<library>_test` target defined via `add_fdbserver_unit_test` (for example, `fdbserver_core_test`, `fdbserver_kvstore_test`, or `fdbserver_storageserver_test`). Find the applicable target in the affected component's `CMakeLists.txt`:
 ```bash
-bin/fdbserver -r unittests                           # all unit tests
-bin/fdbserver -r unittests -f "/flow/DNSCache"       # single test by prefix
+ninja fdbclient_test
+bin/fdbclient_test                                  # all tests in the target
+bin/fdbclient_test -f "<test-prefix>"                # tests matching a prefix
+
+ninja fdbserver_core_test
+bin/fdbserver_core_test
 ```
+
+Use `fdbserver` for simulation or broader end-to-end validation, not as the default unit-test runner.
 
 **Simulation tests** use TOML workload definitions in `tests/fast/`, `tests/slow/`, etc.:
 ```bash
