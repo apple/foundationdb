@@ -29,10 +29,10 @@ jobs:
           git config --global --add safe.directory /__w/foundationdb/foundationdb
 
           CC=clang CXX=clang++ USE_LD=LLD USE_LIBCXX=1 \
-            cmake -S . -B build-out -G Ninja \
+            cmake -S . -B build_output -G Ninja \
               -D BUILD_AWS_BACKUP=ON -D CMAKE_EXPORT_COMPILE_COMMANDS=ON
 
-          ninja -v -C build-out        \
+          ninja -v -C build_output     \
             processed_compile_commands \
             fdboptions                 \
             ProtocolVersion            \
