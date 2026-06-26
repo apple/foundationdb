@@ -39,8 +39,12 @@ jobs:
         # clang-tidy is roughly as slow as compiling per-file,
         # so check only touched files
         run: |
-          FILES=$(git diff --name-only --merge-base ${{github.event.pull_request.base.ref}})
-          printf "Changed files:\n%s\n" "$FILES"
+          SOURCES=$(git diff --name-only --merge-base ${{github.event.pull_request.base.ref}} |
+                  grep -E '\.(c|cpp|h|hpp)$' || true)
+          printf "C++ sources changed:\n%s\n" "$SOURCES"
+
           while read FILE; do
-            clang-tidy "$FILE"
-          done <<<"$FILES"
+            if [ -n "$FILE" ]; then
+              clang-tidy "$FILE"
+            fi
+          done <<<"$SOURCES"
