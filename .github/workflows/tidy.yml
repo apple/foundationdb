@@ -1,0 +1,46 @@
+name: clang-tidy
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  clang-tidy:
+    runs-on: ubuntu-24.04
+    container:
+      image: foundationdb/build:rockylinux9-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          # by default PR virtual "merge" commit is checked-out
+          ref: ${{ github.event.pull_request.head.sha }}
+          # get history of all branches so we can find merge-base
+          fetch-depth: 0
+
+      - name: Configure build
+        run: |
+          CC=clang CXX=clang++ USE_LD=LLD USE_LIBCXX=1 \
+            cmake -S . -B build-out -G Ninja \
+              -D BUILD_AWS_BACKUP=ON -D CMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+          ninja -v -C build-out        \
+            processed_compile_commands \
+            fdboptions                 \
+            ProtocolVersion            \
+            generated/fdbctl/control_service/control_service.grpc.pb.h
+
+      - name: clang-tidy
+        # clang-tidy is roughly as slow as compiling per-file,
+        # so check only touched files
+        run: |
+          FILES=$(git diff --name-only --merge-base ${{github.event.pull_request.base.ref}})
+          printf "Changed files:\n%s\n" "$FILES"
+          while read FILE; do
+            clang-tidy "$FILE"
+          done <<<"$FILES"
