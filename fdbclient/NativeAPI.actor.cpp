@@ -1161,6 +1161,124 @@ ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, Stora
 	}
 }
 
+// Evicts cached ranges mapping to any server address in the input addresses set
+// Yields every LOCATION_CACHE_PEER_EVICTOR_SCAN_CHUNK ranges
+ACTOR static Future<Void> invalidateCacheByAddresses(DatabaseContext* self,
+                                                     std::unordered_set<NetworkAddress> addresses) {
+	// Initial checks
+	if (addresses.empty()) {
+		return Void();
+	}
+	state int rangeChunkThreshold = CLIENT_KNOBS->LOCATION_CACHE_PEER_EVICTOR_SCAN_CHUNK;
+	ASSERT(rangeChunkThreshold >= 1);
+
+	// State across phase 1 and phase 2 below
+	state std::vector<KeyRange> rangesToInvalidate;
+	state double startT = now();
+
+	// Phase 1: scan the cache in chunks, and compute invalid ranges
+	TraceEvent("LocationCacheInvalidatedByAddresses_Phase1_Begin")
+	    .detail("DbId", self->dbId)
+	    .detail("AddressCount", addresses.size());
+	state Key cursor = allKeys.begin;
+	state int phase1RangesScanned = 0;
+	state int phase1Yields = 0;
+
+	loop {
+		TraceEvent("LocationCacheInvalidatedByAddresses_Phase1_ChunkIter")
+		    .suppressFor(5.0)
+		    .detail("DbId", self->dbId)
+		    .detail("AddressCount", addresses.size())
+		    .detail("InvalidatedRanges", rangesToInvalidate.size())
+		    .detail("RangeChunkThreshold", rangeChunkThreshold)
+		    .detail("Phase1RangesScanned", phase1RangesScanned)
+		    .detail("Phase1Yields", phase1Yields);
+
+		// Process as many ranges as possible within chunk threshold
+		auto iter = self->locationCache.rangeContaining(cursor);
+		auto endIter = self->locationCache.ranges().end();
+		bool rangesRemaining = false;
+		int currRangesScanned = 0;
+		for (; iter != endIter; ++iter) {
+			if (currRangesScanned >= rangeChunkThreshold) {
+				rangesRemaining = true;
+				break;
+			}
+			++currRangesScanned;
+			cursor = iter->end();
+			if (!iter->value()) {
+				continue;
+			}
+			auto& loc = iter->value();
+			for (int i = 0; i < loc->size(); ++i) {
+				if (addresses.contains(loc->getInterface(i).address())) {
+					rangesToInvalidate.push_back(KeyRange(KeyRangeRef(iter->begin(), iter->end())));
+					break;
+				}
+			}
+		}
+		phase1RangesScanned += currRangesScanned;
+
+		if (!rangesRemaining) {
+			TraceEvent("LocationCacheInvalidatedByAddresses_Phase1_End")
+			    .detail("DbId", self->dbId)
+			    .detail("AddressCount", addresses.size())
+			    .detail("InvalidatedRanges", rangesToInvalidate.size())
+			    .detail("RangeChunkThreshold", rangeChunkThreshold)
+			    .detail("Phase1RangesScanned", phase1RangesScanned)
+			    .detail("Phase1Yields", phase1Yields)
+			    .detail("Phase1Duration", now() - startT);
+			break;
+		}
+
+		++phase1Yields;
+		TraceEvent("LocationCacheInvalidatedByAddresses_Phase1_Yield")
+		    .suppressFor(5.0)
+		    .detail("DbId", self->dbId)
+		    .detail("AddressCount", addresses.size())
+		    .detail("InvalidatedRanges", rangesToInvalidate.size())
+		    .detail("RangeChunkThreshold", rangeChunkThreshold)
+		    .detail("Phase1RangesScanned", phase1RangesScanned)
+		    .detail("Phase1Yields", phase1Yields);
+		wait(yield());
+	}
+
+	// Phase 2: invalidate the cache based on invalid ranges computed in Phase 1
+	TraceEvent("LocationCacheInvalidatedByAddresses_Phase2_Begin")
+	    .detail("DbId", self->dbId)
+	    .detail("AddressCount", addresses.size())
+	    .detail("InvalidatedRanges", rangesToInvalidate.size());
+	state int phase2Idx = 0;
+	state int phase2Yields = 0;
+	state double phase2StartT = now();
+	for (; phase2Idx < rangesToInvalidate.size(); phase2Idx++) {
+		self->locationCache.insert(rangesToInvalidate[phase2Idx], Reference<LocationInfo>());
+		if ((phase2Idx + 1) % rangeChunkThreshold == 0) {
+			++phase2Yields;
+			TraceEvent("LocationCacheInvalidatedByAddresses_Phase2_Yield")
+			    .suppressFor(5.0)
+			    .detail("DbId", self->dbId)
+			    .detail("AddressCount", addresses.size())
+			    .detail("InvalidatedRanges", rangesToInvalidate.size())
+			    .detail("RangeChunkThreshold", rangeChunkThreshold)
+			    .detail("Phase2RangesScanned", phase2Idx + 1)
+			    .detail("Phase2Yields", phase2Yields);
+			wait(yield());
+		}
+	}
+	TraceEvent("LocationCacheInvalidatedByAddresses_Phase2_End")
+	    .detail("DbId", self->dbId)
+	    .detail("AddressCount", addresses.size())
+	    .detail("InvalidatedRanges", rangesToInvalidate.size())
+	    .detail("RangeChunkThreshold", rangeChunkThreshold)
+	    .detail("Phase2RangesScanned", phase2Idx + 1)
+	    .detail("Phase2Yields", phase2Yields)
+	    .detail("Phase2Duration", now() - phase2StartT)
+	    .detail("OverallDuration", now() - startT);
+
+	return Void();
+}
+
 // Periodically samples FlowTransport's persistent per-address connect-failed
 // counter and evicts any address whose count advanced since the previous tick
 // (a "flap"). This is a direct ConnectionTimeout (CTO) signal: every connect failure increments
@@ -1225,7 +1343,7 @@ ACTOR static Future<Void> locationCachePeerEvictorActor(DatabaseContext* cx) {
 				    .detail("DbId", cx->dbId)
 				    .detail("DeadAddrSetSize", deadAddressSet.size());
 			}
-			cx->invalidateCacheByAddresses(deadAddressSet);
+			wait(invalidateCacheByAddresses(cx, deadAddressSet));
 		} catch (Error& e) {
 			// actor_cancelled must propagate so ~DatabaseContext can tear down the
 			// evictor; any other error should not kill the loop (that would stop the
@@ -2132,34 +2250,6 @@ void DatabaseContext::invalidateCache(const Optional<KeyRef>& tenantPrefix, cons
 	Key begin = rs.begin().begin(),
 	    end = rs.end().begin(); // insert invalidates rs, so can't be passed a mere reference into it
 	locationCache.insert(KeyRangeRef(begin, end), Reference<LocationInfo>());
-}
-
-void DatabaseContext::invalidateCacheByAddresses(const std::unordered_set<NetworkAddress>& addresses) {
-	if (addresses.empty()) {
-		return;
-	}
-	std::vector<KeyRange> rangesToInvalidate;
-	auto ranges = locationCache.ranges();
-	for (auto iter = ranges.begin(); iter != ranges.end(); ++iter) {
-		if (!iter->value())
-			continue;
-		auto& loc = iter->value();
-		for (int i = 0; i < loc->size(); i++) {
-			if (addresses.contains(loc->getInterface(i).address())) {
-				rangesToInvalidate.push_back(KeyRange(KeyRangeRef(iter->begin(), iter->end())));
-				break;
-			}
-		}
-	}
-
-	for (const auto& range : rangesToInvalidate) {
-		locationCache.insert(range, Reference<LocationInfo>());
-	}
-
-	TraceEvent("LocationCacheInvalidatedByAddresses")
-	    .detail("DbId", dbId)
-	    .detail("AddressCount", addresses.size())
-	    .detail("InvalidatedRanges", rangesToInvalidate.size());
 }
 
 void DatabaseContext::setFailedEndpointOnHealthyServer(const Endpoint& endpoint) {

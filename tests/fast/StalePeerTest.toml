@@ -22,6 +22,7 @@ coordinators = 3
 location_cache_peer_evictor_enabled = true
 location_cache_peer_evictor_failed_threshold = 0
 location_cache_peer_evictor_delay = 5.0
+location_cache_peer_evictor_scan_chunk = 2
 
 # Ensure stale commit/grv proxies are also cleaned up
 shrink_proxy_list_clear_cache_below_threshold = true
