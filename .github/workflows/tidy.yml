@@ -36,11 +36,10 @@ jobs:
             generated/fdbctl/control_service/control_service.grpc.pb.h
 
       - name: clang-tidy
-        # clang-tidy is roughly as slow as compiling per-file,
-        # so check only touched files
+        # clang-tidy is roughly as slow as compiling per-file, so check only touched files
         run: |
-          SOURCES=$(git diff --name-only --merge-base ${{github.event.pull_request.base.ref}} |
-                  grep -E '\.(c|cpp|h|hpp)$' || true)
+          SOURCES=$(git diff --name-only ${{github.event.pull_request.base.ref}}... \
+                    | grep -E '\.(c|cpp|h|hpp)$' || true)
           printf "C++ sources changed:\n%s\n" "$SOURCES"
 
           while read FILE; do
