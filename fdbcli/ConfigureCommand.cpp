@@ -99,12 +99,11 @@ Future<bool> configureCommandActor(Reference<IDatabase> db,
 
 			if (noDesiredChanges)
 				outputString += "\nConfigure recommends keeping your current configuration:\n\n";
-			else if (noChanges) {
+			else if (noChanges)
 				outputString +=
 				    "\nConfigure cannot modify the configuration because some parameters have been set manually:\n\n";
-			} else {
+			else
 				outputString += "\nConfigure recommends the following changes:\n\n";
-			}
 			outputString += " ------------------------------------------------------------------- \n";
 			outputString += "| parameter                   | old              | new              |\n";
 			outputString += " ------------------------------------------------------------------- \n";
