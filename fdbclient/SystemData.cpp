@@ -1567,7 +1567,7 @@ void testSSISerdes(StorageServerInterface const& ssi) {
 	ASSERT(ssi.isTss() == ssi2.isTss());
 	ASSERT(ssi.isAcceptingRequests() == ssi2.isAcceptingRequests());
 	if (ssi.isTss()) {
-		ASSERT(ssi2.tssPairID.get() == ssi2.tssPairID.get());
+		ASSERT(ssi.tssPairID.get() == ssi2.tssPairID.get());
 	}
 	ASSERT(ssi.address() == ssi2.address());
 	ASSERT(ssi.getValue.getEndpoint().token == ssi2.getValue.getEndpoint().token);
@@ -1585,7 +1585,9 @@ TEST_CASE("/SystemData/SerDes/SSI") {
 	StorageServerInterface ssi;
 	ssi.uniqueID = UID(0x1234123412341234, 0x5678567856785678);
 	ssi.locality = localityData;
-	ssi.initEndpoints();
+	// This test only needs a serializable endpoint; registering one requires a FlowTransport instance.
+	ssi.getValue =
+	    PublicRequestStream<GetValueRequest>(Endpoint({ NetworkAddress(IPAddress(0x01010101), 1) }, UID(1, 2)));
 
 	testSSISerdes(ssi);
 
