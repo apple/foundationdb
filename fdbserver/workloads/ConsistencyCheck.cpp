@@ -322,8 +322,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 							// undesirable servers error
 							if (!hasUndesirableServers)
 								self->testFailure("Could not read storage queue size");
-						} else
+						} else {
 							throw;
+						}
 					}
 
 					co_await self->checkForStorage(cx, configuration, tssMapping, self);

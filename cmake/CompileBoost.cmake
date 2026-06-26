@@ -1,5 +1,14 @@
-function(compile_boost)
+## Boost
 
+# iostreams can include support for different compression libraries,
+# but this boost build disables them all except for basic zlib.
+# If FLOW_USE_ZSTD enabled then "flow" subdir will build and link
+# the boost iostream zstd implementation, it is not built here.
+
+# To use a separate boost build for fdb, do not build with bzip2/lzma/zstd
+# enabled, or add appropriate link flags via cmake options.
+
+function(compile_boost)
   # Initialize function incoming parameters
   set(options)
   set(oneValueArgs TARGET)
@@ -21,12 +30,6 @@ function(compile_boost)
     set(BOOST_TOOLSET "clang")
   elseif(CLANG)
     set(BOOST_TOOLSET "clang")
-    if(APPLE)
-      # this is to fix a weird macOS issue -- by default
-      # cmake would otherwise pass a compiler that can't
-      # compile boost
-      set(BOOST_CXX_COMPILER "/usr/bin/clang++")
-    endif()
   else()
     set(BOOST_TOOLSET "gcc")
   endif()
@@ -34,7 +37,7 @@ function(compile_boost)
 
   # Configure b2 command
   set(B2_COMMAND "./b2")
-  set(BOOST_COMPILER_FLAGS -fvisibility=hidden -fPIC -std=c++17 -w)
+  set(BOOST_COMPILER_FLAGS -fvisibility=hidden -fPIC -std=c++17 --no-warnings)
   set(BOOST_LINK_FLAGS "")
   if(APPLE OR ICX OR USE_LIBCXX)
     list(APPEND BOOST_COMPILER_FLAGS -stdlib=libc++ -nostdlib++)
@@ -78,11 +81,11 @@ function(compile_boost)
     URL                ${BOOST_SRC_URL}
     URL_HASH           ${BOOST_SRC_SHA}
     CONFIGURE_COMMAND  ${BOOTSTRAP_COMMAND}
-                       ${BOOTSTRAP_ARGS}
                        --with-libraries=${BOOTSTRAP_LIBRARIES}
                        --with-toolset=${BOOST_TOOLSET}
     BUILD_COMMAND      ${B2_COMMAND}
                        link=static ${B2_ADDTTIONAL_BUILD_ARGS}
+                       -s NO_BZIP2=1 -s NO_LZMA=1 -s NO_ZSTD=1
                        ${COMPILE_BOOST_BUILD_ARGS}
                        --prefix=${BOOST_INSTALL_DIR}
                        ${USER_CONFIG_FLAG} install
@@ -96,7 +99,7 @@ function(compile_boost)
                        "${BOOST_INSTALL_DIR}/lib/libboost_serialization.a"
                        "${BOOST_INSTALL_DIR}/lib/libboost_system.a"
                        "${BOOST_INSTALL_DIR}/lib/libboost_url.a"
-					   "${BOOST_INSTALL_DIR}/lib/libboost_program_options.a")
+                       "${BOOST_INSTALL_DIR}/lib/libboost_program_options.a")
 
   add_library(${COMPILE_BOOST_TARGET}_context STATIC IMPORTED)
   add_dependencies(${COMPILE_BOOST_TARGET}_context ${COMPILE_BOOST_TARGET}Project)
@@ -183,15 +186,6 @@ if(WIN32)
                                   Boost::system
                                   Boost::url
   )
-  # Add zstd library since boost::iostreams may depend on it
-  find_package(PkgConfig QUIET)
-  if(PkgConfig_FOUND)
-    pkg_check_modules(ZSTD QUIET libzstd)
-    if(ZSTD_FOUND)
-      target_link_libraries(boost_target INTERFACE ${ZSTD_LIBRARIES})
-      target_link_directories(boost_target INTERFACE ${ZSTD_LIBRARY_DIRS})
-    endif()
-  endif()
   add_library(boost_target_program_options INTERFACE)
   target_link_libraries(boost_target_program_options INTERFACE Boost::boost Boost::program_options)
   return()
@@ -203,19 +197,8 @@ find_package(Boost 1.86.0 EXACT QUIET
              CONFIG PATHS ${BOOST_HINT_PATHS})
 
 set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores any installed boost")
-# The precompiled boost silently broke in CI.  While investigating, I considered extending
-# the old check with something like this, so that it would fail loudly if it found a bad
-# pre-existing boost.  It turns out the error messages we get from CMake explain what is
-# wrong with Boost.  Rather than reimplementing that, I just deleted this logic.  This
-# approach is simpler, has better ergonomics and should be easier to maintain.  If the build
-# is picking up your locally installed or partial version of boost, and you don't want
+# If the build is picking up your locally installed or partial version of boost, and you don't want
 # to / cannot fix it, pass in -DFORCE_BOOST_BUILD=on as a workaround.
-#
-#    if(Boost_FOUND AND Boost_filesystem_FOUND AND Boost_context_FOUND AND Boost_iostreams_FOUND AND Boost_system_FOUND AND Boost_serialization_FOUND AND NOT FORCE_BOOST_BUILD)
-#      ...
-#    elseif(Boost_FOUND AND NOT FORCE_BOOST_BUILD)
-#      message(FATAL_ERROR "Unacceptable precompiled boost found")
-#
 if(Boost_FOUND AND NOT FORCE_BOOST_BUILD)
   message(STATUS "Found Boost: ${Boost_DIR}")
   add_library(boost_target INTERFACE)
@@ -228,17 +211,6 @@ if(Boost_FOUND AND NOT FORCE_BOOST_BUILD)
                                   Boost::system
                                   Boost::url
   )
-  # Add zstd library since boost::iostreams may depend on it when compiled with homebrew on macOS
-  if(APPLE)
-    find_package(PkgConfig QUIET)
-    if(PkgConfig_FOUND)
-      pkg_check_modules(ZSTD QUIET libzstd)
-      if(ZSTD_FOUND)
-        target_link_libraries(boost_target INTERFACE ${ZSTD_LIBRARIES})
-        target_link_directories(boost_target INTERFACE ${ZSTD_LIBRARY_DIRS})
-      endif()
-    endif()
-  endif()
   add_library(boost_target_program_options INTERFACE)
   target_link_libraries(boost_target_program_options INTERFACE Boost::boost Boost::program_options)
 elseif(WIN32)

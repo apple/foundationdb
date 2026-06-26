@@ -65,8 +65,9 @@ Future<Reference<IAsyncFile>> AsyncFileCached::open_impl(std::string filename, i
 			                             makeReference<EvictablePageCache>(65536, pageCacheSize64k));
 			simulatorPageCaches[g_network->getLocalAddress()] = caches;
 			pageCache = (flags & IAsyncFile::OPEN_LARGE_PAGES) ? caches.second : caches.first;
-		} else
+		} else {
 			pageCache = (flags & IAsyncFile::OPEN_LARGE_PAGES) ? cacheItr->second.second : cacheItr->second.first;
+		}
 	} else {
 		if (flags & IAsyncFile::OPEN_LARGE_PAGES) {
 			if (!pc64k.present())

@@ -750,7 +750,7 @@ private:
 		ASSERT((self->flags & IAsyncFile::OPEN_NO_AIO) != 0 ||
 		       ((uintptr_t)data % 4096 == 0 && length % 4096 == 0 && offset % 4096 == 0)); // Required by KAIO.
 		UID opId = deterministicRandom()->randomUniqueID();
-		if (randLog)
+		if (randLog) {
 			fmt::print(randLog,
 			           "SFR1 {0} {1} {2} {3} {4}\n",
 			           self->dbgId.shortString(),
@@ -758,6 +758,7 @@ private:
 			           opId.shortString(),
 			           length,
 			           offset);
+		}
 
 		co_await waitUntilDiskReady(self->diskParameters, length);
 
@@ -864,12 +865,13 @@ private:
 			throw io_error();
 		}
 
-		if (randLog)
+		if (randLog) {
 			fprintf(randLog,
 			        "SFT2 %s %s %s\n",
 			        self->dbgId.shortString().c_str(),
 			        self->filename.c_str(),
 			        opId.shortString().c_str());
+		}
 
 		INJECT_FAULT(io_timeout, "SimpleFile::truncate"); // SimpleFile::truncate inject io_timeout
 		INJECT_FAULT(io_error, "SimpleFile::truncate"); // SimpleFile::truncate inject io_error
@@ -880,12 +882,13 @@ private:
 	// Simulated sync does not actually do anything besides wait a random amount of time
 	static Future<Void> sync_impl(SimpleFile* self) {
 		UID opId = deterministicRandom()->randomUniqueID();
-		if (randLog)
+		if (randLog) {
 			fprintf(randLog,
 			        "SFC1 %s %s %s\n",
 			        self->dbgId.shortString().c_str(),
 			        self->filename.c_str(),
 			        opId.shortString().c_str());
+		}
 
 		if (self->delayOnWrite)
 			co_await waitUntilDiskReady(self->diskParameters, 0, true);
@@ -923,12 +926,13 @@ private:
 			}
 		}
 
-		if (randLog)
+		if (randLog) {
 			fprintf(randLog,
 			        "SFC2 %s %s %s\n",
 			        self->dbgId.shortString().c_str(),
 			        self->filename.c_str(),
 			        opId.shortString().c_str());
+		}
 
 		INJECT_FAULT(io_timeout, "SimpleFile::sync"); // SimpleFile::sync inject io_timeout
 		INJECT_FAULT(io_error, "SimpleFile::sync"); // SimpleFile::sync inject io_errot
@@ -938,12 +942,13 @@ private:
 
 	static Future<int64_t> size_impl(SimpleFile const* self) {
 		UID opId = deterministicRandom()->randomUniqueID();
-		if (randLog)
+		if (randLog) {
 			fprintf(randLog,
 			        "SFS1 %s %s %s\n",
 			        self->dbgId.shortString().c_str(),
 			        self->filename.c_str(),
 			        opId.shortString().c_str());
+		}
 
 		co_await waitUntilDiskReady(self->diskParameters, 0);
 
@@ -1310,12 +1315,13 @@ public:
 		total = diskSpace.totalSpace;
 		free = std::max<int64_t>(0, diskSpace.baseFreeSpace - totalFileSize);
 
-		if (free == 0)
+		if (free == 0) {
 			TraceEvent(SevWarnAlways, "Sim2NoFreeSpace")
 			    .detail("TotalSpace", diskSpace.totalSpace)
 			    .detail("BaseFreeSpace", diskSpace.baseFreeSpace)
 			    .detail("TotalFileSize", totalFileSize)
 			    .detail("NumFiles", numFiles);
+		}
 	}
 	bool isAddressOnThisHost(NetworkAddress const& addr) const override {
 		return addr.ip == getCurrentProcess()->address.ip;
@@ -2318,12 +2324,13 @@ public:
 				killProcess(t.machine, KillType::KillInstantly);
 			}
 
-			if (randLog)
+			if (randLog) {
 				fmt::print(randLog,
 				           "T {0} {1} {2}\n",
 				           this->time,
 				           int(deterministicRandom()->peek() % 10000),
 				           t.machine ? t.machine->name : "none");
+			}
 		}
 	}
 
@@ -2722,8 +2729,9 @@ Future<Void> waitUntilDiskReady(Reference<DiskParameters> diskParameters, int64_
 	double randomLatency;
 	if (sync) {
 		randomLatency = .005 + deterministicRandom()->random01() * (buggify() ? 1.0 : .010);
-	} else
+	} else {
 		randomLatency = 10 * deterministicRandom()->random01() / diskParameters->iops;
+	}
 
 	return delayUntil(diskParameters->nextOperation + randomLatency);
 }
@@ -2847,8 +2855,9 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 			f = map(f,
 			        [=](Reference<IAsyncFile> r) -> Reference<IAsyncFile> { return makeReference<AsyncFileChaos>(r); });
 		return f;
-	} else
+	} else {
 		return AsyncFileCached::open(filename, flags, mode);
+	}
 }
 
 // Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power

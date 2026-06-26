@@ -106,11 +106,12 @@ static Future<BackupContainerFileSystem::FilesAndSizesT> listFiles_impl(std::str
 
 	// Remove .lnk files from results, they are a side effect of a backup that was *read* during simulation.  See
 	// openFile() above for more info on why they are created.
-	if (g_network->isSimulated())
+	if (g_network->isSimulated()) {
 		files.erase(std::remove_if(files.begin(),
 		                           files.end(),
 		                           [](std::string const& f) { return StringRef(f).endsWith(".lnk"_sr); }),
 		            files.end());
+	}
 
 	for (const auto& f : files) {
 		// Hide .part or .temp files.

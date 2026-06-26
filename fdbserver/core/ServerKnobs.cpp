@@ -817,6 +817,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( TAG_THROTTLE_MAX_EMPTY_QUEUE_BUDGET,                1000.0 );
 	init( START_TRANSACTION_MAX_QUEUE_SIZE,                      1e6 ); if ( randomize && buggify() ) START_TRANSACTION_MAX_QUEUE_SIZE = 1000;
 	init( KEY_LOCATION_MAX_QUEUE_SIZE,                           1e6 );
+	init( GRV_PROXY_PROGRESS_CHECK_INTERVAL,                     0.5 );
+	init( GRV_PROXY_MAX_MISSED_PROGRESS_CHECKS,                   10 );
 
 	init( COMMIT_PROXY_LIVENESS_TIMEOUT,                        20.0 );
 	init( COMMIT_PROXY_MAX_LIVENESS_TIMEOUT,                   600.0 ); if ( randomize && buggify() ) COMMIT_PROXY_MAX_LIVENESS_TIMEOUT = 20.0;
