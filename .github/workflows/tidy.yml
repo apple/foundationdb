@@ -32,10 +32,14 @@ jobs:
             cmake -S . -B build_output -G Ninja \
               -D BUILD_AWS_BACKUP=ON -D CMAKE_EXPORT_COMPILE_COMMANDS=ON
 
-          ninja -v -C build_output     \
-            processed_compile_commands \
-            fdboptions                 \
-            ProtocolVersion            \
+          ninja -v -C build_output      \
+            processed_compile_commands  \
+            fdboptions                  \
+            flow_actors                 \
+            fdbrpc_actors               \
+            fdbclient_actors            \
+            fdbserver_actors            \
+            ProtocolVersion             \
             generated/fdbctl/control_service/control_service.grpc.pb.h
 
       - name: clang-tidy
@@ -48,7 +52,7 @@ jobs:
           while read FILE; do
             if grep -E '\.(c|cpp|h|hpp)$' <<<"$FILE"; then
               echo "Checking $FILE ..."
-              clang-tidy "$FILE"
+              clang-tidy -p build_output "$FILE"
               echo
             fi
           done <<<"$CHANGED"
