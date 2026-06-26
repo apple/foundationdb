@@ -25,10 +25,7 @@ jobs:
 
       - name: Configure build
         run: |
-          # debug
-          id
-          ls -la
-          # work-around checkout by different user
+          # git somehow worried that this repo was checked-out by a different user
           git config --global --add safe.directory /__w/foundationdb/foundationdb
 
           CC=clang CXX=clang++ USE_LD=LLD USE_LIBCXX=1 \
@@ -43,13 +40,14 @@ jobs:
 
       - name: clang-tidy
         # clang-tidy is roughly as slow as compiling per-file, so check only touched files
+        shell: bash
         run: |
-          SOURCES=$(git diff --name-only ${{github.event.pull_request.base.ref}}... \
-                    | grep -E '\.(c|cpp|h|hpp)$' || true)
-          printf "C++ sources changed:\n%s\n" "$SOURCES"
+          CHANGED=$(git diff --name-only origin/${{github.event.pull_request.base.ref}}...)
+          printf "Files changed:\n%s\n" "$CHANGED"
 
           while read FILE; do
-            if [ -n "$FILE" ]; then
+            if grep -E '\.(c|cpp|h|hpp)$' <<<"$FILE"; then
+              echo "Checking $FILE ..."
               clang-tidy "$FILE"
             fi
-          done <<<"$SOURCES"
+          done <<<"$CHANGED"
