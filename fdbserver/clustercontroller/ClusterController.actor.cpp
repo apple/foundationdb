@@ -93,6 +93,7 @@ ClusterControllerData::ClusterControllerData(ClusterControllerFullInterface cons
     remoteDCMonitorStarted(false), remoteTransactionSystemDegraded(false), recruitDistributor(false),
     recruitRatekeeper(false), recruitConsistencyScan(false),
     clusterControllerMetrics("ClusterController", id.toString()),
+    cdcProxyAssignmentScans("CDCProxyAssignmentScans", clusterControllerMetrics),
     openDatabaseRequests("OpenDatabaseRequests", clusterControllerMetrics),
     registerWorkerRequests("RegisterWorkerRequests", clusterControllerMetrics),
     getWorkersRequests("GetWorkersRequests", clusterControllerMetrics),
@@ -2148,7 +2149,8 @@ Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 
 constexpr int CDC_PROXY_ASSIGNMENT_SCAN_LIMIT = 10000;
 
-Future<Void> monitorCDCProxyAssignments(ClusterControllerData::DBInfo* db) {
+Future<Void> monitorCDCProxyAssignments(ClusterControllerData* self) {
+	ClusterControllerData::DBInfo* db = &self->db;
 	while (true) {
 		ReadYourWritesTransaction tr(db->db);
 		while (true) {
@@ -2163,6 +2165,7 @@ Future<Void> monitorCDCProxyAssignments(ClusterControllerData::DBInfo* db) {
 				// force a retry or wake the committed watch.
 				Future<Void> endpointChangeFuture = db->clientInfo->onChange();
 				Future<Void> assignmentChangeFuture = tr.watch(cdcProxyAssignmentChangeKey);
+				++self->cdcProxyAssignmentScans;
 				std::map<CDCStreamId, UID> streamToCDCProxyId;
 				const std::vector<CDCProxyInterface> availableProxies = db->clientInfo->get().cdcProxies;
 				std::unordered_map<UID, UID> replacementByFailedProxy;
@@ -3246,7 +3249,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(monitorStorageMetadata(&self));
 	self.addActor.send(monitorGlobalConfig(&self.db));
 	// These actors also drain durable CDC state when new stream registration is disabled.
-	self.addActor.send(monitorCDCProxyAssignments(&self.db));
+	self.addActor.send(monitorCDCProxyAssignments(&self));
 	self.addActor.send(monitorAndRecruitCDCProxies(&self));
 	self.addActor.send(updatedChangingDatacenters(&self));
 	self.addActor.send(updatedChangedDatacenters(&self));

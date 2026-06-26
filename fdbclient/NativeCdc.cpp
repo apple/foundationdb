@@ -32,13 +32,17 @@
 #include "NativeCdcInternal.h"
 #include "flow/CodeProbe.h"
 #include "flow/Error.h"
+#include "flow/Trace.h"
 #include "flow/UnitTest.h"
 
 namespace {
 
+using CDCTagId = uint16_t;
+
+constexpr uint32_t maxNativeCdcTagCount = static_cast<uint32_t>(std::numeric_limits<CDCTagId>::max()) + 1;
+
 bool validNativeCdcTagCount(int tagCount) {
-	return tagCount > 0 &&
-	       static_cast<uint64_t>(tagCount) <= static_cast<uint64_t>(std::numeric_limits<uint16_t>::max()) + 1;
+	return tagCount > 0 && static_cast<uint32_t>(tagCount) <= maxNativeCdcTagCount;
 }
 
 void validateNativeCdcEnabled(bool enabled) {
@@ -51,7 +55,7 @@ void validateNativeCdcEnabled(bool enabled) {
 class NativeCdcIdentifierAllocator {
 	bool sawStream = false;
 	CDCStreamId maxStreamId = 0;
-	std::unordered_map<uint16_t, uint32_t> tagStreamCounts;
+	std::unordered_map<CDCTagId, uint32_t> tagStreamCounts;
 
 public:
 	void observeStreamId(CDCStreamId streamId) {
@@ -74,15 +78,15 @@ public:
 			throw invalid_option_value();
 		}
 		uint32_t leastStreams = std::numeric_limits<uint32_t>::max();
-		uint16_t selectedTagId = 0;
+		CDCTagId selectedTagId = 0;
 		// TODO: Use data-distributor-observed per-tag write throughput to rebalance CDC tags, including
 		// migrating active streams with versioned tag-history assignments.
 		for (uint32_t tagId = 0; tagId < static_cast<uint32_t>(tagCount); ++tagId) {
-			auto count = tagStreamCounts.find(static_cast<uint16_t>(tagId));
+			auto count = tagStreamCounts.find(static_cast<CDCTagId>(tagId));
 			const uint32_t streamCount = count == tagStreamCounts.end() ? 0 : count->second;
 			if (streamCount < leastStreams) {
 				leastStreams = streamCount;
-				selectedTagId = static_cast<uint16_t>(tagId);
+				selectedTagId = static_cast<CDCTagId>(tagId);
 			}
 		}
 		return { streamId, Tag(tagLocalityCDC, selectedTagId) };
@@ -444,6 +448,11 @@ Future<bool> removeNativeCdcStream(Database cx, Key name, CDCStreamId streamId, 
 			Optional<Value> currentId = co_await tr.get(nameKey);
 			if (!nativeCdcNameMatchesStream(currentId, streamId)) {
 				CODE_PROBE(currentId.present(), "Native CDC preserves a replacement stream during removal retry");
+				if (currentId.present()) {
+					TraceEvent("NativeCdcRemovalPreservesReplacement")
+					    .detail("RemovedStreamId", streamId)
+					    .detail("ReplacementStreamId", decodeCDCStreamNameValue(currentId.get()));
+				}
 				co_return false;
 			}
 

@@ -268,6 +268,7 @@ Optional<Value> decodeTagLocalityListKey(KeyRef const&);
 int8_t decodeTagLocalityListValue(ValueRef const&);
 
 // Native CDC stream routing and lifecycle metadata persisted in the transaction state store.
+// See design/cdc.md for the durable metadata layout and lifecycle semantics.
 // "\xff/cdc/name/[[streamName]]" := "[[CDCStreamId]]"
 extern const KeyRangeRef cdcStreamNameKeys;
 Key cdcStreamNameKeyFor(KeyRef const& streamName);

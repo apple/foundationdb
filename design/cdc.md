@@ -93,6 +93,8 @@ The client-facing declarations are in `fdbclient/NativeCdc.h`; durable
 metadata operations used by server roles are in
 the private `fdbclient/NativeCdcInternal.h`; cursor and wire request types are in
 `fdbclient/CDCProxyInterface.h`.
+`CDCStreamId` is a `uint64_t` typedef. CDC tag IDs are 16-bit, so one
+configured tag pool can contain at most 65,536 distinct tags.
 
 ```cpp
 Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, KeyRange keys);
@@ -106,6 +108,11 @@ Reference<NativeCdcConsumer> resumeNativeCdcConsumer(Database cx, CDCCursor posi
 `registerNativeCdcStreamClient()` accepts exactly one `KeyRange`. The range is
 interpreted with FoundationDB's usual half-open `[begin, end)` semantics.
 Multi-range registration is not part of the initial API.
+Registration and removal are low-rate control-plane operations intended for
+stable stream lifecycles, not per-request stream churn. The initial
+implementation does not define a supported registrations-per-second target:
+each change can scan global CDC metadata and wake a full durable ownership
+rescan. Applications should register long-lived streams and reuse them.
 
 A stream registration contains:
 
@@ -371,8 +378,8 @@ Registration runs as a durable metadata transaction:
 3. For a new name, it validates the feature knob.
 4. It allocates a new monotonically increasing `CDCStreamId`.
 5. It selects a CDC tag using current active stream counts. The allocator uses
-   the least populated tag among `NATIVE_CDC_TAG_COUNT` tags, choosing the
-   lowest tag ID on a tie.
+   the least populated tag among `NATIVE_CDC_TAG_COUNT` tags (256 by default),
+   choosing the lowest tag ID on a tie.
 6. It records the stream name, range, initial tag history entry, and
    versionstamped initial minimum version.
 7. It records an available CDC proxy owner and signals assignment monitoring.
@@ -480,14 +487,15 @@ mutations to the registered range and stores versioned mutation batches in a
 per-stream in-memory buffer.
 
 All raw peek windows and stream buffers owned by one CDC proxy share a
-`CDC_PROXY_BUFFER_BYTES` budget. A replicated log read may retain one separately
-capped reply arena from every candidate TLog it consults. CDC history cursors
-therefore disable cross-generation constructor prefetch, report the maximum
-number of reply arenas one active generation can retain, and reserve that count
-times `MAXIMUM_PEEK_BYTES` before issuing a peek. The proxy marks these delivery
-cursors with the same per-reply limit; recovery cursors remain uncapped so that
-transaction-system replay is not constrained by a delivery memory knob. The
-pass also reserves a bounded materialization window. It retains the aggregate
+`CDC_PROXY_BUFFER_BYTES` budget (1 GB by default). A replicated log read may
+retain one separately capped reply arena from every candidate TLog it consults.
+CDC history cursors therefore disable cross-generation constructor prefetch,
+report the maximum number of reply arenas one active generation can retain,
+and reserve that count times `MAXIMUM_PEEK_BYTES` before issuing a peek. The
+proxy marks these delivery cursors with the same per-reply limit; recovery
+cursors remain uncapped so that transaction-system replay is not constrained
+by a delivery memory knob. The pass also reserves a bounded materialization
+window. It retains the aggregate
 raw reservation while filtering and copying, then releases it and transfers
 only accepted filtered bytes to the stream buffers. Acknowledgement or stream
 removal releases those retained permits. The usable retained-batch capacity is
@@ -560,11 +568,12 @@ set, because shared tags and replacement proxies must preserve the same global
 retention decision.
 
 Acknowledgement notifications are level-triggered and coalesced for at least
-`CDC_PROXY_POP_MIN_INTERVAL`. A notification received during a durable-state
-scan schedules one later pass but does not cancel the safe scan already in
-flight. Only replacement of the log-system generation cancels an outstanding
-pop attempt. This both guarantees progress under continuous acknowledgement
-traffic and bounds the frequency of the global metadata scan.
+`CDC_PROXY_POP_MIN_INTERVAL` (100 ms by default). A notification received
+during a durable-state scan schedules one later pass but does not cancel the
+safe scan already in flight. Only replacement of the log-system generation
+cancels an outstanding pop attempt. This both guarantees progress under
+continuous acknowledgement traffic and bounds the frequency of the global
+metadata scan.
 
 ### Removing a stream
 
@@ -678,13 +687,18 @@ drain durable state cannot admit a new stream because its local configuration
 differs.
 
 `NATIVE_CDC_TAG_COUNT` controls the bounded tag pool used for new stream
-allocation and must be between 1 and 65,536 inclusive. Invalid values reject
-new registration and are not used to size recovery routing tables; tags already
-present in durable metadata remain recoverable. Normal operation defaults to a
-larger tag pool; simulation may reduce it so shared-tag behavior is exercised
-frequently. The cluster controller publishes the effective count in
-`ClientDBInfo`, and CDC proxies allocate from that published value rather than
-their process-local copy of the knob.
+allocation and defaults to 256. It must be between 1 and 65,536 inclusive.
+The upper bound comes from the 16-bit CDC tag ID representation; it is an
+encoding limit, not an operational target. The default leaves a modest pool
+for spreading tags across anticipated CDC proxies and tolerating uneven
+per-tag write traffic without creating tens of thousands of TLog streams.
+Deployments should size the pool using the expected CDC proxy count, traffic
+skew, and acceptable shared-tag filtering overhead. Invalid values reject new
+registration and are not used to size recovery routing tables; tags already
+present in durable metadata remain recoverable. Simulation may reduce the
+count so shared-tag behavior is exercised frequently. The cluster controller
+publishes the effective count in `ClientDBInfo`, and CDC proxies allocate from
+that published value rather than their process-local copy of the knob.
 
 Native CDC must be enabled only after every process in the cluster supports the
 `withNativeCdc` protocol version. Once streams or retired-pop records exist, a
@@ -824,3 +838,25 @@ to investigate. Because the initial implementation has no automatic stream
 expiration, operators must repair the consumer, explicitly discard its
 processed history, or remove the stream before retained CDC history exhausts
 the capacity allocated to its tags.
+
+The cluster controller also counts `CDCProxyAssignmentScans`, which measures
+how often the global durable ownership scan actually runs. This makes the
+low-rate control-plane assumption for registration, removal, and assignment
+changes observable.
+
+Production operation needs tooling beyond the initial native API:
+
+| Operator need | Current mechanism | Needed production tooling |
+| --- | --- | --- |
+| Find a stalled consumer | `CDCProxyMetrics` reports the oldest required stream ID, acknowledgement lag, safe-pop distance, and buffer pressure. | A stream-listing view that joins stream name, range, owner, lag, retained bytes, and attributable TLog retention. |
+| Stop retaining abandoned history | `removeNativeCdcStreamClient()` explicitly removes a named stream and relinquishes its unread history. | An authenticated force-removal command with an explicit data-loss confirmation and audit trail. |
+| Prevent new CDC load while draining existing work | Disabling `ENABLE_NATIVE_CDC` rejects new names while allowing existing streams to drain or be removed. | A status command that distinguishes admission state from active and retired CDC work. |
+| Recover a downstream system after discarding CDC history | The downstream system can rebuild from a full scan after the stream is removed and later registered again. | A runbook that coordinates stream removal, downstream rebuild, and safe re-registration. |
+
+If a downstream consumer is wedged while CDC-retained TLog history pushes the
+cluster toward unacceptable spilling, automatic expiration is still the wrong
+default because it silently violates the retention contract. The operator must
+choose explicitly between preserving history while repairing the consumer, or
+removing the stream, accepting the CDC gap, and rebuilding downstream state from
+a full database scan. Disabling admission alone does not release history held
+by existing streams.

@@ -3479,6 +3479,7 @@ public:
 
 	CounterCollection clusterControllerMetrics;
 
+	Counter cdcProxyAssignmentScans;
 	Counter openDatabaseRequests;
 	Counter registerWorkerRequests;
 	Counter getWorkersRequests;

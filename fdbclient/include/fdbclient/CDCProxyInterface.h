@@ -26,6 +26,7 @@
 #include "flow/FileIdentifier.h"
 #include "fdbrpc/fdbrpc.h"
 
+// Native CDC wire messages; see design/cdc.md for protocol and lifecycle semantics.
 struct CDCCursor {
 	constexpr static FileIdentifier file_identifier = 10949553;
 	CDCStreamId streamId = 0;
