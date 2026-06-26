@@ -44,10 +44,11 @@ jobs:
         run: |
           CHANGED=$(git diff --name-only origin/${{github.event.pull_request.base.ref}}...)
           printf "Files changed:\n%s\n" "$CHANGED"
-
+          echo
           while read FILE; do
             if grep -E '\.(c|cpp|h|hpp)$' <<<"$FILE"; then
               echo "Checking $FILE ..."
               clang-tidy "$FILE"
+              echo
             fi
           done <<<"$CHANGED"
