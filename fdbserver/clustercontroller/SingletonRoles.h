@@ -23,6 +23,7 @@
 #include "ClusterController.h"
 #include "fdbserver/core/RatekeeperInterface.h"
 #include "fdbserver/core/DataDistributorInterface.h"
+#include "fdbserver/core/ProcessClassRecruitment.h"
 
 // This is used to artificially amplify the used count for processes
 // occupied by non-singletons. This ultimately makes it less desirable
@@ -48,7 +49,7 @@ struct RatekeeperSingleton : Singleton<RatekeeperInterface> {
 	explicit RatekeeperSingleton(const Optional<RatekeeperInterface>& interface) : Singleton(interface) {}
 
 	Role getRole() const { return Role::RATEKEEPER; }
-	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::Ratekeeper; }
+	recruitment::ClusterRole getClusterRole() const { return recruitment::Ratekeeper; }
 
 	void setInterfaceToDbInfo(ClusterControllerData& cc) const {
 		if (interface.present()) {
@@ -73,7 +74,7 @@ struct DataDistributorSingleton : Singleton<DataDistributorInterface> {
 	explicit DataDistributorSingleton(const Optional<DataDistributorInterface>& interface) : Singleton(interface) {}
 
 	Role getRole() const { return Role::DATA_DISTRIBUTOR; }
-	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::DataDistributor; }
+	recruitment::ClusterRole getClusterRole() const { return recruitment::DataDistributor; }
 
 	void setInterfaceToDbInfo(ClusterControllerData& cc) const {
 		if (interface.present()) {
@@ -98,7 +99,7 @@ struct ConsistencyScanSingleton : Singleton<ConsistencyScanInterface> {
 	explicit ConsistencyScanSingleton(const Optional<ConsistencyScanInterface>& interface) : Singleton(interface) {}
 
 	Role getRole() const { return Role::CONSISTENCYSCAN; }
-	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::ConsistencyScan; }
+	recruitment::ClusterRole getClusterRole() const { return recruitment::ConsistencyScan; }
 
 	void setInterfaceToDbInfo(ClusterControllerData& cc) const {
 		if (interface.present()) {

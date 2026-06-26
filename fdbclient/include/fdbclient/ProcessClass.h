@@ -83,36 +83,6 @@ struct ProcessClass {
 	static_assert(ProcessClass::SimHTTPServerClass == 23);
 	static_assert(ProcessClass::InvalidClass == -1);
 
-	enum Fitness {
-		BestFit,
-		GoodFit,
-		UnsetFit,
-		OkayFit,
-		WorstFit,
-		ExcludeFit,
-		NeverAssign
-	}; // cannot be larger than 7 because of leader election mask
-	enum ClusterRole {
-		Storage,
-		TLog,
-		CommitProxy,
-		GrvProxy,
-		Master,
-		Resolver,
-		LogRouter,
-		ClusterController,
-		DataDistributor,
-		Ratekeeper,
-		ConsistencyScan,
-		BlobManager,
-		BlobWorker,
-		BlobMigrator,
-		RemovedRolePlaceholder1,
-		Backup,
-		EncryptKeyProxy,
-		Worker, // used for actor lineage tracking
-		NoRole
-	};
 	enum ClassSource { CommandLineSource, AutoSource, DBSource, InvalidSource = -1 };
 	int16_t _class;
 	int16_t _source;
@@ -143,7 +113,8 @@ public:
 
 	std::string sourceString() const;
 
-	Fitness machineClassFitness(ClusterRole role) const;
+	// Client-side configuration validation uses this to count workers that can host storage.
+	bool canBecomeStorageServer() const;
 
 	// To change this serialization, ProtocolVersion::ProcessClassValue must be updated, and downgrades need to be
 	// considered

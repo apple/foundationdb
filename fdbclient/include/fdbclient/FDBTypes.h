@@ -1259,7 +1259,7 @@ struct ClusterControllerPriorityInfo {
 	}
 	bool operator!=(ClusterControllerPriorityInfo const& r) const { return !(*this == r); }
 	ClusterControllerPriorityInfo()
-	  : ClusterControllerPriorityInfo(/*ProcessClass::UnsetFit*/ 2,
+	  : ClusterControllerPriorityInfo(/* process class fitness: UnsetFit */ 2,
 	                                  false,
 	                                  ClusterControllerPriorityInfo::FitnessUnknown) {}
 	ClusterControllerPriorityInfo(uint8_t processClassFitness, bool isExcluded, uint8_t dcFitness)

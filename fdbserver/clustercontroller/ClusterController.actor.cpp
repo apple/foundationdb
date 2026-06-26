@@ -33,6 +33,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"
 #include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/ProcessClassRecruitment.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
@@ -300,7 +301,7 @@ Future<Void> recruitFailedLogRouters(ClusterControllerData* cluster,
 	cluster->updateKnownIds(&id_used);
 
 	std::vector<WorkerDetails> workers =
-	    cluster->getWorkersForRoleInDatacenter(targetDcId, ProcessClass::LogRouter, tagIds.size(), db->config, id_used);
+	    cluster->getWorkersForRoleInDatacenter(targetDcId, recruitment::LogRouter, tagIds.size(), db->config, id_used);
 
 	if (workers.size() < tagIds.size()) {
 		TraceEvent(SevWarn, "NotEnoughWorkersForLogRouters", cluster->id)
@@ -811,12 +812,12 @@ void checkOutstandingStorageRequests(ClusterControllerData* self) {
 
 // Finds and returns a new process for role
 WorkerDetails findNewProcessForSingleton(ClusterControllerData* self,
-                                         const ProcessClass::ClusterRole role,
+                                         const recruitment::ClusterRole role,
                                          std::map<Optional<Standalone<StringRef>>, int>& id_used) {
 	// find new process in cluster for role
 	WorkerDetails newWorker =
 	    self->getWorkerForRoleInDatacenter(
-	            self->clusterControllerDcId, role, ProcessClass::NeverAssign, self->db.config, id_used, {}, true)
+	            self->clusterControllerDcId, role, recruitment::NeverAssign, self->db.config, id_used, {}, true)
 	        .worker;
 
 	// check if master's process is actually better suited for role
@@ -831,15 +832,15 @@ WorkerDetails findNewProcessForSingleton(ClusterControllerData* self,
 }
 
 // Return best possible fitness for singleton. Note that lower fitness is better.
-ProcessClass::Fitness findBestFitnessForSingleton(const ClusterControllerData* self,
-                                                  const WorkerDetails& worker,
-                                                  const ProcessClass::ClusterRole& role) {
-	auto bestFitness = worker.processClass.machineClassFitness(role);
+recruitment::Fitness findBestFitnessForSingleton(const ClusterControllerData* self,
+                                                 const WorkerDetails& worker,
+                                                 const recruitment::ClusterRole& role) {
+	auto bestFitness = recruitment::machineClassFitness(worker.processClass, role);
 	// If the process has been marked as excluded, we take the max with ExcludeFit to ensure its fit
 	// is at least as bad as ExcludeFit. This assists with successfully offboarding such processes
 	// and removing them from the cluster.
 	if (self->db.config.isExcludedServer(worker.interf.addresses(), worker.interf.locality)) {
-		bestFitness = std::max(bestFitness, ProcessClass::ExcludeFit);
+		bestFitness = std::max(bestFitness, recruitment::ExcludeFit);
 	}
 	return bestFitness;
 }
@@ -851,7 +852,7 @@ template <class SingletonClass>
 bool isHealthySingleton(ClusterControllerData* self,
                         const WorkerDetails& newWorker,
                         const SingletonClass& singleton,
-                        const ProcessClass::Fitness& bestFitness,
+                        const recruitment::Fitness& bestFitness,
                         const Optional<UID> recruitingID) {
 	// A singleton is stable if it exists in cluster, has not been killed off of proc and is not being recruited
 	bool isStableSingleton = singleton.isPresent() &&
@@ -863,9 +864,9 @@ bool isHealthySingleton(ClusterControllerData* self,
 	}
 
 	auto& currWorker = self->id_worker[singleton.getInterface().locality.processId()];
-	auto currFitness = currWorker.details.processClass.machineClassFitness(singleton.getClusterRole());
+	auto currFitness = recruitment::machineClassFitness(currWorker.details.processClass, singleton.getClusterRole());
 	if (currWorker.priorityInfo.isExcluded) {
-		currFitness = ProcessClass::ExcludeFit;
+		currFitness = recruitment::ExcludeFit;
 	}
 	// If any of the following conditions are met, we will switch the singleton's process:
 	// - if the current proc is used by some non-master, non-singleton role
@@ -934,14 +935,14 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	// Try to find a new process for each singleton.
-	WorkerDetails newRKWorker = findNewProcessForSingleton(self, ProcessClass::Ratekeeper, id_used);
-	WorkerDetails newDDWorker = findNewProcessForSingleton(self, ProcessClass::DataDistributor, id_used);
-	WorkerDetails newCSWorker = findNewProcessForSingleton(self, ProcessClass::ConsistencyScan, id_used);
+	WorkerDetails newRKWorker = findNewProcessForSingleton(self, recruitment::Ratekeeper, id_used);
+	WorkerDetails newDDWorker = findNewProcessForSingleton(self, recruitment::DataDistributor, id_used);
+	WorkerDetails newCSWorker = findNewProcessForSingleton(self, recruitment::ConsistencyScan, id_used);
 
 	// Find best possible fitnesses for each singleton.
-	auto bestFitnessForRK = findBestFitnessForSingleton(self, newRKWorker, ProcessClass::Ratekeeper);
-	auto bestFitnessForDD = findBestFitnessForSingleton(self, newDDWorker, ProcessClass::DataDistributor);
-	auto bestFitnessForCS = findBestFitnessForSingleton(self, newCSWorker, ProcessClass::ConsistencyScan);
+	auto bestFitnessForRK = findBestFitnessForSingleton(self, newRKWorker, recruitment::Ratekeeper);
+	auto bestFitnessForDD = findBestFitnessForSingleton(self, newDDWorker, recruitment::DataDistributor);
+	auto bestFitnessForCS = findBestFitnessForSingleton(self, newCSWorker, recruitment::ConsistencyScan);
 
 	auto& db = self->db.serverInfo->get();
 	auto rkSingleton = RatekeeperSingleton(db.ratekeeper);
@@ -1345,7 +1346,8 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 	ProcessClass newProcessClass = req.processClass;
 	auto info = self->id_worker.find(w.locality.processId());
 	ClusterControllerPriorityInfo newPriorityInfo = req.priorityInfo;
-	newPriorityInfo.processClassFitness = newProcessClass.machineClassFitness(ProcessClass::ClusterController);
+	newPriorityInfo.processClassFitness =
+	    recruitment::machineClassFitness(newProcessClass, recruitment::ClusterController);
 
 	for (auto it : req.incompatiblePeers) {
 		self->db.incompatibleConnections[it] = now() + SERVER_KNOBS->INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
@@ -1409,7 +1411,8 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 			} else {
 				newProcessClass = req.initialClass;
 			}
-			newPriorityInfo.processClassFitness = newProcessClass.machineClassFitness(ProcessClass::ClusterController);
+			newPriorityInfo.processClassFitness =
+			    recruitment::machineClassFitness(newProcessClass, recruitment::ClusterController);
 		}
 
 		if (self->gotFullyRecoveredConfig) {
@@ -1765,7 +1768,7 @@ Future<Void> monitorProcessClasses(ClusterControllerData* self) {
 						if (newProcessClass != w.second.details.processClass) {
 							w.second.details.processClass = newProcessClass;
 							w.second.priorityInfo.processClassFitness =
-							    newProcessClass.machineClassFitness(ProcessClass::ClusterController);
+							    recruitment::machineClassFitness(newProcessClass, recruitment::ClusterController);
 							if (!w.second.reply.isSet()) {
 								w.second.reply.send(
 								    RegisterWorkerReply(w.second.details.processClass, w.second.priorityInfo));
@@ -1999,13 +2002,13 @@ Future<Void> updatedChangingDatacenters(ClusterControllerData* self) {
 					worker.reply.send(RegisterWorkerReply(worker.details.processClass, worker.priorityInfo));
 				}
 			} else {
-				int currentFit = ProcessClass::BestFit;
-				while (currentFit <= ProcessClass::NeverAssign) {
+				int currentFit = recruitment::BestFit;
+				while (currentFit <= recruitment::NeverAssign) {
 					bool updated = false;
 					for (auto& it : self->id_worker) {
 						if ((!it.second.priorityInfo.isExcluded &&
 						     it.second.priorityInfo.processClassFitness == currentFit) ||
-						    currentFit == ProcessClass::NeverAssign) {
+						    currentFit == recruitment::NeverAssign) {
 							uint8_t fitness = ClusterControllerPriorityInfo::calculateDCFitness(
 							    it.second.details.interf.locality.dcId(), self->changingDcIds.get().second.get());
 							if (it.first != self->clusterControllerProcessId &&
@@ -2019,7 +2022,7 @@ Future<Void> updatedChangingDatacenters(ClusterControllerData* self) {
 							}
 						}
 					}
-					if (updated && currentFit < ProcessClass::NeverAssign) {
+					if (updated && currentFit < recruitment::NeverAssign) {
 						co_await delay(SERVER_KNOBS->CC_CLASS_DELAY);
 					}
 					currentFit++;
@@ -2059,13 +2062,13 @@ ACTOR Future<Void> updatedChangedDatacenters(ClusterControllerData* self) {
 							}
 						}
 					} else {
-						state int currentFit = ProcessClass::BestFit;
-						while (currentFit <= ProcessClass::NeverAssign) {
+						state int currentFit = recruitment::BestFit;
+						while (currentFit <= recruitment::NeverAssign) {
 							bool updated = false;
 							for (auto& it : self->id_worker) {
 								if ((!it.second.priorityInfo.isExcluded &&
 								     it.second.priorityInfo.processClassFitness == currentFit) ||
-								    currentFit == ProcessClass::NeverAssign) {
+								    currentFit == recruitment::NeverAssign) {
 									uint8_t fitness = ClusterControllerPriorityInfo::calculateDCFitness(
 									    it.second.details.interf.locality.dcId(),
 									    self->changedDcIds.get().second.get());
@@ -2080,7 +2083,7 @@ ACTOR Future<Void> updatedChangedDatacenters(ClusterControllerData* self) {
 									}
 								}
 							}
-							if (updated && currentFit < ProcessClass::NeverAssign) {
+							if (updated && currentFit < recruitment::NeverAssign) {
 								wait(delay(SERVER_KNOBS->CC_CLASS_DELAY));
 							}
 							currentFit++;
@@ -2404,13 +2407,13 @@ Future<Void> startDataDistributor(ClusterControllerData* self, double waitTime) 
 
 			std::map<Optional<Standalone<StringRef>>, int> idUsed = self->getUsedIds();
 			WorkerFitnessInfo ddWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
-			                                                                ProcessClass::DataDistributor,
-			                                                                ProcessClass::NeverAssign,
+			                                                                recruitment::DataDistributor,
+			                                                                recruitment::NeverAssign,
 			                                                                self->db.config,
 			                                                                idUsed);
 			InitializeDataDistributorRequest req(deterministicRandom()->randomUniqueID());
 			WorkerDetails worker = ddWorker.worker;
-			if (self->onMasterIsBetter(worker, ProcessClass::DataDistributor)) {
+			if (self->onMasterIsBetter(worker, recruitment::DataDistributor)) {
 				worker = self->id_worker[self->masterProcessId.get()].details;
 			}
 
@@ -2505,13 +2508,13 @@ Future<Void> startRatekeeper(ClusterControllerData* self, double waitTime) {
 
 			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
 			WorkerFitnessInfo rkWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
-			                                                                ProcessClass::Ratekeeper,
-			                                                                ProcessClass::NeverAssign,
+			                                                                recruitment::Ratekeeper,
+			                                                                recruitment::NeverAssign,
 			                                                                self->db.config,
 			                                                                id_used);
 			InitializeRatekeeperRequest req(deterministicRandom()->randomUniqueID());
 			WorkerDetails worker = rkWorker.worker;
-			if (self->onMasterIsBetter(worker, ProcessClass::Ratekeeper)) {
+			if (self->onMasterIsBetter(worker, recruitment::Ratekeeper)) {
 				worker = self->id_worker[self->masterProcessId.get()].details;
 			}
 
@@ -2594,14 +2597,14 @@ Future<Void> startConsistencyScan(ClusterControllerData* self) {
 
 			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
 			WorkerFitnessInfo csWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
-			                                                                ProcessClass::ConsistencyScan,
-			                                                                ProcessClass::NeverAssign,
+			                                                                recruitment::ConsistencyScan,
+			                                                                recruitment::NeverAssign,
 			                                                                self->db.config,
 			                                                                id_used);
 
 			InitializeConsistencyScanRequest req(deterministicRandom()->randomUniqueID());
 			WorkerDetails worker = csWorker.worker;
-			if (self->onMasterIsBetter(worker, ProcessClass::ConsistencyScan)) {
+			if (self->onMasterIsBetter(worker, recruitment::ConsistencyScan)) {
 				worker = self->id_worker[self->masterProcessId.get()].details;
 			}
 
