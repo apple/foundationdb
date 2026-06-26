@@ -30,6 +30,7 @@
 #include "foundationdb/fdb_c.h"
 #include "foundationdb/fdb_c_internal.h"
 
+// innocent change
 int g_api_version = 0;
 
 /*

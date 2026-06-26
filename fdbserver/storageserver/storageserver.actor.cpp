@@ -120,6 +120,7 @@
 
 #define SHORT_CIRCUT_ACTUAL_STORAGE 0
 
+// innocent change
 namespace {
 enum ChangeServerKeysContext { CSK_UPDATE, CSK_RESTORE, CSK_ASSIGN_EMPTY, CSK_FALL_BACK };
 
