@@ -296,7 +296,7 @@ Future<Void> recruitFailedLogRouters(ClusterControllerData* cluster,
 	    db->recoveryData->remoteDcIds.size() ? db->recoveryData->remoteDcIds[0] : Optional<Key>();
 
 	// Use getWorkersForRoleInDatacenter to get workers for all log routers at once
-	std::map<Optional<Standalone<StringRef>>, int> id_used;
+	ClusterControllerData::WorkerUsages id_used;
 	cluster->updateKnownIds(&id_used);
 
 	std::vector<WorkerDetails> workers =
@@ -812,7 +812,7 @@ void checkOutstandingStorageRequests(ClusterControllerData* self) {
 // Finds and returns a new process for role
 WorkerDetails findNewProcessForSingleton(ClusterControllerData* self,
                                          const ProcessClass::ClusterRole role,
-                                         std::map<Optional<Standalone<StringRef>>, int>& id_used) {
+                                         ClusterControllerData::WorkerUsages& id_used) {
 	// find new process in cluster for role
 	WorkerDetails newWorker =
 	    self->getWorkerForRoleInDatacenter(
@@ -825,7 +825,7 @@ WorkerDetails findNewProcessForSingleton(ClusterControllerData* self,
 	}
 
 	// acknowledge that the pid is now potentially used by this role as well
-	id_used[newWorker.interf.locality.processId()]++;
+	id_used[newWorker.interf.locality.processId()].addRole(role);
 
 	return newWorker;
 }
@@ -923,14 +923,14 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	// note: this map doesn't consider pids used by existing singletons
-	std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
+	ClusterControllerData::WorkerUsages id_used = self->getUsedIds();
 
 	// We prefer spreading out other roles more than separating singletons on their own process
 	// so we artificially amplify the pid count for the processes used by non-singleton roles.
 	// In other words, we make the processes used for other roles less desirable to be used
 	// by singletons as well.
 	for (auto& it : id_used) {
-		it.second *= PID_USED_AMP_FOR_NON_SINGLETON;
+		it.second.multiplier *= PID_USED_AMP_FOR_NON_SINGLETON;
 	}
 
 	// Try to find a new process for each singleton.
@@ -2402,7 +2402,7 @@ Future<Void> startDataDistributor(ClusterControllerData* self, double waitTime) 
 				co_return;
 			}
 
-			std::map<Optional<Standalone<StringRef>>, int> idUsed = self->getUsedIds();
+			auto idUsed = self->getUsedIds();
 			WorkerFitnessInfo ddWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
 			                                                                ProcessClass::DataDistributor,
 			                                                                ProcessClass::NeverAssign,
@@ -2503,7 +2503,7 @@ Future<Void> startRatekeeper(ClusterControllerData* self, double waitTime) {
 				co_return;
 			}
 
-			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
+			ClusterControllerData::WorkerUsages id_used = self->getUsedIds();
 			WorkerFitnessInfo rkWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
 			                                                                ProcessClass::Ratekeeper,
 			                                                                ProcessClass::NeverAssign,
@@ -2592,7 +2592,7 @@ Future<Void> startConsistencyScan(ClusterControllerData* self) {
 				co_return;
 			}
 
-			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
+			auto id_used = self->getUsedIds();
 			WorkerFitnessInfo csWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
 			                                                                ProcessClass::ConsistencyScan,
 			                                                                ProcessClass::NeverAssign,
