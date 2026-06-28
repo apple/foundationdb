@@ -60,7 +60,6 @@ struct ProxyStats {
 		TIMEOUT,
 		FIRST_IN_BATCH,
 		TRANSACTION_SIZE_LIMIT,
-		TRIGGER,
 	};
 
 	CounterCollection cc;
@@ -70,7 +69,7 @@ struct ProxyStats {
 	Counter txnRejectedForQueuedTooLong;
 	Counter commitBatchIn, commitBatchOut;
 	Counter commitBatchFlushByteLimit, commitBatchFlushCountLimit, commitBatchFlushTimeout,
-	    commitBatchFlushFirstInBatch, commitBatchFlushTransactionSizeLimit, commitBatchFlushTrigger;
+	    commitBatchFlushFirstInBatch, commitBatchFlushTransactionSizeLimit;
 	Counter mutationBytes;
 	Counter mutations;
 	Counter conflictRanges;
@@ -148,9 +147,6 @@ struct ProxyStats {
 		case CommitBatchFlushReason::TRANSACTION_SIZE_LIMIT:
 			++commitBatchFlushTransactionSizeLimit;
 			break;
-		case CommitBatchFlushReason::TRIGGER:
-			++commitBatchFlushTrigger;
-			break;
 		}
 	}
 
@@ -169,8 +165,7 @@ struct ProxyStats {
 	    commitBatchFlushTimeout("CommitBatchFlushTimeout", cc),
 	    commitBatchFlushFirstInBatch("CommitBatchFlushFirstInBatch", cc),
 	    commitBatchFlushTransactionSizeLimit("CommitBatchFlushTransactionSizeLimit", cc),
-	    commitBatchFlushTrigger("CommitBatchFlushTrigger", cc), mutationBytes("MutationBytes", cc),
-	    mutations("Mutations", cc), conflictRanges("ConflictRanges", cc),
+	    mutationBytes("MutationBytes", cc), mutations("Mutations", cc), conflictRanges("ConflictRanges", cc),
 	    keyServerLocationIn("KeyServerLocationIn", cc), keyServerLocationOut("KeyServerLocationOut", cc),
 	    keyServerLocationErrors("KeyServerLocationErrors", cc),
 	    txnExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), rangeLockFastPath("RangeLockFastPath", cc),
