@@ -2993,7 +2993,9 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 			}
 
 			actors.push_back(self->pollMoveKeysLock());
-			actors.push_back(monitorBackupPartitionRequired(self->txnProcessor->context(), &shards, self->ddId));
+			if (!isMocked) {
+				actors.push_back(monitorBackupPartitionRequired(self->txnProcessor->context(), &shards, self->ddId));
+			}
 
 			self->context->tracker = makeReference<DataDistributionTracker>(
 			    DataDistributionTrackerInitParams{ .db = self->txnProcessor,
@@ -3139,17 +3141,21 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 				self->bulkLoadTaskCollection->removeBulkLoadJobRange();
 				// Monitor for bulkLoadMode changes and spawn actors dynamically.
 				// This is critical for restore operations which set bulkLoadMode=1 after DD starts.
-				actors.push_back(monitorBulkLoadModeAndSpawnActors(self, self->initialized.getFuture()));
+				if (!isMocked) {
+					actors.push_back(monitorBulkLoadModeAndSpawnActors(self, self->initialized.getFuture()));
+				}
 			}
 
-			// Always spawn bulkDumpCore - it will dynamically check the mode
+			// Always spawn bulkDumpCore for production DD - it will dynamically check the mode
 			// NOTE: BulkDump does NOT require remoteRecovered() in HA configurations.
 			// BulkDump is read-only: it reads from primary DC and writes to external storage (S3).
 			// Waiting for remoteRecovered() caused hangs when remote DC couldn't form teams.
-			TraceEvent(SevInfo, "DDBulkDumpCoreSpawned", self->ddId)
-			    .detail("UsableRegions", self->configuration.usableRegions)
-			    .detail("InitialMode", self->initData->bulkDumpMode);
-			actors.push_back(bulkDumpCore(self, self->initialized.getFuture()));
+			if (!isMocked) {
+				TraceEvent(SevInfo, "DDBulkDumpCoreSpawned", self->ddId)
+				    .detail("UsableRegions", self->configuration.usableRegions)
+				    .detail("InitialMode", self->initData->bulkDumpMode);
+				actors.push_back(bulkDumpCore(self, self->initialized.getFuture()));
+			}
 
 			actors.push_back(periodicAuditLocationMetadata(self));
 
