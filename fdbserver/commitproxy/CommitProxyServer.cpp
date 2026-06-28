@@ -252,6 +252,12 @@ Future<Void> commitBatcher(ProxyCommitData* commitData,
 		Future<Void> timeout;
 		std::vector<CommitTransactionRequest> batch;
 		int batchBytes = 0;
+		bool triggerCommitFlush = false;
+		auto flushBatch = [&](ProxyStats::CommitBatchFlushReason reason) {
+			commitData->stats.recordCommitBatchFlush(reason);
+			out.send({ std::move(batch), batchBytes });
+			lastBatch = now();
+		};
 		// TODO: Enable this assertion (currently failing with gcc)
 		// static_assert(std::is_nothrow_move_constructible_v<CommitTransactionRequest>);
 
@@ -308,9 +314,11 @@ Future<Void> commitBatcher(ProxyCommitData* commitData,
 
 				if ((batchBytes + bytes > CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT || req.firstInBatch()) &&
 				    !batch.empty()) {
+					auto reason = batchBytes + bytes > CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT
+					                  ? ProxyStats::CommitBatchFlushReason::TRANSACTION_SIZE_LIMIT
+					                  : ProxyStats::CommitBatchFlushReason::FIRST_IN_BATCH;
 					commitData->triggerCommit.set(false);
-					out.send({ std::move(batch), batchBytes });
-					lastBatch = now();
+					flushBatch(reason);
 					timeout = delayJittered(commitData->commitBatchInterval, TaskPriority::ProxyCommitBatcher);
 					batch.clear();
 					batchBytes = 0;
@@ -324,6 +332,7 @@ Future<Void> commitBatcher(ProxyCommitData* commitData,
 				ASSERT(commitData->triggerCommit.get());
 				double commitTime = lastBatch + SERVER_KNOBS->COMMIT_TRIGGER_DELAY;
 				if (now() > commitTime) {
+					triggerCommitFlush = true;
 					break;
 				}
 
@@ -332,9 +341,13 @@ Future<Void> commitBatcher(ProxyCommitData* commitData,
 				UNREACHABLE();
 			}
 		}
+		auto reason = batch.size() == SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_COUNT_MAX
+		                  ? ProxyStats::CommitBatchFlushReason::COUNT_LIMIT
+		              : batchBytes >= desiredBytes ? ProxyStats::CommitBatchFlushReason::BYTE_LIMIT
+		              : triggerCommitFlush         ? ProxyStats::CommitBatchFlushReason::TRIGGER
+		                                           : ProxyStats::CommitBatchFlushReason::TIMEOUT;
 		commitData->triggerCommit.set(false);
-		out.send({ std::move(batch), batchBytes });
-		lastBatch = now();
+		flushBatch(reason);
 	}
 }
 
@@ -2835,6 +2848,13 @@ Future<Void> logDetailedMetrics(ProxyCommitData* commitData) {
 
 		double startTime = now();
 		int64_t commitBatchInBaseline = commitData->stats.commitBatchIn.getValue();
+		int64_t commitBatchFlushByteLimitBaseline = commitData->stats.commitBatchFlushByteLimit.getValue();
+		int64_t commitBatchFlushCountLimitBaseline = commitData->stats.commitBatchFlushCountLimit.getValue();
+		int64_t commitBatchFlushTimeoutBaseline = commitData->stats.commitBatchFlushTimeout.getValue();
+		int64_t commitBatchFlushFirstInBatchBaseline = commitData->stats.commitBatchFlushFirstInBatch.getValue();
+		int64_t commitBatchFlushTransactionSizeLimitBaseline =
+		    commitData->stats.commitBatchFlushTransactionSizeLimit.getValue();
+		int64_t commitBatchFlushTriggerBaseline = commitData->stats.commitBatchFlushTrigger.getValue();
 		int64_t txnCommitInBaseline = commitData->stats.txnCommitIn.getValue();
 		int64_t mutationsBaseline = commitData->stats.mutations.getValue();
 		int64_t mutationBytesBaseline = commitData->stats.mutationBytes.getValue();
@@ -2842,13 +2862,26 @@ Future<Void> logDetailedMetrics(ProxyCommitData* commitData) {
 		co_await delay(SERVER_KNOBS->BURSTINESS_METRICS_LOG_INTERVAL);
 
 		int64_t commitBatchInReal = commitData->stats.commitBatchIn.getValue();
+		int64_t commitBatchFlushByteLimitReal = commitData->stats.commitBatchFlushByteLimit.getValue();
+		int64_t commitBatchFlushCountLimitReal = commitData->stats.commitBatchFlushCountLimit.getValue();
+		int64_t commitBatchFlushTimeoutReal = commitData->stats.commitBatchFlushTimeout.getValue();
+		int64_t commitBatchFlushFirstInBatchReal = commitData->stats.commitBatchFlushFirstInBatch.getValue();
+		int64_t commitBatchFlushTransactionSizeLimitReal =
+		    commitData->stats.commitBatchFlushTransactionSizeLimit.getValue();
+		int64_t commitBatchFlushTriggerReal = commitData->stats.commitBatchFlushTrigger.getValue();
 		int64_t txnCommitInReal = commitData->stats.txnCommitIn.getValue();
 		int64_t mutationsReal = commitData->stats.mutations.getValue();
 		int64_t mutationBytesReal = commitData->stats.mutationBytes.getValue();
 
 		// Don't log anything if any of the counters got reset during the wait
 		// interval. Assume that typically all the counters get reset at once.
-		if (commitBatchInReal < commitBatchInBaseline || txnCommitInReal < txnCommitInBaseline ||
+		if (commitBatchInReal < commitBatchInBaseline ||
+		    commitBatchFlushByteLimitReal < commitBatchFlushByteLimitBaseline ||
+		    commitBatchFlushCountLimitReal < commitBatchFlushCountLimitBaseline ||
+		    commitBatchFlushTimeoutReal < commitBatchFlushTimeoutBaseline ||
+		    commitBatchFlushFirstInBatchReal < commitBatchFlushFirstInBatchBaseline ||
+		    commitBatchFlushTransactionSizeLimitReal < commitBatchFlushTransactionSizeLimitBaseline ||
+		    commitBatchFlushTriggerReal < commitBatchFlushTriggerBaseline || txnCommitInReal < txnCommitInBaseline ||
 		    mutationsReal < mutationsBaseline || mutationBytesReal < mutationBytesBaseline) {
 			continue;
 		}
@@ -2856,6 +2889,14 @@ Future<Void> logDetailedMetrics(ProxyCommitData* commitData) {
 		TraceEvent("ProxyDetailedMetrics")
 		    .detail("Elapsed", now() - startTime)
 		    .detail("CommitBatchIn", commitBatchInReal - commitBatchInBaseline)
+		    .detail("CommitBatchFlushByteLimit", commitBatchFlushByteLimitReal - commitBatchFlushByteLimitBaseline)
+		    .detail("CommitBatchFlushCountLimit", commitBatchFlushCountLimitReal - commitBatchFlushCountLimitBaseline)
+		    .detail("CommitBatchFlushTimeout", commitBatchFlushTimeoutReal - commitBatchFlushTimeoutBaseline)
+		    .detail("CommitBatchFlushFirstInBatch",
+		            commitBatchFlushFirstInBatchReal - commitBatchFlushFirstInBatchBaseline)
+		    .detail("CommitBatchFlushTransactionSizeLimit",
+		            commitBatchFlushTransactionSizeLimitReal - commitBatchFlushTransactionSizeLimitBaseline)
+		    .detail("CommitBatchFlushTrigger", commitBatchFlushTriggerReal - commitBatchFlushTriggerBaseline)
 		    .detail("TxnCommitIn", txnCommitInReal - txnCommitInBaseline)
 		    .detail("Mutations", mutationsReal - mutationsBaseline)
 		    .detail("MutationBytes", mutationBytesReal - mutationBytesBaseline)
