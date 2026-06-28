@@ -91,7 +91,7 @@ struct MutationRef {
 		CompareAndClear,
 		Reserved_For_SpanContextMessage /* See fdbserver/SpanContextMessage.h */,
 		Reserved_For_OTELSpanContextMessage,
-		Reserved_For_PartitionMapMessage /* See fdbserver/core/PartitionMapMessage.h */,
+		Reserved_For_PartitionMapMessage /* See fdbserver/backupworker/PartitionMapMessage.h */,
 		MAX_ATOMIC_OP
 	};
 
