@@ -20,7 +20,7 @@
 
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/datadistributor/DDTeamCollection.h"
-#include "fdbserver/datadistributor/TCInfo.h"
+#include "TCInfo.h"
 #include "flow/CoroUtils.h"
 
 class TCServerInfoImpl {

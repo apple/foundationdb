@@ -26,6 +26,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/datadistributor/DDTeamCollection.h"
 #include "fdbserver/datadistributor/DataDistributionTeam.h"
+#include "TCInfo.h"
 #include "ExclusionTracker.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
@@ -815,7 +816,7 @@ public:
 								serverIds.push_back(*tempMap->getObject(it));
 							}
 							std::sort(serverIds.begin(), serverIds.end());
-							self->addTeam(serverIds.begin(), serverIds.end(), IsInitialTeam::True);
+							self->addTeam(serverIds, IsInitialTeam::True);
 						}
 					} else {
 						serverIds.clear();
@@ -864,7 +865,7 @@ public:
 		std::set<std::vector<UID>>::iterator teamIterEnd =
 		    self->primary ? initTeams->primaryTeams.end() : initTeams->remoteTeams.end();
 		for (; teamIter != teamIterEnd; ++teamIter) {
-			self->addTeam(teamIter->begin(), teamIter->end(), IsInitialTeam::True);
+			self->addTeam(*teamIter, IsInitialTeam::True);
 			co_await yield();
 		}
 	}
@@ -4922,6 +4923,21 @@ Reference<TCTeamInfo> DDTeamCollection::buildLargeTeam(int teamSize) {
 	return teamInfo;
 }
 
+void DDTeamCollection::addTeam(std::vector<UID> const& team, IsInitialTeam isInitialTeam) {
+	std::vector<Reference<TCServerInfo>> newTeamServers;
+	for (auto const& serverID : team) {
+		if (auto server = server_info.find(serverID); server != server_info.end()) {
+			newTeamServers.push_back(server->second);
+		}
+	}
+
+	addTeam(newTeamServers, isInitialTeam);
+}
+
+void DDTeamCollection::addTeam(std::set<UID> const& team, IsInitialTeam isInitialTeam) {
+	addTeam(std::vector<UID>(team.begin(), team.end()), isInitialTeam);
+}
+
 void DDTeamCollection::addTeam(const std::vector<Reference<TCServerInfo>>& newTeamServers,
                                IsInitialTeam isInitialTeam,
                                IsRedundantTeam redundantTeam) {
@@ -5709,7 +5725,7 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 		}
 
 		// Step 4: Add the server team
-		addTeam(bestServerTeam.begin(), bestServerTeam.end(), IsInitialTeam::False);
+		addTeam(bestServerTeam, IsInitialTeam::False);
 		addedTeams++;
 	}
 
