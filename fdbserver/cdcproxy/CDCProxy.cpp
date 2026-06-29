@@ -49,13 +49,17 @@
 
 namespace {
 
+// Snapshot from one durable metadata read, used while initializing or validating one stream.
 struct CDCStreamReadState {
 	Optional<KeyRange> keys;
 	Version minVersion = invalidVersion;
 	Version readVersion = invalidVersion;
+	// Each Version is the inclusive lower bound for log versions routed to its paired tag; the next entry's
+	// Version is the exclusive upper bound.
 	std::vector<std::pair<Version, Tag>> tagAssignments;
 };
 
+// Half-open tag-routing interval retained with one buffered stream; bufferedThrough is its inclusive frontier.
 struct CDCTagInterval {
 	Tag tag;
 	Version begin;
@@ -66,6 +70,7 @@ struct CDCTagInterval {
 	  : tag(tag), begin(begin), end(end), bufferedThrough(begin - 1) {}
 };
 
+// Proxy-owned state for one assigned stream. In-flight actors may retain it after active becomes false.
 struct CDCBufferedStream : ReferenceCounted<CDCBufferedStream> {
 	CDCStreamId streamId;
 	Optional<KeyRange> keys;
@@ -85,11 +90,13 @@ struct CDCBufferedStream : ReferenceCounted<CDCBufferedStream> {
 	explicit CDCBufferedStream(CDCStreamId streamId) : streamId(streamId) {}
 };
 
+// Per-stream scratch mutations from one tag-buffering pass, moved into CDCBufferedStream before the pass returns.
 struct CDCBufferedBatch {
 	int64_t bufferedBytes = 0;
 	std::deque<Standalone<VersionedMutationsRef>> mutations;
 };
 
+// Proxy-owned state for one shared tag and its buffering actor; dropped after the last active stream detaches.
 struct CDCBufferedTag : ReferenceCounted<CDCBufferedTag> {
 	Tag tag;
 	bool active = true;
@@ -100,18 +107,21 @@ struct CDCBufferedTag : ReferenceCounted<CDCBufferedTag> {
 	explicit CDCBufferedTag(Tag tag) : tag(tag) {}
 };
 
+// One stream's frontier and estimated materialization cost while selecting work for a single tag-buffering pass.
 struct CDCBufferCandidate {
 	CDCStreamId streamId;
 	Version nextVersion;
 	int64_t estimatedBytes;
 };
 
+// The stream set selected from one pass's candidates; discarded after those streams' batches are materialized.
 struct CDCBufferSelection {
 	std::unordered_set<CDCStreamId> selectedStreamIds;
 	std::vector<CDCStreamId> oversizedStreamIds;
 	int64_t selectedBytes = 0;
 };
 
+// Memory reservations derived for one tag-buffering pass; discarded when that pass releases its raw peek arenas.
 struct CDCBufferPassLimits {
 	int64_t rawReplyBytes;
 	int64_t preferredBufferedBytes;
@@ -119,6 +129,7 @@ struct CDCBufferPassLimits {
 	int64_t reservationBytes;
 };
 
+// A transactionally consistent durable-watermark snapshot consumed by one acknowledged-data pop pass.
 struct CDCPopState {
 	std::unordered_map<CDCStreamId, Version> minVersions;
 	std::unordered_map<Tag, Version> safePopVersions;
