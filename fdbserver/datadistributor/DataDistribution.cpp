@@ -2916,11 +2916,7 @@ Future<Void> bulkDumpCore(Reference<DataDistributor> self, Future<Void> readyToS
 
 // These actors read or write system keys through a real Database and are not part of MockDD's transaction
 // processor contract.
-void addProductionOnlyDataDistributionActors(Reference<DataDistributor> self,
-                                             KeyRangeMap<ShardTrackedData>* shards,
-                                             std::vector<Future<Void>>& actors) {
-	actors.push_back(monitorBackupPartitionRequired(self->txnProcessor->context(), shards, self->ddId));
-
+void addProductionOnlyDataDistributionActors(Reference<DataDistributor> self, std::vector<Future<Void>>& actors) {
 	if (bulkLoadIsEnabled(self->initData->bulkLoadMode)) {
 		TraceEvent(SevInfo, "DDBulkLoadModeEnabled", self->ddId)
 		    .detail("UsableRegions", self->configuration.usableRegions);
@@ -3032,6 +3028,10 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 			}
 
 			actors.push_back(self->pollMoveKeysLock());
+			if (!isMocked) {
+				actors.push_back(
+				    monitorBackupPartitionRequired(self->txnProcessor->context(), &shards, self->ddId));
+			}
 
 			self->context->tracker = makeReference<DataDistributionTracker>(
 			    DataDistributionTrackerInitParams{ .db = self->txnProcessor,
@@ -3161,7 +3161,7 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 			if (isMocked) {
 				self->bulkLoadTaskCollection->removeBulkLoadJobRange();
 			} else {
-				addProductionOnlyDataDistributionActors(self, &shards, actors);
+				addProductionOnlyDataDistributionActors(self, actors);
 			}
 
 			actors.push_back(monitorShardEncodeKnob(self->ddId));
