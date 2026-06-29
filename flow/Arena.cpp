@@ -45,7 +45,6 @@ extern "C" const char* __lsan_default_options(void) {
 // When creating a new ArenaBlock, poison the memory that will be later allocated to users.
 // When allocating memory to a user, mark that memory as undefined.
 
-// test comment
 namespace {
 #if VALGRIND
 void allowAccess(ArenaBlock* b) {

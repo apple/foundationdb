@@ -195,7 +195,6 @@ THREAD_HANDLE startThread(void*(func)(void*), void* arg, int stackSize = 0, cons
 #error Port me
 #endif
 
-// test comment
 void waitThread(THREAD_HANDLE thread);
 
 // Linux-only for now.  Set thread priority.
