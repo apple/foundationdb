@@ -3029,8 +3029,7 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			actors.push_back(self->pollMoveKeysLock());
 			if (!isMocked) {
-				actors.push_back(
-				    monitorBackupPartitionRequired(self->txnProcessor->context(), &shards, self->ddId));
+				actors.push_back(monitorBackupPartitionRequired(self->txnProcessor->context(), &shards, self->ddId));
 			}
 
 			self->context->tracker = makeReference<DataDistributionTracker>(
