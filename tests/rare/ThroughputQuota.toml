@@ -10,4 +10,3 @@ testTitle='ThroughputQuotaTest'
   testName = 'Cycle'
   transactionsPerSecond = 250.0
   testDuration = 30.0
-  expectedRate = 0

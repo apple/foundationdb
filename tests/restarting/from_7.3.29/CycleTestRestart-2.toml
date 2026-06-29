@@ -8,7 +8,6 @@ runSetup=false
     nodeCount=2500
     testDuration=10.0
     skipSetup=true
-    expectedRate=0
 
     [[test.workload]]
     testName="RandomClogging"

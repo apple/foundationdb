@@ -12,7 +12,6 @@ runSetup=false
     transactionsPerSecond=2500.0
     nodeCount=1000
     testDuration=30.0
-    expectedRate=0
     keyPrefix = 'cycle'
 
     [[test.workload]]
@@ -20,7 +19,6 @@ runSetup=false
     nodeCount = 1000
     transactionsPerSecond = 2500.0
     testDuration = 30.0
-    expectedRate = 0
     keyPrefix = '!'
 
     [[test.workload]]
@@ -28,7 +26,6 @@ runSetup=false
     nodeCount = 1000
     transactionsPerSecond = 2500.0
     testDuration = 30.0
-    expectedRate = 0
     keyPrefix = 'ZZZ'
 
     [[test.workload]]
