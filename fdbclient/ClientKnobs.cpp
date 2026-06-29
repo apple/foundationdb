@@ -28,11 +28,11 @@
 
 #define init(...) KNOB_FN(__VA_ARGS__, INIT_ATOMIC_KNOB, INIT_KNOB)(__VA_ARGS__)
 
-ClientKnobs::ClientKnobs(Randomize randomize) {
-	initialize(randomize);
+ClientKnobs::ClientKnobs(Randomize randomize, IsSimulated isSimulated) {
+	initialize(randomize, isSimulated);
 }
 
-void ClientKnobs::initialize(Randomize randomize) {
+void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	// clang-format off
 
 	init( TOO_MANY,                            1000000 );
@@ -54,6 +54,8 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( MAX_CLIENT_STATUS_AGE,                   1.0 );
 	init( MAX_COMMIT_PROXY_CONNECTIONS,              5 ); if( randomize && BUGGIFY ) MAX_COMMIT_PROXY_CONNECTIONS = 1;
 	init( MAX_GRV_PROXY_CONNECTIONS,                 3 ); if( randomize && BUGGIFY ) MAX_GRV_PROXY_CONNECTIONS = 1;
+	init( SHRINK_PROXY_LIST_CLEAR_CACHE_BELOW_THRESHOLD, false ); if( randomize && isSimulated ) SHRINK_PROXY_LIST_CLEAR_CACHE_BELOW_THRESHOLD = deterministicRandom()->coinflip();
+	init( DBCONTEXT_EAGER_PROXY_UPDATE,          false ); if( randomize && isSimulated ) DBCONTEXT_EAGER_PROXY_UPDATE = deterministicRandom()->coinflip();
 	init( STATUS_IDLE_TIMEOUT,                   120.0 );
 	init( STATUS_TIMEOUT,                         30.0 );
 	init( SEND_ENTIRE_VERSION_VECTOR,            false );
@@ -98,6 +100,9 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( LOCATION_CACHE_EVICTION_SIZE_SIM,         10 ); if( randomize && BUGGIFY ) LOCATION_CACHE_EVICTION_SIZE_SIM = 3;
 	init( LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD,     60 );
 	init( LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL,    60 );
+	init( LOCATION_CACHE_PEER_EVICTOR_ENABLED,          false ); if( randomize && isSimulated ) LOCATION_CACHE_PEER_EVICTOR_ENABLED = deterministicRandom()->coinflip();
+	init( LOCATION_CACHE_PEER_EVICTOR_DELAY,                    60.0 );
+	init( LOCATION_CACHE_PEER_EVICTOR_FAILED_THRESHOLD,      0 );
 
 	init( GET_RANGE_SHARD_LIMIT,                     2 );
 	init( WARM_RANGE_SHARD_LIMIT,                  100 );
@@ -343,13 +348,13 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 TEST_CASE("/fdbclient/knobs/initialize") {
 	// This test depends on TASKBUCKET_TIMEOUT_VERSIONS being defined as a constant multiple of CORE_VERSIONSPERSECOND
-	ClientKnobs clientKnobs(Randomize::False);
+	ClientKnobs clientKnobs(Randomize::False, IsSimulated::False);
 	int64_t initialCoreVersionsPerSecond = clientKnobs.CORE_VERSIONSPERSECOND;
 	int initialTaskBucketTimeoutVersions = clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS;
 	clientKnobs.setKnob("core_versionspersecond", initialCoreVersionsPerSecond * 2);
 	ASSERT_EQ(clientKnobs.CORE_VERSIONSPERSECOND, initialCoreVersionsPerSecond * 2);
 	ASSERT_EQ(clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS, initialTaskBucketTimeoutVersions);
-	clientKnobs.initialize(Randomize::False);
+	clientKnobs.initialize(Randomize::False, IsSimulated::False);
 	ASSERT_EQ(clientKnobs.CORE_VERSIONSPERSECOND, initialCoreVersionsPerSecond * 2);
 	ASSERT_EQ(clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS, initialTaskBucketTimeoutVersions * 2);
 	return Void();

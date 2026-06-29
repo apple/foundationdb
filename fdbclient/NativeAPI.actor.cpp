@@ -1033,6 +1033,13 @@ ACTOR static Future<Void> monitorClientDBInfoChange(DatabaseContext* cx,
 					curCommitProxies = clientDBInfo->get().commitProxies;
 					curGrvProxies = clientDBInfo->get().grvProxies;
 					proxiesChangeTrigger->trigger();
+					// Eagerly rebuild the published proxy ModelInterface the instant the
+					// proxy list changes, so a killed proxy's RequestStream is dropped from
+					// cx->commitProxies/grvProxies on clientInfo rotation rather than waiting
+					// for the next transaction's lazy getCommitProxies()/getGrvProxies().
+					if (CLIENT_KNOBS->DBCONTEXT_EAGER_PROXY_UPDATE) {
+						cx->updateProxies();
+					}
 				}
 			}
 			when(wait(actors.getResult())) {
@@ -1151,6 +1158,83 @@ ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, Stora
 	} catch (Error& e) {
 		TraceEvent(SevError, "UpdateCachedRangesFailed").error(e);
 		throw;
+	}
+}
+
+// Periodically samples FlowTransport's persistent per-address connect-failed
+// counter and evicts any address whose count advanced since the previous tick
+// (a "flap"). This is a direct ConnectionTimeout (CTO) signal: every connect failure increments
+// the counter, and any positive delta within an evictor interval indicates an
+// address that is still being targeted by RPCs but cannot establish a
+// connection.
+ACTOR static Future<Void> locationCachePeerEvictorActor(DatabaseContext* cx) {
+	state double evictorDelay = CLIENT_KNOBS->LOCATION_CACHE_PEER_EVICTOR_DELAY;
+	state int evictorFailedThreshold = CLIENT_KNOBS->LOCATION_CACHE_PEER_EVICTOR_FAILED_THRESHOLD;
+	ASSERT(evictorDelay > 0);
+	ASSERT(evictorFailedThreshold >= 0);
+	// Per-address snapshot of FlowTransport's persistent connect-failed counter
+	// taken on the previous tick. The delta to the current count is the flap
+	// signal: a positive delta means the address is still being targeted by RPCs
+	// but cannot connect.
+	state std::unordered_map<NetworkAddress, int64_t> lastConnectFailedSnapshot;
+	loop {
+		try {
+			wait(delay(evictorDelay));
+
+			std::unordered_set<NetworkAddress> deadAddressSet;
+			const auto& persistent = FlowTransport::transport().getPersistentConnectFailedCounts();
+			for (const auto& [addr, cur] : persistent) {
+				if (!addr.isValid()) {
+					continue;
+				}
+				int64_t prev = 0;
+				auto snapIt = lastConnectFailedSnapshot.find(addr);
+				if (snapIt != lastConnectFailedSnapshot.end()) {
+					prev = snapIt->second;
+				}
+				// If the persistent counter went backwards, the entry was TTL-pruned and re-added
+				// since the last sweep (its count reset to a small value). Count from zero in that
+				// case so a genuine post-reset connect failure isn't missed for a sweep.
+				int64_t delta = (cur.count >= prev) ? (cur.count - prev) : cur.count;
+				lastConnectFailedSnapshot[addr] = cur.count;
+				if (delta > evictorFailedThreshold) {
+					TraceEvent("LocationCachePeerEvictor_FoundDeadAddr")
+					    .suppressFor(5.0)
+					    .detail("DbId", cx->dbId)
+					    .detail("Addr", addr)
+					    .detail("ConnectFailedDelta", delta)
+					    .detail("ConnectFailedTotal", cur.count);
+					deadAddressSet.insert(addr);
+				}
+			}
+			// Drop snapshot entries for addrs FlowTransport no longer reports a counter
+			// for, so this map stays bounded alongside the persistent one.
+			for (auto it = lastConnectFailedSnapshot.begin(); it != lastConnectFailedSnapshot.end();) {
+				if (persistent.find(it->first) == persistent.end()) {
+					TraceEvent("LocationCachePeerEvictor_ClearAddrInSnapshot")
+					    .suppressFor(5.0)
+					    .detail("DbId", cx->dbId)
+					    .detail("Addr", it->first);
+					it = lastConnectFailedSnapshot.erase(it);
+				} else {
+					++it;
+				}
+			}
+			if (!deadAddressSet.empty()) {
+				TraceEvent("LocationCachePeerEvictor_DeadAddrSummary")
+				    .detail("DbId", cx->dbId)
+				    .detail("DeadAddrSetSize", deadAddressSet.size());
+			}
+			cx->invalidateCacheByAddresses(deadAddressSet);
+		} catch (Error& e) {
+			// actor_cancelled must propagate so ~DatabaseContext can tear down the
+			// evictor; any other error should not kill the loop (that would stop the
+			// eviction sweep).
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			TraceEvent(SevWarn, "LocationCachePeerEvictor_Error").error(e).detail("DbId", cx->dbId);
+		}
 	}
 }
 
@@ -1613,6 +1697,9 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	tssMismatchHandler = handleTssMismatches(this);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
+	if (CLIENT_KNOBS->LOCATION_CACHE_PEER_EVICTOR_ENABLED) {
+		locationCachePeerEvictor = locationCachePeerEvictorActor(this);
+	}
 
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
 	globalConfig = std::make_unique<GlobalConfig>(this);
@@ -1921,6 +2008,7 @@ DatabaseContext::~DatabaseContext() {
 	clientDBInfoMonitor.cancel();
 	monitorTssInfoChange.cancel();
 	tssMismatchHandler.cancel();
+	locationCachePeerEvictor.cancel();
 	if (grvUpdateHandler.isValid()) {
 		grvUpdateHandler.cancel();
 	}
@@ -2044,6 +2132,34 @@ void DatabaseContext::invalidateCache(const Optional<KeyRef>& tenantPrefix, cons
 	Key begin = rs.begin().begin(),
 	    end = rs.end().begin(); // insert invalidates rs, so can't be passed a mere reference into it
 	locationCache.insert(KeyRangeRef(begin, end), Reference<LocationInfo>());
+}
+
+void DatabaseContext::invalidateCacheByAddresses(const std::unordered_set<NetworkAddress>& addresses) {
+	if (addresses.empty()) {
+		return;
+	}
+	std::vector<KeyRange> rangesToInvalidate;
+	auto ranges = locationCache.ranges();
+	for (auto iter = ranges.begin(); iter != ranges.end(); ++iter) {
+		if (!iter->value())
+			continue;
+		auto& loc = iter->value();
+		for (int i = 0; i < loc->size(); i++) {
+			if (addresses.contains(loc->getInterface(i).address())) {
+				rangesToInvalidate.push_back(KeyRange(KeyRangeRef(iter->begin(), iter->end())));
+				break;
+			}
+		}
+	}
+
+	for (const auto& range : rangesToInvalidate) {
+		locationCache.insert(range, Reference<LocationInfo>());
+	}
+
+	TraceEvent("LocationCacheInvalidatedByAddresses")
+	    .detail("DbId", dbId)
+	    .detail("AddressCount", addresses.size())
+	    .detail("InvalidatedRanges", rangesToInvalidate.size());
 }
 
 void DatabaseContext::setFailedEndpointOnHealthyServer(const Endpoint& endpoint) {

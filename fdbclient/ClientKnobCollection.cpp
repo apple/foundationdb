@@ -21,16 +21,16 @@
 #include "fdbclient/ClientKnobCollection.h"
 
 ClientKnobCollection::ClientKnobCollection(Randomize randomize, IsSimulated isSimulated)
-  : flowKnobs(randomize, isSimulated), clientKnobs(randomize) {}
+  : flowKnobs(randomize, isSimulated), clientKnobs(randomize, isSimulated) {}
 
 void ClientKnobCollection::initialize(Randomize randomize, IsSimulated isSimulated) {
 	flowKnobs.initialize(randomize, isSimulated);
-	clientKnobs.initialize(randomize);
+	clientKnobs.initialize(randomize, isSimulated);
 }
 
 void ClientKnobCollection::reset(Randomize randomize, IsSimulated isSimulated) {
 	flowKnobs.reset(randomize, isSimulated);
-	clientKnobs.reset(randomize);
+	clientKnobs.reset(randomize, isSimulated);
 }
 
 Optional<KnobValue> ClientKnobCollection::tryParseKnobValue(std::string const& knobName,
