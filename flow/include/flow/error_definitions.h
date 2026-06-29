@@ -267,7 +267,7 @@ ERROR( special_keys_no_module_found, 2113, "Special key space range read does no
 ERROR( special_keys_write_disabled, 2114, "Special Key space is not allowed to write by default. Refer to the `special_key_space_enable_writes` transaction option for more details." )
 ERROR( special_keys_no_write_module_found, 2115, "Special key space key or keyrange in set or clear does not intersect a module" )
 ERROR( special_keys_cross_module_clear, 2116, "Special key space clear crosses modules" )
-ERROR( special_keys_api_failure, 2117, "Api call through special keys failed. For more information, call get on special key 0xff0xff/error_message to get a json string of the error message." )
+ERROR( special_keys_api_failure, 2117, "Api call through special keys failed. For more information, call get - within the same transaction - on special key 0xff0xff/error_message to get a json string of the error message." )
 ERROR( client_lib_invalid_metadata, 2118, "Invalid client library metadata." )
 ERROR( client_lib_already_exists, 2119, "Client library with same identifier already exists on the cluster." )
 ERROR( client_lib_not_found, 2120, "Client library for the given identifier not found." )
