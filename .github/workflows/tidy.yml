@@ -1,4 +1,9 @@
 name: clang-tidy
+# Not *required* to pass, because:
+#  * directly checks header files, some do not include what they need
+#  * bindings/c/foundationdb/fdb_c.h requires FDB_API_VERSION be defined first
+#  * crashes on at least one cpp file (flow/flat_buffers.cpp)
+# ... but > 95% of source files should pass.
 
 on:
   pull_request:
