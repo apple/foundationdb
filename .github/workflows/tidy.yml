@@ -31,7 +31,9 @@ jobs:
           mkdir -v build_output
           cd       build_output
 
+          # CXXFLAGS to work-around "fdb_c_options.g.h not found" by clang-tidy
           CC=clang CXX=clang++ USE_LD=LLD USE_LIBCXX=1 \
+            CXXFLAGS=-I${PWD}/fdbclient/include/fdbclient \
             cmake -S .. -G Ninja -D BUILD_AWS_BACKUP=ON -D CMAKE_EXPORT_COMPILE_COMMANDS=ON
 
           ninja -v                      \
@@ -43,11 +45,13 @@ jobs:
           ACTORS=$(
             ninja -t targets all | grep -v /build_output/ | grep '_actors:' | cut -d: -f1
           )
+          ninja -v $ACTORS
+
           # all protobuf headers
           PB_HEADERS=$(
             ninja -t targets all | grep -v /build_output/ | grep '\.pb\.h:' | cut -d: -f1
           )
-          ninja -v $ACTORS $PB_HEADERS
+          ninja -v $PB_HEADERS
 
       - name: clang-tidy
         # clang-tidy is roughly as slow as compiling per-file, so check only touched files
