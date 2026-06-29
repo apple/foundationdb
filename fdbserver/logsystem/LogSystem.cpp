@@ -614,10 +614,6 @@ void LogSystem::coreStateWritten(DBCoreState const& newState) {
 }
 
 Future<Void> LogSystem::onError() const {
-	return onError_internal();
-}
-
-Future<Void> LogSystem::onError_internal() const {
 	// Never returns normally, but throws an error if the subsystem stops working
 	while (true) {
 		std::vector<Future<Void>> failed;

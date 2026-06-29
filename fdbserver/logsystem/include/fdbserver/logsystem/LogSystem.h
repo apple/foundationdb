@@ -383,8 +383,6 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 
 	Future<Void> onError() const;
 
-	Future<Void> onError_internal() const;
-
 	static Future<Void> pushResetChecker(Reference<ConnectionResetInfo> self, NetworkAddress addr);
 
 	static Future<TLogCommitReply> recordPushMetrics(Reference<ConnectionResetInfo> self,
