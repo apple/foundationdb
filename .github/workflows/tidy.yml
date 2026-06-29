@@ -35,12 +35,12 @@ jobs:
           ninja -v -C build_output      \
             processed_compile_commands  \
             fdboptions                  \
-            flow_actors                 \
-            fdbrpc_actors               \
-            fdbclient_actors            \
-            fdbserver_actors            \
             ProtocolVersion             \
             generated/fdbctl/control_service/control_service.grpc.pb.h
+
+          # all flow actors, for generated headers
+          ACTORS=$(ninja -t targets all | grep actors: | cut -d: -f1)
+          ninja -v -C build_output $ACTORS
 
       - name: clang-tidy
         # clang-tidy is roughly as slow as compiling per-file, so check only touched files
@@ -50,7 +50,12 @@ jobs:
           printf "Files changed:\n%s\n" "$CHANGED"
           echo
           while read FILE; do
-            if grep -E '\.(c|cpp|h|hpp)$' <<<"$FILE"; then
+            # skip actor files, not regular c++
+            if grep -q -F '.actor.' <<<"$FILE" ; then
+              continue
+            fi
+            # only c++ source files
+            if grep -q -E '\.(c|cpp|h|hpp)$' <<<"$FILE" ; then
               echo "Checking $FILE ..."
               clang-tidy -p build_output "$FILE"
               echo
