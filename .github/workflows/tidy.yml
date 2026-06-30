@@ -65,6 +65,8 @@ jobs:
           CHANGED=$(git diff --name-only origin/${{github.event.pull_request.base.ref}}...)
           printf "Files changed:\n%s\n" "$CHANGED"
           echo
+          PASSED=true
+
           while read FILE; do
             if [[ $FILE == contrib/* ]]; then
               continue  # skip contrib sources
@@ -75,7 +77,16 @@ jobs:
             # only c++ source files
             if [[ $FILE =~ \.[ch](pp)?$ ]] ; then
               echo "Checking $FILE ..."
-              clang-tidy -p build_output "$FILE"
+              if ! clang-tidy -p build_output --warnings-as-errors='*' "$FILE"; then
+                PASSED=false
+              fi
               echo
             fi
           done <<<"$CHANGED"
+
+          if ! $PASSED; then
+            echo "FAILED !!"
+            echo "This check is not required to pass, because a few files in this repo are "
+            echo "problematic, but please fix all warnings/errors that are practical to fix."
+            exit 1
+          fi
