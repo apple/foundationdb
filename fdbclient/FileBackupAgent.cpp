@@ -3894,7 +3894,33 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 			}
 		}
 
-		// Get start version after backup worker are enabled
+		// Request the PartitionMap before reading the backup's start version, so the PartitionMap is more likely
+		// to be committed first. backupPartitionListKey absent = no PartitionMap exists yet on this cluster.
+		while (true) {
+			Error err;
+			try {
+				tr->reset();
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+				Future<Optional<MutationLogType>> mlt = config.mutationLogType().get(tr);
+				Future<Optional<Value>> partitionList = tr->get(backupPartitionListKey);
+				co_await (success(mlt) && success(partitionList));
+
+				if (mlt.get().present() && mlt.get().get() == MutationLogType::RANGE_PARTITIONED_LOG &&
+				    !partitionList.get().present()) {
+					tr->set(backupPartitionRequiredKey, backupPartitionRequiredValue(1));
+					co_await tr->commit();
+				}
+				break;
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr->onError(err);
+		}
+
+		// Get a start version to pass as backup's start version in UID of backup in backupStartedKey after backup
+		// workers are enabled.
 		while (true) {
 			Error err;
 			try {
@@ -3912,7 +3938,37 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 			co_await tr->onError(err);
 		}
 
-		// Set the "backupStartedKey" and wait for all backup worker started
+		// Coordinate between BackupAgent and BackupWorkers using two paired keys, so neither gets stuck if a watch is
+		// silently lost.
+		//
+		//   - backupStartedKey: BackupAgent writes the new UID; BackupWorkers watch this key. Tells workers a new
+		//   backup exists.
+		//   - BackupConfig(uid).allWorkerStarted: workers set this once they've all registered the backup; BackupAgent
+		//   watches it. Tells BackupAgent it's safe to snapshot.
+		//
+		// Why both are needed: each side needs to know the other has acted before proceeding. If only one key existed,
+		// a lost watch on EITHER side would leave one party stuck — BackupAgent snapshotting too early (worker hasn't
+		// registered yet -> gap, backup not restorable) or BackupAgent never snapshotting (worker registered but
+		// BackupAgent has no signal). With both keys, each side has a separate signal it can poll/retry, so a lost
+		// watch only delays progress, never breaks it.
+		//
+		// Watch-loss recovery:
+		//   (1) Worker misses its watch on backupStartedKey:
+		//       Workers never register the backup, so allWorkerStarted is never set.
+		//       BackupAgent's task times out, gets reassigned, re-reads backupStartedKey, keeps
+		//       the original version and waits again.
+		//
+		//   (2) BackupAgent misses its watch on allWorkerStarted:
+		//       Workers already set the key, but BackupAgent stays parked. Task times out and
+		//       retries; the new exec finds allWorkerStarted already true, skips the watch, and
+		//       the snapshot reads at the cluster's current version when it actually runs.
+		//
+		// beginVersion (stored in backupStartedKey) stays the same across retries — it's a
+		// logical marker, not where the snapshot reads. The snapshot task does its own
+		// getReadVersion() when it runs, so the actual snapshot version moves forward across
+		// retries. Restorability depends on the snapshot version: by the time the snapshot
+		// runs, workers have already registered the backup and their mutation logs cover the
+		// snapshot's range, so the backup is restorable.
 		tr->reset();
 		while (true) {
 			Future<Void> watchFuture;
@@ -3936,11 +3992,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 					ids = decodeBackupStartedValue(started.get().get());
 				}
 
-				// First range-partitioned backup on this cluster: ask DD to compute the partition list.
-				if (ids.empty() && mutationLogType.get().get() == MutationLogType::RANGE_PARTITIONED_LOG) {
-					tr->set(backupPartitionRequiredKey, backupPartitionRequiredValue(1));
-				}
-
+				// Add this backup's UID and start version to backupStartedKey.
 				const UID uid = config.getUid();
 				auto it = std::find_if(
 				    ids.begin(), ids.end(), [uid](const std::pair<UID, Version>& p) { return p.first == uid; });
@@ -3949,21 +4001,16 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 				} else {
 					Params.beginVersion().set(task, it->second);
 				}
-
 				tr->set(backupStartedKey, encodeBackupStartedValue(ids));
 
-				// Only PartitionedLog workers set BackupConfig.allWorkerStarted, so watch it for that mutation log
-				// type.
-				const bool isPartitionedLog = mutationLogType.get().get() == MutationLogType::PARTITIONED_LOG;
-
 				// The task may be restarted. Set the watch if started key has NOT been set.
-				if (isPartitionedLog && !taskStarted.get().present()) {
+				if (!taskStarted.get().present()) {
 					watchFuture = tr->watch(config.allWorkerStarted().key);
 				}
 
 				co_await keepRunning;
 				co_await tr->commit();
-				if (isPartitionedLog && !taskStarted.get().present()) {
+				if (!taskStarted.get().present()) {
 					co_await watchFuture;
 				}
 				co_return;
