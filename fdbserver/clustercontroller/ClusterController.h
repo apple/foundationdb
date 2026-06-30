@@ -40,6 +40,8 @@ struct WorkerInfo : NonCopyable {
 	ReplyPromise<RegisterWorkerReply> reply;
 	Generation gen;
 	int reboots;
+	// True after this exact worker interface answers a cluster controller liveness ping.
+	bool verified;
 	ProcessClass initialClass;
 	ClusterControllerPriorityInfo priorityInfo;
 	WorkerDetails details;
@@ -49,7 +51,7 @@ struct WorkerInfo : NonCopyable {
 	Standalone<VectorRef<StringRef>> issues;
 
 	WorkerInfo()
-	  : gen(-1), reboots(0),
+	  : gen(-1), reboots(0), verified(false),
 	    priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown) {}
 	WorkerInfo(Future<Void> watcher,
 	           ReplyPromise<RegisterWorkerReply> reply,
@@ -61,11 +63,11 @@ struct WorkerInfo : NonCopyable {
 	           bool degraded,
 	           bool recoveredDiskFiles,
 	           Standalone<VectorRef<StringRef>> issues)
-	  : watcher(watcher), reply(reply), gen(gen), reboots(0), initialClass(initialClass), priorityInfo(priorityInfo),
-	    details(interf, processClass, degraded, recoveredDiskFiles), issues(issues) {}
+	  : watcher(watcher), reply(reply), gen(gen), reboots(0), verified(false), initialClass(initialClass),
+	    priorityInfo(priorityInfo), details(interf, processClass, degraded, recoveredDiskFiles), issues(issues) {}
 
 	explicit(false) WorkerInfo(WorkerInfo&& r) noexcept
-	  : watcher(std::move(r.watcher)), reply(std::move(r.reply)), gen(r.gen), reboots(r.reboots),
+	  : watcher(std::move(r.watcher)), reply(std::move(r.reply)), gen(r.gen), reboots(r.reboots), verified(r.verified),
 	    initialClass(r.initialClass), priorityInfo(r.priorityInfo), details(std::move(r.details)),
 	    haltRatekeeper(r.haltRatekeeper), haltDistributor(r.haltDistributor),
 	    haltConsistencyScan(r.haltConsistencyScan), issues(r.issues) {}
@@ -74,6 +76,7 @@ struct WorkerInfo : NonCopyable {
 		reply = std::move(r.reply);
 		gen = r.gen;
 		reboots = r.reboots;
+		verified = r.verified;
 		initialClass = r.initialClass;
 		priorityInfo = r.priorityInfo;
 		details = std::move(r.details);
@@ -281,9 +284,11 @@ public:
 	};
 
 	bool workerAvailable(WorkerInfo const& worker, bool checkStable) const {
-		return (now() - startTime < 2 * FLOW_KNOBS->SERVER_REQUEST_INTERVAL) ||
-		       (IFailureMonitor::failureMonitor().getState(worker.details.interf.storage.getEndpoint()).isAvailable() &&
-		        (!checkStable || worker.reboots < 2));
+		return worker.verified && ((now() - startTime < 2 * FLOW_KNOBS->SERVER_REQUEST_INTERVAL) ||
+		                           (IFailureMonitor::failureMonitor()
+		                                .getState(worker.details.interf.storage.getEndpoint())
+		                                .isAvailable() &&
+		                            (!checkStable || worker.reboots < 2)));
 	}
 
 	bool isLongLivedStateless(Optional<Key> const& processId) const {
