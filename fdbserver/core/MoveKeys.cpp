@@ -1380,21 +1380,21 @@ static bool destUnchanged(const RangeResult& keyServers,
 		UID checkSrcId, checkDestId;
 		decodeKeyServersValue(uidToTagMap, keyServers[i].value, checkSrc, checkDest, checkSrcId, checkDestId);
 		if (expectedDataMoveId.present()) {
-      // Have checkDestId == expectedDataMoveId — the shards path stamps every assigned
-      // sub-range with its dataMoveId, so any mismatch (including an empty-dest
-      // entry, which decodes to UID()) signals a concurrent reassignment.
+			// Have checkDestId == expectedDataMoveId — the shards path stamps every assigned
+			// sub-range with its dataMoveId, so any mismatch (including an empty-dest
+			// entry, which decodes to UID()) signals a concurrent reassignment.
 			if (checkDestId != expectedDataMoveId.get()) {
 				return false;
 			}
 		} else if (checkDest.empty()) {
-      // Empty-dest entries are tolerated wherever src ⊆ expectedDest. That matches the planning loop's
-      // `alreadyMoved = dest2.empty() && isSubset` branch (see the second planning
-      // loop in finishMoveKeys, around the "first key in iteration sub-range has
-      // already been processed" CODE_PROBE): a sibling iteration of OUR move
-      // already completed this sub-range, src is what was left after team-shrink,
-      // and the upcoming krmSetRangeCoalescing write will collapse it into the
-      // rest. The subset check rules out a foreign completed move whose src is
-      // a different team — clobbering it would overwrite the foreign owner.
+			// Empty-dest entries are tolerated wherever src ⊆ expectedDest. That matches the planning loop's
+			// `alreadyMoved = dest2.empty() && isSubset` branch (see the second planning
+			// loop in finishMoveKeys, around the "first key in iteration sub-range has
+			// already been processed" CODE_PROBE): a sibling iteration of OUR move
+			// already completed this sub-range, src is what was left after team-shrink,
+			// and the upcoming krmSetRangeCoalescing write will collapse it into the
+			// rest. The subset check rules out a foreign completed move whose src is
+			// a different team — clobbering it would overwrite the foreign owner.
 			std::sort(checkSrc.begin(), checkSrc.end());
 			if (!std::includes(expectedDest.begin(), expectedDest.end(), checkSrc.begin(), checkSrc.end())) {
 				return false;
@@ -1740,7 +1740,7 @@ static Future<Void> finishMoveKeys(Database occ,
 						// commit would otherwise clear and rewrite an
 						// unverified-and-possibly-foreign tail. Common under
 						// MOVE_KEYS_KRM_LIMIT buggify (2 rows -- which happens often
-            // in simulation).
+						// in simulation).
 						Key rereadEnd = reread.keyServers.end()[-1].key;
 						// The reread is bounded by `currentKeys` (the upper-bound
 						// passed to readShardState), so a `>` result would mean
