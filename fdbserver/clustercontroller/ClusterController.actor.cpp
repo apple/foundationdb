@@ -3833,4 +3833,107 @@ TEST_CASE("/fdbserver/clustercontroller/invalidateExcludedProcessComplaints") {
 	return Void();
 }
 
+// Test for the fix described in PR #10411.
+// Verifies that in a small cluster (3 stateless, 3 transaction, 3 storage processes),
+// the role allocation correctly assigns all 3 commit_proxy roles to the stateless nodes.
+// Previously, only 1 commit_proxy would be recruited due to a bug in the candidate
+// selection logic within ClusterControllerData::getWorkersForRoleInDatacenter.
+// This test ensures that the desired number of proxies (3) is now fully recruited
+// when sufficient stateless processes exist.
+TEST_CASE("/fdbserver/clustercontroller/proxyColocationOnStateless") {
+	ClusterControllerData data(ClusterControllerFullInterface(),
+	                           LocalityData(),
+	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                           makeReference<AsyncVar<Optional<UID>>>());
+
+	constexpr int numWorkersPerClass = 3;
+
+	auto makeWorkers = [&](ProcessClass::ClassType classType, StringRef prefix, int count) {
+		std::vector<WorkerInterface> workers;
+		for (int i = 0; i < count; i++) {
+			auto pid = prefix.toString() + std::to_string(i);
+			WorkerInterface wi;
+			wi.initEndpoints();
+			wi.locality.set(LocalityData::keyZoneId, Standalone<StringRef>(pid + "_zone"));
+			wi.locality.set(LocalityData::keyProcessId, Standalone<StringRef>(pid));
+			data.id_worker[wi.locality.processId()] =
+			    WorkerInfo(Future<Void>(),
+			               ReplyPromise<RegisterWorkerReply>(),
+			               0,
+			               wi,
+			               ProcessClass(classType, ProcessClass::CommandLineSource),
+			               ProcessClass(classType, ProcessClass::CommandLineSource),
+			               ClusterControllerPriorityInfo(
+			                   ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown),
+			               false,
+			               true,
+			               Standalone<VectorRef<StringRef>>());
+			workers.push_back(wi);
+		}
+		return workers;
+	};
+
+	auto statelessWorkers = makeWorkers(ProcessClass::StatelessClass, "sl"_sr, numWorkersPerClass);
+	auto transactionWorkers = makeWorkers(ProcessClass::TransactionClass, "tx"_sr, numWorkersPerClass);
+	auto storageWorkers = makeWorkers(ProcessClass::StorageClass, "ss"_sr, numWorkersPerClass);
+
+	data.masterProcessId = statelessWorkers[0].locality.processId();
+	data.clusterControllerProcessId = statelessWorkers[1].locality.processId();
+	data.startTime = 0;
+	data.gotFullyRecoveredConfig = true;
+	data.gotProcessClasses = true;
+
+	DatabaseConfiguration config;
+	config.initialized = true;
+	config.tLogReplicationFactor = numWorkersPerClass;
+	config.desiredTLogCount = numWorkersPerClass;
+	config.commitProxyCount = numWorkersPerClass;
+	config.grvProxyCount = numWorkersPerClass;
+	config.resolverCount = numWorkersPerClass;
+	config.tLogPolicy = makeReference<PolicyOne>();
+	data.db.config = config;
+	data.db.fullyRecoveredConfig = config;
+
+	// Use findWorkersForConfigurationDispatch — the production code path
+	// that handles full recruitment: TLogs + two-level proxy/resolver recruiting
+	RecruitFromConfigurationRequest req;
+	req.configuration = config;
+	req.recruitSeedServers = false;
+	req.maxOldLogRouters = 0;
+
+	auto reply = data.findWorkersForConfigurationDispatch(req, false);
+
+	ASSERT(reply.tLogs.size() == numWorkersPerClass);
+	ASSERT(reply.commitProxies.size() == numWorkersPerClass);
+	ASSERT(reply.grvProxies.size() == numWorkersPerClass);
+	ASSERT(reply.resolvers.size() == numWorkersPerClass);
+
+	// TLogs are on transaction processes
+	std::set<Optional<Standalone<StringRef>>> txPids;
+	for (const auto& w : transactionWorkers) {
+		txPids.insert(w.locality.processId());
+	}
+	for (const auto& tlog : reply.tLogs) {
+		ASSERT(txPids.contains(tlog.locality.processId()));
+	}
+
+	// check if proxy/resolvers are on stateless
+	std::set<Optional<Standalone<StringRef>>> slPids;
+	for (const auto& w : statelessWorkers) {
+		slPids.insert(w.locality.processId());
+	}
+	for (const auto& cp : reply.commitProxies) {
+		ASSERT(slPids.contains(cp.locality.processId()));
+	}
+	for (const auto& gp : reply.grvProxies) {
+		ASSERT(slPids.contains(gp.locality.processId()));
+	}
+	for (const auto& rs : reply.resolvers) {
+		ASSERT(slPids.contains(rs.locality.processId()));
+	}
+
+	return Void();
+}
+
 } // namespace
