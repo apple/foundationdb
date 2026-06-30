@@ -35,6 +35,7 @@
 		return handleRequestOnMainThread(&handlerName, req, rep, context);                                             \
 	}
 
+// test change
 namespace fdbctl {
 
 template <class Handler, class Request, class Reply>
