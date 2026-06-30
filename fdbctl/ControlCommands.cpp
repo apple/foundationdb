@@ -24,7 +24,6 @@
 #include "fmt/format.h"
 #include <boost/algorithm/string.hpp>
 
-// test change
 namespace fdbctl {
 
 //-- Coordinators ----
