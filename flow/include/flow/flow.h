@@ -67,6 +67,7 @@
 		static_assert(false, "TEST macros are deprecated, please use CODE_PROBE instead");                             \
 	} while (false)
 
+// this file has clang-tidy warnings
 extern Optional<uint64_t> parse_with_suffix(std::string const& toparse, std::string const& default_unit = "");
 extern Optional<uint64_t> parseDuration(std::string const& str, std::string const& defaultUnit = "");
 extern std::string format(const char* form, ...);
