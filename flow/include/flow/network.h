@@ -37,7 +37,6 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/WriteOnlySet.h"
 
-// this file has clang-tidy warnings
 class Void;
 
 std::string toIPVectorString(std::vector<uint32_t> ips);

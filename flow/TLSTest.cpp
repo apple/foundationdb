@@ -28,7 +28,6 @@
 #include "flow/Arena.h"
 #include "flow/MkCert.h"
 
-// this file has clang-tidy errors
 std::FILE* outp = stdout;
 
 template <class... Args>
