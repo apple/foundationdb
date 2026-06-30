@@ -10,10 +10,11 @@ This guide explains how to run ``clang-tidy`` locally so you can fix issues befo
 What clang-tidy checks
 ======================
 
-FoundationDB enables 25 checks configured in the ``.clang-tidy`` file at the repository root. The
+FoundationDB enables 29 checks configured in the ``.clang-tidy`` file at the repository root. The
 intent is to enable more as we go forward. Here are some example rules:
 
-* **12 Bugprone rules** -- catch potential runtime errors (e.g., ``bugprone-use-after-move``, ``bugprone-suspicious-memory-comparison``)
+* **15 Bugprone rules** -- catch potential runtime errors (e.g., ``bugprone-use-after-move``, ``bugprone-suspicious-memory-comparison``)
+* **1 Misc rule** -- catch RAII objects held across coroutine suspension points (``misc-coroutine-hostile-raii``)
 * **4 Modernize rules** -- encourage modern C++ practices (e.g., ``modernize-use-auto``, ``modernize-use-override``)
 * **2 Performance rules** -- avoid unnecessary copies and pointless moves (e.g., ``performance-for-range-copy``, ``performance-move-const-arg``)
 * **7 Readability rules** -- improve code clarity (e.g., ``readability-container-contains``, ``readability-container-size-empty``)
