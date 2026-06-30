@@ -1001,7 +1001,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CC_RERECRUIT_LOG_ROUTER_ENABLED,                      true ); if ( randomize && buggify() ) CC_RERECRUIT_LOG_ROUTER_ENABLED = deterministicRandom()->coinflip();
 
 	//Move Keys
-	init( SHARD_READY_DELAY,                                    0.25 );
+	init( SHARD_READY_DELAY,                                    0.25 ); if( randomize && buggify() ) SHARD_READY_DELAY = 5.0;
 	init( SERVER_READY_QUORUM_INTERVAL,                         std::min(1.0, std::min(MAX_READ_TRANSACTION_LIFE_VERSIONS, MAX_WRITE_TRANSACTION_LIFE_VERSIONS)/(5.0*VERSIONS_PER_SECOND)) );
 	init( SERVER_READY_QUORUM_TIMEOUT,                          15.0 ); if( randomize && buggify() ) SERVER_READY_QUORUM_TIMEOUT = 1.0;
 	init( REMOVE_RETRY_DELAY,                                    1.0 );
