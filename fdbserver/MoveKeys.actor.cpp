@@ -57,6 +57,19 @@ double finishMoveKeysBackoff(int retries) {
 	return std::min(base * (0.75 + 0.5 * deterministicRandom()->random01()), 5.0); // jitter: [0.75x, 1.25x], capped
 }
 
+// Shared retry tail used by the finishMove* post-wait branches that detect a
+// concurrent change (dest reassigned, data move deleted, phase changed):
+// bumps `retries`, throws finish_move_keys_too_many_retries once the cap is
+// exceeded, resets the transaction.
+ACTOR static Future<Void> retryAfterPostWaitChange(int* retries, Transaction* tr) {
+	if (++(*retries) > SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES) {
+		throw finish_move_keys_too_many_retries();
+	}
+	wait(delay(finishMoveKeysBackoff(*retries)));
+	tr->reset();
+	return Void();
+}
+
 struct Shard {
 	Shard() = default;
 	Shard(KeyRangeRef range, const UID& id) : range(range), id(id) {}
@@ -1305,6 +1318,107 @@ ACTOR Future<Void> checkFetchingState(Database cx,
 	}
 }
 
+// System-key reads that finishMoveKeys / finishMoveShards depend on for
+// correctness. Used both before the waitForShardReady wait (in the planning
+// transaction that's then discarded) and after the wait (in the verify+write
+// transaction). Centralizing the reads ensures both sides see the same set,
+// so the post-wait verification can detect any change to state the planning
+// phase relied on.
+struct ShardStateReads {
+	RangeResult uidToTagMap;
+	RangeResult keyServers;
+	Optional<DataMoveMetaData> dataMove; // populated iff dataMoveId.present()
+};
+
+// Read the system-key state needed by finishMoveKeys / finishMoveShards.
+// Called twice per attempt:
+//   1. Before waitForShardReady, to plan the wait (which dest interfaces, etc).
+//   2. After the wait, to verify nothing changed; the caller compares the two
+//      results and retries if they differ.
+ACTOR static Future<ShardStateReads> readShardState(Transaction* tr,
+                                                    MoveKeysLock lock,
+                                                    const DDEnabledState* ddEnabledState,
+                                                    KeyRange range,
+                                                    Optional<UID> dataMoveId,
+                                                    int krmRowLimit,
+                                                    int krmByteLimit) {
+	// Read set scope: moveKeysLock, dataMove (when applicable), serverTags
+	// (uidToTagMap), and keyServers. The original single-transaction code
+	// also read \xff/serverList/ — that's NOT covered here because writes
+	// key off stable UIDs not interfaces, so a serverList change between
+	// read and write can't invalidate the writes. Both code paths (keys and
+	// shards) commit only UID-keyed entries — keyServersValue and
+	// serverKeysValue for finishMoveKeys, plus dataMoveValue for
+	// finishMoveShards — so a serverList change between read and commit
+	// cannot invalidate any persisted state. Server removal is coordinated
+	// under moveKeysLock (re-checked here); dest reassignment is caught by
+	// the caller's dest-UID equality check; an SS that vanished mid-wait
+	// causes the caller's count check to fail before reaching commit. The
+	// serverList read therefore stays inline at the caller (it's needed
+	// once, before the wait, only to build interfaces).
+	wait(checkMoveKeysLock(tr, lock, ddEnabledState));
+
+	state ShardStateReads r;
+	if (dataMoveId.present()) {
+		Optional<Value> val = wait(tr->get(dataMoveKeyFor(dataMoveId.get())));
+		if (val.present()) {
+			r.dataMove = decodeDataMoveValue(val.get());
+		}
+	}
+
+	RangeResult uidToTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+	ASSERT(!uidToTagMap.more && uidToTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+	r.uidToTagMap = uidToTagMap;
+
+	RangeResult keyServers = wait(krmGetRanges(tr, keyServersPrefix, range, krmRowLimit, krmByteLimit));
+	r.keyServers = keyServers;
+
+	return r;
+}
+
+// Post-wait verification used by both finishMoveKeys and finishMoveShards.
+// Sorts `expectedDest`.
+//
+// Returns true if every sub-range in `keyServers` still maps to `expectedDest`.
+static bool destUnchanged(const RangeResult& keyServers,
+                          const RangeResult& uidToTagMap,
+                          std::vector<UID> expectedDest,
+                          Optional<UID> expectedDataMoveId) {
+	std::sort(expectedDest.begin(), expectedDest.end());
+	for (int i = 0; i + 1 < keyServers.size(); ++i) {
+		std::vector<UID> checkSrc, checkDest;
+		UID checkSrcId, checkDestId;
+		decodeKeyServersValue(uidToTagMap, keyServers[i].value, checkSrc, checkDest, checkSrcId, checkDestId);
+		if (expectedDataMoveId.present()) {
+			// Have checkDestId == expectedDataMoveId — the shards path stamps every assigned
+			// sub-range with its dataMoveId, so any mismatch (including an empty-dest
+			// entry, which decodes to UID()) signals a concurrent reassignment.
+			if (checkDestId != expectedDataMoveId.get()) {
+				return false;
+			}
+		} else if (checkDest.empty()) {
+			// Empty-dest entries are tolerated wherever src ⊆ expectedDest. That matches the planning loop's
+			// `alreadyMoved = dest2.empty() && isSubset` branch (see the second planning
+			// loop in finishMoveKeys, around the "first key in iteration sub-range has
+			// already been processed" CODE_PROBE): a sibling iteration of OUR move
+			// already completed this sub-range, src is what was left after team-shrink,
+			// and the upcoming krmSetRangeCoalescing write will collapse it into the
+			// rest. The subset check rules out a foreign completed move whose src is
+			// a different team — clobbering it would overwrite the foreign owner.
+			std::sort(checkSrc.begin(), checkSrc.end());
+			if (!std::includes(expectedDest.begin(), expectedDest.end(), checkSrc.begin(), checkSrc.end())) {
+				return false;
+			}
+			continue;
+		}
+		std::sort(checkDest.begin(), checkDest.end());
+		if (checkDest != expectedDest) {
+			return false;
+		}
+	}
+	return true;
+}
+
 // Set keyServers[keys].src = keyServers[keys].dest and keyServers[keys].dest=[], return when successful
 // keyServers[k].dest must be the same for all k in keys
 // Set serverKeys[dest][keys] = true; serverKeys[src][keys] = false for all src not in dest
@@ -1372,16 +1486,16 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 					wait(finishMoveKeysParallelismLock->take(TaskPriority::DataDistributionLaunch));
 					releaser = FlowLock::Releaser(*finishMoveKeysParallelismLock);
 
-					wait(checkMoveKeysLock(&tr, lock, ddEnabledState));
-
 					state KeyRange currentKeys = KeyRangeRef(begin, keys.end);
-					state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
-					ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
-					state RangeResult keyServers = wait(krmGetRanges(&tr,
-					                                                 keyServersPrefix,
-					                                                 currentKeys,
-					                                                 SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
-					                                                 SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
+					state ShardStateReads planningState = wait(readShardState(&tr,
+					                                                          lock,
+					                                                          ddEnabledState,
+					                                                          currentKeys,
+					                                                          {},
+					                                                          SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
+					                                                          SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
+					state RangeResult UIDtoTagMap = planningState.uidToTagMap;
+					state RangeResult keyServers = planningState.keyServers;
 
 					// Determine the last processed key (which will be the beginning for the next iteration)
 					endKey = keyServers.end()[-1].key;
@@ -1540,16 +1654,26 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 
 					// update client info in case tss mapping changed or server got updated
 
-					// Wait for new destination servers to fetch the keys
+					// Save the read version before dropping the transaction. waitForShardReady
+					// needs a minimum version the dest must reach; saving the older version is
+					// sufficient because servers will already be past it by the time we
+					// re-verify in the second transaction below.
+					state Version readVersion = tr.getReadVersion().get();
+
+					// Drop the transaction BEFORE the potentially long wait. The 15-second
+					// SERVER_READY_QUORUM_TIMEOUT exceeds the ~5-second transaction lifetime,
+					// so waiting inside the transaction guarantees transaction_too_old on
+					// commit when destination servers are slow to respond.
+					tr.reset();
+
+					// Wait for new destination servers to fetch the keys (OUTSIDE any transaction)
 
 					serverReady.reserve(storageServerInterfaces.size());
 					tssReady.reserve(storageServerInterfaces.size());
 					tssReadyInterfs.reserve(storageServerInterfaces.size());
 					for (int s = 0; s < storageServerInterfaces.size(); s++) {
-						serverReady.push_back(waitForShardReady(storageServerInterfaces[s],
-						                                        keys,
-						                                        tr.getReadVersion().get(),
-						                                        GetShardStateRequest::READABLE));
+						serverReady.push_back(waitForShardReady(
+						    storageServerInterfaces[s], keys, readVersion, GetShardStateRequest::READABLE));
 
 						auto tssPair = tssMapping.find(storageServerInterfaces[s].id());
 
@@ -1557,12 +1681,12 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 						    !tssToIgnore.contains(tssPair->second.id())) {
 							tssReadyInterfs.push_back(tssPair->second);
 							tssReady.push_back(waitForShardReady(
-							    tssPair->second, keys, tr.getReadVersion().get(), GetShardStateRequest::READABLE));
+							    tssPair->second, keys, readVersion, GetShardStateRequest::READABLE));
 						}
 					}
 
 					// Wait for all storage server moves, and explicitly swallow errors for tss ones with
-					// waitForAllReady If this takes too long the transaction will time out and retry, which is ok
+					// waitForAllReady. A long timeout is safe here — no transaction clock is ticking.
 					wait(timeout(waitForAll(serverReady) && waitForAllReady(tssReady),
 					             SERVER_KNOBS->SERVER_READY_QUORUM_TIMEOUT,
 					             Void(),
@@ -1616,11 +1740,66 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 					}
 
 					if (count == dest.size()) {
+						// All destination servers are ready. Open a fresh transaction to
+						// re-verify dest hasn't changed during the wait, then commit.
+						tr.trState->taskID = TaskPriority::MoveKeys;
+						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+						tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						state ShardStateReads reread = wait(readShardState(&tr,
+						                                                   lock,
+						                                                   ddEnabledState,
+						                                                   currentKeys,
+						                                                   {},
+						                                                   SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
+						                                                   SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
+
+						// Re-truncate currentKeys/endKey to the boundary the reread
+						// actually covered. krmGetRanges only emits the synthetic
+						// upper-bound row when its row/byte limit is NOT hit
+						// (see krmDecodeRanges in KeyRangeMap.cpp), so if a
+						// concurrent split or value-size growth pushed the byte
+						// limit forward, reread.keyServers.back().key can be
+						// strictly less than the planning-era currentKeys.end.
+						// The destUnchanged loop below only validates sub-ranges
+						// within reread.keyServers; the krmSetRangeCoalescing
+						// commit would otherwise clear and rewrite an
+						// unverified-and-possibly-foreign tail. Common under
+						// MOVE_KEYS_KRM_LIMIT buggify (2 rows -- which happens often
+						// in simulation).
+						state Key rereadEnd = reread.keyServers.end()[-1].key;
+						// The reread is bounded by `currentKeys` (the upper-bound
+						// passed to readShardState), so a `>` result would mean
+						// readShardState broke its contract — fail loudly rather
+						// than silently expand the commit past the verified end.
+						ASSERT(rereadEnd <= currentKeys.end);
+						if (rereadEnd < currentKeys.end) {
+							CODE_PROBE(true,
+							           "finishMoveKeys reread keyServers boundary shorter than planning",
+							           probe::decoration::rare);
+							currentKeys = KeyRangeRef(currentKeys.begin, rereadEnd);
+							endKey = rereadEnd;
+						}
+
+						// Verify every sub-range still maps to the planned dest (or has
+						// been already-moved-into-empty by a sibling iteration). If
+						// another DD reassigned a sub-range during the wait, retry
+						// rather than clobber its write with our stale plan.
+						if (!destUnchanged(reread.keyServers, reread.uidToTagMap, dest, /*expectedDataMoveId=*/{})) {
+							CODE_PROBE(
+							    true, "finishMoveKeys dest changed during waitForShardReady", probe::decoration::rare);
+							TraceEvent(SevWarn, "FinishMoveKeysDestChanged", relocationIntervalId)
+							    .detail("KeyBegin", keys.begin)
+							    .detail("KeyEnd", keys.end)
+							    .detail("OrigDest", describe(dest));
+							wait(retryAfterPostWaitChange(&retries, &tr));
+							continue;
+						}
+
 						// update keyServers, serverKeys
 						// SOMEDAY: Doing these in parallel is safe because none of them overlap or touch (one per
 						// server)
 						wait(krmSetRangeCoalescing(
-						    &tr, keyServersPrefix, currentKeys, keys, keyServersValue(UIDtoTagMap, dest)));
+						    &tr, keyServersPrefix, currentKeys, keys, keyServersValue(reread.uidToTagMap, dest)));
 
 						std::set<UID>::iterator asi = allServers.begin();
 						std::vector<Future<Void>> actors;
@@ -1649,8 +1828,11 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 						retries = 0;
 						break;
 					}
-					// This leads to a count of transactions starting that exceeds the sum of
-					// committed or aborted, but this is intentional here.
+					// Not all destination servers ready yet — no hard cap on retries.
+					// The waitForShardReady timeout (15s) bounds each attempt's wait,
+					// and DD's logWarningAfter watchdog surfaces the situation if it
+					// persists. Bounding the retry count converts patient progress
+					// (e.g. a dest SS recovering after chaos) into a DD-stuck loop.
 					tr.reset();
 				} catch (Error& error) {
 					txnAborted->increment(1);
@@ -2194,8 +2376,11 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 	state bool cancelDataMove = false;
 	state Severity sevDm = static_cast<Severity>(SERVER_KNOBS->PHYSICAL_SHARD_MOVE_LOG_SEVERITY);
 
-	wait(finishMoveKeysParallelismLock->take(TaskPriority::DataDistributionLaunch));
-	state FlowLock::Releaser releaser = FlowLock::Releaser(*finishMoveKeysParallelismLock);
+	// Take per-iteration in the loop below (mirroring finishMoveKeys): the lock
+	// must be released before the long waitForShardReady and re-taken on every
+	// retry, so the MOVE_KEYS_PARALLELISM throttle actually bounds concurrency
+	// across attempts rather than only the first one.
+	state FlowLock::Releaser releaser;
 	state bool runPreCheck = true;
 	state bool skipTss = false;
 	state double ssReadyTime = std::numeric_limits<double>::max();
@@ -2222,8 +2407,20 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-				wait(checkMoveKeysLock(&tr, lock, ddEnabledState));
+				releaser.release();
+				wait(finishMoveKeysParallelismLock->take(TaskPriority::DataDistributionLaunch));
+				releaser = FlowLock::Releaser(*finishMoveKeysParallelismLock);
 
+				// dataMove is read inline (not via readShardState) because:
+				//   1. Its presence/phase drives a possible early-exit write
+				//      (cancelDataMove -> set Deleting -> commit -> throw),
+				//      which can't sit inside the shared read helper.
+				//   2. dataMove.ranges.front() supplies `range`, which the
+				//      readShardState call below needs as input.
+				// The post-cancel safety-relevant reads (serverTags +
+				// keyServers, plus a redundant moveKeysLock check) go through
+				// readShardState so they stay in sync with the post-wait
+				// re-read in txn 2.
 				Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveId)));
 				if (val.present()) {
 					dataMove = decodeDataMoveValue(val.get());
@@ -2260,14 +2457,15 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					return Void();
 				}
 
-				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
-				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
-
-				state RangeResult keyServers = wait(krmGetRanges(&tr,
-				                                                 keyServersPrefix,
-				                                                 range,
-				                                                 SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
-				                                                 SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
+				state ShardStateReads planningState = wait(readShardState(&tr,
+			                                                          lock,
+			                                                          ddEnabledState,
+			                                                          range,
+			                                                          /*dataMoveId=*/{},
+			                                                          SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
+			                                                          SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
+				state RangeResult UIDtoTagMap = planningState.uidToTagMap;
+				state RangeResult keyServers = planningState.keyServers;
 				ASSERT(!keyServers.empty());
 				range = KeyRangeRef(range.begin, keyServers.back().key);
 				ASSERT(!range.empty());
@@ -2362,11 +2560,17 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 
 				// update client info in case tss mapping changed or server got updated
 
+				// Save the read version before dropping the transaction (mirrors the
+				// pattern in finishMoveKeys above): waitForShardReady needs a minimum
+				// version the dest must reach; servers will already be past it by the
+				// time we re-verify in the second transaction below.
+				state Version readVersion = tr.getReadVersion().get();
+
 				// Wait for new destination servers to fetch the data range.
 				serverReady.reserve(storageServerInterfaces.size());
 				for (int s = 0; s < storageServerInterfaces.size(); s++) {
 					serverReady.push_back(waitForShardReady(
-					    storageServerInterfaces[s], range, tr.getReadVersion().get(), GetShardStateRequest::READABLE));
+					    storageServerInterfaces[s], range, readVersion, GetShardStateRequest::READABLE));
 
 					if (skipTss)
 						continue;
@@ -2376,7 +2580,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					if (tssPair != tssMapping.end()) {
 						tssReadyInterfs.push_back(tssPair->second);
 						tssReady.push_back(waitForShardReady(
-						    tssPair->second, range, tr.getReadVersion().get(), GetShardStateRequest::READABLE));
+						    tssPair->second, range, readVersion, GetShardStateRequest::READABLE));
 					}
 				}
 
@@ -2385,8 +2589,15 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				    .detail("NewDestinations", describe(newDestinations))
 				    .detail("DataMove", dataMove.toString());
 
-				// Wait for all storage server moves, and explicitly swallow errors for tss ones with
-				// waitForAllReady If this takes too long the transaction will time out and retry, which is ok
+				// Drop the transaction BEFORE the potentially long wait. The 15 s
+				// SERVER_READY_QUORUM_TIMEOUT exceeds the ~5 s txn lifetime; waiting
+				// inside the transaction guarantees transaction_too_old on commit
+				// when destination servers are slow to respond. Same pattern as in
+				// finishMoveKeys above.
+				tr.reset();
+
+				// Wait OUTSIDE any transaction. A long timeout is safe — no
+				// transaction clock is ticking.
 				wait(timeout(waitForAll(serverReady) && waitForAllReady(tssReady),
 				             SERVER_KNOBS->SERVER_READY_QUORUM_TIMEOUT,
 				             Void(),
@@ -2429,6 +2640,84 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 
 				if (readyServers.size() == newDestinations.size()) {
 
+					// All destination servers are ready. Open a fresh transaction to
+					// re-verify dataMove and shard assignments haven't changed during
+					// the wait, then commit.
+					tr.trState->taskID = TaskPriority::MoveKeys;
+					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+					state ShardStateReads reread = wait(readShardState(&tr,
+					                                                   lock,
+					                                                   ddEnabledState,
+					                                                   range,
+					                                                   dataMoveId,
+					                                                   SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
+					                                                   SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
+
+					if (!reread.dataMove.present()) {
+						CODE_PROBE(true,
+						           "finishMoveShards data move deleted during waitForShardReady",
+						           probe::decoration::rare);
+						TraceEvent(SevWarn, "FinishMoveShardsDataMoveDeletedAfterWait", relocationIntervalId)
+						    .detail("DataMoveID", dataMoveId);
+						runPreCheck = false;
+						wait(retryAfterPostWaitChange(&retries, &tr));
+						continue;
+					}
+					if (reread.dataMove.get().getPhase() != DataMoveMetaData::Running) {
+						CODE_PROBE(true,
+						           "finishMoveShards data move phase changed during waitForShardReady",
+						           probe::decoration::rare);
+						TraceEvent(SevWarn, "FinishMoveShardsPhaseChangedAfterWait", relocationIntervalId)
+						    .detail("DataMoveID", dataMoveId)
+						    .detail("Phase", static_cast<int>(reread.dataMove.get().getPhase()));
+						runPreCheck = false;
+						wait(retryAfterPostWaitChange(&retries, &tr));
+						continue;
+					}
+					ASSERT(!reread.keyServers.empty());
+
+					// Re-truncate `range` to the boundary the reread actually
+					// covered. krmGetRanges only emits the synthetic upper-bound
+					// row when its row/byte limit is NOT hit (see krmDecodeRanges
+					// in KeyRangeMap.cpp), so if a concurrent split or value-size
+					// growth pushed the byte limit forward,
+					// reread.keyServers.back().key can be strictly less than the
+					// planning-era range.end. The destUnchanged loop only
+					// validates sub-ranges within reread.keyServers; the
+					// krmSetRangeCoalescing commits below would otherwise clear
+					// and rewrite an unverified-and-possibly-foreign tail.
+					state Key rereadEnd = reread.keyServers.back().key;
+					// The reread is bounded by `range`, so a `>` result would
+					// mean readShardState broke its contract — fail loudly
+					// rather than silently expand the commit past the verified
+					// end.
+					ASSERT(rereadEnd <= range.end);
+					if (rereadEnd < range.end) {
+						CODE_PROBE(true,
+						           "finishMoveShards reread keyServers boundary shorter than planning",
+						           probe::decoration::rare);
+						range = KeyRangeRef(range.begin, rereadEnd);
+					}
+
+					if (!destUnchanged(reread.keyServers, reread.uidToTagMap, destServers, dataMoveId)) {
+						CODE_PROBE(
+						    true, "finishMoveShards dest changed during waitForShardReady", probe::decoration::rare);
+						TraceEvent(SevWarn, "FinishMoveShardsDestChanged", relocationIntervalId)
+						    .detail("DataMoveID", dataMoveId)
+						    .detail("Range", range);
+						runPreCheck = false;
+						wait(retryAfterPostWaitChange(&retries, &tr));
+						continue;
+					}
+
+					// Use the freshly-read dataMove snapshot for partial-complete /
+					// checkpoint-deletion / dataMoveValue writes below; the
+					// function-level `dataMove` retains the pre-wait snapshot used
+					// only by the post-loop trace at the end of the function.
+					state DataMoveMetaData postWaitDataMove = reread.dataMove.get();
+
 					std::vector<Future<Void>> actors;
 					actors.push_back(krmSetRangeCoalescing(
 					    &tr, keyServersPrefix, range, allKeys, keyServersValue(destServers, {}, dataMoveId, UID())));
@@ -2446,12 +2735,12 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 						    .detail("StorageServerID", ssId)
 						    .detail("KeyRange", range)
 						    .detail("ShardID", destHasServer ? dataMoveId : UID())
-						    .detail("DataMove", dataMove.toString());
+						    .detail("DataMove", postWaitDataMove.toString());
 					}
 
 					wait(waitForAll(actors));
 
-					if (range.end == dataMove.ranges.front().end) {
+					if (range.end == postWaitDataMove.ranges.front().end) {
 						if (bulkLoadTaskState.present()) {
 							state BulkLoadTaskState newBulkLoadTaskState;
 							try {
@@ -2480,27 +2769,27 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 							    .detail("DataMoveID", dataMoveId)
 							    .detail("JobID", newBulkLoadTaskState.getJobId())
 							    .detail("TaskID", newBulkLoadTaskState.getTaskId());
-							dataMove.bulkLoadTaskState = newBulkLoadTaskState;
+							postWaitDataMove.bulkLoadTaskState = newBulkLoadTaskState;
 						}
-						wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
+						wait(deleteCheckpoints(&tr, postWaitDataMove.checkpoints, dataMoveId));
 						tr.clear(dataMoveKeyFor(dataMoveId));
 						TraceEvent(sevDm, "FinishMoveShardsDeleteMetaData", relocationIntervalId)
-						    .detail("DataMove", dataMove.toString());
+						    .detail("DataMove", postWaitDataMove.toString());
 					} else if (!bulkLoadTaskState.present()) {
 						// Bulk Loading data move does not allow partial complete
 						TraceEvent(SevInfo, "FinishMoveShardsPartialComplete", relocationIntervalId)
 						    .detail("DataMoveID", dataMoveId)
 						    .detail("CurrentRange", range)
-						    .detail("NewDataMoveMetaData", dataMove.toString())
-						    .detail("DataMove", dataMove.toString());
-						dataMove.ranges.front() = KeyRangeRef(range.end, dataMove.ranges.front().end);
-						tr.set(dataMoveKeyFor(dataMoveId), dataMoveValue(dataMove));
+						    .detail("NewDataMoveMetaData", postWaitDataMove.toString())
+						    .detail("DataMove", postWaitDataMove.toString());
+						postWaitDataMove.ranges.front() = KeyRangeRef(range.end, postWaitDataMove.ranges.front().end);
+						tr.set(dataMoveKeyFor(dataMoveId), dataMoveValue(postWaitDataMove));
 					}
 
 					wait(tr.commit());
 					txnCommitted->increment(1);
 
-					if (range.end == dataMove.ranges.front().end && bulkLoadTaskState.present()) {
+					if (range.end == postWaitDataMove.ranges.front().end && bulkLoadTaskState.present()) {
 						Version commitVersion = tr.getCommittedVersion();
 						TraceEvent(
 						    bulkLoadVerboseEventSev(), "DDBulkLoadTaskPersistCompleteState", relocationIntervalId)
@@ -2511,16 +2800,42 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 						    .detail("CommitVersion", commitVersion);
 					}
 
-					if (range.end == dataMove.ranges.front().end) {
+					if (range.end == postWaitDataMove.ranges.front().end) {
 						// Post validate consistency of update of keyServers and serverKeys
 						if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
 							wait(auditLocationMetadataPostCheck(
-							    occ, dataMove.ranges.front(), "finishMoveShards_postcheck", relocationIntervalId));
+							    occ, postWaitDataMove.ranges.front(), "finishMoveShards_postcheck", relocationIntervalId));
 						}
 						break;
 					}
+					continue;
 				} else {
+					// Slow-but-not-stuck dest readiness: do NOT cap with a hard
+					// throw here. The waitForShardReady timeout (15s) bounds
+					// each attempt's wait, and DD's logWarningAfter watchdog
+					// already surfaces the situation if it persists. Bounding
+					// the retry count converts patient progress (e.g. a dest
+					// SS recovering after chaos in tests like ConfigureLocked)
+					// into a DD-stuck loop: each attempt throws after ~50s
+					// of cumulative backoff and DD immediately re-queues the
+					// same move, repeating until QuietDatabase times out.
+					// The three post-wait branches (DestChanged /
+					// DataMoveDeletedAfterWait / PhaseChangedAfterWait)
+					// still use retryAfterPostWaitChange because they detect
+					// real concurrent reassignments, not slowness.
+					++retries;
+					if (retries % 10 == 0) {
+						TraceEvent(SevWarnAlways, "RelocateShard_FinishMoveShardsDestNotReady", relocationIntervalId)
+						    .detail("DataMoveID", dataMoveId)
+						    .detail("Range", range)
+						    .detail("Retries", retries)
+						    .detail("ReadyCount", readyServers.size())
+						    .detail("DestCount", newDestinations.size());
+					}
+					runPreCheck = false;
+					wait(delay(finishMoveKeysBackoff(retries)));
 					tr.reset();
+					continue;
 				}
 			} catch (Error& error) {
 				txnAborted->increment(1);
