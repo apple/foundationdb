@@ -1271,7 +1271,7 @@ ACTOR static Future<Void> invalidateCacheByAddresses(DatabaseContext* self,
 	    .detail("AddressCount", addresses.size())
 	    .detail("InvalidatedRanges", rangesToInvalidate.size())
 	    .detail("RangeChunkThreshold", rangeChunkThreshold)
-	    .detail("Phase2RangesScanned", phase2Idx + 1)
+	    .detail("Phase2RangesScanned", phase2Idx)
 	    .detail("Phase2Yields", phase2Yields)
 	    .detail("Phase2Duration", now() - phase2StartT)
 	    .detail("OverallDuration", now() - startT);
