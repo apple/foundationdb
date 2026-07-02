@@ -1181,7 +1181,8 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 				ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 				rrs.dataMoveId = rd.dataMove->meta.id;
 			} else {
-				ASSERT_WE_THINK(!rd.isRestore()); // Restored data move should not overlap.
+				// Restored data moves can split ordinary relocations, but not other restored data moves.
+				ASSERT_WE_THINK(!rd.isRestore() || !rrs.isRestore());
 				// TODO(psm): The shard id is determined by DD.
 				rrs.dataMove.reset();
 				if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
