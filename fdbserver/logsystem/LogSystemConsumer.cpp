@@ -795,8 +795,11 @@ Reference<IReplayPeekCursor> LogSystemConsumer::peekLogRouter(
 		}
 		firstOld = false;
 	}
+	// No current or historical log set can serve this router at the requested begin version.
+	// Represent that state as an already-exhausted cursor so callers can wait for the
+	// log system to change instead of repeatedly treating the placeholder like a stuck peek.
 	return makeReference<ServerPeekCursor>(
-	    Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, end.get(), false, false);
+	    Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, begin, false, false);
 }
 
 void LogSystemConsumer::popLogRouter(Version upTo, Tag tag, Version durableKnownCommittedVersion, int8_t popLocality) {
