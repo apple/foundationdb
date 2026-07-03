@@ -1359,8 +1359,8 @@ public:
 
 	static std::string logVersionFolderStringForRangePartitioned(Version v, Version baseVersion) {
 		Version directoryVersion =
-		    baseVersion + ((v - baseVersion) / CLIENT_KNOBS->BACKUP_RANGE_PARTITIONED_VDIR_INTERVAL) *
-		                      CLIENT_KNOBS->BACKUP_RANGE_PARTITIONED_VDIR_INTERVAL;
+		    baseVersion + ((v - baseVersion) / CLIENT_KNOBS->RANGE_PARTITIONED_BACKUP_VDIR_INTERVAL) *
+		                      CLIENT_KNOBS->RANGE_PARTITIONED_BACKUP_VDIR_INTERVAL;
 		std::string vFixed = format("%019lld", directoryVersion);
 		return format("rlogs/%s/", vFixed.c_str());
 	}

@@ -317,7 +317,7 @@ public:
 	Future<Void> discontinueBackup(Database cx, Key tagName) {
 		return runRYWTransaction(
 		           cx, [=](Reference<ReadYourWritesTransaction> tr) { return discontinueBackup(tr, tagName); }) +
-		       checkAndDisableBackupWorkers(cx) + checkAndDisableRangeBackupWorkers(cx);
+		       checkAndDisableBackupWorkers(cx) + checkAndDisableRangePartitionedBackupWorkers(cx);
 	}
 
 	// Terminate an ongoing backup, without waiting for the backup to finish.
@@ -332,14 +332,14 @@ public:
 		// First abort the backup, then check and disable backup workers if needed.
 		return runRYWTransaction(cx,
 		                         [=](Reference<ReadYourWritesTransaction> tr) { return abortBackup(tr, tagName); }) +
-		       checkAndDisableBackupWorkers(cx) + checkAndDisableRangeBackupWorkers(cx);
+		       checkAndDisableBackupWorkers(cx) + checkAndDisableRangePartitionedBackupWorkers(cx);
 	}
 
 	// Disable backup workers if no active partitioned backup is running.
 	Future<Void> checkAndDisableBackupWorkers(Database cx);
 
 	// Disable range backup workers if no active range-partitioned backup is running.
-	Future<Void> checkAndDisableRangeBackupWorkers(Database cx);
+	Future<Void> checkAndDisableRangePartitionedBackupWorkers(Database cx);
 
 	Future<std::string> getStatus(Database cx, ShowErrors, std::string tagName);
 	Future<std::string> getStatusJSON(Database cx, std::string tagName);

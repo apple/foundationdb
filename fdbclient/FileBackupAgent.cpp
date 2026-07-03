@@ -4245,7 +4245,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 			if (mutationLogType.get().get() == MutationLogType::PARTITIONED_LOG) {
 				co_await enableBackupWorker(cx);
 			} else if (mutationLogType.get().get() == MutationLogType::RANGE_PARTITIONED_LOG) {
-				co_await enableRangeBackupWorker(cx);
+				co_await enableRangePartitionedBackupWorker(cx);
 			}
 		}
 
@@ -7614,7 +7614,7 @@ public:
 		co_return;
 	}
 
-	static Future<Void> checkAndDisableRangeBackupWorkers(Database cx) {
+	static Future<Void> checkAndDisableRangePartitionedBackupWorkers(Database cx) {
 		bool running = co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<bool> {
 			bool r = co_await anyRangePartitionedBackupRunning(tr);
 			if (!r) {
@@ -7624,7 +7624,7 @@ public:
 			co_return r;
 		});
 		if (!running) {
-			co_await disableRangeBackupWorker(cx);
+			co_await disableRangePartitionedBackupWorker(cx);
 		}
 		co_return;
 	}
@@ -8738,8 +8738,8 @@ Future<Void> FileBackupAgent::checkAndDisableBackupWorkers(Database cx) {
 	return FileBackupAgentImpl::checkAndDisableBackupWorkers(cx);
 }
 
-Future<Void> FileBackupAgent::checkAndDisableRangeBackupWorkers(Database cx) {
-	return FileBackupAgentImpl::checkAndDisableRangeBackupWorkers(cx);
+Future<Void> FileBackupAgent::checkAndDisableRangePartitionedBackupWorkers(Database cx) {
+	return FileBackupAgentImpl::checkAndDisableRangePartitionedBackupWorkers(cx);
 }
 
 Future<std::string> FileBackupAgent::getStatus(Database cx, ShowErrors showErrors, std::string tagName) {
