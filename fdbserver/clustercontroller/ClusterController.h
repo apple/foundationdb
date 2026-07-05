@@ -2937,6 +2937,10 @@ public:
 		    pid == masterProcessId.get()) {
 			return false;
 		}
+		auto masterWorker = id_worker.find(masterProcessId.get());
+		if (masterWorker == id_worker.end() || !workerAvailable(masterWorker->second, true)) {
+			return false;
+		}
 		return isUsedNotMaster(pid);
 	}
 

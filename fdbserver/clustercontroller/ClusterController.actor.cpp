@@ -3307,6 +3307,44 @@ TEST_CASE("/fdbserver/clustercontroller/staleWatcherCannotRemoveReplacement") {
 	return Void();
 }
 
+TEST_CASE("/fdbserver/clustercontroller/unverifiedMasterCannotWinSingletonRecruitment") {
+	state ClusterControllerData data(ClusterControllerFullInterface(),
+	                                 LocalityData(),
+	                                 ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                                     new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                                 makeReference<AsyncVar<Optional<UID>>>());
+	state LocalityData masterLocality;
+	masterLocality.set(LocalityData::keyProcessId, Standalone<StringRef>(std::string{ "unverified-master" }));
+	state WorkerInterface master(masterLocality);
+	master.initEndpoints();
+	master.storage.getEndpoint(TaskPriority::Worker);
+
+	state LocalityData candidateLocality;
+	candidateLocality.set(LocalityData::keyProcessId, Standalone<StringRef>(std::string{ "singleton-candidate" }));
+	state WorkerInterface candidate(candidateLocality);
+	candidate.initEndpoints();
+	candidate.storage.getEndpoint(TaskPriority::Worker);
+
+	state Optional<Standalone<StringRef>> masterProcessId = master.locality.processId();
+	state Optional<Standalone<StringRef>> candidateProcessId = candidate.locality.processId();
+	ASSERT(masterProcessId.present());
+	ASSERT(candidateProcessId.present());
+	data.masterProcessId = masterProcessId;
+	// Make the candidate count as used by a non-singleton role so the master would otherwise be preferred.
+	data.clusterControllerProcessId = candidateProcessId;
+	data.id_worker[masterProcessId].details =
+	    WorkerDetails(master, ProcessClass(ProcessClass::StorageClass, ProcessClass::CommandLineSource), false, true);
+
+	state WorkerDetails candidateDetails(
+	    candidate, ProcessClass(ProcessClass::StorageClass, ProcessClass::CommandLineSource), false, true);
+	ASSERT(!data.id_worker[masterProcessId].verified);
+	ASSERT(!data.onMasterIsBetter(candidateDetails, ProcessClass::DataDistributor));
+
+	data.id_worker[masterProcessId].verified = true;
+	ASSERT(data.onMasterIsBetter(candidateDetails, ProcessClass::DataDistributor));
+	return Void();
+}
+
 // Tests `ClusterControllerData::updateWorkerHealth()` can update `ClusterControllerData::workerHealth`
 // based on `UpdateWorkerHealth` request correctly.
 TEST_CASE("/fdbserver/clustercontroller/updateWorkerHealth") {
