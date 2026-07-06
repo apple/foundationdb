@@ -2149,160 +2149,161 @@ Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 
 constexpr int CDC_PROXY_ASSIGNMENT_SCAN_LIMIT = 10000;
 
-Future<Void> monitorCDCProxyAssignments(ClusterControllerData* self) {
+Future<Void> monitorCDCProxyAssignmentsPass(ClusterControllerData* self) {
 	ClusterControllerData::DBInfo* db = &self->db;
+	ReadYourWritesTransaction tr(db->db);
 	while (true) {
-		ReadYourWritesTransaction tr(db->db);
-		while (true) {
-			Error err;
-			try {
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-				// Install both wakeups before scanning metadata, so changes during the scan
-				// force a retry or wake the committed watch.
-				Future<Void> endpointChangeFuture = db->clientInfo->onChange();
-				Future<Void> assignmentChangeFuture = tr.watch(cdcProxyAssignmentChangeKey);
-				++self->cdcProxyAssignmentScans;
-				std::map<CDCStreamId, UID> streamToCDCProxyId;
-				const std::vector<CDCProxyInterface> availableProxies = db->clientInfo->get().cdcProxies;
-				std::unordered_map<UID, UID> replacementByFailedProxy;
-				size_t replacementIndex = 0;
-				bool repairedAssignment = false;
-				std::vector<CDCStreamId> activeStreamIds;
-				std::map<CDCStreamId, UID> durableAssignments;
-				Key begin = cdcStreamKeys.begin;
-				while (begin < cdcStreamKeys.end) {
-					RangeResult streams =
-					    co_await tr.getRange(KeyRangeRef(begin, cdcStreamKeys.end), CDC_PROXY_ASSIGNMENT_SCAN_LIMIT);
-					for (const auto& stream : streams) {
-						activeStreamIds.push_back(decodeCDCStreamKey(stream.key));
-					}
-					if (!streams.more) {
-						break;
-					}
-					begin = keyAfter(streams.back().key);
+			// Install both wakeups before scanning metadata, so changes during the scan
+			// force a retry or wake the committed watch.
+			Future<Void> endpointChangeFuture = db->clientInfo->onChange();
+			Future<Void> assignmentChangeFuture = tr.watch(cdcProxyAssignmentChangeKey);
+			++self->cdcProxyAssignmentScans;
+			std::map<CDCStreamId, UID> streamToCDCProxyId;
+			const std::vector<CDCProxyInterface> availableProxies = db->clientInfo->get().cdcProxies;
+			std::unordered_map<UID, UID> replacementByFailedProxy;
+			size_t replacementIndex = 0;
+			bool repairedAssignment = false;
+			std::vector<CDCStreamId> activeStreamIds;
+			std::map<CDCStreamId, UID> durableAssignments;
+			Key begin = cdcStreamKeys.begin;
+			while (begin < cdcStreamKeys.end) {
+				RangeResult streams =
+				    co_await tr.getRange(KeyRangeRef(begin, cdcStreamKeys.end), CDC_PROXY_ASSIGNMENT_SCAN_LIMIT);
+				for (const auto& stream : streams) {
+					activeStreamIds.push_back(decodeCDCStreamKey(stream.key));
 				}
-
-				begin = cdcProxyKeys.begin;
-				while (begin < cdcProxyKeys.end) {
-					RangeResult assignments =
-					    co_await tr.getRange(KeyRangeRef(begin, cdcProxyKeys.end), CDC_PROXY_ASSIGNMENT_SCAN_LIMIT);
-					for (const auto& assignment : assignments) {
-						const auto [streamId, proxyId] = decodeCDCProxyKey(assignment.key);
-						const auto [_, inserted] = durableAssignments.emplace(streamId, proxyId);
-						ASSERT_WE_THINK(inserted);
-					}
-					if (!assignments.more) {
-						break;
-					}
-					begin = keyAfter(assignments.back().key);
+				if (!streams.more) {
+					break;
 				}
+				begin = keyAfter(streams.back().key);
+			}
 
-				const std::map<CDCStreamId, UID> previouslyPublishedAssignments =
-				    db->clientInfo->get().streamToCDCProxyId;
-				for (const CDCStreamId streamId : activeStreamIds) {
-					auto durableAssignment = durableAssignments.find(streamId);
-					if (durableAssignment != durableAssignments.end()) {
-						const UID proxyId = durableAssignment->second;
-						UID resolvedProxyId = proxyId;
-						const bool hasOwner = containsCDCProxy(availableProxies, proxyId);
-						if (!availableProxies.empty() && !hasOwner) {
-							auto replacement = replacementByFailedProxy.find(proxyId);
-							if (replacement == replacementByFailedProxy.end()) {
-								resolvedProxyId = availableProxies[replacementIndex++ % availableProxies.size()].id();
-								replacementByFailedProxy.emplace(proxyId, resolvedProxyId);
-							} else {
-								resolvedProxyId = replacement->second;
-							}
-							tr.clear(cdcProxyKeyFor(streamId, proxyId));
-							tr.set(cdcProxyKeyFor(streamId, resolvedProxyId), Value());
-							repairedAssignment = true;
-							CODE_PROBE(
-							    true, "CDC stream assignment is repaired after owner loss", probe::decoration::rare);
-							TraceEvent("CDCProxyAssignmentRepaired")
-							    .detail("StreamId", streamId)
-							    .detail("OldCDCProxyID", proxyId)
-							    .detail("NewCDCProxyID", resolvedProxyId);
-						}
-						const auto [_, inserted] = streamToCDCProxyId.emplace(streamId, resolvedProxyId);
-						ASSERT_WE_THINK(inserted);
-					}
-					if (durableAssignment == durableAssignments.end() && !availableProxies.empty()) {
-						auto previousAssignment = previouslyPublishedAssignments.find(streamId);
-						UID resolvedProxyId;
-						if (previousAssignment != previouslyPublishedAssignments.end() &&
-						    containsCDCProxy(availableProxies, previousAssignment->second)) {
-							resolvedProxyId = previousAssignment->second;
-						} else {
+			begin = cdcProxyKeys.begin;
+			while (begin < cdcProxyKeys.end) {
+				RangeResult assignments =
+				    co_await tr.getRange(KeyRangeRef(begin, cdcProxyKeys.end), CDC_PROXY_ASSIGNMENT_SCAN_LIMIT);
+				for (const auto& assignment : assignments) {
+					const auto [streamId, proxyId] = decodeCDCProxyKey(assignment.key);
+					const auto [_, inserted] = durableAssignments.emplace(streamId, proxyId);
+					ASSERT_WE_THINK(inserted);
+				}
+				if (!assignments.more) {
+					break;
+				}
+				begin = keyAfter(assignments.back().key);
+			}
+
+			const std::map<CDCStreamId, UID> previouslyPublishedAssignments = db->clientInfo->get().streamToCDCProxyId;
+			for (const CDCStreamId streamId : activeStreamIds) {
+				auto durableAssignment = durableAssignments.find(streamId);
+				if (durableAssignment != durableAssignments.end()) {
+					const UID proxyId = durableAssignment->second;
+					UID resolvedProxyId = proxyId;
+					const bool hasOwner = containsCDCProxy(availableProxies, proxyId);
+					if (!availableProxies.empty() && !hasOwner) {
+						auto replacement = replacementByFailedProxy.find(proxyId);
+						if (replacement == replacementByFailedProxy.end()) {
 							resolvedProxyId = availableProxies[replacementIndex++ % availableProxies.size()].id();
+							replacementByFailedProxy.emplace(proxyId, resolvedProxyId);
+						} else {
+							resolvedProxyId = replacement->second;
 						}
-						tr.clear(cdcProxyRangeFor(streamId));
+						tr.clear(cdcProxyKeyFor(streamId, proxyId));
 						tr.set(cdcProxyKeyFor(streamId, resolvedProxyId), Value());
 						repairedAssignment = true;
-						CODE_PROBE(true, "CDC stream assignment is repaired after missing owner");
-						TraceEvent("CDCProxyAssignmentMissingRepaired")
+						CODE_PROBE(true, "CDC stream assignment is repaired after owner loss", probe::decoration::rare);
+						TraceEvent("CDCProxyAssignmentRepaired")
 						    .detail("StreamId", streamId)
-						    .detail("CDCProxyID", resolvedProxyId)
-						    .detail("HadPublishedAssignment",
-						            previousAssignment != previouslyPublishedAssignments.end());
-						const auto [_, inserted] = streamToCDCProxyId.emplace(streamId, resolvedProxyId);
-						ASSERT_WE_THINK(inserted);
+						    .detail("OldCDCProxyID", proxyId)
+						    .detail("NewCDCProxyID", resolvedProxyId);
 					}
+					const auto [_, inserted] = streamToCDCProxyId.emplace(streamId, resolvedProxyId);
+					ASSERT_WE_THINK(inserted);
 				}
-				TraceEvent("CDCProxyAssignmentsScanned")
-				    .detail("AssignmentCount", streamToCDCProxyId.size())
-				    .detail("ActiveStreamCount", activeStreamIds.size())
-				    .detail("CDCProxyCount", availableProxies.size())
-				    .detail("DurableAssignmentCount", durableAssignments.size())
-				    .detail("AssignmentScanLimit", CDC_PROXY_ASSIGNMENT_SCAN_LIMIT)
-				    .detail("TransactionKind", "ReadYourWrites")
-				    .detail("ClientAssignmentCount", db->clientInfo->get().streamToCDCProxyId.size());
-
-				if (!streamToCDCProxyId.empty() && availableProxies.empty()) {
-					CODE_PROBE(
-					    true, "CDC assignments wait while no proxy endpoints are published", probe::decoration::rare);
-					co_await tr.commit();
-					co_await (endpointChangeFuture || assignmentChangeFuture);
-					break;
+				if (durableAssignment == durableAssignments.end() && !availableProxies.empty()) {
+					auto previousAssignment = previouslyPublishedAssignments.find(streamId);
+					UID resolvedProxyId;
+					if (previousAssignment != previouslyPublishedAssignments.end() &&
+					    containsCDCProxy(availableProxies, previousAssignment->second)) {
+						resolvedProxyId = previousAssignment->second;
+					} else {
+						resolvedProxyId = availableProxies[replacementIndex++ % availableProxies.size()].id();
+					}
+					tr.clear(cdcProxyRangeFor(streamId));
+					tr.set(cdcProxyKeyFor(streamId, resolvedProxyId), Value());
+					repairedAssignment = true;
+					CODE_PROBE(true, "CDC stream assignment is repaired after missing owner");
+					TraceEvent("CDCProxyAssignmentMissingRepaired")
+					    .detail("StreamId", streamId)
+					    .detail("CDCProxyID", resolvedProxyId)
+					    .detail("HadPublishedAssignment", previousAssignment != previouslyPublishedAssignments.end());
+					const auto [_, inserted] = streamToCDCProxyId.emplace(streamId, resolvedProxyId);
+					ASSERT_WE_THINK(inserted);
 				}
+			}
+			TraceEvent("CDCProxyAssignmentsScanned")
+			    .detail("AssignmentCount", streamToCDCProxyId.size())
+			    .detail("ActiveStreamCount", activeStreamIds.size())
+			    .detail("CDCProxyCount", availableProxies.size())
+			    .detail("DurableAssignmentCount", durableAssignments.size())
+			    .detail("AssignmentScanLimit", CDC_PROXY_ASSIGNMENT_SCAN_LIMIT)
+			    .detail("TransactionKind", "ReadYourWrites")
+			    .detail("ClientAssignmentCount", db->clientInfo->get().streamToCDCProxyId.size());
 
-				if (repairedAssignment) {
-					tr.set(cdcProxyAssignmentChangeKey,
-					       BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),
-					                             IncludeVersion(ProtocolVersion::withNativeCdc())));
-					co_await tr.commit();
-					break;
-				}
-
-				ClientDBInfo clientInfo = db->clientInfo->get();
-				if (clientInfo.streamToCDCProxyId != streamToCDCProxyId) {
-					clientInfo.id = deterministicRandom()->randomUniqueID();
-					clientInfo.streamToCDCProxyId = std::move(streamToCDCProxyId);
-
-					ServerDBInfo serverInfo = db->serverInfo->get();
-					serverInfo.id = deterministicRandom()->randomUniqueID();
-					serverInfo.infoGeneration = ++db->dbInfoCount;
-					serverInfo.client = clientInfo;
-					db->serverInfo->set(serverInfo);
-					db->clientInfo->set(clientInfo);
-					TraceEvent("CDCProxyAssignmentsPublished")
-					    .detail("AssignmentCount", db->clientInfo->get().streamToCDCProxyId.size())
-					    .detail("CDCProxyCount", db->clientInfo->get().cdcProxies.size())
-					    .detail("ClientInfoID", db->clientInfo->get().id);
-				}
-
+			if (!streamToCDCProxyId.empty() && availableProxies.empty()) {
+				CODE_PROBE(
+				    true, "CDC assignments wait while no proxy endpoints are published", probe::decoration::rare);
 				co_await tr.commit();
 				co_await (endpointChangeFuture || assignmentChangeFuture);
-				break;
-			} catch (Error& e) {
-				TraceEvent(SevWarn, "CDCProxyAssignmentsMonitorError").error(e);
-				err = e;
+				co_return;
 			}
-			co_await tr.onError(err);
+
+			if (repairedAssignment) {
+				tr.set(cdcProxyAssignmentChangeKey,
+				       BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),
+				                             IncludeVersion(ProtocolVersion::withNativeCdc())));
+				co_await tr.commit();
+				co_return;
+			}
+
+			ClientDBInfo clientInfo = db->clientInfo->get();
+			if (clientInfo.streamToCDCProxyId != streamToCDCProxyId) {
+				clientInfo.id = deterministicRandom()->randomUniqueID();
+				clientInfo.streamToCDCProxyId = std::move(streamToCDCProxyId);
+
+				ServerDBInfo serverInfo = db->serverInfo->get();
+				serverInfo.id = deterministicRandom()->randomUniqueID();
+				serverInfo.infoGeneration = ++db->dbInfoCount;
+				serverInfo.client = clientInfo;
+				db->serverInfo->set(serverInfo);
+				db->clientInfo->set(clientInfo);
+				TraceEvent("CDCProxyAssignmentsPublished")
+				    .detail("AssignmentCount", db->clientInfo->get().streamToCDCProxyId.size())
+				    .detail("CDCProxyCount", db->clientInfo->get().cdcProxies.size())
+				    .detail("ClientInfoID", db->clientInfo->get().id);
+			}
+
+			co_await tr.commit();
+			co_await (endpointChangeFuture || assignmentChangeFuture);
+			co_return;
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "CDCProxyAssignmentsMonitorError").error(e);
+			err = e;
 		}
+		co_await tr.onError(err);
+	}
+}
+
+Future<Void> monitorCDCProxyAssignments(ClusterControllerData* self) {
+	while (true) {
+		co_await monitorCDCProxyAssignmentsPass(self);
 	}
 }
 
