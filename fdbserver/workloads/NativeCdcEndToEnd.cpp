@@ -25,6 +25,8 @@
 #include <utility>
 #include <vector>
 
+#include <boost/functional/hash.hpp>
+
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/NativeCdc.h"
 #include "fdbclient/SystemData.h"
@@ -34,6 +36,9 @@
 #include "fdbrpc/simulator.h"
 #include "flow/DeterministicRandom.h"
 
+// Exercises native CDC by registering overlapping streams, writing mutations, consuming and acknowledging them,
+// and checking delivery, retention, assignment publication, failure recovery, and drain behavior. Test options
+// select focused scenarios such as proxy replacement, memory bounds, retired tags, and restart-after-disable drains.
 class NativeCdcEndToEndWorkload : public TestWorkload {
 	struct ExpectedWrite {
 		Version committedVersion;
@@ -42,8 +47,9 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 
 	struct KeyValueHash {
 		size_t operator()(const std::pair<Key, Value>& item) const {
-			size_t hash = std::hash<Key>{}(item.first);
-			hash ^= std::hash<Value>{}(item.second) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+			size_t hash = 0;
+			boost::hash_combine(hash, std::hash<Key>{}(item.first));
+			boost::hash_combine(hash, std::hash<Value>{}(item.second));
 			return hash;
 		}
 	};
