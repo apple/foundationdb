@@ -1103,8 +1103,8 @@ Future<Void> CDCProxy::initializeStream(Reference<CDCBufferedStream> stream) {
 	}
 }
 
-// TODO: Persist per-tag safe-pop state or coordinate pops centrally instead of rebuilding minima from all stream
-// history on every acknowledgement scan.
+// Post-GA optimization: persist per-tag safe-pop state or coordinate pops centrally instead of rebuilding minima from
+// all stream history on every acknowledgement scan. Revisit if acknowledgement volume makes this scan material.
 Future<CDCPopState> readPopState(Database cx) {
 	Transaction tr(cx);
 	while (true) {
