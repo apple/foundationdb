@@ -2600,22 +2600,24 @@ Future<Void> expireBackupData(const char* name,
 		int spaces = lastProgress.size() - p.size();
 		printf("\r%s%s\n", p.c_str(), (spaces > 0 ? std::string(spaces, ' ').c_str() : ""));
 
-		if (endVersion < 0)
+		if (endVersion < 0) {
 			fmt::print("All data before {0} versions ({1}"
 			           " days) prior to latest backup log has been deleted.\n",
 			           -endVersion,
 			           -endVersion / ((int64_t)24 * 3600 * CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
-		else
+		} else {
 			fmt::print("All data before version {} has been deleted.\n", endVersion);
+		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
-		if (e.code() == error_code_backup_cannot_expire)
+		if (e.code() == error_code_backup_cannot_expire) {
 			fprintf(stderr,
 			        "ERROR: Requested expiration would be unsafe.  Backup would not meet minimum restorability.  Use "
 			        "--force to delete data anyway.\n");
-		else
+		} else {
 			fprintf(stderr, "ERROR: %s\n", e.what());
+		}
 		throw;
 	}
 }

@@ -37,10 +37,11 @@ std::string getCoordinatorsInfoString(StatusObjectReader statusObj) {
 	std::string outputString;
 	try {
 		StatusArray coordinatorsArr = statusObj["client.coordinators.coordinators"].get_array();
-		for (StatusObjectReader coor : coordinatorsArr)
+		for (StatusObjectReader coor : coordinatorsArr) {
 			outputString += format("\n  %s  (%s)",
 			                       coor["address"].get_str().c_str(),
 			                       coor["reachable"].get_bool() ? "reachable" : "unreachable");
+		}
 	} catch (std::runtime_error&) {
 		outputString = "\n  Unable to retrieve list of coordination servers";
 	}
@@ -450,8 +451,9 @@ void printStatus(StatusObjectReader statusObj,
 
 				if (statusObjConfig.get("redundancy_mode", strVal)) {
 					outputString += strVal;
-				} else
+				} else {
 					outputString += "unknown";
+				}
 
 				outputString += "\n  Storage engine         - ";
 				if (statusObjConfig.get("storage_engine", strVal)) {
@@ -459,8 +461,9 @@ void printStatus(StatusObjectReader statusObj,
 						isOldMemory = true;
 					}
 					outputString += strVal;
-				} else
+				} else {
 					outputString += "unknown";
+				}
 
 				outputString +=
 				    "\n  Log engine             - " + (statusObjConfig.get("log_engine", strVal) ? strVal : "unknown");
@@ -470,8 +473,9 @@ void printStatus(StatusObjectReader statusObj,
 				outputString += "\n  Coordinators           - ";
 				if (statusObjConfig.get("coordinators_count", intVal)) {
 					outputString += std::to_string(intVal);
-				} else
+				} else {
 					outputString += "unknown";
+				}
 
 				if (!excludedServersArr.empty()) {
 					outputString += format("\n  Exclusions             - %d (type `exclude' for details)",
@@ -622,8 +626,9 @@ void printStatus(StatusObjectReader statusObj,
 						outputString += format(" (less %d excluded; %d with errors)", processExclusions, errors);
 					}
 
-				} else
+				} else {
 					outputString += "unknown";
+				}
 
 				if (!zones.empty()) {
 					outputString += format("\n  Zones                  - %d", zones.size());
@@ -684,8 +689,9 @@ void printStatus(StatusObjectReader statusObj,
 					if (retransCount > 0) {
 						outputString += format("\n  Retransmissions rate   - %d Hz", (int)round(retransCount));
 					}
-				} else
+				} else {
 					outputString += "\n  Machines               - unknown";
+				}
 
 				StatusObjectReader faultTolerance;
 				if (statusObjCluster.get("fault_tolerance", faultTolerance)) {
@@ -833,8 +839,9 @@ void printStatus(StatusObjectReader statusObj,
 				if (statusObjData.has("total_disk_used_bytes")) {
 					double totalDiskUsed = statusObjData.last().get_int64();
 					outputString += toBytesString(totalDiskUsed);
-				} else
+				} else {
 					outputString += "unknown";
+				}
 
 			} catch (std::runtime_error&) {
 				outputString = outputStringCache;

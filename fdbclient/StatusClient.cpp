@@ -170,8 +170,9 @@ void JSONDoc::cleanOps(json_spirit::mObject& obj) {
 						++kv;
 						obj.erase(tmp);
 					}
-				} else // For others just move the value to replace the operator object
+				} else { // For others just move the value to replace the operator object
 					kv->second = o.at(op);
+				}
 				// Don't advance kv because the new value could also be an operator
 				continue;
 			} else {
@@ -391,9 +392,10 @@ AsyncResult<StatusObject> clientStatusFetcher(Reference<IClusterConnectionRecord
 		if (!*quorum_reachable)
 			messages->push_back(
 			    makeMessage(MessageType::QUORUM_NOT_REACHABLE, "Unable to reach a quorum of coordinators."));
-	} else
+	} else {
 		messages->push_back(
 		    makeMessage(MessageType::STATUS_INCOMPLETE_COORDINATORS, "Could not fetch coordinator info."));
+	}
 
 	StatusObject statusObjClusterFile;
 	statusObjClusterFile["path"] = connRecord->getLocation();
@@ -434,18 +436,19 @@ AsyncResult<Optional<StatusObject>> clusterStatusFetcher(ClusterInterface cI,
 	if (res.index() == 0) {
 		ErrorOr<StatusReply> result = std::get<0>(std::move(res));
 		if (result.isError()) {
-			if (result.getError().code() == error_code_request_maybe_delivered)
+			if (result.getError().code() == error_code_request_maybe_delivered) {
 				messages->push_back(makeMessage(MessageType::UNREACHABLE_CLUSTER_CONTROLLER,
 				                                ("Unable to communicate with the cluster controller at " +
 				                                 cI.address().toString() + " to get status.")
 				                                    .c_str()));
-			else if (result.getError().code() == error_code_server_overloaded)
+			} else if (result.getError().code() == error_code_server_overloaded) {
 				messages->push_back(makeMessage(MessageType::SERVER_OVERLOADED,
 				                                "The cluster controller is currently processing too many "
 				                                "status requests and is unable to respond"));
-			else
+			} else {
 				messages->push_back(
 				    makeMessage(MessageType::STATUS_INCOMPLETE_ERROR, "Cluster encountered an error fetching status."));
+			}
 		} else {
 			oStatusObj = result.get().statusObj;
 		}

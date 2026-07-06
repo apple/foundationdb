@@ -43,8 +43,9 @@ std::string trim(std::string const& connectionString) {
 				++c;
 			if (c == end)
 				break;
-		} else if (*c != ' ' && *c != '\n' && *c != '\r' && *c != '\t')
+		} else if (*c != ' ' && *c != '\n' && *c != '\r' && *c != '\t') {
 			trimmed += *c;
+		}
 	}
 	return trimmed;
 }
@@ -529,7 +530,7 @@ Future<Void> monitorNominee(Key key,
 	}
 }
 
-// Also used in fdbserver/LeaderElection.actor.cpp!
+// Also used in fdbserver/core/LeaderElection.cpp!
 // bool represents if the LeaderInfo is a majority answer or not.
 // This function also masks the first 7 bits of changeId of the nominees and returns the Leader with masked changeId
 Optional<std::pair<LeaderInfo, bool>> getLeader(const std::vector<Optional<LeaderInfo>>& nominees) {

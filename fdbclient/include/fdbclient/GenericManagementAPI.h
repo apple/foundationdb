@@ -65,7 +65,7 @@ enum class ConfigurationResult {
 	DATABASE_IS_REGISTERED,
 	INVALID_STORAGE_TYPE,
 	BACKUP_WORKER_ENABLED_RESTRICTED,
-	RANGE_BACKUP_WORKER_ENABLED_RESTRICTED
+	RANGE_PARTITIONED_BACKUP_WORKER_ENABLED_RESTRICTED
 };
 
 enum class CoordinatorsResult {
@@ -443,9 +443,9 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 				}
 
 				// Clear range partitioned backup progress when range partitioned backup workers are disabled
-				if (i->first == rangeBackupWorkerEnabledKey && i->second == "0") {
+				if (i->first == rangePartitionedBackupWorkerEnabledKey && i->second == "0") {
 					tr->clear(backupProgressKeys);
-					TraceEvent("RangePartitionedBackupWorkerProgressCleared");
+					TraceEvent("RangePartitionedBWProgressCleared");
 				}
 			}
 

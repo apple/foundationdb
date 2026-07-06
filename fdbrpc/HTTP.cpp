@@ -56,13 +56,14 @@ std::string urlEncode(const std::string& s) {
 	std::string o;
 	o.reserve(s.size() * 3);
 	char buf[32];
-	for (auto c : s)
+	for (auto c : s) {
 		if (std::isalnum(c) || c == '?' || c == '/' || c == '-' || c == '_' || c == '.' || c == ',' || c == ':')
 			o.append(&c, 1);
 		else {
 			snprintf(buf, sizeof(buf), "%%%.02X", c);
 			o.append(buf);
 		}
+	}
 	return o;
 }
 
@@ -626,12 +627,13 @@ Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnection> 
 		// Prepend headers to content packet buffer chain
 		request->data.content->prependWriteBuffer(pFirst, pLast);
 
-		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 1)
+		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 1) {
 			fmt::print("[{}] HTTP starting {} {} ContentLen:{}\n",
 			           conn->getDebugID().toString(),
 			           request->verb,
 			           request->resource,
 			           request->data.contentLen);
+		}
 		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 2) {
 			for (auto h : request->data.headers)
 				fmt::print("Request Header: {}: {}\n", h.first, h.second);

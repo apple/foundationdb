@@ -43,44 +43,45 @@ ProcessClass::ProcessClass(std::string s, ClassSource source) : _source(source) 
 		_class = CommitProxyClass;
 		printf("WARNING: 'proxy' machine class is deprecated and will be automatically converted "
 		       "'commit_proxy' machine class. Please use 'grv_proxy' or 'commit_proxy' specifically\n");
-	} else if (s == "grv_proxy")
+	} else if (s == "grv_proxy") {
 		_class = GrvProxyClass;
-	else if (s == "master")
+	} else if (s == "master") {
 		_class = MasterClass;
-	else if (s == "test")
+	} else if (s == "test") {
 		_class = TesterClass;
-	else if (s == "unset")
+	} else if (s == "unset") {
 		_class = UnsetClass;
-	else if (s == "stateless")
+	} else if (s == "stateless") {
 		_class = StatelessClass;
-	else if (s == "log")
+	} else if (s == "log") {
 		_class = LogClass;
-	else if (s == "router")
+	} else if (s == "router") {
 		_class = LogRouterClass;
-	else if (s == "cluster_controller")
+	} else if (s == "cluster_controller") {
 		_class = ClusterControllerClass;
-	else if (s == "fast_restore")
+	} else if (s == "fast_restore") {
 		ASSERT(false); // deprecated
-	else if (s == "data_distributor")
+	} else if (s == "data_distributor") {
 		_class = DataDistributorClass;
-	else if (s == "coordinator")
+	} else if (s == "coordinator") {
 		_class = CoordinatorClass;
-	else if (s == "ratekeeper")
+	} else if (s == "ratekeeper") {
 		_class = RatekeeperClass;
-	else if (s == "consistency_scan")
+	} else if (s == "consistency_scan") {
 		_class = ConsistencyScanClass;
-	else if (s == "blob_manager")
+	} else if (s == "blob_manager") {
 		_class = BlobManagerClass;
-	else if (s == "blob_worker")
+	} else if (s == "blob_worker") {
 		_class = BlobWorkerClass;
-	else if (s == "backup")
+	} else if (s == "backup") {
 		_class = BackupClass;
-	else if (s == "encrypt_key_proxy")
+	} else if (s == "encrypt_key_proxy") {
 		_class = EncryptKeyProxyClass;
-	else if (s == "sim_http_server")
+	} else if (s == "sim_http_server") {
 		_class = SimHTTPServerClass;
-	else
+	} else {
 		_class = InvalidClass;
+	}
 }
 
 ProcessClass::ProcessClass(std::string classStr, std::string sourceStr) {
@@ -96,44 +97,45 @@ ProcessClass::ProcessClass(std::string classStr, std::string sourceStr) {
 		_class = CommitProxyClass;
 		printf("WARNING: 'proxy' machine class is deprecated and will be automatically converted "
 		       "'commit_proxy' machine class. Please use 'grv_proxy' or 'commit_proxy' specifically\n");
-	} else if (classStr == "grv_proxy")
+	} else if (classStr == "grv_proxy") {
 		_class = GrvProxyClass;
-	else if (classStr == "master")
+	} else if (classStr == "master") {
 		_class = MasterClass;
-	else if (classStr == "test")
+	} else if (classStr == "test") {
 		_class = TesterClass;
-	else if (classStr == "unset")
+	} else if (classStr == "unset") {
 		_class = UnsetClass;
-	else if (classStr == "stateless")
+	} else if (classStr == "stateless") {
 		_class = StatelessClass;
-	else if (classStr == "log")
+	} else if (classStr == "log") {
 		_class = LogClass;
-	else if (classStr == "router")
+	} else if (classStr == "router") {
 		_class = LogRouterClass;
-	else if (classStr == "cluster_controller")
+	} else if (classStr == "cluster_controller") {
 		_class = ClusterControllerClass;
-	else if (classStr == "fast_restore")
+	} else if (classStr == "fast_restore") {
 		ASSERT(false); // deprecated
-	else if (classStr == "data_distributor")
+	} else if (classStr == "data_distributor") {
 		_class = DataDistributorClass;
-	else if (classStr == "coordinator")
+	} else if (classStr == "coordinator") {
 		_class = CoordinatorClass;
-	else if (classStr == "ratekeeper")
+	} else if (classStr == "ratekeeper") {
 		_class = RatekeeperClass;
-	else if (classStr == "consistency_scan")
+	} else if (classStr == "consistency_scan") {
 		_class = ConsistencyScanClass;
-	else if (classStr == "blob_manager")
+	} else if (classStr == "blob_manager") {
 		_class = BlobManagerClass;
-	else if (classStr == "blob_worker")
+	} else if (classStr == "blob_worker") {
 		_class = BlobWorkerClass;
-	else if (classStr == "backup")
+	} else if (classStr == "backup") {
 		_class = BackupClass;
-	else if (classStr == "encrypt_key_proxy")
+	} else if (classStr == "encrypt_key_proxy") {
 		_class = EncryptKeyProxyClass;
-	else if (classStr == "sim_http_server")
+	} else if (classStr == "sim_http_server") {
 		_class = SimHTTPServerClass;
-	else
+	} else {
 		_class = InvalidClass;
+	}
 
 	if (sourceStr == "command_line")
 		_source = CommandLineSource;

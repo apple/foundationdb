@@ -414,10 +414,11 @@ Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFu
 			gotInfo.myLocality = locality;
 			dbInfo->set(gotInfo);
 		} else if (action == 2) {
-			if (ccInterface->get().present())
+			if (ccInterface->get().present()) {
 				TraceEvent("GotCCInterfaceChange")
 				    .detail("CCID", ccInterface->get().get().id())
 				    .detail("CCMachine", ccInterface->get().get().getWorkers.getEndpoint().getPrimaryAddress());
+			}
 		}
 	}
 }

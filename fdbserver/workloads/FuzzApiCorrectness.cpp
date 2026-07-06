@@ -554,11 +554,12 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				return Key();
 
 			int64_t key_size;
-			if (ksrv < 0.5)
+			if (ksrv < 0.5) {
 				key_size = deterministicRandom()->randomInt64(1, CLIENT_KNOBS->KEY_SIZE_LIMIT + 1) +
 				           CLIENT_KNOBS->KEY_SIZE_LIMIT;
-			else
+			} else {
 				key_size = deterministicRandom()->randomInt64(1, CLIENT_KNOBS->KEY_SIZE_LIMIT + 1);
+			}
 
 			std::string skey;
 			skey.reserve(key_size);
@@ -580,11 +581,12 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				return Value();
 
 			int64_t value_size;
-			if (vrv < 0.5)
+			if (vrv < 0.5) {
 				value_size = deterministicRandom()->randomInt64(1, CLIENT_KNOBS->VALUE_SIZE_LIMIT + 1) +
 				             CLIENT_KNOBS->VALUE_SIZE_LIMIT;
-			else
+			} else {
 				value_size = deterministicRandom()->randomInt64(1, CLIENT_KNOBS->VALUE_SIZE_LIMIT + 1);
+			}
 
 			std::string svalue;
 			svalue.reserve(value_size);

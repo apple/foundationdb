@@ -402,11 +402,12 @@ Future<Void> waitCommitProxyFailure(std::vector<CommitProxyInterface> const& com
 Future<Void> waitGrvProxyFailure(std::vector<GrvProxyInterface> const& grvProxies) {
 	std::vector<Future<Void>> failed;
 	failed.reserve(grvProxies.size());
-	for (int i = 0; i < grvProxies.size(); i++)
+	for (int i = 0; i < grvProxies.size(); i++) {
 		failed.push_back(waitFailureClient(grvProxies[i].waitFailure,
 		                                   SERVER_KNOBS->TLOG_TIMEOUT,
 		                                   -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
 		                                   /*trace=*/true));
+	}
 	ASSERT(!failed.empty());
 	return tagError<Void>(quorum(failed, 1), grv_proxy_failed());
 }
@@ -644,43 +645,43 @@ static Future<Optional<Version>> getMinBackupVersion(Reference<ClusterRecoveryDa
 	}
 }
 
-static Future<Void> recruitRangeBackupWorkers(Reference<ClusterRecoveryData> self, Database cx) {
-	ASSERT(self->backupWorkers.size() > 0);
+static Future<Void> recruitRangePartitionedBackupWorkers(Reference<ClusterRecoveryData> self, Database cx) {
+	ASSERT(!self->backupWorkers.empty());
 
 	// Avoid race between a backup worker's save progress and the reads below.
 	co_await delay(SERVER_KNOBS->SECONDS_BEFORE_RECRUIT_BACKUP_WORKER);
 
 	LogEpoch epoch = self->cstate.myDBState.recoveryCount;
 	Reference<BackupProgress> backupProgress(
-	    new BackupProgress(self->dbgid, self->logSystem->getOldEpochRangeBackupTagsInfo()));
+	    new BackupProgress(self->dbgid, self->logSystem->getOldEpochRangePartitionedBackupTagsInfo()));
 	Future<Void> fBackupProgress = getBackupProgress(cx, self->dbgid, backupProgress, SevInfo);
-	std::vector<Future<InitializeRangeBackupReply>> initializationReplies;
+	std::vector<Future<InitializeRangePartitionedBackupReply>> initializationReplies;
 
-	int rangeBackupTags = self->logSystem->rangeBackupWorkerTags;
+	int rangePartitionedBackupTags = self->logSystem->rangePartitionedBackupWorkerTags;
 	std::vector<std::pair<UID, Tag>> idsTags;
-	idsTags.reserve(rangeBackupTags);
-	for (int i = 0; i < rangeBackupTags; i++) {
-		idsTags.emplace_back(deterministicRandom()->randomUniqueID(), Tag(tagLocalityRangeBackup, i));
+	idsTags.reserve(rangePartitionedBackupTags);
+	for (int i = 0; i < rangePartitionedBackupTags; i++) {
+		idsTags.emplace_back(deterministicRandom()->randomUniqueID(), Tag(tagLocalityRangePartitionedBackup, i));
 	}
 
 	const Version startVersion = self->logSystem->getBackupStartVersion();
 	int i = 0;
-	for (; i < rangeBackupTags; i++) {
+	for (; i < rangePartitionedBackupTags; i++) {
 		const auto& worker = self->backupWorkers[i % self->backupWorkers.size()];
-		InitializeRangeBackupRequest req(idsTags[i].first);
+		InitializeRangePartitionedBackupRequest req(idsTags[i].first);
 		req.recruitedEpoch = epoch;
 		req.backupEpoch = epoch;
 		req.tag = idsTags[i].second;
-		req.totalTags = rangeBackupTags;
+		req.totalTags = rangePartitionedBackupTags;
 		req.startVersion = startVersion;
-		TraceEvent("RangeBackupRecruitment", self->dbgid)
+		TraceEvent("RangePartitionedBWRecruitment", self->dbgid)
 		    .detail("RequestID", req.reqId)
 		    .detail("Tag", req.tag.toString())
 		    .detail("Epoch", epoch)
 		    .detail("BackupEpoch", epoch)
 		    .detail("StartVersion", req.startVersion);
 		initializationReplies.push_back(
-		    transformErrors(throwErrorOr(worker.rangeBackup.getReplyUnlessFailedFor(
+		    transformErrors(throwErrorOr(worker.rangePartitionedBackup.getReplyUnlessFailedFor(
 		                        req, SERVER_KNOBS->BACKUP_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
 		                    backup_worker_failed()));
 	}
@@ -688,14 +689,15 @@ static Future<Void> recruitRangeBackupWorkers(Reference<ClusterRecoveryData> sel
 	Future<Optional<Version>> fMinVersion = getMinBackupVersion(self, cx);
 	co_await (fBackupProgress && success(fMinVersion));
 	Optional<Version> minVersion = fMinVersion.get();
-	TraceEvent("RangeBackupMinVersion", self->dbgid).detail("Version", minVersion.present() ? minVersion.get() : -1);
+	TraceEvent("RangePartitionedBWMinVersion", self->dbgid)
+	    .detail("Version", minVersion.present() ? minVersion.get() : -1);
 
 	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> toRecruit =
 	    backupProgress->getUnfinishedRangePartitionedBackup();
 	for (const auto& [epochVersionTags, tagVersions] : toRecruit) {
 		const Version oldEpochEnd = std::get<1>(epochVersionTags);
 		if (!minVersion.present() || minVersion.get() + 1 >= oldEpochEnd) {
-			TraceEvent("SkipRangeBackupRecruitment", self->dbgid)
+			TraceEvent("RangePartitionedBWSkipRecruitment", self->dbgid)
 			    .detail("MinVersion", minVersion.present() ? minVersion.get() : -1)
 			    .detail("Epoch", epoch)
 			    .detail("OldEpoch", std::get<0>(epochVersionTags))
@@ -705,14 +707,14 @@ static Future<Void> recruitRangeBackupWorkers(Reference<ClusterRecoveryData> sel
 		for (const auto& [tag, version] : tagVersions) {
 			const auto& worker = self->backupWorkers[i % self->backupWorkers.size()];
 			i++;
-			InitializeRangeBackupRequest req(deterministicRandom()->randomUniqueID());
+			InitializeRangePartitionedBackupRequest req(deterministicRandom()->randomUniqueID());
 			req.recruitedEpoch = epoch;
 			req.backupEpoch = std::get<0>(epochVersionTags);
 			req.tag = tag;
 			req.totalTags = std::get<2>(epochVersionTags);
 			req.startVersion = version; // savedVersion + 1
 			req.endVersion = std::get<1>(epochVersionTags) - 1;
-			TraceEvent("RangeBackupRecruitment", self->dbgid)
+			TraceEvent("RangePartitionedBWRecruitment", self->dbgid)
 			    .detail("RequestID", req.reqId)
 			    .detail("Tag", req.tag.toString())
 			    .detail("Epoch", epoch)
@@ -720,15 +722,15 @@ static Future<Void> recruitRangeBackupWorkers(Reference<ClusterRecoveryData> sel
 			    .detail("StartVersion", req.startVersion)
 			    .detail("EndVersion", req.endVersion.get());
 			initializationReplies.push_back(transformErrors(
-			    throwErrorOr(worker.rangeBackup.getReplyUnlessFailedFor(
+			    throwErrorOr(worker.rangePartitionedBackup.getReplyUnlessFailedFor(
 			        req, SERVER_KNOBS->BACKUP_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
 			    backup_worker_failed()));
 		}
 	}
 
-	std::vector<InitializeRangeBackupReply> newRecruits = co_await getAll(initializationReplies);
-	self->logSystem->setRangeBackupWorkers(newRecruits);
-	TraceEvent("RangeBackupRecruitmentDone", self->dbgid).detail("NumWorkers", newRecruits.size());
+	std::vector<InitializeRangePartitionedBackupReply> newRecruits = co_await getAll(initializationReplies);
+	self->logSystem->setRangePartitionedBackupWorkers(newRecruits);
+	TraceEvent("RangePartitionedBWRecruitmentDone", self->dbgid).detail("NumWorkers", newRecruits.size());
 	self->registrationTrigger.trigger();
 }
 
@@ -1565,11 +1567,12 @@ Future<Void> recoverFrom(Reference<ClusterRecoveryData> self,
 			Standalone<CommitTransactionRef> req = std::get<1>(std::move(res));
 			CODE_PROBE(true, "Emergency transaction processing during recovery");
 			TraceEvent("EmergencyTransaction", self->dbgid).log();
-			for (auto m = req.mutations.begin(); m != req.mutations.end(); ++m)
+			for (auto m = req.mutations.begin(); m != req.mutations.end(); ++m) {
 				TraceEvent("EmergencyTransactionMutation", self->dbgid)
 				    .detail("MType", m->type)
 				    .detail("P1", m->param1)
 				    .detail("P2", m->param2);
+			}
 
 			DatabaseConfiguration oldConf = self->configuration;
 			self->configuration = self->originalConfiguration;
@@ -1932,8 +1935,8 @@ Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	self->addActor.send(configurationMonitor(self, cx));
 	if (self->configuration.backupWorkerEnabled) {
 		self->addActor.send(recruitBackupWorkers(self, cx));
-	} else if (self->configuration.rangeBackupWorkerEnabled) {
-		self->addActor.send(recruitRangeBackupWorkers(self, cx));
+	} else if (self->configuration.rangePartitionedBackupWorkerEnabled) {
+		self->addActor.send(recruitRangePartitionedBackupWorkers(self, cx));
 	} else {
 		self->logSystem->setOldestBackupEpoch(self->cstate.myDBState.recoveryCount);
 	}

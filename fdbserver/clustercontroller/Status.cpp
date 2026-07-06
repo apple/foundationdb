@@ -233,8 +233,9 @@ static JsonBuilderObject getError(const TraceEventFields& errorFields) {
 			if (errorFields.tryGetValue("Error", errorName)) {
 				statusObj["name"] = errorName;
 				description += ": " + errorName;
-			} else
+			} else {
 				statusObj["name"] = "process_error";
+			}
 
 			struct tm* timeinfo;
 			time_t t = (time_t)time;
@@ -804,8 +805,9 @@ static AsyncResult<JsonBuilderObject> processStatusFetcher(
 					memInfo->second.memoryUsage += processMetrics.getDouble("Memory");
 					memInfo->second.rssUsage += processMetrics.getDouble("ResidentMemory");
 					memInfo->second.aggregateLimit += programStart.getDouble("MemoryLimit");
-				} else
+				} else {
 					memInfo->second.invalidate();
+				}
 			}
 		} catch (Error& e) {
 			memInfo->second.invalidate();
@@ -2140,19 +2142,21 @@ static AsyncResult<JsonBuilderObject> workloadStatusFetcher(
 		}
 		for (auto& p : db->get().client.commitProxies) {
 			auto worker = getWorker(workersMap, p.address());
-			if (worker.present())
+			if (worker.present()) {
 				commitProxyStatFutures.push_back(timeoutError(
 				    worker.get().interf.eventLogRequest.getReply(EventLogRequest("ProxyMetrics"_sr)), 1.0));
-			else
+			} else {
 				throw all_alternatives_failed(); // We need data from all proxies for this result to be trustworthy
+			}
 		}
 		for (auto& p : db->get().client.grvProxies) {
 			auto worker = getWorker(workersMap, p.address());
-			if (worker.present())
+			if (worker.present()) {
 				grvProxyStatFutures.push_back(timeoutError(
 				    worker.get().interf.eventLogRequest.getReply(EventLogRequest("GrvProxyMetrics"_sr)), 1.0));
-			else
+			} else {
 				throw all_alternatives_failed(); // We need data from all proxies for this result to be trustworthy
+			}
 		}
 		std::vector<TraceEventFields> commitProxyStats = co_await getAllAsync(commitProxyStatFutures);
 		std::vector<TraceEventFields> grvProxyStats = co_await getAllAsync(grvProxyStatFutures);

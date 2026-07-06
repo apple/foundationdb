@@ -1,5 +1,5 @@
 /*
- * BackupWorkerRangePartitioned.h
+ * RangePartitionedBackupWorker.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,9 +23,9 @@
 #include "fdbserver/core/BackupInterface.h"
 #include "flow/flow.h"
 
-struct InitializeRangeBackupRequest;
+struct InitializeRangePartitionedBackupRequest;
 struct ServerDBInfo;
 
-Future<Void> backupWorkerRangePartitioned(BackupInterface bi,
-                                          InitializeRangeBackupRequest req,
+Future<Void> rangePartitionedBackupWorker(BackupInterface bi,
+                                          InitializeRangePartitionedBackupRequest req,
                                           Reference<AsyncVar<ServerDBInfo> const> db);

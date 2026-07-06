@@ -30,17 +30,18 @@ void OperationStack::poppush(RYWMutation entry) {
 	if (hasVector()) {
 		optionalOperations.get().pop_back();
 		optionalOperations.get().push_back(entry);
-	} else
+	} else {
 		singletonOperation = entry;
+	}
 }
 
 void OperationStack::push(RYWMutation entry) {
 	if (defaultConstructed) {
 		singletonOperation = entry;
 		defaultConstructed = false;
-	} else if (hasVector())
+	} else if (hasVector()) {
 		optionalOperations.get().push_back(entry);
-	else {
+	} else {
 		optionalOperations = std::vector<RYWMutation>();
 		optionalOperations.get().push_back(entry);
 	}
@@ -146,10 +147,11 @@ void WriteMap::mutate(KeyRef key, MutationRef::Type operation, ValueRef param, b
 			if (e.stack.size() == 0 && it.is_cleared_range() && is_dependent) {
 				e.stack.push(RYWMutation(Optional<StringRef>(), MutationRef::SetValue));
 				coalesceOver(e.stack, RYWMutation(param, operation), *arena);
-			} else if (!is_unreadable && e.stack.size() > 0)
+			} else if (!is_unreadable && e.stack.size() > 0) {
 				coalesceOver(e.stack, RYWMutation(param, operation), *arena);
-			else
+			} else {
 				e.stack.push(RYWMutation(param, operation));
+			}
 
 			it.tree.clear();
 			PTreeImpl::remove(
@@ -195,7 +197,7 @@ void WriteMap::clear(KeyRangeRef keys, bool addConflict) {
 	                  ExtStringRef(keys.begin, !insert_begin ? 1 : 0),
 	                  ExtStringRef(keys.end, end_coalesce_clear ? 1 : 0));
 
-	if (insert_begin)
+	if (insert_begin) {
 		PTreeImpl::insert(writes,
 		                  ver,
 		                  WriteMapEntry(keys.begin,
@@ -205,8 +207,9 @@ void WriteMap::clear(KeyRangeRef keys, bool addConflict) {
 		                                IsConflict::True,
 		                                FollowingKeysUnreadable::False,
 		                                IsUnreadable::False));
+	}
 
-	if (insert_end)
+	if (insert_end) {
 		PTreeImpl::insert(writes,
 		                  ver,
 		                  WriteMapEntry(keys.end,
@@ -216,6 +219,7 @@ void WriteMap::clear(KeyRangeRef keys, bool addConflict) {
 		                                IsConflict(end_conflict),
 		                                FollowingKeysUnreadable(end_unreadable),
 		                                IsUnreadable(end_unreadable)));
+	}
 }
 
 void WriteMap::addUnmodifiedAndUnreadableRange(KeyRangeRef keys) {
@@ -246,7 +250,7 @@ void WriteMap::addUnmodifiedAndUnreadableRange(KeyRangeRef keys) {
 	                  ExtStringRef(keys.begin, !insert_begin ? 1 : 0),
 	                  ExtStringRef(keys.end, end_coalesce_unmodified ? 1 : 0));
 
-	if (insert_begin)
+	if (insert_begin) {
 		PTreeImpl::insert(writes,
 		                  ver,
 		                  WriteMapEntry(keys.begin,
@@ -256,8 +260,9 @@ void WriteMap::addUnmodifiedAndUnreadableRange(KeyRangeRef keys) {
 		                                IsConflict::False,
 		                                FollowingKeysUnreadable::True,
 		                                IsUnreadable::True));
+	}
 
-	if (insert_end)
+	if (insert_end) {
 		PTreeImpl::insert(writes,
 		                  ver,
 		                  WriteMapEntry(keys.end,
@@ -267,6 +272,7 @@ void WriteMap::addUnmodifiedAndUnreadableRange(KeyRangeRef keys) {
 		                                IsConflict(end_conflict),
 		                                FollowingKeysUnreadable(end_unreadable),
 		                                IsUnreadable(end_unreadable)));
+	}
 }
 
 void WriteMap::addConflictRange(KeyRangeRef keys) {
@@ -506,8 +512,9 @@ RYWMutation WriteMap::coalesce(RYWMutation existingEntry, RYWMutation newEntry, 
 		default:
 			throw operation_failed();
 		}
-	} else
+	} else {
 		throw operation_failed();
+	}
 }
 
 void WriteMap::coalesceOver(OperationStack& stack, RYWMutation newEntry, Arena& arena) {
@@ -624,7 +631,7 @@ void WriteMap::clearNoConflict(KeyRangeRef keys) {
 
 	ASSERT(conflicted != lastConflicted);
 
-	if (insert_end)
+	if (insert_end) {
 		PTreeImpl::insert(writes,
 		                  ver,
 		                  WriteMapEntry(keys.end,
@@ -634,4 +641,5 @@ void WriteMap::clearNoConflict(KeyRangeRef keys) {
 		                                IsConflict(end_conflict),
 		                                FollowingKeysUnreadable(end_unreadable),
 		                                IsUnreadable(end_unreadable)));
+	}
 }

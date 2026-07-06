@@ -1386,6 +1386,17 @@ public:
 				ryw->reset();
 			}
 		} catch (Error& e) {
+			// When the commit is cancelled before commitAndWatch() can propagate the error to
+			// watches (e.g. a transaction timeout firing through resetPromise cancels the commit
+			// actor before it reaches cancelWatches()), the watch future is left orphaned.
+			// Propagating here closes that gap; it is a no-op when watches have already been
+			// resolved or cleared by commitAndWatch() itself.
+			// TODO: the root cause is the actor_cancelled guard in commitAndWatch()
+			// (NativeAPI.actor.cpp); this covers RYW callers but raw Transaction callers remain
+			// exposed.
+			if (e.code() != error_code_actor_cancelled) {
+				ryw->tr.cancelWatches(e);
+			}
 			if (!ryw->tr.apiVersionAtLeast(410)) {
 				ryw->commitStarted = false;
 				if (!ryw->resetPromise.isSet()) {

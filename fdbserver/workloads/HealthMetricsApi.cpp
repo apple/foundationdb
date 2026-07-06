@@ -143,8 +143,9 @@ struct HealthMetricsApiWorkload : TestWorkload {
 			if (healthMetrics == newHealthMetrics) {
 				if (++repeated > maxAllowedStaleness / healthMetricsCheckInterval)
 					healthMetricsStoppedUpdating = true;
-			} else
+			} else {
 				repeated = 0;
+			}
 			healthMetrics = newHealthMetrics;
 
 			worstStorageQueue = std::max(worstStorageQueue, healthMetrics.worstStorageQueue);

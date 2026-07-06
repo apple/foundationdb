@@ -161,10 +161,11 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 	static std::vector<ISimulator::ProcessInfo*> getServers() {
 		std::vector<ISimulator::ProcessInfo*> machines;
 		std::vector<ISimulator::ProcessInfo*> all = g_simulator->getAllProcesses();
-		for (int i = 0; i < all.size(); i++)
+		for (int i = 0; i < all.size(); i++) {
 			if (!all[i]->failed && all[i]->name == std::string("Server") &&
 			    all[i]->startingClass != ProcessClass::TesterClass)
 				machines.push_back(all[i]);
+		}
 		return machines;
 	}
 
