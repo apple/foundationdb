@@ -814,7 +814,7 @@ void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
 	totalTime = t_user + t_nice + t_system + t_idle + t_iowait + t_irq + t_softirq + t_steal + t_guest;
 	idleTime = t_idle + t_iowait;
 
-	if (!DEBUG_DETERMINISM && logDetails && !g_network->isSimulated())
+	if (!DEBUG_DETERMINISM && logDetails && !g_network->isSimulated()) {
 		TraceEvent("MachineLoadDetail")
 		    .detail("User", t_user)
 		    .detail("Nice", t_nice)
@@ -825,6 +825,7 @@ void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
 		    .detail("SoftIRQ", t_softirq)
 		    .detail("Steal", t_steal)
 		    .detail("Guest", t_guest);
+	}
 }
 
 // This is inside the __linux__ ifdef

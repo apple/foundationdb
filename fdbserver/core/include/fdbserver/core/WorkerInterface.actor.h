@@ -59,7 +59,7 @@ struct WorkerInterface {
 	RequestStream<struct InitializeStorageRequest> storage;
 	RequestStream<struct InitializeLogRouterRequest> logRouter;
 	RequestStream<struct InitializeBackupRequest> backup;
-	RequestStream<struct InitializeRangeBackupRequest> rangeBackup;
+	RequestStream<struct InitializeRangePartitionedBackupRequest> rangePartitionedBackup;
 
 	RequestStream<struct LoadedPingRequest> debugPing;
 	RequestStream<struct CoordinationPingMessage> coordinationPing;
@@ -128,7 +128,7 @@ struct WorkerInterface {
 			           workerSnapReq,
 			           backup,
 			           updateServerDBInfo,
-			           rangeBackup,
+			           rangePartitionedBackup,
 			           cdcProxy);
 		} else {
 			ASSERT(ar.protocolVersion().isValid());
@@ -157,7 +157,7 @@ struct WorkerInterface {
 			           workerSnapReq,
 			           backup,
 			           updateServerDBInfo,
-			           rangeBackup);
+			           rangePartitionedBackup);
 			if (ar.protocolVersion().hasNativeCdc()) {
 				serializer(ar, cdcProxy);
 			}
@@ -704,13 +704,13 @@ struct InitializeBackupReply {
 	}
 };
 
-struct InitializeRangeBackupReply {
+struct InitializeRangePartitionedBackupReply {
 	constexpr static FileIdentifier file_identifier = 1986264;
 	struct BackupInterface interf;
 	LogEpoch backupEpoch;
 
-	InitializeRangeBackupReply() = default;
-	InitializeRangeBackupReply(BackupInterface bi, LogEpoch e) : interf(bi), backupEpoch(e) {}
+	InitializeRangePartitionedBackupReply() = default;
+	InitializeRangePartitionedBackupReply(BackupInterface bi, LogEpoch e) : interf(bi), backupEpoch(e) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -739,7 +739,7 @@ struct InitializeBackupRequest {
 	}
 };
 
-struct InitializeRangeBackupRequest {
+struct InitializeRangePartitionedBackupRequest {
 	constexpr static FileIdentifier file_identifier = 1986263;
 	UID reqId;
 	LogEpoch recruitedEpoch;
@@ -748,10 +748,10 @@ struct InitializeRangeBackupRequest {
 	int totalTags;
 	Version startVersion;
 	Optional<Version> endVersion;
-	ReplyPromise<struct InitializeRangeBackupReply> reply;
+	ReplyPromise<struct InitializeRangePartitionedBackupReply> reply;
 
-	InitializeRangeBackupRequest() = default;
-	explicit InitializeRangeBackupRequest(UID id) : reqId(id) {}
+	InitializeRangePartitionedBackupRequest() = default;
+	explicit InitializeRangePartitionedBackupRequest(UID id) : reqId(id) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

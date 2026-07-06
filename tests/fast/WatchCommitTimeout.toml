@@ -1,0 +1,9 @@
+[[test]]
+testTitle = 'WatchCommitTimeout'
+
+    [[test.workload]]
+    testName = 'WatchCommitTimeout'
+    testDuration = 30.0
+    timeoutMs = 30
+    watchResolveBound = 60.0
+    actorsPerClient = 5

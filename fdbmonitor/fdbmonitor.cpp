@@ -663,19 +663,20 @@ int main(int argc, char** argv) {
 							                pid,
 							                WEXITSTATUS(child_status),
 							                delay);
-						} else if (WIFSIGNALED(child_status))
+						} else if (WIFSIGNALED(child_status)) {
 							log_process_msg(SevWarn,
 							                cmd->ssection.c_str(),
 							                "Process %d terminated by signal %d, restarting in %d seconds\n",
 							                pid,
 							                WTERMSIG(child_status),
 							                delay);
-						else
+						} else {
 							log_process_msg(SevWarnAlways,
 							                cmd->ssection.c_str(),
 							                "Process %d exited for unknown reason, restarting in %d seconds\n",
 							                pid,
 							                delay);
+						}
 					}
 
 					start_process(cmd, id, uid, gid, delay, &normal_mask);

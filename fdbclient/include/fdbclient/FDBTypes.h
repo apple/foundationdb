@@ -62,7 +62,7 @@ enum {
 	tagLocalityLogRouterMapped = -6, // The pseudo tag used by log routers to pop the real LogRouter tag (i.e., -2)
 	tagLocalityTxs = -7,
 	tagLocalityBackup = -8, // used by backup role to pop from TLogs
-	tagLocalityRangeBackup = -9, // used by range-partitioned backup workers
+	tagLocalityRangePartitionedBackup = -9, // used by range-partitioned backup workers
 	tagLocalityCDC = -10, // used by native change data capture streams
 	tagLocalityInvalid = -99
 }; // The TLog and LogRouter require these number to be as compact as possible

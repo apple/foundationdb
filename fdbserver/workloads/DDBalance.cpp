@@ -233,7 +233,7 @@ struct DDBalanceWorkload : TestWorkload {
 
 			std::vector<Future<Void>> fs;
 			fs.reserve(self->actorsPerClient / self->moversPerClient);
-			for (int i = 0; i < self->actorsPerClient / self->moversPerClient; i++)
+			for (int i = 0; i < self->actorsPerClient / self->moversPerClient; i++) {
 				fs.push_back(self->ddBalanceWorker(cx,
 				                                   self,
 				                                   moverId,
@@ -244,6 +244,7 @@ struct DDBalanceWorkload : TestWorkload {
 				                                   clientBegin,
 				                                   &lastTime,
 				                                   1.0 / self->transactionsPerSecond));
+			}
 			co_await waitForAll(fs);
 
 			currentBin = nextBin;

@@ -43,8 +43,9 @@ std::string trim(std::string const& connectionString) {
 				++c;
 			if (c == end)
 				break;
-		} else if (*c != ' ' && *c != '\n' && *c != '\r' && *c != '\t')
+		} else if (*c != ' ' && *c != '\n' && *c != '\r' && *c != '\t') {
 			trimmed += *c;
+		}
 	}
 	return trimmed;
 }

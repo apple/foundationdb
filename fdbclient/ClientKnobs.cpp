@@ -308,7 +308,7 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( MIN_CLEANUP_SECONDS,                  3600.0 );
 	init( RESTORE_RANGES_READ_BATCH,             10000 );
 
-	init( BACKUP_RANGE_PARTITIONED_VDIR_INTERVAL, 100000 * 1000000LL );
+	init( RANGE_PARTITIONED_BACKUP_VDIR_INTERVAL, 100000 * 1000000LL );
 	init( BACKUP_NUM_OF_PARTITIONS,               100 );
 	init( BACKUP_CONTAINER_LOCAL_ALLOW_RELATIVE_PATH, false );
 	init( ENABLE_REPLICA_CONSISTENCY_CHECK_ON_BACKUP_READS, false ); if( randomize && buggify() ) { ENABLE_REPLICA_CONSISTENCY_CHECK_ON_BACKUP_READS = true; }

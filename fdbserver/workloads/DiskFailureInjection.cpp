@@ -85,8 +85,9 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 				// Else we honor the testDuration
 				return timeout(periodicEventBroadcast() && result, testDuration, Void());
 			}
-		} else
+		} else {
 			return Void();
+		}
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }

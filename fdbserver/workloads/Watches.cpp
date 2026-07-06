@@ -58,10 +58,11 @@ struct WatchesWorkload : TestWorkload {
 	Future<Void> setup(Database const& cx) override {
 		// return _setup(cx, this);
 		std::vector<Future<Void>> setupActors;
-		for (int i = 0; i < nodes; i++)
+		for (int i = 0; i < nodes; i++) {
 			if (i % clientCount == clientId)
 				setupActors.push_back(
 				    watcherInit(cx, keyForIndex(nodeOrder[i]), keyForIndex(nodeOrder[i + 1]), extraPerNode));
+		}
 
 		co_await waitForAll(setupActors);
 
@@ -199,8 +200,9 @@ struct WatchesWorkload : TestWorkload {
 				if (startValue.present()) {
 					if (isValue)
 						expectedValue = assignedValue;
-				} else
+				} else {
 					expectedValue = assignedValue;
+				}
 
 				if (expectedValue.present())
 					tr->set(startKey, expectedValue.get());

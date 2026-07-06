@@ -537,11 +537,12 @@ public:
 	static Future<Void> openFiles(RawDiskQueue_TwoFiles* self) {
 		std::vector<Future<Reference<IAsyncFile>>> fs;
 		fs.reserve(2);
-		for (int i = 0; i < 2; i++)
+		for (int i = 0; i < 2; i++) {
 			fs.push_back(IAsyncFileSystem::filesystem()->open(self->filename(i),
 			                                                  IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED |
 			                                                      IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_LOCK,
 			                                                  0));
+		}
 		co_await waitForAllReady(fs);
 
 		// Treatment of errors here is important.  If only one of the two files is present
@@ -555,12 +556,13 @@ public:
 			// Neither file was found: we can create a new queue
 			// OPEN_ATOMIC_WRITE_AND_CREATE defers creation (using a .part file) until the calls to sync() below
 			TraceEvent("DiskQueueCreate").detail("File0", self->filename(0));
-			for (int i = 0; i < 2; i++)
+			for (int i = 0; i < 2; i++) {
 				fs[i] = IAsyncFileSystem::filesystem()->open(
 				    self->filename(i),
 				    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE |
 				        IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_LOCK,
 				    0600);
+			}
 
 			// Any error here is fatal
 			co_await waitForAll(fs);
@@ -944,8 +946,9 @@ public:
 			// To mark pages are poped, we push an empty page to specify that following pages were poped.
 			// maxPayLoad is the max. payload size, i.e., (page_size - page_header_size).
 			return Page::maxPayload;
-		} else
+		} else {
 			return backPage().remainingCapacity();
+		}
 	}
 
 	Future<Void> commit() override {
@@ -1455,7 +1458,7 @@ private:
 	void findPhysicalLocation(loc_t loc, int* file, int64_t* page, const char* context) {
 		bool ok = false;
 
-		if (context)
+		if (context) {
 			TraceEvent(SevInfo, "FindPhysicalLocation", dbgid)
 			    .detail("Page0Valid", firstPages(0).checkHash())
 			    .detail("Page0Seq", firstPages(0).seq)
@@ -1464,13 +1467,14 @@ private:
 			    .detail("Location", loc)
 			    .detail("Context", context)
 			    .detail("File0Name", rawQueue->files[0].dbgFilename);
+		}
 
 		for (int i = 1; i >= 0; i--) {
 			ASSERT_WE_THINK(firstPages(i).checkHash());
 			if (firstPages(i).seq <= (size_t)loc) {
 				*file = i;
 				*page = (loc - firstPages(i).seq) / sizeof(Page);
-				if (context)
+				if (context) {
 					TraceEvent("FoundPhysicalLocation", dbgid)
 					    .detail("PageIndex", i)
 					    .detail("PageLocation", *page)
@@ -1479,11 +1483,12 @@ private:
 					    .detail("Location", loc)
 					    .detail("Context", context)
 					    .detail("File0Name", rawQueue->files[0].dbgFilename);
+				}
 				ok = true;
 				break;
 			}
 		}
-		if (!ok)
+		if (!ok) {
 			TraceEvent(SevError, "DiskQueueLocationError", dbgid)
 			    .detail("Page0Valid", firstPages(0).checkHash())
 			    .detail("Page0Seq", firstPages(0).seq)
@@ -1492,6 +1497,7 @@ private:
 			    .detail("Location", loc)
 			    .detail("Context", context ? context : "")
 			    .detail("File0Name", rawQueue->files[0].dbgFilename);
+		}
 		ASSERT(ok);
 	}
 

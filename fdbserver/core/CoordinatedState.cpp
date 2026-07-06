@@ -169,22 +169,24 @@ struct CoordinatedStateImpl {
 
 		if (majorityEmpty.isReady()) {
 			int best = -1;
-			for (int i = 0; i < rep_empty_reply.size(); i++)
+			for (int i = 0; i < rep_empty_reply.size(); i++) {
 				if (rep_empty_reply[i].isReady() && !rep_empty_reply[i].isError()) {
 					if (best < 0 || rep_empty_reply[i].get().rgen > rep_empty_reply[best].get().rgen)
 						best = i;
 				}
+			}
 			ASSERT(best >= 0);
 			co_return rep_empty_reply[best].get();
 		} else {
 			int best = -1;
-			for (int i = 0; i < rep_reply.size(); i++)
+			for (int i = 0; i < rep_reply.size(); i++) {
 				if (rep_reply[i].isReady() && !rep_reply[i].isError()) {
 					if (best < 0 || rep_reply[i].get().gen > rep_reply[best].get().gen ||
 					    (rep_reply[i].get().gen == rep_reply[best].get().gen &&
 					     rep_reply[i].get().rgen > rep_reply[best].get().rgen))
 						best = i;
 				}
+			}
 			ASSERT(best >= 0);
 			co_return rep_reply[best].get();
 		}
@@ -261,8 +263,9 @@ struct MovableCoordinatedStateImpl {
 			if (!r.protocolVersion().hasMovableCoordinatedState()) {
 				// Old coordinated state, not a MovableValue
 				moveState.value = rawValue;
-			} else
+			} else {
 				r >> moveState;
+			}
 		}
 		// SOMEDAY: If moveState.mode == MovingFrom, read (without locking) old state and assert that it corresponds
 		// with our state and is ReallyTo(coordinators)

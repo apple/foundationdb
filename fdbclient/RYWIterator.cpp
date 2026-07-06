@@ -183,14 +183,15 @@ void testESR() {
 	printf("1\n");
 	std::vector<ExtStringRef> srs;
 	std::vector<Standalone<StringRef>> ssrs;
-	for (int e = 0; e < 3; e++)
+	for (int e = 0; e < 3; e++) {
 		for (auto b = bases.begin(); b != bases.end(); ++b) {
 			srs.push_back(ExtStringRef(*b, e));
 			ssrs.push_back(StringRef(*b + std::string(e, 0)));
 		}
+	}
 	ASSERT(srs.size() == ssrs.size());
 	printf("2\n");
-	for (int i = 0; i < srs.size(); i++)
+	for (int i = 0; i < srs.size(); i++) {
 		for (int j = 0; j < srs.size(); j++) {
 			bool c = ssrs[i] != ssrs[j];
 			bool c2 = srs[i] != srs[j];
@@ -222,6 +223,7 @@ void testESR() {
 			}
 			*/
 		}
+	}
 	printf("OK\n");
 }
 
@@ -706,10 +708,11 @@ TEST_CASE("/fdbclient/WriteMap/random") {
 			if (clearMap[key]) {
 				stack = OperationStack(RYWMutation(StringRef(), MutationRef::SetValue));
 				WriteMap::coalesceOver(stack, RYWMutation(value, MutationRef::And), arena);
-			} else if (!unreadableMap[key] && stack.size() > 0)
+			} else if (!unreadableMap[key] && stack.size() > 0) {
 				WriteMap::coalesceOver(stack, RYWMutation(value, MutationRef::And), arena);
-			else
+			} else {
 				stack.push(RYWMutation(value, MutationRef::And));
+			}
 
 			if (addConflict)
 				conflictMap.insert(key, true);

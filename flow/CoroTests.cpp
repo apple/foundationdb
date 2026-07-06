@@ -99,8 +99,9 @@ void onReady(Future<T>&& f, Func&& func, ErrFunc&& errFunc) {
 			errFunc(f.getError());
 		else
 			func(f.get());
-	} else
+	} else {
 		f.addCallbackAndClear(new LambdaCallback<T, Func, ErrFunc, Callback<T>>(std::move(func), std::move(errFunc)));
+	}
 }
 
 template <class T, class Func, class ErrFunc>
@@ -110,9 +111,10 @@ void onReady(FutureStream<T>&& f, Func&& func, ErrFunc&& errFunc) {
 			errFunc(f.getError());
 		else
 			func(f.pop());
-	} else
+	} else {
 		f.addCallbackAndClear(
 		    new LambdaCallback<T, Func, ErrFunc, SingleCallback<T>>(std::move(func), std::move(errFunc)));
+	}
 }
 
 namespace {
