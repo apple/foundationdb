@@ -22,19 +22,27 @@
 #define FLOW_UNIT_TEST_RUNNER_H
 #pragma once
 
+#include <functional>
 #include <string>
 #include <string_view>
 
+#include "flow/flow.h"
+
 class UnitTestRunnerConfig {
 public:
-	explicit UnitTestRunnerConfig(std::string_view sourceSubDir);
+	using SimulationInitializer = std::function<Future<Void>()>;
+
+	explicit UnitTestRunnerConfig(std::string_view sourceSubDir, SimulationInitializer simulationInitializer = {});
 
 	std::string_view suiteName() const;
 	std::string dataDir() const;
 	std::string traceName() const;
+	bool supportsSimulation() const;
+	Future<Void> initializeSimulation() const;
 
 private:
 	std::string_view sourceSubDir;
+	SimulationInitializer simulationInitializer;
 };
 
 int runUnitTests(int argc, char** argv, const UnitTestRunnerConfig& config);

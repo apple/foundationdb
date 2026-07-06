@@ -176,7 +176,7 @@ public:
 		// rangeEnd is past end so the result will include end if it exists
 		KeySelector rangeEnd = KeySelector::firstGreaterThan(end);
 
-		int readSize = BUGGIFY ? 1 : 100000;
+		int readSize = buggify() ? 1 : 100000;
 		Future<RangeResultType> boundariesFuture =
 		    self.kvMap.getRange(tr, rangeBegin, rangeEnd, GetRangeLimits(readSize));
 
@@ -320,11 +320,11 @@ public:
 		// rangeEnd is past end so the result will include end if it exists
 		KeySelector rangeEnd = KeySelector::firstGreaterThan(end);
 
-		int readSize = BUGGIFY ? 1 : 100000;
+		int readSize = buggify() ? 1 : 100000;
 		Future<RangeResultType> boundariesFuture =
 		    self.kvMap.getRange(tr, rangeBegin, rangeEnd, GetRangeLimits(readSize));
 
-		Reference<LocalSnapshot> result = makeReference<LocalSnapshot>();
+		auto result = makeReference<LocalSnapshot>();
 		while (true) {
 			kbt_debug("RANGEMAP snapshot loop\n");
 			RangeResultType boundaries = co_await boundariesFuture;

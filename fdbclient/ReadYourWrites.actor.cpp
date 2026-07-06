@@ -701,7 +701,7 @@ public:
 				int singleClears = 0;
 				int clearLimit = requestCount ? 1 << std::min(requestCount, 20) : 0;
 				if (it.beginKey() < itEnd.beginKey())
-					singleClears = std::min(skipUncached(ucEnd, itEnd, BUGGIFY ? 0 : clearLimit + 100), clearLimit);
+					singleClears = std::min(skipUncached(ucEnd, itEnd, buggify() ? 0 : clearLimit + 100), clearLimit);
 
 				KeySelector read_end;
 				if (ucEnd != itEnd) {
@@ -1007,7 +1007,8 @@ public:
 				int singleClears = 0;
 				int clearLimit = requestCount ? 1 << std::min(requestCount, 20) : 0;
 				if (it.beginKey() > itEnd.beginKey())
-					singleClears = std::min(skipUncachedBack(ucEnd, itEnd, BUGGIFY ? 0 : clearLimit + 100), clearLimit);
+					singleClears =
+					    std::min(skipUncachedBack(ucEnd, itEnd, buggify() ? 0 : clearLimit + 100), clearLimit);
 
 				KeySelector read_begin;
 				if (ucEnd != itEnd) {
@@ -1340,7 +1341,7 @@ public:
 		// would already have a read version. We need to get a read version too, otherwise committing a conflicting
 		// transaction may not ensure this transaction is no longer in-flight, since this transaction could get a read
 		// version _after_.
-		co_await success(ryw->getReadVersion());
+		co_await ryw->getReadVersion();
 		if (!ryw->resetPromise.isSet())
 			ryw->resetPromise.sendError(transaction_timed_out());
 		co_await delay(deterministicRandom()->random01() * 5);
@@ -1410,6 +1411,17 @@ public:
 
 			co_return;
 		} catch (Error& e) {
+			// When the commit is cancelled before commitAndWatch() can propagate the error to
+			// watches (e.g. a transaction timeout firing through resetPromise cancels the commit
+			// actor before it reaches cancelWatches()), the watch future is left orphaned.
+			// Propagating here closes that gap; it is a no-op when watches have already been
+			// resolved or cleared by commitAndWatch() itself.
+			// TODO: the root cause is the actor_cancelled guard in commitAndWatch()
+			// (NativeAPI.actor.cpp); this covers RYW callers but raw Transaction callers remain
+			// exposed.
+			if (e.code() != error_code_actor_cancelled) {
+				ryw->tr.cancelWatches(e);
+			}
 			if (!ryw->tr.apiVersionAtLeast(410)) {
 				ryw->commitStarted = false;
 				if (!ryw->resetPromise.isSet()) {

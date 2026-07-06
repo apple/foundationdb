@@ -57,6 +57,7 @@ struct WorkerInterface {
 	RequestStream<struct InitializeStorageRequest> storage;
 	RequestStream<struct InitializeLogRouterRequest> logRouter;
 	RequestStream<struct InitializeBackupRequest> backup;
+	RequestStream<struct InitializeRangePartitionedBackupRequest> rangePartitionedBackup;
 
 	RequestStream<struct LoadedPingRequest> debugPing;
 	RequestStream<struct CoordinationPingMessage> coordinationPing;
@@ -121,7 +122,8 @@ struct WorkerInterface {
 		           execReq,
 		           workerSnapReq,
 		           backup,
-		           updateServerDBInfo);
+		           updateServerDBInfo,
+		           rangePartitionedBackup);
 	}
 };
 
@@ -644,6 +646,20 @@ struct InitializeBackupReply {
 	}
 };
 
+struct InitializeRangePartitionedBackupReply {
+	constexpr static FileIdentifier file_identifier = 1986264;
+	struct BackupInterface interf;
+	LogEpoch backupEpoch;
+
+	InitializeRangePartitionedBackupReply() = default;
+	InitializeRangePartitionedBackupReply(BackupInterface bi, LogEpoch e) : interf(bi), backupEpoch(e) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, interf, backupEpoch);
+	}
+};
+
 struct InitializeBackupRequest {
 	constexpr static FileIdentifier file_identifier = 1245415;
 	UID reqId;
@@ -658,6 +674,26 @@ struct InitializeBackupRequest {
 
 	InitializeBackupRequest() = default;
 	explicit InitializeBackupRequest(UID id) : reqId(id) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reqId, recruitedEpoch, backupEpoch, tag, totalTags, startVersion, endVersion, reply);
+	}
+};
+
+struct InitializeRangePartitionedBackupRequest {
+	constexpr static FileIdentifier file_identifier = 1986263;
+	UID reqId;
+	LogEpoch recruitedEpoch;
+	LogEpoch backupEpoch;
+	Tag tag;
+	int totalTags;
+	Version startVersion;
+	Optional<Version> endVersion;
+	ReplyPromise<struct InitializeRangePartitionedBackupReply> reply;
+
+	InitializeRangePartitionedBackupRequest() = default;
+	explicit InitializeRangePartitionedBackupRequest(UID id) : reqId(id) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -1142,6 +1178,6 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
 	}
 }
 
-#include "fdbserver/core/ServerDBInfo.h"
 #include "flow/unactorcompiler.h"
+#include "fdbserver/core/ServerDBInfo.h"
 #endif

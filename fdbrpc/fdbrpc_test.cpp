@@ -18,8 +18,21 @@
  * limitations under the License.
  */
 
+#include "fdbrpc/simulator.h"
+#include "flow/BooleanParam.h"
+#include "flow/Knobs.h"
 #include "flow/UnitTestRunner.h"
 
+FDB_BOOLEAN_PARAM(IsSimulated);
+FDB_BOOLEAN_PARAM(Randomize);
+
+namespace {
+Future<Void> initializeSimulation() {
+	resetFlowKnobs(Randomize::True, IsSimulated::True);
+	return startUnitTestSimulator();
+}
+} // namespace
+
 int main(int argc, char** argv) {
-	return runUnitTests(argc, argv, UnitTestRunnerConfig("fdbrpc"));
+	return runUnitTests(argc, argv, UnitTestRunnerConfig("fdbrpc", initializeSimulation));
 }

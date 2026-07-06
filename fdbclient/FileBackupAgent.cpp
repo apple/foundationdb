@@ -374,7 +374,7 @@ public:
 	static Future<std::vector<KeyRange>> getRestoreRangesOrDefault_impl(RestoreConfig* self,
 	                                                                    Reference<ReadYourWritesTransaction> tr) {
 		std::vector<KeyRange> ranges;
-		int batchSize = BUGGIFY ? 1 : CLIENT_KNOBS->RESTORE_RANGES_READ_BATCH;
+		int batchSize = buggify() ? 1 : CLIENT_KNOBS->RESTORE_RANGES_READ_BATCH;
 		Optional<KeyRange> begin;
 		Arena arena;
 		while (true) {
@@ -739,10 +739,11 @@ Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore, Refer
 	bool useRangeFile = !useRangeFileRestore.get().present() || useRangeFileRestore.get().get();
 
 	std::string errstr = "None";
-	if (lastError.get().second != 0)
+	if (lastError.get().second != 0) {
 		errstr = format("'%s' %" PRId64 "s ago.\n",
 		                lastError.get().first.c_str(),
 		                (tr->getReadVersion().get() - lastError.get().second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+	}
 
 	TraceEvent("FileRestoreProgress")
 	    .detail("RestoreUID", uid)
@@ -2372,7 +2373,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 					Key nextKey = done ? endKey : keyAfter(lastKey);
 					co_await rangeFile->writeKey(nextKey);
 
-					if (BUGGIFY) {
+					if (buggify()) {
 						co_await rangeFile->padEnd(true);
 					}
 
@@ -2402,8 +2403,8 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				outVersion = values.second;
 				// block size must be at least large enough for 3 max size keys and 2 max size values + overhead so
 				// 250k conservatively.
-				int blockSize =
-				    BUGGIFY ? deterministicRandom()->randomInt(250e3, 4e6) : CLIENT_KNOBS->BACKUP_RANGEFILE_BLOCK_SIZE;
+				int blockSize = buggify() ? deterministicRandom()->randomInt(250e3, 4e6)
+				                          : CLIENT_KNOBS->BACKUP_RANGEFILE_BLOCK_SIZE;
 				Version snapshotBeginVersion{ 0 };
 				int64_t snapshotRangeFileCount{ 0 };
 
@@ -2782,8 +2783,9 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 		for (; iShard != iShardEnd; ++iShard) {
 			if (iShard->value() == DONE) {
 				++countShardsDone;
-			} else if (iShard->value() >= NOT_DONE_MIN)
+			} else if (iShard->value() >= NOT_DONE_MIN) {
 				++countShardsNotDone;
+			}
 
 			co_await yield();
 		}
@@ -2820,12 +2822,13 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 
 		// In simulation, use snapshot interval / 5 to ensure multiple dispatches run
 		// Otherwise, use the knob for the number of seconds between snapshot dispatch tasks.
-		if (g_network->isSimulated())
+		if (g_network->isSimulated()) {
 			nextDispatchVersion =
 			    recentReadVersion + CLIENT_KNOBS->CORE_VERSIONSPERSECOND * (snapshotIntervalSeconds / 5.0);
-		else
+		} else {
 			nextDispatchVersion = recentReadVersion + CLIENT_KNOBS->CORE_VERSIONSPERSECOND *
 			                                              CLIENT_KNOBS->BACKUP_SNAPSHOT_DISPATCH_INTERVAL_SEC;
+		}
 
 		// If nextDispatchVersion is greater than snapshotTargetEndVersion (which could be in the past) then just
 		// use the greater of recentReadVersion or snapshotTargetEndVersion.  Any range tasks created in this
@@ -2840,11 +2843,12 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 		// timeElapsed is between 0 and 1 and represents what portion of the shards we should have completed by now
 		double timeElapsed;
 		Version snapshotScheduledVersionInterval = snapshotTargetEndVersion - snapshotBeginVersion;
-		if (snapshotTargetEndVersion > snapshotBeginVersion)
+		if (snapshotTargetEndVersion > snapshotBeginVersion) {
 			timeElapsed = std::min(
 			    1.0, (double)(nextDispatchVersion - snapshotBeginVersion) / (snapshotScheduledVersionInterval));
-		else
+		} else {
 			timeElapsed = 1.0;
+		}
 
 		int countExpectedShardsDone = countAllShards * timeElapsed;
 		int countShardsToDispatch = std::max<int>(0, countExpectedShardsDone - countShardsDone);
@@ -2896,8 +2900,8 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 			std::vector<KeyRange> rangesToAdd;
 
 			// Limit number of tasks added per transaction
-			int taskBatchSize = BUGGIFY ? deterministicRandom()->randomInt(1, countShardsToDispatch + 1)
-			                            : CLIENT_KNOBS->BACKUP_DISPATCH_ADDTASK_SIZE;
+			int taskBatchSize = buggify() ? deterministicRandom()->randomInt(1, countShardsToDispatch + 1)
+			                              : CLIENT_KNOBS->BACKUP_DISPATCH_ADDTASK_SIZE;
 			int added = 0;
 
 			while (countShardsToDispatch > 0 && added < taskBatchSize && shardMap.size() > 0) {
@@ -3210,7 +3214,7 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 		// Block size must be at least large enough for 1 max size key, 1 max size value, and overhead, so
 		// conservatively 125k.
 		int blockSize =
-		    BUGGIFY ? deterministicRandom()->randomInt(125e3, 4e6) : CLIENT_KNOBS->BACKUP_LOGFILE_BLOCK_SIZE;
+		    buggify() ? deterministicRandom()->randomInt(125e3, 4e6) : CLIENT_KNOBS->BACKUP_LOGFILE_BLOCK_SIZE;
 		Reference<IBackupFile> outFile = co_await bc->writeLogFile(beginVersion, endVersion, blockSize);
 		LogFileWriter logFile(outFile, blockSize);
 
@@ -3715,7 +3719,7 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 		// of non overlapping key range files
 		std::map<Key, BackupConfig::RangeSlice> localmap;
 		Key startKey;
-		int batchSize = BUGGIFY ? 1 : 1000000;
+		int batchSize = buggify() ? 1 : 1000000;
 
 		while (true) {
 			Error err;
@@ -4241,7 +4245,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 			if (mutationLogType.get().get() == MutationLogType::PARTITIONED_LOG) {
 				co_await enableBackupWorker(cx);
 			} else if (mutationLogType.get().get() == MutationLogType::RANGE_PARTITIONED_LOG) {
-				co_await enableRangeBackupWorker(cx);
+				co_await enableRangePartitionedBackupWorker(cx);
 			}
 		}
 
@@ -4279,13 +4283,19 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 				co_await (success(started) && success(taskStarted) && success(mutationLogType));
 
 				if (!mutationLogType.get().present() || mutationLogType.get().get() == MutationLogType::DEFAULT) {
-					co_return; // Skip if not using partitioned logs
+					co_return; // Skip if not using partitioned or range partitioned logs
 				}
 
 				std::vector<std::pair<UID, Version>> ids;
 				if (started.get().present()) {
 					ids = decodeBackupStartedValue(started.get().get());
 				}
+
+				// First range-partitioned backup on this cluster: ask DD to compute the partition list.
+				if (ids.empty() && mutationLogType.get().get() == MutationLogType::RANGE_PARTITIONED_LOG) {
+					tr->set(backupPartitionRequiredKey, backupPartitionRequiredValue(1));
+				}
+
 				const UID uid = config.getUid();
 				auto it = std::find_if(
 				    ids.begin(), ids.end(), [uid](const std::pair<UID, Version>& p) { return p.first == uid; });
@@ -4297,14 +4307,18 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 
 				tr->set(backupStartedKey, encodeBackupStartedValue(ids));
 
+				// Only PartitionedLog workers set BackupConfig.allWorkerStarted, so watch it for that mutation log
+				// type.
+				const bool isPartitionedLog = mutationLogType.get().get() == MutationLogType::PARTITIONED_LOG;
+
 				// The task may be restarted. Set the watch if started key has NOT been set.
-				if (!taskStarted.get().present()) {
+				if (isPartitionedLog && !taskStarted.get().present()) {
 					watchFuture = tr->watch(config.allWorkerStarted().key);
 				}
 
 				co_await keepRunning;
 				co_await tr->commit();
-				if (!taskStarted.get().present()) {
+				if (isPartitionedLog && !taskStarted.get().present()) {
 					co_await watchFuture;
 				}
 				co_return;
@@ -4589,8 +4603,16 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 				    .detail("RestoreUID", restore.getUid())
 				    .detail("Owner", "BulkLoad");
 
-				// Note: BulkLoad configuration validation (shard_encode_location_metadata, enable_read_lock_on_range)
-				// is performed by the BulkLoad system on the server side when the job is submitted.
+				// TODO(BulkLoad): no precondition validation happens here today.
+				// submitBulkLoadJob() does not check that the cluster has
+				// shard_encode_location_metadata=1 and enable_read_lock_on_range=1, nor
+				// that the storage engine supports SST ingestion. If those preconditions
+				// are not met, setBulkLoadMode + submitBulkLoadJob both succeed but the
+				// Data Distributor never dispatches any tasks, leaving the restore in
+				// "State: running, Tasks: 0/0" indefinitely. Validation needs to live
+				// somewhere with real cluster-side knob visibility (DD or a commit proxy);
+				// it cannot be done from fdbclient because SERVER_KNOBS here are this
+				// process's local defaults, not the running cluster's actual config.
 
 				// Read the original BulkLoad mode from config (saved by StartFullRestoreTaskFunc before task creation).
 				// This is persisted in the database so we can restore the correct mode even after a crash.
@@ -4968,7 +4990,7 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 			int start = 0;
 			int end = data.size();
 			int dataSizeLimit =
-			    BUGGIFY ? deterministicRandom()->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
+			    buggify() ? deterministicRandom()->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
 
 			tr->reset();
 			while (true) {
@@ -5049,7 +5071,7 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 			}
 		}
 		if (!originalFileRanges.empty()) {
-			if (BUGGIFY && restoreRanges.get().size() == 1) {
+			if (buggify() && restoreRanges.get().size() == 1) {
 				Params.originalFileRange().set(task, originalFileRanges[0]);
 			} else {
 				Params.originalFileRanges().set(task, originalFileRanges);
@@ -5350,7 +5372,7 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 		int start = 0;
 		int end = dataFiltered.size();
 		int dataSizeLimit =
-		    BUGGIFY ? deterministicRandom()->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
+		    buggify() ? deterministicRandom()->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
 
 		tr->reset();
 		while (true) {
@@ -5961,7 +5983,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// this is to guarantee commit proxy is catching up doing apply alog -> normal key
 		// with this  backupFile -> alog process
 		// If starting a new batch and the apply lag is too large then re-queue and wait
-		if (applyLag > (BUGGIFY ? 1 : CLIENT_KNOBS->CORE_VERSIONSPERSECOND * 300)) {
+		if (applyLag > (buggify() ? 1 : CLIENT_KNOBS->CORE_VERSIONSPERSECOND * 300)) {
 			// Wait a small amount of time and then re-add this same task.
 			co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
 			co_await RestoreDispatchPartitionedTaskFunc::addTask(
@@ -6203,7 +6225,7 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 		int64_t batchSize = Params.batchSize().get(task);
 
 		// If starting a new batch and the apply lag is too large then re-queue and wait
-		if (!addingToExistingBatch && applyLag > (BUGGIFY ? 1 : CLIENT_KNOBS->CORE_VERSIONSPERSECOND * 300)) {
+		if (!addingToExistingBatch && applyLag > (buggify() ? 1 : CLIENT_KNOBS->CORE_VERSIONSPERSECOND * 300)) {
 			// Wait a small amount of time and then re-add this same task.
 			co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
 			co_await RestoreDispatchTaskFunc::addTask(
@@ -6224,7 +6246,7 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 		std::string beginFile = Params.beginFile().getOrDefault(task);
 		// Get a batch of files.  We're targeting batchSize blocks being dispatched so query for batchSize files
 		// (each of which is 0 or more blocks).
-		int taskBatchSize = BUGGIFY ? 1 : CLIENT_KNOBS->RESTORE_DISPATCH_ADDTASK_SIZE;
+		int taskBatchSize = buggify() ? 1 : CLIENT_KNOBS->RESTORE_DISPATCH_ADDTASK_SIZE;
 		RestoreConfig::FileSetT::RangeResultType files = co_await restore.fileSet().getRange(
 		    tr, Optional<RestoreConfig::RestoreFile>({ beginVersion, beginFile }), {}, taskBatchSize);
 
@@ -6407,8 +6429,9 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 			if (i == 0) {
 				batchSize *= 2;
 				decision = "increased_batch_size";
-			} else
+			} else {
 				decision = "all_files_were_empty";
+			}
 
 			TraceEvent("FileRestoreDispatch")
 			    .detail("RestoreUID", restore.getUid())
@@ -6456,7 +6479,7 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 
 		// If more blocks need to be dispatched in this batch then add a follow-on task that is part of the
 		// allPartsDone group which will won't wait to run and will add more block tasks.
-		if (remainingInBatch > 0)
+		if (remainingInBatch > 0) {
 			addTaskFutures.push_back(RestoreDispatchTaskFunc::addTask(tr,
 			                                                          taskBucket,
 			                                                          task,
@@ -6466,7 +6489,7 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 			                                                          batchSize,
 			                                                          remainingInBatch,
 			                                                          TaskCompletionKey::joinWith(allPartsDone)));
-		else // Otherwise, add a follow-on task to continue after all previously dispatched blocks are done
+		} else { // Otherwise, add a follow-on task to continue after all previously dispatched blocks are done
 			addTaskFutures.push_back(RestoreDispatchTaskFunc::addTask(tr,
 			                                                          taskBucket,
 			                                                          task,
@@ -6477,6 +6500,7 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 			                                                          0,
 			                                                          TaskCompletionKey::noSignal(),
 			                                                          allPartsDone));
+		}
 
 		co_await waitForAll(addTaskFutures);
 
@@ -6559,8 +6583,9 @@ Future<std::string> restoreStatus(Reference<ReadYourWritesTransaction> tr, Key t
 	if (tagName.empty()) {
 		std::vector<KeyBackedTag> t = co_await getAllRestoreTags(tr);
 		tags = t;
-	} else
+	} else {
 		tags.push_back(makeRestoreTag(tagName.toString()));
+	}
 
 	// If no tags found, return helpful message
 	if (tags.empty()) {
@@ -7387,7 +7412,9 @@ public:
 			oldRestore.clear(tr);
 		}
 
-		if (!onlyApplyMutationLogs) {
+		// Bulkload restore (useRangeFileRestore=false) overwrites each shard via the range-lock
+		// mechanism in DD, so a non-empty destination is expected and required — skip the precheck.
+		if (!onlyApplyMutationLogs && useRangeFileRestore) {
 			int index{ 0 };
 			for (index = 0; index < restoreRanges.size(); index++) {
 				KeyRange restoreIntoRange = KeyRangeRef(restoreRanges[index].begin, restoreRanges[index].end)
@@ -7422,7 +7449,7 @@ public:
 		restore.unlockDBAfterRestore().set(tr, unlockDB);
 		restore.mutationLogType().set(tr, mutationLogType);
 		restore.useRangeFileRestore().set(tr, useRangeFileRestore);
-		if (BUGGIFY && restoreRanges.size() == 1) {
+		if (buggify() && restoreRanges.size() == 1) {
 			restore.restoreRange().set(tr, restoreRanges[0]);
 		} else {
 			for (auto& range : restoreRanges) {
@@ -7456,10 +7483,11 @@ public:
 				KeyBackedTag tag = makeRestoreTag(tagName.toString());
 				Optional<UidAndAbortedFlagT> current = co_await tag.get(tr);
 				if (!current.present()) {
-					if (verbose)
+					if (verbose) {
 						printf("waitRestore: Tag: %s  State: %s\n",
 						       tagName.toString().c_str(),
 						       FileBackupAgent::restoreStateText(ERestoreState::UNINITIALIZED).toString().c_str());
+					}
 					co_return ERestoreState::UNINITIALIZED;
 				}
 
@@ -7586,11 +7614,17 @@ public:
 		co_return;
 	}
 
-	static Future<Void> checkAndDisableRangeBackupWorkers(Database cx) {
-		bool running = co_await runRYWTransaction(
-		    cx, [=](Reference<ReadYourWritesTransaction> tr) { return anyRangePartitionedBackupRunning(tr); });
+	static Future<Void> checkAndDisableRangePartitionedBackupWorkers(Database cx) {
+		bool running = co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<bool> {
+			bool r = co_await anyRangePartitionedBackupRunning(tr);
+			if (!r) {
+				// Last range-partitioned backup just finished. Ask DD to clear the partition list.
+				tr->set(backupPartitionRequiredKey, backupPartitionRequiredValue(2));
+			}
+			co_return r;
+		});
 		if (!running) {
-			co_await disableRangeBackupWorker(cx);
+			co_await disableRangePartitionedBackupWorker(cx);
 		}
 		co_return;
 	}
@@ -7966,10 +8000,14 @@ public:
 					}
 					statusText += format("Snapshot Mode: %s\n", snapshotModeText.c_str());
 
-					// Check if backup is BulkLoad compatible (has bulkdump_data/)
-					Optional<std::string> bulkDumpJobIdOpt = co_await config.bulkDumpJobId().get(tr);
-					bool bulkLoadCompatible = bulkDumpJobIdOpt.present() && !bulkDumpJobIdOpt.get().empty();
-					statusText += format("BulkLoad Compatible: %s\n", bulkLoadCompatible ? "yes" : "no");
+					// Check if backup is BulkLoad compatible (has bulkdump_data/).
+					// In rangefile mode no bulkdump task ever runs, so the answer is
+					// always "no" and the line carries no information — skip it.
+					if (snapshotModeValue != 0) {
+						Optional<std::string> bulkDumpJobIdOpt = co_await config.bulkDumpJobId().get(tr);
+						bool bulkLoadCompatible = bulkDumpJobIdOpt.present() && !bulkDumpJobIdOpt.get().empty();
+						statusText += format("BulkLoad Compatible: %s\n", bulkLoadCompatible ? "yes" : "no");
+					}
 
 					bool showBulkDump = (snapshotModeValue == 1 || snapshotModeValue == 2);
 					bool showRangeFile = (snapshotModeValue == 0 || snapshotModeValue == 2);
@@ -8108,15 +8146,16 @@ public:
 						}
 
 						if (!recentErrors.empty()) {
-							if (latestRestorableVersion.present())
+							if (latestRestorableVersion.present()) {
 								statusText +=
 								    format("Recent Errors (since latest restorable point %s ago)\n",
 								           secondsToTimeFormat((recentReadVersion - latestRestorableVersion.get()) /
 								                               CLIENT_KNOBS->CORE_VERSIONSPERSECOND)
 								               .c_str()) +
 								    recentErrors;
-							else
+							} else {
 								statusText += "Recent Errors (since initialization)\n" + recentErrors;
+							}
 						}
 						if (!pastErrors.empty())
 							statusText += "Older Errors\n" + pastErrors;
@@ -8699,8 +8738,8 @@ Future<Void> FileBackupAgent::checkAndDisableBackupWorkers(Database cx) {
 	return FileBackupAgentImpl::checkAndDisableBackupWorkers(cx);
 }
 
-Future<Void> FileBackupAgent::checkAndDisableRangeBackupWorkers(Database cx) {
-	return FileBackupAgentImpl::checkAndDisableRangeBackupWorkers(cx);
+Future<Void> FileBackupAgent::checkAndDisableRangePartitionedBackupWorkers(Database cx) {
+	return FileBackupAgentImpl::checkAndDisableRangePartitionedBackupWorkers(cx);
 }
 
 Future<std::string> FileBackupAgent::getStatus(Database cx, ShowErrors showErrors, std::string tagName) {
@@ -8809,7 +8848,7 @@ static Future<Void> writeKVs(Database cx, Standalone<VectorRef<KeyValueRef>> kvs
 }
 
 void simulateBlobFailure() {
-	if (BUGGIFY && deterministicRandom()->random01() < 0.01) { // Simulate blob failures
+	if (buggify() && deterministicRandom()->random01() < 0.01) { // Simulate blob failures
 		double i = deterministicRandom()->random01();
 		if (i < 0.5) {
 			throw http_request_failed();

@@ -26,7 +26,6 @@
 #include "fdbclient/Schemas.h"
 #include "fdbclient/SpecialKeySpace.h"
 #include "fdbserver/tester/workloads.h"
-#include "flow/actorcompiler.h"
 
 struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 	static constexpr auto NAME = "SpecialKeySpaceRobustness";

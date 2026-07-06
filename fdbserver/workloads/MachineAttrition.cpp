@@ -111,10 +111,10 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 		killProcess = getOption(options, "killProcess"_sr, killProcess);
 		killZone = getOption(options, "killZone"_sr, killZone);
 		killSelf = getOption(options, "killSelf"_sr, killSelf);
-		killAll = getOption(options,
-		                    "killAll"_sr,
-		                    g_network->isSimulated() && !fdbSimulationPolicyState().extraDatabases.empty() &&
-		                        BUGGIFY_WITH_PROB(0.01));
+		killAll =
+		    getOption(options,
+		              "killAll"_sr,
+		              g_network->isSimulated() && !fdbSimulationPolicyState().extraDatabases.empty() && buggify(0.01));
 		targetIds = getOption(options, "targetIds"_sr, std::vector<std::string>());
 		replacement = getOption(options, "replacement"_sr, reboot && deterministicRandom()->random01() < 0.5);
 		waitForVersion = getOption(options, "waitForVersion"_sr, waitForVersion);
@@ -161,10 +161,11 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 	static std::vector<ISimulator::ProcessInfo*> getServers() {
 		std::vector<ISimulator::ProcessInfo*> machines;
 		std::vector<ISimulator::ProcessInfo*> all = g_simulator->getAllProcesses();
-		for (int i = 0; i < all.size(); i++)
+		for (int i = 0; i < all.size(); i++) {
 			if (!all[i]->failed && all[i]->name == std::string("Server") &&
 			    all[i]->startingClass != ProcessClass::TesterClass)
 				machines.push_back(all[i]);
+		}
 		return machines;
 	}
 
@@ -410,11 +411,11 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 
 					// decide on a machine to kill
 					LocalityData targetMachine = machines.back();
-					if (BUGGIFY_WITH_PROB(0.01)) {
+					if (buggify(0.01)) {
 						CODE_PROBE(true, "Marked a zone for maintenance before killing it");
 						co_await setHealthyZone(
 						    cx, targetMachine.zoneId().get(), deterministicRandom()->random01() * 20);
-					} else if (!fdbSimulationPolicyState().willRestart && BUGGIFY_WITH_PROB(0.005)) {
+					} else if (!fdbSimulationPolicyState().willRestart && buggify(0.005)) {
 						// don't do this in restarting test, since test could exit before it is unset, and restarted
 						// test would never unset it
 						CODE_PROBE(true, "Disable DD for all storage server failures");

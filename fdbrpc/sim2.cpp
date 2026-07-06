@@ -53,6 +53,7 @@
 #include "flow/network.h"
 #include "flow/TLSConfig.h"
 #include "fdbrpc/Net2FileSystem.h"
+#include "fdbrpc/FlowTransport.h"
 #include "AsyncFileWriteChecker.h"
 #include "fdbrpc/genericactors.h"
 #include "fdbrpc/WellKnownEndpoints.h"
@@ -60,8 +61,6 @@
 #include "flow/TaskQueue.h"
 #include "flow/IUDPSocket.h"
 #include "flow/IConnection.h"
-
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 ISimulator* g_simulator = nullptr;
 thread_local ISimulator::ProcessInfo* ISimulator::currentProcess = nullptr;
@@ -386,7 +385,7 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 		ASSERT(limit > 0);
 
 		int toSend = 0;
-		if (BUGGIFY && !stableConnection) {
+		if (buggify() && !stableConnection) {
 			toSend = std::min(limit, buffer->bytes_written - buffer->bytes_sent);
 		} else {
 			for (auto p = buffer; p; p = p->next) {
@@ -399,7 +398,7 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 			}
 		}
 		ASSERT(toSend);
-		if (BUGGIFY && !stableConnection)
+		if (buggify() && !stableConnection)
 			toSend = std::min(toSend, deterministicRandom()->randomInt(0, 1000));
 
 		if (!peer)
@@ -457,7 +456,7 @@ private:
 	}
 
 	static Future<Void> sender(Sim2Conn* self) {
-		loop {
+		while (true) {
 			co_await self->writtenBytes.onChange(); // takes place on peer!
 			ASSERT(g_simulator->getCurrentProcess() == self->peerProcess);
 			co_await delay(.002 * deterministicRandom()->random01());
@@ -465,7 +464,7 @@ private:
 		}
 	}
 	static Future<Void> receiver(Sim2Conn* self) {
-		loop {
+		while (true) {
 			if (self->sentBytes.get() != self->receivedBytes.get())
 				co_await g_simulator->onProcess(self->peerProcess);
 			while (self->sentBytes.get() == self->receivedBytes.get())
@@ -502,7 +501,7 @@ private:
 	}
 	static Future<Void> whenReadable(Sim2Conn* self) {
 		try {
-			loop {
+			while (true) {
 				if (self->readBytes.get() != self->receivedBytes.get()) {
 					ASSERT(g_simulator->getCurrentProcess() == self->process);
 					co_return;
@@ -517,7 +516,7 @@ private:
 	}
 	static Future<Void> whenWritable(Sim2Conn* self) {
 		try {
-			loop {
+			while (true) {
 				if (!self->peer)
 					co_return;
 				if (self->peer->availableSendBufferForPeer() > 0) {
@@ -751,7 +750,7 @@ private:
 		ASSERT((self->flags & IAsyncFile::OPEN_NO_AIO) != 0 ||
 		       ((uintptr_t)data % 4096 == 0 && length % 4096 == 0 && offset % 4096 == 0)); // Required by KAIO.
 		UID opId = deterministicRandom()->randomUniqueID();
-		if (randLog)
+		if (randLog) {
 			fmt::print(randLog,
 			           "SFR1 {0} {1} {2} {3} {4}\n",
 			           self->dbgId.shortString(),
@@ -759,6 +758,7 @@ private:
 			           opId.shortString(),
 			           length,
 			           offset);
+		}
 
 		co_await waitUntilDiskReady(self->diskParameters, length);
 
@@ -865,12 +865,13 @@ private:
 			throw io_error();
 		}
 
-		if (randLog)
+		if (randLog) {
 			fprintf(randLog,
 			        "SFT2 %s %s %s\n",
 			        self->dbgId.shortString().c_str(),
 			        self->filename.c_str(),
 			        opId.shortString().c_str());
+		}
 
 		INJECT_FAULT(io_timeout, "SimpleFile::truncate"); // SimpleFile::truncate inject io_timeout
 		INJECT_FAULT(io_error, "SimpleFile::truncate"); // SimpleFile::truncate inject io_error
@@ -881,12 +882,13 @@ private:
 	// Simulated sync does not actually do anything besides wait a random amount of time
 	static Future<Void> sync_impl(SimpleFile* self) {
 		UID opId = deterministicRandom()->randomUniqueID();
-		if (randLog)
+		if (randLog) {
 			fprintf(randLog,
 			        "SFC1 %s %s %s\n",
 			        self->dbgId.shortString().c_str(),
 			        self->filename.c_str(),
 			        opId.shortString().c_str());
+		}
 
 		if (self->delayOnWrite)
 			co_await waitUntilDiskReady(self->diskParameters, 0, true);
@@ -924,12 +926,13 @@ private:
 			}
 		}
 
-		if (randLog)
+		if (randLog) {
 			fprintf(randLog,
 			        "SFC2 %s %s %s\n",
 			        self->dbgId.shortString().c_str(),
 			        self->filename.c_str(),
 			        opId.shortString().c_str());
+		}
 
 		INJECT_FAULT(io_timeout, "SimpleFile::sync"); // SimpleFile::sync inject io_timeout
 		INJECT_FAULT(io_error, "SimpleFile::sync"); // SimpleFile::sync inject io_errot
@@ -939,12 +942,13 @@ private:
 
 	static Future<int64_t> size_impl(SimpleFile const* self) {
 		UID opId = deterministicRandom()->randomUniqueID();
-		if (randLog)
+		if (randLog) {
 			fprintf(randLog,
 			        "SFS1 %s %s %s\n",
 			        self->dbgId.shortString().c_str(),
 			        self->filename.c_str(),
 			        opId.shortString().c_str());
+		}
 
 		co_await waitUntilDiskReady(self->diskParameters, 0);
 
@@ -1096,7 +1100,7 @@ public:
 			             // can't deterministically check stack size as the real network does
 			return yielded = true;
 		}
-		return yielded = BUGGIFY_WITH_PROB(0.01);
+		return yielded = buggify(0.01);
 	}
 	TaskPriority getCurrentTask() const override { return currentTaskID; }
 	void setCurrentTask(TaskPriority taskID) override { currentTaskID = taskID; }
@@ -1221,7 +1225,7 @@ public:
 	}
 	static Future<Reference<IConnection>> waitForProcessAndConnect(NetworkAddress toAddr, INetworkConnections* self) {
 		// We have to be able to connect to processes that don't yet exist, so we do some silly polling
-		loop {
+		while (true) {
 			co_await ::delay(0.1 * deterministicRandom()->random01());
 			if (g_sim2.addressMap.contains(toAddr)) {
 				Reference<IConnection> c = co_await self->connect(toAddr);
@@ -1300,7 +1304,7 @@ public:
 			    .detail("NumFiles", numFiles);
 		} else {
 			int64_t maxDelta = std::min(5.0, (now() - diskSpace.lastUpdate)) *
-			                   (BUGGIFY ? 10e6 : 1e6); // External processes modifying the disk
+			                   (buggify() ? 10e6 : 1e6); // External processes modifying the disk
 			int64_t delta = -maxDelta + deterministicRandom()->random01() * maxDelta * 2;
 			diskSpace.baseFreeSpace = std::min<int64_t>(
 			    diskSpace.totalSpace, std::max<int64_t>(diskSpace.baseFreeSpace + delta, totalFileSize));
@@ -1311,12 +1315,13 @@ public:
 		total = diskSpace.totalSpace;
 		free = std::max<int64_t>(0, diskSpace.baseFreeSpace - totalFileSize);
 
-		if (free == 0)
+		if (free == 0) {
 			TraceEvent(SevWarnAlways, "Sim2NoFreeSpace")
 			    .detail("TotalSpace", diskSpace.totalSpace)
 			    .detail("BaseFreeSpace", diskSpace.baseFreeSpace)
 			    .detail("TotalFileSize", totalFileSize)
 			    .detail("NumFiles", numFiles);
+		}
 	}
 	bool isAddressOnThisHost(NetworkAddress const& addr) const override {
 		return addr.ip == getCurrentProcess()->address.ip;
@@ -2320,12 +2325,13 @@ public:
 				killProcess(t.machine, KillType::KillInstantly);
 			}
 
-			if (randLog)
+			if (randLog) {
 				fmt::print(randLog,
 				           "T {0} {1} {2}\n",
 				           this->time,
 				           int(deterministicRandom()->peek() % 10000),
 				           t.machine ? t.machine->name : "none");
+			}
 		}
 	}
 
@@ -2587,6 +2593,50 @@ void startNewSimulator(bool printSimTime) {
 	    deterministicRandom()->coinflip() ? 0 : DISABLE_CONNECTION_FAILURE_FOREVER;
 }
 
+Future<Void> startUnitTestSimulator() {
+	startNewSimulator(false);
+	Standalone<StringRef> processId(deterministicRandom()->randomUniqueID().toString());
+	auto* process = g_simulator->newProcess(
+	    "UnitTest",
+	    IPAddress(0x01010101),
+	    1,
+	    false,
+	    1,
+	    LocalityData(Optional<Standalone<StringRef>>(), processId, processId, Optional<Standalone<StringRef>>()),
+	    ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource),
+	    "",
+	    "",
+	    currentProtocolVersion(),
+	    false);
+	process->excludeFromRestarts = true;
+
+	Standalone<StringRef> httpProcessId(deterministicRandom()->randomUniqueID().toString());
+	auto* httpProcess = g_simulator->newProcess(
+	    "UnitTestHTTPServer",
+	    IPAddress(0x02020202),
+	    1,
+	    false,
+	    1,
+	    LocalityData(
+	        Optional<Standalone<StringRef>>(), httpProcessId, httpProcessId, Optional<Standalone<StringRef>>()),
+	    ProcessClass(ProcessClass::SimHTTPServerClass, ProcessClass::CommandLineSource),
+	    "",
+	    "",
+	    currentProtocolVersion(),
+	    false);
+	httpProcess->excludeFromRestarts = true;
+	co_await g_simulator->onProcess(httpProcess, TaskPriority::DefaultYield);
+	Sim2FileSystem::newFileSystem();
+	FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT);
+	(void)FlowTransport::transport().bind(httpProcess->address, httpProcess->address);
+	g_simulator->addSimHTTPProcess(makeReference<HTTP::SimServerContext>());
+
+	co_await g_simulator->onProcess(process, TaskPriority::DefaultYield);
+	Sim2FileSystem::newFileSystem();
+	FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT);
+	(void)FlowTransport::transport().bind(process->address, process->address);
+}
+
 Future<Void> doReboot(Uncancellable, ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
 	TraceEvent("RebootingProcessAttempt")
 	    .detail("ZoneId", p->locality.zoneId())
@@ -2679,9 +2729,10 @@ Future<Void> waitUntilDiskReady(Reference<DiskParameters> diskParameters, int64_
 
 	double randomLatency;
 	if (sync) {
-		randomLatency = .005 + deterministicRandom()->random01() * (BUGGIFY ? 1.0 : .010);
-	} else
+		randomLatency = .005 + deterministicRandom()->random01() * (buggify() ? 1.0 : .010);
+	} else {
 		randomLatency = 10 * deterministicRandom()->random01() / diskParameters->iops;
+	}
 
 	return delayUntil(diskParameters->nextOperation + randomLatency);
 }
@@ -2805,8 +2856,9 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 			f = map(f,
 			        [=](Reference<IAsyncFile> r) -> Reference<IAsyncFile> { return makeReference<AsyncFileChaos>(r); });
 		return f;
-	} else
+	} else {
 		return AsyncFileCached::open(filename, flags, mode);
+	}
 }
 
 // Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power
@@ -2845,7 +2897,7 @@ Future<Void> Sim2FileSystem::renameFile(std::string const& from, std::string con
 Future<std::time_t> Sim2FileSystem::lastWriteTime(const std::string& filename) {
 	// TODO: update this map upon file writes.
 	static std::map<std::string, double> fileWrites;
-	if (BUGGIFY && deterministicRandom()->random01() < 0.01) {
+	if (buggify() && deterministicRandom()->random01() < 0.01) {
 		fileWrites[filename] = now();
 	}
 	return fileWrites[filename];

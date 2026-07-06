@@ -189,10 +189,11 @@ void StorageServerMetrics::notify(const Key& key, StorageMetrics& metrics) {
 
 	StorageMetrics notifyMetrics;
 
-	if (metrics.bytesWrittenPerKSecond)
+	if (metrics.bytesWrittenPerKSecond) {
 		notifyMetrics.bytesWrittenPerKSecond =
 		    bytesWriteSample.addAndExpire(key, metrics.bytesWrittenPerKSecond, expire) *
 		    SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+	}
 	if (metrics.iosPerKSecond)
 		notifyMetrics.iosPerKSecond = iopsSample.addAndExpire(key, metrics.iosPerKSecond, expire) *
 		                              SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
@@ -725,7 +726,7 @@ Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest req, Fut
 			try {
 				auto res = co_await race(change.getFuture(), timeout);
 				if (res.index() == 0) {
-					metrics += std::get<0>(std::move(res));
+					metrics += std::get<0>(res);
 				} else {
 					timedout = true;
 				}

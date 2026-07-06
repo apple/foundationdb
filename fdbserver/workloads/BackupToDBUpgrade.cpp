@@ -273,7 +273,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 	Future<Void> _setup(Database cx) {
 		DatabaseBackupAgent backupAgent(cx);
 
-		if (BUGGIFY) {
+		if (buggify()) {
 			for (auto r : getSystemBackupRanges()) {
 				backupRanges.push_back_deep(backupRanges.arena(), r);
 			}

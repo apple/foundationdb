@@ -49,6 +49,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "MetricLogger.actor.h"
 #include "fdbserver/backupworker/BackupWorker.h"
+#include "fdbserver/backupworker/RangePartitionedBackupWorker.h"
 #include "fdbserver/clustercontroller/ClusterController.h"
 #include "fdbserver/commitproxy/CommitProxyServer.h"
 #include "fdbserver/consistencyscan/ConsistencyScan.h"
@@ -261,7 +262,7 @@ template <class T>
 Future<Void> zombie(T workerInterface, Future<Void> worker) {
 	try {
 		co_await worker;
-		if (BUGGIFY)
+		if (buggify())
 			co_await delay(1.0);
 		co_return;
 	} catch (Error& e) {
@@ -522,6 +523,38 @@ std::vector<DiskStore> getDiskStores(std::string folder) {
 	auto result6 =
 	    getDiskStores(folder, shardedRocksdbSuffix.suffix, shardedRocksdbSuffix.type, shardedRocksdbSuffix.check);
 	result.insert(result.end(), result6.begin(), result6.end());
+	return result;
+}
+
+std::vector<DiskStore> getDiskStores(std::string dataFolder, std::string tLogSpillFolder) {
+	auto result = getDiskStores(dataFolder);
+	if (dataFolder == tLogSpillFolder) {
+		return result;
+	}
+
+	std::set<UID> tLogIds;
+	for (const auto& store : result) {
+		if (store.storedComponent == DiskStore::TLogData) {
+			tLogIds.insert(store.storeID);
+		}
+	}
+
+	for (auto& store : getDiskStores(tLogSpillFolder)) {
+		if (store.storedComponent != DiskStore::TLogData) {
+			TraceEvent(SevError, "NonTLogStoreInTLogSpillFolder")
+			    .detail("TLogSpillFolder", tLogSpillFolder)
+			    .detail("Filename", store.filename);
+			throw worker_recovery_failed();
+		}
+		if (!tLogIds.insert(store.storeID).second) {
+			TraceEvent(SevError, "DuplicateTLogStore")
+			    .detail("TLogSpillFolder", tLogSpillFolder)
+			    .detail("TLogID", store.storeID)
+			    .detail("Filename", store.filename);
+			throw worker_recovery_failed();
+		}
+		result.push_back(std::move(store));
+	}
 	return result;
 }
 
@@ -1652,19 +1685,21 @@ Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValueStore
 Future<Void> workerSnapCreate(
     WorkerSnapRequest snapReq,
     std::string snapFolder,
+    Optional<std::string> tLogSpillFolder,
     std::map<std::string, WorkerSnapRequest>* snapReqMap /* ongoing snapshot requests */,
     std::map<std::string, ErrorOr<Void>>*
         snapReqResultMap /* finished snapshot requests, expired in SNAP_MINIMUM_TIME_GAP seconds */) {
 	ExecCmdValueString snapArg(snapReq.snapPayload);
 	std::string snapReqKey = snapReq.snapUID.toString() + snapReq.role.toString();
 	try {
-		int err = co_await execHelper(&snapArg, snapReq.snapUID, snapFolder, snapReq.role.toString());
+		int err = co_await execHelper(&snapArg, snapReq.snapUID, snapFolder, snapReq.role.toString(), tLogSpillFolder);
 		std::string uidStr = snapReq.snapUID.toString();
 		TraceEvent("ExecTraceWorker")
 		    .detail("Uid", uidStr)
 		    .detail("Status", err)
 		    .detail("Role", snapReq.role)
 		    .detail("Value", snapFolder)
+		    .detail("TLogSpillFolder", tLogSpillFolder.present() ? tLogSpillFolder.get() : "")
 		    .detail("ExecPayload", snapReq.snapPayload);
 		if (err != 0) {
 			throw operation_failed();
@@ -1716,17 +1751,21 @@ Future<Void> monitorTraceLogIssues(Reference<AsyncVar<std::set<std::string>>> tr
 static const std::string excludeFromTLogRecruitmentLowDiskIssue = "exclude_from_tlog_recruitment_low_disk";
 
 Future<Void> monitorTLogIssues(std::string folder,
+                               std::string tLogSpillFolder,
                                Reference<AsyncVar<bool>> lowDiskTLogExclusion,
                                Reference<AsyncVar<std::set<std::string>>> tlogIssues) {
 	while (true) {
 		std::set<std::string> currentIssues;
 		if (lowDiskTLogExclusion->get()) {
-			int64_t free = 0;
-			int64_t total = 0;
-			g_network->getDiskBytes(folder, free, total);
 			const double minAvailableSpaceRatio = effectiveTLogMinAvailableSpaceRatio();
+			auto hasSufficientSpace = [minAvailableSpaceRatio](const std::string& path) {
+				int64_t free = 0;
+				int64_t total = 0;
+				g_network->getDiskBytes(path, free, total);
+				return minAvailableSpaceRatio <= 0.0 || total <= 0 || double(free) / total >= minAvailableSpaceRatio;
+			};
 			const bool recovered =
-			    minAvailableSpaceRatio <= 0.0 || total <= 0 || double(free) / total >= minAvailableSpaceRatio;
+			    hasSufficientSpace(folder) && (folder == tLogSpillFolder || hasSufficientSpace(tLogSpillFolder));
 			if (recovered) {
 				lowDiskTLogExclusion->set(false);
 			} else {
@@ -1935,7 +1974,7 @@ void cleanupStorageDisks(Reference<AsyncVar<ServerDBInfo>> dbInfo,
 }
 
 bool skipInitRspInSim(const UID workerInterfID, const bool allowDropInSim) {
-	const bool skip = allowDropInSim && g_network->isSimulated() && BUGGIFY_WITH_PROB(/* 1% */ 0.01);
+	const bool skip = allowDropInSim && g_network->isSimulated() && buggify(/* 1% */ 0.01);
 	if (skip) {
 		TraceEvent("SkipInitRspInSimTrue").detail("WorkerInterfID", workerInterfID);
 	}
@@ -1970,6 +2009,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
                                 Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                 ProcessClass initialClass,
                                 std::string folder,
+                                std::string tLogSpillFolder,
                                 int64_t memoryLimit,
                                 std::string metricsConnFile,
                                 std::string metricsPrefix,
@@ -2009,6 +2049,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state std::map<SharedLogsKey, std::vector<SharedLogsValue>> sharedLogs;
 	state Reference<AsyncVar<UID>> activeSharedTLog(new AsyncVar<UID>());
 	state WorkerCache<InitializeBackupReply> backupWorkerCache;
+	state WorkerCache<InitializeRangePartitionedBackupReply> rangePartitionedBackupWorkerCache;
 	state WorkerCache<TLogInterface> logRouterCache;
 
 	state WorkerSnapRequest lastSnapReq;
@@ -2044,6 +2085,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	}
 
 	folder = abspath(folder);
+	tLogSpillFolder = abspath(tLogSpillFolder);
 
 	if (metricsPrefix.size() > 0) {
 		if (metricsConnFile.size() > 0) {
@@ -2074,7 +2116,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	errorForwarders.add(loadedPonger(interf.debugPing.getFuture()));
 	errorForwarders.add(waitFailureServer(interf.waitFailure.getFuture()));
 	errorForwarders.add(monitorTraceLogIssues(traceLogIssues));
-	errorForwarders.add(monitorTLogIssues(folder, lowDiskTLogExclusion, tlogIssues));
+	errorForwarders.add(monitorTLogIssues(folder, tLogSpillFolder, lowDiskTLogExclusion, tlogIssues));
 	errorForwarders.add(combineWorkerIssues(traceLogIssues, tlogIssues, issues));
 	errorForwarders.add(
 	    testerServerCore(interf.testerInterface,
@@ -2116,7 +2158,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state std::vector<Future<Void>> recoveries;
 
 	try {
-		state std::vector<DiskStore> stores = getDiskStores(folder);
+		state std::vector<DiskStore> stores = getDiskStores(folder, tLogSpillFolder);
+		// Recovery validation remains process-wide: the datadir sentinel covers both disk queues
+		// and tlog spill KV stores, even when the spill files live on a separate volume.
 		state bool validateDataFiles = deleteFile(joinPath(folder, validationFilename));
 		state int index = 0;
 		for (; index < stores.size(); ++index) {
@@ -2220,7 +2264,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					StringRef optionsString = StringRef(filename).removePrefix(fileVersionedLogDataPrefix).eat("-");
 					logQueueBasename = fileLogQueuePrefix.toString() + optionsString.toString() + "-";
 				}
-				ASSERT_WE_THINK(abspath(parentDirectory(s.filename)) == folder);
+				ASSERT_WE_THINK(abspath(parentDirectory(s.filename)) == folder ||
+				                abspath(parentDirectory(s.filename)) == tLogSpillFolder);
 				IKeyValueStore* kv =
 				    openKVStore(s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles, false, dbInfo);
 				const DiskQueueVersion dqv = s.tLogOptions.getDiskQueueVersion();
@@ -2275,6 +2320,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		std::map<std::string, std::string> details;
 		details["Locality"] = locality.toString();
 		details["DataFolder"] = folder;
+		details["TLogSpillFolder"] = tLogSpillFolder;
 		details["StoresPresent"] = format("%d", stores.size());
 
 		startRole(Role::WORKER, interf.id(), interf.id(), details);
@@ -2544,6 +2590,28 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					forwardPromise(Uncancellable{}, req.reply, backupWorkerCache.get(req.reqId));
 				}
 			}
+			when(InitializeRangePartitionedBackupRequest req = waitNext(interf.rangePartitionedBackup.getFuture())) {
+				if (!rangePartitionedBackupWorkerCache.exists(req.reqId)) {
+					LocalLineage _;
+					getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Backup;
+					BackupInterface recruited(locality);
+					recruited.initEndpoints();
+
+					startRole(Role::BACKUP, recruited.id(), interf.id());
+					DUMPTOKEN(recruited.waitFailure);
+
+					ReplyPromise<InitializeRangePartitionedBackupReply> backupReady = req.reply;
+					rangePartitionedBackupWorkerCache.set(req.reqId, backupReady.getFuture());
+					Future<Void> backupProcess = rangePartitionedBackupWorker(recruited, req, dbInfo);
+					backupProcess = rangePartitionedBackupWorkerCache.removeOnReady(req.reqId, backupProcess);
+					errorForwarders.add(forwardError(errors, Role::BACKUP, recruited.id(), backupProcess));
+					TraceEvent("RangePartitionedBWInitRequest", req.reqId).detail("BackupId", recruited.id());
+					InitializeRangePartitionedBackupReply reply(recruited, req.backupEpoch);
+					backupReady.send(reply);
+				} else {
+					forwardPromise(Uncancellable{}, req.reply, rangePartitionedBackupWorkerCache.get(req.reqId));
+				}
+			}
 			when(InitializeTLogRequest req = waitNext(interf.tLog.getFuture())) {
 				// For now, there's a one-to-one mapping of spill type to TLogVersion.
 				// With future work, a particular version of the TLog can support multiple
@@ -2575,8 +2643,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 					const StringRef prefix =
 					    req.logVersion > TLogVersion::V2 ? fileVersionedLogDataPrefix : fileLogDataPrefix;
-					std::string filename =
-					    filenameFromId(req.storeType, folder, prefix.toString() + tLogOptions.toPrefix(), logId);
+					std::string filename = filenameFromId(
+					    req.storeType, tLogSpillFolder, prefix.toString() + tLogOptions.toPrefix(), logId);
 					IKeyValueStore* data =
 					    openKVStore(req.storeType, filename, logId, memoryLimit, false, false, dbInfo);
 					const DiskQueueVersion dqv = tLogOptions.getDiskQueueVersion();
@@ -2878,7 +2946,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				// everything it knows about the DiskStore, and put all the checking logic
 				// on the client side.  This makes the checking logic itself easier to test
 				// locally via test cases with defined consistency bugs.
-				for (DiskStore d : getDiskStores(folder)) {
+				for (DiskStore d : getDiskStores(folder, tLogSpillFolder)) {
 					bool included = true;
 					if (!req.includePartialStores) {
 						if (d.storeType == KeyValueStoreType::SSD_BTREE_V1) {
@@ -2958,6 +3026,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					    },
 					    delayed(workerSnapCreate(snapReq,
 					                             snapReq.role.toString() == "coord" ? coordFolder : folder,
+					                             snapReq.role.toString() == "tlog" && folder != tLogSpillFolder
+					                                 ? Optional<std::string>(tLogSpillFolder)
+					                                 : Optional<std::string>(),
 					                             &snapReqMap,
 					                             &snapReqResultMap),
 					            SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP)));
@@ -3468,7 +3539,7 @@ TEST_CASE("/fdbserver/storageengine/clearInflightCommits") {
 }
 } // namespace
 
-Future<UID> createAndLockProcessIdFile(std::string folder) {
+Future<UID> createAndLockProcessIdFile(std::string folder, Optional<UID> expectedProcessIDUid = Optional<UID>()) {
 	UID processIDUid;
 	platform::createDirectory(folder);
 
@@ -3486,7 +3557,8 @@ Future<UID> createAndLockProcessIdFile(std::string folder) {
 				        IAsyncFile::OPEN_READWRITE,
 				    0600);
 				lockFile = _lockFile;
-				processIDUid = deterministicRandom()->randomUniqueID();
+				processIDUid = expectedProcessIDUid.present() ? expectedProcessIDUid.get()
+				                                              : deterministicRandom()->randomUniqueID();
 				BinaryWriter wr(IncludeVersion(ProtocolVersion::withProcessIDFile()));
 				wr << processIDUid;
 				co_await lockFile.get()->write(wr.getData(), wr.getLength(), 0);
@@ -3501,6 +3573,13 @@ Future<UID> createAndLockProcessIdFile(std::string folder) {
 				bool deleteCorruptProcessIdFile = false;
 				try {
 					processIDUid = BinaryReader::fromStringRef<UID>(fileData, IncludeVersion());
+					if (expectedProcessIDUid.present() && processIDUid != expectedProcessIDUid.get()) {
+						TraceEvent(SevError, "TLogSpillFolderProcessIDMismatch")
+						    .detail("TLogSpillFolder", folder)
+						    .detail("ExpectedProcessID", expectedProcessIDUid.get())
+						    .detail("ActualProcessID", processIDUid);
+						throw worker_recovery_failed();
+					}
 					co_return processIDUid;
 				} catch (Error& e) {
 					if (!g_network->isSimulated()) {
@@ -3725,6 +3804,7 @@ Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
                   LocalityData localities,
                   ProcessClass processClass,
                   std::string dataFolder,
+                  std::string tLogSpillFolder,
                   std::string coordFolder,
                   int64_t memoryLimit,
                   std::string metricsConnFile,
@@ -3742,6 +3822,8 @@ Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 	Error caughtErr;
 	try {
 		ServerCoordinators coordinators(connRecord);
+		dataFolder = abspath(dataFolder);
+		tLogSpillFolder = abspath(tLogSpillFolder);
 		if (g_network->isSimulated()) {
 			whitelistBinPaths = ",, random_path,  /bin/snap_create.sh,,";
 		}
@@ -3749,6 +3831,7 @@ Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		    .detail("ZoneID", localities.zoneId())
 		    .detail("MachineId", localities.machineId())
 		    .detail("DiskPath", dataFolder)
+		    .detail("TLogSpillDiskPath", tLogSpillFolder)
 		    .detail("CoordPath", coordFolder)
 		    .detail("WhiteListBinPath", whitelistBinPaths);
 		// SOMEDAY: start the services on the machine in a staggered fashion in simulation?
@@ -3761,6 +3844,9 @@ Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		UID processIDUid = co_await createAndLockProcessIdFile(dataFolder);
 		localities.set(LocalityData::keyProcessId, processIDUid.toString());
 		// Only one process can execute on a dataFolder from this point onwards
+		if (dataFolder != tLogSpillFolder) {
+			co_await createAndLockProcessIdFile(tLogSpillFolder, processIDUid);
+		}
 
 		co_await testAndUpdateSoftwareVersionCompatibility(dataFolder, processIDUid);
 
@@ -3796,6 +3882,7 @@ Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		                                                 asyncPriorityInfo,
 		                                                 processClass,
 		                                                 dataFolder,
+		                                                 tLogSpillFolder,
 		                                                 memoryLimit,
 		                                                 metricsConnFile,
 		                                                 metricsPrefix,

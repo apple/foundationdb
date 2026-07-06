@@ -920,7 +920,7 @@ const KeyRangeRef configKeys("\xff/conf/"_sr, "\xff/conf0"_sr);
 const KeyRef configKeysPrefix = configKeys.begin;
 
 const KeyRef backupWorkerEnabledKey("\xff/conf/backup_worker_enabled"_sr);
-const KeyRef rangeBackupWorkerEnabledKey("\xff/conf/range_backup_worker_enabled"_sr);
+const KeyRef rangePartitionedBackupWorkerEnabledKey("\xff/conf/range_partitioned_backup_worker_enabled"_sr);
 const KeyRef perpetualStorageWiggleKey("\xff/conf/perpetual_storage_wiggle"_sr);
 const KeyRef perpetualStorageWiggleLocalityKey("\xff/conf/perpetual_storage_wiggle_locality"_sr);
 // The below two are there for compatible upgrade and downgrade. After 7.3, the perpetual wiggle related keys should use
@@ -1060,6 +1060,32 @@ WorkerBackupStatus decodeBackupProgressValue(const ValueRef& value) {
 	return status;
 }
 
+const KeyRangeRef backupPartitionMapHistoryKeys("\xff\x02/backupPartitionMap/"_sr, "\xff\x02/backupPartitionMap0"_sr);
+
+Key backupPartitionMapHistoryKeyFor(LogEpoch epoch, Version version) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(backupPartitionMapHistoryKeys.begin);
+	wr << bigEndian64(epoch) << bigEndian64(version);
+	return wr.toValue();
+}
+
+KeyRange backupPartitionMapHistoryRangeFor(LogEpoch epoch) {
+	BinaryWriter beginW(Unversioned());
+	beginW.serializeBytes(backupPartitionMapHistoryKeys.begin);
+	beginW << bigEndian64(epoch);
+	BinaryWriter endW(Unversioned());
+	endW.serializeBytes(backupPartitionMapHistoryKeys.begin);
+	endW << bigEndian64(epoch + 1);
+	return KeyRangeRef(beginW.toValue(), endW.toValue());
+}
+
+std::pair<LogEpoch, Version> decodeBackupPartitionMapHistoryKey(const KeyRef& key) {
+	BinaryReader rd(key.removePrefix(backupPartitionMapHistoryKeys.begin), Unversioned());
+	int64_t epoch, version;
+	rd >> epoch >> version;
+	return { fromBigEndian64(epoch), fromBigEndian64(version) };
+}
+
 Value encodeBackupStartedValue(const std::vector<std::pair<UID, Version>>& ids) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBackupStartValue()));
 	wr << ids;
@@ -1072,6 +1098,39 @@ std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& va
 	if (!value.empty())
 		reader >> ids;
 	return ids;
+}
+
+const KeyRef backupPartitionRequiredKey = "\xff\x02/backupPartitionRequired"_sr;
+const KeyRef backupPartitionListKey = "\xff\x02/backupPartitionList"_sr;
+
+Value backupPartitionRequiredValue(int8_t requestType) {
+	BinaryWriter wr(Unversioned());
+	wr << requestType;
+	return wr.toValue();
+}
+
+int8_t decodeBackupPartitionRequiredValue(const ValueRef& value) {
+	int8_t requestType = 0;
+	if (!value.empty()) {
+		BinaryReader reader(value, Unversioned());
+		reader >> requestType;
+	}
+	return requestType;
+}
+
+Value encodeBackupPartitionListValue(const std::vector<KeyRange>& partitions) {
+	BinaryWriter wr(IncludeVersion());
+	wr << partitions;
+	return wr.toValue();
+}
+
+std::vector<KeyRange> decodeBackupPartitionListValue(const ValueRef& value) {
+	std::vector<KeyRange> partitions;
+	if (!value.empty()) {
+		BinaryReader reader(value, IncludeVersion());
+		reader >> partitions;
+	}
+	return partitions;
 }
 
 bool mutationForKey(const MutationRef& m, const KeyRef& key) {
@@ -1508,7 +1567,7 @@ void testSSISerdes(StorageServerInterface const& ssi) {
 	ASSERT(ssi.isTss() == ssi2.isTss());
 	ASSERT(ssi.isAcceptingRequests() == ssi2.isAcceptingRequests());
 	if (ssi.isTss()) {
-		ASSERT(ssi2.tssPairID.get() == ssi2.tssPairID.get());
+		ASSERT(ssi.tssPairID.get() == ssi2.tssPairID.get());
 	}
 	ASSERT(ssi.address() == ssi2.address());
 	ASSERT(ssi.getValue.getEndpoint().token == ssi2.getValue.getEndpoint().token);
@@ -1526,7 +1585,9 @@ TEST_CASE("/SystemData/SerDes/SSI") {
 	StorageServerInterface ssi;
 	ssi.uniqueID = UID(0x1234123412341234, 0x5678567856785678);
 	ssi.locality = localityData;
-	ssi.initEndpoints();
+	// This test only needs a serializable endpoint; registering one requires a FlowTransport instance.
+	ssi.getValue =
+	    PublicRequestStream<GetValueRequest>(Endpoint({ NetworkAddress(IPAddress(0x01010101), 1) }, UID(1, 2)));
 
 	testSSISerdes(ssi);
 

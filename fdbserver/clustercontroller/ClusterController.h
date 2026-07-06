@@ -1840,6 +1840,7 @@ public:
 		}
 
 		if (req.configuration.backupWorkerEnabled) {
+			ASSERT(!req.configuration.rangePartitionedBackupWorkerEnabled);
 			const int nBackup = std::max<int>(
 			    (req.configuration.desiredLogRouterCount > 0 ? req.configuration.desiredLogRouterCount : tlogs.size()),
 			    req.maxOldLogRouters);
@@ -1847,6 +1848,19 @@ public:
 			    getWorkersForRoleInDatacenter(dcId, ProcessClass::Backup, nBackup, req.configuration, id_used);
 			std::transform(backupWorkers.begin(),
 			               backupWorkers.end(),
+			               std::back_inserter(result.backupWorkers),
+			               [](const WorkerDetails& w) { return w.interf; });
+		}
+
+		if (req.configuration.rangePartitionedBackupWorkerEnabled) {
+			ASSERT(!req.configuration.backupWorkerEnabled);
+			const int nRangePartitionedBackup = req.configuration.desiredRangePartitionedBackupWorkerCount > 0
+			                                        ? req.configuration.desiredRangePartitionedBackupWorkerCount
+			                                        : tlogs.size();
+			auto rangePartitionedBackupWorkers = getWorkersForRoleInDatacenter(
+			    dcId, ProcessClass::Backup, nRangePartitionedBackup, req.configuration, id_used);
+			std::transform(rangePartitionedBackupWorkers.begin(),
+			               rangePartitionedBackupWorkers.end(),
 			               std::back_inserter(result.backupWorkers),
 			               [](const WorkerDetails& w) { return w.interf; });
 		}
@@ -2084,11 +2098,26 @@ public:
 						}
 
 						if (req.configuration.backupWorkerEnabled) {
+							ASSERT(!req.configuration.rangePartitionedBackupWorkerEnabled);
 							const int nBackup = std::max<int>(tlogs.size(), req.maxOldLogRouters);
 							auto backupWorkers = getWorkersForRoleInDatacenter(
 							    dcId, ProcessClass::Backup, nBackup, req.configuration, used);
 							std::transform(backupWorkers.begin(),
 							               backupWorkers.end(),
+							               std::back_inserter(result.backupWorkers),
+							               [](const WorkerDetails& w) { return w.interf; });
+						}
+
+						if (req.configuration.rangePartitionedBackupWorkerEnabled) {
+							ASSERT(!req.configuration.backupWorkerEnabled);
+							const int nRangePartitionedBackup =
+							    req.configuration.desiredRangePartitionedBackupWorkerCount > 0
+							        ? req.configuration.desiredRangePartitionedBackupWorkerCount
+							        : tlogs.size();
+							auto rangePartitionedBackupWorkers = getWorkersForRoleInDatacenter(
+							    dcId, ProcessClass::Backup, nRangePartitionedBackup, req.configuration, used);
+							std::transform(rangePartitionedBackupWorkers.begin(),
+							               rangePartitionedBackupWorkers.end(),
 							               std::back_inserter(result.backupWorkers),
 							               [](const WorkerDetails& w) { return w.interf; });
 						}

@@ -40,7 +40,6 @@
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/StatusClient.h"
 #include "flow/CoroUtils.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
 const std::string kTracingTransactionIdKey = "transaction_id";
@@ -1384,11 +1383,12 @@ Future<Optional<std::string>> processClassCommitActor(ReadYourWritesTransaction*
 			bool foundChange = false;
 			for (int i = 0; i < workers.size(); i++) {
 				if (addr.excludes(workers[i].address)) {
-					if (processClass.classType() != ProcessClass::InvalidClass)
+					if (processClass.classType() != ProcessClass::InvalidClass) {
 						ryw->getTransaction().set(processClassKeyFor(workers[i].locality.processId().get()),
 						                          processClassValue(processClass));
-					else
+					} else {
 						ryw->getTransaction().clear(processClassKeyFor(workers[i].locality.processId().get()));
+					}
 					foundChange = true;
 				}
 			}
@@ -2686,11 +2686,12 @@ Future<Optional<std::string>> DataDistributionImpl::commit(ReadYourWritesTransac
 						ryw->getTransaction().set(moveKeysLockWriteKey, wrLastWrite.toValue());
 						// set mode
 						ryw->getTransaction().set(dataDistributionModeKey, modeVal);
-					} else
+					} else {
 						msg = ManagementAPIError::toJsonString(false,
 						                                       "datadistribution",
 						                                       "Please set the value of the data_distribution/mode to "
 						                                       "0(disable) or 1(enable), other values are not allowed");
+					}
 				} catch (boost::bad_lexical_cast& e) {
 					msg = ManagementAPIError::toJsonString(false,
 					                                       "datadistribution",

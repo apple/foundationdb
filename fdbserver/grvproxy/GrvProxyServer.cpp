@@ -27,7 +27,9 @@
 #include "fdbclient/GrvProxyInterface.h"
 #include "fdbclient/VersionVector.h"
 #include "fdbserver/grvproxy/GrvProxyServer.h"
+#include "HealthMetricsRequestServer.h"
 #include "GrvQueueDelay.h"
+#include "GrvProxyStarvation.h"
 #include "GrvTransactionRateInfo.h"
 #include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
@@ -241,19 +243,6 @@ struct GrvProxyData {
 	}
 };
 
-Future<Void> healthMetricsRequestServer(GrvProxyInterface grvProxy,
-                                        GetHealthMetricsReply* healthMetricsReply,
-                                        GetHealthMetricsReply* detailedHealthMetricsReply) {
-	while (true) {
-		GetHealthMetricsRequest req = co_await grvProxy.getHealthMetrics.getFuture();
-		if (req.detailed) {
-			req.reply.send(*detailedHealthMetricsReply);
-		} else {
-			req.reply.send(*healthMetricsReply);
-		}
-	}
-}
-
 // Older FDB versions used different keys for client profiling data. This
 // function performs a one-time migration of data in these keys to the new
 // global configuration key space.
@@ -387,8 +376,7 @@ Future<Void> getRate(UID myID,
                      GrvTransactionRateInfo* transactionRateInfo,
                      GrvTransactionRateInfo* batchTransactionRateInfo,
                      GrvRateLeaseState* rateLeaseState,
-                     GetHealthMetricsReply* healthMetricsReply,
-                     GetHealthMetricsReply* detailedHealthMetricsReply,
+                     HealthMetricsRequestServer* healthMetricsServer,
                      TransactionTagMap<uint64_t>* transactionTagCounter,
                      PrioritizedTransactionTagMap<ClientTagThrottleLimits>* clientThrottledTags,
                      GrvProxyStats* stats,
@@ -444,9 +432,8 @@ Future<Void> getRate(UID myID,
 			// lastTC = *inTransactionCount;
 			leaseTimeout = delay(rep.leaseDuration);
 			nextRequestTimer = delayJittered(rep.leaseDuration / 2);
-			healthMetricsReply->update(rep.healthMetrics, expectingDetailedReply, true);
+			healthMetricsServer->update(rep.healthMetrics, expectingDetailedReply);
 			if (expectingDetailedReply) {
-				detailedHealthMetricsReply->update(rep.healthMetrics, true, true);
 				lastDetailedReply = now();
 			}
 
@@ -572,7 +559,7 @@ Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> const>
 			if (stats->txnRequestIn.getValue() - stats->txnRequestOut.getValue() >
 			        SERVER_KNOBS->START_TRANSACTION_MAX_QUEUE_SIZE ||
 			    // Occasionally inject queue pressure in simulation to test queue overflow handling
-			    (g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.01))) {
+			    (g_network->isSimulated() && !g_simulator->speedUpSimulation && buggify(0.01))) {
 				// When the limit is hit, try to drop requests from the lower priority queues.
 				if (req.priority == TransactionPriority::BATCH) {
 					canBeQueued = false;
@@ -605,10 +592,11 @@ Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> const>
 
 				stats->addRequest(req.transactionCount);
 
-				if (req.debugID.present())
+				if (req.debugID.present()) {
 					g_traceBatch.addEvent("TransactionDebug",
 					                      req.debugID.get().first(),
 					                      "GrvProxyServer.queueTransactionStartRequests.Before");
+				}
 
 				if (systemQueue->empty() && defaultQueue->empty() && batchQueue->empty()) {
 					forwardPromise(Uncancellable{},
@@ -901,12 +889,39 @@ Future<Void> monitorDDMetricsChanges(int64_t* midShardSize, Reference<AsyncVar<S
 	}
 }
 
+static Future<Void> grvProxyProgressCanary(Reference<GrvProxyStarvationDetector> starvationDetector) {
+	while (true) {
+		// Run below every priority needed to release and complete a GRV. If this canary runs, the GRV path is not
+		// being starved by higher-priority work.
+		co_await delay(SERVER_KNOBS->GRV_PROXY_PROGRESS_CHECK_INTERVAL, TaskPriority::GetLiveCommittedVersion);
+		// Simulation does not schedule by priority. Occasionally skip this lower-priority progress signal so a rare
+		// run of consecutive skips simulates CPU starvation and exercises the watchdog.
+		if (!buggify()) {
+			starvationDetector->recordProgress();
+		}
+	}
+}
+
+static Future<Void> grvProxyStarvationWatchdog(UID proxyId, Reference<GrvProxyStarvationDetector> starvationDetector) {
+	while (true) {
+		// Flow transport pings run at ReadSocket. If this check runs while the lower-priority canary does not,
+		// the process still looks healthy to transport but cannot make GRV progress.
+		co_await delay(SERVER_KNOBS->GRV_PROXY_PROGRESS_CHECK_INTERVAL, TaskPriority::ReadSocket);
+		if (starvationDetector->checkForStarvation()) {
+			TraceEvent(SevWarnAlways, "GrvProxyCpuStarved", proxyId)
+			    .detail("ConsecutiveMissedProgressChecks", starvationDetector->getConsecutiveMisses())
+			    .detail("ProgressCheckInterval", SERVER_KNOBS->GRV_PROXY_PROGRESS_CHECK_INTERVAL)
+			    .detail("ProgressPriority", static_cast<int>(TaskPriority::GetLiveCommittedVersion));
+			throw failed_to_progress();
+		}
+	}
+}
+
 static Future<Void> transactionStarter(GrvProxyInterface proxy,
                                        Reference<AsyncVar<ServerDBInfo> const> db,
                                        PromiseStream<Future<Void>> addActor,
                                        GrvProxyData* grvProxyData,
-                                       GetHealthMetricsReply* healthMetricsReply,
-                                       GetHealthMetricsReply* detailedHealthMetricsReply) {
+                                       HealthMetricsRequestServer* healthMetricsServer) {
 	double lastGRVTime = 0;
 	PromiseStream<Void> GRVTimer;
 	double GRVBatchTime = SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_MIN;
@@ -943,8 +958,7 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	                      &normalRateInfo,
 	                      &batchRateInfo,
 	                      &rateLeaseState,
-	                      healthMetricsReply,
-	                      detailedHealthMetricsReply,
+	                      healthMetricsServer,
 	                      &transactionTagCounter,
 	                      &clientThrottledTags,
 	                      &grvProxyData->stats,
@@ -1164,8 +1178,7 @@ Future<Void> grvProxyServerCore(GrvProxyInterface proxy,
 	PromiseStream<Future<Void>> addActor;
 	Future<Void> onError = actorCollection(addActor.getFuture());
 
-	GetHealthMetricsReply healthMetricsReply;
-	GetHealthMetricsReply detailedHealthMetricsReply;
+	HealthMetricsRequestServer healthMetricsServer(proxy);
 
 	addActor.send(waitFailureServer(proxy.waitFailure.getFuture()));
 	addActor.send(traceRole(Role::GRV_PROXY, proxy.id()));
@@ -1185,10 +1198,15 @@ Future<Void> grvProxyServerCore(GrvProxyInterface proxy,
 	grvProxyData.logSystem = makeLogSystemFromServerDBInfo(proxy.id(), grvProxyData.db->get(), false, addActor);
 
 	grvProxyData.updateLatencyBandConfig(grvProxyData.db->get().latencyBandConfig);
+	// Start before transactionStarter waits to observe this proxy in dbInfo. The interface can already be visible to
+	// clients at that point, so waiting for GrvProxyReadyForTxnStarts would leave a startup starvation window.
+	auto starvationDetector =
+	    makeReference<GrvProxyStarvationDetector>(SERVER_KNOBS->GRV_PROXY_MAX_MISSED_PROGRESS_CHECKS);
+	addActor.send(grvProxyProgressCanary(starvationDetector));
+	addActor.send(grvProxyStarvationWatchdog(proxy.id(), starvationDetector));
 
-	addActor.send(transactionStarter(
-	    proxy, grvProxyData.db, addActor, &grvProxyData, &healthMetricsReply, &detailedHealthMetricsReply));
-	addActor.send(healthMetricsRequestServer(proxy, &healthMetricsReply, &detailedHealthMetricsReply));
+	addActor.send(transactionStarter(proxy, grvProxyData.db, addActor, &grvProxyData, &healthMetricsServer));
+	addActor.send(healthMetricsServer.run());
 	addActor.send(globalConfigRequestServer(&grvProxyData, proxy));
 
 	if (SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION > 0) {
@@ -1227,15 +1245,17 @@ Future<Void> grvProxyServer(GrvProxyInterface proxy,
 		Future<Void> core = grvProxyServerCore(proxy, req.master, req.masterLifetime, db);
 		co_await (core || checkRemoved(db, req.recoveryCount, proxy));
 	} catch (Error& e) {
-		TraceEvent("GrvProxyTerminated", proxy.id()).errorUnsuppressed(e);
+		Severity sev = e.code() == error_code_failed_to_progress ? SevWarnAlways : SevInfo;
+		TraceEvent(sev, "GrvProxyTerminated", proxy.id()).errorUnsuppressed(e);
 		ASSERT(e.code() !=
 		       error_code_broken_promise); // all broken_promise should be transformed to the correct error code
 		CODE_PROBE(e.code() == error_code_master_failed, "GrvProxyServer master failed");
 		CODE_PROBE(e.code() == error_code_tlog_failed, "GrvProxyServer tlog failed");
+		CODE_PROBE(e.code() == error_code_failed_to_progress, "GRV proxy failed to progress");
 		if (e.code() != error_code_worker_removed && e.code() != error_code_tlog_stopped &&
 		    e.code() != error_code_tlog_failed && e.code() != error_code_coordinators_changed &&
 		    e.code() != error_code_coordinated_state_conflict && e.code() != error_code_new_coordinators_timed_out &&
-		    e.code() != error_code_master_failed) {
+		    e.code() != error_code_master_failed && e.code() != error_code_failed_to_progress) {
 			throw;
 		}
 	}

@@ -793,7 +793,7 @@ template <class T>
     requires(!allow_anonymous_future<T>::value)
 Future<T> safeThreadFutureToFuture(ThreadFuture<T>& threadFuture) {
 	Future<T> f = safeThreadFutureToFutureImpl(threadFuture);
-	if (BUGGIFY) {
+	if (buggify()) {
 		return removeArenaFromStandalone(f);
 	}
 	return f;
@@ -809,7 +809,7 @@ Future<T> safeThreadFutureToFuture(const Future<T>& future) {
 template <class T>
     requires(!allow_anonymous_future<T>::value)
 Future<T> safeThreadFutureToFuture(Future<T>& future) {
-	if (BUGGIFY) {
+	if (buggify()) {
 		return removeArenaFromStandalone(future);
 	}
 	return future;

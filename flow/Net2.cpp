@@ -206,7 +206,7 @@ public:
 		if (thread_network == this)
 			stopCallbacks.emplace_back(std::move(fn));
 		else
-			onMainThreadVoid([this, fn] { this->stopCallbacks.emplace_back(std::move(fn)); });
+			onMainThreadVoid([this, fn = std::move(fn)]() mutable { this->stopCallbacks.emplace_back(std::move(fn)); });
 	}
 
 	bool isSimulated() const override { return false; }
@@ -420,8 +420,9 @@ public:
 				}
 
 				p.sendError(connection_failed());
-			} else
+			} else {
 				p.send(Void());
+			}
 		} catch (Error& e) {
 			p.sendError(e);
 		} catch (...) {
@@ -525,11 +526,12 @@ public:
 			// positive so check explicitly.
 			ASSERT(limit > 0);
 			bool notEmpty = false;
-			for (auto p = data; p; p = p->next)
+			for (auto p = data; p; p = p->next) {
 				if (p->bytes_written - p->bytes_sent > 0) {
 					notEmpty = true;
 					break;
 				}
+			}
 			ASSERT(notEmpty);
 
 			if (err == boost::asio::error::would_block) {
@@ -577,13 +579,14 @@ private:
 	void closeSocket() {
 		boost::system::error_code error;
 		socket.close(error);
-		if (error)
+		if (error) {
 			TraceEvent(SevWarn, "N2_CloseError", id)
 			    .suppressFor(1.0)
 			    .detail("PeerAddr", peer_address)
 			    .detail("PeerAddress", peer_address)
 			    .detail("ErrorCode", error.value())
 			    .detail("Message", error.message());
+		}
 	}
 
 	void onReadError(const boost::system::error_code& error) {
@@ -757,11 +760,12 @@ private:
 	void closeSocket() {
 		boost::system::error_code error;
 		socket.close(error);
-		if (error)
+		if (error) {
 			TraceEvent(SevWarn, "N2_CloseError", id)
 			    .suppressFor(1.0)
 			    .detail("ErrorCode", error.value())
 			    .detail("Message", error.message());
+		}
 	}
 
 	void onReadError(const boost::system::error_code& error) {
@@ -1274,11 +1278,12 @@ public:
 			// positive so check explicitly.
 			ASSERT(limit > 0);
 			bool notEmpty = false;
-			for (auto p = data; p; p = p->next)
+			for (auto p = data; p; p = p->next) {
 				if (p->bytes_written - p->bytes_sent > 0) {
 					notEmpty = true;
 					break;
 				}
+			}
 			ASSERT(notEmpty);
 
 			if (err == boost::asio::error::would_block) {
@@ -1892,13 +1897,14 @@ void Net2::checkForSlowTask(int64_t tscBegin, int64_t tscEnd, double duration, T
 			sampleRate = 1; // Always include slow task events that could show up in our slow task profiling.
 		}
 
-		if (!DEBUG_DETERMINISM && (nondeterministicRandom()->random01() < sampleRate))
+		if (!DEBUG_DETERMINISM && (nondeterministicRandom()->random01() < sampleRate)) {
 			TraceEvent(elapsed > warnThreshold ? SevWarnAlways : SevInfo, "SlowTask")
 			    .detail("TaskID", priority)
 			    .detail("MClocks", elapsed / 1e6)
 			    .detail("Duration", duration)
 			    .detail("SampleRate", sampleRate)
 			    .detail("NumYields", numYields);
+		}
 	}
 }
 

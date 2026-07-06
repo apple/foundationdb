@@ -403,28 +403,32 @@ static int asyncShmLock(sqlite3_file* fd, /* Database file holding the shared me
 			}
 		}
 	} else if (flags & SQLITE_SHM_SHARED) {
-		for (int i = ofst; i < ofst + n; i++)
+		for (int i = ofst; i < ofst + n; i++) {
 			if (memInfo->exclusiveLocks[i] != ((pDbFd->sharedMemoryExclusiveLocks >> i) & 1)) {
 				//TraceEvent("ShmLocked").detail("File", DEBUG_DETERMINISM ? 0 : (int64_t)pDbFd).detail("Acquiring", "Shared").detail("I", i).detail("Exclusive", memInfo->exclusiveLocks[i]).detail("MyExclusive", pDbFd->sharedMemoryExclusiveLocks);
 				return SQLITE_BUSY;
 			}
-		for (int i = ofst; i < ofst + n; i++)
+		}
+		for (int i = ofst; i < ofst + n; i++) {
 			if (!(pDbFd->sharedMemorySharedLocks & (1 << i))) {
 				pDbFd->sharedMemorySharedLocks |= 1 << i;
 				memInfo->sharedLocks[i]++;
 			}
+		}
 	} else {
-		for (int i = ofst; i < ofst + n; i++)
+		for (int i = ofst; i < ofst + n; i++) {
 			if (memInfo->exclusiveLocks[i] != ((pDbFd->sharedMemoryExclusiveLocks >> i) & 1) ||
 			    memInfo->sharedLocks[i] != ((pDbFd->sharedMemorySharedLocks >> i) & 1)) {
 				//TraceEvent("ShmLocked").detail("File", DEBUG_DETERMINISM ? 0 : (int64_t)pDbFd).detail("Acquiring", "Exclusive").detail("I", i).detail("Exclusive", memInfo->exclusiveLocks[i]).detail("MyExclusive", pDbFd->sharedMemoryExclusiveLocks).detail("Shared", memInfo->sharedLocks[i]).detail("MyShared", pDbFd->sharedMemorySharedLocks);
 				return SQLITE_BUSY;
 			}
-		for (int i = ofst; i < ofst + n; i++)
+		}
+		for (int i = ofst; i < ofst + n; i++) {
 			if (!(pDbFd->sharedMemoryExclusiveLocks & (1 << i))) {
 				pDbFd->sharedMemoryExclusiveLocks |= 1 << i;
 				memInfo->exclusiveLocks[i]++;
 			}
+		}
 	}
 	return SQLITE_OK;
 }

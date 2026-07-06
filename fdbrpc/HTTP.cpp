@@ -24,9 +24,10 @@
 #include "flow/IRandom.h"
 #include "flow/Net2Packet.h"
 #include "flow/Trace.h"
+#include "flow/Knobs.h"
+#include "flow/CodeProbe.h"
 #include "md5/md5.h"
 #include "libb64/encode.h"
-#include "flow/Knobs.h"
 #include <cctype>
 #include <sstream>
 #include "flow/IConnection.h"
@@ -55,13 +56,14 @@ std::string urlEncode(const std::string& s) {
 	std::string o;
 	o.reserve(s.size() * 3);
 	char buf[32];
-	for (auto c : s)
+	for (auto c : s) {
 		if (std::isalnum(c) || c == '?' || c == '/' || c == '-' || c == '_' || c == '.' || c == ',' || c == ':')
 			o.append(&c, 1);
 		else {
 			snprintf(buf, sizeof(buf), "%%%.02X", c);
 			o.append(buf);
 		}
+	}
 	return o;
 }
 
@@ -213,7 +215,7 @@ Future<Void> writeResponse(Reference<IConnection> conn, Reference<OutgoingRespon
 	response->data.content->prependWriteBuffer(pFirst, pLast);
 	while (true) {
 		int trySend = FLOW_KNOBS->HTTP_SEND_SIZE;
-		if ((!g_network->isSimulated() || !g_simulator->speedUpSimulation) && BUGGIFY_WITH_PROB(0.01)) {
+		if ((!g_network->isSimulated() || !g_simulator->speedUpSimulation) && buggify(0.1)) {
 			trySend = deterministicRandom()->randomInt(1, 10);
 		}
 		int len = conn->write(response->data.content->getUnsent(), trySend);
@@ -227,7 +229,7 @@ Future<Void> writeResponse(Reference<IConnection> conn, Reference<OutgoingRespon
 	}
 }
 
-// Read at least 1 bytes from conn and up to maxlen in a single read, append read data into *buf
+// Read at least 1 byte from conn and up to maxlen in a single read, append read data into *buf
 // Returns the number of bytes read.
 Future<int> read_into_string(Reference<IConnection> conn, std::string* buf, int maxlen) {
 	while (true) {
@@ -235,7 +237,12 @@ Future<int> read_into_string(Reference<IConnection> conn, std::string* buf, int 
 		int originalSize = buf->size();
 		// TODO:  resize is zero-initializing the space we're about to overwrite, so do something else, which probably
 		// means not using a string for this buffer
-		// FIXME: buggify read size as well
+
+		// Buggify read size to exercise partial-read code paths in simulation
+		if ((!g_network->isSimulated() || !g_simulator->speedUpSimulation) && maxlen > 1 && buggify(0.1)) {
+			maxlen = deterministicRandom()->randomInt(1, maxlen);
+			CODE_PROBE(true, "HTTP buggified read size");
+		}
 		buf->resize(originalSize + maxlen);
 		uint8_t* wptr = (uint8_t*)buf->data() + originalSize;
 		int len = conn->read(wptr, wptr + maxlen);
@@ -620,12 +627,13 @@ Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnection> 
 		// Prepend headers to content packet buffer chain
 		request->data.content->prependWriteBuffer(pFirst, pLast);
 
-		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 1)
+		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 1) {
 			fmt::print("[{}] HTTP starting {} {} ContentLen:{}\n",
 			           conn->getDebugID().toString(),
 			           request->verb,
 			           request->resource,
 			           request->data.contentLen);
+		}
 		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 2) {
 			for (auto h : request->data.headers)
 				fmt::print("Request Header: {}: {}\n", h.first, h.second);
@@ -660,7 +668,7 @@ Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnection> 
 			}
 
 			int trySend = FLOW_KNOBS->HTTP_SEND_SIZE;
-			if ((!g_network->isSimulated() || !g_simulator->speedUpSimulation) && BUGGIFY_WITH_PROB(0.01)) {
+			if ((!g_network->isSimulated() || !g_simulator->speedUpSimulation) && buggify(0.1)) {
 				trySend = deterministicRandom()->randomInt(1, 10);
 			}
 			co_await sendRate->getAllowance(trySend);

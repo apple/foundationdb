@@ -106,7 +106,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 
 		maxClearSize = 1 << deterministicRandom()->randomInt(0, 20);
 		conflictRange = KeyRangeRef("\xfe"_sr, "\xfe\x00"_sr);
-		if (clientId == 0)
+		if (clientId == 0) {
 			TraceEvent("RYWConfiguration")
 			    .detail("Nodes", nodes)
 			    .detail("InitialKeyDensity", initialKeyDensity)
@@ -114,6 +114,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 			    .detail("ValueSizeMin", valueSizeRange.first)
 			    .detail("ValueSizeMax", valueSizeRange.second)
 			    .detail("MaxClearSize", maxClearSize);
+		}
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
@@ -193,8 +194,9 @@ struct WriteDuringReadWorkload : TestWorkload {
 			if (e.code() == error_code_used_during_commit) {
 				ASSERT(*doingCommit);
 				co_return;
-			} else if (e.code() == error_code_transaction_cancelled)
+			} else if (e.code() == error_code_transaction_cancelled) {
 				co_return;
+			}
 			throw;
 		}
 	}
@@ -384,8 +386,9 @@ struct WriteDuringReadWorkload : TestWorkload {
 			if (e.code() == error_code_used_during_commit) {
 				ASSERT(*doingCommit);
 				co_return;
-			} else if (e.code() == error_code_transaction_cancelled)
+			} else if (e.code() == error_code_transaction_cancelled) {
 				co_return;
+			}
 			throw;
 		}
 	}
@@ -431,8 +434,9 @@ struct WriteDuringReadWorkload : TestWorkload {
 			if (e.code() == error_code_used_during_commit) {
 				ASSERT(*doingCommit);
 				co_return;
-			} else if (e.code() == error_code_transaction_cancelled)
+			} else if (e.code() == error_code_transaction_cancelled) {
 				co_return;
+			}
 			throw;
 		}
 	}
@@ -488,8 +492,9 @@ struct WriteDuringReadWorkload : TestWorkload {
 			if (e.code() == error_code_used_during_commit) {
 				ASSERT(*doingCommit);
 				co_return;
-			} else if (e.code() == error_code_transaction_cancelled)
+			} else if (e.code() == error_code_transaction_cancelled) {
 				co_return;
+			}
 			throw;
 		}
 	}
@@ -797,19 +802,19 @@ struct WriteDuringReadWorkload : TestWorkload {
 		int waitLocation = 0;
 		double startTime = now();
 
-		bool disableGetKey = BUGGIFY;
-		bool disableGetRange = BUGGIFY;
-		bool disableGet = BUGGIFY;
-		bool disableCommit = BUGGIFY;
-		bool disableClearRange = BUGGIFY;
-		bool disableClear = BUGGIFY;
-		bool disableWatch = BUGGIFY;
-		bool disableWriteConflictRange = BUGGIFY;
-		bool disableDelay = BUGGIFY;
-		bool disableReset = BUGGIFY;
-		bool disableReadConflictRange = BUGGIFY;
-		bool disableSet = BUGGIFY;
-		bool disableAtomicOp = BUGGIFY;
+		bool disableGetKey = buggify();
+		bool disableGetRange = buggify();
+		bool disableGet = buggify();
+		bool disableCommit = buggify();
+		bool disableClearRange = buggify();
+		bool disableClear = buggify();
+		bool disableWatch = buggify();
+		bool disableWriteConflictRange = buggify();
+		bool disableDelay = buggify();
+		bool disableReset = buggify();
+		bool disableReadConflictRange = buggify();
+		bool disableSet = buggify();
+		bool disableAtomicOp = buggify();
 
 		Key timebombStr = makeString(8);
 		uint8_t* data = mutateString(timebombStr);

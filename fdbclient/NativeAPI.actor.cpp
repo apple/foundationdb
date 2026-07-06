@@ -1572,36 +1572,6 @@ Future<Void> Transaction::warmRange(KeyRange keys) {
 	return warmRange_impl(trState, keys);
 }
 
-namespace {
-
-template <class Interface, class Request, bool P>
-Future<REPLY_TYPE(Request)> loadBalance(
-    DatabaseContext* ctx,
-    const Reference<LocationInfo> alternatives,
-    RequestStream<Request, P> Interface::* channel,
-    const Request& request = Request(),
-    TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
-    AtMostOnce atMostOnce =
-        AtMostOnce::False, // if true, throws request_maybe_delivered() instead of retrying automatically
-    QueueModel* model = nullptr,
-    bool compareReplicas = false,
-    int requiredReplicas = 0) {
-	if (alternatives->hasCaches) {
-		return loadBalance(
-		    alternatives->locations(), channel, request, taskID, atMostOnce, model, compareReplicas, requiredReplicas);
-	}
-	return fmap(
-	    [ctx](auto const& res) {
-		    if (res.cached) {
-			    ctx->updateCache.trigger();
-		    }
-		    return res;
-	    },
-	    loadBalance(
-	        alternatives->locations(), channel, request, taskID, atMostOnce, model, compareReplicas, requiredReplicas));
-}
-} // namespace
-
 ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
                                        Key key,
                                        TransactionRecordLogInfo recordLogInfo) {
@@ -1654,8 +1624,7 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 						throw transaction_too_old();
 					}
 					when(GetValueReply _reply = wait(
-					         loadBalance(trState->cx.getPtr(),
-					                     locationInfo.locations,
+					         loadBalance(locationInfo.locations->locations(),
 					                     &StorageServerInterface::getValue,
 					                     GetValueRequest(span.context,
 					                                     key,
@@ -1783,8 +1752,7 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState, KeySelector k) {
 						throw transaction_too_old();
 					}
 					when(GetKeyReply _reply = wait(
-					         loadBalance(trState->cx.getPtr(),
-					                     locationInfo.locations,
+					         loadBalance(locationInfo.locations->locations(),
 					                     &StorageServerInterface::getKey,
 					                     req,
 					                     TaskPriority::DefaultPromiseEndpoint,
@@ -1926,8 +1894,7 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 			state WatchValueReply resp;
 			choose {
 				when(WatchValueReply r = wait(
-				         loadBalance(cx.getPtr(),
-				                     locationInfo.locations,
+				         loadBalance(locationInfo.locations->locations(),
 				                     &StorageServerInterface::watchValue,
 				                     WatchValueRequest(span.context,
 				                                       parameters->key,
@@ -1957,7 +1924,7 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 			// max versions in flight in an attempt to reliably recognize when
 			// a recovery has occurred, but avoid triggering if it just takes a
 			// little while to get the committed version.
-			bool buggifyRetry = g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.1);
+			bool buggifyRetry = g_network->isSimulated() && !g_simulator->speedUpSimulation && buggify(0.1);
 			CODE_PROBE(buggifyRetry, "Watch buggifying version gap retry");
 			if (v - resp.version < 50'000'000 && !buggifyRetry) {
 				return resp.version;
@@ -2279,8 +2246,7 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 							throw transaction_too_old();
 						}
 						when(GetKeyValuesFamilyReply _rep = wait(loadBalance(
-						         trState->cx.getPtr(),
-						         locations[shard].locations,
+						         locations[shard].locations->locations(),
 						         getRangeRequestStream<GetKeyValuesFamilyRequest>(),
 						         req,
 						         TaskPriority::DefaultPromiseEndpoint,
@@ -2665,8 +2631,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					}
 					// state AnnotateActor annotation(currentLineage);
 					GetKeyValuesFamilyReply _rep =
-					    wait(loadBalance(trState->cx.getPtr(),
-					                     beginServer.locations,
+					    wait(loadBalance(beginServer.locations->locations(),
 					                     getRangeRequestStream<GetKeyValuesFamilyRequest>(),
 					                     req,
 					                     TaskPriority::DefaultPromiseEndpoint,
@@ -2720,7 +2685,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					output.readToBegin = readToBegin;
 					output.readThroughEnd = readThroughEnd;
 
-					if (BUGGIFY && limits.hasByteLimit() && output.size() > std::max(1, originalLimits.minRows) &&
+					if (buggify() && limits.hasByteLimit() && output.size() > std::max(1, originalLimits.minRows) &&
 					    (!std::is_same<GetKeyValuesFamilyRequest, GetMappedKeyValuesRequest>::value)) {
 						// Copy instead of resizing because TSS maybe be using output's arena for comparison. This only
 						// happens in simulation so it's fine
@@ -3978,7 +3943,7 @@ double Transaction::getBackoff(int errCode) {
 
 TransactionOptions::TransactionOptions(Database const& cx) {
 	reset(cx);
-	if (BUGGIFY) {
+	if (buggify()) {
 		commitOnFirstProxy = true;
 	}
 }
@@ -5930,9 +5895,16 @@ Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(Database cx,
 			err = e;
 		}
 		retryCount++;
-		// Upgrade from SevDebug to SevWarn after 60 seconds of retrying
-		Severity sev = (now() - startTime > 60.0) ? SevWarn : SevDebug;
-		TraceEvent(sev, "WaitStorageMetricsHandleError")
+		// Stays at SevDebug. The previous SevDebug→SevWarn upgrade after 60s
+		// elapsed didn't actually filter for stuck shards: the SS-side
+		// waitMetrics is a long-poll with a STORAGE_METRIC_TIMEOUT of 600s,
+		// and on timeout the SS deliberately returns wrong_shard_server with
+		// WAIT_METRICS_WRONG_SHARD_CHANCE = 0.1 to force clients to refresh
+		// their location cache. So most calls that ever hit this catch are
+		// already past 60s elapsed by design, and the SevWarn was firing on
+		// normal cluster operation. DD-init stall visibility lives on the
+		// DDInit* events instead (PR #12913).
+		TraceEvent(SevDebug, "WaitStorageMetricsHandleError")
 		    .error(err)
 		    .detail("Keys", keys)
 		    .detail("Elapsed", now() - startTime)
@@ -6327,7 +6299,7 @@ Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(cons
 		double sampleRate =
 		    cx->globalConfig->get<double>(fdbClientInfoTxnSampleRate, std::numeric_limits<double>::infinity());
 		double clientSamplingProbability = std::isinf(sampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : sampleRate;
-		if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY) &&
+		if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || buggify()) &&
 		    deterministicRandom()->random01() < clientSamplingProbability &&
 		    (!g_network->isSimulated() || !g_simulator->speedUpSimulation)) {
 			return makeReference<TransactionLogInfo>(TransactionLogInfo::DATABASE);

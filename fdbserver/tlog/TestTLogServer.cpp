@@ -114,7 +114,7 @@ struct StorageResources {
 
 	StorageResources() = default;
 	StorageResources(std::string dq, std::string kv, TempStorageFiles files)
-	  : diskQueueFilename(std::move(dq)), kvStoreFilename(std::move(kv)), tempFiles(std::move(files)) {}
+	  : diskQueueFilename(std::move(dq)), kvStoreFilename(std::move(kv)), tempFiles(files) {}
 };
 
 StorageResources setupPersistentStorage(Reference<TLogContext> tLogContext,
@@ -134,7 +134,7 @@ StorageResources setupPersistentStorage(Reference<TLogContext> tLogContext,
 
 	TempStorageFiles tempFiles(
 	    diskQueueFilename, options.diskQueueExtension, kvStoreFilename, options.kvStoreExtension);
-	return StorageResources(diskQueueFilename, kvStoreFilename, std::move(tempFiles));
+	return StorageResources(diskQueueFilename, kvStoreFilename, tempFiles);
 }
 
 Reference<TLogTestContext> initTLogTestContext(TestTLogOptions tLogOptions,
@@ -234,7 +234,7 @@ Future<Void> getTLogCreateActor(Reference<TLogTestContext> pTLogTestContext,
 	// wait for either test completion or tLog failure.
 	auto choice = co_await race(tl, pTLogContext->TestTLogServerCompleted.getFuture());
 	if (choice.index() == 1) {
-		bool testCompleted = std::get<1>(std::move(choice));
+		bool testCompleted = std::get<1>(choice);
 		ASSERT_EQ(testCompleted, true);
 	}
 

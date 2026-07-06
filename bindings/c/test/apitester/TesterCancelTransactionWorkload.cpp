@@ -25,7 +25,7 @@ namespace FdbApiTester {
 
 class CancelTransactionWorkload : public ApiWorkload {
 public:
-	CancelTransactionWorkload(const WorkloadConfig& config) : ApiWorkload(config) {}
+	explicit CancelTransactionWorkload(const WorkloadConfig& config) : ApiWorkload(config) {}
 
 private:
 	enum OpType { OP_CANCEL_GET, OP_CANCEL_AFTER_FIRST_GET, OP_LAST = OP_CANCEL_AFTER_FIRST_GET };

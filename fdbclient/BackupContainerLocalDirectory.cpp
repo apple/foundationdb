@@ -34,7 +34,7 @@ public:
 	BackupFile(const std::string& fileName, Reference<IAsyncFile> file, const std::string& finalFullPath)
 	  : IBackupFile(fileName), m_file(file), m_writeOffset(0), m_finalFullPath(finalFullPath),
 	    m_blockSize(CLIENT_KNOBS->BACKUP_LOCAL_FILE_WRITE_BLOCK) {
-		if (BUGGIFY) {
+		if (buggify()) {
 			m_blockSize = deterministicRandom()->randomInt(100, 20000);
 		}
 		m_buffer.reserve(m_buffer.arena(), m_blockSize);
@@ -106,11 +106,12 @@ static Future<BackupContainerFileSystem::FilesAndSizesT> listFiles_impl(std::str
 
 	// Remove .lnk files from results, they are a side effect of a backup that was *read* during simulation.  See
 	// openFile() above for more info on why they are created.
-	if (g_network->isSimulated())
+	if (g_network->isSimulated()) {
 		files.erase(std::remove_if(files.begin(),
 		                           files.end(),
 		                           [](std::string const& f) { return StringRef(f).endsWith(".lnk"_sr); }),
 		            files.end());
+	}
 
 	for (const auto& f : files) {
 		// Hide .part or .temp files.
