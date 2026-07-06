@@ -2743,6 +2743,7 @@ public:
 	                                      Reference<TSSPairState> tssState) {
 		// SOMEDAY: Cluster controller waits for availability, retry quickly if a server's Locality changes
 		self->recruitingStream.set(self->recruitingStream.get() + 1);
+		bool countedAsRecruiting = true;
 
 		const NetworkAddress& netAddr = candidateWorker.worker.stableAddress();
 		AddressExclusion workerAddr(netAddr.ip, netAddr.port);
@@ -2845,6 +2846,14 @@ public:
 					tssState->markComplete();
 					throw newServer.getError();
 				}
+				// A definitive rejection means that no storage server is being initialized. Keep the worker
+				// excluded during the retry delay to avoid spinning on it, but do not report the cooldown as
+				// active recruitment. A request_maybe_delivered response remains counted because the worker may
+				// still be initializing the server.
+				if (newServer.isError(error_code_recruitment_failed)) {
+					self->recruitingStream.set(self->recruitingStream.get() - 1);
+					countedAsRecruiting = false;
+				}
 				co_await delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY, TaskPriority::DataDistribution);
 			}
 
@@ -2943,7 +2952,9 @@ public:
 			CODE_PROBE(true, "SS with pair TSS recruitment failed for some reason");
 		}
 
-		self->recruitingStream.set(self->recruitingStream.get() - 1);
+		if (countedAsRecruiting) {
+			self->recruitingStream.set(self->recruitingStream.get() - 1);
+		}
 		self->restartRecruiting.trigger();
 	}
 
