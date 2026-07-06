@@ -1102,6 +1102,12 @@ void removeFailedWorker(WorkerInterface const& worker, ClusterControllerData* cl
 	cluster->updateWorkerList.set(worker.locality.processId(), Optional<ProcessData>());
 }
 
+void processRegisteredSingletons(ClusterControllerData* self,
+                                 WorkerInterface const& worker,
+                                 Optional<DataDistributorInterface> const& distributorInterf,
+                                 Optional<RatekeeperInterface> const& ratekeeperInterf,
+                                 Optional<ConsistencyScanInterface> const& consistencyScanInterf);
+
 ACTOR Future<Void> workerAvailabilityWatch(WorkerInterface worker,
                                            ProcessClass startingClass,
                                            ClusterControllerData* cluster) {
@@ -1143,6 +1149,11 @@ ACTOR Future<Void> workerAvailabilityWatch(WorkerInterface worker,
 				}
 				workerInfo->second.verified = true;
 				registrationPingReply = Never();
+				processRegisteredSingletons(cluster,
+				                            worker,
+				                            workerInfo->second.distributorInterf,
+				                            workerInfo->second.ratekeeperInterf,
+				                            workerInfo->second.consistencyScanInterf);
 				checkOutstandingRequests(cluster);
 			}
 			when(wait(IFailureMonitor::failureMonitor().onStateEqual(
@@ -1365,6 +1376,36 @@ void haltRegisteringOrCurrentSingleton(ClusterControllerData* self,
 	}
 }
 
+void processRegisteredSingletons(ClusterControllerData* self,
+                                 WorkerInterface const& worker,
+                                 Optional<DataDistributorInterface> const& distributorInterf,
+                                 Optional<RatekeeperInterface> const& ratekeeperInterf,
+                                 Optional<ConsistencyScanInterface> const& consistencyScanInterf) {
+	// For each singleton
+	// - if the registering singleton conflicts with the singleton being recruited, kill the registering one
+	// - if the singleton is not being recruited, kill the existing one in favour of the registering one
+	if (distributorInterf.present()) {
+		auto currSingleton = DataDistributorSingleton(self->db.serverInfo->get().distributor);
+		auto registeringSingleton = DataDistributorSingleton(distributorInterf);
+		haltRegisteringOrCurrentSingleton<DataDistributorSingleton>(
+		    self, worker, currSingleton, registeringSingleton, self->recruitingDistributorID);
+	}
+
+	if (ratekeeperInterf.present()) {
+		auto currSingleton = RatekeeperSingleton(self->db.serverInfo->get().ratekeeper);
+		auto registeringSingleton = RatekeeperSingleton(ratekeeperInterf);
+		haltRegisteringOrCurrentSingleton<RatekeeperSingleton>(
+		    self, worker, currSingleton, registeringSingleton, self->recruitingRatekeeperID);
+	}
+
+	if (consistencyScanInterf.present()) {
+		auto currSingleton = ConsistencyScanSingleton(self->db.serverInfo->get().consistencyScan);
+		auto registeringSingleton = ConsistencyScanSingleton(consistencyScanInterf);
+		haltRegisteringOrCurrentSingleton<ConsistencyScanSingleton>(
+		    self, worker, currSingleton, registeringSingleton, self->recruitingConsistencyScanID);
+	}
+}
+
 void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 	const WorkerInterface& w = req.wi;
 	if (req.clusterId.present() && self->clusterId->get().present() && req.clusterId != self->clusterId->get() &&
@@ -1453,6 +1494,7 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 		}
 	}
 
+	bool acceptedRegistration = false;
 	if (info == self->id_worker.end()) {
 		self->id_worker[w.locality.processId()] = WorkerInfo(workerAvailabilityWatch(w, newProcessClass, self),
 		                                                     req.reply,
@@ -1489,6 +1531,7 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 		self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
 		self->updateDBInfo.trigger();
 		checkOutstandingRequests(self);
+		acceptedRegistration = true;
 	} else if (info->second.details.interf.id() != w.id() || req.generation >= info->second.gen) {
 		if (!info->second.reply.isSet()) {
 			info->second.reply.send(Never());
@@ -1518,32 +1561,24 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 		self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
 		self->updateDBInfo.trigger();
 		checkOutstandingRequests(self);
+		acceptedRegistration = true;
 	} else {
 		CODE_PROBE(true, "Received an old worker registration request.", probe::decoration::rare);
 	}
 
-	// For each singleton
-	// - if the registering singleton conflicts with the singleton being recruited, kill the registering one
-	// - if the singleton is not being recruited, kill the existing one in favour of the registering one
-	if (req.distributorInterf.present()) {
-		auto currSingleton = DataDistributorSingleton(self->db.serverInfo->get().distributor);
-		auto registeringSingleton = DataDistributorSingleton(req.distributorInterf);
-		haltRegisteringOrCurrentSingleton<DataDistributorSingleton>(
-		    self, w, currSingleton, registeringSingleton, self->recruitingDistributorID);
-	}
-
-	if (req.ratekeeperInterf.present()) {
-		auto currSingleton = RatekeeperSingleton(self->db.serverInfo->get().ratekeeper);
-		auto registeringSingleton = RatekeeperSingleton(req.ratekeeperInterf);
-		haltRegisteringOrCurrentSingleton<RatekeeperSingleton>(
-		    self, w, currSingleton, registeringSingleton, self->recruitingRatekeeperID);
-	}
-
-	if (req.consistencyScanInterf.present()) {
-		auto currSingleton = ConsistencyScanSingleton(self->db.serverInfo->get().consistencyScan);
-		auto registeringSingleton = ConsistencyScanSingleton(req.consistencyScanInterf);
-		haltRegisteringOrCurrentSingleton<ConsistencyScanSingleton>(
-		    self, w, currSingleton, registeringSingleton, self->recruitingConsistencyScanID);
+	if (acceptedRegistration) {
+		auto workerInfo = self->id_worker.find(w.locality.processId());
+		ASSERT(workerInfo != self->id_worker.end() && workerInfo->second.details.interf.id() == w.id());
+		workerInfo->second.distributorInterf = req.distributorInterf;
+		workerInfo->second.ratekeeperInterf = req.ratekeeperInterf;
+		workerInfo->second.consistencyScanInterf = req.consistencyScanInterf;
+		if (workerInfo->second.verified) {
+			processRegisteredSingletons(self,
+			                            w,
+			                            workerInfo->second.distributorInterf,
+			                            workerInfo->second.ratekeeperInterf,
+			                            workerInfo->second.consistencyScanInterf);
+		}
 	}
 
 	// Notify the worker to register again with new process class/exclusive property
@@ -3230,6 +3265,57 @@ TEST_CASE("/fdbserver/clustercontroller/verifyLiveWorkerRegistration") {
 	ASSERT(data.id_worker[processId].details.interf.id() == worker.id());
 	ASSERT(data.id_worker[processId].verified);
 	ASSERT(data.workerAvailable(data.id_worker[processId], false));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/unverifiedRegistrationCannotPublishSingleton") {
+	state ClusterControllerData data(ClusterControllerFullInterface(),
+	                                 LocalityData(),
+	                                 ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                                     new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                                 makeReference<AsyncVar<Optional<UID>>>());
+	state LocalityData workerLocality;
+	workerLocality.set(LocalityData::keyProcessId, Standalone<StringRef>(std::string{ "singleton-worker" }));
+	state WorkerInterface worker(workerLocality);
+	worker.initEndpoints();
+	worker.storage.getEndpoint(TaskPriority::Worker);
+	state FutureStream<LoadedPingRequest> pings = worker.debugPing.getFuture();
+	state LocalityData currentDistributorLocality;
+	currentDistributorLocality.set(LocalityData::keyProcessId,
+	                               Standalone<StringRef>(std::string{ "current-singleton" }));
+	state DataDistributorInterface currentDistributor(currentDistributorLocality, UID(1, 1));
+	state DataDistributorInterface distributor(workerLocality, UID(1, 2));
+	data.db.setDistributor(currentDistributor);
+
+	state RegisterWorkerRequest request;
+	request.wi = worker;
+	request.initialClass = ProcessClass(ProcessClass::StorageClass, ProcessClass::CommandLineSource);
+	request.processClass = request.initialClass;
+	request.generation = 0;
+	request.distributorInterf = distributor;
+	request.recoveredDiskFiles = true;
+	registerWorker(request, &data);
+
+	state Optional<Standalone<StringRef>> processId = worker.locality.processId();
+	ASSERT(processId.present());
+	ASSERT(data.id_worker.contains(processId));
+	ASSERT(!data.id_worker[processId].verified);
+	ASSERT(data.db.serverInfo->get().distributor.present());
+	ASSERT(data.db.serverInfo->get().distributor.get().id() == currentDistributor.id());
+
+	state LoadedPingRequest ping = waitNext(pings);
+	ASSERT(ping.id == worker.id());
+	state LoadedReply reply;
+	reply.id = ping.id;
+	reply.payload = ""_sr;
+	ping.reply.send(reply);
+
+	// The singleton can be published only after this exact worker interface answers the verification ping.
+	wait(delay(0.1));
+	ASSERT(data.id_worker.contains(processId));
+	ASSERT(data.id_worker[processId].verified);
+	ASSERT(data.db.serverInfo->get().distributor.present());
+	ASSERT(data.db.serverInfo->get().distributor.get().id() == distributor.id());
 	return Void();
 }
 

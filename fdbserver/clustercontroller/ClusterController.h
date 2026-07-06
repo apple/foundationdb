@@ -45,6 +45,11 @@ struct WorkerInfo : NonCopyable {
 	ProcessClass initialClass;
 	ClusterControllerPriorityInfo priorityInfo;
 	WorkerDetails details;
+	// Singleton interfaces reported by this exact worker registration. They are only reconciled into
+	// ServerDBInfo after the worker interface has been verified.
+	Optional<DataDistributorInterface> distributorInterf;
+	Optional<RatekeeperInterface> ratekeeperInterf;
+	Optional<ConsistencyScanInterface> consistencyScanInterf;
 	Future<Void> haltRatekeeper;
 	Future<Void> haltDistributor;
 	Future<Void> haltConsistencyScan;
@@ -69,8 +74,9 @@ struct WorkerInfo : NonCopyable {
 	explicit(false) WorkerInfo(WorkerInfo&& r) noexcept
 	  : watcher(std::move(r.watcher)), reply(std::move(r.reply)), gen(r.gen), reboots(r.reboots), verified(r.verified),
 	    initialClass(r.initialClass), priorityInfo(r.priorityInfo), details(std::move(r.details)),
-	    haltRatekeeper(r.haltRatekeeper), haltDistributor(r.haltDistributor),
-	    haltConsistencyScan(r.haltConsistencyScan), issues(r.issues) {}
+	    distributorInterf(std::move(r.distributorInterf)), ratekeeperInterf(std::move(r.ratekeeperInterf)),
+	    consistencyScanInterf(std::move(r.consistencyScanInterf)), haltRatekeeper(r.haltRatekeeper),
+	    haltDistributor(r.haltDistributor), haltConsistencyScan(r.haltConsistencyScan), issues(r.issues) {}
 	void operator=(WorkerInfo&& r) noexcept {
 		watcher = std::move(r.watcher);
 		reply = std::move(r.reply);
@@ -80,6 +86,9 @@ struct WorkerInfo : NonCopyable {
 		initialClass = r.initialClass;
 		priorityInfo = r.priorityInfo;
 		details = std::move(r.details);
+		distributorInterf = std::move(r.distributorInterf);
+		ratekeeperInterf = std::move(r.ratekeeperInterf);
+		consistencyScanInterf = std::move(r.consistencyScanInterf);
 		haltRatekeeper = r.haltRatekeeper;
 		haltDistributor = r.haltDistributor;
 		issues = r.issues;
