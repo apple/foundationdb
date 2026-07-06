@@ -1700,6 +1700,8 @@ Future<Void> CDCProxy::monitorDBInfo(CDCProxyInterface proxy, uint64_t recoveryC
 }
 
 Future<Void> CDCProxy::run(CDCProxyInterface proxy, uint64_t recoveryCount) {
+	// ENABLE_NATIVE_CDC gates new stream admission, not serving: recovery keeps CDC proxies alive while durable
+	// streams or retired-tag pops drain after the feature is disabled.
 	if (SERVER_KNOBS->MAXIMUM_PEEK_BYTES <= 0 ||
 	    SERVER_KNOBS->CDC_PROXY_BUFFER_BYTES <= SERVER_KNOBS->MAXIMUM_PEEK_BYTES ||
 	    SERVER_KNOBS->CDC_PROXY_CONSUME_POLL_TIMEOUT <= 0 || SERVER_KNOBS->CDC_PROXY_POP_MIN_INTERVAL < 0 ||
