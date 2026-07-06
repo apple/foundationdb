@@ -313,6 +313,18 @@ class CDCProxy {
 	std::vector<CDCBufferCandidate> getBufferCandidates(Reference<CDCBufferedTag> tag,
 	                                                    Version throughVersion,
 	                                                    std::unordered_map<CDCStreamId, int64_t> const& estimatedBytes);
+	CDCBufferSelection selectBufferCandidatesForTag(Reference<CDCBufferedTag> tag,
+	                                                Reference<IReplayPeekCursor> cursor,
+	                                                Version throughVersion,
+	                                                int64_t preferredBufferedBatch,
+	                                                int64_t hardBufferedBatchLimit);
+	Future<CDCBufferTagPassResult> materializeBufferSelection(Reference<CDCBufferedTag> tag,
+	                                                          Reference<IReplayPeekCursor> cursor,
+	                                                          Version throughVersion,
+	                                                          CDCBufferSelection const& selection,
+	                                                          int64_t rawPeekReservation,
+	                                                          FlowLock::Releaser& reservation,
+	                                                          int64_t bufferLimit);
 	Future<Void> rotateContendedPeek();
 	Future<CDCBufferTagPassResult> bufferTagPass(Reference<CDCBufferedTag> tag, Version begin);
 	Future<Void> bufferTag(Reference<CDCBufferedTag> tag);
@@ -851,11 +863,107 @@ std::vector<CDCBufferCandidate> CDCProxy::getBufferCandidates(
 	return candidates;
 }
 
+CDCBufferSelection CDCProxy::selectBufferCandidatesForTag(Reference<CDCBufferedTag> tag,
+                                                          Reference<IReplayPeekCursor> cursor,
+                                                          Version throughVersion,
+                                                          int64_t preferredBufferedBatch,
+                                                          int64_t hardBufferedBatchLimit) {
+	Reference<IReplayPeekCursor> estimateCursor = cursor->cloneNoMore();
+	estimateCursor->setProtocolVersion(g_network->protocolVersion());
+	const std::unordered_map<CDCStreamId, int64_t> estimatedBytes =
+	    estimateBufferedBytes(tag, estimateCursor, throughVersion);
+	const std::vector<CDCBufferCandidate> candidates = getBufferCandidates(tag, throughVersion, estimatedBytes);
+	CDCBufferSelection selection = selectBufferCandidates(candidates, preferredBufferedBatch, hardBufferedBatchLimit);
+	for (const CDCStreamId streamId : selection.oversizedStreamIds) {
+		auto stream = streams.find(streamId);
+		if (stream == streams.end() || !stream->second->active) {
+			continue;
+		}
+		CODE_PROBE(true, "CDC proxy rejects a version larger than its complete buffer budget");
+		TraceEvent(SevWarn, "CDCProxyVersionExceedsBufferLimit", id)
+		    .detail("Tag", tag->tag)
+		    .detail("StreamId", streamId)
+		    .detail("EstimatedBytes", estimatedBytes.at(streamId))
+		    .detail("BufferedBatchLimit", hardBufferedBatchLimit)
+		    .detail("Version", throughVersion);
+		stream->second->bufferLimitExceeded = true;
+		stream->second->changed.trigger();
+	}
+	return selection;
+}
+
 Future<Void> CDCProxy::rotateContendedPeek() {
 	if (bufferLock.waiters() == 0) {
 		co_await peekCapacityContended.onTrigger();
 	}
 	co_await delay(SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT);
+}
+
+Future<CDCBufferTagPassResult> CDCProxy::materializeBufferSelection(Reference<CDCBufferedTag> tag,
+                                                                    Reference<IReplayPeekCursor> cursor,
+                                                                    Version throughVersion,
+                                                                    CDCBufferSelection const& selection,
+                                                                    int64_t rawPeekReservation,
+                                                                    FlowLock::Releaser& reservation,
+                                                                    int64_t bufferLimit) {
+	const int64_t materializationReservation = reservation.remaining - rawPeekReservation;
+	ASSERT_GE(materializationReservation, 0);
+	if (selection.selectedBytes <= materializationReservation) {
+		reservation.release(materializationReservation - selection.selectedBytes);
+	} else {
+		CODE_PROBE(
+		    true, "CDC proxy materializes one stream batch larger than its peek reservation", probe::decoration::rare);
+		const int64_t additionalBytes = selection.selectedBytes - materializationReservation;
+		auto exactCapacity = co_await race(bufferLock.take(TaskPriority::TLogPeekReply, additionalBytes),
+		                                   logSystem->onChange(),
+		                                   tag->stopped.onTrigger(),
+		                                   tag->refresh.onTrigger());
+		if (exactCapacity.index() == 1 || exactCapacity.index() == 3) {
+			co_return CDCBufferTagPassResult::RETRY;
+		}
+		if (exactCapacity.index() == 2) {
+			co_return CDCBufferTagPassResult::STOP;
+		}
+		reservation.remaining += additionalBytes;
+		recordBufferUsage();
+	}
+	if (!tag->active) {
+		co_return CDCBufferTagPassResult::STOP;
+	}
+
+	std::unordered_map<CDCStreamId, CDCBufferedBatch> batches =
+	    bufferMessages(tag, cursor, throughVersion, selection.selectedStreamIds);
+	int64_t materializedBytes = 0;
+	for (const auto& [streamId, batch] : batches) {
+		materializedBytes += batch.bufferedBytes;
+	}
+	// An acknowledgement or removal can advance a selected stream while this pass waits for exact capacity. The
+	// materialization pass rechecks current stream frontiers, so it may legitimately produce less than its estimate.
+	ASSERT_LE(materializedBytes, selection.selectedBytes);
+	CODE_PROBE(materializedBytes < selection.selectedBytes,
+	           "CDC proxy drops acknowledged mutations while waiting for buffer capacity",
+	           probe::decoration::rare);
+	ASSERT_GE(reservation.remaining, rawPeekReservation + materializedBytes);
+
+	int64_t acceptedBytes = 0;
+	for (auto& [streamId, batch] : batches) {
+		auto stream = streams.find(streamId);
+		if (stream != streams.end() && stream->second->active && tag->streamIds.contains(streamId)) {
+			acceptedBytes += batch.bufferedBytes;
+			addBufferedBatch(stream->second, std::move(batch));
+		}
+	}
+	ASSERT_LE(acceptedBytes, materializedBytes);
+	ASSERT_LE(acceptedBytes, reservation.remaining);
+	reservation.release(reservation.remaining - acceptedBytes);
+	// Buffered mutations own these permits until acknowledgement or stream removal.
+	reservation.remaining = 0;
+	ASSERT_LE(bufferedBytes, bufferLimit);
+	ASSERT_LE(bufferLock.activePermits(), bufferLimit);
+	advanceTagBufferedThrough(tag, throughVersion, selection.selectedStreamIds);
+	// Every raw cursor arena is covered by rawPeekReservation only for this pass. Reopen from the shared minimum
+	// after releasing it so no cursor response remains live outside the proxy memory budget.
+	co_return CDCBufferTagPassResult::RETRY;
 }
 
 Future<CDCBufferTagPassResult> CDCProxy::bufferTagPass(Reference<CDCBufferedTag> tag, Version begin) {
@@ -937,89 +1045,13 @@ Future<CDCBufferTagPassResult> CDCProxy::bufferTagPass(Reference<CDCBufferedTag>
 	if (throughVersion < begin) {
 		co_return CDCBufferTagPassResult::WAIT_FOR_COMMIT;
 	}
-	Reference<IReplayPeekCursor> estimateCursor = cursor->cloneNoMore();
-	estimateCursor->setProtocolVersion(g_network->protocolVersion());
-	const std::unordered_map<CDCStreamId, int64_t> estimatedBytes =
-	    estimateBufferedBytes(tag, estimateCursor, throughVersion);
-	const std::vector<CDCBufferCandidate> candidates = getBufferCandidates(tag, throughVersion, estimatedBytes);
-	CDCBufferSelection selection = selectBufferCandidates(candidates, preferredBufferedBatch, hardBufferedBatchLimit);
-	for (const CDCStreamId streamId : selection.oversizedStreamIds) {
-		auto stream = streams.find(streamId);
-		if (stream == streams.end() || !stream->second->active) {
-			continue;
-		}
-		CODE_PROBE(true, "CDC proxy rejects a version larger than its complete buffer budget");
-		TraceEvent(SevWarn, "CDCProxyVersionExceedsBufferLimit", id)
-		    .detail("Tag", tag->tag)
-		    .detail("StreamId", streamId)
-		    .detail("EstimatedBytes", estimatedBytes.at(streamId))
-		    .detail("BufferedBatchLimit", hardBufferedBatchLimit)
-		    .detail("Version", throughVersion);
-		stream->second->bufferLimitExceeded = true;
-		stream->second->changed.trigger();
-	}
+	const CDCBufferSelection selection =
+	    selectBufferCandidatesForTag(tag, cursor, throughVersion, preferredBufferedBatch, hardBufferedBatchLimit);
 	if (selection.selectedStreamIds.empty()) {
 		co_return CDCBufferTagPassResult::RETRY;
 	}
-
-	const int64_t materializationReservation = reservation.remaining - rawPeekReservation;
-	ASSERT_GE(materializationReservation, 0);
-	if (selection.selectedBytes <= materializationReservation) {
-		reservation.release(materializationReservation - selection.selectedBytes);
-	} else {
-		CODE_PROBE(
-		    true, "CDC proxy materializes one stream batch larger than its peek reservation", probe::decoration::rare);
-		const int64_t additionalBytes = selection.selectedBytes - materializationReservation;
-		auto exactCapacity = co_await race(bufferLock.take(TaskPriority::TLogPeekReply, additionalBytes),
-		                                   logSystem->onChange(),
-		                                   tag->stopped.onTrigger(),
-		                                   tag->refresh.onTrigger());
-		if (exactCapacity.index() == 1 || exactCapacity.index() == 3) {
-			co_return CDCBufferTagPassResult::RETRY;
-		}
-		if (exactCapacity.index() == 2) {
-			co_return CDCBufferTagPassResult::STOP;
-		}
-		reservation.remaining += additionalBytes;
-		recordBufferUsage();
-	}
-	if (!tag->active) {
-		co_return CDCBufferTagPassResult::STOP;
-	}
-
-	std::unordered_map<CDCStreamId, CDCBufferedBatch> batches =
-	    bufferMessages(tag, cursor, throughVersion, selection.selectedStreamIds);
-	int64_t materializedBytes = 0;
-	for (const auto& [streamId, batch] : batches) {
-		materializedBytes += batch.bufferedBytes;
-	}
-	// An acknowledgement or removal can advance a selected stream while this pass waits for exact capacity. The
-	// materialization pass rechecks current stream frontiers, so it may legitimately produce less than its estimate.
-	ASSERT_LE(materializedBytes, selection.selectedBytes);
-	CODE_PROBE(materializedBytes < selection.selectedBytes,
-	           "CDC proxy drops acknowledged mutations while waiting for buffer capacity",
-	           probe::decoration::rare);
-	ASSERT_GE(reservation.remaining, rawPeekReservation + materializedBytes);
-
-	int64_t acceptedBytes = 0;
-	for (auto& [streamId, batch] : batches) {
-		auto stream = streams.find(streamId);
-		if (stream != streams.end() && stream->second->active && tag->streamIds.contains(streamId)) {
-			acceptedBytes += batch.bufferedBytes;
-			addBufferedBatch(stream->second, std::move(batch));
-		}
-	}
-	ASSERT_LE(acceptedBytes, materializedBytes);
-	ASSERT_LE(acceptedBytes, reservation.remaining);
-	reservation.release(reservation.remaining - acceptedBytes);
-	// Buffered mutations own these permits until acknowledgement or stream removal.
-	reservation.remaining = 0;
-	ASSERT_LE(bufferedBytes, bufferLimit);
-	ASSERT_LE(bufferLock.activePermits(), bufferLimit);
-	advanceTagBufferedThrough(tag, throughVersion, selection.selectedStreamIds);
-	// Every raw cursor arena is covered by rawPeekReservation only for this pass. Reopen from the shared minimum
-	// after releasing it so no cursor response remains live outside the proxy memory budget.
-	co_return CDCBufferTagPassResult::RETRY;
+	co_return co_await materializeBufferSelection(
+	    tag, cursor, throughVersion, selection, rawPeekReservation, reservation, bufferLimit);
 }
 
 Future<Void> CDCProxy::bufferTag(Reference<CDCBufferedTag> tag) {
