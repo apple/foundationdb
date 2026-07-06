@@ -82,14 +82,20 @@ RelocateData::RelocateData()
 
 RelocateData::RelocateData(RelocateShard const& rs)
   : parent_range(rs.getParentRange()), keys(rs.keys), priority(rs.priority),
-    boundaryPriority(isBoundaryPriority(rs.priority) ? rs.priority : -1),
-    healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), reason(rs.reason), dmReason(rs.moveReason),
+    boundaryPriority(rs.retryIntent.present() ? rs.retryIntent.get().boundaryPriority
+                                              : (isBoundaryPriority(rs.priority) ? rs.priority : -1)),
+    healthPriority(rs.retryIntent.present() ? rs.retryIntent.get().healthPriority
+                                            : (isHealthPriority(rs.priority) ? rs.priority : -1)),
+    reason(rs.reason), dmReason(rs.moveReason),
     startTime(now()), randomId(rs.traceId.isValid() ? rs.traceId : deterministicRandom()->randomUniqueID()),
     dataMoveId(rs.dataMoveId), workFactor(0),
-    wantsNewServers(isDataMovementForMountainChopper(rs.moveReason) || isDataMovementForValleyFiller(rs.moveReason) ||
-                    rs.moveReason == DataMovementReason::SPLIT_SHARD ||
-                    rs.moveReason == DataMovementReason::TEAM_REDUNDANT ||
-                    rs.moveReason == DataMovementReason::REBALANCE_STORAGE_QUEUE),
+    wantsNewServers(rs.retryIntent.present()
+                        ? rs.retryIntent.get().wantsNewServers
+                        : (isDataMovementForMountainChopper(rs.moveReason) ||
+                           isDataMovementForValleyFiller(rs.moveReason) ||
+                           rs.moveReason == DataMovementReason::SPLIT_SHARD ||
+                           rs.moveReason == DataMovementReason::TEAM_REDUNDANT ||
+                           rs.moveReason == DataMovementReason::REBALANCE_STORAGE_QUEUE)),
     cancellable(true), interval("QueuedRelocation", randomId), dataMove(rs.dataMove) {
 	if (dataMove != nullptr) {
 		this->src.insert(this->src.end(), dataMove->meta.src.begin(), dataMove->meta.src.end());
@@ -127,6 +133,21 @@ bool RelocateData::operator!=(const RelocateData& rhs) const {
 }
 Optional<KeyRange> RelocateData::getParentRange() const {
 	return parent_range;
+}
+
+static RelocateShard makeDestinationFailureRetry(RelocateData const& rd, UID retryTraceId) {
+	RelocateShard retry(rd.keys, rd.dmReason, rd.reason, retryTraceId);
+	retry.priority = rd.priority;
+	retry.retryIntent = RelocateShard::RetryRelocationIntent{
+		rd.boundaryPriority, rd.healthPriority, rd.wantsNewServers };
+	if (rd.getParentRange().present()) {
+		retry.setParentRange(rd.getParentRange().get());
+	}
+	return retry;
+}
+
+static bool shouldRetryDestinationTeamFailure(bool doBulkLoading, RelocateData const& rd) {
+	return !doBulkLoading && !rd.isRestore();
 }
 
 class ParallelTCInfo final : public ReferenceCounted<ParallelTCInfo>, public IDataDistributionTeam {
@@ -1497,6 +1518,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 	PromiseStream<RelocateData> dataTransferComplete(self->dataTransferComplete);
 	PromiseStream<RelocateData> relocationComplete(self->relocationComplete);
 	bool signalledTransferComplete = false;
+	bool retryAfterDestinationTeamFailure = false;
 	UID distributorId = self->distributorId;
 	ParallelTCInfo healthyDestinations;
 
@@ -2240,6 +2262,8 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 									rd.bulkLoadTask.get().completeAck.send(
 									    BulkLoadAck(/*unretryableError=*/true, rd.priority));
 								}
+								retryAfterDestinationTeamFailure =
+								    shouldRetryDestinationTeamFailure(doBulkLoading, rd);
 								throw data_move_dest_team_not_found();
 							}
 						}
@@ -2424,6 +2448,19 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 	}
 	if (!signalledTransferComplete)
 		dataTransferComplete.send(rd);
+
+	if (err.code() == error_code_data_move_dest_team_not_found && retryAfterDestinationTeamFailure) {
+		// randomId participates in RelocateData's queue ordering, so a new attempt needs a new identity.
+		RelocateShard retry = makeDestinationFailureRetry(rd, deterministicRandom()->randomUniqueID());
+		self->output.send(retry);
+		TraceEvent(SevWarnAlways, "RelocateShardRetryDestinationTeamFailure", self->distributorId)
+		    .detail("Range", rd.keys)
+		    .detail("DataMoveID", rd.dataMoveId)
+		    .detail("Priority", rd.priority)
+		    .detail("Reason", rd.reason.toString())
+		    .detail("TraceID", retry.traceId)
+		    .detail("PreviousTraceID", rd.randomId);
+	}
 
 	relocationComplete.send(rd);
 
@@ -3217,4 +3254,51 @@ TEST_CASE("/DataDistribution/DDQueue/BatchDrainRelocationComplete") {
 	ASSERT(self.activeRelocations == 0);
 
 	std::cout << "BatchDrainRelocationComplete: drained " << drained << " of " << N << " completions\n";
+}
+
+TEST_CASE("/DataDistribution/DDQueue/RetryDestinationTeamFailure") {
+	KeyRange keys(KeyRangeRef("a"_sr, "b"_sr));
+	KeyRange parent(KeyRangeRef(""_sr, "z"_sr));
+	RelocateShard original(keys, DataMovementReason::SPLIT_SHARD, RelocateReason::SIZE_SPLIT, UID(1, 2));
+	original.setParentRange(parent);
+	RelocateData rd(original);
+	rd.priority = SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY;
+	rd.boundaryPriority = SERVER_KNOBS->PRIORITY_SPLIT_SHARD;
+	rd.healthPriority = SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY;
+	rd.wantsNewServers = true;
+
+	RelocateShard retryRequest = makeDestinationFailureRetry(rd, UID(3, 4));
+	RelocateData retry(retryRequest);
+	ASSERT(retry.keys == keys);
+	ASSERT(retry.priority == rd.priority);
+	ASSERT(retry.boundaryPriority == rd.boundaryPriority);
+	ASSERT(retry.healthPriority == rd.healthPriority);
+	ASSERT(retry.reason == rd.reason);
+	ASSERT(retry.dmReason == rd.dmReason);
+	ASSERT(retry.wantsNewServers == rd.wantsNewServers);
+	ASSERT(retry.randomId == UID(3, 4));
+	ASSERT(retry.randomId != rd.randomId);
+	retry.startTime = rd.startTime;
+	std::set<RelocateData, std::greater<RelocateData>> relocations;
+	relocations.insert(retry);
+	ASSERT(!relocations.contains(rd));
+	relocations.insert(rd);
+	ASSERT(relocations.size() == 2);
+	ASSERT(retry.getParentRange().present());
+	ASSERT(retry.getParentRange().get() == parent);
+	ASSERT(retry.src.empty());
+	ASSERT(retry.completeSources.empty());
+	ASSERT(retry.completeDests.empty());
+	ASSERT(retry.workFactor == 0);
+	ASSERT(retry.cancellable);
+	ASSERT(retry.dataMove == nullptr);
+	ASSERT(retry.dataMoveId == anonymousShardId);
+	ASSERT(!retry.isRestore());
+	ASSERT(!retry.bulkLoadTask.present());
+	ASSERT(shouldRetryDestinationTeamFailure(false, rd));
+	ASSERT(!shouldRetryDestinationTeamFailure(true, rd));
+	RelocateData restore = rd;
+	restore.dataMove = std::make_shared<DataMove>();
+	ASSERT(!shouldRetryDestinationTeamFailure(false, restore));
+	return Void();
 }
