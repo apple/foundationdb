@@ -74,6 +74,7 @@ public:
 	int MAXIMUM_PEEK_BYTES;
 	int64_t CDC_PROXY_BUFFER_BYTES;
 	double CDC_PROXY_CONSUME_POLL_TIMEOUT;
+	double CDC_PROXY_FAILURE_TIMEOUT;
 	double CDC_PROXY_FAILURE_COALESCE_DELAY; // Disabled by default; simulations can force a multi-failure batch.
 	double CDC_PROXY_POP_MIN_INTERVAL;
 	double CDC_PROXY_POP_SCAN_INTERVAL;

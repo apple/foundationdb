@@ -561,8 +561,8 @@ Future<std::vector<int>> monitorCDCProxies(std::vector<CDCProxyInterface> const&
 	for (const auto& proxy : cdcProxies) {
 		failures.push_back(
 		    waitFailureClient(proxy.waitFailure,
-		                      SERVER_KNOBS->TLOG_TIMEOUT,
-		                      -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+		                      SERVER_KNOBS->CDC_PROXY_FAILURE_TIMEOUT,
+		                      -SERVER_KNOBS->CDC_PROXY_FAILURE_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
 		                      /*trace=*/true,
 		                      /*traceMsg=*/"CDCProxyFailed"_sr));
 	}
