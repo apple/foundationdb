@@ -105,7 +105,7 @@ public:
 	virtual void setRateControl(Reference<IRateControl> const& rc) { throw unsupported_operation(); }
 };
 
-typedef void (*runCycleFuncPtr)();
+using runCycleFuncPtr = void (*)();
 
 class IAsyncFileSystem {
 public:
@@ -142,8 +142,8 @@ public:
 	}
 
 protected:
-	IAsyncFileSystem() {}
-	virtual ~IAsyncFileSystem() {} // Please don't try to delete through this interface!
+	IAsyncFileSystem() = default;
+	virtual ~IAsyncFileSystem() = default; // Please don't try to delete through this interface!
 };
 
 #endif

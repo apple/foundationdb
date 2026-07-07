@@ -1382,7 +1382,7 @@ Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange range, UID
 		    completeAck.getFuture(), abandoned, delay(SERVER_KNOBS->DD_BULKLOAD_JOB_MONITOR_PERIOD_SEC * 240));
 		BulkLoadAck ack;
 		if (raceResult.index() == 0) {
-			ack = std::get<0>(std::move(raceResult));
+			ack = std::get<0>(raceResult);
 		} else {
 			// Task was abandoned/supplanted, or backstop timeout fired. Throw
 			// timed_out so the existing catch block traces a SevWarn,
@@ -2914,6 +2914,41 @@ Future<Void> bulkDumpCore(Reference<DataDistributor> self, Future<Void> readyToS
 	}
 }
 
+// These actors read or write system keys through a real Database and are not part of MockDD's transaction
+// processor contract.
+void addProductionOnlyDataDistributionActors(Reference<DataDistributor> self, std::vector<Future<Void>>& actors) {
+	if (bulkLoadIsEnabled(self->initData->bulkLoadMode)) {
+		TraceEvent(SevInfo, "DDBulkLoadModeEnabled", self->ddId)
+		    .detail("UsableRegions", self->configuration.usableRegions);
+		self->bulkLoadEnabled = true;
+		if (self->configuration.usableRegions > 1) {
+			// The core actor to handle bulkload tasks
+			actors.push_back(bulkLoadTaskCore(self, self->initialized.getFuture() && remoteRecovered(self->dbInfo)));
+			// The core actor to convert a bulkload job to tasks which are executed by bulkLoadTaskCore
+			actors.push_back(bulkLoadJobCore(self, self->initialized.getFuture() && remoteRecovered(self->dbInfo)));
+		} else {
+			actors.push_back(bulkLoadTaskCore(self, self->initialized.getFuture()));
+			actors.push_back(bulkLoadJobCore(self, self->initialized.getFuture()));
+		}
+	} else {
+		self->bulkLoadTaskCollection->removeBulkLoadJobRange();
+		// Monitor for bulkLoadMode changes and spawn actors dynamically.
+		// This is critical for restore operations which set bulkLoadMode=1 after DD starts.
+		actors.push_back(monitorBulkLoadModeAndSpawnActors(self, self->initialized.getFuture()));
+	}
+
+	// Always spawn bulkDumpCore for production DD - it will dynamically check the mode
+	// NOTE: BulkDump does NOT require remoteRecovered() in HA configurations.
+	// BulkDump is read-only: it reads from primary DC and writes to external storage (S3).
+	// Waiting for remoteRecovered() caused hangs when remote DC couldn't form teams.
+	TraceEvent(SevInfo, "DDBulkDumpCoreSpawned", self->ddId)
+	    .detail("UsableRegions", self->configuration.usableRegions)
+	    .detail("InitialMode", self->initData->bulkDumpMode);
+	actors.push_back(bulkDumpCore(self, self->initialized.getFuture()));
+
+	actors.push_back(periodicAuditLocationMetadata(self));
+}
+
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
 Future<Void> dataDistribution(Reference<DataDistributor> self,
                               PromiseStream<GetMetricsListRequest> getShardMetricsList,
@@ -2993,7 +3028,9 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 			}
 
 			actors.push_back(self->pollMoveKeysLock());
-			actors.push_back(monitorBackupPartitionRequired(self->txnProcessor->context(), &shards, self->ddId));
+			if (!isMocked) {
+				actors.push_back(monitorBackupPartitionRequired(self->txnProcessor->context(), &shards, self->ddId));
+			}
 
 			self->context->tracker = makeReference<DataDistributionTracker>(
 			    DataDistributionTrackerInitParams{ .db = self->txnProcessor,
@@ -3120,38 +3157,11 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 				actors.push_back(monitorPhysicalShardStatus(self->physicalShardCollection));
 			}
 
-			if (bulkLoadIsEnabled(self->initData->bulkLoadMode)) {
-				TraceEvent(SevInfo, "DDBulkLoadModeEnabled", self->ddId)
-				    .detail("UsableRegions", self->configuration.usableRegions);
-				self->bulkLoadEnabled = true;
-				if (self->configuration.usableRegions > 1) {
-					// The core actor to handle bulkload tasks
-					actors.push_back(
-					    bulkLoadTaskCore(self, self->initialized.getFuture() && remoteRecovered(self->dbInfo)));
-					// The core actor to convert a bulkload job to tasks which are executed by bulkLoadTaskCore
-					actors.push_back(
-					    bulkLoadJobCore(self, self->initialized.getFuture() && remoteRecovered(self->dbInfo)));
-				} else {
-					actors.push_back(bulkLoadTaskCore(self, self->initialized.getFuture()));
-					actors.push_back(bulkLoadJobCore(self, self->initialized.getFuture()));
-				}
-			} else {
+			if (isMocked) {
 				self->bulkLoadTaskCollection->removeBulkLoadJobRange();
-				// Monitor for bulkLoadMode changes and spawn actors dynamically.
-				// This is critical for restore operations which set bulkLoadMode=1 after DD starts.
-				actors.push_back(monitorBulkLoadModeAndSpawnActors(self, self->initialized.getFuture()));
+			} else {
+				addProductionOnlyDataDistributionActors(self, actors);
 			}
-
-			// Always spawn bulkDumpCore - it will dynamically check the mode
-			// NOTE: BulkDump does NOT require remoteRecovered() in HA configurations.
-			// BulkDump is read-only: it reads from primary DC and writes to external storage (S3).
-			// Waiting for remoteRecovered() caused hangs when remote DC couldn't form teams.
-			TraceEvent(SevInfo, "DDBulkDumpCoreSpawned", self->ddId)
-			    .detail("UsableRegions", self->configuration.usableRegions)
-			    .detail("InitialMode", self->initData->bulkDumpMode);
-			actors.push_back(bulkDumpCore(self, self->initialized.getFuture()));
-
-			actors.push_back(periodicAuditLocationMetadata(self));
 
 			actors.push_back(monitorShardEncodeKnob(self->ddId));
 

@@ -257,7 +257,7 @@ class MockGlobalState : public IKeyLocationService {
 	std::vector<StorageServerInterface> extractStorageServerInterfaces(const std::vector<UID>& ids) const;
 
 public:
-	typedef ShardsAffectedByTeamFailure::Team Team;
+	using Team = ShardsAffectedByTeamFailure::Team;
 	// In-memory counterpart of the `keyServers` in system keyspace
 	Reference<ShardsAffectedByTeamFailure> shardMapping;
 	// In-memory counterpart of the `serverListKeys` in system keyspace

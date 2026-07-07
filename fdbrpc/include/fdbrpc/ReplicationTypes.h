@@ -61,13 +61,13 @@ struct LocalityEntry {
 	bool operator==(LocalityEntry const& source) const { return _id == source._id; }
 	bool operator<(LocalityEntry const& source) const { return _id < source._id; }
 };
-typedef std::pair<AttribKey, AttribValue> AttribRecord;
+using AttribRecord = std::pair<AttribKey, AttribValue>;
 
 // This structure represents the LocalityData class as an integer map
 struct KeyValueMap final : public ReferenceCounted<KeyValueMap> {
 	std::vector<AttribRecord> _keyvaluearray;
 
-	KeyValueMap() {}
+	KeyValueMap() = default;
 	explicit KeyValueMap(const LocalityData& data);
 	explicit(false) KeyValueMap(const KeyValueMap& entry) : _keyvaluearray(entry._keyvaluearray) {}
 	KeyValueMap& operator=(KeyValueMap const& source) {
@@ -77,6 +77,7 @@ struct KeyValueMap final : public ReferenceCounted<KeyValueMap> {
 
 	int size() const { return _keyvaluearray.size(); }
 
+	// NOLINTNEXTLINE(bugprone-sizeof-container): counts the vector object plus its contents.
 	int getMemoryUsed() const { return sizeof(_keyvaluearray) + (_keyvaluearray.size() * sizeof(AttribRecord)); }
 
 	Optional<AttribValue> getValue(AttribKey const& indexKey) const {
@@ -143,7 +144,7 @@ struct LocalityRecord final : public ReferenceCounted<LocalityRecord> {
 struct StringToIntMap final : public ReferenceCounted<StringToIntMap> {
 	std::map<std::string, int> _hashmap;
 	std::vector<std::string> _lookuparray;
-	StringToIntMap() {}
+	StringToIntMap() = default;
 	explicit(false) StringToIntMap(StringToIntMap const& source)
 	  : _hashmap(source._hashmap), _lookuparray(source._lookuparray) {}
 	StringToIntMap& operator=(StringToIntMap const& source) {
@@ -181,6 +182,8 @@ struct StringToIntMap final : public ReferenceCounted<StringToIntMap> {
 	}
 
 	int getMemoryUsed() const {
+		// Count the container objects themselves plus their separately allocated contents.
+		// NOLINTNEXTLINE(bugprone-sizeof-container)
 		int memSize = sizeof(_hashmap) + sizeof(_lookuparray);
 		for (auto& hashRecord : _hashmap) {
 			memSize += hashRecord.first.size() + sizeof(hashRecord.second);

@@ -481,30 +481,30 @@ Future<Void> enableBackupWorker(Database cx) {
 	}
 }
 
-Future<Void> enableRangeBackupWorker(Database cx) {
+Future<Void> enableRangePartitionedBackupWorker(Database cx) {
 	DatabaseConfiguration configuration = co_await getDatabaseConfiguration(cx);
-	if (configuration.rangeBackupWorkerEnabled) {
-		TraceEvent("RangeBackupWorkerAlreadyEnabled");
+	if (configuration.rangePartitionedBackupWorkerEnabled) {
+		TraceEvent("RangePartitionedBWAlreadyEnabled");
 		co_return;
 	}
 	ConfigurationResult res =
-	    co_await ManagementAPI::changeConfig(cx.getReference(), "range_backup_worker_enabled:=1", true);
+	    co_await ManagementAPI::changeConfig(cx.getReference(), "range_partitioned_backup_worker_enabled:=1", true);
 	if (res != ConfigurationResult::SUCCESS) {
-		TraceEvent("RangeBackupWorkerEnableFailed").detail("Result", res);
+		TraceEvent("RangePartitionedBWEnableFailed").detail("Result", res);
 		throw operation_failed();
 	}
 }
 
-Future<Void> disableRangeBackupWorker(Database cx) {
+Future<Void> disableRangePartitionedBackupWorker(Database cx) {
 	DatabaseConfiguration configuration = co_await getDatabaseConfiguration(cx);
-	if (!configuration.rangeBackupWorkerEnabled) {
-		TraceEvent("RangeBackupWorkerAlreadyDisabled");
+	if (!configuration.rangePartitionedBackupWorkerEnabled) {
+		TraceEvent("RangePartitionedBWAlreadyDisabled");
 		co_return;
 	}
 	ConfigurationResult res =
-	    co_await ManagementAPI::changeConfig(cx.getReference(), "range_backup_worker_enabled:=0", true);
+	    co_await ManagementAPI::changeConfig(cx.getReference(), "range_partitioned_backup_worker_enabled:=0", true);
 	if (res != ConfigurationResult::SUCCESS) {
-		TraceEvent("RangeBackupWorkerDisableFailed").detail("Result", res);
+		TraceEvent("RangePartitionedBWDisableFailed").detail("Result", res);
 		throw operation_failed();
 	}
 }

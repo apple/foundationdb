@@ -36,7 +36,7 @@ struct RatekeeperInterface {
 	struct LocalityData locality;
 	UID myId;
 
-	RatekeeperInterface() {}
+	RatekeeperInterface() = default;
 	explicit RatekeeperInterface(const struct LocalityData& l, UID id) : locality(l), myId(id) {}
 
 	void initEndpoints() {}
@@ -99,7 +99,7 @@ struct GetRateInfoRequest {
 	bool detailed;
 	ReplyPromise<struct GetRateInfoReply> reply;
 
-	GetRateInfoRequest() {}
+	GetRateInfoRequest() = default;
 	GetRateInfoRequest(UID const& requesterID,
 	                   int64_t totalReleasedTransactions,
 	                   int64_t batchReleasedTransactions,
@@ -128,7 +128,7 @@ struct HaltRatekeeperRequest {
 	UID requesterID;
 	ReplyPromise<Void> reply;
 
-	HaltRatekeeperRequest() {}
+	HaltRatekeeperRequest() = default;
 	explicit HaltRatekeeperRequest(UID uid) : requesterID(uid) {}
 
 	template <class Ar>
@@ -142,7 +142,7 @@ struct ReportCommitCostEstimationRequest {
 	UIDTransactionTagMap<TransactionCommitCostEstimation> ssTrTagCommitCost;
 	ReplyPromise<Void> reply;
 
-	ReportCommitCostEstimationRequest() {}
+	ReportCommitCostEstimationRequest() = default;
 	explicit ReportCommitCostEstimationRequest(
 	    UIDTransactionTagMap<TransactionCommitCostEstimation>&& ssTrTagCommitCost)
 	  : ssTrTagCommitCost(std::move(ssTrTagCommitCost)) {}
@@ -168,7 +168,7 @@ struct GetSSVersionLagRequest {
 	constexpr static FileIdentifier file_identifier = 4022009;
 	ReplyPromise<struct GetSSVersionLagReply> reply;
 
-	GetSSVersionLagRequest() {}
+	GetSSVersionLagRequest() = default;
 
 	template <class Ar>
 	void serialize(Ar& ar) {

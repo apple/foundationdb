@@ -163,7 +163,7 @@ struct LocalityData {
 	alignas(8) static const StringRef keyDataHallId;
 
 public:
-	LocalityData() {}
+	LocalityData() = default;
 
 	LocalityData(Optional<Standalone<StringRef>> processID,
 	             Optional<Standalone<StringRef>> zoneID,
@@ -213,7 +213,7 @@ public:
 	std::string toString() const {
 		std::string infoString;
 		for (auto it = _data.rbegin(); !(it == _data.rend()); ++it) {
-			if (infoString.length()) {
+			if (!infoString.empty()) {
 				infoString += " ";
 			}
 			infoString += it->first.printable() + "=";
@@ -281,7 +281,7 @@ public:
 };
 
 static std::string describe(std::vector<LocalityData> const& items, StringRef const key, int max_items = -1) {
-	if (!items.size())
+	if (items.empty())
 		return "[no items]";
 	std::string s;
 	int count = 0;
@@ -307,7 +307,7 @@ struct ProcessData {
 	NetworkAddress address;
 	Optional<NetworkAddress> grpcAddress;
 
-	ProcessData() {}
+	ProcessData() = default;
 	ProcessData(LocalityData locality,
 	            ProcessClass processClass,
 	            NetworkAddress address,

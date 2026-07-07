@@ -109,6 +109,7 @@ ClusterControllerData::ClusterControllerData(ClusterControllerFullInterface cons
 	cx = openDBOnServer(db.serverInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 
 	specialCounter(clusterControllerMetrics, "ClientCount", [this]() { return db.clientCount; });
+	clusterHealthWorkerEventProvider->setCoordinators(coordinators);
 	updateClusterHealthMonitorInputs();
 }
 
