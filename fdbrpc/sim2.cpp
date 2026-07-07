@@ -2210,6 +2210,24 @@ public:
 		}
 	}
 
+	// Coroutine that delays DNS removal and runs on a surviving process context.
+	// This must NOT run on the dying process, because Sim2::execTask() sends Never()
+	// for failed processes, which would cause the removal to never complete.
+	static Future<Void> delayedDNSRemoval(Sim2* self, IPAddress ip, double delaySecs, ProcessInfo* survivingProcess) {
+		CODE_PROBE(
+		    true, "Simulated delayed DNS removal for dead process", probe::context::sim2, probe::assert::simOnly);
+		TraceEvent("SimDNSDelayedRemoval")
+		    .detail("IP", ip.toString())
+		    .detail("DelaySecs", delaySecs)
+		    .detail("SurvivorAddr", survivingProcess->address.toString());
+		// Schedule the delay on the surviving process so the timer actually fires
+		co_await self->delay(delaySecs, TaskPriority::DefaultYield, survivingProcess);
+		for (auto& it : self->httpHandlers) {
+			it.second->removeIp(ip);
+		}
+		co_return;
+	}
+
 	void removeSimHTTPProcess() override {
 		ProcessInfo* p = getCurrentProcess();
 
@@ -2224,13 +2242,13 @@ public:
 		ASSERT(found);
 
 		double dnsRemovalDelay = FLOW_KNOBS->SIM_DNS_REMOVAL_MAX_DELAY;
-		if (dnsRemovalDelay > 0) {
+		if (dnsRemovalDelay > 0 && !httpServerProcesses.empty()) {
 			// Simulate real-world DNS caching: keep stale DNS entries briefly so
 			// clients may still attempt to talk to the dead server's address.
+			// Schedule on a surviving process so the timer fires correctly.
 			double actualDelay = deterministicRandom()->random01() * dnsRemovalDelay;
-			for (auto& it : httpHandlers) {
-				uncancellable(it.second->delayedRemoveIp(p->address.ip, actualDelay));
-			}
+			ProcessInfo* survivor = httpServerProcesses[0].first;
+			uncancellable(delayedDNSRemoval(this, p->address.ip, actualDelay, survivor));
 		} else {
 			for (auto& it : httpHandlers) {
 				it.second->removeIp(p->address.ip);
