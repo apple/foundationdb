@@ -1,5 +1,5 @@
 /*
- * ReadYourWrites.actor.cpp
+ * ReadYourWrites.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -27,7 +27,6 @@
 #include "fdbclient/MonitorLeader.h"
 #include "flow/CoroUtils.h"
 #include "flow/Util.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 class RYWImpl {
 public:
@@ -351,48 +350,31 @@ public:
 		}
 	}
 
-	ACTOR template <class Req>
+	template <class Req>
 	static Future<typename Req::Result> readWithConflictRangeThrough(ReadYourWritesTransaction* ryw,
 	                                                                 Req req,
 	                                                                 Snapshot snapshot) {
-		choose {
-			when(typename Req::Result result = wait(readThrough(ryw, req, snapshot))) {
-				return result;
-			}
-			when(wait(ryw->resetPromise.getFuture())) {
-				throw internal_error();
-			}
-		}
+		co_return co_await waitOrError(readThrough(ryw, req, snapshot), ryw->resetPromise.getFuture());
 	}
-	ACTOR template <class Req>
+
+	template <class Req>
 	static Future<typename Req::Result> readWithConflictRangeSnapshot(ReadYourWritesTransaction* ryw, Req req) {
-		state SnapshotCache::iterator it(&ryw->cache, &ryw->writes);
-		choose {
-			when(typename Req::Result result = wait(read(ryw, req, &it))) {
-				return result;
-			}
-			when(wait(ryw->resetPromise.getFuture())) {
-				throw internal_error();
-			}
-		}
+		SnapshotCache::iterator it(&ryw->cache, &ryw->writes);
+		co_return co_await waitOrError(read(ryw, req, &it), ryw->resetPromise.getFuture());
 	}
-	ACTOR template <class Req>
+
+	template <class Req>
 	static Future<typename Req::Result> readWithConflictRangeRYW(ReadYourWritesTransaction* ryw,
 	                                                             Req req,
 	                                                             Snapshot snapshot) {
-		state RYWIterator it(&ryw->cache, &ryw->writes);
-		choose {
-			when(typename Req::Result result = wait(read(ryw, req, &it))) {
-				// Some overloads of addConflictRange() require it to point to the "right" key and others don't.  The
-				// corresponding overloads of read() have to provide that guarantee!
-				if (!snapshot)
-					addConflictRange(ryw, req, it.extractWriteMapIterator(), result);
-				return result;
-			}
-			when(wait(ryw->resetPromise.getFuture())) {
-				throw internal_error();
-			}
-		}
+		RYWIterator it(&ryw->cache, &ryw->writes);
+		auto result = co_await waitOrError(read(ryw, req, &it), ryw->resetPromise.getFuture());
+
+		// Some overloads of addConflictRange() require it to point to the "right" key and others don't.  The
+		// corresponding overloads of read() have to provide that guarantee!
+		if (!snapshot)
+			addConflictRange(ryw, req, it.extractWriteMapIterator(), result);
+		co_return result;
 	}
 	template <class Req>
 	static inline Future<typename Req::Result> readWithConflictRange(ReadYourWritesTransaction* ryw,
@@ -1194,23 +1176,18 @@ public:
 	}
 
 	// For Snapshot::True and NOT readYourWritesDisabled.
-	ACTOR template <bool backwards>
+	template <bool backwards>
 	static Future<MappedRangeResult> readWithConflictRangeRYW(ReadYourWritesTransaction* ryw,
 	                                                          GetMappedRangeReq<backwards> req,
 	                                                          Snapshot snapshot) {
-		choose {
-			when(MappedRangeResult result = wait(readThrough(ryw, req, Snapshot::True))) {
-				// Insert read conflicts (so that it supported Snapshot::True) and check it is not modified (so it masks
-				// sure not break RYW semantic while not implementing RYW) for both the primary getRange and all
-				// underlying getValue/getRanges.
-				WriteMap::iterator writes(&ryw->writes);
-				addConflictRangeAndMustUnmodified<backwards>(ryw, req, writes, result);
-				return result;
-			}
-			when(wait(ryw->resetPromise.getFuture())) {
-				throw internal_error();
-			}
-		}
+		auto result = co_await waitOrError(readThrough(ryw, req, Snapshot::True), ryw->resetPromise.getFuture());
+
+		// Insert read conflicts (so that it supported Snapshot::True) and check it is not modified (so it masks
+		// sure not break RYW semantic while not implementing RYW) for both the primary getRange and all
+		// underlying getValue/getRanges.
+		WriteMap::iterator writes(&ryw->writes);
+		addConflictRangeAndMustUnmodified<backwards>(ryw, req, writes, result);
+		co_return result;
 	}
 
 	template <bool backwards>
@@ -1408,8 +1385,6 @@ public:
 			if (!ryw->tr.apiVersionAtLeast(410)) {
 				ryw->reset();
 			}
-
-			co_return;
 		} catch (Error& e) {
 			// When the commit is cancelled before commitAndWatch() can propagate the error to
 			// watches (e.g. a transaction timeout firing through resetPromise cancels the commit
@@ -1528,7 +1503,6 @@ public:
 			ryw->debugLogRetries(e);
 
 			ryw->resetRyow();
-			co_return;
 		} catch (Error& e) {
 			if (!ryw->resetPromise.isSet()) {
 				if (ryw->tr.apiVersionAtLeast(610)) {
@@ -1543,16 +1517,8 @@ public:
 		}
 	}
 
-	ACTOR static Future<Version> getReadVersion(ReadYourWritesTransaction* ryw) {
-		choose {
-			when(Version v = wait(ryw->tr.getReadVersion())) {
-				return v;
-			}
-
-			when(wait(ryw->resetPromise.getFuture())) {
-				throw internal_error();
-			}
-		}
+	static Future<Version> getReadVersion(ReadYourWritesTransaction* ryw) {
+		co_return co_await waitOrError(ryw->tr.getReadVersion(), ryw->resetPromise.getFuture());
 	}
 };
 
