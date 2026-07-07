@@ -271,14 +271,15 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		Key randomKey;
 		if (deterministicRandom()->random01() < absoluteRandomProb) {
 			Key prefix;
-			if (deterministicRandom()->random01() < absoluteRandomProb)
+			if (deterministicRandom()->random01() < absoluteRandomProb) {
 				// prefix length is randomly generated
 				prefix =
 				    Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, rangeCount + 1)) +
 				        "/");
-			else
+			} else {
 				// pick up an existing prefix
 				prefix = keys[deterministicRandom()->randomInt(0, rangeCount)].begin;
+			}
 			randomKey = Key(deterministicRandom()->randomAlphaNumeric(keyBytes)).withPrefix(prefix);
 		} else {
 			// pick up existing keys from registered key ranges

@@ -40,7 +40,7 @@ Future<DatabaseConfiguration> getDatabaseConfiguration(Database cx, bool useSyst
 Future<Void> waitForFullReplication(Database cx);
 
 struct IQuorumChange : ReferenceCounted<IQuorumChange> {
-	virtual ~IQuorumChange() {}
+	virtual ~IQuorumChange() = default;
 	virtual Future<std::vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
 	                                                                   std::vector<NetworkAddress> oldCoordinators,
 	                                                                   Reference<IClusterConnectionRecord>,
@@ -371,5 +371,5 @@ Future<Void> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd, UID snap
 
 Future<Void> disableBackupWorker(Database cx);
 Future<Void> enableBackupWorker(Database cx);
-Future<Void> disableRangeBackupWorker(Database cx);
-Future<Void> enableRangeBackupWorker(Database cx);
+Future<Void> disableRangePartitionedBackupWorker(Database cx);
+Future<Void> enableRangePartitionedBackupWorker(Database cx);

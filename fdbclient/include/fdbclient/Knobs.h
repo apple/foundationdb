@@ -208,7 +208,7 @@ public:
 	int RESTORE_RANGES_READ_BATCH;
 
 	// interval for version directory bucketing in range-partitioned backup.
-	int64_t BACKUP_RANGE_PARTITIONED_VDIR_INTERVAL;
+	int64_t RANGE_PARTITIONED_BACKUP_VDIR_INTERVAL;
 	// Number of contiguous user keyspace partitions for range-partitioned backup.
 	int BACKUP_NUM_OF_PARTITIONS;
 	bool BACKUP_CONTAINER_LOCAL_ALLOW_RELATIVE_PATH;

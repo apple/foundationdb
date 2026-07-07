@@ -81,8 +81,8 @@ Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
 	// This setting is now managed automatically by the backup system.
 	if (configString.find(" backup_worker_enabled:=") != std::string::npos) {
 		result = ConfigurationResult::BACKUP_WORKER_ENABLED_RESTRICTED;
-	} else if (configString.find(" range_backup_worker_enabled:=") != std::string::npos) {
-		result = ConfigurationResult::RANGE_BACKUP_WORKER_ENABLED_RESTRICTED;
+	} else if (configString.find(" range_partitioned_backup_worker_enabled:=") != std::string::npos) {
+		result = ConfigurationResult::RANGE_PARTITIONED_BACKUP_WORKER_ENABLED_RESTRICTED;
 	} else {
 		ConfigurationResult r = co_await ManagementAPI::changeConfig(db, configString, force);
 		result = r;
@@ -171,9 +171,9 @@ Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
 		        "backup system\n");
 		ret = false;
 		break;
-	case ConfigurationResult::RANGE_BACKUP_WORKER_ENABLED_RESTRICTED:
+	case ConfigurationResult::RANGE_PARTITIONED_BACKUP_WORKER_ENABLED_RESTRICTED:
 		fprintf(stderr,
-		        "ERROR: range_backup_worker_enabled configuration is restricted in fdbcli and managed "
+		        "ERROR: range_partitioned_backup_worker_enabled configuration is restricted in fdbcli and managed "
 		        "automatically by the backup system\n");
 		ret = false;
 		break;

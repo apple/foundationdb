@@ -303,8 +303,9 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 		storagePolicy = makeReference<PolicyAcross>(2, "data_hall", makeReference<PolicyOne>());
 		tLogPolicy = makeReference<PolicyAcross>(
 		    2, "data_hall", makeReference<PolicyAcross>(2, "zoneid", makeReference<PolicyOne>()));
-	} else
+	} else {
 		redundancySpecified = false;
+	}
 	if (redundancySpecified) {
 		out[p + "storage_replicas"] = redundancy;
 		out[p + "log_replicas"] = log_replicas;
@@ -344,8 +345,9 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 		remote_log_replicas = "4";
 		remoteTLogPolicy = makeReference<PolicyAcross>(
 		    2, "data_hall", makeReference<PolicyAcross>(2, "zoneid", makeReference<PolicyOne>()));
-	} else
+	} else {
 		remoteRedundancySpecified = false;
+	}
 	if (remoteRedundancySpecified) {
 		out[p + "remote_log_replicas"] = remote_log_replicas;
 
@@ -478,30 +480,30 @@ Future<Void> enableBackupWorker(Database cx) {
 	}
 }
 
-Future<Void> enableRangeBackupWorker(Database cx) {
+Future<Void> enableRangePartitionedBackupWorker(Database cx) {
 	DatabaseConfiguration configuration = co_await getDatabaseConfiguration(cx);
-	if (configuration.rangeBackupWorkerEnabled) {
-		TraceEvent("RangeBackupWorkerAlreadyEnabled");
+	if (configuration.rangePartitionedBackupWorkerEnabled) {
+		TraceEvent("RangePartitionedBWAlreadyEnabled");
 		co_return;
 	}
 	ConfigurationResult res =
-	    co_await ManagementAPI::changeConfig(cx.getReference(), "range_backup_worker_enabled:=1", true);
+	    co_await ManagementAPI::changeConfig(cx.getReference(), "range_partitioned_backup_worker_enabled:=1", true);
 	if (res != ConfigurationResult::SUCCESS) {
-		TraceEvent("RangeBackupWorkerEnableFailed").detail("Result", res);
+		TraceEvent("RangePartitionedBWEnableFailed").detail("Result", res);
 		throw operation_failed();
 	}
 }
 
-Future<Void> disableRangeBackupWorker(Database cx) {
+Future<Void> disableRangePartitionedBackupWorker(Database cx) {
 	DatabaseConfiguration configuration = co_await getDatabaseConfiguration(cx);
-	if (!configuration.rangeBackupWorkerEnabled) {
-		TraceEvent("RangeBackupWorkerAlreadyDisabled");
+	if (!configuration.rangePartitionedBackupWorkerEnabled) {
+		TraceEvent("RangePartitionedBWAlreadyDisabled");
 		co_return;
 	}
 	ConfigurationResult res =
-	    co_await ManagementAPI::changeConfig(cx.getReference(), "range_backup_worker_enabled:=0", true);
+	    co_await ManagementAPI::changeConfig(cx.getReference(), "range_partitioned_backup_worker_enabled:=0", true);
 	if (res != ConfigurationResult::SUCCESS) {
-		TraceEvent("RangeBackupWorkerDisableFailed").detail("Result", res);
+		TraceEvent("RangePartitionedBWDisableFailed").detail("Result", res);
 		throw operation_failed();
 	}
 }
@@ -574,8 +576,9 @@ ConfigureAutoResult parseConfig(StatusObject const& status) {
 	} else if (result.old_replication == "three_data_hall_fallback") {
 		storage_replication = 2;
 		log_replication = 4;
-	} else
+	} else {
 		return ConfigureAutoResult();
+	}
 
 	StatusObjectReader machinesMap;
 	if (!statusObjCluster.get("machines", machinesMap))
@@ -1140,10 +1143,11 @@ Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChange> ch
 				}
 			}
 			leaderServers.reserve(coord.clientLeaderServers.size());
-			for (int i = 0; i < coord.clientLeaderServers.size(); i++)
+			for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
 				leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader,
 				                                           GetLeaderRequest(coord.clusterKey, UID()),
 				                                           TaskPriority::CoordinationReply));
+			}
 			auto leaderServersResult = co_await timeout(waitForAll(leaderServers), 5.0);
 			if (!leaderServersResult.present()) {
 				co_return CoordinatorsResult::COORDINATOR_UNREACHABLE;
@@ -1788,11 +1792,12 @@ Future<Void> setClass(Database cx, AddressExclusion server, ProcessClass process
 			bool foundChange = false;
 			for (int i = 0; i < workers.size(); i++) {
 				if (server.excludes(workers[i].address)) {
-					if (processClass.classType() != ProcessClass::InvalidClass)
+					if (processClass.classType() != ProcessClass::InvalidClass) {
 						tr.set(processClassKeyFor(workers[i].locality.processId().get()),
 						       processClassValue(processClass));
-					else
+					} else {
 						tr.clear(processClassKeyFor(workers[i].locality.processId().get()));
+					}
 					foundChange = true;
 				}
 			}

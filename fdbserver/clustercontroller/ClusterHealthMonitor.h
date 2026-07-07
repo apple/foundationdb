@@ -26,11 +26,14 @@
 #include <vector>
 
 #include "ClusterHealthIFactor.h"
+#include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/TLogInterface.h"
 #include "fdbserver/core/WorkerEvents.h"
 #include "flow/flow.h"
+
+class ServerCoordinators;
 
 namespace cluster_health {
 
@@ -53,6 +56,7 @@ public:
 	virtual void delref() const = 0;
 	virtual Optional<RecoveryState> getRecoveryState() const = 0;
 	virtual bool shouldTreatStorageTeamOneReplicaLeftAsCritical() const = 0;
+	virtual AsyncResult<Optional<bool>> areAllCoordinatorsReachable() const = 0;
 	virtual AsyncResult<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const = 0;
 	virtual AsyncResult<LatestWorkerEvents> getLatestRatekeeperEvents(std::string const& eventName) const = 0;
 	virtual AsyncResult<LatestWorkerEvents> getLatestDataDistributorEvents(std::string const& eventName) const = 0;
@@ -65,6 +69,8 @@ class WorkerEventProvider final : public IWorkerEventProvider, public ReferenceC
 	std::vector<WorkerDetails> workers;
 	Optional<RecoveryState> recoveryState;
 	bool storageTeamOneReplicaLeftIsCritical = false;
+	Key coordinatorClusterKey;
+	std::vector<ClientLeaderRegInterface> coordinators;
 	Optional<WorkerInterface> ratekeeperWorker;
 	Optional<WorkerInterface> dataDistributorWorker;
 	std::vector<StorageServerInterface> storageServers;
@@ -76,12 +82,14 @@ public:
 	void setWorkers(std::vector<WorkerDetails> workers);
 	void setRecoveryState(RecoveryState recoveryState);
 	void setStorageTeamOneReplicaLeftIsCritical(bool storageTeamOneReplicaLeftIsCritical);
+	void setCoordinators(ServerCoordinators const& coordinators);
 	void setRatekeeperWorker(Optional<WorkerInterface> ratekeeperWorker);
 	void setDataDistributorWorker(Optional<WorkerInterface> dataDistributorWorker);
 	void setStorageServers(std::vector<StorageServerInterface> storageServers);
 	void setTLogs(std::vector<TLogInterface> tlogs);
 	Optional<RecoveryState> getRecoveryState() const override;
 	bool shouldTreatStorageTeamOneReplicaLeftAsCritical() const override;
+	AsyncResult<Optional<bool>> areAllCoordinatorsReachable() const override;
 	AsyncResult<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const override;
 	AsyncResult<LatestWorkerEvents> getLatestRatekeeperEvents(std::string const& eventName) const override;
 	AsyncResult<LatestWorkerEvents> getLatestDataDistributorEvents(std::string const& eventName) const override;

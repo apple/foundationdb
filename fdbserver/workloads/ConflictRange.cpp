@@ -190,8 +190,9 @@ struct ConflictRangeWorkload : TestWorkload {
 
 				if (self->testReadYourWrites) {
 					trRYOW.setVersion(readVersion);
-				} else
+				} else {
 					tr3.setVersion(readVersion);
+				}
 
 				// Do random operations in one of the transactions and commit.
 				// Either do all sets in locations without existing data or all clears in locations with data.

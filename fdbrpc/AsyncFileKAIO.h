@@ -58,7 +58,7 @@ struct Descriptor<SlowAioSubmit>
 
 class AsyncFileKAIO final : public IAsyncFile, public ReferenceCounted<AsyncFileKAIO> {
 public:
-	virtual StringRef getClassName() override { return "AsyncFileKAIO"_sr; }
+	StringRef getClassName() override { return "AsyncFileKAIO"_sr; }
 
 	struct AsyncFileKAIOMetrics {
 		LatencySample readLatencySample = { "AsyncFileKAIOReadLatency",
@@ -402,7 +402,7 @@ public:
 	}
 
 	static void launch() {
-		if (ctx.queue.size() && ctx.outstanding < FLOW_KNOBS->MAX_OUTSTANDING - FLOW_KNOBS->MIN_SUBMIT) {
+		if (!ctx.queue.empty() && ctx.outstanding < FLOW_KNOBS->MAX_OUTSTANDING - FLOW_KNOBS->MIN_SUBMIT) {
 			ctx.submitMetric = true;
 
 			double begin = timer_monotonic();
@@ -479,8 +479,9 @@ public:
 					toStart[0]->setResult(errno ? -errno : -1000000);
 					rc = 1;
 				}
-			} else
+			} else {
 				ctx.outstanding += rc;
+			}
 			// Any unsubmitted I/Os need to be requeued
 			for (int i = rc; i < n; i++) {
 				KAIOLogBlockEvent(toStart[i], OpLogEntry::REQUEUE);

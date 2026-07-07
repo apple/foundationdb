@@ -35,6 +35,13 @@
 
 namespace RocksDBCommon {
 
+struct RocksDBBackgroundError {
+	rocksdb::BackgroundErrorReason reason;
+	int severity;
+	std::string status;
+	int errorCode;
+};
+
 // Convert FoundationDB StringRef to RocksDB Slice
 rocksdb::Slice toSlice(StringRef s);
 
@@ -45,6 +52,9 @@ StringRef toStringRef(rocksdb::Slice s);
 // Error reason code:
 // https://github.com/facebook/rocksdb/blob/12d798ac06bcce36be703b057d5f5f4dab3b270c/include/rocksdb/listener.h#L125
 std::string getErrorReason(rocksdb::BackgroundErrorReason reason);
+
+// Copies a RocksDB background error into a payload safe to hand back to the Flow thread.
+RocksDBBackgroundError getBackgroundError(rocksdb::BackgroundErrorReason reason, const rocksdb::Status& status);
 
 // Get WAL recovery mode from SERVER_KNOBS->ROCKSDB_WAL_RECOVERY_MODE
 rocksdb::WALRecoveryMode getWalRecoveryMode();

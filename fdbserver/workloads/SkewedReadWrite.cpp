@@ -194,11 +194,12 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 		clientBegin = now();
 		for (int c = 0; c < actorCount; c++) {
 			Future<Void> worker;
-			if (useRYW)
+			if (useRYW) {
 				worker =
 				    randomReadWriteClient<ReadYourWritesTransaction>(cx, this, actorCount / transactionsPerSecond, c);
-			else
+			} else {
 				worker = randomReadWriteClient<Transaction>(cx, this, actorCount / transactionsPerSecond, c);
+			}
 			clients.push_back(worker);
 		}
 	}

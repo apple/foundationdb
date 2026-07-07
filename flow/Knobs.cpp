@@ -349,11 +349,12 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 
 static std::string toLower(std::string const& name) {
 	std::string lower_name;
-	for (auto c = name.begin(); c != name.end(); ++c)
+	for (auto c = name.begin(); c != name.end(); ++c) {
 		if (*c >= 'A' && *c <= 'Z')
 			lower_name += *c - 'A' + 'a';
 		else
 			lower_name += *c;
+	}
 	return lower_name;
 }
 

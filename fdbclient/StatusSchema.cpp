@@ -95,7 +95,7 @@ bool schemaMatch(json_spirit::mValue const& schemaValue,
 					auto& enum_values = sv.get_obj().at("$enum").get_array();
 
 					bool any_match = false;
-					for (auto& enum_item : enum_values)
+					for (auto& enum_item : enum_values) {
 						if (enum_item == rv) {
 							any_match = true;
 							if (checkCoverage) {
@@ -103,6 +103,7 @@ bool schemaMatch(json_spirit::mValue const& schemaValue,
 							}
 							break;
 						}
+					}
 					if (!any_match) {
 						errorStr += format("ERROR: Unknown value `%s' for key `%s'\n",
 						                   json_spirit::write_string(rv).c_str(),

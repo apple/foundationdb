@@ -95,7 +95,7 @@ struct StorageWiggleMetrics {
 		StorageWiggleMetrics newMetrics;
 		newMetrics.smoothed_round_duration.reset(smoothed_round_duration.getTotal());
 		newMetrics.smoothed_wiggle_duration.reset(smoothed_wiggle_duration.getTotal());
-		*this = std::move(newMetrics);
+		*this = newMetrics;
 	}
 };
 

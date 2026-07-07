@@ -189,10 +189,11 @@ void StorageServerMetrics::notify(const Key& key, StorageMetrics& metrics) {
 
 	StorageMetrics notifyMetrics;
 
-	if (metrics.bytesWrittenPerKSecond)
+	if (metrics.bytesWrittenPerKSecond) {
 		notifyMetrics.bytesWrittenPerKSecond =
 		    bytesWriteSample.addAndExpire(key, metrics.bytesWrittenPerKSecond, expire) *
 		    SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+	}
 	if (metrics.iosPerKSecond)
 		notifyMetrics.iosPerKSecond = iopsSample.addAndExpire(key, metrics.iosPerKSecond, expire) *
 		                              SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;

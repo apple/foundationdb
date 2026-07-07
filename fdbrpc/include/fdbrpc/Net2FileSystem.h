@@ -50,7 +50,7 @@ public:
 	explicit Net2FileSystem(double ioTimeout = 0.0, const std::vector<std::string>& fileSystemPaths = {});
 	Net2FileSystem(double ioTimeout, const std::string& fileSystemPath);
 
-	~Net2FileSystem() override {}
+	~Net2FileSystem() override = default;
 
 	static void newFileSystem(double ioTimeout = 0.0, const std::vector<std::string>& fileSystemPaths = {});
 	static void newFileSystem(double ioTimeout, const std::string& fileSystemPath);

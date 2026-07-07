@@ -39,8 +39,6 @@
 #include "flow/IAsyncFile.h"
 #include "flow/TDMetric.h"
 #include "fdbrpc/HTTP.h"
-#include "fdbrpc/FailureMonitor.h"
-#include "fdbrpc/Locality.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/SimulatorKillType.h"
 
@@ -179,7 +177,7 @@ public:
 					    .detail("Result", "Decremented Role");
 				} else {
 					addressIt->second.erase(rolesIt);
-					if (addressIt->second.size()) {
+					if (!addressIt->second.empty()) {
 						TraceEvent("RoleRemove")
 						    .detail("Address", address)
 						    .detail("Role", role)
@@ -286,7 +284,7 @@ public:
 		allSwapsDisabled = false;
 	}
 	bool canSwapToMachine(Optional<Standalone<StringRef>> zoneId) const {
-		return swapsDisabled.count(zoneId) == 0 && !allSwapsDisabled &&
+		return !swapsDisabled.contains(zoneId) && !allSwapsDisabled &&
 		       (!simulationPolicy || simulationPolicy->canSwapToMachine(zoneId));
 	}
 	void enableSwapsToAll() {
@@ -441,9 +439,9 @@ public:
 
 	Future<Void> renameFile(std::string const& from, std::string const& to) override;
 
-	Sim2FileSystem() {}
+	Sim2FileSystem() = default;
 
-	~Sim2FileSystem() override {}
+	~Sim2FileSystem() override = default;
 
 	static void newFileSystem();
 

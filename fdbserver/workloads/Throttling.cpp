@@ -37,10 +37,11 @@ struct TokenBucket {
 	Future<Void> tokenAdder() {
 		while (true) {
 			bucketSize = std::min(bucketSize + transactionRate * addTokensInterval, maxBurst);
-			if (deterministicRandom()->randomInt(0, 100) == 0)
+			if (deterministicRandom()->randomInt(0, 100) == 0) {
 				TraceEvent("AddingTokensx100")
 				    .detail("BucketSize", bucketSize)
 				    .detail("TransactionRate", transactionRate);
+			}
 			co_await delay(addTokensInterval);
 		}
 	}

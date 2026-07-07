@@ -38,14 +38,14 @@
 #include "fdbclient/Status.h"
 #include "fdbrpc/Locality.h"
 
-typedef int64_t Version;
-typedef uint64_t LogEpoch;
-typedef uint64_t Sequence;
-typedef StringRef KeyRef;
-typedef StringRef ValueRef;
-typedef int64_t Generation;
-typedef UID SpanID;
-typedef uint64_t CoordinatorsHash;
+using Version = int64_t;
+using LogEpoch = uint64_t;
+using Sequence = uint64_t;
+using KeyRef = StringRef;
+using ValueRef = StringRef;
+using Generation = int64_t;
+using SpanID = UID;
+using CoordinatorsHash = uint64_t;
 
 // invalidKey is intentionally far beyond the system space.  It is meant to be used as a safe initial value for a key
 // before it is set to something meaningful to avoid mistakes where a default constructed key is written to instead of
@@ -61,7 +61,7 @@ enum {
 	tagLocalityLogRouterMapped = -6, // The pseudo tag used by log routers to pop the real LogRouter tag (i.e., -2)
 	tagLocalityTxs = -7,
 	tagLocalityBackup = -8, // used by backup role to pop from TLogs
-	tagLocalityRangeBackup = -9, // used by range-partitioned backup workers
+	tagLocalityRangePartitionedBackup = -9, // used by range-partitioned backup workers
 	tagLocalityInvalid = -99
 }; // The TLog and LogRouter require these number to be as compact as possible
 
@@ -162,7 +162,7 @@ struct TagsAndMessage {
 	StringRef message;
 	VectorRef<Tag> tags;
 
-	TagsAndMessage() {}
+	TagsAndMessage() = default;
 	TagsAndMessage(StringRef message, VectorRef<Tag> tags) : message(message), tags(tags) {}
 
 	// Loads tags and message from a serialized buffer. "rd" is checkpointed at
@@ -234,7 +234,7 @@ std::string describe(T const& item) {
 
 template <class K, class V>
 std::string describe(std::map<K, V> const& items, int max_items = -1) {
-	if (!items.size())
+	if (items.empty())
 		return "[no items]";
 
 	std::string s;
@@ -251,7 +251,7 @@ std::string describe(std::map<K, V> const& items, int max_items = -1) {
 
 template <class T>
 std::string describeList(T const& items, int max_items) {
-	if (!items.size())
+	if (items.empty())
 		return "[no items]";
 
 	std::string s;
@@ -315,7 +315,7 @@ inline bool equalsKeyAfter(const KeyRef& key, const KeyRef& compareKey) {
 
 struct KeyRangeRef {
 	const KeyRef begin, end;
-	KeyRangeRef() {}
+	KeyRangeRef() = default;
 	KeyRangeRef(const KeyRef& begin, const KeyRef& end) : begin(begin), end(end) {
 		if (begin > end) {
 			TraceEvent("InvertedRange").detail("Begin", begin).detail("End", end).backtrace();
@@ -387,7 +387,7 @@ struct KeyRangeRef {
 		} else {
 			serializer(ar, const_cast<KeyRef&>(begin), const_cast<KeyRef&>(end));
 		}
-		if (ar.isDeserializing && end == StringRef() && begin != StringRef()) {
+		if (ar.isDeserializing && end.empty() && !begin.empty()) {
 			ASSERT(begin[begin.size() - 1] == '\x00');
 			const_cast<KeyRef&>(end) = begin;
 			const_cast<KeyRef&>(begin) = end.substr(0, end.size() - 1);
@@ -454,7 +454,7 @@ inline std::vector<KeyRangeRef> operator-(const KeyRangeRef& lhs, const KeyRange
 struct KeyValueRef {
 	KeyRef key;
 	ValueRef value;
-	KeyValueRef() {}
+	KeyValueRef() = default;
 
 	KeyValueRef(const KeyRef& key, const ValueRef& value) : key(key), value(value) {}
 
@@ -722,7 +722,7 @@ struct Traceable<KeySelectorRef> : std::true_type {
 template <class Val>
 struct KeyRangeWith : KeyRange {
 	Val value;
-	KeyRangeWith() {}
+	KeyRangeWith() = default;
 	KeyRangeWith(const KeyRangeRef& range, const Val& value) : KeyRange(range), value(value) {}
 	bool operator==(const KeyRangeWith& r) const { return KeyRangeRef::operator==(r) && value == r.value; }
 
@@ -797,7 +797,7 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 		if (readThrough.present()) {
 			return readThrough.get();
 		}
-		ASSERT(size() > 0);
+		ASSERT(!empty());
 		return reverse ? back().key : keyAfter(back().key);
 	}
 
@@ -808,7 +808,7 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 		if (readThrough.present()) {
 			return firstGreaterOrEqual(readThrough.get());
 		}
-		ASSERT(size() > 0);
+		ASSERT(!empty());
 		return firstGreaterThan(back().key);
 	}
 
@@ -818,7 +818,7 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 		if (readThrough.present()) {
 			return firstGreaterOrEqual(readThrough.get());
 		}
-		ASSERT(size() > 0);
+		ASSERT(!empty());
 		return firstGreaterOrEqual(back().key);
 	}
 
@@ -870,7 +870,7 @@ struct GetValueReqAndResultRef {
 	KeyRef key;
 	Optional<ValueRef> result;
 
-	GetValueReqAndResultRef() {}
+	GetValueReqAndResultRef() = default;
 	GetValueReqAndResultRef(Arena& a, const GetValueReqAndResultRef& copyFrom)
 	  : key(a, copyFrom.key), result(a, copyFrom.result) {}
 
@@ -888,7 +888,7 @@ struct GetRangeReqAndResultRef {
 	KeySelectorRef begin, end;
 	RangeResultRef result;
 
-	GetRangeReqAndResultRef() {}
+	GetRangeReqAndResultRef() = default;
 	//	KeyValueRef(const KeyRef& key, const ValueRef& value) : key(key), value(value) {}
 	GetRangeReqAndResultRef(Arena& a, const GetRangeReqAndResultRef& copyFrom)
 	  : begin(a, copyFrom.begin), end(a, copyFrom.end), result(a, copyFrom.result) {}
@@ -1151,7 +1151,7 @@ struct StorageBytes {
 	// Amount of space that could eventually be available for use after garbage collection
 	int64_t temp;
 
-	StorageBytes() {}
+	StorageBytes() = default;
 	StorageBytes(int64_t free, int64_t total, int64_t used, int64_t available, int64_t temp = 0)
 	  : free(free), total(total), used(used), available(available), temp(temp) {}
 
@@ -1215,7 +1215,7 @@ struct LogMessageVersion {
 };
 
 inline bool addressExcluded(std::set<AddressExclusion> const& exclusions, NetworkAddress const& addr) {
-	return exclusions.count(AddressExclusion(addr.ip, addr.port)) || exclusions.count(AddressExclusion(addr.ip));
+	return exclusions.contains(AddressExclusion(addr.ip, addr.port)) || exclusions.contains(AddressExclusion(addr.ip));
 }
 
 struct ClusterControllerPriorityInfo {
@@ -1229,7 +1229,7 @@ struct ClusterControllerPriorityInfo {
 	}; // cannot be larger than 7 because of leader election mask
 
 	static DCFitness calculateDCFitness(Optional<Key> const& dcId, std::vector<Optional<Key>> const& dcPriority) {
-		if (!dcPriority.size()) {
+		if (dcPriority.empty()) {
 			return FitnessUnknown;
 		} else if (dcPriority.size() == 1) {
 			if (dcId == dcPriority[0]) {
@@ -1703,7 +1703,7 @@ struct Versionstamp {
 	bool operator<=(const Versionstamp& r) const { return !(*this > r); }
 	bool operator>=(const Versionstamp& r) const { return !(*this < r); }
 
-	Versionstamp() {}
+	Versionstamp() = default;
 	Versionstamp(Version version, uint16_t batchNumber) : version(version), batchNumber(batchNumber) {}
 	explicit Versionstamp(Standalone<StringRef> str) {
 		ASSERT(str.size() == sizeof(Version) + sizeof(batchNumber));

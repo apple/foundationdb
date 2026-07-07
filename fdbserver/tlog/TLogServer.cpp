@@ -134,7 +134,7 @@ public:
 	Future<bool> initializeRecovery(IDiskQueue::location recoverAt) { return queue->initializeRecovery(recoverAt); }
 
 	template <class T>
-	void push(T const& qe, Reference<LogData> logData);
+	uint32_t push(T const& qe, Reference<LogData> logData);
 	void forgetBefore(Version upToVersion, Reference<LogData> logData);
 	void pop(IDiskQueue::location upToLocation);
 	Future<Void> commit() { return queue->commit(); }
@@ -325,6 +325,7 @@ struct TLogData : NonCopyable {
 	TLogQueue* persistentQueue; // Logical queue the log operates on and persist its data.
 
 	int64_t diskQueueCommitBytes;
+	uint64_t diskQueueCommitSerializedBytes;
 	AsyncVar<bool>
 	    largeDiskQueueCommitBytes; // becomes true when diskQueueCommitBytes is greater than MAX_QUEUE_COMMIT_BYTES
 
@@ -380,6 +381,12 @@ struct TLogData : NonCopyable {
 	// and ends when the data is flushed and durable.
 	Reference<Histogram> timeUntilDurableDist;
 
+	// Distribution of serialized queue entry sizes passed to IDiskQueue::push.
+	Reference<Histogram> diskQueueWriteSizeDist;
+
+	// Distribution of aggregate serialized bytes included in each IDiskQueue::commit.
+	Reference<Histogram> diskQueueCommitSizeDist;
+
 	// Controls whether the health monitoring running in this TLog force checking any other processes are degraded.
 	Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck;
 
@@ -394,17 +401,28 @@ struct TLogData : NonCopyable {
 	         Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck)
 	  : dbgid(dbgid), workerID(workerID), persistentData(persistentData), rawPersistentQueue(persistentQueue),
 	    persistentQueue(new TLogQueue(persistentQueue, dbgid)), diskQueueCommitBytes(0),
-	    largeDiskQueueCommitBytes(false), dbInfo(dbInfo), queueCommitEnd(0), queueCommitBegin(0),
-	    instanceID(deterministicRandom()->randomUniqueID().first()), bytesInput(0), bytesDurable(0),
-	    targetVolatileBytes(SERVER_KNOBS->TLOG_SPILL_THRESHOLD), overheadBytesInput(0), overheadBytesDurable(0),
-	    peekMemoryLimiter(SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES),
+	    diskQueueCommitSerializedBytes(0), largeDiskQueueCommitBytes(false), dbInfo(dbInfo), queueCommitEnd(0),
+	    queueCommitBegin(0), instanceID(deterministicRandom()->randomUniqueID().first()), bytesInput(0),
+	    bytesDurable(0), targetVolatileBytes(SERVER_KNOBS->TLOG_SPILL_THRESHOLD), overheadBytesInput(0),
+	    overheadBytesDurable(0), peekMemoryLimiter(SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES),
 	    concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS), persistentDataCommitLock(new FlowLock()),
 	    ignorePopDeadline(0), dataFolder(folder), degraded(degraded), lowDiskTLogExclusion(lowDiskTLogExclusion),
 	    commitLatencyDist(Histogram::getHistogram("tLog"_sr, "commit"_sr, Histogram::Unit::milliseconds)),
 	    queueWaitLatencyDist(Histogram::getHistogram("tLog"_sr, "QueueWait"_sr, Histogram::Unit::milliseconds)),
 	    timeUntilDurableDist(Histogram::getHistogram("tLog"_sr, "TimeUntilDurable"_sr, Histogram::Unit::milliseconds)),
+	    diskQueueWriteSizeDist(Histogram::getHistogram("tLog"_sr, "DiskQueueWriteSize"_sr, Histogram::Unit::bytes)),
+	    diskQueueCommitSizeDist(Histogram::getHistogram("tLog"_sr, "DiskQueueCommitSize"_sr, Histogram::Unit::bytes)),
 	    enablePrimaryTxnSystemHealthCheck(enablePrimaryTxnSystemHealthCheck) {
 		cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
+	}
+
+	void recordDiskQueueWrite(uint32_t serializedBytes, size_t mutationBytes) {
+		diskQueueWriteSizeDist->sample(serializedBytes);
+		diskQueueCommitSerializedBytes += serializedBytes;
+		diskQueueCommitBytes += mutationBytes;
+		if (diskQueueCommitBytes > SERVER_KNOBS->MAX_QUEUE_COMMIT_BYTES) {
+			largeDiskQueueCommitBytes.set(true);
+		}
 	}
 
 	double availableSpaceRatio(StorageBytes const& kvStoreBytes, StorageBytes const& queueBytes) const {
@@ -822,7 +840,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 };
 
 template <class T>
-void TLogQueue::push(T const& qe, Reference<LogData> logData) {
+uint32_t TLogQueue::push(T const& qe, Reference<LogData> logData) {
 	BinaryWriter wr(Unversioned()); // outer framing is not versioned
 	wr << uint32_t(0);
 	IncludeVersion(ProtocolVersion::withTLogQueueEntryRef()).write(wr); // payload is versioned
@@ -834,6 +852,7 @@ void TLogQueue::push(T const& qe, Reference<LogData> logData) {
 	const IDiskQueue::location endloc = queue->push(wr.toValue());
 	//TraceEvent("TLogQueueVersionWritten", dbgid).detail("Size", wr.getLength() - sizeof(uint32_t) - sizeof(uint8_t)).detail("Loc", loc);
 	logData->versionLocation[qe.version] = std::make_pair(startloc, endloc);
+	return static_cast<uint32_t>(wr.getLength());
 }
 
 void TLogQueue::forgetBefore(Version upToVersion, Reference<LogData> logData) {
@@ -2301,8 +2320,13 @@ Future<Void> doQueueCommit(TLogData* self,
 	logData->queueCommittingVersion = ver;
 
 	g_network->setCurrentTask(TaskPriority::TLogCommitReply);
+	if (self->diskQueueCommitSerializedBytes > 0) {
+		self->diskQueueCommitSizeDist->sample(static_cast<uint32_t>(
+		    std::min<uint64_t>(self->diskQueueCommitSerializedBytes, std::numeric_limits<uint32_t>::max())));
+	}
 	Future<Void> c = self->persistentQueue->commit();
 	self->diskQueueCommitBytes = 0;
+	self->diskQueueCommitSerializedBytes = 0;
 	self->largeDiskQueueCommitBytes.set(false);
 
 	co_await ioDegradedOrTimeoutError(
@@ -2479,12 +2503,7 @@ Future<Void> tLogCommit(TLogData* self,
 		qe.knownCommittedVersion = logData->knownCommittedVersion;
 		qe.messages = req.messages;
 		qe.id = logData->logId;
-		self->persistentQueue->push(qe, logData);
-
-		self->diskQueueCommitBytes += qe.expectedSize();
-		if (self->diskQueueCommitBytes > SERVER_KNOBS->MAX_QUEUE_COMMIT_BYTES) {
-			self->largeDiskQueueCommitBytes.set(true);
-		}
+		self->recordDiskQueueWrite(self->persistentQueue->push(qe, logData), qe.expectedSize());
 		// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages actors
 		logData->version.set(req.version);
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
@@ -3157,12 +3176,7 @@ Future<Void> pullAsyncData(TLogData* self,
 					qe.knownCommittedVersion = logData->knownCommittedVersion;
 					qe.alternativeMessages = &messages;
 					qe.id = logData->logId;
-					self->persistentQueue->push(qe, logData);
-
-					self->diskQueueCommitBytes += qe.expectedSize();
-					if (self->diskQueueCommitBytes > SERVER_KNOBS->MAX_QUEUE_COMMIT_BYTES) {
-						self->largeDiskQueueCommitBytes.set(true);
-					}
+					self->recordDiskQueueWrite(self->persistentQueue->push(qe, logData), qe.expectedSize());
 
 					// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages
 					// actors
@@ -3201,12 +3215,7 @@ Future<Void> pullAsyncData(TLogData* self,
 						qe.knownCommittedVersion = logData->knownCommittedVersion;
 						qe.messages = StringRef();
 						qe.id = logData->logId;
-						self->persistentQueue->push(qe, logData);
-
-						self->diskQueueCommitBytes += qe.expectedSize();
-						if (self->diskQueueCommitBytes > SERVER_KNOBS->MAX_QUEUE_COMMIT_BYTES) {
-							self->largeDiskQueueCommitBytes.set(true);
-						}
+						self->recordDiskQueueWrite(self->persistentQueue->push(qe, logData), qe.expectedSize());
 
 						// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages
 						// actors
@@ -3626,8 +3635,9 @@ bool tlogTerminated(TLogData* self, IKeyValueStore* persistentData, TLogQueue* p
 	    e.code() == error_code_file_not_found) {
 		TraceEvent("TLogTerminated", self->dbgid).errorUnsuppressed(e);
 		return true;
-	} else
+	} else {
 		return false;
+	}
 }
 
 Future<Void> updateLogSystem(TLogData* self, Reference<LogData> logData, LogSystemConfig recoverFrom) {
@@ -3830,12 +3840,7 @@ Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, LocalityData l
 				qe.knownCommittedVersion = logData->knownCommittedVersion;
 				qe.messages = StringRef();
 				qe.id = logData->logId;
-				self->persistentQueue->push(qe, logData);
-
-				self->diskQueueCommitBytes += qe.expectedSize();
-				if (self->diskQueueCommitBytes > SERVER_KNOBS->MAX_QUEUE_COMMIT_BYTES) {
-					self->largeDiskQueueCommitBytes.set(true);
-				}
+				self->recordDiskQueueWrite(self->persistentQueue->push(qe, logData), qe.expectedSize());
 				logData->version.set(lastVersionPrevEpoch);
 			}
 

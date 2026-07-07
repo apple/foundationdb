@@ -44,7 +44,7 @@ class TagThrottler : public ITagThrottler {
 
 public:
 	TagThrottler(Database db, UID id);
-	~TagThrottler();
+	~TagThrottler() override;
 
 	Future<Void> monitorThrottlingChanges() override;
 	void addRequests(TransactionTag tag, int count) override;

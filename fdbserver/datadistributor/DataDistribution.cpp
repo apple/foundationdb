@@ -433,12 +433,14 @@ Future<Void> debugCheckCoalescing(Database cx) {
 				RangeResult ranges = co_await krmGetRanges(&tr, serverKeysPrefixFor(id), allKeys);
 				ASSERT(ranges.end()[-1].key == allKeys.end);
 
-				for (int j = 0; j < ranges.size() - 2; j++)
-					if (ranges[j].value == ranges[j + 1].value)
+				for (int j = 0; j < ranges.size() - 2; j++) {
+					if (ranges[j].value == ranges[j + 1].value) {
 						TraceEvent(SevError, "UncoalescedValues", id)
 						    .detail("Key1", ranges[j].key)
 						    .detail("Key2", ranges[j + 1].key)
 						    .detail("Value", ranges[j].value);
+					}
+				}
 			}
 
 			TraceEvent("DoneCheckingCoalescing").log();
@@ -1284,6 +1286,49 @@ Future<Void> failBulkLoadTask(Reference<DataDistributor> self,
 	}
 }
 
+// Polls the persisted bulkload task state every 60s and returns when the task
+// is no longer "ours" -- i.e. when its phase has left {Running, Complete} or
+// its restartCount has advanced past ours (meaning triggerBulkLoadTask ran
+// again and a different doBulkLoadTask now owns this task). Returning from
+// this Future is the signal that the in-flight data move has been abandoned
+// or supplanted, regardless of how long the data move itself has been running.
+// While the task is still ours -- including a multi-hour large-shard data
+// move -- this Future never returns, and the caller continues waiting on
+// completeAck.
+Future<Void> waitUntilTaskAbandoned(Reference<DataDistributor> self, KeyRange range, UID taskId, int ourRestartCount) {
+	while (true) {
+		co_await delay(60.0);
+		Transaction tr(self->txnProcessor->context());
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			BulkLoadTaskState current = co_await getBulkLoadTask(
+			    &tr, range, taskId, { BulkLoadPhase::Triggered, BulkLoadPhase::Running, BulkLoadPhase::Complete });
+			if (current.restartCount > ourRestartCount) {
+				// Someone re-triggered the task; a different doBulkLoadTask owns it.
+				co_return;
+			}
+			// Still ours; poll again. The window from triggerBulkLoadTask (phase=Triggered)
+			// through startMoveShards' transition to Running through finishMoveShards' atomic
+			// commit of phase=Complete is all expected here. Only a phase OUTSIDE that set
+			// (Acknowledged, Error, Invalid) or a higher restartCount means we've been
+			// supplanted.
+			continue;
+		} catch (Error& e) {
+			err = e;
+		}
+		if (err.code() == error_code_actor_cancelled) {
+			throw err;
+		}
+		if (err.code() == error_code_bulkload_task_outdated) {
+			// Task is no longer in {Running, Complete} or has been overwritten.
+			co_return;
+		}
+		// Transient transaction error; retry on the next poll cycle.
+	}
+}
+
 // A bulk load task is guaranteed to be either complete or overwritten by another task
 Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange range, UID taskId) {
 	Promise<BulkLoadAck> completeAck;
@@ -1317,7 +1362,35 @@ Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange range, UID
 		// The completion of the task relies on the fact that a data move on a range is either
 		// completed by itself or replaced by a data move on the overlapping range
 		self->triggerShardBulkLoading.send(BulkLoadShardRequest(triggeredBulkLoadTask));
-		BulkLoadAck ack = co_await completeAck.getFuture(); // proceed when a data move completes with this task
+		// Wait for completeAck (data move finished) or for the task to be abandoned
+		// or for an absolute timeout backstop.
+		//
+		// Abandoned-detection polls the persisted task state every 60s and fires
+		// when the task leaves {Running, Complete} or its restartCount advances
+		// past ours -- meaning a different code path (DD reinit, supplanting
+		// trigger, fail/error path, etc.) is now responsible for this task. While
+		// the task is still ours -- even a multi-hour large-shard data move --
+		// the abandoned Future never resolves and we keep waiting on completeAck.
+		//
+		// Backstop timeout fires after JOB_MONITOR_PERIOD_SEC * 240 (~2 hours in
+		// production). It is the safety net for the original deadlock where DD
+		// reinitializes but no fresh code path advances the task's state -- in
+		// that case neither completeAck nor abandoned will ever fire, but the
+		// backstop guarantees this actor exits within bounded time so
+		// scheduleBulkLoadTasks can re-scan and re-dispatch.
+		Future<Void> abandoned = waitUntilTaskAbandoned(self, range, taskId, triggeredBulkLoadTask.restartCount);
+		auto raceResult = co_await race(
+		    completeAck.getFuture(), abandoned, delay(SERVER_KNOBS->DD_BULKLOAD_JOB_MONITOR_PERIOD_SEC * 240));
+		BulkLoadAck ack;
+		if (raceResult.index() == 0) {
+			ack = std::get<0>(raceResult);
+		} else {
+			// Task was abandoned/supplanted, or backstop timeout fired. Throw
+			// timed_out so the existing catch block traces a SevWarn,
+			// decrements the parallelism counter, and lets scheduleBulkLoadTasks
+			// re-dispatch on the next scan.
+			throw timed_out();
+		}
 		if (ack.unretryableError) {
 			TraceEvent(SevWarnAlways, "DDBulkLoadTaskDoTask", self->ddId)
 			    .detail("Phase", "See unretryable error")
@@ -3208,8 +3281,9 @@ Future<ErrorOr<Void>> trySendSnapReq(RequestStream<WorkerSnapRequest> stream, Wo
 				co_await delay(snapRetryBackoff);
 				snapRetryBackoff = snapRetryBackoff * 2;
 			}
-		} else
+		} else {
 			break;
+		}
 	}
 	co_return ErrorOr<Void>(Void());
 }
