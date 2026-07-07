@@ -6244,6 +6244,13 @@ Future<Void> DDTeamCollection::printSnapshotTeamsInfo(Reference<DDTeamCollection
 
 class DDTeamCollectionUnitTest {
 public:
+	static void setTestEndpoint(StorageServerInterface& interface, int id) {
+		// These unit tests do not run storage server actors, but team tracking still logs each
+		// interface's address. Give every fixture interface a synthetic, unregistered endpoint.
+		interface.getValue =
+		    PublicRequestStream<GetValueRequest>(Endpoint({ NetworkAddress(IPAddress(0x01010101), id) }, UID(id, 1)));
+	}
+
 	static std::unique_ptr<DDTeamCollection> testTeamCollection(
 	    int teamSize,
 	    Reference<IReplicationPolicy> policy,
@@ -6281,6 +6288,7 @@ public:
 			UID uid(id, 0);
 			StorageServerInterface interface;
 			interface.uniqueID = uid;
+			setTestEndpoint(interface, id);
 			interface.locality.set("machineid"_sr, Standalone<StringRef>(std::to_string(id)));
 			interface.locality.set("zoneid"_sr, Standalone<StringRef>(std::to_string(id % 5)));
 			interface.locality.set("data_hall"_sr, Standalone<StringRef>(std::to_string(id % 3)));
@@ -6336,6 +6344,7 @@ public:
 			UID uid(id, 0);
 			StorageServerInterface interface;
 			interface.uniqueID = uid;
+			setTestEndpoint(interface, id);
 			int process_id = id;
 			int dc_id = process_id / 1000;
 			int data_hall_id = process_id / 100;

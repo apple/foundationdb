@@ -133,7 +133,7 @@ class AsyncFileCached final : public IAsyncFile, public ReferenceCounted<AsyncFi
 	friend Reference<P> makeReference(Args&&... args);
 
 public:
-	virtual StringRef getClassName() override { return "AsyncFileCached"_sr; }
+	StringRef getClassName() override { return "AsyncFileCached"_sr; }
 
 	// Opens a file that uses the FDB in-memory page cache
 	static Future<Reference<IAsyncFile>> open(std::string filename, int flags, int mode) {
@@ -494,11 +494,12 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 		if (self->pageOffset < self->owner->prevLength) {
 			try {
 				int _ = co_await self->owner->uncached->read(dst, self->pageCache->pageSize, self->pageOffset);
-				if (_ != self->pageCache->pageSize)
+				if (_ != self->pageCache->pageSize) {
 					TraceEvent("ReadThroughShortRead")
 					    .detail("ReadAmount", _)
 					    .detail("PageSize", self->pageCache->pageSize)
 					    .detail("PageOffset", self->pageOffset);
+				}
 			} catch (Error& e) {
 				self->zeroCopyRefCount = 0;
 				TraceEvent("ReadThroughFailed").error(e);

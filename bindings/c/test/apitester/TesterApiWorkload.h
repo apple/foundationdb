@@ -37,9 +37,9 @@ public:
 
 	IWorkloadControlIfc* getControlIfc() override;
 
-	virtual void stop() override;
+	void stop() override;
 
-	virtual void checkProgress() override;
+	void checkProgress() override;
 
 	// Workload specific setup phase.
 	virtual void setup(TTaskFct cont);

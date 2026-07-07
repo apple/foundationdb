@@ -41,7 +41,7 @@
 #include "flow/SystemMonitor.h"
 
 class ClusterControllerData;
-typedef enum {
+enum ClusterRecoveryEventType {
 	CLUSTER_RECOVERY_STATE_EVENT_NAME,
 	CLUSTER_RECOVERY_COMMIT_TLOG_EVENT_NAME,
 	CLUSTER_RECOVERY_DURATION_EVENT_NAME,
@@ -56,7 +56,7 @@ typedef enum {
 	CLUSTER_RECOVERY_AVAILABLE_EVENT_NAME,
 	CLUSTER_RECOVERY_METRICS_EVENT_NAME,
 	CLUSTER_RECOVERY_LAST // Always the last entry
-} ClusterRecoveryEventType;
+};
 
 Future<Void> recoveryTerminateOnConflict(UID dbgid,
                                          Promise<Void> fullyRecovered,
@@ -105,7 +105,7 @@ private:
 		}
 		self->addActor.send(onConflict);
 
-		if (prevDBStateRaw.size()) {
+		if (!prevDBStateRaw.empty()) {
 			self->prevDBState = BinaryReader::fromStringRef<DBCoreState>(prevDBStateRaw, IncludeVersion());
 			self->myDBState = self->prevDBState;
 		}
@@ -145,7 +145,7 @@ private:
 			self->cstate = MovableCoordinatedState(self->coordinators);
 			Value rereadDBStateRaw = co_await self->cstate.read();
 			DBCoreState readState;
-			if (rereadDBStateRaw.size())
+			if (!rereadDBStateRaw.empty())
 				readState = BinaryReader::fromStringRef<DBCoreState>(rereadDBStateRaw, IncludeVersion());
 
 			if (readState != newState) {
@@ -198,7 +198,7 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 
 	int8_t getNextLocality() {
 		int8_t maxLocality = -1;
-		for (auto it : dcId_locality) {
+		for (const auto& it : dcId_locality) {
 			maxLocality = std::max(maxLocality, it.second);
 		}
 		return maxLocality + 1;

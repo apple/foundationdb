@@ -341,7 +341,7 @@ public:
 		VectorRef<Tag> tags;
 		LogMessageVersion version;
 
-		BufferedMessage() {}
+		BufferedMessage() = default;
 		explicit BufferedMessage(Version version) : version(version) {}
 		BufferedMessage(Arena arena, StringRef message, const VectorRef<Tag>& tags, const LogMessageVersion& version)
 		  : arena(arena), message(message), tags(tags), version(version) {}

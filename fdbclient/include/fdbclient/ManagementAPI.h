@@ -41,7 +41,7 @@ Future<DatabaseConfiguration> getDatabaseConfiguration(Database cx, bool useSyst
 Future<Void> waitForFullReplication(Database cx);
 
 struct IQuorumChange : ReferenceCounted<IQuorumChange> {
-	virtual ~IQuorumChange() {}
+	virtual ~IQuorumChange() = default;
 	virtual Future<std::vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
 	                                                                   std::vector<NetworkAddress> oldCoordinators,
 	                                                                   Reference<IClusterConnectionRecord>,

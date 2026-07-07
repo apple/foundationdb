@@ -187,7 +187,7 @@ struct GlobalConfigRefreshReply {
 	Version version;
 	RangeResultRef result;
 
-	GlobalConfigRefreshReply() {}
+	GlobalConfigRefreshReply() = default;
 	GlobalConfigRefreshReply(Arena const& arena, Version version, RangeResultRef result)
 	  : arena(arena), version(version), result(result) {}
 
@@ -202,7 +202,7 @@ struct GlobalConfigRefreshRequest {
 	Version lastKnown;
 	ReplyPromise<GlobalConfigRefreshReply> reply;
 
-	GlobalConfigRefreshRequest() {}
+	GlobalConfigRefreshRequest() = default;
 	explicit GlobalConfigRefreshRequest(Version lastKnown) : lastKnown(lastKnown) {}
 
 	bool verify() const noexcept { return true; }

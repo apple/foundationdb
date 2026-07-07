@@ -89,7 +89,7 @@ struct stack_entry {
 
 	stack_entry(art_node* n, unsigned char k, stack_entry* s) : node(n), key(k), prev(s) {}
 
-	stack_entry() {}
+	stack_entry() = default;
 };
 
 art_leaf* art_tree::minimum(art_node* n) {

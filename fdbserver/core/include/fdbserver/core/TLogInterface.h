@@ -51,7 +51,7 @@ struct TLogInterface {
 	RequestStream<struct TLogSnapRequest> snapRequest;
 	RequestStream<struct TrackTLogRecoveryRequest> trackRecovery;
 
-	TLogInterface() {}
+	TLogInterface() = default;
 	explicit TLogInterface(const LocalityData& locality)
 	  : filteredLocality(locality), uniqueID(deterministicRandom()->randomUniqueID()) {
 		sharedTLogID = uniqueID;
@@ -122,7 +122,7 @@ struct TLogRecoveryFinishedRequest {
 	constexpr static FileIdentifier file_identifier = 8818668;
 	ReplyPromise<Void> reply;
 
-	TLogRecoveryFinishedRequest() {}
+	TLogRecoveryFinishedRequest() = default;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -135,7 +135,7 @@ struct UnknownCommittedVersions {
 	Version version; // version made durable on recovering tLog
 	Version prev; // previous to version; to ensure no gaps in chain
 	std::vector<uint16_t> tLogLocIds; // locations version was sent to
-	UnknownCommittedVersions() {}
+	UnknownCommittedVersions() = default;
 	UnknownCommittedVersions(Version version, Version prev, std::vector<uint16_t> tLogLocIds)
 	  : version(version), prev(prev), tLogLocIds(tLogLocIds) {}
 	template <class Ar>
@@ -163,7 +163,7 @@ struct TLogConfirmRunningRequest {
 	Optional<UID> debugID;
 	ReplyPromise<Void> reply;
 
-	TLogConfirmRunningRequest() {}
+	TLogConfirmRunningRequest() = default;
 	explicit TLogConfirmRunningRequest(Optional<UID> debugID) : debugID(debugID) {}
 
 	template <class Ar>
@@ -234,7 +234,7 @@ struct TLogPeekRequest {
 	                int replyByteLimit = 0)
 	  : begin(begin), tag(tag), returnIfBlocked(returnIfBlocked), onlySpilled(onlySpilled), sequence(sequence),
 	    end(end), returnEmptyIfStopped(returnEmptyIfStopped), replyByteLimit(replyByteLimit) {}
-	TLogPeekRequest() {}
+	TLogPeekRequest() = default;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -285,7 +285,7 @@ struct TLogPeekStreamRequest {
 	ReplyPromiseStream<TLogPeekStreamReply> reply;
 	Optional<bool> returnEmptyIfStopped;
 
-	TLogPeekStreamRequest() {}
+	TLogPeekStreamRequest() = default;
 	TLogPeekStreamRequest(Version version,
 	                      Tag tag,
 	                      bool returnIfBlocked,
@@ -310,7 +310,7 @@ struct TLogPopRequest {
 
 	TLogPopRequest(Version to, Version durableKnownCommittedVersion, Tag tag)
 	  : to(to), durableKnownCommittedVersion(durableKnownCommittedVersion), tag(tag) {}
-	TLogPopRequest() {}
+	TLogPopRequest() = default;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -322,7 +322,7 @@ struct TagMessagesRef {
 	Tag tag;
 	VectorRef<int> messageOffsets;
 
-	TagMessagesRef() {}
+	TagMessagesRef() = default;
 	TagMessagesRef(Arena& a, const TagMessagesRef& from) : tag(from.tag), messageOffsets(a, from.messageOffsets) {}
 
 	size_t expectedSize() const { return messageOffsets.expectedSize(); }
@@ -359,7 +359,7 @@ struct TLogCommitRequest : TimedRequest {
 	std::vector<uint16_t> tLogLocIds;
 	Optional<UID> debugID;
 
-	TLogCommitRequest() {}
+	TLogCommitRequest() = default;
 	TLogCommitRequest(const SpanContext& context,
 	                  const Arena& a,
 	                  Version prevVersion,
@@ -488,7 +488,7 @@ struct TrackTLogRecoveryRequest {
 	Version oldestGenRecoverAtVersion;
 	ReplyPromise<TrackTLogRecoveryReply> reply;
 
-	TrackTLogRecoveryRequest() {}
+	TrackTLogRecoveryRequest() = default;
 	explicit TrackTLogRecoveryRequest(Version oldestGenRecoverAtVersion)
 	  : oldestGenRecoverAtVersion(oldestGenRecoverAtVersion) {}
 

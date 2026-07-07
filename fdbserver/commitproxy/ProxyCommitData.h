@@ -182,7 +182,7 @@ struct ExpectedIdempotencyIdCountForKey {
 	int16_t idempotencyIdCount = 0;
 	uint8_t batchIndexHighByte = 0;
 
-	ExpectedIdempotencyIdCountForKey() {}
+	ExpectedIdempotencyIdCountForKey() = default;
 	ExpectedIdempotencyIdCountForKey(Version commitVersion, int16_t idempotencyIdCount, uint8_t batchIndexHighByte)
 	  : commitVersion(commitVersion), idempotencyIdCount(idempotencyIdCount), batchIndexHighByte(batchIndexHighByte) {}
 };
@@ -269,7 +269,7 @@ struct ProxyCommitData {
 	// signify they must be repopulated. We do not repopulate them immediately to avoid a slow task.
 	const std::vector<Tag>& tagsForKey(StringRef key) {
 		auto& tags = keyInfo[key].tags;
-		if (!tags.size()) {
+		if (tags.empty()) {
 			auto& r = keyInfo.rangeContaining(key).value();
 			r.populateTags();
 			return r.tags;

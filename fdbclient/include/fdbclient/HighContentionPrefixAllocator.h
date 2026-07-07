@@ -60,7 +60,7 @@ private:
 			    tr->getRange(self->counters.range(), 1, Snapshot::True, Reverse::True);
 			RangeResult range = co_await safeThreadFutureToFuture(rangeFuture);
 
-			if (range.size() > 0) {
+			if (!range.empty()) {
 				start = self->counters.unpack(range[0].key).getInt(0);
 			}
 

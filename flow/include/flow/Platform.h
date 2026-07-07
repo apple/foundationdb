@@ -495,11 +495,11 @@ private:
 } // namespace platform
 
 #ifdef __linux__
-typedef struct {
+using ProfilingSample = struct {
 	double timestamp;
 	size_t length;
 	void* frames[];
-} ProfilingSample;
+};
 
 dev_t getDeviceId(std::string path);
 #endif
