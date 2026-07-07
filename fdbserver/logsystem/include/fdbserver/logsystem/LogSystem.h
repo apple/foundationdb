@@ -384,8 +384,6 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 
 	Future<Void> onError() const;
 
-	static Future<Void> onError_internal(LogSystem const* self);
-
 	static Future<Void> pushResetChecker(Reference<ConnectionResetInfo> self, NetworkAddress addr);
 
 	static Future<TLogCommitReply> recordPushMetrics(Reference<ConnectionResetInfo> self,
@@ -411,16 +409,15 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 
 	Future<Void> onKnownCommittedVersionChange();
 
-	// pop tag from log up to the version defined in self->outstandingPops[].first
-	static Future<Void> popFromLog(LogSystem* self,
-	                               Reference<AsyncVar<OptionalInterface<TLogInterface>>> log,
-	                               Tag tag,
-	                               double delayBeforePop,
-	                               bool popLogRouter);
+	// pop tag from log up to the version defined in outstandingPops[].first
+	Future<Void> popFromLog(Reference<AsyncVar<OptionalInterface<TLogInterface>>> log,
+	                        Tag tag,
+	                        double delayBeforePop,
+	                        bool popLogRouter);
 
 	static Future<Version> getPoppedFromTLog(Reference<AsyncVar<OptionalInterface<TLogInterface>>> log, Tag tag);
 
-	static Future<Version> getPoppedTxs(LogSystem* self);
+	Future<Version> getPoppedTxs();
 
 	static Future<Void> confirmEpochLive_internal(Reference<LogSet> logSet, Optional<UID> debugID);
 
@@ -509,28 +506,26 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	                             LocalityData locality,
 	                             bool* forceRecovery);
 
-	static Future<Void> recruitOldLogRouters(LogSystem* self,
-	                                         std::vector<WorkerInterface> workers,
-	                                         LogEpoch recoveryCount,
-	                                         int8_t locality,
-	                                         Version startVersion,
-	                                         std::vector<LocalityData> tLogLocalities,
-	                                         Reference<IReplicationPolicy> tLogPolicy,
-	                                         bool forRemote);
+	Future<Void> recruitOldLogRouters(std::vector<WorkerInterface> workers,
+	                                  LogEpoch recoveryCount,
+	                                  int8_t locality,
+	                                  Version startVersion,
+	                                  std::vector<LocalityData> tLogLocalities,
+	                                  Reference<IReplicationPolicy> tLogPolicy,
+	                                  bool forRemote);
 
 	static Version getMaxLocalStartVersion(const std::vector<Reference<LogSet>>& tLogs);
 
 	static std::vector<Tag> getLocalTags(int8_t locality, const std::vector<Tag>& allTags);
 
-	static Future<Void> newRemoteEpoch(LogSystem* self,
-	                                   Reference<LogSystem> oldLogSystem,
-	                                   Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers,
-	                                   DatabaseConfiguration configuration,
-	                                   LogEpoch recoveryCount,
-	                                   Version recoveryTransactionVersion,
-	                                   int8_t remoteLocality,
-	                                   std::vector<Tag> allTags,
-	                                   std::vector<Version> oldGenerationRecoverAtVersions);
+	Future<Void> newRemoteEpoch(Reference<LogSystem> oldLogSystem,
+	                            Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers,
+	                            DatabaseConfiguration configuration,
+	                            LogEpoch recoveryCount,
+	                            Version recoveryTransactionVersion,
+	                            int8_t remoteLocality,
+	                            std::vector<Tag> allTags,
+	                            std::vector<Version> oldGenerationRecoverAtVersions);
 
 	static Future<Reference<LogSystem>> newEpoch(Reference<LogSystem> oldLogSystem,
 	                                             RecruitFromConfigurationReply recr,
