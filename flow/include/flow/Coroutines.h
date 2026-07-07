@@ -208,7 +208,7 @@ public:
 	explicit AsyncGenerator(PromiseStream<T>* promise, n_coroutine::coroutine_handle<> handle)
 	  : nextPromise(promise), handle(handle) {}
 
-	~AsyncGenerator() { handle.destroy(); }
+	~AsyncGenerator() { handle.destroy(); } // NOLINT(modernize-use-equals-default): destroys the coroutine handle.
 
 	Future<T> operator()() {
 		handle.resume();
@@ -245,7 +245,7 @@ private:
 
 public:
 	explicit Generator(handle_type h) : handle(h) {}
-	Generator() {}
+	Generator() = default;
 	explicit(false) Generator(Generator const& other) : handle(other.handle) {
 		if (handle) {
 			handle.promise().addRef();

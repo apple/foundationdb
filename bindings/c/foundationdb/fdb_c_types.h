@@ -30,7 +30,11 @@
 extern "C" {
 #endif
 
-/* Pointers to these opaque types represent objects in the FDB API */
+/*
+ * Pointers to these opaque types represent objects in the FDB API.
+ * Keep typedef syntax here because this is a public C header.
+ */
+/* NOLINTBEGIN(modernize-use-using) */
 typedef struct FDB_future FDBFuture;
 typedef struct FDB_result FDBResult;
 typedef struct FDB_cluster FDBCluster;
@@ -39,6 +43,7 @@ typedef struct FDB_transaction FDBTransaction;
 
 typedef int fdb_error_t;
 typedef int fdb_bool_t;
+/* NOLINTEND(modernize-use-using) */
 
 #ifdef __cplusplus
 }

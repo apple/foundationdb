@@ -52,7 +52,7 @@ public:
 	NetworkAddressList addresses;
 	Token token{};
 
-	Endpoint() {}
+	Endpoint() = default;
 	Endpoint(const NetworkAddressList& addresses, Token token) : addresses(addresses), token(token) {
 		choosePrimaryAddress();
 	}

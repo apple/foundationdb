@@ -37,7 +37,8 @@
 extern "C" {
 #endif
 
-// forward declaration and typedef
+// Keep typedef syntax because this header is shared with C API implementation code.
+// NOLINTNEXTLINE(modernize-use-using)
 typedef struct DatabaseSharedState DatabaseSharedState;
 
 DLLEXPORT FDBFuture* fdb_database_create_shared_state(FDBDatabase* db);

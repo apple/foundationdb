@@ -34,7 +34,7 @@ struct ReliablePacket : FastAllocated<ReliablePacket> {
 	    *next; // Linked list of reliable packets on the same connection (only for the first packet in the cont chain)
 	int begin, end;
 
-	ReliablePacket() {}
+	ReliablePacket() = default;
 
 	void insertBefore(ReliablePacket* p);
 	void remove(); // Deletes this and cont chain, unlinks prev and next

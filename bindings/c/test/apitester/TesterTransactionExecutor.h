@@ -36,7 +36,7 @@ namespace FdbApiTester {
  */
 class ITransactionContext : public std::enable_shared_from_this<ITransactionContext> {
 public:
-	virtual ~ITransactionContext() {}
+	virtual ~ITransactionContext() = default;
 
 	// Current FDB database
 	virtual fdb::Database db() = 0;
@@ -112,7 +112,7 @@ struct TransactionExecutorOptions {
  */
 class ITransactionExecutor {
 public:
-	virtual ~ITransactionExecutor() {}
+	virtual ~ITransactionExecutor() = default;
 	virtual void init(IScheduler* sched, const char* clusterFile, const std::string& bgBasePath) = 0;
 	virtual void execute(TOpStartFct start, TOpContFct cont, bool transactional, bool restartOnTimeout) = 0;
 	virtual fdb::Database selectDatabase() = 0;

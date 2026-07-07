@@ -114,9 +114,9 @@ const int NUM_MAJOR_LEVELS_OF_EVENTS = SevMaxUsed / 10 + 1;
 class TraceEventFields {
 public:
 	constexpr static FileIdentifier file_identifier = 11262274;
-	typedef std::pair<std::string, std::string> Field;
-	typedef std::vector<Field> FieldContainer;
-	typedef FieldContainer::const_iterator FieldIterator;
+	using Field = std::pair<std::string, std::string>;
+	using FieldContainer = std::vector<Field>;
+	using FieldIterator = FieldContainer::const_iterator;
 
 	TraceEventFields();
 
@@ -218,9 +218,7 @@ struct SpecialTraceMetricType
 #define TRACE_METRIC_TYPE(from, to)                                                                                    \
 	template <>                                                                                                        \
 	struct SpecialTraceMetricType<from> : std::true_type {                                                             \
-		static to getValue(from v) {                                                                                   \
-			return v;                                                                                                  \
-		}                                                                                                              \
+		static to getValue(from v) { return v; }                                                                       \
 	}
 
 TRACE_METRIC_TYPE(double, double);
@@ -480,7 +478,7 @@ protected:
 // The TraceEvent class provides the implementation for BaseTraceEvent. The only functions that should be implemented
 // here are those that must be called first in a trace event call sequence, such as the suppression functions.
 struct SWIFT_CXX_IMPORT_OWNED TraceEvent : public BaseTraceEvent {
-	TraceEvent() {}
+	TraceEvent() = default;
 	TraceEvent(const char* type, UID id = UID()); // Assumes SevInfo severity
 	TraceEvent(Severity, const char* type, UID id = UID());
 	TraceEvent(struct TraceInterval&, UID id = UID());

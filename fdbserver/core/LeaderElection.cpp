@@ -207,8 +207,9 @@ Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 			    std::find(nominees.begin(), nominees.end(), myInfo) != nominees.end()) {
 				if (!badCandidateTimeout.isValid())
 					badCandidateTimeout = delay(SERVER_KNOBS->POLLING_FREQUENCY * 2, TaskPriority::CoordinationReply);
-			} else
+			} else {
 				badCandidateTimeout = Future<Void>();
+			}
 
 			{
 				auto res = co_await race(nomineeChange.onTrigger(),
@@ -277,18 +278,19 @@ Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 				break;
 			} else if (res.index() == 2) {
 				for (int i = 0; i < coordinators.leaderElectionServers.size(); ++i) {
-					if (true_heartbeats[i].isReady())
+					if (true_heartbeats[i].isReady()) {
 						TraceEvent("LeaderTrueHeartbeat", myInfo.changeID)
 						    .detail("Coordinator",
 						            coordinators.leaderElectionServers[i].candidacy.getEndpoint().getPrimaryAddress());
-					else if (false_heartbeats[i].isReady())
+					} else if (false_heartbeats[i].isReady()) {
 						TraceEvent("LeaderFalseHeartbeat", myInfo.changeID)
 						    .detail("Coordinator",
 						            coordinators.leaderElectionServers[i].candidacy.getEndpoint().getPrimaryAddress());
-					else
+					} else {
 						TraceEvent("LeaderNoHeartbeat", myInfo.changeID)
 						    .detail("Coordinator",
 						            coordinators.leaderElectionServers[i].candidacy.getEndpoint().getPrimaryAddress());
+					}
 				}
 				TraceEvent("ReleasingLeadership", myInfo.changeID).log();
 				break;

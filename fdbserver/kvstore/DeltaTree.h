@@ -201,7 +201,7 @@ struct DeltaTree {
 
 public:
 	struct DecodedNode {
-		DecodedNode() {}
+		DecodedNode() = default;
 
 		// construct root node
 		DecodedNode(Node* raw, const T* prev, const T* next, Arena& arena, bool large)
@@ -422,7 +422,7 @@ public:
 				return false;
 			}
 
-			DecodedNode* newNode = new (arena) DecodedNode();
+			auto* newNode = new (arena) DecodedNode();
 			Node* raw = &tree->newNode();
 			raw->setLeftChildOffset(tree->largeNodes, 0);
 			raw->setRightChildOffset(tree->largeNodes, 0);
@@ -942,7 +942,7 @@ private:
 #pragma pack(push, 1)
 template <typename T, typename DeltaT = typename T::Delta>
 struct DeltaTree2 {
-	typedef typename T::Partial Partial;
+	using Partial = typename T::Partial;
 
 	struct {
 		uint16_t numItems; // Number of items in the tree.
@@ -997,13 +997,23 @@ struct DeltaTree2 {
 		smallOffsets.m = v;                                                                                            \
 	}
 
-		void setRightChildOffset(bool large, int offset) { setMember(rightChild, offset); }
-		void setLeftChildOffset(bool large, int offset) { setMember(leftChild, offset); }
+		void setRightChildOffset(bool large, int offset) {
+			setMember(rightChild, offset);
+		}
+		void setLeftChildOffset(bool large, int offset) {
+			setMember(leftChild, offset);
+		}
 
-		int getRightChildOffset(bool large) const { return getMember(rightChild); }
-		int getLeftChildOffset(bool large) const { return getMember(leftChild); }
+		int getRightChildOffset(bool large) const {
+			return getMember(rightChild);
+		}
+		int getLeftChildOffset(bool large) const {
+			return getMember(leftChild);
+		}
 
-		int size(bool large) const { return delta(large).size() + headerSize(large); }
+		int size(bool large) const {
+			return delta(large).size() + headerSize(large);
+		}
 #undef getMember
 #undef setMember
 	};
@@ -1200,7 +1210,7 @@ public:
 		bool valid() const { return nodeIndex != -1; }
 
 		// Get T for Node n, and provide to n's delta the base and local decode cache entries to use/modify
-		const T get(DecodedNode& decoded) const {
+		T get(DecodedNode& decoded) const {
 			DeltaT& delta = decoded.node(tree)->delta(tree->largeNodes);
 
 			// If this node's cached partial is populated, then the delta can create T from that alone

@@ -42,7 +42,7 @@ struct CommandHelp {
 	std::string usage;
 	std::string short_desc;
 	std::string long_desc;
-	CommandHelp() {}
+	CommandHelp() = default;
 	CommandHelp(const char* usage, const char* short_desc, const char* long_desc)
 	  : usage(usage), short_desc(short_desc), long_desc(long_desc) {}
 };
@@ -50,12 +50,12 @@ struct CommandHelp {
 void arrayGenerator(const char* text, const char* line, const char** options, std::vector<std::string>& lc);
 
 struct CommandFactory {
-	typedef void (*CompletionGeneratorFunc)(const char* text,
-	                                        const char* line,
-	                                        std::vector<std::string>& lc,
-	                                        std::vector<StringRef> const& tokens);
+	using CompletionGeneratorFunc = void (*)(const char* text,
+	                                         const char* line,
+	                                         std::vector<std::string>& lc,
+	                                         std::vector<StringRef> const& tokens);
 
-	typedef std::vector<const char*> (*HintGeneratorFunc)(std::vector<StringRef> const& tokens, bool inArgument);
+	using HintGeneratorFunc = std::vector<const char*> (*)(std::vector<StringRef> const& tokens, bool inArgument);
 
 	CommandFactory(const char* name,
 	               CommandHelp help,

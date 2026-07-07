@@ -39,7 +39,7 @@ struct DistributedTestResults {
 	std::vector<PerfMetric> metrics;
 	int successes, failures;
 
-	DistributedTestResults() {}
+	DistributedTestResults() = default;
 
 	DistributedTestResults(std::vector<PerfMetric> const& metrics, int successes, int failures)
 	  : metrics(metrics), successes(successes), failures(failures) {}

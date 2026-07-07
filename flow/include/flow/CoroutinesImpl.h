@@ -1003,7 +1003,7 @@ struct CoroPromise<T, IsCancellable, ReturnsExplicitVoid, false>
 
 	ActorType coroActor; // Embedded in coroutine frame — single allocation
 
-	CoroPromise() {}
+	CoroPromise() = default;
 
 	ActorType* actor() { return &coroActor; }
 
@@ -1053,7 +1053,7 @@ struct CoroPromise<T, IsCancellable, ReturnsExplicitVoid, true>
 	// allocates it separately because cancel() intentionally destroys that frame.
 	ActorType* coroActor = new ActorType();
 
-	CoroPromise() {}
+	CoroPromise() = default;
 
 	ActorType* actor() { return coroActor; }
 

@@ -72,7 +72,7 @@ struct StateTransactionRef {
 	bool committed;
 	VectorRef<MutationRef> mutations;
 
-	StateTransactionRef() {}
+	StateTransactionRef() = default;
 	StateTransactionRef(const bool committed, VectorRef<MutationRef> const& mutations)
 	  : committed(committed), mutations(mutations) {}
 	StateTransactionRef(Arena& p, const StateTransactionRef& toCopy)

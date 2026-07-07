@@ -161,9 +161,9 @@ struct GetTeamRequest {
 
 	Promise<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> reply;
 
-	typedef Reference<IDataDistributionTeam> TeamRef;
+	using TeamRef = Reference<IDataDistributionTeam>;
 
-	GetTeamRequest() {}
+	GetTeamRequest() = default;
 	GetTeamRequest(TeamSelect teamSelectRequest,
 	               PreferLowerDiskUtil preferLowerDiskUtil,
 	               TeamMustHaveShards teamMustHaveShards,

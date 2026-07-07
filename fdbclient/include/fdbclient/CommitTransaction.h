@@ -390,7 +390,7 @@ public:
 				offloadChecksum();
 			}
 			validateParam2();
-			if (type == ClearRange && param2 == StringRef() && param1 != StringRef()) {
+			if (type == ClearRange && param2.empty() && !param1.empty()) {
 				if (param1[param1.size() - 1] != '\x00') {
 					TraceEvent(SevError, "MutationRefUnexpectedError")
 					    .setMaxFieldLength(-1)
@@ -540,7 +540,7 @@ struct MutationsAndVersionRef {
 	Version version = invalidVersion;
 	Version knownCommittedVersion = invalidVersion;
 
-	MutationsAndVersionRef() {}
+	MutationsAndVersionRef() = default;
 	explicit MutationsAndVersionRef(Version version, Version knownCommittedVersion)
 	  : version(version), knownCommittedVersion(knownCommittedVersion) {}
 	MutationsAndVersionRef(VectorRef<MutationRef> mutations, Version version, Version knownCommittedVersion)
