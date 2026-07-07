@@ -41,7 +41,7 @@
 #include "flow/SystemMonitor.h"
 
 class ClusterControllerData;
-using ClusterRecoveryEventType = enum {
+enum ClusterRecoveryEventType {
 	CLUSTER_RECOVERY_STATE_EVENT_NAME,
 	CLUSTER_RECOVERY_COMMIT_TLOG_EVENT_NAME,
 	CLUSTER_RECOVERY_DURATION_EVENT_NAME,

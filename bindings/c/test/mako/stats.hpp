@@ -102,7 +102,7 @@ class alignas(64) WorkflowStatistics {
 	std::vector<DDSketchMako> sketches;
 
 public:
-	WorkflowStatistics() noexcept { // NOLINT(modernize-use-equals-default): initializes counters and sketches.
+	WorkflowStatistics() noexcept {
 		std::fill(ops.begin(), ops.end(), 0);
 		std::fill(errors.begin(), errors.end(), 0);
 		std::fill(timeouts.begin(), timeouts.end(), 0);

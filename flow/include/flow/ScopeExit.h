@@ -30,7 +30,7 @@ class ScopeExit {
 public:
 	explicit ScopeExit(Func&& fn) : fn(std::forward<Func>(fn)) {}
 
-	~ScopeExit() { fn(); } // NOLINT(modernize-use-equals-default): invokes the scope-exit callback.
+	~ScopeExit() { fn(); }
 };
 
 #endif /*FLOW_SCOPE_EXIT_H*/

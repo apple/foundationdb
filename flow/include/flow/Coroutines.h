@@ -208,7 +208,7 @@ public:
 	explicit AsyncGenerator(PromiseStream<T>* promise, n_coroutine::coroutine_handle<> handle)
 	  : nextPromise(promise), handle(handle) {}
 
-	~AsyncGenerator() { handle.destroy(); } // NOLINT(modernize-use-equals-default): destroys the coroutine handle.
+	~AsyncGenerator() { handle.destroy(); }
 
 	Future<T> operator()() {
 		handle.resume();

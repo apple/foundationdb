@@ -60,8 +60,7 @@ public:
 		fs.addCallbackAndClear(this);
 	}
 
-	FlowSingleCallbackForSwiftContinuation() // NOLINT(modernize-use-equals-default): initializes Swift state.
-	  : continuationInstance(SwiftCC::init()) {}
+	FlowSingleCallbackForSwiftContinuation() : continuationInstance(SwiftCC::init()) {}
 
 	void fire(T const& value) {
 		SingleCallback<T>::remove();

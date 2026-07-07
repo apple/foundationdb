@@ -165,7 +165,7 @@ class ExitGuard {
 public:
 	ExitGuard(Func&& fn) : fn(std::forward<Func>(fn)) {}
 
-	~ExitGuard() { fn(); } // NOLINT(modernize-use-equals-default): the guard invokes its callable on destruction.
+	~ExitGuard() { fn(); }
 };
 
 // invoke user-provided callable when stack unwinds by exception.
