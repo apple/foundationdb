@@ -362,7 +362,7 @@ private:
 public:
 	constexpr static FileIdentifier file_identifier = 13300811;
 	StringRef() : data(0), length(0) {}
-	StringRef(Arena& p, const StringRef& toCopy) : data(new (p) uint8_t[toCopy.size()]), length(toCopy.size()) {
+	StringRef(Arena& p, const StringRef& toCopy) : data(new(p) uint8_t[toCopy.size()]), length(toCopy.size()) {
 		if (length > 0) {
 			bytesCopied()->increment(length);
 			memcpy((void*)data, toCopy.data, length);
@@ -376,7 +376,7 @@ public:
 			memcpy((void*)data, &toCopy[0], length);
 		}
 	}
-	StringRef(Arena& p, const uint8_t* toCopy, int length) : data(new (p) uint8_t[length]), length(length) {
+	StringRef(Arena& p, const uint8_t* toCopy, int length) : data(new(p) uint8_t[length]), length(length) {
 		if (length > 0) {
 			bytesCopied()->increment(length);
 			memcpy((void*)data, toCopy, length);
@@ -965,7 +965,7 @@ public:
 	template <class T2 = T, VecSerStrategy S>
 	    requires(!flow_ref<T2>::value)
 	VectorRef(Arena& p, const VectorRef<T, S>& toCopy)
-	  : VPS(toCopy), data((T*)new (p) uint8_t[sizeof(T) * toCopy.size()]), m_size(toCopy.size()),
+	  : VPS(toCopy), data((T*)new(p) uint8_t[sizeof(T) * toCopy.size()]), m_size(toCopy.size()),
 	    m_capacity(toCopy.size()) {
 		if (m_size > 0) {
 			std::copy(toCopy.data, toCopy.data + m_size, data);
@@ -976,7 +976,7 @@ public:
 	template <class T2 = T, VecSerStrategy S>
 	    requires(flow_ref<T2>::value)
 	VectorRef(Arena& p, const VectorRef<T, S>& toCopy)
-	  : VPS(), data((T*)new (p) uint8_t[sizeof(T) * toCopy.size()]), m_size(toCopy.size()), m_capacity(toCopy.size()) {
+	  : VPS(), data((T*)new(p) uint8_t[sizeof(T) * toCopy.size()]), m_size(toCopy.size()), m_capacity(toCopy.size()) {
 		for (int i = 0; i < m_size; i++) {
 			auto ptr = new (&data[i]) T(p, toCopy[i]);
 			VPS::add(*ptr);

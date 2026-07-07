@@ -997,23 +997,13 @@ struct DeltaTree2 {
 		smallOffsets.m = v;                                                                                            \
 	}
 
-		void setRightChildOffset(bool large, int offset) {
-			setMember(rightChild, offset);
-		}
-		void setLeftChildOffset(bool large, int offset) {
-			setMember(leftChild, offset);
-		}
+		void setRightChildOffset(bool large, int offset) { setMember(rightChild, offset); }
+		void setLeftChildOffset(bool large, int offset) { setMember(leftChild, offset); }
 
-		int getRightChildOffset(bool large) const {
-			return getMember(rightChild);
-		}
-		int getLeftChildOffset(bool large) const {
-			return getMember(leftChild);
-		}
+		int getRightChildOffset(bool large) const { return getMember(rightChild); }
+		int getLeftChildOffset(bool large) const { return getMember(leftChild); }
 
-		int size(bool large) const {
-			return delta(large).size() + headerSize(large);
-		}
+		int size(bool large) const { return delta(large).size() + headerSize(large); }
 #undef getMember
 #undef setMember
 	};

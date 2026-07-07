@@ -70,7 +70,7 @@ static const std::unordered_set<EncryptCipherDomainId> ENCRYPT_CIPHER_DETAULT_DO
 	FDB_DEFAULT_ENCRYPT_DOMAIN_ID,
 };
 
-using EncryptCipherMode = enum {
+enum EncryptCipherMode {
 	ENCRYPT_CIPHER_MODE_NONE = 0,
 	ENCRYPT_CIPHER_MODE_AES_256_CTR = 1,
 	ENCRYPT_CIPHER_MODE_LAST = 2
@@ -88,7 +88,7 @@ EncryptCipherMode encryptModeFromString(const std::string& modeStr);
 // 'tempering' and/or bit rot/flip corruptions. Refer to BlobCipher.h for detailed usage recommendations.
 // 3. LAST - Invalid mode, used for static asserts.
 
-using EncryptAuthTokenMode = enum {
+enum EncryptAuthTokenMode {
 	ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE = 0,
 	ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE = 1,
 	ENCRYPT_HEADER_AUTH_TOKEN_LAST = 3 // Always the last element
@@ -97,7 +97,7 @@ using EncryptAuthTokenMode = enum {
 static_assert(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_LAST <= std::numeric_limits<uint8_t>::max(),
               "EncryptHeaderAuthToken value overflow");
 
-using EncryptAuthTokenAlgo = enum {
+enum EncryptAuthTokenAlgo {
 	ENCRYPT_HEADER_AUTH_TOKEN_ALGO_NONE = 0,
 	ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA = 1,
 	ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC = 2,
