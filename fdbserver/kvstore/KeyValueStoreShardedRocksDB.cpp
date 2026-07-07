@@ -48,7 +48,6 @@
 #include "fdbserver/kvstore/IKeyValueStore.h"
 #include "fdbserver/core/RocksDBCheckpointUtils.h"
 #include "RocksDBCommon.h"
-#include "flow/actorcompiler.h" // has to be last include
 
 #ifdef WITH_ROCKSDB
 
@@ -97,8 +96,8 @@ using RocksDBCommon::getBackgroundError;
 using RocksDBCommon::getErrorReason;
 using RocksDBCommon::RocksDBBackgroundError;
 
-ACTOR Future<Void> forwardError(Future<RocksDBBackgroundError> input) {
-	RocksDBBackgroundError error = wait(input);
+Future<Void> forwardError(Future<RocksDBBackgroundError> input) {
+	RocksDBBackgroundError error = co_await input;
 	TraceEvent(SevError, "ShardedRocksDBBGError")
 	    .detail("Reason", getErrorReason(error.reason))
 	    .detail("ShardedRocksDBSeverity", error.severity)
@@ -3377,7 +3376,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 	Future<Void> getError() const override { return errorFuture; }
 
-	ACTOR static void doClose(ShardedRocksDBKeyValueStore* self, bool deleteOnClose) {
+	static Future<Void> doClose(Uncancellable, ShardedRocksDBKeyValueStore* self, bool deleteOnClose) {
 		self->rState->closing = true;
 		// The metrics future retains a reference to the DB, so stop it before we delete it.
 		self->metrics.reset();
@@ -3387,7 +3386,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		self->counterLogger.cancel();
 
 		try {
-			wait(self->readThreads->stop());
+			co_await self->readThreads->stop();
 		} catch (Error& e) {
 			TraceEvent(SevError, "ShardedRocksCloseReadThreadError").errorUnsuppressed(e);
 		}
@@ -3398,14 +3397,14 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		auto f = a->done.getFuture();
 		self->writeThread->post(a);
 		try {
-			wait(f);
+			co_await f;
 		} catch (Error& e) {
 			TraceEvent(SevError, "ShardedRocksCloseActionError").errorUnsuppressed(e);
 		}
 
 		try {
-			wait(self->writeThread->stop());
-			wait(self->compactionThread->stop());
+			co_await self->writeThread->stop();
+			co_await self->compactionThread->stop();
 		} catch (Error& e) {
 			TraceEvent(SevError, "ShardedRocksCloseWriteThreadError").errorUnsuppressed(e);
 		}
@@ -3423,9 +3422,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 	Future<Void> onClosed() const override { return closePromise.getFuture(); }
 
-	void dispose() override { doClose(this, true); }
+	void dispose() override { doClose(Uncancellable(), this, true); }
 
-	void close() override { doClose(this, false); }
+	void close() override { doClose(Uncancellable(), this, false); }
 
 	KeyValueStoreType getType() const override { return KeyValueStoreType(KeyValueStoreType::SSD_SHARDED_ROCKSDB); }
 
@@ -3495,18 +3494,16 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	// Checks and waits for few seconds if rocskdb is overloaded.
-	ACTOR Future<Void> checkRocksdbState(rocksdb::DB* db) {
-		state uint64_t estPendCompactBytes;
-		state int count = SERVER_KNOBS->ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD;
+	Future<Void> checkRocksdbState(rocksdb::DB* db) {
+		uint64_t estPendCompactBytes{ 0 };
+		int count = SERVER_KNOBS->ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD;
 		db->GetAggregatedIntProperty(rocksdb::DB::Properties::kEstimatePendingCompactionBytes, &estPendCompactBytes);
 		while (count && overloaded(estPendCompactBytes)) {
-			wait(delay(SERVER_KNOBS->ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD));
+			co_await delay(SERVER_KNOBS->ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD);
 			count--;
 			db->GetAggregatedIntProperty(rocksdb::DB::Properties::kEstimatePendingCompactionBytes,
 			                             &estPendCompactBytes);
 		}
-
-		return Void();
 	}
 
 	Future<Void> canCommit() override { return checkRocksdbState(shardManager.getDb()); }
@@ -3537,22 +3534,22 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		return type != ReadType::EAGER && !(key.startsWith(systemKeys.begin));
 	}
 
-	ACTOR template <class Action>
+	template <class Action>
 	static Future<Optional<Value>> read(Action* action, FlowLock* semaphore, IThreadPool* pool, Counter* counter) {
-		state std::unique_ptr<Action> a(action);
-		state Optional<Void> slot = wait(timeout(semaphore->take(), SERVER_KNOBS->ROCKSDB_READ_QUEUE_WAIT));
+		std::unique_ptr<Action> a(action);
+		Optional<Void> slot = co_await timeout(semaphore->take(), SERVER_KNOBS->ROCKSDB_READ_QUEUE_WAIT);
 		if (!slot.present()) {
 			++(*counter);
 			throw server_overloaded();
 		}
 
-		state FlowLock::Releaser release(*semaphore);
+		FlowLock::Releaser release(*semaphore);
 
 		auto fut = a->result.getFuture();
 		pool->post(a.release());
-		Optional<Value> result = wait(fut);
+		Optional<Value> result = co_await fut;
 
-		return result;
+		co_return result;
 	}
 
 	Future<Optional<Value>> readValue(KeyRef key, Optional<ReadOptions> options) override {
@@ -3621,24 +3618,24 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
-	ACTOR static Future<Standalone<RangeResultRef>> read(Reader::ReadRangeAction* action,
-	                                                     FlowLock* semaphore,
-	                                                     IThreadPool* pool,
-	                                                     Counter* counter) {
-		state std::unique_ptr<Reader::ReadRangeAction> a(action);
-		state Optional<Void> slot = wait(timeout(semaphore->take(), SERVER_KNOBS->ROCKSDB_READ_QUEUE_WAIT));
+	static Future<Standalone<RangeResultRef>> read(Reader::ReadRangeAction* action,
+	                                               FlowLock* semaphore,
+	                                               IThreadPool* pool,
+	                                               Counter* counter) {
+		std::unique_ptr<Reader::ReadRangeAction> a(action);
+		Optional<Void> slot = co_await timeout(semaphore->take(), SERVER_KNOBS->ROCKSDB_READ_QUEUE_WAIT);
 		if (!slot.present()) {
 			++(*counter);
 			throw server_overloaded();
 		}
 
-		state FlowLock::Releaser release(*semaphore);
+		FlowLock::Releaser release(*semaphore);
 
 		auto fut = a->result.getFuture();
 		pool->post(a.release());
-		Standalone<RangeResultRef> result = wait(fut);
+		Standalone<RangeResultRef> result = co_await fut;
 
-		return result;
+		co_return result;
 	}
 
 	Future<RangeResult> readRange(KeyRangeRef keys,
@@ -3853,26 +3850,27 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	Future<Void> counterLogger;
 };
 
-ACTOR Future<Void> testCheckpointRestore(IKeyValueStore* kvStore, std::vector<KeyRange> ranges) {
-	state std::string checkpointDir = "checkpoint" + deterministicRandom()->randomAlphaNumeric(5);
+Future<Void> testCheckpointRestore(IKeyValueStore* kvStore, std::vector<KeyRange> ranges) {
+	std::string checkpointDir = "checkpoint" + deterministicRandom()->randomAlphaNumeric(5);
 	platform::eraseDirectoryRecursive(checkpointDir);
 	CheckpointRequest request(
 	    latestVersion, ranges, DataMoveRocksCF, deterministicRandom()->randomUniqueID(), checkpointDir);
-	state CheckpointMetaData checkpoint = wait(kvStore->checkpoint(request));
+	CheckpointMetaData checkpoint = co_await kvStore->checkpoint(request);
 	RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
 
 	TraceEvent(SevDebug, "ShardedRocksCheckpointTest")
 	    .detail("Checkpoint", checkpoint.toString())
 	    .detail("ColumnFamily", rocksCF.toString());
 
-	state std::string rocksDBRestoreDir = "sharded-rocks-restore" + deterministicRandom()->randomAlphaNumeric(5);
+	std::string rocksDBRestoreDir = "sharded-rocks-restore" + deterministicRandom()->randomAlphaNumeric(5);
 	platform::eraseDirectoryRecursive(rocksDBRestoreDir);
-	state IKeyValueStore* restoreKv = keyValueStoreShardedRocksDB(
+	IKeyValueStore* restoreKv = keyValueStoreShardedRocksDB(
 	    rocksDBRestoreDir, deterministicRandom()->randomUniqueID(), KeyValueStoreType::SSD_SHARDED_ROCKSDB);
-	wait(restoreKv->init());
+	co_await restoreKv->init();
 	try {
 		const std::string shardId = "restoredShard";
-		wait(restoreKv->restore(shardId, ranges, { checkpoint }));
+		std::vector<CheckpointMetaData> checkpoints{ checkpoint };
+		co_await restoreKv->restore(shardId, ranges, checkpoints);
 	} catch (Error& e) {
 		TraceEvent(SevWarnAlways, "TestRestoreCheckpointError")
 		    .errorUnsuppressed(e)
@@ -3880,10 +3878,9 @@ ACTOR Future<Void> testCheckpointRestore(IKeyValueStore* kvStore, std::vector<Ke
 		throw;
 	}
 
-	state int i = 0;
-	for (; i < ranges.size(); ++i) {
-		state RangeResult restoreResult = wait(restoreKv->readRange(ranges[i]));
-		RangeResult result = wait(kvStore->readRange(ranges[i]));
+	for (int i = 0; i < ranges.size(); ++i) {
+		RangeResult restoreResult = co_await restoreKv->readRange(ranges[i]);
+		RangeResult result = co_await kvStore->readRange(ranges[i]);
 		ASSERT(!restoreResult.more && !result.more);
 		ASSERT(restoreResult.size() == result.size());
 		for (int i = 0; i < result.size(); ++i) {
@@ -3899,8 +3896,7 @@ ACTOR Future<Void> testCheckpointRestore(IKeyValueStore* kvStore, std::vector<Ke
 
 	Future<Void> restoreKvClose = restoreKv->onClosed();
 	restoreKv->close();
-	wait(restoreKvClose);
-	return Void();
+	co_await restoreKvClose;
 }
 } // namespace
 
@@ -3923,67 +3919,62 @@ IKeyValueStore* keyValueStoreShardedRocksDB(std::string const& path,
 #ifdef WITH_ROCKSDB
 namespace {
 TEST_CASE("noSim/ShardedRocksDB/Initialization") {
-	state const std::string rocksDBTestDir = "sharded-rocksdb-test-db";
+	const std::string rocksDBTestDir = "sharded-rocksdb-test-db";
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
 
-	state IKeyValueStore* kvStore =
-	    new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
-	wait(kvStore->init());
+	IKeyValueStore* kvStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	co_await kvStore->init();
 
 	Future<Void> closed = kvStore->onClosed();
 	kvStore->dispose();
-	wait(closed);
+	co_await closed;
 	ASSERT(!directoryExists(rocksDBTestDir));
-	return Void();
 }
 
 TEST_CASE("noSim/ShardedRocksDB/SingleShardRead") {
-	state const std::string rocksDBTestDir = "sharded-rocksdb-test-db";
+	const std::string rocksDBTestDir = "sharded-rocksdb-test-db";
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
 
-	state IKeyValueStore* kvStore =
-	    new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
-	wait(kvStore->init());
+	IKeyValueStore* kvStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	co_await kvStore->init();
 
 	KeyRangeRef range("a"_sr, "b"_sr);
-	wait(kvStore->addRange(range, "shard-1"));
+	co_await kvStore->addRange(range, "shard-1");
 
 	kvStore->set({ "a"_sr, "foo"_sr });
 	kvStore->set({ "ac"_sr, "bar"_sr });
-	wait(kvStore->commit(false));
+	co_await kvStore->commit(false);
 
-	Optional<Value> val = wait(kvStore->readValue("a"_sr));
+	Optional<Value> val = co_await kvStore->readValue("a"_sr);
 	ASSERT(Optional<Value>("foo"_sr) == val);
 	{
-		Optional<Value> val = wait(kvStore->readValue("ac"_sr));
+		Optional<Value> val = co_await kvStore->readValue("ac"_sr);
 		ASSERT(Optional<Value>("bar"_sr) == val);
 	}
 
 	Future<Void> closed = kvStore->onClosed();
 	kvStore->dispose();
-	wait(closed);
+	co_await closed;
 	ASSERT(!directoryExists(rocksDBTestDir));
-	return Void();
 }
 
 TEST_CASE("noSim/ShardedRocksDB/RangeOps") {
-	state std::string rocksDBTestDir = "sharded-rocksdb-kvs-test-db";
+	std::string rocksDBTestDir = "sharded-rocksdb-kvs-test-db";
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
 
-	state IKeyValueStore* kvStore =
-	    new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
-	wait(kvStore->init());
+	IKeyValueStore* kvStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	co_await kvStore->init();
 
 	std::vector<Future<Void>> addRangeFutures;
 	addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("0"_sr, "3"_sr), "shard-1"));
 	addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("4"_sr, "7"_sr), "shard-2"));
 
-	wait(waitForAll(addRangeFutures));
+	co_await waitForAll(addRangeFutures);
 
 	kvStore->persistRangeMapping(KeyRangeRef("0"_sr, "7"_sr), true);
 
 	// write to shard 1
-	state RangeResult expectedRows;
+	RangeResult expectedRows;
 	for (int i = 0; i < 30; ++i) {
 		std::string key = format("%02d", i);
 		std::string value = std::to_string(i);
@@ -3999,23 +3990,23 @@ TEST_CASE("noSim/ShardedRocksDB/RangeOps") {
 		expectedRows.push_back_deep(expectedRows.arena(), { key, value });
 	}
 
-	wait(kvStore->commit(false));
+	co_await kvStore->commit(false);
 	Future<Void> closed = kvStore->onClosed();
 	kvStore->close();
-	wait(closed);
+	co_await closed;
 	kvStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
-	wait(kvStore->init());
+	co_await kvStore->init();
 
 	// Point read
-	state int i = 0;
+	int i = 0;
 	for (i = 0; i < expectedRows.size(); ++i) {
-		Optional<Value> val = wait(kvStore->readValue(expectedRows[i].key));
+		Optional<Value> val = co_await kvStore->readValue(expectedRows[i].key);
 		ASSERT(val == Optional<Value>(expectedRows[i].value));
 	}
 
 	// Range read
 	// Read forward full range.
-	RangeResult result = wait(kvStore->readRange(KeyRangeRef("0"_sr, ":"_sr), 1000, 10000));
+	RangeResult result = co_await kvStore->readRange(KeyRangeRef("0"_sr, ":"_sr), 1000, 10000);
 	ASSERT_EQ(result.size(), expectedRows.size());
 	for (int i = 0; i < expectedRows.size(); ++i) {
 		ASSERT(result[i] == expectedRows[i]);
@@ -4023,7 +4014,7 @@ TEST_CASE("noSim/ShardedRocksDB/RangeOps") {
 
 	// Read backward full range.
 	{
-		RangeResult result = wait(kvStore->readRange(KeyRangeRef("0"_sr, ":"_sr), -1000, 10000));
+		RangeResult result = co_await kvStore->readRange(KeyRangeRef("0"_sr, ":"_sr), -1000, 10000);
 		ASSERT_EQ(result.size(), expectedRows.size());
 		for (int i = 0; i < expectedRows.size(); ++i) {
 			ASSERT(result[i] == expectedRows[59 - i]);
@@ -4032,7 +4023,7 @@ TEST_CASE("noSim/ShardedRocksDB/RangeOps") {
 
 	// Forward with row limit.
 	{
-		RangeResult result = wait(kvStore->readRange(KeyRangeRef("2"_sr, "6"_sr), 10, 10000));
+		RangeResult result = co_await kvStore->readRange(KeyRangeRef("2"_sr, "6"_sr), 10, 10000);
 		ASSERT_EQ(result.size(), 10);
 		for (int i = 0; i < 10; ++i) {
 			ASSERT(result[i] == expectedRows[20 + i]);
@@ -4040,7 +4031,7 @@ TEST_CASE("noSim/ShardedRocksDB/RangeOps") {
 	}
 
 	// Add another range on shard-1.
-	wait(kvStore->addRange(KeyRangeRef("7"_sr, "9"_sr), "shard-1"));
+	co_await kvStore->addRange(KeyRangeRef("7"_sr, "9"_sr), "shard-1");
 	kvStore->persistRangeMapping(KeyRangeRef("7"_sr, "9"_sr), true);
 
 	for (i = 70; i < 90; ++i) {
@@ -4050,19 +4041,19 @@ TEST_CASE("noSim/ShardedRocksDB/RangeOps") {
 		expectedRows.push_back_deep(expectedRows.arena(), { key, value });
 	}
 
-	wait(kvStore->commit(false));
+	co_await kvStore->commit(false);
 
 	{
 		Future<Void> closed = kvStore->onClosed();
 		kvStore->close();
-		wait(closed);
+		co_await closed;
 	}
 	kvStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
-	wait(kvStore->init());
+	co_await kvStore->init();
 
 	// Read all values.
 	{
-		RangeResult result = wait(kvStore->readRange(KeyRangeRef("0"_sr, ":"_sr), 1000, 10000));
+		RangeResult result = co_await kvStore->readRange(KeyRangeRef("0"_sr, ":"_sr), 1000, 10000);
 		ASSERT_EQ(result.size(), expectedRows.size());
 		for (int i = 0; i < expectedRows.size(); ++i) {
 			ASSERT(result[i] == expectedRows[i]);
@@ -4071,7 +4062,7 @@ TEST_CASE("noSim/ShardedRocksDB/RangeOps") {
 
 	// Read partial range with row limit
 	{
-		RangeResult result = wait(kvStore->readRange(KeyRangeRef("5"_sr, ":"_sr), 35, 10000));
+		RangeResult result = co_await kvStore->readRange(KeyRangeRef("5"_sr, ":"_sr), 35, 10000);
 		ASSERT_EQ(result.size(), 35);
 		for (int i = 0; i < result.size(); ++i) {
 			ASSERT(result[i] == expectedRows[40 + i]);
@@ -4080,59 +4071,58 @@ TEST_CASE("noSim/ShardedRocksDB/RangeOps") {
 
 	// Clear a range on a single shard.
 	kvStore->clear(KeyRangeRef("40"_sr, "45"_sr));
-	wait(kvStore->commit(false));
+	co_await kvStore->commit(false);
 
 	{
-		RangeResult result = wait(kvStore->readRange(KeyRangeRef("4"_sr, "5"_sr), 20, 10000));
+		RangeResult result = co_await kvStore->readRange(KeyRangeRef("4"_sr, "5"_sr), 20, 10000);
 		ASSERT_EQ(result.size(), 5);
 	}
 
 	// Clear a single value.
 	kvStore->clear(KeyRangeRef("01"_sr, keyAfter("01"_sr)));
-	wait(kvStore->commit(false));
+	co_await kvStore->commit(false);
 
-	Optional<Value> val = wait(kvStore->readValue("01"_sr));
+	Optional<Value> val = co_await kvStore->readValue("01"_sr);
 	ASSERT(!val.present());
 
 	// Clear a range spanning on multiple shards.
 	kvStore->clear(KeyRangeRef("1"_sr, "8"_sr));
-	wait(kvStore->commit(false));
+	co_await kvStore->commit(false);
 
 	{
 		Future<Void> closed = kvStore->onClosed();
 		kvStore->close();
-		wait(closed);
+		co_await closed;
 	}
 	kvStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
-	wait(kvStore->init());
+	co_await kvStore->init();
 
 	{
-		RangeResult result = wait(kvStore->readRange(KeyRangeRef("1"_sr, "8"_sr), 1000, 10000));
+		RangeResult result = co_await kvStore->readRange(KeyRangeRef("1"_sr, "8"_sr), 1000, 10000);
 		ASSERT_EQ(result.size(), 0);
 	}
 
 	{
-		RangeResult result = wait(kvStore->readRange(KeyRangeRef("0"_sr, ":"_sr), 1000, 10000));
+		RangeResult result = co_await kvStore->readRange(KeyRangeRef("0"_sr, ":"_sr), 1000, 10000);
 		ASSERT_EQ(result.size(), 19);
 	}
 
 	{
 		Future<Void> closed = kvStore->onClosed();
 		kvStore->dispose();
-		wait(closed);
+		co_await closed;
 	}
 	ASSERT(!directoryExists(rocksDBTestDir));
-	return Void();
 }
 
 TEST_CASE("noSim/ShardedRocksDB/ShardOps") {
-	state std::string rocksDBTestDir = "sharded-rocksdb-kvs-test-db";
+	std::string rocksDBTestDir = "sharded-rocksdb-kvs-test-db";
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
 
-	state ShardedRocksDBKeyValueStore* rocksdbStore =
+	ShardedRocksDBKeyValueStore* rocksdbStore =
 	    new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
-	state IKeyValueStore* kvStore = rocksdbStore;
-	wait(kvStore->init());
+	IKeyValueStore* kvStore = rocksdbStore;
+	co_await kvStore->init();
 
 	// Add some ranges.
 	{
@@ -4140,7 +4130,7 @@ TEST_CASE("noSim/ShardedRocksDB/ShardOps") {
 		addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("a"_sr, "c"_sr), "shard-1"));
 		addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("c"_sr, "f"_sr), "shard-2"));
 
-		wait(waitForAll(addRangeFutures));
+		co_await waitForAll(addRangeFutures);
 	}
 
 	{
@@ -4148,7 +4138,7 @@ TEST_CASE("noSim/ShardedRocksDB/ShardOps") {
 		addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("x"_sr, "z"_sr), "shard-1"));
 		addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("l"_sr, "n"_sr), "shard-3"));
 
-		wait(waitForAll(addRangeFutures));
+		co_await waitForAll(addRangeFutures);
 	}
 
 	// Remove single range.
@@ -4170,10 +4160,10 @@ TEST_CASE("noSim/ShardedRocksDB/ShardOps") {
 	addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("l"_sr, "m"_sr), "shard-2"));
 	addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("u"_sr, "v"_sr), "shard-3"));
 
-	wait(waitForAll(addRangeFutures));
+	co_await waitForAll(addRangeFutures);
 
 	auto dataMap = rocksdbStore->getDataMapping();
-	state std::vector<std::pair<KeyRange, std::string>> mapping;
+	std::vector<std::pair<KeyRange, std::string>> mapping;
 	mapping.push_back(std::make_pair(KeyRange(KeyRangeRef("a"_sr, "b"_sr)), "shard-1"));
 	mapping.push_back(std::make_pair(KeyRange(KeyRangeRef("b"_sr, "g"_sr)), "shard-1"));
 	mapping.push_back(std::make_pair(KeyRange(KeyRangeRef("l"_sr, "m"_sr)), "shard-2"));
@@ -4189,16 +4179,16 @@ TEST_CASE("noSim/ShardedRocksDB/ShardOps") {
 	ASSERT(dataMap == mapping);
 
 	kvStore->persistRangeMapping(KeyRangeRef("a"_sr, "z"_sr), true);
-	wait(kvStore->commit(false));
+	co_await kvStore->commit(false);
 
 	// Restart.
 	Future<Void> closed = kvStore->onClosed();
 	kvStore->close();
-	wait(closed);
+	co_await closed;
 
 	rocksdbStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
 	kvStore = rocksdbStore;
-	wait(kvStore->init());
+	co_await kvStore->init();
 
 	{
 		auto dataMap = rocksdbStore->getDataMapping();
@@ -4211,11 +4201,11 @@ TEST_CASE("noSim/ShardedRocksDB/ShardOps") {
 
 	// Remove all the ranges.
 	{
-		state std::vector<std::string> shardsToCleanUp = kvStore->removeRange(KeyRangeRef("a"_sr, "z"_sr));
+		std::vector<std::string> shardsToCleanUp = kvStore->removeRange(KeyRangeRef("a"_sr, "z"_sr));
 		ASSERT_EQ(shardsToCleanUp.size(), 3);
 
 		// Add another range to shard-2.
-		wait(kvStore->addRange(KeyRangeRef("h"_sr, "i"_sr), "shard-2"));
+		co_await kvStore->addRange(KeyRangeRef("h"_sr, "i"_sr), "shard-2");
 	}
 	{
 		auto dataMap = rocksdbStore->getDataMapping();
@@ -4226,31 +4216,30 @@ TEST_CASE("noSim/ShardedRocksDB/ShardOps") {
 	{
 		Future<Void> closed = kvStore->onClosed();
 		kvStore->dispose();
-		wait(closed);
+		co_await closed;
 	}
 	ASSERT(!directoryExists(rocksDBTestDir));
-	return Void();
 }
 
 TEST_CASE("noSim/ShardedRocksDB/Metadata") {
-	state std::string rocksDBTestDir = "sharded-rocksdb-kvs-test-db";
-	state Key testSpecialKey = "\xff\xff/TestKey"_sr;
-	state Value testSpecialValue = "\xff\xff/TestValue"_sr;
+	std::string rocksDBTestDir = "sharded-rocksdb-kvs-test-db";
+	Key testSpecialKey = "\xff\xff/TestKey"_sr;
+	Value testSpecialValue = "\xff\xff/TestValue"_sr;
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
 
-	state ShardedRocksDBKeyValueStore* rocksdbStore =
+	ShardedRocksDBKeyValueStore* rocksdbStore =
 	    new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
-	state IKeyValueStore* kvStore = rocksdbStore;
-	wait(kvStore->init());
+	IKeyValueStore* kvStore = rocksdbStore;
+	co_await kvStore->init();
 
-	Optional<Value> val = wait(kvStore->readValue(testSpecialKey));
+	Optional<Value> val = co_await kvStore->readValue(testSpecialKey);
 	ASSERT(!val.present());
 
 	kvStore->set(KeyValueRef(testSpecialKey, testSpecialValue));
-	wait(kvStore->commit(false));
+	co_await kvStore->commit(false);
 
 	{
-		Optional<Value> val = wait(kvStore->readValue(testSpecialKey));
+		Optional<Value> val = co_await kvStore->readValue(testSpecialKey);
 		ASSERT(val.get() == testSpecialValue);
 	}
 
@@ -4260,42 +4249,42 @@ TEST_CASE("noSim/ShardedRocksDB/Metadata") {
 	addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("c"_sr, "f"_sr), "shard-2"));
 	kvStore->persistRangeMapping(KeyRangeRef("a"_sr, "f"_sr), true);
 
-	wait(waitForAll(addRangeFutures));
+	co_await waitForAll(addRangeFutures);
 	kvStore->set(KeyValueRef("a1"_sr, "foo"_sr));
 	kvStore->set(KeyValueRef("d1"_sr, "bar"_sr));
-	wait(kvStore->commit(false));
+	co_await kvStore->commit(false);
 
 	// Restart.
 	Future<Void> closed = kvStore->onClosed();
 	kvStore->close();
-	wait(closed);
+	co_await closed;
 	rocksdbStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
 	kvStore = rocksdbStore;
-	wait(kvStore->init());
+	co_await kvStore->init();
 
 	{
-		Optional<Value> val = wait(kvStore->readValue(testSpecialKey));
+		Optional<Value> val = co_await kvStore->readValue(testSpecialKey);
 		ASSERT(val.get() == testSpecialValue);
 	}
 
 	// Read value back.
 	{
-		Optional<Value> val = wait(kvStore->readValue("a1"_sr));
+		Optional<Value> val = co_await kvStore->readValue("a1"_sr);
 		ASSERT(val == Optional<Value>("foo"_sr));
 	}
 	{
-		Optional<Value> val = wait(kvStore->readValue("d1"_sr));
+		Optional<Value> val = co_await kvStore->readValue("d1"_sr);
 		ASSERT(val == Optional<Value>("bar"_sr));
 	}
 
 	// Remove range containing a1.
 	kvStore->persistRangeMapping(KeyRangeRef("a"_sr, "b"_sr), false);
 	auto shardIds = kvStore->removeRange(KeyRangeRef("a"_sr, "b"_sr));
-	wait(kvStore->commit(false));
+	co_await kvStore->commit(false);
 
 	// Read a1.
 	{
-		Optional<Value> val = wait(kvStore->readValue("a1"_sr));
+		Optional<Value> val = co_await kvStore->readValue("a1"_sr);
 		ASSERT(!val.present());
 	}
 
@@ -4303,19 +4292,19 @@ TEST_CASE("noSim/ShardedRocksDB/Metadata") {
 	{
 		Future<Void> closed = kvStore->onClosed();
 		kvStore->close();
-		wait(closed);
+		co_await closed;
 	}
 	rocksdbStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
 	kvStore = rocksdbStore;
-	wait(kvStore->init());
+	co_await kvStore->init();
 
 	// Read again.
 	{
-		Optional<Value> val = wait(kvStore->readValue("a1"_sr));
+		Optional<Value> val = co_await kvStore->readValue("a1"_sr);
 		ASSERT(!val.present());
 	}
 	{
-		Optional<Value> val = wait(kvStore->readValue("d1"_sr));
+		Optional<Value> val = co_await kvStore->readValue("d1"_sr);
 		ASSERT(val == Optional<Value>("bar"_sr));
 	}
 
@@ -4331,11 +4320,11 @@ TEST_CASE("noSim/ShardedRocksDB/Metadata") {
 	{
 		Future<Void> closed = kvStore->onClosed();
 		kvStore->close();
-		wait(closed);
+		co_await closed;
 	}
 	rocksdbStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
 	kvStore = rocksdbStore;
-	wait(kvStore->init());
+	co_await kvStore->init();
 
 	// Because range metadata was not committed, ranges should be restored.
 	{
@@ -4349,19 +4338,19 @@ TEST_CASE("noSim/ShardedRocksDB/Metadata") {
 		mapping = rocksdbStore->getDataMapping();
 		ASSERT(mapping.size() == 1);
 
-		wait(kvStore->commit(false));
+		co_await kvStore->commit(false);
 	}
 
 	// Restart.
 	{
 		Future<Void> closed = kvStore->onClosed();
 		kvStore->close();
-		wait(closed);
+		co_await closed;
 	}
 
 	rocksdbStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
 	kvStore = rocksdbStore;
-	wait(kvStore->init());
+	co_await kvStore->init();
 
 	// No range available.
 	{
@@ -4376,20 +4365,19 @@ TEST_CASE("noSim/ShardedRocksDB/Metadata") {
 	{
 		Future<Void> closed = kvStore->onClosed();
 		kvStore->dispose();
-		wait(closed);
+		co_await closed;
 	}
 	ASSERT(!directoryExists(rocksDBTestDir));
-	return Void();
 }
 
 TEST_CASE("noSim/ShardedRocksDBRangeOps/RemoveSplitRange") {
-	state std::string rocksDBTestDir = "sharded-rocksdb-kvs-test-db";
+	std::string rocksDBTestDir = "sharded-rocksdb-kvs-test-db";
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
 
-	state ShardedRocksDBKeyValueStore* rocksdbStore =
+	ShardedRocksDBKeyValueStore* rocksdbStore =
 	    new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
-	state IKeyValueStore* kvStore = rocksdbStore;
-	wait(kvStore->init());
+	IKeyValueStore* kvStore = rocksdbStore;
+	co_await kvStore->init();
 
 	// Add two ranges to the same shard.
 	{
@@ -4397,19 +4385,19 @@ TEST_CASE("noSim/ShardedRocksDBRangeOps/RemoveSplitRange") {
 		addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("a"_sr, "d"_sr), "shard-1"));
 		addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("g"_sr, "n"_sr), "shard-1"));
 
-		wait(waitForAll(addRangeFutures));
+		co_await waitForAll(addRangeFutures);
 	}
 
-	state std::set<std::string> originalKeys = { "a", "b", "c", "g", "h", "m" };
-	state std::set<std::string> currentKeys = originalKeys;
+	std::set<std::string> originalKeys = { "a", "b", "c", "g", "h", "m" };
+	std::set<std::string> currentKeys = originalKeys;
 	for (auto key : originalKeys) {
 		kvStore->set(KeyValueRef(key, key));
 	}
-	wait(kvStore->commit());
+	co_await kvStore->commit();
 
-	state std::string key;
+	std::string key;
 	for (auto key : currentKeys) {
-		Optional<Value> val = wait(kvStore->readValue(key));
+		Optional<Value> val = co_await kvStore->readValue(key);
 		ASSERT(val.present());
 		ASSERT(val.get().toString() == key);
 	}
@@ -4422,7 +4410,7 @@ TEST_CASE("noSim/ShardedRocksDBRangeOps/RemoveSplitRange") {
 
 		currentKeys.erase("b");
 		for (auto key : originalKeys) {
-			Optional<Value> val = wait(kvStore->readValue(key));
+			Optional<Value> val = co_await kvStore->readValue(key);
 			if (currentKeys.contains(key)) {
 				ASSERT(val.present());
 				ASSERT(val.get().toString() == key);
@@ -4441,7 +4429,7 @@ TEST_CASE("noSim/ShardedRocksDBRangeOps/RemoveSplitRange") {
 		currentKeys.erase("g");
 		currentKeys.erase("h");
 		for (auto key : originalKeys) {
-			Optional<Value> val = wait(kvStore->readValue(key));
+			Optional<Value> val = co_await kvStore->readValue(key);
 			if (currentKeys.contains(key)) {
 				ASSERT(val.present());
 				ASSERT(val.get().toString() == key);
@@ -4454,28 +4442,26 @@ TEST_CASE("noSim/ShardedRocksDBRangeOps/RemoveSplitRange") {
 	{
 		Future<Void> closed = kvStore->onClosed();
 		kvStore->dispose();
-		wait(closed);
+		co_await closed;
 	}
 	ASSERT(!directoryExists(rocksDBTestDir));
-	return Void();
 }
 
 TEST_CASE("noSim/ShardedRocksDBCheckpoint/CheckpointBasic") {
-	state std::string rocksDBTestDir = "sharded-rocks-checkpoint-restore";
-	state std::map<Key, Value> kvs({ { "a"_sr, "TestValueA"_sr },
-	                                 { "ab"_sr, "TestValueAB"_sr },
-	                                 { "ad"_sr, "TestValueAD"_sr },
-	                                 { "b"_sr, "TestValueB"_sr },
-	                                 { "ba"_sr, "TestValueBA"_sr },
-	                                 { "c"_sr, "TestValueC"_sr },
-	                                 { "d"_sr, "TestValueD"_sr },
-	                                 { "e"_sr, "TestValueE"_sr },
-	                                 { "h"_sr, "TestValueH"_sr },
-	                                 { "ha"_sr, "TestValueHA"_sr } });
+	std::string rocksDBTestDir = "sharded-rocks-checkpoint-restore";
+	std::map<Key, Value> kvs({ { "a"_sr, "TestValueA"_sr },
+	                           { "ab"_sr, "TestValueAB"_sr },
+	                           { "ad"_sr, "TestValueAD"_sr },
+	                           { "b"_sr, "TestValueB"_sr },
+	                           { "ba"_sr, "TestValueBA"_sr },
+	                           { "c"_sr, "TestValueC"_sr },
+	                           { "d"_sr, "TestValueD"_sr },
+	                           { "e"_sr, "TestValueE"_sr },
+	                           { "h"_sr, "TestValueH"_sr },
+	                           { "ha"_sr, "TestValueHA"_sr } });
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
-	state IKeyValueStore* kvStore =
-	    new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
-	wait(kvStore->init());
+	IKeyValueStore* kvStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	co_await kvStore->init();
 
 	// Add some ranges.
 	std::vector<Future<Void>> addRangeFutures;
@@ -4483,14 +4469,14 @@ TEST_CASE("noSim/ShardedRocksDBCheckpoint/CheckpointBasic") {
 	addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("c"_sr, "f"_sr), "shard-2"));
 	addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("h"_sr, "k"_sr), "shard-1"));
 	kvStore->persistRangeMapping(KeyRangeRef("a"_sr, "f"_sr), true);
-	wait(waitForAll(addRangeFutures) && kvStore->commit(false));
+	co_await (waitForAll(addRangeFutures) && kvStore->commit(false));
 
 	for (const auto& [k, v] : kvs) {
 		kvStore->set(KeyValueRef(k, v));
 	}
-	wait(kvStore->commit(false));
+	co_await kvStore->commit(false);
 
-	state std::string checkpointDir = "checkpoint";
+	std::string checkpointDir = "checkpoint";
 	platform::eraseDirectoryRecursive(checkpointDir);
 
 	// Checkpoint iterator returns only the desired keyrange, i.e., ["ab", "b"].
@@ -4499,19 +4485,19 @@ TEST_CASE("noSim/ShardedRocksDBCheckpoint/CheckpointBasic") {
 	                          DataMoveRocksCF,
 	                          deterministicRandom()->randomUniqueID(),
 	                          checkpointDir);
-	CheckpointMetaData metaData = wait(kvStore->checkpoint(request));
+	CheckpointMetaData metaData = co_await kvStore->checkpoint(request);
 
-	state Standalone<StringRef> token = BinaryWriter::toValue(KeyRangeRef("a"_sr, "k"_sr), IncludeVersion());
-	state ICheckpointReader* cpReader =
+	Standalone<StringRef> token = BinaryWriter::toValue(KeyRangeRef("a"_sr, "k"_sr), IncludeVersion());
+	ICheckpointReader* cpReader =
 	    newCheckpointReader(metaData, CheckpointAsKeyValues::True, deterministicRandom()->randomUniqueID());
 	ASSERT(cpReader != nullptr);
-	wait(cpReader->init(token));
-	state KeyRange testRange(KeyRangeRef("ab"_sr, "b"_sr));
-	state std::unique_ptr<ICheckpointIterator> iter0 = cpReader->getIterator(testRange);
-	state int numKeys = 0;
+	co_await cpReader->init(token);
+	KeyRange testRange(KeyRangeRef("ab"_sr, "b"_sr));
+	std::unique_ptr<ICheckpointIterator> iter0 = cpReader->getIterator(testRange);
+	int numKeys = 0;
 	try {
-		loop {
-			RangeResult res = wait(iter0->nextBatch(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
+		while (true) {
+			RangeResult res = co_await iter0->nextBatch(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT);
 			for (const auto& kv : res) {
 				ASSERT(testRange.contains(kv.key));
 				ASSERT(kvs[kv.key] == kv.value);
@@ -4524,11 +4510,11 @@ TEST_CASE("noSim/ShardedRocksDBCheckpoint/CheckpointBasic") {
 	}
 
 	testRange = KeyRangeRef("a"_sr, "k"_sr);
-	state std::unique_ptr<ICheckpointIterator> iter1 = cpReader->getIterator(testRange);
+	std::unique_ptr<ICheckpointIterator> iter1 = cpReader->getIterator(testRange);
 	try {
 		numKeys = 0;
-		loop {
-			RangeResult res = wait(iter1->nextBatch(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
+		while (true) {
+			RangeResult res = co_await iter1->nextBatch(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT);
 			for (const auto& kv : res) {
 				ASSERT(testRange.contains(kv.key));
 				ASSERT(kvs[kv.key] == kv.value);
@@ -4548,53 +4534,51 @@ TEST_CASE("noSim/ShardedRocksDBCheckpoint/CheckpointBasic") {
 	closes.push_back(cpReader->close());
 	closes.push_back(kvStore->onClosed());
 	kvStore->dispose();
-	wait(waitForAll(closes));
+	co_await waitForAll(closes);
 
 	ASSERT(!directoryExists(rocksDBTestDir));
 	platform::eraseDirectoryRecursive(checkpointDir);
-
-	return Void();
 }
 
 TEST_CASE("noSim/ShardedRocksDBCheckpoint/CheckpointRestore") {
-	state std::string rocksDBTestDir = "sharded-rocks-checkpoint" + deterministicRandom()->randomAlphaNumeric(5);
-	state std::map<Key, Value> kvs({ { "ab"_sr, "TestValueAB"_sr },
-	                                 { "ad"_sr, "TestValueAD"_sr },
-	                                 { "b"_sr, "TestValueB"_sr },
-	                                 { "ba"_sr, "TestValueBA"_sr },
-	                                 { "c"_sr, "TestValueC"_sr },
-	                                 { "d"_sr, "TestValueD"_sr },
-	                                 { "e"_sr, "TestValueE"_sr },
-	                                 { "h"_sr, "TestValueH"_sr },
-	                                 { "ha"_sr, "TestValueHA"_sr } });
+	std::string rocksDBTestDir = "sharded-rocks-checkpoint" + deterministicRandom()->randomAlphaNumeric(5);
+	std::map<Key, Value> kvs({ { "ab"_sr, "TestValueAB"_sr },
+	                           { "ad"_sr, "TestValueAD"_sr },
+	                           { "b"_sr, "TestValueB"_sr },
+	                           { "ba"_sr, "TestValueBA"_sr },
+	                           { "c"_sr, "TestValueC"_sr },
+	                           { "d"_sr, "TestValueD"_sr },
+	                           { "e"_sr, "TestValueE"_sr },
+	                           { "h"_sr, "TestValueH"_sr },
+	                           { "ha"_sr, "TestValueHA"_sr } });
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
-	state IKeyValueStore* kvStore =
-	    new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
-	wait(kvStore->init());
+	IKeyValueStore* kvStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	co_await kvStore->init();
 
-	state std::string shardId = "shard_1";
-	state std::string emptyShardId = "shard_2";
-	state KeyRangeRef rangeK(""_sr, "k"_sr);
-	state KeyRangeRef rangeKz("z1"_sr, "z3"_sr);
+	std::string shardId = "shard_1";
+	std::string emptyShardId = "shard_2";
+	KeyRangeRef rangeK(""_sr, "k"_sr);
+	KeyRangeRef rangeKz("z1"_sr, "z3"_sr);
 	// // Add some ranges.
 	std::vector<Future<Void>> addRangeFutures;
 	addRangeFutures.push_back(kvStore->addRange(rangeK, shardId));
 	addRangeFutures.push_back(kvStore->addRange(rangeKz, emptyShardId));
 	kvStore->persistRangeMapping(rangeK, true);
 	kvStore->persistRangeMapping(rangeKz, true);
-	wait(waitForAll(addRangeFutures));
-	wait(kvStore->commit(false));
+	co_await waitForAll(addRangeFutures);
+	co_await kvStore->commit(false);
 
 	for (const auto& [k, v] : kvs) {
 		kvStore->set(KeyValueRef(k, v));
 	}
-	wait(kvStore->commit(false));
+	co_await kvStore->commit(false);
 	kvStore->clear(KeyRangeRef(""_sr, "z"_sr));
-	wait(kvStore->commit(false));
+	co_await kvStore->commit(false);
 
-	state Error err;
+	Error err;
 	try {
-		wait(testCheckpointRestore(kvStore, { rangeK }));
+		std::vector<KeyRange> ranges{ rangeK };
+		co_await testCheckpointRestore(kvStore, ranges);
 	} catch (Error& e) {
 		TraceEvent(SevError, "TestCheckpointRestoreError").errorUnsuppressed(e);
 		err = e;
@@ -4603,7 +4587,8 @@ TEST_CASE("noSim/ShardedRocksDBCheckpoint/CheckpointRestore") {
 	// ASSERT(err.code() == error_code_failed_to_restore_checkpoint);
 
 	try {
-		wait(testCheckpointRestore(kvStore, { rangeKz }));
+		std::vector<KeyRange> ranges{ rangeKz };
+		co_await testCheckpointRestore(kvStore, ranges);
 	} catch (Error& e) {
 		TraceEvent("TestCheckpointRestoreError").errorUnsuppressed(e);
 		err = e;
@@ -4612,30 +4597,28 @@ TEST_CASE("noSim/ShardedRocksDBCheckpoint/CheckpointRestore") {
 	std::vector<Future<Void>> closes;
 	closes.push_back(kvStore->onClosed());
 	kvStore->dispose();
-	wait(waitForAll(closes));
+	co_await waitForAll(closes);
 	ASSERT(!directoryExists(rocksDBTestDir));
-
-	return Void();
 }
 
 TEST_CASE("noSim/ShardedRocksDBCheckpoint/RocksDBSstFileWriter") {
-	state std::string localFile = "rocksdb-sst-file-dump.sst";
-	state std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
+	std::string localFile = "rocksdb-sst-file-dump.sst";
+	std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
 	// Write nothing to sst file
 	sstWriter->open(localFile);
 	bool anyFileCreated = sstWriter->finish();
 	ASSERT(!anyFileCreated);
 	// Write kvs1 to sst file
-	state std::map<Key, Value> kvs1({ { "a"_sr, "1"_sr },
-	                                  { "ab"_sr, "12"_sr },
-	                                  { "ad"_sr, "14"_sr },
-	                                  { "b"_sr, "2"_sr },
-	                                  { "ba"_sr, "21"_sr },
-	                                  { "c"_sr, "3"_sr },
-	                                  { "d"_sr, "4"_sr },
-	                                  { "e"_sr, "5"_sr },
-	                                  { "h"_sr, "8"_sr },
-	                                  { "ha"_sr, "81"_sr } });
+	std::map<Key, Value> kvs1({ { "a"_sr, "1"_sr },
+	                            { "ab"_sr, "12"_sr },
+	                            { "ad"_sr, "14"_sr },
+	                            { "b"_sr, "2"_sr },
+	                            { "ba"_sr, "21"_sr },
+	                            { "c"_sr, "3"_sr },
+	                            { "d"_sr, "4"_sr },
+	                            { "e"_sr, "5"_sr },
+	                            { "h"_sr, "8"_sr },
+	                            { "ha"_sr, "81"_sr } });
 	sstWriter = newRocksDBSstFileWriter();
 	sstWriter->open(localFile);
 	for (const auto& [key, value] : kvs1) {
@@ -4644,16 +4627,16 @@ TEST_CASE("noSim/ShardedRocksDBCheckpoint/RocksDBSstFileWriter") {
 	anyFileCreated = sstWriter->finish();
 	ASSERT(anyFileCreated);
 	// Write kvs2 to the same sst file where kvs2 keys are different from kvs1
-	state std::map<Key, Value> kvs2({ { "fa"_sr, "61"_sr },
-	                                  { "fab"_sr, "612"_sr },
-	                                  { "fad"_sr, "614"_sr },
-	                                  { "fb"_sr, "62"_sr },
-	                                  { "fba"_sr, "621"_sr },
-	                                  { "fc"_sr, "63"_sr },
-	                                  { "fd"_sr, "64"_sr },
-	                                  { "fe"_sr, "65"_sr },
-	                                  { "fh"_sr, "68"_sr },
-	                                  { "fha"_sr, "681"_sr } });
+	std::map<Key, Value> kvs2({ { "fa"_sr, "61"_sr },
+	                            { "fab"_sr, "612"_sr },
+	                            { "fad"_sr, "614"_sr },
+	                            { "fb"_sr, "62"_sr },
+	                            { "fba"_sr, "621"_sr },
+	                            { "fc"_sr, "63"_sr },
+	                            { "fd"_sr, "64"_sr },
+	                            { "fe"_sr, "65"_sr },
+	                            { "fh"_sr, "68"_sr },
+	                            { "fha"_sr, "681"_sr } });
 	sstWriter->open(localFile);
 	for (const auto& [key, value] : kvs2) {
 		sstWriter->write(key, value);
@@ -4661,16 +4644,16 @@ TEST_CASE("noSim/ShardedRocksDBCheckpoint/RocksDBSstFileWriter") {
 	anyFileCreated = sstWriter->finish();
 	ASSERT(anyFileCreated);
 	// Write kvs3 to the same sst file where kvs3 modifies values of kvs2
-	state std::map<Key, Value> kvs3({ { "fa"_sr, "1"_sr },
-	                                  { "fab"_sr, "12"_sr },
-	                                  { "fad"_sr, "14"_sr },
-	                                  { "fb"_sr, "2"_sr },
-	                                  { "fba"_sr, "21"_sr },
-	                                  { "fc"_sr, "3"_sr },
-	                                  { "fd"_sr, "4"_sr },
-	                                  { "fe"_sr, "5"_sr },
-	                                  { "fh"_sr, "8"_sr },
-	                                  { "fha"_sr, "81"_sr } });
+	std::map<Key, Value> kvs3({ { "fa"_sr, "1"_sr },
+	                            { "fab"_sr, "12"_sr },
+	                            { "fad"_sr, "14"_sr },
+	                            { "fb"_sr, "2"_sr },
+	                            { "fba"_sr, "21"_sr },
+	                            { "fc"_sr, "3"_sr },
+	                            { "fd"_sr, "4"_sr },
+	                            { "fe"_sr, "5"_sr },
+	                            { "fh"_sr, "8"_sr },
+	                            { "fha"_sr, "81"_sr } });
 	sstWriter->open(localFile);
 	for (const auto& [key, value] : kvs3) {
 		sstWriter->write(key, value);
@@ -4708,29 +4691,28 @@ TEST_CASE("noSim/ShardedRocksDBCheckpoint/RocksDBSstFileWriter") {
 }
 
 TEST_CASE("perf/ShardedRocksDB/RangeClearSysKey") {
-	state int deleteCount = params.getInt("deleteCount").orDefault(20000);
+	int deleteCount = params.getInt("deleteCount").orDefault(20000);
 	std::cout << "delete count: " << deleteCount << "\n";
 
-	state std::string rocksDBTestDir = "sharded-rocksdb-perf-db";
+	std::string rocksDBTestDir = "sharded-rocksdb-perf-db";
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
 
-	state IKeyValueStore* kvStore =
-	    new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
-	wait(kvStore->init());
+	IKeyValueStore* kvStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	co_await kvStore->init();
 
-	state KeyRef shardPrefix = "\xffprefix/"_sr;
-	wait(kvStore->addRange(prefixRange(shardPrefix), "shard-1"));
+	KeyRef shardPrefix = "\xffprefix/"_sr;
+	co_await kvStore->addRange(prefixRange(shardPrefix), "shard-1");
 	kvStore->persistRangeMapping(prefixRange(shardPrefix), true);
-	state int i = 0;
-	state std::string key1;
-	state std::string key2;
+	int i = 0;
+	std::string key1;
+	std::string key2;
 	for (; i < deleteCount; ++i) {
 		key1 = format("\xffprefix/%d", i);
 		key2 = format("\xffprefix/%d", i + 1);
 
 		kvStore->set({ key2, std::to_string(i) });
 		kvStore->clear({ KeyRangeRef(shardPrefix, key1) });
-		wait(kvStore->commit(false));
+		co_await kvStore->commit(false);
 	}
 
 	std::cout << "start flush\n";
@@ -4741,11 +4723,11 @@ TEST_CASE("perf/ShardedRocksDB/RangeClearSysKey") {
 	{
 		Future<Void> closed = kvStore->onClosed();
 		kvStore->close();
-		wait(closed);
+		co_await closed;
 	}
 
 	kvStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
-	wait(kvStore->init());
+	co_await kvStore->init();
 
 	std::cout << "Restarted.\n";
 	i = 0;
@@ -4755,44 +4737,42 @@ TEST_CASE("perf/ShardedRocksDB/RangeClearSysKey") {
 		key2 = format("\xffprefix/%d", i + 1);
 
 		kvStore->set({ key2, std::to_string(i) });
-		RangeResult result = wait(kvStore->readRange(KeyRangeRef(shardPrefix, key1), 10000, 10000));
+		RangeResult result = co_await kvStore->readRange(KeyRangeRef(shardPrefix, key1), 10000, 10000);
 		kvStore->clear({ KeyRangeRef(shardPrefix, key1) });
-		wait(kvStore->commit(false));
+		co_await kvStore->commit(false);
 		if (i % 100 == 0) {
 			std::cout << "Commit: " << i << "\n";
 		}
 	}
 	Future<Void> closed = kvStore->onClosed();
 	kvStore->dispose();
-	wait(closed);
+	co_await closed;
 	ASSERT(!directoryExists(rocksDBTestDir));
-	return Void();
 }
 
 TEST_CASE("perf/ShardedRocksDB/RangeClearUserKey") {
-	state int deleteCount = params.getInt("deleteCount").orDefault(20000);
+	int deleteCount = params.getInt("deleteCount").orDefault(20000);
 	std::cout << "delete count: " << deleteCount << "\n";
 
-	state std::string rocksDBTestDir = "sharded-rocksdb-perf-db";
+	std::string rocksDBTestDir = "sharded-rocksdb-perf-db";
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
 
-	state IKeyValueStore* kvStore =
-	    new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
-	wait(kvStore->init());
+	IKeyValueStore* kvStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	co_await kvStore->init();
 
-	state KeyRef shardPrefix = "prefix/"_sr;
-	wait(kvStore->addRange(prefixRange(shardPrefix), "shard-1"));
+	KeyRef shardPrefix = "prefix/"_sr;
+	co_await kvStore->addRange(prefixRange(shardPrefix), "shard-1");
 	kvStore->persistRangeMapping(prefixRange(shardPrefix), true);
-	state int i = 0;
-	state std::string key1;
-	state std::string key2;
+	int i = 0;
+	std::string key1;
+	std::string key2;
 	for (; i < deleteCount; ++i) {
 		key1 = format("prefix/%d", i);
 		key2 = format("prefix/%d", i + 1);
 
 		kvStore->set({ key2, std::to_string(i) });
 		kvStore->clear({ KeyRangeRef(shardPrefix, key1) });
-		wait(kvStore->commit(false));
+		co_await kvStore->commit(false);
 	}
 
 	std::cout << "start flush\n";
@@ -4803,11 +4783,11 @@ TEST_CASE("perf/ShardedRocksDB/RangeClearUserKey") {
 	{
 		Future<Void> closed = kvStore->onClosed();
 		kvStore->close();
-		wait(closed);
+		co_await closed;
 	}
 
 	kvStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
-	wait(kvStore->init());
+	co_await kvStore->init();
 
 	std::cout << "Restarted.\n";
 	i = 0;
@@ -4816,30 +4796,29 @@ TEST_CASE("perf/ShardedRocksDB/RangeClearUserKey") {
 		key2 = format("prefix/%d", i + 1);
 
 		kvStore->set({ key2, std::to_string(i) });
-		RangeResult result = wait(kvStore->readRange(KeyRangeRef(shardPrefix, key1), 10000, 10000));
+		RangeResult result = co_await kvStore->readRange(KeyRangeRef(shardPrefix, key1), 10000, 10000);
 		kvStore->clear({ KeyRangeRef(shardPrefix, key1) });
-		wait(kvStore->commit(false));
+		co_await kvStore->commit(false);
 		if (i % 100 == 0) {
 			std::cout << "Commit: " << i << "\n";
 		}
 	}
 	Future<Void> closed = kvStore->onClosed();
 	kvStore->dispose();
-	wait(closed);
+	co_await closed;
 	ASSERT(!directoryExists(rocksDBTestDir));
-	return Void();
 }
 
-ACTOR Future<Void> testWrites(IKeyValueStore* kvStore, int writeCount) {
-	state int i = 0;
+Future<Void> testWrites(IKeyValueStore* kvStore, int writeCount) {
+	int i = 0;
 
 	while (i < writeCount) {
-		state int endCount = deterministicRandom()->randomInt(i + 1, i + 1000);
-		state std::string beginKey = format("key-%6d", i);
-		state std::string endKey = format("key-%6d", endCount);
-		wait(kvStore->addRange(KeyRangeRef(beginKey, endKey), deterministicRandom()->randomUniqueID().toString()));
+		int endCount = deterministicRandom()->randomInt(i + 1, i + 1000);
+		std::string beginKey = format("key-%6d", i);
+		std::string endKey = format("key-%6d", endCount);
+		co_await kvStore->addRange(KeyRangeRef(beginKey, endKey), deterministicRandom()->randomUniqueID().toString());
 		kvStore->persistRangeMapping(KeyRangeRef(beginKey, endKey), true);
-		wait(kvStore->commit(false));
+		co_await kvStore->commit(false);
 
 		for (; i < endCount; ++i) {
 			std::string key = format("key-%6d", i);
@@ -4853,46 +4832,39 @@ ACTOR Future<Void> testWrites(IKeyValueStore* kvStore, int writeCount) {
 			}
 
 			if (deterministicRandom()->random01() < 0.2) {
-				wait(kvStore->commit(false));
+				co_await kvStore->commit(false);
 			}
 		}
 	}
-	wait(kvStore->commit(false));
-	return Void();
+	co_await kvStore->commit(false);
 }
 
-ACTOR Future<Void> testReadValue(IKeyValueStore* kvStore, int readCount) {
-	state int i = 0;
-	state std::string key;
-	state std::string value;
-	for (; i < readCount; ++i) {
+Future<Void> testReadValue(IKeyValueStore* kvStore, int readCount) {
+	std::string key;
+	for (int i = 0; i < readCount; ++i) {
 		key = format("key-%6d", deterministicRandom()->randomInt(0, readCount));
-		Optional<Value> val = wait(kvStore->readValue(key));
+		Optional<Value> val = co_await kvStore->readValue(key);
 	}
-	return Void();
 }
 
-ACTOR Future<Void> testReadRange(IKeyValueStore* kvStore, int readCount) {
-	state int i = 0;
-	for (; i < readCount; ++i) {
+Future<Void> testReadRange(IKeyValueStore* kvStore, int readCount) {
+	for (int i = 0; i < readCount; ++i) {
 		std::string key = format("key-%6d", deterministicRandom()->randomInt(0, readCount));
 		// Enable forward read and backward read.
 		int recordCount = deterministicRandom()->randomInt(-500, 500);
-		RangeResult result = wait(kvStore->readRange(KeyRangeRef(key, "key0"_sr), recordCount, 10000));
+		RangeResult result = co_await kvStore->readRange(KeyRangeRef(key, "key0"_sr), recordCount, 10000);
 		ASSERT(result.size() >= 0);
 	}
-	return Void();
 }
 
 TEST_CASE("perf/ShardedRocksDB/ConcurrentReadWrite") {
-	state int readCount = params.getInt("readCount").orDefault(50000);
+	int readCount = params.getInt("readCount").orDefault(50000);
 	std::cout << "read count: " << readCount << "\n";
-	state std::string rocksDBTestDir = "sharded-rocksdb-concurrent-read-write";
+	std::string rocksDBTestDir = "sharded-rocksdb-concurrent-read-write";
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
-	state std::vector<Future<Void>> futures;
-	state IKeyValueStore* kvStore =
-	    new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
-	wait(kvStore->init());
+	std::vector<Future<Void>> futures;
+	IKeyValueStore* kvStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	co_await kvStore->init();
 
 	int writeCount = 50000;
 	futures.push_back(testWrites(kvStore, writeCount));
@@ -4901,13 +4873,12 @@ TEST_CASE("perf/ShardedRocksDB/ConcurrentReadWrite") {
 	futures.push_back(testReadRange(kvStore, readCount));
 	futures.push_back(testReadRange(kvStore, readCount));
 	futures.push_back(testReadRange(kvStore, readCount));
-	wait(waitForAll(futures));
+	co_await waitForAll(futures);
 
 	Future<Void> closed = kvStore->onClosed();
 	kvStore->dispose();
-	wait(closed);
+	co_await closed;
 	ASSERT(!directoryExists(rocksDBTestDir));
-	return Void();
 }
 
 // The "noSim/determinism/checkpoint_metadata/*" unit tests below
