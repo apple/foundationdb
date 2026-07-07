@@ -566,7 +566,7 @@ class ExecuteOnLeave {
 
 public:
 	explicit ExecuteOnLeave(std::function<void()> func) : func(func) {}
-	~ExecuteOnLeave() { func(); } // NOLINT(modernize-use-equals-default): this is a scope-exit callback.
+	~ExecuteOnLeave() { func(); }
 };
 
 void cpBytesAndLengthInner(uint8_t*& pByte, jint*& pLength, const uint8_t* data, const int& length) {
