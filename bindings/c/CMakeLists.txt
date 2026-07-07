@@ -385,7 +385,10 @@ if(NOT WIN32)
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
         --upgrade-path "${FDB_CURRENT_VERSION}" "wiggle"
         --disable-log-dump
-        --process-number 3
+        # A wiggle replaces every storage server; with only 3 processes the cluster
+        # has no spare capacity to recruit the replacements, so recovery can stall
+        # past the progress-check window. 5 processes gives the wiggle headroom.
+        --process-number 5
         --redundancy double
         )
 
@@ -395,7 +398,9 @@ if(NOT WIN32)
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
         --upgrade-path "${FDB_PREV_RELEASE_VERSION}" "wiggle" "${FDB_CURRENT_VERSION}"
         --disable-log-dump
-        --process-number 3
+        # See fdb_c_wiggle_only: a wiggle needs spare process capacity to recruit
+        # replacement storage servers.
+        --process-number 5
         --redundancy double
         )
 

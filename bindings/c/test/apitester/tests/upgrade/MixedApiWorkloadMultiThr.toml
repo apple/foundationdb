@@ -1,3 +1,18 @@
+# Mixed workload for the C API upgrade/wiggle tests (fdb_c_wiggle_only,
+# fdb_c_upgrade_from_prev*, fdb_c_wiggle_and_upgrade, fdb_c_upgrade_to_future_version).
+#
+# minTxTimeoutMs/maxTxTimeoutMs give every transactional workload a timeout
+# backstop (which also enables restartOnTimeout in the executor). Without it, a
+# request whose reply never arrives across a wiggle/upgrade (coordinator change +
+# storage re-recruitment can leave an in-flight request targeting a stale endpoint
+# token, which FlowTransport drops silently and never errors) leaves the
+# transaction's future pending forever; the workload stops making progress and the
+# 30s post-step progress check fails (SIGKILL). With a timeout the stuck op fails
+# with timed_out, the executor restarts it (re-resolving locations), and the
+# workload recovers. The range is kept well under the 30s progress-check window so
+# the retry completes in time, and above normal op latency so healthy ops are
+# unaffected.
+
 [[test]]
 title = 'Mixed Workload for Upgrade Tests with a Multi-Threaded Client'
 multiThreaded = true
@@ -22,6 +37,8 @@ maxClients = 8
     initialSize = 100
     runUntilStop = true
     readExistingKeysRatio = 0.9
+    minTxTimeoutMs = 2000
+    maxTxTimeoutMs = 10000
 
     [[test.workload]]
     name = 'CancelTransaction'
@@ -33,13 +50,19 @@ maxClients = 8
     initialSize = 100
     runUntilStop = true
     readExistingKeysRatio = 0.9
+    minTxTimeoutMs = 2000
+    maxTxTimeoutMs = 10000
 
     [[test.workload]]
     name = 'AtomicOpsCorrectness'
     initialSize = 0
     runUntilStop = true
+    minTxTimeoutMs = 2000
+    maxTxTimeoutMs = 10000
 
     [[test.workload]]
     name = 'WatchAndWait'
     initialSize = 0
     runUntilStop = true
+    minTxTimeoutMs = 2000
+    maxTxTimeoutMs = 10000
