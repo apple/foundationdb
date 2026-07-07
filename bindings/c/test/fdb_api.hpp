@@ -99,12 +99,6 @@ using KeyRef = BytesRef;
 using Value = ByteString;
 using ValueRef = BytesRef;
 
-// FoundationDB's C API takes byte pointers together with explicit lengths. Keep
-// that pairing visible to clang-tidy instead of treating these views as C strings.
-inline const uint8_t* dataWithLength(BytesRef bytes) noexcept {
-	return bytes.data();
-}
-
 struct KeyValue {
 	Key key;
 	Value value;
@@ -145,12 +139,12 @@ CharsRef toCharsRef(const std::optional<StringLike<Char>>& s) noexcept {
 
 [[maybe_unused]] constexpr const bool OverflowCheck = false;
 
-inline int intSize(BytesRef b) {
+inline int intSize(size_t size) {
 	if constexpr (OverflowCheck) {
-		if (b.size() > static_cast<size_t>(std::numeric_limits<int>::max()))
+		if (size > static_cast<size_t>(std::numeric_limits<int>::max()))
 			throw std::overflow_error("byte strlen goes beyond int bounds");
 	}
-	return static_cast<int>(b.size());
+	return static_cast<int>(size);
 }
 
 template <template <class...> class StringLike, class Char>
@@ -284,7 +278,7 @@ inline int maxApiVersion() {
 namespace network {
 
 inline Error setOptionNothrow(FDBNetworkOption option, BytesRef str) noexcept {
-	return Error(native::fdb_network_set_option(option, dataWithLength(str), intSize(str)));
+	return Error(native::fdb_network_set_option(option, str.data(), intSize(str.size())));
 }
 
 inline Error setOptionNothrow(FDBNetworkOption option, CharsRef str) noexcept {
@@ -506,19 +500,19 @@ struct KeySelector {
 namespace key_select {
 
 inline KeySelector firstGreaterThan(KeyRef key, int offset = 0) {
-	return KeySelector{ FDB_KEYSEL_FIRST_GREATER_THAN(dataWithLength(key), intSize(key)) + offset };
+	return KeySelector{ FDB_KEYSEL_FIRST_GREATER_THAN(key.data(), intSize(key.size())) + offset };
 }
 
 inline KeySelector firstGreaterOrEqual(KeyRef key, int offset = 0) {
-	return KeySelector{ FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(dataWithLength(key), intSize(key)) + offset };
+	return KeySelector{ FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(key.data(), intSize(key.size())) + offset };
 }
 
 inline KeySelector lastLessThan(KeyRef key, int offset = 0) {
-	return KeySelector{ FDB_KEYSEL_LAST_LESS_THAN(dataWithLength(key), intSize(key)) + offset };
+	return KeySelector{ FDB_KEYSEL_LAST_LESS_THAN(key.data(), intSize(key.size())) + offset };
 }
 
 inline KeySelector lastLessOrEqual(KeyRef key, int offset = 0) {
-	return KeySelector{ FDB_KEYSEL_LAST_LESS_OR_EQUAL(dataWithLength(key), intSize(key)) + offset };
+	return KeySelector{ FDB_KEYSEL_LAST_LESS_OR_EQUAL(key.data(), intSize(key.size())) + offset };
 }
 
 } // namespace key_select
@@ -555,7 +549,7 @@ public:
 	}
 
 	Error setOptionNothrow(FDBTransactionOption option, BytesRef str) noexcept {
-		return Error(native::fdb_transaction_set_option(tr.get(), option, dataWithLength(str), intSize(str)));
+		return Error(native::fdb_transaction_set_option(tr.get(), option, str.data(), intSize(str.size())));
 	}
 
 	Error setOptionNothrow(FDBTransactionOption option, CharsRef str) noexcept {
@@ -606,7 +600,7 @@ public:
 	}
 
 	TypedFuture<future_var::ValueRef> get(KeyRef key, bool snapshot) {
-		return native::fdb_transaction_get(tr.get(), dataWithLength(key), intSize(key), snapshot);
+		return native::fdb_transaction_get(tr.get(), key.data(), intSize(key.size()), snapshot);
 	}
 
 	// Usage: tx.getRange(key_select::firstGreaterOrEqual(firstKey), key_select::lastLessThan(lastKey), ...)
@@ -637,7 +631,7 @@ public:
 	}
 
 	TypedFuture<future_var::None> watch(KeyRef key) {
-		return native::fdb_transaction_watch(tr.get(), dataWithLength(key), intSize(key));
+		return native::fdb_transaction_watch(tr.get(), key.data(), intSize(key.size()));
 	}
 
 	TypedFuture<future_var::None> commit() { return native::fdb_transaction_commit(tr.get()); }
@@ -649,24 +643,24 @@ public:
 	void cancel() { return native::fdb_transaction_cancel(tr.get()); }
 
 	void set(KeyRef key, ValueRef value) {
-		native::fdb_transaction_set(tr.get(), dataWithLength(key), intSize(key), dataWithLength(value), intSize(value));
+		native::fdb_transaction_set(tr.get(), key.data(), intSize(key.size()), value.data(), intSize(value.size()));
 	}
 
 	void atomicOp(KeyRef key, ValueRef param, FDBMutationType operationType) {
 		native::fdb_transaction_atomic_op(
-		    tr.get(), dataWithLength(key), intSize(key), dataWithLength(param), intSize(param), operationType);
+		    tr.get(), key.data(), intSize(key.size()), param.data(), intSize(param.size()), operationType);
 	}
 
-	void clear(KeyRef key) { native::fdb_transaction_clear(tr.get(), dataWithLength(key), intSize(key)); }
+	void clear(KeyRef key) { native::fdb_transaction_clear(tr.get(), key.data(), intSize(key.size())); }
 
 	void clearRange(KeyRef begin, KeyRef end) {
 		native::fdb_transaction_clear_range(
-		    tr.get(), dataWithLength(begin), intSize(begin), dataWithLength(end), intSize(end));
+		    tr.get(), begin.data(), intSize(begin.size()), end.data(), intSize(end.size()));
 	}
 
 	void addConflictRange(KeyRef begin, KeyRef end, FDBConflictRangeType rangeType) {
 		if (auto err = Error(native::fdb_transaction_add_conflict_range(
-		        tr.get(), dataWithLength(begin), intSize(begin), dataWithLength(end), intSize(end), rangeType))) {
+		        tr.get(), begin.data(), intSize(begin.size()), end.data(), intSize(end.size()), rangeType))) {
 			throwError("fdb_transaction_add_conflict_range returned error: ", err);
 		}
 	}
@@ -714,7 +708,7 @@ public:
 	}
 
 	Error setOptionNothrow(FDBDatabaseOption option, BytesRef str) noexcept {
-		return Error(native::fdb_database_set_option(db.get(), option, dataWithLength(str), intSize(str)));
+		return Error(native::fdb_database_set_option(db.get(), option, str.data(), intSize(str.size())));
 	}
 
 	void setOption(FDBDatabaseOption option, int64_t value) {
