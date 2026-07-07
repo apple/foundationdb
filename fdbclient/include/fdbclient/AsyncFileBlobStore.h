@@ -258,13 +258,14 @@ private:
 		// m_error Also, hold a releaser for the concurrent upload slot while all that is going on.
 		auto releaser = std::make_shared<FlowLock::Releaser>(f->m_concurrentUploads, 1);
 		f->m_parts.back()->etag =
-		    holdWhile(std::move(releaser), joinErrorGroup(doPartUpload(f, f->m_parts.back().getPtr()), f->m_error));
+		    holdWhile(releaser, joinErrorGroup(doPartUpload(f, f->m_parts.back().getPtr()), f->m_error));
 
 		// Make a new part to write to
-		if (startNew)
+		if (startNew) {
 			f->m_parts.push_back(makeReference<Part>(f->m_parts.size() + 1,
 			                                         f->m_bstore->knobs.multipart_min_part_size,
 			                                         f->m_bstore->knobs.enable_object_integrity_check));
+		}
 	}
 
 	Future<std::string> getUploadID() {

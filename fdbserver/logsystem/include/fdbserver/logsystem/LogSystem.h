@@ -619,7 +619,7 @@ void LogPushData::writeTypedMessage(T const& item, bool metadataMessage, bool al
 			ASSERT(this->subsequence > 0);
 		}
 	} else {
-		ASSERT(writtenLocations.size() == 0);
+		ASSERT(writtenLocations.empty());
 	}
 
 	uint32_t subseq = this->subsequence++;

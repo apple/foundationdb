@@ -168,7 +168,7 @@ public:
 	// be removed)
 	bool excludeOnRecruit() const { return !isFailed && !isWrongConfiguration; }
 };
-typedef AsyncMap<UID, ServerStatus> ServerStatusMap;
+using ServerStatusMap = AsyncMap<UID, ServerStatus>;
 
 FDB_BOOLEAN_PARAM(IsPrimary);
 FDB_BOOLEAN_PARAM(IsInitialTeam);
@@ -180,7 +180,7 @@ FDB_BOOLEAN_PARAM(WaitWiggle);
 // call synchronous method from components outside DDTeamCollection
 struct IDDTeamCollection {
 	PromiseStream<GetTeamRequest> getTeam;
-	virtual ~IDDTeamCollection() {}
+	virtual ~IDDTeamCollection() = default;
 };
 
 struct DDTeamCollectionInitParams {

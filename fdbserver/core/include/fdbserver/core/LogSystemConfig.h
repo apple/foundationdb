@@ -40,7 +40,7 @@ struct OptionalInterface {
 
 	explicit OptionalInterface(UID id) : ident(id) {}
 	explicit OptionalInterface(Interface const& i) : ident(i.id()), iface(i) {}
-	OptionalInterface() {}
+	OptionalInterface() = default;
 
 	std::string toString() const { return ident.toString(); }
 

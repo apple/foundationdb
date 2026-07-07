@@ -145,13 +145,13 @@ public:
 	FileBackupAgent();
 
 	explicit(false) FileBackupAgent(FileBackupAgent&& r) noexcept
-	  : subspace(std::move(r.subspace)), config(std::move(r.config)), lastRestorable(std::move(r.lastRestorable)),
-	    taskBucket(std::move(r.taskBucket)), futureBucket(std::move(r.futureBucket)) {}
+	  : subspace(r.subspace), config(r.config), lastRestorable(r.lastRestorable), taskBucket(std::move(r.taskBucket)),
+	    futureBucket(std::move(r.futureBucket)) {}
 
 	void operator=(FileBackupAgent&& r) noexcept {
-		subspace = std::move(r.subspace);
-		config = std::move(r.config);
-		lastRestorable = std::move(r.lastRestorable), taskBucket = std::move(r.taskBucket);
+		subspace = r.subspace;
+		config = r.config;
+		lastRestorable = r.lastRestorable, taskBucket = std::move(r.taskBucket);
 		futureBucket = std::move(r.futureBucket);
 	}
 
@@ -395,22 +395,21 @@ public:
 	explicit DatabaseBackupAgent(Database src);
 
 	explicit(false) DatabaseBackupAgent(DatabaseBackupAgent&& r) noexcept
-	  : subspace(std::move(r.subspace)), states(std::move(r.states)), config(std::move(r.config)),
-	    errors(std::move(r.errors)), ranges(std::move(r.ranges)), tagNames(std::move(r.tagNames)),
-	    sourceStates(std::move(r.sourceStates)), sourceTagNames(std::move(r.sourceTagNames)),
+	  : subspace(r.subspace), states(r.states), config(r.config), errors(r.errors), ranges(r.ranges),
+	    tagNames(r.tagNames), sourceStates(r.sourceStates), sourceTagNames(r.sourceTagNames),
 	    taskBucket(std::move(r.taskBucket)), futureBucket(std::move(r.futureBucket)) {}
 
 	void operator=(DatabaseBackupAgent&& r) noexcept {
-		subspace = std::move(r.subspace);
-		states = std::move(r.states);
-		config = std::move(r.config);
-		errors = std::move(r.errors);
-		ranges = std::move(r.ranges);
-		tagNames = std::move(r.tagNames);
+		subspace = r.subspace;
+		states = r.states;
+		config = r.config;
+		errors = r.errors;
+		ranges = r.ranges;
+		tagNames = r.tagNames;
 		taskBucket = std::move(r.taskBucket);
 		futureBucket = std::move(r.futureBucket);
-		sourceStates = std::move(r.sourceStates);
-		sourceTagNames = std::move(r.sourceTagNames);
+		sourceStates = r.sourceStates;
+		sourceTagNames = r.sourceTagNames;
 	}
 
 	Future<Void> run(Database cx, double pollDelay, int maxConcurrentTasks) {
@@ -616,7 +615,7 @@ inline EBackupState TupleCodec<EBackupState>::unpack(Standalone<StringRef> const
 // All tasks on the UID will have a validation key/value that requires aborted_flag to be
 // false, so changing that value, such as changing the UID or setting aborted_flag to true,
 // will kill all of the active tasks on that backup/restore UID.
-typedef std::pair<UID, bool> UidAndAbortedFlagT;
+using UidAndAbortedFlagT = std::pair<UID, bool>;
 class KeyBackedTag : public KeyBackedProperty<UidAndAbortedFlagT> {
 public:
 	KeyBackedTag() : KeyBackedProperty(StringRef()) {}
@@ -639,7 +638,7 @@ public:
 	Key tagMapPrefix;
 };
 
-typedef KeyBackedMap<std::string, UidAndAbortedFlagT> TagMap;
+using TagMap = KeyBackedMap<std::string, UidAndAbortedFlagT>;
 // Map of tagName to {UID, aborted_flag} located in the fileRestorePrefixRange keyspace.
 class TagUidMap : public KeyBackedMap<std::string, UidAndAbortedFlagT> {
 	static Future<std::vector<KeyBackedTag>> getAll_impl(TagUidMap* tagsMap,
@@ -820,7 +819,7 @@ public:
 	};
 
 	// Map of range end boundaries to info about the backup file written for that range.
-	typedef KeyBackedMap<Key, RangeSlice> RangeFileMapT;
+	using RangeFileMapT = KeyBackedMap<Key, RangeSlice>;
 	RangeFileMapT snapshotRangeFileMap() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Number of kv range files that were both committed to persistent storage AND inserted into
@@ -831,7 +830,7 @@ public:
 	KeyBackedBinaryValue<int64_t> snapshotRangeFileCount() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Coalesced set of ranges already dispatched for writing.
-	typedef KeyBackedMap<Key, bool> RangeDispatchMapT;
+	using RangeDispatchMapT = KeyBackedMap<Key, bool>;
 	RangeDispatchMapT snapshotRangeDispatchMap() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Interval to use for the first (initial) snapshot.
@@ -1062,7 +1061,7 @@ struct StringRefReader {
 
 	// Return a T from the current read position and advance read pos
 	template <typename T>
-	const T consume() {
+	T consume() {
 		return *(const T*)consume(sizeof(T));
 	}
 
@@ -1123,11 +1122,11 @@ bool isDefaultBackup(Container ranges) {
 		return false;
 	}
 
-	if (!uniqueRanges.count(normalKeys)) {
+	if (!uniqueRanges.contains(normalKeys)) {
 		return false;
 	}
 	for (auto range : getSystemBackupRanges()) {
-		if (!uniqueRanges.count(range)) {
+		if (!uniqueRanges.contains(range)) {
 			return false;
 		}
 	}

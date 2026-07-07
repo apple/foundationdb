@@ -1382,7 +1382,7 @@ Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange range, UID
 		    completeAck.getFuture(), abandoned, delay(SERVER_KNOBS->DD_BULKLOAD_JOB_MONITOR_PERIOD_SEC * 240));
 		BulkLoadAck ack;
 		if (raceResult.index() == 0) {
-			ack = std::get<0>(std::move(raceResult));
+			ack = std::get<0>(raceResult);
 		} else {
 			// Task was abandoned/supplanted, or backstop timeout fired. Throw
 			// timed_out so the existing catch block traces a SevWarn,

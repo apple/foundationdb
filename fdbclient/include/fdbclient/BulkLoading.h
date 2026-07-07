@@ -104,7 +104,7 @@ struct BulkLoadByteSampleSetting {
 	}
 
 	bool isValid() const {
-		if (method.size() == 0) {
+		if (method.empty()) {
 			return false;
 		}
 		return true;
