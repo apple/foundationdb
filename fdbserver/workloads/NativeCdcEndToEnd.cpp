@@ -533,7 +533,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 					const ClientDBInfo& clientInfo = cx->clientInfo->get();
 					auto assignment = clientInfo.streamToCDCProxyId.find(streamId);
 					if (assignment != clientInfo.streamToCDCProxyId.end() && assignment->second == proxy.get().id()) {
-						co_return std::make_pair(proxy.get(), std::get<0>(std::move(result)));
+						co_return std::make_pair(proxy.get(), std::get<0>(result));
 					}
 				}
 			} catch (Error& e) {

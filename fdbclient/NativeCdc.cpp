@@ -699,7 +699,7 @@ Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, KeyRang
 			while (true) {
 				auto result = co_await race(throwErrorOr(request), proxyChanged);
 				if (result.index() == 0) {
-					co_return std::get<0>(std::move(result)).streamId;
+					co_return std::get<0>(result).streamId;
 				}
 
 				proxyChanged = cx->clientInfo->onChange();
