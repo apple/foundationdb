@@ -774,6 +774,12 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		while (stream.consumer->position().lastConsumedVersion < lastVersion) {
 			const Version previous = stream.consumer->position().lastConsumedVersion;
 			CDCConsumeReply reply = co_await timeoutError(stream.consumer->consume(), operationTimeout);
+			// The priming consumer intentionally does not acknowledge. If its delivery proxy is replaced, the
+			// consumer rewinds to its durable cursor and replays retained versions through the replacement proxy.
+			if (reply.lastConsumedVersion < previous) {
+				ASSERT_LT(now(), primeDeadline);
+				continue;
+			}
 			if (reply.lastConsumedVersion == previous) {
 				ASSERT_LT(now(), primeDeadline);
 				co_await delay(0.1);
