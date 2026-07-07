@@ -33,7 +33,7 @@
 #include "fdbclient/RunRYWTransaction.h"
 #include "fdbserver/datadistributor/DDTxnProcessor.h"
 #include "fdbserver/datadistributor/ShardsAffectedByTeamFailure.h"
-#include "fdbserver/datadistributor/TCInfo.h"
+#include "fdbserver/datadistributor/DataDistributionTeam.h"
 #include "fdbclient/StorageWiggleMetrics.h"
 #include "fdbclient/DataDistributionConfig.h"
 #include <boost/heap/policies.hpp>
