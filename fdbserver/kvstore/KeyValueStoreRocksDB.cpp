@@ -83,7 +83,10 @@ static_assert(ROCKSDB_PATCH == FDB_ROCKSDB_PATCH, "Unsupported RocksDB patch ver
 namespace {
 using rocksdb::BackgroundErrorReason;
 
+using RocksDBCommon::getBackgroundError;
+using RocksDBCommon::getErrorReason;
 using RocksDBCommon::getWalRecoveryMode;
+using RocksDBCommon::RocksDBBackgroundError;
 
 rocksdb::CompactionPri getCompactionPriority() {
 	return RocksDBCommon::getCompactionPriorityFromKnob(SERVER_KNOBS->ROCKSDB_COMPACTION_PRI);
@@ -343,41 +346,30 @@ rocksdb::ReadOptions SharedRocksDBState::initialReadOptions() {
 	return options;
 }
 
-// Returns string representation of RocksDB background error reason.
-// Error reason code:
-// https://github.com/facebook/rocksdb/blob/12d798ac06bcce36be703b057d5f5f4dab3b270c/include/rocksdb/listener.h#L125
-// This function needs to be updated when error code changes.
-using RocksDBCommon::getErrorReason;
-
 // Background error handling is tested with Chaos test.
 // TODO: Test background error in simulation. RocksDB doesn't use flow IO in simulation, which limits our ability to
-// inject IO errors. We could implement rocksdb::FileSystem using flow IO to unblock simulation. Also, trace event is
-// not available on background threads because trace event requires setting up special thread locals. Using trace event
-// could potentially cause segmentation fault.
+// inject IO errors. We could implement rocksdb::FileSystem using flow IO to unblock simulation.
+// OnBackgroundError can run on RocksDB background threads, so report errors through the thread-safe promise instead of
+// emitting TraceEvents from the callback.
+Future<Void> forwardError(Future<RocksDBBackgroundError> input, UID id) {
+	RocksDBBackgroundError error = co_await input;
+	TraceEvent(SevError, "RocksDBBGError", id)
+	    .detail("Reason", getErrorReason(error.reason))
+	    .detail("RocksDBSeverity", error.severity)
+	    .detail("Status", error.status);
+	throw Error::fromCode(error.errorCode);
+}
+
 class RocksDBErrorListener : public rocksdb::EventListener {
 public:
-	explicit RocksDBErrorListener(UID id) : id(id) {};
+	RocksDBErrorListener() = default;
 	void OnBackgroundError(rocksdb::BackgroundErrorReason reason, rocksdb::Status* bg_error) override {
-		TraceEvent(SevError, "RocksDBBGError", id)
-		    .detail("Reason", getErrorReason(reason))
-		    .detail("RocksDBSeverity", bg_error->severity())
-		    .detail("Status", bg_error->ToString());
 		std::unique_lock<std::mutex> lock(mutex);
 		if (!errorPromise.isValid())
 			return;
-		// RocksDB generates two types of background errors, IO Error and Corruption
-		// Error type and severity map could be found at
-		// https://github.com/facebook/rocksdb/blob/2e09a54c4fb82e88bcaa3e7cfa8ccbbbbf3635d5/db/error_handler.cc#L138.
-		// All background errors will be treated as storage engine failure. Send the error to storage server.
-		if (bg_error->IsIOError()) {
-			errorPromise.sendError(io_error());
-		} else if (bg_error->IsCorruption()) {
-			errorPromise.sendError(file_corrupt());
-		} else {
-			errorPromise.sendError(unknown_error());
-		}
+		errorPromise.send(getBackgroundError(reason, *bg_error));
 	}
-	Future<Void> getFuture() {
+	Future<RocksDBBackgroundError> getFuture() {
 		std::unique_lock<std::mutex> lock(mutex);
 		return errorPromise.getFuture();
 	}
@@ -389,9 +381,8 @@ public:
 	}
 
 private:
-	ThreadReturnPromise<Void> errorPromise;
+	ThreadReturnPromise<RocksDBBackgroundError> errorPromise;
 	std::mutex mutex;
-	UID id;
 };
 
 class RocksDBEventListener : public rocksdb::EventListener {
@@ -2042,7 +2033,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	    fetchSemaphore(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
 	    numReadWaiters(SERVER_KNOBS->ROCKSDB_READ_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
 	    numFetchWaiters(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
-	    errorListener(std::make_shared<RocksDBErrorListener>(id)), errorFuture(errorListener->getFuture()),
+	    errorListener(std::make_shared<RocksDBErrorListener>()),
+	    errorFuture(forwardError(errorListener->getFuture(), id)),
 	    deletesPerCommitHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
 	                                                      ROCKSDB_DELETES_PER_COMMIT_HISTOGRAM,
 	                                                      Histogram::Unit::countLinear,
