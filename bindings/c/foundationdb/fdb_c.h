@@ -71,7 +71,6 @@ extern "C" {
 #endif
 
 /* Keep typedef syntax in this public C header. */
-/* NOLINTBEGIN(modernize-use-using) */
 
 DLLEXPORT const char* fdb_get_error(fdb_error_t code);
 
@@ -669,5 +668,4 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_range_selector(FDBTr
 #ifdef __cplusplus
 }
 #endif
-/* NOLINTEND(modernize-use-using) */
 #endif
