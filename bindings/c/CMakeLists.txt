@@ -406,8 +406,11 @@ if(NOT WIN32)
 
       # These tests replace every process in a local cluster. Running them with
       # other CTests can starve recovery long enough to trip the progress check.
+      # Worst-case budget: cluster startup + exclude/remove (120s) +
+      # wait_for_cluster_healthy (180s) + progress checks 3x30s (90s) = ~450s.
+      # Use 900s to leave margin for slow machines.
       set_tests_properties(fdb_c_wiggle_only fdb_c_wiggle_and_upgrade
-        PROPERTIES RUN_SERIAL TRUE)
+        PROPERTIES RUN_SERIAL TRUE TIMEOUT 900)
 
     endif()
   endif()
