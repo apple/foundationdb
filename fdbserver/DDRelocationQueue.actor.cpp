@@ -646,6 +646,7 @@ void DDQueue::updatePipelineFull() {
 		    .detail("PipelineSize", pipelineSize())
 		    .detail("PendingGateRelocations", pendingGateRelocations)
 		    .detail("PipelineLimit", SERVER_KNOBS->DD_MAX_PIPELINE_MOVES);
+		CODE_PROBE(true, "DD Pipeline Full");
 	} else if (pipelineSize() < SERVER_KNOBS->DD_MAX_PIPELINE_MOVES && pipelineFull->get()) {
 		pipelineFull->set(false);
 		TraceEvent("DDPipelineFullCleared", distributorId)
@@ -2834,10 +2835,10 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 	}
 }
 
-// Gates the relocation input stream by the pipeline limit. Cancellations and high-priority
-// moves (>= PRIORITY_TEAM_UNHEALTHY) always pass through immediately so that failure recovery
-// is never blocked by stuck or zombie moves holding pipeline slots. All other relocations are
-// held when the pipeline is full, waiting for pipelineFull to become false before forwarding.
+// Gates the relocation input stream by the pipeline limit. Cancellations always pass through
+// immediately because they reduce tracked metadata rather than adding to it. All other
+// relocations, regardless of priority, are held when the pipeline is full, waiting for
+// pipelineFull to become false before forwarding.
 // The global isDDPipelineControlEnabled() flag (cleared by disableDDPipelineControl()) also
 // bypasses the gate, allowing the test harness to open up the pipeline so DD can quiesce.
 // We poll it via delay() rather than AsyncVar to avoid cross-process callbacks in simulation.
@@ -2846,7 +2847,7 @@ ACTOR Future<Void> pipelineGateActor(Reference<DDQueue> self,
                                      PromiseStream<RelocateShard> output) {
 	loop {
 		state RelocateShard rs = waitNext(input);
-		if (!rs.cancelled && rs.priority < SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY) {
+		if (!rs.cancelled) {
 			while (self->pipelineFull->get() && isDDPipelineControlEnabled()) {
 				TraceEvent("DDPipelineFull", self->distributorId)
 				    .suppressFor(30.0)
