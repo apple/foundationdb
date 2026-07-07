@@ -1203,6 +1203,20 @@ protected:
 	bool shouldFireImmediately() { return SingleCallback<T>::next != this; }
 };
 
+// Global callback for futureRef tracking release, set by FlowTransport at init
+inline void (*g_futureRefReleasedCallback)(int64_t id) = nullptr;
+
+// Global callback for futureRef tracking copy, set by FlowTransport at init.
+// Given the source FutureStream's tracking id, registers a brand-new tracked
+// ref (cloning the source's addr/token) and returns its id. A copied
+// FutureStream is a distinct ref (it bumps the queue's future ref count), so it
+// needs its own tracking id rather than sharing the source's -- otherwise
+// copies would go untracked (the move ctor propagates the id, but a copy can't
+// steal it). The flow layer has no endpoint context of its own, so this defers
+// to FlowTransport, which holds the source record's addr/token. Returns -1 when
+// the source isn't tracked or observability is off.
+inline int64_t (*g_futureRefCopiedCallback)(int64_t srcId) = nullptr;
+
 template <class T>
 class FutureStream {
 public:
@@ -1216,26 +1230,53 @@ public:
 	void addCallbackAndClear(SingleCallback<T>* cb) {
 		queue->addCallbackAndDelFutureRef(cb);
 		queue = nullptr;
+		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_futureRefTrackingId >= 0 && g_futureRefReleasedCallback) {
+			g_futureRefReleasedCallback(m_futureRefTrackingId);
+		}
+		m_futureRefTrackingId = -1;
 	}
-	FutureStream() : queue(nullptr) {}
-	FutureStream(const FutureStream& rhs) : queue(rhs.queue) { queue->addFutureRef(); }
-	FutureStream(FutureStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
+	FutureStream() : queue(nullptr), m_futureRefTrackingId(-1) {}
+	FutureStream(const FutureStream& rhs) : queue(rhs.queue), m_futureRefTrackingId(-1) {
+		queue->addFutureRef();
+		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && rhs.m_futureRefTrackingId >= 0 && g_futureRefCopiedCallback) {
+			m_futureRefTrackingId = g_futureRefCopiedCallback(rhs.m_futureRefTrackingId);
+		}
+	}
+	FutureStream(FutureStream&& rhs) noexcept : queue(rhs.queue), m_futureRefTrackingId(rhs.m_futureRefTrackingId) {
+		rhs.queue = 0;
+		rhs.m_futureRefTrackingId = -1;
+	}
 	~FutureStream() {
 		if (queue)
 			queue->delFutureRef();
+		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_futureRefTrackingId >= 0 && g_futureRefReleasedCallback) {
+			g_futureRefReleasedCallback(m_futureRefTrackingId);
+		}
 	}
 	void operator=(const FutureStream& rhs) {
 		rhs.queue->addFutureRef();
 		if (queue)
 			queue->delFutureRef();
+		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_futureRefTrackingId >= 0 && g_futureRefReleasedCallback) {
+			g_futureRefReleasedCallback(m_futureRefTrackingId);
+		}
 		queue = rhs.queue;
+		m_futureRefTrackingId = -1;
+		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && rhs.m_futureRefTrackingId >= 0 && g_futureRefCopiedCallback) {
+			m_futureRefTrackingId = g_futureRefCopiedCallback(rhs.m_futureRefTrackingId);
+		}
 	}
 	void operator=(FutureStream&& rhs) noexcept {
 		if (rhs.queue != queue) {
 			if (queue)
 				queue->delFutureRef();
+			if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY && m_futureRefTrackingId >= 0 && g_futureRefReleasedCallback) {
+				g_futureRefReleasedCallback(m_futureRefTrackingId);
+			}
 			queue = rhs.queue;
+			m_futureRefTrackingId = rhs.m_futureRefTrackingId;
 			rhs.queue = nullptr;
+			rhs.m_futureRefTrackingId = -1;
 		}
 	}
 	bool operator==(const FutureStream& rhs) { return rhs.queue == queue; }
@@ -1247,10 +1288,14 @@ public:
 		return queue->error;
 	}
 
-	explicit FutureStream(NotifiedQueue<T>* queue) : queue(queue) {}
+	explicit FutureStream(NotifiedQueue<T>* queue) : queue(queue), m_futureRefTrackingId(-1) {}
+	FutureStream(NotifiedQueue<T>* queue, int64_t trackingId) : queue(queue), m_futureRefTrackingId(trackingId) {}
+
+	int64_t getFutureRefTrackingId() const { return m_futureRefTrackingId; }
 
 private:
 	NotifiedQueue<T>* queue;
+	int64_t m_futureRefTrackingId;
 };
 
 template <class Request>

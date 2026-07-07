@@ -1,0 +1,87 @@
+[configuration]
+buggify = false
+machineCount = 10
+desiredTLogCount = 6
+generateFearless = false
+config = 'triple'
+
+storageCacheMachinesInDC0 = 0
+tenantModes = ['disabled'] 
+encryptModes = ['disabled']
+disableTss = true
+
+# Force 3 coordinators so dstKillRole=coordinator always has a non-protected target.
+# With sim2's default coordinator count and protectedAddresses (a majority is protected), small
+# clusters can end up with all coordinators in protectedAddresses, in which case
+# the test trivially skips and we get no signal.
+coordinators = 3
+
+[[knobs]]
+
+# Tune knobs to aggressively evict potentially dead storage servers from NativeAPI's LocationCache
+location_cache_peer_evictor_enabled = true
+location_cache_peer_evictor_failed_threshold = 0
+location_cache_peer_evictor_delay = 5.0
+
+# Ensure stale commit/grv proxies are also cleaned up
+shrink_proxy_list_clear_cache_below_threshold = true
+dbcontext_eager_proxy_update = true
+
+# The pass criterion is the per-role InterfaceTracker delta (leaked copies of
+# the killed role's interface RequestStreams), which requires this bookkeeping,
+# so it must be ON. Raw peerReferences is NOT the criterion (a client keeps
+# expected connection-level refs to the killed address).
+stale_peer_observability = true
+
+[[test]]
+testTitle = 'StalePeerTest'
+
+# The purpose of this test is purely measuring stale peer references
+# and ensuring there are none for a given (srcCheckRole, dstKillRole).
+# These checks in general are run outside this test with stale fix features
+# turned on e.g. location_cache_peer_evictor_enabled.
+runConsistencyCheck = false
+waitForQuiescenceBegin = false
+waitForQuiescenceEnd = false
+clearAfterTest = false
+
+    [[test.workload]]
+    testName = 'StalePeerTest'
+    # dstKillRole: which role's process to kill (the "destination" whose stale
+    # peer refs we hunt). Options: 'tlog', 'ss', 'commit_proxy', 'grv_proxy',
+    # 'master', 'resolver', 'dd', 'rk', 'coordinator', 'log_router',
+    # 'cluster_controller', and the special value 'clientFacing'.
+    # 'clientFacing' resolves per-run (deterministically by seed) to one of the
+    # roles a client directly addresses: coordinator, cluster_controller,
+    # commit_proxy, grv_proxy, ss. Use it for bulk validation that all
+    # client-facing dst-role kills are stale-ref clean in a single ensemble.
+    dstKillRole = 'clientFacing'
+    # srcCheckRole: which source processes we inspect for a lingering peer ref
+    # to the killed dst. 'any' = every live process (server roles included).
+    # 'tester_client' = only customer-client processes (ProcessClass::TesterClass,
+    # the testers running the workload). The client-side fixes target what a
+    # pure customer client sees; server roles drive the client lib internally
+    # but are out of scope, so we check only tester clients here.
+    srcCheckRole = 'tester_client'
+    # Wait after the kill before checking. For the client contract the drain is
+    # fast (clientInfo rotation for proxies/CC; location-cache eviction for SS),
+    # so a short wait suffices.
+    waitAfterKill = 60.0
+
+    # Drive real client->dst connections so the tester_client check is not
+    # vacuous: without sustained reads/writes a tester client may never open a
+    # connection to the killed dst (especially an SS). ReadWrite has each client
+    # populate + read/write a keyspace, so clients hold genuine peer refs to
+    # commit/grv proxies and storage servers and we observe them drop the dead
+    # dst while keeping the live ones.
+    [[test.workload]]
+    testName = 'ReadWrite'
+    testDuration = 180.0
+    transactionsPerSecond = 100
+    nodeCount = 1000
+    readsPerTransactionA = 10
+    writesPerTransactionA = 1
+    readsPerTransactionB = 0
+    writesPerTransactionB = 0
+    alpha = 0.0
+    setup = true

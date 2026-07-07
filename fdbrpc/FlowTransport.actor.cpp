@@ -327,6 +327,10 @@ public:
 	NetworkAddressCachedString localAddresses;
 	std::vector<Future<Void>> listeners;
 	std::unordered_map<NetworkAddress, Reference<struct Peer>> peers;
+
+	std::unordered_map<NetworkAddress, ConnectFailedInfo> persistentConnectFailedCount;
+	double persistentConnectFailedLastPrune = 0;
+
 	std::unordered_map<NetworkAddress, std::pair<double, double>> closedPeers;
 	HealthMonitor healthMonitor;
 	std::set<NetworkAddress> orderedAddresses;
@@ -858,13 +862,56 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 					}
 				} catch (Error& e) {
 					++self->connectFailedCount;
+					// Track per-address cumulative connect failures + last-failure time. The map
+					// potentially has unbounded list of peers as they're having connection issues.
+					// To make the map bounded, evict based on TTL.
+					//
+					// Note: this prune only runs here, inside the connect-failure path, so it is
+					// failure-driven rather than on a timer. If connect failures stop across all
+					// addresses, the scan does not run again and stale entries can linger past their
+					// TTL until the next failure on any address. The map is still bounded -- by the
+					// set of addresses ever contacted, and the next failure prunes the stale ones --
+					// so this is not unbounded growth, just not strictly time-based eviction.
+					{
+						double ttl = FLOW_KNOBS->PERSISTENT_CONNECT_FAILED_COUNT_TTL;
+						double tNow = now();
+						auto& failCounts = self->transport->persistentConnectFailedCount;
+						auto& info = failCounts[self->destination];
+						info.count++;
+						info.lastFailed = tNow;
+						TraceEvent("PersistentConnectFailed")
+						    .suppressFor(5.0)
+						    .detail("PeerAddr", self->destination)
+						    .detail("ConnectFailedTotal", info.count);
+						if (ttl > 0 && tNow - self->transport->persistentConnectFailedLastPrune >= ttl) {
+							self->transport->persistentConnectFailedLastPrune = tNow;
+							for (auto it = failCounts.begin(); it != failCounts.end();) {
+								if (tNow - it->second.lastFailed >= ttl) {
+									TraceEvent("PersistentConnectFailedPrune")
+									    .suppressFor(5.0)
+									    .detail("PeerAddr", it->first)
+									    .detail("ConnectFailedTotal", it->second.count);
+									it = failCounts.erase(it);
+								} else {
+									++it;
+								}
+							}
+						}
+					}
 					if (e.code() != error_code_connection_failed) {
 						throw;
 					}
+
 					TraceEvent("ConnectionTimedOut", conn ? conn->getDebugID() : UID())
 					    .suppressFor(1.0)
 					    .detail("PeerAddr", self->destination)
-					    .detail("PeerAddress", self->destination);
+					    .detail("PeerAddress", self->destination)
+					    .detail("PeerReferences", self->peerReferences)
+					    .detail("ReliableEmpty", self->reliable.empty())
+					    .detail("UnsentEmpty", self->unsent.empty())
+					    .detail("OutstandingReplies", self->outstandingReplies)
+					    .detail("ConnectFailedCount", self->connectFailedCount)
+					    .detail("Connected", self->connected);
 
 					throw;
 				}
@@ -1013,7 +1060,13 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 				    .errorUnsuppressed(e)
 				    .suppressFor(1.0)
 				    .detail("PeerAddr", self->destination)
-				    .detail("PeerAddress", self->destination);
+				    .detail("PeerAddress", self->destination)
+				    .detail("PeerReferences", self->peerReferences)
+				    .detail("ReliableEmpty", self->reliable.empty())
+				    .detail("UnsentEmpty", self->unsent.empty())
+				    .detail("OutstandingReplies", self->outstandingReplies)
+				    .detail("ConnectFailedCount", self->connectFailedCount)
+				    .detail("Connected", self->connected);
 				self->connect.cancel();
 				self->transport->peers.erase(self->destination);
 				self->transport->orderedAddresses.erase(self->destination);
@@ -1785,6 +1838,225 @@ ACTOR static Future<Void> multiVersionCleanupWorker(TransportData* self) {
 	}
 }
 
+// ==== InterfaceTracker ====
+// Bookkeeping is gated entirely on FLOW_KNOBS->STALE_PEER_OBSERVABILITY: every
+// mutating method early-returns when the knob is off, every accessor returns
+// empty/zero. Callers may invoke these unconditionally.
+
+void InterfaceTracker::created(const NetworkAddress& dstAddr,
+                               const std::string& dstRole,
+                               const std::vector<UID>& tokens) {
+	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
+		return;
+	}
+	auto& entry = map[Key{ dstAddr, dstRole }];
+	entry.numCreated += tokens.size();
+	int64_t id = nextCreateId++;
+	entry.createRecords.push_back(
+	    { id, g_network ? g_network->now() : 0.0, platform::get_backtrace(), (int)tokens.size() });
+	for (const auto& tok : tokens) {
+		tokenToInfo[TokenKey{ dstAddr, tok }] = TokenInfo{ dstRole, id };
+	}
+}
+
+void InterfaceTracker::peerRefAdded(const NetworkAddress& addr) {
+	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
+		return;
+	}
+	peerRefCounts[addr].added++;
+}
+
+void InterfaceTracker::peerRefRemovedRaw(const NetworkAddress& addr) {
+	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
+		return;
+	}
+	peerRefCounts[addr].removed++;
+}
+
+void InterfaceTracker::peerRefRemoved(const NetworkAddress& addr, const UID& token) {
+	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
+		return;
+	}
+	auto it = tokenToInfo.find(TokenKey{ addr, token });
+	if (it != tokenToInfo.end()) {
+		ASSERT(map.contains(Key{ addr, it->second.role }));
+		auto& entry = map[Key{ addr, it->second.role }];
+		entry.numDeleted++;
+		for (auto& rec : entry.createRecords) {
+			if (rec.id == it->second.createId) {
+				rec.numStreamsDeleted++;
+				break;
+			}
+		}
+	}
+}
+
+int64_t InterfaceTracker::getDelta(const NetworkAddress& addr, const std::string& role) const {
+	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
+		return 0;
+	}
+	auto it = map.find(Key{ addr, role });
+	if (it == map.end())
+		return 0;
+	return it->second.numCreated - it->second.numDeleted;
+}
+
+int64_t InterfaceTracker::flowReceiverCreated(const NetworkAddress& addr, const UID& token) {
+	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
+		return -1;
+	}
+	int64_t id = nextFlowReceiverId++;
+	flowReceiverRecords[id] = FlowReceiverRecord{
+		id, addr, token, g_network ? g_network->now() : 0.0, platform::get_backtrace(), currentCallerTag
+	};
+	return id;
+}
+
+void InterfaceTracker::flowReceiverDestroyed(const NetworkAddress& addr, int64_t id) {
+	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
+		return;
+	}
+	flowReceiverRecords.erase(id);
+}
+
+int64_t InterfaceTracker::promiseRefAdded(const NetworkAddress& addr, const UID& token) {
+	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
+		return -1;
+	}
+	int64_t id = nextRefId++;
+	refRecords[id] = RefRecord{ id, addr, token, g_network ? g_network->now() : 0.0, platform::get_backtrace(), false };
+	return id;
+}
+
+void InterfaceTracker::promiseRefReleased(int64_t id) {
+	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
+		return;
+	}
+	if (id < 0)
+		return;
+	refRecords.erase(id);
+}
+
+int64_t InterfaceTracker::futureRefAdded(const NetworkAddress& addr, const UID& token) {
+	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
+		return -1;
+	}
+	int64_t id = nextRefId++;
+	refRecords[id] = RefRecord{ id, addr, token, g_network ? g_network->now() : 0.0, platform::get_backtrace(), true };
+	return id;
+}
+
+// Clone the (addr, token) of an existing tracked future ref into a brand-new
+// tracked ref. Used by FutureStream's copy ctor/assignment: a copy is a
+// distinct ref and must get its own id so it is released independently, rather
+// than going untracked (which would undercount live future refs). Copy the
+// fields out before inserting -- the insert may rehash and invalidate `it`.
+int64_t InterfaceTracker::futureRefCopied(int64_t srcId) {
+	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
+		return -1;
+	}
+	if (srcId < 0) {
+		return -1;
+	}
+	auto it = refRecords.find(srcId);
+	if (it == refRecords.end()) {
+		return -1;
+	}
+	NetworkAddress addr = it->second.addr;
+	UID token = it->second.token;
+	int64_t id = nextRefId++;
+	refRecords[id] = RefRecord{ id, addr, token, g_network ? g_network->now() : 0.0, platform::get_backtrace(), true };
+	return id;
+}
+
+void InterfaceTracker::futureRefReleased(int64_t id) {
+	if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
+		return;
+	}
+	if (id < 0)
+		return;
+	refRecords.erase(id);
+}
+
+void InterfaceTracker::prettyPrintLeakedReceivers(const NetworkAddress& srcAddr,
+                                                  const std::vector<NetworkAddress>& filterAddrs) const {
+	for (const auto& [id, rec] : flowReceiverRecords) {
+		for (const auto& filterAddr : filterAddrs) {
+			if (rec.addr == filterAddr) {
+				TraceEvent("FlowReceiverLeaked")
+				    .detail("SrcProcess", srcAddr)
+				    .detail("CallerTag", rec.callerTag)
+				    .detail("DstAddress", rec.addr)
+				    .detail("Token", rec.token)
+				    .detail("ReceiverId", rec.id)
+				    .detail("CreateTime", format("%.6f", rec.createTime))
+				    .detail("Backtrace", rec.backtrace);
+			}
+		}
+	}
+}
+
+void InterfaceTracker::prettyPrintLeakedRefs(const NetworkAddress& srcAddr,
+                                             const std::vector<NetworkAddress>& filterAddrs) const {
+	for (const auto& [id, rec] : refRecords) {
+		for (const auto& filterAddr : filterAddrs) {
+			if (rec.addr == filterAddr) {
+				TraceEvent(rec.isFutureRef ? "FutureRefLeaked" : "PromiseRefLeaked")
+				    .detail("SrcProcess", srcAddr)
+				    .detail("DstAddress", rec.addr)
+				    .detail("Token", rec.token)
+				    .detail("RefId", rec.id)
+				    .detail("RefCreateTime", format("%.6f", rec.time))
+				    .detail("RefBacktrace", rec.backtrace);
+				break;
+			}
+		}
+	}
+}
+
+void InterfaceTracker::prettyPrint(const NetworkAddress& srcAddr,
+                                   const std::vector<NetworkAddress>& filterAddrs) const {
+	for (const auto& filterAddr : filterAddrs) {
+		for (const auto& [key, entry] : map) {
+			if (key.dstAddress == filterAddr) {
+				TraceEvent("InterfaceTrackerDump")
+				    .detail("SrcProcess", srcAddr)
+				    .detail("DstAddress", key.dstAddress)
+				    .detail("DstRole", key.dstRole)
+				    .detail("NumCreated", entry.numCreated)
+				    .detail("NumDeleted", entry.numDeleted)
+				    .detail("Delta", entry.numCreated - entry.numDeleted);
+				if (entry.numCreated > entry.numDeleted) {
+					for (const auto& rec : entry.createRecords) {
+						if (rec.numStreamsDeleted < rec.numStreams) {
+							TraceEvent("InterfaceTrackerLeaked")
+							    .detail("SrcProcess", srcAddr)
+							    .detail("DstAddress", key.dstAddress)
+							    .detail("DstRole", key.dstRole)
+							    .detail("CreateId", rec.id)
+							    .detail("CreateTime", format("%.6f", rec.time))
+							    .detail("NumStreams", rec.numStreams)
+							    .detail("NumStreamsDeleted", rec.numStreamsDeleted)
+							    .detail("Backtrace", rec.backtrace);
+						}
+					}
+				}
+			}
+		}
+	}
+	for (const auto& filterAddr : filterAddrs) {
+		auto it = peerRefCounts.find(filterAddr);
+		if (it != peerRefCounts.end()) {
+			TraceEvent("InterfaceTrackerPeerRefRaw")
+			    .detail("SrcProcess", srcAddr)
+			    .detail("DstAddress", filterAddr)
+			    .detail("TotalAdded", it->second.added)
+			    .detail("TotalRemoved", it->second.removed)
+			    .detail("RawDelta", it->second.added - it->second.removed);
+		}
+	}
+}
+
 FlowTransport::FlowTransport(uint64_t transportId, int maxWellKnownEndpoints, IPAllowList const* allowList)
   : self(new TransportData(transportId, maxWellKnownEndpoints, allowList)) {
 	self->multiVersionCleanup = multiVersionCleanupWorker(self);
@@ -1793,6 +2065,23 @@ FlowTransport::FlowTransport(uint64_t transportId, int maxWellKnownEndpoints, IP
 			self->publicKeys.emplace(p.first, p.second.toPublic());
 		}
 	}
+	g_futureRefReleasedCallback = [](int64_t id) {
+		if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
+			return;
+		}
+		if (g_network && g_network->global(INetwork::enFlowTransport)) {
+			FlowTransport::transport().interfaceTracker.futureRefReleased(id);
+		}
+	};
+	g_futureRefCopiedCallback = [](int64_t srcId) -> int64_t {
+		if (!FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
+			return -1;
+		}
+		if (g_network && g_network->global(INetwork::enFlowTransport)) {
+			return FlowTransport::transport().interfaceTracker.futureRefCopied(srcId);
+		}
+		return -1;
+	};
 }
 
 FlowTransport::~FlowTransport() {
@@ -1823,6 +2112,10 @@ void FlowTransport::setLocalAddress(NetworkAddress const& address) {
 
 const std::unordered_map<NetworkAddress, Reference<Peer>>& FlowTransport::getAllPeers() const {
 	return self->peers;
+}
+
+const std::unordered_map<NetworkAddress, ConnectFailedInfo>& FlowTransport::getPersistentConnectFailedCounts() const {
+	return self->persistentConnectFailedCount;
 }
 
 std::map<NetworkAddress, std::pair<uint64_t, double>>* FlowTransport::getIncompatiblePeers() {
@@ -1875,6 +2168,7 @@ void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
 	} else {
 		peer->peerReferences++;
 	}
+	interfaceTracker.peerRefAdded(endpoint.getPrimaryAddress());
 }
 
 void FlowTransport::removePeerReference(const Endpoint& endpoint, bool isStream) {
@@ -1883,6 +2177,19 @@ void FlowTransport::removePeerReference(const Endpoint& endpoint, bool isStream)
 	Reference<Peer> peer = self->getPeer(endpoint.getPrimaryAddress());
 	if (peer) {
 		peer->peerReferences--;
+		if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
+			interfaceTracker.peerRefRemovedRaw(endpoint.getPrimaryAddress());
+			interfaceTracker.peerRefRemoved(endpoint.getPrimaryAddress(), endpoint.token);
+			// Per-token backtrace of which code path is releasing this peer ref.
+			// platform::get_backtrace() is expensive and this fires on every
+			// removePeerReference; suppressFor caps the per-event rate.
+			TraceEvent("PeerRefRemovedBacktrace")
+			    .suppressFor(2.0)
+			    .detail("PeerAddr", endpoint.getPrimaryAddress())
+			    .detail("Token", endpoint.token)
+			    .detail("PeerReferences", peer->peerReferences)
+			    .detail("Backtrace", platform::get_backtrace());
+		}
 		if (peer->peerReferences < 0) {
 			TraceEvent(SevError, "InvalidPeerReferences")
 			    .detail("References", peer->peerReferences)

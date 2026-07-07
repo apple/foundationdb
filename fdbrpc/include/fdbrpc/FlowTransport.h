@@ -23,6 +23,10 @@
 #pragma once
 
 #include <algorithm>
+#include <map>
+#include <unordered_map>
+#include <unordered_set>
+#include <string>
 
 #include "fdbrpc/DDSketch.h"
 #include "fdbrpc/HealthMonitor.h"
@@ -32,7 +36,110 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/Net2Packet.h"
 #include "flow/Arena.h"
+#include "flow/Platform.h"
 #include "flow/PKey.h"
+
+// Tracks creation and destruction of interface objects (StorageServerInterface,
+// TLogInterface, etc.) per process. Used for debugging stale peer references.
+//
+// All bookkeeping methods are no-ops when FLOW_KNOBS->STALE_PEER_OBSERVABILITY
+// is false. Method bodies live in fdbrpc/FlowTransport.actor.cpp to keep this
+// header light.
+struct InterfaceTracker {
+	struct Key {
+		NetworkAddress dstAddress;
+		std::string dstRole;
+		bool operator==(const Key& other) const { return dstAddress == other.dstAddress && dstRole == other.dstRole; }
+	};
+	struct KeyHash {
+		size_t operator()(const Key& k) const {
+			return std::hash<NetworkAddress>()(k.dstAddress) ^ std::hash<std::string>()(k.dstRole);
+		}
+	};
+	struct Entry {
+		int64_t numCreated = 0;
+		int64_t numDeleted = 0;
+		struct CreateRecord {
+			int64_t id;
+			double time;
+			std::string backtrace;
+			int numStreams;
+			int numStreamsDeleted = 0;
+		};
+		std::vector<CreateRecord> createRecords;
+	};
+	struct TokenKey {
+		NetworkAddress addr;
+		UID token;
+		bool operator==(const TokenKey& other) const { return addr == other.addr && token == other.token; }
+	};
+	struct TokenKeyHash {
+		size_t operator()(const TokenKey& k) const { return k.addr.hash() ^ k.token.hash(); }
+	};
+	struct TokenInfo {
+		std::string role;
+		int64_t createId;
+	};
+	struct PeerRefCount {
+		int64_t added = 0;
+		int64_t removed = 0;
+	};
+	struct FlowReceiverRecord {
+		int64_t id;
+		NetworkAddress addr;
+		UID token;
+		double createTime;
+		std::string backtrace;
+		std::string callerTag;
+	};
+	struct RefRecord {
+		int64_t id;
+		NetworkAddress addr;
+		UID token;
+		double time;
+		std::string backtrace;
+		bool isFutureRef = false;
+	};
+
+	// Per (address, role): created/deleted interface counts + per-creation backtraces (the Delta source).
+	std::unordered_map<Key, Entry, KeyHash> map;
+	// Per (address, token): which (role, create-record) a stream token belongs to, for matching deletes to creates.
+	std::unordered_map<TokenKey, TokenInfo, TokenKeyHash> tokenToInfo;
+	// Per address: running count of peer references added vs removed (raw peer-ref accounting).
+	std::unordered_map<NetworkAddress, PeerRefCount> peerRefCounts;
+	// Live FlowReceiver records by id: who created each receiver + backtrace, erased on destroy.
+	std::unordered_map<int64_t, FlowReceiverRecord> flowReceiverRecords;
+	// Live promise/future ref records by id: creation backtrace per outstanding ref, erased on release.
+	std::unordered_map<int64_t, RefRecord> refRecords;
+	// Monotonic id generators for the records above (id 0 unused; -1 means "not tracked").
+	int64_t nextCreateId = 0;
+	int64_t nextFlowReceiverId = 0;
+	int64_t nextRefId = 0;
+	// Optional tag identifying the current call site, attached to new FlowReceiver records.
+	std::string currentCallerTag;
+
+	void created(const NetworkAddress& dstAddr, const std::string& dstRole, const std::vector<UID>& tokens);
+
+	void peerRefAdded(const NetworkAddress& addr);
+	void peerRefRemovedRaw(const NetworkAddress& addr);
+	void peerRefRemoved(const NetworkAddress& addr, const UID& token);
+
+	int64_t getDelta(const NetworkAddress& addr, const std::string& role) const;
+
+	int64_t flowReceiverCreated(const NetworkAddress& addr, const UID& token);
+	void flowReceiverDestroyed(const NetworkAddress& addr, int64_t id);
+
+	int64_t promiseRefAdded(const NetworkAddress& addr, const UID& token);
+	void promiseRefReleased(int64_t id);
+	int64_t futureRefAdded(const NetworkAddress& addr, const UID& token);
+	int64_t futureRefCopied(int64_t srcId);
+	void futureRefReleased(int64_t id);
+
+	void prettyPrintLeakedReceivers(const NetworkAddress& srcAddr,
+	                                const std::vector<NetworkAddress>& filterAddrs) const;
+	void prettyPrintLeakedRefs(const NetworkAddress& srcAddr, const std::vector<NetworkAddress>& filterAddrs) const;
+	void prettyPrint(const NetworkAddress& srcAddr, const std::vector<NetworkAddress>& filterAddrs) const;
+};
 
 class IConnection;
 
@@ -191,6 +298,12 @@ struct Peer : public ReferenceCounted<Peer> {
 
 class IPAllowList;
 
+// Per-address connect-failure tracking on TransportData.
+struct ConnectFailedInfo {
+	int64_t count = 0; // cumulative number of failed connect attempts
+	double lastFailed = 0; // now() of the most recent failure
+};
+
 class FlowTransport : NonCopyable {
 public:
 	FlowTransport(uint64_t transportId, int maxWellKnownEndpoints, IPAllowList const* allowList);
@@ -227,6 +340,12 @@ public:
 
 	// Returns all peers that the FlowTransport is monitoring.
 	const std::unordered_map<NetworkAddress, Reference<Peer>>& getAllPeers() const;
+
+	// Returns a per-address cumulative count of connect failures.
+	// The map lives on TransportData and persists across Peer destruction,
+	// so it remains a reliable signal for catching short-lived peers that
+	// all point to the same address
+	const std::unordered_map<NetworkAddress, ConnectFailedInfo>& getPersistentConnectFailedCounts() const;
 
 	// Returns the same of all peers that have attempted to connect, but have incompatible protocol versions
 	std::map<NetworkAddress, std::pair<uint64_t, double>>* getIncompatiblePeers();
@@ -307,6 +426,8 @@ public:
 
 	// Periodically read JWKS (RFC 7517) public key file to refresh public key set.
 	void watchPublicKeyFile(const std::string& publicKeyFilePath);
+
+	InterfaceTracker interfaceTracker;
 
 private:
 	class TransportData* self;
