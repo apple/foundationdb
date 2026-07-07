@@ -1762,6 +1762,81 @@ void peekMessagesFromMemory(Reference<LogData> self,
 	}
 }
 
+struct TLogPeekMemoryVersion {
+	Version version;
+	Standalone<StringRef> messages;
+};
+
+struct TLogPeekMemoryVersions {
+	std::vector<TLogPeekMemoryVersion> versions;
+	bool truncated = false;
+	Optional<Version> firstExcludedVersion;
+};
+
+// Capture memory messages as complete versions before waiting on a spilled-data read. A capped Native CDC peek can
+// then append only versions that fit after the spilled prefix, without either splitting a version or re-reading a
+// moving in-memory tail after the disk wait.
+TLogPeekMemoryVersions peekMessageVersionsFromMemory(Reference<LogData> self, Tag tag, Version begin, int byteTarget) {
+	ASSERT(byteTarget > 0);
+
+	TLogPeekMemoryVersions result;
+	int messageCount = 0;
+	int collectedBytes = 0;
+	auto& deque = getVersionMessages(self, tag);
+
+	begin = std::max(begin, self->persistentDataDurableVersion + 1);
+	auto it = std::lower_bound(deque.begin(),
+	                           deque.end(),
+	                           std::make_pair(begin, LengthPrefixedStringRef()),
+	                           [](const auto& l, const auto& r) -> bool { return l.first < r.first; });
+
+	while (it != deque.end()) {
+		Version currentVersion = it->first;
+		BinaryWriter versionMessages(Unversioned());
+		versionMessages << VERSION_HEADER << currentVersion;
+
+		while (it != deque.end() && it->first == currentVersion) {
+			// We need the 4 byte length prefix to be a TagsAndMessage format, but that prefix is added as part of
+			// StringRef serialization.
+			int offset = versionMessages.getLength();
+			versionMessages << it->second.toStringRef();
+			void* data = versionMessages.getData();
+			DEBUG_TAGS_AND_MESSAGE("TLogPeek",
+			                       currentVersion,
+			                       StringRef((uint8_t*)data + offset, versionMessages.getLength() - offset),
+			                       self->logId)
+			    .detail("PeekTag", tag);
+			++messageCount;
+			++it;
+		}
+
+		collectedBytes += versionMessages.getLength();
+		result.versions.push_back({ currentVersion, versionMessages.toValue() });
+		if (collectedBytes >= byteTarget) {
+			result.truncated = it != deque.end();
+			if (result.truncated) {
+				result.firstExcludedVersion = it->first;
+			}
+			break;
+		}
+	}
+
+	if (messageCount == 0) {
+		++self->emptyPeeks;
+	} else {
+		++self->nonEmptyPeeks;
+		auto [it, _] = self->peekVersionCounts.try_emplace(tag,
+		                                                   "PeekVersionCounts " + tag.toString(),
+		                                                   deterministicRandom()->randomUniqueID(),
+		                                                   SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                                                   SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
+		LatencySample& sample = it->second;
+		sample.addMeasurement(messageCount);
+	}
+
+	return result;
+}
+
 Future<std::vector<StringRef>> parseMessagesForTag(StringRef commitBlob, Tag tag, int logRouters) {
 	// See the comment in LogSystem.cpp for the binary format of commitBlob.
 	std::vector<StringRef> relevantMessages;
@@ -1792,6 +1867,29 @@ int tLogPeekReplyByteLimit(Tag tag, int requestedLimit) {
 	           : 0;
 }
 
+enum class TLogPeekVersionAppendResult { Appended, ReplyByteLimitReached, VersionTooLarge };
+
+TLogPeekVersionAppendResult appendTLogPeekVersion(BinaryWriter& messages,
+                                                  StringRef versionMessages,
+                                                  int replyByteLimit) {
+	if (replyByteLimit > 0) {
+		if (versionMessages.size() > replyByteLimit) {
+			return TLogPeekVersionAppendResult::VersionTooLarge;
+		}
+		if (messages.getLength() > replyByteLimit - versionMessages.size()) {
+			return TLogPeekVersionAppendResult::ReplyByteLimitReached;
+		}
+	}
+
+	messages.serializeBytes(versionMessages);
+	return TLogPeekVersionAppendResult::Appended;
+}
+
+Version tLogPeekTruncatedEndVersion(Optional<Version> firstExcludedVersion, Optional<Version> lastReplyVersion) {
+	ASSERT(firstExcludedVersion.present() || lastReplyVersion.present());
+	return firstExcludedVersion.present() ? firstExcludedVersion.get() : lastReplyVersion.get() + 1;
+}
+
 } // namespace
 
 // Common logics to peek TLog and create TLogPeekReply that serves both streaming peek or normal peek request
@@ -1816,6 +1914,30 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	if (reqTag.locality == tagLocalityTxs && reqTag.id >= logData->txsTags && logData->txsTags > 0) {
 		reqTag.id = reqTag.id % logData->txsTags;
 	}
+
+	const int replyByteLimit = tLogPeekReplyByteLimit(reqTag, reqReplyByteLimit);
+	bool replyByteLimitReached = false;
+	bool replyVersionTooLarge = false;
+	int oversizedVersionBytes = 0;
+	Optional<Version> lastReplyVersion;
+	Optional<Version> firstExcludedVersion;
+	auto appendVersion = [&](Version version, StringRef versionMessages) {
+		auto result = appendTLogPeekVersion(messages, versionMessages, replyByteLimit);
+		if (result == TLogPeekVersionAppendResult::Appended) {
+			lastReplyVersion = version;
+		} else {
+			replyByteLimitReached = true;
+			if (!firstExcludedVersion.present()) {
+				firstExcludedVersion = version;
+			}
+			if (result == TLogPeekVersionAppendResult::VersionTooLarge && messages.getLength() == 0 &&
+			    version == reqBegin) {
+				replyVersionTooLarge = true;
+				oversizedVersionBytes = versionMessages.size();
+			}
+		}
+		return result;
+	};
 
 	if (reqSequence.present()) {
 		try {
@@ -1958,6 +2080,24 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	Version poppedVer{ 0 };
 	Version endVersion{ 0 };
 	bool onlySpilled{ false };
+	auto setTruncatedEndVersion = [&]() {
+		endVersion = tLogPeekTruncatedEndVersion(firstExcludedVersion, lastReplyVersion);
+	};
+	auto appendMemoryVersions = [&](const TLogPeekMemoryVersions& memoryVersions) {
+		for (const auto& version : memoryVersions.versions) {
+			auto result = appendVersion(version.version, version.messages);
+			if (result != TLogPeekVersionAppendResult::Appended) {
+				return result;
+			}
+		}
+		if (memoryVersions.truncated) {
+			ASSERT(memoryVersions.firstExcludedVersion.present());
+			if (!firstExcludedVersion.present()) {
+				firstExcludedVersion = memoryVersions.firstExcludedVersion;
+			}
+		}
+		return TLogPeekVersionAppendResult::Appended;
+	};
 
 	// Run the peek logic in a loop to account for the case where there is no data to return to the caller, and we may
 	// want to wait a little bit instead of just sending back an empty message. This feature is controlled by a knob.
@@ -2039,11 +2179,14 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 			// Just in case the durable version changes while we are waiting for the read, we grab this data from
 			// memory. We may or may not actually send it depending on whether we get enough data from disk. SOMEDAY:
 			// Only do this if an initial attempt to read from disk results in insufficient data and the required data
-			// is no longer in memory SOMEDAY: Should we only send part of the messages we collected, to actually limit
-			// the size of the result?
+			// is no longer in memory.
+			TLogPeekMemoryVersions memoryVersions;
 
 			if (reqOnlySpilled) {
 				endVersion = logData->persistentDataDurableVersion + 1;
+			} else if (replyByteLimit > 0) {
+				memoryVersions = peekMessageVersionsFromMemory(
+				    logData, reqTag, reqBegin, std::min(replyByteLimit, SERVER_KNOBS->DESIRED_TOTAL_BYTES));
 			} else {
 				peekMessagesFromMemory(logData, reqTag, reqBegin, messages2, endVersion);
 			}
@@ -2058,13 +2201,27 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 
 				for (auto& kv : kvs) {
 					auto ver = decodeTagMessagesKey(kv.key);
-					messages << VERSION_HEADER << ver;
-					messages.serializeBytes(kv.value);
+					BinaryWriter versionMessages(Unversioned());
+					versionMessages << VERSION_HEADER << ver;
+					versionMessages.serializeBytes(kv.value);
+					auto result = appendVersion(ver, versionMessages.toValue());
+					if (result != TLogPeekVersionAppendResult::Appended) {
+						break;
+					}
 				}
 
-				if (kvs.expectedSize() >= SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
+				if (replyByteLimitReached) {
+					setTruncatedEndVersion();
+					onlySpilled = true;
+				} else if (kvs.expectedSize() >= SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
+					ASSERT(!kvs.empty());
 					endVersion = decodeTagMessagesKey(kvs.end()[-1].key) + 1;
 					onlySpilled = true;
+				} else if (replyByteLimit > 0) {
+					auto result = appendMemoryVersions(memoryVersions);
+					if (result != TLogPeekVersionAppendResult::Appended || memoryVersions.truncated) {
+						setTruncatedEndVersion();
+					}
 				} else {
 					messages.serializeBytes(messages2.toValue());
 				}
@@ -2132,17 +2289,22 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 					ASSERT(valid == 0x01);
 					ASSERT(length + sizeof(valid) == queueEntryData.size());
 
-					messages << VERSION_HEADER << entry.version;
-
+					BinaryWriter versionMessages(Unversioned());
+					versionMessages << VERSION_HEADER << entry.version;
 					std::vector<StringRef> rawMessages =
 					    co_await parseMessagesForTag(entry.messages, reqTag, logData->logRouterTags);
 					for (const StringRef& msg : rawMessages) {
-						messages.serializeBytes(msg);
+						versionMessages.serializeBytes(msg);
 						DEBUG_TAGS_AND_MESSAGE("TLogPeekFromDisk", entry.version, msg, logData->logId)
 						    .detail("DebugID", self->dbgid)
 						    .detail("PeekTag", reqTag);
 					}
 
+					auto result = appendVersion(entry.version, versionMessages.toValue());
+					if (result != TLogPeekVersionAppendResult::Appended) {
+						earlyEnd = true;
+						break;
+					}
 					lastRefMessageVersion = entry.version;
 					index++;
 				}
@@ -2150,9 +2312,18 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 				messageReads.clear();
 				memoryReservation.release();
 
-				if (earlyEnd) {
-					endVersion = lastRefMessageVersion + 1;
+				if (earlyEnd || replyByteLimitReached) {
+					if (firstExcludedVersion.present() || lastReplyVersion.present()) {
+						setTruncatedEndVersion();
+					} else {
+						endVersion = lastRefMessageVersion + 1;
+					}
 					onlySpilled = true;
+				} else if (replyByteLimit > 0) {
+					auto result = appendMemoryVersions(memoryVersions);
+					if (result != TLogPeekVersionAppendResult::Appended || memoryVersions.truncated) {
+						setTruncatedEndVersion();
+					}
 				} else {
 					messages.serializeBytes(messages2.toValue());
 				}
@@ -2160,6 +2331,13 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		} else {
 			if (reqOnlySpilled) {
 				endVersion = logData->persistentDataDurableVersion + 1;
+			} else if (replyByteLimit > 0) {
+				auto memoryVersions = peekMessageVersionsFromMemory(
+				    logData, reqTag, reqBegin, std::min(replyByteLimit, SERVER_KNOBS->DESIRED_TOTAL_BYTES));
+				auto result = appendMemoryVersions(memoryVersions);
+				if (result != TLogPeekVersionAppendResult::Appended || memoryVersions.truncated) {
+					setTruncatedEndVersion();
+				}
 			} else {
 				peekMessagesFromMemory(logData, reqTag, reqBegin, messages, endVersion);
 			}
@@ -2171,7 +2349,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		//   - Have data return to the caller, or
 		//   - Batching empty peek is disabled, or
 		//   - Batching empty peek interval has been reached.
-		if (messages.getLength() > 0 || !SERVER_KNOBS->PEEK_BATCHING_EMPTY_MSG ||
+		if (replyByteLimitReached || messages.getLength() > 0 || !SERVER_KNOBS->PEEK_BATCHING_EMPTY_MSG ||
 		    (now() - blockStart > SERVER_KNOBS->PEEK_BATCHING_EMPTY_MSG_INTERVAL)) {
 			break;
 		}
@@ -2188,17 +2366,18 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		}
 	}
 
-	const int replyByteLimit = tLogPeekReplyByteLimit(reqTag, reqReplyByteLimit);
-	if (replyByteLimit > 0 && messages.getLength() > replyByteLimit) {
-		CODE_PROBE(true, "TLog rejects an oversized Native CDC peek reply", probe::decoration::rare);
-		TraceEvent(SevWarn, "TLogPeekReplyExceedsByteLimit", logData->logId)
+	if (replyVersionTooLarge) {
+		CODE_PROBE(true, "TLog rejects an oversized Native CDC version", probe::decoration::rare);
+		TraceEvent(SevWarn, "TLogPeekVersionExceedsByteLimit", logData->logId)
 		    .detail("Tag", reqTag)
 		    .detail("ReqBegin", reqBegin)
-		    .detail("ReplyBytes", messages.getLength())
+		    .detail("Version", firstExcludedVersion.get())
+		    .detail("VersionBytes", oversizedVersionBytes)
 		    .detail("ReplyByteLimit", replyByteLimit);
 		replyPromise.sendError(cdc_tlog_peek_reply_too_large());
 		co_return;
 	}
+	ASSERT(replyByteLimit <= 0 || messages.getLength() <= replyByteLimit);
 
 	TLogPeekReply reply;
 	reply.maxKnownVersion = logData->version.get();
@@ -4045,6 +4224,32 @@ TEST_CASE("/NativeCDC/TLogPeekReplyLimit") {
 	ASSERT(tLogPeekReplyByteLimit(Tag(tagLocalityCDC, 0), 4096) == std::min(4096, SERVER_KNOBS->MAXIMUM_PEEK_BYTES));
 	ASSERT(tLogPeekReplyByteLimit(Tag(tagLocalityLogRouter, 0), SERVER_KNOBS->MAXIMUM_PEEK_BYTES) == 0);
 	ASSERT(tLogPeekReplyByteLimit(Tag(tagLocalityTxs, 0), SERVER_KNOBS->MAXIMUM_PEEK_BYTES) == 0);
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/TLogPeekReplyVersionBoundary") {
+	BinaryWriter firstVersion(Unversioned());
+	firstVersion << VERSION_HEADER << Version(1) << uint32_t(1);
+	auto firstVersionValue = firstVersion.toValue();
+
+	BinaryWriter secondVersion(Unversioned());
+	secondVersion << VERSION_HEADER << Version(2) << uint64_t(2);
+	auto secondVersionValue = secondVersion.toValue();
+
+	BinaryWriter reply(Unversioned());
+	int replyByteLimit = firstVersionValue.size() + secondVersionValue.size() - 1;
+	ASSERT(appendTLogPeekVersion(reply, firstVersionValue, replyByteLimit) == TLogPeekVersionAppendResult::Appended);
+	ASSERT(appendTLogPeekVersion(reply, secondVersionValue, replyByteLimit) ==
+	       TLogPeekVersionAppendResult::ReplyByteLimitReached);
+	ASSERT(reply.getLength() == firstVersionValue.size());
+
+	BinaryWriter oversizedReply(Unversioned());
+	ASSERT(appendTLogPeekVersion(oversizedReply, secondVersionValue, secondVersionValue.size() - 1) ==
+	       TLogPeekVersionAppendResult::VersionTooLarge);
+	ASSERT(oversizedReply.getLength() == 0);
+	// A sparse tag can safely advance through an empty gap before retrying an excluded version.
+	ASSERT_EQ(tLogPeekTruncatedEndVersion(Optional<Version>(150), Optional<Version>()), 150);
+	ASSERT_EQ(tLogPeekTruncatedEndVersion(Optional<Version>(), Optional<Version>(100)), 101);
 	return Void();
 }
 

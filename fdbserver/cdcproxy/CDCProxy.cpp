@@ -43,6 +43,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/CodeProbe.h"
 #include "flow/Error.h"
+#include "flow/Knobs.h"
 #include "flow/ScopeExit.h"
 #include "flow/UnitTest.h"
 #include "flow/genericactors.actor.h"
@@ -128,6 +129,56 @@ struct CDCBufferPassLimits {
 	int64_t hardBufferedBytes;
 	int64_t reservationBytes;
 };
+
+// The payload budget deliberately leaves room for RPC framing below PACKET_LIMIT. The estimate used for individual
+// versions is also conservative: it uses the stream's in-memory accounting, whose MutationRef storage is larger than
+// the serialized mutation envelope.
+constexpr int64_t CDC_PROXY_CONSUME_PACKET_HEADROOM_BYTES = 1 << 20;
+
+// State accumulated while choosing one consume reply. The first excluded version is also the first version that the
+// next consume must retry, so the returned frontier can still advance across versions with no matching mutations.
+struct CDCConsumeReplySelection {
+	Optional<Version> firstExcludedVersion;
+	int64_t selectedBytes = 0;
+	bool firstVersionTooLarge = false;
+};
+
+int64_t estimatedCDCConsumeVersionBytes(VersionedMutationsRef const& versioned) {
+	const size_t mutationBytes = versioned.mutations.expectedSize();
+	if (mutationBytes > static_cast<size_t>(std::numeric_limits<int64_t>::max() - sizeof(VersionedMutationsRef))) {
+		return std::numeric_limits<int64_t>::max();
+	}
+	return static_cast<int64_t>(sizeof(VersionedMutationsRef) + mutationBytes);
+}
+
+// Returns true when this complete version fits in the current reply. Versions must be considered in increasing order.
+bool selectCDCConsumeReplyVersion(CDCConsumeReplySelection* selection,
+                                  Version begin,
+                                  Version version,
+                                  int64_t versionBytes,
+                                  int64_t byteLimit) {
+	ASSERT(selection != nullptr);
+	ASSERT(!selection->firstExcludedVersion.present());
+	ASSERT_GE(version, begin);
+	ASSERT_GE(versionBytes, 0);
+	ASSERT_GT(byteLimit, 0);
+
+	if (versionBytes > byteLimit) {
+		selection->firstExcludedVersion = version;
+		selection->firstVersionTooLarge = version == begin;
+		return false;
+	}
+	if (selection->selectedBytes > byteLimit - versionBytes) {
+		selection->firstExcludedVersion = version;
+		return false;
+	}
+	selection->selectedBytes += versionBytes;
+	return true;
+}
+
+Version selectedCDCConsumeReplyThrough(CDCConsumeReplySelection const& selection, Version bufferedThrough) {
+	return selection.firstExcludedVersion.present() ? selection.firstExcludedVersion.get() - 1 : bufferedThrough;
+}
 
 // A transactionally consistent durable-watermark snapshot consumed by one acknowledged-data pop pass.
 struct CDCPopState {
@@ -1488,14 +1539,35 @@ Future<Void> CDCProxy::consume(CDCConsumeRequest request) {
 		}
 
 		CDCConsumeReply reply;
+		CDCConsumeReplySelection selection;
 		for (const auto& versioned : stream->mutations) {
-			if (versioned.version >= begin && versioned.version <= stream->bufferedThrough) {
-				// Retain the already-accounted stream arena instead of copying mutation payloads for every reply.
-				reply.arena.dependsOn(versioned.arena());
-				reply.mutations.push_back(reply.arena, VersionedMutationsRef(versioned.version, versioned.mutations));
+			if (versioned.version < begin) {
+				continue;
 			}
+			if (versioned.version > stream->bufferedThrough) {
+				break;
+			}
+			if (!selectCDCConsumeReplyVersion(&selection,
+			                                  begin,
+			                                  versioned.version,
+			                                  estimatedCDCConsumeVersionBytes(versioned),
+			                                  SERVER_KNOBS->CDC_PROXY_CONSUME_REPLY_BYTES)) {
+				break;
+			}
+			// Retain the already-accounted stream arena instead of copying mutation payloads for every reply.
+			reply.arena.dependsOn(versioned.arena());
+			reply.mutations.push_back(reply.arena, VersionedMutationsRef(versioned.version, versioned.mutations));
 		}
-		reply.lastConsumedVersion = stream->bufferedThrough;
+		if (selection.firstVersionTooLarge) {
+			CODE_PROBE(
+			    true, "CDC proxy rejects one consume version larger than its reply budget", probe::decoration::rare);
+			TraceEvent(SevWarn, "CDCProxyConsumeVersionExceedsReplyLimit", id)
+			    .detail("StreamId", stream->streamId)
+			    .detail("Version", begin)
+			    .detail("ReplyLimit", SERVER_KNOBS->CDC_PROXY_CONSUME_REPLY_BYTES);
+			throw server_overloaded();
+		}
+		reply.lastConsumedVersion = selectedCDCConsumeReplyThrough(selection, stream->bufferedThrough);
 		request.reply.send(reply);
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
@@ -1734,13 +1806,18 @@ Future<Void> CDCProxy::monitorDBInfo(CDCProxyInterface proxy, uint64_t recoveryC
 Future<Void> CDCProxy::run(CDCProxyInterface proxy, uint64_t recoveryCount) {
 	// ENABLE_NATIVE_CDC gates new stream admission, not serving: recovery keeps CDC proxies alive while durable
 	// streams or retired-tag pops drain after the feature is disabled.
-	if (SERVER_KNOBS->MAXIMUM_PEEK_BYTES <= 0 ||
+	if (SERVER_KNOBS->MAXIMUM_PEEK_BYTES <= 0 || SERVER_KNOBS->CDC_PROXY_CONSUME_REPLY_BYTES <= 0 ||
+	    FLOW_KNOBS->PACKET_LIMIT <= CDC_PROXY_CONSUME_PACKET_HEADROOM_BYTES ||
+	    SERVER_KNOBS->CDC_PROXY_CONSUME_REPLY_BYTES >
+	        FLOW_KNOBS->PACKET_LIMIT - CDC_PROXY_CONSUME_PACKET_HEADROOM_BYTES ||
 	    SERVER_KNOBS->CDC_PROXY_BUFFER_BYTES <= SERVER_KNOBS->MAXIMUM_PEEK_BYTES ||
 	    SERVER_KNOBS->CDC_PROXY_CONSUME_POLL_TIMEOUT <= 0 || SERVER_KNOBS->CDC_PROXY_POP_MIN_INTERVAL < 0 ||
 	    SERVER_KNOBS->CDC_PROXY_POP_SCAN_INTERVAL <= 0) {
 		TraceEvent(SevError, "InvalidCDCProxyMemoryConfiguration", id)
 		    .detail("BufferBytes", SERVER_KNOBS->CDC_PROXY_BUFFER_BYTES)
 		    .detail("MaximumPeekBytes", SERVER_KNOBS->MAXIMUM_PEEK_BYTES)
+		    .detail("ConsumeReplyBytes", SERVER_KNOBS->CDC_PROXY_CONSUME_REPLY_BYTES)
+		    .detail("PacketLimit", FLOW_KNOBS->PACKET_LIMIT)
 		    .detail("ConsumePollTimeout", SERVER_KNOBS->CDC_PROXY_CONSUME_POLL_TIMEOUT)
 		    .detail("PopMinInterval", SERVER_KNOBS->CDC_PROXY_POP_MIN_INTERVAL)
 		    .detail("PopScanInterval", SERVER_KNOBS->CDC_PROXY_POP_SCAN_INTERVAL);
@@ -1855,6 +1932,33 @@ TEST_CASE("/NativeCDC/ProxyBufferPassLimits") {
 	ASSERT(!calculateBufferPassLimits(300, 100, 3).present());
 	ASSERT(!calculateBufferPassLimits(std::numeric_limits<int64_t>::max(), std::numeric_limits<int64_t>::max(), 2)
 	            .present());
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/ProxyConsumeReplySelection") {
+	CDCConsumeReplySelection chunked;
+	ASSERT(selectCDCConsumeReplyVersion(&chunked, 100, 100, 60, 100));
+	ASSERT(selectCDCConsumeReplyVersion(&chunked, 100, 102, 40, 100));
+	ASSERT(!selectCDCConsumeReplyVersion(&chunked, 100, 104, 1, 100));
+	ASSERT_EQ(chunked.selectedBytes, 100);
+	ASSERT(chunked.firstExcludedVersion.present());
+	ASSERT_EQ(chunked.firstExcludedVersion.get(), 104);
+	ASSERT_EQ(selectedCDCConsumeReplyThrough(chunked, 110), 103);
+	ASSERT(!chunked.firstVersionTooLarge);
+
+	// A gap without matching mutations still advances the cursor before an oversized version is retried.
+	CDCConsumeReplySelection gapBeforeOversized;
+	ASSERT(!selectCDCConsumeReplyVersion(&gapBeforeOversized, 100, 102, 101, 100));
+	ASSERT_EQ(selectedCDCConsumeReplyThrough(gapBeforeOversized, 110), 101);
+	ASSERT(!gapBeforeOversized.firstVersionTooLarge);
+
+	CDCConsumeReplySelection oversizedAtFrontier;
+	ASSERT(!selectCDCConsumeReplyVersion(&oversizedAtFrontier, 102, 102, 101, 100));
+	ASSERT_EQ(selectedCDCConsumeReplyThrough(oversizedAtFrontier, 110), 101);
+	ASSERT(oversizedAtFrontier.firstVersionTooLarge);
+
+	CDCConsumeReplySelection noMutations;
+	ASSERT_EQ(selectedCDCConsumeReplyThrough(noMutations, 110), 110);
 	return Void();
 }
 

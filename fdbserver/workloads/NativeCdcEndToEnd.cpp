@@ -70,6 +70,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	int assignmentPublicationChecks;
 	bool testProxyReplacement;
 	bool testMemoryBound;
+	bool testReplyChunking;
 	bool testOversizedPeek;
 	bool testDurableAckScan;
 	bool testDelayedRetention;
@@ -245,6 +246,11 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		ASSERT_GE(keyCount, 4);
 		co_await addStream(cx, KeyRange(KeyRangeRef(keyForIndex(0), keyForIndex(2))));
 		co_await addStream(cx, KeyRange(KeyRangeRef(keyForIndex(2), keyForIndex(4))));
+	}
+
+	Future<Void> initializeReplyChunkingStream(Database cx) {
+		ASSERT_GE(keyCount, 2);
+		co_await addStream(cx, KeyRange(KeyRangeRef(keyForIndex(0), keyForIndex(keyCount))));
 	}
 
 	Future<Void> validatePublicLifecycle(Database cx) {
@@ -740,6 +746,96 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		co_await validatePopProgressUnderContinuousRequests(cx, firstStreamId, &proxy);
 	}
 
+	Future<Void> validateReplyChunking(Database cx) {
+		ASSERT_EQ(streams.size(), 1);
+		ASSERT_GE(keyCount, 2);
+		auto& stream = streams.front();
+		struct ExpectedVersion {
+			Version version;
+			std::vector<std::pair<Key, Value>> values;
+		};
+		std::vector<ExpectedVersion> expected;
+		for (int i = 0; i < 8; ++i) {
+			std::vector<std::pair<Key, Value>> values;
+			values.emplace_back(keyForIndex(0), Value(std::string(memoryTestValueBytes, static_cast<char>('a' + i))));
+			values.emplace_back(keyForIndex(1), Value(std::string(memoryTestValueBytes, static_cast<char>('A' + i))));
+			const Version committed = co_await writeValues(cx, values);
+			if (!expected.empty()) {
+				ASSERT_GT(committed, expected.back().version);
+			}
+			expected.push_back(ExpectedVersion{ committed, std::move(values) });
+		}
+		const Version lastVersion = expected.back().version;
+
+		// Prime one proxy-owned retained buffer without acknowledging. The first consume starts with several complete
+		// TLog versions available, so it also exercises raw-peek truncation before the resumed consumer exercises the
+		// proxy-to-client reply bound.
+		const double primeDeadline = now() + operationTimeout;
+		while (stream.consumer->position().lastConsumedVersion < lastVersion) {
+			const Version previous = stream.consumer->position().lastConsumedVersion;
+			CDCConsumeReply reply = co_await timeoutError(stream.consumer->consume(), operationTimeout);
+			if (reply.lastConsumedVersion == previous) {
+				ASSERT_LT(now(), primeDeadline);
+				co_await delay(0.1);
+				continue;
+			}
+			ASSERT_GT(reply.lastConsumedVersion, previous);
+		}
+
+		Reference<NativeCdcConsumer> resumed =
+		    resumeNativeCdcConsumer(cx, CDCCursor(stream.consumer->position().streamId, invalidVersion));
+		std::set<Version> observedVersions;
+		int replyCount = 0;
+		bool checkedFirstReply = false;
+		const double resumeDeadline = now() + operationTimeout;
+		while (resumed->position().lastConsumedVersion < lastVersion) {
+			const Version previous = resumed->position().lastConsumedVersion;
+			CDCConsumeReply reply = co_await timeoutError(resumed->consume(), operationTimeout);
+			if (reply.lastConsumedVersion == previous) {
+				ASSERT_LT(now(), resumeDeadline);
+				co_await delay(0.1);
+				continue;
+			}
+			ASSERT_GT(reply.lastConsumedVersion, previous);
+			if (!checkedFirstReply) {
+				ASSERT_LT(reply.lastConsumedVersion, lastVersion);
+				checkedFirstReply = true;
+			}
+			for (const auto& versioned : reply.mutations) {
+				ASSERT_GT(versioned.version, previous);
+				ASSERT_LE(versioned.version, reply.lastConsumedVersion);
+				auto expectedVersion = std::find_if(expected.begin(), expected.end(), [&](const auto& item) {
+					return item.version == versioned.version;
+				});
+				ASSERT(expectedVersion != expected.end());
+				ASSERT(observedVersions.insert(versioned.version).second);
+				ASSERT_EQ(versioned.mutations.size(), expectedVersion->values.size());
+				for (const auto& [key, value] : expectedVersion->values) {
+					const bool found = std::any_of(
+					    versioned.mutations.begin(), versioned.mutations.end(), [&](const MutationRef& mutation) {
+						    return mutation.type == MutationRef::SetValue && mutation.param1 == key &&
+						           mutation.param2 == value;
+					    });
+					ASSERT(found);
+				}
+			}
+			for (const auto& item : expected) {
+				if (item.version <= reply.lastConsumedVersion) {
+					ASSERT(observedVersions.contains(item.version));
+				}
+			}
+			co_await timeoutError(resumed->acknowledge(), operationTimeout);
+			++replyCount;
+		}
+		ASSERT(checkedFirstReply);
+		ASSERT_GT(replyCount, 1);
+		ASSERT_EQ(observedVersions.size(), expected.size());
+
+		co_await timeoutError(removeNativeCdcStreamClient(cx, stream.name), operationTimeout);
+		streams.clear();
+		co_await timeoutError(waitForRetiredTagCleanup(cx), operationTimeout);
+	}
+
 	Future<Void> validateOversizedPeek(Database cx) {
 		ASSERT_EQ(streams.size(), 2);
 		// Both mutations share one CDC tag and commit version, so the raw TLog reply exceeds its cap. Each mutation
@@ -1225,6 +1321,10 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			co_await validateOversizedPeek(cx);
 			co_return;
 		}
+		if (testReplyChunking) {
+			co_await validateReplyChunking(cx);
+			co_return;
+		}
 		if (testDurableAckScan) {
 			co_await validateDurableAcknowledgementScan(cx);
 			co_return;
@@ -1304,6 +1404,7 @@ public:
 		assignmentPublicationChecks = getOption(options, "assignmentPublicationChecks"_sr, 0);
 		testProxyReplacement = getOption(options, "testProxyReplacement"_sr, false);
 		testMemoryBound = getOption(options, "testMemoryBound"_sr, false);
+		testReplyChunking = getOption(options, "testReplyChunking"_sr, false);
 		testOversizedPeek = getOption(options, "testOversizedPeek"_sr, false);
 		testDurableAckScan = getOption(options, "testDurableAckScan"_sr, false);
 		testDelayedRetention = getOption(options, "testDelayedRetention"_sr, false);
@@ -1327,6 +1428,7 @@ public:
 		ASSERT_GT(memoryTestValueBytes, 0);
 		ASSERT_GE(retentionValidationDelay, 0.0);
 		ASSERT(!(prepareRestartDrain && drainAfterRestart));
+		ASSERT(!(testReplyChunking && (testOversizedPeek || testDurableAckScan)));
 		ASSERT(!(testOversizedPeek && testDurableAckScan));
 		ASSERT(!(testRetiredSharedTagSnapshot && testRetiredRecovery));
 		ASSERT(!testRetiredIncompleteLogSystem || testRetiredRecovery);
@@ -1350,6 +1452,9 @@ public:
 		}
 		if (testOversizedPeek) {
 			return initializeOversizedPeekStreams(cx);
+		}
+		if (testReplyChunking) {
+			return initializeReplyChunkingStream(cx);
 		}
 		return initializeStreams(cx);
 	}

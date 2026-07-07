@@ -519,11 +519,24 @@ that consume fails with `server_overloaded`; operators must configure the
 budget to hold both the largest raw peek and the largest supported filtered
 transaction for one stream.
 
+The TLog applies `MAXIMUM_PEEK_BYTES` at complete commit-version boundaries.
+When several individually valid versions would exceed one raw reply, it
+returns the prefix and leaves the next version for a later peek. It reports an
+oversized CDC peek only when one complete version cannot fit by itself; a
+multi-version batch must not permanently overload a stream merely because the
+ordinary TLog batching target is larger than the CDC reply budget.
+
 A consume operation supplies a cursor. The proxy returns buffered or newly
 peeked data after the cursor position and a position through which the
 consumer may acknowledge after processing. If a stream is removed while a
 consume is blocked, reconciliation wakes the request and it fails rather than
 waiting on a data-change trigger for an inactive stream.
+Each reply is also bounded by `CDC_PROXY_CONSUME_REPLY_BYTES` (10 MB by
+default) and contains only complete commit-version groups. If more buffered
+data is available, the reply stops before the next version and advances
+`lastConsumedVersion` only through the delivered prefix, including any empty
+version gap before that next mutation. If one complete filtered version cannot
+fit in the reply budget, the consume fails with `server_overloaded`.
 The owning proxy accepts a cursor only when the position has already been
 delivered by that owner or is covered by the stream's durable acknowledgement
 watermark. A fabricated or otherwise unproven cursor is rejected instead of
@@ -809,6 +822,9 @@ The basic native CDC workload covers:
 * Bounded raw-plus-filtered proxy memory, consume-lease cleanup after client
   cancellation and unrelated assignment changes, and rejection of concurrent
   consumers for one stream.
+* Version-boundary chunking for multi-version raw peeks and retained consume
+  replies, including resume from a durable cursor after unacknowledged data
+  accumulates in the proxy.
 * Oversized raw-peek rejection scoped to consumers blocked at that version, so
   a same-tag stream registered at a later frontier continues to make progress.
 
