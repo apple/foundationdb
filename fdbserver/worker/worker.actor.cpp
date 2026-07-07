@@ -47,7 +47,7 @@
 #include "flow/TDMetric.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "MetricLogger.actor.h"
+#include "MetricLogger.h"
 #include "fdbserver/backupworker/BackupWorker.h"
 #include "fdbserver/backupworker/RangePartitionedBackupWorker.h"
 #include "fdbserver/clustercontroller/ClusterController.h"

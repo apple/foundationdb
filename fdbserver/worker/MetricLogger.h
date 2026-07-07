@@ -1,5 +1,5 @@
 /*
- * MetricLogger.actor.h
+ * MetricLogger.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,21 +20,10 @@
 
 #pragma once
 
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_WORKER_METRICLOGGER_ACTOR_G_H)
-#define FDBSERVER_WORKER_METRICLOGGER_ACTOR_G_H
-#include "MetricLogger.actor.g.h"
-#elif !defined(FDBSERVER_WORKER_METRICLOGGER_ACTOR_H)
-#define FDBSERVER_WORKER_METRICLOGGER_ACTOR_H
-
 #include "fdbclient/FDBTypes.h"
 #include "flow/flow.h"
 
 class Database;
 
-#include "flow/actorcompiler.h" // This must be the last #include
-
-ACTOR Future<Void> runMetrics(Future<Database> fcx, Key metricsPrefix);
-ACTOR Future<Void> runMetrics();
-
-#include "flow/unactorcompiler.h"
-#endif
+Future<Void> runMetrics(Future<Database> fcx, Key metricsPrefix);
+Future<Void> runMetrics();
