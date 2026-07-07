@@ -127,9 +127,9 @@ inline bool operator<(const ExtStringRef& lhs, const WriteMapEntry& rhs) {
 
 class WriteMap {
 private:
-	typedef PTreeImpl::PTree<WriteMapEntry> PTreeT;
-	typedef PTreeImpl::PTreeFinger<WriteMapEntry> PTreeFingerT;
-	typedef Reference<PTreeT> Tree;
+	using PTreeT = PTreeImpl::PTree<WriteMapEntry>;
+	using PTreeFingerT = PTreeImpl::PTreeFinger<WriteMapEntry>;
+	using Tree = Reference<PTreeT>;
 
 public:
 	explicit WriteMap(Arena* arena) : arena(arena), writeMapEmpty(true), ver(-1), scratch_iterator(this) {

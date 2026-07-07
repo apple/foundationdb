@@ -522,8 +522,9 @@ public:
 				if (done) {
 					getBatchSize = 1;
 					break;
-				} else
+				} else {
 					getBatchSize = std::min<unsigned int>(getBatchSize * 2, maxConcurrentTasks);
+				}
 			}
 			++taskBucket->dispatchSlotChecksComplete;
 

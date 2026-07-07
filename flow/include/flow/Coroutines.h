@@ -245,7 +245,7 @@ private:
 
 public:
 	explicit Generator(handle_type h) : handle(h) {}
-	Generator() {}
+	Generator() = default;
 	explicit(false) Generator(Generator const& other) : handle(other.handle) {
 		if (handle) {
 			handle.promise().addRef();

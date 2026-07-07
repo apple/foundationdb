@@ -47,7 +47,6 @@
 #include <unordered_set>
 #include <type_traits>
 #include <sstream>
-#include <string_view>
 #include <fmt/format.h>
 
 // TrackIt is a zero-size class for tracking constructions, destructions, and assignments of instances
@@ -61,7 +60,7 @@
 // of a class without producing an "inaccessible due to ambiguity" error.
 template <class T>
 struct TrackIt {
-	typedef TrackIt<T> TrackItType;
+	using TrackItType = TrackIt<T>;
 // Put TRACKIT_ASSIGN into any operator= functions for which you want assignments tracked
 #define TRACKIT_ASSIGN(o) *(TrackItType*)this = *(TrackItType*)&(o)
 
@@ -305,7 +304,7 @@ public:
 	T& contents() { return *(T*)this; }
 	T const& contents() const { return *(T const*)this; }
 
-	Standalone() {}
+	Standalone() = default;
 	explicit(false) Standalone(const T& t) : Arena(t.expectedSize()), T(arena(), t) {}
 	Standalone<T>& operator=(const T& t) {
 		Arena old = std::move(arena()); // We want to defer the destruction of the arena until after we have copied t,
@@ -782,7 +781,7 @@ struct dynamic_size_traits<StringRef> : std::true_type {
 };
 
 inline bool operator==(const StringRef& lhs, const StringRef& rhs) {
-	if (lhs.size() == 0 && rhs.size() == 0) {
+	if (lhs.empty() && rhs.empty()) {
 		return true;
 	}
 	ASSERT(lhs.size() >= 0);
@@ -818,7 +817,7 @@ inline bool operator>=(const StringRef& lhs, const StringRef& rhs) {
 	return !(lhs < rhs);
 }
 
-typedef uint64_t Word;
+using Word = uint64_t;
 // Get the number of prefix bytes that are the same between a and b, up to their common length of cl
 static inline int commonPrefixLength(uint8_t const* ap, uint8_t const* bp, int cl) {
 	int i = 0;
@@ -883,7 +882,7 @@ enum class VecSerStrategy { FlatBuffers, String };
 
 template <class T, VecSerStrategy>
 struct VectorRefPreserializer {
-	VectorRefPreserializer() {}
+	VectorRefPreserializer() = default;
 	explicit(false) VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) noexcept {}
 	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) noexcept {
 		return *this;
@@ -1311,15 +1310,10 @@ public:
 
 public: // Construction
 	static_assert(std::is_trivially_destructible_v<T>);
-	SmallVectorRef() {}
+	SmallVectorRef() = default;
 	explicit(false) SmallVectorRef(const SmallVectorRef<T, InlineMembers>& other)
 	  : m_size(other.m_size), arr(other.arr), data(other.data) {}
-	SmallVectorRef& operator=(const SmallVectorRef<T, InlineMembers>& other) {
-		m_size = other.m_size;
-		arr = other.arr;
-		data = other.data;
-		return *this;
-	}
+	SmallVectorRef& operator=(const SmallVectorRef<T, InlineMembers>&) = default;
 
 	template <class T2 = T, int IM = InlineMembers>
 	    requires(!flow_ref<T2>::value)

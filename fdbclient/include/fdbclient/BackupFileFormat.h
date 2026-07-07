@@ -43,7 +43,7 @@ struct StringRefReader {
 
 	// Return a T from the current read position and advance read pos
 	template <typename T>
-	const T consume() {
+	T consume() {
 		return *(const T*)consume(sizeof(T));
 	}
 
