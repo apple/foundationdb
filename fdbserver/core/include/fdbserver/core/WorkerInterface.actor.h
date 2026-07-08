@@ -33,6 +33,8 @@
 #include "fdbclient/ConsistencyScanInterface.h"
 #include "fdbserver/core/ResolverInterface.h"
 #include "fdbclient/ClientBooleanParams.h"
+#include "fdbclient/ProcessClass.h"
+#include "fdbserver/core/ProcessClassRecruitment.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbclient/FDBTypes.h"
@@ -223,8 +225,7 @@ struct RegisterWorkerReply {
 	ProcessClass processClass;
 	ClusterControllerPriorityInfo priorityInfo;
 
-	RegisterWorkerReply()
-	  : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown) {}
+	RegisterWorkerReply() : priorityInfo(recruitment::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown) {}
 	RegisterWorkerReply(ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo)
 	  : processClass(processClass), priorityInfo(priorityInfo) {}
 
@@ -402,7 +403,7 @@ struct RegisterWorkerRequest {
 	Optional<UID> clusterId;
 
 	RegisterWorkerRequest()
-	  : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown), degraded(false) {}
+	  : priorityInfo(recruitment::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown), degraded(false) {}
 	RegisterWorkerRequest(WorkerInterface wi,
 	                      ProcessClass initialClass,
 	                      ProcessClass processClass,
@@ -1022,37 +1023,37 @@ struct Role {
 	std::string abbreviation;
 	bool includeInTraceRoles;
 
-	static const Role& get(ProcessClass::ClusterRole role) {
+	static const Role& get(recruitment::ClusterRole role) {
 		switch (role) {
-		case ProcessClass::Storage:
+		case recruitment::Storage:
 			return STORAGE_SERVER;
-		case ProcessClass::TLog:
+		case recruitment::TLog:
 			return TRANSACTION_LOG;
-		case ProcessClass::CommitProxy:
+		case recruitment::CommitProxy:
 			return COMMIT_PROXY;
-		case ProcessClass::GrvProxy:
+		case recruitment::GrvProxy:
 			return GRV_PROXY;
-		case ProcessClass::Master:
+		case recruitment::Master:
 			return MASTER;
-		case ProcessClass::Resolver:
+		case recruitment::Resolver:
 			return RESOLVER;
-		case ProcessClass::LogRouter:
+		case recruitment::LogRouter:
 			return LOG_ROUTER;
-		case ProcessClass::ClusterController:
+		case recruitment::ClusterController:
 			return CLUSTER_CONTROLLER;
-		case ProcessClass::DataDistributor:
+		case recruitment::DataDistributor:
 			return DATA_DISTRIBUTOR;
-		case ProcessClass::Ratekeeper:
+		case recruitment::Ratekeeper:
 			return RATEKEEPER;
-		case ProcessClass::Backup:
+		case recruitment::Backup:
 			return BACKUP;
-		case ProcessClass::EncryptKeyProxy:
+		case recruitment::EncryptKeyProxy:
 			return ENCRYPT_KEY_PROXY;
-		case ProcessClass::ConsistencyScan:
+		case recruitment::ConsistencyScan:
 			return CONSISTENCYSCAN;
-		case ProcessClass::Worker:
+		case recruitment::Worker:
 			return WORKER;
-		case ProcessClass::NoRole:
+		case recruitment::NoRole:
 		default:
 			ASSERT(false);
 			throw internal_error();

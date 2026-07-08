@@ -24,6 +24,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/ProcessClassRecruitment.h"
 #include "fdbserver/datadistributor/DDTeamCollection.h"
 #include "fdbserver/datadistributor/DataDistributionTeam.h"
 #include "TCInfo.h"
@@ -1471,7 +1472,8 @@ public:
 						p.send(Void());
 				}
 
-				if (server->getLastKnownClass().machineClassFitness(ProcessClass::Storage) > ProcessClass::UnsetFit) {
+				if (recruitment::machineClassFitness(server->getLastKnownClass(), recruitment::Storage) >
+				    recruitment::UnsetFit) {
 					// NOTE: Should not use self->healthyTeamCount > 0 in if statement, which will cause status bouncing
 					// between healthy and unhealthy and result in OOM (See PR#2228).
 
@@ -1481,7 +1483,9 @@ public:
 						    .detail("Address", server->getLastKnownInterface().address())
 						    .detail("Reason", "WrongMachineClass")
 						    .detail("OptimalTeamCount", self->optimalTeamCount)
-						    .detail("Fitness", server->getLastKnownClass().machineClassFitness(ProcessClass::Storage));
+						    .detail(
+						        "Fitness",
+						        recruitment::machineClassFitness(server->getLastKnownClass(), recruitment::Storage));
 						status.isUndesired = true;
 					}
 					otherChanges.push_back(self->zeroOptimalTeams.onChange());

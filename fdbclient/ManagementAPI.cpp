@@ -3656,7 +3656,7 @@ TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 			                        false,
 			                        1,
 			                        data.locality,
-			                        ProcessClass(ProcessClass::CoordinatorClass, ProcessClass::CommandLineSource),
+			                        makeReference<simulator::ProcessInfoMetadata>("coordinator"),
 			                        "",
 			                        "",
 			                        currentProtocolVersion(),

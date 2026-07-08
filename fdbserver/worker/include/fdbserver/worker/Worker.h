@@ -28,6 +28,7 @@
 #include "fdbclient/ClientWorkerInterface.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/ProcessClass.h"
 #include "fdbrpc/Locality.h"
 #include "flow/flow.h"
 

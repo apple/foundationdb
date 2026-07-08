@@ -31,6 +31,7 @@ the contents of the system key space.
 #include <map>
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/DatabaseConfiguration.h"
+#include "fdbclient/ProcessClass.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/Subspace.h"
 #include "fdbclient/SystemData.h"
@@ -358,7 +359,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 					if (!newConfig.regions.empty()) {
 						std::map<Optional<Key>, std::set<Optional<Key>>> dcId_zoneIds;
 						for (auto& it : fWorkers.get()) {
-							if (it.processClass.machineClassFitness(ProcessClass::Storage) <= ProcessClass::WorstFit) {
+							if (it.processClass.canBecomeStorageServer()) {
 								dcId_zoneIds[it.locality.dcId()].insert(it.locality.zoneId());
 							}
 						}
@@ -380,7 +381,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 					} else {
 						std::set<Optional<Key>> zoneIds;
 						for (auto& it : fWorkers.get()) {
-							if (it.processClass.machineClassFitness(ProcessClass::Storage) <= ProcessClass::WorstFit) {
+							if (it.processClass.canBecomeStorageServer()) {
 								zoneIds.insert(it.locality.zoneId());
 							}
 						}

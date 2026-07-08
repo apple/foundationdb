@@ -26,6 +26,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/Knobs.h"
+#include "fdbclient/ProcessClass.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/DatabaseContext.h"
