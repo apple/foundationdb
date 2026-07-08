@@ -103,6 +103,7 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( LOCATION_CACHE_PEER_EVICTOR_ENABLED,          false ); if( randomize && isSimulated ) LOCATION_CACHE_PEER_EVICTOR_ENABLED = deterministicRandom()->coinflip();
 	init( LOCATION_CACHE_PEER_EVICTOR_DELAY,                    60.0 );
 	init( LOCATION_CACHE_PEER_EVICTOR_FAILED_THRESHOLD,      0 );
+	init( LOCATION_CACHE_PEER_EVICTOR_SCAN_CHUNK,         1000000 ); if( randomize && BUGGIFY ) LOCATION_CACHE_PEER_EVICTOR_SCAN_CHUNK = deterministicRandom()->randomInt(1, 11);
 
 	init( GET_RANGE_SHARD_LIMIT,                     2 );
 	init( WARM_RANGE_SHARD_LIMIT,                  100 );

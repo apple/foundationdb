@@ -126,6 +126,12 @@ public:
 	// Expected failures per interval ~ LOCATION_CACHE_PEER_EVICTOR_DELAY /
 	//                                   (SERVER_REQUEST_INTERVAL + CONNECTION_MONITOR_TIMEOUT)
 	int LOCATION_CACHE_PEER_EVICTOR_FAILED_THRESHOLD;
+	// Number of location cache ranges the address-based invalidation scan processes
+	// before yielding to the main event loop.
+	// Value must be >= 1 (evictor will assert otherwise).
+	// If this value is > LOCATION_CACHE_EVICTION_SIZE, then this will boil down to blocking
+	// invalidation without any yields in between.
+	int LOCATION_CACHE_PEER_EVICTOR_SCAN_CHUNK;
 
 	int GET_RANGE_SHARD_LIMIT;
 	int WARM_RANGE_SHARD_LIMIT;

@@ -309,7 +309,6 @@ public:
 	Reference<LocationInfo> setCachedLocation(const KeyRangeRef&, const std::vector<struct StorageServerInterface>&);
 	void invalidateCache(const Optional<KeyRef>& tenantPrefix, const KeyRef& key, Reverse isBackward = Reverse::False);
 	void invalidateCache(const Optional<KeyRef>& tenantPrefix, const KeyRangeRef& keys);
-	void invalidateCacheByAddresses(const std::unordered_set<NetworkAddress>& addresses);
 
 	// Records that `endpoint` is failed on a healthy server.
 	void setFailedEndpointOnHealthyServer(const Endpoint& endpoint);
