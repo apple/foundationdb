@@ -1251,7 +1251,7 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 		// part of the transaction sub system.
 		// Note that we don't need to calculate recovered peer in this case since all the recently closed peers are
 		// considered permanently closed peers.
-		for (const auto& address : FlowTransport::transport().healthMonitor()->getRecentClosedPeers()) {
+		for (const auto& address : FlowTransport::transport().getRecentClosedPeers()) {
 			if (allPeers.find(address) != allPeers.end()) {
 				// We have checked this peer in the above for loop.
 				continue;

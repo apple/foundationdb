@@ -26,7 +26,7 @@
 #include "fdbserver/core/BackupPartitionMap.h"
 #include "fdbserver/core/BackupProgress.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/PartitionMapMessage.h"
+#include "PartitionMapMessage.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/logsystem/LogSystemConsumer.h"
