@@ -150,8 +150,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// Hard cap on total relocations DD tracks (queued + in-flight). 1000 corresponds to a 500-server
 	// cluster with two concurrent shard moves per storage server.  We have observed large clusters doing
 	// 25-30GB in flight, or closer to 100 shards at a time, so this has plenty of margin of safety
-	// built in.
-	init( DD_MAX_PIPELINE_MOVES,                                1000 ); if( randomize && BUGGIFY ) DD_MAX_PIPELINE_MOVES = 5;
+	// built in.  For simulation, we don't really know how many servers there are, but 10 seems like a good
+	// guess (thus 20 moves).  Do not buggify this too small: testing under artificial scarcity results in
+	// uninteresting degenerate cases.
+	init( DD_MAX_PIPELINE_MOVES,                                1000 ); if( randomize && BUGGIFY ) DD_MAX_PIPELINE_MOVES = 20;
 	init( DD_REBALANCE_RESET_AMOUNT,                              30 );
 	init( INFLIGHT_PENALTY_HEALTHY,                              1.0 );
 	init( INFLIGHT_PENALTY_UNHEALTHY,                          500.0 );
