@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/BackupAgent.h"
+#include "fdbclient/BackupFileFormat.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/SystemData.h"
