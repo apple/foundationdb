@@ -46,7 +46,7 @@ bool isBlobstoreUrl(const std::string& url);
 class IBackupFile {
 public:
 	explicit IBackupFile(const std::string& fileName) : m_fileName(fileName) {}
-	virtual ~IBackupFile() {}
+	virtual ~IBackupFile() = default;
 	// Backup files are append-only and cannot have more than 1 append outstanding at once.
 	virtual Future<Void> append(const void* data, int len) = 0;
 	// Non-virtual size_t overload: safely chunks large writes so len never overflows the int parameter
@@ -273,8 +273,8 @@ public:
 	virtual void addref() = 0;
 	virtual void delref() = 0;
 
-	IBackupContainer() {}
-	virtual ~IBackupContainer() {}
+	IBackupContainer() = default;
+	virtual ~IBackupContainer() = default;
 
 	// Create the container
 	virtual Future<Void> create() = 0;

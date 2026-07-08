@@ -26,7 +26,7 @@
 #include "bindings/flow/fdb_flow.h"
 #include "fdbclient/TupleVersionstamp.h"
 
-typedef TupleVersionstamp Versionstamp;
+using Versionstamp = TupleVersionstamp;
 
 namespace FDB {
 struct Uuid {
@@ -49,7 +49,7 @@ private:
 };
 
 struct Tuple {
-	Tuple() {}
+	Tuple() = default;
 
 	static Tuple unpack(StringRef const& str);
 

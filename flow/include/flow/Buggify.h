@@ -107,7 +107,7 @@ inline std::map<std::pair<std::string, int>, bool> SwiftGeneralSBVar;
 
 inline bool getGeneralSBVar(const char* file, const int line) {
 	const auto paired = std::make_pair(std::string(file), line);
-	if (SwiftGeneralSBVar.count(paired)) [[likely]] {
+	if (SwiftGeneralSBVar.contains(paired)) [[likely]] {
 		return SwiftGeneralSBVar[paired];
 	}
 

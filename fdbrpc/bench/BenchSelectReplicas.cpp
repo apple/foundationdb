@@ -44,7 +44,7 @@ static void bench_select_replicas(int repCount, benchmark::State& state) {
 
 	Reference<LocalitySet> fromServersSet =
 	    createTestLocalityMap(indexes, dcTotal, szTotal, rackTotal, slotTotal, independentItems, independentTotal);
-	LocalityGroup* fromServersGroup = (LocalityGroup*)fromServersSet.getPtr();
+	auto* fromServersGroup = (LocalityGroup*)fromServersSet.getPtr();
 
 	const Reference<LocalitySet> alreadyServersSet = makeReference<LocalityGroup>();
 

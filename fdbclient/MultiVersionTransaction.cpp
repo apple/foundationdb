@@ -2020,7 +2020,7 @@ std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPe
 			TraceEvent("CopyingExternalClient")
 			    .detail("FileName", filename)
 			    .detail("LibraryPath", path)
-			    .detail("TempPath", tempName);
+			    .detail("TempPath", std::string(tempName));
 
 			constexpr size_t buf_sz = 4096;
 			char buf[buf_sz];

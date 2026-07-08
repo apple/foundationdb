@@ -44,7 +44,7 @@ public:
 	void addref() override { ReferenceCounted<AsyncFileChaos>::addref(); }
 	void delref() override { ReferenceCounted<AsyncFileChaos>::delref(); }
 
-	virtual StringRef getClassName() override { return "AsyncFileReadAheadCache"_sr; }
+	StringRef getClassName() override { return "AsyncFileReadAheadCache"_sr; }
 
 	double getDelay() const {
 		double delayFor = 0.0;
@@ -53,14 +53,14 @@ public:
 
 		auto res = g_network->global(INetwork::enDiskFailureInjector);
 		if (res) {
-			DiskFailureInjector* delayInjector = static_cast<DiskFailureInjector*>(res);
+			auto* delayInjector = static_cast<DiskFailureInjector*>(res);
 			delayFor = delayInjector->getDiskDelay();
 
 			// increment the metric for disk delays
 			if (delayFor > 0.0) {
 				auto res = g_network->global(INetwork::enChaosMetrics);
 				if (res) {
-					ChaosMetrics* chaosMetrics = static_cast<ChaosMetrics*>(res);
+					auto* chaosMetrics = static_cast<ChaosMetrics*>(res);
 					chaosMetrics->diskDelays++;
 				}
 			}
@@ -109,7 +109,7 @@ public:
 					// increment the metric for bit flips
 					auto chaosMetricsPointer = g_network->global(INetwork::enChaosMetrics);
 					if (chaosMetricsPointer) {
-						ChaosMetrics* chaosMetrics = static_cast<ChaosMetrics*>(chaosMetricsPointer);
+						auto* chaosMetrics = static_cast<ChaosMetrics*>(chaosMetricsPointer);
 						chaosMetrics->bitFlips++;
 					}
 				}

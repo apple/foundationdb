@@ -167,7 +167,7 @@ struct KeyRangeLocationInfo {
 	KeyRange range;
 	Reference<LocationInfo> locations;
 
-	KeyRangeLocationInfo() {}
+	KeyRangeLocationInfo() = default;
 	KeyRangeLocationInfo(KeyRange range, Reference<LocationInfo> locations) : range(range), locations(locations) {}
 };
 

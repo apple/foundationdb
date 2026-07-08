@@ -818,13 +818,11 @@ void LogSystemConsumer::popLogRouter(Version upTo, Tag tag, Version durableKnown
 						    std::make_pair(upTo, durableKnownCommittedVersion);
 					}
 					if (prev == 0) {
-						ls.popActors.add(
-						    LogSystem::popFromLog(&ls,
-						                          log,
-						                          tag,
-						                          /*delayBeforePop=*/0.0,
-						                          /*popLogRouter=*/true)); // Fast pop time because log routers can only
-						                                                   // hold 5 seconds of data.
+						ls.popActors.add(ls.popFromLog(log,
+						                               tag,
+						                               /*delayBeforePop=*/0.0,
+						                               /*popLogRouter=*/true)); // Fast pop time because log routers can
+						                                                        // only hold 5 seconds of data.
 					}
 				}
 			}
@@ -851,8 +849,8 @@ void LogSystemConsumer::popLogRouter(Version upTo, Tag tag, Version durableKnown
 								    std::make_pair(upTo, durableKnownCommittedVersion);
 							}
 							if (prev == 0) {
-								ls.popActors.add(LogSystem::popFromLog(
-								    &ls, log, tag, /*delayBeforePop=*/0.0, /*popLogRouter=*/true));
+								ls.popActors.add(
+								    ls.popFromLog(log, tag, /*delayBeforePop=*/0.0, /*popLogRouter=*/true));
 							}
 						}
 					}
@@ -891,8 +889,7 @@ void LogSystemConsumer::pop(Version upTo, Tag tag, Version durableKnownCommitted
 				}
 				if (prev == 0) {
 					// pop tag from log upto version defined in ls.outstandingPops[].first
-					ls.popActors.add(
-					    LogSystem::popFromLog(&ls, log, tag, SERVER_KNOBS->POP_FROM_LOG_DELAY, /*popLogRouter=*/false));
+					ls.popActors.add(ls.popFromLog(log, tag, SERVER_KNOBS->POP_FROM_LOG_DELAY, /*popLogRouter=*/false));
 				}
 			}
 		}
@@ -901,7 +898,7 @@ void LogSystemConsumer::pop(Version upTo, Tag tag, Version durableKnownCommitted
 
 Future<Version> LogSystemConsumer::getTxsPoppedVersion() {
 	auto& ls = *logSystem;
-	return LogSystem::getPoppedTxs(&ls);
+	return ls.getPoppedTxs();
 }
 
 Version LogSystemConsumer::getEnd() const {

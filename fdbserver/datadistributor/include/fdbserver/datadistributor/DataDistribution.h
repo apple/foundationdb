@@ -33,7 +33,7 @@
 #include "fdbclient/RunRYWTransaction.h"
 #include "fdbserver/datadistributor/DDTxnProcessor.h"
 #include "fdbserver/datadistributor/ShardsAffectedByTeamFailure.h"
-#include "fdbserver/datadistributor/TCInfo.h"
+#include "fdbserver/datadistributor/DataDistributionTeam.h"
 #include "fdbclient/StorageWiggleMetrics.h"
 #include "fdbclient/DataDistributionConfig.h"
 #include <boost/heap/policies.hpp>
@@ -97,8 +97,8 @@ struct DDShardInfo;
 struct DataMove {
 	DataMove() : meta(DataMoveMetaData()), restore(false), valid(false), cancelled(false) {}
 	explicit DataMove(DataMoveMetaData meta, bool restore)
-	  : meta(std::move(meta)), restore(restore), valid(true), cancelled(meta.getPhase() == DataMoveMetaData::Deleting) {
-	}
+	  : meta(std::move(meta)), restore(restore), valid(true),
+	    cancelled(this->meta.getPhase() == DataMoveMetaData::Deleting) {}
 
 	// Checks if the DataMove is consistent with the shard.
 	void validateShard(const DDShardInfo& shard, KeyRangeRef range, int priority = SERVER_KNOBS->PRIORITY_RECOVER_MOVE);
@@ -154,7 +154,7 @@ private:
 struct GetMetricsRequest {
 	KeyRange keys;
 	Promise<StorageMetrics> reply;
-	GetMetricsRequest() {}
+	GetMetricsRequest() = default;
 	explicit(false) GetMetricsRequest(KeyRange const& keys) : keys(keys) {}
 };
 
@@ -167,7 +167,7 @@ struct GetTopKMetricsReply {
 	};
 	std::vector<KeyRangeStorageMetrics> shardMetrics;
 	double minReadLoad = -1, maxReadLoad = -1;
-	GetTopKMetricsReply() {}
+	GetTopKMetricsReply() = default;
 	GetTopKMetricsReply(std::vector<KeyRangeStorageMetrics> const& m, double minReadLoad, double maxReadLoad)
 	  : shardMetrics(m), minReadLoad(minReadLoad), maxReadLoad(maxReadLoad) {}
 };
@@ -180,7 +180,7 @@ public:
 	Promise<GetTopKMetricsReply> reply; // topK storage metrics
 	double maxReadLoadPerKSecond = 0, minReadLoadPerKSecond = 0; // all returned shards won't exceed this read load
 
-	GetTopKMetricsRequest() {}
+	GetTopKMetricsRequest() = default;
 	explicit(false) GetTopKMetricsRequest(std::vector<KeyRange> const& keys,
 	                                      int topK = 1,
 	                                      double maxReadLoadPerKSecond = std::numeric_limits<double>::max(),
@@ -212,7 +212,7 @@ struct GetMetricsListRequest {
 	int shardLimit;
 	Promise<Standalone<VectorRef<DDMetricsRef>>> reply;
 
-	GetMetricsListRequest() {}
+	GetMetricsListRequest() = default;
 	GetMetricsListRequest(KeyRange const& keys, const int shardLimit) : keys(keys), shardLimit(shardLimit) {}
 };
 
@@ -440,7 +440,7 @@ struct RebalanceStorageQueueRequest {
 	std::vector<ShardsAffectedByTeamFailure::Team> teams;
 	bool primary;
 
-	RebalanceStorageQueueRequest() {}
+	RebalanceStorageQueueRequest() = default;
 	RebalanceStorageQueueRequest(UID serverId,
 	                             const std::vector<ShardsAffectedByTeamFailure::Team>& teams,
 	                             bool primary)
@@ -760,7 +760,7 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	StorageWiggleMetrics metrics;
 	AsyncVar<bool> stopWiggleSignal;
 	// data structures
-	typedef std::pair<StorageMetadataType, UID> MetadataUIDP;
+	using MetadataUIDP = std::pair<StorageMetadataType, UID>;
 	// min-heap
 	boost::heap::skew_heap<MetadataUIDP, boost::heap::mutable_<true>, boost::heap::compare<std::greater<MetadataUIDP>>>
 	    wiggle_pq;

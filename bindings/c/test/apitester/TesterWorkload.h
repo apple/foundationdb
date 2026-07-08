@@ -49,7 +49,7 @@ public:
 // Workload interface
 class IWorkload {
 public:
-	virtual ~IWorkload() {}
+	virtual ~IWorkload() = default;
 
 	// Initialize the workload
 	virtual void init(WorkloadManager* manager) = 0;

@@ -175,8 +175,8 @@ public:
 		if (locks.size() != rLocks.size()) {
 			return false;
 		}
-		std::map<RangeLockUniqueString, RangeLockState>::const_iterator iterator = locks.begin();
-		std::map<RangeLockUniqueString, RangeLockState>::const_iterator rIterator = rLocks.begin();
+		auto iterator = locks.begin();
+		auto rIterator = rLocks.begin();
 		while (iterator != locks.end() && rIterator != rLocks.end()) {
 			if (iterator->first != rIterator->first || iterator->second != rIterator->second) {
 				return false;

@@ -40,7 +40,7 @@ struct OptionalInterface {
 
 	explicit OptionalInterface(UID id) : ident(id) {}
 	explicit OptionalInterface(Interface const& i) : ident(i.id()), iface(i) {}
-	OptionalInterface() {}
+	OptionalInterface() = default;
 
 	std::string toString() const { return ident.toString(); }
 
@@ -141,15 +141,16 @@ struct OldTLogConf {
 	std::set<int8_t>
 	    pseudoLocalities; // Tracking pseudo localities, e.g., tagLocalityLogRouterMapped, used in the old epoch.
 	LogEpoch epoch;
-	int32_t rangeBackupWorkerTags;
+	int32_t rangePartitionedBackupWorkerTags;
 
 	OldTLogConf()
-	  : epochBegin(0), epochEnd(0), recoverAt(0), logRouterTags(0), txsTags(0), epoch(0), rangeBackupWorkerTags(0) {}
+	  : epochBegin(0), epochEnd(0), recoverAt(0), logRouterTags(0), txsTags(0), epoch(0),
+	    rangePartitionedBackupWorkerTags(0) {}
 	std::string toString() const {
-		return format("end: %d tags: %d rangeBackupWorkerTags: %d %s",
+		return format("end: %d tags: %d rangePartitionedBackupWorkerTags: %d %s",
 		              epochEnd,
 		              logRouterTags,
-		              rangeBackupWorkerTags,
+		              rangePartitionedBackupWorkerTags,
 		              describe(tLogs).c_str());
 	}
 
@@ -159,9 +160,10 @@ struct OldTLogConf {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		// FlatBuffer serializers always include all fields regardless of protocol version, so rangeBackupWorkerTags
-		// is unconditionally serialized. Non-FlatBuffer (versioned binary) serializers must gate the field on
-		// hasRangeBackupWorker() to maintain wire compatibility with older peers that don't know about this field.
+		// FlatBuffer serializers always include all fields regardless of protocol version, so
+		// rangePartitionedBackupWorkerTags is unconditionally serialized. Non-FlatBuffer (versioned binary) serializers
+		// must gate the field on hasRangePartitionedBackupWorker() to maintain wire compatibility with older peers that
+		// don't know about this field.
 		if constexpr (is_fb_function<Ar>) {
 			serializer(ar,
 			           tLogs,
@@ -172,11 +174,11 @@ struct OldTLogConf {
 			           txsTags,
 			           epoch,
 			           recoverAt,
-			           rangeBackupWorkerTags);
+			           rangePartitionedBackupWorkerTags);
 		} else {
 			serializer(ar, tLogs, epochBegin, epochEnd, logRouterTags, pseudoLocalities, txsTags, epoch, recoverAt);
-			if (ar.protocolVersion().hasRangeBackupWorker()) {
-				serializer(ar, rangeBackupWorkerTags);
+			if (ar.protocolVersion().hasRangePartitionedBackupWorker()) {
+				serializer(ar, rangePartitionedBackupWorkerTags);
 			}
 		}
 	}
@@ -205,11 +207,11 @@ struct LogSystemConfig {
 	LogEpoch epoch;
 	LogEpoch oldestBackupEpoch;
 	std::map<uint8_t, std::vector<uint16_t>> knownLockedTLogIds;
-	int32_t rangeBackupWorkerTags;
+	int32_t rangePartitionedBackupWorkerTags;
 
 	explicit LogSystemConfig(LogEpoch e = 0)
 	  : logSystemType(LogSystemType::empty), logRouterTags(0), txsTags(0), expectedLogSets(0), stopped(false), epoch(e),
-	    oldestBackupEpoch(e), rangeBackupWorkerTags(0) {}
+	    oldestBackupEpoch(e), rangePartitionedBackupWorkerTags(0) {}
 
 	std::string toString() const;
 
@@ -247,9 +249,10 @@ struct LogSystemConfig {
 
 template <class Ar>
 void LogSystemConfig::serialize(Ar& ar) {
-	// FlatBuffer serializers always include all fields regardless of protocol version, so rangeBackupWorkerTags
-	// is unconditionally serialized. Non-FlatBuffer (versioned binary) serializers must gate the field on
-	// hasRangeBackupWorker() to maintain wire compatibility with older peers that don't know about this field.
+	// FlatBuffer serializers always include all fields regardless of protocol version, so
+	// rangePartitionedBackupWorkerTags is unconditionally serialized. Non-FlatBuffer (versioned binary) serializers
+	// must gate the field on hasRangePartitionedBackupWorker() to maintain wire compatibility with older peers that
+	// don't know about this field.
 	if constexpr (is_fb_function<Ar>) {
 		serializer(ar,
 		           logSystemType,
@@ -265,7 +268,7 @@ void LogSystemConfig::serialize(Ar& ar) {
 		           epoch,
 		           oldestBackupEpoch,
 		           knownLockedTLogIds,
-		           rangeBackupWorkerTags);
+		           rangePartitionedBackupWorkerTags);
 	} else {
 		serializer(ar,
 		           logSystemType,
@@ -281,8 +284,8 @@ void LogSystemConfig::serialize(Ar& ar) {
 		           epoch,
 		           oldestBackupEpoch,
 		           knownLockedTLogIds);
-		if (ar.protocolVersion().hasRangeBackupWorker()) {
-			serializer(ar, rangeBackupWorkerTags);
+		if (ar.protocolVersion().hasRangePartitionedBackupWorker()) {
+			serializer(ar, rangePartitionedBackupWorkerTags);
 		}
 	}
 }
