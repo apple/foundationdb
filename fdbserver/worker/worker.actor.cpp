@@ -48,9 +48,9 @@
 #include "flow/TDMetric.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "MetricLogger.actor.h"
+#include "MetricLogger.h"
 #include "fdbserver/backupworker/BackupWorker.h"
-#include "fdbserver/backupworker/BackupWorkerRangePartitioned.h"
+#include "fdbserver/backupworker/RangePartitionedBackupWorker.h"
 #include "fdbserver/clustercontroller/ClusterController.h"
 #include "fdbserver/commitproxy/CommitProxyServer.h"
 #include "fdbserver/consistencyscan/ConsistencyScan.h"
@@ -1252,7 +1252,7 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 		// part of the transaction sub system.
 		// Note that we don't need to calculate recovered peer in this case since all the recently closed peers are
 		// considered permanently closed peers.
-		for (const auto& address : FlowTransport::transport().healthMonitor()->getRecentClosedPeers()) {
+		for (const auto& address : FlowTransport::transport().getRecentClosedPeers()) {
 			if (allPeers.find(address) != allPeers.end()) {
 				// We have checked this peer in the above for loop.
 				continue;
@@ -2050,7 +2050,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state std::map<SharedLogsKey, std::vector<SharedLogsValue>> sharedLogs;
 	state Reference<AsyncVar<UID>> activeSharedTLog(new AsyncVar<UID>());
 	state WorkerCache<InitializeBackupReply> backupWorkerCache;
-	state WorkerCache<InitializeRangeBackupReply> rangeBackupWorkerCache;
+	state WorkerCache<InitializeRangePartitionedBackupReply> rangePartitionedBackupWorkerCache;
 	state WorkerCache<TLogInterface> logRouterCache;
 
 	state WorkerSnapRequest lastSnapReq;
@@ -2591,8 +2591,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					forwardPromise(Uncancellable{}, req.reply, backupWorkerCache.get(req.reqId));
 				}
 			}
-			when(InitializeRangeBackupRequest req = waitNext(interf.rangeBackup.getFuture())) {
-				if (!rangeBackupWorkerCache.exists(req.reqId)) {
+			when(InitializeRangePartitionedBackupRequest req = waitNext(interf.rangePartitionedBackup.getFuture())) {
+				if (!rangePartitionedBackupWorkerCache.exists(req.reqId)) {
 					LocalLineage _;
 					getCurrentLineage()->modify(&RoleLineage::role) = recruitment::Backup;
 					BackupInterface recruited(locality);
@@ -2601,16 +2601,16 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					startRole(Role::BACKUP, recruited.id(), interf.id());
 					DUMPTOKEN(recruited.waitFailure);
 
-					ReplyPromise<InitializeRangeBackupReply> backupReady = req.reply;
-					rangeBackupWorkerCache.set(req.reqId, backupReady.getFuture());
-					Future<Void> backupProcess = backupWorkerRangePartitioned(recruited, req, dbInfo);
-					backupProcess = rangeBackupWorkerCache.removeOnReady(req.reqId, backupProcess);
+					ReplyPromise<InitializeRangePartitionedBackupReply> backupReady = req.reply;
+					rangePartitionedBackupWorkerCache.set(req.reqId, backupReady.getFuture());
+					Future<Void> backupProcess = rangePartitionedBackupWorker(recruited, req, dbInfo);
+					backupProcess = rangePartitionedBackupWorkerCache.removeOnReady(req.reqId, backupProcess);
 					errorForwarders.add(forwardError(errors, Role::BACKUP, recruited.id(), backupProcess));
-					TraceEvent("RangeBackupInitRequest", req.reqId).detail("BackupId", recruited.id());
-					InitializeRangeBackupReply reply(recruited, req.backupEpoch);
+					TraceEvent("RangePartitionedBWInitRequest", req.reqId).detail("BackupId", recruited.id());
+					InitializeRangePartitionedBackupReply reply(recruited, req.backupEpoch);
 					backupReady.send(reply);
 				} else {
-					forwardPromise(Uncancellable{}, req.reply, rangeBackupWorkerCache.get(req.reqId));
+					forwardPromise(Uncancellable{}, req.reply, rangePartitionedBackupWorkerCache.get(req.reqId));
 				}
 			}
 			when(InitializeTLogRequest req = waitNext(interf.tLog.getFuture())) {

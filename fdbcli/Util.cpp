@@ -22,6 +22,7 @@
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/Schemas.h"
 #include "fdbclient/Status.h"
+#include "fdbclient/StatusSchema.h"
 #include "fdbclient/BulkDumping.h"
 #include "fdbclient/BulkLoading.h"
 #include "flow/Arena.h"

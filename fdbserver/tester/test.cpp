@@ -43,7 +43,7 @@
 #include "fdbserver/core/QuietDatabase.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
-#include "fdbserver/tester/KnobProtectiveGroups.h"
+#include "KnobProtectiveGroups.h"
 #include "ConsistencyChecker.h"
 #include "DatabaseMaintenance.h"
 #include "TestSpecParser.h"

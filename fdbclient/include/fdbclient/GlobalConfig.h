@@ -41,7 +41,7 @@ class Transaction;
 struct VersionHistory {
 	constexpr static FileIdentifier file_identifier = 5863456;
 
-	VersionHistory() {}
+	VersionHistory() = default;
 	explicit VersionHistory(Version v) : version(v) {}
 
 	Version version;
@@ -79,7 +79,7 @@ struct ConfigValue : ReferenceCounted<ConfigValue> {
 	Arena arena;
 	std::any value;
 
-	ConfigValue() {}
+	ConfigValue() = default;
 	ConfigValue(Arena&& a, std::any&& v) : arena(a), value(v) {}
 };
 
@@ -130,7 +130,7 @@ public:
 	// the key.
 	template <typename T>
 	    requires(std::is_arithmetic_v<T>)
-	const T get(KeyRef name, T defaultVal) {
+	T get(KeyRef name, T defaultVal) {
 		try {
 			auto configValue = get(name);
 			if (configValue.isValid()) {

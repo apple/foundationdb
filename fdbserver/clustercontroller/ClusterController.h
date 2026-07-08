@@ -147,18 +147,8 @@ public:
 		ClusterType clusterType = ClusterType::STANDALONE;
 		Reference<ClusterRecoveryData> recoveryData;
 
-		DBInfo()
-		  : clientInfo(new AsyncVar<ClientDBInfo>()), serverInfo(new AsyncVar<ServerDBInfo>()),
-		    masterRegistrationCount(0), dbInfoCount(0), recoveryStalled(false), forceRecovery(false),
-		    db(DatabaseContext::create(clientInfo,
-		                               Future<Void>(),
-		                               LocalityData(),
-		                               EnableLocalityLoadBalance::True,
-		                               TaskPriority::DefaultEndpoint,
-		                               LockAware::True)), // SOMEDAY: Locality!
-		    unfinishedRecoveries(0), cachePopulated(false), clientCount(0) {
-			clientCounter = countClients(this);
-		}
+		DBInfo();
+		~DBInfo();
 
 		void setDistributor(const DataDistributorInterface& interf) {
 			auto newInfo = serverInfo->get();
@@ -268,8 +258,9 @@ public:
 						for (auto w = delta.begin(); w != delta.end(); ++w) {
 							if (w->second.present()) {
 								tr.set(workerListKeyFor(w->first.get()), workerListValue(w->second.get()));
-							} else
+							} else {
 								tr.clear(workerListKeyFor(w->first.get()));
+							}
 						}
 						co_await tr.commit();
 						break;
@@ -310,7 +301,7 @@ public:
 			    .detail("RecoverDiskFiles", it.second.details.recoveredDiskFiles)
 			    .detail("NotExcludedMachine", !excludedMachines.contains(it.second.details.interf.locality.zoneId()))
 			    .detail("IncludeDC",
-			            (includeDCs.size() == 0 || includeDCs.contains(it.second.details.interf.locality.dcId())))
+			            (includeDCs.empty() || includeDCs.contains(it.second.details.interf.locality.dcId())))
 			    .detail("NotExcludedAddress", !addressExcluded(excludedAddresses, it.second.details.interf.address()))
 			    .detail("NotExcludedAddress2",
 			            (!it.second.details.interf.secondaryAddress().present() ||
@@ -322,7 +313,7 @@ public:
 			            recruitment::machineClassFitness(it.second.details.processClass, recruitment::Storage));
 			if (workerAvailable(it.second, false) && it.second.details.recoveredDiskFiles &&
 			    !excludedMachines.contains(it.second.details.interf.locality.zoneId()) &&
-			    (includeDCs.size() == 0 || includeDCs.contains(it.second.details.interf.locality.dcId())) &&
+			    (includeDCs.empty() || includeDCs.contains(it.second.details.interf.locality.dcId())) &&
 			    !addressExcluded(excludedAddresses, it.second.details.interf.address()) &&
 			    (!it.second.details.interf.secondaryAddress().present() ||
 			     !addressExcluded(excludedAddresses, it.second.details.interf.secondaryAddress().get())) &&
@@ -340,7 +331,7 @@ public:
 				    recruitment::machineClassFitness(it.second.details.processClass, recruitment::Storage);
 				if (workerAvailable(it.second, false) && it.second.details.recoveredDiskFiles &&
 				    !excludedMachines.contains(it.second.details.interf.locality.zoneId()) &&
-				    (includeDCs.size() == 0 || includeDCs.contains(it.second.details.interf.locality.dcId())) &&
+				    (includeDCs.empty() || includeDCs.contains(it.second.details.interf.locality.dcId())) &&
 				    !addressExcluded(excludedAddresses, it.second.details.interf.address()) && fit < bestFit) {
 					bestFit = fit;
 					bestInfo = it.second.details;
@@ -362,7 +353,7 @@ public:
 		std::map<recruitment::Fitness, std::vector<WorkerDetails>> fitness_workers;
 		std::vector<WorkerDetails> results;
 		Reference<LocalitySet> logServerSet = makeReference<LocalityMap<WorkerDetails>>();
-		LocalityMap<WorkerDetails>* logServerMap = (LocalityMap<WorkerDetails>*)logServerSet.getPtr();
+		auto* logServerMap = (LocalityMap<WorkerDetails>*)logServerSet.getPtr();
 		bool bCompleted = false;
 
 		for (auto& it : id_worker) {
@@ -410,10 +401,10 @@ public:
 	                             int desired,
 	                             const std::vector<WorkerDetails>& workers,
 	                             std::set<WorkerDetails>& resultSet) {
-		typedef Optional<Standalone<StringRef>> Field;
-		typedef Optional<Standalone<StringRef>> Zone;
-		typedef std::tuple<int, bool, Field> FieldCount;
-		typedef std::pair<int, Zone> ZoneCount;
+		using Field = Optional<Standalone<StringRef>>;
+		using Zone = Optional<Standalone<StringRef>>;
+		using FieldCount = std::tuple<int, bool, Field>;
+		using ZoneCount = std::pair<int, Zone>;
 
 		std::priority_queue<FieldCount, std::vector<FieldCount>, std::greater<FieldCount>> fieldQueue;
 		std::map<Field, std::priority_queue<ZoneCount, std::vector<ZoneCount>, std::greater<ZoneCount>>>
@@ -458,16 +449,16 @@ public:
 		}
 
 		// start with the least used field, and try to find a worker with that field
-		while (fieldQueue.size()) {
+		while (!fieldQueue.empty()) {
 			auto lowestField = fieldQueue.top();
 			auto& lowestZoneQueue = field_zoneQueue[std::get<2>(lowestField)];
 			bool added = false;
 			// start with the least used zoneId, and try and find a worker with that zone
-			while (lowestZoneQueue.size() && !added) {
+			while (!lowestZoneQueue.empty() && !added) {
 				auto lowestZone = lowestZoneQueue.top();
 				auto& zoneWorkers = zone_workers[lowestZone.second];
 
-				while (zoneWorkers.size() && !added) {
+				while (!zoneWorkers.empty() && !added) {
 					if (!resultSet.contains(zoneWorkers.back())) {
 						resultSet.insert(zoneWorkers.back());
 						if (resultSet.size() == desired) {
@@ -478,7 +469,7 @@ public:
 					zoneWorkers.pop_back();
 				}
 				lowestZoneQueue.pop();
-				if (added && zoneWorkers.size()) {
+				if (added && !zoneWorkers.empty()) {
 					++lowestZone.first;
 					lowestZoneQueue.push(lowestZone);
 				}
@@ -495,8 +486,8 @@ public:
 	void addWorkersByLowestZone(int desired,
 	                            const std::vector<WorkerDetails>& workers,
 	                            std::set<WorkerDetails>& resultSet) {
-		typedef Optional<Standalone<StringRef>> Zone;
-		typedef std::pair<int, Zone> ZoneCount;
+		using Zone = Optional<Standalone<StringRef>>;
+		using ZoneCount = std::pair<int, Zone>;
 
 		std::map<Zone, int> zone_count;
 		std::map<Zone, std::vector<WorkerDetails>> zone_workers;
@@ -517,12 +508,12 @@ public:
 			zoneQueue.emplace(it.second, it.first);
 		}
 
-		while (zoneQueue.size()) {
+		while (!zoneQueue.empty()) {
 			auto lowestZone = zoneQueue.top();
 			auto& zoneWorkers = zone_workers[lowestZone.second];
 
 			bool added = false;
-			while (zoneWorkers.size() && !added) {
+			while (!zoneWorkers.empty() && !added) {
 				if (!resultSet.contains(zoneWorkers.back())) {
 					resultSet.insert(zoneWorkers.back());
 					if (resultSet.size() == desired) {
@@ -533,7 +524,7 @@ public:
 				zoneWorkers.pop_back();
 			}
 			zoneQueue.pop();
-			if (added && zoneWorkers.size()) {
+			if (added && !zoneWorkers.empty()) {
 				++lowestZone.first;
 				zoneQueue.push(lowestZone);
 			}
@@ -658,8 +649,8 @@ public:
 		auto requiredFitness = recruitment::NeverAssign;
 		int requiredUsed = 1e6;
 
-		typedef Optional<Standalone<StringRef>> Field;
-		typedef Optional<Standalone<StringRef>> Zone;
+		using Field = Optional<Standalone<StringRef>>;
+		using Zone = Optional<Standalone<StringRef>>;
 		std::map<Field, std::pair<std::set<Zone>, std::vector<WorkerDetails>>> field_zones;
 		std::set<Field> fieldsWithMin;
 		std::map<Field, int> field_count;
@@ -1002,7 +993,7 @@ public:
 		std::map<std::tuple<recruitment::Fitness, int, bool, bool>, std::vector<WorkerDetails>> fitness_workers;
 		std::vector<WorkerDetails> results;
 		Reference<LocalitySet> logServerSet = makeReference<LocalityMap<WorkerDetails>>();
-		LocalityMap<WorkerDetails>* logServerMap = (LocalityMap<WorkerDetails>*)logServerSet.getPtr();
+		auto* logServerMap = (LocalityMap<WorkerDetails>*)logServerSet.getPtr();
 		bool bCompleted = false;
 		desired = std::max(required, desired);
 
@@ -1254,10 +1245,10 @@ public:
 		desired = std::max(required, desired);
 		bool useSimple = false;
 		if (policy->name() == "Across") {
-			PolicyAcross* pa1 = (PolicyAcross*)policy.getPtr();
+			auto* pa1 = (PolicyAcross*)policy.getPtr();
 			Reference<IReplicationPolicy> embedded = pa1->embeddedPolicy();
 			if (embedded->name() == "Across") {
-				PolicyAcross* pa2 = (PolicyAcross*)embedded.getPtr();
+				auto* pa2 = (PolicyAcross*)embedded.getPtr();
 				if (pa2->attributeKey() == "zoneid" && pa2->embeddedPolicyName() == "One") {
 					std::map<Optional<Standalone<StringRef>>, int> testUsed = id_used;
 
@@ -1494,7 +1485,7 @@ public:
 			}
 		}
 
-		if (fitness_workers.size()) {
+		if (!fitness_workers.empty()) {
 			auto worker = deterministicRandom()->randomChoice(fitness_workers.begin()->second);
 			id_used[worker.interf.locality.processId()]++;
 			return WorkerFitnessInfo(worker,
@@ -1660,11 +1651,13 @@ public:
 	std::set<Optional<Standalone<StringRef>>> getDatacenters(DatabaseConfiguration const& conf,
 	                                                         bool checkStable = false) {
 		std::set<Optional<Standalone<StringRef>>> result;
-		for (auto& it : id_worker)
+		for (auto& it : id_worker) {
 			if (workerAvailable(it.second, checkStable) &&
 			    !conf.isExcludedServer(it.second.details.interf.addresses(), it.second.details.interf.locality) &&
-			    !isExcludedDegradedServer(it.second.details.interf.addresses()))
+			    !isExcludedDegradedServer(it.second.details.interf.addresses())) {
 				result.insert(it.second.details.interf.locality.dcId());
+			}
+		}
 		return result;
 	}
 
@@ -1843,7 +1836,7 @@ public:
 		}
 
 		if (req.configuration.backupWorkerEnabled) {
-			ASSERT(!req.configuration.rangeBackupWorkerEnabled);
+			ASSERT(!req.configuration.rangePartitionedBackupWorkerEnabled);
 			const int nBackup = std::max<int>(
 			    (req.configuration.desiredLogRouterCount > 0 ? req.configuration.desiredLogRouterCount : tlogs.size()),
 			    req.maxOldLogRouters);
@@ -1855,15 +1848,15 @@ public:
 			               [](const WorkerDetails& w) { return w.interf; });
 		}
 
-		if (req.configuration.rangeBackupWorkerEnabled) {
+		if (req.configuration.rangePartitionedBackupWorkerEnabled) {
 			ASSERT(!req.configuration.backupWorkerEnabled);
-			const int nRangeBackup = req.configuration.desiredRangeBackupWorkerCount > 0
-			                             ? req.configuration.desiredRangeBackupWorkerCount
-			                             : tlogs.size();
-			auto rangeBackupWorkers =
-			    getWorkersForRoleInDatacenter(dcId, recruitment::Backup, nRangeBackup, req.configuration, id_used);
-			std::transform(rangeBackupWorkers.begin(),
-			               rangeBackupWorkers.end(),
+			const int nRangePartitionedBackup = req.configuration.desiredRangePartitionedBackupWorkerCount > 0
+			                                        ? req.configuration.desiredRangePartitionedBackupWorkerCount
+			                                        : tlogs.size();
+			auto rangePartitionedBackupWorkers = getWorkersForRoleInDatacenter(
+			    dcId, recruitment::Backup, nRangePartitionedBackup, req.configuration, id_used);
+			std::transform(rangePartitionedBackupWorkers.begin(),
+			               rangePartitionedBackupWorkers.end(),
 			               std::back_inserter(result.backupWorkers),
 			               [](const WorkerDetails& w) { return w.interf; });
 		}
@@ -2024,7 +2017,7 @@ public:
 			int numEquivalent = 1;
 			Optional<Key> bestDC;
 
-			for (auto dcId : datacenters) {
+			for (const auto& dcId : datacenters) {
 				try {
 					// SOMEDAY: recruitment in other DCs besides the clusterControllerDcID will not account for the
 					// processes used by the master and cluster controller properly.
@@ -2101,7 +2094,7 @@ public:
 						}
 
 						if (req.configuration.backupWorkerEnabled) {
-							ASSERT(!req.configuration.rangeBackupWorkerEnabled);
+							ASSERT(!req.configuration.rangePartitionedBackupWorkerEnabled);
 							const int nBackup = std::max<int>(tlogs.size(), req.maxOldLogRouters);
 							auto backupWorkers = getWorkersForRoleInDatacenter(
 							    dcId, recruitment::Backup, nBackup, req.configuration, used);
@@ -2111,15 +2104,16 @@ public:
 							               [](const WorkerDetails& w) { return w.interf; });
 						}
 
-						if (req.configuration.rangeBackupWorkerEnabled) {
+						if (req.configuration.rangePartitionedBackupWorkerEnabled) {
 							ASSERT(!req.configuration.backupWorkerEnabled);
-							const int nRangeBackup = req.configuration.desiredRangeBackupWorkerCount > 0
-							                             ? req.configuration.desiredRangeBackupWorkerCount
-							                             : tlogs.size();
-							auto rangeBackupWorkers = getWorkersForRoleInDatacenter(
-							    dcId, recruitment::Backup, nRangeBackup, req.configuration, used);
-							std::transform(rangeBackupWorkers.begin(),
-							               rangeBackupWorkers.end(),
+							const int nRangePartitionedBackup =
+							    req.configuration.desiredRangePartitionedBackupWorkerCount > 0
+							        ? req.configuration.desiredRangePartitionedBackupWorkerCount
+							        : tlogs.size();
+							auto rangePartitionedBackupWorkers = getWorkersForRoleInDatacenter(
+							    dcId, recruitment::Backup, nRangePartitionedBackup, req.configuration, used);
+							std::transform(rangePartitionedBackupWorkers.begin(),
+							               rangePartitionedBackupWorkers.end(),
 							               std::back_inserter(result.backupWorkers),
 							               [](const WorkerDetails& w) { return w.interf; });
 						}
@@ -2590,7 +2584,7 @@ public:
 
 		RegionInfo region;
 		RegionInfo remoteRegion;
-		if (db.config.regions.size()) {
+		if (!db.config.regions.empty()) {
 			primaryDC.insert(clusterControllerDcId);
 			for (auto& r : db.config.regions) {
 				if (r.dcId != clusterControllerDcId.get()) {
@@ -2598,7 +2592,7 @@ public:
 					remoteDC.insert(r.dcId);
 					remoteRegion = r;
 				} else {
-					ASSERT(region.dcId == StringRef());
+					ASSERT(region.dcId.empty());
 					region = r;
 				}
 			}

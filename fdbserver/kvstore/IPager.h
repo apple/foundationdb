@@ -39,12 +39,12 @@
 #include <cstddef>
 #include <stdint.h>
 
-typedef uint32_t LogicalPageID;
-typedef uint32_t PhysicalPageID;
+using LogicalPageID = uint32_t;
+using PhysicalPageID = uint32_t;
 #define invalidLogicalPageID std::numeric_limits<LogicalPageID>::max()
 #define invalidPhysicalPageID std::numeric_limits<PhysicalPageID>::max()
 
-typedef uint32_t QueueID;
+using QueueID = uint32_t;
 #define invalidQueueID std::numeric_limits<QueueID>::max()
 
 // Pager Events
@@ -402,7 +402,7 @@ public:
 		pPayload = page->getPayload();
 		payloadSize = logicalSize - (pPayload - buffer);
 
-		RedwoodHeaderV1* h = page->getMainHeader<RedwoodHeaderV1>();
+		auto* h = page->getMainHeader<RedwoodHeaderV1>();
 		h->pageType = pageType;
 		h->pageSubType = pageSubType;
 		h->pageFormat = pageFormat;
@@ -451,7 +451,7 @@ public:
 	// verification will fail.
 	void setWriteInfo(PhysicalPageID pageID, Version writeVersion) {
 		if (page->headerVersion == 1) {
-			RedwoodHeaderV1* h = page->getMainHeader<RedwoodHeaderV1>();
+			auto* h = page->getMainHeader<RedwoodHeaderV1>();
 			h->firstPhysicalPageID = pageID;
 			h->writeVersion = writeVersion;
 			h->writeTime = now();
@@ -463,7 +463,7 @@ public:
 	// last known logical page ID should always be updated before writing an updated version of a BTree page.
 	void setLogicalPageInfo(LogicalPageID lastKnownLogicalPageID, LogicalPageID lastKnownParentLogicalPageID) {
 		if (page->headerVersion == 1) {
-			RedwoodHeaderV1* h = page->getMainHeader<RedwoodHeaderV1>();
+			auto* h = page->getMainHeader<RedwoodHeaderV1>();
 			h->lastKnownLogicalPageID = lastKnownLogicalPageID;
 			h->lastKnownParentLogicalPageID = lastKnownParentLogicalPageID;
 		}
@@ -516,7 +516,7 @@ public:
 
 		if (page->headerVersion == 1) {
 			if (verify) {
-				RedwoodHeaderV1* h = page->getMainHeader<RedwoodHeaderV1>();
+				auto* h = page->getMainHeader<RedwoodHeaderV1>();
 				h->verifyChecksum(buffer, pPayload - buffer);
 				if (pageID != h->firstPhysicalPageID) {
 					throw page_header_wrong_page_id();
@@ -611,7 +611,7 @@ public:
 
 	virtual Key getMetaKey() const = 0;
 
-	virtual ~IPagerSnapshot() {}
+	virtual ~IPagerSnapshot() = default;
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;
@@ -746,7 +746,7 @@ public:
 	virtual int64_t* getPageCachePenaltySource() = 0;
 
 protected:
-	~IPager2() {} // Destruction should be done using close()/dispose() from the IClosable interface
+	~IPager2() = default; // Destruction should be done using close()/dispose() from the IClosable interface
 };
 
 #endif

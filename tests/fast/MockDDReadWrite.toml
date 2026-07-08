@@ -3,7 +3,7 @@ testClass = 'MockDD'
 
 [[knobs]]
 enable_dd_physical_shard = false
-storage_quota_enabled = false
+shard_encode_location_metadata = false
 
 [[test]]
 testTitle = 'MockDDTracker'

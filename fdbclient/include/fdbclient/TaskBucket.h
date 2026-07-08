@@ -57,7 +57,7 @@ FDB_BOOLEAN_PARAM(UpdateParams);
 class Task : public ReferenceCounted<Task> {
 public:
 	explicit Task(Value type = StringRef(), uint32_t version = 0, Value done = StringRef(), unsigned int priority = 0);
-	~Task() {};
+	~Task() = default;
 
 	// Methods that safely read values from task's params
 	uint32_t getVersion() const;
@@ -441,13 +441,13 @@ public:
 
 struct TaskFuncBase : IDispatched<TaskFuncBase, Standalone<StringRef>, std::function<TaskFuncBase*()>>,
                       ReferenceCounted<TaskFuncBase> {
-	virtual ~TaskFuncBase() {};
+	virtual ~TaskFuncBase() = default;
 	static Reference<TaskFuncBase> create(Standalone<StringRef> const& taskFuncType) {
 		return Reference<TaskFuncBase>(dispatch(taskFuncType)());
 	}
 
 	static bool isValidTaskType(StringRef type) {
-		return (type.size()) && (dispatches().find(type) != dispatches().end());
+		return !type.empty() && (dispatches().find(type) != dispatches().end());
 	}
 
 	static bool isValidTask(Reference<Task> task) {
@@ -498,7 +498,7 @@ struct TaskCompletionKey {
 	static TaskCompletionKey signal(Reference<TaskFuture> f) { return TaskCompletionKey(f->key); }
 
 	static TaskCompletionKey noSignal() { return TaskCompletionKey(StringRef()); }
-	TaskCompletionKey() {}
+	TaskCompletionKey() = default;
 
 private:
 	explicit TaskCompletionKey(Reference<TaskFuture> f) : joinFuture(f) {}

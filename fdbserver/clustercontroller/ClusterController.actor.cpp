@@ -73,6 +73,21 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+ClusterControllerData::DBInfo::DBInfo()
+  : clientInfo(new AsyncVar<ClientDBInfo>()), serverInfo(new AsyncVar<ServerDBInfo>()), masterRegistrationCount(0),
+    dbInfoCount(0), recoveryStalled(false), forceRecovery(false),
+    db(DatabaseContext::create(clientInfo,
+                               Future<Void>(),
+                               LocalityData(),
+                               EnableLocalityLoadBalance::True,
+                               TaskPriority::DefaultEndpoint,
+                               LockAware::True)), // SOMEDAY: Locality!
+    unfinishedRecoveries(0), cachePopulated(false), clientCount(0) {
+	clientCounter = countClients(this);
+}
+
+ClusterControllerData::DBInfo::~DBInfo() = default;
+
 static bool storageTeamOneReplicaLeftIsCritical(DatabaseConfiguration const& configuration) {
 	return configuration.initialized && configuration.storageTeamSize == 3;
 }
@@ -110,6 +125,7 @@ ClusterControllerData::ClusterControllerData(ClusterControllerFullInterface cons
 	cx = openDBOnServer(db.serverInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 
 	specialCounter(clusterControllerMetrics, "ClientCount", [this]() { return db.clientCount; });
+	clusterHealthWorkerEventProvider->setCoordinators(coordinators);
 	updateClusterHealthMonitorInputs();
 }
 

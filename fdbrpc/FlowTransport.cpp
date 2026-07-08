@@ -35,7 +35,7 @@
 
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/FailureMonitor.h"
-#include "fdbrpc/HealthMonitor.h"
+#include "HealthMonitor.h"
 #include "JsonWebKeySet.h"
 #include "fdbrpc/genericactors.h"
 #include "fdbrpc/IPAllowList.h"
@@ -762,11 +762,11 @@ Future<Void> connectionWriter(Reference<Peer> self, Reference<IConnection> conn)
 	}
 }
 
-Future<Void> delayedHealthUpdate(NetworkAddress address, bool* tooManyConnectionsClosed) {
+Future<Void> delayedHealthUpdate(HealthMonitor* healthMonitor, NetworkAddress address, bool* tooManyConnectionsClosed) {
 	double start = now();
 	while (true) {
 		if (FLOW_KNOBS->HEALTH_MONITOR_MARK_FAILED_UNSTABLE_CONNECTIONS &&
-		    FlowTransport::transport().healthMonitor()->tooManyConnectionsClosed(address) && address.isPublic()) {
+		    healthMonitor->tooManyConnectionsClosed(address) && address.isPublic()) {
 			co_await delayJittered(FLOW_KNOBS->MAX_RECONNECTION_TIME * 2.0);
 		} else {
 			if (*tooManyConnectionsClosed) {
@@ -774,7 +774,7 @@ Future<Void> delayedHealthUpdate(NetworkAddress address, bool* tooManyConnection
 				    .detail("Dest", address)
 				    .detail("StartTime", start)
 				    .detail("TimeElapsed", now() - start)
-				    .detail("ClosedCount", FlowTransport::transport().healthMonitor()->closedConnectionsCount(address));
+				    .detail("ClosedCount", healthMonitor->closedConnectionsCount(address));
 				*tooManyConnectionsClosed = false;
 			}
 			IFailureMonitor::failureMonitor().setStatus(address, FailureStatus(false));
@@ -855,7 +855,8 @@ Future<Void> connectionKeeper(Reference<Peer> self,
 							IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(false));
 						}
 						if (self->unsent.empty()) {
-							delayedHealthUpdateF = delayedHealthUpdate(self->destination, &tooManyConnectionsClosed);
+							delayedHealthUpdateF = delayedHealthUpdate(
+							    &self->transport->healthMonitor, self->destination, &tooManyConnectionsClosed);
 							auto healthRes = co_await race(delayedHealthUpdateF, self->dataToSend.onTrigger());
 							if (healthRes.index() == 0) {
 								conn->close();
@@ -897,7 +898,8 @@ Future<Void> connectionKeeper(Reference<Peer> self,
 			try {
 				self->transport->countConnEstablished++;
 				if (!delayedHealthUpdateF.isValid())
-					delayedHealthUpdateF = delayedHealthUpdate(self->destination, &tooManyConnectionsClosed);
+					delayedHealthUpdateF = delayedHealthUpdate(
+					    &self->transport->healthMonitor, self->destination, &tooManyConnectionsClosed);
 				self->connected = true;
 				co_await (connectionWriter(self, conn) || reader || connectionMonitor(self) ||
 				          self->resetConnection.onTrigger());
@@ -992,15 +994,14 @@ Future<Void> connectionKeeper(Reference<Peer> self,
 
 			if (conn) {
 				if (self->destination.isPublic() && e.code() == error_code_connection_failed) {
-					FlowTransport::transport().healthMonitor()->reportPeerClosed(self->destination);
+					self->transport->healthMonitor.reportPeerClosed(self->destination);
 					if (FLOW_KNOBS->HEALTH_MONITOR_MARK_FAILED_UNSTABLE_CONNECTIONS &&
-					    FlowTransport::transport().healthMonitor()->tooManyConnectionsClosed(self->destination) &&
+					    self->transport->healthMonitor.tooManyConnectionsClosed(self->destination) &&
 					    self->destination.isPublic()) {
 						TraceEvent("TooManyConnectionsClosedMarkFailed")
 						    .detail("Dest", self->destination)
-						    .detail(
-						        "ClosedCount",
-						        FlowTransport::transport().healthMonitor()->closedConnectionsCount(self->destination));
+						    .detail("ClosedCount",
+						            self->transport->healthMonitor.closedConnectionsCount(self->destination));
 						tooManyConnectionsClosed = true;
 						IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(true));
 					}
@@ -2182,8 +2183,8 @@ void FlowTransport::createInstance(bool isClient,
 	g_network->setGlobal(INetwork::enClientFailureMonitor, isClient ? (flowGlobalType)1 : nullptr);
 }
 
-HealthMonitor* FlowTransport::healthMonitor() {
-	return &self->healthMonitor;
+std::unordered_set<NetworkAddress> FlowTransport::getRecentClosedPeers() {
+	return self->healthMonitor.getRecentClosedPeers();
 }
 
 Optional<PublicKey> FlowTransport::getPublicKeyByName(StringRef name) const {

@@ -22,6 +22,8 @@
 #include <utility>
 
 #include "fmt/format.h"
+#include "fdbrpc/genericactors.h"
+#include "fdbserver/core/CoordinationInterface.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/WorkerEvents.h"
 #include "flow/Trace.h"
@@ -154,6 +156,11 @@ void WorkerEventProvider::setStorageTeamOneReplicaLeftIsCritical(bool storageTea
 	this->storageTeamOneReplicaLeftIsCritical = storageTeamOneReplicaLeftIsCritical;
 }
 
+void WorkerEventProvider::setCoordinators(ServerCoordinators const& coordinators) {
+	coordinatorClusterKey = coordinators.clusterKey;
+	this->coordinators = coordinators.clientLeaderServers;
+}
+
 void WorkerEventProvider::setRatekeeperWorker(Optional<WorkerInterface> ratekeeperWorker) {
 	this->ratekeeperWorker = std::move(ratekeeperWorker);
 }
@@ -176,6 +183,43 @@ Optional<RecoveryState> WorkerEventProvider::getRecoveryState() const {
 
 bool WorkerEventProvider::shouldTreatStorageTeamOneReplicaLeftAsCritical() const {
 	return storageTeamOneReplicaLeftIsCritical;
+}
+
+AsyncResult<Optional<bool>> WorkerEventProvider::areAllCoordinatorsReachable() const {
+	if (coordinators.empty()) {
+		co_return Optional<bool>();
+	}
+
+	try {
+		std::vector<Future<ErrorOr<Optional<LeaderInfo>>>> coordinatorReplies;
+		coordinatorReplies.reserve(coordinators.size());
+		for (auto const& coordinator : coordinators) {
+			Future<Optional<LeaderInfo>> reply;
+			if (coordinator.hostname.present()) {
+				reply = retryGetReplyFromHostname(GetLeaderRequest(coordinatorClusterKey, UID()),
+				                                  coordinator.hostname.get(),
+				                                  WLTOKEN_CLIENTLEADERREG_GETLEADER,
+				                                  TaskPriority::CoordinationReply);
+			} else {
+				reply = retryBrokenPromise(coordinator.getLeader,
+				                           GetLeaderRequest(coordinatorClusterKey, UID()),
+				                           TaskPriority::CoordinationReply);
+			}
+			coordinatorReplies.push_back(errorOr(timeoutError(reply, 2.0)));
+		}
+
+		co_await waitForAll(coordinatorReplies);
+		for (auto const& reply : coordinatorReplies) {
+			if (reply.get().isError()) {
+				co_return false;
+			}
+		}
+		co_return true;
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(),
+		          error_code_actor_cancelled); // All errors should be filtering through the errorOr actor above
+		throw;
+	}
 }
 
 AsyncResult<LatestWorkerEvents> WorkerEventProvider::getLatestEvents(std::string const& eventName) const {
@@ -265,6 +309,7 @@ Monitor Monitor::create(Reference<IWorkerEventProvider const> workerEventProvide
 	                                                    SERVER_KNOBS->CLUSTER_HEALTH_METRIC_TLOG_CRITICAL_THRESHOLD));
 	factors.push_back(std::make_unique<StorageReplicationFactor>());
 	factors.push_back(std::make_unique<RecoveryStateFactor>());
+	factors.push_back(std::make_unique<CoordinatorReachabilityFactor>());
 	factors.push_back(std::make_unique<ProcessErrorsFactor>());
 	factors.push_back(std::make_unique<RkThrottlingFactor>(
 	    SERVER_KNOBS->CLUSTER_HEALTH_METRIC_RK_CRITICAL_RELEASED_TPS_RATIO_THRESHOLD));

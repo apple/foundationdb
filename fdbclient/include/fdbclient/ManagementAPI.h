@@ -32,7 +32,6 @@ standard API and some knowledge of the contents of the system key space.
 #include "fdbclient/GenericManagementAPI.h"
 #include "fdbclient/ProcessClass.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/RangeLock.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/MonitorLeader.h"
@@ -42,7 +41,7 @@ Future<DatabaseConfiguration> getDatabaseConfiguration(Database cx, bool useSyst
 Future<Void> waitForFullReplication(Database cx);
 
 struct IQuorumChange : ReferenceCounted<IQuorumChange> {
-	virtual ~IQuorumChange() {}
+	virtual ~IQuorumChange() = default;
 	virtual Future<std::vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
 	                                                                   std::vector<NetworkAddress> oldCoordinators,
 	                                                                   Reference<IClusterConnectionRecord>,
@@ -358,40 +357,6 @@ Future<Optional<BulkDumpOwnerInfo>> getBulkLoadOwner(Database cx, UID jobId);
 
 // ==================== End Progress Tracking ====================
 
-// Persist a rangeLock owner to database metadata
-// A range can only be locked by a registered owner
-Future<Void> registerRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID, std::string description);
-
-// Remove an owner form the database metadata
-Future<Void> removeRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID);
-
-// Get all registered rangeLock owner
-AsyncResult<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx);
-
-// Get a rangeLock owner by ownerUniqueID
-Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID);
-
-// Block write traffic to a user range (the input range must be within normalKeys).
-// One transaction can call releaseExclusiveReadLockOnRange at most for one time.
-Future<Void> takeExclusiveReadLockOnRange(Transaction* tr, KeyRange range, RangeLockOwnerName ownerUniqueID);
-
-Future<Void> takeExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID);
-
-// Unblock a user range (the input range must be within normalKeys).
-// One transaction can call releaseExclusiveReadLockOnRange at most for one time.
-Future<Void> releaseExclusiveReadLockOnRange(Transaction* tr, KeyRange range, RangeLockOwnerName ownerUniqueID);
-
-Future<Void> releaseExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID);
-
-// Get locked ranges within the input range (the input range must be within normalKeys)
-Future<std::vector<std::pair<KeyRange, RangeLockState>>> findExclusiveReadLockOnRange(
-    Database cx,
-    KeyRange range,
-    Optional<RangeLockOwnerName> ownerName = Optional<RangeLockOwnerName>());
-
-// Clear all exclusive read lock by the input user. Not transactional.
-Future<Void> releaseExclusiveReadLockByUser(Database cx, RangeLockOwnerName ownerUniqueID);
-
 Future<Void> printHealthyZone(Database cx);
 Future<bool> clearHealthyZone(Database cx, bool printWarning = false, bool clearSSFailureZoneString = false);
 Future<bool> setHealthyZone(Database cx, StringRef zoneId, double seconds, bool printWarning = false);
@@ -401,20 +366,11 @@ Future<Void> waitForPrimaryDC(Database cx, StringRef dcId);
 // Gets the cluster connection string
 Future<Optional<ClusterConnectionString>> getConnectionString(Database cx);
 
-void schemaCoverage(std::string const& spath, bool covered = true);
-bool schemaMatch(json_spirit::mValue const& schema,
-                 json_spirit::mValue const& result,
-                 std::string& errorStr,
-                 Severity sev = SevError,
-                 bool checkCoverage = false,
-                 std::string path = std::string(),
-                 std::string schema_path = std::string());
-
 // execute payload in 'snapCmd' on all the coordinators, TLogs and
 // storage nodes
 Future<Void> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
 
 Future<Void> disableBackupWorker(Database cx);
 Future<Void> enableBackupWorker(Database cx);
-Future<Void> disableRangeBackupWorker(Database cx);
-Future<Void> enableRangeBackupWorker(Database cx);
+Future<Void> disableRangePartitionedBackupWorker(Database cx);
+Future<Void> enableRangePartitionedBackupWorker(Database cx);
