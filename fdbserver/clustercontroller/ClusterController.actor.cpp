@@ -73,8 +73,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ClusterControllerData::DBInfo::DBInfo()
-  : clientInfo(new AsyncVar<ClientDBInfo>()), serverInfo(new AsyncVar<ServerDBInfo>()),
-    masterRegistrationCount(0), dbInfoCount(0), recoveryStalled(false), forceRecovery(false),
+  : clientInfo(new AsyncVar<ClientDBInfo>()), serverInfo(new AsyncVar<ServerDBInfo>()), masterRegistrationCount(0),
+    dbInfoCount(0), recoveryStalled(false), forceRecovery(false),
     db(DatabaseContext::create(clientInfo,
                                Future<Void>(),
                                LocalityData(),
