@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "fdbclient/DatabaseConfiguration.h"
+#include "fdbclient/ProcessClass.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/ReplicationPolicy.h"

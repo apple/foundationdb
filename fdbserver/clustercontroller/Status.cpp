@@ -43,6 +43,7 @@
 #include "fdbserver/core/RatekeeperLimitReasons.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/ProcessClassRecruitment.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/StorageWiggleMetrics.h"
 
@@ -2051,7 +2052,7 @@ static int getExtraTLogEligibleZones(const std::vector<WorkerDetails>& workers,
 	std::set<StringRef> allZones;
 	std::map<Key, std::set<StringRef>> dcId_zone;
 	for (auto const& worker : workers) {
-		if (worker.processClass.machineClassFitness(ProcessClass::TLog) < ProcessClass::NeverAssign &&
+		if (recruitment::machineClassFitness(worker.processClass, recruitment::TLog) < recruitment::NeverAssign &&
 		    !configuration.isExcludedServer(worker.interf.addresses(), worker.interf.locality)) {
 			allZones.insert(worker.interf.locality.zoneId().get());
 			if (worker.interf.locality.dcId().present()) {

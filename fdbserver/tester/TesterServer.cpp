@@ -31,6 +31,7 @@
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/simulator.h"
+#include "fdbserver/core/FDBSimulatorProcessInfo.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
@@ -183,7 +184,7 @@ void printSimulatedTopology() {
 		indent += "  ";
 		printf("%sAddress: %s\n", indent.c_str(), p->address.toString().c_str());
 		indent += "  ";
-		printf("%sClass: %s\n", indent.c_str(), p->startingClass.toString().c_str());
+		printf("%sClass: %s\n", indent.c_str(), getSimulatorProcessClass(p).toString().c_str());
 		printf("%sName: %s\n", indent.c_str(), p->name.c_str());
 	}
 }

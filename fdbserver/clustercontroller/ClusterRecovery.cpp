@@ -28,6 +28,7 @@
 #include "fdbserver/core/BackupProgress.h"
 #include "ClusterRecovery.h"
 #include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/ProcessClassRecruitment.h"
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/SeedShardServers.h"
 #include "fdbserver/core/WaitFailure.h"
@@ -87,13 +88,14 @@ Future<Void> recruitNewMaster(ClusterControllerData* cluster,
 		std::map<Optional<Standalone<StringRef>>, int> id_used;
 		id_used[cluster->clusterControllerProcessId]++;
 		masterWorker = cluster->getWorkerForRoleInDatacenter(
-		    cluster->clusterControllerDcId, ProcessClass::Master, ProcessClass::NeverAssign, db->config, id_used);
-		if ((masterWorker.worker.processClass.machineClassFitness(ProcessClass::Master) >
+		    cluster->clusterControllerDcId, recruitment::Master, recruitment::NeverAssign, db->config, id_used);
+		if ((recruitment::machineClassFitness(masterWorker.worker.processClass, recruitment::Master) >
 		         SERVER_KNOBS->EXPECTED_MASTER_FITNESS ||
 		     masterWorker.worker.interf.locality.processId() == cluster->clusterControllerProcessId) &&
 		    !cluster->goodRecruitmentTime.isReady()) {
 			TraceEvent("RecruitNewMaster", cluster->id)
-			    .detail("Fitness", masterWorker.worker.processClass.machineClassFitness(ProcessClass::Master));
+			    .detail("Fitness",
+			            recruitment::machineClassFitness(masterWorker.worker.processClass, recruitment::Master));
 			co_await delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY);
 			continue;
 		}

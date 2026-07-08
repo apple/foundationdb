@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/ProcessClassRecruitment.h"
 #include "fdbclient/Knobs.h"
 #include "flow/IRandom.h"
 
@@ -994,12 +995,12 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CLUSTER_HEALTH_METRIC_RK_CRITICAL_RELEASED_TPS_RATIO_THRESHOLD, 1.2 );
 
 	init( INCOMPATIBLE_PEERS_LOGGING_INTERVAL,                   600 ); if( randomize && buggify() ) INCOMPATIBLE_PEERS_LOGGING_INTERVAL = 60.0;
-	init( EXPECTED_MASTER_FITNESS,            ProcessClass::UnsetFit );
-	init( EXPECTED_TLOG_FITNESS,              ProcessClass::UnsetFit );
-	init( EXPECTED_LOG_ROUTER_FITNESS,        ProcessClass::UnsetFit );
-	init( EXPECTED_COMMIT_PROXY_FITNESS,      ProcessClass::UnsetFit );
-	init( EXPECTED_GRV_PROXY_FITNESS,         ProcessClass::UnsetFit );
-	init( EXPECTED_RESOLVER_FITNESS,          ProcessClass::UnsetFit );
+	init( EXPECTED_MASTER_FITNESS,            recruitment::UnsetFit );
+	init( EXPECTED_TLOG_FITNESS,              recruitment::UnsetFit );
+	init( EXPECTED_LOG_ROUTER_FITNESS,        recruitment::UnsetFit );
+	init( EXPECTED_COMMIT_PROXY_FITNESS,      recruitment::UnsetFit );
+	init( EXPECTED_GRV_PROXY_FITNESS,         recruitment::UnsetFit );
+	init( EXPECTED_RESOLVER_FITNESS,          recruitment::UnsetFit );
 	init( RECRUITMENT_TIMEOUT,                                   600 ); if( randomize && buggify() ) RECRUITMENT_TIMEOUT = deterministicRandom()->coinflip() ? 60.0 : 1.0;
 
 	init( POLICY_RATING_TESTS,                                   200 ); if( randomize && buggify() ) POLICY_RATING_TESTS = 20;

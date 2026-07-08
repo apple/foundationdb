@@ -22,6 +22,7 @@
 #include "fdbrpc/Locality.h"
 #include "fdbserver/core/CoordinationInterface.h"
 #include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/ProcessClassRecruitment.h"
 #include "fdbclient/MonitorLeader.h"
 #include "flow/CoroUtils.h"
 
@@ -124,7 +125,7 @@ Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 	    asyncPriorityInfo->get().dcFitness == ClusterControllerPriorityInfo::FitnessNotPreferred ||
 	    asyncPriorityInfo->get().isExcluded) {
 		co_await delay(SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY);
-	} else if (asyncPriorityInfo->get().processClassFitness > ProcessClass::UnsetFit) {
+	} else if (asyncPriorityInfo->get().processClassFitness > recruitment::UnsetFit) {
 		co_await delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY);
 	}
 
