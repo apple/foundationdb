@@ -32,6 +32,8 @@ using RangeLockOwnerName = std::string;
 using RangeLockUniqueString = std::string;
 using RangeLockID = std::string;
 
+class Transaction;
+
 enum class RangeLockType : uint8_t {
 	Invalid = 0,
 	ExclusiveReadLock = 1, // reject all commits to the locked range
@@ -221,5 +223,37 @@ public:
 private:
 	std::map<RangeLockUniqueString, RangeLockState> locks;
 };
+
+// Persist a rangeLock owner to database metadata.
+// A range can only be locked by a registered owner.
+Future<Void> registerRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID, std::string description);
+
+// Remove an owner from the database metadata.
+Future<Void> removeRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID);
+
+// Get all registered rangeLock owners.
+AsyncResult<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx);
+
+// Get a rangeLock owner by ownerUniqueID.
+Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID);
+
+// Block write traffic to a user range (the input range must be within normalKeys).
+// One transaction can call takeExclusiveReadLockOnRange at most one time.
+Future<Void> takeExclusiveReadLockOnRange(Transaction* tr, KeyRange range, RangeLockOwnerName ownerUniqueID);
+Future<Void> takeExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID);
+
+// Unblock a user range (the input range must be within normalKeys).
+// One transaction can call releaseExclusiveReadLockOnRange at most one time.
+Future<Void> releaseExclusiveReadLockOnRange(Transaction* tr, KeyRange range, RangeLockOwnerName ownerUniqueID);
+Future<Void> releaseExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID);
+
+// Get locked ranges within the input range (the input range must be within normalKeys).
+Future<std::vector<std::pair<KeyRange, RangeLockState>>> findExclusiveReadLockOnRange(
+    Database cx,
+    KeyRange range,
+    Optional<RangeLockOwnerName> ownerName = Optional<RangeLockOwnerName>());
+
+// Clear all exclusive read locks owned by the input user. Not transactional.
+Future<Void> releaseExclusiveReadLockByUser(Database cx, RangeLockOwnerName ownerUniqueID);
 
 #endif

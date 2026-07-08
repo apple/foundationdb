@@ -20,9 +20,9 @@
 
 #include <boost/lexical_cast.hpp>
 
-#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/Schemas.h"
+#include "fdbclient/StatusSchema.h"
 #include "fdbserver/tester/workloads.h"
 
 struct DataDistributionMetricsWorkload : KVWorkload {

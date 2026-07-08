@@ -19,7 +19,6 @@
  */
 
 #include "fdbcli/fdbcli.h"
-#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/RangeLock.h"
 #include "flow/Arena.h"
 

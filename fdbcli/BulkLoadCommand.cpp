@@ -21,6 +21,7 @@
 #include "fdbcli/fdbcli.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/BulkLoading.h"
+#include "fdbclient/RangeLock.h"
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/ThreadHelper.actor.h"

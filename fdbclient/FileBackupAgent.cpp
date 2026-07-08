@@ -39,6 +39,7 @@
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.h"
+#include "fdbclient/RangeLock.h"
 #include "PartitionedLogIterator.h"
 #include "RestoreInterface.h"
 #include "fdbclient/Status.h"

@@ -25,6 +25,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/Schemas.h"
 #include "fdbclient/SpecialKeySpace.h"
+#include "fdbclient/StatusSchema.h"
 #include "fdbserver/tester/workloads.h"
 
 struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
