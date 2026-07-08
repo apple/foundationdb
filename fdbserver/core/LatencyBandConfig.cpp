@@ -20,8 +20,8 @@
 
 #include "fdbserver/core/LatencyBandConfig.h"
 
-#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/Schemas.h"
+#include "fdbclient/StatusSchema.h"
 
 bool operator==(LatencyBandConfig::RequestConfig const& lhs, LatencyBandConfig::RequestConfig const& rhs) {
 	return typeid(lhs) == typeid(rhs) && lhs.isEqual(rhs);

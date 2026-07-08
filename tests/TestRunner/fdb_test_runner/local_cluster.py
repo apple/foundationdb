@@ -16,6 +16,14 @@ from .test_util import random_alphanum_string
 
 CLUSTER_UPDATE_TIMEOUT_SEC = 10
 EXCLUDE_SERVERS_TIMEOUT_SEC = 120
+# A wiggle re-recruits storage and moves data; the cluster can take a while to
+# become fully healthy again afterwards (recovery + data redistribution), so this
+# wait is bounded generously but returns as soon as the cluster is healthy.
+CLUSTER_HEALTHY_TIMEOUT_SEC = 180
+# The cluster must report healthy this many consecutive checks before we trust it,
+# so we don't latch onto a transient healthy window while recovery is still in
+# progress.
+CLUSTER_HEALTHY_STABLE_CHECKS = 5
 RETRY_INTERVAL_SEC = 0.5
 PORT_LOCK_DIR = Path(tempfile.gettempdir()).joinpath("fdb_local_cluster_port_locks")
 MAX_PORT_ACQUIRE_ATTEMPTS = 1000
@@ -545,6 +553,102 @@ knob_min_trace_severity=5
             timeout, self.active_servers, servers_found
         )
 
+    # Wait until the cluster is fully healthy again: fully recovered, data
+    # replicated to the configured factor, and no data movement in flight. This is
+    # needed after operations like a wiggle that re-recruit storage and move data,
+    # because the process set can be updated (wait_for_server_update) well before
+    # the cluster has finished redistributing data and is able to serve all
+    # workloads. Returns as soon as the cluster has been healthy for a few
+    # consecutive checks (to avoid latching onto a transient healthy window during
+    # recovery); bounded by timeout.
+    def wait_for_cluster_healthy(self, timeout=CLUSTER_HEALTHY_TIMEOUT_SEC):
+        time_limit = time.time() + timeout
+        last_reason = "unknown"
+        consecutive_healthy = 0
+        while time.time() <= time_limit:
+            reason = self.cluster_health_issue()
+            if reason is None:
+                consecutive_healthy += 1
+                if consecutive_healthy >= CLUSTER_HEALTHY_STABLE_CHECKS:
+                    return
+            else:
+                if consecutive_healthy > 0:
+                    # Was briefly healthy then regressed - the cluster is still
+                    # settling, so restart the stability count.
+                    last_reason = "regressed after {} healthy checks: {}".format(
+                        consecutive_healthy, reason
+                    )
+                else:
+                    last_reason = reason
+                consecutive_healthy = 0
+            time.sleep(RETRY_INTERVAL_SEC)
+        assert (
+            False
+        ), "Cluster did not become stably healthy after {}sec. Last issue: {}".format(
+            timeout, last_reason
+        )
+
+    # Return None if the cluster is healthy, otherwise a short string describing
+    # why it is not (used by wait_for_cluster_healthy).
+    def cluster_health_issue(self):
+        try:
+            status = self.get_status()
+        except Exception as e:
+            return "status unavailable: {}".format(e)
+
+        cluster = status.get("cluster", {})
+
+        if "processes" not in cluster:
+            return "no processes in status"
+
+        recovery_state = cluster.get("recovery_state", {}).get("name")
+        if recovery_state != "fully_recovered":
+            return "recovery_state={}".format(recovery_state)
+
+        data = cluster.get("data", {})
+        data_state = data.get("state", {})
+        if not data_state.get("healthy", False):
+            return "data.state={}".format(data_state.get("name", "missing"))
+
+        # No data movement may be in flight.
+        moving = data.get("moving_data", {})
+        in_flight = moving.get("in_flight_bytes")
+        if in_flight is not None and in_flight > 0:
+            return "moving_data.in_flight_bytes={}".format(in_flight)
+        in_queue = moving.get("in_queue_bytes")
+        if in_queue is not None and in_queue > 0:
+            return "moving_data.in_queue_bytes={}".format(in_queue)
+
+        # Every storage team must be fully replicated with no in-flight relocation.
+        for tracker in data.get("team_trackers", []):
+            if not tracker.get("in_flight_bytes", 0) == 0:
+                return "team_tracker.in_flight_bytes={}".format(
+                    tracker.get("in_flight_bytes")
+                )
+            if tracker.get("unhealthy_servers", 0) != 0:
+                return "team_tracker.unhealthy_servers={}".format(
+                    tracker.get("unhealthy_servers")
+                )
+            tracker_state = tracker.get("state", {})
+            if tracker_state and not tracker_state.get("healthy", False):
+                return "team_tracker.state={}".format(
+                    tracker_state.get("name", "missing")
+                )
+
+        # No processes may still be excluded from the cluster (a wiggle excludes
+        # the old servers; they must be gone before we call the cluster healthy).
+        for proc_info in cluster["processes"].values():
+            if proc_info.get("excluded", False):
+                return "excluded_process={}".format(proc_info.get("address"))
+
+        # All expected processes must be present and reporting no excluded servers.
+        if len(cluster["processes"]) != self.process_number:
+            return "process_count={}/{}".format(
+                len(cluster["processes"]), self.process_number
+            )
+
+        return None
+
     # Apply changes to the set of the coordinators, based on the current value of self.coordinators
     def update_coordinators(self):
         urls = [
@@ -644,6 +748,19 @@ knob_min_trace_severity=5
         self.wait_for_server_update()
         print(
             "Old servers successfully removed from the cluster. Time: {}s".format(
+                time.time() - start_time
+            )
+        )
+
+        # Step 5: wait until the cluster is fully healthy again. The steps above
+        # only ensure the process set has been updated; the cluster may still be
+        # recovering and redistributing data onto the new servers. Returning before
+        # that completes lets the subsequent progress check race with an
+        # unavailable cluster and fail spuriously.
+        start_time = time.time()
+        self.wait_for_cluster_healthy()
+        print(
+            "Cluster fully healthy after wiggle. Time: {}s".format(
                 time.time() - start_time
             )
         )

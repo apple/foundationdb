@@ -146,18 +146,8 @@ public:
 		std::vector<CDCProxyInterface> cdcProxies;
 		Reference<ClusterRecoveryData> recoveryData;
 
-		DBInfo()
-		  : clientInfo(new AsyncVar<ClientDBInfo>()), serverInfo(new AsyncVar<ServerDBInfo>()),
-		    masterRegistrationCount(0), dbInfoCount(0), recoveryStalled(false), forceRecovery(false),
-		    db(DatabaseContext::create(clientInfo,
-		                               Future<Void>(),
-		                               LocalityData(),
-		                               EnableLocalityLoadBalance::True,
-		                               TaskPriority::DefaultEndpoint,
-		                               LockAware::True)), // SOMEDAY: Locality!
-		    unfinishedRecoveries(0), cachePopulated(false), clientCount(0) {
-			clientCounter = countClients(this);
-		}
+		DBInfo();
+		~DBInfo();
 
 		void setDistributor(const DataDistributorInterface& interf) {
 			auto newInfo = serverInfo->get();

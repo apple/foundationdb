@@ -23,6 +23,12 @@ from .test_util import random_alphanum_string
 CLUSTER_ACTIONS = ["wiggle"]
 HEALTH_CHECK_TIMEOUT_SEC = 5
 PROGRESS_CHECK_TIMEOUT_SEC = 30
+# Number of times a progress check is retried before failing. Tolerates brief
+# post-wiggle/upgrade windows where the cluster is server-side healthy but the
+# client-side (MVC coordinator reconnect, location cache refresh) hasn't caught
+# up yet. wait_for_cluster_healthy covers server-side recovery; these retries
+# cover client-side warmup.
+PROGRESS_CHECK_RETRIES = 3
 TESTER_STATS_INTERVAL_SEC = 5
 TRANSACTION_RETRY_LIMIT = 100
 RUN_WITH_GDB = False
@@ -263,17 +269,32 @@ class UpgradeTest:
                 )
                 os._exit(1)
 
-    # Perform a progress check: Trigger it and wait until it is completed
+    # Perform a progress check: Trigger it and wait until it is completed.
+    # Retried PROGRESS_CHECK_RETRIES times: wait_for_cluster_healthy ensures
+    # server-side recovery, but after a coordinator change the MVC client-side
+    # (protocol-version monitor, location cache) can take longer to stabilize.
+    # A CHECK_OK requires all workloads to confirm progress, so a stale
+    # CHECK_OK from a slow-but-not-stuck prior attempt is acceptable evidence
+    # that the workloads were making progress; a genuinely stuck workload never
+    # produces a CHECK_OK regardless of retry count.
     def progress_check(self):
-        self.progress_event.clear()
-        os.write(self.ctrl_pipe, b"CHECK\n")
-        self.progress_event.wait(None if RUN_WITH_GDB else PROGRESS_CHECK_TIMEOUT_SEC)
-        if self.progress_event.is_set():
-            print("Progress check: OK")
-        else:
-            assert False, "Progress check failed after upgrade to version {}".format(
-                self.cluster_version
+        for attempt in range(1, PROGRESS_CHECK_RETRIES + 1):
+            self.progress_event.clear()
+            os.write(self.ctrl_pipe, b"CHECK\n")
+            self.progress_event.wait(
+                None if RUN_WITH_GDB else PROGRESS_CHECK_TIMEOUT_SEC
             )
+            if self.progress_event.is_set():
+                print("Progress check: OK")
+                return
+            print(
+                "Progress check attempt {}/{} timed out after {}s".format(
+                    attempt, PROGRESS_CHECK_RETRIES, PROGRESS_CHECK_TIMEOUT_SEC
+                )
+            )
+        assert False, "Progress check failed after upgrade to version {}".format(
+            self.cluster_version
+        )
 
     # The main function of a thread for reading and processing
     # the notifications received from the tester

@@ -409,7 +409,7 @@ Future<Reference<IReplayPeekCursor>> LogRouterData::getPeekCursorData(Reference<
 			          }
 			          logSystemChanged = logSystem->onChange();
 		          })
-		    .When(result ? delay(SERVER_KNOBS->LOG_ROUTER_PEEK_SWITCH_DC_TIME) : Never(),
+		    .When(result && !result->isExhausted() ? delay(SERVER_KNOBS->LOG_ROUTER_PEEK_SWITCH_DC_TIME) : Never(),
 		          [&](const Void&) {
 			          // Peek has become stuck for a while, trying switching between primary DC and satellite
 			          CODE_PROBE(true, "Detect log router slow peeks");

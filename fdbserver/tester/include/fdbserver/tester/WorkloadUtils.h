@@ -29,7 +29,7 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
-#include "fdbserver/tester/KnobProtectiveGroups.h"
+#include "fdbserver/tester/KnobKeyValuePairs.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbrpc/PerfMetric.h"
