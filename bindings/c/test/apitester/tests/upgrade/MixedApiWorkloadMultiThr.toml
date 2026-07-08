@@ -64,5 +64,9 @@ maxClients = 8
     name = 'WatchAndWait'
     initialSize = 0
     runUntilStop = true
-    minTxTimeoutMs = 2000
-    maxTxTimeoutMs = 10000
+    # WatchAndWait does not get a timeout: it relies on a concurrent transaction
+    # setting the watched key to fire the watch naturally. A timeout would leave
+    # the watch future orphaned in pre-8.0.0 client libraries (which lack the
+    # cancelWatches fix), causing the workload to hang permanently even on a
+    # stable cluster. The other workloads' timeouts are sufficient to recover
+    # from stale-endpoint hangs during upgrades.
