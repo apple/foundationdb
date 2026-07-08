@@ -1555,9 +1555,11 @@ static Optional<DecodedKeyServersState> decodeKeyServersState(RangeResult const&
 // owns the FlowLock slot). Returns the interfaces plus the read version at
 // which they were fetched — the read version is what waitForShardReady()
 // needs (see finishMoveKeys where we save it before dropping the txn).
-static Future<std::pair<std::vector<StorageServerInterface>, Version>>
-buildKeysDestServerInterfaces(Transaction* tr, std::vector<UID> const& dest, std::vector<UID> const& completeSrc,
-                              bool hasRemote) {
+static Future<std::pair<std::vector<StorageServerInterface>, Version>> buildKeysDestServerInterfaces(
+    Transaction* tr,
+    std::vector<UID> const& dest,
+    std::vector<UID> const& completeSrc,
+    bool hasRemote) {
 	std::set<UID> completeSrcSet(completeSrc.begin(), completeSrc.end());
 	std::vector<UID> newDestinations;
 	for (auto& it : dest) {
@@ -1619,8 +1621,7 @@ static Future<int> waitForKeysDestServers(std::vector<StorageServerInterface> co
 
 		if (tssPair != tssMapping.end() && *waitForTSSCounter > 0 && !tssToIgnore->contains(tssPair->second.id())) {
 			tssReadyInterfs.push_back(tssPair->second);
-			tssReady.push_back(
-			    waitForShardReady(tssPair->second, keys, readVersion, GetShardStateRequest::READABLE));
+			tssReady.push_back(waitForShardReady(tssPair->second, keys, readVersion, GetShardStateRequest::READABLE));
 		}
 	}
 
@@ -1732,9 +1733,7 @@ static Future<bool> reverifyKeysDestAndCommit(Transaction* tr,
 	// than silently expand the commit past the verified end.
 	ASSERT(rereadEnd <= currentKeys->end);
 	if (rereadEnd < currentKeys->end) {
-		CODE_PROBE(true,
-		           "finishMoveKeys reread keyServers boundary shorter than planning",
-		           probe::decoration::rare);
+		CODE_PROBE(true, "finishMoveKeys reread keyServers boundary shorter than planning", probe::decoration::rare);
 		*currentKeys = KeyRangeRef(currentKeys->begin, rereadEnd);
 		*endKey = rereadEnd;
 	}
@@ -1756,8 +1755,7 @@ static Future<bool> reverifyKeysDestAndCommit(Transaction* tr,
 	// update keyServers, serverKeys
 	// SOMEDAY: Doing these in parallel is safe because none of them overlap or touch (one per
 	// server)
-	co_await krmSetRangeCoalescing(
-	    tr, keyServersPrefix, *currentKeys, keys, keyServersValue(reread.uidToTagMap, dest));
+	co_await krmSetRangeCoalescing(tr, keyServersPrefix, *currentKeys, keys, keyServersValue(reread.uidToTagMap, dest));
 
 	auto asi = allServers.begin();
 	std::vector<Future<Void>> actors;
@@ -1851,8 +1849,13 @@ static Future<Void> finishMoveKeys(Database occ,
 
 					// Decode + validate keyServers. Nullopt = entire range already moved
 					// by a sibling iteration; nothing more to do this iteration.
-					Optional<DecodedKeyServersState> decoded = decodeKeyServersState(
-					    state.uidToTagMap, state.keyServers, destinationTeam, relocationIntervalId, keys, begin, endKey);
+					Optional<DecodedKeyServersState> decoded = decodeKeyServersState(state.uidToTagMap,
+					                                                                 state.keyServers,
+					                                                                 destinationTeam,
+					                                                                 relocationIntervalId,
+					                                                                 keys,
+					                                                                 begin,
+					                                                                 endKey);
 					if (!decoded.present()) {
 						begin = endKey;
 						consecutiveTransactionTooOldRetries = 0;
@@ -1863,8 +1866,8 @@ static Future<Void> finishMoveKeys(Database occ,
 					// waitForShardReady will need after we drop the txn below.
 					std::vector<StorageServerInterface> storageServerInterfaces;
 					Version readVersion;
-					std::tie(storageServerInterfaces, readVersion) = co_await buildKeysDestServerInterfaces(
-					    &tr, decoded->dest, decoded->completeSrc, hasRemote);
+					std::tie(storageServerInterfaces, readVersion) =
+					    co_await buildKeysDestServerInterfaces(&tr, decoded->dest, decoded->completeSrc, hasRemote);
 
 					releaser.release();
 
@@ -2440,11 +2443,17 @@ struct DecodedShardsKeyServers {
 // running the per-sub-range AUDIT_DATAMOVE_PRE_CHECK when enabled. On a
 // stamp mismatch, sets *cancelDataMove=true and throws retry() so the outer
 // loop enters the cancel path. `dataMove` is only used for tracing.
-static Future<DecodedShardsKeyServers>
-decodeAndPreCheckShards(Database occ, Transaction* tr, RangeResult const& UIDtoTagMap, RangeResult const& keyServers,
-                        std::vector<UID> const& destServers, UID dataMoveId, bool runPreCheck,
-                        DataMoveMetaData const& dataMove, UID relocationIntervalId, Severity sevDm,
-                        bool* cancelDataMove) {
+static Future<DecodedShardsKeyServers> decodeAndPreCheckShards(Database occ,
+                                                               Transaction* tr,
+                                                               RangeResult const& UIDtoTagMap,
+                                                               RangeResult const& keyServers,
+                                                               std::vector<UID> const& destServers,
+                                                               UID dataMoveId,
+                                                               bool runPreCheck,
+                                                               DataMoveMetaData const& dataMove,
+                                                               UID relocationIntervalId,
+                                                               Severity sevDm,
+                                                               bool* cancelDataMove) {
 	std::vector<UID> completeSrc;
 	std::unordered_set<UID> allServers;
 
@@ -2506,9 +2515,11 @@ decodeAndPreCheckShards(Database occ, Transaction* tr, RangeResult const& UIDtoT
 // finishMoveShards analog of buildKeysDestServerInterfaces. Only difference:
 // a missing serverList entry throws retry() rather than asserting — shards
 // tolerates the SS-removed race by re-reading dataMove and starting over.
-static Future<std::pair<std::vector<StorageServerInterface>, Version>>
-buildShardsDestServerInterfaces(Transaction* tr, std::vector<UID> const& destServers,
-                                std::vector<UID> const& completeSrc, bool hasRemote) {
+static Future<std::pair<std::vector<StorageServerInterface>, Version>> buildShardsDestServerInterfaces(
+    Transaction* tr,
+    std::vector<UID> const& destServers,
+    std::vector<UID> const& completeSrc,
+    bool hasRemote) {
 	std::set<UID> completeSrcSet(completeSrc.begin(), completeSrc.end());
 	std::vector<UID> newDestinations;
 	for (const UID& id : destServers) {
@@ -2580,8 +2591,7 @@ static Future<int> waitForShardsDestServers(std::vector<StorageServerInterface> 
 
 		if (tssPair != tssMapping.end()) {
 			tssReadyInterfs.push_back(tssPair->second);
-			tssReady.push_back(
-			    waitForShardReady(tssPair->second, range, readVersion, GetShardStateRequest::READABLE));
+			tssReady.push_back(waitForShardReady(tssPair->second, range, readVersion, GetShardStateRequest::READABLE));
 		}
 	}
 
@@ -2623,7 +2633,7 @@ static Future<int> waitForShardsDestServers(std::vector<StorageServerInterface> 
 		}
 	}
 
-	co_return (int)readyServers_out->size();
+	co_return (int) readyServers_out->size();
 }
 
 // Result of reverifyShardsAndCommit — encodes the three outcomes the caller
@@ -2671,9 +2681,7 @@ static Future<ReverifyShardsResult> reverifyShardsAndCommit(Transaction* tr,
 	                                                 SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT);
 
 	if (!reread.dataMove.present()) {
-		CODE_PROBE(true,
-		           "finishMoveShards data move deleted during waitForShardReady",
-		           probe::decoration::rare);
+		CODE_PROBE(true, "finishMoveShards data move deleted during waitForShardReady", probe::decoration::rare);
 		TraceEvent(SevWarn, "FinishMoveShardsDataMoveDeletedAfterWait", relocationIntervalId)
 		    .detail("DataMoveID", dataMoveId);
 		*runPreCheck = false;
@@ -2681,9 +2689,7 @@ static Future<ReverifyShardsResult> reverifyShardsAndCommit(Transaction* tr,
 		co_return ReverifyShardsResult::RetryLoop;
 	}
 	if (reread.dataMove.get().getPhase() != DataMoveMetaData::Running) {
-		CODE_PROBE(true,
-		           "finishMoveShards data move phase changed during waitForShardReady",
-		           probe::decoration::rare);
+		CODE_PROBE(true, "finishMoveShards data move phase changed during waitForShardReady", probe::decoration::rare);
 		TraceEvent(SevWarn, "FinishMoveShardsPhaseChangedAfterWait", relocationIntervalId)
 		    .detail("DataMoveID", dataMoveId)
 		    .detail("Phase", static_cast<int>(reread.dataMove.get().getPhase()));
@@ -2710,9 +2716,7 @@ static Future<ReverifyShardsResult> reverifyShardsAndCommit(Transaction* tr,
 	// end.
 	ASSERT(rereadEnd <= range->end);
 	if (rereadEnd < range->end) {
-		CODE_PROBE(true,
-		           "finishMoveShards reread keyServers boundary shorter than planning",
-		           probe::decoration::rare);
+		CODE_PROBE(true, "finishMoveShards reread keyServers boundary shorter than planning", probe::decoration::rare);
 		*range = KeyRangeRef(range->begin, rereadEnd);
 	}
 
@@ -2947,8 +2951,8 @@ static Future<Void> finishMoveShards(Database occ,
 				// version waitForShardReady will need after we drop the txn.
 				std::vector<StorageServerInterface> storageServerInterfaces;
 				Version readVersion;
-				std::tie(storageServerInterfaces, readVersion) = co_await buildShardsDestServerInterfaces(
-				    &tr, destServers, decoded.completeSrc, hasRemote);
+				std::tie(storageServerInterfaces, readVersion) =
+				    co_await buildShardsDestServerInterfaces(&tr, destServers, decoded.completeSrc, hasRemote);
 
 				releaser.release();
 
