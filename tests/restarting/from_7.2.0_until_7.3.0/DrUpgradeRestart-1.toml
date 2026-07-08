@@ -14,7 +14,6 @@ simBackupAgents = "BackupToDB"
     nodeCount = 30000
     transactionsPerSecond = 1000.0
     testDuration = 30.0
-    expectedRate = 0
 
     [[test.workload]]
     testName = "BackupToDBUpgrade"

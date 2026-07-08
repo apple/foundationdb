@@ -9,7 +9,6 @@ simBackupAgents = 'BackupToFile'
     testName = 'Cycle'
     nodeCount = 3000
     testDuration = 10.0
-    expectedRate = 0
     
     [[test.workload]]
     testName = 'RandomClogging'
@@ -108,4 +107,3 @@ checkOnly = 'true'
     [[test.workload]]
     testName = 'Cycle'
     nodeCount = 3000
-    expectedRate = 0

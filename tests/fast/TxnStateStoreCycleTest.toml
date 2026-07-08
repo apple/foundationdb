@@ -18,7 +18,6 @@ testTitle = 'Clogged'
     testName = 'Cycle'
     transactionsPerSecond = 2500.0
     testDuration = 10.0
-    expectedRate = 0
     keyPrefix = '\xff/TESTONLYtxnStateStore/'
 
     [[test.workload]]

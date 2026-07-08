@@ -194,6 +194,7 @@ if(WITH_PYTHON)
   # TODO: Fix failures and reenable this test:
   add_fdb_test(TEST_FILES fast/LowLatencySingleClog.toml IGNORE)
   add_fdb_test(TEST_FILES fast/MemoryLifetime.toml)
+  add_fdb_test(TEST_FILES fast/MinimumThroughput.toml)
   add_fdb_test(TEST_FILES fast/MoveKeysCycle.toml)
   add_fdb_test(TEST_FILES fast/MutationLogReaderCorrectness.toml)
 

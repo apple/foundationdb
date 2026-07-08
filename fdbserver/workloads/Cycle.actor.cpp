@@ -57,7 +57,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 	static constexpr auto NAME = MultiTenancy ? "TenantCycle" : "Cycle";
 	static constexpr auto TenantEnabled = MultiTenancy;
 	int actorCount, nodeCount;
-	double testDuration, transactionsPerSecond, minExpectedTransactionsPerSecond, traceParentProbability;
+	double testDuration, transactionsPerSecond, traceParentProbability;
 	bool unseedCheck{ true };
 	bool skipSetup{ false }; // Useful for restarting tests
 	Key keyPrefix;
@@ -75,7 +75,6 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 		nodeCount = getOption(options, "nodeCount"_sr, transactionsPerSecond * clientCount);
 		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, ""_sr).toString());
 		traceParentProbability = getOption(options, "traceParentProbability"_sr, 0.01);
-		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, "expectedRate"_sr, 0.7);
 		unseedCheck = getOption(options, "unseedCheck"_sr, true);
 		skipSetup = getOption(options, "skipSetup"_sr, false);
 		if constexpr (MultiTenancy) {
@@ -311,19 +310,6 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 	}
 
 	ACTOR Future<bool> cycleCheck(Database cx, CycleWorkload* self, bool ok) {
-		if (self->transactions.getMetric().value() < self->testDuration * self->minExpectedTransactionsPerSecond) {
-			TraceEvent(SevWarnAlways, "TestFailure")
-			    .detail("Reason", "Rate below desired rate")
-			    .detail("File", __FILE__)
-			    .detail(
-			        "Details",
-			        format("%.2f",
-			               self->transactions.getMetric().value() / (self->transactionsPerSecond * self->testDuration)))
-			    .detail("TransactionsAchieved", self->transactions.getMetric().value())
-			    .detail("MinTransactionsExpected", self->testDuration * self->minExpectedTransactionsPerSecond)
-			    .detail("TransactionGoal", self->transactionsPerSecond * self->testDuration);
-			ok = false;
-		}
 		if (!self->clientId) {
 			// One client checks the validity of the cycle
 			state Transaction tr(cx);

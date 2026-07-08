@@ -15,7 +15,6 @@ timeout = 360000
     nodeCount = 1000
     transactionsPerSecond = 2500.0
     testDuration = 30.0
-    expectedRate = 0
     keyPrefix = '!'
 
     [[test.workload]]
@@ -23,7 +22,6 @@ timeout = 360000
     nodeCount = 1000
     transactionsPerSecond = 2500.0
     testDuration = 30.0
-    expectedRate = 0
     keyPrefix = 'z'
 
     [[test.workload]]
@@ -31,7 +29,6 @@ timeout = 360000
     nodeCount = 1000
     transactionsPerSecond = 2500.0
     testDuration = 30.0
-    expectedRate = 0
     keyPrefix = 'A'
 
     [[test.workload]]
@@ -39,7 +36,6 @@ timeout = 360000
     nodeCount = 1000
     transactionsPerSecond = 2500.0
     testDuration = 30.0
-    expectedRate = 0
     keyPrefix = 'Z'
     # Each testName=RunRestoreWorkerWorkload creates a restore worker
     # We need at least 3 restore workers: master, loader, and applier

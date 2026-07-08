@@ -28,7 +28,6 @@ runFailureWorkloads = false
     nodeCount = 100
     transactionsPerSecond = 10.0
     testDuration = 10.0
-    expectedRate = 0
 
     [[test.workload]]
     testName = 'BackupAndRestoreValidation'
