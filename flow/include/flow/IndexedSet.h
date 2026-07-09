@@ -60,8 +60,8 @@ class StringRef;
 
 template <class T, class Metric>
 struct IndexedSet {
-	typedef T value_type;
-	typedef T key_type;
+	using value_type = T;
+	using key_type = T;
 
 private: // Forward-declare IndexedSet::Node because Clang is much stricter about this ordering.
 	struct Node : FastAllocated<Node> {
@@ -357,7 +357,7 @@ public: // but testonly
 
 class NoMetric {
 public:
-	NoMetric() {}
+	NoMetric() = default;
 	explicit(false) NoMetric(int) {} // NoMetric(1)
 	NoMetric operator+(NoMetric const&) const { return NoMetric(); }
 	NoMetric operator-(NoMetric const&) const { return NoMetric(); }
@@ -423,10 +423,10 @@ bool operator<(CompatibleWithKey const& l, MapPair<Key, Value> const& r) {
 template <class Key, class Value, class Pair = MapPair<Key, Value>, class Metric = NoMetric>
 class Map {
 public:
-	typedef typename IndexedSet<Pair, Metric>::iterator iterator;
-	typedef typename IndexedSet<Pair, Metric>::const_iterator const_iterator;
+	using iterator = typename IndexedSet<Pair, Metric>::iterator;
+	using const_iterator = typename IndexedSet<Pair, Metric>::const_iterator;
 
-	Map() {}
+	Map() = default;
 	const_iterator begin() const { return set.begin(); }
 	iterator begin() { return set.begin(); }
 	const_iterator cbegin() const { return begin(); }
@@ -1246,8 +1246,9 @@ void IndexedSet<T, Metric>::erase(iterator toErase) {
 				break;
 			}
 			rebalanceNode = *parent;
-		} else if (rebalanceNode->balance) // +/- 1, we are done
+		} else if (rebalanceNode->balance) { // +/- 1, we are done
 			break;
+		}
 
 		if (!rebalanceNode->parent)
 			break;

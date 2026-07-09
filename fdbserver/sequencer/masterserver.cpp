@@ -252,10 +252,11 @@ class LiveCommittedVersionServer {
 	Future<Void> serveGetLiveCommittedVersion() {
 		while (true) {
 			GetRawCommittedVersionRequest req = co_await self->myInterface.getLiveCommittedVersion.getFuture();
-			if (req.debugID.present())
+			if (req.debugID.present()) {
 				g_traceBatch.addEvent("TransactionDebug",
 				                      req.debugID.get().first(),
 				                      "MasterServer.serveLiveCommittedVersion.GetRawCommittedVersion");
+			}
 
 			if (self->liveCommittedVersion.get() == invalidVersion) {
 				self->liveCommittedVersion.set(self->recoveryTransactionVersion);

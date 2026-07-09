@@ -373,8 +373,9 @@ static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& er
 				ret.push_back(std::move(buf));
 				offset = i = line.find_first_not_of(' ', i + 1);
 				forcetoken = false;
-			} else
+			} else {
 				i++;
+			}
 			break;
 		case '"':
 			quoted = !quoted;
@@ -390,8 +391,9 @@ static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& er
 					buf.push_back(StringRef((uint8_t*)(line.data() + offset), i - offset));
 				offset = i = line.find_first_not_of(" \n\t\r", i);
 				forcetoken = false;
-			} else
+			} else {
 				i++;
+			}
 			break;
 		case '\\':
 			if (i + 2 > line.length()) {
@@ -625,8 +627,9 @@ void printHelp(StringRef command) {
 			printAtCol(i->second.long_desc.c_str(), 80);
 		}
 		printf("\n");
-	} else
+	} else {
 		printf("I don't know anything about `%s'\n", formatStringRef(command).c_str());
+	}
 }
 
 int printStatusFromJSON(std::string const& jsonFileName) {
@@ -1256,7 +1259,7 @@ Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterConnecti
 					if (tokens.size() == 1) {
 						printHelpOverview();
 					} else if (tokens.size() == 2) {
-						if (tokencmp(tokens[1], "escaping"))
+						if (tokencmp(tokens[1], "escaping")) {
 							printf("\n"
 							       "When parsing commands, fdbcli considers a space to delimit individual tokens.\n"
 							       "To include a space in a single token, you may either enclose the token in\n"
@@ -1276,17 +1279,19 @@ Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterConnecti
 							       "\n"
 							       "All keys and values are displayed by the fdbcli with non-printable characters\n"
 							       "and spaces encoded as two-digit hex bytes.\n\n");
-						else if (tokencmp(tokens[1], "options")) {
+						} else if (tokencmp(tokens[1], "options")) {
 							printf("\n"
 							       "The following options are available to be set using the `option' command:\n"
 							       "\n");
 							options->printHelpString();
-						} else if (tokencmp(tokens[1], "help"))
+						} else if (tokencmp(tokens[1], "help")) {
 							printHelpOverview();
-						else
+						} else {
 							printHelp(tokens[1]);
-					} else
+						}
+					} else {
 						printf("Usage: help [topic]\n");
+					}
 					continue;
 				}
 
@@ -1854,8 +1859,9 @@ Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterConnecti
 								printf("\nCurrently enabled options:\n\n");
 								options->print();
 								printf("\n");
-							} else
+							} else {
 								fprintf(stderr, "There are no options enabled\n");
+							}
 
 							continue;
 						}
@@ -2090,6 +2096,9 @@ int main(int argc, char** argv) {
 	CLIOptions opt(argc, argv);
 	if (opt.exit_code != -1)
 		return opt.exit_code;
+
+	// fdbcli connects to one cluster, so multiple client threads per version have no effect.
+	MultiVersionApi::api->ignoreEnvironmentVariableNetworkOption(FDBNetworkOptions::CLIENT_THREADS_PER_VERSION);
 
 	if (opt.trace) {
 		if (opt.traceDir.empty())

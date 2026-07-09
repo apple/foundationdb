@@ -39,7 +39,7 @@ struct OTELSpanContextMessage {
 
 	SpanContext spanContext;
 
-	OTELSpanContextMessage() {}
+	OTELSpanContextMessage() = default;
 	explicit OTELSpanContextMessage(SpanContext const& spanContext) : spanContext(spanContext) {}
 
 	std::string toString() const {

@@ -754,10 +754,11 @@ struct UpdateEagerReadInfo {
 				keys.emplace_back(m.param1, m.param2.size() + 1);
 			}
 		} else if ((m.type == MutationRef::AppendIfFits) || (m.type == MutationRef::ByteMin) ||
-		           (m.type == MutationRef::ByteMax))
+		           (m.type == MutationRef::ByteMax)) {
 			keys.emplace_back(m.param1, CLIENT_KNOBS->VALUE_SIZE_LIMIT);
-		else if (isAtomicOp((MutationRef::Type)m.type))
+		} else if (isAtomicOp((MutationRef::Type)m.type)) {
 			keys.emplace_back(m.param1, m.param2.size());
+		}
 	}
 
 	void finishKeyBegin() {
@@ -1596,11 +1597,12 @@ public:
 	void checkChangeCounter(uint64_t oldShardChangeCounter, KeyRangeRef const& keys) {
 		if (oldShardChangeCounter != shardChangeCounter) {
 			auto sh = shards.intersectingRanges(keys);
-			for (auto i = sh.begin(); i != sh.end(); ++i)
+			for (auto i = sh.begin(); i != sh.end(); ++i) {
 				if (i->value()->getChangeCounter() > oldShardChangeCounter) {
 					CODE_PROBE(true, "shard change during range operation");
 					throw wrong_shard_server();
 				}
+			}
 		}
 	}
 
@@ -1984,11 +1986,12 @@ ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version, 
 			return version;
 		}
 		when(wait(delay(SERVER_KNOBS->FUTURE_VERSION_DELAY))) {
-			if (deterministicRandom()->random01() < 0.001)
+			if (deterministicRandom()->random01() < 0.001) {
 				TraceEvent(SevWarn, "ShardServerFutureVersion1000x", data->thisServerID)
 				    .detail("Version", version)
 				    .detail("MyVersion", data->version.get())
 				    .detail("ServerID", data->thisServerID);
+			}
 			throw future_version();
 		}
 	}
@@ -2088,11 +2091,12 @@ ACTOR Future<Version> waitForVersionNoTooOld(StorageServer* data, Version versio
 			return version;
 		}
 		when(wait(delay(SERVER_KNOBS->FUTURE_VERSION_DELAY))) {
-			if (deterministicRandom()->random01() < 0.001)
+			if (deterministicRandom()->random01() < 0.001) {
 				TraceEvent(SevWarn, "ShardServerFutureVersion1000x", data->thisServerID)
 				    .detail("Version", version)
 				    .detail("MyVersion", data->version.get())
 				    .detail("ServerID", data->thisServerID);
+			}
 			throw future_version();
 		}
 	}
@@ -2163,10 +2167,11 @@ Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		data->counters.readLatencySamples.sample(
 		    queueWaitEnd - req.requestTime(), ReadLatencySamples::READ_QUEUE_WAIT, trackedReadType(req));
 
-		if (req.options.present() && req.options.get().debugID.present())
+		if (req.options.present() && req.options.get().debugID.present()) {
 			g_traceBatch.addEvent("GetValueDebug",
 			                      req.options.get().debugID.get().first(),
 			                      "getValueQ.DoRead"); //.detail("TaskID", g_network->getCurrentTask());
+		}
 
 		Optional<Value> v;
 		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
@@ -2174,10 +2179,11 @@ Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		data->counters.readLatencySamples.sample(
 		    g_network->timer() - queueWaitEnd, ReadLatencySamples::READ_VERSION_WAIT, trackedReadType(req));
 
-		if (req.options.present() && req.options.get().debugID.present())
+		if (req.options.present() && req.options.get().debugID.present()) {
 			g_traceBatch.addEvent("GetValueDebug",
 			                      req.options.get().debugID.get().first(),
 			                      "getValueQ.AfterVersion"); //.detail("TaskID", g_network->getCurrentTask());
+		}
 
 		uint64_t changeCounter = data->shardChangeCounter;
 
@@ -2240,10 +2246,11 @@ Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 			data->metrics.notifyBytesReadPerKSecond(req.key, bytesReadPerKSecond);
 		}
 
-		if (req.options.present() && req.options.get().debugID.present())
+		if (req.options.present() && req.options.get().debugID.present()) {
 			g_traceBatch.addEvent("GetValueDebug",
 			                      req.options.get().debugID.get().first(),
 			                      "getValueQ.AfterRead"); //.detail("TaskID", g_network->getCurrentTask());
+		}
 
 		GetValueReply reply(v, /*cached=*/false);
 		reply.penalty = data->getPenalty();
@@ -2279,17 +2286,19 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext p
 	state Location spanLocation = "SS:watchWaitForValueChange"_loc;
 	state Span span(spanLocation, parent);
 	state Reference<ServerWatchMetadata> metadata = data->getWatchMetadata(key);
-	if (metadata->debugID.present())
+	if (metadata->debugID.present()) {
 		g_traceBatch.addEvent("WatchValueDebug",
 		                      metadata->debugID.get().first(),
 		                      "watchValueSendReply.Before"); //.detail("TaskID", g_network->getCurrentTask());
+	}
 
 	state Version originalMetadataVersion = metadata->version;
 	wait(success(waitForVersionNoTooOld(data, metadata->version)));
-	if (metadata->debugID.present())
+	if (metadata->debugID.present()) {
 		g_traceBatch.addEvent("WatchValueDebug",
 		                      metadata->debugID.get().first(),
 		                      "watchValueSendReply.AfterVersion"); //.detail("TaskID", g_network->getCurrentTask());
+	}
 
 	state Version minVersion = data->data().latestVersion;
 	state Future<Void> watchFuture = data->watches.onChange(metadata->key);
@@ -2324,11 +2333,12 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext p
 			                           reply.value.present() ? StringRef(reply.value.get()) : "<null>"_sr),
 			               data->thisServerID);
 
-			if (metadata->debugID.present())
+			if (metadata->debugID.present()) {
 				g_traceBatch.addEvent(
 				    "WatchValueDebug",
 				    metadata->debugID.get().first(),
 				    "watchValueSendReply.AfterRead"); //.detail("TaskID", g_network->getCurrentTask());
+			}
 
 			// If the version we read is less than minVersion, then we may fail to be notified of any changes that occur
 			// up to or including minVersion. To prevent that, we'll check the key again once the version reaches our
@@ -3122,12 +3132,13 @@ Future<Key> findKey(StorageServer* data,
 	int maxBytes{ 0 };
 	if (sel.offset <= 1 && sel.offset >= 0)
 		maxBytes = std::numeric_limits<int>::max();
-	else
+	else {
 		maxBytes =
 		    (g_network->isSimulated() &&
 		     simulationPolicyHasCapability(ISimulationPolicy::Capability::LimitStorageServerReadBytes) && buggify())
 		        ? SERVER_KNOBS->BUGGIFY_LIMIT_BYTES
 		        : SERVER_KNOBS->STORAGE_LIMIT_BYTES;
+	}
 
 	GetKeyValuesReply rep = co_await readRange(data,
 	                                           version,
@@ -3433,10 +3444,11 @@ Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			data->counters.readLatencySamples.sample(duration, ReadLatencySamples::KV_READ_RANGE, trackedReadType(req));
 			GetKeyValuesReply r = _r;
 
-			if (req.options.present() && req.options.get().debugID.present())
+			if (req.options.present() && req.options.get().debugID.present()) {
 				g_traceBatch.addEvent("TransactionDebug",
 				                      req.options.get().debugID.get().first(),
 				                      "storageserver.getKeyValues.AfterReadRange");
+			}
 			//.detail("Begin",begin).detail("End",end).detail("SizeOf",r.data.size());
 			data->checkChangeCounter(
 			    changeCounter,
@@ -3514,10 +3526,11 @@ Future<GetRangeReqAndResultRef> quickGetKeyValues(StorageServer* data,
 	double getValuesStart = g_network->timer();
 	getRange.begin = firstGreaterOrEqual(KeyRef(*a, prefix));
 	getRange.end = firstGreaterOrEqual(strinc(prefix, *a));
-	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
+	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present()) {
 		g_traceBatch.addEvent("TransactionDebug",
 		                      pOriginalReq->options.get().debugID.get().first(),
 		                      "storageserver.quickGetKeyValues.Before");
+	}
 	try {
 		// TODO: Use a lower level API may be better?
 		GetKeyValuesRequest req;
@@ -3549,10 +3562,11 @@ Future<GetRangeReqAndResultRef> quickGetKeyValues(StorageServer* data,
 			const double duration = g_network->timer() - getValuesStart;
 			data->counters.readLatencySamples.sample(
 			    duration, ReadLatencySamples::MAPPED_RANGE_LOCAL, trackedReadType(*pOriginalReq));
-			if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
+			if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present()) {
 				g_traceBatch.addEvent("TransactionDebug",
 				                      pOriginalReq->options.get().debugID.get().first(),
 				                      "storageserver.quickGetKeyValues.AfterLocalFetch");
+			}
 			co_return getRange;
 		}
 		// Otherwise fallback.
@@ -3578,10 +3592,11 @@ Future<GetRangeReqAndResultRef> quickGetKeyValues(StorageServer* data,
 		const double duration = g_network->timer() - getValuesStart;
 		data->counters.readLatencySamples.sample(
 		    duration, ReadLatencySamples::MAPPED_RANGE_REMOTE, trackedReadType(*pOriginalReq));
-		if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
+		if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present()) {
 			g_traceBatch.addEvent("TransactionDebug",
 			                      pOriginalReq->options.get().debugID.get().first(),
 			                      "storageserver.quickGetKeyValues.AfterRemoteFetch");
+		}
 		co_return getRange;
 	} else {
 		throw quick_get_key_values_miss();
@@ -5548,10 +5563,11 @@ Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	std::vector<MappedKeyValueRef> kvms(k);
 	std::vector<Future<Void>> subqueries;
 	int offset = 0;
-	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
+	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present()) {
 		g_traceBatch.addEvent("TransactionDebug",
 		                      pOriginalReq->options.get().debugID.get().first(),
 		                      "storageserver.mapKeyValues.BeforeLoop");
+	}
 
 	for (; (offset < sz) && (*remainingLimitBytes > 0); offset += SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE) {
 		// Divide into batches of MAX_PARALLEL_QUICK_GET_VALUE subqueries
@@ -5572,10 +5588,11 @@ Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 			    mapSubquery(data, input.version, pOriginalReq, &result.arena, isRangeQuery, it, kvm, mappedKey));
 		}
 		co_await waitForAll(subqueries);
-		if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
+		if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present()) {
 			g_traceBatch.addEvent("TransactionDebug",
 			                      pOriginalReq->options.get().debugID.get().first(),
 			                      "storageserver.mapKeyValues.AfterBatch");
+		}
 		subqueries.clear();
 		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
 			// since we always read the index, so always consider the index size
@@ -5599,10 +5616,11 @@ Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 		result.data.back().value = input.data[resultSize - 1].value;
 	}
 	result.more = input.more || resultSize < sz;
-	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
+	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present()) {
 		g_traceBatch.addEvent("TransactionDebug",
 		                      pOriginalReq->options.get().debugID.get().first(),
 		                      "storageserver.mapKeyValues.AfterAll");
+	}
 	co_return result;
 }
 
@@ -5649,10 +5667,11 @@ Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRequest 
 		//		try {
 		KeyRange shard = getShardKeyRange(data, req.begin);
 
-		if (req.options.present() && req.options.get().debugID.present())
+		if (req.options.present() && req.options.get().debugID.present()) {
 			g_traceBatch.addEvent("TransactionDebug",
 			                      req.options.get().debugID.get().first(),
 			                      "storageserver.getMappedKeyValues.AfterVersion");
+		}
 		//.detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
 		//} catch (Error& e) { TraceEvent("WrongShardServer", data->thisServerID).detail("Begin",
 		// req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("Shard",
@@ -5676,10 +5695,11 @@ Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRequest 
 		Key begin = co_await fBegin;
 		Key end = co_await fEnd;
 
-		if (req.options.present() && req.options.get().debugID.present())
+		if (req.options.present() && req.options.get().debugID.present()) {
 			g_traceBatch.addEvent("TransactionDebug",
 			                      req.options.get().debugID.get().first(),
 			                      "storageserver.getMappedKeyValues.AfterKeys");
+		}
 		//.detail("Off1",offset1).detail("Off2",offset2).detail("ReqBegin",req.begin.getKey()).detail("ReqEnd",req.end.getKey());
 
 		// Offsets of zero indicate begin/end keys in this shard, which obviously means we can answer the query
@@ -5697,10 +5717,11 @@ Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRequest 
 		}
 
 		if (begin >= end) {
-			if (req.options.present() && req.options.get().debugID.present())
+			if (req.options.present() && req.options.get().debugID.present()) {
 				g_traceBatch.addEvent("TransactionDebug",
 				                      req.options.get().debugID.get().first(),
 				                      "storageserver.getMappedKeyValues.Send");
+			}
 			//.detail("Begin",begin).detail("End",end);
 
 			GetMappedKeyValuesReply none;
@@ -5738,10 +5759,11 @@ Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRequest 
 				throw;
 			}
 
-			if (req.options.present() && req.options.get().debugID.present())
+			if (req.options.present() && req.options.get().debugID.present()) {
 				g_traceBatch.addEvent("TransactionDebug",
 				                      req.options.get().debugID.get().first(),
 				                      "storageserver.getMappedKeyValues.AfterReadRange");
+			}
 			//.detail("Begin",begin).detail("End",end).detail("SizeOf",r.data.size());
 			data->checkChangeCounter(
 			    changeCounter,
@@ -5820,10 +5842,11 @@ Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest 
 		//		try {
 		KeyRange shard = getShardKeyRange(data, req.begin);
 
-		if (req.options.present() && req.options.get().debugID.present())
+		if (req.options.present() && req.options.get().debugID.present()) {
 			g_traceBatch.addEvent("TransactionDebug",
 			                      req.options.get().debugID.get().first(),
 			                      "storageserver.getKeyValuesStream.AfterVersion");
+		}
 		//.detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
 		//} catch (Error& e) { TraceEvent("WrongShardServer", data->thisServerID).detail("Begin",
 		// req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("Shard",
@@ -5846,10 +5869,11 @@ Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest 
 		                       : findKey(data, req.end, version, shard, &offset2, span.context, req.options);
 		Key begin = co_await fBegin;
 		Key end = co_await fEnd;
-		if (req.options.present() && req.options.get().debugID.present())
+		if (req.options.present() && req.options.get().debugID.present()) {
 			g_traceBatch.addEvent("TransactionDebug",
 			                      req.options.get().debugID.get().first(),
 			                      "storageserver.getKeyValuesStream.AfterKeys");
+		}
 		//.detail("Off1",offset1).detail("Off2",offset2).detail("ReqBegin",req.begin.getKey()).detail("ReqEnd",req.end.getKey());
 
 		// Offsets of zero indicate begin/end keys in this shard, which obviously means we can answer the query
@@ -5867,10 +5891,11 @@ Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest 
 		}
 
 		if (begin >= end) {
-			if (req.options.present() && req.options.get().debugID.present())
+			if (req.options.present() && req.options.get().debugID.present()) {
 				g_traceBatch.addEvent("TransactionDebug",
 				                      req.options.get().debugID.get().first(),
 				                      "storageserver.getKeyValuesStream.Send");
+			}
 			//.detail("Begin",begin).detail("End",end);
 
 			GetKeyValuesStreamReply none;
@@ -5910,10 +5935,11 @@ Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest 
 				readLock.release();
 				GetKeyValuesStreamReply r(_r);
 
-				if (req.options.present() && req.options.get().debugID.present())
+				if (req.options.present() && req.options.get().debugID.present()) {
 					g_traceBatch.addEvent("TransactionDebug",
 					                      req.options.get().debugID.get().first(),
 					                      "storageserver.getKeyValuesStream.AfterReadRange");
+				}
 				//.detail("Begin",begin).detail("End",end).detail("SizeOf",r.data.size());
 				data->checkChangeCounter(
 				    changeCounter,
@@ -6018,15 +6044,16 @@ Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 
 		KeyRef k = absoluteKey;
 		KeySelector updated;
-		if (offset < 0)
+		if (offset < 0) {
 			updated = firstGreaterOrEqual(k) +
 			          offset; // first thing on this shard OR (large offset case) smallest key retrieved in range read
-		else if (offset > 0)
+		} else if (offset > 0) {
 			updated =
 			    firstGreaterOrEqual(k) + offset -
 			    1; // first thing on next shard OR (large offset case) keyAfter largest key retrieved in range read
-		else
+		} else {
 			updated = KeySelectorRef(k, true, 0); // found
+		}
 
 		resultSize = k.size();
 		data->counters.bytesQueried += resultSize;
@@ -6204,8 +6231,9 @@ Optional<MutationRef> clipMutation(MutationRef const& m, KeyRangeRef range) {
 		KeyRangeRef i = range & KeyRangeRef(m.param1, m.param2);
 		if (!i.empty())
 			return MutationRef((MutationRef::Type)m.type, i.begin, i.end);
-	} else
+	} else {
 		ASSERT(false);
+	}
 	return Optional<MutationRef>();
 }
 
@@ -6482,8 +6510,9 @@ void splitMutation(StorageServer* data, KeyRangeMap<T>& map, MutationRef const& 
 				addMutation(i->value(), ver, fromFetch, MutationRef((MutationRef::Type)m.type, k.begin, k.end));
 			}
 		}
-	} else
+	} else {
 		ASSERT(false); // Unknown mutation type in splitMutations
+	}
 }
 
 Future<Void> logFetchKeysWarning(AddingShard* shard) {
@@ -7596,8 +7625,9 @@ void AddingShard::addMutation(Version version, bool fromFetch, MutationRef const
 		updates.back().mutations.push_back_deep(updates.back().arena(), mutation);
 	} else if (phase == FetchingCF || phase == Waiting) {
 		server->addMutation(version, fromFetch, mutation, keys, server->updateEagerReads);
-	} else
+	} else {
 		ASSERT(false);
+	}
 }
 
 void updateMoveInShardMetaData(StorageServer* data, MoveInShard* shard) {
@@ -8688,11 +8718,11 @@ void changeServerKeys(StorageServer* data,
 	for (int i = 0; i < ranges.size(); i++) {
 		if (!ranges[i].value) {
 			ASSERT((KeyRangeRef&)ranges[i] == keys); // there shouldn't be any nulls except for the range being inserted
-		} else if (ranges[i].value->notAssigned())
+		} else if (ranges[i].value->notAssigned()) {
 			data->addShard(ShardInfo::newNotAssigned(ranges[i]));
-		else if (ranges[i].value->isReadable())
+		} else if (ranges[i].value->isReadable()) {
 			data->addShard(ShardInfo::newReadWrite(ranges[i], data));
-		else {
+		} else {
 			ASSERT(ranges[i].value->getAddingShard());
 			data->addShard(ShardInfo::newAdding(data,
 			                                    ranges[i],
@@ -9637,11 +9667,12 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			start = now();
 			co_await data->durableVersionLock.take(TaskPriority::TLogPeekReply, 1);
 			FlowLock::Releaser holdingDVL(data->durableVersionLock);
-			if (now() - start > 0.1)
+			if (now() - start > 0.1) {
 				TraceEvent("SSSlowTakeLock1", data->thisServerID)
 				    .detailf("From", "%016llx", debug_lastLoadBalanceResultEndpointToken)
 				    .detail("Duration", now() - start)
 				    .detail("Version", data->version.get());
+			}
 			data->ssVersionLockLatencyHistogram->sampleSeconds(now() - start);
 
 			start = now();
@@ -9883,10 +9914,11 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 							++data->counters.atomicMutations;
 							break;
 						}
-					} else
+					} else {
 						TraceEvent(SevError, "DiscardingPeekedData", data->thisServerID)
 						    .detail("Mutation", msg)
 						    .detail("Version", cloneCursor2->version().toString());
+					}
 				}
 			}
 
@@ -10780,8 +10812,9 @@ void StorageServerDisk::writeMutation(MutationRef mutation) {
 		if (KeyRangeRef(mutation.param1, mutation.param2).singleKeyRange()) {
 			++(*kvClearSingleKey);
 		}
-	} else
+	} else {
 		ASSERT(false);
+	}
 }
 
 void StorageServerDisk::writeMutationsBuggy(const VectorRef<MutationRef>& mutations,
@@ -11558,10 +11591,11 @@ Future<Void> serveGetValueRequests(StorageServer* self, FutureStream<GetValueReq
 		GetValueRequest req = co_await getValue;
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
 		// downgrade before doing real work
-		if (req.options.present() && req.options.get().debugID.present())
+		if (req.options.present() && req.options.get().debugID.present()) {
 			g_traceBatch.addEvent("GetValueDebug",
 			                      req.options.get().debugID.get().first(),
 			                      "storageServer.received"); //.detail("TaskID", g_network->getCurrentTask());
+		}
 
 		if (SHORT_CIRCUT_ACTUAL_STORAGE && normalKeys.contains(req.key))
 			req.reply.send(GetValueReply());
@@ -12156,8 +12190,9 @@ bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData
 	    e.code() == error_code_file_not_found || e.code() == error_code_actor_cancelled) {
 		TraceEvent("StorageServerTerminated", self.thisServerID).errorUnsuppressed(e);
 		return true;
-	} else
+	} else {
 		return false;
+	}
 }
 
 Future<Void> memoryStoreRecover(IKeyValueStore* store, Reference<IClusterConnectionRecord> connRecord, UID id) {

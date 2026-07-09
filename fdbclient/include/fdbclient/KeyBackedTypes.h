@@ -472,8 +472,8 @@ public:
 // the codec
 template <typename T, typename VersionOptions>
 class KeyBackedObjectProperty : public KeyBackedProperty<T, ObjectCodec<T, VersionOptions>> {
-	typedef ObjectCodec<T, VersionOptions> TCodec;
-	typedef KeyBackedProperty<T, TCodec> Base;
+	using TCodec = ObjectCodec<T, VersionOptions>;
+	using Base = KeyBackedProperty<T, TCodec>;
 
 public:
 	KeyBackedObjectProperty(KeyRef key, VersionOptions vo, Optional<WatchableTrigger> trigger = {})
@@ -484,7 +484,7 @@ public:
 // atomic ops and version stamp operations.
 template <typename T>
 class KeyBackedBinaryValue : public KeyBackedProperty<T, BinaryCodec<T>> {
-	typedef KeyBackedProperty<T, BinaryCodec<T>> Base;
+	using Base = KeyBackedProperty<T, BinaryCodec<T>>;
 
 public:
 	explicit(false) KeyBackedBinaryValue(KeyRef key = invalidKey, Optional<WatchableTrigger> trigger = {})
@@ -558,13 +558,13 @@ public:
 	    KeyBackedMap(KeyRef prefix = invalidKey, Optional<WatchableTrigger> trigger = {}, ValueCodec valueCodec = {})
 	  : subspace(prefixRange(prefix)), trigger(trigger), valueCodec(valueCodec) {}
 
-	typedef _KeyType KeyType;
-	typedef _ValueType ValueType;
-	typedef std::pair<KeyType, ValueType> PairType;
-	typedef KeyBackedRangeResult<PairType> RangeResultType;
-	typedef TypedKVPair<KeyType, ValueType> KVType;
-	typedef KeyBackedProperty<ValueType, ValueCodec> SingleRecordProperty;
-	typedef TypedKeySelector<KeyType, KeyCodec> KeySelector;
+	using KeyType = _KeyType;
+	using ValueType = _ValueType;
+	using PairType = std::pair<KeyType, ValueType>;
+	using RangeResultType = KeyBackedRangeResult<PairType>;
+	using KVType = TypedKVPair<KeyType, ValueType>;
+	using SingleRecordProperty = KeyBackedProperty<ValueType, ValueCodec>;
+	using KeySelector = TypedKeySelector<KeyType, KeyCodec>;
 
 	// If end is not present one key past the end of the map is used.
 	template <class Transaction>
@@ -878,8 +878,8 @@ public:
 template <typename _KeyType, typename _ValueType, typename VersionOptions, typename KeyCodec = TupleCodec<_KeyType>>
 class KeyBackedObjectMap
   : public KeyBackedMap<_KeyType, _ValueType, KeyCodec, ObjectCodec<_ValueType, VersionOptions>> {
-	typedef ObjectCodec<_ValueType, VersionOptions> ValueCodec;
-	typedef KeyBackedMap<_KeyType, _ValueType, KeyCodec, ValueCodec> Base;
+	using ValueCodec = ObjectCodec<_ValueType, VersionOptions>;
+	using Base = KeyBackedMap<_KeyType, _ValueType, KeyCodec, ValueCodec>;
 
 public:
 	KeyBackedObjectMap(KeyRef key, VersionOptions vo, Optional<WatchableTrigger> trigger = {})
@@ -892,9 +892,9 @@ public:
 	explicit(false) KeyBackedSet(KeyRef key = invalidKey, Optional<WatchableTrigger> trigger = {})
 	  : subspace(prefixRange(key)), trigger(trigger) {}
 
-	typedef _ValueType ValueType;
-	typedef KeyBackedRangeResult<ValueType> RangeResultType;
-	typedef TypedKeySelector<ValueType, Codec> KeySelector;
+	using ValueType = _ValueType;
+	using RangeResultType = KeyBackedRangeResult<ValueType>;
+	using KeySelector = TypedKeySelector<ValueType, Codec>;
 
 	template <class Transaction>
 	Future<RangeResultType> getRange(Transaction tr,

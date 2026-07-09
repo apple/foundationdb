@@ -89,7 +89,7 @@ bool OldTLogConf::operator==(const OldTLogConf& rhs) const {
 	return tLogs == rhs.tLogs && epochBegin == rhs.epochBegin && epochEnd == rhs.epochEnd &&
 	       recoverAt == rhs.recoverAt && logRouterTags == rhs.logRouterTags && txsTags == rhs.txsTags &&
 	       pseudoLocalities == rhs.pseudoLocalities && epoch == rhs.epoch &&
-	       rangeBackupWorkerTags == rhs.rangeBackupWorkerTags;
+	       rangePartitionedBackupWorkerTags == rhs.rangePartitionedBackupWorkerTags;
 }
 
 bool OldTLogConf::isEqualIds(OldTLogConf const& r) const {
@@ -105,11 +105,11 @@ bool OldTLogConf::isEqualIds(OldTLogConf const& r) const {
 }
 
 std::string LogSystemConfig::toString() const {
-	return format("type: %d oldGenerations: %d tags: %d rangeBackupWorkerTags: %d %s",
+	return format("type: %d oldGenerations: %d tags: %d rangePartitionedBackupWorkerTags: %d %s",
 	              logSystemType,
 	              oldTLogs.size(),
 	              logRouterTags,
-	              rangeBackupWorkerTags,
+	              rangePartitionedBackupWorkerTags,
 	              describe(tLogs).c_str());
 }
 
@@ -259,7 +259,7 @@ bool LogSystemConfig::isEqual(LogSystemConfig const& r) const {
 	       expectedLogSets == r.expectedLogSets && logRouterTags == r.logRouterTags && txsTags == r.txsTags &&
 	       recruitmentID == r.recruitmentID && stopped == r.stopped && recoveredAt == r.recoveredAt &&
 	       pseudoLocalities == r.pseudoLocalities && epoch == r.epoch && oldestBackupEpoch == r.oldestBackupEpoch &&
-	       rangeBackupWorkerTags == r.rangeBackupWorkerTags;
+	       rangePartitionedBackupWorkerTags == r.rangePartitionedBackupWorkerTags;
 }
 
 bool LogSystemConfig::isEqualIds(LogSystemConfig const& r) const {

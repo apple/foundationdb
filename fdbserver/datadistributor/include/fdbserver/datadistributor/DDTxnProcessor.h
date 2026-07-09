@@ -21,6 +21,7 @@
 #ifndef FOUNDATIONDB_DDTXNPROCESSOR_H
 #define FOUNDATIONDB_DDTXNPROCESSOR_H
 
+#include "fdbclient/ProcessClass.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MoveKeys.h"
 #include "flow/FastRef.h"

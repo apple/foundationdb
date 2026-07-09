@@ -24,8 +24,10 @@
 #include "fdbrpc/simulator.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/ProcessClassRecruitment.h"
 #include "fdbserver/datadistributor/DDTeamCollection.h"
 #include "fdbserver/datadistributor/DataDistributionTeam.h"
+#include "TCInfo.h"
 #include "ExclusionTracker.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
@@ -815,7 +817,7 @@ public:
 								serverIds.push_back(*tempMap->getObject(it));
 							}
 							std::sort(serverIds.begin(), serverIds.end());
-							self->addTeam(serverIds.begin(), serverIds.end(), IsInitialTeam::True);
+							self->addTeam(serverIds, IsInitialTeam::True);
 						}
 					} else {
 						serverIds.clear();
@@ -864,7 +866,7 @@ public:
 		std::set<std::vector<UID>>::iterator teamIterEnd =
 		    self->primary ? initTeams->primaryTeams.end() : initTeams->remoteTeams.end();
 		for (; teamIter != teamIterEnd; ++teamIter) {
-			self->addTeam(teamIter->begin(), teamIter->end(), IsInitialTeam::True);
+			self->addTeam(*teamIter, IsInitialTeam::True);
 			co_await yield();
 		}
 	}
@@ -1470,7 +1472,8 @@ public:
 						p.send(Void());
 				}
 
-				if (server->getLastKnownClass().machineClassFitness(ProcessClass::Storage) > ProcessClass::UnsetFit) {
+				if (recruitment::machineClassFitness(server->getLastKnownClass(), recruitment::Storage) >
+				    recruitment::UnsetFit) {
 					// NOTE: Should not use self->healthyTeamCount > 0 in if statement, which will cause status bouncing
 					// between healthy and unhealthy and result in OOM (See PR#2228).
 
@@ -1480,7 +1483,9 @@ public:
 						    .detail("Address", server->getLastKnownInterface().address())
 						    .detail("Reason", "WrongMachineClass")
 						    .detail("OptimalTeamCount", self->optimalTeamCount)
-						    .detail("Fitness", server->getLastKnownClass().machineClassFitness(ProcessClass::Storage));
+						    .detail(
+						        "Fitness",
+						        recruitment::machineClassFitness(server->getLastKnownClass(), recruitment::Storage));
 						status.isUndesired = true;
 					}
 					otherChanges.push_back(self->zeroOptimalTeams.onChange());
@@ -4922,6 +4927,21 @@ Reference<TCTeamInfo> DDTeamCollection::buildLargeTeam(int teamSize) {
 	return teamInfo;
 }
 
+void DDTeamCollection::addTeam(std::vector<UID> const& team, IsInitialTeam isInitialTeam) {
+	std::vector<Reference<TCServerInfo>> newTeamServers;
+	for (auto const& serverID : team) {
+		if (auto server = server_info.find(serverID); server != server_info.end()) {
+			newTeamServers.push_back(server->second);
+		}
+	}
+
+	addTeam(newTeamServers, isInitialTeam);
+}
+
+void DDTeamCollection::addTeam(std::set<UID> const& team, IsInitialTeam isInitialTeam) {
+	addTeam(std::vector<UID>(team.begin(), team.end()), isInitialTeam);
+}
+
 void DDTeamCollection::addTeam(const std::vector<Reference<TCServerInfo>>& newTeamServers,
                                IsInitialTeam isInitialTeam,
                                IsRedundantTeam redundantTeam) {
@@ -5709,7 +5729,7 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 		}
 
 		// Step 4: Add the server team
-		addTeam(bestServerTeam.begin(), bestServerTeam.end(), IsInitialTeam::False);
+		addTeam(bestServerTeam, IsInitialTeam::False);
 		addedTeams++;
 	}
 
@@ -6244,6 +6264,13 @@ Future<Void> DDTeamCollection::printSnapshotTeamsInfo(Reference<DDTeamCollection
 
 class DDTeamCollectionUnitTest {
 public:
+	static void setTestEndpoint(StorageServerInterface& interface, int id) {
+		// These unit tests do not run storage server actors, but team tracking still logs each
+		// interface's address. Give every fixture interface a synthetic, unregistered endpoint.
+		interface.getValue =
+		    PublicRequestStream<GetValueRequest>(Endpoint({ NetworkAddress(IPAddress(0x01010101), id) }, UID(id, 1)));
+	}
+
 	static std::unique_ptr<DDTeamCollection> testTeamCollection(
 	    int teamSize,
 	    Reference<IReplicationPolicy> policy,
@@ -6281,6 +6308,7 @@ public:
 			UID uid(id, 0);
 			StorageServerInterface interface;
 			interface.uniqueID = uid;
+			setTestEndpoint(interface, id);
 			interface.locality.set("machineid"_sr, Standalone<StringRef>(std::to_string(id)));
 			interface.locality.set("zoneid"_sr, Standalone<StringRef>(std::to_string(id % 5)));
 			interface.locality.set("data_hall"_sr, Standalone<StringRef>(std::to_string(id % 3)));
@@ -6336,6 +6364,7 @@ public:
 			UID uid(id, 0);
 			StorageServerInterface interface;
 			interface.uniqueID = uid;
+			setTestEndpoint(interface, id);
 			int process_id = id;
 			int dc_id = process_id / 1000;
 			int data_hall_id = process_id / 100;

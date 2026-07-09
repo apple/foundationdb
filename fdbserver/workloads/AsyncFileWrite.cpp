@@ -121,12 +121,13 @@ struct AsyncFileWriteWorkload : public AsyncFileWorkload {
 					// If the file is exhausted, start over at the beginning
 					if (offset >= self->fileSize)
 						offset = 0;
-				} else if (self->unbufferedIO)
+				} else if (self->unbufferedIO) {
 					offset = (int64_t)(deterministicRandom()->random01() * (self->fileSize - 1) /
 					                   AsyncFileWorkload::_PAGE_SIZE) *
 					         AsyncFileWorkload::_PAGE_SIZE;
-				else
+				} else {
 					offset = (int64_t)(deterministicRandom()->random01() * (self->fileSize - 1));
+				}
 			}
 
 			co_await waitForAll(self->writeFutures);

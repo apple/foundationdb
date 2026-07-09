@@ -75,13 +75,14 @@ struct SerializabilityWorkload : TestWorkload {
 		// keyPrefix = "\x02";
 
 		maxClearSize = deterministicRandom()->randomInt(10, 2 * nodes);
-		if (clientId == 0)
+		if (clientId == 0) {
 			TraceEvent("SerializabilityConfiguration")
 			    .detail("Nodes", nodes)
 			    .detail("AdjacentKeys", adjacentKeys)
 			    .detail("ValueSizeMin", valueSizeRange.first)
 			    .detail("ValueSizeMax", valueSizeRange.second)
 			    .detail("MaxClearSize", maxClearSize);
+		}
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }

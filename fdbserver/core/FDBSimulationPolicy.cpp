@@ -28,6 +28,7 @@
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/simulator.h"
+#include "fdbserver/core/FDBSimulatorProcessInfo.h"
 
 FDBExtraDatabaseMode stringToFDBExtraDatabaseMode(const std::string& databaseMode) {
 	if (databaseMode == "Disabled") {
@@ -56,6 +57,10 @@ FDBSimulationPolicyState& policyState() {
 
 class FDBSimulationPolicy final : public ISimulationPolicy {
 public:
+	bool shouldIncludeInAvailabilityCheck(ProcessInfo const& processInfo) const override {
+		return isAvailableSimulatorProcessClass(processInfo);
+	}
+
 	bool datacenterDead(Optional<Standalone<StringRef>> dcId,
 	                    std::vector<ProcessInfo*> const& allProcesses) const override {
 		if (!dcId.present()) {
@@ -66,7 +71,7 @@ public:
 		std::vector<LocalityData> primaryLocalitiesLeft;
 
 		for (auto processInfo : allProcesses) {
-			if (!processInfo->isSpawnedKVProcess() && processInfo->isAvailableClass() &&
+			if (!processInfo->isSpawnedKVProcess() && isAvailableSimulatorProcessClass(processInfo) &&
 			    processInfo->locality.dcId() == dcId) {
 				if (processInfo->isExcluded() || processInfo->isCleared() || !processInfo->isAvailable()) {
 					primaryProcessesDead.add(processInfo->locality);
