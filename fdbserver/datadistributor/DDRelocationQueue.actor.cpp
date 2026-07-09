@@ -2915,15 +2915,14 @@ struct DDQueueImpl {
 						// returning to the choose loop. Prevents fetchKeysComplete from
 						// growing when completions are starved by other events.
 						int drained = 0;
-						while (completedRelocations.isReady() && !completedRelocations.isError() &&
-						       drained++ < 1000) {
+						while (completedRelocations.isReady() && !completedRelocations.isError() && drained++ < 1000) {
 							RelocateData next = completedRelocations.pop();
 							self->processRelocationComplete(next);
 							scheduleRangesComplete(next.keys);
 						}
 						if (drained > 0) {
-							static auto* c = SimpleCounter<int64_t>::makeCounter(
-							    "/dd/queue/relocationComplete/batchDrained");
+							static auto* c =
+							    SimpleCounter<int64_t>::makeCounter("/dd/queue/relocationComplete/batchDrained");
 							c->increment(drained + 1);
 							TraceEvent("RelocationCompleteBatchDrain", self->distributorId)
 							    .suppressFor(1.0)
@@ -3116,7 +3115,7 @@ TEST_CASE("/DataDistribution/DDQueue/BatchDrainRelocationComplete") {
 	}
 
 	ASSERT(drained == N - 1);
-	ASSERT(self.fetchKeysComplete.size() == 0);
+	ASSERT(self.fetchKeysComplete.empty());
 	ASSERT(self.activeRelocations == 0);
 
 	std::cout << "BatchDrainRelocationComplete: drained " << drained << " of " << N << " completions\n";
