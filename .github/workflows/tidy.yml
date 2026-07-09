@@ -86,6 +86,17 @@ jobs:
                 continue
                 ;;
             esac
+            # These inputs are not parseable as standalone clang-tidy translation units in this workflow:
+            # the RocksDB compile commands refer to headers that are not built here, and the Flow headers depend
+            # on include order from their real consumers.
+            case "$FILE" in
+              fdbserver/core/RocksDBCheckpointUtils.cpp|fdbserver/kvstore/KeyValueStoreRocksDB.cpp|fdbserver/kvstore/KeyValueStoreShardedRocksDB.cpp)
+                continue
+                ;;
+              flow/include/flow/Coroutines.h|flow/include/flow/CoroutinesImpl.h|flow/include/flow/FlowThread.h)
+                continue
+                ;;
+            esac
             # only c++ source files
             if [[ $FILE =~ \.[ch](pp)?$ ]] ; then
               echo "Checking $FILE ..."
