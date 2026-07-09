@@ -241,6 +241,7 @@ struct ProxyCommitData {
 	Promise<Void> validState; // Set once txnStateStore and version are valid
 	double lastVersionTime;
 	KeyRangeMap<std::set<Key>> vecBackupKeys;
+	CDCRoutingTable cdcRouting;
 	uint64_t commitVersionRequestNumber;
 	uint64_t mostRecentProcessedRequestNumber;
 	KeyRangeMap<Deque<std::pair<Version, int>>> keyResolvers;
@@ -472,6 +473,7 @@ inline ApplyMetadataProxyContext ProxyCommitData::getApplyMetadataProxyContext()
 	return { .dbgid = dbgid,
 		     .txnStateStore = txnStateStore,
 		     .vecBackupKeys = &vecBackupKeys,
+		     .cdcRouting = &cdcRouting,
 		     .keyInfo = &keyInfo,
 		     .uid_applyMutationsData = firstProxy ? &uid_applyMutationsData : nullptr,
 		     .commit = commit,

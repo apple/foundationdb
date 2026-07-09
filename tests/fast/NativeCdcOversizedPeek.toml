@@ -1,0 +1,33 @@
+[configuration]
+config = 'single'
+singleRegion = true
+buggify = false
+faultInjection = false
+
+[[knobs]]
+enable_native_cdc = true
+native_cdc_tag_count = 1
+# Leave enough room for the topology-dependent replicated peek reservation so this test isolates the per-reply cap.
+cdc_proxy_buffer_bytes = 65536
+maximum_peek_bytes = 4096
+cdc_proxy_consume_poll_timeout = 30.0
+
+[[test]]
+testTitle = 'NativeCdcOversizedPeek'
+useDB = true
+waitForQuiescenceEnd = false
+connectionFailuresDisableDuration = 1000000
+
+    [[test.workload]]
+    testName = 'NativeCdcEndToEnd'
+    initialStreamCount = 2
+    minStreamCount = 2
+    maxStreamCount = 3
+    keyCount = 6
+    writesPerRound = 1
+    rounds = 0
+    testOversizedPeek = true
+    # Two disjoint streams each receive one mutation that fits the filtered budget; their shared tagged reply does not.
+    # A third stream is registered after that version and verifies the failure is not applied to a later frontier.
+    memoryTestValueBytes = 3072
+    operationTimeout = 120.0

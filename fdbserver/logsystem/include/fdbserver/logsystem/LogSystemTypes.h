@@ -57,6 +57,10 @@ struct IPeekCursor {
 
 // Peek cursor that reports log location and can be cloned and repositioned for replay.
 struct IReplayPeekCursor : IPeekCursor {
+	// Upper bound on TLogPeekReply arenas retained before or while satisfying the next getMore().
+	virtual int64_t getMaxRetainedReplyCount() const = 0;
+	// Applies a per-reply cap before the cursor issues its first TLog peek. Zero leaves replies uncapped.
+	virtual void setReplyByteLimit(int limitBytes) = 0;
 	virtual Optional<UID> getPrimaryPeekLocation() const = 0;
 	virtual Optional<UID> getCurrentPeekLocation() const = 0;
 	virtual Version getMaxKnownVersion() const = 0;
@@ -95,7 +99,11 @@ public:
 	bool hasLogRouter(UID id) const;
 	bool hasBackupWorker(UID id) const;
 	std::string logServerString();
-	void populateSatelliteTagLocations(int logRouterTags, int oldLogRouterTags, int txsTags, int oldTxsTags);
+	void populateSatelliteTagLocations(int logRouterTags,
+	                                   int oldLogRouterTags,
+	                                   int txsTags,
+	                                   int oldTxsTags,
+	                                   int cdcTags);
 	void checkSatelliteTagLocations();
 	int bestLocationFor(Tag tag);
 	void updateLocalitySet(std::vector<LocalityData> const& localities);
@@ -108,6 +116,7 @@ public:
 	    const Optional<Reference<LocalitySet>>& restrictedLogSet = Optional<Reference<LocalitySet>>());
 
 private:
+	int satelliteTagLocationIndex(Tag tag) const;
 	std::vector<LocalityEntry> alsoServers, resultEntries;
 	std::vector<int> newLocations;
 };
@@ -139,6 +148,7 @@ public:
 	int fastReplies;
 	int unknownReplies;
 	bool returnEmptyIfStopped;
+	int replyByteLimit;
 
 	ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInterface>>> const& interf,
 	                 Tag tag,
@@ -173,6 +183,8 @@ public:
 	const LogMessageVersion& version() const override;
 	Version popped() const override;
 	Version getMinKnownCommittedVersion() const override;
+	int64_t getMaxRetainedReplyCount() const override;
+	void setReplyByteLimit(int limitBytes) override;
 	Optional<UID> getPrimaryPeekLocation() const override;
 	Optional<UID> getCurrentPeekLocation() const override;
 	void addref() override { ReferenceCounted<ServerPeekCursor>::addref(); }
@@ -234,6 +246,8 @@ public:
 	Version popped() const override;
 	Version getMinKnownCommittedVersion() const override;
 	Version getMaxKnownVersion() const override;
+	int64_t getMaxRetainedReplyCount() const override;
+	void setReplyByteLimit(int limitBytes) override;
 	Optional<UID> getPrimaryPeekLocation() const override;
 	Optional<UID> getCurrentPeekLocation() const override;
 	void addref() override { ReferenceCounted<MergedPeekCursor>::addref(); }
@@ -291,6 +305,8 @@ public:
 	Version popped() const override;
 	Version getMinKnownCommittedVersion() const override;
 	Version getMaxKnownVersion() const override;
+	int64_t getMaxRetainedReplyCount() const override;
+	void setReplyByteLimit(int limitBytes) override;
 	Optional<UID> getPrimaryPeekLocation() const override;
 	Optional<UID> getCurrentPeekLocation() const override;
 	void addref() override { ReferenceCounted<SetPeekCursor>::addref(); }
@@ -303,8 +319,11 @@ public:
 	std::vector<Reference<IReplayPeekCursor>> cursors;
 	std::vector<LogMessageVersion> epochEnds;
 	Version poppedVersion;
+	bool prefetch;
 
-	ReplayMultiCursor(std::vector<Reference<IReplayPeekCursor>> cursors, std::vector<LogMessageVersion> epochEnds);
+	ReplayMultiCursor(std::vector<Reference<IReplayPeekCursor>> cursors,
+	                  std::vector<LogMessageVersion> epochEnds,
+	                  bool prefetch = true);
 
 	Reference<IReplayPeekCursor> cloneNoMore() override;
 	void setProtocolVersion(ProtocolVersion version) override;
@@ -322,6 +341,8 @@ public:
 	Version popped() const override;
 	Version getMinKnownCommittedVersion() const override;
 	Version getMaxKnownVersion() const override;
+	int64_t getMaxRetainedReplyCount() const override;
+	void setReplyByteLimit(int limitBytes) override;
 	Optional<UID> getPrimaryPeekLocation() const override;
 	Optional<UID> getCurrentPeekLocation() const override;
 	void addref() override { ReferenceCounted<ReplayMultiCursor>::addref(); }

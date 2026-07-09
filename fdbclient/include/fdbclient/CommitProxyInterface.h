@@ -22,10 +22,12 @@
 #define FDBCLIENT_COMMITPROXYINTERFACE_H
 #pragma once
 
+#include <map>
 #include <utility>
 #include <vector>
 
 #include "fdbclient/CommitTransaction.h"
+#include "fdbclient/CDCProxyInterface.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GlobalConfig.h"
 #include "fdbclient/GrvProxyInterface.h"
@@ -111,6 +113,10 @@ struct ClientDBInfo {
 	UID id; // Changes each time anything else changes
 	std::vector<GrvProxyInterface> grvProxies;
 	std::vector<CommitProxyInterface> commitProxies;
+	bool nativeCdcEnabled = false;
+	int nativeCdcTagCount = 0;
+	std::vector<CDCProxyInterface> cdcProxies;
+	std::map<CDCStreamId, UID> streamToCDCProxyId;
 	Optional<CommitProxyInterface>
 	    firstCommitProxy; // not serialized, used for commitOnFirstProxy when the commit proxies vector has been shrunk
 	Optional<Value> forward;
@@ -126,10 +132,28 @@ struct ClientDBInfo {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		if constexpr (!is_fb_function<Archive>) {
+		// FlatBuffer serializers include every schema field. Versioned binary serializers must omit Native CDC fields
+		// for peers predating withNativeCdc so a new client can still decode their ClientDBInfo payloads.
+		if constexpr (is_fb_function<Archive>) {
+			serializer(ar,
+			           grvProxies,
+			           commitProxies,
+			           id,
+			           forward,
+			           history,
+			           clusterId,
+			           clusterType,
+			           nativeCdcEnabled,
+			           nativeCdcTagCount,
+			           cdcProxies,
+			           streamToCDCProxyId);
+		} else {
 			ASSERT(ar.protocolVersion().isValid());
+			serializer(ar, grvProxies, commitProxies, id, forward, history, clusterId, clusterType);
+			if (ar.protocolVersion().hasNativeCdc()) {
+				serializer(ar, nativeCdcEnabled, nativeCdcTagCount, cdcProxies, streamToCDCProxyId);
+			}
 		}
-		serializer(ar, grvProxies, commitProxies, id, forward, history, clusterId, clusterType);
 	}
 };
 
