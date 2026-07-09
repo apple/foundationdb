@@ -515,6 +515,7 @@ struct Counters {
 	Counter rocksdbReadRangeQueries;
 	Counter commitDelayed;
 
+	// NOLINTNEXTLINE(modernize-use-equals-default)
 	Counters()
 	  : cc("RocksDBThrottle"), immediateThrottle("ImmediateThrottle", cc), failedToAcquire("FailedToAcquire", cc),
 	    deleteKeyReqs("DeleteKeyRequests", cc), deleteRangeReqs("DeleteRangeRequests", cc),
@@ -732,6 +733,7 @@ private:
 	uint64_t getRocksdbPerfcontextMetric(int metric);
 };
 
+// NOLINTNEXTLINE(modernize-use-equals-default)
 PerfContextMetrics::PerfContextMetrics() {
 	metrics = {
 		{ "UserKeyComparisonCount", rocksdb_user_key_comparison_count, {} },
@@ -2357,10 +2359,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			co_await delay(SERVER_KNOBS->ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD);
 			++self->counters.commitDelayed;
 			count--;
-			if (deterministicRandom()->random01() < 0.001)
+			if (deterministicRandom()->random01() < 0.001) {
 				TraceEvent(SevWarn, "RocksDBCommitsDelayed1000x", self->id)
 				    .detail("EstPendCompactBytes", estPendCompactBytes)
 				    .detail("NumImmutableMemtables", numImmutableMemtables);
+			}
 			self->db->GetAggregatedIntProperty(rocksdb::DB::Properties::kEstimatePendingCompactionBytes,
 			                                   &estPendCompactBytes);
 			self->db->GetAggregatedIntProperty(rocksdb::DB::Properties::kNumImmutableMemTable, &numImmutableMemtables);
@@ -2380,10 +2383,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		self->maxDeletes = SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_MAX;
 		self->deletesPerCommitHistogram->sampleRecordCounter(self->deletesPerCommit);
 		self->deleteRangesPerCommitHistogram->sampleRecordCounter(self->deleteRangesPerCommit);
-		if (self->deletesPerCommit > 8000 || self->deleteRangesPerCommit > 1000)
+		if (self->deletesPerCommit > 8000 || self->deleteRangesPerCommit > 1000) {
 			TraceEvent("RocksDBDeletesCount", self->id)
 			    .detail("DeletesPerCommit", self->deletesPerCommit)
 			    .detail("DeleteRangesPerCommit", self->deleteRangesPerCommit);
+		}
 		self->deletesPerCommit = 0;
 		self->deleteRangesPerCommit = 0;
 		Future<Void> fut = a->done.getFuture();
@@ -3063,7 +3067,7 @@ TEST_CASE("noSim/RocksDB/RangeClear") {
 TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/IngestSSTFileVisibility") {
 	std::string testDir = "test_ingest_sst_visibility";
 	UID testStoreID = deterministicRandom()->randomUniqueID();
-	RocksDBKeyValueStore* kvStore = new RocksDBKeyValueStore(testDir, testStoreID);
+	auto kvStore = new RocksDBKeyValueStore(testDir, testStoreID);
 
 	// Initialize the store
 	co_await kvStore->init();

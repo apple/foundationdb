@@ -29,10 +29,8 @@
 #include <liburing.h>
 #endif
 #endif
-#include "fdbclient/SystemData.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/core/FDBRocksDBVersion.h"
-#include "flow/flow.h"
 #include "flow/IThreadPool.h"
 #include "flow/ThreadHelper.h"
 #include "flow/Histogram.h"
@@ -4119,8 +4117,7 @@ TEST_CASE("noSim/ShardedRocksDB/ShardOps") {
 	std::string rocksDBTestDir = "sharded-rocksdb-kvs-test-db";
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
 
-	ShardedRocksDBKeyValueStore* rocksdbStore =
-	    new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	auto rocksdbStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
 	IKeyValueStore* kvStore = rocksdbStore;
 	co_await kvStore->init();
 
@@ -4227,8 +4224,7 @@ TEST_CASE("noSim/ShardedRocksDB/Metadata") {
 	Value testSpecialValue = "\xff\xff/TestValue"_sr;
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
 
-	ShardedRocksDBKeyValueStore* rocksdbStore =
-	    new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	auto rocksdbStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
 	IKeyValueStore* kvStore = rocksdbStore;
 	co_await kvStore->init();
 
@@ -4374,8 +4370,7 @@ TEST_CASE("noSim/ShardedRocksDBRangeOps/RemoveSplitRange") {
 	std::string rocksDBTestDir = "sharded-rocksdb-kvs-test-db";
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
 
-	ShardedRocksDBKeyValueStore* rocksdbStore =
-	    new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	auto rocksdbStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
 	IKeyValueStore* kvStore = rocksdbStore;
 	co_await kvStore->init();
 

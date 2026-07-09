@@ -170,7 +170,7 @@ struct ThreadCallback {
 
 class ThreadMultiCallback final : public ThreadCallback, public FastAllocated<ThreadMultiCallback> {
 public:
-	ThreadMultiCallback() {}
+	ThreadMultiCallback() = default;
 
 	ThreadCallback* addCallback(ThreadCallback* callback) override {
 		// May be triggered by a waitForAll on a vector with the same future in it more than once
@@ -209,7 +209,7 @@ public:
 
 		UNSTOPPABLE_ASSERT(loopDepth == 0);
 
-		while (callbacks.size()) {
+		while (!callbacks.empty()) {
 			auto cb = callbacks.back();
 			callbacks.pop_back();
 			cb->destroyHolder(cb->getHolder(this));
@@ -226,7 +226,7 @@ public:
 
 		UNSTOPPABLE_ASSERT(loopDepth == 0);
 
-		while (callbacks.size()) {
+		while (!callbacks.empty()) {
 			auto cb = callbacks.back();
 			callbacks.pop_back();
 			cb->destroyHolder(cb->getHolder(this));
@@ -503,7 +503,7 @@ class ThreadSingleAssignmentVar
     /* public FastAllocated<ThreadSingleAssignmentVar<T>>,*/ public ThreadSafeReferenceCounted<
         ThreadSingleAssignmentVar<T>> {
 public:
-	virtual ~ThreadSingleAssignmentVar() {}
+	virtual ~ThreadSingleAssignmentVar() = default;
 
 	T value;
 
@@ -720,7 +720,7 @@ template <class T>
 Future<T> safeThreadFutureToFutureImpl(ThreadFuture<T> threadFuture, ExplicitVoid = {}) {
 	Promise<Void> ready;
 	Future<Void> onReady = ready.getFuture();
-	UtilCallback<T>* callback = new UtilCallback<T>(threadFuture, ready.extractRawPointer());
+	auto callback = new UtilCallback<T>(threadFuture, ready.extractRawPointer());
 	int unused = 0;
 	threadFuture.callOrSetAsCallback(callback, unused, 0);
 	try {

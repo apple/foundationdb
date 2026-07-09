@@ -782,6 +782,7 @@ bool RocksDBSstFileWriter::finish() {
 
 class RocksDBSstFileReader : public IRocksDBSstFileReader {
 public:
+	// NOLINTNEXTLINE(modernize-use-equals-default)
 	RocksDBSstFileReader() : sstReader(std::make_unique<rocksdb::SstFileReader>(rocksdb::Options())) {};
 
 	RocksDBSstFileReader(const KeyRange& rangeBoundary, size_t rowLimit, size_t byteLimit)
