@@ -39,6 +39,7 @@ typedef struct FDB_result FDBResult;
 typedef struct FDB_cluster FDBCluster;
 typedef struct FDB_database FDBDatabase;
 typedef struct FDB_transaction FDBTransaction;
+typedef struct FDB_native_cdc_consumer FDBNativeCdcConsumer;
 
 typedef int fdb_error_t;
 typedef int fdb_bool_t;

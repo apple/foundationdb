@@ -1970,6 +1970,43 @@ TEST_CASE("fdb_database_get_server_protocol") {
 	fdb_future_destroy(protocolFuture);
 }
 
+TEST_CASE("native CDC metadata and synthetic consumer cursor") {
+	// Listing remains available when native CDC admission is disabled, so this
+	// exercises the C result conversion without requiring a registered stream.
+	FDBFuture* listFuture = fdb_database_list_native_cdc_streams(db);
+	REQUIRE(listFuture != nullptr);
+	fdb_check(fdb_future_block_until_ready(listFuture));
+
+	FDBNativeCdcStreamInfo const* streams = nullptr;
+	int streamCount = -1;
+	fdb_check(fdb_future_get_native_cdc_stream_info_array(listFuture, &streams, &streamCount));
+	CHECK(streamCount >= 0);
+	if (streamCount > 0) {
+		CHECK(streams != nullptr);
+	}
+	fdb_future_destroy(listFuture);
+
+	// Resuming only reconstructs a cursor-bearing client handle. It does not
+	// contact CDC infrastructure until consume or acknowledge is requested.
+	constexpr uint64_t streamId = 0x0102030405060708ULL;
+	constexpr int64_t lastConsumedVersion = 123456789;
+	FDBFuture* resumeFuture = fdb_database_resume_native_cdc_consumer(db, streamId, lastConsumedVersion);
+	REQUIRE(resumeFuture != nullptr);
+	fdb_check(fdb_future_block_until_ready(resumeFuture));
+
+	FDBNativeCdcConsumer* consumer = nullptr;
+	fdb_check(fdb_future_get_native_cdc_consumer(resumeFuture, &consumer));
+	fdb_future_destroy(resumeFuture);
+	REQUIRE(consumer != nullptr);
+
+	uint64_t outStreamId = 0;
+	int64_t outLastConsumedVersion = 0;
+	fdb_check(fdb_native_cdc_consumer_get_position(consumer, &outStreamId, &outLastConsumedVersion));
+	CHECK(outStreamId == streamId);
+	CHECK(outLastConsumedVersion == lastConsumedVersion);
+	fdb_native_cdc_consumer_destroy(consumer);
+}
+
 TEST_CASE("fdb_transaction_watch read_your_writes_disable") {
 	// Watches created on a transaction with the option READ_YOUR_WRITES_DISABLE
 	// should return a watches_disabled error.
