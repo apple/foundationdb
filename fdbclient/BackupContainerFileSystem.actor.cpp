@@ -888,6 +888,10 @@ public:
 		restorableBeginVersion = resolveRelativeVersion(
 		    desc.maxLogEnd, restorableBeginVersion, "RestorableBeginVersion", invalid_option_value());
 
+		if (progress != nullptr) {
+			progress->requestedEndVersion = expireEndVersion;
+		}
+
 		// It would be impossible to have restorability to any version < expireEndVersion after expiring to that
 		// version
 		if (restorableBeginVersion < expireEndVersion)
@@ -896,6 +900,9 @@ public:
 		// If the expire request is to a version at or before the previous version to which data was already
 		// deleted then do nothing and just return
 		if (expireEndVersion <= desc.expiredEndVersion.orDefault(invalidVersion)) {
+			if (progress != nullptr) {
+				progress->actualEndVersion = desc.expiredEndVersion.orDefault(invalidVersion);
+			}
 			return Void();
 		}
 
@@ -962,6 +969,10 @@ public:
 					expireEndVersion = newLogBeginVersion.get();
 				}
 			}
+		}
+
+		if (progress != nullptr) {
+			progress->actualEndVersion = expireEndVersion;
 		}
 
 		// Make a list of files to delete
@@ -2650,6 +2661,92 @@ ACTOR Future<Void> testBackupContinuousLogEndVer(std::string url, Optional<std::
 TEST_CASE("/backup/containers/localdir/continuousLogEndVersion") {
 	wait(testBackupContinuousLogEndVer(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()),
 	                                   {}));
+	return Void();
+}
+
+// Verifies that IBackupContainer::ExpireProgress reports both the requested expire version and
+// the version expiration was actually performed to, in the two cases where they can differ:
+//   1. The requested version falls inside a log file, so the actual version is rolled back to
+//      the log file's begin version to avoid splitting it.
+//   2. The requested version is at or before a version that was already expired by a prior call,
+//      so nothing new is deleted and the actual version reflects the prior expiration.
+ACTOR static Future<Void> testExpireProgressVersions(std::string url, Optional<std::string> proxy) {
+	state FlowLock lock(100e6);
+	printf("BackupContainerTest URL %s\n", url.c_str());
+	state Reference<IBackupContainer> c = IBackupContainer::openContainer(url, proxy, {}, 0);
+
+	// Make sure container doesn't exist, then create it.
+	try {
+		wait(c->deleteContainer());
+	} catch (Error& e) {
+		if (e.code() != error_code_backup_invalid_url && e.code() != error_code_backup_does_not_exist)
+			throw;
+	}
+
+	wait(c->create());
+
+	state int blockSize = 1024;
+	state Key begin = randomKeyBetween(normalKeys);
+	state Key end = randomKeyBetween(KeyRangeRef(begin, normalKeys.end));
+	state std::vector<Future<Void>> writes;
+
+	// A single-file snapshot ending well before the log file below.
+	state Version snapshotVersion = 100;
+	state Reference<IBackupFile> range = wait(c->writeRangeFile(snapshotVersion, 0, snapshotVersion, blockSize));
+	writes.push_back(writeAndVerifyFile(c, range, 100, &lock));
+	writes.push_back(c->writeKeyspaceSnapshotFile(
+	    { range->getFileName() }, { std::make_pair(begin, end) }, 100, IncludeKeyRangeMap(BUGGIFY)));
+
+	// A single log file spanning a wide version range that straddles the version we're about to
+	// request expiring to. A log file can't be partially deleted, so expireData() must roll the
+	// actual expiration point back to this file's begin version.
+	state Version logBegin = 10;
+	state Version logEnd = 1000;
+	state Reference<IBackupFile> log = wait(c->writeLogFile(logBegin, logEnd, blockSize));
+	writes.push_back(writeAndVerifyFile(c, log, 100, &lock));
+
+	wait(waitForAll(writes));
+
+	state BackupDescription desc = wait(c->describeBackup());
+	printf("\n%s\n", desc.toString().c_str());
+	ASSERT_EQ(desc.snapshots.size(), 1);
+	ASSERT_EQ(desc.snapshots[0].endVersion, snapshotVersion);
+	ASSERT_EQ(desc.maxLogEnd, logEnd);
+
+	// Case 1: request an expire version strictly inside the log file's range. The actual
+	// expiration point must be rolled back to the log file's begin version, which is before
+	// the snapshot's end version, so the snapshot must survive.
+	state Version requestedVersion = logBegin + (logEnd - logBegin) / 2;
+	state IBackupContainer::ExpireProgress progress1;
+	wait(c->expireData(requestedVersion, true, &progress1));
+
+	fmt::print("Case 1: requested={} actual={}\n", progress1.requestedEndVersion, progress1.actualEndVersion);
+	ASSERT_EQ(progress1.requestedEndVersion, requestedVersion);
+	ASSERT_EQ(progress1.actualEndVersion, logBegin);
+	ASSERT_LT(progress1.actualEndVersion, progress1.requestedEndVersion);
+
+	state BackupDescription desc1 = wait(c->describeBackup());
+	printf("\n%s\n", desc1.toString().c_str());
+	ASSERT_EQ(desc1.snapshots.size(), 1); // Snapshot must not have been deleted.
+
+	// Case 2: request an expire version at or before what has already been expired. No new data
+	// can be deleted, so the actual version must reflect the version already achieved by the
+	// prior expiration, not the newly (smaller) requested version.
+	state Version smallerVersion = 1;
+	state IBackupContainer::ExpireProgress progress2;
+	wait(c->expireData(smallerVersion, true, &progress2));
+
+	fmt::print("Case 2: requested={} actual={}\n", progress2.requestedEndVersion, progress2.actualEndVersion);
+	ASSERT_EQ(progress2.requestedEndVersion, smallerVersion);
+	ASSERT_EQ(progress2.actualEndVersion, progress1.actualEndVersion);
+	ASSERT_GE(progress2.actualEndVersion, progress2.requestedEndVersion);
+
+	return Void();
+}
+
+TEST_CASE("/backup/containers/localdir/expireProgressVersions") {
+	wait(testExpireProgressVersions(
+	    format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()), {}));
 	return Void();
 }
 

@@ -278,6 +278,12 @@ public:
 		std::string step;
 		int total;
 		int done;
+		// The expire version actually requested, once resolved to an absolute version.
+		Version requestedEndVersion = invalidVersion;
+		// The version expiration was actually performed to, which can differ from requestedEndVersion
+		// because expiration cannot split a log file and will move the end version back to the
+		// beginning of a log file that would otherwise have been partially deleted.
+		Version actualEndVersion = invalidVersion;
 		std::string toString() const;
 	};
 	// Delete backup files which do not contain any data at or after (more recent than) expireEndVersion.
