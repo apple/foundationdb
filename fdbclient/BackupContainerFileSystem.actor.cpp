@@ -28,6 +28,7 @@
 #include "fdbclient/BackupContainerLocalDirectory.h"
 #include "fdbclient/BackupContainerS3BlobStore.h"
 #include "fdbclient/JsonBuilder.h"
+#include "fdbrpc/AsyncFileEncrypted.h"
 #include "flow/StreamCipher.h"
 #include "flow/UnitTest.h"
 
@@ -1531,13 +1532,18 @@ Future<std::vector<LogFile>> BackupContainerFileSystem::listLogFiles(Version beg
 	};
 
 	return map(listFiles((mutationLogType == MutationLogType::PARTITIONED_LOG ? "plogs/" : "logs/"), pathFilter),
-	           [=](const FilesAndSizesT& files) {
+	           [=, self = Reference<BackupContainerFileSystem>::addRef(this)](const FilesAndSizesT& files) {
 		           std::vector<LogFile> results;
 		           LogFile lf;
 		           for (auto& f : files) {
 			           if (BackupContainerFileSystemImpl::pathToLogFile(lf, f.first, f.second) &&
-			               lf.endVersion > beginVersion && lf.beginVersion <= targetVersion)
+			               lf.endVersion > beginVersion && lf.beginVersion <= targetVersion) {
+				           if (self->usesEncryption()) {
+					           lf.fileSize =
+					               AsyncFileEncrypted::rawToLogicalSize(lf.fileSize, self->encryptionBlockSize);
+				           }
 				           results.push_back(lf);
+			           }
 		           }
 		           return results;
 	           });
@@ -1559,16 +1565,22 @@ Future<std::vector<RangeFile>> BackupContainerFileSystem::old_listRangeFiles(Ver
 		       (cleaned > firstPath && cleaned < lastPath);
 	};
 
-	return map(listFiles("ranges/", pathFilter), [=](const FilesAndSizesT& files) {
-		std::vector<RangeFile> results;
-		RangeFile rf;
-		for (auto& f : files) {
-			if (BackupContainerFileSystemImpl::pathToRangeFile(rf, f.first, f.second) && rf.version >= beginVersion &&
-			    rf.version <= endVersion)
-				results.push_back(rf);
-		}
-		return results;
-	});
+	return map(listFiles("ranges/", pathFilter),
+	           [=, self = Reference<BackupContainerFileSystem>::addRef(this)](const FilesAndSizesT& files) {
+		           std::vector<RangeFile> results;
+		           RangeFile rf;
+		           for (auto& f : files) {
+			           if (BackupContainerFileSystemImpl::pathToRangeFile(rf, f.first, f.second) &&
+			               rf.version >= beginVersion && rf.version <= endVersion) {
+				           if (self->usesEncryption()) {
+					           rf.fileSize =
+					               AsyncFileEncrypted::rawToLogicalSize(rf.fileSize, self->encryptionBlockSize);
+				           }
+				           results.push_back(rf);
+			           }
+		           }
+		           return results;
+	           });
 }
 
 Future<std::vector<RangeFile>> BackupContainerFileSystem::listRangeFiles(Version beginVersion, Version endVersion) {
@@ -1581,16 +1593,22 @@ Future<std::vector<RangeFile>> BackupContainerFileSystem::listRangeFiles(Version
 		return BackupContainerFileSystemImpl::extractSnapshotBeginVersion(path) <= endVersion;
 	};
 
-	Future<std::vector<RangeFile>> newFiles = map(listFiles("kvranges/", pathFilter), [=](const FilesAndSizesT& files) {
-		std::vector<RangeFile> results;
-		RangeFile rf;
-		for (auto& f : files) {
-			if (BackupContainerFileSystemImpl::pathToRangeFile(rf, f.first, f.second) && rf.version >= beginVersion &&
-			    rf.version <= endVersion)
-				results.push_back(rf);
-		}
-		return results;
-	});
+	Future<std::vector<RangeFile>> newFiles =
+	    map(listFiles("kvranges/", pathFilter),
+	        [=, self = Reference<BackupContainerFileSystem>::addRef(this)](const FilesAndSizesT& files) {
+		        std::vector<RangeFile> results;
+		        RangeFile rf;
+		        for (auto& f : files) {
+			        if (BackupContainerFileSystemImpl::pathToRangeFile(rf, f.first, f.second) &&
+			            rf.version >= beginVersion && rf.version <= endVersion) {
+				        if (self->usesEncryption()) {
+					        rf.fileSize = AsyncFileEncrypted::rawToLogicalSize(rf.fileSize, self->encryptionBlockSize);
+				        }
+				        results.push_back(rf);
+			        }
+		        }
+		        return results;
+	        });
 
 	return map(success(oldFiles) && success(newFiles), [=](Void _) {
 		std::vector<RangeFile> results = std::move(newFiles.get());
