@@ -247,6 +247,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( MAX_BUGGIFIED_DELAY,                                   0 ); if( randomize && buggify() ) MAX_BUGGIFIED_DELAY =  0.2 * deterministicRandom()->random01();
 	init( MAX_RUNLOOP_SLEEP_DELAY,                               0 );
 	init( SIM_CONNECT_ERROR_MODE,                                0 ); if( randomize && buggify() ) SIM_CONNECT_ERROR_MODE = deterministicRandom()->randomInt(0,3);
+	init( SIM_DNS_REMOVAL_MAX_DELAY,                             0 ); if( randomize && buggify() ) SIM_DNS_REMOVAL_MAX_DELAY = 2.0 * deterministicRandom()->random01();
 
 	//Tracefiles
 	init( ZERO_LENGTH_FILE_PAD,                                  1 );
