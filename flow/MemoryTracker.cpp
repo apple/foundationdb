@@ -302,8 +302,7 @@ void memTrackerSampleAlloc(void* p, std::size_t n) {
 		site.estLiveCount += weight;
 		if (site.estLiveBytes > site.estPeakBytes)
 			site.estPeakBytes = site.estLiveBytes;
-		(*g_liveMap)[reinterpret_cast<std::uintptr_t>(p)] =
-		    LiveEntry{ fp, static_cast<std::uint64_t>(n), weight };
+		(*g_liveMap)[reinterpret_cast<std::uintptr_t>(p)] = LiveEntry{ fp, static_cast<std::uint64_t>(n), weight };
 		g_liveBytesTotal += nBytes;
 		g_liveBlocksTotal += 1;
 		g_estLiveBytesTotal += estBytes;
