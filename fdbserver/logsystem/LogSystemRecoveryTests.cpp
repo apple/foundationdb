@@ -58,6 +58,32 @@ std::tuple<int, std::vector<TLogLockResult>, bool> makeLogGroupResults(
 
 void forceLinkLogSystemRecoveryTests() {}
 
+TEST_CASE("/LogSystem/PopLogRouter/CurrentGenerationAcceptsPredecessor") {
+	constexpr Version generationStart = 100;
+	constexpr int8_t remoteTLogLocality = 1;
+	LocalityData locality;
+	TLogInterface router(locality);
+	auto currentSet = makeReference<LogSet>();
+	currentSet->locality = remoteTLogLocality;
+	currentSet->startVersion = generationStart;
+	currentSet->logRouters.push_back(
+	    makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(OptionalInterface<TLogInterface>(router)));
+
+	auto logSystem = makeReference<LogSystem>(UID(), locality, LogEpoch(1));
+	logSystem->tLogs.push_back(currentSet);
+	LogSystemConsumer consumer(logSystem);
+	Tag tag(tagLocalityRemoteLog, 0);
+	auto routerTag = std::make_pair(router.id(), tag);
+
+	consumer.popLogRouter(generationStart - 2, tag, 0, remoteTLogLocality);
+	ASSERT(!logSystem->outstandingPops.contains(routerTag));
+
+	consumer.popLogRouter(generationStart - 1, tag, 0, remoteTLogLocality);
+	ASSERT(logSystem->outstandingPops.contains(routerTag));
+	ASSERT(logSystem->outstandingPops.at(routerTag).first == generationStart - 1);
+	return Void();
+}
+
 TEST_CASE("/LogSystem/PeekLogRouter/EmptyOldRangeIsExhausted") {
 	LocalityData locality;
 	TLogInterface router(locality);

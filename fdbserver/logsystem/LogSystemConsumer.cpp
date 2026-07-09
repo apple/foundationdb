@@ -808,7 +808,11 @@ void LogSystemConsumer::popLogRouter(Version upTo, Tag tag, Version durableKnown
 		return;
 
 	Version lastGenerationStartVersion = LogSystem::getMaxLocalStartVersion(ls.tLogs);
-	if (upTo >= lastGenerationStartVersion) {
+	// Pop boundaries are exclusive. At a generation handoff, the remote TLog can durably reach
+	// startVersion - 1 while the current log router still needs that pop to advance flow control.
+	// Forward exactly that predecessor without making earlier generations eligible.
+	if (upTo >= lastGenerationStartVersion ||
+	    (lastGenerationStartVersion > 0 && upTo == lastGenerationStartVersion - 1)) {
 		for (auto& t : ls.tLogs) {
 			if (t->locality == popLocality) {
 				for (auto& log : t->logRouters) {
