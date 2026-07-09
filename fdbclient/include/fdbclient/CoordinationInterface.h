@@ -38,7 +38,7 @@ struct ClientLeaderRegInterface {
 	RequestStream<struct CheckDescriptorMutableRequest> checkDescriptorMutable;
 	Optional<Hostname> hostname;
 
-	ClientLeaderRegInterface() {}
+	ClientLeaderRegInterface() = default;
 	explicit ClientLeaderRegInterface(NetworkAddress remote);
 	explicit ClientLeaderRegInterface(INetwork* local);
 	explicit ClientLeaderRegInterface(Hostname hostname) : hostname(hostname) {}
@@ -65,7 +65,7 @@ class ClusterConnectionString {
 public:
 	constexpr static FileIdentifier file_identifier = 13602011;
 
-	ClusterConnectionString() {}
+	ClusterConnectionString() = default;
 	explicit ClusterConnectionString(const std::string& connectionString);
 	ClusterConnectionString(const std::vector<NetworkAddress>& coordinators, Key key);
 	ClusterConnectionString(const std::vector<Hostname>& hosts, Key key);
@@ -121,7 +121,7 @@ class IClusterConnectionRecord {
 public:
 	explicit IClusterConnectionRecord(ConnectionStringNeedsPersisted connectionStringNeedsPersisted)
 	  : connectionStringNeedsPersisted(connectionStringNeedsPersisted) {}
-	virtual ~IClusterConnectionRecord() {}
+	virtual ~IClusterConnectionRecord() = default;
 
 	// Returns the connection string currently held in this object. This may not match the stored record if it hasn't
 	// been persisted or if the persistent storage for the record has been modified externally.
@@ -246,7 +246,7 @@ struct GetLeaderRequest {
 	UID knownLeader;
 	ReplyPromise<Optional<LeaderInfo>> reply;
 
-	GetLeaderRequest() {}
+	GetLeaderRequest() = default;
 	explicit GetLeaderRequest(Key key, UID kl) : key(key), knownLeader(kl) {}
 
 	bool verify() const { return true; }
@@ -299,7 +299,7 @@ public:
 
 	explicit ClientCoordinators(Reference<IClusterConnectionRecord> ccr);
 	explicit ClientCoordinators(Key clusterKey, std::vector<NetworkAddress> coordinators);
-	ClientCoordinators() {}
+	ClientCoordinators() = default;
 };
 
 struct ProtocolInfoReply {
@@ -347,7 +347,7 @@ struct CheckDescriptorMutableReply {
 struct CheckDescriptorMutableRequest {
 	constexpr static FileIdentifier file_identifier = 214729;
 	ReplyPromise<CheckDescriptorMutableReply> reply;
-	CheckDescriptorMutableRequest() {}
+	CheckDescriptorMutableRequest() = default;
 
 	template <class Ar>
 	void serialize(Ar& ar) {

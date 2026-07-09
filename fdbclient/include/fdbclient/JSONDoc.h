@@ -165,8 +165,9 @@ struct JSONDoc {
 				if (curVal->type() != json_spirit::obj_type)
 					*curVal = json_spirit::mObject();
 				curObj = &curVal->get_obj();
-			} else // Otherwise start with the object *this is writing to
+			} else { // Otherwise start with the object *this is writing to
 				curObj = wpObj;
+			}
 
 			// Make sure key exists, if not then return false
 			if (!curObj->count(key))

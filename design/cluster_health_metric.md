@@ -104,6 +104,19 @@ Behavior:
 - Returns `SELF_HEALING` if recovery is at or above `ACCEPTING_COMMITS` but below `FULLY_RECOVERED`.
 - Returns `HEALTHY` at `FULLY_RECOVERED`.
 
+### `CoordinatorReachability`
+
+Source:
+- `GetLeaderRequest` sent directly to each coordinator configured in the cluster connection string
+
+Fields used:
+- none; this factor checks whether each coordinator replies before the probe timeout
+
+Behavior:
+- Returns `INTERVENTION_REQUIRED` if any configured coordinator is missing or unreachable.
+- Returns `HEALTHY` if every configured coordinator replies.
+- Returns `METRICS_MISSING` if no coordinator list is available.
+
 ### `ProcessErrors`
 
 Source event:
@@ -162,6 +175,7 @@ Fields:
 - `FactorTLogSpace`: same enum
 - `FactorStorageReplication`: same enum
 - `FactorRecoveryState`: same enum
+- `FactorCoordinatorReachability`: same enum
 - `FactorProcessErrors`: same enum
 - `FactorRkThrottling`: same enum
 - `Aggregate`: same enum, computed from the most limiting factor

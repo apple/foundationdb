@@ -29,7 +29,7 @@
 struct NetworkTestInterface {
 	RequestStream<struct NetworkTestRequest> test;
 	RequestStream<struct NetworkTestStreamingRequest> testStream;
-	NetworkTestInterface() {}
+	NetworkTestInterface() = default;
 	explicit NetworkTestInterface(NetworkAddress remote);
 	explicit NetworkTestInterface(INetwork* local);
 };
@@ -37,7 +37,7 @@ struct NetworkTestInterface {
 struct NetworkTestReply {
 	constexpr static FileIdentifier file_identifier = 14465374;
 	Value value;
-	NetworkTestReply() {}
+	NetworkTestReply() = default;
 	explicit NetworkTestReply(Value value) : value(value) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -50,7 +50,7 @@ struct NetworkTestRequest {
 	Key key;
 	uint32_t replySize;
 	ReplyPromise<struct NetworkTestReply> reply;
-	NetworkTestRequest() {}
+	NetworkTestRequest() = default;
 	NetworkTestRequest(Key key, uint32_t replySize) : key(key), replySize(replySize) {}
 	template <class Ar>
 	void serialize(Ar& ar) {

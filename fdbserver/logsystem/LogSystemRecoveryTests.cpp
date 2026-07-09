@@ -84,6 +84,26 @@ TEST_CASE("/LogSystem/PopLogRouter/CurrentGenerationAcceptsPredecessor") {
 	return Void();
 }
 
+TEST_CASE("/LogSystem/PeekLogRouter/EmptyOldRangeIsExhausted") {
+	LocalityData locality;
+	TLogInterface router(locality);
+	auto oldSet = makeReference<LogSet>();
+	oldSet->logRouters.push_back(
+	    makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(OptionalInterface<TLogInterface>(router)));
+
+	auto logSystem = makeReference<LogSystem>(UID(), locality, LogEpoch(1));
+	OldLogData old;
+	old.epochEnd = 100;
+	old.tLogs.push_back(oldSet);
+	logSystem->oldLogData.push_back(old);
+
+	LogSystemConsumer consumer(logSystem);
+	auto cursor = consumer.peekLogRouter(router.id(), old.epochEnd, Tag(tagLocalityLogRouter, 0), false);
+	ASSERT(cursor->isExhausted());
+	ASSERT(cursor->version().version == old.epochEnd);
+	return Void();
+}
+
 TEST_CASE("/LogSystem/GetRecoverVersionUnicast/Simple") {
 	if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 		return Void();

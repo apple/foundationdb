@@ -184,9 +184,9 @@ public:
 
 	virtual void destroy() { delete this; }
 	virtual void cancel() {}
-	virtual void unwait() override { delFutureRef(); }
-	virtual void fire(T const&) override { ASSERT(false); }
-	virtual void fire(T&&) override { ASSERT(false); }
+	void unwait() override { delFutureRef(); }
+	void fire(T const&) override { ASSERT(false); }
+	void fire(T&&) override { ASSERT(false); }
 
 protected:
 	bool shouldFireImmediatelyUnsafe() { return SingleCallback<T>::next != this; }

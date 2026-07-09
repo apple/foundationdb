@@ -34,7 +34,7 @@ struct ExtStringRef {
 
 	Standalone<StringRef> toStandaloneStringRef() const {
 		auto s = makeString(size());
-		if (base.size() > 0) {
+		if (!base.empty()) {
 			memcpy(mutateString(s), base.begin(), base.size());
 		}
 		memset(mutateString(s) + base.size(), 0, extra_zero_bytes);
@@ -44,13 +44,14 @@ struct ExtStringRef {
 	StringRef toArenaOrRef(Arena& a) const {
 		if (extra_zero_bytes) {
 			StringRef dest = StringRef(new (a) uint8_t[size()], size());
-			if (base.size() > 0) {
+			if (!base.empty()) {
 				memcpy(mutateString(dest), base.begin(), base.size());
 			}
 			memset(mutateString(dest) + base.size(), 0, extra_zero_bytes);
 			return dest;
-		} else
+		} else {
 			return base;
+		}
 	}
 
 	StringRef assertRef() const {
@@ -61,13 +62,14 @@ struct ExtStringRef {
 	StringRef toArena(Arena& a) const {
 		if (extra_zero_bytes) {
 			StringRef dest = StringRef(new (a) uint8_t[size()], size());
-			if (base.size() > 0) {
+			if (!base.empty()) {
 				memcpy(mutateString(dest), base.begin(), base.size());
 			}
 			memset(mutateString(dest) + base.size(), 0, extra_zero_bytes);
 			return dest;
-		} else
+		} else {
 			return StringRef(a, base);
+		}
 	}
 
 	int size() const { return base.size() + extra_zero_bytes; }
@@ -211,10 +213,11 @@ public:
 				auto prev = it;
 				prev.decrementNonEnd();
 				return prev->endKey;
-			} else if (offset == 1)
+			} else if (offset == 1) {
 				return it->beginKey;
-			else
+			} else {
 				return ExtStringRef(it->values[(offset - 2) >> 1].key, offset & 1);
+			}
 		}
 		ExtStringRef endKey() const {
 			if (offset == 0)

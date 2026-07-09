@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/tester/KnobProtectiveGroups.h"
+#include "KnobProtectiveGroups.h"
 
 #include <array>
 

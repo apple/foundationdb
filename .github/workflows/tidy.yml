@@ -74,6 +74,18 @@ jobs:
             if [[ $FILE == *.actor.* ]]; then
               continue  # actor syntax is not plain c++
             fi
+            # Keep vendored external dependencies as upstream snapshots.
+            case "$FILE" in
+              fdbclient/include/fdbclient/ConvertUTF.h|fdbclient/include/fdbclient/SimpleIni.h|fdbclient/include/fdbclient/json_spirit/*)
+                continue
+                ;;
+              fdbclient/sha1/*|fdbrpc/libcoroutine/*|fdbrpc/libeio/*)
+                continue
+                ;;
+              flow/include/flow/sse2neon.h|flow/include/flow/xxhash.h)
+                continue
+                ;;
+            esac
             # only c++ source files
             if [[ $FILE =~ \.[ch](pp)?$ ]] ; then
               echo "Checking $FILE ..."

@@ -54,6 +54,14 @@ double finishMoveKeysBackoff(int retries) {
 	return std::min(base * (0.75 + 0.5 * deterministicRandom()->random01()), 5.0); // jitter: [0.75x, 1.25x], capped
 }
 
+static bool updateFinishMoveKeysTransactionTooOldRetries(int errorCode, int maxRetries, int* consecutiveRetries) {
+	if (errorCode != error_code_transaction_too_old) {
+		*consecutiveRetries = 0;
+		return false;
+	}
+	return ++(*consecutiveRetries) > maxRetries;
+}
+
 // Shared retry tail used by the finishMove* post-wait branches that detect a
 // concurrent change (dest reassigned, data move deleted, phase changed):
 // bumps `retries`, throws finish_move_keys_too_many_retries once the cap is
@@ -1270,9 +1278,9 @@ Future<Void> checkFetchingState(Database cx,
 				// that might cause it to trigger. Adding this assertion to find any such cases via testing.
 				ASSERT_WE_THINK(serverListValues[s].present());
 				if (!serverListValues[s].present()) {
-					// FIXME: Is this the right behavior?  dataMovementComplete will never be sent!
-					// CODE_PROBE(true, "check fetching state moved to removed server", probe::decoration::rare);
-					throw move_to_removed_server();
+					CODE_PROBE(true, "check fetching state moved to removed server", probe::decoration::rare);
+					dataMovementComplete.sendError(move_to_removed_server());
+					co_return;
 				}
 				auto si = decodeServerListValue(serverListValues[s].get());
 				ASSERT(si.id() == dest[s]);
@@ -1429,6 +1437,10 @@ static Future<Void> finishMoveKeys(Database occ,
 	Key begin = keys.begin;
 	Key endKey;
 	int retries = 0;
+	// Transaction 2 can hit benign not_committed conflicts while adjacent
+	// finishers update KRM ranges. Only consecutive transaction_too_old
+	// failures should exhaust the bailout intended for a stuck TTO loop.
+	int consecutiveTransactionTooOldRetries = 0;
 	FlowLock::Releaser releaser;
 
 	std::unordered_set<UID> tssToIgnore;
@@ -1587,6 +1599,7 @@ static Future<Void> finishMoveKeys(Database occ,
 						    .detail("IterationBegin", begin)
 						    .detail("IterationEnd", endKey);
 						begin = keyServers.end()[-1].key;
+						consecutiveTransactionTooOldRetries = 0;
 						break;
 					}
 
@@ -1766,6 +1779,7 @@ static Future<Void> finishMoveKeys(Database occ,
 							    .detail("KeyBegin", keys.begin)
 							    .detail("KeyEnd", keys.end)
 							    .detail("OrigDest", describe(dest));
+							consecutiveTransactionTooOldRetries = 0;
 							co_await retryAfterPostWaitChange(&retries, &tr);
 							continue;
 						}
@@ -1801,10 +1815,12 @@ static Future<Void> finishMoveKeys(Database occ,
 
 						begin = endKey;
 						retries = 0;
+						consecutiveTransactionTooOldRetries = 0;
 						break;
 					}
 					// This leads to a count of transactions starting that exceeds the sum of
 					// committed or aborted, but this is intentional here.
+					consecutiveTransactionTooOldRetries = 0;
 					retries++;
 					if (retries > SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES) {
 						CODE_PROBE(true, "finishMoveKeys giving up due to timeout on dest servers");
@@ -1829,6 +1845,8 @@ static Future<Void> finishMoveKeys(Database occ,
 					throw err;
 				co_await tr.onError(err);
 				retries++;
+				bool tooManyConsecutiveTransactionTooOldRetries = updateFinishMoveKeysTransactionTooOldRetries(
+				    err.code(), SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES, &consecutiveTransactionTooOldRetries);
 				// tr.onError delays are short for transaction_too_old. With 15
 				// FlowLock slots all retrying, this creates a retry storm. Add
 				// additional exponential backoff capped at 5s.
@@ -1838,14 +1856,16 @@ static Future<Void> finishMoveKeys(Database occ,
 					TraceEvent("FinishMoveKeysBackoff", relocationIntervalId)
 					    .suppressFor(1.0)
 					    .detail("Retries", retries)
+					    .detail("TransactionTooOldRetries", consecutiveTransactionTooOldRetries)
 					    .detail("BackoffSeconds", backoff);
-					if (retries > SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES) {
+					if (tooManyConsecutiveTransactionTooOldRetries) {
 						CODE_PROBE(true, "finishMoveKeys giving up after max retries");
 						TraceEvent(SevWarnAlways, "RelocateShard_FinishMoveKeysGivingUp", relocationIntervalId)
 						    .error(err)
 						    .detail("KeyBegin", keys.begin)
 						    .detail("KeyEnd", keys.end)
-						    .detail("Retries", retries);
+						    .detail("Retries", retries)
+						    .detail("TransactionTooOldRetries", consecutiveTransactionTooOldRetries);
 						throw finish_move_keys_too_many_retries();
 					}
 					co_await delay(backoff);
@@ -3326,20 +3346,22 @@ Future<Void> removeKeysFromFailedServer(Database cx,
 							actors.push_back(
 							    krmSetRangeCoalescing(&tr, serverKeysPrefixFor(id), range, allKeys, serverKeysFalse));
 						}
+						co_await waitForAll(actors);
 
 						// Assign the shard to the new team as an empty range.
 						// Note, there could be data loss.
+						std::vector<Future<Void>> emptyRangeActors;
 						for (const UID& id : teamForDroppedRange) {
 							if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-								actors.push_back(krmSetRangeCoalescing(
+								emptyRangeActors.push_back(krmSetRangeCoalescing(
 								    &tr, serverKeysPrefixFor(id), range, allKeys, serverKeysValue(shardId)));
 							} else {
-								actors.push_back(krmSetRangeCoalescing(
+								emptyRangeActors.push_back(krmSetRangeCoalescing(
 								    &tr, serverKeysPrefixFor(id), range, allKeys, serverKeysTrueEmptyRange));
 							}
 						}
 
-						co_await waitForAll(actors);
+						co_await waitForAll(emptyRangeActors);
 
 						TraceEvent trace(SevWarnAlways, "ShardLossAllReplicasDropShard", serverID);
 						trace.detail("Begin", it.key);
@@ -3854,6 +3876,27 @@ TEST_CASE("/fdbserver/MoveKeys/finishMoveKeysBackoff") {
 
 	// Verify the retry limit knob exists and is positive
 	ASSERT(SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES > 0);
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MoveKeys/consecutiveTransactionTooOldRetryBudget") {
+	constexpr int maxRetries = 2;
+	int consecutiveRetries = 0;
+
+	ASSERT(
+	    !updateFinishMoveKeysTransactionTooOldRetries(error_code_transaction_too_old, maxRetries, &consecutiveRetries));
+	ASSERT(consecutiveRetries == 1);
+	ASSERT(!updateFinishMoveKeysTransactionTooOldRetries(error_code_not_committed, maxRetries, &consecutiveRetries));
+	ASSERT(consecutiveRetries == 0);
+
+	ASSERT(
+	    !updateFinishMoveKeysTransactionTooOldRetries(error_code_transaction_too_old, maxRetries, &consecutiveRetries));
+	ASSERT(
+	    !updateFinishMoveKeysTransactionTooOldRetries(error_code_transaction_too_old, maxRetries, &consecutiveRetries));
+	ASSERT(
+	    updateFinishMoveKeysTransactionTooOldRetries(error_code_transaction_too_old, maxRetries, &consecutiveRetries));
+	ASSERT(consecutiveRetries == maxRetries + 1);
 
 	return Void();
 }

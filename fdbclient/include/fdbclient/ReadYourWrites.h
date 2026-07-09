@@ -47,7 +47,7 @@ struct ReadYourWritesTransactionOptions {
 	int snapshotRywEnabled;
 	bool bypassUnreadable : 1;
 
-	ReadYourWritesTransactionOptions() {}
+	ReadYourWritesTransactionOptions() = default;
 	explicit ReadYourWritesTransactionOptions(Transaction const& tr);
 	void reset(Transaction const& tr);
 	bool getAndResetWriteConflictDisabled();

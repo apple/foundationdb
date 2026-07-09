@@ -34,6 +34,7 @@
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/SimulatorMachineInfo.h"
 #include "fdbrpc/SimulatorKillType.h"
+#include "fdbrpc/SimulatorProcessMetadata.h"
 
 struct MachineInfo;
 
@@ -47,7 +48,7 @@ struct ProcessInfo : NonCopyable {
 	NetworkAddressList addresses;
 	NetworkAddress address;
 	LocalityData locality;
-	ProcessClass startingClass;
+	Reference<ProcessInfoMetadata> metadata;
 	TDMetricCollection tdmetrics;
 	MetricCollection metrics;
 	ChaosMetrics chaosMetrics;
@@ -76,16 +77,16 @@ struct ProcessInfo : NonCopyable {
 
 	ProcessInfo(const char* name,
 	            LocalityData locality,
-	            ProcessClass startingClass,
+	            Reference<ProcessInfoMetadata> metadata,
 	            NetworkAddressList addresses,
 	            INetworkConnections* net,
 	            const char* dataFolder,
 	            const char* coordinationFolder)
 	  : name(name), coordinationFolder(coordinationFolder), dataFolder(dataFolder), machine(nullptr),
-	    addresses(addresses), address(addresses.address), locality(locality), startingClass(startingClass),
-	    failed(false), excluded(false), cleared(false), rebooting(false), drProcess(false), network(net),
-	    fault_injection_r(0), fault_injection_p1(0), fault_injection_p2(0), blob_inject_failure_rate(0),
-	    failedDisk(false) {
+	    addresses(addresses), address(addresses.address), locality(locality), metadata(metadata), failed(false),
+	    excluded(false), cleared(false), rebooting(false), drProcess(false), network(net), fault_injection_r(0),
+	    fault_injection_p1(0), fault_injection_p2(0), blob_inject_failure_rate(0), failedDisk(false) {
+		ASSERT(metadata);
 		uid = deterministicRandom()->randomUniqueID();
 	}
 
@@ -111,34 +112,6 @@ struct ProcessInfo : NonCopyable {
 	}
 	std::vector<ProcessInfo*> const& getChilds() const { return childs; }
 
-	// Return true if the class type is suitable for stateful roles, such as tLog and StorageServer.
-	bool isAvailableClass() const {
-		switch (startingClass._class) {
-		case ProcessClass::UnsetClass:
-		case ProcessClass::StorageClass:
-		case ProcessClass::TransactionClass:
-		case ProcessClass::LogClass:
-			return true;
-
-		case ProcessClass::ResolutionClass:
-		case ProcessClass::CommitProxyClass:
-		case ProcessClass::GrvProxyClass:
-		case ProcessClass::MasterClass:
-		case ProcessClass::TesterClass:
-		case ProcessClass::StatelessClass:
-		case ProcessClass::LogRouterClass:
-		case ProcessClass::ClusterControllerClass:
-		case ProcessClass::DataDistributorClass:
-		case ProcessClass::RatekeeperClass:
-		case ProcessClass::ConsistencyScanClass:
-		case ProcessClass::BlobManagerClass:
-		case ProcessClass::BackupClass:
-		case ProcessClass::EncryptKeyProxyClass:
-		default:
-			return false;
-		}
-	}
-
 	Reference<IListener> getListener(const NetworkAddress& addr) const {
 		auto listener = listenerMap.find(addr);
 		ASSERT(listener != listenerMap.end());
@@ -160,7 +133,7 @@ struct ProcessInfo : NonCopyable {
 		              formatIpPort(addresses.address.ip, addresses.address.port).c_str(),
 		              (locality.zoneId().present() ? locality.zoneId().get().printable().c_str() : "[unset]"),
 		              (locality.dataHallId().present() ? locality.dataHallId().get().printable().c_str() : "[unset]"),
-		              startingClass.toString().c_str(),
+		              metadata->role.c_str(),
 		              excluded,
 		              cleared);
 	}

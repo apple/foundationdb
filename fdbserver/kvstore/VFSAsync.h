@@ -28,7 +28,7 @@
 ** When using this VFS, the sqlite3_file* handles that SQLite uses are
 ** actually pointers to instances of type VFSAsyncFile.
 */
-typedef struct VFSAsyncFile VFSAsyncFile;
+using VFSAsyncFile = struct VFSAsyncFile;
 struct VFSAsyncFile {
 	sqlite3_file base; /* Base class. Must be first. */
 	int flags;

@@ -39,10 +39,9 @@
 #include "flow/IAsyncFile.h"
 #include "flow/TDMetric.h"
 #include "fdbrpc/HTTP.h"
-#include "fdbrpc/FailureMonitor.h"
-#include "fdbrpc/Locality.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/SimulatorKillType.h"
+#include "fdbrpc/SimulatorProcessMetadata.h"
 
 enum ClogMode { ClogDefault, ClogAll, ClogSend, ClogReceive };
 
@@ -70,6 +69,7 @@ public:
 	};
 
 	virtual bool shouldProtectNewProcess(ProcessInfo const&) const { return false; }
+	virtual bool shouldIncludeInAvailabilityCheck(ProcessInfo const&) const { return true; }
 	virtual bool isAvailable(std::vector<ProcessInfo*> const&,
 	                         std::vector<ProcessInfo*> const& availableProcesses,
 	                         std::vector<ProcessInfo*> const& deadProcesses) const {
@@ -120,7 +120,7 @@ public:
 	                                bool sslEnabled,
 	                                uint16_t listenPerProcess,
 	                                LocalityData locality,
-	                                ProcessClass startingClass,
+	                                Reference<simulator::ProcessInfoMetadata> metadata,
 	                                const char* dataFolder,
 	                                const char* coordinationFolder,
 	                                ProtocolVersion protocol,
@@ -179,7 +179,7 @@ public:
 					    .detail("Result", "Decremented Role");
 				} else {
 					addressIt->second.erase(rolesIt);
-					if (addressIt->second.size()) {
+					if (!addressIt->second.empty()) {
 						TraceEvent("RoleRemove")
 						    .detail("Address", address)
 						    .detail("Role", role)
@@ -286,7 +286,7 @@ public:
 		allSwapsDisabled = false;
 	}
 	bool canSwapToMachine(Optional<Standalone<StringRef>> zoneId) const {
-		return swapsDisabled.count(zoneId) == 0 && !allSwapsDisabled &&
+		return !swapsDisabled.contains(zoneId) && !allSwapsDisabled &&
 		       (!simulationPolicy || simulationPolicy->canSwapToMachine(zoneId));
 	}
 	void enableSwapsToAll() {
@@ -441,9 +441,9 @@ public:
 
 	Future<Void> renameFile(std::string const& from, std::string const& to) override;
 
-	Sim2FileSystem() {}
+	Sim2FileSystem() = default;
 
-	~Sim2FileSystem() override {}
+	~Sim2FileSystem() override = default;
 
 	static void newFileSystem();
 

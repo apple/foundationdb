@@ -29,7 +29,7 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
-#include "fdbserver/tester/KnobProtectiveGroups.h"
+#include "fdbserver/tester/KnobKeyValuePairs.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbrpc/PerfMetric.h"
@@ -39,7 +39,7 @@ struct DistributedTestResults {
 	std::vector<PerfMetric> metrics;
 	int successes, failures;
 
-	DistributedTestResults() {}
+	DistributedTestResults() = default;
 
 	DistributedTestResults(std::vector<PerfMetric> const& metrics, int successes, int failures)
 	  : metrics(metrics), successes(successes), failures(failures) {}
