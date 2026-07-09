@@ -284,10 +284,7 @@ void assertLocalFolderContained(const BulkLoadFileSet& localFileSet, const UID& 
 	std::string resolvedFolder = abspath(localFileSet.getFolder());
 	// Compare against root + separator so a sibling like "/data-evil" is not
 	// accepted for root "/data"; the exact-root case is allowed on its own.
-	std::string rootWithSep = resolvedRoot + "/";
-	bool contained =
-	    resolvedFolder == resolvedRoot || (resolvedFolder.size() >= rootWithSep.size() &&
-	                                       resolvedFolder.compare(0, rootWithSep.size(), rootWithSep) == 0);
+	bool contained = resolvedFolder == resolvedRoot || resolvedFolder.starts_with(resolvedRoot + "/");
 	if (!contained) {
 		TraceEvent(SevError, "BulkLoadLocalFolderEscapesRoot", logId)
 		    .detail("ResolvedRoot", resolvedRoot)
