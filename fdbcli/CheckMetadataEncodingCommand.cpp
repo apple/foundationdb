@@ -115,7 +115,7 @@ Future<bool> checkMetadataEncodingCommandActor(Database cx, std::vector<StringRe
 	}
 
 	// Count dataMoves
-	{
+	loop {
 		Transaction tr(cx);
 		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
@@ -124,12 +124,11 @@ Future<bool> checkMetadataEncodingCommandActor(Database cx, std::vector<StringRe
 		try {
 			RangeResult result = co_await tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY);
 			dataMovesCount = result.size();
+			break;
 		} catch (Error& e) {
 			err = e;
 		}
-		if (err.isValid()) {
-			co_await tr.onError(err);
-		}
+		co_await tr.onError(err);
 	}
 
 	// Report
