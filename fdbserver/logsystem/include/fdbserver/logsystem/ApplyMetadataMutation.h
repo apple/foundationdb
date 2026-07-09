@@ -56,10 +56,36 @@ struct ApplyMutationsData {
 	Reference<KeyRangeMap<Version>> keyVersion;
 };
 
+// Active CDC write routing reconstructed from durable stream and tag-history metadata.
+class CDCRoutingTable : NonCopyable {
+	struct StreamState {
+		Optional<KeyRange> keys;
+		Optional<std::pair<Version, Tag>> tag;
+	};
+
+	std::unordered_map<CDCStreamId, StreamState> streams;
+	KeyRangeMap<std::set<Tag>> tagsByRange;
+
+	void updateRange(CDCStreamId streamId, KeyRangeRef const& keys);
+	bool updateTag(CDCStreamId streamId, Version version, Tag tag);
+	void rebuildRanges();
+
+public:
+	CDCRoutingTable();
+	void setRange(CDCStreamId streamId, KeyRangeRef const& keys);
+	void setTag(CDCStreamId streamId, Version version, Tag tag);
+	void reload(IKeyValueStore* txnStateStore);
+	bool empty() const { return streams.empty(); }
+
+	const std::set<Tag>& tagsForKey(KeyRef const& key) const;
+	std::set<Tag> tagsForRange(KeyRangeRef const& keys) const;
+};
+
 struct ApplyMetadataProxyContext {
 	UID dbgid;
 	IKeyValueStore* txnStateStore = nullptr;
 	KeyRangeMap<std::set<Key>>* vecBackupKeys = nullptr;
+	CDCRoutingTable* cdcRouting = nullptr;
 	KeyRangeMap<ServerCacheInfo>* keyInfo = nullptr;
 	std::map<Key, ApplyMutationsData>* uid_applyMutationsData = nullptr;
 	PublicRequestStream<CommitTransactionRequest> commit;

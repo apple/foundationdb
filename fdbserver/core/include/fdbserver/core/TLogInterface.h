@@ -221,6 +221,8 @@ struct TLogPeekRequest {
 	Optional<Version> end; // when set is exclusive to the desired range
 	// @todo investigate whether we really need this variable (and if not needed, remove it).
 	Optional<bool> returnEmptyIfStopped;
+	// Zero leaves replies uncapped. Nonzero limits are honored only for Native CDC tags.
+	int replyByteLimit = 0;
 
 	TLogPeekRequest(Version begin,
 	                Tag tag,
@@ -228,14 +230,33 @@ struct TLogPeekRequest {
 	                bool onlySpilled,
 	                Optional<std::pair<UID, int>> sequence = Optional<std::pair<UID, int>>(),
 	                Optional<Version> end = Optional<Version>(),
-	                Optional<bool> returnEmptyIfStopped = Optional<bool>())
+	                Optional<bool> returnEmptyIfStopped = Optional<bool>(),
+	                int replyByteLimit = 0)
 	  : begin(begin), tag(tag), returnIfBlocked(returnIfBlocked), onlySpilled(onlySpilled), sequence(sequence),
-	    end(end), returnEmptyIfStopped(returnEmptyIfStopped) {}
+	    end(end), returnEmptyIfStopped(returnEmptyIfStopped), replyByteLimit(replyByteLimit) {}
 	TLogPeekRequest() = default;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, begin, tag, returnIfBlocked, onlySpilled, sequence, reply, end, returnEmptyIfStopped);
+		if constexpr (is_fb_function<Ar>) {
+			// FlatBuffer visitors must see every field in one call because each visit starts at field zero.
+			serializer(ar,
+			           begin,
+			           tag,
+			           returnIfBlocked,
+			           onlySpilled,
+			           sequence,
+			           reply,
+			           end,
+			           returnEmptyIfStopped,
+			           replyByteLimit);
+		} else {
+			ASSERT(ar.protocolVersion().isValid());
+			serializer(ar, begin, tag, returnIfBlocked, onlySpilled, sequence, reply, end, returnEmptyIfStopped);
+			if (ar.protocolVersion().hasNativeCdc()) {
+				serializer(ar, replyByteLimit);
+			}
+		}
 	}
 };
 
