@@ -41,6 +41,7 @@
 #include "flow/DebugTrace.h"
 #include "DDRelocationQueue.h"
 #include "flow/CoroUtils.h"
+#include "flow/SimpleCounter.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #define WORK_FULL_UTILIZATION 10000 // This is not a knob; it is a fixed point scaling factor!
@@ -779,6 +780,20 @@ void DDQueue::validate() {
 		for (auto it = priority_relocations.begin(); it != priority_relocations.end(); ++it)
 			testActive += it->second;
 		ASSERT(activeRelocations + queuedRelocations == testActive);
+	}
+}
+
+void DDQueue::processRelocationComplete(const RelocateData& done) {
+	activeRelocations--;
+	TraceEvent(SevVerbose, "InFlightRelocationChange")
+	    .detail("Complete", done.dataMoveId)
+	    .detail("IsRestore", done.isRestore())
+	    .detail("Total", activeRelocations);
+	finishRelocation(done.priority, done.healthPriority);
+	fetchKeysComplete.erase(done);
+	if (g_network->isSimulated() && debug_isCheckRelocationDuration() && now() - done.startTime > 60) {
+		TraceEvent(SevWarnAlways, "RelocationDurationTooLong").detail("Duration", now() - done.startTime);
+		debug_setCheckRelocationDuration(false);
 	}
 }
 
@@ -2808,6 +2823,7 @@ struct DDQueueImpl {
 		state KeyRange keysToLaunchFrom;
 		state RelocateData launchData;
 		state Future<Void> recordMetrics = delay(SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL);
+		state FutureStream<RelocateData> completedRelocations = self->relocationComplete.getFuture();
 
 		state std::vector<Future<Void>> ddQueueFutures;
 
@@ -2887,22 +2903,30 @@ struct DDQueueImpl {
 							launchQueuedWorkTimeout = delay(0, TaskPriority::DataDistributionLaunch);
 						serversToLaunchFrom.insert(done.src.begin(), done.src.end());
 					}
-					when(RelocateData done = waitNext(self->relocationComplete.getFuture())) {
-						self->activeRelocations--;
-						TraceEvent(SevVerbose, "InFlightRelocationChange")
-						    .detail("Complete", done.dataMoveId)
-						    .detail("IsRestore", done.isRestore())
-						    .detail("Total", self->activeRelocations);
-						self->finishRelocation(done.priority, done.healthPriority);
-						self->fetchKeysComplete.erase(done);
+					when(RelocateData done = waitNext(completedRelocations)) {
+						self->processRelocationComplete(done);
 						// self->logRelocation( done, "ShardRelocatorDone" );
-						self->noErrorActors.add(
-						    tag(delay(0, TaskPriority::DataDistributionLaunch), done.keys, rangesComplete));
-						if (g_network->isSimulated() && debug_isCheckRelocationDuration() &&
-						    now() - done.startTime > 60) {
-							TraceEvent(SevWarnAlways, "RelocationDurationTooLong")
-							    .detail("Duration", now() - done.startTime);
-							debug_setCheckRelocationDuration(false);
+						auto scheduleRangesComplete = [&](KeyRange keys) {
+							self->noErrorActors.add(
+							    tag(delay(0, TaskPriority::DataDistributionLaunch), keys, rangesComplete));
+						};
+						scheduleRangesComplete(done.keys);
+						// Batch drain: process all remaining ready completions without
+						// returning to the choose loop. Prevents fetchKeysComplete from
+						// growing when completions are starved by other events.
+						int drained = 0;
+						while (completedRelocations.isReady() && !completedRelocations.isError() && drained++ < 1000) {
+							RelocateData next = completedRelocations.pop();
+							self->processRelocationComplete(next);
+							scheduleRangesComplete(next.keys);
+						}
+						if (drained > 0) {
+							static auto* c =
+							    SimpleCounter<int64_t>::makeCounter("/dd/queue/relocationComplete/batchDrained");
+							c->increment(drained + 1);
+							TraceEvent("RelocationCompleteBatchDrain", self->distributorId)
+							    .suppressFor(1.0)
+							    .detail("Drained", drained + 1);
 						}
 					}
 					when(KeyRange done = waitNext(rangesComplete.getFuture())) {
@@ -3046,5 +3070,54 @@ TEST_CASE("/DataDistribution/DDQueue/ServerCounterTrace") {
 		}
 	}
 	std::cout << "Finished.";
+	return Void();
+}
+
+// Verify the batch drain in the relocationComplete handler processes all queued
+// completions in one iteration. Simulates a burst of completions arriving at
+// once and checks that fetchKeysComplete is fully drained.
+TEST_CASE("/DataDistribution/DDQueue/BatchDrainRelocationComplete") {
+	state DDQueue self;
+	self.rawProcessingUnhealthy = makeReference<AsyncVar<bool>>(false);
+	self.rawProcessingWiggle = makeReference<AsyncVar<bool>>(false);
+	self.pipelineFull = makeReference<AsyncVar<bool>>(false);
+	state int N = 100;
+
+	state std::vector<RelocateData> entries;
+	for (int i = 0; i < N; i++) {
+		RelocateData rd;
+		Key begin = Key(format("key/%05d", i));
+		Key end = Key(format("key/%05d/", i));
+		rd.keys = KeyRangeRef(begin, end);
+		rd.startTime = now();
+		entries.push_back(rd);
+	}
+
+	self.activeRelocations = N;
+	for (auto& rd : entries) {
+		self.fetchKeysComplete.insert(rd);
+		self.relocationComplete.send(rd);
+	}
+
+	ASSERT(self.fetchKeysComplete.size() == N);
+	ASSERT(self.activeRelocations == N);
+
+	state FutureStream<RelocateData> completions = self.relocationComplete.getFuture();
+	RelocateData first = waitNext(completions);
+	self.processRelocationComplete(first);
+
+	// Mirrors the production drain loop. Note: noErrorActors.add(tag(..., rangesComplete)) is
+	// not exercised here since that requires a running actor collection.
+	int drained = 0;
+	while (completions.isReady() && !completions.isError() && drained++ < 1000) {
+		RelocateData next = completions.pop();
+		self.processRelocationComplete(next);
+	}
+
+	ASSERT(drained == N - 1);
+	ASSERT(self.fetchKeysComplete.empty());
+	ASSERT(self.activeRelocations == 0);
+
+	std::cout << "BatchDrainRelocationComplete: drained " << drained << " of " << N << " completions\n";
 	return Void();
 }
