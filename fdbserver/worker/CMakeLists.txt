@@ -4,6 +4,7 @@ add_flow_target(STATIC_LIBRARY NAME fdbserver_worker SRCS ${FDBSERVER_WORKER_SRC
 add_fdbserver_link_test(fdbserver_workerlinktest
   fdbserver_worker
   fdbserver_backupworker
+  fdbserver_cdcproxy
   fdbserver_clustercontroller
   fdbserver_commitproxy
   fdbserver_consistencyscan
@@ -56,6 +57,7 @@ target_link_libraries(fdbserver_worker
     fdbctl
   PRIVATE
     fdbserver_backupworker
+    fdbserver_cdcproxy
     fdbserver_clustercontroller
     fdbserver_commitproxy
     fdbserver_consistencyscan

@@ -706,6 +706,10 @@ std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
 			if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 				auto& tags = pProxyCommitData->tagsForKey(m.param1);
 				transactionTags.insert(tags.begin(), tags.end());
+				if (!pProxyCommitData->cdcRouting.empty()) {
+					const auto& cdcTags = pProxyCommitData->cdcRouting.tagsForKey(m.param1);
+					transactionTags.insert(cdcTags.begin(), cdcTags.end());
+				}
 			} else if (m.type == MutationRef::ClearRange) {
 				auto range = pProxyCommitData->keyInfo.rangeContaining(m.param1);
 				if (range.end() >= m.param2) {
@@ -721,6 +725,10 @@ std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
 					}
 				}
 				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
+				if (!pProxyCommitData->cdcRouting.empty()) {
+					const auto cdcTags = pProxyCommitData->cdcRouting.tagsForRange(clearRange);
+					transactionTags.insert(cdcTags.begin(), cdcTags.end());
+				}
 			} else {
 				UNREACHABLE();
 			}
@@ -1409,6 +1417,9 @@ Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 
 				DEBUG_MUTATION("ProxyCommit", self->commitVersion, m, pProxyCommitData->dbgid).detail("To", tags);
 				self->toCommit.addTags(tags);
+				if (!pProxyCommitData->cdcRouting.empty()) {
+					self->toCommit.addTags(pProxyCommitData->cdcRouting.tagsForKey(m.param1));
+				}
 
 				if (pProxyCommitData->acsBuilder != nullptr) {
 					updateMutationWithAcsAndAddMutationToAcsBuilder(
@@ -1500,6 +1511,9 @@ Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				}
 
 				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
+				if (!pProxyCommitData->cdcRouting.empty()) {
+					self->toCommit.addTags(pProxyCommitData->cdcRouting.tagsForRange(clearRange));
+				}
 				WriteMutationRefVar var = writeMutation(self, &m);
 				// FIXME: Remove assert once ClearRange RAW_ACCESS usecase handling is done
 				ASSERT(std::holds_alternative<MutationRef>(var));
@@ -2771,6 +2785,7 @@ Future<Void> processCompleteTransactionStateRequest(TransactionStateResolveConte
 	auto lockedKey = pContext->pTxnStateStore->readValue(databaseLockedKey).get();
 	pContext->pCommitData->locked = lockedKey.present() && !lockedKey.get().empty();
 	pContext->pCommitData->metadataVersion = pContext->pTxnStateStore->readValue(metadataVersionKey).get();
+	pContext->pCommitData->cdcRouting.reload(pContext->pTxnStateStore);
 
 	pContext->pTxnStateStore->enableSnapshot();
 }

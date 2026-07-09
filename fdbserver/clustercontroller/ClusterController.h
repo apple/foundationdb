@@ -145,6 +145,7 @@ public:
 		Future<Void> clientCounter;
 		int clientCount;
 		ClusterType clusterType = ClusterType::STANDALONE;
+		std::vector<CDCProxyInterface> cdcProxies;
 		Reference<ClusterRecoveryData> recoveryData;
 
 		DBInfo();
@@ -3469,6 +3470,7 @@ public:
 
 	CounterCollection clusterControllerMetrics;
 
+	Counter cdcProxyAssignmentScans;
 	Counter openDatabaseRequests;
 	Counter registerWorkerRequests;
 	Counter getWorkersRequests;
