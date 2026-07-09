@@ -25,7 +25,7 @@
 #include "flow/flow.h"
 #include "fdbrpc/ReplicationTypes.h"
 
-typedef std::string repTestType;
+using repTestType = std::string;
 // string value defining test type
 
 extern repTestType convertToTestType(int iValue);

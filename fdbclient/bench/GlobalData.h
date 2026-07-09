@@ -31,7 +31,7 @@ KeyRef getKey(size_t keySize);
 
 template <typename T>
 struct InputGenerator {
-	InputGenerator() {}
+	InputGenerator() = default;
 
 	template <typename Fn>
 	InputGenerator(int n, Fn genFunc) {

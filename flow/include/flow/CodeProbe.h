@@ -74,14 +74,14 @@ template <class Left, class Right>
 struct AssertOr {
 	typename std::remove_const<Left>::type left;
 	typename std::remove_const<Right>::type right;
-	constexpr AssertOr() {}
+	constexpr AssertOr() = default;
 	constexpr bool operator()(ICodeProbe* self) const { return left(self) || right(self); }
 };
 template <class Left, class Right>
 struct AssertAnd {
 	typename std::remove_const<Left>::type left;
 	typename std::remove_const<Right>::type right;
-	constexpr AssertAnd() {}
+	constexpr AssertAnd() = default;
 	constexpr bool operator()(ICodeProbe* self) const { return left(self) && right(self); }
 };
 template <class T>

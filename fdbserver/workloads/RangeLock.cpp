@@ -21,7 +21,6 @@
 #include "fdbclient/AuditUtils.h"
 #include "fdbclient/RangeLock.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.h"

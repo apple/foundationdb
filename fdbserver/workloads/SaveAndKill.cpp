@@ -26,6 +26,7 @@
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbrpc/simulator.h"
+#include "fdbserver/core/FDBSimulatorProcessInfo.h"
 #include "flow/Knobs.h"
 
 #include "boost/algorithm/string/predicate.hpp"
@@ -112,7 +113,8 @@ struct SaveAndKillWorkload : TestWorkload {
 					             (process->locality.zoneId().present())
 					                 ? process->locality.zoneId().get().printable().c_str()
 					                 : "");
-					ini.SetValue(machineIdString, "mClass", format("%d", process->startingClass.classType()).c_str());
+					ini.SetValue(
+					    machineIdString, "mClass", format("%d", getSimulatorProcessClass(process).classType()).c_str());
 					ini.SetValue(machineIdString,
 					             format("ipAddr%d", process->address.port - 1).c_str(),
 					             process->address.ip.toString().c_str());

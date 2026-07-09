@@ -32,7 +32,7 @@
 
 class ExecCmdValueString {
 public:
-	ExecCmdValueString() {}
+	ExecCmdValueString() = default;
 	explicit ExecCmdValueString(StringRef cmdValueString);
 
 	StringRef getBinaryPath() const;

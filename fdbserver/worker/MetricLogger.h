@@ -1,5 +1,5 @@
 /*
- * BackupWorkerRangePartitioned.h
+ * MetricLogger.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,12 +20,10 @@
 
 #pragma once
 
-#include "fdbserver/core/BackupInterface.h"
+#include "fdbclient/FDBTypes.h"
 #include "flow/flow.h"
 
-struct InitializeRangeBackupRequest;
-struct ServerDBInfo;
+class Database;
 
-Future<Void> backupWorkerRangePartitioned(BackupInterface bi,
-                                          InitializeRangeBackupRequest req,
-                                          Reference<AsyncVar<ServerDBInfo> const> db);
+Future<Void> runMetrics(Future<Database> fcx, Key metricsPrefix);
+Future<Void> runMetrics();

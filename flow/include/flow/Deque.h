@@ -32,11 +32,11 @@ class Deque {
 	// Capacity is limited to 2^32-1 items even in 64 bit
 
 public:
-	typedef T value_type;
-	typedef T& reference;
-	typedef T const& const_reference;
-	typedef int32_t difference_type;
-	typedef uint32_t size_type;
+	using value_type = T;
+	using reference = T&;
+	using const_reference = const T&;
+	using difference_type = int32_t;
+	using size_type = uint32_t;
 
 	Deque() : arr(0), begin(0), end(0), mask(-1) {}
 
@@ -145,8 +145,9 @@ public:
 		if (begin == mask) {
 			begin -= mask;
 			end -= mask + 1;
-		} else
+		} else {
 			begin++;
+		}
 	}
 
 	void clear() {

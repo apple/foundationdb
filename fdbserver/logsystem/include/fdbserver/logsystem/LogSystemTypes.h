@@ -22,8 +22,47 @@
 #define FDBSERVER_LOGSYSTEM_LOGSYSTEMTYPES_H
 #pragma once
 
+#include "fdbrpc/Replication.h"
 #include "fdbserver/core/LogSystemConfig.h"
 #include "fdbserver/core/DBCoreState.h"
+
+struct ConnectionResetInfo : public ReferenceCounted<ConnectionResetInfo> {
+	double lastReset;
+	Future<Void> resetCheck;
+	int slowReplies;
+	int fastReplies;
+
+	ConnectionResetInfo() : lastReset(now()), resetCheck(Void()), slowReplies(0), fastReplies(0) {}
+};
+
+// Base cursor contract for consuming a sequential log peek stream.
+struct IPeekCursor {
+	virtual void setProtocolVersion(ProtocolVersion version) = 0;
+
+	virtual bool hasMessage() const = 0;
+	virtual VectorRef<Tag> getTags() const = 0;
+	virtual Arena& arena() = 0;
+	virtual ArenaReader* reader() = 0;
+	virtual StringRef getMessage() = 0;
+	virtual StringRef getMessageWithTags() = 0;
+	virtual void nextMessage() = 0;
+	virtual Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply) = 0;
+	virtual bool isExhausted() const = 0;
+	virtual const LogMessageVersion& version() const = 0;
+	virtual Version popped() const = 0;
+	virtual Version getMinKnownCommittedVersion() const = 0;
+	virtual void addref() = 0;
+	virtual void delref() = 0;
+};
+
+// Peek cursor that reports log location and can be cloned and repositioned for replay.
+struct IReplayPeekCursor : IPeekCursor {
+	virtual Optional<UID> getPrimaryPeekLocation() const = 0;
+	virtual Optional<UID> getCurrentPeekLocation() const = 0;
+	virtual Version getMaxKnownVersion() const = 0;
+	virtual Reference<IReplayPeekCursor> cloneNoMore() = 0;
+	virtual void advanceTo(LogMessageVersion n) = 0;
+};
 
 class LogSet : NonCopyable, public ReferenceCounted<LogSet> {
 public:
@@ -324,7 +363,7 @@ public:
 		VectorRef<Tag> tags;
 		LogMessageVersion version;
 
-		BufferedMessage() {}
+		BufferedMessage() = default;
 		explicit BufferedMessage(Version version) : version(version) {}
 		BufferedMessage(Arena arena, StringRef message, const VectorRef<Tag>& tags, const LogMessageVersion& version)
 		  : arena(arena), message(message), tags(tags), version(version) {}

@@ -27,7 +27,7 @@
 
 class ShardsAffectedByTeamFailure : public ReferenceCounted<ShardsAffectedByTeamFailure> {
 public:
-	ShardsAffectedByTeamFailure() {}
+	ShardsAffectedByTeamFailure() = default;
 
 	enum class CheckMode { Normal = 0, ForceCheck, ForceNoCheck };
 

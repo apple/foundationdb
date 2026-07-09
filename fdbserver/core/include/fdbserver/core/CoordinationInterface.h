@@ -50,7 +50,7 @@ struct GenerationRegInterface {
 	// thus form a totally ordered sequence of modifications, in which
 	// the v2 of the previous generation is the v1 of the next.
 
-	GenerationRegInterface() {}
+	GenerationRegInterface() = default;
 	explicit GenerationRegInterface(NetworkAddress const& remote);
 	explicit GenerationRegInterface(INetwork* local);
 	explicit GenerationRegInterface(Hostname const& hostname) : hostname(hostname) {};
@@ -84,7 +84,7 @@ struct GenerationRegReadReply {
 	constexpr static FileIdentifier file_identifier = 12623609;
 	Optional<Value> value;
 	UniqueGeneration gen, rgen;
-	GenerationRegReadReply() {}
+	GenerationRegReadReply() = default;
 	GenerationRegReadReply(Optional<Value> value, UniqueGeneration gen, UniqueGeneration rgen)
 	  : value(value), gen(gen), rgen(rgen) {}
 	template <class Ar>
@@ -98,7 +98,7 @@ struct GenerationRegReadRequest {
 	Key key;
 	UniqueGeneration gen;
 	ReplyPromise<struct GenerationRegReadReply> reply;
-	GenerationRegReadRequest() {}
+	GenerationRegReadRequest() = default;
 	GenerationRegReadRequest(Key key, UniqueGeneration gen) : key(key), gen(gen) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -111,7 +111,7 @@ struct GenerationRegWriteRequest {
 	KeyValue kv;
 	UniqueGeneration gen;
 	ReplyPromise<UniqueGeneration> reply;
-	GenerationRegWriteRequest() {}
+	GenerationRegWriteRequest() = default;
 	GenerationRegWriteRequest(KeyValue kv, UniqueGeneration gen) : kv(kv), gen(gen) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -125,7 +125,7 @@ struct LeaderElectionRegInterface : ClientLeaderRegInterface {
 	RequestStream<struct LeaderHeartbeatRequest> leaderHeartbeat;
 	RequestStream<struct ForwardRequest> forward;
 
-	LeaderElectionRegInterface() {}
+	LeaderElectionRegInterface() = default;
 	explicit LeaderElectionRegInterface(NetworkAddress const& remote);
 	explicit LeaderElectionRegInterface(INetwork* local);
 	explicit LeaderElectionRegInterface(Hostname const& hostname) : ClientLeaderRegInterface(hostname) {}
@@ -138,7 +138,7 @@ struct CandidacyRequest {
 	UID knownLeader, prevChangeID;
 	ReplyPromise<Optional<LeaderInfo>> reply;
 
-	CandidacyRequest() {}
+	CandidacyRequest() = default;
 	CandidacyRequest(Key key, LeaderInfo const& myInfo, UID const& knownLeader, UID const& prevChangeID)
 	  : key(key), myInfo(myInfo), knownLeader(knownLeader), prevChangeID(prevChangeID) {}
 
@@ -193,7 +193,7 @@ struct LeaderHeartbeatRequest {
 	UID prevChangeID;
 	ReplyPromise<LeaderHeartbeatReply> reply;
 
-	LeaderHeartbeatRequest() {}
+	LeaderHeartbeatRequest() = default;
 	explicit LeaderHeartbeatRequest(Key key, LeaderInfo const& myInfo, UID prevChangeID)
 	  : key(key), myInfo(myInfo), prevChangeID(prevChangeID) {}
 
@@ -209,7 +209,7 @@ struct ForwardRequest {
 	Value conn; // a cluster connection string
 	ReplyPromise<Void> reply;
 
-	ForwardRequest() {}
+	ForwardRequest() = default;
 	ForwardRequest(Key key, Value conn) : key(key), conn(conn) {}
 
 	template <class Ar>
@@ -220,7 +220,7 @@ struct ForwardRequest {
 
 class ServerCoordinators : public ClientCoordinators {
 public:
-	ServerCoordinators() {}
+	ServerCoordinators() = default;
 	explicit ServerCoordinators(Reference<IClusterConnectionRecord> ccr);
 
 	std::vector<LeaderElectionRegInterface> leaderElectionServers;
