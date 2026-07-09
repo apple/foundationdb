@@ -111,23 +111,13 @@ Future<Optional<UID>> getNativeCdcProxyAssignment(Transaction* tr, CDCStreamId s
 }
 
 Future<Tag> getNativeCdcCurrentTag(Transaction* tr, CDCStreamId streamId) {
-	Optional<Tag> currentTag;
-	const KeyRange historyRange = cdcTagHistoryRangeFor(streamId);
-	Key begin = historyRange.begin;
-	while (begin < historyRange.end) {
-		RangeResult history = co_await tr->getRange(KeyRangeRef(begin, historyRange.end), CLIENT_KNOBS->TOO_MANY);
-		for (const auto& assignment : history) {
-			currentTag = decodeCDCTagHistoryKey(assignment.key).tag;
-		}
-		if (!history.more) {
-			break;
-		}
-		begin = keyAfter(history.back().key);
-	}
-	if (!currentTag.present()) {
+	// Tag-history keys sort by their big-endian assignment version, so the final
+	// key in this stream's prefix range contains its current tag.
+	RangeResult history = co_await tr->getRange(cdcTagHistoryRangeFor(streamId), 1, Snapshot::False, Reverse::True);
+	if (history.empty()) {
 		throw client_invalid_operation();
 	}
-	co_return currentTag.get();
+	co_return decodeCDCTagHistoryKey(history.front().key).tag;
 }
 
 // TODO: Persist current per-tag ownership so registration does not reconstruct it by scanning all active streams.
