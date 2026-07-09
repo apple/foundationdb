@@ -57,8 +57,13 @@ R0. **Cheap enough to enable in production by default.** Various following
     requirements support this.
 
 R1. **Un-sampled hot path.** A non-sampled allocation incurs only one
-    thread-local load, one decrement, and one branch. No atomics, no
-    syscalls, no library calls.
+    thread-local load, one decrement, and one branch. A non-sampled free
+    (which has no per-thread counter to gate on) incurs one relaxed read of
+    a global enabled flag and one branch. That flag is written only on an
+    enabled-state change, so it stays in MESI shared state and the read is a
+    cached, uncontended atomic load (~12-15 cycles for an L2 cache hit) —
+    never a contended or uncached atomic. No syscalls, no library calls, no
+    locks on either path.
 
 R2. **Sampled CPU budget.** End-to-end overhead from sampling at 1% on
     workloads that allocate at 100K/sec must be under 0.1% CPU. Stack
@@ -95,12 +100,12 @@ R6. **Determinism in simulation.** Sampling state lives entirely in
 
 R7. **Periodic reporting.** A configurable cadence (default 10 minutes
     in production, 30 s in simulation) emits one TraceEvent per
-    qualifying site, where a site qualifies when its current live
+    qualifying site, where a site qualifies when its estimated live
     bytes exceed `MEMORY_TRACKING_REPORT_BYTES_THRESHOLD` (default
-    80 MB — see Reporting for rationale). Each site event contains raw
-    return-address frames; a single combined `addr2line` command for
-    all qualifying sites is emitted as its own event. The dump itself
-    runs in under 5 ms when ~50 sites qualify.
+    80 MB — see Reporting for rationale). Each site event carries the site's
+    raw return-address frames together with a ready-to-paste `addr2line`
+    command (the `AddrCmd` detail) covering just that site's frames. The dump
+    itself runs in under 5 ms when ~50 sites qualify.
 
 R8. **Zero-cost runtime symbolization.** All address-to-symbol mapping
     happens offline. The runtime never calls `backtrace_symbols`,
@@ -111,8 +116,10 @@ R9. **Strip-aware.** Reports work against stripped production binaries
     build already produces) is available to the offline tooling.
 
 R10. **Off-switch.** Setting the sample-inverse knob to 0 disables
-     sampling at runtime. The hot path remains a single TLS load + branch;
-     no aggregation work happens.
+     sampling at runtime. The alloc hot path remains a TLS load, decrement,
+     and branch; the free hot path remains a cached atomic-flag read and a
+     branch. No aggregation work, and in particular no lock acquisition,
+     happens on either path when disabled.
 
 R11. **Reentrancy safety.** No allocation made by the tracker itself
      (table grows, dump scratch space) re-enters the tracking path. A
@@ -158,9 +165,10 @@ Three pieces:
      are tracked and the side table disappears entirely.
 
 3. **Reporting.** A `memTrackerDump(int64_t bytesThreshold)` walks the
-   aggregation table, emits a TraceEvent per site whose live bytes
-   exceed the threshold, plus one combined `addr2line` command covering
-   all qualifying sites. Called periodically from `SystemMonitor.cpp`.
+   aggregation table, emits a TraceEvent per site whose estimated live
+   bytes exceed the threshold — each carrying the site's estimated usage,
+   raw sampled counters, and a ready-to-paste `addr2line` command for its
+   stack — plus one summary event. Called periodically from `SystemMonitor.cpp`.
 
 Hooks:
 
@@ -181,28 +189,47 @@ extern thread_local bool gInMemTracker;
 extern thread_local int  gMemTrackerCounter;
 extern thread_local size_t gForceSampleBytes;  // refreshed periodically from FlowKnobs
 
+// Written only on an enabled-state change (rare), so it stays MESI-shared and
+// reads are cached/uncontended. Lives on its own cache line.
+extern std::atomic<bool> g_memTrackerEnabled;
+
 inline void memTrackerOnAlloc(void* p, size_t n) {
     if (gInMemTracker || !p) return;
     if (--gMemTrackerCounter > 0 && n < gForceSampleBytes) return;  // un-sampled fast path
     gInMemTracker = true;
-    memTrackerSampleAlloc(p, n);            // out-of-line; reseeds counter
+    memTrackerSampleAlloc(p, n);            // out-of-line; reseeds counter, publishes g_memTrackerEnabled
     gInMemTracker = false;
 }
 
 inline void memTrackerOnFree(void* p) {
     if (gInMemTracker || !p) return;
+    if (!g_memTrackerEnabled.load(relaxed)) return;  // disabled: no lock, no table probe
     gInMemTracker = true;
     memTrackerSampleFree(p);                // no-op if p not tracked
     gInMemTracker = false;
 }
 ```
 
+A free has no per-thread sampling counter — every free is a candidate to
+debit a live entry — so it cannot be gated the way an alloc is. Gating it on
+the enabled flag instead keeps the disabled free path lock-free: without this
+gate, every hooked `delete`/`FastAllocator::release`/`ArenaBlock` teardown
+would acquire the global spinlock even with sampling off, defeating the
+off-switch. The flag is written only when the enabled state actually changes
+(published from `memTrackerSampleAlloc`, the one place that re-reads the knob),
+so its cache line stays shared across cores and the hot-path read is cheap.
+Runtime toggling has the same in-flight caveat as `MEMORY_TRACKING_LIVE_TRACKING`:
+disabling while entries are live orphans them in the table rather than debiting
+them on free.
+
 The counter is reseeded on every sample to a small uniform random
 integer with mean `INV`, so the sampling rate averages 1-in-`INV`
 without aliasing to fixed allocation patterns. When `INV == 0`
-(off-switch), the reseed parks the counter at a value large enough
-that the un-sampled fast-path branch is taken indefinitely with no
-further work.
+(off-switch), the reseed re-parks the counter at a bounded value
+(`MEMORY_TRACKER_DISABLED_RESEED`, 64K) rather than `INT_MAX`, so a parked
+thread re-enters the lock-free slow path — which re-reads the knob and can
+observe an off→on change — within a bounded number of allocations instead of
+after ~2³¹. The bail-out itself does no aggregation work and takes no lock.
 
 The counter's initial value (per-thread) is chosen so the first
 allocation a thread sees is always sampled, which guarantees that
@@ -362,23 +389,35 @@ about.
 
 #### Live-block table
 
-Hash table, key `void*`, value `{uint64_t fingerprint, uint32_t size}`
-(16 bytes/entry). All backing memory comes from `std::malloc`
+Hash table, key `void*`, value `{uint64_t fingerprint, uint64_t size,
+bool forceSampled}`. All backing memory comes from `std::malloc`
 directly: this bypasses our `operator new` hooks (we override
 `operator new`, not libc `malloc`), so the tracker's own allocations
 cannot recurse back into the tracking path. The thread-local
 `gInMemTracker` flag is the single line of defense and is sufficient
 on its own; we don't need a private slab pool.
 
+`size` is a full 64-bit `size_t`, not a narrower field: it is added to
+`liveBytes` at full width on alloc and subtracted on free, so a narrower
+field would under-debit (mod 2³²) on free for any allocation ≥ 4 GiB and
+permanently inflate the live-byte totals.
+
 Created lazily on first sample if the `MEMORY_TRACKING_LIVE_TRACKING`
 knob is set; if the knob is off, the table is never allocated and only
 the aggregation table exists.
 
-Single global `ThreadSpinLock` for v1. At 1% sampling and 100K
-alloc/sec the lock fires ~1K times/sec; uncontended spinlock acquire is
-~20 ns; total ~20 µs/sec ≈ 0.002% CPU. Per-thread sharding is deferred
-to a follow-up if profiling on a real workload shows contention (see
-Alternatives).
+Single global `ThreadSpinLock` for v1. Two things acquire it: sampled
+allocs (~1K/sec at 1% of 100K alloc/sec; uncontended acquire ~20 ns, so
+~0.002% CPU) and **every** free while live-tracking is enabled — a free
+carries no backtrace, so its only key is the pointer and it must probe the
+live table to learn whether that pointer was sampled. At 100K free/sec that
+is ~100K lock+probe/sec, the dominant cost of the enabled steady state. Two
+mitigations: (1) when the tracker is *disabled* the `g_memTrackerEnabled`
+flag short-circuits the free path before the lock, so the off-switch is
+genuinely free of lock work; (2) per-thread or pointer-sharded live tables to
+cut enabled-state contention are deferred to a follow-up, to be sized against
+the phased-rollout performance baseline before the production default is
+flipped on (see Alternatives).
 
 #### Aggregation table
 
@@ -496,16 +535,37 @@ production (knob-controlled via `MEMORY_TRACKING_REPORT_INTERVAL`);
 simulation defaults to 30 s for test exercise.
 
 Rather than logging a fixed top-N, the dump emits a `MemoryTrackerSite`
-event for every site whose live bytes exceed
+event for every site whose **estimated** live bytes exceed
 `MEMORY_TRACKING_REPORT_BYTES_THRESHOLD`. The default threshold is
 **80 MB**, chosen as roughly 1% of the target RSS for a production
-fdbserver (~8 GB). Sites smaller than that are not load-bearing for
-RSS-level investigations and would only add log volume; sites above it
-are the ones worth attributing. A pure top-N has the wrong shape for
-this — top-50 against a process that genuinely has only three
-heavyweight sites still emits 47 noise events, while a process with
-hundreds of meaningful sites silently truncates at 50. A byte
-threshold scales naturally to the actual distribution.
+fdbserver (~8 GB). Because the threshold is expressed in real bytes,
+it is compared against the estimated (sampling-corrected) live bytes,
+not the raw sampled bytes — comparing 80 MB against ~1/100th-scale
+sampled bytes would qualify almost nothing. Sites smaller than that are
+not load-bearing for RSS-level investigations and would only add log
+volume; sites above it are the ones worth attributing. A pure top-N has
+the wrong shape for this — top-50 against a process that genuinely has
+only three heavyweight sites still emits 47 noise events, while a
+process with hundreds of meaningful sites silently truncates at 50. A
+byte threshold scales naturally to the actual distribution.
+
+**Estimated usage.** The consumer should not have to do sampling math.
+Each site reports `Est*` fields — estimated *population* usage —
+alongside the raw sampled counters. The estimate weights each sampled
+block by its inverse inclusion probability at sample time: a randomly
+sampled block (1-in-`INV`) is weighted `INV`, a force-sampled block
+(captured with certainty) is weighted 1. `EstLiveBytes = Σ size×weight`
+over that site's live blocks, and likewise for cumulative and peak. The
+weight is stored per live block, so a free debits the estimate by
+exactly what its alloc credited even if `INV` changed in between.
+Weighting at sample time (rather than scaling raw totals at report time)
+also makes `EstPeakBytes` well-defined as the running max of
+`EstLiveBytes`. The raw counters remain in the event for auditing the
+estimate and gauging confidence (a site with few `SampledAllocs` is
+noisy); the `MemoryTrackerSummary` event carries an `EstimateBasis`
+caveat string. (`INV` is used as the weight rather than the exact mean
+reseed gap `INV + 0.5`; the ~`0.5/INV` bias is negligible at the
+production `INV` of 100.)
 
 **Degraded mode.** When `MEMORY_TRACKING_LIVE_TRACKING` is `false`,
 the live-block side table is not maintained, so `onFree` is a no-op
@@ -527,14 +587,21 @@ if (FLOW_KNOBS->MEMORY_TRACKING_REPORT_INTERVAL > 0 &&
 Implementation: take the spinlock; copy the aggregation table values
 into a local `std::vector<CallSite>` (backed by `std::malloc`; the
 `gInMemTracker` reentrancy flag prevents recursion into the tracker);
-release the lock; sort by `liveBytes` descending; filter to entries
-with `liveBytes >= bytesThreshold`; emit one TraceEvent per qualifying
-site with its stats and a ready-to-paste `addr2line` command for
-that site's stack:
+release the lock; sort by `estLiveBytes` descending; filter to entries
+with `estLiveBytes >= bytesThreshold`; emit one TraceEvent per qualifying
+site with its estimated and raw stats and a ready-to-paste `addr2line`
+command for that site's stack:
 
 ```
 TraceEvent("MemoryTrackerSite")
     .detail("Fingerprint", format("%016" PRIx64, s.fingerprint))
+    // Estimated population usage — sampling already applied; consume directly.
+    .detail("EstLiveBytes", s.estLiveBytes)
+    .detail("EstLiveCount", s.estLiveCount)
+    .detail("EstPeakBytes", s.estPeakBytes)
+    .detail("EstCumulativeBytes", s.estCumulativeBytes)
+    .detail("EstCumulativeAllocs", s.estCumulativeAllocs)
+    // Raw sampled counters — uninterpreted observations, for auditing/confidence.
     .detail("LiveBytes", s.liveBytes)
     .detail("LiveCount", s.liveCount)
     .detail("PeakBytes", s.peakBytes)
@@ -555,6 +622,12 @@ Also emit one summary event per dump:
 TraceEvent("MemoryTrackerSummary")
     .detail("SitesTracked", aggregationTable.size())   // unique call-site fingerprints tracked
     .detail("SitesReported", qualifying.size())        // sites that crossed the byte threshold this dump
+    // Estimated population totals (sampling-corrected).
+    .detail("EstLiveBytesTotal", estLiveBytesTotal)
+    .detail("EstLiveBlocksTotal", estLiveBlocksTotal)
+    .detail("EstCumulativeBytes", estCumulativeBytesTotal)
+    .detail("EstCumulativeAllocs", estCumulativeAllocsTotal)
+    // Raw sampled totals.
     .detail("LiveBlocks", liveMap.size())              // currently live sampled blocks
     .detail("LiveBytesTotal", liveBytesTotal)          // sum of bytes across currently live sampled blocks
     .detail("LiveBlocksTotal", liveBlocksTotal)        // running counter; equivalent to LiveBlocks above
@@ -563,16 +636,18 @@ TraceEvent("MemoryTrackerSummary")
     .detail("SamplesEmitted", samplesEmittedSinceStart)
     .detail("SampleInverse", FLOW_KNOBS->MEMORY_TRACKING_SAMPLE_INVERSE)
     .detail("ForceSampleBytes", FLOW_KNOBS->MEMORY_TRACKING_FORCE_SAMPLE_BYTES)
-    .detail("ReportBytesThreshold", bytesThreshold);
+    .detail("ReportBytesThreshold", bytesThreshold)
+    .detail("EstimateBasis", "Est*=sampled*SampleInverse; force-sampled weight 1; statistical estimate");
 ```
 
-The running totals (`LiveBytesTotal`, `LiveBlocksTotal`,
+The raw running totals (`LiveBytesTotal`, `LiveBlocksTotal`,
 `CumulativeAllocs`, `CumulativeBytes`) are maintained as `int64_t`
 globals updated under the same spinlock on every sample. They are
-*sampled* totals, not population totals; to estimate population,
-multiply by the sample inverse. (Force-sampled large allocations
-should be deducted before multiplying — easiest to track them in
-their own counter pair if this estimate matters.) `LiveBlocks` is a
+*sampled* totals, not population totals. The `Est*Total` globals
+alongside them are the population estimates — accumulated with the
+per-block weight at sample time (force-sampled blocks contribute at
+weight 1, so no separate deduction is needed), so a consumer reads them
+directly without multiplying. `LiveBlocks` is a
 snapshot of the live-block table size at dump time and is equivalent
 to `LiveBlocksTotal`; both are emitted for now and one may drop in a
 cleanup.

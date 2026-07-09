@@ -206,9 +206,9 @@ void dumpSitesForFailure(const char* tag) {
 
 class KnobOverride {
 public:
-	KnobOverride() : prevInverse(FLOW_KNOBS->MEMORY_TRACKING_SAMPLE_INVERSE) {
+	explicit KnobOverride(int inverse = 1) : prevInverse(FLOW_KNOBS->MEMORY_TRACKING_SAMPLE_INVERSE) {
 		auto* k = const_cast<FlowKnobs*>(FLOW_KNOBS);
-		k->MEMORY_TRACKING_SAMPLE_INVERSE = 1;
+		k->MEMORY_TRACKING_SAMPLE_INVERSE = inverse;
 	}
 	~KnobOverride() {
 		auto* k = const_cast<FlowKnobs*>(FLOW_KNOBS);
@@ -312,7 +312,61 @@ TEST_CASE("/flow/MemoryTracker/offSwitch") {
 	memTrackerForEachSite([&](const MemoryTrackerCallSite&) { siteCount++; });
 	ASSERT_EQ(siteCount, 0);
 
+	// The enabled flag gates the free hot path: with sampling off it must be
+	// false, so memTrackerOnFree short-circuits before taking g_mtLock.
+	ASSERT(!g_memTrackerEnabled.value.load(std::memory_order_relaxed));
+
 	k->MEMORY_TRACKING_SAMPLE_INVERSE = prev;
+	return Void();
+}
+
+TEST_CASE("/flow/MemoryTracker/enableAfterOff") {
+	// Regression test for the startup/off->on activation path. A thread that
+	// first hits the slow path while sampling is off must NOT be parked
+	// permanently: after the knob flips on, sampling has to resume without any
+	// call to memTrackerResetForTest() (which the other tests use and which
+	// would mask this bug).
+	auto* k = const_cast<FlowKnobs*>(FLOW_KNOBS);
+	int prev = k->MEMORY_TRACKING_SAMPLE_INVERSE;
+
+	// Start from a clean, disabled state.
+	k->MEMORY_TRACKING_SAMPLE_INVERSE = 0;
+	memTrackerResetForTest();
+
+	// One allocation drives the slow path, which parks the counter at
+	// MEMORY_TRACKER_DISABLED_RESEED and publishes enabled=false.
+	{
+		auto* warm = new int[4];
+		escape(warm);
+		delete[] warm;
+	}
+	ASSERT(!g_memTrackerEnabled.value.load(std::memory_order_relaxed));
+
+	// Flip sampling on WITHOUT resetting tracker state. The parked counter must
+	// drain within MEMORY_TRACKER_DISABLED_RESEED allocations and re-read the
+	// knob, at which point sampling resumes and a site is recorded.
+	k->MEMORY_TRACKING_SAMPLE_INVERSE = 1;
+
+	int siteCount = 0;
+	for (int i = 0; i < MEMORY_TRACKER_DISABLED_RESEED + 16; i++) {
+		auto* p = new int[4];
+		p[0] = i;
+		escape(p);
+		delete[] p;
+		if ((i & 0x3ff) == 0) {
+			siteCount = 0;
+			memTrackerForEachSite([&](const MemoryTrackerCallSite&) { siteCount++; });
+			if (siteCount > 0)
+				break;
+		}
+	}
+	siteCount = 0;
+	memTrackerForEachSite([&](const MemoryTrackerCallSite&) { siteCount++; });
+	ASSERT(siteCount > 0);
+	ASSERT(g_memTrackerEnabled.value.load(std::memory_order_relaxed));
+
+	k->MEMORY_TRACKING_SAMPLE_INVERSE = prev;
+	memTrackerResetForTest();
 	return Void();
 }
 
@@ -356,6 +410,57 @@ TEST_CASE("/flow/MemoryTracker/cumulativeIsMonotonic") {
 
 	ASSERT(maxCumulative >= 100);
 	ASSERT_EQ(finalLive, 0); // every alloc was paired with delete
+	return Void();
+}
+
+TEST_CASE("/flow/MemoryTracker/estimateScaling") {
+	// End-to-end estimate check. With a fixed inverse N > 1 and no force-sampled
+	// blocks, every sample at a site carries weight N, so the site's estimated
+	// usage must be *exactly* N times its raw sampled counters. This verifies
+	// the reported Est* numbers without depending on which specific allocations
+	// happened to be sampled. Runs on all platforms (no frame inspection).
+	constexpr int N = 8;
+	KnobOverride ko(N);
+	memTrackerResetForTest();
+
+	// Small allocations (16 bytes), far below the force-sample threshold, so
+	// none are force-sampled and every sampled block gets weight N.
+	std::vector<int*> ptrs;
+	ptrs.reserve(5000);
+	for (int i = 0; i < 5000; i++) {
+		auto* p = new int[4];
+		escape(p);
+		ptrs.push_back(p);
+	}
+
+	int checked = 0;
+	memTrackerForEachSite([&](const MemoryTrackerCallSite& s) {
+		if (s.forceSampledCount != 0)
+			return; // ignore any incidental force-sampled site (weight 1, not N)
+		ASSERT_EQ(s.estCumulativeBytes, s.cumulativeBytes * N);
+		ASSERT_EQ(s.estCumulativeAllocs, s.cumulativeAllocs * N);
+		ASSERT_EQ(s.estLiveBytes, s.liveBytes * N);
+		ASSERT_EQ(s.estLiveCount, s.liveCount * N);
+		ASSERT_EQ(s.estPeakBytes, s.peakBytes * N);
+		checked++;
+	});
+	ASSERT(checked > 0);
+
+	for (auto* p : ptrs)
+		delete[] p;
+	ptrs.clear();
+
+	// Symmetric debit: after freeing everything, estimated live returns to 0.
+	int64_t estLiveSum = 0;
+	int64_t rawLiveSum = 0;
+	memTrackerForEachSite([&](const MemoryTrackerCallSite& s) {
+		estLiveSum += s.estLiveBytes;
+		rawLiveSum += s.liveBytes;
+	});
+	ASSERT_EQ(rawLiveSum, 0);
+	ASSERT_EQ(estLiveSum, 0);
+
+	memTrackerResetForTest();
 	return Void();
 }
 
