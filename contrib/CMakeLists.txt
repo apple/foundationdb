@@ -1,7 +1,7 @@
 add_library(rapidjson INTERFACE)
 target_include_directories(rapidjson INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/rapidjson)
 
-find_package(fmt 8.1.1 GLOBAL)
+find_package(fmt 8.1.1 EXACT GLOBAL)
 if(NOT fmt_FOUND)
   add_subdirectory(fmt-8.1.1)
 endif()
