@@ -1903,6 +1903,18 @@ const char* MultiVersionApi::getClientVersion() {
 	return localClient->api->getClientVersion();
 }
 
+void MultiVersionApi::ignoreEnvironmentVariableNetworkOption(FDBNetworkOptions::Option option) {
+	if (FDBNetworkOptions::optionInfo.find(option) == FDBNetworkOptions::optionInfo.end()) {
+		throw invalid_option();
+	}
+
+	MutexHolder holder(lock);
+	if (envOptionsLoaded) {
+		throw invalid_option();
+	}
+	ignoredEnvOptions.insert(option);
+}
+
 void MultiVersionApi::useFutureProtocolVersion() {
 	localClient->api->useFutureProtocolVersion();
 }
@@ -2604,6 +2616,13 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 
 	for (const auto& option : FDBNetworkOptions::optionInfo) {
 		if (!option.second.hidden) {
+			{
+				MutexHolder holder(lock);
+				if (ignoredEnvOptions.contains(option.first)) {
+					continue;
+				}
+			}
+
 			std::string valueStr;
 			try {
 				if (platform::getEnvironmentVar(("FDB_NETWORK_OPTION_" + option.second.name).c_str(), valueStr)) {
