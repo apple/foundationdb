@@ -27,6 +27,7 @@
 #include "fdbserver/core/RocksDBCheckpointUtils.h"
 #include "fdbserver/core/StorageMetrics.h"
 #include "flow/genericactors.actor.h"
+#include "flow/UnitTest.h"
 
 Future<Void> readBulkFileBytes(std::string path, int64_t maxLength, std::shared_ptr<std::string> output) {
 	try {
@@ -271,11 +272,37 @@ void resetFileFolder(const std::string& folderPath) {
 	return;
 }
 
+// Defense-in-depth guard for the bulk-load sink. Before we wipe and repopulate
+// the local staging folder, verify it resolves to a location at or under the
+// (operator-supplied) local root. Parse-time validation in BulkLoadFileSet
+// already rejects ".."/absolute manifest fields; this is the last-resort check
+// right before eraseDirectoryRecursive() so that any traversal that slips
+// through cannot drive the wipe/writes to an arbitrary path (e.g. the FDB data
+// directory or TLS material). Throws rather than proceed.
+void assertLocalFolderContained(const BulkLoadFileSet& localFileSet, const UID& logId) {
+	std::string resolvedRoot = abspath(localFileSet.getRootPath());
+	std::string resolvedFolder = abspath(localFileSet.getFolder());
+	// Compare against root + separator so a sibling like "/data-evil" is not
+	// accepted for root "/data"; the exact-root case is allowed on its own.
+	std::string rootWithSep = resolvedRoot + "/";
+	bool contained = resolvedFolder == resolvedRoot ||
+	                 (resolvedFolder.size() >= rootWithSep.size() &&
+	                  resolvedFolder.compare(0, rootWithSep.size(), rootWithSep) == 0);
+	if (!contained) {
+		TraceEvent(SevError, "BulkLoadLocalFolderEscapesRoot", logId)
+		    .detail("ResolvedRoot", resolvedRoot)
+		    .detail("ResolvedFolder", resolvedFolder)
+		    .detail("FileSet", localFileSet.toString());
+		throw bulkload_fileset_invalid_filepath();
+	}
+}
+
 Future<Void> bulkLoadTransportCP_impl(BulkLoadFileSet fromRemoteFileSet,
                                       BulkLoadFileSet toLocalFileSet,
                                       size_t fileBytesMax,
                                       UID logId) {
 	// Clear existing local folder
+	assertLocalFolderContained(toLocalFileSet, logId);
 	resetFileFolder(abspath(toLocalFileSet.getFolder()));
 	// Copy data file
 	co_await copyBulkFile(
@@ -294,6 +321,7 @@ Future<Void> bulkLoadTransportBlobstore_impl(BulkLoadFileSet fromRemoteFileSet,
                                              size_t fileBytesMax,
                                              UID logId) {
 	// Clear existing local folder
+	assertLocalFolderContained(toLocalFileSet, logId);
 	resetFileFolder(abspath(toLocalFileSet.getFolder()));
 	TraceEvent(SevDebug, "BulkLoadBlobstoreTransportStart", logId)
 	    .detail("FromRemote", fromRemoteFileSet.toString())
@@ -641,4 +669,26 @@ Future<BulkLoadManifestSet> getBulkLoadManifestMetadataFromEntry(
 		ASSERT(manifests.addManifest(manifest));
 	}
 	co_return manifests;
+}
+
+TEST_CASE("/fdbserver/BulkLoad/bulkLoadPathIsContained") {
+	// Safe: relative paths, nested dirs, empty, dotfiles, and names that merely
+	// contain dots without a standalone ".." component.
+	ASSERT(bulkLoadPathIsContained(""));
+	ASSERT(bulkLoadPathIsContained("data.sst"));
+	ASSERT(bulkLoadPathIsContained("a/b/c"));
+	ASSERT(bulkLoadPathIsContained("5676202155931feac1bbd501d491170b/0/data.sst"));
+	ASSERT(bulkLoadPathIsContained("a/.hidden/b"));
+	ASSERT(bulkLoadPathIsContained("a..b/c"));
+	ASSERT(bulkLoadPathIsContained("..."));
+
+	// Unsafe: absolute path, or a ".." component anywhere in the path.
+	ASSERT(!bulkLoadPathIsContained("/var/lib/foundationdb"));
+	ASSERT(!bulkLoadPathIsContained(".."));
+	ASSERT(!bulkLoadPathIsContained("../x"));
+	ASSERT(!bulkLoadPathIsContained("../../../../var/lib/foundationdb"));
+	ASSERT(!bulkLoadPathIsContained("a/../../etc"));
+	ASSERT(!bulkLoadPathIsContained("a/b/.."));
+
+	return Void();
 }
