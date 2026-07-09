@@ -32,7 +32,12 @@ Future<bool> checkMetadataEncodingCommandActor(Database cx, std::vector<StringRe
 	int64_t serverKeysOld = 0, serverKeysNew = 0;
 	int64_t dataMovesCount = 0;
 
-	// Scan keyServers
+	// Scan keyServers.
+	// Empty-value entries are KRM boundary sentinels — they mark the
+	// edges between adjacent same-valued ranges and do not carry any
+	// keyServers assignment. Skip them; counting them as either format
+	// leaves a permanent residual that makes the FORWARD COMPLETE
+	// terminal state unreachable on any real cluster.
 	{
 		Key begin = keyServersPrefix;
 		Key end = keyServersEnd;
@@ -46,7 +51,6 @@ Future<bool> checkMetadataEncodingCommandActor(Database cx, std::vector<StringRe
 				RangeResult result = co_await tr.getRange(KeyRangeRef(begin, end), 1000);
 				for (const auto& kv : result) {
 					if (kv.value.empty()) {
-						keyServersOld++;
 						continue;
 					}
 					BinaryReader rd(kv.value, IncludeVersion());
@@ -68,7 +72,15 @@ Future<bool> checkMetadataEncodingCommandActor(Database cx, std::vector<StringRe
 		}
 	}
 
-	// Scan serverKeys
+	// Scan serverKeys.
+	// Uses classifiers from SystemData.h to distinguish format-neutral
+	// entries (empty sentinels + serverKeysFalse "not assigned") from
+	// old-format assignments (serverKeysTrue / serverKeysTrueEmptyRange)
+	// from new-format assignments (any other non-empty value: a
+	// UID-encoded dataMoveId). Previously all three category buckets
+	// were merged into "old", making the FORWARD COMPLETE terminal
+	// state unreachable — any running cluster always has serverKeysFalse
+	// entries as range-boundary markers around assigned ranges.
 	{
 		Key begin = serverKeysPrefix;
 		Key end = strinc(serverKeysPrefix);
@@ -81,8 +93,10 @@ Future<bool> checkMetadataEncodingCommandActor(Database cx, std::vector<StringRe
 			try {
 				RangeResult result = co_await tr.getRange(KeyRangeRef(begin, end), 1000);
 				for (const auto& kv : result) {
-					if (kv.value == serverKeysTrue || kv.value == serverKeysFalse ||
-					    kv.value == serverKeysTrueEmptyRange) {
+					if (isServerKeysUnassigned(kv.value)) {
+						continue;
+					}
+					if (isServerKeysOldFormatAssigned(kv.value)) {
 						serverKeysOld++;
 					} else {
 						serverKeysNew++;

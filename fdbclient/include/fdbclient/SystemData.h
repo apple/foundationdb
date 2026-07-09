@@ -181,6 +181,17 @@ DataMoveMetaData decodeDataMoveValue(const ValueRef& value);
 extern const KeyRangeRef serverKeysRange;
 extern const KeyRef serverKeysPrefix;
 extern const ValueRef serverKeysTrue, serverKeysTrueEmptyRange, serverKeysFalse;
+// Returns true iff `value` is a format-neutral serverKeys entry — i.e.
+// serverKeysFalse ("this server does not own this range") or the empty
+// value that KRM uses as a range-boundary sentinel. Both are written by
+// both the tag-based (finishMoveKeys) and the shard-encoded
+// (finishMoveShards) paths, so they carry no format signal.
+bool isServerKeysUnassigned(const ValueRef& value);
+// Returns true iff `value` is an old-format (tag-based) serverKeys
+// "assigned" marker. Excludes serverKeysFalse and empty (see
+// isServerKeysUnassigned). New-format entries encode a UID and won't
+// equal these constants.
+bool isServerKeysOldFormatAssigned(const ValueRef& value);
 UID newDataMoveId(const uint64_t physicalShardId,
                   AssignEmptyRange assignEmptyRange,
                   const DataMoveType type,
