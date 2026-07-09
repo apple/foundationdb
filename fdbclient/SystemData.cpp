@@ -1936,7 +1936,7 @@ TEST_CASE("/SystemData/NativeCDC") {
 	ASSERT(cdcTagHistoryRangeFor(streamId).contains(tagHistoryKey));
 
 	const Value serializedTagHistory = ObjectWriter::toValue(decodedTagHistory, Unversioned());
-	const CDCTagHistoryEntry deserializedTagHistory =
+	const auto deserializedTagHistory =
 	    ObjectReader::fromStringRef<CDCTagHistoryEntry>(serializedTagHistory, Unversioned());
 	ASSERT_EQ(deserializedTagHistory.streamId, streamId);
 	ASSERT_EQ(deserializedTagHistory.version, minVersion);

@@ -32,7 +32,7 @@ TEST_CASE("/NativeCDC/InternalInterfaceFlatBufferRoundTrip") {
 	worker.cdcProxy = RequestStream<InitializeCDCProxyRequest>(Endpoint({ cdcAddress }, UID(3, 4)));
 
 	const Standalone<StringRef> serializedWorker = ObjectWriter::toValue(worker, Unversioned());
-	const WorkerInterface decodedWorker = ObjectReader::fromStringRef<WorkerInterface>(serializedWorker, Unversioned());
+	const auto decodedWorker = ObjectReader::fromStringRef<WorkerInterface>(serializedWorker, Unversioned());
 	ASSERT_EQ(decodedWorker.tLog.getEndpoint().token, worker.tLog.getEndpoint().token);
 	ASSERT_EQ(decodedWorker.cdcProxy.getEndpoint().token, worker.cdcProxy.getEndpoint().token);
 	ASSERT_EQ(decodedWorker.cdcProxy.getEndpoint().getPrimaryAddress(), cdcAddress);
@@ -49,8 +49,7 @@ TEST_CASE("/NativeCDC/InternalInterfaceFlatBufferRoundTrip") {
 	request.recoveryStalled = false;
 
 	const Standalone<StringRef> serializedRequest = ObjectWriter::toValue(request, Unversioned());
-	const RegisterMasterRequest decodedRequest =
-	    ObjectReader::fromStringRef<RegisterMasterRequest>(serializedRequest, Unversioned());
+	const auto decodedRequest = ObjectReader::fromStringRef<RegisterMasterRequest>(serializedRequest, Unversioned());
 	ASSERT_EQ(decodedRequest.id, request.id);
 	ASSERT_EQ(decodedRequest.cdcProxies.size(), 1);
 	ASSERT_EQ(decodedRequest.cdcProxies.front().id(), cdcProxy.id());
@@ -69,8 +68,7 @@ TEST_CASE("/NativeCDC/TLogPeekRequestFlatBufferRoundTrip") {
 	                        4096);
 
 	const Standalone<StringRef> serializedRequest = ObjectWriter::toValue(request, Unversioned());
-	const TLogPeekRequest decodedRequest =
-	    ObjectReader::fromStringRef<TLogPeekRequest>(serializedRequest, Unversioned());
+	const auto decodedRequest = ObjectReader::fromStringRef<TLogPeekRequest>(serializedRequest, Unversioned());
 	ASSERT_EQ(decodedRequest.begin, request.begin);
 	ASSERT_EQ(decodedRequest.tag, request.tag);
 	ASSERT_EQ(decodedRequest.end, request.end);
