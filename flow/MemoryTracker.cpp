@@ -312,8 +312,8 @@ void memTrackerSampleAlloc(void* p, std::size_t n) {
 		auto stale = g_liveMap->find(key);
 		if (stale != g_liveMap->end()) {
 			const LiveEntry& old = stale->second;
-			std::int64_t oldBytes = static_cast<std::int64_t>(old.size);
-			std::int64_t oldEst = oldBytes * old.weight;
+			auto oldBytes = static_cast<std::int64_t>(old.size);
+			auto oldEst = oldBytes * old.weight;
 			if (g_aggMap) {
 				auto oldSite = g_aggMap->find(old.fingerprint);
 				if (oldSite != g_aggMap->end()) {
