@@ -26,9 +26,11 @@
 #include <assert.h>
 #include <string.h>
 
+#include <algorithm>
 #include <condition_variable>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
@@ -1970,41 +1972,243 @@ TEST_CASE("fdb_database_get_server_protocol") {
 	fdb_future_destroy(protocolFuture);
 }
 
-TEST_CASE("CDC metadata and synthetic consumer cursor") {
-	// Listing remains available when CDC admission is disabled, so this
-	// exercises the C result conversion without requiring a registered stream.
-	FDBFuture* listFuture = fdb_database_list_cdc_streams(db);
-	REQUIRE(listFuture != nullptr);
-	fdb_check(fdb_future_block_until_ready(listFuture));
+TEST_CASE("CDC C binding end-to-end") {
+	using FuturePtr = std::unique_ptr<FDBFuture, decltype(&fdb_future_destroy)>;
+	using ConsumerPtr = std::unique_ptr<FDBCdcConsumer, decltype(&fdb_cdc_consumer_destroy)>;
 
+	auto ownFuture = [](FDBFuture* future) { return FuturePtr(future, &fdb_future_destroy); };
+	auto ownConsumer = [](FDBCdcConsumer* consumer) { return ConsumerPtr(consumer, &fdb_cdc_consumer_destroy); };
+	auto waitForSuccess = [](FDBFuture* future) {
+		fdb_check(fdb_future_block_until_ready(future));
+		fdb_check(fdb_future_get_error(future));
+	};
+	auto commitSetValues = [](std::vector<std::pair<std::string, std::string>> const& values) {
+		fdb::Transaction tr(db);
+		while (true) {
+			for (auto const& [key, value] : values) {
+				tr.set(key, value);
+			}
+			fdb::EmptyFuture commitFuture = tr.commit();
+			fdb_error_t err = wait_future(commitFuture);
+			if (err) {
+				fdb::EmptyFuture onErrorFuture = tr.on_error(err);
+				fdb_check(wait_future(onErrorFuture));
+				continue;
+			}
+			int64_t committedVersion;
+			fdb_check(tr.get_committed_version(&committedVersion));
+			return committedVersion;
+		}
+	};
+	auto commitClearRange = [](std::string const& begin, std::string const& end) {
+		fdb::Transaction tr(db);
+		while (true) {
+			tr.clear_range(begin, end);
+			fdb::EmptyFuture commitFuture = tr.commit();
+			fdb_error_t err = wait_future(commitFuture);
+			if (err) {
+				fdb::EmptyFuture onErrorFuture = tr.on_error(err);
+				fdb_check(wait_future(onErrorFuture));
+				continue;
+			}
+			int64_t committedVersion;
+			fdb_check(tr.get_committed_version(&committedVersion));
+			return committedVersion;
+		}
+	};
+
+	struct CopiedCdcMutation {
+		uint8_t type;
+		std::string param1;
+		std::string param2;
+	};
+	struct CopiedCdcReply {
+		int64_t version;
+		int64_t lastConsumedVersion;
+		std::vector<CopiedCdcMutation> mutations;
+	};
+
+	auto consumeThroughVersion = [&](FDBCdcConsumer* consumer, int64_t targetVersion) {
+		while (true) {
+			auto future = ownFuture(fdb_cdc_consumer_consume(consumer));
+			REQUIRE(future != nullptr);
+			waitForSuccess(future.get());
+
+			FDBCdcVersionedMutations const* groups = nullptr;
+			int groupCount = -1;
+			int64_t lastConsumedVersion = -1;
+			fdb_check(fdb_future_get_cdc_versioned_mutations(future.get(), &groups, &groupCount, &lastConsumedVersion));
+			CHECK(groupCount >= 0);
+
+			FDBCdcVersionedMutations const* targetGroup = nullptr;
+			for (int i = 0; i < groupCount; ++i) {
+				if (groups[i].version == targetVersion) {
+					targetGroup = &groups[i];
+					break;
+				}
+			}
+			if (targetGroup == nullptr && lastConsumedVersion < targetVersion) {
+				auto acknowledgeFuture = ownFuture(fdb_cdc_consumer_acknowledge(consumer));
+				REQUIRE(acknowledgeFuture != nullptr);
+				waitForSuccess(acknowledgeFuture.get());
+				continue;
+			}
+
+			REQUIRE(targetGroup != nullptr);
+			CopiedCdcReply result{ targetGroup->version, lastConsumedVersion, {} };
+			result.mutations.reserve(targetGroup->mutation_count);
+			for (int i = 0; i < targetGroup->mutation_count; ++i) {
+				auto const& mutation = targetGroup->mutations[i];
+				result.mutations.push_back(CopiedCdcMutation{
+				    mutation.type,
+				    std::string(reinterpret_cast<char const*>(mutation.param1), mutation.param1_length),
+				    std::string(reinterpret_cast<char const*>(mutation.param2), mutation.param2_length) });
+			}
+
+			fdb_future_release_memory(future.get());
+			CHECK(fdb_future_get_cdc_versioned_mutations(future.get(), &groups, &groupCount, &lastConsumedVersion) ==
+			      1102); // future_released
+			return result;
+		}
+	};
+
+	const std::string streamName = key("cdc-stream");
+	const std::string rangeBegin = key("cdc-data/");
+	const std::string rangeEnd = strinc_str(rangeBegin);
+	const std::string firstKey = rangeBegin + "first";
+	const std::string secondKey = rangeBegin + "second";
+	const std::string outsideKey = key("outside-cdc-range");
+	const std::string firstValue = "first-value";
+	const std::string secondValue = "second-value";
+
+	// Clear test data before registration so CDC sees only mutations below.
+	insert_data(db, std::map<std::string, std::string>{});
+
+	// CDC calls must retain their input bytes after the C function returns.
+	std::string nameInput = streamName;
+	std::string beginInput = rangeBegin;
+	std::string endInput = rangeEnd;
+	auto registerFuture =
+	    ownFuture(fdb_database_register_cdc_stream(db,
+	                                               reinterpret_cast<uint8_t const*>(nameInput.data()),
+	                                               nameInput.size(),
+	                                               reinterpret_cast<uint8_t const*>(beginInput.data()),
+	                                               beginInput.size(),
+	                                               reinterpret_cast<uint8_t const*>(endInput.data()),
+	                                               endInput.size()));
+	REQUIRE(registerFuture != nullptr);
+	std::fill(nameInput.begin(), nameInput.end(), 'x');
+	std::fill(beginInput.begin(), beginInput.end(), 'x');
+	std::fill(endInput.begin(), endInput.end(), 'x');
+	waitForSuccess(registerFuture.get());
+
+	uint64_t streamId = 0;
+	fdb_check(fdb_future_get_uint64(registerFuture.get(), &streamId));
+	REQUIRE(streamId != 0);
+
+	auto listFuture = ownFuture(fdb_database_list_cdc_streams(db));
+	REQUIRE(listFuture != nullptr);
+	waitForSuccess(listFuture.get());
 	FDBCdcStreamInfo const* streams = nullptr;
 	int streamCount = -1;
-	fdb_check(fdb_future_get_cdc_stream_info_array(listFuture, &streams, &streamCount));
-	CHECK(streamCount >= 0);
-	if (streamCount > 0) {
-		CHECK(streams != nullptr);
+	fdb_check(fdb_future_get_cdc_stream_info_array(listFuture.get(), &streams, &streamCount));
+	bool foundStream = false;
+	for (int i = 0; i < streamCount; ++i) {
+		if (extractString(streams[i].name) != streamName) {
+			continue;
+		}
+		foundStream = true;
+		CHECK(streams[i].stream_id == streamId);
+		CHECK(std::string(reinterpret_cast<char const*>(streams[i].key_range.begin_key),
+		                  streams[i].key_range.begin_key_length) == rangeBegin);
+		CHECK(std::string(reinterpret_cast<char const*>(streams[i].key_range.end_key),
+		                  streams[i].key_range.end_key_length) == rangeEnd);
+		CHECK(streams[i].min_version >= 0);
 	}
-	fdb_future_destroy(listFuture);
+	REQUIRE(foundStream);
+	fdb_future_release_memory(listFuture.get());
+	CHECK(fdb_future_get_cdc_stream_info_array(listFuture.get(), &streams, &streamCount) == 1102); // future_released
 
-	// Resuming only reconstructs a cursor-bearing client handle. It does not
-	// contact CDC infrastructure until consume or acknowledge is requested.
-	constexpr uint64_t streamId = 0x0102030405060708ULL;
-	constexpr int64_t lastConsumedVersion = 123456789;
-	FDBFuture* resumeFuture = fdb_database_resume_cdc_consumer(db, streamId, lastConsumedVersion);
-	REQUIRE(resumeFuture != nullptr);
-	fdb_check(fdb_future_block_until_ready(resumeFuture));
-
-	FDBCdcConsumer* consumer = nullptr;
-	fdb_check(fdb_future_get_cdc_consumer(resumeFuture, &consumer));
-	fdb_future_destroy(resumeFuture);
+	auto createFuture = ownFuture(
+	    fdb_database_create_cdc_consumer(db, reinterpret_cast<uint8_t const*>(streamName.data()), streamName.size()));
+	REQUIRE(createFuture != nullptr);
+	waitForSuccess(createFuture.get());
+	FDBCdcConsumer* rawConsumer = nullptr;
+	fdb_check(fdb_future_get_cdc_consumer(createFuture.get(), &rawConsumer));
+	auto consumer = ownConsumer(rawConsumer);
+	createFuture.reset();
 	REQUIRE(consumer != nullptr);
 
-	uint64_t outStreamId = 0;
-	int64_t outLastConsumedVersion = 0;
-	fdb_check(fdb_cdc_consumer_get_position(consumer, &outStreamId, &outLastConsumedVersion));
-	CHECK(outStreamId == streamId);
-	CHECK(outLastConsumedVersion == lastConsumedVersion);
-	fdb_cdc_consumer_destroy(consumer);
+	uint64_t positionStreamId = 0;
+	int64_t positionVersion = 0;
+	fdb_check(fdb_cdc_consumer_get_position(consumer.get(), &positionStreamId, &positionVersion));
+	CHECK(positionStreamId == streamId);
+	CHECK(positionVersion == -1);
+
+	const int64_t setVersion =
+	    commitSetValues({ { firstKey, firstValue }, { secondKey, secondValue }, { outsideKey, "outside-value" } });
+	auto setReply = consumeThroughVersion(consumer.get(), setVersion);
+	CHECK(setReply.version == setVersion);
+	CHECK(setReply.lastConsumedVersion >= setVersion);
+	REQUIRE(setReply.mutations.size() == 2);
+	std::map<std::string, std::string> expectedSets{ { firstKey, firstValue }, { secondKey, secondValue } };
+	for (auto const& mutation : setReply.mutations) {
+		CHECK(mutation.type == FDB_CDC_MUTATION_TYPE_SET_VALUE);
+		auto expected = expectedSets.find(mutation.param1);
+		REQUIRE(expected != expectedSets.end());
+		CHECK(mutation.param2 == expected->second);
+		expectedSets.erase(expected);
+	}
+	CHECK(expectedSets.empty());
+
+	auto acknowledgeFuture = ownFuture(fdb_cdc_consumer_acknowledge(consumer.get()));
+	REQUIRE(acknowledgeFuture != nullptr);
+	waitForSuccess(acknowledgeFuture.get());
+	fdb_check(fdb_cdc_consumer_get_position(consumer.get(), &positionStreamId, &positionVersion));
+	CHECK(positionStreamId == streamId);
+	CHECK(positionVersion == setReply.lastConsumedVersion);
+	consumer.reset();
+
+	auto resumeFuture = ownFuture(fdb_database_resume_cdc_consumer(db, positionStreamId, positionVersion));
+	REQUIRE(resumeFuture != nullptr);
+	waitForSuccess(resumeFuture.get());
+	FDBCdcConsumer* rawResumedConsumer = nullptr;
+	fdb_check(fdb_future_get_cdc_consumer(resumeFuture.get(), &rawResumedConsumer));
+	auto resumedConsumer = ownConsumer(rawResumedConsumer);
+	resumeFuture.reset();
+	REQUIRE(resumedConsumer != nullptr);
+	fdb_check(fdb_cdc_consumer_get_position(resumedConsumer.get(), &positionStreamId, &positionVersion));
+	CHECK(positionStreamId == streamId);
+	CHECK(positionVersion == setReply.lastConsumedVersion);
+
+	const std::string clearEnd = strinc_str(firstKey);
+	const int64_t clearVersion = commitClearRange(firstKey, clearEnd);
+	auto clearReply = consumeThroughVersion(resumedConsumer.get(), clearVersion);
+	CHECK(clearReply.version == clearVersion);
+	REQUIRE(clearReply.mutations.size() == 1);
+	CHECK(clearReply.mutations[0].type == FDB_CDC_MUTATION_TYPE_CLEAR_RANGE);
+	CHECK(clearReply.mutations[0].param1 == firstKey);
+	CHECK(clearReply.mutations[0].param2 == clearEnd);
+
+	auto resumedAcknowledgeFuture = ownFuture(fdb_cdc_consumer_acknowledge(resumedConsumer.get()));
+	REQUIRE(resumedAcknowledgeFuture != nullptr);
+	waitForSuccess(resumedAcknowledgeFuture.get());
+	resumedConsumer.reset();
+
+	auto removeFuture = ownFuture(
+	    fdb_database_remove_cdc_stream(db, reinterpret_cast<uint8_t const*>(streamName.data()), streamName.size()));
+	REQUIRE(removeFuture != nullptr);
+	waitForSuccess(removeFuture.get());
+
+	auto removedListFuture = ownFuture(fdb_database_list_cdc_streams(db));
+	REQUIRE(removedListFuture != nullptr);
+	waitForSuccess(removedListFuture.get());
+	streams = nullptr;
+	streamCount = -1;
+	fdb_check(fdb_future_get_cdc_stream_info_array(removedListFuture.get(), &streams, &streamCount));
+	for (int i = 0; i < streamCount; ++i) {
+		CHECK(extractString(streams[i].name) != streamName);
+	}
 }
 
 TEST_CASE("fdb_transaction_watch read_your_writes_disable") {
