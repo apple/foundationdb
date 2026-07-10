@@ -556,6 +556,8 @@ elseif(NOT WIN32 AND NOT APPLE) # Linux Only
     --api-test-dir ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
     ${SHIM_LIB_TEST_EXTRA_OPTIONS}
     )
+  set_property(TEST fdb_c_shim_library_tests APPEND PROPERTY ENVIRONMENT
+    "FDB_KNOB_enable_native_cdc=true")
 
 endif() # End Linux only
 
