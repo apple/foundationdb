@@ -97,11 +97,10 @@ R5. **Determinism in simulation.** Sampling state lives entirely in
     `g_network->now()`. Identical workload + seed must produce identical
     aggregate counts.
 
-R6. **Periodic reporting.** A configurable cadence (default 10 minutes
-    in production, 30 s in simulation) emits one TraceEvent per
+R6. **Periodic reporting.** A configurable cadence emits one TraceEvent per
     qualifying site, where a site qualifies when its estimated live
-    bytes exceed `MEMORY_TRACKING_REPORT_BYTES_THRESHOLD` (default
-    80 MB — see Reporting for rationale). Each site event carries the site's
+    bytes exceed `MEMORY_TRACKING_REPORT_BYTES_THRESHOLD` (see Reporting
+    for rationale). Each site event carries the site's
     raw return-address frames together with a ready-to-paste `addr2line`
     command (the `AddrCmd` detail) covering just that site's frames. The dump
     itself runs in under 5 ms when ~50 sites qualify.
