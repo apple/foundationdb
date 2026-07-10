@@ -109,7 +109,7 @@ Continuously monitors each shard. When metrics exceed bounds:
 
 ---
 
-## DDQueue / DDRelocationQueue -- [`DDRelocationQueue.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/datadistributor/DDRelocationQueue.actor.cpp)
+## DDQueue / DDRelocationQueue -- [`DDRelocationQueue.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/datadistributor/DDRelocationQueue.cpp)
 
 ### Key Members (`DDRelocationQueue.h:125+`)
 
@@ -264,7 +264,7 @@ MoveKeys protocol:
 | [`fdbserver/datadistributor/DataDistribution.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/datadistributor/DataDistribution.cpp) | Main DD actor, initialization |
 | [`fdbserver/datadistributor/DDTeamCollection.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/datadistributor/DDTeamCollection.actor.cpp) | Team building, health monitoring, SS recruitment |
 | [`fdbserver/datadistributor/DDShardTracker.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/datadistributor/DDShardTracker.cpp) | Shard metrics, split/merge decisions |
-| [`fdbserver/datadistributor/DDRelocationQueue.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/datadistributor/DDRelocationQueue.actor.cpp) | Relocation queue, prioritization, execution |
+| [`fdbserver/datadistributor/DDRelocationQueue.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/datadistributor/DDRelocationQueue.cpp) | Relocation queue, prioritization, execution |
 | [`fdbserver/core/MoveKeys.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/MoveKeys.cpp) | Atomic shard transfer protocol |
 | [`fdbserver/core/DataMovement.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/DataMovement.cpp) | Data move metadata |
 | [`fdbserver/datadistributor/ShardsAffectedByTeamFailure.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/datadistributor/ShardsAffectedByTeamFailure.cpp) | Impact analysis for team failures |

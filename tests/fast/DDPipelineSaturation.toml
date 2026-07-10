@@ -2,7 +2,7 @@
 # (DD_MAX_PIPELINE_MOVES). Forces many small shards and then a burst of
 # failure-recovery relocations (machine kills) so that pipelineSize()
 # exceeds the limit, tripping the "DD Pipeline Full" code probe in
-# DDRelocationQueue.actor.cpp. The limit is pinned to 20 -- the realistic
+# DDRelocationQueue.cpp. The limit is pinned to 20 -- the realistic
 # low end of the knob's range -- rather than an unrealistically small value
 # that would destabilize unrelated simulations.
 
