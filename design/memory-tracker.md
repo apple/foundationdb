@@ -993,14 +993,13 @@ symbol resolution works.
 The "did the tracker actually capture each allocation path?" check is
 fully automated using sentinel functions and direct introspection of
 the aggregation table — no log parsing, no `addr2line`, no eyeballing.
-
-Add an introspection API:
+It uses the `memTrackerForEachSite` introspection API:
 
 ```cpp
 void memTrackerForEachSite(std::function<void(const CallSite&)>);
 ```
 
-The unit test:
+The `coverage` test (with the `*Accounting` tests) does this:
 
 1. Sets `MEMORY_TRACKING_SAMPLE_INVERSE = 1` (sample everything) and
    resets the aggregation table.
