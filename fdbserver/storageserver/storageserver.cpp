@@ -818,6 +818,8 @@ public:
 	Version version;
 	Future<Version> watch_impl;
 	Promise<Version> versionPromise;
+	// Number of watchValueSendReply coroutines still serving this shared watch.
+	int watchReplyCount{ 0 };
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
 
@@ -2393,13 +2395,18 @@ Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext parent,
 	return watch;
 }
 
-void checkCancelWatchImpl(StorageServer* data, WatchValueRequest req) {
-	Reference<ServerWatchMetadata> metadata = data->getWatchMetadata(req.key.contents());
-	// The response race/timeout path may retain one copy of resp while the winning branch runs. This reply
-	// owns the parameter plus at most that race copy; any other reply adds a third reference.
-	if (metadata.isValid() && metadata->versionPromise.getFutureReferenceCount() <= 2) {
-		// last watch timed out so cancel watch_impl and delete key from the map
-		data->deleteWatchMetadata(req.key.contents());
+void finishWatchValueReply(StorageServer* data, Reference<ServerWatchMetadata> metadata) {
+	ASSERT_GT(metadata->watchReplyCount, 0);
+	if (--metadata->watchReplyCount != 0) {
+		return;
+	}
+
+	// Coroutine race/timeout helpers retain transient copies of the response future, so its reference count does
+	// not identify the last live reply. Only remove the entry if this is still the metadata currently mapped for
+	// the key; a newer watch may already have replaced it.
+	Reference<ServerWatchMetadata> currentMetadata = data->getWatchMetadata(metadata->key.contents());
+	if (currentMetadata.getPtr() == metadata.getPtr()) {
+		data->deleteWatchMetadata(metadata->key.contents());
 		metadata->watch_impl.cancel();
 	}
 }
@@ -2407,10 +2414,11 @@ void checkCancelWatchImpl(StorageServer* data, WatchValueRequest req) {
 Future<Void> watchValueSendReply(coro::FrameSizeRecorder,
                                  StorageServer* data,
                                  WatchValueRequest req,
-                                 Future<Version> resp,
+                                 Reference<ServerWatchMetadata> metadata,
                                  SpanContext spanContext) {
 	Span span("SS:watchValue"_loc, spanContext);
 	double startTime = now();
+	Future<Version> resp = metadata->versionPromise.getFuture();
 	++data->counters.watchQueries;
 	++data->numWatches;
 	data->watchBytes += WATCH_OVERHEAD_WATCHQ;
@@ -2431,7 +2439,7 @@ Future<Void> watchValueSendReply(coro::FrameSizeRecorder,
 
 					// fire watch
 					req.reply.send(WatchValueReply{ ver });
-					checkCancelWatchImpl(data, req);
+					finishWatchValueReply(data, metadata);
 					--data->numWatches;
 					data->watchBytes -= WATCH_OVERHEAD_WATCHQ;
 					co_return;
@@ -2452,7 +2460,7 @@ Future<Void> watchValueSendReply(coro::FrameSizeRecorder,
 					// watch timed out
 					data->sendErrorWithPenalty(req.reply, timed_out(), data->getPenalty());
 				}
-				checkCancelWatchImpl(data, req);
+				finishWatchValueReply(data, metadata);
 				--data->numWatches;
 				data->watchBytes -= WATCH_OVERHEAD_WATCHQ;
 				co_return;
@@ -2462,7 +2470,7 @@ Future<Void> watchValueSendReply(coro::FrameSizeRecorder,
 			}
 		} catch (Error& e) {
 			data->watchBytes -= WATCH_OVERHEAD_WATCHQ;
-			checkCancelWatchImpl(data, req);
+			finishWatchValueReply(data, metadata);
 			--data->numWatches;
 
 			if (!canReplyWith(e))
@@ -2475,15 +2483,23 @@ Future<Void> watchValueSendReply(coro::FrameSizeRecorder,
 
 Future<Void> watchValueSendReply(StorageServer* data,
                                  WatchValueRequest req,
-                                 Future<Version> resp,
+                                 Reference<ServerWatchMetadata> metadata,
                                  SpanContext spanContext) {
 	auto watch = watchValueSendReply(coro::FrameSizeRecorder{ &WATCH_OVERHEAD_WATCHQ },
 	                                 data,
 	                                 std::move(req),
-	                                 std::move(resp),
+	                                 std::move(metadata),
 	                                 std::move(spanContext));
 	ASSERT(WATCH_OVERHEAD_WATCHQ > 0);
 	return watch;
+}
+
+void addWatchValueReply(StorageServer* data,
+                        WatchValueRequest req,
+                        Reference<ServerWatchMetadata> metadata,
+                        SpanContext spanContext) {
+	++metadata->watchReplyCount;
+	data->actors.add(watchValueSendReply(data, std::move(req), std::move(metadata), std::move(spanContext)));
 }
 
 // Finds a checkpoint.
@@ -11670,7 +11686,7 @@ Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream<Watch
 			metadata = makeReference<ServerWatchMetadata>(req.key, req.value, req.version, req.tags, req.debugID);
 			KeyRef key = self->setWatchMetadata(metadata);
 			metadata->watch_impl = forward(watchWaitForValueChange(self, span.context, key), metadata->versionPromise);
-			self->actors.add(watchValueSendReply(self, req, metadata->versionPromise.getFuture(), span.context));
+			addWatchValueReply(self, req, metadata, span.context);
 		}
 		// case 2: there is a watch in the map and it has the same value so just update version
 		else if (metadata->value == req.value) {
@@ -11692,7 +11708,7 @@ Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream<Watch
 				}
 			}
 
-			self->actors.add(watchValueSendReply(self, req, metadata->versionPromise.getFuture(), span.context));
+			addWatchValueReply(self, req, metadata, span.context);
 		}
 		// case 3: version in map has a lower version so trigger watch and create a new entry in map
 		else if (req.version > metadata->version) {
@@ -11704,7 +11720,7 @@ Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream<Watch
 			KeyRef key = self->setWatchMetadata(metadata);
 			metadata->watch_impl = forward(watchWaitForValueChange(self, span.context, key), metadata->versionPromise);
 
-			self->actors.add(watchValueSendReply(self, req, metadata->versionPromise.getFuture(), span.context));
+			addWatchValueReply(self, req, metadata, span.context);
 		}
 		// case 4: version in the map is higher so immediately trigger watch
 		else if (req.version < metadata->version) {
@@ -11737,8 +11753,7 @@ Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream<Watch
 						KeyRef key = self->setWatchMetadata(metadata);
 						metadata->watch_impl =
 						    forward(watchWaitForValueChange(self, span.context, key), metadata->versionPromise);
-						self->actors.add(
-						    watchValueSendReply(self, req, metadata->versionPromise.getFuture(), span.context));
+						addWatchValueReply(self, req, metadata, span.context);
 					} else {
 						req.reply.send(WatchValueReply{ latest });
 					}
@@ -12085,6 +12100,9 @@ Future<Void> storageServerCore(StorageServer* self, StorageServerInterface ssi) 
 	Future<Void> doUpdate = Void();
 	bool updateReceived = false; // true iff the current update() actor assigned to doUpdate has already
 	                             // received an update from the tlog
+	// Request dispatch now runs in dedicated serving coroutines. Unlike the old multiplexing choose, those
+	// request arrivals do not reset this timestamp, so SlowSSLoopx100 measures only storageServerCore's control
+	// loop wakeups.
 	double lastLoopResumeTime = now();
 	Future<Void> dbInfoChange = Void();
 	Future<Void> checkLastUpdate = Void();
