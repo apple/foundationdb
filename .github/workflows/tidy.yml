@@ -74,6 +74,9 @@ jobs:
             if [[ $FILE == *.actor.* ]]; then
               continue  # actor syntax is not plain c++
             fi
+            if [[ $FILE == flow/include/flow/CoroutinesImpl.h ]]; then
+              continue  # internal implementation header, included only from Coroutines.h
+            fi
             # Keep vendored external dependencies as upstream snapshots.
             case "$FILE" in
               fdbclient/include/fdbclient/ConvertUTF.h|fdbclient/include/fdbclient/SimpleIni.h|fdbclient/include/fdbclient/json_spirit/*)
