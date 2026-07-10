@@ -53,13 +53,13 @@
 // MEMORY_TRACKING_FRAMES knob controls the runtime depth (1..MEMORY_TRACKER_MAX_FRAMES).
 constexpr int MEMORY_TRACKER_MAX_FRAMES = 10;
 
-// When sampling is disabled (MEMORY_TRACKING_SAMPLE_INVERSE <= 0) the alloc slow
-// path re-parks the per-thread counter at this value rather than at INT_MAX.
-// A parked thread therefore re-enters the (lock-free, knob-reading) slow path
-// once every ~this-many allocations, so an off->on knob change is observed
-// within a bounded window instead of after ~2^31 allocations. The cost while
-// disabled is one slow-path visit (a handful of int reads, no lock) per this
-// many allocations -- negligible.
+// When sampling is disabled (MEMORY_TRACKING_SAMPLE_INVERSE <= 0) the
+// alloc slow path re-parks the per-thread counter at this value
+// rather than at INT_MAX.  A parked thread therefore re-enters the
+// (lock-free, knob-reading) slow path once every ~this-many
+// allocations, so an off->on knob change is observed within a bounded
+// window.  The cost while disabled is one slow-path visit (a handful
+// of int reads, no lock) per this many allocations -- negligible.
 constexpr int MEMORY_TRACKER_DISABLED_RESEED = 1 << 16;
 
 // Per-site aggregate. Public so unit tests can introspect via memTrackerForEachSite.
@@ -69,7 +69,7 @@ constexpr int MEMORY_TRACKER_DISABLED_RESEED = 1 << 16;
 //     costing. Each sampled block is weighted by its inverse inclusion
 //     probability (≈ SampleInverse for randomly-sampled blocks, 1 for
 //     force-sampled blocks) at sample time, so these already have the sampling
-//     math applied — a consumer reads them directly, no scaling required.
+//     math applied — a consumer (logging, etc) reads them directly, no scaling required.
 //   * the raw sampled counters (liveBytes, cumulativeAllocs, …) — the
 //     uninterpreted "what we actually observed" numbers, kept for auditing the
 //     estimate and gauging its confidence (few samples ⇒ noisy estimate).
@@ -95,7 +95,7 @@ struct MemoryTrackerCallSite {
 	uint8_t exemplarFrameCount;
 };
 
-// Thread-local state — see header comment.
+// Described above
 extern thread_local bool gInMemTracker;
 extern thread_local int gMemTrackerCounter;
 extern thread_local std::size_t gForceSampleBytes;
@@ -104,7 +104,7 @@ extern thread_local std::size_t gForceSampleBytes;
 // only when the enabled state actually changes (i.e. rarely -- on the first
 // slow-path visit after a MEMORY_TRACKING_SAMPLE_INVERSE knob change), so it
 // stays in MESI shared state across cores and every core's read is
-// effectively L1-local. The free hot path reads it (relaxed) before touching
+// likely cached. The free hot path reads it (relaxed) before touching
 // the lock: when disabled, a free is one read + one branch. This is what makes
 // the "off switch" genuinely free-of-cost on the free path (a free has no
 // per-thread sampling counter to gate on, unlike an alloc).
@@ -146,22 +146,26 @@ void memTrackerSampleFree(void* p);
 // Header-inlined hot path. Cost on the un-sampled path: one TLS load +
 // one decrement + one branch.
 inline void memTrackerOnAlloc(void* p, std::size_t n) {
-	if (gInMemTracker || !p)
+	if (gInMemTracker || !p) {
 		return;
-	if (--gMemTrackerCounter > 0 && n < gForceSampleBytes)
+	}
+	if (--gMemTrackerCounter > 0 && n < gForceSampleBytes) {
 		return;
+	}
 	gInMemTracker = true;
 	memTrackerSampleAlloc(p, n);
 	gInMemTracker = false;
 }
 
 inline void memTrackerOnFree(void* p) {
-	if (gInMemTracker || !p)
+	if (gInMemTracker || !p) {
 		return;
+	}
 	// Cheap cache-line-shared read: when the tracker is disabled there is no
 	// live-block table to debit, so skip all lock/table work.
-	if (!g_memTrackerEnabled.value.load(std::memory_order_relaxed))
+	if (!g_memTrackerEnabled.value.load(std::memory_order_relaxed)) {
 		return;
+	}
 	gInMemTracker = true;
 	memTrackerSampleFree(p);
 	gInMemTracker = false;
@@ -172,8 +176,7 @@ inline void memTrackerOnFree(void* p) {
 // exceeds bytesThreshold. The threshold is compared against the sampling-corrected
 // estimate, not the raw sampled bytes. Each site event carries an "AddrCmd"
 // detail: a ready-to-paste addr2line invocation covering just that site's frames.
-// A final TraceEvent("MemoryTrackerSummary") reports aggregate totals. Called
-// from SystemMonitor.
+// A final TraceEvent("MemoryTrackerSummary") reports aggregate totals.
 void memTrackerDump(int64_t bytesThreshold);
 
 // Snapshot iteration for tests. The callback runs while a copy of the
