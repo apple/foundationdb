@@ -27,11 +27,17 @@
 //     every-allocation rate, which includes both the sampled-alloc slow path
 //     and the per-free lock+probe (the dominant enabled-state cost).
 //
-// Run: bin/flow_bench --benchmark_filter=memtracker
+// Run: bin/fdbserver_bench --benchmark_filter=memtracker
+//
+// This bench lives under fdbserver/ (not flow/) and its CMake compiles
+// fdbserver/GlobalNewDelete.cpp into the executable, so the real global
+// operator new/delete override is active here and bench_memtracker_operator_new
+// actually exercises the tracker. flow_bench links only flow (no override), so
+// the operator-new path could not be measured there.
 //
 // FLOW_KNOBS points at the process-default (non-simulated) bootstrap knobs in
-// flow_bench, so MEMORY_TRACKING_SAMPLE_INVERSE starts at 0 (off); we drive it
-// per benchmark via const_cast, exactly like the unit tests do.
+// fdbserver_bench, so MEMORY_TRACKING_SAMPLE_INVERSE starts at 0 (off); we drive
+// it per benchmark via const_cast, exactly like the unit tests do.
 
 #include "benchmark/benchmark.h"
 
