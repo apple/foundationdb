@@ -56,6 +56,13 @@ in place:
 R0. **Cheap enough to enable in production by default.** Various following
     requirements support this.
 
+// TODO: Change this to be more specific and merge with R2: say < 1% total overhead.
+// Note that the current estimate (do not give the estimate in the requirements,
+// only lower in the detailed design) comes in comfortably below this.
+// The current estimate might change later if the design changes.
+// The requirement should not need to change and in fact we do not want
+// to just arbitrarily relax requirements every time implementations change.
+
 R1. **Un-sampled hot path.** A non-sampled allocation incurs only one
     thread-local load, one decrement, and one branch. A non-sampled free
     (which has no per-thread counter to gate on) incurs one relaxed read of
@@ -69,6 +76,8 @@ R2. **Sampled CPU budget.** End-to-end overhead from sampling at 1% on
     workloads that allocate at 100K/sec must be under 0.1% CPU. Stack
     capture must take less than 200 ns for 6 frames on x86_64 and
     aarch64.
+
+// TODO: delete this requirement per previous TODO comment.
 
 R3. **Default-on in production and simulation (post-rollout
     steady state).** Steady-state production default is 1% sampling
@@ -139,13 +148,14 @@ R12. **Side-thread coverage.** Allocations from any thread are
 
 Three pieces:
 
-1. **Sampling and capture.** Every allocation site calls a header-inlined
-   `memTrackerOnAlloc(p, size)` (and matching `memTrackerOnFree(p)`).
-   Both check a thread-local reentrancy flag and a thread-local
-   decrementing counter; the un-sampled path is one TLS load + one
-   decrement + one branch. On sample, walk the frame-pointer chain for
-   4–6 return addresses (initial estimate, subject to refinement during
-   development of this feature).
+1. **Sampling and capture.** Every allocation site calls a
+   header-inlined `memTrackerOnAlloc(p, size)` (and matching
+   `memTrackerOnFree(p)`).  Both check a thread-local reentrancy flag
+   and a thread-local decrementing counter; the un-sampled path is one
+   TLS load + one decrement + one branch. On sample, walk the
+   frame-pointer chain for 4-6 return addresses (4-6 being initial
+   estimate, subject to refinement during development of this
+   feature).
 
 2. **Storage.** Two tables, both backed by `std::malloc` (which bypasses
    our `operator new` hooks):
@@ -220,7 +230,8 @@ off-switch. The flag is written only when the enabled state actually changes
 so its cache line stays shared across cores and the hot-path read is cheap.
 Runtime toggling has the same in-flight caveat as `MEMORY_TRACKING_LIVE_TRACKING`:
 disabling while entries are live orphans them in the table rather than debiting
-them on free.
+them on free.  Note that in practice we don't expect this knob to
+flip; fdbserver process restarts are more typical when knobs change.
 
 The counter is reseeded on every sample to a small uniform random
 integer with mean `INV`, so the sampling rate averages 1-in-`INV`
@@ -238,6 +249,11 @@ test workloads with very few allocations still exercise the path.
 **Force-sample-large.** The `n < gForceSampleBytes` check guarantees
 that any allocation at or above the configured threshold (default 100
 KB; `INT64_MAX` disables) is *always* sampled regardless of the
+
+// TODO: why INT64_MAX? It's going to be set by a human in a config file
+// and nobody wants to type out extremely large constants.  Use -1 instead
+// unless there is a good reason not to.
+
 counter. Large allocations are rare per second so unconditional
 sampling costs almost nothing in CPU, and they are often the most
 interesting individual allocations regardless of frequency (caches,
@@ -294,10 +310,16 @@ Skips no frames at capture; the caller (`memTrackerSampleAlloc`) is
 responsible for stripping the topmost 1–2 frames so the captured stack
 starts at the real allocation site (not inside the tracker itself).
 
+// TODO: the above is not a complete sentence.  The large code block
+// is not effective as the subject of a sentence.  Rewrite this not to
+// use implied subject sentences.
+
 Relies on `-fno-omit-frame-pointer` already set globally
 (`cmake/ConfigureCompiler.cmake`). On x86_64 and aarch64 each frame
 is two adjacent words (saved FP, saved RA), so the walk is one indirect
 load per frame: ~100 ns for 6 frames.
+
+// TODO: same problem as above. Write complete sentences.
 
 Caveats and mitigations:
 
@@ -324,6 +346,10 @@ Caveats and mitigations:
   boundary; we still get the FDB-side prefix, which is what we
   care about. See "Side-thread safety" below for the full chain
   analysis.
+
+// TODO: the above story is repeated below.  Consolidate this.
+// Pick the best place to put it. Mainly just tell it only one time.
+
 - Signal handlers can leave a transiently bad FP chain mid-walk.
   The same stack-bounds + `next <= fp` checks bail out of those
   cases.
@@ -611,6 +637,11 @@ TraceEvent("MemoryTrackerSite")
     .detail("AddrCmd", "<full addr2line invocation for this site>");
 ```
 
+// TODO: the above has a hard coupling with the implementation.
+// All told I am in favor of giving the details both here and in the implementation.
+// Add a code comment to the implementation saying "if you change this TraceEvent,
+// go change the documentation" and give the path to this design doc.
+
 The `AddrCmd` value is short — one prefix plus a handful of
 PIE-relative addresses, well under the TraceEvent string-detail
 length cap. A human or AI consumer pastes one site's `AddrCmd` and
@@ -658,6 +689,9 @@ cleanup.
 |---|---|---|---|
 | `MEMORY_TRACKING_SAMPLE_INVERSE` | 100 | 2 | 0=off, N=1-in-N |
 | `MEMORY_TRACKING_FORCE_SAMPLE_BYTES` | 100000 | 100000 | Always sample allocations ≥ this many bytes; `INT64_MAX` disables force-sample |
+
+// TODO: again with the INT64_MAX.  CHange to -1 if possible.
+
 | `MEMORY_TRACKING_LIVE_TRACKING` | true | true | When false, skip the pointer-keyed live-block table and report cumulative-only stats |
 | `MEMORY_TRACKING_REPORT_INTERVAL` | 600.0 | 30.0 | Seconds between dumps; 0 disables |
 | `MEMORY_TRACKING_REPORT_BYTES_THRESHOLD` | 80000000 | 80000000 | Sites with live bytes ≥ this are reported each dump (~1% of an 8 GB target RSS) |
@@ -794,6 +828,15 @@ number of I/O / RocksDB threads), the merge cost is small.
 Chose single global spinlock for v1 because:
 - At 1% sampling + 100K alloc/sec the lock fires only 1K times/sec.
   Uncontended spinlock acquire is ~20 ns. Total CPU cost ~20 µs/sec.
+
+// TODO: we should caveat that the above is conjectural and actual
+// results may not be quite this.  For example 100K alloc/sec is pure guesswork.
+// Also how did you come up with 20ns?  I don't have a better number but
+// are you absolutely sure it's always this, on all platforms?
+// We could be off on the "estimate of time taken is too low" side of
+// things on both the 100k/sec and the 20ns/call numbers.  So just put a
+// small caveat about this.
+
 - Per-thread tables require a thread-registration mechanism (the
   tracker has to know about thread births/deaths so it can merge) and a
   thread-local pointer in TLS; non-trivial to get right under
@@ -826,6 +869,12 @@ The new module supersedes it. The dead code stays in place behind its
 jemalloc has a mature sampled-stack heap profiler enabled via
 `MALLOC_CONF=prof:true,prof_active:true,lg_prof_sample:14`. Zero
 implementation cost.
+
+// TODO: is the runtime cost of jemalloc heap profiling well known or
+// well established?  If it is, mention it.  If it's not, and reasons for
+// its cost not being well established are themselves known, then list those
+// reasons.  If neither of these things are very well known, just state that
+// too.  **Do not fabricate claims about jemalloc heap profiling performance**.
 
 Rejected as a complete solution because:
 - Covers only `malloc` and `operator new`, not `FastAllocator` or
@@ -910,6 +959,15 @@ workloads.
   delta.
 - **Sampled path.** Same loop with sample inverse 100; target: < 5%
   delta vs. the un-sampled baseline at 100K alloc/sec.
+
+
+// TODO: are these microbenchmarks implemented?  If they are not
+// implemented, we should do that now.  Tell me the situation and
+// ask to implement.
+//
+// TODO: the named test case above **does not exist**.
+// Do not delete this TODO until the tests exist or the text above
+// has been updated to no longer reference non-existent test cases.
 
 ### Strip-aware symbolization spot-check
 
