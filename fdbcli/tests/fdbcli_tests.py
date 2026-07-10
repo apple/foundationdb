@@ -898,6 +898,22 @@ def integer_options():
     assert error_output == b""
 
 
+def client_threads_per_version_env_ignored():
+    test_env = fdbcli_env.copy()
+    test_env["FDB_NETWORK_OPTION_CLIENT_THREADS_PER_VERSION"] = "not_an_integer"
+    process = subprocess.run(
+        command_template + ["status minimal"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=test_env,
+    )
+    assert process.returncode == 0
+    assert (
+        b"Environment variable network option could not be set"
+        not in process.stderr
+    )
+
+
 def tls_address_suffix():
     # fdbcli shall prevent a non-TLS fdbcli run from connecting to an all-TLS cluster
     preamble = "eNW1yf1M:eNW1yf1M@"
@@ -999,6 +1015,7 @@ if __name__ == "__main__":
         tls_address_suffix()
         status_json_file_region_failover_message()
         idempotency_ids()
+        client_threads_per_version_env_ignored()
     else:
         assert args.process_number > 1, "Process number should be positive"
         coordinators()

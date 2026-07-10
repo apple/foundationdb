@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/BackupAgent.h"
+#include "fdbclient/BackupFileFormat.h"
 #include "fdbclient/BackupContainer.h"
 #include "flow/BooleanParam.h"
 #ifdef BUILD_AZURE_BACKUP
@@ -28,6 +29,7 @@
 #include "BackupContainerLocalDirectory.h"
 #include "BackupContainerBlobStore.h"
 #include "fdbclient/JsonBuilder.h"
+#include "fdbrpc/AsyncFileEncrypted.h"
 #include "flow/StreamCipher.h"
 #include "flow/UnitTest.h"
 
@@ -886,12 +888,13 @@ public:
 				if (desc.minRestorableVersion.present() && desc.maxRestorableVersion.present()) {
 					// check if we have contiguous logs from minRestorableVersion to current snapshot endVersion
 					bool contiguousLogs = false;
-					if (desc.mutationLogType == MutationLogType::PARTITIONED_LOG)
+					if (desc.mutationLogType == MutationLogType::PARTITIONED_LOG) {
 						contiguousLogs =
 						    isPartitionedLogsContinuous(logs, desc.minRestorableVersion.get(), s.endVersion);
-					else
+					} else {
 						contiguousLogs =
 						    hasContinuousLogsForSnapshot(logs, desc.minRestorableVersion.get(), s.endVersion);
+					}
 
 					if (contiguousLogs) {
 						// The previous restorable version can be extended to current snapshot version,
@@ -1358,8 +1361,8 @@ public:
 
 	static std::string logVersionFolderStringForRangePartitioned(Version v, Version baseVersion) {
 		Version directoryVersion =
-		    baseVersion + ((v - baseVersion) / CLIENT_KNOBS->BACKUP_RANGE_PARTITIONED_VDIR_INTERVAL) *
-		                      CLIENT_KNOBS->BACKUP_RANGE_PARTITIONED_VDIR_INTERVAL;
+		    baseVersion + ((v - baseVersion) / CLIENT_KNOBS->RANGE_PARTITIONED_BACKUP_VDIR_INTERVAL) *
+		                      CLIENT_KNOBS->RANGE_PARTITIONED_BACKUP_VDIR_INTERVAL;
 		std::string vFixed = format("%019lld", directoryVersion);
 		return format("rlogs/%s/", vFixed.c_str());
 	}
@@ -1617,13 +1620,18 @@ Future<std::vector<LogFile>> BackupContainerFileSystem::listLogFiles(Version beg
 	};
 
 	return map(listFiles((mutationLogType == MutationLogType::PARTITIONED_LOG ? "plogs/" : "logs/"), pathFilter),
-	           [=](const FilesAndSizesT& files) {
+	           [=, self = Reference<BackupContainerFileSystem>::addRef(this)](const FilesAndSizesT& files) {
 		           std::vector<LogFile> results;
 		           LogFile lf;
 		           for (auto& f : files) {
 			           if (BackupContainerFileSystemImpl::pathToLogFile(lf, f.first, f.second) &&
-			               lf.endVersion > beginVersion && lf.beginVersion <= targetVersion)
+			               lf.endVersion > beginVersion && lf.beginVersion <= targetVersion) {
+				           if (self->usesEncryption()) {
+					           lf.fileSize =
+					               AsyncFileEncrypted::rawToLogicalSize(lf.fileSize, self->encryptionBlockSize);
+				           }
 				           results.push_back(lf);
+			           }
 		           }
 		           return results;
 	           });
@@ -1645,16 +1653,22 @@ Future<std::vector<RangeFile>> BackupContainerFileSystem::old_listRangeFiles(Ver
 		       (cleaned > firstPath && cleaned < lastPath);
 	};
 
-	return map(listFiles("ranges/", pathFilter), [=](const FilesAndSizesT& files) {
-		std::vector<RangeFile> results;
-		RangeFile rf;
-		for (auto& f : files) {
-			if (BackupContainerFileSystemImpl::pathToRangeFile(rf, f.first, f.second) && rf.version >= beginVersion &&
-			    rf.version <= endVersion)
-				results.push_back(rf);
-		}
-		return results;
-	});
+	return map(listFiles("ranges/", pathFilter),
+	           [=, self = Reference<BackupContainerFileSystem>::addRef(this)](const FilesAndSizesT& files) {
+		           std::vector<RangeFile> results;
+		           RangeFile rf;
+		           for (auto& f : files) {
+			           if (BackupContainerFileSystemImpl::pathToRangeFile(rf, f.first, f.second) &&
+			               rf.version >= beginVersion && rf.version <= endVersion) {
+				           if (self->usesEncryption()) {
+					           rf.fileSize =
+					               AsyncFileEncrypted::rawToLogicalSize(rf.fileSize, self->encryptionBlockSize);
+				           }
+				           results.push_back(rf);
+			           }
+		           }
+		           return results;
+	           });
 }
 
 Future<std::vector<RangeFile>> BackupContainerFileSystem::listRangeFiles(Version beginVersion, Version endVersion) {
@@ -1667,16 +1681,22 @@ Future<std::vector<RangeFile>> BackupContainerFileSystem::listRangeFiles(Version
 		return BackupContainerFileSystemImpl::extractSnapshotBeginVersion(path) <= endVersion;
 	};
 
-	Future<std::vector<RangeFile>> newFiles = map(listFiles("kvranges/", pathFilter), [=](const FilesAndSizesT& files) {
-		std::vector<RangeFile> results;
-		RangeFile rf;
-		for (auto& f : files) {
-			if (BackupContainerFileSystemImpl::pathToRangeFile(rf, f.first, f.second) && rf.version >= beginVersion &&
-			    rf.version <= endVersion)
-				results.push_back(rf);
-		}
-		return results;
-	});
+	Future<std::vector<RangeFile>> newFiles =
+	    map(listFiles("kvranges/", pathFilter),
+	        [=, self = Reference<BackupContainerFileSystem>::addRef(this)](const FilesAndSizesT& files) {
+		        std::vector<RangeFile> results;
+		        RangeFile rf;
+		        for (auto& f : files) {
+			        if (BackupContainerFileSystemImpl::pathToRangeFile(rf, f.first, f.second) &&
+			            rf.version >= beginVersion && rf.version <= endVersion) {
+				        if (self->usesEncryption()) {
+					        rf.fileSize = AsyncFileEncrypted::rawToLogicalSize(rf.fileSize, self->encryptionBlockSize);
+				        }
+				        results.push_back(rf);
+			        }
+		        }
+		        return results;
+	        });
 
 	return map(success(oldFiles) && success(newFiles), [=](Void _) {
 		std::vector<RangeFile> results = newFiles.get();
@@ -2379,12 +2399,13 @@ void printFileList(BackupFileList& backupFileList) {
 		printf("\n%s", l.toString().c_str());
 
 	printf("\nSnapshotFiles count:%lu", backupFileList.snapshots.size());
-	for (const auto& s : backupFileList.snapshots)
+	for (const auto& s : backupFileList.snapshots) {
 		printf("\n%" PRId64 ", %" PRId64 ", %s, %" PRId64 "\n",
 		       s.beginVersion,
 		       s.endVersion,
 		       s.fileName.c_str(),
 		       s.totalSize);
+	}
 }
 
 // Intentionally missing some log range files and checking if the snapshot can be restored.

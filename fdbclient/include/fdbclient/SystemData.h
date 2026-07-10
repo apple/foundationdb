@@ -22,14 +22,18 @@
 #define FDBCLIENT_SYSTEMDATA_H
 #pragma once
 
+#include <tuple>
+
 // Functions and constants documenting the organization of the reserved keyspace in the database beginning with "\xFF"
 
 #include "fdbclient/AccumulativeChecksum.h"
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/BulkDumping.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/ProcessClass.h"
 #include "fdbclient/RangeLock.h"
 #include "fdbclient/StorageServerInterface.h"
+#include "flow/FileIdentifier.h"
 
 // Don't warn on constants being defined in this file.
 #pragma clang diagnostic push
@@ -264,6 +268,80 @@ Value tagLocalityListValue(int8_t const&);
 Optional<Value> decodeTagLocalityListKey(KeyRef const&);
 int8_t decodeTagLocalityListValue(ValueRef const&);
 
+// Native CDC stream routing and lifecycle metadata persisted in the transaction state store.
+// See design/cdc.md for the durable metadata layout and lifecycle semantics.
+// "\xff/cdc/name/[[streamName]]" := "[[CDCStreamId]]"
+extern const KeyRangeRef cdcStreamNameKeys;
+Key cdcStreamNameKeyFor(KeyRef const& streamName);
+Key decodeCDCStreamNameKey(KeyRef const& key);
+Value cdcStreamNameValue(CDCStreamId streamId);
+CDCStreamId decodeCDCStreamNameValue(ValueRef const& value);
+
+// "\xff/cdc/maxStreamId" := "[[CDCStreamId]]"
+extern const KeyRef cdcMaxStreamIdKey;
+Value cdcMaxStreamIdValue(CDCStreamId streamId);
+CDCStreamId decodeCDCMaxStreamIdValue(ValueRef const& value);
+
+// "\xff/cdc/keys/[[CDCStreamId]]" := "[[KeyRange]]"
+extern const KeyRangeRef cdcStreamKeys;
+Key cdcStreamKeyFor(CDCStreamId streamId);
+CDCStreamId decodeCDCStreamKey(KeyRef const& key);
+Value cdcStreamKeysValue(KeyRangeRef const& keys);
+KeyRange decodeCDCStreamKeysValue(ValueRef const& value);
+
+// "\xff/cdc/tagHistory/[[CDCStreamId]][[Version]][[Tag]]" := ""
+struct CDCTagHistoryEntry {
+	constexpr static FileIdentifier file_identifier = 13091844;
+
+	CDCStreamId streamId = 0;
+	Version version = invalidVersion;
+	Tag tag;
+
+	CDCTagHistoryEntry() = default;
+	CDCTagHistoryEntry(CDCStreamId streamId, Version version, Tag tag)
+	  : streamId(streamId), version(version), tag(tag) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, streamId, version, tag);
+	}
+};
+
+extern const KeyRangeRef cdcTagHistoryKeys;
+Key cdcTagHistoryKeyFor(CDCStreamId streamId, Version version, Tag tag);
+KeyRange cdcTagHistoryRangeFor(CDCStreamId streamId);
+CDCTagHistoryEntry decodeCDCTagHistoryKey(KeyRef const& key);
+
+// Native CDC acknowledgement progress is regular storage-server-backed system data.
+// "\xff\x02/cdc/minVersion/[[CDCStreamId]]" := "[[Version]]"
+// The initial value is versionstamped at stream registration commit.
+extern const KeyRangeRef cdcMinVersionKeys;
+Key cdcMinVersionKeyFor(CDCStreamId streamId);
+CDCStreamId decodeCDCMinVersionKey(KeyRef const& key);
+Value cdcMinVersionValue(Version version);
+Value cdcVersionstampedMinVersionValue();
+Version decodeCDCMinVersionValue(ValueRef const& value);
+
+// "\xff/cdc/retiredTagPop/[[Tag]]" := ""
+// Marks tags with durable final-pop work, so recovery keeps a CDC proxy available.
+extern const KeyRangeRef cdcRetiredTagPopKeys;
+Key cdcRetiredTagPopKeyFor(Tag tag);
+Tag decodeCDCRetiredTagPopKey(KeyRef const& key);
+
+// "\xff\x02/cdc/retiredTagPopVersion/[[Tag]]" := "[[Version]]"
+// Stores bounded storage-backed final-pop watermarks for removed streams.
+extern const KeyRangeRef cdcRetiredTagPopVersionKeys;
+Key cdcRetiredTagPopVersionKeyFor(Tag tag);
+Tag decodeCDCRetiredTagPopVersionKey(KeyRef const& key);
+
+// "\xff/cdc/proxies/[[CDCStreamId]][[proxyUID]]" := ""
+extern const KeyRangeRef cdcProxyKeys;
+// Changed whenever durable CDC stream-to-proxy assignments change.
+extern const KeyRef cdcProxyAssignmentChangeKey;
+Key cdcProxyKeyFor(CDCStreamId streamId, UID proxyId);
+KeyRange cdcProxyRangeFor(CDCStreamId streamId);
+std::pair<CDCStreamId, UID> decodeCDCProxyKey(KeyRef const& key);
+
 //    "\xff\x02/datacenterReplicas/[[datacenterID]]" := "[[replicas]]"
 //	Provides the number of replicas for the given datacenterID.
 //	Used in the initialization of the Data Distributor.
@@ -318,7 +396,7 @@ extern const KeyRangeRef configKeys;
 extern const KeyRef configKeysPrefix;
 
 extern const KeyRef backupWorkerEnabledKey;
-extern const KeyRef rangeBackupWorkerEnabledKey;
+extern const KeyRef rangePartitionedBackupWorkerEnabledKey;
 extern const KeyRef perpetualStorageWiggleKey;
 extern const KeyRef perpetualStorageWiggleLocalityKey;
 extern const KeyRef perpetualStorageWiggleIDPrefix;

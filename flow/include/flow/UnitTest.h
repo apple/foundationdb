@@ -91,7 +91,7 @@ public:
 
 // Unit test definition structured as a linked list item
 struct UnitTest {
-	typedef Future<Void> (*TestFunction)(const UnitTestParameters& params);
+	using TestFunction = Future<Void> (*)(const UnitTestParameters&);
 
 	const char* name;
 	const char* file;

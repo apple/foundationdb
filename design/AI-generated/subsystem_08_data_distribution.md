@@ -158,6 +158,38 @@ Ordering: `(priority desc) → (startTime asc) → (randomId desc)`
 
 ---
 
+## Disk-Capacity Balancing (byte targeting)
+
+DD's disk-rebalancing goal is to equalize the **absolute amount of stored data (used
+logical bytes) per team** -- not equal free bytes, not equal free *percentage*, and not
+capacity-proportional fill. Teams are ranked by `TCTeamInfo::getLoadBytes()`, whose core
+term is the mean of each server's `StorageMetrics.load.bytes` (a sampled estimate of
+bytes stored), with no normalization by disk size. A rebalance move fires only when
+`source.getLoadBytes() - dest.getLoadBytes() > 3 * max(MIN_SHARD_BYTES, shardBytes)`.
+
+Free space enters only as two guardrails on top of that absolute-bytes objective:
+
+1. **Eligibility pivot (dominant).** `updateAvailableSpacePivots()` / `updateTeamEligibility()`
+   compute the cluster-median free-space *ratio* (`available/capacity`), clamped to
+   `[MIN_AVAILABLE_SPACE_RATIO 0.05, TARGET_AVAILABLE_SPACE_RATIO 0.30]`. For destination
+   selection (`PreferLowerDiskUtil`), `getBestTeam` skips any team whose free ratio is below
+   that pivot (and whose free bytes are below `MIN_AVAILABLE_SPACE` = 100 MB). So a
+   relatively-full server stops receiving data once its free *ratio* falls below the
+   cluster median -- no later than the 30%-free mark in a healthy cluster.
+2. **Near-full penalty.** `getLoadBytes()` multiplies by `AVAILABLE_SPACE_RATIO_CUTOFF /
+   max(min(cutoff, freeRatio), eps)` with cutoff `0.05`; this is `1.0` (no effect) above
+   5% free and rises steeply (squared for triple replication) below it.
+
+**Heterogeneous hardware:** because the objective is equal stored bytes, a small and a
+large disk tend toward holding the *same amount of data* until the pivot gate makes the
+smaller (relatively fuller) disk ineligible, at which point new data is steered to the
+emptier/larger disks. DD never targets capacity proportionally (an explicit
+`SOMEDAY: Account for capacity` TODO remains). See
+[`data-distributor-internals.md`](../data-distributor-internals.md) §8, "What disk-capacity
+balancing actually targets," for the full treatment.
+
+---
+
 ## MoveKeys Protocol -- [`fdbserver/core/MoveKeys.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/MoveKeys.cpp)
 
 Atomic shard ownership transfer using system key transactions.

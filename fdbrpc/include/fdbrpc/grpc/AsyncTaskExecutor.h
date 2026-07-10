@@ -105,7 +105,7 @@ public:
 private:
 	// Serves no purpose for us, but needed for `IThreadPool`.
 	struct Receiver : IThreadPoolReceiver {
-		void init() {}
+		void init() override {}
 	};
 
 	template <typename Func, class __Enable = void>

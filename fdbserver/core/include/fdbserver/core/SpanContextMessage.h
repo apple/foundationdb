@@ -38,7 +38,7 @@ struct SpanContextMessage {
 
 	SpanID spanContext;
 
-	SpanContextMessage() {}
+	SpanContextMessage() = default;
 	explicit SpanContextMessage(SpanID const& spanContext) : spanContext(spanContext) {}
 
 	std::string toString() const {

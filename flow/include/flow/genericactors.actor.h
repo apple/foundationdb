@@ -2029,7 +2029,7 @@ struct FlowLock : NonCopyable, public ReferenceCounted<FlowLock> {
 
 	struct Releaser : NonCopyable {
 		FlowLock* lock;
-		int remaining;
+		int64_t remaining;
 		Releaser() : lock(0), remaining(0) {}
 		explicit(false) Releaser(FlowLock& lock, int64_t amount = 1) : lock(&lock), remaining(amount) {}
 		explicit(false) Releaser(Releaser&& r) noexcept : lock(r.lock), remaining(r.remaining) { r.remaining = 0; }

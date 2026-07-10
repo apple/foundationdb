@@ -21,29 +21,9 @@
 #ifndef FDBSERVER_TESTER_KNOBPROTECTIVEGROUPS_H
 #define FDBSERVER_TESTER_KNOBPROTECTIVEGROUPS_H
 
-#include <array>
-#include <unordered_map>
+#include "fdbserver/tester/KnobKeyValuePairs.h"
 
-#include "flow/Knobs.h"
-
-// A list of knob key value pairs
-class KnobKeyValuePairs {
-public:
-	using container_t = std::unordered_map<std::string, ParsedKnobValue>;
-
-private:
-	// Here the knob value is directly stored, unlike KnobValue, for simplicity
-	container_t knobs;
-
-public:
-	// Sets a value for a given knob
-	void set(const std::string& name, const ParsedKnobValue value);
-
-	// Gets a list of knobs for given type
-	const container_t& getKnobs() const;
-};
-
-// For knobs, temporarily change the values, the original values will be recovered
+// For knobs, temporarily change the values, the original values will be recovered.
 class KnobProtectiveGroup {
 	KnobKeyValuePairs overriddenKnobs;
 	KnobKeyValuePairs originalKnobs;

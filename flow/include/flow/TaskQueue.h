@@ -60,8 +60,9 @@ public:
 			b = threadReady.canSleep();
 			if (!b)
 				++countCantSleep;
-		} else
+		} else {
 			++countWontSleep;
+		}
 		return b;
 	}
 	// Returns a time interval a caller should sleep from now until the next timer.
@@ -178,7 +179,7 @@ private:
 	template <class T>
 	class ReadyQueue : public std::priority_queue<T, std::vector<T>> {
 	public:
-		typedef typename std::priority_queue<T, std::vector<T>>::size_type size_type;
+		using size_type = typename std::priority_queue<T, std::vector<T>>::size_type;
 		explicit ReadyQueue(size_type capacity = 0) { reserve(capacity); };
 		void reserve(size_type capacity) { this->c.reserve(capacity); }
 	};

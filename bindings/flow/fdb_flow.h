@@ -47,7 +47,7 @@ struct CFuture : NonCopyable, ReferenceCounted<CFuture>, FastAllocated<CFuture> 
 template <class T>
 class FDBStandalone : public T {
 public:
-	FDBStandalone() {}
+	FDBStandalone() = default;
 	FDBStandalone(Reference<CFuture> f, T const& t) : T(t), f(f) {}
 	FDBStandalone(FDBStandalone const& o) : T((T const&)o), f(o.f) {}
 
@@ -57,7 +57,7 @@ private:
 
 class ReadTransaction : public ReferenceCounted<ReadTransaction> {
 public:
-	virtual ~ReadTransaction() {};
+	virtual ~ReadTransaction() = default;
 	virtual void setReadVersion(Version v) = 0;
 	virtual Future<Version> getReadVersion() = 0;
 
@@ -137,7 +137,7 @@ public:
 
 class Database : public ReferenceCounted<Database> {
 public:
-	virtual ~Database() {};
+	virtual ~Database() = default;
 	virtual Reference<Transaction> createTransaction() = 0;
 	virtual void setDatabaseOption(FDBDatabaseOption option, Optional<StringRef> value = Optional<StringRef>()) = 0;
 	virtual Future<int64_t> rebootWorker(const StringRef& address, bool check = false, int duration = 0) = 0;

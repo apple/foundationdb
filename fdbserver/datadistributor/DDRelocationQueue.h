@@ -128,8 +128,8 @@ class DDQueue : public IDDRelocationQueue, public ReferenceCounted<DDQueue> {
 public:
 	friend struct DDQueueImpl;
 
-	typedef Reference<IDataDistributionTeam> ITeamRef;
-	typedef std::pair<ITeamRef, ITeamRef> SrcDestTeamPair;
+	using ITeamRef = Reference<IDataDistributionTeam>;
+	using SrcDestTeamPair = std::pair<ITeamRef, ITeamRef>;
 
 	struct DDDataMove {
 		DDDataMove() = default;
@@ -146,8 +146,8 @@ public:
 		enum CountType : uint8_t { ProposedSource = 0, QueuedSource, LaunchedSource, LaunchedDest, __COUNT };
 
 	private:
-		typedef std::array<int, (int)__COUNT> Item; // one for each CountType
-		typedef std::array<Item, RelocateReason::typeCount()> ReasonItem; // one for each RelocateReason
+		using Item = std::array<int, (int)__COUNT>; // one for each CountType
+		using ReasonItem = std::array<Item, RelocateReason::typeCount()>; // one for each RelocateReason
 
 		std::unordered_map<UID, ReasonItem> counter;
 
@@ -369,6 +369,8 @@ public:
 	Future<Void> periodicalRefreshCounter();
 
 	int getUnhealthyRelocationCount() const override;
+
+	void processRelocationComplete(const RelocateData& done);
 
 	Future<SrcDestTeamPair> getSrcDestTeams(const int& teamCollectionIndex,
 	                                        const GetTeamRequest& srcReq,

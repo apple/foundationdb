@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <algorithm>
 #include <cmath>
 #include <utility>
 
@@ -27,6 +28,7 @@
 #include "fdbserver/core/BackupProgress.h"
 #include "ClusterRecovery.h"
 #include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/ProcessClassRecruitment.h"
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/SeedShardServers.h"
 #include "fdbserver/core/WaitFailure.h"
@@ -34,6 +36,7 @@
 #include "flow/Error.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/Trace.h"
+#include "flow/UnitTest.h"
 
 #include "flow/CoroUtils.h"
 
@@ -45,6 +48,7 @@ static std::set<int> const& normalClusterRecoveryErrors() {
 		s.insert(error_code_tlog_failed);
 		s.insert(error_code_commit_proxy_failed);
 		s.insert(error_code_grv_proxy_failed);
+		s.insert(error_code_cdc_proxy_failed);
 		s.insert(error_code_resolver_failed);
 		s.insert(error_code_backup_worker_failed);
 		s.insert(error_code_recruitment_failed);
@@ -84,13 +88,14 @@ Future<Void> recruitNewMaster(ClusterControllerData* cluster,
 		std::map<Optional<Standalone<StringRef>>, int> id_used;
 		id_used[cluster->clusterControllerProcessId]++;
 		masterWorker = cluster->getWorkerForRoleInDatacenter(
-		    cluster->clusterControllerDcId, ProcessClass::Master, ProcessClass::NeverAssign, db->config, id_used);
-		if ((masterWorker.worker.processClass.machineClassFitness(ProcessClass::Master) >
+		    cluster->clusterControllerDcId, recruitment::Master, recruitment::NeverAssign, db->config, id_used);
+		if ((recruitment::machineClassFitness(masterWorker.worker.processClass, recruitment::Master) >
 		         SERVER_KNOBS->EXPECTED_MASTER_FITNESS ||
 		     masterWorker.worker.interf.locality.processId() == cluster->clusterControllerProcessId) &&
 		    !cluster->goodRecruitmentTime.isReady()) {
 			TraceEvent("RecruitNewMaster", cluster->id)
-			    .detail("Fitness", masterWorker.worker.processClass.machineClassFitness(ProcessClass::Master));
+			    .detail("Fitness",
+			            recruitment::machineClassFitness(masterWorker.worker.processClass, recruitment::Master));
 			co_await delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY);
 			continue;
 		}
@@ -229,6 +234,75 @@ Future<Void> newGrvProxies(Reference<ClusterRecoveryData> self, RecruitFromConfi
 	std::vector<GrvProxyInterface> newRecruits = co_await getAll(initializationReplies);
 	TraceEvent("GrvProxyInitializationComplete", self->dbgid).log();
 	self->grvProxies = std::move(newRecruits);
+}
+
+bool shouldRecruitCDCProxies(bool nativeCdcEnabled, bool hasDurableCdcState) {
+	return nativeCdcEnabled || hasDurableCdcState;
+}
+
+Future<Void> ensureCDCProxies(Reference<ClusterRecoveryData> self, RecruitFromConfigurationReply recr) {
+	const bool hasDurableCdcState = !(co_await self->txnStateStore->readRange(cdcStreamKeys)).empty() ||
+	                                !(co_await self->txnStateStore->readRange(cdcRetiredTagPopKeys)).empty();
+	if (!shouldRecruitCDCProxies(CLIENT_KNOBS->ENABLE_NATIVE_CDC, hasDurableCdcState)) {
+		CODE_PROBE(true, "Recovery skips CDC proxies when disabled with no durable state");
+		self->controllerData->db.cdcProxies.clear();
+		co_return;
+	}
+	CODE_PROBE(!CLIENT_KNOBS->ENABLE_NATIVE_CDC && hasDurableCdcState,
+	           "Recovery recruits CDC proxies to drain disabled durable state",
+	           probe::decoration::rare);
+	auto& cdcProxies = self->controllerData->db.cdcProxies;
+	const size_t reusedCount = cdcProxies.size();
+	if (reusedCount > 0) {
+		CODE_PROBE(true, "Recovery reuses CDC proxies while CDC state remains durable");
+		TraceEvent("CDCProxiesReused", self->dbgid).detail("Count", reusedCount);
+	}
+	const size_t targetCount = recr.grvProxies.size();
+	if (reusedCount >= targetCount) {
+		co_return;
+	}
+
+	std::vector<Future<CDCProxyInterface>> initializationReplies;
+	for (const auto& grvProxy : recr.grvProxies) {
+		if (reusedCount + initializationReplies.size() >= targetCount) {
+			break;
+		}
+		const Optional<Key> grvProcessId = grvProxy.locality.processId();
+		ASSERT(grvProcessId.present());
+		const bool alreadyHostsCDCProxy =
+		    std::any_of(cdcProxies.begin(), cdcProxies.end(), [&](const CDCProxyInterface& cdcProxy) {
+			    return cdcProxy.processId.present() && cdcProxy.processId.get() == grvProcessId.get();
+		    });
+		if (alreadyHostsCDCProxy) {
+			continue;
+		}
+		InitializeCDCProxyRequest req;
+		req.recoveryCount = self->cstate.myDBState.recoveryCount + 1;
+		TraceEvent("CDCProxyReplies", self->dbgid).detail("WorkerID", grvProxy.id());
+		initializationReplies.push_back(
+		    transformErrors(throwErrorOr(grvProxy.cdcProxy.getReplyUnlessFailedFor(
+		                        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
+		                    cdc_proxy_failed()));
+	}
+
+	std::vector<CDCProxyInterface> newRecruits = co_await getAll(initializationReplies);
+	ASSERT_EQ(reusedCount + newRecruits.size(), targetCount);
+	TraceEvent("CDCProxyInitializationComplete", self->dbgid)
+	    .detail("Count", newRecruits.size())
+	    .detail("ReusedCount", reusedCount)
+	    .detail("TotalCount", targetCount);
+	CODE_PROBE(
+	    reusedCount > 0, "Recovery expands retained CDC proxies to match GRV proxy count", probe::decoration::rare);
+	cdcProxies.insert(cdcProxies.end(), newRecruits.begin(), newRecruits.end());
+	self->registrationTrigger.trigger();
+}
+
+TEST_CASE("/NativeCDC/RecoveryRecruitment") {
+	ASSERT_EQ(shouldRecruitCDCProxies(true, false), true);
+	ASSERT_EQ(shouldRecruitCDCProxies(true, true), true);
+	ASSERT_EQ(shouldRecruitCDCProxies(false, false), false);
+	ASSERT_EQ(shouldRecruitCDCProxies(false, true), true);
+	return Void();
 }
 
 Future<Void> newResolvers(Reference<ClusterRecoveryData> self, RecruitFromConfigurationReply recr) {
@@ -402,11 +476,12 @@ Future<Void> waitCommitProxyFailure(std::vector<CommitProxyInterface> const& com
 Future<Void> waitGrvProxyFailure(std::vector<GrvProxyInterface> const& grvProxies) {
 	std::vector<Future<Void>> failed;
 	failed.reserve(grvProxies.size());
-	for (int i = 0; i < grvProxies.size(); i++)
+	for (int i = 0; i < grvProxies.size(); i++) {
 		failed.push_back(waitFailureClient(grvProxies[i].waitFailure,
 		                                   SERVER_KNOBS->TLOG_TIMEOUT,
 		                                   -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
 		                                   /*trace=*/true));
+	}
 	ASSERT(!failed.empty());
 	return tagError<Void>(quorum(failed, 1), grv_proxy_failed());
 }
@@ -644,43 +719,43 @@ static Future<Optional<Version>> getMinBackupVersion(Reference<ClusterRecoveryDa
 	}
 }
 
-static Future<Void> recruitRangeBackupWorkers(Reference<ClusterRecoveryData> self, Database cx) {
-	ASSERT(self->backupWorkers.size() > 0);
+static Future<Void> recruitRangePartitionedBackupWorkers(Reference<ClusterRecoveryData> self, Database cx) {
+	ASSERT(!self->backupWorkers.empty());
 
 	// Avoid race between a backup worker's save progress and the reads below.
 	co_await delay(SERVER_KNOBS->SECONDS_BEFORE_RECRUIT_BACKUP_WORKER);
 
 	LogEpoch epoch = self->cstate.myDBState.recoveryCount;
 	Reference<BackupProgress> backupProgress(
-	    new BackupProgress(self->dbgid, self->logSystem->getOldEpochRangeBackupTagsInfo()));
+	    new BackupProgress(self->dbgid, self->logSystem->getOldEpochRangePartitionedBackupTagsInfo()));
 	Future<Void> fBackupProgress = getBackupProgress(cx, self->dbgid, backupProgress, SevInfo);
-	std::vector<Future<InitializeRangeBackupReply>> initializationReplies;
+	std::vector<Future<InitializeRangePartitionedBackupReply>> initializationReplies;
 
-	int rangeBackupTags = self->logSystem->rangeBackupWorkerTags;
+	int rangePartitionedBackupTags = self->logSystem->rangePartitionedBackupWorkerTags;
 	std::vector<std::pair<UID, Tag>> idsTags;
-	idsTags.reserve(rangeBackupTags);
-	for (int i = 0; i < rangeBackupTags; i++) {
-		idsTags.emplace_back(deterministicRandom()->randomUniqueID(), Tag(tagLocalityRangeBackup, i));
+	idsTags.reserve(rangePartitionedBackupTags);
+	for (int i = 0; i < rangePartitionedBackupTags; i++) {
+		idsTags.emplace_back(deterministicRandom()->randomUniqueID(), Tag(tagLocalityRangePartitionedBackup, i));
 	}
 
 	const Version startVersion = self->logSystem->getBackupStartVersion();
 	int i = 0;
-	for (; i < rangeBackupTags; i++) {
+	for (; i < rangePartitionedBackupTags; i++) {
 		const auto& worker = self->backupWorkers[i % self->backupWorkers.size()];
-		InitializeRangeBackupRequest req(idsTags[i].first);
+		InitializeRangePartitionedBackupRequest req(idsTags[i].first);
 		req.recruitedEpoch = epoch;
 		req.backupEpoch = epoch;
 		req.tag = idsTags[i].second;
-		req.totalTags = rangeBackupTags;
+		req.totalTags = rangePartitionedBackupTags;
 		req.startVersion = startVersion;
-		TraceEvent("RangeBackupRecruitment", self->dbgid)
+		TraceEvent("RangePartitionedBWRecruitment", self->dbgid)
 		    .detail("RequestID", req.reqId)
 		    .detail("Tag", req.tag.toString())
 		    .detail("Epoch", epoch)
 		    .detail("BackupEpoch", epoch)
 		    .detail("StartVersion", req.startVersion);
 		initializationReplies.push_back(
-		    transformErrors(throwErrorOr(worker.rangeBackup.getReplyUnlessFailedFor(
+		    transformErrors(throwErrorOr(worker.rangePartitionedBackup.getReplyUnlessFailedFor(
 		                        req, SERVER_KNOBS->BACKUP_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
 		                    backup_worker_failed()));
 	}
@@ -688,14 +763,15 @@ static Future<Void> recruitRangeBackupWorkers(Reference<ClusterRecoveryData> sel
 	Future<Optional<Version>> fMinVersion = getMinBackupVersion(self, cx);
 	co_await (fBackupProgress && success(fMinVersion));
 	Optional<Version> minVersion = fMinVersion.get();
-	TraceEvent("RangeBackupMinVersion", self->dbgid).detail("Version", minVersion.present() ? minVersion.get() : -1);
+	TraceEvent("RangePartitionedBWMinVersion", self->dbgid)
+	    .detail("Version", minVersion.present() ? minVersion.get() : -1);
 
 	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> toRecruit =
 	    backupProgress->getUnfinishedRangePartitionedBackup();
 	for (const auto& [epochVersionTags, tagVersions] : toRecruit) {
 		const Version oldEpochEnd = std::get<1>(epochVersionTags);
 		if (!minVersion.present() || minVersion.get() + 1 >= oldEpochEnd) {
-			TraceEvent("SkipRangeBackupRecruitment", self->dbgid)
+			TraceEvent("RangePartitionedBWSkipRecruitment", self->dbgid)
 			    .detail("MinVersion", minVersion.present() ? minVersion.get() : -1)
 			    .detail("Epoch", epoch)
 			    .detail("OldEpoch", std::get<0>(epochVersionTags))
@@ -705,14 +781,14 @@ static Future<Void> recruitRangeBackupWorkers(Reference<ClusterRecoveryData> sel
 		for (const auto& [tag, version] : tagVersions) {
 			const auto& worker = self->backupWorkers[i % self->backupWorkers.size()];
 			i++;
-			InitializeRangeBackupRequest req(deterministicRandom()->randomUniqueID());
+			InitializeRangePartitionedBackupRequest req(deterministicRandom()->randomUniqueID());
 			req.recruitedEpoch = epoch;
 			req.backupEpoch = std::get<0>(epochVersionTags);
 			req.tag = tag;
 			req.totalTags = std::get<2>(epochVersionTags);
 			req.startVersion = version; // savedVersion + 1
 			req.endVersion = std::get<1>(epochVersionTags) - 1;
-			TraceEvent("RangeBackupRecruitment", self->dbgid)
+			TraceEvent("RangePartitionedBWRecruitment", self->dbgid)
 			    .detail("RequestID", req.reqId)
 			    .detail("Tag", req.tag.toString())
 			    .detail("Epoch", epoch)
@@ -720,15 +796,15 @@ static Future<Void> recruitRangeBackupWorkers(Reference<ClusterRecoveryData> sel
 			    .detail("StartVersion", req.startVersion)
 			    .detail("EndVersion", req.endVersion.get());
 			initializationReplies.push_back(transformErrors(
-			    throwErrorOr(worker.rangeBackup.getReplyUnlessFailedFor(
+			    throwErrorOr(worker.rangePartitionedBackup.getReplyUnlessFailedFor(
 			        req, SERVER_KNOBS->BACKUP_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
 			    backup_worker_failed()));
 		}
 	}
 
-	std::vector<InitializeRangeBackupReply> newRecruits = co_await getAll(initializationReplies);
-	self->logSystem->setRangeBackupWorkers(newRecruits);
-	TraceEvent("RangeBackupRecruitmentDone", self->dbgid).detail("NumWorkers", newRecruits.size());
+	std::vector<InitializeRangePartitionedBackupReply> newRecruits = co_await getAll(initializationReplies);
+	self->logSystem->setRangePartitionedBackupWorkers(newRecruits);
+	TraceEvent("RangePartitionedBWRecruitmentDone", self->dbgid).detail("NumWorkers", newRecruits.size());
 	self->registrationTrigger.trigger();
 }
 
@@ -867,6 +943,7 @@ void sendMasterRegistration(ClusterRecoveryData* self,
                             LogSystemConfig const& logSystemConfig,
                             std::vector<CommitProxyInterface> commitProxies,
                             std::vector<GrvProxyInterface> grvProxies,
+                            std::vector<CDCProxyInterface> cdcProxies,
                             std::vector<ResolverInterface> resolvers,
                             DBRecoveryCount recoveryCount,
                             std::vector<UID> priorCommittedLogServers) {
@@ -876,6 +953,7 @@ void sendMasterRegistration(ClusterRecoveryData* self,
 	masterReq.logSystemConfig = logSystemConfig;
 	masterReq.commitProxies = commitProxies;
 	masterReq.grvProxies = grvProxies;
+	masterReq.cdcProxies = cdcProxies;
 	masterReq.resolvers = resolvers;
 	masterReq.recoveryCount = recoveryCount;
 	if (self->hasConfiguration)
@@ -914,6 +992,7 @@ Future<Void> updateRegistration(Reference<ClusterRecoveryData> self, Reference<L
 			                       logSystemConfig,
 			                       self->provisionalCommitProxies,
 			                       self->provisionalGrvProxies,
+			                       self->controllerData->db.cdcProxies,
 			                       self->resolvers,
 			                       self->cstate.myDBState.recoveryCount,
 			                       self->cstate.prevDBState.getPriorCommittedLogServers());
@@ -923,6 +1002,7 @@ Future<Void> updateRegistration(Reference<ClusterRecoveryData> self, Reference<L
 			                       logSystemConfig,
 			                       self->commitProxies,
 			                       self->grvProxies,
+			                       self->controllerData->db.cdcProxies,
 			                       self->resolvers,
 			                       self->cstate.myDBState.recoveryCount,
 			                       std::vector<UID>());
@@ -1210,6 +1290,7 @@ Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	Future<Void> txnSystemInitialized =
 	    traceAfter(newCommitProxies(self, recruits), "CommitProxiesInitialized") &&
 	    traceAfter(newGrvProxies(self, recruits), "GRVProxiesInitialized") &&
+	    traceAfter(ensureCDCProxies(self, recruits), "CDCProxiesAvailable") &&
 	    traceAfter(newResolvers(self, recruits), "ResolversInitialized") &&
 	    traceAfter(newTLogServers(self, recruits, oldLogSystem, &confChanges), "TLogServersInitialized");
 	co_await (txnSystemInitialized || monitorInitializingTxnSystem(self->controllerData->db.unfinishedRecoveries));
@@ -1365,6 +1446,27 @@ Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> self,
 	RangeResult rawHistoryTags = co_await self->txnStateStore->readRange(serverTagHistoryKeys);
 	for (auto& kv : rawHistoryTags) {
 		self->allTags.push_back(decodeServerTagValue(kv.value));
+	}
+
+	std::set<CDCStreamId> activeCdcStreams;
+	RangeResult rawCdcStreams = co_await self->txnStateStore->readRange(cdcStreamKeys);
+	for (auto& kv : rawCdcStreams) {
+		activeCdcStreams.insert(decodeCDCStreamKey(kv.key));
+	}
+
+	RangeResult rawCdcHistoryTags = co_await self->txnStateStore->readRange(cdcTagHistoryKeys);
+	for (auto& kv : rawCdcHistoryTags) {
+		const CDCTagHistoryEntry tagHistory = decodeCDCTagHistoryKey(kv.key);
+		if (activeCdcStreams.contains(tagHistory.streamId)) {
+			self->allTags.push_back(tagHistory.tag);
+		}
+	}
+
+	// Final pops are durable recovery work. Preserve their tags even after the
+	// corresponding active stream history has been removed.
+	RangeResult rawRetiredCdcTags = co_await self->txnStateStore->readRange(cdcRetiredTagPopKeys);
+	for (auto& kv : rawRetiredCdcTags) {
+		self->allTags.push_back(decodeCDCRetiredTagPopKey(kv.key));
 	}
 
 	uniquify(self->allTags);
@@ -1565,11 +1667,12 @@ Future<Void> recoverFrom(Reference<ClusterRecoveryData> self,
 			Standalone<CommitTransactionRef> req = std::get<1>(std::move(res));
 			CODE_PROBE(true, "Emergency transaction processing during recovery");
 			TraceEvent("EmergencyTransaction", self->dbgid).log();
-			for (auto m = req.mutations.begin(); m != req.mutations.end(); ++m)
+			for (auto m = req.mutations.begin(); m != req.mutations.end(); ++m) {
 				TraceEvent("EmergencyTransactionMutation", self->dbgid)
 				    .detail("MType", m->type)
 				    .detail("P1", m->param1)
 				    .detail("P2", m->param2);
+			}
 
 			DatabaseConfiguration oldConf = self->configuration;
 			self->configuration = self->originalConfiguration;
@@ -1932,8 +2035,8 @@ Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	self->addActor.send(configurationMonitor(self, cx));
 	if (self->configuration.backupWorkerEnabled) {
 		self->addActor.send(recruitBackupWorkers(self, cx));
-	} else if (self->configuration.rangeBackupWorkerEnabled) {
-		self->addActor.send(recruitRangeBackupWorkers(self, cx));
+	} else if (self->configuration.rangePartitionedBackupWorkerEnabled) {
+		self->addActor.send(recruitRangePartitionedBackupWorkers(self, cx));
 	} else {
 		self->logSystem->setOldestBackupEpoch(self->cstate.myDBState.recoveryCount);
 	}

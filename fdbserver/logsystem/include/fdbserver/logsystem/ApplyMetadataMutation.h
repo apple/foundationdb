@@ -56,10 +56,36 @@ struct ApplyMutationsData {
 	Reference<KeyRangeMap<Version>> keyVersion;
 };
 
+// Active CDC write routing reconstructed from durable stream and tag-history metadata.
+class CDCRoutingTable : NonCopyable {
+	struct StreamState {
+		Optional<KeyRange> keys;
+		Optional<std::pair<Version, Tag>> tag;
+	};
+
+	std::unordered_map<CDCStreamId, StreamState> streams;
+	KeyRangeMap<std::set<Tag>> tagsByRange;
+
+	void updateRange(CDCStreamId streamId, KeyRangeRef const& keys);
+	bool updateTag(CDCStreamId streamId, Version version, Tag tag);
+	void rebuildRanges();
+
+public:
+	CDCRoutingTable();
+	void setRange(CDCStreamId streamId, KeyRangeRef const& keys);
+	void setTag(CDCStreamId streamId, Version version, Tag tag);
+	void reload(IKeyValueStore* txnStateStore);
+	bool empty() const { return streams.empty(); }
+
+	const std::set<Tag>& tagsForKey(KeyRef const& key) const;
+	std::set<Tag> tagsForRange(KeyRangeRef const& keys) const;
+};
+
 struct ApplyMetadataProxyContext {
 	UID dbgid;
 	IKeyValueStore* txnStateStore = nullptr;
 	KeyRangeMap<std::set<Key>>* vecBackupKeys = nullptr;
+	CDCRoutingTable* cdcRouting = nullptr;
 	KeyRangeMap<ServerCacheInfo>* keyInfo = nullptr;
 	std::map<Key, ApplyMutationsData>* uid_applyMutationsData = nullptr;
 	PublicRequestStream<CommitTransactionRequest> commit;
@@ -112,7 +138,7 @@ inline bool isMetadataMutation(MutationRef const& m) {
 	// FIXME: This is conservative - not everything in system keyspace is necessarily processed by
 	// applyMetadataMutations
 	if (m.type == MutationRef::SetValue) {
-		return (m.param1.size() && m.param1[0] == systemKeys.begin[0] &&
+		return (!m.param1.empty() && m.param1[0] == systemKeys.begin[0] &&
 		        !m.param1.startsWith(nonMetadataSystemKeys.begin));
 	} else if (m.type == MutationRef::ClearRange) {
 		return m.param2.size() > 1 && m.param2[0] == systemKeys.begin[0] &&

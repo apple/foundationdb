@@ -424,8 +424,9 @@ private:
 					dataSets.clear();
 				}
 				data.erase(data.lower_bound(o->p1), data.end());
-			} else
+			} else {
 				ASSERT(false);
+			}
 			if (log)
 				log_location = log_op(o->op, o->p1, o->p2);
 		}
@@ -570,11 +571,12 @@ private:
 								// Copy the suffix into the new reconstituted key
 								memcpy(mutateString(p1) + borrowed, suffix.begin(), suffix.size());
 							}
-							if (p1 >= uncommittedNextKey)
+							if (p1 >= uncommittedNextKey) {
 								recoveryQueue.clear(
 								    KeyRangeRef(uncommittedNextKey, p1),
 								    &uncommittedNextKey
 								         .arena()); // FIXME: Not sure what this line is for, is it necessary?
+							}
 							recoveryQueue.set(KeyValueRef(p1, p2), &data.arena());
 							uncommittedNextKey = keyAfter(p1);
 							++dbgSnapshotItemCount;
@@ -614,8 +616,9 @@ private:
 							uncommittedNextKey = self->recoveredSnapshotKey;
 							uncommittedPrevSnapshotEnd = self->previousSnapshotEnd;
 							uncommittedSnapshotEnd = self->currentSnapshotEnd;
-						} else
+						} else {
 							ASSERT(false);
+						}
 					} else {
 						TraceEvent("KVSMemRecoverySkippedZeroFill", self->id)
 						    .detail("PayloadSize", data.size())
@@ -736,12 +739,13 @@ private:
 
 			auto next = nextKeyAfter ? self->data.upper_bound(nextKey) : self->data.lower_bound(nextKey);
 			int diff = self->notifiedCommittedWriteBytes.get() - snapshotTotalWrittenBytes;
-			if (diff > lastDiff && diff > 5e7)
+			if (diff > lastDiff && diff > 5e7) {
 				TraceEvent(SevWarnAlways, "ManyWritesAtOnce", self->id)
 				    .detail("CommittedWrites", self->notifiedCommittedWriteBytes.get())
 				    .detail("SnapshotWrites", snapshotTotalWrittenBytes)
 				    .detail("Diff", diff)
 				    .detail("LastOperationWasASnapshot", nextKey.empty() && !nextKeyAfter);
+			}
 			lastDiff = diff;
 
 			// Since notifiedCommittedWriteBytes is only set() once per commit, before logging the commit operation,

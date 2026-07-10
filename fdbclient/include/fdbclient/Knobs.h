@@ -90,6 +90,8 @@ public:
 	int64_t CHANGE_FEED_CACHE_FLUSH_BYTES;
 	double CHANGE_FEED_CACHE_EXPIRE_TIME;
 	int64_t CHANGE_FEED_CACHE_LIMIT_BYTES;
+	bool ENABLE_NATIVE_CDC;
+	int NATIVE_CDC_TAG_COUNT;
 
 	int MAX_BATCH_SIZE;
 	double GRV_BATCH_TIMEOUT;
@@ -208,7 +210,7 @@ public:
 	int RESTORE_RANGES_READ_BATCH;
 
 	// interval for version directory bucketing in range-partitioned backup.
-	int64_t BACKUP_RANGE_PARTITIONED_VDIR_INTERVAL;
+	int64_t RANGE_PARTITIONED_BACKUP_VDIR_INTERVAL;
 	// Number of contiguous user keyspace partitions for range-partitioned backup.
 	int BACKUP_NUM_OF_PARTITIONS;
 	bool BACKUP_CONTAINER_LOCAL_ALLOW_RELATIVE_PATH;

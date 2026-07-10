@@ -270,10 +270,11 @@ struct MeasurePeriodically : IMeasurer {
 		std::string prefix = format("T=%04.0fs:", t);
 		std::vector<PerfMetric> m;
 		msp.getMetrics(m);
-		for (auto i = m.begin(); i != m.end(); ++i)
+		for (auto i = m.begin(); i != m.end(); ++i) {
 			if (includeMetrics.contains(i->name())) {
 				accumulatedMetrics.push_back(i->withPrefix(prefix));
 			}
+		}
 
 		// reset stats
 		msp = msp0;

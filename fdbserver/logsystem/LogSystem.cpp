@@ -21,8 +21,10 @@
 #include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/logsystem/LogSystemConsumer.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/Knobs.h"
 #include "fdbserver/core/OTELSpanContextMessage.h"
 #include "fdbserver/core/SpanContextMessage.h"
+#include "flow/CodeProbe.h"
 #include "flow/serialize.h"
 
 bool logSystemHasRemoteLogs(LogSystem const& logSystem) {
@@ -232,7 +234,7 @@ OldTLogConf toOldTLogConf(const OldLogData& oldLogData) {
 	result.recoverAt = oldLogData.recoverAt;
 	result.logRouterTags = oldLogData.logRouterTags;
 	result.txsTags = oldLogData.txsTags;
-	result.rangeBackupWorkerTags = oldLogData.rangeBackupWorkerTags;
+	result.rangePartitionedBackupWorkerTags = oldLogData.rangePartitionedBackupWorkerTags;
 	result.pseudoLocalities = oldLogData.pseudoLocalities;
 	result.epoch = oldLogData.epoch;
 	for (const Reference<LogSet>& logSet : oldLogData.tLogs) {
@@ -245,7 +247,7 @@ OldTLogCoreData toOldTLogCoreData(const OldLogData& oldData) {
 	OldTLogCoreData result;
 	result.logRouterTags = oldData.logRouterTags;
 	result.txsTags = oldData.txsTags;
-	result.rangeBackupWorkerTags = oldData.rangeBackupWorkerTags;
+	result.rangePartitionedBackupWorkerTags = oldData.rangePartitionedBackupWorkerTags;
 	result.epochBegin = oldData.epochBegin;
 	result.epochEnd = oldData.epochEnd;
 	result.recoverAt = oldData.recoverAt;
@@ -432,7 +434,7 @@ Reference<LogSystem> LogSystem::fromLogSystemConfig(UID const& dbgid,
 	logSystem->expectedLogSets = lsConf.expectedLogSets;
 	logSystem->logRouterTags = lsConf.logRouterTags;
 	logSystem->txsTags = lsConf.txsTags;
-	logSystem->rangeBackupWorkerTags = lsConf.rangeBackupWorkerTags;
+	logSystem->rangePartitionedBackupWorkerTags = lsConf.rangePartitionedBackupWorkerTags;
 	logSystem->recruitmentID = lsConf.recruitmentID;
 	logSystem->stopped = lsConf.stopped;
 	if (useRecoveredAt) {
@@ -473,7 +475,7 @@ Reference<LogSystem> LogSystem::fromOldLogSystemConfig(UID const& dbgid,
 		}
 		logSystem->logRouterTags = lsConf.oldTLogs[0].logRouterTags;
 		logSystem->txsTags = lsConf.oldTLogs[0].txsTags;
-		logSystem->rangeBackupWorkerTags = lsConf.oldTLogs[0].rangeBackupWorkerTags;
+		logSystem->rangePartitionedBackupWorkerTags = lsConf.oldTLogs[0].rangePartitionedBackupWorkerTags;
 		// logSystem->epochEnd = lsConf.oldTLogs[0].epochEnd;
 
 		for (int i = 1; i < lsConf.oldTLogs.size(); i++) {
@@ -548,7 +550,7 @@ void LogSystem::toCoreState(DBCoreState& newState) const {
 	newState.tLogs.clear();
 	newState.logRouterTags = logRouterTags;
 	newState.txsTags = txsTags;
-	newState.rangeBackupWorkerTags = rangeBackupWorkerTags;
+	newState.rangePartitionedBackupWorkerTags = rangePartitionedBackupWorkerTags;
 	newState.pseudoLocalities = pseudoLocalities;
 	for (const auto& t : tLogs) {
 		if (!t->logServers.empty()) {
@@ -569,7 +571,8 @@ void LogSystem::toCoreState(DBCoreState& newState) const {
 			TraceEvent("BWToCore")
 			    .detail("Epoch", newState.oldTLogData.back().epoch)
 			    .detail("TotalTags", newState.oldTLogData.back().logRouterTags)
-			    .detail("RangeBackupWorkerTags", newState.oldTLogData.back().rangeBackupWorkerTags)
+			    .detail("RangePartitionedBackupWorkerTags",
+			            newState.oldTLogData.back().rangePartitionedBackupWorkerTags)
 			    .detail("BeginVersion", newState.oldTLogData.back().epochBegin)
 			    .detail("EndVersion", newState.oldTLogData.back().epochEnd);
 		}
@@ -614,10 +617,6 @@ void LogSystem::coreStateWritten(DBCoreState const& newState) {
 }
 
 Future<Void> LogSystem::onError() const {
-	return onError_internal(this);
-}
-
-Future<Void> LogSystem::onError_internal(LogSystem const* self) {
 	// Never returns normally, but throws an error if the subsystem stops working
 	while (true) {
 		std::vector<Future<Void>> failed;
@@ -625,7 +624,7 @@ Future<Void> LogSystem::onError_internal(LogSystem const* self) {
 		std::vector<Future<Void>> backupFailed(1, Never());
 		std::vector<Future<Void>> changes;
 
-		for (auto& it : self->tLogs) {
+		for (auto& it : tLogs) {
 			for (auto& t : it->logServers) {
 				if (t->get().present()) {
 					failed.push_back(waitFailureClient(t->get().interf().waitFailure,
@@ -664,10 +663,10 @@ Future<Void> LogSystem::onError_internal(LogSystem const* self) {
 			}
 		}
 
-		if (!self->recoveryCompleteWrittenToCoreState.get()) {
+		if (!recoveryCompleteWrittenToCoreState.get()) {
 			failed.insert(failed.end(), routerFailed.begin(), routerFailed.end());
 			routerFailed.clear();
-			for (auto& old : self->oldLogData) {
+			for (auto& old : oldLogData) {
 				for (auto& it : old.tLogs) {
 					for (auto& t : it->logRouters) {
 						if (t->get().present()) {
@@ -707,12 +706,12 @@ Future<Void> LogSystem::onError_internal(LogSystem const* self) {
 			failed.insert(failed.end(), routerFailed.begin(), routerFailed.end());
 		}
 
-		if (self->hasRemoteServers && (!self->remoteRecovery.isReady() || self->remoteRecovery.isError())) {
-			changes.push_back(self->remoteRecovery);
+		if (hasRemoteServers && (!remoteRecovery.isReady() || remoteRecovery.isError())) {
+			changes.push_back(remoteRecovery);
 		}
 
-		changes.push_back(self->recoveryCompleteWrittenToCoreState.onChange());
-		changes.push_back(self->backupWorkerChanged.onTrigger());
+		changes.push_back(recoveryCompleteWrittenToCoreState.onChange());
+		changes.push_back(backupWorkerChanged.onTrigger());
 
 		ASSERT(!failed.empty());
 		co_await (
@@ -908,8 +907,7 @@ Future<Void> LogSystem::onKnownCommittedVersionChange() {
 	return waitForAny(result);
 }
 
-Future<Void> LogSystem::popFromLog(LogSystem* self,
-                                   Reference<AsyncVar<OptionalInterface<TLogInterface>>> log,
+Future<Void> LogSystem::popFromLog(Reference<AsyncVar<OptionalInterface<TLogInterface>>> log,
                                    Tag tag,
                                    double delayBeforePop,
                                    bool popLogRouter) {
@@ -918,10 +916,10 @@ Future<Void> LogSystem::popFromLog(LogSystem* self,
 		co_await delay(delayBeforePop, TaskPriority::TLogPop);
 
 		// to: first is upto version, second is durableKnownComittedVersion
-		std::pair<Version, Version> to = self->outstandingPops[std::make_pair(log->get().id(), tag)];
+		std::pair<Version, Version> to = outstandingPops[std::make_pair(log->get().id(), tag)];
 
 		if (to.first <= last) {
-			self->outstandingPops.erase(std::make_pair(log->get().id(), tag));
+			outstandingPops.erase(std::make_pair(log->get().id(), tag));
 			co_return;
 		}
 
@@ -932,14 +930,14 @@ Future<Void> LogSystem::popFromLog(LogSystem* self,
 			                                                  TaskPriority::TLogPop);
 
 			if (popLogRouter) {
-				self->logRouterLastPops[std::make_pair(log->get().id(), tag)] = to.first;
+				logRouterLastPops[std::make_pair(log->get().id(), tag)] = to.first;
 			}
 
 			last = to.first;
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
 				throw;
-			TraceEvent((e.code() == error_code_broken_promise) ? SevInfo : SevError, "LogPopError", self->dbgid)
+			TraceEvent((e.code() == error_code_broken_promise) ? SevInfo : SevError, "LogPopError", dbgid)
 			    .error(e)
 			    .detail("Log", log->get().id());
 			co_return; // Leaving outstandingPops filled in means no further pop requests to this tlog from this
@@ -969,12 +967,12 @@ Future<Version> LogSystem::getPoppedFromTLog(Reference<AsyncVar<OptionalInterfac
 	}
 }
 
-Future<Version> LogSystem::getPoppedTxs(LogSystem* self) {
+Future<Version> LogSystem::getPoppedTxs() {
 	std::vector<std::vector<Future<Version>>> poppedFutures;
 	std::vector<Future<Void>> poppedReady;
-	if (!self->tLogs.empty()) {
+	if (!tLogs.empty()) {
 		poppedFutures.push_back(std::vector<Future<Version>>());
-		for (auto& it : self->tLogs) {
+		for (auto& it : tLogs) {
 			for (auto& log : it->logServers) {
 				poppedFutures.back().push_back(LogSystem::getPoppedFromTLog(log, Tag(tagLocalityTxs, 0)));
 			}
@@ -982,7 +980,7 @@ Future<Version> LogSystem::getPoppedTxs(LogSystem* self) {
 		poppedReady.push_back(waitForAny(poppedFutures.back()));
 	}
 
-	for (auto& old : self->oldLogData) {
+	for (auto& old : oldLogData) {
 		if (!old.tLogs.empty()) {
 			poppedFutures.push_back(std::vector<Future<Version>>());
 			for (auto& it : old.tLogs) {
@@ -994,7 +992,7 @@ Future<Version> LogSystem::getPoppedTxs(LogSystem* self) {
 		}
 	}
 
-	UID dbgid = self->dbgid;
+	UID dbgid = this->dbgid;
 	Future<Void> maxGetPoppedDuration = delay(SERVER_KNOBS->TXS_POPPED_MAX_DELAY);
 	co_await (waitForAll(poppedReady) || maxGetPoppedDuration);
 
@@ -1126,7 +1124,7 @@ LogSystemConfig LogSystem::getLogSystemConfig() const {
 	logSystemConfig.expectedLogSets = expectedLogSets;
 	logSystemConfig.logRouterTags = logRouterTags;
 	logSystemConfig.txsTags = txsTags;
-	logSystemConfig.rangeBackupWorkerTags = rangeBackupWorkerTags;
+	logSystemConfig.rangePartitionedBackupWorkerTags = rangePartitionedBackupWorkerTags;
 	logSystemConfig.recruitmentID = recruitmentID;
 	logSystemConfig.stopped = stopped;
 	logSystemConfig.recoveredAt = recoveredAt;
@@ -1277,8 +1275,8 @@ int LogSystem::getLogRouterTags() const {
 	return logRouterTags;
 }
 
-int LogSystem::getRangeBackupWorkerTags() const {
-	return rangeBackupWorkerTags;
+int LogSystem::getRangePartitionedBackupWorkerTags() const {
+	return rangePartitionedBackupWorkerTags;
 }
 
 Version LogSystem::getBackupStartVersion() const {
@@ -1299,14 +1297,14 @@ std::map<LogEpoch, EpochTagsVersionsInfo> LogSystem::getOldEpochLogRouterTagsInf
 	return epochInfos;
 }
 
-std::map<LogEpoch, EpochTagsVersionsInfo> LogSystem::getOldEpochRangeBackupTagsInfo() const {
+std::map<LogEpoch, EpochTagsVersionsInfo> LogSystem::getOldEpochRangePartitionedBackupTagsInfo() const {
 	std::map<LogEpoch, EpochTagsVersionsInfo> epochInfos;
 	for (const auto& old : oldLogData) {
 		epochInfos.insert(
-		    { old.epoch, EpochTagsVersionsInfo(old.rangeBackupWorkerTags, old.epochBegin, old.epochEnd) });
-		TraceEvent("OldEpochRangeBackupTagsInfo", dbgid)
+		    { old.epoch, EpochTagsVersionsInfo(old.rangePartitionedBackupWorkerTags, old.epochBegin, old.epochEnd) });
+		TraceEvent("RangePartitionedBWOldEpochTagsInfo", dbgid)
 		    .detail("Epoch", old.epoch)
-		    .detail("Tags", old.rangeBackupWorkerTags)
+		    .detail("Tags", old.rangePartitionedBackupWorkerTags)
 		    .detail("BeginVersion", old.epochBegin)
 		    .detail("EndVersion", old.epochEnd);
 	}
@@ -1348,7 +1346,7 @@ void LogSystem::setBackupWorkers(const std::vector<InitializeBackupReply>& repli
 	backupWorkerChanged.trigger();
 }
 
-void LogSystem::setRangeBackupWorkers(const std::vector<InitializeRangeBackupReply>& replies) {
+void LogSystem::setRangePartitionedBackupWorkers(const std::vector<InitializeRangePartitionedBackupReply>& replies) {
 	ASSERT(!tLogs.empty());
 
 	Reference<LogSet> logset = tLogs[0];
@@ -1368,11 +1366,11 @@ void LogSystem::setRangeBackupWorkers(const std::vector<InitializeRangeBackupRep
 			ASSERT(logset.isValid());
 		}
 		logset->backupWorkers.push_back(worker);
-		TraceEvent("AddRangeBackupWorker", dbgid)
+		TraceEvent("RangePartitionedBWAdd", dbgid)
 		    .detail("Epoch", logsetEpoch)
 		    .detail("BackupWorkerID", reply.interf.id());
 	}
-	TraceEvent("SetOldestRangeBackupEpoch", dbgid).detail("Epoch", oldestBackupEpoch);
+	TraceEvent("RangePartitionedBWSetOldestEpoch", dbgid).detail("Epoch", oldestBackupEpoch);
 	backupWorkerChanged.trigger();
 }
 
@@ -2092,7 +2090,7 @@ Future<Void> LogSystem::epochEnd(Reference<AsyncVar<Reference<LogSystem>>> outLo
 			logSystem->tLogs = logServers;
 			logSystem->logRouterTags = prevState.logRouterTags;
 			logSystem->txsTags = prevState.txsTags;
-			logSystem->rangeBackupWorkerTags = prevState.rangeBackupWorkerTags;
+			logSystem->rangePartitionedBackupWorkerTags = prevState.rangePartitionedBackupWorkerTags;
 			logSystem->oldLogData = oldLogData;
 			logSystem->logSystemType = prevState.logSystemType;
 			logSystem->rejoins = rejoins;
@@ -2117,8 +2115,7 @@ Future<Void> LogSystem::epochEnd(Reference<AsyncVar<Reference<LogSystem>>> outLo
 	}
 }
 
-Future<Void> LogSystem::recruitOldLogRouters(LogSystem* self,
-                                             std::vector<WorkerInterface> workers,
+Future<Void> LogSystem::recruitOldLogRouters(std::vector<WorkerInterface> workers,
                                              LogEpoch recoveryCount,
                                              int8_t locality,
                                              Version startVersion,
@@ -2131,17 +2128,17 @@ Future<Void> LogSystem::recruitOldLogRouters(LogSystem* self,
 	Version lastStart = std::numeric_limits<Version>::max();
 
 	if (!forRemote) {
-		Version maxStart = LogSystem::getMaxLocalStartVersion(self->tLogs);
+		Version maxStart = LogSystem::getMaxLocalStartVersion(tLogs);
 
 		lastStart = std::max(startVersion, maxStart);
-		if (self->logRouterTags == 0) {
+		if (logRouterTags == 0) {
 			ASSERT_WE_THINK(false);
-			self->logSystemConfigChanged.trigger();
+			logSystemConfigChanged.trigger();
 			co_return;
 		}
 
 		bool found = false;
-		for (auto& tLogs : self->tLogs) {
+		for (auto& tLogs : this->tLogs) {
 			if (tLogs->locality == locality) {
 				found = true;
 			}
@@ -2157,17 +2154,15 @@ Future<Void> LogSystem::recruitOldLogRouters(LogSystem* self,
 			newLogSet->locality = locality;
 			newLogSet->startVersion = lastStart;
 			newLogSet->isLocal = false;
-			self->tLogs.push_back(newLogSet);
+			tLogs.push_back(newLogSet);
 		}
 
-		for (auto& tLogs : self->tLogs) {
+		for (auto& tLogs : this->tLogs) {
 			// Recruit log routers for old generations of the primary locality
 			if (tLogs->locality == locality) {
 				logRouterInitializationReplies.emplace_back();
-				TraceEvent("LogRouterInitReqSent1")
-				    .detail("Locality", locality)
-				    .detail("LogRouterTags", self->logRouterTags);
-				for (int i = 0; i < self->logRouterTags; i++) {
+				TraceEvent("LogRouterInitReqSent1").detail("Locality", locality).detail("LogRouterTags", logRouterTags);
+				for (int i = 0; i < logRouterTags; i++) {
 					InitializeLogRouterRequest req;
 					req.reqId = deterministicRandom()->randomUniqueID();
 					req.recoveryCount = recoveryCount;
@@ -2176,8 +2171,8 @@ Future<Void> LogSystem::recruitOldLogRouters(LogSystem* self,
 					req.tLogLocalities = tLogLocalities;
 					req.tLogPolicy = tLogPolicy;
 					req.locality = locality;
-					req.recoverAt = self->recoverAt.get();
-					req.knownLockedTLogIds = self->knownLockedTLogIds;
+					req.recoverAt = recoverAt.get();
+					req.knownLockedTLogIds = knownLockedTLogIds;
 					req.allowDropInSim = SERVER_KNOBS->CC_RECOVERY_INIT_REQ_ALLOW_DROP_IN_SIM && !forRemote;
 					req.isReplacement = false;
 					auto reply = transformErrors(
@@ -2192,7 +2187,7 @@ Future<Void> LogSystem::recruitOldLogRouters(LogSystem* self,
 		}
 	}
 
-	for (auto& old : self->oldLogData) {
+	for (auto& old : oldLogData) {
 		Version maxStart = LogSystem::getMaxLocalStartVersion(old.tLogs);
 
 		if (old.logRouterTags == 0 || maxStart >= lastStart) {
@@ -2255,10 +2250,10 @@ Future<Void> LogSystem::recruitOldLogRouters(LogSystem* self,
 	std::vector<Future<Void>> failed;
 
 	if (!forRemote) {
-		Version maxStart = LogSystem::getMaxLocalStartVersion(self->tLogs);
+		Version maxStart = LogSystem::getMaxLocalStartVersion(tLogs);
 
 		lastStart = std::max(startVersion, maxStart);
-		for (auto& tLogs : self->tLogs) {
+		for (auto& tLogs : this->tLogs) {
 			if (tLogs->locality == locality) {
 				for (int i = 0; i < logRouterInitializationReplies[nextReplies].size(); i++) {
 					tLogs->logRouters.push_back(makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(
@@ -2274,7 +2269,7 @@ Future<Void> LogSystem::recruitOldLogRouters(LogSystem* self,
 		}
 	}
 
-	for (auto& old : self->oldLogData) {
+	for (auto& old : oldLogData) {
 		Version maxStart = LogSystem::getMaxLocalStartVersion(old.tLogs);
 		if (old.logRouterTags == 0 || maxStart >= lastStart) {
 			break;
@@ -2299,7 +2294,7 @@ Future<Void> LogSystem::recruitOldLogRouters(LogSystem* self,
 	}
 
 	if (!forRemote) {
-		self->logSystemConfigChanged.trigger();
+		logSystemConfigChanged.trigger();
 		co_await (!failed.empty() ? tagError<Void>(quorum(failed, 1), tlog_failed()) : Future<Void>(Never()));
 		throw internal_error();
 	}
@@ -2325,8 +2320,7 @@ std::vector<Tag> LogSystem::getLocalTags(int8_t locality, const std::vector<Tag>
 	return localTags;
 }
 
-Future<Void> LogSystem::newRemoteEpoch(LogSystem* self,
-                                       Reference<LogSystem> oldLogSystem,
+Future<Void> LogSystem::newRemoteEpoch(Reference<LogSystem> oldLogSystem,
                                        Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers,
                                        DatabaseConfiguration configuration,
                                        LogEpoch recoveryCount,
@@ -2351,7 +2345,7 @@ Future<Void> LogSystem::newRemoteEpoch(LogSystem* self,
 	for (int lockNum = 0; lockNum < oldLogSystem->lockResults.size(); ++lockNum) {
 		if (oldLogSystem->lockResults[lockNum].logSet->locality == remoteLocality) {
 			while (true) {
-				auto durableVersionInfo = LogSystem::getDurableVersion(self->dbgid, oldLogSystem->lockResults[lockNum]);
+				auto durableVersionInfo = LogSystem::getDurableVersion(dbgid, oldLogSystem->lockResults[lockNum]);
 				if (durableVersionInfo.present()) {
 					logSet->startVersion = std::min(std::min(durableVersionInfo.get().knownCommittedVersion + 1,
 					                                         oldLogSystem->lockResults[lockNum].epochEnd),
@@ -2373,22 +2367,21 @@ Future<Void> LogSystem::newRemoteEpoch(LogSystem* self,
 	Future<Void> oldRouterRecruitment = Void();
 	if (logSet->startVersion < oldLogSystem->knownCommittedVersion + 1) {
 		ASSERT(oldLogSystem->logRouterTags > 0);
-		oldRouterRecruitment = LogSystem::recruitOldLogRouters(self,
-		                                                       remoteWorkers.logRouters,
-		                                                       recoveryCount,
-		                                                       remoteLocality,
-		                                                       logSet->startVersion,
-		                                                       localities,
-		                                                       logSet->tLogPolicy,
-		                                                       /* forRemote */ true);
+		oldRouterRecruitment = recruitOldLogRouters(remoteWorkers.logRouters,
+		                                            recoveryCount,
+		                                            remoteLocality,
+		                                            logSet->startVersion,
+		                                            localities,
+		                                            logSet->tLogPolicy,
+		                                            /* forRemote */ true);
 	}
 
 	std::vector<Future<TLogInterface>> logRouterInitializationReplies;
 	const Version startVersion = oldLogSystem->logRouterTags == 0
 	                                 ? oldLogSystem->recoverAt.get() + 1
-	                                 : std::max(self->tLogs[0]->startVersion, logSet->startVersion);
-	TraceEvent("LogRouterInitReqSent3").detail("Locality", remoteLocality).detail("LogRouterTags", self->logRouterTags);
-	for (int i = 0; i < self->logRouterTags; i++) {
+	                                 : std::max(tLogs[0]->startVersion, logSet->startVersion);
+	TraceEvent("LogRouterInitReqSent3").detail("Locality", remoteLocality).detail("LogRouterTags", logRouterTags);
+	for (int i = 0; i < logRouterTags; i++) {
 		InitializeLogRouterRequest req;
 		req.reqId = deterministicRandom()->randomUniqueID();
 		req.recoveryCount = recoveryCount;
@@ -2399,7 +2392,7 @@ Future<Void> LogSystem::newRemoteEpoch(LogSystem* self,
 		req.locality = remoteLocality;
 		req.allowDropInSim = false;
 		req.isReplacement = false;
-		TraceEvent("RemoteTLogRouterReplies", self->dbgid)
+		TraceEvent("RemoteTLogRouterReplies", dbgid)
 		    .detail("WorkerID", remoteWorkers.logRouters[i % remoteWorkers.logRouters.size()].id());
 		logRouterInitializationReplies.push_back(transformErrors(
 		    throwErrorOr(
@@ -2438,7 +2431,7 @@ Future<Void> LogSystem::newRemoteEpoch(LogSystem* self,
 			}
 			for (int i = 0; i < maxTxsTags; i++) {
 				Tag tag = Tag(tagLocalityTxs, i);
-				Tag pushTag = Tag(tagLocalityTxs, i % self->txsTags);
+				Tag pushTag = Tag(tagLocalityTxs, i % txsTags);
 				locations.clear();
 				logSet->getPushLocations(VectorRef<Tag>(&pushTag, 1), locations, 0);
 				for (int loc : locations) {
@@ -2449,14 +2442,14 @@ Future<Void> LogSystem::newRemoteEpoch(LogSystem* self,
 	}
 
 	if (!oldLogSystem->tLogs.empty()) {
-		for (int i = 0; i < self->txsTags; i++) {
+		for (int i = 0; i < txsTags; i++) {
 			localTags.push_back(Tag(tagLocalityTxs, i));
 		}
 	}
 
 	for (int i = 0; i < remoteWorkers.remoteTLogs.size(); i++) {
 		InitializeTLogRequest& req = remoteTLogReqs[i];
-		req.recruitmentID = self->recruitmentID;
+		req.recruitmentID = recruitmentID;
 		req.logVersion = configuration.tLogVersion;
 		req.storeType = configuration.tLogDataStoreType;
 		req.spillType = configuration.tLogSpillType;
@@ -2470,14 +2463,14 @@ Future<Void> LogSystem::newRemoteEpoch(LogSystem* self,
 		req.allTags = localTags;
 		req.startVersion = logSet->startVersion;
 		req.logRouterTags = 0;
-		req.txsTags = self->txsTags;
+		req.txsTags = txsTags;
 		req.recoveryTransactionVersion = recoveryTransactionVersion;
 		req.oldGenerationRecoverAtVersions = oldGenerationRecoverAtVersions;
 	}
 
 	remoteTLogInitializationReplies.reserve(remoteWorkers.remoteTLogs.size());
 	for (int i = 0; i < remoteWorkers.remoteTLogs.size(); i++) {
-		TraceEvent("RemoteTLogInitReqSent", self->dbgid).detail("WorkerID", remoteWorkers.remoteTLogs[i].id());
+		TraceEvent("RemoteTLogInitReqSent", dbgid).detail("WorkerID", remoteWorkers.remoteTLogs[i].id());
 		remoteTLogInitializationReplies.push_back(transformErrors(
 		    throwErrorOr(remoteWorkers.remoteTLogs[i].tLog.getReplyUnlessFailedFor(
 		        remoteTLogReqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
@@ -2486,8 +2479,8 @@ Future<Void> LogSystem::newRemoteEpoch(LogSystem* self,
 
 	TraceEvent("RemoteLogRecruitment_InitializingRemoteLogs")
 	    .detail("StartVersion", logSet->startVersion)
-	    .detail("LocalStart", self->tLogs[0]->startVersion)
-	    .detail("LogRouterTags", self->logRouterTags);
+	    .detail("LocalStart", tLogs[0]->startVersion)
+	    .detail("LogRouterTags", logRouterTags);
 	co_await (traceAfter(waitForAll(remoteTLogInitializationReplies), "RemoteTLogInitializationRepliesReceived") &&
 	          traceAfter(waitForAll(logRouterInitializationReplies), "LogRouterInitializationRepliesReceived") &&
 	          traceAfter(oldRouterRecruitment, "OldRouterRecruitmentFinished"));
@@ -2516,10 +2509,9 @@ Future<Void> LogSystem::newRemoteEpoch(LogSystem* self,
 		allRemoteTLogServers.push_back(logSet->logServers[i]);
 	}
 
-	self->remoteRecoveryComplete = waitForAll(recoveryComplete);
-	self->remoteTrackTLogRecovery =
-	    LogSystem::trackTLogRecoveryActor(allRemoteTLogServers, self->remoteRecoveredVersion);
-	self->tLogs.push_back(logSet);
+	remoteRecoveryComplete = waitForAll(recoveryComplete);
+	remoteTrackTLogRecovery = LogSystem::trackTLogRecoveryActor(allRemoteTLogServers, remoteRecoveredVersion);
+	tLogs.push_back(logSet);
 	TraceEvent("RemoteLogRecruitment_CompletingRecovery").log();
 }
 
@@ -2564,10 +2556,10 @@ Future<Reference<LogSystem>> LogSystem::newEpoch(Reference<LogSystem> oldLogSyst
 		TraceEvent("AddPseudoLocality", logSystem->getDebugID()).detail("Locality", "Backup");
 	}
 
-	if (configuration.rangeBackupWorkerEnabled) {
-		logSystem->rangeBackupWorkerTags = configuration.desiredRangeBackupWorkerCount > 0
-		                                       ? configuration.desiredRangeBackupWorkerCount
-		                                       : (int)recr.tLogs.size();
+	if (configuration.rangePartitionedBackupWorkerEnabled) {
+		logSystem->rangePartitionedBackupWorkerTags = configuration.desiredRangePartitionedBackupWorkerCount > 0
+		                                                  ? configuration.desiredRangePartitionedBackupWorkerCount
+		                                                  : (int)recr.tLogs.size();
 	}
 
 	logSystem->tLogs.push_back(makeReference<LogSet>());
@@ -2583,6 +2575,21 @@ Future<Reference<LogSystem>> LogSystem::newEpoch(Reference<LogSystem> oldLogSyst
 	int maxTxsTags = oldLogSystem->txsTags;
 	for (auto& it : oldLogSystem->oldLogData) {
 		maxTxsTags = std::max<int>(maxTxsTags, it.txsTags);
+	}
+	const int configuredCdcTags = CLIENT_KNOBS->NATIVE_CDC_TAG_COUNT;
+	const bool validConfiguredCdcTags =
+	    configuredCdcTags > 0 &&
+	    static_cast<uint64_t>(configuredCdcTags) <= static_cast<uint64_t>(std::numeric_limits<uint16_t>::max()) + 1;
+	int maxCdcTags = validConfiguredCdcTags ? configuredCdcTags : 0;
+	if (!validConfiguredCdcTags) {
+		CODE_PROBE(true, "Recovery ignores an invalid Native CDC tag count", probe::decoration::rare);
+		TraceEvent(SevWarnAlways, "InvalidNativeCdcTagCount", oldLogSystem->getDebugID())
+		    .detail("ConfiguredTagCount", configuredCdcTags);
+	}
+	for (Tag tag : allTags) {
+		if (tag.locality == tagLocalityCDC) {
+			maxCdcTags = std::max<int>(maxCdcTags, tag.id + 1);
+		}
 	}
 
 	if (region.satelliteTLogReplicationFactor > 0 && configuration.usableRegions > 1) {
@@ -2612,8 +2619,29 @@ Future<Reference<LogSystem>> LogSystem::newEpoch(Reference<LogSystem> oldLogSyst
 		        .size()); // Dummy interfaces, so that logSystem->getPushLocations() below uses the correct size
 		logSystem->tLogs[1]->updateLocalitySet(logSystem->tLogs[1]->tLogLocalities);
 		logSystem->tLogs[1]->populateSatelliteTagLocations(
-		    logSystem->logRouterTags, oldLogSystem->logRouterTags, logSystem->txsTags, maxTxsTags);
+		    logSystem->logRouterTags, oldLogSystem->logRouterTags, logSystem->txsTags, maxTxsTags, maxCdcTags);
 		logSystem->expectedLogSets++;
+	}
+
+	// Backup workers are bound to the recovery that recruited them and self-displace when the recovery count
+	// advances. Do not carry their interfaces into this recovery: the master re-recruits any unfinished work from
+	// durable progress, and monitoring an inherited interface would turn expected displacement into
+	// backup_worker_failed.
+	size_t droppedBackupWorkers = 0;
+	auto dropBackupWorkers = [&droppedBackupWorkers](const std::vector<Reference<LogSet>>& logSets) {
+		for (const auto& logSet : logSets) {
+			droppedBackupWorkers += logSet->backupWorkers.size();
+			logSet->backupWorkers.clear();
+		}
+	};
+	dropBackupWorkers(oldLogSystem->tLogs);
+	for (const auto& old : oldLogSystem->oldLogData) {
+		dropBackupWorkers(old.tLogs);
+	}
+	if (droppedBackupWorkers > 0) {
+		TraceEvent("DropPreviousRecoveryBackupWorkers", logSystem->dbgid)
+		    .detail("RecoveryCount", recoveryCount)
+		    .detail("Count", droppedBackupWorkers);
 	}
 
 	if (!oldLogSystem->tLogs.empty()) {
@@ -2623,7 +2651,7 @@ Future<Reference<LogSystem>> LogSystem::newEpoch(Reference<LogSystem> oldLogSyst
 		logSystem->oldLogData[0].epochEnd = oldLogSystem->knownCommittedVersion + 1;
 		logSystem->oldLogData[0].recoverAt = oldLogSystem->recoverAt.get();
 		logSystem->oldLogData[0].logRouterTags = oldLogSystem->logRouterTags;
-		logSystem->oldLogData[0].rangeBackupWorkerTags = oldLogSystem->rangeBackupWorkerTags;
+		logSystem->oldLogData[0].rangePartitionedBackupWorkerTags = oldLogSystem->rangePartitionedBackupWorkerTags;
 		logSystem->oldLogData[0].txsTags = oldLogSystem->txsTags;
 		logSystem->oldLogData[0].pseudoLocalities = oldLogSystem->pseudoLocalities;
 		logSystem->oldLogData[0].epoch = oldLogSystem->epoch;
@@ -2671,14 +2699,13 @@ Future<Reference<LogSystem>> LogSystem::newEpoch(Reference<LogSystem> oldLogSyst
 	if (oldLogSystem->logRouterTags > 0 ||
 	    logSystem->tLogs[0]->startVersion < oldLogSystem->knownCommittedVersion + 1) {
 		// Use log routers to recover [knownCommittedVersion, recoveryVersion] from the old generation.
-		oldRouterRecruitment = LogSystem::recruitOldLogRouters(oldLogSystem.getPtr(),
-		                                                       recr.oldLogRouters,
-		                                                       recoveryCount,
-		                                                       primaryLocality,
-		                                                       logSystem->tLogs[0]->startVersion,
-		                                                       localities,
-		                                                       logSystem->tLogs[0]->tLogPolicy,
-		                                                       /* forRemote */ false);
+		oldRouterRecruitment = oldLogSystem->recruitOldLogRouters(recr.oldLogRouters,
+		                                                          recoveryCount,
+		                                                          primaryLocality,
+		                                                          logSystem->tLogs[0]->startVersion,
+		                                                          localities,
+		                                                          logSystem->tLogs[0]->tLogPolicy,
+		                                                          /* forRemote */ false);
 		if (oldLogSystem->knownCommittedVersion - logSystem->tLogs[0]->startVersion >
 		    SERVER_KNOBS->MAX_RECOVERY_VERSIONS) {
 			// make sure we can recover in the other DC.
@@ -2783,6 +2810,18 @@ Future<Reference<LogSystem>> LogSystem::newEpoch(Reference<LogSystem> oldLogSyst
 		std::vector<Future<TLogInterface>> satelliteInitializationReplies;
 		std::vector<InitializeTLogRequest> sreqs(recr.satelliteTLogs.size());
 		std::vector<Tag> satelliteTags;
+
+		for (Tag tag : allTags) {
+			if (tag.locality == tagLocalityCDC) {
+				CODE_PROBE(true, "CDC tags are recovered onto satellite TLogs");
+				locations.clear();
+				logSystem->tLogs[1]->getPushLocations(VectorRef<Tag>(&tag, 1), locations, 0);
+				for (int loc : locations) {
+					sreqs[loc].recoverTags.push_back(tag);
+				}
+				satelliteTags.push_back(tag);
+			}
+		}
 
 		if (logSystem->logRouterTags) {
 			for (int i = 0; i < oldLogSystem->logRouterTags; i++) {
@@ -2898,8 +2937,7 @@ Future<Reference<LogSystem>> LogSystem::newEpoch(Reference<LogSystem> oldLogSyst
 
 	if (configuration.usableRegions > 1) {
 		logSystem->hasRemoteServers = true;
-		logSystem->remoteRecovery = LogSystem::newRemoteEpoch(logSystem.getPtr(),
-		                                                      oldLogSystem,
+		logSystem->remoteRecovery = logSystem->newRemoteEpoch(oldLogSystem,
 		                                                      fRemoteWorkers,
 		                                                      configuration,
 		                                                      recoveryCount,

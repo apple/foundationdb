@@ -66,12 +66,22 @@ struct FutureReturnType<FutureStream<T>> {
 };
 
 template <class T>
+struct FutureReturnType<ThreadFutureStream<T>> {
+	using type = T;
+};
+
+template <class T>
 struct FutureReturnType<Future<T> const&> {
 	using type = T;
 };
 
 template <class T>
 struct FutureReturnType<FutureStream<T> const&> {
+	using type = T;
+};
+
+template <class T>
+struct FutureReturnType<ThreadFutureStream<T> const&> {
 	using type = T;
 };
 
@@ -109,12 +119,22 @@ struct GetFutureType<FutureStream<T>> {
 };
 
 template <class T>
+struct GetFutureType<ThreadFutureStream<T>> {
+	constexpr static FutureType value = FutureType::FutureStream;
+};
+
+template <class T>
 struct GetFutureType<Future<T> const&> {
 	constexpr static FutureType value = FutureType::Future;
 };
 
 template <class T>
 struct GetFutureType<FutureStream<T> const&> {
+	constexpr static FutureType value = FutureType::FutureStream;
+};
+
+template <class T>
+struct GetFutureType<ThreadFutureStream<T> const&> {
 	constexpr static FutureType value = FutureType::FutureStream;
 };
 
@@ -999,7 +1019,7 @@ struct CoroPromise<T, IsCancellable, ReturnsExplicitVoid, false>
 
 	ActorType coroActor; // Embedded in coroutine frame — single allocation
 
-	CoroPromise() {}
+	CoroPromise() = default;
 
 	ActorType* actor() { return &coroActor; }
 
@@ -1049,7 +1069,7 @@ struct CoroPromise<T, IsCancellable, ReturnsExplicitVoid, true>
 	// allocates it separately because cancel() intentionally destroys that frame.
 	ActorType* coroActor = new ActorType();
 
-	CoroPromise() {}
+	CoroPromise() = default;
 
 	ActorType* actor() { return coroActor; }
 

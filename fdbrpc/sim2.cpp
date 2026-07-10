@@ -171,7 +171,7 @@ void ISimulator::displayWorkers() const {
 			printf("                  %9s %-10s%-13s%-8s %-6s %-9s %-8s %-48s %-40s\n",
 			       processInfo->address.toString().c_str(),
 			       processInfo->name.c_str(),
-			       processInfo->startingClass.toString().c_str(),
+			       processInfo->metadata->role.c_str(),
 			       (processInfo->isExcluded() ? "True" : "False"),
 			       (processInfo->failed ? "True" : "False"),
 			       (processInfo->rebooting ? "True" : "False"),
@@ -750,7 +750,7 @@ private:
 		ASSERT((self->flags & IAsyncFile::OPEN_NO_AIO) != 0 ||
 		       ((uintptr_t)data % 4096 == 0 && length % 4096 == 0 && offset % 4096 == 0)); // Required by KAIO.
 		UID opId = deterministicRandom()->randomUniqueID();
-		if (randLog)
+		if (randLog) {
 			fmt::print(randLog,
 			           "SFR1 {0} {1} {2} {3} {4}\n",
 			           self->dbgId.shortString(),
@@ -758,6 +758,7 @@ private:
 			           opId.shortString(),
 			           length,
 			           offset);
+		}
 
 		co_await waitUntilDiskReady(self->diskParameters, length);
 
@@ -864,12 +865,13 @@ private:
 			throw io_error();
 		}
 
-		if (randLog)
+		if (randLog) {
 			fprintf(randLog,
 			        "SFT2 %s %s %s\n",
 			        self->dbgId.shortString().c_str(),
 			        self->filename.c_str(),
 			        opId.shortString().c_str());
+		}
 
 		INJECT_FAULT(io_timeout, "SimpleFile::truncate"); // SimpleFile::truncate inject io_timeout
 		INJECT_FAULT(io_error, "SimpleFile::truncate"); // SimpleFile::truncate inject io_error
@@ -880,12 +882,13 @@ private:
 	// Simulated sync does not actually do anything besides wait a random amount of time
 	static Future<Void> sync_impl(SimpleFile* self) {
 		UID opId = deterministicRandom()->randomUniqueID();
-		if (randLog)
+		if (randLog) {
 			fprintf(randLog,
 			        "SFC1 %s %s %s\n",
 			        self->dbgId.shortString().c_str(),
 			        self->filename.c_str(),
 			        opId.shortString().c_str());
+		}
 
 		if (self->delayOnWrite)
 			co_await waitUntilDiskReady(self->diskParameters, 0, true);
@@ -923,12 +926,13 @@ private:
 			}
 		}
 
-		if (randLog)
+		if (randLog) {
 			fprintf(randLog,
 			        "SFC2 %s %s %s\n",
 			        self->dbgId.shortString().c_str(),
 			        self->filename.c_str(),
 			        opId.shortString().c_str());
+		}
 
 		INJECT_FAULT(io_timeout, "SimpleFile::sync"); // SimpleFile::sync inject io_timeout
 		INJECT_FAULT(io_error, "SimpleFile::sync"); // SimpleFile::sync inject io_errot
@@ -938,12 +942,13 @@ private:
 
 	static Future<int64_t> size_impl(SimpleFile const* self) {
 		UID opId = deterministicRandom()->randomUniqueID();
-		if (randLog)
+		if (randLog) {
 			fprintf(randLog,
 			        "SFS1 %s %s %s\n",
 			        self->dbgId.shortString().c_str(),
 			        self->filename.c_str(),
 			        opId.shortString().c_str());
+		}
 
 		co_await waitUntilDiskReady(self->diskParameters, 0);
 
@@ -1310,12 +1315,13 @@ public:
 		total = diskSpace.totalSpace;
 		free = std::max<int64_t>(0, diskSpace.baseFreeSpace - totalFileSize);
 
-		if (free == 0)
+		if (free == 0) {
 			TraceEvent(SevWarnAlways, "Sim2NoFreeSpace")
 			    .detail("TotalSpace", diskSpace.totalSpace)
 			    .detail("BaseFreeSpace", diskSpace.baseFreeSpace)
 			    .detail("TotalFileSize", totalFileSize)
 			    .detail("NumFiles", numFiles);
+		}
 	}
 	bool isAddressOnThisHost(NetworkAddress const& addr) const override {
 		return addr.ip == getCurrentProcess()->address.ip;
@@ -1406,7 +1412,7 @@ public:
 	                        bool sslEnabled,
 	                        uint16_t listenPerProcess,
 	                        LocalityData locality,
-	                        ProcessClass startingClass,
+	                        Reference<simulator::ProcessInfoMetadata> metadata,
 	                        const char* dataFolder,
 	                        const char* coordinationFolder,
 	                        ProtocolVersion protocol,
@@ -1436,8 +1442,7 @@ public:
 		// These files must live on after process kills for sim purposes.
 		if (machine.machineProcess == 0) {
 			NetworkAddress machineAddress(ip, 0, false, false);
-			machine.machineProcess =
-			    new ProcessInfo("Machine", locality, startingClass, { machineAddress }, this, "", "");
+			machine.machineProcess = new ProcessInfo("Machine", locality, metadata, { machineAddress }, this, "", "");
 			machine.machineProcess->machine = &machine;
 		}
 
@@ -1448,7 +1453,7 @@ public:
 		}
 
 		// FIXME: why would a ProcessInfo be called `m`?
-		auto* m = new ProcessInfo(name, locality, startingClass, addresses, this, dataFolder, coordinationFolder);
+		auto* m = new ProcessInfo(name, locality, metadata, addresses, this, dataFolder, coordinationFolder);
 		for (int processPort = port; processPort < port + listenPerProcess; ++processPort) {
 			NetworkAddress address(ip, processPort, true, sslEnabled && processPort == port);
 			m->listenerMap[address] = makeReference<Sim2Listener>(m, address);
@@ -1494,7 +1499,7 @@ public:
 		std::vector<ProcessInfo*> processesLeft, processesDead;
 		auto processes = getAllProcesses();
 		for (auto processInfo : processes) {
-			if (processInfo->isAvailableClass()) {
+			if (!getSimulationPolicy() || getSimulationPolicy()->shouldIncludeInAvailabilityCheck(*processInfo)) {
 				if (processInfo->isExcluded() || processInfo->isCleared() || !processInfo->isAvailable()) {
 					processesDead.push_back(processInfo);
 				} else {
@@ -1776,7 +1781,7 @@ public:
 			int protectedWorker = 0, unavailable = 0, excluded = 0, cleared = 0;
 
 			for (auto processInfo : getAllProcesses()) {
-				if (processInfo->isAvailableClass()) {
+				if (!getSimulationPolicy() || getSimulationPolicy()->shouldIncludeInAvailabilityCheck(*processInfo)) {
 					if (processInfo->isExcluded()) {
 						processesDead.push_back(processInfo);
 						excluded++;
@@ -1905,12 +1910,12 @@ public:
 				TraceEvent("KillMachineProcess")
 				    .detail("KillType", kt)
 				    .detail("Process", process->toString())
-				    .detail("StartingClass", process->startingClass.toString())
+				    .detail("StartingClass", process->metadata->role)
 				    .detail("Failed", process->failed)
 				    .detail("Excluded", process->excluded)
 				    .detail("Cleared", process->cleared)
 				    .detail("Rebooting", process->rebooting);
-				if (process->startingClass != ProcessClass::TesterClass)
+				if (!process->metadata->excludeFromMachineKill)
 					killProcess_internal(process, kt);
 			}
 		} else if (kt == KillType::Reboot || kt == KillType::RebootAndDelete ||
@@ -1919,12 +1924,12 @@ public:
 				TraceEvent("KillMachineProcess")
 				    .detail("KillType", kt)
 				    .detail("Process", process->toString())
-				    .detail("StartingClass", process->startingClass.toString())
+				    .detail("StartingClass", process->metadata->role)
 				    .detail("Failed", process->failed)
 				    .detail("Excluded", process->excluded)
 				    .detail("Cleared", process->cleared)
 				    .detail("Rebooting", process->rebooting);
-				if (process->startingClass != ProcessClass::TesterClass)
+				if (!process->metadata->excludeFromMachineKill)
 					doReboot(Uncancellable(), process, kt);
 			}
 		}
@@ -1983,7 +1988,7 @@ public:
 		     (kt == KillType::RebootAndDelete) || (kt == KillType::RebootProcessAndDelete))) {
 			std::vector<ProcessInfo*> processesLeft, processesDead;
 			for (auto processInfo : getAllProcesses()) {
-				if (processInfo->isAvailableClass()) {
+				if (!getSimulationPolicy() || getSimulationPolicy()->shouldIncludeInAvailabilityCheck(*processInfo)) {
 					if (processInfo->isExcluded() || processInfo->isCleared() || !processInfo->isAvailable()) {
 						processesDead.push_back(processInfo);
 					} else if (isProtectedAddress(processInfo->address) ||
@@ -2211,6 +2216,24 @@ public:
 		}
 	}
 
+	// Coroutine that delays DNS removal and runs on a surviving process context.
+	// This must NOT run on the dying process, because Sim2::execTask() sends Never()
+	// for failed processes, which would cause the removal to never complete.
+	static Future<Void> delayedDNSRemoval(Sim2* self, IPAddress ip, double delaySecs, ProcessInfo* survivingProcess) {
+		CODE_PROBE(
+		    true, "Simulated delayed DNS removal for dead process", probe::context::sim2, probe::assert::simOnly);
+		TraceEvent("SimDNSDelayedRemoval")
+		    .detail("IP", ip.toString())
+		    .detail("DelaySecs", delaySecs)
+		    .detail("SurvivorAddr", survivingProcess->address.toString());
+		// Schedule the delay on the surviving process so the timer actually fires
+		co_await self->delay(delaySecs, TaskPriority::DefaultYield, survivingProcess);
+		for (auto& it : self->httpHandlers) {
+			it.second->removeIp(ip);
+		}
+		co_return;
+	}
+
 	void removeSimHTTPProcess() override {
 		ProcessInfo* p = getCurrentProcess();
 
@@ -2224,9 +2247,18 @@ public:
 		}
 		ASSERT(found);
 
-		// FIXME: potentially instead delay removing from DNS for a bit so we still briefly try to talk to dead server
-		for (auto& it : httpHandlers) {
-			it.second->removeIp(p->address.ip);
+		double dnsRemovalDelay = FLOW_KNOBS->SIM_DNS_REMOVAL_MAX_DELAY;
+		if (dnsRemovalDelay > 0 && !httpServerProcesses.empty()) {
+			// Simulate real-world DNS caching: keep stale DNS entries briefly so
+			// clients may still attempt to talk to the dead server's address.
+			// Schedule on a surviving process so the timer fires correctly.
+			double actualDelay = deterministicRandom()->random01() * dnsRemovalDelay;
+			ProcessInfo* survivor = httpServerProcesses[0].first;
+			uncancellable(delayedDNSRemoval(this, p->address.ip, actualDelay, survivor));
+		} else {
+			for (auto& it : httpHandlers) {
+				it.second->removeIp(p->address.ip);
+			}
 		}
 	}
 
@@ -2273,7 +2305,7 @@ public:
 		currentProcess =
 		    new ProcessInfo("NoMachine",
 		                    LocalityData(Optional<Standalone<StringRef>>(), StringRef(), StringRef(), StringRef()),
-		                    ProcessClass(),
+		                    makeReference<simulator::ProcessInfoMetadata>("unset"),
 		                    { NetworkAddress() },
 		                    this,
 		                    "",
@@ -2319,12 +2351,13 @@ public:
 				killProcess(t.machine, KillType::KillInstantly);
 			}
 
-			if (randLog)
+			if (randLog) {
 				fmt::print(randLog,
 				           "T {0} {1} {2}\n",
 				           this->time,
 				           int(deterministicRandom()->peek() % 10000),
 				           t.machine ? t.machine->name : "none");
+			}
 		}
 	}
 
@@ -2596,7 +2629,7 @@ Future<Void> startUnitTestSimulator() {
 	    false,
 	    1,
 	    LocalityData(Optional<Standalone<StringRef>>(), processId, processId, Optional<Standalone<StringRef>>()),
-	    ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource),
+	    makeReference<simulator::ProcessInfoMetadata>("test", true),
 	    "",
 	    "",
 	    currentProtocolVersion(),
@@ -2612,7 +2645,7 @@ Future<Void> startUnitTestSimulator() {
 	    1,
 	    LocalityData(
 	        Optional<Standalone<StringRef>>(), httpProcessId, httpProcessId, Optional<Standalone<StringRef>>()),
-	    ProcessClass(ProcessClass::SimHTTPServerClass, ProcessClass::CommandLineSource),
+	    makeReference<simulator::ProcessInfoMetadata>("sim_http_server"),
 	    "",
 	    "",
 	    currentProtocolVersion(),
@@ -2635,7 +2668,7 @@ Future<Void> doReboot(Uncancellable, ISimulator::ProcessInfo* p, ISimulator::Kil
 	    .detail("ZoneId", p->locality.zoneId())
 	    .detail("KillType", kt)
 	    .detail("Process", p->toString())
-	    .detail("StartingClass", p->startingClass.toString())
+	    .detail("StartingClass", p->metadata->role)
 	    .detail("Failed", p->failed)
 	    .detail("Excluded", p->excluded)
 	    .detail("Cleared", p->cleared)
@@ -2723,8 +2756,9 @@ Future<Void> waitUntilDiskReady(Reference<DiskParameters> diskParameters, int64_
 	double randomLatency;
 	if (sync) {
 		randomLatency = .005 + deterministicRandom()->random01() * (buggify() ? 1.0 : .010);
-	} else
+	} else {
 		randomLatency = 10 * deterministicRandom()->random01() / diskParameters->iops;
+	}
 
 	return delayUntil(diskParameters->nextOperation + randomLatency);
 }
@@ -2848,8 +2882,9 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 			f = map(f,
 			        [=](Reference<IAsyncFile> r) -> Reference<IAsyncFile> { return makeReference<AsyncFileChaos>(r); });
 		return f;
-	} else
+	} else {
 		return AsyncFileCached::open(filename, flags, mode);
+	}
 }
 
 // Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power

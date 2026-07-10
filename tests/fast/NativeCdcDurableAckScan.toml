@@ -1,0 +1,28 @@
+[configuration]
+config = 'single'
+singleRegion = true
+buggify = false
+faultInjection = false
+
+[[knobs]]
+enable_native_cdc = true
+native_cdc_tag_count = 1
+cdc_proxy_pop_scan_interval = 0.25
+cdc_proxy_consume_poll_timeout = 30.0
+
+[[test]]
+testTitle = 'NativeCdcDurableAckScan'
+useDB = true
+waitForQuiescenceEnd = false
+connectionFailuresDisableDuration = 1000000
+
+    [[test.workload]]
+    testName = 'NativeCdcEndToEnd'
+    initialStreamCount = 1
+    minStreamCount = 1
+    maxStreamCount = 1
+    keyCount = 4
+    writesPerRound = 1
+    rounds = 0
+    testDurableAckScan = true
+    operationTimeout = 120.0

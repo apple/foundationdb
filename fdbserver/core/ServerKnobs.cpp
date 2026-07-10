@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/ProcessClassRecruitment.h"
 #include "fdbclient/Knobs.h"
 #include "flow/IRandom.h"
 
@@ -175,6 +176,18 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DESIRED_UPDATE_BYTES,                2*DESIRED_TOTAL_BYTES );
 	init( UPDATE_DELAY,                                        0.001 );
 	init( MAXIMUM_PEEK_BYTES,                                   10e6 );
+	init( CDC_PROXY_CONSUME_REPLY_BYTES,                         10e6 );
+	init( CDC_PROXY_BUFFER_BYTES,                                1e9 );
+	if (randomize && buggify()) {
+		MAXIMUM_PEEK_BYTES = 5000;
+		CDC_PROXY_CONSUME_REPLY_BYTES = 5000;
+		CDC_PROXY_BUFFER_BYTES = 10000;
+	}
+	init( CDC_PROXY_CONSUME_POLL_TIMEOUT,                         5.0 ); if( randomize && buggify() ) CDC_PROXY_CONSUME_POLL_TIMEOUT = 0.1;
+	init( CDC_PROXY_FAILURE_TIMEOUT,                              0.4 );
+	init( CDC_PROXY_FAILURE_COALESCE_DELAY,                       0.0 );
+	init( CDC_PROXY_POP_MIN_INTERVAL,                             0.1 ); if( randomize && buggify() ) CDC_PROXY_POP_MIN_INTERVAL = 0.01;
+	init( CDC_PROXY_POP_SCAN_INTERVAL,                            5.0 ); if( randomize && buggify() ) CDC_PROXY_POP_SCAN_INTERVAL = 0.1;
 	init( APPLY_MUTATION_BYTES,                                  1e6 );
 	init( BUGGIFY_RECOVER_MEMORY_LIMIT,                          1e6 );
 	init( BUGGIFY_WORKER_REMOVED_MAX_LAG,                         30 );
@@ -268,8 +281,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// Hard cap on total relocations DD tracks (queued + in-flight). 1000 corresponds to a 500-server
 	// cluster with two concurrent shard moves per storage server.  We have observed large clusters doing
 	// 25-30GB in flight, or closer to 100 shards at a time, so this has plenty of margin of safety
-	// built in.
-	init( DD_MAX_PIPELINE_MOVES,                                1000 ); if( randomize && buggify() ) DD_MAX_PIPELINE_MOVES = 5;
+	// built in.  For simulation, we don't really know how many servers there are, but 10 seems like a good
+	// guess (thus 20 moves).  Do not buggify this too small: testing under artificial scarcity results in
+	// uninteresting degenerate cases.
+	init( DD_MAX_PIPELINE_MOVES,                                1000 ); if( randomize && buggify() ) DD_MAX_PIPELINE_MOVES = 20;
 	init( DD_REBALANCE_RESET_AMOUNT,                              30 );
 	init( INFLIGHT_PENALTY_HEALTHY,                              1.0 );
 	init( INFLIGHT_PENALTY_UNHEALTHY,                          500.0 );
@@ -316,7 +331,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	init( ALLOW_LARGE_SHARD,                                   false ); if( randomize && buggify() )  ALLOW_LARGE_SHARD = true;
 	init( MAX_LARGE_SHARD_BYTES,                          1000000000 ); // 1G
-	init( SHARD_ENCODE_LOCATION_METADATA,                      false ); if( isSimulated ) { bool v = deterministicRandom()->random01() < 0.75; if( !explicitlySetKnobs.count("shard_encode_location_metadata") ) SHARD_ENCODE_LOCATION_METADATA = v; }
+	init( SHARD_ENCODE_LOCATION_METADATA,                      false ); if( isSimulated ) { bool v = deterministicRandom()->random01() < 0.75; if( !explicitlySetKnobs.contains("shard_encode_location_metadata") ) SHARD_ENCODE_LOCATION_METADATA = v; }
 	init( ENABLE_DD_PHYSICAL_SHARD,                            false ); // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true; When true, optimization of data move between DCs is disabled
 	init( DD_PHYSICAL_SHARD_MOVE_PROBABILITY,                    0.0 ); // FIXME: re-enable after ShardedRocksDB is well tested by simulation
 	init( ENABLE_PHYSICAL_SHARD_MOVE_EXPERIMENT,               false ); // FIXME: re-enable after ShardedRocksDB is well tested by simulation
@@ -817,6 +832,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( TAG_THROTTLE_MAX_EMPTY_QUEUE_BUDGET,                1000.0 );
 	init( START_TRANSACTION_MAX_QUEUE_SIZE,                      1e6 ); if ( randomize && buggify() ) START_TRANSACTION_MAX_QUEUE_SIZE = 1000;
 	init( KEY_LOCATION_MAX_QUEUE_SIZE,                           1e6 );
+	init( GRV_PROXY_PROGRESS_CHECK_INTERVAL,                     0.5 );
+	init( GRV_PROXY_MAX_MISSED_PROGRESS_CHECKS,                   10 );
 
 	init( COMMIT_PROXY_LIVENESS_TIMEOUT,                        20.0 );
 	init( COMMIT_PROXY_MAX_LIVENESS_TIMEOUT,                   600.0 ); if ( randomize && buggify() ) COMMIT_PROXY_MAX_LIVENESS_TIMEOUT = 20.0;
@@ -978,12 +995,12 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CLUSTER_HEALTH_METRIC_RK_CRITICAL_RELEASED_TPS_RATIO_THRESHOLD, 1.2 );
 
 	init( INCOMPATIBLE_PEERS_LOGGING_INTERVAL,                   600 ); if( randomize && buggify() ) INCOMPATIBLE_PEERS_LOGGING_INTERVAL = 60.0;
-	init( EXPECTED_MASTER_FITNESS,            ProcessClass::UnsetFit );
-	init( EXPECTED_TLOG_FITNESS,              ProcessClass::UnsetFit );
-	init( EXPECTED_LOG_ROUTER_FITNESS,        ProcessClass::UnsetFit );
-	init( EXPECTED_COMMIT_PROXY_FITNESS,      ProcessClass::UnsetFit );
-	init( EXPECTED_GRV_PROXY_FITNESS,         ProcessClass::UnsetFit );
-	init( EXPECTED_RESOLVER_FITNESS,          ProcessClass::UnsetFit );
+	init( EXPECTED_MASTER_FITNESS,            recruitment::UnsetFit );
+	init( EXPECTED_TLOG_FITNESS,              recruitment::UnsetFit );
+	init( EXPECTED_LOG_ROUTER_FITNESS,        recruitment::UnsetFit );
+	init( EXPECTED_COMMIT_PROXY_FITNESS,      recruitment::UnsetFit );
+	init( EXPECTED_GRV_PROXY_FITNESS,         recruitment::UnsetFit );
+	init( EXPECTED_RESOLVER_FITNESS,          recruitment::UnsetFit );
 	init( RECRUITMENT_TIMEOUT,                                   600 ); if( randomize && buggify() ) RECRUITMENT_TIMEOUT = deterministicRandom()->coinflip() ? 60.0 : 1.0;
 
 	init( POLICY_RATING_TESTS,                                   200 ); if( randomize && buggify() ) POLICY_RATING_TESTS = 20;
@@ -997,7 +1014,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CC_RERECRUIT_LOG_ROUTER_ENABLED,                      true ); if ( randomize && buggify() ) CC_RERECRUIT_LOG_ROUTER_ENABLED = deterministicRandom()->coinflip();
 
 	//Move Keys
-	init( SHARD_READY_DELAY,                                    0.25 );
+	init( SHARD_READY_DELAY,                                    0.25 ); if( randomize && buggify() ) SHARD_READY_DELAY = 5.0;
 	init( SERVER_READY_QUORUM_INTERVAL,                         std::min(1.0, std::min(MAX_READ_TRANSACTION_LIFE_VERSIONS, MAX_WRITE_TRANSACTION_LIFE_VERSIONS)/(5.0*VERSIONS_PER_SECOND)) );
 	init( SERVER_READY_QUORUM_TIMEOUT,                          15.0 ); if( randomize && buggify() ) SERVER_READY_QUORUM_TIMEOUT = 1.0;
 	init( REMOVE_RETRY_DELAY,                                    1.0 );
