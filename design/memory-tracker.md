@@ -941,48 +941,46 @@ indirectly by the tests above.
 
 ### Microbenchmarks
 
-The targets below are 5% rather than R0's 1% end-to-end CPU ceiling
-because a tight alloc/free loop is the pessimal case: there is no real
-work between hook calls to amortize the overhead against, so the
-per-allocation cost shows up undiluted. R0's 1% applies to realistic
-workloads.
+`flow/bench/BenchMemoryTracker.cpp` (Google Benchmark; run
+`bin/flow_bench --benchmark_filter=memtracker`) measures the tracker's
+per-operation cost. Two cases matter, both feeding R0 ("cheap enough to leave
+on?"): the **off-state** cost (always-compiled hooks, sampling disabled) and
+the **enabled-state** cost (hooks at the production 1% rate, and at the pessimal
+every-allocation rate). Each is measured both end-to-end through global
+`operator new[]`/`delete[]` and by calling `memTrackerOnAlloc`/`OnFree` directly
+on a preallocated buffer (which isolates the tracker's own work, with no
+allocation in the loop); a raw `malloc`/`free` loop is the tracker-free
+baseline.
 
-- **Un-sampled hot path.** A new `bin/fdbserver -r unittests
-  -f /flow/MemoryTracker/perfUnsampled` allocates and frees in a tight
-  loop with sample inverse 0; compare against a baseline build with the
-  hooks compiled out (`#ifdef MEMTRACKER_DISABLED`). Target: < 5%
-  delta.
-- **Sampled path.** Same loop with sample inverse 100; target: < 5%
-  delta vs. the un-sampled baseline at 100K alloc/sec.
+Measured on a 32-core dev pod (ns per alloc+free pair), with the cost projected
+to one second at an assumed 100K allocations/sec (numbers stable to within a few
+percent across repeated runs):
 
-// TODO(not-yet-implemented): the `/flow/MemoryTracker/perfUnsampled` and
-// `/flow/MemoryTracker/perfSampled` unit tests named above DO NOT EXIST yet.
-// Build them next, then update this section to past tense and delete this TODO.
-// Two benchmarks are the whole v1 set — both answer "is it cheap enough to
-// leave on?" (R0); resist adding more unless a number below comes back bad.
-//   - Baseline is in-binary: std::malloc/std::free are NOT hooked (we override
-//     operator new, not libc malloc), so there's no need for a hooks-compiled-
-//     out build. delta(hooked new[]/delete[], raw malloc/free) = tracker cost.
-//   - perfUnsampled  = off-state per-op cost: hooked new[]/delete[] at inverse
-//     0 vs raw malloc/free. (Bundles the alloc hook and the free enabled-flag
-//     read; that pair cost is what R0 cares about, so bundling is fine.)
-//   - perfSampled = enabled-state per-op cost: hooked new[]/delete[] at inverse
-//     100 (prod) and inverse 1 (pessimal), live-tracking on, vs inverse 0. This
-//     is the end-to-end enabled number. NOTE it includes both the ~1% sampled-
-//     alloc slow path and the 100%-of-frees lock+probe (the dominant enabled
-//     cost); that's the right thing to measure for R0.
-//   - Report ns/op via a MemoryTrackerPerf* TraceEvent and stderr; reset
-//     tracker state around each phase; use fewer iterations when
-//     g_network->isSimulated(); do NOT hard-assert wall-clock thresholds
-//     (machine noise) — the reported number is the deliverable, at most a very
-//     loose sanity ceiling.
-//   - Diagnostics to build ONLY IF perfSampled looks concerning (do not build
-//     preemptively): re-run perfSampled with LIVE_TRACKING off to split the
-//     free-lock cost from the sampled-alloc cost; a standalone captureFramesFP
-//     timer vs frame depth; a multi-thread free-contention run (the real
-//     justification for the deferred live-table sharding).
-//   - Goal: replace the aspirational "< 5% delta" prose above with measured
-//     ns/op numbers once the benchmarks run on the dev pod.
+| Case | ns/op | @100K/s | % of one core |
+|---|---|---|---|
+| `malloc`/`free` (baseline, no tracker) | 7.8 | 777 µs/s | 0.08% |
+| hooks, off | 1.9 | 190 µs/s | 0.019% |
+| hooks, 1% sampling | 5.6 | 558 µs/s | 0.056% |
+| hooks, every alloc (worst case, not a default) | 70 | 7.0 ms/s | 0.70% |
+| `operator new`/`delete`, off | 10.6 | 1.06 ms/s | 0.11% |
+| `operator new`/`delete`, 1% sampling | 13.8 | 1.38 ms/s | 0.14% |
+| `operator new`/`delete`, every alloc (worst case, not a default) | 85 | 8.5 ms/s | 0.85% |
+
+Takeaways:
+
+- **Disabled**, the tracker adds ~1.9 ns per alloc+free pair — ~0.02% of a core
+  at 100K/s. This is the off-switch cost (R9).
+- **At the production 1% rate**, the tracker's own work is ~5.6 ns/pair
+  (~0.056% of a core at 100K/s) — roughly 1/17th of R0's 1% ceiling. The cost is
+  dominated by the per-free lock+probe (every free takes the lock while
+  live-tracking is on), not the 1%-of-allocs slow path.
+- The **every-allocation** rows are **not a proposed configuration** — they are
+  an estimated worst case for buggified `inverse=1` simulation runs, included to
+  bound the pessimal cost. Even then it stays under 1% of a core at 100K/s.
+
+Caveat: 100K allocations/sec is the design's assumed rate, not a measured FDB
+figure; scale the per-second numbers linearly for other rates (e.g. ~0.56% of a
+core at 1M/sec at 1% sampling).
 
 ### Strip-aware symbolization spot-check
 
