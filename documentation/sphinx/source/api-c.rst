@@ -543,76 +543,76 @@ An |database-blurb1| Modifications to a database are performed via transactions.
          ]
       }
 
-Native CDC
-----------
+CDC
+---
 
-Native CDC exposes durable, named streams of committed mutations for one
-half-open user-key range. New stream registration requires native CDC admission
+CDC exposes durable, named streams of committed mutations for one half-open
+user-key range. New stream registration requires CDC admission
 to be enabled on the cluster. Listing, removal, consumer creation, resume,
 consume, and acknowledgement remain available for already durable streams while
 new admission is disabled so that callers can drain or remove them.
 
-.. type:: FDBNativeCdcMutationType
+.. type:: FDBCdcMutationType
 
-   The raw mutation type returned by native CDC. Values match the corresponding
+   The raw mutation type returned by CDC. Values match the corresponding
    FoundationDB mutation encoding. ``SET_VALUE`` uses ``param1`` as the key and
    ``param2`` as the value; ``CLEAR_RANGE`` uses them as the clipped begin and
    end keys; atomic mutations use them as the key and operand.
 
-.. type:: FDBNativeCdcStreamInfo
+.. type:: FDBCdcStreamInfo
 
-   A listed native CDC stream, including its name, stable stream ID, registered
+   A listed CDC stream, including its name, stable stream ID, registered
    key range, and durable minimum required version.
 
-.. type:: FDBNativeCdcMutation
+.. type:: FDBCdcMutation
 
-   One raw mutation within a native CDC commit-version group.
+   One raw mutation within a CDC commit-version group.
 
-.. type:: FDBNativeCdcVersionedMutations
+.. type:: FDBCdcVersionedMutations
 
    A complete group of mutations with one FoundationDB commit version. A
    consume reply contains only complete groups; callers should preserve this
    grouping when processing a reply.
 
-.. type:: FDBNativeCdcConsumer
+.. type:: FDBCdcConsumer
 
-   An opaque, reference-counted native CDC consumer handle. A handle extracted
-   with :func:`fdb_future_get_native_cdc_consumer()` is owned by the caller and
+   An opaque, reference-counted CDC consumer handle. A handle extracted
+   with :func:`fdb_future_get_cdc_consumer()` is owned by the caller and
    remains valid after the originating future is destroyed. Destroy it exactly
-   once with :func:`fdb_native_cdc_consumer_destroy()`.
+   once with :func:`fdb_cdc_consumer_destroy()`.
 
-.. function:: FDBFuture* fdb_database_register_native_cdc_stream(FDBDatabase* database, uint8_t const* name, int name_length, uint8_t const* begin_key, int begin_key_length, uint8_t const* end_key, int end_key_length)
+.. function:: FDBFuture* fdb_database_register_cdc_stream(FDBDatabase* database, uint8_t const* name, int name_length, uint8_t const* begin_key, int begin_key_length, uint8_t const* end_key, int end_key_length)
 
    Registers ``name`` for the non-empty half-open range ``[begin_key,
    end_key)`` in normal user key space. Repeating the same name and range is
    idempotent; reusing a name with a different range fails. The future returns
    the ``uint64_t`` stream ID, extracted with :func:`fdb_future_get_uint64()`.
 
-.. function:: FDBFuture* fdb_database_remove_native_cdc_stream(FDBDatabase* database, uint8_t const* name, int name_length)
+.. function:: FDBFuture* fdb_database_remove_cdc_stream(FDBDatabase* database, uint8_t const* name, int name_length)
 
    Removes the named stream and relinquishes its unread history. Removing a
    missing name succeeds. The returned future contains no value.
 
-.. function:: FDBFuture* fdb_database_list_native_cdc_streams(FDBDatabase* database)
+.. function:: FDBFuture* fdb_database_list_cdc_streams(FDBDatabase* database)
 
-   Returns the currently registered native CDC streams. Extract the result with
-   :func:`fdb_future_get_native_cdc_stream_info_array()`.
+   Returns the currently registered CDC streams. Extract the result with
+   :func:`fdb_future_get_cdc_stream_info_array()`.
 
-.. function:: fdb_error_t fdb_future_get_native_cdc_stream_info_array(FDBFuture* future, FDBNativeCdcStreamInfo const** out_streams, int* out_count)
+.. function:: fdb_error_t fdb_future_get_cdc_stream_info_array(FDBFuture* future, FDBCdcStreamInfo const** out_streams, int* out_count)
 
    Extracts the stream-info array returned by
-   :func:`fdb_database_list_native_cdc_streams()`. |future-get-return1|
+   :func:`fdb_database_list_cdc_streams()`. |future-get-return1|
    |future-get-return2|.
 
    |future-memory-mine|
 
-.. function:: FDBFuture* fdb_database_create_native_cdc_consumer(FDBDatabase* database, uint8_t const* name, int name_length)
+.. function:: FDBFuture* fdb_database_create_cdc_consumer(FDBDatabase* database, uint8_t const* name, int name_length)
 
    Creates a consumer for an existing stream name at its initial position.
    Extract the returned handle with
-   :func:`fdb_future_get_native_cdc_consumer()`.
+   :func:`fdb_future_get_cdc_consumer()`.
 
-.. function:: FDBFuture* fdb_database_resume_native_cdc_consumer(FDBDatabase* database, uint64_t stream_id, int64_t last_consumed_version)
+.. function:: FDBFuture* fdb_database_resume_cdc_consumer(FDBDatabase* database, uint64_t stream_id, int64_t last_consumed_version)
 
    Resumes a consumer from a checkpointed cursor. A cursor is only the stable
    ``stream_id`` and the version through which the caller has consumed; it does
@@ -620,28 +620,28 @@ new admission is disabled so that callers can drain or remove them.
    acknowledged position because unacknowledged mutations may be redelivered
    after CDC proxy replacement.
 
-.. function:: fdb_error_t fdb_future_get_native_cdc_consumer(FDBFuture* future, FDBNativeCdcConsumer** out_consumer)
+.. function:: fdb_error_t fdb_future_get_cdc_consumer(FDBFuture* future, FDBCdcConsumer** out_consumer)
 
    Extracts the owned consumer handle returned by
-   :func:`fdb_database_create_native_cdc_consumer()` or
-   :func:`fdb_database_resume_native_cdc_consumer()`. |future-get-return1|
+   :func:`fdb_database_create_cdc_consumer()` or
+   :func:`fdb_database_resume_cdc_consumer()`. |future-get-return1|
    |future-get-return2|.
 
-.. function:: void fdb_native_cdc_consumer_destroy(FDBNativeCdcConsumer* consumer)
+.. function:: void fdb_cdc_consumer_destroy(FDBCdcConsumer* consumer)
 
-   Releases an owned native CDC consumer handle.
+   Releases an owned CDC consumer handle.
 
-.. function:: FDBFuture* fdb_native_cdc_consumer_consume(FDBNativeCdcConsumer* consumer)
+.. function:: FDBFuture* fdb_cdc_consumer_consume(FDBCdcConsumer* consumer)
 
    Long-polls for the next delivered position and complete commit-version
    mutation groups. Extract the reply with
-   :func:`fdb_future_get_native_cdc_versioned_mutations()`. Consumption advances
+   :func:`fdb_future_get_cdc_versioned_mutations()`. Consumption advances
    the in-memory consumer position but does not release durable CDC retention.
 
-.. function:: fdb_error_t fdb_future_get_native_cdc_versioned_mutations(FDBFuture* future, FDBNativeCdcVersionedMutations const** out_mutations, int* out_count, int64_t* out_last_consumed_version)
+.. function:: fdb_error_t fdb_future_get_cdc_versioned_mutations(FDBFuture* future, FDBCdcVersionedMutations const** out_mutations, int* out_count, int64_t* out_last_consumed_version)
 
    Extracts the grouped mutation reply from
-   :func:`fdb_native_cdc_consumer_consume()`. ``out_last_consumed_version`` is
+   :func:`fdb_cdc_consumer_consume()`. ``out_last_consumed_version`` is
    the delivered cursor after the reply and may advance across commit-version
    gaps that contain no returned mutation. |future-get-return1|
    |future-get-return2|.
@@ -650,14 +650,14 @@ new admission is disabled so that callers can drain or remove them.
    ``future`` and remain valid until :func:`fdb_future_destroy()` or
    :func:`fdb_future_release_memory()` is called.
 
-.. function:: FDBFuture* fdb_native_cdc_consumer_acknowledge(FDBNativeCdcConsumer* consumer)
+.. function:: FDBFuture* fdb_cdc_consumer_acknowledge(FDBCdcConsumer* consumer)
 
    Durably acknowledges the consumer's current delivered position. Call this
    only after all mutations represented through that position have been durably
    processed. A consumer may have only one consume or acknowledge operation
    outstanding at a time. The returned future contains no value.
 
-.. function:: fdb_error_t fdb_native_cdc_consumer_get_position(FDBNativeCdcConsumer* consumer, uint64_t* out_stream_id, int64_t* out_last_consumed_version)
+.. function:: fdb_error_t fdb_cdc_consumer_get_position(FDBCdcConsumer* consumer, uint64_t* out_stream_id, int64_t* out_last_consumed_version)
 
    Returns the consumer's current cursor.
 

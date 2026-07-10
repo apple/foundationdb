@@ -42,7 +42,7 @@ int g_api_version = 0;
  *   FDBResult -> ThreadSingleAssignmentVarBase
  *   FDBDatabase -> IDatabase
  *   FDBTransaction -> ITransaction
- *   FDBNativeCdcConsumer -> INativeCdcConsumer
+ *   FDBCdcConsumer -> INativeCdcConsumer
  */
 #define TSAVB(f) ((ThreadSingleAssignmentVarBase*)(f))
 #define TSAV(T, f) ((ThreadSingleAssignmentVar<T>*)(f))
@@ -68,43 +68,42 @@ static_assert(static_cast<int>(FDB_BG_MUTATION_TYPE_SET_VALUE) == static_cast<in
 static_assert(static_cast<int>(FDB_BG_MUTATION_TYPE_CLEAR_RANGE) == static_cast<int>(MutationRef::Type::ClearRange),
               "FDB_BG_MUTATION_TYPE_CLEAR_RANGE enum value mismatch");
 
-static_assert(static_cast<int>(FDB_NATIVE_CDC_MUTATION_TYPE_SET_VALUE) == static_cast<int>(MutationRef::Type::SetValue),
-              "FDB_NATIVE_CDC_MUTATION_TYPE_SET_VALUE enum value mismatch");
-static_assert(static_cast<int>(FDB_NATIVE_CDC_MUTATION_TYPE_CLEAR_RANGE) ==
-                  static_cast<int>(MutationRef::Type::ClearRange),
-              "FDB_NATIVE_CDC_MUTATION_TYPE_CLEAR_RANGE enum value mismatch");
-static_assert(static_cast<int>(FDB_NATIVE_CDC_MUTATION_TYPE_ADD) == static_cast<int>(MutationRef::Type::AddValue),
-              "FDB_NATIVE_CDC_MUTATION_TYPE_ADD enum value mismatch");
-static_assert(static_cast<int>(FDB_NATIVE_CDC_MUTATION_TYPE_AND) == static_cast<int>(MutationRef::Type::And),
-              "FDB_NATIVE_CDC_MUTATION_TYPE_AND enum value mismatch");
-static_assert(static_cast<int>(FDB_NATIVE_CDC_MUTATION_TYPE_OR) == static_cast<int>(MutationRef::Type::Or),
-              "FDB_NATIVE_CDC_MUTATION_TYPE_OR enum value mismatch");
-static_assert(static_cast<int>(FDB_NATIVE_CDC_MUTATION_TYPE_XOR) == static_cast<int>(MutationRef::Type::Xor),
-              "FDB_NATIVE_CDC_MUTATION_TYPE_XOR enum value mismatch");
-static_assert(static_cast<int>(FDB_NATIVE_CDC_MUTATION_TYPE_APPEND_IF_FITS) ==
+static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_SET_VALUE) == static_cast<int>(MutationRef::Type::SetValue),
+              "FDB_CDC_MUTATION_TYPE_SET_VALUE enum value mismatch");
+static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_CLEAR_RANGE) == static_cast<int>(MutationRef::Type::ClearRange),
+              "FDB_CDC_MUTATION_TYPE_CLEAR_RANGE enum value mismatch");
+static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_ADD) == static_cast<int>(MutationRef::Type::AddValue),
+              "FDB_CDC_MUTATION_TYPE_ADD enum value mismatch");
+static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_AND) == static_cast<int>(MutationRef::Type::And),
+              "FDB_CDC_MUTATION_TYPE_AND enum value mismatch");
+static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_OR) == static_cast<int>(MutationRef::Type::Or),
+              "FDB_CDC_MUTATION_TYPE_OR enum value mismatch");
+static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_XOR) == static_cast<int>(MutationRef::Type::Xor),
+              "FDB_CDC_MUTATION_TYPE_XOR enum value mismatch");
+static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_APPEND_IF_FITS) ==
                   static_cast<int>(MutationRef::Type::AppendIfFits),
-              "FDB_NATIVE_CDC_MUTATION_TYPE_APPEND_IF_FITS enum value mismatch");
-static_assert(static_cast<int>(FDB_NATIVE_CDC_MUTATION_TYPE_MAX) == static_cast<int>(MutationRef::Type::Max),
-              "FDB_NATIVE_CDC_MUTATION_TYPE_MAX enum value mismatch");
-static_assert(static_cast<int>(FDB_NATIVE_CDC_MUTATION_TYPE_MIN) == static_cast<int>(MutationRef::Type::Min),
-              "FDB_NATIVE_CDC_MUTATION_TYPE_MIN enum value mismatch");
-static_assert(static_cast<int>(FDB_NATIVE_CDC_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY) ==
+              "FDB_CDC_MUTATION_TYPE_APPEND_IF_FITS enum value mismatch");
+static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_MAX) == static_cast<int>(MutationRef::Type::Max),
+              "FDB_CDC_MUTATION_TYPE_MAX enum value mismatch");
+static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_MIN) == static_cast<int>(MutationRef::Type::Min),
+              "FDB_CDC_MUTATION_TYPE_MIN enum value mismatch");
+static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY) ==
                   static_cast<int>(MutationRef::Type::SetVersionstampedKey),
-              "FDB_NATIVE_CDC_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY enum value mismatch");
-static_assert(static_cast<int>(FDB_NATIVE_CDC_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE) ==
+              "FDB_CDC_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY enum value mismatch");
+static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE) ==
                   static_cast<int>(MutationRef::Type::SetVersionstampedValue),
-              "FDB_NATIVE_CDC_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE enum value mismatch");
-static_assert(static_cast<int>(FDB_NATIVE_CDC_MUTATION_TYPE_BYTE_MIN) == static_cast<int>(MutationRef::Type::ByteMin),
-              "FDB_NATIVE_CDC_MUTATION_TYPE_BYTE_MIN enum value mismatch");
-static_assert(static_cast<int>(FDB_NATIVE_CDC_MUTATION_TYPE_BYTE_MAX) == static_cast<int>(MutationRef::Type::ByteMax),
-              "FDB_NATIVE_CDC_MUTATION_TYPE_BYTE_MAX enum value mismatch");
-static_assert(static_cast<int>(FDB_NATIVE_CDC_MUTATION_TYPE_MIN_V2) == static_cast<int>(MutationRef::Type::MinV2),
-              "FDB_NATIVE_CDC_MUTATION_TYPE_MIN_V2 enum value mismatch");
-static_assert(static_cast<int>(FDB_NATIVE_CDC_MUTATION_TYPE_AND_V2) == static_cast<int>(MutationRef::Type::AndV2),
-              "FDB_NATIVE_CDC_MUTATION_TYPE_AND_V2 enum value mismatch");
-static_assert(static_cast<int>(FDB_NATIVE_CDC_MUTATION_TYPE_COMPARE_AND_CLEAR) ==
+              "FDB_CDC_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE enum value mismatch");
+static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_BYTE_MIN) == static_cast<int>(MutationRef::Type::ByteMin),
+              "FDB_CDC_MUTATION_TYPE_BYTE_MIN enum value mismatch");
+static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_BYTE_MAX) == static_cast<int>(MutationRef::Type::ByteMax),
+              "FDB_CDC_MUTATION_TYPE_BYTE_MAX enum value mismatch");
+static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_MIN_V2) == static_cast<int>(MutationRef::Type::MinV2),
+              "FDB_CDC_MUTATION_TYPE_MIN_V2 enum value mismatch");
+static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_AND_V2) == static_cast<int>(MutationRef::Type::AndV2),
+              "FDB_CDC_MUTATION_TYPE_AND_V2 enum value mismatch");
+static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_COMPARE_AND_CLEAR) ==
                   static_cast<int>(MutationRef::Type::CompareAndClear),
-              "FDB_NATIVE_CDC_MUTATION_TYPE_COMPARE_AND_CLEAR enum value mismatch");
+              "FDB_CDC_MUTATION_TYPE_COMPARE_AND_CLEAR enum value mismatch");
 
 namespace {
 
@@ -113,12 +112,12 @@ namespace {
 // FDBFuture is destroyed or releases its result memory.
 struct CNativeCdcStreamInfoArray {
 	Arena arena;
-	VectorRef<FDBNativeCdcStreamInfo> streams;
+	VectorRef<FDBCdcStreamInfo> streams;
 };
 
 struct CNativeCdcConsumeResult {
 	Arena arena;
-	VectorRef<FDBNativeCdcVersionedMutations> mutations;
+	VectorRef<FDBCdcVersionedMutations> mutations;
 	Version lastConsumedVersion = invalidVersion;
 };
 
@@ -137,7 +136,7 @@ CNativeCdcStreamInfoArray makeCNativeCdcStreamInfoArray(std::vector<NativeCdcStr
 	CNativeCdcStreamInfoArray result;
 	result.streams.reserve(result.arena, source.size());
 	for (auto const& stream : source) {
-		FDBNativeCdcStreamInfo cStream;
+		FDBCdcStreamInfo cStream;
 		cStream.name = copyNativeCdcKey(result.arena, stream.name);
 		cStream.stream_id = stream.streamId;
 		cStream.key_range = copyNativeCdcKeyRange(result.arena, stream.keys);
@@ -152,18 +151,18 @@ CNativeCdcConsumeResult makeCNativeCdcConsumeResult(NativeCdcConsumeResult const
 	result.lastConsumedVersion = source.cursor.lastConsumedVersion;
 	result.mutations.reserve(result.arena, source.mutations.size());
 	for (auto const& versioned : source.mutations) {
-		FDBNativeCdcVersionedMutations cVersioned;
+		FDBCdcVersionedMutations cVersioned;
 		cVersioned.version = versioned.version;
 		cVersioned.mutation_count = versioned.mutations.size();
 		cVersioned.mutations = nullptr;
 		if (!versioned.mutations.empty()) {
-			auto* cMutations = new (result.arena) FDBNativeCdcMutation[versioned.mutations.size()];
+			auto* cMutations = new (result.arena) FDBCdcMutation[versioned.mutations.size()];
 			for (int i = 0; i < versioned.mutations.size(); ++i) {
 				auto const& mutation = versioned.mutations[i];
 				StringRef param1(result.arena, mutation.param1);
 				StringRef param2(result.arena, mutation.param2);
 				cMutations[i] =
-				    FDBNativeCdcMutation{ mutation.type, param1.begin(), param1.size(), param2.begin(), param2.size() };
+				    FDBCdcMutation{ mutation.type, param1.begin(), param1.size(), param2.begin(), param2.size() };
 			}
 			cVersioned.mutations = cMutations;
 		}
@@ -463,24 +462,23 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_get_key_array(FDBFuture* f, FDBKey c
 	                 *out_count = na.size(););
 }
 
-extern "C" DLLEXPORT fdb_error_t fdb_future_get_native_cdc_stream_info_array(FDBFuture* f,
-                                                                             FDBNativeCdcStreamInfo const** out_streams,
-                                                                             int* out_count) {
+extern "C" DLLEXPORT fdb_error_t fdb_future_get_cdc_stream_info_array(FDBFuture* f,
+                                                                      FDBCdcStreamInfo const** out_streams,
+                                                                      int* out_count) {
 	CATCH_AND_RETURN(CNativeCdcStreamInfoArray result = TSAV(CNativeCdcStreamInfoArray, f)->get();
 	                 *out_streams = result.streams.begin();
 	                 *out_count = result.streams.size(););
 }
 
-extern "C" DLLEXPORT fdb_error_t fdb_future_get_native_cdc_consumer(FDBFuture* f, FDBNativeCdcConsumer** out_consumer) {
+extern "C" DLLEXPORT fdb_error_t fdb_future_get_cdc_consumer(FDBFuture* f, FDBCdcConsumer** out_consumer) {
 	CATCH_AND_RETURN(Reference<INativeCdcConsumer> consumer = TSAV(Reference<INativeCdcConsumer>, f)->get();
-	                 *out_consumer = (FDBNativeCdcConsumer*)consumer.extractPtr(););
+	                 *out_consumer = (FDBCdcConsumer*)consumer.extractPtr(););
 }
 
-extern "C" DLLEXPORT fdb_error_t
-fdb_future_get_native_cdc_versioned_mutations(FDBFuture* f,
-                                              FDBNativeCdcVersionedMutations const** out_mutations,
-                                              int* out_count,
-                                              int64_t* out_last_consumed_version) {
+extern "C" DLLEXPORT fdb_error_t fdb_future_get_cdc_versioned_mutations(FDBFuture* f,
+                                                                        FDBCdcVersionedMutations const** out_mutations,
+                                                                        int* out_count,
+                                                                        int64_t* out_last_consumed_version) {
 	CATCH_AND_RETURN(CNativeCdcConsumeResult result = TSAV(CNativeCdcConsumeResult, f)->get();
 	                 *out_mutations = result.mutations.begin();
 	                 *out_count = result.mutations.size();
@@ -601,13 +599,13 @@ extern "C" DLLEXPORT fdb_error_t fdb_database_create_transaction(FDBDatabase* d,
 	                 *out_transaction = (FDBTransaction*)tr.extractPtr(););
 }
 
-extern "C" DLLEXPORT FDBFuture* fdb_database_register_native_cdc_stream(FDBDatabase* db,
-                                                                        uint8_t const* name,
-                                                                        int name_length,
-                                                                        uint8_t const* begin_key,
-                                                                        int begin_key_length,
-                                                                        uint8_t const* end_key,
-                                                                        int end_key_length) {
+extern "C" DLLEXPORT FDBFuture* fdb_database_register_cdc_stream(FDBDatabase* db,
+                                                                 uint8_t const* name,
+                                                                 int name_length,
+                                                                 uint8_t const* begin_key,
+                                                                 int begin_key_length,
+                                                                 uint8_t const* end_key,
+                                                                 int end_key_length) {
 	RETURN_FUTURE_ON_ERROR(
 	    CDCStreamId,
 	    return (FDBFuture*)(DB(db)
@@ -617,53 +615,51 @@ extern "C" DLLEXPORT FDBFuture* fdb_database_register_native_cdc_stream(FDBDatab
 	                            .extractPtr()););
 }
 
-extern "C" DLLEXPORT FDBFuture* fdb_database_remove_native_cdc_stream(FDBDatabase* db,
-                                                                      uint8_t const* name,
-                                                                      int name_length) {
+extern "C" DLLEXPORT FDBFuture* fdb_database_remove_cdc_stream(FDBDatabase* db, uint8_t const* name, int name_length) {
 	RETURN_FUTURE_ON_ERROR(Void,
 	                       return (FDBFuture*)(DB(db)->removeNativeCdcStream(KeyRef(name, name_length)).extractPtr()););
 }
 
-extern "C" DLLEXPORT FDBFuture* fdb_database_list_native_cdc_streams(FDBDatabase* db) {
+extern "C" DLLEXPORT FDBFuture* fdb_database_list_cdc_streams(FDBDatabase* db) {
 	RETURN_FUTURE_ON_ERROR(CNativeCdcStreamInfoArray,
 	                       return mapNativeCdcStreamInfoFuture(DB(db)->listNativeCdcStreams()););
 }
 
-extern "C" DLLEXPORT FDBFuture* fdb_database_create_native_cdc_consumer(FDBDatabase* db,
-                                                                        uint8_t const* name,
-                                                                        int name_length) {
+extern "C" DLLEXPORT FDBFuture* fdb_database_create_cdc_consumer(FDBDatabase* db,
+                                                                 uint8_t const* name,
+                                                                 int name_length) {
 	RETURN_FUTURE_ON_ERROR(
 	    Reference<INativeCdcConsumer>,
 	    return (FDBFuture*)(DB(db)->createNativeCdcConsumer(KeyRef(name, name_length)).extractPtr()););
 }
 
-extern "C" DLLEXPORT FDBFuture* fdb_database_resume_native_cdc_consumer(FDBDatabase* db,
-                                                                        uint64_t stream_id,
-                                                                        int64_t last_consumed_version) {
+extern "C" DLLEXPORT FDBFuture* fdb_database_resume_cdc_consumer(FDBDatabase* db,
+                                                                 uint64_t stream_id,
+                                                                 int64_t last_consumed_version) {
 	RETURN_FUTURE_ON_ERROR(Reference<INativeCdcConsumer>, NativeCdcCursor cursor; cursor.streamId = stream_id;
 	                       cursor.lastConsumedVersion = last_consumed_version;
 	                       return (FDBFuture*)(DB(db)->resumeNativeCdcConsumer(cursor).extractPtr()););
 }
 
-extern "C" DLLEXPORT void fdb_native_cdc_consumer_destroy(FDBNativeCdcConsumer* consumer) {
+extern "C" DLLEXPORT void fdb_cdc_consumer_destroy(FDBCdcConsumer* consumer) {
 	try {
 		NATIVE_CDC_CONSUMER(consumer)->delref();
 	} catch (...) {
 	}
 }
 
-extern "C" DLLEXPORT FDBFuture* fdb_native_cdc_consumer_consume(FDBNativeCdcConsumer* consumer) {
+extern "C" DLLEXPORT FDBFuture* fdb_cdc_consumer_consume(FDBCdcConsumer* consumer) {
 	RETURN_FUTURE_ON_ERROR(CNativeCdcConsumeResult,
 	                       return mapNativeCdcConsumeFuture(NATIVE_CDC_CONSUMER(consumer)->consume()););
 }
 
-extern "C" DLLEXPORT FDBFuture* fdb_native_cdc_consumer_acknowledge(FDBNativeCdcConsumer* consumer) {
+extern "C" DLLEXPORT FDBFuture* fdb_cdc_consumer_acknowledge(FDBCdcConsumer* consumer) {
 	RETURN_FUTURE_ON_ERROR(Void, return (FDBFuture*)(NATIVE_CDC_CONSUMER(consumer)->acknowledge().extractPtr()););
 }
 
-extern "C" DLLEXPORT fdb_error_t fdb_native_cdc_consumer_get_position(FDBNativeCdcConsumer* consumer,
-                                                                      uint64_t* out_stream_id,
-                                                                      int64_t* out_last_consumed_version) {
+extern "C" DLLEXPORT fdb_error_t fdb_cdc_consumer_get_position(FDBCdcConsumer* consumer,
+                                                               uint64_t* out_stream_id,
+                                                               int64_t* out_last_consumed_version) {
 	CATCH_AND_RETURN(NativeCdcCursor position = NATIVE_CDC_CONSUMER(consumer)->getPosition();
 	                 *out_stream_id = position.streamId;
 	                 *out_last_consumed_version = position.lastConsumedVersion;);

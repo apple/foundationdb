@@ -774,47 +774,47 @@ void DLApi::init() {
 	loadClientFunction(&api->databaseRegisterNativeCdcStream,
 	                   lib,
 	                   fdbCPath,
-	                   "fdb_database_register_native_cdc_stream",
+	                   "fdb_database_register_cdc_stream",
 	                   headerVersion >= ApiVersion::withNativeCdcApi().version());
 	loadClientFunction(&api->databaseRemoveNativeCdcStream,
 	                   lib,
 	                   fdbCPath,
-	                   "fdb_database_remove_native_cdc_stream",
+	                   "fdb_database_remove_cdc_stream",
 	                   headerVersion >= ApiVersion::withNativeCdcApi().version());
 	loadClientFunction(&api->databaseListNativeCdcStreams,
 	                   lib,
 	                   fdbCPath,
-	                   "fdb_database_list_native_cdc_streams",
+	                   "fdb_database_list_cdc_streams",
 	                   headerVersion >= ApiVersion::withNativeCdcApi().version());
 	loadClientFunction(&api->databaseCreateNativeCdcConsumer,
 	                   lib,
 	                   fdbCPath,
-	                   "fdb_database_create_native_cdc_consumer",
+	                   "fdb_database_create_cdc_consumer",
 	                   headerVersion >= ApiVersion::withNativeCdcApi().version());
 	loadClientFunction(&api->databaseResumeNativeCdcConsumer,
 	                   lib,
 	                   fdbCPath,
-	                   "fdb_database_resume_native_cdc_consumer",
+	                   "fdb_database_resume_cdc_consumer",
 	                   headerVersion >= ApiVersion::withNativeCdcApi().version());
 	loadClientFunction(&api->nativeCdcConsumerDestroy,
 	                   lib,
 	                   fdbCPath,
-	                   "fdb_native_cdc_consumer_destroy",
+	                   "fdb_cdc_consumer_destroy",
 	                   headerVersion >= ApiVersion::withNativeCdcApi().version());
 	loadClientFunction(&api->nativeCdcConsumerConsume,
 	                   lib,
 	                   fdbCPath,
-	                   "fdb_native_cdc_consumer_consume",
+	                   "fdb_cdc_consumer_consume",
 	                   headerVersion >= ApiVersion::withNativeCdcApi().version());
 	loadClientFunction(&api->nativeCdcConsumerAcknowledge,
 	                   lib,
 	                   fdbCPath,
-	                   "fdb_native_cdc_consumer_acknowledge",
+	                   "fdb_cdc_consumer_acknowledge",
 	                   headerVersion >= ApiVersion::withNativeCdcApi().version());
 	loadClientFunction(&api->nativeCdcConsumerGetPosition,
 	                   lib,
 	                   fdbCPath,
-	                   "fdb_native_cdc_consumer_get_position",
+	                   "fdb_cdc_consumer_get_position",
 	                   headerVersion >= ApiVersion::withNativeCdcApi().version());
 
 	loadClientFunction(&api->transactionSetOption, lib, fdbCPath, "fdb_transaction_set_option", headerVersion >= 0);
@@ -907,17 +907,17 @@ void DLApi::init() {
 	loadClientFunction(&api->futureGetNativeCdcStreamInfoArray,
 	                   lib,
 	                   fdbCPath,
-	                   "fdb_future_get_native_cdc_stream_info_array",
+	                   "fdb_future_get_cdc_stream_info_array",
 	                   headerVersion >= ApiVersion::withNativeCdcApi().version());
 	loadClientFunction(&api->futureGetNativeCdcConsumer,
 	                   lib,
 	                   fdbCPath,
-	                   "fdb_future_get_native_cdc_consumer",
+	                   "fdb_future_get_cdc_consumer",
 	                   headerVersion >= ApiVersion::withNativeCdcApi().version());
 	loadClientFunction(&api->futureGetNativeCdcVersionedMutations,
 	                   lib,
 	                   fdbCPath,
-	                   "fdb_future_get_native_cdc_versioned_mutations",
+	                   "fdb_future_get_cdc_versioned_mutations",
 	                   headerVersion >= ApiVersion::withNativeCdcApi().version());
 	loadClientFunction(&api->futureGetSharedState, lib, fdbCPath, "fdb_future_get_shared_state", headerVersion >= 710);
 	loadClientFunction(&api->futureSetCallback, lib, fdbCPath, "fdb_future_set_callback", headerVersion >= 0);
