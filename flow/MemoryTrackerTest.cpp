@@ -98,9 +98,7 @@ __attribute__((noinline)) void* triggerArenaSentinel(int n) {
 
 // ---------------------------------------------------------------------------
 // Accounting tests: verify byte/block counts come out right per allocation path
-// and there's no double-tracking. The Arena medium/huge tests are the explicit
-// regression tests for B1 — pre-fix they see two sites with the sentinel's
-// frames (operator new[] hook + explicit Arena hook); post-fix only one.
+// and there's no double-tracking.
 
 // Allocate n arenas (each holding one >256-byte block, exercising the
 // allocateAndMaybeKeepalive / new uint8_t[] path).
@@ -146,8 +144,9 @@ __attribute__((noinline)) void* allocateFastAlloc32Sentinel(int n, std::vector<v
 }
 
 __attribute__((noinline)) void releaseFastAlloc32(std::vector<void*>& ptrs) {
-	for (void* p : ptrs)
+	for (void* p : ptrs) {
 		FastAllocator<32>::release(p);
+	}
 	ptrs.clear();
 }
 
@@ -192,8 +191,9 @@ void dumpSitesForFailure(const char* tag) {
 		        (long long)s.liveCount,
 		        (long long)s.cumulativeBytes,
 		        (long long)s.cumulativeAllocs);
-		for (int i = 0; i < s.exemplarFrameCount; i++)
+		for (int i = 0; i < s.exemplarFrameCount; i++) {
 			fprintf(stderr, "%p ", s.exemplarFrames[i]);
+		}
 		fprintf(stderr, "\n");
 	});
 }
@@ -239,12 +239,15 @@ TEST_CASE("/flow/MemoryTracker/coverage") {
 	memTrackerForEachSite([&](const MemoryTrackerCallSite& s) {
 		siteCount++;
 		for (int i = 0; i < s.exemplarFrameCount; i++) {
-			if (frameInside(s.exemplarFrames[i], opNew))
+			if (frameInside(s.exemplarFrames[i], opNew)) {
 				foundOpNew = true;
-			if (frameInside(s.exemplarFrames[i], fastAlloc))
+			}
+			if (frameInside(s.exemplarFrames[i], fastAlloc)) {
 				foundFastAlloc = true;
-			if (frameInside(s.exemplarFrames[i], arena))
+			}
+			if (frameInside(s.exemplarFrames[i], arena)) {
 				foundArena = true;
+			}
 		}
 	});
 
@@ -350,8 +353,9 @@ TEST_CASE("/flow/MemoryTracker/enableAfterOff") {
 		if ((i & 0x3ff) == 0) {
 			siteCount = 0;
 			memTrackerForEachSite([&](const MemoryTrackerCallSite&) { siteCount++; });
-			if (siteCount > 0)
+			if (siteCount > 0) {
 				break;
+			}
 		}
 	}
 	siteCount = 0;
@@ -395,8 +399,9 @@ TEST_CASE("/flow/MemoryTracker/cumulativeIsMonotonic") {
 	memTrackerForEachSite([&](const MemoryTrackerCallSite& s) {
 		for (int i = 0; i < s.exemplarFrameCount; i++) {
 			if (frameInside(s.exemplarFrames[i], sentinel)) {
-				if (s.cumulativeAllocs > maxCumulative)
+				if (s.cumulativeAllocs > maxCumulative) {
 					maxCumulative = s.cumulativeAllocs;
+				}
 				finalLive += s.liveCount;
 			}
 		}
@@ -417,8 +422,8 @@ TEST_CASE("/flow/MemoryTracker/estimateScaling") {
 	KnobOverride ko(N);
 	memTrackerResetForTest();
 
-	// Small allocations (16 bytes), far below the force-sample threshold, so
-	// none are force-sampled and every sampled block gets weight N.
+	// Small allocations far below the force-sample threshold, so none
+	// are force-sampled and every sampled block gets weight N.
 	std::vector<int*> ptrs;
 	ptrs.reserve(5000);
 	for (int i = 0; i < 5000; i++) {
@@ -430,8 +435,9 @@ TEST_CASE("/flow/MemoryTracker/estimateScaling") {
 	int checked = 0;
 	int64_t rawLiveBefore = 0;
 	memTrackerForEachSite([&](const MemoryTrackerCallSite& s) {
-		if (s.forceSampledCount != 0)
+		if (s.forceSampledCount != 0) {
 			return; // ignore any incidental force-sampled site (weight 1, not N)
+		}
 		ASSERT_EQ(s.estCumulativeBytes, s.cumulativeBytes * N);
 		ASSERT_EQ(s.estCumulativeAllocs, s.cumulativeAllocs * N);
 		ASSERT_EQ(s.estLiveBytes, s.liveBytes * N);
@@ -443,8 +449,9 @@ TEST_CASE("/flow/MemoryTracker/estimateScaling") {
 	ASSERT(checked > 0);
 	ASSERT(rawLiveBefore > 0);
 
-	for (auto* p : ptrs)
+	for (auto* p : ptrs) {
 		delete[] p;
+	}
 	ptrs.clear();
 
 	// Symmetric debit: the per-site scaling invariant must still hold after the
@@ -455,8 +462,9 @@ TEST_CASE("/flow/MemoryTracker/estimateScaling") {
 	int64_t rawLiveAfter = 0;
 	int64_t estLiveAfter = 0;
 	memTrackerForEachSite([&](const MemoryTrackerCallSite& s) {
-		if (s.forceSampledCount != 0)
+		if (s.forceSampledCount != 0) {
 			return;
+		}
 		ASSERT_EQ(s.estLiveBytes, s.liveBytes * N);
 		rawLiveAfter += s.liveBytes;
 		estLiveAfter += s.estLiveBytes;
@@ -470,8 +478,7 @@ TEST_CASE("/flow/MemoryTracker/estimateScaling") {
 
 // ---------------------------------------------------------------------------
 // Accounting tests. The "sites with the sentinel's frames" assertion is the
-// load-bearing check: if more than one site has the sentinel's frames, two
-// hooks fired on the same allocation (regression of B1).
+// main check here.
 
 TEST_CASE("/flow/MemoryTracker/fastAlloc32Accounting") {
 #ifndef __linux__
@@ -549,11 +556,8 @@ TEST_CASE("/flow/MemoryTracker/arenaMediumAccounting") {
 #ifndef __linux__
 	return Void(); // see /coverage for rationale
 #endif
-	// B1 regression test. Pre-fix this fails because the >256 ArenaBlock
-	// path triggers BOTH the explicit memTrackerOnAlloc hook AND the
-	// global operator new[] override (via allocateAndMaybeKeepalive's
-	// `new uint8_t[]`), producing two sites with the sentinel's frames
-	// and double-tracked totals.
+	// Make sure arenas aren't counted twice, once due to their direct
+	// instrumentation and a second time due to their use of operator new.
 	KnobOverride ko;
 	constexpr int N = 30;
 
@@ -587,7 +591,7 @@ TEST_CASE("/flow/MemoryTracker/arenaHugeAccounting") {
 #ifndef __linux__
 	return Void(); // see /coverage for rationale
 #endif
-	// B1 regression test for the huge path of ArenaBlock::create.
+	// Again ensure arena allocations aren't counted twice.
 	KnobOverride ko;
 	constexpr int N = 10;
 

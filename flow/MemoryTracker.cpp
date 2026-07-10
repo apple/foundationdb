@@ -84,6 +84,11 @@ inline std::uint32_t xorshift32(std::uint32_t& s) {
 // machinery). Without this guard, the FP-elided frame leaves an
 // uninitialized saved-FP slot and the walk dereferences garbage. See
 // design/memory-tracker.md, "Side-thread safety".
+//
+// You've heard of optimistic concurrency control in database systems? This is
+// basically *optimistic segfault avoidance* to enable fast stack unwinding.
+// Caveat: the heuristics here aren't perfect. They seem pretty effective
+// so far.
 thread_local uintptr_t gStackLow = 0;
 thread_local uintptr_t gStackHigh = 0;
 
@@ -109,31 +114,38 @@ void initStackBoundsForThread() {
 //
 // Bounds the walk by the current thread's stack range so that crossing into
 // FP-elided code (which leaves the saved-FP slot uninitialized rather than
-// NULL) terminates cleanly instead of dereferencing garbage.
+// NULL) terminates cleanly instead of dereferencing garbage (see above).
 __attribute__((no_instrument_function, noinline)) int captureFramesFP(void** out, int max) {
-	if (!gStackLow)
+	if (!gStackLow) {
 		initStackBoundsForThread();
+	}
 	void** fp = static_cast<void**>(__builtin_frame_address(0));
 	// Fallback for threads where pthread_getattr_np failed: ±8 MB around
 	// the initial frame.
+	// Caveat: this may need to be constrained more tightly to deal with
+	// smaller stacks.
 	uintptr_t lo = gStackLow ? gStackLow : reinterpret_cast<uintptr_t>(fp);
 	uintptr_t hi = gStackHigh ? gStackHigh : reinterpret_cast<uintptr_t>(fp) + (8u << 20);
 	int n = 0;
 	while (fp && n < max) {
 		uintptr_t a = reinterpret_cast<uintptr_t>(fp);
 		// Reject out-of-stack or misaligned fp before dereferencing.
-		if (a < lo || a + 16 > hi)
+		if (a < lo || a + 16 > hi) {
 			break;
-		if (a & (sizeof(void*) - 1))
+		}
+		if (a & (sizeof(void*) - 1)) {
 			break;
+		}
 		void* ra = fp[1];
-		if (!ra)
+		if (!ra) {
 			break;
+		}
 		out[n++] = ra;
 		void** next = static_cast<void**>(fp[0]);
 		// Sanity: stack grows down, so each next frame address must be larger.
-		if (next <= fp)
+		if (next <= fp) {
 			break;
+		}
 		fp = next;
 	}
 	return n;
@@ -153,12 +165,22 @@ __attribute__((no_instrument_function, noinline)) int captureFramesFP(void**, in
 
 #endif // __linux__
 
+// TODO: when memory tracking is enabled, regardless of the sampling
+// rate, every deallocation has to acquire this mutex. At O(1M)
+// frees/second this is noticeable overhead.  This could be sped up by
+// sharding the mutex and the global state protected by the mutex
+// (the global state is the 2 maps and ~10 scalars defined below).
+// Presumably hash of the malloc buffer address itself could direct
+// the sharding.  Consumers of the global state would have to merge
+// across shards but that is intended only to be the periodic log
+// reporter so making it do costly work is fine since it only runs
+// O(1/minute).
+
 ThreadSpinLock g_mtLock;
 
 struct LiveEntry {
 	std::uint64_t fingerprint;
-	std::uint64_t size; // 64-bit: allocation size is size_t; a truncated size would under-debit
-	                    // liveBytes on free for allocations >= 4 GiB, permanently inflating reports.
+	std::uint64_t size;
 	std::int64_t weight; // inverse inclusion probability at sample time (≈ SampleInverse, or 1 if
 	                     // force-sampled); estimated contribution of this block is size * weight.
 	                     // Stored so free debits the estimate by exactly what alloc credited, even
@@ -187,10 +209,12 @@ std::int64_t g_estCumulativeBytesTotal = 0;
 std::int64_t g_estCumulativeAllocsTotal = 0;
 
 void ensureMaps() {
-	if (!g_aggMap)
+	if (!g_aggMap) {
 		g_aggMap = new std::unordered_map<std::uint64_t, MemoryTrackerCallSite>();
-	if (!g_liveMap)
+	}
+	if (!g_liveMap) {
 		g_liveMap = new std::unordered_map<std::uintptr_t, LiveEntry>();
+	}
 }
 
 } // namespace
@@ -227,13 +251,13 @@ void memTrackerSampleAlloc(void* p, std::size_t n) {
 		g_memTrackerEnabled.value.store(enabled, std::memory_order_relaxed);
 	}
 
-	// Reseed the counter for the un-sampled fast path.
 	if (inverse <= 0) {
-		// Sampling is off. Re-park the counter at a bounded value (not INT_MAX)
-		// so this thread re-reads the knob within MEMORY_TRACKER_DISABLED_RESEED
-		// allocations and can pick up an off->on change. Also restore
-		// gForceSampleBytes so large allocations stay on the fast path while
-		// disabled instead of repeatedly bouncing into this bail-out.
+		// Sampling is off. Re-park the counter at a bounded value so
+		// this thread re-reads the knob within
+		// MEMORY_TRACKER_DISABLED_RESEED allocations and can pick up
+		// an off->on change. Also restore gForceSampleBytes so large
+		// allocations stay on the fast path while disabled instead of
+		// repeatedly bouncing into this bail-out.
 		gMemTrackerCounter = MEMORY_TRACKER_DISABLED_RESEED;
 		gForceSampleBytes = static_cast<std::size_t>(-1);
 		return;
@@ -258,7 +282,7 @@ void memTrackerSampleAlloc(void* p, std::size_t n) {
 	// captured with certainty and represents only itself. (The random reseed is
 	// uniform on [1, 2*inverse], so the true mean gap is inverse + 0.5; we use
 	// the integer inverse, a ~0.5/inverse underestimate — negligible at the
-	// production inverse of 100, and the raw counters remain for auditing.)
+	// intended production inverse of 100, and the raw counters remain for auditing.)
 	std::int64_t weight = (isForceSampled || inverse <= 1) ? 1 : inverse;
 
 	// Capture frames; skip the topmost two (this function and captureFramesFP
@@ -289,18 +313,20 @@ void memTrackerSampleAlloc(void* p, std::size_t n) {
 		// the offline addr2line command in the dump.
 		site.fingerprint = fp;
 		site.exemplarFrameCount = static_cast<std::uint8_t>(kept);
-		for (int i = 0; i < kept; i++)
+		for (int i = 0; i < kept; i++) {
 			site.exemplarFrames[i] = keep[i];
+		}
 	}
 	auto nBytes = static_cast<std::int64_t>(n);
-	std::int64_t estBytes = nBytes * weight;
+	auto estBytes = nBytes * weight;
 
 	site.cumulativeAllocs += 1;
 	site.cumulativeBytes += nBytes;
 	site.estCumulativeAllocs += weight;
 	site.estCumulativeBytes += estBytes;
-	if (isForceSampled)
+	if (isForceSampled) {
 		site.forceSampledCount += 1;
+	}
 
 	if (liveTracking) {
 		auto key = reinterpret_cast<std::uintptr_t>(p);
@@ -331,12 +357,14 @@ void memTrackerSampleAlloc(void* p, std::size_t n) {
 
 		site.liveBytes += nBytes;
 		site.liveCount += 1;
-		if (site.liveBytes > site.peakBytes)
+		if (site.liveBytes > site.peakBytes) {
 			site.peakBytes = site.liveBytes;
+		}
 		site.estLiveBytes += estBytes;
 		site.estLiveCount += weight;
-		if (site.estLiveBytes > site.estPeakBytes)
+		if (site.estLiveBytes > site.estPeakBytes) {
 			site.estPeakBytes = site.estLiveBytes;
+		}
 		(*g_liveMap)[key] = LiveEntry{ fp, static_cast<std::uint64_t>(n), weight };
 		g_liveBytesTotal += nBytes;
 		g_liveBlocksTotal += 1;
@@ -352,21 +380,24 @@ void memTrackerSampleAlloc(void* p, std::size_t n) {
 
 void memTrackerSampleFree(void* p) {
 	bool liveTracking = FLOW_KNOBS ? FLOW_KNOBS->MEMORY_TRACKING_LIVE_TRACKING : true;
-	if (!liveTracking)
+	if (!liveTracking) {
 		return; // we never recorded the alloc, nothing to undo
+	}
 
 	ThreadSpinLockHolder lk(g_mtLock);
-	if (!g_liveMap)
+	if (!g_liveMap) {
 		return;
+	}
 	auto it = g_liveMap->find(reinterpret_cast<std::uintptr_t>(p));
-	if (it == g_liveMap->end())
+	if (it == g_liveMap->end()) {
 		return; // un-tracked pointer, no-op
+	}
 
 	LiveEntry e = it->second;
 	g_liveMap->erase(it);
 
 	auto eBytes = static_cast<std::int64_t>(e.size);
-	std::int64_t eEstBytes = eBytes * e.weight;
+	auto eEstBytes = eBytes * e.weight;
 	if (g_aggMap) {
 		auto sit = g_aggMap->find(e.fingerprint);
 		if (sit != g_aggMap->end()) {
@@ -392,22 +423,26 @@ void memTrackerForEachSite(std::function<void(const MemoryTrackerCallSite&)> cb)
 		ThreadSpinLockHolder lk(g_mtLock);
 		if (g_aggMap) {
 			snapshot.reserve(g_aggMap->size());
-			for (auto& kv : *g_aggMap)
+			for (auto& kv : *g_aggMap) {
 				snapshot.push_back(kv.second);
+			}
 		}
 	}
-	for (auto& s : snapshot)
+	for (auto& s : snapshot) {
 		cb(s);
+	}
 }
 
 void memTrackerResetForTest() {
 	gInMemTracker = true;
 	{
 		ThreadSpinLockHolder lk(g_mtLock);
-		if (g_aggMap)
+		if (g_aggMap) {
 			g_aggMap->clear();
-		if (g_liveMap)
+		}
+		if (g_liveMap) {
 			g_liveMap->clear();
+		}
 		g_liveBytesTotal = 0;
 		g_liveBlocksTotal = 0;
 		g_cumulativeBytesTotal = 0;
@@ -430,6 +465,7 @@ void memTrackerResetForTest() {
 	gInMemTracker = false;
 }
 
+// This is the periodic log emitter.
 void memTrackerDump(int64_t bytesThreshold) {
 	gInMemTracker = true;
 
@@ -449,8 +485,9 @@ void memTrackerDump(int64_t bytesThreshold) {
 		ThreadSpinLockHolder lk(g_mtLock);
 		if (g_aggMap) {
 			sites.reserve(g_aggMap->size());
-			for (auto& kv : *g_aggMap)
+			for (auto& kv : *g_aggMap) {
 				sites.push_back(kv.second);
+			}
 			aggSize = static_cast<int>(g_aggMap->size());
 		}
 		liveSize = g_liveMap ? static_cast<int>(g_liveMap->size()) : 0;
@@ -493,8 +530,9 @@ void memTrackerDump(int64_t bytesThreshold) {
 	qualifying.reserve(sites.size());
 	for (const auto& s : sites) {
 		int64_t v = liveTracking ? s.estLiveBytes : s.estCumulativeBytes;
-		if (v < bytesThreshold)
+		if (v < bytesThreshold) {
 			break;
+		}
 		qualifying.push_back(s);
 	}
 
@@ -521,10 +559,6 @@ void memTrackerDump(int64_t bytesThreshold) {
 			uintptr_t pieRelative = reinterpret_cast<uintptr_t>(s.exemplarFrames[i]) - pieOffset;
 			addrCmd += format(" 0x%lx", pieRelative);
 		}
-		// If you change the MemoryTrackerSite / MemoryTrackerSummary detail set
-		// below, update the matching schema in design/memory-tracker.md
-		// (Reporting section) — the doc intentionally documents these events and
-		// is kept in sync by hand.
 		TraceEvent("MemoryTrackerSite")
 		    .detail("Fingerprint", format("%016llx", static_cast<unsigned long long>(s.fingerprint)))
 		    // Estimated population usage — already sampling-corrected; consume directly.

@@ -23,9 +23,10 @@
 //
 // Two questions, both about "is it cheap enough to leave on?" (R0):
 //   * off-state cost  — the always-compiled hooks with sampling disabled;
-//   * enabled-state cost — hooks at the production 1% rate and the pessimal
-//     every-allocation rate, which includes both the sampled-alloc slow path
-//     and the per-free lock+probe (the dominant enabled-state cost).
+//   * enabled-state cost — hooks at the envisioned production 1% rate
+//     and the pessimal every-allocation rate, which includes both the
+//     sampled-alloc slow path and the per-free lock+probe (the
+//     dominant enabled-state cost).
 //
 // Run: bin/fdbserver_bench --benchmark_filter=memtracker
 //
@@ -95,6 +96,10 @@ static void bench_memtracker_operator_new(benchmark::State& state) {
 // OnFree still takes the global lock and probes the live table (the dominant
 // enabled-state cost), while ~1/inverse of the OnAlloc calls take the sampling
 // slow path (frame walk + table insert).
+//
+// This is doing a stack unwind against the same stack, and is going
+// to hit the same hash table entries each iteration, so this is definitely
+// a best-case estimate.
 static void bench_memtracker_hooks(benchmark::State& state) {
 	int prev = setInverseAndReset(state.range(0));
 	void* p = std::malloc(kSize);

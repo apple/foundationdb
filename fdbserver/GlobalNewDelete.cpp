@@ -48,14 +48,17 @@
 #include <cstdlib>
 #include <new>
 
+// TODO: the old ALLOC_INSTRUMENTATION doesn't seem to be usable at
+// scale. Consider deleting it.
 #if defined(ALLOC_INSTRUMENTATION) || defined(ALLOC_INSTRUMENTATION_STDOUT)
 
 #include "flow/FastAlloc.h"
 
 void* operator new(std::size_t size) {
 	void* p = malloc(size);
-	if (!p)
+	if (!p) {
 		throw std::bad_alloc();
+	}
 	recordAllocation(p, size);
 	return p;
 }
@@ -78,8 +81,9 @@ void operator delete(void* ptr, const std::nothrow_t&) throw() {
 // array throwing new and matching delete[]
 void* operator new[](std::size_t size) {
 	void* p = malloc(size);
-	if (!p)
+	if (!p) {
 		throw std::bad_alloc();
+	}
 	recordAllocation(p, size);
 	return p;
 }
@@ -99,14 +103,15 @@ void operator delete[](void* ptr, const std::nothrow_t&) throw() {
 	free(ptr);
 }
 
-#else // sampled memory tracker
+#else // sampled memory tracker, see design/memory-tracker.md
 
 #include "flow/MemoryTracker.h"
 
 void* operator new(std::size_t n) {
 	void* p = std::malloc(n);
-	if (!p)
+	if (!p) {
 		throw std::bad_alloc();
+	}
 	memTrackerOnAlloc(p, n);
 	return p;
 }
@@ -121,8 +126,9 @@ void operator delete(void* p, std::size_t) noexcept {
 
 void* operator new[](std::size_t n) {
 	void* p = std::malloc(n);
-	if (!p)
+	if (!p) {
 		throw std::bad_alloc();
+	}
 	memTrackerOnAlloc(p, n);
 	return p;
 }
@@ -158,8 +164,9 @@ void operator delete[](void* p, const std::nothrow_t&) noexcept {
 // C++17 over-aligned new/delete.
 void* operator new(std::size_t n, std::align_val_t a) {
 	void* p = nullptr;
-	if (posix_memalign(&p, static_cast<std::size_t>(a), n) != 0)
+	if (posix_memalign(&p, static_cast<std::size_t>(a), n) != 0) {
 		throw std::bad_alloc();
+	}
 	memTrackerOnAlloc(p, n);
 	return p;
 }
@@ -174,8 +181,9 @@ void operator delete(void* p, std::size_t, std::align_val_t) noexcept {
 
 void* operator new[](std::size_t n, std::align_val_t a) {
 	void* p = nullptr;
-	if (posix_memalign(&p, static_cast<std::size_t>(a), n) != 0)
+	if (posix_memalign(&p, static_cast<std::size_t>(a), n) != 0) {
 		throw std::bad_alloc();
+	}
 	memTrackerOnAlloc(p, n);
 	return p;
 }
