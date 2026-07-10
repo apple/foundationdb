@@ -939,21 +939,6 @@ Not yet covered by dedicated unit tests: an explicit reentrancy-guard test
 and a frame-pointer-walk-depth test — both behaviors are exercised
 indirectly by the tests above.
 
-### Simulation tests
-
-- **Determinism.** Run `bin/fdbserver -r simulation -f tests/fast/Cycle.toml`
-  with `--knob_memory_tracking_sample_inverse=2` repeatedly with the
-  same `-s <seed>`. The aggregate counts (`MemoryTrackerSummary` event)
-  must match across runs.
-- **Coverage.** Run any small simulation test with sample inverse 1 and
-  confirm `MemoryTrackerSite` events include known-heavy sites: arena
-  growth from `MutationListRef` parsing, FastAlloc usage from
-  `Reference<>` ref-count blocks, `operator new` from `std::shared_ptr`
-  control blocks inside RocksDB-touching code paths.
-- **Buggified inverse.** Exercise the tracker at inverse=1 in a
-  fault-injection workload (e.g., `tests/slow/CycleWithKills.toml`).
-  Confirm no crashes, no determinism failures.
-
 ### Microbenchmarks
 
 The targets below are 5% rather than R0's 1% end-to-end CPU ceiling
