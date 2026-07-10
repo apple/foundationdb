@@ -595,7 +595,9 @@ Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> const>
 				if (req.debugID.present()) {
 					g_traceBatch.addEvent("TransactionDebug",
 					                      req.debugID.get().first(),
-					                      "GrvProxyServer.queueTransactionStartRequests.Before");
+					                      "GrvProxyServer.queueTransactionStartRequests.Before",
+					                      req.spanContext.traceID,
+					                      req.spanContext.spanID);
 				}
 
 				if (systemQueue->empty() && defaultQueue->empty() && batchQueue->empty()) {
@@ -682,10 +684,14 @@ Future<Void> lastCommitUpdater(GrvProxyData* self, PromiseStream<Future<Void>> a
 	}
 }
 
+Optional<UID> getDebugID(Optional<BatchDebugIDs> debugIDs) {
+	return debugIDs.present() ? Optional<UID>(debugIDs.get().debugID) : Optional<UID>();
+}
+
 Future<GetReadVersionReply> getLiveCommittedVersion(std::vector<SpanContext> spanContexts,
                                                     GrvProxyData* grvProxyData,
                                                     uint32_t flags,
-                                                    Optional<UID> debugID,
+                                                    Optional<BatchDebugIDs> debugIDs,
                                                     int transactionCount,
                                                     int systemTransactionCount,
                                                     int defaultPriTransactionCount,
@@ -702,6 +708,7 @@ Future<GetReadVersionReply> getLiveCommittedVersion(std::vector<SpanContext> spa
 	++grvProxyData->stats.txnStartBatch;
 
 	double grvStart = now();
+	Optional<UID> debugID = getDebugID(debugIDs);
 	Future<GetRawCommittedVersionReply> replyFromMasterFuture;
 	replyFromMasterFuture = grvProxyData->master.getLiveCommittedVersion.getReply(
 	    GetRawCommittedVersionRequest(span.context, debugID, grvProxyData->ssVersionVectorCache.getMaxVersion()),
@@ -717,8 +724,11 @@ Future<GetReadVersionReply> getLiveCommittedVersion(std::vector<SpanContext> spa
 	double grvConfirmEpochLive = now();
 	grvProxyData->stats.grvConfirmEpochLiveDist->sampleSeconds(grvConfirmEpochLive - grvStart);
 	if (debugID.present()) {
-		g_traceBatch.addEvent(
-		    "TransactionDebug", debugID.get().first(), "GrvProxyServer.getLiveCommittedVersion.confirmEpochLive");
+		g_traceBatch.addEvent("TransactionDebug",
+		                      debugID.get().first(),
+		                      "GrvProxyServer.getLiveCommittedVersion.confirmEpochLive",
+		                      debugIDs.get().debugTraceID,
+		                      debugIDs.get().debugSpanID);
 	}
 
 	GetRawCommittedVersionReply repFromMaster =
@@ -745,8 +755,11 @@ Future<GetReadVersionReply> getLiveCommittedVersion(std::vector<SpanContext> spa
 	                                                 : g_network->networkInfo.metrics.lastRunLoopBusyness);
 
 	if (debugID.present()) {
-		g_traceBatch.addEvent(
-		    "TransactionDebug", debugID.get().first(), "GrvProxyServer.getLiveCommittedVersion.After");
+		g_traceBatch.addEvent("TransactionDebug",
+		                      debugID.get().first(),
+		                      "GrvProxyServer.getLiveCommittedVersion.After",
+		                      debugIDs.get().debugTraceID,
+		                      debugIDs.get().debugSpanID);
 	}
 
 	grvProxyData->stats.txnStartOut += transactionCount;
@@ -1013,7 +1026,7 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 		std::vector<std::vector<GetReadVersionRequest>> start(
 		    2); // start[0] is transactions starting with !(flags&CAUSAL_READ_RISKY), start[1] is transactions starting
 		        // with flags&CAUSAL_READ_RISKY
-		Optional<UID> debugID;
+		Optional<BatchDebugIDs> debugIDs;
 
 		int requestsToStart = 0;
 
@@ -1043,10 +1056,17 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 			}
 
 			if (req.debugID.present()) {
-				if (!debugID.present()) {
-					debugID = nondeterministicRandom()->randomUniqueID();
+				if (!debugIDs.present()) {
+					debugIDs = BatchDebugIDs{ nondeterministicRandom()->randomUniqueID(),
+						                      req.spanContext.traceID,
+						                      req.spanContext.spanID };
 				}
-				g_traceBatch.addAttach("TransactionAttachID", req.debugID.get().first(), debugID.get().first());
+				Optional<UID> debugID = getDebugID(debugIDs);
+				g_traceBatch.addAttach("TransactionAttachID",
+				                       req.debugID.get().first(),
+				                       debugID.get().first(),
+				                       req.spanContext.traceID,
+				                       req.spanContext.spanID);
 			}
 
 			transactionsStarted[req.flags & 1] += tc;
@@ -1121,10 +1141,13 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 		                               systemQueue.empty() && defaultQueue.empty() && batchQueue.empty(),
 		                               elapsed);
 
-		if (debugID.present()) {
+		if (debugIDs.present()) {
+			Optional<UID> debugID = getDebugID(debugIDs);
 			g_traceBatch.addEvent("TransactionDebug",
 			                      debugID.get().first(),
-			                      "GrvProxyServer.transactionStarter.AskLiveCommittedVersionFromMaster");
+			                      "GrvProxyServer.transactionStarter.AskLiveCommittedVersionFromMaster",
+			                      debugIDs.get().debugTraceID,
+			                      debugIDs.get().debugSpanID);
 		}
 
 		int defaultGRVProcessed = 0;
@@ -1140,7 +1163,7 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 				Future<GetReadVersionReply> readVersionReply = getLiveCommittedVersion(spanContexts,
 				                                                                       grvProxyData,
 				                                                                       i,
-				                                                                       debugID,
+				                                                                       debugIDs,
 				                                                                       transactionsStarted[i],
 				                                                                       systemTransactionsStarted[i],
 				                                                                       defaultPriTransactionsStarted[i],
