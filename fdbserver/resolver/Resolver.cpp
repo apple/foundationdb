@@ -272,8 +272,12 @@ Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatchReque
 
 	if (req.debugID.present()) {
 		debugID = nondeterministicRandom()->randomUniqueID();
-		g_traceBatch.addAttach("CommitAttachID", req.debugID.get().first(), debugID.get().first());
-		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "Resolver.resolveBatch.Before");
+		g_traceBatch.addAttach("CommitAttachID",
+		                       req.debugID.get().first(),
+		                       debugID.get().first(),
+		                       req.spanContext.traceID,
+		                       req.spanContext.spanID);
+		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "Resolver.resolveBatch.Before", req.spanContext.traceID, req.spanContext.spanID);
 	}
 
 	/* TraceEvent("ResolveBatchStart", self->dbgid).detail("From", proxyAddress).detail("Version",
@@ -295,7 +299,7 @@ Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatchReque
 	}
 
 	if (debugID.present()) {
-		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "Resolver.resolveBatch.AfterQueueSizeCheck");
+		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "Resolver.resolveBatch.AfterQueueSizeCheck", req.spanContext.traceID, req.spanContext.spanID);
 	}
 
 	co_await versionReady(self.getPtr(), &proxyInfo, req.prevVersion);
@@ -328,7 +332,7 @@ Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatchReque
 		proxyInfo.lastVersion = req.version;
 
 		if (req.debugID.present())
-			g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "Resolver.resolveBatch.AfterOrderer");
+			g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "Resolver.resolveBatch.AfterOrderer", req.spanContext.traceID, req.spanContext.spanID);
 
 		ResolveTransactionBatchReply& reply = proxyInfo.outstandingBatches[req.version];
 		reply.writtenTags = req.writtenTags;
@@ -530,7 +534,7 @@ Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatchReque
 		self->computeTimeDist->sampleSeconds(endComputeTime - beginComputeTime);
 
 		if (req.debugID.present())
-			g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "Resolver.resolveBatch.After");
+			g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "Resolver.resolveBatch.After", req.spanContext.traceID, req.spanContext.spanID);
 	} else {
 		CODE_PROBE(true, "Duplicate resolve batch request");
 		//TraceEvent("DupResolveBatchReq", self->dbgid).detail("From", proxyAddress);
