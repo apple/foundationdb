@@ -26,7 +26,7 @@
 #include <vector>
 
 #include "fdbclient/FDBTypes.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 
 // Native CDC value types shared by thread-safe client surfaces and language
 // bindings. Keep this header independent from NativeAPI so multi-version
