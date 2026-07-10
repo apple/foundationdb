@@ -78,7 +78,6 @@
 #include "fdbclient/AuditUtils.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -99,18 +98,8 @@
 #include "fdbserver/storageserver/StorageServer.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "StorageServerUtils.h"
-#include "flow/ActorCollection.h"
-#include "flow/Arena.h"
-#include "flow/Error.h"
-#include "flow/Hash3.h"
-#include "flow/Histogram.h"
-#include "flow/IRandom.h"
-#include "flow/IndexedSet.h"
 #include "flow/CoroUtils.h"
-#include "flow/SystemMonitor.h"
 #include "flow/TDMetric.h"
-#include "flow/Trace.h"
-#include "flow/Util.h"
 #include "flow/genericactors.actor.h"
 
 #ifndef __INTEL_COMPILER
@@ -713,7 +702,7 @@ private:
 
 	static Future<Key> readFirstKey(IKeyValueStore* storage, KeyRangeRef range, Optional<ReadOptions> options) {
 		RangeResult r = co_await storage->readRange(range, 1, 1 << 30, options);
-		if (r.size())
+		if (!r.empty())
 			co_return r[0].key;
 		else
 			co_return range.end;
@@ -745,7 +734,7 @@ struct UpdateEagerReadInfo {
 		else if (m.type == MutationRef::CompareAndClear) {
 			if (enableClearRangeEagerReads)
 				keyBegin.push_back(keyAfter(m.param1, arena));
-			if (keys.size() > 0 && keys.back().first == m.param1) {
+			if (!keys.empty() && keys.back().first == m.param1) {
 				// Don't issue a second read, if the last read was equal to the current key.
 				// CompareAndClear is likely to be used after another atomic operation on same key.
 				keys.back().second = std::max(keys.back().second, m.param2.size() + 1);
@@ -1070,11 +1059,11 @@ public:
 				hist = &allHistoryCopy;
 			}
 
-			while (hist->size() && v > hist->back().first) {
+			while (!hist->empty() && v > hist->back().first) {
 				logSystem->pop(v, hist->back().second);
 				hist->pop_back();
 			}
-			if (hist->size()) {
+			if (!hist->empty()) {
 				logSystem->pop(v, hist->back().second);
 			} else {
 				logSystem->pop(v, tag);
@@ -2399,8 +2388,7 @@ Future<Version> watchWaitForValueChange(coro::FrameSizeRecorder, StorageServer* 
 }
 
 Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext parent, KeyRef key) {
-	auto watch =
-	    watchWaitForValueChange(coro::FrameSizeRecorder{ &WATCH_OVERHEAD_WATCHIMPL }, data, std::move(parent), key);
+	auto watch = watchWaitForValueChange(coro::FrameSizeRecorder{ &WATCH_OVERHEAD_WATCHIMPL }, data, parent, key);
 	ASSERT(WATCH_OVERHEAD_WATCHIMPL > 0);
 	return watch;
 }
@@ -2445,7 +2433,7 @@ Future<Void> watchValueSendReply(coro::FrameSizeRecorder,
 			if (timeoutDelay < 0) {
 				auto res = co_await race(resp, data->noRecentUpdates.onChange());
 				if (res.index() == 0) {
-					Version ver = std::get<0>(std::move(res));
+					Version ver = std::get<0>(res);
 
 					// fire watch
 					req.reply.send(WatchValueReply{ ver });
@@ -2462,7 +2450,7 @@ Future<Void> watchValueSendReply(coro::FrameSizeRecorder,
 
 			auto res = co_await race(timeout(resp, timeoutDelay), data->noRecentUpdates.onChange());
 			if (res.index() == 0) {
-				Optional<Version> response = std::get<0>(std::move(res));
+				Optional<Version> response = std::get<0>(res);
 				if (response.present()) {
 					// fire watch
 					req.reply.send(WatchValueReply{ response.get() });
@@ -2495,11 +2483,8 @@ Future<Void> watchValueSendReply(StorageServer* data,
                                  WatchValueRequest req,
                                  Reference<ServerWatchMetadata> metadata,
                                  SpanContext spanContext) {
-	auto watch = watchValueSendReply(coro::FrameSizeRecorder{ &WATCH_OVERHEAD_WATCHQ },
-	                                 data,
-	                                 std::move(req),
-	                                 std::move(metadata),
-	                                 std::move(spanContext));
+	auto watch = watchValueSendReply(
+	    coro::FrameSizeRecorder{ &WATCH_OVERHEAD_WATCHQ }, data, std::move(req), std::move(metadata), spanContext);
 	ASSERT(WATCH_OVERHEAD_WATCHQ > 0);
 	return watch;
 }
@@ -2509,7 +2494,7 @@ void addWatchValueReply(StorageServer* data,
                         Reference<ServerWatchMetadata> metadata,
                         SpanContext spanContext) {
 	++metadata->watchReplyCount;
-	data->actors.add(watchValueSendReply(data, std::move(req), std::move(metadata), std::move(spanContext)));
+	data->actors.add(watchValueSendReply(data, std::move(req), std::move(metadata), spanContext));
 }
 
 // Finds a checkpoint.
@@ -2753,7 +2738,7 @@ Future<Void> getShardState_impl(StorageServer* data, GetShardStateRequest req) {
 			}
 		}
 
-		if (!onChange.size()) {
+		if (onChange.empty()) {
 			GetShardStateReply rep(data->version.get(), data->durableVersion.get());
 			if (req.includePhysicalShard) {
 				rep.shards = data->getStorageServerShards(req.keys);
@@ -3135,7 +3120,7 @@ Future<GetKeyValuesReply> readRange(StorageServer* data,
 	data->readRangeKVPairsReturnedHistogram->sample(result.data.size());
 
 	// all but the last item are less than *pLimitBytes
-	ASSERT(result.data.size() == 0 || *pLimitBytes + result.data.end()[-1].expectedSize() + sizeof(KeyValueRef) > 0);
+	ASSERT(result.data.empty() || *pLimitBytes + result.data.end()[-1].expectedSize() + sizeof(KeyValueRef) > 0);
 	result.more = limit == 0 || *pLimitBytes <= 0; // FIXME: Does this have to be exact?
 	result.version = version;
 	co_return result;
@@ -3205,7 +3190,7 @@ Future<Key> findKey(StorageServer* data,
 	}
 
 	int index = distance - 1;
-	if (skipEqualKey && rep.data.size() && rep.data[0].key == sel.getKey())
+	if (skipEqualKey && !rep.data.empty() && rep.data[0].key == sel.getKey())
 		++index;
 
 	if (index < rep.data.size()) {
@@ -3232,7 +3217,7 @@ Future<Key> findKey(StorageServer* data,
 		if (more) {
 			CODE_PROBE(true, "Key selector read range had more results");
 
-			ASSERT(rep.data.size());
+			ASSERT(!rep.data.empty());
 			Key returnKey = forward ? keyAfter(rep.data.back().key) : rep.data.back().key;
 
 			// This is possible if key/value pairs are very large and only one result is returned on a last less than
@@ -3529,7 +3514,7 @@ Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			resultSize = req.limitBytes - remainingLimitBytes;
 			data->counters.bytesQueried += resultSize;
 			data->counters.rowsQueried += r.data.size();
-			if (r.data.size() == 0) {
+			if (r.data.empty()) {
 				++data->counters.emptyQueries;
 			}
 		}
@@ -4409,12 +4394,12 @@ std::vector<std::string> compareSourceAndRestoredData(UID thisServerID,
 	    .detail("Version", version);
 
 	// Log first few keys from both sets for debugging
-	if (sourceReply.data.size() > 0) {
+	if (!sourceReply.data.empty()) {
 		TraceEvent("SSAuditRestoreCompareSourceKeys", thisServerID)
 		    .detail("FirstSourceKey", sourceReply.data[0].key)
 		    .detail("LastSourceKey", sourceReply.data[sourceReply.data.size() - 1].key);
 	}
-	if (restoredReply.data.size() > 0) {
+	if (!restoredReply.data.empty()) {
 		TraceEvent("SSAuditRestoreCompareRestoredKeys", thisServerID)
 		    .detail("FirstRestoredKey", restoredReply.data[0].key)
 		    .detail("LastRestoredKey", restoredReply.data[restoredReply.data.size() - 1].key);
@@ -4609,14 +4594,13 @@ Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
 					// This catches the case where mode=BOTH backup created empty range files.
 					if (numValidatedKeys == 0 && restoredReply.data.empty() && !restoredReply.more &&
 					    !sourceReply.data.empty()) {
-						std::string error =
-						    format("Baseline restore data is completely empty but source has %d keys! "
-						           "This likely means the backup's range file snapshot was empty (mode=BOTH bug). "
-						           "First source key: %s",
-						           sourceReply.data.size(),
-						           sourceReply.data.size() > 0
-						               ? Traceable<StringRef>::toString(sourceReply.data[0].key).c_str()
-						               : "N/A");
+						std::string error = format(
+						    "Baseline restore data is completely empty but source has %d keys! "
+						    "This likely means the backup's range file snapshot was empty (mode=BOTH bug). "
+						    "First source key: %s",
+						    sourceReply.data.size(),
+						    !sourceReply.data.empty() ? Traceable<StringRef>::toString(sourceReply.data[0].key).c_str()
+						                              : "N/A");
 						TraceEvent(SevError, "SSAuditRestoreEmptyBaseline", data->thisServerID)
 						    .detail("AuditID", req.id)
 						    .detail("AuditRange", req.range)
@@ -4636,7 +4620,7 @@ Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
 						           "This likely means the bulkload restore failed. "
 						           "First baseline key: %s",
 						           restoredReply.data.size(),
-						           restoredReply.data.size() > 0
+						           !restoredReply.data.empty()
 						               ? Traceable<StringRef>::toString(restoredReply.data[0].key).c_str()
 						               : "N/A");
 						TraceEvent(SevError, "SSAuditRestoreEmptySource", data->thisServerID)
@@ -5822,7 +5806,7 @@ Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRequest 
 			resultSize = req.limitBytes - remainingLimitBytes;
 			data->counters.getMappedRangeBytesQueried += resultSize;
 			data->counters.finishedGetMappedRangeSecondaryQueries += r.data.size();
-			if (r.data.size() == 0) {
+			if (r.data.empty()) {
 				++data->counters.emptyQueries;
 			}
 		}
@@ -6015,14 +5999,14 @@ Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest 
 				req.reply.send(r);
 
 				data->counters.rowsQueried += r.data.size();
-				if (r.data.size() == 0) {
+				if (r.data.empty()) {
 					++data->counters.emptyQueries;
 				}
 				if (!r.more) {
 					req.reply.sendError(end_of_stream());
 					break;
 				}
-				ASSERT(r.data.size());
+				ASSERT(!r.data.empty());
 
 				if (req.limit >= 0) {
 					begin = keyAfter(lastKey);
@@ -6812,8 +6796,8 @@ static Future<Void> processSampleFiles(StorageServer* data,
                                        KeyRange maxRange,
                                        std::string bulkLoadLocalDir,
                                        std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets) {
-	BulkLoadFileSetKeyMap::const_iterator iter = localFileSets->begin();
-	BulkLoadFileSetKeyMap::const_iterator end = localFileSets->end();
+	auto iter = localFileSets->begin();
+	auto end = localFileSets->end();
 	std::vector<KeyValue> rawSamples;
 	std::unique_ptr<IRocksDBSstFileReader> reader;
 
@@ -7274,7 +7258,7 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 						    .detail("BlockBytes", expectedBlockSize)
 						    .detail("KeyBegin", keys.begin)
 						    .detail("KeyEnd", keys.end)
-						    .detail("Last", this_block.size() ? this_block.end()[-1].key : std::string())
+						    .detail("Last", !this_block.empty() ? this_block.end()[-1].key : std::string())
 						    .detail("Version", fetchVersion)
 						    .detail("More", this_block.more)
 						    .detail("DataMoveId", dataMoveId.toString())
@@ -7310,7 +7294,7 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 						// Write this_block to storage
 						Standalone<VectorRef<KeyValueRef>> blockData(this_block, this_block.arena());
 						Key blockEnd =
-						    this_block.size() > 0 && this_block.more ? keyAfter(this_block.back().key) : keys.end;
+						    !this_block.empty() && this_block.more ? keyAfter(this_block.back().key) : keys.end;
 						KeyRange blockRange(KeyRangeRef(blockBegin, blockEnd));
 						co_await data->storage.replaceRange(blockRange, blockData);
 
@@ -7424,7 +7408,7 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					    .detail("FKID", fetchKeysID);
 
 					CODE_PROBE(true, "fetchkeys has more");
-					CODE_PROBE(shard->updates.size(), "Shard has updates");
+					CODE_PROBE(!shard->updates.empty(), "Shard has updates");
 					ASSERT(otherShard->updates.empty());
 				}
 				break;
@@ -7655,7 +7639,7 @@ void AddingShard::addMutation(Version version, bool fromFetch, MutationRef const
 		// Save incoming mutations (See the comments of member variable `updates`).
 
 		// Create a new VerUpdateRef in updates queue if it is a new version.
-		if (!updates.size() || version > updates.end()[-1].version) {
+		if (updates.empty() || version > updates.end()[-1].version) {
 			VerUpdateRef v;
 			v.version = version;
 			v.isPrivateData = false;
@@ -10123,7 +10107,7 @@ Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* data,
 				if (sstWriter == nullptr) {
 					break;
 				}
-				ASSERT(metaData.ranges.size() > 0);
+				ASSERT(!metaData.ranges.empty());
 				std::sort(metaData.ranges.begin(), metaData.ranges.end(), [](KeyRange a, KeyRange b) {
 					// Debug usage: make sure no overlapping between compared two ranges
 					/* if (a.begin < b.begin) {
@@ -11868,7 +11852,7 @@ Future<Void> storageEngineConsistencyCheck(StorageServer* self) {
 	while (true) {
 		co_await delay(SERVER_KNOBS->STORAGE_SHARD_CONSISTENCY_CHECK_INTERVAL);
 		// Only validate when storage server and storage engine are expected to have the same shard mapping.
-		while (self->pendingAddRanges.size() > 0 || self->pendingRemoveRanges.size() > 0) {
+		while (!self->pendingAddRanges.empty() || !self->pendingRemoveRanges.empty()) {
 			co_await delay(5.0);
 		}
 
@@ -11896,12 +11880,12 @@ Future<Void> storageEngineConsistencyCheck(StorageServer* self) {
 
 		auto kvRanges = kvShards.ranges();
 		for (auto it = kvRanges.begin(); it != kvRanges.end(); ++it) {
-			if (it.value() == "") {
+			if (it.value().empty()) {
 				continue;
 			}
 
 			for (auto v : currentShards.intersectingRanges(it.range())) {
-				if (v.value() == "") {
+				if (v.value().empty()) {
 					TraceEvent(SevWarn, "MissingShardSS").detail("Range", v.range()).detail("ShardIdKv", it.value());
 				} else if (v.value() != it.value()) {
 					TraceEvent(SevWarn, "ShardMismatch")
@@ -11913,12 +11897,12 @@ Future<Void> storageEngineConsistencyCheck(StorageServer* self) {
 		}
 
 		for (auto it : currentShards.ranges()) {
-			if (it.value() == "") {
+			if (it.value().empty()) {
 				continue;
 			}
 
 			for (auto v : kvShards.intersectingRanges(it.range())) {
-				if (v.value() == "") {
+				if (v.value().empty()) {
 					TraceEvent(SevWarn, "MissingShardKv").detail("Range", v.range()).detail("ShardIdSS", it.value());
 				}
 			}
@@ -12382,7 +12366,7 @@ Future<Void> replaceInterface(StorageServer* self, StorageServerInterface ssi) {
 				    serverTagHistoryKeyFor(ssi.id()), serverTagValue(rep.tag), MutationRef::SetVersionstampedKey);
 			}
 
-			if (rep.history.size() && rep.history.back().first < self->version.get()) {
+			if (!rep.history.empty() && rep.history.back().first < self->version.get()) {
 				tr.clear(serverTagHistoryRangeBefore(ssi.id(), self->version.get()));
 			}
 
@@ -12408,7 +12392,7 @@ Future<Void> replaceInterface(StorageServer* self, StorageServerInterface ssi) {
 				TraceEvent("SSHistory", self->thisServerID).detail("Ver", it.first).detail("Tag", it.second.toString());
 			}
 
-			if (self->history.size() && buggify()) {
+			if (!self->history.empty() && buggify()) {
 				TraceEvent("SSHistoryReboot", self->thisServerID).log();
 				throw please_reboot();
 			}

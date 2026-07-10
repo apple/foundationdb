@@ -18,6 +18,13 @@
  * limitations under the License.
  */
 
+// CoroutinesImpl.h is normally included from Coroutines.h. When tools lint this
+// implementation header directly, enter through the public header first so the
+// declarations below are available before Coroutines.h uses them.
+#ifndef FLOW_COROUTINES_H
+#include "flow/Coroutines.h"
+#endif
+
 #ifndef FLOW_COROUTINESIMPL_H
 #define FLOW_COROUTINESIMPL_H
 
