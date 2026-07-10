@@ -951,35 +951,51 @@ on a preallocated buffer (which isolates the tracker's own work, with no
 allocation in the loop); a raw `malloc`/`free` loop is the tracker-free
 baseline.
 
-Measured on a 32-core dev pod (ns per alloc+free pair), with the cost projected
-to one second at an assumed 100K allocations/sec (numbers stable to within a few
-percent across repeated runs):
+Measured on a 32-core dev pod (ns per alloc+free pair), projected to one second
+at **~2M allocations/sec** — the storage-process allocation rate measured in the
+mako A/B below (numbers stable to within a few percent across repeated runs):
 
-| Case | ns/op | @100K/s | % of one core |
+| Case | ns/op | @2M/s | % of one core |
 |---|---|---|---|
-| `malloc`/`free` (baseline, no tracker) | 7.8 | 777 µs/s | 0.08% |
-| hooks, off | 1.9 | 190 µs/s | 0.019% |
-| hooks, 1% sampling | 5.6 | 558 µs/s | 0.056% |
-| hooks, every alloc (worst case, not a default) | 70 | 7.0 ms/s | 0.70% |
-| `operator new`/`delete`, off | 10.6 | 1.06 ms/s | 0.11% |
-| `operator new`/`delete`, 1% sampling | 13.8 | 1.38 ms/s | 0.14% |
-| `operator new`/`delete`, every alloc (worst case, not a default) | 85 | 8.5 ms/s | 0.85% |
+| `malloc`/`free` (baseline, no tracker) | 7.8 | 15.6 ms/s | 1.56% |
+| hooks, off | 1.9 | 3.8 ms/s | 0.38% |
+| hooks, 1% sampling | 5.6 | 11.2 ms/s | 1.12% |
+| hooks, every alloc (worst case, not a default) | 70 | 140 ms/s | 14% |
+| `operator new`/`delete`, off | 10.6 | 21.2 ms/s | 2.12% |
+| `operator new`/`delete`, 1% sampling | 13.8 | 27.6 ms/s | 2.76% |
+| `operator new`/`delete`, every alloc (worst case, not a default) | 85 | 170 ms/s | 17% |
 
 Takeaways:
 
-- **Disabled**, the tracker adds ~1.9 ns per alloc+free pair — ~0.02% of a core
-  at 100K/s. This is the off-switch cost (R9).
-- **At the production 1% rate**, the tracker's own work is ~5.6 ns/pair
-  (~0.056% of a core at 100K/s) — roughly 1/17th of R0's 1% ceiling. The cost is
-  dominated by the per-free lock+probe (every free takes the lock while
-  live-tracking is on), not the 1%-of-allocs slow path.
+- **Disabled**, the tracker adds ~1.9 ns per alloc+free pair — ~0.38% of a core
+  at 2M/s. Small but no longer negligible at this rate; this is the off-switch
+  cost (R9).
+- **At the production 1% rate**, the tracker's own *single-threaded* work is
+  ~5.6 ns/pair — ~1.1% of a core at 2M/s, i.e. already at R0's 1% ceiling, and
+  that is *without* cross-thread lock contention. The cost is dominated by the
+  per-free lock+probe (every free takes the global lock while live-tracking is
+  on), not the 1%-of-allocs slow path.
+- These are single-threaded projections and are a **floor**, not the real cost.
+  The end-to-end mako A/B (storage isolated on one core, real multi-threaded
+  allocation including I/O threads) measures a materially larger hit at 1%
+  sampling — a single-digit-percent TPS regression — because all those frees
+  contend on the one global `g_mtLock`.
+- **Conclusion:** even at this worst-case ~2M/s (a CPU-saturated storage core),
+  the current single-global-lock design is *not* comfortably under R0's 1%
+  ceiling when enabled at 1%. This is why the production default stays off
+  (R2's phased rollout) until the live-table lock is sharded / made per-thread
+  (the deferred follow-up in Storage and Alternatives); the µbench and A/B
+  together size that work.
 - The **every-allocation** rows are **not a proposed configuration** — they are
-  an estimated worst case for buggified `inverse=1` simulation runs, included to
-  bound the pessimal cost. Even then it stays under 1% of a core at 100K/s.
+  an estimated worst case for buggified `inverse=1` simulation runs.
 
-Caveat: 100K allocations/sec is the design's assumed rate, not a measured FDB
-figure; scale the per-second numbers linearly for other rates (e.g. ~0.56% of a
-core at 1M/sec at 1% sampling).
+Caveat: 2M/s is a **worst-case** rate — it was measured on a deliberately
+CPU-pegged storage server (the mako bench pins the storage role to ~one core at
+max throughput). A production server not running flat out allocates less, so the
+%-of-core figures here are upper bounds; scale linearly for lower rates or other
+roles. Conversely, the single-threaded µbench excludes cross-thread lock
+contention, so its per-op %-of-core is a *lower* bound — the mako A/B is the
+representative end-to-end number. The real cost is bracketed between the two.
 
 ### Strip-aware symbolization spot-check
 
