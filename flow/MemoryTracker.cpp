@@ -61,7 +61,7 @@ namespace {
 // FNV-1a 64-bit. Produces a 64-bit fingerprint over the captured frame array.
 uint64_t fnv64(const void* data, std::size_t len) {
 	uint64_t h = 0xcbf29ce484222325ULL;
-	const std::uint8_t* p = static_cast<const std::uint8_t*>(data);
+	const auto* p = static_cast<const std::uint8_t*>(data);
 	for (std::size_t i = 0; i < len; i++) {
 		h ^= p[i];
 		h *= 0x100000001b3ULL;
@@ -283,7 +283,7 @@ void memTrackerSampleAlloc(void* p, std::size_t n) {
 		for (int i = 0; i < kept; i++)
 			site.exemplarFrames[i] = keep[i];
 	}
-	std::int64_t nBytes = static_cast<std::int64_t>(n);
+	auto nBytes = static_cast<std::int64_t>(n);
 	std::int64_t estBytes = nBytes * weight;
 
 	site.cumulativeAllocs += 1;
@@ -330,7 +330,7 @@ void memTrackerSampleFree(void* p) {
 	LiveEntry e = it->second;
 	g_liveMap->erase(it);
 
-	std::int64_t eBytes = static_cast<std::int64_t>(e.size);
+	auto eBytes = static_cast<std::int64_t>(e.size);
 	std::int64_t eEstBytes = eBytes * e.weight;
 	if (g_aggMap) {
 		auto sit = g_aggMap->find(e.fingerprint);
