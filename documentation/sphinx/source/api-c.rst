@@ -287,7 +287,18 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
 
    .. note:: This function provides no benefit to most application code. It is designed for use in writing generic, thread-safe language bindings. Applications should normally call :func:`fdb_future_destroy` only.
 
-   This function may only be called after a successful (zero return value) call to :func:`fdb_future_get_key`, :func:`fdb_future_get_value`, or :func:`fdb_future_get_keyvalue_array`. It indicates that the memory returned by the prior get call is no longer needed by the application. After this function has been called the same number of times as ``fdb_future_get_*()``, further calls to ``fdb_future_get_*()`` will return a :ref:`future_released <developer-guide-error-codes>` error. It is still necessary to later destroy the future with :func:`fdb_future_destroy`.
+   This function may only be called after a successful (zero return value)
+   call to an ``fdb_future_get_*()`` function that returns memory owned by
+   the future. This includes :func:`fdb_future_get_key`,
+   :func:`fdb_future_get_value`, :func:`fdb_future_get_keyvalue_array`,
+   :func:`fdb_future_get_cdc_stream_info_array`, and
+   :func:`fdb_future_get_cdc_versioned_mutations`. It indicates that the
+   memory returned by the prior get call is no longer needed by the
+   application. After this function has been called the same number of times
+   as ``fdb_future_get_*()``, further calls to ``fdb_future_get_*()``
+   will return a :ref:`future_released <developer-guide-error-codes>` error.
+   It is still necessary to later destroy the future with
+   :func:`fdb_future_destroy`.
 
    Calling this function is optional, since :func:`fdb_future_destroy` will also release the memory returned by get functions. However, :func:`fdb_future_release_memory` leaves the future object itself intact and provides a specific error code which can be used for coordination by multiple threads racing to do something with the results of a specific future. This has proven helpful in writing binding code.
 
@@ -298,6 +309,13 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
 .. function:: fdb_error_t fdb_future_get_int64(FDBFuture* future, int64_t* out)
 
    Extracts a 64-bit integer from a pointer to :type:`FDBFuture` into a caller-provided variable of type ``int64_t``. |future-warning|
+
+   |future-get-return1| |future-get-return2|.
+
+.. function:: fdb_error_t fdb_future_get_uint64(FDBFuture* future, uint64_t* out)
+
+   Extracts an unsigned 64-bit integer from a pointer to :type:`FDBFuture`
+   into a caller-provided variable of type ``uint64_t``. |future-warning|
 
    |future-get-return1| |future-get-return2|.
 
