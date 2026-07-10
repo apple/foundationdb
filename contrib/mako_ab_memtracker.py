@@ -36,8 +36,11 @@ of the storage process trace.
 
 Run on the dev pod, e.g.:
   python3 /root/src/fdb5/foundationdb/contrib/mako_ab_memtracker.py --build /root/build_output5 \
-      --engines redwood rocksdb --warmup 60 --seconds 240 \
-      --outdir /mnt/ram/memtracker_ab
+      --engines redwood rocksdb --warmup 60 --seconds 240
+
+Only SS/cluster data goes on tmpfs (--ramdir under /mnt/ram, clobbered clean at
+startup); per-arm metrics are saved under --outdir on /root so the report
+survives the next run's clobber.
 """
 
 import argparse
@@ -56,6 +59,37 @@ COLOR = {"off": "#4477CC", "on": "#EE7733"}
 ARMS = [("off", 0), ("on", 100)]  # (label, sample_inverse)
 PCTS = [("medianLatency", "p50"), ("p95Latency", "p95"),
         ("p99Latency", "p99"), ("p99.9Latency", "p99.9")]
+
+
+def clobber_ramdisk(ram_mount):
+    """Clear all scratch under the tmpfs so every run starts with an empty
+    ramdisk. /mnt/ram is only ~24 GB and fills fast across runs. Done at startup
+    rather than teardown: a killed run can't be trusted to have cleaned up, and
+    leaving the last run's data in place until the next run keeps it available
+    to inspect when something fails."""
+    if not os.path.isdir(ram_mount):
+        return
+    for name in os.listdir(ram_mount):
+        subprocess.run(["rm", "-rf", os.path.join(ram_mount, name)], check=False)
+    print(f"clobbered ramdisk contents under {ram_mount}", flush=True)
+
+
+def save_metrics(dst, metrics):
+    """Persist an arm's computed metrics to /root so the report survives the
+    next run's ramdisk clobber (the traces alloc-rate/knob-verify are derived
+    from live only while the run's tmpfs data exists)."""
+    os.makedirs(dst, exist_ok=True)
+    with open(os.path.join(dst, "metrics.json"), "w") as f:
+        json.dump(metrics, f)
+
+
+def load_metrics(dst):
+    try:
+        with open(os.path.join(dst, "metrics.json")) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {"overallTPS": None, "persec": [], "latency": {}, "ok": False}
+
 
 
 def run_arm(bench, build, engine, arm, inverse, warmup, seconds, rows, outbase):
@@ -200,21 +234,22 @@ def parse_run(rundir):
     return out
 
 
-def collect(bench, build, engines, warmup, seconds, rows, outbase):
+def collect(bench, build, engines, warmup, seconds, rows, ramdir, outdir):
     data = {}  # engine -> arm -> {metrics, verified_inverse}
     for engine in engines:
         data[engine] = {}
         for arm, inverse in ARMS:
             rundir = run_arm(bench, build, engine, arm, inverse,
-                             warmup, seconds, rows, outbase)
-            metrics = parse_run(rundir)
-            observed = verify_sample_inverse(rundir)
+                             warmup, seconds, rows, ramdir)
+            metrics = parse_run(rundir)                 # reads mako.json + alloc-rate off tmpfs
+            observed = verify_sample_inverse(rundir)    # reads the trace off tmpfs
             metrics["verified_inverse"] = observed
             metrics["expected_inverse"] = inverse
             ok = "OK" if observed == inverse else f"MISMATCH (saw {observed})"
             print(f"    -> overallTPS={metrics['overallTPS']} "
                   f"knob-verify SampleInverse={observed} expected={inverse} [{ok}]",
                   flush=True)
+            save_metrics(os.path.join(outdir, arm, engine), metrics)  # persist to /root
             data[engine][arm] = metrics
     return data
 
@@ -388,17 +423,21 @@ def main():
     ap.add_argument("--warmup", type=int, default=60)
     ap.add_argument("--seconds", type=int, default=240)
     ap.add_argument("--rows", type=int, default=100000)
-    ap.add_argument("--outdir", default="/mnt/ram/memtracker_ab")
+    ap.add_argument("--ramdir", default="/mnt/ram/memtracker_ab",
+                    help="tmpfs scratch for SS/cluster data (only SS data lives on /mnt/ram)")
+    ap.add_argument("--ram-mount", default="/mnt/ram",
+                    help="tmpfs mount clobbered clean at startup")
+    ap.add_argument("--outdir", default="/root/memtracker_ab_results",
+                    help="persistent results dir on /root (~1 TB); per-arm metrics saved here")
     ap.add_argument("--report", default=None,
                     help="HTML output path (default: /root/src/mako_memtracker_ab.html, "
                          "which syncs to ~/src on the Mac)")
     ap.add_argument("--report-only", action="store_true",
-                    help="Skip running; regenerate HTML from an existing outdir")
+                    help="Skip running; regenerate HTML from an existing --outdir")
     args = ap.parse_args()
 
     # Default the report into the okteto sync root (~/src <-> /root/src) so it
-    # lands on the Mac for viewing without a separate copy step. The bulky run
-    # data stays in --outdir (tmpfs /mnt/ram), which is not synced.
+    # lands on the Mac for viewing without a separate copy step.
     report = args.report or "/root/src/mako_memtracker_ab.html"
 
     if args.report_only:
@@ -406,15 +445,13 @@ def main():
         for eng in args.engines:
             data[eng] = {}
             for arm, inverse in ARMS:
-                rundir = os.path.join(args.outdir, arm, eng)
-                m = parse_run(rundir)
-                m["verified_inverse"] = verify_sample_inverse(rundir)
-                m["expected_inverse"] = inverse
-                data[eng][arm] = m
+                data[eng][arm] = load_metrics(os.path.join(args.outdir, arm, eng))
     else:
+        clobber_ramdisk(args.ram_mount)          # clean slate up front; no end-of-run cleanup
+        os.makedirs(args.ramdir, exist_ok=True)
         os.makedirs(args.outdir, exist_ok=True)
         data = collect(args.bench, args.build, args.engines,
-                       args.warmup, args.seconds, args.rows, args.outdir)
+                       args.warmup, args.seconds, args.rows, args.ramdir, args.outdir)
 
     generate_html(data, report, args.warmup, args.seconds, args.rows)
     print(f"\nReport written: {report}")
