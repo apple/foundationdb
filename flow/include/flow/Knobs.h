@@ -129,7 +129,7 @@ public:
 
 	// Per-call-site sampled memory tracker. See design/memory-tracker.md and flow/MemoryTracker.h.
 	int MEMORY_TRACKING_SAMPLE_INVERSE; // 0=off, N=1-in-N
-	int64_t MEMORY_TRACKING_FORCE_SAMPLE_BYTES; // always sample allocations >= this many bytes; INT64_MAX disables
+	int64_t MEMORY_TRACKING_FORCE_SAMPLE_BYTES; // always sample allocations >= this many bytes; -1 disables
 	bool MEMORY_TRACKING_LIVE_TRACKING; // when false, skip the pointer-keyed live-block table.
 	                                    // Treat as startup-only: toggling true→false leaves orphan
 	                                    // entries in the live-block table that won't get debited;

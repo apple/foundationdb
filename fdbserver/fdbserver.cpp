@@ -705,54 +705,9 @@ static void printUsage(const char* name, bool devhelp) {
 
 extern bool g_crashOnError;
 
-#if defined(ALLOC_INSTRUMENTATION) || defined(ALLOC_INSTRUMENTATION_STDOUT)
-void* operator new(std::size_t size) {
-	void* p = malloc(size);
-	if (!p)
-		throw std::bad_alloc();
-	recordAllocation(p, size);
-	return p;
-}
-void operator delete(void* ptr) throw() {
-	recordDeallocation(ptr);
-	free(ptr);
-}
-
-// scalar, nothrow new and it matching delete
-void* operator new(std::size_t size, const std::nothrow_t&) throw() {
-	void* p = malloc(size);
-	recordAllocation(p, size);
-	return p;
-}
-void operator delete(void* ptr, const std::nothrow_t&) throw() {
-	recordDeallocation(ptr);
-	free(ptr);
-}
-
-// array throwing new and matching delete[]
-void* operator new[](std::size_t size) {
-	void* p = malloc(size);
-	if (!p)
-		throw std::bad_alloc();
-	recordAllocation(p, size);
-	return p;
-}
-void operator delete[](void* ptr) throw() {
-	recordDeallocation(ptr);
-	free(ptr);
-}
-
-// array, nothrow new and matching delete[]
-void* operator new[](std::size_t size, const std::nothrow_t&) throw() {
-	void* p = malloc(size);
-	recordAllocation(p, size);
-	return p;
-}
-void operator delete[](void* ptr, const std::nothrow_t&) throw() {
-	recordDeallocation(ptr);
-	free(ptr);
-}
-#endif
+// The global operator new / operator delete replacements (both the legacy
+// ALLOC_INSTRUMENTATION accounting hooks and the sampled memory tracker) live in
+// fdbserver/GlobalNewDelete.cpp.
 
 Optional<bool> checkBuggifyOverride(const char* testFile) {
 	std::ifstream ifs;

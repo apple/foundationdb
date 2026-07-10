@@ -32,7 +32,7 @@ A partial framework already exists in `flow/include/flow/FastAlloc.h`
 under the `ALLOC_INSTRUMENTATION` compile flag. It defines the right
 shapes — `memSample` (pointer → backtrace hash + size), `backTraceLookup`
 (hash → aggregate), a `memSample_entered` reentrancy flag — and global
-`operator new`/`delete` overrides in `fdbserver/fdbserver.cpp`. But
+`operator new`/`delete` overrides (in `fdbserver/GlobalNewDelete.cpp`). But
 it relies on glibc `backtrace(3)` (microseconds per call), is gated behind
 a non-default compile flag, and was designed for offline analysis, not
 production. In practice it is dead code: builds that turn it on are too
@@ -173,7 +173,7 @@ Hooks:
 
 | Path | Allocate | Free |
 |---|---|---|
-| Global `new`/`delete` | `MemoryTracker.cpp` (new file) | `MemoryTracker.cpp` (same file) |
+| Global `new`/`delete` | `fdbserver/GlobalNewDelete.cpp` | `fdbserver/GlobalNewDelete.cpp` |
 | `FastAllocator<Size>` | `FastAlloc.cpp` (`::allocate`) | `FastAlloc.cpp` (`::release`) |
 | `Arena` | `Arena.cpp` (`ArenaBlock::create`) | `Arena.cpp` (`ArenaBlock::destroyLeaf`) |
 
@@ -473,17 +473,38 @@ max(estPeakBytes, estLiveBytes)`) updated on each alloc.
 
 #### Global `operator new` / `delete`
 
-`MemoryTracker.cpp` defines the ~12 standard global overloads — `new`,
-`new[]`, `delete`, `delete[]`, sized variants, `nothrow_t` variants, and
-the C++17 `std::align_val_t` overloads. Each calls `std::malloc` /
-`std::free` (or `aligned_alloc` for the aligned variants) and then
-`memTrackerOnAlloc`/`OnFree`. The new module's unconditional overrides
-cover every binary that links flow. The legacy conditional overrides
-in `fdbserver/fdbserver.cpp` are left in place; our new overrides are
-wrapped in
-`#if !defined(ALLOC_INSTRUMENTATION) && !defined(ALLOC_INSTRUMENTATION_STDOUT)`
-so the two paths don't produce duplicate symbols when the legacy flag
-is on.
+`fdbserver/GlobalNewDelete.cpp` defines the ~12 standard global overloads
+— `new`, `new[]`, `delete`, `delete[]`, sized variants, `nothrow_t`
+variants, and the C++17 `std::align_val_t` overloads. Each calls
+`std::malloc` / `std::free` (or `posix_memalign` for the aligned
+variants) and then `memTrackerOnAlloc`/`OnFree`.
+
+These overloads live in a translation unit compiled directly into the
+`fdbserver` executable — not in the `flow` static library — for two
+reasons:
+
+1. **Correct interposition.** `operator new` / `operator delete` are
+   replaceable functions. A definition sitting in a static archive is
+   only pulled into the link if the linker already needs some other
+   symbol from that same object file; placing the overloads in an
+   executable TU guarantees they win rather than relying on incidental
+   archive pull-in.
+2. **Client isolation.** `flow` is linked into `libfdb_c` and every
+   client binding. A global-`new` override compiled into it would
+   interpose the entire host process's allocator in any application
+   that loads the client. `fdbserver` is a standalone executable that
+   clients never link, so keeping these here confines the interposition
+   to the server. (The `FastAllocator` and `Arena` hooks still compile
+   into `flow`, and hence into the client, but those are ordinary direct
+   calls gated on the sampling knob — not global-symbol interposition —
+   and are inert when sampling is off.)
+
+The same file also hosts the legacy `ALLOC_INSTRUMENTATION`
+`recordAllocation`/`recordDeallocation` overrides; the two
+implementations are selected by a single
+`#if defined(ALLOC_INSTRUMENTATION) …` / `#else` / `#endif`, so exactly
+one set of global operators is ever defined.
+
 
 #### FastAllocator
 
@@ -510,12 +531,10 @@ Likewise in `FastAllocator<Size>::release()`, an unconditional
 conditional `recordDeallocation(ptr)`. Size is known at compile time
 from the template parameter, so no header lookup is needed.
 
-The conditional global `operator new` / `delete` overrides in
-`fdbserver/fdbserver.cpp` also stay in place. Our unconditional
-overrides in `flow/MemoryTracker.cpp` are wrapped in
-`#if !defined(ALLOC_INSTRUMENTATION) && !defined(ALLOC_INSTRUMENTATION_STDOUT)`
-so the two paths don't produce duplicate symbols when somebody builds
-with the old flag on.
+The global `operator new` / `delete` overrides (both the tracker path
+and the legacy `ALLOC_INSTRUMENTATION` path) live in
+`fdbserver/GlobalNewDelete.cpp`; see the "Global `operator new` /
+`delete`" section above.
 
 #### Arena
 
@@ -681,29 +700,36 @@ cleanup.
 
 | Knob | Default (prod) | Default (sim) | Meaning |
 |---|---|---|---|
-| `MEMORY_TRACKING_SAMPLE_INVERSE` | 100 | 2 | 0=off, N=1-in-N |
+| `MEMORY_TRACKING_SAMPLE_INVERSE` | 0 | 2 | 0=off, N=1-in-N (prod ships off during rollout; 100 is the intended steady-state rate) |
 | `MEMORY_TRACKING_FORCE_SAMPLE_BYTES` | 100000 | 100000 | Always sample allocations ≥ this many bytes; `-1` disables force-sample (caches to `SIZE_MAX`) |
 
 | `MEMORY_TRACKING_LIVE_TRACKING` | true | true | When false, skip the pointer-keyed live-block table and report cumulative-only stats |
 | `MEMORY_TRACKING_REPORT_INTERVAL` | 600.0 | 30.0 | Seconds between dumps; 0 disables |
-| `MEMORY_TRACKING_REPORT_BYTES_THRESHOLD` | 80000000 | 80000000 | Sites with live bytes ≥ this are reported each dump (~1% of an 8 GB target RSS) |
+| `MEMORY_TRACKING_REPORT_BYTES_THRESHOLD` | 80000000 | 1000000 | Sites with live bytes ≥ this are reported each dump (prod ~1% of an 8 GB target RSS; sim lowered so site events actually fire) |
 | `MEMORY_TRACKING_FRAMES` | 6 | 6 | Captured stack depth (1–10) |
 
-Buggify the inverse to 1 (sample everything) in a small fraction of
-simulation runs.
+Simulation uses a fixed 1-in-2 sample rate; the every-allocation path
+(`inverse==1`) and the sampled/weighted path (`inverse=N>1`) are both
+pinned deterministically by unit tests (`MemoryTrackerTest.cpp`), so no
+buggify of the rate is needed.
 
 ### Files
 
 New:
 - `flow/MemoryTracker.cpp` — out-of-line sample paths
   (`memTrackerSampleAlloc`, `memTrackerSampleFree`), live-block table,
-  aggregation table, `memTrackerDump`, `memTrackerForEachSite`, and
-  global `operator new`/`delete` overloads (wrapped in
-  `#if !defined(ALLOC_INSTRUMENTATION) && !defined(ALLOC_INSTRUMENTATION_STDOUT)`
-  to avoid duplicate symbols against the legacy framework).
+  aggregation table, `memTrackerDump`, `memTrackerForEachSite`.
 - `flow/include/flow/MemoryTracker.h` — header-inlined hot-path
   entry points (`memTrackerOnAlloc`/`OnFree`), declarations of the
   out-of-line entry points, `memTrackerDump`, `memTrackerForEachSite`.
+- `fdbserver/GlobalNewDelete.cpp` — the global `operator new`/`delete`
+  overloads that route through `memTrackerOnAlloc`/`OnFree`. Compiled
+  into the `fdbserver` executable, not `flow`, so the interposition is
+  confined to the server and never ships in `libfdb_c` / client
+  bindings. Also hosts the legacy `ALLOC_INSTRUMENTATION`
+  `recordAllocation`/`recordDeallocation` overrides, selected by a single
+  `#if defined(ALLOC_INSTRUMENTATION) …` / `#else` so exactly one set of
+  global operators is defined.
 
 Modified:
 - `flow/FastAlloc.cpp` — add unconditional
@@ -714,20 +740,25 @@ Modified:
 - `flow/SystemMonitor.cpp` — periodic dump call.
 - `flow/Knobs.h`, `flow/Knobs.cpp` — six new FlowKnobs (see Knobs
   table above).
-- `flow/CMakeLists.txt` — register `MemoryTracker.cpp`.
+- `fdbserver/fdbserver.cpp` — remove the legacy global `operator new`/
+  `delete` overrides (moved to `GlobalNewDelete.cpp`).
+
+No CMake changes are needed: `fdb_find_sources` globs `flow/*.cpp` and
+`fdbserver/*.cpp`, so `MemoryTracker.cpp` and `GlobalNewDelete.cpp` are
+picked up automatically.
 
 Reused as-is:
 - `platform::format_backtrace` (`flow/Platform.cpp`).
 - `platform::ImageInfo` (`flow/include/flow/Platform.h`).
 
 Not touched:
-- The `ALLOC_INSTRUMENTATION` block in `flow/include/flow/FastAlloc.h`
+- The `ALLOC_INSTRUMENTATION` framework in `flow/include/flow/FastAlloc.h`
   and its callers in `flow/FastAlloc.cpp` (the conditional
-  `recordAllocation`/`recordDeallocation` lines) and
-  `fdbserver/fdbserver.cpp` (the conditional `operator new`
-  overrides). All of these compile to nothing in default builds and
-  stay available for whoever might still wire up the old offline
-  analysis path.
+  `recordAllocation`/`recordDeallocation` lines). These compile to
+  nothing in default builds and stay available for whoever might still
+  wire up the old offline analysis path. (The global `operator new`
+  overrides that path used to define in `fdbserver.cpp` now live,
+  unchanged, in the `#if` branch of `GlobalNewDelete.cpp`.)
 
 ### Determinism in simulation
 
@@ -1070,32 +1101,31 @@ These are the operator-visible knobs for "is the tracker working" and
 
 ### Client library implications
 
-`libfdb_c.so` and other client artifacts link `flow/`. The tracker
-binary path is therefore present in client binaries linked into
-embedding applications. Implications:
+`libfdb_c.so` and other client artifacts link `flow/`, so the tracker's
+`FastAllocator` and `Arena` hooks — and the out-of-line sample paths —
+are present in client binaries. The **global `operator new` / `delete`
+overrides are not**: they live in `fdbserver/GlobalNewDelete.cpp`, which
+is compiled only into the `fdbserver` executable (a standalone binary
+clients never link). Implications:
 
-- Sampling defaults to 0 in client contexts. We do not have any plans
-  or requirements currently to enable this for client library users.
-- `operator new` overrides apply globally inside the client process,
-  affecting host application allocations too. Most embedding apps will
-  not enable sampling, so the cost is just the extra `if
-  (gInMemTracker)` check on every `operator new`.
-
-We will need to test client bindings to ensure that overriding operator new
-does not cause problems for existing clients.
-
-If always-compiled tracker code in the client library ends up not
-working, should gate it behind a `-DENABLE_MEMORY_TRACKING_CLIENT=OFF`
-CMake flag for client builds specifically.
+- The global-allocator interposition never reaches an embedding
+  application. This removes the main client risk — a host app that has
+  its own `operator new` override, or is sensitive to which allocator
+  services `new`, is unaffected.
+- The `FastAllocator` / `Arena` hooks that do compile into the client
+  are ordinary direct calls gated on the sampling knob, not global-symbol
+  interposition. Sampling defaults to 0 in client contexts, so their
+  cost is just the `if (gInMemTracker)` / disabled-flag check. We have no
+  plans or requirements to enable sampling for client library users.
 
 ### `ALLOC_INSTRUMENTATION` coexistence
 
-The existing framework in `flow/include/flow/FastAlloc.h` and
-its associated conditional code paths (in `flow/FastAlloc.cpp` and
-`fdbserver/fdbserver.cpp`) remain in place. The new tracker
-sits next to it, gated only by the inverse complement of the same
-`#ifdef`s where they would otherwise produce duplicate symbols (the
-`operator new` overrides). No removal is planned.
+The existing framework in `flow/include/flow/FastAlloc.h` and its
+conditional callers in `flow/FastAlloc.cpp` remain in place. Its global
+`operator new` / `delete` overrides now live in the `#if
+defined(ALLOC_INSTRUMENTATION)` branch of `fdbserver/GlobalNewDelete.cpp`,
+mutually exclusive (via `#else`) with the tracker overrides, so exactly
+one set of global operators is defined. No removal is planned.
 
 ### Rollback
 
@@ -1107,6 +1137,6 @@ benchmarks.
 
 If the operator-new overrides themselves need to be rolled back (e.g.,
 they cause issues with a third-party library that has its own global
-new override), a build flag `-DDISABLE_GLOBAL_NEW_OVERRIDE` could omit
-just those overloads while keeping FastAlloc and Arena tracking. Not
-included in v1; can be added if such an issue surfaces.
+new override), removing them is a matter of deleting
+`fdbserver/GlobalNewDelete.cpp`'s tracker branch while keeping the
+FastAlloc and Arena tracking that lives in `flow`.
