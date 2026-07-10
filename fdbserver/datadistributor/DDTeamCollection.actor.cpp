@@ -2849,7 +2849,8 @@ public:
 				// A recruitment_failed reply is definitive that this request will not later deliver a successful
 				// reply, so do not report the cooldown as active recruitment. Unlike request_maybe_delivered,
 				// it is safe to release the ID: if startup reached serverList before failing, waitServerListChange
-				// must be able to discover that entry while the worker locality remains excluded during the retry delay.
+				// must be able to discover that entry while the worker locality remains excluded during the retry
+				// delay.
 				if (newServer.isError(error_code_recruitment_failed)) {
 					self->recruitingIds.erase(interfaceId);
 					self->recruitingStream.set(self->recruitingStream.get() - 1);
@@ -7112,8 +7113,8 @@ public:
 		candidate.worker.storage = RequestStream<InitializeStorageRequest>();
 
 		DDEnabledState ddEnabledState;
-		Future<Void> recruitment = collection->initializeStorage(
-		    candidate, ddEnabledState, false, makeReference<TSSPairState>());
+		Future<Void> recruitment =
+		    collection->initializeStorage(candidate, ddEnabledState, false, makeReference<TSSPairState>());
 		InitializeStorageRequest request = co_await candidate.worker.storage.getFuture();
 
 		ASSERT(collection->recruitingStream.get() == 1);
