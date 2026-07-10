@@ -229,3 +229,5 @@ if(NOT OPEN_FOR_IDE)
 endif()
 
 target_link_libraries(fdbserver PUBLIC fdbctl)
+
+add_subdirectory(bench EXCLUDE_FROM_ALL)
