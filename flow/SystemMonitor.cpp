@@ -492,8 +492,11 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 	statState->networkMetricsState = g_network->networkInfo.metrics;
 	statState->networkState = netData;
 
-	// Periodic dump of the per-call-site memory tracker. Cadence controlled
-	// by the MEMORY_TRACKING_REPORT_INTERVAL knob; <=0 disables.
+	// Periodic dump of the per-call-site memory tracker; cadence from the
+	// MEMORY_TRACKING_REPORT_INTERVAL knob (<=0 disables). In simulation the
+	// tracker's tables and this static are shared across all simulated
+	// processes, so one dump fires per interval cluster-wide and its site
+	// numbers blend every process — correct only in a real single-process server.
 	if (FLOW_KNOBS && FLOW_KNOBS->MEMORY_TRACKING_REPORT_INTERVAL > 0) {
 		static double lastMemTrackerDump = 0;
 		if (now() - lastMemTrackerDump >= FLOW_KNOBS->MEMORY_TRACKING_REPORT_INTERVAL) {

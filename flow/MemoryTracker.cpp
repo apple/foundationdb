@@ -206,18 +206,26 @@ void memTrackerSampleAlloc(void* p, std::size_t n) {
 		liveTracking = FLOW_KNOBS->MEMORY_TRACKING_LIVE_TRACKING;
 		gForceSampleBytes = static_cast<std::size_t>(FLOW_KNOBS->MEMORY_TRACKING_FORCE_SAMPLE_BYTES);
 	}
-	if (frames < 1)
+	if (frames < 1) {
 		frames = 1;
-	if (frames > MEMORY_TRACKER_MAX_FRAMES)
+	}
+	if (frames > MEMORY_TRACKER_MAX_FRAMES) {
 		frames = MEMORY_TRACKER_MAX_FRAMES;
+	}
+	// Bound the reseed's `2 * inverse` arithmetic to int range for absurd knob
+	// values; 1-in-256M sampling is already effectively off.
+	if (inverse > (1 << 28)) {
+		inverse = 1 << 28;
+	}
 
 	// Publish the enabled state for the free hot path's gate. Store only on an
 	// actual transition so the flag's cache line stays in MESI shared state
 	// (see MemTrackerEnabledFlag in the header). This is the single point that
 	// observes off->on / on->off knob changes and propagates them.
 	bool enabled = (inverse > 0);
-	if (g_memTrackerEnabled.value.load(std::memory_order_relaxed) != enabled)
+	if (g_memTrackerEnabled.value.load(std::memory_order_relaxed) != enabled) {
 		g_memTrackerEnabled.value.store(enabled, std::memory_order_relaxed);
+	}
 
 	// Reseed the counter for the un-sampled fast path.
 	if (inverse <= 0) {
@@ -236,7 +244,8 @@ void memTrackerSampleAlloc(void* p, std::size_t n) {
 		// reseed below, which would otherwise leave counter==2 half the
 		// time and cause us to miss every other allocation.
 		gMemTrackerCounter = 1;
-	} else {
+	} else if (gMemTrackerCounter <= 0) {
+		// The random countdown actually expired: draw a fresh gap.
 		std::uint32_t r = xorshift32(gMemTrackerSeed);
 		gMemTrackerCounter = 1 + static_cast<int>(r % static_cast<std::uint32_t>(2 * inverse));
 	}
@@ -294,6 +303,32 @@ void memTrackerSampleAlloc(void* p, std::size_t n) {
 		site.forceSampledCount += 1;
 
 	if (liveTracking) {
+		auto key = reinterpret_cast<std::uintptr_t>(p);
+		// If a stale entry already exists for this address — its free was
+		// suppressed (e.g. during memTrackerDump or a memTrackerForEachSite
+		// callback) so it was never debited — debit it now before overwriting.
+		// Otherwise its live credit leaks permanently once the address is reused
+		// and live totals creep upward over long uptime.
+		auto stale = g_liveMap->find(key);
+		if (stale != g_liveMap->end()) {
+			const LiveEntry& old = stale->second;
+			std::int64_t oldBytes = static_cast<std::int64_t>(old.size);
+			std::int64_t oldEst = oldBytes * old.weight;
+			if (g_aggMap) {
+				auto oldSite = g_aggMap->find(old.fingerprint);
+				if (oldSite != g_aggMap->end()) {
+					oldSite->second.liveBytes -= oldBytes;
+					oldSite->second.liveCount -= 1;
+					oldSite->second.estLiveBytes -= oldEst;
+					oldSite->second.estLiveCount -= old.weight;
+				}
+			}
+			g_liveBytesTotal -= oldBytes;
+			g_liveBlocksTotal -= 1;
+			g_estLiveBytesTotal -= oldEst;
+			g_estLiveBlocksTotal -= old.weight;
+		}
+
 		site.liveBytes += nBytes;
 		site.liveCount += 1;
 		if (site.liveBytes > site.peakBytes)
@@ -302,7 +337,7 @@ void memTrackerSampleAlloc(void* p, std::size_t n) {
 		site.estLiveCount += weight;
 		if (site.estLiveBytes > site.estPeakBytes)
 			site.estPeakBytes = site.estLiveBytes;
-		(*g_liveMap)[reinterpret_cast<std::uintptr_t>(p)] = LiveEntry{ fp, static_cast<std::uint64_t>(n), weight };
+		(*g_liveMap)[key] = LiveEntry{ fp, static_cast<std::uint64_t>(n), weight };
 		g_liveBytesTotal += nBytes;
 		g_liveBlocksTotal += 1;
 		g_estLiveBytesTotal += estBytes;

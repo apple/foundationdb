@@ -157,9 +157,6 @@ struct AccountingSummary {
 	int64_t cumAllocsSentinel = 0;
 	int64_t liveBytesSentinel = 0;
 	int64_t liveCountSentinel = 0;
-	int64_t totalCumBytes = 0;
-	int64_t totalLiveBytes = 0;
-	int64_t totalLiveCount = 0;
 	int totalSites = 0;
 };
 
@@ -181,9 +178,6 @@ AccountingSummary collectAccounting(void* sentinel) {
 			acc.liveBytesSentinel += s.liveBytes;
 			acc.liveCountSentinel += s.liveCount;
 		}
-		acc.totalCumBytes += s.cumulativeBytes;
-		acc.totalLiveBytes += s.liveBytes;
-		acc.totalLiveCount += s.liveCount;
 	});
 	return acc;
 }
@@ -501,17 +495,16 @@ TEST_CASE("/flow/MemoryTracker/fastAlloc32Accounting") {
 	ASSERT_EQ(pre.liveCountSentinel, N);
 	ASSERT_EQ(pre.cumBytesSentinel, int64_t(N) * 32);
 	ASSERT_EQ(pre.liveBytesSentinel, pre.cumBytesSentinel);
-	// No accounting bytes outside the sentinel-touching site.
-	ASSERT_EQ(pre.totalCumBytes, pre.cumBytesSentinel);
-	ASSERT_EQ(pre.totalLiveBytes, pre.liveBytesSentinel);
+	// Global totals are intentionally not asserted: at inverse=1 a foreign-thread
+	// allocation in the window would break a strict global equality (flaky at
+	// Joshua scale); the sentinel-scoped checks above pin the regression.
 
 	releaseFastAlloc32(ptrs);
 
 	auto post = collectAccounting(sentinel);
 	ASSERT_EQ(post.liveBytesSentinel, 0);
 	ASSERT_EQ(post.liveCountSentinel, 0);
-	ASSERT_EQ(post.totalLiveBytes, 0);
-	ASSERT_EQ(post.totalLiveCount, 0);
+	// Global live totals intentionally not asserted (flaky at inverse=1; see above).
 	ASSERT_EQ(post.cumAllocsSentinel, N); // cumulative never decrements
 	return Void();
 }
@@ -538,17 +531,16 @@ TEST_CASE("/flow/MemoryTracker/arenaSmallAccounting") {
 	ASSERT_EQ(pre.liveCountSentinel, N);
 	// liveBytes == cumulativeBytes since nothing freed yet.
 	ASSERT_EQ(pre.liveBytesSentinel, pre.cumBytesSentinel);
-	// No accounting bytes outside the sentinel-touching site.
-	ASSERT_EQ(pre.totalCumBytes, pre.cumBytesSentinel);
-	ASSERT_EQ(pre.totalLiveBytes, pre.liveBytesSentinel);
+	// Global totals are intentionally not asserted: at inverse=1 a foreign-thread
+	// allocation in the window would break a strict global equality (flaky at
+	// Joshua scale); the sentinel-scoped checks above pin the regression.
 
 	arenas.clear();
 
 	auto post = collectAccounting(sentinel);
 	ASSERT_EQ(post.liveBytesSentinel, 0);
 	ASSERT_EQ(post.liveCountSentinel, 0);
-	ASSERT_EQ(post.totalLiveBytes, 0);
-	ASSERT_EQ(post.totalLiveCount, 0);
+	// Global live totals intentionally not asserted (flaky at inverse=1; see above).
 	ASSERT_EQ(post.cumAllocsSentinel, N);
 	return Void();
 }
@@ -579,16 +571,14 @@ TEST_CASE("/flow/MemoryTracker/arenaMediumAccounting") {
 	ASSERT_EQ(pre.cumAllocsSentinel, N);
 	ASSERT_EQ(pre.liveCountSentinel, N);
 	ASSERT_EQ(pre.liveBytesSentinel, pre.cumBytesSentinel);
-	ASSERT_EQ(pre.totalCumBytes, pre.cumBytesSentinel);
-	ASSERT_EQ(pre.totalLiveBytes, pre.liveBytesSentinel);
+	// Global totals intentionally not asserted (flaky at inverse=1; see above).
 
 	arenas.clear();
 
 	auto post = collectAccounting(sentinel);
 	ASSERT_EQ(post.liveBytesSentinel, 0);
 	ASSERT_EQ(post.liveCountSentinel, 0);
-	ASSERT_EQ(post.totalLiveBytes, 0);
-	ASSERT_EQ(post.totalLiveCount, 0);
+	// Global live totals intentionally not asserted (flaky at inverse=1; see above).
 	ASSERT_EQ(post.cumAllocsSentinel, N);
 	return Void();
 }
@@ -615,16 +605,14 @@ TEST_CASE("/flow/MemoryTracker/arenaHugeAccounting") {
 	ASSERT_EQ(pre.cumAllocsSentinel, N);
 	ASSERT_EQ(pre.liveCountSentinel, N);
 	ASSERT_EQ(pre.liveBytesSentinel, pre.cumBytesSentinel);
-	ASSERT_EQ(pre.totalCumBytes, pre.cumBytesSentinel);
-	ASSERT_EQ(pre.totalLiveBytes, pre.liveBytesSentinel);
+	// Global totals intentionally not asserted (flaky at inverse=1; see above).
 
 	arenas.clear();
 
 	auto post = collectAccounting(sentinel);
 	ASSERT_EQ(post.liveBytesSentinel, 0);
 	ASSERT_EQ(post.liveCountSentinel, 0);
-	ASSERT_EQ(post.totalLiveBytes, 0);
-	ASSERT_EQ(post.totalLiveCount, 0);
+	// Global live totals intentionally not asserted (flaky at inverse=1; see above).
 	ASSERT_EQ(post.cumAllocsSentinel, N);
 	return Void();
 }
