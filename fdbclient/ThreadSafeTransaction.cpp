@@ -221,7 +221,7 @@ ThreadFuture<Void> ThreadSafeDatabase::createSnapshot(const StringRef& uid, cons
 	});
 }
 
-ThreadFuture<CDCStreamId> ThreadSafeDatabase::registerNativeCdcStream(KeyRef name, KeyRangeRef keys) {
+ThreadFuture<CDCStreamId> ThreadSafeDatabase::registerNativeCdcStream(const KeyRef& name, const KeyRangeRef& keys) {
 	DatabaseContext* db = this->db;
 	Key nameCopy(name);
 	KeyRange keysCopy(keys);
@@ -231,7 +231,7 @@ ThreadFuture<CDCStreamId> ThreadSafeDatabase::registerNativeCdcStream(KeyRef nam
 	});
 }
 
-ThreadFuture<Void> ThreadSafeDatabase::removeNativeCdcStream(KeyRef name) {
+ThreadFuture<Void> ThreadSafeDatabase::removeNativeCdcStream(const KeyRef& name) {
 	DatabaseContext* db = this->db;
 	Key nameCopy(name);
 	return onMainThread([db, nameCopy]() -> Future<Void> {
@@ -248,7 +248,7 @@ ThreadFuture<std::vector<NativeCdcStreamInfo>> ThreadSafeDatabase::listNativeCdc
 	});
 }
 
-ThreadFuture<Reference<INativeCdcConsumer>> ThreadSafeDatabase::createNativeCdcConsumer(KeyRef name) {
+ThreadFuture<Reference<INativeCdcConsumer>> ThreadSafeDatabase::createNativeCdcConsumer(const KeyRef& name) {
 	DatabaseContext* db = this->db;
 	Key nameCopy(name);
 	return onMainThread([db, nameCopy]() -> Future<Reference<INativeCdcConsumer>> {
@@ -258,7 +258,7 @@ ThreadFuture<Reference<INativeCdcConsumer>> ThreadSafeDatabase::createNativeCdcC
 	});
 }
 
-ThreadFuture<Reference<INativeCdcConsumer>> ThreadSafeDatabase::resumeNativeCdcConsumer(NativeCdcCursor cursor) {
+ThreadFuture<Reference<INativeCdcConsumer>> ThreadSafeDatabase::resumeNativeCdcConsumer(const NativeCdcCursor& cursor) {
 	DatabaseContext* db = this->db;
 	return onMainThread([db, cursor]() -> Future<Reference<INativeCdcConsumer>> {
 		db->checkDeferredError();

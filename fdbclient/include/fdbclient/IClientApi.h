@@ -156,11 +156,11 @@ public:
 	// Native CDC operations. These values are intentionally independent from
 	// NativeAPI so multi-version client wrappers can forward them without
 	// depending on the native client implementation.
-	virtual ThreadFuture<CDCStreamId> registerNativeCdcStream(KeyRef name, KeyRangeRef keys) = 0;
-	virtual ThreadFuture<Void> removeNativeCdcStream(KeyRef name) = 0;
+	virtual ThreadFuture<CDCStreamId> registerNativeCdcStream(const KeyRef& name, const KeyRangeRef& keys) = 0;
+	virtual ThreadFuture<Void> removeNativeCdcStream(const KeyRef& name) = 0;
 	virtual ThreadFuture<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams() = 0;
-	virtual ThreadFuture<Reference<INativeCdcConsumer>> createNativeCdcConsumer(KeyRef name) = 0;
-	virtual ThreadFuture<Reference<INativeCdcConsumer>> resumeNativeCdcConsumer(NativeCdcCursor cursor) = 0;
+	virtual ThreadFuture<Reference<INativeCdcConsumer>> createNativeCdcConsumer(const KeyRef& name) = 0;
+	virtual ThreadFuture<Reference<INativeCdcConsumer>> resumeNativeCdcConsumer(const NativeCdcCursor& cursor) = 0;
 
 	// Interface to manage shared state across multiple connections to the same Database
 	virtual ThreadFuture<DatabaseSharedState*> createSharedState() = 0;

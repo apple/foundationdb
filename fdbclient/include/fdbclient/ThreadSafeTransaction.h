@@ -58,11 +58,11 @@ public:
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
 
-	ThreadFuture<CDCStreamId> registerNativeCdcStream(KeyRef name, KeyRangeRef keys) override;
-	ThreadFuture<Void> removeNativeCdcStream(KeyRef name) override;
+	ThreadFuture<CDCStreamId> registerNativeCdcStream(const KeyRef& name, const KeyRangeRef& keys) override;
+	ThreadFuture<Void> removeNativeCdcStream(const KeyRef& name) override;
 	ThreadFuture<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams() override;
-	ThreadFuture<Reference<INativeCdcConsumer>> createNativeCdcConsumer(KeyRef name) override;
-	ThreadFuture<Reference<INativeCdcConsumer>> resumeNativeCdcConsumer(NativeCdcCursor cursor) override;
+	ThreadFuture<Reference<INativeCdcConsumer>> createNativeCdcConsumer(const KeyRef& name) override;
+	ThreadFuture<Reference<INativeCdcConsumer>> resumeNativeCdcConsumer(const NativeCdcCursor& cursor) override;
 
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;

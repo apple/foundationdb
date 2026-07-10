@@ -549,7 +549,7 @@ ThreadFuture<Void> DLDatabase::createSnapshot(const StringRef& uid, const String
 	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
 }
 
-ThreadFuture<CDCStreamId> DLDatabase::registerNativeCdcStream(KeyRef name, KeyRangeRef keys) {
+ThreadFuture<CDCStreamId> DLDatabase::registerNativeCdcStream(const KeyRef& name, const KeyRangeRef& keys) {
 	if (!api->databaseRegisterNativeCdcStream) {
 		return unsupported_operation();
 	}
@@ -564,7 +564,7 @@ ThreadFuture<CDCStreamId> DLDatabase::registerNativeCdcStream(KeyRef name, KeyRa
 	});
 }
 
-ThreadFuture<Void> DLDatabase::removeNativeCdcStream(KeyRef name) {
+ThreadFuture<Void> DLDatabase::removeNativeCdcStream(const KeyRef& name) {
 	if (!api->databaseRemoveNativeCdcStream) {
 		return unsupported_operation();
 	}
@@ -593,7 +593,7 @@ ThreadFuture<std::vector<NativeCdcStreamInfo>> DLDatabase::listNativeCdcStreams(
 	});
 }
 
-ThreadFuture<Reference<INativeCdcConsumer>> DLDatabase::createNativeCdcConsumer(KeyRef name) {
+ThreadFuture<Reference<INativeCdcConsumer>> DLDatabase::createNativeCdcConsumer(const KeyRef& name) {
 	if (!api->databaseCreateNativeCdcConsumer || !api->futureGetNativeCdcConsumer) {
 		return unsupported_operation();
 	}
@@ -608,7 +608,7 @@ ThreadFuture<Reference<INativeCdcConsumer>> DLDatabase::createNativeCdcConsumer(
 	});
 }
 
-ThreadFuture<Reference<INativeCdcConsumer>> DLDatabase::resumeNativeCdcConsumer(NativeCdcCursor cursor) {
+ThreadFuture<Reference<INativeCdcConsumer>> DLDatabase::resumeNativeCdcConsumer(const NativeCdcCursor& cursor) {
 	if (!api->databaseResumeNativeCdcConsumer || !api->futureGetNativeCdcConsumer) {
 		return unsupported_operation();
 	}
@@ -1667,24 +1667,25 @@ ThreadFuture<Void> MultiVersionDatabase::createSnapshot(const StringRef& uid, co
 	return executeOperation(&IDatabase::createSnapshot, uid, snapshot_command);
 }
 
-ThreadFuture<CDCStreamId> MultiVersionDatabase::registerNativeCdcStream(KeyRef name, KeyRangeRef keys) {
-	return executeOperation(&IDatabase::registerNativeCdcStream, std::move(name), std::move(keys));
+ThreadFuture<CDCStreamId> MultiVersionDatabase::registerNativeCdcStream(const KeyRef& name, const KeyRangeRef& keys) {
+	return executeOperation(&IDatabase::registerNativeCdcStream, name, keys);
 }
 
-ThreadFuture<Void> MultiVersionDatabase::removeNativeCdcStream(KeyRef name) {
-	return executeOperation(&IDatabase::removeNativeCdcStream, std::move(name));
+ThreadFuture<Void> MultiVersionDatabase::removeNativeCdcStream(const KeyRef& name) {
+	return executeOperation(&IDatabase::removeNativeCdcStream, name);
 }
 
 ThreadFuture<std::vector<NativeCdcStreamInfo>> MultiVersionDatabase::listNativeCdcStreams() {
 	return executeOperation(&IDatabase::listNativeCdcStreams);
 }
 
-ThreadFuture<Reference<INativeCdcConsumer>> MultiVersionDatabase::createNativeCdcConsumer(KeyRef name) {
-	return executeOperation(&IDatabase::createNativeCdcConsumer, std::move(name));
+ThreadFuture<Reference<INativeCdcConsumer>> MultiVersionDatabase::createNativeCdcConsumer(const KeyRef& name) {
+	return executeOperation(&IDatabase::createNativeCdcConsumer, name);
 }
 
-ThreadFuture<Reference<INativeCdcConsumer>> MultiVersionDatabase::resumeNativeCdcConsumer(NativeCdcCursor cursor) {
-	return executeOperation(&IDatabase::resumeNativeCdcConsumer, std::move(cursor));
+ThreadFuture<Reference<INativeCdcConsumer>> MultiVersionDatabase::resumeNativeCdcConsumer(
+    const NativeCdcCursor& cursor) {
+	return executeOperation(&IDatabase::resumeNativeCdcConsumer, cursor);
 }
 
 ThreadFuture<DatabaseSharedState*> MultiVersionDatabase::createSharedState() {
