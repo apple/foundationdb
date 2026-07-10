@@ -232,25 +232,26 @@ Future<Void> writeResponse(Reference<IConnection> conn, Reference<OutgoingRespon
 // Read at least 1 byte from conn and up to maxlen in a single read, append read data into *buf
 // Returns the number of bytes read.
 Future<int> read_into_string(Reference<IConnection> conn, std::string* buf, int maxlen) {
-	while (true) {
-		// Read into buffer
-		int originalSize = buf->size();
-		// TODO:  resize is zero-initializing the space we're about to overwrite, so do something else, which probably
-		// means not using a string for this buffer
+	// Use a temporary buffer to avoid std::string::resize() zero-initializing memory that
+	// conn->read() is about to overwrite. We allocate once and reuse across loop iterations.
+	std::vector<uint8_t> readBuf(maxlen);
 
+	while (true) {
+		int readLen = maxlen;
 		// Buggify read size to exercise partial-read code paths in simulation
-		if ((!g_network->isSimulated() || !g_simulator->speedUpSimulation) && maxlen > 1 && buggify(0.1)) {
-			maxlen = deterministicRandom()->randomInt(1, maxlen);
+		if ((!g_network->isSimulated() || !g_simulator->speedUpSimulation) && readLen > 1 && buggify(0.1)) {
+			readLen = deterministicRandom()->randomInt(1, readLen);
 			CODE_PROBE(true, "HTTP buggified read size");
 		}
-		buf->resize(originalSize + maxlen);
-		uint8_t* wptr = (uint8_t*)buf->data() + originalSize;
-		int len = conn->read(wptr, wptr + maxlen);
-		buf->resize(originalSize + len);
 
-		// Make sure data was actually read, it's possible for there to be none.
-		if (len > 0)
+		// Read into temporary buffer, then append only the bytes actually read
+		uint8_t* wptr = readBuf.data();
+		int len = conn->read(wptr, wptr + readLen);
+
+		if (len > 0) {
+			buf->append(reinterpret_cast<const char*>(wptr), len);
 			co_return len;
+		}
 
 		// Wait for connection to have something to read
 		co_await conn->onReadable();
