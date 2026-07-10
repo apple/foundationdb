@@ -140,6 +140,17 @@ Edit `.actor.cpp` and `.actor.h` sources, not actorcompiler-generated output und
 
 Every new `.cpp` / `.h` / `.actor.cpp` / `.actor.h` file starts with the standard Apache 2.0 license block, with the filename on line 2 and the current year on the copyright line. Copy from any existing file in the tree (e.g. `flow/Knobs.cpp`). Add file-purpose comments *after* the license block, not in place of it.
 
+## Code Review
+
+Unless you have specific instructions to the contrary, when asked to review code (named files or a diff), address all of these explicitly:
+
+- What is it trying to accomplish?
+- Is it correct?
+- Are there bugs?
+- Are there omissions?
+- Are there things that could be done better?
+- Should it be LGTM'd? (clear yes / no / not-yet)
+
 ## Branching
 
 PRs target `main`. Release branches receive cherry-picks rather than direct PRs — don't open backport PRs without confirming first.
