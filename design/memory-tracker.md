@@ -10,7 +10,11 @@ fraction of allocations, aggregates byte and call counts per call
 site, and periodically emits the aggregates as TraceEvents for offline
 `addr2line` symbolization. The mechanism must be lightweight enough to
 leave on by default in production (~1% sampling) and at higher rates
-(~50%) in simulation, where it must remain deterministic.
+(~50%) in simulation, where it must remain deterministic. (That ≤1%
+overhead is the *target* that gates leaving it on; the v1 single-lock
+implementation does not yet meet it at high allocation rates, so it ships
+**off** by default pending a lock-sharding follow-up — see Performance and
+Rollout.)
 
 ## Background
 
@@ -147,21 +151,16 @@ Three pieces:
    feature).
 
 2. **Storage.** Two tables, both backed by `std::malloc` (which bypasses
-   our `operator new` hooks):
-   - A fingerprint-keyed *aggregation table*: `uint64_t → CallSite`,
-     where `CallSite` carries `liveCount` / `liveBytes` (count and
-     bytes of objects currently allocated at this site), `peakBytes`,
-     `cumulativeAllocs` / `cumulativeBytes` (never-decremented
-     lifetime totals), `forceSampledCount`, and the exemplar frames.
-     Fingerprint is `fnv64(frames)`. Always present. See "Aggregation
-     table" below for the full struct.
-   - A pointer-keyed *live-block table* (`void* → {fingerprint, size}`)
-     so `onFree` can find what `onAlloc` recorded. The pointer is the
-     only key available at free time — there is no backtrace to hash —
-     so the table is necessarily pointer-keyed if we want to track live
-     bytes at all. Optional, gated by the `MEMORY_TRACKING_LIVE_TRACKING`
-     knob (default on). When disabled, only cumulative per-site stats
-     are tracked and the side table disappears entirely.
+   our `operator new` hooks, so the tracker's own bookkeeping cannot recurse
+   into the tracking path):
+   - A fingerprint-keyed *aggregation table* (`fnv64(frames) → per-site
+     counters`): live / peak / cumulative bytes and counts, plus exemplar
+     frames for offline symbolization. Always present.
+   - A pointer-keyed *live-block table* (`void* → {fingerprint, size,
+     weight}`) so `onFree` can find what `onAlloc` recorded — the pointer is
+     the only key available at free time. Gated by the
+     `MEMORY_TRACKING_LIVE_TRACKING` knob (default on); when off, only
+     cumulative per-site stats are kept.
 
 3. **Reporting.** A `memTrackerDump(int64_t bytesThreshold)` walks the
    aggregation table, emits a TraceEvent per site whose estimated live
@@ -225,25 +224,18 @@ flip; fdbserver process restarts are more typical when knobs change.
 The counter is reseeded on every sample to a small uniform random
 integer with mean `INV`, so the sampling rate averages 1-in-`INV`
 without aliasing to fixed allocation patterns. When `INV == 0`
-(off-switch), the reseed re-parks the counter at a bounded value
-(`MEMORY_TRACKER_DISABLED_RESEED`, 64K) rather than `INT_MAX`, so a parked
-thread re-enters the lock-free slow path — which re-reads the knob and can
-observe an off→on change — within a bounded number of allocations instead of
-after ~2³¹. The bail-out itself does no aggregation work and takes no lock.
+(off-switch) the reseed re-parks the counter at a bounded value rather than
+effectively infinity, so a parked thread re-enters the lock-free slow path —
+which re-reads the knob and can observe an off→on change — within a bounded
+number of allocations. The bail-out does no aggregation work and takes no lock.
 
 The counter's initial value (per-thread) is chosen so the first
 allocation a thread sees is always sampled, which guarantees that
 test workloads with very few allocations still exercise the path.
 
-**Force-sample-large.** The `n < gForceSampleBytes` check guarantees
-that any allocation at or above the configured threshold (default 100
-KB) is *always* sampled regardless of the counter. Setting
-`MEMORY_TRACKING_FORCE_SAMPLE_BYTES` to `-1` disables force-sampling: the
-knob is cached into the `size_t` `gForceSampleBytes`, so `-1` becomes
-`SIZE_MAX` and no allocation ever reaches the threshold. (`-1` is used as
-the "disabled" sentinel rather than an enormous literal so that an
-operator setting the knob in a config file need not type out a huge
-constant.)
+**Force-sample-large.** Any allocation at or above
+`MEMORY_TRACKING_FORCE_SAMPLE_BYTES` (default ~100 KB) is *always* sampled
+regardless of the counter; setting the knob to `-1` disables force-sampling.
 
 Large allocations are rare per second so unconditional
 sampling costs almost nothing in CPU, and they are often the most
@@ -268,39 +260,20 @@ population rates.
 
 ### Stack capture
 
-```cpp
-// Cached once per thread; see "Side-thread safety" for why.
-extern thread_local uintptr_t gStackLow, gStackHigh;
-void initStackBoundsForThread();   // pthread_getattr_np + pthread_attr_getstack
+Capture is a hand-rolled frame-pointer walk (`captureStackFP`): starting from
+`__builtin_frame_address(0)`, follow the saved-FP links, recording the saved
+return address at each frame, up to `MEMORY_TRACKING_FRAMES` deep. The caller
+(`memTrackerSampleAlloc`) strips the topmost 1–2 tracker frames so the captured
+stack starts at the real allocation site rather than inside the tracker.
 
-__attribute__((no_instrument_function, noinline))
-int captureStackFP(void** frames, int max) {
-    if (!gStackLow) initStackBoundsForThread();
-    void** fp = (void**)__builtin_frame_address(0);
-    // Fallback for threads where pthread_getattr_np fails: ±8 MB
-    // around the initial frame.
-    uintptr_t lo = gStackLow  ? gStackLow  : (uintptr_t)fp;
-    uintptr_t hi = gStackHigh ? gStackHigh : (uintptr_t)fp + (8u << 20);
-    int n = 0;
-    while (fp && n < max) {
-        uintptr_t a = (uintptr_t)fp;
-        if (a < lo || a + 16 > hi) break;            // unmapped / FP-elided upstream
-        if (a & (sizeof(void*) - 1)) break;          // misaligned
-        void* ra = fp[1];
-        if (!ra) break;
-        frames[n++] = ra;
-        void** next = (void**)fp[0];
-        if (next <= fp) break;                       // stack grows down
-        fp = next;
-    }
-    return n;
-}
-```
-
-The walker skips no frames at capture; instead, the caller
-(`memTrackerSampleAlloc`) strips the topmost 1–2 frames so the captured
-stack starts at the real allocation site rather than inside the tracker
-itself.
+The **load-bearing safety invariant** is a check on every iteration: each
+candidate frame pointer must be word-aligned and lie within the current
+thread's stack range — cached once per thread via `pthread_getattr_np` /
+`pthread_attr_getstack`, with a bounded fallback around the initial frame if
+that fails — *before* it is dereferenced. This is what lets the walk terminate
+cleanly instead of chasing a garbage saved-FP into unmapped memory when it
+reaches FP-elided code; see "Side-thread safety" for why that is not
+hypothetical.
 
 The walk relies on `-fno-omit-frame-pointer`, which is already set
 globally (`cmake/ConfigureCompiler.cmake`). On x86_64 and aarch64 each
@@ -309,26 +282,14 @@ one indirect load per frame — roughly 100 ns for 6 frames.
 
 Caveats and mitigations:
 
-- Code compiled with `-fomit-frame-pointer` (notably glibc's pthread
-  shutdown / TLS-destructor machinery, and third-party static libs
-  not rebuilt with project flags) does NOT terminate the walk
-  cleanly. The saved-FP slot at the FP-elided boundary contains
-  whatever that function happened to leave on the stack —
-  uninitialized garbage, not `NULL`. The `next <= fp` sanity check
-  is insufficient: garbage often satisfies it but points into
-  unmapped memory, and the next `fp[1]` dereference segfaults.
-  Mitigation: cache the current thread's stack range once via
-  `pthread_getattr_np` + `pthread_attr_getstack`, and require
-  `fp ∈ [stackLow, stackHigh - 16)` aligned before dereferencing on
-  each iteration. The walk then terminates cleanly at the FDB-side
-  boundary, still yielding the FDB-side prefix, which is what we care
-  about. This is not hypothetical — see "Side-thread safety" below for
-  the empirical repro (joshua-found `IThreadPool` segfaults) and the
-  full chain analysis.
-
-- Signal handlers can leave a transiently bad FP chain mid-walk.
-  The same stack-bounds + `next <= fp` checks bail out of those
-  cases.
+- Code compiled with `-fomit-frame-pointer` (glibc's pthread
+  shutdown / TLS-destructor machinery, third-party static libs not rebuilt
+  with project flags) does not terminate the walk cleanly — the saved-FP slot
+  at the boundary is uninitialized garbage, not `NULL`, and a naive `next <= fp`
+  check is insufficient. The stack-bounds invariant above is the mitigation;
+  see "Side-thread safety" for the empirical repro and full chain analysis.
+- Signal handlers can leave a transiently bad FP chain mid-walk; the same
+  bounds check bails out.
 - ASAN/MSAN builds may instrument the FP chain. The tracker is a
   no-op-equivalent in those builds (sampling defaults can be flipped to
   0 in CMake when sanitizers are on).
@@ -399,20 +360,20 @@ cannot recurse back into the tracking path. The thread-local
 `gInMemTracker` flag is the single line of defense and is sufficient
 on its own; we don't need a private slab pool.
 
-`size` is a full 64-bit `size_t`, not a narrower field: it is added to
-`liveBytes` at full width on alloc and subtracted on free, so a narrower
-field would under-debit (mod 2³²) on free for any allocation ≥ 4 GiB and
-permanently inflate the live-byte totals.
-
-`weight` is the block's estimate multiplier, captured at sample time
-(≈ `SampleInverse` for a randomly-sampled block, 1 for a force-sampled
-one). Storing it per block lets a free debit the *estimated* totals by
-exactly what its alloc credited, even if the sampling knob changed in
+`size` is stored full-width (a narrower field would under-debit `liveBytes`
+on free for allocations ≥ 4 GiB). `weight` is the block's estimate multiplier,
+captured at sample time (≈ `SampleInverse` for a randomly-sampled block, 1 for
+a force-sampled one); storing it per block lets a free debit the *estimated*
+totals by exactly what its alloc credited even if the sampling knob changed in
 between — see "Estimated usage" under Reporting.
 
-Created lazily on first sample if the `MEMORY_TRACKING_LIVE_TRACKING`
-knob is set; if the knob is off, the table is never allocated and only
-the aggregation table exists.
+The table is created lazily alongside the aggregation table on the first
+sampled allocation; when live-tracking is off it stays allocated-but-empty.
+
+Both tables are allocated once and never torn down — intentionally leaked at
+process exit so `delete`s arriving during static destruction still find valid
+tables, and the tracker installs no `fork` handler since fdbserver does not
+fork after init.
 
 Single global `ThreadSpinLock` for v1. Two things acquire it: sampled
 allocs (~1K/sec at 1% of 100K alloc/sec; uncontended acquire ~20 ns, so
@@ -429,45 +390,22 @@ flipped on (see Alternatives).
 
 #### Aggregation table
 
-Open-addressing hash, key `uint64_t fingerprint`, value:
+Open-addressing hash keyed by `uint64_t` fingerprint. Each entry holds, for one
+call site: the **estimated** population usage (live / peak / cumulative bytes
+and counts, sampling-correction already applied at sample time so consumers read
+them directly), the **raw** sampled counters alongside them (one increment per
+observed sample, for auditing the estimate and gauging its confidence), a
+force-sampled count, and the exemplar return-address frames (bounded by
+`MEMORY_TRACKING_FRAMES`, capped at 10). The exact field set is in `CallSite`
+(`flow/MemoryTracker.h`).
 
-```cpp
-constexpr int MEMORY_TRACKER_MAX_FRAMES = 10;  // upper bound for the
-                                               // MEMORY_TRACKING_FRAMES knob
-
-struct CallSite {
-    uint64_t fingerprint;
-    // Estimated population usage — sampling correction applied at sample time
-    // (each sampled block contributes size*weight / weight). Consumers read
-    // these directly; no post-hoc scaling.
-    int64_t  estLiveBytes;
-    int64_t  estLiveCount;
-    int64_t  estPeakBytes;
-    int64_t  estCumulativeBytes;
-    int64_t  estCumulativeAllocs;
-    // Raw sampled counters — one increment per observed sample, for auditing
-    // the estimate and gauging its confidence.
-    int64_t  liveBytes;
-    int64_t  liveCount;
-    int64_t  peakBytes;
-    int64_t  cumulativeAllocs;    // never decremented
-    int64_t  cumulativeBytes;     // never decremented
-    int64_t  forceSampledCount;   // see "Force-sample-large" in Sampling
-    void*    exemplarFrames[MEMORY_TRACKER_MAX_FRAMES];
-    uint8_t  exemplarFrameCount;
-};
-```
-
-`fingerprint = fnv64(frames[0..n])` computed once at sample time. The
-exemplar frames are stored from the first allocation that produced the
-fingerprint and are never updated — different call paths that happen to
-collide on a fingerprint hash are very rare with 64-bit fnv and 4–6
-frames (the frame count is an initial estimate, subject to refinement
-during development); if it matters we can switch to xxhash or store all
-observed frames per fingerprint.
-
-`peakBytes = max(peakBytes, liveBytes)` (and `estPeakBytes =
-max(estPeakBytes, estLiveBytes)`) updated on each alloc.
+`fingerprint = fnv64(frames)`, computed once at sample time; exemplar frames are
+recorded from the first allocation with that fingerprint and never updated.
+Fingerprint collisions between distinct call paths are very unlikely with 64-bit
+FNV over several frames; if it ever matters we can switch hashes or store all
+observed frames. Live and peak fields are maintained only when live-tracking is
+enabled (they stay 0 in degraded mode); the cumulative fields are always
+maintained.
 
 ### Hook sites
 
@@ -508,28 +446,11 @@ one set of global operators is ever defined.
 
 #### FastAllocator
 
-In `flow/FastAlloc.cpp`, `FastAllocator<Size>::allocate` currently
-contains:
-
-```cpp
-#if defined(ALLOC_INSTRUMENTATION) || defined(ALLOC_INSTRUMENTATION_STDOUT)
-    recordAllocation(p, Size);
-#endif
-```
-
-This block is left untouched — it already compiles to nothing in default
-builds, costs us nothing to leave, and stays available for whoever might
-still wire up the old offline analysis path. Immediately after it we
-add an unconditional new line:
-
-```cpp
-    memTrackerOnAlloc(p, Size);
-```
-
-Likewise in `FastAllocator<Size>::release()`, an unconditional
-`memTrackerOnFree(ptr)` is added next to (not replacing) the existing
-conditional `recordDeallocation(ptr)`. Size is known at compile time
-from the template parameter, so no header lookup is needed.
+In `flow/FastAlloc.cpp`, `FastAllocator<Size>::allocate` / `::release` get an
+unconditional `memTrackerOnAlloc(p, Size)` / `memTrackerOnFree(ptr)` call added
+next to (not replacing) the existing conditional `ALLOC_INSTRUMENTATION`
+`recordAllocation`/`recordDeallocation` lines, which are left in place. `Size`
+is a compile-time template parameter, so no size lookup is needed.
 
 The global `operator new` / `delete` overrides (both the tracker path
 and the legacy `ALLOC_INSTRUMENTATION` path) live in
@@ -606,159 +527,73 @@ reseed gap `INV + 0.5`; the ~`0.5/INV` bias is negligible at the
 production `INV` of 100.)
 
 **Degraded mode.** When `MEMORY_TRACKING_LIVE_TRACKING` is `false`,
-the live-block side table is not maintained, so `onFree` is a no-op
-and `liveBytes` / `liveCount` / `peakBytes` are never decremented —
-they end up tracking the cumulatives. The threshold filter still
-works, but it now reports "any site that has ever allocated ≥
-threshold bytes" rather than "any site currently holding ≥
-threshold". Operators using this mode should read the dump
-accordingly.
+the live-block side table is not populated, so `onFree` is a no-op and
+the per-site `liveBytes` / `liveCount` / `peakBytes` (and their `est*`
+counterparts) are never incremented — they stay at 0. Only the
+`Cumulative*` / `EstCumulative*` fields are meaningful in this mode, and
+the dump filters and ranks on `estCumulativeBytes` accordingly, so it
+reports "any site that has ever allocated ≥ threshold bytes" rather than
+"any site currently holding ≥ threshold". Operators using this mode
+should read the dump accordingly and ignore the (zero) live/peak fields.
 
-```cpp
-if (FLOW_KNOBS->MEMORY_TRACKING_REPORT_INTERVAL > 0 &&
-    now() - lastDump >= FLOW_KNOBS->MEMORY_TRACKING_REPORT_INTERVAL) {
-    memTrackerDump(FLOW_KNOBS->MEMORY_TRACKING_REPORT_BYTES_THRESHOLD);
-    lastDump = now();
-}
-```
+Each dump snapshots the aggregation table under the spinlock into a
+`std::malloc`-backed local (the `gInMemTracker` guard prevents recursion),
+releases the lock, then ranks and filters by the estimated bytes and emits:
 
-Implementation: take the spinlock; copy the aggregation table values
-into a local `std::vector<CallSite>` (backed by `std::malloc`; the
-`gInMemTracker` reentrancy flag prevents recursion into the tracker);
-release the lock; sort by `estLiveBytes` descending; filter to entries
-with `estLiveBytes >= bytesThreshold`; emit one TraceEvent per qualifying
-site with its estimated and raw stats and a ready-to-paste `addr2line`
-command for that site's stack:
+- one **`MemoryTrackerSite`** event per qualifying site: its fingerprint, the
+  estimated population fields, the raw sampled counters (for auditing), and an
+  `AddrCmd` detail — a ready-to-paste `addr2line` invocation for just that
+  site's frames (short enough to fit under the TraceEvent string-detail cap, so
+  a consumer pastes one site's `AddrCmd` and gets exactly that site's stack);
+- one **`MemoryTrackerSummary`** event per dump: site counts, estimated and raw
+  population totals, live-block count, samples emitted, an echo of the active
+  knobs (`SampleInverse`, `ForceSampleBytes`, threshold), and an `EstimateBasis`
+  caveat string.
 
-```
-TraceEvent("MemoryTrackerSite")
-    .detail("Fingerprint", format("%016" PRIx64, s.fingerprint))
-    // Estimated population usage — sampling already applied; consume directly.
-    .detail("EstLiveBytes", s.estLiveBytes)
-    .detail("EstLiveCount", s.estLiveCount)
-    .detail("EstPeakBytes", s.estPeakBytes)
-    .detail("EstCumulativeBytes", s.estCumulativeBytes)
-    .detail("EstCumulativeAllocs", s.estCumulativeAllocs)
-    // Raw sampled counters — uninterpreted observations, for auditing/confidence.
-    .detail("LiveBytes", s.liveBytes)
-    .detail("LiveCount", s.liveCount)
-    .detail("PeakBytes", s.peakBytes)
-    .detail("CumulativeBytes", s.cumulativeBytes)
-    .detail("CumulativeAllocs", s.cumulativeAllocs)
-    .detail("ForceSampledCount", s.forceSampledCount)
-    .detail("AddrCmd", "<full addr2line invocation for this site>");
-```
-
-These event schemas are intentionally documented here *and* spelled out in
-the implementation. The two are kept in sync by a comment at the
-`TraceEvent` call sites in `flow/MemoryTracker.cpp` directing anyone who
-changes the details to update this section (`design/memory-tracker.md`,
-Reporting).
-
-The `AddrCmd` value is short — one prefix plus a handful of
-PIE-relative addresses, well under the TraceEvent string-detail
-length cap. A human or AI consumer pastes one site's `AddrCmd` and
-gets exactly that site's stack resolved.
-
-Also emit one summary event per dump:
-
-```
-TraceEvent("MemoryTrackerSummary")
-    .detail("SitesTracked", aggregationTable.size())   // unique call-site fingerprints tracked
-    .detail("SitesReported", qualifying.size())        // sites that crossed the byte threshold this dump
-    // Estimated population totals (sampling-corrected).
-    .detail("EstLiveBytesTotal", estLiveBytesTotal)
-    .detail("EstLiveBlocksTotal", estLiveBlocksTotal)
-    .detail("EstCumulativeBytes", estCumulativeBytesTotal)
-    .detail("EstCumulativeAllocs", estCumulativeAllocsTotal)
-    // Raw sampled totals.
-    .detail("LiveBlocks", liveMap.size())              // currently live sampled blocks
-    .detail("LiveBytesTotal", liveBytesTotal)          // sum of bytes across currently live sampled blocks
-    .detail("LiveBlocksTotal", liveBlocksTotal)        // running counter; equivalent to LiveBlocks above
-    .detail("CumulativeAllocs", cumulativeAllocsTotal)
-    .detail("CumulativeBytes", cumulativeBytesTotal)
-    .detail("SamplesEmitted", samplesEmittedSinceStart)
-    .detail("SampleInverse", FLOW_KNOBS->MEMORY_TRACKING_SAMPLE_INVERSE)
-    .detail("ForceSampleBytes", FLOW_KNOBS->MEMORY_TRACKING_FORCE_SAMPLE_BYTES)
-    .detail("ReportBytesThreshold", bytesThreshold)
-    .detail("EstimateBasis", "Est*=sampled*SampleInverse; force-sampled weight 1; statistical estimate");
-```
-
-The raw running totals (`LiveBytesTotal`, `LiveBlocksTotal`,
-`CumulativeAllocs`, `CumulativeBytes`) are maintained as `int64_t`
-globals updated under the same spinlock on every sample. They are
-*sampled* totals, not population totals. The `Est*Total` globals
-alongside them are the population estimates — accumulated with the
-per-block weight at sample time (force-sampled blocks contribute at
-weight 1, so no separate deduction is needed), so a consumer reads them
-directly without multiplying. `LiveBlocks` is a
-snapshot of the live-block table size at dump time and is equivalent
-to `LiveBlocksTotal`; both are emitted for now and one may drop in a
-cleanup.
+The exact detail keys live in the `TraceEvent` call sites in
+`flow/MemoryTracker.cpp`; a comment there points back to this section. The raw
+running totals are maintained as globals under the same spinlock on every
+sample; the `Est*` totals are their sampling-corrected counterparts, accumulated
+with the per-block weight so consumers read them without post-hoc scaling.
 
 ### Knobs (FlowKnobs, since clients use Arena/new too)
 
-| Knob | Default (prod) | Default (sim) | Meaning |
-|---|---|---|---|
-| `MEMORY_TRACKING_SAMPLE_INVERSE` | 0 | 2 | 0=off, N=1-in-N (prod ships off during rollout; 100 is the intended steady-state rate) |
-| `MEMORY_TRACKING_FORCE_SAMPLE_BYTES` | 100000 | 100000 | Always sample allocations ≥ this many bytes; `-1` disables force-sample (caches to `SIZE_MAX`) |
+Authoritative defaults live in `flow/Knobs.cpp`; this table gives the meaning
+and intent, not exact literals.
 
-| `MEMORY_TRACKING_LIVE_TRACKING` | true | true | When false, skip the pointer-keyed live-block table and report cumulative-only stats |
-| `MEMORY_TRACKING_REPORT_INTERVAL` | 600.0 | 30.0 | Seconds between dumps; 0 disables |
-| `MEMORY_TRACKING_REPORT_BYTES_THRESHOLD` | 80000000 | 1000000 | Sites with live bytes ≥ this are reported each dump (prod ~1% of an 8 GB target RSS; sim lowered so site events actually fire) |
-| `MEMORY_TRACKING_FRAMES` | 6 | 6 | Captured stack depth (1–10) |
+| Knob | Meaning / intent |
+|---|---|
+| `MEMORY_TRACKING_SAMPLE_INVERSE` | 0 = off, N = sample 1-in-N. Ships off in prod during rollout; ~1% (N=100) is the steady-state target; simulation runs at 1-in-2 to exercise the path. |
+| `MEMORY_TRACKING_FORCE_SAMPLE_BYTES` | Always sample allocations at or above this size (~100 KB); `-1` disables force-sampling. |
+| `MEMORY_TRACKING_LIVE_TRACKING` | On by default. When off, skip the live-block table and report cumulative-only stats. |
+| `MEMORY_TRACKING_REPORT_INTERVAL` | Seconds between dumps (~10 min in prod, ~30 s in sim); 0 disables reporting. |
+| `MEMORY_TRACKING_REPORT_BYTES_THRESHOLD` | Report sites whose estimated bytes exceed this (prod ≈ 1% of an ~8 GB target RSS; lowered in sim so events actually fire). |
+| `MEMORY_TRACKING_FRAMES` | Captured stack depth (1–10). |
 
 Simulation uses a fixed 1-in-2 sample rate; the every-allocation path
 (`inverse==1`) and the sampled/weighted path (`inverse=N>1`) are both
 pinned deterministically by unit tests (`MemoryTrackerTest.cpp`), so no
 buggify of the rate is needed.
 
-### Files
+### Code layout
 
-New:
-- `flow/MemoryTracker.cpp` — out-of-line sample paths
-  (`memTrackerSampleAlloc`, `memTrackerSampleFree`), live-block table,
-  aggregation table, `memTrackerDump`, `memTrackerForEachSite`.
-- `flow/include/flow/MemoryTracker.h` — header-inlined hot-path
-  entry points (`memTrackerOnAlloc`/`OnFree`), declarations of the
-  out-of-line entry points, `memTrackerDump`, `memTrackerForEachSite`.
-- `fdbserver/GlobalNewDelete.cpp` — the global `operator new`/`delete`
-  overloads that route through `memTrackerOnAlloc`/`OnFree`. Compiled
-  into the `fdbserver` executable, not `flow`, so the interposition is
-  confined to the server and never ships in `libfdb_c` / client
-  bindings. Also hosts the legacy `ALLOC_INSTRUMENTATION`
-  `recordAllocation`/`recordDeallocation` overrides, selected by a single
-  `#if defined(ALLOC_INSTRUMENTATION) …` / `#else` so exactly one set of
-  global operators is defined.
+- **Tracker core:** `flow/MemoryTracker.{cpp,h}` — hot-path inlines, out-of-line
+  sample/free paths, the two tables, and the dump.
+- **Global `operator new`/`delete`:** `fdbserver/GlobalNewDelete.cpp` — compiled
+  only into the `fdbserver` executable (client isolation), and also home to the
+  legacy `ALLOC_INSTRUMENTATION` overrides via `#if`/`#else`.
+- **Allocator hooks:** unconditional `memTrackerOnAlloc`/`OnFree` calls added in
+  `flow/FastAlloc.cpp` and `flow/Arena.cpp`, next to the existing
+  `ALLOC_INSTRUMENTATION` lines (which are left untouched — dormant in default
+  builds).
+- **Dump driver / knobs:** `flow/SystemMonitor.cpp` and `flow/Knobs.{cpp,h}`.
+- **Tests / bench:** `flow/MemoryTrackerTest.cpp` (unit tests) and
+  `fdbserver/bench/` (`fdbserver_bench`).
 
-Modified:
-- `flow/FastAlloc.cpp` — add unconditional
-  `memTrackerOnAlloc`/`OnFree` calls *next to* (not replacing) the
-  existing conditional `recordAllocation`/`recordDeallocation` calls.
-- `flow/Arena.cpp` — add hooks in `ArenaBlock::create` and
-  `ArenaBlock::destroyLeaf`.
-- `flow/SystemMonitor.cpp` — periodic dump call.
-- `flow/Knobs.h`, `flow/Knobs.cpp` — six new FlowKnobs (see Knobs
-  table above).
-- `fdbserver/fdbserver.cpp` — remove the legacy global `operator new`/
-  `delete` overrides (moved to `GlobalNewDelete.cpp`).
-
-No CMake changes are needed: `fdb_find_sources` globs `flow/*.cpp` and
-`fdbserver/*.cpp`, so `MemoryTracker.cpp` and `GlobalNewDelete.cpp` are
-picked up automatically.
-
-Reused as-is:
-- `platform::format_backtrace` (`flow/Platform.cpp`).
-- `platform::ImageInfo` (`flow/include/flow/Platform.h`).
-
-Not touched:
-- The `ALLOC_INSTRUMENTATION` framework in `flow/include/flow/FastAlloc.h`
-  and its callers in `flow/FastAlloc.cpp` (the conditional
-  `recordAllocation`/`recordDeallocation` lines). These compile to
-  nothing in default builds and stay available for whoever might still
-  wire up the old offline analysis path. (The global `operator new`
-  overrides that path used to define in `fdbserver.cpp` now live,
-  unchanged, in the `#if` branch of `GlobalNewDelete.cpp`.)
+Most files are picked up by the source globs; the exceptions are the
+`fdbserver/bench/` subdirectory (its own `CMakeLists.txt` + an `add_subdirectory`
+line) and the `forceLinkMemoryTrackerTests()` stub that `fdbserver/workloads/UnitTests.cpp`
+must call so the test TU is not dropped from the link.
 
 ### Determinism in simulation
 
@@ -770,9 +605,6 @@ allocates from FDB-visible heaps, and never takes any lock that
 participates in Sim2 ordering. The sample dump cadence is driven by
 `now()`, but only inside `SystemMonitor.cpp` where time-driven cadence
 is already deterministic in simulation.
-
-`BUGGIFY` flips `MEMORY_TRACKING_SAMPLE_INVERSE` to 1 in some seeds so
-the tracker is exercised at 100% under fault injection.
 
 ## Alternatives Considered
 
@@ -971,8 +803,8 @@ indirectly by the tests above.
 
 ### Microbenchmarks
 
-`flow/bench/BenchMemoryTracker.cpp` (Google Benchmark; run
-`bin/flow_bench --benchmark_filter=memtracker`) measures the tracker's
+`fdbserver/bench/BenchMemoryTracker.cpp` (Google Benchmark; run
+`bin/fdbserver_bench --benchmark_filter=memtracker`) measures the tracker's
 per-operation cost. Two cases matter, both feeding R0 ("cheap enough to leave
 on?"): the **off-state** cost (always-compiled hooks, sampling disabled) and
 the **enabled-state** cost (hooks at the production 1% rate, and at the pessimal
@@ -980,37 +812,45 @@ every-allocation rate). Each is measured both end-to-end through global
 `operator new[]`/`delete[]` and by calling `memTrackerOnAlloc`/`OnFree` directly
 on a preallocated buffer (which isolates the tracker's own work, with no
 allocation in the loop); a raw `malloc`/`free` loop is the tracker-free
-baseline.
+baseline. The operator-new path only fires the tracker when the global override
+(`fdbserver/GlobalNewDelete.cpp`) is linked into the binary, so this bench lives
+under `fdbserver/` and its CMake compiles that override into `fdbserver_bench`;
+`flow_bench` links only `flow` (no override) and would measure the unhooked
+allocator.
 
-Measured on a 32-core dev pod (ns per alloc+free pair), projected to one second
-at **~2M allocations/sec** — the storage-process allocation rate measured in the
-mako A/B below (numbers stable to within a few percent across repeated runs):
+Measured on the dev pod (AMD EPYC 9R14 / Zen 4, 32 vCPUs, 128 GB; `clang -O3`
+release build), ns per alloc+free pair, projected to one second at **~2M
+allocations/sec** — the storage-process allocation rate measured in the mako A/B
+below. These are a point-in-time snapshot on one machine (numbers stable to
+within a few percent across repeated runs), not a portable guarantee:
 
 | Case | ns/op | @2M/s | % of one core |
 |---|---|---|---|
 | `malloc`/`free` (baseline, no tracker) | 7.8 | 15.6 ms/s | 1.56% |
-| hooks, off | 1.9 | 3.8 ms/s | 0.38% |
-| hooks, 1% sampling | 5.6 | 11.2 ms/s | 1.12% |
-| hooks, every alloc (worst case, not a default) | 70 | 140 ms/s | 14% |
-| `operator new`/`delete`, off | 10.6 | 21.2 ms/s | 2.12% |
-| `operator new`/`delete`, 1% sampling | 13.8 | 27.6 ms/s | 2.76% |
-| `operator new`/`delete`, every alloc (worst case, not a default) | 85 | 170 ms/s | 17% |
+| hooks, off | 1.6 | 3.3 ms/s | 0.33% |
+| hooks, 1% sampling | 5.1 | 10.2 ms/s | 1.02% |
+| hooks, every alloc (worst case, not a default) | 75 | 150 ms/s | 15% |
+| `operator new`/`delete`, off | 11.4 | 22.8 ms/s | 2.28% |
+| `operator new`/`delete`, 1% sampling | 14.4 | 28.8 ms/s | 2.88% |
+| `operator new`/`delete`, every alloc (worst case, not a default) | 81 | 162 ms/s | 16% |
 
 Takeaways:
 
-- **Disabled**, the tracker adds ~1.9 ns per alloc+free pair — ~0.38% of a core
+- **Disabled**, the tracker adds ~1.6 ns per alloc+free pair — ~0.33% of a core
   at 2M/s. Small but no longer negligible at this rate; this is the off-switch
   cost (R9).
 - **At the production 1% rate**, the tracker's own *single-threaded* work is
-  ~5.6 ns/pair — ~1.1% of a core at 2M/s, i.e. already at R0's 1% ceiling, and
+  ~5.1 ns/pair — ~1.0% of a core at 2M/s, i.e. right at R0's 1% ceiling, and
   that is *without* cross-thread lock contention. The cost is dominated by the
   per-free lock+probe (every free takes the global lock while live-tracking is
   on), not the 1%-of-allocs slow path.
 - These are single-threaded projections and are a **floor**, not the real cost.
   The end-to-end mako A/B (storage isolated on one core, real multi-threaded
   allocation including I/O threads) measures a materially larger hit at 1%
-  sampling — a single-digit-percent TPS regression — because all those frees
-  contend on the one global `g_mtLock`.
+  sampling — **−16.5% TPS on redwood, −9.9% on rocksdb** (off vs 1:100, live
+  tracking on) — because all those frees contend on the one global `g_mtLock`.
+  The engine with the higher baseline throughput (redwood) takes the larger
+  hit, consistent with a per-free-lock cost that scales with allocation rate.
 - **Conclusion:** even at this worst-case ~2M/s (a CPU-saturated storage core),
   the current single-global-lock design is *not* comfortably under R0's 1%
   ceiling when enabled at 1%. This is why the production default stays off
@@ -1036,52 +876,20 @@ symbol resolution works.
 
 ### Coverage spot-check via sentinel functions
 
-The "did the tracker actually capture each allocation path?" check is
-fully automated using sentinel functions and direct introspection of
-the aggregation table — no log parsing, no `addr2line`, no eyeballing.
-It uses the `memTrackerForEachSite` introspection API:
-
-```cpp
-void memTrackerForEachSite(std::function<void(const CallSite&)>);
-```
-
-The `coverage` test (with the `*Accounting` tests) does this:
-
-1. Sets `MEMORY_TRACKING_SAMPLE_INVERSE = 1` (sample everything) and
-   resets the aggregation table.
-2. Calls a sentinel function `triggerOperatorNewSentinel()` that does
-   N `new int[k]` / `delete[]` pairs.
-3. Calls `triggerFastAllocSentinel<32>()` that does N
-   `FastAllocator<32>::allocate/release` pairs.
-4. Calls `triggerArenaSentinel()` that does N arena growths large
-   enough to force `ArenaBlock::create` calls.
-5. Captures the address of each sentinel via its function pointer:
-   `void* expected = (void*)&triggerOperatorNewSentinel;`
-6. Iterates the aggregation table via `memTrackerForEachSite`, asserts
-   that for each sentinel address there exists at least one site
-   whose `exemplarFrames` contains an address in the
-   `[&triggerXSentinel, &triggerXSentinel + reasonableSize)` range,
-   and that the matching site's `cumulativeAllocs == N`.
-
-This tests the full pipeline (sampling → capture → fingerprint →
-aggregation) end-to-end. The sentinel-address technique compares raw
-return addresses to function-pointer values at runtime, so it is
-deterministic, fast, and works on stripped builds.
+The `coverage` / `*Accounting` tests verify capture without log parsing or
+`addr2line`: they sample at inverse 1, drive a known number of allocations
+through each path from a dedicated sentinel function, then use the
+`memTrackerForEachSite` introspection API to assert that some captured site's
+exemplar frames fall inside that sentinel's address range with the expected
+allocation count. Comparing raw return addresses to function-pointer values is
+deterministic, fast, and works on stripped builds — it exercises the full
+sampling → capture → fingerprint → aggregation pipeline.
 
 ## Observability/Supportability Considerations
 
-### Self-metrics emitted by the tracker
-
-Every `MemoryTrackerSummary` event reports:
-- `SitesTracked` — unique call-site fingerprints in the aggregation table.
-- `SitesReported` — sites that crossed the byte threshold this dump.
-- `LiveBlocks` / `LiveBlocksTotal` — currently live sampled blocks
-  (two equivalent paths; see Reporting).
-- `SamplesEmitted` — cumulative samples that produced an aggregate
-  update.
-
-These are the operator-visible knobs for "is the tracker working" and
-"is the tracker hurting us".
+The `MemoryTrackerSummary` event (see Reporting) doubles as the tracker's own
+health signal: site counts, live-block count, and samples-emitted answer "is the
+tracker working" and "is it costing us." No separate self-metrics are added.
 
 ## Rollout/Migration Considerations
 

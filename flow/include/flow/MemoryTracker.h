@@ -168,10 +168,11 @@ inline void memTrackerOnFree(void* p) {
 }
 
 // Periodic dump — emits one TraceEvent("MemoryTrackerSite") per site whose
-// liveBytes (or cumulativeBytes when MEMORY_TRACKING_LIVE_TRACKING is off)
-// exceeds bytesThreshold. Each site event carries an "AddrCmd" detail: a
-// ready-to-paste addr2line invocation covering just that site's frames. A
-// final TraceEvent("MemoryTrackerSummary") reports aggregate totals. Called
+// estLiveBytes (or estCumulativeBytes when MEMORY_TRACKING_LIVE_TRACKING is off)
+// exceeds bytesThreshold. The threshold is compared against the sampling-corrected
+// estimate, not the raw sampled bytes. Each site event carries an "AddrCmd"
+// detail: a ready-to-paste addr2line invocation covering just that site's frames.
+// A final TraceEvent("MemoryTrackerSummary") reports aggregate totals. Called
 // from SystemMonitor.
 void memTrackerDump(int64_t bytesThreshold);
 
