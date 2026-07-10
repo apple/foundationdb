@@ -552,12 +552,18 @@ to be enabled on the cluster. Listing, removal, consumer creation, resume,
 consume, and acknowledgement remain available for already durable streams while
 new admission is disabled so that callers can drain or remove them.
 
+The CDC C API is available beginning with API version 800. Applications must
+select API version 800 or later before calling these functions.
+
 .. type:: FDBCdcMutationType
 
    The raw mutation type returned by CDC. Values match the corresponding
    FoundationDB mutation encoding. ``SET_VALUE`` uses ``param1`` as the key and
    ``param2`` as the value; ``CLEAR_RANGE`` uses them as the clipped begin and
    end keys; atomic mutations use them as the key and operand.
+
+   The listed constants are not exhaustive. Callers must handle an
+   unrecognized raw ``uint8_t`` value in ``FDBCdcMutation.type``.
 
 .. type:: FDBCdcStreamInfo
 
@@ -614,9 +620,11 @@ new admission is disabled so that callers can drain or remove them.
 
 .. function:: FDBFuture* fdb_database_resume_cdc_consumer(FDBDatabase* database, uint64_t stream_id, int64_t last_consumed_version)
 
-   Resumes a consumer from a checkpointed cursor. A cursor is only the stable
-   ``stream_id`` and the version through which the caller has consumed; it does
-   not contain process-local state. Resume from the last durably processed and
+   Constructs a local consumer handle from a checkpointed cursor. A cursor is
+   only the stable ``stream_id`` and the version through which the caller has
+   consumed; it does not contain process-local state. This call does not
+   validate the stream ID or cursor; those checks occur when the handle
+   consumes or acknowledges. Resume from the last durably processed and
    acknowledged position because unacknowledged mutations may be redelivered
    after CDC proxy replacement.
 
@@ -654,8 +662,11 @@ new admission is disabled so that callers can drain or remove them.
 
    Durably acknowledges the consumer's current delivered position. Call this
    only after all mutations represented through that position have been durably
-   processed. A consumer may have only one consume or acknowledge operation
-   outstanding at a time. The returned future contains no value.
+   processed. Acknowledgement advances a frontier shared by the stream, not one
+   private to the handle, so a stream may have only one active logical
+   consumer. Independently, a consumer handle may have only one consume or
+   acknowledge operation outstanding at a time. The returned future contains
+   no value.
 
 .. function:: fdb_error_t fdb_cdc_consumer_get_position(FDBCdcConsumer* consumer, uint64_t* out_stream_id, int64_t* out_last_consumed_version)
 
