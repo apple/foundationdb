@@ -23,7 +23,7 @@
 #include "BenchSupport.h"
 #include "flow/flow.h"
 #include "flow/TLSConfig.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 #include "flow/network.h"
 
 #include <thread>

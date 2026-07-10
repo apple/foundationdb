@@ -79,7 +79,7 @@
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/ClientWorkerInterface.h"
 #include "flow/Profiler.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"

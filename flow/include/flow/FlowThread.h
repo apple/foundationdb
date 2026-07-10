@@ -26,7 +26,7 @@
 #include <flow/flow.h>
 #include <flow/FastAlloc.h>
 #include <flow/ThreadPrimitives.h>
-#include <flow/ThreadHelper.actor.h>
+#include <flow/ThreadHelper.h>
 #include <flow/ScopeExit.h>
 
 // NOTE: Currently futures should only be used from main thread.

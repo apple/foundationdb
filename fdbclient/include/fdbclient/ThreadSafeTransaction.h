@@ -25,7 +25,7 @@
 #pragma once
 
 #include "fdbclient/ReadYourWrites.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/IClientApi.h"
 
