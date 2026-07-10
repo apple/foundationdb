@@ -434,6 +434,7 @@ TEST_CASE("/flow/MemoryTracker/estimateScaling") {
 	}
 
 	int checked = 0;
+	int64_t rawLiveBefore = 0;
 	memTrackerForEachSite([&](const MemoryTrackerCallSite& s) {
 		if (s.forceSampledCount != 0)
 			return; // ignore any incidental force-sampled site (weight 1, not N)
@@ -442,23 +443,32 @@ TEST_CASE("/flow/MemoryTracker/estimateScaling") {
 		ASSERT_EQ(s.estLiveBytes, s.liveBytes * N);
 		ASSERT_EQ(s.estLiveCount, s.liveCount * N);
 		ASSERT_EQ(s.estPeakBytes, s.peakBytes * N);
+		rawLiveBefore += s.liveBytes;
 		checked++;
 	});
 	ASSERT(checked > 0);
+	ASSERT(rawLiveBefore > 0);
 
 	for (auto* p : ptrs)
 		delete[] p;
 	ptrs.clear();
 
-	// Symmetric debit: after freeing everything, estimated live returns to 0.
-	int64_t estLiveSum = 0;
-	int64_t rawLiveSum = 0;
+	// Symmetric debit: the per-site scaling invariant must still hold after the
+	// frees (each free debits the estimate by exactly weight×size), and the live
+	// total must have dropped. We check the invariant rather than "live == 0"
+	// because incidental still-live allocations (e.g. the ptrs vector's own
+	// backing buffer) legitimately remain tracked.
+	int64_t rawLiveAfter = 0;
+	int64_t estLiveAfter = 0;
 	memTrackerForEachSite([&](const MemoryTrackerCallSite& s) {
-		estLiveSum += s.estLiveBytes;
-		rawLiveSum += s.liveBytes;
+		if (s.forceSampledCount != 0)
+			return;
+		ASSERT_EQ(s.estLiveBytes, s.liveBytes * N);
+		rawLiveAfter += s.liveBytes;
+		estLiveAfter += s.estLiveBytes;
 	});
-	ASSERT_EQ(rawLiveSum, 0);
-	ASSERT_EQ(estLiveSum, 0);
+	ASSERT_EQ(estLiveAfter, rawLiveAfter * N);
+	ASSERT(rawLiveAfter < rawLiveBefore); // the freed blocks were debited
 
 	memTrackerResetForTest();
 	return Void();
