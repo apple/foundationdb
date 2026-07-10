@@ -402,25 +402,25 @@ int getSrcWorkFactor(RelocateData const& relocation, int singleRegionTeamSize) {
 	// introduce ENABLE_CONSERVATIVE_RELOCATION_WHEN_REPLICA_CONSISTENCY_CHECK knob to adjust the relocation parallelism
 	// accordingly. The adjustment is to reduce the relocation parallelism by a factor of
 	// (1 + DATAMOVE_CONSISTENCY_CHECK_REQUIRED_REPLICAS).
-	if (relocation.bulkLoadTask.present())
+	if (relocation.bulkLoadTask.present()) {
 		return 0;
-	else if (relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT ||
-	         relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT)
+	} else if (relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT ||
+	           relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT) {
 		return WORK_FULL_UTILIZATION /
 		       adjustRelocationParallelismForSrc(SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER);
-	else if (relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT)
+	} else if (relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT) {
 		return WORK_FULL_UTILIZATION /
 		       adjustRelocationParallelismForSrc(2 * SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER);
-	else if (relocation.healthPriority == SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE)
+	} else if (relocation.healthPriority == SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE) {
 		// we want to set PRIORITY_PERPETUAL_STORAGE_WIGGLE to a reasonably large value
 		// to make this parallelism take effect
 		return WORK_FULL_UTILIZATION /
 		       adjustRelocationParallelismForSrc(SERVER_KNOBS->WIGGLING_RELOCATION_PARALLELISM_PER_SOURCE_SERVER);
-	else if (relocation.priority == SERVER_KNOBS->PRIORITY_MERGE_SHARD)
+	} else if (relocation.priority == SERVER_KNOBS->PRIORITY_MERGE_SHARD) {
 		return WORK_FULL_UTILIZATION /
 		       adjustRelocationParallelismForSrc(SERVER_KNOBS->MERGE_RELOCATION_PARALLELISM_PER_TEAM);
-	else { // for now we assume that any message at a lower priority can best be assumed to have a full team left for
-		   // work
+	} else { // for now we assume that any message at a lower priority can best be assumed to have a full team left
+		     // for work
 		return WORK_FULL_UTILIZATION /
 		       adjustRelocationParallelismForSrc(singleRegionTeamSize *
 		                                         SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER);
@@ -442,7 +442,7 @@ bool canLaunchSrc(RelocateData& relocation,
                   std::vector<RelocateData> cancellableRelocations) {
 	// assert this has not already been launched
 	ASSERT(relocation.workFactor == 0);
-	ASSERT(relocation.src.size() != 0);
+	ASSERT(!relocation.src.empty());
 	ASSERT(teamSize >= singleRegionTeamSize);
 
 	if (relocation.bulkLoadTask.present()) {
@@ -643,9 +643,10 @@ void DDQueue::validate() {
 	if (EXPENSIVE_VALIDATION) {
 		for (auto it = fetchingSourcesQueue.begin(); it != fetchingSourcesQueue.end(); ++it) {
 			// relocates in the fetching queue do not have src servers yet.
-			if (it->src.size())
+			if (!it->src.empty()) {
 				TraceEvent(SevError, "DDQueueValidateError1")
 				    .detail("Problem", "relocates in the fetching queue do not have src servers yet");
+			}
 
 			// relocates in the fetching queue do not have a work factor yet.
 			if (it->workFactor != 0.0)
@@ -721,16 +722,18 @@ void DDQueue::validate() {
 			}
 
 			// in flight relocates have source servers
-			if (it->value().startTime != -1 && !it->value().src.size())
+			if (it->value().startTime != -1 && it->value().src.empty()) {
 				TraceEvent(SevError, "DDQueueValidateError11")
 				    .detail("Problem", "in flight relocates have source servers");
+			}
 
 			if (inFlightActors.liveActorAt(it->range().begin)) {
 				// the key range in the inFlight map matches the key range in the RelocateData message
-				if (it->value().keys != it->range())
+				if (it->value().keys != it->range()) {
 					TraceEvent(SevError, "DDQueueValidateError12")
 					    .detail("Problem",
 					            "the key range in the inFlight map matches the key range in the RelocateData message");
+				}
 			} else if (it->value().cancellable) {
 				TraceEvent(SevError, "DDQueueValidateError13")
 				    .detail("Problem", "key range is cancellable but not in flight!")
@@ -740,33 +743,37 @@ void DDQueue::validate() {
 
 		for (auto it = busymap.begin(); it != busymap.end(); ++it) {
 			for (int i = 0; i < it->second.ledger.size() - 1; i++) {
-				if (it->second.ledger[i] < it->second.ledger[i + 1])
+				if (it->second.ledger[i] < it->second.ledger[i + 1]) {
 					TraceEvent(SevError, "DDQueueValidateError14")
 					    .detail("Problem", "ascending ledger problem")
 					    .detail("LedgerLevel", i)
 					    .detail("LedgerValueA", it->second.ledger[i])
 					    .detail("LedgerValueB", it->second.ledger[i + 1]);
-				if (it->second.ledger[i] < 0.0)
+				}
+				if (it->second.ledger[i] < 0.0) {
 					TraceEvent(SevError, "DDQueueValidateError15")
 					    .detail("Problem", "negative ascending problem")
 					    .detail("LedgerLevel", i)
 					    .detail("LedgerValue", it->second.ledger[i]);
+				}
 			}
 		}
 
 		for (auto it = destBusymap.begin(); it != destBusymap.end(); ++it) {
 			for (int i = 0; i < it->second.ledger.size() - 1; i++) {
-				if (it->second.ledger[i] < it->second.ledger[i + 1])
+				if (it->second.ledger[i] < it->second.ledger[i + 1]) {
 					TraceEvent(SevError, "DDQueueValidateError16")
 					    .detail("Problem", "ascending ledger problem")
 					    .detail("LedgerLevel", i)
 					    .detail("LedgerValueA", it->second.ledger[i])
 					    .detail("LedgerValueB", it->second.ledger[i + 1]);
-				if (it->second.ledger[i] < 0.0)
+				}
+				if (it->second.ledger[i] < 0.0) {
 					TraceEvent(SevError, "DDQueueValidateError17")
 					    .detail("Problem", "negative ascending problem")
 					    .detail("LedgerLevel", i)
 					    .detail("LedgerValue", it->second.ledger[i]);
+				}
 			}
 		}
 
@@ -814,7 +821,7 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 		std::set<RelocateData, std::greater<RelocateData>>::iterator firstRelocationItr;
 		bool foundActiveRelocation = false;
 
-		if (!foundActiveFetching && rrs.src.size()) {
+		if (!foundActiveFetching && !rrs.src.empty()) {
 			firstQueue = &queue[rrs.src[0]];
 			firstRelocationItr = firstQueue->find(rrs);
 			foundActiveRelocation = firstRelocationItr != firstQueue->end();
@@ -876,7 +883,7 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 		// ASSERT(queueMapItr->value() == queueMap.rangeContaining(affectedQueuedItems[r].begin)->value());
 		RelocateData& rrs = queueMapItr->value();
 
-		if (rrs.src.size() == 0 && (rrs.keys == rd.keys || fetchingSourcesQueue.contains(rrs))) {
+		if (rrs.src.empty() && (rrs.keys == rd.keys || fetchingSourcesQueue.contains(rrs))) {
 			if (rrs.keys != rd.keys) {
 				delayDelete.insert(rrs);
 			}
@@ -903,7 +910,7 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 		} else {
 			RelocateData newData(rrs);
 			newData.keys = affectedQueuedItems[r];
-			ASSERT(rrs.src.size() || rrs.startTime == -1);
+			ASSERT(!rrs.src.empty() || rrs.startTime == -1);
 
 			bool foundActiveRelocation = false;
 			for (int i = 0; i < rrs.src.size(); i++) {
@@ -929,8 +936,9 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 					}
 
 					serverQueue.insert(newData);
-				} else
+				} else {
 					break;
+				}
 			}
 
 			// We update the keys of a relocation even if it is "dead" since it helps validate()
@@ -939,7 +947,7 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 		}
 	}
 
-	for (auto it : delayDelete) {
+	for (const auto& it : delayDelete) {
 		fetchingSourcesQueue.erase(it);
 	}
 	DebugRelocationTraceEvent("ReceivedRelocateShard", distributorId)
@@ -983,7 +991,7 @@ void DDQueue::launchQueuedWork(KeyRange keys, const DDEnabledState* ddEnabledSta
 	std::set<RelocateData, std::greater<RelocateData>> combined;
 	auto f = queueMap.intersectingRanges(keys);
 	for (auto it = f.begin(); it != f.end(); ++it) {
-		if (it->value().src.size() && queue[it->value().src[0]].contains(it->value()))
+		if (!it->value().src.empty() && queue[it->value().src[0]].contains(it->value()))
 			combined.insert(it->value());
 	}
 	launchQueuedWork(combined, ddEnabledState);
@@ -1361,7 +1369,7 @@ Future<Void> cancelDataMove(class DDQueue* self, KeyRange range, const DDEnabled
 		// a newer relocator.
 		// This cancelDataMove should be transparent to the new relocator
 		std::vector<KeyRange> toResetRanges;
-		for (auto observedDataMove : lastObservedDataMoves) {
+		for (const auto& observedDataMove : lastObservedDataMoves) {
 			auto f = self->dataMoves.intersectingRanges(observedDataMove.first);
 			for (auto it = f.begin(); it != f.end(); ++it) {
 				if (it->value().id != observedDataMove.second) {
@@ -1642,7 +1650,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 
 		std::unordered_set<uint64_t> excludedDstPhysicalShards;
 
-		ASSERT(rd.src.size());
+		ASSERT(!rd.src.empty());
 		while (true) {
 			destOverloadedCount = 0;
 			stuckCount = 0;
@@ -2161,7 +2169,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 					    signalledTransferComplete ? Never() : dataMovementComplete.getFuture();
 					auto res = co_await race(doMoveKeys, pollHealth, dataMovementFuture);
 					if (res.index() == 0) {
-						if (extraIds.size()) {
+						if (!extraIds.empty()) {
 							destIds.insert(destIds.end(), extraIds.begin(), extraIds.end());
 							healthyIds.insert(healthyIds.end(), extraIds.begin(), extraIds.end());
 							extraIds.clear();
@@ -2553,7 +2561,7 @@ static Future<bool> rebalanceTeams(DDQueue* self,
 
 	traceEvent->detail("AverageShardBytes", averageShardBytes).detail("ShardsInSource", shards.size());
 
-	if (!shards.size()) {
+	if (shards.empty()) {
 		traceEvent->detail("SkipReason", "NoShardOnSource");
 		co_return false;
 	}
@@ -2664,7 +2672,7 @@ Future<bool> getSkipRebalanceValue(Reference<IDDTxnProcessor> txnProcessor, bool
 
 	bool skipCurrentLoop = false;
 	// NOTE: check special value "" and "on" might written in old version < 7.2
-	if (val.get().size() > 0 && val.get() != "on"_sr) {
+	if (!val.get().empty() && val.get() != "on"_sr) {
 		int ddIgnore = BinaryReader::fromStringRef<uint8_t>(val.get(), Unversioned());
 		if (readRebalance) {
 			skipCurrentLoop = (ddIgnore & DDIgnore::REBALANCE_READ) > 0;
