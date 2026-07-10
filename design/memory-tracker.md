@@ -53,15 +53,12 @@ in place:
 
 ## Requirements
 
-R0. **Cheap enough to enable in production by default.** Various following
-    requirements support this.
-
-// TODO: Change this to be more specific and merge with R2: say < 1% total overhead.
-// Note that the current estimate (do not give the estimate in the requirements,
-// only lower in the detailed design) comes in comfortably below this.
-// The current estimate might change later if the design changes.
-// The requirement should not need to change and in fact we do not want
-// to just arbitrarily relax requirements every time implementations change.
+R0. **Cheap enough to leave on in production by default.** Total CPU
+    overhead from the tracker at the production default sampling rate must
+    stay under 1% end-to-end on realistic workloads. This is a ceiling the
+    design must meet; the measured/estimated overhead is reported in the
+    detailed design, not here, and the ceiling is not to be relaxed to
+    accommodate an implementation.
 
 R1. **Un-sampled hot path.** A non-sampled allocation incurs only one
     thread-local load, one decrement, and one branch. A non-sampled free
@@ -72,14 +69,7 @@ R1. **Un-sampled hot path.** A non-sampled allocation incurs only one
     never a contended or uncached atomic. No syscalls, no library calls, no
     locks on either path.
 
-R2. **Sampled CPU budget.** End-to-end overhead from sampling at 1% on
-    workloads that allocate at 100K/sec must be under 0.1% CPU. Stack
-    capture must take less than 200 ns for 6 frames on x86_64 and
-    aarch64.
-
-// TODO: delete this requirement per previous TODO comment.
-
-R3. **Default-on in production and simulation (post-rollout
+R2. **Default-on in production and simulation (post-rollout
     steady state).** Steady-state production default is 1% sampling
     (one in 100 allocations); simulation runs at 50% (one in two) so
     the tracker is exercised under fault injection. The Rollout
@@ -87,7 +77,7 @@ R3. **Default-on in production and simulation (post-rollout
     starts at 0 and is flipped to the steady-state value after
     baseline performance testing.
 
-R4. **Allocation-path coverage.** All three FDB-owned allocation paths
+R3. **Allocation-path coverage.** All three FDB-owned allocation paths
     are attributed:
     - Global `operator new` / `operator delete` (all standard overloads:
       sized, unsized, array, nothrow, aligned).
@@ -95,19 +85,19 @@ R4. **Allocation-path coverage.** All three FDB-owned allocation paths
     - `Arena` allocations, attributed at the `ArenaBlock` granularity
       (one entry per block, sized to the block's byte count).
 
-R5. **Out-of-scope allocators.** Direct libc `malloc`/`free`,
+R4. **Out-of-scope allocators.** Direct libc `malloc`/`free`,
     `posix_memalign`/`aligned_alloc`, `mmap`, and third-party allocators
     that bypass `operator new` are not attributed in v1. RocksDB
     allocations *are* covered via the `operator new` override since
     RocksDB STL containers and internal `Arena` slabs go through global
     `operator new[]`.
 
-R6. **Determinism in simulation.** Sampling state lives entirely in
+R5. **Determinism in simulation.** Sampling state lives entirely in
     thread-local variables and never reads `g_random` or
     `g_network->now()`. Identical workload + seed must produce identical
     aggregate counts.
 
-R7. **Periodic reporting.** A configurable cadence (default 10 minutes
+R6. **Periodic reporting.** A configurable cadence (default 10 minutes
     in production, 30 s in simulation) emits one TraceEvent per
     qualifying site, where a site qualifies when its estimated live
     bytes exceed `MEMORY_TRACKING_REPORT_BYTES_THRESHOLD` (default
@@ -116,25 +106,25 @@ R7. **Periodic reporting.** A configurable cadence (default 10 minutes
     command (the `AddrCmd` detail) covering just that site's frames. The dump
     itself runs in under 5 ms when ~50 sites qualify.
 
-R8. **Zero-cost runtime symbolization.** All address-to-symbol mapping
+R7. **Zero-cost runtime symbolization.** All address-to-symbol mapping
     happens offline. The runtime never calls `backtrace_symbols`,
     `dladdr`, or any DWARF reader.
 
-R9. **Strip-aware.** Reports work against stripped production binaries
+R8. **Strip-aware.** Reports work against stripped production binaries
     when separate debug info (the `.debug` sidecar this repo's release
     build already produces) is available to the offline tooling.
 
-R10. **Off-switch.** Setting the sample-inverse knob to 0 disables
+R9. **Off-switch.** Setting the sample-inverse knob to 0 disables
      sampling at runtime. The alloc hot path remains a TLS load, decrement,
      and branch; the free hot path remains a cached atomic-flag read and a
      branch. No aggregation work, and in particular no lock acquisition,
      happens on either path when disabled.
 
-R11. **Reentrancy safety.** No allocation made by the tracker itself
+R10. **Reentrancy safety.** No allocation made by the tracker itself
      (table grows, dump scratch space) re-enters the tracking path. A
      thread-local guard prevents re-entry.
 
-R12. **Side-thread coverage.** Allocations from any thread are
+R11. **Side-thread coverage.** Allocations from any thread are
      attributed, not only the network thread. This includes threads
      spawned by third-party libraries we do not own (RocksDB
      compaction/flush/iteration, OpenSSL background workers, etc.).
@@ -248,13 +238,15 @@ test workloads with very few allocations still exercise the path.
 
 **Force-sample-large.** The `n < gForceSampleBytes` check guarantees
 that any allocation at or above the configured threshold (default 100
-KB; `INT64_MAX` disables) is *always* sampled regardless of the
+KB) is *always* sampled regardless of the counter. Setting
+`MEMORY_TRACKING_FORCE_SAMPLE_BYTES` to `-1` disables force-sampling: the
+knob is cached into the `size_t` `gForceSampleBytes`, so `-1` becomes
+`SIZE_MAX` and no allocation ever reaches the threshold. (`-1` is used as
+the "disabled" sentinel rather than an enormous literal so that an
+operator setting the knob in a config file need not type out a huge
+constant.)
 
-// TODO: why INT64_MAX? It's going to be set by a human in a config file
-// and nobody wants to type out extremely large constants.  Use -1 instead
-// unless there is a good reason not to.
-
-counter. Large allocations are rare per second so unconditional
+Large allocations are rare per second so unconditional
 sampling costs almost nothing in CPU, and they are often the most
 interesting individual allocations regardless of frequency (caches,
 buffers, big arrays). This collapses the byte-rate-vs-count-rate
@@ -306,20 +298,15 @@ int captureStackFP(void** frames, int max) {
 }
 ```
 
-Skips no frames at capture; the caller (`memTrackerSampleAlloc`) is
-responsible for stripping the topmost 1–2 frames so the captured stack
-starts at the real allocation site (not inside the tracker itself).
+The walker skips no frames at capture; instead, the caller
+(`memTrackerSampleAlloc`) strips the topmost 1–2 frames so the captured
+stack starts at the real allocation site rather than inside the tracker
+itself.
 
-// TODO: the above is not a complete sentence.  The large code block
-// is not effective as the subject of a sentence.  Rewrite this not to
-// use implied subject sentences.
-
-Relies on `-fno-omit-frame-pointer` already set globally
-(`cmake/ConfigureCompiler.cmake`). On x86_64 and aarch64 each frame
-is two adjacent words (saved FP, saved RA), so the walk is one indirect
-load per frame: ~100 ns for 6 frames.
-
-// TODO: same problem as above. Write complete sentences.
+The walk relies on `-fno-omit-frame-pointer`, which is already set
+globally (`cmake/ConfigureCompiler.cmake`). On x86_64 and aarch64 each
+frame is two adjacent words (saved FP, saved RA), so the walk performs
+one indirect load per frame — roughly 100 ns for 6 frames.
 
 Caveats and mitigations:
 
@@ -331,24 +318,14 @@ Caveats and mitigations:
   uninitialized garbage, not `NULL`. The `next <= fp` sanity check
   is insufficient: garbage often satisfies it but points into
   unmapped memory, and the next `fp[1]` dereference segfaults.
-  **Observed empirically:** without a bounds check, simulation
-  segfaulted inside `captureStackFP` on every joshua-found seed
-  that exercised `tests/fast/RandomUnitTests.toml`'s
-  `IThreadPool/{NamedThread, ExplicitStop, ImplicitStop}` cases
-  (the crash signature was identical: thread-pool worker exiting,
-  its `FastAllocator<N>::ThreadData` destructor allocating a
-  vector grow, the FP walk crossing into glibc's TLS-destructor
-  cleanup and dereferencing garbage). Mitigation: cache the
-  current thread's stack range once via `pthread_getattr_np` +
-  `pthread_attr_getstack`, and require `fp ∈ [stackLow, stackHigh
-  - 16)` aligned before dereferencing on each iteration. With the
-  bounds check the walk terminates cleanly at the FDB-side
-  boundary; we still get the FDB-side prefix, which is what we
-  care about. See "Side-thread safety" below for the full chain
-  analysis.
-
-// TODO: the above story is repeated below.  Consolidate this.
-// Pick the best place to put it. Mainly just tell it only one time.
+  Mitigation: cache the current thread's stack range once via
+  `pthread_getattr_np` + `pthread_attr_getstack`, and require
+  `fp ∈ [stackLow, stackHigh - 16)` aligned before dereferencing on
+  each iteration. The walk then terminates cleanly at the FDB-side
+  boundary, still yielding the FDB-side prefix, which is what we care
+  about. This is not hypothetical — see "Side-thread safety" below for
+  the empirical repro (joshua-found `IThreadPool` segfaults) and the
+  full chain analysis.
 
 - Signal handlers can leave a transiently bad FP chain mid-walk.
   The same stack-bounds + `next <= fp` checks bail out of those
@@ -365,7 +342,7 @@ significant work on its own background threads (compaction, flush,
 iteration), and those code paths certainly allocate. Missing
 side-thread coverage would leave a large blind spot precisely
 where we expect a lot of byte volume. Side-thread coverage is a
-hard requirement (see R12), not a nice-to-have.
+hard requirement (see R11), not a nice-to-have.
 
 This pulled in two non-obvious constraints that the initial draft
 missed:
@@ -416,7 +393,7 @@ about.
 #### Live-block table
 
 Hash table, key `void*`, value `{uint64_t fingerprint, uint64_t size,
-bool forceSampled}`. All backing memory comes from `std::malloc`
+int64_t weight}`. All backing memory comes from `std::malloc`
 directly: this bypasses our `operator new` hooks (we override
 `operator new`, not libc `malloc`), so the tracker's own allocations
 cannot recurse back into the tracking path. The thread-local
@@ -427,6 +404,12 @@ on its own; we don't need a private slab pool.
 `liveBytes` at full width on alloc and subtracted on free, so a narrower
 field would under-debit (mod 2³²) on free for any allocation ≥ 4 GiB and
 permanently inflate the live-byte totals.
+
+`weight` is the block's estimate multiplier, captured at sample time
+(≈ `SampleInverse` for a randomly-sampled block, 1 for a force-sampled
+one). Storing it per block lets a free debit the *estimated* totals by
+exactly what its alloc credited, even if the sampling knob changed in
+between — see "Estimated usage" under Reporting.
 
 Created lazily on first sample if the `MEMORY_TRACKING_LIVE_TRACKING`
 knob is set; if the knob is off, the table is never allocated and only
@@ -455,6 +438,16 @@ constexpr int MEMORY_TRACKER_MAX_FRAMES = 10;  // upper bound for the
 
 struct CallSite {
     uint64_t fingerprint;
+    // Estimated population usage — sampling correction applied at sample time
+    // (each sampled block contributes size*weight / weight). Consumers read
+    // these directly; no post-hoc scaling.
+    int64_t  estLiveBytes;
+    int64_t  estLiveCount;
+    int64_t  estPeakBytes;
+    int64_t  estCumulativeBytes;
+    int64_t  estCumulativeAllocs;
+    // Raw sampled counters — one increment per observed sample, for auditing
+    // the estimate and gauging its confidence.
     int64_t  liveBytes;
     int64_t  liveCount;
     int64_t  peakBytes;
@@ -474,7 +467,8 @@ frames (the frame count is an initial estimate, subject to refinement
 during development); if it matters we can switch to xxhash or store all
 observed frames per fingerprint.
 
-`peakBytes = max(peakBytes, liveBytes)` updated on each alloc.
+`peakBytes = max(peakBytes, liveBytes)` (and `estPeakBytes =
+max(estPeakBytes, estLiveBytes)`) updated on each alloc.
 
 ### Hook sites
 
@@ -637,10 +631,11 @@ TraceEvent("MemoryTrackerSite")
     .detail("AddrCmd", "<full addr2line invocation for this site>");
 ```
 
-// TODO: the above has a hard coupling with the implementation.
-// All told I am in favor of giving the details both here and in the implementation.
-// Add a code comment to the implementation saying "if you change this TraceEvent,
-// go change the documentation" and give the path to this design doc.
+These event schemas are intentionally documented here *and* spelled out in
+the implementation. The two are kept in sync by a comment at the
+`TraceEvent` call sites in `flow/MemoryTracker.cpp` directing anyone who
+changes the details to update this section (`design/memory-tracker.md`,
+Reporting).
 
 The `AddrCmd` value is short — one prefix plus a handful of
 PIE-relative addresses, well under the TraceEvent string-detail
@@ -688,9 +683,7 @@ cleanup.
 | Knob | Default (prod) | Default (sim) | Meaning |
 |---|---|---|---|
 | `MEMORY_TRACKING_SAMPLE_INVERSE` | 100 | 2 | 0=off, N=1-in-N |
-| `MEMORY_TRACKING_FORCE_SAMPLE_BYTES` | 100000 | 100000 | Always sample allocations ≥ this many bytes; `INT64_MAX` disables force-sample |
-
-// TODO: again with the INT64_MAX.  CHange to -1 if possible.
+| `MEMORY_TRACKING_FORCE_SAMPLE_BYTES` | 100000 | 100000 | Always sample allocations ≥ this many bytes; `-1` disables force-sample (caches to `SIZE_MAX`) |
 
 | `MEMORY_TRACKING_LIVE_TRACKING` | true | true | When false, skip the pointer-keyed live-block table and report cumulative-only stats |
 | `MEMORY_TRACKING_REPORT_INTERVAL` | 600.0 | 30.0 | Seconds between dumps; 0 disables |
@@ -829,13 +822,14 @@ Chose single global spinlock for v1 because:
 - At 1% sampling + 100K alloc/sec the lock fires only 1K times/sec.
   Uncontended spinlock acquire is ~20 ns. Total CPU cost ~20 µs/sec.
 
-// TODO: we should caveat that the above is conjectural and actual
-// results may not be quite this.  For example 100K alloc/sec is pure guesswork.
-// Also how did you come up with 20ns?  I don't have a better number but
-// are you absolutely sure it's always this, on all platforms?
-// We could be off on the "estimate of time taken is too low" side of
-// things on both the 100k/sec and the 20ns/call numbers.  So just put a
-// small caveat about this.
+  These figures are back-of-the-envelope, not measured. The 100K
+  alloc/sec is an assumed workload rate (real rates vary widely by
+  process role and load), and the ~20 ns uncontended-acquire is a
+  rough x86 ballpark that will differ across microarchitectures and
+  ISAs (aarch64), and under cache pressure or NUMA effects. Both could
+  be optimistic; treat the conclusion as "cheap on the sampled path
+  under expected conditions," to be confirmed by the microbenchmarks
+  and rollout baseline rather than as a guaranteed bound.
 
 - Per-thread tables require a thread-registration mechanism (the
   tracker has to know about thread births/deaths so it can merge) and a
@@ -870,11 +864,15 @@ jemalloc has a mature sampled-stack heap profiler enabled via
 `MALLOC_CONF=prof:true,prof_active:true,lg_prof_sample:14`. Zero
 implementation cost.
 
-// TODO: is the runtime cost of jemalloc heap profiling well known or
-// well established?  If it is, mention it.  If it's not, and reasons for
-// its cost not being well established are themselves known, then list those
-// reasons.  If neither of these things are very well known, just state that
-// too.  **Do not fabricate claims about jemalloc heap profiling performance**.
+Its runtime cost is not a single well-established figure we can cite here.
+jemalloc profiling samples at an average byte interval set by
+`lg_prof_sample` and captures a backtrace per sample, so the overhead
+scales with the allocation rate and the configured interval and is
+generally characterized as low at coarse sampling intervals. We have not
+benchmarked it for FDB's workload, and jemalloc's documentation does not
+give a workload-independent overhead number. We therefore make no specific
+performance claim; the reasons below reject it on coverage and portability
+grounds regardless of its cost.
 
 Rejected as a complete solution because:
 - Covers only `malloc` and `operator new`, not `FastAllocator` or
@@ -912,22 +910,34 @@ Rejected because:
 
 ### Unit tests
 
-A new `flow/MemoryTrackerTest.cpp` exercises:
+`flow/MemoryTrackerTest.cpp` implements these `TEST_CASE`s (all under
+`/flow/MemoryTracker/`):
 
-- **Sampling correctness.** With sample inverse 1, allocate 100K
-  objects in a tight loop; confirm the aggregation table has one entry
-  for the test function with `cumulativeAllocs == 100K`. Free them;
-  confirm `liveCount` returns to 0 and `cumulativeAllocs` stays at 100K.
-- **Off-switch.** With sample inverse 0, allocate 100K objects; confirm
-  the aggregation table is empty.
-- **Reentrancy guard.** Force a path where the tracker itself
-  allocates during sampling (e.g., aggregation table resize); confirm
-  the `gInMemTracker` flag prevents re-entry into the tracking path.
-- **Frame-pointer walk depth.** Allocate from increasingly deeper call
-  stacks; confirm the captured frame count tracks `MEMORY_TRACKING_FRAMES`.
-- **Free of un-tracked pointer.** `memTrackerOnFree` for a pointer that
-  was never sampled is a no-op (correct against the live-block table
-  miss).
+- **`coverage`** — sentinel functions drive one allocation each through
+  `operator new`, `FastAllocator`, and `Arena`; confirms a captured call
+  site contains a frame inside each sentinel. Linux-only (the FP walker is
+  a no-op stub elsewhere).
+- **`cumulativeIsMonotonic`** — after allocating then freeing, `liveCount`
+  returns to 0 while `cumulativeAllocs` does not decrement.
+- **`offSwitch`** — with sample inverse 0, no sites are recorded and the
+  `g_memTrackerEnabled` flag is false (so frees skip the lock).
+- **`enableAfterOff`** — flips inverse 0 → 1 *without* resetting tracker
+  state; confirms sampling resumes within the bounded re-park window. This
+  is the regression test for the startup / off→on activation path.
+- **`freeOfUntrackedPtrIsNoop`** — `memTrackerOnFree` on a never-sampled
+  pointer (and on `nullptr`) records nothing.
+- **`estimateScaling`** — with a fixed inverse N and no force-sampled
+  blocks, each site's `Est*` value equals N × its raw counter, and freeing
+  debits the estimate symmetrically.
+- **`fastAlloc32Accounting`, `arenaSmallAccounting`,
+  `arenaMediumAccounting`, `arenaHugeAccounting`** — byte/block accounting
+  per allocation path; the "exactly one site carries the sentinel's frames"
+  assertion is the B1 double-tracking regression test (the medium and huge
+  `Arena` paths are the ones that regressed).
+
+Not yet covered by dedicated unit tests: an explicit reentrancy-guard test
+and a frame-pointer-walk-depth test — both behaviors are exercised
+indirectly by the tests above.
 
 ### Simulation tests
 
@@ -946,10 +956,10 @@ A new `flow/MemoryTrackerTest.cpp` exercises:
 
 ### Microbenchmarks
 
-The targets below are 5% rather than R2's 0.1% end-to-end CPU ceiling
+The targets below are 5% rather than R0's 1% end-to-end CPU ceiling
 because a tight alloc/free loop is the pessimal case: there is no real
 work between hook calls to amortize the overhead against, so the
-per-allocation cost shows up undiluted. R2's 0.1% applies to realistic
+per-allocation cost shows up undiluted. R0's 1% applies to realistic
 workloads.
 
 - **Un-sampled hot path.** A new `bin/fdbserver -r unittests
@@ -960,14 +970,34 @@ workloads.
 - **Sampled path.** Same loop with sample inverse 100; target: < 5%
   delta vs. the un-sampled baseline at 100K alloc/sec.
 
-
-// TODO: are these microbenchmarks implemented?  If they are not
-// implemented, we should do that now.  Tell me the situation and
-// ask to implement.
-//
-// TODO: the named test case above **does not exist**.
-// Do not delete this TODO until the tests exist or the text above
-// has been updated to no longer reference non-existent test cases.
+// TODO(not-yet-implemented): the `/flow/MemoryTracker/perfUnsampled` and
+// `/flow/MemoryTracker/perfSampled` unit tests named above DO NOT EXIST yet.
+// Build them next, then update this section to past tense and delete this TODO.
+// Two benchmarks are the whole v1 set — both answer "is it cheap enough to
+// leave on?" (R0); resist adding more unless a number below comes back bad.
+//   - Baseline is in-binary: std::malloc/std::free are NOT hooked (we override
+//     operator new, not libc malloc), so there's no need for a hooks-compiled-
+//     out build. delta(hooked new[]/delete[], raw malloc/free) = tracker cost.
+//   - perfUnsampled  = off-state per-op cost: hooked new[]/delete[] at inverse
+//     0 vs raw malloc/free. (Bundles the alloc hook and the free enabled-flag
+//     read; that pair cost is what R0 cares about, so bundling is fine.)
+//   - perfSampled = enabled-state per-op cost: hooked new[]/delete[] at inverse
+//     100 (prod) and inverse 1 (pessimal), live-tracking on, vs inverse 0. This
+//     is the end-to-end enabled number. NOTE it includes both the ~1% sampled-
+//     alloc slow path and the 100%-of-frees lock+probe (the dominant enabled
+//     cost); that's the right thing to measure for R0.
+//   - Report ns/op via a MemoryTrackerPerf* TraceEvent and stderr; reset
+//     tracker state around each phase; use fewer iterations when
+//     g_network->isSimulated(); do NOT hard-assert wall-clock thresholds
+//     (machine noise) — the reported number is the deliverable, at most a very
+//     loose sanity ceiling.
+//   - Diagnostics to build ONLY IF perfSampled looks concerning (do not build
+//     preemptively): re-run perfSampled with LIVE_TRACKING off to split the
+//     free-lock cost from the sampled-alloc cost; a standalone captureFramesFP
+//     timer vs frame depth; a multi-thread free-contention run (the real
+//     justification for the deferred live-table sharding).
+//   - Goal: replace the aspirational "< 5% delta" prose above with measured
+//     ns/op numbers once the benchmarks run on the dev pod.
 
 ### Strip-aware symbolization spot-check
 
