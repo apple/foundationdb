@@ -436,7 +436,7 @@ void memTrackerDump(int64_t bytesThreshold) {
 	// real bytes (~1% of target RSS), not sampled bytes.
 	// std::sort is unstable and unordered_map iteration is bucket-order, so
 	// MemoryTrackerSite events for sites with tied byte values may appear in
-	// different orders across same-seed sim2 runs. The R6 determinism
+	// different orders across same-seed sim2 runs. The R5 determinism
 	// requirement is on aggregate counts, not event ordering — those are
 	// unaffected — so we don't pay for stable_sort here.
 	auto byLive = [](const MemoryTrackerCallSite& a, const MemoryTrackerCallSite& b) {
@@ -486,6 +486,10 @@ void memTrackerDump(int64_t bytesThreshold) {
 			uintptr_t pieRelative = reinterpret_cast<uintptr_t>(s.exemplarFrames[i]) - pieOffset;
 			addrCmd += format(" 0x%lx", pieRelative);
 		}
+		// If you change the MemoryTrackerSite / MemoryTrackerSummary detail set
+		// below, update the matching schema in design/memory-tracker.md
+		// (Reporting section) — the doc intentionally documents these events and
+		// is kept in sync by hand.
 		TraceEvent("MemoryTrackerSite")
 		    .detail("Fingerprint", format("%016llx", static_cast<unsigned long long>(s.fingerprint)))
 		    // Estimated population usage — already sampling-corrected; consume directly.
