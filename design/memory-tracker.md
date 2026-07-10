@@ -868,6 +868,16 @@ roles. Conversely, the single-threaded µbench excludes cross-thread lock
 contention, so its per-op %-of-core is a *lower* bound — the mako A/B is the
 representative end-to-end number. The real cost is bracketed between the two.
 
+Two mako A/B harnesses drive these end-to-end numbers, both on a single-host
+1/1/1 loopback cluster with the storage role CPU-pegged on tmpfs.
+`contrib/mako_ab_memtracker.py` runs one build at sampling off vs on (the
+−16.5% / −9.9% figures above). `contrib/mako_ab_binaries.py` compares a
+vanilla-`main` fdbserver against this PR built with tracking off, isolating the
+cost of the always-compiled-but-disabled code: on a shared base commit it
+measured **−0.53% (redwood) / −0.10% (rocksdb)**, confirming the off-state
+overhead is well within R0's 1% ceiling. Each emits a self-contained chart.js
+report.
+
 ### Strip-aware symbolization spot-check
 
 Build the release binary, strip it, paste an `AddrCmd` field from a
