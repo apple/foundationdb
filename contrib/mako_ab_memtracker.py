@@ -66,8 +66,16 @@ def run_arm(bench, build, engine, arm, inverse, warmup, seconds, rows, outbase):
     env["WARMUP_SECONDS"] = str(warmup)
     env["SECONDS_RUN"] = str(seconds)
     env["ROWS"] = str(rows)
-    env["KNOBS"] = (f"--knob_memory_tracking_sample_inverse={inverse} "
-                    f"--knob_memory_tracking_report_interval=30")
+    knobs = [f"--knob_memory_tracking_sample_inverse={inverse}",
+             "--knob_memory_tracking_report_interval=30"]
+    if engine == "rocksdb":
+        # RocksDB opens its DB with O_DIRECT by default; tmpfs (/mnt/ram, where
+        # this harness runs its data dir) does not support direct I/O, so the
+        # storage engine fails to Open and the cluster never configures. Turn
+        # direct I/O off via RocksDB's existing knobs (no new knobs added).
+        knobs += ["--knob_rocksdb_use_direct_reads=0",
+                  "--knob_rocksdb_use_direct_io_flush_compaction=0"]
+    env["KNOBS"] = " ".join(knobs)
     print(f"\n=== {engine} / {arm} (sample_inverse={inverse}) ===", flush=True)
     print(f"    WORKDIR={workdir}  KNOBS={env['KNOBS']}", flush=True)
     subprocess.run(["bash", bench, build, engine], env=env, check=False)
