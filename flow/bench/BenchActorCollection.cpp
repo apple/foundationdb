@@ -57,9 +57,9 @@ Future<Void> benchActorCollectionPendingActor(benchmark::State* state) {
 		int activeActors = 0;
 		Future<Void> collection = actorCollection(addActors.getFuture(),
 		                                          &activeActors,
-		                                          nullptr,
-		                                          nullptr,
-		                                          nullptr,
+		                                          /*lastChangeTime = */ nullptr,
+		                                          /*idleTime = */ nullptr,
+		                                          /*allTime = */ nullptr,
 		                                          scenario == ActorCollectionScenario::CompletePending);
 		std::vector<Promise<Void>> completions;
 		completions.reserve(actorCount);
