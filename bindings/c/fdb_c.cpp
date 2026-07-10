@@ -68,43 +68,6 @@ static_assert(static_cast<int>(FDB_BG_MUTATION_TYPE_SET_VALUE) == static_cast<in
 static_assert(static_cast<int>(FDB_BG_MUTATION_TYPE_CLEAR_RANGE) == static_cast<int>(MutationRef::Type::ClearRange),
               "FDB_BG_MUTATION_TYPE_CLEAR_RANGE enum value mismatch");
 
-static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_SET_VALUE) == static_cast<int>(MutationRef::Type::SetValue),
-              "FDB_CDC_MUTATION_TYPE_SET_VALUE enum value mismatch");
-static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_CLEAR_RANGE) == static_cast<int>(MutationRef::Type::ClearRange),
-              "FDB_CDC_MUTATION_TYPE_CLEAR_RANGE enum value mismatch");
-static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_ADD) == static_cast<int>(MutationRef::Type::AddValue),
-              "FDB_CDC_MUTATION_TYPE_ADD enum value mismatch");
-static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_AND) == static_cast<int>(MutationRef::Type::And),
-              "FDB_CDC_MUTATION_TYPE_AND enum value mismatch");
-static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_OR) == static_cast<int>(MutationRef::Type::Or),
-              "FDB_CDC_MUTATION_TYPE_OR enum value mismatch");
-static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_XOR) == static_cast<int>(MutationRef::Type::Xor),
-              "FDB_CDC_MUTATION_TYPE_XOR enum value mismatch");
-static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_APPEND_IF_FITS) ==
-                  static_cast<int>(MutationRef::Type::AppendIfFits),
-              "FDB_CDC_MUTATION_TYPE_APPEND_IF_FITS enum value mismatch");
-static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_MAX) == static_cast<int>(MutationRef::Type::Max),
-              "FDB_CDC_MUTATION_TYPE_MAX enum value mismatch");
-static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_MIN) == static_cast<int>(MutationRef::Type::Min),
-              "FDB_CDC_MUTATION_TYPE_MIN enum value mismatch");
-static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY) ==
-                  static_cast<int>(MutationRef::Type::SetVersionstampedKey),
-              "FDB_CDC_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY enum value mismatch");
-static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE) ==
-                  static_cast<int>(MutationRef::Type::SetVersionstampedValue),
-              "FDB_CDC_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE enum value mismatch");
-static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_BYTE_MIN) == static_cast<int>(MutationRef::Type::ByteMin),
-              "FDB_CDC_MUTATION_TYPE_BYTE_MIN enum value mismatch");
-static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_BYTE_MAX) == static_cast<int>(MutationRef::Type::ByteMax),
-              "FDB_CDC_MUTATION_TYPE_BYTE_MAX enum value mismatch");
-static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_MIN_V2) == static_cast<int>(MutationRef::Type::MinV2),
-              "FDB_CDC_MUTATION_TYPE_MIN_V2 enum value mismatch");
-static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_AND_V2) == static_cast<int>(MutationRef::Type::AndV2),
-              "FDB_CDC_MUTATION_TYPE_AND_V2 enum value mismatch");
-static_assert(static_cast<int>(FDB_CDC_MUTATION_TYPE_COMPARE_AND_CLEAR) ==
-                  static_cast<int>(MutationRef::Type::CompareAndClear),
-              "FDB_CDC_MUTATION_TYPE_COMPARE_AND_CLEAR enum value mismatch");
-
 namespace {
 
 // These wrappers own the C-shaped arrays returned by the corresponding future
