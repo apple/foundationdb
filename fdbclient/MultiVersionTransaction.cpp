@@ -448,7 +448,7 @@ public:
 			    api->futureGetNativeCdcVersionedMutations(f, &mutations, &count, &lastConsumedVersion);
 			ASSERT(!error);
 			NativeCdcConsumeResult result = copyNativeCdcConsumeResult(mutations, count, lastConsumedVersion);
-			result.cursor = self->getPosition();
+			result.cursor.streamId = self->getPosition().streamId;
 			return result;
 		});
 	}
