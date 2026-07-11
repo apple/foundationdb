@@ -27,7 +27,7 @@
 #include "fdbclient/CommitTransaction.h"
 
 #include "flow/Arena.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 #include "flow/genericactors.actor.h"
 
 namespace fdb_cli {

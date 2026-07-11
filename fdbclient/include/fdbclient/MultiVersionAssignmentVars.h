@@ -23,7 +23,7 @@
 #pragma once
 
 #include "MultiVersionTransaction.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 
 template <class T>
 class AbortableSingleAssignmentVar final : public ThreadSingleAssignmentVar<T>, public ThreadCallback {

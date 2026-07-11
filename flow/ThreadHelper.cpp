@@ -22,7 +22,7 @@
 
 #include "flow/flow.h"
 #include "flow/network.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 #include "flow/Coroutines.h"
 #include "flow/Error.h"
 #include "flow/UnitTest.h"
