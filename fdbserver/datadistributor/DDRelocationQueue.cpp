@@ -2160,7 +2160,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 				                                                        : Optional<BulkLoadTaskState>());
 			}
 			Future<Void> doMoveKeys = self->txnProcessor->moveKeys(*params);
-			Future<Void> pollHealth = signalledTransferComplete
+			Future<Void> pollHealth = signalledTransferComplete && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA
 			                              ? Never()
 			                              : delay(SERVER_KNOBS->HEALTH_POLL_TIME, TaskPriority::DataDistributionLaunch);
 			try {
@@ -2229,8 +2229,22 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 								signalledTransferComplete = true;
 								self->dataTransferComplete.send(rd);
 							}
+							if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+								CODE_PROBE(true,
+								           "Cancel shard-encoded data move after destination team becomes unhealthy",
+								           probe::decoration::rare);
+								TraceEvent(SevWarnAlways, "RelocateShardDestinationTeamUnhealthy", distributorId)
+								    .detail("DataMoveID", rd.dataMoveId)
+								    .detail("Range", rd.keys)
+								    .detail("Dest", describe(destIds));
+								if (doBulkLoading && rd.bulkLoadTask.get().completeAck.canBeSet()) {
+									rd.bulkLoadTask.get().completeAck.send(
+									    BulkLoadAck(/*unretryableError=*/true, rd.priority));
+								}
+								throw data_move_dest_team_not_found();
+							}
 						}
-						pollHealth = signalledTransferComplete
+						pollHealth = signalledTransferComplete && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA
 						                 ? Never()
 						                 : delay(SERVER_KNOBS->HEALTH_POLL_TIME, TaskPriority::DataDistributionLaunch);
 					} else if (res.index() == 2) {
