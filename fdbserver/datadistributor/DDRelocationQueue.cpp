@@ -2885,6 +2885,9 @@ struct DDQueueImpl {
 	static Future<Void> processCompletedDataTransfers(RunState* state, FutureStream<RelocateData> input) {
 		while (true) {
 			RelocateData done = co_await input;
+			// Relocator cancellation sends this stream inline from launchQueuedWork().
+			// Yield before mutating queue state so launchQueuedWork() can finish repairing its maps.
+			co_await delay(0, TaskPriority::DataDistributionLaunch);
 			complete(done, state->self->busymap, state->self->destBusymap);
 			bool wasEmpty = state->serversToLaunchFrom.empty();
 			state->serversToLaunchFrom.insert(done.src.begin(), done.src.end());
@@ -2898,6 +2901,9 @@ struct DDQueueImpl {
 	static Future<Void> processCompletedRelocations(RunState* state) {
 		while (true) {
 			RelocateData done = co_await state->completedRelocations;
+			// Relocator cancellation sends this stream inline from launchQueuedWork().
+			// Yield before mutating queue state so launchQueuedWork() can finish repairing its maps.
+			co_await delay(0, TaskPriority::DataDistributionLaunch);
 			state->self->processRelocationComplete(done);
 			// self->logRelocation( done, "ShardRelocatorDone" );
 			auto scheduleRangesComplete = [&](KeyRange keys) {
