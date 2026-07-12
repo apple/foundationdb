@@ -3082,14 +3082,16 @@ public:
 
 	// Read the physical extent at given pageID
 	// NOTE that we use the same interface (<ArenaPage>) for the extent as the page
-	static Future<Reference<ArenaPage>> readPhysicalExtent(DWALPager* self, PhysicalPageID pageID, int readSize = 0) {
+	ACTOR static Future<Reference<ArenaPage>> readPhysicalExtent(DWALPager* self,
+	                                                             PhysicalPageID pageID,
+	                                                             int readSize = 0) {
 		// First take the concurrentExtentReads lock to avoid issuing too many reads concurrently
-		co_await self->concurrentExtentReads->take();
+		wait(self->concurrentExtentReads->take());
 
 		ASSERT(!self->memoryOnly);
 
 		if (g_network->getCurrentTask() > TaskPriority::DiskRead) {
-			co_await delay(0, TaskPriority::DiskRead);
+			wait(delay(0, TaskPriority::DiskRead));
 		}
 
 		// readSize may not be equal to the physical extent size (for the first and last extents)
@@ -3098,7 +3100,7 @@ public:
 			readSize = self->physicalExtentSize;
 		}
 
-		Reference<ArenaPage> extent = makeReference<ArenaPage>(readSize, readSize);
+		state Reference<ArenaPage> extent = makeReference<ArenaPage>(readSize, readSize);
 
 		// physicalReadSize is the size of disk read we intend to issue
 		auto physicalReadSize = SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_READ_SIZE;
@@ -3143,7 +3145,7 @@ public:
 		}
 
 		// wait for all the parallel read futures for the given extent
-		co_await waitForAll(reads);
+		wait(waitForAll(reads));
 
 		debug_printf("DWALPager(%s) op=readPhysicalExtentComplete %s ptr=%p bytes=%d file offset=%d\n",
 		             self->filename.c_str(),
@@ -3152,7 +3154,7 @@ public:
 		             readSize,
 		             (pageID * self->physicalPageSize));
 
-		co_return extent;
+		return extent;
 	}
 
 	Future<Reference<ArenaPage>> readExtent(LogicalPageID pageID) override {
