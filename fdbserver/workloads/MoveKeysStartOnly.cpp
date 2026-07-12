@@ -36,7 +36,8 @@ public:
 	static constexpr auto NAME = "MoveKeysStartOnly";
 
 	explicit MoveKeysStartOnlyWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), enabled(!clientId && g_network->isSimulated()) {}
+	  : TestWorkload(wcx), enabled(!clientId && g_network->isSimulated()),
+	    testDuration(getOption(options, "testDuration"_sr, 50.0)) {}
 
 	Future<Void> setup(Database const& cx) override {
 		if (!enabled) {
@@ -62,6 +63,7 @@ public:
 
 private:
 	bool enabled;
+	double testDuration;
 	int oldDDMode = 1;
 	DDEnabledState ddEnabledState;
 	DatabaseConfiguration configuration;
@@ -78,15 +80,25 @@ private:
 
 	Future<Void> readInitialDataDistribution(Database cx) {
 		Reference<IDDTxnProcessor> processor = makeReference<DDTxnProcessor>(cx);
-		MoveKeysLock lock = co_await readMoveKeysLock(cx);
-		initialData =
-		    co_await processor->getInitialDataDistribution(UID(), lock, {}, &ddEnabledState, SkipDDModeCheck::True);
+		while (true) {
+			MoveKeysLock lock = co_await readMoveKeysLock(cx);
+			try {
+				initialData = co_await processor->getInitialDataDistribution(
+				    UID(), lock, {}, &ddEnabledState, SkipDDModeCheck::True);
+				co_return;
+			} catch (Error& e) {
+				if (e.code() != error_code_movekeys_conflict) {
+					throw;
+				}
+			}
+			co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
+		}
 	}
 
 	Future<Void> startImpl(Database cx) {
 		Error error;
 		try {
-			co_await startAndVerify(cx);
+			co_await timeoutError(startAndVerify(cx), testDuration);
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
@@ -121,7 +133,8 @@ private:
 		}
 		std::sort(destinationTeam.begin(), destinationTeam.end());
 
-		FlowLock startMoveKeysLock(1);
+		// Conflicting encoded data moves are cleaned up while startMoveShards holds one permit.
+		FlowLock startMoveKeysLock(2);
 		FlowLock finishMoveKeysLock(1);
 		MoveKeysLock lock = co_await takeMoveKeysLock(cx, UID());
 		const UID dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
@@ -161,7 +174,18 @@ private:
 		}
 
 		std::map<UID, StorageServerInterface> tssMapping;
-		co_await rawStartMovement(cx, params, tssMapping);
+		while (true) {
+			try {
+				co_await rawStartMovement(cx, params, tssMapping);
+				break;
+			} catch (Error& e) {
+				if (e.code() != error_code_movekeys_conflict) {
+					throw;
+				}
+			}
+			co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
+			params.lock = co_await takeMoveKeysLock(cx, UID());
+		}
 		co_await readInitialDataDistribution(cx);
 
 		auto first = std::lower_bound(initialData->shards.begin(),

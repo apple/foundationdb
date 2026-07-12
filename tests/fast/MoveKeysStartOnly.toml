@@ -10,3 +10,4 @@ testTitle = 'MoveKeysStartOnly'
 
     [[test.workload]]
     testName = 'MoveKeysStartOnly'
+    testDuration = 50.0
