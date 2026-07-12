@@ -21,6 +21,8 @@
 #include "fdbserver/datadistributor/ShardsAffectedByTeamFailure.h"
 #include "flow/UnitTest.h"
 
+void forceLinkShardsAffectedByTeamFailureTests() {}
+
 TEST_CASE("/DataDistributor/ShardsAffectedByTeamFailure/SplitAndMerge") {
 	ShardsAffectedByTeamFailure shards;
 	shards.setCheckMode(ShardsAffectedByTeamFailure::CheckMode::ForceCheck);
