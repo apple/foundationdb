@@ -57,7 +57,6 @@
 #include "fdbrpc/simulator.h"
 #include "fdbserver/coordinator/CoordinationServer.h"
 #include "fdbserver/CoroFlow.h"
-#include "fdbserver/datadistributor/DataDistribution.h"
 #include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/NetworkTest.h"

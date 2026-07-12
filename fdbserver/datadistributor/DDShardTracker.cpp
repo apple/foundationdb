@@ -23,7 +23,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/datadistributor/DataDistribution.h"
-#include "fdbserver/datadistributor/DDSharedContext.h"
+#include "DDSharedContext.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/ShardSizing.h"
 #include "flow/ActorCollection.h"
@@ -31,7 +31,7 @@
 #include "flow/CodeProbe.h"
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
-#include "fdbserver/datadistributor/DDShardTracker.h"
+#include "DDShardTracker.h"
 #include "flow/CoroUtils.h"
 
 // The used bandwidth of a shard. The higher the value is, the busier the shard is.
