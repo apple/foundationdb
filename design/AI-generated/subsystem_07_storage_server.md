@@ -395,7 +395,7 @@ Comprehensive metrics are emitted via `rocksDBMetricLogger` (line 1008):
 
 ---
 
-### Redwood (VersionedBTree) Engine -- [`VersionedBTree.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/VersionedBTree.cpp) (~11K lines)
+### Redwood (VersionedBTree) Engine -- [`VersionedBTree.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/VersionedBTree.actor.cpp) (~11K lines)
 
 A custom versioned copy-on-write B-tree storage engine built from scratch for FoundationDB. Named "Redwood," it is designed for high space efficiency through delta compression and for tight integration with FDB's versioned storage model.
 
@@ -758,7 +758,7 @@ Client ──GetValueRequest──▶ StorageServer getValueQ()
 | [`fdbserver/kvstore/include/fdbserver/kvstore/IKeyValueStore.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/include/fdbserver/kvstore/IKeyValueStore.h) | IKeyValueStore interface definition |
 | [`fdbserver/kvstore/IKeyValueStore.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/IKeyValueStore.cpp) | Factory function `openKVStore()` |
 | [`fdbserver/kvstore/KeyValueStoreRocksDB.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreRocksDB.actor.cpp) | RocksDB engine implementation |
-| [`fdbserver/kvstore/VersionedBTree.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/VersionedBTree.cpp) | Redwood engine (VersionedBTree + DWALPager) |
+| [`fdbserver/kvstore/VersionedBTree.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/VersionedBTree.actor.cpp) | Redwood engine (VersionedBTree + DWALPager) |
 | [`fdbserver/kvstore/IPager.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/IPager.h) | Pager interface (IPager2) for Redwood |
 | [`fdbserver/kvstore/DeltaTree.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/DeltaTree.h) | DeltaTree2 delta-compressed sorted structure |
 | [`fdbserver/kvstore/KeyValueStoreSQLite.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreSQLite.cpp) | SQLite engine (V1/V2) |
