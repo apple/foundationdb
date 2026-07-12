@@ -2897,6 +2897,17 @@ struct DDQueueImpl {
 			RelocateData results = co_await input;
 			co_await state->queueMutationLock.take(TaskPriority::DataDistributionLaunch);
 			FlowLock::Releaser lockGuard(state->queueMutationLock);
+			// A source-fetch actor can finish after an overlapping relocation has already cancelled and
+			// replaced the item it was fetching for. The old serialized choose loop could not observe that
+			// completion after the replacement had been processed, but the coroutine split can.
+			if (!state->self->fetchingSourcesQueue.contains(results)) {
+				DebugRelocationTraceEvent("StaleSourceFetchResult", state->self->distributorId)
+				    .detail("KeyBegin", results.keys.begin)
+				    .detail("KeyEnd", results.keys.end)
+				    .detail("Priority", results.priority)
+				    .detail("RandomID", results.randomId);
+				continue;
+			}
 			// This stream is triggered by queueRelocation(), which is triggered by sending self->input.
 			state->self->completeSourceFetch(results);
 			validate(state);
