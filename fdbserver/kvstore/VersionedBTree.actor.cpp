@@ -7153,15 +7153,15 @@ private:
 			InternalPageSliceUpdate all;
 			RedwoodRecordRef rootLink;
 		};
-		auto state = std::make_shared<CommitImplState>();
+		auto commitState = std::make_shared<CommitImplState>();
 
-		state->batch.mutations = std::move(self->m_pBuffer);
+		commitState->batch.mutations = std::move(self->m_pBuffer);
 		self->m_pBuffer.reset(new MutationBuffer());
-		state->batch.mutationCount = self->m_mutationCount;
+		commitState->batch.mutationCount = self->m_mutationCount;
 		self->m_mutationCount = 0;
 
-		state->batch.writeVersion = writeVersion;
-		state->batch.newOldestVersion = self->m_newOldestVersion;
+		commitState->batch.writeVersion = writeVersion;
+		commitState->batch.newOldestVersion = self->m_newOldestVersion;
 
 		// Wait for the latest commit to be finished.
 		co_await previousCommit;
@@ -7169,70 +7169,74 @@ private:
 		// If the write version has not advanced then there can be no changes pending.
 		// If there are no changes, then the commit is a no-op.
 		if (writeVersion == self->m_pager->getLastCommittedVersion()) {
-			ASSERT(state->batch.mutationCount == 0);
-			debug_printf(
-			    "%s: Empty commit at repeat version %" PRId64 "\n", self->m_name.c_str(), state->batch.writeVersion);
+			ASSERT(commitState->batch.mutationCount == 0);
+			debug_printf("%s: Empty commit at repeat version %" PRId64 "\n",
+			             self->m_name.c_str(),
+			             commitState->batch.writeVersion);
 			co_return;
 		}
 
 		// For this commit, use the latest snapshot that was just committed.
-		state->batch.readVersion = self->m_pager->getLastCommittedVersion();
+		commitState->batch.readVersion = self->m_pager->getLastCommittedVersion();
 
-		self->m_pager->setOldestReadableVersion(state->batch.newOldestVersion);
+		self->m_pager->setOldestReadableVersion(commitState->batch.newOldestVersion);
 		debug_printf("%s: Beginning commit of version %" PRId64 ", read version %" PRId64
 		             ", new oldest version set to %" PRId64 "\n",
 		             self->m_name.c_str(),
-		             state->batch.writeVersion,
-		             state->batch.readVersion,
-		             state->batch.newOldestVersion);
+		             commitState->batch.writeVersion,
+		             commitState->batch.readVersion,
+		             commitState->batch.newOldestVersion);
 
-		state->batch.snapshot = self->m_pager->getReadSnapshot(state->batch.readVersion);
+		commitState->batch.snapshot = self->m_pager->getReadSnapshot(commitState->batch.readVersion);
 
-		state->rootNodeLink = self->m_header.root;
-		state->rootLink = dbBegin.withPageID(state->rootNodeLink);
-		state->all.subtreeLowerBound = state->rootLink;
-		state->all.decodeLowerBound = state->rootLink;
-		state->all.subtreeUpperBound = dbEnd;
-		state->all.decodeUpperBound = dbEnd;
-		state->all.skipLen = 0;
+		commitState->rootNodeLink = self->m_header.root;
+		commitState->rootLink = dbBegin.withPageID(commitState->rootNodeLink);
+		commitState->all.subtreeLowerBound = commitState->rootLink;
+		commitState->all.decodeLowerBound = commitState->rootLink;
+		commitState->all.subtreeUpperBound = dbEnd;
+		commitState->all.decodeUpperBound = dbEnd;
+		commitState->all.skipLen = 0;
 
-		MutationBuffer::const_iterator mBegin = state->batch.mutations->upper_bound(state->all.subtreeLowerBound.key);
+		MutationBuffer::const_iterator mBegin =
+		    commitState->batch.mutations->upper_bound(commitState->all.subtreeLowerBound.key);
 		--mBegin;
-		MutationBuffer::const_iterator mEnd = state->batch.mutations->lower_bound(state->all.subtreeUpperBound.key);
+		MutationBuffer::const_iterator mEnd =
+		    commitState->batch.mutations->lower_bound(commitState->all.subtreeUpperBound.key);
 
 		co_await commitSubtree(self,
-		                       &state->batch,
-		                       state->rootNodeLink,
+		                       &commitState->batch,
+		                       commitState->rootNodeLink,
 		                       invalidLogicalPageID,
 		                       self->m_header.height,
 		                       mBegin,
 		                       mEnd,
-		                       &state->all);
+		                       &commitState->all);
 
 		// If the old root was deleted, write a new empty tree root node and free the old roots
-		if (state->all.childrenChanged) {
-			if (state->all.newLinks.empty()) {
+		if (commitState->all.childrenChanged) {
+			if (commitState->all.newLinks.empty()) {
 				debug_printf("Writing new empty root.\n");
 				LogicalPageID newRootID = co_await self->m_pager->newPageID();
-				state->rootNodeLink = BTreeNodeLinkRef((LogicalPageID*)&newRootID, 1);
+				commitState->rootNodeLink = BTreeNodeLinkRef((LogicalPageID*)&newRootID, 1);
 				self->m_header.height = 1;
 
 				Reference<ArenaPage> page = co_await makeEmptyRoot(self);
 				// Newly allocated page so logical id = physical id and there is no parent as this is a new root
-				page->setLogicalPageInfo(state->rootNodeLink.front(), invalidLogicalPageID);
-				self->m_pager->updatePage(PagerEventReasons::Commit, self->m_header.height, state->rootNodeLink, page);
+				page->setLogicalPageInfo(commitState->rootNodeLink.front(), invalidLogicalPageID);
+				self->m_pager->updatePage(
+				    PagerEventReasons::Commit, self->m_header.height, commitState->rootNodeLink, page);
 			} else {
-				Standalone<VectorRef<RedwoodRecordRef>> newRootRecords(state->all.newLinks,
-				                                                       state->all.newLinks.arena());
+				Standalone<VectorRef<RedwoodRecordRef>> newRootRecords(commitState->all.newLinks,
+				                                                       commitState->all.newLinks.arena());
 				// Build new root levels if there are multiple new root records or if the root pointer is too large
 				Standalone<VectorRef<RedwoodRecordRef>> newRootPage = co_await buildNewRootsIfNeeded(
-				    self, state->batch.writeVersion, newRootRecords, self->m_header.height);
-				state->rootNodeLink = newRootPage.front().getChildPage();
+				    self, commitState->batch.writeVersion, newRootRecords, self->m_header.height);
+				commitState->rootNodeLink = newRootPage.front().getChildPage();
 			}
 		}
 
-		debug_printf("new root %s\n", toString(state->rootNodeLink).c_str());
-		self->m_header.root = state->rootNodeLink;
+		debug_printf("new root %s\n", toString(commitState->rootNodeLink).c_str());
+		self->m_header.root = commitState->rootNodeLink;
 
 		self->m_lazyClearStop = true;
 		co_await self->m_lazyClearActor;
