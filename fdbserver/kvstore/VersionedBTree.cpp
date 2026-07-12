@@ -86,7 +86,7 @@ static void prepareLegacyXorCompatibility(const Reference<ArenaPage>& page, cons
 std::string addPrefix(std::string prefix, std::string lines) {
 	StringRef m = lines;
 	std::string s;
-	while (m.size() != 0) {
+	while (!m.empty()) {
 		StringRef line = m.eat("\n");
 		s += prefix;
 		s += ' ';
@@ -704,8 +704,9 @@ public:
 						} else {
 							allocateNewExtent = true;
 						}
-					} else
+					} else {
 						allocateNewExtent = true;
+					}
 					if (allocateNewExtent) {
 						PhysicalPageID newPID = co_await self->queue->pager->newExtentPageID(self->queue->queueID);
 						newPageID = newPID;
@@ -1252,8 +1253,9 @@ public:
 						             self->tailPageNewExtent,
 						             self->prevExtentEndPageID,
 						             self->tailWriter.pageID);
-					} else
+					} else {
 						self->newTailPage = self->pager->newPageID();
+					}
 					workPending = true;
 				} else {
 					if (self->usesExtents) {
@@ -1876,7 +1878,7 @@ public:
 		// to be destroyed so the prioritizedEvictions head/tail will become invalid.
 		self->prioritizedEvictions.clear();
 
-		typename CacheT::iterator i = self->cache.begin();
+		auto i = self->cache.begin();
 		while (i != self->cache.end()) {
 			co_await (waitForSafeEviction ? i->second.item.onEvictable() : i->second.item.cancel());
 			++i;
@@ -3046,9 +3048,10 @@ public:
 				             v,
 				             toString(j->second).c_str());
 				pageID = j->second;
-				if (pageID == invalidLogicalPageID)
+				if (pageID == invalidLogicalPageID) {
 					debug_printf(
 					    "DWALPager(%s) remappedPagesMap: %s\n", filename.c_str(), toString(remappedPages).c_str());
+				}
 
 				ASSERT(pageID != invalidLogicalPageID);
 			}
@@ -3234,11 +3237,11 @@ public:
 
 	static Future<Void> removeRemapEntry(DWALPager* self, RemappedPage p, Version oldestRetainedVersion) {
 		// Get iterator to the versioned page map entry for the original page
-		PageToVersionedMapT::iterator iPageMapPair = self->remappedPages.find(p.originalPageID);
+		auto iPageMapPair = self->remappedPages.find(p.originalPageID);
 		// The iterator must be valid and not empty and its first page map entry must match p's version
 		ASSERT(iPageMapPair != self->remappedPages.end());
 		ASSERT(!iPageMapPair->second.empty());
-		VersionToPageMapT::iterator iVersionPagePair = iPageMapPair->second.find(p.version);
+		auto iVersionPagePair = iPageMapPair->second.find(p.version);
 		ASSERT(iVersionPagePair != iPageMapPair->second.end());
 
 		RemappedPage::Type firstType = p.getType();
@@ -5077,7 +5080,7 @@ public:
 		}
 
 		Value btreeHeader = self->m_pager->getCommitRecord();
-		if (btreeHeader.size() == 0) {
+		if (btreeHeader.empty()) {
 			// Create new BTree
 			self->m_header.formatVersion = BTreeCommitHeader::FORMAT_VERSION;
 			self->m_header.encodingType = self->m_encodingType;
@@ -5131,7 +5134,7 @@ public:
 
 		TraceEvent e(SevInfo, "RedwoodRecoveredBTree");
 		e.detail("FileName", self->m_name);
-		e.detail("OpenedExisting", btreeHeader.size() != 0);
+		e.detail("OpenedExisting", !btreeHeader.empty());
 		e.detail("LatestVersion", self->m_pager->getLastCommittedVersion());
 		self->m_lazyClearQueue.toTraceEvent(e, "LazyClearQueue");
 		e.log();
@@ -5669,7 +5672,7 @@ private:
 	                                                                  Version v,
 	                                                                  BTreeNodeLinkRef previousID,
 	                                                                  LogicalPageID parentID) {
-		ASSERT(entries.size() > 0);
+		ASSERT(!entries.empty());
 
 		Standalone<VectorRef<RedwoodRecordRef>> records;
 
@@ -5677,7 +5680,7 @@ private:
 		int prefixLen = lowerBound->getCommonPrefixLen(*upperBound);
 
 		std::vector<PageToBuild> pagesToBuild = self->splitPages(lowerBound, upperBound, prefixLen, entries, height);
-		ASSERT(pagesToBuild.size() > 0);
+		ASSERT(!pagesToBuild.empty());
 		debug_printf("splitPages returning %s\n", toString(pagesToBuild).c_str());
 
 		// Lower bound of the page being added to
@@ -6018,7 +6021,7 @@ private:
 			              .c_str());
 		}
 
-		unsigned int height = (unsigned int)((const BTreePage*)page->data())->height;
+		auto height = (unsigned int)((const BTreePage*)page->data())->height;
 		ASSERT(height < 0xf0);
 		if (oldID.size() == 1) {
 			page->setLogicalPageInfo(oldID.front(), parentID);
@@ -7310,7 +7313,7 @@ public:
 			return r;
 		}
 
-		const RedwoodRecordRef get() { return path.back().cursor.get(); }
+		RedwoodRecordRef get() { return path.back().cursor.get(); }
 
 		bool inRoot() const { return path.size() == 1; }
 
@@ -7477,8 +7480,9 @@ public:
 				// Prefetch the sibling if the link is not null
 				if (c.get().value.present()) {
 					BTreeNodeLinkRef childPage = c.get().getChildPage();
-					if (childPage.size() > 0)
+					if (!childPage.empty()) {
 						preLoadPage(pager.getPtr(), childPage, ioLeafPriority);
+					}
 					recordsRead += estRecordsPerPage;
 					// Use sibling node capacity as an estimate of bytes read.
 					bytesRead += childPage.size() * this->btree->m_blockSize;
@@ -7969,10 +7973,8 @@ Future<Void> verifyRangeBTreeCursor(VersionedBTree* btree,
 	if (end <= start)
 		end = keyAfter(start);
 
-	std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator i =
-	    written->lower_bound(std::make_pair(start.toString(), 0));
-	std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator iEnd =
-	    written->upper_bound(std::make_pair(end.toString(), initialVersion));
+	auto i = written->lower_bound(std::make_pair(start.toString(), 0));
+	auto iEnd = written->upper_bound(std::make_pair(end.toString(), initialVersion));
 	std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator iLast;
 
 	VersionedBTree::BTreeCursor cur;
@@ -9863,7 +9865,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	pager = new DWALPager(
 	    pageSize, extentSize, file, pageCacheBytes, remapCleanupWindowBytes, concurrentExtentReads, pagerMemoryOnly);
 
-	VersionedBTree* btree = new VersionedBTree(pager, file, UID(), /*ServerDBInfo blah */ {});
+	auto* btree = new VersionedBTree(pager, file, UID(), /*ServerDBInfo blah */ {});
 	co_await btree->init();
 
 	DecodeBoundaryVerifier* pBoundaries = DecodeBoundaryVerifier::getVerifier(file);
@@ -10488,7 +10490,7 @@ TEST_CASE(":/redwood/performance/set") {
 
 	DWALPager* pager = new DWALPager(
 	    pageSize, extentSize, file, pageCacheBytes, remapCleanupWindowBytes, concurrentExtentReads, pagerMemoryOnly);
-	VersionedBTree* btree = new VersionedBTree(pager, file, UID(), {});
+	auto* btree = new VersionedBTree(pager, file, UID(), {});
 	co_await btree->init();
 	printf("Initialized.  StorageBytes=%s\n", btree->getStorageBytes().toString().c_str());
 
